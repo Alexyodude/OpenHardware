@@ -15,6 +15,14 @@ LEDGER = """# Upstream deltas
 Reason: analog net semantics, spec section 4.1.
 """
 
+LEDGER_WITH_BODY_PROSE_BACKTICKS = """# Upstream deltas
+
+## `src/lib/spareparts.cc`
+
+Reason: analog net semantics, spec section 4.1. Mirrors `src/lib/board.h`
+for the pin layout, but that is prose, not a heading.
+"""
+
 
 def test_ledger_paths_are_parsed(tmp_path):
     path = tmp_path / "upstream-deltas.md"
@@ -24,6 +32,15 @@ def test_ledger_paths_are_parsed(tmp_path):
 
 def test_missing_ledger_yields_no_paths(tmp_path):
     assert logged_paths(tmp_path / "absent.md") == set()
+
+
+def test_body_prose_backticks_do_not_authorise_paths(tmp_path):
+    # Only a `## ` heading naming a path authorises it. A path mentioned in
+    # backticks inside ordinary reason prose must not be silently exempted
+    # from ever needing its own entry.
+    path = tmp_path / "upstream-deltas.md"
+    path.write_text(LEDGER_WITH_BODY_PROSE_BACKTICKS, encoding="utf-8")
+    assert logged_paths(path) == {"src/lib/spareparts.cc"}
 
 
 def test_modified_upstream_file_without_entry_is_flagged():

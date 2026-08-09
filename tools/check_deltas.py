@@ -7,7 +7,9 @@
 """Checker for .claude/rules/upstream-sync.md.
 
 Additive files are unrestricted. A file that existed at ``fork-point`` may only
-be modified if ``docs/upstream-deltas.md`` names it in backticks.
+be modified if ``docs/upstream-deltas.md`` names it in backticks on a ``## ``
+heading line. Backticks elsewhere in the ledger — reason prose, intro text,
+bullet lists — authorise nothing; only the heading is the log entry.
 """
 
 from __future__ import annotations
@@ -20,14 +22,14 @@ import sys
 FORK_POINT = "fork-point"
 LEDGER = pathlib.Path("docs/upstream-deltas.md")
 
-_BACKTICKED = re.compile(r"`([^`]+)`")
+_HEADING_PATH = re.compile(r"^##\s+`([^`]+)`", re.MULTILINE)
 
 
 def logged_paths(ledger: pathlib.Path = LEDGER) -> set[str]:
     if not ledger.is_file():
         return set()
     text = ledger.read_text(encoding="utf-8")
-    return {match.group(1).strip() for match in _BACKTICKED.finditer(text)}
+    return {match.group(1).strip() for match in _HEADING_PATH.finditer(text)}
 
 
 def unlogged_modifications(
