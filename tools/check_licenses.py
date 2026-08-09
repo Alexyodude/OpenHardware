@@ -77,14 +77,17 @@ def _added_since_fork_point() -> list[pathlib.Path]:
 def main() -> int:
     try:
         v2_only = find_v2_only()
+        missing = find_missing_headers(_added_since_fork_point())
     except ValueError as exc:
+        print(f"check_licenses: {exc}", file=sys.stderr)
+        return 2
+    except subprocess.CalledProcessError as exc:
         print(f"check_licenses: {exc}", file=sys.stderr)
         return 2
 
     for path in v2_only:
         print(f"{path}: GPL header is version-2-only", file=sys.stderr)
 
-    missing = find_missing_headers(_added_since_fork_point())
     for path in missing:
         print(f"{path}: new source file has no GPL header", file=sys.stderr)
 

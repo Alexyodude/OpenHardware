@@ -39,3 +39,9 @@ Use the `feature-strategy` skill. Do not add features to a ledger by hand.
 Tag `fork-point` = `cd92747b1a04cab56c17f4e9ac35a1406c9935f7` (2026-07-30).
 Every modification to a file that existed then must appear in
 `docs/upstream-deltas.md`.
+
+CI (`.github/workflows/rules.yml`) needs the `fork-point` tag pushed to
+whatever remote hosts this repo — tags are not carried by an ordinary branch
+push. As of this writing that push has not happened: this repo has no
+`origin` remote, only `upstream` (the read-only upstream project), so there
+is nowhere of ours to push the tag to yet.

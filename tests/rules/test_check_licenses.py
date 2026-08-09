@@ -4,8 +4,11 @@
 # the terms of the GNU General Public License as published by the Free Software
 # Foundation; either version 2, or (at your option) any later version.
 
+import subprocess
+
 import pytest
 
+from tools import check_licenses
 from tools.check_licenses import find_missing_headers, find_v2_only
 
 V2_OR_LATER = (
@@ -72,3 +75,16 @@ def test_gpl_mention_without_version_grant_is_not_flagged(tmp_path):
         GPL_MENTION_WITHOUT_VERSION_GRANT, encoding="utf-8"
     )
     assert find_v2_only(tmp_path) == []
+
+
+def test_unresolvable_fork_point_tag_is_diagnosed_not_raised(monkeypatch):
+    # check_deltas.py and check_banned_symbols.py both catch
+    # subprocess.CalledProcessError from the git call that resolves
+    # fork-point and turn it into a diagnostic exit 2. main() here used to
+    # call _added_since_fork_point() outside the guarded try block, so the
+    # same failure surfaced as an uncaught traceback instead.
+    def _raise() -> list:
+        raise subprocess.CalledProcessError(128, ["git", "diff", "fork-point"])
+
+    monkeypatch.setattr(check_licenses, "_added_since_fork_point", _raise)
+    assert check_licenses.main() == 2
