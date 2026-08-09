@@ -14,8 +14,10 @@ The fork commit is tagged `fork-point`
 ## 1. 2026-08-09 — SCRIPT-ENFORCED: modifications to upstream files must be logged
 
 `tools/check_deltas.py` intersects `git diff --name-only fork-point HEAD` with
-`git ls-tree -r --name-only fork-point` and subtracts the backticked paths in
-`docs/upstream-deltas.md`. Anything left exits non-zero.
+`git ls-tree -r --name-only fork-point` and subtracts the paths backticked in
+`## ` heading lines of `docs/upstream-deltas.md`. Backticks anywhere else in
+the ledger — reason prose, intro text, bullet lists — authorise nothing.
+Anything left exits non-zero.
 
 Additive files are unrestricted and always will be. Two of this fork's three
 planned additions — the 8086 core and the web UI — are entirely new files and

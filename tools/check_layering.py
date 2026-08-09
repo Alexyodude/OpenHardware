@@ -36,7 +36,7 @@ def find_violations(
 ) -> list[tuple[pathlib.Path, int, str]]:
     paths = sorted(
         path
-        for path in backend_dir.glob("*")
+        for path in backend_dir.rglob("*")
         if path.is_file() and path.suffix in SOURCE_SUFFIXES
     ) if backend_dir.is_dir() else []
 

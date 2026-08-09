@@ -14,8 +14,8 @@ protects one consequence of it.
 ## 1. 2026-08-09 — SCRIPT-ENFORCED: no file may carry a v2-only header
 
 `find_v2_only` in `tools/check_licenses.py` scans the whole tree for a file
-whose first 4000 bytes mention `GNU General Public License` without
-`any later version`.
+whose first 4000 bytes mention `GNU General Public License` and `version 2`
+without `later version`.
 
 Upstream is v2-**or-later**, verified in `src/picsimlab1.cc` and
 `src/sim_backend/bsim_simavr.h`. That is what makes **Apache-2.0 dependencies

@@ -49,6 +49,22 @@ def test_empty_directory_raises(tmp_path):
         find_violations(tmp_path / "missing")
 
 
+def test_forbidden_include_in_nested_subdirectory_is_found(tmp_path):
+    # src/sim_backend/ is flat today, but nothing guarantees it stays that
+    # way -- a future backend (e.g. an 8086 core) may live in its own
+    # subdirectory. A non-recursive scan would silently miss it.
+    (tmp_path / "bsim_ok.cc").write_text("#include \"../lib/board.h\"\n", encoding="utf-8")
+    nested = tmp_path / "i8086"
+    nested.mkdir()
+    (nested / "bsim_bad.cc").write_text(
+        '#include "../parts/input_POT.h"\n', encoding="utf-8"
+    )
+    violations = find_violations(tmp_path)
+    assert len(violations) == 1
+    assert violations[0][0] == nested / "bsim_bad.cc"
+    assert violations[0][2] == "../parts/input_POT.h"
+
+
 def test_real_sim_backend_is_clean():
     # Verified clean at fork-point on 2026-08-09; this pins it.
     assert find_violations(REPO / "src" / "sim_backend") == []
