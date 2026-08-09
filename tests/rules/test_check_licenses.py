@@ -20,6 +20,16 @@ V2_ONLY = (
     "# by the Free Software Foundation.\n"
 )
 
+# Mentions the GPL without granting version 2 of it at all — e.g. a file that
+# was relicensed away from GPL. The old two-condition check (GPL name present,
+# "later version" absent) flagged this as v2-only, which is wrong: it never
+# granted version 2 in the first place. The three-condition check requires an
+# actual "version 2" mention before flagging.
+GPL_MENTION_WITHOUT_VERSION_GRANT = (
+    "# This file was relicensed from the GNU General Public License to the MIT\n"
+    "# License; see LICENSE-MIT for the terms that now apply.\n"
+)
+
 
 def test_v2_only_header_is_detected(tmp_path):
     (tmp_path / "bad.py").write_text(V2_ONLY, encoding="utf-8")
@@ -55,3 +65,10 @@ def test_present_header_satisfies_the_check(tmp_path):
 def test_empty_scan_raises(tmp_path):
     with pytest.raises(ValueError, match="no source files"):
         find_v2_only(tmp_path / "missing")
+
+
+def test_gpl_mention_without_version_grant_is_not_flagged(tmp_path):
+    (tmp_path / "relicensed.py").write_text(
+        GPL_MENTION_WITHOUT_VERSION_GRANT, encoding="utf-8"
+    )
+    assert find_v2_only(tmp_path) == []

@@ -44,8 +44,14 @@ Scoped to files added since `fork-point`, via
 `git diff --diff-filter=A fork-point HEAD`. Upstream's files are upstream's
 business; ours are ours.
 
-## 3. 2026-08-09 — SCRIPT-ENFORCED: dependency licences
+## 3. 2026-08-09 — CONVENTION: dependency licences
 
 MIT, BSD, and GPL-compatible licences only. PyYAML (MIT) is the sole
 third-party Python dependency. Apache-2.0 is permitted **only while section 1
 passes** — the moment it fails, every Apache-2.0 dependency must go.
+
+Not enforced by a script: nothing in this repository checks dependency
+licences automatically. With a single dependency, the discipline is manual
+review at add-time. This should upgrade to SCRIPT-ENFORCED the moment a
+second or third dependency shows up — a CONVENTION label stops being honest
+once there is more than one thing to forget to check.

@@ -24,7 +24,8 @@ FORK_POINT = "fork-point"
 SOURCE_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".h", ".hpp", ".py"})
 
 _GPL = "GNU General Public License"
-_LATER = "any later version"
+_VERSION_2 = "version 2"
+_LATER = "later version"
 _HEAD_BYTES = 4000
 
 
@@ -47,7 +48,7 @@ def find_v2_only(root: pathlib.Path = pathlib.Path(".")) -> list[pathlib.Path]:
     offenders = []
     for path in paths:
         head = path.read_text(encoding="utf-8", errors="replace")[:_HEAD_BYTES]
-        if _GPL in head and _LATER not in head:
+        if _GPL in head and _VERSION_2 in head and _LATER not in head:
             offenders.append(path)
     return offenders
 
