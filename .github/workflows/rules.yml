@@ -1,0 +1,39 @@
+name: rules
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch fork-point tag
+        run: git fetch --tags --force
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: pip install pytest==9.0.2 PyYAML==6.0.3
+
+      - name: check_layering
+        run: python tools/check_layering.py
+
+      - name: check_licenses
+        run: python tools/check_licenses.py
+
+      - name: check_deltas
+        run: python tools/check_deltas.py
+
+      - name: check_banned_symbols
+        run: python tools/check_banned_symbols.py
+
+      - name: rules test suite
+        run: pytest tests/rules/ -v
