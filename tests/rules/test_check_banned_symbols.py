@@ -41,3 +41,29 @@ def test_clean_file_passes(tmp_path):
     path = tmp_path / "bsim_new.cc"
     path.write_text("int x = cycles * 2;\n", encoding="utf-8")
     assert find_banned([path]) == []
+
+
+def test_call_after_same_line_block_comment_is_flagged(tmp_path):
+    path = tmp_path / "bsim_new.cc"
+    path.write_text("/* note */ x = rand();\n", encoding="utf-8")
+    assert find_banned([path]) == [(path, 1, "rand")]
+
+
+def test_call_inside_multiline_block_comment_is_not_flagged(tmp_path):
+    path = tmp_path / "bsim_new.cc"
+    path.write_text("/*\nrand();\n*/\n", encoding="utf-8")
+    assert find_banned([path]) == []
+
+
+def test_trailing_comment_mentioning_banned_symbol_is_not_flagged(tmp_path):
+    path = tmp_path / "bsim_new.cc"
+    path.write_text(
+        "int x = cycles * 2; // comment mentioning rand()\n", encoding="utf-8"
+    )
+    assert find_banned([path]) == []
+
+
+def test_call_after_multiline_block_comment_closes_is_flagged(tmp_path):
+    path = tmp_path / "bsim_new.cc"
+    path.write_text("/* still open\n*/ x = rand();\n", encoding="utf-8")
+    assert find_banned([path]) == [(path, 2, "rand")]

@@ -9,6 +9,11 @@
 Scoped to files added since ``fork-point``. Upstream's existing use of these
 symbols is upstream's business; a delta would be needed to change it, and this
 checker is not the place to force one.
+
+Comment stripping is a small C-style scan (``//`` to end of line, ``/* ... */``
+possibly spanning several lines), not a full C parser: a ``/*`` inside a
+string literal is not recognised as a string and would incorrectly be treated
+as opening a comment. That is out of scope here.
 """
 
 from __future__ import annotations
@@ -23,7 +28,47 @@ SOURCE_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".h", ".hpp"})
 BANNED = ("rand", "time", "clock")
 
 _CALL = re.compile(r"(?<![\w])(" + "|".join(BANNED) + r")\s*\(")
-_COMMENT = re.compile(r"^\s*(//|/\*|\*)")
+
+
+def _strip_comments(lines: list[str]) -> list[str]:
+    """Return `lines` with `//` and `/* ... */` comment text removed.
+
+    A boolean carries "currently inside a block comment" from line to line,
+    so a comment opened on one line and closed on a later one strips
+    everything in between, and code following the close is still scanned —
+    including code on the very line where the block comment closes.
+    """
+    stripped: list[str] = []
+    in_block = False
+    for line in lines:
+        out: list[str] = []
+        i = 0
+        n = len(line)
+        while i < n:
+            if in_block:
+                end = line.find("*/", i)
+                if end == -1:
+                    i = n
+                else:
+                    i = end + 2
+                    in_block = False
+                continue
+            line_comment = line.find("//", i)
+            block_comment = line.find("/*", i)
+            if line_comment == -1 and block_comment == -1:
+                out.append(line[i:])
+                i = n
+            elif block_comment == -1 or (
+                line_comment != -1 and line_comment < block_comment
+            ):
+                out.append(line[i:line_comment])
+                i = n
+            else:
+                out.append(line[i:block_comment])
+                i = block_comment + 2
+                in_block = True
+        stripped.append("".join(out))
+    return stripped
 
 
 def find_banned(
@@ -34,9 +79,8 @@ def find_banned(
         if path.suffix not in SOURCE_SUFFIXES or not path.is_file():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        for number, line in enumerate(text.splitlines(), start=1):
-            if _COMMENT.match(line):
-                continue
+        code_lines = _strip_comments(text.splitlines())
+        for number, line in enumerate(code_lines, start=1):
             match = _CALL.search(line)
             if match:
                 hits.append((path, number, match.group(1)))
