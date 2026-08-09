@@ -10,14 +10,15 @@
 
 ## Global Constraints
 
-- **License:** GPL-2-or-later. Every new source file carries the header in `HEADER_TEMPLATE` below, verbatim. Upstream was verified v2-or-later on 2026-08-09 (spec §8.1).
+- **License:** GPL-2-or-later. Every new `.py` file carries the header in `HEADER_TEMPLATE` below, verbatim — **including test files and `tools/__init__.py`**. `tools/check_licenses.py` enforces this against every file added since `fork-point` and does not exempt `tests/`, so a test file without a header fails CI. Upstream was verified v2-or-later on 2026-08-09 (spec §8.1).
+- **Test imports:** `tests/rules/conftest.py` puts the repo root on `sys.path` once. No test file contains `sys.path` manipulation; they import `from tools.<module> import ...` directly.
 - **Dependencies:** MIT, BSD, or GPL-compatible only. PyYAML is MIT. Apache-2.0 is permitted *only* because upstream is v2-or-later; if Task 3 finds a v2-only header anywhere, Apache-2.0 becomes forbidden and this constraint inverts.
 - **Additive-only:** No file that exists at tag `fork-point` (`cd92747b1a04cab56c17f4e9ac35a1406c9935f7`) may be modified. Every file in this plan is new. Local-only ignores go in `.git/info/exclude`, never in upstream's `.gitignore`.
 - **Test scope:** Always `pytest tests/rules/ -v`. Never bare `pytest` from the repo root — upstream's `tests/python/test_blink.py` imports the out-of-tree module `PICSimLab_rcontrol` and requires a built binary, so a bare run errors at collection.
 - **Branch:** All work on `design/feature-strategy`, which already exists and holds the spec commit.
 - **Vacuous-pass ban:** No checker may pass when it has nothing to check. Empty input is an error, not a success. Upstream's `tests/python/test_blink.py:54` demonstrates the failure mode this bans — it catches `ConnectionError`, prints it, and passes.
 
-**HEADER_TEMPLATE** (Python files — first four lines of every new `.py`):
+**HEADER_TEMPLATE** (the opening lines of every new `.py`, tests included — the first line's description changes per file, the three licence lines never do):
 
 ```python
 # OpenHardware — <one-line description>
@@ -62,7 +63,7 @@ Neither deviation changes what the spec requires — only where the files live a
 ### Task 1: Rule metadata parser
 
 **Files:**
-- Create: `tools/rules_meta.py`
+- Create: `tools/__init__.py`, `tools/rules_meta.py`, `tests/rules/conftest.py`
 - Test: `tests/rules/test_rules_meta.py`
 
 **Interfaces:**
@@ -74,12 +75,16 @@ Neither deviation changes what the spec requires — only where the files live a
 Create `tests/rules/test_rules_meta.py`:
 
 ```python
+# OpenHardware — tests for the rule frontmatter parser.
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2, or (at your option) any later version.
+
 import pathlib
-import sys
 
 import pytest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from tools.rules_meta import Mechanism, RuleParseError, load_rules, parse_rule
 
 VALID = """---
@@ -154,7 +159,32 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'tools.rules_meta'`
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `tools/__init__.py` (empty file, makes `tools` importable), then `tools/rules_meta.py`:
+First create `tests/rules/conftest.py`, which puts the repo root on `sys.path` once for every test file in the directory:
+
+```python
+# OpenHardware — make the repo root importable for the rules test suite.
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2, or (at your option) any later version.
+
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+```
+
+Then `tools/__init__.py`, which makes `tools` an importable package. It carries the licence header like every other new `.py`; it holds no code:
+
+```python
+# OpenHardware — package marker for the repository's checker scripts.
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2, or (at your option) any later version.
+```
+
+Then `tools/rules_meta.py`:
 
 ```python
 # OpenHardware — parse .claude/rules frontmatter into structured metadata.
@@ -276,7 +306,8 @@ Expected: PASS — 8 passed
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tools/__init__.py tools/rules_meta.py tests/rules/test_rules_meta.py
+git add tools/__init__.py tools/rules_meta.py \
+        tests/rules/conftest.py tests/rules/test_rules_meta.py
 git commit -m "feat(rules): add rule frontmatter parser
 
 Malformed or empty input raises rather than yielding an empty pass."
@@ -302,12 +333,16 @@ Delivers one rule with a working checker and the meta-guard that ties them toget
 Create `tests/rules/test_check_layering.py`:
 
 ```python
+# OpenHardware — tests for the backend layering checker.
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2, or (at your option) any later version.
+
 import pathlib
-import sys
 
 import pytest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from tools.check_layering import find_violations
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -517,10 +552,14 @@ Not enforced here because correctness per method is what
 Create `tests/rules/test_rules_are_armed.py`:
 
 ```python
-import pathlib
-import sys
+# OpenHardware — meta-guard: every armed mechanism names a real checker.
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2, or (at your option) any later version.
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+import pathlib
+
 from tools.rules_meta import load_rules
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -587,12 +626,14 @@ sim_backend measured clean at fork-point: 15 files, 0 violations."
 Create `tests/rules/test_check_licenses.py`:
 
 ```python
-import pathlib
-import sys
+# OpenHardware — tests for the GPL header checker.
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2, or (at your option) any later version.
 
 import pytest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from tools.check_licenses import find_missing_headers, find_v2_only
 
 V2_OR_LATER = (
@@ -860,12 +901,14 @@ one v2-only file revokes the GPL-3 path and every Apache-2.0 dependency."
 Create `tests/rules/test_check_deltas.py`:
 
 ```python
-import pathlib
-import sys
+# OpenHardware — tests for the upstream delta checker.
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2, or (at your option) any later version.
 
 import pytest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from tools.check_deltas import logged_paths, unlogged_modifications
 
 LEDGER = """# Upstream deltas
@@ -1119,10 +1162,12 @@ Ships one armed mechanism and one explicitly unarmed one, exercising the
 Create `tests/rules/test_check_banned_symbols.py`:
 
 ```python
-import pathlib
-import sys
+# OpenHardware — tests for the nondeterministic-symbol checker.
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2, or (at your option) any later version.
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from tools.check_banned_symbols import find_banned
 
 
@@ -1348,12 +1393,16 @@ The replay mechanism ships armed:false with blocked_by naming spec 8.4."
 Create `tests/rules/test_ledger.py`:
 
 ```python
+# OpenHardware — tests for the feature ledger parser.
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2, or (at your option) any later version.
+
 import pathlib
-import sys
 
 import pytest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from tools.ledger import Cell, LedgerError, parse_ledger
 
 HEADER = (
@@ -1795,10 +1844,14 @@ Six phases from capability gap to oracle-bound ledger."
 Create `tests/rules/test_claude_md_lists_every_rule.py`:
 
 ```python
-import pathlib
-import sys
+# OpenHardware — every rule must be named in CLAUDE.md.
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 2, or (at your option) any later version.
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+import pathlib
+
 from tools.rules_meta import load_rules
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
