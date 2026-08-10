@@ -1,0 +1,194 @@
+# Answers the two open questions in
+# docs/superpowers/specs/2026-08-09-openhardware-feature-strategy-design.md:
+#
+#   8.3 — does bsim_remote's protocol expose enough to drive conformance
+#         fixtures headlessly, or does it need extending?
+#   8.4 — does the NOGUI build produce VCD output without a display?
+#
+# This is a PROBE, not a gate. It is expected to fail informatively rather than
+# pass quietly, so investigative steps carry continue-on-error and every step
+# reports into the job summary. Nothing in .claude/rules depends on it, and
+# .github/workflows/rules.yml stays the gate.
+#
+# It is manual-only: install_deps.sh pulls a very large package set and
+# build_all_static.sh builds qemu, so a run costs a long time on a hosted
+# runner. Do not add push/pull_request triggers without meaning to.
+#
+# Cannot run until the fork-point tag is pushed to a remote — see CLAUDE.md.
+
+name: NOGUI probe (spec 8.3 / 8.4)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # build_package_NOGUI.sh runs `git archive master`, so the ref must exist.
+      - name: Ensure master ref exists
+        run: |
+          git rev-parse --verify master \
+            || git branch master origin/master \
+            || echo "::warning::no master ref; the NOGUI package step will fail"
+
+      - name: Install build dependencies
+        continue-on-error: true
+        run: bscripts/install_deps.sh
+
+      - name: Build vendored engines
+        id: build_libs
+        continue-on-error: true
+        run: |
+          mkdir -p build_all
+          bscripts/build_all_static.sh
+
+      # The only script that knows how to build the NOGUI variant: it clones
+      # lxrad_nogui, rewrites src/Makefile for the NOGUI target, and produces a
+      # .deb. Everything downstream depends on this step.
+      - name: Build NOGUI package
+        id: build_nogui
+        continue-on-error: true
+        run: bscripts/build_package_NOGUI.sh
+
+      - name: Install NOGUI package
+        id: install_nogui
+        continue-on-error: true
+        run: |
+          set -x
+          ls -la release_*/ || true
+          deb=$(find . -name 'picsimlab_NOGUI_*.deb' | head -1)
+          if [ -z "$deb" ]; then
+            echo "::error::no NOGUI .deb produced; spec 8.4 unanswered"
+            exit 1
+          fi
+          sudo dpkg -i "$deb" || sudo apt-get -f install -y
+          command -v picsimlab_NOGUI || find / -name 'picsimlab_NOGUI' -type f 2>/dev/null | head
+
+      # From here on DISPLAY is explicitly unset. The whole question is whether
+      # this works with no display at all, so xvfb would defeat the purpose.
+      - name: Probe A — does it run with no display?
+        id: probe_run
+        continue-on-error: true
+        run: |
+          set -x
+          unset DISPLAY
+          bin=$(command -v picsimlab_NOGUI || find / -name 'picsimlab_NOGUI' -type f 2>/dev/null | head -1)
+          echo "binary=$bin" >> "$GITHUB_OUTPUT"
+          if [ -z "$bin" ]; then
+            echo "::error::no picsimlab_NOGUI binary found; probes B and C cannot run"
+            exit 1
+          fi
+          # Capture the real exit status: piping into tee would report tee's,
+          # and a trailing `|| true` would report 0 no matter what happened.
+          set +e
+          timeout 20 "$bin" --help > probe_help.log 2>&1
+          echo "--help exit status: $?" | tee -a probe_help.log
+
+      - name: Probe B — rcontrol surface over plain TCP
+        id: probe_rcontrol
+        continue-on-error: true
+        run: |
+          unset DISPLAY
+          bin="${{ steps.probe_run.outputs.binary }}"
+          mkdir -p probe_out && cd probe_out
+          # Launch against upstream's own blink workspace and let it settle.
+          timeout 120 "$bin" ../tests/blink/blink.pzw > run.log 2>&1 &
+          sleep 25
+          python3 - <<'PY' | tee rcontrol.log
+          import socket, sys
+          # rcontrol is a plain line-oriented TCP protocol, so no out-of-tree
+          # PICSimLab_rcontrol module is needed to interrogate it.
+          CMDS = ["version", "info", "pins", "pinsl", "splist", "dumpr", "help"]
+          try:
+              s = socket.create_connection(("127.0.0.1", 5000), timeout=10)
+          except OSError as exc:
+              print(f"CONNECT FAILED: {exc}")
+              sys.exit(0)
+          s.settimeout(6)
+          for cmd in CMDS:
+              try:
+                  s.sendall((cmd + "\n").encode())
+                  data = s.recv(65536).decode(errors="replace")
+                  print(f"--- {cmd} ---\n{data}\n")
+              except OSError as exc:
+                  print(f"--- {cmd} --- ERROR {exc}\n")
+          s.sendall(b"quit\n")
+          s.close()
+          PY
+          sleep 2
+          pkill -f picsimlab_NOGUI || true
+
+      - name: Probe C — is any VCD produced without a display?
+        id: probe_vcd
+        continue-on-error: true
+        run: |
+          mkdir -p probe_out
+          # -newer needs its reference file to exist; without this guard find
+          # errors out and the step reports nothing either way.
+          if [ ! -f probe_out/run.log ]; then
+            echo "::warning::probe_out/run.log absent — Probe B never launched the binary"
+            : > probe_out/run.log
+          fi
+          find . -name '*.vcd' -newer probe_out/run.log -print -exec head -20 {} \; \
+            | tee probe_out/vcd_found.log
+          if [ -s probe_out/vcd_found.log ]; then
+            echo "found=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=no" >> "$GITHUB_OUTPUT"
+            echo "No .vcd emitted. Expected if blink.pzw wires no virtual_VCD_Dump part —"
+            echo "VCD is configured by placing that part in the workspace, not via rcontrol."
+          fi
+
+      - name: Collect logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nogui-probe-logs
+          path: |
+            probe_*.log
+            probe_out/
+            build_all/*.log
+          if-no-files-found: warn
+
+      - name: Report findings
+        if: always()
+        run: |
+          {
+            echo "## NOGUI probe results"
+            echo
+            echo "| Step | Outcome |"
+            echo "|---|---|"
+            echo "| Build engines | ${{ steps.build_libs.outcome }} |"
+            echo "| Build NOGUI | ${{ steps.build_nogui.outcome }} |"
+            echo "| Install NOGUI | ${{ steps.install_nogui.outcome }} |"
+            echo "| Runs headless | ${{ steps.probe_run.outcome }} |"
+            echo "| rcontrol reachable | ${{ steps.probe_rcontrol.outcome }} |"
+            echo "| VCD emitted | ${{ steps.probe_vcd.outputs.found }} |"
+            echo
+            echo "### What these answer"
+            echo
+            echo "**Spec 8.4** is answered by 'Runs headless' plus 'VCD emitted'."
+            echo "A NOGUI binary that starts with no DISPLAY but emits no VCD does"
+            echo "not settle 8.4 on its own — check whether the workspace used"
+            echo "actually wires a \`virtual_VCD_Dump\` part before concluding."
+            echo
+            echo "**Spec 8.3** is answered by the rcontrol log in the artifact."
+            echo "Static reading of \`src/lib/rcontrol.cc\` already shows the"
+            echo "vocabulary is: all, blist, buclist, clk, dumpe, dumpf, dumpr,"
+            echo "exit, help, info, oscmeasures, oscrdcfg, oscshow, oscwrcfg,"
+            echo "pins, pinsl, quit, reset, sim, splist, spshow, start, stop,"
+            echo "sync, version — with **no VCD command**. This probe confirms"
+            echo "whether that surface is reachable headlessly and what it returns."
+            echo
+            echo "Record the answers in the two \`blocked_by\` fields in"
+            echo "\`.claude/rules/determinism.md\` and"
+            echo "\`.claude/rules/conformance-fixtures.md\`, and arm those"
+            echo "mechanisms only once a fixture genuinely passes."
+          } >> "$GITHUB_STEP_SUMMARY"
