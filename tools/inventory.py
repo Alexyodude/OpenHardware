@@ -39,6 +39,7 @@ import collections
 import pathlib
 import subprocess
 import sys
+import typing
 
 try:
     from tools.ledger import LedgerError, parse_ledger
@@ -172,92 +173,115 @@ def _head() -> str:
         return "unknown"
 
 
-def render_text() -> str:
-    tests = collect_tests()
-    mechanisms = collect_mechanisms()
-    files = collect_files()
-    ledgers = collect_ledgers()
+class _Inventory(typing.NamedTuple):
+    tests: dict[str, int]
+    mechanisms: list[tuple[str, str, bool, str | None]]
+    files: dict[str, list[str]]
+    ledgers: dict[str, collections.Counter]
 
-    armed = sum(1 for _, _, is_armed, _ in mechanisms if is_armed)
+
+def _gather() -> _Inventory:
+    """Collect every section once, so the two renderers cannot disagree."""
+    return _Inventory(
+        collect_tests(), collect_mechanisms(), collect_files(), collect_ledgers()
+    )
+
+
+def _armed(mechanisms: list[tuple[str, str, bool, str | None]]) -> int:
+    return sum(1 for _, _, is_armed, _ in mechanisms if is_armed)
+
+
+def _tests_by_size(tests: dict[str, int]) -> list[tuple[str, int]]:
+    """Largest file first, then alphabetical — one ordering for both renderers."""
+    return sorted(tests.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
+def _breakdown(counter: collections.Counter) -> str:
+    return ", ".join(f"{count} {status}" for status, count in sorted(counter.items()))
+
+
+def render_text() -> str:
+    inv = _gather()
+    armed = _armed(inv.mechanisms)
     lines = [f"OpenHardware inventory at {_head()}", ""]
 
-    lines.append(f"TESTS — {sum(tests.values())} across {len(tests)} files")
-    for path, count in sorted(tests.items(), key=lambda kv: (-kv[1], kv[0])):
+    lines.append(f"TESTS — {sum(inv.tests.values())} across {len(inv.tests)} files")
+    for path, count in _tests_by_size(inv.tests):
         lines.append(f"  {count:>4}  {path}")
 
     lines.append("")
-    lines.append(f"MECHANISMS — {armed} armed, {len(mechanisms) - armed} unarmed")
-    for rule, tier, is_armed, checker in mechanisms:
+    lines.append(f"MECHANISMS — {armed} armed, {len(inv.mechanisms) - armed} unarmed")
+    for rule, tier, is_armed, checker in inv.mechanisms:
         lines.append(
             f"  {'ARMED  ' if is_armed else 'unarmed'}  {tier:<16}  {rule}  ->  {checker}"
         )
 
     lines.append("")
-    total_files = sum(len(v) for v in files.values())
-    lines.append(f"FILES since {FORK_POINT} — {total_files}")
-    for status, paths in sorted(files.items()):
+    lines.append(
+        f"FILES since {FORK_POINT} — {sum(len(p) for p in inv.files.values())}"
+    )
+    for status, paths in sorted(inv.files.items()):
         lines.append(f"  {len(paths):>4}  {STATUS_LABELS.get(status, status)}")
 
     lines.append("")
-    lines.append(f"LEDGERS — {len(ledgers)}")
-    for path, counter in ledgers.items():
-        breakdown = ", ".join(f"{n} {s}" for s, n in sorted(counter.items()))
-        lines.append(f"  {sum(counter.values()):>4}  {path}  ({breakdown})")
+    lines.append(f"LEDGERS — {len(inv.ledgers)}")
+    for path, counter in inv.ledgers.items():
+        lines.append(f"  {sum(counter.values()):>4}  {path}  ({_breakdown(counter)})")
 
     return "\n".join(lines)
 
 
 def render_markdown() -> str:
-    tests = collect_tests()
-    mechanisms = collect_mechanisms()
-    files = collect_files()
-    ledgers = collect_ledgers()
+    inv = _gather()
+    armed = _armed(inv.mechanisms)
 
-    armed = sum(1 for _, _, is_armed, _ in mechanisms if is_armed)
     out = [
         "# OpenHardware inventory",
         "",
         f"Generated from `{_head()}` by `tools/inventory.py`. Every number here is "
-        f"computed from the repository; do not edit this by hand.",
+        "computed from the repository; do not edit this by hand.",
         "",
-        f"## Tests — {sum(tests.values())}",
+        f"## Tests — {sum(inv.tests.values())}",
         "",
         "| file | tests |",
         "|---|---|",
     ]
-    out += [
-        f"| `{path}` | {count} |"
-        for path, count in sorted(tests.items(), key=lambda kv: (-kv[1], kv[0]))
-    ]
+    out += [f"| `{path}` | {count} |" for path, count in _tests_by_size(inv.tests)]
 
     out += [
         "",
-        f"## Mechanisms — {armed} armed, {len(mechanisms) - armed} unarmed",
+        f"## Mechanisms — {armed} armed, {len(inv.mechanisms) - armed} unarmed",
         "",
         "| rule | tier | armed | checker |",
         "|---|---|---|---|",
     ]
     out += [
         f"| {rule} | `{tier}` | {'yes' if is_armed else 'no'} | `{checker}` |"
-        for rule, tier, is_armed, checker in mechanisms
+        for rule, tier, is_armed, checker in inv.mechanisms
     ]
 
     out += [
         "",
-        f"## Files since `{FORK_POINT}` — {sum(len(v) for v in files.values())}",
+        f"## Files since `{FORK_POINT}` — {sum(len(p) for p in inv.files.values())}",
         "",
         "| status | count |",
         "|---|---|",
     ]
     out += [
         f"| {STATUS_LABELS.get(status, status)} | {len(paths)} |"
-        for status, paths in sorted(files.items())
+        for status, paths in sorted(inv.files.items())
     ]
 
-    out += ["", f"## Ledgers — {len(ledgers)}", "", "| ledger | cells | breakdown |", "|---|---|---|"]
     out += [
-        f"| `{path}` | {sum(c.values())} | {', '.join(f'{n} {s}' for s, n in sorted(c.items()))} |"
-        for path, c in ledgers.items()
+        "",
+        f"## Ledgers — {len(inv.ledgers)}",
+        "",
+        "| ledger | cells | breakdown |",
+        "|---|---|---|",
+    ]
+    out += [
+        f"| `{path}` | {sum(counter.values())} | {_breakdown(counter)} |"
+        for path, counter in inv.ledgers.items()
     ]
 
     return "\n".join(out) + "\n"
