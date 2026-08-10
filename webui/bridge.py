@@ -97,7 +97,10 @@ OPERATIONS: dict[str, tuple] = {
         lambda api, a: api.set_part_input(a["part"], a["index"], a["value"]),
         ("part", "index", "value"),
     ),
-    "add_part": (lambda api, a: api.add_part(a["name"]), ("name",)),
+    "add_part": (
+        lambda api, a: api.add_part(a["name"], a.get("x", 0), a.get("y", 0)),
+        ("name",),
+    ),
     "remove_part": (lambda api, a: api.remove_part(a["index"]), ("index",)),
     "read_part_config": (lambda api, a: api.read_part_config(a["index"]), ("index",)),
     "run": (lambda api, a: api.run(), ()),

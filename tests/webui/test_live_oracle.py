@@ -104,8 +104,14 @@ def test_version_returns_something(api: SimulatorApi):
 
 
 def test_real_pins_output_parses(live: RControlClient):
-    """The `pins` parser follows rcontrol.cc:1095. This proves I read it right."""
-    pins = parse_pins(live.command("pins"))
+    """Proves the parser matches the server, which reading alone did not.
+
+    The first version of this test used `pins` and failed on every line: the
+    formatter at rcontrol.cc:1095 serves `pinsl`, while `pins` is a narrow
+    two-column display. Reading the source produced a confident, wrong parser;
+    only the live server exposed it.
+    """
+    pins = parse_pins(live.command("pinsl"))
     assert pins, "a loaded board should report at least one pin"
     assert all(pin.name for pin in pins)
     assert all(pin.direction in ("I", "O") for pin in pins)
@@ -122,22 +128,55 @@ def test_supported_parts_parse(api: SimulatorApi):
 # --- a write is only real if a read confirms it ------------------------------
 
 
-def test_writing_a_pin_is_observable(api: SimulatorApi):
-    """The whole UI premise: an action must be readable back.
+def test_writing_a_pin_is_accepted(api: SimulatorApi):
+    """`set pin[]` is accepted by the server for a real pin index.
 
-    If this fails, every `set` the browser issues is a no-op that reports Ok,
-    which would make the interface a convincing liar.
+    This asserts acceptance, deliberately **not** observability. An earlier
+    version asserted that `get pin[]` reflects the written value; against a live
+    Arduino Uno it does not, and the honest response was to weaken the claim
+    rather than keep a test that says something untrue. See
+    test_pin_writes_are_not_observable_via_get_pin below.
     """
     pins = api.pins()
-    target = next((p for p in pins if p.direction == "O"), pins[0])
+    api.set_pin(pins[0].index, 1)  # raises on ERROR
 
-    before = api.get_pin(target.index)
-    api.set_pin(target.index, 0 if before else 1)
-    after = api.get_pin(target.index)
 
-    assert after != before, (
-        f"pin[{target.index:02}] read back {after} after being set to "
-        f"{0 if before else 1}; the write did not take effect"
+def test_pin_writes_are_not_observable_via_get_pin(api: SimulatorApi):
+    """Pins the MCU owns do not take an external write. Documented, not wished away.
+
+    Measured on PICSimLab 0.9.3, Arduino Uno, simavr, simulation paused:
+    `set pin[04] = 0` and `set pin[04] = 1` both leave `get pin[04]` reporting
+    16, unchanged. Poking MCU pins is therefore **not** the interaction path a
+    browser UI can build on.
+
+    The supported path is spare parts — `spadd`, then `set part[N].in[M]` — which
+    is how PICSimLab models buttons and potentiometers. That path is blocked on
+    this machine because part assets are not installed, and placing a part
+    without them segfaults the simulator (docs/known-issues.md).
+
+    This test pins the current, surprising behaviour so that if a future version
+    makes pin writes observable, it fails and tells us the model changed.
+    """
+    api.pause()
+    try:
+        pins = api.pins()
+        target = next(
+            p
+            for p in pins
+            if p.direction == "I" and p.type == "D" and "V" not in p.name
+        )
+        api.set_pin(target.index, 0)
+        low = api.get_pin(target.index)
+        api.set_pin(target.index, 1)
+        high = api.get_pin(target.index)
+    finally:
+        api.run()
+
+    assert low == high, (
+        f"pin[{target.index:02}] now distinguishes 0 from 1 ({low} vs {high}). "
+        f"That is an improvement, but it contradicts what was measured on "
+        f"0.9.3 -- update this test and revisit whether the UI can drive pins "
+        f"directly."
     )
 
 
@@ -150,13 +189,13 @@ def test_the_typed_api_agrees_with_the_raw_command(live: RControlClient):
     The API layer must not quietly reinterpret what the server said.
     """
     api = SimulatorApi(live)
-    raw = live.command("pins")
+    raw = live.command("pinsl")
     assert len(api.pins()) == len(parse_pins(raw))
 
 
 def test_pin_count_matches_the_header(live: RControlClient):
     """The header is the server's own checksum on its body."""
-    response = live.command("pins")
+    response = live.command("pinsl")
     header = next(line for line in response.lines if "pins [" in line)
     promised = int(header.split()[0])
     assert len(parse_pins(response)) == promised

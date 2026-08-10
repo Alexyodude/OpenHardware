@@ -22,7 +22,17 @@ import re
 
 from webui.rcontrol import RControlClient, Response
 
-# `  pin[%02i] %c %c %i %03i %5.3f "%-8.8s" ` — rcontrol.cc:1095
+# `  pin[%02i] %c %c %i %03i %5.3f "%-8.8s" ` — rcontrol.cc:1095, the **pinsl**
+# formatter. Confirmed against a live PICSimLab 0.9.3 on 2026-08-10.
+#
+# `pins` and `pinsl` are different commands with different output, and an
+# earlier version of this file used this parser against `pins`, which fails on
+# every line. `pins` emits two entries per line in a narrow form —
+# `  pin[01] ( PC6/RST) < 0    pin[15] (PB1/~9  ) < 0` — with `<`/`>` for
+# direction and no type, analog value, or count header.
+#
+# This module uses `pinsl` exclusively: it is strictly richer, and its header
+# doubles as a checksum on its own body.
 _PIN_LINE = re.compile(
     r"""^\s*pin\[(?P<index>\d+)\]\s+
         (?P<type>\S)\s+
@@ -42,6 +52,12 @@ _TRAILING_VALUE = re.compile(r"=\s*(?P<value>-?[\d.]+)\s*$")
 
 # splist prints `"name", "name", ` — rcontrol.cc:1322
 _QUOTED = re.compile(r'"([^"]*)"')
+
+#: `blist` and `buclist` print **bare** comma-separated names, not quoted:
+#: ` Arduino_Mega, Arduino_Nano, Arduino_Uno, ...`. Only `splist` quotes them.
+#: Confirmed live on 2026-08-10; using the quoted parser here silently returns
+#: an empty list, which is why board discovery must not share splist's parser.
+_LIST_HEADER = re.compile(r":\s*$")
 
 #: `pins` reports the output-analog value as ``(int)(oavalue - 55)``
 #: (rcontrol.cc:1097). The offset is upstream's, its origin undocumented there.
@@ -103,8 +119,22 @@ def parse_pins(response: Response) -> list[Pin]:
 
 
 def parse_quoted_list(response: Response) -> list[str]:
-    """Parse a reply whose payload is quoted, comma-separated names."""
+    """Parse a reply whose payload is quoted, comma-separated names (`splist`)."""
     return [name for name in _QUOTED.findall(response.body) if name]
+
+
+def parse_comma_list(response: Response) -> list[str]:
+    """Parse a reply whose payload is bare, comma-separated names.
+
+    Used by `blist` and `buclist`. The first line is a heading ending in `:`
+    and is skipped; everything after is split on commas.
+    """
+    names: list[str] = []
+    for line in response.lines:
+        if _LIST_HEADER.search(line):
+            continue
+        names.extend(part.strip() for part in line.split(",") if part.strip())
+    return names
 
 
 def parse_trailing_value(response: Response) -> float:
@@ -131,10 +161,11 @@ class SimulatorApi:
         return self.client.command("info").body.strip()
 
     def supported_boards(self) -> list[str]:
-        return parse_quoted_list(self.client.command("blist"))
+        # blist is bare comma-separated, unlike splist. See parse_comma_list.
+        return parse_comma_list(self.client.command("blist"))
 
     def supported_mcus(self) -> list[str]:
-        return parse_quoted_list(self.client.command("buclist"))
+        return parse_comma_list(self.client.command("buclist"))
 
     # -- run control -------------------------------------------------------
 
@@ -153,7 +184,9 @@ class SimulatorApi:
     # -- pins --------------------------------------------------------------
 
     def pins(self) -> list[Pin]:
-        return parse_pins(self.client.command("pins"))
+        # `pinsl`, not `pins`: see the note on _PIN_LINE. `pins` is a narrow
+        # two-column display with no type, analog value, or count header.
+        return parse_pins(self.client.command("pinsl"))
 
     def get_pin(self, index: int) -> float:
         return parse_trailing_value(self.client.command(f"get pin[{index:02}]"))
@@ -183,8 +216,24 @@ class SimulatorApi:
     def supported_parts(self) -> list[str]:
         return parse_quoted_list(self.client.command("splist"))
 
-    def add_part(self, name: str) -> None:
-        self.client.command(f"spadd {name}")
+    def add_part(self, name: str, xpos: int = 0, ypos: int = 0) -> None:
+        """Place a spare part at a canvas position.
+
+        `spadd` parses `" \\"%99[^\\"]\\" %i %i"` (rcontrol.cc:1266), so the name
+        must be **quoted** and both coordinates are required. An earlier version
+        of this method sent `spadd {name}` bare; the server rejected every call.
+        Reading the dispatch found the format, and a live server confirmed it.
+
+        The name must match `splist` exactly. A name that does not match logs
+        "Erro creating part" and returns ERROR.
+
+        **Warning, observed on PICSimLab 0.9.3:** placing a part whose assets
+        are not installed does not fail cleanly — it logs `Erro CC_LOADIMAGE!`
+        and then **segfaults the simulator**. Callers should expect the
+        connection to drop rather than an ERROR reply. This is an upstream
+        robustness bug, recorded in docs/known-issues.md.
+        """
+        self.client.command(f'spadd "{name}" {int(xpos)} {int(ypos)}')
 
     def remove_part(self, index: int) -> None:
         self.client.command(f"spdel {index}")

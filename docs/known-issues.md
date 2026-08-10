@@ -51,6 +51,19 @@ third-party sources.** That produces a false positive, never a false green, but
 it erodes trust in the documented workflow. Scoping `find_v2_only` to tracked
 files would fix it.
 
+## 4a. Upstream defects observed on a live PICSimLab 0.9.3
+
+Found on 2026-08-10 running the simulator built in WSL. These are upstream's,
+not this fork's, and are recorded so nobody rediscovers them the hard way.
+
+| # | Issue | Consequence |
+|---|---|---|
+| 4a.1 | **`spadd` segfaults when a part's assets are missing.** Adding a part whose `part.map`/`part.svg` are absent logs `Erro CC_LOADIMAGE!` and then `Caught SIGSEGV`. It does not return ERROR. | Any UI offering part placement can kill the simulator. The bridge must expect the connection to drop rather than an error reply. Worth reporting upstream. |
+| 4a.2 | **Corrected.** Part assets are not missing — they ship in `share/parts/`. The binary looks for `share/picsimlab/parts/`, an installed layout with one extra path component, so a plain source build cannot find them. Symlinking `share/picsimlab -> share` makes them resolve and `spadd` then succeeds. My first diagnosis said the assets were never produced; that was wrong, and the difference matters because the real fix is `make install` or a `_SHARE_` path, not generating anything. | An in-tree run needs the symlink or a proper install. Without it, every part placement hits 4a.1 and kills the simulator. |
+| 4a.5 | With assets resolving, `spadd "Push Buttons" 100 100` returns Ok and `sprdcfg 0` returns a real config — the part genuinely exists. But `get part[0].in[N]` returns ERROR for every N, so `Part->GetInputCount()` is 0 for a part placed without the GUI having laid it out. | The write-confirm path a browser UI needs is still not reachable headlessly. This is the specific remaining blocker for `webui.ui.button-press` and `webui.ui.pot-drag`, and it is narrower than "parts do not work": placement works, input enumeration does not. |
+| 4a.3 | `set pin[N]` is accepted but **not observable** via `get pin[N]` on an Arduino Uno. With the simulation paused, `set pin[04] = 0` and `= 1` both leave the value at 16. | Driving MCU pins is not a viable UI interaction path on this board. Buttons and potentiometers must go through spare parts, which 4a.2 blocks. Pinned by `test_pin_writes_are_not_observable_via_get_pin`. |
+| 4a.4 | `get board.in[]` and `get board.out[]` return ERROR on Arduino Uno, which has no on-board controls (`Use Spare: 0` by default). | Board I/O is board-dependent. A portable UI cannot assume it exists; boards like PICGenios have it, the Uno does not. |
+
 ## 5. Open specification questions
 
 Both are recorded as `blocked_by` on unarmed mechanisms, so nothing currently

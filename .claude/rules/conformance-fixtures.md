@@ -8,8 +8,15 @@ mechanisms:
     checker: tests/rules/test_fixtures_pass.py
     armed: false
     blocked_by: >-
-      No fixtures exist yet. Requires the NOGUI build and a resolved
-      PICSimLab_rcontrol dependency; spec sections 8.3 and 8.4 are open.
+      Narrowed 2026-08-10. The PICSimLab_rcontrol dependency is RESOLVED: this
+      fork has its own client at webui/rcontrol.py, verified against a live
+      PICSimLab 0.9.3, so no out-of-tree module is needed. Spec section 8.3 is
+      answered for reads -- pinsl, blist, splist, info and version all parse
+      from a real server. What still blocks fixtures is that writes are not
+      observable: set pin[] is accepted but does not change get pin[] on an
+      Arduino Uno, and the spare-parts path that would replace it cannot run
+      because part assets are absent from a source build and placing a part
+      without them segfaults the simulator. See docs/known-issues.md 4a.
 ---
 
 # Conformance fixtures

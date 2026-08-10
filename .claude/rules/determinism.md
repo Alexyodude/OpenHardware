@@ -8,8 +8,12 @@ mechanisms:
     checker: tests/rules/test_replay_determinism.py
     armed: false
     blocked_by: >-
-      Requires a verified Makefile.NOGUI build producing VCD output without a
-      display. Spec section 8.4 is still open.
+      Narrowed 2026-08-10, not cleared. A simulator now builds and runs: WSL2
+      Ubuntu 22.04, bscripts/build_all_static.sh, PICSimLab 0.9.3. But that
+      binary is the WX GUI variant (it reports Linux64_WX) running under WSLg
+      with DISPLAY=:0, so it answers nothing about a display-less build.
+      Makefile.NOGUI has still never been built and no VCD has ever been
+      emitted. Spec section 8.4 remains open on exactly those two points.
 ---
 
 # Determinism

@@ -7,7 +7,13 @@
 import pytest
 
 from tests.webui.stub_rcontrol import StubRControl, ok
-from webui.api import ApiError, SimulatorApi, parse_pins, parse_quoted_list
+from webui.api import (
+    ApiError,
+    SimulatorApi,
+    parse_comma_list,
+    parse_pins,
+    parse_quoted_list,
+)
 from webui.rcontrol import RControlClient, Response
 
 # Exactly the shape rcontrol.cc:1091 and :1095 emit.
@@ -85,6 +91,56 @@ def test_an_empty_quoted_list_is_empty_not_an_error():
     assert parse_quoted_list(response("Supported Spare Parts:\r\n")) == []
 
 
+# --- regressions for three bugs a live simulator found ----------------------
+# Each of these passed review and passed against the stub while being wrong.
+# Only a real PICSimLab 0.9.3 exposed them, on 2026-08-10.
+
+
+def test_blist_is_bare_comma_separated_not_quoted():
+    """`blist` does not quote its names; only `splist` does.
+
+    Using the quoted parser here returned [] silently -- a board list that is
+    empty rather than an error, which is the failure mode this repo is built
+    to catch. Verbatim from a live server:
+    """
+    body = (
+        "Supported Boards:\r\n"
+        " Arduino_Mega, Arduino_Nano, Arduino_Uno, Blue_Pill, Breadboard, "
+        "Curiosity, McLab1, Remote_TCP, gpboard, uCboard,"
+    )
+    names = parse_comma_list(response(body))
+    assert "Arduino_Uno" in names
+    assert "uCboard" in names
+    assert parse_quoted_list(response(body)) == [], "quoted parser must fail here"
+
+
+def test_pins_uses_pinsl_because_pins_has_a_different_format():
+    """`pins` and `pinsl` are different commands with different output.
+
+    The parser follows rcontrol.cc:1095, which serves `pinsl`. `pins` is a
+    narrow two-column display -- `pin[01] ( PC6/RST) < 0    pin[15] ...` --
+    that this parser cannot read. Sending `pins` failed on every line live.
+    """
+    with StubRControl({"pinsl": ok('1 pins [x]:\r\n  pin[01] D I 1 000 0.000 "PD0     " ')}) as stub:
+        api, client = api_for(stub)
+        assert len(api.pins()) == 1
+        client.close()
+    assert stub.received == ["pinsl"]
+
+
+def test_add_part_quotes_the_name_and_sends_coordinates():
+    """`spadd` parses `" \\"%99[^\\"]\\" %i %i"` -- quotes and both coords required.
+
+    The first implementation sent `spadd LED`, which the server rejected every
+    time.
+    """
+    with StubRControl() as stub:
+        api, client = api_for(stub)
+        api.add_part("Push Button", 100, 250)
+        client.close()
+    assert stub.received == ['spadd "Push Button" 100 250']
+
+
 # --- command construction ---------------------------------------------------
 # These assert the exact wire text, because the server parses by substring
 # (`strstr(cmd, " pin[")`) and is unforgiving about the bracket forms.
@@ -137,10 +193,11 @@ def test_part_lifecycle_commands():
     with StubRControl({"splist": ok('"LED", "Buzzer", ')}) as stub:
         api, client = api_for(stub)
         assert api.supported_parts() == ["LED", "Buzzer"]
-        api.add_part("LED")
+        api.add_part("LED", 10, 20)
         api.remove_part(3)
         client.close()
-    assert stub.received == ["splist", "spadd LED", "spdel 3"]
+    # spadd requires the quoted name and both coordinates; see add_part.
+    assert stub.received == ["splist", 'spadd "LED" 10 20', "spdel 3"]
 
 
 def test_a_get_reply_with_no_value_raises():

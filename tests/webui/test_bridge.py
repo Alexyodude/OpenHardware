@@ -98,7 +98,9 @@ def test_pins_are_returned_as_structured_objects():
     body = ok('1 pins [atmega328p]:\r\n  pin[01] D I 1 000 0.000 "PD0     " ')
 
     async def scenario():
-        with StubRControl({"pins": body}) as stub:
+        # The API reads `pinsl`, not `pins` -- different commands, different
+        # output. See test_pins_uses_pinsl_because_pins_has_a_different_format.
+        with StubRControl({"pinsl": body}) as stub:
             bridge, client = bridge_for(stub)
             reply = await call(bridge, "pins")
             client.close()
