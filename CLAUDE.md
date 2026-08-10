@@ -25,11 +25,32 @@ python tools/check_board_contract.py
 python tools/check_licenses.py
 python tools/check_deltas.py
 python tools/check_banned_symbols.py
-pytest tests/rules/ -v
+pytest tests/rules/ tests/webui/ -v
 ```
 
 Never run bare `pytest` from the repo root: upstream's `tests/python/` imports
-the out-of-tree module `PICSimLab_rcontrol` and needs a built binary.
+the out-of-tree module `PICSimLab_rcontrol` and needs a built binary. Name the
+suites explicitly.
+
+## Running the UI bridge
+
+```bash
+python webui/bridge.py --rcontrol-port 5000 --ws-port 8787
+```
+
+It connects to a running `picsimlab` over rcontrol and serves a websocket on
+loopback. It refuses to bind anything but loopback, checks `Origin`, and
+exposes an explicit operation allowlist rather than passing raw protocol text
+through — a websocket on localhost is reachable by any page you visit.
+
+`webui/api.py` is the layer both transports share. A future WASM build calls
+the same operations through `ccall`; only the transport under
+`webui/rcontrol.py` changes.
+
+**The bridge's tests run against a stub server, not a real simulator.** They
+prove the client matches `src/lib/rcontrol.cc` as read, not as executed. The
+differential cells in `docs/features/webui.md` stay `in-progress` until a live
+session confirms it.
 
 ## What is in here
 

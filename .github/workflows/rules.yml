@@ -28,7 +28,7 @@ jobs:
           python-version: "3.14"
 
       - name: Install dependencies
-        run: pip install pytest==9.0.2 PyYAML==6.0.3
+        run: pip install pytest==9.0.2 PyYAML==6.0.3 websockets==15.0.1
 
       - name: check_layering
         run: python tools/check_layering.py
@@ -47,3 +47,6 @@ jobs:
 
       - name: rules test suite
         run: pytest tests/rules/ -v
+
+      - name: webui test suite
+        run: pytest tests/webui/ -v
