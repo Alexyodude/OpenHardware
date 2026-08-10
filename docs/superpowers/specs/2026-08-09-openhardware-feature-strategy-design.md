@@ -100,7 +100,7 @@ Where each gap lands:
 | Gap | Seam | Invasiveness |
 |---|---|---|
 | 8086 core | `bsim_i8086.*` + `board_x86.*` | **Additive** — follows the existing pattern exactly |
-| Web UI | new front-end over the NOGUI/JS core | **Additive-ish** — replaces presentation, not simulation |
+| Web UI | bridge to `rcontrol` (§4.2) | **Additive** — no new C++ at all |
 | Analog solver | `SpareParts` mediator (§4.1) | **Contained** — extends one existing chokepoint |
 
 Two of three additions are new files that never touch upstream code and rebase
@@ -159,6 +159,45 @@ The general lesson is recorded in §6 as the reason Phase 0 exists: this
 document's invasiveness rating was inferred from a directory listing and was
 wrong by one whole architectural layer. Ratings derived from file names are
 hypotheses, not findings.
+
+### 4.2 The remote-control surface, enumerated
+
+Added 2026-08-10, and it is the second correction of the same kind.
+
+An earlier reading of `src/lib/rcontrol.cc` extracted its vocabulary with a
+regex over bare quoted tokens, which **missed every command matched by
+`strncmp` with a trailing space**. On that partial evidence the interface looked
+read-oriented and the web UI looked expensive.
+
+Read by dispatch branch instead, `set` has four forms
+(`src/lib/rcontrol.cc:1127`):
+
+| form | reaches |
+|---|---|
+| `set board.in[NN] = v` | board inputs — buttons, pots, jumpers; raises `Input->update` |
+| `set apin[NN] = f` | `SpareParts.SetAPin` / `Board->MSetAPin` |
+| `set pin[NN] = v` | `SpareParts.SetPin` / `Board->MSetPin`, under `IoLockAccess()` |
+| `set part[N].in[M] = v` | a specific spare part's input |
+
+`get` has eight (`src/lib/rcontrol.cc:724`): `board.in[]`, `board.out[]`,
+`apin[]`, `pin[]`, `pinl[]`, `pinm[]`, `part[N].in[M]`, `part[N].out[M]`.
+Alongside them: `spadd` and `spdel` to place and remove parts while running,
+`sprdcfg`/`spwrcfg` to configure them, `loadhex`, the `sim`/`reset`/`start`/
+`stop` run controls, and the `osc*` family.
+
+**That is the entire interaction model a Wokwi-style UI needs, already
+implemented and already exercised by upstream's `tests/python/test_blink.py`.**
+The web UI therefore requires no new C++ — it is a bridge plus a front-end,
+which is why §9 now places it first.
+
+Two limits worth stating so they are not rediscovered later. There is **no
+CPU-register write**, so the 8086 conformance harness must still drive its core
+directly rather than through this interface (§8.3 is unaffected). And the
+Emscripten build in `src/Makefile.JS` is **not reproducible from this
+repository** — no build script, no CI, `template.html` and `src/assets` both
+absent, and hardcoded sibling checkouts including one reaching into another
+project's test directory. It also links no QEMU, so ESP32 and STM32 are absent
+from any browser build.
 
 ## 5. The skill — how features get derived
 
@@ -390,17 +429,34 @@ Gates: whether §6.4 can be armed on day one. Requires actually building
 
 Each gets its own spec → plan → build cycle. Listed for context; not in scope here.
 
+**Reordered 2026-08-10.** The web UI was slice 5 and is now slice 2. The
+original order rested on two beliefs that reading the source disproved, in
+opposite directions: that `rcontrol` was too read-only to drive a UI, and that a
+working browser build already existed. The interface turned out richer than
+believed and the build poorer. Full evidence in
+`docs/superpowers/plans/2026-08-10-webui.md`; the ledger is
+`docs/features/webui.md`.
+
 | # | Slice | Proves |
 |---|---|---|
 | 1 | This document's machinery | Derivation and enforcement work on real code |
-| 2 | 8086 core (`bsim_i8086`) | The `bsim_*` contract generalizes to a wildly different ISA |
-| 3 | Analog solver + scope | MNA, convergence, waveforms |
-| 4 | Mixed-signal bridge | Event-driven digital co-simulating with timestep-driven analog |
-| 5 | Web UI over the JS build | Wokwi-class UX |
+| 2 | Web UI over a bridge to `rcontrol` | Wokwi-class UX, on engines that already work |
+| 3 | 8086 core (`bsim_i8086`) | The `bsim_*` contract generalizes to a wildly different ISA |
+| 4 | Analog solver + scope | MNA, convergence, waveforms |
+| 5 | Mixed-signal bridge | Event-driven digital co-simulating with timestep-driven analog |
 
-Slice 2 is placed before the analog work deliberately, as an abstraction test.
-It is additive and cheap; it either validates the `bsim_*` seam or exposes it as
-AVR/PIC-shaped before anything invasive is attempted.
+The web UI is first because it is the only slice that produces something visible
+using engines that are already built and tested — `simavr` and `picsim` — and
+because it requires **no new C++**. `rcontrol` already implements the whole
+interaction model: `set board.in[]`, `set pin[]`, `set apin[]`,
+`set part[N].in[M]`, eight `get` forms, `spadd`/`spdel` for placing parts, and
+`loadhex`. The 8086 core by contrast shows nothing to anyone until it is nearly
+finished.
+
+The 8086 core keeps its place ahead of the analog work, and for the original
+reason: it is an abstraction test. It is additive and cheap, and it either
+validates the `bsim_*` seam or exposes it as AVR/PIC-shaped before anything
+invasive is attempted.
 
 ## 10. Non-goals
 
