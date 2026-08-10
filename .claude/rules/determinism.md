@@ -8,12 +8,16 @@ mechanisms:
     checker: tests/rules/test_replay_determinism.py
     armed: false
     blocked_by: >-
-      Narrowed 2026-08-10, not cleared. A simulator now builds and runs: WSL2
-      Ubuntu 22.04, bscripts/build_all_static.sh, PICSimLab 0.9.3. But that
-      binary is the WX GUI variant (it reports Linux64_WX) running under WSLg
-      with DISPLAY=:0, so it answers nothing about a display-less build.
-      Makefile.NOGUI has still never been built and no VCD has ever been
-      emitted. Spec section 8.4 remains open on exactly those two points.
+      Narrowed twice on 2026-08-10, still not cleared, and the remaining
+      blocker is now precisely known. A simulator builds and runs (WSL2 Ubuntu
+      22.04, PICSimLab 0.9.3) but it is the WX GUI variant under WSLg, so it
+      says nothing about a display-less build. The NOGUI variant was attempted
+      and CANNOT be linked here: gcc 11.4 dies with an internal compiler error
+      in lto1 at link time, and removing -flto=auto does not help because the
+      dependency archives from build_all_static.sh carry LTO IR of their own.
+      Unblocking requires rebuilding the whole dependency chain without LTO, or
+      a different compiler. See docs/known-issues.md 4a.6. No VCD has ever been
+      emitted, so section 8.4 stays open.
 ---
 
 # Determinism

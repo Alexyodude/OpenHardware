@@ -64,6 +64,8 @@ not this fork's, and are recorded so nobody rediscovers them the hard way.
 | 4a.3 | `set pin[N]` is accepted but **not observable** via `get pin[N]` on an Arduino Uno. With the simulation paused, `set pin[04] = 0` and `= 1` both leave the value at 16. | Driving MCU pins is not a viable UI interaction path on this board. Buttons and potentiometers must go through spare parts, which 4a.2 blocks. Pinned by `test_pin_writes_are_not_observable_via_get_pin`. |
 | 4a.4 | `get board.in[]` and `get board.out[]` return ERROR on Arduino Uno, which has no on-board controls (`Use Spare: 0` by default). | Board I/O is board-dependent. A portable UI cannot assume it exists; boards like PICGenios have it, the Uno does not. |
 
+| 4a.6 | **The NOGUI build cannot be linked with GCC 11.4 on Ubuntu 22.04.** `make -f Makefile.NOGUI` compiles cleanly and reaches the link stage, then dies with `lto1: internal compiler error: Segmentation fault` → `lto-wrapper: fatal error`. Removing `-flto=auto` from `Makefile.NOGUI` does **not** help: the dependency archives built by `bscripts/build_all_static.sh` (picsim, lxrad, simavr) carry LTO IR themselves, so the linker still runs `lto-wrapper`. `bscripts/build_package_NOGUI.sh` fails earlier and separately, on Debian packaging plumbing — `debuild` runs in the wrong directory, so `src/Makefile` and `debian/rules` are missing. | Spec §8.4 cannot be answered without rebuilding the whole dependency chain with LTO disabled, or using a different compiler. The WX GUI build is unaffected and works. |
+
 ## 5. Open specification questions
 
 Both are recorded as `blocked_by` on unarmed mechanisms, so nothing currently
