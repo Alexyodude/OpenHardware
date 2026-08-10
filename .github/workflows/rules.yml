@@ -33,6 +33,9 @@ jobs:
       - name: check_layering
         run: python tools/check_layering.py
 
+      - name: check_board_contract
+        run: python tools/check_board_contract.py
+
       - name: check_licenses
         run: python tools/check_licenses.py
 
