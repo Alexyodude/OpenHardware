@@ -21,6 +21,7 @@ the checkers named in each file are what actually enforce them.
 
 ```bash
 python tools/check_layering.py
+python tools/check_board_contract.py
 python tools/check_licenses.py
 python tools/check_deltas.py
 python tools/check_banned_symbols.py
@@ -29,6 +30,21 @@ pytest tests/rules/ -v
 
 Never run bare `pytest` from the repo root: upstream's `tests/python/` imports
 the out-of-tree module `PICSimLab_rcontrol` and needs a built binary.
+
+## What is in here
+
+```bash
+python tools/inventory.py              # tests, mechanisms, files, ledgers
+python tools/inventory.py --markdown   # same, pasteable, with provenance
+```
+
+Every number it prints is computed from the repository — test counts by
+parsing each file, mechanisms from rule frontmatter, files from `git diff`
+against `fork-point`, ledger cells via the ledger parser.
+
+**Do not write those counts down anywhere.** An inventory is the document that
+rots fastest, and this repo has already caught two rule files describing code
+they no longer matched. Run the generator instead of maintaining a list.
 
 ## Deciding what to build
 
