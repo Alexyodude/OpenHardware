@@ -1,0 +1,76 @@
+<!doctype html>
+<!--
+  OpenHardware — browser front-end for a running PICSimLab.
+
+  This program is free software; you can redistribute it and/or modify it under
+  the terms of the GNU General Public License as published by the Free Software
+  Foundation; either version 2, or (at your option) any later version.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenHardware</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+<header class="bar">
+  <h1>OpenHardware</h1>
+  <div class="identity">
+    <span id="board-name">—</span>
+    <span class="sep">·</span>
+    <span id="board-mcu">—</span>
+    <span class="sep">·</span>
+    <span id="board-clock">—</span>
+  </div>
+  <div class="status" id="status" data-state="connecting">connecting…</div>
+</header>
+
+<main>
+  <section class="panel board-panel">
+    <div class="panel-head">
+      <h2>Board</h2>
+      <div class="controls">
+        <button id="run" type="button">Run</button>
+        <button id="pause" type="button">Pause</button>
+        <button id="reset" type="button">Reset</button>
+      </div>
+    </div>
+    <div class="stage">
+      <div class="board" id="board">
+        <img id="board-img" alt="" />
+        <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+    </div>
+    <p class="note" id="board-note"></p>
+  </section>
+
+  <section class="panel side">
+    <div class="panel-head"><h2>Outputs &amp; controls</h2></div>
+    <table class="grid" id="regions">
+      <thead><tr><th>Region</th><th>Role</th><th>Value</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <div class="panel-head"><h2>Spare parts</h2></div>
+    <div id="parts" class="parts"></div>
+
+    <div class="panel-head">
+      <h2>Pins</h2>
+      <button id="refresh-pins" class="link" type="button">refresh</button>
+    </div>
+    <table class="grid" id="pins">
+      <thead><tr><th>#</th><th>Name</th><th>Dir</th><th>Value</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+
+<footer class="bar foot">
+  <span id="log">—</span>
+</footer>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

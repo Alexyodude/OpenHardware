@@ -47,8 +47,8 @@ pipe-delimited row it finds.
 | webui.api.firmware-load | F0 | rcontrol | exact | in-progress | - |
 | webui.api.scope | F0 | rcontrol | exact | in-progress | - |
 | webui.api.board-info | F0 | rcontrol | exact | done | tests/webui/test_live_oracle.py |
-| webui.ui.board-canvas | F0 | sim-state | exact | planned | - |
-| webui.ui.run-controls | F0 | sim-state | exact | planned | - |
+| webui.ui.board-canvas | F0 | sim-state | exact | done | tests/webui/test_live_oracle.py |
+| webui.ui.run-controls | F0 | sim-state | exact | done | tests/webui/test_live_oracle.py |
 | webui.ui.firmware-picker | F0 | sim-state | exact | planned | - |
 | webui.ui.part-palette | F0 | sim-state | exact | planned | - |
 | webui.ui.part-place | F0 | sim-state | exact | planned | - |
@@ -56,9 +56,9 @@ pipe-delimited row it finds.
 | webui.ui.part-config | F0 | sim-state | exact | planned | - |
 | webui.ui.button-press | F0 | sim-state | exact | planned | - |
 | webui.ui.pot-drag | F0 | sim-state | exact | planned | - |
-| webui.ui.led-render | F0 | sim-state | exact | planned | - |
+| webui.ui.led-render | F0 | sim-state | exact | done | tests/webui/test_live_oracle.py |
 | webui.ui.display-render | F0 | sim-state | exact | planned | - |
-| webui.ui.pin-inspector | F0 | sim-state | exact | planned | - |
+| webui.ui.pin-inspector | F0 | sim-state | exact | in-progress | - |
 | webui.ui.scope-view | F0 | sim-state | exact | planned | - |
 | webui.ui.serial-terminal | F0 | sim-state | exact | planned | - |
 | webui.ws.load-pzw | F0 | pzw | exact | planned | - |

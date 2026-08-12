@@ -72,6 +72,40 @@ class ApiError(Exception):
     """A reply was framed correctly but did not match its documented format."""
 
 
+#: Widest index rcontrol can express. See `ix`.
+INDEX_MAX = 99
+
+
+def ix(value: int) -> str:
+    """Format one protocol index. **The only place this is done.**
+
+    rcontrol parses an index by character position, exactly two wide:
+
+        int out = (ptr[11] - '0') * 10 + (ptr[12] - '0');   # rcontrol.cc:748
+
+    so `board.out[1]` reads `']'` as the second digit, computes 55, fails the
+    range test, and replies ERROR. The same shape indexes `pin[`, `apin[`,
+    `board.in[`, and both halves of `part[NN].in[MM]` (rcontrol.cc:809-810).
+
+    ERROR is a single undifferentiated reply, so a malformed index is
+    indistinguishable from an unsupported feature without reading the parser.
+    That ambiguity cost this project two recorded upstream defects that never
+    existed -- `docs/known-issues.md` 4a.4 and 4a.5, both withdrawn -- and this
+    module emitted the unpadded form for part I/O the whole time.
+
+    Two digits is also a ceiling, so this raises rather than silently sending a
+    three-digit index that the server would read as a different, valid one.
+    """
+    number = int(value)
+    if not 0 <= number <= INDEX_MAX:
+        raise ApiError(
+            f"index {number} is outside 0..{INDEX_MAX}: rcontrol reads an index "
+            f"as exactly two characters, so a wider one addresses the wrong "
+            f"element rather than failing"
+        )
+    return f"{number:02}"
+
+
 @dataclasses.dataclass(frozen=True)
 class Pin:
     index: int
@@ -190,27 +224,27 @@ class SimulatorApi:
         return parse_pins(self.client.command("pinsl"))
 
     def get_pin(self, index: int) -> float:
-        return parse_trailing_value(self.client.command(f"get pin[{index:02}]"))
+        return parse_trailing_value(self.client.command(f"get pin[{ix(index)}]"))
 
     def get_apin(self, index: int) -> float:
-        return parse_trailing_value(self.client.command(f"get apin[{index:02}]"))
+        return parse_trailing_value(self.client.command(f"get apin[{ix(index)}]"))
 
     def set_pin(self, index: int, value: int) -> None:
-        self.client.command(f"set pin[{index:02}] = {int(value)}")
+        self.client.command(f"set pin[{ix(index)}] = {int(value)}")
 
     def set_apin(self, index: int, value: float) -> None:
-        self.client.command(f"set apin[{index:02}] = {float(value)}")
+        self.client.command(f"set apin[{ix(index)}] = {float(value)}")
 
     # -- board inputs and outputs ------------------------------------------
 
     def get_board_input(self, index: int) -> float:
-        return parse_trailing_value(self.client.command(f"get board.in[{index:02}]"))
+        return parse_trailing_value(self.client.command(f"get board.in[{ix(index)}]"))
 
     def get_board_output(self, index: int) -> float:
-        return parse_trailing_value(self.client.command(f"get board.out[{index:02}]"))
+        return parse_trailing_value(self.client.command(f"get board.out[{ix(index)}]"))
 
     def set_board_input(self, index: int, value: int) -> None:
-        self.client.command(f"set board.in[{index:02}] = {int(value)}")
+        self.client.command(f"set board.in[{ix(index)}] = {int(value)}")
 
     # -- spare parts -------------------------------------------------------
 
@@ -241,16 +275,16 @@ class SimulatorApi:
 
     def get_part_input(self, part: int, index: int) -> float:
         return parse_trailing_value(
-            self.client.command(f"get part[{part}].in[{index}]")
+            self.client.command(f"get part[{ix(part)}].in[{ix(index)}]")
         )
 
     def get_part_output(self, part: int, index: int) -> float:
         return parse_trailing_value(
-            self.client.command(f"get part[{part}].out[{index}]")
+            self.client.command(f"get part[{ix(part)}].out[{ix(index)}]")
         )
 
     def set_part_input(self, part: int, index: int, value: int) -> None:
-        self.client.command(f"set part[{part}].in[{index}] = {int(value)}")
+        self.client.command(f"set part[{ix(part)}].in[{ix(index)}] = {int(value)}")
 
     def read_part_config(self, index: int) -> str:
         """Deprecated alias for read_config; kept for the bridge's allowlist.

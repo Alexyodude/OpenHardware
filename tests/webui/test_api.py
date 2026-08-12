@@ -146,7 +146,17 @@ def test_add_part_quotes_the_name_and_sends_coordinates():
 # (`strstr(cmd, " pin[")`) and is unforgiving about the bracket forms.
 
 
-def test_pin_writes_use_the_two_digit_form_the_server_scans_for():
+def test_every_index_is_two_digits_including_both_halves_of_a_part_accessor():
+    """Both indices of `part[NN].in[MM]` are two-digit, like every other one.
+
+    This test previously asserted `set part[2].in[5] = 1` and passed, because
+    the stub answers Ok to anything and the assertion encoded the same mistake
+    the code made. A live server does not: `get part[0].in[0]` returns ERROR
+    and `get part[00].in[00]` returns a value.
+
+    rcontrol.cc:809-810 reads `(ptr[5]-'0')*10 + (ptr[6]-'0')` for the part
+    number and the same for the input, and echoes `part[%02i].in[%02i]`.
+    """
     with StubRControl() as stub:
         api, client = api_for(stub)
         api.set_pin(7, 1)
@@ -158,7 +168,7 @@ def test_pin_writes_use_the_two_digit_form_the_server_scans_for():
         "set pin[07] = 1",
         "set apin[03] = 3.3",
         "set board.in[12] = 0",
-        "set part[2].in[5] = 1",
+        "set part[02].in[05] = 1",
     ]
 
 
@@ -167,7 +177,7 @@ def test_reads_use_the_documented_forms():
         "get pin[04]": ok("get pin[04] PD4= 1"),
         "get apin[02]": ok("get apin[02] AN2= 2.500"),
         "get board.out[01]": ok("get board.out[01] LD1= 1"),
-        "get part[0].out[1]": ok("get part[0].out[1] LED= 0"),
+        "get part[00].out[01]": ok("get part[00].out[01] LED= 0"),
     }
     with StubRControl(replies) as stub:
         api, client = api_for(stub)
@@ -176,6 +186,26 @@ def test_reads_use_the_documented_forms():
         assert api.get_board_output(1) == pytest.approx(1)
         assert api.get_part_output(0, 1) == pytest.approx(0)
         client.close()
+
+
+def test_an_index_too_wide_to_express_raises_rather_than_addressing_another():
+    """100 cannot be written in two characters, so it must not be sent.
+
+    Silently truncating or overflowing would address a different, valid
+    element and report success -- the miswiring-reported-as-success failure
+    this API already had once, with pin values wrapping mod 256.
+    """
+    for call in (
+        lambda api: api.get_pin(100),
+        lambda api: api.set_board_input(100, 1),
+        lambda api: api.get_part_input(100, 0),
+        lambda api: api.get_part_input(0, 100),
+    ):
+        with StubRControl() as stub:
+            api, client = api_for(stub)
+            with pytest.raises(ApiError, match="outside 0..99"):
+                call(api)
+            client.close()
 
 
 def test_run_control_sends_the_documented_commands():

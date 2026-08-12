@@ -204,6 +204,77 @@ def test_pin_count_matches_the_header(live: RControlClient):
 # --- wiring, against a live simulator ---------------------------------------
 
 
+# --- the render pipeline, against a live simulator ---------------------------
+
+
+def test_a_live_info_dump_parses_into_state(api: SimulatorApi):
+    """The render loop's whole server side starts here, so it must parse.
+
+    `render_model.parse_info` was written against a captured dump. This is the
+    test that catches the day the real format stops matching the capture.
+    """
+    from webui.render_model import parse_info
+
+    state = parse_info(api.info())
+    assert state.board, "info always names a board"
+    assert state.processor
+
+
+def test_the_draw_list_binds_board_art_to_live_values(api: SimulatorApi):
+    """Art on disk plus state from the wire must actually meet.
+
+    This is the cell behind `webui.ui.board-canvas` and `webui.ui.led-render`:
+    a region id in the shipped `.map` resolves to a value the simulator is
+    reporting right now. If the naming convention ever drifts, every region
+    goes unbound and this fails rather than rendering a dead board.
+    """
+    from webui.assets import load_board
+    from webui.render_model import build, parse_info
+
+    state = parse_info(api.info())
+    model = build(state, load_board(state.board))
+
+    assert model["regions"], "the board's art declares no regions"
+    bound = [r for r in model["regions"] if r["value"] is not None]
+    assert bound, (
+        f"{state.board}: no region bound to live state. Reported outputs were "
+        f"{[e.name for e in state.board_outputs]}; art declares "
+        f"{[r['id'] for r in model['regions']]}."
+    )
+
+
+def test_the_on_board_led_reports_a_changing_value_while_running(api: SimulatorApi):
+    """The blink firmware's LED must actually vary -- a still board is not live.
+
+    Measured on 2026-08-12: sampling `board.out[01]` over two seconds returned
+    values spanning 0 to 200. A single constant reading would mean the render
+    loop is painting something that is not moving, which is the failure this
+    whole differential suite exists to catch.
+
+    Skips rather than fails when the board reports no outputs at all, because
+    that is a property of the board, not a defect -- but an unreachable
+    simulator still fails, via the `api` fixture.
+    """
+    import time
+
+    from webui.render_model import parse_info
+
+    if not parse_info(api.info()).board_outputs:
+        pytest.skip("this board reports no on-board outputs to sample")
+
+    api.run()
+    seen = set()
+    for _ in range(20):
+        state = parse_info(api.info())
+        seen.add(state.board_outputs[0].value)
+        time.sleep(0.1)
+
+    assert len(seen) > 1, (
+        f"the on-board output never changed over 2s of running ({seen}). "
+        f"Either the firmware is not blinking or the value is not live."
+    )
+
+
 @pytest.fixture
 def buttons(api):
     """Place a Push Buttons part and yield (index, schema). Cleans up after."""

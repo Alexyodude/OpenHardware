@@ -40,20 +40,47 @@ import asyncio
 import dataclasses
 import json
 import sys
+import urllib.parse
+
+import pathlib
 
 try:
+    from webui import render_model
     from webui.api import ApiError, SimulatorApi
+    from webui.assets import AssetError, BoardArt, available_boards, load_board
     from webui.rcontrol import RControlClient, RControlError
 except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
-    import pathlib
-
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from webui import render_model
     from webui.api import ApiError, SimulatorApi
+    from webui.assets import AssetError, BoardArt, available_boards, load_board
     from webui.rcontrol import RControlClient, RControlError
 
 DEFAULT_BIND = "127.0.0.1"
 DEFAULT_WS_PORT = 8787
 LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
+
+STATIC_DIR = pathlib.Path(__file__).resolve().parent / "static"
+
+#: Only these extensions are served, and each with an explicit type. A default
+#: of `application/octet-stream` for anything unrecognised would let a file
+#: dropped into `static/` be served without anyone deciding it should be.
+CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".svg": "image/svg+xml",
+}
+
+#: Parsing a board's art re-reads a quarter-megabyte SVG, so keep it. Keyed by
+#: board name; the set of boards cannot change while the simulator runs.
+_ART_CACHE: dict[str, BoardArt] = {}
+
+
+def board_art(name: str) -> BoardArt:
+    if name not in _ART_CACHE:
+        _ART_CACHE[name] = load_board(name)
+    return _ART_CACHE[name]
 
 
 class BridgeError(Exception):
@@ -64,6 +91,17 @@ def _pins(api: SimulatorApi) -> list[dict]:
     return [dataclasses.asdict(pin) for pin in api.pins()]
 
 
+def _render(api: SimulatorApi) -> dict:
+    """One `info` round trip, resolved against the board's art into a draw list.
+
+    This is the render loop's whole server side. `info` carries the board
+    identity as well as the values, so the art is chosen by what the simulator
+    says it is running rather than by anything the browser asserts.
+    """
+    state = render_model.parse_info(api.info())
+    return render_model.build(state, board_art(state.board))
+
+
 #: name -> (callable(api, args), required argument names)
 OPERATIONS: dict[str, tuple] = {
     "version": (lambda api, a: api.version(), ()),
@@ -72,6 +110,8 @@ OPERATIONS: dict[str, tuple] = {
     "supported_mcus": (lambda api, a: api.supported_mcus(), ()),
     "supported_parts": (lambda api, a: api.supported_parts(), ()),
     "pins": (lambda api, a: _pins(api), ()),
+    "render": (lambda api, a: _render(api), ()),
+    "board_art_names": (lambda api, a: list(available_boards()), ()),
     "get_pin": (lambda api, a: api.get_pin(a["index"]), ("index",)),
     "get_apin": (lambda api, a: api.get_apin(a["index"]), ("index",)),
     "set_pin": (lambda api, a: api.set_pin(a["index"], a["value"]), ("index", "value")),
@@ -137,6 +177,52 @@ def build_error(request_id: object, exc: Exception) -> str:
     )
 
 
+def resolve_static(target: str) -> tuple[bytes, str] | None:
+    """Map a request path to file bytes and a content type, or None for 404.
+
+    Path traversal is blocked by resolving the candidate and requiring it to
+    stay under `static/`. `..` in a URL is not exotic; it is the first thing
+    anyone tries against a file server, and this one runs beside a simulator
+    that can load firmware.
+    """
+    path = target.split("?", 1)[0]
+    if path in ("", "/"):
+        path = "/index.html"
+
+    candidate = (STATIC_DIR / path.lstrip("/")).resolve()
+    try:
+        candidate.relative_to(STATIC_DIR.resolve())
+    except ValueError:
+        return None
+    if not candidate.is_file():
+        return None
+
+    content_type = CONTENT_TYPES.get(candidate.suffix)
+    if content_type is None:
+        return None
+    return candidate.read_bytes(), content_type
+
+
+def resolve_board_svg(target: str) -> tuple[bytes, str] | None:
+    """Serve `/board.svg?name=<board>` from `share/`, never from `static/`.
+
+    The art is upstream's and stays where upstream put it. Copying it into
+    `static/` would fork 108 files that already exist and would go stale the
+    first time upstream redraws a board.
+    """
+    path, _, query = target.partition("?")
+    if path != "/board.svg":
+        return None
+    params = urllib.parse.parse_qs(query)
+    names = params.get("name")
+    if not names:
+        return None
+    try:
+        return board_art(names[0]).svg, "image/svg+xml"
+    except AssetError:
+        return None
+
+
 def origin_is_allowed(origin: str | None, allowed: frozenset[str]) -> bool:
     """Reject any Origin not explicitly allowed.
 
@@ -182,7 +268,15 @@ class Bridge:
                 result = await asyncio.to_thread(dispatch, self.api, op, args)
             return build_reply(request_id, result)
 
-        except (BridgeError, ApiError, RControlError, json.JSONDecodeError, KeyError) as exc:
+        except (
+            BridgeError,
+            ApiError,
+            AssetError,
+            render_model.StateError,
+            RControlError,
+            json.JSONDecodeError,
+            KeyError,
+        ) as exc:
             return build_error(request_id, exc)
 
 
@@ -194,6 +288,8 @@ async def serve(
     allowed_origins: frozenset[str],
 ) -> None:
     import websockets
+    from websockets.datastructures import Headers
+    from websockets.http11 import Response
 
     if bind not in LOOPBACK:
         raise BridgeError(
@@ -205,8 +301,41 @@ async def serve(
     client.connect()
     bridge = Bridge(SimulatorApi(client), allowed_origins)
 
-    print(f"bridge: rcontrol {rcontrol_host}:{rcontrol_port} -> ws://{bind}:{ws_port}")
-    async with websockets.serve(bridge.handle, bind, ws_port):
+    def process_request(connection, request):
+        """Serve the page over HTTP; let websocket handshakes through.
+
+        One port serves both, so the page's own origin is the origin the
+        websocket check already allows and `python webui/bridge.py` stays the
+        entire install.
+        """
+        if request.headers.get("Upgrade", "").lower() == "websocket":
+            return None
+
+        served = resolve_static(request.path) or resolve_board_svg(request.path)
+        if served is None:
+            return Response(404, "Not Found", Headers({"Content-Length": "0"}), b"")
+
+        body, content_type = served
+        return Response(
+            200,
+            "OK",
+            Headers(
+                {
+                    "Content-Type": content_type,
+                    "Content-Length": str(len(body)),
+                    # The bridge is a development server for a local simulator;
+                    # a stale cached app.js is a debugging session nobody wants.
+                    "Cache-Control": "no-store",
+                }
+            ),
+            body,
+        )
+
+    print(f"bridge: rcontrol {rcontrol_host}:{rcontrol_port}")
+    print(f"bridge: open http://{bind}:{ws_port}/")
+    async with websockets.serve(
+        bridge.handle, bind, ws_port, process_request=process_request
+    ):
         await asyncio.Future()
 
 
