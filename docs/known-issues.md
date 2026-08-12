@@ -101,6 +101,23 @@ Two smaller gaps, both measured live on PICSimLab 0.9.3:
 | 4b.1 | The server's arity guard is **one-sided**. `Part->ReadPreferences` returns `sscanf`'s assignment count, so under-arity is rejected but **over-arity is accepted with the extra field silently dropped**. | An over-long schema is caught only by the client's own check, and only on a later read. Do not rely on the server to reject it. |
 | 4b.2 | Config fields are `%hhu`, so pin values wrap mod 256. Before the range check landed, `connect(..., 300)` was accepted and read back as 44. | `_set_field` now rejects anything outside 0..255. Any future code path that writes a config without going through it reopens this. |
 
+## 4c. Tests that constrain less than their names suggest
+
+From the final review of the peripherals work, 2026-08-10. None block; all are
+worth knowing before trusting a green suite.
+
+| test | what it actually proves |
+|---|---|
+| `test_no_shipped_schema_claims_verification_it_has_not_earned` | Asserts the substring `round-trip` appears in `verified`. A hand-written `"verified": "round-trip"` passes it — **it cannot detect the hand-authoring it is named for.** |
+| `test_*_matches_its_source` (×3) | Restates the JSON in Python rather than deriving from the C++. They are change-detectors, not oracles: both sides move together if someone edits the schema. |
+| `test_a_placed_part_matches_its_schema_arity` | Cannot fail independently of `read_wiring`'s own internal arity check. |
+| `test_version_returns_something`, `test_supported_boards_parse`, `test_supported_parts_parse` | Truthiness only. |
+| `test_settings_survive_a_pin_write` | Checks `active` and `Size` but not `mode`. |
+
+The suite's genuinely constraining tests — arity mismatch, role refusal, unknown
+label, quote format, duplicate names, and every negative control verified to
+fail against the pre-fix code — are what the confidence rests on.
+
 ## 5. Open specification questions
 
 Both are recorded as `blocked_by` on unarmed mechanisms, so nothing currently
