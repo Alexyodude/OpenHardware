@@ -1,0 +1,17 @@
+{
+  "part": "Push Buttons",
+  "source": "src/parts/input_push_buttons.cc:377",
+  "fields": [
+    {"role": "pin", "dir": "out", "label": "B1"},
+    {"role": "pin", "dir": "out", "label": "B2"},
+    {"role": "pin", "dir": "out", "label": "B3"},
+    {"role": "pin", "dir": "out", "label": "B4"},
+    {"role": "pin", "dir": "out", "label": "B5"},
+    {"role": "pin", "dir": "out", "label": "B6"},
+    {"role": "pin", "dir": "out", "label": "B7"},
+    {"role": "pin", "dir": "out", "label": "B8"},
+    {"role": "setting", "type": "int", "label": "active"},
+    {"role": "setting", "type": "int", "label": "mode"},
+    {"role": "setting", "type": "int", "label": "Size"}
+  ]
+}

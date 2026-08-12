@@ -108,3 +108,50 @@ def test_duplicate_part_names_raise(tmp_path):
     write(tmp_path, VALID, "two.json")
     with pytest.raises(SchemaError, match="duplicate"):
         load_all_schemas(tmp_path)
+
+
+REPO = pathlib.Path(__file__).resolve().parents[2]
+SCHEMAS = REPO / "webui" / "parts" / "schemas"
+
+
+def test_the_shipped_schemas_all_load():
+    assert load_all_schemas(SCHEMAS)
+
+
+def test_push_buttons_matches_its_source():
+    """input_push_buttons.cc:377 — 8 output pins, then active, mode, Size.
+
+    A live `sprdcfg` on a freshly placed Push Buttons returned
+    "0,0,0,0,0,0,0,0,1,0,8", which decodes exactly against this layout:
+    eight unconnected pins, active=1, mode=0, Size=8.
+    """
+    schema = load_all_schemas(SCHEMAS)["Push Buttons"]
+    assert schema.arity == 11
+    assert len(schema.pin_fields) == 8
+    assert all(f.dir == "out" for _, f in schema.pin_fields)
+    assert [f.label for f in schema.fields[8:]] == ["active", "mode", "Size"]
+
+
+def test_leds_matches_its_source():
+    """output_leds.cc:220 — 8 input pins, active, 8 colors, Size."""
+    schema = load_all_schemas(SCHEMAS)["LEDs"]
+    assert schema.arity == 18
+    assert len(schema.pin_fields) == 8
+    assert all(f.dir == "in" for _, f in schema.pin_fields)
+    assert schema.fields[8].label == "active"
+    assert schema.fields[17].label == "Size"
+
+
+def test_led_matrix_matches_its_source():
+    """output_LED_matrix.cc:173 — 3 input pins, 1 output pin, angle, lmode."""
+    schema = load_all_schemas(SCHEMAS)["LED Matrix"]
+    assert schema.arity == 6
+    assert [f.dir for _, f in schema.pin_fields] == ["in", "in", "in", "out"]
+    assert [f.label for f in schema.fields[4:]] == ["angle", "lmode"]
+
+
+def test_no_shipped_schema_claims_verification_it_has_not_earned():
+    # `verified` is set only by a live round-trip, never by hand.
+    for schema in load_all_schemas(SCHEMAS).values():
+        if schema.verified is not None:
+            assert "round-trip" in schema.verified
