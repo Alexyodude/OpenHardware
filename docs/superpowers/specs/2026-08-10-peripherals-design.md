@@ -166,14 +166,22 @@ Three checks, strongest first:
    `sprdcfg` reply. Cheap, and catches the most likely schema error.
 3. **Placement** — after `spadd`, `sprdcfg` at the expected index must succeed.
 
-**The ceiling: none of this proves a wire carries signal.** That requires
-`get part[N].in[M]`, which returns ERROR for every index on a headlessly placed
-part because `GetInputCount()` is 0 (`docs/known-issues.md` 4a.5). A verified
-schema therefore proves **configuration, not conduction**, and no cell may claim
-otherwise.
+**The ceiling: none of this proves a wire carries signal.** A verified schema
+proves **configuration, not conduction**, and no cell may claim otherwise.
 
-This is the honest boundary of the sub-project. Closing it needs either the
-GUI-layout path that populates part inputs, or an upstream change.
+**Corrected 2026-08-12 — the reason given here was wrong, and the ceiling is
+narrower than it said.** This section claimed conduction was unreachable because
+`get part[N].in[M]` returns ERROR for every index, `GetInputCount()` being 0 on
+a headlessly placed part. That is not so: `get part[00].in[00]` returns
+`PB_1= 0`. The original measurement used a one-digit index, and every indexed
+accessor in `rcontrol` is fixed-width two-digit (`docs/known-issues.md` 4a.8).
+Reading a part's inputs works headlessly.
+
+What remains unproven is narrower and still real: `set part[00].in[00] = 1` and
+`= 0` are both accepted, and both read back 16. So a written value's encoding is
+not yet understood, and until it is, no fixture can assert that pressing a
+button in a UI reached the firmware. Configuration is proven; conduction is not;
+the enumeration barrier that was supposed to explain why never existed.
 
 ## 9. Testing
 

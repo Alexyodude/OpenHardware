@@ -149,10 +149,10 @@ def test_pin_writes_are_not_observable_via_get_pin(api: SimulatorApi):
     16, unchanged. Poking MCU pins is therefore **not** the interaction path a
     browser UI can build on.
 
-    The supported path is spare parts — `spadd`, then `set part[N].in[M]` — which
-    is how PICSimLab models buttons and potentiometers. That path is blocked on
-    this machine because part assets are not installed, and placing a part
-    without them segfaults the simulator (docs/known-issues.md).
+    The supported path is spare parts — `spadd`, then `set part[00].in[00]` —
+    which is how PICSimLab models buttons and potentiometers. That path works
+    here once `share/picsimlab -> share` exists; without the symlink a part
+    placement segfaults the simulator (docs/known-issues.md 4a.1, 4a.2).
 
     This test pins the current, surprising behaviour so that if a future version
     makes pin writes observable, it fails and tells us the model changed.
@@ -236,10 +236,14 @@ def test_a_freshly_placed_part_has_no_connections(api, buttons):
 def test_a_wiring_change_round_trips(api, buttons):
     """Write a pin, read it back. Proves configuration, NOT conduction.
 
-    Nothing here shows a signal reaches the pin — that needs
-    get part[N].in[M], which returns ERROR on a headlessly placed part
-    (docs/known-issues.md 4a.5). This asserts only that the simulator stored
-    what it was told.
+    Nothing here shows a signal reaches the pin. This asserts only that the
+    simulator stored what it was told.
+
+    An earlier version of this docstring blamed `get part[N].in[M]` returning
+    ERROR on a headlessly placed part. That was withdrawn on 2026-08-12: the
+    index has to be zero-padded, and `get part[00].in[00]` works
+    (docs/known-issues.md 4a.8). Conduction is still unproven, for the smaller
+    reason that a written input value reads back 16 whether 0 or 1 was sent.
     """
     index, schema = buttons
     api.connect(index, schema, "B1", 7)
