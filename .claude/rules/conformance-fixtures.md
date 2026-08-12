@@ -8,15 +8,20 @@ mechanisms:
     checker: tests/rules/test_fixtures_pass.py
     armed: false
     blocked_by: >-
-      Narrowed 2026-08-10. The PICSimLab_rcontrol dependency is RESOLVED: this
-      fork has its own client at webui/rcontrol.py, verified against a live
-      PICSimLab 0.9.3, so no out-of-tree module is needed. Spec section 8.3 is
-      answered for reads -- pinsl, blist, splist, info and version all parse
-      from a real server. What still blocks fixtures is that writes are not
-      observable: set pin[] is accepted but does not change get pin[] on an
-      Arduino Uno, and the spare-parts path that would replace it cannot run
-      because part assets are absent from a source build and placing a part
-      without them segfaults the simulator. See docs/known-issues.md 4a.
+      Narrowed again 2026-08-12, because the previous text had gone stale and
+      described a world that no longer exists. RESOLVED since it was written:
+      the PICSimLab_rcontrol dependency (this fork has webui/rcontrol.py), and
+      the spare-parts blocker -- part assets are NOT absent, they resolve via
+      the share/picsimlab symlink (known-issues 4a.2), and twelve peripherals
+      have since been placed, wired and round-tripped against a live 0.9.3.
+      Fixtures now exist and pass: tests/webui/test_live_oracle.py backs
+      fourteen done cells under OPENHARDWARE_LIVE=1. What blocks ARMING is
+      narrower and different -- CI has no simulator, so a test that runs the
+      fixtures would either fail every CI run or skip, and section 4 forbids
+      the skip. Arming needs a PICSimLab in the workflow. Still unresolved and
+      unrelated to arming: writes remain unobservable (set pin[] does not move
+      get pin[], and a part input reads back 16 whether 0 or 1 was written),
+      so fixtures prove configuration, not conduction.
   - tier: SCRIPT-ENFORCED
     checker: tools/check_part_schemas.py
     armed: true
@@ -79,3 +84,37 @@ success. The citation is what makes a schema auditable, so a citation nobody
 can follow is treated as no citation at all.
 
 `find_problems` raises on an empty directory, for the reason section 2 gives.
+
+## 7. 2026-08-12 — CONVENTION: no cell in this repository is hardware-validated
+
+Asked directly whether the boards were bare-metal verified, the answer was no,
+and it is worth writing down rather than rediscovering.
+
+**Every oracle this project uses is software.** Counted across both ledgers on
+2026-08-12: `rcontrol` (the protocol), `sim-state` (the simulator itself),
+`pzw`, `network-log`, `board.h`, and the Intel manual. Not one is a
+measurement taken from a running chip.
+
+`sim-state` is the one most easily over-read. It means *the UI agrees with the
+simulator* — an LED lights in the browser when PICSimLab says that pin is
+high. It says nothing about whether PICSimLab agrees with an ATmega328P.
+
+Two consequences follow, and neither is a defect to fix:
+
+- **The simulation cores are inherited untested.** `simavr`, `picsim` and
+  `ucsim` are upstream's. Whatever accuracy they have is upstream's claim, not
+  a measured property of this repository, and no test here examines it.
+- **The one hardware-derived oracle is unstarted.** `SingleStepTests/8088` is
+  genuine silicon ground truth, captured per-cycle from a real AMD 8088. It
+  backs 31 cells in `docs/features/i8086.md` and **all 31 are `planned`**.
+
+So the standing rule: a cell may claim what its oracle can see and nothing
+further. Do not describe a board as working, accurate, or verified without
+naming which of the software oracles above said so. When hardware validation
+does happen it earns a new oracle name and an `F1` or better tier — see
+section 5 on why declaring low fidelity is never the failure mode.
+
+Not enforced by a script. A checker could plausibly reject an oracle string
+naming hardware when no fixture reaches one, but there is no such oracle in
+either ledger yet, so the checker would guard nothing — section 2's hazard
+seen from the other side.
