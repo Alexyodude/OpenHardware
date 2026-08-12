@@ -318,11 +318,24 @@ class SimulatorApi:
         `sscanf(cmd + 8, "%d \\"%511[^\\"]\\"", &pid, scfg)`, so an unquoted
         config never reaches the part -- the same trap `spadd` sets.
 
-        The server also validates arity for us: rcontrol.cc:1310 compares
+        The server's arity guard is one-sided. rcontrol.cc:1310 compares
         `Part->ReadPreferences(scfg)` against `Part->PreferencesNumberFields()`
-        and answers ERROR when they disagree. So a schema with the wrong field
-        count fails loudly on write rather than silently miswiring, which is a
-        stronger guarantee than this plan assumed.
+        and answers ERROR when they disagree -- but `sscanf`'s assignment
+        count, which is what `ReadPreferences` returns, can only ever be *less
+        than or equal to* the number of `%`-conversions in its own format
+        string. It has no way to notice trailing input past the last field, so
+        it cannot detect an over-long config. Measured live against a placed
+        Push Buttons part (11-field schema):
+
+            OVER-ARITY  (12 fields sent): ACCEPTED -- extra field silently dropped
+            UNDER-ARITY  (3 fields sent): REJECTED
+
+        So the server only ever rejects *under*-arity. An over-long config is
+        silently truncated to the part's real field count and the write still
+        reports Ok. What actually catches over-arity on this client is
+        `_values()`'s own length check against the schema, on the **read**
+        path -- so an over-long write is only caught on a subsequent read, not
+        at write time.
         """
         self.client.command(f'spwrcfg {index} "{config}"')
 
@@ -343,12 +356,29 @@ class SimulatorApi:
             for field, value in zip(schema.fields, self._values(index, schema))
         }
 
+    #: The config field a pin value lands in is `%hhu` (rcontrol.cc:1266,
+    #: :1307 and every part's own `sprintf`/`sscanf` pair) -- an unsigned
+    #: char. A value outside this range does not fail on the wire; it wraps
+    #: mod 256, so `connect(..., 300)` is silently accepted and reads back as
+    #: 44. Confirmed live against PICSimLab 0.9.3 on a placed Push Buttons
+    #: part: `connect(index, schema, "B1", 300)` read back 44,
+    #: `connect(index, schema, "B1", -1)` read back 255. `UNCONNECTED` (0)
+    #: is within this range and stays valid.
+    PIN_MIN = 0
+    PIN_MAX = 255
+
     def _set_field(self, index: int, schema: PartSchema, label: str, value: int) -> None:
         position = schema.index_of(label)
         if schema.fields[position].role != "pin":
             raise SchemaError(f"{schema.part}: {label!r} is not a pin field")
+        value = int(value)
+        if not self.PIN_MIN <= value <= self.PIN_MAX:
+            raise SchemaError(
+                f"{schema.part}: {label!r} pin value {value} is out of range "
+                f"{self.PIN_MIN}..{self.PIN_MAX}"
+            )
         values = self._values(index, schema)
-        values[position] = int(value)
+        values[position] = value
         self.write_config(index, ",".join(str(v) for v in values))
 
     def connect(self, index: int, schema: PartSchema, label: str, pin: int) -> None:

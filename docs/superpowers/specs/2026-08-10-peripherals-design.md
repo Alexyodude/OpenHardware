@@ -131,13 +131,18 @@ needed; there is no requirement to cover all 52 before anything works.
 
 ```python
 place_part(name, x, y) -> int        # spadd, returns the new index
-remove_part(index) / remove_all()    # spdel N / spdel all
+remove_part(index)                   # spdel N
 read_config(index) -> str            # sprdcfg, raw
 write_config(index, cfg)             # spwrcfg, raw
 read_wiring(index, schema) -> dict   # config string -> named fields
 connect(index, schema, label, pin)   # set one pin field, write back
 disconnect(index, schema, label)     # same, to 0
 ```
+
+`spdel` also accepts `all` as a bulk-delete (`rcontrol.cc:1275`, dispatching to
+`CSpareParts::DeleteParts()`), but no `remove_all()` wrapper was ever added to
+`webui/api.py` — `remove_part(index)` is the only removal operation this API
+exposes, and this list above previously claimed otherwise.
 
 `connect()` is necessarily a read-modify-write of the entire config string,
 because `spwrcfg` accepts nothing smaller. Concurrent writers would clobber each

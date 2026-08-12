@@ -8,7 +8,7 @@ import pytest
 
 from tests.webui.stub_rcontrol import StubRControl, ok
 from webui.api import SimulatorApi
-from webui.parts.schema import PartSchema, load_all_schemas
+from webui.parts.schema import PartSchema, SchemaError, load_all_schemas
 from webui.rcontrol import RControlClient
 
 import pathlib
@@ -89,6 +89,27 @@ def test_connecting_a_setting_field_is_refused():
         api, client = api_for(stub)
         with pytest.raises(Exception, match="not a pin"):
             api.connect(0, BUTTONS, "Size", 3)
+        client.close()
+
+
+def test_connecting_a_pin_number_above_255_raises():
+    # The config field is `%hhu` -- an unsigned char. Values above 255 wrap
+    # mod 256 on the wire (300 lands as 44), so a caller wiring "pin 300" is
+    # silently rewired to pin 44 and told it succeeded unless this is caught
+    # client-side first.
+    with StubRControl({"sprdcfg 0": ok(FRESH)}) as stub:
+        api, client = api_for(stub)
+        with pytest.raises(SchemaError, match="B1"):
+            api.connect(0, BUTTONS, "B1", 300)
+        client.close()
+
+
+def test_connecting_a_negative_pin_number_raises():
+    # Same wraparound from the other direction: -1 lands as 255 on the wire.
+    with StubRControl({"sprdcfg 0": ok(FRESH)}) as stub:
+        api, client = api_for(stub)
+        with pytest.raises(SchemaError, match="B1"):
+            api.connect(0, BUTTONS, "B1", -1)
         client.close()
 
 
