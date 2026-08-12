@@ -66,6 +66,39 @@ not this fork's, and are recorded so nobody rediscovers them the hard way.
 
 | 4a.6 | **The NOGUI build cannot be linked with GCC 11.4 on Ubuntu 22.04.** `make -f Makefile.NOGUI` compiles cleanly and reaches the link stage, then dies with `lto1: internal compiler error: Segmentation fault` → `lto-wrapper: fatal error`. Removing `-flto=auto` from `Makefile.NOGUI` does **not** help: the dependency archives built by `bscripts/build_all_static.sh` (picsim, lxrad, simavr) carry LTO IR themselves, so the linker still runs `lto-wrapper`. `bscripts/build_package_NOGUI.sh` fails earlier and separately, on Debian packaging plumbing — `debuild` runs in the wrong directory, so `src/Makefile` and `debian/rules` are missing. | Spec §8.4 cannot be answered without rebuilding the whole dependency chain with LTO disabled, or using a different compiler. The WX GUI build is unaffected and works. |
 
+## 4b. What a wrong part schema can still do undetected
+
+Added 2026-08-10 after the peripherals work. This is the honest limit of the
+schema mechanism, stated so nobody has to rediscover it.
+
+A part schema says what each position in a peripheral's positional CSV config
+means. Several guards defend it: the loader validates structure (roles, labels,
+`dir`/`type`); `tools/check_part_schemas.py` proves a `source` names a file and
+a line that exist; the server rejects under-arity; the client compares arity
+against the live part on every read; and a live round-trip confirms arity,
+storage and settings survival.
+
+**None of them can detect a schema whose fields are in the wrong order.**
+
+`connect()` writes through `schema.index_of(label)` and `read_wiring()` reads
+through the same positions, so any transposition round-trips perfectly clean.
+Swap `B3` and `B7`, or `active` and `mode`, and every test still passes while
+the circuit is wired wrong. The same blindness covers a wrong `dir` (nothing
+cross-checks `in`/`out` against the C++ array the value came from), a
+mislabelled field at the correct position, and a `source` citation pointing at
+a real but irrelevant line.
+
+**Only a human re-reading the cited `sprintf` catches these.** That is why every
+schema carries a `source`, and why `verified` was narrowed to claim arity and
+storage rather than layout.
+
+Two smaller gaps, both measured live on PICSimLab 0.9.3:
+
+| # | Gap | Consequence |
+|---|---|---|
+| 4b.1 | The server's arity guard is **one-sided**. `Part->ReadPreferences` returns `sscanf`'s assignment count, so under-arity is rejected but **over-arity is accepted with the extra field silently dropped**. | An over-long schema is caught only by the client's own check, and only on a later read. Do not rely on the server to reject it. |
+| 4b.2 | Config fields are `%hhu`, so pin values wrap mod 256. Before the range check landed, `connect(..., 300)` was accepted and read back as 44. | `_set_field` now rejects anything outside 0..255. Any future code path that writes a config without going through it reopens this. |
+
 ## 5. Open specification questions
 
 Both are recorded as `blocked_by` on unarmed mechanisms, so nothing currently
