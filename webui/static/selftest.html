@@ -1,0 +1,140 @@
+<!doctype html>
+<!--
+  OpenHardware — browser-side self test.
+
+  This program is free software; you can redistribute it and/or modify it under
+  the terms of the GNU General Public License as published by the Free Software
+  Foundation; either version 2, or (at your option) any later version.
+
+  Deliberately primitive: no stylesheet, no ES modules, no import map, no
+  three.js. Everything is inline and classic-script, so this page renders even
+  when the machinery the real UI depends on is exactly what is failing.
+
+  It exists because the server passed every check that could be run from the
+  server side while the browser showed a blank page. Those checks used a client
+  that opened a fresh connection per request and so could not reproduce what a
+  browser does. This runs *in* the browser and reports what it actually sees.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>OpenHardware self test</title>
+</head>
+<body style="background:#10131a;color:#d8dee9;font:14px/1.6 system-ui,sans-serif;margin:0;padding:24px">
+
+<h1 style="font-size:16px;margin:0 0 4px">OpenHardware self test</h1>
+<p id="intro" style="color:#7d8799;margin:0 0 18px">
+  If you can read this, HTML and inline script both work.
+</p>
+
+<table style="border-collapse:collapse;font-family:ui-monospace,Consolas,monospace;font-size:12px">
+  <thead>
+    <tr>
+      <th style="text-align:left;padding:4px 14px 4px 0;color:#7d8799">check</th>
+      <th style="text-align:left;padding:4px 14px 4px 0;color:#7d8799">result</th>
+    </tr>
+  </thead>
+  <tbody id="rows"></tbody>
+</table>
+
+<p id="verdict" style="margin-top:20px;font-weight:600"></p>
+
+<script>
+// Classic script on purpose. If ES modules are what is broken, this still runs.
+var rows = document.getElementById("rows");
+var failures = [];
+
+function report(name, ok, detail) {
+  var tr = document.createElement("tr");
+  var a = document.createElement("td");
+  a.style.cssText = "padding:3px 14px 3px 0;white-space:nowrap";
+  a.textContent = name;
+  var b = document.createElement("td");
+  b.style.cssText = "padding:3px 0;color:" + (ok ? "#46d17e" : "#e06c75");
+  b.textContent = (ok ? "OK    " : "FAIL  ") + (detail || "");
+  tr.appendChild(a); tr.appendChild(b); rows.appendChild(tr);
+  if (!ok) failures.push(name + ": " + (detail || ""));
+}
+
+report("inline script", true, "this page rendered");
+report("browser", true, navigator.userAgent.slice(0, 70));
+report("import maps", HTMLScriptElement.supports
+  ? HTMLScriptElement.supports("importmap")
+  : false, HTMLScriptElement.supports ? "" : "HTMLScriptElement.supports missing");
+
+// WebGL, which the 3D view needs and nothing else does.
+try {
+  var gl = document.createElement("canvas").getContext("webgl2");
+  report("WebGL2", !!gl, gl ? gl.getParameter(gl.VERSION) : "no context");
+} catch (e) {
+  report("WebGL2", false, String(e));
+}
+
+var assets = ["/", "/style.css", "/app.js", "/board.js", "/scene3d.js",
+              "/models3d.js", "/vendor/three.module.js", "/vendor/three.core.js",
+              "/vendor/OrbitControls.js"];
+
+var pending = assets.length;
+assets.forEach(function (path) {
+  fetch(path, { cache: "no-store" })
+    .then(function (r) {
+      return r.text().then(function (t) {
+        report("GET " + path, r.ok, r.status + "  " + t.length + " bytes");
+      });
+    })
+    .catch(function (e) { report("GET " + path, false, String(e)); })
+    .finally(function () { if (--pending === 0) afterAssets(); });
+});
+
+function afterAssets() {
+  // The ES module graph the real page depends on, loaded the same way it does.
+  import("/board.js")
+    .then(function () { report("import /board.js", true, "module graph loads"); })
+    .catch(function (e) { report("import /board.js", false, String(e)); })
+    .finally(checkSocket);
+}
+
+function checkSocket() {
+  var socket;
+  try {
+    socket = new WebSocket("ws://" + location.host + "/");
+  } catch (e) {
+    report("websocket", false, String(e));
+    finish();
+    return;
+  }
+  var settled = false;
+  var timer = setTimeout(function () {
+    if (!settled) { settled = true; report("websocket", false, "no reply in 8s"); finish(); }
+  }, 8000);
+
+  socket.onopen = function () { socket.send('{"id":1,"op":"version","args":{}}'); };
+  socket.onmessage = function (ev) {
+    if (settled) return;
+    settled = true; clearTimeout(timer);
+    var payload = JSON.parse(ev.data);
+    report("websocket", !!payload.ok,
+           payload.ok ? String(payload.result).trim() : payload.error);
+    socket.close(); finish();
+  };
+  socket.onerror = function () {
+    if (settled) return;
+    settled = true; clearTimeout(timer);
+    report("websocket", false, "connection failed");
+    finish();
+  };
+}
+
+function finish() {
+  var v = document.getElementById("verdict");
+  if (failures.length === 0) {
+    v.style.color = "#46d17e";
+    v.textContent = "Everything passed. The main page should work — open /";
+  } else {
+    v.style.color = "#e06c75";
+    v.textContent = "Failing: " + failures.join("  |  ");
+  }
+}
+</script>
+</body>
+</html>

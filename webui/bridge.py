@@ -39,6 +39,7 @@ import argparse
 import asyncio
 import dataclasses
 import json
+import os
 import sys
 import urllib.parse
 
@@ -745,7 +746,11 @@ def main(argv: list[str] | None = None) -> int:
         or [f"http://127.0.0.1:{args.ws_port}", f"http://localhost:{args.ws_port}"]
     )
 
-    LAUNCH["command"] = args.sim_command
+    # An environment variable as well as a flag, because this value is a shell
+    # command full of nested quotes and passing it through another shell --
+    # cmd.exe, PowerShell, a .cmd launcher -- mangles it. An environment
+    # variable carries it verbatim. The flag wins when both are set.
+    LAUNCH["command"] = args.sim_command or os.environ.get("OPENHARDWARE_SIM_COMMAND")
 
     try:
         asyncio.run(
