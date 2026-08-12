@@ -14,9 +14,13 @@ authored here and why every one cites the line it came from.
 
 A wrong schema does not raise. It writes a valid-looking config that wires the
 circuit incorrectly and reports success, so `source` and `verified` carry real
-weight: `source` says where the layout was read, `verified` says a live
-round-trip confirmed it. `verified` is absent until that happens and is never
-hand-written.
+weight — but they answer different questions. `source` says where the field
+*order* was read. A round-trip cannot check that order: writing and reading
+both go through the same schema's positions, so two transposed fields would
+round-trip clean. `verified` says only what a round-trip actually can confirm
+— arity matches the running part, a written value is stored and read back,
+and settings survive a pin write — not that each label sits at the right
+position. `verified` is absent until that happens and is never hand-written.
 """
 
 from __future__ import annotations

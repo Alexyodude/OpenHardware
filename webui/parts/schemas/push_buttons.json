@@ -1,7 +1,7 @@
 {
   "part": "Push Buttons",
   "source": "src/parts/input_push_buttons.cc:377",
-  "verified": "2026-08-10 round-trip against PICSimLab 0.9.3",
+  "verified": "2026-08-10 arity and storage round-tripped against PICSimLab 0.9.3; field order read from input_push_buttons.cc:377, not confirmed by the round-trip",
   "fields": [
     {"role": "pin", "dir": "out", "label": "B1"},
     {"role": "pin", "dir": "out", "label": "B2"},
