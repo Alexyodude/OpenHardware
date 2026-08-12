@@ -19,6 +19,8 @@ from webui.assets import (
     available_boards,
     load_board,
     parse_map,
+    resolve_board_name,
+    sanitise,
     share_root,
 )
 
@@ -121,6 +123,48 @@ def test_wrong_coordinate_count_raises():
         parse_map(one('<area shape="rect" coords="1,2,3" href="O_A" />'))
     with pytest.raises(AssetError, match="circle needs 3"):
         parse_map(one('<area shape="circle" coords="1,2" href="O_A" />'))
+
+
+# --- the two names every board has ------------------------------------------
+
+
+def test_sanitise_matches_the_simulators_own_rule():
+    """board.cc:585-590 turns both space and hyphen into underscore."""
+    assert sanitise("Arduino Uno") == "Arduino_Uno"
+    assert sanitise("ESP32-DevKitC") == "ESP32_DevKitC"
+    assert sanitise("ESP32-C3-DevKitC-02") == "ESP32_C3_DevKitC_02"
+
+
+def test_every_board_resolves_from_the_name_blist_reports():
+    """`blist` gives `name_`, `info` gives `name`, art uses `name`.
+
+    Ten of the twenty-one shipped boards contain a space or hyphen, so a UI
+    that fed `blist` names to the art loader would fail on half the catalogue.
+    """
+    for art_name in available_boards():
+        assert resolve_board_name(sanitise(art_name)) == art_name
+
+
+def test_the_lossy_direction_is_never_guessed():
+    """`ESP32_C3_DevKitC_02` must resolve to the hyphenated art directory.
+
+    Un-sanitising is impossible -- an underscore could have been either
+    character -- so resolution sanitises the candidates instead. This is the
+    case that proves it, since a space-substituting inverse would produce
+    "ESP32 C3 DevKitC 02", which does not exist.
+    """
+    assert resolve_board_name("ESP32_C3_DevKitC_02") == "ESP32-C3-DevKitC-02"
+    assert resolve_board_name("ESP32-C3-DevKitC-02") == "ESP32-C3-DevKitC-02"
+
+
+def test_load_board_accepts_either_name_form():
+    assert load_board("Blue_Pill").name == "Blue Pill"
+    assert load_board("Blue Pill").name == "Blue Pill"
+
+
+def test_an_unknown_board_name_lists_what_is_known():
+    with pytest.raises(AssetError, match="no board art matches"):
+        resolve_board_name("Raspberry Pi Pico")
 
 
 def test_a_missing_board_raises():

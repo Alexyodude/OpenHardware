@@ -8,7 +8,7 @@ import pytest
 
 from tests.webui.stub_rcontrol import StubRControl, ok
 from webui.api import SimulatorApi
-from webui.parts.schema import PartSchema, SchemaError, load_all_schemas
+from webui.parts.schema import Field, PartSchema, SchemaError, load_all_schemas
 from webui.rcontrol import RControlClient
 
 import pathlib
@@ -151,3 +151,84 @@ def test_write_part_config_sends_the_quoted_form():
         api.write_part_config(0, FRESH)
         client.close()
     assert f'spwrcfg 0 "{FRESH}"' in stub.received
+
+
+# --- values that are not integers -------------------------------------------
+#
+# Added 2026-08-12. `input_LDR.cc:240` writes `vthreshold` with `%f`, so an LDR
+# reports `0,0,100,2.500000`. Until the LDR schema was authored, every shipped
+# schema was all-integer and `_values` parsed the whole config with `int()`.
+# That crashed on read -- and worse, a read-modify-write would have written
+# `2.500000` back as `2`, silently destroying a setting the caller never
+# touched.
+
+
+def _float_schema() -> PartSchema:
+    return PartSchema(
+        part="Floaty",
+        source="src/parts/input_LDR.cc:240",
+        fields=(
+            Field(role="pin", dir="out", label="P1"),
+            Field(role="pin", dir="out", label="P2"),
+            Field(role="setting", type="int", label="value"),
+            Field(role="setting", type="float", label="vthreshold"),
+        ),
+    )
+
+
+def test_a_float_setting_reads_back_as_a_float():
+    schema = _float_schema()
+    with StubRControl({"sprdcfg 0": ok('"0,0,100,2.500000"')}) as stub:
+        client = RControlClient(port=stub.port, timeout=2)
+        client.connect()
+        wiring = SimulatorApi(client).read_wiring(0, schema)
+        client.close()
+    assert wiring["vthreshold"] == pytest.approx(2.5)
+    assert wiring["value"] == 100
+    assert wiring["P1"] == 0
+
+
+def test_a_pin_write_preserves_a_float_setting_byte_for_byte():
+    """The corruption case. `2.500000` must go back exactly, not as `2`."""
+    schema = _float_schema()
+    with StubRControl({"sprdcfg 0": ok('"0,0,100,2.500000"')}) as stub:
+        client = RControlClient(port=stub.port, timeout=2)
+        client.connect()
+        SimulatorApi(client).connect(0, schema, "P1", 9)
+        client.close()
+    written = [c for c in stub.received if c.startswith("spwrcfg")]
+    assert written == ['spwrcfg 0 "9,0,100,2.500000"'], written
+
+
+def test_an_unparseable_field_is_returned_as_text_not_raised_on():
+    """Refusing to answer would make the whole part unreadable over one field."""
+    schema = _float_schema()
+    with StubRControl({"sprdcfg 0": ok('"0,0,100,nonsense"')}) as stub:
+        client = RControlClient(port=stub.port, timeout=2)
+        client.connect()
+        wiring = SimulatorApi(client).read_wiring(0, schema)
+        client.close()
+    assert wiring["vthreshold"] == "nonsense"
+
+
+# --- the shipped catalogue ---------------------------------------------------
+
+
+def test_every_shipped_schema_loads_and_cites_a_line():
+    schemas = load_all_schemas(
+        pathlib.Path(__file__).resolve().parents[2] / "webui" / "parts" / "schemas"
+    )
+    assert len(schemas) >= 12, sorted(schemas)
+    for name, schema in schemas.items():
+        assert ":" in schema.source, f"{name} cites no line"
+        assert schema.arity == len(schema.fields)
+
+
+def test_every_pin_field_declares_a_direction():
+    """A pin with no direction cannot be drawn or wired correctly."""
+    schemas = load_all_schemas(
+        pathlib.Path(__file__).resolve().parents[2] / "webui" / "parts" / "schemas"
+    )
+    for name, schema in schemas.items():
+        for _, field in schema.pin_fields:
+            assert field.dir in ("in", "out"), f"{name}.{field.label}"

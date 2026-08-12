@@ -70,6 +70,38 @@ not this fork's, and are recorded so nobody rediscovers them the hard way.
 
 | 4a.7 | **The simulator crashes under repeated live-test runs.** After many cycles of placing and deleting a Push Buttons part, PICSimLab 0.9.3 died with a SIGSEGV stack trace in `/root/.picsimlab/picsimlab_log0.txt`. Same family as 4a.1. | A live test run can fail through no fault of the code. The failure presents as an **error**, not a pass — the fixture cannot reach the simulator and says so, which is the intended behaviour. Before debugging a live-test failure, check the simulator is still alive: `wsl -d Ubuntu-22.04 -- pgrep picsimlab`. Restart, then re-run. |
 
+## 4a-bis. Which boards actually run, measured 2026-08-12
+
+Every shipped board's `demo.pzw` was launched in turn and probed over rcontrol.
+**17 of 21 start and answer; 4 die.** The four are exactly the QEMU-backed
+ones, and they fail the same way:
+
+```
+PICSimLab Qemu: /root/oh/lib/picsimlab//qemu/libqemu-xtensa.so:
+                cannot open shared object file: No such file or directory
+#Error# Qemu-esp32: Error loading libqemu-xtensa
+PICSimLab Caught SIGSEGV: Segmentation Fault
+```
+
+| verdict | boards |
+|---|---|
+| runs (17) | Arduino Mega, Arduino Nano, Arduino Uno, Breadboard, Curiosity, Curiosity HPC, Franzininho DIY, K16F, McLab1, McLab2, PICGenios, PQDB, Remote TCP, X, Xpress, gpboard, uCboard |
+| **segfaults (4)** | **Blue Pill, ESP32-C3-DevKitC-02, ESP32-DevKitC, STM32 H103** |
+
+`bscripts/build_all_static.sh` does not build the QEMU shared objects, so the
+ARM and Xtensa/RISC-V boards have no CPU to run and crash rather than
+reporting a missing backend. This is an incomplete build here, not an upstream
+defect, but it is recorded because the failure looks like a board bug.
+
+Two consequences worth stating:
+
+- **The web UI renders all 21 correctly** — every board that runs reports a
+  `Board:` name matching its art directory exactly, so nothing further is
+  needed for the other sixteen. The limit is the simulator, not the UI.
+- **There is no rcontrol command that changes board.** The `help` text lists
+  the entire surface and none of it sets one; `loadhex` takes hex/bin only.
+  Switching means relaunching the simulator with that board's `demo.pzw`.
+
 ## 4b. What a wrong part schema can still do undetected
 
 Added 2026-08-10 after the peripherals work. This is the honest limit of the

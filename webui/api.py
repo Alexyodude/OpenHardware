@@ -373,9 +373,20 @@ class SimulatorApi:
         """
         self.client.command(f'spwrcfg {index} "{config}"')
 
-    def _values(self, index: int, schema: PartSchema) -> list[int]:
+    def _values(self, index: int, schema: PartSchema) -> list[str]:
+        """The config's fields as the part wrote them, still as text.
+
+        Deliberately not parsed to `int` here. Not every field is an integer --
+        `input_LDR.cc:240` writes `vthreshold` with `%f`, so an LDR reports
+        `0,0,100,2.500000` -- and a read-modify-write that parsed to `int` and
+        formatted back would rewrite `2.500000` as `2`, destroying a setting
+        the caller never asked to change while reporting success.
+
+        Keeping the raw token means every field this client does not touch is
+        written back byte-for-byte.
+        """
         raw = self.read_config(index)
-        values = [int(v) for v in raw.split(",") if v.strip() != ""]
+        values = [v.strip() for v in raw.split(",") if v.strip() != ""]
         if len(values) != schema.arity:
             raise SchemaError(
                 f"{schema.part}: arity mismatch — schema declares {schema.arity} "
@@ -383,11 +394,24 @@ class SimulatorApi:
             )
         return values
 
-    def read_wiring(self, index: int, schema: PartSchema) -> dict[str, int]:
+    @staticmethod
+    def _typed(field, raw: str) -> int | float | str:
+        """Parse one field by what its schema says it is.
+
+        An unparseable value is returned as text rather than raised on: the
+        caller asked what the part reports, and refusing to answer because one
+        setting has an unexpected shape would make the whole part unreadable.
+        """
+        try:
+            return float(raw) if field.type == "float" else int(raw)
+        except ValueError:
+            return raw
+
+    def read_wiring(self, index: int, schema: PartSchema) -> dict[str, int | float | str]:
         """Map every field label to its current value."""
         return {
-            field.label: value
-            for field, value in zip(schema.fields, self._values(index, schema))
+            field.label: self._typed(field, raw)
+            for field, raw in zip(schema.fields, self._values(index, schema))
         }
 
     #: The config field a pin value lands in is `%hhu` (rcontrol.cc:1266,
@@ -412,8 +436,10 @@ class SimulatorApi:
                 f"{self.PIN_MIN}..{self.PIN_MAX}"
             )
         values = self._values(index, schema)
-        values[position] = value
-        self.write_config(index, ",".join(str(v) for v in values))
+        values[position] = str(value)
+        # Every other field goes back exactly as it came, so a float setting
+        # survives a pin write. See _values.
+        self.write_config(index, ",".join(values))
 
     def connect(self, index: int, schema: PartSchema, label: str, pin: int) -> None:
         """Wire one of the part's pins to a board pin number."""

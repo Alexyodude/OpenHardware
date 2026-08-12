@@ -185,25 +185,26 @@ class Drawable:
         return dataclasses.asdict(self)
 
 
-def _resolve(region: Region, state: SimState) -> Element | None:
-    if region.role == "output":
-        return state.output_named(region.name)
-    return state.input_named(region.name)
+def _drawables(
+    regions: tuple[Region, ...],
+    outputs: tuple[Element, ...],
+    inputs: tuple[Element, ...],
+) -> list[Drawable]:
+    """Resolve regions against named elements. Shared by boards and parts.
 
-
-def build(state: SimState, art: BoardArt) -> dict:
-    """Combine live state with board art into a draw list.
-
-    Regions the simulator says nothing about are kept with `value=None` rather
-    than dropped, and counted in `unbound`. A board whose art and firmware
-    disagree is a real condition worth seeing, and silently omitting the
-    element would make it invisible.
+    Parts ship the same image-map format as boards and their region ids carry
+    the same names the simulator reports, so one function covers both. A second
+    implementation would be a second place for the binding rule to drift.
     """
-    drawables: list[Drawable] = []
-    for region in art.regions:
-        element = _resolve(region, state)
+    by_name_out = {e.name: e for e in outputs}
+    by_name_in = {e.name: e for e in inputs}
+
+    resolved: list[Drawable] = []
+    for region in regions:
+        table = by_name_out if region.role == "output" else by_name_in
+        element = table.get(region.name)
         value = None if element is None else element.value
-        drawables.append(
+        resolved.append(
             Drawable(
                 id=region.id,
                 role=region.role,
@@ -221,6 +222,43 @@ def build(state: SimState, art: BoardArt) -> dict:
                 clickable=region.role in ("button", "input") and element is not None,
             )
         )
+    return resolved
+
+
+def build(state: SimState, art: BoardArt, part_art=None) -> dict:
+    """Combine live state with board and part art into a draw list.
+
+    `part_art` is an optional callable taking a part name and returning its
+    `BoardArt`, or None when that part has no drawable art. It is injected
+    rather than imported so this module keeps doing no I/O.
+
+    Regions the simulator says nothing about are kept with `value=None` rather
+    than dropped, and counted in `unbound`. A board whose art and firmware
+    disagree is a real condition worth seeing, and silently omitting the
+    element would make it invisible.
+    """
+    drawables = _drawables(art.regions, state.board_outputs, state.board_inputs)
+
+    parts: list[dict] = []
+    for part in state.parts:
+        rendered = part_art(part.name) if part_art else None
+        regions = (
+            _drawables(rendered.regions, part.outputs, part.inputs) if rendered else []
+        )
+        parts.append(
+            {
+                "index": part.index,
+                "name": part.name,
+                "width": rendered.width if rendered else None,
+                "height": rendered.height if rendered else None,
+                "regions": [d.as_dict() for d in regions],
+                "inputs": [dataclasses.asdict(e) for e in part.inputs],
+                "outputs": [dataclasses.asdict(e) for e in part.outputs],
+                # Stated per part so a peripheral that is placed but cannot be
+                # drawn is visible as such, rather than just missing.
+                "drawable": rendered is not None,
+            }
+        )
 
     return {
         "board": state.board,
@@ -230,14 +268,6 @@ def build(state: SimState, art: BoardArt) -> dict:
         "width": art.width,
         "height": art.height,
         "regions": [d.as_dict() for d in drawables],
-        "parts": [
-            {
-                "index": part.index,
-                "name": part.name,
-                "inputs": [dataclasses.asdict(e) for e in part.inputs],
-                "outputs": [dataclasses.asdict(e) for e in part.outputs],
-            }
-            for part in state.parts
-        ],
+        "parts": parts,
         "unbound": sum(1 for d in drawables if d.value is None),
     }

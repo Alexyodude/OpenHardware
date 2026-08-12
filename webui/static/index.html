@@ -24,46 +24,67 @@
     <span class="sep">·</span>
     <span id="board-clock">—</span>
   </div>
+  <div class="controls">
+    <button id="run" type="button">Run</button>
+    <button id="pause" type="button">Pause</button>
+    <button id="reset" type="button">Reset</button>
+  </div>
   <div class="status" id="status" data-state="connecting">connecting…</div>
 </header>
 
 <main>
-  <section class="panel board-panel">
-    <div class="panel-head">
-      <h2>Board</h2>
-      <div class="controls">
-        <button id="run" type="button">Run</button>
-        <button id="pause" type="button">Pause</button>
-        <button id="reset" type="button">Reset</button>
+  <section class="col">
+    <div class="panel">
+      <div class="panel-head"><h2>Board</h2><span class="hint" id="board-note"></span></div>
+      <div class="stage">
+        <div class="board" id="board">
+          <img id="board-img" alt="" />
+          <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
       </div>
     </div>
-    <div class="stage">
-      <div class="board" id="board">
-        <img id="board-img" alt="" />
-        <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Workbench</h2>
+        <span class="hint" id="workbench-note">no peripherals placed</span>
       </div>
+      <div id="workbench" class="workbench"></div>
     </div>
-    <p class="note" id="board-note"></p>
   </section>
 
-  <section class="panel side">
-    <div class="panel-head"><h2>Outputs &amp; controls</h2></div>
-    <table class="grid" id="regions">
-      <thead><tr><th>Region</th><th>Role</th><th>Value</th></tr></thead>
-      <tbody></tbody>
-    </table>
-
-    <div class="panel-head"><h2>Spare parts</h2></div>
-    <div id="parts" class="parts"></div>
-
-    <div class="panel-head">
-      <h2>Pins</h2>
-      <button id="refresh-pins" class="link" type="button">refresh</button>
+  <section class="col side">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Add a peripheral</h2>
+        <button id="enable-spare" class="link" type="button">enable</button>
+      </div>
+      <div class="pad">
+        <input id="palette-filter" class="filter" type="search"
+               placeholder="filter 60+ peripherals…" autocomplete="off" />
+        <div id="palette" class="palette"></div>
+      </div>
     </div>
-    <table class="grid" id="pins">
-      <thead><tr><th>#</th><th>Name</th><th>Dir</th><th>Value</th></tr></thead>
-      <tbody></tbody>
-    </table>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Boards</h2></div>
+      <div id="board-list" class="board-list"></div>
+      <p class="note">
+        rcontrol has no board-set command, so switching means relaunching the
+        simulator with that board's <code>demo.pzw</code>.
+      </p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Pins</h2>
+        <button id="refresh-pins" class="link" type="button">refresh</button>
+      </div>
+      <table class="grid" id="pins">
+        <thead><tr><th>#</th><th>Name</th><th>Dir</th><th>Value</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </section>
 </main>
 

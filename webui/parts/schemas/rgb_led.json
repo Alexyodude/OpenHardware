@@ -1,6 +1,6 @@
 {
-  "part": "LED Matrix",
-  "source": "src/parts/output_LED_matrix.cc:173",
+  "part": "RGB LED",
+  "source": "src/parts/output_RGB_LED.cc:155",
   "verified": "2026-08-12 arity, storage and settings-survival round-tripped against PICSimLab 0.9.3; field order and pin directions read from the cited line, not confirmed by the round-trip",
   "fields": [
     {
@@ -19,19 +19,9 @@
       "label": "B"
     },
     {
-      "role": "pin",
-      "dir": "out",
-      "label": "DOUT"
-    },
-    {
       "role": "setting",
       "type": "int",
-      "label": "angle"
-    },
-    {
-      "role": "setting",
-      "type": "int",
-      "label": "lmode"
+      "label": "active"
     }
   ]
 }

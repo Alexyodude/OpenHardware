@@ -275,6 +275,75 @@ def test_the_on_board_led_reports_a_changing_value_while_running(api: SimulatorA
     )
 
 
+def test_every_shipped_schema_matches_a_really_placed_part(api: SimulatorApi):
+    """Place each peripheral and check the schema against what it reports.
+
+    Arity is the cheapest strong check a schema can face (peripherals design
+    §8.2): the field count of a real `sprdcfg` reply must equal the schema's.
+    It catches the most likely authoring error, and it is the check that
+    cannot be satisfied by reading the source wrongly, because the part
+    answers for itself.
+
+    The round-trip then proves storage and that settings survive a pin write --
+    the case that found `_values` truncating `2.500000` to `2` on an LDR.
+
+    What none of this proves is **field order**: a transposed schema
+    round-trips perfectly clean (docs/known-issues.md §4b). Only a human
+    re-reading the cited `sprintf` catches that.
+
+    This places and deletes every schema'd part in one run, which is the
+    pattern that triggers the intermittent crash in known-issues 4a.7. If this
+    errors, check the simulator is still alive before suspecting a schema:
+    `wsl -d Ubuntu-22.04 -- pgrep picsimlab`. A dead simulator makes the rest
+    of this file error too, which is the intended behaviour -- an unreachable
+    oracle is a failure, never a skip.
+    """
+    import pathlib
+
+    from webui.parts.schema import load_all_schemas
+
+    schemas = load_all_schemas(
+        pathlib.Path(__file__).resolve().parents[2] / "webui" / "parts" / "schemas"
+    )
+    api.client.command("spshow 1")
+    api.client.try_command("spdel all")
+
+    problems = []
+    try:
+        for name, schema in sorted(schemas.items()):
+            index = api.place_part(name, 60, 60)
+            try:
+                fields = api.read_config(index).split(",")
+                if len(fields) != schema.arity:
+                    problems.append(
+                        f"{name}: schema {schema.arity} fields, part reported "
+                        f"{len(fields)}"
+                    )
+                    continue
+                pins = schema.pin_fields
+                if not pins:
+                    continue
+                label = pins[0][1].label
+                before = api.read_wiring(index, schema)
+                api.connect(index, schema, label, 7)
+                after = api.read_wiring(index, schema)
+                if after[label] != 7:
+                    problems.append(f"{name}: wrote 7 to {label}, read {after[label]}")
+                changed = [
+                    f.label
+                    for f in schema.fields
+                    if f.role != "pin" and after[f.label] != before[f.label]
+                ]
+                if changed:
+                    problems.append(f"{name}: pin write disturbed settings {changed}")
+            finally:
+                api.client.try_command(f"spdel {index}")
+    finally:
+        api.client.try_command("spdel all")
+
+    assert not problems, "\n".join(problems)
+
+
 @pytest.fixture
 def buttons(api):
     """Place a Push Buttons part and yield (index, schema). Cleans up after."""

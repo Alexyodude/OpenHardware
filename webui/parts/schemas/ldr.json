@@ -1,37 +1,27 @@
 {
-  "part": "LED Matrix",
-  "source": "src/parts/output_LED_matrix.cc:173",
+  "part": "LDR",
+  "source": "src/parts/input_LDR.cc:240",
   "verified": "2026-08-12 arity, storage and settings-survival round-tripped against PICSimLab 0.9.3; field order and pin directions read from the cited line, not confirmed by the round-trip",
   "fields": [
     {
       "role": "pin",
-      "dir": "in",
-      "label": "R"
-    },
-    {
-      "role": "pin",
-      "dir": "in",
-      "label": "G"
-    },
-    {
-      "role": "pin",
-      "dir": "in",
-      "label": "B"
+      "dir": "out",
+      "label": "P1"
     },
     {
       "role": "pin",
       "dir": "out",
-      "label": "DOUT"
+      "label": "P2"
     },
     {
       "role": "setting",
       "type": "int",
-      "label": "angle"
+      "label": "value"
     },
     {
       "role": "setting",
-      "type": "int",
-      "label": "lmode"
+      "type": "float",
+      "label": "vthreshold"
     }
   ]
 }

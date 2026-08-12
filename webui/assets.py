@@ -156,8 +156,120 @@ def available_boards(root: pathlib.Path | None = None) -> tuple[str, ...]:
     return tuple(names)
 
 
+#: `share/parts/` is grouped into these. `Common` is shared IC body art (IC8,
+#: IC16, ...) reused by several parts, not a part anyone can place, so it is
+#: excluded from the catalogue.
+PART_CATEGORIES = ("Input", "Output", "Other", "Virtual")
+
+
+def available_parts(root: pathlib.Path | None = None) -> dict[str, str]:
+    """Map each placeable part's name to its category.
+
+    The name is the directory name, which is also the name `splist` reports and
+    `spadd` expects, so no translation is needed here -- unlike boards, where
+    two spellings exist.
+    """
+    base = (root or share_root()) / "parts"
+    found: dict[str, str] = {}
+    for category in PART_CATEGORIES:
+        directory = base / category
+        if not directory.is_dir():
+            continue
+        for entry in sorted(directory.iterdir()):
+            if (entry / "part.svg").is_file():
+                found[entry.name] = category
+    if not found:
+        raise AssetError(f"{base} holds no part with a part.svg")
+    return found
+
+
+def load_part(name: str, root: pathlib.Path | None = None) -> BoardArt:
+    """Load one part's art, using the same image-map parser boards use.
+
+    Parts ship the identical format -- GIMP image maps with `O_`/`B_`/`I_`
+    prefixed ids -- and the ids line up with the names the simulator reports
+    for a placed part: `B_PB_1` in `share/parts/Input/Push Buttons/part.map`
+    pairs with `part[00].in[00] PB_1` in an `info` dump.
+
+    That correspondence is why placed peripherals can be drawn and clicked
+    through exactly the same path as board regions.
+    """
+    base = (root or share_root()) / "parts"
+    for category in PART_CATEGORIES:
+        directory = base / category / name
+        if (directory / "part.svg").is_file():
+            if not (directory / "part.map").is_file():
+                raise AssetError(
+                    f"{name}: has part.svg but no part.map, so its regions "
+                    f"cannot be located. It can be placed but not drawn."
+                )
+            width, height, regions = parse_map(
+                (directory / "part.map").read_text(encoding="utf-8", errors="replace")
+            )
+            return BoardArt(
+                name=name,
+                svg=(directory / "part.svg").read_bytes(),
+                width=width,
+                height=height,
+                regions=regions,
+            )
+    raise AssetError(f"no part art for {name!r} under {base}")
+
+
+def sanitise(name: str) -> str:
+    """Apply the simulator's own board-name sanitiser.
+
+    `src/lib/board.cc:585-590` fills `board_desc.name_` from `name`:
+
+        if ((name[i] != ' ') && (name[i] != '-')) { name_[i] = name[i]; }
+        else                                      { name_[i] = '_'; }
+
+    so a board carries two names. `info` reports `name` -- "ESP32-DevKitC" --
+    and `blist` reports `name_` -- "ESP32_DevKitC". Art directories use the
+    display form.
+
+    The mapping is **lossy and must only be applied forwards.** Underscore has
+    two possible origins, so "ESP32_C3_DevKitC_02" cannot be turned back into
+    "ESP32-C3-DevKitC-02" without knowing the answer already. Ten of the
+    twenty-one shipped boards contain a space or a hyphen, so guessing the
+    inverse would silently fail on half the catalogue.
+    """
+    return re.sub(r"[ \-]", "_", name)
+
+
+def resolve_board_name(name: str, root: pathlib.Path | None = None) -> str:
+    """Return the art-directory name for either form of a board's name.
+
+    Accepts the display name `info` reports or the sanitised name `blist`
+    reports, and resolves both by sanitising the *candidates* rather than
+    trying to un-sanitise the input.
+    """
+    base = (root or share_root()) / "boards"
+    if (base / name / "board.svg").is_file():
+        return name
+
+    wanted = sanitise(name)
+    matches = [
+        candidate
+        for candidate in available_boards(root)
+        if sanitise(candidate) == wanted
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        raise AssetError(
+            f"no board art matches {name!r}. Known boards: "
+            f"{list(available_boards(root))}"
+        )
+    raise AssetError(
+        f"{name!r} is ambiguous: {matches} all sanitise to {wanted!r}. "
+        f"The simulator cannot distinguish them either."
+    )
+
+
 def load_board(name: str, root: pathlib.Path | None = None) -> BoardArt:
-    """Load one board's SVG and parsed image map."""
+    """Load one board's SVG and parsed image map, by either name form."""
+    name = resolve_board_name(name, root)
     base = (root or share_root()) / "boards" / name
     svg_path, map_path = base / "board.svg", base / "board.map"
     for path in (svg_path, map_path):

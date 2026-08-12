@@ -1,24 +1,97 @@
 {
   "part": "LEDs",
   "source": "src/parts/output_LEDs.cc:220",
+  "verified": "2026-08-12 arity, storage and settings-survival round-tripped against PICSimLab 0.9.3; field order and pin directions read from the cited line, not confirmed by the round-trip",
   "fields": [
-    {"role": "pin", "dir": "in", "label": "L1"},
-    {"role": "pin", "dir": "in", "label": "L2"},
-    {"role": "pin", "dir": "in", "label": "L3"},
-    {"role": "pin", "dir": "in", "label": "L4"},
-    {"role": "pin", "dir": "in", "label": "L5"},
-    {"role": "pin", "dir": "in", "label": "L6"},
-    {"role": "pin", "dir": "in", "label": "L7"},
-    {"role": "pin", "dir": "in", "label": "L8"},
-    {"role": "setting", "type": "int", "label": "active"},
-    {"role": "setting", "type": "int", "label": "color1"},
-    {"role": "setting", "type": "int", "label": "color2"},
-    {"role": "setting", "type": "int", "label": "color3"},
-    {"role": "setting", "type": "int", "label": "color4"},
-    {"role": "setting", "type": "int", "label": "color5"},
-    {"role": "setting", "type": "int", "label": "color6"},
-    {"role": "setting", "type": "int", "label": "color7"},
-    {"role": "setting", "type": "int", "label": "color8"},
-    {"role": "setting", "type": "int", "label": "Size"}
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "L1"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "L2"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "L3"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "L4"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "L5"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "L6"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "L7"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "L8"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "active"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "color1"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "color2"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "color3"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "color4"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "color5"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "color6"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "color7"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "color8"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "Size"
+    }
   ]
 }

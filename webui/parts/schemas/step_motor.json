@@ -1,37 +1,32 @@
 {
-  "part": "LED Matrix",
-  "source": "src/parts/output_LED_matrix.cc:173",
+  "part": "Step Motor",
+  "source": "src/parts/output_step.cc:405",
   "verified": "2026-08-12 arity, storage and settings-survival round-tripped against PICSimLab 0.9.3; field order and pin directions read from the cited line, not confirmed by the round-trip",
   "fields": [
     {
       "role": "pin",
       "dir": "in",
-      "label": "R"
+      "label": "IN1"
     },
     {
       "role": "pin",
       "dir": "in",
-      "label": "G"
+      "label": "IN2"
     },
     {
       "role": "pin",
       "dir": "in",
-      "label": "B"
+      "label": "IN3"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "IN4"
     },
     {
       "role": "pin",
       "dir": "out",
-      "label": "DOUT"
-    },
-    {
-      "role": "setting",
-      "type": "int",
-      "label": "angle"
-    },
-    {
-      "role": "setting",
-      "type": "int",
-      "label": "lmode"
+      "label": "OUT1"
     }
   ]
 }

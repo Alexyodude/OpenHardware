@@ -257,3 +257,180 @@ button.link {
 }
 
 .foot .err { color: var(--err); }
+
+/* --- layout ------------------------------------------------------------- */
+
+.col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+.hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.pad { padding: 10px 12px; }
+
+/* --- palette ------------------------------------------------------------ */
+
+.filter {
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 9px;
+  margin-bottom: 8px;
+}
+
+.filter:focus { outline: none; border-color: var(--accent); }
+
+.palette {
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.catalogue-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: none;
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.catalogue-row:hover { background: var(--panel-2); border-color: var(--line); color: var(--text); }
+.catalogue-row .cat-name { flex: 1; min-width: 0; }
+.catalogue-row .cat-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: lowercase;
+}
+/* Placeable but undrawable: still offered, visibly marked. */
+.catalogue-row.no-art .cat-name { color: var(--muted); font-style: italic; }
+
+/* --- board list --------------------------------------------------------- */
+
+.board-list { display: flex; flex-direction: column; padding: 6px 4px; max-height: 220px; overflow-y: auto; }
+
+.board-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: 5px;
+}
+
+.board-row .b-name { flex: 1; }
+.board-row .b-tag { font-family: var(--mono); font-size: 10px; color: var(--live); }
+.board-row.active { background: var(--panel-2); }
+.board-row.active .b-name { color: var(--live); font-weight: 600; }
+
+/* --- workbench ---------------------------------------------------------- */
+
+.workbench {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.workbench:empty::after {
+  content: "Pick a peripheral from the palette to place it here.";
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.part-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.part-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.part-head h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--mono);
+  flex: 1;
+}
+
+.part-head .link { margin-left: 0; }
+.link.danger { color: var(--err); }
+
+.part-stage {
+  position: relative;
+  line-height: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+
+.part-stage img { max-width: 100%; height: auto; display: block; }
+
+.part-overlay {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  width: calc(100% - 24px);
+  height: calc(100% - 20px);
+  overflow: visible;
+}
+
+.wiring {
+  border-top: 1px solid var(--line);
+  padding: 8px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.wire-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.wire-row span { flex: 1; color: var(--muted); }
+
+.wire-row input {
+  width: 74px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 3px 7px;
+}
+
+.wire-row input:focus { outline: none; border-color: var(--accent); }
+
+code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--panel-2);
+  padding: 1px 4px;
+  border-radius: 3px;
+}

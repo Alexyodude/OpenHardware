@@ -1,37 +1,22 @@
 {
-  "part": "LED Matrix",
-  "source": "src/parts/output_LED_matrix.cc:173",
+  "part": "Ultrasonic HC-SR04",
+  "source": "src/parts/input_hcsr04.cc:223",
   "verified": "2026-08-12 arity, storage and settings-survival round-tripped against PICSimLab 0.9.3; field order and pin directions read from the cited line, not confirmed by the round-trip",
   "fields": [
     {
       "role": "pin",
       "dir": "in",
-      "label": "R"
-    },
-    {
-      "role": "pin",
-      "dir": "in",
-      "label": "G"
-    },
-    {
-      "role": "pin",
-      "dir": "in",
-      "label": "B"
+      "label": "TRIG"
     },
     {
       "role": "pin",
       "dir": "out",
-      "label": "DOUT"
+      "label": "ECHO"
     },
     {
       "role": "setting",
       "type": "int",
-      "label": "angle"
-    },
-    {
-      "role": "setting",
-      "type": "int",
-      "label": "lmode"
+      "label": "value"
     }
   ]
 }

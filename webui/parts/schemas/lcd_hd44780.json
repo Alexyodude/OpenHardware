@@ -1,0 +1,67 @@
+{
+  "part": "LCD hd44780",
+  "source": "src/parts/output_LCD_hd44780.cc:233",
+  "verified": "2026-08-12 arity, storage and settings-survival round-tripped against PICSimLab 0.9.3; field order and pin directions read from the cited line, not confirmed by the round-trip",
+  "fields": [
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "pin01"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "pin02"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "pin03"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "pin04"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "pin05"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "pin06"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "pin07"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "pin08"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "pin09"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "pin10"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "pin11"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "model"
+    }
+  ]
+}

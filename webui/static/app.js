@@ -4,7 +4,14 @@
 // the terms of the GNU General Public License as published by the Free Software
 // Foundation; either version 2, or (at your option) any later version.
 
-import { paint, paintParts, paintPins, paintRegionTable } from "/board.js";
+import {
+  paint,
+  paintBoardList,
+  paintPalette,
+  paintPins,
+  paintWiring,
+  paintWorkbench,
+} from "/board.js";
 
 const POLL_MS = 120;
 
@@ -14,6 +21,7 @@ const log = document.getElementById("log");
 let socket = null;
 let nextId = 1;
 const pending = new Map();
+let catalogue = { parts: [] };
 
 function setStatus(state, text) {
   status.dataset.state = state;
@@ -49,7 +57,7 @@ function onMessage(event) {
   let payload;
   try {
     payload = JSON.parse(event.data);
-  } catch (err) {
+  } catch {
     note(`unparseable reply: ${event.data}`, true);
     return;
   }
@@ -63,7 +71,8 @@ function onMessage(event) {
 // --- the render loop --------------------------------------------------------
 //
 // One `render` call per frame. The server turns a single `info` round trip into
-// a draw list, so this does not scale with the number of elements on the board.
+// a draw list covering the board and every placed peripheral, so this does not
+// scale with the number of elements.
 //
 // A failed frame stops the loop and shows the failure. It never keeps painting
 // the previous frame: a UI that shows a last-known-good board while the
@@ -71,24 +80,26 @@ function onMessage(event) {
 
 let looping = false;
 
+const handlers = {
+  onRegionClick: onPartRegionClick,
+  onRemove: removePart,
+  onWiring: showWiring,
+};
+
 async function frame() {
   if (!looping) return;
   try {
     const model = await call("render");
-    paint(model, onRegionClick);
-    paintRegionTable(model);
-    paintParts(model, onPartInput);
+    paint(model, onBoardRegionClick);
+    paintWorkbench(model, handlers);
 
     document.getElementById("board-name").textContent = model.board;
     document.getElementById("board-mcu").textContent = model.processor;
     document.getElementById("board-clock").textContent = model.frequency;
-
-    const note_ = document.getElementById("board-note");
-    note_.textContent =
+    document.getElementById("board-note").textContent =
       model.unbound > 0
-        ? `${model.regions.length} regions from board.map; ` +
-          `${model.unbound} not reported by this board and drawn dashed.`
-        : `${model.regions.length} regions, all bound.`;
+        ? `${model.regions.length} regions, ${model.unbound} not driven by this board`
+        : `${model.regions.length} regions, all bound`;
 
     setStatus("live", "live");
     setTimeout(frame, POLL_MS);
@@ -101,29 +112,74 @@ async function frame() {
 
 // --- interactions -----------------------------------------------------------
 
-async function onRegionClick(region) {
+async function onBoardRegionClick(region) {
   try {
     const current = await call("get_board_input", { index: region.index });
-    await call("set_board_input", {
-      index: region.index,
-      value: current ? 0 : 1,
-    });
+    await call("set_board_input", { index: region.index, value: current ? 0 : 1 });
     note(`${region.id}: wrote ${current ? 0 : 1}`);
   } catch (err) {
     note(`${region.id}: ${err.message}`, true);
   }
 }
 
-async function onPartInput(part, input) {
+async function onPartRegionClick(part, region) {
   try {
     await call("set_part_input", {
       part: part.index,
-      index: input.index,
-      value: input.value ? 0 : 1,
+      index: region.index,
+      value: region.value ? 0 : 1,
     });
-    note(`part[${part.index}].in[${input.index}] ${input.name}: wrote`);
+    note(`part[${part.index}] ${region.name}: wrote`);
   } catch (err) {
-    note(`${input.name}: ${err.message}`, true);
+    note(`${region.id}: ${err.message}`, true);
+  }
+}
+
+async function placePart(name) {
+  try {
+    await call("enable_spare_parts");
+    const index = await call("place_part", { name, x: 120, y: 120 });
+    note(`placed ${name} as part[${index}]`);
+  } catch (err) {
+    // 4a.1: placing a part whose assets are missing segfaults the simulator
+    // rather than replying ERROR, so a dropped connection is a likely outcome.
+    note(`could not place ${name}: ${err.message}`, true);
+  }
+}
+
+async function removePart(part) {
+  try {
+    await call("remove_part", { index: part.index });
+    note(`removed part[${part.index}]`);
+  } catch (err) {
+    note(`remove failed: ${err.message}`, true);
+  }
+}
+
+async function showWiring(part) {
+  try {
+    const schema = await call("part_schema", { name: part.name });
+    if (schema === null) {
+      paintWiring(part.index, null, {}, () => {});
+      note(`${part.name}: no schema`);
+      return;
+    }
+    const wiring = await call("read_wiring", { index: part.index, name: part.name });
+    paintWiring(part.index, schema, wiring, async (label, pin) => {
+      try {
+        await call("connect", {
+          index: part.index,
+          name: part.name,
+          label,
+          pin,
+        });
+        note(`${part.name}.${label} -> pin ${pin}`);
+      } catch (err) {
+        note(`${label}: ${err.message}`, true);
+      }
+    });
+  } catch (err) {
+    note(`wiring: ${err.message}`, true);
   }
 }
 
@@ -133,6 +189,16 @@ async function refreshPins() {
     note("pins refreshed");
   } catch (err) {
     note(`pins: ${err.message}`, true);
+  }
+}
+
+async function loadCatalogue() {
+  try {
+    catalogue = await call("catalogue");
+    paintPalette(catalogue, "", placePart);
+    paintBoardList(await call("boards"));
+  } catch (err) {
+    note(`catalogue: ${err.message}`, true);
   }
 }
 
@@ -148,9 +214,15 @@ function wireControls() {
   document.getElementById("run").addEventListener("click", send("run"));
   document.getElementById("pause").addEventListener("click", send("pause"));
   document.getElementById("reset").addEventListener("click", send("reset"));
+  document.getElementById("refresh-pins").addEventListener("click", refreshPins);
   document
-    .getElementById("refresh-pins")
-    .addEventListener("click", refreshPins);
+    .getElementById("enable-spare")
+    .addEventListener("click", send("enable_spare_parts"));
+  document
+    .getElementById("palette-filter")
+    .addEventListener("input", (event) =>
+      paintPalette(catalogue, event.target.value, placePart),
+    );
 }
 
 // --- connection -------------------------------------------------------------
@@ -165,6 +237,7 @@ function connect() {
     looping = true;
     frame();
     refreshPins();
+    loadCatalogue();
   });
 
   socket.addEventListener("message", onMessage);

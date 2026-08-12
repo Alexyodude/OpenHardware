@@ -1,37 +1,32 @@
 {
-  "part": "LED Matrix",
-  "source": "src/parts/output_LED_matrix.cc:173",
+  "part": "DC Motor",
+  "source": "src/parts/output_dcmotor.cc:330",
   "verified": "2026-08-12 arity, storage and settings-survival round-tripped against PICSimLab 0.9.3; field order and pin directions read from the cited line, not confirmed by the round-trip",
   "fields": [
     {
       "role": "pin",
-      "dir": "in",
-      "label": "R"
-    },
-    {
-      "role": "pin",
-      "dir": "in",
-      "label": "G"
-    },
-    {
-      "role": "pin",
-      "dir": "in",
-      "label": "B"
+      "dir": "out",
+      "label": "ENC_A"
     },
     {
       "role": "pin",
       "dir": "out",
-      "label": "DOUT"
+      "label": "ENC_B"
     },
     {
-      "role": "setting",
-      "type": "int",
-      "label": "angle"
+      "role": "pin",
+      "dir": "in",
+      "label": "IA"
     },
     {
-      "role": "setting",
-      "type": "int",
-      "label": "lmode"
+      "role": "pin",
+      "dir": "in",
+      "label": "IB"
+    },
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "PWM"
     }
   ]
 }

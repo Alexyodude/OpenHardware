@@ -1,0 +1,12 @@
+{
+  "part": "Servo Motor",
+  "source": "src/parts/output_servo.cc:160",
+  "verified": "2026-08-12 arity, storage and settings-survival round-tripped against PICSimLab 0.9.3; field order and pin directions read from the cited line, not confirmed by the round-trip",
+  "fields": [
+    {
+      "role": "pin",
+      "dir": "in",
+      "label": "PWM"
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "part": "Potentiometers",
+  "source": "src/parts/input_pot.cc:254",
+  "verified": "2026-08-12 arity, storage and settings-survival round-tripped against PICSimLab 0.9.3; field order and pin directions read from the cited line, not confirmed by the round-trip",
+  "fields": [
+    {
+      "role": "pin",
+      "dir": "out",
+      "label": "P1"
+    },
+    {
+      "role": "pin",
+      "dir": "out",
+      "label": "P2"
+    },
+    {
+      "role": "pin",
+      "dir": "out",
+      "label": "P3"
+    },
+    {
+      "role": "pin",
+      "dir": "out",
+      "label": "P4"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "value1"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "value2"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "value3"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "value4"
+    },
+    {
+      "role": "setting",
+      "type": "int",
+      "label": "Size"
+    }
+  ]
+}
