@@ -50,13 +50,31 @@ MIT, BSD, and GPL-compatible licences only. Apache-2.0 is permitted **only
 while section 1 passes** — the moment it fails, every Apache-2.0 dependency
 must go.
 
-Third-party Python dependencies, in full:
+Third-party dependencies, in full:
 
-| package | licence | needed by |
-|---|---|---|
-| PyYAML | MIT | `tools/rules_meta.py` frontmatter parsing |
-| pytest | MIT | the test suites |
-| websockets | BSD-3-Clause | `webui/bridge.py` |
+| package | licence | form | needed by |
+|---|---|---|---|
+| PyYAML | MIT | installed | `tools/rules_meta.py` frontmatter parsing |
+| pytest | MIT | installed | the test suites |
+| websockets | BSD-3-Clause | installed | `webui/bridge.py` |
+| three.js 0.185.1 | MIT | **vendored** | `webui/static/scene3d.js`, the 3D wiring view |
+
+**three.js is the first vendored dependency and the first non-Python one**,
+added 2026-08-12. Two consequences worth stating rather than discovering:
+
+- Vendoring is what the offline guarantee requires — a page that fetches a
+  renderer from a CDN is not offline, and `webui.pkg.offline-guarantee` is a
+  ledger cell whose oracle is the browser's own network log. It costs ~2.1 MB
+  (`three.module.js` plus the `three.core.js` it imports).
+- **Vendored source must never be given a GPL header.** three.js is MIT, and
+  rewriting its header would misstate its licence — a worse defect than the
+  missing header section 2 looks for. `tools/check_licenses.py` therefore
+  skips any path under a `vendor/` directory, and
+  `test_vendored_source_is_never_asked_for_a_gpl_header` pins that.
+
+Adding it also closed a hole: `SOURCE_SUFFIXES` covered only C/C++ and Python,
+so this fork's own `webui/static/*.js`, CSS and HTML had never been checked for
+a header at all. They are now.
 
 **The upgrade trigger in this section's previous version has fired.** It said
 this should become SCRIPT-ENFORCED "the moment a second or third dependency

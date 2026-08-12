@@ -21,12 +21,33 @@ import subprocess
 import sys
 
 FORK_POINT = "fork-point"
-SOURCE_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".h", ".hpp", ".py"})
+
+#: Extended 2026-08-12 with the front-end suffixes. Until then this scanned
+#: only C/C++ and Python, so `webui/static/*.js` and the page's CSS and HTML --
+#: several hundred lines of this fork's own source -- were never checked for a
+#: licence header at all. They happened to carry one; nothing required it.
+SOURCE_SUFFIXES = frozenset(
+    {".c", ".cc", ".cpp", ".h", ".hpp", ".py", ".js", ".css", ".html"}
+)
+
+#: Third-party source kept verbatim. Nothing here may be given a GPL header:
+#: three.js is MIT and rewriting its header would misstate its licence, which
+#: is a worse defect than the one this checker exists to catch. The directory
+#: is excluded rather than the files, so a future vendored dependency is
+#: covered without editing this list -- and `find_v2_only` skips it too,
+#: because a v2-only *dependency* is a §3 dependency-licence question, not a
+#: header to rewrite.
+VENDOR_DIRS = ("vendor",)
 
 _GPL = "GNU General Public License"
 _VERSION_2 = "version 2"
 _LATER = "later version"
 _HEAD_BYTES = 4000
+
+
+def is_vendored(path: pathlib.Path) -> bool:
+    """True for third-party source kept verbatim. See VENDOR_DIRS."""
+    return any(part in VENDOR_DIRS for part in path.parts)
 
 
 def _source_files(root: pathlib.Path) -> list[pathlib.Path]:
@@ -38,6 +59,7 @@ def _source_files(root: pathlib.Path) -> list[pathlib.Path]:
         if path.is_file()
         and path.suffix in SOURCE_SUFFIXES
         and ".git" not in path.parts
+        and not is_vendored(path)
     )
 
 
@@ -57,6 +79,8 @@ def find_missing_headers(paths: list[pathlib.Path]) -> list[pathlib.Path]:
     offenders = []
     for path in paths:
         if path.suffix not in SOURCE_SUFFIXES or not path.is_file():
+            continue
+        if is_vendored(path):
             continue
         head = path.read_text(encoding="utf-8", errors="replace")[:_HEAD_BYTES]
         if _GPL not in head:

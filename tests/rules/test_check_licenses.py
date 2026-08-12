@@ -88,3 +88,66 @@ def test_unresolvable_fork_point_tag_is_diagnosed_not_raised(monkeypatch):
 
     monkeypatch.setattr(check_licenses, "_added_since_fork_point", _raise)
     assert check_licenses.main() == 2
+
+
+# --- front-end source, added 2026-08-12 --------------------------------------
+#
+# Until three.js was vendored, SOURCE_SUFFIXES held only C/C++ and Python, so
+# this fork's own webui/static/*.js, its CSS and its HTML were never checked
+# for a licence header. They carried one; nothing required it.
+
+
+def test_front_end_suffixes_are_scanned():
+    from tools.check_licenses import SOURCE_SUFFIXES
+
+    assert {".js", ".css", ".html"} <= SOURCE_SUFFIXES
+
+
+def test_a_new_js_file_without_a_header_is_caught(tmp_path):
+    js = tmp_path / "widget.js"
+    js.write_text("export const x = 1;\n", encoding="utf-8")
+    assert find_missing_headers([js]) == [js]
+
+
+def test_a_new_js_file_with_a_header_passes(tmp_path):
+    js = tmp_path / "widget.js"
+    js.write_text(
+        "// GNU General Public License, version 2 or (at your option) any "
+        "later version.\nexport const x = 1;\n",
+        encoding="utf-8",
+    )
+    assert find_missing_headers([js]) == []
+
+
+def test_vendored_source_is_never_asked_for_a_gpl_header(tmp_path):
+    """three.js is MIT. Giving it a GPL header would misstate its licence.
+
+    That is a worse defect than the missing header this checker looks for, so
+    vendored trees are skipped rather than exempted file by file.
+    """
+    vendor = tmp_path / "static" / "vendor"
+    vendor.mkdir(parents=True)
+    third_party = vendor / "three.module.js"
+    third_party.write_text("// MIT, (c) three.js authors\n", encoding="utf-8")
+    assert find_missing_headers([third_party]) == []
+
+
+def test_vendored_source_is_excluded_from_the_v2_scan(tmp_path):
+    """A v2-only dependency is a §3 licence question, not a header to rewrite."""
+    vendor = tmp_path / "vendor"
+    vendor.mkdir(parents=True)
+    (vendor / "old.js").write_text(
+        "GNU General Public License version 2\n", encoding="utf-8"
+    )
+    # Something outside vendor/ so the scan is not empty and does not raise.
+    (tmp_path / "ours.py").write_text("# ok\n", encoding="utf-8")
+    assert find_v2_only(tmp_path) == []
+
+
+def test_the_real_vendor_directory_is_recognised():
+    import pathlib
+
+    from tools.check_licenses import is_vendored
+
+    assert is_vendored(pathlib.Path("webui/static/vendor/three.module.js"))
+    assert not is_vendored(pathlib.Path("webui/static/app.js"))

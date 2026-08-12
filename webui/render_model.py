@@ -225,7 +225,47 @@ def _drawables(
     return resolved
 
 
-def build(state: SimState, art: BoardArt, part_art=None) -> dict:
+#: A part's pin-number labels are drawn at `O_PN_<n>` regions in its art, and
+#: its schema lists the same pins as config fields. Nothing states the
+#: correspondence, so it is taken positionally: the nth pin field is drawn at
+#: `O_PN_<n>`.
+#:
+#: That assumption is checked rather than trusted -- if the counts disagree the
+#: part gets no anchors at all and says so, because a wire drawn from the wrong
+#: pin is worse than a wire the user has to place through the form. Position is
+#: cosmetic (wiring is by pin number), but a *label* attached to the wrong dot
+#: would make the picture lie about which pin is connected.
+_PIN_LABEL_REGION = re.compile(r"^O_PN_(\d+)$")
+
+
+def _anchors(regions: tuple[Region, ...], labels: list[str], wiring: dict) -> list[dict]:
+    numbered: dict[int, Region] = {}
+    for region in regions:
+        match = _PIN_LABEL_REGION.match(region.id)
+        if match:
+            numbered[int(match.group(1))] = region
+
+    if len(numbered) != len(labels):
+        return []
+
+    out = []
+    for position, label in enumerate(labels, start=1):
+        region = numbered.get(position)
+        if region is None:
+            return []
+        x, y = region.centre
+        out.append(
+            {
+                "label": label,
+                "x": x,
+                "y": y,
+                "wired_to": wiring.get(label) or None,
+            }
+        )
+    return out
+
+
+def build(state: SimState, art: BoardArt, part_art=None, part_detail=None) -> dict:
     """Combine live state with board and part art into a draw list.
 
     `part_art` is an optional callable taking a part name and returning its
@@ -245,6 +285,12 @@ def build(state: SimState, art: BoardArt, part_art=None) -> dict:
         regions = (
             _drawables(rendered.regions, part.outputs, part.inputs) if rendered else []
         )
+        detail = part_detail(part.index, part.name) if part_detail else None
+        anchors = (
+            _anchors(rendered.regions, detail["labels"], detail["wiring"])
+            if rendered and detail
+            else []
+        )
         parts.append(
             {
                 "index": part.index,
@@ -254,6 +300,10 @@ def build(state: SimState, art: BoardArt, part_art=None) -> dict:
                 "regions": [d.as_dict() for d in regions],
                 "inputs": [dataclasses.asdict(e) for e in part.inputs],
                 "outputs": [dataclasses.asdict(e) for e in part.outputs],
+                # Where each schema pin is drawn, and what it is wired to.
+                # Empty when the part has no schema, no art, or when the two
+                # disagree about how many pins it has -- see _anchors.
+                "anchors": anchors,
                 # Stated per part so a peripheral that is placed but cannot be
                 # drawn is visible as such, rather than just missing.
                 "drawable": rendered is not None,

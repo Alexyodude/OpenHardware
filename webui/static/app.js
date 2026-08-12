@@ -23,6 +23,12 @@ let nextId = 1;
 const pending = new Map();
 let catalogue = { parts: [] };
 
+//: The 3D view and its ~2.1 MB of three.js are imported the first time it is
+//: opened, not at page load. Someone who only wants the 2D board never pays
+//: for the renderer.
+let scene3d = null;
+let view = "2d";
+
 function setStatus(state, text) {
   status.dataset.state = state;
   status.textContent = text;
@@ -90,7 +96,11 @@ async function frame() {
   if (!looping) return;
   try {
     const model = await call("render");
-    paint(model, onBoardRegionClick);
+    if (view === "2d") {
+      paint(model, onBoardRegionClick);
+    } else if (scene3d) {
+      scene3d.update(model);
+    }
     paintWorkbench(model, handlers);
 
     document.getElementById("board-name").textContent = model.board;
@@ -202,6 +212,62 @@ async function loadCatalogue() {
   }
 }
 
+// --- the 3D view ------------------------------------------------------------
+
+/**
+ * A wire dropped on a header pin.
+ *
+ * The scene never draws the connection itself — it calls this, and the wire
+ * appears on the next frame only because `render` reported it. A picture of a
+ * connection the simulator did not accept is exactly the
+ * miswiring-reported-as-success failure this project has hit twice.
+ */
+async function onSceneConnect(anchor, pad) {
+  try {
+    await call("connect", {
+      index: anchor.partIndex,
+      name: anchor.partName,
+      label: anchor.label,
+      pin: pad.pin,
+    });
+    note(`${anchor.partName}.${anchor.label} → ${pad.label} (pin ${pad.pin})`);
+  } catch (err) {
+    note(`could not wire ${anchor.label} → ${pad.label}: ${err.message}`, true);
+  }
+}
+
+async function showView(which) {
+  view = which;
+  document.getElementById("stage-2d").hidden = which !== "2d";
+  document.getElementById("stage-3d").hidden = which !== "3d";
+  document.getElementById("view-2d").classList.toggle("on", which === "2d");
+  document.getElementById("view-3d").classList.toggle("on", which === "3d");
+
+  if (which !== "3d" || scene3d) return;
+
+  try {
+    note("loading the 3D renderer…");
+    const { Scene3D } = await import("/scene3d.js");
+    scene3d = new Scene3D(document.getElementById("scene"), {
+      onConnect: onSceneConnect,
+      onNote: (text) => note(text),
+    });
+    const pinmap = await call("pinmap");
+    scene3d.setPinMap(pinmap);
+    if (pinmap) {
+      note(`${pinmap.board}: ${pinmap.pads.length} header pads, drag a pin onto one`);
+    } else {
+      note(
+        "this board has no authored pin map, so there are no header pads to " +
+          "drop onto — wire it from the workbench form instead",
+        true,
+      );
+    }
+  } catch (err) {
+    note(`3D view failed to start: ${err.message}`, true);
+  }
+}
+
 function wireControls() {
   const send = (op) => async () => {
     try {
@@ -215,6 +281,8 @@ function wireControls() {
   document.getElementById("pause").addEventListener("click", send("pause"));
   document.getElementById("reset").addEventListener("click", send("reset"));
   document.getElementById("refresh-pins").addEventListener("click", refreshPins);
+  document.getElementById("view-2d").addEventListener("click", () => showView("2d"));
+  document.getElementById("view-3d").addEventListener("click", () => showView("3d"));
   document
     .getElementById("enable-spare")
     .addEventListener("click", send("enable_spare_parts"));

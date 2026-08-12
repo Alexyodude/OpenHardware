@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from webui.assets import load_board
+from webui.assets import load_board, load_part
 from webui.render_model import StateError, build, parse_info
 
 LIVE_INFO = """Board:     Arduino Uno
@@ -160,3 +160,58 @@ def test_parts_reach_the_draw_list_with_their_inputs():
     assert part["name"] == "Push Buttons"
     assert len(part["inputs"]) == 8
     assert part["inputs"][2]["value"] == 1.0
+
+
+# --- pin anchors, added 2026-08-12 ------------------------------------------
+#
+# A part's pins are drawn at `O_PN_<n>` regions and named by its schema. The
+# correspondence is positional and nothing states it, so `_anchors` checks the
+# counts agree and returns nothing at all when they do not.
+
+
+def test_anchors_land_on_the_parts_own_pin_label_regions():
+    state = parse_info(LIVE_INFO)
+    detail = lambda index, name: {  # noqa: E731 - a stub, not a design
+        "labels": [f"B{i}" for i in range(1, 9)],
+        "wiring": {"B1": 9},
+    }
+    m = build(state, load_board("Arduino Uno"), part_art=load_part,
+              part_detail=detail)
+    anchors = m["parts"][0]["anchors"]
+    assert len(anchors) == 8
+    assert anchors[0]["label"] == "B1"
+    assert anchors[0]["wired_to"] == 9
+    assert anchors[1]["wired_to"] is None
+    # Position comes from the art, not from anything invented here.
+    art = load_part("Push Buttons")
+    first = next(r for r in art.regions if r.id == "O_PN_1")
+    assert anchors[0]["x"] == first.centre[0]
+
+
+def test_a_count_disagreement_yields_no_anchors_rather_than_wrong_ones():
+    """Nine labels against eight drawn pins: draw nothing.
+
+    A wire from the wrong dot would make the picture lie about which pin is
+    connected, which is worse than making the user wire from the form.
+    """
+    state = parse_info(LIVE_INFO)
+    detail = lambda index, name: {  # noqa: E731
+        "labels": [f"B{i}" for i in range(1, 10)],
+        "wiring": {},
+    }
+    m = build(state, load_board("Arduino Uno"), part_art=load_part,
+              part_detail=detail)
+    assert m["parts"][0]["anchors"] == []
+
+
+def test_a_part_with_no_schema_gets_no_anchors():
+    state = parse_info(LIVE_INFO)
+    m = build(state, load_board("Arduino Uno"), part_art=load_part,
+              part_detail=lambda index, name: None)
+    assert m["parts"][0]["anchors"] == []
+
+
+def test_anchors_are_absent_when_no_detail_source_is_given():
+    state = parse_info(LIVE_INFO)
+    m = build(state, load_board("Arduino Uno"), part_art=load_part)
+    assert m["parts"][0]["anchors"] == []

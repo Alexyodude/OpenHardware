@@ -12,6 +12,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>OpenHardware</title>
 <link rel="stylesheet" href="/style.css" />
+
+<!--
+  Native import map: three.js is vendored under /vendor/ and resolves without
+  a bundler, which is what keeps `python webui/bridge.py` the whole install.
+  The addons path is mapped explicitly rather than by prefix, because the
+  vendored OrbitControls sits flat in /vendor/ and not in three's own tree.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three.module.js",
+    "three/addons/controls/OrbitControls.js": "/vendor/OrbitControls.js"
+  }
+}
+</script>
 </head>
 <body>
 
@@ -35,12 +50,28 @@
 <main>
   <section class="col">
     <div class="panel">
-      <div class="panel-head"><h2>Board</h2><span class="hint" id="board-note"></span></div>
-      <div class="stage">
+      <div class="panel-head">
+        <h2>Board</h2>
+        <div class="seg" role="group" aria-label="view">
+          <button id="view-2d" type="button" class="on">2D</button>
+          <button id="view-3d" type="button">3D wiring</button>
+        </div>
+        <span class="hint" id="board-note"></span>
+      </div>
+
+      <div class="stage" id="stage-2d">
         <div class="board" id="board">
           <img id="board-img" alt="" />
           <svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg>
         </div>
+      </div>
+
+      <div class="stage stage-3d" id="stage-3d" hidden>
+        <canvas id="scene"></canvas>
+        <p class="note" id="scene-note">
+          Drag from a peripheral pin (grey dot) onto a header pin to wire it.
+          Orbit with the left mouse button, zoom with the wheel.
+        </p>
       </div>
     </div>
 

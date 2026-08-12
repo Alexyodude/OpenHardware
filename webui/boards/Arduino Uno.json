@@ -1,0 +1,236 @@
+{
+  "board": "Arduino Uno",
+  "image": {
+    "width": 402,
+    "height": 304,
+    "file": "share/boards/Arduino Uno/board.svg"
+  },
+  "derivation": "Pad centres extracted from board.svg: circle elements mapped through viewBox 0 0 27957 21193 -> 402x304 with the root translate(-42763,-28610). The 14.4px spacing is the 0.1in header pitch and is what identifies a header run. Group sizes 10+8 top and 8+6 bottom match an Uno R3.",
+  "assumption": "Pad-to-label assignment is the documented Uno R3 silkscreen order with USB at the left, confirmed against board.map (reset button top-left, ICSP right, power jack bottom-left). Pin numbers come from the simulator's own pinsl names. A wrong assignment here is COSMETIC: wiring is by pin number, so the dot a user drags to always wires the pin its label names.",
+  "pads": [
+    {
+      "label": "SCL",
+      "pin": 28,
+      "x": 119.9,
+      "y": 16.1,
+      "group": "digital-high"
+    },
+    {
+      "label": "SDA",
+      "pin": 27,
+      "x": 134.3,
+      "y": 16.1,
+      "group": "digital-high"
+    },
+    {
+      "label": "AREF",
+      "pin": 21,
+      "x": 148.6,
+      "y": 16.1,
+      "group": "digital-high"
+    },
+    {
+      "label": "GND",
+      "pin": 22,
+      "x": 163.0,
+      "y": 16.1,
+      "group": "digital-high"
+    },
+    {
+      "label": "13",
+      "pin": 19,
+      "x": 177.4,
+      "y": 16.1,
+      "group": "digital-high"
+    },
+    {
+      "label": "12",
+      "pin": 18,
+      "x": 191.8,
+      "y": 16.1,
+      "group": "digital-high"
+    },
+    {
+      "label": "~11",
+      "pin": 17,
+      "x": 206.2,
+      "y": 16.1,
+      "group": "digital-high"
+    },
+    {
+      "label": "~10",
+      "pin": 16,
+      "x": 220.5,
+      "y": 16.1,
+      "group": "digital-high"
+    },
+    {
+      "label": "~9",
+      "pin": 15,
+      "x": 234.9,
+      "y": 16.1,
+      "group": "digital-high"
+    },
+    {
+      "label": "8",
+      "pin": 14,
+      "x": 249.3,
+      "y": 16.1,
+      "group": "digital-high"
+    },
+    {
+      "label": "7",
+      "pin": 13,
+      "x": 272.3,
+      "y": 16.1,
+      "group": "digital-low"
+    },
+    {
+      "label": "~6",
+      "pin": 12,
+      "x": 286.7,
+      "y": 16.1,
+      "group": "digital-low"
+    },
+    {
+      "label": "~5",
+      "pin": 11,
+      "x": 301.1,
+      "y": 16.1,
+      "group": "digital-low"
+    },
+    {
+      "label": "4",
+      "pin": 6,
+      "x": 315.4,
+      "y": 16.1,
+      "group": "digital-low"
+    },
+    {
+      "label": "~3",
+      "pin": 5,
+      "x": 329.8,
+      "y": 16.1,
+      "group": "digital-low"
+    },
+    {
+      "label": "2",
+      "pin": 4,
+      "x": 344.2,
+      "y": 16.1,
+      "group": "digital-low"
+    },
+    {
+      "label": "1",
+      "pin": 3,
+      "x": 358.6,
+      "y": 16.1,
+      "group": "digital-low"
+    },
+    {
+      "label": "0",
+      "pin": 2,
+      "x": 373.0,
+      "y": 16.1,
+      "group": "digital-low"
+    },
+    {
+      "label": "NC",
+      "pin": null,
+      "x": 171.6,
+      "y": 288.2,
+      "group": "power"
+    },
+    {
+      "label": "IOREF",
+      "pin": null,
+      "x": 186.0,
+      "y": 288.2,
+      "group": "power"
+    },
+    {
+      "label": "RESET",
+      "pin": 1,
+      "x": 200.4,
+      "y": 288.2,
+      "group": "power"
+    },
+    {
+      "label": "3V3",
+      "pin": null,
+      "x": 214.8,
+      "y": 288.2,
+      "group": "power"
+    },
+    {
+      "label": "5V",
+      "pin": 7,
+      "x": 229.2,
+      "y": 288.2,
+      "group": "power"
+    },
+    {
+      "label": "GND",
+      "pin": 8,
+      "x": 243.5,
+      "y": 288.2,
+      "group": "power"
+    },
+    {
+      "label": "GND",
+      "pin": 22,
+      "x": 257.9,
+      "y": 288.2,
+      "group": "power"
+    },
+    {
+      "label": "VIN",
+      "pin": null,
+      "x": 272.3,
+      "y": 288.2,
+      "group": "power"
+    },
+    {
+      "label": "A0",
+      "pin": 23,
+      "x": 301.1,
+      "y": 288.2,
+      "group": "analog"
+    },
+    {
+      "label": "A1",
+      "pin": 24,
+      "x": 315.4,
+      "y": 288.2,
+      "group": "analog"
+    },
+    {
+      "label": "A2",
+      "pin": 25,
+      "x": 329.8,
+      "y": 288.2,
+      "group": "analog"
+    },
+    {
+      "label": "A3",
+      "pin": 26,
+      "x": 344.2,
+      "y": 288.2,
+      "group": "analog"
+    },
+    {
+      "label": "A4",
+      "pin": 27,
+      "x": 358.6,
+      "y": 288.2,
+      "group": "analog"
+    },
+    {
+      "label": "A5",
+      "pin": 28,
+      "x": 373.0,
+      "y": 288.2,
+      "group": "analog"
+    }
+  ]
+}

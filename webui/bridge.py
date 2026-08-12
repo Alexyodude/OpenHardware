@@ -45,7 +45,7 @@ import urllib.parse
 import pathlib
 
 try:
-    from webui import render_model
+    from webui import pinmap, render_model
     from webui.api import ApiError, SimulatorApi
     from webui.assets import (
         AssetError,
@@ -60,7 +60,7 @@ try:
     from webui.rcontrol import RControlClient, RControlError
 except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-    from webui import render_model
+    from webui import pinmap, render_model
     from webui.api import ApiError, SimulatorApi
     from webui.assets import (
         AssetError,
@@ -186,6 +186,32 @@ def _part_art(name: str) -> BoardArt | None:
     return _PART_ART_CACHE[name]
 
 
+def _part_detail(api: SimulatorApi):
+    """Per-part pin labels and current wiring, for the render model.
+
+    Injected rather than imported so `render_model` keeps doing no I/O. Returns
+    None for a part with no schema -- its pins cannot be named, so it gets no
+    anchors and the UI offers the raw form instead.
+    """
+
+    def detail(index: int, name: str) -> dict | None:
+        schema = _schemas().get(name)
+        if schema is None:
+            return None
+        try:
+            wiring = api.read_wiring(index, schema)
+        except (ApiError, SchemaError, RControlError):
+            # A part whose config cannot be read right now must not take the
+            # whole frame down; it simply gets no anchors this pass.
+            return None
+        return {
+            "labels": [field.label for _, field in schema.pin_fields],
+            "wiring": {k: v for k, v in wiring.items() if isinstance(v, int)},
+        }
+
+    return detail
+
+
 def _render(api: SimulatorApi) -> dict:
     """One `info` round trip, resolved against the art into a draw list.
 
@@ -195,7 +221,23 @@ def _render(api: SimulatorApi) -> dict:
     browser asserts.
     """
     state = render_model.parse_info(api.info())
-    return render_model.build(state, board_art(state.board), part_art=_part_art)
+    return render_model.build(
+        state,
+        board_art(state.board),
+        part_art=_part_art,
+        part_detail=_part_detail(api),
+    )
+
+
+def _pinmap(api: SimulatorApi) -> dict | None:
+    """Where the running board's header pins sit on its image, if authored.
+
+    None is not an error: coverage is partial by design and a board without a
+    map falls back to the pin rail. See webui/pinmap.py.
+    """
+    board = render_model.parse_info(api.info()).board
+    found = pinmap.load(board)
+    return None if found is None else found.as_dict()
 
 
 def _catalogue(api: SimulatorApi) -> dict:
@@ -257,6 +299,7 @@ OPERATIONS: dict[str, tuple] = {
     "render": (lambda api, a: _render(api), ()),
     "board_art_names": (lambda api, a: list(available_boards()), ()),
     "boards": (lambda api, a: _boards(api), ()),
+    "pinmap": (lambda api, a: _pinmap(api), ()),
     "catalogue": (lambda api, a: _catalogue(api), ()),
     "enable_spare_parts": (lambda api, a: api.client.command("spshow 1").body, ()),
     "place_part": (
@@ -442,6 +485,7 @@ class Bridge:
             ApiError,
             AssetError,
             SchemaError,
+            pinmap.PinMapError,
             render_model.StateError,
             RControlError,
             json.JSONDecodeError,

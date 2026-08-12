@@ -434,3 +434,36 @@ code {
   padding: 1px 4px;
   border-radius: 3px;
 }
+
+/* --- view toggle and 3D stage ------------------------------------------- */
+
+.seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+
+.seg button {
+  border: 0;
+  border-radius: 0;
+  padding: 3px 11px;
+  font-size: 11px;
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button:hover { color: var(--text); }
+.seg button.on { background: var(--accent); color: #08121f; font-weight: 600; }
+
+.stage-3d { flex-direction: column; align-items: stretch; padding: 0; }
+
+#scene {
+  display: block;
+  width: 100%;
+  /* Sized by the renderer; this keeps layout stable before the first frame. */
+  min-height: 360px;
+  background:
+    radial-gradient(120% 90% at 50% 0%,
+      color-mix(in srgb, var(--accent) 8%, transparent), transparent 70%);
+  cursor: grab;
+  touch-action: none;
+}
+
+#scene:active { cursor: grabbing; }
