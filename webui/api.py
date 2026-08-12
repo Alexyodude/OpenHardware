@@ -20,7 +20,8 @@ from __future__ import annotations
 import dataclasses
 import re
 
-from webui.rcontrol import RControlClient, Response
+from webui.parts.schema import UNCONNECTED, PartSchema, SchemaError
+from webui.rcontrol import RControlClient, RControlCommandError, Response
 
 # `  pin[%02i] %c %c %i %03i %5.3f "%-8.8s" ` — rcontrol.cc:1095, the **pinsl**
 # formatter. Confirmed against a live PICSimLab 0.9.3 on 2026-08-10.
@@ -264,3 +265,85 @@ class SimulatorApi:
 
     def scope_read_config(self) -> list[str]:
         return self.client.command("oscrdcfg").lines
+
+    # -- wiring ------------------------------------------------------------
+
+    MAX_PARTS = 256
+
+    def part_count(self) -> int:
+        """Count placed parts by probing until the server refuses.
+
+        There is no count command. `spadd` returns Ok rather than an index and
+        `spshow` returns a flag, so the only way to learn how many parts exist
+        is to ask for each in turn until one errors.
+
+        Bounded defensively at `MAX_PARTS`: a live server does return ERROR
+        past the last part, so this loop always returns well before the bound
+        against observed behaviour. The bound exists to guard a changed or
+        misbehaving server, not because probing has ever run away in practice.
+        """
+        for index in range(self.MAX_PARTS):
+            try:
+                self.client.command(f"sprdcfg {index}")
+            except RControlCommandError:
+                return index
+        raise SchemaError(
+            f"part count exceeded {self.MAX_PARTS}; sprdcfg never returned ERROR"
+        )
+
+    def place_part(self, name: str, xpos: int, ypos: int) -> int:
+        """Place a part and return the index it landed at."""
+        index = self.part_count()
+        self.add_part(name, xpos, ypos)
+        return index
+
+    def read_config(self, index: int) -> str:
+        # A live `sprdcfg 0` returned `"0,0,0,0,0,0,0,0,1,0,8"` -- quoted.
+        return self.client.command(f"sprdcfg {index}").body.strip().strip('"')
+
+    def write_config(self, index: int, config: str) -> None:
+        """Write a part's whole config string.
+
+        The quotes are mandatory. rcontrol.cc:1307 parses this argument with
+        `sscanf(cmd + 8, "%d \\"%511[^\\"]\\"", &pid, scfg)`, so an unquoted
+        config never reaches the part -- the same trap `spadd` sets.
+
+        The server also validates arity for us: rcontrol.cc:1310 compares
+        `Part->ReadPreferences(scfg)` against `Part->PreferencesNumberFields()`
+        and answers ERROR when they disagree. So a schema with the wrong field
+        count fails loudly on write rather than silently miswiring, which is a
+        stronger guarantee than this plan assumed.
+        """
+        self.client.command(f'spwrcfg {index} "{config}"')
+
+    def _values(self, index: int, schema: PartSchema) -> list[int]:
+        raw = self.read_config(index)
+        values = [int(v) for v in raw.split(",") if v.strip() != ""]
+        if len(values) != schema.arity:
+            raise SchemaError(
+                f"{schema.part}: arity mismatch — schema declares {schema.arity} "
+                f"fields, part {index} reported {len(values)}: {raw!r}"
+            )
+        return values
+
+    def read_wiring(self, index: int, schema: PartSchema) -> dict[str, int]:
+        """Map every field label to its current value."""
+        return {
+            field.label: value
+            for field, value in zip(schema.fields, self._values(index, schema))
+        }
+
+    def _set_field(self, index: int, schema: PartSchema, label: str, value: int) -> None:
+        position = schema.index_of(label)
+        if schema.fields[position].role != "pin":
+            raise SchemaError(f"{schema.part}: {label!r} is not a pin field")
+        values = self._values(index, schema)
+        values[position] = int(value)
+        self.write_config(index, ",".join(str(v) for v in values))
+
+    def connect(self, index: int, schema: PartSchema, label: str, pin: int) -> None:
+        """Wire one of the part's pins to a board pin number."""
+        self._set_field(index, schema, label, pin)
+
+    def disconnect(self, index: int, schema: PartSchema, label: str) -> None:
+        self._set_field(index, schema, label, UNCONNECTED)
