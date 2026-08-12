@@ -107,3 +107,26 @@ def test_an_unknown_label_raises():
         with pytest.raises(Exception, match="no field labelled"):
             api.connect(0, BUTTONS, "nonexistent", 1)
         client.close()
+
+
+# -- regression: the pre-existing sibling methods must agree with the new
+# schema-aware ones on wire format, or the two pairs silently drift apart.
+
+
+def test_read_part_config_strips_the_quotes_sprdcfg_returns():
+    # sprdcfg's real reply is quoted -- `ok(FRESH)` alone would not reproduce
+    # the bug, since the stub then never sends a quote to strip.
+    with StubRControl({"sprdcfg 0": ok(f'"{FRESH}"')}) as stub:
+        api, client = api_for(stub)
+        config = api.read_part_config(0)
+        client.close()
+    assert '"' not in config
+    assert config == FRESH
+
+
+def test_write_part_config_sends_the_quoted_form():
+    with StubRControl({"sprdcfg 0": ok(FRESH)}) as stub:
+        api, client = api_for(stub)
+        api.write_part_config(0, FRESH)
+        client.close()
+    assert f'spwrcfg 0 "{FRESH}"' in stub.received

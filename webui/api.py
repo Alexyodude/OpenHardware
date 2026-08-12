@@ -253,10 +253,20 @@ class SimulatorApi:
         self.client.command(f"set part[{part}].in[{index}] = {int(value)}")
 
     def read_part_config(self, index: int) -> str:
-        return self.client.command(f"sprdcfg {index}").body.strip()
+        """Deprecated alias for read_config; kept for the bridge's allowlist.
+
+        Used to send `.body.strip()` without stripping the quotes `sprdcfg`
+        actually returns, and `write_part_config` below used to send `spwrcfg`
+        unquoted -- two constructions of the same commands that had drifted
+        from the ones `read_config`/`write_config` get right. Delegating
+        collapses both pairs to one construction site per command so the wire
+        formats cannot diverge again.
+        """
+        return self.read_config(index)
 
     def write_part_config(self, index: int, config: str) -> None:
-        self.client.command(f"spwrcfg {index} {config}")
+        """Deprecated alias for write_config; kept for symmetry."""
+        self.write_config(index, config)
 
     # -- oscilloscope ------------------------------------------------------
 
