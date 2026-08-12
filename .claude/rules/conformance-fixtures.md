@@ -17,6 +17,9 @@ mechanisms:
       Arduino Uno, and the spare-parts path that would replace it cannot run
       because part assets are absent from a source build and placing a part
       without them segfaults the simulator. See docs/known-issues.md 4a.
+  - tier: SCRIPT-ENFORCED
+    checker: tools/check_part_schemas.py
+    armed: true
 ---
 
 # Conformance fixtures
@@ -62,3 +65,17 @@ returning an empty result — the same defect wearing different clothes.
 The failure mode is not shipping low fidelity. It is shipping low fidelity
 while implying high. Declare `F0` and move on; promote a cell only when a
 fixture and oracle justify it.
+
+## 6. 2026-08-10 — SCRIPT-ENFORCED: a schema must cite a checkable line
+
+`tools/check_part_schemas.py` requires every part schema's `source` to name a
+file that exists and a line within it.
+
+A part's config string is positional and the simulator will not explain it
+(`src/lib/part.h` offers name-to-id lookup only), so each schema is authored by
+reading that part's `WritePreferences`. A wrong schema does not raise — it
+writes a valid-looking config that wires the circuit incorrectly and reports
+success. The citation is what makes a schema auditable, so a citation nobody
+can follow is treated as no citation at all.
+
+`find_problems` raises on an empty directory, for the reason section 2 gives.

@@ -36,6 +36,9 @@ jobs:
       - name: check_board_contract
         run: python tools/check_board_contract.py
 
+      - name: check_part_schemas
+        run: python tools/check_part_schemas.py
+
       - name: check_licenses
         run: python tools/check_licenses.py
 
