@@ -42,6 +42,40 @@ def test_a_source_pointing_at_a_missing_file_is_a_problem(tmp_path):
     assert any("does not exist" in p for p in problems)
 
 
+def _cite(tmp_path, filename, cited_as):
+    """Lay out a repo holding `src/<filename>`, and a schema citing `cited_as`."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / filename).write_text("x\n" * 300, encoding="utf-8")
+    schemas = tmp_path / "schemas"
+    schemas.mkdir()
+    (schemas / "example.json").write_text(
+        json.dumps({**GOOD, "source": f"src/{cited_as}:220"}), encoding="utf-8"
+    )
+    return schemas
+
+
+def test_a_citation_matching_the_on_disk_spelling_passes(tmp_path):
+    schemas = _cite(tmp_path, "output_LEDs.cc", "output_LEDs.cc")
+    assert find_problems(schemas, repo_root=tmp_path) == []
+
+
+def test_a_citation_with_the_wrong_case_is_a_problem(tmp_path):
+    """The shipped LEDs schema cited `output_leds.cc`; the file is `output_LEDs.cc`.
+
+    Windows resolved it happily and the checker printed OK for six days. Linux
+    CI rejected it on the first run this repository ever performed.
+
+    On a case-sensitive filesystem this test passes because the cited file
+    genuinely is not there; on Windows and macOS it passes only because the
+    checker now compares spelling rather than asking the filesystem. Same
+    verdict, two routes -- which is the point, since the old checker's verdict
+    depended on which machine ran it.
+    """
+    schemas = _cite(tmp_path, "output_LEDs.cc", "output_leds.cc")
+    problems = find_problems(schemas, repo_root=tmp_path)
+    assert any("output_leds.cc" in p for p in problems)
+
+
 def test_an_empty_directory_raises(tmp_path):
     with pytest.raises(Exception, match="no schemas"):
         find_problems(tmp_path)

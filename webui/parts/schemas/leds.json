@@ -1,6 +1,6 @@
 {
   "part": "LEDs",
-  "source": "src/parts/output_leds.cc:220",
+  "source": "src/parts/output_LEDs.cc:220",
   "fields": [
     {"role": "pin", "dir": "in", "label": "L1"},
     {"role": "pin", "dir": "in", "label": "L2"},

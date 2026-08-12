@@ -14,6 +14,7 @@ guessed, and a guessed schema wires a circuit wrongly while reporting success.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import sys
@@ -26,6 +27,32 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
 
 SCHEMA_DIR = pathlib.Path("webui/parts/schemas")
 _SOURCE = re.compile(r"^(?P<path>[^:]+):(?P<line>\d+)$")
+
+
+def _spelled_exactly(repo_root: pathlib.Path, relative: str) -> bool:
+    """True only if every component of `relative` matches its on-disk spelling.
+
+    `Path.is_file()` answers a different question on different filesystems.
+    Windows and macOS resolve case-insensitively, so a citation of
+    `src/parts/output_leds.cc` opened `output_LEDs.cc` on this fork's
+    development machine and the checker reported OK for six days; Linux CI
+    rejected it on the first run it ever performed.
+
+    A citation exists to be followed by a person, and `git` stores the name
+    with its case, so the spelling is part of the citation. Listing each parent
+    and requiring an exact match makes the checker give the same answer
+    everywhere rather than the answer its host filesystem prefers.
+    """
+    current = repo_root
+    for component in pathlib.PurePosixPath(relative).parts:
+        try:
+            names = os.listdir(current)
+        except (NotADirectoryError, FileNotFoundError, PermissionError):
+            return False
+        if component not in names:
+            return False
+        current = current / component
+    return current.is_file()
 
 
 def find_problems(
@@ -45,8 +72,15 @@ def find_problems(
         if repo_root is None:
             continue
         cited = repo_root / match.group("path")
-        if not cited.is_file():
-            problems.append(f"{schema.part}: source file {match.group('path')} does not exist")
+        if not _spelled_exactly(repo_root, match.group("path")):
+            # Name the two cases apart: a typo and a case slip need different
+            # fixes, and on Windows the second one looks like nothing at all.
+            detail = (
+                "does not match the on-disk spelling"
+                if cited.is_file()
+                else "does not exist"
+            )
+            problems.append(f"{schema.part}: source file {match.group('path')} {detail}")
             continue
         lines = cited.read_text(encoding="utf-8", errors="replace").splitlines()
         if int(match.group("line")) > len(lines):
