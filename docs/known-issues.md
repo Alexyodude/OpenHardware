@@ -66,6 +66,8 @@ not this fork's, and are recorded so nobody rediscovers them the hard way.
 
 | 4a.6 | **The NOGUI build cannot be linked with GCC 11.4 on Ubuntu 22.04.** `make -f Makefile.NOGUI` compiles cleanly and reaches the link stage, then dies with `lto1: internal compiler error: Segmentation fault` → `lto-wrapper: fatal error`. Removing `-flto=auto` from `Makefile.NOGUI` does **not** help: the dependency archives built by `bscripts/build_all_static.sh` (picsim, lxrad, simavr) carry LTO IR themselves, so the linker still runs `lto-wrapper`. `bscripts/build_package_NOGUI.sh` fails earlier and separately, on Debian packaging plumbing — `debuild` runs in the wrong directory, so `src/Makefile` and `debian/rules` are missing. | Spec §8.4 cannot be answered without rebuilding the whole dependency chain with LTO disabled, or using a different compiler. The WX GUI build is unaffected and works. |
 
+| 4a.7 | **The simulator crashes under repeated live-test runs.** After many cycles of placing and deleting a Push Buttons part, PICSimLab 0.9.3 died with a SIGSEGV stack trace in `/root/.picsimlab/picsimlab_log0.txt`. Same family as 4a.1. | A live test run can fail through no fault of the code. The failure presents as an **error**, not a pass — the fixture cannot reach the simulator and says so, which is the intended behaviour. Before debugging a live-test failure, check the simulator is still alive: `wsl -d Ubuntu-22.04 -- pgrep picsimlab`. Restart, then re-run. |
+
 ## 4b. What a wrong part schema can still do undetected
 
 Added 2026-08-10 after the peripherals work. This is the honest limit of the
