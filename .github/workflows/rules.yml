@@ -9,9 +9,22 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # Check out the branch itself, never GitHub's synthetic PR merge commit.
+      #
+      # On a `pull_request` event the default checkout is head merged into base,
+      # and base carries whatever upstream has committed since `fork-point`.
+      # `check_deltas.py` then sees upstream's own edits inside `fork-point..HEAD`
+      # and reports them as unlogged modifications of ours: the first PR opened
+      # against this fork failed with eight, which were byte-for-byte the eight
+      # files upstream touched in the two commits it made after the fork.
+      #
+      # The rule's subject is what THIS fork changed, so the tree it is measured
+      # against must contain only this fork's commits. On `push` the expression
+      # is empty and checkout falls back to the pushed ref.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Fetch fork-point tag
         run: git fetch --tags --force
