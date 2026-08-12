@@ -21,6 +21,7 @@ import {
   buildBoardFurniture,
   buildHeader,
   buildPart,
+  buildPinPost,
   hasModel,
   setGlow,
 } from "/models3d.js";
@@ -38,12 +39,12 @@ const PART_PCB = 1.2;
 const GROUND = 0;
 const PART_GAP = 6;       // clear space between peripherals, front to back
 
-//: Anchors sit ON TOP of the peripheral's own PCB. An earlier version put them
-//: at `PART_HEIGHT - 0.8`, which is *below* a slab whose underside is at
-//: `PART_HEIGHT - 0.6` -- the dots were buried inside the board and could
-//: never be picked, which is why dragging did nothing.
-const ANCHOR_R = 0.85;
-const ANCHOR_Y = PART_PCB / 2 + ANCHOR_R;
+//: A peripheral pin is a post standing on its PCB, so it is placed at the
+//: board's top face and the wire meets its tip. An earlier version used a
+//: sphere at `PART_HEIGHT - 0.8`, which is *below* a slab whose underside is
+//: at `PART_HEIGHT - 0.6`: the dots were buried inside the board and could
+//: never be picked, which is why dragging did nothing at all.
+const ANCHOR_BASE_Y = PART_PCB / 2;
 
 const COLOUR = {
   ghost: 0xe5c07b,
@@ -228,32 +229,27 @@ export class Scene3D {
         this.glowing.push({ partIndex: part.index, items });
       }
 
-      const geo = new THREE.SphereGeometry(ANCHOR_R, 16, 12);
       for (const anchor of part.anchors) {
-        const dot = new THREE.Mesh(
-          geo,
-          new THREE.MeshStandardMaterial({ color: COLOUR.anchor, roughness: 0.45 }),
-        );
-        dot.position.set(
+        const post = buildPinPost();
+        post.position.set(
           (anchor.x - part.width / 2) * SCALE,
-          ANCHOR_Y,
+          ANCHOR_BASE_Y,
           (anchor.y - part.height / 2) * SCALE,
         );
-        dot.userData = {
-          kind: "anchor",
-          partIndex: part.index,
-          partName: part.name,
-          label: anchor.label,
-        };
-        built.group.add(dot);
+        post.userData.kind = "anchor";
+        built.group.add(post);
 
+        // The wire meets the top of the post, not the centre of the group.
         const world = new THREE.Vector3();
-        dot.getWorldPosition(world);
+        post.getWorldPosition(world);
+        world.y += post.userData.tip;
+
         this.anchors.push({
           partIndex: part.index,
           partName: part.name,
           label: anchor.label,
-          mesh: dot,
+          mesh: post.userData.grab, // generous, invisible pick target
+          tint: post.userData.post, // the visible gold post
           world,
           wiredTo: anchor.wired_to,
         });
@@ -289,7 +285,7 @@ export class Scene3D {
         changed = true;
       }
       if (!this.drag || this.drag.anchor !== anchor) {
-        anchor.mesh.material.color.setHex(
+        anchor.tint.material.color.setHex(
           anchor.wiredTo ? COLOUR.anchorWired : COLOUR.anchor,
         );
       }
@@ -465,7 +461,7 @@ export class Scene3D {
         this.canvas.setPointerCapture(event.pointerId);
         this.controls.enabled = false;
         this.drag = { anchor, to: anchor.world.clone(), pad: null };
-        anchor.mesh.material.color.setHex(COLOUR.anchorHot);
+        anchor.tint.material.color.setHex(COLOUR.anchorHot);
         this.onNote(
           `${anchor.partName}.${anchor.label} — drop on a gold header pin, ` +
             `or anywhere else to cancel`,
@@ -503,7 +499,7 @@ export class Scene3D {
       if (event?.pointerId !== undefined && this.canvas.hasPointerCapture(event.pointerId)) {
         this.canvas.releasePointerCapture(event.pointerId);
       }
-      anchor.mesh.material.color.setHex(
+      anchor.tint.material.color.setHex(
         anchor.wiredTo ? COLOUR.anchorWired : COLOUR.anchor,
       );
       this._drawWires();

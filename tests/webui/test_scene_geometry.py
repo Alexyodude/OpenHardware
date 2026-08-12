@@ -45,19 +45,32 @@ def source() -> str:
 
 
 def test_pin_anchors_rest_on_top_of_the_peripheral_board(source):
-    """The regression. An anchor's underside must clear the PCB's top face."""
+    """The regression: a pin post must stand ON the PCB, never inside it."""
     pcb = constant("PART_PCB", source)
-    radius = constant("ANCHOR_R", source)
-    anchor_y = re.search(r"^const ANCHOR_Y = ([^;]+);", source, re.M)
-    assert anchor_y, "ANCHOR_Y is no longer declared"
-    assert "PART_PCB / 2 + ANCHOR_R" in anchor_y.group(1), (
-        "ANCHOR_Y must stay derived from the PCB thickness and the anchor "
-        "radius. A literal here is how it drifted under the board last time."
+    base = re.search(r"^const ANCHOR_BASE_Y = ([^;]+);", source, re.M)
+    assert base, "ANCHOR_BASE_Y is no longer declared"
+    assert "PART_PCB / 2" in base.group(1), (
+        "ANCHOR_BASE_Y must stay derived from the PCB thickness. A literal "
+        "here is how it drifted under the board last time."
     )
-    computed = pcb / 2 + radius
-    assert computed - radius >= pcb / 2, (
-        f"anchors sit at y={computed} with radius {radius}, so their underside "
-        f"is {computed - radius}, below the PCB top face at {pcb / 2}"
+    assert pcb / 2 >= pcb / 2  # the post's base is exactly the top face
+    assert "ANCHOR_BASE_Y," in source, (
+        "the post is no longer placed at ANCHOR_BASE_Y, so the constant this "
+        "test checks is not the one the scene uses"
+    )
+
+
+def test_a_peripheral_pin_is_a_post_with_a_tip_the_wire_meets(source):
+    """Spheres read as floating beads; a wire has to plug into something."""
+    models = (STATIC / "models3d.js").read_text(encoding="utf-8")
+    assert "export function buildPinPost" in models
+    assert "userData.tip" in models, "the wire attach point is not declared"
+    assert "world.y += post.userData.tip" in source, (
+        "the wire must meet the top of the post, not the centre of the group"
+    )
+    assert "userData.grab" in models, (
+        "a bare 0.62-unit post is a fiddly pick target; an invisible grab "
+        "volume is what makes it usable"
     )
 
 

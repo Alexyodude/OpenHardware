@@ -449,6 +449,42 @@ export function buildBoardFurniture(regions, toLocal, topY, scale) {
   return group;
 }
 
+/**
+ * One peripheral pin: a gold square post in a black shroud, the same shape as
+ * the board's header so the two ends of a wire look like the same connector.
+ *
+ * These were spheres, which read as floating beads rather than as something a
+ * wire plugs into.
+ */
+export function buildPinPost() {
+  const group = new THREE.Group();
+  const shroud = new THREE.Mesh(
+    new THREE.BoxGeometry(1.5, 1.1, 1.5),
+    M.plastic(0x14161c),
+  );
+  shroud.position.y = 0.55;
+  const post = new THREE.Mesh(
+    new THREE.BoxGeometry(0.62, 3.0, 0.62),
+    M.metal(0xd4a944),
+  );
+  post.position.y = 2.4;
+  group.add(shroud, post);
+  //: The wire attaches at the top of the post, not the centre of the group.
+  group.userData.tip = 3.6;
+  //: A generous invisible cylinder makes the post pickable without having to
+  //: hit a 0.6-unit square. Interaction target and visible shape are allowed
+  //: to differ; a fiddly hitbox is a worse lie than a slightly large one.
+  const grab = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.25, 1.25, 4.4, 10),
+    new THREE.MeshBasicMaterial({ visible: false }),
+  );
+  grab.position.y = 2.0;
+  group.add(grab);
+  group.userData.grab = grab;
+  group.userData.post = post;
+  return group;
+}
+
 /** A 0.1in header: black plastic base with a gold pin standing in each pad. */
 export function buildHeader(pads, toLocal, topY) {
   const group = new THREE.Group();

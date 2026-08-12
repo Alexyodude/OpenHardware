@@ -202,11 +202,40 @@ async function refreshPins() {
   }
 }
 
+/**
+ * Restart the simulator on another board.
+ *
+ * There is no rcontrol command that changes board -- the whole surface is in
+ * `help` and none of it sets one -- so this restarts the process on that
+ * board's workspace. The bridge refuses unless it was started with
+ * --sim-command, and says so.
+ */
+async function switchBoard(board) {
+  const name = board.art ?? board.name;
+  try {
+    note(`restarting the simulator on ${name}…`);
+    looping = false;
+    const result = await call("switch_board", { name });
+    note(`now running ${result.board}`);
+    if (scene3d) {
+      scene3d.setPinMap(await call("pinmap"));
+    }
+    await loadCatalogue();
+    looping = true;
+    frame();
+    refreshPins();
+  } catch (err) {
+    looping = true;
+    frame();
+    note(`could not switch to ${name}: ${err.message}`, true);
+  }
+}
+
 async function loadCatalogue() {
   try {
     catalogue = await call("catalogue");
     paintPalette(catalogue, "", placePart);
-    paintBoardList(await call("boards"));
+    paintBoardList(await call("boards"), switchBoard);
   } catch (err) {
     note(`catalogue: ${err.message}`, true);
   }

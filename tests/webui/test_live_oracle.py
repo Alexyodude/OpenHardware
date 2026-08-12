@@ -157,6 +157,12 @@ def test_pin_writes_are_not_observable_via_get_pin(api: SimulatorApi):
     This test pins the current, surprising behaviour so that if a future version
     makes pin writes observable, it fails and tells us the model changed.
     """
+    # Nothing else may be driving the pin. This suite shares one simulator, and
+    # other tests place spare parts that drive pins -- with one attached, a
+    # write *is* observable and this test fails while being right about the
+    # bare MCU. The claim is about a pin in isolation, so isolate it.
+    api.client.try_command("spdel all")
+
     api.pause()
     try:
         pins = api.pins()

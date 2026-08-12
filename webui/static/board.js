@@ -299,16 +299,23 @@ export function paintPalette(catalogue, filter, onPlace) {
   }
 }
 
-export function paintBoardList(boards) {
+export function paintBoardList(boards, onSwitch) {
   const host = document.getElementById("board-list");
   host.replaceChildren();
   for (const board of boards.boards) {
-    const row = document.createElement("div");
+    const row = document.createElement("button");
+    row.type = "button";
     row.className = `board-row${board.active ? " active" : ""}`;
-    const art = board.art ?? "(no art)";
+    const art = board.art ?? board.name;
+    row.title = board.active
+      ? "this board is running"
+      : `restart the simulator on ${art}`;
     row.innerHTML =
       `<span class="b-name">${art}</span>` +
-      `<span class="b-tag">${board.active ? "running" : ""}</span>`;
+      `<span class="b-tag">${board.active ? "running" : "switch"}</span>`;
+    if (!board.active && onSwitch) {
+      row.addEventListener("click", () => onSwitch(board));
+    }
     host.append(row);
   }
 }

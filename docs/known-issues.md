@@ -102,6 +102,32 @@ Two consequences worth stating:
   the entire surface and none of it sets one; `loadhex` takes hex/bin only.
   Switching means relaunching the simulator with that board's `demo.pzw`.
 
+## 4a-ter. Several `demo.pzw` workspaces crash this build, 2026-08-12
+
+Board switching restarts the simulator on `share/boards/<name>/demo.pzw`,
+because no rcontrol command changes board. The mechanism works — Arduino Mega,
+PICGenios and Arduino Uno were each switched to and answered in about three
+seconds — but **the resulting session may die moments later**, because a demo
+workspace places spare parts and some of those hit 4a.1:
+
+```
+PICSimLab: Using board "Arduino Uno"
+Spare parts: parts[00] (Step Motor) created
+Spare parts: parts[01] (Text Box) created
+Spare parts: parts[02] (IO Virtual Term) created
+PICSimLab Caught SIGSEGV: Segmentation Fault
+```
+
+`tests/blink/blink.pzw` places no parts and is stable, which is why the runbook
+uses it. This also qualifies the survey in 4a-bis: it probed rcontrol shortly
+after launch, so a board recorded `OK` there proves the board **starts**, not
+that it survives.
+
+Nothing here is this fork's: it is 4a.1 reached by a different route. The
+lesson for the bridge is that a switch reporting success is reporting that the
+simulator answered once, and the render loop failing seconds later is the
+honest signal that it then died.
+
 ## 4b. What a wrong part schema can still do undetected
 
 Added 2026-08-10 after the peripherals work. This is the honest limit of the

@@ -55,6 +55,7 @@ try:
         load_board,
         load_part,
         resolve_board_name,
+        share_root,
     )
     from webui.parts.schema import SchemaError, load_all_schemas
     from webui.rcontrol import RControlClient, RControlError
@@ -70,6 +71,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
         load_board,
         load_part,
         resolve_board_name,
+        share_root,
     )
     from webui.parts.schema import SchemaError, load_all_schemas
     from webui.rcontrol import RControlClient, RControlError
@@ -107,6 +109,119 @@ def board_art(name: str) -> BoardArt:
 
 class BridgeError(Exception):
     """The bridge refused a request before it reached the simulator."""
+
+
+#: How to (re)start the simulator, and where to reconnect afterwards.
+#:
+#: **There is no rcontrol command that changes board.** `help` lists the whole
+#: surface and none of it sets one; `loadhex` takes hex/bin only. A board is
+#: chosen when the process starts, from the workspace it is given, so switching
+#: means restarting the simulator -- which the bridge can only do if it is told
+#: how to start one.
+#:
+#: Left unset, `switch_board` refuses and prints the command to run by hand.
+#: That is deliberate: launching a process is not something a websocket from a
+#: browser should be able to do unless the operator asked for it at startup.
+LAUNCH = {"command": None, "host": "127.0.0.1", "port": 5000,
+          "process": None}
+
+
+def _switch_board(api: SimulatorApi, name: str) -> dict:
+    """Restart the simulator on another board and reconnect to it."""
+    import shlex
+    import subprocess
+    import time
+
+    try:
+        resolved = resolve_board_name(name)
+    except AssetError as exc:
+        raise BridgeError(str(exc)) from exc
+
+    workspace = share_root() / "boards" / resolved / "demo.pzw"
+    if not workspace.is_file():
+        raise BridgeError(
+            f"{resolved} ships no demo.pzw, so there is no workspace to start "
+            f"it from. Boards are chosen by workspace, not by command."
+        )
+
+    if not LAUNCH["command"]:
+        raise BridgeError(
+            f"this bridge was not told how to start a simulator, so it will "
+            f"not start one. Run the bridge with --sim-command to enable "
+            f"switching, or relaunch picsimlab yourself with this workspace: "
+            f"{workspace}"
+        )
+
+    # `resolved` comes from the shipped board list, never from the request, so
+    # the only interpolation into the shell is a name this repository owns.
+    #
+    # `{board}` exists as well as `{workspace}` because the simulator often
+    # runs somewhere the bridge's own paths do not reach -- here it is inside
+    # WSL, where this repo's `C:\...\share` is `/root/oh/share`. Substituting
+    # the name lets the template build the path in the simulator's world.
+    command = (
+        LAUNCH["command"]
+        .replace("{workspace}", str(workspace))
+        .replace("{board}", resolved)
+    )
+
+    # Split into argv and run without a shell. Going through one is both
+    # unnecessary -- Popen already detaches -- and actively wrong on Windows,
+    # where `shell=True` means cmd.exe: `&` is a command separator there, so a
+    # template ending in the `&` that backgrounds the process *inside WSL* got
+    # torn in half before wsl.exe ever saw it, and the nested quoting collapsed
+    # with it. shlex keeps the whole `bash -lc` script as one argument.
+    try:
+        argv = shlex.split(command, posix=True)
+    except ValueError as exc:
+        raise BridgeError(f"--sim-command is not parseable: {exc}") from exc
+    if not argv:
+        raise BridgeError("--sim-command is empty")
+
+    # The launched process is deliberately held rather than backgrounded. A
+    # template ending in `&` looks right and does not work through `wsl.exe`:
+    # when the foreground command of a WSL session returns, the session is torn
+    # down and its background children go with it -- measured, `setsid nohup
+    # ... &` returned 0 and left no process. `exec` in the template plus this
+    # Popen keeps the simulator alive for as long as the bridge runs.
+    previous = LAUNCH.get("process")
+    if previous is not None and previous.poll() is None:
+        previous.terminate()
+
+    try:
+        self_held = subprocess.Popen(argv)
+    except OSError as exc:
+        raise BridgeError(f"could not run {argv[0]!r}: {exc}") from exc
+    LAUNCH["process"] = self_held
+
+    deadline = time.monotonic() + 30
+    last = ""
+    while time.monotonic() < deadline:
+        time.sleep(1.0)
+        probe = RControlClient(host=LAUNCH["host"], port=LAUNCH["port"], timeout=3)
+        try:
+            probe.connect()
+        except RControlError as exc:
+            last = str(exc)
+            continue
+        running = render_model.parse_info(SimulatorApi(probe).info()).board
+        if running == resolved:
+            try:
+                api.client.close()
+            except OSError:
+                pass
+            api.client = probe
+            _ART_CACHE.pop(resolved, None)
+            return {"board": running, "workspace": str(workspace)}
+        probe.close()
+        last = f"simulator came up on {running!r}, not {resolved!r}"
+
+    raise BridgeError(
+        f"restarted for {resolved} but no simulator answered on "
+        f"{LAUNCH['host']}:{LAUNCH['port']} within 30s. Last: {last or 'no reply'}. "
+        f"Four boards segfault on this build for want of QEMU "
+        f"(docs/known-issues.md 4a-bis) -- check whether {resolved} is one."
+    )
 
 
 def _pins(api: SimulatorApi) -> list[dict]:
@@ -306,6 +421,7 @@ OPERATIONS: dict[str, tuple] = {
     "board_art_names": (lambda api, a: list(available_boards()), ()),
     "boards": (lambda api, a: _boards(api), ()),
     "pinmap": (lambda api, a: _pinmap(api), ()),
+    "switch_board": (lambda api, a: _switch_board(api, a["name"]), ("name",)),
     "catalogue": (lambda api, a: _catalogue(api), ()),
     "enable_spare_parts": (lambda api, a: api.client.command("spshow 1").body, ()),
     "place_part": (
@@ -517,6 +633,7 @@ async def serve(
             f"including loading firmware. Loopback only ({sorted(LOOPBACK)})."
         )
 
+    LAUNCH["host"], LAUNCH["port"] = rcontrol_host, rcontrol_port
     client = RControlClient(host=rcontrol_host, port=rcontrol_port)
     client.connect()
     bridge = Bridge(SimulatorApi(client), allowed_origins)
@@ -570,6 +687,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bind", default=DEFAULT_BIND)
     parser.add_argument("--ws-port", type=int, default=DEFAULT_WS_PORT)
     parser.add_argument(
+        "--sim-command",
+        default=None,
+        help=(
+            "command that starts picsimlab, enabling board switching from the "
+            "UI. {workspace} is the board's demo.pzw path as this process sees "
+            "it; {board} is its name, for when the simulator lives somewhere "
+            "with different paths. Split with shlex and run without a shell. "
+            "**Do not background it** -- this process holds it -- and stop any "
+            "running simulator first, or the new one cannot bind the rcontrol "
+            "port. Use `pkill -x`, not `pkill -f`: the launching shell's own "
+            "command line contains the word picsimlab, so -f makes it kill "
+            "itself. Example for a simulator in WSL: "
+            "wsl -d Ubuntu-22.04 -- bash -lc \"pkill -x picsimlab; sleep 2; "
+            "cd /root/oh/src && DISPLAY=:0 exec ./picsimlab "
+            "'/root/oh/share/boards/{board}/demo.pzw'\""
+        ),
+    )
+    parser.add_argument(
         "--allow-origin",
         action="append",
         default=None,
@@ -581,6 +716,8 @@ def main(argv: list[str] | None = None) -> int:
         args.allow_origin
         or [f"http://127.0.0.1:{args.ws_port}", f"http://localhost:{args.ws_port}"]
     )
+
+    LAUNCH["command"] = args.sim_command
 
     try:
         asyncio.run(
