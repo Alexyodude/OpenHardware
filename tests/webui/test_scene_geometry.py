@@ -79,12 +79,21 @@ def test_the_drag_handler_runs_before_orbit_controls(source):
     the wire, so the wire drag must run in the capture phase and stop
     propagation. This asserts the listener is still registered that way.
     """
-    match = re.search(
-        r'addEventListener\(\s*"pointerdown",(.+?)\btrue,?\s*\)', source, re.S
+    start = source.find('"pointerdown"')
+    assert start > 0, "no pointerdown listener at all"
+    # The handler runs to the next listener registration. Slicing on that is
+    # steadier than a non-greedy regex, which stopped at the `true` inside
+    # `intersectObjects(..., true)` once wire-picking was added and made this
+    # test fail for its own parsing rather than for the code.
+    end = source.find("addEventListener", start)
+    handler = source[start : end if end > start else len(source)]
+
+    assert re.search(r"^\s*true,\s*$", handler, re.M), (
+        "the pointerdown listener no longer passes `true`, so it is not in the "
+        "capture phase and OrbitControls will start an orbit first"
     )
-    assert match, "pointerdown is no longer registered in the capture phase"
-    assert "stopPropagation" in match.group(1)
-    assert "setPointerCapture" in match.group(1), (
+    assert "stopPropagation" in handler
+    assert "setPointerCapture" in handler, (
         "without pointer capture a fast drag that leaves the canvas never "
         "delivers pointerup, and the wire is left hanging"
     )

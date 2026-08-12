@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from webui.pinmap import PinMapError, available, load, parse
+from webui.pinmap import PinMapError, available, load, parse, synthesise
 
 GOOD = {
     "board": "Example",
@@ -117,3 +117,64 @@ def test_malformed_json_raises(tmp_path):
 def test_a_good_map_round_trips_through_as_dict():
     pinmap = parse(GOOD, "sample")
     assert json.loads(json.dumps(pinmap.as_dict()))["pads"][0]["label"] == "13"
+
+
+# --- synthesised headers, added 2026-08-12 ----------------------------------
+#
+# Only the Uno's pads are authored. The other twenty boards get a header laid
+# out from the simulator's own pin list so they are wireable immediately.
+
+
+def _pins(count: int):
+    from webui.api import Pin
+
+    return [
+        Pin(index=i, type="D", direction="I", value=0, oavalue_raw=0,
+            avalue=0.0, name=f"P{i}")
+        for i in range(1, count + 1)
+    ]
+
+
+def test_a_synthesised_header_uses_the_simulators_own_pins():
+    pinmap = synthesise("Test", _pins(28), 400, 300)
+    assert len(pinmap.pads) == 28
+    assert pinmap.pads[0].label == "P1"
+    assert pinmap.pads[0].pin == 1
+    assert all(pad.wireable for pad in pinmap.pads)
+
+
+def test_a_synthesised_header_says_it_is_approximate():
+    """The wiring is exact; only the picture is schematic. Do not imply more."""
+    assert synthesise("Test", _pins(28), 400, 300).derived is True
+    assert load("Arduino Uno").derived is False
+
+
+def test_a_synthesised_header_stays_inside_the_board_image():
+    for count in (4, 16, 17, 40, 64):
+        pinmap = synthesise("Test", _pins(count), 376, 149)
+        for pad in pinmap.pads:
+            assert 0 <= pad.x <= pinmap.width, (count, pad.label, pad.x)
+            assert 0 <= pad.y <= pinmap.height, (count, pad.label, pad.y)
+
+
+def test_many_pins_wrap_onto_a_second_row():
+    """A single row of forty on a small board is unusable."""
+    assert len({p.group for p in synthesise("T", _pins(40), 400, 300).pads}) == 2
+    assert len({p.group for p in synthesise("T", _pins(14), 400, 300).pads}) == 1
+
+
+def test_a_board_with_no_pins_raises_rather_than_making_an_empty_header():
+    with pytest.raises(PinMapError, match="reports no pins"):
+        synthesise("Test", [], 400, 300)
+
+
+def test_every_shipped_board_can_be_given_a_header():
+    """The 3D view must work for all 21 boards, not only the authored one."""
+    from webui.assets import available_boards, load_board
+
+    for board in available_boards():
+        art = load_board(board)
+        pinmap = load(board) or synthesise(board, _pins(28), art.width, art.height)
+        assert pinmap.wireable, board
+        for pad in pinmap.wireable:
+            assert 0 <= pad.x <= art.width and 0 <= pad.y <= art.height, board

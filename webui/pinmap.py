@@ -71,6 +71,10 @@ class PinMap:
     width: int
     height: int
     pads: tuple[Pad, ...]
+    #: True when the positions were laid out evenly rather than read from the
+    #: board's art. The wiring is exact either way; only the picture is
+    #: schematic, and the UI says so rather than implying a real pinout.
+    derived: bool = False
 
     @property
     def wireable(self) -> tuple[Pad, ...]:
@@ -84,6 +88,7 @@ class PinMap:
             "board": self.board,
             "width": self.width,
             "height": self.height,
+            "derived": self.derived,
             "pads": [dataclasses.asdict(pad) for pad in self.pads],
         }
 
@@ -157,6 +162,54 @@ def load(board: str, directory: pathlib.Path | None = None) -> PinMap | None:
     except json.JSONDecodeError as exc:
         raise PinMapError(f"{path}: not valid JSON: {exc}") from exc
     return parse(raw, path.name)
+
+
+def synthesise(board: str, pins: list, width: int, height: int) -> PinMap:
+    """Lay the simulator's own pins along the board's bottom edge.
+
+    Twenty-one boards ship and only their headers' *positions* are missing, so
+    hand-authoring every one is a lot of work for something cosmetic. This gives
+    the other twenty a droppable header immediately, built from what the
+    simulator reports rather than from anything invented: the labels are
+    `pinsl` names and the indices are the protocol's own.
+
+    **The positions are approximate and say so** -- `derived` is True and the
+    UI reports it. They are laid out evenly rather than where the pads actually
+    are, which is honest about being a placeholder for an authored map. Since
+    wiring is by pin number, a wire dropped here connects exactly what its
+    label names; only the picture is schematic.
+
+    Pins are split across two rows when there are more than sixteen, because a
+    single row of forty on a small board is unusable.
+    """
+    if not pins:
+        raise PinMapError(
+            f"{board}: the simulator reports no pins, so no header can be "
+            f"synthesised. A board with no pins cannot be wired at all."
+        )
+
+    rows = 1 if len(pins) <= 16 else 2
+    per_row = -(-len(pins) // rows)
+    margin = max(width * 0.06, 8.0)
+    span = width - 2 * margin
+    pads: list[Pad] = []
+
+    for position, pin in enumerate(pins):
+        row = position // per_row
+        column = position % per_row
+        step = span / max(per_row - 1, 1)
+        pads.append(
+            Pad(
+                label=pin.name,
+                pin=pin.index,
+                x=round(margin + column * step, 1),
+                y=round(height - 10 - row * 12, 1),
+                group=f"synthetic-row-{row}",
+            )
+        )
+
+    return PinMap(board=board, width=width, height=height, pads=tuple(pads),
+                  derived=True)
 
 
 def available(directory: pathlib.Path | None = None) -> tuple[str, ...]:

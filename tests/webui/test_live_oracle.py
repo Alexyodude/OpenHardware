@@ -246,10 +246,20 @@ def test_the_draw_list_binds_board_art_to_live_values(api: SimulatorApi):
 def test_the_on_board_led_reports_a_changing_value_while_running(api: SimulatorApi):
     """The blink firmware's LED must actually vary -- a still board is not live.
 
-    Measured on 2026-08-12: sampling `board.out[01]` over two seconds returned
-    values spanning 0 to 200. A single constant reading would mean the render
-    loop is painting something that is not moving, which is the failure this
-    whole differential suite exists to catch.
+    Measured on 2026-08-12: sampling `board.out[01]` returned values spanning
+    0 to 200. A single constant reading would mean the render loop is painting
+    something that is not moving, which is the failure this whole differential
+    suite exists to catch.
+
+    **The value is not a raw pin state.** A later run of this same test found
+    it sitting at 99-100 for two solid seconds -- almost exactly the mean of a
+    0/200 square wave -- so the simulator reports something averaged, and a
+    fixed number of samples at a fixed interval can legitimately see no change
+    at all. The first version of this test asserted over exactly twenty samples
+    and failed for that reason, not because anything was broken.
+
+    So it polls until it sees a change, and only fails if none arrives in the
+    whole window. That is still a real assertion: a dead LED never changes.
 
     Skips rather than fails when the board reports no outputs at all, because
     that is a property of the board, not a defect -- but an unreachable
@@ -263,15 +273,16 @@ def test_the_on_board_led_reports_a_changing_value_while_running(api: SimulatorA
         pytest.skip("this board reports no on-board outputs to sample")
 
     api.run()
+    deadline = time.monotonic() + 6.0
     seen = set()
-    for _ in range(20):
-        state = parse_info(api.info())
-        seen.add(state.board_outputs[0].value)
-        time.sleep(0.1)
+    while time.monotonic() < deadline and len(seen) < 2:
+        seen.add(parse_info(api.info()).board_outputs[0].value)
+        time.sleep(0.05)
 
     assert len(seen) > 1, (
-        f"the on-board output never changed over 2s of running ({seen}). "
-        f"Either the firmware is not blinking or the value is not live."
+        f"the on-board output never moved off {seen} in six seconds of "
+        f"running. Either the firmware is not blinking or the value is not "
+        f"live -- check the simulator is actually running with `sim`."
     )
 
 

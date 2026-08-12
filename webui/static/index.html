@@ -68,10 +68,14 @@
 
       <div class="stage stage-3d" id="stage-3d" hidden>
         <canvas id="scene"></canvas>
-        <p class="note" id="scene-note">
-          Drag from a peripheral pin (grey dot) onto a header pin to wire it.
-          Orbit with the left mouse button, zoom with the wheel.
-        </p>
+        <div class="scene-bar">
+          <span class="scene-help">
+            Drag a pin dot onto a gold header pin to wire · double-click a dot
+            to unwire · click a wire to select it
+          </span>
+          <div class="swatches" id="swatches" role="group"
+               aria-label="wire colour"></div>
+        </div>
       </div>
     </div>
 

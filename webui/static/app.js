@@ -236,6 +236,25 @@ async function onSceneConnect(anchor, pad) {
   }
 }
 
+/** Colour swatches for wires. Purely a viewing choice; never sent anywhere. */
+function paintSwatches(palette) {
+  const host = document.getElementById("swatches");
+  if (!host || host.childElementCount) return;
+  palette.forEach((hex, i) => {
+    const swatch = document.createElement("button");
+    swatch.type = "button";
+    swatch.className = "swatch";
+    swatch.style.background = `#${hex.toString(16).padStart(6, "0")}`;
+    swatch.title = `wire colour ${i + 1}`;
+    swatch.addEventListener("click", () => {
+      for (const other of host.children) other.classList.remove("on");
+      swatch.classList.add("on");
+      scene3d?.setWireColour(hex);
+    });
+    host.append(swatch);
+  });
+}
+
 /** Double-clicking a wired pin unwires it: `connect` with pin 0 disconnects. */
 async function onSceneDisconnect(anchor) {
   try {
@@ -262,22 +281,25 @@ async function showView(which) {
 
   try {
     note("loading the 3D renderer…");
-    const { Scene3D } = await import("/scene3d.js");
+    const { Scene3D, JUMPER } = await import("/scene3d.js");
     scene3d = new Scene3D(document.getElementById("scene"), {
       onConnect: onSceneConnect,
       onDisconnect: onSceneDisconnect,
       onNote: (text) => note(text),
     });
+    paintSwatches(JUMPER);
     const pinmap = await call("pinmap");
     scene3d.setPinMap(pinmap);
-    if (pinmap) {
-      note(`${pinmap.board}: ${pinmap.pads.length} header pads, drag a pin onto one`);
-    } else {
+    if (!pinmap) {
+      note("this board reports no pins, so there is nothing to wire", true);
+    } else if (pinmap.derived) {
       note(
-        "this board has no authored pin map, so there are no header pads to " +
-          "drop onto — wire it from the workbench form instead",
-        true,
+        `${pinmap.board}: ${pinmap.pads.length} pins laid out along the edge. ` +
+          `Positions are schematic — no pad map is authored for this board — ` +
+          `but wiring is by pin number, so a connection is exact.`,
       );
+    } else {
+      note(`${pinmap.board}: ${pinmap.pads.length} header pads, drag a pin onto one`);
     }
   } catch (err) {
     note(`3D view failed to start: ${err.message}`, true);

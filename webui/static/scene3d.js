@@ -17,15 +17,26 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-import { buildHeader, buildPart, hasModel, setGlow } from "/models3d.js";
+import {
+  buildBoardFurniture,
+  buildHeader,
+  buildPart,
+  hasModel,
+  setGlow,
+} from "/models3d.js";
 
 //: World units per image pixel. A 402px board becomes ~40 units wide, which
 //: keeps the default framing sane for every board from 376px to 702px.
 const SCALE = 0.1;
 const BOARD_THICKNESS = 1.6;
 const PART_PCB = 1.2;
-const PART_HEIGHT = 16;   // how far peripherals float above the board
-const PART_GAP = 16;      // between peripherals, front to back
+
+//: **Everything rests on one surface.** An earlier build floated peripherals
+//: sixteen units above the board, which read as two unrelated planes rather
+//: than parts laid out on a bench. Each object is now positioned by half its
+//: own thickness, so every PCB underside sits on y=0 whatever it is.
+const GROUND = 0;
+const PART_GAP = 6;       // clear space between peripherals, front to back
 
 //: Anchors sit ON TOP of the peripheral's own PCB. An earlier version put them
 //: at `PART_HEIGHT - 0.8`, which is *below* a slab whose underside is at
@@ -35,12 +46,19 @@ const ANCHOR_R = 0.85;
 const ANCHOR_Y = PART_PCB / 2 + ANCHOR_R;
 
 const COLOUR = {
-  wire: 0x4da3ff,
   ghost: 0xe5c07b,
   anchor: 0x9aa4b4,
   anchorWired: 0x4da3ff,
   anchorHot: 0x46d17e,
+  selected: 0xffffff,
 };
+
+//: Dupont ribbon order, so consecutive wires are told apart at a glance.
+//: Exported for the picker so the swatches and the wires cannot drift.
+export const JUMPER = [
+  0xe0413a, 0xe08a2e, 0xe5c945, 0x4bbf5a, 0x3f8ce0,
+  0x9b5de5, 0xf06fb0, 0x8a6a4a, 0xd8dee9, 0x2b2f3a,
+];
 
 export class Scene3D {
   constructor(canvas, { onConnect, onDisconnect, onNote }) {
@@ -54,11 +72,15 @@ export class Scene3D {
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.5, 800);
-    this.camera.position.set(6, 62, 74);
+    //: Looking down the bench from the front. The target sits behind the
+    //: board because the peripherals extend that way on the same surface.
+    this.camera.position.set(4, 44, 58);
 
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
-    this.controls.target.set(0, 6, -12);
+    this.controls.target.set(0, 0, -14);
+    //: Below the surface there is nothing to see, so stop the camera there.
+    this.controls.maxPolarAngle = Math.PI * 0.49;
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 1.25));
     const key = new THREE.DirectionalLight(0xffffff, 2.0);
@@ -79,6 +101,11 @@ export class Scene3D {
     this.pinmap = null;
     this.topology = "";
     this.drag = null;
+    //: Wire colour is a viewing choice, not simulator state, so it lives here
+    //: and is never written back. Keyed by part/label so it survives rebuilds.
+    this.colours = new Map();
+    this.nextColour = null;
+    this.selected = null;
 
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -136,11 +163,28 @@ export class Scene3D {
       new THREE.BoxGeometry(model.width * SCALE, BOARD_THICKNESS, model.height * SCALE),
       [edge, edge, art, edge, edge, edge],
     );
+    board.position.y = GROUND + BOARD_THICKNESS / 2;
     this.world.add(board);
+
+    // --- everything its own map says is on it -------------------------------
+    // Buttons, LEDs, ICs, jacks and programming headers, placed from the
+    // regions the board already declares. No per-board authoring.
+    const furniture = buildBoardFurniture(
+      model.regions,
+      toBoardLocal,
+      GROUND + BOARD_THICKNESS,
+      SCALE,
+    );
+    this.world.add(furniture);
+    this.furniture = furniture.userData.glowing;
 
     // --- its header --------------------------------------------------------
     if (this.pinmap) {
-      const header = buildHeader(this.pinmap.pads, toBoardLocal, BOARD_THICKNESS / 2);
+      const header = buildHeader(
+        this.pinmap.pads,
+        toBoardLocal,
+        GROUND + BOARD_THICKNESS,
+      );
       this.world.add(header);
       for (const entry of header.userData.pins) {
         this.pads.push({
@@ -156,6 +200,8 @@ export class Scene3D {
     // Laid out in a row behind the board. Position carries no meaning: the
     // simulator has no notion of where a part physically sits.
     let modelled = 0;
+    // Start clear of the board's back edge.
+    this.cursor = -(model.height * SCALE) / 2 - PART_GAP;
     model.parts.forEach((part, i) => {
       if (!part.drawable) return;
       const built = buildPart(
@@ -167,8 +213,13 @@ export class Scene3D {
       );
       if (built.kind === "model") modelled += 1;
 
-      const z = -(model.height * SCALE) / 2 - 14 - i * PART_GAP;
-      built.group.position.set(0, PART_HEIGHT, z);
+      // Behind the board, on the same surface. `cursor` accumulates each
+      // peripheral's own depth so a tall part does not overlap the next.
+      const depth = part.height * SCALE;
+      this.cursor -= depth / 2;
+      const z = this.cursor;
+      this.cursor -= depth / 2 + PART_GAP;
+      built.group.position.set(0, GROUND + PART_PCB / 2, z);
       this.world.add(built.group);
 
       // LED-style parts glow with the value the simulator reports.
@@ -245,6 +296,19 @@ export class Scene3D {
     }
     if (changed && !this.drag) this._drawWires();
 
+    // Board furniture glow: an LED modelled from a region lights when the
+    // simulator says that region is active, same source as the 2D overlay.
+    if (this.furniture) {
+      for (const region of model.regions) {
+        const item = this.furniture.get(region.id);
+        if (!item) continue;
+        for (const mesh of item.userData.glow ?? []) {
+          mesh.userData.glowColour = item.userData.glowColour;
+          setGlow(mesh, region.intensity);
+        }
+      }
+    }
+
     // Component glow, driven by the part's own reported input values.
     for (const entry of this.glowing) {
       const part = model.parts.find((p) => p.index === entry.partIndex);
@@ -262,26 +326,84 @@ export class Scene3D {
     }
   }
 
+  // --- wires ----------------------------------------------------------------
+
+  /** The colour a connection is drawn in, assigned on first sight. */
+  colourFor(anchor) {
+    const key = `${anchor.partIndex}/${anchor.label}`;
+    if (!this.colours.has(key)) {
+      this.colours.set(key, JUMPER[this.colours.size % JUMPER.length]);
+    }
+    return this.colours.get(key);
+  }
+
+  /** Set the colour used for new wires, and for the selected one if any. */
+  setWireColour(hex) {
+    this.nextColour = hex;
+    if (this.selected) {
+      this.colours.set(
+        `${this.selected.partIndex}/${this.selected.label}`,
+        hex,
+      );
+      this._drawWires();
+      this.onNote(`${this.selected.partName}.${this.selected.label} recoloured`);
+    }
+  }
+
   _drawWires(ghost) {
     this.wires.clear();
     for (const anchor of this.anchors) {
       if (!anchor.wiredTo) continue;
       const pad = this.pads.find((p) => p.pin === anchor.wiredTo);
       if (!pad) continue; // wired to a pin this board exposes on no header
-      this.wires.add(this._wire(anchor.world, pad.world, COLOUR.wire));
+      const wire = this._wire(anchor.world, pad.world, this.colourFor(anchor));
+      wire.userData = { kind: "wire", anchor };
+      this.wires.add(wire);
     }
-    if (ghost) this.wires.add(this._wire(ghost.from, ghost.to, COLOUR.ghost));
+    if (ghost) {
+      const g = this._wire(ghost.from, ghost.to, this.nextColour ?? COLOUR.ghost);
+      g.userData = { kind: "ghost" };
+      this.wires.add(g);
+    }
   }
 
-  /** A wire as a tube sagging between two points, the way a jumper hangs. */
+  /**
+   * One jumper: a round conductor that sags under its own weight, with a
+   * moulded boot at each end where it meets the pin.
+   *
+   * The sag is a real catenary-ish droop rather than a symmetric arc, so a
+   * short hop between adjacent pins lies almost flat while a long run across
+   * the board hangs -- which is what makes the picture read as wire rather
+   * than as a drawn connection line.
+   */
   _wire(from, to, colour) {
-    const mid = from.clone().lerp(to, 0.5);
-    mid.y += Math.max(4, from.distanceTo(to) * 0.3);
-    const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
-    return new THREE.Mesh(
-      new THREE.TubeGeometry(curve, 28, 0.26, 8, false),
-      new THREE.MeshStandardMaterial({ color: colour, roughness: 0.45 }),
+    const span = from.distanceTo(to);
+    const droop = Math.min(2 + span * 0.16, 9);
+    const points = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8;
+      const at = from.clone().lerp(to, t);
+      // Lift the whole run, then subtract a parabola so the ends stay put.
+      at.y += (droop + span * 0.06) * Math.sin(Math.PI * t) - 0;
+      points.push(at);
+    }
+    const curve = new THREE.CatmullRomCurve3(points);
+    const material = new THREE.MeshStandardMaterial({
+      color: colour,
+      roughness: 0.32,
+      metalness: 0.05,
+    });
+    const group = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 40, 0.3, 10, false),
+      material,
     );
+    const boot = new THREE.SphereGeometry(0.46, 12, 10);
+    for (const end of [from, to]) {
+      const cap = new THREE.Mesh(boot, material);
+      cap.position.copy(end);
+      group.add(cap);
+    }
+    return group;
   }
 
   // --- picking --------------------------------------------------------------
@@ -321,7 +443,22 @@ export class Scene3D {
       (event) => {
         this._at(event);
         const anchor = this._hitAnchor();
-        if (!anchor) return;
+        if (!anchor) {
+          // Clicking a wire selects it, so the colour picker has a target.
+          const hit = this.raycaster.intersectObjects(this.wires.children, true)[0];
+          const owner = hit && (hit.object.userData.anchor ??
+                                hit.object.parent?.userData?.anchor);
+          if (owner) {
+            event.stopPropagation();
+            this.selected = owner;
+            this.onNote(
+              `selected ${owner.partName}.${owner.label} — pick a colour to recolour it`,
+            );
+          } else if (this.selected) {
+            this.selected = null;
+          }
+          return;
+        }
 
         event.stopPropagation();
         event.preventDefault();

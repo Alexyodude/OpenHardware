@@ -237,7 +237,13 @@ def _pinmap(api: SimulatorApi) -> dict | None:
     """
     board = render_model.parse_info(api.info()).board
     found = pinmap.load(board)
-    return None if found is None else found.as_dict()
+    if found is not None:
+        return found.as_dict()
+    # No authored map: lay the simulator's own pins out along the board edge so
+    # the board is still wireable. Marked derived so the UI does not present a
+    # schematic header as a real pinout.
+    art = board_art(board)
+    return pinmap.synthesise(board, api.pins(), art.width, art.height).as_dict()
 
 
 def _catalogue(api: SimulatorApi) -> dict:

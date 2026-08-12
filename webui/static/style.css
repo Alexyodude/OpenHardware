@@ -467,3 +467,31 @@ code {
 }
 
 #scene:active { cursor: grabbing; }
+
+/* --- 3D scene bar and wire swatches ------------------------------------- */
+
+.scene-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 14px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.scene-help { font-size: 11px; color: var(--muted); flex: 1; min-width: 200px; }
+
+.swatches { display: flex; gap: 4px; }
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  box-shadow: 0 0 0 1px var(--line) inset;
+  cursor: pointer;
+}
+
+.swatch:hover { transform: scale(1.15); }
+.swatch.on { border-color: var(--text); }

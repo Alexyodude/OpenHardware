@@ -289,6 +289,166 @@ export function buildPart(partName, widthPx, heightPx, svgUrl, scale) {
   return { group, kind: "model", board, parts };
 }
 
+// --- board furniture ---------------------------------------------------------
+//
+// Every board's `.map` already locates its components: `B_PB_*` is a push
+// button, `O_LD_*` an LED, `I_SW_PWR` the power jack, `O_IC_*` an IC package.
+// Surveyed across all 21 shipped maps, those families cover 460 of the 486
+// regions, so modelling by family gives real geometry on every board without
+// authoring anything per board.
+//
+// A region whose family has no builder is simply not furnished -- the art
+// underneath still shows it, so nothing disappears.
+
+function smdLed(w, h) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(Math.max(w, 0.8), 0.7, Math.max(h, 0.8)),
+    M.glass(0xffd60a),
+  );
+  body.position.y = 0.35;
+  g.add(body);
+  g.userData.glow = [body];
+  g.userData.glowColour = 0xffd60a;
+  return g;
+}
+
+function icPackage(w, h) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(w, 2.2, h),
+    M.plastic(0x1b1d24),
+  );
+  body.position.y = 1.1;
+  // Pin 1 dimple, so the package reads as an IC rather than a black box.
+  const dot = new THREE.Mesh(
+    new THREE.CylinderGeometry(Math.min(w, h) * 0.09, Math.min(w, h) * 0.09, 0.3, 10),
+    M.plastic(0x3a4150),
+  );
+  dot.position.set(-w / 2 + w * 0.14, 2.25, -h / 2 + h * 0.16);
+  g.add(body, dot);
+  return g;
+}
+
+function barrelJack(w, h) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, 5.2, h), M.plastic(0x14161c));
+  body.position.y = 2.6;
+  const bore = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.5, 1.5, 2.2, 16),
+    M.plastic(0x05070a),
+  );
+  bore.rotation.x = Math.PI / 2;
+  bore.position.set(0, 2.9, h / 2);
+  g.add(body, bore);
+  return g;
+}
+
+function pinHeaderBlock(w, h, cols = 3, rows = 2) {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(w, 1.2, h), M.plastic(0x14161c));
+  base.position.y = 0.6;
+  g.add(base);
+  const pin = new THREE.BoxGeometry(0.5, 3, 0.5);
+  const gold = M.metal(0xd4a944);
+  for (let c = 0; c < cols; c++) {
+    for (let r = 0; r < rows; r++) {
+      const p = new THREE.Mesh(pin, gold);
+      p.position.set(
+        -w / 2 + (w / cols) * (c + 0.5),
+        2.4,
+        -h / 2 + (h / rows) * (r + 0.5),
+      );
+      g.add(p);
+    }
+  }
+  return g;
+}
+
+function dipSwitch(w, h) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, 1.6, h), M.plastic(0xc23b3b));
+  body.position.y = 0.8;
+  const lever = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 0.5, 0.6, h * 0.55),
+    M.plastic(0xe8e8e8),
+  );
+  lever.position.set(0, 1.85, -h * 0.15);
+  g.add(body, lever);
+  return g;
+}
+
+function sevenSegCell(w, h) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, 1.8, h), M.plastic(0x14161c));
+  body.position.y = 0.9;
+  const face = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 0.82, 0.25, h * 0.85),
+    M.plastic(0x2a0d0d),
+  );
+  face.position.y = 1.9;
+  g.add(body, face);
+  g.userData.glow = [face];
+  g.userData.glowColour = 0xff3b30;
+  return g;
+}
+
+//: family prefix -> builder taking the region's footprint in world units.
+const FURNITURE = {
+  O_LD: smdLed,
+  O_SS: sevenSegCell,
+  O_DS: sevenSegCell,
+  O_IC: icPackage,
+  O_SO: icPackage,
+  O_MC: icPackage,
+  O_LCD: (w, h) => {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(w, 3, h), M.plastic(0x2f6f4f));
+    body.position.y = 1.5;
+    g.add(body);
+    return g;
+  },
+  B_PB: () => tactile(),
+  I_PB: () => tactile(),
+  O_PB: () => tactile(),
+  B_KB: () => tactile(0x3a4150),
+  B_PO: () => potKnob(),
+  B_DP: dipSwitch,
+  I_SW: barrelJack,
+  I_PG: (w, h) => pinHeaderBlock(w, h),
+  B_JP: (w, h) => pinHeaderBlock(w, h, 2, 1),
+};
+
+/**
+ * Furnish a board from the regions its own `.map` declares.
+ *
+ * `toLocal(x, y)` maps image pixels into the board's local space and `topY` is
+ * its top face. Returns a group plus the meshes that can glow, keyed by region
+ * id so live values can drive them.
+ */
+export function buildBoardFurniture(regions, toLocal, topY, scale) {
+  const group = new THREE.Group();
+  const glowing = new Map();
+
+  for (const region of regions) {
+    const family = region.id.slice(0, region.id.indexOf("_", 2));
+    const build = FURNITURE[family];
+    if (!build) continue;
+
+    const w = Math.max((region.right - region.left) * scale, 0.6);
+    const h = Math.max((region.bottom - region.top) * scale, 0.6);
+    const item = build(w, h);
+    const at = toLocal((region.left + region.right) / 2, (region.top + region.bottom) / 2);
+    item.position.set(at.x, topY, at.z);
+    group.add(item);
+
+    if (item.userData.glow) glowing.set(region.id, item);
+  }
+
+  group.userData.glowing = glowing;
+  return group;
+}
+
 /** A 0.1in header: black plastic base with a gold pin standing in each pad. */
 export function buildHeader(pads, toLocal, topY) {
   const group = new THREE.Group();
