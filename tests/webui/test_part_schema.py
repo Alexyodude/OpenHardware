@@ -20,6 +20,17 @@ VALID = {
     ],
 }
 
+INTERLEAVED = {
+    "part": "Interleaved",
+    "source": "src/parts/example.cc:1",
+    "fields": [
+        {"role": "setting", "type": "int", "label": "before"},
+        {"role": "pin", "dir": "out", "label": "A"},
+        {"role": "setting", "type": "int", "label": "between"},
+        {"role": "pin", "dir": "in", "label": "B"},
+    ],
+}
+
 
 def write(tmp_path: pathlib.Path, data: dict, name: str = "example.json") -> pathlib.Path:
     path = tmp_path / name
@@ -36,9 +47,12 @@ def test_a_valid_schema_loads(tmp_path):
 
 
 def test_pin_fields_report_their_position(tmp_path):
-    # Position matters: it is the index into the config CSV.
-    schema = load_schema(write(tmp_path, VALID))
-    assert [(i, f.label) for i, f in schema.pin_fields] == [(0, "A")]
+    # Settings deliberately precede and separate the pins: a pre-filtered
+    # implementation would report (0, "A"), (1, "B") and pass a fixture where
+    # pins came first. These indices are positions in the config CSV, and
+    # connect() rewrites a single column by them.
+    schema = load_schema(write(tmp_path, INTERLEAVED))
+    assert [(i, f.label) for i, f in schema.pin_fields] == [(1, "A"), (3, "B")]
 
 
 def test_missing_source_raises(tmp_path):
