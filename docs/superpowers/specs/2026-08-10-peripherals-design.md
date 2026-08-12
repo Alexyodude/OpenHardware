@@ -139,8 +139,9 @@ connect(index, schema, label, pin)   # set one pin field, write back
 disconnect(index, schema, label)     # same, to 0
 ```
 
-`spdel` also accepts `all` as a bulk-delete (`rcontrol.cc:1275`, dispatching to
-`CSpareParts::DeleteParts()`), but no `remove_all()` wrapper was ever added to
+`spdel` also accepts `all` as a bulk-delete: `src/lib/rcontrol.cc:1276`
+dispatches to `SpareParts.DeleteParts()`, a real method at
+`src/lib/spareparts.cc:89`. But no `remove_all()` wrapper was ever added to
 `webui/api.py` — `remove_part(index)` is the only removal operation this API
 exposes, and this list above previously claimed otherwise.
 
