@@ -668,7 +668,12 @@ async def serve(
             or resolve_part_svg(request.path)
         )
         if served is None:
-            return Response(404, "Not Found", Headers({"Content-Length": "0"}), b"")
+            return Response(
+                404,
+                "Not Found",
+                Headers({"Content-Length": "0", "Connection": "close"}),
+                b"",
+            )
 
         body, content_type = served
         return Response(
@@ -681,6 +686,15 @@ async def serve(
                     # The bridge is a development server for a local simulator;
                     # a stale cached app.js is a debugging session nobody wants.
                     "Cache-Control": "no-store",
+                    # **Say that the socket is closing.** websockets serves one
+                    # HTTP response per connection and then closes it, but
+                    # HTTP/1.1 defaults to keep-alive, so without this a browser
+                    # reuses the socket for style.css and app.js and every one
+                    # of those requests dies on a closed connection -- which
+                    # renders as a blank page with the document itself
+                    # discarded. `urllib` never saw it because it opens a fresh
+                    # connection per request; a browser does not.
+                    "Connection": "close",
                 }
             ),
             body,
