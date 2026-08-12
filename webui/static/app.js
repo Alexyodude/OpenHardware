@@ -236,6 +236,21 @@ async function onSceneConnect(anchor, pad) {
   }
 }
 
+/** Double-clicking a wired pin unwires it: `connect` with pin 0 disconnects. */
+async function onSceneDisconnect(anchor) {
+  try {
+    await call("connect", {
+      index: anchor.partIndex,
+      name: anchor.partName,
+      label: anchor.label,
+      pin: 0,
+    });
+    note(`${anchor.partName}.${anchor.label} disconnected`);
+  } catch (err) {
+    note(`could not disconnect ${anchor.label}: ${err.message}`, true);
+  }
+}
+
 async function showView(which) {
   view = which;
   document.getElementById("stage-2d").hidden = which !== "2d";
@@ -250,6 +265,7 @@ async function showView(which) {
     const { Scene3D } = await import("/scene3d.js");
     scene3d = new Scene3D(document.getElementById("scene"), {
       onConnect: onSceneConnect,
+      onDisconnect: onSceneDisconnect,
       onNote: (text) => note(text),
     });
     const pinmap = await call("pinmap");

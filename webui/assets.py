@@ -162,8 +162,49 @@ def available_boards(root: pathlib.Path | None = None) -> tuple[str, ...]:
 PART_CATEGORIES = ("Input", "Output", "Other", "Virtual")
 
 
+def resolve_part_art(directory: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path] | None:
+    """Pick the SVG and image map for a part directory, or None if it has none.
+
+    `src/lib/part.cc:447` gives the default -- `GetName() + "/part.svg"` -- but
+    it is a **runtime method**, and parts override it. `output_7s_Display.cc:791`
+    returns `part.svg` or `part1.svg` depending on the display type currently
+    configured, and `output_LCD_hd44780.cc` composites four images through
+    `GetPictureFileName` plus three underscore-suffixed variants.
+
+    So no static rule can be exactly right, and an earlier version of this
+    module assumed `part.svg` and therefore reported several parts as having no
+    art at all -- `LCD hd44780` ships `LCD_hd44780.svg` beside a `part.map`, and
+    `7 Segments Display (Decoder)` ships `7sdisplay_dec.{svg,map}`.
+
+    The order here is: the documented default, then a same-stem pair, then the
+    sole map with the first SVG. Choosing a variant wrongly shows a different
+    picture of the same part, which is cosmetic; the regions still come from the
+    map that is paired with it.
+    """
+    if not directory.is_dir():
+        return None
+
+    svgs = sorted(p for p in directory.glob("*.svg"))
+    maps = sorted(p for p in directory.glob("*.map"))
+    if not svgs or not maps:
+        return None
+
+    default_svg, default_map = directory / "part.svg", directory / "part.map"
+    if default_svg.is_file() and default_map.is_file():
+        return default_svg, default_map
+
+    by_stem = {p.stem: p for p in svgs}
+    for candidate in maps:
+        if candidate.stem in by_stem:
+            return by_stem[candidate.stem], candidate
+
+    # A map whose stem names no SVG: the LCD case, where `part.map` describes
+    # art that is composited from differently-named files.
+    return svgs[0], maps[0]
+
+
 def available_parts(root: pathlib.Path | None = None) -> dict[str, str]:
-    """Map each placeable part's name to its category.
+    """Map each drawable part's name to its category.
 
     The name is the directory name, which is also the name `splist` reports and
     `spadd` expects, so no translation is needed here -- unlike boards, where
@@ -176,10 +217,10 @@ def available_parts(root: pathlib.Path | None = None) -> dict[str, str]:
         if not directory.is_dir():
             continue
         for entry in sorted(directory.iterdir()):
-            if (entry / "part.svg").is_file():
+            if entry.is_dir() and resolve_part_art(entry) is not None:
                 found[entry.name] = category
     if not found:
-        raise AssetError(f"{base} holds no part with a part.svg")
+        raise AssetError(f"{base} holds no part with a drawable svg/map pair")
     return found
 
 
@@ -196,23 +237,20 @@ def load_part(name: str, root: pathlib.Path | None = None) -> BoardArt:
     """
     base = (root or share_root()) / "parts"
     for category in PART_CATEGORIES:
-        directory = base / category / name
-        if (directory / "part.svg").is_file():
-            if not (directory / "part.map").is_file():
-                raise AssetError(
-                    f"{name}: has part.svg but no part.map, so its regions "
-                    f"cannot be located. It can be placed but not drawn."
-                )
-            width, height, regions = parse_map(
-                (directory / "part.map").read_text(encoding="utf-8", errors="replace")
-            )
-            return BoardArt(
-                name=name,
-                svg=(directory / "part.svg").read_bytes(),
-                width=width,
-                height=height,
-                regions=regions,
-            )
+        art = resolve_part_art(base / category / name)
+        if art is None:
+            continue
+        svg_path, map_path = art
+        width, height, regions = parse_map(
+            map_path.read_text(encoding="utf-8", errors="replace")
+        )
+        return BoardArt(
+            name=name,
+            svg=svg_path.read_bytes(),
+            width=width,
+            height=height,
+            regions=regions,
+        )
     raise AssetError(f"no part art for {name!r} under {base}")
 
 
