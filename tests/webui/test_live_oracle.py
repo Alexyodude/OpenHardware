@@ -199,3 +199,61 @@ def test_pin_count_matches_the_header(live: RControlClient):
     header = next(line for line in response.lines if "pins [" in line)
     promised = int(header.split()[0])
     assert len(parse_pins(response)) == promised
+
+
+# --- wiring, against a live simulator ---------------------------------------
+
+
+@pytest.fixture
+def buttons(api):
+    """Place a Push Buttons part and yield (index, schema). Cleans up after."""
+    import pathlib
+
+    from webui.parts.schema import load_all_schemas
+
+    schemas = load_all_schemas(
+        pathlib.Path(__file__).resolve().parents[2] / "webui" / "parts" / "schemas"
+    )
+    api.client.command("spshow 1")
+    index = api.place_part("Push Buttons", 100, 100)
+    yield index, schemas["Push Buttons"]
+    api.client.try_command(f"spdel {index}")
+
+
+def test_a_placed_part_matches_its_schema_arity(api, buttons):
+    """The cheapest proof a schema describes the running part."""
+    index, schema = buttons
+    wiring = api.read_wiring(index, schema)
+    assert len(wiring) == schema.arity
+
+
+def test_a_freshly_placed_part_has_no_connections(api, buttons):
+    index, schema = buttons
+    wiring = api.read_wiring(index, schema)
+    assert all(wiring[f.label] == 0 for _, f in schema.pin_fields)
+
+
+def test_a_wiring_change_round_trips(api, buttons):
+    """Write a pin, read it back. Proves configuration, NOT conduction.
+
+    Nothing here shows a signal reaches the pin — that needs
+    get part[N].in[M], which returns ERROR on a headlessly placed part
+    (docs/known-issues.md 4a.5). This asserts only that the simulator stored
+    what it was told.
+    """
+    index, schema = buttons
+    api.connect(index, schema, "B1", 7)
+    assert api.read_wiring(index, schema)["B1"] == 7
+
+    api.disconnect(index, schema, "B1")
+    assert api.read_wiring(index, schema)["B1"] == 0
+
+
+def test_settings_survive_a_pin_write(api, buttons):
+    """connect() rewrites the whole string, so it must not disturb settings."""
+    index, schema = buttons
+    before = api.read_wiring(index, schema)
+    api.connect(index, schema, "B2", 5)
+    after = api.read_wiring(index, schema)
+    assert after["active"] == before["active"]
+    assert after["Size"] == before["Size"]
