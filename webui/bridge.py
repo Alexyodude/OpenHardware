@@ -188,8 +188,22 @@ def _switch_board(api: SimulatorApi, name: str) -> dict:
     if previous is not None and previous.poll() is None:
         previous.terminate()
 
+    # No console window, and no inherited pipes.
+    #
+    # On Windows every child process gets its own console unless told not to,
+    # so each board switch popped a window in front of whatever the operator
+    # was doing -- from a UI they were driving in a browser. CREATE_NO_WINDOW
+    # exists only on Windows, hence the guard rather than a platform check.
+    #
+    # stdout and stderr go to DEVNULL as well: an inherited pipe nobody reads
+    # fills and blocks the simulator once it has written enough, which would
+    # look like the board hanging some minutes after a switch.
+    options: dict = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        options["creationflags"] = subprocess.CREATE_NO_WINDOW
+
     try:
-        self_held = subprocess.Popen(argv)
+        self_held = subprocess.Popen(argv, **options)
     except OSError as exc:
         raise BridgeError(f"could not run {argv[0]!r}: {exc}") from exc
     LAUNCH["process"] = self_held

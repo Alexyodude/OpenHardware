@@ -133,3 +133,34 @@ def test_builders_name_parts_that_actually_exist():
     assert named, "no builders found; the parse above is wrong"
     unknown = named - set(available_parts())
     assert not unknown, f"builders for parts that do not ship: {sorted(unknown)}"
+
+
+# --- launching the simulator, added 2026-08-12 -------------------------------
+
+
+def test_switching_boards_opens_no_console_window():
+    """Every switch popped a Windows console in front of the browser UI.
+
+    `subprocess.Popen` gives a child its own console on Windows unless told
+    otherwise, so driving the simulator from a web page threw up a window each
+    time a board changed. The flag exists only on Windows, so the guard is a
+    `hasattr` rather than a platform test -- that way the same code is correct
+    on Linux, where there is nothing to suppress.
+    """
+    bridge = (
+        pathlib.Path(__file__).resolve().parents[2] / "webui" / "bridge.py"
+    ).read_text(encoding="utf-8")
+    assert 'hasattr(subprocess, "CREATE_NO_WINDOW")' in bridge
+    assert "creationflags" in bridge
+
+
+def test_the_launched_simulator_gets_no_inherited_pipes():
+    """An unread pipe fills and blocks the simulator minutes later.
+
+    That failure arrives long after the switch that caused it and looks like
+    the board hanging, so it is worth pinning rather than rediscovering.
+    """
+    bridge = (
+        pathlib.Path(__file__).resolve().parents[2] / "webui" / "bridge.py"
+    ).read_text(encoding="utf-8")
+    assert "subprocess.DEVNULL" in bridge
