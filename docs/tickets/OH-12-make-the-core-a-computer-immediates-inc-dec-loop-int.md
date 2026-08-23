@@ -2,7 +2,7 @@
 id: OH-12
 title: 'Make the core a computer: immediates, INC/DEC, LOOP, INT, and the rest of
   the 8086'
-status: open
+status: done
 priority: P1
 owner: session/isa
 created: '2026-08-23'
@@ -10,7 +10,8 @@ touches:
 - core/i8086/decode.*
 - core/i8086/exec_core.*
 - core/i8086/CMakeLists.txt
-- tests/i8086/test_isa_rest.py
+- tests/i8086/test_programs.py
+- tests/i8086/test_isa_full.py
 - tests/i8086/test_abi.py
 ---
 

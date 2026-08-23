@@ -23,6 +23,17 @@ from core.i8086 import abi
 #: The initial state of the first case in tests/fixtures/sst8088/90.json.
 #: Real values from a real capture, so nothing here is a shape the corpus
 #: cannot produce.
+#: The eight bytes that are prefixes rather than opcodes.
+#:
+#: 26/2E/36/3E are the segment overrides and F0-F3 are LOCK, its undocumented
+#: second encoding, REPNE and REP. Nothing else in the 256 is unclaimed.
+#:
+#: The four segment overrides sit exactly where the last four ALU groups would
+#: put `PUSH sreg`, which is why the pattern claiming the stack ops has to
+#: stop at 0x20: below it, form 6 is PUSH ES/CS/SS/DS; above it, form 6 is a
+#: prefix and form 7 is a BCD adjust.
+PREFIX_BYTES = {0x26, 0x2E, 0x36, 0x3E, 0xF0, 0xF1, 0xF2, 0xF3}
+
 ORACLE_CASE = {
     "ax": 22348, "bx": 20994, "cx": 55040, "dx": 35727,
     "cs": 30669, "ss": 7470, "ds": 56187, "es": 16953,
@@ -261,38 +272,58 @@ def test_the_raw_word_accessor_is_not_segment_aware(cpu):
 
 
 def test_the_opcode_table_is_the_only_authority(library):
-    """Sweeps all 256. Asserted as structure, not a list of 73 numbers.
+    """Sweeps all 256, and the map is now complete.
 
-    The map fills in by families, so a family is what a reader can check. An
-    explicit list would have to be edited on every addition and would stop
-    being read after the second time.
+    This used to enumerate families, because for four tickets only some of
+    them existed and a set of families was the only readable way to say which.
+    That is over: **every opcode the 8086 defines is implemented**, and the
+    only four bytes reporting otherwise are prefixes, which are not opcodes at
+    all -- see the test below.
+
+    Asserted as "everything except the prefixes" rather than as a list,
+    because the interesting property now is completeness, and a list of 252
+    numbers states it far worse than one sentence does.
     """
     implemented = {op for op in range(256) if abi.opcode_info(op)[0]}
+    assert implemented == set(range(256)) - PREFIX_BYTES
 
-    # ALU group: 0x00-0x3F, but only forms 0-3 of each eight. Forms 4 and 5
-    # take an immediate and 6/7 are segment stack ops; none are written yet.
-    alu = {op for op in range(0x00, 0x40) if (op & 0x07) <= 0x03}
-    alu_imm = {op for op in range(0x00, 0x40) if (op & 0x07) in (0x04, 0x05)}
-    group1 = {0x80, 0x81, 0x82, 0x83}    # ALU r/m,imm -- 0x82 aliases 0x80
-    test_imm = {0xA8, 0xA9}
-    moffs = {0xA0, 0xA1, 0xA2, 0xA3}     # MOV accumulator <-> direct address
-    mov_imm = set(range(0xB0, 0xC0)) | {0xC6, 0xC7}
-    inc_dec = set(range(0x40, 0x50))     # INC/DEC r16
-    groups_45 = {0xFE, 0xFF}             # INC/DEC r/m, and indirect CALL/JMP/PUSH
-    stack = set(range(0x50, 0x60))       # PUSH/POP r16
-    jcc = set(range(0x70, 0x80))         # all sixteen conditions
-    mov = {0x88, 0x89, 0x8A, 0x8B}
-    shift = set(range(0xD0, 0xD4))       # the whole group, all eight members
-    port = {0xE4, 0xE5, 0xE6, 0xE7, 0xEC, 0xED, 0xEE, 0xEF}   # IN/OUT
-    flag_ops = {0xF5, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD}     # CMC..STD
-    bcd = {0x27, 0x2F, 0x37, 0x3F, 0xD4, 0xD5}   # DAA DAS AAA AAS AAM AAD
-    string = {0xA4, 0xA5, 0xA6, 0xA7, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF}
-    group3 = {0xF6, 0xF7}    # TEST NOT NEG MUL IMUL DIV IDIV, by modrm reg
-    singles = {0x90, 0xC3, 0xE8, 0xE9, 0xEB}  # NOP RET CALL JMP JMPS
 
-    assert implemented == (alu | alu_imm | group1 | test_imm | moffs | mov_imm
-                           | inc_dec | groups_45 | stack | jcc | mov | shift
-                           | port | flag_ops | bcd | string | group3 | singles)
+def test_the_prefix_bytes_are_not_opcodes(library):
+    """The eight prefix bytes report `implemented = False`, and that is right.
+
+    Four segment overrides, LOCK, its undocumented second encoding, REPNE and
+    REP. The decoder consumes them in its prefix loop before it reaches an
+    opcode,
+    so `Lookup` is never asked about them in anger -- and answering "yes" would
+    be worse, because it would claim they can be executed on their own.
+
+    The distinction matters to a disassembler, which must show `F3 A4` as one
+    instruction and not two.
+    """
+    for byte in sorted(PREFIX_BYTES):
+        assert not abi.opcode_info(byte)[0], f"{byte:02X} is a prefix, not an opcode"
+
+
+def test_a_prefixed_instruction_is_one_instruction(library):
+    """The consequence of the above, checked rather than asserted in prose."""
+    with abi.Cpu() as cpu:
+        cpu.set_regs(cs=0x0000, ip=0x0000)
+        cpu.write_block(0x00000, bytes([0xF3, 0xA4]))     # rep movsb
+        decoded = cpu.decode()
+        assert decoded.opcode == 0xA4
+        assert decoded.length == 2
+
+
+def test_the_segment_stack_ops_are_implemented_including_the_one_with_no_oracle(library):
+    """PUSH/POP ES, CS, SS and DS.
+
+    0x0F is POP CS. The part executes it, and **SST8088 has no file for it** --
+    it is the only instruction in the core with no hardware oracle behind it,
+    written by symmetry with the other three. That is recorded here rather
+    than left for someone to discover from a missing download.
+    """
+    for opcode in (0x06, 0x07, 0x0E, 0x0F, 0x16, 0x17, 0x1E, 0x1F):
+        assert abi.opcode_info(opcode)[0], f"{opcode:02X} is not implemented"
 
 
 def test_the_immediate_alu_forms_carry_no_modrm(library):
@@ -320,12 +351,6 @@ def test_the_immediate_alu_forms_carry_no_modrm(library):
             assert wide == (form == 0x05), f"{opcode:02X} has the wrong width"
 
 
-def test_the_segment_stack_ops_are_still_unwritten(library):
-    """Form 6 and 7 of the first four ALU groups: PUSH/POP ES, CS, SS, DS."""
-    for opcode in (0x06, 0x07, 0x0E, 0x0F, 0x16, 0x17, 0x1E, 0x1F):
-        assert not abi.opcode_info(opcode)[0], f"{opcode:02X} claims to be implemented"
-
-
 def test_the_alu_group_width_follows_opcode_bit_zero(library):
     for op in range(0x00, 0x40):
         if (op & 0x07) > 0x03:
@@ -339,5 +364,16 @@ def test_push_and_pop_are_always_wide(library):
         assert abi.opcode_is_wide(op), f"{op:02X} should be 16-bit"
 
 
-def test_an_unknown_opcode_is_not_implemented(library):
-    assert abi.opcode_info(0xF4) == (False, False)
+def test_halt_is_implemented_and_reports_itself_as_stopped(library):
+    """HLT is the one instruction with no corpus file -- it cannot be
+    single-stepped on a capture rig, because the rig's next step never comes.
+
+    So it is checked here by hand, and it must be distinguishable from an
+    opcode nobody has written: `step` returns False rather than raising.
+    """
+    assert abi.opcode_info(0xF4)[0], "HLT is implemented"
+    with abi.Cpu() as cpu:
+        cpu.set_regs(cs=0x0000, ip=0x0000)
+        cpu.write_block(0x00000, bytes([0x90, 0xF4]))
+        assert cpu.step() is True, "NOP keeps running"
+        assert cpu.step() is False, "HLT stops"

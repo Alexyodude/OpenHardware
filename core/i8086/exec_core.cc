@@ -467,6 +467,7 @@ StepStatus Step(Cpu& cpu) {
             }
             case 3: {  // CALL far, through a memory pair -- offset then segment
                 if (rm.is_register) {
+                    cpu.regs().ip = entry_ip;           // refuse cleanly
                     return StepStatus::kUnimplemented;  // m16:16 only
                 }
                 const std::uint16_t segment = SegmentValue(cpu.regs(), rm.segment);
@@ -484,6 +485,7 @@ StepStatus Step(Cpu& cpu) {
                 return StepStatus::kOk;
             case 5: {  // JMP far, indirect
                 if (rm.is_register) {
+                    cpu.regs().ip = entry_ip;
                     return StepStatus::kUnimplemented;
                 }
                 const std::uint16_t segment = SegmentValue(cpu.regs(), rm.segment);
@@ -494,6 +496,12 @@ StepStatus Step(Cpu& cpu) {
                 cpu.regs().ip = offset;
                 return StepStatus::kOk;
             }
+            case 7:
+                // Group 5 has no eighth member. IP goes back, because a
+                // refused instruction must leave the processor exactly where
+                // it was -- that is what abi.h promises a caller.
+                cpu.regs().ip = entry_ip;
+                return StepStatus::kUnimplemented;
             case 6: {  // PUSH r/m16
                 // Decrement, then read -- the same order as 50-57, and for
                 // the same measured reason. `FF F4` (PUSH SP) stores the
@@ -503,6 +511,7 @@ StepStatus Step(Cpu& cpu) {
                 return StepStatus::kOk;
             }
             default:
+                cpu.regs().ip = entry_ip;
                 return StepStatus::kUnimplemented;
         }
     }
@@ -536,8 +545,8 @@ StepStatus Step(Cpu& cpu) {
         return StepStatus::kOk;
     }
 
-    // --- Jcc rel8 ----------------------------------------------------------
-    if (opcode >= 0x70 && opcode <= 0x7F) {
+    // --- Jcc rel8, and its undocumented second copy at 0x60-0x6F -----------
+    if (opcode >= 0x60 && opcode <= 0x7F) {
         if (Condition(static_cast<std::uint8_t>(opcode & 0x0F), cpu.regs().flags)) {
             cpu.regs().ip = static_cast<std::uint16_t>(next_ip + instruction.immediate);
         }
@@ -632,6 +641,61 @@ StepStatus Step(Cpu& cpu) {
         return StepStatus::kOk;
     }
 
+    // --- PUSH/POP a segment register ---------------------------------------
+    // Opcode bits 4:3 name the register in the same order Segment does, and
+    // bit 0 is the direction.
+    // `< 0x20` for the same reason as in Lookup: 27, 2F, 37 and 3F are the
+    // BCD adjusts, not stack ops, and a wider test shadows them.
+    if (opcode < 0x20 && (opcode & 0x07) >= 0x06) {
+        const Segment which = static_cast<Segment>((opcode >> 3) & 0x03);
+        if ((opcode & 0x01) == 0) {
+            Push(cpu, SegmentValue(cpu.regs(), which));
+            return StepStatus::kOk;
+        }
+        const std::uint16_t value = Pop(cpu);
+        switch (which) {
+            case Segment::kEs: cpu.regs().es = value; break;
+            // 0x0F is POP CS. The part executes it -- it is not an invalid
+            // opcode -- but **SST8088 has no file for it**, so this line is
+            // the one instruction in the core with no hardware oracle behind
+            // it. Written by symmetry with the other three and labelled as
+            // such rather than left to refuse, because refusing would be an
+            // equally unverified claim in the other direction.
+            case Segment::kCs: cpu.regs().cs = value; break;
+            case Segment::kSs: cpu.regs().ss = value; break;
+            default: cpu.regs().ds = value; break;
+        }
+        return StepStatus::kOk;
+    }
+
+    // --- XCHG AX, r16 -------------------------------------------------------
+    if (opcode >= 0x91 && opcode <= 0x97) {
+        const std::uint16_t other = ReadWordRegister(cpu.regs(), instruction.reg_in_opcode);
+        WriteWordRegister(cpu.regs(), instruction.reg_in_opcode, cpu.regs().ax);
+        cpu.regs().ax = other;
+        return StepStatus::kOk;
+    }
+
+    // --- LOOP and JCXZ ------------------------------------------------------
+    // LOOP counts CX down and jumps while it is not zero; JCXZ jumps when it
+    // already is and **does not decrement**. None of the four touches a flag.
+    if (opcode >= 0xE0 && opcode <= 0xE3) {
+        bool taken = false;
+        if (opcode == 0xE3) {  // JCXZ
+            taken = cpu.regs().cx == 0;
+        } else {
+            cpu.regs().cx = static_cast<std::uint16_t>(cpu.regs().cx - 1);
+            const bool zero = HasFlag(cpu.regs().flags, kZero);
+            taken = cpu.regs().cx != 0 &&
+                    (opcode == 0xE2 ||                    // LOOP, no condition
+                     (opcode == 0xE1 ? zero : !zero));    // LOOPZ / LOOPNZ
+        }
+        if (taken) {
+            cpu.regs().ip = static_cast<std::uint16_t>(next_ip + instruction.immediate);
+        }
+        return StepStatus::kOk;
+    }
+
     switch (opcode) {
         case 0x88:
         case 0x89:
@@ -649,6 +713,198 @@ StepStatus Step(Cpu& cpu) {
 
         case 0x90:  // NOP, which is XCHG AX,AX and touches nothing.
             return StepStatus::kOk;
+        case 0x9B:  // WAIT -- waits for a coprocessor that is not fitted
+            return StepStatus::kOk;
+        case 0xF4:  // HLT
+            // The one instruction with no corpus file: it cannot be
+            // single-stepped on the capture rig, because the rig's next step
+            // never arrives. Its behaviour is not in doubt, but this line is
+            // checked by hand-written tests only, and says so.
+            return StepStatus::kHalted;
+
+        case 0x84:    // TEST r/m8, r8
+        case 0x85: {  // TEST r/m16, r16
+            std::uint16_t flags = cpu.regs().flags;
+            Alu(AluKind::kAnd, Read(cpu, ResolveRm(cpu, instruction)),
+                Read(cpu, RegOperand(instruction)), instruction.wide, flags);
+            cpu.regs().flags = static_cast<std::uint16_t>(flags | kFlagsAlwaysSet);
+            return StepStatus::kOk;
+        }
+
+        case 0xC4:    // LES r16, m16:16
+        case 0xC5: {  // LDS r16, m16:16
+            // Loads a far pointer in one instruction: the offset into the
+            // named register and the segment into ES or DS.
+            const Operand rm = ResolveRm(cpu, instruction);
+            if (rm.is_register) {
+                cpu.regs().ip = entry_ip;
+                return StepStatus::kUnimplemented;  // m16:16 only
+            }
+            const std::uint16_t from = SegmentValue(cpu.regs(), rm.segment);
+            const std::uint16_t offset = cpu.ReadWordAt(from, rm.offset);
+            const std::uint16_t segment =
+                cpu.ReadWordAt(from, static_cast<std::uint16_t>(rm.offset + 2));
+            WriteWordRegister(cpu.regs(), instruction.modrm.reg, offset);
+            if (opcode == 0xC4) {
+                cpu.regs().es = segment;
+            } else {
+                cpu.regs().ds = segment;
+            }
+            return StepStatus::kOk;
+        }
+
+        case 0xD6:  // SALC -- AL becomes 0xFF when CF is set, 0x00 when not
+            WriteByteRegister(cpu.regs(), 0,
+                              HasFlag(cpu.regs().flags, kCarry) ? 0xFF : 0x00);
+            return StepStatus::kOk;
+
+        // The coprocessor escapes. The effective address is computed -- and
+        // on real hardware driven onto the bus for an 8087 to see -- and with
+        // nothing fitted, that is the whole of it.
+        case 0xD8: case 0xD9: case 0xDA: case 0xDB:
+        case 0xDC: case 0xDD: case 0xDE: case 0xDF:
+            return StepStatus::kOk;
+
+        // Undocumented second encodings of the returns.
+        case 0xC1:  // as C3
+            cpu.regs().ip = Pop(cpu);
+            return StepStatus::kOk;
+        case 0xC0:  // as C2
+            cpu.regs().ip = Pop(cpu);
+            cpu.regs().sp =
+                static_cast<std::uint16_t>(cpu.regs().sp + instruction.immediate);
+            return StepStatus::kOk;
+        case 0xC9:  // as CB
+            cpu.regs().ip = Pop(cpu);
+            cpu.regs().cs = Pop(cpu);
+            return StepStatus::kOk;
+        case 0xC8:  // as CA
+            cpu.regs().ip = Pop(cpu);
+            cpu.regs().cs = Pop(cpu);
+            cpu.regs().sp =
+                static_cast<std::uint16_t>(cpu.regs().sp + instruction.immediate);
+            return StepStatus::kOk;
+
+        // --- interrupts ------------------------------------------------------
+        case 0xCC:  // INT3
+            RaiseInterrupt(cpu, 3, next_ip);
+            return StepStatus::kOk;
+        case 0xCD:  // INT imm8
+            RaiseInterrupt(cpu, static_cast<std::uint8_t>(instruction.immediate), next_ip);
+            return StepStatus::kOk;
+        case 0xCE:  // INTO -- a conditional trap, and the condition is OF
+            if (HasFlag(cpu.regs().flags, kOverflow)) {
+                RaiseInterrupt(cpu, 4, next_ip);
+            }
+            return StepStatus::kOk;
+        case 0xCF:  // IRET
+            cpu.regs().ip = Pop(cpu);
+            cpu.regs().cs = Pop(cpu);
+            cpu.regs().flags = static_cast<std::uint16_t>(Pop(cpu) | kFlagsAlwaysSet);
+            return StepStatus::kOk;
+
+        // --- far transfers and the returns that unwind arguments ------------
+        case 0x9A:  // CALL far
+            Push(cpu, cpu.regs().cs);
+            Push(cpu, next_ip);
+            cpu.regs().cs = static_cast<std::uint16_t>(instruction.displacement);
+            cpu.regs().ip = static_cast<std::uint16_t>(instruction.immediate);
+            return StepStatus::kOk;
+        case 0xEA:  // JMP far
+            cpu.regs().cs = static_cast<std::uint16_t>(instruction.displacement);
+            cpu.regs().ip = static_cast<std::uint16_t>(instruction.immediate);
+            return StepStatus::kOk;
+        case 0xC2:  // RET imm16 -- return, then drop the caller's arguments
+            cpu.regs().ip = Pop(cpu);
+            cpu.regs().sp =
+                static_cast<std::uint16_t>(cpu.regs().sp + instruction.immediate);
+            return StepStatus::kOk;
+        case 0xCB:  // RETF
+            cpu.regs().ip = Pop(cpu);
+            cpu.regs().cs = Pop(cpu);
+            return StepStatus::kOk;
+        case 0xCA:  // RETF imm16
+            cpu.regs().ip = Pop(cpu);
+            cpu.regs().cs = Pop(cpu);
+            cpu.regs().sp =
+                static_cast<std::uint16_t>(cpu.regs().sp + instruction.immediate);
+            return StepStatus::kOk;
+
+        // --- addresses and segment registers ---------------------------------
+        case 0x8D: {  // LEA -- the ADDRESS, not what is at it
+            const Address address =
+                EffectiveAddress(cpu.regs(), instruction.modrm, instruction.displacement,
+                                 instruction.segment_override);
+            WriteWordRegister(cpu.regs(), instruction.modrm.reg, address.offset);
+            return StepStatus::kOk;
+        }
+        case 0x8C: {  // MOV r/m16, sreg
+            const Segment which = static_cast<Segment>(instruction.modrm.reg & 0x03);
+            Write(cpu, ResolveRm(cpu, instruction), SegmentValue(cpu.regs(), which));
+            return StepStatus::kOk;
+        }
+        case 0x8E: {  // MOV sreg, r/m16
+            const std::uint16_t value = Read(cpu, ResolveRm(cpu, instruction));
+            switch (static_cast<Segment>(instruction.modrm.reg & 0x03)) {
+                case Segment::kEs: cpu.regs().es = value; break;
+                case Segment::kCs: cpu.regs().cs = value; break;
+                case Segment::kSs: cpu.regs().ss = value; break;
+                default: cpu.regs().ds = value; break;
+            }
+            return StepStatus::kOk;
+        }
+        case 0x8F:  // POP r/m16
+            Write(cpu, ResolveRm(cpu, instruction), Pop(cpu));
+            return StepStatus::kOk;
+
+        case 0x86:    // XCHG r/m8, r8
+        case 0x87: {  // XCHG r/m16, r16
+            const Operand rm = ResolveRm(cpu, instruction);
+            const Operand reg = RegOperand(instruction);
+            const std::uint16_t left = Read(cpu, rm);
+            const std::uint16_t right = Read(cpu, reg);
+            Write(cpu, rm, right);
+            Write(cpu, reg, left);
+            return StepStatus::kOk;
+        }
+
+        // --- sign extension, the flag byte, and the table lookup -------------
+        case 0x98:  // CBW -- AL's sign fills AH
+            cpu.regs().ax = static_cast<std::uint16_t>(
+                static_cast<std::int16_t>(static_cast<std::int8_t>(cpu.regs().ax & 0xFF)));
+            return StepStatus::kOk;
+        case 0x99:  // CWD -- AX's sign fills DX
+            cpu.regs().dx =
+                (cpu.regs().ax & 0x8000) != 0 ? 0xFFFF : 0x0000;
+            return StepStatus::kOk;
+
+        case 0x9C:  // PUSHF
+            Push(cpu, cpu.regs().flags);
+            return StepStatus::kOk;
+        case 0x9D:  // POPF
+            cpu.regs().flags = static_cast<std::uint16_t>(Pop(cpu) | kFlagsAlwaysSet);
+            return StepStatus::kOk;
+        case 0x9E:  // SAHF -- AH replaces the low byte of FLAGS
+            // Only the five flags that live below bit 8, and bit 1 stays high.
+            cpu.regs().flags = static_cast<std::uint16_t>(
+                (cpu.regs().flags & 0xFF00) |
+                (ReadByteRegister(cpu.regs(), 4) & 0xD5) | 0x02);
+            return StepStatus::kOk;
+        case 0x9F:  // LAHF
+            WriteByteRegister(cpu.regs(), 4,
+                              static_cast<std::uint8_t>(cpu.regs().flags & 0xFF));
+            return StepStatus::kOk;
+
+        case 0xD7: {  // XLAT -- AL becomes the byte at [BX + AL]
+            const Segment which = instruction.segment_override == Segment::kNone
+                                      ? Segment::kDs
+                                      : instruction.segment_override;
+            const std::uint16_t offset = static_cast<std::uint16_t>(
+                cpu.regs().bx + (cpu.regs().ax & 0xFF));
+            WriteByteRegister(cpu.regs(), 0,
+                              cpu.ReadByte(Physical(SegmentValue(cpu.regs(), which), offset)));
+            return StepStatus::kOk;
+        }
 
         // --- TEST accumulator,immediate -------------------------------------
         case 0xA8:

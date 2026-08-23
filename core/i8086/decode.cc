@@ -46,9 +46,30 @@ OpcodeInfo Lookup(std::uint8_t opcode) {
     if (opcode >= 0x50 && opcode <= 0x5F) {
         return {true, Form::kRegInOpcode, true};
     }
-    // Jcc rel8, all sixteen conditions.
-    if (opcode >= 0x70 && opcode <= 0x7F) {
+    // Jcc rel8, all sixteen conditions -- **twice**. 0x60-0x6F is an
+    // undocumented second copy of 0x70-0x7F on this part; the corpus
+    // disassembles 0x60 as `jo` and 0x6F as `jnle`, 10,000 cases each. The
+    // 80186 reused the range for PUSHA and friends, which is why an emulator
+    // written from a later manual refuses these.
+    if (opcode >= 0x60 && opcode <= 0x7F) {
         return {true, Form::kRel8, false};
+    }
+    // PUSH/POP a segment register. The register is opcode bits 4:3 and the
+    // direction is bit 0. 0x0F is POP CS, which the part really does execute
+    // and which SST8088 has no file for -- see the executor.
+    //
+    // **`< 0x20`, not `< 0x40`.** Only the FIRST FOUR ALU groups put segment
+    // stack ops in forms 6 and 7; the last four put DAA, DAS, AAA and AAS
+    // there. Written as `< 0x40` this pattern silently swallowed all four
+    // adjusts -- they matched here and never reached their own cases below --
+    // and took them from 100% to 0.00% while every other opcode stayed green.
+    // The comment above IsAluModRmForm warns about exactly this shadowing.
+    if (opcode < 0x20 && (opcode & 0x07) >= 0x06) {
+        return {true, Form::kNone, true};
+    }
+    // XCHG AX, r16. 0x90 is XCHG AX,AX, which is NOP and handled below.
+    if (opcode >= 0x91 && opcode <= 0x97) {
+        return {true, Form::kRegInOpcode, true};
     }
     // INC r16 (40-47) and DEC r16 (48-4F). Always 16-bit; the byte forms
     // live in group 4 (FE) instead.
@@ -162,6 +183,59 @@ OpcodeInfo Lookup(std::uint8_t opcode) {
         case 0xF6: return {true, Form::kGroup3, false};
         case 0xF7: return {true, Form::kGroup3, true};
 
+        case 0x84: return {true, Form::kModRm, false};      // TEST r/m8, r8
+        case 0x85: return {true, Form::kModRm, true};       // TEST r/m16, r16
+        case 0xC4: return {true, Form::kModRm, true};       // LES r16, m16:16
+        case 0xC5: return {true, Form::kModRm, true};       // LDS r16, m16:16
+        case 0xD6: return {true, Form::kNone, false};       // SALC
+        case 0x9B: return {true, Form::kNone, false};       // WAIT
+        case 0xF4: return {true, Form::kNone, false};       // HLT
+
+        // The coprocessor escapes. With no 8087 attached they compute an
+        // effective address, put nothing on the bus that anything answers,
+        // and continue. Claimed rather than refused because the corpus has
+        // 10,000 cases of each and they must decode at the right length --
+        // an ESC skipped as "unimplemented" desynchronises everything after.
+        case 0xD8: case 0xD9: case 0xDA: case 0xDB:
+        case 0xDC: case 0xDD: case 0xDE: case 0xDF:
+            return {true, Form::kModRm, false};
+
+        // Undocumented second encodings of the returns, all four verified.
+        case 0xC0: return {true, Form::kImm16, true};       // RET imm16, as C2
+        case 0xC1: return {true, Form::kNone, true};        // RET, as C3
+        case 0xC8: return {true, Form::kImm16, true};       // RETF imm16, as CA
+        case 0xC9: return {true, Form::kNone, true};        // RETF, as CB
+
+        // Control flow.
+        case 0xE0: return {true, Form::kRel8, false};      // LOOPNZ
+        case 0xE1: return {true, Form::kRel8, false};      // LOOPZ
+        case 0xE2: return {true, Form::kRel8, false};      // LOOP
+        case 0xE3: return {true, Form::kRel8, false};      // JCXZ
+        case 0xCC: return {true, Form::kNone, false};      // INT3
+        case 0xCD: return {true, Form::kImm8, false};      // INT imm8
+        case 0xCE: return {true, Form::kNone, false};      // INTO
+        case 0xCF: return {true, Form::kNone, true};       // IRET
+        case 0x9A: return {true, Form::kFarPointer, true}; // CALL far
+        case 0xEA: return {true, Form::kFarPointer, true}; // JMP far
+        case 0xC2: return {true, Form::kImm16, true};      // RET imm16
+        case 0xCA: return {true, Form::kImm16, true};      // RETF imm16
+        case 0xCB: return {true, Form::kNone, true};       // RETF
+
+        // Addresses, segment registers and the odds and ends.
+        case 0x8D: return {true, Form::kModRm, true};      // LEA
+        case 0x8C: return {true, Form::kModRm, true};      // MOV r/m16, sreg
+        case 0x8E: return {true, Form::kModRm, true};      // MOV sreg, r/m16
+        case 0x8F: return {true, Form::kModRm, true};      // POP r/m16
+        case 0x86: return {true, Form::kModRm, false};     // XCHG r/m8, r8
+        case 0x87: return {true, Form::kModRm, true};      // XCHG r/m16, r16
+        case 0x98: return {true, Form::kNone, false};      // CBW
+        case 0x99: return {true, Form::kNone, true};       // CWD
+        case 0x9C: return {true, Form::kNone, true};       // PUSHF
+        case 0x9D: return {true, Form::kNone, true};       // POPF
+        case 0x9E: return {true, Form::kNone, false};      // SAHF
+        case 0x9F: return {true, Form::kNone, false};      // LAHF
+        case 0xD7: return {true, Form::kNone, false};      // XLAT
+
         case 0x90: return {true, Form::kNone, false};   // NOP
         case 0xC3: return {true, Form::kNone, true};    // RET near
         case 0xE8: return {true, Form::kRel16, true};   // CALL near
@@ -188,6 +262,11 @@ Instruction Decode(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip) {
             out.segment_override = segment;
         } else if (byte == kPrefixRepZ) {
             out.repeat = Rep::kWhileZero;
+        } else if (byte == kPrefixLock || byte == kPrefixLockAlias) {
+            // LOCK asserts a bus signal for one instruction. Nothing here has
+            // a bus to contend for, so it is consumed, counted in `length`,
+            // and otherwise ignored -- which is what the part does with it on
+            // a single-processor machine.
         } else if (byte == kPrefixRepNz) {
             out.repeat = Rep::kWhileNotZero;
         } else {
@@ -308,6 +387,17 @@ Instruction Decode(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip) {
                 out.immediate = static_cast<std::int16_t>(FetchAt(cpu, cs, ip, at));
                 ++at;
             }
+            break;
+        }
+
+        case Form::kFarPointer: {
+            const std::uint8_t offset_low = FetchAt(cpu, cs, ip, at);
+            const std::uint8_t offset_high = FetchAt(cpu, cs, ip, at + 1);
+            const std::uint8_t segment_low = FetchAt(cpu, cs, ip, at + 2);
+            const std::uint8_t segment_high = FetchAt(cpu, cs, ip, at + 3);
+            out.immediate = static_cast<std::int16_t>(offset_low | (offset_high << 8));
+            out.displacement = static_cast<std::int16_t>(segment_low | (segment_high << 8));
+            at += 4;
             break;
         }
 

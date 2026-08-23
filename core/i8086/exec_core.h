@@ -23,6 +23,16 @@ namespace i8086 {
 enum class StepStatus : std::uint8_t {
     kOk = 0,
     kUnimplemented = 1,
+    /// HLT ran. The processor is not broken and the instruction is not
+    /// missing -- it has stopped, and only an interrupt or a reset restarts
+    /// it.
+    ///
+    /// A distinct status rather than reusing kUnimplemented, because a caller
+    /// showing "this program ended" and one showing "this emulator is
+    /// incomplete" are answering different questions, and a UI that conflates
+    /// them tells the user the wrong one every time a program finishes
+    /// normally.
+    kHalted = 2,
 };
 
 /// The eight byte registers, in encoding order: AL CL DL BL AH CH DH BH.

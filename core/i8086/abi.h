@@ -40,7 +40,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define I8086_ABI_VERSION 5
+#define I8086_ABI_VERSION 6
 
 /// Mirrors i8086::Registers.
 ///
@@ -124,10 +124,18 @@ I8086_API int i8086_opcode_info(uint8_t opcode);
 
 /// Execute one instruction at CS:IP, advancing IP past it.
 ///
-/// Returns 0 on success and 1 for an opcode that is not implemented. On 1 the
-/// processor is untouched, including IP -- so a caller can report exactly
-/// which instruction stopped it, and a conformance case can never pass by
-/// accident because an unwritten opcode behaved like a NOP.
+/// Returns 0 on success, 1 for an opcode that is not implemented, and 2 when
+/// the instruction was HLT and the processor has stopped.
+///
+/// On 1 the processor is untouched, including IP -- so a caller can report
+/// exactly which instruction stopped it, and a conformance case can never
+/// pass by accident because an unwritten opcode behaved like a NOP.
+///
+/// 2 is separate from 1 because they mean opposite things to whoever is
+/// watching: a program that reaches HLT has *finished*, and one that reaches
+/// an unimplemented opcode has hit a hole in this emulator. Reporting both as
+/// a failure tells the user the wrong story every time a program ends
+/// normally.
 I8086_API int i8086_step(I8086Cpu* cpu);
 
 #ifdef __cplusplus

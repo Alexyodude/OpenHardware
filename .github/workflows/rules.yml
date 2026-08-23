@@ -90,12 +90,21 @@ jobs:
       #   83 B8 C7 81.0       the immediate forms, including 83's sign-extended
       #                       8-bit immediate on 16-bit operands
       #   40 48 FE.0 FF.2     INC/DEC, and the indirect CALL
+      #   E2 CD CF 9A         LOOP, INT n, IRET, far CALL
+      #   8D 8E C4 06         LEA, segment moves, LES, PUSH ES
+      #   60 D6 D8 C0         the undocumented four: a Jcc alias, SALC, a
+      #                       coprocessor escape, and a second RET encoding
+      #
+      # HLT has no corpus file at all -- it cannot be single-stepped, because
+      # the rig's next step never arrives -- so tests/i8086/test_abi.py checks
+      # it by hand instead.
       - name: Fetch a corpus slice
         run: >
           bash tools/get_8088_tests.sh --opcodes
           00 09 21 29 31 39 50 58 74 8B
           D0.4 D2.2 27 D4 A4 A6 E4 FC F6.4 F6.7
           54 FF.6 83 B8 C7 81.0 40 48 FE.0 FF.2
+          E2 CD CF 9A 8D 8E C4 06 60 D6 D8 C0
 
       - name: Core suite
         run: pytest tests/i8086/ -v

@@ -203,16 +203,19 @@ def test_an_unimplemented_opcode_raises(cpu):
     """Silently doing nothing would make an unwritten opcode behave like a
     NOP, and a conformance case whose expected state happened to match would
     then pass."""
+    # `FF /7` -- group 5 has seven members and this is the eighth slot.
+    # This used to use F4 (HLT), which is now implemented and reports itself
+    # as halted rather than missing; the two are deliberately distinct.
     cpu.set_regs(cs=0x0000, ip=0x0000)
-    cpu.write_block(0x00000, bytes([0xF4]))  # HLT, not implemented
-    with pytest.raises(abi.Unimplemented, match="F4"):
+    cpu.write_block(0x00000, bytes([0xFF, 0xF8]))
+    with pytest.raises(abi.Unimplemented, match="FF"):
         cpu.step()
 
 
 def test_an_unimplemented_opcode_leaves_ip_alone(cpu):
     """So the caller can report which instruction stopped it."""
     cpu.set_regs(cs=0x0000, ip=0x0123)
-    cpu.write_block(0x00123, bytes([0xF4]))
+    cpu.write_block(0x00123, bytes([0xFF, 0xF8]))
     with pytest.raises(abi.Unimplemented):
         cpu.step()
     assert cpu.regs.ip == 0x0123

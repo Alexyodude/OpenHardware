@@ -55,6 +55,10 @@ enum class Rep : std::uint8_t {
 constexpr std::uint8_t kPrefixRepNz = 0xF2;
 constexpr std::uint8_t kPrefixRepZ = 0xF3;
 
+/// LOCK, and the undocumented second encoding of it this part also accepts.
+constexpr std::uint8_t kPrefixLock = 0xF0;
+constexpr std::uint8_t kPrefixLockAlias = 0xF1;
+
 /// The mod-reg-rm byte, split.
 struct ModRm {
     std::uint8_t mod = 0;  ///< 0 memory, 1 memory+disp8, 2 memory+disp16, 3 register
@@ -161,6 +165,13 @@ enum class Form : std::uint8_t {
     /// A 16-bit direct address and no modrm, kept in `displacement`. A0-A3,
     /// the short forms of MOV to and from the accumulator.
     kMoffs = 10,
+    /// A full four-byte far pointer: offset then segment. 9A and EA.
+    ///
+    /// The offset lands in `immediate` and the segment in `displacement`.
+    /// Reusing two fields rather than adding a third: these are the only two
+    /// opcodes with this shape, and neither field means anything else for
+    /// them.
+    kFarPointer = 11,
 };
 
 /// What the decoder and the executor both need to know about an opcode.

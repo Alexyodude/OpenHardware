@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match I8086_ABI_VERSION in abi.h.
-ABI_VERSION = 5
+ABI_VERSION = 6
 
 #: Must match abi.h's field order exactly -- this is a struct mirror, and a
 #: reordering here reads the wrong bytes. It does NOT need to match the
@@ -55,6 +55,12 @@ class AbiError(Exception):
 
 class Unimplemented(AbiError):
     """The core reached an opcode nobody has written yet."""
+
+
+#: What i8086_step returns. Mirrors i8086::StepStatus.
+STEP_OK = 0
+STEP_UNIMPLEMENTED = 1
+STEP_HALTED = 2
 
 
 class Registers(ctypes.Structure):
@@ -309,20 +315,30 @@ class Cpu:
         )
         return out
 
-    def step(self) -> None:
-        """Execute one instruction, or raise naming the opcode that stopped it.
+    def step(self) -> bool:
+        """Execute one instruction. Returns False once the processor has halted.
 
-        Raising rather than returning a status: a caller that ignores a status
-        code turns an unimplemented opcode into a silent no-op, and a
-        conformance case whose expected state happens to match would then pass.
+        An **unimplemented** opcode raises, and does not return a status: a
+        caller that ignores a status code turns a missing opcode into a silent
+        no-op, and a conformance case whose expected state happens to match
+        would then pass.
+
+        A **halt** returns False instead, because it is not an error. HLT is
+        how a program says it has finished, and raising there would make every
+        successful run look like a crash. Existing callers ignore the return
+        value and are unaffected -- the corpus contains no HLT, since the
+        instruction cannot be single-stepped on the capture rig.
         """
         status = self._lib.i8086_step(self._check())
-        if status != 0:
+        if status == STEP_HALTED:
+            return False
+        if status != STEP_OK:
             current = self.decode()
             raise Unimplemented(
                 f"opcode {current.opcode:02X}h at "
                 f"{self.regs.cs:04X}:{self.regs.ip:04X} is not implemented"
             )
+        return True
 
 
 def opcode_info(opcode: int) -> tuple[bool, bool]:
