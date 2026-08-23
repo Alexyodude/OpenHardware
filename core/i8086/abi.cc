@@ -153,7 +153,8 @@ int i8086_step(I8086Cpu* cpu) {
 
 int i8086_opcode_info(uint8_t opcode) {
     const i8086::OpcodeInfo info = i8086::Lookup(opcode);
-    return (info.implemented ? 1 : 0) | (info.has_modrm ? 2 : 0);
+    return (info.implemented ? 1 : 0) | (info.has_modrm() ? 2 : 0) |
+           (info.wide ? 4 : 0);
 }
 
 uint32_t i8086_decoded_size(void) { return static_cast<uint32_t>(sizeof(I8086Decoded)); }

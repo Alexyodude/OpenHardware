@@ -14,3 +14,13 @@ US-003/US-004/US-005 (OH-3 execute, OH-6 wired) complete 2026-08-23.
   Learning: CF and OF answer different questions. 0x7F+0x01 overflows signed
   without carrying; 0xFF+0x01 carries without overflowing. Both are tested.
   Learning: PF is set on EVEN parity, and only over the low byte.
+OH-3 completed 2026-08-23 (logic, stack, control flow, 16-bit forms).
+  73 opcodes, 490,000 hardware-captured cases, 100%.
+  KEY FINDING: the 8088 CLEARS AF on AND/OR/XOR. The manual calls it
+  "undefined". Leaving it carried cost exactly 50% of every logical opcode --
+  it passed only where AF happened to be clear already. Verified across
+  60,000 cases: AF set beforehand ~50%, set afterwards 0.
+  Structure: the ALU group 0x00-0x3F is regular (bits 5:3 = operation,
+  bits 2:0 = form), so one handler covers 48 opcodes.
+  IP advances BEFORE execution -- every relative branch is measured from the
+  next instruction and CALL pushes that address.

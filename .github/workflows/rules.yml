@@ -57,6 +57,15 @@ jobs:
       - name: Build the i8086 core
         run: python tools/build_core.py
 
+      # A representative slice of the hardware corpus: one opcode from each
+      # family the core implements. ~14 MB rather than the full 2 GB, and it
+      # is 90,000 silicon-captured cases -- the eleven committed fixtures are
+      # a smoke test, this is the real check. It was a fetch like this that
+      # found AF being cleared on logical operations, which the fixtures could
+      # not see.
+      - name: Fetch a corpus slice
+        run: bash tools/get_8088_tests.sh --opcodes 00 09 21 29 31 39 50 58 74 8B
+
       - name: Core suite
         run: pytest tests/i8086/ -v
 

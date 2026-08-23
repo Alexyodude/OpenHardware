@@ -311,3 +311,29 @@ def test_every_add_case_matches_flags_exactly(cases):
     assert len(adds) == 4, "fixture assumption"
     report = conformance.run_cases(adds, conformance.core_step, name="add")
     assert report.passed == 4, "; ".join(f.describe() for f in report.failures)
+
+
+def test_the_fetched_corpus_passes_completely():
+    """Every fetched opcode file, every case, against silicon.
+
+    Skips when the corpus has not been fetched -- it is ~117 MB for the
+    opcodes implemented so far and git-ignored. When it IS present this is the
+    strongest check in the repository: the eleven committed cases are a
+    smoke test, and this is 10,000 hardware-captured cases per opcode.
+
+    It found the AF-on-logicals divergence that eleven cases could not: the
+    manual calls AF undefined after AND/OR/XOR, the silicon clears it, and
+    leaving it carried cost exactly half of every logical opcode.
+    """
+    corpus = pathlib.Path(__file__).resolve().parents[2] / "third_party" / "sst8088" / "v2"
+    if not corpus.is_dir():
+        pytest.skip("corpus absent; see tools/get_8088_tests.sh")
+    files = sst8088.opcode_files(corpus)
+    if not files:
+        pytest.skip("corpus directory is empty")
+
+    reports = [conformance.run_file(path, conformance.core_step) for path in files]
+    failing = [r for r in reports if r.failed]
+    assert not failing, "; ".join(
+        f"{r.name}: {r.passed}/{r.total} -- {r.failures[0].describe()}" for r in failing[:5]
+    )

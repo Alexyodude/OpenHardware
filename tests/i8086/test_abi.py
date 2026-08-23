@@ -261,23 +261,48 @@ def test_the_raw_word_accessor_is_not_segment_aware(cpu):
 
 
 def test_the_opcode_table_is_the_only_authority(library):
-    """Sweeps all 256. The decoder and executor read one table, so an opcode
-    cannot be implemented in one and unknown to the other."""
-    implemented = [op for op in range(256) if abi.opcode_info(op)[0]]
-    assert implemented == [0x00, 0x88, 0x90], (
-        f"implemented set changed: {[hex(o) for o in implemented]}. "
-        f"Update this list when an opcode lands."
-    )
+    """Sweeps all 256. Asserted as structure, not a list of 73 numbers.
+
+    The map fills in by families, so a family is what a reader can check. An
+    explicit list would have to be edited on every addition and would stop
+    being read after the second time.
+    """
+    implemented = {op for op in range(256) if abi.opcode_info(op)[0]}
+
+    # ALU group: 0x00-0x3F, but only forms 0-3 of each eight. Forms 4 and 5
+    # take an immediate and 6/7 are segment stack ops; none are written yet.
+    alu = {op for op in range(0x00, 0x40) if (op & 0x07) <= 0x03}
+    stack = set(range(0x50, 0x60))       # PUSH/POP r16
+    jcc = set(range(0x70, 0x80))         # all sixteen conditions
+    mov = {0x88, 0x89, 0x8A, 0x8B}
+    singles = {0x90, 0xC3, 0xE8, 0xE9, 0xEB}  # NOP RET CALL JMP JMPS
+
+    assert implemented == alu | stack | jcc | mov | singles
 
 
-def test_every_implemented_opcode_declares_its_modrm(library):
-    """A modrm mismatch decodes at the wrong length, so IP lands
-    mid-instruction and everything after it is garbage."""
-    expected = {0x00: True, 0x88: True, 0x90: False}
-    for opcode, wants_modrm in expected.items():
-        found, has_modrm = abi.opcode_info(opcode)
-        assert found, f"{opcode:02X} is no longer implemented"
-        assert has_modrm == wants_modrm, f"{opcode:02X} modrm flag flipped"
+def test_the_unwritten_alu_forms_are_refused(library):
+    """Forms 4-7 of the ALU group are NOT implemented, and must say so.
+
+    They decode at a different length -- an immediate rather than a modrm --
+    so treating them as implemented would advance IP wrongly.
+    """
+    for base in range(0x00, 0x40, 0x08):
+        for form in range(0x04, 0x08):
+            opcode = base + form
+            assert not abi.opcode_info(opcode)[0], f"{opcode:02X} claims to be implemented"
+
+
+def test_the_alu_group_width_follows_opcode_bit_zero(library):
+    for op in range(0x00, 0x40):
+        if (op & 0x07) > 0x03:
+            continue
+        assert abi.opcode_is_wide(op) == bool(op & 1), f"{op:02X} width wrong"
+
+
+def test_push_and_pop_are_always_wide(library):
+    """This part has no byte form of either."""
+    for op in range(0x50, 0x60):
+        assert abi.opcode_is_wide(op), f"{op:02X} should be 16-bit"
 
 
 def test_an_unknown_opcode_is_not_implemented(library):

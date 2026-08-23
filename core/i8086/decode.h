@@ -65,6 +65,14 @@ struct Instruction {
     /// Total length including prefixes. IP advances by exactly this, so an
     /// error here desynchronises every following instruction.
     std::uint8_t length = 0;
+    /// For kRel8 and kRel16: the signed displacement from the END of this
+    /// instruction. `74 71` is "jump 0x71 bytes past the byte after the 71".
+    std::int16_t immediate = 0;
+    /// For kRegInOpcode: the register the low three opcode bits name.
+    std::uint8_t reg_in_opcode = 0;
+    /// 16-bit operands, copied from the table so the executor need not look
+    /// the opcode up a second time.
+    bool wide = false;
     /// False when the prefix run exceeded kMaxLength and no opcode was ever
     /// reached. Execution must refuse an invalid instruction rather than run
     /// whatever byte the scan stopped on. See kMaxLength.
@@ -91,6 +99,15 @@ struct Address {
     std::uint16_t offset = 0;
 };
 
+/// The shape of an instruction's operands, which is what decides its length.
+enum class Form : std::uint8_t {
+    kNone = 0,          ///< opcode only (NOP, RET)
+    kModRm = 1,         ///< a modrm byte, and whatever displacement it implies
+    kRel8 = 2,          ///< one signed byte, relative to the next instruction
+    kRel16 = 3,         ///< two bytes, relative to the next instruction
+    kRegInOpcode = 4,   ///< the low three bits name a register (PUSH/POP)
+};
+
 /// What the decoder and the executor both need to know about an opcode.
 ///
 /// **One table, consulted by both.** These were two lists -- a switch in
@@ -103,7 +120,13 @@ struct Address {
 /// With ~200 opcodes still to add, that desync is a matter of when.
 struct OpcodeInfo {
     bool implemented = false;
-    bool has_modrm = false;
+    Form form = Form::kNone;
+    /// 16-bit operands. For most of the map this is opcode bit 0, but it is
+    /// stated per entry rather than computed, because the exceptions (PUSH,
+    /// the string ops, the far jumps) outnumber a rule worth trusting.
+    bool wide = false;
+
+    bool has_modrm() const { return form == Form::kModRm; }
 };
 
 /// Properties of an opcode. Unknown opcodes report `implemented = false`.

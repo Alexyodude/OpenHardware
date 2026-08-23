@@ -29,6 +29,15 @@ enum class StepStatus : std::uint8_t {
 std::uint8_t ReadByteRegister(const Registers& regs, std::uint8_t index);
 void WriteByteRegister(Registers& regs, std::uint8_t index, std::uint8_t value);
 
+/// The eight word registers: AX CX DX BX SP BP SI DI.
+///
+/// A different order from the byte registers, and a different order again from
+/// the way `Registers` declares its fields. Three orders that look similar and
+/// are not is exactly the kind of thing that produces a core which is right
+/// for AX and wrong for SI.
+std::uint16_t ReadWordRegister(const Registers& regs, std::uint8_t index);
+void WriteWordRegister(Registers& regs, std::uint8_t index, std::uint16_t value);
+
 /// Decode and execute the instruction at CS:IP, advancing IP past it.
 ///
 /// IP advances only on success. A `kUnimplemented` step leaves the processor

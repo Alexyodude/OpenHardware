@@ -14,18 +14,55 @@ std::uint8_t FetchAt(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip, int n) 
     return cpu.ReadByte(Physical(cs, offset));
 }
 
+/// The ALU group fills 0x00-0x3F in a regular pattern, and describing it as a
+/// pattern rather than sixty-four table rows is what keeps the table readable
+/// as the map fills in.
+///
+///   bits 5:3  operation:  ADD OR ADC SBB AND SUB XOR CMP
+///   bits 2:0  form:       0 r/m8,r8   1 r/m16,r16   2 r8,r/m8   3 r16,r/m16
+///                         4 AL,imm8   5 AX,imm16    6,7 segment PUSH/POP
+///
+/// Only forms 0-3 are claimed here. 4 and 5 take an immediate, 6 and 7 are
+/// segment-register stack ops; all four report unimplemented and are refused
+/// rather than decoded at the wrong length.
+bool IsAluModRmForm(std::uint8_t opcode) {
+    return opcode < 0x40 && (opcode & 0x07) <= 0x03;
+}
+
 }  // namespace
 
 OpcodeInfo Lookup(std::uint8_t opcode) {
+    if (IsAluModRmForm(opcode)) {
+        return {true, Form::kModRm, (opcode & 0x01) != 0};
+    }
+    // PUSH r16 (50-57) and POP r16 (58-5F). Always 16-bit: this part has no
+    // byte form of either.
+    if (opcode >= 0x50 && opcode <= 0x5F) {
+        return {true, Form::kRegInOpcode, true};
+    }
+    // Jcc rel8, all sixteen conditions.
+    if (opcode >= 0x70 && opcode <= 0x7F) {
+        return {true, Form::kRel8, false};
+    }
+
     switch (opcode) {
-        case 0x00: return {true, true};    // ADD r/m8, r8
-        case 0x88: return {true, true};    // MOV r/m8, r8
-        case 0x90: return {true, false};   // NOP
-        default: return {false, false};
+        // MOV, following the same direction/width pattern as the ALU group.
+        case 0x88: return {true, Form::kModRm, false};
+        case 0x89: return {true, Form::kModRm, true};
+        case 0x8A: return {true, Form::kModRm, false};
+        case 0x8B: return {true, Form::kModRm, true};
+
+        case 0x90: return {true, Form::kNone, false};   // NOP
+        case 0xC3: return {true, Form::kNone, true};    // RET near
+        case 0xE8: return {true, Form::kRel16, true};   // CALL near
+        case 0xE9: return {true, Form::kRel16, true};   // JMP near
+        case 0xEB: return {true, Form::kRel8, true};    // JMP short
+
+        default: return {false, Form::kNone, false};
     }
 }
 
-bool OpcodeHasModRm(std::uint8_t opcode) { return Lookup(opcode).has_modrm; }
+bool OpcodeHasModRm(std::uint8_t opcode) { return Lookup(opcode).has_modrm(); }
 
 Instruction Decode(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip) {
     Instruction out;
@@ -53,30 +90,51 @@ Instruction Decode(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip) {
     out.opcode = FetchAt(cpu, cs, ip, at);
     ++at;
 
-    if (OpcodeHasModRm(out.opcode)) {
-        out.has_modrm = true;
-        out.modrm = ModRm::From(FetchAt(cpu, cs, ip, at));
-        ++at;
+    const OpcodeInfo info = Lookup(out.opcode);
+    out.wide = info.wide;
 
-        if (out.modrm.mod == 1) {
-            // Sign-extended. 0x9C is -100, not 156, and getting this wrong
-            // puts the operand 256 bytes away from where hardware put it.
-            out.displacement = static_cast<std::int8_t>(FetchAt(cpu, cs, ip, at));
+    switch (info.form) {
+        case Form::kModRm: {
+            out.has_modrm = true;
+            out.modrm = ModRm::From(FetchAt(cpu, cs, ip, at));
             ++at;
-        } else if (out.modrm.mod == 2) {
-            const std::uint8_t low = FetchAt(cpu, cs, ip, at);
-            const std::uint8_t high = FetchAt(cpu, cs, ip, at + 1);
-            out.displacement = static_cast<std::int16_t>(low | (high << 8));
-            at += 2;
-        } else if (out.modrm.mod == 0 && out.modrm.rm == 6) {
-            // The one exception in the table: mod 0 rm 6 is not [bp], it is a
-            // direct 16-bit address. [bp] with no displacement is unreachable
-            // and is encoded as mod 1 with a zero disp8.
-            const std::uint8_t low = FetchAt(cpu, cs, ip, at);
-            const std::uint8_t high = FetchAt(cpu, cs, ip, at + 1);
-            out.displacement = static_cast<std::int16_t>(low | (high << 8));
-            at += 2;
+
+            if (out.modrm.mod == 1) {
+                // Sign-extended. 0x9C is -100, not 156, and getting this wrong
+                // puts the operand 256 bytes away from where hardware put it.
+                out.displacement = static_cast<std::int8_t>(FetchAt(cpu, cs, ip, at));
+                ++at;
+            } else if (out.modrm.mod == 2 || (out.modrm.mod == 0 && out.modrm.rm == 6)) {
+                // mod 2 is disp16. mod 0 rm 6 is the table's one exception: a
+                // direct 16-bit address, not [bp]. [bp] with no displacement
+                // is unreachable and encodes as mod 1 with a zero disp8.
+                const std::uint8_t low = FetchAt(cpu, cs, ip, at);
+                const std::uint8_t high = FetchAt(cpu, cs, ip, at + 1);
+                out.displacement = static_cast<std::int16_t>(low | (high << 8));
+                at += 2;
+            }
+            break;
         }
+
+        case Form::kRel8:
+            out.immediate = static_cast<std::int8_t>(FetchAt(cpu, cs, ip, at));
+            ++at;
+            break;
+
+        case Form::kRel16: {
+            const std::uint8_t low = FetchAt(cpu, cs, ip, at);
+            const std::uint8_t high = FetchAt(cpu, cs, ip, at + 1);
+            out.immediate = static_cast<std::int16_t>(low | (high << 8));
+            at += 2;
+            break;
+        }
+
+        case Form::kRegInOpcode:
+            out.reg_in_opcode = static_cast<std::uint8_t>(out.opcode & 0x07);
+            break;
+
+        case Form::kNone:
+            break;
     }
 
     out.length = static_cast<std::uint8_t>(at);

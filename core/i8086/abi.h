@@ -118,8 +118,8 @@ I8086_API void i8086_decode(const I8086Cpu* cpu, uint16_t cs, uint16_t ip,
                             I8086Decoded* out);
 I8086_API uint32_t i8086_decoded_size(void);
 
-/// Bit 0: implemented. Bit 1: takes a modrm byte. From the single table both
-/// the decoder and the executor consult.
+/// Bit 0: implemented. Bit 1: takes a modrm byte. Bit 2: 16-bit operands.
+/// From the single table both the decoder and the executor consult.
 I8086_API int i8086_opcode_info(uint8_t opcode);
 
 /// Execute one instruction at CS:IP, advancing IP past it.

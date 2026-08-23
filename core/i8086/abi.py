@@ -329,3 +329,8 @@ def opcode_info(opcode: int) -> tuple[bool, bool]:
     """(implemented, has_modrm) for an opcode, from the core's own table."""
     bits = int(load().i8086_opcode_info(opcode & 0xFF))
     return bool(bits & 1), bool(bits & 2)
+
+
+def opcode_is_wide(opcode: int) -> bool:
+    """True when the opcode's operands are 16-bit."""
+    return bool(int(load().i8086_opcode_info(opcode & 0xFF)) & 4)

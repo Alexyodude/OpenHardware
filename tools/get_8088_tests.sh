@@ -13,16 +13,58 @@
 # (8441DMA, 1982) in Maximum Mode via the Arduino8088 interface. It is the only
 # non-software oracle this project has.
 #
-#   bash tools/get_8088_tests.sh              # v2, the current suite
-#   bash tools/get_8088_tests.sh v2_undefined # undefined-opcode behaviour
+#   bash tools/get_8088_tests.sh                    # v2, the whole suite (~2 GB)
+#   bash tools/get_8088_tests.sh v2_undefined       # undefined-opcode behaviour
+#   bash tools/get_8088_tests.sh --opcodes 00 88 90 # just these, a few MB each
+#
+# `--opcodes` exists because the whole suite is ~2 GB and a run usually cares
+# about the handful of opcodes being worked on. Each file is 10,000 cases, so
+# even three of them is far stronger evidence than the eleven committed
+# fixtures -- it was a targeted fetch that found the AF-on-logicals
+# divergence, which the fixtures could not see.
 #
 # Downloads land in third_party/sst8088/<set>/ which is git-ignored.
 
 set -euo pipefail
 
-SET="${1:-v2}"
+SET="v2"
 REPO="https://github.com/SingleStepTests/8088.git"
+RAW="https://raw.githubusercontent.com/SingleStepTests/8088/main"
 DEST="third_party/sst8088"
+
+# --- targeted fetch -------------------------------------------------------
+if [ "${1:-}" = "--opcodes" ]; then
+  shift
+  if [ $# -eq 0 ]; then
+    echo "--opcodes needs at least one opcode, e.g. --opcodes 00 88 90" >&2
+    exit 2
+  fi
+  mkdir -p "$DEST/$SET"
+  fetched=0
+  for op in "$@"; do
+    upper=$(printf '%s' "$op" | tr '[:lower:]' '[:upper:]')
+    out="$DEST/$SET/${upper}.json.gz"
+    if [ -s "$out" ]; then
+      fetched=$((fetched + 1))
+      continue
+    fi
+    if curl -sfL "$RAW/$SET/${upper}.json.gz" -o "$out"; then
+      fetched=$((fetched + 1))
+    else
+      rm -f "$out"
+      echo "no corpus file for opcode ${upper}" >&2
+    fi
+  done
+  if [ "$fetched" -eq 0 ]; then
+    echo "ERROR: fetched nothing. A conformance run over zero cases reports" >&2
+    echo "zero failures, which is indistinguishable from a pass." >&2
+    exit 1
+  fi
+  echo "$fetched opcode file(s) in $DEST/$SET"
+  exit 0
+fi
+
+SET="${1:-v2}"
 
 case "$SET" in
   v2|v2_undefined|v2_binary|v1) ;;
