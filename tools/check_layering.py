@@ -17,7 +17,34 @@ import pathlib
 import re
 import sys
 
-BACKEND_DIR = pathlib.Path("src/sim_backend")
+
+try:
+    from webui import picsimlab
+except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from webui import picsimlab
+
+#: Exit code meaning "did not run", distinct from 0 (ran, clean) and 1 (found
+#: problems). A checker that needs upstream source and cannot find it must be
+#: distinguishable from one that checked and was happy; collapsing the two is
+#: how a suite goes green while checking nothing.
+SKIPPED = 3
+
+
+def _skip(checker: str) -> int:
+    print(
+        f"{checker}: SKIPPED - no PICSimLab source checkout. "
+        f"Set ${picsimlab.ENV_VAR} or see docs/picsimlab-reference.md.",
+        file=sys.stderr,
+    )
+    return SKIPPED
+
+
+def backend_dir() -> pathlib.Path:
+    """`src/sim_backend` inside the PICSimLab source checkout."""
+    return picsimlab.source_root() / "src" / "sim_backend"
+
+
 SOURCE_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".h", ".hpp"})
 
 _INCLUDE = re.compile(r'^\s*#\s*include\s*["<]([^">]+)[">]')
@@ -32,16 +59,17 @@ def _is_forbidden(target: str) -> bool:
 
 
 def find_violations(
-    backend_dir: pathlib.Path = BACKEND_DIR,
+    directory: pathlib.Path | None = None,
 ) -> list[tuple[pathlib.Path, int, str]]:
+    directory = backend_dir() if directory is None else directory
     paths = sorted(
         path
-        for path in backend_dir.rglob("*")
+        for path in directory.rglob("*")
         if path.is_file() and path.suffix in SOURCE_SUFFIXES
-    ) if backend_dir.is_dir() else []
+    ) if directory.is_dir() else []
 
     if not paths:
-        raise ValueError(f"{backend_dir}: no source files to scan")
+        raise ValueError(f"{directory}: no source files to scan")
 
     violations: list[tuple[pathlib.Path, int, str]] = []
     for path in paths:
@@ -54,6 +82,8 @@ def find_violations(
 
 
 def main() -> int:
+    if picsimlab.find_source() is None:
+        return _skip("check_layering")
     try:
         violations = find_violations()
     except ValueError as exc:

@@ -65,6 +65,7 @@ def test_forbidden_include_in_nested_subdirectory_is_found(tmp_path):
     assert violations[0][2] == "../parts/input_POT.h"
 
 
-def test_real_sim_backend_is_clean():
-    # Verified clean at fork-point on 2026-08-09; this pins it.
-    assert find_violations(REPO / "src" / "sim_backend") == []
+def test_real_sim_backend_is_clean(upstream):
+    # Verified clean at fork-point on 2026-08-09; this pins it against
+    # whatever upstream revision the reference checkout holds.
+    assert find_violations(upstream / "src" / "sim_backend") == []

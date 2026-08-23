@@ -4,7 +4,7 @@
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free Software
 # Foundation; either version 2, or (at your option) any later version.
-"""Report what this fork contains: tests, rule mechanisms, files, ledger cells.
+"""Report what this repository contains: tests, mechanisms, files, ledger cells.
 
 The numbers are **computed, never claimed**. A hand-maintained inventory saying
 "65 tests" is wrong the moment someone adds a test, and this repository has
@@ -17,7 +17,7 @@ Four collectors, one per thing worth counting:
 
 * `collect_tests`   — parses each test file with `ast`
 * `collect_mechanisms` — reads `.claude/rules/*.md` frontmatter
-* `collect_files`   — asks git what changed since the `fork-point` tag
+* `collect_files`   — asks git what this repository tracks
 * `collect_ledgers` — parses every ledger under `docs/features/`
 
 Each raises rather than returning an empty result. A report that renders
@@ -58,9 +58,11 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
 TESTS_DIR = pathlib.Path("tests/rules")
 RULES_DIR = pathlib.Path(".claude/rules")
 FEATURES_DIR = pathlib.Path("docs/features")
-FORK_POINT = "fork-point"
-
-STATUS_LABELS = {"A": "added", "M": "modified", "D": "deleted"}
+#: Top-level directories, in the order the report lists them. Anything
+#: outside them lands in `other`, which is deliberately visible: the
+#: separation from upstream is only kept by noticing when something
+#: unexpected appears at the root.
+KNOWN_AREAS = ("webui", "tools", "tests", "docs", "patches", ".claude", ".github")
 
 
 class InventoryError(Exception):
@@ -112,30 +114,46 @@ def collect_mechanisms(
     return rows
 
 
-def collect_files(fork_point: str = FORK_POINT) -> dict[str, list[str]]:
-    """Files changed since the fork point, grouped by git status letter."""
+def collect_files(repo: pathlib.Path | None = None) -> dict[str, list[str]]:
+    """Every tracked file, grouped by top-level directory.
+
+    This used to ask `git diff fork-point HEAD` — what did we change
+    relative to upstream. That question died with the fork: PICSimLab is no
+    longer in this tree, so there is no fork point to diff against and
+    **every tracked file is ours**. Asking git what it tracks is the same
+    question more directly put, and it needs no tag pushed to a remote for
+    CI to work — which is what kept `.github/workflows/rules.yml` from
+    ever running.
+
+    Grouping is by area rather than git status letter for the same reason:
+    with nothing inherited, `added` against `modified` says nothing, while
+    `webui 34, tools 13` says what the repository is made of.
+    """
     try:
         result = subprocess.run(
-            ["git", "diff", "--name-status", fork_point, "HEAD"],
+            ["git", "ls-files"],
             capture_output=True,
             text=True,
             check=True,
+            cwd=repo,
         )
-    except subprocess.CalledProcessError as exc:
-        raise InventoryError(f"git diff against {fork_point!r} failed: {exc}") from exc
+    except (
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+        NotADirectoryError,
+    ) as exc:
+        raise InventoryError(f"git ls-files failed: {exc}") from exc
 
     grouped: dict[str, list[str]] = collections.defaultdict(list)
     for line in result.stdout.splitlines():
-        if not line.strip():
+        path = line.strip()
+        if not path:
             continue
-        status, _, path = line.partition("\t")
-        grouped[status.strip()[:1]].append(path.strip())
+        head = path.split("/")[0]
+        grouped[head if head in KNOWN_AREAS else "other"].append(path)
 
     if not grouped:
-        raise InventoryError(
-            f"no files changed since {fork_point!r}; either the tag is wrong or "
-            f"this is not the fork"
-        )
+        raise InventoryError("git tracks no files here; this is not the repository")
     return dict(grouped)
 
 
@@ -218,10 +236,10 @@ def render_text() -> str:
 
     lines.append("")
     lines.append(
-        f"FILES since {FORK_POINT} — {sum(len(p) for p in inv.files.values())}"
+        f"FILES tracked — {sum(len(p) for p in inv.files.values())}"
     )
-    for status, paths in sorted(inv.files.items()):
-        lines.append(f"  {len(paths):>4}  {STATUS_LABELS.get(status, status)}")
+    for area, paths in sorted(inv.files.items()):
+        lines.append(f"  {len(paths):>4}  {area}")
 
     lines.append("")
     lines.append(f"LEDGERS — {len(inv.ledgers)}")
@@ -262,14 +280,14 @@ def render_markdown() -> str:
 
     out += [
         "",
-        f"## Files since `{FORK_POINT}` — {sum(len(p) for p in inv.files.values())}",
+        f"## Files tracked — {sum(len(p) for p in inv.files.values())}",
         "",
-        "| status | count |",
+        "| area | count |",
         "|---|---|",
     ]
     out += [
-        f"| {STATUS_LABELS.get(status, status)} | {len(paths)} |"
-        for status, paths in sorted(inv.files.items())
+        f"| `{area}` | {len(paths)} |"
+        for area, paths in sorted(inv.files.items())
     ]
 
     out += [

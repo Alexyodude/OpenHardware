@@ -29,6 +29,8 @@ import dataclasses
 import pathlib
 import re
 
+from webui import picsimlab
+
 #: `href` prefix -> role. Surveyed, not guessed; see the module docstring.
 ROLES = {"O": "output", "B": "button", "I": "input"}
 
@@ -139,8 +141,19 @@ def parse_map(text: str) -> tuple[int, int, tuple[Region, ...]]:
 
 
 def share_root(start: pathlib.Path | None = None) -> pathlib.Path:
-    """Find the repository's `share/` directory."""
-    base = (start or pathlib.Path(__file__).resolve().parent.parent) / "share"
+    """Find PICSimLab's `share/` directory.
+
+    `start` names a PICSimLab root directly and is mostly for tests. With it
+    omitted the location comes from `webui.picsimlab`, which is the only place
+    that knows where upstream lives -- this repository does not contain it.
+    """
+    if start is not None:
+        base = pathlib.Path(start) / "share"
+    else:
+        try:
+            base = picsimlab.install_root() / "share"
+        except picsimlab.PicsimlabNotFound as exc:
+            raise AssetError(str(exc)) from exc
     if not (base / "boards").is_dir():
         raise AssetError(f"no board art under {base}; expected {base / 'boards'}")
     return base

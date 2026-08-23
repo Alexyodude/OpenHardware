@@ -1,0 +1,38 @@
+# OpenHardware
+#
+# This file is ours. In the fork it was upstream's, so the plan documents told
+# contributors to put local ignores in .git/info/exclude instead of editing it.
+# That constraint is gone with the fork; add ignores here.
+
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# --- Fetched, never vendored ----------------------------------------------
+# The SingleStepTests 8088 corpus is ~2 GB; tools/get_8088_tests.sh puts it
+# here. tests/fixtures/sst8088/ holds the committed eleven-case excerpt and is
+# deliberately NOT ignored.
+third_party/
+
+# --- PICSimLab ------------------------------------------------------------
+# The reference checkout normally lives beside this repository, not inside it
+# (see docs/picsimlab-reference.md). These cover the case where someone puts
+# it here anyway, so a 89 MB tree of upstream's source cannot be committed by
+# accident -- which is the thing this repository was extracted to stop.
+/picsimlab/
+/picsimlab-reference/
+
+# --- Editors and OS -------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

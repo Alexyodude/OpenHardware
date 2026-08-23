@@ -15,7 +15,7 @@ they are the only such corpus this project has.
 ## Why an excerpt is committed at all
 
 The full corpus is **≈2 GB**, so `.claude/rules/gpl-hygiene.md` §3 and plain
-sense both say fetch it, do not vendor it: `bscripts/get_8088_tests.sh` does
+sense both say fetch it, do not vendor it: `tools/get_8088_tests.sh` does
 that.
 
 But a conformance harness needs tests of its own, and those must not reach the

@@ -104,16 +104,36 @@ def test_malformed_ledger_raises_inventory_error(tmp_path):
 # --- collect_files ---------------------------------------------------------
 
 
-def test_unresolvable_fork_point_raises():
+def test_a_path_that_is_not_a_repository_raises(tmp_path):
     with pytest.raises(InventoryError, match="failed"):
-        collect_files("no-such-tag-exists-here")
+        collect_files(tmp_path)
 
 
-def test_real_fork_point_reports_additions_and_the_one_delta():
-    files = collect_files()
-    assert files["A"], "expected added files since fork-point"
-    # The fork's only upstream modification, logged in docs/upstream-deltas.md.
-    assert files.get("M") == ["src/lib/board.h"]
+def test_the_repository_reports_its_own_areas():
+    files = collect_files(REPO)
+    for area in ("webui", "tools", "tests"):
+        assert files.get(area), f"expected tracked files under {area}/"
+
+
+def test_no_upstream_source_is_tracked_here():
+    """The separation from PICSimLab, pinned.
+
+    This repository was extracted from a fork of `lcgamboa/picsimlab` and must
+    not drift back into being one. PICSimLab is consumed as an external
+    install (`webui/picsimlab.py`) and its source is never vendored; the one
+    change we need to its C++ lives in `patches/` as a diff, not as a copy of
+    the file it patches.
+
+    `other` is the escape hatch in `KNOWN_AREAS`, so anything appearing at the
+    root that nobody declared shows up here rather than passing unnoticed.
+    """
+    files = collect_files(REPO)
+    upstream_dirs = {"src", "share", "lib", "package", "debian", "bscripts"}
+    tracked_roots = {path.split("/")[0] for paths in files.values() for path in paths}
+    assert not (tracked_roots & upstream_dirs), (
+        f"upstream source has reappeared in this tree: "
+        f"{sorted(tracked_roots & upstream_dirs)}"
+    )
 
 
 # --- self-consistency ------------------------------------------------------
@@ -154,7 +174,7 @@ def test_every_armed_checker_is_a_file_the_inventory_reports():
 
 def test_text_render_names_every_section():
     out = render_text()
-    for heading in ("TESTS", "MECHANISMS", "FILES since", "LEDGERS"):
+    for heading in ("TESTS", "MECHANISMS", "FILES tracked", "LEDGERS"):
         assert heading in out
 
 

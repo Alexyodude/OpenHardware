@@ -14,8 +14,8 @@
 # (8441DMA, 1982) in Maximum Mode via the Arduino8088 interface. It is the only
 # non-software oracle this project has.
 #
-#   bash bscripts/get_8088_tests.sh              # v2, the current suite
-#   bash bscripts/get_8088_tests.sh v2_undefined # undefined-opcode behaviour
+#   bash tools/get_8088_tests.sh              # v2, the current suite
+#   bash tools/get_8088_tests.sh v2_undefined # undefined-opcode behaviour
 #
 # Downloads land in third_party/sst8088/<set>/ which is git-ignored.
 

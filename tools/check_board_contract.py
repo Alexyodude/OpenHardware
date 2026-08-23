@@ -31,7 +31,34 @@ import pathlib
 import re
 import sys
 
-BOARD_H = pathlib.Path("src/lib/board.h")
+
+try:
+    from webui import picsimlab
+except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from webui import picsimlab
+
+#: Exit code meaning "did not run", distinct from 0 (ran, clean) and 1 (found
+#: problems). A checker that needs upstream source and cannot find it must be
+#: distinguishable from one that checked and was happy; collapsing the two is
+#: how a suite goes green while checking nothing.
+SKIPPED = 3
+
+
+def _skip(checker: str) -> int:
+    print(
+        f"{checker}: SKIPPED - no PICSimLab source checkout. "
+        f"Set ${picsimlab.ENV_VAR} or see docs/picsimlab-reference.md.",
+        file=sys.stderr,
+    )
+    return SKIPPED
+
+
+def board_h_default() -> pathlib.Path:
+    """`src/lib/board.h` inside the PICSimLab source checkout."""
+    return picsimlab.source_root() / "src" / "lib" / "board.h"
+
+
 
 # `virtual void MStep(void) = 0;` -> MStep
 _PURE_VIRTUAL = re.compile(
@@ -49,8 +76,9 @@ class ContractError(Exception):
     """A header could not be read, or declares nothing at all."""
 
 
-def contract_methods(board_h: pathlib.Path = BOARD_H) -> set[str]:
+def contract_methods(header: pathlib.Path | None = None) -> set[str]:
     """Names of every pure virtual declared in board.h."""
+    board_h = board_h_default() if header is None else header
     if not board_h.is_file():
         raise ContractError(f"{board_h}: not found")
     names = set(_PURE_VIRTUAL.findall(board_h.read_text(encoding="utf-8", errors="replace")))
@@ -79,7 +107,7 @@ def overridden_methods(paths: list[pathlib.Path]) -> set[str]:
 
 
 def missing_methods(
-    headers: list[pathlib.Path], board_h: pathlib.Path = BOARD_H
+    headers: list[pathlib.Path], board_h: pathlib.Path | None = None
 ) -> set[str]:
     """Pure virtuals that the given pair of headers does not override."""
     return contract_methods(board_h) - overridden_methods(headers)
@@ -88,17 +116,22 @@ def missing_methods(
 # Pairs this fork owns or uses as a reference. Upstream pairs are listed because
 # they demonstrably compile, so a failure against them means the checker is
 # wrong rather than the code.
-PAIRS = {
-    "uCboard (upstream reference)": [
-        pathlib.Path("src/sim_backend/bsim_ucsim.h"),
-        pathlib.Path("src/boards/board_uCboard.h"),
-    ],
-}
+def pairs() -> dict[str, list[pathlib.Path]]:
+    """Header pairs to check, resolved against the PICSimLab source checkout."""
+    root = picsimlab.source_root()
+    return {
+        "uCboard (upstream reference)": [
+            root / "src" / "sim_backend" / "bsim_ucsim.h",
+            root / "src" / "boards" / "board_uCboard.h",
+        ],
+    }
 
 
 def main() -> int:
+    if picsimlab.find_source() is None:
+        return _skip("check_board_contract")
     failed = False
-    for label, headers in PAIRS.items():
+    for label, headers in pairs().items():
         try:
             missing = missing_methods(headers)
         except ContractError as exc:

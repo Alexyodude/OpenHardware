@@ -25,7 +25,16 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
     from webui.parts.schema import SchemaError, load_all_schemas
 
-SCHEMA_DIR = pathlib.Path("webui/parts/schemas")
+try:
+    from webui import picsimlab
+except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from webui import picsimlab
+
+SCHEMA_DIR = pathlib.Path(__file__).resolve().parents[1] / "webui" / "parts" / "schemas"
+
+#: See tools/check_layering.py for why a skip needs its own exit code.
+SKIPPED = 3
 _SOURCE = re.compile(r"^(?P<path>[^:]+):(?P<line>\d+)$")
 
 
@@ -92,8 +101,20 @@ def find_problems(
 
 
 def main() -> int:
+    # `repo_root` here means the root the citations are relative to, and every
+    # citation names a path inside PICSimLab (`src/parts/output_LEDs.cc:220`),
+    # not inside this repository. Since the split those are different trees.
+    source = picsimlab.find_source()
+    if source is None:
+        print(
+            "check_part_schemas: SKIPPED - no PICSimLab source checkout, so "
+            f"schema citations cannot be followed. Set ${picsimlab.ENV_VAR} "
+            "or see docs/picsimlab-reference.md.",
+            file=sys.stderr,
+        )
+        return SKIPPED
     try:
-        problems = find_problems(SCHEMA_DIR, repo_root=pathlib.Path("."))
+        problems = find_problems(SCHEMA_DIR, repo_root=source)
     except SchemaError as exc:
         print(f"check_part_schemas: {exc}", file=sys.stderr)
         return 2

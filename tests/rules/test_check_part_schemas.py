@@ -81,5 +81,10 @@ def test_an_empty_directory_raises(tmp_path):
         find_problems(tmp_path)
 
 
-def test_the_shipped_schemas_pass():
-    assert find_problems(REPO / "webui" / "parts" / "schemas", repo_root=REPO) == []
+def test_the_shipped_schemas_pass(upstream):
+    # The schemas live here; the paths they cite live in PICSimLab. Since the
+    # split those are two different roots, and conflating them was what made
+    # this test pass against a tree that no longer exists.
+    assert (
+        find_problems(REPO / "webui" / "parts" / "schemas", repo_root=upstream) == []
+    )

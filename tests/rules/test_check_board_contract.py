@@ -16,7 +16,6 @@ from tools.check_board_contract import (
 )
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-BOARD_H = REPO / "src" / "lib" / "board.h"
 
 CONTRACT = """
 class board {
@@ -107,17 +106,17 @@ def test_missing_file_raises(tmp_path):
         overridden_methods([tmp_path / "absent.h"])
 
 
-def test_upstream_reference_pair_covers_the_whole_contract():
+def test_upstream_reference_pair_covers_the_whole_contract(upstream):
     # bsim_ucsim + board_uCboard demonstrably compile upstream, so a failure
     # here means this checker's parsing is wrong, not that the code is.
     pair = [
-        REPO / "src" / "sim_backend" / "bsim_ucsim.h",
-        REPO / "src" / "boards" / "board_uCboard.h",
+        upstream / "src" / "sim_backend" / "bsim_ucsim.h",
+        upstream / "src" / "boards" / "board_uCboard.h",
     ]
-    assert missing_methods(pair, BOARD_H) == set()
+    assert missing_methods(pair, upstream / "src" / "lib" / "board.h") == set()
 
 
-def test_the_real_contract_is_the_expected_size():
+def test_the_real_contract_is_the_expected_size(upstream):
     # Pins the count the strategy document cites. If board.h gains or loses a
     # pure virtual, this fails and the doc needs updating with it.
-    assert len(contract_methods(BOARD_H)) == 42
+    assert len(contract_methods(upstream / "src" / "lib" / "board.h")) == 42

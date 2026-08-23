@@ -204,7 +204,7 @@ def opcode_files(directory: pathlib.Path) -> list[pathlib.Path]:
     if not found:
         raise CorpusError(
             f"{directory} holds no corpus files. Fetch them with "
-            f"bscripts/get_8088_tests.sh -- they are ~2 GB and deliberately "
+            f"tools/get_8088_tests.sh -- they are ~2 GB and deliberately "
             f"not vendored."
         )
     return found
