@@ -25,4 +25,17 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
 
-add_subdirectory(core/i8086)
+# Every core under core/ with a CMakeLists.txt, discovered rather than listed.
+# `tools/build_core.py` finds them the same way, so the two cannot disagree
+# about which architectures exist.
+#
+# CONFIGURE_DEPENDS so that adding a core re-runs cmake on the next build
+# rather than being silently absent until someone deletes build/.
+file(GLOB core_builds CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/core/*/CMakeLists.txt")
+if(NOT core_builds)
+  message(FATAL_ERROR "no cores found under core/ -- nothing to build")
+endif()
+foreach(core_build IN LISTS core_builds)
+  get_filename_component(core_dir "${core_build}" DIRECTORY)
+  add_subdirectory("${core_dir}")
+endforeach()

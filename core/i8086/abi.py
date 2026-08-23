@@ -181,7 +181,10 @@ def load(build_if_missing: bool = True) -> ctypes.CDLL:
         return _library
 
     try:
-        path = ensure_built() if build_if_missing else library_path()
+        # Named explicitly: this file is the binding for one architecture,
+        # and `core/` now holds more than one.
+        path = (ensure_built("i8086") if build_if_missing
+                else library_path("i8086"))
     except BuildError as exc:
         raise AbiError(str(exc)) from exc
     if not path.is_file():

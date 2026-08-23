@@ -46,12 +46,25 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 BUILD_DIR = REPO / "build"
 LIB_DIR = BUILD_DIR / "lib"
 
-#: What the shared library is called, per platform.
-LIB_NAMES = {
-    "Windows": "i8086.dll",
-    "Darwin": "libi8086.dylib",
-    "Linux": "libi8086.so",
+#: How each platform decorates a library name. `{}` is the core's name.
+#:
+#: This was three literals naming i8086 directly. It is a pattern now because
+#: `core/` is about to hold more than one architecture, and a hardcoded name
+#: is the kind of thing a second core discovers by failing to build.
+LIB_NAME_PATTERNS = {
+    "Windows": "{}.dll",
+    "Darwin": "lib{}.dylib",
+    "Linux": "lib{}.so",
 }
+
+#: The directory every core lives under. A core is any subdirectory of it with
+#: a CMakeLists.txt, which is also exactly what the top-level CMakeLists adds.
+CORE_DIR = REPO / "core"
+
+#: The core to build when a caller does not say. Every existing caller means
+#: this one, and naming it here beats threading a default through five
+#: signatures.
+DEFAULT_CORE = "i8086"
 
 _VSWHERE = pathlib.Path(
     os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
@@ -62,11 +75,26 @@ class BuildError(Exception):
     """The core could not be built."""
 
 
-def library_path() -> pathlib.Path:
-    name = LIB_NAMES.get(platform.system())
-    if name is None:
+def cores() -> list[str]:
+    """Every architecture under `core/`, discovered rather than listed.
+
+    Discovered so that adding one is adding a directory, and so that this file
+    and the top-level CMakeLists cannot disagree about which cores exist --
+    they answer the question the same way.
+    """
+    if not CORE_DIR.is_dir():
+        return []
+    return sorted(
+        child.name for child in CORE_DIR.iterdir()
+        if (child / "CMakeLists.txt").is_file()
+    )
+
+
+def library_path(core: str = DEFAULT_CORE) -> pathlib.Path:
+    pattern = LIB_NAME_PATTERNS.get(platform.system())
+    if pattern is None:
         raise BuildError(f"no library name known for {platform.system()!r}")
-    return LIB_DIR / name
+    return LIB_DIR / pattern.format(core)
 
 
 def _find_vcvarsall() -> pathlib.Path | None:
@@ -192,21 +220,34 @@ def build(clean: bool = False, verbose: bool = False) -> pathlib.Path:
     _run(["cmake", "-S", str(REPO), "-B", str(BUILD_DIR), *generator], env)
     _run(["cmake", "--build", str(BUILD_DIR), "--config", "Release"], env)
 
-    path = library_path()
-    if not path.is_file():
+    # Every core is checked, not just the default one. A build that reports
+    # success while producing nothing is the failure this guards against, and
+    # it is per-core: one architecture can build while another silently emits
+    # no library at all.
+    built = []
+    missing = []
+    for core in cores():
+        path = library_path(core)
+        (built if path.is_file() else missing).append(path)
+    if missing:
         found = sorted(p.name for p in LIB_DIR.glob("*")) if LIB_DIR.is_dir() else []
         raise BuildError(
-            f"build reported success but {path.name} is not in {LIB_DIR}. Found: {found}"
+            f"build reported success but {[p.name for p in missing]} "
+            f"{'is' if len(missing) == 1 else 'are'} not in {LIB_DIR}. Found: {found}"
         )
     if verbose:
-        print(f"{path}  ({path.stat().st_size} bytes)")
-    return path
+        for path in built:
+            print(f"{path}  ({path.stat().st_size} bytes)")
+    return library_path(DEFAULT_CORE)
 
 
-def ensure_built() -> pathlib.Path:
-    """The library path, building it first if it is not there."""
-    path = library_path()
-    return path if path.is_file() else build()
+def ensure_built(core: str = DEFAULT_CORE) -> pathlib.Path:
+    """The library path for one core, building everything first if it is absent."""
+    path = library_path(core)
+    if path.is_file():
+        return path
+    build()
+    return library_path(core)
 
 
 def main() -> int:
