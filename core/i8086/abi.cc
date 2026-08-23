@@ -1,0 +1,146 @@
+// OpenHardware - flat C ABI over the i8086 core.
+//
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+
+#include "abi.h"
+
+#include <cstring>
+#include <new>
+
+#include "cpu.h"
+
+namespace {
+
+// The opaque handle Python holds. A struct rather than a bare `Cpu*` so the
+// header can forward-declare it without exposing any C++.
+struct Handle {
+    i8086::Cpu cpu;
+};
+
+inline i8086::Cpu* Of(I8086Cpu* p) { return &reinterpret_cast<Handle*>(p)->cpu; }
+inline const i8086::Cpu* Of(const I8086Cpu* p) {
+    return &reinterpret_cast<const Handle*>(p)->cpu;
+}
+
+}  // namespace
+
+extern "C" {
+
+int i8086_abi_version(void) { return I8086_ABI_VERSION; }
+uint32_t i8086_regs_size(void) { return static_cast<uint32_t>(sizeof(I8086Registers)); }
+uint32_t i8086_memory_size(void) { return i8086::kMemorySize; }
+
+I8086Cpu* i8086_new(void) {
+    // nothrow: an exception crossing a C ABI boundary is undefined, and a
+    // null return is something ctypes can actually check.
+    return reinterpret_cast<I8086Cpu*>(new (std::nothrow) Handle());
+}
+
+void i8086_free(I8086Cpu* cpu) {
+    if (cpu != nullptr) {
+        delete reinterpret_cast<Handle*>(cpu);
+    }
+}
+
+void i8086_reset(I8086Cpu* cpu) {
+    if (cpu != nullptr) {
+        Of(cpu)->Reset();
+    }
+}
+
+void i8086_get_regs(const I8086Cpu* cpu, I8086Registers* out) {
+    if (cpu == nullptr || out == nullptr) {
+        return;
+    }
+    const i8086::Registers& r = Of(cpu)->regs();
+    out->ax = r.ax;
+    out->bx = r.bx;
+    out->cx = r.cx;
+    out->dx = r.dx;
+    out->si = r.si;
+    out->di = r.di;
+    out->bp = r.bp;
+    out->sp = r.sp;
+    out->cs = r.cs;
+    out->ds = r.ds;
+    out->es = r.es;
+    out->ss = r.ss;
+    out->ip = r.ip;
+    out->flags = r.flags;
+}
+
+void i8086_set_regs(I8086Cpu* cpu, const I8086Registers* in) {
+    if (cpu == nullptr || in == nullptr) {
+        return;
+    }
+    i8086::Registers r;
+    r.ax = in->ax;
+    r.bx = in->bx;
+    r.cx = in->cx;
+    r.dx = in->dx;
+    r.si = in->si;
+    r.di = in->di;
+    r.bp = in->bp;
+    r.sp = in->sp;
+    r.cs = in->cs;
+    r.ds = in->ds;
+    r.es = in->es;
+    r.ss = in->ss;
+    r.ip = in->ip;
+    r.flags = in->flags;
+    Of(cpu)->set_regs(r);
+}
+
+uint8_t i8086_read_byte(const I8086Cpu* cpu, uint32_t address) {
+    return cpu == nullptr ? 0u : Of(cpu)->ReadByte(address);
+}
+
+void i8086_write_byte(I8086Cpu* cpu, uint32_t address, uint8_t value) {
+    if (cpu != nullptr) {
+        Of(cpu)->WriteByte(address, value);
+    }
+}
+
+uint16_t i8086_read_word(const I8086Cpu* cpu, uint32_t address) {
+    return cpu == nullptr ? 0u : Of(cpu)->ReadWord(address);
+}
+
+void i8086_write_word(I8086Cpu* cpu, uint32_t address, uint16_t value) {
+    if (cpu != nullptr) {
+        Of(cpu)->WriteWord(address, value);
+    }
+}
+
+void i8086_write_block(I8086Cpu* cpu, uint32_t address, const uint8_t* data, uint32_t length) {
+    if (cpu == nullptr || data == nullptr) {
+        return;
+    }
+    // Byte at a time rather than memcpy: the address wraps at 1 MB, and a
+    // memcpy of a block straddling the top would run off the end of the
+    // buffer instead of wrapping to zero.
+    for (uint32_t i = 0; i < length; ++i) {
+        Of(cpu)->WriteByte(address + i, data[i]);
+    }
+}
+
+void i8086_read_block(const I8086Cpu* cpu, uint32_t address, uint8_t* out, uint32_t length) {
+    if (cpu == nullptr || out == nullptr) {
+        return;
+    }
+    for (uint32_t i = 0; i < length; ++i) {
+        out[i] = Of(cpu)->ReadByte(address + i);
+    }
+}
+
+void i8086_clear_memory(I8086Cpu* cpu) {
+    if (cpu != nullptr) {
+        Of(cpu)->ClearMemory();
+    }
+}
+
+uint32_t i8086_physical(uint16_t segment, uint16_t offset) {
+    return i8086::Physical(segment, offset);
+}
+
+}  // extern "C"

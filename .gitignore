@@ -16,6 +16,9 @@ htmlcov/
 .venv/
 venv/
 
+# CMake output for the native core. tools/build_core.py recreates it.
+/build/
+
 # --- Fetched, never vendored ----------------------------------------------
 # The SingleStepTests 8088 corpus is ~2 GB; tools/get_8088_tests.sh puts it
 # here. tests/fixtures/sst8088/ holds the committed eleven-case excerpt and is

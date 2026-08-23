@@ -18,7 +18,7 @@
 # command. Setting it here fixes both, and `pytest` with no arguments now
 # works from the repo root -- which it never did before.
 addopts = "--import-mode=importlib"
-testpaths = ["tests/rules", "tests/webui"]
+testpaths = ["tests/rules", "tests/webui", "tests/i8086"]
 
 # tests/fixtures/ holds JSON data, not tests.
 norecursedirs = ["tests/fixtures", "third_party", ".git"]

@@ -51,6 +51,15 @@ jobs:
       - name: Install dependencies
         run: pip install pytest==9.0.2 PyYAML==6.0.3 websockets==15.0.1
 
+      # The native core. This is the only place g++ ever sees it -- the
+      # development machine is Windows and MSVC, so a warning or an error that
+      # only GCC raises would otherwise reach master unseen.
+      - name: Build the i8086 core
+        run: python tools/build_core.py
+
+      - name: Core suite
+        run: pytest tests/i8086/ -v
+
       - name: check_layering
         run: python tools/check_layering.py
 

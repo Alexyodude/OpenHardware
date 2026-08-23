@@ -9,8 +9,6 @@ touches:
 - webui/static/emulator.*
 - webui/emulator.py
 - tests/webui/test_emulator.py
-- webui/api.py
-- webui/tpyo_not_real.py
 ---
 
 The application surface: load a binary, step and run, watch state change. Talks to the core, not to PICSimLab.
