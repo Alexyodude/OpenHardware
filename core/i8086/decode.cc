@@ -95,6 +95,25 @@ OpcodeInfo Lookup(std::uint8_t opcode) {
         case 0xD4: return {true, Form::kImm8, false};   // AAM imm8
         case 0xD5: return {true, Form::kImm8, false};   // AAD imm8
 
+        // The string instructions. No modrm and no immediate: the operands
+        // are always DS:SI and ES:DI, and the width is opcode bit 0.
+        case 0xA4: return {true, Form::kNone, false};   // MOVSB
+        case 0xA5: return {true, Form::kNone, true};    // MOVSW
+        case 0xA6: return {true, Form::kNone, false};   // CMPSB
+        case 0xA7: return {true, Form::kNone, true};    // CMPSW
+        case 0xAA: return {true, Form::kNone, false};   // STOSB
+        case 0xAB: return {true, Form::kNone, true};    // STOSW
+        case 0xAC: return {true, Form::kNone, false};   // LODSB
+        case 0xAD: return {true, Form::kNone, true};    // LODSW
+        case 0xAE: return {true, Form::kNone, false};   // SCASB
+        case 0xAF: return {true, Form::kNone, true};    // SCASW
+
+        // Group 3. Seven distinct instructions behind two opcodes, chosen
+        // by the modrm reg field: TEST(0 and 1), NOT, NEG, MUL, IMUL, DIV,
+        // IDIV. `/1` is an undocumented second encoding of TEST.
+        case 0xF6: return {true, Form::kGroup3, false};
+        case 0xF7: return {true, Form::kGroup3, true};
+
         case 0x90: return {true, Form::kNone, false};   // NOP
         case 0xC3: return {true, Form::kNone, true};    // RET near
         case 0xE8: return {true, Form::kRel16, true};   // CALL near
@@ -111,15 +130,21 @@ Instruction Decode(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip) {
     Instruction out;
     int at = 0;
 
-    // Prefixes first. The hardware allows several, and the last segment
-    // override wins -- so this loops rather than checking once.
+    // Prefixes first. The hardware allows several in any order and the last
+    // of each kind wins -- so this loops rather than checking once, and a
+    // segment override and a repeat can both be present on one instruction.
     for (;;) {
         const std::uint8_t byte = FetchAt(cpu, cs, ip, at);
         const Segment segment = SegmentForPrefix(byte);
-        if (segment == Segment::kNone) {
+        if (segment != Segment::kNone) {
+            out.segment_override = segment;
+        } else if (byte == kPrefixRepZ) {
+            out.repeat = Rep::kWhileZero;
+        } else if (byte == kPrefixRepNz) {
+            out.repeat = Rep::kWhileNotZero;
+        } else {
             break;
         }
-        out.segment_override = segment;
         ++at;
         if (at >= kMaxLength) {
             // Do not stop and read the next byte as an opcode -- it is a
@@ -137,6 +162,7 @@ Instruction Decode(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip) {
     out.wide = info.wide;
 
     switch (info.form) {
+        case Form::kGroup3:
         case Form::kModRm: {
             out.has_modrm = true;
             out.modrm = ModRm::From(FetchAt(cpu, cs, ip, at));
@@ -155,6 +181,21 @@ Instruction Decode(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip) {
                 const std::uint8_t high = FetchAt(cpu, cs, ip, at + 1);
                 out.displacement = static_cast<std::int16_t>(low | (high << 8));
                 at += 2;
+            }
+
+            // Only after the modrm is in hand can a group 3 instruction's
+            // length be known: `/0` and `/1` are TEST and carry an immediate,
+            // and the other six members do not.
+            if (info.form == Form::kGroup3 && out.modrm.reg <= 1) {
+                if (out.wide) {
+                    const std::uint8_t low = FetchAt(cpu, cs, ip, at);
+                    const std::uint8_t high = FetchAt(cpu, cs, ip, at + 1);
+                    out.immediate = static_cast<std::int16_t>(low | (high << 8));
+                    at += 2;
+                } else {
+                    out.immediate = static_cast<std::int16_t>(FetchAt(cpu, cs, ip, at));
+                    ++at;
+                }
             }
             break;
         }

@@ -535,6 +535,292 @@ def test_the_divide_error_leaves_ax_untouched(cpu):
     assert cpu.regs.ax == 0xE837
 
 
+# ======================================================================================
+# The string instructions
+# ======================================================================================
+
+
+def test_movsb_copies_from_ds_si_to_es_di(cpu):
+    cpu.set_regs(cs=0x0000, ip=0x0000, ds=0x0000, si=0x0200, es=0x0000, di=0x0300, flags=0)
+    cpu.write_block(0x00000, bytes([0xA4]))
+    cpu.write_byte(0x00200, 0x5A)
+    cpu.step()
+    assert cpu.read_byte(0x00300) == 0x5A
+    assert (cpu.regs.si, cpu.regs.di) == (0x0201, 0x0301)
+
+
+def test_the_direction_flag_counts_the_pointers_down(cpu):
+    cpu.set_regs(cs=0x0000, ip=0x0000, ds=0x0000, si=0x0200, es=0x0000, di=0x0300,
+                 flags=0x0400)
+    cpu.write_block(0x00000, bytes([0xA4]))
+    cpu.step()
+    assert (cpu.regs.si, cpu.regs.di) == (0x01FF, 0x02FF)
+
+
+def test_the_word_form_steps_by_two(cpu):
+    cpu.set_regs(cs=0x0000, ip=0x0000, ds=0x0000, si=0x0200, es=0x0000, di=0x0300, flags=0)
+    cpu.write_block(0x00000, bytes([0xA5]))
+    cpu.write_word(0x00200, 0xBEEF)
+    cpu.step()
+    assert cpu.read_word(0x00300) == 0xBEEF
+    assert (cpu.regs.si, cpu.regs.di) == (0x0202, 0x0302)
+
+
+def test_a_segment_override_moves_the_source_and_never_the_destination(cpu):
+    """`36 A4` reads from SS:SI and still writes to ES:DI.
+
+    The override deliberately names a **third** segment, different from both
+    DS and ES. An earlier version of this test used the ES prefix, so the
+    overridden source segment and the fixed destination segment were the same
+    register -- and a core that wrongly applied the override to the
+    destination as well produced identical output and passed. It was caught by
+    mutating the core and finding this test still green.
+    """
+    cpu.set_regs(cs=0x0000, ip=0x0000, ds=0x3000, ss=0x2000, es=0x1000,
+                 si=0x0200, di=0x0300, flags=0)
+    cpu.write_block(0x00000, bytes([0x36, 0xA4]))     # SS override on the source
+    cpu.write_byte(0x20200, 0x77)                     # SS:0200 -- what must be read
+    cpu.write_byte(0x30200, 0x11)                     # DS:0200 -- must not be
+    cpu.step()
+    assert cpu.read_byte(0x10300) == 0x77, "the destination is ES:DI, always"
+    assert cpu.read_byte(0x20300) == 0x00, "nothing may be written to SS:DI"
+
+
+def test_stos_has_no_source_so_an_override_changes_nothing(cpu):
+    cpu.set_regs(cs=0x0000, ip=0x0000, ds=0x0000, es=0x0000, di=0x0300, ax=0x1234, flags=0)
+    cpu.write_block(0x00000, bytes([0x2E, 0xAA]))     # CS override, and no source
+    cpu.step()
+    assert cpu.read_byte(0x00300) == 0x34
+    assert cpu.regs.di == 0x0301
+
+
+def test_lods_loads_al_and_leaves_ah(cpu):
+    cpu.set_regs(cs=0x0000, ip=0x0000, ds=0x0000, si=0x0200, ax=0xAB00, flags=0)
+    cpu.write_block(0x00000, bytes([0xAC]))
+    cpu.write_byte(0x00200, 0x5A)
+    cpu.step()
+    assert cpu.regs.ax == 0xAB5A
+
+
+def test_cmps_subtracts_the_destination_from_the_source(cpu):
+    """The operand order is not symmetric and CF says which way round it is:
+    5 - 9 borrows, 9 - 5 does not."""
+    cpu.set_regs(cs=0x0000, ip=0x0000, ds=0x0000, es=0x0000, si=0x0200, di=0x0300, flags=0)
+    cpu.write_block(0x00000, bytes([0xA6]))
+    cpu.write_byte(0x00200, 0x05)
+    cpu.write_byte(0x00300, 0x09)
+    cpu.step()
+    assert cpu.regs.flags & CF
+
+
+# --- REP, which runs the whole loop inside one step ---------------------------------
+
+
+def test_a_repeated_move_runs_to_completion_in_one_step(cpu):
+    """`F3 A4` with CX=4 moves four bytes and advances IP by two. It is one
+    instruction, not four steps -- CX comes out zero and IP past the prefix."""
+    cpu.set_regs(cs=0x0000, ip=0x0000, ds=0x0000, es=0x0000,
+                 si=0x0200, di=0x0300, cx=4, flags=0)
+    cpu.write_block(0x00000, bytes([0xF3, 0xA4]))
+    cpu.write_block(0x00200, bytes([1, 2, 3, 4]))
+    cpu.step()
+    assert cpu.read_block(0x00300, 4) == bytes([1, 2, 3, 4])
+    assert (cpu.regs.cx, cpu.regs.si, cpu.regs.di, cpu.regs.ip) == (0, 0x0204, 0x0304, 2)
+
+
+def test_a_repeat_with_a_zero_count_does_nothing_but_advance_ip(cpu):
+    cpu.set_regs(cs=0x0000, ip=0x0000, ds=0x0000, es=0x0000,
+                 si=0x0200, di=0x0300, cx=0, flags=0)
+    cpu.write_block(0x00000, bytes([0xF3, 0xA4]))
+    cpu.write_byte(0x00200, 0x99)
+    cpu.step()
+    assert cpu.read_byte(0x00300) == 0x00
+    assert (cpu.regs.si, cpu.regs.di, cpu.regs.ip) == (0x0200, 0x0300, 2)
+
+
+def test_repe_cmps_stops_at_the_first_difference(cpu):
+    cpu.set_regs(cs=0x0000, ip=0x0000, ds=0x0000, es=0x0000,
+                 si=0x0200, di=0x0300, cx=4, flags=0)
+    cpu.write_block(0x00000, bytes([0xF3, 0xA6]))
+    cpu.write_block(0x00200, bytes([1, 2, 9, 4]))
+    cpu.write_block(0x00300, bytes([1, 2, 3, 4]))
+    cpu.step()
+    assert cpu.regs.cx == 1, "stopped after comparing the third byte"
+    assert not cpu.regs.flags & ZF
+
+
+def test_repne_scas_stops_when_it_finds_the_byte(cpu):
+    cpu.set_regs(cs=0x0000, ip=0x0000, es=0x0000, di=0x0300, cx=4, ax=0x0003, flags=0)
+    cpu.write_block(0x00000, bytes([0xF2, 0xAE]))
+    cpu.write_block(0x00300, bytes([1, 2, 3, 4]))
+    cpu.step()
+    assert cpu.regs.cx == 1
+    assert cpu.regs.flags & ZF
+
+
+def test_both_repeat_prefixes_mean_the_same_thing_on_a_move(cpu):
+    """MOVS sets no flags, so there is no condition for F2 and F3 to differ
+    on -- the corpus disassembles `F2 A4` as `rep movsb`, not `repne`."""
+    for prefix in (0xF2, 0xF3):
+        cpu.set_regs(cs=0x0000, ip=0x0000, ds=0x0000, es=0x0000,
+                     si=0x0200, di=0x0300, cx=3, flags=0)
+        cpu.write_block(0x00000, bytes([prefix, 0xA4]))
+        cpu.write_block(0x00200, bytes([7, 7, 7]))
+        cpu.step()
+        assert cpu.regs.cx == 0, f"prefix {prefix:02X} did not run to completion"
+
+
+# ======================================================================================
+# Group 3: TEST, NOT, NEG, MUL, IMUL, DIV, IDIV
+# ======================================================================================
+
+TEST_, TEST_ALT, NOT_, NEG_, MUL_, IMUL_, DIV_, IDIV_ = range(8)
+
+
+def group3(cpu, operation: int, value: int, immediate: bytes = b"",
+           wide: bool = False, **regs):
+    """`F6`/`F7` /op on BL or BX, at mod=3."""
+    opcode = 0xF7 if wide else 0xF6
+    modrm = 0xC0 | (operation << 3) | 0x03
+    cpu.set_regs(cs=0x0000, ip=0x0000, bx=value, flags=0, **regs)
+    cpu.write_block(0x00000, bytes([opcode, modrm]) + immediate)
+    cpu.step()
+
+
+def test_test_sets_flags_without_storing_a_result(cpu):
+    group3(cpu, TEST_, 0x0FF0, immediate=bytes([0x0F]))
+    assert cpu.regs.bx == 0x0FF0, "the operand must be unchanged"
+    assert cpu.regs.flags & ZF, "0xF0 AND 0x0F is zero"
+
+
+def test_the_length_of_a_group_three_instruction_depends_on_the_reg_field(cpu):
+    """`F6 /0` carries an immediate and `F6 /2` does not, so `Lookup` alone
+    cannot say how long an F6 is. A decoder that guesses one length for the
+    whole group puts IP one byte out on half of it."""
+    cpu.set_regs(cs=0x0000, ip=0x0000)
+    cpu.write_block(0x00000, bytes([0xF6, 0xC3, 0x0F]))     # TEST BL, 0Fh
+    assert cpu.decode().length == 3
+    cpu.write_block(0x00000, bytes([0xF6, 0xD3]))           # NOT BL
+    assert cpu.decode().length == 2
+    cpu.write_block(0x00000, bytes([0xF7, 0xC3, 0x34, 0x12]))  # TEST BX, 1234h
+    assert cpu.decode().length == 4
+
+
+def test_reg_one_is_a_second_encoding_of_test(cpu):
+    """Undocumented, and the corpus has 10,000 cases of it per width."""
+    group3(cpu, TEST_ALT, 0x0FF0, immediate=bytes([0x0F]))
+    assert cpu.regs.bx == 0x0FF0
+    assert cpu.regs.flags & ZF
+
+
+def test_not_touches_no_flag_at_all(cpu):
+    everything = CF | PF | AF | ZF | SF | OF
+    cpu.set_regs(cs=0x0000, ip=0x0000, bx=0x00F0, flags=everything)
+    cpu.write_block(0x00000, bytes([0xF6, 0xC0 | (NOT_ << 3) | 0x03]))
+    cpu.step()
+    assert cpu.regs.bx & 0xFF == 0x0F
+    assert cpu.regs.flags & everything == everything
+
+
+def test_neg_subtracts_from_zero_and_carries_unless_the_operand_was_zero(cpu):
+    group3(cpu, NEG_, 0x0001)
+    assert cpu.regs.bx & 0xFF == 0xFF
+    assert cpu.regs.flags & CF
+
+    group3(cpu, NEG_, 0x0000)
+    assert cpu.regs.bx & 0xFF == 0x00
+    assert not cpu.regs.flags & CF
+
+
+# --- the multiplies -------------------------------------------------------------------
+
+
+def test_mul_byte_puts_the_product_in_ax(cpu):
+    group3(cpu, MUL_, 0x0010, ax=0x0010)      # 16 * 16
+    assert cpu.regs.ax == 0x0100
+
+
+def test_mul_word_puts_the_high_half_in_dx(cpu):
+    group3(cpu, MUL_, 0x1000, wide=True, ax=0x1000)
+    assert (cpu.regs.dx, cpu.regs.ax) == (0x0100, 0x0000)
+
+
+def test_mul_carries_and_overflows_together_when_the_high_half_is_used(cpu):
+    group3(cpu, MUL_, 0x0010, ax=0x0010)
+    assert cpu.regs.flags & CF and cpu.regs.flags & OF
+    group3(cpu, MUL_, 0x0002, ax=0x0003)      # fits in AL
+    assert not (cpu.regs.flags & CF or cpu.regs.flags & OF)
+
+
+def test_mul_takes_its_sign_zero_and_parity_from_the_high_half(cpu):
+    """All three are documented undefined and all three are the high half's.
+    Measured exact over 20,000 cases; from the low half instead, MUL scores
+    about 6%."""
+    group3(cpu, MUL_, 0x0002, ax=0x0003)      # AX = 6, so AH = 0
+    assert cpu.regs.flags & ZF, "ZF follows AH, which is zero, not AX"
+    group3(cpu, MUL_, 0x0080, ax=0x0002)      # AX = 0x0100, AH = 1
+    assert not cpu.regs.flags & ZF
+
+
+def test_imul_multiplies_signed(cpu):
+    group3(cpu, IMUL_, 0x00FF, ax=0x0002)     # 2 * -1
+    assert cpu.regs.ax == 0xFFFE
+
+
+def test_imul_does_not_overflow_when_the_high_half_is_only_a_sign_extension(cpu):
+    group3(cpu, IMUL_, 0x00FF, ax=0x0002)     # -2 fits in a byte
+    assert not (cpu.regs.flags & CF or cpu.regs.flags & OF)
+
+
+# --- the divides ----------------------------------------------------------------------
+
+
+def test_div_byte_puts_the_quotient_in_al_and_the_remainder_in_ah(cpu):
+    group3(cpu, DIV_, 0x0007, ax=0x0011)      # 17 / 7 = 2 remainder 3
+    assert cpu.regs.ax == 0x0302
+
+
+def test_div_word_puts_the_remainder_in_dx(cpu):
+    group3(cpu, DIV_, 0x0007, wide=True, ax=0x0011, dx=0x0000)
+    assert (cpu.regs.ax, cpu.regs.dx) == (0x0002, 0x0003)
+
+
+def test_idiv_divides_signed(cpu):
+    group3(cpu, IDIV_, 0x0007, ax=0xFFEF)     # -17 / 7 = -2 remainder -3
+    assert cpu.regs.ax & 0xFF == 0xFE
+
+
+def test_dividing_by_zero_traps(cpu):
+    set_up_vector_zero(cpu, 0xB000, 0x1234)
+    cpu.set_regs(cs=0x0000, ip=0x0100, ss=0x0000, sp=0x0200, ax=0x0011, bx=0x0000, flags=0)
+    cpu.write_block(0x00100, bytes([0xF6, 0xC0 | (DIV_ << 3) | 0x03]))
+    cpu.step()
+    assert (cpu.regs.cs, cpu.regs.ip) == (0xB000, 0x1234)
+    assert cpu.regs.ax == 0x0011, "AX must be untouched -- no partial answer"
+
+
+def test_a_quotient_too_large_for_its_half_traps_rather_than_truncating(cpu):
+    """`DIV` by 1 on a dividend above 255 is the usual way to meet this: the
+    quotient has nowhere to go. Truncating instead would return a plausible
+    wrong answer and never say so."""
+    set_up_vector_zero(cpu, 0xB000, 0x1234)
+    cpu.set_regs(cs=0x0000, ip=0x0100, ss=0x0000, sp=0x0200, ax=0x0100, bx=0x0001, flags=0)
+    cpu.write_block(0x00100, bytes([0xF6, 0xC0 | (DIV_ << 3) | 0x03]))
+    cpu.step()
+    assert (cpu.regs.cs, cpu.regs.ip) == (0xB000, 0x1234)
+
+
+def test_a_divide_that_fits_does_not_trap(cpu):
+    """The other half of the check above: a core that traps too eagerly passes
+    every test that only looks for traps."""
+    set_up_vector_zero(cpu, 0xB000, 0x1234)
+    cpu.set_regs(cs=0x0000, ip=0x0100, ss=0x0000, sp=0x0200, ax=0x00FF, bx=0x0001, flags=0)
+    cpu.write_block(0x00100, bytes([0xF6, 0xC0 | (DIV_ << 3) | 0x03]))
+    cpu.step()
+    assert (cpu.regs.cs, cpu.regs.ip) == (0x0000, 0x0102)
+    assert cpu.regs.sp == 0x0200, "nothing was pushed"
+
+
 def test_the_divide_error_disables_interrupts_for_the_handler(cpu):
     """IF and TF are cleared after the push, so IRET restores them. A handler
     entered with interrupts still on would be re-entered by the next one."""

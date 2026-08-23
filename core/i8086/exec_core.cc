@@ -7,6 +7,7 @@
 
 #include "alu.h"
 #include "bcd.h"
+#include "muldiv.h"
 #include "shift.h"
 
 namespace i8086 {
@@ -138,6 +139,106 @@ void RaiseInterrupt(Cpu& cpu, std::uint8_t vector, std::uint16_t return_ip) {
 /// a board model arrives (OH-9), this constant is the seam it replaces.
 constexpr std::uint8_t kOpenBus = 0xFF;
 constexpr std::uint16_t kOpenBusWord = 0xFFFF;
+
+/// The ten string opcodes, A4-A7 and AA-AF.
+///
+/// A8 and A9 sit in the middle of that range and are TEST, not a string
+/// operation -- which is why this is a list of families rather than a range
+/// check.
+bool IsStringOpcode(std::uint8_t opcode) {
+    const std::uint8_t family = static_cast<std::uint8_t>(opcode & 0xFE);
+    return family == 0xA4 || family == 0xA6 || family == 0xAA || family == 0xAC ||
+           family == 0xAE;
+}
+
+/// Whether a string instruction sets ZF, and so whether a repeat prefix has a
+/// condition to test. Only the two that compare.
+bool StringSetsZero(std::uint8_t opcode) {
+    const std::uint8_t family = static_cast<std::uint8_t>(opcode & 0xFE);
+    return family == 0xA6 || family == 0xAE;  // CMPS, SCAS
+}
+
+/// One iteration of a string instruction, advancing SI and/or DI.
+///
+/// Two rules that are easy to state and easy to get wrong:
+///
+/// * **The source is DS:SI and is overridable; the destination is ES:DI and
+///   is not.** A segment prefix on `MOVS` moves where it reads and never
+///   where it writes. STOS and SCAS have no source at all, so a prefix on
+///   them changes nothing -- and the corpus has cases of exactly that,
+///   which a core applying the override to ES would fail.
+///
+/// * **DF chooses the direction, and the step is the operand width**, so a
+///   word operation moves the pointers by two.
+void StringIteration(Cpu& cpu, std::uint8_t opcode, bool wide, Segment source_override) {
+    Registers& regs = cpu.regs();
+    const std::uint16_t source = SegmentValue(
+        regs, source_override == Segment::kNone ? Segment::kDs : source_override);
+    const std::uint16_t width = wide ? 2 : 1;
+    const std::uint16_t step = HasFlag(regs.flags, kDirection)
+                                   ? static_cast<std::uint16_t>(0 - width)
+                                   : width;
+
+    const auto read_at = [&cpu, wide](std::uint16_t segment, std::uint16_t offset) {
+        return wide ? cpu.ReadWordAt(segment, offset)
+                    : static_cast<std::uint16_t>(cpu.ReadByte(Physical(segment, offset)));
+    };
+    const auto write_at = [&cpu, wide](std::uint16_t segment, std::uint16_t offset,
+                                       std::uint16_t value) {
+        if (wide) {
+            cpu.WriteWordAt(segment, offset, value);
+        } else {
+            cpu.WriteByte(Physical(segment, offset), static_cast<std::uint8_t>(value));
+        }
+    };
+    const auto accumulator = [&regs, wide]() {
+        return wide ? regs.ax : static_cast<std::uint16_t>(regs.ax & 0xFF);
+    };
+
+    switch (static_cast<std::uint8_t>(opcode & 0xFE)) {
+        case 0xA4:  // MOVS -- ES:DI <- DS:SI
+            write_at(regs.es, regs.di, read_at(source, regs.si));
+            regs.si = static_cast<std::uint16_t>(regs.si + step);
+            regs.di = static_cast<std::uint16_t>(regs.di + step);
+            break;
+
+        case 0xA6: {  // CMPS -- the source MINUS the destination, result discarded
+            const std::uint16_t left = read_at(source, regs.si);
+            const std::uint16_t right = read_at(regs.es, regs.di);
+            std::uint16_t flags = regs.flags;
+            Alu(AluKind::kCmp, left, right, wide, flags);
+            regs.flags = static_cast<std::uint16_t>(flags | kFlagsAlwaysSet);
+            regs.si = static_cast<std::uint16_t>(regs.si + step);
+            regs.di = static_cast<std::uint16_t>(regs.di + step);
+            break;
+        }
+
+        case 0xAA:  // STOS -- ES:DI <- AL/AX. No source, so no override applies.
+            write_at(regs.es, regs.di, accumulator());
+            regs.di = static_cast<std::uint16_t>(regs.di + step);
+            break;
+
+        case 0xAC: {  // LODS -- AL/AX <- DS:SI
+            const std::uint16_t value = read_at(source, regs.si);
+            if (wide) {
+                regs.ax = value;
+            } else {
+                WriteByteRegister(regs, 0, static_cast<std::uint8_t>(value));
+            }
+            regs.si = static_cast<std::uint16_t>(regs.si + step);
+            break;
+        }
+
+        default: {  // 0xAE, SCAS -- AL/AX minus ES:DI
+            const std::uint16_t right = read_at(regs.es, regs.di);
+            std::uint16_t flags = regs.flags;
+            Alu(AluKind::kCmp, accumulator(), right, wide, flags);
+            regs.flags = static_cast<std::uint16_t>(flags | kFlagsAlwaysSet);
+            regs.di = static_cast<std::uint16_t>(regs.di + step);
+            break;
+        }
+    }
+}
 
 /// The sixteen Jcc conditions, from the low four opcode bits.
 ///
@@ -277,6 +378,73 @@ StepStatus Step(Cpu& cpu) {
         if (Condition(static_cast<std::uint8_t>(opcode & 0x0F), cpu.regs().flags)) {
             cpu.regs().ip = static_cast<std::uint16_t>(next_ip + instruction.immediate);
         }
+        return StepStatus::kOk;
+    }
+
+    // --- the string instructions ------------------------------------------
+    // A repeated string operation is ONE instruction that runs to completion:
+    // `F3 A4` with CX=84 moves 84 bytes and advances IP by two. It is not 84
+    // steps. (Real hardware can be interrupted mid-loop and resumes by
+    // re-executing the prefix; nothing here can be interrupted yet, and OH-5
+    // is where that matters.)
+    if (IsStringOpcode(opcode)) {
+        if (instruction.repeat == Rep::kNone) {
+            StringIteration(cpu, opcode, instruction.wide, instruction.segment_override);
+            return StepStatus::kOk;
+        }
+        const bool until = instruction.repeat == Rep::kWhileZero;
+        while (cpu.regs().cx != 0) {
+            StringIteration(cpu, opcode, instruction.wide, instruction.segment_override);
+            cpu.regs().cx = static_cast<std::uint16_t>(cpu.regs().cx - 1);
+            // The count comes down first, then the condition is tested. On
+            // MOVS, STOS and LODS there is no condition and both prefixes
+            // mean the same thing.
+            if (StringSetsZero(opcode) && HasFlag(cpu.regs().flags, kZero) != until) {
+                break;
+            }
+        }
+        return StepStatus::kOk;
+    }
+
+    // --- group 3, 0xF6/0xF7 -----------------------------------------------
+    // Seven instructions behind two opcodes. TEST, NOT and NEG are operand
+    // shaped and stay here; the four that produce a double-width result go
+    // through muldiv.cc.
+    if (opcode == 0xF6 || opcode == 0xF7) {
+        const Operand rm = ResolveRm(cpu, instruction);
+        const std::uint16_t value = Read(cpu, rm);
+        std::uint16_t flags = cpu.regs().flags;
+
+        switch (instruction.modrm.reg) {
+            case 0:
+            case 1: {  // TEST r/m, imm -- AND with the result thrown away
+                Alu(AluKind::kAnd, value,
+                    static_cast<std::uint16_t>(instruction.immediate), instruction.wide, flags);
+                break;
+            }
+            case 2:  // NOT -- the only member that touches no flag at all
+                Write(cpu, rm, static_cast<std::uint16_t>(~value));
+                return StepStatus::kOk;
+            case 3: {  // NEG -- SUB from zero, and its flags are exactly that
+                const std::uint16_t result = Alu(AluKind::kSub, 0, value, instruction.wide, flags);
+                Write(cpu, rm, result);
+                break;
+            }
+            default: {
+                const MulDivResult result =
+                    MulDiv(static_cast<MulDivKind>(instruction.modrm.reg), cpu.regs().ax,
+                           cpu.regs().dx, value, instruction.wide, flags);
+                cpu.regs().flags = static_cast<std::uint16_t>(flags | kFlagsAlwaysSet);
+                if (result.divide_error) {
+                    RaiseInterrupt(cpu, 0, next_ip);
+                    return StepStatus::kOk;
+                }
+                cpu.regs().ax = result.ax;
+                cpu.regs().dx = result.dx;
+                return StepStatus::kOk;
+            }
+        }
+        cpu.regs().flags = static_cast<std::uint16_t>(flags | kFlagsAlwaysSet);
         return StepStatus::kOk;
     }
 

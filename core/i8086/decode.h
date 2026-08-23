@@ -37,6 +37,24 @@ constexpr Segment SegmentForPrefix(std::uint8_t byte) {
     }
 }
 
+/// The two repeat prefixes.
+///
+/// F3 is spelled REP before MOVS, STOS and LODS and REPE/REPZ before CMPS and
+/// SCAS; F2 is REPNE/REPNZ before the compares and, confusingly, plain REP
+/// before the others -- the corpus disassembles `F2 A4` as `rep movsb`. They
+/// are one mechanism with two names, so this enum names the *condition*
+/// rather than either mnemonic: on the instructions that set ZF the loop runs
+/// while ZF matches, and on the ones that do not, both simply run CX times.
+enum class Rep : std::uint8_t {
+    kNone = 0,
+    kWhileZero = 1,     ///< F3
+    kWhileNotZero = 2,  ///< F2
+};
+
+/// The repeat prefix bytes.
+constexpr std::uint8_t kPrefixRepNz = 0xF2;
+constexpr std::uint8_t kPrefixRepZ = 0xF3;
+
 /// The mod-reg-rm byte, split.
 struct ModRm {
     std::uint8_t mod = 0;  ///< 0 memory, 1 memory+disp8, 2 memory+disp16, 3 register
@@ -62,6 +80,10 @@ struct Instruction {
     /// The override a prefix asked for, or kNone. Not the segment finally
     /// used -- that also depends on the addressing mode. See EffectiveAddress.
     Segment segment_override = Segment::kNone;
+    /// The repeat prefix, or kNone. Only the string instructions read it; on
+    /// anything else the prefix is accepted, counted in `length`, and has no
+    /// effect, which is what the part does.
+    Rep repeat = Rep::kNone;
     /// Total length including prefixes. IP advances by exactly this, so an
     /// error here desynchronises every following instruction.
     std::uint8_t length = 0;
@@ -71,6 +93,9 @@ struct Instruction {
     ///   instruction. `74 71` is "jump 0x71 bytes past the byte after the 71".
     /// * kImm8 -- the **unsigned** byte exactly as encoded, 0 to 255. A port
     ///   number is not negative and neither is an AAM divisor.
+    /// * kGroup3 -- for `/0` and `/1` only, TEST's immediate at the
+    ///   instruction's width. Read back masked: a 16-bit 0xFFFF is stored
+    ///   here as -1 and is not one.
     ///
     /// One field rather than two because the bytes are the same bytes and a
     /// second field would be unused for every form but one. The sign lives in
@@ -115,6 +140,14 @@ enum class Form : std::uint8_t {
     kRel16 = 3,         ///< two bytes, relative to the next instruction
     kRegInOpcode = 4,   ///< the low three bits name a register (PUSH/POP)
     kImm8 = 5,          ///< one unsigned byte (a port number, an AAM divisor)
+    /// F6/F7: a modrm, plus an immediate for `/0` and `/1` only.
+    ///
+    /// The one form whose LENGTH depends on the modrm byte. TEST takes an
+    /// immediate and the other six members of the group do not, so `Lookup`
+    /// alone cannot say how long an F6 is -- only the decoder, after it has
+    /// read the modrm, can. That is why this is its own form rather than a
+    /// flag on kModRm.
+    kGroup3 = 6,
 };
 
 /// What the decoder and the executor both need to know about an opcode.
@@ -135,7 +168,7 @@ struct OpcodeInfo {
     /// the string ops, the far jumps) outnumber a rule worth trusting.
     bool wide = false;
 
-    bool has_modrm() const { return form == Form::kModRm; }
+    bool has_modrm() const { return form == Form::kModRm || form == Form::kGroup3; }
 };
 
 /// Properties of an opcode. Unknown opcodes report `implemented = false`.

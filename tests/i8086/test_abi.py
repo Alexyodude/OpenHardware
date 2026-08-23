@@ -279,10 +279,12 @@ def test_the_opcode_table_is_the_only_authority(library):
     port = {0xE4, 0xE5, 0xE6, 0xE7, 0xEC, 0xED, 0xEE, 0xEF}   # IN/OUT
     flag_ops = {0xF5, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD}     # CMC..STD
     bcd = {0x27, 0x2F, 0x37, 0x3F, 0xD4, 0xD5}   # DAA DAS AAA AAS AAM AAD
+    string = {0xA4, 0xA5, 0xA6, 0xA7, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF}
+    group3 = {0xF6, 0xF7}    # TEST NOT NEG MUL IMUL DIV IDIV, by modrm reg
     singles = {0x90, 0xC3, 0xE8, 0xE9, 0xEB}  # NOP RET CALL JMP JMPS
 
     assert implemented == (alu | stack | jcc | mov | shift | port | flag_ops
-                           | bcd | singles)
+                           | bcd | string | group3 | singles)
 
 
 def test_the_immediate_alu_forms_are_refused(library):
