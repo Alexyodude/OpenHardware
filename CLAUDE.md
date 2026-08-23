@@ -41,6 +41,7 @@ the checkers named in each file are what actually enforce them.
 - `rules/core-interface.md` — backends never include parts or UI
 - `rules/determinism.md` — no nondeterministic calls in new code
 - `rules/conformance-fixtures.md` — oracle and fixture requirements
+- `rules/ticket-claims.md` — one ticket per unit of work; a ticket owns the paths it may edit
 
 ## Before you commit
 
@@ -105,6 +106,22 @@ test would count once here and many times in pytest.
 `test_ast_count_matches_pytest_collection` fails loudly on the divergence, so
 **do not add `@pytest.mark.parametrize`** without teaching the counter about
 it first. Use a loop inside one test.
+
+## Working alongside another session
+
+Work is tracked in `docs/tickets/`, one file per ticket, and a ticket declares
+the paths it may edit. Before writing anything:
+
+```bash
+python tools/tickets.py list             # what is open, most urgent first
+python tools/tickets.py start OH-3       # take it; refuses if another session holds it
+python tools/tickets.py owner <path>     # who claims this file
+python tools/tickets.py stop             # give it back
+```
+
+`tools/ticket_guard.py` refuses a write into another ticket's files before it
+lands, and `tools/check_ticket_claims.py` catches the same thing in CI. See
+`rules/ticket-claims.md`, and `docs/tickets/README.md` for installing the hook.
 
 ## Deciding what to build
 

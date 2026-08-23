@@ -41,6 +41,9 @@ third_party/
 # oh-my-claudecode session state: notepad, plans, logs, per-session dirs.
 .omc/
 
+# Playwright MCP scratch output (snapshots, console logs).
+.playwright-mcp/
+
 # --- Editors and OS -------------------------------------------------------
 .DS_Store
 Thumbs.db

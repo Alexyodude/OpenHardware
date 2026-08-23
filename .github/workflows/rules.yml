@@ -69,6 +69,16 @@ jobs:
       - name: check_banned_symbols
         run: python tools/check_banned_symbols.py
 
+      # Ticket collisions do not need PICSimLab or the reference checkout;
+      # they are a property of docs/tickets/ and the working tree alone.
+      - name: check_ticket_claims
+        run: python tools/check_ticket_claims.py
+
+      # The guard is a PreToolUse hook and cannot run in CI, so its own
+      # self-test is what keeps it honest here.
+      - name: ticket_guard self-test
+        run: python tools/ticket_guard.py --self-test
+
       # The patches must still apply to whatever upstream is today. This is the
       # only thing that notices when they rot, and it costs a second.
       - name: patches still apply
