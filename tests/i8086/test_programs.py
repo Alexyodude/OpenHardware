@@ -34,15 +34,23 @@ from core.i8086 import abi
 
 #: Where every program is loaded, and where its data goes.
 #:
-#: 0x0100 rather than 0x0000, and not arbitrarily: **the interrupt vector
-#: table occupies the first 1024 bytes of memory.** The first version of this
-#: file loaded programs at 0x0000, so the test that installs a handler wrote
-#: vector 0 straight over its own first instruction and the fault dispatched
-#: into rubble. A single-instruction test can never meet that, because it
-#: never has both a program and a vector table in memory at once.
+#: **The interrupt vector table occupies the first 1024 bytes of memory**, and
+#: the 256 after it are where a real machine keeps its BIOS data. 0x0500 is the
+#: first byte clear of both.
 #:
-#: 0x0100 is also where DOS loads a .COM file, for the same reason.
-CODE = 0x0100
+#: This file first loaded programs at 0x0000, so the test that installs a
+#: handler wrote vector 0 straight over its own first instruction and the
+#: fault dispatched into rubble. A single-instruction test can never meet
+#: that, because it never has both a program and a vector table in memory at
+#: once.
+#:
+#: The fix was 0x0100 -- "where DOS loads a .COM" -- which is *also* inside the
+#: table: vectors 0x40 to 0xFF live at 0x0100-0x03FF. DOS gets away with it
+#: because that offset sits in a segment whose base is far above the table,
+#: and here every segment starts at zero. Only the sample programs that happen
+#: to use a low vector number survived the difference, which is exactly the
+#: kind of luck a test should not depend on.
+CODE = 0x0500
 DATA = 0x0200
 
 
@@ -225,11 +233,11 @@ def test_a_divide_error_runs_a_handler_and_comes_back(cpu):
         0xA3, 0x00, 0x02,        # 7: mov [0200], ax
     ])                           # 10: done
     load(cpu, program)
-    # Vector 0 -> 0000:0300, and a handler that marks memory and returns.
+    # Vector 0 -> 0000:0800, and a handler that marks memory and returns.
     # The handler lives well clear of both the program and the vector table.
-    cpu.write_word(0x0000, 0x0300)
+    cpu.write_word(0x0000, 0x0800)
     cpu.write_word(0x0002, 0x0000)
-    cpu.write_block(0x0300, bytes([
+    cpu.write_block(0x0800, bytes([
         0xC7, 0x06, 0x02, 0x02, 0xEF, 0xBE,   # mov word [0202], BEEFh
         0xCF,                                  # iret
     ]))
@@ -250,9 +258,9 @@ def test_an_explicit_software_interrupt_behaves_the_same_way(cpu):
         0xA3, 0x00, 0x02,        # 2: mov [0200], ax
     ])                           # 5: done
     load(cpu, program, ax=0x1234)
-    cpu.write_word(0x21 * 4, 0x0300)
+    cpu.write_word(0x21 * 4, 0x0800)
     cpu.write_word(0x21 * 4 + 2, 0x0000)
-    cpu.write_block(0x0300, bytes([
+    cpu.write_block(0x0800, bytes([
         0xB8, 0x99, 0x00,        # mov ax, 0099h
         0xCF,                    # iret
     ]))

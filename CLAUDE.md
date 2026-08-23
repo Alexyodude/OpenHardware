@@ -66,6 +66,27 @@ The first four checkers need a PICSimLab **source** checkout and will skip
 without one. `pytest` skips the same tests via the `upstream` fixture rather
 than failing.
 
+## Running the emulator
+
+```bash
+python tools/build_core.py                 # once, to build libi8086
+python webui/emulator_server.py            # http://127.0.0.1:8088/
+```
+
+Registers, flags, memory and disassembly, with step and run and six sample
+programs. It drives `core/i8086` directly and has nothing to do with
+PICSimLab or the bridge below.
+
+The server binds loopback only and checks `Origin`, for the reason
+`webui/bridge.py` gives at length: loading a program means running arbitrary
+8086 code in this process, so the boundary that matters is who can ask. The
+emulated part cannot reach outside its own megabyte -- it has no way to open a
+file or a socket.
+
+`webui/emulator.py` is the session and holds all the behaviour;
+`webui/emulator_server.py` is a thin JSON translation of it, so the tests
+drive the session rather than the transport.
+
 ## Running the UI bridge
 
 ```bash

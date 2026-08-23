@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match I8086_ABI_VERSION in abi.h.
-ABI_VERSION = 6
+ABI_VERSION = 7
 
 #: Must match abi.h's field order exactly -- this is a struct mirror, and a
 #: reordering here reads the wrong bytes. It does NOT need to match the
@@ -79,6 +79,12 @@ class Registers(ctypes.Structure):
 #: 0=ES 1=CS 2=SS 3=DS 4=none, matching i8086::Segment in decode.h.
 SEGMENT_NAMES = ("es", "cs", "ss", "ds", None)
 
+#: i8086::Form, in declaration order. A caller cannot read `immediate`
+#: correctly without knowing which of these applies.
+FORM_NONE, FORM_MODRM, FORM_REL8, FORM_REL16, FORM_REG_IN_OPCODE = 0, 1, 2, 3, 4
+FORM_IMM8, FORM_GROUP3, FORM_IMM16, FORM_MODRM_IMM = 5, 6, 7, 8
+FORM_REG_IMM, FORM_MOFFS, FORM_FAR_POINTER = 9, 10, 11
+
 
 class Decoded(ctypes.Structure):
     """Mirror of `I8086Decoded`. Padding is left to ctypes and the compiler,
@@ -98,7 +104,18 @@ class Decoded(ctypes.Structure):
         ("ea_segment", ctypes.c_uint8),
         ("ea_offset", ctypes.c_uint16),
         ("ea_physical", ctypes.c_uint32),
+        ("immediate", ctypes.c_int16),
+        ("form", ctypes.c_uint8),
+        ("repeat", ctypes.c_uint8),
+        ("reg_in_opcode", ctypes.c_uint8),
+        ("wide", ctypes.c_uint8),
     ]
+
+    @property
+    def repeat_name(self) -> str | None:
+        """`rep` or `repne`, or None. The two prefixes are one mechanism, so
+        which mnemonic is right depends on the opcode -- see FORM_* below."""
+        return (None, "rep", "repne")[self.repeat]
 
     @property
     def override_name(self) -> str | None:

@@ -40,7 +40,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define I8086_ABI_VERSION 6
+#define I8086_ABI_VERSION 7
 
 /// Mirrors i8086::Registers.
 ///
@@ -77,6 +77,18 @@ typedef struct {
     uint8_t ea_segment;
     uint16_t ea_offset;
     uint32_t ea_physical;
+    /// The immediate operand, read according to the opcode's form. Signed for
+    /// the relative branches, unsigned for everything else.
+    int16_t immediate;
+    /// The instruction's form, as i8086::Form. A caller cannot tell whether
+    /// `immediate` means anything without it.
+    uint8_t form;
+    /// The repeat prefix, as i8086::Rep: 0 none, 1 REP/REPE, 2 REPNE.
+    uint8_t repeat;
+    /// For the forms where the low three opcode bits name a register.
+    uint8_t reg_in_opcode;
+    /// 16-bit operands.
+    uint8_t wide;
 } I8086Decoded;
 
 typedef struct I8086Cpu I8086Cpu;

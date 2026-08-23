@@ -152,5 +152,10 @@ jobs:
       - name: rules test suite
         run: pytest tests/rules/ -v
 
+      # Includes `node --check` over the browser scripts. Node is present on
+      # the GitHub runners; where it is not, that test skips and says so.
+      # Python cannot execute the front end, so without this a script that
+      # does not parse at all passes every other test in the repository --
+      # which is how one shipped for about ten minutes.
       - name: webui test suite
         run: pytest tests/webui/ -v

@@ -174,6 +174,11 @@ void i8086_decode(const I8086Cpu* cpu, uint16_t cs, uint16_t ip, I8086Decoded* o
     out->segment_override = static_cast<uint8_t>(decoded.segment_override);
     out->length = decoded.length;
     out->valid = decoded.valid ? 1u : 0u;
+    out->immediate = decoded.immediate;
+    out->form = static_cast<uint8_t>(i8086::Lookup(decoded.opcode).form);
+    out->repeat = static_cast<uint8_t>(decoded.repeat);
+    out->reg_in_opcode = decoded.reg_in_opcode;
+    out->wide = decoded.wide ? 1u : 0u;
 
     if (decoded.has_modrm && !decoded.modrm.is_register()) {
         const i8086::Address address = i8086::EffectiveAddress(

@@ -1,0 +1,77 @@
+<!doctype html>
+<!--
+  OpenHardware — the i8086 emulator, in a browser.
+
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+
+  Served by webui/emulator_server.py, which binds loopback only. The page
+  talks to its own origin and nothing else, so there is no CDN, no font
+  request and no analytics — which is also why it works with the network
+  unplugged.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>i8086 Emulator</title>
+<link rel="stylesheet" href="/emulator.css" />
+<!-- Inline, so the page makes exactly one request per asset it needs and
+     none for one it does not. A 404 in the console is a thing someone
+     will one day spend ten minutes on. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%273%27 fill=%27%23111%27/%3E%3Ctext x=%278%27 y=%2712%27 font-size=%2710%27 font-family=%27monospace%27 text-anchor=%27middle%27 fill=%27%23f2a63b%27%3E86%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+
+<div class="bar">
+  <div class="brand">i8086 <span>— OpenHardware</span></div>
+
+  <select id="sample" aria-label="Sample program"></select>
+  <button id="load">Load</button>
+
+  <span class="spacer"></span>
+
+  <span class="status" id="status" data-state="running">ready</span>
+  <span class="status" id="counter" title="instructions executed">0 steps</span>
+
+  <button id="step" class="primary">Step</button>
+  <button id="run" class="primary">Run</button>
+  <button id="stop" disabled>Stop</button>
+  <button id="reset">Reset</button>
+  <button id="theme" title="Switch between light and dark">◐</button>
+</div>
+
+<main>
+  <section class="panel" id="code">
+    <h2>Disassembly <span class="note" id="where">0000:0100</span></h2>
+    <div class="listing" id="listing"></div>
+    <p class="detail" id="detail"></p>
+  </section>
+
+  <section class="panel" id="state">
+    <h2>Registers <span class="note">changed since last step</span></h2>
+    <div class="registers" id="registers"></div>
+    <h2 style="border-top:1px solid var(--line)">Flags</h2>
+    <div class="flags" id="flags"></div>
+  </section>
+
+  <section class="panel" id="memory">
+    <h2>Memory</h2>
+    <div class="memory-bar">
+      <label for="at">address</label>
+      <input id="at" value="0200" spellcheck="false" />
+      <span id="memnote"></span>
+    </div>
+    <pre class="hexdump" id="hexdump"></pre>
+  </section>
+</main>
+
+<footer>
+  Every instruction here is checked against 2,797,000 cases captured from a
+  physical AMD D8088. Run <code>python tests/i8086/conformance.py
+  third_party/sst8088/v2</code> to see it.
+</footer>
+
+<script src="/emulator.js"></script>
+</body>
+</html>
