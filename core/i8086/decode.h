@@ -37,10 +37,6 @@ constexpr Segment SegmentForPrefix(std::uint8_t byte) {
     }
 }
 
-constexpr bool IsSegmentPrefix(std::uint8_t byte) {
-    return SegmentForPrefix(byte) != Segment::kNone;
-}
-
 /// The mod-reg-rm byte, split.
 struct ModRm {
     std::uint8_t mod = 0;  ///< 0 memory, 1 memory+disp8, 2 memory+disp16, 3 register

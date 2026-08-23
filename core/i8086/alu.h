@@ -33,8 +33,6 @@ inline void SetFlag(std::uint16_t& flags, std::uint16_t mask, bool value) {
                   : static_cast<std::uint16_t>(flags & ~mask);
 }
 
-inline bool GetFlag(std::uint16_t flags, std::uint16_t mask) { return (flags & mask) != 0; }
-
 /// ZF, SF and PF from an 8-bit result. Shared by every operation that sets
 /// them the same way, which is most of them.
 void SetResultFlags8(std::uint8_t result, std::uint16_t& flags);

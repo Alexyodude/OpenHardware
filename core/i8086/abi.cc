@@ -5,7 +5,6 @@
 
 #include "abi.h"
 
-#include <cstring>
 #include <new>
 
 #include "cpu.h"

@@ -96,15 +96,14 @@ def test_a_perfect_step_passes(case):
 
 
 def test_every_fixture_case_passes_a_perfect_step(cases):
-    report = conformance.run_cases(cases, lambda cpu: None, name="unused")
-    # Each case needs its own perfect step, so run them individually.
-    passed = 0
+    """Each case needs its own perfect step, so they run one at a time."""
+    failed = []
     with abi.Cpu() as cpu:
         for one in cases:
-            if conformance.run_case(cpu, one, perfect(one)).ok:
-                passed += 1
-    assert passed == len(cases), f"{len(cases) - passed} of {len(cases)} failed"
-    assert report.total == len(cases)
+            result = conformance.run_case(cpu, one, perfect(one))
+            if not result.ok:
+                failed.append(result.describe())
+    assert not failed, "; ".join(failed)
 
 
 # --- and disagrees with an incorrect one -------------------------------------------
