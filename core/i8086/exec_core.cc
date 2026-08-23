@@ -90,6 +90,22 @@ std::uint16_t Pop(Cpu& cpu) {
     return value;
 }
 
+/// What an undriven 8088 data bus reads as.
+///
+/// The corpus was captured on a machine with **nothing attached to the I/O
+/// bus**: all 40,000 IN cases across E4, E5, EC and ED read 0xFF, and all
+/// 40,000 OUT cases change nothing but IP. That is not the harness
+/// simplifying -- it is what an open bus does.
+///
+/// So there is no port map here, because there is no device to put in one.
+/// A map with nothing in it would be machinery serving callers that want a
+/// constant, and **the corpus could not tell the two apart** -- which is
+/// worth saying out loud, because it means these four opcodes are the one
+/// family in this core whose conformance score is not evidence of much. When
+/// a board model arrives (OH-9), this constant is the seam it replaces.
+constexpr std::uint8_t kOpenBus = 0xFF;
+constexpr std::uint16_t kOpenBusWord = 0xFFFF;
+
 /// The sixteen Jcc conditions, from the low four opcode bits.
 ///
 /// Opcode bit 0 inverts, so there are only eight tests and the odd encodings
@@ -268,6 +284,55 @@ StepStatus Step(Cpu& cpu) {
         }
 
         case 0x90:  // NOP, which is XCHG AX,AX and touches nothing.
+            return StepStatus::kOk;
+
+        // --- port I/O ------------------------------------------------------
+        // The port number is deliberately not computed: nothing consumes it.
+        // E4/E5 carry it as an immediate and EC/ED take it from DX, and both
+        // read the same open bus. See kOpenBus.
+        case 0xE4:  // IN AL, imm8
+        case 0xE5:  // IN AX, imm8
+        case 0xEC:  // IN AL, DX
+        case 0xED:  // IN AX, DX
+            if (instruction.wide) {
+                cpu.regs().ax = kOpenBusWord;
+            } else {
+                WriteByteRegister(cpu.regs(), 0, kOpenBus);  // AL
+            }
+            return StepStatus::kOk;
+
+        case 0xE6:  // OUT imm8, AL
+        case 0xE7:  // OUT imm8, AX
+        case 0xEE:  // OUT DX, AL
+        case 0xEF:  // OUT DX, AX
+            // Nothing latches what is driven. Written as an explicit case
+            // rather than left to the default, because "ran, and had no
+            // observable effect" is a different fact from "not implemented" --
+            // and the corpus separates them, since an unimplemented OUT would
+            // leave IP where it started.
+            return StepStatus::kOk;
+
+        // --- the single-byte flag instructions ------------------------------
+        case 0xF5:  // CMC -- the only one of the seven that reads a flag first
+            SetFlag(cpu.regs().flags, kCarry, !HasFlag(cpu.regs().flags, kCarry));
+            return StepStatus::kOk;
+        case 0xF8:  // CLC
+            SetFlag(cpu.regs().flags, kCarry, false);
+            return StepStatus::kOk;
+        case 0xF9:  // STC
+            SetFlag(cpu.regs().flags, kCarry, true);
+            return StepStatus::kOk;
+        case 0xFA:  // CLI
+            SetFlag(cpu.regs().flags, kInterrupt, false);
+            return StepStatus::kOk;
+        case 0xFB:  // STI
+            SetFlag(cpu.regs().flags, kInterrupt, true);
+            return StepStatus::kOk;
+        case 0xFC:  // CLD -- string operations count upwards
+            SetFlag(cpu.regs().flags, kDirection, false);
+            return StepStatus::kOk;
+        case 0xFD:  // STD -- and downwards
+            SetFlag(cpu.regs().flags, kDirection, true);
             return StepStatus::kOk;
 
         case 0xC3:  // RET near

@@ -245,3 +245,108 @@ def test_the_shift_group_takes_a_modrm_byte_at_both_widths(library):
     assert all(abi.opcode_info(op)[1] for op in (0xD0, 0xD1, 0xD2, 0xD3))
     widths = [abi.opcode_is_wide(op) for op in (0xD0, 0xD1, 0xD2, 0xD3)]
     assert widths == [False, True, False, True]
+
+
+# ======================================================================================
+# Port I/O
+#
+# These are the weakest tests in the file, and deliberately labelled as such.
+# The machine the corpus was captured on had nothing attached to its I/O bus,
+# so all 40,000 IN cases read 0xFF and all 40,000 OUT cases are invisible.
+# A core that models ports properly and one that returns a constant score
+# identically. What is actually pinned here is the *decode* -- lengths, widths,
+# and which half of AX moves -- which the corpus does check.
+# ======================================================================================
+
+
+def run_bytes(cpu, code: bytes, **regs):
+    """Execute one instruction at 0000:0000 with the given registers."""
+    cpu.set_regs(cs=0x0000, ip=0x0000, **regs)
+    cpu.write_block(0x00000, code)
+    cpu.step()
+
+
+def test_in_from_an_immediate_port_reads_the_open_bus(cpu):
+    run_bytes(cpu, bytes([0xE4, 0x1B]), ax=0x9960)   # in al, 1Bh
+    assert cpu.regs.ax & 0xFF == 0xFF
+
+
+def test_in_leaves_the_high_half_of_ax_alone(cpu):
+    """The byte form writes AL only. A core that assigns AX wholesale passes
+    every conformance case where AH happened to be 0xFF and no other."""
+    run_bytes(cpu, bytes([0xE4, 0x1B]), ax=0x9960)
+    assert cpu.regs.ax == 0x99FF
+
+
+def test_the_word_form_of_in_fills_all_of_ax(cpu):
+    run_bytes(cpu, bytes([0xE5, 0x1B]), ax=0x0000)
+    assert cpu.regs.ax == 0xFFFF
+
+
+def test_in_from_dx_reads_the_open_bus_too(cpu):
+    run_bytes(cpu, bytes([0xEC]), ax=0x1234, dx=0x03F8)
+    assert cpu.regs.ax == 0x12FF
+
+
+def test_an_immediate_port_is_two_bytes_and_a_dx_port_is_one(cpu):
+    """`E4 FF` must be port 255, not a one-byte instruction followed by a
+    stray FF. Getting the form wrong desynchronises everything after it."""
+    cpu.set_regs(cs=0x0000, ip=0x0000)
+    cpu.write_block(0x00000, bytes([0xE4, 0xFF]))
+    assert cpu.decode().length == 2
+    cpu.write_block(0x00000, bytes([0xEC]))
+    assert cpu.decode().length == 1
+
+
+def test_out_changes_nothing_but_ip(cpu):
+    """Nothing is attached, so OUT is observable only in that it ran. It must
+    still not be refused -- an unimplemented opcode leaves IP where it was."""
+    cpu.set_regs(cs=0x0000, ip=0x0000, ax=0x1234, dx=0x03F8, flags=0)
+    cpu.write_block(0x00000, bytes([0xEE]))
+    before = cpu.regs.as_dict()
+    cpu.step()
+    after = cpu.regs.as_dict()
+    assert after["ip"] == 1
+    del before["ip"], after["ip"]
+    assert before == after
+
+
+# --- the single-byte flag instructions -------------------------------------------
+
+
+def test_clc_clears_carry_and_stc_sets_it(cpu):
+    run_bytes(cpu, bytes([0xF8]), flags=CF)
+    assert not cpu.regs.flags & CF
+    run_bytes(cpu, bytes([0xF9]), flags=0)
+    assert cpu.regs.flags & CF
+
+
+def test_cmc_complements_carry_in_both_directions(cpu):
+    run_bytes(cpu, bytes([0xF5]), flags=0)
+    assert cpu.regs.flags & CF
+    run_bytes(cpu, bytes([0xF5]), flags=CF)
+    assert not cpu.regs.flags & CF
+
+
+def test_cld_clears_direction_and_std_sets_it(cpu):
+    """DF is what makes the string operations count downwards."""
+    run_bytes(cpu, bytes([0xFC]), flags=0x0400)
+    assert not cpu.regs.flags & 0x0400
+    run_bytes(cpu, bytes([0xFD]), flags=0)
+    assert cpu.regs.flags & 0x0400
+
+
+def test_cli_clears_the_interrupt_flag_and_sti_sets_it(cpu):
+    run_bytes(cpu, bytes([0xFA]), flags=0x0200)
+    assert not cpu.regs.flags & 0x0200
+    run_bytes(cpu, bytes([0xFB]), flags=0)
+    assert cpu.regs.flags & 0x0200
+
+
+def test_a_flag_instruction_touches_only_its_own_bit(cpu):
+    """CLC must not disturb ZF, SF, PF, AF, OF, DF or IF. A core reaching for
+    a whole-flags assignment gets this wrong and nothing else notices."""
+    everything = CF | PF | AF | ZF | SF | OF | 0x0200 | 0x0400
+    run_bytes(cpu, bytes([0xF8]), flags=everything)
+    assert cpu.regs.flags & (everything & ~CF) == (everything & ~CF)
+    assert not cpu.regs.flags & CF

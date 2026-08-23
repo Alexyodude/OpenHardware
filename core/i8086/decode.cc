@@ -59,6 +59,27 @@ OpcodeInfo Lookup(std::uint8_t opcode) {
         case 0x8A: return {true, Form::kModRm, false};
         case 0x8B: return {true, Form::kModRm, true};
 
+        // Port I/O. The `imm8` forms carry the port number as a byte, so they
+        // reach only ports 0-255; the DX forms reach all 65,536.
+        case 0xE4: return {true, Form::kImm8, false};   // IN  AL, imm8
+        case 0xE5: return {true, Form::kImm8, true};    // IN  AX, imm8
+        case 0xE6: return {true, Form::kImm8, false};   // OUT imm8, AL
+        case 0xE7: return {true, Form::kImm8, true};    // OUT imm8, AX
+        case 0xEC: return {true, Form::kNone, false};   // IN  AL, DX
+        case 0xED: return {true, Form::kNone, true};    // IN  AX, DX
+        case 0xEE: return {true, Form::kNone, false};   // OUT DX, AL
+        case 0xEF: return {true, Form::kNone, true};    // OUT DX, AX
+
+        // The single-byte flag instructions. `wide` is meaningless for these
+        // and is left false rather than guessed at.
+        case 0xF5: return {true, Form::kNone, false};   // CMC
+        case 0xF8: return {true, Form::kNone, false};   // CLC
+        case 0xF9: return {true, Form::kNone, false};   // STC
+        case 0xFA: return {true, Form::kNone, false};   // CLI
+        case 0xFB: return {true, Form::kNone, false};   // STI
+        case 0xFC: return {true, Form::kNone, false};   // CLD
+        case 0xFD: return {true, Form::kNone, false};   // STD
+
         case 0x90: return {true, Form::kNone, false};   // NOP
         case 0xC3: return {true, Form::kNone, true};    // RET near
         case 0xE8: return {true, Form::kRel16, true};   // CALL near
@@ -125,6 +146,13 @@ Instruction Decode(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip) {
 
         case Form::kRel8:
             out.immediate = static_cast<std::int8_t>(FetchAt(cpu, cs, ip, at));
+            ++at;
+            break;
+
+        case Form::kImm8:
+            // Zero-extended, not sign-extended. `E4 FF` is port 255, not
+            // port -1, and `D4 FF` is a divisor of 255.
+            out.immediate = static_cast<std::int16_t>(FetchAt(cpu, cs, ip, at));
             ++at;
             break;
 

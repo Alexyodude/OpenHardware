@@ -65,8 +65,16 @@ struct Instruction {
     /// Total length including prefixes. IP advances by exactly this, so an
     /// error here desynchronises every following instruction.
     std::uint8_t length = 0;
-    /// For kRel8 and kRel16: the signed displacement from the END of this
-    /// instruction. `74 71` is "jump 0x71 bytes past the byte after the 71".
+    /// The instruction's immediate operand, read according to its form.
+    ///
+    /// * kRel8, kRel16 -- **signed**, and relative to the END of this
+    ///   instruction. `74 71` is "jump 0x71 bytes past the byte after the 71".
+    /// * kImm8 -- the **unsigned** byte exactly as encoded, 0 to 255. A port
+    ///   number is not negative and neither is an AAM divisor.
+    ///
+    /// One field rather than two because the bytes are the same bytes and a
+    /// second field would be unused for every form but one. The sign lives in
+    /// the reader, and the two readers are three lines apart in Decode.
     std::int16_t immediate = 0;
     /// For kRegInOpcode: the register the low three opcode bits name.
     std::uint8_t reg_in_opcode = 0;
@@ -106,6 +114,7 @@ enum class Form : std::uint8_t {
     kRel8 = 2,          ///< one signed byte, relative to the next instruction
     kRel16 = 3,         ///< two bytes, relative to the next instruction
     kRegInOpcode = 4,   ///< the low three bits name a register (PUSH/POP)
+    kImm8 = 5,          ///< one unsigned byte (a port number, an AAM divisor)
 };
 
 /// What the decoder and the executor both need to know about an opcode.
