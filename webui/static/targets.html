@@ -1,9 +1,4 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Emulation targets — OpenHardware</title>
 <!--
   OpenHardware — every chip on the board list, and whether an oracle exists.
 
@@ -26,6 +21,12 @@
 
   No JavaScript. Nothing here is computed at render time — see the note in
   the footer about which numbers are generated and which are asserted.
+
+  The licence comment sits directly after the doctype deliberately:
+  check_licenses stops scanning at the first line that is not blank, a
+  shebang, a doctype or a comment, so a header placed after <head> is not
+  found. It was placed there first, and the checker did not object -- because
+  the file was still untracked, and check_licenses only reads what git tracks.
 -->
 <style>
 :root {
