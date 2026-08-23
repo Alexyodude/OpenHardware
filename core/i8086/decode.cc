@@ -20,11 +20,17 @@ std::uint8_t FetchAt(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip, int n) 
 ///
 ///   bits 5:3  operation:  ADD OR ADC SBB AND SUB XOR CMP
 ///   bits 2:0  form:       0 r/m8,r8   1 r/m16,r16   2 r8,r/m8   3 r16,r/m16
-///                         4 AL,imm8   5 AX,imm16    6,7 segment PUSH/POP
+///                         4 AL,imm8   5 AX,imm16    6,7 not ALU at all
 ///
-/// Only forms 0-3 are claimed here. 4 and 5 take an immediate, 6 and 7 are
-/// segment-register stack ops; all four report unimplemented and are refused
-/// rather than decoded at the wrong length.
+/// Only forms 0-3 are claimed here. 4 and 5 take an immediate, so they are
+/// refused rather than decoded at the wrong length.
+///
+/// **Forms 6 and 7 are not ALU operations and this function must not claim
+/// them.** For the first four groups they are the segment-register stack ops
+/// (06/07 PUSH/POP ES and so on); for the last four the encoding was reused
+/// entirely, and 27, 2F, 37 and 3F are DAA, DAS, AAA and AAS. Those four are
+/// implemented, in the switch below, and would be shadowed if the pattern
+/// above were widened to cover them.
 bool IsAluModRmForm(std::uint8_t opcode) {
     return opcode < 0x40 && (opcode & 0x07) <= 0x03;
 }
@@ -79,6 +85,15 @@ OpcodeInfo Lookup(std::uint8_t opcode) {
         case 0xFB: return {true, Form::kNone, false};   // STI
         case 0xFC: return {true, Form::kNone, false};   // CLD
         case 0xFD: return {true, Form::kNone, false};   // STD
+
+        // The decimal and ASCII adjusts. All six work on AX alone; only AAM
+        // and AAD carry an operand, and it is an unsigned byte.
+        case 0x27: return {true, Form::kNone, false};   // DAA
+        case 0x2F: return {true, Form::kNone, false};   // DAS
+        case 0x37: return {true, Form::kNone, false};   // AAA
+        case 0x3F: return {true, Form::kNone, false};   // AAS
+        case 0xD4: return {true, Form::kImm8, false};   // AAM imm8
+        case 0xD5: return {true, Form::kImm8, false};   // AAD imm8
 
         case 0x90: return {true, Form::kNone, false};   // NOP
         case 0xC3: return {true, Form::kNone, true};    // RET near

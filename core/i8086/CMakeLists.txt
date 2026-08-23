@@ -8,6 +8,7 @@ add_library(i8086 SHARED
   decode.cc
   alu.cc
   shift.cc
+  bcd.cc
   exec_core.cc
   abi.cc
 )

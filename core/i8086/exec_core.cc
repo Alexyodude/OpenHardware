@@ -6,6 +6,7 @@
 #include "exec_core.h"
 
 #include "alu.h"
+#include "bcd.h"
 #include "shift.h"
 
 namespace i8086 {
@@ -88,6 +89,38 @@ std::uint16_t Pop(Cpu& cpu) {
     const std::uint16_t value = cpu.ReadWordAt(cpu.regs().ss, cpu.regs().sp);
     cpu.regs().sp = static_cast<std::uint16_t>(cpu.regs().sp + 2);
     return value;
+}
+
+/// Take an interrupt vector: push FLAGS, CS and IP, then jump through the
+/// table at the bottom of memory.
+///
+/// **`return_ip` is the address of the next instruction, not the faulting
+/// one.** Measured: `D4 00` at IP 0x8573 pushes 0x8575. Later x86 parts push
+/// the faulting address for a divide error, which is the difference between
+/// it being a fault there and a trap here -- an 8086 handler cannot retry the
+/// instruction, and was never meant to.
+///
+/// This lives here rather than in the `interrupt.*` that OH-5 claims. The
+/// only thing that raises an interrupt today is AAM with a zero divisor, and
+/// creating that file now to hold one function this ticket needs would leave
+/// OH-5 inheriting a header it did not design. It moves when OH-5 arrives and
+/// has INT n, INT3, INTO and the trap flag to put beside it.
+void RaiseInterrupt(Cpu& cpu, std::uint8_t vector, std::uint16_t return_ip) {
+    // FLAGS goes first, and it is the value the instruction has already
+    // computed -- the corpus pushes the adjusted word, not the one the
+    // instruction started with.
+    Push(cpu, cpu.regs().flags);
+    // Cleared after the push, so IRET restores them. A handler entered with
+    // interrupts still enabled would be re-entered by the next one.
+    SetFlag(cpu.regs().flags, kInterrupt, false);
+    SetFlag(cpu.regs().flags, kTrap, false);
+    Push(cpu, cpu.regs().cs);
+    Push(cpu, return_ip);
+
+    // The table is 256 entries of offset-then-segment at 0000:0000.
+    const std::uint16_t entry = static_cast<std::uint16_t>(vector * 4);
+    cpu.regs().ip = cpu.ReadWordAt(0x0000, entry);
+    cpu.regs().cs = cpu.ReadWordAt(0x0000, static_cast<std::uint16_t>(entry + 2));
 }
 
 /// What an undriven 8088 data bus reads as.
@@ -285,6 +318,38 @@ StepStatus Step(Cpu& cpu) {
 
         case 0x90:  // NOP, which is XCHG AX,AX and touches nothing.
             return StepStatus::kOk;
+
+        // --- the decimal and ASCII adjusts ----------------------------------
+        // All six touch AX and nothing else, so one arm serves them. The
+        // immediate is read for every kind and ignored by four of them.
+        case 0x27:    // DAA
+        case 0x2F:    // DAS
+        case 0x37:    // AAA
+        case 0x3F:    // AAS
+        case 0xD4:    // AAM imm8
+        case 0xD5: {  // AAD imm8
+            static constexpr BcdKind kKinds[] = {BcdKind::kDaa, BcdKind::kDas,
+                                                 BcdKind::kAaa, BcdKind::kAas,
+                                                 BcdKind::kAam, BcdKind::kAad};
+            const std::size_t index = opcode == 0x27   ? 0
+                                      : opcode == 0x2F ? 1
+                                      : opcode == 0x37 ? 2
+                                      : opcode == 0x3F ? 3
+                                      : opcode == 0xD4 ? 4
+                                                       : 5;
+            std::uint16_t flags = cpu.regs().flags;
+            const BcdResult result =
+                Bcd(kKinds[index], cpu.regs().ax,
+                    static_cast<std::uint8_t>(instruction.immediate & 0xFF), flags);
+            cpu.regs().ax = result.ax;
+            cpu.regs().flags = static_cast<std::uint16_t>(flags | kFlagsAlwaysSet);
+            if (result.divide_error) {
+                // Flags are already stored, because RaiseInterrupt pushes the
+                // adjusted word rather than the one we arrived with.
+                RaiseInterrupt(cpu, 0, next_ip);
+            }
+            return StepStatus::kOk;
+        }
 
         // --- port I/O ------------------------------------------------------
         // The port number is deliberately not computed: nothing consumes it.

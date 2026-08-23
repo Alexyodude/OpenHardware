@@ -278,21 +278,37 @@ def test_the_opcode_table_is_the_only_authority(library):
     shift = set(range(0xD0, 0xD4))       # the whole group, all eight members
     port = {0xE4, 0xE5, 0xE6, 0xE7, 0xEC, 0xED, 0xEE, 0xEF}   # IN/OUT
     flag_ops = {0xF5, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD}     # CMC..STD
+    bcd = {0x27, 0x2F, 0x37, 0x3F, 0xD4, 0xD5}   # DAA DAS AAA AAS AAM AAD
     singles = {0x90, 0xC3, 0xE8, 0xE9, 0xEB}  # NOP RET CALL JMP JMPS
 
-    assert implemented == alu | stack | jcc | mov | shift | port | flag_ops | singles
+    assert implemented == (alu | stack | jcc | mov | shift | port | flag_ops
+                           | bcd | singles)
 
 
-def test_the_unwritten_alu_forms_are_refused(library):
-    """Forms 4-7 of the ALU group are NOT implemented, and must say so.
+def test_the_immediate_alu_forms_are_refused(library):
+    """Forms 4 and 5 of the ALU group are NOT implemented, and must say so.
 
-    They decode at a different length -- an immediate rather than a modrm --
-    so treating them as implemented would advance IP wrongly.
+    `ALU AL,imm8` and `ALU AX,imm16` decode at a different length -- an
+    immediate rather than a modrm -- so treating them as implemented would
+    advance IP wrongly.
+
+    Forms 6 and 7 are deliberately not swept here. They are not ALU
+    operations at all: for the first four groups they are the segment-register
+    stack ops (06/07/0E/0F/16/17/1E/1F) and for the last four they are
+    DAA, DAS, AAA and AAS. This test used to cover 4-7 and had to be narrowed
+    when the adjusts landed -- the group is regular in its low four forms and
+    not in its high four, and pretending otherwise is what made it fail.
     """
     for base in range(0x00, 0x40, 0x08):
-        for form in range(0x04, 0x08):
+        for form in (0x04, 0x05):
             opcode = base + form
             assert not abi.opcode_info(opcode)[0], f"{opcode:02X} claims to be implemented"
+
+
+def test_the_segment_stack_ops_are_still_unwritten(library):
+    """Form 6 and 7 of the first four ALU groups: PUSH/POP ES, CS, SS, DS."""
+    for opcode in (0x06, 0x07, 0x0E, 0x0F, 0x16, 0x17, 0x1E, 0x1F):
+        assert not abi.opcode_info(opcode)[0], f"{opcode:02X} claims to be implemented"
 
 
 def test_the_alu_group_width_follows_opcode_bit_zero(library):

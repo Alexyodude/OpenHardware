@@ -350,3 +350,199 @@ def test_a_flag_instruction_touches_only_its_own_bit(cpu):
     run_bytes(cpu, bytes([0xF8]), flags=everything)
     assert cpu.regs.flags & (everything & ~CF) == (everything & ~CF)
     assert not cpu.regs.flags & CF
+
+
+# ======================================================================================
+# The decimal and ASCII adjusts
+# ======================================================================================
+
+
+def test_daa_corrects_a_low_digit(cpu):
+    """0x0F is 15, which is not a decimal digit: add 6 to carry it."""
+    run_bytes(cpu, bytes([0x27]), ax=0x000F, flags=0)
+    assert cpu.regs.ax & 0xFF == 0x15
+
+
+def test_daa_corrects_both_digits_and_carries(cpu):
+    run_bytes(cpu, bytes([0x27]), ax=0x009B, flags=0)
+    assert cpu.regs.ax & 0xFF == 0x01
+    assert cpu.regs.flags & CF
+
+
+def test_the_high_correction_threshold_rises_to_9f_when_af_arrives_set(cpu):
+    """The one fact in this family that no published algorithm has.
+
+    With AF clear, AL=0x9E takes both corrections: 0x9E + 0x66 = 0x04, carry
+    out. With AF *already set* it takes only the low one: 0x9E + 6 = 0xA4, no
+    carry. The Intel algorithm has no AF term in its second test and gets one
+    of these two wrong whichever threshold it is written with.
+
+    Derived by recovering `final AL - initial AL` from all 10,000 DAA cases
+    and tabulating it against AL's high nibble and AF. 64 cases distinguish
+    the two, which is 0.64% -- small enough to look like noise in a summary
+    and quite large enough to be a bug.
+    """
+    run_bytes(cpu, bytes([0x27]), ax=0x009E, flags=0)
+    assert (cpu.regs.ax & 0xFF, bool(cpu.regs.flags & CF)) == (0x04, True)
+
+    run_bytes(cpu, bytes([0x27]), ax=0x009E, flags=AF)
+    assert (cpu.regs.ax & 0xFF, bool(cpu.regs.flags & CF)) == (0xA4, False)
+
+
+def test_das_uses_the_same_threshold_as_daa(cpu):
+    """The two correction tables are byte-identical; only the sign differs."""
+    run_bytes(cpu, bytes([0x2F]), ax=0x009E, flags=0)
+    assert cpu.regs.ax & 0xFF == 0x38          # 0x9E - 0x66
+    run_bytes(cpu, bytes([0x2F]), ax=0x009E, flags=AF)
+    assert cpu.regs.ax & 0xFF == 0x98          # 0x9E - 6
+
+
+def test_das_carry_is_which_correction_ran_not_a_borrow(cpu):
+    """The manual says CF is the incoming carry OR a borrow out of the low
+    correction. It is not: it is exactly whether the high correction ran.
+    AL=0x01 with AF set borrows out of 0x01-6 and still leaves CF clear."""
+    run_bytes(cpu, bytes([0x2F]), ax=0x0001, flags=AF)
+    assert cpu.regs.ax & 0xFF == 0xFB
+    assert not cpu.regs.flags & CF
+
+
+def test_daa_leaves_the_high_half_of_ax_alone(cpu):
+    run_bytes(cpu, bytes([0x27]), ax=0x5A0F, flags=0)
+    assert cpu.regs.ax >> 8 == 0x5A
+
+
+# --- AAA and AAS ------------------------------------------------------------------
+
+
+def test_aaa_carries_the_tens_digit_into_ah(cpu):
+    run_bytes(cpu, bytes([0x37]), ax=0x000B, flags=0)
+    assert cpu.regs.ax == 0x0101
+    assert cpu.regs.flags & CF and cpu.regs.flags & AF
+
+
+def test_aas_borrows_the_tens_digit_from_ah(cpu):
+    run_bytes(cpu, bytes([0x3F]), ax=0x020B, flags=0)
+    assert cpu.regs.ax == 0x0105
+    assert cpu.regs.flags & CF and cpu.regs.flags & AF
+
+
+def test_aaa_masks_al_to_one_digit_even_with_nothing_to_correct(cpu):
+    run_bytes(cpu, bytes([0x37]), ax=0x0005, flags=0)
+    assert cpu.regs.ax == 0x0005
+    assert not cpu.regs.flags & CF
+
+
+def test_the_sign_flag_comes_from_before_the_mask(cpu):
+    """AAA runs the ALU whether or not a correction is due, and the flags are
+    that operation's -- taken before AL is masked to its low digit.
+
+    AL=0x85 needs no correction, so the operation is `0x85 + 0`, which is
+    negative. AL is then stored as 0x05. A core that computes flags from the
+    stored value reports SF clear and loses 94% of this opcode: the corpus
+    scores 6.15% for exactly this mistake.
+    """
+    run_bytes(cpu, bytes([0x37]), ax=0x0085, flags=0)
+    assert cpu.regs.ax & 0xFF == 0x05
+    assert cpu.regs.flags & SF
+
+
+# --- AAM and AAD ---------------------------------------------------------------------
+
+
+def test_aam_splits_al_into_two_digits(cpu):
+    run_bytes(cpu, bytes([0xD4, 0x0A]), ax=0x004D, flags=0)   # 77 -> 7, 7
+    assert cpu.regs.ax == 0x0707
+
+
+def test_aam_takes_the_divisor_from_the_operand_not_from_ten(cpu):
+    """`D4 0A` is the assembler's default and the only form most code uses;
+    the opcode takes any byte, and the corpus exercises all of them."""
+    run_bytes(cpu, bytes([0xD4, 0x10]), ax=0x00FF, flags=0)   # 255 = 15*16 + 15
+    assert cpu.regs.ax == 0x0F0F
+
+
+def test_aad_combines_two_digits_into_al(cpu):
+    run_bytes(cpu, bytes([0xD5, 0x0A]), ax=0x0307, flags=0)   # 3*10 + 7
+    assert cpu.regs.ax == 0x0025
+
+
+def test_aad_sets_the_flags_its_final_addition_produces(cpu):
+    """CF, AF and OF are all documented undefined and all three are simply
+    the last ADD's. 0x80 + 0x80 overflows, carries, and comes out zero."""
+    run_bytes(cpu, bytes([0xD5, 0x02]), ax=0x4080, flags=0)   # 0x40*2 = 0x80, + 0x80
+    assert cpu.regs.ax == 0x0000
+    assert cpu.regs.flags & CF and cpu.regs.flags & OF and cpu.regs.flags & ZF
+
+
+def test_aad_does_not_trap_on_a_zero_operand(cpu):
+    """AAM divides and AAM traps; AAD multiplies, and multiplying by zero is
+    an answer. Treating the pair symmetrically is the obvious mistake."""
+    run_bytes(cpu, bytes([0xD5, 0x00]), ax=0x1234, flags=0)
+    assert cpu.regs.ax == 0x0034
+    assert cpu.regs.ip == 2
+
+
+# --- the divide error, which is the first interrupt this core takes ------------------
+
+
+def set_up_vector_zero(cpu, handler_cs: int, handler_ip: int) -> None:
+    """Point interrupt 0 at a handler and give the processor a stack."""
+    cpu.write_word(0x00000, handler_ip)
+    cpu.write_word(0x00002, handler_cs)
+
+
+def test_aam_by_zero_jumps_through_vector_zero(cpu):
+    set_up_vector_zero(cpu, 0xB000, 0x1234)
+    cpu.set_regs(cs=0x0000, ip=0x0100, ss=0x0000, sp=0x0200, ax=0xE837, flags=0)
+    cpu.write_block(0x00100, bytes([0xD4, 0x00]))
+    cpu.step()
+    assert (cpu.regs.cs, cpu.regs.ip) == (0xB000, 0x1234)
+
+
+def test_the_divide_error_pushes_the_address_after_the_instruction(cpu):
+    """Not the faulting address. Measured: `D4 00` at IP 0x8573 pushes 0x8575.
+
+    Later x86 parts push the faulting address so a handler can fix up and
+    retry; an 8086 cannot, and was never meant to.
+    """
+    set_up_vector_zero(cpu, 0xB000, 0x1234)
+    cpu.set_regs(cs=0x7983, ip=0x0100, ss=0x0000, sp=0x0200, ax=0xE837, flags=0)
+    cpu.write_block(0x79930, bytes([0xD4, 0x00]))   # 7983:0100
+    cpu.step()
+    assert cpu.regs.sp == 0x01FA
+    assert cpu.read_word(0x001FA) == 0x0102        # IP after the instruction
+    assert cpu.read_word(0x001FC) == 0x7983        # CS
+
+
+def test_the_divide_error_pushes_the_flags_the_instruction_computed(cpu):
+    """AAM sets flags from a zero result *before* it traps, and it is that
+    word which reaches the stack -- not the one the instruction started with."""
+    set_up_vector_zero(cpu, 0xB000, 0x1234)
+    cpu.set_regs(cs=0x0000, ip=0x0100, ss=0x0000, sp=0x0200, ax=0xE837,
+                 flags=CF | AF | SF | OF)
+    cpu.write_block(0x00100, bytes([0xD4, 0x00]))
+    cpu.step()
+    pushed = cpu.read_word(0x001FE)
+    assert not pushed & (CF | AF | SF | OF)
+    assert pushed & ZF and pushed & PF
+
+
+def test_the_divide_error_leaves_ax_untouched(cpu):
+    set_up_vector_zero(cpu, 0xB000, 0x1234)
+    cpu.set_regs(cs=0x0000, ip=0x0100, ss=0x0000, sp=0x0200, ax=0xE837, flags=0)
+    cpu.write_block(0x00100, bytes([0xD4, 0x00]))
+    cpu.step()
+    assert cpu.regs.ax == 0xE837
+
+
+def test_the_divide_error_disables_interrupts_for_the_handler(cpu):
+    """IF and TF are cleared after the push, so IRET restores them. A handler
+    entered with interrupts still on would be re-entered by the next one."""
+    set_up_vector_zero(cpu, 0xB000, 0x1234)
+    cpu.set_regs(cs=0x0000, ip=0x0100, ss=0x0000, sp=0x0200, ax=0xE837,
+                 flags=0x0200 | 0x0100)
+    cpu.write_block(0x00100, bytes([0xD4, 0x00]))
+    cpu.step()
+    assert not cpu.regs.flags & 0x0200      # IF
+    assert not cpu.regs.flags & 0x0100      # TF
+    assert cpu.read_word(0x001FE) & 0x0300 == 0x0300, "both were pushed set"
