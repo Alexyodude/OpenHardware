@@ -12,12 +12,13 @@ and `upstream-sync.md` each drifted from the code they described inside a single
 session. An inventory is exactly the kind of document that rots fastest, so
 this one is generated on demand instead of written down.
 
-Four collectors, one per thing worth counting:
+Five collectors, one per thing worth counting:
 
 * `collect_tests`   — parses each test file with `ast`
 * `collect_mechanisms` — reads `rules/*.md` frontmatter
 * `collect_files`   — asks git what this repository tracks
 * `collect_ledgers` — parses every ledger under `docs/features/`
+* `collect_boards`  — reads every board definition under `webui/boards/`
 
 Each raises rather than returning an empty result. A report that renders
 cheerfully with nothing in it is indistinguishable from a report of a healthy
@@ -35,6 +36,7 @@ from __future__ import annotations
 import argparse
 import ast
 import collections
+import json
 import pathlib
 import subprocess
 import sys
@@ -57,6 +59,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
 TESTS_DIR = pathlib.Path("tests/rules")
 RULES_DIR = pathlib.Path("rules")
 FEATURES_DIR = pathlib.Path("docs/features")
+BOARDS_DIR = pathlib.Path("webui/boards")
 #: Top-level directories, in the order the report lists them. Anything
 #: outside them lands in `other`, which is deliberately visible: the
 #: separation from upstream is only kept by noticing when something
@@ -186,6 +189,66 @@ def collect_ledgers(
         raise InventoryError(f"{features_dir}: {exc}") from exc
 
 
+class Board(typing.NamedTuple):
+    """One board definition, and how much of it the simulator can reach."""
+
+    name: str
+    pads: int
+    wired: int
+    vendor: str | None
+    licence: str | None
+    art: bool
+
+
+def collect_boards(boards_dir: pathlib.Path = BOARDS_DIR) -> list[Board]:
+    """Every board under `webui/boards/`, with its pad and wiring counts.
+
+    `wired` is the number of pads carrying a simulator pin index, and it is the
+    only field here that says whether a board *does* anything. A pad whose
+    `pin` is null draws and refuses a wire — every XIAO file states exactly
+    that in its own `assumption` field, and gives the reason: a guessed pin
+    number would wire the circuit wrongly and report success.
+
+    So the count that matters is not how many boards exist. Reporting "26
+    boards" without the wiring split would claim twenty-five that cannot be
+    connected to anything, which is the vacuous green this whole tool exists
+    to prevent.
+    """
+    if not boards_dir.is_dir():
+        raise InventoryError(f"{boards_dir}: boards directory does not exist")
+    paths = sorted(boards_dir.glob("*.json"))
+    if not paths:
+        raise InventoryError(f"{boards_dir}: contains no board definitions")
+
+    boards = []
+    for path in paths:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise InventoryError(f"{path}: {exc}") from exc
+        pads = data.get("pads")
+        if not isinstance(pads, list):
+            raise InventoryError(
+                f"{path}: expected a `pads` list, got {type(pads).__name__}"
+            )
+        # `source` is absent on hand-written boards and present on every
+        # imported one. Missing provenance is reported as missing rather than
+        # defaulted to a vendor name, because "we do not know where this came
+        # from" is the finding.
+        source = data.get("source") or {}
+        boards.append(
+            Board(
+                name=data.get("board", path.stem),
+                pads=len(pads),
+                wired=sum(1 for pad in pads if pad.get("pin") is not None),
+                vendor=source.get("vendor"),
+                licence=source.get("licence"),
+                art=path.with_suffix(".svg").is_file(),
+            )
+        )
+    return boards
+
+
 def _head() -> str:
     try:
         result = subprocess.run(
@@ -204,12 +267,17 @@ class _Inventory(typing.NamedTuple):
     mechanisms: list[tuple[str, str, bool, str | None]]
     files: dict[str, list[str]]
     ledgers: dict[str, collections.Counter]
+    boards: list[Board]
 
 
 def _gather() -> _Inventory:
     """Collect every section once, so the two renderers cannot disagree."""
     return _Inventory(
-        collect_tests(), collect_mechanisms(), collect_files(), collect_ledgers()
+        collect_tests(),
+        collect_mechanisms(),
+        collect_files(),
+        collect_ledgers(),
+        collect_boards(),
     )
 
 
@@ -224,6 +292,22 @@ def _tests_by_size(tests: dict[str, int]) -> list[tuple[str, int]]:
 
 def _breakdown(counter: collections.Counter) -> str:
     return ", ".join(f"{count} {status}" for status, count in sorted(counter.items()))
+
+
+def _boards_by_reach(boards: list[Board]) -> list[Board]:
+    """Wired boards first, then alphabetical — one ordering for both renderers.
+
+    Sorting by what the simulator can reach rather than by name puts the
+    honest answer at the top of the list instead of at whatever position the
+    alphabet happens to give it.
+    """
+    return sorted(boards, key=lambda b: (-b.wired, b.name))
+
+
+def _board_provenance(board: Board) -> str:
+    if board.vendor and board.licence:
+        return f"{board.vendor}, {board.licence}"
+    return "no recorded provenance"
 
 
 def render_text() -> str:
@@ -253,6 +337,19 @@ def render_text() -> str:
     lines.append(f"LEDGERS — {len(inv.ledgers)}")
     for path, counter in inv.ledgers.items():
         lines.append(f"  {sum(counter.values()):>4}  {path}  ({_breakdown(counter)})")
+
+    wired = [b for b in inv.boards if b.wired]
+    lines.append("")
+    lines.append(
+        f"BOARDS — {len(inv.boards)} definitions; {len(wired)} wired to the "
+        f"simulator, {len(inv.boards) - len(wired)} outline only"
+    )
+    for board in _boards_by_reach(inv.boards):
+        lines.append(
+            f"  {board.wired:>3}/{board.pads:<3} pins  {board.name:<24}"
+            f"  {_board_provenance(board)}"
+            f"{'' if board.art else '  [no artwork]'}"
+        )
 
     return "\n".join(lines)
 
@@ -308,6 +405,24 @@ def render_markdown() -> str:
     out += [
         f"| `{path}` | {sum(counter.values())} | {_breakdown(counter)} |"
         for path, counter in inv.ledgers.items()
+    ]
+
+    wired = [b for b in inv.boards if b.wired]
+    out += [
+        "",
+        f"## Boards — {len(inv.boards)} definitions, {len(wired)} wired to the simulator",
+        "",
+        "A board is *wired* when its pads carry simulator pin indices. The rest "
+        "draw to scale and deliberately refuse connections: a pad with a null "
+        "pin would otherwise wire the circuit wrongly and report success.",
+        "",
+        "| board | pads | wired | artwork | provenance |",
+        "|---|---|---|---|---|",
+    ]
+    out += [
+        f"| `{board.name}` | {board.pads} | {board.wired} "
+        f"| {'yes' if board.art else 'no'} | {_board_provenance(board)} |"
+        for board in _boards_by_reach(inv.boards)
     ]
 
     return "\n".join(out) + "\n"

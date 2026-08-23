@@ -71,6 +71,46 @@ websocket on localhost is reachable by any page you visit.
 python tools/inventory.py     # computed, never claimed
 ```
 
+## Boards
+
+Board definitions live in `webui/boards/`, each a JSON pad map beside an SVG
+outline. They are imported from vendor KiCad by `tools/import_kicad_board.py`;
+pad centres are exact to three decimal places in millimetres, and nothing is
+measured off an image.
+
+**Only the first group below is wired to the simulator.** The rest draw to
+scale and deliberately refuse connections: a pad whose `pin` is null has no
+simulator pin index, and a guessed one would wire the circuit wrongly *and
+report success*. Each board file says so in its own `assumption` field.
+
+Wired to the simulator:
+
+- `Arduino Uno`
+
+Outline and pad labels only, not yet wired:
+
+- `XIAO-ESP32-C3-DIP` · `XIAO-ESP32-C3-DIP-SMD` · `XIAO-ESP32-C3-SMD`
+- `XIAO-ESP32-C5-DIP` · `XIAO-ESP32-C5-SMD`
+- `XIAO-ESP32-C6-DIP` · `XIAO-ESP32-C6-SMD`
+- `XIAO-ESP32-S3-DIP` · `XIAO-ESP32-S3-SMD` · `XIAO-ESP32-S3-SMD_PAD`
+- `XIAO-MG24-DIP` · `XIAO-MG24-SMD`
+- `XIAO-RP2040-DIP` · `XIAO-RP2040-SMD`
+- `XIAO-RP2350-DIP` · `XIAO-RP2350-SMD`
+- `XIAO-SAMD21-DIP` · `XIAO-SAMD21-SMD`
+- `XIAO-XIAO STM32C5-SMD`
+- `XIAO-nRF52840-DIP` · `XIAO-nRF52840-SMD`
+- `XIAO-nRF54LM20A-DIP` · `XIAO-nRF54LM20A-SMD`
+- `XIAO-nRF54l15-DIP` · `XIAO-nRF54l15-SMD`
+
+All XIAO artwork is Seeed Studio's, MIT, from
+[OSHW-XIAO-Series](https://github.com/Seeed-Studio/OSHW-XIAO-Series).
+
+This list is not maintained by hand.
+`test_readme_board_list_matches_the_directory` fails if it drifts from
+`webui/boards/`, and `python tools/inventory.py` prints the pad and wiring
+counts — which are deliberately *not* written down here, for the reason the
+rest of this file gives.
+
 ## The rules engine
 
 Each file in `rules/` declares mechanisms with a tier

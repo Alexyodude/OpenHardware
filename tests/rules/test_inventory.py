@@ -12,6 +12,7 @@ import pytest
 
 from tools.inventory import (
     InventoryError,
+    collect_boards,
     collect_files,
     collect_ledgers,
     collect_mechanisms,
@@ -173,7 +174,7 @@ def test_every_armed_checker_is_a_file_the_inventory_reports():
 
 def test_text_render_names_every_section():
     out = render_text()
-    for heading in ("TESTS", "MECHANISMS", "FILES tracked", "LEDGERS"):
+    for heading in ("TESTS", "MECHANISMS", "FILES tracked", "LEDGERS", "BOARDS"):
         assert heading in out
 
 
@@ -182,6 +183,120 @@ def test_markdown_render_has_a_table_per_section_and_states_provenance():
     # Count separator *lines*, not occurrences: a four-column table contains
     # "|---" four times on one line.
     separators = sum(1 for line in out.splitlines() if line.startswith("|---"))
-    assert separators == 4, "expected one table per section"
+    assert separators == 5, "expected one table per section"
     assert "Generated from" in out
     assert "do not edit this by hand" in out
+
+
+# --- collect_boards --------------------------------------------------------
+
+
+def test_missing_boards_directory_raises(tmp_path):
+    with pytest.raises(InventoryError, match="does not exist"):
+        collect_boards(tmp_path / "nope")
+
+
+def test_boards_directory_without_definitions_raises(tmp_path):
+    with pytest.raises(InventoryError, match="no board definitions"):
+        collect_boards(tmp_path)
+
+
+def test_a_board_without_a_pads_list_raises(tmp_path):
+    (tmp_path / "b.json").write_text('{"board": "b"}', encoding="utf-8")
+    with pytest.raises(InventoryError, match="expected a `pads` list"):
+        collect_boards(tmp_path)
+
+
+def test_unparseable_board_raises(tmp_path):
+    (tmp_path / "b.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(InventoryError, match="b.json"):
+        collect_boards(tmp_path)
+
+
+def test_only_pads_with_a_pin_index_count_as_wired(tmp_path):
+    (tmp_path / "b.json").write_text(
+        '{"board": "b", "pads": ['
+        '{"pin": 3}, {"pin": 0}, {"pin": null}, {}'
+        "]}",
+        encoding="utf-8",
+    )
+    board = collect_boards(tmp_path)[0]
+    assert (board.pads, board.wired) == (4, 2), (
+        "pin 0 is a real pin index and must count; null and absent must not"
+    )
+
+
+def test_missing_provenance_is_reported_as_missing_not_defaulted(tmp_path):
+    (tmp_path / "b.json").write_text('{"board": "b", "pads": []}', encoding="utf-8")
+    board = collect_boards(tmp_path)[0]
+    assert board.vendor is None and board.licence is None
+
+
+# --- the README cannot drift from the directory ----------------------------
+
+
+def _readme_board_groups() -> tuple[set[str], set[str]]:
+    """The two board name sets the README claims, as (wired, outline-only).
+
+    Parses the section rather than the whole file so that a board name
+    mentioned in prose elsewhere -- `Arduino Uno` turns up in plenty of
+    sentences -- cannot silently satisfy this check.
+    """
+    text = (REPO / "README.md").read_text(encoding="utf-8")
+    section = re.search(r"\n## Boards\n(.*?)(?=\n## )", text, re.DOTALL)
+    assert section, "README.md has no `## Boards` section"
+    body = section.group(1)
+
+    marker = "Outline and pad labels only, not yet wired:"
+    assert marker in body, "README.md's Boards section lost its outline-only heading"
+    wired_half, outline_half = body.split(marker)
+
+    def names_in_bullets(part: str) -> set[str]:
+        # Only bullet lines hold board names. The prose around them also uses
+        # backticks -- for `pin`, `webui/boards/`, `assumption` -- and reading
+        # those as boards would make the check pass on nonsense.
+        return {
+            name
+            for line in part.splitlines()
+            if line.startswith("- ")
+            for name in re.findall(r"`([^`]+)`", line)
+        }
+
+    return names_in_bullets(wired_half), names_in_bullets(outline_half)
+
+
+def test_readme_board_list_matches_the_directory():
+    boards = collect_boards(REPO / "webui" / "boards")
+    readme_wired, readme_outline = _readme_board_groups()
+
+    actual_wired = {b.name for b in boards if b.wired}
+    actual_outline = {b.name for b in boards if not b.wired}
+
+    assert readme_wired == actual_wired, (
+        "README.md's wired board list has drifted from webui/boards/; "
+        f"only in README: {sorted(readme_wired - actual_wired)}; "
+        f"only on disk: {sorted(actual_wired - readme_wired)}"
+    )
+    assert readme_outline == actual_outline, (
+        "README.md's outline-only board list has drifted from webui/boards/; "
+        f"only in README: {sorted(readme_outline - actual_outline)}; "
+        f"only on disk: {sorted(actual_outline - readme_outline)}"
+    )
+
+
+def test_the_readme_does_not_write_down_board_counts():
+    """The counts belong to the generator, not to prose.
+
+    `CLAUDE.md` is explicit that an inventory is the document that rots
+    fastest, and this repository has already caught two rule files describing
+    code they no longer matched. The board *names* are drift-tested above; a
+    hand-typed total has no such guard, so it must not appear at all.
+    """
+    section = re.search(
+        r"\n## Boards\n(.*?)(?=\n## )",
+        (REPO / "README.md").read_text(encoding="utf-8"),
+        re.DOTALL,
+    )
+    assert section
+    stray = re.findall(r"\b\d+\s+(?:boards?|pads?|definitions?)\b", section.group(1))
+    assert not stray, f"board counts written down by hand: {stray}"
