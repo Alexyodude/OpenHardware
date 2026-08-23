@@ -148,6 +148,19 @@ enum class Form : std::uint8_t {
     /// read the modrm, can. That is why this is its own form rather than a
     /// flag on kModRm.
     kGroup3 = 6,
+    kImm16 = 7,      ///< two bytes, unsigned (ALU AX,imm16 and TEST AX,imm16)
+    /// A modrm, then an immediate at the operand width. 80/81/82/83 and
+    /// C6/C7. **0x83 is the exception**: it has 16-bit operands but an 8-bit
+    /// immediate, sign-extended, which is how `ADD word ptr [bx], -1` fits in
+    /// three bytes. Handled by name in Decode rather than by a form of its
+    /// own, because a form with one member is a worse way to say "exception".
+    kModRmImm = 8,
+    /// The low three opcode bits name a register and an immediate follows,
+    /// at the operand width. B0-BF.
+    kRegImm = 9,
+    /// A 16-bit direct address and no modrm, kept in `displacement`. A0-A3,
+    /// the short forms of MOV to and from the accumulator.
+    kMoffs = 10,
 };
 
 /// What the decoder and the executor both need to know about an opcode.
@@ -168,7 +181,18 @@ struct OpcodeInfo {
     /// the string ops, the far jumps) outnumber a rule worth trusting.
     bool wide = false;
 
-    bool has_modrm() const { return form == Form::kModRm || form == Form::kGroup3; }
+    /// Whether a modrm byte follows the opcode.
+    ///
+    /// Three forms carry one, and this must name all three: kModRm, kGroup3
+    /// (F6/F7) and kModRmImm (80-83, C6/C7). It listed only the first two
+    /// when kModRmImm was added, so `i8086_opcode_info` reported 0x83 as
+    /// having no modrm -- decoding was unaffected, because Decode switches on
+    /// the form itself, but every caller of the ABI got a wrong answer. A
+    /// disassembler is exactly such a caller.
+    bool has_modrm() const {
+        return form == Form::kModRm || form == Form::kGroup3 ||
+               form == Form::kModRmImm;
+    }
 };
 
 /// Properties of an opcode. Unknown opcodes report `implemented = false`.

@@ -38,6 +38,28 @@ Operand ResolveRm(const Cpu& cpu, const Instruction& instruction) {
     return out;
 }
 
+/// AL or AX, which is register index 0 at either width.
+Operand AccumulatorOperand(bool wide) {
+    Operand out;
+    out.is_register = true;
+    out.register_index = 0;
+    out.wide = wide;
+    return out;
+}
+
+/// The direct address carried by A0-A3, which has no modrm to resolve.
+///
+/// DS by default and overridable, like any other data access -- `2E A1 00 20`
+/// really does read CS:2000.
+Operand MoffsOperand(const Instruction& instruction) {
+    Operand out;
+    out.wide = instruction.wide;
+    out.segment = instruction.segment_override == Segment::kNone ? Segment::kDs
+                                                                 : instruction.segment_override;
+    out.offset = static_cast<std::uint16_t>(instruction.displacement);
+    return out;
+}
+
 Operand RegOperand(const Instruction& instruction) {
     Operand out;
     out.is_register = true;
@@ -358,13 +380,154 @@ StepStatus Step(Cpu& cpu) {
         return StepStatus::kOk;
     }
 
+    // --- ALU accumulator,immediate -- forms 4 and 5 of the 0x00-0x3F group --
+    if (opcode < 0x40 && ((opcode & 0x07) == 0x04 || (opcode & 0x07) == 0x05)) {
+        const AluKind kind = static_cast<AluKind>((opcode >> 3) & 0x07);
+        const Operand destination = AccumulatorOperand(instruction.wide);
+        std::uint16_t flags = cpu.regs().flags;
+        const std::uint16_t result =
+            Alu(kind, Read(cpu, destination), static_cast<std::uint16_t>(instruction.immediate),
+                instruction.wide, flags);
+        if (kind != AluKind::kCmp) {
+            Write(cpu, destination, result);
+        }
+        cpu.regs().flags = static_cast<std::uint16_t>(flags | kFlagsAlwaysSet);
+        return StepStatus::kOk;
+    }
+
+    // --- group 1: ALU r/m,immediate, operation in the modrm reg field -------
+    if (opcode >= 0x80 && opcode <= 0x83) {
+        const AluKind kind = static_cast<AluKind>(instruction.modrm.reg);
+        const Operand rm = ResolveRm(cpu, instruction);
+        std::uint16_t flags = cpu.regs().flags;
+        const std::uint16_t result =
+            Alu(kind, Read(cpu, rm), static_cast<std::uint16_t>(instruction.immediate),
+                instruction.wide, flags);
+        if (kind != AluKind::kCmp) {
+            Write(cpu, rm, result);
+        }
+        cpu.regs().flags = static_cast<std::uint16_t>(flags | kFlagsAlwaysSet);
+        return StepStatus::kOk;
+    }
+
+    // --- MOV reg,imm -- B0-B7 byte, B8-BF word ------------------------------
+    if (opcode >= 0xB0 && opcode <= 0xBF) {
+        if (instruction.wide) {
+            WriteWordRegister(cpu.regs(), instruction.reg_in_opcode,
+                              static_cast<std::uint16_t>(instruction.immediate));
+        } else {
+            WriteByteRegister(cpu.regs(), instruction.reg_in_opcode,
+                              static_cast<std::uint8_t>(instruction.immediate));
+        }
+        return StepStatus::kOk;
+    }
+
+    // --- INC r16 / DEC r16, and groups 4 and 5 -----------------------------
+    // Split out because **INC and DEC do not touch CF**, and that is their
+    // whole point: a loop can count with INC and still carry a multi-word
+    // addition across iterations. Routing them through ADD/SUB and forgetting
+    // to put CF back is the classic way to break exactly that.
+    if ((opcode >= 0x40 && opcode <= 0x4F) || opcode == 0xFE ||
+        (opcode == 0xFF && instruction.modrm.reg <= 1)) {
+        const bool by_opcode = opcode <= 0x4F;
+        const bool decrement = by_opcode ? (opcode & 0x08) != 0
+                                         : instruction.modrm.reg == 1;
+        Operand target;
+        if (by_opcode) {
+            target.is_register = true;
+            target.register_index = instruction.reg_in_opcode;
+            target.wide = true;
+        } else {
+            target = ResolveRm(cpu, instruction);
+        }
+
+        std::uint16_t flags = cpu.regs().flags;
+        const bool carry = HasFlag(flags, kCarry);
+        const std::uint16_t result =
+            Alu(decrement ? AluKind::kSub : AluKind::kAdd, Read(cpu, target), 1,
+                target.wide, flags);
+        SetFlag(flags, kCarry, carry);
+        Write(cpu, target, result);
+        cpu.regs().flags = static_cast<std::uint16_t>(flags | kFlagsAlwaysSet);
+        return StepStatus::kOk;
+    }
+
+    // --- the rest of group 5: indirect CALL, JMP and PUSH -------------------
+    if (opcode == 0xFF) {
+        const Operand rm = ResolveRm(cpu, instruction);
+        switch (instruction.modrm.reg) {
+            case 2: {  // CALL near, through a register or memory
+                // The target is read BEFORE the return address is pushed.
+                // `FF D4` is CALL SP, and the part jumps to the value SP held
+                // on entry, not to the decremented one -- 328 of 328 cases.
+                const std::uint16_t target = Read(cpu, rm);
+                Push(cpu, next_ip);
+                cpu.regs().ip = target;
+                return StepStatus::kOk;
+            }
+            case 3: {  // CALL far, through a memory pair -- offset then segment
+                if (rm.is_register) {
+                    return StepStatus::kUnimplemented;  // m16:16 only
+                }
+                const std::uint16_t segment = SegmentValue(cpu.regs(), rm.segment);
+                const std::uint16_t offset = cpu.ReadWordAt(segment, rm.offset);
+                const std::uint16_t target =
+                    cpu.ReadWordAt(segment, static_cast<std::uint16_t>(rm.offset + 2));
+                Push(cpu, cpu.regs().cs);
+                Push(cpu, next_ip);
+                cpu.regs().cs = target;
+                cpu.regs().ip = offset;
+                return StepStatus::kOk;
+            }
+            case 4:  // JMP near, indirect
+                cpu.regs().ip = Read(cpu, rm);
+                return StepStatus::kOk;
+            case 5: {  // JMP far, indirect
+                if (rm.is_register) {
+                    return StepStatus::kUnimplemented;
+                }
+                const std::uint16_t segment = SegmentValue(cpu.regs(), rm.segment);
+                const std::uint16_t offset = cpu.ReadWordAt(segment, rm.offset);
+                const std::uint16_t target =
+                    cpu.ReadWordAt(segment, static_cast<std::uint16_t>(rm.offset + 2));
+                cpu.regs().cs = target;
+                cpu.regs().ip = offset;
+                return StepStatus::kOk;
+            }
+            case 6: {  // PUSH r/m16
+                // Decrement, then read -- the same order as 50-57, and for
+                // the same measured reason. `FF F4` (PUSH SP) stores the
+                // decremented value in 277 of 277 cases.
+                cpu.regs().sp = static_cast<std::uint16_t>(cpu.regs().sp - 2);
+                cpu.WriteWordAt(cpu.regs().ss, cpu.regs().sp, Read(cpu, rm));
+                return StepStatus::kOk;
+            }
+            default:
+                return StepStatus::kUnimplemented;
+        }
+    }
+
     // --- PUSH r16 / POP r16 -----------------------------------------------
     if (opcode >= 0x50 && opcode <= 0x57) {
-        // PUSH SP stores the value SP held BEFORE its own decrement on this
-        // part. Later x86 changed that, and it is the classic way to tell an
-        // 8086 from a 286 in software -- so the read happens first.
-        const std::uint16_t value = ReadWordRegister(cpu.regs(), instruction.reg_in_opcode);
-        Push(cpu, value);
+        // **SP decrements first, and only then is the operand read.** For
+        // `PUSH SP` that means the DECREMENTED value reaches the stack.
+        //
+        // This comment used to say the opposite -- that the 8086 stores the
+        // value SP held before its own decrement, "the classic way to tell an
+        // 8086 from a 286 in software" -- and the code read the register
+        // first to match. It is wrong on this part. Measured on the AMD D8088
+        // the corpus was captured from: SP=DD10 pushes DD0E, in 10,000 cases
+        // out of 10,000.
+        //
+        // Nothing caught it for two tickets because opcode 54 is the only
+        // encoding where the two orders differ, and 54 was not among the
+        // corpus files anyone had fetched -- 50, 51 and 52 push AX, CX and DX,
+        // where the question does not arise. The whole opcode scored 0.00% the
+        // moment its file was downloaded. `FF /6`, the other encoding of
+        // PUSH SP, agrees: 277 of 277.
+        cpu.regs().sp = static_cast<std::uint16_t>(cpu.regs().sp - 2);
+        cpu.WriteWordAt(cpu.regs().ss, cpu.regs().sp,
+                        ReadWordRegister(cpu.regs(), instruction.reg_in_opcode));
         return StepStatus::kOk;
     }
     if (opcode >= 0x58 && opcode <= 0x5F) {
@@ -485,6 +648,39 @@ StepStatus Step(Cpu& cpu) {
         }
 
         case 0x90:  // NOP, which is XCHG AX,AX and touches nothing.
+            return StepStatus::kOk;
+
+        // --- TEST accumulator,immediate -------------------------------------
+        case 0xA8:
+        case 0xA9: {
+            std::uint16_t flags = cpu.regs().flags;
+            Alu(AluKind::kAnd, Read(cpu, AccumulatorOperand(instruction.wide)),
+                static_cast<std::uint16_t>(instruction.immediate), instruction.wide, flags);
+            cpu.regs().flags = static_cast<std::uint16_t>(flags | kFlagsAlwaysSet);
+            return StepStatus::kOk;
+        }
+
+        // --- MOV between the accumulator and a direct address ---------------
+        case 0xA0:  // MOV AL, [addr]
+        case 0xA1:  // MOV AX, [addr]
+            Write(cpu, AccumulatorOperand(instruction.wide),
+                  Read(cpu, MoffsOperand(instruction)));
+            return StepStatus::kOk;
+        case 0xA2:  // MOV [addr], AL
+        case 0xA3:  // MOV [addr], AX
+            Write(cpu, MoffsOperand(instruction),
+                  Read(cpu, AccumulatorOperand(instruction.wide)));
+            return StepStatus::kOk;
+
+        // --- MOV r/m,immediate ----------------------------------------------
+        case 0xC6:
+        case 0xC7:
+            // Only `/0` is a defined encoding. The others are not refused
+            // here: they decode at the same length and the part stores the
+            // immediate regardless of what reg holds, so refusing would be a
+            // claim the corpus does not support either way.
+            Write(cpu, ResolveRm(cpu, instruction),
+                  static_cast<std::uint16_t>(instruction.immediate));
             return StepStatus::kOk;
 
         // --- the decimal and ASCII adjusts ----------------------------------

@@ -272,6 +272,13 @@ def test_the_opcode_table_is_the_only_authority(library):
     # ALU group: 0x00-0x3F, but only forms 0-3 of each eight. Forms 4 and 5
     # take an immediate and 6/7 are segment stack ops; none are written yet.
     alu = {op for op in range(0x00, 0x40) if (op & 0x07) <= 0x03}
+    alu_imm = {op for op in range(0x00, 0x40) if (op & 0x07) in (0x04, 0x05)}
+    group1 = {0x80, 0x81, 0x82, 0x83}    # ALU r/m,imm -- 0x82 aliases 0x80
+    test_imm = {0xA8, 0xA9}
+    moffs = {0xA0, 0xA1, 0xA2, 0xA3}     # MOV accumulator <-> direct address
+    mov_imm = set(range(0xB0, 0xC0)) | {0xC6, 0xC7}
+    inc_dec = set(range(0x40, 0x50))     # INC/DEC r16
+    groups_45 = {0xFE, 0xFF}             # INC/DEC r/m, and indirect CALL/JMP/PUSH
     stack = set(range(0x50, 0x60))       # PUSH/POP r16
     jcc = set(range(0x70, 0x80))         # all sixteen conditions
     mov = {0x88, 0x89, 0x8A, 0x8B}
@@ -283,28 +290,34 @@ def test_the_opcode_table_is_the_only_authority(library):
     group3 = {0xF6, 0xF7}    # TEST NOT NEG MUL IMUL DIV IDIV, by modrm reg
     singles = {0x90, 0xC3, 0xE8, 0xE9, 0xEB}  # NOP RET CALL JMP JMPS
 
-    assert implemented == (alu | stack | jcc | mov | shift | port | flag_ops
-                           | bcd | string | group3 | singles)
+    assert implemented == (alu | alu_imm | group1 | test_imm | moffs | mov_imm
+                           | inc_dec | groups_45 | stack | jcc | mov | shift
+                           | port | flag_ops | bcd | string | group3 | singles)
 
 
-def test_the_immediate_alu_forms_are_refused(library):
-    """Forms 4 and 5 of the ALU group are NOT implemented, and must say so.
+def test_the_immediate_alu_forms_carry_no_modrm(library):
+    """Forms 4 and 5 of the ALU group take an immediate and no modrm.
 
-    `ALU AL,imm8` and `ALU AX,imm16` decode at a different length -- an
-    immediate rather than a modrm -- so treating them as implemented would
-    advance IP wrongly.
+    This test used to assert the opposite -- that they were unimplemented and
+    refused -- which was true until they landed. What it pins now is the fact
+    that made them worth refusing in the first place: they decode at a
+    different length from forms 0-3, so a table claiming a modrm here would
+    put IP one or two bytes out on every one of them.
 
-    Forms 6 and 7 are deliberately not swept here. They are not ALU
-    operations at all: for the first four groups they are the segment-register
-    stack ops (06/07/0E/0F/16/17/1E/1F) and for the last four they are
-    DAA, DAS, AAA and AAS. This test used to cover 4-7 and had to be narrowed
-    when the adjusts landed -- the group is regular in its low four forms and
-    not in its high four, and pretending otherwise is what made it fail.
+    Forms 6 and 7 are deliberately not swept. They are not ALU operations at
+    all: for the first four groups they are the segment-register stack ops
+    (06/07/0E/0F/16/17/1E/1F) and for the last four they are DAA, DAS, AAA
+    and AAS. The group is regular in its low four forms and not in its high
+    four.
     """
     for base in range(0x00, 0x40, 0x08):
         for form in (0x04, 0x05):
             opcode = base + form
-            assert not abi.opcode_info(opcode)[0], f"{opcode:02X} claims to be implemented"
+            implemented, has_modrm, wide = (*abi.opcode_info(opcode),
+                                            abi.opcode_is_wide(opcode))
+            assert implemented, f"{opcode:02X} is not implemented"
+            assert not has_modrm, f"{opcode:02X} must not claim a modrm byte"
+            assert wide == (form == 0x05), f"{opcode:02X} has the wrong width"
 
 
 def test_the_segment_stack_ops_are_still_unwritten(library):

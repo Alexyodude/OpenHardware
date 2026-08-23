@@ -81,11 +81,21 @@ jobs:
       #   F6.7                IDIV -- deliberately a PARTIAL file, so the
       #                       exclusion machinery in test_conformance.py is
       #                       exercised here rather than only locally
+      #   54 FF.6             PUSH SP, both encodings. **Sampling a family is
+      #                       not enough when its members differ.** 50, 51 and
+      #                       52 were the sample and all three were green
+      #                       while 54 was 0.00% for two tickets, because AX,
+      #                       CX and DX cannot show the order of the decrement
+      #                       and SP can.
+      #   83 B8 C7 81.0       the immediate forms, including 83's sign-extended
+      #                       8-bit immediate on 16-bit operands
+      #   40 48 FE.0 FF.2     INC/DEC, and the indirect CALL
       - name: Fetch a corpus slice
         run: >
           bash tools/get_8088_tests.sh --opcodes
           00 09 21 29 31 39 50 58 74 8B
           D0.4 D2.2 27 D4 A4 A6 E4 FC F6.4 F6.7
+          54 FF.6 83 B8 C7 81.0 40 48 FE.0 FF.2
 
       - name: Core suite
         run: pytest tests/i8086/ -v

@@ -536,6 +536,63 @@ def test_the_divide_error_leaves_ax_untouched(cpu):
 
 
 # ======================================================================================
+# PUSH SP -- the one operand where the order of the decrement is observable
+# ======================================================================================
+
+
+def test_push_sp_stores_the_decremented_value(cpu):
+    """`54` pushes SP AFTER its own decrement.
+
+    This is the only register for which the order is visible, and the core had
+    it backwards for two tickets: a comment asserted the 8086 pushes the
+    pre-decrement value -- "the classic way to tell an 8086 from a 286" -- and
+    the code read the register first to match.
+
+    It was invisible because opcode 54 was the only corpus file that could
+    disprove it, and 50, 51 and 52 were the ones anyone had fetched. Those
+    push AX, CX and DX, where the question does not arise. The moment 54 was
+    downloaded it scored 0.00% -- 10,000 cases, every one wrong -- while every
+    sibling opcode stayed at 100%.
+
+    Measured: SS:SP = F778:DD10 pushes DD0E.
+    """
+    cpu.set_regs(cs=0x0000, ip=0x0000, ss=0x0000, sp=0x0210, flags=0)
+    cpu.write_block(0x00000, bytes([0x54]))
+    cpu.step()
+    assert cpu.regs.sp == 0x020E
+    assert cpu.read_word(0x0020E) == 0x020E, "0x0210 would be the pre-decrement value"
+
+
+def test_the_other_encoding_of_push_sp_agrees(cpu):
+    """`FF /6` is the second encoding, and the part gives the same answer --
+    277 of 277 corpus cases. Two encodings disagreeing would have been the
+    more interesting result, so it is worth pinning that they do not."""
+    cpu.set_regs(cs=0x0000, ip=0x0000, ss=0x0000, sp=0x0210, flags=0)
+    cpu.write_block(0x00000, bytes([0xFF, 0xF4]))     # mod=3, /6, rm=100 (SP)
+    cpu.step()
+    assert cpu.read_word(0x0020E) == 0x020E
+
+
+def test_pushing_any_other_register_is_unaffected(cpu):
+    """The fix changed the order for every PUSH, so this pins that the
+    ordinary case still stores what it always did."""
+    cpu.set_regs(cs=0x0000, ip=0x0000, ss=0x0000, sp=0x0210, bx=0xBEEF, flags=0)
+    cpu.write_block(0x00000, bytes([0x53]))           # PUSH BX
+    cpu.step()
+    assert cpu.read_word(0x0020E) == 0xBEEF
+
+
+def test_an_indirect_call_reads_its_target_before_pushing(cpu):
+    """`FF D4` is CALL SP. The target is the value SP held on entry, not the
+    decremented one -- 328 of 328 cases. The mirror of the PUSH rule above,
+    and the opposite answer, which is why both are pinned."""
+    cpu.set_regs(cs=0x0000, ip=0x0000, ss=0x0000, sp=0x0210, flags=0)
+    cpu.write_block(0x00000, bytes([0xFF, 0xD4]))
+    cpu.step()
+    assert cpu.regs.ip == 0x0210, "0x020E would mean the push happened first"
+
+
+# ======================================================================================
 # The string instructions
 # ======================================================================================
 

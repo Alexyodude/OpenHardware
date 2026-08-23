@@ -50,6 +50,26 @@ OpcodeInfo Lookup(std::uint8_t opcode) {
     if (opcode >= 0x70 && opcode <= 0x7F) {
         return {true, Form::kRel8, false};
     }
+    // INC r16 (40-47) and DEC r16 (48-4F). Always 16-bit; the byte forms
+    // live in group 4 (FE) instead.
+    if (opcode >= 0x40 && opcode <= 0x4F) {
+        return {true, Form::kRegInOpcode, true};
+    }
+    // ALU accumulator,immediate: forms 4 and 5 of each group in 0x00-0x3F.
+    // Form 4 is AL,imm8 and form 5 is AX,imm16. The operation is bits 5:3,
+    // exactly as for the modrm forms.
+    if (opcode < 0x40 && (opcode & 0x07) == 0x04) {
+        return {true, Form::kImm8, false};
+    }
+    if (opcode < 0x40 && (opcode & 0x07) == 0x05) {
+        return {true, Form::kImm16, true};
+    }
+    // MOV reg,imm. B0-B7 are the byte registers and B8-BF the word ones, so
+    // the width is opcode bit 3 here and not bit 0 -- the one place in the
+    // map where that is true, and an easy thing to get wrong by pattern.
+    if (opcode >= 0xB0 && opcode <= 0xBF) {
+        return {true, Form::kRegImm, (opcode & 0x08) != 0};
+    }
     // The shift/rotate group. D0/D1 shift by one, D2/D3 by CL, and in both
     // cases the count is implicit -- there is no immediate byte, so the form
     // is a plain modrm and the modrm's `reg` field picks the operation. See
@@ -94,6 +114,34 @@ OpcodeInfo Lookup(std::uint8_t opcode) {
         case 0x3F: return {true, Form::kNone, false};   // AAS
         case 0xD4: return {true, Form::kImm8, false};   // AAM imm8
         case 0xD5: return {true, Form::kImm8, false};   // AAD imm8
+
+        // Group 4 (byte) and group 5 (word), operation in the modrm reg
+        // field. Group 5 carries far more than its name suggests: as well as
+        // INC and DEC it holds the indirect CALL and JMP, both near and far,
+        // and PUSH r/m16.
+        case 0xFE: return {true, Form::kModRm, false};
+        case 0xFF: return {true, Form::kModRm, true};
+
+        // Group 1: ALU r/m,immediate, with the operation in the modrm reg
+        // field. 0x82 is an undocumented alias of 0x80 -- same encoding, same
+        // behaviour -- and the corpus has 10,000 cases of each of its eight
+        // members, so it is claimed rather than refused.
+        case 0x80: return {true, Form::kModRmImm, false};
+        case 0x81: return {true, Form::kModRmImm, true};
+        case 0x82: return {true, Form::kModRmImm, false};
+        case 0x83: return {true, Form::kModRmImm, true};   // imm8, sign-extended
+
+        case 0xA8: return {true, Form::kImm8, false};      // TEST AL, imm8
+        case 0xA9: return {true, Form::kImm16, true};      // TEST AX, imm16
+
+        // MOV between the accumulator and a direct address.
+        case 0xA0: return {true, Form::kMoffs, false};     // MOV AL, [addr]
+        case 0xA1: return {true, Form::kMoffs, true};      // MOV AX, [addr]
+        case 0xA2: return {true, Form::kMoffs, false};     // MOV [addr], AL
+        case 0xA3: return {true, Form::kMoffs, true};      // MOV [addr], AX
+
+        case 0xC6: return {true, Form::kModRmImm, false};  // MOV r/m8, imm8
+        case 0xC7: return {true, Form::kModRmImm, true};   // MOV r/m16, imm16
 
         // The string instructions. No modrm and no immediate: the operands
         // are always DS:SI and ES:DI, and the width is opcode bit 0.
@@ -163,6 +211,7 @@ Instruction Decode(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip) {
 
     switch (info.form) {
         case Form::kGroup3:
+        case Form::kModRmImm:
         case Form::kModRm: {
             out.has_modrm = true;
             out.modrm = ModRm::From(FetchAt(cpu, cs, ip, at));
@@ -186,6 +235,22 @@ Instruction Decode(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip) {
             // Only after the modrm is in hand can a group 3 instruction's
             // length be known: `/0` and `/1` are TEST and carry an immediate,
             // and the other six members do not.
+            if (info.form == Form::kModRmImm) {
+                if (out.opcode == 0x83) {
+                    // 16-bit operands, 8-bit immediate, SIGN-extended. Read as
+                    // unsigned it would make `ADD word [bx], -1` add 255.
+                    out.immediate = static_cast<std::int8_t>(FetchAt(cpu, cs, ip, at));
+                    ++at;
+                } else if (out.wide) {
+                    const std::uint8_t low = FetchAt(cpu, cs, ip, at);
+                    const std::uint8_t high = FetchAt(cpu, cs, ip, at + 1);
+                    out.immediate = static_cast<std::int16_t>(low | (high << 8));
+                    at += 2;
+                } else {
+                    out.immediate = static_cast<std::int16_t>(FetchAt(cpu, cs, ip, at));
+                    ++at;
+                }
+            }
             if (info.form == Form::kGroup3 && out.modrm.reg <= 1) {
                 if (out.wide) {
                     const std::uint8_t low = FetchAt(cpu, cs, ip, at);
@@ -223,6 +288,38 @@ Instruction Decode(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip) {
         case Form::kRegInOpcode:
             out.reg_in_opcode = static_cast<std::uint8_t>(out.opcode & 0x07);
             break;
+
+        case Form::kImm16: {
+            const std::uint8_t low = FetchAt(cpu, cs, ip, at);
+            const std::uint8_t high = FetchAt(cpu, cs, ip, at + 1);
+            out.immediate = static_cast<std::int16_t>(low | (high << 8));
+            at += 2;
+            break;
+        }
+
+        case Form::kRegImm: {
+            out.reg_in_opcode = static_cast<std::uint8_t>(out.opcode & 0x07);
+            if (out.wide) {
+                const std::uint8_t low = FetchAt(cpu, cs, ip, at);
+                const std::uint8_t high = FetchAt(cpu, cs, ip, at + 1);
+                out.immediate = static_cast<std::int16_t>(low | (high << 8));
+                at += 2;
+            } else {
+                out.immediate = static_cast<std::int16_t>(FetchAt(cpu, cs, ip, at));
+                ++at;
+            }
+            break;
+        }
+
+        case Form::kMoffs: {
+            // A direct address, kept where a modrm displacement would be so
+            // the executor resolves it the same way.
+            const std::uint8_t low = FetchAt(cpu, cs, ip, at);
+            const std::uint8_t high = FetchAt(cpu, cs, ip, at + 1);
+            out.displacement = static_cast<std::int16_t>(low | (high << 8));
+            at += 2;
+            break;
+        }
 
         case Form::kNone:
             break;
