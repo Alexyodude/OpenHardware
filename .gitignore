@@ -38,6 +38,9 @@ third_party/
 # them. They were never editor configuration; they are this project's spec.
 .claude/
 
+# oh-my-claudecode session state: notepad, plans, logs, per-session dirs.
+.omc/
+
 # --- Editors and OS -------------------------------------------------------
 .DS_Store
 Thumbs.db
