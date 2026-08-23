@@ -24,7 +24,7 @@ at 100%.** Estimates against that unit are the agents' judgement, not measured.
 | **ESP32-C3** | RV32IMC | **Route through QEMU** | The CPU is the *smallest* obstacle — see §4.1. |
 | **ESP32-S3** | Xtensa LX7 | **Avoid** | NDA-gated ISA, register windowing, and a licence trap in the only public doc. |
 | **RP2350** | Cortex-M33 | **Defer** | As configured it carries Security + DSP + FPU — far past plain Armv8-M. |
-| **RP2350** | Hazard3 RISC-V | **The interesting door** | Open source, Apache-2.0, and the chip's own datasheet documents the exact ISA. |
+| **RP2350** | Hazard3 RISC-V | **Strongest oracle in the field** | Open source Apache-2.0, the datasheet states the exact ISA string, **and the repo ships its own C++17 golden model** — see §2.1b. |
 
 The recommendation is not uniform because the situations are not: **integrate
 where good MIT prior art exists, route through an existing emulator where the
@@ -71,7 +71,84 @@ bugs with it. It is not speculative.
 a corpus for these parts. Feasibility — throughput especially — is under
 active investigation.
 
-### 2.2 A second route, possibly toolchain-free
+### 2.1a The SWD route is practical, and the feared blocker is not real
+
+The worry was that Cortex-M0+ lacks hardware single-step. **It does not**, and
+the confusion is between two different mechanisms [V]:
+
+- **Halting debug** — halt via `DHCSR.C_HALT`, then `C_STEP` executes exactly
+  one instruction and re-halts. Base Armv6-M. Universal across every Cortex-M.
+- **Debug-monitor stepping** — non-invasive, via a DebugMonitor exception.
+  **This** is what Armv6-M lacks.
+
+Corpus capture wants the core fully halted between instructions anyway, so it
+needs the mechanism that exists, not the one that does not. Confirmed in
+pyOCD's own source (`pyocd/coresight/cortex_m.py`): its generic `step()` is
+shared by every Cortex-M target, drives `DHCSR` directly, and sets
+`C_MASKINTS` before stepping specifically so an interrupt cannot fire mid-step
+and destroy the one-instruction assumption. The tool already handles the one
+real gotcha.
+
+**The actual risk is throughput, and nobody has published a number.** The
+bottleneck is not SWD wire speed but CMSIS-DAP over USB HID — one 64-byte
+packet per ~1 ms, with an ack per packet. Estimated 20–50 cases/sec realistic,
+100–200 if well batched, single digits if not. At SST8088 density over a
+15–25 opcode subset (150,000–250,000 cases) that is **1–3.5 hours**, or 1–2
+days pessimistically. Not weeks — but this is arithmetic from a generic
+latency figure, not a benchmark. SST8088's own README publishes no throughput
+numbers either, so there is nothing to calibrate against.
+
+Two design constraints to settle **before** writing the rig, not after:
+
+- Armv6-M collapses every fault into one **HardFault** vector — no separate
+  MemManage/BusFault/UsageFault. "This instruction faulted" has to be a
+  designed outcome class, the way SST8088 special-cased the 8088's divide
+  exception, not an afterthought.
+- Cases whose operands would branch out of the sandbox or touch the debug unit
+  must be filtered at *generation* time. SST8088 did the equivalent by masking
+  CX to 7 bits and CL to 6.
+
+**Nobody has published this exact recipe** — SWD halting-debug capture from a
+Cortex-M, released as a portable corpus. That cuts both ways: no one has shown
+it fails, and no one has left behind the pitfalls either.
+
+### 2.1b Hazard3 ships its own golden model — the cheapest oracle in the field
+
+The strongest single finding of the survey. `Hazard3`'s repository contains
+**`test/sim/rvcpp/`, a ~1080-line C++17 ISA simulator written by the same
+author as the silicon**, covering exactly the RP2350 configuration. Apache-2.0.
+Builds with `g++ -std=c++17`, no dependencies and **no cross-compiler**. Its
+`RVCore` exposes `regs[32]`, `pc`, `csr` and `step()` as plain public members —
+it is already the shape a SingleStepTests-style fixture generator needs.
+Roughly 150 lines of new C++ turns it into one. [V]
+
+A second, independent model is available for CI: `riscv/sail-riscv`, the
+official RISC-V golden model, BSD-2-Clause, publishes **prebuilt Linux x86_64
+binaries** in weekly releases — no build, no toolchain. No Windows binary, so
+the natural split is rvcpp locally and Sail in CI, which also gives two
+independent implementations rather than one. [V]
+
+### 2.1c A trap in the obvious shortcut
+
+**Unicorn Engine's core is QEMU's TCG.** They are not independent
+implementations, so "our core agrees with Unicorn" is nearly worthless as
+cross-validation against QEMU. A genuinely separate second implementation is
+needed for agreement to mean anything. [V]
+
+That matters because the risk is not hypothetical: a published study
+differential-tested real Arm hardware against QEMU across 2,774,649
+instruction streams and found **155,642 divergences (30% of encodings)** plus
+four confirmed QEMU bugs — including missing alignment enforcement on
+LDRD/STRD/LDM/STM. A simulator oracle is a real oracle, but it is an oracle
+for agreement with an implementation, not with silicon. [V]
+
+Worth noting against our own instinct: the RISC-V industry's own standard is
+*simulator*-oracle, not hardware. OpenHW's CORE-V-VERIF verifies CV32E40P by
+lock-step co-simulation against a commercial ISS inside RTL simulation. So a
+self-captured hardware corpus would be outside normal practice, not following
+it. [V]
+
+### 2.2 A third route, possibly toolchain-free
 
 `riscv/riscv-unified-db` publishes one YAML per instruction under
 BSD-3-Clause-Clear, carrying an `encoding.match` bit pattern, field positions,
@@ -103,9 +180,19 @@ From **ARM DDI 0419E** §A6.7, extracted from the 374-page PDF [V]:
 That single check is the entire desynchronisation risk. Get it right and the
 rest is a two-level dispatch.
 
-**Only seven entries use a 32-bit encoding at all** [V]: `BL`, `DMB`, `DSB`,
-`ISB`, `MRS`, `MSR (register)`, and the T2 form of `UDF` — that last one is
-easily missed, since `UDF` also has a 16-bit encoding.
+**Six entries use a 32-bit encoding** [V]: `BL`, `DMB`, `DSB`, `ISB`, `MRS`,
+`MSR (register)`. DDI0419C §A4.1 states exactly that list verbatim, and §A4.1.1
+adds that `BL` is *"the only 32-bit instruction in ARMv6-M that updates the
+PC"*.
+
+*Two agents disagreed here* — one reading DDI0419**E** counted seven, including
+a T2 encoding of `UDF`; the other, reading DDI0419**C**, counted six and
+classifies `UDF` as a name for the permanently-undefined space rather than an
+instruction. The difference does not change a decoder (both agree `UDF` means
+"refuse"), but it is recorded rather than silently averaged. The same agent
+also notes 2 of the 71 16-bit entries are deprecated assembler aliases with no
+unique encoding — `CPY` (for `MOV` register) and `NEG` (for `RSB #0`) — giving
+**74 functionally distinct operations** if you fold those out.
 
 Estimated effort: **~0.6–0.8×** the i8086's 73-opcode first conformance. No
 segments, no ModRM combinatorics, uniform 32-bit register file.
@@ -517,12 +604,24 @@ session — one agent lost WebFetch to st.com timeouts throughout. Cross-check
 RM0091 (F0), RM0451 (L0), RM0454 (G0), RM0490 (C0) before treating exact names
 as implementable.
 
-**The PICSimLab build (OH-9) now gates the whole ESP path.** Verified locally:
-`../picsimlab-reference` is source-only — it carries `share/` with 23 boards,
-which is all `install_root()` needs, but no binary, no `libqemu-riscv32` or
-`libqemu-xtensa`, and no ESP ROM images. Our own `known-issues.md` 4a.6 says
-only the *NOGUI* build fails to link and "the WX GUI build is unaffected and
-works", so the recorded blocker is broader than the evidence supports.
+**The PICSimLab build turned out not to gate anything — and our own note was
+wrong.** `known-issues.md` 4a.6 asserted that GCC 11.4 on Ubuntu 22.04 cannot
+link the NOGUI build. Upstream's CI disproves it, and the evidence is inside
+our own reference clone: `.github/workflows/linux-release.yml` runs a
+`[ubuntu-22.04, ubuntu-24.04]` matrix, gates the appimage step to 22.04, and
+that step runs `bscripts/build_appimage.sh`, whose line 68 performs the NOGUI
+link — on every master push. [V]
+
+The published `PICSimLab_NOGUI-0.9.3_260822_Ubuntu_22.04.5_LTS_x86_64.AppImage`
+is 16,435,704 bytes, returns HTTP 200, and was built from commit `62e8b5b` —
+**the exact commit our clone sits on.** [V] So the local ICE is environmental,
+not a property of this source and this compiler. 4a.6 has been corrected.
+
+Better still: `build_appimage.sh` copies `lib/qemu` into the AppDir, so the
+prebuilt NOGUI AppImage **already bundles `libqemu-riscv32`, `libqemu-xtensa`
+and the ESP ROM images** [V] — the whole stack the ESP path needs, with no
+build at all. And since nothing in OH-9 requires NOGUI, and 4a.6 records the
+WX GUI build working here, the adapter work can proceed today.
 
 ---
 
