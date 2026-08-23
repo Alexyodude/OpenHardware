@@ -11,6 +11,7 @@ corrupted the tests that prove the checker works.
 """
 
 import pathlib
+import subprocess
 
 import pytest
 
@@ -227,3 +228,32 @@ def test_this_repository_passes_every_check():
     assert missing_mit(REPO) == []
     assert stray_gpl(REPO) == []
     assert mislabelled_patches(REPO) == []
+
+
+def test_untracked_and_ignored_files_are_out_of_scope(tmp_path):
+    """A licence header is a claim about code this repository distributes.
+
+    It distributes what it tracks. An earlier version walked the filesystem
+    with rglob and reported 26 problems the moment `.claude/` was installed
+    from claude-template -- 151 gitignored files, none of them ours to label.
+    """
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text(".claude/\n", encoding="utf-8")
+    (tmp_path / "ours.py").write_text(MIT_HEADER, encoding="utf-8")
+    vendored = tmp_path / ".claude" / "agents"
+    vendored.mkdir(parents=True)
+    (vendored / "someone-elses.py").write_text("# no header at all\n", encoding="utf-8")
+
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+
+    assert missing_mit(tmp_path) == []
+    assert stray_gpl(tmp_path) == []
+
+
+def test_a_tracked_file_is_still_caught_in_a_real_repo(tmp_path):
+    """The counterpart: git deciding the set must not weaken the check."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "ours.py").write_text("print('no header')\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+
+    assert missing_mit(tmp_path) == [tmp_path / "ours.py"]

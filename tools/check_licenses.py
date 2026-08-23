@@ -55,6 +55,7 @@ exclusion is a licence question for a person, not a header to rewrite.
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import sys
 
 #: Directories whose contents are not ours to label. See the module docstring.
@@ -130,14 +131,45 @@ def _whole(path: pathlib.Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")[:_HEAD_BYTES]
 
 
+def _candidates(root: pathlib.Path) -> list[pathlib.Path]:
+    """Files to consider: what git tracks, or everything if this is not a repo.
+
+    **Tracked, not present.** An earlier version walked the filesystem with
+    `rglob`, which meant it judged files this repository does not own. It
+    found 26 problems the moment `.claude/` was installed from
+    `Alexyodude/claude-template` -- 151 gitignored files, none of them ours to
+    label, every report a false one.
+
+    A licence header is a claim this repository makes about code it
+    distributes. It distributes what it tracks. So git decides the set, and an
+    ignored file is not merely skipped but genuinely out of scope.
+
+    The `rglob` fallback is for the tmp_path directories the tests build,
+    which are not repositories.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-files"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        tracked = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        if tracked:
+            return [root / rel for rel in tracked]
+    except (subprocess.CalledProcessError, FileNotFoundError, NotADirectoryError):
+        pass
+    return [path for path in root.rglob("*") if ".git" not in path.parts]
+
+
 def _ours(root: pathlib.Path = pathlib.Path(".")) -> list[pathlib.Path]:
     """Every source file this repository owns and must label itself."""
     return sorted(
         path
-        for path in root.rglob("*")
+        for path in _candidates(root)
         if path.is_file()
         and path.suffix in SOURCE_SUFFIXES
-        and ".git" not in path.parts
         and not is_third_party(path.relative_to(root).as_posix())
         and not is_patch(path.relative_to(root).as_posix())
     )
