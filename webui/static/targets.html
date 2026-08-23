@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emulation targets — OpenHardware</title>
+<!--
+  OpenHardware — every chip on the board list, and whether an oracle exists.
+
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+
+  Served by webui/emulator_server.py at /targets.html. No server change was
+  needed: resolve_static serves any .html under static/ with an explicit
+  content type.
+
+  This page is a sibling of emulator.html and deliberately inherits its
+  palette and its discipline — one monospace grid for all data so columns
+  line up, and colour used sparingly enough that when something IS coloured
+  it means something. It is not a second visual identity.
+
+  The one column that carries the project's actual argument is `evidence`.
+  docs/architectures.md is valuable because it records contradictions rather
+  than averaging them; a summary that flattened "we ran this here" and "a
+  toolchain header says so" into one confident table would throw that away.
+
+  No JavaScript. Nothing here is computed at render time — see the note in
+  the footer about which numbers are generated and which are asserted.
+-->
+<style>
+:root {
+  --ground:#eef1f4; --surface:#ffffff; --sunken:#e4e8ed; --line:#d3dae1;
+  --ink:#131a21; --muted:#5e6c7a; --faint:#8996a3;
+  --accent:#a85806; --accent-wash:#fdf3e5;
+  --ok:#0b6e52; --ok-wash:#e6f4ef;
+  --warn:#8a6100; --warn-wash:#fbf2dd;
+  --stop:#8c2f39; --stop-wash:#fbeaec;
+  --shadow:0 1px 2px rgba(19,26,33,.07), 0 6px 18px rgba(19,26,33,.05);
+  --mono:ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#12161a; --surface:#1a2027; --sunken:#0d1115; --line:#2a333d;
+    --ink:#dee5ec; --muted:#8a98a6; --faint:#6b7885;
+    --accent:#f2a63b; --accent-wash:#2a2115;
+    --ok:#48d6a0; --ok-wash:#12261f;
+    --warn:#e0b558; --warn-wash:#2a2415;
+    --stop:#f0788a; --stop-wash:#2b171b;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.28);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#12161a; --surface:#1a2027; --sunken:#0d1115; --line:#2a333d;
+  --ink:#dee5ec; --muted:#8a98a6; --faint:#6b7885;
+  --accent:#f2a63b; --accent-wash:#2a2115;
+  --ok:#48d6a0; --ok-wash:#12261f;
+  --warn:#e0b558; --warn-wash:#2a2415;
+  --stop:#f0788a; --stop-wash:#2b171b;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 18px rgba(0,0,0,.28);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+  font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:34px 20px 70px;
+  display:flex;flex-direction:column;gap:28px}
+
+header h1{margin:0 0 6px;font-size:29px;letter-spacing:-.015em;text-wrap:balance}
+header p{margin:0;color:var(--muted);max-width:66ch}
+.stamp{font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:10px}
+.stamp a{color:var(--accent)}
+
+.strip{display:grid;gap:1px;background:var(--line);border:1px solid var(--line);
+  border-radius:10px;overflow:hidden;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.cell{background:var(--surface);padding:13px 15px}
+.cell .n{font-family:var(--mono);font-size:23px;font-variant-numeric:tabular-nums;
+  display:block;line-height:1.15}
+.cell .k{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+  display:block;margin-top:3px}
+.cell.is-ok .n{color:var(--ok)} .cell.is-stop .n{color:var(--stop)}
+.cell.is-warn .n{color:var(--warn)}
+
+section{background:var(--surface);border:1px solid var(--line);border-radius:11px;
+  box-shadow:var(--shadow);overflow:hidden}
+section > h2{margin:0;padding:13px 17px;font-size:11px;font-weight:600;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--muted);
+  border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+section > h2 .sub{margin-left:auto;font-family:var(--mono);letter-spacing:0;
+  text-transform:none;font-weight:400;font-size:12px;color:var(--faint)}
+.body{padding:15px 17px}
+.body p{margin:0 0 11px;max-width:74ch}
+.body p:last-child{margin-bottom:0}
+
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--muted);font-weight:600;padding:9px 12px;border-bottom:1px solid var(--line);
+  white-space:nowrap;background:var(--sunken)}
+td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td.chip{font-family:var(--mono);font-weight:600;white-space:nowrap}
+td.isa{font-family:var(--mono);font-size:12.5px;color:var(--muted);
+  word-break:break-word;min-width:20ch}
+td.note{color:var(--muted);min-width:26ch}
+tr.dim td{opacity:.72}
+
+/* Status reads as form first, colour second — a bordered pill survives
+   greyscale and colour-blindness; a hue alone does not. */
+.pill{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:600;
+  padding:2px 8px;border-radius:4px;white-space:nowrap;border:1px solid transparent}
+.p-ok{color:var(--ok);background:var(--ok-wash);border-color:var(--ok)}
+.p-go{color:var(--accent);background:var(--accent-wash);border-color:var(--accent)}
+.p-warn{color:var(--warn);background:var(--warn-wash);border-color:var(--warn)}
+.p-stop{color:var(--stop);background:var(--stop-wash);border-color:var(--stop)}
+.p-none{color:var(--muted);background:var(--sunken);border-color:var(--line)}
+
+.ev{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:3px;
+  background:var(--sunken);color:var(--muted);border:1px solid var(--line);white-space:nowrap}
+
+code{font-family:var(--mono);font-size:.92em;background:var(--sunken);
+  padding:1px 4px;border-radius:3px}
+
+.tree{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.clus{border:1px solid var(--line);border-radius:9px;padding:13px;background:var(--sunken)}
+.clus.bad{border-color:var(--stop)}
+.clus.good{border-color:var(--ok)}
+.clus h3{margin:0 0 3px;font-size:13px;font-family:var(--mono)}
+.clus .why{margin:0 0 10px;font-size:12px;color:var(--muted)}
+.node{font-family:var(--mono);font-size:12px;padding:5px 9px;background:var(--surface);
+  border:1px solid var(--line);border-radius:5px;margin-bottom:5px}
+.node.root{border-color:var(--stop);color:var(--stop);font-weight:600}
+.node.kid{margin-left:18px;position:relative}
+.node.kid::before{content:"\2514\2500";position:absolute;left:-15px;color:var(--faint)}
+
+ul{margin:0;padding-left:20px} li{margin-bottom:7px} li:last-child{margin-bottom:0}
+.q{border-left:3px solid var(--accent);padding:2px 0 2px 13px;margin:0 0 13px;
+  color:var(--muted);font-style:italic;max-width:70ch}
+footer{color:var(--faint);font-size:12.5px;text-align:center;max-width:78ch;
+  margin:0 auto}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Emulation targets</h1>
+  <p>Every chip on the OpenHardware board list, what it would take to emulate it,
+     and — the part that decides everything else — whether a trustworthy oracle
+     exists to check the result against.</p>
+  <div class="stamp">Compiled 2026-08-24 from <code>docs/architectures.md</code> and nine
+    verification lanes · <a href="/">back to the emulator</a></div>
+</header>
+
+<div class="strip">
+  <div class="cell is-ok"><span class="n">2</span><span class="k">oracle proven here</span></div>
+  <div class="cell"><span class="n">18</span><span class="k">chips surveyed</span></div>
+  <div class="cell is-warn"><span class="n">3</span><span class="k">no public datasheet</span></div>
+  <div class="cell is-stop"><span class="n">2</span><span class="k">avoid or defer</span></div>
+  <div class="cell"><span class="n">26</span><span class="k">boards imported</span></div>
+  <div class="cell is-warn"><span class="n">1</span><span class="k">board actually wired</span></div>
+</div>
+
+<section>
+  <h2>The one thing that decides the rest <span class="sub">§2</span></h2>
+  <div class="body">
+    <p class="q">A core is only as good as the thing you check it against. The 8086 core
+      reached 2,797,000 hardware-captured cases at 100% because SingleStepTests had already
+      captured them. For every chip below, that corpus does not exist.</p>
+    <p><strong>And “SST-shaped” does not mean hardware-captured.</strong> Only the x86 family
+      (8086/8088/80186/80286/80386/V20) claims hardware generation. ARM7TDMI comes from
+      NanoBoyAdvance, m68000 from MAME, sh4 from Reicast — simulator-generated, like the
+      corpus we would be making. That assumption was load-bearing, and it was wrong.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Raspberry Pi silicon <span class="sub">§5</span></h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Part</th><th>Core</th><th>Verdict</th><th>Evidence</th><th>What is actually known</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="chip">RP2040</td>
+        <td class="isa">Cortex-M0+</td>
+        <td><span class="pill p-go">INTEGRATE</span></td>
+        <td><span class="ev">RAN HERE</span></td>
+        <td class="note">rp2040js, MIT, browser-native. <strong>126/126 tests pass in 2.97 s</strong>,
+          sustaining <strong>1,188,334 corpus cases/sec</strong> — both measured on this machine.
+          Its instructions were silicon-diffed once via gdbdiff; the gap is turning that one-off
+          into a continuous claim. The only free oracle that models M0+ rather than M0.</td>
+      </tr>
+      <tr>
+        <td class="chip">RP2350</td>
+        <td class="isa">Hazard3 · rv32ima_zicsr_zifencei_zba_zbb_zbs_zbkb_zca_zcb_zcmp</td>
+        <td><span class="pill p-ok">CHEAPEST DOOR</span></td>
+        <td><span class="ev">BUILT + RAN</span></td>
+        <td class="note">Ships its own C++17 golden model (<code>rvcpp</code>, Apache-2.0).
+          Built here with MSVC behind a 13-line shim; 5 of 5 hand-assembled instructions correct.
+          <strong>Qualified:</strong> no extension gating of any kind, and the RVC decoder has no
+          XLEN gate, so four RV64 encodings are live where RV32 assigns Zcf/Zcd. Right on the legal
+          space, wrong at the illegal-instruction edge — for its own target part.</td>
+      </tr>
+      <tr class="dim">
+        <td class="chip">RP2350</td>
+        <td class="isa">Cortex-M33 · Security + DSP + FPU</td>
+        <td><span class="pill p-warn">DEFER</span></td>
+        <td><span class="ev">SECONDARY</span></td>
+        <td class="note">Far past plain Armv8-M mainline — 8 SAU and 16 MPU regions. Secondary
+          sources put it at 300–450 instructions; flagged for a primary-source pass on DDI 0553.</td>
+      </tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>STM32 — Cortex-M0 / M0+ <span class="sub">the build-our-own candidate</span></h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Family</th><th>Core</th><th>Verdict</th><th>Evidence</th><th>What is actually known</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="chip">C0</td><td class="isa">Cortex-M0+ · 48 MHz</td>
+        <td><span class="pill p-go">BUILD OURS</span></td>
+        <td><span class="ev">HAL SOURCE</span></td>
+        <td class="note">Reference chip, on a ~£12 Nucleo-C031C6. <strong>It has no PLL</strong> —
+          HSI48 plus a divider — so the survey’s four boot spins (a G0 figure) are really
+          <strong>three</strong> here: HSIRDY, <code>ACR.LATENCY</code>, and <code>SWS == SW</code>.</td>
+      </tr>
+      <tr>
+        <td class="chip">G0 · L0 · U0</td><td class="isa">Cortex-M0+</td>
+        <td><span class="pill p-go">BUILD OURS</span></td>
+        <td><span class="ev">HAL SOURCE</span></td>
+        <td class="note">Same core, same approach. G0 is where the original four-spin measurement
+          came from.</td>
+      </tr>
+      <tr class="dim">
+        <td class="chip">F0</td><td class="isa">Cortex-M0 (not M0+)</td>
+        <td><span class="pill p-stop">DROPPED</span></td>
+        <td><span class="ev">CMSIS HEADERS</span></td>
+        <td class="note"><strong>No VTOR, and no <code>CONTROL.nPRIV</code>.</strong> The vector
+          table is pinned at zero, so a per-case HardFault handler cannot be relocated — which makes
+          the whole fault-outcome design impossible. Two architectural deltas, not one.</td>
+      </tr>
+    </tbody>
+  </table></div>
+  <div class="body" style="border-top:1px solid var(--line)">
+    <p><strong>The throughput question is answered, and without hardware.</strong>
+      Roughly <strong>250–350 cases/sec</strong> for a competent rig — a full corpus in
+      2–3 hours, not two days. The feared 10× spread is host tooling, not physics: pyOCD driving
+      the on-board ST-LINK manages 19/s (42 hours), while OpenOCD in dap-direct mode, or a ~£12
+      Raspberry Pi Debug Probe, reaches 245–2,000/s.
+      <strong>The board decision is really a probe decision.</strong></p>
+    <p>And the reason to buy silicon changed. Every free Armv6-M model <em>fails to model faults
+      at all</em>: rp2040js never calls <code>exceptionEntry(EXC_HARDFAULT)</code>, and
+      thumbulator’s <code>decode_error()</code> prints to stderr and exits. They are a good oracle
+      for the defined instruction space and a <strong>null oracle for the fault space</strong> —
+      which is where a conformance corpus earns its keep.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Espressif <span class="sub">§4</span></h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Part</th><th>ISA — silicon</th><th>Verdict</th><th>Evidence</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td class="chip">ESP32-C3</td><td class="isa">RV32IMC — no A</td>
+        <td><span class="pill p-go">REFERENCE CASE</span></td><td><span class="ev">DATASHEET</span></td>
+        <td class="note">A decoder that accepts <code>lr.w</code> here is out of spec. Booted
+          end-to-end this session under prebuilt Windows QEMU: ROM → bootloader → app → blink.</td></tr>
+      <tr><td class="chip">ESP32-C2</td><td class="isa">RV32IMAC</td>
+        <td><span class="pill p-go">ROUTE VIA QEMU</span></td><td><span class="ev">DATASHEET</span></td>
+        <td class="note"><strong>It has atomics.</strong> IDF and LLVM both compile it as
+          <code>rv32imc</code> — a compiler choice, not the silicon. An emulator must implement A,
+          or it traps a legal instruction.</td></tr>
+      <tr><td class="chip">ESP32-C6</td><td class="isa">RV32IMAC</td>
+        <td><span class="pill p-go">ROUTE VIA QEMU</span></td><td><span class="ev">DATASHEET</span></td>
+        <td class="note">Upstream QEMU now carries <code>hw/riscv/esp32c6.c</code>.</td></tr>
+      <tr><td class="chip">ESP32-C5</td><td class="isa">RV32IMAC + Zcb/Zcmp/Zcmt + Xhwlp</td>
+        <td><span class="pill p-warn">DECODER EXCEEDS IDF</span></td><td><span class="ev">DATASHEET</span></td>
+        <td class="note">Silicon has Zc; <code>ZCMP_WORKAROUND=1</code> gates it out of the default
+          build. Both true — they answer different questions.</td></tr>
+      <tr><td class="chip">ESP32-C61</td><td class="isa">RV32IMAC + Zcb/Zcmp/Zcmt</td>
+        <td><span class="pill p-warn">CONFLICT</span></td><td><span class="ev">CONFLICT</span></td>
+        <td class="note">LLVM adds <code>B + Zbc</code>; the datasheet never mentions Zb.
+          Recorded, not settled.</td></tr>
+      <tr><td class="chip">ESP32-H2</td><td class="isa">RV32IMAC</td>
+        <td><span class="pill p-go">ROUTE VIA QEMU</span></td><td><span class="ev">DATASHEET</span></td>
+        <td class="note">No WiFi — BLE 5.3 and 802.15.4.</td></tr>
+      <tr><td class="chip">ESP32-P4</td><td class="isa">RV32IMAFC + Zc + <strong>Zb</strong> + XespV + XespLoop</td>
+        <td><span class="pill p-warn">LARGE</span></td><td><span class="ev">DATASHEET</span></td>
+        <td class="note">The survey’s row missed <strong>Zb</strong>. Two custom extensions that
+          riscv-unified-db does not contain — those would be ours to write.</td></tr>
+      <tr><td class="chip">ESP32-S31</td><td class="isa">rv32imafcb_zicsr_zifencei_zcb_zcmp_zcmt_xesploop_xespv</td>
+        <td><span class="pill p-warn">TOOLCHAIN ONLY</span></td><td><span class="ev">NO DATASHEET</span></td>
+        <td class="note"><strong>It exists, and it is RISC-V</strong> — the survey recorded it as
+          possibly fictional. Its ROM ELF reads <code>e_machine=0xF3</code> with 345,660 bytes of
+          real content. Largest ISA in the family, and the only ESP part with Zc on by default.</td></tr>
+      <tr><td class="chip">ESP32-H4</td><td class="isa">rv32imafcb + xespdsp</td>
+        <td><span class="pill p-warn">TOOLCHAIN ONLY</span></td><td><span class="ev">NO DATASHEET</span></td>
+        <td class="note">Its datasheet 404s — which vindicates the survey’s “no public TRM, do not
+          start here”.</td></tr>
+      <tr><td class="chip">ESP32-H21</td><td class="isa">rv32imac</td>
+        <td><span class="pill p-none">MISSING FROM SURVEY</span></td><td><span class="ev">IDF ONLY</span></td>
+        <td class="note">Absent from the §4.2 table entirely.</td></tr>
+      <tr class="dim"><td class="chip">ESP32-S2 · S3</td><td class="isa">Xtensa LX6 / LX7</td>
+        <td><span class="pill p-stop">AVOID</span></td><td><span class="ev">RE-ARGUED</span></td>
+        <td class="note">The licence objection <strong>does not survive</strong> — the decode tables
+          are MIT, not GPL-2, and QEMU’s Xtensa CPU model is BSD-3. Avoid still holds on the other
+          leg: register windowing at 2–3× the 8086 effort, and <strong>no permissively-licensed
+          executable Xtensa ISS exists anywhere</strong>.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>Which oracles are actually independent</h2>
+  <div class="body">
+    <p class="q">Two sources agreeing is not independence when they share an ancestor. Three
+      instances of that trap surfaced in one session — each time, a thing that looked like
+      corroboration turned out to be downstream of the thing it appeared to corroborate.</p>
+    <div class="tree">
+      <div class="clus bad">
+        <h3>QEMU / TCG</h3>
+        <p class="why">Agreement across these edges is worthless.</p>
+        <div class="node root">QEMU TCG</div>
+        <div class="node kid">Unicorn Engine</div>
+        <div class="node kid">tlib → Renode</div>
+      </div>
+      <div class="clus bad">
+        <h3>Tensilica overlay</h3>
+        <p class="why">“Our decoder agrees with <code>objdump</code>” is a tautology on Xtensa —
+          <code>import_core.sh</code> extracts the same vendor tables.</p>
+        <div class="node root">Tensilica vendor archive</div>
+        <div class="node kid">QEMU-xtensa</div>
+        <div class="node kid">binutils / ESP GCC</div>
+      </div>
+      <div class="clus good">
+        <h3>Genuinely independent</h3>
+        <p class="why">Different ancestors. A cross-check here means something.</p>
+        <div class="node">real silicon — ground truth</div>
+        <div class="node">Hazard3 rvcpp — hand-written by the RTL author</div>
+        <div class="node">riscv-unified-db / Trusim — spec-derived</div>
+        <div class="node">rp2040js — hand-written from DDI0419</div>
+        <div class="node">LLVM Xtensa — hand-written TableGen</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Boards carried in the repository <span class="sub">python tools/inventory.py</span></h2>
+  <div class="body">
+    <p><strong>26 board definitions, of which one is wired to the simulator.</strong>
+      582 pads in total; 28 carry a simulator pin index, and all 28 are on Arduino Uno.
+      The 25 Seeed XIAO boards draw to scale and deliberately refuse connections — a pad with a
+      null pin would otherwise wire the circuit wrongly <em>and report success</em>.</p>
+    <p>Those counts are computed by the generator, never written down. Four tests fail if the
+      README’s list drifts from <code>webui/boards/</code>, and each was verified to fail on real
+      drift before being trusted.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Open — and needing a human</h2>
+  <div class="body">
+    <ul>
+      <li><strong>Arm FVP licence.</strong> Freely downloadable, runs here, models both M0 and M0+.
+        But its supplementary terms <em>prevail</em> over the EULA and scope “Software Models” to
+        Arm architecture licensees. An Armv6-M core here is one. Default: build nothing on it.</li>
+      <li><strong>The Nucleo’s ST-LINK revision.</strong> Decides 245 vs 2,000 cases/sec.
+        Answerable from the board’s silkscreen; st.com is unreachable from this network.</li>
+      <li><strong>The UDB toolchain image.</strong> Trusim cannot build here —
+        <code>./do</code> dies at <code>unsupported OS: MINGW64_NT</code> before Ruby or GMP matter.
+        Docker is the only route, and the image denies anonymous pull.</li>
+      <li><strong>What an oracle must prove.</strong> The handoff asked whether rvcpp builds and
+        exposes the right shape. Both true. The question nobody specified was <em>does it model
+        what the hardware refuses?</em> — and it does not. That belongs in the acceptance criteria
+        for every candidate oracle, not just this one.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>Research output, not adopted repo policy. Every claim carries its evidence class, and
+  conflicts are recorded rather than averaged. The board counts come from
+  <code>tools/inventory.py</code>; the per-chip rows are asserted here and sourced in
+  <code>docs/architectures.md</code> — if the two ever disagree, the repository wins.</footer>
+
+</div>
+</body>
+</html>
