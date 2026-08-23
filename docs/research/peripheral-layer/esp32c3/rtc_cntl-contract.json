@@ -1,0 +1,193 @@
+{
+ "peripheral": "RTC_CNTL (watchdog + clock-select slice)",
+ "role": "WDT reference material for a future coded:esp_wdt - NOT loaded by the chip file, and no longer a contract for a coded peripheral. By team-lead ruling 2026-08-24, RTC_CNTL is model regmap:esp32c3/rtc_cntl.json (the adopted watchdog posture is deferral: inert until a conformance fixture asserts expiry behaviour, then a fully-tested coded model, never an increment between). The RWDT/Super-WDT register layout, WPROTECT keys, stage-action encoding and the bootloader auto-feed sequence preserved here are exactly what that future coded model needs and would be expensive to re-derive. The original author's recommendation that RTC_CNTL be coded now via the WDT write-clause is preserved verbatim in role_original as a recorded position; the ruling chose deferral instead. Retitled by esp-soc implementing the ruling; no other field of this file was changed.",
+ "source": "espressif/esp-idf tag v6.0.2: components/soc/esp32c3/register/soc/rtc_cntl_reg.h; components/bootloader_support/src/esp32c3/bootloader_esp32c3.c; components/bootloader_support/src/bootloader_init.c; components/esp_hw_support/port/esp32c3/rtc_clk.c; components/esp_hw_support/port/esp32c3/rtc_clk_init.c",
+ "verified": "2026-08-24, all offsets/bits/reset-values/quotes below fetched from the pinned tag above via raw.githubusercontent.com and gh api. The C3 TRM PDF was not consulted.",
+ "clock_select_findings": {
+  "claim_checked": "esp-soc's stub note for RTC_CNTL: 'Known suspect: clock-ready status bits polled by rtc_clk_init will spin - let the detector name them rather than guessing kinds here unverified.'",
+  "result": "NOT FOUND on ESP32-C3. Read rtc_clk.c and rtc_clk_init.c in full (413 + 81 lines). The C3 main-clock and BBPLL path never polls a memory-mapped ready bit: rtc_clk_bbpll_enable/configure drive the BBPLL entirely through the analog REGI2C control bus (regi2c_ctrl_ll_bbpll_calibration_start(), regi2c_ctrl_ll_i2c_bbpll_enable() -- write-only register-indirect analog control, not a status poll), and every RTC-domain clock switch (rc_fast enable, slow-clock source select) uses a fixed esp_rom_delay_us(SOC_DELAY_*) wait, e.g. rtc_clk.c:85 'esp_rom_delay_us(SOC_DELAY_RC_FAST_ENABLE)', :130 'esp_rom_delay_us(SOC_DELAY_RTC_SLOW_CLK_SWITCH)', :151 'esp_rom_delay_us(SOC_DELAY_RTC_FAST_CLK_SWITCH)'. Those constants are just timed waits (esp_rom_delay_us is itself a ROM-resident calibrated busy-loop against the cycle counter, not a register poll), so a virtual-time model that advances cycles under any busy-wait is sufficient -- no field kind is needed for this path at all, because nothing in it reads an MMIO status bit in a loop.",
+  "one_real_finding": "rtc_clk_wait_for_slow_cycle() (rtc_time.c:176-181) DOES poll RTC_CNTL_SLOW_CLK_CONF_REG.SLOW_CLK_NEXT_EDGE in a while loop, with the function's own comment reading '//This function may not by useful any more' [sic]. A repo-wide search (gh api search/code for rtc_clk_wait_for_slow_cycle across espressif/esp-idf) found this function declared and defined for esp32/esp32c2/esp32c3/esp32s2/esp32s3, called from nowhere else in any of those ports. Treat as present-but-dormant: model it (see field below, it costs one field) but it is not on the app_main() critical path today and should not be prioritised over the two watchdogs."
+ },
+ "registers": [
+  {
+   "name": "RTC_CNTL_SLOW_CLK_CONF_REG",
+   "offset": "0x0074",
+   "fields": [
+    {
+     "bits": "31",
+     "name": "SLOW_CLK_NEXT_EDGE",
+     "kind": "self-clearing",
+     "source": "components/soc/esp32c3/register/soc/rtc_cntl_reg.h:1086-1092",
+     "why": "rtc_clk_wait_for_slow_cycle() sets this bit then polls it until clear, waiting one slow-clock edge. Correct minimal model per the design doc's kind-5 rule ('write 1 starts an action; correct model reads back 0 (instant completion)') -- safe because, per clock_select_findings above, nothing currently calls this function on the C3 boot path, so an instant-clear default cannot break a real spin; it only needs to be right if/when someone wires this function up"
+    }
+   ]
+  },
+  {
+   "name": "RTC_CNTL_RESET_STATE_REG",
+   "offset": "0x0038",
+   "fields": [
+    {
+     "bits": "0-5",
+     "name": "RESET_CAUSE_PROCPU",
+     "kind": "hw",
+     "source": "components/soc/esp32c3/register/soc/rtc_cntl_reg.h:456,547",
+     "why": "esp_rom_get_reset_reason(0), called in bootloader_esp32c3.c:60 (bootloader_check_wdt_reset) and again by the app's own startup, reads this to decide whether the previous reset was a watchdog reset and to print/act on it. Its correct value depends on which reset path the emulator itself just took (power-on vs RWDT-timeout vs SW reset vs brownout), so it is the harness's own reset logic writing this, not firmware -- impure with respect to 'stored state plus virtual time' in the same sense GPIO IN is, hence kind hw rather than a data default"
+    }
+   ]
+  },
+  {
+   "name": "RTC_CNTL_WDTCONFIG0_REG (RWDT)",
+   "offset": "0x0090",
+   "reset": "0x00003C81 (WDT_FLASHBOOT_MOD_EN=1, WDT_CPU_RESET_LENGTH=1, WDT_SYS_RESET_LENGTH=1, WDT_PAUSE_IN_SLP=1, all else 0 per field resets below)",
+   "coded": true,
+   "fields": [
+    {
+     "bits": "31",
+     "name": "WDT_EN",
+     "kind": "hw",
+     "reset": 0,
+     "source": "components/soc/esp32c3/register/soc/rtc_cntl_reg.h:1571-1576"
+    },
+    {
+     "bits": "28-30",
+     "name": "WDT_STG0",
+     "kind": "hw",
+     "reset": 0,
+     "source": "components/soc/esp32c3/register/soc/rtc_cntl_reg.h:1578",
+     "why": "3-bit action selector, shared encoding across all four stages and identical to TIMG's: 0=off, 1=interrupt, 2=RESET_CPU, 3=RESET_SYSTEM, 4=RESET_RTC (rtc_cntl_reg.h RTC_WDT_STG_SEL_* constants, same block). RESET_RTC (value 4) exists on RWDT but not on TIMG's MWDT (which tops out at RESET_SYSTEM=3) -- a real asymmetry between the two watchdog types, not a typo"
+    },
+    {
+     "bits": "25-27",
+     "name": "WDT_STG1",
+     "kind": "hw",
+     "reset": 0
+    },
+    {
+     "bits": "22-24",
+     "name": "WDT_STG2",
+     "kind": "hw",
+     "reset": 0
+    },
+    {
+     "bits": "19-21",
+     "name": "WDT_STG3",
+     "kind": "hw",
+     "reset": 0
+    },
+    {
+     "bits": "12",
+     "name": "WDT_FLASHBOOT_MOD_EN",
+     "kind": "hw",
+     "reset": 1,
+     "source": "components/soc/esp32c3/register/soc/rtc_cntl_reg.h:1622-1627",
+     "why": "THE mask-ROM-set bit. Reset default 1: the mask ROM arms RWDT in flashboot-protect mode before the 2nd-stage bootloader gets control at all (bootloader_start.c's own top comment: 'We arrive here after the ROM bootloader finished loading this second stage bootloader ... The hardware is mostly uninitialized'). bootloader_config_wdt() (bootloader_init.c:73-102) is the FIRST thing that clears it: 'wdt_hal_write_protect_disable(&rwdt_ctx); wdt_hal_set_flashboot_en(&rwdt_ctx, false); wdt_hal_write_protect_enable(&rwdt_ctx);'. If this bit is not modelled as starting at 1 and the RWDT's flashboot timeout is not honoured, an emulator that skips straight to app_main() has silently skipped a real hazard rather than proven the app survives it -- the design's own instruction to check whether we can skip the bootloader (see the boot-sequence findings in the accompanying report) hinges on this exact bit"
+    },
+    {
+     "bits": "9",
+     "name": "WDT_PAUSE_IN_SLP",
+     "kind": "hw",
+     "reset": 1
+    }
+   ]
+  },
+  {
+   "name": "RTC_CNTL_WDTCONFIG1..4_REG (RWDT stage hold values)",
+   "offset": "0x0094 / 0x0098 / 0x009C / 0x00A0",
+   "coded": true,
+   "fields": [
+    {
+     "name": "WDT_STG0_HOLD",
+     "kind": "hw",
+     "reset": 200000,
+     "offset": "0x0094",
+     "why": "RWDT ticks are RTC slow-clock cycles (~150kHz nominal on RC_SLOW), not microseconds -- 200000 cycles is on the order of a second, not the bootloader's own much shorter CONFIG_BOOTLOADER_WDT_TIME_MS-derived value it sets when CONFIG_BOOTLOADER_WDT_ENABLE is on"
+    },
+    {
+     "name": "WDT_STG1_HOLD",
+     "kind": "hw",
+     "reset": 80000,
+     "offset": "0x0098"
+    },
+    {
+     "name": "WDT_STG2_HOLD",
+     "kind": "hw",
+     "reset": 4095,
+     "offset": "0x009C"
+    },
+    {
+     "name": "WDT_STG3_HOLD",
+     "kind": "hw",
+     "reset": 4095,
+     "offset": "0x00A0"
+    }
+   ]
+  },
+  {
+   "name": "RTC_CNTL_WDTFEED_REG",
+   "offset": "0x00A4",
+   "coded": true,
+   "fields": [
+    {
+     "bits": "31",
+     "name": "WDT_FEED",
+     "kind": "hw",
+     "source": "components/soc/esp32c3/register/soc/rtc_cntl_reg.h:1691-1696",
+     "why": "Write-only, always reads 0 -- but per the design doc's write clause, 'FEED stores nothing': the real effect is resetting a hidden internal countdown counter the emulator must track separately, not writable field data. This is the canonical case the design doc names for why WDTs are whole-peripheral coded, not a grown kind"
+    }
+   ]
+  },
+  {
+   "name": "RTC_CNTL_WDTWPROTECT_REG",
+   "offset": "0x00A8",
+   "coded": true,
+   "fields": [
+    {
+     "bits": "0-31",
+     "name": "WDT_WKEY",
+     "kind": "hw",
+     "source": "components/soc/esp32c3/register/soc/rtc_cntl_reg.h:1699-1705",
+     "why": "Write-protect key. Per rtc_cntl_reg.h the unlock value is 0x50D83AA1 (write anything else and the RWDT config registers above become read-only until the correct key is written again). This is the other write-clause case the design doc names: 'write-protect registers gate the writability of *sibling* registers' -- the register's own storage is trivial (rw the raw 32 bits) but its EFFECT is a hidden protect-state latch consulted on every write to WDTCONFIG0-5 and WDTFEED, which is why the whole group is coded rather than four independent rw fields"
+    }
+   ]
+  },
+  {
+   "name": "RTC_CNTL_SWD_CONF_REG (analog Super WDT)",
+   "offset": "0x00AC",
+   "coded": true,
+   "fields": [
+    {
+     "bits": "31",
+     "name": "SWD_AUTO_FEED_EN",
+     "kind": "hw",
+     "reset": 0,
+     "source": "components/soc/esp32c3/register/soc/rtc_cntl_reg.h:1707-1713",
+     "why": "The analog Super WDT is the fourth watchdog mechanism named in docs/architectures.md 4.3 item 9, and unlike RWDT/MWDT it is NOT disabled by clearing an enable bit -- it is silenced by setting THIS bit, which switches it to auto-feed-itself forever. Exact sequence, quoted verbatim from bootloader_esp32c3.c:76-81 (bootloader_super_wdt_auto_feed(), called as literally the third line of bootloader_init(), before even memory init): 'REG_WRITE(RTC_CNTL_SWD_WPROTECT_REG, RTC_CNTL_SWD_WKEY_VALUE); REG_SET_BIT(RTC_CNTL_SWD_CONF_REG, RTC_CNTL_SWD_AUTO_FEED_EN); REG_WRITE(RTC_CNTL_SWD_WPROTECT_REG, 0);' -- unlock, set the bit, immediately relock with an all-zero (deliberately-wrong) key. If a synthetic boot skips the mask-ROM-to-2nd-stage-bootloader handoff (see boot-sequence findings) and jumps straight to app code, this exact three-instruction sequence is one of the two pieces of ROM-adjacent behaviour (the other being RWDT flashboot-protect disable above) that must still be replayed by the harness, or the Super WDT resets the chip on its own fixed hardware timeout with no software escape at all -- it has no HAL_GetTick-style dependency to break, which is exactly what makes it dangerous to skip silently rather than merely inconvenient"
+    },
+    {
+     "bits": "18-27",
+     "name": "SWD_SIGNAL_WIDTH",
+     "kind": "hw",
+     "reset": 300,
+     "source": "components/soc/esp32c3/register/soc/rtc_cntl_reg.h:1732-1737"
+    }
+   ]
+  },
+  {
+   "name": "RTC_CNTL_SWD_WPROTECT_REG",
+   "offset": "0x00B0",
+   "coded": true,
+   "fields": [
+    {
+     "bits": "0-31",
+     "name": "SWD_WKEY",
+     "kind": "hw",
+     "reset": "0x8F1D312A",
+     "source": "components/soc/esp32c3/register/soc/rtc_cntl_reg.h:1757-1763",
+     "why": "Separate key space from RTC_CNTL_WDT_WKEY above (0x50D83AA1) -- the two watchdogs are independently write-protected, do not conflate their unlock constants"
+    }
+   ]
+  }
+ ],
+ "coded_because": "Every WDTCONFIG*/WDTFEED/WDTWPROTECT and SWD_CONF/SWD_WPROTECT field fails the design's read-purity test on the write side specifically: FEED writes store nothing (the effect is resetting a hidden counter), WPROTECT writes gate the writability of sibling registers rather than storing meaningful data themselves, and a watchdog's expiry is a time-triggered global side effect (forcing a CPU/system/RTC reset) attached to no register access at all -- exactly the canonical WDT case the design doc names in section 1. RESET_CAUSE_PROCPU is separately impure on the READ side (kind hw, reflecting harness-internal reset-cause state, not firmware-written data). SLOW_CLK_NEXT_EDGE is the one field in this whole peripheral that IS cleanly data-shaped (kind self-clearing) -- included above rather than declared coded, in case a future engine wants to special-case single fields inside an otherwise-coded peripheral; if that granularity is rejected per the design's whole-peripheral rule for kind-8, fold it into the coded model instead, it costs nothing either way since nothing calls it yet.",
+ "role_original": "Register contract for coded:esp_rtc_cntl -- not loaded by the regmap engine. esp-soc's chip file lists all of RTC_CNTL as \"model\": \"stub\" pending verification of clock-ready spins. This file reports that verification: the clock-ready spin esp-soc flagged as a 'known suspect' does not exist on ESP32-C3 (see clock_select_findings below), so the register file's real hazard is entirely in the two watchdogs (RWDT + analog Super WDT), which is a boot-liveness problem, not a spin-on-read problem: the mask ROM arms both before any software runs, and getting the disable/feed sequence wrong resets the chip mid-boot rather than hanging it. Recommend RTC_CNTL stay 'coded', same as TIMG, but for a different reason: not because any single field is arithmetic-impure, but because the write-protect key gating (a write only takes effect if the *previous* write to WDTWPROTECT matched a magic constant) makes 'every write only stores' false for the whole WDTCONFIG*/WDTFEED group -- this is exactly the WDT write-clause the design doc calls out in section 1, kind-8 discussion."
+}

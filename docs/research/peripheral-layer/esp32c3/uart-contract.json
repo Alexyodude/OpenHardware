@@ -1,0 +1,30 @@
+{
+  "peripheral": "UART0",
+  "base": "0x60000000",
+  "role": "Register contract for esp-soc's coded:esp_uart. esp-soc's chip file already flags FIFO reads as impure and status-read-0-means-empty as the load-bearing simplification; this file supplies the concrete offsets/fields.",
+  "source": "espressif/esp-idf tag v6.0.2, components/soc/esp32c3/register/soc/uart_reg.h",
+  "verified": "2026-08-24, offsets and bit positions quoted from the pinned tag.",
+  "caveat": "esp-soc's own chip file already notes the XIAO ESP32-C3 board has no UART-to-USB bridge and Arduino defaults CDC-on-boot=1, so Serial actually lands on USB_SERIAL_JTAG (0x60043000), not UART0. This file documents UART0 anyway because (a) it is still the ROM download-mode console and the target of esp_rom_printf() in early boot before app-level Serial is configured, and (b) many non-XIAO C3 dev boards (e.g. plain ESP32-C3-DevKitM-1) DO bridge UART0 to a USB-serial chip, so it is not XIAO-only. Do not skip modelling it on the assumption every board uses USB_SERIAL_JTAG instead.",
+  "registers": [
+    {"name": "UART_FIFO_REG", "offset": "0x0", "kind": "hw",
+     "source": "uart_reg.h:14",
+     "why": "Write pushes one byte to the 128-entry TX FIFO (drained by hardware onto the wire at the configured baud); read pops one byte from the RX FIFO. Both directions are stateful side effects on a FIFO the register itself does not represent as data -- textbook kind-8. esp_rom_printf ultimately writes here byte-by-byte, gated by TXFIFO_CNT below"},
+    {"name": "UART_CLKDIV_REG", "offset": "0x14", "kind": "rw", "reset": "0x2B6",
+     "source": "uart_reg.h:543-555",
+     "why": "12-bit integer + 4-bit fractional baud divisor (reset 0x2B6 = 694, consistent with UART0's default post-ROM-handoff 115200 baud off a 40MHz-derived reference). Plain storage -- uart_set_baudrate() writes it, uart_get_baudrate() reads it back, no poll depends on it"},
+    {"name": "UART_STATUS_REG", "offset": "0x1C", "kind": "hw",
+     "source": "uart_reg.h:571-621",
+     "why": "TXFIFO_CNT (bits 25:16, RO) and RXFIFO_CNT (bits 9:0, RO) report live FIFO occupancy -- impure because they change as a side effect of FIFO push/pop, not because firmware wrote them. This is the register the ROM's putc-style helpers and IDF's uart_tx_one_char poll (directly or via the TX FIFO empty interrupt status below) before writing the next byte; a model that always reports TXFIFO_CNT=0 makes every write look immediately drained, which is actually a safe simplification for a simulator with no real baud-rate timing constraint, and is the same 'read-0 is the safe default' logic esp-soc's chip-file note already applies"},
+    {"name": "UART_CONF0_REG", "offset": "0x20", "reset": "0x800001CC", "fields": [
+      {"bits": "2-3", "name": "BIT_NUM", "kind": "rw", "reset": 3, "source": "uart_reg.h:772-778", "why": "Data bits, encoded value+5 (3 -> 8 data bits, IDF's default)"},
+      {"bits": "4-5", "name": "STOP_BIT_NUM", "kind": "rw", "reset": 1, "source": "uart_reg.h:766-772", "why": "1 -> 1 stop bit"},
+      {"bits": "1", "name": "PARITY_EN", "kind": "rw", "reset": 0, "source": "uart_reg.h:778-784"},
+      {"bits": "17", "name": "RXFIFO_RST", "kind": "hw", "source": "uart_reg.h:690-696", "why": "Not plain rw despite the header calling it R/W: setting it clears the RX FIFO as a side effect (the FIFO itself, not this bit, is the state), so it belongs with FIFO in the coded model rather than being treated as a stored config flag"},
+      {"bits": "18", "name": "TXFIFO_RST", "kind": "hw", "source": "uart_reg.h:684-690", "why": "Same reasoning as RXFIFO_RST"}
+    ]},
+    {"name": "UART_INT_RAW_REG / UART_INT_ST_REG / UART_INT_ENA_REG / UART_INT_CLR_REG", "offset": "0x4 / 0x8 / 0xC / 0x10", "kind": "w1c",
+     "source": "uart_reg.h:22-164 (RAW), :421-530 (CLR), example field TXFIFO_EMPTY_INT_RAW at uart_reg.h:149 access-typed 'R/WTC/SS' (read, write-to-clear, set-by-status)",
+     "why": "Standard w1c interrupt bank: a source condition (e.g. TXFIFO_EMPTY) sets the RAW bit and, if the matching ENA bit is set, the ST bit; software clears by writing 1 to the matching bit in INT_CLR, which the header's own access-type annotation 'WT' on every *_INT_CLR field confirms. Modelled wrong as plain rw, an ISR's clear-write is indistinguishable from a config write and the flag never actually clears -- the design doc's own description of this failure mode ('a hang wearing an interrupt-storm costume') applies directly. Not needed for a polling-only console, but any console driver that uses the TX-empty interrupt to refill the FIFO needs this bank correct"}
+  ],
+  "coded_because": "FIFO push/pop (data-flow, not enable-flow, per the design doc's own UART TXE-wait example) and FIFO-occupancy status reads that change from side effects rather than firmware writes are both irreducibly impure. CONF0's two FIFO-reset bits ride along with FIFO for the same reason. The remaining fields (CLKDIV, most of CONF0, all of CONF1 not detailed here) are plain rw and could in principle be split into a companion data regmap the same way TIMG's RTCCALICFG is split from its own coded VALUE/WDT fields -- flagged here as a design question for whoever implements this, not resolved unilaterally in this file, since esp-soc's chip file already committed UART0 to whole-peripheral coded and splitting it is a schema-level decision, not a data one."
+}

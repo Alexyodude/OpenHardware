@@ -1,0 +1,24 @@
+{
+  "corrects": "peripherals/esp32c3/timg-contract.json (authored by esp-soc)",
+  "role": "Not a replacement file -- esp-soc's timg-contract.json is left untouched to avoid a concurrent write against another agent's artifact. This is a verification result against the exact two things that file itself flagged as unverified, plus one field it did not include.",
+  "source": "espressif/esp-idf tag v6.0.2, components/soc/esp32c3/register/soc/timer_group_reg.h",
+  "verified": "2026-08-24, fetched directly via raw.githubusercontent.com/espressif/esp-idf/v6.0.2/components/soc/esp32c3/register/soc/timer_group_reg.h",
+
+  "correction_1_offset": {
+    "esp-soc_wrote": "RTCCALICFG2 offset 0x70, explicitly flagged: 'RTCCALICFG2's offset 0x70 and bit position are inferred from macro names and header ordering, not quoted, and its reset value is omitted as unverified'",
+    "actual_verified_value": "0x80, not 0x70. Quote: 'TIMG_RTCCALICFG2_REG(i) (DR_REG_TIMG_BASE(i) + 0x80)' at timer_group_reg.h:496. Offset 0x70 belongs to a different register entirely: TIMG_INT_ENA_TIMERS_REG (line 359 region), 'Interrupt enable bits'. The inference-from-ordering method failed here because TIMG_RTCCALICFG1_REG (0x6c) is immediately followed in the header by TIMG_INT_ENA_TIMERS_REG (0x70), TIMG_INT_RAW_TIMERS_REG (0x74), TIMG_INT_ST_TIMERS_REG (0x78), TIMG_INT_CLR_TIMERS_REG (0x7c), and ONLY THEN TIMG_RTCCALICFG2_REG (0x80) -- the interrupt-bank registers are interleaved between the two calibration registers in the header's physical layout, not adjacent to them."
+  },
+
+  "correction_2_reset_value": {
+    "esp-soc_wrote": "TIMEOUT field, no reset value given (flagged unverified)",
+    "actual_verified_value": "TIMG_RTC_CALI_TIMEOUT itself resets to 0 (RO status bit, quote: 'TIMG_RTC_CALI_TIMEOUT : RO; bitpos: [0]; default: 0' at timer_group_reg.h:497). Its companion threshold field TIMG_RTC_CALI_TIMEOUT_THRES (bits 31:7, R/W) resets to 33554431 (0x1FFFFFF, i.e. the field's own maximum value -- the timeout is effectively disabled at power-on and only becomes meaningful once software writes a real threshold, exactly matching what rtc_time.c's rtc_clk_cal_internal() does: it explicitly writes a small threshold (1) or a computed one via REG_SET_FIELD before every calibration run, never relying on the reset default)."
+  },
+
+  "addition_missing_field": {
+    "name": "TIMG_RTC_CALI_TIMEOUT_RST_CNT", "offset_register": "TIMG_RTCCALICFG2_REG (0x80)", "bits": "6-3", "reset": 3,
+    "source": "timer_group_reg.h:504-510",
+    "why": "Not present in esp-soc's contract. 'Cycles that release calibration timeout reset' per the header's own doc comment -- a config field controlling how the internal timeout circuit itself resets, read/write, feeding the same coded_because arithmetic bucket as TIMEOUT_THRES and VALUE. Listed here for completeness of the RTCCALICFG2 register, not because it changes the coded/data classification esp-soc already reached."
+  },
+
+  "unaffected": "esp-soc's classification of RTCCALICFG.START as rw and RDY as ready-follows(START, when=set), and the overall conclusion that TIMG must be coded because of RTCCALICFG1.VALUE's arithmetic and the WDT write-clause, are both independently confirmed by this agent's own read of rtc_time.c and are NOT affected by the offset correction above -- only the offset of the register holding the hardware-timeout escape hatch was wrong, not the reasoning about what that escape hatch does."
+}

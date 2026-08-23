@@ -1,0 +1,51 @@
+{
+  "peripheral": "XOSC",
+  "size": "0x10",
+  "source": "src/rp2040/hardware_regs/include/hardware/regs/xosc.h (pico-sdk, fetched this session); RP2040.svd peripheral XOSC at line 50831 of the fetched SVD",
+  "verified": "2026-08-24 covers CTRL/STATUS as read against xosc.h and src/rp2_common/hardware_xosc/xosc.c's xosc_init/xosc_disable/xosc_dormant; not yet traced against a live simulator or hardware",
+  "registers": [
+    {
+      "name": "CTRL",
+      "offset": "0x00",
+      "reset": "0x00000000",
+      "fields": [
+        {"bits": "23-12", "name": "ENABLE", "kind": "rw",
+         "magic_values": {"0xd1e": "DISABLE", "0xfab": "ENABLE"},
+         "why": "xosc_init() does hw_set_bits(&xosc_hw->ctrl, ENABLE_VALUE_ENABLE << ENABLE_LSB) (xosc.c:37). A modeled field must decode the exact 12-bit magic value, not just non-zero -- DISABLE (0xd1e) is also non-zero.",
+         "source": "src/rp2040/hardware_regs/include/hardware/regs/xosc.h:29-42 (pico-sdk). VERIFIED, quoted."},
+        {"bits": "11-0", "name": "FREQ_RANGE", "kind": "rw",
+         "why": "'This resets to 0xAA0 and cannot be changed' per the header comment -- RP2040 silicon only implements the 1-15MHz encoding despite the field being nominally RW; modeled here as plain rw since xosc_init() always writes the same VALUE_1_15MHZ constant (xosc.c:31) and no boot-path firmware exercises the RESERVED encodings.",
+         "source": "src/rp2040/hardware_regs/include/hardware/regs/xosc.h:44-54 (pico-sdk). VERIFIED."}
+      ]
+    },
+    {
+      "name": "STATUS",
+      "offset": "0x04",
+      "reset": "0x00000000",
+      "fields": [
+        {
+          "bits": "31", "name": "STABLE", "kind": "ready-follows", "follows": "CTRL.ENABLE", "when": "set",
+          "why": "xosc_init() spins `while(!(xosc_hw->status & XOSC_STATUS_STABLE_BITS)) { tight_loop_contents(); }` (src/rp2_common/hardware_xosc/xosc.c:40-42, fetched this session -- VERIFIED, quoted). Same field polled inverted in xosc_disable() (xosc.c:51-53) and non-inverted again in xosc_dormant() (xosc.c:60-62). This is the FIRST hardware-dependent hang point in a stock boot -- before PLL or CLOCKS are ever touched. Real silicon has a startup delay counted by the STARTUP register's DELAY field (offset 0x0c, not itemized field-by-field here); modeling STABLE as an instant ready-follows rather than a counter-gated delay is a documented simplification, not a correctness gap for boot-to-blink.",
+          "source": "src/rp2_common/hardware_xosc/xosc.c:40-42,51-53,60-62 (pico-sdk, fetched this session). VERIFIED, quoted."
+        },
+        {
+          "bits": "12", "name": "ENABLED", "kind": "ready-follows", "follows": "CTRL.ENABLE", "when": "set",
+          "why": "'Oscillator is enabled but not necessarily running and stable, resets to 0' -- an immediate (not startup-delay-gated) mirror of ENABLE, distinct from STABLE. Not itself polled by any pico-sdk call found this session.",
+          "source": "src/rp2040/hardware_regs/include/hardware/regs/xosc.h -- 'Oscillator is enabled but not necessarily running and stable, resets to 0'. VERIFIED, quoted."
+        },
+        {
+          "bits": "24", "name": "BADWRITE", "kind": "w1c",
+          "why": "Not exercised by any pico-sdk call found this session, so write-1-vs-write-0 clear polarity is UNVERIFIED -- header ACCESS is literally 'WC', modeled here as w1c per the doc's default naming but flagged as the one guess in this file.",
+          "source": "src/rp2040/hardware_regs/include/hardware/regs/xosc.h -- 'An invalid value has been written to CTRL_ENABLE or CTRL_FREQ_RANGE or DORMANT', ACCESS=\"WC\". VERIFIED text, UNVERIFIED clear-polarity."
+        }
+      ]
+    },
+    {
+      "name": "STARTUP",
+      "offset": "0x0c",
+      "note": "DELAY field (14 bits), not itemized -- see STABLE's why-note above. Offset on record for whoever adds the precise countdown.",
+      "source": "src/rp2_common/hardware_xosc/xosc.c:22-26,34 (pico-sdk). VERIFIED presence/purpose, bit layout not extracted this session."
+    }
+  ],
+  "spin_targets": ["STATUS.STABLE -- xosc_init()'s spin. Second boot-blocking spin after RESETS.RESET_DONE."]
+}

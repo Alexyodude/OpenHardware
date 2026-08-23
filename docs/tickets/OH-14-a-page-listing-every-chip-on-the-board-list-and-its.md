@@ -1,7 +1,7 @@
 ---
 id: OH-14
 title: A page listing every chip on the board list and its emulation status
-status: open
+status: done
 priority: P2
 created: '2026-08-24'
 touches:

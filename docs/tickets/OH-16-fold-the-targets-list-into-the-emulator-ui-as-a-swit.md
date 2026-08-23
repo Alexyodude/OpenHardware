@@ -1,7 +1,7 @@
 ---
 id: OH-16
 title: Fold the targets list into the emulator UI as a switchable view
-status: open
+status: done
 priority: P2
 created: '2026-08-24'
 touches:

@@ -1,0 +1,34 @@
+{
+ "peripheral": "SYSTEM",
+ "superseded_by": "peripherals/esp32c3/system-regmap.json",
+ "role": "SUPERSEDED by team-lead ruling 2026-08-24: esp-soc-2's system-regmap.json is a strict superset (adds PERIP_CLK_EN0/PERIP_RST_EN0 clock gating) and pins an IDF tag rather than master - better on both counts, per esp-soc's own assessment. Kept, not deleted, so the original two-register verification trail below stays auditable.",
+ "size": "0x1000",
+ "source": "ESP-IDF master as read 2026-08-24: components/soc/esp32c3/register/soc/system_reg.h (offsets); components/esp_hal_clock/esp32c3/include/hal/clk_tree_ll.h and components/esp_hw_support/port/esp32c3/rtc_clk.c (semantics). Register-name facts elected under the headers' MIT option (SPDX Apache-2.0 OR MIT)",
+ "verified": "2026-08-24 offsets quoted from system_reg.h; semantics from clk_tree_ll.h as read - a grep of its 789 lines found zero busy-wait loops, and the CPU/SoC clock switch has no readiness handshake on the C3: rtc_clk.c uses fixed esp_rom_delay_us waits (lines 129, 150). Only the two registers the clock path actually touches are listed; everything else in the block falls to the unknown-offset default and the accounting report. The C3 TRM PDF was not consulted",
+ "registers": [
+  {
+   "name": "CPU_PER_CONF",
+   "offset": "0x008",
+   "fields": [
+    {
+     "bits": "0-31",
+     "name": "ALL",
+     "kind": "rw",
+     "why": "CPUPERIOD_SEL / PLL_FREQ_SEL written by clk_ll_cpu_set_freq_mhz_from_pll (clk_tree_ll.h:273) when esp_clk_init raises the CPU to 160 MHz; read back by rtc_clk_cpu_freq_get_config - reads-zero would misreport the current frequency, not hang"
+    }
+   ]
+  },
+  {
+   "name": "SYSCLK_CONF",
+   "offset": "0x058",
+   "fields": [
+    {
+     "bits": "0-31",
+     "name": "ALL",
+     "kind": "rw",
+     "why": "SOC_CLK_SEL (XTAL/PLL/RC_FAST) and PRE_DIV_CNT (clk_tree_ll.h:415); the switch takes effect immediately with no SWS-style mirror to poll - the C3 differs from STM32 here, and modelling it as plain storage is the verified contract, not a shortcut"
+    }
+   ]
+  }
+ ]
+}

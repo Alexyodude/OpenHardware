@@ -1,0 +1,22 @@
+{
+  "peripheral": "PWR",
+  "base_address": "0x4000_7000",
+  "rm_chapter": "RM0490 Chapter 5 (Power control (PWR))",
+  "svd_source": "STM32C031.svd, peripheral PWR",
+  "honest_finding": "PWR is essentially NOT load-bearing for the reset-to-blinking-LED path on this chip. Grepped every 'PWR' occurrence across the fetched stm32c0xx_hal_rcc.c, stm32c0xx_hal_flash.c and stm32c0xx_hal_flash_ex.c: the ONLY hit is a single '__HAL_RCC_PWR_CLK_DISABLE()' call inside HAL_RCC_OscConfig's LSE-disable path (stm32c0xx_hal_rcc.c:553), which only runs if firmware explicitly disables the LSE crystal. Unlike STM32L0 (which architectures.md SS3.3 notes couples flash wait states to PWR->CR VCORE range), STM32C0 has a single fixed voltage domain -- there is no VOS/voltage-scaling field anywhere in PWR_CR1..CR4 (confirmed against the full SVD field dump). Team-lead's brief lists PWR in the minimum peripheral set, so it is modelled below for completeness and because RCC_APBENR1.PWREN gates it (see rcc.json) -- but a simulator that stubbed PWR out entirely would still boot this specific board's blink+printf firmware correctly. This is the kind of 'false green' risk noted for GPIOAEN in rcc.json, just in the opposite direction: PWR being UNDER-modelled would not actually cause a divergence from real silicon on THIS firmware, whereas GPIOAEN being under-modelled would.",
+  "registers": [
+    {
+      "name": "PWR_CR1",
+      "offset": "0x00",
+      "rm_section": "5.4.1 PWR control register 1 (PWR_CR1)",
+      "reset_value": "0x00000208",
+      "reset_value_decoded": "FPD_SLP=0, FPD_STOP=1 (bit3), LPMS=010; note SVD's field list for THIS register only actually documents FPD_SLP/FPD_STOP/LPMS -- the RM's own prose for these bits was found under the shifted/garbled heading position (see chip.json extraction_caveat) and was cross-checked against the SVD field list instead of trusted verbatim.",
+      "fields": [
+        {"bits": "5", "name": "FPD_SLP", "kind": "rw", "why": "Power down flash in Sleep mode. Not touched by an active blink loop (device never enters Sleep in a trivial while(1){toggle;delay;} firmware unless HAL_SuspendTick+WFI patterns are used)."},
+        {"bits": "3", "name": "FPD_STOP", "kind": "rw", "why": "Power down flash in Stop mode. Same scope note as FPD_SLP."},
+        {"bits": "2:0", "name": "LPMS", "kind": "rw", "why": "Selects which low-power mode CPU deepsleep enters (Stop/Standby/Shutdown). Irrelevant to a firmware that never calls HAL_PWR_EnterSTOPMode or __WFI in deepsleep-configured mode."}
+      ]
+    }
+  ],
+  "deferred_registers": "PWR_CR2 (C071-only, reserved elsewhere), PWR_CR3/CR4 (wakeup-pin config), PWR_SR1/SR2 (wakeup/standby status), PWR_SCR (wakeup-flag clear), PWR_PUCRx/PDCRx x6 (per-port pull config applied only when CR3.APC=1) -- all captured in other_svd.txt but out of scope for the minimum blink/printf set per the scope_note pattern used in flash.json."
+}

@@ -1,7 +1,7 @@
 ---
 id: OH-13
 title: 'Board inventory: generate the board list instead of maintaining it'
-status: open
+status: done
 priority: P2
 created: '2026-08-24'
 touches:

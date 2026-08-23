@@ -1,0 +1,85 @@
+{
+  "peripheral_template": "GPIOx (x = A, B, C, D, F -- no GPIOE on C0, confirmed by both SVD peripheral list and RM heading '(x = A, B, C, D, F)' repeated on every register in RM SS8.5)",
+  "base_addresses": {"GPIOA": "0x5000_0000", "GPIOB": "0x5000_0400", "GPIOC": "0x5000_0800", "GPIOD": "0x5000_0C00", "GPIOF": "0x5000_1400"},
+  "rm_chapter": "RM0490 Chapter 8 (General-purpose I/Os (GPIO))",
+  "svd_source": "STM32C031.svd, peripheral GPIOA (GPIOB/C/D/F are separate SVD peripheral entries at the offsets above with identical register layout -- checked, not derivedFrom-aliased in the SVD, but field-for-field identical)",
+  "registers": [
+    {
+      "name": "GPIOx_MODER",
+      "offset": "0x00",
+      "rm_section": "8.5.1 GPIO port mode register (GPIOx_MODER) (x = A, B, C, D, F)",
+      "reset_value_GPIOA": "0xEBFFFFFF",
+      "reset_value_GPIOA_decoded": "MODE13=10(AF), MODE14=10(AF), all other MODEy=11(analog). VERIFIED by hand-decoding the SVD's literal <resetValue> bit-by-bit (not trusted from RM prose): PA13/PA14 default to alternate-function mode out of reset so SWDIO/SWCLK stay live for debug without any firmware GPIO init -- every other pin, including PA5 (the LED), defaults to analog. This is the reason HAL_GPIO_Init MUST run and set MODE5=01 before the LED will do anything; skipping it is the single most likely 'nothing happens' bug in a from-scratch GPIO model.",
+      "field_pattern": "2 bits per pin y (y=0..15) at bits[2y+1:2y], name MODEy",
+      "field_values": {"00": "input", "01": "general-purpose output", "10": "alternate function", "11": "analog (reset default for most pins)"},
+      "kind": "rw",
+      "why": "HAL_GPIO_Init (stm32c0xx_hal_gpio.c) computes a 2-bit MODEy value from GPIO_InitStruct.Mode and read-modify-writes it into this register for every pin in GPIO_InitStruct.Pin. For the LED (PA5) this must become 01 (output); for USART2 TX/RX (PA2/PA3) it must become 10 (AF) with AFRL selecting AF1 (see GPIOx_AFRL below)."
+    },
+    {
+      "name": "GPIOx_OTYPER",
+      "offset": "0x04",
+      "rm_section": "8.5.2 GPIO port output type register (GPIOx_OTYPER) (x = A, B, C, D, F)",
+      "reset_value": "0x00000000",
+      "field_pattern": "1 bit per pin y at bits[y], name OTy",
+      "field_values": {"0": "push-pull (reset default, and what the BSP's LED4 uses)", "1": "open-drain"},
+      "kind": "rw",
+      "why": "Left at reset (push-pull) for both the LED and USART2 TX in the BSP's default config -- HAL_GPIO_Init only writes a non-zero value here if GPIO_InitStruct.Mode requests open-drain, which neither LED_Init nor the BSP's COM1 UART init does."
+    },
+    {
+      "name": "GPIOx_OSPEEDR",
+      "offset": "0x08",
+      "rm_section": "8.5.3 GPIO port output speed register (GPIOx_OSPEEDR) (x = A, B, C, D, F)",
+      "reset_value_GPIOA": "0x0C000000",
+      "field_pattern": "2 bits per pin y at bits[2y+1:2y], name OSPEEDy",
+      "kind": "rw",
+      "why": "Slew-rate/drive-strength selection. Not spun on, not correctness-critical for a simulator (affects real-world EMI/rise-time, not logic-level behaviour) -- included for completeness since HAL_GPIO_Init writes it unconditionally as part of every pin config."
+    },
+    {
+      "name": "GPIOx_PUPDR",
+      "offset": "0x0C",
+      "rm_section": "8.5.4 GPIO port pull-up/pull-down register (GPIOx_PUPDR) (x = A, B, C, D, F)",
+      "reset_value_GPIOA": "0x24000000",
+      "field_pattern": "2 bits per pin y at bits[2y+1:2y], name PUPDy",
+      "field_values": {"00": "none", "01": "pull-up", "10": "pull-down", "11": "reserved"},
+      "kind": "rw",
+      "why": "HAL_GPIO_Init writes this from GPIO_InitStruct.Pull. Load-bearing for PC13 (USER button B1) if the button relies on an internal pull rather than an external one -- not load-bearing for the LED (push-pull output doesn't need a pull) or for USART2 TX (driven output) but IS relevant for USART2 RX if left floating with nothing connected."
+    },
+    {
+      "name": "GPIOx_IDR",
+      "offset": "0x10",
+      "rm_section": "8.5.5 GPIO port input data register (GPIOx_IDR) (x = A, B, C, D, F)",
+      "reset_value": "0x0000XXXX (undefined at power-on per the SVD, since it reflects live pin state before any driver takes control)",
+      "field_pattern": "1 read-only bit per pin y at bits[y], name IDy",
+      "kind": "hw-coded",
+      "why": "READ-PURITY VIOLATION (per the rule stated in my brief: a register is data iff every read is a pure function of stored state + virtual time). IDR's value is NOT a function of RCC/GPIO register state at all -- it is the electrical level of the physical pin, which on a real board is driven by whatever the button/external circuit is doing, and in this simulator's part-wiring model (webui/parts/, the SpareParts/pin-net layer already used by the LED/button parts) is a property of the wider circuit graph, not of the peripheral's own stored bits. Modelling IDR as a plain regmap field would either (a) require the regmap layer to reach across to the parts/net layer on every read, which is exactly the kind of cross-layer reach rules/core-interface.md forbids backends from doing directly, or (b) silently return stale/zero data disconnected from the actual wired button. This is THE clearest hw-coded case in the whole minimum register set."
+    },
+    {
+      "name": "GPIOx_ODR",
+      "offset": "0x14",
+      "rm_section": "8.5.6 GPIO port output data register (GPIOx_ODR) (x = A, B, C, D, F)",
+      "reset_value": "0x00000000",
+      "field_pattern": "1 read-write bit per pin y at bits[y], name ODy",
+      "kind": "rw",
+      "why": "Directly writable, but in practice HAL_GPIO_WritePin/TogglePin never write it directly for single-pin operations (see BSRR below) -- HAL_GPIO_WritePin's own doc comment in stm32c0xx_hal_gpio.c literally says 'This function uses GPIOx_BSRR and GPIOx_BRR registers to allow atomic read/modify' (VERIFIED, line 401 of the fetched source). ODR is still the field a plain digitalRead-style read of an output pin returns, and BSRR writes are DEFINED in terms of what they do to ODR (see BSRR's hw-coded note below), so ODR itself stays a clean rw store."
+    },
+    {
+      "name": "GPIOx_BSRR",
+      "offset": "0x18",
+      "rm_section": "8.5.7 GPIO port bit set/reset register (GPIOx_BSRR) (x = A, B, C, D, F)",
+      "reset_value": "0x00000000",
+      "field_pattern": "write-only, bits[31:16]=BRy (reset pin y), bits[15:0]=BSy (set pin y); 'A read operation always returns 0x0000' (VERIFIED, SVD field description, both halves)",
+      "kind": "hw-coded",
+      "why": "READ-PURITY VIOLATION on the WRITE side specifically: 'every write only stores' fails here because a single write to THIS register computes and stores into a DIFFERENT register (ODR). VERIFIED against the actual HAL implementation: HAL_GPIO_WritePin (stm32c0xx_hal_gpio.c:421) does 'GPIOx->BSRR = (uint32_t)GPIO_Pin;' for SET and (per the same function's else-branch, line ~423 by inspection of the surrounding block) writes the pin shifted into the upper 16 bits for RESET; HAL_GPIO_TogglePin (line 453) computes 'GPIOx->BSRR = tmp;' from a read of ODR XORed with the target pins (lines 470-473: 'odr = GPIOx->ODR; ... GPIOx->BSRR = ((odr & GPIO_Pin) << GPIO_NUMBER) | (~odr & GPIO_Pin);'). So BSRR's write handler must (a) never persist a stored value in BSRR itself (reads are hard-wired 0), (b) apply BSx bits to set the corresponding ODy bits in ODR, (c) apply BRy bits to clear the corresponding ODy bits in ODR, with 'BSx has priority' documented in the SVD's BRy description ('If both BSx and BRx are set, BSx h[as priority]') for the case where firmware sets both halves for the same pin simultaneously. This is exactly the mechanism the survey's checklist item 7 flags ('BSRR specifically: HAL uses atomic set/reset, not read-modify-write') and is THE canonical hw-coded register for this entire drop -- no ('bits','name','kind') triple can express a write that mutates a different register with priority-ordered semantics."
+    },
+    {
+      "name": "GPIOx_AFRL",
+      "offset": "0x20",
+      "rm_section": "8.5.9 GPIO alternate function low register (GPIOx_AFRL) (x = A, B, C, D, F)",
+      "reset_value": "0x00000000",
+      "field_pattern": "4 bits per pin y (y=0..7) at bits[4y+3:4y], name AFSELy",
+      "kind": "rw",
+      "why": "Needed 'for USART for printf' per the brief: PA2 (USART2_TX) and PA3 (USART2_RX) both need AFSEL2/AFSEL3 = 0001 (GPIO_AF1_USART2, VERIFIED from nucleo-c031c6-bsp's COM1_TX_AF/COM1_RX_AF macros) written here, in addition to MODER being set to 10(AF) for those two pins. Without this the pin is in AF mode electrically routed to the WRONG peripheral (AF0 by default), which is a silent 'no output on TX pin' failure distinct from the GPIOAEN false-green case."
+    }
+  ],
+  "deferred_registers": "GPIOx_LCKR (config lock, not touched by blink/printf), GPIOx_AFRH (pins 8-15, not needed since LED=PA5 and USART2=PA2/PA3 are all pins 0-7), GPIOx_BRR (a plain write-only lower-half-of-BSRR alias at a different offset -- same hw-coded write semantics as BSRR's BR half, kept separate here only because the SVD models it as its own register at 0x28)."
+}

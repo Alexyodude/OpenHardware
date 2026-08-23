@@ -1,0 +1,92 @@
+{
+  "peripheral": "CLOCKS",
+  "size": "0x9c",
+  "source": "src/rp2040/hardware_regs/include/hardware/regs/clocks.h (pico-sdk, fetched this session; only CLK_REF/CLK_SYS/CLK_PERI/FC0 regions read -- CLK_GPOUT0-3/CLK_USB/CLK_ADC/CLK_RTC/CLK_SYS_RESUS/WAKE_EN present in the file but out of scope for the boot-to-blink floor)",
+  "verified": "2026-08-24 covers CLK_REF/CLK_SYS/CLK_PERI as read against clocks.h and src/rp2_common/hardware_clocks/clocks.c's clock_configure_internal(); not yet traced against a live simulator or hardware",
+  "registers": [
+    {
+      "name": "CLK_REF_CTRL", "offset": "0x30", "reset": "0x00000000",
+      "fields": [
+        {"bits": "1-0", "name": "SRC", "kind": "rw",
+         "values": {"0x0":"rosc_clksrc_ph","0x1":"clksrc_clk_ref_aux","0x2":"xosc_clksrc"},
+         "why": "clock_configure_internal() writes this via hw_write_masked (clocks.c:79-83) for clocks with a glitchless mux -- has_glitchless_mux() returns true only for clk_sys and clk_ref (clocks.c:29-31).",
+         "source": "clocks_regs.h:476-508 (pico-sdk). VERIFIED, quoted."},
+        {"bits": "6-5", "name": "AUXSRC", "kind": "rw",
+         "values": {"0x0":"clksrc_pll_usb","0x1":"clksrc_gpin0","0x2":"clksrc_gpin1"},
+         "source": "clocks_regs.h:483-495 (pico-sdk). VERIFIED, quoted."}
+      ]
+    },
+    {
+      "name": "CLK_REF_DIV", "offset": "0x34", "reset": "0x00000100",
+      "fields": [{"bits": "9-8", "name": "INT", "kind": "rw", "reset": "1",
+        "why": "'0 -> divide by 2^16'. Only a 2-bit integer divider on clk_ref, unlike clk_sys's much wider 24.8 field below.",
+        "source": "clocks_regs.h:511-521 (pico-sdk). VERIFIED."}]
+    },
+    {
+      "name": "CLK_REF_SELECTED", "offset": "0x38", "reset": "0x00000001",
+      "fields": [
+        {
+          "bits": "31-0", "name": "one-hot bit per SRC value", "kind": "mirrors", "source": "CLK_REF_CTRL.SRC", "transform": "onehot",
+          "why": "clocks.c:54-55 and 84-85 both spin `while (!(clock_hw->selected & (1u << src)))`. Design doc SS1 point 3 names this exact register as its onehot example ('RP2040 CLK_SYS.SELECTED <- CTRL.SRC is one-hot... an identity mirror hangs the pico-sdk loop') -- CLK_REF_SELECTED is the sibling register with identical mechanics, confirmed by the same register-comment wording appearing at both clocks_regs.h:525-541 (REF) and :604-620 (SYS).",
+          "source": "clocks_regs.h:525-541 (pico-sdk). VERIFIED, quoted: 'Indicates which SRC is currently selected by the glitchless mux (one-hot)... one decoded bit for each of the clock sources... at most one of these bits will be set at any time... may briefly show all-0s.'"
+        }
+      ]
+    },
+    {
+      "name": "CLK_SYS_CTRL", "offset": "0x3c", "reset": "0x00000000",
+      "fields": [
+        {"bits": "0", "name": "SRC", "kind": "rw", "values": {"0x0":"clk_ref","0x1":"clksrc_clk_sys_aux"},
+         "source": "clocks_regs.h:566-580 (pico-sdk). VERIFIED, quoted."},
+        {"bits": "7-5", "name": "AUXSRC", "kind": "rw",
+         "values": {"0x0":"clksrc_pll_sys","0x1":"clksrc_pll_usb","0x2":"rosc_clksrc","0x3":"xosc_clksrc","0x4":"clksrc_gpin0","0x5":"clksrc_gpin1"},
+         "source": "clocks_regs.h:549-562 (pico-sdk). VERIFIED, quoted."}
+      ]
+    },
+    {
+      "name": "CLK_SYS_DIV", "offset": "0x40", "reset": "0x00000100",
+      "fields": [
+        {"bits": "31-8", "name": "INT", "kind": "rw", "reset": "1",
+         "why": "24-bit integer divider (vs clk_ref's 2-bit) -- clk_sys supports a full 24.8 fixed-point divider.",
+         "source": "clocks_regs.h:587-596 (pico-sdk). VERIFIED. '0 -> divide by 2^16'."},
+        {"bits": "7-0", "name": "FRAC", "kind": "rw", "reset": "0", "source": "clocks_regs.h:598-604 (pico-sdk). VERIFIED."}
+      ]
+    },
+    {
+      "name": "CLK_SYS_SELECTED", "offset": "0x44", "reset": "0x00000001",
+      "fields": [
+        {
+          "bits": "31-0", "name": "one-hot bit per SRC value", "kind": "mirrors", "source": "CLK_SYS_CTRL.SRC", "transform": "onehot",
+          "why": "This is the exact register the design doc names as its worked onehot example (SS1 point 3), and the exact register the original brief named ('CLK_SYS.SELECTED'). Same spin pattern as CLK_REF_SELECTED (clocks.c:54-55, 84-85). A boolean/scalar mirror hangs any src other than 0, and worse, PASSES for src==0 by coincidence -- so a bug here looks like it works and only hangs on the first non-default source switch.",
+          "source": "clocks_regs.h:604-620 (pico-sdk). VERIFIED, identical wording to CLK_REF_SELECTED."
+        }
+      ]
+    },
+    {
+      "name": "CLK_PERI_CTRL", "offset": "0x48", "reset": "0x00000000",
+      "fields": [
+        {"bits": "11", "name": "ENABLE", "kind": "rw",
+         "why": "clk_peri has NO glitchless mux, so clock_configure_internal()'s else-branch (clocks.c:60-71) uses ENABLE/KILL directly instead of a SELECTED spin. UART (this floor's stdio target) is clocked from clk_peri by default, so this field must be correctly modeled for UART to produce output at all, even though it involves no spin loop of its own.",
+         "source": "clocks_regs.h:628-634 (pico-sdk). VERIFIED. 'Starts and stops the clock generator cleanly.'"},
+        {"bits": "10", "name": "KILL", "kind": "rw", "source": "clocks_regs.h:636-642 (pico-sdk). VERIFIED. 'Asynchronously kills the clock generator.'"},
+        {"bits": "7-5", "name": "AUXSRC", "kind": "rw",
+         "values": {"0x0":"clk_sys","0x1":"clksrc_pll_sys","0x2":"clksrc_pll_usb","0x3":"rosc_clksrc_ph","0x4":"xosc_clksrc","0x5":"clksrc_gpin0","0x6":"clksrc_gpin1"},
+         "why": "Default/typical firmware leaves this at 0x0 (clk_sys) so clk_peri simply follows clk_sys.",
+         "source": "clocks_regs.h:645-661 (pico-sdk). VERIFIED, quoted."}
+      ]
+    },
+    {
+      "name": "CLK_PERI_SELECTED", "offset": "0x4c",
+      "note": "Present per the generic per-clock layout but NOT onehot/glitchless-mux-driven since clk_peri has no glitchless mux -- field layout not extracted, nothing in clocks.c spins on it."
+    }
+  ],
+  "fc0_deferred_to_coded": {
+    "registers": "FC0_REF_KHZ/MIN_KHZ/MAX_KHZ/DELAY/INTERVAL/SRC (six consecutive config registers) plus FC0_STATUS and FC0_RESULT",
+    "why_not_in_regmap_fields": "FC0_STATUS.RUNNING and .DONE do not fit the closed kind vocabulary cleanly. Both are RO and neither is written by software directly -- they're driven by a write to a DIFFERENT register (FC0_SRC) starting a hardware-timed measurement, then RUNNING auto-clears and DONE auto-sets when it finishes. `ready-follows`/`follows` as specified (SS1 point 2, SS2 example) models a status bit following an ENABLE-shaped field being set/cleared, not a status bit triggered by a plain write to a config register with no boolean enable semantics. Per the doc's own guard (SS1: 'a register the vocabulary cannot express goes to coded:, never to a new schema feature'), this deliverable recommends FC0 route to coded: logic layered on the CLOCKS peripheral, or be left as a named stub, rather than force-fitting RUNNING/DONE into `follows`.",
+    "spin_citations_kept_for_reference": [
+      "RUNNING: src/rp2_common/hardware_clocks/clocks.c:175-177, `while(fc->status & CLOCKS_FC0_STATUS_RUNNING_BITS) { tight_loop_contents(); }` -- waits for a PRIOR measurement to finish before starting a new one. VERIFIED, quoted.",
+      "DONE: clocks.c:192-194, `while(!(fc->status & CLOCKS_FC0_STATUS_DONE_BITS)) { tight_loop_contents(); }`, immediately after `fc->src = src;` (clocks.c:190, comment: 'Set SRC which automatically starts the measurement'). VERIFIED, quoted."
+    ],
+    "scope": "Tier 2 per the original brief (MicroPython hits it, blink does not) -- kept here only because the team-lead's spin-detector-defeat check specifically asked about it. See chips/rp2040.json's spin_detector_defeat_check: RUNNING and DONE are two SEQUENTIAL single-address loops on the SAME register, not an alternating two-address pattern, so they do NOT defeat the amended per-address-counter spin detector."
+  },
+  "spin_targets": ["CLK_REF_SELECTED", "CLK_SYS_SELECTED -- highest-value unstick target after RESETS/XOSC/PLL, since it gates the LAST stage of clock setup for both of RP2040's glitchless-mux clocks; a hang here happens after XOSC and PLL have both already succeeded."]
+}

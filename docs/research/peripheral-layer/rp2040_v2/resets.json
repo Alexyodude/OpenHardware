@@ -1,0 +1,49 @@
+{
+  "peripheral": "RESETS",
+  "size": "0x0c",
+  "source": "src/rp2040/hardware_regs/include/hardware/regs/resets.h (pico-sdk, fetched this session); cross-checked against RP2040.svd peripheral RESETS at line 36459 of the fetched SVD",
+  "verified": "2026-08-24 covers RESET/RESET_DONE as read against resets.h and src/rp2_common/hardware_resets/include/hardware/resets.h's unreset_block_reg_mask_wait_blocking(); not yet traced against a live simulator or hardware",
+  "registers": [
+    {
+      "name": "RESET",
+      "offset": "0x00",
+      "reset": "0x01ffffff",
+      "why_reset_value": "All 25 resettable blocks come up held in reset at power-on -- the first thing runtime_init() must undo for anything else in this peripheral floor to work.",
+      "fields": [
+        {"bits": "24-0", "name": "block bit, one per resettable peripheral (see bit_table)", "kind": "rw",
+         "polarity": "1 = peripheral held in reset, 0 = reset deasserted",
+         "why": "reset_block_num()/unreset_block_num() (resets.h) set/clear these directly. Every peripheral init in the floor -- xosc_init, pll_init (via reset_unreset_block_num_wait_blocking), uart_init's uart_reset/uart_unreset -- touches this first.",
+         "source": "src/rp2040/hardware_regs/include/hardware/regs/resets.h -- register comment: 'Reset control. If a bit is set it means the peripheral is in reset. 0 means the peripheral's reset is deasserted.' VERIFIED, quoted verbatim."}
+      ],
+      "bit_table": {"0":"ADC0","1":"BUSCTRL","2":"DMA","3":"I2C0","4":"I2C1","5":"IO_BANK0","6":"IO_QSPI","7":"JTAG","8":"PADS_BANK0","9":"PADS_QSPI","10":"PIO0","11":"PIO1","12":"PLL_SYS","13":"PLL_USB","14":"PWM","15":"RTC","16":"SPI0","17":"SPI1","18":"SYSCFG","19":"SYSINFO","20":"TBMAN","21":"TIMER","22":"UART0","23":"UART1","24":"USBCTRL"},
+      "bit_table_source": "src/rp2_common/hardware_resets/include/hardware/resets.h:26-55 (pico-sdk, fetched this session), the rp2040_specific doxygen table. VERIFIED, quoted."
+    },
+    {
+      "name": "WDSEL",
+      "offset": "0x04",
+      "reset": "0x00000000",
+      "fields": [
+        {"bits": "24-0", "name": "block bit, same layout as RESET", "kind": "rw",
+         "why": "Selects which RESET bits the watchdog's reset also asserts. Not on the runtime_init() critical path; included for completeness.",
+         "source": "src/rp2040/hardware_regs/include/hardware/regs/resets.h:198-209 (pico-sdk). VERIFIED."}
+      ]
+    },
+    {
+      "name": "RESET_DONE",
+      "offset": "0x08",
+      "reset": "0x00000000",
+      "fields": [
+        {
+          "bits": "24-0",
+          "name": "block bit, same layout as RESET",
+          "kind": "ready-follows",
+          "follows": "RESET (same bit index)",
+          "when": "clear",
+          "why": "unreset_block_num_wait_blocking() and reset_unreset_block_num_wait_blocking() both spin `while (~*reset_done & mask) tight_loop_contents();` after clearing the matching RESET bit (src/rp2_common/hardware_resets/include/hardware/resets.h:119-123, fetched this session -- VERIFIED, quoted). pll_init() calls this before touching any PLL register, so RESETS must be correct before PLL_SYS/PLL_USB can come up at all. This is the RESETS.RESET_DONE[n] case the design doc names explicitly as the inverted-polarity example (SS1 point 2) -- CONFIRMED exactly: 'the source polarity is inverted' is precisely what clearing RESET then polling RESET_DONE for the SAME bit to go high does. `when: \"clear\"` is the correct encoding per the doc's own vocabulary, not a new case.",
+          "source": "src/rp2_common/hardware_resets/include/hardware/resets.h:119-123 (pico-sdk, fetched this session), cross-checked against RESET's own doc comment in resets_regs.h ('If a bit is set it means the peripheral is in reset. 0 means... deasserted'). VERIFIED, both files fetched and quoted this session."
+        }
+      ]
+    }
+  ],
+  "spin_targets": ["RESET_DONE -- unreset_block*_wait_blocking() callers spin here. Earliest boot-blocking spin in the whole floor; a stuck emulator hangs on the FIRST peripheral brought out of reset."]
+}

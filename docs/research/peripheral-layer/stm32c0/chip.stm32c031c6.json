@@ -1,0 +1,75 @@
+{
+  "chip": "STM32C031C6T6",
+  "family": "STM32C0",
+  "core": "Cortex-M0+",
+  "board": "NUCLEO-C031C6",
+  "board_justification": "~GBP12, on the project's board list (docs/architectures.md ??3.2), and STMicroelectronics' own reference BSP/pin definitions are published on GitHub (nucleo-c031c6-bsp), which this file cites directly instead of guessing pin numbers.",
+  "reference_manual": {
+    "number": "RM0490",
+    "revision": "Rev 6",
+    "date": "May 2026",
+    "title": "STM32C0 series advanced Arm(R)-based 32-bit MCUs",
+    "source_url": "https://www.st.com/resource/en/reference_manual/rm0490-stm32c0x1c0x2xxxx-advanced-armbased-32bit-mcus-stmicroelectronics.pdf",
+    "fetch_note": "st.com times out to direct curl/WebFetch from this environment (matches the survey's prior finding). Fetched successfully through the r.jina.ai text-extraction proxy. VERIFIED: 1023-page document, rev/date banner read directly off the extracted text."
+  },
+  "extraction_caveat": {
+    "severity": "important",
+    "finding": "The proxy-extracted RM text has a systematic one-heading lag in at least two chapters (RCC 6.4.8-6.4.15, PWR 5.4.1-5.4.6): the bit-level prose paragraph immediately following a '## N.N.N Register Name' heading actually describes the PREVIOUS heading's register, not the one just printed. Root cause is almost certainly the RM's two-column PDF layout defeating linear text extraction.",
+    "how_found": "RCC_IOPENR's heading (6.4.12) was immediately followed by prose describing ADCRST/TIM17RST/.../SYSCFGRST -- bits that belong to RCC_APBRSTR2 (6.4.11) per the RM's own 'Table 31: RCC register map and reset values' (6.4.24), which IS self-consistent and was used as the cross-check.",
+    "mitigation": "Every field's bits/name/reset value in this drop is taken from the CMSIS-SVD (STM32C031.svd, mechanically authoritative, see svd_provenance below), not from adjacent RM prose. RM prose was used only for behavioural semantics (why a field matters) and was accepted only when it was internally self-consistent (bit names/positions in the paragraph matched the register's own field list) or corroborated by the HAL C source. Section NUMBERS cited below are reliable (the heading sequence itself is not scrambled, only the body-paragraph attachment is) -- but treat any *prose sentence* quoted from RM0490 in a 'why' as spot-checked against SVD/HAL, not as verbatim-trustworthy PDF extraction."
+  },
+  "svd_provenance": {
+    "file": "STM32C031.svd",
+    "fetched_from": "https://raw.githubusercontent.com/Open-CMSIS-Pack/STM32C0xx_DFP/main/CMSIS/SVD/STM32C031.svd",
+    "pack": "Keil.STM32C0xx_DFP v2.4.0 (2025-12-23), pdsc fetched from https://www.keil.com/pack/Keil.STM32C0xx_DFP.pdsc which points at this GitHub source repo",
+    "licence": "Apache-2.0. VERIFIED two ways: (1) the repo's own LICENSE file at https://raw.githubusercontent.com/Open-CMSIS-Pack/STM32C0xx_DFP/main/LICENSE is the literal Apache-2.0 boilerplate; (2) the SVD file's own XML comment header states 'Copyright (c) 2024 STMicroelectronics. SPDX-License-Identifier: Apache-2.0'. No licence trap -- freely vendorable into this MIT tree with attribution, same status as cmsis_device_c0.",
+    "svd_bug_found": "RCC_CR's declared <resetValue> is 0x00000500 (HSIDIV[13:11]=000, i.e. /1). This contradicts BOTH RM0490 SS4.3.2 prose ('Upon power-on reset ... HCLK ... automatically set to 12 MHz') and CMSIS's own system_stm32c0xx.c, which statically initialises 'uint32_t SystemCoreClock = 12000000UL;' -- consistent only with HSIDIV=010 (/4), giving 48MHz/4=12MHz. Two independent ST sources (RM prose + CMSIS startup code) agree with each other and disagree with the SVD's stated register reset value. Treat the SVD's resetValue for RCC_CR as WRONG for the HSIDIV field; this repo's regmap below uses the RM/CMSIS-confirmed value (HSIDIV=010) and flags it in rcc.json."
+  },
+  "hal_provenance": {
+    "repo": "https://github.com/STMicroelectronics/stm32c0xx-hal-driver",
+    "note": "STM32CubeC0's top-level repo (STMicroelectronics/STM32CubeC0) vendors this as a git submodule; both the top-level repo name and this submodule's name were renamed with hyphens at some point after the .gitmodules entry was written (STM32CubeC0/.gitmodules still says 'stm32c0xx_hal_driver.git' with underscores; GitHub 301-redirects that to 'stm32c0xx-hal-driver'). Fetched from the resolved name, main branch, no pinned commit (matches this repo's own upstream-sync philosophy of not pinning revisions).",
+    "files_fetched": [
+      "Src/stm32c0xx_hal_rcc.c", "Src/stm32c0xx_hal_flash.c", "Src/stm32c0xx_hal_flash_ex.c",
+      "Src/stm32c0xx_hal_cortex.c", "Src/stm32c0xx_hal_gpio.c", "Src/stm32c0xx_hal_uart.c",
+      "Src/stm32c0xx_hal_pwr.c", "Src/stm32c0xx_hal.c"
+    ]
+  },
+  "bsp_provenance": {
+    "repo": "https://github.com/STMicroelectronics/nucleo-c031c6-bsp",
+    "file": "stm32c0xx_nucleo.h",
+    "verified_pins": {
+      "LED (LD4/LED1)": "PA5, push-pull output, no AF",
+      "LED2": "PC9",
+      "USER button (B1)": "PC13",
+      "VCP (COM1)": "USART2, TX=PA2 (AF1, GPIO_AF1_USART2), RX=PA3 (AF1, GPIO_AF1_USART2), routed to the onboard ST-LINK"
+    }
+  },
+  "memory_map": {
+    "citation": "RM0490 Chapter 2 (Memory and bus architecture) SS2.1, and SS2.2 for peripheral boundary addresses; peripheral base addresses individually cross-checked against STM32C031.svd <baseAddress> elements.",
+    "regions": [
+      {"name": "Main flash memory", "base": "0x0800_0000", "size": "32 KB (x6 variant) / 16 KB (x4 variant)", "note": "STM32C031C6 = 32 KB flash, 12 KB SRAM per the product page. Aliased to 0x0000_0000 at boot per BOOT0/nBOOT_SEL selection (FLASH_OPTR) -- this is the alias the checklist in architectures.md SS3.3 item 2 warns about."},
+      {"name": "SRAM", "base": "0x2000_0000", "size": "12 KB"},
+      {"name": "PWR", "base": "0x4000_7000", "kind": "APB1"},
+      {"name": "RCC", "base": "0x4002_1000", "kind": "AHB"},
+      {"name": "FLASH interface registers", "base": "0x4002_2000", "kind": "AHB"},
+      {"name": "USART2", "base": "0x4000_4400", "kind": "APB1"},
+      {"name": "USART1", "base": "0x4001_3800", "kind": "APB2"},
+      {"name": "GPIOA", "base": "0x5000_0000", "kind": "IOPORT (own AHB2-equivalent bus per SS2.1)"},
+      {"name": "GPIOB", "base": "0x5000_0400"},
+      {"name": "GPIOC", "base": "0x5000_0800"},
+      {"name": "GPIOD", "base": "0x5000_0C00"},
+      {"name": "GPIOF", "base": "0x5000_1400", "note": "GPIOE does not exist on C0; the port letters jump A,B,C,D,F, confirmed by both the SVD peripheral list and RM SS8 heading '(x = A, B, C, D, F)' on every GPIO register."}
+    ]
+  },
+  "field_kind_taxonomy_as_applied_here": {
+    "note": "The 8-kind taxonomy (rw / ready-follows / mirrors / clears-instantly / self-clearing / w1c+rc_w0 / counter / hw-coded) was designed by a sibling agent (stm-soc) earlier this session. I could not locate its schema/definition artifact on disk (checked webui/parts/schemas, tools/, docs/, and the shared scratchpad) and messaged stm-soc directly to ask for it; no reply had arrived by the time this drop was written. The definitions below are MY reconstruction from the 8 kind-names plus the read-purity rule stated in my brief, cross-checked against the concrete polarity table already in docs/architectures.md SS3.4 (which distinguishes 'status mirrors enable' from 'register stores and reflects' -- exactly the ready-follows/mirrors split used here). Flag this as UNVERIFIED against the original design; reconcile if/when stm-soc's actual schema surfaces.",
+    "rw": "Plain read-write storage. Read returns the last value written (masked to defined bits); write stores unconditionally. No cross-field or time dependency.",
+    "ready-follows": "A read-only status bit that tracks a paired enable bit: reads 1 once the enable has been set, reads 0 once the enable has been cleared. Models the real hardware's settle time as instantaneous, which is exactly the Renode 'ready-mirrors-enable' pattern architectures.md SS3.4 recommends for unsticking HAL_GetTick-gated spins.",
+    "mirrors": "A read-only (or read-mostly) field whose value is defined as a pure copy of a DIFFERENT field's most recently written value, with no separate enable/disable latch semantics of its own -- e.g. RCC_CFGR.SWS mirroring RCC_CFGR.SW once a clock switch is requested.",
+    "clears-instantly": "A status bit that is 1 exactly while some external condition holds and reverts to 0 the instant that condition stops holding, with no software action needed to clear it. Not used in this drop's minimum register set (candidate for USART_ISR.TXE/RXNE if this simulator ever models buffer occupancy as instantaneous rather than time-delayed).",
+    "self-clearing": "A bit software SETS to request a one-shot hardware action; hardware autonomously clears it back to 0 once that action completes, with no discrete w1c write required. Example in the wider FLASH register set (out of this drop's scope): FLASH_CR.OBL_LAUNCH, whose own SVD description literally says 'automatically cleared upon completion'.",
+    "w1c+rc_w0": "A hardware-set error/event flag that stays 1 until software explicitly clears it, either by writing 1 to the same bit position (w1c) or via a companion write-1-to-clear register (e.g. USART_ICR clearing USART_ISR flags, RCC_CICR clearing RCC_CIFR flags). Not used in this drop's minimum register set; RCC_CSR2's reset-cause flags are the nearest in-scope example and are modelled as a distinct pattern (RMVF-gated) below rather than force-fit into this bucket.",
+    "counter": "A field that advances autonomously with virtual time/cycles rather than purely in response to a write. Not present in this drop -- SysTick is the only counter in the minimum boot set and is explicitly out of the regmap system (in-core Armv6-M SCS, not a vendor peripheral) per my brief.",
+    "hw-coded": "A register where no ('bits','name','kind') tuple is a sufficient description, because the read-purity rule in .claude/rules (a register is data iff every read is a pure function of stored state + virtual time AND every write only stores) is violated. Enumerated explicitly in stm32c031c6_hw_coded_registers.md-equivalent section of the findings report; see regmap files' \"hw_coded\" blocks."
+  }
+}

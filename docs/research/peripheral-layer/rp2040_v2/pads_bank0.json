@@ -1,0 +1,35 @@
+{
+  "peripheral": "PADS_BANK0",
+  "size": "0x80",
+  "source": "src/rp2040/hardware_regs/include/hardware/regs/pads_bank0.h (pico-sdk, fetched this session; VOLTAGE_SELECT at 0x00 plus GPIO0's full field layout read, GPIO1-29 same layout by convention not individually re-read)",
+  "verified": "2026-08-24 covers GPIO0's field layout as read against pads_bank0.h; not yet traced against a live simulator or hardware",
+  "instance_layout": "GPIOn register at 0x04 + n*4 -- n*4 stride UNVERIFIED beyond GPIO0 at 0x04 (PADS_BANK0 packs all fields into one 8-bit-wide register per pin, unlike IO_BANK0's STATUS+CTRL pair, so 4-byte stride is the reasonable but unconfirmed assumption).",
+  "registers_per_gpio": [
+    {
+      "name": "GPIOn", "offset": "0x04 + n*4", "reset": "0x00000056",
+      "why_reset_value": "0x56 = OD=0, IE=1, DRIVE=01(4mA), PUE=0, PDE=1, SCHMITT=1. Every pad comes up input-enabled with pull-down and no pull-up -- a firmware bug that forgets to configure a floating input pin reads a stable 0, not noise. Matters for any conformance fixture checking 'undriven pin reads low'.",
+      "fields": [
+        {"bits": "7", "name": "OD", "kind": "rw", "reset": "0",
+         "why": "'Output disable. Has priority over output enable from peripherals' -- forces the pad to never drive, overriding SIO's GPIO_OE and IO_BANK0's OEOVER both. Third and last gate (after FUNCSEL==5 and SIO.GPIO_OE) blink's digitalWrite must pass through.",
+         "source": "pads_bank0_regs.h:35-42 (pico-sdk). VERIFIED, quoted."},
+        {"bits": "6", "name": "IE", "kind": "rw", "reset": "1", "source": "pads_bank0_regs.h:44-50 (pico-sdk). VERIFIED. 'Input enable.'"},
+        {"bits": "5-4", "name": "DRIVE", "kind": "rw", "reset": "1",
+         "values": {"0x0":"2mA","0x1":"4mA","0x2":"8mA","0x3":"12mA"},
+         "why": "Not electrically meaningful for a digital-logic-level model (no analog current modeling in scope) -- included for completeness of the register map.",
+         "source": "pads_bank0_regs.h:52-66 (pico-sdk). VERIFIED, quoted."},
+        {"bits": "3", "name": "PUE", "kind": "rw", "reset": "0", "source": "pads_bank0_regs.h:68-74 (pico-sdk). VERIFIED. 'Pull up enable.'"},
+        {"bits": "2", "name": "PDE", "kind": "rw", "reset": "1",
+         "why": "Combined with PUE, this is what an undriven-input fixture needs: PDE=1,PUE=0 at reset means floating pins read 0. A simulator that hardcodes 'floating = 0' happens to match the reset default but is wrong the moment firmware changes either bit -- must actually model PDE/PUE.",
+         "source": "pads_bank0_regs.h:76-82 (pico-sdk). VERIFIED. 'Pull down enable.'"},
+        {"bits": "1", "name": "SCHMITT", "kind": "rw", "reset": "1",
+         "why": "Not electrically meaningful for a digital-logic-level model -- included for completeness.",
+         "source": "pads_bank0_regs.h:84-89 (pico-sdk). VERIFIED. 'Enable schmitt trigger.'"},
+        {"bits": "0", "name": "SLEWFAST", "kind": "rw",
+         "why": "UNVERIFIED this session -- inferred from bit-budget (BITS mask 0xff minus the 7 confirmed fields at bits 7-1 leaves bit 0 unaccounted). Standard RP2040 pad field name for bit 0 is SLEWFAST per general knowledge of the layout; the one field in this file not individually grepped from source.",
+         "source": "UNVERIFIED this session."}
+      ]
+    }
+  ],
+  "spin_targets": [],
+  "note_on_no_spins": "Same silent-failure caveat as IO_BANK0: wrong OD/IE modeling breaks GPIO conduction without hanging anything."
+}

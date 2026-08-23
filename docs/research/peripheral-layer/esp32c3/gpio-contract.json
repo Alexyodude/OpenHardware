@@ -1,0 +1,53 @@
+{
+  "peripheral": "GPIO",
+  "base": "0x60004000",
+  "role": "Register contract for esp-soc's coded:esp_gpio. That chip-file entry already correctly calls GPIO whole-peripheral impure ('OUT/W1TS/W1TC writes emit pin events; IN carries button state inward'); this file supplies the concrete offsets, bit layout and the GPIO-matrix routing mechanism the code needs, cited to the register header, so the model can be typed in directly.",
+  "source": "espressif/esp-idf tag v6.0.2: components/soc/esp32c3/register/soc/gpio_reg.h; components/soc/esp32c3/include/soc/gpio_sig_map.h",
+  "verified": "2026-08-24, offsets and bit positions quoted from the pinned tag.",
+
+  "pin_state_registers": [
+    {"name": "GPIO_OUT_REG", "offset": "0x4", "width_bits": 26, "kind": "hw",
+     "source": "gpio_reg.h:50", "why": "Bits 0-21 = GPIO0-21 pad output level when that pin's ENABLE bit is set. digitalWrite(pin, level) on IDF/Arduino ultimately does a read-modify-write here (or uses the W1TS/W1TC pair below to avoid the RMW race). This is literally the blink target -- flip bit N and the emulator must emit a pin-change event, not just store a bit"},
+    {"name": "GPIO_OUT_W1TS_REG", "offset": "0x8", "kind": "hw",
+     "source": "gpio_reg.h:58", "why": "Write-1-to-set alias over GPIO_OUT: writing bit N here sets OUT bit N without a read-modify-write, and IDF's gpio_set_level() uses this (not a plain store to OUT) specifically to be race-free against interrupts. Must alias the same underlying pin state as OUT and OUT_W1TC, not be a separate storage cell"},
+    {"name": "GPIO_OUT_W1TC_REG", "offset": "0xC", "kind": "hw", "source": "gpio_reg.h:66", "why": "Write-1-to-clear alias, same aliasing requirement as W1TS"},
+    {"name": "GPIO_ENABLE_REG", "offset": "0x20", "width_bits": 26, "kind": "hw",
+     "source": "gpio_reg.h:82", "why": "Output-enable per pin (1 = driven output, 0 = high-Z / input). gpio_set_direction(pin, GPIO_MODE_OUTPUT) sets the corresponding bit here in addition to configuring IO_MUX.FUN_IE; both must be right for a pin to behave as either GPIO output or input"},
+    {"name": "GPIO_ENABLE_W1TS_REG", "offset": "0x24", "kind": "hw", "source": "gpio_reg.h:90-96"},
+    {"name": "GPIO_ENABLE_W1TC_REG", "offset": "0x28", "kind": "hw", "source": "gpio_reg.h:98-104"},
+    {"name": "GPIO_IN_REG", "offset": "0x3C", "width_bits": 26, "kind": "hw",
+     "source": "gpio_reg.h:114", "why": "Read-only pad input level per pin, valid only when that pin's IO_MUX FUN_IE is set AND (for a pin also driven as output) the pin is actually wired externally to reflect what was written -- for a pure output-only blink this register does not gate correctness, but any board with an input (a button part) needs this to carry the external pin state in, symmetric with OUT carrying it out. Impure the same way OUT is: its correct value depends on the simulated external world, not on anything firmware wrote"},
+    {"name": "GPIO_STATUS_REG", "offset": "0x44", "kind": "hw",
+     "source": "gpio_reg.h:122", "why": "Per-pin GPIO interrupt status (edge/level triggered per GPIO_PIN0_REG's config, offset 0x74 + 4*n, not detailed here); write-1-to-clear like GPIO_STATUS_W1TC at 0x48. Needed once a driver uses attachInterrupt()-style pin change interrupts; not needed for a plain blink"}
+  ],
+
+  "gpio_matrix": {
+    "role": "The mechanism behind docs/architectures.md 4.3 item 7 ('GPIO matrix + IO MUX -- any pin to (almost) any signal, via a routing table. NOT a fixed pinout'). Two independent per-signal register arrays, output and input, layered on top of the per-pin IO_MUX function select (see io_mux-regmap.json).",
+    "output_routing": {
+      "register": "GPIO_FUNCn_OUT_SEL_CFG_REG, n = 0..21 (one per GPIO pin number)",
+      "base_offset": "0x554", "stride": "0x4 (register n is at 0x554 + 4*n)",
+      "source": "gpio_reg.h:3882 (n=0 instance)",
+      "fields": [
+        {"bits": "0-7", "name": "OUT_SEL", "kind": "rw", "reset": "0x80 (=128=SIG_GPIO_OUT_IDX)",
+         "source": "gpio_reg.h:3901-3906",
+         "why": "Selects which signal drives THIS pin's output: 0-127 selects a specific peripheral output signal by its SIG index (e.g. writing 6 here routes U0TXD -- see gpio_sig_map.h U0TXD_OUT_IDX=6 -- onto this pin); the reset default 128 = SIG_GPIO_OUT_IDX (gpio_sig_map.h:176) means 'drive this pin from GPIO_OUT/W1TS/W1TC instead of any peripheral', i.e. plain GPIO is the power-on default and a peripheral driver must actively claim the pin. A model that ignores this field and always treats every pin as plain-GPIO-driven will get an accidental right answer for blink (which wants exactly that default) but will silently break UART-on-a-non-default-pin or any part that calls esp_rom_gpio_connect_out_signal(), which is precisely how IDF's uart_set_pin() reassigns UART0 TX off its default pin"},
+        {"bits": "8", "name": "OUT_INV_SEL", "kind": "rw", "source": "gpio_reg.h:3894-3899"},
+        {"bits": "9", "name": "OEN_SEL", "kind": "rw", "source": "gpio_reg.h:3887-3892", "why": "0 = output-enable follows the peripheral signal's own OE line (needed for e.g. open-drain I2C); 1 = output-enable comes from GPIO_ENABLE instead"},
+        {"bits": "10", "name": "OEN_INV_SEL", "kind": "rw", "source": "gpio_reg.h:3883-3885"}
+      ]
+    },
+    "input_routing": {
+      "register": "GPIO_FUNCn_IN_SEL_CFG_REG, n = signal index (0..~127), NOT pin number",
+      "base_offset": "0x154", "stride": "0x4",
+      "source": "gpio_reg.h:1322 (n=0 instance)",
+      "why": "Inverted addressing from the output side: here n identifies the PERIPHERAL SIGNAL (e.g. n=6 is U0RXD_IN_IDX per gpio_sig_map.h:20), and the register's IN_SEL field (bits 0-4 per the FUNC127 template seen in the header, 5-bit pin index 0-31 plus a 'always low/high' pseudo-pin) picks WHICH GPIO PIN feeds that signal. uart_set_pin() for RX writes the target pin number into GPIO_FUNC6_IN_SEL_CFG's IN_SEL field. This is the register a naive implementation is most likely to get backwards -- output routing is indexed by pin, input routing is indexed by signal -- and getting it backwards produces a UART that transmits fine but never receives, which looks exactly like a wiring bug rather than an emulator bug"
+    },
+    "signal_constants_verified": [
+      {"name": "U0TXD_OUT_IDX", "value": 6, "source": "gpio_sig_map.h:21"},
+      {"name": "U0RXD_IN_IDX", "value": 6, "source": "gpio_sig_map.h:20"},
+      {"name": "SIG_GPIO_OUT_IDX", "value": 128, "source": "gpio_sig_map.h:176"}
+    ]
+  },
+
+  "pin_count_note": "ESP32-C3 exposes GPIO0-21 (22 usable pins), 6 fewer than ESP32-C3's 32-bit OUT/ENABLE registers could address -- bits 22-31 are reserved/unimplemented, not silently-wired extra pins. GPIO12-17 on modules with in-package flash (most XIAO-form-factor C3 boards) are typically bonded internally to the flash die and not brought out; a board file (not written this session) needs to say which of the 22 are actually panel-exposed per board, since 'GPIO exists in the SoC register map' and 'GPIO is wireable on this board' are different facts."
+}

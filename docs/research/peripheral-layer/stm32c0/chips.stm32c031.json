@@ -1,0 +1,32 @@
+{
+  "chip": "STM32C031C6",
+  "cpu": "cortex-m0plus",
+  "source": "RM0490 Rev 6 (May 2026) SS2.1/SS2.2 memory map; STM32C031.svd for peripheral base addresses",
+  "verified": "2026-08-24 memory map and every peripheral base address cross-checked between RM0490's own Table (SS2.2) and STM32C031.svd <baseAddress> elements; board pin assignments (LED/USART) verified against nucleo-c031c6-bsp source, not guessed",
+  "board": "NUCLEO-C031C6",
+  "board_justification": "~GBP12, on the project's board list, and STMicroelectronics publish the reference BSP (pin definitions) on GitHub -- cited directly below rather than assumed from convention.",
+  "memory": [
+    {"name": "flash", "base": "0x08000000", "size": "0x8000", "alias": "0x00000000",
+     "why": "BOOT0=0 (default) aliases main flash at zero; the core fetches SP/PC from the alias. STM32C031C6 = 32KB variant; the x4 SKU is 0x4000."},
+    {"name": "sram", "base": "0x20000000", "size": "0x3000"}
+  ],
+  "atomic_aliases": null,
+  "peripherals": [
+    {"name": "RCC", "base": "0x40021000", "model": "regmap:stm32c0/rcc.json"},
+    {"name": "FLASH", "base": "0x40022000", "model": "regmap:stm32c0/flash.json"},
+    {"name": "PWR", "base": "0x40007000", "model": "stub",
+     "why": "See regmap.pwr.json in this drop for the research behind this call. Grepped every RCC/FLASH HAL file fetched this session for 'PWR': the only hit is __HAL_RCC_PWR_CLK_DISABLE() in HAL_RCC_OscConfig's LSE-disable path -- not exercised by a no-crystal blink+printf. No VOS/voltage-scaling field exists anywhere in PWR_CR1..CR4 on this chip (unlike L0), and nothing in the boot-critical path polls a PWR bit. A stub -- one name+base line so unmodelled PWR accesses log as 'PWR+0x14' instead of a bare address -- is honest here, not a shortcut: full field data was captured (PWR_CR1 LPMS/FPD_STOP/FPD_SLP, RM SS5.4.1) in case a future ticket needs low-power modelling, but promoting it to a regmap file would overstate how load-bearing PWR is for this chip's minimum boot set."},
+    {"name": "GPIOA", "base": "0x50000000", "model": "coded:stm32_gpio", "args": {"port": "A"},
+     "why": "GPIOx_IDR reads the wired part/net level (world-observable, not stored SFR state) and GPIOx_BSRR's write mutates the SIBLING register ODR with BSx-over-BRx priority -- both are read-purity violations per SS1's data-vs-code rule, and per the doc's whole-peripheral-granularity ruling the entire port routes to coded:, not just those two registers. Full field-by-field research (MODER/OTYPER/OSPEEDR/PUPDR/ODR/IDR/BSRR/AFRL reset values and semantics) is preserved in contract.gpio.json as the coded model's design notes."},
+    {"name": "GPIOB", "base": "0x50000400", "model": "coded:stm32_gpio", "args": {"port": "B"}},
+    {"name": "GPIOC", "base": "0x50000800", "model": "coded:stm32_gpio", "args": {"port": "C"},
+     "why": "Gates PC9 (LED2) and PC13 (USER button B1) per nucleo-c031c6-bsp."},
+    {"name": "GPIOD", "base": "0x50000C00", "model": "coded:stm32_gpio", "args": {"port": "D"}},
+    {"name": "GPIOF", "base": "0x50001400", "model": "coded:stm32_gpio", "args": {"port": "F"},
+     "why": "No GPIOE on C0 -- port letters jump A,B,C,D,F. Confirmed by both the SVD peripheral list and RM SS8's register-heading pattern '(x = A, B, C, D, F)', repeated verbatim on every GPIO register."},
+    {"name": "USART2", "base": "0x40004400", "model": "coded:stm32_usart", "irq": 28,
+     "why": "THE printf UART on this board -- nucleo-c031c6-bsp: COM1_UART=USART2, TX=PA2/AF1, RX=PA3/AF1, routed to the onboard ST-LINK VCP. Routes to coded: because USART_TDR's write must also trigger TXE-clear/TC-recompute and hand the byte to the TX net (not just store), and because USART_CR1/USART_ISR are SVD-modelled as two full alternate register definitions at the same offset depending on CR1.FIFOEN -- a live bit meaning cannot be expressed as a static field list. IRQ number RM0490 SS14 vector table, position 28 -- UNVERIFIED this session (not independently re-derived from the vector table text; carried over as a plausible value, flag before relying on it for NVIC dispatch)."},
+    {"name": "USART1", "base": "0x40013800", "model": "coded:stm32_usart", "irq": 27,
+     "why": "Identical register layout to USART2 (SVD marks USART2 derivedFrom=USART1). Not the board's VCP UART -- included for completeness since printf() could be retargeted to it. IRQ number UNVERIFIED, same caveat as USART2."}
+  ]
+}

@@ -12,3 +12,5 @@ touches:
 ---
 
 A Cortex-M0+ core is worth ~22 boards on the catalogue -- every Pico, every SAMD21 Arduino, the M0+ Nucleos, XIAO RP2040 and SAMD21. But this project does not ship a core without an oracle, and no Armv6-M corpus exists anywhere: SingleStepTests has 22 repos and none is M-profile. rp2040js is the oracle that exists today -- MIT, hand-written from DDI0419 so independent of QEMU, models M0+ rather than M0, and measured here at 1,188,334 cases/sec. Generate SST8088-shaped fixtures from it, so a core can be written against something. Corpus is git-ignored and fetched/generated like the 8088 one.
+
+**Note 2026-08-24:** Generator landed (tools/gen_armv6m_tests.mjs, commit 8afe281) and verified: 150 cases over 3 families; 50/50 ADCS agree with an independently written implementation of the N/Z/C/V rules. NOT done: no Cortex-M0+ core exists to check against it, and the corpus itself is git-ignored and not yet generated at scale.

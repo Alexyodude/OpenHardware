@@ -1,0 +1,47 @@
+{
+  "peripheral": "SYSTEM",
+  "base": "0x600C0000",
+  "role": "Peripheral clock gating, peripheral reset, and CPU clock-source select. Pure data: every field here is plain RMW storage with no polled ready-bit and no side effect other than gating a clock or reset line. esp-soc's chip file (chips/esp32c3.json) currently lists SYSTEM as \"model\": \"stub\" -- this file promotes it to a real regmap.",
+  "source": "espressif/esp-idf tag v6.0.2, components/soc/esp32c3/register/soc/system_reg.h, fetched from https://raw.githubusercontent.com/espressif/esp-idf/v6.0.2/components/soc/esp32c3/register/soc/system_reg.h",
+  "verified": "2026-08-24 every offset, bit position and reset value below is quoted from the cited header at the pinned tag; the C3 TRM PDF was not consulted. Cross-checked behaviourally against components/esp_hw_support/port/esp32c3/rtc_clk.c and rtc_clk_init.c (tag v6.0.2): the C3 clock-switch path (rtc_clk_cpu_freq_set_config, rtc_clk_bbpll_enable/configure) never polls any SYSTEM register for readiness -- BBPLL config goes through the analog REGI2C bus (regi2c_ctrl_ll_bbpll_calibration_start(), write-only from the CPU's point of view) and RTC-domain clock switches use fixed esp_rom_delay_us() waits, not status-bit polls. So unlike STM32's RCC, no field in this register file is a wait-for-set/wait-for-match target; a plain reads-as-written default cannot create a false boot spin here.",
+  "registers": [
+    {"name": "SYSTEM_CPU_PER_CONF_REG", "offset": "0x008", "fields": [
+      {"bits": "0-1", "name": "CPUPERIOD_SEL", "kind": "rw",
+       "source": "components/soc/esp32c3/register/soc/system_reg.h:61",
+       "why": "rtc_clk_cpu_freq_to_pll_mhz()/clk_ll_cpu_set_freq_mhz_from_pll() write this to select the CPU divide ratio off the 480MHz/320MHz BBPLL tap once PLL is running; esp_rom_set_cpu_ticks_per_us() is told the resulting frequency directly by software, so this field does not itself need to be read back correctly for boot to proceed -- only stored so later reads (e.g. esp_clk_cpu_freq()) are self-consistent"},
+      {"bits": "3", "name": "CPU_WAIT_MODE_FORCE_ON", "kind": "rw",
+       "source": "components/soc/esp32c3/register/soc/system_reg.h:49",
+       "why": "Keeps the CPU's AHB/APB clock alive during WFI so debuggers and the interrupt matrix keep working; reset default 1, plain storage"}
+    ]},
+    {"name": "SYSTEM_PERIP_CLK_EN0_REG", "offset": "0x010", "reset": "0xFFFFFFFF (chip-default; individual field resets below, several default 0)", "fields": [
+      {"bits": "13", "name": "TIMERGROUP_CLK_EN", "kind": "rw", "reset": 1,
+       "source": "components/soc/esp32c3/register/soc/system_reg.h:185",
+       "why": "Gates TIMG0's APB clock. TIMG0 is used for the boot-time RTC calibration loop (TIMG_RTCCALICFG, see peripherals/esp32c3/timg-contract.json) and by esp_timer; the __attribute__((constructor)) enable_timer_group0_for_calibration() in rtc_time.c calls timg_ll_enable_bus_clock(0,true), which sets this bit before any calibration register is touched -- if this field is not modelled as real storage (reads back what was written) that ctor's own enable becomes unverifiable and a strict caller could legitimately check it first"},
+      {"bits": "5", "name": "UART1_CLK_EN", "kind": "rw", "reset": 1,
+       "source": "components/soc/esp32c3/register/soc/system_reg.h", "why": "UART1 clock gate, not on the minimum console path (see UART0 below); included for completeness of this register"},
+      {"bits": "3", "name": "WDG_CLK_EN", "kind": "rw", "reset": 1,
+       "source": "components/soc/esp32c3/register/soc/system_reg.h:239",
+       "why": "Despite the name this does not gate the RTC watchdog (that lives entirely inside RTC_CNTL, always clocked from the RTC domain) -- 'WDG' here is the APB register-access clock for the RTC_CNTL block's APB-side shadow registers. Left as plain rw; no driver polls it"},
+      {"bits": "2", "name": "UART_CLK_EN", "kind": "rw", "reset": 1,
+       "source": "components/soc/esp32c3/register/soc/system_reg.h:245",
+       "why": "Gates UART0's APB clock -- the console. periph_module_enable(PERIPH_UART0_MODULE) sets this before uart_hal_init() touches any UART0 register; a UART0 access with this bit clear is undefined on real silicon, but ESP-IDF always sets it first on the boot path, so for a first blink+console slice this can default reset=1 and be treated as always-on without breaking anything observable"},
+      {"bits": "0", "name": "TIMERS_CLK_EN", "kind": "rw", "reset": 1,
+       "source": "components/soc/esp32c3/register/soc/system_reg.h", "why": "Gates the two general-purpose 54-bit hardware timers inside TIMG (distinct from the calibration unit and from MWDT); not on the blink/console path"}
+    ], "note": "Register also carries SPI2/SPI3/SPI4/I2C/I2S/PWM/RMT/LEDC/PCNT/TWAI/UHCI/ADC/SYSTIMER/USB_DEVICE gate bits (system_reg.h:76-263) -- all plain rw, omitted here as not on the minimum boot+blink+console path. No GPIO clock-gate bit exists in this register or in PERIP_CLK_EN1: the GPIO matrix has no software clock gate on ESP32-C3, unlike STM32's IOPENR/AHBENR. That is a real difference from the STM32 checklist in docs/architectures.md 3.3 item 5 worth calling out explicitly so nobody goes looking for one."},
+    {"name": "SYSTEM_PERIP_RST_EN0_REG", "offset": "0x018", "fields": [
+      {"bits": "13", "name": "TIMERGROUP_RST", "kind": "rw", "reset": 0,
+       "source": "components/soc/esp32c3/register/soc/system_reg.h:429",
+       "why": "timg_ll_reset_register(0), called by the same constructor as TIMERGROUP_CLK_EN above, pulses this bit; mirrors the enable register bit-for-bit, plain storage"},
+      {"bits": "3", "name": "WDG_RST", "kind": "rw", "reset": 0, "source": "components/soc/esp32c3/register/soc/system_reg.h:483", "why": "APB-side reset for RTC_CNTL's bus interface, not the watchdog itself; see WDG_CLK_EN above"},
+      {"bits": "2", "name": "UART_RST", "kind": "rw", "reset": 0, "source": "components/soc/esp32c3/register/soc/system_reg.h:489", "why": "UART0 peripheral reset line; periph_module_reset(PERIPH_UART0_MODULE) pulses it before init"}
+    ]},
+    {"name": "SYSTEM_SYSCLK_CONF_REG", "offset": "0x058", "fields": [
+      {"bits": "10-11", "name": "SOC_CLK_SEL", "kind": "rw",
+       "source": "components/soc/esp32c3/register/soc/system_reg.h:803",
+       "why": "Selects the SoC root clock source (XTAL / PLL / RC_FAST) for the AHB/APB fabric, distinct from CPU_PER_CONF which only picks the CPU's own divide ratio off that root. Written by rtc_clk_cpu_freq_set_config() via clk_ll_cpu_set_src(); read back nowhere in a spin -- rtc_clk_cpu_freq_get_config() (used for diagnostics, not boot gating) reads it back, so storage alone is sufficient"},
+      {"bits": "0-9", "name": "PRE_DIV_CNT", "kind": "rw",
+       "source": "components/soc/esp32c3/register/soc/system_reg.h:809", "why": "APB pre-divider off the selected SOC_CLK_SEL source; plain storage, no poll"}
+    ]}
+  ],
+  "not_covered": "SYSTEM_CPU_INTR_FROM_CPU_0..3_REG (software-triggered interrupt lines, offsets 0x028-0x034) are plain rw storage too but belong with the interrupt-matrix work (esp-soc's chips/esp32c3.json INTMATRIX entry), not this clock/reset file."
+}

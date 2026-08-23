@@ -1,0 +1,30 @@
+{
+  "peripheral": "TIMG (calibration unit contract)",
+  "role": "Register contract for coded:esp_timg - NOT loaded by the regmap engine. Records what the coded model must honor, in regmap vocabulary where it fits, and why it cannot be a regmap where it does not. Schema deviation flagged to stm-soc: role and coded_because are not fields of the proposed regmap schema; this file poses the question of whether coded peripherals should carry a contract file at all, or whether this content belongs only in the coded model's tests",
+  "size": "0x1000",
+  "source": "ESP-IDF master: components/esp_hw_support/port/esp32c3/rtc_time.c; components/esp_system/port/soc/esp32c3/clk.c; components/soc/esp32c3/register/soc/timer_group_reg.h",
+  "verified": "2026-08-24 kinds derived from the two driver files as read; RTCCALICFG/RTCCALICFG1 offsets and reset values quoted from the register header as read. RTCCALICFG2 was initially inferred at 0x70 and flagged unverified; that inference was WRONG - the interrupt-bank registers (INT_ENA 0x70, INT_RAW 0x74, INT_ST 0x78, INT_CLR 0x7c) sit between CFG1 and CFG2. Corrected to 0x80 with field resets quoted from esp-idf v6.0.2 timer_group_reg.h:496-511, first caught by the peer verification in timg-contract-CORRECTIONS.json and re-verified independently against the same pinned tag. The C3 TRM PDF was not consulted - the soc header field descriptions on master are scrubbed to Reserved, so the drivers plus the v6.0.2 header are the oracle used here",
+  "registers": [
+    {"name": "RTCCALICFG", "offset": "0x68", "reset": "0x00013000", "fields": [
+      {"bits": "31", "name": "START", "kind": "rw",
+       "why": "Software-managed, not self-clearing: rtc_clk_cal_internal clears it before setting it and clears it again after completion - pointless against hardware that self-clears. Contradicts the design doc's kind-5 example; reads-as-written is the correct model"},
+      {"bits": "15", "name": "RDY", "kind": "ready-follows", "follows": "RTCCALICFG.START", "when": "set",
+       "why": "The boot poll. Single-source follows is a simplification: hardware also asserts RDY under START_CYCLING (which resets to 1), and follows-START-OR-START_CYCLING is not expressible in the schema - the second reason this peripheral is coded"},
+      {"bits": "12", "name": "START_CYCLING", "kind": "rw",
+       "why": "Read back as stored config by the cycling branch of rtc_clk_cal_internal; resets to 1"},
+      {"bits": "13-14", "name": "CLK_SEL", "kind": "rw",
+       "why": "Reference select (header text: 0 rtc slow clock, 1 clk_8m, 2 xtal_32k); an input to the VALUE arithmetic; resets to 1"},
+      {"bits": "16-30", "name": "MAX", "kind": "rw",
+       "why": "Slow-clock periods to measure over; IDF writes SLOW_CLK_CAL_CYCLES (sdkconfig default 1024); the other VALUE input; resets to 1"}
+    ]},
+    {"name": "RTCCALICFG2", "offset": "0x80", "fields": [
+      {"bits": "0", "name": "TIMEOUT", "kind": "clears-instantly",
+       "why": "Hardware escape hatch read by the poll's second arm (RO, resets 0 - v6.0.2 timer_group_reg.h:497); there is no software timeout in this loop. Read-0 is correct when RDY asserts instantly. Note: the poll alternates two addresses (0x68 then 0x80), which defeats the spin detector's consecutive-same-address rule as specified - reported to stm-soc with a proposed amendment"},
+      {"bits": "3-6", "name": "TIMEOUT_RST_CNT", "kind": "rw",
+       "why": "Cycles that release the calibration timeout reset (resets 3 - v6.0.2 header:504); config storage, surfaced by the peer verification"},
+      {"bits": "7-31", "name": "TIMEOUT_THRES", "kind": "rw",
+       "why": "Timeout threshold (resets 0x1FFFFFF, its maximum - effectively disabled at power-on; rtc_clk_cal_internal writes a real threshold before every run, never relying on the default - v6.0.2 header:511)"}
+    ]}
+  ],
+  "coded_because": "RTCCALICFG1 (offset 0x6C, reset 0), field VALUE at bits 31:7, has no kind: it must read the measured count, approximately MAX * f_ref / f_slow - a pure function of stored MAX and CLK_SEL plus nominal chip frequencies (f_ref = 40 MHz XTAL; RC_SLOW nominal ~136 kHz, from memory, not re-verified). Example: MAX=1024 against RC_SLOW gives roughly 3.0e5. Reading 0 is not survivable: select_rtc_slow_clk wraps calibration in do { ... } while (cal_val == 0), and its retry-3 fallback only rescues the XTAL32K source by switching to RC_SLOW - a zero on the default RC_SLOW source retries forever. VALUE is not counter (a latched measurement, not time-advancing) and not mirrors (transform vocabulary is identity|onehot; this is arithmetic over two fields and chip constants). Per the design's own escape rule this forces coded:, and per its whole-peripheral granularity all of TIMG goes with it."
+}

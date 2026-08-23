@@ -1,0 +1,63 @@
+{
+  "model": "coded:rp2040_uart",
+  "note": "NOT a regmap file -- design doc SS1 point 8 names this exact peripheral class as its worked kind-8 example ('UART data and FIFO flags (TXE waits are data-flow, not enable-flow; an RX read pops a FIFO)'). This file preserves the register facts for whoever implements coded:rp2040_uart.",
+  "instances": [{"name": "UART0", "base": "0x40034000", "reset_bit_in_RESETS": 22}, {"name": "UART1", "base": "0x40038000", "reset_bit_in_RESETS": 23}],
+  "note_on_instances": "SVD declares UART1 as derivedFrom=\"UART0\" (line 41990 of the fetched RP2040.svd) -- one coded model, two instances via args.instance per chips/rp2040.json.",
+  "atomic_alias_timing_note": "Added 2026-08-24, from chips/rp2040.json's exclusion-set verification. RP2040 Datasheet SS2.1.2 p.17 (pdftotext-extracted verbatim this session) names UART as one of four peripherals (I2C, UART, SPI, SSI) whose atomic SET/CLR/XOR aliases are 'added using a bus interposer, which translates upstream atomic writes into downstream read-modify-write sequences, at the boundary of the peripheral. This extends the access time by two system clock cycles.' So UART DOES have working atomic aliases (unlike SIO) -- if firmware used hw_set_bits()/hw_clear_bits() on UARTCR/UARTLCR_H/etc., it would work. This deliverable's coded: model does not currently implement that +2-cycle timing distinction (UART is modeled at the FIFO/data-flow level per this project's virtual-cycle determinism rule, not at per-write bus-cycle granularity) -- flagged as a fidelity gap for cycle-accurate work, not a correctness gap for the boot-to-blink floor.",
+  "source_regs_h": "src/rp2040/hardware_regs/include/hardware/regs/uart.h (pico-sdk, fetched this session)",
+  "source_uart_c": "src/rp2_common/hardware_uart/{uart.c, include/hardware/uart.h} (pico-sdk, fetched this session)",
+  "registers": [
+    {
+      "name": "UARTDR", "offset": "0x00", "access": "rw",
+      "behavior": "Write pushes a byte into the TX FIFO/shift-register (side effect: TXFF may become true, TXFE false). Read pops the RX FIFO (side effect: RXFE may become true). Queue-op semantics, not a plain register store -- the canonical reason this whole peripheral is coded:, not a field-kind puzzle.",
+      "why": "The register uart_putc_raw()/uart_getc() touch, gated by UARTFR.TXFF/RXFE below.",
+      "source": "src/rp2040/hardware_regs/include/hardware/regs/uart.h:18 (offset). DATA bits 7-0 plus four RO error-flag bits FE/PE/BE/OE at 11-8 (standard PL011, UNVERIFIED bit positions this session, existence standard)."
+    },
+    {
+      "name": "UARTFR", "offset": "0x18", "access": "ro",
+      "fields": [
+        {
+          "name": "TXFF", "bits": "5",
+          "behavior": "True when TX FIFO (32 entries) is full. Should track TX FIFO occupancy against 32-entry capacity, freeing entries on a virtual-cycle schedule tied to the configured baud rate (UARTIBRD/UARTFBRD) -- not instantly, and not stuck-full.",
+          "why": "THIS FLOOR'S STDIO SPIN. src/rp2_common/hardware_uart/include/hardware/uart.h:441-442,480 (pico-sdk, fetched this session): `uart_is_writable()` returns `!(fr & TXFF_BITS)`, and uart_putc_raw's loop does `while (!uart_is_writable(uart)) tight_loop_contents();` before every byte. A TXFF that never clears hangs the SECOND character (first succeeds because TXFF starts false); a naive 'always full' hangs the FIRST. Highest-value UART unstick target -- unlike GPIO's silent failures, this one hangs visibly. An --unstick pass that just forces TXFF=0 forever would erase FIFO-full backpressure a real firmware bug (printing faster than the wire) would actually hit -- bigger fidelity loss than XOSC/PLL's simpler ready-follows unsticking.",
+          "source": "src/rp2040/hardware_regs/include/hardware/regs/uart.h:181-191 (pico-sdk). VERIFIED. 'Transmit FIFO Full.'"
+        },
+        {
+          "name": "RXFE", "bits": "4", "reset": "1 (VERIFIED for this field specifically -- RXFE_RESET=_u(0x1) in the header)",
+          "behavior": "True when RX FIFO is empty.",
+          "why": "uart_is_readable() returns `!(fr & RXFE_BITS)`; uart_getc's blocking path spins `while (!uart_is_readable(uart)) tight_loop_contents();` (uart.h:461-463,497). Not on the write-only blink path but included since the brief's 'enough UART for stdio' conventionally includes readback in test harnesses.",
+          "source": "src/rp2040/hardware_regs/include/hardware/regs/uart.h:193-203 (pico-sdk). VERIFIED."
+        },
+        {
+          "name": "BUSY", "bits": "3",
+          "behavior": "True while the serial shift register is actively clocking a bit out. 'set as soon as the TX FIFO becomes non-empty... cleared once the FIFO is empty and the last character has been transmitted.' Derived from simulated bit-clock timing on virtual cycles per rules/determinism.md, not real time -- must clear after a modeled number of bit-times, not instantly, or firmware racing ahead of BUSY (e.g. before changing baud rate) would be mismodeled.",
+          "why": "uart_tx_wait_blocking() spins `while (fr & BUSY_BITS) tight_loop_contents();` (uart.h:450-451). Not required for blink itself.",
+          "source": "src/rp2040/hardware_regs/include/hardware/regs/uart.h:205-215 (pico-sdk). VERIFIED, quoted."
+        }
+      ]
+    },
+    {"name": "UARTIBRD", "offset": "0x24", "access": "rw", "behavior": "16-bit integer baud divisor (standard PL011).", "source": "uart.h:264 (offset VERIFIED, field width UNVERIFIED exact bits this session)."},
+    {"name": "UARTFBRD", "offset": "0x28", "access": "rw", "behavior": "6-bit fractional baud divisor (standard PL011).", "source": "uart.h:279 (offset VERIFIED, field width UNVERIFIED exact bits this session)."},
+    {
+      "name": "UARTLCR_H", "offset": "0x2c", "access": "rw",
+      "fields": [
+        {"name": "WLEN", "bits": "6-5", "behavior": "0b11 = 8 data bits (used by virtually all stdio).",
+         "why": "'Any LCR writes need to take place before enabling the UART' -- uart.c:56, VERIFIED quoted.",
+         "source": "uart.h:310-318 (pico-sdk). VERIFIED offset/bits."},
+        {"name": "FEN", "bits": "4", "behavior": "FIFO enable -- gates 32-entry-FIFO vs single-character-buffer behavior for UARTDR/UARTFR.",
+         "why": "pico-sdk enables by default. A model treating UARTDR as single-buffer regardless of FEN diverges from FIFO-drain timing but still functionally delivers bytes -- fidelity gap, not correctness-blocking for blink-class fixtures.",
+         "source": "uart.h:320-328 (pico-sdk). VERIFIED."}
+      ]
+    },
+    {
+      "name": "UARTCR", "offset": "0x30", "access": "rw",
+      "fields": [
+        {"name": "UARTEN", "bits": "0", "reset": "0",
+         "why": "Master enable. UARTDR/UARTFR are meaningless until set. A model letting TXFF/BUSY move before UARTEN==1 lets firmware appear to print successfully before the UART is enabled -- silently wrong the same way FUNCSEL errors are silently wrong.",
+         "source": "uart.h:518-526 (pico-sdk). VERIFIED."},
+        {"name": "TXE/RXE", "bits": "9/8 (standard PL011 positions, UNVERIFIED against this specific header's field comments this session)",
+         "why": "Original brief's UART checklist explicitly asked for TXE/TC. Flag for whoever finalizes this: re-grep uart_regs.h directly for UART_UARTCR_TXE_BITS/RXE_BITS rather than trust this recollection."}
+      ]
+    }
+  ]
+}

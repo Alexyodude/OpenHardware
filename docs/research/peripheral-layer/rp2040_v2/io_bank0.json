@@ -1,0 +1,48 @@
+{
+  "peripheral": "IO_BANK0",
+  "size": "0xf0",
+  "source": "src/rp2040/hardware_regs/include/hardware/regs/io_bank0.h (pico-sdk, fetched this session; GPIO0's STATUS+CTRL pair read in full as the representative instance, GPIO1-29 same layout by 8-byte stride confirmed for GPIO0/GPIO1 only)",
+  "verified": "2026-08-24 covers GPIO0's STATUS/CTRL as read against io_bank0.h and src/rp2_common/hardware_gpio/gpio.c's gpio_set_function(); not yet traced against a live simulator or hardware",
+  "instance_layout": "GPIOn_STATUS at offset n*8, GPIOn_CTRL at n*8+4, n in 0..29. Confirmed for n=0,1 (GPIO0_STATUS=0x00, GPIO0_CTRL=0x04, GPIO1_STATUS=0x08, GPIO1_CTRL=0x0c); n=2..29 extrapolated, not individually re-checked.",
+  "registers_per_gpio": [
+    {
+      "name": "GPIOn_STATUS", "offset": "n*8", "reset": "0x00000000",
+      "fields": [
+        {"bits": "26", "name": "IRQTOPROC", "kind": "mirrors", "source": "GPIOn_STATUS.IRQFROMPAD", "transform": "identity",
+         "why": "'after override is applied' -- not itemizing the IRQOVER transform (invert/drive-low/drive-high) here since interrupt delivery is out of this deliverable's blink-floor scope; treat as identity for the common case.",
+         "source_cite": "io_bank0_regs.h:22-28 (pico-sdk). VERIFIED."},
+        {"bits": "24", "name": "IRQFROMPAD", "kind": "hw",
+         "why": "Driven by pad/interrupt-detect hardware, not derived from another modeled field in this deliverable's scope -- routes to coded: if interrupt support is ever added; left unmodelled (stub-equivalent) for the blink floor.",
+         "source_cite": "io_bank0_regs.h:30-36 (pico-sdk). VERIFIED."},
+        {"bits": "19", "name": "INTOPERI", "kind": "mirrors", "source": "GPIOn_STATUS.INFROMPAD", "transform": "identity",
+         "why": "'after override is applied' (INOVER transform elided for the same reason as IRQTOPROC above). This is what SIO.GPIO_IN reads (see coded-model-notes/rp2040_sio.json) -- so GPIO_IN mirrors INTOPERI, which itself mirrors INFROMPAD: a two-hop chain, not one 'mirrors' hop. Flagging since the doc's mirrors kind (SS1 point 3) is illustrated as single-hop (SWS<-SW, SELECTED<-SRC); a bus model needs INFROMPAD -> INTOPERI -> SIO.GPIO_IN as two chained lookups.",
+         "source_cite": "io_bank0_regs.h:38-44 (pico-sdk). VERIFIED."},
+        {"bits": "17", "name": "INFROMPAD", "kind": "hw",
+         "why": "Raw pad input before override -- driven by whatever the wiring/part model puts on the pin, not by another register in this map. Exact bit position UNVERIFIED beyond seeing the field named in this session's grep (existence and purpose VERIFIED, MSB/LSB not individually re-extracted).",
+         "source_cite": "io_bank0_regs.h (pico-sdk), field name confirmed present. UNVERIFIED exact bits."}
+      ]
+    },
+    {
+      "name": "GPIOn_CTRL", "offset": "n*8 + 4", "reset": "0x0000001f",
+      "fields": [
+        {
+          "bits": "4-0", "name": "FUNCSEL", "kind": "rw", "reset": "0x1f",
+          "why": "gpio_set_function() (src/rp2_common/hardware_gpio/gpio.c:38-48, fetched this session) writes this directly. gpio_init()/gpio_set_dir() call gpio_set_function(gpio, GPIO_FUNC_SIO) (gpio.c:277). This is the field the original brief named: 'SIO only drives the pad if FUNCSEL selects function 5' -- CONFIRMED for GPIO0 (0x05 -> sio_0); the per-GPIO function table differs by pin in general and only GPIO0's table was read this session, but pico-sdk treats GPIO_FUNC_SIO as one constant across all gpio_set_function() calls, implying the sio encoding is uniformly 5 -- UNVERIFIED for pins other than GPIO0 specifically. Getting FUNCSEL wrong is a SILENT failure: no hang, GPIO writes just vanish into whatever else the pin is routed to. A conformance fixture for blink needs to assert FUNCSEL==5 on the target pin, not just that firmware ran without hanging.",
+          "values_for_gpio0": {"0x00":"jtag_tck","0x01":"spi0_rx","0x02":"uart0_tx","0x03":"i2c0_sda","0x04":"pwm_a_0","0x05":"sio_0","0x06":"pio0_0","0x07":"pio1_0","0x09":"usb_muxing_overcurr_detect","0x1f":"null"},
+          "source": "io_bank0_regs.h:156-173 (pico-sdk). VERIFIED, quoted verbatim."
+        },
+        {"bits": "15-14", "name": "OEOVER", "kind": "rw",
+         "values": {"0x0":"drive OE from peripheral signal selected by funcsel","0x1":"drive from inverse","0x2":"disable output","0x3":"enable output"},
+         "source": "io_bank0_regs.h (pico-sdk), field present in CTRL's field list. UNVERIFIED exact value-comment wording this session (inferred from the standard RP2040 OVER-field pattern shared by IRQOVER/INOVER, which WERE quoted verbatim)."},
+        {"bits": "17-16", "name": "INOVER", "kind": "rw",
+         "values": {"0x0":"don't invert the peri input","0x1":"invert the peri input","0x2":"drive peri input low","0x3":"drive peri input high"},
+         "source": "io_bank0_regs.h:109-122 (pico-sdk). VERIFIED, quoted verbatim."},
+        {"bits": "29-28", "name": "IRQOVER", "kind": "rw",
+         "values": {"0x0":"don't invert the interrupt","0x1":"invert the interrupt","0x2":"drive interrupt low","0x3":"drive interrupt high"},
+         "source": "io_bank0_regs.h:94-107 (pico-sdk). VERIFIED, quoted verbatim."}
+      ]
+    }
+  ],
+  "spin_targets": [],
+  "note_on_no_spins": "Nothing here is a spin-loop target -- FUNCSEL/OEOVER/INOVER/IRQOVER are plain configuration writes. Included because a wrong FUNCSEL is a silent non-hang failure (see FUNCSEL's why-note), arguably worse for --unstick's purposes than a hang since there is nothing to detect."
+}

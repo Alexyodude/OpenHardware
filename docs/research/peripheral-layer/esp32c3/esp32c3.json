@@ -1,0 +1,148 @@
+{
+ "chip": "ESP32-C3",
+ "cpu": "rv32imc",
+ "source": "ESP-IDF master, components/soc/esp32c3/include/soc/soc.h and components/soc/esp32c3/register/soc/reg_base.h, as read 2026-08-24",
+ "verified": "2026-08-24 every memory bound and peripheral base below is quoted from the two headers above; the C3 TRM PDF was not consulted. No irq numbers appear anywhere in this file because interrupt-matrix source numbers were not verified this session",
+ "memory": [
+  {
+   "name": "rom",
+   "base": "0x40000000",
+   "size": "0x60000",
+   "why": "Mask ROM, fetch bus; the reset vector enters here, and IDF/Arduino apps link ROM-resident functions via esp32c3.rom.ld, so a ROM dump (espressif/esp-rom-elfs) must be loaded or the app's first ROM call is a wild jump"
+  },
+  {
+   "name": "rom_dbus",
+   "base": "0x3FF00000",
+   "size": "0x20000",
+   "why": "Data-bus window onto ROM constants (SOC_DROM_MASK); ROM code reads its own tables here"
+  },
+  {
+   "name": "iram",
+   "base": "0x4037C000",
+   "size": "0x64000",
+   "why": "400 KB SRAM, instruction bus; app-image IRAM segments copy here"
+  },
+  {
+   "name": "dram",
+   "base": "0x3FC80000",
+   "size": "0x60000",
+   "why": "The same physical SRAM as iram+0x4000 seen from the data bus (0x3FC80000 aliases 0x40380000); a store through one view must be visible through the other"
+  },
+  {
+   "name": "irom_cache",
+   "base": "0x42000000",
+   "size": "0x800000",
+   "why": "Flash-cache window, instruction side; .flash.text is linked here. At bring-up the loader statically serves app-image bytes at their vaddrs, standing in for the cache MMU"
+  },
+  {
+   "name": "drom_cache",
+   "base": "0x3C000000",
+   "size": "0x800000",
+   "why": "Flash-cache window, data side; .flash.rodata. Same static-mapping stand-in"
+  },
+  {
+   "name": "rtc_ram",
+   "base": "0x50000000",
+   "size": "0x2000",
+   "why": "8 KB RTC FAST memory, mapped identically on both buses (SOC_RTC_IRAM equals SOC_RTC_DRAM)"
+  }
+ ],
+ "atomic_aliases": null,
+ "peripherals": [
+  {
+   "name": "UART0",
+   "base": "0x60000000",
+   "model": "coded:esp_uart",
+   "why": "An RX read pops a FIFO - impure. TX-status read-0 happens to mean empty so prints drain, but the bytes must land in the session's serial event stream"
+  },
+  {
+   "name": "SPI1",
+   "base": "0x60002000",
+   "model": "coded:esp_spimem",
+   "why": "The flash controller the esp_flash driver commands directly; nvs_flash_init in Arduino's init reads the NVS partition through it"
+  },
+  {
+   "name": "SPI0",
+   "base": "0x60003000",
+   "model": "stub",
+   "why": "Cache-fill engine; firmware rarely touches it directly - the access accounting will say if that assumption is wrong"
+  },
+  {
+   "name": "GPIO",
+   "base": "0x60004000",
+   "model": "coded:esp_gpio",
+   "why": "OUT/W1TS/W1TC writes emit pin events; IN carries button state inward - impure both directions. digitalWrite ends here, and the visible blink is this peripheral's output"
+  },
+  {
+   "name": "RTC_CNTL",
+   "base": "0x60008000",
+   "model": "regmap:esp32c3/rtc_cntl.json",
+   "why": "Upgraded from stub after reading rtc_clk.c/rtc_init.c/rtc_time.c: the TIME counter is load-bearing (the ocode regi2c poll's only escape is a timeout computed from it), STORE4/5 stash XTAL/APB frequencies, and SLOW_CLK_NEXT_EDGE is a genuine self-clearing bit. The RWDT/SWD watchdog block is deliberately NOT listed in the regmap so the unknown-offset default keeps it inert - a half-coded watchdog is worse than an inert one"
+  },
+  {
+   "name": "EFUSE",
+   "base": "0x60008800",
+   "model": "stub",
+   "why": "The bootloader compares the image's min_chip_rev_full against the efuse wafer version; all-zero efuse reads rev v0.0 and modern images refuse to boot (IDF C3 default min rev v0.3 - not re-verified this session). Needs a regmap with nonzero revision reset values drafted from efuse_reg.h; PICSimLab's C3 board writes wafer-minor=3 for exactly this reason"
+  },
+  {
+   "name": "IO_MUX",
+   "base": "0x60009000",
+   "model": "stub",
+   "why": "Pure pin-function storage at bring-up; reads-as-written serves the RMW config patterns"
+  },
+  {
+   "name": "TIMG0",
+   "base": "0x6001F000",
+   "model": "coded:esp_timg",
+   "args": {
+    "instance": 0
+   },
+   "why": "Forced coded by RTCCALICFG1.VALUE arithmetic and by RDY depending on two source bits - see peripherals/esp32c3/timg-contract.json. The MWDT0 half stays inert at bring-up for the RTC_CNTL reason"
+  },
+  {
+   "name": "TIMG1",
+   "base": "0x60020000",
+   "model": "coded:esp_timg",
+   "args": {
+    "instance": 1
+   },
+   "why": "MWDT1 and the second calibration unit; same contract"
+  },
+  {
+   "name": "SYSTIMER",
+   "base": "0x60023000",
+   "model": "coded:esp_systimer",
+   "why": "FreeRTOS tick and esp_timer source: counter reads derive from cycles, but the alarm comparators raise interrupts - a side effect no kind expresses. Without it vTaskDelay never wakes: blink toggles once and stops"
+  },
+  {
+   "name": "APB_CTRL",
+   "base": "0x60026000",
+   "model": "stub"
+  },
+  {
+   "name": "USB_SERIAL_JTAG",
+   "base": "0x60043000",
+   "model": "coded:esp_usj",
+   "why": "The XIAO ESP32-C3 has no UART bridge and Arduino defaults CDC-on-boot=1, so Serial writes land here, not UART0. A simple FIFO+status pair; status read-0 means space-available so prints drain"
+  },
+  {
+   "name": "SYSTEM",
+   "base": "0x600C0000",
+   "model": "regmap:esp32c3/system-regmap.json",
+   "why": "Adopted by ruling 2026-08-24: esp-soc-2's regmap (strict superset of esp-soc's retired system.json - adds PERIP_CLK_EN0/PERIP_RST_EN0 gating - and pins an IDF tag). The C3 clock switch is write-and-fixed-delay with no SWS-style handshake, verified independently by both agents; every field is plain storage"
+  },
+  {
+   "name": "INTMATRIX",
+   "base": "0x600C2000",
+   "model": "coded:esp_intmatrix",
+   "why": "Espressif-custom source-to-CPU-line routing - no CLINT or PLIC exists on any ESP RISC-V chip, so a stock RISC-V platform model cannot substitute. Boundary question for the design's section 3: the CPU-side INTC priority/claim registers are this chip's SCS-analogue and arguably belong in-core, with only this routing matrix outboard"
+  },
+  {
+   "name": "EXTMEM",
+   "base": "0x600C4000",
+   "model": "stub",
+   "why": "Cache/MMU control. The loader's static flash mapping stands in until firmware calls esp_partition_mmap or the flash driver suspends the cache; accounting on this stub is the tripwire that says the stand-in has run out"
+  }
+ ]
+}

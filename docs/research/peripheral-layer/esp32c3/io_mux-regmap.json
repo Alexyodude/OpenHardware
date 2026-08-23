@@ -1,0 +1,35 @@
+{
+  "peripheral": "IO_MUX",
+  "base": "0x60009000",
+  "role": "One 32-bit pad-configuration register per physical pin (26 pins on ESP32-C3: GPIO0-21 plus 4 pins with no GPIO number). Selects which of up to 6 signals drives the pad (function 1 is almost always 'plain GPIO', routed onward through the GPIO matrix), plus pull-up/down, drive strength, input-enable and sleep-mode overrides. Genuinely pure data -- every field is RMW storage with no side effect on read and no poll target found anywhere in the boot path. esp-soc's chip file currently lists IO_MUX as \"model\": \"stub\" with the note 'reads-as-written serves the RMW config patterns' -- this file is that promotion to a cited regmap, one register template plus the per-pin offset table.",
+  "source": "espressif/esp-idf tag v6.0.2, components/soc/esp32c3/register/soc/io_mux_reg.h",
+  "verified": "2026-08-24 field template (SLP_*, FUN_*, MCU_SEL, FILTER_EN) and the GPIO2 register offset (0x0c) and its function-select values quoted directly from the header at the pinned tag. The remaining 25 pins' offsets follow the same header's IO_MUX_GPIOn_REG table (io_mux_reg.h:96-114+) and were not individually re-quoted here -- draft the full 26-entry offset table mechanically from that macro block rather than retyping it by hand.",
+  "register_template": {
+    "size_bytes": 4,
+    "fields": [
+      {"bits": "0", "name": "SLP_OE", "kind": "rw", "why": "Output-enable override while the RTC domain is in sleep; not exercised before app_main()"},
+      {"bits": "1", "name": "SLP_SEL", "kind": "rw", "why": "Marks this pin as a sleep wakeup source"},
+      {"bits": "2", "name": "SLP_PD", "kind": "rw"},
+      {"bits": "3", "name": "SLP_PU", "kind": "rw"},
+      {"bits": "4", "name": "SLP_IE", "kind": "rw"},
+      {"bits": "5-6", "name": "SLP_DRV", "kind": "rw"},
+      {"bits": "7", "name": "FUN_PD", "kind": "rw", "why": "Pulldown enable in the pin's normal (non-sleep) function"},
+      {"bits": "8", "name": "FUN_PU", "kind": "rw", "why": "Pullup enable; Arduino's INPUT_PULLUP sets this via gpio_pullup_en()"},
+      {"bits": "9", "name": "FUN_IE", "kind": "rw", "why": "Input-enable. Must be set for a pin used as UART RX or as a digitalRead() input, or the pad never drives its input buffer and GPIO_IN always reads 0 for that pin regardless of the external signal"},
+      {"bits": "10-11", "name": "FUN_DRV", "kind": "rw", "why": "Output drive strength (5/10/20/40 mA); cosmetic for a simulator, stored so readback matches"},
+      {"bits": "12-14", "name": "MCU_SEL", "kind": "rw", "why": "Function select, 0-5 (this pin's GPIO2 example: 0=GPIO2_0/analog default, 1=GPIO2 digital GPIO, 2=FSPIQ). This is the field IO_MUX contributes to the 'any pin to (almost) any signal' story from docs/architectures.md 4.3 item 7: MCU_SEL must equal the pin's own 'route through GPIO matrix' function value (1 on every C3 pin checked) before the GPIO-matrix FUNCn_OUT_SEL_CFG/FUNCn_IN_SEL_CFG registers (see gpio-contract.json) have any effect at all. Get MCU_SEL wrong and the matrix routing is set up correctly in software but the pad itself is still listening to some other peripheral's dedicated function -- a silent miswire, not a hang"},
+      {"bits": "15", "name": "FILTER_EN", "kind": "rw", "why": "Glitch filter on the input path; not exercised before app_main()"}
+    ]
+  },
+  "example_instance": {
+    "name": "PERIPHS_IO_MUX_GPIO2_U (a.k.a. IO_MUX_GPIO2_REG)",
+    "offset": "0x0c",
+    "source": "components/soc/esp32c3/register/soc/io_mux_reg.h:171 (macro), :98 (GPIOn alias)",
+    "function_values": [
+      {"value": 0, "name": "FUNC_GPIO2_GPIO2_0", "source": "io_mux_reg.h:174"},
+      {"value": 1, "name": "FUNC_GPIO2_GPIO2", "why": "the value gpio_ll / IDF's GPIO driver writes to route this pad through the GPIO matrix", "source": "io_mux_reg.h:173"},
+      {"value": 2, "name": "FUNC_GPIO2_FSPIQ", "source": "io_mux_reg.h:172"}
+    ]
+  },
+  "per_pin_offset_note": "IO_MUX_GPIOn_REG for n=0..21 plus 4 non-GPIO pins are #define aliases to PERIPHS_IO_MUX_<padname>_U macros at io_mux_reg.h:96-114 and following; several pin names are the pad's other bonded function (e.g. IO_MUX_GPIO4_REG -> PERIPHS_IO_MUX_MTMS_U, IO_MUX_GPIO12_REG -> PERIPHS_IO_MUX_SPIHD_U) because those pads are shared with JTAG or the in-package SPI flash on some C3 modules. GPIO12-17 in particular are frequently NOT available on modules with in-package flash -- the chip file's pin table (not yet written by anyone this session) should flag that per board, not assume all 22 GPIOs are free."
+}

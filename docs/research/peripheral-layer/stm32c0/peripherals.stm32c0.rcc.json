@@ -1,0 +1,76 @@
+{
+  "peripheral": "RCC",
+  "size": "0x400",
+  "source": "RM0490 Rev 6 SS6.4; drafted from STM32C031.svd (Apache-2.0, github.com/Open-CMSIS-Pack/STM32C0xx_DFP)",
+  "verified": "2026-08-24. Two DISTINCT corroboration chains, per the drafting policy this file's own CR.reset finding produced (bits/offsets draft mechanically from SVD; reset values need independent corroboration, an SVD reset value is not self-verifying). (1) Bit names/offsets/field widths: mechanically drafted from STM32C031.svd, hand-decoded bit-by-bit against each register's stated reset value to confirm the SVD's own field list and reset word agree with each other (they do, for every register below except one). (2) Reset VALUES: CR is the one register on this page where the SVD's stated reset word does NOT survive independent corroboration -- see CR.reset_note: SVD says 0x00000500 (HSIDIV=/1), but RM0490 SS4.3.2 prose ('HCLK ... automatically set to 12 MHz' at reset) and CMSIS system_stm32c0xx.c's own static 'SystemCoreClock = 12000000UL' default independently agree with each other and require HSIDIV=/4 instead -- two ST sources against ST's own SVD field, corrected to 0x00001500 here. CFGR/IOPENR/AHBENR/APBENR1 reset values are single-sourced from the SVD only (0x0 for CFGR/IOPENR/APBENR1 needs no corroboration -- an all-zero reset is not the kind of value a divider-selection bug hides in; AHBENR's FLASHEN=1 was sanity-checked against the structural necessity that flash must be clocked to fetch the reset vector at all, not against an independent numeric source) -- flagged here as NOT corroborated the way CR was, rather than silently implying uniform verification depth across the file. Boot-critical spin behaviour (CR.HSION/HSIRDY, CFGR.SW/SWS, FLASH_ACR.LATENCY in the sibling file) additionally traced against stm32c0xx-hal-driver's stm32c0xx_hal_rcc.c as read, with exact file:line citations below; not yet traced against Renode or hardware capture.",
+  "rm_extraction_caveat": "This chapter's RM0490 PDF-to-text extraction has a systematic one-heading lag (SS6.4.8-6.4.15): the prose paragraph immediately after a register heading describes the PREVIOUS register, a 2-column-PDF artifact. Caught by cross-checking against RM's own self-consistent 'Table 31: RCC register map' and the SVD. Every field below is SVD-sourced, not prose-sourced.",
+  "no_pll_confirmed": "STM32C0 HAS NO PLL. Confirmed absent from both RCC_CR and RCC_CFGR in the SVD's full field list (no PLLON/PLLRDY/PLLCFGR anywhere in the RCC peripheral), and from RM0490's own RCC chapter (SS6.1-6.2 describe HSE/HSI48/LSE/LSI/HSIUSB48(C071-only) as the complete clock source list, no PLL entry). This directly answers team-lead's steer: the doc's worked rcc.json example (PLLON/PLLRDY under CR) is a generic-STM32 placeholder, not drawn from this chip's SVD/HAL -- confirmed by omission here rather than contradicted. HSIDIV (an HSI48 predivider, C0's closest analogue to a PLL in that it also gates the FLASH_ACR.LATENCY spin) takes PLL's structural role instead; modelled below as plain rw since nothing polls it directly (HAL polls FLASH_ACR.LATENCY and RCC_CFGR.SWS instead, both of which ARE spin targets).",
+  "registers": [
+    {
+      "name": "CR",
+      "offset": "0x00",
+      "reset": "0x00001500",
+      "reset_note": "SVD literally states resetValue=0x00000500 (HSIDIV=000, i.e. /1). This CONTRADICTS RM0490 SS4.3.2 prose ('Upon power-on reset ... HCLK ... automatically set to 12 MHz') and CMSIS system_stm32c0xx.c's static 'uint32_t SystemCoreClock = 12000000UL;' default, both of which require HSIDIV=010 (/4) for 48MHz/4=12MHz. Two independent ST sources agree with each other and disagree with the SVD field -- used 0x00001500 (HSIDIV=010 added) here as the RM/CMSIS-confirmed value. Flag as a real SVD bug, not a transcription slip on my part.",
+      "fields": [
+        {"bits": "17", "name": "HSERDY", "kind": "ready-follows", "follows": "CR.HSEON",
+         "why": "stm32c0xx_hal_rcc.c HAL_RCC_OscConfig lines 335 ('==0U', enable path) and 349 ('!=0U', disable path). Not exercised on the default no-crystal Nucleo-C031C6 SystemClock_Config; load-bearing the moment an external crystal is added."},
+        {"bits": "16", "name": "HSEON", "kind": "rw"},
+        {"bits": "13-11", "name": "HSIDIV", "kind": "rw",
+         "why": "HSI48->HSISYS predivider. Reset 010(/4)->12MHz boot; SystemClock_Config sets 000(/1) to reach 48MHz. Not itself polled -- gates which FLASH_ACR.LATENCY value is legal (see flash.json) and is read back by SystemCoreClockUpdate(), not spun on."},
+        {"bits": "10", "name": "HSIRDY", "kind": "ready-follows", "follows": "CR.HSION",
+         "why": "THE load-bearing ready bit for this board's default boot path. stm32c0xx_hal_rcc.c HAL_RCC_OscConfig lines 414 ('==0U') and 434 ('!=0U'). Exercised on every stock CubeMX SystemClock_Config for this board, since RCC_OSCILLATORTYPE_HSI is the only oscillator type touched when there is no crystal."},
+        {"bits": "8", "name": "HSION", "kind": "rw"}
+      ]
+    },
+    {
+      "name": "CFGR",
+      "offset": "0x08",
+      "reset": "0x00000000",
+      "fields": [
+        {"bits": "5-3", "name": "SWS", "kind": "mirrors", "source": "CFGR.SW", "transform": "identity",
+         "why": "THE main spin target of the entire boot sequence. stm32c0xx_hal_rcc.c HAL_RCC_ClockConfig:756 -- 'while (__HAL_RCC_GET_SYSCLK_SOURCE() != (SYSCLKSource << RCC_CFGR_SWS_Pos))'. Identity transform confirmed correct for C0 (unlike RP2040 CLK_SYS.SELECTED, which needs one-hot) -- SW and SWS use the SAME 3-bit encoding {000:HSISYS,001:HSE,010:HSIUSB48-C071-only,011:LSI,100:LSE}, verified from RM0490 SS6.4.3's bit-field table which is self-consistent (appeared directly under its own heading, not the shifted range). RM also documents hardware FORCES SW back to 000 on wake from Stop/Standby/Shutdown or HSE failure -- SWS must reflect that forced value too, not just software-requested writes to SW."},
+        {"bits": "2-0", "name": "SW", "kind": "rw"}
+      ]
+    },
+    {
+      "name": "IOPENR",
+      "offset": "0x34",
+      "reset": "0x00000000",
+      "provenance_note": "Confirmed against RM0490's self-consistent Table 31 (SS6.4.24) AND the SVD -- both agree GPIOx clock enables live here, not in AHBENR, despite this file's own rm_extraction_caveat garbling the immediately-adjacent prose.",
+      "fields": [
+        {"bits": "2", "name": "GPIOCEN", "kind": "rw",
+         "why": "Gates PC9 (LED2) and PC13 (USER button B1)."},
+        {"bits": "0", "name": "GPIOAEN", "kind": "rw",
+         "why": "THE load-bearing bit for the blink LED and printf UART: gates both PA5 (LED1/LD4) and PA2/PA3 (USART2 TX/RX). If 0, GPIOA_MODER writes still store (this is why coded:stm32_gpio must itself check RCC.IOPENR.GPIOAEN, not just trust its own register writes) but the pin never actually drives -- a false green distinct from any spin."},
+        {"bits": "1", "name": "GPIOBEN", "kind": "rw"},
+        {"bits": "3", "name": "GPIODEN", "kind": "rw"},
+        {"bits": "5", "name": "GPIOFEN", "kind": "rw"}
+      ]
+    },
+    {
+      "name": "AHBENR",
+      "offset": "0x38",
+      "reset": "0x00000100",
+      "fields": [
+        {"bits": "8", "name": "FLASHEN", "kind": "rw",
+         "why": "Reset=1: the flash interface clock is enabled out of reset by necessity (it must be, to fetch the reset vector). Its own SVD text adds 'can only be cleared when the flash memory is in power down mode' -- a write-precondition, not a kind change; modelled as plain rw with that note rather than a 9th kind."}
+      ]
+    },
+    {
+      "name": "APBENR1",
+      "offset": "0x3C",
+      "reset": "0x00000000",
+      "fields": [
+        {"bits": "17", "name": "USART2EN", "kind": "rw",
+         "why": "Gates the printf UART's clock. Must be set before touching any USART2_* register or the peripheral does not respond on real silicon (writes land in a clock-gated block)."},
+        {"bits": "28", "name": "PWREN", "kind": "rw",
+         "why": "Gates the PWR peripheral's APB clock -- see chips.stm32c031.json's PWR stub entry for why PWR itself is not modelled beyond this gate."}
+      ]
+    }
+  ],
+  "spin_loops_verified_against_hal": {
+    "source_file": "stm32c0xx-hal-driver/Src/stm32c0xx_hal_rcc.c, fetched from https://raw.githubusercontent.com/STMicroelectronics/stm32c0xx-hal-driver/main/Src/stm32c0xx_hal_rcc.c (note: repo renamed with hyphens after STM32CubeC0's .gitmodules was written; underscore name 301-redirects)",
+    "survey_and_doc_claim_being_checked": "docs/architectures.md SS3.4 says four classic loops incl. PLLRDY, sourced from stm32g0xx_hal_rcc.c (G0). The peripheral-layer design doc's worked rcc.json example also carries PLLON/PLLRDY under CR.",
+    "verdict": "CONFIRMS the design doc's own steer, does not contradict it: STM32C0 has no PLL register at all (see no_pll_confirmed above), so there is no PLLRDY loop to find on this chip -- not merely unexercised, the bit does not exist in silicon. Full inventory: 11 distinct while-loops across 3 HAL functions (HAL_RCC_DeInit, HAL_RCC_OscConfig, HAL_RCC_ClockConfig), zero of them PLL-related. Minimum set exercised by a stock no-crystal Nucleo-C031C6 blink: HSIRDY wait (OscConfig:414), FLASH_ACR.LATENCY readback (ClockConfig:670, see flash.json), SWS==SW wait (ClockConfig:756) -- three loops, not four, on this specific chip+board+no-crystal configuration. Full 11-loop line-by-line table (incl. HSE/LSI/LSE/HSIUSB48 variants and the DeInit-path loops) preserved in this scratchpad's original regmap.rcc.json for reference; trimmed here to keep this file matching the doc's abridged-example shape."
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "model": "coded:rp2040_sio",
+  "note": "NOT a regmap file -- SIO is whole-peripheral kind-8 hw per design doc SS1 point 8 (GPIO ODR/IDR/BSRR is the doc's own STM32 analogue) and SS3 (pin events belong in the Python session, not regmap data). This file preserves the register facts an implementer of coded:rp2040_sio needs, in the same spirit as a regmap file's citations, but is explicitly NOT schema data to be loaded by the regmap engine.",
+  "base": "0xd0000000",
+  "bus": "sio",
+  "per_core": true,
+  "source_svd": "RP2040.svd peripheral SIO at line 37531 of the fetched SVD",
+  "source_regs_h": "src/rp2040/hardware_regs/include/hardware/regs/sio.h (pico-sdk, fetched this session, 1658 lines; CPUID and GPIO_* region read in detail)",
+  "why_coded_not_regmap": [
+    "GPIO_OUT_SET/_CLR/_XOR and GPIO_OE_SET/_CLR/_XOR are write-side-effecting: a write does not store into the target register itself, it ORs/AND-NOTs/XORs into a SIBLING register (GPIO_OUT / GPIO_OE). This fails the doc's data-vs-code rule ('every write only stores') exactly the way BSRR does on STM32.",
+    "These registers are RP2040 hardware's own hand-rolled reimplementation of what the chip-level atomic_aliases decorator gives APB peripherals -- SIO is not on the APB bus (base 0xd0000000, vs 0x40000000-0x4006c000 for every APB peripheral) so the decorator can't reach it, and the hardware author built the same SET/CLR/XOR functional pattern as real distinct registers instead. See chips/rp2040.json's atomic_aliases_scope_note.",
+    "GPIO_IN is a live read of external pad state via IO_BANK0's INTOPERI mirror chain (see peripherals/rp2040/io_bank0.json's INTOPERI field) -- read-impure in the sense that its value comes from outside the modeled register file (wiring/part state), matching the doc's 'button state in' GPIO example.",
+    "CPUID's reset value is literally the string \"-\" in pico-sdk's own header (not a fixed reset value) because it differs by which core reads it -- a per-instance constant, not a stored field with normal read/write semantics."
+  ],
+  "registers": [
+    {"name": "CPUID", "offset": "0x00", "access": "ro",
+     "behavior": "Returns 0 for core 0, 1 for core 1. Per docs/architectures.md SS5.5's single-core-first recommendation, hard-wire to 0.",
+     "why": "crt0's core-1 park logic branches on this. Not itself a spin-loop target -- static per-core identity, read once.",
+     "source": "src/rp2040/hardware_regs/include/hardware/regs/sio.h:19-28 (pico-sdk). VERIFIED. RESET literally \"-\"."},
+    {"name": "GPIO_IN", "offset": "0x04", "access": "ro",
+     "behavior": "Bits 29-0, one per Bank0 GPIO. Drive from IO_BANK0.GPIOn_STATUS.INTOPERI (which itself mirrors INFROMPAD, i.e. external pad state).",
+     "source": "src/rp2040/hardware_regs/include/hardware/regs/sio.h:33-38 (pico-sdk). VERIFIED."},
+    {"name": "GPIO_OUT", "offset": "0x10", "access": "rw",
+     "behavior": "Bits 29-0. Plain stored register -- SET/CLR/XOR below write-combine into this.",
+     "why": "digitalWrite()/gpio_put() ultimately drive this, gated by GPIO_OE and IO_BANK0 FUNCSEL==5 (sio_0) and PADS_BANK0.OD==0 -- blink's entire observable effect is a periodic write here.",
+     "source": "src/rp2040/hardware_regs/include/hardware/regs/sio.h:61-66 (pico-sdk). VERIFIED."},
+    {"name": "GPIO_OUT_SET", "offset": "0x14", "access": "wo", "behavior": "write value ORed into GPIO_OUT", "source": "sio.h:71-76 (pico-sdk). VERIFIED."},
+    {"name": "GPIO_OUT_CLR", "offset": "0x18", "access": "wo", "behavior": "write value's complement ANDed into GPIO_OUT", "source": "sio.h:82-87 (pico-sdk). VERIFIED."},
+    {"name": "GPIO_OUT_XOR", "offset": "0x1c", "access": "wo", "behavior": "write value XORed into GPIO_OUT", "source": "sio.h:93-98 (pico-sdk). VERIFIED."},
+    {"name": "GPIO_OE", "offset": "0x20", "access": "rw", "behavior": "Bits 29-0, output enable per pin.",
+     "why": "gpio_set_dir(pin, true) sets this (via OE_SET) before/around gpio_put(). Gated by FUNCSEL==5 and PADS_BANK0.OD.",
+     "source": "sio.h:109-114 (pico-sdk). VERIFIED."},
+    {"name": "GPIO_OE_SET", "offset": "0x24", "access": "wo", "behavior": "write value ORed into GPIO_OE", "source": "sio.h:119-124 (pico-sdk). VERIFIED."},
+    {"name": "GPIO_OE_CLR", "offset": "0x28", "access": "wo", "behavior": "write value's complement ANDed into GPIO_OE", "source": "sio.h:130-135 (pico-sdk). VERIFIED."},
+    {"name": "GPIO_OE_XOR", "offset": "0x2c", "access": "wo", "behavior": "write value XORed into GPIO_OE", "source": "sio.h:141-146 (pico-sdk). VERIFIED."}
+  ],
+  "not_covered_this_session": [
+    "FIFO/mailbox registers (SIO_FIFO_ST/WR/RD) -- needed only for multicore_launch_core1() dual-core handshaking. Out of scope per docs/architectures.md SS5.5's single-core-first recommendation. Their offsets exist in sio.h but were not grepped this session.",
+    "SPINLOCK0-31, DIV_* (integer divider), INTERP0/1 (hardware interpolators) -- present in sio.h, irrelevant to reset->runtime_init()->blink."
+  ],
+  "dual_core_note": "Core 1 at reset runs bootrom code that immediately parks itself, draining its own SIO mailbox and blocking on a 6-word handshake {0,0,1,vector_table,sp,entry} from core 0. Core 0's boot path never waits FOR core 1 -- the wait is one-directional -- so a first implementation needs only core 0's own GPIO_OUT/OE/IN register file fully modeled, plus FIFO/mailbox registers present as non-faulting stubs."
+}

@@ -1,0 +1,68 @@
+{
+  "peripheral": "PLL",
+  "note": "Shared by PLL_SYS and PLL_USB -- SVD declares PLL_USB as derivedFrom=\"PLL_SYS\", identical layout, VERIFIED this session (RP2040.svd line 33800).",
+  "size": "0x10",
+  "source": "src/rp2040/hardware_regs/include/hardware/regs/pll.h (pico-sdk, fetched this session, full 136-line file); RP2040.svd peripheral PLL_SYS at line 33685",
+  "verified": "2026-08-24 covers CS/PWR/FBDIV_INT/PRIM as read against pll.h and src/rp2_common/hardware_pll/pll.c's pll_init(); not yet traced against a live simulator or hardware",
+  "registers": [
+    {
+      "name": "CS",
+      "offset": "0x00",
+      "reset": "0x00000001",
+      "fields": [
+        {
+          "bits": "31", "name": "LOCK", "kind": "ready-follows",
+          "follows": ["PWR.PD", "PWR.VCOPD"], "op": "and", "when": "clear",
+          "why": "pll_init() spins `while (!(pll->cs & PLL_CS_LOCK_BITS)) tight_loop_contents();` (src/rp2_common/hardware_pll/pll.c:63, fetched this session -- VERIFIED, quoted) immediately after `hw_clear_bits(&pll->pwr, PLL_PWR_PD_BITS | PLL_PWR_VCOPD_BITS)` (pll.c:57-60). LOCK's real hardware condition is PD==0 AND VCOPD==0 (PWR resets to 0x2d, i.e. fully powered down, per PWR's why-note below). UPDATED 2026-08-24: this is now the doc's own motivating case for multi-source `follows` (list + `op: \"and\"`, `when` applying uniformly) -- stm-soc adopted the grammar with this exact field written in verbatim. The prior single-field approximation (follows:\"PWR.PD\" alone) was noted as behaviourally indistinguishable for stock pico-sdk, since pll_init's hw_clear_bits call clears PD and VCOPD together in one write -- that note is preserved here as it explains why the approximation was safe, not because it is still the model.",
+          "source": "src/rp2_common/hardware_pll/pll.c:42-48,50,57-63 (pico-sdk, fetched this session). VERIFIED, quoted."
+        },
+        {"bits": "8", "name": "BYPASS", "kind": "rw",
+         "why": "Not written by pll_init()'s stock path -- included for completeness only.",
+         "source": "src/rp2040/hardware_regs/include/hardware/regs/pll.h:34-43 (pico-sdk). VERIFIED."},
+        {"bits": "5-0", "name": "REFDIV", "kind": "rw", "reset": "0x01",
+         "why": "pll_init() writes `pll->cs = refdiv` (pll.c:53) before powering up the VCO.",
+         "source": "src/rp2040/hardware_regs/include/hardware/regs/pll.h:45-54 (pico-sdk). VERIFIED. 'Behaviour is undefined for div=0.'"}
+      ]
+    },
+    {
+      "name": "PWR",
+      "offset": "0x04",
+      "reset": "0x0000002d",
+      "why_reset_value": "0x2d = PD=1, DSMPD=1, POSTDIVPD=1, VCOPD=1 -- the PLL comes up FULLY POWERED DOWN. pll_init() must explicitly clear PD+VCOPD before LOCK can ever assert; a model that defaults PWR to all-zero would let LOCK go true without firmware ever powering the PLL, masking a real firmware-correctness class.",
+      "fields": [
+        {"bits": "5", "name": "VCOPD", "kind": "rw", "reset": "1",
+         "source": "pll.h:62-70 (pico-sdk). VERIFIED. See CS.LOCK's why-note for the two-field-AND caveat this field is part of."},
+        {"bits": "3", "name": "POSTDIVPD", "kind": "rw", "reset": "1",
+         "why": "pll_init() clears this LAST (pll.c:69), after LOCK is already confirmed -- the post divider is deliberately held powered-down until the VCO is locked.",
+         "source": "pll.h:72-80 (pico-sdk). VERIFIED."},
+        {"bits": "2", "name": "DSMPD", "kind": "rw", "reset": "1",
+         "why": "'Nothing is achieved by setting this low' -- this PLL has no usable fractional mode; correct firmware leaves it at reset value.",
+         "source": "pll.h:82-89 (pico-sdk). VERIFIED, quoted."},
+        {"bits": "0", "name": "PD", "kind": "rw", "reset": "1",
+         "source": "pll.h:91-98 (pico-sdk). VERIFIED."}
+      ]
+    },
+    {
+      "name": "FBDIV_INT",
+      "offset": "0x08",
+      "reset": "0x00000000",
+      "fields": [
+        {"bits": "11-0", "name": "FBDIV_INT", "kind": "rw",
+         "why": "pll_init() writes this (pll.c:54) before powering up the VCO, and its own early-out check (pll.c:42-48) reads it back to skip re-init if the PLL is already correctly configured -- must round-trip a plain write/read independent of LOCK's ready-follows behaviour.",
+         "source": "pll.h:100-109 (pico-sdk). VERIFIED. 'this PLL does not support fractional division'."}
+      ]
+    },
+    {
+      "name": "PRIM",
+      "offset": "0x0c",
+      "reset": "0x00077000",
+      "fields": [
+        {"bits": "18-16", "name": "POSTDIV1", "kind": "rw", "reset": "7", "source": "pll.h:120-126 (pico-sdk). VERIFIED. 'divide by 1-7'."},
+        {"bits": "14-12", "name": "POSTDIV2", "kind": "rw", "reset": "7",
+         "why": "pll_init() writes both dividers together AFTER LOCK is confirmed (pll.c:63-66) -- the post-divider write is not gated by LOCK's condition, it happens once LOCK is already true.",
+         "source": "pll.h:128-134 (pico-sdk). VERIFIED. 'divide by 1-7'."}
+      ]
+    }
+  ],
+  "spin_targets": ["CS.LOCK -- second boot-blocking spin after XOSC.STATUS.STABLE, for both PLL_SYS and PLL_USB instances."]
+}

@@ -1,7 +1,7 @@
 ---
 id: OH-15
 title: Land the verified corrections into docs/architectures.md
-status: open
+status: done
 priority: P2
 created: '2026-08-24'
 touches:

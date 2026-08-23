@@ -1,0 +1,126 @@
+{
+  "peripheral": "RCC",
+  "base_address": "0x4002_1000",
+  "rm_chapter": "RM0490 Chapter 6 (Reset and clock control (RCC))",
+  "svd_source": "STM32C031.svd, peripheral RCC (derivedFrom=None)",
+  "note_no_pll": "STM32C0 has NO PLL. RCC_CR carries only HSE/HSI48/(HSIUSB48 on C071 only)/LSI/LSE enable+ready bits; RCC_CFGR.SW/SWS select among {HSISYS, HSE, HSIUSB48-C071-only, LSI, LSE} directly, with no PLL entry at all. This directly corrects the general-STM32 assumption (and the survey's G0-derived 'four classic loops incl. PLLRDY') for THIS family: see spin_loops_verified_against_hal below -- there is no PLLRDY loop on C0 because there is no PLL register.",
+  "registers": [
+    {
+      "name": "RCC_CR",
+      "offset": "0x00",
+      "rm_section": "6.4.1 RCC clock control register (RCC_CR)",
+      "reset_value_svd_states": "0x00000500",
+      "reset_value_used": "0x00001500",
+      "reset_value_discrepancy": "SEE chip.stm32c031c6.json svd_provenance.svd_bug_found. SVD's 0x00000500 decodes to HSIDIV=000(/1), HSION=1, HSIRDY=1. RM SS4.3.2 prose + CMSIS system_stm32c0xx.c's SystemCoreClock=12000000UL default both require HSIDIV=010(/4) for the documented 12MHz post-reset HCLK, i.e. resetValue should be 0x00001500 (adds HSIDIV=010 at bits[13:11]). Used the RM/CMSIS-confirmed value.",
+      "fields": [
+        {"bits": "19", "name": "CSSON", "kind": "rw", "why": "Clock security system enable. Not touched by a plain SystemClock_Config(HSI48); relevant only if HSE is used and HAL_RCC_EnableCSS() is called."},
+        {"bits": "18", "name": "HSEBYP", "kind": "rw", "why": "Bypass an external oscillator for an external clock signal. Nucleo-C031C6 has no HSE crystal populated on the low-cost SKU per the product overview (no crystal in 'Clock management' bullet list beyond the two internal RC + one external crystal footprint) -- deferred, not touched by the default HSI48 boot path."},
+        {"bits": "17", "name": "HSERDY", "kind": "ready-follows", "source": "HSEON (bit 16, same register)", "why": "Set by hardware once the HSE oscillator is stable. HAL_RCC_OscConfig (stm32c0xx_hal_rcc.c, HAL_RCC_OscConfig, lines 335 and 349) spins on this bit both when enabling HSE ('while (READ_BIT(RCC->CR, RCC_CR_HSERDY) == 0U)') and disabling it ('!= 0U'). Only exercised if OscInitStruct.OscillatorType includes RCC_OSCILLATORTYPE_HSE -- not on the default HSI48-only Nucleo path, but load-bearing the moment a user adds an external crystal."},
+        {"bits": "16", "name": "HSEON", "kind": "rw", "why": "Software request to enable the HSE oscillator; HSERDY (above) is defined relative to this bit."},
+        {"bits": "13:11", "name": "HSIDIV", "kind": "rw", "why": "Divider from HSI48 to produce HSISYS. Reset 010(/4)->12MHz; SystemClock_Config sets it to 000(/1) to reach the datasheet's 48MHz max. Read by SystemCoreClockUpdate() (system_stm32c0xx.c) to recompute SystemCoreClock; not itself polled in a spin loop, but its value gates which FLASH_ACR.LATENCY setting is legal (see flash.json)."},
+        {"bits": "10", "name": "HSIRDY", "kind": "ready-follows", "source": "HSION (bit 8, same register)", "why": "THE load-bearing ready bit for the default (HSI48-only, no-crystal) Nucleo-C031C6 boot path. HAL_RCC_OscConfig spins on it at stm32c0xx_hal_rcc.c lines 414 ('== 0U', after setting HSION) and 434 ('!= 0U', after clearing it). This is the loop that actually executes on a stock CubeMX SystemClock_Config() for this board, since RCC_OSCILLATORTYPE_HSI is the only oscillator type touched when there is no crystal."},
+        {"bits": "9", "name": "HSIKERON", "kind": "rw", "why": "Keeps HSI48 alive in Stop mode for USART1/USART2/I2C1 kernel clocks. Not touched by a basic blink+printf; relevant only for Stop-mode UART wakeup."},
+        {"bits": "8", "name": "HSION", "kind": "rw", "why": "Software enable for the HSI48 oscillator. Set by HAL_RCC_OscConfig when OscInitStruct.HSIState = RCC_HSI_ON, which is what ST's own CubeMX-generated SystemClock_Config() does for this board (no crystal footprint populated on the base SKU)."},
+        {"bits": "7:5", "name": "HSIKERDIV", "kind": "rw", "why": "Divider for the HSI48 kernel (peripheral) clock, independent of HSIDIV. Not touched by blink/printf at default settings (reset value 010 = /3 is left alone unless a peripheral explicitly needs HSI48 as its kernel clock, e.g. USART1/2 with USART1SEL/kernel-clock muxing -- out of scope for a fixed-baud printf)."},
+        {"bits": "4:2", "name": "SYSDIV", "kind": "rw", "why": "System clock division factor. RM explicitly notes: 'This bitfield is only available on STM32C051xx, STM32C071xx, and STM32C091xx/92xx.' RESERVED on STM32C031xx (our chip) -- included here only so a generic C0-family regmap does not silently drop the field; on C031 writes to it should be modelled as don't-care/ignored, not as controlling anything."}
+      ]
+    },
+    {
+      "name": "RCC_CFGR",
+      "offset": "0x08",
+      "rm_section": "6.4.3 RCC clock configuration register (RCC_CFGR)",
+      "reset_value": "0x00000000",
+      "fields": [
+        {"bits": "31:28", "name": "MCOPRE", "kind": "rw", "why": "MCO output prescaler. Not touched by blink/printf; debug/clock-out feature only."},
+        {"bits": "27:24", "name": "MCOSEL", "kind": "rw", "why": "MCO clock source select. Same as above -- out of scope for the minimum boot path."},
+        {"bits": "14:12", "name": "PPRE", "kind": "rw", "why": "APB prescaler (HCLK->PCLK). SystemClock_Config leaves this at reset (0xx=/1) for a simple 48MHz-everywhere config; USART baud-rate calculation (USART_BRR) depends on the resulting PCLK, so this field IS load-bearing for printf baud accuracy even though HAL never spins on it."},
+        {"bits": "11:8", "name": "HPRE", "kind": "rw", "why": "AHB prescaler (SYSCLK->HCLK). Same role as PPRE: not polled, but HAL_RCC_ClockConfig writes it in the same call that triggers the SWS spin below, and HAL_RCC_GetHCLKFreq()/GetSysClockFreq() read it back to compute SystemCoreClock."},
+        {"bits": "5:3", "name": "SWS", "kind": "mirrors", "source": "SW (bits 2:0, same register)", "why": "THE most important spin target in the whole boot sequence. HAL_RCC_ClockConfig (stm32c0xx_hal_rcc.c:756) does 'while (__HAL_RCC_GET_SYSCLK_SOURCE() != (RCC_ClkInitStruct->SYSCLKSource << RCC_CFGR_SWS_Pos))' -- i.e. it busy-waits for SWS to catch up with the SW value it just wrote. On a stock Nucleo-C031C6 SystemClock_Config, SW is set to RCC_SYSCLKSOURCE_HSISYS (000) so this loop needs SWS to read back 000 once the switch completes. RM SS4.3.2 additionally documents that hardware forces SW back to 000 (HSISYS) on wake from Stop/Standby/Shutdown or HSE failure -- SWS must reflect that forced value too, not just software-requested ones."},
+        {"bits": "2:0", "name": "SW", "kind": "rw", "why": "Software-requested system clock source. See SWS above for the field it drives."}
+      ]
+    },
+    {
+      "name": "RCC_IOPENR",
+      "offset": "0x34",
+      "rm_section": "6.4.12 RCC I/O port clock enable register (RCC_IOPENR)",
+      "reset_value": "0x00000000",
+      "provenance_note": "Confirmed against RM0490 Table 31 (6.4.24, self-consistent) AND STM32C031.svd -- both agree GPIOx clock enables live here, not in RCC_AHBENR, despite the extraction_caveat garbling in this file's immediate RM prose neighbourhood.",
+      "fields": [
+        {"bits": "5", "name": "GPIOFEN", "kind": "rw", "why": "Not touched by this board's blink/printf (uses ports A and C only)."},
+        {"bits": "3", "name": "GPIODEN", "kind": "rw", "why": "Not touched."},
+        {"bits": "2", "name": "GPIOCEN", "kind": "rw", "why": "Gates PC9 (LED2) and PC13 (USER button, B1) per nucleo-c031c6-bsp. __HAL_RCC_GPIOC_CLK_ENABLE() in the BSP's LED2/BUTTON_USER macros writes this bit."},
+        {"bits": "1", "name": "GPIOBEN", "kind": "rw", "why": "Not touched by this board's default blink/printf."},
+        {"bits": "0", "name": "GPIOAEN", "kind": "rw", "why": "THE load-bearing bit for the blink LED and the printf UART: gates both PA5 (LD4/LED1) and PA2/PA3 (USART2 TX/RX, VCP). If this bit is 0, GPIOA_MODER writes 'succeed' (they store) but the pin never actually drives -- the classic 'false green' the survey's checklist item 5 warns about. __HAL_RCC_GPIOA_CLK_ENABLE(), called by both LED4_GPIO_CLK_ENABLE() and COM1_TX/RX_GPIO_CLK_ENABLE() in the BSP, sets this bit."}
+      ]
+    },
+    {
+      "name": "RCC_AHBENR",
+      "offset": "0x38",
+      "rm_section": "6.4.13 RCC AHB peripheral clock enable register (RCC_AHBENR)",
+      "reset_value": "0x00000100",
+      "fields": [
+        {"bits": "12", "name": "CRCEN", "kind": "rw", "why": "Not touched by blink/printf."},
+        {"bits": "8", "name": "FLASHEN", "kind": "rw", "why": "Reset value 1 -- the flash interface clock is enabled out of reset (it must be, to fetch the reset vector and boot code at all), and this bit 'can only be cleared when the flash memory is in power down mode' per its own SVD description, so a boot-time simulator can treat it as always-1/hw-coded-latched rather than genuinely softwaremutable during the boot window."},
+        {"bits": "0", "name": "DMA1EN", "kind": "rw", "why": "Not touched."}
+      ]
+    },
+    {
+      "name": "RCC_APBENR1",
+      "offset": "0x3C",
+      "rm_section": "6.4.14 RCC APB peripheral clock enable register 1 (RCC_APBENR1)",
+      "reset_value": "0x00000000",
+      "fields": [
+        {"bits": "28", "name": "PWREN", "kind": "rw", "why": "Gates the PWR peripheral's own APB clock. Confirmed as the ONLY place PWR is touched anywhere in the RCC/FLASH HAL source for this chip: __HAL_RCC_PWR_CLK_DISABLE() appears once, in HAL_RCC_OscConfig's LSE-disable path (stm32c0xx_hal_rcc.c:553), as part of releasing backup-domain write access after touching RCC_CSR1.LSEON. A plain HSI48-only blink+printf never enables PWREN at all -- see pwr.json's scope note."},
+        {"bits": "17", "name": "USART2EN", "kind": "rw", "why": "Gates the printf UART's own clock (COM1_UART = USART2 per the BSP). Must be set before touching any USART2_* register or the peripheral simply does not respond (register writes land in a clock-gated block and have no observable effect on real silicon)."}
+      ]
+    },
+    {
+      "name": "RCC_CSR2",
+      "offset": "0x60",
+      "rm_section": "6.4.23 RCC control/status register 2 (RCC_CSR2)",
+      "reset_value": "0x00000000",
+      "note": "Not load-bearing for blink/printf -- included because it directly demonstrates the w1c+rc_w0-adjacent 'RMVF-gated multi-flag' pattern absent from the rest of this minimum set, and because HAL_RCC_GetResetSource()-style code (common in user main.c to log reset cause) reads it.",
+      "fields": [
+        {"bits": "31", "name": "LPWRRSTF", "kind": "w1c+rc_w0", "source": "cleared by RMVF (bit 23, same register)", "why": "Illegal low-power-mode-entry reset flag. Per its own SVD text: 'Cleared by setting the RMVF bit' -- i.e. this is not a self-clearing or plain w1c-on-itself bit, it is cleared as a side effect of writing a DIFFERENT bit (RMVF) in the same register. Modelled as w1c+rc_w0 with RMVF as the trigger rather than inventing a 9th kind."},
+        {"bits": "30", "name": "WWDGRSTF", "kind": "w1c+rc_w0", "source": "cleared by RMVF"},
+        {"bits": "29", "name": "IWDGRSTF", "kind": "w1c+rc_w0", "source": "cleared by RMVF"},
+        {"bits": "28", "name": "SFTRSTF", "kind": "w1c+rc_w0", "source": "cleared by RMVF"},
+        {"bits": "27", "name": "PWRRSTF", "kind": "w1c+rc_w0", "source": "cleared by RMVF", "why": "BOR/POR flag -- this is the one a firmware reset-cause dump checks first on real power-up."},
+        {"bits": "26", "name": "PINRSTF", "kind": "w1c+rc_w0", "source": "cleared by RMVF"},
+        {"bits": "25", "name": "OBLRSTF", "kind": "w1c+rc_w0", "source": "cleared by RMVF"},
+        {"bits": "23", "name": "RMVF", "kind": "self-clearing", "why": "Software writes 1 to clear ALL of the *RSTF flags above in one shot. Its own SVD description just says 'Set by software to clear the reset flags' with no explicit hardware-autoclear statement, but ST's HAL macro __HAL_RCC_CLEAR_RESET_FLAGS() only ever sets it (never reads it back to confirm 0), and every other STM32 family's equivalent bit is a pure strobe -- modelled as self-clearing (reads back 0 on the next access) rather than rw, since RM never documents reading RMVF as 1."},
+        {"bits": "1", "name": "LSIRDY", "kind": "ready-follows", "source": "LSION (bit 0, same register)", "why": "Same enable/ready pairing pattern as HSIRDY/HSION, spun on at stm32c0xx_hal_rcc.c:471/488 inside HAL_RCC_OscConfig when OscillatorType includes RCC_OSCILLATORTYPE_LSI (IWDG/RTC use cases -- not exercised by blink/printf)."},
+        {"bits": "0", "name": "LSION", "kind": "rw", "why": "See LSIRDY."}
+      ]
+    }
+  ],
+  "spin_loops_verified_against_hal": {
+    "source_file": "stm32c0xx-hal-driver/Src/stm32c0xx_hal_rcc.c (fetched from https://raw.githubusercontent.com/STMicroelectronics/stm32c0xx-hal-driver/main/Src/stm32c0xx_hal_rcc.c)",
+    "survey_claim_being_checked": "docs/architectures.md SS3.4 says 'all four classic loops are there: wait for HSERDY, wait for PLLRDY, wait for FLASH->ACR to read back the latency just written, wait for RCC->CFGR SWS to match SW' -- sourced there from stm32g0xx_hal_rcc.c (G0), not C0.",
+    "verdict": "CORRECTED for C0, not confirmed as-is. STM32C0 has NO PLL AT ALL (no PLLCFGR/PLLCR register exists in RCC; confirmed absent from both the SVD peripheral listing and every RCC_CR/RCC_CFGR field table above), so there is no PLLRDY loop to find -- it is not merely unexercised, the register bit does not exist on silicon. The full loop inventory actually present in stm32c0xx_hal_rcc.c is 11 distinct 'while' sites across 3 functions, not 4:",
+    "all_while_loops_found": [
+      {"line": 213, "function": "HAL_RCC_DeInit", "condition": "READ_BIT(RCC->CR, RCC_CR_HSIRDY) == 0U", "note": "waits for HSI ready while resetting RCC to defaults; only reached if user code calls HAL_RCC_DeInit() (some CubeMX templates do, at the top of SystemClock_Config)"},
+      {"line": 231, "function": "HAL_RCC_DeInit", "condition": "READ_BIT(RCC->CFGR, RCC_CFGR_SWS) != 0U", "note": "waits for SWS to fall back to 0 (HSISYS) during deinit"},
+      {"line": 246, "function": "HAL_RCC_DeInit", "condition": "READ_BIT(RCC->CR, RCC_CR_HSERDY) != 0U", "note": "waits for HSE to actually stop"},
+      {"line": 335, "function": "HAL_RCC_OscConfig", "condition": "HSERDY == 0U (enable path)"},
+      {"line": 349, "function": "HAL_RCC_OscConfig", "condition": "HSERDY != 0U (disable path)"},
+      {"line": 414, "function": "HAL_RCC_OscConfig", "condition": "HSIRDY == 0U (enable path)", "note": "THE one exercised by a stock no-crystal Nucleo-C031C6 SystemClock_Config"},
+      {"line": 434, "function": "HAL_RCC_OscConfig", "condition": "HSIRDY != 0U (disable path)"},
+      {"line": 471, "function": "HAL_RCC_OscConfig", "condition": "RCC->CSR2, RCC_CSR2_LSIRDY == 0U"},
+      {"line": 488, "function": "HAL_RCC_OscConfig", "condition": "RCC_CSR2_LSIRDY != 0U"},
+      {"line": 527, "function": "HAL_RCC_OscConfig", "condition": "RCC->CSR1, RCC_CSR1_LSERDY == 0U"},
+      {"line": 541, "function": "HAL_RCC_OscConfig", "condition": "RCC_CSR1_LSERDY != 0U"},
+      {"line": 574, "function": "HAL_RCC_OscConfig", "condition": "RCC_CR_HSIUSB48RDY == 0U", "note": "C071xx only, reserved bit on C031 -- dead code on this chip"},
+      {"line": 591, "function": "HAL_RCC_OscConfig", "condition": "RCC_CR_HSIUSB48RDY != 0U", "note": "C071xx only"},
+      {"line": 670, "function": "HAL_RCC_ClockConfig", "condition": "(FLASH->ACR & FLASH_ACR_LATENCY) != FLatency", "note": "pre-switch latency bump, see flash.json"},
+      {"line": 756, "function": "HAL_RCC_ClockConfig", "condition": "__HAL_RCC_GET_SYSCLK_SOURCE() != (SYSCLKSource << RCC_CFGR_SWS_Pos)", "note": "THE main SWS==SW wait, exercised on every boot"},
+      {"line": 775, "function": "HAL_RCC_ClockConfig", "condition": "(FLASH->ACR & FLASH_ACR_LATENCY) != FLatency", "note": "post-switch latency reduction, only if lowering frequency"}
+    ],
+    "minimum_set_actually_exercised_by_stock_nucleo_c031c6_blink": [
+      "HAL_RCC_OscConfig: HSIRDY==0U wait (line 414)",
+      "HAL_RCC_ClockConfig: FLASH_ACR.LATENCY!=FLatency wait (line 670, raising latency from 0 to 1 before raising SYSCLK from 12MHz to 48MHz)",
+      "HAL_RCC_ClockConfig: SWS!=SW wait (line 756)"
+    ],
+    "conclusion": "THREE loops on the boot-critical path for this specific chip+board+no-crystal configuration, not four -- the fourth ('PLLRDY') from the survey's G0-derived claim does not exist on C0 hardware at all. If HAL_RCC_DeInit() is also called at the top of SystemClock_Config (common in CubeMX output), add its 2 HSIRDY/SWS loops (lines 213, 231) for up to 5 loops total in the very first milliseconds after reset -- still zero PLL loops."
+  }
+}

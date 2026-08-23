@@ -1,0 +1,49 @@
+{
+  "peripheral": "RTC_CNTL",
+  "size": "0x400",
+  "source": "ESP-IDF master as read 2026-08-24: components/soc/esp32c3/register/soc/rtc_cntl_reg.h (offsets and bit positions); components/esp_hw_support/port/esp32c3/rtc_clk.c and rtc_time.c, components/esp_hal_clock/esp32c3/include/hal/clk_tree_ll.h, components/esp_hal_rtc_timer/esp32c3/include/hal/rtc_timer_ll.h (semantics). Register-name facts elected under the headers' MIT option (SPDX Apache-2.0 OR MIT)",
+  "verified": "2026-08-24 every offset and bit position quoted from rtc_cntl_reg.h; kinds derived from the drivers as read. Grep of clk_tree_ll.h (789 lines) found zero busy-wait loops: the C3 clock LL is write-and-fixed-delay (rtc_clk.c:84,129,150,395,401 all esp_rom_delay_us), so the config registers here are storage, not handshakes. Deliberately unlisted: the RWDT/SWD watchdog block, so the unknown-offset default (reads-as-written plus accounting) keeps it inert per the adopted watchdog posture; and RESET_STATE, whose power-on encoding was not verified - note that a reads-as-zero RESET_STATE makes esp_rtc_init skip ocode calibration (esp_system/port/soc/esp32c3/clk.c:66-73 sets cali_ocode only on RESET_REASON_CHIP_POWER_ON), which is a benign accident but an accident. The C3 TRM PDF was not consulted",
+  "registers": [
+    {"name": "OPTIONS0", "offset": "0x0000", "fields": [
+      {"bits": "0-31", "name": "ALL", "kind": "rw",
+       "why": "BBPLL power/force bits RMWed by clk_ll_bbpll_enable/disable (clk_tree_ll.h:73); storage suffices, gating is not modelled"}
+    ]},
+    {"name": "TIME_UPDATE", "offset": "0x000C", "fields": [
+      {"bits": "31", "name": "TIME_UPDATE", "kind": "self-clearing",
+       "why": "rtc_timer_ll_get_cycle_count (rtc_timer_ll.h:52-59) sets it then reads TIME_LOW0/HIGH0 with no wait - V1 hardware needs none - so it is never polled on the C3; read-0 is correct. Its latch side effect is deliberately not modelled: free-running TIME values are strictly better for the only C3 use, timeout arithmetic"}
+    ]},
+    {"name": "TIME_LOW0", "offset": "0x0010", "fields": [
+      {"bits": "0-31", "name": "TIME_LOW0", "kind": "counter", "divisor": 1176, "width": 32, "direction": "up",
+       "why": "The RTC slow-clock counter, and it is load-bearing: calibrate_ocode's regi2c poll (rtc_init.c:209-220) escapes only via a timeout computed from rtc_time_get() - if this register freezes, that poll never times out and first power-on boot hangs. This is the design doc's kind-7 generalised trap with a C3-verified instance. Divisor 1176 is nominal 160 MHz CPU cycles per ~136 kHz RC_SLOW tick; both frequencies nominal, flagged"}
+    ]},
+    {"name": "TIME_HIGH0", "offset": "0x0014", "fields": [
+      {"bits": "0-15", "name": "TIME_HIGH0", "kind": "counter", "divisor": 5050881540096, "width": 16, "direction": "up",
+       "why": "Upper 16 bits of the same 48-bit counter, expressed as the low word's divisor times 2^32 - the split-counter case is expressible in the existing vocabulary via a larger divisor, which is worth recording as the pattern for every chip with a wide counter split across registers"}
+    ]},
+    {"name": "TIMER1", "offset": "0x001C", "fields": [
+      {"bits": "0-31", "name": "ALL", "kind": "rw",
+       "why": "CPU stall/wait-cycle config touched by clk_ll (clk_tree_ll.h:142); storage"}
+    ]},
+    {"name": "STORE0", "offset": "0x0050", "fields": [{"bits": "0-31", "name": "STORE0", "kind": "rw", "why": "Scratch register; ROM and IDF stash values across resets - must read back exactly"}]},
+    {"name": "STORE1", "offset": "0x0054", "fields": [{"bits": "0-31", "name": "STORE1", "kind": "rw", "why": "Scratch"}]},
+    {"name": "STORE2", "offset": "0x0058", "fields": [{"bits": "0-31", "name": "STORE2", "kind": "rw", "why": "Scratch"}]},
+    {"name": "STORE3", "offset": "0x005C", "fields": [{"bits": "0-31", "name": "STORE3", "kind": "rw", "why": "Scratch"}]},
+    {"name": "EXT_XTL_CONF", "offset": "0x0060", "fields": [
+      {"bits": "0-31", "name": "ALL", "kind": "rw",
+       "why": "XTAL32K enable modes written by clk_ll_xtal32k_enable (clk_tree_ll.h:94, rtc_clk.c:46-63); no ready bit is polled - the driver uses fixed delays"}
+    ]},
+    {"name": "CLK_CONF", "offset": "0x0070", "fields": [
+      {"bits": "0-31", "name": "ALL", "kind": "rw",
+       "why": "RC_FAST enable/divider and fast/slow clock source selects (clk_tree_ll.h:141, rtc_clk.c:83-155); every wait in that path is esp_rom_delay_us, so storage is the whole contract"}
+    ]},
+    {"name": "SLOW_CLK_CONF", "offset": "0x0074", "fields": [
+      {"bits": "31", "name": "SLOW_CLK_NEXT_EDGE", "kind": "self-clearing",
+       "why": "The genuine C3 kind-5 example: rtc_clk_wait_for_slow_cycle (rtc_time.c:176-182) sets this bit and polls the SAME bit until hardware clears it - modelled rw it spins forever. Grep found no caller on the C3 default path (the function is marked 'may not by useful any more'), so the stakes are low, but the semantic is real and chip-sourced - offered to stm-soc as the replacement example for the misclassified TIMG START"},
+      {"bits": "0-30", "name": "REST", "kind": "rw", "why": "Slow-clock divider config; storage"}
+    ]},
+    {"name": "STORE4", "offset": "0x00B8", "fields": [{"bits": "0-31", "name": "STORE4", "kind": "rw", "why": "XTAL frequency stash read back by rtc_clk_xtal_freq_get; misreads propagate into every baud-rate and delay computation"}]},
+    {"name": "STORE5", "offset": "0x00BC", "fields": [{"bits": "0-31", "name": "STORE5", "kind": "rw", "why": "APB frequency stash written by rtc_clk_apb_freq_update (rtc_clk.c, on every CPU freq switch); readers compute peripheral clocks from it"}]},
+    {"name": "STORE6", "offset": "0x00C0", "fields": [{"bits": "0-31", "name": "STORE6", "kind": "rw", "why": "Deep-sleep wake entry point (startup docs); storage"}]},
+    {"name": "STORE7", "offset": "0x00C4", "fields": [{"bits": "0-31", "name": "STORE7", "kind": "rw", "why": "CRC companion to STORE6; storage"}]}
+  ]
+}

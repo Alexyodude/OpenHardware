@@ -1,0 +1,24 @@
+{
+  "peripheral": "FLASH (interface registers, not the memory array)",
+  "base_address": "0x4002_2000",
+  "rm_chapter": "RM0490 Chapter 4 (Embedded flash memory (FLASH))",
+  "svd_source": "STM32C031.svd, peripheral FLASH",
+  "scope_note": "Team-lead's brief asked for FLASH(ACR) specifically -- 'At minimum RCC, FLASH(ACR), PWR, GPIO, SysTick(...), and enough of USART'. FLASH_SR/FLASH_CR/FLASH_OPTR and the PCROP/WRP protection registers are the flash PROGRAM/ERASE interface (needed for e.g. HAL_FLASH_Program, option-byte tooling) and are deliberately NOT modelled here: no HAL_FLASH_* call appears anywhere on the reset-to-blinking-LED path for stock firmware. Their offsets/fields were captured during SVD extraction (see other_svd.txt in this scratchpad) if a future ticket needs them.",
+  "registers": [
+    {
+      "name": "FLASH_ACR",
+      "offset": "0x000",
+      "rm_section": "4.7.1 FLASH access control register (FLASH_ACR)",
+      "reset_value": "0x00040600",
+      "reset_value_decoded": "DBG_SWEN=1, EMPTY=0, ICRST=0, ICEN=1, PRFTEN=0, LATENCY=000",
+      "fields": [
+        {"bits": "18", "name": "DBG_SWEN", "kind": "rw", "why": "Debugger read-access enable. Not touched by blink/printf; SWD stays alive by default (reset=1)."},
+        {"bits": "16", "name": "EMPTY", "kind": "hw-coded", "why": "'Updated by hardware only during the loading of option bytes: it is set when the 64-bit content of address 0x0800 0000 is read as 0xFFFF FFFF FFFF FFFF, otherwise it is cleared' (RM SS4.3.4-adjacent, VERIFIED self-consistent paragraph -- this text appeared directly under its own heading, not the shifted-by-one range). Reading this field's correct value requires consulting the actual flash CONTENTS (whether the first double-word is erased), not just RCC/FLASH register state -- a genuine read-purity violation if the simulator's flash-content store lives outside the regmap system. The RM also notes software CAN write it directly ('The software can also modify the EMPTY flag directly in the FLASH_ACR register'), so it is not purely hardware-computed either -- it needs both a stored override AND a fallback computed-from-content path, which is exactly the hw-coded case."},
+        {"bits": "11", "name": "ICRST", "kind": "rw", "why": "Instruction cache reset. Writable only when ICEN=0 per its own SVD text -- a genuine cross-field write precondition, but still expressible as data (write ignored/undefined-if-ICEN=1 rather than requiring branching side effects elsewhere) so left as rw with a note rather than hw-coded."},
+        {"bits": "9", "name": "ICEN", "kind": "rw", "why": "Instruction cache enable, reset=1 ('The Instruction cache memory is enabled after system reset' -- RM SS4.3.3, self-consistent paragraph). Not spun on by HAL; performance-only for a plain blink."},
+        {"bits": "8", "name": "PRFTEN", "kind": "rw", "why": "Prefetch enable, reset=0. Same as ICEN: performance tuning only, HAL never polls it during boot."},
+        {"bits": "2:0", "name": "LATENCY", "kind": "mirrors", "source": "itself (software-written value, read back by the same field)", "why": "THE second of the three boot-critical spins. HAL_RCC_ClockConfig (stm32c0xx_hal_rcc.c:670) writes the target latency then does 'while ((FLASH->ACR & FLASH_ACR_LATENCY) != FLatency)'. Unlike SWS/SW (two DIFFERENT fields), this is the SAME field polled right after being written -- there is no real hardware delay to simulate (flash wait-state configuration takes effect combinationally on real silicon too), so in a behavioural model this spin should terminate on the very next read with no special handling: write-then-read-back of a plain rw field. RM Table 14 (SS4.3.2, VERIFIED self-consistent) gives the concrete legal values for this chip: HCLK<=24MHz -> LATENCY=000 (1 HCLK cycle access), HCLK<=48MHz -> LATENCY=001 (2 HCLK cycles) -- note this is only TWO legal settings on C0, not the 3-4 seen on larger STM32 families, because C0 tops out at 48MHz on a single flash technology node. A stock Nucleo-C031C6 SystemClock_Config targeting 48MHz must set LATENCY=001 before raising SYSCLK past 24MHz -- this is the value HAL_RCC_ClockConfig's line-670 loop is waiting to see."}
+      ]
+    }
+  ]
+}

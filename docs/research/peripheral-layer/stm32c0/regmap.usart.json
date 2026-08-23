@@ -1,0 +1,61 @@
+{
+  "peripheral": "USART2",
+  "base_address": "0x4000_4400",
+  "note": "USART2 chosen (not USART1) because it is the board's actual VCP UART: nucleo-c031c6-bsp's COM1_UART = USART2, TX=PA2/AF1, RX=PA3/AF1, routed to the onboard ST-LINK -- this is what a printf() over the Nucleo's USB-serial port actually goes through. USART1 (base 0x4001_3800, APB2, RCC_APBENR2.USART1EN) has an identical register layout (SVD marks USART2 as derivedFrom=USART1) and is not separately modelled.",
+  "rm_chapter": "RM0490 Chapter 26 (Universal synchronous receiver transmitter (USART))",
+  "svd_source": "STM32C031.svd, peripheral USART2 (derivedFrom=USART1)",
+  "hw_coded_top_level_finding": {
+    "what": "USART_CR1 and USART_ISR are each modelled TWICE in the SVD, as 'USART_CR1_enabled'/'USART_CR1_disabled' and 'USART_ISR_enabled'/'USART_ISR_disabled', both pairs sharing the SAME address offset (CR1=0x00, ISR=0x1C).",
+    "why_two_variants": "USART_CR1 bit 29 (FIFOEN) changes what several OTHER bits at the SAME offset mean. With FIFOEN=1 (enabled/FIFO-mode variant): bit 7=TXFNFIE, bit 5=RXFNEIE, and ISR bit 7=TXFNF, bit 5=RXFNE, bit 23=TXFE, bit 24=RXFF, bit 26=RXFT, bit 27=TXFT all become meaningful FIFO-status bits. With FIFOEN=0 (disabled/classic variant): the SAME bit positions instead mean CR1.TXEIE/RXNEIE and ISR.TXE/RXNE (the classic single-buffer semantics every STM32 tutorial assumes), and the FIFO-only bits (23,24,26,27 of ISR) read as reserved/0.",
+    "why_hw_coded": "This is a second, distinct flavour of the read-purity violation from GPIOx_BSRR: here the violation is that the SAME bit position's NAME AND MEANING depends on the live value of a DIFFERENT bit (CR1.FIFOEN) elsewhere in the SAME register. A static ('bits','name','kind') table cannot express 'bit 7 of USART_ISR is named TXFNF if CR1.FIFOEN=1, else TXE' -- reading it correctly requires a runtime branch on CR1.FIFOEN, i.e. code, not just data. Both variants are still individually pure functions of stored state (no external circuit involved, unlike GPIOx_IDR), so this is a milder case than BSRR/IDR -- but it still fails the letter of 'every read is a pure function of stored state' if 'stored state' is read as 'the field list is fixed', so it is flagged as hw-coded rather than silently picking one variant and hoping FIFOEN never changes.",
+    "practical_note": "FIFOEN resets to 0 (see USART_CR1 reset_value below) and stock HAL_UART_Init() does not enable it by default (FIFO mode is an opt-in HAL_UARTEx_ call on this family) -- so for a plain printf-over-VCP firmware, the 'disabled' (classic TXE/RXNE/TC) variant is the one actually exercised, and a simulator could reasonably implement only that variant first and treat FIFOEN=1 as a documented gap, rather than building both variants before anything works (per this repo's build-order rule: one thin end-to-end path first)."
+  },
+  "registers": [
+    {
+      "name": "USART_CR1",
+      "offset": "0x00",
+      "rm_section": "26.8.1 USART control register 1 (USART_CR1) / 26.8.2 [alternate]",
+      "reset_value": "0x00000000",
+      "fields_common_to_both_variants": [
+        {"bits": "29", "name": "FIFOEN", "kind": "rw", "why": "The mux bit itself -- see hw_coded_top_level_finding above. 'This bitfield can only be written when the USART is disabled (UE = 0)' per its own SVD text."},
+        {"bits": "12,28", "name": "M0,M1 (word length)", "kind": "rw", "why": "M[1:0]=00 is 8 data bits (HAL_UART_Init default for a printf console). Not spun on."},
+        {"bits": "3", "name": "TE", "kind": "rw", "why": "Transmitter enable. HAL_UART_Init sets this. Its ACK counterpart TEACK (USART_ISR bit 21, both variants) is a ready-follows-shaped status bit but is NOT spun on by HAL_UART_Transmit -- HAL only waits on TC/TXE (below), not on TEACK, so TEACK is out of the boot-critical path even though it exists."},
+        {"bits": "2", "name": "RE", "kind": "rw", "why": "Receiver enable. Set by HAL_UART_Init even for a TX-only printf console (ST's HAL always configures both directions unless UART_MODE_TX is explicitly selected)."},
+        {"bits": "0", "name": "UE", "kind": "rw", "why": "USART global enable. Must be 1 before TE/RE have any effect; several other CR1/CR2/CR3 bits are only writable while UE=0 (documented per-field in the SVD, e.g. FIFOEN, OVER8) -- a genuine write-precondition worth enforcing in a strict model, though not required just to make TX work if firmware sequences it correctly (which stock HAL does)."}
+      ]
+    },
+    {
+      "name": "USART_BRR",
+      "offset": "0x0C",
+      "rm_section": "26.8.5 USART baud rate register (USART_BRR)",
+      "reset_value": "0x00000000",
+      "fields": [
+        {"bits": "15:0", "name": "BRR", "kind": "rw", "why": "USARTDIV = PCLK / desired_baud (OVER8=0 case, the HAL default). HAL_UART_Init computes and writes this from huart->Init.BaudRate and the USART's actual kernel clock frequency -- which is why RCC_CFGR.PPRE (APB prescaler, see rcc.json) is load-bearing for printf even though nothing spins on it: a wrong PCLK assumption here silently produces a garbage baud rate on real hardware, the software-visible symptom being 'printf outputs noise', not a hang."}
+      ]
+    },
+    {
+      "name": "USART_ISR",
+      "offset": "0x1C",
+      "rm_section": "26.8.9 USART interrupt and status register (USART_ISR) / 26.8.10 [alternate]",
+      "reset_value": "0x008000C0",
+      "reset_value_decoded": "VERIFIED by exact bit-by-bit decode of 0x008000C0: bits {23, 7, 6} are the only set bits. Bit 6 = TC (both variants) = 1. Bit 7 = TXE (classic variant) / TXFNF (FIFO variant) = 1. Bit 23 = reserved in the classic/disabled field list, = TXFE in the FIFO/enabled field list = 1. I.e. both variants report 'transmit path empty/ready' immediately at reset, before UE/TE are even set -- consistent with TXE/TC being defined relative to 'is there unconsumed data', which is trivially true (no) before any write to TDR has ever happened.",
+      "fields_classic_disabled_variant": [
+        {"bits": "6", "name": "TC", "kind": "clears-instantly", "source": "computed from: TE and whether a shift-register transmission is in flight", "why": "Transmission-complete flag. HAL_UART_Transmit's underlying wait helper, UART_WaitOnFlagUntilTimeout (stm32c0xx_hal_uart.c:3407: 'while ((__HAL_UART_GET_FLAG(huart, Flag) ? SET : RESET) == Status)'), is parameterised and called once waiting for TXE-equivalent and once for TC depending on the call site -- confirmed the generic wait mechanism exists at that line; did not trace every individual call site's Flag argument in this pass. TC=1 means 'the last byte written to TDR has fully left the shift register', which for a simulator modelling 'transmission happens instantly' collapses to 'set to 1 the instant TDR is written and TE=1' -- hence clears-instantly rather than a genuine ready-follows pairing, since there is no single persistent 'enable' bit it tracks, only a transient write event."},
+        {"bits": "7", "name": "TXE", "kind": "clears-instantly", "source": "computed from: whether TDR currently holds unconsumed data", "why": "THE bit printf spins on. Set (buffer empty, ready for next byte) whenever TDR's previous content has been 'moved to the shift register' -- in an instant-transmit behavioural model this is simply '1 unless a byte was JUST written to TDR this same access', i.e. it clears the instant TDR is written and sets again immediately (zero simulated transmit latency is a legitimate and common first-pass choice, matching this project's likely fixed-point: a working printf, not a cycle-accurate baud-rate-timed UART). If/when the simulator later gives USART a real byte-time delay, TXE becomes a genuine counter-gated field instead (goes 0 on write, back to 1 only after N virtual cycles of byte time have elapsed) -- flagged here as the natural next step past the MVP, not built now per this repo's 'thin path first' rule."}
+      ],
+      "fields_fifo_enabled_variant_delta": [
+        {"bits": "7", "name": "TXFNF", "kind": "clears-instantly", "why": "Same bit position as TXE above but FIFO-not-full semantics instead of single-register-empty -- only reachable if firmware sets CR1.FIFOEN=1, out of scope for the stock printf path per hw_coded_top_level_finding.practical_note."}
+      ]
+    },
+    {
+      "name": "USART_TDR",
+      "offset": "0x28",
+      "rm_section": "26.8.13 USART transmit data register (USART_TDR)",
+      "reset_value": "0x00000000",
+      "fields": [
+        {"bits": "8:0", "name": "TDR", "kind": "hw-coded", "why": "Writing this register is the actual observable side effect printf ultimately produces (the byte that should appear on the virtual serial console / net). A pure 'store the value' write is necessary but not sufficient: on real hardware (and in any simulator that wants the byte to actually go somewhere) the write must ALSO trigger the TXE-clears/TC-recomputes behaviour above and hand the byte to whatever is listening on the TX net -- i.e. it has an observable side effect beyond storage, the same shape of violation as BSRR though far simpler in practice (no priority-ordering complexity, just 'also notify the transmit path')."}
+      ]
+    }
+  ],
+  "deferred_registers": "USART_CR2 (clock/sync-mode/address-detect, not needed for async printf), USART_CR3 (DMA/hardware-flow-control/IrDA/Smartcard, not needed), USART_GTPR, USART_RTOR, USART_RQR, USART_ICR (error-flag w1c clear register -- would matter once RX/error handling is modelled, out of scope for a TX-only printf MVP), USART_RDR (RX data, symmetric case to TDR, deferred for the same reason CR3/flow-control is), USART_PRESC."
+}
