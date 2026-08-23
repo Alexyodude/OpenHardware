@@ -24,7 +24,7 @@ at 100%.** Estimates against that unit are the agents' judgement, not measured.
 | **ESP32-C3** | RV32IMC | **Route through QEMU** | The CPU is the *smallest* obstacle — see §4.1. |
 | **ESP32-S3** | Xtensa LX7 | **Avoid** | NDA-gated ISA, register windowing, and a licence trap in the only public doc. |
 | **RP2350** | Cortex-M33 | **Defer** | As configured it carries Security + DSP + FPU — far past plain Armv8-M. |
-| **RP2350** | Hazard3 RISC-V | **Strongest oracle in the field** | Open source Apache-2.0, the datasheet states the exact ISA string, **and the repo ships its own C++17 golden model** — see §2.1b. |
+| **RP2350** | Hazard3 RISC-V | **Cheapest oracle, not a sufficient one** | Apache-2.0, exact ISA string in the datasheet, **and the repo ships its own C++17 golden model** — built and run here. But it models no extension boundary and is wrong at the illegal-instruction edge for its own part; see §2.1b. |
 
 The recommendation is not uniform because the situations are not: **integrate
 where good MIT prior art exists, route through an existing emulator where the
@@ -112,15 +112,50 @@ Two design constraints to settle **before** writing the rig, not after:
 Cortex-M, released as a portable corpus. That cuts both ways: no one has shown
 it fails, and no one has left behind the pitfalls either.
 
-### 2.1b Hazard3 ships its own golden model — the cheapest oracle in the field
+### 2.1b Hazard3 ships its own golden model — cheap, and not sufficient alone
 
-The strongest single finding of the survey. `Hazard3`'s repository contains
-**`test/sim/rvcpp/`, a ~1080-line C++17 ISA simulator written by the same
-author as the silicon**, covering exactly the RP2350 configuration. Apache-2.0.
-Builds with `g++ -std=c++17`, no dependencies and **no cross-compiler**. Its
-`RVCore` exposes `regs[32]`, `pc`, `csr` and `step()` as plain public members —
-it is already the shape a SingleStepTests-style fixture generator needs.
-Roughly 150 lines of new C++ turns it into one. [V]
+`Hazard3`'s repository contains **`test/sim/rvcpp/`, a 1080-line C++17 ISA
+simulator written by the same author as the silicon**. Apache-2.0, confirmed
+from the LICENSE file. Its `RVCore` exposes `regs[32]`, `pc`, `csr` and
+`step()` as plain public members — already the shape a SingleStepTests-style
+fixture generator needs. **Built and executed on this machine** [V]: MSVC
+19.44 behind a 13-line shim (it needs `__attribute__((unused))` neutralised,
+four GCC builtins, and `<string>`, which `main.cpp` uses without including),
+then 15 hand-assembled instructions run with `add`, `clz`, `cpop`, `rev8` and
+`ctz` all correct. No cross-compiler at any point.
+
+**But it does not model what the hardware refuses, and that is measured, not
+inferred.** [V]
+
+* **It has no extension configuration of any kind** — no `#ifdef`, no runtime
+  enable. All 94 opcodes are live unconditionally, including `Zbc`, which the
+  RP2350 ISA string does not contain.
+* **Its RVC decoder has no XLEN gate.** `C_LD` (`rv_core.cpp:732`), `C_SD`
+  (764), `C_LDSP` (981) and `C_SDSP` (1000) are the RV64 meanings of encodings
+  that on RV32 belong to Zcf/Zcd — and rvcpp is `XLEN=32` with zero
+  floating-point support. On RP2350, which has no FPU, all four must raise
+  illegal-instruction. Measured at `8af9929`: they execute as integer loads and
+  stores whenever the destination or source register is **even**. Odd registers
+  reject only because the generated opcode masks carry a spurious `rd[0] == 0`
+  constraint — half the register space rejects by coincidence, not because the
+  model knows `F` is absent.
+* **The defect camouflages itself.** With registers at their reset zeros the
+  even-register cases still trap, but with cause 5 or 7 (access fault) rather
+  than 2 (illegal instruction). So it presents as a correct rejection in three
+  of the four register-parity × base-validity quadrants, and is visible only
+  when a probe hits an even register and a valid base together.
+
+So: **the cheapest RISC-V oracle that runs on Windows, and the right thing to
+debug a fixture generator against — but not the sole oracle for a conformance
+corpus.** It is wrong at the illegal-instruction edge for its own target part,
+and that edge is where this project's corpora earn their keep: the 8086 work's
+value was exactness at the undefined and undocumented boundaries. Illegal-
+instruction expectations need a configurable model (UDB with an explicit
+config, or Sail) or silicon.
+
+**The general acceptance criterion this produced**, which §6.1 did not ask for
+and should have: *does the candidate model what the hardware refuses?* Building
+and exposing the right shape is necessary and not sufficient.
 
 A second, independent model is available for CI: `riscv/sail-riscv`, the
 official RISC-V golden model, BSD-2-Clause, publishes **prebuilt Linux x86_64
@@ -134,6 +169,34 @@ independent implementations rather than one. [V]
 implementations, so "our core agrees with Unicorn" is nearly worthless as
 cross-validation against QEMU. A genuinely separate second implementation is
 needed for agreement to mean anything. [V]
+
+**And so is Renode.** [V] `antmicro/tlib`'s LICENSE opens *"This code is based
+on libqemu code and is LGPL licensed"*, and `arch/arm/translate.c` carries
+*"Copyright (c) 2003 Fabrice Bellard"*. So the graph is
+`QEMU/TCG → {Unicorn, tlib → Renode}` and **two** candidate second opinions
+retire at once.
+
+**This is one hazard with at least three instances, and it deserves a name.**
+In each case a thing that *looked* like corroboration was downstream of what it
+appeared to corroborate:
+
+| Instance | Apparent second opinion | Actual ancestor |
+|---|---|---|
+| Unicorn, Renode | separate emulators | QEMU TCG |
+| QEMU-xtensa vs `objdump` | separate toolchains | the same Tensilica archive, via `import_core.sh` (§4.4) |
+| IDF vs LLVM extension lists | separate repos, languages, maintainers | both answer *"what the compiler emits"* (§4.2) |
+
+**The check that catches all three is the same one: before treating agreement
+as evidence, establish that the two sources do not share an ancestor.** It is
+cheap, and it retired two candidate oracles here in about ten minutes.
+
+**A related correction to this document's own premise.** [V] "SST-shaped" has
+been read throughout as implying hardware-captured. It does not. Of
+SingleStepTests' 22 repositories, only the x86 family — 8086/8088/80186/80286/
+80386/V20 — claims hardware generation. ARM7TDMI is generated from
+NanoBoyAdvance, m68000 from MAME, sh4 from Reicast, huc6280 from Mesen, and
+z80/spc700/sm83 from JSMoo. That is the same kind of artefact we would be
+producing, so the format carries no implication about the oracle behind it.
 
 That matters because the risk is not hypothetical: a published study
 differential-tested real Arm hardware against QEMU across 2,774,649
@@ -188,8 +251,27 @@ PC"*.
 *Two agents disagreed here* — one reading DDI0419**E** counted seven, including
 a T2 encoding of `UDF`; the other, reading DDI0419**C**, counted six and
 classifies `UDF` as a name for the permanently-undefined space rather than an
-instruction. The difference does not change a decoder (both agree `UDF` means
-"refuse"), but it is recorded rather than silently averaged. The same agent
+instruction.
+
+**Resolved for decoding purposes: six.** [V] Three sources now agree, two of
+them independent implementations rather than readings of the same document:
+
+| Source | Kind | What it does |
+|---|---|---|
+| **DDI0419C §A4.1** | primary specification | states the list verbatim |
+| **QEMU** `target/arm/tcg/translate.c:6218-6229` | independent implementation | whitelists exactly those six by mask; every other 32-bit encoding falls through to `illegal_op` |
+| **GNU binutils 2.40** (`arm-none-eabi-as -mcpu=cortex-m0plus`) | independent implementation | assembles exactly those six, and **rejects `udf.w` by name**: *"selected processor does not support `udf.w #0' in Thumb-2 mode"*. Also rejects `movw`, `mls`, `clz`, `ldrex` |
+
+**What this does not settle**, and the distinction is worth keeping: it does
+not disprove that DDI0419E names a `UDF` T2 form inside the permanently-
+undefined encoding space. The two readings never conflicted about *behaviour* —
+both agree `UDF` means "refuse". The disagreement was taxonomic, about whether
+a name given to permanently-undefined space counts as an instruction, and that
+question is left open because it does not affect a decoder. What is settled is
+that no specification, emulator or assembler treats a seventh 32-bit encoding
+as available.
+
+The same agent
 also notes 2 of the 71 16-bit entries are deprecated assembler aliases with no
 unique encoding — `CPY` (for `MOV` register) and `NEG` (for `RSB #0`) — giving
 **74 functionally distinct operations** if you fold those out.
@@ -278,6 +360,17 @@ Fetched verbatim from ST's `stm32g0xx_hal_rcc.c` [V]: all four classic loops
 are there — wait for `HSERDY`, wait for `PLLRDY`, wait for `FLASH->ACR` to read
 back the latency just written, wait for `RCC->CFGR` `SWS` to match `SW`.
 
+> **That is a G0 measurement, and it does not transfer to C0.** [V]
+> **STM32C0 has no PLL at all** — HSI48 with an HSIDIV divider — confirmed
+> absent from `RCC_CR` and `RCC_CFGR` in both the SVD and the RM chapter. Its
+> own `stm32c0xx_hal_rcc.c` contains **11 `while` loops across three
+> functions**, of which only **three** are exercised on the stock no-crystal
+> Nucleo-C031C6 boot path: `HSIRDY` (line 414), the `FLASH_ACR.LATENCY`
+> readback (670), and `SWS == SW` (756). So *finding no PLL wait on C0 confirms
+> this analysis rather than contradicting it*, and a C0 register map is
+> legitimately smaller than the four-loop figure implies. Do not transcribe the
+> G0 list onto C0 unexamined.
+
 **Every one of them uses `HAL_GetTick()` as its timeout. `HAL_GetTick` is
 incremented by the SysTick interrupt.**
 
@@ -316,7 +409,18 @@ Three walls sit behind a correct ESP core, and none of them is the ISA:
    `esp_rom_printf`, UART and SPI-flash primitives. You can skip the
    bootloader; you cannot skip the ROM. Every working emulator ships a ROM
    image. [V]
-2. **A custom interrupt matrix, not a PLIC.** ESP RISC-V chips route peripheral
+2. **A custom interrupt matrix, not a PLIC** — but this is stated too broadly.
+   [V] The matrix-not-PLIC shape is datasheet-confirmed **for the C3**
+   (§4.1.3.4 "Interrupt Matrix"), and the numbers there are **62 peripheral
+   sources in, 31 CPU peripheral interrupts out** — this document's "43 to 32"
+   conflated the CPU's 32 vectored slots with the matrix's 31 outputs, and the
+   43 has no source. But **C5 and P4 datasheets explicitly say CLIC**
+   ("compliant with RISC-V Core-Local Interrupt Controller"), so the blanket
+   claim is wrong for them. And the PLIC half is weaker still: `soc_caps.h`
+   sets `SOC_INT_PLIC_SUPPORTED=1` for C6/H2/H21, but neither the C6 nor the H2
+   datasheet ever uses the word — C6 says only "Interrupt controller with up to
+   28 external vectored interrupts". **Treat CLIC as datasheet-confirmed and
+   PLIC as IDF-header-only.** ESP RISC-V chips route peripheral
    sources through an Espressif crossbar, using IDs 1–31 where the RISC-V
    standard reserves 0–15 for core-internal use. A generic PLIC bolted on will
    silently mis-route every driver interrupt. [V]
@@ -341,7 +445,8 @@ All verified against Espressif's own datasheets [V].
 | **ESP32-C61** | RV32IMAC + Zc | 1 | 160 MHz | WiFi 6 (2.4), BLE 6.0 |
 | **ESP32-H2** | RV32IMAC | 1 | 96 MHz | **No WiFi** — BLE 5.3 + 802.15.4 |
 | **ESP32-H4** | RV32IMAC [U] | 2 | 96 MHz | BLE 5.4, 802.15.4 — **sampling, no public TRM** |
-| **ESP32-P4** | **RV32IMAFC** + Zc + XespV + XespLoop | 2 HP + 1 LP | 400 / 40 MHz | **None** — pairs with a C6 over SDIO |
+| **ESP32-P4** | **RV32IMAFC** + Zc + **Zb** + XespV + XespLoop | 2 HP + 1 LP | 400 / 40 MHz | **None** — pairs with a C6 over SDIO |
+| **ESP32-H21** | RV32IMAC [U — IDF headers only] | 1 | — | 802.15.4 + BLE |
 
 The S2 and S3 also carry a **ULP RISC-V coprocessor** (RV32IMC) beside their
 Xtensa main cores, restricted to RTC memory and registers. [V]
@@ -350,6 +455,47 @@ Xtensa main cores, restricted to RTC memory and registers. [V]
 and corroborated behaviourally: ESP-IDF's C3 port uses critical sections rather
 than LR/SC *because* the core lacks A. [V] A decoder that accepts `lr.w` on C3
 is out of spec.
+
+#### The C2 lesson: `-march` is compiler policy, the datasheet is silicon
+
+This table was challenged and **survived**, and how it survived is worth more
+than the table. An agent built a competing extension list from ESP-IDF's
+`project_include.cmake` and Espressif LLVM's `RISCVProcessors.td` — different
+repositories, languages and maintainers — found them in agreement, and issued
+corrections against the `[V]` datasheet cells. Two were wrong. The ESP8684
+datasheet says verbatim: *"base integer (I), multiplication/division (M),
+**atomic (A)** and compressed (C)"*, **"RV32IMAC ISA"**. The C2 row was right
+all along; IDF and LLVM simply *compile* C2 as `rv32imc`. [V]
+
+> **Two sources agreeing is not independence when they share a premise.**
+
+Both answer *"what does the compiler emit"*. The cells here answer *"what does
+the silicon implement"*. This is the same trap as §2.1c's "Unicorn's core is
+QEMU's TCG", one level up — and the agent that walked into it had built an
+independence matrix in the same report.
+
+**The operational rule:**
+
+* **Emulator or decoder → the datasheet.** Accept everything the hardware
+  accepts, or you trap a legal instruction. Had the C2 "correction" landed, a
+  C2 core would have refused `lr.w`.
+* **Fixture corpus covering only real firmware → `-march`.** Nothing outside it
+  appears in an IDF build.
+* Where they disagree, **record both and name the question being answered.**
+
+That dissolves the C5/C61 Zc question rather than leaving it contradictory:
+silicon has Zcb/Zcmp/Zcmt per the datasheets, and `ZCMP_WORKAROUND=1` gates
+them out of the default build. So a claim that stock firmware needs them is
+wrong, *and* a decoder must still implement them. Both true, different
+questions.
+
+Also from the same pass: vendor extensions have **two naming registers, both
+correct**. `Xhwlp`, `XespV` and `XespLoop` are the datasheets' own prose names;
+`_xesploop`, `_xespv` and `_xespdsp` are the `-march` substrings a decoder
+author actually meets. Record both. And **ESP32-H4** is `rv32imafcb` + xespdsp
+rather than the RV32IMAC this table guessed — but its datasheet 404s, so that
+is toolchain-sourced, which is an improvement on a `[U]` guess and *not* the
+same class as a datasheet row.
 
 ### 4.3 Checklist — ESP32-C3 (the reference case)
 
@@ -384,7 +530,8 @@ core: RISC-V RV32IMC, single-core, 160 MHz
     mechanisms.
     — an emulator that ignores them entirely is SAFE. One that half-models
       them resets spuriously. Ignoring is the right first move.
-10. Interrupt matrix, NOT a PLIC. 43 sources to 32 CPU lines, 7 priorities,
+10. Interrupt matrix, NOT a PLIC. **62** sources to **31** CPU lines [V —
+    corrected; see the note under this list], 7 priorities,
     IDs 1-31.
     — a generic PLIC mis-routes esp_intr_alloc and breaks every driver that
       uses interrupts, which is everything but trivial polling.
@@ -419,21 +566,70 @@ domains, and per-core interrupt matrices (32+32, not shared) — estimated
   caller's registers. [V]
 - Estimated **2–3×** the complete 8086 effort.
 
-**Two licence traps** [V], both worth catching before anyone vendors anything:
+**Two licence traps were recorded here. One is real; the second was wrong and
+is struck below.** The Avoid verdict does not rest on either — see the note
+after them.
 
 1. `espressif/xtensa-isa-doc` — the README says CC-BY-SA-3.0, the LICENSE file
    says **Attribution-NonCommercial-ShareAlike**. The repository contradicts
    itself. It cannot go into an MIT tree.
-2. Espressif QEMU's `target/xtensa/core-esp32s3/xtensa-modules.inc.c` is
-   1.31 MB of **vendor-generated** Tensilica decode tables, imported from a
-   Cadence overlay rather than reverse-engineered. GPL-2. External process
-   only, never in-tree.
+2. ~~Espressif QEMU's `core-esp32s3/xtensa-modules.inc.c` is GPL-2, external
+   process only, never in-tree.~~ **STRUCK — this was wrong.** [V] The file
+   (1,312,360 bytes) and `core-isa.h` beside it carry a verbatim **MIT** grant,
+   "Copyright (c) 2003-2021 Tensilica Inc.", and QEMU's `LICENSE` §2 says
+   per-file licences govern. The GPL-2 file is a *different* one — upstream's
+   FSF/BFD-derived `core-dc232b/xtensa-modules.c.inc`, which we do not need.
+   QEMU's whole Xtensa **CPU model** (`translate.c`, `cpu.c`, `helper.c`,
+   `op_helper.c`, `win_helper.c` — where the windowing bookkeeping actually
+   lives — `exc_helper.c`, `mmu_helper.c`) is **BSD-3-Clause**, Max Filippov;
+   `xtensa-isa.c` is MIT. And LLVM carries a **hand-written** Xtensa backend
+   with AsmParser and Disassembler under Apache-2.0-WITH-LLVM-exception, with
+   `esp32s3` in Espressif's fork. So "no legally consumable ISA description"
+   is false.
+
+   One caveat a human should rule on before anything is vendored: the tables
+   carry "Customer ID=15128", so they are per-customer generated artefacts.
+   The MIT grant is in the file and Espressif has redistributed them publicly
+   inside a GPL project for years — but a copyright grant is not a patent or
+   trademark grant. **Flag, do not vendor silently.**
+
+**Net: Avoid still holds — on cost and oracle scarcity, not on licence.** [V]
+The engineering argument above is untouched: ~90–100 instructions with
+mandatory `.N` density forms, and register windowing through `WINDOWBASE` with
+overflow/underflow in three spill sizes matching Espressif's GCC ABI. And it
+gains a second leg stronger than the licence claim ever was: **no
+permissively-licensed *executable* Xtensa ISS exists anywhere.** There is no
+rvcpp and no Sail for Xtensa; LLVM has a backend but no simulator; QEMU's is a
+TCG translator, not a steppable golden model. A verdict resting on "we cannot
+check it" is more durable than one resting on a licence reading — which is just
+as well, since the licence reading turned out to be wrong.
+
+One further collision for the independence graph: `import_core.sh` extracts
+`binutils/xtensa-modules.c` from the same Tensilica archive QEMU imports, so
+**"our decoder agrees with `objdump`" is a tautology on Xtensa.** LLVM's
+hand-written backend is the only permissive second opinion. [V]
 
 ### 4.5 What QEMU does and does not give you
 
-Espressif's QEMU fork supports **ESP32, ESP32-S3 and ESP32-C3 only** — no C5,
-no C6. And on *every* target it emulates **no GPIO matrix or IO MUX, no I2C,
-I2S, SPI, RMT, USB, WiFi, BLE or ULP**. [V]
+Espressif's QEMU fork supports ~~**ESP32, ESP32-S3 and ESP32-C3 only** — no C5,
+no C6~~ — **out of date.** [V] `espressif/qemu` at `esp-develop` now carries
+`hw/riscv/esp32c6.c`, `esp32c6_clk.c` and `esp32c6_intmatrix.c`, so **C6 is
+supported**; the Xtensa side has `core-esp32` and `core-esp32s3` only, so there
+is **no S2**. The prebuilt binaries lag the source — `-machine help` on the
+current release exposes only `esp32c3` for riscv32.
+
+**And it runs on Windows natively.** [V] Espressif publishes a prebuilt
+`x86_64-w64-mingw32` build (esp-develop-9.2.2). A real PlatformIO XIAO
+ESP32-C3 blink was taken end-to-end on this machine under it — ROM →
+second-stage bootloader → app → `blink HIGH/blink LOW` on UART0 — with two
+flash-fidelity traps reproduced and diagnosed: an 80 MHz `f_flash` default that
+asserts in `do_core_init`, and Arduino's sdkconfig probing QIO regardless of
+the image header. That materially narrows the paragraph below: the fork is no
+longer load-bearing for the *CPU and firmware-input* path, only for the
+pin/I2C/SPI/RMT callback ABI.
+
+On *every* target, stock QEMU still emulates **no GPIO matrix or IO MUX, no
+I2C, I2S, SPI, RMT, USB, WiFi, BLE or ULP**. [V]
 
 That looks fatal for our purposes, and it is — for *stock* QEMU. PICSimLab's
 fork (`lcgamboa/qemu`, branch `picsimlab-esp32`) adds exactly those callbacks:
@@ -581,13 +777,40 @@ the 25 boards already imported.
 Recorded rather than resolved, because both sides were argued by agents that
 fetched sources.
 
-**"ESP32-S31" — disputed.** One agent reports a dual-core RISC-V part at
-320 MHz with WiFi 6, BLE 5.4 including Classic, 802.15.4 and a gigabit Ethernet
-MAC, announced 2026-03-26, citing an Espressif news page and Hackaday. Another
-agent, enumerating boards, saw a similar string in one page render and
-concluded it was **garbled, could not verify the chip exists, and excluded it**.
-**Do not treat S31 as real until a datasheet is fetched.** If it is real it is
-preview-only with no public TRM either way.
+**"ESP32-S31" — RESOLVED: it exists, and it is RISC-V.** [V] This was recorded
+as disputed — one agent citing an Espressif news page, another concluding the
+string was garbled and excluding the part. The instruction was "do not treat
+S31 as real until a datasheet is fetched". No datasheet exists (the URL still
+404s), but three converging **non**-datasheet lines settle it, and the first is
+Espressif's own published silicon artefact:
+
+1. **`espressif/esp-rom-elfs` publishes `esp32s31_rev0_rom.elf`.** Read
+   directly: `e_machine = 0xF3` (RISC-V) with **345,660 bytes** of real
+   `PT_LOAD` content — not a stub — and an entry point of `0x2f800000`, a
+   different address space from both C3 (`0x40000000`) and S3
+   (`0x40000400`). The control case holds in the same release: S3 really is
+   Xtensa (`0x5E`), so the "S" prefix does **not** imply Xtensa.
+2. `toolchain-esp32s31.cmake` sets `_CMAKE_TOOLCHAIN_PREFIX riscv32-esp-elf-`.
+3. Espressif's LLVM fork defines `ESPRESSIF_ESP32S31` as a
+   `RISCVProcessorModel`.
+
+**ISA, from two machine-readable sources** — IDF's
+`components/soc/project_include.cmake` and LLVM's `RISCVProcessors.td`:
+
+```
+rv32imafcb_zicsr_zifencei_zcb_zcmp_zcmt_xesploop_xespv
+```
+
+the largest in the Espressif family. Two things make it notable: `soc_caps.h`
+gives it `ZC_EXTENSIONS=1` with **no** `ZCMP_WORKAROUND`, making it the only
+ESP part shipping Zc on by default; and it needs two vendor extensions that
+riscv-unified-db does not contain, so those would be ours to write.
+
+**Evidence class: toolchain-sourced, not datasheet-sourced** — see the C2
+lesson in §4.2 before treating this as equivalent to a `[V]` datasheet row.
+One honest disagreement inside it: LLVM omits Zcmp with a "TODO … HW bug
+workaround" comment while IDF's GCC path emits it. GCC-yes / Clang-not-yet,
+recorded rather than picked.
 
 **ESP32-H4's exact ISA string** is unconfirmed — RV32IMAC by lineage, no public
 TRM. [U]
@@ -627,8 +850,18 @@ WX GUI build working here, the adapter work can proceed today.
 
 ## 8. If we do one thing next
 
-**STM32C0 or F030, built here, verified against a corpus we capture ourselves
-from a Nucleo over SWD.**
+**STM32C0 — ~~or F030~~ — built here, verified against a corpus we capture
+ourselves from a Nucleo over SWD.**
+
+> **F030 is struck.** [V] It is a Cortex-**M0**, not M0+, and the two differ in
+> a way that decides this plan. `core_cm0.h` mentions **VTOR zero times**;
+> `core_cm0plus.h` mentions it 14. With no VTOR the vector table is pinned at
+> `0x00000000`, so a per-case HardFault handler **cannot be relocated** — and
+> the fault-outcome class below is the main reason to buy hardware at all.
+> There is a second delta: `CONTROL.nPRIV` exists only on M0+, so an M0 has no
+> unprivileged thread mode. **Capture on M0+**; an M0 corpus is a strict subset
+> derivable from an M0+ one, never the reverse, and the corpus format must
+> record which variant it came from.
 
 It is the only combination where all four are true at once: the ISA is small
 and precisely specified from a free primary source; the prior art is weakest
@@ -640,3 +873,67 @@ costs about twelve pounds.
 Everything else on this page is either already solved by someone with a better
 licence than we could offer (RP2040), or gated behind an SoC wall that has
 nothing to do with instruction-level correctness (ESP).
+
+### 8.1 The throughput question is answered, and the answer moves the plan
+
+This section previously left "how many cases per second?" as the one open
+question, estimated at 20–50/sec and requiring hardware to settle. It was
+settled **without hardware** [V], by driving pyOCD's own packer and reading the
+constants out of Arm's CMSIS-DAP reference firmware, pyOCD and OpenOCD:
+
+| Rig | Limited by | cases/s | 2.797 M cases |
+|---|---|---|---|
+| ST-LINK/V3 + OpenOCD dap-direct, SWD 24 MHz | USB | **~2,000** | 0.4 h |
+| RPi Debug Probe (CMSIS-DAP), lean, SWD 4 MHz | USB | **~333** | 2.3 h |
+| Nucleo ST-LINK/V2-1 + OpenOCD dap-direct | SWD | **~245** | 3.2 h |
+| Nucleo ST-LINK/V2-1 + **pyOCD** | USB | **19** | **42 h** |
+
+**≈250–350 cases/sec for a competent rig — 2–3 hours, not two days.** The 10×
+spread is real but it is *host tooling*, not physics: OpenOCD's ST-LINK driver
+batches 64 MEM-AP accesses per USB transaction (1227 on V3) and reads all 21
+registers in one, and **pyOCD's ST-LINK backend does neither**. So drive it
+with OpenOCD `interface/stlink-dap.cfg` (firmware ≥V2J32), or bypass the
+on-board probe — every Nucleo brings SWD out — with a ~£12 Raspberry Pi Debug
+Probe, which is CMSIS-DAP and batches natively. **The board decision is really
+a probe decision.**
+
+**OPEN, and it gates the purchase:** confirm the NUCLEO-C031C6's on-board
+debugger revision. V2-1 is USB full speed; V3E is high speed with a 19× larger
+batch. It decides between the top and bottom rows above. Answerable from the
+board's silkscreen or UM2953 — not from here, since st.com fails at the
+connection level from this network.
+
+### 8.2 Buy the board for the fault space, not for throughput
+
+The reason to buy silicon changed. **No free Armv6-M model implements faults at
+all** [V]: rp2040js never calls `exceptionEntry(EXC_HARDFAULT)` — an unknown
+opcode reaches `logger.warn('… not implemented yet!')` and execution continues
+— and thumbulator's `decode_error()` prints to stderr and calls `sim_exit(1)`.
+They are a good oracle for the defined instruction space and a **null oracle
+for the fault space**.
+
+And which variant each oracle models turns out to be a hard constraint, not a
+configuration detail:
+
+| Oracle | Variant | Matches a Nucleo-C031C6 (M0+)? |
+|---|---|---|
+| **rp2040js** | **M0+** — has VTOR and `nPRIV` | **yes** |
+| thumbulator | M0 — zero VTOR references | no |
+| QEMU | **M0 only** — `arm_v7m_cpus[]` has no `cortex-m0plus` at all | no |
+| Arm FVP | both — ships M0 and M0plus binaries | yes, but see below |
+
+So **build the generator against rp2040js first**: MIT, independent of QEMU,
+the only free oracle matching the target variant, and it runs here today at
+**1,188,334 cases/sec** [V] — three orders of magnitude faster than any
+hardware rig, which is what makes it the right place to debug the schema,
+operand filters and differ before a board arrives.
+
+**The Arm FVP is licence-blocked pending a human decision.** It downloads
+unauthenticated, its sha256 matches Arm's published digest, and it runs here
+[V]. The EULA alone would permit a corpus — clause 3.1(e) preserves the right
+to distribute "Reports". But EULA note (B) makes `supplementary_terms.txt`
+**prevail**, and its paragraph 2 scopes *"testing, debugging, analysing …
+**Software Models**"* to holders of an Arm architecture licence, with
+"Software" defined to exclude Software Models. An Armv6-M core in this
+repository is a Software Model by that file's own definition. **This is a
+reading of the terms, not legal advice. Default: build nothing on the FVP.**
