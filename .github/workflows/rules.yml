@@ -57,22 +57,43 @@ jobs:
       - name: Build the i8086 core
         run: python tools/build_core.py
 
-      # A representative slice of the hardware corpus: one opcode from each
-      # family the core implements. ~14 MB rather than the full 2 GB, and it
-      # is 90,000 silicon-captured cases -- the eleven committed fixtures are
-      # a smoke test, this is the real check. It was a fetch like this that
-      # found AF being cleared on logical operations, which the fixtures could
-      # not see.
+      # A representative slice of the hardware corpus: at least one opcode
+      # from every family the core implements, rather than the full 2 GB. The
+      # eleven committed fixtures are a smoke test; this is the real check,
+      # and it was a fetch like this that found AF being cleared on logical
+      # operations, which the fixtures could not see.
+      #
+      # **This list must gain an entry whenever a family lands.** It went one
+      # whole ticket without being updated, and every opcode OH-4 added was
+      # therefore unverified here while looking green -- the suite passes
+      # happily over a corpus that says nothing about the new code.
+      #
+      # Each one is chosen for what it can fail on, not at random:
+      #   00 09 21 29 31 39   the ALU group, including the logicals' AF
+      #   50 58 74 8B         stack, conditional branch, MOV
+      #   D0.4                SHL, whose AF rule differs from SHR's and SAR's
+      #   D2.2                RCL by CL -- the only member that can show the
+      #                       shift count is not masked to five bits
+      #   27 D4               DAA's AF-dependent threshold, and AAM's trap
+      #   A4 A6               MOVS and CMPS: REP, and segment overrides
+      #   E4 FC               port I/O and a flag instruction
+      #   F6.4                MUL, whose undefined flags are the high half's
+      #   F6.7                IDIV -- deliberately a PARTIAL file, so the
+      #                       exclusion machinery in test_conformance.py is
+      #                       exercised here rather than only locally
       - name: Fetch a corpus slice
-        run: bash tools/get_8088_tests.sh --opcodes 00 09 21 29 31 39 50 58 74 8B
+        run: >
+          bash tools/get_8088_tests.sh --opcodes
+          00 09 21 29 31 39 50 58 74 8B
+          D0.4 D2.2 27 D4 A4 A6 E4 FC F6.4 F6.7
 
       - name: Core suite
         run: pytest tests/i8086/ -v
 
       # Informational, not a gate. Prints the pass rate against the committed
-      # eleven-case excerpt so the number is visible in every run as slices
-      # land. It is 0% until OH-3 executes anything, and saying so out loud is
-      # the point -- a harness with no core to run must not look like a pass.
+      # eleven-case excerpt so the number is visible in every run. The gate is
+      # the suite above, which runs every fetched file; this is the one line a
+      # reader looks at first.
       - name: Conformance baseline
         run: python tests/i8086/conformance.py --failures 0
 
