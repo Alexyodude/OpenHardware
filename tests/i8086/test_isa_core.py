@@ -228,3 +228,56 @@ def test_ip_wraps_inside_the_segment(cpu):
     cpu.write_byte(abi.physical(0x1000, 0xFFFF), 0x90)
     cpu.step()
     assert cpu.regs.ip == 0x0000
+
+
+# --- exhaustive ------------------------------------------------------------------
+
+
+def test_add_agrees_with_the_intel_rules_on_every_operand_pair(cpu):
+    """All 65,536 byte pairs, against expectations derived independently.
+
+    The four ADD cases in the corpus are four points in a space of 65,536, and
+    they happen not to include a nibble carry without a byte carry, or a signed
+    overflow at the negative boundary. This closes that gap: the reference
+    below states each Intel rule directly rather than restating the C++, so a
+    shared misunderstanding cannot make both sides agree.
+    """
+    CF, PF, AF, ZF, SF, OF = 0x0001, 0x0004, 0x0010, 0x0040, 0x0080, 0x0800
+    mask = CF | PF | AF | ZF | SF | OF
+
+    def reference(a: int, b: int) -> tuple[int, int]:
+        total = a + b
+        result = total & 0xFF
+        flags = 0
+        if total > 0xFF:
+            flags |= CF
+        if ((a & 0xF) + (b & 0xF)) > 0xF:
+            flags |= AF
+        if (a < 0x80) == (b < 0x80) and (result < 0x80) != (a < 0x80):
+            flags |= OF
+        if result == 0:
+            flags |= ZF
+        if result & 0x80:
+            flags |= SF
+        if bin(result).count("1") % 2 == 0:
+            flags |= PF
+        return result, flags
+
+    cpu.write_block(0x00000, bytes([0x00, 0xCB]))  # ADD BL, CL
+    disagreements = []
+    for a in range(256):
+        for b in range(256):
+            cpu.set_regs(cs=0, ip=0, bx=a, cx=b, flags=0)
+            cpu.step()
+            got = (cpu.regs.bx & 0xFF, cpu.regs.flags & mask)
+            if got != reference(a, b):
+                disagreements.append((a, b, got, reference(a, b)))
+                if len(disagreements) >= 5:
+                    break
+        if len(disagreements) >= 5:
+            break
+
+    assert not disagreements, "; ".join(
+        f"{a:02X}+{b:02X}: got {g[0]:02X}/{g[1]:04X} want {w[0]:02X}/{w[1]:04X}"
+        for a, b, g, w in disagreements
+    )

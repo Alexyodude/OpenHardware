@@ -1,7 +1,7 @@
 ---
 id: OH-3
 title: 'Core ISA: mov, arithmetic, logic, stack, control flow'
-status: done
+status: in-review
 priority: P0
 owner: session/isa
 created: '2026-08-23'
