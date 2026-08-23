@@ -1,8 +1,7 @@
 # OpenHardware — locate and parse the board art PICSimLab already ships.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Read `share/boards/<name>/board.{svg,map}` into something a browser can use.
 
 No new artwork is needed for a web UI. Every board already ships an SVG and a

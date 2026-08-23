@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # OpenHardware — parse feature ledgers into validated cells.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Parser for the feature ledgers under ``docs/features/``.
 
 Every malformed row raises. A ledger parser that skips rows it cannot read

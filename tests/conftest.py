@@ -34,3 +34,23 @@ def upstream() -> pathlib.Path:
             f"beside this repo (see docs/picsimlab-reference.md)"
         )
     return root
+
+
+@pytest.fixture(scope="session")
+def board_art() -> pathlib.Path:
+    """Root of a PICSimLab **install** (needs only `share/`), or skip.
+
+    Weaker than `upstream`: a packaged PICSimLab satisfies this, no source
+    checkout required. Tests that read board or part artwork want this one.
+
+    Modules use it through `pytestmark = pytest.mark.usefixtures("board_art")`
+    rather than naming it per test, because within those modules every test
+    touches the art and listing the fixture 12 times says nothing extra.
+    """
+    root = picsimlab.find_install()
+    if root is None:
+        pytest.skip(
+            f"no PICSimLab install; set ${picsimlab.ENV_VAR} or clone the "
+            f"reference beside this repo (see docs/picsimlab-reference.md)"
+        )
+    return root

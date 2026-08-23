@@ -5,36 +5,44 @@ on:
     branches: ["**"]
   pull_request:
 
+env:
+  # Every checker that reads upstream C++ resolves through webui/picsimlab.py,
+  # which honours this. Without it those checkers exit 3 (SKIPPED) and the job
+  # fails -- deliberately: a rules run that silently checked nothing is the
+  # vacuous green this repository exists to prevent.
+  PICSIMLAB_ROOT: ${{ github.workspace }}/../picsimlab-reference
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      # Check out the branch itself, never GitHub's synthetic PR merge commit.
+      # A plain checkout is correct again.
       #
-      # On a `pull_request` event the default checkout is head merged into base,
-      # and base carries whatever upstream has committed since `fork-point`.
-      # `check_deltas.py` then sees upstream's own edits inside `fork-point..HEAD`
-      # and reports them as unlogged modifications of ours: the first PR opened
-      # against this fork failed with eight, which were byte-for-byte the eight
-      # files upstream touched in the two commits it made after the fork.
+      # While this was a fork, `check_deltas.py` diffed against a `fork-point`
+      # tag, and on a `pull_request` event the default checkout is head merged
+      # into base -- base carrying upstream's own post-fork commits, which the
+      # checker then reported as eight unlogged modifications of ours. The
+      # workaround was to check out the PR head instead.
       #
-      # The rule's subject is what THIS fork changed, so the tree it is measured
-      # against must contain only this fork's commits. On `push` the expression
-      # is empty and checkout falls back to the pushed ref.
+      # Both the tag and the bug are gone: upstream is no longer in this tree,
+      # and an upstream change is now a file in patches/, which no merge can
+      # fabricate. See rules/upstream-sync.md section 1.
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Fetch fork-point tag
-        run: git fetch --tags --force
-
-      - name: Verify fork-point tag resolves
+      # Shallow: the checkers read files, never history. This is ~90 MB and the
+      # single slowest step in the job, so it is worth not deepening it.
+      - name: Clone the PICSimLab reference
         run: |
-          if ! git rev-parse --verify --quiet fork-point >/dev/null; then
-            echo "::error::Tag 'fork-point' is missing from this remote. Tags are not carried by an ordinary branch push -- push it explicitly with: git push <remote> fork-point" >&2
-            exit 1
-          fi
+          git clone --depth 1 https://github.com/lcgamboa/picsimlab \
+            "${{ github.workspace }}/../picsimlab-reference"
+
+      - name: Verify the reference resolves
+        run: |
+          python -c "
+          from webui import picsimlab
+          print('install:', picsimlab.install_root())
+          print('source: ', picsimlab.source_root())
+          "
 
       - uses: actions/setup-python@v5
         with:
@@ -60,6 +68,11 @@ jobs:
 
       - name: check_banned_symbols
         run: python tools/check_banned_symbols.py
+
+      # The patches must still apply to whatever upstream is today. This is the
+      # only thing that notices when they rot, and it costs a second.
+      - name: patches still apply
+        run: tools/apply_patches.sh
 
       - name: rules test suite
         run: pytest tests/rules/ -v

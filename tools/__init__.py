@@ -1,5 +1,4 @@
 # OpenHardware — package marker for the repository's checker scripts.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.

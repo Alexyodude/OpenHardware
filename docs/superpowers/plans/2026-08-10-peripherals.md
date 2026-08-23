@@ -33,7 +33,7 @@
 | `webui/parts/schemas/led_matrix.json` | Real schema, from `output_LED_matrix.cc:173`. |
 | `webui/api.py` | Gains wiring operations. Existing methods unchanged. |
 | `tools/check_part_schemas.py` | Validates every schema; wired into CI. |
-| `.claude/rules/conformance-fixtures.md` | Gains a mechanism declaring the checker. |
+| `rules/conformance-fixtures.md` | Gains a mechanism declaring the checker. |
 | `tests/webui/test_part_schema.py` | Schema loading and validation. |
 | `tests/webui/test_wiring.py` | Wiring API against the stub server. |
 | `tests/webui/test_live_oracle.py` | Gains live round-trip tests. |
@@ -734,7 +734,7 @@ protocol offers no count command."
 
 **Files:**
 - Create: `tools/check_part_schemas.py`
-- Modify: `.claude/rules/conformance-fixtures.md` (frontmatter and a new numbered section), `.github/workflows/rules.yml`
+- Modify: `rules/conformance-fixtures.md` (frontmatter and a new numbered section), `.github/workflows/rules.yml`
 - Test: `tests/rules/test_check_part_schemas.py`
 
 **Interfaces:**
@@ -815,7 +815,7 @@ Create `tools/check_part_schemas.py`:
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free Software
 # Foundation; either version 2, or (at your option) any later version.
-"""Checker for the schema requirements in .claude/rules/conformance-fixtures.md.
+"""Checker for the schema requirements in rules/conformance-fixtures.md.
 
 Loading proves a schema is well formed. This additionally proves its citation
 is checkable: a `source` must name a file that exists and a line within it. A
@@ -899,7 +899,7 @@ Expected: `check_part_schemas: OK`, exit 0
 
 - [ ] **Step 6: Declare the mechanism**
 
-In `.claude/rules/conformance-fixtures.md`, add a third entry to the `mechanisms:` list in the frontmatter, keeping the existing two unchanged:
+In `rules/conformance-fixtures.md`, add a third entry to the `mechanisms:` list in the frontmatter, keeping the existing two unchanged:
 
 ```yaml
   - tier: SCRIPT-ENFORCED
@@ -943,7 +943,7 @@ Expected: PASS. `test_every_armed_script_enforced_checker_runs_in_ci` must pass 
 
 ```bash
 git add tools/check_part_schemas.py tests/rules/test_check_part_schemas.py \
-        .claude/rules/conformance-fixtures.md .github/workflows/rules.yml
+        rules/conformance-fixtures.md .github/workflows/rules.yml
 git commit -m "feat(rules): require part schemas to cite a checkable line
 
 A wrong schema does not raise; it miswires a circuit and reports success, so

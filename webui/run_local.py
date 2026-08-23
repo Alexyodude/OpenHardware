@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # OpenHardware — start the simulator and the web UI, detached.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Bring the whole local stack up, and leave it up.
 
     python webui/run_local.py            start both, print the URL

@@ -71,5 +71,5 @@ Section 3 proves every method is **declared**. Nothing proves any of them is
 compiles, links, runs, and silently produces a dead analog pin.
 
 Never report a passing `check_board_contract.py` as evidence that a backend
-works. Correctness per method is what `.claude/rules/conformance-fixtures.md`
+works. Correctness per method is what `rules/conformance-fixtures.md`
 covers, one ledger cell at a time.

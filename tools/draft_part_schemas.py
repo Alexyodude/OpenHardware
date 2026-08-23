@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # OpenHardware — draft part wiring schemas from the C++ that writes the config.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Read each part's `WritePreferences` and emit a **draft** schema.
 
 A part's config string is positional and the simulator will never explain it:

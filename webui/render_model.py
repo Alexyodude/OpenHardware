@@ -1,14 +1,13 @@
 # OpenHardware — turn simulator state plus board art into a draw list.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """The decision layer of the web UI, kept in Python so it can be tested.
 
 There is no npm in this repository and therefore no browser test runner, so
 logic living in a `.js` file has no reachable fixture and the ledger cells it
 backs could never move past `in-progress`
-(`.claude/rules/conformance-fixtures.md` §3). The response is to put the
+(`rules/conformance-fixtures.md` §3). The response is to put the
 decisions here and leave the browser a painter:
 
     info dump + board art  ->  draw list  ->  the browser paints it

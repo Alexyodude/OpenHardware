@@ -1,9 +1,8 @@
-# OpenHardware — parse .claude/rules frontmatter into structured metadata.
+# OpenHardware — parse rules frontmatter into structured metadata.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
-"""Parse ``.claude/rules/*.md`` frontmatter.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+"""Parse ``rules/*.md`` frontmatter.
 
 A malformed rule file raises. It is never skipped: a rule that silently fails
 to parse is indistinguishable from a rule nobody wrote, which is the exact
@@ -17,7 +16,7 @@ import pathlib
 
 import yaml
 
-RULES_DIR = pathlib.Path(".claude/rules")
+RULES_DIR = pathlib.Path("rules")
 
 VALID_TIERS = frozenset(
     {

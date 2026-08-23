@@ -1,8 +1,7 @@
 # OpenHardware — tests for board pin maps.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Where a board's header pins sit on its image.
 
 This is the one piece of board data nobody upstream has: `board.map` declares
@@ -17,6 +16,10 @@ import json
 import pytest
 
 from webui.pinmap import PinMapError, available, load, parse, synthesise
+
+# Every test here reads board or part artwork from a PICSimLab install,
+# so the whole module skips without one. See tests/conftest.py.
+pytestmark = pytest.mark.usefixtures("board_art")
 
 GOOD = {
     "board": "Example",

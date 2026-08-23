@@ -30,6 +30,14 @@ third_party/
 /picsimlab/
 /picsimlab-reference/
 
+# --- Claude Code ----------------------------------------------------------
+# Installed from Alexyodude/claude-template, not committed per-project.
+#
+# This project's OWN rules are not in here -- they live in `rules/`, tracked,
+# because `tools/rules_meta.py` parses their frontmatter and CI depends on
+# them. They were never editor configuration; they are this project's spec.
+.claude/
+
 # --- Editors and OS -------------------------------------------------------
 .DS_Store
 Thumbs.db

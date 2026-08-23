@@ -1,8 +1,7 @@
 # OpenHardware — every real feature ledger must parse.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Closes the gap left by `test_ledger.py`.
 
 `test_ledger.py` exercises `parse_ledger` against synthetic rows in

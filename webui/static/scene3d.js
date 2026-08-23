@@ -1,8 +1,7 @@
 // OpenHardware — 3D board view with drag-to-wire.
 //
-// This program is free software; you can redistribute it and/or modify it under
-// the terms of the GNU General Public License as published by the Free Software
-// Foundation; either version 2, or (at your option) any later version.
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 //
 // Components are procedural geometry from `models3d.js`; the board is a PCB
 // slab textured with the `board.svg` PICSimLab already ships, carrying a real

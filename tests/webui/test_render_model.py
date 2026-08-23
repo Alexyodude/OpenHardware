@@ -1,13 +1,12 @@
 # OpenHardware — tests for the draw-list model.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """The decision layer, tested where the decisions are.
 
 There is no browser test runner in this repository, so this is the only place
 the UI's logic can be checked at all. That is the reason it lives in Python:
-`.claude/rules/conformance-fixtures.md` §3 will not let a cell reach `done`
+`rules/conformance-fixtures.md` §3 will not let a cell reach `done`
 without a fixture, and a fixture that cannot see the logic proves nothing.
 
 The `info` text below is a **verbatim capture** from a live PICSimLab 0.9.3 on
@@ -20,6 +19,10 @@ import pytest
 
 from webui.assets import load_board, load_part
 from webui.render_model import StateError, build, parse_info
+
+# Every test here reads board or part artwork from a PICSimLab install,
+# so the whole module skips without one. See tests/conftest.py.
+pytestmark = pytest.mark.usefixtures("board_art")
 
 LIVE_INFO = """Board:     Arduino Uno
 Processor: atmega328p

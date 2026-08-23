@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # OpenHardware — enforce that CPU backends do not depend on parts or the UI.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
-"""Checker for .claude/rules/core-interface.md.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+"""Checker for rules/core-interface.md.
 
 Nothing under ``src/sim_backend/`` may include from ``src/parts/`` or from the
 lxrad UI layer. A backend that reaches into parts stops being swappable, which
@@ -94,7 +93,7 @@ def main() -> int:
     if violations:
         print(
             f"check_layering: {len(violations)} violation(s) of "
-            f".claude/rules/core-interface.md",
+            f"rules/core-interface.md",
             file=sys.stderr,
         )
         return 1

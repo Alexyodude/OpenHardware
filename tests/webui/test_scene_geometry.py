@@ -1,8 +1,7 @@
 # OpenHardware — geometry invariants of the 3D view.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Guard the one 3D mistake that silently breaks interaction.
 
 The first 3D build placed a peripheral's pin dots at `PART_HEIGHT - 0.8` while
@@ -23,6 +22,10 @@ import pathlib
 import re
 
 import pytest
+
+# Every test here reads board or part artwork from a PICSimLab install,
+# so the whole module skips without one. See tests/conftest.py.
+pytestmark = pytest.mark.usefixtures("board_art")
 
 STATIC = pathlib.Path(__file__).resolve().parents[2] / "webui" / "static"
 SCENE = STATIC / "scene3d.js"

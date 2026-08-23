@@ -1,8 +1,7 @@
 # OpenHardware — load and validate part wiring schemas.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Describe the positional fields of a part's rcontrol config string.
 
 A part's config is a positional CSV produced by that part's `WritePreferences`

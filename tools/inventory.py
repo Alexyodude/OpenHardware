@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 # OpenHardware — derive the repository inventory from the repository itself.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Report what this repository contains: tests, mechanisms, files, ledger cells.
 
 The numbers are **computed, never claimed**. A hand-maintained inventory saying
 "65 tests" is wrong the moment someone adds a test, and this repository has
-already caught that failure twice in its own rule documents — `gpl-hygiene.md`
+already caught that failure twice in its own rule documents — `licence-hygiene.md`
 and `upstream-sync.md` each drifted from the code they described inside a single
 session. An inventory is exactly the kind of document that rots fastest, so
 this one is generated on demand instead of written down.
@@ -16,7 +15,7 @@ this one is generated on demand instead of written down.
 Four collectors, one per thing worth counting:
 
 * `collect_tests`   — parses each test file with `ast`
-* `collect_mechanisms` — reads `.claude/rules/*.md` frontmatter
+* `collect_mechanisms` — reads `rules/*.md` frontmatter
 * `collect_files`   — asks git what this repository tracks
 * `collect_ledgers` — parses every ledger under `docs/features/`
 
@@ -56,13 +55,22 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.rules_meta import RuleParseError, load_rules
 
 TESTS_DIR = pathlib.Path("tests/rules")
-RULES_DIR = pathlib.Path(".claude/rules")
+RULES_DIR = pathlib.Path("rules")
 FEATURES_DIR = pathlib.Path("docs/features")
 #: Top-level directories, in the order the report lists them. Anything
 #: outside them lands in `other`, which is deliberately visible: the
 #: separation from upstream is only kept by noticing when something
 #: unexpected appears at the root.
-KNOWN_AREAS = ("webui", "tools", "tests", "docs", "patches", ".claude", ".github")
+KNOWN_AREAS = (
+    "webui",
+    "tools",
+    "tests",
+    "docs",
+    "rules",
+    "skills",
+    "patches",
+    ".github",
+)
 
 
 class InventoryError(Exception):

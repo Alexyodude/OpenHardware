@@ -1,15 +1,14 @@
 # OpenHardware — meta-guard: every armed mechanism names a real checker.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 
 import pathlib
 
 from tools.rules_meta import load_rules
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-RULES_DIR = REPO / ".claude" / "rules"
+RULES_DIR = REPO / "rules"
 
 
 def test_rules_parse():

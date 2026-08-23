@@ -1,77 +1,127 @@
 #!/usr/bin/env python3
-# OpenHardware — require every modification to an upstream file to be logged.
+# OpenHardware - require every change to upstream to be a documented patch.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
-"""Checker for .claude/rules/upstream-sync.md.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+"""Checker for rules/upstream-sync.md.
 
-Additive files are unrestricted. A file that existed at ``fork-point`` may only
-be modified if ``docs/upstream-deltas.md`` names it in backticks on a ``## ``
-heading line. Backticks elsewhere in the ledger — reason prose, intro text,
-bullet lists — authorise nothing; only the heading is the log entry.
+The rule has not changed: **no change to PICSimLab goes unrecorded.** The
+mechanism has, because the thing it watches has.
+
+While this was a fork, a change to upstream meant a modified file sitting in
+this tree, and the checker intersected `git diff fork-point HEAD` with
+`git ls-tree fork-point`. Both halves of that are gone: there is no upstream
+file here to modify, and no fork-point tag to diff against.
+
+A change to upstream is now a **patch file**, and the ledger is
+`patches/README.md`. Every `patches/*.patch` must be named in a `### ` heading
+there, and every heading must name a patch that exists. Backticks anywhere
+else -- reason prose, intro text, bullet lists -- authorise nothing; only the
+heading is the entry. That much carries over verbatim.
+
+## Why this is a stronger check than the one it replaces
+
+`docs/known-issues.md` 1.8 recorded that the old premise -- everything in
+`fork-point..HEAD` is ours -- is false for any tree that also contains
+upstream commits made after the tag. It fired the first time CI ever ran, on
+upstream's own eight files, and the note warned the same eight would return
+the day the fork merged upstream for real.
+
+A patch file cannot have that bug. It is ours by construction: nobody else
+writes into `patches/`, and no upstream merge can put anything there.
+
+## Both directions
+
+An undocumented patch is the obvious failure. An orphaned heading -- prose
+describing a patch that no longer exists -- is the quieter one, and it is
+worse in the way stale documentation is always worse than missing
+documentation: it reads as current.
 """
 
 from __future__ import annotations
 
 import pathlib
 import re
-import subprocess
 import sys
 
-FORK_POINT = "fork-point"
-LEDGER = pathlib.Path("docs/upstream-deltas.md")
+PATCH_DIR = pathlib.Path("patches")
+LEDGER_NAME = "README.md"
 
-_HEADING_PATH = re.compile(r"^##\s+`([^`]+)`", re.MULTILINE)
+_HEADING_NAME = re.compile(r"^###\s+`([^`]+)`", re.MULTILINE)
 
 
-def logged_paths(ledger: pathlib.Path = LEDGER) -> set[str]:
+class DeltaError(Exception):
+    """The patch directory and its ledger disagree about what exists."""
+
+
+def documented_patches(ledger: pathlib.Path) -> set[str]:
+    """Patch filenames named in `### ` headings of the ledger."""
     if not ledger.is_file():
         return set()
     text = ledger.read_text(encoding="utf-8")
-    return {match.group(1).strip() for match in _HEADING_PATH.finditer(text)}
+    return {match.group(1).strip() for match in _HEADING_NAME.finditer(text)}
 
 
-def unlogged_modifications(
-    changed: set[str], at_fork: set[str], logged: set[str]
-) -> list[str]:
-    if not at_fork:
-        raise ValueError(
-            f"no files at fork-point: does tag {FORK_POINT!r} exist?"
-        )
-    return sorted((changed & at_fork) - logged)
+def patch_files(directory: pathlib.Path = PATCH_DIR) -> set[str]:
+    """Every `*.patch` in the directory, by filename."""
+    if not directory.is_dir():
+        return set()
+    return {path.name for path in directory.glob("*.patch")}
 
 
-def _git(*args: str) -> set[str]:
-    result = subprocess.run(
-        ["git", *args], capture_output=True, text=True, check=True
-    )
-    return {line for line in result.stdout.splitlines() if line}
+def undocumented(present: set[str], documented: set[str]) -> list[str]:
+    """Patches with no ledger entry."""
+    return sorted(present - documented)
+
+
+def orphaned(present: set[str], documented: set[str]) -> list[str]:
+    """Ledger entries naming a patch that is not there."""
+    return sorted(documented - present)
 
 
 def main() -> int:
-    try:
-        offenders = unlogged_modifications(
-            changed=_git("diff", "--name-only", FORK_POINT, "HEAD"),
-            at_fork=_git("ls-tree", "-r", "--name-only", FORK_POINT),
-            logged=logged_paths(),
-        )
-    except (ValueError, subprocess.CalledProcessError) as exc:
-        print(f"check_deltas: {exc}", file=sys.stderr)
-        return 2
+    present = patch_files()
+    ledger = PATCH_DIR / LEDGER_NAME
 
-    for path in offenders:
+    if present and not ledger.is_file():
         print(
-            f"{path}: upstream file modified but absent from {LEDGER}",
+            f"check_deltas: {len(present)} patch(es) but no {ledger}",
             file=sys.stderr,
         )
-    if offenders:
+        return 2
+
+    documented = documented_patches(ledger)
+    missing = undocumented(present, documented)
+    stale = orphaned(present, documented)
+
+    for name in missing:
         print(
-            f"check_deltas: {len(offenders)} unlogged upstream modification(s)",
+            f"patches/{name}: applied to upstream but absent from {ledger}. "
+            f"Add a '### `{name}`' section saying what it changes and why.",
+            file=sys.stderr,
+        )
+    for name in stale:
+        print(
+            f"{ledger}: documents `{name}`, which does not exist. "
+            f"Remove the section, or restore the patch.",
+            file=sys.stderr,
+        )
+
+    if missing or stale:
+        print(
+            f"check_deltas: {len(missing) + len(stale)} patch/ledger "
+            f"disagreement(s), per rules/upstream-sync.md",
             file=sys.stderr,
         )
         return 1
-    print("check_deltas: OK")
+
+    if not present:
+        # The goal state, and worth saying out loud rather than printing a
+        # bare OK that looks identical to "checked something".
+        print("check_deltas: OK (no patches; upstream is unmodified)")
+        return 0
+
+    print(f"check_deltas: OK ({len(present)} patch(es), all documented)")
     return 0
 
 

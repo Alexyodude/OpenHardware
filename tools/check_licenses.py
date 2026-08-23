@@ -1,129 +1,222 @@
 #!/usr/bin/env python3
-# OpenHardware — verify GPL headers keep the v2-or-later path open.
+# OpenHardware - verify every file states the licence it is actually under.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
-"""Checker for .claude/rules/gpl-hygiene.md.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+"""Checker for rules/licence-hygiene.md.
 
-Two checks with different scopes:
+This repository is MIT. It was extracted from a GPL-2-or-later fork of
+PICSimLab, and three trees inside it are still not MIT. The whole risk lives in
+that sentence: a header saying the wrong thing is worse than no header, because
+someone downstream will believe it.
 
-* v2-only headers are searched for across the **whole tree**, because a single
-  such file revokes the GPL-3 path and every Apache-2.0 dependency with it.
-* header presence is required only on files **added since fork-point**, because
-  upstream's files are upstream's business.
+So there are three checks, and each guards a different way of being wrong.
+
+## 1. Our source says MIT
+
+Every source file outside the exempt trees carries
+``SPDX-License-Identifier: MIT``. Machine-readable on purpose -- the previous
+GPL boilerplate was three lines of prose that had to be pattern-matched, and
+matching prose is how the old `find_v2_only` ended up asserting the *absence*
+of a bad header rather than the presence of a good one.
+
+## 2. Our source does not say GPL
+
+A GPL grant anywhere outside ``patches/`` means one of two things, and both
+need a person: a header the relicense missed, or code copied in from upstream
+that should not have been. Neither is safe to leave.
+
+This is the check that would have caught the relicense being half-done.
+
+## 3. Patches say GPL, and never MIT
+
+``patches/`` holds diffs against PICSimLab's GPL source. A diff is a derivative
+of what it patches, so those files are GPL-2-or-later no matter what the rest
+of the repository is. Labelling one MIT would be a licence claim we have no
+right to make, so it is checked in both directions.
+
+## Headers, not prose
+
+Checks 1 and 2 read only the **leading comment block**, not the whole file.
+A licence claim lives in the header; prose further down discusses licences,
+and this module's own docstring names the GPL repeatedly. Scanning whole files
+made this checker fail on itself, which is how the distinction got drawn.
+
+## What is exempt, and why it is a directory rule
+
+``webui/static/vendor/`` is three.js (MIT, (c) three.js authors) and
+``tests/fixtures/`` is an excerpt of SingleStepTests/8088 (MIT, (c) Daniel
+Balsom). Third-party source keeps the header it shipped with. Excluding the
+directory rather than listing files means the next vendored dependency is
+covered without editing this file -- and a dependency arriving with no
+exclusion is a licence question for a person, not a header to rewrite.
 """
 
 from __future__ import annotations
 
 import pathlib
-import subprocess
 import sys
 
-FORK_POINT = "fork-point"
+#: Directories whose contents are not ours to label. See the module docstring.
+THIRD_PARTY = ("webui/static/vendor/", "tests/fixtures/")
 
-#: Extended 2026-08-12 with the front-end suffixes. Until then this scanned
-#: only C/C++ and Python, so `webui/static/*.js` and the page's CSS and HTML --
-#: several hundred lines of this fork's own source -- were never checked for a
-#: licence header at all. They happened to carry one; nothing required it.
+#: Diffs against GPL source. GPL-2-or-later, checked in both directions.
+PATCH_DIR = "patches/"
+
 SOURCE_SUFFIXES = frozenset(
-    {".c", ".cc", ".cpp", ".h", ".hpp", ".py", ".js", ".css", ".html"}
+    {".c", ".cc", ".cpp", ".h", ".hpp", ".py", ".js", ".css", ".html", ".sh"}
 )
 
-#: Third-party source kept verbatim. Nothing here may be given a GPL header:
-#: three.js is MIT and rewriting its header would misstate its licence, which
-#: is a worse defect than the one this checker exists to catch. The directory
-#: is excluded rather than the files, so a future vendored dependency is
-#: covered without editing this list -- and `find_v2_only` skips it too,
-#: because a v2-only *dependency* is a §3 dependency-licence question, not a
-#: header to rewrite.
-VENDOR_DIRS = ("vendor",)
-
+SPDX_MIT = "SPDX-License-Identifier: MIT"
 _GPL = "GNU General Public License"
-_VERSION_2 = "version 2"
-_LATER = "later version"
 _HEAD_BYTES = 4000
+_HEAD_LINES = 40
 
 
-def is_vendored(path: pathlib.Path) -> bool:
-    """True for third-party source kept verbatim. See VENDOR_DIRS."""
-    return any(part in VENDOR_DIRS for part in path.parts)
+class LicenceError(Exception):
+    """There was nothing to check, which is never a pass."""
 
 
-def _source_files(root: pathlib.Path) -> list[pathlib.Path]:
-    if not root.is_dir():
-        return []
+def is_third_party(rel: str) -> bool:
+    """True for source kept verbatim from someone else."""
+    return rel.replace("\\", "/").startswith(THIRD_PARTY)
+
+
+def is_patch(rel: str) -> bool:
+    """True for anything under patches/."""
+    return rel.replace("\\", "/").startswith(PATCH_DIR)
+
+
+def leading_comment_block(text: str) -> str:
+    """The comment block at the very top of a file, and nothing after it.
+
+    Stops at the first line that is not blank, a shebang, a doctype, a line
+    comment, or inside a block comment. For Python that is the module
+    docstring; for JS and CSS the first statement or rule; for HTML the first
+    element after the header comment.
+    """
+    kept: list[str] = []
+    in_block = False
+    for line in text.splitlines()[:_HEAD_LINES]:
+        stripped = line.strip()
+
+        if in_block:
+            kept.append(line)
+            if "*/" in stripped or "-->" in stripped:
+                in_block = False
+            continue
+
+        if not stripped:
+            kept.append(line)
+            continue
+        if stripped.startswith(("#", "//")) or stripped.lower().startswith("<!doctype"):
+            kept.append(line)
+            continue
+        if stripped.startswith(("/*", "<!--")):
+            kept.append(line)
+            if not (stripped.endswith("*/") or stripped.endswith("-->")):
+                in_block = True
+            continue
+        break
+    return "\n".join(kept)
+
+
+def _header(path: pathlib.Path) -> str:
+    text = path.read_text(encoding="utf-8", errors="replace")[:_HEAD_BYTES]
+    return leading_comment_block(text)
+
+
+def _whole(path: pathlib.Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")[:_HEAD_BYTES]
+
+
+def _ours(root: pathlib.Path = pathlib.Path(".")) -> list[pathlib.Path]:
+    """Every source file this repository owns and must label itself."""
     return sorted(
         path
         for path in root.rglob("*")
         if path.is_file()
         and path.suffix in SOURCE_SUFFIXES
         and ".git" not in path.parts
-        and not is_vendored(path)
+        and not is_third_party(path.relative_to(root).as_posix())
+        and not is_patch(path.relative_to(root).as_posix())
     )
 
 
-def find_v2_only(root: pathlib.Path = pathlib.Path(".")) -> list[pathlib.Path]:
-    paths = _source_files(root)
+def missing_mit(root: pathlib.Path = pathlib.Path(".")) -> list[pathlib.Path]:
+    """Our source files that do not carry the SPDX MIT identifier."""
+    paths = _ours(root)
     if not paths:
-        raise ValueError(f"{root}: no source files to scan")
-    offenders = []
-    for path in paths:
-        head = path.read_text(encoding="utf-8", errors="replace")[:_HEAD_BYTES]
-        if _GPL in head and _VERSION_2 in head and _LATER not in head:
-            offenders.append(path)
+        raise LicenceError(f"{root}: no source files to scan")
+    return [path for path in paths if SPDX_MIT not in _header(path)]
+
+
+def stray_gpl(root: pathlib.Path = pathlib.Path(".")) -> list[pathlib.Path]:
+    """Our source files still claiming the GPL. See docstring section 2."""
+    paths = _ours(root)
+    if not paths:
+        raise LicenceError(f"{root}: no source files to scan")
+    return [path for path in paths if _GPL in _header(path)]
+
+
+def mislabelled_patches(root: pathlib.Path = pathlib.Path(".")) -> list[pathlib.Path]:
+    """Anything under patches/ claiming MIT, or a README that omits the GPL.
+
+    The patch files are diffs and carry no header of their own, so what is
+    actually pinned is that the directory's README states the licence and that
+    nothing in there claims MIT.
+    """
+    directory = root / PATCH_DIR.rstrip("/")
+    if not directory.is_dir():
+        return []
+
+    offenders = [
+        path
+        for path in sorted(directory.rglob("*"))
+        if path.is_file() and SPDX_MIT in _whole(path)
+    ]
+
+    # Prose, so read whole rather than as a header block.
+    readme = directory / "README.md"
+    if not readme.is_file() or _GPL not in _whole(readme):
+        offenders.append(readme)
     return offenders
-
-
-def find_missing_headers(paths: list[pathlib.Path]) -> list[pathlib.Path]:
-    offenders = []
-    for path in paths:
-        if path.suffix not in SOURCE_SUFFIXES or not path.is_file():
-            continue
-        if is_vendored(path):
-            continue
-        head = path.read_text(encoding="utf-8", errors="replace")[:_HEAD_BYTES]
-        if _GPL not in head:
-            offenders.append(path)
-    return offenders
-
-
-def _added_since_fork_point() -> list[pathlib.Path]:
-    result = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=A", FORK_POINT, "HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return [pathlib.Path(line) for line in result.stdout.split() if line]
 
 
 def main() -> int:
+    root = pathlib.Path(".")
     try:
-        v2_only = find_v2_only()
-        missing = find_missing_headers(_added_since_fork_point())
-    except ValueError as exc:
+        missing = missing_mit(root)
+        stray = stray_gpl(root)
+        patches = mislabelled_patches(root)
+    except LicenceError as exc:
         print(f"check_licenses: {exc}", file=sys.stderr)
         return 2
-    except subprocess.CalledProcessError as exc:
-        print(f"check_licenses: {exc}", file=sys.stderr)
-        return 2
-
-    for path in v2_only:
-        print(f"{path}: GPL header is version-2-only", file=sys.stderr)
 
     for path in missing:
-        print(f"{path}: new source file has no GPL header", file=sys.stderr)
-
-    if v2_only:
+        print(f"{path}: no '{SPDX_MIT}' header", file=sys.stderr)
+    for path in stray:
         print(
-            "check_licenses: a v2-only header revokes the GPL-3 path; "
-            "every Apache-2.0 dependency must be removed",
+            f"{path}: claims the GPL in its header, but only patches/ may. "
+            f"Either the relicense missed it, or upstream code was copied in.",
             file=sys.stderr,
         )
-    if v2_only or missing:
+    for path in patches:
+        print(
+            f"{path}: patches/ is GPL-2-or-later and must not claim MIT; "
+            f"patches/README.md must state the licence",
+            file=sys.stderr,
+        )
+
+    total = len(missing) + len(stray) + len(patches)
+    if total:
+        print(
+            f"check_licenses: {total} problem(s), per "
+            f"rules/licence-hygiene.md",
+            file=sys.stderr,
+        )
         return 1
-    print("check_licenses: OK")
+    print(f"check_licenses: OK ({len(_ours(root))} files carry {SPDX_MIT})")
     return 0
 
 

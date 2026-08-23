@@ -28,8 +28,8 @@
 
 | Goal | Status | Evidence |
 |---|---|---|
-| Rules machinery (5 rules, checkers, meta-guard) | ACHIEVED | `.claude/rules/*.md`, `tools/check_*.py`, commit `90fe15a7` |
-| `feature-strategy` skill | ACHIEVED | `.claude/skills/feature-strategy/SKILL.md`, `05027e3e` |
+| Rules machinery (5 rules, checkers, meta-guard) | ACHIEVED | `rules/*.md`, `tools/check_*.py`, commit `90fe15a7` |
+| `feature-strategy` skill | ACHIEVED | `skills/feature-strategy/SKILL.md`, `05027e3e` |
 | Repo inventory generator | ACHIEVED | `tools/inventory.py`, `f029e141` |
 | Board-contract checker (no compiler needed) | ACHIEVED | `tools/check_board_contract.py` — 42/42 virtuals on upstream pair, `c76da89a` |
 | 8086 ledger derived | ACHIEVED | `docs/features/i8086.md`, 43 cells, `def1fa04` |
@@ -163,7 +163,7 @@ wsl -d Ubuntu-22.04 -- ln -sfn /root/oh/share /root/oh/share/picsimlab
 
 | File | Purpose |
 |---|---|
-| `rules_meta.py` | Parses `.claude/rules/*.md` frontmatter. Raises on malformed. |
+| `rules_meta.py` | Parses `rules/*.md` frontmatter. Raises on malformed. |
 | `check_layering.py` | `sim_backend/` may not include `parts/` or UI. |
 | `check_board_contract.py` | A `bsim_*`/`board_*` pair covers all 42 pure virtuals. |
 | `check_licenses.py` | No v2-only GPL headers; new `.py` carry headers. |

@@ -1,78 +1,109 @@
-# OpenHardware — tests for the upstream delta checker.
+# OpenHardware - tests for the upstream patch ledger checker.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 
-import pytest
+import pathlib
 
-from tools.check_deltas import logged_paths, unlogged_modifications
+from tools.check_deltas import (
+    documented_patches,
+    orphaned,
+    patch_files,
+    undocumented,
+)
 
-LEDGER = """# Upstream deltas
+REPO = pathlib.Path(__file__).resolve().parents[2]
 
-## `src/lib/spareparts.cc`
+LEDGER = """# Patches to PICSimLab
 
-Reason: analog net semantics, spec section 4.1.
+Intro prose mentioning `not-a-heading.patch`, which authorises nothing.
+
+- a bullet naming `also-not-a-heading.patch`
+
+### `0001-real.patch`
+
+Reason: because.
+
+### `0002-another.patch`
+
+Reason: also because.
 """
 
-LEDGER_WITH_BODY_PROSE_BACKTICKS = """# Upstream deltas
 
-## `src/lib/spareparts.cc`
-
-Reason: analog net semantics, spec section 4.1. Mirrors `src/lib/board.h`
-for the pin layout, but that is prose, not a heading.
-"""
+def _ledger(tmp_path, text: str) -> pathlib.Path:
+    path = tmp_path / "README.md"
+    path.write_text(text, encoding="utf-8")
+    return path
 
 
-def test_ledger_paths_are_parsed(tmp_path):
-    path = tmp_path / "upstream-deltas.md"
-    path.write_text(LEDGER, encoding="utf-8")
-    assert logged_paths(path) == {"src/lib/spareparts.cc"}
+# --- parsing the ledger ------------------------------------------------------
 
 
-def test_missing_ledger_yields_no_paths(tmp_path):
-    assert logged_paths(tmp_path / "absent.md") == set()
+def test_heading_names_are_parsed(tmp_path):
+    assert documented_patches(_ledger(tmp_path, LEDGER)) == {
+        "0001-real.patch",
+        "0002-another.patch",
+    }
 
 
-def test_body_prose_backticks_do_not_authorise_paths(tmp_path):
-    # Only a `## ` heading naming a path authorises it. A path mentioned in
-    # backticks inside ordinary reason prose must not be silently exempted
-    # from ever needing its own entry.
-    path = tmp_path / "upstream-deltas.md"
-    path.write_text(LEDGER_WITH_BODY_PROSE_BACKTICKS, encoding="utf-8")
-    assert logged_paths(path) == {"src/lib/spareparts.cc"}
+def test_backticks_outside_headings_authorise_nothing(tmp_path):
+    """Prose and bullets are not entries. Carried over from the fork-era rule."""
+    names = documented_patches(_ledger(tmp_path, LEDGER))
+    assert "not-a-heading.patch" not in names
+    assert "also-not-a-heading.patch" not in names
 
 
-def test_modified_upstream_file_without_entry_is_flagged():
-    result = unlogged_modifications(
-        changed={"src/lib/board.h"},
-        at_fork={"src/lib/board.h"},
-        logged=set(),
-    )
-    assert result == ["src/lib/board.h"]
+def test_a_missing_ledger_yields_no_entries(tmp_path):
+    assert documented_patches(tmp_path / "nope.md") == set()
 
 
-def test_modified_upstream_file_with_entry_passes():
-    result = unlogged_modifications(
-        changed={"src/lib/board.h"},
-        at_fork={"src/lib/board.h"},
-        logged={"src/lib/board.h"},
-    )
-    assert result == []
+# --- finding the patches -----------------------------------------------------
 
 
-def test_new_file_is_never_flagged():
-    # Additive files are unrestricted; they did not exist at fork-point.
-    result = unlogged_modifications(
-        changed={"tools/check_deltas.py"},
-        at_fork={"src/lib/board.h"},
-        logged=set(),
-    )
-    assert result == []
+def test_patch_files_are_found(tmp_path):
+    (tmp_path / "0001-real.patch").write_text("--- a/x\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("not a patch\n", encoding="utf-8")
+    assert patch_files(tmp_path) == {"0001-real.patch"}
 
 
-def test_empty_fork_point_set_raises():
-    # An empty fork-point listing means the tag resolved to nothing; treating
-    # that as "no upstream files" would pass every modification silently.
-    with pytest.raises(ValueError, match="no files at fork-point"):
-        unlogged_modifications(changed={"a"}, at_fork=set(), logged=set())
+def test_a_missing_patch_directory_is_not_an_error(tmp_path):
+    """Zero patches is the goal state, not a failure."""
+    assert patch_files(tmp_path / "nope") == set()
+
+
+# --- the two directions ------------------------------------------------------
+
+
+def test_an_undocumented_patch_is_flagged():
+    assert undocumented({"a.patch", "b.patch"}, {"a.patch"}) == ["b.patch"]
+
+
+def test_an_orphaned_ledger_entry_is_flagged():
+    """Prose describing a patch that no longer exists reads as current."""
+    assert orphaned({"a.patch"}, {"a.patch", "gone.patch"}) == ["gone.patch"]
+
+
+def test_agreement_yields_nothing():
+    both = {"a.patch", "b.patch"}
+    assert undocumented(both, both) == []
+    assert orphaned(both, both) == []
+
+
+def test_no_patches_and_no_entries_agree():
+    assert undocumented(set(), set()) == []
+    assert orphaned(set(), set()) == []
+
+
+# --- the repository itself ---------------------------------------------------
+
+
+def test_this_repositorys_patches_are_all_documented():
+    present = patch_files(REPO / "patches")
+    documented = documented_patches(REPO / "patches" / "README.md")
+    assert undocumented(present, documented) == []
+    assert orphaned(present, documented) == []
+
+
+def test_the_one_known_patch_is_present():
+    """Pins the ARCH_X86 patch. If it is retired upstream, delete this too."""
+    assert "0001-board-arch-x86.patch" in patch_files(REPO / "patches")

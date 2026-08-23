@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 # OpenHardware — ban nondeterministic calls from new simulation code.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
-"""Checker for .claude/rules/determinism.md.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+"""Checker for rules/determinism.md.
 
-Scoped to files added since ``fork-point``. Upstream's existing use of these
-symbols is upstream's business; a delta would be needed to change it, and this
-checker is not the place to force one.
+Scoped to the C/C++ this repository tracks. It used to be scoped to files
+added since ``fork-point``, because upstream's own tree was here and its use of
+these symbols was upstream's business. With PICSimLab consumed as an external
+install there is no upstream source in this tree, so every C/C++ file here is
+ours by definition and the scoping question disappears.
+
+**There is no C/C++ here yet** -- the x86-16 core is planned, not written. The
+checker therefore reports the number of files it scanned, so a zero is stated
+rather than implied. A bare "OK" over an empty set is indistinguishable from a
+real pass, which is the vacuous green this repository exists to prevent.
 
 Comment stripping is a small C-style scan (``//`` to end of line, ``/* ... */``
 possibly spanning several lines), not a full C parser: a ``/*`` inside a
@@ -23,7 +29,6 @@ import re
 import subprocess
 import sys
 
-FORK_POINT = "fork-point"
 SOURCE_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".h", ".hpp"})
 BANNED = ("rand", "time", "clock")
 
@@ -87,19 +92,25 @@ def find_banned(
     return hits
 
 
-def _added_since_fork_point() -> list[pathlib.Path]:
+def _tracked_sources() -> list[pathlib.Path]:
+    """Every C/C++ file git tracks here. See the module docstring on scope."""
     result = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=A", FORK_POINT, "HEAD"],
+        ["git", "ls-files"],
         capture_output=True,
         text=True,
         check=True,
     )
-    return [pathlib.Path(line) for line in result.stdout.split() if line]
+    return [
+        path
+        for path in (pathlib.Path(line) for line in result.stdout.split() if line)
+        if path.suffix in SOURCE_SUFFIXES
+    ]
 
 
 def main() -> int:
     try:
-        hits = find_banned(_added_since_fork_point())
+        sources = _tracked_sources()
+        hits = find_banned(sources)
     except subprocess.CalledProcessError as exc:
         print(f"check_banned_symbols: {exc}", file=sys.stderr)
         return 2
@@ -108,11 +119,14 @@ def main() -> int:
     if hits:
         print(
             f"check_banned_symbols: {len(hits)} violation(s) of "
-            f".claude/rules/determinism.md",
+            f"rules/determinism.md",
             file=sys.stderr,
         )
         return 1
-    print("check_banned_symbols: OK")
+    if not sources:
+        print("check_banned_symbols: OK (0 C/C++ files tracked; none written yet)")
+    else:
+        print(f"check_banned_symbols: OK ({len(sources)} C/C++ file(s) scanned)")
     return 0
 
 

@@ -1,153 +1,229 @@
-# OpenHardware — tests for the GPL header checker.
+# OpenHardware - tests for the licence header checker.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+"""Tests for tools/check_licenses.py, per rules/licence-hygiene.md.
 
-import subprocess
+The fixtures below deliberately contain GPL text. That is why this file was
+the one thing the relicense script refused to rewrite automatically: it could
+not tell a licence *claim* from a licence *fixture*, and guessing would have
+corrupted the tests that prove the checker works.
+"""
+
+import pathlib
 
 import pytest
 
-from tools import check_licenses
-from tools.check_licenses import find_missing_headers, find_v2_only
+from tools.check_licenses import (
+    SPDX_MIT,
+    LicenceError,
+    is_patch,
+    is_third_party,
+    leading_comment_block,
+    mislabelled_patches,
+    missing_mit,
+    stray_gpl,
+)
 
-V2_OR_LATER = (
+REPO = pathlib.Path(__file__).resolve().parents[2]
+
+MIT_HEADER = (
+    "# OpenHardware - a thing.\n"
+    "#\n"
+    "# SPDX-License-Identifier: MIT\n"
+    "# Copyright (c) 2026 the OpenHardware authors. See LICENSE.\n"
+)
+
+GPL_HEADER = (
+    "# OpenHardware - a thing.\n"
+    "#\n"
     "# This program is free software; you can redistribute it and/or modify it\n"
-    "# under the terms of the GNU General Public License as published by the Free\n"
-    "# Software Foundation; either version 2, or (at your option) any later version.\n"
-)
-
-V2_ONLY = (
-    "# This program is free software; you can redistribute it and/or modify it\n"
-    "# under the terms of the GNU General Public License version 2 as published\n"
-    "# by the Free Software Foundation.\n"
-)
-
-# Mentions the GPL without granting version 2 of it at all — e.g. a file that
-# was relicensed away from GPL. The old two-condition check (GPL name present,
-# "later version" absent) flagged this as v2-only, which is wrong: it never
-# granted version 2 in the first place. The three-condition check requires an
-# actual "version 2" mention before flagging.
-GPL_MENTION_WITHOUT_VERSION_GRANT = (
-    "# This file was relicensed from the GNU General Public License to the MIT\n"
-    "# License; see LICENSE-MIT for the terms that now apply.\n"
+    "# under the terms of the GNU General Public License as published by the\n"
+    "# Free Software Foundation; either version 2, or any later version.\n"
 )
 
 
-def test_v2_only_header_is_detected(tmp_path):
-    (tmp_path / "bad.py").write_text(V2_ONLY, encoding="utf-8")
-    assert find_v2_only(tmp_path) == [tmp_path / "bad.py"]
+def _repo(tmp_path, files: dict[str, str]) -> pathlib.Path:
+    for name, body in files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    return tmp_path
 
 
-def test_v2_or_later_header_is_accepted(tmp_path):
-    (tmp_path / "good.py").write_text(V2_OR_LATER, encoding="utf-8")
-    assert find_v2_only(tmp_path) == []
+# --- check 1: our source says MIT -------------------------------------------
 
 
-def test_non_source_files_are_ignored(tmp_path):
-    # COPYING is the stock GPL-2 text and must never trip the v2-only check.
-    # A real source file sits alongside it because a directory holding only
-    # COPYING has no source files at all, which is the error case below.
-    (tmp_path / "COPYING").write_text(V2_ONLY, encoding="utf-8")
-    (tmp_path / "real.py").write_text(V2_OR_LATER, encoding="utf-8")
-    assert find_v2_only(tmp_path) == []
+def test_a_file_without_the_spdx_line_is_caught(tmp_path):
+    root = _repo(tmp_path, {"a.py": "print('hi')\n"})
+    assert missing_mit(root) == [root / "a.py"]
 
 
-def test_missing_header_is_detected(tmp_path):
-    path = tmp_path / "new.py"
-    path.write_text("print('hello')\n", encoding="utf-8")
-    assert find_missing_headers([path]) == [path]
+def test_a_file_with_the_spdx_line_passes(tmp_path):
+    root = _repo(tmp_path, {"a.py": MIT_HEADER + "print('hi')\n"})
+    assert missing_mit(root) == []
 
 
-def test_present_header_satisfies_the_check(tmp_path):
-    path = tmp_path / "new.py"
-    path.write_text(V2_OR_LATER + "print('hello')\n", encoding="utf-8")
-    assert find_missing_headers([path]) == []
+def test_a_shebang_before_the_header_is_fine(tmp_path):
+    root = _repo(tmp_path, {"a.py": "#!/usr/bin/env python3\n" + MIT_HEADER})
+    assert missing_mit(root) == []
 
 
-def test_empty_scan_raises(tmp_path):
-    with pytest.raises(ValueError, match="no source files"):
-        find_v2_only(tmp_path / "missing")
-
-
-def test_gpl_mention_without_version_grant_is_not_flagged(tmp_path):
-    (tmp_path / "relicensed.py").write_text(
-        GPL_MENTION_WITHOUT_VERSION_GRANT, encoding="utf-8"
+def test_front_end_suffixes_are_scanned(tmp_path):
+    """JS, CSS and HTML are this project's own source and must be labelled."""
+    root = _repo(
+        tmp_path,
+        {
+            "a.js": "export const x = 1;\n",
+            "a.css": ":root { color: red }\n",
+            "a.html": "<!doctype html>\n<p>hi</p>\n",
+            "a.sh": "#!/bin/bash\necho hi\n",
+        },
     )
-    assert find_v2_only(tmp_path) == []
+    assert {p.name for p in missing_mit(root)} == {"a.js", "a.css", "a.html", "a.sh"}
 
 
-def test_unresolvable_fork_point_tag_is_diagnosed_not_raised(monkeypatch):
-    # check_deltas.py and check_banned_symbols.py both catch
-    # subprocess.CalledProcessError from the git call that resolves
-    # fork-point and turn it into a diagnostic exit 2. main() here used to
-    # call _added_since_fork_point() outside the guarded try block, so the
-    # same failure surfaced as an uncaught traceback instead.
-    def _raise() -> list:
-        raise subprocess.CalledProcessError(128, ["git", "diff", "fork-point"])
-
-    monkeypatch.setattr(check_licenses, "_added_since_fork_point", _raise)
-    assert check_licenses.main() == 2
+def test_an_empty_scan_raises_rather_than_passing(tmp_path):
+    with pytest.raises(LicenceError, match="no source files"):
+        missing_mit(tmp_path / "nothing-here")
 
 
-# --- front-end source, added 2026-08-12 --------------------------------------
-#
-# Until three.js was vendored, SOURCE_SUFFIXES held only C/C++ and Python, so
-# this fork's own webui/static/*.js, its CSS and its HTML were never checked
-# for a licence header. They carried one; nothing required it.
+# --- check 2: our source does not say GPL -----------------------------------
 
 
-def test_front_end_suffixes_are_scanned():
-    from tools.check_licenses import SOURCE_SUFFIXES
-
-    assert {".js", ".css", ".html"} <= SOURCE_SUFFIXES
-
-
-def test_a_new_js_file_without_a_header_is_caught(tmp_path):
-    js = tmp_path / "widget.js"
-    js.write_text("export const x = 1;\n", encoding="utf-8")
-    assert find_missing_headers([js]) == [js]
+def test_a_stray_gpl_header_is_caught(tmp_path):
+    root = _repo(tmp_path, {"a.py": GPL_HEADER + "print('hi')\n"})
+    assert stray_gpl(root) == [root / "a.py"]
 
 
-def test_a_new_js_file_with_a_header_passes(tmp_path):
-    js = tmp_path / "widget.js"
-    js.write_text(
-        "// GNU General Public License, version 2 or (at your option) any "
-        "later version.\nexport const x = 1;\n",
-        encoding="utf-8",
-    )
-    assert find_missing_headers([js]) == []
+def test_gpl_discussed_below_the_header_is_not_a_claim(tmp_path):
+    """The case that made the first version of this checker fail on itself.
 
-
-def test_vendored_source_is_never_asked_for_a_gpl_header(tmp_path):
-    """three.js is MIT. Giving it a GPL header would misstate its licence.
-
-    That is a worse defect than the missing header this checker looks for, so
-    vendored trees are skipped rather than exempted file by file.
+    A module whose docstring explains GPL handling is not making a GPL claim.
+    Only the leading comment block is a claim, so only that is scanned.
     """
-    vendor = tmp_path / "static" / "vendor"
-    vendor.mkdir(parents=True)
-    third_party = vendor / "three.module.js"
-    third_party.write_text("// MIT, (c) three.js authors\n", encoding="utf-8")
-    assert find_missing_headers([third_party]) == []
+    body = MIT_HEADER + '"""We must never carry a GNU General Public License header."""\n'
+    root = _repo(tmp_path, {"a.py": body})
+    assert stray_gpl(root) == []
+    assert missing_mit(root) == []
 
 
-def test_vendored_source_is_excluded_from_the_v2_scan(tmp_path):
-    """A v2-only dependency is a §3 licence question, not a header to rewrite."""
-    vendor = tmp_path / "vendor"
-    vendor.mkdir(parents=True)
-    (vendor / "old.js").write_text(
-        "GNU General Public License version 2\n", encoding="utf-8"
+# --- the header/prose boundary ----------------------------------------------
+
+
+def test_the_block_stops_at_the_first_real_line():
+    """Cases are a loop rather than a parametrise, deliberately.
+
+    `tools/inventory.py` counts `def test_*` with ast, so a parametrised test
+    counts once there and five times in pytest, and
+    `test_ast_count_matches_pytest_collection` fails on the divergence. That
+    guard is worth more than the syntax sugar.
+    """
+    cases = [
+        ("# head\n" '"""doc with GNU General Public License"""\n', "# head"),
+        ("// head\nexport const x = 1;\n", "// head"),
+        ("/* head */\n:root { color: red }\n", "/* head */"),
+        ("<!doctype html>\n<!-- head -->\n<p>body</p>\n", "<!-- head -->"),
+        ("#!/bin/bash\n# head\necho hi\n", "# head"),
+    ]
+    for text, expected_last in cases:
+        actual = leading_comment_block(text).strip().splitlines()[-1].strip()
+        assert actual == expected_last, f"{text!r} -> {actual!r}"
+
+
+def test_a_multiline_block_comment_is_kept_whole():
+    text = "/*\n * SPDX-License-Identifier: MIT\n */\n:root { color: red }\n"
+    assert SPDX_MIT in leading_comment_block(text)
+    assert "color: red" not in leading_comment_block(text)
+
+
+def test_a_multiline_html_comment_is_kept_whole():
+    text = "<!doctype html>\n<!--\n  SPDX-License-Identifier: MIT\n-->\n<p>hi</p>\n"
+    assert SPDX_MIT in leading_comment_block(text)
+    assert "<p>hi</p>" not in leading_comment_block(text)
+
+
+# --- exemptions --------------------------------------------------------------
+
+
+def test_vendored_source_is_never_asked_for_our_header(tmp_path):
+    """three.js is MIT already. Rewriting its header would misstate its origin."""
+    root = _repo(
+        tmp_path,
+        {
+            "webui/static/vendor/three.module.js": "// (c) three.js authors\n",
+            "ours.py": MIT_HEADER,
+        },
     )
-    # Something outside vendor/ so the scan is not empty and does not raise.
-    (tmp_path / "ours.py").write_text("# ok\n", encoding="utf-8")
-    assert find_v2_only(tmp_path) == []
+    assert missing_mit(root) == []
 
 
-def test_the_real_vendor_directory_is_recognised():
-    import pathlib
+def test_third_party_fixtures_are_exempt(tmp_path):
+    root = _repo(
+        tmp_path,
+        {"tests/fixtures/sst8088/90.json": "{}\n", "ours.py": MIT_HEADER},
+    )
+    assert missing_mit(root) == []
 
-    from tools.check_licenses import is_vendored
 
-    assert is_vendored(pathlib.Path("webui/static/vendor/three.module.js"))
-    assert not is_vendored(pathlib.Path("webui/static/app.js"))
+def test_the_real_exempt_directories_are_recognised():
+    assert is_third_party("webui/static/vendor/three.module.js")
+    assert is_third_party("tests/fixtures/sst8088/README.md")
+    assert not is_third_party("webui/static/app.js")
+    assert is_patch("patches/0001-board-arch-x86.patch")
+    assert not is_patch("tools/apply_patches.sh")
+
+
+# --- check 3: patches say GPL, never MIT -------------------------------------
+
+
+def test_a_patch_claiming_mit_is_caught(tmp_path):
+    root = _repo(
+        tmp_path,
+        {
+            "patches/README.md": "GNU General Public License applies here.\n",
+            "patches/0001-x.patch": f"# {SPDX_MIT}\n--- a/x\n+++ b/x\n",
+        },
+    )
+    assert root / "patches" / "0001-x.patch" in mislabelled_patches(root)
+
+
+def test_a_patches_readme_that_omits_the_licence_is_caught(tmp_path):
+    root = _repo(tmp_path, {"patches/README.md": "Some patches live here.\n"})
+    assert mislabelled_patches(root) == [root / "patches" / "README.md"]
+
+
+def test_a_correctly_labelled_patches_directory_passes(tmp_path):
+    root = _repo(
+        tmp_path,
+        {
+            "patches/README.md": (
+                "These patches are under the GNU General Public License, "
+                "version 2 or later.\n"
+            ),
+            "patches/0001-x.patch": "--- a/x\n+++ b/x\n",
+        },
+    )
+    assert mislabelled_patches(root) == []
+
+
+def test_no_patches_directory_is_not_a_failure(tmp_path):
+    assert mislabelled_patches(tmp_path) == []
+
+
+def test_patches_are_excluded_from_the_mit_requirement(tmp_path):
+    """A patch must not be given an MIT header, so it is not asked for one."""
+    root = _repo(
+        tmp_path,
+        {"patches/0001-x.patch": "--- a/x\n+++ b/x\n", "ours.py": MIT_HEADER},
+    )
+    assert missing_mit(root) == []
+
+
+# --- the repository itself ---------------------------------------------------
+
+
+def test_this_repository_passes_every_check():
+    assert missing_mit(REPO) == []
+    assert stray_gpl(REPO) == []
+    assert mislabelled_patches(REPO) == []

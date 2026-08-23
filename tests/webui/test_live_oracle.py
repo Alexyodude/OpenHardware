@@ -1,8 +1,7 @@
 # OpenHardware — differential tests against a live PICSimLab.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Check the client against a running simulator rather than against a stub.
 
 Everything else under ``tests/webui/`` talks to ``stub_rcontrol.py``, which
@@ -14,7 +13,7 @@ the cells in ``docs/features/webui.md`` stay ``in-progress`` until these run.
 **Skipping here is dangerous, so it is opt-in.** By default these skip when no
 simulator is listening, because most runs happen without one. But a skip that
 looks like a pass is exactly the defect
-``.claude/rules/conformance-fixtures.md`` section 4 was written about — upstream's
+``rules/conformance-fixtures.md`` section 4 was written about — upstream's
 own ``test_blink.py`` swallows ``ConnectionError`` and passes when the simulator
 never started. So set ``OPENHARDWARE_LIVE=1`` to *demand* a live simulator: with
 it set, an unreachable server is a **failure**, never a skip. CI and any run

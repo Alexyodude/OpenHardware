@@ -1,8 +1,7 @@
 // OpenHardware — paint draw lists onto board and peripheral art.
 //
-// This program is free software; you can redistribute it and/or modify it under
-// the terms of the GNU General Public License as published by the Free Software
-// Foundation; either version 2, or (at your option) any later version.
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 //
 // This file holds no decisions. Which regions exist, whether one is active, how
 // bright it is and whether it can be clicked are all computed by

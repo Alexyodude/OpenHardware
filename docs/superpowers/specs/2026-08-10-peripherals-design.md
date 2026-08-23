@@ -190,7 +190,7 @@ the enumeration barrier that was supposed to explain why never existed.
 - Live round-trip tests extend `tests/webui/test_live_oracle.py`, opt-in under
   `OPENHARDWARE_LIVE=1` so an absent simulator fails rather than skips.
 - `tools/check_part_schemas.py` — every schema parses, cites a `source`, and has
-  consistent arity. Declared as a mechanism in `.claude/rules/`, which means the
+  consistent arity. Declared as a mechanism in `rules/`, which means the
   meta-guard will require it to appear in `rules.yml`.
 
 The checker follows the house pattern: every artifact class in this repository

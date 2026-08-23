@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # OpenHardware — verify a backend/board pair covers board.h's pure virtuals.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
-"""Checker for .claude/rules/core-interface.md.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+"""Checker for rules/core-interface.md.
 
 ``src/lib/board.h`` declares the contract a board must satisfy as pure
 virtuals. A concrete board is assembled from two halves — a ``bsim_*`` backend
@@ -147,7 +146,7 @@ def main() -> int:
     if failed:
         print(
             "check_board_contract: incomplete board contract, per "
-            ".claude/rules/core-interface.md",
+            "rules/core-interface.md",
             file=sys.stderr,
         )
         return 1

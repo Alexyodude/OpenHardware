@@ -1,8 +1,7 @@
 # OpenHardware — meta-guard: every armed SCRIPT-ENFORCED checker runs in CI.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Closes the gap `test_rules_are_armed.py` leaves open.
 
 That file proves an armed mechanism's `checker` path exists on disk. It does
@@ -26,7 +25,7 @@ import pathlib
 from tools.rules_meta import load_rules
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-RULES_DIR = REPO / ".claude" / "rules"
+RULES_DIR = REPO / "rules"
 WORKFLOW = REPO / ".github" / "workflows" / "rules.yml"
 
 

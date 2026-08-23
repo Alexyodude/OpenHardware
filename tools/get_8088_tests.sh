@@ -1,9 +1,8 @@
 #!/bin/bash
 # OpenHardware — fetch the SingleStepTests/8088 conformance corpus.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 #
 # Fetch, do not vendor. The corpus is ~2 GB -- putting it in this repository
 # would dwarf the source several times over and make every clone pay for it.

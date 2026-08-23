@@ -40,8 +40,8 @@
 | `tools/check_deltas.py` | Fail if a file existing at `fork-point` was modified without a ledger entry. |
 | `tools/check_banned_symbols.py` | Fail if new simulation code calls `rand()`/`time()`/`clock()`. |
 | `tools/ledger.py` | Parse feature-ledger markdown tables into `Cell` objects. Raises on malformed rows. |
-| `.claude/rules/*.md` | Five rule documents, each with frontmatter declaring its mechanisms. |
-| `.claude/skills/feature-strategy/SKILL.md` | The six-phase derivation procedure. |
+| `rules/*.md` | Five rule documents, each with frontmatter declaring its mechanisms. |
+| `skills/feature-strategy/SKILL.md` | The six-phase derivation procedure. |
 | `docs/upstream-deltas.md` | Ledger of intentional modifications to upstream files. |
 | `tests/rules/*.py` | Tests for every tool above, plus the meta-guard. |
 | `CLAUDE.md` | Repo-root pointer that loads the rules into agent context. |
@@ -187,12 +187,12 @@ Then `tools/__init__.py`, which makes `tools` an importable package. It carries 
 Then `tools/rules_meta.py`:
 
 ```python
-# OpenHardware — parse .claude/rules frontmatter into structured metadata.
+# OpenHardware — parse rules frontmatter into structured metadata.
 #
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free Software
 # Foundation; either version 2, or (at your option) any later version.
-"""Parse ``.claude/rules/*.md`` frontmatter.
+"""Parse ``rules/*.md`` frontmatter.
 
 A malformed rule file raises. It is never skipped: a rule that silently fails
 to parse is indistinguishable from a rule nobody wrote, which is the exact
@@ -206,7 +206,7 @@ import pathlib
 
 import yaml
 
-RULES_DIR = pathlib.Path(".claude/rules")
+RULES_DIR = pathlib.Path("rules")
 
 VALID_TIERS = frozenset(
     {
@@ -320,7 +320,7 @@ Malformed or empty input raises rather than yielding an empty pass."
 Delivers one rule with a working checker and the meta-guard that ties them together, proving the whole loop before four more rules are written.
 
 **Files:**
-- Create: `.claude/rules/core-interface.md`
+- Create: `rules/core-interface.md`
 - Create: `tools/check_layering.py`
 - Test: `tests/rules/test_check_layering.py`, `tests/rules/test_rules_are_armed.py`
 
@@ -405,7 +405,7 @@ Create `tools/check_layering.py`:
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free Software
 # Foundation; either version 2, or (at your option) any later version.
-"""Checker for .claude/rules/core-interface.md.
+"""Checker for rules/core-interface.md.
 
 Nothing under ``src/sim_backend/`` may include from ``src/parts/`` or from the
 lxrad UI layer. A backend that reaches into parts stops being swappable, which
@@ -465,7 +465,7 @@ def main() -> int:
     if violations:
         print(
             f"check_layering: {len(violations)} violation(s) of "
-            f".claude/rules/core-interface.md",
+            f"rules/core-interface.md",
             file=sys.stderr,
         )
         return 1
@@ -489,7 +489,7 @@ Expected: `check_layering: OK`, exit code 0
 
 - [ ] **Step 6: Write the rule document**
 
-Create `.claude/rules/core-interface.md`:
+Create `rules/core-interface.md`:
 
 ```markdown
 ---
@@ -544,7 +544,7 @@ they exist. Nothing enforces that they are *correct*, and a backend that stubs
 analog pin.
 
 Not enforced here because correctness per method is what
-`.claude/rules/conformance-fixtures.md` covers, one ledger cell at a time.
+`rules/conformance-fixtures.md` covers, one ledger cell at a time.
 ```
 
 - [ ] **Step 7: Write the meta-guard test**
@@ -602,7 +602,7 @@ Expected: PASS — 17 passed
 - [ ] **Step 9: Commit**
 
 ```bash
-git add .claude/rules/core-interface.md tools/check_layering.py \
+git add rules/core-interface.md tools/check_layering.py \
         tests/rules/test_check_layering.py tests/rules/test_rules_are_armed.py
 git commit -m "feat(rules): arm core-interface with layering checker
 
@@ -614,7 +614,7 @@ sim_backend measured clean at fork-point: 15 files, 0 violations."
 ### Task 3: gpl-hygiene rule and license checker
 
 **Files:**
-- Create: `.claude/rules/gpl-hygiene.md`, `tools/check_licenses.py`
+- Create: `rules/gpl-hygiene.md`, `tools/check_licenses.py`
 - Test: `tests/rules/test_check_licenses.py`
 
 **Interfaces:**
@@ -701,7 +701,7 @@ Create `tools/check_licenses.py`:
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free Software
 # Foundation; either version 2, or (at your option) any later version.
-"""Checker for .claude/rules/gpl-hygiene.md.
+"""Checker for rules/gpl-hygiene.md.
 
 Two checks with different scopes:
 
@@ -817,7 +817,7 @@ policy in Global Constraints inverts and Apache-2.0 becomes forbidden.
 
 - [ ] **Step 6: Write the rule document**
 
-Create `.claude/rules/gpl-hygiene.md`:
+Create `rules/gpl-hygiene.md`:
 
 ```markdown
 ---
@@ -876,7 +876,7 @@ Expected: PASS — 23 passed
 - [ ] **Step 8: Commit**
 
 ```bash
-git add .claude/rules/gpl-hygiene.md tools/check_licenses.py \
+git add rules/gpl-hygiene.md tools/check_licenses.py \
         tests/rules/test_check_licenses.py
 git commit -m "feat(rules): arm gpl-hygiene with license checker
 
@@ -889,7 +889,7 @@ one v2-only file revokes the GPL-3 path and every Apache-2.0 dependency."
 ### Task 4: upstream-sync rule and delta checker
 
 **Files:**
-- Create: `.claude/rules/upstream-sync.md`, `tools/check_deltas.py`, `docs/upstream-deltas.md`
+- Create: `rules/upstream-sync.md`, `tools/check_deltas.py`, `docs/upstream-deltas.md`
 - Test: `tests/rules/test_check_deltas.py`
 
 **Interfaces:**
@@ -980,7 +980,7 @@ Create `tools/check_deltas.py`:
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free Software
 # Foundation; either version 2, or (at your option) any later version.
-"""Checker for .claude/rules/upstream-sync.md.
+"""Checker for rules/upstream-sync.md.
 
 Additive files are unrestricted. A file that existed at ``fork-point`` may only
 be modified if ``docs/upstream-deltas.md`` names it in backticks.
@@ -1069,7 +1069,7 @@ Every file that existed at tag `fork-point` and has since been modified must
 appear here as a `## ` heading naming its repo-relative path in backticks,
 followed by the reason.
 
-Enforced by `tools/check_deltas.py`, per `.claude/rules/upstream-sync.md`.
+Enforced by `tools/check_deltas.py`, per `rules/upstream-sync.md`.
 
 **Current count: zero.** Every file added by this fork so far is new, which is
 the state this fork intends to hold for as long as possible.
@@ -1082,7 +1082,7 @@ Expected: `check_deltas: OK`, exit code 0 — no upstream file has been modified
 
 - [ ] **Step 7: Write the rule document**
 
-Create `.claude/rules/upstream-sync.md`:
+Create `rules/upstream-sync.md`:
 
 ```markdown
 ---
@@ -1135,7 +1135,7 @@ Expected: PASS — 29 passed
 - [ ] **Step 9: Commit**
 
 ```bash
-git add .claude/rules/upstream-sync.md tools/check_deltas.py \
+git add rules/upstream-sync.md tools/check_deltas.py \
         docs/upstream-deltas.md tests/rules/test_check_deltas.py
 git commit -m "feat(rules): arm upstream-sync with delta ledger checker
 
@@ -1150,7 +1150,7 @@ Ships one armed mechanism and one explicitly unarmed one, exercising the
 `blocked_by` path in the meta-guard for the first time.
 
 **Files:**
-- Create: `.claude/rules/determinism.md`, `tools/check_banned_symbols.py`
+- Create: `rules/determinism.md`, `tools/check_banned_symbols.py`
 - Test: `tests/rules/test_check_banned_symbols.py`
 
 **Interfaces:**
@@ -1223,7 +1223,7 @@ Create `tools/check_banned_symbols.py`:
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free Software
 # Foundation; either version 2, or (at your option) any later version.
-"""Checker for .claude/rules/determinism.md.
+"""Checker for rules/determinism.md.
 
 Scoped to files added since ``fork-point``. Upstream's existing use of these
 symbols is upstream's business; a delta would be needed to change it, and this
@@ -1283,7 +1283,7 @@ def main() -> int:
     if hits:
         print(
             f"check_banned_symbols: {len(hits)} violation(s) of "
-            f".claude/rules/determinism.md",
+            f"rules/determinism.md",
             file=sys.stderr,
         )
         return 1
@@ -1307,7 +1307,7 @@ Expected: `check_banned_symbols: OK`, exit code 0
 
 - [ ] **Step 6: Write the rule document**
 
-Create `.claude/rules/determinism.md`:
+Create `rules/determinism.md`:
 
 ```markdown
 ---
@@ -1338,7 +1338,7 @@ a negative lookbehind for word characters, and `test_srand_is_not_mistaken_for_r
 pins that, since seeding is how determinism is *achieved*.
 
 Scoped to new files only. Forcing upstream's existing usage to comply would
-require an upstream delta, which section 3 of `.claude/rules/upstream-sync.md`
+require an upstream delta, which section 3 of `rules/upstream-sync.md`
 exists to discourage.
 
 ## 2. 2026-08-09 — TEST-ENFORCED, NOT YET ARMED: identical replay
@@ -1369,7 +1369,7 @@ exercises a real unarmed mechanism for the first time.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add .claude/rules/determinism.md tools/check_banned_symbols.py \
+git add rules/determinism.md tools/check_banned_symbols.py \
         tests/rules/test_check_banned_symbols.py
 git commit -m "feat(rules): arm determinism's symbol check, declare replay unarmed
 
@@ -1381,7 +1381,7 @@ The replay mechanism ships armed:false with blocked_by naming spec 8.4."
 ### Task 6: conformance-fixtures rule and ledger parser
 
 **Files:**
-- Create: `.claude/rules/conformance-fixtures.md`, `tools/ledger.py`, `docs/features/README.md`
+- Create: `rules/conformance-fixtures.md`, `tools/ledger.py`, `docs/features/README.md`
 - Test: `tests/rules/test_ledger.py`
 
 **Interfaces:**
@@ -1595,7 +1595,7 @@ Ledgers are emitted by the `feature-strategy` skill, not written by hand.
 
 - [ ] **Step 6: Write the rule document**
 
-Create `.claude/rules/conformance-fixtures.md`:
+Create `rules/conformance-fixtures.md`:
 
 ```markdown
 ---
@@ -1665,7 +1665,7 @@ Expected: PASS — 43 passed
 - [ ] **Step 8: Commit**
 
 ```bash
-git add .claude/rules/conformance-fixtures.md tools/ledger.py \
+git add rules/conformance-fixtures.md tools/ledger.py \
         docs/features/README.md tests/rules/test_ledger.py
 git commit -m "feat(rules): add feature ledger parser and conformance rule
 
@@ -1677,7 +1677,7 @@ Records upstream test_blink.py's vacuous-pass defect as the worked example."
 ### Task 7: The feature-strategy skill
 
 **Files:**
-- Create: `.claude/skills/feature-strategy/SKILL.md`
+- Create: `skills/feature-strategy/SKILL.md`
 
 **Interfaces:**
 - Consumes: `tools/ledger.py` (the emitted ledger must parse), all five rule files.
@@ -1685,7 +1685,7 @@ Records upstream test_blink.py's vacuous-pass defect as the worked example."
 
 - [ ] **Step 1: Write the skill document**
 
-Create `.claude/skills/feature-strategy/SKILL.md`:
+Create `skills/feature-strategy/SKILL.md`:
 
 ```markdown
 ---
@@ -1786,11 +1786,11 @@ pytest tests/rules/ -v
 
 ## Rules that bind this work
 
-- `.claude/rules/conformance-fixtures.md` — oracle and fixture requirements
-- `.claude/rules/core-interface.md` — where a new architecture may live
-- `.claude/rules/upstream-sync.md` — additive by default
-- `.claude/rules/determinism.md` — no nondeterministic calls in new code
-- `.claude/rules/gpl-hygiene.md` — headers and dependency licences
+- `rules/conformance-fixtures.md` — oracle and fixture requirements
+- `rules/core-interface.md` — where a new architecture may live
+- `rules/upstream-sync.md` — additive by default
+- `rules/determinism.md` — no nondeterministic calls in new code
+- `rules/gpl-hygiene.md` — headers and dependency licences
 
 ## Red flags
 
@@ -1808,7 +1808,7 @@ pytest tests/rules/ -v
 Run:
 
 ```bash
-python -c "import yaml,pathlib; t=pathlib.Path('.claude/skills/feature-strategy/SKILL.md').read_text(encoding='utf-8'); e=t.find(chr(10)+'---'+chr(10),3); d=yaml.safe_load(t[4:e+1]); print(d['name'], '|', d['description'][:60])"
+python -c "import yaml,pathlib; t=pathlib.Path('skills/feature-strategy/SKILL.md').read_text(encoding='utf-8'); e=t.find(chr(10)+'---'+chr(10),3); d=yaml.safe_load(t[4:e+1]); print(d['name'], '|', d['description'][:60])"
 ```
 
 Expected: `feature-strategy | Use when deciding what to build next in OpenHardware — der`
@@ -1821,7 +1821,7 @@ Expected: PASS — 43 passed
 - [ ] **Step 4: Commit**
 
 ```bash
-git add .claude/skills/feature-strategy/SKILL.md
+git add skills/feature-strategy/SKILL.md
 git commit -m "feat(skill): add feature-strategy derivation skill
 
 Six phases from capability gap to oracle-bound ledger."
@@ -1887,14 +1887,14 @@ Upstream is GPL-2-or-later. **So is everything here.**
 
 ## Rules
 
-`.claude/rules/` is not auto-loaded. These are listed so they enter context;
+`rules/` is not auto-loaded. These are listed so they enter context;
 the checkers named in each file are what actually enforce them.
 
-- `.claude/rules/gpl-hygiene.md` — no v2-only headers; dependency licences
-- `.claude/rules/upstream-sync.md` — additive by default; log every upstream edit
-- `.claude/rules/core-interface.md` — backends never include parts or UI
-- `.claude/rules/determinism.md` — no nondeterministic calls in new code
-- `.claude/rules/conformance-fixtures.md` — oracle and fixture requirements
+- `rules/gpl-hygiene.md` — no v2-only headers; dependency licences
+- `rules/upstream-sync.md` — additive by default; log every upstream edit
+- `rules/core-interface.md` — backends never include parts or UI
+- `rules/determinism.md` — no nondeterministic calls in new code
+- `rules/conformance-fixtures.md` — oracle and fixture requirements
 
 ## Before you commit
 

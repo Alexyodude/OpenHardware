@@ -1,14 +1,13 @@
 # OpenHardware — tests for the SST8088 corpus reader.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Read real hardware-captured cases, offline.
 
 These run against `tests/fixtures/sst8088/`, eleven cases excerpted verbatim
 from the corpus. Nothing here touches the network: a conformance reader whose
 tests fail when GitHub is slow is one people learn to ignore, and
-`.claude/rules/determinism.md` wants the same input to give the same answer
+`rules/determinism.md` wants the same input to give the same answer
 every run.
 """
 

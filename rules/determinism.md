@@ -34,7 +34,7 @@ a negative lookbehind for word characters, and `test_srand_is_not_mistaken_for_r
 pins that, since seeding is how determinism is *achieved*.
 
 Scoped to new files only. Forcing upstream's existing usage to comply would
-require an upstream delta, which section 3 of `.claude/rules/upstream-sync.md`
+require an upstream delta, which section 3 of `rules/upstream-sync.md`
 exists to discourage.
 
 ## 2. 2026-08-09 — TEST-ENFORCED, NOT YET ARMED: identical replay

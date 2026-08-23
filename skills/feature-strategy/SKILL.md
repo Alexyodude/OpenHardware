@@ -96,11 +96,11 @@ pytest tests/rules/ -v
 
 ## Rules that bind this work
 
-- `.claude/rules/conformance-fixtures.md` — oracle and fixture requirements
-- `.claude/rules/core-interface.md` — where a new architecture may live
-- `.claude/rules/upstream-sync.md` — additive by default
-- `.claude/rules/determinism.md` — no nondeterministic calls in new code
-- `.claude/rules/gpl-hygiene.md` — headers and dependency licences
+- `rules/conformance-fixtures.md` — oracle and fixture requirements
+- `rules/core-interface.md` — where a new architecture may live
+- `rules/upstream-sync.md` — additive by default
+- `rules/determinism.md` — no nondeterministic calls in new code
+- `rules/licence-hygiene.md` — headers and dependency licences
 
 ## Red flags
 

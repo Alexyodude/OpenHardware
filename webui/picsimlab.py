@@ -29,7 +29,7 @@ source they were read from.
 
 A checker that needs source and cannot find it must **skip and say so**, never
 pass quietly. A silent skip is how a checker stops checking without anyone
-noticing, which is the failure `.claude/rules/` exists to prevent.
+noticing, which is the failure `rules/` exists to prevent.
 """
 
 from __future__ import annotations

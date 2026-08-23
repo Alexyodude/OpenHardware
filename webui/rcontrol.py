@@ -1,8 +1,7 @@
 # OpenHardware — client for PICSimLab's remote control protocol.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Speak the TCP protocol implemented by ``src/lib/rcontrol.cc``.
 
 The protocol, read from that file rather than inferred:
@@ -21,7 +20,7 @@ clients: upstream's own ``tests/python/test_blink.py`` wraps its assertions in
 ``except ConnectionError: print(e)``, so when the simulator is not listening
 nothing is asserted and the test passes. A suite of those reports green on a
 machine where the simulator never started. This module exists partly so that
-cannot happen again, and ``.claude/rules/conformance-fixtures.md`` section 4
+cannot happen again, and ``rules/conformance-fixtures.md`` section 4
 records it.
 
 This client does not interpret command semantics — that is ``webui/api.py``.

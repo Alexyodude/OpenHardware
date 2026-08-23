@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 # OpenHardware — reader for the SingleStepTests/8088 conformance corpus.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Parse `SingleStepTests/8088` cases into something a harness can execute.
 
 This corpus is the only **hardware** ground truth this project has. Every other
 oracle here is software -- the protocol, the simulator, a datasheet -- and
-`.claude/rules/conformance-fixtures.md` §7 says so plainly. These cases were
+`rules/conformance-fixtures.md` §7 says so plainly. These cases were
 captured from a physical AMD D8088 (8441DMA, 1982) in Maximum Mode, so a core
 that matches them matches silicon, not another emulator's opinion.
 
@@ -177,7 +176,7 @@ def load(path: pathlib.Path) -> list[Case]:
 
     Raises on a file holding no cases. An empty result is indistinguishable
     from a corpus that failed to download, and a harness reporting "0 failures"
-    over nothing is the defect `.claude/rules/conformance-fixtures.md` §4 was
+    over nothing is the defect `rules/conformance-fixtures.md` §4 was
     written about.
     """
     if not path.is_file():

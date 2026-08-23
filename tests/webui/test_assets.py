@@ -1,8 +1,7 @@
 # OpenHardware — tests for the board art loader.
 #
-# This program is free software; you can redistribute it and/or modify it under
-# the terms of the GNU General Public License as published by the Free Software
-# Foundation; either version 2, or (at your option) any later version.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Parse the art PICSimLab actually ships, not fixtures invented here.
 
 A hand-written sample map would only prove the parser matches my idea of the
@@ -23,6 +22,10 @@ from webui.assets import (
     sanitise,
     share_root,
 )
+
+# Every test here reads board or part artwork from a PICSimLab install,
+# so the whole module skips without one. See tests/conftest.py.
+pytestmark = pytest.mark.usefixtures("board_art")
 
 HEADER = '<img src="x" width="402" height="304" border="0" usemap="#map" />'
 

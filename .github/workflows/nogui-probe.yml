@@ -7,19 +7,30 @@
 #
 # This is a PROBE, not a gate. It is expected to fail informatively rather than
 # pass quietly, so investigative steps carry continue-on-error and every step
-# reports into the job summary. Nothing in .claude/rules depends on it, and
+# reports into the job summary. Nothing in rules/ depends on it, and
 # .github/workflows/rules.yml stays the gate.
 #
 # It is manual-only: install_deps.sh pulls a very large package set and
 # build_all_static.sh builds qemu, so a run costs a long time on a hosted
 # runner. Do not add push/pull_request triggers without meaning to.
 #
-# Cannot run until the fork-point tag is pushed to a remote — see CLAUDE.md.
+# --- 2026-08-23: what changed when this stopped being a fork ------------------
+#
+# Every build script this uses is PICSimLab's, not ours: install_deps.sh,
+# build_all_static.sh and build_package_NOGUI.sh all live in upstream's
+# bscripts/. While this was a fork they were in the tree. They are not any
+# more, so the job clones PICSimLab and runs them there.
+#
+# The old blocker note is also gone: this needed a `fork-point` tag pushed to a
+# remote, and there is no such tag now.
 
 name: NOGUI probe (spec 8.3 / 8.4)
 
 on:
   workflow_dispatch:
+
+env:
+  PICSIMLAB: ${{ github.workspace }}/picsimlab-reference
 
 jobs:
   probe:
@@ -29,22 +40,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          path: openhardware
 
-      # build_package_NOGUI.sh runs `git archive master`, so the ref must exist.
-      - name: Ensure master ref exists
+      # Full history: build_package_NOGUI.sh runs `git archive master`, so the
+      # ref has to exist and be real. This is the one place a shallow clone of
+      # upstream is not enough.
+      - name: Clone PICSimLab
         run: |
-          git rev-parse --verify master \
-            || git branch master origin/master \
+          git clone https://github.com/lcgamboa/picsimlab "$PICSIMLAB"
+          git -C "$PICSIMLAB" rev-parse --verify master \
+            || git -C "$PICSIMLAB" branch master origin/master \
             || echo "::warning::no master ref; the NOGUI package step will fail"
+          echo "PICSimLab at $(git -C "$PICSIMLAB" rev-parse --short HEAD)"
+
+      # The probe is about the simulator we actually target, which is the
+      # patched one. If a patch no longer applies, that is worth knowing here
+      # rather than after a three-hour build.
+      - name: Apply our patches
+        working-directory: openhardware
+        run: tools/apply_patches.sh "$PICSIMLAB"
 
       - name: Install build dependencies
         continue-on-error: true
+        working-directory: picsimlab-reference
         run: bscripts/install_deps.sh
 
       - name: Build vendored engines
         id: build_libs
         continue-on-error: true
+        working-directory: picsimlab-reference
         run: |
           mkdir -p build_all
           bscripts/build_all_static.sh
@@ -55,6 +79,7 @@ jobs:
       - name: Build NOGUI package
         id: build_nogui
         continue-on-error: true
+        working-directory: picsimlab-reference
         run: bscripts/build_package_NOGUI.sh
 
       - name: Install NOGUI package
@@ -62,8 +87,8 @@ jobs:
         continue-on-error: true
         run: |
           set -x
-          ls -la release_*/ || true
-          deb=$(find . -name 'picsimlab_NOGUI_*.deb' | head -1)
+          ls -la "$PICSIMLAB"/release_*/ || true
+          deb=$(find "$PICSIMLAB" -name 'picsimlab_NOGUI_*.deb' | head -1)
           if [ -z "$deb" ]; then
             echo "::error::no NOGUI .deb produced; spec 8.4 unanswered"
             exit 1
@@ -98,8 +123,8 @@ jobs:
           unset DISPLAY
           bin="${{ steps.probe_run.outputs.binary }}"
           mkdir -p probe_out && cd probe_out
-          # Launch against upstream's own blink workspace and let it settle.
-          timeout 120 "$bin" ../tests/blink/blink.pzw > run.log 2>&1 &
+          # blink.pzw is upstream's own workspace, so it comes from the clone.
+          timeout 120 "$bin" "$PICSIMLAB/tests/blink/blink.pzw" > run.log 2>&1 &
           sleep 25
           python3 - <<'PY' | tee rcontrol.log
           import socket, sys
@@ -125,6 +150,29 @@ jobs:
           sleep 2
           pkill -f picsimlab_NOGUI || true
 
+      # Our own client against the same binary. This is the part the probe
+      # gained by the split: webui/rcontrol.py is the code that will actually
+      # drive conformance fixtures, so exercising it here answers 8.3 about the
+      # real client rather than about an ad-hoc socket script.
+      - name: Probe B2 — our rcontrol client against the same binary
+        id: probe_client
+        continue-on-error: true
+        working-directory: openhardware
+        run: |
+          unset DISPLAY
+          bin="${{ steps.probe_run.outputs.binary }}"
+          timeout 120 "$bin" "$PICSIMLAB/tests/blink/blink.pzw" > /tmp/run2.log 2>&1 &
+          sleep 25
+          PICSIMLAB_ROOT="$PICSIMLAB" python -c "
+          from webui.rcontrol import RControlClient
+          with RControlClient() as c:
+              print('banner:', c.banner)
+              for cmd in ('version', 'pinsl', 'splist'):
+                  print('---', cmd, '---')
+                  print('\n'.join(c.command(cmd).lines))
+          " | tee /tmp/client.log
+          pkill -f picsimlab_NOGUI || true
+
       - name: Probe C — is any VCD produced without a display?
         id: probe_vcd
         continue-on-error: true
@@ -136,7 +184,7 @@ jobs:
             echo "::warning::probe_out/run.log absent — Probe B never launched the binary"
             : > probe_out/run.log
           fi
-          find . -name '*.vcd' -newer probe_out/run.log -print -exec head -20 {} \; \
+          find . "$PICSIMLAB" -name '*.vcd' -newer probe_out/run.log -print -exec head -20 {} \; \
             | tee probe_out/vcd_found.log
           if [ -s probe_out/vcd_found.log ]; then
             echo "found=yes" >> "$GITHUB_OUTPUT"
@@ -154,7 +202,8 @@ jobs:
           path: |
             probe_*.log
             probe_out/
-            build_all/*.log
+            /tmp/client.log
+            picsimlab-reference/build_all/*.log
           if-no-files-found: warn
 
       - name: Report findings
@@ -163,6 +212,8 @@ jobs:
           {
             echo "## NOGUI probe results"
             echo
+            echo "PICSimLab: \`$(git -C "$PICSIMLAB" rev-parse --short HEAD)\`, patched with \`patches/\`."
+            echo
             echo "| Step | Outcome |"
             echo "|---|---|"
             echo "| Build engines | ${{ steps.build_libs.outcome }} |"
@@ -170,6 +221,7 @@ jobs:
             echo "| Install NOGUI | ${{ steps.install_nogui.outcome }} |"
             echo "| Runs headless | ${{ steps.probe_run.outcome }} |"
             echo "| rcontrol reachable | ${{ steps.probe_rcontrol.outcome }} |"
+            echo "| our client works | ${{ steps.probe_client.outcome }} |"
             echo "| VCD emitted | ${{ steps.probe_vcd.outputs.found }} |"
             echo
             echo "### What these answer"
@@ -179,7 +231,7 @@ jobs:
             echo "not settle 8.4 on its own — check whether the workspace used"
             echo "actually wires a \`virtual_VCD_Dump\` part before concluding."
             echo
-            echo "**Spec 8.3** is answered by the rcontrol log in the artifact."
+            echo "**Spec 8.3** is answered by the rcontrol logs in the artifact."
             echo "Static reading of \`src/lib/rcontrol.cc\` already shows the"
             echo "vocabulary is: all, blist, buclist, clk, dumpe, dumpf, dumpr,"
             echo "exit, help, info, oscmeasures, oscrdcfg, oscshow, oscwrcfg,"
@@ -188,7 +240,7 @@ jobs:
             echo "whether that surface is reachable headlessly and what it returns."
             echo
             echo "Record the answers in the two \`blocked_by\` fields in"
-            echo "\`.claude/rules/determinism.md\` and"
-            echo "\`.claude/rules/conformance-fixtures.md\`, and arm those"
+            echo "\`rules/determinism.md\` and"
+            echo "\`rules/conformance-fixtures.md\`, and arm those"
             echo "mechanisms only once a fixture genuinely passes."
           } >> "$GITHUB_STEP_SUMMARY"

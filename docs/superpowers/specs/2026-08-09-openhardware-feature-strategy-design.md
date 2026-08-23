@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-09
 **Status:** design approved, not yet implemented
-**Scope:** the meta-layer only — a feature-derivation skill and five `.claude/rules`.
+**Scope:** the meta-layer only — a feature-derivation skill and five `rules`.
 No simulator code is written in this pass.
 
 ## 1. What this project is
@@ -201,7 +201,7 @@ from any browser build.
 
 ## 5. The skill — how features get derived
 
-`.claude/skills/feature-strategy/SKILL.md`
+`skills/feature-strategy/SKILL.md`
 
 The premise that makes this systematic rather than vibes:
 
@@ -262,11 +262,11 @@ ledger, which is what closes the loop between derivation and construction.
 
 ## 6. The rules
 
-`.claude/rules/`, written in the `wrinkle` house format: numbered dated
+`rules/`, written in the `wrinkle` house format: numbered dated
 headings, each labeled with its enforcement tier, each naming the construct
 that enforces it rather than a line number.
 
-`.claude/rules/*.md` is **not** auto-loaded by Claude Code. A rules file is
+`rules/*.md` is **not** auto-loaded by Claude Code. A rules file is
 advisory unless something reads it. Enforcement tiers therefore mean:
 
 | Tier | Mechanism | Catches violation |
@@ -369,6 +369,12 @@ working headless build first, so they ship `armed: false`, and the meta-guard
 tracks that state explicitly rather than letting it rot silently.
 
 ## 7. Repository layout
+
+> **Superseded 2026-08-23.** This records the fork-era layout as designed.
+> OpenHardware is no longer a fork: PICSimLab is external, the rules moved
+> from `.claude/rules/` to `rules/`, and the licence is MIT. The diagram is
+> left as written because a spec is a record of what was decided, not a
+> description of the present. See `README.md` and `PROVENANCE.md`.
 
 ```
 OpenHardware/                     fork of lcgamboa/picsimlab @ GPL-2.0

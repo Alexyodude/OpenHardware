@@ -111,7 +111,7 @@ Three reasons, in order of weight:
 1. `webui.pkg.offline-guarantee` is a ledger cell whose oracle is the browser's
    own network log. A page with no external origins satisfies it by
    construction; a bundled page has to be audited to prove it.
-2. `.claude/rules/gpl-hygiene.md` §3 restricts dependency licences and is
+2. `rules/gpl-hygiene.md` §3 restricts dependency licences and is
    *already* knowingly weaker than its own standard at three Python
    dependencies (known-issues 3.4). Adding a transitive npm tree before the
    dependency checker exists would make an acknowledged gap much worse.
@@ -144,7 +144,7 @@ real test of whether that abstraction was the right shape.
 
 You cannot test a DOM without a browser runner, and there is no npm here to
 install one. Fourteen cells whose oracle is `sim-state` would then have no
-reachable fixture, and `.claude/rules/conformance-fixtures.md` §3 forbids
+reachable fixture, and `rules/conformance-fixtures.md` §3 forbids
 marking those `done`.
 
 So the model is Python and the browser is a renderer.

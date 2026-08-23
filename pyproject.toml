@@ -1,0 +1,24 @@
+# OpenHardware
+#
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+
+[tool.pytest.ini_options]
+# importlib, not the default `prepend`.
+#
+# The suites import each other by full package path -- `tests.webui.
+# stub_rcontrol` -- while having no __init__.py anywhere. Under `prepend`
+# pytest puts tests/webui/ on sys.path and imports the module as a top-level
+# `test_api`, so the package path never resolves and collection dies with
+# `ModuleNotFoundError: No module named 'tests.webui'`.
+#
+# In the fork this was survivable, because CLAUDE.md told everyone to name the
+# two directories explicitly and upstream's own tests/python/ made a bare
+# `pytest` fail anyway. It is not survivable in CI, which runs the bare
+# command. Setting it here fixes both, and `pytest` with no arguments now
+# works from the repo root -- which it never did before.
+addopts = "--import-mode=importlib"
+testpaths = ["tests/rules", "tests/webui"]
+
+# tests/fixtures/ holds JSON data, not tests.
+norecursedirs = ["tests/fixtures", "third_party", ".git"]
