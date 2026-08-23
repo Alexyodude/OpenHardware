@@ -21,23 +21,38 @@
      will one day spend ten minutes on. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%273%27 fill=%27%23111%27/%3E%3Ctext x=%278%27 y=%2712%27 font-size=%2710%27 font-family=%27monospace%27 text-anchor=%27middle%27 fill=%27%23f2a63b%27%3E86%3C/text%3E%3C/svg%3E" />
 </head>
-<body>
+<body data-view="emulator">
 
 <div class="bar">
   <div class="brand">i8086 <span>— OpenHardware</span></div>
 
-  <select id="sample" aria-label="Sample program"></select>
-  <button id="load">Load</button>
+  <!-- Which view is showing lives on <body>, not on <main>, because the
+       toolbar sits *before* main and CSS has no previous-sibling combinator.
+       One attribute drives both the panel swap and which controls apply. -->
+  <div class="views" role="tablist" aria-label="View">
+    <button class="tab" id="tab-emulator" role="tab" aria-selected="true">Emulator</button>
+    <button class="tab" id="tab-targets" role="tab" aria-selected="false">Targets</button>
+  </div>
+
+  <!-- `display: contents` so these still participate in the toolbar's flex
+       layout and gap; wrapping them in a normal span would collapse their
+       spacing into one item. -->
+  <span class="only-emulator">
+    <select id="sample" aria-label="Sample program"></select>
+    <button id="load">Load</button>
+  </span>
 
   <span class="spacer"></span>
 
-  <span class="status" id="status" data-state="running">ready</span>
-  <span class="status" id="counter" title="instructions executed">0 steps</span>
+  <span class="only-emulator">
+    <span class="status" id="status" data-state="running">ready</span>
+    <span class="status" id="counter" title="instructions executed">0 steps</span>
 
-  <button id="step" class="primary">Step</button>
-  <button id="run" class="primary">Run</button>
-  <button id="stop" disabled>Stop</button>
-  <button id="reset">Reset</button>
+    <button id="step" class="primary">Step</button>
+    <button id="run" class="primary">Run</button>
+    <button id="stop" disabled>Stop</button>
+    <button id="reset">Reset</button>
+  </span>
   <button id="theme" title="Switch between light and dark">◐</button>
 </div>
 
@@ -64,6 +79,208 @@
     </div>
     <pre class="hexdump" id="hexdump"></pre>
   </section>
+
+  <!-- The targets view. Static markup, deliberately: nothing here is computed
+       at render time, and the one column that carries the argument is
+       `evidence`. docs/architectures.md is valuable because it records
+       contradictions instead of averaging them, so a summary that flattened
+       "we built and ran this" together with "a toolchain header says so"
+       would throw that away. Hence CONFLICT and TOOLCHAIN ONLY as first-class
+       states rather than a confident single verdict per row. -->
+  <div id="targets">
+
+    <section class="panel">
+      <h2>Emulation targets <span class="note">docs/architectures.md</span></h2>
+      <div class="prose">
+        <p>Every chip on the board list, what emulating it would take, and — the part
+          that decides everything else — whether a trustworthy oracle exists to check
+          the result against.</p>
+        <p class="pull">A core is only as good as the thing you check it against. The
+          8086 core reached 2,797,000 hardware-captured cases at 100% because
+          SingleStepTests had already captured them. For every chip below, that corpus
+          does not exist.</p>
+        <p><strong>And “SST-shaped” does not mean hardware-captured.</strong> Only the
+          x86 family claims hardware generation — ARM7TDMI comes from NanoBoyAdvance,
+          m68000 from MAME, sh4 from Reicast. Simulator-generated, like the corpus we
+          would be making.</p>
+      </div>
+      <div class="strip">
+        <div class="cell is-ok"><span class="n">2</span><span class="k">oracle proven here</span></div>
+        <div class="cell"><span class="n">18</span><span class="k">chips surveyed</span></div>
+        <div class="cell is-warn"><span class="n">3</span><span class="k">no public datasheet</span></div>
+        <div class="cell is-stop"><span class="n">2</span><span class="k">avoid or defer</span></div>
+        <div class="cell"><span class="n">26</span><span class="k">boards imported</span></div>
+        <div class="cell is-warn"><span class="n">1</span><span class="k">board actually wired</span></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Raspberry Pi silicon <span class="note">§5</span></h2>
+      <div class="scroll"><table class="grid">
+        <thead><tr><th>Part</th><th>Core</th><th>Verdict</th><th>Evidence</th><th>What is actually known</th></tr></thead>
+        <tbody>
+          <tr><td class="chip">RP2040</td><td class="isa">Cortex-M0+</td>
+            <td><span class="pill p-go">INTEGRATE</span></td><td><span class="ev">RAN HERE</span></td>
+            <td class="note-cell">rp2040js, MIT, browser-native. <strong>126/126 tests pass in
+              2.97 s</strong>, sustaining <strong>1,188,334 corpus cases/sec</strong> — both
+              measured on this machine. The only free oracle that models M0+ rather than M0.</td></tr>
+          <tr><td class="chip">RP2350</td><td class="isa">Hazard3 · rv32ima_zicsr_zifencei_zba_zbb_zbs_zbkb_zca_zcb_zcmp</td>
+            <td><span class="pill p-ok">CHEAPEST DOOR</span></td><td><span class="ev">BUILT + RAN</span></td>
+            <td class="note-cell">Ships its own C++17 golden model (<code>rvcpp</code>, Apache-2.0),
+              built here with MSVC behind a 13-line shim. <strong>Qualified:</strong> no extension
+              gating at all, and its RVC decoder has no XLEN gate — four RV64 encodings are live
+              where RV32 assigns Zcf/Zcd. Right on the legal space, wrong at the
+              illegal-instruction edge, for its own target part.</td></tr>
+          <tr class="dim"><td class="chip">RP2350</td><td class="isa">Cortex-M33 · Security + DSP + FPU</td>
+            <td><span class="pill p-warn">DEFER</span></td><td><span class="ev">SECONDARY</span></td>
+            <td class="note-cell">Far past plain Armv8-M mainline. Secondary sources put it at
+              300–450 instructions.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="panel">
+      <h2>STM32 — Cortex-M0 / M0+ <span class="note">the build-our-own candidate</span></h2>
+      <div class="scroll"><table class="grid">
+        <thead><tr><th>Family</th><th>Core</th><th>Verdict</th><th>Evidence</th><th>What is actually known</th></tr></thead>
+        <tbody>
+          <tr><td class="chip">C0</td><td class="isa">Cortex-M0+ · 48 MHz</td>
+            <td><span class="pill p-go">BUILD OURS</span></td><td><span class="ev">HAL SOURCE</span></td>
+            <td class="note-cell">Reference chip, on a ~£12 Nucleo-C031C6. <strong>It has no
+              PLL</strong> — so the survey’s four boot spins (a G0 figure) are really
+              <strong>three</strong>: HSIRDY, <code>ACR.LATENCY</code>, <code>SWS == SW</code>.</td></tr>
+          <tr><td class="chip">G0 · L0 · U0</td><td class="isa">Cortex-M0+</td>
+            <td><span class="pill p-go">BUILD OURS</span></td><td><span class="ev">HAL SOURCE</span></td>
+            <td class="note-cell">Same core, same approach. G0 is where the original four-spin
+              measurement came from.</td></tr>
+          <tr class="dim"><td class="chip">F0</td><td class="isa">Cortex-M0 (not M0+)</td>
+            <td><span class="pill p-stop">DROPPED</span></td><td><span class="ev">CMSIS HEADERS</span></td>
+            <td class="note-cell"><strong>No VTOR, no <code>CONTROL.nPRIV</code>.</strong> The vector
+              table is pinned at zero, so a per-case HardFault handler cannot be relocated — which
+              makes the whole fault-outcome design impossible.</td></tr>
+        </tbody>
+      </table></div>
+      <div class="prose bordered">
+        <p><strong>Throughput is answered, and without hardware.</strong> Roughly
+          <strong>250–350 cases/sec</strong> for a competent rig — a full corpus in 2–3 hours,
+          not two days. The feared 10× spread is host tooling: pyOCD on the on-board ST-LINK
+          manages 19/s, while OpenOCD dap-direct or a ~£12 Raspberry Pi Debug Probe reaches
+          245–2,000/s. <strong>The board decision is really a probe decision.</strong></p>
+        <p>And the reason to buy silicon changed: every free Armv6-M model <em>fails to model
+          faults at all</em>. They are a good oracle for the defined instruction space and a
+          <strong>null oracle for the fault space</strong> — which is where a conformance corpus
+          earns its keep.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Espressif <span class="note">§4</span></h2>
+      <div class="scroll"><table class="grid">
+        <thead><tr><th>Part</th><th>ISA — silicon</th><th>Verdict</th><th>Evidence</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td class="chip">ESP32-C3</td><td class="isa">RV32IMC — no A</td>
+            <td><span class="pill p-go">REFERENCE CASE</span></td><td><span class="ev">DATASHEET</span></td>
+            <td class="note-cell">A decoder accepting <code>lr.w</code> here is out of spec. Booted
+              end-to-end this session: ROM → bootloader → app → blink.</td></tr>
+          <tr><td class="chip">ESP32-C2</td><td class="isa">RV32IMAC</td>
+            <td><span class="pill p-go">ROUTE VIA QEMU</span></td><td><span class="ev">DATASHEET</span></td>
+            <td class="note-cell"><strong>It has atomics.</strong> IDF and LLVM both compile it as
+              <code>rv32imc</code> — a compiler choice, not the silicon.</td></tr>
+          <tr><td class="chip">ESP32-C6</td><td class="isa">RV32IMAC</td>
+            <td><span class="pill p-go">ROUTE VIA QEMU</span></td><td><span class="ev">DATASHEET</span></td>
+            <td class="note-cell">Upstream QEMU now carries <code>hw/riscv/esp32c6.c</code>.</td></tr>
+          <tr><td class="chip">ESP32-C5</td><td class="isa">RV32IMAC + Zcb/Zcmp/Zcmt + Xhwlp</td>
+            <td><span class="pill p-warn">DECODER EXCEEDS IDF</span></td><td><span class="ev">DATASHEET</span></td>
+            <td class="note-cell">Silicon has Zc; <code>ZCMP_WORKAROUND=1</code> gates it out of the
+              default build. Both true — different questions.</td></tr>
+          <tr><td class="chip">ESP32-C61</td><td class="isa">RV32IMAC + Zcb/Zcmp/Zcmt</td>
+            <td><span class="pill p-warn">CONFLICT</span></td><td><span class="ev">CONFLICT</span></td>
+            <td class="note-cell">LLVM adds <code>B + Zbc</code>; the datasheet never mentions Zb.
+              Recorded, not settled.</td></tr>
+          <tr><td class="chip">ESP32-H2</td><td class="isa">RV32IMAC</td>
+            <td><span class="pill p-go">ROUTE VIA QEMU</span></td><td><span class="ev">DATASHEET</span></td>
+            <td class="note-cell">No WiFi — BLE 5.3 and 802.15.4.</td></tr>
+          <tr><td class="chip">ESP32-P4</td><td class="isa">RV32IMAFC + Zc + <strong>Zb</strong> + XespV + XespLoop</td>
+            <td><span class="pill p-warn">LARGE</span></td><td><span class="ev">DATASHEET</span></td>
+            <td class="note-cell">The survey’s row missed <strong>Zb</strong>. Two custom extensions
+              riscv-unified-db does not contain.</td></tr>
+          <tr><td class="chip">ESP32-S31</td><td class="isa">rv32imafcb_zicsr_zifencei_zcb_zcmp_zcmt_xesploop_xespv</td>
+            <td><span class="pill p-warn">TOOLCHAIN ONLY</span></td><td><span class="ev">NO DATASHEET</span></td>
+            <td class="note-cell"><strong>It exists, and it is RISC-V</strong> — recorded as possibly
+              fictional. Its ROM ELF reads <code>e_machine=0xF3</code> with 345,660 bytes of real
+              content. Only ESP part with Zc on by default.</td></tr>
+          <tr><td class="chip">ESP32-H4</td><td class="isa">rv32imafcb + xespdsp</td>
+            <td><span class="pill p-warn">TOOLCHAIN ONLY</span></td><td><span class="ev">NO DATASHEET</span></td>
+            <td class="note-cell">Datasheet 404s — vindicating “no public TRM, do not start here”.</td></tr>
+          <tr><td class="chip">ESP32-H21</td><td class="isa">rv32imac</td>
+            <td><span class="pill p-none">MISSING FROM SURVEY</span></td><td><span class="ev">IDF ONLY</span></td>
+            <td class="note-cell">Absent from the §4.2 table entirely.</td></tr>
+          <tr class="dim"><td class="chip">ESP32-S2 · S3</td><td class="isa">Xtensa LX6 / LX7</td>
+            <td><span class="pill p-stop">AVOID</span></td><td><span class="ev">RE-ARGUED</span></td>
+            <td class="note-cell">The licence objection <strong>does not survive</strong> — the decode
+              tables are MIT, not GPL-2. Avoid holds on the other leg: register windowing at 2–3× the
+              8086 effort, and <strong>no permissively-licensed executable Xtensa ISS exists
+              anywhere</strong>.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="panel">
+      <h2>Which oracles are actually independent</h2>
+      <div class="prose">
+        <p class="pull">Two sources agreeing is not independence when they share an ancestor.
+          Three instances surfaced in one session — each time, a thing that looked like
+          corroboration was downstream of what it appeared to corroborate.</p>
+      </div>
+      <div class="tree">
+        <div class="clus bad">
+          <h3>QEMU / TCG</h3>
+          <p class="why">Agreement across these edges is worthless.</p>
+          <div class="node root">QEMU TCG</div>
+          <div class="node kid">Unicorn Engine</div>
+          <div class="node kid">tlib → Renode</div>
+        </div>
+        <div class="clus bad">
+          <h3>Tensilica overlay</h3>
+          <p class="why">“Agrees with <code>objdump</code>” is a tautology on Xtensa —
+            <code>import_core.sh</code> extracts the same vendor tables.</p>
+          <div class="node root">Tensilica vendor archive</div>
+          <div class="node kid">QEMU-xtensa</div>
+          <div class="node kid">binutils / ESP GCC</div>
+        </div>
+        <div class="clus good">
+          <h3>Genuinely independent</h3>
+          <p class="why">Different ancestors. A cross-check here means something.</p>
+          <div class="node">real silicon — ground truth</div>
+          <div class="node">Hazard3 rvcpp — hand-written by the RTL author</div>
+          <div class="node">riscv-unified-db / Trusim — spec-derived</div>
+          <div class="node">rp2040js — hand-written from DDI0419</div>
+          <div class="node">LLVM Xtensa — hand-written TableGen</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Open — and needing a human</h2>
+      <div class="prose">
+        <ul>
+          <li><strong>Arm FVP licence.</strong> Downloads unauthenticated, runs here, models both
+            M0 and M0+. But its supplementary terms <em>prevail</em> over the EULA and scope
+            “Software Models” to Arm architecture licensees. An Armv6-M core here is one.
+            Default: build nothing on it.</li>
+          <li><strong>The Nucleo’s ST-LINK revision.</strong> Decides 245 vs 2,000 cases/sec.
+            Answerable from the board’s silkscreen; st.com is unreachable from this network.</li>
+          <li><strong>The UDB toolchain image.</strong> Trusim cannot build here —
+            <code>./do</code> dies at <code>unsupported OS: MINGW64_NT</code> before Ruby or GMP
+            matter. Docker is the only route, and the image denies anonymous pull.</li>
+          <li><strong>What an oracle must prove.</strong> The handoff asked whether rvcpp builds
+            and exposes the right shape. Both true. The question nobody specified was
+            <em>does it model what the hardware refuses?</em> — and it does not.</li>
+        </ul>
+      </div>
+    </section>
+
+  </div>
 </main>
 
 <footer>

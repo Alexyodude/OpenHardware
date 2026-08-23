@@ -253,7 +253,24 @@ function startingTheme() {
     ? "dark" : "light";
 }
 
+/** Switch between the emulator and the targets list.
+ *
+ *  The view is one attribute on `<body>`; the CSS does the rest, so there is
+ *  no second place that can disagree about which is showing. Switching does
+ *  NOT stop a run in progress — it is a change of what you are looking at,
+ *  not of what the processor is doing, and stopping on a tab click would
+ *  throw away a long run for no reason. */
+function showView(name) {
+  document.body.dataset.view = name;
+  for (const view of ["emulator", "targets"]) {
+    $(`tab-${view}`).setAttribute("aria-selected", String(view === name));
+  }
+}
+
 function wire() {
+  $("tab-emulator").addEventListener("click", () => showView("emulator"));
+  $("tab-targets").addEventListener("click", () => showView("targets"));
+
   $("step").addEventListener("click", () => stepOnce().catch(report));
   $("run").addEventListener("click", () => runContinuously().catch(report));
   $("stop").addEventListener("click", () => { running = false; });
@@ -280,6 +297,9 @@ function wire() {
 
   document.addEventListener("keydown", (event) => {
     if (event.target.tagName === "INPUT" || event.target.tagName === "SELECT") return;
+    // The step and run keys are for the emulator. Firing them while the
+    // targets list is showing would advance a processor the reader cannot see.
+    if (document.body.dataset.view !== "emulator") return;
     if (event.key === "F10" || event.key === "s") { event.preventDefault(); stepOnce().catch(report); }
     if (event.key === "F5" || event.key === "r") { event.preventDefault(); runContinuously().catch(report); }
     if (event.key === "Escape") running = false;
