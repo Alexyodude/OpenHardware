@@ -115,7 +115,30 @@ def test_upstream_reference_pair_covers_the_whole_contract(upstream):
     assert missing_methods(pair, upstream / "src" / "lib" / "board.h") == set()
 
 
+#: Pure virtuals in upstream's `src/lib/board.h`.
+#:
+#: 42 measured 2026-08-09 against the fork point (`cd92747b`).
+#: 44 measured 2026-08-23 against upstream `62e8b5ba`, which added
+#: `GetSimBackends()` and `GetDebuggers()`.
+#:
+#: Upstream is deliberately unpinned (rules/upstream-sync.md section 4), so
+#: this number tracks whatever revision the reference checkout holds and
+#: **will fire again** when upstream touches the contract. That is the point:
+#: it is the only thing that notices a board this project has to implement
+#: gained a method.
+CONTRACT_SIZE = 44
+
+
 def test_the_real_contract_is_the_expected_size(upstream):
-    # Pins the count the strategy document cites. If board.h gains or loses a
-    # pure virtual, this fails and the doc needs updating with it.
-    assert len(contract_methods(upstream / "src" / "lib" / "board.h")) == 42
+    """A tripwire on upstream's board contract, not a build gate.
+
+    When this fails, upstream changed `board.h`. Reconcile the ledgers under
+    `docs/features/` and `rules/core-interface.md`, then update
+    `CONTRACT_SIZE` with the date and revision you measured against.
+    """
+    found = contract_methods(upstream / "src" / "lib" / "board.h")
+    assert len(found) == CONTRACT_SIZE, (
+        f"board.h declares {len(found)} pure virtuals, expected "
+        f"{CONTRACT_SIZE}. Upstream has changed the board contract. "
+        f"Declared now: {sorted(found)}"
+    )

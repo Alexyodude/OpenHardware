@@ -48,7 +48,8 @@ output. `test_empty_directory_raises` pins it.
 a concrete board covers them across two halves: a `bsim_*` supplying the
 simulation surface and a `board_*` supplying the UI surface.
 
-`tools/check_board_contract.py` asserts the union of a pair declares all 42.
+`tools/check_board_contract.py` asserts the union of a pair declares all of
+them — 44 as of upstream `62e8b5ba` (2026-08-23), 42 at the fork point.
 
 A C++ compiler does this better, and where one is available it should be
 trusted over a regex. This checker exists because a toolchain is not always
@@ -57,7 +58,7 @@ the probe in `.github/workflows/nogui-probe.yml` succeeds. It is validated
 against `bsim_ucsim.h` + `board_uCboard.h`, an upstream pair that demonstrably
 compiles, so a failure there means the checker is wrong rather than the code:
 `test_upstream_reference_pair_covers_the_whole_contract` pins it, and
-`test_the_real_contract_is_the_expected_size` fails if the count of 42 ever
+`test_the_real_contract_is_the_expected_size` fails if that count ever
 changes.
 
 `contract_methods` raises when it finds no pure virtuals at all. An empty
@@ -73,3 +74,17 @@ compiles, links, runs, and silently produces a dead analog pin.
 Never report a passing `check_board_contract.py` as evidence that a backend
 works. Correctness per method is what `rules/conformance-fixtures.md`
 covers, one ledger cell at a time.
+
+## 4. 2026-08-23 — the contract moves, because upstream is unpinned
+
+The count was 42 at the fork point and is 44 today: upstream added
+`GetSimBackends()` and `GetDebuggers()` in the ten commits after `bc0fe3ad`.
+
+It was CI that noticed, on the first run this project ever completed — the
+local reference was a stale clone reporting 42 while CI cloned upstream HEAD
+and got 44. Both are now on `62e8b5ba`.
+
+Expect this to fire again. `rules/upstream-sync.md` section 4 explains why
+there is no pinned revision, and `CONTRACT_SIZE` in
+`tests/rules/test_check_board_contract.py` carries the date and revision of
+each measurement so the next person can see what moved.
