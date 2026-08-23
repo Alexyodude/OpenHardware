@@ -1,0 +1,16 @@
+US-001/US-002 (OH-2, decode) complete 2026-08-23.
+  core/i8086/decode.{h,cc}: prefixes, modrm, disp8 sign-extension, disp16,
+  the mod-0-rm-6 direct-address exception, BP-implies-SS default segment.
+  Exposed over the ABI as i8086_decode (ABI version bumped 1 -> 2).
+  Learning: `**BASE, **regs` raises on a duplicate key -- use {**a, **b}.
+  Learning: disp8 MUST be int8_t before widening. 0x9C is -100, and read
+  unsigned the instruction still "works" but touches the wrong memory.
+US-003/US-004/US-005 (OH-3 execute, OH-6 wired) complete 2026-08-23.
+  core/i8086/alu.{h,cc}    Add8 with CF/AF/OF/ZF/SF/PF
+  core/i8086/exec_core.*   NOP, MOV r/m8 r8, ADD r/m8 r8, byte register file
+  ABI 2 -> 3, i8086_step added; unimplemented opcodes RAISE, never no-op.
+  Conformance: 0/11 -> 11/11. Baseline mode kept, still 0/11, so the
+  comparison stays meaningful.
+  Learning: CF and OF answer different questions. 0x7F+0x01 overflows signed
+  without carrying; 0xFF+0x01 carries without overflowing. Both are tested.
+  Learning: PF is set on EVEN parity, and only over the low byte.

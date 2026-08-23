@@ -9,6 +9,8 @@
 #include <new>
 
 #include "cpu.h"
+#include "decode.h"
+#include "exec_core.h"
 
 namespace {
 
@@ -141,6 +143,41 @@ void i8086_clear_memory(I8086Cpu* cpu) {
 
 uint32_t i8086_physical(uint16_t segment, uint16_t offset) {
     return i8086::Physical(segment, offset);
+}
+
+int i8086_step(I8086Cpu* cpu) {
+    if (cpu == nullptr) {
+        return 1;
+    }
+    return static_cast<int>(i8086::Step(*Of(cpu)));
+}
+
+uint32_t i8086_decoded_size(void) { return static_cast<uint32_t>(sizeof(I8086Decoded)); }
+
+void i8086_decode(const I8086Cpu* cpu, uint16_t cs, uint16_t ip, I8086Decoded* out) {
+    if (cpu == nullptr || out == nullptr) {
+        return;
+    }
+    const i8086::Instruction decoded = i8086::Decode(*Of(cpu), cs, ip);
+    *out = I8086Decoded{};
+    out->opcode = decoded.opcode;
+    out->has_modrm = decoded.has_modrm ? 1u : 0u;
+    out->mod = decoded.modrm.mod;
+    out->reg = decoded.modrm.reg;
+    out->rm = decoded.modrm.rm;
+    out->displacement = decoded.displacement;
+    out->segment_override = static_cast<uint8_t>(decoded.segment_override);
+    out->length = decoded.length;
+
+    if (decoded.has_modrm && !decoded.modrm.is_register()) {
+        const i8086::Address address = i8086::EffectiveAddress(
+            Of(cpu)->regs(), decoded.modrm, decoded.displacement, decoded.segment_override);
+        out->has_memory_operand = 1u;
+        out->ea_segment = static_cast<uint8_t>(address.segment);
+        out->ea_offset = address.offset;
+        out->ea_physical =
+            i8086::Physical(i8086::SegmentValue(Of(cpu)->regs(), address.segment), address.offset);
+    }
 }
 
 }  // extern "C"

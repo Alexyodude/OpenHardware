@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match I8086_ABI_VERSION in abi.h.
-ABI_VERSION = 1
+ABI_VERSION = 3
 
 #: Field order is abi.h's, which is the SST8088 corpus's. Do not sort it.
 REGISTER_NAMES = (
@@ -49,6 +49,10 @@ REGISTER_NAMES = (
 
 class AbiError(Exception):
     """The library is missing, or does not match this binding."""
+
+
+class Unimplemented(AbiError):
+    """The core reached an opcode nobody has written yet."""
 
 
 class Registers(ctypes.Structure):
@@ -64,7 +68,58 @@ class Registers(ctypes.Structure):
         return f"<Registers {inner}>"
 
 
+#: 0=ES 1=CS 2=SS 3=DS 4=none, matching i8086::Segment in decode.h.
+SEGMENT_NAMES = ("es", "cs", "ss", "ds", None)
+
+
+class Decoded(ctypes.Structure):
+    """Mirror of `I8086Decoded`. Padding is left to ctypes and the compiler,
+    which agree by default -- and `i8086_decoded_size` proves it at load."""
+
+    _fields_ = [
+        ("opcode", ctypes.c_uint8),
+        ("has_modrm", ctypes.c_uint8),
+        ("mod", ctypes.c_uint8),
+        ("reg", ctypes.c_uint8),
+        ("rm", ctypes.c_uint8),
+        ("displacement", ctypes.c_int16),
+        ("segment_override", ctypes.c_uint8),
+        ("length", ctypes.c_uint8),
+        ("has_memory_operand", ctypes.c_uint8),
+        ("ea_segment", ctypes.c_uint8),
+        ("ea_offset", ctypes.c_uint16),
+        ("ea_physical", ctypes.c_uint32),
+    ]
+
+    @property
+    def override_name(self) -> str | None:
+        """The segment a prefix asked for, or None if there was no prefix."""
+        return SEGMENT_NAMES[self.segment_override]
+
+    @property
+    def segment_name(self) -> str | None:
+        """The segment actually used for the memory operand, if any."""
+        return SEGMENT_NAMES[self.ea_segment] if self.has_memory_operand else None
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        parts = [f"op={self.opcode:02X}", f"len={self.length}"]
+        if self.has_modrm:
+            parts.append(f"mod={self.mod} reg={self.reg} rm={self.rm}")
+            parts.append(f"disp={self.displacement}")
+        if self.has_memory_operand:
+            parts.append(f"{self.segment_name}:{self.ea_offset:04X}={self.ea_physical:05X}")
+        if self.override_name:
+            parts.append(f"override={self.override_name}")
+        return "<Decoded " + " ".join(parts) + ">"
+
+
 _SIGNATURES = {
+    "i8086_step": ([ctypes.c_void_p], ctypes.c_int),
+    "i8086_decoded_size": ([], ctypes.c_uint32),
+    "i8086_decode": (
+        [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_uint16, ctypes.POINTER(Decoded)],
+        None,
+    ),
     "i8086_abi_version": ([], ctypes.c_int),
     "i8086_regs_size": ([], ctypes.c_uint32),
     "i8086_memory_size": ([], ctypes.c_uint32),
@@ -122,12 +177,15 @@ def load(build_if_missing: bool = True) -> ctypes.CDLL:
     reported = library.i8086_abi_version()
     if reported != ABI_VERSION:
         raise AbiError(f"library ABI version {reported}, this binding expects {ABI_VERSION}")
-    size = library.i8086_regs_size()
-    if size != ctypes.sizeof(Registers):
-        raise AbiError(
-            f"I8086Registers is {size} bytes in the library and "
-            f"{ctypes.sizeof(Registers)} here; the mirrors have drifted"
-        )
+    for label, reported, mirrored in (
+        ("I8086Registers", library.i8086_regs_size(), ctypes.sizeof(Registers)),
+        ("I8086Decoded", library.i8086_decoded_size(), ctypes.sizeof(Decoded)),
+    ):
+        if reported != mirrored:
+            raise AbiError(
+                f"{label} is {reported} bytes in the library and {mirrored} here; "
+                f"the mirrors have drifted"
+            )
 
     _library = library
     return library
@@ -231,3 +289,33 @@ class Cpu:
 
     def clear_memory(self) -> None:
         self._lib.i8086_clear_memory(self._check())
+
+    def decode(self, cs: int | None = None, ip: int | None = None) -> Decoded:
+        """Decode the instruction at cs:ip without executing it.
+
+        Defaults to the current CS:IP, which is what a disassembly view wants.
+        """
+        current = self.regs
+        out = Decoded()
+        self._lib.i8086_decode(
+            self._check(),
+            current.cs if cs is None else cs & 0xFFFF,
+            current.ip if ip is None else ip & 0xFFFF,
+            ctypes.byref(out),
+        )
+        return out
+
+    def step(self) -> None:
+        """Execute one instruction, or raise naming the opcode that stopped it.
+
+        Raising rather than returning a status: a caller that ignores a status
+        code turns an unimplemented opcode into a silent no-op, and a
+        conformance case whose expected state happens to match would then pass.
+        """
+        status = self._lib.i8086_step(self._check())
+        if status != 0:
+            current = self.decode()
+            raise Unimplemented(
+                f"opcode {current.opcode:02X}h at "
+                f"{self.regs.cs:04X}:{self.regs.ip:04X} is not implemented"
+            )

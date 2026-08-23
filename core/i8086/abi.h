@@ -40,7 +40,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define I8086_ABI_VERSION 1
+#define I8086_ABI_VERSION 3
 
 /// Mirrors i8086::Registers, in the SST8088 corpus's own field order.
 typedef struct {
@@ -50,6 +50,27 @@ typedef struct {
     uint16_t ip;
     uint16_t flags;
 } I8086Registers;
+
+/// A decoded instruction, flattened for the ABI.
+///
+/// `ea_*` are filled only when the instruction has a memory operand, so a
+/// caller need not reimplement the addressing table to know where an
+/// instruction points. `segment_override` and `ea_segment` use
+/// 0=ES 1=CS 2=SS 3=DS 4=none, matching i8086::Segment.
+typedef struct {
+    uint8_t opcode;
+    uint8_t has_modrm;
+    uint8_t mod;
+    uint8_t reg;
+    uint8_t rm;
+    int16_t displacement;
+    uint8_t segment_override;
+    uint8_t length;
+    uint8_t has_memory_operand;
+    uint8_t ea_segment;
+    uint16_t ea_offset;
+    uint32_t ea_physical;
+} I8086Decoded;
 
 typedef struct I8086Cpu I8086Cpu;
 
@@ -84,6 +105,19 @@ I8086_API void i8086_clear_memory(I8086Cpu* cpu);
 /// Segment:offset to physical, exposed so the Python side tests the same
 /// wrapping the core uses rather than reimplementing it.
 I8086_API uint32_t i8086_physical(uint16_t segment, uint16_t offset);
+
+/// Decode the instruction at cs:ip without executing it.
+I8086_API void i8086_decode(const I8086Cpu* cpu, uint16_t cs, uint16_t ip,
+                            I8086Decoded* out);
+I8086_API uint32_t i8086_decoded_size(void);
+
+/// Execute one instruction at CS:IP, advancing IP past it.
+///
+/// Returns 0 on success and 1 for an opcode that is not implemented. On 1 the
+/// processor is untouched, including IP -- so a caller can report exactly
+/// which instruction stopped it, and a conformance case can never pass by
+/// accident because an unwritten opcode behaved like a NOP.
+I8086_API int i8086_step(I8086Cpu* cpu);
 
 #ifdef __cplusplus
 }  // extern "C"

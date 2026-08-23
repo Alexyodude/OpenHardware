@@ -4,13 +4,19 @@
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Tests for tests/i8086/conformance.py, per ticket OH-6.
 
-There is no core to execute instructions yet -- that is OH-3. So the harness is
-driven by stand-ins whose behaviour is known exactly: one that produces the
-right answer, and several that are wrong in one specific way each.
+Two layers, and the first is what makes the second trustworthy.
 
-That is the only way to know a harness works. Pointed at a real core, a
-harness that always says "pass" and a harness that is correct look identical
-until the core has a bug, and by then you are debugging both.
+**The harness, against stand-ins.** Most of this file drives the harness with
+behaviour known exactly: one step that produces the right answer, and several
+wrong in one specific way each. That is the only way to know a harness works.
+Pointed at a real core, a harness that always says "pass" and a harness that
+is correct look identical until the core has a bug, and by then you are
+debugging both.
+
+**The core, against silicon.** The last few run the real core over all eleven
+cases and require 11/11, plus a matching run of the do-nothing baseline that
+must still score 0. If those two ever report the same rate, the comparison has
+stopped meaning anything.
 
 The cases are the eleven real ones committed under `tests/fixtures/sst8088/`,
 so every shape exercised here is a shape the corpus actually produces.
@@ -272,3 +278,37 @@ def test_the_fetched_corpus_runs_if_it_is_present():
     for path in files:
         report = conformance.run_file(path, does_nothing, limit=5)
         assert report.total == 5
+
+
+# --- the real core against the real cases ------------------------------------------
+
+
+def test_the_real_core_passes_every_committed_case(cases):
+    """The number this whole slice exists to move: 0/11 to 11/11.
+
+    Asserted rather than printed. A printed rate that quietly drops to 9/11
+    is a regression nobody notices until they read the log; an assertion
+    fails the build.
+    """
+    report = conformance.run_cases(cases, conformance.core_step, name="fixtures")
+    detail = "; ".join(f.describe() for f in report.failures)
+    assert report.passed == report.total, (
+        f"{report.failed} of {report.total} regressed: {detail}"
+    )
+    assert report.total == 11, "the committed excerpt is eleven cases"
+
+
+def test_the_do_nothing_baseline_still_fails(cases):
+    """Proves the 100% above is the core and not a harness that passes
+    anything. If both report the same rate, the comparison is meaningless."""
+    baseline = conformance.run_cases(cases, conformance.no_execution, name="baseline")
+    assert baseline.passed == 0
+
+
+def test_every_add_case_matches_flags_exactly(cases):
+    """All four 00.json cases change flags, so they are the real flag test --
+    against silicon, not against a manual."""
+    adds = [c for c in cases if c.name.startswith("add")]
+    assert len(adds) == 4, "fixture assumption"
+    report = conformance.run_cases(adds, conformance.core_step, name="add")
+    assert report.passed == 4, "; ".join(f.describe() for f in report.failures)

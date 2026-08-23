@@ -244,14 +244,21 @@ def summarise(reports: list[Report]) -> str:
     return "\n".join(lines)
 
 
-def _no_execution(cpu: abi.Cpu) -> None:
-    """The placeholder step, until OH-3 lands.
+def core_step(cpu: abi.Cpu) -> None:
+    """Execute one instruction with the real core.
 
-    Named rather than a lambda so the report says what it was run against. A
-    run through this reports the pass rate of a core that executes nothing,
-    which is the baseline every later slice is measured against -- and it is
-    not zero, because some cases genuinely change nothing observable.
+    An unimplemented opcode raises rather than passing silently, and the
+    harness turns that into a failure for the case rather than aborting the
+    run -- one unwritten opcode should not hide the pass rate of every other.
     """
+    try:
+        cpu.step()
+    except abi.Unimplemented:
+        pass
+
+
+def no_execution(cpu: abi.Cpu) -> None:
+    """A core that does nothing, kept as the baseline to measure against."""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -269,15 +276,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--limit", type=int, help="cases per file")
     parser.add_argument("--failures", type=int, default=3, help="failures to print per file")
+    parser.add_argument(
+        "--baseline",
+        action="store_true",
+        help="run the do-nothing core instead, to see what the real one is worth",
+    )
     args = parser.parse_args(argv)
 
     repo = pathlib.Path(__file__).resolve().parents[2]
     target = args.path or (repo / "tests" / "fixtures" / "sst8088")
 
-    # OH-3 has not landed, so there is nothing to execute yet. Stating that is
-    # the point: a 0% baseline printed loudly is honest, where a harness that
-    # silently had no core to run would not be.
-    step: Step = _no_execution
+    step: Step = no_execution if args.baseline else core_step
 
     try:
         if target.is_dir():
@@ -288,7 +297,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"conformance: {exc}", file=sys.stderr)
         return 2
 
-    print("core: none (OH-3 unimplemented); this is the do-nothing baseline\n")
+    label = "none (do-nothing baseline)" if args.baseline else "core/i8086"
+    print(f"core: {label}\n")
     print(summarise(reports))
     for report in reports:
         for failure in report.failures[: args.failures]:

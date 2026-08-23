@@ -15,3 +15,5 @@ Drives the core directly rather than through rcontrol, which has no register-wri
 **Note 2026-08-23:** Harness runs, tested against deliberately-correct and deliberately-wrong stand-ins. Baseline against the committed excerpt is 0/11, which is correct: nothing executes until OH-3.
 
 **Note 2026-08-23:** CI run 32635052721 green: harness suite passed on Linux and the baseline step printed the rate.
+
+**Note 2026-08-23:** Wired to the real core; 11/11 on the committed excerpt, asserted by test rather than printed.
