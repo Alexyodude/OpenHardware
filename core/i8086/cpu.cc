@@ -44,6 +44,19 @@ void Cpu::WriteWord(std::uint32_t address, std::uint16_t value) {
     WriteByte(address + 1, static_cast<std::uint8_t>(value >> 8));
 }
 
+std::uint16_t Cpu::ReadWordAt(std::uint16_t segment, std::uint16_t offset) const {
+    const std::uint16_t low = ReadByte(Physical(segment, offset));
+    const std::uint16_t high =
+        ReadByte(Physical(segment, static_cast<std::uint16_t>(offset + 1)));
+    return static_cast<std::uint16_t>(low | (high << 8));
+}
+
+void Cpu::WriteWordAt(std::uint16_t segment, std::uint16_t offset, std::uint16_t value) {
+    WriteByte(Physical(segment, offset), static_cast<std::uint8_t>(value & 0xFF));
+    WriteByte(Physical(segment, static_cast<std::uint16_t>(offset + 1)),
+              static_cast<std::uint8_t>(value >> 8));
+}
+
 void Cpu::ClearMemory() { std::fill(memory_.begin(), memory_.end(), std::uint8_t{0}); }
 
 }  // namespace i8086

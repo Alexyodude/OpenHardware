@@ -151,6 +151,11 @@ int i8086_step(I8086Cpu* cpu) {
     return static_cast<int>(i8086::Step(*Of(cpu)));
 }
 
+int i8086_opcode_info(uint8_t opcode) {
+    const i8086::OpcodeInfo info = i8086::Lookup(opcode);
+    return (info.implemented ? 1 : 0) | (info.has_modrm ? 2 : 0);
+}
+
 uint32_t i8086_decoded_size(void) { return static_cast<uint32_t>(sizeof(I8086Decoded)); }
 
 void i8086_decode(const I8086Cpu* cpu, uint16_t cs, uint16_t ip, I8086Decoded* out) {
@@ -167,6 +172,7 @@ void i8086_decode(const I8086Cpu* cpu, uint16_t cs, uint16_t ip, I8086Decoded* o
     out->displacement = decoded.displacement;
     out->segment_override = static_cast<uint8_t>(decoded.segment_override);
     out->length = decoded.length;
+    out->valid = decoded.valid ? 1u : 0u;
 
     if (decoded.has_modrm && !decoded.modrm.is_register()) {
         const i8086::Address address = i8086::EffectiveAddress(

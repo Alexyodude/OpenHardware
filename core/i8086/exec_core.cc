@@ -76,6 +76,16 @@ void WriteByteRegister(Registers& regs, std::uint8_t index, std::uint8_t value) 
 
 StepStatus Step(Cpu& cpu) {
     const Instruction instruction = Decode(cpu, cpu.regs().cs, cpu.regs().ip);
+    if (!instruction.valid) {
+        return StepStatus::kUnimplemented;
+    }
+
+    // The table is the authority on what exists; the switch below only says
+    // what each one does. A case here without a table entry decodes at the
+    // wrong length, so refuse it rather than run it.
+    if (!Lookup(instruction.opcode).implemented) {
+        return StepStatus::kUnimplemented;
+    }
 
     switch (instruction.opcode) {
         case 0x90:  // NOP, which is XCHG AX,AX and touches nothing.
@@ -99,7 +109,9 @@ StepStatus Step(Cpu& cpu) {
         }
 
         default:
-            // IP is deliberately not advanced. See StepStatus.
+            // Unreachable: the table check above already refused anything not
+            // implemented. Kept so adding a table entry without a case here is
+            // a refusal rather than a fall-through that advances IP.
             return StepStatus::kUnimplemented;
     }
 

@@ -40,9 +40,15 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define I8086_ABI_VERSION 3
+#define I8086_ABI_VERSION 5
 
-/// Mirrors i8086::Registers, in the SST8088 corpus's own field order.
+/// Mirrors i8086::Registers.
+///
+/// The field ORDER is this file's own and deliberately need not match the
+/// corpus's -- every crossing is by name (`set_regs(**case.initial_regs)`,
+/// `as_dict()`), never positional. An earlier version of this comment
+/// claimed the orders matched. They do not, and nothing noticed because
+/// nothing depends on it.
 typedef struct {
     uint16_t ax, bx, cx, dx;
     uint16_t si, di, bp, sp;
@@ -66,6 +72,7 @@ typedef struct {
     int16_t displacement;
     uint8_t segment_override;
     uint8_t length;
+    uint8_t valid;
     uint8_t has_memory_operand;
     uint8_t ea_segment;
     uint16_t ea_offset;
@@ -110,6 +117,10 @@ I8086_API uint32_t i8086_physical(uint16_t segment, uint16_t offset);
 I8086_API void i8086_decode(const I8086Cpu* cpu, uint16_t cs, uint16_t ip,
                             I8086Decoded* out);
 I8086_API uint32_t i8086_decoded_size(void);
+
+/// Bit 0: implemented. Bit 1: takes a modrm byte. From the single table both
+/// the decoder and the executor consult.
+I8086_API int i8086_opcode_info(uint8_t opcode);
 
 /// Execute one instruction at CS:IP, advancing IP past it.
 ///

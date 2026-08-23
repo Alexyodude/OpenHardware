@@ -58,7 +58,7 @@ enum Flag : std::uint16_t {
 /// hardware on the first case it runs.
 inline constexpr std::uint16_t kFlagsAlwaysSet = 0xF002u;
 
-/// Registers, in the corpus's own order.
+/// The register file. Order is ours; see abi.h.
 struct Registers {
     std::uint16_t ax = 0, bx = 0, cx = 0, dx = 0;
     std::uint16_t si = 0, di = 0, bp = 0, sp = 0;
@@ -87,10 +87,25 @@ class Cpu {
     std::uint8_t ReadByte(std::uint32_t address) const;
     void WriteByte(std::uint32_t address, std::uint8_t value);
 
-    /// Little-endian, and wrapping at the top of the space like the address
-    /// adder does -- a word read at 0xFFFFF takes its high byte from 0x00000.
+    /// Little-endian word at a **physical** address, wrapping at the top of
+    /// the 1 MB space.
+    ///
+    /// This is a raw inspection accessor -- a debugger reading memory, or the
+    /// ABI's i8086_read_word. **Instruction operands must not use it.** A word
+    /// at seg:FFFF takes its high byte from seg:0000, the same segment, not
+    /// from physical+1 which belongs to the next paragraph. Use the
+    /// segment:offset pair below for anything the processor itself does.
     std::uint16_t ReadWord(std::uint32_t address) const;
     void WriteWord(std::uint32_t address, std::uint16_t value);
+
+    /// Little-endian word at segment:offset, wrapping the **offset** inside
+    /// the segment.
+    ///
+    /// This is what the hardware does, and it is not the same as wrapping the
+    /// physical address. PUSH and POP at SS:SP hit it the moment SP is near
+    /// 0xFFFF, which is a real stack, not a contrived one.
+    std::uint16_t ReadWordAt(std::uint16_t segment, std::uint16_t offset) const;
+    void WriteWordAt(std::uint16_t segment, std::uint16_t offset, std::uint16_t value);
 
     void ClearMemory();
 

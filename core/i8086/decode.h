@@ -65,13 +65,49 @@ struct Instruction {
     /// Total length including prefixes. IP advances by exactly this, so an
     /// error here desynchronises every following instruction.
     std::uint8_t length = 0;
+    /// False when the prefix run exceeded kMaxLength and no opcode was ever
+    /// reached. Execution must refuse an invalid instruction rather than run
+    /// whatever byte the scan stopped on. See kMaxLength.
+    bool valid = true;
 };
+
+/// The longest instruction this decoder will accept, in bytes.
+///
+/// The 8086 has no architectural limit -- its bus unit will consume prefixes
+/// forever -- so a decoder needs one or a page of 0x2E bytes is an infinite
+/// loop. 15 is the limit later x86 parts adopted, and is comfortably longer
+/// than any real 8086 instruction (opcode + modrm + disp16 + imm16 is 6, plus
+/// prefixes).
+///
+/// Exceeding it marks the instruction **invalid** rather than stopping and
+/// treating the byte it stopped on as an opcode. The first version did the
+/// latter: seven segment prefixes decoded as `opcode 2E, length 7`, silently
+/// producing a wrong instruction instead of refusing one.
+inline constexpr int kMaxLength = 15;
 
 /// A computed memory operand.
 struct Address {
     Segment segment = Segment::kDs;  ///< after any override is applied
     std::uint16_t offset = 0;
 };
+
+/// What the decoder and the executor both need to know about an opcode.
+///
+/// **One table, consulted by both.** These were two lists -- a switch in
+/// `OpcodeHasModRm` and a switch in `Step` -- and nothing connected them. Add
+/// an opcode to the executor and forget the decoder and it decodes at the
+/// wrong length, so IP lands mid-instruction and everything after it is
+/// garbage. Nothing would have failed at compile time, and the corpus case
+/// for that opcode would fail in a way that looks like an arithmetic bug.
+///
+/// With ~200 opcodes still to add, that desync is a matter of when.
+struct OpcodeInfo {
+    bool implemented = false;
+    bool has_modrm = false;
+};
+
+/// Properties of an opcode. Unknown opcodes report `implemented = false`.
+OpcodeInfo Lookup(std::uint8_t opcode);
 
 /// Whether an instruction's opcode takes a modrm byte.
 bool OpcodeHasModRm(std::uint8_t opcode);

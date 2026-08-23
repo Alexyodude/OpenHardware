@@ -2,15 +2,16 @@
 #
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
-"""Tests for core/i8086/abi.h, abi.cc and abi.py, per ticket OH-1.
+"""Tests for core/i8086/abi.h, abi.cc and abi.py, per tickets OH-1 and OH-2.
 
-This slice has no decode and no execution, so what is checked is the pipeline
-and the state: that the library builds, that Python and C++ agree on the
-struct, and that memory and segmentation behave the way the oracle will
-require when OH-6 starts feeding real cases through.
+The contract between three files that drift silently: abi.h declares it,
+abi.cc implements it, abi.py mirrors it. A field added on one side and not the
+other does not fail to compile and does not fail to load -- it reads the wrong
+bytes. So the sizes are checked, the names are checked, and the opcode table
+is swept across all 256 values.
 
 The register values here are taken from an actual SST8088 case rather than
-invented, so the shapes exercised are the shapes the corpus will produce.
+invented, so the shapes exercised are the shapes the corpus produces.
 """
 
 import ctypes
@@ -47,9 +48,33 @@ def test_the_struct_is_fourteen_packed_words():
     assert len(abi.REGISTER_NAMES) == 14
 
 
-def test_the_field_order_matches_the_corpus():
-    """The harness fills this struct straight from a case's `regs` object."""
+def test_the_struct_names_exactly_the_corpus_registers():
+    """Same fourteen names -- and the order is deliberately NOT asserted.
+
+    This used to be `set(...) == set(...)` under a name claiming the field
+    ORDER matched the corpus, which a set comparison cannot check. It does not
+    match, three docstrings said it did, and nothing caught it because nothing
+    depends on it: every crossing is by name.
+
+    So the claim is gone and this asserts what is actually required -- the same
+    names, so `set_regs(**case.initial_regs)` cannot raise on an unknown key.
+    """
     assert set(abi.REGISTER_NAMES) == set(ORACLE_CASE)
+    assert len(abi.REGISTER_NAMES) == len(set(abi.REGISTER_NAMES)), "no duplicates"
+
+
+def test_the_orders_differ_which_is_fine_and_deliberate():
+    """Pins the fact the old comment got wrong, so nobody re-asserts it."""
+    from tools import sst8088
+
+    assert abi.REGISTER_NAMES != sst8088.REGISTERS
+    assert set(abi.REGISTER_NAMES) == set(sst8088.REGISTERS)
+
+
+def test_a_whole_corpus_case_survives_the_name_crossing(cpu):
+    """The property the order claim was standing in for."""
+    cpu.set_regs(**ORACLE_CASE)
+    assert cpu.regs.as_dict() == ORACLE_CASE
 
 
 def test_the_address_space_is_one_megabyte(library):
@@ -206,3 +231,54 @@ def test_closing_twice_is_harmless(library):
     instance = abi.Cpu()
     instance.close()
     instance.close()
+
+
+# --- word access at a segment boundary ------------------------------------------
+
+
+def test_a_physical_word_read_wraps_at_the_megabyte(cpu):
+    """The raw accessor: documented as physical, and inspection-only."""
+    cpu.write_byte(0xFFFFF, 0xEF)
+    cpu.write_byte(0x00000, 0xBE)
+    assert cpu.read_word(0xFFFFF) == 0xBEEF
+
+
+def test_the_raw_word_accessor_is_not_segment_aware(cpu):
+    """Pins the boundary that made this worth splitting in two.
+
+    A word at seg:FFFF takes its high byte from seg:0000 on real hardware --
+    the same segment. The physical accessor reads physical+1, which is the
+    next paragraph. That is correct for a debugger and wrong for an operand,
+    and PUSH/POP at SS:SP hits it the moment SP nears 0xFFFF.
+    """
+    cpu.write_byte(abi.physical(0x1000, 0xFFFF), 0xEF)
+    cpu.write_byte(abi.physical(0x1000, 0x0000), 0xBE)   # what hardware wants
+    cpu.write_byte(abi.physical(0x1000, 0xFFFF) + 1, 0x77)  # what physical+1 gives
+    assert cpu.read_word(abi.physical(0x1000, 0xFFFF)) == 0x77EF
+
+
+# --- one opcode table, not two ----------------------------------------------------
+
+
+def test_the_opcode_table_is_the_only_authority(library):
+    """Sweeps all 256. The decoder and executor read one table, so an opcode
+    cannot be implemented in one and unknown to the other."""
+    implemented = [op for op in range(256) if abi.opcode_info(op)[0]]
+    assert implemented == [0x00, 0x88, 0x90], (
+        f"implemented set changed: {[hex(o) for o in implemented]}. "
+        f"Update this list when an opcode lands."
+    )
+
+
+def test_every_implemented_opcode_declares_its_modrm(library):
+    """A modrm mismatch decodes at the wrong length, so IP lands
+    mid-instruction and everything after it is garbage."""
+    expected = {0x00: True, 0x88: True, 0x90: False}
+    for opcode, wants_modrm in expected.items():
+        found, has_modrm = abi.opcode_info(opcode)
+        assert found, f"{opcode:02X} is no longer implemented"
+        assert has_modrm == wants_modrm, f"{opcode:02X} modrm flag flipped"
+
+
+def test_an_unknown_opcode_is_not_implemented(library):
+    assert abi.opcode_info(0xF4) == (False, False)

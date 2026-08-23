@@ -16,15 +16,16 @@ std::uint8_t FetchAt(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip, int n) 
 
 }  // namespace
 
-bool OpcodeHasModRm(std::uint8_t opcode) {
+OpcodeInfo Lookup(std::uint8_t opcode) {
     switch (opcode) {
-        case 0x00:  // ADD r/m8, r8
-        case 0x88:  // MOV r/m8, r8
-            return true;
-        default:
-            return false;
+        case 0x00: return {true, true};    // ADD r/m8, r8
+        case 0x88: return {true, true};    // MOV r/m8, r8
+        case 0x90: return {true, false};   // NOP
+        default: return {false, false};
     }
 }
+
+bool OpcodeHasModRm(std::uint8_t opcode) { return Lookup(opcode).has_modrm; }
 
 Instruction Decode(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip) {
     Instruction out;
@@ -40,11 +41,12 @@ Instruction Decode(const Cpu& cpu, std::uint16_t cs, std::uint16_t ip) {
         }
         out.segment_override = segment;
         ++at;
-        // An instruction is at most 6 bytes on this part; a run of prefixes
-        // longer than that is a decode that has lost its place, and looping
-        // forever on it would hang rather than fail.
-        if (at >= 6) {
-            break;
+        if (at >= kMaxLength) {
+            // Do not stop and read the next byte as an opcode -- it is a
+            // prefix, and calling it an opcode is a silently wrong decode.
+            out.length = static_cast<std::uint8_t>(at);
+            out.valid = false;
+            return out;
         }
     }
 

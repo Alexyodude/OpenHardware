@@ -36,9 +36,11 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match I8086_ABI_VERSION in abi.h.
-ABI_VERSION = 3
+ABI_VERSION = 5
 
-#: Field order is abi.h's, which is the SST8088 corpus's. Do not sort it.
+#: Must match abi.h's field order exactly -- this is a struct mirror, and a
+#: reordering here reads the wrong bytes. It does NOT need to match the
+#: corpus's order: every crossing is by name, never positional.
 REGISTER_NAMES = (
     "ax", "bx", "cx", "dx",
     "si", "di", "bp", "sp",
@@ -85,6 +87,7 @@ class Decoded(ctypes.Structure):
         ("displacement", ctypes.c_int16),
         ("segment_override", ctypes.c_uint8),
         ("length", ctypes.c_uint8),
+        ("valid", ctypes.c_uint8),
         ("has_memory_operand", ctypes.c_uint8),
         ("ea_segment", ctypes.c_uint8),
         ("ea_offset", ctypes.c_uint16),
@@ -115,6 +118,7 @@ class Decoded(ctypes.Structure):
 
 _SIGNATURES = {
     "i8086_step": ([ctypes.c_void_p], ctypes.c_int),
+    "i8086_opcode_info": ([ctypes.c_uint8], ctypes.c_int),
     "i8086_decoded_size": ([], ctypes.c_uint32),
     "i8086_decode": (
         [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_uint16, ctypes.POINTER(Decoded)],
@@ -319,3 +323,9 @@ class Cpu:
                 f"opcode {current.opcode:02X}h at "
                 f"{self.regs.cs:04X}:{self.regs.ip:04X} is not implemented"
             )
+
+
+def opcode_info(opcode: int) -> tuple[bool, bool]:
+    """(implemented, has_modrm) for an opcode, from the core's own table."""
+    bits = int(load().i8086_opcode_info(opcode & 0xFF))
+    return bool(bits & 1), bool(bits & 2)
