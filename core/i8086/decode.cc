@@ -44,6 +44,13 @@ OpcodeInfo Lookup(std::uint8_t opcode) {
     if (opcode >= 0x70 && opcode <= 0x7F) {
         return {true, Form::kRel8, false};
     }
+    // The shift/rotate group. D0/D1 shift by one, D2/D3 by CL, and in both
+    // cases the count is implicit -- there is no immediate byte, so the form
+    // is a plain modrm and the modrm's `reg` field picks the operation. See
+    // ShiftKind in shift.h.
+    if (opcode >= 0xD0 && opcode <= 0xD3) {
+        return {true, Form::kModRm, (opcode & 0x01) != 0};
+    }
 
     switch (opcode) {
         // MOV, following the same direction/width pattern as the ALU group.

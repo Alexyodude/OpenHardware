@@ -211,13 +211,37 @@ def run_cases(
     return report
 
 
+#: The suffixes a corpus file may carry, longest first.
+CORPUS_SUFFIXES = (".json.gz", ".json")
+
+
+def opcode_name(path: pathlib.Path) -> str:
+    """The opcode a corpus file covers, from its filename.
+
+    `path.stem` alone is not enough: `90.json.gz` has `.gz` as its suffix, so
+    the stem is `90.json` and thirty-two group files all report as
+    `D0.0.json`. But stripping *every* suffix is worse -- `D0.0` has `.0` as a
+    suffix, so a loop collapses all eight members of the group to `D0` and the
+    summary lists the same name eight times with different numbers beside it.
+    That is exactly what happened on the first run of the shift group.
+
+    So only the two suffixes the corpus actually uses come off, and the group
+    index stays part of the name.
+    """
+    name = path.name
+    for suffix in CORPUS_SUFFIXES:
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return path.stem
+
+
 def run_file(
     path: pathlib.Path,
     step: Step,
     flag_mask: int = 0xFFFF,
     limit: int | None = None,
 ) -> Report:
-    return run_cases(sst8088.load(path), step, path.stem, flag_mask, limit)
+    return run_cases(sst8088.load(path), step, opcode_name(path), flag_mask, limit)
 
 
 def run_corpus(

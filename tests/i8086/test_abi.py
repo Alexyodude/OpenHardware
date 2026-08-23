@@ -275,9 +275,10 @@ def test_the_opcode_table_is_the_only_authority(library):
     stack = set(range(0x50, 0x60))       # PUSH/POP r16
     jcc = set(range(0x70, 0x80))         # all sixteen conditions
     mov = {0x88, 0x89, 0x8A, 0x8B}
+    shift = set(range(0xD0, 0xD4))       # the whole group, all eight members
     singles = {0x90, 0xC3, 0xE8, 0xE9, 0xEB}  # NOP RET CALL JMP JMPS
 
-    assert implemented == alu | stack | jcc | mov | singles
+    assert implemented == alu | stack | jcc | mov | shift | singles
 
 
 def test_the_unwritten_alu_forms_are_refused(library):

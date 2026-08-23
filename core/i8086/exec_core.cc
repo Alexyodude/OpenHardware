@@ -6,6 +6,7 @@
 #include "exec_core.h"
 
 #include "alu.h"
+#include "shift.h"
 
 namespace i8086 {
 namespace {
@@ -227,6 +228,27 @@ StepStatus Step(Cpu& cpu) {
         if (Condition(static_cast<std::uint8_t>(opcode & 0x0F), cpu.regs().flags)) {
             cpu.regs().ip = static_cast<std::uint16_t>(next_ip + instruction.immediate);
         }
+        return StepStatus::kOk;
+    }
+
+    // --- shift and rotate, 0xD0-0xD3 --------------------------------------
+    if (opcode >= 0xD0 && opcode <= 0xD3) {
+        const Operand rm = ResolveRm(cpu, instruction);
+        // Bit 1 selects the count: clear means one, set means CL. CL is byte
+        // register 1 -- read through ReadByteRegister rather than masking
+        // cpu.regs().cx, so the one encoding table stays the only one.
+        const std::uint8_t count = (opcode & 0x02) != 0
+                                       ? ReadByteRegister(cpu.regs(), 1)
+                                       : 1;
+        std::uint16_t flags = cpu.regs().flags;
+        const std::uint16_t result =
+            Shift(static_cast<ShiftKind>(instruction.modrm.reg), Read(cpu, rm), count,
+                  instruction.wide, flags);
+        // Written back even when the count was zero, which stores the value
+        // that was already there. Harmless, and it keeps the zero case from
+        // being a second path through this branch.
+        Write(cpu, rm, result);
+        cpu.regs().flags = static_cast<std::uint16_t>(flags | kFlagsAlwaysSet);
         return StepStatus::kOk;
     }
 
