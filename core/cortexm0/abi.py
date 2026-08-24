@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match CORTEXM0_ABI_VERSION in abi.h.
-ABI_VERSION = 8
+ABI_VERSION = 9
 
 #: Must match cortexm0::WriteOp. Spelled at call sites rather than numbered.
 WRITE_OPS = {"store": 0, "set": 1, "clear": 2, "xor": 3}
@@ -111,7 +111,7 @@ _SIGNATURES = {
     "cortexm0_add_region": (
         [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int,
          ctypes.c_uint8],
-        None,
+        ctypes.c_int,
     ),
     "cortexm0_clear_regions": ([ctypes.c_void_p], None),
     "cortexm0_map_register": (
@@ -273,9 +273,15 @@ class Cpu:
         not a valid Thumb encoding, so running off into it stops the core
         instead of executing a million no-ops.
         """
-        self._lib.cortexm0_add_region(
+        if not self._lib.cortexm0_add_region(
             self._handle, base, size, 1 if executable else 0, fill
-        )
+        ):
+            raise AbiError(
+                f"a region already covers 0x{base:08x}..0x{base + size:08x}. "
+                f"Overlapping regions are a mistake in a board description: "
+                f"the lookup returns the first match, so the second one's "
+                f"writes would go somewhere nothing reads."
+            )
 
     def clear_regions(self) -> None:
         """Forget every region added by `add_region`. Flash and SRAM remain."""

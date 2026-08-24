@@ -165,13 +165,9 @@ def handle_api(session: emulator.Session, selection: Selection, route: str,
         return {"targets": listing, "selected": selection.name, "driving": DRIVING}
 
     if route == "/api/boards":
-        boards = board_catalogue.catalogue()
         return {
-            "boards": [b.as_json() for b in boards],
-            "waiting": [
-                {"isa": isa, "boards": names}
-                for isa, names in board_catalogue.missing_cores().items()
-            ],
+            "boards": [b.as_json() for b in board_catalogue.catalogue()],
+            "waiting": board_catalogue.missing_cores(),
         }
 
     if route == "/api/target":

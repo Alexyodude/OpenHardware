@@ -19,7 +19,15 @@ from webui.boards import rp2040
 
 @pytest.fixture
 def board(cpu):
+    """A whole RP2040, replacing the bare SRAM the conftest fixture installs.
+
+    `clear_regions` first is not tidiness: the conftest gives every test a flat
+    SRAM at 0x20000000 for the instruction suites, and the board adds its own
+    there too. Overlapping regions are refused now, and before they were
+    refused this silently allocated a second buffer nothing could read.
+    """
     cpu.clear_memory()
+    cpu.clear_regions()
     rp2040.install(cpu)
     return cpu
 

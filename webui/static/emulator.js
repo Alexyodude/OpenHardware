@@ -319,12 +319,12 @@ async function selectTarget(name) {
 
 async function fillBoards() {
   const data = await api("/api/boards");
+  const proven = data.boards.filter((b) => b.firmware_verified).length;
   const runnable = data.boards.filter((b) => b.runnable).length;
-  const described = data.boards.filter((b) => b.described).length;
 
   $("boards-strip").replaceChildren(
-    stripCell(String(runnable), "boards runnable", runnable ? "is-ok" : "is-stop"),
-    stripCell(String(described), "chips described", described ? "is-ok" : ""),
+    stripCell(String(proven), "watched running firmware", proven ? "is-ok" : "is-stop"),
+    stripCell(String(runnable), "core and board exist", runnable ? "is-ok" : ""),
     stripCell(String(data.boards.length - runnable), "not yet", "is-warn"),
     stripCell(String(data.boards.length), "boards imported", ""),
   );
@@ -351,15 +351,20 @@ async function fillBoards() {
 
   $("boards-waiting").replaceChildren(...data.waiting.map((group) => {
     const row = document.createElement("tr");
-    const isa = document.createElement("td");
-    isa.className = "isa";
-    isa.textContent = group.isa;
+    const core = document.createElement("td");
+    core.className = "isa";
+    core.textContent = group.core;
     const count = document.createElement("td");
     count.textContent = String(group.boards.length);
-    const names = document.createElement("td");
-    names.className = "note-cell";
-    names.textContent = group.boards.join(", ");
-    row.append(isa, count, names);
+    const need = document.createElement("td");
+    // A core that already exists is a different job from one that does not:
+    // those boards need a description, not an instruction set.
+    need.append(span(group.exists ? "pill p-warn" : "pill p-none",
+                     group.exists ? "BOARD DESCRIPTION" : "A CORE"));
+    const oracle = document.createElement("td");
+    oracle.className = "note-cell";
+    oracle.textContent = group.oracle;
+    row.append(core, count, need, oracle);
     return row;
   }));
 }
@@ -370,7 +375,12 @@ async function fillBoards() {
  *  written a core for and one whose core exists but has no memory map -- and
  *  those are days apart in effort. */
 function boardStatus(board) {
-  if (board.runnable) return ["pill p-ok", "RUNS FIRMWARE"];
+  // RUNS FIRMWARE is reserved for boards where a real image has actually been
+  // watched executing. Everything else says what exists, which is a claim
+  // about the repository rather than about the board -- the paragraph above
+  // this table used to be honest about that while this badge was not.
+  if (board.firmware_verified) return ["pill p-ok", "RUNS FIRMWARE"];
+  if (board.runnable) return ["pill p-warn", "CORE + BOARD, UNPROVEN"];
   if (!board.core_exists) return ["pill p-none", "NO CORE"];
   if (!board.core_built) return ["pill p-warn", "CORE UNBUILT"];
   return ["pill p-warn", "NO BOARD DESCRIPTION"];

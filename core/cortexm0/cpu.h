@@ -1,4 +1,4 @@
-// OpenHardware — Cortex-M0+ registers, flags and the SRAM window.
+// OpenHardware — Cortex-M0+ registers, flags, and whatever memory a board gives it.
 //
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 the OpenHardware authors. See LICENSE.
@@ -212,7 +212,8 @@ public:
     /// which was false when written, since the SAMD21 shares this core and
     /// puts flash at zero. The constants are gone; the sentence is kept
     /// inverted so the next person does not re-derive the same excuse.
-    void add_region(uint32_t base, uint32_t size, bool executable,
+    /// False when it overlaps a region already added, having added nothing.
+    bool add_region(uint32_t base, uint32_t size, bool executable,
                     uint8_t fill = 0);
 
     /// Forget every region. Paired with `clear_registers` in `reset`, because

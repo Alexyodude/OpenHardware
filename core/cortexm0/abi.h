@@ -28,7 +28,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define CORTEXM0_ABI_VERSION 8
+#define CORTEXM0_ABI_VERSION 9
 
 /// r0-r15, then the flags.
 ///
@@ -82,9 +82,10 @@ CORTEXM0_API void cortexm0_clear_registers(CortexM0Cpu* cpu);
 /// A readable, writable region of `size` bytes at `base`. `executable` 0 makes
 /// a fetch from it fault while data reads still answer -- what a stub standing
 /// in for contents this project cannot ship needs. See cpu.h.
-CORTEXM0_API void cortexm0_add_region(CortexM0Cpu* cpu, uint32_t base,
-                                      uint32_t size, int executable,
-                                      uint8_t fill);
+/// 0 when it overlaps a region already added, having added nothing.
+CORTEXM0_API int cortexm0_add_region(CortexM0Cpu* cpu, uint32_t base,
+                                     uint32_t size, int executable,
+                                     uint8_t fill);
 CORTEXM0_API void cortexm0_clear_regions(CortexM0Cpu* cpu);
 
 /// Make one memory-mapped word respond, reads-as-written. See cpu.h: only

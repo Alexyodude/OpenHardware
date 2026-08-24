@@ -41,14 +41,30 @@ void Cpu::reset() {
     regs_.fill(0);
     apsr_ = 0;
     clear_memory();
-    // Power-on, so the board goes too. `clear_memory` alone would leave a
-    // half-configured machine that looks reset and is not.
+    // Power-on, so the whole board goes: both the peripherals and the memory
+    // map. Clearing only one leaves a machine with RAM and no registers, or
+    // registers and no RAM -- half a board, which is exactly the
+    // looks-reset-and-is-not state this is here to prevent. The call to
+    // `clear_regions` was missing while this comment already claimed it,
+    // which is how a reset machine kept its flash.
     clear_registers();
+    clear_regions();
 }
 
 void Cpu::clear_registers() { mmio_.clear(); }
 
-void Cpu::add_region(uint32_t base, uint32_t size, bool executable, uint8_t fill) {
+bool Cpu::add_region(uint32_t base, uint32_t size, bool executable, uint8_t fill) {
+    // An overlapping region is a mistake in a board description, not a
+    // layering choice. Accepting it silently allocated a second buffer that
+    // nothing could ever read, because the lookup returns the first match --
+    // so the board would appear to work while half its writes went nowhere.
+    for (const Extra& existing : regions_) {
+        const bool disjoint =
+            base + size <= existing.base || existing.base + existing.size <= base;
+        if (!disjoint) {
+            return false;
+        }
+    }
     Extra region;
     region.base = base;
     region.size = size;
@@ -56,6 +72,7 @@ void Cpu::add_region(uint32_t base, uint32_t size, bool executable, uint8_t fill
     region.fill = fill;
     region.bytes.assign(size, fill);
     regions_.push_back(std::move(region));
+    return true;
 }
 
 void Cpu::clear_regions() { regions_.clear(); }

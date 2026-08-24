@@ -81,6 +81,39 @@ CHIPS: dict[str, tuple[str, str]] = {
     "STM32C5": ("unknown -- part not confirmed to exist", "unknown"),
 }
 
+#: Chips on which a real compiled image has been watched executing, and the
+#: test that watched it.
+#:
+#: **This is the only thing that licenses the words "runs firmware".** Having a
+#: built core and a board description means a board *could* run something; it
+#: is not evidence that anything has. The distinction is small on a good day
+#: and the whole difference on a bad one, so the claim is tied to a named file
+#: and `test_every_firmware_claim_names_a_test_that_exists` checks the file is
+#: there.
+FIRMWARE_VERIFIED: dict[str, str] = {
+    "RP2040": "tests/cortexm0/test_blink.py",
+}
+
+#: What each instruction set would need before a core for it could be trusted.
+#: From `docs/architectures.md`, which records the evidence class for each.
+#: Ordering the backlog needs this: "how many boards" says what to build first,
+#: and this says what it would cost.
+ORACLES: dict[str, str] = {
+    "cortexm0": "rp2040js (MIT, hand-written from DDI0419) -- in use here",
+    "cortexm33": "none free that models Armv8-M security extensions; QEMU has m33 "
+                 "but not the RP2350's Hazard3 half",
+    "cortexm4": "QEMU has cortex-m4; no independent second source, so a "
+                "disagreement could not be adjudicated",
+    "riscv32": "Hazard3's rvcpp (Apache-2.0) builds here, but has no extension "
+               "gating at all -- right on the legal space, wrong at the "
+               "illegal-instruction edge",
+    "xtensa": "NONE. QEMU-xtensa and binutils-xtensa both derive from the same "
+              "Tensilica archive via import_core.sh, so their agreement is a "
+              "tautology (docs/architectures.md 2.1c)",
+    "avr": "simavr and avr-gdb exist; neither is hardware-captured",
+    "unknown": "the part is not confirmed to exist",
+}
+
 #: Boards whose name does not follow `XIAO-<CHIP>-<PACKAGE>`. Named here so
 #: they are handled, rather than parsed into something plausible and wrong.
 IRREGULAR: dict[str, str] = {
@@ -106,13 +139,23 @@ class Board:
     core_exists: bool
     core_built: bool
     described: bool
+    firmware_evidence: str | None
 
     @property
     def runnable(self) -> bool:
-        """Every part must hold. A built core with no board description has no
-        memory map and no peripherals; a description with no core has nothing
-        to execute it."""
+        """Everything needed to *attempt* an image exists.
+
+        A built core with no board description has no memory map and no
+        peripherals; a description with no core has nothing to execute it.
+        This is emphatically **not** "firmware has run" -- see
+        `firmware_verified`, which is the claim that needs evidence.
+        """
         return self.core_built and self.described
+
+    @property
+    def firmware_verified(self) -> bool:
+        """A real compiled image has been watched executing on this chip."""
+        return self.firmware_evidence is not None
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -124,6 +167,8 @@ class Board:
             "core_built": self.core_built,
             "described": self.described,
             "runnable": self.runnable,
+            "firmware_verified": self.firmware_verified,
+            "firmware_evidence": self.firmware_evidence,
         }
 
 
@@ -198,19 +243,38 @@ def catalogue(directory: pathlib.Path | None = None) -> list[Board]:
             core_exists=core_exists,
             core_built=built,
             described=chip.upper().replace("-", "") in described,
+            firmware_evidence=FIRMWARE_VERIFIED.get(chip),
         ))
     return out
 
 
-def missing_cores(directory: pathlib.Path | None = None) -> dict[str, list[str]]:
-    """Instruction sets with boards waiting on them, and what each blocks.
+def missing_cores(directory: pathlib.Path | None = None) -> list[dict[str, object]]:
+    """The cores that would unlock the remaining boards, and what each needs.
 
-    Ordered by the number of boards it would unlock, because that is the only
-    ordering the backlog has that is not a guess.
+    **Grouped by core, not by instruction-set string.** Grouping by the string
+    split `cortexm33` into "Armv8-M (Cortex-M33)" and "Armv8-M (Cortex-M33) +
+    RV32 (Hazard3)", and `riscv32` into three, so ten rows described five
+    pieces of work -- and one of the rows was `cortexm0`, a core that is
+    already built, sitting under a heading about missing ones.
+
+    Ordered by boards unlocked, which is the only ordering that is not a
+    guess; `oracle` says what each would cost, which is the other half of the
+    decision.
     """
     waiting: dict[str, list[str]] = {}
     for board in catalogue(directory):
         if board.runnable:
             continue
-        waiting.setdefault(board.isa, []).append(board.name)
-    return dict(sorted(waiting.items(), key=lambda kv: (-len(kv[1]), kv[0])))
+        waiting.setdefault(board.core, []).append(board.name)
+
+    rows = [
+        {
+            "core": core,
+            "isas": sorted({b.isa for b in catalogue(directory) if b.core == core}),
+            "boards": names,
+            "exists": core in set(build_core.cores()),
+            "oracle": ORACLES.get(core, "not surveyed"),
+        }
+        for core, names in waiting.items()
+    ]
+    return sorted(rows, key=lambda r: (-len(r["boards"]), str(r["core"])))

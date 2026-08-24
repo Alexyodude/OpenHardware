@@ -169,18 +169,23 @@
           <th>Core</th><th>Status</th></tr></thead>
         <tbody id="boards-rows"></tbody>
       </table></div>
-      <h3 class="sub">What each missing core would unlock</h3>
+      <h3 class="sub">What stands between here and the rest</h3>
       <div class="scroll"><table class="grid">
-        <thead><tr><th>Instruction set</th><th>Boards</th><th>Waiting</th></tr></thead>
+        <thead><tr><th>Core</th><th>Boards</th><th>Needs</th>
+          <th>Oracle it would need</th></tr></thead>
         <tbody id="boards-waiting"></tbody>
       </table></div>
       <div class="prose bordered">
-        <p><strong>The backlog is ordered by boards unlocked, which is the only
-          ordering it has that is not a guess.</strong> It is not ordered by
-          ease: Xtensa is last on evidence, because no free independent oracle
-          for it exists — QEMU-xtensa and binutils-xtensa both come from the same
-          Tensilica archive, so their agreement proves nothing
-          (<code>docs/architectures.md</code> §2.1c).</p>
+        <p><strong>Ordered by boards unlocked, which is the only ordering that
+          is not a guess</strong> — and grouped by <em>core</em>, because that is
+          the unit of work. Grouping by instruction-set name split one core into
+          three rows and listed a core that already exists under a heading about
+          missing ones.</p>
+        <p>The last column is why the order is not a plan. Xtensa has
+          <strong>no free independent oracle at all</strong>: QEMU-xtensa and
+          binutils-xtensa both derive from the same Tensilica archive, so their
+          agreement is a tautology (<code>docs/architectures.md</code> §2.1c).
+          Three boards is not worth a core nothing can check.</p>
       </div>
     </section>
 

@@ -166,9 +166,23 @@ def install_sio(cpu: Cpu) -> None:
 
 
 def install_memory(cpu: Cpu) -> None:
-    """Flash and SRAM. The core ships with neither."""
+    """Flash and SRAM. The core ships with neither.
+
+    **SRAM is left zero-filled and executable, and that is a decision.** Flash
+    gets 0xFF because that is what an erased part reads and because 0xFFFF
+    stops the core; the temptation is to give SRAM a poison fill for the same
+    reason, and it would be wrong three times over. SRAM contents really are
+    undefined at power-on, so any specific fill invents a fact. rp2040js
+    answers zero, and diverging from the oracle costs more than it buys. And
+    making SRAM non-executable would be the worst of the three: a real
+    Cortex-M0+ executes from SRAM, and firmware that copies a routine into RAM
+    and calls it is ordinary rather than exotic.
+
+    The asymmetry with flash is the interesting part, which is why it is
+    written down rather than left as a default that fell out.
+    """
     cpu.add_region(FLASH, FLASH_SIZE, executable=True, fill=FLASH_ERASED)
-    cpu.add_region(SRAM, SRAM_SIZE, executable=True)
+    cpu.add_region(SRAM, SRAM_SIZE, executable=True, fill=0x00)
 
 
 def install_bootrom_stub(cpu: Cpu) -> None:

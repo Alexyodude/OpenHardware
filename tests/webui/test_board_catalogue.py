@@ -119,23 +119,84 @@ def test_no_board_is_runnable_when_nothing_is_built(tmp_path, monkeypatch):
 # --- the backlog is ordered by evidence ------------------------------------
 
 
-def test_the_backlog_lists_instruction_sets_with_the_boards_each_blocks():
+def test_the_backlog_names_a_core_and_what_it_would_cost():
     waiting = catalogue.missing_cores()
     assert waiting, "everything cannot already be runnable"
-    assert all(isinstance(v, list) and v for v in waiting.values())
+    for row in waiting:
+        assert row["boards"], f"{row['core']} blocks nothing"
+        assert row["oracle"], f"{row['core']} has no oracle recorded"
+
+
+def test_the_backlog_groups_by_core_rather_than_by_instruction_set_name():
+    """Grouping by the ISA string split `cortexm33` into two rows and
+    `riscv32` into three, so ten rows described five pieces of work."""
+    cores = [row["core"] for row in catalogue.missing_cores()]
+    assert len(cores) == len(set(cores)), f"a core appears twice: {cores}"
+    assert "cortexm33" in cores
+    row = next(r for r in catalogue.missing_cores() if r["core"] == "cortexm33")
+    assert len(row["isas"]) > 1, "the RP2350 and the MG24 spell their ISA differently"
+
+
+def test_the_backlog_says_which_of_its_rows_already_have_a_core():
+    """`cortexm0` appears because SAMD21 has no board description -- a
+    different job from the rows that need an instruction set written, and
+    listing it under 'missing cores' without saying so misreads the work."""
+    row = next(r for r in catalogue.missing_cores() if r["core"] == "cortexm0")
+    assert row["exists"] is True
+    assert all(r["exists"] is False for r in catalogue.missing_cores()
+               if r["core"] != "cortexm0")
 
 
 def test_the_backlog_is_ordered_by_how_many_boards_each_would_unlock():
     """The only ordering this backlog has that is not a guess."""
-    counts = [len(v) for v in catalogue.missing_cores().values()]
+    counts = [len(row["boards"]) for row in catalogue.missing_cores()]
     assert counts == sorted(counts, reverse=True)
 
 
 def test_the_runnable_boards_are_absent_from_the_backlog():
-    waiting = {name for names in catalogue.missing_cores().values() for name in names}
+    waiting = {n for row in catalogue.missing_cores() for n in row["boards"]}
     for board in catalogue.catalogue():
         if board.runnable:
             assert board.name not in waiting
+
+
+def test_xtensa_records_that_it_has_no_independent_oracle():
+    """The reason three boards are not worth a core: QEMU-xtensa and
+    binutils-xtensa share the same Tensilica archive, so agreement between
+    them proves nothing."""
+    row = next(r for r in catalogue.missing_cores() if r["core"] == "xtensa")
+    assert "NONE" in row["oracle"]
+
+
+# --- runnable is not the same claim as "firmware has run" -------------------
+
+
+def test_running_firmware_is_a_separate_claim_from_being_runnable():
+    """The badge said RUNS FIRMWARE for anything with a built core and a
+    description. An empty `samd21.py` would have earned it."""
+    for board in catalogue.catalogue():
+        if board.firmware_verified:
+            assert board.runnable, "cannot have run without the parts existing"
+
+
+def test_only_the_board_a_real_image_ran_on_claims_to_have_run_one():
+    proven = {b.chip for b in catalogue.catalogue() if b.firmware_verified}
+    assert proven == {"RP2040"}
+
+
+def test_every_firmware_claim_names_a_test_that_exists():
+    """The claim is tied to a file so it cannot be asserted into being."""
+    repo = pathlib.Path(__file__).resolve().parents[2]
+    for chip, evidence in catalogue.FIRMWARE_VERIFIED.items():
+        assert (repo / evidence).is_file(), f"{chip} cites a missing {evidence}"
+
+
+def test_the_firmware_evidence_actually_runs_an_image():
+    """Naming any file would satisfy the check above. The named one has to be
+    a test that loads a compiled image and steps it."""
+    repo = pathlib.Path(__file__).resolve().parents[2]
+    text = (repo / catalogue.FIRMWARE_VERIFIED["RP2040"]).read_text(encoding="utf-8")
+    assert "blink.bin" in text and "cpu.step()" in text
 
 
 # --- the description convention --------------------------------------------
@@ -190,3 +251,51 @@ def test_the_targets_copy_does_not_claim_every_chip_lacks_a_core():
     page = (pathlib.Path(__file__).resolve().parents[2]
             / "webui" / "static" / "emulator.html").read_text(encoding="utf-8")
     assert "Every chip in the tables below has no core directory at all" not in page
+
+
+# --- the route the UI actually calls ----------------------------------------
+#
+# There was none of this, and the gap cost exactly what it was always going to.
+# `missing_cores` changed from a dict to a list, `emulator_server` kept calling
+# `.items()`, 340 tests passed, and the Boards view rendered empty with an
+# ERR_EMPTY_RESPONSE in the console. Nothing between the catalogue and the
+# browser was under test.
+
+
+def test_the_boards_route_answers_without_raising():
+    from webui import emulator_server
+
+    payload = emulator_server.handle_api(
+        None, emulator_server.Selection(), "/api/boards", {}, {}
+    )
+    assert payload["boards"] and payload["waiting"]
+
+
+def test_the_boards_route_is_json_serialisable():
+    """The handler's answer goes through `json.dumps` in the server. A value
+    that is not serialisable is a 500 the tests never see."""
+    import json
+
+    from webui import emulator_server
+
+    payload = emulator_server.handle_api(
+        None, emulator_server.Selection(), "/api/boards", {}, {}
+    )
+    json.dumps(payload)
+
+
+def test_the_boards_route_carries_what_the_ui_reads():
+    """Named field by field, because the UI reads them by name and a rename
+    here renders an empty table rather than an error."""
+    from webui import emulator_server
+
+    payload = emulator_server.handle_api(
+        None, emulator_server.Selection(), "/api/boards", {}, {}
+    )
+    board = payload["boards"][0]
+    for key in ("name", "chip", "isa", "core", "core_exists", "core_built",
+                "described", "runnable", "firmware_verified"):
+        assert key in board, f"emulator.js reads board.{key}"
+    row = payload["waiting"][0]
+    for key in ("core", "boards", "exists", "oracle"):
+        assert key in row, f"emulator.js reads group.{key}"

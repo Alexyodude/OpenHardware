@@ -102,9 +102,9 @@ void cortexm0_clear_registers(CortexM0Cpu* cpu) {
     as_handle(cpu)->cpu.clear_registers();
 }
 
-void cortexm0_add_region(CortexM0Cpu* cpu, uint32_t base, uint32_t size,
-                         int executable, uint8_t fill) {
-    as_handle(cpu)->cpu.add_region(base, size, executable != 0, fill);
+int cortexm0_add_region(CortexM0Cpu* cpu, uint32_t base, uint32_t size,
+                        int executable, uint8_t fill) {
+    return as_handle(cpu)->cpu.add_region(base, size, executable != 0, fill) ? 1 : 0;
 }
 
 void cortexm0_clear_regions(CortexM0Cpu* cpu) {
