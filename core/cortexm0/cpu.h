@@ -206,10 +206,12 @@ public:
     /// end. Marking it non-executable turns the one dangerous case loud while
     /// leaving the harmless one working.
     ///
-    /// Regions added here sit alongside the built-in flash and SRAM. Those two
-    /// are still hardcoded because every Armv6-M part this project targets has
-    /// them at the same addresses; the moment one does not, they move out here
-    /// too.
+    /// There are no built-in regions to sit alongside. An earlier version of
+    /// this comment said flash and SRAM were "still hardcoded because every
+    /// Armv6-M part this project targets has them at the same addresses" --
+    /// which was false when written, since the SAMD21 shares this core and
+    /// puts flash at zero. The constants are gone; the sentence is kept
+    /// inverted so the next person does not re-derive the same excuse.
     void add_region(uint32_t base, uint32_t size, bool executable,
                     uint8_t fill = 0);
 

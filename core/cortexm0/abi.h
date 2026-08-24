@@ -109,7 +109,9 @@ CORTEXM0_API void cortexm0_map_mirror(CortexM0Cpu* cpu, uint32_t address,
 /// Execute one instruction at PC, advancing PC past it.
 ///
 /// Returns 0 on success, 1 for an encoding this core does not implement, and
-/// 2 when the fetch itself was outside the modelled SRAM.
+/// 2 when memory refused the access -- either an address no region covers, or
+/// a fetch from a region that exists and is not executable. Ask
+/// `cortexm0_fault_address` and `cortexm0_in_range` which.
 ///
 /// On 1 and 2 the processor is untouched, PC included -- so a caller can
 /// report exactly which instruction stopped it, and a conformance case can
