@@ -55,3 +55,37 @@ LEARNINGS:
 - Mutation testing found `read_only` was DEAD: a mirror's write lands in its own
   word and its read comes from `source`, so ignoring the write changed nothing
   observable. Removed rather than kept as a flag that looks load-bearing.
+
+=== 2026-08-25 US-002..US-005 + the review that rejected them ===
+A WORKING BOARD: tests/cortexm0/blink/blink.c, compiled by arm-none-eabi-gcc,
+runs on an emulated RP2040 and toggles GP25 -- 45 transitions in 20,000
+instructions at a constant 453-instruction period. Not the Arduino image: that
+one stops at 225,759 instructions calling into a boot ROM this project cannot
+ship (mufplib licensing). rp2040js reaches the SAME PC at the SAME step, then
+warns and executes 174,000 instructions of unmapped memory, because it does not
+model faults. The two models agree exactly; only one says so.
+
+THE REVIEW REJECTED THE FIRST ATTEMPT, CORRECTLY. Four findings, all real:
+ 1. The core held flash/SRAM bases as constexpr while claiming to hold no chip
+    address. SAMD21 shares the core and puts flash at 0, so "one core, many
+    boards" was false. My grep evidence was scoped to terms that skipped
+    exactly those constants -- weak verification of my own claim.
+ 2. Zero-filled flash executed 5,000 instructions with no fault: the accident
+    the design says it exists to prevent, guarded on 16 KB of ROM and left open
+    across 2 MB of flash.
+ 3. UI copy claimed "a real compiled image has executed on it" while computing
+    "core built and description exists".
+ 4. A test asserted a substring against a message containing two addresses.
+
+LEARNINGS:
+- Erased flash reads 0xFF on real parts, and 0xFFFF is not a valid Thumb
+  encoding. The hardware-truthful fill is ALSO the loud one. Prefer modelling
+  what the hardware does over inventing a guard.
+- Fixing a vacuous test found a real bug within minutes: NX fetches recorded no
+  fault address, because only a FAILED read sets one and an NX fetch's read
+  succeeds. Vacuous tests do not merely fail to catch bugs, they hide them.
+- Verifying your own claim with a grep you chose is not verification. The terms
+  I picked could not have found the constants that falsified the claim.
+- Do not add a board description just to make a counter go up. An empty
+  samd21.py would have flipped two boards to "runnable" with no peripherals and
+  no image ever run.
