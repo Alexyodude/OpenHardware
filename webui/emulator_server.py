@@ -103,6 +103,33 @@ def _int(payload: dict[str, object], name: str, default: int) -> int:
     return value
 
 
+#: The cores this server can actually put on screen.
+#:
+#: `webui/emulator.py` is an i8086 session and nothing else: its registers,
+#: its disassembly and its sample programs are all 8086. A second core being
+#: *built* does not make it drivable here, and letting one be selected anyway
+#: would leave the UI showing 8086 state under an Arm label -- a worse lie
+#: than not offering it.
+#:
+#: So this is separate from `targets.READY`, which answers "is there a built
+#: core". Two orthogonal facts, and the UI shows both.
+DRIVABLE = frozenset({"i8086"})
+
+#: What the emulator view is running right now. Not `targets.default_name()`:
+#: that returns the first *runnable* core, which became `cortexm0` the moment
+#: a second core was built, and would have had the selector claim the page was
+#: driving an Arm.
+DRIVING = "i8086"
+
+
+def _not_drivable(name: str) -> str:
+    return (
+        f"{name!r} is built, but this server drives only "
+        f"{', '.join(sorted(DRIVABLE))}. webui/emulator.py is an i8086 session; "
+        f"a core needs one of its own before it can be shown here."
+    )
+
+
 class Selection:
     """Which target the UI is pointed at, for the life of the server.
 
@@ -115,7 +142,7 @@ class Selection:
     """
 
     def __init__(self, name: str | None = None) -> None:
-        self.name = name if name is not None else targets.default_name()
+        self.name = name if name is not None else DRIVING
 
 
 def handle_api(session: emulator.Session, selection: Selection, route: str,
@@ -123,10 +150,18 @@ def handle_api(session: emulator.Session, selection: Selection, route: str,
                payload: dict[str, object]) -> dict[str, object]:
     """The whole API. Adding a route means adding it here, on purpose."""
     if route == "/api/targets":
-        return {
-            "targets": [t.as_json() for t in targets.catalogue()],
-            "selected": selection.name,
-        }
+        listing = []
+        for target in targets.catalogue():
+            entry = target.as_json()
+            entry["drivable"] = target.name in DRIVABLE
+            if entry["selectable"] and not entry["drivable"]:
+                # Overwrite rather than add a second reason field: the UI shows
+                # one line per target, and "built and loadable" beside a
+                # disabled option reads as a bug in the UI.
+                entry["detail"] = _not_drivable(target.name)
+                entry["selectable"] = False
+            listing.append(entry)
+        return {"targets": listing, "selected": selection.name, "driving": DRIVING}
 
     if route == "/api/target":
         name = payload.get("name")
@@ -136,6 +171,8 @@ def handle_api(session: emulator.Session, selection: Selection, route: str,
             chosen = targets.require_selectable(name)
         except targets.TargetError as exc:
             raise ApiError(str(exc)) from exc
+        if chosen.name not in DRIVABLE:
+            raise ApiError(_not_drivable(chosen.name))
         selection.name = chosen.name
         return {"selected": selection.name, "target": chosen.as_json()}
 

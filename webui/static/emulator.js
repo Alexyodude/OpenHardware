@@ -231,12 +231,17 @@ async function fillTargets() {
   select.replaceChildren(...TARGETS.map((target) => {
     const option = document.createElement("option");
     option.value = target.name;
-    // The status rides in the label rather than only in a colour, so the
-    // reason a target cannot be picked survives being read aloud, printed,
-    // or looked at by someone who cannot distinguish the two greens.
+    // The reason rides in the label rather than only in a colour, so it
+    // survives being read aloud, printed, or looked at by someone who cannot
+    // distinguish the two greens.
+    //
+    // It must be the reason it is *disabled*, not its status: `cortexm0 —
+    // ready` beside a greyed-out option reads as a broken UI, because "ready"
+    // is exactly what it is not.
     option.textContent = target.selectable
       ? target.name
-      : `${target.name} — ${target.status}`;
+      : `${target.name} — ${target.drivable === false && target.library
+            ? "not drivable here" : target.status}`;
     option.disabled = !target.selectable;
     option.title = target.detail;
     return option;
@@ -261,11 +266,13 @@ async function fillTargets() {
 }
 
 function renderRunnable() {
-  const ready = TARGETS.filter((t) => t.selectable).length;
+  const drivable = TARGETS.filter((t) => t.selectable).length;
+  const built = TARGETS.filter((t) => t.library).length;
   $("runnable-strip").replaceChildren(
-    stripCell(String(ready), "runnable now", ready > 0 ? "is-ok" : "is-stop"),
-    stripCell(String(TARGETS.length - ready), "present but unbuilt",
-              TARGETS.length - ready > 0 ? "is-warn" : ""),
+    stripCell(String(drivable), "drivable here", drivable > 0 ? "is-ok" : "is-stop"),
+    stripCell(String(built), "cores built", "is-ok"),
+    stripCell(String(TARGETS.length - built), "present but unbuilt",
+              TARGETS.length - built > 0 ? "is-warn" : ""),
     stripCell(String(TARGETS.length), "cores in core/", ""),
   );
 
@@ -275,10 +282,13 @@ function renderRunnable() {
     name.className = "chip";
     name.textContent = target.name;
     const status = document.createElement("td");
-    const pill = span(
-      target.selectable ? "pill p-ok" : "pill p-warn",
-      target.selectable ? "RUNNABLE" : target.status.toUpperCase(),
-    );
+    // Three states, not two. A core that is built but not drivable is not
+    // the same as one that was never compiled, and collapsing them would put
+    // "UNBUILT" beside a library that is sitting on disk.
+    const label = target.selectable
+      ? "DRIVABLE"
+      : (target.drivable === false && target.library ? "BUILT" : target.status.toUpperCase());
+    const pill = span(target.selectable ? "pill p-ok" : "pill p-warn", label);
     status.append(pill);
     const detail = document.createElement("td");
     detail.className = "note-cell";

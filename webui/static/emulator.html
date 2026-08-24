@@ -124,11 +124,22 @@
         <tbody id="runnable-rows"></tbody>
       </table></div>
       <div class="prose bordered">
-        <p><strong>Every chip in the tables below has no core directory and is not
-          runnable.</strong> They are surveyed, not started — that is what those
-          tables are for. They are deliberately absent from the selector above
-          rather than listed and greyed: an option you can never pick is a promise
-          the repository has not made.</p>
+        <p><strong>Built is not the same as drivable, and the table says both.</strong>
+          A core is <em>runnable</em> when it exists and has been compiled. It is
+          <em>drivable</em> when this page can put it on screen — and this page is an
+          i8086 session, so its registers, disassembly and sample programs are all
+          8086. A second core being built does not change that, and offering it in
+          the selector would show 8086 state under another architecture's name.</p>
+        <p><strong>The Cortex-M0+ core implements Thumb formats 1–4 only</strong>
+          — the register-only, flag-setting arithmetic at 0x0000–0x43FF. No loads,
+          no stores, no branches, no exceptions. That is enough to be checked
+          against 13,500 oracle cases and <em>not</em> enough to run a board's
+          firmware. Do not read a green conformance run as a working dev board.</p>
+        <p><strong>Every chip in the tables below has no core directory at all.</strong>
+          They are surveyed, not started — that is what those tables are for, and
+          they are deliberately absent from the selector rather than listed and
+          greyed: an option you can never pick is a promise the repository has not
+          made.</p>
       </div>
     </section>
 

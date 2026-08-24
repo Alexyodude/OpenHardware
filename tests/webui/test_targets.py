@@ -54,10 +54,15 @@ def add_library(name: str) -> pathlib.Path:
 # --- the real repository ---------------------------------------------------
 
 
-def test_the_repository_has_exactly_one_core_today():
-    """A guard on the claim the UI makes. If a second core lands, this fails
-    and whoever added it updates the copy that says only one is runnable."""
-    assert build_core.cores() == ["i8086"]
+def test_the_repository_has_the_cores_the_ui_copy_describes():
+    """A guard on the claim the UI makes.
+
+    It has already earned its keep once: it was written when `i8086` was the
+    only core and it failed the moment `cortexm0` landed, which is what sent
+    someone to update the Targets copy rather than letting it quietly go
+    stale. Adding a third core should fail this again.
+    """
+    assert build_core.cores() == ["cortexm0", "i8086"]
 
 
 def test_the_catalogue_covers_every_core_that_exists():

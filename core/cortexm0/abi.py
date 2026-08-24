@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+# OpenHardware - the Python side of the Cortex-M0+ C ABI.
+#
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+"""ctypes binding for `core/cortexm0/abi.h`.
+
+Three files describe one contract: `abi.h` declares it, `abi.cc` implements it,
+and this mirrors it. They are kept together because the failure mode when they
+drift is silent -- a field added on one side and not the other neither fails to
+compile nor fails to load, it reads the wrong bytes and produces a register
+value that is merely wrong.
+
+So the binding checks two things at load: the ABI version the library reports,
+and `sizeof(CortexM0Registers)` against this module's mirror.
+
+    from core.cortexm0.abi import Cpu
+
+    with Cpu() as cpu:
+        cpu.write_halfword(cpu.sram_base + 0x1000, 0x1840)  # ADDS r0, r0, r1
+        cpu.set_regs([0] * 16, apsr=0)
+        cpu.step()
+"""
+
+from __future__ import annotations
+
+import ctypes
+import pathlib
+import sys
+
+try:
+    from tools.build_core import BuildError, ensure_built, library_path
+except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from tools.build_core import BuildError, ensure_built, library_path
+
+#: Must match CORTEXM0_ABI_VERSION in abi.h.
+ABI_VERSION = 3
+
+#: Must match cortexm0::StepResult and abi.h's documented return values.
+OK = 0
+UNIMPLEMENTED = 1
+MEMORY_FAULT = 2
+
+
+class AbiError(Exception):
+    """The library is missing, or does not match this binding."""
+
+
+class Unimplemented(AbiError):
+    """The core reached an encoding nobody has written yet."""
+
+
+class MemoryFault(AbiError):
+    """A fetch outside the modelled SRAM window."""
+
+
+class Registers(ctypes.Structure):
+    """Mirrors `CortexM0Registers`.
+
+    Indexed rather than named, matching the corpus, which delivers `regs` as a
+    16-element list. The i8086 binding crosses by name instead; the difference
+    is deliberate and follows whichever shape the oracle uses, because that is
+    the crossing where a transcription error would live.
+    """
+
+    _fields_ = [
+        ("r", ctypes.c_uint32 * 16),
+        ("apsr", ctypes.c_uint32),
+    ]
+
+    def as_list(self) -> list[int]:
+        return list(self.r)
+
+
+_SIGNATURES = {
+    "cortexm0_abi_version": ([], ctypes.c_int),
+    "cortexm0_regs_size": ([], ctypes.c_uint32),
+    "cortexm0_sram_base": ([], ctypes.c_uint32),
+    "cortexm0_sram_size": ([], ctypes.c_uint32),
+    "cortexm0_new": ([], ctypes.c_void_p),
+    "cortexm0_free": ([ctypes.c_void_p], None),
+    "cortexm0_reset": ([ctypes.c_void_p], None),
+    "cortexm0_get_regs": ([ctypes.c_void_p, ctypes.POINTER(Registers)], None),
+    "cortexm0_set_regs": ([ctypes.c_void_p, ctypes.POINTER(Registers)], None),
+    "cortexm0_read_word": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)],
+        ctypes.c_int,
+    ),
+    "cortexm0_write_word": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32], ctypes.c_int
+    ),
+    "cortexm0_write_halfword": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint16], ctypes.c_int
+    ),
+    "cortexm0_write_block": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint8),
+         ctypes.c_uint32],
+        ctypes.c_int,
+    ),
+    "cortexm0_read_block": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint8),
+         ctypes.c_uint32],
+        ctypes.c_int,
+    ),
+    "cortexm0_clear_memory": ([ctypes.c_void_p], None),
+    "cortexm0_map_register": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32], None
+    ),
+    "cortexm0_is_mapped": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
+    "cortexm0_step": ([ctypes.c_void_p], ctypes.c_int),
+    "cortexm0_fault_address": ([ctypes.c_void_p], ctypes.c_uint32),
+    "cortexm0_fault_was_fetch": ([ctypes.c_void_p], ctypes.c_int),
+}
+
+_library: ctypes.CDLL | None = None
+
+
+def load(build_if_missing: bool = True) -> ctypes.CDLL:
+    """Load the shared library once, checking it matches this binding."""
+    global _library
+    if _library is not None:
+        return _library
+
+    try:
+        path = (ensure_built("cortexm0") if build_if_missing
+                else library_path("cortexm0"))
+    except BuildError as exc:
+        raise AbiError(str(exc)) from exc
+    if not path.is_file():
+        raise AbiError(f"{path} is missing. Run: python tools/build_core.py")
+
+    library = ctypes.CDLL(str(path))
+    for name, (argtypes, restype) in _SIGNATURES.items():
+        try:
+            function = getattr(library, name)
+        except AttributeError as exc:
+            raise AbiError(
+                f"{path.name} exports no {name!r}. The library is older than this "
+                f"binding, or built from a different abi.h."
+            ) from exc
+        function.argtypes = argtypes
+        function.restype = restype
+
+    # Declaring argtypes is not enough on its own: a struct that gained a field
+    # on one side still loads, and every read after it is off by four bytes.
+    reported = library.cortexm0_abi_version()
+    if reported != ABI_VERSION:
+        raise AbiError(
+            f"library ABI version {reported}, this binding expects {ABI_VERSION}"
+        )
+    reported_size = library.cortexm0_regs_size()
+    if reported_size != ctypes.sizeof(Registers):
+        raise AbiError(
+            f"library says sizeof(CortexM0Registers) is {reported_size}, "
+            f"this binding mirrors {ctypes.sizeof(Registers)}"
+        )
+
+    _library = library
+    return library
+
+
+class Cpu:
+    """One Cortex-M0+, freed when the context exits."""
+
+    def __init__(self, build_if_missing: bool = True) -> None:
+        self._lib = load(build_if_missing)
+        self._handle = self._lib.cortexm0_new()
+        if not self._handle:
+            raise AbiError("cortexm0_new returned null")
+        self.sram_base = self._lib.cortexm0_sram_base()
+        self.sram_size = self._lib.cortexm0_sram_size()
+
+    def __enter__(self) -> Cpu:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._handle:
+            self._lib.cortexm0_free(self._handle)
+            self._handle = None
+
+    # --- state ------------------------------------------------------------
+
+    def get_regs(self) -> Registers:
+        out = Registers()
+        self._lib.cortexm0_get_regs(self._handle, ctypes.byref(out))
+        return out
+
+    def set_regs(self, regs: list[int], apsr: int) -> None:
+        if len(regs) != 16:
+            raise AbiError(f"expected 16 registers, got {len(regs)}: {regs!r}")
+        value = Registers()
+        for index, entry in enumerate(regs):
+            value.r[index] = entry & 0xFFFFFFFF
+        value.apsr = apsr & 0xFFFFFFFF
+        self._lib.cortexm0_set_regs(self._handle, ctypes.byref(value))
+
+    def reset(self) -> None:
+        self._lib.cortexm0_reset(self._handle)
+
+    # --- memory -----------------------------------------------------------
+
+    def read_word(self, address: int) -> int:
+        out = ctypes.c_uint32()
+        if not self._lib.cortexm0_read_word(self._handle, address, ctypes.byref(out)):
+            raise MemoryFault(f"0x{address:08x} is outside the modelled SRAM")
+        return out.value
+
+    def write_word(self, address: int, value: int) -> None:
+        if not self._lib.cortexm0_write_word(self._handle, address, value):
+            raise MemoryFault(f"0x{address:08x} is outside the modelled SRAM")
+
+    def write_halfword(self, address: int, value: int) -> None:
+        if not self._lib.cortexm0_write_halfword(self._handle, address, value):
+            raise MemoryFault(f"0x{address:08x} is outside the modelled SRAM")
+
+    def write_block(self, address: int, data: bytes) -> None:
+        buffer = (ctypes.c_uint8 * len(data)).from_buffer_copy(data)
+        if not self._lib.cortexm0_write_block(self._handle, address, buffer, len(data)):
+            raise MemoryFault(
+                f"0x{address:08x}..0x{address + len(data):08x} leaves the modelled SRAM"
+            )
+
+    def read_block(self, address: int, length: int) -> bytes:
+        buffer = (ctypes.c_uint8 * length)()
+        if not self._lib.cortexm0_read_block(self._handle, address, buffer, length):
+            raise MemoryFault(
+                f"0x{address:08x}..0x{address + length:08x} leaves the modelled SRAM"
+            )
+        return bytes(buffer)
+
+    def clear_memory(self) -> None:
+        self._lib.cortexm0_clear_memory(self._handle)
+
+    def map_register(self, address: int, value: int = 0) -> None:
+        """Make one memory-mapped word respond, reads-as-written.
+
+        Only what you register responds. Everything else still faults, which
+        is what keeps a missing peripheral loud instead of turning a
+        wait-for-ready poll into a silent hang.
+        """
+        self._lib.cortexm0_map_register(self._handle, address, value)
+
+    def is_mapped(self, address: int) -> bool:
+        return bool(self._lib.cortexm0_is_mapped(self._handle, address))
+
+    # --- running ----------------------------------------------------------
+
+    def step(self) -> None:
+        """One instruction, or raise saying why not.
+
+        Raising rather than returning a code, because every caller in this
+        repository treats both non-zero results as a stop. The PC is untouched
+        in both cases, so the exception message can name the address and the
+        caller can read the encoding back out of memory.
+        """
+        result = self._lib.cortexm0_step(self._handle)
+        if result == OK:
+            return
+        pc = self.get_regs().r[15]
+        if result == UNIMPLEMENTED:
+            raise Unimplemented(f"no implementation for the encoding at 0x{pc:08x}")
+        # The faulting address, not the PC. An earlier version said "fetch at
+        # <pc> is outside the modelled SRAM" for every fault, which was wrong
+        # twice over on the first real firmware it met: the fault was a *load*,
+        # not a fetch, and the address it wanted was 0xD0000000 -- SIO, a
+        # peripheral -- while the message pointed at an instruction sitting
+        # happily in flash.
+        where = self._lib.cortexm0_fault_address(self._handle)
+        kind = ("fetch" if self._lib.cortexm0_fault_was_fetch(self._handle)
+                else "data access")
+        raise MemoryFault(
+            f"{kind} at 0x{where:08x} is outside the modelled memory "
+            f"(instruction at 0x{pc:08x})"
+        )
