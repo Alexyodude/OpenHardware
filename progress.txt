@@ -89,3 +89,36 @@ LEARNINGS:
 - Do not add a board description just to make a counter go up. An empty
   samd21.py would have flipped two boards to "runnable" with no peripherals and
   no image ever run.
+
+=== 2026-08-25 review round 2 ===
+US-004 CLEARED by the reviewer after the layering refactor. Remaining findings,
+all real, all repaired in c522ba6:
+
+R2  reset() cleared registers but NOT regions, while the comment beside it
+    already claimed both. Cause worth recording: I wrote the call into cpu.h's
+    COMMENT instead of cpu.cc's BODY. A doc that describes a call which does
+    not exist reads exactly like one that does.
+R3  The backlog grouped by ISA *string*, so cortexm33 appeared twice and
+    riscv32 three times -- ten rows for five pieces of work -- and cortexm0,
+    which is built, sat under "what each missing core would unlock". Now
+    grouped by core, with `exists` and the oracle each would need.
+R4  The badge said RUNS FIRMWARE from `core_built and described`. The
+    paragraph above it had already been corrected; the pill had not followed.
+    Now firmware_verified is a separate field tied to a named test file, and
+    two tests check the file exists AND actually loads an image and steps it.
+R6  /api/boards had NO TEST. Changing missing_cores from dict to list left the
+    server calling .items(): 340 tests passed and the page rendered EMPTY.
+    Found in a browser. Second time this repo has needed one to see something
+    a green suite hid.
+
+LEARNINGS:
+- A comment can describe a call that was never written. `reset()` "cleared
+  regions" in prose for two commits. Check behaviour, not the docstring.
+- Adding a dedupe check found an existing overlap the same minute: the test
+  fixture's SRAM and the board's SRAM had been double-allocating, first-match
+  winning. Guards find present bugs, not just future ones.
+- The layer between a generator and its UI is where untested seams live. The
+  catalogue had 25 tests and the route that serves it had none.
+- When a claim cannot be computed (which chip runs which ISA), tie it to
+  something checkable instead: FIRMWARE_VERIFIED names a file, and a test
+  asserts the file both exists and does what it claims.
