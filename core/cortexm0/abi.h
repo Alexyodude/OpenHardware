@@ -28,7 +28,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define CORTEXM0_ABI_VERSION 9
+#define CORTEXM0_ABI_VERSION 10
 
 /// r0-r15, then the flags.
 ///
@@ -98,8 +98,11 @@ CORTEXM0_API int cortexm0_is_mapped(const CortexM0Cpu* cpu, uint32_t address);
 /// `op`: 0 store, 1 set, 2 clear, 3 xor. An address whose write applies `op`
 /// to `target`'s word -- the RP2040's atomic aliases, STM32's BSRR. The
 /// offsets that mean "set" on a given chip are the caller's business.
+/// `readable` 0 makes it read as zero: a dedicated write-only register such as
+/// SIO's GPIO_OUT_SET, as against a bus alias window which reads through to the
+/// register it aliases. See cpu.h.
 CORTEXM0_API void cortexm0_map_alias(CortexM0Cpu* cpu, uint32_t address,
-                                     uint32_t target, int op);
+                                     uint32_t target, int op, int readable);
 
 /// An address whose read derives from `source`, optionally inverted and
 /// masked. RP2040's RESET_DONE is `~RESET`; a driver polls it in a loop, so a

@@ -184,6 +184,51 @@ def test_output_enable_is_a_separate_register_from_output_value(board):
     assert board.read_word(rp2040.SIO + rp2040.SIO_GPIO_OUT) == 0
 
 
+# --- write-only registers, which is not the same as an alias window --------
+
+
+def test_a_sio_write_only_register_reads_as_zero(board):
+    """`GPIO_OUT_SET` is its own register that happens to modify another, and
+    hardware reads it as zero.
+
+    Returning `GPIO_OUT` here was the one residual defect that answered
+    *wrongly* rather than loudly -- a value a driver could act on. The oracle
+    agrees: rp2040js's SIO read switch has no case for these offsets.
+    """
+    board.write_word(rp2040.SIO + rp2040.SIO_GPIO_OUT_SET, 1 << 25)
+    assert board.read_word(rp2040.SIO + rp2040.SIO_GPIO_OUT) == (1 << 25)
+    assert board.read_word(rp2040.SIO + rp2040.SIO_GPIO_OUT_SET) == 0
+
+
+def test_all_four_sio_write_only_registers_read_as_zero(board):
+    board.write_word(rp2040.SIO + rp2040.SIO_GPIO_OUT_SET, 0xFF)
+    board.write_word(rp2040.SIO + rp2040.SIO_GPIO_OE_SET, 0xFF)
+    for offset in (rp2040.SIO_GPIO_OUT_SET, rp2040.SIO_GPIO_OUT_CLR,
+                   rp2040.SIO_GPIO_OUT_XOR, rp2040.SIO_GPIO_OE_SET,
+                   rp2040.SIO_GPIO_OE_CLR, rp2040.SIO_GPIO_OE_XOR):
+        assert board.read_word(rp2040.SIO + offset) == 0, hex(offset)
+
+
+def test_a_write_only_register_still_writes(board):
+    """Zero on read must not have cost the write. A model that made these
+    inert would pass the test above and break every blink."""
+    board.write_word(rp2040.SIO + rp2040.SIO_GPIO_OUT_XOR, 1 << 3)
+    assert board.read_word(rp2040.SIO + rp2040.SIO_GPIO_OUT) == (1 << 3)
+
+
+def test_a_bus_alias_window_still_reads_through_to_its_register(board):
+    """The other half, and the reason this needed a flag rather than a rule.
+
+    RESETS's +0x2000 window is a second *view* of the register, so reading it
+    returns the register -- and the oracle's bus path masks an aliased address
+    back to the base offset, which is the same thing. Making every alias
+    read-as-zero would be as wrong as making every one read through.
+    """
+    reset = rp2040.RESETS + rp2040.RESETS_RESET
+    assert board.read_word(reset + rp2040.ALIAS_SET) == board.read_word(reset)
+    assert board.read_word(reset) != 0
+
+
 # --- the boot ROM stub -----------------------------------------------------
 
 

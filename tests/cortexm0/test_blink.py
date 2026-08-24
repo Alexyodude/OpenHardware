@@ -144,13 +144,20 @@ def test_the_committed_binary_matches_its_source(cpu):
     """`blink.bin` is committed so this suite runs without a toolchain. That
     invites drift, so wherever a compiler exists the binary is rebuilt and
     compared -- and where none exists, this is the only test that skips."""
-    gcc = pathlib.Path(
-        "C:/Users/Alexyodude/.platformio/packages/toolchain-gccarmnoneeabi/bin/"
-        "arm-none-eabi-gcc.exe"
+    # PATH first, then the PlatformIO toolchain this machine happens to have.
+    # It was the hardcoded path alone, which meant the drift guard ran on
+    # exactly one computer and skipped everywhere else -- a guard that protects
+    # nothing on CI is not a guard.
+    import shutil
+
+    found = shutil.which("arm-none-eabi-gcc")
+    gcc = pathlib.Path(found) if found else pathlib.Path(
+        pathlib.Path.home(),
+        ".platformio/packages/toolchain-gccarmnoneeabi/bin/arm-none-eabi-gcc.exe",
     )
-    objcopy = gcc.with_name("arm-none-eabi-objcopy.exe")
+    objcopy = gcc.with_name(gcc.name.replace("gcc", "objcopy"))
     if not gcc.is_file():
-        pytest.skip(f"no arm-none-eabi-gcc at {gcc}")
+        pytest.skip(f"no arm-none-eabi-gcc on PATH or at {gcc}")
 
     import tempfile
 

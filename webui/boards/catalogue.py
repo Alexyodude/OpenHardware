@@ -99,6 +99,11 @@ CHIPS: dict[str, tuple[str, str]] = {
 #: and the whole difference on a bad one, so the claim is tied to a named file
 #: and `test_every_firmware_claim_names_a_test_that_exists` checks the file is
 #: there.
+#: **Coupled to `test_only_the_board_a_real_image_ran_on_claims_to_have_run_one`,
+#: which pins the set to {"RP2040"}.** That pin is what stops a second entry
+#: being added by pointing at a file that merely exists and merely mentions the
+#: right symbols; adding a chip here means editing that test too, and its name
+#: says what it is protecting.
 FIRMWARE_VERIFIED: dict[str, str] = {
     "RP2040": "tests/cortexm0/test_blink.py",
 }

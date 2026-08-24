@@ -8,6 +8,7 @@ touches:
 - tools/board_sources.py
 - tools/get_board_sources.py
 - tests/rules/test_board_sources.py
+parent: OH-23
 ---
 
 tools/get_seeed_hardware.sh is one vendor hard-coded into one shell script: the repository URL, the library directory name and the --all flag are all Seeed-specific. A second vendor written the same way is a second script, and fifteen is fifteen.

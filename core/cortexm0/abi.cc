@@ -115,9 +115,11 @@ void cortexm0_map_register(CortexM0Cpu* cpu, uint32_t address, uint32_t value) {
     as_handle(cpu)->cpu.map_register(address, value);
 }
 
-void cortexm0_map_alias(CortexM0Cpu* cpu, uint32_t address, uint32_t target, int op) {
+void cortexm0_map_alias(CortexM0Cpu* cpu, uint32_t address, uint32_t target,
+                        int op, int readable) {
     as_handle(cpu)->cpu.map_alias(address, target,
-                                  static_cast<cortexm0::WriteOp>(op));
+                                  static_cast<cortexm0::WriteOp>(op),
+                                  readable != 0);
 }
 
 void cortexm0_map_mirror(CortexM0Cpu* cpu, uint32_t address, uint32_t source,

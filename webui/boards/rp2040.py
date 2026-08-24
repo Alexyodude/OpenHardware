@@ -103,7 +103,8 @@ class Cpu(typing.Protocol):
     """What this module needs of a core: the three mapping calls."""
 
     def map_register(self, address: int, value: int = 0) -> None: ...
-    def map_alias(self, address: int, target: int, op: str) -> None: ...
+    def map_alias(self, address: int, target: int, op: str, *,
+                  readable: bool = ...) -> None: ...
     def map_mirror(self, address: int, source: int, *, invert: bool = ...,
                    mask: int = ...) -> None: ...
     def add_region(self, base: int, size: int, *, executable: bool = ...,
@@ -154,15 +155,22 @@ def install_sio(cpu: Cpu) -> None:
     cpu.map_register(SIO + SIO_CPUID, 0)
     cpu.map_register(SIO + SIO_GPIO_IN, 0)
 
+    # `readable=False` on every one of these. They are dedicated write-only
+    # registers, not alias windows: hardware reads them as zero, and the oracle
+    # agrees -- rp2040js's SIO read switch has no case for them, while its bus
+    # alias path masks an aliased address back to the base register and returns
+    # that. Reading GPIO_OUT through GPIO_OUT_SET is a wrong value rather than
+    # a missing feature, which is the one failure this project treats as worse
+    # than a fault.
     cpu.map_register(SIO + SIO_GPIO_OUT, 0)
-    cpu.map_alias(SIO + SIO_GPIO_OUT_SET, SIO + SIO_GPIO_OUT, "set")
-    cpu.map_alias(SIO + SIO_GPIO_OUT_CLR, SIO + SIO_GPIO_OUT, "clear")
-    cpu.map_alias(SIO + SIO_GPIO_OUT_XOR, SIO + SIO_GPIO_OUT, "xor")
+    cpu.map_alias(SIO + SIO_GPIO_OUT_SET, SIO + SIO_GPIO_OUT, "set", readable=False)
+    cpu.map_alias(SIO + SIO_GPIO_OUT_CLR, SIO + SIO_GPIO_OUT, "clear", readable=False)
+    cpu.map_alias(SIO + SIO_GPIO_OUT_XOR, SIO + SIO_GPIO_OUT, "xor", readable=False)
 
     cpu.map_register(SIO + SIO_GPIO_OE, 0)
-    cpu.map_alias(SIO + SIO_GPIO_OE_SET, SIO + SIO_GPIO_OE, "set")
-    cpu.map_alias(SIO + SIO_GPIO_OE_CLR, SIO + SIO_GPIO_OE, "clear")
-    cpu.map_alias(SIO + SIO_GPIO_OE_XOR, SIO + SIO_GPIO_OE, "xor")
+    cpu.map_alias(SIO + SIO_GPIO_OE_SET, SIO + SIO_GPIO_OE, "set", readable=False)
+    cpu.map_alias(SIO + SIO_GPIO_OE_CLR, SIO + SIO_GPIO_OE, "clear", readable=False)
+    cpu.map_alias(SIO + SIO_GPIO_OE_XOR, SIO + SIO_GPIO_OE, "xor", readable=False)
 
 
 def install_memory(cpu: Cpu) -> None:
@@ -209,7 +217,13 @@ def install_bootrom_stub(cpu: Cpu) -> None:
 
 
 def install(cpu: Cpu) -> None:
-    """Every region and peripheral this board models, which is not every one."""
+    """Every region and peripheral this board models, which is not every one.
+
+    **Precondition: no region may already cover this board's map.** Regions
+    refuse to overlap, so a caller that has installed memory of its own -- the
+    test suite's bare SRAM, for instance -- must `clear_regions()` first. The
+    refusal is loud, but it is easier to read here than in a traceback.
+    """
     install_memory(cpu)
     install_bootrom_stub(cpu)
     install_resets(cpu)

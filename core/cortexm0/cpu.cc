@@ -95,12 +95,13 @@ void Cpu::map_register(uint32_t address, uint32_t value) {
     mmio_[at] = entry;
 }
 
-void Cpu::map_alias(uint32_t address, uint32_t target, WriteOp op) {
+void Cpu::map_alias(uint32_t address, uint32_t target, WriteOp op, bool readable) {
     const uint32_t at = address & ~3u;
     Mapped entry;
     entry.target = target & ~3u;
     entry.source = target & ~3u;
     entry.op = op;
+    entry.readable = readable;
     mmio_[at] = entry;
 }
 
@@ -124,6 +125,11 @@ bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
         return false;
     }
     const Mapped& entry = found->second;
+    if (!entry.readable) {
+        // The architecture's answer, not an absence. See `map_alias`.
+        out = 0;
+        return true;
+    }
     // One hop only. A mirror of a mirror would need a loop, and a loop needs a
     // cycle check; nothing has asked for it, so the shape that cannot loop is
     // the one that ships.

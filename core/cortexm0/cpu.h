@@ -163,7 +163,25 @@ public:
     /// value. **The offsets are not here.** That +0x2000 means "set" on an
     /// RP2040 is a fact about that chip's bus; the caller passes both
     /// addresses, so this stays architecture-only.
-    void map_alias(uint32_t address, uint32_t target, WriteOp op);
+    ///
+    /// `readable` separates two things that write identically and read
+    /// differently, and conflating them gives a wrong answer rather than a
+    /// loud one:
+    ///
+    ///  * A **bus alias window** is a second view of the register, so reading
+    ///    it returns that register. The RP2040's +0x1000/+0x2000/+0x3000
+    ///    windows are these, and the oracle agrees -- its read path masks the
+    ///    offset back to the base register.
+    ///  * A **dedicated write-only register** is its own address that happens
+    ///    to modify another. SIO's `GPIO_OUT_SET` is one, and hardware reads
+    ///    it as zero. Returning `GPIO_OUT` there is not a missing feature, it
+    ///    is a wrong value, which is the failure this file otherwise refuses.
+    ///
+    /// Zero from a `readable == false` register is the *architecture's* answer,
+    /// not this model shrugging -- the distinction the rest of this class
+    /// spends its comments on.
+    void map_alias(uint32_t address, uint32_t target, WriteOp op,
+                   bool readable = true);
 
     /// An address whose read is derived from another's word.
     ///
@@ -295,6 +313,7 @@ private:
         uint32_t source = 0;
         WriteOp op = WriteOp::Store;
         bool invert = false;
+        bool readable = true;
         uint32_t mask = 0xFFFFFFFFu;
     };
 

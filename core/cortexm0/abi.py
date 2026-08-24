@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match CORTEXM0_ABI_VERSION in abi.h.
-ABI_VERSION = 9
+ABI_VERSION = 10
 
 #: Must match cortexm0::WriteOp. Spelled at call sites rather than numbered.
 WRITE_OPS = {"store": 0, "set": 1, "clear": 2, "xor": 3}
@@ -119,7 +119,9 @@ _SIGNATURES = {
     ),
     "cortexm0_is_mapped": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
     "cortexm0_map_alias": (
-        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int], None
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int,
+         ctypes.c_int],
+        None,
     ),
     "cortexm0_map_mirror": (
         [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int,
@@ -304,12 +306,18 @@ class Cpu:
     def is_mapped(self, address: int) -> bool:
         return bool(self._lib.cortexm0_is_mapped(self._handle, address))
 
-    def map_alias(self, address: int, target: int, op: str) -> None:
+    def map_alias(self, address: int, target: int, op: str, *,
+                  readable: bool = True) -> None:
         """An address whose write applies `op` to `target`'s word.
 
         `op` is one of "store", "set", "clear", "xor" -- spelled rather than
         numbered, because a bare 2 at a call site is unreadable and the
         difference between clear and xor is a silent wrong answer.
+
+        `readable=False` for a dedicated write-only register, which reads as
+        zero on the part. A bus alias window is readable and returns the
+        register it aliases; see the core's `map_alias` for why conflating the
+        two answers wrongly rather than loudly.
         """
         try:
             code = WRITE_OPS[op]
@@ -317,7 +325,9 @@ class Cpu:
             raise AbiError(
                 f"unknown write op {op!r}; expected one of {sorted(WRITE_OPS)}"
             ) from None
-        self._lib.cortexm0_map_alias(self._handle, address, target, code)
+        self._lib.cortexm0_map_alias(
+            self._handle, address, target, code, 1 if readable else 0
+        )
 
     def map_mirror(self, address: int, source: int, *, invert: bool = False,
                    mask: int = 0xFFFFFFFF) -> None:
