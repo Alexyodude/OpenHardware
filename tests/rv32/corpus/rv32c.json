@@ -1,0 +1,210 @@
+[
+ {
+  "mnemonic": "c.nop",
+  "encoding": "0x0001",
+  "width": 16,
+  "requires": [
+   "C"
+  ],
+  "requires_source": "RV32C: 16-bit quadrant encoding, op field in bits [1:0]",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "10": "0x00001234",
+   "11": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.li x10, 7",
+  "encoding": "0x451d",
+  "width": 16,
+  "requires": [
+   "C"
+  ],
+  "requires_source": "RV32C: 16-bit quadrant encoding, op field in bits [1:0]",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "10": "0x00001234",
+   "11": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "10": 7
+   }
+  }
+ },
+ {
+  "mnemonic": "c.addi x10, 3",
+  "encoding": "0x050d",
+  "width": 16,
+  "requires": [
+   "C"
+  ],
+  "requires_source": "RV32C: 16-bit quadrant encoding, op field in bits [1:0]",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "10": "0x00001234",
+   "11": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "10": 4663
+   }
+  }
+ },
+ {
+  "mnemonic": "c.slli x10, 4",
+  "encoding": "0x0512",
+  "width": 16,
+  "requires": [
+   "C"
+  ],
+  "requires_source": "RV32C: 16-bit quadrant encoding, op field in bits [1:0]",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "10": "0x00001234",
+   "11": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "10": 74560
+   }
+  }
+ },
+ {
+  "mnemonic": "c.mv x10, x11",
+  "encoding": "0x852e",
+  "width": 16,
+  "requires": [
+   "C"
+  ],
+  "requires_source": "RV32C: 16-bit quadrant encoding, op field in bits [1:0]",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "10": "0x00001234",
+   "11": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "10": 255
+   }
+  }
+ },
+ {
+  "mnemonic": "c.add x10, x11",
+  "encoding": "0x952e",
+  "width": 16,
+  "requires": [
+   "C"
+  ],
+  "requires_source": "RV32C: 16-bit quadrant encoding, op field in bits [1:0]",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "10": "0x00001234",
+   "11": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "10": 4915
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sub x10, x11",
+  "encoding": "0x8d0d",
+  "width": 16,
+  "requires": [
+   "C"
+  ],
+  "requires_source": "RV32C: 16-bit quadrant encoding, op field in bits [1:0]",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "10": "0x00001234",
+   "11": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "10": 4405
+   }
+  }
+ },
+ {
+  "mnemonic": "c.xor x10, x11",
+  "encoding": "0x8d2d",
+  "width": 16,
+  "requires": [
+   "C"
+  ],
+  "requires_source": "RV32C: 16-bit quadrant encoding, op field in bits [1:0]",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "10": "0x00001234",
+   "11": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "10": 4811
+   }
+  }
+ },
+ {
+  "mnemonic": "c.or x10, x11",
+  "encoding": "0x8d4d",
+  "width": 16,
+  "requires": [
+   "C"
+  ],
+  "requires_source": "RV32C: 16-bit quadrant encoding, op field in bits [1:0]",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "10": "0x00001234",
+   "11": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "10": 4863
+   }
+  }
+ },
+ {
+  "mnemonic": "c.and x10, x11",
+  "encoding": "0x8d6d",
+  "width": 16,
+  "requires": [
+   "C"
+  ],
+  "requires_source": "RV32C: 16-bit quadrant encoding, op field in bits [1:0]",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "10": "0x00001234",
+   "11": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "10": 52
+   }
+  }
+ }
+]

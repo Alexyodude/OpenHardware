@@ -1,0 +1,3346 @@
+[
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoadd.w x12, x11, (x10)",
+  "encoding": "0x00b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoswap.w x12, x11, (x10)",
+  "encoding": "0x08b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00001 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "lr.w x12, x11, (x10)",
+  "encoding": "0x1005262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00010 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sc.w x12, x11, (x10)",
+  "encoding": "0x18b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00011 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoxor.w x12, x11, (x10)",
+  "encoding": "0x20b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b00100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoor.w x12, x11, (x10)",
+  "encoding": "0x40b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amoand.w x12, x11, (x10)",
+  "encoding": "0x60b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b01100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomin.w x12, x11, (x10)",
+  "encoding": "0x80b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomax.w x12, x11, (x10)",
+  "encoding": "0xa0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b10100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amominu.w x12, x11, (x10)",
+  "encoding": "0xc0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11000 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "amomaxu.w x12, x11, (x10)",
+  "encoding": "0xe0b5262f",
+  "width": 32,
+  "requires": [
+   "A"
+  ],
+  "requires_source": "RV32A: opcode=AMO(0x2f) funct3=0b010 (.w) funct5=0b11100 aq=0 rl=0",
+  "initial": {
+   "10": "0x80001000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ }
+]

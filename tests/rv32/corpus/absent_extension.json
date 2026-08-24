@@ -1,0 +1,82 @@
+[
+ {
+  "mnemonic": "c.flw x12, 0(x8)",
+  "encoding": "0x6010",
+  "width": 16,
+  "requires": [
+   "F"
+  ],
+  "requires_source": "RV32C quadrant with funct3=0b011: C.FLW/C.FLWSP, which need F. The same words are RV64's C.LD/C.LDSP. No ESP32-C part has an FPU and none is RV64, so both readings make this illegal here.",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "12": "0x00000000",
+   "13": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.flw x13, 0(x8)",
+  "encoding": "0x6014",
+  "width": 16,
+  "requires": [
+   "F"
+  ],
+  "requires_source": "RV32C quadrant with funct3=0b011: C.FLW/C.FLWSP, which need F. The same words are RV64's C.LD/C.LDSP. No ESP32-C part has an FPU and none is RV64, so both readings make this illegal here.",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "12": "0x00000000",
+   "13": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "trapped",
+   "cause": "2"
+  }
+ },
+ {
+  "mnemonic": "c.flwsp x12, 0(sp)",
+  "encoding": "0x6602",
+  "width": 16,
+  "requires": [
+   "F"
+  ],
+  "requires_source": "RV32C quadrant with funct3=0b011: C.FLW/C.FLWSP, which need F. The same words are RV64's C.LD/C.LDSP. No ESP32-C part has an FPU and none is RV64, so both readings make this illegal here.",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "12": "0x00000000",
+   "13": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.flwsp x13, 0(sp)",
+  "encoding": "0x6682",
+  "width": 16,
+  "requires": [
+   "F"
+  ],
+  "requires_source": "RV32C quadrant with funct3=0b011: C.FLW/C.FLWSP, which need F. The same words are RV64's C.LD/C.LDSP. No ESP32-C part has an FPU and none is RV64, so both readings make this illegal here.",
+  "initial": {
+   "2": "0x80001000",
+   "8": "0x80001000",
+   "12": "0x00000000",
+   "13": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "trapped",
+   "cause": "2"
+  }
+ }
+]

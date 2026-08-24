@@ -1,0 +1,2434 @@
+[
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967294
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967294
+   }
+  }
+ },
+ {
+  "mnemonic": "mul x12, x10, x11",
+  "encoding": "0x02b50633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b000 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "mulh x12, x10, x11",
+  "encoding": "0x02b51633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b001 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhsu x12, x10, x11",
+  "encoding": "0x02b52633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b010 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "mulhu x12, x10, x11",
+  "encoding": "0x02b53633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b011 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967294
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967294
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "div x12, x10, x11",
+  "encoding": "0x02b54633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b100 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483647
+   }
+  }
+ },
+ {
+  "mnemonic": "divu x12, x10, x11",
+  "encoding": "0x02b55633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b101 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "rem x12, x10, x11",
+  "encoding": "0x02b56633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b110 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "remu x12, x10, x11",
+  "encoding": "0x02b57633",
+  "width": 32,
+  "requires": [
+   "M"
+  ],
+  "requires_source": "RV32M: opcode=0x33 funct7=0b0000001 funct3=0b111 -- the extension is that one funct7 value",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ }
+]
