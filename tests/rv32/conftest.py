@@ -27,7 +27,8 @@ CORPUS = pathlib.Path(__file__).parent / "corpus"
 #: Every family the generator emits. Named rather than globbed, so a corpus
 #: missing a family fails loudly instead of quietly testing less -- the same
 #: contract `tests/cortexm0/test_conformance.py` keeps with its FAMILIES.
-FAMILIES = ("rv32i_op", "rv32m_op", "rv32a", "rv32c", "rv32zba", "absent_extension")
+FAMILIES = ("rv32i_op", "rv32m_op", "rv32a", "rv32c", "rv32zba", "rv32zbs",
+            "absent_extension")
 
 #: rvcpp's map, so a captured final state means the same thing on both sides.
 #: From `third_party/hazard3/test/sim/rvcpp/main.cpp`: `RAM_BASE 0x80000000`
@@ -74,7 +75,7 @@ TARGETS = {
 #: and the honest response is to say which cases that affects rather than to
 #: shrink the target and assert that an RP2350 refuses `clz`. It does not; this
 #: core simply cannot be told that it has Zbb yet.
-MODELLED = frozenset({"M", "A", "C", "Zba"})
+MODELLED = frozenset({"M", "A", "C", "Zba", "Zbs"})
 
 
 def faithfully_configurable(case: dict, target: str) -> bool:

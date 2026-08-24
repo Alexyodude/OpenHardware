@@ -87,6 +87,66 @@ def test_zba_agrees_with_rvcpp(oracle, tmp_path):
     )
 
 
+def test_zbs_agrees_with_rvcpp(oracle, tmp_path):
+    """All eight Zbs encodings against the model written by Hazard3's author.
+
+    Both forms of all four, because the register and immediate halves are
+    decoded in different places -- opcode 0b0110011 and 0b0010011 -- and a
+    core could get one right and the other wrong with no test between them.
+
+    Bit 31 is exercised on purpose: `bset` at index 31 is the one that
+    distinguishes `1u << 31` from a signed shift, and a model that got that
+    wrong would agree on every other index.
+    """
+    body = [
+        e.lui("t0", 0xF0F0F),
+        e.addi("t0", "t0", 0x0F0),
+        e.addi("t1", "x0", 4),
+        e.bset("a0", "t0", "t1"),
+        e.bclr("a1", "t0", "t1"),
+        e.binv("a2", "t0", "t1"),
+        e.bext("a3", "t0", "t1"),
+        e.bseti("a4", "t0", 31),
+        e.bclri("a5", "t0", 31),
+        e.binvi("a6", "t0", 0),
+        e.bexti("a7", "t0", 31),
+        # An index above 31 cannot be encoded -- the field is five bits -- so
+        # the wrap a 64-bit model would show up on is unreachable here, and
+        # saying so is cheaper than a test that pretends to cover it.
+        e.bext("s0", "t0", "t0"),
+    ]
+    check(
+        lockstep.run(image(body), tmp_path, extensions=abi.RP2350_MODELLED),
+        least=len(body),
+    )
+
+
+def test_zbs_immediates_share_a_funct3_with_the_shifts_and_agree_anyway(oracle, tmp_path):
+    """`slli`, `srli`, `srai` and the Zbs immediates in one program.
+
+    They live under two funct3 values between them and are told apart by
+    funct7. Running them adjacently is what would catch a decoder that opened
+    the Zbs funct7 values and lost a shift, or the reverse -- neither of which
+    a program using only one family would notice.
+    """
+    body = [
+        e.addi("t0", "x0", -1),
+        e.slli("a0", "t0", 5),
+        e.srli("a1", "t0", 5),
+        e.srai("a2", "t0", 5),
+        e.bseti("a3", "t0", 5),
+        e.bclri("a4", "t0", 5),
+        e.bexti("a5", "t0", 5),
+        e.binvi("a6", "t0", 5),
+        e.slli("a7", "t0", 0),
+        e.bclri("s0", "t0", 0),
+    ]
+    check(
+        lockstep.run(image(body), tmp_path, extensions=abi.RP2350_MODELLED),
+        least=len(body),
+    )
+
+
 def test_zba_writing_x0_changes_nothing_in_either_model(oracle, tmp_path):
     """x0 stays zero however it is written, and both models must agree it does.
 

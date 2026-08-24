@@ -46,6 +46,7 @@ EXT_M = 1
 EXT_A = 2
 EXT_C = 4
 EXT_ZBA = 8
+EXT_ZBS = 16
 
 #: The ISA of the parts this core is for, spelled once. `docs/
 #: architectures.md` 4.2 is the citation, and the C3 row is the one that
@@ -58,7 +59,7 @@ ESP32_C6 = EXT_M | EXT_A | EXT_C
 #:
 #:     rv32ima_zicsr_zifencei_zba_zbb_zbs_zbkb_zca_zcb_zcmp
 #:
-#: so Zbb, Zbs, Zbkb, Zcb and Zcmp are missing here, and `kExtC` is standing in
+#: so Zbb, Zbkb, Zcb and Zcmp are missing here, and `kExtC` is standing in
 #: for Zca -- see the note on `Extension` in cpu.h for why that is sound for a
 #: part with no FPU and would stop being sound for one with an FPU.
 #:
@@ -69,7 +70,7 @@ ESP32_C6 = EXT_M | EXT_A | EXT_C
 #: so an unmodelled extension shows up as a gap rather than as the silicon
 #: lacking it. Adding Zbb here without adding it there is the mistake this
 #: paragraph exists to prevent.
-RP2350_MODELLED = EXT_M | EXT_A | EXT_C | EXT_ZBA
+RP2350_MODELLED = EXT_M | EXT_A | EXT_C | EXT_ZBA | EXT_ZBS
 
 #: Must match `riscv32::StepResult` and abi.h's documented return values.
 OK = 0

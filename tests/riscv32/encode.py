@@ -157,6 +157,25 @@ def sub(rd, rs1, rs2): return r_type(0x20, rs2, rs1, 0x0, rd, 0x33)
 def sh1add(rd, rs1, rs2): return r_type(0x10, rs2, rs1, 0x2, rd, 0x33)
 def sh2add(rd, rs1, rs2): return r_type(0x10, rs2, rs1, 0x4, rd, 0x33)
 def sh3add(rd, rs1, rs2): return r_type(0x10, rs2, rs1, 0x6, rd, 0x33)
+
+# Zbs single-bit. Three funct7 values, and the funct3 does half the deciding:
+# set, clear and invert share 001 while extract is 101 and exists under 0x24
+# only. Taken from rvcpp's table so the bits are not from memory --
+# `RVOPC_BSET_BITS = 0b0010100_00000_00000_001_00000_0110011`
+# (third_party/hazard3/test/sim/rvcpp/include/encoding/rv_opcodes.h:...).
+#
+# The immediate forms are the same funct7 and funct3 over opcode 0b0010011,
+# with the shift-amount field where rs2 sits -- which is why they are built
+# with r_type rather than i_type, exactly as slli and srai above are.
+def bset(rd, rs1, rs2): return r_type(0x14, rs2, rs1, 0x1, rd, 0x33)
+def bclr(rd, rs1, rs2): return r_type(0x24, rs2, rs1, 0x1, rd, 0x33)
+def bext(rd, rs1, rs2): return r_type(0x24, rs2, rs1, 0x5, rd, 0x33)
+def binv(rd, rs1, rs2): return r_type(0x34, rs2, rs1, 0x1, rd, 0x33)
+
+def bseti(rd, rs1, shamt): return r_type(0x14, shamt, rs1, 0x1, rd, 0x13)
+def bclri(rd, rs1, shamt): return r_type(0x24, shamt, rs1, 0x1, rd, 0x13)
+def bexti(rd, rs1, shamt): return r_type(0x24, shamt, rs1, 0x5, rd, 0x13)
+def binvi(rd, rs1, shamt): return r_type(0x34, shamt, rs1, 0x1, rd, 0x13)
 def sll(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x1, rd, 0x33)
 def slt(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x2, rd, 0x33)
 def sltu(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x3, rd, 0x33)

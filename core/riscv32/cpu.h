@@ -69,14 +69,15 @@ constexpr unsigned kRegisters = 32;
 /// before any part with an FPU arrives, and `tests/rv32/corpus/
 /// absent_extension.json` already holds the encodings that would separate them.
 ///
-/// Zbb, Zbs, Zbkb, Zcb and Zcmp are still absent: the RP2350 has them and this
-/// core does not implement them yet, which `tests/rv32/conftest.py` records as
-/// a gap in `MODELLED` rather than by pretending the part lacks them.
+/// Zbb, Zbkb, Zcb and Zcmp are still absent: the RP2350 has them and this core
+/// does not implement them yet, which `tests/rv32/conftest.py` records as a
+/// gap in `MODELLED` rather than by pretending the part lacks them.
 enum Extension : uint32_t {
     kExtM = 1u << 0,
     kExtA = 1u << 1,
     kExtC = 1u << 2,
     kExtZba = 1u << 3,
+    kExtZbs = 1u << 4,
 };
 
 /// What `step` did.

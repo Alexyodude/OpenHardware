@@ -1,0 +1,2370 @@
+[
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483648
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 5
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483649
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 6
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483650
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "bset x12, x10, x11",
+  "encoding": "0x28b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0010100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 0",
+  "encoding": "0x28051613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 0",
+  "encoding": "0x28051613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 0",
+  "encoding": "0x28051613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 0",
+  "encoding": "0x28051613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 1",
+  "encoding": "0x28151613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 1",
+  "encoding": "0x28151613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 1",
+  "encoding": "0x28151613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 1",
+  "encoding": "0x28151613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 2",
+  "encoding": "0x28251613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 6
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 2",
+  "encoding": "0x28251613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 6
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 2",
+  "encoding": "0x28251613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 6
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 2",
+  "encoding": "0x28251613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 6
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 31",
+  "encoding": "0x29f51613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 31",
+  "encoding": "0x29f51613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 31",
+  "encoding": "0x29f51613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "bseti x12, x10, 31",
+  "encoding": "0x29f51613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0010100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967294
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967293
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967291
+   }
+  }
+ },
+ {
+  "mnemonic": "bclr x12, x10, x11",
+  "encoding": "0x48b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483647
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 0",
+  "encoding": "0x48051613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 0",
+  "encoding": "0x48051613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 0",
+  "encoding": "0x48051613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 0",
+  "encoding": "0x48051613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 1",
+  "encoding": "0x48151613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 1",
+  "encoding": "0x48151613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 1",
+  "encoding": "0x48151613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 1",
+  "encoding": "0x48151613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 2",
+  "encoding": "0x48251613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 2",
+  "encoding": "0x48251613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 2",
+  "encoding": "0x48251613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 2",
+  "encoding": "0x48251613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 31",
+  "encoding": "0x49f51613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483647
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 31",
+  "encoding": "0x49f51613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483647
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 31",
+  "encoding": "0x49f51613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483647
+   }
+  }
+ },
+ {
+  "mnemonic": "bclri x12, x10, 31",
+  "encoding": "0x49f51613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483647
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483648
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 5
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483649
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 6
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483650
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967294
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967293
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967291
+   }
+  }
+ },
+ {
+  "mnemonic": "binv x12, x10, x11",
+  "encoding": "0x68b51633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0110100 funct3=0b001 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483647
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 0",
+  "encoding": "0x68051613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 0",
+  "encoding": "0x68051613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 0",
+  "encoding": "0x68051613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 0",
+  "encoding": "0x68051613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 1",
+  "encoding": "0x68151613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 1",
+  "encoding": "0x68151613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 1",
+  "encoding": "0x68151613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 1",
+  "encoding": "0x68151613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 2",
+  "encoding": "0x68251613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 6
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 2",
+  "encoding": "0x68251613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 6
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 2",
+  "encoding": "0x68251613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 6
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 2",
+  "encoding": "0x68251613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 6
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 31",
+  "encoding": "0x69f51613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483647
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 31",
+  "encoding": "0x69f51613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483647
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 31",
+  "encoding": "0x69f51613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483647
+   }
+  }
+ },
+ {
+  "mnemonic": "binvi x12, x10, 31",
+  "encoding": "0x69f51613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0110100 funct3=0b001, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2147483647
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bext x12, x10, x11",
+  "encoding": "0x48b55633",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit: opcode=0x33 funct7=0b0100100 funct3=0b101 -- both fields decide, since funct3 001 and 101 mean different instructions under the same funct7",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 0",
+  "encoding": "0x48055613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 0",
+  "encoding": "0x48055613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 0",
+  "encoding": "0x48055613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 0",
+  "encoding": "0x48055613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 1",
+  "encoding": "0x48155613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 1",
+  "encoding": "0x48155613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 1",
+  "encoding": "0x48155613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 1",
+  "encoding": "0x48155613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 2",
+  "encoding": "0x48255613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 2",
+  "encoding": "0x48255613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 2",
+  "encoding": "0x48255613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 2",
+  "encoding": "0x48255613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 31",
+  "encoding": "0x49f55613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 31",
+  "encoding": "0x49f55613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 31",
+  "encoding": "0x49f55613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "bexti x12, x10, 31",
+  "encoding": "0x49f55613",
+  "width": 32,
+  "requires": [
+   "Zbs"
+  ],
+  "requires_source": "Zbs single-bit immediate: opcode=0x13 funct7=0b0100100 funct3=0b101, shamt in the rs2 field -- the same funct3 SLLI and SRLI use",
+  "initial": {
+   "10": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ }
+]

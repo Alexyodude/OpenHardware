@@ -104,16 +104,97 @@ def test_zba_is_not_reached_by_enabling_some_other_extension(cpu):
 def test_an_unassigned_encoding_under_zbas_funct7_is_still_illegal(cpu):
     """Zba is three funct3 values, not a whole funct7.
 
-    funct7 0b0010000 with funct3 001 is `bset` from Zbs, which this core does
-    not model. Turning Zba on must not turn that on with it -- an extension
-    gate that opened a funct7 wholesale would execute a neighbouring
-    extension's encoding and rvcpp, which implements Zbs too, would agree.
+    **This docstring used to say funct7 0b0010000 with funct3 001 was `bset`
+    from Zbs. It is not, and the error survived into OH-44's justification.**
+    `bset` is funct7 0b0010100 -- `RVOPC_BSET_BITS` in rvcpp's own table --
+    so this encoding belongs to no extension at all. The assertion was always
+    right and only the label was wrong, which is why nothing failed when Zbs
+    landed and why the "tripwire" OH-44 was sequenced for did not exist.
+
+    What it does check is still worth checking, and now more so: Zba opened
+    funct7 0b0010000 at funct3 010, 100 and 110, and this is one of the four
+    values it must have left shut.
     """
-    bset = e.r_type(0x10, "t1", "t0", 0x1, "a0", 0x33)
-    load(cpu, [bset])
+    unassigned = e.r_type(0x10, "t1", "t0", 0x1, "a0", 0x33)
+    load(cpu, [unassigned])
     cpu.set_extensions(abi.RP2350_MODELLED)
     with pytest.raises(abi.Illegal):
         cpu.step()
+
+
+def test_zbs_opens_its_funct7_values_only_at_the_funct3_it_defines(cpu):
+    """The guard the test above was *meant* to be, on the right encodings.
+
+    Zbs defines funct3 001 for all three of its funct7 values and funct3 101
+    for 0x24 alone. So `0x14` with funct3 101 is not an instruction, and a
+    gate keyed on the extension and the funct7 without the funct3 would
+    execute it. rvcpp implements Zbs, so a lockstep run would have agreed.
+    """
+    for funct7, funct3 in ((0x14, 0x5), (0x34, 0x5), (0x14, 0x2), (0x24, 0x3)):
+        load(cpu, [e.r_type(funct7, "t1", "t0", funct3, "a0", 0x33)])
+        cpu.set_extensions(abi.RP2350_MODELLED)
+        with pytest.raises(abi.Illegal):
+            cpu.step()
+
+
+def test_zbs_does_not_reopen_the_rv64_six_bit_shift(cpu):
+    """The line Zbs actually had to be threaded past, and the one that matters.
+
+    `SLLI` refuses any nonzero funct7 because a one in bit 25 is RV64's
+    six-bit shift amount, and an RV32 part raises illegal-instruction rather
+    than shifting by a masked one. Zbs shares that funct3, so the refusal had
+    to become a list of named funct7 values instead of "nonzero" -- and every
+    Zbs funct7 has bit 25 clear, so the RV64 encoding stays shut.
+
+    Written as its own test because the two facts are separable: a decoder
+    could get every Zbs bit right and still have opened this by using
+    `funct7 != 0` as the new gate.
+    """
+    rv64_slli = e.r_type(0x01, 3, "t0", 0x1, "a0", 0x13)
+    for part in (abi.ESP32_C6, abi.RP2350_MODELLED):
+        load(cpu, [rv64_slli])
+        cpu.set_extensions(part)
+        with pytest.raises(abi.Illegal):
+            cpu.step()
+
+
+def test_zbs_is_illegal_on_both_esp32_parts_and_executes_on_an_rp2350(cpu):
+    """All eight, both ways, with the values checked rather than the outcome.
+
+    An extension test that only asserts "did not raise" would pass over a
+    decoder that ran the wrong one of the four -- they share a funct7 space
+    and differ by three bits, which is exactly where a transposition hides.
+    """
+    start = 0xF0F0F0F0
+    index = 4
+    expected = {
+        "bset": start | (1 << index),
+        "bclr": start & ~(1 << index),
+        "binv": start ^ (1 << index),
+        "bext": (start >> index) & 1,
+    }
+    for name, encoded in (
+        ("bset", e.bset("a0", "t0", "t1")), ("bclr", e.bclr("a0", "t0", "t1")),
+        ("binv", e.binv("a0", "t0", "t1")), ("bext", e.bext("a0", "t0", "t1")),
+        ("bset", e.bseti("a0", "t0", index)), ("bclr", e.bclri("a0", "t0", index)),
+        ("binv", e.binvi("a0", "t0", index)), ("bext", e.bexti("a0", "t0", index)),
+    ):
+        for part in (abi.ESP32_C3, abi.ESP32_C6):
+            load(cpu, [encoded])
+            cpu.set_extensions(part)
+            with pytest.raises(abi.Illegal):
+                cpu.step()
+
+        load(cpu, [encoded])
+        cpu.set_extensions(abi.RP2350_MODELLED)
+        regs = cpu.get_regs().as_list()
+        regs[5], regs[6] = start, index      # t0, t1
+        cpu.set_regs(regs, pc=PC)
+        cpu.step()
+        assert cpu.reg(10) == expected[name], (
+            f"{name} ({encoded:#010x}) produced {cpu.reg(10):#010x}, "
+            f"expected {expected[name]:#010x}"
+        )
 
 
 def test_the_two_refusals_are_different_codes_at_the_abi_and_not_only_in_python(cpu):

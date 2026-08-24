@@ -325,27 +325,57 @@ StepResult step(Cpu& cpu) {
         case 0x4u: result = a ^ imm; break;                              // XORI
         case 0x6u: result = a | imm; break;                              // ORI
         case 0x7u: result = a & imm; break;                              // ANDI
-        case 0x1u:  // SLLI
+        case 0x1u: {  // SLLI, and Zbs's three single-bit immediates
             // On RV32 the shift amount is five bits and bit 25 must be zero.
             // A one there is the RV64 encoding of a six-bit shift, and an
             // RV32 part raises illegal-instruction rather than shifting by a
             // masked amount. This is the same class of hole rvcpp has in its
             // compressed decoder (docs/architectures.md 2.1b): an RV64 meaning
             // silently accepted on a 32-bit part.
-            if (funct7_of(instr) != 0x00u) {
-                return StepResult::Illegal;
-            }
-            result = a << (rs2 & 0x1Fu);
-            break;
-        case 0x5u:  // SRLI, SRAI
-            if (funct7_of(instr) == 0x00u) {
-                result = a >> (rs2 & 0x1Fu);
-            } else if (funct7_of(instr) == 0x20u) {
-                result = shift_right_arithmetic(a, rs2 & 0x1Fu);
+            //
+            // **Zbs shares this funct3 and does not weaken that.** Its three
+            // funct7 values here are 0b0010100, 0b0100100 and 0b0110100, and
+            // every one of them has bit 25 clear -- so opening them leaves the
+            // RV64 six-bit shift exactly as illegal as it was. That is why
+            // this is a switch over named funct7 values and not a test for
+            // "nonzero", which would have opened the case this paragraph
+            // exists to close.
+            const uint32_t seven = funct7_of(instr);
+            const uint32_t bit = 1u << (rs2 & 0x1Fu);
+            if (seven == 0x00u) {
+                result = a << (rs2 & 0x1Fu);                            // SLLI
+            } else if (seven == 0x14u || seven == 0x24u || seven == 0x34u) {
+                if (!cpu.has(kExtZbs)) {
+                    return StepResult::Illegal;
+                }
+                result = seven == 0x14u ? (a | bit)                     // BSETI
+                       : seven == 0x24u ? (a & ~bit)                    // BCLRI
+                       :                  (a ^ bit);                    // BINVI
             } else {
                 return StepResult::Illegal;
             }
             break;
+        }
+        case 0x5u: {  // SRLI, SRAI, and Zbs's BEXTI
+            const uint32_t seven = funct7_of(instr);
+            if (seven == 0x00u) {
+                result = a >> (rs2 & 0x1Fu);                            // SRLI
+            } else if (seven == 0x20u) {
+                result = shift_right_arithmetic(a, rs2 & 0x1Fu);        // SRAI
+            } else if (seven == 0x24u) {
+                // Only BEXTI lives under this funct3. The other two Zbs
+                // funct7 values belong to funct3 001, so a gate keyed on the
+                // extension alone -- without the funct3 -- would execute
+                // encodings Zbs does not define.
+                if (!cpu.has(kExtZbs)) {
+                    return StepResult::Illegal;
+                }
+                result = (a >> (rs2 & 0x1Fu)) & 1u;                     // BEXTI
+            } else {
+                return StepResult::Illegal;
+            }
+            break;
+        }
         default:
             return StepResult::Illegal;
         }
@@ -403,6 +433,27 @@ StepResult step(Cpu& cpu) {
             // and `MODELLED` in tests/rv32/conftest.py is what keeps a
             // not-modelled encoding from being asserted against a real part.
             default: return StepResult::Illegal;
+            }
+        } else if (funct7 == 0x14u || funct7 == 0x24u || funct7 == 0x34u) {
+            // Zbs single-bit register forms. The funct7 alone does not decide
+            // which: set, clear and invert share funct3 001 and are told apart
+            // by funct7, while extract is funct3 101 and exists for 0x24 only.
+            // So `0x24` with funct3 001 is BCLR and with 101 is BEXT, and the
+            // other two funct7 values have no funct3 101 meaning at all -- a
+            // gate that opened a whole funct7 would execute an encoding Zbs
+            // does not define, and rvcpp, which implements Zbs, would agree.
+            if (!cpu.has(kExtZbs)) {
+                return StepResult::Illegal;
+            }
+            const uint32_t bit = 1u << amount;
+            if (funct3 == 0x1u) {
+                result = funct7 == 0x14u ? (a | bit)                     // BSET
+                       : funct7 == 0x24u ? (a & ~bit)                    // BCLR
+                       :                   (a ^ bit);                    // BINV
+            } else if (funct3 == 0x5u && funct7 == 0x24u) {
+                result = (a >> amount) & 1u;                             // BEXT
+            } else {
+                return StepResult::Illegal;
             }
         } else {
             return StepResult::Illegal;

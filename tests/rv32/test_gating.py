@@ -58,6 +58,7 @@ def extension_mask(abi, names) -> int:
         "A": abi.EXT_A,
         "C": abi.EXT_C,
         "Zba": abi.EXT_ZBA,
+        "Zbs": abi.EXT_ZBS,
     }
     assert set(bits) == set(MODELLED), (
         f"MODELLED says {sorted(MODELLED)} and this map has {sorted(bits)}. "
@@ -209,6 +210,42 @@ def test_zba_is_refused_on_both_esp32_parts_and_run_on_an_rp2350(cpu, abi):
         "the corpus no longer records rvcpp executing this, so the premise "
         "that the oracle cannot see gating needs rechecking"
     )
+
+
+def test_zbs_is_refused_on_both_esp32_parts_and_run_on_an_rp2350(cpu, abi):
+    """The second extension whose three targets do not agree, from the corpus.
+
+    Worth its own case beside the Zba one rather than left to the sweep,
+    because Zbs is the first group whose encodings live under **two** opcodes:
+    the register forms under OP and the immediates under OP_IMM, sharing a
+    funct3 with SLLI and SRLI. A core could gate one opcode and not the other
+    and the sweep would still pass on whichever half it happened to reach
+    first, so both are asserted here by name.
+    """
+    cases = load_family("rv32zbs")
+    assert all(case["requires"] == ["Zbs"] for case in cases)
+
+    opcodes = {int(case["encoding"], 16) & 0x7F for case in cases}
+    assert opcodes == {0x33, 0x13}, (
+        f"the Zbs family covers opcodes {sorted(hex(o) for o in opcodes)}; both "
+        f"the register forms (0x33) and the immediates (0x13) must be in it"
+    )
+
+    for opcode in sorted(opcodes):
+        case = next(c for c in cases if int(c["encoding"], 16) & 0x7F == opcode)
+        for absent in ("ESP32-C3", "ESP32-C6"):
+            assert attempt(cpu, abi, case, absent) == "illegal", (
+                f"{case['mnemonic']} ({case['encoding']}) was not refused on an "
+                f"{absent}. {case['requires_source']}"
+            )
+        assert attempt(cpu, abi, case, "RP2350") == "executed", (
+            f"{case['mnemonic']} was not executed on an RP2350, whose datasheet "
+            f"ISA string contains _zbs_"
+        )
+        assert case["rvcpp"]["status"] == "executed", (
+            "rvcpp no longer executes this, so the premise that the oracle "
+            "cannot see gating needs rechecking"
+        )
 
 
 def test_the_c_and_zca_equivalence_is_only_claimed_for_parts_without_an_fpu(cpu, abi):

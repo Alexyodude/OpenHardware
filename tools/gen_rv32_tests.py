@@ -339,6 +339,21 @@ RV32ZBA_OP = (
     ("sh1add", 0x2), ("sh2add", 0x4), ("sh3add", 0x6),
 )
 
+#: Zbs "Single-bit instructions", as (mnemonic, funct7, funct3). Unlike Zba
+#: the funct7 does not decide on its own: set, clear and invert share funct3
+#: 001 and differ by funct7, while extract is funct3 101 under 0x24 only. Both
+#: fields are in `requires_source` for that reason -- a case citing only the
+#: funct7 would describe three encodings.
+#:
+#: The immediate forms are the same two fields over OP_IMM, sharing funct3
+#: with SLLI and SRLI/SRAI. That overlap is the interesting half: opening it
+#: had to leave RV64's six-bit shift shut, and `absent_extension` does not
+#: cover that because it is not an extension question.
+RV32ZBS_OP = (
+    ("bset", 0x14, 0x1), ("bclr", 0x24, 0x1),
+    ("binv", 0x34, 0x1), ("bext", 0x24, 0x5),
+)
+
 
 def build(count: int, want_oracle: bool) -> dict[str, list[dict]]:
     rng = random.Random(SEED)
@@ -379,6 +394,25 @@ def build(count: int, want_oracle: bool) -> dict[str, list[dict]]:
                  f"Zba address generation: opcode={OP:#04x} funct7=0b0010000 "
                  f"funct3={funct3:#05b} -- the RP2350 datasheet 3.8 ISA string "
                  f"has _zba_ and no ESP32-C part's does", {10: a, 11: b})
+
+    for mnemonic, funct7, funct3 in RV32ZBS_OP:
+        for a, b in operand_sets(count, rng):
+            emit("rv32zbs", f"{mnemonic} x12, x10, x11",
+                 r_type(funct7, 11, 10, funct3, 12, OP), 32, ["Zbs"],
+                 f"Zbs single-bit: opcode={OP:#04x} funct7={funct7:#09b} "
+                 f"funct3={funct3:#05b} -- both fields decide, since funct3 001 "
+                 f"and 101 mean different instructions under the same funct7",
+                 {10: a, 11: b})
+        for a, _ in operand_sets(count, rng):
+            # The immediate form: same funct7 and funct3 over OP_IMM, with the
+            # shift-amount field where rs2 sits.
+            shamt = a & 0x1F
+            emit("rv32zbs", f"{mnemonic}i x12, x10, {shamt}",
+                 r_type(funct7, shamt, 10, funct3, 12, OP_IMM), 32, ["Zbs"],
+                 f"Zbs single-bit immediate: opcode={OP_IMM:#04x} "
+                 f"funct7={funct7:#09b} funct3={funct3:#05b}, shamt in the rs2 "
+                 f"field -- the same funct3 SLLI and SRLI use",
+                 {10: a})
 
     for mnemonic, funct5 in RV32A_OP:
         for a, _ in operand_sets(count, rng):
