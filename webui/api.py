@@ -17,8 +17,13 @@ worth pinning down before either front-end exists.
 from __future__ import annotations
 
 import dataclasses
+import importlib
 import re
+import types
+import typing
 
+from webui import firmware, targets
+from webui.boards import catalogue
 from webui.parts.schema import UNCONNECTED, PartSchema, SchemaError
 from webui.rcontrol import RControlClient, RControlCommandError, Response
 
@@ -446,3 +451,419 @@ class SimulatorApi:
 
     def disconnect(self, index: int, schema: PartSchema, label: str) -> None:
         self._set_field(index, schema, label, UNCONNECTED)
+
+
+# --------------------------------------------------------------------------
+# Boards: putting a compiled image on the chip a person actually chose
+# --------------------------------------------------------------------------
+#
+# **This section shares the file and nothing else with the rcontrol operations
+# above.** Those drive PICSimLab over a socket; these drive a core in this
+# process. They sit together because `api.py` is the layer a front-end calls
+# and because OH-32 names it as the seam -- not because a board session is an
+# rcontrol concept. When a third backend arrives this is the part to move.
+#
+# Everything here is a join between pieces that already exist and were built
+# apart from each other:
+#
+#   webui/boards/catalogue.py   which chip is on a board, which core it needs
+#   webui/targets.py            whether that core is built
+#   webui/boards/<chip>.py      the memory map and the peripherals
+#   webui/firmware.py           an artefact's bytes -> an addressed Image
+#   core/<core>/abi.py          something that executes
+#
+# None of them is reimplemented. Each join refuses separately, because "this
+# chip has no description", "that core is not built" and "that image is not
+# for this chip" are three different problems with three different fixes, and
+# a single message covering all three sends the reader to the wrong one.
+#
+# Selection is by **board**, which is the thing a person picks up and owns.
+# `targets.py` already answers the core question and answers it well; asking
+# someone which instruction set their board speaks is asking them to do the
+# lookup this module exists to do.
+
+
+class BoardRunError(Exception):
+    """A board and an image that cannot be put together, and why."""
+
+
+class Core(typing.Protocol):
+    """What this section needs of a core, which is less than a core has.
+
+    Written out for the same reason `webui/boards/rp2040.py` writes out its
+    own `Cpu` protocol: the description modules and this one are the two
+    things that talk to a core, and each depending on the calls it actually
+    makes is what keeps a second core honest about what it has to provide.
+    """
+
+    def clear_memory(self) -> None: ...
+    def clear_registers(self) -> None: ...
+    def clear_regions(self) -> None: ...
+    def write_block(self, address: int, data: bytes) -> None: ...
+    def read_word(self, address: int) -> int: ...
+    def in_range(self, address: int, size: int = ...) -> bool: ...
+    def set_regs(self, regs: list[int], apsr: int) -> None: ...
+    def step(self) -> None: ...
+    def close(self) -> None: ...
+
+
+#: The UF2 family a build for each chip declares, named from
+#: `firmware.UF2_FAMILIES`.
+#:
+#: Passed straight through to `load_image`, so the filtering happens in the
+#: layer that owns the format rather than being redone here. It matters most
+#: on the RP2040: Raspberry Pi ships universal files carrying an RP2040 image
+#: *and* an RP2XXX_ABSOLUTE one at the same addresses, and `parse_uf2` refuses
+#: to choose between them unless it is told which one is wanted.
+#:
+#: A chip absent from here parses with `family=None`, which is correct for the
+#: formats that carry no family at all and for a single-family UF2.
+UF2_FAMILY_BY_CHIP: dict[str, str] = {"RP2040": "RP2040"}
+
+#: An RP2040 flash image begins with `boot2`, the 256-byte XIP setup stage,
+#: and the vector table follows it. `tests/cortexm0/blink/blink.ld` links past
+#: it to 0x10000100 for exactly this reason, and `firmware.read_vector_table`
+#: names the same address in its docstring.
+RP2040_BOOT2_BYTES = 256
+
+#: Where to look for a vector table, as offsets from the lowest loaded byte.
+#:
+#: **Every candidate is checked and none is assumed**, which is the whole
+#: difference between this and a guess -- see `_vector_table_at`, which
+#: validates both words against the board's own map before accepting either.
+#: Assuming the first convention is how `read_vector_table` once answered
+#: 0x4b32b500, which is two instructions of boot2, and called it a stack
+#: pointer.
+#:
+#: A bare-metal image linked past boot2 and a pico-sdk image that includes it
+#: are both ordinary, so the RP2040 genuinely has two conventions rather than
+#: one convention and one mistake.
+VECTOR_TABLE_OFFSETS: dict[str, tuple[int, ...]] = {
+    "RP2040": (0, RP2040_BOOT2_BYTES),
+}
+
+#: Every other chip: the vector table is the start of the image, which is the
+#: plain Cortex-M arrangement.
+DEFAULT_VECTOR_TABLE_OFFSETS = (0,)
+
+
+@dataclasses.dataclass(frozen=True)
+class Runtime:
+    """Everything that must already exist before a board can take an image."""
+
+    board: str
+    chip: str
+    core: str
+    #: `webui.boards.<chip>` -- the memory map and peripherals.
+    description: types.ModuleType
+    #: `core.<core>.abi` -- the thing that executes.
+    abi: types.ModuleType
+
+
+def description_module(chip: str) -> str:
+    """`RP2040` -> `webui.boards.rp2040`.
+
+    The exact inverse of `catalogue.described_chips`, which reads a module
+    stem as `stem.upper().replace("-", "")`. Written as a rule rather than a
+    table so that adding a chip stays "add one file", which is the property
+    that module is built around.
+    """
+    return f"webui.boards.{chip.lower().replace('-', '')}"
+
+
+def runtime_for(board_name: str) -> Runtime:
+    """Resolve a board to what would execute it, refusing at each join.
+
+    Four things can be missing and each gets its own message, because each has
+    a different fix: the board is not one we have, the chip has no description,
+    the core is not built, or a module that should import does not.
+    """
+    boards = {board.name: board for board in catalogue.catalogue()}
+    board = boards.get(board_name)
+    if board is None:
+        raise BoardRunError(
+            f"no such board: {board_name!r}. webui/boards/ holds "
+            f"{len(boards)}, including {', '.join(sorted(boards)[:3])}"
+        )
+
+    # The core is asked about first, and the order is deliberate. Both facts
+    # are missing for most boards, and of the two the core is the one that
+    # decides: writing a memory map for a chip whose instruction set nothing
+    # executes buys nothing. `catalogue.missing_cores` orders the backlog the
+    # same way and for the same reason. targets.py already phrases this
+    # refusal, including the build command, and its wording is the one the UI
+    # shows elsewhere.
+    try:
+        targets.require_selectable(board.core)
+    except targets.TargetError as error:
+        raise BoardRunError(
+            f"{board_name} is a {board.chip} and needs the {board.core} "
+            f"core: {error}"
+        ) from error
+
+    if not board.described:
+        described = sorted(catalogue.described_chips()) or ["nothing"]
+        raise BoardRunError(
+            f"{board_name} is a {board.chip} and no module describes that "
+            f"chip, so an image would have no memory to load into. "
+            f"webui/boards/ describes {', '.join(described)}"
+        )
+
+    module_name = description_module(board.chip)
+    try:
+        description = importlib.import_module(module_name)
+    except ModuleNotFoundError as error:
+        raise BoardRunError(
+            f"{board_name}: the catalogue reports {board.chip} as described, "
+            f"but {module_name} does not import: {error}"
+        ) from error
+    if not hasattr(description, "install"):
+        raise BoardRunError(
+            f"{module_name} has no install(cpu). A board description has to "
+            f"map the chip's memory before anything can be written into it"
+        )
+
+    abi_name = f"core.{board.core}.abi"
+    try:
+        abi = importlib.import_module(abi_name)
+    except ModuleNotFoundError as error:
+        raise BoardRunError(
+            f"{board_name}: the {board.core} core is built but {abi_name} "
+            f"does not import: {error}"
+        ) from error
+
+    return Runtime(board.name, board.chip, board.core, description, abi)
+
+
+@dataclasses.dataclass(frozen=True)
+class Placement:
+    """Where the image sits, and the two words the core starts from."""
+
+    vector_table: int
+    stack_pointer: int
+    entry: int
+
+
+def _vector_table_at(cpu: Core, image: firmware.Image, address: int) -> Placement | str:
+    """A checked vector table at `address`, or the reason it is not one.
+
+    Armv6-M puts the initial stack pointer in the first word and the reset
+    handler in the second with bit 0 set for Thumb. Both are checked against
+    **the board's own map**, which is the authority: `in_range` asks the
+    regions `install` just built, so a chip with flash at zero and one with
+    flash at 0x10000000 are told apart without either address appearing here.
+
+    Returning a reason rather than raising, because the caller tries more than
+    one candidate and the interesting message is all of them at once.
+    """
+    words = firmware.read_vector_table(image, address)
+    if words is None:
+        return f"0x{address:08x}: the image does not cover both words"
+    sp, reset = words
+    if not sp or not cpu.in_range(sp - 4, 4):
+        return (
+            f"0x{address:08x}: first word 0x{sp:08x} is not a stack pointer "
+            f"this board could have, because nothing is mapped below it"
+        )
+    if not reset & 1:
+        return (
+            f"0x{address:08x}: second word 0x{reset:08x} has bit 0 clear, so "
+            f"it is not a Thumb reset address"
+        )
+    if not cpu.in_range(reset & ~1, 2):
+        return (
+            f"0x{address:08x}: reset address 0x{reset & ~1:08x} is in no "
+            f"region this board maps"
+        )
+    return Placement(address, sp, reset & ~1)
+
+
+def _check_fits(runtime: Runtime, cpu: Core, image: firmware.Image) -> None:
+    """Every byte must land somewhere this board maps.
+
+    This is what rejects an image on its own addresses instead of on a fault
+    twenty thousand instructions later. Again the board is the authority: an
+    ESP32-C3 image at 0x42000020 fails here on a board whose flash is at
+    0x10000000, and no table in this module had to know either number.
+    """
+    for segment in image.segments:
+        if cpu.in_range(segment.address, len(segment.data)):
+            continue
+        raise BoardRunError(
+            f"{runtime.board} ({runtime.chip}) maps nothing at "
+            f"0x{segment.address:08x}..0x{segment.end:08x}, where this "
+            f"{image.format} image's {len(segment.data)}-byte segment loads"
+        )
+
+
+def _place(
+    runtime: Runtime, cpu: Core, image: firmware.Image, requested: int | None
+) -> Placement:
+    """The vector table to enter at, checked rather than assumed."""
+    lowest = min(segment.address for segment in image.segments)
+    if requested is not None:
+        candidates: tuple[int, ...] = (requested,)
+    else:
+        offsets = VECTOR_TABLE_OFFSETS.get(runtime.chip, DEFAULT_VECTOR_TABLE_OFFSETS)
+        candidates = tuple(lowest + offset for offset in offsets)
+
+    reasons = []
+    for address in candidates:
+        found = _vector_table_at(cpu, image, address)
+        if isinstance(found, Placement):
+            return found
+        reasons.append(found)
+    raise BoardRunError(
+        f"{runtime.board}: no vector table this board could enter. Tried "
+        + "; ".join(reasons)
+        + ". Pass vector_table= if the image is linked somewhere else"
+    )
+
+
+class BoardSession:
+    """A board with an image on it, stopped at the reset vector.
+
+    The caller owns the core's lifetime: `close()` releases it, and the class
+    is a context manager so a test or a request handler does not have to
+    remember. Stepping is the caller's too -- this deliberately does not run a
+    budget of its own, because how long to run is a question about what is
+    being watched, not about the board.
+    """
+
+    def __init__(
+        self,
+        runtime: Runtime,
+        cpu: Core,
+        image: firmware.Image,
+        placement: Placement,
+    ) -> None:
+        self.runtime = runtime
+        self.cpu = cpu
+        self.image = image
+        self.placement = placement
+
+    @property
+    def board(self) -> str:
+        return self.runtime.board
+
+    @property
+    def chip(self) -> str:
+        return self.runtime.chip
+
+    def step(self, count: int = 1) -> None:
+        """`count` instructions, or raise from the core saying why not."""
+        for _ in range(count):
+            self.cpu.step()
+
+    def close(self) -> None:
+        self.cpu.close()
+
+    def __enter__(self) -> BoardSession:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+    def as_json(self) -> dict[str, object]:
+        """What a transport hands the UI after a successful load.
+
+        `notes` carries `firmware.Image.notes` through unchanged, plus one of
+        this layer's own when an ELF's declared entry point disagrees with the
+        vector table that was entered. That disagreement is not an error --
+        `e_entry` and the reset vector are allowed to differ -- but a reader
+        watching an unexpected instruction stream needs to be told which one
+        the core actually took.
+        """
+        notes = list(self.image.notes)
+        if self.image.entry is not None and (self.image.entry & ~1) != self.placement.entry:
+            notes.append(
+                f"the {self.image.format} declares entry "
+                f"0x{self.image.entry & ~1:08x}; entered at the vector table's "
+                f"0x{self.placement.entry:08x} instead"
+            )
+        return {
+            "board": self.board,
+            "chip": self.chip,
+            "core": self.runtime.core,
+            "format": self.image.format,
+            "family": self.image.family,
+            "bytes": self.image.total_bytes,
+            "segments": [
+                {"address": segment.address, "bytes": len(segment.data)}
+                for segment in self.image.segments
+            ],
+            "vector_table": self.placement.vector_table,
+            "stack_pointer": self.placement.stack_pointer,
+            "entry": self.placement.entry,
+            "notes": notes,
+        }
+
+
+def load_firmware(
+    board_name: str,
+    data: bytes,
+    *,
+    base: int | None = None,
+    vector_table: int | None = None,
+) -> BoardSession:
+    """Put a compiled artefact on a named board, stopped at its reset vector.
+
+    The operation OH-32 is about: a **board** goes in, not a core. Everything
+    between is a lookup this module does so a person does not have to.
+
+    `base` is passed to `firmware.load_image` and is required only for a raw
+    `.bin`, which carries no address of its own. No default is invented here
+    for the same reason `parse_bin` invents none: 0x10000000 is right for a
+    pico-sdk RP2040 image and wrong for the bare-metal one in
+    `tests/cortexm0/blink/`, which links to 0x10000100.
+
+    `vector_table` overrides the search in `VECTOR_TABLE_OFFSETS` for an image
+    linked somewhere neither convention covers.
+
+    Raises `BoardRunError` at four separate joins -- unknown board, chip with
+    no description, core not built, image that does not belong on this chip --
+    and `firmware.FirmwareError` when the artefact cannot be read at all.
+    """
+    runtime = runtime_for(board_name)
+
+    image = firmware.load_image(
+        data, base=base, family=UF2_FAMILY_BY_CHIP.get(runtime.chip)
+    )
+    # `parse_uf2` answers an empty image rather than raising when the family
+    # asked for is not in the file -- every block is disregarded, exactly as
+    # the specification requires, and nothing is left. Loading nothing and
+    # reporting success is the failure this whole ticket is about, so it is
+    # caught here, where the chip that was wanted is known.
+    if not image.segments:
+        raise BoardRunError(
+            f"{runtime.board}: this {image.format} holds nothing for a "
+            f"{runtime.chip}. "
+            + ("; ".join(image.notes) if image.notes else "It has no segments at all")
+        )
+
+    cpu = runtime.abi.Cpu()
+    try:
+        cpu.clear_memory()
+        cpu.clear_registers()
+        cpu.clear_regions()
+        runtime.description.install(cpu)
+
+        _check_fits(runtime, cpu, image)
+        for segment in image.segments:
+            cpu.write_block(segment.address, segment.data)
+
+        placement = _place(runtime, cpu, image, vector_table)
+        # r0..r12 zero, then SP, LR, PC. The core has no reset sequence of its
+        # own: a board description says what memory exists and this says where
+        # execution begins, which together are the whole of a power-on.
+        cpu.set_regs(
+            [0] * 13 + [placement.stack_pointer, 0, placement.entry], apsr=0
+        )
+    except BaseException:
+        # The core is a ctypes handle over a native allocation, so a refusal
+        # after construction has to release it or the process leaks one per
+        # rejected image.
+        cpu.close()
+        raise
+
+    return BoardSession(runtime, cpu, image, placement)
