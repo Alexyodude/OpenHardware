@@ -9,6 +9,7 @@ touches:
 - webui/emulator_server.py
 - webui/static/emulator.js
 - webui/static/emulator.html
+- webui/static/emulator.css
 - tests/webui/test_emulator_session.py
 ---
 
@@ -23,3 +24,13 @@ Keep the refusals. targets.py's UNBUILT state and its message carry the command 
 Depends on the Armv6-M disassembler ticket: the listing pane needs one before cortexm0 can fill it.
 
 Done when a person can open XIAO-RP2040-DIP in the Emulator tab, step it, and read Arm registers and a Thumb listing, with the i8086 unchanged in behaviour.
+
+**Note 2026-08-25:** The UX finding that sharpens this, from using the page rather than reading it: the workflow is in the wrong tab, not merely the selector.
+
+webui/static/emulator.html:115 puts the whole program-and-upload flow -- board picker, file input, load base, Load, Run, and the UART console -- inside the Targets view, underneath the progress tables and the architecture survey. Meanwhile the Emulator view's toolbar carries a #target selector whose options come from /api/targets and which, with DRIVING = 'i8086', can only ever offer one thing.
+
+So the research tracker owns the workflow and the workflow tab owns a one-item dropdown. That is backwards, and it is why someone asks why they are choosing a target on the Targets tab.
+
+The #target selector sits outside .only-emulator deliberately -- the comment says 'which machine you are driving is true in both views, and hiding it on the Targets tab would hide it exactly where someone went looking for it.' That reasoning was right while Targets owned the upload flow and stops being right the moment it does not.
+
+Intended end state: the Emulator tab carries ONE machine picker listing the i8086 sample machine and each runnable board, plus upload, run and the debug panes. The Targets tab becomes read-only -- what has progressed, and nothing to operate.

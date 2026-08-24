@@ -34,15 +34,21 @@
     <button class="tab" id="tab-targets" role="tab" aria-selected="false">Targets</button>
   </div>
 
-  <!-- The target selector is outside `only-emulator` on purpose: which machine
-       you are driving is true in both views, and hiding it on the Targets tab
-       would hide it exactly where someone went looking for it.
+  <!-- The target selector is inside `only-emulator`, and it was outside on
+       purpose until 2026-08-25. The reasoning then was that "which machine you
+       are driving is true in both views, and hiding it on the Targets tab
+       would hide it exactly where someone went looking for it" — which held
+       while the Targets view was where you loaded an image. It is not any
+       more: the Targets view describes what has progressed and operates
+       nothing, so a control there is a control in the wrong room.
 
        Its options are built from /api/targets, never from this file. A core
        that is present but unbuilt appears here `disabled`, carrying the reason
        — a target that silently vanished because someone deleted build/ is the
        one failure this control exists to prevent. -->
-  <select id="target" aria-label="Emulation target"></select>
+  <span class="only-emulator">
+    <select id="target" aria-label="Emulation target"></select>
+  </span>
 
   <!-- `display: contents` so these still participate in the toolbar's flex
        layout and gap; wrapping them in a normal span would collapse their
@@ -67,6 +73,50 @@
 </div>
 
 <main>
+  <!-- Loading an image and running it: the reason someone opened this page.
+       It lives in the Emulator view because that is where a person expects to
+       program a board, and it did not until 2026-08-25.
+
+       It was in the Targets view, under the progress tables and eighteen rows
+       of architecture survey, and the comment here explained why: "Deliberately
+       NOT a third tab. The view switch in emulator.css is a two-value CSS rule
+       ... and emulator.css belongs to another ticket." That was a true
+       statement about scope and it produced the wrong page -- the research
+       tracker owned the workflow while the workflow tab owned a one-item
+       dropdown. Moving it needed one line of CSS, which this ticket claims.
+
+       No third view was added. `#board-run` joins `#code`, `#state` and
+       `#memory` in the list emulator.css hides on the Targets view, which is
+       the mechanism that was already there. -->
+  <section class="panel" id="board-run">
+    <h2>Load and run an image <span class="note">POST /api/board/load, /api/board/run; GET /api/board/state</span></h2>
+    <div class="prose">
+      <p>Pick a board, choose a compiled image, and step it. <strong>The
+        selector offers only boards a core is built for and a description
+        exists for</strong> — the rest are listed with the reason, because an
+        option you can never pick is a promise this repository has not made.</p>
+      <p>A raw <code>.bin</code> cannot say where it belongs, so it needs a
+        load address; ELF, UF2 and Intel HEX carry their own and the field is
+        ignored. <code>tests/cortexm0/uart/hello.bin</code> links past the
+        RP2040 boot stage, at <code>0x10000100</code>.</p>
+    </div>
+    <div class="prose" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; border-top:1px solid var(--line)">
+      <select id="board-pick" aria-label="Board"></select>
+      <input type="file" id="board-file" aria-label="Compiled image" />
+      <input id="board-base" size="12" spellcheck="false" placeholder="0x10000100"
+             aria-label="Load address for a raw .bin" />
+      <button id="board-load">Load</button>
+      <button id="board-go" class="primary" disabled>Run</button>
+    </div>
+    <div class="prose bordered">
+      <p id="board-report">Nothing loaded yet.</p>
+    </div>
+    <p class="detail" id="board-error"></p>
+    <h2 style="border-top:1px solid var(--line)">Console
+      <span class="note" id="board-console-note">UART0, as the board transmitted it</span></h2>
+    <pre class="hexdump" id="board-console"></pre>
+  </section>
+
   <section class="panel" id="code">
     <h2>Disassembly <span class="note" id="where">0000:0100</span></h2>
     <div class="listing" id="listing"></div>
@@ -99,47 +149,6 @@
        states rather than a confident single verdict per row. -->
   <div id="targets">
 
-    <!-- The only panel on this page that changes the machine rather than
-         describing it. It sits first because the two tables below explain its
-         options: which cores are built, and which boards have a description.
-         A control above its own explanation is the right order; the reverse
-         asks someone to read eighteen rows of research before finding out
-         that one board can be picked.
-
-         Deliberately NOT a third tab. The view switch in emulator.css is a
-         two-value CSS rule -- `body[data-view="emulator"] #targets` and
-         `body[data-view="targets"] #code` -- so a third value would show both
-         halves at once, and emulator.css belongs to another ticket. Folding
-         it in beside the Boards table needs no new mechanism and puts it
-         where boards already are. -->
-    <section class="panel" id="board-run">
-      <h2>Load and run an image <span class="note">POST /api/board/load, /api/board/run; GET /api/board/state</span></h2>
-      <div class="prose">
-        <p>Pick a board, choose a compiled image, and step it. <strong>The
-          selector offers only boards a core is built for and a description
-          exists for</strong> — the rest are listed with the reason, because an
-          option you can never pick is a promise this repository has not made.</p>
-        <p>A raw <code>.bin</code> cannot say where it belongs, so it needs a
-          load address; ELF, UF2 and Intel HEX carry their own and the field is
-          ignored. <code>tests/cortexm0/uart/hello.bin</code> links past the
-          RP2040 boot stage, at <code>0x10000100</code>.</p>
-      </div>
-      <div class="prose" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; border-top:1px solid var(--line)">
-        <select id="board-pick" aria-label="Board"></select>
-        <input type="file" id="board-file" aria-label="Compiled image" />
-        <input id="board-base" size="12" spellcheck="false" placeholder="0x10000100"
-               aria-label="Load address for a raw .bin" />
-        <button id="board-load">Load</button>
-        <button id="board-go" class="primary" disabled>Run</button>
-      </div>
-      <div class="prose bordered">
-        <p id="board-report">Nothing loaded yet.</p>
-      </div>
-      <p class="detail" id="board-error"></p>
-      <h2 style="border-top:1px solid var(--line)">Console
-        <span class="note" id="board-console-note">UART0, as the board transmitted it</span></h2>
-      <pre class="hexdump" id="board-console"></pre>
-    </section>
 
     <!-- The one panel here that is NOT static. Everything below is a reading
          of docs/architectures.md — verdicts about what emulating a part would

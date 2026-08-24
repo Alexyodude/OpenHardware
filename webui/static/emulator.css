@@ -370,6 +370,11 @@ footer code { font-family: var(--mono); }
 
 body[data-view="targets"] .only-emulator { display: none; }
 body[data-view="emulator"] #targets { display: none; }
+/* `#board-run` joined this list on 2026-08-25, when loading an image moved
+   out of the Targets view and into the Emulator view where it belongs. No new
+   mechanism: the switch is still the two-value rule above, and the panel is
+   simply named among the ones the Targets view hides. */
+body[data-view="targets"] #board-run,
 body[data-view="targets"] #code,
 body[data-view="targets"] #state,
 body[data-view="targets"] #memory { display: none; }
