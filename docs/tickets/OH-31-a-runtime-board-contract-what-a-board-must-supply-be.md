@@ -8,6 +8,8 @@ created: '2026-08-25'
 touches:
 - webui/boards/contract.py
 - tests/webui/test_board_runtime_contract.py
+- webui/boards/rp2040.py
+- webui/boards/samd21.py
 ---
 
 webui/boards/rp2040.py is the only board that can execute anything, and everything it knows about being a board is implicit in one file: the memory map, the reset vector, the atomic SET/CLR/XOR aliases, which peripheral registers exist and their reset values. A second board written by reading the first is how the shape gets copied wrong.

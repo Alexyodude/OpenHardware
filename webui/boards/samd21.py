@@ -83,6 +83,16 @@ FLASH_ERASED = 0xFF
 SRAM = 0x20000000
 SRAM_SIZE = 32 * 1024
 
+#: Where the reset vector sits, relative to the lowest address the image loads
+#: at. One candidate, and it is zero.
+#:
+#: The plain Cortex-M arrangement, and the contrast with the RP2040 is the
+#: point: that part reserves the first 256 bytes of flash for boot2 and links
+#: its vector table after it, so its tuple carries both 0 and 256. A SAMD21 has
+#: no such blob -- flash *is* the reset address space -- so offering 256 here
+#: would invite entering at whatever instruction happens to sit there.
+VECTOR_TABLE_OFFSETS: tuple[int, ...] = (0,)
+
 #: PORT, from `samd21g18a.h:389` -- `#define PORT (0x41004400U)`.
 PORT = 0x41004400
 

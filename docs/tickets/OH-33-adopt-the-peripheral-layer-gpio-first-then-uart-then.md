@@ -1,7 +1,7 @@
 ---
 id: OH-33
 title: 'Adopt the peripheral layer: GPIO first, then UART, then one timer'
-status: in-review
+status: done
 priority: P1
 created: '2026-08-25'
 touches:

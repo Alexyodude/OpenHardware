@@ -73,6 +73,25 @@ SIO = 0xD0000000
 #: same registers at another base, and nothing has asked for a second one.
 UART0 = 0x40034000
 
+#: The first 256 bytes of flash are boot2, the XIP setup blob, so a linked
+#: image puts its vector table after it -- which is why `blink.ld` links at
+#: 0x10000100 and not 0x10000000.
+BOOT2_BYTES = 256
+
+#: Where the reset vector may sit, relative to the lowest address the image
+#: loads at. Tried in order.
+#:
+#: **This is a chip fact and it used to live in `webui/api.py`**, in a table
+#: keyed by chip name beside the code that speaks HTTP. That was harmless while
+#: one board could run anything and became a question with two answers the
+#: moment a second could: a SAMD21 image has no boot2 in front of it, so an
+#: RP2040's 256 would enter at a word that is not a stack pointer.
+#:
+#: Both are offered because a bare-metal image linked at 0x10000000 is as real
+#: as a pico-sdk one linked past boot2, and `api.py` checks each candidate
+#: against this board's own map rather than assuming.
+VECTOR_TABLE_OFFSETS: tuple[int, ...] = (0, BOOT2_BYTES)
+
 #: The three alias windows, from datasheet §2.1.2.
 ALIAS_XOR = 0x1000
 ALIAS_SET = 0x2000
