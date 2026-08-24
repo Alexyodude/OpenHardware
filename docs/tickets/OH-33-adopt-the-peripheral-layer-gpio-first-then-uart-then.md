@@ -1,7 +1,7 @@
 ---
 id: OH-33
 title: 'Adopt the peripheral layer: GPIO first, then UART, then one timer'
-status: open
+status: in-review
 priority: P1
 created: '2026-08-25'
 touches:
@@ -42,3 +42,11 @@ The decisive observation from writing samd21.py today: the cost was reading Micr
 KEPT: the citations. Pull the source:/verified: strings into the board file per register as it is modelled, which is what rp2040.py and samd21.py already do.
 
 ACCEPTED for the narrow widening: UART and one timer on the RP2040, hand-written in the existing vocabulary. Two core gaps measured this session and both real: byte/halfword access to a mapped register faults (0x41004410..0x41004411 leaves the modelled memory), and there is no cycle or time API at all, so a counter register cannot advance.
+
+**Note 2026-08-25:** DONE, and the one criterion that is not.
+
+Delivered: the section 6 gate answered and recorded; UART0 modelled and a real compiled image printing 'hello, world' through it; TIMER modelled and a real compiled image delaying on it; every adopted register citing its provenance. Three new core behaviours, each forced by something measured rather than anticipated -- map_stream (a data register is a queue, not a word), map_constant (a read-only status register; map_mirror cannot stand in because a mirror needs a source), map_counter (a register that advances, which is the one hang that cannot be made loud). Plus sub-word MMIO access, which was a listed residual defect: STRB and LDRB never consulted the register map at all.
+
+NOT DONE: 'a firmware printf reaches the UI'. The bytes exist and rp2040.uart0_output() returns them, but putting them on the page means editing webui/emulator_server.py and webui/api.py, and both are claimed by OH-32, which is in-review and held by another session. Filed separately rather than reached into. See the follow-on ticket.
+
+Also not done, and blocked rather than skipped: TIMER's ALARM0-3, which is how sleep_ms() actually waits. It needs an IRQ to deliver and core/cortexm0 has no exceptions. The alarms fault instead of accepting a write that could never fire, so the gap is loud.
