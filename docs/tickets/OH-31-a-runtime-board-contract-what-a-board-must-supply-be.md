@@ -21,3 +21,5 @@ Keep rp2040.py's growth rule, which is load-bearing: a peripheral is added only 
 Done when rp2040.py satisfies a stated contract, tests/cortexm0/test_blink.py still passes unchanged, and a board missing a required part fails with the part named.
 
 Note: webui/boards/** is claimed wholesale by OH-22.
+
+**Note 2026-08-25:** Design constraint discovered by OH-26, and it lands squarely on this ticket's pin mux: the simulator's integer 'pin' field CANNOT represent 8 of the 25 XIAO boards. 123 of 321 resolved pads name a chip pin that has no flat integer index at all -- SAMD21 PA02, MG24 PC0, nRF54L15/LM20A P2.08 -- because those vendors publish no flat GPIO numbering. An nRF54L15's P0 is five pins wide, so the usual 32-per-port arithmetic yields a number that appears in no Nordic document. RP2040, RP2350 and the ESP32 parts are flat, and the nRF52840 Arduino core publishes a flat 32-per-port encoding, so 198 pads do get an integer. Whatever this contract says a pin IS must therefore admit a string chip pin with a null index, or it will be unable to describe a third of the boards. Reproduce with: python tools/import_pindefs.py --all --summary

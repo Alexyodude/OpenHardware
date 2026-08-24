@@ -1,7 +1,7 @@
 ---
 id: OH-37
 title: A board may claim it runs only when a named test watched real firmware execute
-status: open
+status: done
 priority: P1
 created: '2026-08-25'
 touches:

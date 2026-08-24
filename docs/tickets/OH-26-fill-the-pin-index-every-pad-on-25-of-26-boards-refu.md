@@ -1,7 +1,7 @@
 ---
 id: OH-26
 title: 'Fill the pin index: every pad on 25 of 26 boards refuses a wire'
-status: in-review
+status: done
 priority: P0
 created: '2026-08-25'
 touches:

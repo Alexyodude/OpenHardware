@@ -1,7 +1,7 @@
 ---
 id: OH-39
 title: A SAMD21 board description, and a blink that proves it
-status: open
+status: in-review
 priority: P1
 created: '2026-08-25'
 touches:

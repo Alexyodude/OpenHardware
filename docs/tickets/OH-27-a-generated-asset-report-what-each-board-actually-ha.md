@@ -2,7 +2,7 @@
 id: OH-27
 title: 'A generated asset report: what each board actually has, and what is only a
   picture'
-status: in-review
+status: done
 priority: P2
 created: '2026-08-25'
 touches:
