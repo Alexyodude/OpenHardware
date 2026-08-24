@@ -2,7 +2,7 @@
 id: OH-21
 title: Full 16-bit Thumb, a real memory map, and lockstep against rp2040js on real
   firmware
-status: in-review
+status: done
 priority: P1
 created: '2026-08-24'
 touches:
