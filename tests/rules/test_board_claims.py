@@ -414,3 +414,36 @@ def test_a_fabricated_claim_fails_the_checker_end_to_end(tmp_path):
     assert "docs/boards.md:1" in result.stderr
     assert "SAMD21 names no test in FIRMWARE_VERIFIED" in result.stderr
     assert "rules/board-claims.md" in result.stderr
+
+
+def test_a_temporal_clause_is_not_a_claim():
+    """The false positive found the day this rule was armed.
+
+    `webui/boards/samd21.py` explained that `PM_APBBMASK_PORT` is already set
+    at power-on -- "so the bit is set before firmware runs" -- and the very
+    next sentence named the test that turns that from a claim into a
+    measurement. The substring match flagged it anyway, so the check fired on
+    exactly the discipline it exists to encourage, while a sloppier author who
+    wrote "this board runs firmware" in a docstring would have been caught.
+
+    A temporal clause says *when* something happens. It asserts nothing about
+    this repository running anything.
+    """
+    careful = "set before firmware runs. `tests/cortexm0/test_samd21_blink.py` is what turns"
+    assert not C._asserts_a_run(careful), "the sentence this fix exists for"
+
+    for temporal in (
+        "the register is live when firmware runs",
+        "once firmware runs the bit is already set",
+        "nothing is written until firmware runs",
+        "PORT is clocked at power-on, after firmware runs it is unchanged",
+    ):
+        assert not C._asserts_a_run(temporal), temporal
+
+    for claim in (
+        "this board runs firmware",
+        "firmware runs on this board today",
+        "the RP2040 ran real firmware here",
+        "firmware-verified",
+    ):
+        assert C._asserts_a_run(claim), claim

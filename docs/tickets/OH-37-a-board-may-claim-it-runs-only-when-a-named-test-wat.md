@@ -1,7 +1,7 @@
 ---
 id: OH-37
 title: A board may claim it runs only when a named test watched real firmware execute
-status: in-review
+status: open
 priority: P1
 created: '2026-08-25'
 touches:
@@ -20,3 +20,5 @@ Promote it to a rule with a checker, the shape rules/ already uses -- frontmatte
 The counter-pressure is real and the repository has already resisted it twice: OH-13 refused to call 25 unwired boards supported, and OH-19 refused a selector entry for surveyed-but-unbuilt chips because 'an option you can never pick is a promise the repo has not made.' This makes that refusal structural instead of remembered.
 
 Done when the checker fails on a fabricated claim, passes on RP2040, and is listed in CLAUDE.md's pre-commit block.
+
+**Note 2026-08-25:** REGRESSION, found within minutes of arming: ungrounded_code_claims fires on webui/boards/samd21.py:54, which is a false positive. The matched prose is 'PM_APBBMASK_PORT ... so the bit is set before firmware runs', a statement about a clock-enable bit at power-on, and the very next sentence names tests/cortexm0/test_samd21_blink.py as what turns the claim into a measurement. That is the discipline this rule exists to encourage, and the checker fails it. The matcher is keying on the substring rather than on a claim that a board or chip runs. Because the rule is armed and in CI, this blocks another session's OH-39 work. Tighten what counts as a claim; the negative control must include this exact sentence.

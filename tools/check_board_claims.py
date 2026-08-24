@@ -91,6 +91,34 @@ _RUN_CLAIM = re.compile(
     re.IGNORECASE,
 )
 
+#: A temporal clause is not a claim. "the bit is set before firmware runs"
+#: says *when* a register settles; it asserts nothing about this repository
+#: running anything.
+#:
+#: This was found the day the rule was armed, on `webui/boards/samd21.py`,
+#: and it is the failure worth remembering: the flagged sentence explained
+#: that PM_APBBMASK_PORT is set at power-on, and the sentence immediately
+#: after it named the test that turns the claim into a measurement. So the
+#: substring match failed the careful author while a sloppier one who phrased
+#: it "this board runs firmware" in a docstring would have been caught. A
+#: check that fires on the discipline it exists to encourage gets disarmed by
+#: whoever it blocks next, and then it protects nothing.
+_TEMPORAL = re.compile(
+    r"\b(?:before|after|when|whenever|while|until|till|once|unless|if|since|as)\s+"
+    r"(?:the\s+|any\s+)?firmware\s+(?:runs?|ran|running|executes?|executed)\b",
+    re.IGNORECASE,
+)
+
+
+def _asserts_a_run(line: str) -> bool:
+    """True when the line claims firmware runs, not merely when it would."""
+    temporal = [m.span() for m in _TEMPORAL.finditer(line)]
+    return any(
+        not any(start <= m.start() < end for start, end in temporal)
+        for m in _RUN_CLAIM.finditer(line)
+    )
+
+
 #: The evidence field. A surface that consults this is deriving the claim
 #: rather than asserting it.
 _EVIDENCE_FIELD = re.compile(r"\bFIRMWARE_VERIFIED\b|\bfirmware_verified\b")
@@ -273,7 +301,7 @@ def unevidenced_chip_claims(root: pathlib.Path | None = None) -> list[str]:
     for path in surfaces(root):
         rel = path.relative_to(root).as_posix()
         for number, line in enumerate(_text(path).splitlines(), start=1):
-            if not _RUN_CLAIM.search(line):
+            if not _asserts_a_run(line):
                 continue
             for chip in sorted({m.group(1) for m in pattern.finditer(line)}):
                 if chip.lower() in verified:
@@ -297,7 +325,7 @@ def ungrounded_code_claims(root: pathlib.Path | None = None) -> list[str]:
             continue
         rel = path.relative_to(root).as_posix()
         for number, line in enumerate(text.splitlines(), start=1):
-            if _RUN_CLAIM.search(line):
+            if _asserts_a_run(line):
                 problems.append(
                     f"{rel}:{number}: says firmware runs, but nothing in this file "
                     f"reads firmware_verified, so the claim is written down rather "
@@ -317,7 +345,7 @@ def claims_decided_by_a_weaker_fact(root: pathlib.Path | None = None) -> list[st
         lines = _text(path).splitlines()
         rel = path.relative_to(root).as_posix()
         for index, line in enumerate(lines):
-            if not _RUN_CLAIM.search(line):
+            if not _asserts_a_run(line):
                 continue
             window = "\n".join(lines[max(0, index - WINDOW) : index + 1])
             if _EVIDENCE_FIELD.search(window):
