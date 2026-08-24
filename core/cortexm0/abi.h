@@ -28,7 +28,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define CORTEXM0_ABI_VERSION 6
+#define CORTEXM0_ABI_VERSION 8
 
 /// r0-r15, then the flags.
 ///
@@ -51,11 +51,6 @@ typedef struct CortexM0Cpu CortexM0Cpu;
 CORTEXM0_API int cortexm0_abi_version(void);
 /// sizeof(CortexM0Registers), so Python can check its mirror matches.
 CORTEXM0_API uint32_t cortexm0_regs_size(void);
-
-/// The modelled SRAM window, so Python need not hardcode either number.
-/// See cpu.h for why there is a window rather than a 4 GB address space.
-CORTEXM0_API uint32_t cortexm0_sram_base(void);
-CORTEXM0_API uint32_t cortexm0_sram_size(void);
 
 CORTEXM0_API CortexM0Cpu* cortexm0_new(void);
 CORTEXM0_API void cortexm0_free(CortexM0Cpu* cpu);
@@ -88,7 +83,8 @@ CORTEXM0_API void cortexm0_clear_registers(CortexM0Cpu* cpu);
 /// a fetch from it fault while data reads still answer -- what a stub standing
 /// in for contents this project cannot ship needs. See cpu.h.
 CORTEXM0_API void cortexm0_add_region(CortexM0Cpu* cpu, uint32_t base,
-                                      uint32_t size, int executable);
+                                      uint32_t size, int executable,
+                                      uint8_t fill);
 CORTEXM0_API void cortexm0_clear_regions(CortexM0Cpu* cpu);
 
 /// Make one memory-mapped word respond, reads-as-written. See cpu.h: only
@@ -129,6 +125,13 @@ CORTEXM0_API int cortexm0_step(CortexM0Cpu* cpu);
 /// address is the diagnostic that matters when bringing up firmware.
 CORTEXM0_API uint32_t cortexm0_fault_address(const CortexM0Cpu* cpu);
 CORTEXM0_API int cortexm0_fault_was_fetch(const CortexM0Cpu* cpu);
+
+/// Whether `address` falls in any region. Lets a caller tell the two fetch
+/// failures apart: an address that does not exist, and one that exists but is
+/// not executable. They mean different things -- a missing memory map versus a
+/// jump into a stub -- and one message for both sends the reader the wrong way.
+CORTEXM0_API int cortexm0_in_range(const CortexM0Cpu* cpu, uint32_t address,
+                                   uint32_t bytes);
 
 #ifdef __cplusplus
 }  // extern "C"

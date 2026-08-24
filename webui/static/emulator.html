@@ -152,10 +152,16 @@
     <section class="panel" id="boards">
       <h2>Boards <span class="note">computed from webui/boards/</span></h2>
       <div class="prose">
-        <p>Every board imported into this repository, what is on it, and whether
-          it can run firmware today. <strong>“Runnable” means a real compiled
-          image has executed on it</strong> — not that its chip is well
-          understood.</p>
+        <p>Every board imported into this repository, what is on it, and how far
+          it has got. <strong>“Runnable” is computed: a core for its instruction
+          set is built, <em>and</em> a board description gives that core a memory
+          map and peripherals.</strong> That is a claim about what exists, not a
+          promise that any particular image runs — an image still meets whatever
+          the board does not model yet.</p>
+        <p>Only one board has actually been watched running compiled code: the
+          RP2040 blinks an LED in <code>tests/cortexm0/test_blink.py</code>. The
+          same chip stops after 225,759 instructions of an Arduino image, at a
+          boot ROM this project cannot ship.</p>
       </div>
       <div class="strip" id="boards-strip"></div>
       <div class="scroll"><table class="grid">

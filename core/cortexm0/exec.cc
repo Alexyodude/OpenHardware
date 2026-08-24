@@ -633,7 +633,7 @@ StepResult step(Cpu& cpu) {
         // The executability check is deliberately *after* the read, so an
         // address that is simply absent and one that is present but not
         // executable both arrive here with the faulting address recorded.
-        cpu.note_fetch_fault();
+        cpu.note_fetch_fault(address);
         return StepResult::MemoryFault;
     }
 

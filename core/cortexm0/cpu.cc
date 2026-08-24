@@ -19,9 +19,6 @@ struct Region {
     uint32_t size;
 };
 
-constexpr Region kFlash{kFlashBase, kFlashSize};
-constexpr Region kSram{kSramBase, kSramSize};
-
 /// True when `bytes` starting at `address` fits wholly inside `region`.
 ///
 /// The remaining-space form, not `offset + bytes <= size`: that addition wraps
@@ -37,7 +34,8 @@ bool contains(const Region& region, uint32_t address, uint32_t bytes, uint32_t& 
 
 }  // namespace
 
-Cpu::Cpu() : flash_(kFlashSize, 0), sram_(kSramSize, 0) {}
+// No memory. A board adds it; see cpu.h for why the map is not here.
+Cpu::Cpu() = default;
 
 void Cpu::reset() {
     regs_.fill(0);
@@ -50,20 +48,25 @@ void Cpu::reset() {
 
 void Cpu::clear_registers() { mmio_.clear(); }
 
-void Cpu::add_region(uint32_t base, uint32_t size, bool executable) {
+void Cpu::add_region(uint32_t base, uint32_t size, bool executable, uint8_t fill) {
     Extra region;
     region.base = base;
     region.size = size;
     region.executable = executable;
-    region.bytes.assign(size, 0);
-    extra_.push_back(std::move(region));
+    region.fill = fill;
+    region.bytes.assign(size, fill);
+    regions_.push_back(std::move(region));
 }
 
-void Cpu::clear_regions() { extra_.clear(); }
+void Cpu::clear_regions() { regions_.clear(); }
 
 void Cpu::clear_memory() {
-    std::fill(flash_.begin(), flash_.end(), static_cast<uint8_t>(0));
-    std::fill(sram_.begin(), sram_.end(), static_cast<uint8_t>(0));
+    // Back to each region's own fill byte, not to zero: erased flash reads
+    // 0xFF, and clearing it to zero would turn a region that stops the core
+    // into one that executes a million no-ops.
+    for (Extra& region : regions_) {
+        std::fill(region.bytes.begin(), region.bytes.end(), region.fill);
+    }
 }
 
 void Cpu::map_register(uint32_t address, uint32_t value) {
@@ -151,15 +154,7 @@ bool Cpu::mmio_write(uint32_t address, uint32_t value) {
 
 const std::vector<uint8_t>* Cpu::region_for(uint32_t address, uint32_t bytes,
                                             uint32_t& offset) const {
-    if (contains(kSram, address, bytes, offset)) {
-        // SRAM first: it is where a running program spends almost every
-        // access, and where the corpus puts everything.
-        return &sram_;
-    }
-    if (contains(kFlash, address, bytes, offset)) {
-        return &flash_;
-    }
-    for (const Extra& region : extra_) {
+    for (const Extra& region : regions_) {
         if (contains(Region{region.base, region.size}, address, bytes, offset)) {
             return &region.bytes;
         }
@@ -170,14 +165,15 @@ const std::vector<uint8_t>* Cpu::region_for(uint32_t address, uint32_t bytes,
 }
 
 bool Cpu::executable_at(uint32_t address) const {
-    // Flash and SRAM both execute. Only an added region can be non-executable,
-    // and only one is: the boot ROM stub.
-    for (const Extra& region : extra_) {
+    for (const Extra& region : regions_) {
         uint32_t offset = 0;
         if (contains(Region{region.base, region.size}, address, 2, offset)) {
             return region.executable;
         }
     }
+    // Not in any region. The fetch will fault on the read anyway; saying
+    // "executable" here keeps this function about permission rather than
+    // about existence.
     return true;
 }
 

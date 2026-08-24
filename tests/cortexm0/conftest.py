@@ -16,9 +16,16 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 #: the rule checkers keep when they cannot find a PICSimLab source tree.
 CORPUS = REPO / "third_party" / "armv6m" / "v1"
 
-#: Where the generator puts the instruction under test and its scratch words.
-#: Both are inside the SRAM window this core models, and both are the
-#: generator's constants rather than this file's -- see gen_armv6m_tests.mjs.
+#: Where the generator puts the instruction under test and its scratch words,
+#: and the SRAM they sit in. All three are the generator's constants rather
+#: than this file's -- see gen_armv6m_tests.mjs, which uses rp2040js's
+#: RAM_START_ADDRESS plus 0x1000 and 0x2000.
+#:
+#: The core has no memory of its own, so a test that wants any must say so.
+#: These tests are about instructions rather than about a board, so they get
+#: the plainest possible map: one flat SRAM, no peripherals, nothing else.
+SRAM = 0x20000000
+SRAM_SIZE = 264 * 1024
 PC = 0x20001000
 SANDBOX = 0x20002000
 SANDBOX_WORDS = 8
@@ -66,4 +73,8 @@ def _no_registers_leak_between_tests(cpu):
     """
     cpu.clear_registers()
     cpu.clear_regions()
+    # The core ships with no memory, so every test starts by declaring the
+    # map it needs. Tests that want a whole board call `rp2040.install`, which
+    # replaces this with the real one.
+    cpu.add_region(SRAM, SRAM_SIZE)
     yield

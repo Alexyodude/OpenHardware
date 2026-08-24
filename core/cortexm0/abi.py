@@ -17,8 +17,9 @@ and `sizeof(CortexM0Registers)` against this module's mirror.
     from core.cortexm0.abi import Cpu
 
     with Cpu() as cpu:
-        cpu.write_halfword(cpu.sram_base + 0x1000, 0x1840)  # ADDS r0, r0, r1
-        cpu.set_regs([0] * 16, apsr=0)
+        cpu.add_region(0x20000000, 0x1000)          # a board would do this
+        cpu.write_halfword(0x20000000, 0x1840)      # ADDS r0, r0, r1
+        cpu.set_regs([0] * 15 + [0x20000000], apsr=0)
         cpu.step()
 """
 
@@ -35,7 +36,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match CORTEXM0_ABI_VERSION in abi.h.
-ABI_VERSION = 6
+ABI_VERSION = 8
 
 #: Must match cortexm0::WriteOp. Spelled at call sites rather than numbered.
 WRITE_OPS = {"store": 0, "set": 1, "clear": 2, "xor": 3}
@@ -80,8 +81,6 @@ class Registers(ctypes.Structure):
 _SIGNATURES = {
     "cortexm0_abi_version": ([], ctypes.c_int),
     "cortexm0_regs_size": ([], ctypes.c_uint32),
-    "cortexm0_sram_base": ([], ctypes.c_uint32),
-    "cortexm0_sram_size": ([], ctypes.c_uint32),
     "cortexm0_new": ([], ctypes.c_void_p),
     "cortexm0_free": ([ctypes.c_void_p], None),
     "cortexm0_reset": ([ctypes.c_void_p], None),
@@ -110,7 +109,9 @@ _SIGNATURES = {
     "cortexm0_clear_memory": ([ctypes.c_void_p], None),
     "cortexm0_clear_registers": ([ctypes.c_void_p], None),
     "cortexm0_add_region": (
-        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int], None
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int,
+         ctypes.c_uint8],
+        None,
     ),
     "cortexm0_clear_regions": ([ctypes.c_void_p], None),
     "cortexm0_map_register": (
@@ -128,6 +129,9 @@ _SIGNATURES = {
     "cortexm0_step": ([ctypes.c_void_p], ctypes.c_int),
     "cortexm0_fault_address": ([ctypes.c_void_p], ctypes.c_uint32),
     "cortexm0_fault_was_fetch": ([ctypes.c_void_p], ctypes.c_int),
+    "cortexm0_in_range": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32], ctypes.c_int
+    ),
 }
 
 _library: ctypes.CDLL | None = None
@@ -185,8 +189,6 @@ class Cpu:
         self._handle = self._lib.cortexm0_new()
         if not self._handle:
             raise AbiError("cortexm0_new returned null")
-        self.sram_base = self._lib.cortexm0_sram_base()
-        self.sram_size = self._lib.cortexm0_sram_size()
 
     def __enter__(self) -> Cpu:
         return self
@@ -256,15 +258,23 @@ class Cpu:
         """Forget every mapped register. Not implied by `clear_memory`."""
         self._lib.cortexm0_clear_registers(self._handle)
 
-    def add_region(self, base: int, size: int, *, executable: bool = True) -> None:
-        """A readable, writable region at `base`.
+    def add_region(self, base: int, size: int, *, executable: bool = True,
+                   fill: int = 0) -> None:
+        """A readable, writable region at `base`. **The only way memory exists.**
 
-        `executable=False` makes a fetch from it fault while data reads still
-        answer -- what a stub standing in for contents this project cannot ship
-        needs, so that reading its table works and jumping into it is loud.
+        The core ships with none, so a board describes its whole map -- which
+        is what lets an RP2040 put flash at 0x10000000 and a SAMD21 put it at
+        zero over the same core.
+
+        `executable=False` makes a fetch fault while data reads still answer,
+        which a stub standing in for contents this project cannot ship needs.
+        `fill` is what an untouched byte reads: pass 0xFF for flash, because
+        that is what erased flash reads on a real part *and* because 0xFFFF is
+        not a valid Thumb encoding, so running off into it stops the core
+        instead of executing a million no-ops.
         """
         self._lib.cortexm0_add_region(
-            self._handle, base, size, 1 if executable else 0
+            self._handle, base, size, 1 if executable else 0, fill
         )
 
     def clear_regions(self) -> None:
@@ -279,6 +289,11 @@ class Cpu:
         wait-for-ready poll into a silent hang.
         """
         self._lib.cortexm0_map_register(self._handle, address, value)
+
+    def in_range(self, address: int, size: int = 4) -> bool:
+        """Whether any region covers `address`. Mapped registers are not
+        regions, so this is False for them."""
+        return bool(self._lib.cortexm0_in_range(self._handle, address, size))
 
     def is_mapped(self, address: int) -> bool:
         return bool(self._lib.cortexm0_is_mapped(self._handle, address))
@@ -328,9 +343,15 @@ class Cpu:
         # peripheral -- while the message pointed at an instruction sitting
         # happily in flash.
         where = self._lib.cortexm0_fault_address(self._handle)
-        kind = ("fetch" if self._lib.cortexm0_fault_was_fetch(self._handle)
-                else "data access")
+        fetch = bool(self._lib.cortexm0_fault_was_fetch(self._handle))
+        exists = bool(self._lib.cortexm0_in_range(self._handle, where, 2))
+        # A fetch from a region that exists means the region refused to be
+        # executed -- a jump into a stub -- and that sends the reader somewhere
+        # entirely different from a missing memory map. Every other case is an
+        # address nothing covers.
+        why = ("is in a region that is not executable" if exists
+               else "is outside the modelled memory")
+        kind = "fetch" if fetch else "data access"
         raise MemoryFault(
-            f"{kind} at 0x{where:08x} is outside the modelled memory "
-            f"(instruction at 0x{pc:08x})"
+            f"{kind} at 0x{where:08x} {why} (instruction at 0x{pc:08x})"
         )

@@ -3,22 +3,26 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 //
-// ## Why there is a window rather than an address space
+// ## The core owns no memory map
 //
-// The i8086 core owns a flat megabyte, because a megabyte is the whole space
-// and fits in a malloc. Armv6-M addresses four gigabytes and this core cannot
-// allocate that, so it models **one window: the RP2040's SRAM**, 264 KB at
-// 0x20000000, which is where the corpus puts both the instruction under test
-// (0x20001000) and its scratch words (0x20002000).
+// Not one address in this file names a chip. Memory exists because a *board*
+// called `add_region`, and a core with no board has no memory at all -- the
+// first fetch faults, saying so.
 //
-// Anything outside that window is reported as a fault, never read as zero.
-// A silent zero would make an out-of-range fetch decode as `MOVS r0, #0` and
-// execute cleanly, which is precisely the accident conformance testing exists
-// to catch.
+// It was not always this way, and the reason it changed is worth keeping. An
+// earlier version hardcoded flash at 0x10000000 and SRAM at 0x20000000 as
+// `constexpr`, with a comment claiming every Armv6-M part this project targets
+// puts them there. That comment was wrong: the SAMD21 -- which shares this
+// very core, and which the board catalogue names as the proof that one core
+// serves several boards -- puts its flash at 0x00000000. So the claim "RP2040
+// and SAMD21 are both expressible over this core" was false while those
+// constants existed, and no test noticed, because the tests all used an
+// RP2040.
 //
-// **This is a deliberate limit of the current slice, not a model of the part.**
-// Real firmware needs flash at 0x10000000 and peripherals at 0x40000000, and
-// adding them is a change to this file rather than to anything above it.
+// **Anything outside every added region faults, and is never read as zero.**
+// That deliberately includes peripheral space: firmware polls a clock's ready
+// bit within its first few hundred instructions, and a zero answer spins
+// forever, which looks like a hang rather than a missing feature.
 //
 // ## Cortex-M0+, not Cortex-M0
 //
@@ -28,9 +32,8 @@
 // `arm_v7m_cpus[]` has m0, m3, m4, m7, m33 and m55 -- which is the reason the
 // oracle here is rp2040js.
 //
-// Neither register is reachable from Thumb formats 1-4, so nothing in this
-// slice depends on it yet. It is recorded now because the choice of oracle
-// already depends on it.
+// Neither register is reachable from the 16-bit Thumb map, so nothing here
+// depends on it yet. It is recorded because the choice of oracle already does.
 
 #ifndef OPENHARDWARE_CORTEXM0_CPU_H
 #define OPENHARDWARE_CORTEXM0_CPU_H
@@ -42,28 +45,6 @@
 #include <vector>
 
 namespace cortexm0 {
-
-/// The modelled address space, matching the RP2040 so that both the corpus's
-/// addresses and a real firmware image land where they expect to.
-///
-/// **Two regions, not one.** The first slice modelled SRAM alone, which was
-/// enough for a corpus that puts its instruction under test at 0x20001000 and
-/// nothing else. It is not enough for firmware: a Pico image is linked to
-/// execute *from flash* at 0x10000000 and to keep its variables in SRAM, so a
-/// core with one window faults on the first instruction it fetches.
-///
-/// Anything outside both regions is still a fault rather than a zero. That
-/// deliberately includes the peripheral space at 0x40000000 and the
-/// single-cycle IO at 0xD0000000: firmware reaches them almost immediately,
-/// and a core that answered zero would spin forever in a poll for a clock
-/// that never becomes ready, looking like a hang rather than a missing
-/// feature. See `docs/research/peripheral-layer/` for what modelling them
-/// would take.
-constexpr uint32_t kFlashBase = 0x10000000u;
-constexpr uint32_t kFlashSize = 2u * 1024u * 1024u;
-
-constexpr uint32_t kSramBase = 0x20000000u;
-constexpr uint32_t kSramSize = 264u * 1024u;
 
 /// Bit positions of the flags inside APSR, as the architecture numbers them.
 constexpr uint32_t kFlagN = 1u << 31;
@@ -206,6 +187,17 @@ public:
 
     /// Add a readable, writable region of `size` bytes at `base`.
     ///
+    /// **This is the only way memory comes to exist.** The core ships with
+    /// none, so a board describes its whole map and two boards over the same
+    /// core can differ -- which is what an RP2040 and a SAMD21 do, one putting
+    /// flash at 0x10000000 and the other at zero.
+    ///
+    /// `fill` is the byte an untouched location reads. It defaults to zero,
+    /// and flash should pass 0xFF: that is what erased flash reads on real
+    /// parts, and it is also the loud answer, because 0xFFFF is not a valid
+    /// Thumb encoding and stops the core. Zero-filled flash executes as a
+    /// million `MOVS r0, r0` and looks like progress.
+    ///
     /// `executable` is the field that earns this API. A stub region -- one
     /// standing in for contents this project cannot ship, like the RP2040 boot
     /// ROM -- must answer *data* reads, because firmware reads its function
@@ -218,10 +210,11 @@ public:
     /// are still hardcoded because every Armv6-M part this project targets has
     /// them at the same addresses; the moment one does not, they move out here
     /// too.
-    void add_region(uint32_t base, uint32_t size, bool executable);
+    void add_region(uint32_t base, uint32_t size, bool executable,
+                    uint8_t fill = 0);
 
-    /// Forget every mapped region added by `add_region`, leaving flash and
-    /// SRAM. Paired with `clear_registers` in `reset`.
+    /// Forget every region. Paired with `clear_registers` in `reset`, because
+    /// a reset machine has no board.
     void clear_regions();
 
     /// Forget every mapped register.
@@ -242,7 +235,19 @@ public:
     /// difference between SIO and a UART.
     uint32_t fault_address() const { return fault_address_; }
     bool fault_was_fetch() const { return fault_was_fetch_; }
-    void note_fetch_fault() { fault_was_fetch_ = true; }
+    /// Record that a *fetch* failed at `address`.
+    ///
+    /// Takes the address rather than only setting the flag, because the two
+    /// ways a fetch can fail reach here differently: an absent address is
+    /// recorded by the read that failed, but a *present but non-executable*
+    /// one has no failed read to record it -- the read succeeded. Setting only
+    /// the flag left that case reporting whatever address had faulted last,
+    /// which for a freshly-installed board is zero. The diagnostic that exists
+    /// to say which address a program wanted was naming a different one.
+    void note_fetch_fault(uint32_t address) {
+        fault_address_ = address;
+        fault_was_fetch_ = true;
+    }
 
 private:
     void set_flag(uint32_t mask, bool on) {
@@ -259,19 +264,17 @@ private:
 
     std::array<uint32_t, 16> regs_{};
     uint32_t apsr_ = 0;
-    std::vector<uint8_t> flash_;
-    std::vector<uint8_t> sram_;
-
-    /// Regions the board added. A vector rather than a map because there are
-    /// a handful and every access scans them; a hash lookup per byte would
-    /// cost more than the scan saves.
+    /// Every region there is. A vector rather than a map because there are a
+    /// handful and every access scans them; a hash lookup per byte would cost
+    /// more than the scan saves.
     struct Extra {
         uint32_t base;
         uint32_t size;
         bool executable;
+        uint8_t fill;
         std::vector<uint8_t> bytes;
     };
-    std::vector<Extra> extra_;
+    std::vector<Extra> regions_;
 
     // `mutable` because the read path is const and this is a diagnostic, not
     // state the program can observe. Recorded at the single choke point where

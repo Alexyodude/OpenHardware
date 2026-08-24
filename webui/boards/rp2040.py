@@ -43,6 +43,21 @@ from __future__ import annotations
 
 import typing
 
+#: The memory map. The core has none of its own, so this is the whole of it.
+#: Flash is XIP-mapped at 0x10000000; a SAMD21 over the same core puts its
+#: flash at zero, which is the difference that moved these out of the core.
+FLASH = 0x10000000
+FLASH_SIZE = 2 * 1024 * 1024
+
+#: Erased flash reads 0xFF on a real part. It is also the loud value: 0xFFFF is
+#: not a valid Thumb encoding, so a program that runs off the end of its image
+#: stops, rather than executing zeros as `MOVS r0, r0` for as long as anyone
+#: watches.
+FLASH_ERASED = 0xFF
+
+SRAM = 0x20000000
+SRAM_SIZE = 264 * 1024
+
 #: The boot ROM. 16 KB at zero on the real part; the first words are a vector
 #: table and a table of function pointers the runtime looks up.
 BOOTROM = 0x00000000
@@ -91,7 +106,8 @@ class Cpu(typing.Protocol):
     def map_alias(self, address: int, target: int, op: str) -> None: ...
     def map_mirror(self, address: int, source: int, *, invert: bool = ...,
                    mask: int = ...) -> None: ...
-    def add_region(self, base: int, size: int, *, executable: bool = ...) -> None: ...
+    def add_region(self, base: int, size: int, *, executable: bool = ...,
+                   fill: int = ...) -> None: ...
 
 
 def alias_block(cpu: Cpu, address: int) -> None:
@@ -149,6 +165,12 @@ def install_sio(cpu: Cpu) -> None:
     cpu.map_alias(SIO + SIO_GPIO_OE_XOR, SIO + SIO_GPIO_OE, "xor")
 
 
+def install_memory(cpu: Cpu) -> None:
+    """Flash and SRAM. The core ships with neither."""
+    cpu.add_region(FLASH, FLASH_SIZE, executable=True, fill=FLASH_ERASED)
+    cpu.add_region(SRAM, SRAM_SIZE, executable=True)
+
+
 def install_bootrom_stub(cpu: Cpu) -> None:
     """A zero-filled, **non-executable** boot ROM.
 
@@ -173,7 +195,8 @@ def install_bootrom_stub(cpu: Cpu) -> None:
 
 
 def install(cpu: Cpu) -> None:
-    """Every peripheral this board models, which is not every peripheral."""
+    """Every region and peripheral this board models, which is not every one."""
+    install_memory(cpu)
     install_bootrom_stub(cpu)
     install_resets(cpu)
     install_sio(cpu)

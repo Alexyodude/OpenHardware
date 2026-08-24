@@ -30,9 +30,6 @@ uint32_t cortexm0_regs_size(void) {
     return static_cast<uint32_t>(sizeof(CortexM0Registers));
 }
 
-uint32_t cortexm0_sram_base(void) { return cortexm0::kSramBase; }
-uint32_t cortexm0_sram_size(void) { return cortexm0::kSramSize; }
-
 CortexM0Cpu* cortexm0_new(void) {
     return reinterpret_cast<CortexM0Cpu*>(new Handle());
 }
@@ -106,8 +103,8 @@ void cortexm0_clear_registers(CortexM0Cpu* cpu) {
 }
 
 void cortexm0_add_region(CortexM0Cpu* cpu, uint32_t base, uint32_t size,
-                         int executable) {
-    as_handle(cpu)->cpu.add_region(base, size, executable != 0);
+                         int executable, uint8_t fill) {
+    as_handle(cpu)->cpu.add_region(base, size, executable != 0, fill);
 }
 
 void cortexm0_clear_regions(CortexM0Cpu* cpu) {
@@ -134,6 +131,10 @@ int cortexm0_is_mapped(const CortexM0Cpu* cpu, uint32_t address) {
 
 uint32_t cortexm0_fault_address(const CortexM0Cpu* cpu) {
     return as_handle(cpu)->cpu.fault_address();
+}
+
+int cortexm0_in_range(const CortexM0Cpu* cpu, uint32_t address, uint32_t bytes) {
+    return as_handle(cpu)->cpu.in_range(address, bytes) ? 1 : 0;
 }
 
 int cortexm0_fault_was_fetch(const CortexM0Cpu* cpu) {

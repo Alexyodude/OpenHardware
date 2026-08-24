@@ -195,13 +195,69 @@ def test_a_fetch_outside_the_modelled_memory_is_a_fault_not_a_zero(cpu):
         cpu.step()
 
 
-def test_flash_is_modelled_so_firmware_can_execute_from_it(cpu):
-    """The counterpart. A Pico image is linked to run from 0x10000000, so a
-    core that faulted there could not execute a single instruction of it."""
-    cpu.clear_memory()
+def test_the_core_has_no_memory_until_a_board_gives_it_some(cpu):
+    """0x10000000 is flash on an RP2040 and nothing on this core.
+
+    This test used to assert the opposite -- that flash was modelled -- back
+    when the core hardcoded the RP2040's map. It does not, and that is the
+    point: a SAMD21 shares this core and puts its flash at zero, so a core
+    with an opinion about where flash lives could only ever serve one board.
+    """
+    cpu.clear_regions()
+    with pytest.raises(MemoryFault):
+        cpu.write_halfword(0x10000100, 0x2042)
+
+
+def test_a_board_supplied_region_is_where_firmware_executes(cpu):
+    """The counterpart. Once something adds flash, code runs from it."""
+    cpu.clear_regions()
+    cpu.add_region(0x10000000, 0x1000, executable=True, fill=0xFF)
     cpu.write_halfword(0x10000100, 0x2042)      # MOVS r0, #0x42
     cpu.set_regs([0] * 15 + [0x10000100], apsr=0)
     cpu.step()
     regs = cpu.get_regs()
     assert regs.r[0] == 0x42
     assert regs.r[15] == 0x10000102
+
+
+def test_running_off_the_end_of_an_image_stops_instead_of_executing_zeros(cpu):
+    """Erased flash reads 0xFF, which is what a real part reads and also the
+    loud answer: 0xFFFF is not a valid Thumb encoding.
+
+    Filling flash with zeros instead makes every untouched word `MOVS r0, r0`,
+    so a program that runs past its own code executes a million no-ops and
+    looks like it is working. Measured before this changed: 5,000 instructions
+    of zero-filled flash with no fault at all.
+    """
+    cpu.clear_regions()
+    cpu.add_region(0x10000000, 0x1000, executable=True, fill=0xFF)
+    cpu.set_regs([0] * 15 + [0x10000000], apsr=0)
+    with pytest.raises(Unimplemented):
+        cpu.step()
+
+
+def test_the_same_core_serves_a_board_with_a_different_memory_map(cpu):
+    """The claim the layering exists for, tested rather than asserted.
+
+    A SAMD21 shares this core with an RP2040 and puts its flash at zero rather
+    than at 0x10000000. While the core held those addresses as `constexpr`,
+    that claim was false and nothing noticed, because every test used an
+    RP2040. So this builds a SAMD21-shaped map -- 256 KB of flash at 0, 32 KB
+    of SRAM at 0x20000000 -- and runs an instruction out of it.
+
+    It deliberately does **not** add `webui/boards/samd21.py`. Doing so would
+    flip two boards to "runnable" in the catalogue on the strength of a memory
+    map alone, with no peripherals and no image ever run on them.
+    """
+    cpu.clear_regions()
+    cpu.add_region(0x00000000, 256 * 1024, executable=True, fill=0xFF)
+    cpu.add_region(0x20000000, 32 * 1024, executable=True)
+
+    cpu.write_halfword(0x00000100, 0x2077)          # MOVS r0, #0x77
+    cpu.set_regs([0] * 15 + [0x00000100], apsr=0)
+    cpu.step()
+    assert cpu.get_regs().r[0] == 0x77
+
+    # And its SRAM really is 32 KB, not the RP2040's 264 KB.
+    assert cpu.in_range(0x20007FFC)
+    assert not cpu.in_range(0x20009000)

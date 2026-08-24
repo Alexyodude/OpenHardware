@@ -200,11 +200,25 @@ def test_executing_the_bootrom_stub_faults_rather_than_running_zeros(board):
         board.step()
 
 
-def test_the_bootrom_fault_names_the_address_rather_than_the_region(board):
-    board.set_regs([0] * 15 + [rp2040.BOOTROM], apsr=0)
+def test_the_bootrom_fault_names_the_faulting_address_not_just_any_address(board):
+    """The message carries two addresses -- what faulted, and the instruction
+    that did it -- and a substring check cannot tell them apart.
+
+    `BOOTROM` is 0, so asserting `"0x00000000" in message` passed even when the
+    *faulting* address was reported wrongly, because the "(instruction at
+    0x00000000)" half satisfied it. Both halves are checked separately now, and
+    against an address that is not zero, so neither can stand in for the other.
+    """
+    probe = rp2040.BOOTROM + 0x200
+    board.set_regs([0] * 15 + [probe], apsr=0)
     with pytest.raises(MemoryFault) as caught:
         board.step()
-    assert "0x00000000" in str(caught.value)
+    message = str(caught.value)
+    assert message.startswith(f"fetch at 0x{probe:08x}")
+    # And it says *why*: the boot ROM exists, so "outside the modelled memory"
+    # would send the reader looking for a missing region that is right there.
+    assert "not executable" in message
+    assert f"(instruction at 0x{probe:08x})" in message
 
 
 def test_flash_stays_executable_while_the_stub_does_not(board):
