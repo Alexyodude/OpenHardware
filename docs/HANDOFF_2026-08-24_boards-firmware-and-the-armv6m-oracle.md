@@ -24,7 +24,7 @@
 | Firmware format layer (UF2/ELF/HEX/bin) | ACHIEVED | `7693013`; `webui/firmware.py`, 25 tests |
 | Peripheral-layer research preserved | ACHIEVED | `ff9f12c`; `docs/research/peripheral-layer/`, 37 files |
 | **A Cortex-M0+ core** | NOT STARTED | The corpus generator exists; nothing consumes it |
-| **`tools/import_firmware.py`** | NOT STARTED | §6.1 — the top item |
+| **`tools/import_firmware.py`** | ACHIEVED (2026-08-24, later session) | `tools/import_firmware.py`; 42 tests in `tests/rules/test_import_firmware.py`; verified against a rebuilt three-env PlatformIO build |
 | **`load_firmware` API op + UI view** | NOT STARTED | §6.2 |
 | Peripheral design adopted into code | NOT STARTED | Deliberately. `docs/research/peripheral-layer/design.md` §6 is the scoping test |
 | OH-9 PICSimLab adapter | BLOCKED ON a PICSimLab install | Unchanged from the previous handoff |
@@ -234,10 +234,28 @@ python -m pytest tests/webui/test_firmware.py -q    # -> 25 passed
 Every artefact this session measured lived in a session-scoped scratchpad that
 no longer exists. PlatformIO is installed but **not on PATH**:
 
+**Corrected 2026-08-24 (later session): the sketch below did not compile.**
+All three environments failed with `'pinMode' was not declared in this scope`,
+because PlatformIO only auto-injects `<Arduino.h>` for `.ino` files, not for
+`src/main.cpp`. The ESP environment then failed a second time on `'LED_BUILTIN'
+was not declared` — the XIAO ESP32-C3 has no user LED, so its variant defines
+none. The version here is the one that builds; it was run to completion and
+every figure in the table below reproduced from it.
+
 ```bash
 PIO="/c/Users/Alexyodude/.platformio/penv/Scripts/pio.exe"
 mkdir -p /tmp/fw/src && cd /tmp/fw
-printf 'void setup(){pinMode(LED_BUILTIN,OUTPUT);}\nvoid loop(){digitalWrite(LED_BUILTIN,1);delay(500);digitalWrite(LED_BUILTIN,0);delay(500);}\n' > src/main.cpp
+cat > src/main.cpp <<'CPP'
+#include <Arduino.h>
+#ifndef LED_BUILTIN          // XIAO ESP32-C3 has no user LED
+#define LED_BUILTIN 10
+#endif
+void setup() { pinMode(LED_BUILTIN, OUTPUT); }
+void loop() {
+  digitalWrite(LED_BUILTIN, 1); delay(500);
+  digitalWrite(LED_BUILTIN, 0); delay(500);
+}
+CPP
 cat > platformio.ini <<'INI'
 [env:nucleo_g031k8]
 platform = ststm32
@@ -321,7 +339,30 @@ drift.
 
 ## 6. Open work, highest priority first
 
-### 6.1 `tools/import_firmware.py` — artefact discovery — *software-only, START HERE*
+### 6.1 `tools/import_firmware.py` — artefact discovery — **DONE 2026-08-24**
+
+**Landed.** `find_artefacts` covers all three layouts, the CLI reports what
+`load_image` found, and a bare `.bin` is refused without `--base` — including
+the refusal of one `--base` for a whole directory, since an ESP environment's
+three images go to 0x0, 0x8000 and 0x10000.
+
+Three things in the specification below were **deliberately not done**, each
+for a reason worth keeping:
+
+- **`boot_app0.bin`** is not searched for. It is not a build output — it is a
+  framework constant, identical for every project, living under
+  `~/.platformio/packages/framework-arduinoespressif32/tools/partitions/`.
+  Discovering it would tie discovery to a global install path. It is flashed
+  at 0xE000 and the module docstring says where it is.
+- **An esp-idf image parser.** `identify_esp_image` walks the container's own
+  structure — that walk *is* the identity check, since 0xE9 is also x86 `jmp
+  rel32` — and reports where the five segments load. It builds no `Image`;
+  that belongs in `webui/firmware.py` with its own tests, and is the natural
+  first half of §6.2.
+- **`docs/features/firmware.md`.** A ledger comes from the `feature-strategy`
+  skill. `CLAUDE.md` says not to write one by hand and that still holds.
+
+Everything below is the original specification, kept for its reasoning.
 
 `webui/firmware.py` parses bytes. Nothing yet finds those bytes. This is the
 piece that makes "open my PlatformIO project" work, and it is fully specified

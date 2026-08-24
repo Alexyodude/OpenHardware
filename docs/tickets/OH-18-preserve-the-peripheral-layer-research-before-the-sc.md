@@ -1,7 +1,7 @@
 ---
 id: OH-18
 title: Preserve the peripheral-layer research before the scratchpad is lost
-status: open
+status: done
 priority: P2
 created: '2026-08-24'
 touches:
