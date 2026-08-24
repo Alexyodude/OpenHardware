@@ -512,6 +512,12 @@ async function loadBoardImage() {
   $("board-go").disabled = false;
   $("board-console").textContent = "";
   $("board-console-note").textContent = "nothing transmitted yet";
+  // Draw the machine at its reset vector straight away. Without this the
+  // registers, listing and hexdump keep showing whatever was there before --
+  // an i8086, or the previous board -- which reads as this board's state
+  // rather than as a stale pane.
+  previousBoard = null;
+  renderBoardState(await api("/api/board/state"));
   const notes = boardImage.notes.length ? ` — ${boardImage.notes.join("; ")}` : "";
   boardSays(
     `${file.name}: ${boardImage.bytes} bytes of ${boardImage.format} on ` +
@@ -536,6 +542,7 @@ async function runLoadedBoard() {
 
   const state = await api("/api/board/state");
   renderBoardConsole(state.uart);
+  renderBoardState(state);
   const stopped = result.status === "stopped"
     ? ` and stopped: ${result.detail}`
     : "";
@@ -544,6 +551,108 @@ async function runLoadedBoard() {
     `${stopped}. pc 0x${state.registers[15].toString(16).padStart(8, "0")}`,
     result.status === "stopped" ? result.detail : "",
   );
+}
+
+/** Arm register names, indexed the way the core delivers them.
+ *
+ *  A separate renderer from the i8086's rather than one made generic, because
+ *  the two register sets differ in kind and not only in spelling: x86 arrives
+ *  as an object keyed by name and carries segments, Armv6-M arrives as
+ *  sixteen positional words and has none. Folding them together would need a
+ *  flag at every line, which is the parameterise-instead-of-split move the
+ *  house rules name. */
+const ARM_REGISTERS = [
+  "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7",
+  "r8", "r9", "r10", "r11", "r12", "sp", "lr", "pc",
+];
+
+/** The flags Armv6-M models, and only those. The core drops the rest on write
+ *  rather than storing them, so showing more would show something the model
+ *  does not have. */
+const ARM_FLAGS = [["N", 31], ["Z", 30], ["C", 29], ["V", 28]];
+
+/** The previous board register snapshot, for the "changed" highlight. Separate
+ *  from `previous` so switching between the i8086 and a board does not mark
+ *  every register as moved. */
+let previousBoard = null;
+
+function renderBoardRegisters(values) {
+  $("registers").replaceChildren(...ARM_REGISTERS.map((name, index) => {
+    const cell = document.createElement("div");
+    cell.className = "reg";
+    if (previousBoard && previousBoard[index] !== values[index]) {
+      cell.classList.add("moved");
+    }
+    const label = document.createElement("span");
+    label.className = "name";
+    label.textContent = name;
+    const value = document.createElement("span");
+    value.className = "value";
+    value.textContent = hex(values[index], 8);
+    cell.append(label, value);
+    return cell;
+  }));
+}
+
+function renderBoardFlags(apsr) {
+  $("flags").replaceChildren(...ARM_FLAGS.map(([name, bit]) => {
+    const on = ((apsr >>> bit) & 1) === 1;
+    const chip = document.createElement("span");
+    chip.className = "flag";
+    chip.dataset.on = String(on);
+    chip.textContent = name;
+    chip.title = `${name} is ${on ? "set" : "clear"}`;
+    return chip;
+  }));
+}
+
+/** The instructions around the program counter, or why there are none.
+ *
+ *  **An empty listing is not the same as a core that cannot disassemble**, and
+ *  that is why `listing.present` is on the wire — the same distinction
+ *  `uart.present` draws. `riscv32` is built and has no disassembler today, so
+ *  this is a live case: the board still steps and its registers still read,
+ *  and saying so beats an empty pane that reads as "no code here". */
+function renderBoardListing(listing) {
+  const host = $("listing");
+  if (!listing.present) {
+    const note = document.createElement("div");
+    note.className = "row";
+    note.style.color = "var(--muted)";
+    note.style.whiteSpace = "pre-wrap";
+    note.textContent = listing.note;
+    host.replaceChildren(note);
+    return;
+  }
+  host.replaceChildren(...listing.lines.map((line) => {
+    const row = document.createElement("div");
+    row.className = "row" + (line.current ? " current" : "");
+    const addr = document.createElement("span");
+    addr.className = "addr";
+    addr.textContent = hex(line.address, 8);
+    const raw = document.createElement("span");
+    raw.className = "raw";
+    raw.textContent = line.raw;
+    const text = document.createElement("span");
+    text.textContent = line.text;
+    row.append(addr, raw, text);
+    return row;
+  }));
+}
+
+/** Registers, flags, listing and memory for a loaded board.
+ *
+ *  Memory goes through the i8086's `renderMemory` with one key renamed rather
+ *  than a copy of it: a hexdump is a hexdump, and the two panes differ only in
+ *  what the server calls the base address. Registers and the listing do not
+ *  get that treatment, for the reason `ARM_REGISTERS` gives. */
+function renderBoardState(state) {
+  renderBoardRegisters(state.registers);
+  renderBoardFlags(state.apsr);
+  renderBoardListing(state.listing);
+  renderMemory({ address: state.memory.at, bytes: state.memory.bytes });
+  $("where").textContent = hex(state.registers[15], 8);
+  previousBoard = state.registers;
 }
 
 /** What the board printed, or why there is nothing to print.

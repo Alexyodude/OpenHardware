@@ -115,3 +115,71 @@ def test_the_view_switch_is_still_two_valued():
     machine — worth pinning, since it is what makes 'no new mechanism' true."""
     views = set(re.findall(r'body\[data-view="(\w+)"\]', CSS))
     assert views == {"emulator", "targets"}, f"views are now {sorted(views)}"
+
+
+# --- what a loaded board shows in the debug panes -----------------------------
+#
+# These drive the API rather than the browser, for the reason the module header
+# gives: the arrangement is checked statically and the behaviour is checked
+# here, and a real browser is what found both wrong in the first place.
+
+
+def test_a_loaded_board_carries_a_listing_around_its_program_counter():
+    """The half of OH-46 that makes a board debuggable rather than only
+    runnable. Around the PC, not the load address: after a run those are
+    nowhere near each other."""
+    import pathlib
+
+    from webui import api
+
+    image = pathlib.Path(__file__).resolve().parents[1] / "cortexm0/timer/delay.bin"
+    with api.load_firmware("XIAO-RP2040-DIP", image.read_bytes(),
+                           base=0x10000100) as session:
+        session.step(5000)
+        state = session.state()
+        listing = state["listing"]
+        assert listing["present"]
+        assert listing["at"] == state["registers"][15]
+        assert listing["lines"], "a listing with no lines is not a listing"
+        current = [line for line in listing["lines"] if line["current"]]
+        assert len(current) == 1, "exactly one line is where execution is"
+        assert current[0]["address"] == state["registers"][15]
+
+
+def test_the_listing_is_thumb_rather_than_whatever_ran_last():
+    """The defect a browser found while this was being written: the panes kept
+    showing the i8086's x86 listing because a stale server process was still
+    answering. Asserting the text is Thumb catches the whole class -- a listing
+    from the wrong machine, whatever the reason."""
+    import pathlib
+
+    from webui import api
+
+    image = pathlib.Path(__file__).resolve().parents[1] / "cortexm0/uart/hello.bin"
+    with api.load_firmware("XIAO-RP2040-DIP", image.read_bytes(),
+                           base=0x10000100) as session:
+        text = " ".join(line["text"] for line in session.state()["listing"]["lines"])
+    # Thumb register names and no x86 ones. `mov cx, 000Ah` was what appeared.
+    assert " r" in text or text.startswith("r"), text
+    for x86 in (" ax", " cx", " dx", " bx,"):
+        assert x86 not in text, f"an x86 operand in a Thumb listing: {text!r}"
+
+
+def test_a_core_without_a_disassembler_says_so_rather_than_showing_nothing():
+    """`present: false` is a claim about this repository; an empty listing is a
+    claim about the image, and they are different facts -- the distinction
+    `uart_view` already draws. Asserted against a stand-in rather than a real
+    board, because every board that runs today happens to have one, and the
+    case that needs holding is the one with no example yet."""
+    import types
+
+    from webui import api
+
+    runtime = types.SimpleNamespace(
+        chip="ESP32-C3", core="riscv32", description=None, board="XIAO-ESP32-C3-DIP",
+    )
+    view = api.listing_view(runtime, None, 0)
+    assert view["present"] is False
+    assert view["lines"] == []
+    assert "riscv32" in view["note"]
+    assert "no disassembler" in view["note"]

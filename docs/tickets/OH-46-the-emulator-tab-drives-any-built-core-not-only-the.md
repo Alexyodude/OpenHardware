@@ -7,6 +7,7 @@ created: '2026-08-25'
 touches:
 - webui/emulator.py
 - webui/emulator_server.py
+- webui/api.py
 - webui/static/emulator.js
 - webui/static/emulator.html
 - webui/static/emulator.css

@@ -755,6 +755,59 @@ def uart_view(runtime: Runtime, cpu: Core) -> dict[str, object]:
     }
 
 
+#: How many instructions a listing carries. Enough to fill the pane without
+#: making every poll disassemble a screenful nobody scrolls to.
+LISTING_LENGTH = 24
+
+
+def listing_view(runtime: Runtime, cpu: Core, at: int,
+                 count: int = LISTING_LENGTH) -> dict[str, object]:
+    """The instructions around the program counter, as something a page can
+    render.
+
+    **A core with no disassembler says so, exactly as a board with no UART
+    does.** An empty listing reads as "there is no code there", which is a
+    claim about the image; `present: false` is a claim about this repository,
+    and they are different facts. `riscv32` is built and has no `disasm` module
+    today, so this is a live case rather than a hypothetical.
+
+    **The address is flat, and that is a board-shaped assumption rather than a
+    universal one.** `core/cortexm0/disasm.py` takes `(cpu, address, count)`;
+    `core/i8086/disasm.py` takes `(cpu, cs, ip, count)`, because that machine
+    is genuinely segmented. The difference is real and it costs nothing here:
+    **no board carries an i8086**, so the board path only ever needs the flat
+    form. If one ever does, this is where the two shapes have to meet.
+    """
+    module_name = f"core.{runtime.core}.disasm"
+    try:
+        disasm = importlib.import_module(module_name)
+    except ModuleNotFoundError:
+        return {
+            "present": False,
+            "note": (
+                f"{runtime.chip} runs on the {runtime.core} core, which has no "
+                f"disassembler: {module_name} does not exist. The board still "
+                f"steps and its registers still read; only the listing is "
+                f"missing."
+            ),
+            "lines": [],
+        }
+
+    return {
+        "present": True,
+        "at": at,
+        "lines": [
+            {
+                "address": line.address,
+                "raw": line.raw,
+                "text": line.text.expandtabs(1),
+                "current": line.address == at,
+            }
+            for line in disasm.disassemble_range(cpu, at, count)
+        ],
+    }
+
+
 @dataclasses.dataclass(frozen=True)
 class RunResult:
     """How far a run got, and why it stopped if it did."""
@@ -1001,6 +1054,10 @@ class BoardSession:
             },
             "words": watched,
             "uart": uart_view(self.runtime, self.cpu),
+            # Around the program counter rather than the load address: what a
+            # debugger shows is where execution *is*, and after a run that is
+            # nowhere near where the image started.
+            "listing": listing_view(self.runtime, self.cpu, registers.as_list()[15]),
         }
 
     def close(self) -> None:
