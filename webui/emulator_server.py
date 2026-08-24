@@ -48,6 +48,7 @@ import urllib.parse
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from webui import emulator, targets  # noqa: E402
+from webui.boards import catalogue as board_catalogue  # noqa: E402
 
 DEFAULT_BIND = "127.0.0.1"
 DEFAULT_PORT = 8088
@@ -162,6 +163,16 @@ def handle_api(session: emulator.Session, selection: Selection, route: str,
                 entry["selectable"] = False
             listing.append(entry)
         return {"targets": listing, "selected": selection.name, "driving": DRIVING}
+
+    if route == "/api/boards":
+        boards = board_catalogue.catalogue()
+        return {
+            "boards": [b.as_json() for b in boards],
+            "waiting": [
+                {"isa": isa, "boards": names}
+                for isa, names in board_catalogue.missing_cores().items()
+            ],
+        }
 
     if route == "/api/target":
         name = payload.get("name")

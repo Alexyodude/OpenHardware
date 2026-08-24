@@ -101,8 +101,31 @@ int cortexm0_read_block(const CortexM0Cpu* cpu, uint32_t address, uint8_t* out,
 
 void cortexm0_clear_memory(CortexM0Cpu* cpu) { as_handle(cpu)->cpu.clear_memory(); }
 
+void cortexm0_clear_registers(CortexM0Cpu* cpu) {
+    as_handle(cpu)->cpu.clear_registers();
+}
+
+void cortexm0_add_region(CortexM0Cpu* cpu, uint32_t base, uint32_t size,
+                         int executable) {
+    as_handle(cpu)->cpu.add_region(base, size, executable != 0);
+}
+
+void cortexm0_clear_regions(CortexM0Cpu* cpu) {
+    as_handle(cpu)->cpu.clear_regions();
+}
+
 void cortexm0_map_register(CortexM0Cpu* cpu, uint32_t address, uint32_t value) {
     as_handle(cpu)->cpu.map_register(address, value);
+}
+
+void cortexm0_map_alias(CortexM0Cpu* cpu, uint32_t address, uint32_t target, int op) {
+    as_handle(cpu)->cpu.map_alias(address, target,
+                                  static_cast<cortexm0::WriteOp>(op));
+}
+
+void cortexm0_map_mirror(CortexM0Cpu* cpu, uint32_t address, uint32_t source,
+                         int invert, uint32_t mask) {
+    as_handle(cpu)->cpu.map_mirror(address, source, invert != 0, mask);
 }
 
 int cortexm0_is_mapped(const CortexM0Cpu* cpu, uint32_t address) {

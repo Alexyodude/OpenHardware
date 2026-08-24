@@ -24,3 +24,34 @@ OH-3 completed 2026-08-23 (logic, stack, control flow, 16-bit forms).
   bits 2:0 = form), so one handler covers 48 opcodes.
   IP advances BEFORE execution -- every relative branch is measured from the
   next instruction and CALL pushes that address.
+
+=== 2026-08-24 US-001: RESETS with atomic aliases ===
+Landed two GENERIC mechanisms in core/cortexm0 (no chip addresses):
+  map_alias(addr, target, op)  -- write applies store/set/clear/xor to target
+  map_mirror(addr, source, invert, mask) -- read derives from another register
+RP2040 specifics live in webui/boards/rp2040.py, adopted from the (unadopted)
+docs/research/peripheral-layer/rp2040_v2/ with its datasheet citations.
+
+MEASURED: standalone Pico blink 225,723 -> 225,755 instructions.
+NEXT BLOCKER: 0x00000014 = RP2040 boot ROM function table. This is the
+licensing question the 2026-08-24 handoff 6.5.4 flagged: the ROM contains
+mufplib, licensed "solely on a Raspberry Pi RP2040 device" or GPLv2, so it is
+NOT MIT-redistributable. rp2040js vendors it anyway. Recommended there:
+fetch-don't-vendor at setup.
+
+LEARNINGS:
+- Aliases are per-REGISTER address arithmetic, not per-peripheral: the SET view
+  of base+0x08 is base+0x2008. Aliasing the peripheral stacks every register's
+  alias on the first one.
+- SIO is the chip's ONLY peripheral without bus-level aliases (datasheet 2.1.2).
+  Its GPIO registers carry dedicated SET/CLR/XOR registers instead. The research
+  had corrected itself here already: the rule is per-peripheral, NOT "APB range"
+  -- SSI at 0x18000000 is far from APB and does have aliases.
+- RESET_DONE must be a MIRROR, not storage. Drivers spin on it; stored, the
+  loop never terminates -- a hang that looks like a bad instruction.
+- Session-scoped pytest fixture + new mutable state = cross-test leakage.
+  clear_memory() deliberately does NOT clear the register map (contents vs
+  configuration), so an autouse fixture calls clear_registers().
+- Mutation testing found `read_only` was DEAD: a mirror's write lands in its own
+  word and its read comes from `source`, so ignoring the write changed nothing
+  observable. Removed rather than kept as a flag that looks load-bearing.

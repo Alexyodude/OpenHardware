@@ -28,7 +28,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define CORTEXM0_ABI_VERSION 3
+#define CORTEXM0_ABI_VERSION 6
 
 /// r0-r15, then the flags.
 ///
@@ -81,6 +81,15 @@ CORTEXM0_API int cortexm0_read_block(const CortexM0Cpu* cpu, uint32_t address,
                                      uint8_t* out, uint32_t length);
 
 CORTEXM0_API void cortexm0_clear_memory(CortexM0Cpu* cpu);
+/// Forget every mapped register. Separate from clearing memory contents.
+CORTEXM0_API void cortexm0_clear_registers(CortexM0Cpu* cpu);
+
+/// A readable, writable region of `size` bytes at `base`. `executable` 0 makes
+/// a fetch from it fault while data reads still answer -- what a stub standing
+/// in for contents this project cannot ship needs. See cpu.h.
+CORTEXM0_API void cortexm0_add_region(CortexM0Cpu* cpu, uint32_t base,
+                                      uint32_t size, int executable);
+CORTEXM0_API void cortexm0_clear_regions(CortexM0Cpu* cpu);
 
 /// Make one memory-mapped word respond, reads-as-written. See cpu.h: only
 /// registered addresses respond, so an unmodelled peripheral still faults
@@ -88,6 +97,18 @@ CORTEXM0_API void cortexm0_clear_memory(CortexM0Cpu* cpu);
 CORTEXM0_API void cortexm0_map_register(CortexM0Cpu* cpu, uint32_t address,
                                         uint32_t value);
 CORTEXM0_API int cortexm0_is_mapped(const CortexM0Cpu* cpu, uint32_t address);
+
+/// `op`: 0 store, 1 set, 2 clear, 3 xor. An address whose write applies `op`
+/// to `target`'s word -- the RP2040's atomic aliases, STM32's BSRR. The
+/// offsets that mean "set" on a given chip are the caller's business.
+CORTEXM0_API void cortexm0_map_alias(CortexM0Cpu* cpu, uint32_t address,
+                                     uint32_t target, int op);
+
+/// An address whose read derives from `source`, optionally inverted and
+/// masked. RP2040's RESET_DONE is `~RESET`; a driver polls it in a loop, so a
+/// mirror that did not follow would spin forever.
+CORTEXM0_API void cortexm0_map_mirror(CortexM0Cpu* cpu, uint32_t address,
+                                      uint32_t source, int invert, uint32_t mask);
 
 /// Execute one instruction at PC, advancing PC past it.
 ///

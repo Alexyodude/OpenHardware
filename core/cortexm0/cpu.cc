@@ -41,7 +41,23 @@ void Cpu::reset() {
     regs_.fill(0);
     apsr_ = 0;
     clear_memory();
+    // Power-on, so the board goes too. `clear_memory` alone would leave a
+    // half-configured machine that looks reset and is not.
+    clear_registers();
 }
+
+void Cpu::clear_registers() { mmio_.clear(); }
+
+void Cpu::add_region(uint32_t base, uint32_t size, bool executable) {
+    Extra region;
+    region.base = base;
+    region.size = size;
+    region.executable = executable;
+    region.bytes.assign(size, 0);
+    extra_.push_back(std::move(region));
+}
+
+void Cpu::clear_regions() { extra_.clear(); }
 
 void Cpu::clear_memory() {
     std::fill(flash_.begin(), flash_.end(), static_cast<uint8_t>(0));
@@ -49,11 +65,86 @@ void Cpu::clear_memory() {
 }
 
 void Cpu::map_register(uint32_t address, uint32_t value) {
-    mmio_[address & ~3u] = value;
+    const uint32_t at = address & ~3u;
+    Mapped entry;
+    entry.value = value;
+    entry.target = at;
+    entry.source = at;
+    mmio_[at] = entry;
+}
+
+void Cpu::map_alias(uint32_t address, uint32_t target, WriteOp op) {
+    const uint32_t at = address & ~3u;
+    Mapped entry;
+    entry.target = target & ~3u;
+    entry.source = target & ~3u;
+    entry.op = op;
+    mmio_[at] = entry;
+}
+
+void Cpu::map_mirror(uint32_t address, uint32_t source, bool invert, uint32_t mask) {
+    const uint32_t at = address & ~3u;
+    Mapped entry;
+    entry.target = at;
+    entry.source = source & ~3u;
+    entry.invert = invert;
+    entry.mask = mask;
+    mmio_[at] = entry;
 }
 
 bool Cpu::is_mapped(uint32_t address) const {
     return mmio_.find(address & ~3u) != mmio_.end();
+}
+
+bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
+    const auto found = mmio_.find(address & ~3u);
+    if (found == mmio_.end()) {
+        return false;
+    }
+    const Mapped& entry = found->second;
+    // One hop only. A mirror of a mirror would need a loop, and a loop needs a
+    // cycle check; nothing has asked for it, so the shape that cannot loop is
+    // the one that ships.
+    uint32_t value = entry.value;
+    if (entry.source != (address & ~3u)) {
+        const auto origin = mmio_.find(entry.source);
+        if (origin == mmio_.end()) {
+            // A mirror whose source was never mapped. Faulting is right: it is
+            // a mistake in the board description, and answering zero would be
+            // the silent-hang failure this whole design refuses.
+            fault_address_ = address;
+            fault_was_fetch_ = false;
+            return false;
+        }
+        value = origin->second.value;
+    }
+    if (entry.invert) {
+        value = ~value;
+    }
+    out = value & entry.mask;
+    return true;
+}
+
+bool Cpu::mmio_write(uint32_t address, uint32_t value) {
+    const auto found = mmio_.find(address & ~3u);
+    if (found == mmio_.end()) {
+        return false;
+    }
+    const Mapped& entry = found->second;
+    const auto target = mmio_.find(entry.target);
+    if (target == mmio_.end()) {
+        fault_address_ = address;
+        fault_was_fetch_ = false;
+        return false;
+    }
+    uint32_t& stored = target->second.value;
+    switch (entry.op) {
+        case WriteOp::Store: stored = value; break;
+        case WriteOp::Set: stored |= value; break;
+        case WriteOp::Clear: stored &= ~value; break;
+        case WriteOp::Xor: stored ^= value; break;
+    }
+    return true;
 }
 
 const std::vector<uint8_t>* Cpu::region_for(uint32_t address, uint32_t bytes,
@@ -66,9 +157,26 @@ const std::vector<uint8_t>* Cpu::region_for(uint32_t address, uint32_t bytes,
     if (contains(kFlash, address, bytes, offset)) {
         return &flash_;
     }
+    for (const Extra& region : extra_) {
+        if (contains(Region{region.base, region.size}, address, bytes, offset)) {
+            return &region.bytes;
+        }
+    }
     fault_address_ = address;
     fault_was_fetch_ = false;
     return nullptr;
+}
+
+bool Cpu::executable_at(uint32_t address) const {
+    // Flash and SRAM both execute. Only an added region can be non-executable,
+    // and only one is: the boot ROM stub.
+    for (const Extra& region : extra_) {
+        uint32_t offset = 0;
+        if (contains(Region{region.base, region.size}, address, 2, offset)) {
+            return region.executable;
+        }
+    }
+    return true;
 }
 
 std::vector<uint8_t>* Cpu::region_for(uint32_t address, uint32_t bytes,
@@ -87,10 +195,8 @@ bool Cpu::in_range(uint32_t address, uint32_t bytes) const {
 bool Cpu::read_word(uint32_t address, uint32_t& out) const {
     // MMIO is checked before the regions, not after, so a mapped register
     // cannot be shadowed by a region that happens to cover it.
-    const auto mapped = mmio_.find(address & ~3u);
-    if (mapped != mmio_.end()) {
-        out = mapped->second;
-        return true;
+    if (is_mapped(address)) {
+        return mmio_read(address, out);
     }
     uint32_t offset = 0;
     const std::vector<uint8_t>* region = region_for(address, 4, offset);
@@ -108,10 +214,8 @@ bool Cpu::read_word(uint32_t address, uint32_t& out) const {
 }
 
 bool Cpu::write_word(uint32_t address, uint32_t value) {
-    const auto mapped = mmio_.find(address & ~3u);
-    if (mapped != mmio_.end()) {
-        mapped->second = value;
-        return true;
+    if (is_mapped(address)) {
+        return mmio_write(address, value);
     }
     uint32_t offset = 0;
     std::vector<uint8_t>* region = region_for(address, 4, offset);

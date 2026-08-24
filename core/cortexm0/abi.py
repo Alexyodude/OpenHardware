@@ -35,7 +35,10 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match CORTEXM0_ABI_VERSION in abi.h.
-ABI_VERSION = 3
+ABI_VERSION = 6
+
+#: Must match cortexm0::WriteOp. Spelled at call sites rather than numbered.
+WRITE_OPS = {"store": 0, "set": 1, "clear": 2, "xor": 3}
 
 #: Must match cortexm0::StepResult and abi.h's documented return values.
 OK = 0
@@ -104,10 +107,23 @@ _SIGNATURES = {
         ctypes.c_int,
     ),
     "cortexm0_clear_memory": ([ctypes.c_void_p], None),
+    "cortexm0_clear_registers": ([ctypes.c_void_p], None),
+    "cortexm0_add_region": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int], None
+    ),
+    "cortexm0_clear_regions": ([ctypes.c_void_p], None),
     "cortexm0_map_register": (
         [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32], None
     ),
     "cortexm0_is_mapped": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
+    "cortexm0_map_alias": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int], None
+    ),
+    "cortexm0_map_mirror": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int,
+         ctypes.c_uint32],
+        None,
+    ),
     "cortexm0_step": ([ctypes.c_void_p], ctypes.c_int),
     "cortexm0_fault_address": ([ctypes.c_void_p], ctypes.c_uint32),
     "cortexm0_fault_was_fetch": ([ctypes.c_void_p], ctypes.c_int),
@@ -235,6 +251,25 @@ class Cpu:
     def clear_memory(self) -> None:
         self._lib.cortexm0_clear_memory(self._handle)
 
+    def clear_registers(self) -> None:
+        """Forget every mapped register. Not implied by `clear_memory`."""
+        self._lib.cortexm0_clear_registers(self._handle)
+
+    def add_region(self, base: int, size: int, *, executable: bool = True) -> None:
+        """A readable, writable region at `base`.
+
+        `executable=False` makes a fetch from it fault while data reads still
+        answer -- what a stub standing in for contents this project cannot ship
+        needs, so that reading its table works and jumping into it is loud.
+        """
+        self._lib.cortexm0_add_region(
+            self._handle, base, size, 1 if executable else 0
+        )
+
+    def clear_regions(self) -> None:
+        """Forget every region added by `add_region`. Flash and SRAM remain."""
+        self._lib.cortexm0_clear_regions(self._handle)
+
     def map_register(self, address: int, value: int = 0) -> None:
         """Make one memory-mapped word respond, reads-as-written.
 
@@ -246,6 +281,28 @@ class Cpu:
 
     def is_mapped(self, address: int) -> bool:
         return bool(self._lib.cortexm0_is_mapped(self._handle, address))
+
+    def map_alias(self, address: int, target: int, op: str) -> None:
+        """An address whose write applies `op` to `target`'s word.
+
+        `op` is one of "store", "set", "clear", "xor" -- spelled rather than
+        numbered, because a bare 2 at a call site is unreadable and the
+        difference between clear and xor is a silent wrong answer.
+        """
+        try:
+            code = WRITE_OPS[op]
+        except KeyError:
+            raise AbiError(
+                f"unknown write op {op!r}; expected one of {sorted(WRITE_OPS)}"
+            ) from None
+        self._lib.cortexm0_map_alias(self._handle, address, target, code)
+
+    def map_mirror(self, address: int, source: int, *, invert: bool = False,
+                   mask: int = 0xFFFFFFFF) -> None:
+        """An address whose read derives from `source`."""
+        self._lib.cortexm0_map_mirror(
+            self._handle, address, source, 1 if invert else 0, mask
+        )
 
     # --- running ----------------------------------------------------------
 

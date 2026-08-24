@@ -629,7 +629,10 @@ StepResult execute_wide(Cpu& cpu, uint16_t first, uint32_t address) {
 StepResult step(Cpu& cpu) {
     const uint32_t address = cpu.reg(kPc);
     uint16_t encoding = 0;
-    if (!cpu.read_halfword(address, encoding)) {
+    if (!cpu.read_halfword(address, encoding) || !cpu.executable_at(address)) {
+        // The executability check is deliberately *after* the read, so an
+        // address that is simply absent and one that is present but not
+        // executable both arrive here with the faulting address recorded.
         cpu.note_fetch_fault();
         return StepResult::MemoryFault;
     }

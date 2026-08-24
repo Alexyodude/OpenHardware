@@ -310,6 +310,72 @@ async function selectTarget(name) {
   await fillTargets();
 }
 
+// --- boards -------------------------------------------------------------------
+//
+// Rendered from /api/boards, which computes every field. Nothing about which
+// board works is written in this file, for the same reason the board list and
+// the target list are generated: a hand-kept claim about what works is wrong
+// the moment someone builds or deletes a core, and wrong silently.
+
+async function fillBoards() {
+  const data = await api("/api/boards");
+  const runnable = data.boards.filter((b) => b.runnable).length;
+  const described = data.boards.filter((b) => b.described).length;
+
+  $("boards-strip").replaceChildren(
+    stripCell(String(runnable), "boards runnable", runnable ? "is-ok" : "is-stop"),
+    stripCell(String(described), "chips described", described ? "is-ok" : ""),
+    stripCell(String(data.boards.length - runnable), "not yet", "is-warn"),
+    stripCell(String(data.boards.length), "boards imported", ""),
+  );
+
+  $("boards-rows").replaceChildren(...data.boards.map((board) => {
+    const row = document.createElement("tr");
+    if (!board.runnable) row.className = "dim";
+    const name = document.createElement("td");
+    name.className = "chip";
+    name.textContent = board.name;
+    const chip = document.createElement("td");
+    chip.textContent = board.chip;
+    const isa = document.createElement("td");
+    isa.className = "isa";
+    isa.textContent = board.isa;
+    const core = document.createElement("td");
+    core.className = "isa";
+    core.textContent = board.core;
+    const status = document.createElement("td");
+    status.append(span(...boardStatus(board)));
+    row.append(name, chip, isa, core, status);
+    return row;
+  }));
+
+  $("boards-waiting").replaceChildren(...data.waiting.map((group) => {
+    const row = document.createElement("tr");
+    const isa = document.createElement("td");
+    isa.className = "isa";
+    isa.textContent = group.isa;
+    const count = document.createElement("td");
+    count.textContent = String(group.boards.length);
+    const names = document.createElement("td");
+    names.className = "note-cell";
+    names.textContent = group.boards.join(", ");
+    row.append(isa, count, names);
+    return row;
+  }));
+}
+
+/** Which of the three facts is missing, said as the reason it is not runnable.
+ *
+ *  A single "not runnable" would hide the difference between a chip nobody has
+ *  written a core for and one whose core exists but has no memory map -- and
+ *  those are days apart in effort. */
+function boardStatus(board) {
+  if (board.runnable) return ["pill p-ok", "RUNS FIRMWARE"];
+  if (!board.core_exists) return ["pill p-none", "NO CORE"];
+  if (!board.core_built) return ["pill p-warn", "CORE UNBUILT"];
+  return ["pill p-warn", "NO BOARD DESCRIPTION"];
+}
+
 // --- wiring -------------------------------------------------------------------
 
 async function fillSamples() {
@@ -415,4 +481,5 @@ wire();
 // which targets exist is true whether or not a sample ever loads. Chaining
 // them would leave the selector empty whenever a sample failed.
 fillTargets().catch(report);
+fillBoards().catch(report);
 fillSamples().then(loadSelected).catch(report);

@@ -208,6 +208,19 @@ let executed = 0;
 for (; executed < limit; executed++) {
   executedSoFar = executed;
   if (profile) pcHistogram.set(core.PC >>> 0, (pcHistogram.get(core.PC >>> 0) ?? 0) + 1);
+  // rp2040js does not fault. It warns and carries on, so its instruction
+  // count keeps rising long after the program has left anything executable.
+  // The first PC outside flash and SRAM is where its numbers stop meaning
+  // anything, and it is the honest end of a comparison run.
+  {
+    const here = core.PC >>> 0;
+    const inFlash = here >= 0x10000000 && here < 0x10200000;
+    const inSram = here >= 0x20000000 && here < 0x20042000;
+    if (!inFlash && !inSram && trace.leftMemoryAt === undefined) {
+      trace.leftMemoryAt = executed;
+      trace.leftMemoryPc = here;
+    }
+  }
   const before = state();
   const pc = core.PC >>> 0;
   try {
@@ -256,4 +269,9 @@ if (profile) {
   console.log(`vectors    SP 0x${sp.toString(16)}  entry 0x${entry.toString(16)}`);
   console.log(`executed   ${executed} instructions in the oracle`);
   console.log(`stopped    ${trace.stopped ?? "reached the limit"}`);
+  console.log(
+    trace.leftMemoryAt === undefined
+      ? "in range   PC stayed in flash or SRAM for the whole run"
+      : `LEFT MEMORY at step ${trace.leftMemoryAt}, PC 0x${trace.leftMemoryPc.toString(16)}` +
+        " -- everything the oracle reports after this point is fiction");
 }

@@ -119,6 +119,10 @@ button:disabled, select:disabled { opacity: 0.45; cursor: not-allowed; }
    still readable. The default in several browsers is a grey close enough to
    the background to look like a rendering fault. */
 option:disabled { color: var(--muted); }
+
+/* A sub-heading inside a panel, for the second table in the Boards view. */
+.sub { margin: 22px 15px 0; font-size: 12px; text-transform: uppercase;
+       letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
 button:focus-visible, select:focus-visible, input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;

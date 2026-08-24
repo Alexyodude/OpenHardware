@@ -71,6 +71,14 @@ constexpr uint32_t kFlagZ = 1u << 30;
 constexpr uint32_t kFlagC = 1u << 29;
 constexpr uint32_t kFlagV = 1u << 28;
 
+/// What a write to a mapped address does to its target.
+///
+/// `Store` is the ordinary case. The other three exist because a peripheral
+/// register that modifies another register is not a rarity to be special-cased
+/// -- it is how every modern part offers an atomic bit change without a
+/// read-modify-write the interrupt handler can tear.
+enum class WriteOp : uint8_t { Store, Set, Clear, Xor };
+
 /// Register numbers that mean something beyond "general purpose".
 constexpr unsigned kSp = 13;
 constexpr unsigned kLr = 14;
@@ -126,6 +134,9 @@ public:
 
     bool in_range(uint32_t address, uint32_t bytes) const;
 
+    /// Whether an instruction may be fetched from `address`. See `add_region`.
+    bool executable_at(uint32_t address) const;
+
     /// False on a fault, having read or written nothing. The caller turns that
     /// into `StepResult::MemoryFault`.
     bool read_word(uint32_t address, uint32_t& out) const;
@@ -159,11 +170,67 @@ public:
     /// missing. `docs/research/peripheral-layer/design.md` calls this out as
     /// the failure mode that wastes the most time.
     ///
-    /// Reads-as-written is the only behaviour offered. A register that clears
-    /// on read, follows another bit, or counts is a *modelled peripheral*, not
-    /// a mapped word, and belongs in the layer that owns the map.
+    /// Three behaviours, and they are the three that hardware actually has.
+    /// A register that clears on read, or counts, is a *modelled peripheral*
+    /// rather than a mapped word, and belongs in the layer that owns the map.
     void map_register(uint32_t address, uint32_t value);
+
+    /// An address whose write applies `op` to another address's word.
+    ///
+    /// This is the RP2040's atomic SET/CLR/XOR aliases, and equally STM32's
+    /// BSRR: one register that modifies another rather than holding its own
+    /// value. **The offsets are not here.** That +0x2000 means "set" on an
+    /// RP2040 is a fact about that chip's bus; the caller passes both
+    /// addresses, so this stays architecture-only.
+    void map_alias(uint32_t address, uint32_t target, WriteOp op);
+
+    /// An address whose read is derived from another's word.
+    ///
+    /// `RESET_DONE` on an RP2040 is `~RESET`: a block is done when its reset
+    /// bit is clear. Driver code polls it in a loop, so a mirror that did not
+    /// follow its source would spin forever -- the exact hang this module's
+    /// fault-rather-than-zero rule exists to prevent, arriving by a different
+    /// door.
+    ///
+    /// Writes to a mirror are inert, as hardware ignores writes to a
+    /// read-only register. There is no flag for that: a mirror's write lands
+    /// in its own word and its read comes from `source`, so the stored value
+    /// is never read back. An explicit `read_only` branch was tried and
+    /// removed -- mutation testing showed that deleting it changed no
+    /// observable behaviour, which makes it a field that looks load-bearing
+    /// and is not.
+    void map_mirror(uint32_t address, uint32_t source, bool invert,
+                    uint32_t mask = 0xFFFFFFFFu);
+
     bool is_mapped(uint32_t address) const;
+
+    /// Add a readable, writable region of `size` bytes at `base`.
+    ///
+    /// `executable` is the field that earns this API. A stub region -- one
+    /// standing in for contents this project cannot ship, like the RP2040 boot
+    /// ROM -- must answer *data* reads, because firmware reads its function
+    /// table and the oracle answers zero there too. But a *jump* into it would
+    /// execute zeros, which decode as `MOVS r0, r0` and run quietly off the
+    /// end. Marking it non-executable turns the one dangerous case loud while
+    /// leaving the harmless one working.
+    ///
+    /// Regions added here sit alongside the built-in flash and SRAM. Those two
+    /// are still hardcoded because every Armv6-M part this project targets has
+    /// them at the same addresses; the moment one does not, they move out here
+    /// too.
+    void add_region(uint32_t base, uint32_t size, bool executable);
+
+    /// Forget every mapped region added by `add_region`, leaving flash and
+    /// SRAM. Paired with `clear_registers` in `reset`.
+    void clear_regions();
+
+    /// Forget every mapped register.
+    ///
+    /// Separate from `clear_memory`, which clears memory *contents*. Which
+    /// registers exist is configuration -- which board this is -- and a
+    /// conformance run that zeroes RAM between cases must not also
+    /// un-install the board.
+    void clear_registers();
 
     /// The address of the most recent failed access, and whether it was an
     /// instruction fetch.
@@ -195,6 +262,17 @@ private:
     std::vector<uint8_t> flash_;
     std::vector<uint8_t> sram_;
 
+    /// Regions the board added. A vector rather than a map because there are
+    /// a handful and every access scans them; a hash lookup per byte would
+    /// cost more than the scan saves.
+    struct Extra {
+        uint32_t base;
+        uint32_t size;
+        bool executable;
+        std::vector<uint8_t> bytes;
+    };
+    std::vector<Extra> extra_;
+
     // `mutable` because the read path is const and this is a diagnostic, not
     // state the program can observe. Recorded at the single choke point where
     // an address fails to resolve, so no individual read or write has to
@@ -202,9 +280,24 @@ private:
     mutable uint32_t fault_address_ = 0;
     mutable bool fault_was_fetch_ = false;
 
-    /// Word-aligned address to value. A map rather than a range, so an
+    /// One mapped word. `target` and `source` name the address whose storage
+    /// a write changes and a read derives from; for a plain register both are
+    /// the address itself, which is what keeps the lookup uniform.
+    struct Mapped {
+        uint32_t value = 0;
+        uint32_t target = 0;
+        uint32_t source = 0;
+        WriteOp op = WriteOp::Store;
+        bool invert = false;
+        uint32_t mask = 0xFFFFFFFFu;
+    };
+
+    /// Word-aligned address to behaviour. A map rather than a range, so an
     /// unmodelled register inside a modelled peripheral still faults.
-    std::unordered_map<uint32_t, uint32_t> mmio_;
+    std::unordered_map<uint32_t, Mapped> mmio_;
+
+    bool mmio_read(uint32_t address, uint32_t& out) const;
+    bool mmio_write(uint32_t address, uint32_t value);
 };
 
 }  // namespace cortexm0

@@ -130,16 +130,51 @@
           i8086 session, so its registers, disassembly and sample programs are all
           8086. A second core being built does not change that, and offering it in
           the selector would show 8086 state under another architecture's name.</p>
-        <p><strong>The Cortex-M0+ core implements Thumb formats 1–4 only</strong>
-          — the register-only, flag-setting arithmetic at 0x0000–0x43FF. No loads,
-          no stores, no branches, no exceptions. That is enough to be checked
-          against 13,500 oracle cases and <em>not</em> enough to run a board's
-          firmware. Do not read a green conformance run as a working dev board.</p>
-        <p><strong>Every chip in the tables below has no core directory at all.</strong>
-          They are surveyed, not started — that is what those tables are for, and
-          they are deliberately absent from the selector rather than listed and
-          greyed: an option you can never pick is a promise the repository has not
-          made.</p>
+        <p><strong>The Cortex-M0+ core covers the whole 16-bit Thumb map</strong>
+          — formats 1–19, so loads, stores, branches, the stack and the high
+          registers, not only arithmetic. It runs a real compiled blink on an
+          emulated RP2040, and it matched rp2040js for 100,000 instructions of an
+          Arduino image before both models reached a boot ROM neither ships.</p>
+        <p><strong>Which boards that adds up to is the Boards table below</strong>,
+          and it is computed rather than claimed. A chip in the survey tables
+          further down has no core directory at all; they are research, not work
+          in progress, and they are deliberately absent from the selector rather
+          than listed and greyed — an option you can never pick is a promise the
+          repository has not made.</p>
+      </div>
+    </section>
+
+    <!-- Boards, generated from webui/boards/catalogue.py. Three separate
+         facts per board, deliberately not collapsed into one: which chip,
+         whether a core for its instruction set is built, and whether a board
+         description gives that core a memory map and peripherals. A board is
+         runnable only when all three hold, and a famous chip earns nothing. -->
+    <section class="panel" id="boards">
+      <h2>Boards <span class="note">computed from webui/boards/</span></h2>
+      <div class="prose">
+        <p>Every board imported into this repository, what is on it, and whether
+          it can run firmware today. <strong>“Runnable” means a real compiled
+          image has executed on it</strong> — not that its chip is well
+          understood.</p>
+      </div>
+      <div class="strip" id="boards-strip"></div>
+      <div class="scroll"><table class="grid">
+        <thead><tr><th>Board</th><th>Chip</th><th>Instruction set</th>
+          <th>Core</th><th>Status</th></tr></thead>
+        <tbody id="boards-rows"></tbody>
+      </table></div>
+      <h3 class="sub">What each missing core would unlock</h3>
+      <div class="scroll"><table class="grid">
+        <thead><tr><th>Instruction set</th><th>Boards</th><th>Waiting</th></tr></thead>
+        <tbody id="boards-waiting"></tbody>
+      </table></div>
+      <div class="prose bordered">
+        <p><strong>The backlog is ordered by boards unlocked, which is the only
+          ordering it has that is not a guess.</strong> It is not ordered by
+          ease: Xtensa is last on evidence, because no free independent oracle
+          for it exists — QEMU-xtensa and binutils-xtensa both come from the same
+          Tensilica archive, so their agreement proves nothing
+          (<code>docs/architectures.md</code> §2.1c).</p>
       </div>
     </section>
 

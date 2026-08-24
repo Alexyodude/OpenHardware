@@ -51,3 +51,19 @@ def cpu():
     abi = pytest.importorskip("core.cortexm0.abi")
     with abi.Cpu() as instance:
         yield instance
+
+
+@pytest.fixture(autouse=True)
+def _no_registers_leak_between_tests(cpu):
+    """Un-install any board the previous test mapped.
+
+    The `cpu` fixture is session-scoped so the 13,500-case corpus does not pay
+    to construct one per case, and `clear_memory` deliberately does not touch
+    the register map. Without this, installing an RP2040 in one test left its
+    registers mapped in every test after it -- which is exactly how two tests
+    asserting "this address is not mapped" started failing the moment a board
+    existed.
+    """
+    cpu.clear_registers()
+    cpu.clear_regions()
+    yield

@@ -1,7 +1,7 @@
 ---
 id: OH-19
 title: Target selection in the UI, driven by which cores are actually built
-status: in-review
+status: done
 priority: P1
 created: '2026-08-24'
 touches:
