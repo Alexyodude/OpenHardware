@@ -60,9 +60,11 @@ def test_the_repository_has_the_cores_the_ui_copy_describes():
     It has already earned its keep once: it was written when `i8086` was the
     only core and it failed the moment `cortexm0` landed, which is what sent
     someone to update the Targets copy rather than letting it quietly go
-    stale. Adding a third core should fail this again.
+    stale. It then earned it a second time: `riscv32` landed and this failed
+    again, which is the tripwire working, not breaking. Adding a fourth core
+    should fail it once more.
     """
-    assert build_core.cores() == ["cortexm0", "i8086"]
+    assert build_core.cores() == ["cortexm0", "i8086", "riscv32"]
 
 
 def test_the_catalogue_covers_every_core_that_exists():

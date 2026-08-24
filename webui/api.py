@@ -484,7 +484,39 @@ class SimulatorApi:
 
 
 class BoardRunError(Exception):
-    """A board and an image that cannot be put together, and why."""
+    """A board and an image that cannot be put together, and why.
+
+    `reason` is a short stable slug -- `unknown-board`, `core-not-built` and
+    the rest listed in `REASONS`. The message is the useful half and always
+    carries the values that caused it; the slug exists so a transport can keep
+    the refusals apart without matching on message text, which is the thing
+    that breaks the first time a message is reworded.
+
+    They are separate failures with separate fixes. Collapsing them into one
+    "could not load" is how a person ends up rebuilding a core to fix an image
+    that was simply linked at the wrong address.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        if reason not in REASONS:
+            raise ValueError(f"unknown refusal reason {reason!r}; known: {sorted(REASONS)}")
+        self.reason = reason
+
+
+#: Every way this layer refuses, and what each one means for the person
+#: reading it. `webui/emulator_server.py` maps these to status codes.
+REASONS = {
+    "unknown-board": "no board of that name in webui/boards/",
+    "core-not-built": "the chip's core is missing or not compiled",
+    "chip-not-described": "no module gives this chip a memory map",
+    "nothing-for-this-chip": "the artefact holds no image for this chip",
+    "outside-the-board-map": "the image loads where this board has no memory",
+    "no-vector-table": "no address in the image looks like one this board could enter",
+    "budget-refused": "the number of instructions asked for is not usable",
+    "window-refused": "the memory window asked for is not a usable size",
+    "window-outside-the-map": "the memory window asked for is not on this board",
+}
 
 
 class Core(typing.Protocol):
@@ -501,7 +533,10 @@ class Core(typing.Protocol):
     def clear_regions(self) -> None: ...
     def write_block(self, address: int, data: bytes) -> None: ...
     def read_word(self, address: int) -> int: ...
+    def read_block(self, address: int, length: int) -> bytes: ...
     def in_range(self, address: int, size: int = ...) -> bool: ...
+    def is_mapped(self, address: int) -> bool: ...
+    def get_regs(self) -> typing.Any: ...
     def set_regs(self, regs: list[int], apsr: int) -> None: ...
     def step(self) -> None: ...
     def close(self) -> None: ...
@@ -582,6 +617,7 @@ def runtime_for(board_name: str) -> Runtime:
     board = boards.get(board_name)
     if board is None:
         raise BoardRunError(
+            "unknown-board",
             f"no such board: {board_name!r}. webui/boards/ holds "
             f"{len(boards)}, including {', '.join(sorted(boards)[:3])}"
         )
@@ -597,6 +633,7 @@ def runtime_for(board_name: str) -> Runtime:
         targets.require_selectable(board.core)
     except targets.TargetError as error:
         raise BoardRunError(
+            "core-not-built",
             f"{board_name} is a {board.chip} and needs the {board.core} "
             f"core: {error}"
         ) from error
@@ -604,6 +641,7 @@ def runtime_for(board_name: str) -> Runtime:
     if not board.described:
         described = sorted(catalogue.described_chips()) or ["nothing"]
         raise BoardRunError(
+            "chip-not-described",
             f"{board_name} is a {board.chip} and no module describes that "
             f"chip, so an image would have no memory to load into. "
             f"webui/boards/ describes {', '.join(described)}"
@@ -614,11 +652,13 @@ def runtime_for(board_name: str) -> Runtime:
         description = importlib.import_module(module_name)
     except ModuleNotFoundError as error:
         raise BoardRunError(
+            "chip-not-described",
             f"{board_name}: the catalogue reports {board.chip} as described, "
             f"but {module_name} does not import: {error}"
         ) from error
     if not hasattr(description, "install"):
         raise BoardRunError(
+            "chip-not-described",
             f"{module_name} has no install(cpu). A board description has to "
             f"map the chip's memory before anything can be written into it"
         )
@@ -628,11 +668,40 @@ def runtime_for(board_name: str) -> Runtime:
         abi = importlib.import_module(abi_name)
     except ModuleNotFoundError as error:
         raise BoardRunError(
+            "core-not-built",
             f"{board_name}: the {board.core} core is built but {abi_name} "
             f"does not import: {error}"
         ) from error
 
     return Runtime(board.name, board.chip, board.core, description, abi)
+
+
+#: A ceiling on one `run` call. `webui/emulator.py` states the reasoning for
+#: its own: without one, a single request pins the server for as long as the
+#: caller likes. A separate number rather than a shared one because these are
+#: different cores at different speeds, and the right ceiling is a property of
+#: the core, not of the idea.
+MAX_RUN_STEPS = 200_000
+
+#: The widest memory window `state` will read, so one request cannot ask for
+#: the whole of a 2 MB flash and be handed it as a JSON array of integers.
+MAX_WINDOW_BYTES = 4096
+
+#: How many memory-mapped words one `state` call will read. A peripheral view
+#: watches a handful; a request asking for thousands is reading flash the slow
+#: way, one `read_word` at a time.
+MAX_WATCHED_WORDS = 32
+
+
+@dataclasses.dataclass(frozen=True)
+class RunResult:
+    """How far a run got, and why it stopped if it did."""
+
+    steps: int
+    #: "running" -- the budget ran out with the program still going --
+    #: or "stopped", with `detail` carrying what the core said.
+    status: str
+    detail: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -690,6 +759,7 @@ def _check_fits(runtime: Runtime, cpu: Core, image: firmware.Image) -> None:
         if cpu.in_range(segment.address, len(segment.data)):
             continue
         raise BoardRunError(
+            "outside-the-board-map",
             f"{runtime.board} ({runtime.chip}) maps nothing at "
             f"0x{segment.address:08x}..0x{segment.end:08x}, where this "
             f"{image.format} image's {len(segment.data)}-byte segment loads"
@@ -714,6 +784,7 @@ def _place(
             return found
         reasons.append(found)
     raise BoardRunError(
+        "no-vector-table",
         f"{runtime.board}: no vector table this board could enter. Tried "
         + "; ".join(reasons)
         + ". Pass vector_table= if the image is linked somewhere else"
@@ -741,6 +812,11 @@ class BoardSession:
         self.cpu = cpu
         self.image = image
         self.placement = placement
+        #: "running" until the core refuses an instruction, then "stopped".
+        #: A program that faults is a fact about the program, not a failure of
+        #: this layer, so it is recorded here and reported rather than raised.
+        self.status = "running"
+        self.detail = ""
 
     @property
     def board(self) -> str:
@@ -751,9 +827,113 @@ class BoardSession:
         return self.runtime.chip
 
     def step(self, count: int = 1) -> None:
-        """`count` instructions, or raise from the core saying why not."""
+        """`count` instructions, or raise from the core saying why not.
+
+        Raises, unlike `run`. A caller stepping one instruction at a time is
+        watching for the stop and wants the traceback; a caller asking for
+        twenty thousand wants the answer.
+        """
         for _ in range(count):
             self.cpu.step()
+
+    def run(self, budget: int) -> RunResult:
+        """Up to `budget` instructions, stopping where the core does.
+
+        A fault is **reported, not raised**. A program running off into
+        unmapped memory is a fact about that program, and the message the core
+        composed -- which access, at which address, from which instruction --
+        is the most useful thing anyone gets all day. Losing it to a traceback
+        in a request handler would be a waste.
+        """
+        if budget < 1:
+            raise BoardRunError(
+                "budget-refused", f"a budget of {budget} steps runs nothing"
+            )
+        if budget > MAX_RUN_STEPS:
+            raise BoardRunError(
+                "budget-refused",
+                f"a budget of {budget} exceeds {MAX_RUN_STEPS}; ask again to "
+                f"keep going. Without a ceiling one request pins the caller "
+                f"for as long as it likes",
+            )
+        if self.status != "running":
+            return RunResult(0, self.status, self.detail)
+
+        taken = 0
+        for _ in range(budget):
+            try:
+                self.cpu.step()
+            except self.runtime.abi.AbiError as error:
+                self.status = "stopped"
+                self.detail = str(error)
+                break
+            taken += 1
+        return RunResult(taken, self.status, self.detail)
+
+    def state(self, memory_at: int | None = None, memory_length: int = 64,
+              words: typing.Sequence[int] = ()) -> dict:
+        """Registers, a window of memory, and any single words asked for.
+
+        **Memory and peripherals are separate arguments because the core keeps
+        them separate.** A region -- flash, SRAM -- is bulk memory and reads a
+        block at a time. A memory-mapped register is one word that a
+        peripheral computes; `in_range` is false for it by design and
+        `read_block` refuses it. Watching a blink means reading SIO's
+        GPIO_OUT, so a state call that could only do the first would be unable
+        to show the thing the whole exercise is about.
+
+        `memory_at` defaults to the vector table, the one address this layer
+        knows is on the board. A window off the board is refused by name
+        rather than left to fault: asking about an address is not executing
+        one, and the answer should be a sentence.
+        """
+        if memory_length < 1 or memory_length > MAX_WINDOW_BYTES:
+            raise BoardRunError(
+                "window-refused",
+                f"a window of {memory_length} bytes is outside 1..{MAX_WINDOW_BYTES}",
+            )
+        if len(words) > MAX_WATCHED_WORDS:
+            raise BoardRunError(
+                "window-refused",
+                f"{len(words)} watched words is more than {MAX_WATCHED_WORDS}",
+            )
+        address = self.placement.vector_table if memory_at is None else memory_at
+        if not self.cpu.in_range(address, memory_length):
+            hint = (
+                " -- that is a mapped register, not a region, so ask for it "
+                "with words="
+                if self.cpu.is_mapped(address)
+                else ""
+            )
+            raise BoardRunError(
+                "window-outside-the-map",
+                f"{self.board} maps no region at 0x{address:08x}.."
+                f"0x{address + memory_length:08x}{hint}",
+            )
+
+        watched = []
+        for watch in words:
+            if not self.cpu.is_mapped(watch) and not self.cpu.in_range(watch, 4):
+                raise BoardRunError(
+                    "window-outside-the-map",
+                    f"{self.board} has nothing at 0x{watch:08x} to watch",
+                )
+            watched.append({"address": watch, "value": self.cpu.read_word(watch)})
+
+        registers = self.cpu.get_regs()
+        return {
+            "board": self.board,
+            "chip": self.chip,
+            "status": self.status,
+            "detail": self.detail,
+            "registers": registers.as_list(),
+            "apsr": registers.apsr,
+            "memory": {
+                "at": address,
+                "bytes": list(self.cpu.read_block(address, memory_length)),
+            },
+            "words": watched,
+        }
 
     def close(self) -> None:
         self.cpu.close()
@@ -836,6 +1016,7 @@ def load_firmware(
     # caught here, where the chip that was wanted is known.
     if not image.segments:
         raise BoardRunError(
+            "nothing-for-this-chip",
             f"{runtime.board}: this {image.format} holds nothing for a "
             f"{runtime.chip}. "
             + ("; ".join(image.notes) if image.notes else "It has no segments at all")

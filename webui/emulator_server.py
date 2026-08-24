@@ -33,11 +33,63 @@ Loading a program is *meant* to run arbitrary 8086 code -- that is the entire
 product -- so the boundary that matters is who can ask, not what they ask for.
 The 8086 has no way out of its one megabyte: it cannot open a file, reach a
 socket, or address a byte this process did not give it.
+
+## The board routes
+
+`/api/board/load`, `/api/board/run` and `/api/board/state` are the transport
+half of OH-32: a board name and an uploaded artefact in, a running core out.
+The same posture applies and applies harder -- this is the one route that
+takes a file from the caller -- so it is behind the same loopback bind, the
+same Origin check, and additionally a ceiling on the artefact and on the whole
+request body.
+
+The emulated core is no more dangerous than the 8086 above: a Cortex-M0+ here
+addresses only the regions its board description mapped, and has no file, no
+socket and no syscall. What the ceilings bound is this process's memory, not
+the guest's reach.
+
+`webui/api.py` holds every one of these operations and every refusal, for the
+same reason `webui/emulator.py` holds the 8086's: **the tests drive the
+session, not the transport.** The nine ways a load can be refused are tested
+there. What is tested *here* is that each of them arrives as itself, with its
+own status code, rather than as one flat 400.
+
+### What a page sends, and what comes back
+
+`webui/static/` is another ticket's, so this is written down rather than
+wired. The board list is already at `GET /api/boards`; a page offers what
+that returns and posts a name back.
+
+    POST /api/board/load
+      {"board": "XIAO-RP2040-DIP",
+       "image": "<base64 of the artefact>",
+       "base": "0x10000100",      // raw .bin only; ELF/UF2/HEX carry their own
+       "vector_table": "0x..."}   // optional, only if neither convention fits
+      -> 200 {board, chip, core, format, family, bytes, segments,
+              vector_table, stack_pointer, entry, notes}
+
+    POST /api/board/run     {"steps": 5000}
+      -> 200 {steps, status: "running"|"stopped", detail}
+
+    GET  /api/board/state?at=0x10000100&len=64&words=0xd0000010,0xd0000020
+      -> 200 {board, chip, status, detail, registers[16], apsr,
+              memory: {at, bytes[]}, words: [{address, value}]}
+
+`base` and `vector_table` accept a number or a `0x` string, because a text
+input hands over text. `words` is how a peripheral register is read: `at`/`len`
+is a window over regions, and a mapped register is not a region -- the refusal
+says so and names `words=` when someone tries.
+
+Every refusal answers `{"error": ..., "reason": ...}` where `reason` is one of
+`api.REASONS`, so a page can style the "build a core" case differently from
+the "your image is linked at the wrong address" case without parsing English.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import http.server
 import json
 import pathlib
@@ -47,7 +99,7 @@ import urllib.parse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from webui import emulator, targets  # noqa: E402
+from webui import api, emulator, firmware, targets  # noqa: E402
 from webui.boards import catalogue as board_catalogue  # noqa: E402
 
 DEFAULT_BIND = "127.0.0.1"
@@ -68,6 +120,44 @@ CONTENT_TYPES = {
 #: The largest program the API will accept, in bytes. The address space is a
 #: megabyte; anything larger is a mistake or an attempt to exhaust memory.
 MAX_PROGRAM_BYTES = 1 << 20
+
+#: The largest firmware artefact `/api/board/load` will accept. Sized from the
+#: boards in the catalogue rather than picked: the RP2040 has 2 MiB of flash
+#: and the largest part on the list has 4 MiB, so 8 MiB accepts any real image
+#: with room to spare and still bounds one request.
+MAX_IMAGE_BYTES = 8 << 20
+
+#: A ceiling on the whole request body, checked from `Content-Length` **before
+#: a byte is read**. Base64 inflates by four thirds, so this has to clear
+#: `MAX_IMAGE_BYTES` with the JSON around it; 16 MiB does.
+#:
+#: Added with the upload route. Without it a declared Content-Length of any
+#: size was allocated and read, which mattered little when every body was a
+#: small JSON object and matters now that one route exists to be handed a
+#: file.
+MAX_BODY_BYTES = 16 << 20
+
+#: Which HTTP status each of `api.REASONS` deserves.
+#:
+#: The distinction is the point of the endpoint, not decoration. **400** means
+#: the request or the artefact is wrong and the caller can fix it. **409**
+#: means this checkout cannot do it yet, and only building a core or writing a
+#: board description will change that -- a different person doing a different
+#: thing on a different day. **404** means the board named is not here at all.
+#:
+#: Collapsing these into one 400 would tell someone to fix their firmware when
+#: what they actually need is `python tools/build_core.py`.
+BOARD_ERROR_STATUS = {
+    "unknown-board": 404,
+    "core-not-built": 409,
+    "chip-not-described": 409,
+    "nothing-for-this-chip": 400,
+    "outside-the-board-map": 400,
+    "no-vector-table": 400,
+    "budget-refused": 400,
+    "window-refused": 400,
+    "window-outside-the-map": 400,
+}
 
 
 class ApiError(Exception):
@@ -146,10 +236,149 @@ class Selection:
         self.name = name if name is not None else DRIVING
 
 
+class BoardSlot:
+    """The board session the page is watching, or none yet.
+
+    Separate from the `emulator.Session` above and deliberately so: that is
+    the i8086 this server was written around, and a board is a different core
+    with a different state shape. One board at a time, because the page shows
+    one.
+    """
+
+    def __init__(self) -> None:
+        self.session: api.BoardSession | None = None
+
+    def replace(self, loaded: api.BoardSession) -> None:
+        """Adopt a session, releasing the one it displaces.
+
+        A `BoardSession` owns a native allocation, so dropping the reference
+        leaks it until the process exits. Loading a second image is the most
+        ordinary thing a person does here, which would make that a leak per
+        request rather than a rare one.
+        """
+        if self.session is not None:
+            self.session.close()
+        self.session = loaded
+
+    def require(self) -> api.BoardSession:
+        if self.session is None:
+            raise ApiError(
+                "no board is loaded; POST /api/board/load with a board name "
+                "and a base64 image first"
+            )
+        return self.session
+
+
+def _optional_int(payload: dict[str, object], name: str) -> int | None:
+    """An integer field that may be absent, and may arrive as a hex string.
+
+    A file-input page reads `0x10000100` out of a text box as text. Accepting
+    that spelling saves every caller a parse; refusing anything that is not an
+    int or a string keeps `int(value, 0)` from being handed a list.
+    """
+    value = payload.get(name)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ApiError(f"{name} must be an integer or a hex string, got {value!r}")
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value, 0)
+    except ValueError as exc:
+        raise ApiError(f"{name}: {exc}") from exc
+
+
+def _image_bytes(payload: dict[str, object]) -> bytes:
+    """The uploaded artefact, decoded and bounded.
+
+    `validate=True` so that base64 with rubbish in it is refused here rather
+    than silently discarded and handed to a firmware parser as a short file.
+    """
+    encoded = payload.get("image")
+    if not isinstance(encoded, str):
+        raise ApiError("image must be a base64 string of the artefact's bytes")
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ApiError(f"image is not valid base64: {exc}") from exc
+    if not data:
+        raise ApiError("image is empty")
+    if len(data) > MAX_IMAGE_BYTES:
+        raise ApiError(
+            f"{len(data)} bytes is larger than the {MAX_IMAGE_BYTES}-byte ceiling"
+        )
+    return data
+
+
+def handle_board_api(boards: BoardSlot, route: str,
+                     query: dict[str, list[str]],
+                     payload: dict[str, object]) -> dict[str, object]:
+    """Three routes: put an image on a board, run it, look at it.
+
+    Thin, like everything else here. `webui/api.py` holds the behaviour and
+    the refusals; this decodes a request into a call and the answer into JSON.
+    A bug that can only be found through HTTP is a bug in these thirty lines.
+
+    The board list itself is already at `/api/boards`, so nothing here has to
+    enumerate anything: a page offers what that returns and posts a name back.
+    """
+    if route == "/api/board/load":
+        board = payload.get("board")
+        if not isinstance(board, str):
+            raise ApiError(
+                "board must be a string naming a board from /api/boards"
+            )
+        loaded = api.load_firmware(
+            board,
+            _image_bytes(payload),
+            base=_optional_int(payload, "base"),
+            vector_table=_optional_int(payload, "vector_table"),
+        )
+        boards.replace(loaded)
+        return loaded.as_json()
+
+    if route == "/api/board/run":
+        result = boards.require().run(_int(payload, "steps", 10_000))
+        return {"steps": result.steps, "status": result.status,
+                "detail": result.detail}
+
+    if route == "/api/board/state":
+        at = query.get("at")
+        # `words=` is comma-separated because a peripheral view watches a
+        # handful of fixed addresses and repeating the key for each would make
+        # the query string harder to read than the thing it describes.
+        watched = [
+            int(word, 0)
+            for group in query.get("words", [])
+            for word in group.split(",")
+            if word
+        ]
+        return boards.require().state(
+            memory_at=int(at[0], 0) if at else None,
+            memory_length=int(query.get("len", ["64"])[0], 0),
+            words=watched,
+        )
+
+    raise ApiError(f"no such route: {route}")
+
+
 def handle_api(session: emulator.Session, selection: Selection, route: str,
                query: dict[str, list[str]],
-               payload: dict[str, object]) -> dict[str, object]:
-    """The whole API. Adding a route means adding it here, on purpose."""
+               payload: dict[str, object],
+               boards: BoardSlot | None = None) -> dict[str, object]:
+    """The whole API. Adding a route means adding it here, on purpose.
+
+    `boards` is last and optional so that a caller with no board slot -- a
+    test reaching for one of the i8086 routes -- keeps working unchanged. The
+    board routes refuse rather than inventing a slot, because a slot invented
+    per call would hold a core nobody could step twice.
+    """
+    if route.startswith("/api/board/"):
+        if boards is None:
+            raise ApiError(f"{route} needs a board slot; this caller has none")
+        return handle_board_api(boards, route, query, payload)
+
     if route == "/api/targets":
         listing = []
         for target in targets.catalogue():
@@ -233,6 +462,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     session: emulator.Session
     selection: Selection
+    boards: BoardSlot
     lock: threading.Lock
     allowed_origins: frozenset[str]
 
@@ -267,6 +497,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(404, b"not found", "text/plain; charset=utf-8")
             return
         length = int(self.headers.get("Content-Length") or 0)
+        if length > MAX_BODY_BYTES:
+            # Checked from the header, before a byte is allocated. Reading a
+            # declared length and then judging it is the thing this avoids.
+            self._json(413, {"error": f"body of {length} bytes exceeds "
+                                      f"{MAX_BODY_BYTES}"})
+            return
         raw = self.rfile.read(length) if length else b"{}"
         try:
             payload = json.loads(raw or b"{}")
@@ -286,8 +522,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with self.lock:
                 self._json(
                     200,
-                    handle_api(self.session, self.selection, route, query, payload),
+                    handle_api(self.session, self.selection, route, query,
+                               payload, self.boards),
                 )
+        except api.BoardRunError as exc:
+            # **Each refusal reaches the caller as itself.** Flattening these
+            # into one 400 would lose the difference between "build a core"
+            # and "your image is linked at the wrong address", which is the
+            # only difference that matters to the person reading it.
+            self._json(
+                BOARD_ERROR_STATUS.get(exc.reason, 400),
+                {"error": str(exc), "reason": exc.reason},
+            )
+        except firmware.FirmwareError as exc:
+            self._json(400, {"error": str(exc), "reason": "unreadable-artefact"})
         except (ApiError, emulator.EmulatorError, ValueError) as exc:
             # A bad request, named. Not a 500: nothing here is broken.
             self._json(400, {"error": str(exc)})
@@ -336,6 +584,7 @@ def build_server(bind: str, port: int,
 
     Bound.session = live
     Bound.selection = Selection()
+    Bound.boards = BoardSlot()
     Bound.lock = threading.Lock()
     server = http.server.ThreadingHTTPServer((bind, port), Bound)
 

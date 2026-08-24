@@ -436,3 +436,330 @@ def test_a_refusal_leaves_the_next_load_working():
             api.load_firmware(BOARD, blink_bytes(), base=0x42000020)
     with api.load_firmware(BOARD, blink_bytes(), base=BLINK_LOAD) as session:
         assert len(watch_led(session)) >= 2
+
+
+# --- running, stopping, and looking ---------------------------------------
+
+
+def test_a_run_reports_where_it_got_to():
+    needs_core()
+    with api.load_firmware(BOARD, blink_bytes(), base=BLINK_LOAD) as session:
+        result = session.run(5000)
+    assert result.steps == 5000
+    assert result.status == "running", "a blink loops forever, so it never ends"
+    assert result.detail == ""
+
+
+def test_a_fault_is_reported_rather_than_raised():
+    """A program running off into memory that is not there is a fact about
+    that program. The core's message names the access, the address and the
+    instruction, and losing it to a traceback in a request handler would be a
+    waste of the most useful sentence anyone gets all day."""
+    needs_core()
+    cases = (
+        # A reset vector into the boot ROM stub, which is mapped and
+        # deliberately not executable -- see webui/boards/rp2040.py.
+        (0x00000001, "not executable"),
+        # And one that lands in erased flash, where 0xFFFF is not an encoding.
+        (BLINK_LOAD + 0x700 + 1, "no implementation"),
+    )
+    for reset, expected in cases:
+        image = struct.pack("<II", 0x20042000, reset)
+        with api.load_firmware(BOARD, image, base=BLINK_LOAD) as session:
+            result = session.run(50)
+        assert result.status == "stopped", reset
+        assert expected in result.detail, result.detail
+        assert "0x" in result.detail, "the address that caused it"
+
+
+def test_a_stopped_board_stays_stopped():
+    needs_core()
+    image = struct.pack("<II", 0x20042000, 0x00000001)
+    with api.load_firmware(BOARD, image, base=BLINK_LOAD) as session:
+        first = session.run(50)
+        again = session.run(50)
+    assert first.status == "stopped"
+    assert again == api.RunResult(0, "stopped", first.detail)
+
+
+def test_a_run_budget_has_to_be_usable():
+    needs_core()
+    with api.load_firmware(BOARD, blink_bytes(), base=BLINK_LOAD) as session:
+        for budget in (0, -1, api.MAX_RUN_STEPS + 1):
+            with pytest.raises(api.BoardRunError) as caught:
+                session.run(budget)
+            assert caught.value.reason == "budget-refused"
+            assert str(budget) in str(caught.value)
+
+
+def test_state_shows_the_registers_and_a_window_of_memory():
+    needs_core()
+    with api.load_firmware(BOARD, blink_bytes(), base=BLINK_LOAD) as session:
+        at_reset = session.state()
+        session.run(5000)
+        later = session.state()
+    assert at_reset["registers"][13] == 0x20042000, "SP"
+    assert at_reset["registers"][15] == BLINK_LOAD + 8, "PC at the reset handler"
+    assert at_reset["memory"]["at"] == BLINK_LOAD, "the vector table by default"
+    assert bytes(at_reset["memory"]["bytes"][:4]) == struct.pack("<I", 0x20042000)
+    assert later["registers"][15] != at_reset["registers"][15], "it moved"
+    assert later["status"] == "running"
+
+
+def test_a_memory_window_off_the_board_is_refused_by_name():
+    """Asking about an address is not the same as executing one, so this is a
+    named refusal rather than a fault."""
+    needs_core()
+    with api.load_firmware(BOARD, blink_bytes(), base=BLINK_LOAD) as session:
+        with pytest.raises(api.BoardRunError) as caught:
+            session.state(memory_at=0x42000020)
+        assert caught.value.reason == "window-outside-the-map"
+        assert "0x42000020" in str(caught.value)
+
+        for length in (0, api.MAX_WINDOW_BYTES + 1):
+            with pytest.raises(api.BoardRunError) as caught:
+                session.state(memory_length=length)
+            assert caught.value.reason == "window-refused"
+
+
+def test_every_refusal_has_a_reason_and_every_reason_is_documented():
+    """A refusal that reached a caller with an unlisted slug would be one the
+    transport had no status for."""
+    seen = set()
+    for board in catalogue.catalogue():
+        if board.runnable:
+            continue
+        with pytest.raises(api.BoardRunError) as caught:
+            api.runtime_for(board.name)
+        seen.add(caught.value.reason)
+    assert seen <= set(api.REASONS), seen - set(api.REASONS)
+    assert {"core-not-built", "chip-not-described"} <= seen
+
+    with pytest.raises(ValueError, match="unknown refusal reason"):
+        api.BoardRunError("made-up", "message")
+
+
+# --- over HTTP, on a real loopback socket ---------------------------------
+#
+# `webui/emulator.py`'s suite says why there is so little here: the behaviour
+# and every refusal are tested above, against the session. What is worth
+# testing at the boundary is only what exists at the boundary -- the Origin
+# check on an upload, the body ceiling, and that each of the nine refusals
+# arrives as itself with its own status rather than as one flat 400.
+
+import base64
+import http.client
+import json
+import threading
+import urllib.error
+import urllib.request
+
+from webui import emulator_server
+
+
+@pytest.fixture
+def live_server():
+    """A real server on a real loopback port, stopped afterwards."""
+    needs_core()
+    try:
+        server = emulator_server.build_server("127.0.0.1", 0)
+    except Exception as error:  # pragma: no cover - environment, not logic
+        pytest.skip(f"cannot start the server: {error}")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address[:2]
+        yield f"http://{host}:{port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def post(base_url: str, path: str, body: dict, origin: str | None = None):
+    request = urllib.request.Request(
+        base_url + path, data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"}, method="POST")
+    if origin is not None:
+        request.add_header("Origin", origin)
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.loads(response.read())
+
+
+def get(base_url: str, path: str):
+    with urllib.request.urlopen(base_url + path, timeout=10) as response:
+        return json.loads(response.read())
+
+
+def upload(image: bytes = None, **extra) -> dict:
+    body = {"image": base64.b64encode(blink_bytes() if image is None else image).decode()}
+    body.update(extra)
+    return body
+
+
+def test_a_board_and_an_image_load_over_http(live_server):
+    """The headline through the transport the page will use."""
+    report = post(live_server, "/api/board/load",
+                  upload(board=BOARD, base=hex(BLINK_LOAD)))
+    assert report["board"] == BOARD
+    assert report["chip"] == "RP2040"
+    assert report["vector_table"] == BLINK_LOAD
+    assert report["stack_pointer"] == 0x20042000
+    assert report["bytes"] == BLINK.stat().st_size
+
+
+def test_a_loaded_board_runs_and_can_be_looked_at_over_http(live_server):
+    post(live_server, "/api/board/load", upload(board=BOARD, base=BLINK_LOAD))
+    out = rp2040.SIO + rp2040.SIO_GPIO_OUT
+    oe = rp2040.SIO + rp2040.SIO_GPIO_OE
+
+    before = get(live_server, "/api/board/state")
+    result = post(live_server, "/api/board/run", {"steps": 5000})
+    after = get(live_server, f"/api/board/state?words={hex(out)},{hex(oe)}")
+
+    assert result == {"steps": 5000, "status": "running", "detail": ""}
+    assert before["registers"][15] == BLINK_LOAD + 8
+    assert after["registers"][15] != before["registers"][15]
+    # The whole point, read back through the transport: the pin is an output
+    # and the blink has driven it.
+    assert [w["address"] for w in after["words"]] == [out, oe]
+    assert after["words"][1]["value"] & LED, "GP25 is an output"
+    assert after["memory"]["at"] == BLINK_LOAD, "the window still defaults to the image"
+
+
+def test_a_peripheral_address_is_not_a_memory_window(live_server):
+    """`in_range` is false for a mapped register by design and `read_block`
+    refuses one, so a window over SIO would fault. The refusal says so and
+    names the argument that does work."""
+    post(live_server, "/api/board/load", upload(board=BOARD, base=BLINK_LOAD))
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        get(live_server, f"/api/board/state?at={hex(rp2040.SIO + rp2040.SIO_GPIO_OUT)}")
+    answer = json.loads(caught.value.read())
+    assert answer["reason"] == "window-outside-the-map"
+    assert "words=" in answer["error"]
+
+
+def test_an_upload_from_another_origin_is_refused(live_server):
+    """This is the route that takes a file, so it is the one that matters. A
+    page you happen to be visiting can POST to loopback; the Origin check is
+    what stops it driving the board."""
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        post(live_server, "/api/board/load",
+             upload(board=BOARD, base=BLINK_LOAD), origin="http://evil.example")
+    assert caught.value.code == 403
+
+    # And nothing was loaded by the attempt.
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        get(live_server, "/api/board/state")
+    assert json.loads(refused.value.read())["error"].startswith("no board is loaded")
+
+    # The server's own origin is still accepted, so the check is not simply off.
+    assert post(live_server, "/api/board/load",
+                upload(board=BOARD, base=BLINK_LOAD),
+                origin=live_server)["board"] == BOARD
+
+
+def test_each_refusal_arrives_as_itself(live_server):
+    """The part worth having. One flat 400 would tell someone to fix their
+    firmware when what they need is `python tools/build_core.py`."""
+    wrong_family = uf2_block(0x42000020, blink_bytes(), ESP32C3_FAMILY, 0, 1)
+    cases = (
+        (upload(board="Raspberry Pi Pico", base=BLINK_LOAD), 404, "unknown-board"),
+        (upload(board="XIAO-RP2350-DIP", base=BLINK_LOAD), 409, "core-not-built"),
+        (upload(board="XIAO-ESP32-C3-DIP", base=BLINK_LOAD), 409, "chip-not-described"),
+        (upload(board=BOARD, base=0x42000020), 400, "outside-the-board-map"),
+        (upload(b"\x00" * 64, board=BOARD, base=0x10000000), 400, "no-vector-table"),
+        (upload(wrong_family, board=BOARD), 400, "nothing-for-this-chip"),
+        (upload(board=BOARD), 400, "unreadable-artefact"),
+    )
+    for body, status, reason in cases:
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            post(live_server, "/api/board/load", body)
+        answer = json.loads(caught.value.read())
+        assert caught.value.code == status, (reason, answer)
+        assert answer["reason"] == reason, answer
+        assert answer["error"], "and the message that carries the values"
+
+
+def test_every_reason_the_api_can_raise_has_a_status():
+    """A refusal with no entry here would arrive as a bare 400 and lose the
+    distinction the mapping exists to keep."""
+    assert set(api.REASONS) == set(emulator_server.BOARD_ERROR_STATUS)
+
+
+def test_an_oversized_body_is_refused_from_its_header(live_server):
+    """Judged from Content-Length before a byte is allocated. Reading a
+    declared length and then deciding it was too big is the failure mode this
+    avoids, and this is the one route anybody uploads a file to."""
+    host, port = live_server.removeprefix("http://").split(":")
+    connection = http.client.HTTPConnection(host, int(port), timeout=10)
+    connection.putrequest("POST", "/api/board/load")
+    connection.putheader("Content-Type", "application/json")
+    connection.putheader("Content-Length", str(emulator_server.MAX_BODY_BYTES + 1))
+    connection.endheaders()
+    connection.send(b"{}")          # far less than declared, and never read
+    response = connection.getresponse()
+    body = json.loads(response.read())
+    connection.close()
+    assert response.status == 413
+    assert str(emulator_server.MAX_BODY_BYTES) in body["error"]
+
+
+def test_an_upload_that_is_not_base64_is_refused(live_server):
+    """`validate=True`, so rubbish is refused here rather than quietly
+    discarded and handed to a firmware parser as a short file."""
+    for image in ("not base64 at all!!", "", 17):
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            post(live_server, "/api/board/load", {"board": BOARD, "image": image})
+        assert caught.value.code == 400
+        assert "image" in json.loads(caught.value.read())["error"]
+
+
+def test_an_image_larger_than_any_board_is_refused(live_server):
+    oversized = b"\x00" * (emulator_server.MAX_IMAGE_BYTES + 1)
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        post(live_server, "/api/board/load", upload(oversized, board=BOARD))
+    assert caught.value.code == 400
+    assert str(emulator_server.MAX_IMAGE_BYTES) in json.loads(caught.value.read())["error"]
+
+
+def test_running_or_looking_before_loading_says_what_to_do_first(live_server):
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        post(live_server, "/api/board/run", {"steps": 10})
+    assert caught.value.code == 400
+    assert "POST /api/board/load" in json.loads(caught.value.read())["error"]
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        get(live_server, "/api/board/state")
+    assert caught.value.code == 400
+    assert "POST /api/board/load" in json.loads(caught.value.read())["error"]
+
+
+def test_a_second_load_releases_the_first_core():
+    """A BoardSession owns a native allocation, and loading a second image is
+    the most ordinary thing a person does here. Tested against the contract --
+    `replace` calls `close` -- rather than by reaching into ctypes."""
+    class Closes:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    slot = emulator_server.BoardSlot()
+    first, second = Closes(), Closes()
+    slot.replace(first)
+    slot.replace(second)
+    assert first.closed, "the displaced session was not released"
+    assert not second.closed
+    assert slot.session is second
+
+
+def test_the_board_routes_refuse_a_caller_with_no_slot():
+    """`handle_api` keeps `boards` optional so the i8086 callers that predate
+    it still work. A board route reached that way refuses rather than making
+    a slot nobody could step twice."""
+    with pytest.raises(emulator_server.ApiError, match="needs a board slot"):
+        emulator_server.handle_api(
+            None, emulator_server.Selection(), "/api/board/run", {}, {}
+        )
