@@ -213,6 +213,93 @@ async function runContinuously() {
   }
 }
 
+// --- targets ------------------------------------------------------------------
+//
+// The selector and the "Runnable now" panel are both built from /api/targets,
+// which reads `core/` and `build/lib/` on every request. Nothing about which
+// targets exist is written down in this file, for the same reason the board
+// list is generated rather than maintained: a hand-kept list of what works is
+// wrong the moment someone adds a core or deletes a build, and wrong silently.
+
+let TARGETS = [];
+
+async function fillTargets() {
+  const data = await api("/api/targets");
+  TARGETS = data.targets;
+
+  const select = $("target");
+  select.replaceChildren(...TARGETS.map((target) => {
+    const option = document.createElement("option");
+    option.value = target.name;
+    // The status rides in the label rather than only in a colour, so the
+    // reason a target cannot be picked survives being read aloud, printed,
+    // or looked at by someone who cannot distinguish the two greens.
+    option.textContent = target.selectable
+      ? target.name
+      : `${target.name} — ${target.status}`;
+    option.disabled = !target.selectable;
+    option.title = target.detail;
+    return option;
+  }));
+
+  if (TARGETS.length === 0) {
+    const option = document.createElement("option");
+    option.textContent = "no cores built";
+    option.disabled = true;
+    select.replaceChildren(option);
+  }
+  if (data.selected) select.value = data.selected;
+  select.disabled = TARGETS.filter((t) => t.selectable).length < 2;
+  // Disabled, not hidden. With one core there is nothing to switch to, and a
+  // control that disappears reads as a missing feature rather than as an
+  // accurate report of a repository with one core in it.
+  select.title = select.disabled
+    ? "one runnable target; the selector opens when a second core is built"
+    : "choose which core to drive";
+
+  renderRunnable();
+}
+
+function renderRunnable() {
+  const ready = TARGETS.filter((t) => t.selectable).length;
+  $("runnable-strip").replaceChildren(
+    stripCell(String(ready), "runnable now", ready > 0 ? "is-ok" : "is-stop"),
+    stripCell(String(TARGETS.length - ready), "present but unbuilt",
+              TARGETS.length - ready > 0 ? "is-warn" : ""),
+    stripCell(String(TARGETS.length), "cores in core/", ""),
+  );
+
+  $("runnable-rows").replaceChildren(...TARGETS.map((target) => {
+    const row = document.createElement("tr");
+    const name = document.createElement("td");
+    name.className = "chip";
+    name.textContent = target.name;
+    const status = document.createElement("td");
+    const pill = span(
+      target.selectable ? "pill p-ok" : "pill p-warn",
+      target.selectable ? "RUNNABLE" : target.status.toUpperCase(),
+    );
+    status.append(pill);
+    const detail = document.createElement("td");
+    detail.className = "note-cell";
+    detail.textContent = target.detail;
+    row.append(name, status, detail);
+    return row;
+  }));
+}
+
+function stripCell(number, key, extra) {
+  const cell = document.createElement("div");
+  cell.className = extra ? `cell ${extra}` : "cell";
+  cell.append(span("n", number), span("k", key));
+  return cell;
+}
+
+async function selectTarget(name) {
+  await api("/api/target", { name });
+  await fillTargets();
+}
+
 // --- wiring -------------------------------------------------------------------
 
 async function fillSamples() {
@@ -281,6 +368,8 @@ function wire() {
     await refresh();
   });
   $("load").addEventListener("click", () => loadSelected().catch(report));
+  $("target").addEventListener("change", (event) =>
+    selectTarget(event.target.value).catch(report));
   $("theme").addEventListener("click", () => {
     applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
   });
@@ -312,4 +401,8 @@ function report(error) {
 
 applyTheme(startingTheme());
 wire();
+// Targets first, and on its own chain: the samples are an i8086 thing, but
+// which targets exist is true whether or not a sample ever loads. Chaining
+// them would leave the selector empty whenever a sample failed.
+fillTargets().catch(report);
 fillSamples().then(loadSelected).catch(report);

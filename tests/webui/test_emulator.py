@@ -339,7 +339,9 @@ def test_only_the_four_declared_extensions_are_served():
 
 def test_an_unknown_route_is_a_named_error(session):
     with pytest.raises(emulator_server.ApiError, match="no such route"):
-        emulator_server.handle_api(session, "/api/nope", {}, {})
+        emulator_server.handle_api(
+            session, emulator_server.Selection(), "/api/nope", {}, {}
+        )
 
 
 @pytest.fixture

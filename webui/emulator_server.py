@@ -47,7 +47,7 @@ import urllib.parse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from webui import emulator  # noqa: E402
+from webui import emulator, targets  # noqa: E402
 
 DEFAULT_BIND = "127.0.0.1"
 DEFAULT_PORT = 8088
@@ -103,9 +103,42 @@ def _int(payload: dict[str, object], name: str, default: int) -> int:
     return value
 
 
-def handle_api(session: emulator.Session, route: str, query: dict[str, list[str]],
+class Selection:
+    """Which target the UI is pointed at, for the life of the server.
+
+    A class rather than a bare string because the handler shares one of these
+    across every request, exactly as it shares the session and the lock. It
+    holds a name and not a `Target`, because a target's *status* is read from
+    disk each time it is asked for -- deleting `build/lib/` under a running
+    server has to be visible, and a cached `Target` would keep reporting
+    `ready` at a library that is no longer there.
+    """
+
+    def __init__(self, name: str | None = None) -> None:
+        self.name = name if name is not None else targets.default_name()
+
+
+def handle_api(session: emulator.Session, selection: Selection, route: str,
+               query: dict[str, list[str]],
                payload: dict[str, object]) -> dict[str, object]:
     """The whole API. Adding a route means adding it here, on purpose."""
+    if route == "/api/targets":
+        return {
+            "targets": [t.as_json() for t in targets.catalogue()],
+            "selected": selection.name,
+        }
+
+    if route == "/api/target":
+        name = payload.get("name")
+        if not isinstance(name, str):
+            raise ApiError("name must be a string naming a core under core/")
+        try:
+            chosen = targets.require_selectable(name)
+        except targets.TargetError as exc:
+            raise ApiError(str(exc)) from exc
+        selection.name = chosen.name
+        return {"selected": selection.name, "target": chosen.as_json()}
+
     if route == "/api/samples":
         return {"samples": [
             {"name": s.name, "hex": s.hex, "watch": s.watch,
@@ -155,6 +188,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     """One session, shared by every request, guarded by one lock."""
 
     session: emulator.Session
+    selection: Selection
     lock: threading.Lock
     allowed_origins: frozenset[str]
 
@@ -206,7 +240,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
              payload: dict[str, object]) -> None:
         try:
             with self.lock:
-                self._json(200, handle_api(self.session, route, query, payload))
+                self._json(
+                    200,
+                    handle_api(self.session, self.selection, route, query, payload),
+                )
         except (ApiError, emulator.EmulatorError, ValueError) as exc:
             # A bad request, named. Not a 500: nothing here is broken.
             self._json(400, {"error": str(exc)})
@@ -254,6 +291,7 @@ def build_server(bind: str, port: int,
         pass
 
     Bound.session = live
+    Bound.selection = Selection()
     Bound.lock = threading.Lock()
     server = http.server.ThreadingHTTPServer((bind, port), Bound)
 

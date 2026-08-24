@@ -34,6 +34,16 @@
     <button class="tab" id="tab-targets" role="tab" aria-selected="false">Targets</button>
   </div>
 
+  <!-- The target selector is outside `only-emulator` on purpose: which machine
+       you are driving is true in both views, and hiding it on the Targets tab
+       would hide it exactly where someone went looking for it.
+
+       Its options are built from /api/targets, never from this file. A core
+       that is present but unbuilt appears here `disabled`, carrying the reason
+       — a target that silently vanished because someone deleted build/ is the
+       one failure this control exists to prevent. -->
+  <select id="target" aria-label="Emulation target"></select>
+
   <!-- `display: contents` so these still participate in the toolbar's flex
        layout and gap; wrapping them in a normal span would collapse their
        spacing into one item. -->
@@ -88,6 +98,39 @@
        would throw that away. Hence CONFLICT and TOOLCHAIN ONLY as first-class
        states rather than a confident single verdict per row. -->
   <div id="targets">
+
+    <!-- The one panel here that is NOT static. Everything below is a reading
+         of docs/architectures.md — verdicts about what emulating a part would
+         take. This one answers the different, smaller question the Run button
+         actually depends on: which of these can you run today?
+
+         Eighteen rows of research beside a Run button reads as eighteen things
+         you could run, and exactly one of them is true. That gap is what this
+         panel closes, and it is filled from /api/targets so it cannot drift
+         from what is on disk. -->
+    <section class="panel" id="runnable">
+      <h2>Runnable now <span class="note">computed from core/ and build/lib/</span></h2>
+      <div class="prose">
+        <p>A target is <strong>runnable</strong> when it has a directory under
+          <code>core/</code> with a <code>CMakeLists.txt</code> — the same test
+          <code>tools/build_core.py</code> applies — <em>and</em> that core has been
+          built. Both halves are read from disk on every request, so deleting
+          <code>build/lib/</code> shows up here rather than making a target quietly
+          disappear.</p>
+      </div>
+      <div class="strip" id="runnable-strip"></div>
+      <div class="scroll"><table class="grid">
+        <thead><tr><th>Target</th><th>Status</th><th>Detail</th></tr></thead>
+        <tbody id="runnable-rows"></tbody>
+      </table></div>
+      <div class="prose bordered">
+        <p><strong>Every chip in the tables below has no core directory and is not
+          runnable.</strong> They are surveyed, not started — that is what those
+          tables are for. They are deliberately absent from the selector above
+          rather than listed and greyed: an option you can never pick is a promise
+          the repository has not made.</p>
+      </div>
+    </section>
 
     <section class="panel">
       <h2>Emulation targets <span class="note">docs/architectures.md</span></h2>

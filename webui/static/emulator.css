@@ -109,8 +109,16 @@ button, select {
   padding: 5px 12px;
   cursor: pointer;
 }
-button:hover:not(:disabled), select:hover { border-color: var(--muted); }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
+/* `:not(:disabled)` on the select too. It was only on the button, so a
+   disabled select still lit up on hover -- which is the one moment the control
+   is claiming to be usable and is not. */
+button:hover:not(:disabled), select:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled, select:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* A disabled <option> inside an enabled selector: present, unpickable, and
+   still readable. The default in several browsers is a grey close enough to
+   the background to look like a rendering fault. */
+option:disabled { color: var(--muted); }
 button:focus-visible, select:focus-visible, input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
