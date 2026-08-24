@@ -1,7 +1,7 @@
 ---
 id: OH-39
 title: A SAMD21 board description, and a blink that proves it
-status: in-review
+status: done
 priority: P1
 created: '2026-08-25'
 touches:
@@ -30,3 +30,5 @@ Done when a real compiled SAMD21 image is watched toggling a pin, SAMD21 is in F
 **Note 2026-08-25:** The handoff's design guess was wrong on one point, and the vendor header is what caught it. HANDOFF_2026-08-25 6.1 said PORT's DIRSET/OUTSET/OUTCLR/OUTTGL are 'write-only registers like SIO's, so use map_alias(..., readable=False)'. Microchip's generated CMSIS header marks all six __IO ... (R/W 32), and marks WRCONFIG __O ... ( /W 32) in the same struct -- so the header does draw the write-only distinction and declines to draw it for these. Modelled readable, with the departure and its evidence written down in install_port's docstring and pinned by test_the_set_registers_read_back_their_target_unlike_sios.
 
 Residual, stated rather than buried: no code in the fetched tree ever READS these registers -- all ~20 uses across the Arduino core, the bootloaders and ASF's port.h driver are writes. So the read-back value rests on the header's access type and is exercised by no driver here.
+
+**Note 2026-08-25:** Complete and committed at bdcc8c9. webui/boards/samd21.py, a 48-byte compiled blink toggling PA17 45 times at a constant 453-instruction period, SAMD21 added to FIRMWARE_VERIFIED with the pinned test updated deliberately, and the Boards panel's hand-written 'only one board has actually been watched' sentence replaced with one derived from the register. Seven isolated mutations of the board file each caught by the test named for them. Closing so it stops holding webui/static/*, which OH-43 now needs.
