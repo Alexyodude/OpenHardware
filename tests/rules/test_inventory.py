@@ -387,7 +387,7 @@ def test_an_unfetched_vendor_tree_is_unsearchable_not_absent(tmp_path):
 
     report = collect_assets(boards, tmp_path / "never-fetched")[0]
     assert report.schematic.evidence is Evidence.UNSEARCHABLE
-    assert "get_seeed_hardware.sh" in report.schematic.detail, (
+    assert "get_board_sources.py" in report.schematic.detail, (
         "the cell must say how to make the search possible"
     )
 
@@ -464,9 +464,10 @@ def test_an_asset_in_a_directory_named_for_the_footprint_counts(tmp_path):
 def test_a_file_in_the_index_but_not_on_disk_is_indexed_not_absent(tmp_path):
     """A sparse checkout must not be read as a vendor publishing nothing.
 
-    `tools/get_seeed_hardware.sh` fetches the KiCad library and `document/`
-    and nothing else, because the full tree is ~196 MB of marketing PNGs. A
-    disk-only search would call a real unfetched schematic absent.
+    `python tools/get_board_sources.py seeed-xiao` fetches the KiCad library
+    and `document/` and nothing else, because the full tree is ~196 MB of
+    marketing PNGs. A disk-only search would call a real unfetched schematic
+    absent.
     """
     boards = tmp_path / "boards"
     boards.mkdir()
@@ -657,3 +658,60 @@ def test_the_report_says_which_boards_are_incomplete():
     assert incomplete, "if every board is complete, this test has outlived its point"
     for report in incomplete:
         assert report.name in text, f"{report.name} is graded but not rendered"
+
+
+def test_the_vendor_dir_is_the_registry_s_own_path():
+    """`VENDOR_DIR` must equal what `tools/board_sources.py` computes.
+
+    The comment beside `VENDOR_DIR` used to promise it would become a lookup
+    once OH-24 replaced the fetcher with a registry. OH-24 landed and OH-40
+    retired the script, so the promise came due — but a lookup at *import*
+    time would turn a missing registry entry into a module that will not
+    load, and this one is imported by every `--markdown` run.
+
+    So the path stays spelled out and this binds it instead. `Source.name` is
+    documented as stable precisely because other tools hold paths built from
+    it; if that ever stops being true, this fails rather than the asset
+    search quietly reporting `unsearchable` for a tree that is sitting there.
+    """
+    from tools.board_sources import source
+
+    assert VENDOR_DIR == source("seeed-xiao").dest(pathlib.Path("."))
+
+
+def test_nothing_tells_anyone_to_run_the_retired_fetcher():
+    """OH-40's done-criterion, in the form that is actually true.
+
+    The ticket says "nothing outside third_party/ mentions get_seeed_hardware".
+    Taken literally that is both unachievable and wrong, and this test is the
+    corrected version:
+
+    * This file has to name the string in order to look for it.
+    * `tools/board_sources.py` and `tools/get_board_sources.py` name it in the
+      past tense, to record what they replaced and which precedent they kept.
+      That reasoning is the most useful thing in either docstring.
+    * `docs/` holds a dated handoff and closed tickets. Rewriting those to
+      name a tool that did not exist when they were written would falsify a
+      record rather than fix a reference.
+
+    What matters is that no surface *instructs* anyone to run a file that is
+    no longer there. So this looks for the invocation, not the name.
+    """
+    invocation = "bash tools/" + "get_seeed_hardware.sh"
+    telling = []
+    for directory in ("tools", "tests"):
+        for path in sorted((REPO / directory).rglob("*.py")):
+            if invocation in path.read_text(encoding="utf-8"):
+                telling.append(path.relative_to(REPO).as_posix())
+
+    assert not (REPO / "tools" / "get_seeed_hardware.sh").exists(), "the script is retired"
+    # tools/import_kicad_board.py carries the other instruction, and OH-41
+    # retires that file and its error message together.
+    #
+    # A subset rather than an exact list, and the difference matters. Exact
+    # would fail the moment OH-41 clears the last exemption -- a tripwire
+    # whose only possible instruction is "delete this line", which is friction
+    # carrying no information. Subset still fails loudly if a *new* surface
+    # starts telling someone to run the retired script, which is the thing
+    # worth catching, and it lets the exemption empty out on its own.
+    assert set(telling) <= {"tools/import_kicad_board.py"}, telling

@@ -16,7 +16,7 @@ footprint carries pad centres in millimetres, to three decimal places, as
 authored by the people who made the board.
 
 Seeed Studio publishes exactly that for the XIAO series, MIT licensed
-(`tools/get_seeed_hardware.sh`). This module reads it.
+(`python tools/get_board_sources.py seeed-xiao`). This module reads it.
 
 ## Why a real parser and not a regex
 

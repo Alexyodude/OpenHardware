@@ -68,11 +68,17 @@ TESTS_DIR = pathlib.Path("tests/rules")
 RULES_DIR = pathlib.Path("rules")
 FEATURES_DIR = pathlib.Path("docs/features")
 BOARDS_DIR = pathlib.Path("webui/boards")
-#: Where `tools/get_seeed_hardware.sh` puts the vendor's CAD. Fetched, never
-#: vendored, and git-ignored — a survey of what a vendor publishes must not
-#: quietly become a copy of it. One vendor is named here because there is one
-#: vendor today; OH-24 replaces the fetcher with a table over many, and this
-#: becomes a lookup on that day and not before.
+#: Where `python tools/get_board_sources.py seeed-xiao` puts the vendor's CAD.
+#: Fetched, never vendored, and git-ignored — a survey of what a vendor
+#: publishes must not quietly become a copy of it.
+#:
+#: The registry in `tools/board_sources.py` is the authority on this path:
+#: `source("seeed-xiao").dest(root)` computes it, and `Source.name` is
+#: documented as stable because other tools hold paths built from it. It is
+#: still spelled out here rather than looked up, because a lookup at import
+#: time turns a missing registry entry into a module that will not load, and
+#: this one is read by every `--markdown` run. `test_the_vendor_dir_is_the
+#: _registry_s_own_path` binds the two instead, so they cannot drift quietly.
 VENDOR_DIR = pathlib.Path("third_party/seeed-xiao")
 #: Top-level directories, in the order the report lists them. Anything
 #: outside them lands in `other`, which is deliberately visible: the
@@ -371,7 +377,7 @@ def _vendor_tree(vendor_dir: pathlib.Path) -> _Tree:
     """Everything the vendor tree holds, split by whether it was fetched.
 
     The index half is the reason this consults git at all.
-    `tools/get_seeed_hardware.sh` clones **sparsely by default** — the KiCad
+    `tools/get_board_sources.py` clones **sparsely by default** — the KiCad
     library and `document/`, nothing else — because the full tree is ~196 MB
     of marketing PNGs. A disk-only search over a sparse checkout would report
     "no schematic" for a schematic sitting in the repository unfetched, which
@@ -383,7 +389,7 @@ def _vendor_tree(vendor_dir: pathlib.Path) -> _Tree:
             (),
             (),
             f"{vendor_dir.as_posix()} is not fetched here; "
-            f"run: bash tools/get_seeed_hardware.sh",
+            f"run: python tools/get_board_sources.py seeed-xiao",
         )
 
     on_disk: list[str] = []
@@ -411,8 +417,8 @@ def _vendor_tree(vendor_dir: pathlib.Path) -> _Tree:
     except subprocess.CalledProcessError as exc:
         raise InventoryError(
             f"{vendor_dir}: git ls-tree failed: {(exc.stderr or '').strip() or exc}. "
-            f"This should be the clone tools/get_seeed_hardware.sh makes; delete it "
-            f"and re-run that script."
+            f"This should be the clone `python tools/get_board_sources.py seeed-xiao` "
+            f"makes; delete it and fetch again."
         ) from exc
     except (FileNotFoundError, NotADirectoryError) as exc:
         raise InventoryError(f"{vendor_dir}: cannot run git here: {exc}") from exc
@@ -747,7 +753,8 @@ def render_text() -> str:
     lines.append(
         f"  Vendor CAD is searched for under {VENDOR_DIR.as_posix()}/, where"
     )
-    lines.append("  tools/get_seeed_hardware.sh puts it. Evidence, strongest first:")
+    lines.append("  python tools/get_board_sources.py seeed-xiao puts it.")
+    lines.append("  Evidence, strongest first:")
     for evidence in Evidence:
         lines.append(f"    {evidence.label:<13} {evidence.gloss}")
     lines.append("")
@@ -838,7 +845,7 @@ def render_markdown() -> str:
         f"## Assets — {len(whole)} of {len(inv.assets)} boards carry all five",
         "",
         f"By cell: {_asset_tallies(inv.assets)}. Vendor CAD is searched for under "
-        f"`{VENDOR_DIR.as_posix()}/`, where `tools/get_seeed_hardware.sh` puts it; "
+        f"`{VENDOR_DIR.as_posix()}/`, where `python tools/get_board_sources.py seeed-xiao` puts it; "
         "a cell reading `unsearchable` means that tree is absent from this "
         "checkout, which is a fact about the checkout and not about the vendor.",
         "",

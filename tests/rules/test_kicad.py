@@ -238,9 +238,9 @@ def test_the_derivation_is_recorded(footprint, symbols):
 
 
 def test_the_real_vendor_library_parses():
-    """Skips by name when tools/get_seeed_hardware.sh has not been run."""
+    """Skips by name when the vendor CAD has not been fetched."""
     if not VENDOR.is_dir():
-        pytest.skip("vendor library absent; run bash tools/get_seeed_hardware.sh")
+        pytest.skip("vendor library absent; run python tools/get_board_sources.py seeed-xiao")
     mod = VENDOR / "XIAO-ESP32-C3-DIP.kicad_mod"
     if not mod.is_file():
         pytest.skip(f"{mod.name} absent from the fetched tree")
