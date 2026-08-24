@@ -295,22 +295,21 @@ def _element_pads(
     return tuple(pads)
 
 
-def read_board(path: pathlib.Path) -> Board:
-    """Read one EAGLE `.brd`.
+def _open(path: pathlib.Path, wanted: str) -> ET.Element:
+    """The `<eagle>` root of `path`, or an error saying what the file is instead.
 
-    Refuses anything that is not EAGLE XML **by name**. The extension is not
-    enough: Cadence Allegro writes `.brd` too, and the Raspberry Pi Pico
-    design files ship one. Handing a binary Allegro board to an XML parser
-    would fail somewhere deep with a message about byte 0, so the check is up
-    front and says which format was found instead.
+    Shared by the board and schematic readers because the way an EAGLE file
+    fails to be one is the same either way, and the message that matters --
+    naming the binary formats that share these extensions — should not exist
+    in two versions that can drift apart.
     """
     try:
         tree = ET.parse(path)
     except ET.ParseError as exc:
         raise EagleError(
-            f"{path}: not XML, so not an EAGLE 6-or-later board ({exc}). "
-            f"EAGLE 5 and earlier, and Cadence Allegro, also use .brd and are "
-            f"binary; neither can be read here."
+            f"{path}: not XML, so not an EAGLE 6-or-later {wanted} ({exc}). "
+            f"EAGLE 5 and earlier are binary, and so are Cadence Allegro .brd "
+            f"and Altium .SchDoc; none can be read here."
         ) from exc
     except OSError as exc:
         raise EagleError(f"{path}: {exc}") from exc
@@ -320,6 +319,19 @@ def read_board(path: pathlib.Path) -> Board:
         raise EagleError(
             f"{path}: XML, but the root element is <{root.tag}>, not <eagle>"
         )
+    return root
+
+
+def read_board(path: pathlib.Path) -> Board:
+    """Read one EAGLE `.brd`.
+
+    Refuses anything that is not EAGLE XML **by name**. The extension is not
+    enough: Cadence Allegro writes `.brd` too, and the Raspberry Pi Pico
+    design files ship one. Handing a binary Allegro board to an XML parser
+    would fail somewhere deep with a message about byte 0, so the check is up
+    front and says which format was found instead.
+    """
+    root = _open(path, "board")
     board = root.find("drawing/board")
     if board is None:
         raise EagleError(
@@ -364,3 +376,128 @@ def read_board(path: pathlib.Path) -> Board:
         if wire.get("layer") == DIMENSION_LAYER
     ]
     return Board(path.stem, root.get("version") or "unknown", tuple(elements), tuple(outline))
+
+
+# --- schematics ---------------------------------------------------------------
+#
+# A board file says where the copper is. A schematic says what is connected to
+# what, and that is a different question with a different answer: the header
+# pad silkscreened `GPIO5` on the board this was written against is on the
+# module's `IO23`, and no amount of reading the layout would reveal it.
+
+
+@dataclasses.dataclass(frozen=True)
+class Part:
+    """One component in the schematic, by its reference designator."""
+
+    name: str
+    library: str
+    deviceset: str
+    device: str
+    value: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class PinRef:
+    """One end of a net: a named pin on a named part."""
+
+    part: str
+    gate: str
+    pin: str
+
+
+@dataclasses.dataclass(frozen=True)
+class Net:
+    """One net, and everything on it.
+
+    EAGLE splits a net into `<segment>`s, one per drawn run of wire. They are
+    the same electrical node, so the segments are flattened here; keeping them
+    apart would make a net look like several and break every question worth
+    asking of it.
+    """
+
+    name: str
+    pins: tuple[PinRef, ...]
+
+    def on(self, part: str) -> tuple[PinRef, ...]:
+        return tuple(ref for ref in self.pins if ref.part == part)
+
+
+@dataclasses.dataclass(frozen=True)
+class Schematic:
+    name: str
+    version: str
+    parts: tuple[Part, ...]
+    nets: tuple[Net, ...]
+
+    def part(self, name: str) -> Part:
+        for candidate in self.parts:
+            if candidate.name == name:
+                return candidate
+        raise EagleError(
+            f"{self.name}: no part called {name!r}. This schematic has "
+            f"{len(self.parts)} parts, among them: "
+            f"{', '.join(p.name for p in self.parts[:12])}"
+        )
+
+    def pins_of(self, part: str) -> tuple[str, ...]:
+        """Every pin of `part` that any net reaches.
+
+        Pins with nothing on them do not appear: a schematic lists a part's
+        pins in its library symbol, and this reads the nets. An unconnected
+        pin is absent rather than reported as connected to nothing, which is
+        the same distinction `absent` and `unsearchable` draw elsewhere.
+        """
+        return tuple(
+            sorted({ref.pin for net in self.nets for ref in net.on(part)})
+        )
+
+
+def read_schematic(path: pathlib.Path) -> Schematic:
+    """Read one EAGLE `.sch` into parts and flattened nets.
+
+    Refuses a board file by name: `.sch` and `.brd` are the same XML dialect
+    with different payloads, and reading one as the other would report zero
+    nets over a file full of them, which reads exactly like a board with
+    nothing connected.
+    """
+    root = _open(path, "schematic")
+    schematic = root.find("drawing/schematic")
+    if schematic is None:
+        holds = "a <board>" if root.find("drawing/board") is not None else "neither"
+        raise EagleError(
+            f"{path}: an EAGLE file, but it holds no <schematic> ({holds}). "
+            f"Connectivity lives in the schematic; the board file has the "
+            f"copper and tools/eagle.py's read_board is what reads that."
+        )
+
+    parts = tuple(
+        Part(
+            node.get("name") or "",
+            node.get("library") or "",
+            node.get("deviceset") or "",
+            node.get("device") or "",
+            node.get("value"),
+        )
+        for node in schematic.findall("parts/part")
+    )
+    if not parts:
+        raise EagleError(f"{path}: lists no parts; refusing to report an empty schematic")
+
+    nets = []
+    for node in schematic.findall("sheets/sheet/nets/net"):
+        name = node.get("name")
+        if name is None:
+            continue
+        refs = tuple(
+            PinRef(ref.get("part") or "", ref.get("gate") or "", ref.get("pin") or "")
+            for segment in node.findall("segment")
+            for ref in segment.findall("pinref")
+        )
+        nets.append(Net(name, refs))
+    if not nets:
+        raise EagleError(
+            f"{path}: {len(parts)} parts and not one net. A schematic with no "
+            f"connectivity is not one; refusing to report it as empty."
+        )
+    return Schematic(path.stem, root.get("version") or "unknown", parts, tuple(nets))
