@@ -55,7 +55,8 @@ class Unimplemented(AbiError):
 
 
 class MemoryFault(AbiError):
-    """A fetch outside the modelled SRAM window."""
+    """An access outside the modelled memory, or a fetch from a region that
+    exists but is not executable."""
 
 
 class Registers(ctypes.Structure):
@@ -222,29 +223,29 @@ class Cpu:
     def read_word(self, address: int) -> int:
         out = ctypes.c_uint32()
         if not self._lib.cortexm0_read_word(self._handle, address, ctypes.byref(out)):
-            raise MemoryFault(f"0x{address:08x} is outside the modelled SRAM")
+            raise MemoryFault(f"0x{address:08x} is outside the modelled memory")
         return out.value
 
     def write_word(self, address: int, value: int) -> None:
         if not self._lib.cortexm0_write_word(self._handle, address, value):
-            raise MemoryFault(f"0x{address:08x} is outside the modelled SRAM")
+            raise MemoryFault(f"0x{address:08x} is outside the modelled memory")
 
     def write_halfword(self, address: int, value: int) -> None:
         if not self._lib.cortexm0_write_halfword(self._handle, address, value):
-            raise MemoryFault(f"0x{address:08x} is outside the modelled SRAM")
+            raise MemoryFault(f"0x{address:08x} is outside the modelled memory")
 
     def write_block(self, address: int, data: bytes) -> None:
         buffer = (ctypes.c_uint8 * len(data)).from_buffer_copy(data)
         if not self._lib.cortexm0_write_block(self._handle, address, buffer, len(data)):
             raise MemoryFault(
-                f"0x{address:08x}..0x{address + len(data):08x} leaves the modelled SRAM"
+                f"0x{address:08x}..0x{address + len(data):08x} leaves the modelled memory"
             )
 
     def read_block(self, address: int, length: int) -> bytes:
         buffer = (ctypes.c_uint8 * length)()
         if not self._lib.cortexm0_read_block(self._handle, address, buffer, length):
             raise MemoryFault(
-                f"0x{address:08x}..0x{address + length:08x} leaves the modelled SRAM"
+                f"0x{address:08x}..0x{address + length:08x} leaves the modelled memory"
             )
         return bytes(buffer)
 

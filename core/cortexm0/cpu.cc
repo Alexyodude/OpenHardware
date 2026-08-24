@@ -5,6 +5,8 @@
 
 #include "cpu.h"
 
+#include <cassert>
+
 #include <algorithm>
 
 namespace cortexm0 {
@@ -273,12 +275,21 @@ bool Cpu::write_byte_checked(uint32_t address, uint8_t value) {
 
 uint8_t Cpu::read_byte(uint32_t address) const {
     uint8_t value = 0;
-    read_byte_checked(address, value);
+    // The return value is dropped deliberately, and the assert is why that is
+    // safe rather than the zero-on-failure this file otherwise refuses. Both
+    // callers -- the ABI's block functions -- range-check the whole span
+    // first, so reaching here out of range is a bug in this file, not bad
+    // input. Returning a silent zero would make it look like data.
+    const bool present = read_byte_checked(address, value);
+    assert(present && "read_byte is unchecked; callers must range-check first");
+    (void)present;
     return value;
 }
 
 void Cpu::write_byte(uint32_t address, uint8_t value) {
-    write_byte_checked(address, value);
+    const bool present = write_byte_checked(address, value);
+    assert(present && "write_byte is unchecked; callers must range-check first");
+    (void)present;
 }
 
 }  // namespace cortexm0
