@@ -322,6 +322,21 @@ async function fillBoards() {
   const proven = data.boards.filter((b) => b.firmware_verified).length;
   const runnable = data.boards.filter((b) => b.runnable).length;
 
+  // The evidence sentence, derived rather than written. The paragraph this
+  // replaces was hand-kept prose reading "only one board has actually been
+  // watched", and it went false the day a second one was. Naming the chips and
+  // their tests from the data means it cannot say a number the table disagrees
+  // with -- and phrasing it as a list rather than a count is what makes zero,
+  // one and many all read correctly without a special case.
+  const watched = data.boards.filter((b) => b.firmware_verified);
+  const evidence = [...new Map(
+    watched.map((b) => [b.chip, b.firmware_evidence]),
+  ).entries()];
+  $("boards-evidence").textContent = evidence.length
+    ? "Watched running compiled code: " +
+      evidence.map(([chip, test]) => `${chip} (${test})`).join(", ") + "."
+    : "No board here has yet been watched running compiled code.";
+
   $("boards-strip").replaceChildren(
     stripCell(String(proven), "watched running firmware", proven ? "is-ok" : "is-stop"),
     stripCell(String(runnable), "core and board exist", runnable ? "is-ok" : ""),

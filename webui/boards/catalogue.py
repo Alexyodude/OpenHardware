@@ -100,12 +100,22 @@ CHIPS: dict[str, tuple[str, str]] = {
 #: and `test_every_firmware_claim_names_a_test_that_exists` checks the file is
 #: there.
 #: **Coupled to `test_only_the_board_a_real_image_ran_on_claims_to_have_run_one`,
-#: which pins the set to {"RP2040"}.** That pin is what stops a second entry
-#: being added by pointing at a file that merely exists and merely mentions the
-#: right symbols; adding a chip here means editing that test too, and its name
-#: says what it is protecting.
+#: which pins the set to {"RP2040", "SAMD21"}.** That pin is what stops a
+#: further entry being added by pointing at a file that merely exists and
+#: merely mentions the right symbols; adding a chip here means editing that
+#: test too, and its name says what it is protecting.
+#:
+#: The SAMD21 entry is the first one added since the pin existed, and it is
+#: worth saying what made it admissible, because "the core was already built"
+#: is exactly the argument the pin is there to refuse. The core being shared
+#: with the RP2040 bought nothing: the entry is here because
+#: `tests/cortexm0/test_samd21_blink.py` loads a 48-byte image compiled by
+#: arm-none-eabi-gcc from `tests/cortexm0/samd21/blink.c` and watches PA17
+#: change state 45 times. Different chip, different flash address, different
+#: peripheral, its own compiled image.
 FIRMWARE_VERIFIED: dict[str, str] = {
     "RP2040": "tests/cortexm0/test_blink.py",
+    "SAMD21": "tests/cortexm0/test_samd21_blink.py",
 }
 
 #: What each instruction set would need before a core for it could be trusted.

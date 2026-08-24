@@ -9,6 +9,7 @@
 # being famous. These tests are mostly about that separation.
 
 import pathlib
+import re
 
 import pytest
 
@@ -126,10 +127,23 @@ def test_a_board_is_runnable_only_when_its_core_is_built_and_it_is_described():
 
 
 def test_a_built_core_without_a_board_description_is_not_runnable(tmp_path):
-    """SAMD21 is the case that makes this real: it shares the cortexm0 core
-    with RP2040, so its core is built -- and with no memory map and no
-    peripherals there is nothing for firmware to run against."""
-    board = next(b for b in catalogue.catalogue() if b.chip == "SAMD21")
+    """A built core is not a working board: with no memory map and no
+    peripherals there is nothing for an image to run against.
+
+    **Written against a synthetic directory, and that is the point.** This used
+    to name the SAMD21, which shared `cortexm0` with the RP2040 and had no
+    description -- a real example, and a perishable one. `webui/boards/samd21.py`
+    landed on 2026-08-25 and the example evaporated, taking the coverage with
+    it: there is now no chip in the tree whose core is built and whose
+    description is missing.
+
+    A test that depends on which board happens to be undescribed stops testing
+    the rule the moment somebody does the work. So this builds the case instead
+    of finding it, and keeps holding as the remaining boards are described.
+    """
+    (tmp_path / "XIAO-SAMD21-DIP.json").write_text("{}", encoding="utf-8")
+    board, = catalogue.catalogue(tmp_path)
+    assert board.chip == "SAMD21"
     assert board.core_exists and board.core_built
     assert not board.described
     assert not board.runnable
@@ -169,14 +183,37 @@ def test_the_backlog_groups_by_core_rather_than_by_instruction_set_name():
     assert len(row["isas"]) > 1, "the RP2350 and the MG24 spell their ISA differently"
 
 
-def test_the_backlog_says_which_of_its_rows_already_have_a_core():
-    """`cortexm0` appears because SAMD21 has no board description -- a
-    different job from the rows that need an instruction set written, and
-    listing it under 'missing cores' without saying so misreads the work."""
-    row = next(r for r in catalogue.missing_cores() if r["core"] == "cortexm0")
+def test_the_cortexm0_row_left_the_backlog_when_the_samd21_was_described():
+    """`cortexm0` used to sit in this backlog, because SAMD21 had no board
+    description -- a different job from writing an instruction set, and the
+    reason `missing_cores` reports `exists` at all. Writing
+    `webui/boards/samd21.py` on 2026-08-25 emptied that row, because both of
+    the chips over this core are now described.
+
+    **Only that is asserted here, and the narrowness was learned the hard
+    way.** The first version of this test also claimed every *remaining* row
+    needs a core written -- true when it was typed, and false within the hour,
+    because another session added `core/riscv32/` and its row began reporting
+    `exists: True`. That is the same mistake as the test this one replaced:
+    pinning a fact about the tree that somebody else's work invalidates. The
+    claim below is about this ticket's own change and nothing else.
+    """
+    assert "cortexm0" not in {row["core"] for row in catalogue.missing_cores()}
+
+
+def test_the_backlog_still_distinguishes_a_missing_description_from_a_missing_core(tmp_path):
+    """The `exists` field the test above now sees only as False.
+
+    Both halves have to keep working, and the true half has no example left in
+    the tree, so it gets a built one -- a SAMD21 board in a directory with no
+    description module beside it. Without this, `exists` could be hardcoded to
+    False and the suite would not notice.
+    """
+    (tmp_path / "XIAO-SAMD21-DIP.json").write_text("{}", encoding="utf-8")
+    row, = catalogue.missing_cores(tmp_path)
+    assert row["core"] == "cortexm0"
     assert row["exists"] is True
-    assert all(r["exists"] is False for r in catalogue.missing_cores()
-               if r["core"] != "cortexm0")
+    assert row["boards"] == ["XIAO-SAMD21-DIP"]
 
 
 def test_the_backlog_is_ordered_by_how_many_boards_each_would_unlock():
@@ -212,8 +249,21 @@ def test_running_firmware_is_a_separate_claim_from_being_runnable():
 
 
 def test_only_the_board_a_real_image_ran_on_claims_to_have_run_one():
+    """Pinned, so that adding a chip is a decision rather than a diff.
+
+    This is deliberately the *second* layer. `tools/check_board_claims.py`
+    already checks an entry is well-formed -- a real test, naming a real image,
+    reading and stepping it. A well-formed entry can still be a wrong one, and
+    editing a test whose name says what it protects is what makes adding one
+    deliberate.
+
+    SAMD21 joined RP2040 on 2026-08-25. Not because its core was already built
+    -- that is the argument this pin exists to refuse, and it would have let an
+    empty `samd21.py` in -- but because `tests/cortexm0/test_samd21_blink.py`
+    watches a real compiled image toggle PA17.
+    """
     proven = {b.chip for b in catalogue.catalogue() if b.firmware_verified}
-    assert proven == {"RP2040"}
+    assert proven == {"RP2040", "SAMD21"}
 
 
 def test_every_firmware_claim_names_a_test_that_exists():
@@ -224,11 +274,25 @@ def test_every_firmware_claim_names_a_test_that_exists():
 
 
 def test_the_firmware_evidence_actually_runs_an_image():
-    """Naming any file would satisfy the check above. The named one has to be
-    a test that loads a compiled image and steps it."""
+    """Naming any file would satisfy the check above. Each named one has to be
+    a test that loads a compiled image and steps it.
+
+    Looped over every entry rather than spelling out RP2040, which is what it
+    did while RP2040 was the only one. A check written around a single key
+    stops checking the moment a second key arrives -- and it arrives at exactly
+    the moment the check matters most, since a new claim is the one nobody has
+    read yet.
+    """
     repo = pathlib.Path(__file__).resolve().parents[2]
-    text = (repo / catalogue.FIRMWARE_VERIFIED["RP2040"]).read_text(encoding="utf-8")
-    assert "blink.bin" in text and "cpu.step()" in text
+    for chip, evidence in catalogue.FIRMWARE_VERIFIED.items():
+        text = (repo / evidence).read_text(encoding="utf-8")
+        images = [
+            line for line in text.splitlines()
+            if any(suffix in line for suffix in (".bin", ".elf", ".hex", ".uf2"))
+        ]
+        assert images, f"{chip}: {evidence} names no compiled image"
+        assert ".read_bytes()" in text, f"{chip}: {evidence} never reads one off disk"
+        assert "cpu.step()" in text, f"{chip}: {evidence} never executes it"
 
 
 # --- the description convention --------------------------------------------
@@ -331,3 +395,32 @@ def test_the_boards_route_carries_what_the_ui_reads():
     row = payload["waiting"][0]
     for key in ("core", "boards", "exists", "oracle"):
         assert key in row, f"emulator.js reads group.{key}"
+    assert "firmware_evidence" in board, (
+        "emulator.js names the test behind each claim in the evidence sentence"
+    )
+
+
+def test_every_element_the_script_fills_exists_in_the_page():
+    """`$("some-id")` in the script, `id="some-id"` in the page.
+
+    The seam between the two is where this repository has twice shipped a panel
+    a green suite said was fine -- §3.8 of the 2026-08-25 handoff, where a
+    dict-to-list change left the Boards view blank while 340 tests passed.
+    Nothing between the script and the markup was checked, and nothing here
+    checks it except this.
+
+    Written as a sweep rather than a list of the ids that exist today, so it
+    covers the next one somebody adds without being edited.
+    """
+    static = pathlib.Path(__file__).resolve().parents[2] / "webui" / "static"
+    script = (static / "emulator.js").read_text(encoding="utf-8")
+    page = (static / "emulator.html").read_text(encoding="utf-8")
+
+    wanted = set(re.findall(r"""\$\(["']([\w-]+)["']\)""", script))
+    assert wanted, "found no $(\"id\") calls; the pattern above has gone stale"
+    present = set(re.findall(r"""\bid=["']([\w-]+)["']""", page))
+    missing = sorted(wanted - present)
+    assert not missing, (
+        f"emulator.js fills elements the page does not have: {missing}. "
+        f"replaceChildren on null throws, and the panel renders empty."
+    )

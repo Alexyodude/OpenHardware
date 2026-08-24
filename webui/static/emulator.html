@@ -158,10 +158,17 @@
           map and peripherals.</strong> That is a claim about what exists, not a
           promise that any particular image runs — an image still meets whatever
           the board does not model yet.</p>
-        <p>Only one board has actually been watched running compiled code: the
-          RP2040 blinks an LED in <code>tests/cortexm0/test_blink.py</code>. The
-          same chip stops after 225,759 instructions of an Arduino image, at a
-          boot ROM this project cannot ship.</p>
+        <!-- Filled by fillBoards() from FIRMWARE_VERIFIED, never written here.
+             This paragraph used to name the RP2040 and say "only one board",
+             and it was false within the session that added the second one --
+             which is exactly what CLAUDE.md means by an inventory being the
+             document that rots fastest. The placeholder below states no count,
+             so a page whose script never ran is silent rather than wrong. -->
+        <p id="boards-evidence">Which boards have been watched running compiled
+          code is computed from the table below.</p>
+        <p>The RP2040 stops after 225,759 instructions of an Arduino image, at a
+          boot ROM this project cannot ship — so the images watched here are
+          bare metal, which is a smaller claim and a true one.</p>
       </div>
       <div class="strip" id="boards-strip"></div>
       <div class="scroll"><table class="grid">
