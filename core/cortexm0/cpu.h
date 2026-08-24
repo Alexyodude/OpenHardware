@@ -151,9 +151,15 @@ public:
     /// missing. `docs/research/peripheral-layer/design.md` calls this out as
     /// the failure mode that wastes the most time.
     ///
-    /// Three behaviours, and they are the three that hardware actually has.
-    /// A register that clears on read, or counts, is a *modelled peripheral*
-    /// rather than a mapped word, and belongs in the layer that owns the map.
+    /// A register that clears on read is a *modelled peripheral* rather than a
+    /// mapped word, and has no home here yet.
+    ///
+    /// This paragraph used to send a register that *counts* to "the layer that
+    /// owns the map" as well, and that layer is Python, which cannot serve a
+    /// read -- so the sentence named a place that does not exist. `map_counter`
+    /// below is where counting went, on this file's actual principle: the
+    /// mechanism is architecture-neutral and belongs here, while the address
+    /// and the rate are chip facts and stay in the board.
     void map_register(uint32_t address, uint32_t value);
 
     /// An address whose write applies `op` to another address's word.
@@ -244,6 +250,40 @@ public:
     /// Empty for an address that is not one, which is the same answer as a
     /// stream nothing has written to -- the caller registered it and knows.
     const std::vector<uint8_t>& stream(uint32_t address) const;
+
+    /// A register whose read answers `executed() / instructions_per_tick`: a
+    /// free-running counter.
+    ///
+    /// The fifth behaviour, and the one `map_register`'s own comment sends
+    /// elsewhere -- "a register that clears on read, or counts, is a *modelled
+    /// peripheral* rather than a mapped word, and belongs in the layer that
+    /// owns the map". That layer is Python and cannot serve a read, so as
+    /// written the sentence names a place that does not exist. It lands here
+    /// on the same principle the rest of this class follows: **the mechanism
+    /// is here and the map is not.** Counting is architecture-neutral; which
+    /// address counts, and how fast, are chip facts and stay in the board.
+    ///
+    /// Why anything needs it: `timer_busy_wait_us_32()` in pico-sdk's timer.c
+    /// spins `while (timer->timerawl - start < delay_us)`. A register that
+    /// does not advance makes that loop run forever, which is the hang class
+    /// `docs/architectures.md` §3 is about -- and unlike a missing register it
+    /// cannot be made loud, because the address *is* modelled and the read
+    /// *does* answer. Only the answer never changes.
+    ///
+    /// **`instructions_per_tick` is a stated approximation, not a
+    /// measurement.** This core has no cycle model, so virtual time is counted
+    /// in retired instructions. See `webui/boards/rp2040.py`, which picks the
+    /// number and says what it does and does not claim.
+    void map_counter(uint32_t address, uint32_t instructions_per_tick);
+
+    /// Instructions retired since construction. The only source of virtual
+    /// time, and deliberately an integer: `rules/determinism.md` §3 notes that
+    /// accumulating simulated time in a float makes step size affect results.
+    uint64_t executed() const { return executed_; }
+
+    /// Called by `step` once an instruction has actually retired -- never on a
+    /// fault, so a program stopped by one does not age while it is stopped.
+    void note_executed() { ++executed_; }
 
     bool is_mapped(uint32_t address) const;
 
@@ -380,6 +420,24 @@ private:
         std::vector<uint8_t> bytes;
     };
     std::unordered_map<uint32_t, Stream> streams_;
+
+    /// A `map_counter` address: its rate, and where it started counting.
+    ///
+    /// **`origin` is what makes a board's timer start at zero.** Without it a
+    /// counter reads the machine's whole lifetime, so installing a board on a
+    /// core that has already run gives its timer a head start -- and a test
+    /// suite sharing one core watches each test's clock carry into the next.
+    /// That is the same leak `streams_` had, arriving by a different door.
+    /// Installing a board is this model's power-on, so counting from the map
+    /// call is both the fix and the more accurate reading.
+    struct Counter {
+        uint32_t instructions_per_tick = 1;
+        uint64_t origin = 0;
+    };
+    std::unordered_map<uint32_t, Counter> counters_;
+
+    /// Retired instructions. Virtual time's only source; see `executed()`.
+    uint64_t executed_ = 0;
 
     /// Word-aligned address to behaviour. A map rather than a range, so an
     /// unmodelled register inside a modelled peripheral still faults.

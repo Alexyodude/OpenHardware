@@ -28,7 +28,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define CORTEXM0_ABI_VERSION 11
+#define CORTEXM0_ABI_VERSION 12
 
 /// r0-r15, then the flags.
 ///
@@ -134,6 +134,18 @@ CORTEXM0_API void cortexm0_map_stream(CortexM0Cpu* cpu, uint32_t address,
 /// truncated prefix as if it were the whole output.
 CORTEXM0_API uint32_t cortexm0_stream(const CortexM0Cpu* cpu, uint32_t address,
                                       uint8_t* out, uint32_t capacity);
+
+/// An address whose read answers `executed / instructions_per_tick`: a
+/// free-running counter such as the RP2040's TIMERAWL, which pico-sdk's
+/// `timer_busy_wait_us_32()` spins on. A register that does not advance makes
+/// that loop run forever, and unlike a missing register it cannot be made loud
+/// -- the address is modelled and the read does answer. `instructions_per_tick`
+/// is a stated approximation; this core has no cycle model. See cpu.h.
+CORTEXM0_API void cortexm0_map_counter(CortexM0Cpu* cpu, uint32_t address,
+                                       uint32_t instructions_per_tick);
+
+/// Instructions retired since the core was created. Virtual time's only source.
+CORTEXM0_API uint64_t cortexm0_executed(const CortexM0Cpu* cpu);
 
 /// Execute one instruction at PC, advancing PC past it.
 ///

@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match CORTEXM0_ABI_VERSION in abi.h.
-ABI_VERSION = 11
+ABI_VERSION = 12
 
 #: Must match cortexm0::WriteOp. Spelled at call sites rather than numbered.
 WRITE_OPS = {"store": 0, "set": 1, "clear": 2, "xor": 3}
@@ -140,6 +140,10 @@ _SIGNATURES = {
          ctypes.c_uint32],
         ctypes.c_uint32,
     ),
+    "cortexm0_map_counter": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32], None
+    ),
+    "cortexm0_executed": ([ctypes.c_void_p], ctypes.c_uint64),
     "cortexm0_step": ([ctypes.c_void_p], ctypes.c_int),
     "cortexm0_fault_address": ([ctypes.c_void_p], ctypes.c_uint32),
     "cortexm0_fault_was_fetch": ([ctypes.c_void_p], ctypes.c_int),
@@ -366,6 +370,29 @@ class Cpu:
         gate lets firmware appear to print before it enabled the peripheral.
         """
         self._lib.cortexm0_map_stream(self._handle, address, enable, enable_mask)
+
+    def map_counter(self, address: int, instructions_per_tick: int) -> None:
+        """An address whose read answers `executed // instructions_per_tick`.
+
+        A free-running counter such as the RP2040's TIMERAWL. A register that
+        does not advance makes a busy-wait spin forever, and that hang cannot
+        be made loud the way a missing register can: the address is modelled
+        and the read does answer, it just never changes.
+
+        `instructions_per_tick` is a stated approximation -- this core has no
+        cycle model, so virtual time is counted in retired instructions. The
+        board picks the number and says what it does not claim.
+        """
+        self._lib.cortexm0_map_counter(self._handle, address, instructions_per_tick)
+
+    def executed(self) -> int:
+        """Instructions retired since this core was created.
+
+        Virtual time's only source, and an integer for the reason
+        `rules/determinism.md` §3 gives: a float accumulator makes step size
+        affect results.
+        """
+        return int(self._lib.cortexm0_executed(self._handle))
 
     def stream(self, address: int) -> bytes:
         """Everything written to a `map_stream` address, oldest first.

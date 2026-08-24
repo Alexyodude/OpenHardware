@@ -150,6 +150,15 @@ uint32_t cortexm0_stream(const CortexM0Cpu* cpu, uint32_t address, uint8_t* out,
     return length;
 }
 
+void cortexm0_map_counter(CortexM0Cpu* cpu, uint32_t address,
+                          uint32_t instructions_per_tick) {
+    as_handle(cpu)->cpu.map_counter(address, instructions_per_tick);
+}
+
+uint64_t cortexm0_executed(const CortexM0Cpu* cpu) {
+    return as_handle(cpu)->cpu.executed();
+}
+
 int cortexm0_is_mapped(const CortexM0Cpu* cpu, uint32_t address) {
     return as_handle(cpu)->cpu.is_mapped(address) ? 1 : 0;
 }
@@ -167,7 +176,16 @@ int cortexm0_fault_was_fetch(const CortexM0Cpu* cpu) {
 }
 
 int cortexm0_step(CortexM0Cpu* cpu) {
-    return static_cast<int>(cortexm0::step(as_handle(cpu)->cpu));
+    cortexm0::Cpu& processor = as_handle(cpu)->cpu;
+    const cortexm0::StepResult result = cortexm0::step(processor);
+    // Only a retired instruction ages the machine. On Unimplemented or
+    // MemoryFault the processor is untouched, PC included, so a program
+    // stopped by one must not go on accruing virtual time -- a caller that
+    // steps a halted core in a loop would otherwise watch its timer advance.
+    if (result == cortexm0::StepResult::Ok) {
+        processor.note_executed();
+    }
+    return static_cast<int>(result);
 }
 
 }  // extern "C"

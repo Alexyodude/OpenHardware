@@ -49,6 +49,9 @@ void Cpu::reset() {
     // which is how a reset machine kept its flash.
     clear_registers();
     clear_regions();
+    // Virtual time restarts with the machine. A reset core whose timer kept
+    // running would let firmware read a clock from before it existed.
+    executed_ = 0;
 }
 
 void Cpu::clear_registers() {
@@ -58,6 +61,7 @@ void Cpu::clear_registers() {
     // responds -- and, worse, would carry one board's captured output into the
     // next board installed over it.
     streams_.clear();
+    counters_.clear();
 }
 
 bool Cpu::add_region(uint32_t base, uint32_t size, bool executable, uint8_t fill) {
@@ -149,6 +153,34 @@ void Cpu::map_stream(uint32_t address, uint32_t enable_address,
     streams_[at] = stream;
 }
 
+void Cpu::map_counter(uint32_t address, uint32_t instructions_per_tick) {
+    const uint32_t at = address & ~3u;
+    // Registered in `mmio_` too, so `is_mapped` sees it and a write lands
+    // somewhere harmless. TIMERAWL is "RO" per pico-sdk's timer.h, and a write
+    // to it is ignored rather than refused, which is what the part does.
+    //
+    // **No `writable = false` here, and it was there until mutation testing
+    // removed it.** A counter's read is served from `counters_` before the
+    // stored-word path is reached, so the word a write lands in is never read
+    // back -- the flag changed nothing observable. That is the same argument
+    // `map_mirror` makes about itself, and the same conclusion the `read_only`
+    // flag reached before it was deleted.
+    Mapped entry;
+    entry.target = at;
+    entry.source = at;
+    mmio_[at] = entry;
+
+    // Zero would divide by zero on the first read. A board asking for a
+    // counter that never advances has asked for the hang this exists to
+    // prevent, so it is corrected to the fastest legal rate rather than
+    // honoured.
+    Counter counter;
+    counter.instructions_per_tick =
+        instructions_per_tick == 0 ? 1u : instructions_per_tick;
+    counter.origin = executed_;
+    counters_[at] = counter;
+}
+
 const std::vector<uint8_t>& Cpu::stream(uint32_t address) const {
     static const std::vector<uint8_t> none;
     const auto found = streams_.find(address & ~3u);
@@ -164,6 +196,15 @@ bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
     if (found == mmio_.end()) {
         return false;
     }
+    // A counter derives its answer rather than storing one, so it is checked
+    // before the stored-value path below.
+    const auto counter = counters_.find(address & ~3u);
+    if (counter != counters_.end()) {
+        out = static_cast<uint32_t>((executed_ - counter->second.origin) /
+                                    counter->second.instructions_per_tick);
+        return true;
+    }
+
     const Mapped& entry = found->second;
     if (!entry.readable) {
         // The architecture's answer, not an absence. See `map_alias`.

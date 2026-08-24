@@ -130,6 +130,31 @@ UART_FR_TXFF = 1 << 5
 #: full, transmitter not busy.
 UART_FR_AT_REST = UART_FR_RXFE
 
+#: TIMER, from pico-sdk's `hardware/regs/addressmap.h`:
+#: `#define TIMER_BASE _u(0x40054000)`. The research file names the same base.
+TIMER = 0x40054000
+
+#: `TIMER_TIMERAWL_OFFSET _u(0x00000028)` -- "Raw read from bits 31:0 of time
+#: (no side effects)", access "RO". Read from the header rather than from the
+#: research, which records these offsets as ungrepped.
+TIMER_TIMERAWL = 0x28
+
+#: How many retired instructions make one microsecond of virtual time.
+#:
+#: **A stated approximation, and not a measurement.** The RP2040's TIMER counts
+#: microseconds and the part's default system clock is 125 MHz, so 125 would be
+#: exactly right if every instruction took one cycle -- which on a Cortex-M0+ it
+#: does not: loads, stores and taken branches take more, and this core models no
+#: cycle costs at all. So the number below is the right order of magnitude and
+#: nothing finer, and **this model does not claim cycle accuracy**.
+#:
+#: What it does guarantee is what a busy-wait actually needs: virtual time that
+#: is monotonic, deterministic and an integer -- the last per
+#: `rules/determinism.md` §3, which notes that a float accumulator makes step
+#: size affect results. A firmware delay measured in emulated microseconds is
+#: therefore repeatable, and is not a claim about wall-clock time.
+TIMER_INSTRUCTIONS_PER_TICK = 125
+
 #: The RESETS bit that holds UART0. From `rp2040_v2/rp2040_uart.json`'s
 #: instance table, cross-checked against `resets.json`'s bit table, where 22 is
 #: UART0 and 23 is UART1.
@@ -137,7 +162,7 @@ RESET_UART0 = 1 << 22
 
 
 class Cpu(typing.Protocol):
-    """What this module needs of a core: the three mapping calls."""
+    """What this module needs of a core: the mapping calls it uses."""
 
     def map_register(self, address: int, value: int = 0) -> None: ...
     def map_alias(self, address: int, target: int, op: str, *,
@@ -147,6 +172,7 @@ class Cpu(typing.Protocol):
     def map_constant(self, address: int, value: int) -> None: ...
     def map_stream(self, address: int, *, enable: int,
                    enable_mask: int) -> None: ...
+    def map_counter(self, address: int, instructions_per_tick: int) -> None: ...
     def stream(self, address: int) -> bytes: ...
     def add_region(self, base: int, size: int, *, executable: bool = ...,
                    fill: int = ...) -> None: ...
@@ -275,6 +301,32 @@ def uart0_output(cpu: Cpu) -> bytes:
     return cpu.stream(UART0 + UART_DR)
 
 
+def install_timer(cpu: Cpu) -> None:
+    """TIMER, far enough for a busy-wait to end, and no further.
+
+    Offsets from pico-sdk's own `hardware/regs/timer.h`, which the research
+    file explicitly did **not** grep -- it records TIMERAWL/H as "offsets not
+    grepped this session", so these were read from the header directly:
+    `TIMER_TIMERAWL_OFFSET _u(0x00000028)`, described there as "Raw read from
+    bits 31:0 of time (no side effects)", access `"RO"`.
+
+    **This is the hang class that is not a status bit.** `timer_busy_wait_us_32()`
+    spins `while (timer->timerawl - start < delay_us)`, so a TIMERAWL that does
+    not advance runs forever -- and that hang cannot be made loud the way a
+    missing register can, because the address is modelled and the read does
+    answer. It just answers the same thing every time.
+
+    **What is deliberately not here, and why it cannot be.** `sleep_ms()` does
+    not poll; it arms an alarm and waits for its interrupt. Modelling ALARM0-3
+    needs an IRQ to deliver, and this core has no exceptions -- so the alarm
+    half of TIMER is blocked on a piece of work this ticket does not contain,
+    rather than skipped. TIMERAWH, TIMELR and TIMEHR are likewise unmapped, so
+    a 64-bit `time_us_64()` faults and names the address instead of reading a
+    plausible zero.
+    """
+    cpu.map_counter(TIMER + TIMER_TIMERAWL, TIMER_INSTRUCTIONS_PER_TICK)
+
+
 def install_memory(cpu: Cpu) -> None:
     """Flash and SRAM. The core ships with neither.
 
@@ -331,3 +383,4 @@ def install(cpu: Cpu) -> None:
     install_resets(cpu)
     install_sio(cpu)
     install_uart0(cpu)
+    install_timer(cpu)
