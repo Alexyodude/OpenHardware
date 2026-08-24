@@ -325,6 +325,21 @@ def operand_sets(count: int, rng: random.Random) -> list[tuple[int, int]]:
     return pairs[:count]
 
 
+#: Zba "Address generation", the whole of it on RV32: funct7 0b0010000 with
+#: three funct3 values under the same opcode as RV32I_OP. Encodings taken from
+#: rvcpp's own table so the corpus and the oracle cannot disagree about the
+#: bits before they disagree about the answer --
+#: `RVOPC_SH1ADD_BITS = 0b0010000_00000_00000_010_00000_0110011`
+#: (third_party/hazard3/test/sim/rvcpp/include/encoding/rv_opcodes.h:149).
+#:
+#: The RP2350's datasheet ISA string contains `_zba_`; neither ESP32-C part's
+#: does. So this family is the first in the corpus where the three targets do
+#: not all give the same verdict, and rvcpp gives all three the same one.
+RV32ZBA_OP = (
+    ("sh1add", 0x2), ("sh2add", 0x4), ("sh3add", 0x6),
+)
+
+
 def build(count: int, want_oracle: bool) -> dict[str, list[dict]]:
     rng = random.Random(SEED)
     families: dict[str, list[dict]] = {}
@@ -356,6 +371,14 @@ def build(count: int, want_oracle: bool) -> dict[str, list[dict]]:
             emit("rv32m_op", f"{mnemonic} x12, x10, x11", word, 32, ["M"],
                  f"RV32M: opcode={OP:#04x} funct7=0b0000001 funct3={funct3:#05b} "
                  f"-- the extension is that one funct7 value", {10: a, 11: b})
+
+    for mnemonic, funct3 in RV32ZBA_OP:
+        for a, b in operand_sets(count, rng):
+            word = r_type(0x10, 11, 10, funct3, 12, OP)
+            emit("rv32zba", f"{mnemonic} x12, x10, x11", word, 32, ["Zba"],
+                 f"Zba address generation: opcode={OP:#04x} funct7=0b0010000 "
+                 f"funct3={funct3:#05b} -- the RP2350 datasheet 3.8 ISA string "
+                 f"has _zba_ and no ESP32-C part's does", {10: a, 11: b})
 
     for mnemonic, funct5 in RV32A_OP:
         for a, _ in operand_sets(count, rng):

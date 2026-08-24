@@ -51,6 +51,71 @@ def test_an_atomic_is_illegal_on_a_c3_and_merely_unwritten_on_a_c6(cpu):
             cpu.step()
 
 
+def test_zba_is_illegal_on_a_c3_and_executes_on_an_rp2350(cpu):
+    """The gating case for the first extension this core *implements*.
+
+    Different from the atomic above in one way that matters. `lr.w` on an
+    ESP32-C6 answers `Unimplemented`, because the extension is enabled and
+    nobody has written it. `sh1add` on an RP2350 answers `Ok` and produces a
+    number -- so this pair separates "the part refuses it" from "the part runs
+    it", which is the stronger of the two statements and the one that could not
+    be made before.
+
+    rvcpp executes `sh1add` for both parts (rv_core.cpp:265), so no lockstep
+    run will ever produce the left-hand half of this test.
+    """
+    for encoding, shift in ((e.sh1add("a0", "t0", "t1"), 1),
+                            (e.sh2add("a0", "t0", "t1"), 2),
+                            (e.sh3add("a0", "t0", "t1"), 3)):
+        load(cpu, [encoding])
+        cpu.set_extensions(abi.ESP32_C3)
+        with pytest.raises(abi.Illegal):
+            cpu.step()
+
+        load(cpu, [encoding])
+        cpu.set_extensions(abi.RP2350_MODELLED)
+        regs = cpu.get_regs().as_list()
+        regs[5], regs[6] = 7, 5          # t0, t1
+        cpu.set_regs(regs, pc=PC)
+        cpu.step()
+        assert cpu.reg(10) == (7 << shift) + 5, (
+            f"sh{shift}add produced {cpu.reg(10)}, expected (7 << {shift}) + 5"
+        )
+
+
+def test_zba_is_not_reached_by_enabling_some_other_extension(cpu):
+    """The bit has to be the Zba bit, not any bit that happens to be set.
+
+    A gate written as "not the base ISA" would let M or A switch Zba on, and
+    every test above would still pass because both parts that have M also have
+    everything else those tests use. The ESP32-C6 is the counter-example that
+    exists in silicon: RV32IMAC, so M and A and C are all on and Zba is not.
+    """
+    load(cpu, [e.sh1add("a0", "t0", "t1")])
+    cpu.set_extensions(abi.ESP32_C6)
+    with pytest.raises(abi.Illegal):
+        cpu.step()
+
+    assert abi.RP2350_MODELLED & abi.EXT_ZBA
+    assert not abi.ESP32_C6 & abi.EXT_ZBA
+    assert not abi.ESP32_C3 & abi.EXT_ZBA
+
+
+def test_an_unassigned_encoding_under_zbas_funct7_is_still_illegal(cpu):
+    """Zba is three funct3 values, not a whole funct7.
+
+    funct7 0b0010000 with funct3 001 is `bset` from Zbs, which this core does
+    not model. Turning Zba on must not turn that on with it -- an extension
+    gate that opened a funct7 wholesale would execute a neighbouring
+    extension's encoding and rvcpp, which implements Zbs too, would agree.
+    """
+    bset = e.r_type(0x10, "t1", "t0", 0x1, "a0", 0x33)
+    load(cpu, [bset])
+    cpu.set_extensions(abi.RP2350_MODELLED)
+    with pytest.raises(abi.Illegal):
+        cpu.step()
+
+
 def test_the_two_refusals_are_different_codes_at_the_abi_and_not_only_in_python(cpu):
     """The exception types are a convenience of the binding. What a second
     caller sees -- a WASM build, a corpus runner -- is the integer, and if

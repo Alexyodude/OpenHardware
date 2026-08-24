@@ -19,7 +19,8 @@ unfinished core look like a correctly strict one.
 from __future__ import annotations
 
 from tests.rv32.conftest import (
-    PC, SANDBOX, TARGETS, every_case, legal_on, load_family,
+    MODELLED, PC, SANDBOX, TARGETS, every_case, faithfully_configurable,
+    legal_on, load_family,
 )
 
 #: Families the core does not implement yet, and why that is not a gating
@@ -44,17 +45,29 @@ def refusal_is_testable(case: dict) -> bool:
     return case["width"] == 32 or "rv32c" not in EXPECTED_HOLES
 
 
-def extension_mask(abi, letters) -> int:
-    """Extension letters to the bitmask `core/riscv32/abi.py` uses."""
-    bits = {"M": abi.EXT_M, "A": abi.EXT_A, "C": abi.EXT_C}
+def extension_mask(abi, names) -> int:
+    """Extension names to the bitmask `core/riscv32/abi.py` uses.
+
+    Only the modelled ones. An unmodelled name is dropped rather than raising,
+    because a target legitimately has extensions this core cannot represent --
+    `faithfully_configurable` is what decides whether that matters for the case
+    in hand, and doing it here as well would make one question two.
+    """
+    bits = {
+        "M": abi.EXT_M,
+        "A": abi.EXT_A,
+        "C": abi.EXT_C,
+        "Zba": abi.EXT_ZBA,
+    }
+    assert set(bits) == set(MODELLED), (
+        f"MODELLED says {sorted(MODELLED)} and this map has {sorted(bits)}. "
+        f"They are the same list written twice and must not drift: a name in "
+        f"MODELLED with no bit here would be silently dropped from every mask."
+    )
     mask = 0
-    for letter in letters:
-        if letter not in bits:
-            raise AssertionError(
-                f"no bit in core.riscv32.abi for extension {letter!r}; "
-                f"known: {sorted(bits)}"
-            )
-        mask |= bits[letter]
+    for name in names:
+        if name in bits:
+            mask |= bits[name]
     return mask
 
 
@@ -120,6 +133,8 @@ def test_no_legal_encoding_is_refused_on_either_part(cpu, abi):
         for target in TARGETS:
             if not legal_on(case, target):
                 continue
+            if not faithfully_configurable(case, target):
+                continue
             if attempt(cpu, abi, case, target) == "illegal":
                 wrong.append(f"{target} refused {family}/{case['mnemonic']} "
                              f"({case['encoding']}), requires={case['requires']}")
@@ -148,6 +163,8 @@ def test_every_absent_extension_is_refused_on_every_part(cpu, abi):
         for target in TARGETS:
             if legal_on(case, target):
                 continue
+            if not faithfully_configurable(case, target):
+                continue
             verdict = attempt(cpu, abi, case, target)
             if verdict == "illegal":
                 continue
@@ -165,6 +182,60 @@ def test_every_absent_extension_is_refused_on_every_part(cpu, abi):
         assert tolerated == 0, (
             "the C decoder exists now, so no compressed encoding may answer "
             "Unimplemented in place of Illegal.")
+
+
+def test_zba_is_refused_on_both_esp32_parts_and_run_on_an_rp2350(cpu, abi):
+    """The gating case OH-42 adds, from the corpus rather than by hand.
+
+    Neither ESP32-C part has Zba: the C3 is RV32IMC and the C6 RV32IMAC. The
+    RP2350's datasheet string has `_zba_`. So one encoding, three parts, two
+    different correct answers -- and rvcpp executes it for all three
+    (`rv_core.cpp:265`), which is why the verdict is derived from the
+    extension letters instead.
+    """
+    case = load_family("rv32zba")[0]
+    assert case["requires"] == ["Zba"], case
+
+    for absent in ("ESP32-C3", "ESP32-C6"):
+        assert attempt(cpu, abi, case, absent) == "illegal", (
+            f"{case['mnemonic']} ({case['encoding']}) was not refused on an "
+            f"{absent}. {case['requires_source']}"
+        )
+    assert attempt(cpu, abi, case, "RP2350") == "executed", (
+        f"{case['mnemonic']} was not executed on an RP2350, whose datasheet "
+        f"ISA string contains _zba_"
+    )
+    assert case["rvcpp"]["status"] == "executed", (
+        "the corpus no longer records rvcpp executing this, so the premise "
+        "that the oracle cannot see gating needs rechecking"
+    )
+
+
+def test_the_c_and_zca_equivalence_is_only_claimed_for_parts_without_an_fpu(cpu, abi):
+    """Why `C` is in the RP2350's set when its ISA string says `zca`.
+
+    `C` is `Zca` + `Zcf` + `Zcd`; `Zcf` needs F and `Zcd` needs D. On a part
+    with neither, `C` and `Zca` cover the same encodings and the substitution
+    is sound. The `absent_extension` family is the proof that this core does
+    not merely assume it: those cases are `C.FLW`/`C.FLWSP`, which are the
+    encodings the equivalence *excludes*, and every target must still refuse
+    them.
+
+    If a part with an FPU is ever added to TARGETS, this test is what should
+    fail first -- before some corpus case quietly starts passing on it.
+    """
+    fpu_cases = [c for c in load_family("absent_extension") if c["requires"] == ["F"]]
+    assert fpu_cases, "the F cases that make this argument checkable are gone"
+
+    for target, extensions in TARGETS.items():
+        assert "F" not in extensions and "D" not in extensions, (
+            f"{target} has an FPU, so `C` may no longer stand in for `Zca` in "
+            f"its extension set: C.FLW and C.FLWSP become legal on it and the "
+            f"corpus would start calling them illegal"
+        )
+    for case in fpu_cases:
+        for target in TARGETS:
+            assert not legal_on(case, target)
 
 
 def test_the_oracle_executed_what_these_parts_must_refuse(cpu, abi):
@@ -191,6 +262,8 @@ def test_the_oracle_executed_what_these_parts_must_refuse(cpu, abi):
         "supposedly present, so refusal should be testable and is not.")
     for family, case in testable:
         for target in TARGETS:
+            if not faithfully_configurable(case, target):
+                continue
             assert attempt(cpu, abi, case, target) == "illegal", (
                 f"{target} did not refuse {case['mnemonic']} "
                 f"({case['encoding']}) -- rvcpp executes it, so a lockstep run "
@@ -232,3 +305,22 @@ def test_the_extension_letters_match_the_abi_bitmasks(abi):
     assert extension_mask(abi, TARGETS["ESP32-C6"]) == abi.ESP32_C6
     assert abi.EXT_A & abi.ESP32_C3 == 0, "an ESP32-C3 is RV32IMC: no atomics"
     assert abi.EXT_A & abi.ESP32_C6 != 0, "an ESP32-C6 is RV32IMAC: atomics"
+
+    # The RP2350 is the case where the two spellings can drift *silently*,
+    # because its datasheet set is larger than what the core can be told.
+    # `abi.RP2350_MODELLED` is the intersection written out by hand, and this
+    # is what stops someone adding Zbb to it without adding Zbb to MODELLED --
+    # which would make the core claim an extension no test could then reach.
+    assert extension_mask(abi, TARGETS["RP2350"]) == abi.RP2350_MODELLED, (
+        f"TARGETS['RP2350'] & MODELLED is "
+        f"{sorted(TARGETS['RP2350'] & MODELLED)}, whose mask is "
+        f"{extension_mask(abi, TARGETS['RP2350']):#x}, but "
+        f"abi.RP2350_MODELLED is {abi.RP2350_MODELLED:#x}"
+    )
+    assert abi.EXT_ZBA & abi.RP2350_MODELLED != 0, "the RP2350 has Zba"
+    assert abi.EXT_ZBA & abi.ESP32_C6 == 0, "an ESP32-C6 does not"
+    assert TARGETS["RP2350"] - MODELLED, (
+        "every extension the RP2350 has is now modelled, so `MODELLED` and "
+        "`faithfully_configurable` have become no-ops and the comments "
+        "explaining them describe a state that no longer exists"
+    )

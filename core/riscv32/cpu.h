@@ -52,13 +52,31 @@ constexpr unsigned kRegisters = 32;
 /// The optional extensions this core can be told a part has. RV32I is the
 /// base and is always present, so it has no bit.
 ///
-/// Only the three the seven boards actually differ over. Zb*, Zc* and F are
-/// not here because no board in this repository needs them yet, and a flag
-/// with no call site is a promise nothing keeps.
+/// One bit per extension this core can be *told about*, which is not the same
+/// as one bit per extension it implements. `kExtM` and `kExtA` are classified
+/// and then refused; `kExtZba` is implemented. Both need a bit, because the
+/// question a bit answers is "does this part have it", and that has to be
+/// answerable before the encoding is written or every instruction added later
+/// inherits the wrong default.
+///
+/// **`kExtC` is not Zca, and the difference is not academic.** The RP2350's
+/// ISA string is `..._zca_zcb_zcmp` with no plain `c`. On an RV32 part with no
+/// F and no D the two describe the same set of legal encodings, because `C` is
+/// exactly `Zca` plus `Zcf` (needs F) plus `Zcd` (needs D). Neither the
+/// RP2350 nor any ESP32-C part has an FPU, so reusing `kExtC` for them happens
+/// to give the right answers today -- by a coincidence about those parts, not
+/// because the names mean the same thing. A separate `kExtZca` belongs here
+/// before any part with an FPU arrives, and `tests/rv32/corpus/
+/// absent_extension.json` already holds the encodings that would separate them.
+///
+/// Zbb, Zbs, Zbkb, Zcb and Zcmp are still absent: the RP2350 has them and this
+/// core does not implement them yet, which `tests/rv32/conftest.py` records as
+/// a gap in `MODELLED` rather than by pretending the part lacks them.
 enum Extension : uint32_t {
     kExtM = 1u << 0,
     kExtA = 1u << 1,
     kExtC = 1u << 2,
+    kExtZba = 1u << 3,
 };
 
 /// What `step` did.

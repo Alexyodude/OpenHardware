@@ -1,0 +1,914 @@
+[
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 5
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 6
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967294
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "sh1add x12, x10, x11",
+  "encoding": "0x20b52633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b010 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967293
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 5
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 6
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 3
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 8
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 9
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 10
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 7
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967292
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967293
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967294
+   }
+  }
+ },
+ {
+  "mnemonic": "sh2add x12, x10, x11",
+  "encoding": "0x20b54633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b100 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967291
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000000",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 8
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 9
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 10
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000001",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 7
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 16
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 17
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 18
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0x00000002",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 15
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967288
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967289
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967290
+   }
+  }
+ },
+ {
+  "mnemonic": "sh3add x12, x10, x11",
+  "encoding": "0x20b56633",
+  "width": 32,
+  "requires": [
+   "Zba"
+  ],
+  "requires_source": "Zba address generation: opcode=0x33 funct7=0b0010000 funct3=0b110 -- the RP2350 datasheet 3.8 ISA string has _zba_ and no ESP32-C part's does",
+  "initial": {
+   "10": "0xffffffff",
+   "11": "0xffffffff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "12": 4294967287
+   }
+  }
+ }
+]

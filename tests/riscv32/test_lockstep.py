@@ -56,6 +56,50 @@ def check(report: lockstep.Report, least: int) -> None:
     )
 
 
+def test_zba_agrees_with_rvcpp(oracle, tmp_path):
+    """The RP2350's Zba, against the model written by the author of its silicon.
+
+    `sh1add`, `sh2add` and `sh3add` are the whole of Zba on RV32, and they are
+    the first extension this core implements rather than classifies-and-
+    refuses. Run with `RP2350_MODELLED`, because with Zba off the core must
+    raise illegal-instruction -- which is `test_extension_gating.py`'s half of
+    the answer and is invisible here, since rvcpp executes them for every part.
+
+    Both operands are chosen to overflow: `(rs1 << 3) + rs2` on 0x2000_0000
+    wraps, and a model that widened to 64 bits somewhere would agree on every
+    small case and diverge only here.
+    """
+    body = [
+        e.lui("t0", 0x12345),
+        e.addi("t0", "t0", 0x678),
+        e.addi("t1", "x0", -1),
+        e.sh1add("a0", "t0", "t1"),
+        e.sh2add("a1", "t0", "t1"),
+        e.sh3add("a2", "t0", "t1"),
+        e.lui("t2", 0x20000),
+        e.sh3add("a3", "t2", "t0"),
+        e.sh1add("a4", "t1", "t1"),
+        e.sh2add("x0", "t0", "t1"),
+    ]
+    check(
+        lockstep.run(image(body), tmp_path, extensions=abi.RP2350_MODELLED),
+        least=len(body),
+    )
+
+
+def test_zba_writing_x0_changes_nothing_in_either_model(oracle, tmp_path):
+    """x0 stays zero however it is written, and both models must agree it does.
+
+    The last instruction of the program above targets x0 on purpose. rvcpp
+    reports a writeback for it, so a core that let the write land would diverge
+    on the very next comparison -- but only if something is watching all 32
+    registers, which is why lockstep compares the whole file rather than rd.
+    """
+    body = [e.addi("t0", "x0", 7), e.sh3add("x0", "t0", "t0")]
+    report = lockstep.run(image(body), tmp_path, extensions=abi.RP2350_MODELLED)
+    check(report, least=len(body))
+
+
 def test_the_whole_alu_agrees_with_rvcpp(oracle, tmp_path):
     """Every register-register and register-immediate form in one program, so
     a divergence names the instruction rather than the family."""

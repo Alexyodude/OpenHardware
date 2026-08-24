@@ -148,6 +148,15 @@ def srai(rd, rs1, shamt): return r_type(0x20, shamt, rs1, 0x5, rd, 0x13)
 
 def add(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x0, rd, 0x33)
 def sub(rd, rs1, rs2): return r_type(0x20, rs2, rs1, 0x0, rd, 0x33)
+
+# Zba address generation. funct7 0b0010000 with funct3 010, 100 and 110, taken
+# from rvcpp's own encoding table so the two models cannot disagree about the
+# bits before they disagree about the answer:
+# `RVOPC_SH1ADD_BITS = 0b0010000_00000_00000_010_00000_0110011`
+# (third_party/hazard3/test/sim/rvcpp/include/encoding/rv_opcodes.h:149).
+def sh1add(rd, rs1, rs2): return r_type(0x10, rs2, rs1, 0x2, rd, 0x33)
+def sh2add(rd, rs1, rs2): return r_type(0x10, rs2, rs1, 0x4, rd, 0x33)
+def sh3add(rd, rs1, rs2): return r_type(0x10, rs2, rs1, 0x6, rd, 0x33)
 def sll(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x1, rd, 0x33)
 def slt(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x2, rd, 0x33)
 def sltu(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x3, rd, 0x33)

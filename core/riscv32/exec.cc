@@ -382,6 +382,28 @@ StepResult step(Cpu& cpu) {
             case 0x5u: result = shift_right_arithmetic(a, amount); break; // SRA
             default: return StepResult::Illegal;
             }
+        } else if (funct7 == 0x10u) {
+            // Zba address generation. `refuse` is deliberately not used here:
+            // it answers Unimplemented when the extension is present, and
+            // these three are implemented. A part without Zba must raise
+            // illegal-instruction, and that is the whole verdict rvcpp cannot
+            // give -- it executes SH1ADD for every part, gated or not
+            // (rv_core.cpp:265). Encodings from its own table:
+            // RVOPC_SH1ADD_BITS = 0b0010000_00000_00000_010_00000_0110011.
+            if (!cpu.has(kExtZba)) {
+                return StepResult::Illegal;
+            }
+            switch (funct3) {
+            case 0x2u: result = (a << 1) + b; break;                   // SH1ADD
+            case 0x4u: result = (a << 2) + b; break;                   // SH2ADD
+            case 0x6u: result = (a << 3) + b; break;                   // SH3ADD
+            // funct3 000, 001, 011, 101 and 111 under this funct7 are not
+            // Zba. Some belong to Zbs and Zbkb, which this core does not
+            // model; unassigned and not-modelled both read as Illegal here,
+            // and `MODELLED` in tests/rv32/conftest.py is what keeps a
+            // not-modelled encoding from being asserted against a real part.
+            default: return StepResult::Illegal;
+            }
         } else {
             return StepResult::Illegal;
         }

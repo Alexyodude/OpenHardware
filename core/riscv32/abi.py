@@ -45,12 +45,31 @@ ABI_VERSION = 1
 EXT_M = 1
 EXT_A = 2
 EXT_C = 4
+EXT_ZBA = 8
 
-#: The ISA of the three parts this core is for, spelled once. `docs/
+#: The ISA of the parts this core is for, spelled once. `docs/
 #: architectures.md` 4.2 is the citation, and the C3 row is the one that
 #: matters: **RV32IMC, no A**, quoted from the datasheet.
 ESP32_C3 = EXT_M | EXT_C
 ESP32_C6 = EXT_M | EXT_A | EXT_C
+
+#: The RP2350's Hazard3, **as far as this core models it, which is not all of
+#: it.** The datasheet's own string is
+#:
+#:     rv32ima_zicsr_zifencei_zba_zbb_zbs_zbkb_zca_zcb_zcmp
+#:
+#: so Zbb, Zbs, Zbkb, Zcb and Zcmp are missing here, and `kExtC` is standing in
+#: for Zca -- see the note on `Extension` in cpu.h for why that is sound for a
+#: part with no FPU and would stop being sound for one with an FPU.
+#:
+#: **This constant therefore describes a part that does not exist**, and it is
+#: named for a real one. That is only safe because nothing derives "the RP2350
+#: must refuse X" from it: `tests/rv32/conftest.py` keeps the datasheet's full
+#: set separately as the citable truth and intersects it with what is modelled,
+#: so an unmodelled extension shows up as a gap rather than as the silicon
+#: lacking it. Adding Zbb here without adding it there is the mistake this
+#: paragraph exists to prevent.
+RP2350_MODELLED = EXT_M | EXT_A | EXT_C | EXT_ZBA
 
 #: Must match `riscv32::StepResult` and abi.h's documented return values.
 OK = 0
