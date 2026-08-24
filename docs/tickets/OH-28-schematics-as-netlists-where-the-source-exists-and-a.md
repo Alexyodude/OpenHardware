@@ -19,3 +19,5 @@ The XIAO LED is the concrete motivation. tools/import_firmware.py's note records
 Where only a PDF exists the answer is 'PDF only', recorded as a fact about the vendor, and the board's LED wiring stays unknown. An unknown that is written down is usable; one that is inferred is not.
 
 Done when one board's LED-to-GPIO edge comes out of the vendor's schematic source and is checked against that board's own board-support definition, and a PDF-only vendor is reported as PDF-only rather than as unparsed.
+
+**Note 2026-08-25:** Same census as OH-29's note: Seeed publishes 0 .kicad_sch and 0 .kicad_pcb across the whole repository -- 37 .kicad_mod and 1 .kicad_sym are the entire machine-readable set. The 2 .pdf are marketing slides and a use-case document, not schematics. So neither branch of this ticket has input from the current vendor: there is no schematic source to turn into a netlist, and no schematic PDF to record as PDF-only. Blocked behind OH-23 in practice.

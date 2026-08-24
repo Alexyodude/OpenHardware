@@ -12,17 +12,24 @@ and `upstream-sync.md` each drifted from the code they described inside a single
 session. An inventory is exactly the kind of document that rots fastest, so
 this one is generated on demand instead of written down.
 
-Five collectors, one per thing worth counting:
+Six collectors, one per thing worth counting:
 
 * `collect_tests`   — parses each test file with `ast`
 * `collect_mechanisms` — reads `rules/*.md` frontmatter
 * `collect_files`   — asks git what this repository tracks
 * `collect_ledgers` — parses every ledger under `docs/features/`
 * `collect_boards`  — reads every board definition under `webui/boards/`
+* `collect_assets`  — searches for the CAD behind each board, and grades it
 
 Each raises rather than returning an empty result. A report that renders
 cheerfully with nothing in it is indistinguishable from a report of a healthy
 repository, which is the vacuous green this project exists to prevent.
+
+`collect_assets` is the one that reports on things this repository does not
+have. Every cell it emits carries an evidence class, because *a schematic
+exists* and *a schematic was opened and parsed* are answers to different
+questions and a survey that renders them in the same cell has stopped being
+useful. Reading "absent" across a row is the intended output, not a failure.
 
 **Known model limit:** `collect_tests` counts `def test_*` via `ast`, so it
 counts a parametrised test once where pytest counts it many times. No test here
@@ -36,6 +43,7 @@ from __future__ import annotations
 import argparse
 import ast
 import collections
+import enum
 import json
 import pathlib
 import subprocess
@@ -60,6 +68,12 @@ TESTS_DIR = pathlib.Path("tests/rules")
 RULES_DIR = pathlib.Path("rules")
 FEATURES_DIR = pathlib.Path("docs/features")
 BOARDS_DIR = pathlib.Path("webui/boards")
+#: Where `tools/get_seeed_hardware.sh` puts the vendor's CAD. Fetched, never
+#: vendored, and git-ignored — a survey of what a vendor publishes must not
+#: quietly become a copy of it. One vendor is named here because there is one
+#: vendor today; OH-24 replaces the fetcher with a table over many, and this
+#: becomes a lookup on that day and not before.
+VENDOR_DIR = pathlib.Path("third_party/seeed-xiao")
 #: Top-level directories, in the order the report lists them. Anything
 #: outside them lands in `other`, which is deliberately visible: the
 #: separation from upstream is only kept by noticing when something
@@ -249,6 +263,345 @@ def collect_boards(boards_dir: pathlib.Path = BOARDS_DIR) -> list[Board]:
     return boards
 
 
+class Evidence(enum.Enum):
+    """How strong a claim one asset cell is making, strongest first.
+
+    `docs/architectures.md` marks each of its findings with the class of
+    evidence behind it, because "the datasheet says 400 MHz" and "a repost
+    says 360 MHz" are not the same claim and averaging them helps nobody. An
+    asset survey has that problem in a sharper form: *a schematic exists* and
+    *a schematic was opened and parsed* are answers to different questions,
+    and the gap between them is where a survey stops being useful.
+
+    The two weakest classes are the ones to read carefully, because they look
+    alike and are not. `ABSENT` means the search ran and there is nothing --
+    a finding about the vendor. `UNSEARCHABLE` means the search could not run
+    at all, which is a finding about *this checkout*: `third_party/` is
+    git-ignored, so a fresh clone has no vendor tree, and reporting `absent`
+    there would manufacture twenty-six negative results out of a fetch nobody
+    performed.
+
+    The gloss travels with the member rather than in a table beside it, so a
+    class cannot be added without the report learning how to explain it.
+    """
+
+    PARSED = ("parsed", "this tool opened the file and read what is in it")
+    PRESENT = ("present", "a file is on disk; nothing here has opened it")
+    INDEXED = ("indexed", "the vendor's git tree names it; it is not on this disk")
+    ABSENT = ("absent", "the search ran and found nothing")
+    UNSEARCHABLE = (
+        "unsearchable",
+        "the search could not run: no vendor tree, or no source recorded",
+    )
+
+    def __init__(self, label: str, gloss: str) -> None:
+        self.label = label
+        self.gloss = gloss
+
+
+#: What counts as each asset, as (form, suffixes) in the order the report
+#: prefers them. `form` names the distinction only where it changes what can
+#: be done with the file: a schematic in source form can become a netlist
+#: (OH-28), a schematic as a PDF can be read by a person and nothing else.
+#: The non-KiCad suffixes are here because the boards this project wants are
+#: not all published in KiCad; Eagle and Altium cover nearly all of the rest.
+SCHEMATIC_FORMS = (("source", (".kicad_sch", ".sch", ".schdoc")), ("PDF", (".pdf",)))
+PCB_FORMS = ((None, (".kicad_pcb", ".brd", ".pcbdoc")),)
+MODEL_FORMS = ((None, (".step", ".stp", ".wrl", ".stl", ".3mf")),)
+#: File stems that carry a licence. `COPYING` is here because GPL trees use it.
+LICENCE_STEMS = frozenset({"license", "licence", "copying"})
+#: The asset cells, in report order. Named once so the two renderers and the
+#: completeness count cannot disagree about what "all of them" means.
+ASSET_CELLS = ("schematic", "pcb", "model3d", "pins", "licence")
+
+
+class Asset(typing.NamedTuple):
+    """One cell of the asset report: what was found, and how well it is known."""
+
+    evidence: Evidence
+    #: The value behind the cell — the path that was found, the counts that
+    #: were read, or the reason the search could not run. Never a bare "no".
+    detail: str
+    #: The form of the asset, where the form changes what it is good for.
+    #: Only the schematic sets it: `source` or `PDF`.
+    form: str | None = None
+
+    def summary(self) -> str:
+        """The cell as one short token, for the fixed-width text report."""
+        return f"{self.evidence.label}:{self.form}" if self.form else self.evidence.label
+
+
+class BoardAssets(typing.NamedTuple):
+    """What one board has behind it, cell by cell."""
+
+    name: str
+    schematic: Asset
+    pcb: Asset
+    model3d: Asset
+    pins: Asset
+    licence: Asset
+
+    def missing(self) -> tuple[str, ...]:
+        """The cells this report cannot show anything for.
+
+        `UNSEARCHABLE` counts as missing alongside `ABSENT`, and the wording
+        matters: this is "the report has nothing here", not "the vendor
+        published nothing". A board is never called complete on the strength
+        of a search that did not run — OH-13 set that precedent when the
+        board list refused to call twenty-five unwired boards supported.
+        """
+        return tuple(
+            cell
+            for cell in ASSET_CELLS
+            if getattr(self, cell).evidence
+            in (Evidence.ABSENT, Evidence.UNSEARCHABLE)
+        )
+
+
+class _Tree(typing.NamedTuple):
+    """The vendor CAD tree, or the reason there is nothing to search."""
+
+    root: pathlib.Path
+    on_disk: tuple[str, ...]
+    indexed: tuple[str, ...]
+    unsearchable: str | None
+
+
+def _vendor_tree(vendor_dir: pathlib.Path) -> _Tree:
+    """Everything the vendor tree holds, split by whether it was fetched.
+
+    The index half is the reason this consults git at all.
+    `tools/get_seeed_hardware.sh` clones **sparsely by default** — the KiCad
+    library and `document/`, nothing else — because the full tree is ~196 MB
+    of marketing PNGs. A disk-only search over a sparse checkout would report
+    "no schematic" for a schematic sitting in the repository unfetched, which
+    is a false negative wearing the clothes of a finding.
+    """
+    if not vendor_dir.is_dir():
+        return _Tree(
+            vendor_dir,
+            (),
+            (),
+            f"{vendor_dir.as_posix()} is not fetched here; "
+            f"run: bash tools/get_seeed_hardware.sh",
+        )
+
+    on_disk: list[str] = []
+    for entry in sorted(vendor_dir.iterdir()):
+        if entry.name == ".git":
+            continue
+        if entry.is_file():
+            on_disk.append(entry.name)
+            continue
+        on_disk += [
+            path.relative_to(vendor_dir).as_posix()
+            for path in entry.rglob("*")
+            if path.is_file()
+        ]
+    on_disk.sort()
+
+    try:
+        result = subprocess.run(
+            ["git", "ls-tree", "-r", "HEAD", "--name-only"],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=vendor_dir,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise InventoryError(
+            f"{vendor_dir}: git ls-tree failed: {(exc.stderr or '').strip() or exc}. "
+            f"This should be the clone tools/get_seeed_hardware.sh makes; delete it "
+            f"and re-run that script."
+        ) from exc
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise InventoryError(f"{vendor_dir}: cannot run git here: {exc}") from exc
+
+    fetched = set(on_disk)
+    indexed = sorted(
+        line.strip()
+        for line in result.stdout.splitlines()
+        if line.strip() and line.strip() not in fetched
+    )
+    return _Tree(vendor_dir, tuple(on_disk), tuple(indexed), None)
+
+
+def _named_for(
+    paths: tuple[str, ...], footprint: str, suffixes: tuple[str, ...]
+) -> str | None:
+    """The first path naming `footprint` exactly and ending in one of `suffixes`.
+
+    Exact names only: the file's stem *is* the footprint, or one of its parent
+    directories *is*. Prefix matching is refused, and
+    `webui/boards/catalogue.py` spends four paragraphs on why — `startswith`
+    matched `ESP32-C6` against `ESP32-C61`, a different real part. The same
+    shortcut here would match `XIAO-ESP32-C3-DIP` against
+    `XIAO-ESP32-C3-DIP-SMD.kicad_sch` and file one board's schematic under its
+    neighbour's name. A missed schematic is a false `absent` somebody can go
+    and fix; a schematic filed under the wrong board is a wrong answer nobody
+    can see.
+    """
+    for path in paths:
+        candidate = pathlib.PurePosixPath(path)
+        if candidate.suffix.lower() not in suffixes:
+            continue
+        if candidate.stem == footprint or footprint in candidate.parent.parts:
+            return path
+    return None
+
+
+def _vendor_cell(
+    forms: tuple[tuple[str | None, tuple[str, ...]], ...],
+    footprint: str | None,
+    tree: _Tree,
+) -> Asset:
+    """One cell for an asset that would live in the vendor's tree.
+
+    On-disk hits beat indexed ones whatever the form, because `PRESENT` is the
+    stronger claim; the form is reported either way, so preferring a fetched
+    PDF over an unfetched source file loses nothing.
+    """
+    if tree.unsearchable:
+        return Asset(Evidence.UNSEARCHABLE, tree.unsearchable)
+    if not footprint:
+        return Asset(
+            Evidence.UNSEARCHABLE,
+            "the board file records no `source.footprint`, so there is no name "
+            "to search the vendor tree for",
+        )
+
+    for form, suffixes in forms:
+        hit = _named_for(tree.on_disk, footprint, suffixes)
+        if hit:
+            return Asset(Evidence.PRESENT, f"{tree.root.as_posix()}/{hit}", form)
+    for form, suffixes in forms:
+        hit = _named_for(tree.indexed, footprint, suffixes)
+        if hit:
+            return Asset(
+                Evidence.INDEXED,
+                f"{hit} — in the vendor's git tree, not fetched",
+                form,
+            )
+
+    wanted = "/".join(suffix for _, group in forms for suffix in group)
+    return Asset(
+        Evidence.ABSENT,
+        f"nothing named {footprint} with a {wanted} suffix under "
+        f"{tree.root.as_posix()}",
+    )
+
+
+def _pin_cell(path: pathlib.Path, pads: list) -> Asset:
+    """The pin-definition cell, the only one this tool reads for itself.
+
+    `PARSED` is the honest class here and nowhere else: the pad map was
+    opened, decoded and counted a few lines above. The counts go in the detail
+    because "there is a pin definition" is a much weaker statement than it
+    sounds — on twenty-five of these boards every `pin` is null, and a cell
+    saying only `parsed` would read as though they were wired.
+    """
+    if not pads:
+        return Asset(Evidence.ABSENT, f"{path.as_posix()} declares no pads")
+    wired = sum(1 for pad in pads if pad.get("pin") is not None)
+    return Asset(
+        Evidence.PARSED,
+        f"{len(pads)} pads, {wired} carrying a simulator pin index",
+    )
+
+
+def _licence_file(paths: tuple[str, ...]) -> str | None:
+    """The licence file nearest the root of the tree, if there is one.
+
+    Nearest, because a `COPYING` buried in one sample project covers that
+    project; the one at the top covers the CAD.
+    """
+    candidates = [
+        path
+        for path in paths
+        if pathlib.PurePosixPath(path).stem.lower() in LICENCE_STEMS
+    ]
+    return min(candidates, key=lambda path: (path.count("/"), path), default=None)
+
+
+def _licence_cell(licence: str | None, tree: _Tree) -> Asset:
+    """How well the licence claim over a board's assets is backed.
+
+    A licence string in a board file is a note an importer wrote. A licence
+    file in the tree it came from is the licence. The classes keep those apart
+    rather than letting the note stand in for the thing.
+    """
+    if not licence:
+        return Asset(Evidence.ABSENT, "the board file records no `source.licence`")
+    if tree.unsearchable:
+        return Asset(
+            Evidence.UNSEARCHABLE,
+            f"{licence} recorded in the board file, uncorroborated: "
+            f"{tree.unsearchable}",
+        )
+
+    on_disk = _licence_file(tree.on_disk)
+    if on_disk:
+        return Asset(Evidence.PRESENT, f"{licence}; {tree.root.as_posix()}/{on_disk}")
+    indexed = _licence_file(tree.indexed)
+    if indexed:
+        return Asset(
+            Evidence.INDEXED,
+            f"{licence}; {indexed} — in the vendor's git tree, not fetched",
+        )
+    return Asset(
+        Evidence.ABSENT,
+        f"{licence} recorded in the board file, but {tree.root.as_posix()} holds "
+        f"no licence file to back it",
+    )
+
+
+def collect_assets(
+    boards_dir: pathlib.Path = BOARDS_DIR,
+    vendor_dir: pathlib.Path = VENDOR_DIR,
+) -> list[BoardAssets]:
+    """Per board: schematic, PCB, 3D model, pin definition, licence, each graded.
+
+    Nothing here is typed by hand. The five cells are searched for on the
+    filesystem every time the report runs, so a board added with no schematic
+    reports no schematic without anyone editing anything — which is the point.
+    The alternative is a five-column table of yes and no, which is precisely
+    the hand-maintained inventory `CLAUDE.md` forbids by name on the grounds
+    that it is the document that rots fastest.
+    """
+    if not boards_dir.is_dir():
+        raise InventoryError(f"{boards_dir}: boards directory does not exist")
+    paths = sorted(boards_dir.glob("*.json"))
+    if not paths:
+        raise InventoryError(f"{boards_dir}: contains no board definitions")
+
+    tree = _vendor_tree(vendor_dir)
+
+    reports = []
+    for path in paths:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise InventoryError(f"{path}: {exc}") from exc
+        pads = data.get("pads")
+        if not isinstance(pads, list):
+            raise InventoryError(
+                f"{path}: expected a `pads` list, got {type(pads).__name__}"
+            )
+        source = data.get("source") or {}
+        footprint = source.get("footprint")
+        reports.append(
+            BoardAssets(
+                name=data.get("board", path.stem),
+                schematic=_vendor_cell(SCHEMATIC_FORMS, footprint, tree),
+                pcb=_vendor_cell(PCB_FORMS, footprint, tree),
+                model3d=_vendor_cell(MODEL_FORMS, footprint, tree),
+                pins=_pin_cell(path, pads),
+                licence=_licence_cell(source.get("licence"), tree),
+            )
+        )
+    return reports
+
+
 def _head() -> str:
     try:
         result = subprocess.run(
@@ -268,6 +621,7 @@ class _Inventory(typing.NamedTuple):
     files: dict[str, list[str]]
     ledgers: dict[str, collections.Counter]
     boards: list[Board]
+    assets: list[BoardAssets]
 
 
 def _gather() -> _Inventory:
@@ -278,6 +632,7 @@ def _gather() -> _Inventory:
         collect_files(),
         collect_ledgers(),
         collect_boards(),
+        collect_assets(),
     )
 
 
@@ -302,6 +657,38 @@ def _boards_by_reach(boards: list[Board]) -> list[Board]:
     alphabet happens to give it.
     """
     return sorted(boards, key=lambda b: (-b.wired, b.name))
+
+
+def _assets_by_completeness(assets: list[BoardAssets]) -> list[BoardAssets]:
+    """Most complete first, then alphabetical — one ordering for both renderers.
+
+    The same choice `_boards_by_reach` makes, for the same reason: sorting by
+    what is actually there puts whatever this repository has managed to
+    substantiate at the top, rather than at whatever position the alphabet
+    happens to give it.
+    """
+    return sorted(assets, key=lambda report: (len(report.missing()), report.name))
+
+
+def _asset_tallies(assets: list[BoardAssets]) -> str:
+    """Per cell, how many boards have anything at all — one string, both renderers."""
+    return ", ".join(
+        f"{cell} {sum(1 for report in assets if cell not in report.missing())}"
+        for cell in ASSET_CELLS
+    )
+
+
+def _asset_md(asset: Asset) -> str:
+    """One markdown cell: the class, and the thing it rests on where there is one.
+
+    A found file is named; a cell with nothing behind it shows the class
+    alone, because the prose above the table already says where the search ran
+    and repeating that sentence seventy-eight times would bury the rows that
+    have something in them.
+    """
+    if asset.evidence in (Evidence.ABSENT, Evidence.UNSEARCHABLE):
+        return f"`{asset.summary()}`"
+    return f"`{asset.summary()}` {asset.detail}"
 
 
 def _board_provenance(board: Board) -> str:
@@ -350,6 +737,26 @@ def render_text() -> str:
             f"  {_board_provenance(board)}"
             f"{'' if board.art else '  [no artwork]'}"
         )
+
+    whole = [report for report in inv.assets if not report.missing()]
+    lines.append("")
+    lines.append(
+        f"ASSETS — {len(whole)} of {len(inv.assets)} boards carry all five; "
+        f"by cell: {_asset_tallies(inv.assets)}"
+    )
+    lines.append(
+        f"  Vendor CAD is searched for under {VENDOR_DIR.as_posix()}/, where"
+    )
+    lines.append("  tools/get_seeed_hardware.sh puts it. Evidence, strongest first:")
+    for evidence in Evidence:
+        lines.append(f"    {evidence.label:<13} {evidence.gloss}")
+    lines.append("")
+    lines.append("  " + "".join(f"{cell:<15}" for cell in ASSET_CELLS) + "board")
+    for report in _assets_by_completeness(inv.assets):
+        cells = "".join(
+            f"{getattr(report, cell).summary():<15}" for cell in ASSET_CELLS
+        )
+        lines.append(f"  {cells}{report.name}")
 
     return "\n".join(lines)
 
@@ -423,6 +830,30 @@ def render_markdown() -> str:
         f"| `{board.name}` | {board.pads} | {board.wired} "
         f"| {'yes' if board.art else 'no'} | {_board_provenance(board)} |"
         for board in _boards_by_reach(inv.boards)
+    ]
+
+    whole = [report for report in inv.assets if not report.missing()]
+    out += [
+        "",
+        f"## Assets — {len(whole)} of {len(inv.assets)} boards carry all five",
+        "",
+        f"By cell: {_asset_tallies(inv.assets)}. Vendor CAD is searched for under "
+        f"`{VENDOR_DIR.as_posix()}/`, where `tools/get_seeed_hardware.sh` puts it; "
+        "a cell reading `unsearchable` means that tree is absent from this "
+        "checkout, which is a fact about the checkout and not about the vendor.",
+        "",
+    ]
+    out += [f"* `{evidence.label}` — {evidence.gloss}" for evidence in Evidence]
+    out += [
+        "",
+        "| board | " + " | ".join(ASSET_CELLS) + " |",
+        "|---" * (len(ASSET_CELLS) + 1) + "|",
+    ]
+    out += [
+        f"| `{report.name}` | "
+        + " | ".join(_asset_md(getattr(report, cell)) for cell in ASSET_CELLS)
+        + " |"
+        for report in _assets_by_completeness(inv.assets)
     ]
 
     return "\n".join(out) + "\n"

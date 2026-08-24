@@ -18,3 +18,5 @@ Size will decide what is stored. A tessellated board with every component is ten
 Done when one board renders from the vendor's own STEP with pad positions agreeing with the existing JSON to the tolerance the tessellation allows, and that tolerance is stated rather than assumed.
 
 Scope: ingestion only. The view is a separate ticket.
+
+**Note 2026-08-25:** Verified against the vendor tree by full git ls-tree census, not a sparse checkout: Seeed's OSHW-XIAO-Series publishes ZERO board 3D models -- 0 .step, 0 .stp, 0 .wrl. The only 13 .stl are enclosure parts for a community NTP-clock project (cases, lids, diffuser masks), not boards. So this ticket has no source material for 25 of the 26 boards here and cannot start until OH-23 finds a vendor that publishes board 3D. Do not begin by writing a STEP tessellator.

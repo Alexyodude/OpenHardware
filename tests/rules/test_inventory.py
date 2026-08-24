@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 
+import json
 import pathlib
 import re
 import subprocess
@@ -11,7 +12,10 @@ import sys
 import pytest
 
 from tools.inventory import (
+    VENDOR_DIR,
+    Evidence,
     InventoryError,
+    collect_assets,
     collect_boards,
     collect_files,
     collect_ledgers,
@@ -174,7 +178,14 @@ def test_every_armed_checker_is_a_file_the_inventory_reports():
 
 def test_text_render_names_every_section():
     out = render_text()
-    for heading in ("TESTS", "MECHANISMS", "FILES tracked", "LEDGERS", "BOARDS"):
+    for heading in (
+        "TESTS",
+        "MECHANISMS",
+        "FILES tracked",
+        "LEDGERS",
+        "BOARDS",
+        "ASSETS",
+    ):
         assert heading in out
 
 
@@ -183,7 +194,7 @@ def test_markdown_render_has_a_table_per_section_and_states_provenance():
     # Count separator *lines*, not occurrences: a four-column table contains
     # "|---" four times on one line.
     separators = sum(1 for line in out.splitlines() if line.startswith("|---"))
-    assert separators == 5, "expected one table per section"
+    assert separators == 6, "expected one table per section"
     assert "Generated from" in out
     assert "do not edit this by hand" in out
 
@@ -300,3 +311,349 @@ def test_the_readme_does_not_write_down_board_counts():
     assert section
     stray = re.findall(r"\b\d+\s+(?:boards?|pads?|definitions?)\b", section.group(1))
     assert not stray, f"board counts written down by hand: {stray}"
+
+
+# --- collect_assets --------------------------------------------------------
+#
+# The asset report answers, per board: is there a schematic, a PCB design, a
+# 3D model, a pin definition, a licence — and how strong is the claim. These
+# tests are mostly about the *weak* answers, because a survey earns its keep
+# by being trusted when it says no.
+
+
+def _board_file(directory, name, footprint=None, licence=None, pads=None):
+    """Write one board definition, with only the fields under test."""
+    source = {}
+    if footprint is not None:
+        source["footprint"] = footprint
+    if licence is not None:
+        source["licence"] = licence
+    board = {"board": name, "pads": pads if pads is not None else [{"pin": None}]}
+    if source:
+        board["source"] = source
+    (directory / f"{name}.json").write_text(json.dumps(board), encoding="utf-8")
+
+
+def _vendor_checkout(root, files):
+    """A git checkout holding `files`, the way the fetch script leaves one.
+
+    Committed as well as written, because `collect_assets` reads the git tree
+    to tell "the vendor does not publish this" from "we did not fetch it".
+    """
+    for relative, text in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "add", "-A", "-f"], cwd=root, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "user.name=test",
+            "commit",
+            "-qm",
+            "vendor",
+        ],
+        cwd=root,
+        check=True,
+    )
+    return root
+
+
+def test_assets_missing_boards_directory_raises(tmp_path):
+    with pytest.raises(InventoryError, match="does not exist"):
+        collect_assets(tmp_path / "absent", tmp_path / "vendor")
+
+
+def test_assets_boards_directory_without_definitions_raises(tmp_path):
+    with pytest.raises(InventoryError, match="no board definitions"):
+        collect_assets(tmp_path, tmp_path / "vendor")
+
+
+def test_an_unfetched_vendor_tree_is_unsearchable_not_absent(tmp_path):
+    """The difference this whole grading scheme exists for.
+
+    `third_party/` is git-ignored, so a fresh clone has no vendor tree at all.
+    Reporting `absent` there would turn one missing fetch into twenty-six
+    findings about what a vendor publishes, which is the vacuous-green failure
+    inverted: a confident negative nobody checked.
+    """
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "B", footprint="B")
+
+    report = collect_assets(boards, tmp_path / "never-fetched")[0]
+    assert report.schematic.evidence is Evidence.UNSEARCHABLE
+    assert "get_seeed_hardware.sh" in report.schematic.detail, (
+        "the cell must say how to make the search possible"
+    )
+
+
+def test_a_fetched_tree_holding_nothing_reports_absent(tmp_path):
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "B", footprint="B")
+    vendor = _vendor_checkout(tmp_path / "vendor", {"README.md": "nothing here"})
+
+    report = collect_assets(boards, vendor)[0]
+    assert report.schematic.evidence is Evidence.ABSENT
+    assert "B" in report.schematic.detail and ".kicad_sch" in report.schematic.detail, (
+        f"an absent cell must say what was looked for: {report.schematic.detail}"
+    )
+
+
+def test_a_schematic_in_source_form_is_told_apart_from_a_pdf(tmp_path):
+    """Source or PDF is the difference between a netlist and a picture.
+
+    OH-28 can turn `.kicad_sch` into a netlist. Nothing can turn a PDF into
+    one, so a report that renders both as "schematic: yes" promises work that
+    cannot be done.
+    """
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "Source", footprint="Source")
+    _board_file(boards, "Paper", footprint="Paper")
+    vendor = _vendor_checkout(
+        tmp_path / "vendor",
+        {"cad/Source.kicad_sch": "(kicad_sch)", "cad/Paper.pdf": "%PDF-1.4"},
+    )
+
+    cells = {report.name: report.schematic for report in collect_assets(boards, vendor)}
+    assert cells["Source"].form == "source"
+    assert cells["Paper"].form == "PDF"
+    assert cells["Source"].evidence is cells["Paper"].evidence is Evidence.PRESENT
+    assert cells["Paper"].summary() == "present:PDF"
+
+
+def test_a_schematic_is_never_credited_to_a_neighbouring_board(tmp_path):
+    """The `ESP32-C6` / `ESP32-C61` bug, in its board-file form.
+
+    `webui/boards/catalogue.py` records that `startswith` matched a chip
+    against a different real part. Here the same shortcut would hand
+    `XIAO-ESP32-C3-DIP` its neighbour's schematic, and the report would be
+    wrong in the one direction nobody goes looking: a filled-in cell.
+    """
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "XIAO-ESP32-C3-DIP", footprint="XIAO-ESP32-C3-DIP")
+    vendor = _vendor_checkout(
+        tmp_path / "vendor", {"XIAO-ESP32-C3-DIP-SMD.kicad_sch": "(kicad_sch)"}
+    )
+
+    report = collect_assets(boards, vendor)[0]
+    assert report.schematic.evidence is Evidence.ABSENT
+
+
+def test_an_asset_in_a_directory_named_for_the_footprint_counts(tmp_path):
+    """Vendors file per-board CAD in a per-board directory as often as not."""
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "B", footprint="XIAO-RP2040-DIP")
+    vendor = _vendor_checkout(
+        tmp_path / "vendor", {"hardware/XIAO-RP2040-DIP/schematic.pdf": "%PDF-1.4"}
+    )
+
+    report = collect_assets(boards, vendor)[0]
+    assert report.schematic.evidence is Evidence.PRESENT
+    assert report.schematic.form == "PDF"
+
+
+def test_a_file_in_the_index_but_not_on_disk_is_indexed_not_absent(tmp_path):
+    """A sparse checkout must not be read as a vendor publishing nothing.
+
+    `tools/get_seeed_hardware.sh` fetches the KiCad library and `document/`
+    and nothing else, because the full tree is ~196 MB of marketing PNGs. A
+    disk-only search would call a real unfetched schematic absent.
+    """
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "B", footprint="B")
+    vendor = _vendor_checkout(tmp_path / "vendor", {"cad/B.kicad_pcb": "(kicad_pcb)"})
+    (vendor / "cad" / "B.kicad_pcb").unlink()
+
+    report = collect_assets(boards, vendor)[0]
+    assert report.pcb.evidence is Evidence.INDEXED
+    assert "not fetched" in report.pcb.detail
+
+
+def test_a_vendor_directory_that_is_not_a_checkout_raises(tmp_path):
+    """Do not silently downgrade to a disk-only search.
+
+    Half a search reported as a whole one is the failure mode this module
+    exists to prevent, so the tool says what is wrong and stops.
+    """
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "B", footprint="B")
+    loose = tmp_path / "loose"
+    loose.mkdir()
+    (loose / "B.kicad_sch").write_text("(kicad_sch)", encoding="utf-8")
+
+    with pytest.raises(InventoryError, match="git"):
+        collect_assets(boards, loose)
+
+
+def test_the_pin_cell_counts_pads_and_says_how_many_are_wired(tmp_path):
+    """`parsed` alone would read as though the board were connected.
+
+    Twenty-five of the twenty-six boards here have a complete pad map and not
+    one simulator pin index in it, so the counts belong in the cell.
+    """
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "B", pads=[{"pin": 3}, {"pin": 0}, {"pin": None}, {}])
+
+    report = collect_assets(boards, tmp_path / "vendor")[0]
+    assert report.pins.evidence is Evidence.PARSED
+    assert "4 pads, 2 carrying a simulator pin index" in report.pins.detail
+
+
+def test_a_board_declaring_no_pads_has_no_pin_definition(tmp_path):
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "B", pads=[])
+
+    report = collect_assets(boards, tmp_path / "vendor")[0]
+    assert report.pins.evidence is Evidence.ABSENT
+
+
+def test_a_licence_string_is_not_the_same_claim_as_a_licence_file(tmp_path):
+    """The board file's `source.licence` is a note; the LICENSE is the licence."""
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "Backed", footprint="Backed", licence="MIT")
+    _board_file(boards, "Bare", footprint="Bare", licence="MIT")
+
+    backed = _vendor_checkout(tmp_path / "backed", {"LICENSE": "MIT ..."})
+    bare = _vendor_checkout(tmp_path / "bare", {"README.md": "no licence here"})
+
+    with_file = {r.name: r.licence for r in collect_assets(boards, backed)}["Backed"]
+    without = {r.name: r.licence for r in collect_assets(boards, bare)}["Bare"]
+
+    assert with_file.evidence is Evidence.PRESENT
+    assert "LICENSE" in with_file.detail
+    assert without.evidence is Evidence.ABSENT
+    assert "MIT" in without.detail, "the recorded string is still worth reporting"
+
+
+def test_a_licence_at_the_top_of_the_tree_beats_one_inside_a_sample(tmp_path):
+    """A `COPYING` in one bundled project covers that project, not the CAD."""
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "B", footprint="B", licence="MIT")
+    vendor = _vendor_checkout(
+        tmp_path / "vendor",
+        {"LICENSE": "MIT ...", "projects/demo/COPYING": "GPL-2.0 ..."},
+    )
+
+    report = collect_assets(boards, vendor)[0]
+    assert report.licence.detail.endswith("/LICENSE")
+
+
+def test_a_board_recording_no_licence_reports_absent(tmp_path):
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "B", footprint="B")
+    vendor = _vendor_checkout(tmp_path / "vendor", {"LICENSE": "MIT ..."})
+
+    report = collect_assets(boards, vendor)[0]
+    assert report.licence.evidence is Evidence.ABSENT
+    assert "source.licence" in report.licence.detail
+
+
+def test_missing_names_every_cell_with_nothing_behind_it(tmp_path):
+    """The report has to be able to say a board is incomplete, and which part.
+
+    OH-13 set the precedent when the generated board list refused to call
+    twenty-five unwired boards supported. `unsearchable` counts as missing
+    alongside `absent` for the same reason: a search that did not run is not
+    evidence that anything is there.
+    """
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "B", footprint="B", licence="MIT", pads=[{"pin": 1}])
+    vendor = _vendor_checkout(tmp_path / "vendor", {"LICENSE": "MIT ..."})
+
+    report = collect_assets(boards, vendor)[0]
+    assert report.missing() == ("schematic", "pcb", "model3d")
+
+    unfetched = collect_assets(boards, tmp_path / "never-fetched")[0]
+    assert unfetched.missing() == ("schematic", "pcb", "model3d", "licence")
+
+
+def test_every_evidence_class_explains_itself():
+    """A class the report cannot gloss is a class a reader cannot use.
+
+    The gloss lives on the enum member rather than in a legend beside it, so
+    this is a shape check rather than a drift check — there is no second
+    place for it to drift from.
+    """
+    labels = [evidence.label for evidence in Evidence]
+    assert len(set(labels)) == len(labels), f"duplicate evidence labels: {labels}"
+    for evidence in Evidence:
+        assert evidence.gloss.strip(), f"{evidence.label} has no gloss"
+
+
+# --- the asset report cannot drift from the directory ----------------------
+
+
+def test_the_asset_report_covers_exactly_the_boards_on_disk():
+    """One row per board definition, named the way the board list names it.
+
+    The drift guard OH-13 put on the README board list, applied to the report
+    that grades those boards: a board added to `webui/boards/` appears here
+    and a board removed disappears, with nobody editing a table.
+    """
+    boards_dir = REPO / "webui" / "boards"
+    reported = [report.name for report in collect_assets(boards_dir, REPO / VENDOR_DIR)]
+    listed = [board.name for board in collect_boards(boards_dir)]
+
+    assert sorted(reported) == sorted(listed), (
+        "the asset report has drifted from webui/boards/; "
+        f"only in the report: {sorted(set(reported) - set(listed))}; "
+        f"only in the board list: {sorted(set(listed) - set(reported))}"
+    )
+    assert len(reported) == len(set(reported)), f"a board is reported twice: {reported}"
+
+
+def test_a_new_board_with_no_schematic_reports_no_schematic_by_itself(tmp_path):
+    """The acceptance condition of OH-27, run as an experiment.
+
+    A board that appears in the directory has to show up graded without anyone
+    touching the report — otherwise this is the hand-maintained five-column
+    table of yes and no that `CLAUDE.md` forbids, wearing a generator's coat.
+
+    Run against a directory of its own rather than `webui/boards/`: a test
+    that writes into the real board directory would be visible to every other
+    thing reading it while it ran.
+    """
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "First", footprint="First")
+    vendor = _vendor_checkout(tmp_path / "vendor", {"cad/First.kicad_sch": "(sch)"})
+
+    before = {report.name for report in collect_assets(boards, vendor)}
+    _board_file(boards, "Late arrival", footprint="Late arrival")
+    after = {report.name: report for report in collect_assets(boards, vendor)}
+
+    assert set(after) - before == {"Late arrival"}
+    assert after["Late arrival"].schematic.evidence is Evidence.ABSENT
+    assert "schematic" in after["Late arrival"].missing()
+    assert after["First"].schematic.evidence is Evidence.PRESENT
+
+
+def test_the_report_says_which_boards_are_incomplete():
+    """Incompleteness is the finding, not a failure to render.
+
+    Today every board is missing something, and the text report must show
+    each of them rather than quietly listing the ones that came out well.
+    """
+    text = render_text()
+    reports = collect_assets(REPO / "webui" / "boards", REPO / VENDOR_DIR)
+    incomplete = [report for report in reports if report.missing()]
+    assert incomplete, "if every board is complete, this test has outlived its point"
+    for report in incomplete:
+        assert report.name in text, f"{report.name} is graded but not rendered"
