@@ -73,7 +73,22 @@ that returns and posts a name back.
 
     GET  /api/board/state?at=0x10000100&len=64&words=0xd0000010,0xd0000020
       -> 200 {board, chip, status, detail, registers[16], apsr,
-              memory: {at, bytes[]}, words: [{address, value}]}
+              memory: {at, bytes[]}, words: [{address, value}],
+              uart: {present, bytes, dropped_bytes, text, undecodable_bytes}}
+
+`uart` is **cumulative**: `text` is everything the board has transmitted since
+the image was loaded, not what is new since the last poll. A console therefore
+**replaces** its contents on each state call and must not append, or it prints
+every line again on every poll. `bytes` is the total so a client can tell
+"nothing new" without comparing strings, and `dropped_bytes` is how many of the
+oldest were left out once the total passed `api.MAX_UART_BYTES`.
+
+A byte that is not valid UTF-8 does not fail the request: it arrives as a
+backslash-x escape and `undecodable_bytes` counts how many, so a page can say
+"this is not text" rather than showing escapes as if the firmware printed them.
+A board whose description has no UART answers `{"present": false, "note": ...}`
+-- which is a fact about the model, and not the same as a program that ran and
+printed nothing.
 
 `base` and `vector_table` accept a number or a `0x` string, because a text
 input hands over text. `words` is how a peripheral register is read: `at`/`len`

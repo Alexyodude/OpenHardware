@@ -692,6 +692,68 @@ MAX_WINDOW_BYTES = 4096
 #: way, one `read_word` at a time.
 MAX_WATCHED_WORDS = 32
 
+#: How much of a board's UART output one `state` call will carry. The core
+#: keeps everything ever transmitted, so a program printing in a loop grows it
+#: without bound and this is the only field in `state` that a *program* can
+#: make arbitrarily large. Over the cap the **oldest** bytes are dropped and
+#: the count of them is reported: a console wants the newest line, and silently
+#: keeping the first 64 KiB of a program that has printed a megabyte would show
+#: a console frozen at boot with no indication why.
+MAX_UART_BYTES = 64 << 10
+
+
+def uart_view(runtime: Runtime, cpu: Core) -> dict[str, object]:
+    """What a board has printed, as something a page can render.
+
+    Three decisions, all of which could have gone the other way:
+
+    **Cumulative, not since-last-poll.** `uart0_output` is everything ever
+    transmitted and this passes that through. A delta would make `state`
+    answer differently on two identical calls, which is the one thing a GET
+    should not do -- and with two browser tabs polling, each would consume
+    bytes the other never saw. So the endpoint reports what is true and a
+    console **replaces** its contents rather than appending. `bytes` is there
+    so a client can tell "nothing new" without diffing the text.
+
+    **Bytes are not text, and the answer says so rather than failing.**
+    Firmware printing binary is ordinary and a decode error must not take the
+    endpoint down. Undecodable bytes become backslash-x escapes, which is
+    `backslashreplace` and not `replace`: U+FFFD throws the byte away, and a
+    reader debugging a baud-rate mistake needs to see *which* byte arrived.
+    `undecodable_bytes` is exact, so a page can say "this is not text" instead
+    of showing escapes as though the firmware had printed them.
+
+    **A board with no UART model says so.** Not an empty string: an empty
+    console reads as "ran and printed nothing", which is a claim about the
+    program. `present: false` is a claim about the model, and they are
+    different facts.
+    """
+    printer = getattr(runtime.description, "uart0_output", None)
+    if printer is None:
+        return {
+            "present": False,
+            "note": (
+                f"{runtime.description.__name__} models no UART, so nothing on "
+                f"a {runtime.chip} can print. This is a gap in the board "
+                f"description, not silence from the program."
+            ),
+        }
+
+    data = printer(cpu)
+    dropped = max(0, len(data) - MAX_UART_BYTES)
+    shown = data[dropped:]
+    # `ignore` drops exactly the undecodable bytes and UTF-8 round-trips the
+    # rest, so re-encoding what survived gives the decodable byte count and
+    # the difference is the rest. Exact, and it needs no second decoder.
+    decodable = len(shown.decode("utf-8", errors="ignore").encode("utf-8"))
+    return {
+        "present": True,
+        "bytes": len(data),
+        "dropped_bytes": dropped,
+        "text": shown.decode("utf-8", errors="backslashreplace"),
+        "undecodable_bytes": len(shown) - decodable,
+    }
+
 
 @dataclasses.dataclass(frozen=True)
 class RunResult:
@@ -886,6 +948,11 @@ class BoardSession:
         knows is on the board. A window off the board is refused by name
         rather than left to fault: asking about an address is not executing
         one, and the answer should be a sentence.
+
+        `uart` is the fourth thing and the only one a *program* writes: see
+        `uart_view` for why it is cumulative rather than a delta, why an
+        undecodable byte is rendered instead of raised, and why a board with
+        no UART model says so rather than returning an empty string.
         """
         if memory_length < 1 or memory_length > MAX_WINDOW_BYTES:
             raise BoardRunError(
@@ -933,6 +1000,7 @@ class BoardSession:
                 "bytes": list(self.cpu.read_block(address, memory_length)),
             },
             "words": watched,
+            "uart": uart_view(self.runtime, self.cpu),
         }
 
     def close(self) -> None:

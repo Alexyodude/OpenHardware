@@ -763,3 +763,166 @@ def test_the_board_routes_refuse_a_caller_with_no_slot():
         emulator_server.handle_api(
             None, emulator_server.Selection(), "/api/board/run", {}, {}
         )
+
+
+# --- what the board printed -------------------------------------------------
+#
+# `uart/hello.bin` is the second committed arm-none-eabi-gcc image in the
+# repository, and it is the one that makes the headline sentence sayable: a
+# person loads firmware and reads what it printed. Everything below runs those
+# bytes unmodified.
+
+#: The UART image and where `hello.ld` links it. Same convention as blink.
+HELLO = REPO / "tests" / "cortexm0" / "uart" / "hello.bin"
+HELLO_LOAD = 0x10000100
+
+#: A SAMD21 board and its own image. Used for the no-UART case, because a
+#: board that models no UART is a real state -- 25 of 26 boards are in it --
+#: and asserting it against a synthesised module would prove nothing.
+QUIET_BOARD = "XIAO-SAMD21-DIP"
+QUIET_IMAGE = REPO / "tests" / "cortexm0" / "samd21" / "blink.bin"
+
+#: Long enough for hello.bin to reach the end of its string. Measured, not
+#: guessed: the run below asserts the whole thing arrived.
+PRINT_BUDGET = 200_000
+
+
+def needs_uart_image() -> None:
+    needs_core()
+    if not HELLO.is_file():
+        pytest.skip(f"{HELLO} is missing")
+
+
+def printed(session: api.BoardSession) -> dict:
+    return session.state()["uart"]
+
+
+def test_a_board_that_printed_reports_what_it_printed():
+    """The headline, at the seam: real image in, the text it wrote out.
+
+    Through `state()` rather than by calling `rp2040.uart0_output` directly,
+    because the browser has no other way to reach it and the point of this
+    ticket is that the wire carries it.
+    """
+    needs_uart_image()
+    with api.load_firmware(BOARD, HELLO.read_bytes(), base=HELLO_LOAD) as session:
+        assert printed(session)["text"] == "", "something was transmitted before a step"
+        session.run(PRINT_BUDGET)
+        view = printed(session)
+
+    assert view["present"] is True
+    assert view["text"] == "hello, world\n"
+    assert view["bytes"] == 13
+    assert view["undecodable_bytes"] == 0
+    assert view["dropped_bytes"] == 0
+
+
+def test_the_uart_view_is_cumulative_so_a_console_must_replace_not_append():
+    """Two polls with no run between them return the same text.
+
+    This is the decision the wire shape records, asserted rather than
+    described. A delta would make a GET answer differently on two identical
+    calls, and with two tabs polling each would consume bytes the other never
+    saw. The cost is that a console appending would print every line twice,
+    which is why the docstring and this test both say `replaces`.
+    """
+    needs_uart_image()
+    with api.load_firmware(BOARD, HELLO.read_bytes(), base=HELLO_LOAD) as session:
+        session.run(PRINT_BUDGET)
+        first = printed(session)
+        second = printed(session)
+        assert first == second, "a second poll returned something different"
+
+        session.run(1000)
+        third = printed(session)
+        assert third["text"].startswith(first["text"]), (
+            "later output did not extend earlier output; this is not cumulative"
+        )
+
+
+def test_a_byte_that_is_not_text_does_not_take_the_endpoint_down():
+    """Firmware printing binary is ordinary and must not break `state`.
+
+    The bytes go through the modelled UART data register, the same way the
+    program's own writes do, so this exercises the real path rather than a
+    stub. 0xEF and 0xFF are not valid UTF-8 in that order; the `!` after them
+    proves decoding resumed rather than giving up at the first bad byte.
+    """
+    needs_uart_image()
+    with api.load_firmware(BOARD, HELLO.read_bytes(), base=HELLO_LOAD) as session:
+        session.run(PRINT_BUDGET)
+        for byte in (0xEF, 0xFF, ord("!")):
+            session.cpu.write_word(rp2040.UART0 + rp2040.UART_DR, byte)
+        view = printed(session)
+
+    assert view["undecodable_bytes"] == 2
+    assert view["bytes"] == 16
+    assert view["text"].startswith("hello, world\n")
+    assert view["text"].endswith("!"), "decoding stopped at the first bad byte"
+    assert "ef" in view["text"] and "ff" in view["text"], (
+        f"the byte values were thrown away rather than shown: {view['text']!r}"
+    )
+
+
+def test_a_board_with_no_uart_model_says_so_rather_than_showing_an_empty_console():
+    """`present: false` is a claim about the model. An empty string would be a
+    claim about the program, and they are different facts -- one of them is
+    "this board cannot print" and the other is "it ran and chose not to"."""
+    needs_core()
+    if not QUIET_IMAGE.is_file():
+        pytest.skip(f"{QUIET_IMAGE} is missing")
+
+    with api.load_firmware(QUIET_BOARD, QUIET_IMAGE.read_bytes(), base=0) as session:
+        session.run(BUDGET)
+        view = printed(session)
+
+    assert view["present"] is False
+    assert "text" not in view, (
+        "a board with no UART returned text, which a console would render as "
+        "output the program did not produce"
+    )
+    assert "samd21" in view["note"] and "models no UART" in view["note"]
+
+
+def test_the_uart_view_is_bounded_and_says_what_it_dropped():
+    """The one field a *program* can grow without bound.
+
+    Everything else in `state` is fixed-size or already capped. A program
+    printing in a loop would hand the browser megabytes, so the oldest bytes
+    go and the count of them is reported -- a console frozen at boot with no
+    explanation is worse than one that says how much it lost.
+    """
+    needs_uart_image()
+    with api.load_firmware(BOARD, HELLO.read_bytes(), base=HELLO_LOAD) as session:
+        session.run(PRINT_BUDGET)
+        for _ in range(api.MAX_UART_BYTES + 40):
+            session.cpu.write_word(rp2040.UART0 + rp2040.UART_DR, ord("x"))
+        view = printed(session)
+
+    assert view["bytes"] == 13 + api.MAX_UART_BYTES + 40
+    assert view["dropped_bytes"] == 53
+    assert len(view["text"]) == api.MAX_UART_BYTES
+    assert view["text"].endswith("x")
+    assert not view["text"].startswith("hello"), (
+        "the newest bytes were dropped instead of the oldest; a console would "
+        "be stuck showing boot output forever"
+    )
+
+
+def test_the_state_route_carries_the_uart_to_the_wire():
+    """Through `handle_board_api`, since that is what the browser calls."""
+    needs_uart_image()
+    slot = emulator_server.BoardSlot()
+    try:
+        slot.replace(api.load_firmware(BOARD, HELLO.read_bytes(), base=HELLO_LOAD))
+        emulator_server.handle_board_api(
+            slot, "/api/board/run", {}, {"steps": PRINT_BUDGET}
+        )
+        state = emulator_server.handle_board_api(slot, "/api/board/state", {}, {})
+    finally:
+        slot.replace(None)
+
+    assert state["uart"]["text"] == "hello, world\n"
+    assert set(state["uart"]) == {
+        "present", "bytes", "dropped_bytes", "text", "undecodable_bytes",
+    }, "the wire shape in emulator_server's docstring no longer matches"
