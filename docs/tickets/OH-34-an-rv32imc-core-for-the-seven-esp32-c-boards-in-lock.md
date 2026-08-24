@@ -1,7 +1,7 @@
 ---
 id: OH-34
 title: An RV32IMC core for the seven ESP32-C boards, in lockstep with rvcpp
-status: open
+status: in-review
 priority: P1
 created: '2026-08-25'
 touches:
@@ -19,3 +19,5 @@ Scope is RV32IMC, the C3's set. C5's Zcb/Zcmp/Zcmt and C6's A extension are late
 Done when a compiled image runs in lockstep with rvcpp over real firmware and the two agree instruction for instruction, and when tools/check_layering.py passes with no chip address in the core.
 
 The oracle has a known blind spot, filed separately. Read it before trusting a green run.
+
+**Note 2026-08-25:** Landing core/riscv32/ broke two assertions that hard-code the core list, and they are red on master now: tests/webui/test_targets.py::test_the_repository_has_the_cores_the_ui_copy_describes asserts build_core.cores() == ['cortexm0', 'i8086'] and gets ['cortexm0', 'i8086', 'riscv32'], and tests/webui/test_board_catalogue.py fails the same way. Neither file is claimed by another ticket. Updating them is part of landing this core -- a new core is exactly the event those assertions exist to notice, so they should be corrected rather than loosened. Add both paths to this ticket's touches before editing them.

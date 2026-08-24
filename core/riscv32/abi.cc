@@ -1,0 +1,129 @@
+// OpenHardware — the RV32 core behind a C ABI.
+//
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+//
+// Translation only. Every function here is a cast and a call: any behaviour
+// that appeared in this file would be behaviour the C++ tests cannot reach and
+// only the Python side exercises.
+
+#include "abi.h"
+
+#include "cpu.h"
+#include "exec.h"
+
+namespace {
+
+riscv32::Cpu* as_cpu(Riscv32Cpu* handle) {
+    return reinterpret_cast<riscv32::Cpu*>(handle);
+}
+
+const riscv32::Cpu* as_cpu(const Riscv32Cpu* handle) {
+    return reinterpret_cast<const riscv32::Cpu*>(handle);
+}
+
+}  // namespace
+
+extern "C" {
+
+int riscv32_abi_version(void) { return RISCV32_ABI_VERSION; }
+
+uint32_t riscv32_regs_size(void) {
+    return static_cast<uint32_t>(sizeof(Riscv32Registers));
+}
+
+Riscv32Cpu* riscv32_new(void) {
+    return reinterpret_cast<Riscv32Cpu*>(new riscv32::Cpu());
+}
+
+void riscv32_free(Riscv32Cpu* cpu) { delete as_cpu(cpu); }
+
+void riscv32_reset(Riscv32Cpu* cpu) { as_cpu(cpu)->reset(); }
+
+void riscv32_get_regs(const Riscv32Cpu* cpu, Riscv32Registers* out) {
+    const riscv32::Cpu* core = as_cpu(cpu);
+    for (unsigned index = 0; index < riscv32::kRegisters; ++index) {
+        out->x[index] = core->reg(index);
+    }
+    out->pc = core->pc();
+}
+
+void riscv32_set_regs(Riscv32Cpu* cpu, const Riscv32Registers* in) {
+    riscv32::Cpu* core = as_cpu(cpu);
+    // From 1, not 0. x0 is hardwired and `set_reg` discards it anyway; naming
+    // the range here says why rather than relying on that.
+    for (unsigned index = 1; index < riscv32::kRegisters; ++index) {
+        core->set_reg(index, in->x[index]);
+    }
+    core->set_pc(in->pc);
+}
+
+uint32_t riscv32_extensions(const Riscv32Cpu* cpu) {
+    return as_cpu(cpu)->extensions();
+}
+
+void riscv32_set_extensions(Riscv32Cpu* cpu, uint32_t mask) {
+    as_cpu(cpu)->set_extensions(mask);
+}
+
+int riscv32_read_word(const Riscv32Cpu* cpu, uint32_t address, uint32_t* out) {
+    return as_cpu(cpu)->read_word(address, *out) ? 1 : 0;
+}
+
+int riscv32_write_word(Riscv32Cpu* cpu, uint32_t address, uint32_t value) {
+    return as_cpu(cpu)->write_word(address, value) ? 1 : 0;
+}
+
+int riscv32_write_block(Riscv32Cpu* cpu, uint32_t address, const uint8_t* data,
+                        uint32_t length) {
+    riscv32::Cpu* core = as_cpu(cpu);
+    // The whole span first, so an image that overruns its region writes none
+    // of it. A half-written image runs for a while and then does something
+    // inexplicable, which costs far more to diagnose than a refused load.
+    if (length != 0 && !core->in_range(address, length)) {
+        return 0;
+    }
+    for (uint32_t offset = 0; offset < length; ++offset) {
+        core->write_byte(address + offset, data[offset]);
+    }
+    return 1;
+}
+
+int riscv32_read_block(const Riscv32Cpu* cpu, uint32_t address, uint8_t* out,
+                       uint32_t length) {
+    const riscv32::Cpu* core = as_cpu(cpu);
+    if (length != 0 && !core->in_range(address, length)) {
+        return 0;
+    }
+    for (uint32_t offset = 0; offset < length; ++offset) {
+        out[offset] = core->read_byte(address + offset);
+    }
+    return 1;
+}
+
+void riscv32_clear_memory(Riscv32Cpu* cpu) { as_cpu(cpu)->clear_memory(); }
+
+int riscv32_add_region(Riscv32Cpu* cpu, uint32_t base, uint32_t size,
+                       int executable, uint8_t fill) {
+    return as_cpu(cpu)->add_region(base, size, executable != 0, fill) ? 1 : 0;
+}
+
+void riscv32_clear_regions(Riscv32Cpu* cpu) { as_cpu(cpu)->clear_regions(); }
+
+int riscv32_step(Riscv32Cpu* cpu) {
+    return static_cast<int>(riscv32::step(*as_cpu(cpu)));
+}
+
+uint32_t riscv32_fault_address(const Riscv32Cpu* cpu) {
+    return as_cpu(cpu)->fault_address();
+}
+
+int riscv32_fault_was_fetch(const Riscv32Cpu* cpu) {
+    return as_cpu(cpu)->fault_was_fetch() ? 1 : 0;
+}
+
+int riscv32_in_range(const Riscv32Cpu* cpu, uint32_t address, uint32_t bytes) {
+    return as_cpu(cpu)->in_range(address, bytes) ? 1 : 0;
+}
+
+}  // extern "C"
