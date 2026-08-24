@@ -1,7 +1,7 @@
 ---
 id: OH-24
 title: A vendor source registry, and one fetcher that reads it
-status: open
+status: in-review
 priority: P1
 created: '2026-08-25'
 touches:
