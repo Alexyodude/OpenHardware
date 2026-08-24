@@ -55,6 +55,38 @@ def test_a_board_that_is_not_a_xiao_is_named_rather_than_parsed():
     assert catalogue.chip_for("Arduino Uno") == "ATmega328P"
 
 
+def test_a_chip_that_merely_extends_a_known_one_is_not_that_chip():
+    """The ESP32-C61 is a real Espressif part and is not an ESP32-C6.
+
+    Without a delimiter check, `startswith` matched any name beginning with a
+    known chip, so this resolved to ESP32-C6 and would have been silently
+    given the wrong instruction set -- the same failure class as the
+    ESP32-C3-DIP bug the table-matching rewrite was meant to fix.
+    """
+    with pytest.raises(catalogue.CatalogueError):
+        catalogue.chip_for("XIAO-ESP32-C61-DIP")
+
+
+def test_a_suffixed_chip_name_is_not_the_chip_it_starts_with():
+    with pytest.raises(catalogue.CatalogueError):
+        catalogue.chip_for("XIAO-RP2040X-SMD")
+
+
+def test_a_longer_number_is_not_the_shorter_one():
+    with pytest.raises(catalogue.CatalogueError):
+        catalogue.chip_for("XIAO-MG240-DIP")
+
+
+def test_the_delimiter_check_does_not_break_the_names_that_do_resolve():
+    """The check must not be so strict it rejects real boards. All four
+    awkward shapes still work: two-word package, underscored package,
+    inconsistent case, and a plain name."""
+    assert catalogue.chip_for("XIAO-ESP32-C3-DIP-SMD") == "ESP32-C3"
+    assert catalogue.chip_for("XIAO-ESP32-S3-SMD_PAD") == "ESP32-S3"
+    assert catalogue.chip_for("XIAO-nRF54LM20A-SMD") == "nRF54LM20A"
+    assert catalogue.chip_for("XIAO-RP2040-DIP") == "RP2040"
+
+
 def test_an_unrecognised_name_raises_rather_than_guessing():
     """Silently filing a board under an invented chip is how a catalogue
     starts lying."""

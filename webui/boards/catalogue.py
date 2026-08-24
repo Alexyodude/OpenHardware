@@ -27,13 +27,22 @@ one -- they are KiCad footprints with pads, and inventing an `mcu` key in 26
 JSON files would be exactly the hand-maintained list this repository keeps
 deleting.
 
-**The rule is "longest known chip that the name starts with", not "the middle
-field".** The obvious middle-field rule is wrong and was wrong here: the
-package is not always one field. `XIAO-ESP32-C3-DIP-SMD` has a two-word
-package and parsed as a chip called `ESP32-C3-DIP`, which then fell through to
-"not in the survey" -- a board quietly filed as unknown while its two siblings
-resolved correctly. Matching against `CHIPS` cannot do that, because a chip
-that is not in the table raises instead.
+**The rule is "longest known chip the name starts with, ending at a `-` or at
+the end", not "the middle field".** Both halves of that were learned the hard
+way.
+
+The obvious middle-field rule is wrong because the package is not always one
+field: `XIAO-ESP32-C3-DIP-SMD` parsed as a chip called `ESP32-C3-DIP` and fell
+through to "not in the survey", one board quietly unknown while its two
+siblings resolved.
+
+Matching against `CHIPS` fixed that and introduced the same bug in a subtler
+place. Without the delimiter check, `startswith` matched any name merely
+*beginning* with a known chip, so `XIAO-ESP32-C61-DIP` resolved to `ESP32-C6`
+-- and the ESP32-C61 is a real Espressif part, so this is not hypothetical.
+An earlier version of this paragraph claimed matching against the table "cannot
+do that, because a chip that is not in the table raises instead". It could,
+and it did.
 
 The two boards that do not start with `XIAO-` at all (`Arduino Uno`, and
 `XIAO-XIAO STM32C5-SMD` with its doubled prefix) are named explicitly rather
@@ -190,8 +199,19 @@ def chip_for(board_name: str) -> str:
     # Longest first, so `ESP32-C3` wins over a hypothetical `ESP32`, and
     # case-insensitively, because Seeed spells nRF54l15 and nRF54LM20A
     # differently from each other.
+    #
+    # **The delimiter check is the load-bearing part.** A bare `startswith`
+    # matches any name that merely *begins* with a known chip, so
+    # `XIAO-ESP32-C61-DIP` resolved to `ESP32-C6` -- and ESP32-C61 is a real
+    # Espressif part, not a hypothetical. That is the same failure class as the
+    # `ESP32-C3-DIP` bug this rule was rewritten to fix: a name silently
+    # assigned to the wrong chip instead of raising. Requiring the chip to end
+    # at a `-` or at the end of the string is what makes an unknown part loud.
     for chip in sorted(CHIPS, key=len, reverse=True):
-        if rest.lower().startswith(chip.lower()):
+        if not rest.lower().startswith(chip.lower()):
+            continue
+        tail = rest[len(chip):]
+        if tail == "" or tail.startswith("-"):
             return chip
     raise CatalogueError(
         f"{board_name!r} names no chip in CHIPS. Add the chip with its "
