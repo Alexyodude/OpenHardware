@@ -265,12 +265,14 @@ public:
     /// the flag left that case reporting whatever address had faulted last,
     /// which for a freshly-installed board is zero. The diagnostic that exists
     /// to say which address a program wanted was naming a different one.
-    void note_fetch_fault(uint32_t address) {
-        fault_address_ = address;
-        fault_was_fetch_ = true;
-    }
+    void note_fetch_fault(uint32_t address) { note_fault(address, true); }
 
 private:
+    void note_fault(uint32_t address, bool fetch) const {
+        fault_address_ = address;
+        fault_was_fetch_ = fetch;
+    }
+
     void set_flag(uint32_t mask, bool on) {
         apsr_ = on ? (apsr_ | mask) : (apsr_ & ~mask);
     }

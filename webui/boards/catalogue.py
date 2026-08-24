@@ -286,18 +286,20 @@ def missing_cores(directory: pathlib.Path | None = None) -> list[dict[str, objec
     guess; `oracle` says what each would cost, which is the other half of the
     decision.
     """
+    boards = catalogue(directory)
+    cores = set(build_core.cores())
+
     waiting: dict[str, list[str]] = {}
-    for board in catalogue(directory):
-        if board.runnable:
-            continue
-        waiting.setdefault(board.core, []).append(board.name)
+    for board in boards:
+        if not board.runnable:
+            waiting.setdefault(board.core, []).append(board.name)
 
     rows = [
         {
             "core": core,
-            "isas": sorted({b.isa for b in catalogue(directory) if b.core == core}),
+            "isas": sorted({b.isa for b in boards if b.core == core}),
             "boards": names,
-            "exists": core in set(build_core.cores()),
+            "exists": core in cores,
             "oracle": ORACLES.get(core, "not surveyed"),
         }
         for core, names in waiting.items()

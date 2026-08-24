@@ -28,7 +28,6 @@ SRAM = 0x20000000
 SRAM_SIZE = 264 * 1024
 PC = 0x20001000
 SANDBOX = 0x20002000
-SANDBOX_WORDS = 8
 
 
 @pytest.fixture(scope="session")

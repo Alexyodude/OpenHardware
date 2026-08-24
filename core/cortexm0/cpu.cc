@@ -1,4 +1,4 @@
-// OpenHardware — Cortex-M0+ registers, flags and the memory map.
+// OpenHardware — Cortex-M0+ registers, flags, and whatever memory a board gives it.
 //
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 the OpenHardware authors. See LICENSE.
@@ -140,8 +140,7 @@ bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
             // A mirror whose source was never mapped. Faulting is right: it is
             // a mistake in the board description, and answering zero would be
             // the silent-hang failure this whole design refuses.
-            fault_address_ = address;
-            fault_was_fetch_ = false;
+            note_fault(address, false);
             return false;
         }
         value = origin->second.value;
@@ -161,8 +160,7 @@ bool Cpu::mmio_write(uint32_t address, uint32_t value) {
     const Mapped& entry = found->second;
     const auto target = mmio_.find(entry.target);
     if (target == mmio_.end()) {
-        fault_address_ = address;
-        fault_was_fetch_ = false;
+        note_fault(address, false);
         return false;
     }
     uint32_t& stored = target->second.value;
@@ -182,8 +180,7 @@ const std::vector<uint8_t>* Cpu::region_for(uint32_t address, uint32_t bytes,
             return &region.bytes;
         }
     }
-    fault_address_ = address;
-    fault_was_fetch_ = false;
+    note_fault(address, false);
     return nullptr;
 }
 
