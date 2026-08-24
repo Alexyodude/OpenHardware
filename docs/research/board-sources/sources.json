@@ -1,0 +1,952 @@
+{
+  "surveyed": "2026-08-25",
+  "ticket": "OH-23",
+  "adopted": false,
+  "_comment": [
+    "Hand-authored survey data. Every cell carries its own evidence class and",
+    "citation; see README.md for what the classes mean. probe.py re-derives the",
+    "machine-checkable cells and prints what no longer matches. render.py turns",
+    "this file into survey.md -- do not edit survey.md.",
+    "A row is identified by its url, which is unique; vendor is not (Raspberry Pi has two rows) and neither was source before this was fixed."
+  ],
+  "evidence_classes": {
+    "opened": "the artefact was fetched here and its contents listed or read",
+    "listed": "the host's own file listing was read; the filenames are real, the files were not opened",
+    "stated": "a vendor page or README asserts it; nobody opened the artefact",
+    "absent": "a complete listing was searched and it is not there",
+    "unreachable": "the source could not be reached from here; what was tried is recorded"
+  },
+  "sources": [
+    {
+      "vendor": "Seeed Studio",
+      "source": "Seeed-Studio/OSHW-XIAO-Series",
+      "url": "https://github.com/Seeed-Studio/OSHW-XIAO-Series",
+      "model": "one repository for the whole XIAO range",
+      "size": {
+        "value": "196,037 KiB",
+        "evidence": "listed",
+        "cite": "GitHub repos API .size, 2026-08-25"
+      },
+      "licence": {
+        "value": "MIT",
+        "covers": "design files",
+        "evidence": "listed",
+        "cite": "GitHub repos API .license.spdx_id = MIT; LICENSE at repo root"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "no .sch, .kicad_sch, .schdoc or .dsn anywhere in 675 blobs",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "the repository holds exactly two PDFs and neither is a schematic: document/Seeed_Studio_XIAO_Slides.pdf and projects/community-diy-projects/XIAO_USE_CASE.pdf",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "no .kicad_pcb, .brd or .pcbdoc",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "37 .kicad_mod and 1 .kicad_sym under 'Seeed Studio XIAO Series Library'. This repository already imports them; the pad coordinates in webui/boards/*.json come from here.",
+          "cite": "tools/get_seeed_hardware.sh; tools/import_kicad_board.py"
+        },
+        "model_3d": {
+          "value": "partial",
+          "evidence": "listed",
+          "note": "13 .stl -- meshes, not STEP or WRL, so no solid geometry",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        },
+        "board_support": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "no pin-definition headers; Seeed's board support ships in the Arduino core, not here",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        }
+      },
+      "notes": [
+        "69 PNGs account for nearly all 196,037 KiB. tools/get_seeed_hardware.sh calls them 'pictures of a pinout, not a pinout' and fetches sparsely for that reason.",
+        "That script's '~196 MB' and GitHub's size field are the same number: GitHub reports KiB, so 196,037 KiB is 191 MiB.",
+        "The surprise is what is missing. Seeed is the vendor this project already vendors from, and it publishes no schematic and no PCB layout at all -- only footprints and symbols. That is why the boards here are pad maps rather than netlists, and OH-28 cannot be satisfied from this source."
+      ]
+    },
+    {
+      "vendor": "Raspberry Pi",
+      "source": "Pico design files (datasheets.raspberrypi.com)",
+      "url": "https://datasheets.raspberrypi.com/pico/RPi-Pico-R3-PUBLIC-20200119.zip",
+      "model": "per-board zip, linked from the product page",
+      "size": {
+        "value": "651,151 bytes",
+        "evidence": "opened",
+        "cite": "downloaded 2026-08-25"
+      },
+      "licence": {
+        "value": "bespoke permissive grant",
+        "covers": "design files",
+        "evidence": "opened",
+        "cite": "LICENSE.txt inside the zip: 'These design files are made available openly, with no limitations. Permission to use, copy, modify, and/or distribute this design for any purpose with or without fee is hereby granted.'"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "RPI-PICO-R3-PUBLIC.DSN, 189,440 bytes -- OrCAD Capture, a proprietary binary format",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "RPI-PICO-R3-PUBLIC-SCHEMATIC.pdf, 260,692 bytes",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "RPI-PICO-R3a-PUBLIC.brd, 1,238,956 bytes -- Cadence Allegro, also proprietary binary",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "the zip has five entries and none is a library",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "model_3d": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "separate download Pico-R3-step.zip contains Pico-R3.step, 1,721,174 bytes",
+          "cite": "https://datasheets.raspberrypi.com/pico/Pico-R3-step.zip, downloaded 2026-08-25"
+        },
+        "board_support": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "142 headers under src/boards/include/boards/ in raspberrypi/pico-sdk (BSD-3-Clause, 9,389 KiB), covering third-party boards as well as Raspberry Pi's own",
+          "cite": "GitHub trees API raspberrypi/pico-sdk master?recursive=1, 2026-08-25"
+        }
+      },
+      "notes": [
+        "The Pico W zip (RPi-PicoW-PUBLIC-20220607.zip, 1,303,978 bytes) carries the Allegro .brd and the OrCAD .DSN but no schematic PDF and no LICENSE.txt. Same vendor, adjacent board, different terms -- so the licence is a per-download fact, not a vendor fact.",
+        "It also ships __MACOSX/ resource forks, which is a fair indication of how these packages are assembled."
+      ]
+    },
+    {
+      "vendor": "Raspberry Pi",
+      "source": "Product Information Portal design files (CM5 IO board)",
+      "url": "https://pip.raspberrypi.com/categories/1098-design-files",
+      "model": "per-board zip on a separate portal from the Pico downloads",
+      "size": {
+        "value": "3,594,386 bytes",
+        "evidence": "opened",
+        "cite": "downloaded 2026-08-25"
+      },
+      "licence": {
+        "value": "none stated",
+        "covers": "nothing stated",
+        "evidence": "opened",
+        "cite": "29-entry zip listing contains no LICENSE; the portal category page states no terms"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "CM5IO.kicad_sch plus CM5_GPIO.kicad_sch and CM5_HighSpeed.kicad_sch -- KiCad, a text format that can be parsed to a netlist",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "no PDF among the 29 entries",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "CM5IO.kicad_pcb, 3,233,047 bytes",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "CM5IO.kicad_sym plus a CM5IO.pretty/ directory of .kicad_mod, including Raspberry-Pi-5-Compute-Module.kicad_mod",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "model_3d": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "CM5IO.3dshapes/ holds 8 STEP files for connectors and the inductor",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "board_support": {
+          "value": "n/a",
+          "evidence": "absent",
+          "note": "carrier board, not an MCU board",
+          "cite": "zip listing, 2026-08-25"
+        }
+      },
+      "notes": [
+        "This is the richest artefact set in the survey and it contradicts the Pico row from the same vendor: KiCad source with footprints and 3D for the CM5 IO board, proprietary Cadence binaries for the Pico. Recording both rather than averaging them is the point.",
+        "It is also the strongest argument against a per-vendor registry key. 'What does Raspberry Pi publish' has no single answer."
+      ]
+    },
+    {
+      "vendor": "Espressif",
+      "source": "docs.espressif.com per-board user guides",
+      "url": "https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c3/esp32-c3-devkitm-1/user_guide.html",
+      "model": "per-board links to dl.espressif.com",
+      "size": {
+        "value": "n/a -- individual files, no repository",
+        "evidence": "stated",
+        "cite": "user guide page, read 2026-08-25"
+      },
+      "licence": {
+        "value": "none stated",
+        "covers": "nothing stated",
+        "evidence": "stated",
+        "cite": "user guide page, read 2026-08-25"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "no",
+          "evidence": "stated",
+          "note": "the page offers PDF only and directs anyone wanting more to sales@espressif.com",
+          "cite": "user guide page, read 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "SCH_ESP32-C3-DEVKITM-1_V1_20200915A.pdf -- HTTP 200, content-type application/pdf",
+          "cite": "https://dl.espressif.com/dl/schematics/SCH_ESP32-C3-DEVKITM-1_V1_20200915A.pdf, HEAD 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "partial",
+          "evidence": "listed",
+          "note": "a PCB layout PDF, which is a picture of a layout; plus a dimension DXF, which is real vector geometry but outline only",
+          "cite": "PCB_ESP32-C3-DEVKITM-1_V1_20200915AA.pdf and DIMENSION_...dxf, both HTTP 200, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "none offered on the page and none in esp-dev-kits",
+          "cite": "user guide page; GitHub trees API espressif/esp-dev-kits, 2026-08-25"
+        },
+        "model_3d": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "the four .STEP files in espressif/esp-dev-kits are 3D-printed enclosure parts for one board (ESP32-S31-Korvo-1 case top, bottom, stand, light guide), not board models",
+          "cite": "GitHub trees API espressif/esp-dev-kits master?recursive=1, 2026-08-25"
+        },
+        "board_support": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "espressif/esp-bsp, 130,399 KiB, board support packages in C -- pin definitions and peripheral wiring, no hardware artefacts",
+          "cite": "GitHub repos and trees API, 2026-08-25"
+        }
+      },
+      "notes": [
+        "espressif/esp-dev-kits is Apache-2.0 and 827,468 KiB, and it is easy to read that as 'Espressif publishes its dev-kit hardware openly'. It does not. Across 3,631 blobs the repository holds exactly one PDF (docs/_static/espressif2.pdf, the logo) and four STEP files (enclosure parts). The Apache-2.0 grant covers example code and documentation; the design files are elsewhere, on dl.espressif.com, under no stated licence at all.",
+        "This is the clearest licence-scope split in the survey and the reason the ticket asks whether a licence covers design files or only documentation."
+      ]
+    },
+    {
+      "vendor": "Nordic Semiconductor",
+      "source": "nRF52840-DK hardware files 3.0.3",
+      "url": "https://www.nordicsemi.com/Products/Development-hardware/nRF52840-DK/Download",
+      "model": "per-kit versioned zip, eleven prior versions kept",
+      "size": {
+        "value": "23,729,151 bytes",
+        "evidence": "opened",
+        "cite": "downloaded 2026-08-25"
+      },
+      "licence": {
+        "value": "Nordic 5-clause BSD variant",
+        "covers": "contested, see notes",
+        "evidence": "opened",
+        "cite": "License.txt inside the zip, 1,950 bytes, (c) 2010-2024 Nordic Semiconductor ASA"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "six Altium .SchDoc sheets (cover, nRF52840 MCU, interface MCU, misc, connectors, power supply) plus pca10056.PrjPCB and pca10056.IntLib",
+          "cite": "zip listing, 61 entries, 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "PCA10056_Schematic_And_PCB.pdf, 12,081,929 bytes",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "400236.PcbDoc, 15,106,048 bytes, plus a full Production files/ tree -- 14 gerber layers, 6 drill files, pick-and-place CSV, BOM .xls, assembly drawing and laminate spec",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "pca10056.IntLib, 4,599,808 bytes -- an Altium integrated library, so symbols and footprints together in a proprietary binary",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "model_3d": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "no STEP or WRL; the .PcbDoc may embed 3D bodies but that was not opened",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "board_support": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "not in this package; Zephyr carries the board definition separately",
+          "cite": "zip listing, 2026-08-25"
+        }
+      },
+      "notes": [
+        "The conflict, recorded rather than resolved: the licence shipped with the hardware files says 'software' in every clause and forbids reverse-engineering anything supplied in binary form -- but what it is attached to is an Altium PCB project. Clause 4 further restricts use to designs built around a Nordic integrated circuit. Read literally it is a software licence stapled to a board design; read by intent it is a use grant limited to Nordic parts. Either reading rules out redistributing the files, so the practical answer is the same and the ambiguity does not need settling to act on it.",
+        "Completeness is the highest here of any vendor surveyed: schematic source, PCB source, gerbers, drill, BOM and pick-and-place, all in one download, and the flexible NFC antenna PCB as a second project alongside.",
+        "probe.py reports HTTP 403 for the download page and that is not a broken row: nordicsemi.com refuses non-browser clients on HEAD and on GET alike. The zip itself is served from nsscprodmedia.blob.core.windows.net and answers 200 -- which is where it was fetched from here."
+      ]
+    },
+    {
+      "vendor": "Adafruit",
+      "source": "adafruit/Adafruit-HUZZAH32-ESP32-Feather-PCB (sampled)",
+      "url": "https://github.com/adafruit/Adafruit-HUZZAH32-ESP32-Feather-PCB",
+      "model": "634 repositories match 'PCB' in the name under org:adafruit",
+      "size": {
+        "value": "1,614 KiB for the sampled board",
+        "evidence": "listed",
+        "cite": "GitHub repos API .size; search/repositories q=org:adafruit+PCB+in:name total_count=634, 2026-08-25"
+      },
+      "licence": {
+        "value": "CC BY-SA 3.0 Unported",
+        "covers": "design files",
+        "evidence": "opened",
+        "cite": "licence.txt at repo root, read 2026-08-25"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "'Adafruit HUZZAH32 ESP32 Feather.sch' -- EagleCAD, proprietary binary",
+          "cite": "GitHub contents API, 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "the only PDF is a pinout diagram, not a schematic",
+          "cite": "GitHub contents API, 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "'Adafruit HUZZAH32 ESP32 Feather.brd' -- EagleCAD board",
+          "cite": "GitHub contents API, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "no .lbr in the sampled repository; Adafruit keeps its Eagle libraries in a separate repository not sampled here",
+          "cite": "GitHub contents API, 2026-08-25"
+        },
+        "model_3d": {
+          "value": "no",
+          "evidence": "absent",
+          "cite": "GitHub contents API, 2026-08-25"
+        },
+        "board_support": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "software lives in separate repositories",
+          "cite": "GitHub contents API, 2026-08-25"
+        }
+      },
+      "notes": [
+        "Six files in the sampled repository, and the whole board design is two of them. This is the tidiest per-board layout in the survey and the easiest to fetch selectively.",
+        "GitHub reports the licence as NOASSERTION because licence.txt is the CC-BY-SA 3.0 legal code rather than a recognised template. The README says only 'Creative Commons Attribution/Share-Alike' with no version, so the version is a fact about the file, not about the README.",
+        "634 repositories at roughly 1 MB each is the opposite shape from Seeed: nothing to fetch sparsely, but 634 things to enumerate."
+      ]
+    },
+    {
+      "vendor": "SparkFun",
+      "source": "sparkfun/SparkFun_Thing_Plus_ESP32_C6 (sampled)",
+      "url": "https://github.com/sparkfun/SparkFun_Thing_Plus_ESP32_C6",
+      "model": "1,413 repositories under org:sparkfun",
+      "size": {
+        "value": "34,208 KiB for the sampled board",
+        "evidence": "listed",
+        "cite": "GitHub repos API .size; search/repositories q=org:sparkfun total_count=1413, 2026-08-25"
+      },
+      "licence": {
+        "value": "CC BY-SA 4.0 for hardware, separate terms for code",
+        "covers": "design files, see notes",
+        "evidence": "opened",
+        "cite": "LICENSE.md in sparkfun/RP2040_Thing_Plus: 'SparkFun hardware is released under Creative Commons Share-alike 4.0 International'"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "Hardware/Thing_Plus_ESP32_C6.sch -- EagleCAD",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "docs/assets/board_files/Thing_Plus_ESP32_C6.pdf",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "Hardware/Thing_Plus_ESP32_C6.brd plus a Production/ tree with 11 gerber layers, drill, panelised .brd and design rules",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "Hardware/ESP32-C6-WROOM-1.lbr -- an Eagle library for the module used",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        },
+        "model_3d": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "a dimensions PNG, no STEP or WRL",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        },
+        "board_support": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "not in the board repository",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        }
+      },
+      "notes": [
+        "The sampled repository's README says 'Please review the LICENSE.md file for license information' and there is no LICENSE.md in it. Three other SparkFun board repositories were checked -- SparkFun_Thing_Plus_ESP32_WROOM_C, ESP32_Thing_Plus, RP2040_Thing_Plus -- and all three have one. So the licence is per-repository and at least one repository asserts terms it does not ship.",
+        "That is the specific reason a registry cannot store one licence per vendor: the failure mode is not a vendor changing its mind, it is a single repository missing a file."
+      ]
+    },
+    {
+      "vendor": "Arduino",
+      "source": "per-board CAD zip on docs.arduino.cc",
+      "url": "https://docs.arduino.cc/hardware/uno-rev3/",
+      "model": "per-board download alongside the schematic PDF and pinout",
+      "size": {
+        "value": "303,265 bytes for the UNO R3 CAD zip",
+        "evidence": "opened",
+        "cite": "downloaded 2026-08-25"
+      },
+      "licence": {
+        "value": "CC BY-SA 4.0",
+        "covers": "design files, said so explicitly",
+        "evidence": "opened",
+        "cite": "License.txt inside A000066-cad-files.zip, 211 bytes"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "UNO-TH_Rev3e.sch, 2,222,276 bytes -- EagleCAD",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "yes",
+          "evidence": "stated",
+          "note": "linked separately as A000066-schematics.pdf; not downloaded here",
+          "cite": "docs.arduino.cc/hardware/uno-rev3/, read 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "UNO-TH_Rev3e.brd, 707,996 bytes",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "no .lbr in the zip; the zip has five entries, two of them __MACOSX forks",
+          "cite": "zip listing, 2026-08-25"
+        },
+        "model_3d": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "not in the CAD zip and not linked on the board page",
+          "cite": "zip listing; docs.arduino.cc/hardware/uno-rev3/, 2026-08-25"
+        },
+        "board_support": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "arduino/ArduinoCore-avr, 19,021 KiB -- boards.txt and variants/ carry the pin definitions. GitHub reports no licence for it and there is no LICENSE file at the repository root.",
+          "cite": "GitHub contents and trees API, 2026-08-25"
+        }
+      },
+      "notes": [
+        "Arduino is the only vendor in the survey whose licence file says the word 'hardware' in the sentence that grants the rights. Everyone else either grants broadly and leaves scope to inference, or says 'software' over a board design.",
+        "webui/pinmap.py records that the UNO's pad centres had to be extracted from board.svg by hand. The .brd in this zip has them exactly -- so that was solvable, in a format nobody here reads yet."
+      ]
+    },
+    {
+      "vendor": "STMicroelectronics",
+      "source": "st.com CAD resources (Nucleo / Discovery)",
+      "url": "https://www.st.com/en/evaluation-tools/nucleo-c031c6.html",
+      "model": "per-board schematic pack and manufacturing files on the product page",
+      "size": {
+        "value": "unknown",
+        "evidence": "unreachable",
+        "cite": "not established"
+      },
+      "licence": {
+        "value": "unknown",
+        "covers": "unknown",
+        "evidence": "unreachable",
+        "cite": "not established"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "unknown",
+          "evidence": "unreachable",
+          "cite": "not established"
+        },
+        "schematic_pdf": {
+          "value": "unknown",
+          "evidence": "unreachable",
+          "note": "a web search named https://www.st.com/resource/en/schematic_pack/mb1717-c031c6-b02_schematic.pdf as the MB1717 schematic pack; that URL was not reachable from here, so it is a lead, not a fact",
+          "cite": "web search result title 'NUCLEO-C031C6', 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "unknown",
+          "evidence": "unreachable",
+          "cite": "not established"
+        },
+        "footprints_symbols": {
+          "value": "unknown",
+          "evidence": "unreachable",
+          "cite": "not established"
+        },
+        "model_3d": {
+          "value": "unknown",
+          "evidence": "unreachable",
+          "cite": "not established"
+        },
+        "board_support": {
+          "value": "yes",
+          "evidence": "stated",
+          "note": "Zephyr carries boards/st/nucleo_c031c6/nucleo_c031c6.dts and arduino_r3_connector.dtsi -- a third-party board definition, not ST's",
+          "cite": "https://docs.zephyrproject.org/latest/boards/st/nucleo_c031c6/doc/index.html, read 2026-08-25"
+        }
+      },
+      "notes": [
+        "What was tried, all on 2026-08-25 and all from this machine: curl to https://www.st.com/ timed out after 40 s with zero bytes received (exit 28); curl to the schematic_pack PDF, with and without a browser user-agent, returned HTTP 000; WebFetch of the product page timed out at 60 s; WebFetch of the PDF timed out at 60 s. Other hosts fetched successfully in the same minutes, so this is st.com from this network, not a general outage.",
+        "The Zephyr page reached fine and links ST's reference manual and UM2953 user manual, but no schematic -- so even the corroborating source does not confirm what ST publishes as CAD.",
+        "ST matters more than most rows here: docs/architectures.md picks STM32 C0/G0 as 'build our own' and names a $12 Nucleo-C031C6 as the oracle. The one vendor whose files this project most needs is the one row that could not be verified. Re-run probe.py from a network that can reach st.com before anyone builds on this."
+      ]
+    },
+    {
+      "vendor": "Texas Instruments",
+      "source": "ti.com LaunchPad tool pages",
+      "url": "https://www.ti.com/tool/LP-MSPM0G3507",
+      "model": "per-tool page; documentation by literature number",
+      "size": {
+        "value": "1,815,326 bytes for the sampled user guide",
+        "evidence": "opened",
+        "cite": "https://www.ti.com/lit/ug/slau873d/slau873d.pdf, downloaded 2026-08-25"
+      },
+      "licence": {
+        "value": "none stated",
+        "covers": "nothing found",
+        "evidence": "stated",
+        "cite": "neither sampled tool page states terms for design files"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "not found",
+          "evidence": "absent",
+          "note": "no design-file package located from either sampled tool page",
+          "cite": "ti.com/tool/LP-MSPM0G3507 and ti.com/tool/MSP-EXP430FR2433, read 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "unknown",
+          "evidence": "opened",
+          "note": "the user guide slau873d.pdf was downloaded and is a real PDF of about 29 pages, and TI's convention is to print the schematic in a user-guide appendix -- but no PDF text extractor is available here, so whether the schematic is inside was NOT established. Do not record this as a schematic PDF until someone opens it.",
+          "cite": "downloaded 2026-08-25; text extraction attempted and failed"
+        },
+        "pcb_layout": {
+          "value": "not found",
+          "evidence": "absent",
+          "cite": "both sampled tool pages, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "not found",
+          "evidence": "absent",
+          "cite": "both sampled tool pages, 2026-08-25"
+        },
+        "model_3d": {
+          "value": "not found",
+          "evidence": "absent",
+          "cite": "both sampled tool pages, 2026-08-25"
+        },
+        "board_support": {
+          "value": "yes",
+          "evidence": "stated",
+          "note": "Zephyr carries boards/ti/lp_mspm0g3507 -- again a third-party definition",
+          "cite": "https://docs.zephyrproject.org/latest/boards/ti/lp_mspm0g3507/doc/index.html, search result 2026-08-25"
+        }
+      },
+      "notes": [
+        "What was tried: WebFetch of ti.com/tool/LP-MSPM0G3507 and ti.com/tool/MSP-EXP430FR2433, neither of which lists a design-files package; ti.com/lit/zip/slau873 and ti.com/lit/zip/slac889, both HTTP 404 -- and those were guessed literature numbers, so their 404s prove nothing except that guessing is not a method; TI's own E2E thread titled 'LP-MSPM0G3507: TI Launchpad board design files' returned HTTP 403.",
+        "This row is deliberately thin. TI may well publish more than was found; what is recorded is what two tool pages actually offered."
+      ]
+    },
+    {
+      "vendor": "PJRC (Teensy)",
+      "source": "pjrc.com product pages",
+      "url": "https://www.pjrc.com/store/teensy41.html",
+      "model": "per-board page, images inline",
+      "size": {
+        "value": "n/a -- individual images, no package",
+        "evidence": "opened",
+        "cite": "page read 2026-08-25"
+      },
+      "licence": {
+        "value": "none stated",
+        "covers": "nothing stated",
+        "evidence": "stated",
+        "cite": "https://www.pjrc.com/store/teensy41.html, read 2026-08-25"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "no",
+          "evidence": "absent",
+          "cite": "page read 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "the schematic is published as https://www.pjrc.com/teensy/schematic41.png -- HTTP 200 image/png. The same path with .pdf returns HTTP 404. A picture of a schematic, in the same sense as Seeed's pinout PNGs.",
+          "cite": "HEAD requests, 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "no",
+          "evidence": "absent",
+          "cite": "page read 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "no",
+          "evidence": "absent",
+          "cite": "page read 2026-08-25"
+        },
+        "model_3d": {
+          "value": "no",
+          "evidence": "stated",
+          "note": "the page says user-contributed 3D CAD models may be available on the forum -- community, not vendor",
+          "cite": "page read 2026-08-25"
+        },
+        "board_support": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "PaulStoffregen/cores, 3,941 KiB, 404 blobs of C/C++ headers carrying the pin definitions. GitHub recognises no licence for it.",
+          "cite": "GitHub repos and trees API, 2026-08-25"
+        }
+      },
+      "notes": [
+        "The page makes no open-hardware claim and grants nothing. That is not an oversight to be corrected; it is the position.",
+        "Teensy is the survey's clearest 'publishes nothing machine-readable' row, and it is listed for that reason rather than omitted. Everything hardware is a raster image; everything machine-readable is software.",
+        "It is also the only vendor here that makes no open-hardware claim at all, which is at least consistent."
+      ]
+    },
+    {
+      "vendor": "WCH",
+      "source": "openwch GitHub organisation",
+      "url": "https://github.com/openwch/ch32v003",
+      "model": "one repository per chip family, hardware buried inside the software EVT tree",
+      "size": {
+        "value": "67,792 KiB (ch32v003); 184,471 KiB (ch32v307)",
+        "evidence": "listed",
+        "cite": "GitHub repos API .size; search/repositories q=org:openwch total_count=40, 2026-08-25"
+      },
+      "licence": {
+        "value": "none",
+        "covers": "nothing stated",
+        "evidence": "listed",
+        "cite": "GitHub repos API .license, 2026-08-25"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "EVT/PUB/SCHPCB/CH32V003F4P6-R0-1v1.SchDoc and SCHPCB/CH32V003F4P6-R0-1v1/SCH_PCB/CH32V003F4P6-R0-1v1.SchDoc -- Altium, and shipped twice at different paths. ch32v307 carries 15 .SchDoc.",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "EVT/PUB/CH32V00xSCH.pdf and SCHPCB/.../CH32V003F4P6-R0-1v1.pdf",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "matching .PcbDoc at both paths; ch32v307 carries 15",
+          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "no",
+          "evidence": "absent",
+          "cite": "GitHub trees API, 2026-08-25"
+        },
+        "model_3d": {
+          "value": "no",
+          "evidence": "absent",
+          "cite": "GitHub trees API, 2026-08-25"
+        },
+        "board_support": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "openwch/arduino_core_ch32, 768 KiB",
+          "cite": "GitHub repos API, 2026-08-25"
+        }
+      },
+      "notes": [
+        "GitHub reports no licence for ch32v003, ch32v307, ch32v20x or ch32x035 -- the repositories that carry the hardware. Some siblings that do not (ch583, ch592, usb-jtag-spi) are Apache-2.0, which makes the omission look deliberate rather than forgotten.",
+        "The hardware is real Altium source and it is genuinely hard to find: buried under EVT/PUB/SCHPCB/ inside a repository that is mostly C headers and source, with 169 duplicated Eclipse project files per chip family. Nothing in the repository name or description says hardware is in there.",
+        "No licence on the repositories that matter, Apache-2.0 on ones that do not. Under those terms the files can be read but not redistributed, so this is a fetch-never-vendor source regardless of size."
+      ]
+    },
+    {
+      "vendor": "Waveshare",
+      "source": "waveshare.com wiki, per board",
+      "url": "https://www.waveshare.com/wiki/RP2040-Zero",
+      "model": "per-board wiki page linking files on files.waveshare.com",
+      "size": {
+        "value": "n/a -- individual files; the sampled STEP zip is 1,462,340 bytes",
+        "evidence": "opened",
+        "cite": "downloaded 2026-08-25"
+      },
+      "licence": {
+        "value": "none stated",
+        "covers": "nothing stated",
+        "evidence": "opened",
+        "cite": "page fetched with curl and grepped, 82,302 bytes, 2026-08-25"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "no",
+          "evidence": "absent",
+          "cite": "wiki page link scrape, 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "https://files.waveshare.com/upload/4/4c/RP2040_Zero.pdf -- fetched, %PDF- magic confirmed. Two sibling boards spot-checked the same way (RP2040-Tiny, RP2040-PiZero), both real PDFs.",
+          "cite": "range GET, 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "no",
+          "evidence": "absent",
+          "cite": "wiki page link scrape, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "no",
+          "evidence": "absent",
+          "cite": "wiki page link scrape, 2026-08-25"
+        },
+        "model_3d": {
+          "value": "yes",
+          "evidence": "opened",
+          "note": "RP2040_Zero_stp.zip contains one entry, RP2040_Zero.stp, 9,554,038 bytes uncompressed",
+          "cite": "downloaded and listed, 2026-08-25"
+        },
+        "board_support": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "the wiki links Raspberry Pi's own Pico documentation instead",
+          "cite": "wiki page link scrape, 2026-08-25"
+        }
+      },
+      "notes": [
+        "The trap on this page: WAVESHARE-RP2040-Board.zip reads like a board file package and is not. Opened, it contains two MicroPython .uf2 firmware images and nothing else. A survey that inferred artefact class from filenames would have recorded a PCB layout that does not exist -- which is exactly what 'no row asserts an artefact nobody opened' is for.",
+        "Waveshare also re-hosts Raspberry Pi's own RPI-PICO-R3-PUBLIC-SCHEMATIC.pdf on its wiki, so some of what looks like Waveshare's output is Raspberry Pi's."
+      ]
+    },
+    {
+      "vendor": "M5Stack",
+      "source": "m5stack/M5_Hardware",
+      "url": "https://github.com/m5stack/M5_Hardware",
+      "model": "one repository for the whole product range",
+      "size": {
+        "value": "127,690 KiB",
+        "evidence": "listed",
+        "cite": "GitHub repos API .size, 2026-08-25"
+      },
+      "licence": {
+        "value": "MIT",
+        "covers": "design files",
+        "evidence": "listed",
+        "cite": "GitHub repos API .license.spdx_id = MIT, 2026-08-25"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "4 .SchDoc and 5 .SchLib (Altium), 1 .kicad_sch and 2 .kicad_sym -- both toolchains in one tree",
+          "cite": "GitHub trees API master?recursive=1, 369 blobs, 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "partial",
+          "evidence": "listed",
+          "note": "one PDF in M5_Hardware. The older m5stack/M5-Schematic (55,103 KiB, no licence, last pushed 2019-09-23) holds 98 schematic PDFs and 6 .SchDoc -- more coverage, years stale, no grant.",
+          "cite": "GitHub trees API on both repositories, 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "19 .PcbDoc and 5 .PcbLib (Altium), 1 .kicad_pcb",
+          "cite": "GitHub trees API, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "11 .kicad_mod and 2 .kicad_sym, plus the Altium .SchLib/.PcbLib pairs",
+          "cite": "GitHub trees API, 2026-08-25"
+        },
+        "model_3d": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "9 .step and 5 .stp, plus 275 .stl and 6 .obj and 8 .dxf -- most of the repository by file count is enclosure geometry, not boards",
+          "cite": "GitHub trees API, 2026-08-25"
+        },
+        "board_support": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "software is in separate repositories; espressif/esp-bsp carries m5stack_core_s3 and m5stack_tab5 board support",
+          "cite": "GitHub trees API on both, 2026-08-25"
+        }
+      },
+      "notes": [
+        "MIT over Altium and KiCad sources together is the most permissive grant in the survey attached to schematic and PCB source. The catch is coverage: 19 .PcbDoc against a product range in the hundreds.",
+        "The two M5Stack repositories disagree about what exists. M5-Schematic has far more boards and no licence and stopped in 2019; M5_Hardware has MIT and current activity and fewer boards. Recorded as one row naming both rather than merged into an average."
+      ]
+    },
+    {
+      "vendor": "Olimex",
+      "source": "OLIMEX/ESP32-POE (sampled)",
+      "url": "https://github.com/OLIMEX/ESP32-POE",
+      "model": "144 repositories under org:OLIMEX, HARDWARE/ per revision",
+      "size": {
+        "value": "36,801 KiB for the sampled board",
+        "evidence": "listed",
+        "cite": "GitHub repos API .size; search/repositories q=org:OLIMEX total_count=144, 2026-08-25"
+      },
+      "licence": {
+        "value": "Apache-2.0",
+        "covers": "design files",
+        "evidence": "opened",
+        "cite": "LICENSE at repo root, read 2026-08-25"
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "15 .sch and 3 .kicad_sch across revisions -- KiCad, text, parseable to a netlist. Also 23 .lib and 3 .dcm (KiCad 5-era symbol libraries).",
+          "cite": "GitHub trees API master?recursive=1, 1,041 blobs, 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "37 PDFs including per-revision colour and black-and-white schematics and a BOM PDF",
+          "cite": "GitHub trees API, 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "16 .kicad_pcb plus 142 .gbr gerbers, 28 .drl drill files and 9 .net netlists",
+          "cite": "GitHub trees API, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "23 .lib and 3 .dcm",
+          "cite": "GitHub trees API, 2026-08-25"
+        },
+        "model_3d": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "279 .step, 15 .stp and 151 .wrl -- the largest 3D holding in the survey by file count",
+          "cite": "GitHub trees API, 2026-08-25"
+        },
+        "board_support": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "SOFTWARE/ in the same repository: 85 .c, 41 .h, 34 .ino",
+          "cite": "GitHub trees API, 2026-08-25"
+        }
+      },
+      "notes": [
+        "Every artefact class the ticket asks about is present, in open text formats, under a named OSI licence, in one repository per board. On the ticket's own criteria this is the best source surveyed, and it is not one of the vendors this project currently carries boards from.",
+        "Per-repository variance again: OLIMEX/ESP32-POE-ISO has no LICENSE file, only a 'Licensee.pdf', and GitHub reports no licence for it. The sibling board is Apache-2.0. Sample per repository, never per organisation."
+      ]
+    },
+    {
+      "vendor": "Pimoroni",
+      "source": "pimoroni GitHub organisation",
+      "url": "https://github.com/pimoroni/eagle",
+      "model": "no per-board hardware repositories found",
+      "size": {
+        "value": "9,182 KiB for the Eagle parts library",
+        "evidence": "listed",
+        "cite": "GitHub repos API .size, 2026-08-25"
+      },
+      "licence": {
+        "value": "CC BY-SA 3.0",
+        "covers": "part libraries only, no board",
+        "evidence": "stated",
+        "cite": "pimoroni/eagle repository description: 'CC v3.0 Share-Alike You are welcome to use this library for commercial purposes.' GitHub reports NOASSERTION."
+      },
+      "artefacts": {
+        "schematic_source": {
+          "value": "no",
+          "evidence": "absent",
+          "note": "searched org:pimoroni for repository names containing 'hardware', 'kicad' and 'pcb' -- zero results for each",
+          "cite": "GitHub search/repositories, three queries, all total_count=0, 2026-08-25"
+        },
+        "schematic_pdf": {
+          "value": "no",
+          "evidence": "absent",
+          "cite": "same three searches, 2026-08-25"
+        },
+        "pcb_layout": {
+          "value": "no",
+          "evidence": "absent",
+          "cite": "same three searches, 2026-08-25"
+        },
+        "footprints_symbols": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "16 .lbr Eagle libraries and 5 .dru design-rule files in pimoroni/eagle -- reusable parts, boards, connectors, headers and mechanical outlines. Symbols and footprints for components, not for any Pimoroni board as a whole.",
+          "cite": "GitHub trees API master?recursive=1, 27 blobs, 2026-08-25"
+        },
+        "model_3d": {
+          "value": "no",
+          "evidence": "absent",
+          "cite": "GitHub trees API, 2026-08-25"
+        },
+        "board_support": {
+          "value": "yes",
+          "evidence": "listed",
+          "note": "pimoroni/pimoroni-pico, MIT, 10,597 KiB -- C++ and MicroPython libraries with pin definitions for their RP2040 boards, and no hardware artefacts of any kind",
+          "cite": "GitHub repos and trees API, 2026-08-25"
+        }
+      },
+      "notes": [
+        "Pimoroni publishes no board design files. Listed rather than omitted, because 'we checked and there is nothing' is the answer a registry needs; silence would read as 'not yet surveyed'.",
+        "What it does publish is component libraries and software, both openly. The only Pimoroni footprints anyone can use for a whole board are third-party -- there is a community KiCad footprint for the Tiny2040 and a forum thread asking for Yukon module footprints, which is what an absent vendor library looks like from the outside."
+      ]
+    }
+  ]
+}
