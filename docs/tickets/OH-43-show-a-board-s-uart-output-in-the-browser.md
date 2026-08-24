@@ -1,7 +1,7 @@
 ---
 id: OH-43
 title: Show a board's UART output in the browser
-status: open
+status: in-review
 priority: P1
 created: '2026-08-25'
 touches:

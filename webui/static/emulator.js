@@ -382,6 +382,38 @@ async function fillBoards() {
     row.append(core, count, need, oracle);
     return row;
   }));
+
+  // Filled from the same response rather than a second request. Two fetches
+  // of /api/boards could disagree -- a core built between them is not
+  // hypothetical, it happened twice in one afternoon -- and then the table
+  // would explain options the selector did not offer.
+  fillBoardPicker(data.boards);
+}
+
+/** The board selector, offering only what can be picked.
+ *
+ *  A board that is not runnable appears `disabled` carrying its reason, which
+ *  is the same choice the target selector in the toolbar makes. Hiding them
+ *  would leave someone hunting for a board that is right there in the table
+ *  below; offering them would accept a click that cannot be honoured. */
+function fillBoardPicker(boards) {
+  const select = $("board-pick");
+  const ordered = [...boards].sort((a, b) =>
+    Number(b.runnable) - Number(a.runnable) || a.name.localeCompare(b.name));
+  select.replaceChildren(...ordered.map((board) => {
+    const option = document.createElement("option");
+    option.value = board.name;
+    option.disabled = !board.runnable;
+    // The reason comes from boardStatus, so the word beside a board here is
+    // the word beside it in the table below. Two spellings of one fact is how
+    // a UI starts contradicting itself.
+    option.textContent = board.runnable
+      ? board.name
+      : `${board.name} — ${boardStatus(board)[1].toLowerCase()}`;
+    return option;
+  }));
+  const first = ordered.find((board) => board.runnable);
+  if (first) select.value = first.name;
 }
 
 /** Which of the three facts is missing, said as the reason it is not runnable.
@@ -399,6 +431,162 @@ function boardStatus(board) {
   if (!board.core_exists) return ["pill p-none", "NO CORE"];
   if (!board.core_built) return ["pill p-warn", "CORE UNBUILT"];
   return ["pill p-warn", "NO BOARD DESCRIPTION"];
+}
+
+// --- running an image on a board ----------------------------------------------
+//
+// The three routes OH-32 built, driven from the page. Everything about whether
+// an image belongs on a chip, where its vector table is and what the board
+// refuses lives behind them; this decides only what is shown.
+//
+// Nothing here decides whether a board can run anything. `board.runnable` is
+// computed by webui/boards/catalogue.py from what is on disk, and an option is
+// offered or disabled on that alone -- the same rule the target selector in
+// the toolbar follows, and for the same reason.
+
+/** How far Run steps. Instant at this size, and enough for the UART sample to
+ *  reach the end of its string. Shown in the report rather than hidden, since
+ *  a program that has not finished has not finished for a reason.
+ *
+ *  Pressing Run again continues from where it stopped, and the console keeps
+ *  growing, because /api/board/state reports everything transmitted since the
+ *  image was loaded rather than what is new since the last poll. */
+const BOARD_STEPS = 200000;
+
+/** The last successful load, or null. Enables Run and names what is on. */
+let boardImage = null;
+
+/** Base64 of a File, without the `data:` prefix the reader puts in front. */
+function fileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`could not read ${file.name}`));
+    reader.onload = () => {
+      const text = String(reader.result);
+      const comma = text.indexOf(",");
+      resolve(comma < 0 ? text : text.slice(comma + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Say what happened, or what went wrong. Never both at once.
+ *
+ *  `.detail` is the page's error styling, so it carries refusals only and is
+ *  emptied on success -- a stale red line under a working load reads as a
+ *  failure that already happened. */
+function boardSays(report, error) {
+  $("board-report").textContent = report;
+  $("board-error").textContent = error || "";
+}
+
+async function loadBoardImage() {
+  const board = $("board-pick").value;
+  const file = $("board-file").files[0];
+  if (!board) {
+    boardSays("Nothing loaded yet.", "Pick a board first.");
+    return;
+  }
+  if (!file) {
+    boardSays("Nothing loaded yet.", "Choose a compiled image first.");
+    return;
+  }
+
+  const request = { board, image: await fileAsBase64(file) };
+  const base = $("board-base").value.trim();
+  // Sent only when given. An empty string is not an address, and passing one
+  // would turn "you did not say" into "you said nothing", which the server
+  // would have to guess about -- the thing it exists not to do.
+  if (base) request.base = base;
+
+  boardImage = null;
+  $("board-go").disabled = true;
+  try {
+    boardImage = await api("/api/board/load", request);
+  } catch (error) {
+    $("board-console").textContent = "";
+    boardSays("Nothing loaded yet.", error.message);
+    return;
+  }
+
+  $("board-go").disabled = false;
+  $("board-console").textContent = "";
+  $("board-console-note").textContent = "nothing transmitted yet";
+  const notes = boardImage.notes.length ? ` — ${boardImage.notes.join("; ")}` : "";
+  boardSays(
+    `${file.name}: ${boardImage.bytes} bytes of ${boardImage.format} on ` +
+    `${boardImage.board}, a ${boardImage.chip} on the ${boardImage.core} core. ` +
+    `Entered at 0x${boardImage.entry.toString(16).padStart(8, "0")}${notes}`,
+    "",
+  );
+}
+
+async function runLoadedBoard() {
+  if (!boardImage) {
+    boardSays("Nothing loaded yet.", "Load an image before running it.");
+    return;
+  }
+  let result;
+  try {
+    result = await api("/api/board/run", { steps: BOARD_STEPS });
+  } catch (error) {
+    boardSays($("board-report").textContent, error.message);
+    return;
+  }
+
+  const state = await api("/api/board/state");
+  renderBoardConsole(state.uart);
+  const stopped = result.status === "stopped"
+    ? ` and stopped: ${result.detail}`
+    : "";
+  boardSays(
+    `${boardImage.board}: ${result.steps.toLocaleString()} instructions` +
+    `${stopped}. pc 0x${state.registers[15].toString(16).padStart(8, "0")}`,
+    result.status === "stopped" ? result.detail : "",
+  );
+}
+
+/** What the board printed, or why there is nothing to print.
+ *
+ *  **An empty console is not the same as a board that cannot print**, and this
+ *  is the whole reason `uart.present` is on the wire. A board whose
+ *  description models no UART says so in the console itself, because an empty
+ *  black box is read as "it ran and printed nothing" -- a claim about the
+ *  program, when the truth is a gap in the board description.
+ *
+ *  `textContent` throughout: the bytes came off an emulated wire and anything
+ *  in them is data. Firmware that prints `<script>` prints those characters. */
+function renderBoardConsole(uart) {
+  const pane = $("board-console");
+  const note = $("board-console-note");
+  if (!uart.present) {
+    pane.textContent = uart.note;
+    // Muted inline rather than by class: emulator.css styles `.hexdump .text`
+    // as a *descendant*, so putting that class on the <pre> itself matches
+    // nothing. A class that looks like styling and does none is worse than no
+    // class, because the next reader believes it.
+    pane.style.color = "var(--muted)";
+    pane.style.whiteSpace = "pre-wrap";
+    note.textContent = "no UART in this board description";
+    return;
+  }
+
+  pane.style.color = "";
+  pane.style.whiteSpace = "";
+  pane.textContent = uart.text;
+  const parts = [`${uart.bytes} bytes`];
+  // Both are counts the server computed, and both change what the text means.
+  // Escapes shown without saying they are escapes read as output the program
+  // produced; a truncated console with nothing said reads as a program that
+  // stopped printing.
+  if (uart.undecodable_bytes) {
+    parts.push(`${uart.undecodable_bytes} not valid UTF-8, shown escaped`);
+  }
+  if (uart.dropped_bytes) {
+    parts.push(`${uart.dropped_bytes} older bytes dropped`);
+  }
+  if (!uart.bytes) parts[0] = "nothing transmitted yet";
+  note.textContent = parts.join(", ");
 }
 
 // --- wiring -------------------------------------------------------------------
@@ -469,6 +657,13 @@ function wire() {
     await refresh();
   });
   $("load").addEventListener("click", () => loadSelected().catch(report));
+  // These report into their own panel, not through `report`, which writes to
+  // the disassembly panel's detail line -- invisible from the view this
+  // control lives in.
+  $("board-load").addEventListener("click", () =>
+    loadBoardImage().catch((error) => boardSays("Nothing loaded yet.", String(error.message || error))));
+  $("board-go").addEventListener("click", () =>
+    runLoadedBoard().catch((error) => boardSays($("board-report").textContent, String(error.message || error))));
   $("target").addEventListener("change", (event) =>
     selectTarget(event.target.value).catch(report));
   $("theme").addEventListener("click", () => {
