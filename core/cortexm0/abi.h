@@ -28,7 +28,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define CORTEXM0_ABI_VERSION 10
+#define CORTEXM0_ABI_VERSION 11
 
 /// r0-r15, then the flags.
 ///
@@ -109,6 +109,31 @@ CORTEXM0_API void cortexm0_map_alias(CortexM0Cpu* cpu, uint32_t address,
 /// mirror that did not follow would spin forever.
 CORTEXM0_API void cortexm0_map_mirror(CortexM0Cpu* cpu, uint32_t address,
                                       uint32_t source, int invert, uint32_t mask);
+
+/// An address whose reads answer `value` and whose writes are ignored: a
+/// read-only status register. `cortexm0_map_mirror` cannot stand in, because a
+/// mirror reads from a source register and a constant has none.
+CORTEXM0_API void cortexm0_map_constant(CortexM0Cpu* cpu, uint32_t address,
+                                        uint32_t value);
+
+/// An address whose writes append a byte to a captured stream: a TX FIFO,
+/// where a plain register would keep only the last character written.
+///
+/// Captured only while `enable_address & enable_mask` is non-zero -- a disabled
+/// UART transmits nothing, and a model without the gate lets firmware appear to
+/// print before it enabled the peripheral. See cpu.h.
+CORTEXM0_API void cortexm0_map_stream(CortexM0Cpu* cpu, uint32_t address,
+                                      uint32_t enable_address,
+                                      uint32_t enable_mask);
+
+/// Copy up to `capacity` bytes of the stream at `address` into `out`, and
+/// return how many bytes the stream holds.
+///
+/// The return value is the true length, not the number copied, so a caller
+/// that passed too small a buffer can tell -- rather than silently reading a
+/// truncated prefix as if it were the whole output.
+CORTEXM0_API uint32_t cortexm0_stream(const CortexM0Cpu* cpu, uint32_t address,
+                                      uint8_t* out, uint32_t capacity);
 
 /// Execute one instruction at PC, advancing PC past it.
 ///

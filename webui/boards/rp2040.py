@@ -67,6 +67,12 @@ BOOTROM_SIZE = 16 * 1024
 RESETS = 0x4000C000
 SIO = 0xD0000000
 
+#: UART0, from `rp2040_v2/rp2040_uart.json`, which cites pico-sdk's
+#: `hardware/regs/uart.h` and `hardware_uart/uart.c`. UART1 is at 0x40038000
+#: and is not modelled: the SVD declares it `derivedFrom="UART0"`, so it is the
+#: same registers at another base, and nothing has asked for a second one.
+UART0 = 0x40034000
+
 #: The three alias windows, from datasheet §2.1.2.
 ALIAS_XOR = 0x1000
 ALIAS_SET = 0x2000
@@ -98,6 +104,37 @@ SIO_GPIO_OE_SET = 0x024
 SIO_GPIO_OE_CLR = 0x028
 SIO_GPIO_OE_XOR = 0x02C
 
+#: UART (PL011) register offsets, from `rp2040_v2/rp2040_uart.json`, each
+#: citing a line of pico-sdk's `hardware/regs/uart.h`.
+UART_DR = 0x00
+UART_FR = 0x18
+UART_IBRD = 0x24
+UART_FBRD = 0x28
+UART_LCR_H = 0x2C
+UART_CR = 0x30
+
+#: `UARTCR.UARTEN`, bit 0, reset 0. The master enable, and the gate on the data
+#: register. The research file is explicit about why it is load-bearing:
+#: "A model letting TXFF/BUSY move before UARTEN==1 lets firmware appear to
+#: print successfully before the UART is enabled -- silently wrong the same way
+#: FUNCSEL errors are silently wrong."
+UART_CR_UARTEN = 1 << 0
+
+#: `UARTFR` bits, from the same file. `RXFE` is the only one set in the model
+#: this board can express -- see `install_uart0`.
+UART_FR_BUSY = 1 << 3
+UART_FR_RXFE = 1 << 4
+UART_FR_TXFF = 1 << 5
+
+#: What `UARTFR` reads in this model: receive FIFO empty, transmit FIFO not
+#: full, transmitter not busy.
+UART_FR_AT_REST = UART_FR_RXFE
+
+#: The RESETS bit that holds UART0. From `rp2040_v2/rp2040_uart.json`'s
+#: instance table, cross-checked against `resets.json`'s bit table, where 22 is
+#: UART0 and 23 is UART1.
+RESET_UART0 = 1 << 22
+
 
 class Cpu(typing.Protocol):
     """What this module needs of a core: the three mapping calls."""
@@ -107,6 +144,10 @@ class Cpu(typing.Protocol):
                   readable: bool = ...) -> None: ...
     def map_mirror(self, address: int, source: int, *, invert: bool = ...,
                    mask: int = ...) -> None: ...
+    def map_constant(self, address: int, value: int) -> None: ...
+    def map_stream(self, address: int, *, enable: int,
+                   enable_mask: int) -> None: ...
+    def stream(self, address: int) -> bytes: ...
     def add_region(self, base: int, size: int, *, executable: bool = ...,
                    fill: int = ...) -> None: ...
 
@@ -173,6 +214,67 @@ def install_sio(cpu: Cpu) -> None:
     cpu.map_alias(SIO + SIO_GPIO_OE_XOR, SIO + SIO_GPIO_OE, "xor", readable=False)
 
 
+def install_uart0(cpu: Cpu) -> None:
+    """UART0, far enough for a `printf` to arrive and no further.
+
+    Register facts from `rp2040_v2/rp2040_uart.json`, which cites pico-sdk's
+    `hardware/regs/uart.h` line by line.
+
+    **`UARTDR` is a stream, not a register**, and that is the whole reason this
+    peripheral needed something new in the core. The research file puts it
+    plainly: "Queue-op semantics, not a plain register store -- the canonical
+    reason this whole peripheral is coded:". A `map_register` here would hold
+    one character, so every byte but the last would be lost, and a test reading
+    it back would see a plausible single letter rather than an empty output --
+    wrong rather than loud.
+
+    **The `UARTEN` gate is why `map_stream` takes one.** Bytes are captured
+    only while the master enable is set, so firmware that writes `UARTDR`
+    before enabling the UART transmits nothing, exactly as the part does.
+
+    **`UARTFR` is a constant, and that is a stated fidelity gap rather than an
+    oversight.** In the model this board can express -- a transmitter that
+    always accepts and a receiver with no wire on it -- `TXFF`, `RXFE` and
+    `BUSY` never move, so they are not a register that changes. What this
+    cannot show is FIFO backpressure, and the research file names the cost:
+    forcing `TXFF` low forever "would erase FIFO-full backpressure a real
+    firmware bug (printing faster than the wire) would actually hit". Modelling
+    the 32-entry FIFO needs a virtual-cycle schedule tied to the baud divisors,
+    which is `rules/determinism.md` work and a bigger change than a printf
+    needs. `RXFE` reading empty forever is not a gap in the same way: nothing
+    in this project drives RX, so an empty receive FIFO is the truth.
+
+    The four configuration registers are plain latches. Firmware writes the
+    baud divisors and the line control and never reads them back, so
+    reads-as-written is both what the part does and all that is exercised.
+    """
+    # Written before the stream, because `map_stream` resolves its gate at
+    # write time and a board that registered them the other way round would
+    # still work -- but reading them in dependency order is how the reader
+    # learns that the data register depends on the control register.
+    cpu.map_register(UART0 + UART_CR, 0)
+    cpu.map_register(UART0 + UART_IBRD, 0)
+    cpu.map_register(UART0 + UART_FBRD, 0)
+    cpu.map_register(UART0 + UART_LCR_H, 0)
+
+    cpu.map_constant(UART0 + UART_FR, UART_FR_AT_REST)
+    cpu.map_stream(UART0 + UART_DR, enable=UART0 + UART_CR,
+                   enable_mask=UART_CR_UARTEN)
+
+    # UART is one of the four peripherals whose atomic aliases are real, per
+    # datasheet §2.1.2 as quoted in the research file: I2C, UART, SPI and SSI
+    # get theirs "using a bus interposer". So `hw_set_bits()` on UARTCR works,
+    # which pico-sdk's uart_init does, and leaving them out would fault on a
+    # driver doing something ordinary.
+    alias_block(cpu, UART0 + UART_CR)
+    alias_block(cpu, UART0 + UART_LCR_H)
+
+
+def uart0_output(cpu: Cpu) -> bytes:
+    """Everything UART0 has transmitted, oldest byte first."""
+    return cpu.stream(UART0 + UART_DR)
+
+
 def install_memory(cpu: Cpu) -> None:
     """Flash and SRAM. The core ships with neither.
 
@@ -228,3 +330,4 @@ def install(cpu: Cpu) -> None:
     install_bootrom_stub(cpu)
     install_resets(cpu)
     install_sio(cpu)
+    install_uart0(cpu)

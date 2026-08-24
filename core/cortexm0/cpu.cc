@@ -51,7 +51,14 @@ void Cpu::reset() {
     clear_regions();
 }
 
-void Cpu::clear_registers() { mmio_.clear(); }
+void Cpu::clear_registers() {
+    mmio_.clear();
+    // Streams go with them. They are registered in both tables, so clearing
+    // one and not the other would leave a stream whose address no longer
+    // responds -- and, worse, would carry one board's captured output into the
+    // next board installed over it.
+    streams_.clear();
+}
 
 bool Cpu::add_region(uint32_t base, uint32_t size, bool executable, uint8_t fill) {
     // An overlapping region is a mistake in a board description, not a
@@ -115,6 +122,39 @@ void Cpu::map_mirror(uint32_t address, uint32_t source, bool invert, uint32_t ma
     mmio_[at] = entry;
 }
 
+void Cpu::map_constant(uint32_t address, uint32_t value) {
+    const uint32_t at = address & ~3u;
+    Mapped entry;
+    entry.value = value;
+    entry.target = at;
+    entry.source = at;
+    entry.writable = false;
+    mmio_[at] = entry;
+}
+
+void Cpu::map_stream(uint32_t address, uint32_t enable_address,
+                     uint32_t enable_mask) {
+    const uint32_t at = address & ~3u;
+    // Registered in `mmio_` as well, so `is_mapped` sees it and a read answers
+    // this entry's value, which stays zero. The stream table alone would make
+    // the address respond to writes and fault on reads.
+    Mapped entry;
+    entry.target = at;
+    entry.source = at;
+    mmio_[at] = entry;
+
+    Stream stream;
+    stream.enable = enable_address & ~3u;
+    stream.enable_mask = enable_mask;
+    streams_[at] = stream;
+}
+
+const std::vector<uint8_t>& Cpu::stream(uint32_t address) const {
+    static const std::vector<uint8_t> none;
+    const auto found = streams_.find(address & ~3u);
+    return found == streams_.end() ? none : found->second.bytes;
+}
+
 bool Cpu::is_mapped(uint32_t address) const {
     return mmio_.find(address & ~3u) != mmio_.end();
 }
@@ -152,20 +192,64 @@ bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
     return true;
 }
 
-bool Cpu::mmio_write(uint32_t address, uint32_t value) {
-    const auto found = mmio_.find(address & ~3u);
+bool Cpu::mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask) {
+    const uint32_t at = address & ~3u;
+    const auto found = mmio_.find(at);
     if (found == mmio_.end()) {
         return false;
     }
+
+    // A stream is checked before the word behaviours, because it is not one:
+    // its write appends rather than stores, and falling through would latch
+    // the byte into a register nobody reads.
+    const auto stream = streams_.find(at);
+    if (stream != streams_.end()) {
+        const auto gate = mmio_.find(stream->second.enable);
+        if (gate == mmio_.end()) {
+            // The gate register was never mapped. A board description mistake,
+            // and faulting says so; capturing regardless would print bytes a
+            // real part would have discarded.
+            note_fault(address, false);
+            return false;
+        }
+        if ((gate->second.value & stream->second.enable_mask) != 0) {
+            stream->second.bytes.push_back(static_cast<uint8_t>(value >> 0));
+        }
+        // Writing to a disabled transmitter is not an error on the part, so
+        // the access succeeds and the byte goes nowhere -- which is what the
+        // hardware does with it.
+        return true;
+    }
+
     const Mapped& entry = found->second;
+    if (!entry.writable) {
+        // A read-only register ignores the write, as hardware does. See
+        // `map_constant`.
+        return true;
+    }
     const auto target = mmio_.find(entry.target);
     if (target == mmio_.end()) {
         note_fault(address, false);
         return false;
     }
+    // `value` always arrives already confined to `byte_mask`: the sub-word
+    // accessors shift the byte or halfword into place and leave the rest zero,
+    // and the word path passes a full mask. So set, clear and xor need no
+    // masking of their own -- a byte contributing zero is the identity for all
+    // three, which is the property that makes a partial write to an atomic
+    // alias mean what it says.
+    //
+    // **Store is the exception, and the only reason the mask is a parameter.**
+    // It has to preserve the bytes it does not address; without the mask a
+    // `STRB` would zero the other three. Masking the other three ops as well
+    // was written first and mutation testing found it dead -- deleting it
+    // changed nothing observable, the same way the `read_only` flag on
+    // `map_mirror` did before it was removed.
     uint32_t& stored = target->second.value;
     switch (entry.op) {
-        case WriteOp::Store: stored = value; break;
+        case WriteOp::Store:
+            stored = (stored & ~byte_mask) | (value & byte_mask);
+            break;
         case WriteOp::Set: stored |= value; break;
         case WriteOp::Clear: stored &= ~value; break;
         case WriteOp::Xor: stored ^= value; break;
@@ -247,7 +331,22 @@ bool Cpu::write_word(uint32_t address, uint32_t value) {
     return true;
 }
 
+// The four sub-word accessors below check `is_mapped` first, exactly as the
+// word pair does. They did not, and the gap was invisible for as long as
+// nothing needed it: every peripheral modelled here was word-accessed, so
+// `LDRB` from a mapped register faulted with a message about leaving the
+// modelled memory -- for an address the board had explicitly mapped. A UART
+// data register is the first one firmware reaches a byte at a time.
+
 bool Cpu::read_halfword(uint32_t address, uint16_t& out) const {
+    if (is_mapped(address)) {
+        uint32_t word = 0;
+        if (!mmio_read(address, word)) {
+            return false;
+        }
+        out = static_cast<uint16_t>(word >> ((address & 2u) * 8u));
+        return true;
+    }
     uint32_t offset = 0;
     const std::vector<uint8_t>* region = region_for(address, 2, offset);
     if (region == nullptr) {
@@ -259,6 +358,11 @@ bool Cpu::read_halfword(uint32_t address, uint16_t& out) const {
 }
 
 bool Cpu::write_halfword(uint32_t address, uint16_t value) {
+    if (is_mapped(address)) {
+        const uint32_t shift = (address & 2u) * 8u;
+        return mmio_write(address, static_cast<uint32_t>(value) << shift,
+                          static_cast<uint32_t>(0xFFFFu) << shift);
+    }
     uint32_t offset = 0;
     std::vector<uint8_t>* region = region_for(address, 2, offset);
     if (region == nullptr) {
@@ -270,6 +374,14 @@ bool Cpu::write_halfword(uint32_t address, uint16_t value) {
 }
 
 bool Cpu::read_byte_checked(uint32_t address, uint8_t& out) const {
+    if (is_mapped(address)) {
+        uint32_t word = 0;
+        if (!mmio_read(address, word)) {
+            return false;
+        }
+        out = static_cast<uint8_t>(word >> ((address & 3u) * 8u));
+        return true;
+    }
     uint32_t offset = 0;
     const std::vector<uint8_t>* region = region_for(address, 1, offset);
     if (region == nullptr) {
@@ -280,6 +392,11 @@ bool Cpu::read_byte_checked(uint32_t address, uint8_t& out) const {
 }
 
 bool Cpu::write_byte_checked(uint32_t address, uint8_t value) {
+    if (is_mapped(address)) {
+        const uint32_t shift = (address & 3u) * 8u;
+        return mmio_write(address, static_cast<uint32_t>(value) << shift,
+                          static_cast<uint32_t>(0xFFu) << shift);
+    }
     uint32_t offset = 0;
     std::vector<uint8_t>* region = region_for(address, 1, offset);
     if (region == nullptr) {

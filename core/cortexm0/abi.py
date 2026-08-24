@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match CORTEXM0_ABI_VERSION in abi.h.
-ABI_VERSION = 10
+ABI_VERSION = 11
 
 #: Must match cortexm0::WriteOp. Spelled at call sites rather than numbered.
 WRITE_OPS = {"store": 0, "set": 1, "clear": 2, "xor": 3}
@@ -127,6 +127,18 @@ _SIGNATURES = {
         [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int,
          ctypes.c_uint32],
         None,
+    ),
+    "cortexm0_map_constant": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32], None
+    ),
+    "cortexm0_map_stream": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32],
+        None,
+    ),
+    "cortexm0_stream": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint8),
+         ctypes.c_uint32],
+        ctypes.c_uint32,
     ),
     "cortexm0_step": ([ctypes.c_void_p], ctypes.c_int),
     "cortexm0_fault_address": ([ctypes.c_void_p], ctypes.c_uint32),
@@ -335,6 +347,40 @@ class Cpu:
         self._lib.cortexm0_map_mirror(
             self._handle, address, source, 1 if invert else 0, mask
         )
+
+    def map_constant(self, address: int, value: int) -> None:
+        """An address whose reads answer `value` and whose writes are ignored.
+
+        A read-only status register. `map_mirror` cannot stand in for it: a
+        mirror reads from a source register and a constant has none.
+        """
+        self._lib.cortexm0_map_constant(self._handle, address, value)
+
+    def map_stream(self, address: int, *, enable: int, enable_mask: int) -> None:
+        """An address whose writes append a byte to a captured stream.
+
+        A UART's data register, where `map_register` would keep only the last
+        character written. `enable`/`enable_mask` name the bit that has to be
+        set for the bytes to be captured -- `UARTCR.UARTEN` on a PL011 --
+        because a disabled transmitter sends nothing and a model without the
+        gate lets firmware appear to print before it enabled the peripheral.
+        """
+        self._lib.cortexm0_map_stream(self._handle, address, enable, enable_mask)
+
+    def stream(self, address: int) -> bytes:
+        """Everything written to a `map_stream` address, oldest first.
+
+        Asked for its length first and read second, rather than guessing a
+        buffer size: the C side returns the true length either way, so a stream
+        that grew between the two calls is caught by the second call's own
+        return rather than silently truncated.
+        """
+        length = self._lib.cortexm0_stream(self._handle, address, None, 0)
+        if length == 0:
+            return b""
+        buffer = (ctypes.c_uint8 * length)()
+        self._lib.cortexm0_stream(self._handle, address, buffer, length)
+        return bytes(buffer)
 
     # --- running ----------------------------------------------------------
 

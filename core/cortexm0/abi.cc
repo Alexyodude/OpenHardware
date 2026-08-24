@@ -127,6 +127,29 @@ void cortexm0_map_mirror(CortexM0Cpu* cpu, uint32_t address, uint32_t source,
     as_handle(cpu)->cpu.map_mirror(address, source, invert != 0, mask);
 }
 
+void cortexm0_map_constant(CortexM0Cpu* cpu, uint32_t address, uint32_t value) {
+    as_handle(cpu)->cpu.map_constant(address, value);
+}
+
+void cortexm0_map_stream(CortexM0Cpu* cpu, uint32_t address,
+                         uint32_t enable_address, uint32_t enable_mask) {
+    as_handle(cpu)->cpu.map_stream(address, enable_address, enable_mask);
+}
+
+uint32_t cortexm0_stream(const CortexM0Cpu* cpu, uint32_t address, uint8_t* out,
+                         uint32_t capacity) {
+    const std::vector<uint8_t>& bytes = as_handle(cpu)->cpu.stream(address);
+    const uint32_t length = static_cast<uint32_t>(bytes.size());
+    // Copy what fits and report what there is. A caller that sized its buffer
+    // from a previous call can tell the stream grew, rather than reading a
+    // prefix and believing it complete.
+    if (out != nullptr && capacity != 0) {
+        const uint32_t copied = length < capacity ? length : capacity;
+        std::copy(bytes.begin(), bytes.begin() + copied, out);
+    }
+    return length;
+}
+
 int cortexm0_is_mapped(const CortexM0Cpu* cpu, uint32_t address) {
     return as_handle(cpu)->cpu.is_mapped(address) ? 1 : 0;
 }

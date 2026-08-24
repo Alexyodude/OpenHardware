@@ -201,6 +201,50 @@ public:
     void map_mirror(uint32_t address, uint32_t source, bool invert,
                     uint32_t mask = 0xFFFFFFFFu);
 
+    /// A register whose reads answer `value` and whose writes are ignored.
+    ///
+    /// Hardware's read-only status register. `map_mirror` cannot stand in for
+    /// it: a mirror reads from a *source register*, and a constant has none --
+    /// pointing one at itself makes the write land where the read comes from,
+    /// which is `map_register` with extra steps.
+    ///
+    /// The RP2040's `UARTFR` is the case that asked for it. In the model this
+    /// core can express -- a TX that always accepts and an RX with nothing
+    /// wired to it -- `TXFF`, `RXFE` and `BUSY` do not move, so a constant is
+    /// the honest shape rather than a shortcut. What it cannot express is FIFO
+    /// backpressure, and `webui/boards/rp2040.py` says so where it calls this.
+    void map_constant(uint32_t address, uint32_t value);
+
+    /// A register whose writes append a byte to a captured stream: a TX FIFO.
+    ///
+    /// The fourth behaviour, and the first that is not a word at all.
+    /// `map_register` holds one value, so a second write destroys the first --
+    /// which for a UART data register means every character but the last is
+    /// lost. `docs/research/peripheral-layer/rp2040_v2/rp2040_uart.json` names
+    /// this exactly: "Queue-op semantics, not a plain register store -- the
+    /// canonical reason this whole peripheral is coded:".
+    ///
+    /// **Gated, and the gate is the load-bearing part.** Writes are captured
+    /// only while `enable_address & enable_mask` is non-zero, which for a PL011
+    /// is `UARTCR.UARTEN`. A disabled UART transmits nothing, and the same
+    /// research file names the alternative as a silent lie: "A model letting
+    /// TXFF/BUSY move before UARTEN==1 lets firmware appear to print
+    /// successfully before the UART is enabled -- silently wrong the same way
+    /// FUNCSEL errors are silently wrong." Answering wrongly rather than
+    /// loudly is the one failure this file spends its comments refusing, so
+    /// the gate is not an option on the primitive; it is the primitive.
+    ///
+    /// Reads answer zero. On a real PL011 a read pops the RX FIFO, and nothing
+    /// in this project drives RX, so the board pairs this with an `RXFE` that
+    /// reads empty forever -- a truthful model of a pin with no wire on it.
+    void map_stream(uint32_t address, uint32_t enable_address,
+                    uint32_t enable_mask);
+
+    /// Everything written to a `map_stream` address so far, oldest first.
+    /// Empty for an address that is not one, which is the same answer as a
+    /// stream nothing has written to -- the caller registered it and knows.
+    const std::vector<uint8_t>& stream(uint32_t address) const;
+
     bool is_mapped(uint32_t address) const;
 
     /// Add a readable, writable region of `size` bytes at `base`.
@@ -316,15 +360,44 @@ private:
         WriteOp op = WriteOp::Store;
         bool invert = false;
         bool readable = true;
+        /// False for `map_constant`. A mirror does not need it -- its write
+        /// lands in its own word while its read comes from `source`, so the
+        /// stored value is never read back. A constant reads its own word, so
+        /// for it the difference is observable.
+        bool writable = true;
         uint32_t mask = 0xFFFFFFFFu;
     };
+
+    /// A `map_stream` address: what gates it, and what has been written.
+    ///
+    /// Held beside `mmio_` rather than inside `Mapped` because a stream is the
+    /// one behaviour that is not a word. Three fields on every mapped register
+    /// to serve one of them would be the tail wagging the dog, and `Mapped` is
+    /// copied on every lookup.
+    struct Stream {
+        uint32_t enable = 0;
+        uint32_t enable_mask = 0;
+        std::vector<uint8_t> bytes;
+    };
+    std::unordered_map<uint32_t, Stream> streams_;
 
     /// Word-aligned address to behaviour. A map rather than a range, so an
     /// unmodelled register inside a modelled peripheral still faults.
     std::unordered_map<uint32_t, Mapped> mmio_;
 
     bool mmio_read(uint32_t address, uint32_t& out) const;
-    bool mmio_write(uint32_t address, uint32_t value);
+
+    /// `byte_mask` selects which bytes of the word the write touches, so a
+    /// `STRB` reaches a mapped register without disturbing its neighbours.
+    ///
+    /// **A mask rather than a read-modify-write, and the difference is not
+    /// cosmetic.** RMW would read the word, replace one byte and store the
+    /// result -- and storing a whole word through a `Set` alias sets every bit
+    /// that happened to be in the value read, rather than the eight the
+    /// instruction addressed. The mask keeps the untouched bytes contributing
+    /// zero, which is the identity for set, clear and xor alike.
+    bool mmio_write(uint32_t address, uint32_t value,
+                    uint32_t byte_mask = 0xFFFFFFFFu);
 };
 
 }  // namespace cortexm0
