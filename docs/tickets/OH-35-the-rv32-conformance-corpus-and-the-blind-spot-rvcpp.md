@@ -2,7 +2,7 @@
 id: OH-35
 title: The RV32 conformance corpus, and the blind spot rvcpp has at the illegal-instruction
   edge
-status: in-review
+status: done
 priority: P2
 created: '2026-08-25'
 touches:

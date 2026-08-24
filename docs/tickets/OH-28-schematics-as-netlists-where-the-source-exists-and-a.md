@@ -2,7 +2,7 @@
 id: OH-28
 title: Schematics as netlists where the source exists, and as pictures where it does
   not
-status: in-review
+status: done
 priority: P2
 created: '2026-08-25'
 touches:

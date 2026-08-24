@@ -1,7 +1,7 @@
 ---
 id: OH-29
 title: 'Ingest 3D board models: STEP and WRL into something a browser can draw'
-status: in-review
+status: done
 priority: P2
 created: '2026-08-25'
 touches:

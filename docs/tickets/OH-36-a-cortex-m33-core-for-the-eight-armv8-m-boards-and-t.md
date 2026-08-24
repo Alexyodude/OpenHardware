@@ -2,7 +2,7 @@
 id: OH-36
 title: A Cortex-M33 core for the eight Armv8-M boards, and the oracle it does not
   have
-status: open
+status: blocked
 priority: P2
 created: '2026-08-25'
 touches:
@@ -19,3 +19,5 @@ So scope this to what can actually be verified: the non-secure baseline, against
 The RP2350's RISC-V half may reach through the RV32 core instead. Whether that is a cheaper route to a running RP2350 than Armv8-M is worth answering before starting.
 
 Done when a compiled non-secure image runs in lockstep with QEMU, the security extensions are documented as unimplemented rather than stubbed, and the single-source limitation is recorded where a future reader will hit it.
+
+**Note 2026-08-25:** BLOCKED and split, on this ticket's own checkpoint evidence, verified independently. TWO blockers, not one. (a) No oracle: qemu-system-arm absent, and it cannot be built here -- QEMU needs meson plus GCC or Clang and all four are absent; MSVC 14.44 is the only C compiler. The rvcpp shim that saved OH-34 was 13 lines over a 1,080-line single-file simulator and does not scale to a build system of hundreds of translation units. (b) No image: arm-none-eabi-gcc is absent, and unlike cortexm0 there is no committed Armv8-M artefact -- test_blink.py's header records that its 76-byte blink.bin was compiled elsewhere precisely so the test runs without a toolchain. So even a QEMU binary appearing tomorrow leaves nothing to feed it but hand-assembled instructions. The ticket's own single-source objection survives both. SPLIT: the RP2350's two boards go through their RISC-V door as OH-42, which the user has chosen; the remaining six -- MG24 x2, nRF54l15 x2, nRF54LM20A x2 -- have no RISC-V door and stay blocked here until someone decides to fetch a prebuilt QEMU and an ARM toolchain. That is a decision about third-party binaries, not a coding step. docs/architectures.md 5.4 'RP2350 -- two doors, one much cheaper' already reached this conclusion before the ticket was filed.

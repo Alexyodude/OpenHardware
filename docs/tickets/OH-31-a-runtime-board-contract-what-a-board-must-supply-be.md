@@ -2,7 +2,7 @@
 id: OH-31
 title: 'A runtime board contract: what a board must supply before firmware can run
   on it'
-status: open
+status: in-review
 priority: P1
 created: '2026-08-25'
 touches:

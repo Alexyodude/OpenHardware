@@ -1,7 +1,7 @@
 ---
 id: OH-32
 title: Pick a board in the UI, load real firmware, and watch it run
-status: in-review
+status: done
 priority: P0
 created: '2026-08-25'
 touches:

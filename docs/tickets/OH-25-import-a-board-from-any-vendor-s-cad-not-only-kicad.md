@@ -1,7 +1,7 @@
 ---
 id: OH-25
 title: Import a board from any vendor's CAD, not only KiCad footprints from Seeed
-status: in-review
+status: done
 priority: P1
 created: '2026-08-25'
 touches:

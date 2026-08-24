@@ -2,7 +2,7 @@
 id: OH-42
 title: 'The RP2350 through its RISC-V door: extend core/riscv32 to the datasheet''s
   ISA string'
-status: in-review
+status: done
 priority: P1
 created: '2026-08-25'
 touches:

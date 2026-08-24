@@ -1,7 +1,7 @@
 ---
 id: OH-34
 title: An RV32IMC core for the seven ESP32-C boards, in lockstep with rvcpp
-status: in-review
+status: done
 priority: P1
 created: '2026-08-25'
 touches:

@@ -1,7 +1,7 @@
 ---
 id: OH-40
 title: Retire get_seeed_hardware.sh now that the generic fetcher exists
-status: in-review
+status: done
 priority: P3
 created: '2026-08-25'
 touches:
