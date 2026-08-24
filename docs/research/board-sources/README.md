@@ -85,11 +85,19 @@ board, ships none. One SparkFun board repository tells you to read a
 `LICENSE.md` that is not in it, while three sibling repositories have one. Any
 registry keyed on vendor will be wrong about specific boards on its first day.
 
-**Schematic *source* is common; schematic source in a format anything here can
-read is not.** Most of what is published as schematic source is EagleCAD,
-Altium or Cadence OrCAD binary. The exceptions — KiCad text that
-can be walked to a netlist — are Olimex, M5Stack in part, and Raspberry Pi's
-CM5 IO board.
+**Schematic *source* is common, and more of it is machine-readable than it
+looks.** Nine rows publish schematic source. Four are opaque binaries — Cadence
+OrCAD (Pico) and Altium (Nordic, WCH, most of M5Stack). The other five can be
+walked to a netlist today: KiCad text from Olimex, Raspberry Pi's CM5 IO board
+and one M5Stack board, and **EAGLE XML from Arduino, Adafruit and SparkFun**.
+
+That last clause is a correction to this survey's own first pass, which called
+EAGLE "proprietary binary" from the file extension. EAGLE has written XML since
+version 6. All three were opened to settle it: the Arduino UNO holds 61 `<net>`
+and 151 `<part>` elements, Adafruit's HUZZAH32 holds 43 and 69, SparkFun's
+Thing Plus ESP32-C6 holds 48 and 114. Recording an artefact class from an
+extension is exactly what the `opened` class exists to prevent, and the survey
+that defined the class still managed to do it three times.
 
 **The vendor this project already imports from publishes the least.** Seeed
 ships footprints and symbols and no schematic and no PCB layout at all. That

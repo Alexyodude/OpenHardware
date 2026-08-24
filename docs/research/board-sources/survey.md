@@ -9,13 +9,13 @@ Evidence class per cell: `O` opened, `L` listed, `S` stated, `A` absent, `U` unr
 
 | Vendor | Source | Licence | Covers | Sch src | Sch PDF | PCB | Fp/sym | 3D | BSP | Size |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Seeed Studio | [Seeed-Studio/OSHW-XIAO-Series](https://github.com/Seeed-Studio/OSHW-XIAO-Series) | MIT `L` | design files | no `A` | no `A` | no `A` | yes `O` | partial `L` | no `A` | 196,037 KiB |
+| Seeed Studio | [Seeed-Studio/OSHW-XIAO-Series](https://github.com/Seeed-Studio/OSHW-XIAO-Series) | MIT `L` | design files | no `A` | no `A` | no `A` | yes `O` | no `A` | no `A` | 196,037 KiB |
 | Raspberry Pi | [Pico design files (datasheets.raspberrypi.com)](https://datasheets.raspberrypi.com/pico/RPi-Pico-R3-PUBLIC-20200119.zip) | bespoke permissive grant `O` | design files | yes `O` | yes `O` | yes `O` | no `A` | yes `O` | yes `L` | 651,151 bytes |
 | Raspberry Pi | [Product Information Portal design files (CM5 IO board)](https://pip.raspberrypi.com/categories/1098-design-files) | none stated `O` | nothing stated | yes `O` | no `A` | yes `O` | yes `O` | yes `O` | n/a `A` | 3,594,386 bytes |
 | Espressif | [docs.espressif.com per-board user guides](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32c3/esp32-c3-devkitm-1/user_guide.html) | none stated `S` | nothing stated | no `S` | yes `L` | partial `L` | no `A` | no `A` | yes `L` | n/a -- individual files, no repository |
 | Nordic Semiconductor | [nRF52840-DK hardware files 3.0.3](https://www.nordicsemi.com/Products/Development-hardware/nRF52840-DK/Download) | Nordic 5-clause BSD variant `O` | contested, see notes | yes `O` | yes `O` | yes `O` | yes `O` | no `A` | no `A` | 23,729,151 bytes |
-| Adafruit | [adafruit/Adafruit-HUZZAH32-ESP32-Feather-PCB (sampled)](https://github.com/adafruit/Adafruit-HUZZAH32-ESP32-Feather-PCB) | CC BY-SA 3.0 Unported `O` | design files | yes `L` | no `A` | yes `L` | no `A` | no `A` | no `A` | 1,614 KiB for the sampled board |
-| SparkFun | [sparkfun/SparkFun_Thing_Plus_ESP32_C6 (sampled)](https://github.com/sparkfun/SparkFun_Thing_Plus_ESP32_C6) | CC BY-SA 4.0 for hardware, separate terms for code `O` | design files, see notes | yes `L` | yes `L` | yes `L` | yes `L` | no `A` | no `A` | 34,208 KiB for the sampled board |
+| Adafruit | [adafruit/Adafruit-HUZZAH32-ESP32-Feather-PCB (sampled)](https://github.com/adafruit/Adafruit-HUZZAH32-ESP32-Feather-PCB) | CC BY-SA 3.0 Unported `O` | design files | yes `O` | no `A` | yes `L` | no `A` | no `A` | no `A` | 1,614 KiB for the sampled board |
+| SparkFun | [sparkfun/SparkFun_Thing_Plus_ESP32_C6 (sampled)](https://github.com/sparkfun/SparkFun_Thing_Plus_ESP32_C6) | CC BY-SA 4.0 for hardware, separate terms for code `O` | design files, see notes | yes `O` | yes `L` | yes `L` | yes `L` | no `A` | no `A` | 34,208 KiB for the sampled board |
 | Arduino | [per-board CAD zip on docs.arduino.cc](https://docs.arduino.cc/hardware/uno-rev3/) | CC BY-SA 4.0 `O` | design files, said so explicitly | yes `O` | yes `S` | yes `O` | no `A` | no `A` | yes `L` | 303,265 bytes for the UNO R3 CAD zip |
 | STMicroelectronics | [st.com CAD resources (Nucleo / Discovery)](https://www.st.com/en/evaluation-tools/nucleo-c031c6.html) | unknown `U` | unknown | unknown `U` | unknown `U` | unknown `U` | unknown `U` | unknown `U` | yes `S` | unknown |
 | Texas Instruments | [ti.com LaunchPad tool pages](https://www.ti.com/tool/LP-MSPM0G3507) | none stated `S` | nothing found | not found `A` | unknown `O` | not found `A` | not found `A` | not found `A` | yes `S` | 1,815,326 bytes for the sampled user guide |
@@ -42,7 +42,7 @@ Evidence class per cell: `O` opened, `L` listed, `S` stated, `A` absent, `U` unr
 - **Sch PDF**: no (A) — the repository holds exactly two PDFs and neither is a schematic: document/Seeed_Studio_XIAO_Slides.pdf and projects/community-diy-projects/XIAO_USE_CASE.pdf *GitHub trees API main?recursive=1, 2026-08-25*
 - **PCB**: no (A) — no .kicad_pcb, .brd or .pcbdoc *GitHub trees API main?recursive=1, 2026-08-25*
 - **Fp/sym**: yes (O) — 37 .kicad_mod and 1 .kicad_sym under 'Seeed Studio XIAO Series Library'. This repository already imports them; the pad coordinates in webui/boards/*.json come from here. *tools/get_seeed_hardware.sh; tools/import_kicad_board.py*
-- **3D**: partial (L) — 13 .stl -- meshes, not STEP or WRL, so no solid geometry *GitHub trees API main?recursive=1, 2026-08-25*
+- **3D**: no (A) — no STEP, WRL or board mesh of any kind. All 13 .stl live under one path, projects/community-diy-projects/XIAO_ESP32_NTP_Clock/3d_models/, and are printable clock-case parts contributed by a user -- not board geometry and not Seeed's output. An earlier version of this cell said 'partial' on the strength of the extension tally alone; opening the paths disproved it. *GitHub trees API main?recursive=1, paths listed 2026-08-25*
 - **BSP**: no (A) — no pin-definition headers; Seeed's board support ships in the Arduino core, not here *GitHub trees API main?recursive=1, 2026-08-25*
 
 > 69 PNGs account for nearly all 196,037 KiB. tools/get_seeed_hardware.sh calls them 'pictures of a pinout, not a pinout' and fetches sparsely for that reason.
@@ -137,7 +137,7 @@ Evidence class per cell: `O` opened, `L` listed, `S` stated, `A` absent, `U` unr
 - **Size** — 1,614 KiB for the sampled board (L: GitHub repos API .size; search/repositories q=org:adafruit+PCB+in:name total_count=634, 2026-08-25)
 - **Licence** — CC BY-SA 3.0 Unported; covers design files (O: licence.txt at repo root, read 2026-08-25)
 
-- **Sch src**: yes (L) — 'Adafruit HUZZAH32 ESP32 Feather.sch' -- EagleCAD, proprietary binary *GitHub contents API, 2026-08-25*
+- **Sch src**: yes (O) — 'Adafruit HUZZAH32 ESP32 Feather.sch', 320,698 bytes. EAGLE XML, 43 <net> and 69 <part> elements -- opened and counted here, not inferred from the extension. *opened via the GitHub contents download_url, 2026-08-25*
 - **Sch PDF**: no (A) — the only PDF is a pinout diagram, not a schematic *GitHub contents API, 2026-08-25*
 - **PCB**: yes (L) — 'Adafruit HUZZAH32 ESP32 Feather.brd' -- EagleCAD board *GitHub contents API, 2026-08-25*
 - **Fp/sym**: no (A) — no .lbr in the sampled repository; Adafruit keeps its Eagle libraries in a separate repository not sampled here *GitHub contents API, 2026-08-25*
@@ -150,6 +150,8 @@ Evidence class per cell: `O` opened, `L` listed, `S` stated, `A` absent, `U` unr
 
 > 634 repositories at roughly 1 MB each is the opposite shape from Seeed: nothing to fetch sparsely, but 634 things to enumerate.
 
+> Correction to this survey's first pass, which recorded EAGLE as 'proprietary binary' from the extension alone. EAGLE has written XML since version 6, so this row's schematic is machine-readable today. Three vendors were mis-recorded the same way and all three were opened to fix it -- which is precisely the failure the `opened` class exists to prevent, committed by the survey that defined it.
+
 ### SparkFun — sparkfun/SparkFun_Thing_Plus_ESP32_C6 (sampled)
 
 <https://github.com/sparkfun/SparkFun_Thing_Plus_ESP32_C6>
@@ -158,7 +160,7 @@ Evidence class per cell: `O` opened, `L` listed, `S` stated, `A` absent, `U` unr
 - **Size** — 34,208 KiB for the sampled board (L: GitHub repos API .size; search/repositories q=org:sparkfun total_count=1413, 2026-08-25)
 - **Licence** — CC BY-SA 4.0 for hardware, separate terms for code; covers design files, see notes (O: LICENSE.md in sparkfun/RP2040_Thing_Plus: 'SparkFun hardware is released under Creative Commons Share-alike 4.0 International')
 
-- **Sch src**: yes (L) — Hardware/Thing_Plus_ESP32_C6.sch -- EagleCAD *GitHub trees API main?recursive=1, 2026-08-25*
+- **Sch src**: yes (O) — Hardware/Thing_Plus_ESP32_C6.sch, 1,242,417 bytes. EAGLE XML, 48 <net> and 114 <part> elements -- opened and counted here. *opened via the GitHub contents download_url, 2026-08-25*
 - **Sch PDF**: yes (L) — docs/assets/board_files/Thing_Plus_ESP32_C6.pdf *GitHub trees API main?recursive=1, 2026-08-25*
 - **PCB**: yes (L) — Hardware/Thing_Plus_ESP32_C6.brd plus a Production/ tree with 11 gerber layers, drill, panelised .brd and design rules *GitHub trees API main?recursive=1, 2026-08-25*
 - **Fp/sym**: yes (L) — Hardware/ESP32-C6-WROOM-1.lbr -- an Eagle library for the module used *GitHub trees API main?recursive=1, 2026-08-25*
@@ -169,6 +171,8 @@ Evidence class per cell: `O` opened, `L` listed, `S` stated, `A` absent, `U` unr
 
 > That is the specific reason a registry cannot store one licence per vendor: the failure mode is not a vendor changing its mind, it is a single repository missing a file.
 
+> Correction to this survey's first pass, which recorded EAGLE as 'proprietary binary' from the extension alone. EAGLE has written XML since version 6, so this row's schematic is machine-readable today. Three vendors were mis-recorded the same way and all three were opened to fix it -- which is precisely the failure the `opened` class exists to prevent, committed by the survey that defined it.
+
 ### Arduino — per-board CAD zip on docs.arduino.cc
 
 <https://docs.arduino.cc/hardware/uno-rev3/>
@@ -177,7 +181,7 @@ Evidence class per cell: `O` opened, `L` listed, `S` stated, `A` absent, `U` unr
 - **Size** — 303,265 bytes for the UNO R3 CAD zip (O: downloaded 2026-08-25)
 - **Licence** — CC BY-SA 4.0; covers design files, said so explicitly (O: License.txt inside A000066-cad-files.zip, 211 bytes)
 
-- **Sch src**: yes (O) — UNO-TH_Rev3e.sch, 2,222,276 bytes -- EagleCAD *zip listing, 2026-08-25*
+- **Sch src**: yes (O) — UNO-TH_Rev3e.sch, 2,222,276 bytes. EAGLE 9.3.1, and **the file is XML, not a binary**: it opens `<?xml version="1.0"?><!DOCTYPE eagle ...>` and holds 61 <net> and 151 <part> elements. That is a netlist, directly parseable. *opened, downloaded and parsed 2026-08-25*
 - **Sch PDF**: yes (S) — linked separately as A000066-schematics.pdf; not downloaded here *docs.arduino.cc/hardware/uno-rev3/, read 2026-08-25*
 - **PCB**: yes (O) — UNO-TH_Rev3e.brd, 707,996 bytes *zip listing, 2026-08-25*
 - **Fp/sym**: no (A) — no .lbr in the zip; the zip has five entries, two of them __MACOSX forks *zip listing, 2026-08-25*
@@ -187,6 +191,8 @@ Evidence class per cell: `O` opened, `L` listed, `S` stated, `A` absent, `U` unr
 > Arduino is the only vendor in the survey whose licence file says the word 'hardware' in the sentence that grants the rights. Everyone else either grants broadly and leaves scope to inference, or says 'software' over a board design.
 
 > webui/pinmap.py records that the UNO's pad centres had to be extracted from board.svg by hand. The .brd in this zip has them exactly -- so that was solvable, in a format nobody here reads yet.
+
+> Correction to this survey's first pass, which recorded EAGLE as 'proprietary binary' from the extension alone. EAGLE has written XML since version 6, so this row's schematic is machine-readable today. Three vendors were mis-recorded the same way and all three were opened to fix it -- which is precisely the failure the `opened` class exists to prevent, committed by the survey that defined it.
 
 ### STMicroelectronics — st.com CAD resources (Nucleo / Discovery)
 
@@ -320,7 +326,7 @@ Evidence class per cell: `O` opened, `L` listed, `S` stated, `A` absent, `U` unr
 - **Sch PDF**: yes (L) — 37 PDFs including per-revision colour and black-and-white schematics and a BOM PDF *GitHub trees API, 2026-08-25*
 - **PCB**: yes (L) — 16 .kicad_pcb plus 142 .gbr gerbers, 28 .drl drill files and 9 .net netlists *GitHub trees API, 2026-08-25*
 - **Fp/sym**: yes (L) — 23 .lib and 3 .dcm *GitHub trees API, 2026-08-25*
-- **3D**: yes (L) — 279 .step, 15 .stp and 151 .wrl -- the largest 3D holding in the survey by file count *GitHub trees API, 2026-08-25*
+- **3D**: yes (L) — 279 .step, 15 .stp and 151 .wrl -- the largest 3D holding in the survey by file count, and all of it component-level, under HARDWARE/<rev>/3d/: BAT54.step, C_0402_1005Metric.wrl, connector bodies. This is KiCad's per-footprint 3D library, not a model of the assembled board. Paired with the .kicad_pcb in the same directory it renders a board; on its own it does not. *GitHub trees API master?recursive=1, paths listed 2026-08-25*
 - **BSP**: yes (L) — SOFTWARE/ in the same repository: 85 .c, 41 .h, 34 .ino *GitHub trees API, 2026-08-25*
 
 > Every artefact class the ticket asks about is present, in open text formats, under a named OSI licence, in one repository per board. On the ticket's own criteria this is the best source surveyed, and it is not one of the vendors this project currently carries boards from.

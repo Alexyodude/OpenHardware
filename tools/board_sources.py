@@ -279,9 +279,14 @@ SOURCES: tuple[Source, ...] = (
                 "webui/boards/*.json were imported from them",
             ),
             model_3d=Artefact(
-                Published.PARTIAL,
-                Evidence.LISTED,
-                "13 .stl meshes, no STEP or WRL, and none of them a board",
+                Published.NO,
+                Evidence.ABSENT,
+                "no STEP, WRL or board mesh of any kind. All 13 .stl sit under "
+                "projects/community-diy-projects/XIAO_ESP32_NTP_Clock/3d_models/ "
+                "and are printable clock-case parts contributed by a user -- not "
+                "board geometry, and not Seeed's output. This cell said PARTIAL "
+                "on the strength of the extension tally alone until the survey "
+                "opened the paths",
             ),
             board_support=Artefact(
                 Published.NO,
@@ -316,8 +321,9 @@ SOURCES: tuple[Source, ...] = (
         artefacts=Artefacts(
             schematic_source=Artefact(
                 Published.YES,
-                Evidence.LISTED,
-                "'Adafruit HUZZAH32 ESP32 Feather.sch' — EagleCAD, proprietary binary",
+                Evidence.OPENED,
+                "'Adafruit HUZZAH32 ESP32 Feather.sch' — EagleCAD, proprietary binary. "
+                "Fetched here, so the survey upgraded this cell from LISTED to OPENED",
             ),
             schematic_pdf=Artefact(
                 Published.NO,
@@ -383,8 +389,9 @@ SOURCES: tuple[Source, ...] = (
         artefacts=Artefacts(
             schematic_source=Artefact(
                 Published.YES,
-                Evidence.LISTED,
-                "Hardware/Thing_Plus_ESP32_C6.sch — EagleCAD",
+                Evidence.OPENED,
+                "Hardware/Thing_Plus_ESP32_C6.sch — EagleCAD. Fetched here, so the "
+                "survey upgraded this cell from LISTED to OPENED",
             ),
             schematic_pdf=Artefact(
                 Published.YES,

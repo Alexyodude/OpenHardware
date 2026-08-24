@@ -59,10 +59,10 @@
           "cite": "tools/get_seeed_hardware.sh; tools/import_kicad_board.py"
         },
         "model_3d": {
-          "value": "partial",
-          "evidence": "listed",
-          "note": "13 .stl -- meshes, not STEP or WRL, so no solid geometry",
-          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+          "value": "no",
+          "evidence": "absent",
+          "note": "no STEP, WRL or board mesh of any kind. All 13 .stl live under one path, projects/community-diy-projects/XIAO_ESP32_NTP_Clock/3d_models/, and are printable clock-case parts contributed by a user -- not board geometry and not Seeed's output. An earlier version of this cell said 'partial' on the strength of the extension tally alone; opening the paths disproved it.",
+          "cite": "GitHub trees API main?recursive=1, paths listed 2026-08-25"
         },
         "board_support": {
           "value": "no",
@@ -333,9 +333,9 @@
       "artefacts": {
         "schematic_source": {
           "value": "yes",
-          "evidence": "listed",
-          "note": "'Adafruit HUZZAH32 ESP32 Feather.sch' -- EagleCAD, proprietary binary",
-          "cite": "GitHub contents API, 2026-08-25"
+          "evidence": "opened",
+          "note": "'Adafruit HUZZAH32 ESP32 Feather.sch', 320,698 bytes. EAGLE XML, 43 <net> and 69 <part> elements -- opened and counted here, not inferred from the extension.",
+          "cite": "opened via the GitHub contents download_url, 2026-08-25"
         },
         "schematic_pdf": {
           "value": "no",
@@ -370,7 +370,8 @@
       "notes": [
         "Six files in the sampled repository, and the whole board design is two of them. This is the tidiest per-board layout in the survey and the easiest to fetch selectively.",
         "GitHub reports the licence as NOASSERTION because licence.txt is the CC-BY-SA 3.0 legal code rather than a recognised template. The README says only 'Creative Commons Attribution/Share-Alike' with no version, so the version is a fact about the file, not about the README.",
-        "634 repositories at roughly 1 MB each is the opposite shape from Seeed: nothing to fetch sparsely, but 634 things to enumerate."
+        "634 repositories at roughly 1 MB each is the opposite shape from Seeed: nothing to fetch sparsely, but 634 things to enumerate.",
+        "Correction to this survey's first pass, which recorded EAGLE as 'proprietary binary' from the extension alone. EAGLE has written XML since version 6, so this row's schematic is machine-readable today. Three vendors were mis-recorded the same way and all three were opened to fix it -- which is precisely the failure the `opened` class exists to prevent, committed by the survey that defined it."
       ]
     },
     {
@@ -392,9 +393,9 @@
       "artefacts": {
         "schematic_source": {
           "value": "yes",
-          "evidence": "listed",
-          "note": "Hardware/Thing_Plus_ESP32_C6.sch -- EagleCAD",
-          "cite": "GitHub trees API main?recursive=1, 2026-08-25"
+          "evidence": "opened",
+          "note": "Hardware/Thing_Plus_ESP32_C6.sch, 1,242,417 bytes. EAGLE XML, 48 <net> and 114 <part> elements -- opened and counted here.",
+          "cite": "opened via the GitHub contents download_url, 2026-08-25"
         },
         "schematic_pdf": {
           "value": "yes",
@@ -429,7 +430,8 @@
       },
       "notes": [
         "The sampled repository's README says 'Please review the LICENSE.md file for license information' and there is no LICENSE.md in it. Three other SparkFun board repositories were checked -- SparkFun_Thing_Plus_ESP32_WROOM_C, ESP32_Thing_Plus, RP2040_Thing_Plus -- and all three have one. So the licence is per-repository and at least one repository asserts terms it does not ship.",
-        "That is the specific reason a registry cannot store one licence per vendor: the failure mode is not a vendor changing its mind, it is a single repository missing a file."
+        "That is the specific reason a registry cannot store one licence per vendor: the failure mode is not a vendor changing its mind, it is a single repository missing a file.",
+        "Correction to this survey's first pass, which recorded EAGLE as 'proprietary binary' from the extension alone. EAGLE has written XML since version 6, so this row's schematic is machine-readable today. Three vendors were mis-recorded the same way and all three were opened to fix it -- which is precisely the failure the `opened` class exists to prevent, committed by the survey that defined it."
       ]
     },
     {
@@ -452,8 +454,8 @@
         "schematic_source": {
           "value": "yes",
           "evidence": "opened",
-          "note": "UNO-TH_Rev3e.sch, 2,222,276 bytes -- EagleCAD",
-          "cite": "zip listing, 2026-08-25"
+          "note": "UNO-TH_Rev3e.sch, 2,222,276 bytes. EAGLE 9.3.1, and **the file is XML, not a binary**: it opens `<?xml version=\"1.0\"?><!DOCTYPE eagle ...>` and holds 61 <net> and 151 <part> elements. That is a netlist, directly parseable.",
+          "cite": "opened, downloaded and parsed 2026-08-25"
         },
         "schematic_pdf": {
           "value": "yes",
@@ -488,7 +490,8 @@
       },
       "notes": [
         "Arduino is the only vendor in the survey whose licence file says the word 'hardware' in the sentence that grants the rights. Everyone else either grants broadly and leaves scope to inference, or says 'software' over a board design.",
-        "webui/pinmap.py records that the UNO's pad centres had to be extracted from board.svg by hand. The .brd in this zip has them exactly -- so that was solvable, in a format nobody here reads yet."
+        "webui/pinmap.py records that the UNO's pad centres had to be extracted from board.svg by hand. The .brd in this zip has them exactly -- so that was solvable, in a format nobody here reads yet.",
+        "Correction to this survey's first pass, which recorded EAGLE as 'proprietary binary' from the extension alone. EAGLE has written XML since version 6, so this row's schematic is machine-readable today. Three vendors were mis-recorded the same way and all three were opened to fix it -- which is precisely the failure the `opened` class exists to prevent, committed by the survey that defined it."
       ]
     },
     {
@@ -877,8 +880,8 @@
         "model_3d": {
           "value": "yes",
           "evidence": "listed",
-          "note": "279 .step, 15 .stp and 151 .wrl -- the largest 3D holding in the survey by file count",
-          "cite": "GitHub trees API, 2026-08-25"
+          "note": "279 .step, 15 .stp and 151 .wrl -- the largest 3D holding in the survey by file count, and all of it component-level, under HARDWARE/<rev>/3d/: BAT54.step, C_0402_1005Metric.wrl, connector bodies. This is KiCad's per-footprint 3D library, not a model of the assembled board. Paired with the .kicad_pcb in the same directory it renders a board; on its own it does not.",
+          "cite": "GitHub trees API master?recursive=1, paths listed 2026-08-25"
         },
         "board_support": {
           "value": "yes",
