@@ -42,6 +42,26 @@ instead of megabytes -- Seeed's own pinout PNGs are 2-5 MB each.
 
     python tools/import_kicad_board.py --list
     python tools/import_kicad_board.py XIAO-ESP32-C3-DIP --symbol XIAO-ESP32-C3-SMD
+
+## Retiring, under OH-41
+
+`tools/import_board.py` reproduces this tool's output exactly -- OH-25 checked
+the committed `XIAO-RP2040-DIP.json` pad for pad, every coordinate identical to
+0.0 px -- and records `source.file` as well as the footprint name, which is
+what makes an asset search work. This file is redundant and is going.
+
+**It is still here because deleting it turns the rules suite red**, and the
+two things that would break are not on OH-41's claim:
+
+    tests/rules/test_kicad.py:29         from tools.import_kicad_board import build, header_pads
+    tests/rules/test_board_sources.py:125  from tools.import_kicad_board import VENDOR
+
+The 50 `webui/boards/*.json` and `*.svg` files naming this tool in their
+`derivation` are **not** a blocker and must not be rewritten: `derivation`
+records how a file was made, and these really were made by this tool. Saying
+otherwise would be falsifying provenance to tidy a reference. The one line
+that does need to move with the boards is
+`tests/rules/test_kicad.py:233`, which asserts the current generator's name.
 """
 
 from __future__ import annotations
@@ -205,8 +225,13 @@ def main() -> int:
     args = parser.parse_args()
 
     if not VENDOR.is_dir():
+        # OH-40 deleted tools/get_seeed_hardware.sh, which this used to name.
+        # An instruction pointing at a file that is gone is worse than no
+        # instruction, so it names the fetcher that replaced it and the
+        # registry key it needs.
         print(
-            f"{VENDOR} is missing. Run: bash tools/get_seeed_hardware.sh",
+            f"{VENDOR} is missing. "
+            f"Run: python tools/get_board_sources.py seeed-xiao",
             file=sys.stderr,
         )
         return 2
