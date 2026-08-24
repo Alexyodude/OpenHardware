@@ -476,6 +476,77 @@ SOURCES: tuple[Source, ...] = (
         cite="OH-23 survey, docs/research/board-sources/sources.json: "
         "Raspberry Pi / Pico design files (datasheets.raspberrypi.com)",
     ),
+    Source(
+        name="olimex-esp32-poe",
+        vendor="Olimex",
+        model="one repository per board; 144 under org:OLIMEX, HARDWARE/ per revision",
+        size="36,801 KiB for the sampled board",
+        licence=Licence(
+            name="Apache-2.0",
+            covers="design files",
+            sampled=True,
+            evidence=Evidence.OPENED,
+            cite="LICENSE at repo root, read 2026-08-25. Sampled per repository "
+            "and not per organisation, because the sibling OLIMEX/ESP32-POE-ISO "
+            "has no LICENSE at all -- only a Licensee.pdf -- and GitHub reports "
+            "no licence for it",
+        ),
+        fetch=Fetch(
+            transport=Transport.GIT_SPARSE,
+            url="https://github.com/OLIMEX/ESP32-POE.git",
+            wanted=("HARDWARE",),
+            skipped=(
+                (
+                    "SOFTWARE",
+                    "85 .c, 41 .h and 34 .ino of example firmware. This project "
+                    "models the board rather than compiling for it, and the "
+                    "geometry OH-29 reads is entirely under HARDWARE/",
+                ),
+            ),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES,
+                Evidence.LISTED,
+                "15 .sch and 3 .kicad_sch across revisions -- KiCad, text, "
+                "parseable to a netlist; also 23 .lib and 3 .dcm",
+            ),
+            schematic_pdf=Artefact(
+                Published.YES,
+                Evidence.LISTED,
+                "37 PDFs including per-revision colour and black-and-white "
+                "schematics and a BOM PDF",
+            ),
+            pcb_layout=Artefact(
+                Published.YES,
+                Evidence.LISTED,
+                "16 .kicad_pcb plus 142 .gbr gerbers, 28 .drl drill files and "
+                "9 .net netlists. **This is the cell OH-29 turns on**: the board "
+                "outline lives on the .kicad_pcb Edge.Cuts layer, in millimetres, "
+                "beside the pads it has to agree with",
+            ),
+            footprints_symbols=Artefact(
+                Published.YES, Evidence.LISTED, "23 .lib and 3 .dcm"
+            ),
+            model_3d=Artefact(
+                Published.YES,
+                Evidence.LISTED,
+                "279 .step, 15 .stp and 151 .wrl -- the largest 3D holding in the "
+                "survey by file count, and all of it component-level, under "
+                "HARDWARE/<rev>/3d/: BAT54.step, C_0402_1005Metric.wrl, connector "
+                "bodies. This is KiCad's per-footprint 3D library, not a model of "
+                "the assembled board. Paired with the .kicad_pcb in the same "
+                "directory it renders a board; on its own it does not",
+            ),
+            board_support=Artefact(
+                Published.YES,
+                Evidence.LISTED,
+                "SOFTWARE/ in the same repository: 85 .c, 41 .h, 34 .ino",
+            ),
+        ),
+        cite="OH-23 survey, docs/research/board-sources/sources.json: "
+        "Olimex / OLIMEX/ESP32-POE (sampled)",
+    ),
 )
 
 
