@@ -1,13 +1,14 @@
 ---
 id: OH-37
 title: A board may claim it runs only when a named test watched real firmware execute
-status: open
+status: in-review
 priority: P1
 created: '2026-08-25'
 touches:
 - rules/board-claims.md
 - tools/check_board_claims.py
 - tests/rules/test_board_claims.py
+- .github/workflows/rules.yml
 ---
 
 catalogue.py already carries the mechanism, as a dict and a docstring: FIRMWARE_VERIFIED maps a chip to the test that watched a real compiled image execute, and its comment is the principle -- 'Having a built core and a board description means a board *could* run something; it is not evidence that anything has. The distinction is small on a good day and the whole difference on a bad one.'

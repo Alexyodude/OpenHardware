@@ -42,6 +42,7 @@ the checkers named in each file are what actually enforce them.
 - `rules/determinism.md` — no nondeterministic calls in new code
 - `rules/conformance-fixtures.md` — oracle and fixture requirements
 - `rules/ticket-claims.md` — one ticket per unit of work; a ticket owns the paths it may edit
+- `rules/board-claims.md` — a board says it runs firmware only where a named test watched an image execute
 
 ## Before you commit
 
@@ -52,6 +53,7 @@ python tools/check_part_schemas.py
 python tools/check_licenses.py
 python tools/check_deltas.py
 python tools/check_banned_symbols.py
+python tools/check_board_claims.py
 pytest
 ```
 

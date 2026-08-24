@@ -134,6 +134,13 @@ jobs:
       - name: check_banned_symbols
         run: python tools/check_banned_symbols.py
 
+      # Reads this repository and nothing else -- no PICSimLab, no toolchain --
+      # so it is the one checker here that can never skip for want of a
+      # checkout. What it costs a second to catch is a surface saying a board
+      # runs firmware when no test ever watched one execute.
+      - name: check_board_claims
+        run: python tools/check_board_claims.py
+
       # Ticket collisions do not need PICSimLab or the reference checkout;
       # they are a property of docs/tickets/ and the working tree alone.
       - name: check_ticket_claims
