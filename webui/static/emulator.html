@@ -134,6 +134,12 @@
       <button id="board-load">Load</button>
       <button id="board-go" class="primary" disabled>Run</button>
     </div>
+    <div class="prose" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center"
+         id="artefact-row" hidden>
+      <select id="artefact-pick" aria-label="A build found on this machine"></select>
+      <button id="artefact-load">Load that build</button>
+      <span class="note" id="artefact-note"></span>
+    </div>
     <div class="prose bordered">
       <p id="board-report">Nothing loaded yet.</p>
     </div>

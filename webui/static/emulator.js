@@ -492,6 +492,98 @@ async function loadBoardImage() {
   );
 }
 
+/** Builds this server was told it may look for, keyed by their path. */
+let artefacts = new Map();
+
+/** Offer the builds already on this machine, if the server was told to look.
+ *
+ *  **The row stays hidden when the search is off, and that is not the same as
+ *  empty.** `enabled: false` means nobody asked the server to look; an empty
+ *  list means it looked and found nothing. A page that showed one empty
+ *  dropdown for both would tell a person their builds are missing when in fact
+ *  the server was never pointed at them.
+ *
+ *  Nothing here can ask for a directory. The server was started with the ones
+ *  it may read and a request only ever chooses among what comes back -- the
+ *  same shape the compile route keeps. */
+async function offerArtefacts() {
+  const row = $("artefact-row");
+  let found;
+  try {
+    found = await api("/api/board/artefacts");
+  } catch {
+    // An older server without the route. The file picker above still works,
+    // so this is an absence rather than a failure and says nothing.
+    row.hidden = true;
+    return;
+  }
+  if (!found.enabled || !found.artefacts.length) {
+    row.hidden = true;
+    return;
+  }
+
+  artefacts = new Map(found.artefacts.map((a) => [a.path, a]));
+  const pick = $("artefact-pick");
+  pick.replaceChildren(...found.artefacts.map((a) => {
+    const option = document.createElement("option");
+    option.value = a.path;
+    // Target and role first, because "esp32c3 / bootloader" is what tells a
+    // person this is not the program they meant to run.
+    option.textContent =
+      `${a.target} — ${a.name} (${a.role}, ${a.bytes.toLocaleString()} bytes)`;
+    return option;
+  }));
+  $("artefact-note").textContent =
+    `${found.artefacts.length} found under ${found.roots.join(", ")}`;
+  row.hidden = false;
+}
+
+/** Load the build the dropdown is showing.
+ *
+ *  The base address comes from the file's own format wherever it has one --
+ *  ELF, UF2 and Intel HEX all carry it -- so the field above is consulted only
+ *  for a raw `.bin`, which is the one shape that cannot say where it belongs.
+ *  That is the whole of "without typing a base address by hand". */
+async function loadArtefact() {
+  const board = $("board-pick").value;
+  const path = $("artefact-pick").value;
+  if (!board) {
+    boardSays("Nothing loaded yet.", "Pick a board first.");
+    return;
+  }
+  const chosen = artefacts.get(path);
+  const request = { board, path };
+  if (chosen && chosen.needs_base) {
+    const base = $("board-base").value.trim();
+    if (!base) {
+      boardSays(
+        "Nothing loaded yet.",
+        `${chosen.name} is a raw .bin, which cannot say where it belongs. ` +
+        `Give a load address above.`,
+      );
+      return;
+    }
+    request.base = base;
+  }
+
+  running = false;
+  boardImage = null;
+  $("board-go").disabled = true;
+  boardImage = await api("/api/board/load-artefact", request);
+  $("board-go").disabled = false;
+  $("board-console").textContent = "";
+  $("board-console-note").textContent = "nothing transmitted yet";
+  previousBoard = null;
+  renderBoardState(await api("/api/board/state"));
+  boardSays(
+    `${chosen ? chosen.name : path}: ${boardImage.bytes} bytes of ` +
+    `${boardImage.format} on ${boardImage.board}, a ${boardImage.chip} on the ` +
+    `${boardImage.core} core. Entered at ` +
+    `0x${boardImage.entry.toString(16).padStart(8, "0")}`,
+    "",
+  );
+}
+
 /** The sketch a person sees before they type anything.
  *
  *  A real Blink and not a stub, because the first thing anybody does is press
@@ -932,6 +1024,13 @@ function wire() {
   $("board-go").addEventListener("click", () =>
     runLoadedBoard().catch((error) => boardSays($("board-report").textContent, String(error.message || error))));
   $("sketch-source").value = DEFAULT_SKETCH;
+  $("artefact-load").addEventListener("click", () =>
+    loadArtefact().catch((error) =>
+      boardSays("Nothing loaded yet.", String(error.message || error))));
+  // Asked for once at start-up. The answer only changes when somebody
+  // rebuilds, and a page that polled the filesystem would walk it every
+  // second for a list that is almost always the same.
+  offerArtefacts().catch(() => {});
   $("sketch-build").addEventListener("click", () =>
     buildSketch().catch((error) => {
       // A refusal the server made before compiling -- an unknown board, or a

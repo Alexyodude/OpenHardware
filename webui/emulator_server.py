@@ -137,6 +137,9 @@ from webui import api, emulator, firmware, targets  # noqa: E402
 # Aliased, because `compile` is a builtin and shadowing it inside a module this
 # large is a trap somebody would eventually fall into.
 from webui import compile as compile_service  # noqa: E402
+# OH-10's headline: 42 tests of artefact discovery that nothing under webui/
+# imported. This is the import.
+from tools import import_firmware  # noqa: E402
 from webui.boards import catalogue as board_catalogue  # noqa: E402
 
 #: What this program calls itself, in the `Server:` header and on stdout.
@@ -356,6 +359,85 @@ def _image_bytes(payload: dict[str, object]) -> bytes:
     return data
 
 
+class ArtefactSearch:
+    """Where the server may look for builds, and what it found.
+
+    **`roots is None` means off, and an empty list means on and nothing
+    found.** They are different facts and a page says different things about
+    them: one is "you did not turn this on", the other is "you have not built
+    anything there yet".
+
+    Module state rather than a parameter threaded through `handle_board_api`,
+    because it is a property of how the server was STARTED. A request cannot
+    reach it, which is the security property this whole route rests on --
+    `tools/import_firmware.py` walks directories, and a route that took a path
+    from a caller would walk any of them.
+    """
+
+    def __init__(self) -> None:
+        self.roots: list[pathlib.Path] | None = None
+
+    def allow(self, directories: list[str]) -> None:
+        self.roots = [pathlib.Path(d).expanduser().resolve() for d in directories]
+
+    def listing(self) -> list[dict[str, object]]:
+        """Every artefact under every allowed root, newest first.
+
+        Sorted by modification time, because the one somebody wants is almost
+        always the one they just built -- and a list of forty firmware.elf
+        ordered by path makes a person read all forty.
+        """
+        found: list[dict[str, object]] = []
+        for root in self.roots or []:
+            for artefact in import_firmware.find_artefacts(root):
+                try:
+                    stat = artefact.path.stat()
+                except OSError:
+                    # Vanished between the walk and the stat. Skipping it is
+                    # right: it is not there to load either.
+                    continue
+                found.append({
+                    "path": str(artefact.path),
+                    "name": artefact.path.name,
+                    "toolchain": artefact.toolchain,
+                    "target": artefact.target,
+                    "role": artefact.role,
+                    "bytes": stat.st_size,
+                    "modified": stat.st_mtime,
+                    # A format that carries its own load address needs no base
+                    # typed by hand. This is the field a page uses to decide
+                    # whether to ask for one.
+                    "needs_base": artefact.path.suffix.lower() == ".bin",
+                })
+        found.sort(key=lambda a: a["modified"], reverse=True)
+        return found
+
+    def resolve(self, wanted: str) -> pathlib.Path:
+        """A path from a request, checked to be one this search offered.
+
+        **Not `startswith`.** A root of `/home/me/build` would otherwise admit
+        `/home/me/build-secrets`, which is the classic prefix mistake.
+        `Path.is_relative_to` compares components.
+        """
+        if self.roots is None:
+            raise ApiError(
+                "artefact search is off. Start the server with --artefacts DIR."
+            )
+        candidate = pathlib.Path(wanted).expanduser().resolve()
+        if not any(candidate.is_relative_to(root) for root in self.roots):
+            raise ApiError(
+                f"{wanted} is not under any directory this server was told to "
+                f"search: {', '.join(str(r) for r in self.roots)}"
+            )
+        if not candidate.is_file():
+            raise ApiError(f"{wanted} is not a file")
+        return candidate
+
+
+#: Set once from the command line. See `ArtefactSearch`.
+SEARCH_ROOTS = ArtefactSearch()
+
+
 def handle_board_api(boards: BoardSlot, route: str,
                      query: dict[str, list[str]],
                      payload: dict[str, object]) -> dict[str, object]:
@@ -382,6 +464,33 @@ def handle_board_api(boards: BoardSlot, route: str,
         )
         boards.replace(loaded)
         return loaded.as_json()
+
+    if route == "/api/board/artefacts":
+        # **The request cannot name a directory, and that is the whole point.**
+        #
+        # OH-10 left this open: the compile-safety decision the user made on
+        # 2026-08-25 was about running a compiler, not about reading a caller's
+        # filesystem, and the ticket says to ask rather than assume the answer
+        # carries over. It does not need asking if the answer is "off unless
+        # the person running the server said otherwise" -- which is the same
+        # shape `webui/compile.py` already keeps: the operator decides, the
+        # request chooses among what the operator allowed.
+        #
+        # So `--artefacts DIR` on the command line is the only way this
+        # answers anything. Absent, it reports that it is off and names the
+        # flag, rather than 404 -- a route that exists and is disabled and a
+        # route that does not exist are different facts, and a page can say so.
+        if SEARCH_ROOTS.roots is None:
+            return {
+                "enabled": False,
+                "note": (
+                    "artefact search is off. Start the server with "
+                    "--artefacts DIR to let it look for builds under DIR."
+                ),
+                "artefacts": [],
+            }
+        return {"enabled": True, "roots": [str(r) for r in SEARCH_ROOTS.roots],
+                "artefacts": SEARCH_ROOTS.listing()}
 
     if route == "/api/board/compile":
         # **Build and load in one step, and the image never crosses the wire.**
@@ -416,6 +525,29 @@ def handle_board_api(boards: BoardSlot, route: str,
         )
         boards.replace(loaded)
         return {**built.as_json(), "board": loaded.as_json()}
+
+    if route == "/api/board/load-artefact":
+        # Load one of the files `/api/board/artefacts` offered, by path.
+        #
+        # **The path is checked against the allowed roots, not trusted.** It
+        # came back from this server a moment ago, but a request is a request:
+        # nothing stops a caller sending a different one, and `resolve` is
+        # what makes that harmless.
+        board = payload.get("board")
+        wanted = payload.get("path")
+        if not isinstance(board, str):
+            raise ApiError("board must be a string naming a board from /api/boards")
+        if not isinstance(wanted, str):
+            raise ApiError("path must be a string naming a file from /api/board/artefacts")
+        path = SEARCH_ROOTS.resolve(wanted)
+        loaded = api.load_firmware(
+            board,
+            path.read_bytes(),
+            base=_optional_int(payload, "base"),
+            vector_table=_optional_int(payload, "vector_table"),
+        )
+        boards.replace(loaded)
+        return loaded.as_json()
 
     if route == "/api/board/run":
         result = boards.require().run(_int(payload, "steps", 10_000))
@@ -683,7 +815,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--bind", default=DEFAULT_BIND)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument(
+        "--artefacts", action="append", metavar="DIR", default=[],
+        help="let the server look for PlatformIO, arduino-cli and STM32CubeIDE "
+             "builds under DIR, so an image can be picked from a list instead "
+             "of a file dialog. OFF unless given, and repeatable. A request "
+             "can never name a directory -- only choose among what is found "
+             "under these.",
+    )
     args = parser.parse_args(argv)
+    if args.artefacts:
+        SEARCH_ROOTS.allow(args.artefacts)
 
     try:
         server = build_server(args.bind, args.port)
