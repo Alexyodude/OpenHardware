@@ -34,21 +34,25 @@
     <button class="tab" id="tab-targets" role="tab" aria-selected="false">Targets</button>
   </div>
 
-  <!-- The target selector is inside `only-emulator`, and it was outside on
-       purpose until 2026-08-25. The reasoning then was that "which machine you
-       are driving is true in both views, and hiding it on the Targets tab
-       would hide it exactly where someone went looking for it" — which held
-       while the Targets view was where you loaded an image. It is not any
-       more: the Targets view describes what has progressed and operates
-       nothing, so a control there is a control in the wrong room.
+  <!-- There is no core selector here, and there was one until 2026-08-25.
 
-       Its options are built from /api/targets, never from this file. A core
-       that is present but unbuilt appears here `disabled`, carrying the reason
-       — a target that silently vanished because someone deleted build/ is the
-       one failure this control exists to prevent. -->
-  <span class="only-emulator">
-    <select id="target" aria-label="Emulation target"></select>
-  </span>
+       It listed `core/` directories — cortexm0, i8086, riscv32 — and with
+       `DRIVING = "i8086"` it disabled itself entirely, carrying the title
+       "one runnable target; the selector opens when a second core is built".
+       So the most prominent control on the page was a dropdown that named no
+       MCU and could not be used, which reads as "this is where you choose a
+       machine, and nothing works". Someone looking for a board reasonably
+       found this first.
+
+       Everything it said is still said, and said better, by the "Runnable now"
+       table in the Targets view: same /api/targets data, room for the reason
+       beside each row, and it sits in the view whose job is describing what
+       has progressed. A disabled duplicate of a table is not a second opinion.
+
+       **The machine selector is `#board-pick`, in the first panel below.** It
+       lists all 26 boards, offering the ones a core is built and described for
+       and disabling the rest with their reason — which is what someone means
+       by "pick an MCU". -->
 
   <!-- `display: contents` so these still participate in the toolbar's flex
        layout and gap; wrapping them in a normal span would collapse their

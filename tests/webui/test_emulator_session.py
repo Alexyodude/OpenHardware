@@ -99,14 +99,35 @@ def test_the_stylesheet_hides_the_board_panel_on_the_targets_view():
     )
 
 
-def test_the_machine_selector_is_scoped_to_the_emulator_view():
-    """`#target` sat outside `.only-emulator` on purpose, because the Targets
-    view used to be where an image was loaded. It is not any more, so a
-    selector there is a control in the room that operates nothing."""
-    match = re.search(
-        r'<span class="only-emulator">\s*<select id="target"', HTML
+def test_the_only_machine_selector_is_the_board_picker():
+    """One control chooses what to emulate, and it is the one that names MCUs.
+
+    A `#target` selector used to sit first in the toolbar. It listed `core/`
+    directories — `cortexm0`, `i8086`, `riscv32` — and with one drivable core
+    it disabled *itself*, titled "one runnable target; the selector opens when
+    a second core is built". So the most prominent control on the page named no
+    MCU and could not be used, and someone looking for their board found it
+    first and reasonably concluded nothing worked.
+
+    Nothing was lost by removing it: the Targets view's "Runnable now" table is
+    built from the same `/api/targets` data and has room for the reason beside
+    each row.
+    """
+    assert 'id="target"' not in HTML, (
+        "the core selector is back in the toolbar; it names cores rather than "
+        "MCUs and disables itself while one core is drivable"
     )
-    assert match, "the target selector is no longer scoped to the Emulator view"
+    assert 'id="board-pick"' in HTML
+
+
+def test_nothing_in_the_script_still_reaches_for_the_removed_selector():
+    """Markup and script have to be removed together. A leftover
+    `$("target")` throws on load, which takes the whole page with it —
+    the class `test_every_element_the_script_fills_exists_in_the_page`
+    guards from the other direction."""
+    script = (STATIC / "emulator.js").read_text(encoding="utf-8")
+    assert '$("target")' not in script
+    assert "selectTarget" not in script, "a function with no caller"
 
 
 def test_the_view_switch_is_still_two_valued():

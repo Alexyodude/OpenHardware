@@ -224,44 +224,14 @@ async function runContinuously() {
 let TARGETS = [];
 
 async function fillTargets() {
+  // Fetched for the "Runnable now" table in the Targets view, and for nothing
+  // else. It used to fill a core selector in the toolbar too; that selector
+  // was removed on 2026-08-25 because with one drivable core it disabled
+  // itself, and a disabled dropdown naming `core/` directories is not what
+  // someone means when they go looking for their MCU. The table says the same
+  // thing with room for the reason. `#board-pick` is the machine selector.
   const data = await api("/api/targets");
   TARGETS = data.targets;
-
-  const select = $("target");
-  select.replaceChildren(...TARGETS.map((target) => {
-    const option = document.createElement("option");
-    option.value = target.name;
-    // The reason rides in the label rather than only in a colour, so it
-    // survives being read aloud, printed, or looked at by someone who cannot
-    // distinguish the two greens.
-    //
-    // It must be the reason it is *disabled*, not its status: `cortexm0 —
-    // ready` beside a greyed-out option reads as a broken UI, because "ready"
-    // is exactly what it is not.
-    option.textContent = target.selectable
-      ? target.name
-      : `${target.name} — ${target.drivable === false && target.library
-            ? "not drivable here" : target.status}`;
-    option.disabled = !target.selectable;
-    option.title = target.detail;
-    return option;
-  }));
-
-  if (TARGETS.length === 0) {
-    const option = document.createElement("option");
-    option.textContent = "no cores built";
-    option.disabled = true;
-    select.replaceChildren(option);
-  }
-  if (data.selected) select.value = data.selected;
-  select.disabled = TARGETS.filter((t) => t.selectable).length < 2;
-  // Disabled, not hidden. With one core there is nothing to switch to, and a
-  // control that disappears reads as a missing feature rather than as an
-  // accurate report of a repository with one core in it.
-  select.title = select.disabled
-    ? "one runnable target; the selector opens when a second core is built"
-    : "choose which core to drive";
-
   renderRunnable();
 }
 
@@ -303,11 +273,6 @@ function stripCell(number, key, extra) {
   cell.className = extra ? `cell ${extra}` : "cell";
   cell.append(span("n", number), span("k", key));
   return cell;
-}
-
-async function selectTarget(name) {
-  await api("/api/target", { name });
-  await fillTargets();
 }
 
 // --- boards -------------------------------------------------------------------
@@ -773,8 +738,6 @@ function wire() {
     loadBoardImage().catch((error) => boardSays("Nothing loaded yet.", String(error.message || error))));
   $("board-go").addEventListener("click", () =>
     runLoadedBoard().catch((error) => boardSays($("board-report").textContent, String(error.message || error))));
-  $("target").addEventListener("change", (event) =>
-    selectTarget(event.target.value).catch(report));
   $("theme").addEventListener("click", () => {
     applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
   });
