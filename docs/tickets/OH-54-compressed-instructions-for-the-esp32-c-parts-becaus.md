@@ -2,7 +2,7 @@
 id: OH-54
 title: Compressed instructions for the ESP32-C parts, because two thirds of a real
   image is 16-bit
-status: open
+status: done
 priority: P1
 created: '2026-08-25'
 touches:
