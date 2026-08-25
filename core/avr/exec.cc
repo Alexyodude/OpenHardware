@@ -64,10 +64,17 @@
 //
 // ## What is deliberately still absent
 //
-// `bld`, `bst`, `sbrc`, `sbrs`, `ijmp`, `icall`, `eijmp`, `eicall`, `elpm`,
-// `spm`, `des`, `sleep`, `wdr`, `break`, `xch`, `las`, `lac`, `lat` and the
-// fractional multiplies. None appears in the sketch this ticket measured, and
-// each would be a claim without a test behind it. They refuse.
+// `bld`, `bst`, `eijmp`, `eicall`, `elpm`, `spm`, `des`, `sleep`, `wdr`,
+// `break`, `xch`, `las`, `lac`, `lat` and the fractional multiplies. Each
+// would be a claim without a test behind it, so they refuse.
+//
+// **`sbrc`, `sbrs`, `ijmp` and `icall` were on that list until OH-63.** They
+// came off it the way everything here does: a real image reached them. A
+// sketch calling `Serial.println` dispatches through `Print`'s vtable, and
+// gcc compiles that to `ijmp`; `sbrc`/`sbrs` appear five times in the same
+// image. Measured, not guessed -- stepping every distinct word of a 1,724-byte
+// Serial sketch left 23 refused, of which 14 are `.word` to objdump and are
+// the pin tables read as code.
 
 #include "exec.h"
 
@@ -335,6 +342,30 @@ StepResult step(Cpu& cpu) {
             return StepResult::MemoryFault;
         }
         cpu.set_reg(0, value);
+        return StepResult::Ok;
+    }
+
+    // --- ijmp / icall -- 1001 0100 0000 1001 / 1001 0101 0000 1001 --------
+    //
+    // Jump to where Z points. **Z is a WORD address here**, unlike `lpm`,
+    // which reads program memory through the same register pair by BYTE
+    // address. One register, two meanings, decided by the instruction -- the
+    // reason `cpu.h` keeps the two spaces apart and makes every accessor say
+    // which one it means.
+    //
+    // Reached by a real image and not by inspection: `Serial.println` dispatches
+    // through `Print`'s vtable, and gcc compiles that tail call to `ijmp`.
+    // `eijmp` and `eicall` are the same encodings with bit 4 set; they need
+    // EIND, which this part does not have, so they still refuse.
+    if (encoding == 0x9409 || encoding == 0x9509) {
+        if (encoding == 0x9509) {   // icall pushes, ijmp does not
+            const uint32_t ret = cpu.pc();
+            if (!push_byte(cpu, static_cast<uint8_t>(ret)) ||
+                !push_byte(cpu, static_cast<uint8_t>(ret >> 8))) {
+                return StepResult::MemoryFault;
+            }
+        }
+        cpu.set_pc(cpu.reg_pair(kZ));
         return StepResult::Ok;
     }
 
@@ -945,6 +976,26 @@ StepResult step(Cpu& cpu) {
         const bool set = (cpu.sreg() & (1u << bit)) != 0;
         if (set == branch_if_set) {
             cpu.set_pc(static_cast<uint32_t>(cpu.pc() + offset));
+        }
+        return StepResult::Ok;
+    }
+
+    // --- sbrc / sbrs Rr, b -- 1111 110r rrrr 0bbb / 1111 111r rrrr 0bbb ---
+    //
+    // Skip the next instruction on a bit of a REGISTER, where `sbic`/`sbis`
+    // test a bit of the IO space. Same skip rule and the same two-word trap:
+    // how far to skip is a property of the instruction being skipped.
+    //
+    // Bit 9 chooses the polarity, so the mask is 0xFC08 and not 0xFE08 -- and
+    // **bit 3 must be clear**, which is what keeps `bld` and `bst` out. They
+    // share these eight bits and differ only there, so a mask that ignored it
+    // would execute a bit-copy as a conditional skip.
+    if ((encoding & 0xFC08) == 0xFC00) {
+        const bool skip_if_set = (encoding & 0x0200) != 0;
+        const uint8_t rr = (encoding >> 4) & 0x1F;
+        const uint8_t bit = encoding & 0x07;
+        if (((cpu.reg(rr) >> bit) & 1) == (skip_if_set ? 1u : 0u)) {
+            return skip_next(cpu);
         }
         return StepResult::Ok;
     }

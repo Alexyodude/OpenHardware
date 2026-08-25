@@ -194,8 +194,8 @@ def test_nothing_the_core_executes_disagrees_with_the_oracle():
     # most prone to. It was 78 when OH-58 opened, which was the fourteen
     # instructions `core/avr` had then; it is now every case in the corpus.
     # Raise it when the corpus grows; it must never fall.
-    assert len(found["agreed"]) >= 570, (
-        f"only {len(found['agreed'])} cases agreed, down from 570. Something "
+    assert len(found["agreed"]) >= 597, (
+        f"only {len(found['agreed'])} cases agreed, down from 597. Something "
         f"that used to execute has stopped."
     )
 

@@ -369,6 +369,41 @@ for (const [name, base] of [["sbic", 0x9900], ["sbis", 0x9b00]]) {
 // `sbis` does not. The last case is the one that matters in the other
 // direction: a core that read the width and skipped two words *regardless* of
 // the condition would pass every case above it.
+// --- sbrc / sbrs, which skip on a bit of a REGISTER -------------------------
+//
+// `sbic`/`sbis` above test the IO space; these test the register file, and
+// they are a different encoding in a different quarter of the map. r16's seed
+// differs per variant, so each of these skips in some variants and not others
+// without the generator having to arrange it.
+//
+// **Bit 3 of the encoding must stay clear.** `bld` and `bst` share these eight
+// bits and differ only there, so a decoder with a loose mask would run a
+// bit-copy as a conditional skip. Nothing here asserts that directly -- what
+// asserts it is that `bld` and `bst` are absent from this corpus and from the
+// core, so a mask that caught them would show up as an unexpected refusal.
+for (const [name, base] of [["sbrc", 0xfc00], ["sbrs", 0xfe00]]) {
+  for (const bit of [0, 3, 7]) {
+    add(`${name} r16, ${bit}`, [base | (16 << 4) | bit, 0x0000, 0x0000]);
+  }
+}
+// Bit 2 and not bit 0: r16's three seeds are 0x1b, 0xef and 0xc3, and bit 0
+// is set in all of them, so a case on bit 0 would never take the skip it is
+// here to test. Bit 2 is clear in two of the three.
+add("sbrc r16, 2 skipping jmp", [0xfc00 | (16 << 4) | 2, 0x940c, 0x0020]);
+
+// --- ijmp and icall, which jump to where Z points ---------------------------
+//
+// **Z is a WORD address here** and a BYTE address for `lpm`, which is the
+// clearest single reason `core/avr/cpu.h` keeps the two spaces apart.
+//
+// Z is put at word 64 rather than left at its default. avr8js ends every
+// instruction with `pc = (pc + 1) % progMem.length` and progMem here is 512
+// words, so a Z beyond that would make the oracle disagree about its own
+// harness rather than about the instruction -- the same trap `RETURN_ADDRESS`
+// records at the top of this file.
+add("ijmp", [0x9409, 0x0000], { pointerIntoSram: true, z: 0x0040 });
+add("icall", [0x9509, 0x0000], { pointerIntoSram: true, z: 0x0040 });
+
 add("cpse r5, r5 skipping jmp", [reg2(0x1000, 5, 5), 0x940c, 0x0020]);
 add("cpse r5, r5 skipping lds", [reg2(0x1000, 5, 5), 0x9000, 0x0140]);
 add("sbic 0x1f, 7 skipping call", [0x9900 | (0x1f << 3) | 7, 0x940e, 0x0020]);
