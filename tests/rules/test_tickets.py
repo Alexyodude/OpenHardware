@@ -10,6 +10,8 @@ silent: everything keeps working until two sessions land in one file.
 """
 
 import pathlib
+import subprocess
+import sys
 
 import pytest
 
@@ -311,3 +313,38 @@ def test_a_leading_star_claim_round_trips(board):
     (read_back,) = T.load_tickets(board)
     assert read_back.touches == ("**/cpu.cc", "*.py", "core/**")
 
+
+
+def test_every_subcommand_runs_as_a_script():
+    """`tickets check` was broken for the whole of its existence.
+
+    `cmd_check` imports `tools.check_ticket_claims` absolutely, and running
+    this file as a script puts `tools/` on `sys.path` rather than the
+    repository root -- so it raised ModuleNotFoundError while every other
+    subcommand worked, and while importing the module from a test worked too.
+    `docs/tickets/README.md` documents `check` as the housekeeping command.
+
+    So this runs the CLI the way a person does, as a subprocess, because the
+    failure was invisible to anything that imported it. A non-zero exit is
+    allowed -- `check` answers 1 when it finds a collision -- but a traceback
+    is not.
+    """
+    read_only = (
+        ["list"],
+        ["check"],
+        ["dupes"],
+        ["whoami"],
+        ["owner", "tools/tickets.py"],
+        ["similar", "a title that resembles nothing at all"],
+    )
+    broken = []
+    for argv in read_only:
+        done = subprocess.run(
+            [sys.executable, "tools/tickets.py", *argv],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+        )
+        if "Traceback" in done.stderr or "ModuleNotFoundError" in done.stderr:
+            broken.append(f"{' '.join(argv)}: {done.stderr.strip().splitlines()[-1]}")
+    assert not broken, "subcommands that fail when run as a script: " + "; ".join(broken)

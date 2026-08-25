@@ -638,7 +638,17 @@ def cmd_group(args) -> int:
 
 
 def cmd_check(args) -> int:
-    from tools.check_ticket_claims import main as check_main
+    # `tools.check_ticket_claims` is an absolute import, and running this file
+    # as a script puts `tools/` on sys.path rather than the repository root --
+    # so the import fails with ModuleNotFoundError and `tickets check`, which
+    # docs/tickets/README.md documents as the housekeeping command, could not
+    # run at all. Same fix the rest of the repository already uses; see
+    # tools/check_board_contract.py and webui/boards/catalogue.py.
+    try:
+        from tools.check_ticket_claims import main as check_main
+    except ModuleNotFoundError:  # pragma: no cover - only when run as a script
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+        from tools.check_ticket_claims import main as check_main
 
     return check_main([])
 
