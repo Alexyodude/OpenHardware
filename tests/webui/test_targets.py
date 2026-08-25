@@ -57,14 +57,18 @@ def add_library(name: str) -> pathlib.Path:
 def test_the_repository_has_the_cores_the_ui_copy_describes():
     """A guard on the claim the UI makes.
 
-    It has already earned its keep once: it was written when `i8086` was the
-    only core and it failed the moment `cortexm0` landed, which is what sent
+    It has already earned its keep three times. Written when `i8086` was the
+    only core, it failed the moment `cortexm0` landed, which is what sent
     someone to update the Targets copy rather than letting it quietly go
-    stale. It then earned it a second time: `riscv32` landed and this failed
-    again, which is the tripwire working, not breaking. Adding a fourth core
-    should fail it once more.
+    stale. `riscv32` landed and it failed again. `avr` landed on 2026-08-25
+    and it failed a third time -- and on that occasion the copy needed no
+    change, because the "Runnable now" table is generated from /api/targets
+    rather than written down. That is the tripwire working: it asks the
+    question every time and the answer is allowed to be "nothing to do".
+
+    Adding a fifth core should fail it once more.
     """
-    assert build_core.cores() == ["cortexm0", "i8086", "riscv32"]
+    assert build_core.cores() == ["avr", "cortexm0", "i8086", "riscv32"]
 
 
 def test_the_catalogue_covers_every_core_that_exists():
