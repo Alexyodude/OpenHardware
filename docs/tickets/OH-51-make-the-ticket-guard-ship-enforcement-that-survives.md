@@ -1,7 +1,7 @@
 ---
 id: OH-51
 title: 'Make the ticket guard ship: enforcement that survives a fresh clone'
-status: open
+status: done
 priority: P1
 created: '2026-08-25'
 touches:
