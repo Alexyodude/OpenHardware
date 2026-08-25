@@ -1,7 +1,7 @@
 ---
 id: OH-47
 title: Memory-mapped IO for the RISC-V core, so an ESP32 board can be described
-status: open
+status: done
 priority: P1
 created: '2026-08-25'
 touches:
