@@ -285,8 +285,48 @@ def next_id(tickets: list[Ticket]) -> str:
 # --- collisions ------------------------------------------------------------------
 
 
+#: `docs/tickets/`, normalised, with a trailing slash.
+_TICKET_DIR_PREFIX = TICKET_DIR.relative_to(REPO).as_posix() + "/"
+
+
+def ticket_file_owner(path: str) -> str | None:
+    """The ticket id a ticket file belongs to, or None if it is not one.
+
+    `docs/tickets/OH-3-whatever.md` belongs to OH-3 and to nothing else. The
+    id is read off the filename rather than by opening the file, because this
+    has to answer for a path that is being deleted or has not been written.
+    """
+    if not path.startswith(_TICKET_DIR_PREFIX):
+        return None
+    name = path[len(_TICKET_DIR_PREFIX) :]
+    if "/" in name or not name.endswith(".md"):
+        return None
+    head = name.split("-")[:2]
+    if len(head) != 2 or not head[1].isdigit():
+        return None
+    return "-".join(head)
+
+
 def owners_of(path: str, tickets: list[Ticket]) -> list[Ticket]:
-    """Every open ticket whose claims cover this path."""
+    """Every open ticket whose claims cover this path.
+
+    **A ticket always owns its own file**, whatever else claims the directory.
+    Without that rule a single broad claim on `docs/tickets/**` stops every
+    other session recording a note or a status on its own ticket -- which is
+    not a hypothetical: OH-17 claimed it, and when write enforcement first
+    shipped, 15 of 16 open tickets could not commit their own file. The claim
+    system exists to stop two sessions editing one file, and a ticket's own
+    file has exactly one session that should ever write it.
+
+    So a ticket file is owned by its ticket and by nobody else. A broad
+    directory claim still covers `README.md` and anything else in there.
+    """
+    owner_id = ticket_file_owner(path)
+    if owner_id is not None:
+        mine = [t for t in tickets if t.id.lower() == owner_id.lower() and t.is_open]
+        if mine:
+            return mine
+
     return [
         t
         for t in tickets

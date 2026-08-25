@@ -147,3 +147,22 @@ settings file it cannot parse or a `core.hooksPath` someone else already set.
 
 Demonstrated, not assumed: staging a file claimed by another ticket and running
 `git commit` exits 1 with `changed while holding OH-51, but claimed by OH-17`.
+### 7.2 2026-08-25 — a ticket always owns its own file
+
+Shipping §7.1 exposed a defect that had been latent for as long as the board
+existed. OH-17 claimed `docs/tickets/**` — legal, and harmless while nothing
+enforced claims. The moment a commit hook existed, **15 of 16 open tickets
+could not commit a note or a status onto their own ticket**, because a single
+broad directory claim owned every ticket file.
+
+So `owners_of` now gives `docs/tickets/OH-N-*.md` to OH-N and to nobody else,
+whatever else claims that directory. The reasoning is that the claim system
+exists to stop two sessions editing one file, and a ticket's own file has
+exactly one session that should ever write it — the one holding it.
+
+The id comes off the filename rather than out of the file, because this has to
+answer for a path being deleted or not yet written. A broad directory claim
+still covers `README.md` and anything else in there, which is asserted as a
+negative control rather than assumed. A **closed** ticket owns nothing, so its
+file falls back to the directory claim like any other path.
+

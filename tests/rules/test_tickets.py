@@ -348,3 +348,61 @@ def test_every_subcommand_runs_as_a_script():
         if "Traceback" in done.stderr or "ModuleNotFoundError" in done.stderr:
             broken.append(f"{' '.join(argv)}: {done.stderr.strip().splitlines()[-1]}")
     assert not broken, "subcommands that fail when run as a script: " + "; ".join(broken)
+
+
+def _ticket(board, ident, touches, status="open"):
+    return T.Ticket(
+        id=ident,
+        title=f"{ident} title",
+        status=status,
+        priority="P2",
+        owner="",
+        created="2026-08-25",
+        touches=tuple(touches),
+        path=board / f"{ident}-title.md",
+    )
+
+
+def test_a_ticket_owns_its_own_file_whatever_claims_the_directory(board):
+    """The rule that unblocked the board when enforcement first shipped.
+
+    OH-17 claimed `docs/tickets/**`, which is legal and was harmless while
+    nothing enforced claims. The moment a pre-commit hook existed, 15 of 16
+    open tickets could not commit a note or a status on their own ticket.
+
+    A ticket file has exactly one session that should ever write it, so it is
+    owned by its ticket and by nobody else.
+    """
+    hoarder = _ticket(board, "OH-17", ["docs/tickets/**"])
+    mine = _ticket(board, "OH-51", ["tools/tickets.py"])
+    tickets = [hoarder, mine]
+
+    own_file = "docs/tickets/OH-51-make-the-guard-ship.md"
+    owners = [t.id for t in T.owners_of(own_file, tickets)]
+    assert owners == ["OH-51"], (
+        f"OH-51 must own its own file; got {owners}. Without this rule the "
+        f"directory claim wins and no session can record its own notes."
+    )
+
+    # The negative control: the broad claim still owns everything else there.
+    readme = [t.id for t in T.owners_of("docs/tickets/README.md", tickets)]
+    assert readme == ["OH-17"], (
+        f"a directory claim must still cover non-ticket files; got {readme}"
+    )
+
+
+def test_a_ticket_file_is_recognised_only_by_the_shape_of_its_name():
+    assert T.ticket_file_owner("docs/tickets/OH-3-anything.md") == "OH-3"
+    assert T.ticket_file_owner("docs/tickets/README.md") is None
+    assert T.ticket_file_owner("docs/tickets/sub/OH-3-x.md") is None
+    assert T.ticket_file_owner("tools/tickets.py") is None
+    assert T.ticket_file_owner("docs/tickets/OH-3-x.txt") is None
+    assert T.ticket_file_owner("docs/tickets/NOTES-3-x.md") == "NOTES-3"
+
+
+def test_a_closed_tickets_file_falls_back_to_the_directory_claim(board):
+    """Ownership follows the ticket, and a done ticket claims nothing."""
+    hoarder = _ticket(board, "OH-17", ["docs/tickets/**"])
+    closed = _ticket(board, "OH-51", ["tools/tickets.py"], status="done")
+    owners = [t.id for t in T.owners_of("docs/tickets/OH-51-x.md", [hoarder, closed])]
+    assert owners == ["OH-17"], f"a closed ticket owns nothing; got {owners}"
