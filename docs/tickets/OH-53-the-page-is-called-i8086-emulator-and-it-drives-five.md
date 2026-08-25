@@ -1,7 +1,7 @@
 ---
 id: OH-53
 title: The page is called i8086 Emulator and it drives five boards across three architectures
-status: open
+status: done
 priority: P2
 created: '2026-08-25'
 touches:

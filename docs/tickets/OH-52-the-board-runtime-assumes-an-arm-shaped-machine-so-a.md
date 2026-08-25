@@ -2,7 +2,7 @@
 id: OH-52
 title: The board runtime assumes an Arm-shaped machine, so a Harvard core cannot be
   entered
-status: open
+status: done
 priority: P1
 created: '2026-08-25'
 touches:
