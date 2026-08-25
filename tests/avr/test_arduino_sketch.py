@@ -28,14 +28,19 @@
 # It **skips** without the framework and never passes quietly, which is the
 # rule `CLAUDE.md` states for the rule checkers and the reason it is a rule.
 #
-# ## What it does not claim
+# ## And OH-59's, since the timer landed
 #
-# That the sketch *blinks*. It does not, and the reason is not the instruction
-# set — see `test_the_sketch_stops_making_progress_inside_delay`. `delay()`
-# waits on `micros()`, `micros()` reads timer 0, and
-# `webui/boards/atmega328p.py` maps no timer, so `TCNT0` reads the zero it was
-# written. That is the next ticket and it is named in the assertion rather than
-# left as a silence.
+# It used to end here, with `loop()` entered exactly once: `delay()` waits on
+# `micros()`, `micros()` reads timer 0, and the board mapped no timer, so
+# `TCNT0` read back the zero it was reset to and the sketch spun forever.
+# `test_the_sketch_blinks_at_the_period_it_asked_for` is what that assertion
+# turned into.
+#
+# **The period is arithmetic, not a fitted constant.** `micros()` is
+# `(overflows * 256 + TCNT0) * 4`, the counter ticks every
+# `INSTRUCTIONS_PER_TICK` retired instructions, and the two cancel to sixteen
+# instructions per microsecond — so `delay(500)` is 8,000,000 of them and
+# anything else is a defect rather than a tolerance.
 
 import os
 import pathlib
@@ -57,13 +62,36 @@ BOARD = "Arduino Uno"
 #: PB5, through the board description rather than as a literal.
 LED = 1 << atmega328p.LED_PIN
 
-#: `TCNT0` is `_SFR_IO8(0x26)` in `iom328p.h:212`, so 0x46 in the data space.
-#: Named here because the assertion about it is the point of the last test.
-TCNT0 = 0x46
-
 #: Enough steps for `setup()`, the first `digitalWrite`, and several thousand
 #: turns of the `delay()` spin. The whole sketch reaches `loop()` inside 200.
 BUDGET = 50_000
+
+#: The Uno's crystal, and the prescaler Arduino's `init()` selects. Both are
+#: facts about the sketch's world rather than about this model, which is why
+#: they are spelled out instead of folded into one ratio.
+F_CPU_MHZ = 16
+PRESCALER = 64
+
+#: How many retired instructions this model calls one microsecond.
+#:
+#: TCNT0 advances once per `INSTRUCTIONS_PER_TICK` here and once per
+#: `PRESCALER` clock cycles on the part, so one instruction is
+#: `PRESCALER / INSTRUCTIONS_PER_TICK` cycles -- one, as the board says. At 16
+#: MHz that is sixteen instructions to the microsecond, and the two 256s in
+#: `micros()`'s own arithmetic cancel out entirely.
+INSTRUCTIONS_PER_MICROSECOND = (
+    F_CPU_MHZ * PRESCALER // atmega328p.INSTRUCTIONS_PER_TICK
+)
+
+#: `delay(500)`, in retired instructions. Derived rather than written down, so
+#: a change to the board's approximation moves this with it.
+HALF_PERIOD = 500_000 * INSTRUCTIONS_PER_MICROSECOND
+
+#: Two half-periods, and a fifth over for the run-up through `setup()`.
+BLINK_BUDGET = HALF_PERIOD * 2 + HALF_PERIOD // 5
+
+#: How often the LED is looked at. See the blink test for the arithmetic.
+SAMPLE_EVERY = 256
 
 
 def toolchain() -> tuple[pathlib.Path, pathlib.Path]:
@@ -196,7 +224,7 @@ def entered(image: bytes, symbols: dict[str, int], budget: int = BUDGET) -> dict
             session.step()
         counts["#portb"] = session.cpu.read_data(atmega328p.PORTB)
         counts["#ddrb"] = session.cpu.read_data(atmega328p.DDRB)
-        counts["#tcnt0"] = session.cpu.read_data(TCNT0)
+        counts["#tcnt0"] = session.cpu.read_data(atmega328p.TCNT0)
         counts["#pc"] = session.cpu.pc
     return counts
 
@@ -262,25 +290,68 @@ def test_loop_runs_and_drives_the_led_pin_high(sketch):
     assert counts["#portb"] & LED, f"PORTB is {counts['#portb']:#04x}"
 
 
-def test_the_sketch_stops_making_progress_inside_delay(sketch):
-    """**The remaining gap, measured rather than assumed — and it is not the
-    instruction set.**
+def test_the_timer_overflow_handler_is_reached(sketch):
+    """`millis()` is maintained by an interrupt, and this is that interrupt.
 
-    `delay()` calls `micros()`, `micros()` reads `TCNT0` and the overflow count
-    that timer 0's interrupt maintains, and `webui/boards/atmega328p.py` maps
-    no timer at all. An AVR data space has no holes, so `TCNT0` is a byte of
-    memory that reads back the zero it was reset to: `micros()` returns the
-    same number forever and `delay(500)` never finishes.
-
-    So `loop()` is entered exactly once and `micros()` thousands of times.
-    Asserting that is what keeps the limitation visible; the alternative is a
-    test that watches the LED and fails without saying which layer is missing.
+    `__vector_16` is Arduino's `ISR(TIMER0_OVF_vect)`. Nothing calls it: it is
+    reached only because the core delivers a vector, which is the half of
+    OH-59 that is not a counter. Before that existed this symbol was entered
+    zero times no matter how long the sketch ran.
     """
     image, symbols = sketch
     counts = entered(image, symbols)
-    assert counts.get("loop", 0) == 1, "loop ran more than once; did a timer start?"
-    assert counts.get("micros", 0) > 100, (
-        f"micros was entered {counts.get('micros', 0)} times; delay() should "
-        f"be spinning on it"
+    assert counts.get("__vector_16", 0) >= 3, (
+        f"the overflow handler ran {counts.get('__vector_16', 0)} times in "
+        f"{BUDGET} steps; one overflow is "
+        f"{256 * atmega328p.INSTRUCTIONS_PER_TICK} instructions"
     )
-    assert counts["#tcnt0"] == 0, "TCNT0 is still an unmapped byte of memory"
+
+
+def test_the_sketch_blinks_at_the_period_it_asked_for(sketch):
+    """**The headline, and OH-59's Done-when.**
+
+    `delay(500)` at 16 MHz is 8,000,000 microseconds' worth of
+    `INSTRUCTIONS_PER_TICK`: `micros()` returns
+    `(overflows * 256 + TCNT0) * 4`, the counter ticks every 64 retired
+    instructions, and the two cancel to exactly **16 instructions per
+    microsecond**. So a half-period is 8,000,000 steps and the number is
+    arithmetic rather than a fitted constant.
+
+    **This is the most expensive test in the repository, at about eight
+    seconds.** Two full periods of a real 500 ms blink is sixteen million
+    instructions and there is no way to watch a blink for less. It earns it:
+    everything else here asserts that a mechanism behaves, and this is the only
+    thing that asserts the machine does what the sketch on it says.
+
+    PORTB is sampled every 256 steps rather than every step, which halves the
+    run and places each transition to within 256 instructions -- three parts in
+    a hundred thousand of the gap being measured, against a tolerance of one in
+    a thousand.
+    """
+    image, _ = sketch
+    led = 1 << atmega328p.LED_PIN
+    transitions: list[int] = []
+    last = 0
+
+    with api.load_firmware(BOARD, image, base=0) as session:
+        for batch in range(BLINK_BUDGET // SAMPLE_EVERY):
+            for _ in range(SAMPLE_EVERY):
+                session.step()
+            now = session.cpu.read_data(atmega328p.PORTB) & led
+            if now != last:
+                transitions.append(batch * SAMPLE_EVERY)
+                last = now
+                if len(transitions) == 3:
+                    break
+
+    assert len(transitions) == 3, (
+        f"the pin changed state {len(transitions)} times in {BLINK_BUDGET} "
+        f"instructions; two full half-periods is {2 * HALF_PERIOD}"
+    )
+    gaps = [b - a for a, b in zip(transitions, transitions[1:])]
+    for gap in gaps:
+        assert abs(gap - HALF_PERIOD) <= HALF_PERIOD // 1000, (
+            f"a half-period of {gap} instructions, not {HALF_PERIOD}. "
+            f"That is {gap / INSTRUCTIONS_PER_MICROSECOND / 1000:.1f} ms where the "
+            f"sketch asked for 500."
+        )

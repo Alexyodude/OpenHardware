@@ -7,9 +7,9 @@
 
 The third board here and the first that is not Arm, which makes it the one
 worth reading against the other two. `webui/boards/rp2040.py` and `samd21.py`
-are 400 and 230 lines of memory-mapped registers; this is a hundred, and
-almost none of it is registers. That difference is the architecture and not an
-omission -- see "Why there is no peripheral section" below.
+are 400 and 230 lines of memory-mapped registers; this is half that, and almost
+none of it is registers. That difference is the architecture and not an
+omission -- see "One peripheral, and why only one" below.
 
 ## Where these numbers come from
 
@@ -28,10 +28,10 @@ table -- the one board in the catalogue that is not a Seeed XIAO.
 
 ## Two spaces, sized rather than mapped
 
-`install(cpu)` calls `configure(program_words, data_bytes)` and stops. There is
-no `add_region`, because there are no regions: an AVR has exactly two address
-spaces, both starting at zero, and the only thing a board chooses is how big
-each is. A Cortex-M0+ board must place flash (0x00000000 on a SAMD21,
+`install(cpu)` calls `configure(program_words, data_bytes)` and then maps one
+peripheral. There is no `add_region`, because there are no regions: an AVR has
+exactly two address spaces, both starting at zero, and the only thing a board
+chooses is how big each is. A Cortex-M0+ board must place flash (0x00000000 on a SAMD21,
 0x10000000 on an RP2040) because that part is genuinely a decision; here it
 is not.
 
@@ -41,13 +41,21 @@ but they are consecutive addresses in one space, and `lds r0, 0x0025` reads
 PORTB exactly as `in r0, 0x05` does. Modelling them separately would invent a
 boundary the instruction set does not have.
 
-## Why there is no peripheral section
+## One peripheral, and why only one
 
 `rp2040.py` and `samd21.py` both spend most of their length on `map_register`
-and `map_alias`, and this file has neither -- because `core/avr` has no MMIO
-mechanism at all. On this part it does not yet need one: `DDRB` and `PORTB`
-are bytes of the data space, so a write to 0x24 stores and a read returns what
-was stored, which is what the silicon does for those two registers.
+and `map_alias`, and this file has neither. On this part it mostly does not
+need them: `DDRB` and `PORTB` are bytes of the data space, so a write to 0x24
+stores and a read returns what was stored, which is what the silicon does for
+those two registers.
+
+**Timer 0 is the exception, and it is exactly one call.** `TCNT0` cannot be a
+stored byte -- it has to answer something different each time it is read, or
+`delay()` never returns. OH-59 measured that: with the instruction set
+complete, a stock Arduino Blink reached `loop()`, drove PB5 high, and then
+spun in `micros()` forever. So `core/avr` grew a counter and the one interrupt
+it raises, and this file is where the addresses for them are written down. See
+`core/avr/cpu.h`'s `Timer` for what is modelled and what is not.
 
 **Where that stops being true, and it does:** `PINB` reads the *electrical
 level on the pins*, so on a pin driven as an output it follows `PORTB`, and on
@@ -65,12 +73,16 @@ yet; the day something does, that is the first claim to re-check.
 
 ## What is deliberately absent
 
-Every timer, the USART, the ADC, the EEPROM. Same growth rule the other two
-boards keep: a peripheral is added when a real image faults on it and not
-before. Here the rule bites differently, because a missing peripheral on this
-core does not fault -- it reads zero. `tests/avr/test_uno_board.py` is what
-makes that visible: it watches an image that touches only PORTB, so nothing in
-it depends on a register this file does not describe.
+Timers 1 and 2, timer 0's compare-match interrupts and PWM outputs, the USART,
+the ADC, the EEPROM. Same growth rule the other two boards keep: a peripheral
+is added when a real image needs it and not before, and timer 0 is here
+because a real image spun forever without it.
+
+Here the rule bites differently, because a missing peripheral on this core
+does not fault -- it reads zero. `TCCR0A` and `TCCR0B` are the live example:
+Arduino's `init()` writes a prescaler into them and this model never reads it
+back, taking `INSTRUCTIONS_PER_TICK` as given. A sketch that chose a different
+prescaler would be believed and ignored.
 """
 
 from __future__ import annotations
@@ -120,6 +132,58 @@ PINB_IO, PINB = 0x03, 0x23
 DDRB_IO, DDRB = 0x04, 0x24
 PORTB_IO, PORTB = 0x05, 0x25
 
+#: Timer 0, as **data** addresses. From `iom328p.h:141,221,229,237,438`:
+#:
+#:     #define TIFR0  _SFR_IO8(0x15)
+#:     #define TCCR0A _SFR_IO8(0x24)
+#:     #define TCCR0B _SFR_IO8(0x25)
+#:     #define TCNT0  _SFR_IO8(0x26)
+#:     #define TIMSK0 _SFR_MEM8(0x6E)
+#:
+#: **Read that list twice.** Four of them are `_SFR_IO8`, which adds 0x20, and
+#: `TIMSK0` is `_SFR_MEM8`, which does not -- so TIMSK0 is 0x6E in the data
+#: space and TIFR0 is 0x35 rather than 0x15. The two registers hold the same
+#: bit number for the same event, which makes the asymmetry easy to smooth
+#: over: TOV0 is bit 0 of TIFR0 and TOIE0 is bit 0 of TIMSK0.
+TIFR0_IO, TIFR0 = 0x15, 0x35
+TCCR0A_IO, TCCR0A = 0x24, 0x44
+TCCR0B_IO, TCCR0B = 0x25, 0x45
+TCNT0_IO, TCNT0 = 0x26, 0x46
+TIMSK0 = 0x6E
+
+#: `#define TOV0 0` at `iom328p.h:142` and `#define TOIE0 0` at 439. The same
+#: number in both registers, which is what lets the core carry one `bit`.
+TOV0 = TOIE0 = 0
+
+#: `#define TIMER0_OVF_vect _VECTOR(16)` at `iom328p.h:848`.
+#:
+#: A part with more than 8 KB of flash uses four-byte vectors -- a `jmp`, not
+#: an `rjmp` -- so vector 16 is at byte 64 and **word 32**. Confirmed against a
+#: real image rather than derived: `avr-objdump` on an Arduino sketch shows
+#: `40: 0c 94 98 00  jmp 0x130  ; <__vector_16>`.
+TIMER0_OVF_VECTOR_NUMBER = 16
+VECTOR_WORDS = 2
+TIMER0_OVF_VECTOR = TIMER0_OVF_VECTOR_NUMBER * VECTOR_WORDS
+
+#: How many retired instructions make one tick of TCNT0.
+#:
+#: **A stated approximation, and not a measurement** -- the same one
+#: `webui/boards/rp2040.py` makes for its TIMER, and it is worth reading that
+#: file's paragraph beside this one. Arduino's `init()` sets timer 0's
+#: prescaler to 64 (`sbi(TCCR0B, CS01); sbi(TCCR0B, CS00);`), so on the silicon
+#: TCNT0 advances once per 64 clock cycles. This core models no cycle costs at
+#: all, so 64 is exactly right only if every AVR instruction took one cycle --
+#: which it does not: loads, stores and taken branches take two or three.
+#:
+#: So virtual time here runs somewhere around 1.5x slow against a real Uno, and
+#: **this model does not claim cycle accuracy**. What it does guarantee is what
+#: a busy-wait needs: time that is monotonic, deterministic, and an integer.
+#:
+#: The prescaler is this number and not a reading of TCCR0B. A sketch that set
+#: a different one would be believed and ignored -- recorded in `core/avr/cpu.h`
+#: beside the `Timer` struct, where the next reader of the mechanism will see it.
+INSTRUCTIONS_PER_TICK = 64
+
 #: The Uno's user LED. From Arduino's own variant file,
 #: `framework-arduino-avr/variants/standard/pins_arduino.h:54`, which defines
 #: `LED_BUILTIN` as 13, and its pinout comment at line 99: `PB5 (D 13)`.
@@ -130,24 +194,38 @@ LED_PIN = 5
 
 
 class Cpu(typing.Protocol):
-    """What this module needs of a core, which is one call.
+    """What this module needs of a core, which is two calls.
 
-    Narrower than either Arm board's protocol by every mapping method, because
-    this machine has nothing to map. Stated as a protocol anyway, and stated
-    this small on purpose: it is the clearest single piece of evidence that
-    "describe a board" means something different on a Harvard part.
+    Still narrower than either Arm board's protocol by every mapping method:
+    `rp2040.py` needs seven and this needs one, because on this part almost
+    every register really is a byte of the data space that stores what was
+    written to it. The exception is the one below.
     """
 
     def configure(self, program_words: int, data_bytes: int) -> None: ...
+    def map_timer(self, *, counter: int, flag: int, enable: int, bit: int,
+                  vector: int, instructions_per_tick: int) -> None: ...
 
 
 def install(cpu: Cpu) -> None:
-    """Size both address spaces. That is the whole of this board's model.
+    """Size both address spaces, and give the machine timer 0.
 
     **Postcondition, and `core/avr/machine.py` depends on it:** `configure`
     resets the machine -- data zeroed, program filled with the erased word
     0xFFFF, SP at `STACK_TOP`. `webui/api.py` writes the image *after* calling
     this and enters afterwards, so the order is install, load, enter, and
     reversing the first two would erase the image.
+
+    **The timer is mapped after `configure` and not before**, for the same
+    reason: `configure` resets, and a reset before a mapping is a mapping that
+    survives while a reset after one is a mapping that does not need to.
     """
     cpu.configure(program_words=PROGRAM_WORDS, data_bytes=DATA_BYTES)
+    cpu.map_timer(
+        counter=TCNT0,
+        flag=TIFR0,
+        enable=TIMSK0,
+        bit=TOV0,
+        vector=TIMER0_OVF_VECTOR,
+        instructions_per_tick=INSTRUCTIONS_PER_TICK,
+    )
