@@ -492,6 +492,158 @@ async function loadBoardImage() {
   );
 }
 
+/** The sketch a person sees before they type anything.
+ *
+ *  A real Blink and not a stub, because the first thing anybody does is press
+ *  the button -- and a page whose default sketch does nothing teaches nothing
+ *  about whether the machine works. */
+const DEFAULT_SKETCH = [
+  "void setup() {",
+  "  pinMode(13, OUTPUT);",
+  "}",
+  "",
+  "void loop() {",
+  "  digitalWrite(13, HIGH);",
+  "  delay(500);",
+  "  digitalWrite(13, LOW);",
+  "  delay(500);",
+  "}",
+  "",
+].join("\n");
+
+/** `sketch.cpp:LINE:COL: message`, which is how gcc names a place.
+ *
+ *  Anchored at the start of a line so a path appearing mid-message cannot be
+ *  mistaken for a location. */
+const DIAGNOSTIC_AT = /^sketch\.cpp:(\d+):(\d+):/gm;
+
+/** Render the compiler's output with the offending source line beside it.
+ *
+ *  **The page quotes the line, not the compiler.** `webui/compile.py` prepends
+ *  `#line 1` so the numbers match what the person typed, and the cost of that
+ *  is gcc dropping its own quoted source and caret -- it can no longer map the
+ *  reported line back to a physical one to read. So the quote comes from the
+ *  textarea, which is better than gcc's copy anyway: it is the text in front
+ *  of the reader, and it stays right if they scroll.
+ *
+ *  A message with no `sketch.cpp:N:` in it is shown as-is. That is what a
+ *  linker error looks like, and inventing a line for it would be a guess. */
+function renderDiagnostics(text, source) {
+  const lines = source.split("\n");
+  const pane = $("sketch-errors");
+  pane.textContent = "";
+  pane.hidden = false;
+
+  let last = 0;
+  for (const match of text.matchAll(DIAGNOSTIC_AT)) {
+    const [whole, lineText, columnText] = match;
+    const line = Number(lineText);
+    const column = Number(columnText);
+    // Everything since the previous match, which is the message body of the
+    // diagnostic before this one.
+    pane.append(text.slice(last, match.index));
+    last = match.index + whole.length;
+
+    const anchor = document.createElement("span");
+    anchor.className = "diagnostic-at";
+    anchor.textContent = whole;
+    // Clicking a location puts the cursor on it. This is the whole of
+    // "renders against its line number" as a person experiences it.
+    anchor.tabIndex = 0;
+    const jump = () => focusSourceLine(line, column);
+    anchor.addEventListener("click", jump);
+    anchor.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); jump(); }
+    });
+    pane.append(anchor);
+
+    const quoted = lines[line - 1];
+    if (quoted !== undefined) {
+      const shown = document.createElement("span");
+      shown.className = "diagnostic-source";
+      // The caret is built from the column, so a tab in the source would move
+      // it. Tabs are rendered as-is above, so the two stay in step.
+      shown.textContent = `\n    ${quoted}\n    ${" ".repeat(Math.max(0, column - 1))}^`;
+      pane.append(shown);
+    }
+  }
+  pane.append(text.slice(last));
+}
+
+/** Put the cursor on one line and column of the sketch, and show it. */
+function focusSourceLine(line, column) {
+  const box = $("sketch-source");
+  const lines = box.value.split("\n");
+  let offset = 0;
+  for (let i = 0; i < line - 1 && i < lines.length; i += 1) offset += lines[i].length + 1;
+  const at = offset + Math.max(0, column - 1);
+  box.focus();
+  box.setSelectionRange(at, at);
+  // A textarea does not scroll to the selection on its own when it already
+  // has focus, so nudge it: the line height times the line, less a third of
+  // the box, puts the line about a third of the way down rather than at the
+  // very top where it is easy to miss.
+  const lineHeight = box.scrollHeight / Math.max(1, lines.length);
+  box.scrollTop = Math.max(0, (line - 1) * lineHeight - box.clientHeight / 3);
+}
+
+/** Build the sketch on the server, load it, and leave it ready to run.
+ *
+ *  **Stop, load, enter -- in that order, and the order is the point.** A
+ *  free-running machine whose flash is replaced underneath it executes a
+ *  program that is half the old one, which is the hazard
+ *  `webui/boards/atmega328p.py`'s `install` docstring records from the other
+ *  side. `running = false` stops the loop; the server's compile route replaces
+ *  the board only on a build that succeeded, so a syntax error costs nobody
+ *  the program that was already there. */
+async function buildSketch() {
+  const board = $("board-pick").value;
+  const source = $("sketch-source").value;
+  const button = $("sketch-build");
+  if (!board) {
+    $("sketch-report").textContent = "Pick a board above first.";
+    return;
+  }
+
+  running = false;
+  // Disabled for the whole round trip. A build takes a second or two, and two
+  // compilers racing for one temporary directory is the failure a second press
+  // would buy.
+  button.disabled = true;
+  const wasLabel = button.textContent;
+  button.textContent = "Building…";
+  $("sketch-report").textContent = `Building for ${board}…`;
+  $("sketch-errors").hidden = true;
+
+  try {
+    const built = await api("/api/board/compile", { board, source });
+    if (!built.ok) {
+      $("sketch-report").textContent = "Did not compile. The board is unchanged.";
+      renderDiagnostics(built.diagnostics, source);
+      return;
+    }
+    boardImage = built.board;
+    $("board-go").disabled = false;
+    $("board-console").textContent = "";
+    $("board-console-note").textContent = "nothing transmitted yet";
+    previousBoard = null;
+    renderBoardState(await api("/api/board/state"));
+    $("sketch-report").textContent =
+      `${built.bytes} bytes on ${boardImage.board}, entered at ` +
+      `0x${boardImage.entry.toString(16).padStart(8, "0")}. Press Run.`;
+    boardSays(
+      `Built from the sketch: ${built.bytes} bytes of ${boardImage.format} on ` +
+      `${boardImage.board}, a ${boardImage.chip} on the ${boardImage.core} core.`,
+      "",
+    );
+  } finally {
+    // In `finally` so a thrown request -- an unknown board, a missing
+    // toolchain -- does not leave the button dead for the rest of the session.
+    button.disabled = false;
+    button.textContent = wasLabel;
+  }
+}
+
 async function runLoadedBoard() {
   if (!boardImage) {
     boardSays("Nothing loaded yet.", "Load an image before running it.");
@@ -763,6 +915,14 @@ function wire() {
     loadBoardImage().catch((error) => boardSays("Nothing loaded yet.", String(error.message || error))));
   $("board-go").addEventListener("click", () =>
     runLoadedBoard().catch((error) => boardSays($("board-report").textContent, String(error.message || error))));
+  $("sketch-source").value = DEFAULT_SKETCH;
+  $("sketch-build").addEventListener("click", () =>
+    buildSketch().catch((error) => {
+      // A refusal the server made before compiling -- an unknown board, or a
+      // toolchain it does not have. It is not a diagnostic, so it goes in the
+      // report line rather than the errors pane, which is for gcc's words.
+      $("sketch-report").textContent = String(error.message || error);
+    }));
   $("theme").addEventListener("click", () => {
     applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
   });

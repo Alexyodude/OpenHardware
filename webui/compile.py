@@ -331,6 +331,19 @@ def preamble(source: str) -> str:
     Left alone when the sketch already includes it, so a person who writes the
     include -- which is what a PlatformIO project does -- gets exactly the file
     they wrote and no shifted line numbers from a duplicate.
+
+    **`#line` costs gcc's quoted source line, and that is the right trade.**
+    Measured: without it a diagnostic reads
+
+        sketch.cpp:3:22: error: expected primary-expression before ';' token
+         void loop(){ int x = ; }
+                              ^
+
+    -- the caret is helpful and the number is wrong by two. With it the number
+    is right and gcc drops the quote, because it can no longer map the reported
+    line back to a physical one to read. The editor quotes the line instead,
+    from the source the person actually typed, which is better than gcc's copy
+    of a file it was handed.
     """
     if "<Arduino.h>" in source or '"Arduino.h"' in source:
         return source

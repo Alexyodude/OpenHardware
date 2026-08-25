@@ -143,6 +143,29 @@
     <pre class="hexdump" id="board-console"></pre>
   </section>
 
+  <section class="panel" id="sketch">
+    <h2>Write a sketch <span class="note">POST /api/board/compile</span></h2>
+    <div class="prose">
+      <p>Type an Arduino sketch and build it here. <strong>The server chooses
+        the compiler, the flags and the linker script from the board</strong>
+        — the request carries only this text and a board name, because a
+        request that could add a compiler flag could run anything on the
+        machine serving this page.</p>
+      <p><code>#include &lt;Arduino.h&gt;</code> is added for you if you leave
+        it out, exactly as the Arduino IDE does. Only boards with a build
+        recipe can be built for; the rest still load a compiled image above.</p>
+    </div>
+    <div class="prose" style="border-top:1px solid var(--line)">
+      <textarea id="sketch-source" spellcheck="false" rows="12"
+                aria-label="Arduino sketch"></textarea>
+    </div>
+    <div class="prose" style="display:flex; gap:8px; align-items:center">
+      <button id="sketch-build" class="primary">Build and run</button>
+      <span class="note" id="sketch-report">Uses the board picked above.</span>
+    </div>
+    <pre class="diagnostics" id="sketch-errors" hidden></pre>
+  </section>
+
   <section class="panel" id="code">
     <h2>Disassembly <span class="note" id="where">0000:0100</span></h2>
     <div class="listing" id="listing"></div>

@@ -471,3 +471,60 @@ table.grid tr.dim td { opacity: 0.72; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* --- the sketch editor ---------------------------------------------------
+ *
+ *  A textarea and not an editor library. Nothing here is fetched at run time
+ *  -- `webui/static/vendor/` holds three.js because that decision was made
+ *  once and deliberately -- and a monospace box with the page's own colours is
+ *  enough to type a Blink into. Syntax highlighting is a real want and a real
+ *  dependency; it is not this ticket's.
+ *
+ *  `tab-size: 2` matches what the default sketch is written with, so the caret
+ *  a diagnostic draws lines up with the text above it. */
+#sketch-source {
+  width: 100%;
+  box-sizing: border-box;
+  font: 12px/1.55 var(--mono);
+  tab-size: 2;
+  color: var(--ink);
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+#sketch-source:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.diagnostics {
+  font: 12px/1.55 var(--mono);
+  white-space: pre-wrap;
+  overflow-x: auto;
+  margin: 0 18px 18px;
+  padding: 10px 12px;
+  color: var(--ink);
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--halt);
+  border-radius: 4px;
+}
+
+/*  The location is the part a reader acts on, so it is the part that looks
+ *  actionable -- and it really is: clicking one puts the cursor there. */
+.diagnostic-at {
+  color: var(--halt);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.diagnostic-at:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/*  The quoted source line comes from the textarea rather than from gcc, which
+ *  drops its own quote once `#line` is in play. Muted, because it is context
+ *  for the message above it and not a second message. */
+.diagnostic-source { color: var(--muted); }
