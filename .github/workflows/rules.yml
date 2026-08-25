@@ -51,10 +51,14 @@ jobs:
       - name: Install dependencies
         run: pip install pytest==9.0.2 PyYAML==6.0.3 websockets==15.0.1
 
-      # The native core. This is the only place g++ ever sees it -- the
-      # development machine is Windows and MSVC, so a warning or an error that
-      # only GCC raises would otherwise reach master unseen.
-      - name: Build the i8086 core
+      # **All four cores, not one.** `build_core.py` has built avr, cortexm0,
+      # i8086 and riscv32 since each landed; only this step's name still said
+      # i8086, which is how the job looked narrower than it was.
+      #
+      # This is the only place g++ ever sees them -- the development machine is
+      # Windows and MSVC, so a warning or an error that only GCC raises would
+      # otherwise reach master unseen.
+      - name: Build the cores
         run: python tools/build_core.py
 
       # A representative slice of the hardware corpus: at least one opcode
@@ -106,8 +110,6 @@ jobs:
           54 FF.6 83 B8 C7 81.0 40 48 FE.0 FF.2
           E2 CD CF 9A 8D 8E C4 06 60 D6 D8 C0
 
-      - name: Core suite
-        run: pytest tests/i8086/ -v
 
       # Informational, not a gate. Prints the pass rate against the committed
       # eleven-case excerpt so the number is visible in every run. The gate is
@@ -156,13 +158,30 @@ jobs:
       - name: patches still apply
         run: tools/apply_patches.sh
 
-      - name: rules test suite
-        run: pytest tests/rules/ -v
 
+      # **Bare `pytest`, which is what CLAUDE.md tells a person to run.**
+      #
+      # It used to be three named directories -- tests/i8086, tests/rules and
+      # tests/webui -- and the other four suites were in neither CI nor its
+      # reach. Four of the five cores were therefore verified only by whoever
+      # remembered to run them locally, and CLAUDE.md's claim that "bare pytest
+      # is what CI runs" was false in both halves: CI named three directories
+      # and `testpaths` names seven.
+      #
+      # Reading `testpaths` rather than listing suites is the point. A suite
+      # added to pyproject.toml is now run here without anybody editing this
+      # file, and `test_ci_runs_every_suite_in_testpaths` fails if that ever
+      # stops being true.
+      #
       # Includes `node --check` over the browser scripts. Node is present on
       # the GitHub runners; where it is not, that test skips and says so.
       # Python cannot execute the front end, so without this a script that
       # does not parse at all passes every other test in the repository --
       # which is how one shipped for about ten minutes.
-      - name: webui test suite
-        run: pytest tests/webui/ -v
+      #
+      # Suites whose oracle or toolchain is absent on a runner SKIP and say so
+      # -- avr8js, rp2040js, rvcpp and the PlatformIO toolchains are none of
+      # them installed here. A skip that names what it wanted is the honest
+      # answer; a suite silently not collected is not.
+      - name: The whole test suite
+        run: pytest -q

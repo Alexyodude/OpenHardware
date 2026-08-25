@@ -49,3 +49,45 @@ def test_every_armed_script_enforced_checker_runs_in_ci():
     assert not unwired, (
         "armed SCRIPT-ENFORCED checkers not wired into CI: " + "; ".join(unwired)
     )
+
+
+def test_ci_runs_every_suite_in_testpaths():
+    """The other half, and the half that was false.
+
+    `test_every_armed_script_enforced_checker_runs_in_ci` above proves the
+    checkers run. Nothing proved the *tests* did. Measured 2026-08-26: the
+    workflow ran `pytest tests/i8086/`, `tests/rules/` and `tests/webui/` by
+    name, so tests/avr, tests/cortexm0, tests/riscv32 and tests/rv32 — four of
+    the five cores — were in neither CI nor its reach.
+
+    `tests/rules/test_testpaths.py` guards the configuration; this guards the
+    workflow's use of it. Between them a suite cannot fall out of the gate at
+    either end.
+
+    A bare `pytest` satisfies this by reading `testpaths` itself, which is why
+    it is the shape CI now uses: a suite added to `pyproject.toml` is run here
+    without anybody editing the workflow.
+    """
+    import tomllib
+
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    runs = [line.split("run:", 1)[1].strip()
+            for line in workflow.splitlines() if line.strip().startswith("run:")]
+    pytest_runs = [r for r in runs if r.split()[:1] == ["pytest"]]
+    assert pytest_runs, f"nothing in {WORKFLOW} runs pytest at all"
+
+    # A bare `pytest` -- no path argument -- reads testpaths and therefore
+    # covers every suite by construction.
+    if any(not [word for word in r.split()[1:] if not word.startswith("-")]
+           for r in pytest_runs):
+        return
+
+    config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    wanted = set(config["tool"]["pytest"]["ini_options"]["testpaths"])
+    named = {word.rstrip("/") for r in pytest_runs for word in r.split()[1:]
+             if not word.startswith("-")}
+    missing = sorted(wanted - {n.rstrip("/") for n in named})
+    assert not missing, (
+        f"CI names its suites and misses {missing}. Either add them or run "
+        f"bare `pytest`, which reads testpaths and cannot miss one."
+    )
