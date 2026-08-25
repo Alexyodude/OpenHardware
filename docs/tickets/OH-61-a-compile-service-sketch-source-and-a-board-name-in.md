@@ -1,7 +1,7 @@
 ---
 id: OH-61
 title: 'A compile service: sketch source and a board name in, a loadable image out'
-status: open
+status: done
 priority: P1
 created: '2026-08-26'
 touches:
@@ -32,3 +32,21 @@ BUILD IT VERTICALLY. One board end to end before any second one: Arduino Uno, on
 WHAT MUST BE LOUD. A compile error is the most common thing that will happen here and it is a NORMAL result, not a fault: the compiler's own stderr, with the line numbers, has to reach the caller intact. A service that answers 'build failed' is useless. Equally: a board with no toolchain installed must SKIP-and-say, never silently offer a build that cannot happen.
 
 Done when a sketch typed as a string, plus the name 'Arduino Uno', comes back as bytes that webui/api.load_firmware accepts and that toggle PB5 at 500 ms; when a sketch with a deliberate syntax error comes back with avr-gcc's own message naming the line; and when a board whose toolchain is absent says which one it wanted.
+
+**Note 2026-08-26:** CLOSED 2026-08-26.
+
+DONE-WHEN, all four met. A sketch as a string plus 'Arduino Uno' returns bytes api.load_firmware accepts (1,946 bytes, starting 0c 94). Those bytes toggle PB5 at 8,000,095 instructions -- 500.0 ms. A deliberate syntax error returns avr-gcc's own message at sketch.cpp:2:22, which is the line the person typed. An absent toolchain names the PlatformIO package it wanted.
+
+THE SAFETY SHAPE IS ASSERTED STRUCTURALLY, not by trying a payload. test_nothing_in_a_recipe_comes_from_a_request reads build()'s signature and fails if it ever takes more than a board name and source -- an attempted exploit proves one payload was handled; this proves the shape. The untrusted half reaches subprocess in exactly one place, as file CONTENTS in a per-build temporary directory.
+
+TWO THINGS FOUND WHILE BUILDING IT.
+
+(1) PlatformIO does not inject #include <Arduino.h> into a .cpp, only into a .ino -- OH-10's notes already recorded this and it is why the first good sketch failed to compile. The preamble is prepended, and it ENDS WITH #line 1 "sketch.cpp" because prepending shifts every diagnostic down one line. A line number that is confidently wrong is worse than none.
+
+(2) The image this service builds links HardwareSerial, so Serial's global constructor runs before setup(): DDRB is set at step 941, against 116 for the four-source blink tests/avr/test_arduino_sketch.py builds. A step budget copied from that file fails here for a reason that has nothing to do with compiling. Recorded in the test.
+
+/api/board/compile BUILDS AND LOADS in one step, so no image crosses the wire in either direction -- the only thing a client could do with one is post it straight back. A failed build leaves the board untouched, so a syntax error does not cost a person the program that was running.
+
+SCOPE HELD: one board end to end, as the ticket asked. RECIPES has one row. The ESP32-C3, SAMD21 and RP2040 all have toolchains installed and none has a recipe, which is deliberate -- a second row is a second slice, and the refusal for a board without one names its chip.
+
+Gate: 1,403 passed, 17 skipped; all eight checkers exit 0.
