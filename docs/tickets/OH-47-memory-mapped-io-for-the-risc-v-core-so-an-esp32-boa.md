@@ -6,6 +6,7 @@ priority: P1
 created: '2026-08-25'
 touches:
 - core/riscv32/mmio.md
+- core/riscv32/machine.py
 ---
 
 The seven ESP32-C boards sit exactly where the SAMD21 sat before OH-39: core built, no board description, not runnable. The difference is that the SAMD21 needed only a file, and these need a mechanism first.
@@ -17,3 +18,5 @@ Port the five behaviours core/cortexm0 grew, in the order they were forced there
 BLOCKED, and on a claim rather than on the work: core/riscv32/** is claimed by OH-44, which is a live extension programme -- its body sequences Zbb, then Zbkb, then the Zc* group. This ticket claims only a placeholder path so it can exist without colliding. Whoever picks it up must coordinate with OH-44 first; two sessions in one core's cpu.h is precisely what rules/ticket-claims.md exists to prevent.
 
 Done when an ESP32-C3 GPIO register can be mapped, written and read back, an unmodelled address in the same peripheral still faults, and the behaviours have the tests core/cortexm0's did.
+
+**Note 2026-08-25:** Widened 2026-08-25 to include core/riscv32/machine.py. OH-52 changed what a board needs of a core: webui/api.py now resolves core.<core>.machine for blank/refuses/write/enter/view/readable/read/word, and webui/boards/contract.py asks that module what a board owes. So MMIO alone no longer makes a RISC-V board loadable -- contract.core_requirements('riscv32') currently RAISES, by design, saying the core cannot host a board. See core/cortexm0/machine.py and core/avr/machine.py for the two shapes, and note the AVR one exists to prove the interface is not Arm-specific.
