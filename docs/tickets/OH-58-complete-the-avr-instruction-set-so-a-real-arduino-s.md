@@ -1,7 +1,7 @@
 ---
 id: OH-58
 title: Complete the AVR instruction set, so a real Arduino sketch runs on the Uno
-status: open
+status: done
 priority: P1
 created: '2026-08-26'
 touches:
@@ -41,3 +41,15 @@ AFTER THE ISA, the peripherals. delay() needs millis() needs timer0, so TCCR0A/T
 WHY THIS IS WANTED: it is the only path to "paste any Arduino sketch and it runs". The alternative -- a thin OpenHardware runtime over the peripherals each board models -- was spiked on 2026-08-26 and works today on the RP2040 (setup/loop, delay accurate to the microsecond, Serial into the UART pane), but it cannot run vendor libraries and is a different product.
 
 Done when a real Arduino sketch compiled against framework-arduino-avr executes past its vector table and through setup(), verified in lockstep against avr8js, and the remaining gap is measured rather than assumed.
+
+**Note 2026-08-26:** CLOSED 2026-08-26. Every mnemonic in STILL_MISSING implemented; the set is empty and the assertion now reads 'nothing in the corpus is refused', still failing in both directions.
+
+EVIDENCE. tests/avr/test_arduino_sketch.py builds the stock Blink against framework-arduino-avr and drives it through webui/api.py: the reset jmp lands on its decoded target in one step, main at step 51, setup at 113, pinMode at 116 (DDRB bit 5 set), loop at 159, digitalWrite at 162 (PORTB bit 5 set), delay at 209. Fifty thousand steps with no Unimplemented. The image is built rather than committed because linking Arduino's core makes it LGPL-2.1-derived; the test skips loudly without the framework.
+
+THE GAP, MEASURED. Stepping every distinct word of the 1,058-byte image leaves 18 refused, and avr-objdump calls every one of those 18 '.word' -- they are the pin tables in .progmem read as code by the scan. Nothing the image EXECUTES is refused. It stops in delay() -> micros() -> TCNT0, which webui/boards/atmega328p.py does not map. That is OH-59, not this.
+
+CORPUS. 552 cases -> 570, all agreed, 0 refused, 0 wrong. Three gaps closed while there: no case skipped over a 32-bit instruction, Z pointed at extended IO so no store through Z was ever checked, and every lpm case had Z even.
+
+A SECOND ORACLE DEFECT. avr8js never sets V for neg -- instruction.js:523 tests '128 === R' where R is '0 - value', a negative JS number that is never 128. No seed draws 0x80 into a neg operand so the corpus cannot say so; tests/avr/test_datasheet_edges.py asserts it against the manual, beside the known half-carry bug.
+
+FOUND EN ROUTE. tests/avr was absent from pyproject.toml's testpaths, so bare pytest had never run the AVR suite. Fixed, with tests/rules/test_testpaths.py as the guard. CI is narrower still and is OH-60.
