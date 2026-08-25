@@ -8,6 +8,8 @@ created: '2026-08-25'
 touches:
 - core/riscv32/disasm.py
 - tests/riscv32/test_disasm.py
+- tests/webui/test_emulator_session.py
+- tests/riscv32/test_esp32c3_board.py
 ---
 
 webui/api.py's listing_view resolves core.<core>.disasm and answers {present: false, note} when it does not exist. riscv32 is the live case that comment names: the board steps and its registers read, and the Disassembly pane says why it is empty.
@@ -25,3 +27,32 @@ Watch for the same trap cortexm0 hit: objdump decodes a WIDER architecture than 
 Depends on OH-54 for nothing structurally, but a disassembler that cannot render compressed instructions is useless on a part where two thirds of the image is compressed, so it lands after.
 
 Done when a loaded ESP32-C3 board shows a Thumb-equivalent listing around its program counter in the browser, and the sweep agrees with objdump on every encoding this core claims.
+
+**Note 2026-08-25:** Delivered. The ESP32-C3 boards now have all four panes -- Registers, Flags, Disassembly, Memory -- which is what the seven-board programme was for.
+
+THREE SWEEPS AGAINST OBJDUMP, because they catch different things:
+ - every compressed encoding: all 49,152 halfwords with (c&3)!=3
+ - every opcode x funct3 x funct7: 32,768, which checks every mnemonic decision
+ - every field of every form: 27,904, registers across all 32 and immediates across a spread including both sign bits
+
+The third is the one the others cannot replace: a transposed immediate leaves the mnemonic right and the offset wrong, which reads perfectly and points somewhere else.
+
+FOUR THINGS THE SWEEPS TAUGHT ME ABOUT THE ORACLE, all of which cost a round:
+
+ 1. objdump RE-SYNCS ON HALFWORDS when it cannot decode a word, printing `009f 0000 000f` as one six-byte blob where this module renders three entries. Comparing the two outputs line-for-line therefore drifts the moment either meets something it does not know -- which is exactly the region a sweep is for. The harness now compares BY ADDRESS and treats a missing line as a refusal.
+
+ 2. objdump appends `# 0x1234` when a base register is zero and it can compute the absolute address. 522 lines of the field sweep differed by only that. Reading them as decode failures would have wasted a day.
+
+ 3. objdump is NARROWER as well as wider. Its default riscv:rv32 does not know Zba or Zbs at all, both of which this core implements and gates per part. The cortexm0 note says objdump decodes a wider architecture; here it does both, in the same run.
+
+ 4. The atomics spell themselves eight ways once .aq/.rl/.aqrl are counted and the FP families more than fifty. Accounting by MNEMONIC was listing objdump's vocabulary; accounting by OPCODE states what core/riscv32/exec.cc implements, which is the fact that actually decides it.
+
+ONE REAL GAP THE SWEEP FOUND IN THE MODULE: `fence` rendered bare, ignoring its pred/succ operands. objdump prints `fence rw,rw`, and no image in this repository contains a fence -- so nothing but a sweep would ever have said so.
+
+EIGHT MUTATIONS, and the first round left a SURVIVOR that was a hole this test file dug itself: reversing the fence pred/succ bit order passed all three sweeps, because every fence they contain has non-zero rd/rs1, objdump refuses to render those, and ACCOUNTED_MINE excused the difference. An accounting entry that excuses a whole mnemonic excuses its bugs with it. Two direct fence tests now assert the orderings, one against a transcribed table and one against objdump itself so a transcription cannot be wrong in the same direction twice.
+
+TWO TRIPWIRES FIRED, both asserting riscv32 has no disassembler. The webui one used riscv32 as its stand-in for a core without one; it is `avr` now, which is better because the Arduino Uno is a real board that shows exactly that note -- and the docstring's claim that "every board that runs happens to have one" had already been false since OH-52 and nobody noticed.
+
+Browser-verified with one listener checked first. After load the pane shows the `_start` this ticket's sibling wrote -- lui sp,0x3fce0 / c.addi sp,-16 / jal zero,0x4200000a -- with widths 4, 2, 4 interleaved. After 200,000 instructions it shows the delay loop with the current line marked. 0 console messages.
+
+1,250 passed, 17 skipped.

@@ -151,14 +151,45 @@ def test_the_state_reports_thirty_three_registers_and_no_flags():
     assert all(register["width"] == 32 for register in state["registers"])
 
 
-def test_the_core_has_no_disassembler_yet_and_the_listing_says_so():
-    """`present: false` is a claim about this repository; an empty listing
-    would be a claim about the image. OH-56 is the ticket."""
+def test_the_listing_shows_the_instructions_around_the_program_counter():
+    """The fourth pane, and the last one this board was missing.
+
+    **This asserted `present: false` until OH-56.** What it checks now is the
+    property that breaks first: an RV32 listing interleaves 16-bit and 32-bit
+    instructions, so a disassembler advancing by a constant produces a
+    plausible listing offset by two bytes from the second line on.
+    """
     needs_core()
     with load() as session:
-        listing = session.state()["listing"]
-    assert listing["present"] is False
-    assert "riscv32" in listing["note"]
+        session.run(2000)
+        state = session.state()
+        listing = state["listing"]
+
+    assert listing["present"] is True
+    assert listing["at"] == state["pc"]
+    assert listing["lines"], "a listing with no lines is not a listing"
+
+    current = [line for line in listing["lines"] if line["current"]]
+    assert len(current) == 1, "exactly one line is where execution is"
+    assert current[0]["address"] == state["pc"]
+
+    # Widths interleave, and each address is the previous one plus its width.
+    widths = [len(line["raw"]) // 2 for line in listing["lines"]]
+    assert 2 in widths and 4 in widths, f"expected both widths, got {widths}"
+    for previous, following in itertools.pairwise(listing["lines"]):
+        assert following["address"] == previous["address"] + len(previous["raw"]) // 2
+
+
+def test_the_listing_is_riscv_rather_than_whatever_ran_last():
+    """The class of defect a stale server produced once before: panes showing
+    another machine's disassembly with no console error. `c.` mnemonics and ABI
+    register names are RISC-V and appear in no Thumb or AVR listing."""
+    needs_core()
+    with load() as session:
+        session.run(2000)
+        text = " ".join(line["text"] for line in session.state()["listing"]["lines"])
+    assert "c." in text, f"no compressed instruction in {text!r}"
+    assert any(name in text for name in ("sp", "a5", "zero")), text
 
 
 # --- the board description's own claims -------------------------------------

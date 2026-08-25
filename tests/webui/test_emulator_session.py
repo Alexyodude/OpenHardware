@@ -256,16 +256,41 @@ def test_a_core_without_a_disassembler_says_so_rather_than_showing_nothing():
     claim about the image, and they are different facts -- the distinction
     `uart_view` already draws. Asserted against a stand-in rather than a real
     board, because every board that runs today happens to have one, and the
-    case that needs holding is the one with no example yet."""
+    case that needs holding is the one with no example yet.
+
+    **The stand-in was `riscv32` until OH-56 wrote its disassembler**, and the
+    docstring above was already wrong before that: it said every board that
+    runs happens to have one, and the Arduino Uno has not since OH-52. So this
+    now names a core that genuinely lacks one *and* has a real board on it,
+    which makes the case live rather than hypothetical -- a person loading an
+    Uno sees exactly this note.
+    """
     import types
 
     from webui import api
 
     runtime = types.SimpleNamespace(
-        chip="ESP32-C3", core="riscv32", description=None, board="XIAO-ESP32-C3-DIP",
+        chip="ATmega328P", core="avr", description=None, board="Arduino Uno",
     )
     view = api.listing_view(runtime, None, 0)
     assert view["present"] is False
     assert view["lines"] == []
-    assert "riscv32" in view["note"]
+    assert "avr" in view["note"]
     assert "no disassembler" in view["note"]
+
+
+def test_the_cores_with_a_disassembler_are_the_ones_that_have_the_module():
+    """The other direction, so the test above cannot pass by every core lacking
+    one. `present` has to follow the filesystem rather than a list."""
+    import importlib
+    import types
+
+    from webui import api
+
+    for core, expected in (("cortexm0", True), ("riscv32", True), ("avr", False)):
+        assert (importlib.util.find_spec(f"core.{core}.disasm") is not None) is expected
+        runtime = types.SimpleNamespace(
+            chip="x", core=core, description=None, board="b",
+        )
+        if not expected:
+            assert api.listing_view(runtime, None, 0)["present"] is False
