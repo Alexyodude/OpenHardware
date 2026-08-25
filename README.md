@@ -74,7 +74,7 @@ python tools/inventory.py     # computed, never claimed
 ## Boards
 
 Board definitions live in `webui/boards/`, each a JSON pad map beside an SVG
-outline. They are imported from vendor KiCad by `tools/import_kicad_board.py`;
+outline. They are imported from vendor CAD by `tools/import_board.py`;
 pad centres are exact to three decimal places in millimetres, and nothing is
 measured off an image.
 

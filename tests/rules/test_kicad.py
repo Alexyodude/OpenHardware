@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
-"""Tests for tools/kicad.py and tools/import_kicad_board.py.
+"""Tests for tools/kicad.py, the parser both board importers used.
 
 The fixtures here are written inline rather than read from
 `third_party/seeed-xiao/`, because that tree is fetched and git-ignored. A
@@ -26,7 +26,6 @@ from tools.kicad import (
     read_symbol_pins,
     symbol_roots,
 )
-from tools.import_kicad_board import build, header_pads
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 VENDOR = REPO / "third_party" / "seeed-xiao" / "Seeed Studio XIAO Series Library"
@@ -189,50 +188,18 @@ def test_an_unknown_symbol_names_what_is_available(symbols):
         read_symbol_pins(symbols, "NOT-THERE")
 
 
-# --- the importer -----------------------------------------------------------------
-
-
-def test_through_hole_wins_over_smd(footprint):
-    """A DIP footprint carries both for one pin; two dots on one pad is wrong."""
-    pads = header_pads(footprint)
-    assert {p.kind for p in pads} == {"thru_hole"}
-    assert len(pads) == 2
-
-
-def test_the_built_board_matches_the_pinmap_schema(footprint, symbols):
-    board, svg = build(footprint, read_symbol_pins(symbols, "TEST-BOARD-SMD"))
-    assert board["board"] == "TEST-BOARD"
-    assert board["image"]["width"] > 0 and board["image"]["height"] > 0
-    assert {p["label"] for p in board["pads"]} == {"D0", "GND"}
-    assert svg.startswith("<svg") and svg.rstrip().endswith("</svg>")
-
-
-def test_every_pin_is_null_until_a_backend_defines_it(footprint, symbols):
-    """A guessed pin index wires the circuit wrongly and reports success."""
-    board, _ = build(footprint, read_symbol_pins(symbols, "TEST-BOARD-SMD"))
-    assert all(pad["pin"] is None for pad in board["pads"])
-
-
-def test_a_pad_with_no_symbol_entry_keeps_its_number_and_is_reported(footprint):
-    board, _ = build(footprint, {"1": "D0"})
-    assert board["unnamed_pads"] == ["2"]
-    assert {p["label"] for p in board["pads"]} == {"D0", "2"}
-
-
-def test_the_fab_layer_is_not_drawn(footprint, symbols):
-    """F.Fab is assembly annotation and reads as noise at board scale."""
-    _, svg = build(footprint, read_symbol_pins(symbols, "TEST-BOARD-SMD"))
-    # the F.Fab segment runs 0,0 -> 1,1; at 8 px/mm with a 1 mm margin that
-    # would land at 88,88 -> 96,96. Its absence is what is asserted.
-    assert 'x1="88.0" y1="88.0"' not in svg
-
-
-def test_the_derivation_is_recorded(footprint, symbols):
-    """`webui/boards/*.json` must say where its numbers came from."""
-    board, _ = build(footprint, read_symbol_pins(symbols, "TEST-BOARD-SMD"))
-    assert "import_kicad_board.py" in board["derivation"]
-    assert board["source"]["licence"] == "MIT"
-
+# --- the importer, which is tools/import_board.py -----------------------------
+#
+# The six tests that were here exercised `tools/import_kicad_board.py`'s
+# `build` and `header_pads`, and went with it when OH-41 retired that file.
+# **Their coverage did not go with them**: `tests/rules/test_import_board.py`
+# has 27 tests over the replacement, including the one that made the
+# retirement possible -- it reproduces the committed
+# `webui/boards/XIAO-RP2040-DIP.json` exactly, from a different tool than the
+# one that produced it, every coordinate identical to 0.0 px.
+#
+# What remains in this file is `tools/kicad.py`: the parser, which both
+# importers used and only one of them is gone.
 
 # --- against the real vendor library ------------------------------------------------
 
@@ -245,15 +212,34 @@ def test_the_real_vendor_library_parses():
     if not mod.is_file():
         pytest.skip(f"{mod.name} absent from the fetched tree")
 
-    fp = read_footprint(mod)
+    from tools.import_board import read_geometry
+
+    # `read_footprint` is what this file is about and is exercised whole; the
+    # geometry comes from the surviving importer, because pad SELECTION -- a
+    # DIP footprint carries both a through-hole and an SMD pad for one pin --
+    # is that tool's rule and not the parser's.
+    assert read_footprint(mod), "the footprint parses"
     pins = read_symbol_pins(VENDOR / "Seeed_Studio_XIAO_Series.kicad_sym", "XIAO-ESP32-C3-SMD")
-    pads = header_pads(fp)
+    # `--select` is needed because the symbol library names only the SMD
+    # variant of this part: a DIP and an SMD XIAO share one symbol and differ
+    # only in their footprints. The retired tool took the footprint's own name
+    # and would have failed here too -- the difference is that this one says
+    # which names it does have.
+    pads = read_geometry(mod, select="XIAO-ESP32-C3-SMD").pads
 
     assert len(pads) == 14, "the XIAO is a 14-pin board"
     # 2.54 mm is the 0.1 inch header pitch; pinmap.py treats that pitch as what
     # identifies a header run, so it is worth pinning rather than assuming.
-    row = sorted(p.x_mm for p in pads if p.y_mm < 0)
-    gaps = {round(b - a, 2) for a, b in zip(row, row[1:])}
+    #
+    # Grouped by Y rather than by sign: `PadSpec` measures from the top-left
+    # with Y increasing DOWN, where the retired tool measured from the
+    # footprint origin and put the top row at a negative Y. Same board, two
+    # conventions, and reading the old one here would silently select nothing.
+    rows: dict[float, list[float]] = {}
+    for pad in pads:
+        rows.setdefault(round(pad.y_mm, 2), []).append(pad.x_mm)
+    longest = sorted(rows.values(), key=len)[-1]
+    gaps = {round(b - a, 2) for a, b in zip(sorted(longest), sorted(longest)[1:])}
     assert gaps == {2.54}
     assert pins["1"] == "D0"
 

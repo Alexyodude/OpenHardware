@@ -32,7 +32,8 @@ Not in the CAD. In the board-support packages, one small file per board:
 
 Nothing is vendored. `--fetch` clones each blobless and sparse into
 `third_party/bsp/`, which is git-ignored, the same fetch-don't-vendor trade
-`tools/get_seeed_hardware.sh` argues for the CAD. What is extracted is a pin
+`tools/get_board_sources.py` makes for the CAD -- and which
+`tools/get_seeed_hardware.sh` argued for before it was retired. What is extracted is a pin
 number -- a fact about a piece of hardware, not an expression of the package
 that recorded it -- and every report names the file and the short revision it
 came from, so the claim can be checked rather than believed.
@@ -838,7 +839,7 @@ def fetch(package: Package, bsp_dir: pathlib.Path = BSP_DIR) -> pathlib.Path:
     arduino-esp32 is ~1 GB checked out whole and zephyr rather more; between
     them the six packages here need eleven small text files. `--filter=blob:none`
     with a cone sparse-checkout brings ~70 MB instead, and the same argument
-    `tools/get_seeed_hardware.sh` makes about the vendor CAD applies: size
+    `tools/get_board_sources.py` makes about the vendor CAD applies: size
     decides, not licence.
     """
     destination = bsp_dir / package.name

@@ -119,15 +119,21 @@ def test_the_seeed_row_lands_where_the_existing_tools_already_look():
     """Two other tools hold paths built from this name; renaming it breaks them.
 
     `tools/inventory.py` grades board assets out of that directory and
-    `tools/import_kicad_board.py` reads the KiCad library out of it. Neither
-    imports this registry, so nothing but this test couples them.
+    `tools/import_board.py` reads the KiCad library out of it. Neither imports
+    this registry, so nothing but this test couples them.
+
+    The second half used to come from `tools/import_kicad_board.py`'s own
+    `VENDOR` constant. OH-41 retired that file, so the library path is spelled
+    here -- which is what `tests/rules/test_kicad.py` already does, and is the
+    only remaining place it is written down.
     """
-    from tools.import_kicad_board import VENDOR
     from tools.inventory import VENDOR_DIR
 
     dest = source("seeed-xiao").dest(REPO)
     assert dest == REPO / VENDOR_DIR
-    assert VENDOR.is_relative_to(dest), f"{VENDOR} is no longer under {dest}"
+
+    library = dest / "Seeed Studio XIAO Series Library"
+    assert library.is_relative_to(dest), f"{library} is no longer under {dest}"
 
 
 def test_a_source_can_record_that_a_vendor_publishes_nothing_of_a_kind():

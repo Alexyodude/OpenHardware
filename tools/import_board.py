@@ -5,9 +5,10 @@
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """Read one CAD file and emit the board JSON, whatever CAD the vendor writes.
 
-`tools/import_kicad_board.py` reads a `.kicad_mod` joined to a `.kicad_sym`.
-That works because Seeed publishes KiCad, and Seeed is the only vendor in this
-repository so far. The survey in `docs/research/board-sources/` says that does
+This replaced `tools/import_kicad_board.py`, which read a `.kicad_mod` joined
+to a `.kicad_sym` and nothing else. That worked because Seeed publishes KiCad
+and Seeed was the only vendor in this repository. It was retired by OH-41 once
+this tool reproduced its output exactly. The survey in `docs/research/board-sources/` says that does
 not generalise: Adafruit and SparkFun publish EAGLE, Arduino publishes both,
 ST publishes Altium and PDF, and several vendors publish a picture.
 
@@ -64,8 +65,9 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools import eagle, kicad
 
 #: Space around the outline so a pad on the very edge is not clipped by the
-#: viewBox. The same 1.0 mm `tools/import_kicad_board.py` uses, so the two
-#: tools' output can be compared without an offset between them.
+#: viewBox. The same 1.0 mm the retired `tools/import_kicad_board.py` used,
+#: which is what let the two tools' output be compared without an offset --
+#: the comparison that made retiring it possible.
 MARGIN_MM = 1.0
 #: Two pads are on the same header run when their shared coordinate agrees to
 #: better than this. Nothing in CAD is fuzzy — the pads in a run share an
@@ -122,10 +124,10 @@ def _grouped(pads: list[tuple[str, str, float, float]]) -> tuple[PadSpec, ...]:
 
     A header is a line of pads sharing one coordinate, and which coordinate
     they share is what makes the run horizontal or vertical. That is read off
-    the pads rather than assumed: `tools/import_kicad_board.py` decides with
-    `header-top if y < 0 else header-bottom`, which is true of a KiCad
-    footprint centred on its origin and false of an EAGLE board whose origin
-    is a corner. Reading the runs works for both.
+    the pads rather than assumed: the retired `tools/import_kicad_board.py`
+    decided with `header-top if y < 0 else header-bottom`, which is true of a
+    KiCad footprint centred on its origin and false of an EAGLE board whose
+    origin is a corner. Reading the runs works for both.
 
     Two runs get the names the existing board files use. More than two get
     numbered, because `header-top` for one of five rows would be a guess
