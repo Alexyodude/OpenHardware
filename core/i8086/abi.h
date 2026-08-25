@@ -40,7 +40,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define I8086_ABI_VERSION 7
+#define I8086_ABI_VERSION 8
 
 /// Mirrors i8086::Registers.
 ///
@@ -133,6 +133,15 @@ I8086_API uint32_t i8086_decoded_size(void);
 /// Bit 0: implemented. Bit 1: takes a modrm byte. Bit 2: 16-bit operands.
 /// From the single table both the decoder and the executor consult.
 I8086_API int i8086_opcode_info(uint8_t opcode);
+
+/// The fewest clocks an instruction of `length` bytes can take with `queued`
+/// of its bytes already in the prefetch queue.
+///
+/// A BOUND, not a count. See core/i8086/timing.h for why the difference is
+/// the whole point: this is the part of 8088 timing that can be derived from
+/// the architecture rather than fitted to the oracle, and is therefore the
+/// part the oracle can actually check.
+I8086_API uint32_t i8086_minimum_cycles(uint8_t length, uint8_t queued);
 
 /// Execute one instruction at CS:IP, advancing IP past it.
 ///

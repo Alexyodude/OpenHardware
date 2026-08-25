@@ -9,6 +9,7 @@
 
 #include "cpu.h"
 #include "decode.h"
+#include "timing.h"
 #include "exec_core.h"
 
 namespace {
@@ -142,6 +143,10 @@ void i8086_clear_memory(I8086Cpu* cpu) {
 
 uint32_t i8086_physical(uint16_t segment, uint16_t offset) {
     return i8086::Physical(segment, offset);
+}
+
+uint32_t i8086_minimum_cycles(uint8_t length, uint8_t queued) {
+    return i8086::MinimumCycles(length, queued);
 }
 
 int i8086_step(I8086Cpu* cpu) {

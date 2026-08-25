@@ -11,6 +11,7 @@ add_library(i8086 SHARED
   bcd.cc
   muldiv.cc
   interrupt.cc
+  timing.cc
   exec_core.cc
   abi.cc
 )

@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match I8086_ABI_VERSION in abi.h.
-ABI_VERSION = 7
+ABI_VERSION = 8
 
 #: Must match abi.h's field order exactly -- this is a struct mirror, and a
 #: reordering here reads the wrong bytes. It does NOT need to match the
@@ -142,6 +142,7 @@ class Decoded(ctypes.Structure):
 _SIGNATURES = {
     "i8086_step": ([ctypes.c_void_p], ctypes.c_int),
     "i8086_opcode_info": ([ctypes.c_uint8], ctypes.c_int),
+    "i8086_minimum_cycles": ([ctypes.c_uint8, ctypes.c_uint8], ctypes.c_uint32),
     "i8086_decoded_size": ([], ctypes.c_uint32),
     "i8086_decode": (
         [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_uint16, ctypes.POINTER(Decoded)],
@@ -365,6 +366,19 @@ def opcode_info(opcode: int) -> tuple[bool, bool]:
     """(implemented, has_modrm) for an opcode, from the core's own table."""
     bits = int(load().i8086_opcode_info(opcode & 0xFF))
     return bool(bits & 1), bool(bits & 2)
+
+
+def minimum_cycles(length: int, queued: int) -> int:
+    """The fewest clocks an instruction of `length` bytes can take, given a
+    prefetch queue already holding `queued` of them.
+
+    **A bound, not a count**, and the difference is the whole point --
+    `core/i8086/timing.h` says why at length. The short version: this is the
+    one part of 8088 timing derivable from the architecture rather than fitted
+    to the oracle, so it is the one part the oracle can check rather than
+    confirm.
+    """
+    return int(load().i8086_minimum_cycles(length & 0xFF, queued & 0xFF))
 
 
 def opcode_is_wide(opcode: int) -> bool:
