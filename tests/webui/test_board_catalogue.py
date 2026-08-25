@@ -479,3 +479,39 @@ def test_the_two_lists_of_non_boards_agree():
     from webui.boards import contract
 
     assert catalogue.NOT_A_BOARD == contract.NOT_A_BOARD
+
+
+def test_the_stm32c5_is_a_cortex_m33_part_and_not_an_unknown_one():
+    """**Pinned so the question is not re-opened from scratch.**
+
+    This board was recorded as "unknown -- part not confirmed to exist" from
+    2026-08-24, which was an honest report of a search and not a fact about
+    silicon: nobody could place "STM32C5" among ST's families. OH-65 checked
+    again and it is real — ST announced it in March 2026, a Cortex-M33 part
+    positioned as a faster low-cost sibling to the Cortex-M0+ STM32C0.
+
+    The corroboration that carries the weight is not a wiki. It is that
+    Seeed's own KiCad library ships `XIAO-STM32C5-SMD.kicad_mod` in a commit
+    dated 2026-07-15, four months after the announcement, from the vendor who
+    would be building the board. A vendor does not draw a footprint for a part
+    that does not exist.
+
+    So the board is no longer blocked on identification. It is blocked on
+    OH-36's oracle, exactly like the other eight Cortex-M33 boards — and it
+    makes that nine.
+    """
+    isa, core = catalogue.CHIPS["STM32C5"]
+    assert core == "cortexm33", "the part is identified; do not put it back to unknown"
+    assert "Cortex-M33" in isa
+
+
+def test_the_cortex_m33_boards_are_nine_and_wait_on_one_oracle():
+    """Counted rather than listed, so adding an Armv8-M board moves it.
+
+    The number is worth asserting because it is the size of a single blocked
+    ticket: nine boards of twenty-six, none of which can run until OH-36 has
+    something to check a core against.
+    """
+    waiting = [b for b in catalogue.catalogue() if b.core == "cortexm33"]
+    assert len(waiting) == 9, sorted(b.name for b in waiting)
+    assert not any(b.runnable for b in waiting), "one claims to run without a core"

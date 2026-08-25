@@ -98,10 +98,34 @@ CHIPS: dict[str, tuple[str, str]] = {
     "ESP32-C6": ("RV32IMAC", "riscv32"),
     "ESP32-S3": ("Xtensa LX7", "xtensa"),
     "ATmega328P": ("AVR", "avr"),
-    # No product page confirms this part exists, and "STM32C5" is not an ST
-    # family anyone could place. Recorded as unknown rather than guessed at --
-    # see the 2026-08-24 handoff's known-limitations list.
-    "STM32C5": ("unknown -- part not confirmed to exist", "unknown"),
+    # **It exists. It was announced after this entry was written.**
+    #
+    # This read "unknown -- part not confirmed to exist" from 2026-08-24, and
+    # that was an honest report of a search rather than a fact about silicon:
+    # nobody could place "STM32C5" among ST's families, so the catalogue
+    # refused to guess a core. OH-65 checked again on 2026-08-26.
+    #
+    # ST announced the STM32C5 in **March 2026** -- a Cortex-M33 part, sold as
+    # low-cost with more performance than the M0+ STM32C0. Two independent
+    # statements in Wikipedia's STM32 article agree: its comparison table gives
+    # the core as "Cortex-M33F", and its history timeline reads "March 2026
+    # STM32C5 with Cortex-M33, increased performance with cost efficiency and
+    # enhanced end-device capabilities".
+    #
+    # **The corroboration that matters is not Wikipedia.** It is that Seeed's
+    # own KiCad library ships `XIAO-STM32C5-SMD.kicad_mod`, in a commit dated
+    # 2026-07-15 -- four months after the announcement, from the vendor who
+    # would be building the board. A vendor does not draw a footprint for a
+    # part that does not exist.
+    #
+    # st.com could not be reached to cite directly; two attempts timed out.
+    # Recorded so the next reader knows which source is missing rather than
+    # assuming it was checked.
+    #
+    # So this board is no longer blocked on identification. It is blocked on
+    # exactly what the other eight Cortex-M33 boards are blocked on -- OH-36's
+    # oracle -- and it makes that nine.
+    "STM32C5": ("Armv8-M (Cortex-M33)", "cortexm33"),
 }
 
 #: Chips on which a real compiled image has been watched executing, and the
