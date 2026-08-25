@@ -26,7 +26,7 @@ THE TICKET'S NOTES WERE STALE. 'NOT done: no Cortex-M0+ core exists to check aga
 
 The 200 are rp2040js's three known shift-carry bugs. Each is PREDICTED by oracle_carry_bug rather than tolerated, and the run asserts predicted > 0 -- so a fixed oracle fails loudly instead of quietly reducing what this proves.
 
-WHAT WAS GENUINELY MISSING was the floor, and it was worse than absent -- it was misleading.  is twenty-seven. --count is a command-line argument, so a corpus regenerated with --count 1 would be twenty-seven cases and PASS: every divergence explained, nothing wrong, and the core checked against a 399th of what it had been. Now 27 x 500, verified red by raising CASES_PER_FAMILY to 501.
+WHAT WAS GENUINELY MISSING was the floor, and it was worse than absent -- it was misleading. The assertion read 'total >= len(FAMILIES)', which is twenty-seven. --count is a command-line argument, so a corpus regenerated with --count 1 would be twenty-seven cases and PASS: every divergence explained, nothing wrong, and the core checked against a 399th of what it had been. Now 27 x 500, verified red by raising CASES_PER_FAMILY to 501.
 
 tools/get_armv6m_tests.sh was claimed by this ticket and never written. It exists now. The 8088 corpus is FETCHED and this one is GENERATED -- SingleStepTests has 22 repositories and not one is M-profile -- but the contract is identical and it is the contract that matters: never committed, one command to produce, and a suite with no corpus SKIPS saying how to get one. The skip message names the script now, because the raw node command is one forgotten flag from a corpus the floor rejects.
 
