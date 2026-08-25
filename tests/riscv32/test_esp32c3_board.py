@@ -1,0 +1,295 @@
+# OpenHardware — an ESP32-C3 board, driven the way the browser drives it.
+#
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+#
+# ## What this proves that test_rvc.py does not
+#
+# That file drives `core.riscv32.abi.Cpu` directly: it adds its own regions,
+# writes the image itself, and sets the PC and the stack pointer itself. It
+# proves the compressed decoder works.
+#
+# It proves nothing about whether a *board* can be selected and loaded, which
+# is a different claim and the one `webui/boards/catalogue.py`'s
+# `FIRMWARE_VERIFIED` makes. So everything below goes through `webui/api.py`: a
+# board name and a file of bytes go in, and GPIO8 moves.
+#
+# ## What it cannot claim
+#
+# **An ESP-IDF application will not run on this board**, and nothing here
+# suggests otherwise. An ESP32-C3 resets into 384 KB of Espressif mask ROM that
+# sets up the cache, the clock and its own function table before `app_main`;
+# that ROM is not redistributable and is not modelled. `docs/architectures.md`
+# records that PICSimLab's own ESP route runs the vendor's QEMU rather than
+# modelling any of it.
+#
+# What runs is a bare-metal image, which is the standard `tests/cortexm0/
+# test_blink.py`, `test_samd21_blink.py` and `tests/avr/test_uno_board.py`
+# already meet.
+#
+# ## And there is no LED to watch
+#
+# Measured, not assumed: Seeed's own `XIAO_ESP32C3/pins_arduino.h` is 34 lines
+# and contains the string "LED" zero times, where the Arduino Uno's variant
+# defines `LED_BUILTIN 13`. So this watches the GPIO register the firmware
+# drives rather than a pin something is wired to -- a smaller claim than the
+# RP2040's, and a true one.
+
+import itertools
+import pathlib
+import shutil
+import subprocess
+
+import pytest
+
+from webui import api
+from webui.boards import esp32c3
+
+HERE = pathlib.Path(__file__).resolve().parent
+IMAGE = HERE / "c3blink" / "blink.bin"
+SOURCE = HERE / "c3blink" / "blink.c"
+SCRIPT = HERE / "c3blink" / "blink.ld"
+
+#: One of the three XIAO ESP32-C3 boards in the catalogue. They differ in
+#: footprint and not in silicon, so the description serves all three.
+BOARD = "XIAO-ESP32-C3-DIP"
+
+LED = 1 << esp32c3.LED_PIN
+GPIO_OUT = esp32c3.GPIO + esp32c3.GPIO_OUT
+GPIO_ENABLE = esp32c3.GPIO + esp32c3.GPIO_ENABLE
+
+#: Several toggles at the measured 606-instruction period.
+BUDGET = 20_000
+
+
+def needs_core() -> None:
+    pytest.importorskip("core.riscv32.abi")
+    if not IMAGE.is_file():
+        pytest.skip(f"{IMAGE} is missing")
+
+
+def load() -> api.BoardSession:
+    """A board name and a file of bytes. `base` because a raw `.bin` carries no
+    address of its own, and this one is linked into the flash execute window."""
+    return api.load_firmware(BOARD, IMAGE.read_bytes(), base=esp32c3.IROM)
+
+
+def watch(session: api.BoardSession, budget: int = BUDGET) -> list[tuple[int, bool]]:
+    """Step, recording every step at which GPIO8 changes state."""
+    transitions: list[tuple[int, bool]] = []
+    last = 0
+    for step in range(budget):
+        session.step()
+        now = session.cpu.read_word(GPIO_OUT) & LED
+        if now != last:
+            transitions.append((step, bool(now)))
+            last = now
+    return transitions
+
+
+# --- the headline -----------------------------------------------------------
+
+
+def test_a_board_name_and_a_compiled_image_drive_a_gpio_register():
+    """The evidence for ESP32-C3, and the seven-board unlock's first three.
+
+    Two transitions is a blink. One is a bit that came on and stayed on, which
+    is what a broken toggle looks like from the outside.
+    """
+    needs_core()
+    with load() as session:
+        transitions = watch(session)
+    assert len(transitions) >= 2, f"the bit changed {len(transitions)} times"
+    states = [state for _, state in transitions]
+    assert states[0] is True
+    assert all(a != b for a, b in itertools.pairwise(states)), states[:8]
+
+
+def test_the_pin_is_configured_as_an_output_and_the_period_is_steady():
+    """A toggle on a pin still configured as an input is a lie the output
+    register alone cannot catch, and a wandering period means the delay loop is
+    wrong. The period is what caught the AVR's inverted branch."""
+    needs_core()
+    with load() as session:
+        steps = [step for step, _ in watch(session)]
+        assert session.cpu.read_word(GPIO_ENABLE) & LED, "GPIO8 is an output"
+    periods = {b - a for a, b in itertools.pairwise(steps[1:])}
+    assert len(periods) == 1, f"period varies: {sorted(periods)}"
+    assert periods.pop() > 100, "a loop counting to 100 costs more than 100 steps"
+
+
+# --- what this machine reports, which is not what an Arm one does ------------
+
+
+def test_the_board_reports_no_vector_table_because_it_has_none():
+    """An RV32 part resets to a chip-defined address and reads no table. The
+    two words an Arm report carries are **absent** rather than null: null would
+    claim there is a stack-pointer word whose value is unknown."""
+    needs_core()
+    with load() as session:
+        report = session.as_json()
+    assert report["chip"] == "ESP32-C3"
+    assert report["core"] == "riscv32"
+    assert report["entry"] == esp32c3.IROM, "the image's first byte"
+    assert "vector_table" not in report
+    assert "stack_pointer" not in report
+
+
+def test_the_state_reports_thirty_three_registers_and_no_flags():
+    """RV32 has no condition-code register: a comparison writes a register and
+    a branch compares two. So an empty `flags` is the true answer rather than a
+    missing feature, and the page renders nothing rather than four wrong
+    letters."""
+    needs_core()
+    with load() as session:
+        state = session.state()
+    names = [register["name"] for register in state["registers"]]
+    assert len(names) == 33, "x0..x31 and pc"
+    assert names[:3] == ["zero", "ra", "sp"], "the ABI names, as objdump spells them"
+    assert names[-1] == "pc"
+    assert state["flags"] == []
+    assert all(register["width"] == 32 for register in state["registers"])
+
+
+def test_the_core_has_no_disassembler_yet_and_the_listing_says_so():
+    """`present: false` is a claim about this repository; an empty listing
+    would be a claim about the image. OH-56 is the ticket."""
+    needs_core()
+    with load() as session:
+        listing = session.state()["listing"]
+    assert listing["present"] is False
+    assert "riscv32" in listing["note"]
+
+
+# --- the board description's own claims -------------------------------------
+
+
+def test_the_board_agrees_with_the_catalogue_about_the_isa():
+    """One fact, one home. The board declares `RV32IMC` because that is what
+    the datasheet prints; `catalogue.CHIPS` records the same string for the
+    same reason, and a board that drifted from it would configure a part the
+    catalogue describes differently."""
+    from webui.boards import catalogue
+
+    assert esp32c3.ISA == "RV32" + catalogue.CHIPS["ESP32-C3"][0][len("RV32"):]
+    assert catalogue.CHIPS["ESP32-C3"][0] == esp32c3.ISA
+
+
+def test_the_board_configures_the_part_and_not_some_other_one():
+    """The C is load-bearing in one direction and the absent A in the other.
+
+    This part must **trap** an atomic and an ESP32-C6 must execute one, and no
+    lockstep run against rvcpp could ever say so -- it runs both. So the board
+    saying which part this is is the only thing standing between the two.
+    """
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        assert cpu.extensions() == abi.ESP32_C3
+        assert cpu.extensions() != abi.ESP32_C6, "an ESP32-C6 has A and this does not"
+
+
+def test_reading_the_input_register_faults_rather_than_answering_wrongly():
+    """`GPIO_IN` reads the electrical level on the pins, so on GPIO8 driven
+    high it should read high. This model has no way to express that, so the
+    address is left unmapped and a read **faults**.
+
+    The same decision `webui/boards/samd21.py` makes about its `PORT_IN`, and
+    the opposite of what `webui/boards/atmega328p.py` could do -- an AVR's data
+    space has no holes, so its `PINB` returns a wrong zero and is pinned as a
+    limitation instead. Faulting is available here and is better.
+    """
+    needs_core()
+    from core.riscv32 import abi
+
+    with load() as session:
+        # Stepped until the bit is *high* rather than for a fixed budget: it
+        # toggles every 606 instructions, so any constant is a coin flip on
+        # which phase it lands in.
+        for _ in range(BUDGET):
+            session.step()
+            if session.cpu.read_word(GPIO_OUT) & LED:
+                break
+        assert session.cpu.read_word(GPIO_OUT) & LED, "GPIO8 is driven high"
+        with pytest.raises(abi.MemoryFault):
+            session.cpu.read_word(esp32c3.GPIO + esp32c3.GPIO_IN)
+
+
+def test_the_instruction_bus_view_of_sram_faults_and_the_data_view_does_not():
+    """0x3FC80000 and 0x4037C000 are two views of one 384 KB array, and
+    `add_region` cannot express an alias -- mapping both would make two
+    independent arrays, so a program writing through one and reading through
+    the other would see zeros.
+
+    So only the data view is mapped and the instruction view faults, naming an
+    address `webui/boards/esp32c3.py`'s `install_memory` explains. Pinned
+    because it is a real limitation rather than an oversight, and because the
+    fix is a feature the core does not have.
+    """
+    needs_core()
+    from core.riscv32 import abi
+
+    with load() as session:
+        session.cpu.write_word(esp32c3.DRAM, 0xC0FFEE)
+        assert session.cpu.read_word(esp32c3.DRAM) == 0xC0FFEE
+        with pytest.raises(abi.MemoryFault):
+            session.cpu.read_word(esp32c3.IRAM)
+
+
+def test_an_undescribed_peripheral_faults_rather_than_reading_zero():
+    """The whole reason MMIO is not a region. Firmware polling a clock or reset
+    status bit that answered zero would spin forever, which reads as a hang
+    rather than as a missing feature -- and the fault names the address, which
+    is what says which peripheral to describe next."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with load() as session, pytest.raises(abi.MemoryFault) as caught:
+        session.cpu.read_word(0x60008000)          # UART0, not described
+    assert "60008000" in str(caught.value).lower()
+
+
+# --- the fixture cannot drift from its source -------------------------------
+
+
+def test_the_committed_binary_matches_its_source():
+    """Skipped where no toolchain exists rather than failing, the same contract
+    `tests/avr/test_blink.py` keeps."""
+    home = pathlib.Path.home() / ".platformio/packages/toolchain-riscv32-esp/bin"
+    compiler = shutil.which("riscv32-esp-elf-gcc") or home / "riscv32-esp-elf-gcc.exe"
+    objcopy = shutil.which("riscv32-esp-elf-objcopy") or home / "riscv32-esp-elf-objcopy.exe"
+    if not pathlib.Path(compiler).is_file() or not pathlib.Path(objcopy).is_file():
+        pytest.skip("no riscv32-esp-elf toolchain")
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as work:
+        elf = pathlib.Path(work) / "blink.elf"
+        rebuilt = pathlib.Path(work) / "blink.bin"
+        subprocess.run(
+            [str(compiler), "-march=rv32imc", "-mabi=ilp32", "-Os", "-ffreestanding",
+             "-nostdlib", "-nostartfiles", "-T", str(SCRIPT), "-o", str(elf),
+             str(SOURCE)],
+            check=True, capture_output=True,
+        )
+        subprocess.run([str(objcopy), "-O", "binary", str(elf), str(rebuilt)],
+                       check=True, capture_output=True)
+        assert rebuilt.read_bytes() == IMAGE.read_bytes()
+
+
+def test_the_image_begins_with_its_startup_and_not_with_main():
+    """The defect the linker script exists to prevent, pinned.
+
+    Without a script the linker placed `main` first and `_start` after it, so
+    the stack setup was skipped and the first push faulted. An image that links
+    cleanly and runs the wrong instruction first is exactly the silent class --
+    so the first instruction is asserted to be the one that loads `sp`.
+
+    `lui sp, 0x3fce0` is `0x3fce0137`: opcode 0x37 (LUI), rd 2 (sp).
+    """
+    needs_core()
+    first = int.from_bytes(IMAGE.read_bytes()[:4], "little")
+    assert first & 0x7F == 0x37, "the first instruction is a LUI"
+    assert (first >> 7) & 0x1F == 2, "and its destination is sp"

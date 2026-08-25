@@ -279,6 +279,47 @@ class Cpu:
     def extensions(self) -> int:
         return self._lib.riscv32_extensions(self._handle)
 
+    def set_isa(self, letters: str) -> None:
+        """Say which part this is, as its datasheet spells its ISA.
+
+        `set_extensions` takes a bitmask, which is a fact about this binding.
+        A **board** knows its part's ISA string -- `RV32IMC` for an ESP32-C3,
+        `RV32IMAC` for a C6 -- because that is what the datasheet prints and
+        what `webui/boards/catalogue.py` already records. Translating letters
+        to bits belongs here, where the bits are defined, so a board never
+        restates them and the two cannot drift.
+
+        Raises on a letter this core cannot represent rather than dropping it.
+        A part described as RV32IMAC on a core that silently ignored the `A`
+        would execute atomics an ESP32-C3 must trap, and would do it quietly --
+        which is the one distinction this whole core is shaped around.
+        """
+        text = letters.upper()
+        if not text.startswith("RV32"):
+            raise AbiError(
+                f"{letters!r} is not an RV32 ISA string; expected something "
+                f"like 'RV32IMC'"
+            )
+        rest = text[len("RV32"):]
+        if not rest.startswith("I"):
+            raise AbiError(
+                f"{letters!r} does not name the I base, which this core "
+                f"assumes and cannot switch off"
+            )
+
+        known = {"M": EXT_M, "A": EXT_A, "C": EXT_C}
+        mask = 0
+        for letter in rest[1:]:
+            if letter not in known:
+                raise AbiError(
+                    f"{letters!r} names extension {letter!r}, which this core "
+                    f"cannot represent. Known: {''.join(sorted(known))}. An "
+                    f"extension dropped rather than refused would make a part "
+                    f"look like one it is not."
+                )
+            mask |= known[letter]
+        self.set_extensions(mask)
+
     def set_extensions(self, mask: int) -> None:
         """Say which part this is. See `ESP32_C3` and `ESP32_C6`."""
         self._lib.riscv32_set_extensions(self._handle, mask)

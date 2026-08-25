@@ -678,7 +678,17 @@ def test_each_refusal_arrives_as_itself(live_server):
     cases = (
         (upload(board="Raspberry Pi Pico", base=BLINK_LOAD), 404, "unknown-board"),
         (upload(board="XIAO-RP2350-DIP", base=BLINK_LOAD), 409, "core-not-built"),
-        (upload(board="XIAO-ESP32-C3-DIP", base=BLINK_LOAD), 409, "chip-not-described"),
+        # An ESP32-C6: riscv32 is built and no module describes that chip yet.
+        #
+        # **This was the C3 until OH-48 described it**, and the replacement is
+        # on a countdown of its own -- OH-57 describes the C6 and the C5, and
+        # after that no board in the catalogue is core-built-and-undescribed,
+        # because every remaining chip needs a core that is not built. When
+        # this fails again the fix is not another board name: it is the
+        # synthetic-directory treatment
+        # `test_a_built_core_without_a_board_description_is_not_runnable`
+        # already uses, for exactly this reason.
+        (upload(board="XIAO-ESP32-C6-DIP", base=BLINK_LOAD), 409, "chip-not-described"),
         (upload(board=BOARD, base=0x42000020), 400, "outside-the-board-map"),
         (upload(b"\x00" * 64, board=BOARD, base=0x10000000), 400, "no-vector-table"),
         (upload(wrong_family, board=BOARD), 400, "nothing-for-this-chip"),

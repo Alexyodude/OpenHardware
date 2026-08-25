@@ -457,6 +457,10 @@ def test_the_link_register_holds_the_address_after_a_compressed_call(machine):
 # count -- an inverted AVR branch ran sixty thousand instructions, toggled a
 # pin, alternated correctly, and was wrong.
 
+#: Shared with `tests/riscv32/test_esp32c3_board.py`, which **owns** it: the
+#: rebuild-and-compare lives there, so there is one copy of the compiler
+#: invocation. There were two until the linker script landed and only one of
+#: them learned about it.
 BLINK = pathlib.Path(__file__).resolve().parent / "c3blink" / "blink.bin"
 
 #: Where the image is linked, from `-Wl,-Ttext=0x42000000`. That is the
@@ -487,15 +491,18 @@ def test_a_real_compiled_image_runs_and_the_gpio_register_alternates():
     with abi.Cpu() as cpu:
         cpu.set_extensions(abi.ESP32_C3)
         cpu.add_region(BLINK_LOAD, 0x1000, executable=True)
-        cpu.add_region(0x3FC80000, 0x1000, executable=False)   # SRAM, for the stack
+        cpu.add_region(0x3FC80000, 0x60000, executable=False)  # SRAM; _start puts sp near its top
         cpu.add_region(GPIO, 0x100, executable=False)
         for offset in range(0, len(image), 4):
             word = int.from_bytes(image[offset:offset + 4].ljust(4, b"\0"), "little")
             cpu.write_word(BLINK_LOAD + offset, word)
 
-        regs = [0] * 32
-        regs[2] = 0x3FC80F00           # sp, near the top of the mapped SRAM
-        cpu.set_regs(regs, pc=BLINK_LOAD)
+        # **No stack pointer is set here, and that changed.** The image sets
+        # its own in `_start`, which is what every RISC-V image does -- `crt0`
+        # is where it normally lives, and a `-nostartfiles` build has to do it
+        # itself. Setting one here as well would hide a fixture that had
+        # stopped doing so.
+        cpu.set_regs([0] * 32, pc=BLINK_LOAD)
 
         transitions: list[tuple[int, bool]] = []
         last = 0
@@ -521,40 +528,6 @@ def test_a_real_compiled_image_runs_and_the_gpio_register_alternates():
     periods = {b - a for a, b in itertools.pairwise(steps[1:])}
     assert len(periods) == 1, f"period varies: {sorted(periods)}"
     assert periods.pop() > 100, "a loop counting to 100 costs more than 100 steps"
-
-
-def test_the_committed_binary_matches_its_source():
-    """So the fixture cannot drift from the C it claims to be.
-
-    Skipped where no toolchain exists rather than failing, the same contract
-    `tests/avr/test_blink.py` keeps.
-    """
-    compiler = shutil.which("riscv32-esp-elf-gcc") or (
-        pathlib.Path.home()
-        / ".platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-gcc.exe"
-    )
-    objcopy = shutil.which("riscv32-esp-elf-objcopy") or (
-        pathlib.Path.home()
-        / ".platformio/packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-objcopy.exe"
-    )
-    if not pathlib.Path(compiler).is_file() or not pathlib.Path(objcopy).is_file():
-        pytest.skip("no riscv32-esp-elf toolchain")
-
-    import tempfile
-
-    source = BLINK.with_name("blink.c")
-    with tempfile.TemporaryDirectory() as work:
-        elf = pathlib.Path(work) / "blink.elf"
-        rebuilt = pathlib.Path(work) / "blink.bin"
-        subprocess.run(
-            [str(compiler), "-march=rv32imc", "-mabi=ilp32", "-Os", "-ffreestanding",
-             "-nostdlib", "-nostartfiles", f"-Wl,-Ttext={hex(BLINK_LOAD)}",
-             "-o", str(elf), str(source)],
-            check=True, capture_output=True,
-        )
-        subprocess.run([str(objcopy), "-O", "binary", str(elf), str(rebuilt)],
-                       check=True, capture_output=True)
-        assert rebuilt.read_bytes() == BLINK.read_bytes()
 
 
 def test_most_of_the_committed_image_is_compressed():

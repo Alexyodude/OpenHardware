@@ -41,15 +41,19 @@ first needed it and is simply "where to enter" on every other machine.
 
 ## The stack pointer is the image's problem, not this module's
 
-An Armv6-M part loads SP from the vector table before its first instruction.
-An RV32 part does not: `sp` is whatever reset left, and every RISC-V startup
-file begins by loading it. A bare-metal image built with `-nostartfiles` has no
-such file, so it comes up with `sp` at zero -- and `tests/riscv32/test_rvc.py`
-sets one explicitly for exactly that reason.
+An Armv6-M part loads SP from the vector table before its first instruction. An
+RV32 part does not: `sp` is whatever reset left it, and **every** RISC-V image
+begins by setting it -- that is what `crt0` is for.
+
+So this leaves it at zero, and `tests/riscv32/c3blink/blink.c` sets its own in
+`_start`, which is the one thing the startup file a `-nostartfiles` build omits
+would have done. That is not a workaround: it is what the real image does, and
+an image that did not would fault on its first push here exactly as it would on
+silicon.
 
 Inventing a stack pointer here would be inventing a fact about a chip in a
-module that describes an instruction set. A board that needs one sets it in
-`install`, where the SRAM address it points into is already written down.
+module that describes an instruction set -- and inventing one in the *board*
+would hide an image that never set up its stack.
 """
 
 from __future__ import annotations
@@ -182,10 +186,8 @@ def enter(
     thing to want and the caller has to be able to say it.
 
     **Every register comes up zero, `sp` included.** That is what an RV32 part
-    does -- there is no vector table to load one from -- and a bare-metal image
-    built with `-nostartfiles` has no startup file to set it either. A board
-    that needs a stack sets `sp` in its own `install`, where the SRAM address
-    is already written down.
+    does -- there is no vector table to load one from -- so the image sets its
+    own, as every RISC-V image does. See the module docstring.
     """
     lowest = min(segment.address for segment in image.segments)
     at = lowest if requested is None else requested
@@ -199,8 +201,10 @@ def enter(
     notes: tuple[str, ...] = ()
     if requested is not None and requested != lowest:
         notes = (
-            f"entered at 0x{requested:08x} rather than the image's start "
-            f"0x{lowest:08x}, because one was asked for",
+            (
+                f"entered at 0x{requested:08x} rather than the image's start "
+                f"0x{lowest:08x}, because one was asked for"
+            ),
         )
 
     cpu.set_regs([0] * 32, pc=at)

@@ -269,9 +269,15 @@ def test_only_the_board_a_real_image_ran_on_claims_to_have_run_one():
     *board* and that file never mentions one. The evidence is
     `tests/avr/test_uno_board.py`, where `api.load_firmware("Arduino Uno", ...)`
     is what runs.
+
+    ESP32-C3 joined on 2026-08-25 under OH-48 and unlocked three boards at once
+    rather than one. The argument it had to survive is the same:
+    `tests/riscv32/test_rvc.py` already ran the same image and would have been
+    the wrong evidence, because it drives the ABI directly and so proves the
+    compressed decoder rather than the board.
     """
     proven = {b.chip for b in catalogue.catalogue() if b.firmware_verified}
-    assert proven == {"RP2040", "SAMD21", "ATmega328P"}
+    assert proven == {"RP2040", "SAMD21", "ATmega328P", "ESP32-C3"}
 
 
 def test_every_firmware_claim_names_a_test_that_exists():
@@ -439,3 +445,18 @@ def test_every_element_the_script_fills_exists_in_the_page():
         f"emulator.js fills elements the page does not have: {missing}. "
         f"replaceChildren on null throws, and the panel renders empty."
     )
+
+
+def test_the_two_lists_of_non_boards_agree():
+    """`catalogue.NOT_A_BOARD` and `contract.NOT_A_BOARD` are the same fact
+    written twice, because `contract` imports `catalogue` and the reverse
+    import would not resolve.
+
+    Two copies of one list is the arrangement that rots quietly, so this pins
+    them -- and a helper added to `webui/boards/` fails here until both know
+    about it, rather than surfacing as a phantom chip in `described_chips()`
+    the way `contract` itself did.
+    """
+    from webui.boards import contract
+
+    assert catalogue.NOT_A_BOARD == contract.NOT_A_BOARD

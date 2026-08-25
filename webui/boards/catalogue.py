@@ -63,6 +63,20 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
 
 BOARDS_DIR = pathlib.Path(__file__).resolve().parent
 
+#: Modules beside the board descriptions that are not boards.
+#:
+#: **Restated here rather than imported from `contract`, and the cycle is the
+#: reason**: `webui/boards/contract.py` imports this module, so importing it
+#: back would not resolve. Two copies of one list, which
+#: `test_the_two_lists_of_non_boards_agree` pins together -- the same
+#: arrangement, and the same guard, that `VECTOR_TABLE_OFFSETS` had before it
+#: found a single home.
+#:
+#: `contract` was missing from this set until 2026-08-25, so `described_chips()`
+#: returned a phantom chip called `CONTRACT`. Harmless while no chip is called
+#: that, and a latent lie.
+NOT_A_BOARD = frozenset({"__init__", "catalogue", "contract"})
+
 #: Instruction set per chip, and which core directory would implement it.
 #:
 #: **This is a fact table, not a generated one**, and it is the only such table
@@ -122,10 +136,18 @@ CHIPS: dict[str, tuple[str, str]] = {
 #: claim this table makes is a board claim, so the evidence is
 #: `tests/avr/test_uno_board.py`, where a board name and a file of bytes go
 #: into `webui/api.py` and PB5 moves.
+#: The ESP32-C3 entry is the first RISC-V one and the first to unlock three
+#: boards at once. What made it admissible is the same thing that made the
+#: ATmega328P admissible: `tests/riscv32/test_esp32c3_board.py` puts a board
+#: name and a real `riscv32-esp-elf-gcc` image into `webui/api.py` and watches
+#: GPIO8 alternate at a constant period. `tests/riscv32/test_rvc.py` also runs
+#: that image and is **not** named here, because it drives the ABI directly and
+#: so proves the decoder rather than the board.
 FIRMWARE_VERIFIED: dict[str, str] = {
     "RP2040": "tests/cortexm0/test_blink.py",
     "SAMD21": "tests/cortexm0/test_samd21_blink.py",
     "ATmega328P": "tests/avr/test_uno_board.py",
+    "ESP32-C3": "tests/riscv32/test_esp32c3_board.py",
 }
 
 #: What each instruction set would need before a core for it could be trusted.
@@ -260,7 +282,12 @@ def described_chips(directory: pathlib.Path | None = None) -> set[str]:
     return {
         path.stem.upper().replace("-", "")
         for path in directory.glob("*.py")
-        if path.stem not in ("__init__", "catalogue")
+        # `contract` is not a board either, and was counted as one until
+        # 2026-08-25: `described_chips()` returned a phantom "CONTRACT".
+        # Harmless while no chip is called that, and a latent lie -- so it is
+        # taken from `contract.NOT_A_BOARD`, which is the list that already
+        # knows, rather than repeated here as a third copy.
+        if path.stem not in NOT_A_BOARD
     }
 
 
