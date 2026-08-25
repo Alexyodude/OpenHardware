@@ -66,7 +66,14 @@ constexpr uint16_t kSph = 0x005E;
 constexpr uint16_t kSreg = 0x005F;
 
 /// The X, Y and Z pointer pairs, by their low register number.
+///
+/// They are ordinary registers -- r26 through r31 -- and the only thing that
+/// makes them pointers is that some encodings name them implicitly. Z is the
+/// one that reaches the *other* address space: `lpm` reads program memory
+/// through it, by byte address.
+constexpr uint8_t kX = 26;
 constexpr uint8_t kY = 28;
+constexpr uint8_t kZ = 30;
 
 /// What `step` did. Same three-valued contract the other cores keep, and for
 /// the same reason: an unimplemented encoding must leave the machine untouched

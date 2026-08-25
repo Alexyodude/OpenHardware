@@ -250,15 +250,25 @@ def test_an_unimplemented_encoding_leaves_the_machine_untouched(cpu):
     """It matters more here than on Arm. A core that skipped an unknown word
     would resume decoding from the middle of the next instruction, and on a
     variable-length encoding that is not a fault — it is a different program
-    that runs to completion."""
+    that runs to completion.
+
+    **The example is 0xFFFF and that is not an arbitrary choice.** This test
+    used to use `lpm` (0x95C8), which OH-58 implemented — and then it failed,
+    because its example had come from live data and was on a countdown, the
+    same shape `tests/webui/test_board_run.py` was caught by. 0xFFFF cannot go
+    the same way: it is the erased flash word, `core/avr/cpu.cc` fills program
+    memory with it for exactly this reason, and it is not an AVR instruction —
+    `sbrs` is the nearest encoding and it needs bit 3 clear. Nothing can
+    implement it, so nothing will.
+    """
     from core.avr.abi import Unimplemented
 
-    cpu.write_program(0, 0x95C8)          # lpm, which this core does not have
+    cpu.write_program(0, 0xFFFF)
     cpu.pc = 0
     with pytest.raises(Unimplemented) as caught:
         cpu.step()
     assert cpu.pc == 0, "the PC moved past an instruction that did not execute"
-    assert "0x95c8" in str(caught.value)
+    assert "0xffff" in str(caught.value)
 
 
 def test_running_off_the_end_of_program_memory_faults(cpu):

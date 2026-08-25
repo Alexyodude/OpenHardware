@@ -107,6 +107,21 @@ const SPH = 0x5e;
 const SRAM_START = 0x100;
 const SRAM_BYTES = 2048;
 
+/// What `ret` and `reti` find on the stack, as a WORD address.
+///
+/// **It has to be small, and 0x3400 is why.** avr8js ends every instruction
+/// with `cpu.pc = (cpu.pc + 1) % cpu.progMem.length` (`instruction.js:860`),
+/// and `progMem` here is 512 words. The first version of this file left
+/// 0x34/0x00 on the stack, which is the word address 0x3400 -- an exact
+/// multiple of 512, so the oracle wrapped it to **0** and the corpus recorded
+/// `ret` as a jump to the reset vector. `core/avr` has 16,384 words and does
+/// not wrap, so it would have returned to 0x3400 and been called wrong for
+/// being right.
+///
+/// A return address inside 512 words never meets that modulus, so both
+/// machines answer the same thing for the same reason.
+const RETURN_ADDRESS = 0x0134;
+
 // --- deterministic seeds ----------------------------------------------------
 
 function lcg(seed) {
@@ -173,6 +188,17 @@ const HALF_CARRY = {
   neg: "R3 + Rd3",
 };
 
+/// The four mnemonics that read C as an *input*. Everything else in
+/// `HALF_CARRY` computes its result from the two operands alone.
+///
+/// **This list is why `sub r5, r5` was reported wrong.** Feeding the seeded
+/// carry to every arithmetic mnemonic made the manual expect `x - x - 1`,
+/// whose bit 3 is set, where the machine computes `x - x` and clears it. The
+/// oracle agreed with the core and only the second source was wrong -- which
+/// is the failure a two-source arrangement is *supposed* to make visible, so
+/// it is named here rather than folded into the expression above.
+const READS_CARRY = new Set(["adc", "sbc", "sbci", "cpc"]);
+
 /// H per the manual, or null when the instruction does not touch it -- and
 /// null is a real answer, not a gap: SREG's H must then be unchanged, which
 /// the test checks against the seed rather than against the oracle.
@@ -186,10 +212,11 @@ function manualHalfCarry(mnemonic, left, right, carryIn) {
     const result = (0 - left) & 0xff;
     return { h: bit(result, 3) | bit(left, 3), expression: rule };
   }
+  const carry = READS_CARRY.has(name) ? carryIn : 0;
   const adding = name === "add" || name === "adc";
   const result = adding
-    ? (left + right + carryIn) & 0xff
-    : (left - right - carryIn) & 0xff;
+    ? (left + right + carry) & 0xff
+    : (left - right - carry) & 0xff;
   const d3 = bit(left, 3);
   const r3 = bit(right, 3);
   const s3 = bit(result, 3);
@@ -309,6 +336,10 @@ for (const [name, word] of [["lpm", 0x95c8], ["lpm r16, Z", 0x9104],
                             ["lpm r16, Z+", 0x9105]]) {
   add(name, [word, 0x0000], { lpm: true });
 }
+// Z odd, which selects the HIGH byte of the word. Every case above has Z even,
+// so a core that had the two halves the wrong way round would agree with all
+// of them -- the seeded word is 0xbead and both halves are distinctive.
+add("lpm r16, Z odd", [0x9104, 0x0000], { lpm: true, z: 0x0081 });
 
 // The multiplies gcc emits for 16-bit arithmetic.
 add("mul r16, r17", [0x9f01 | 0, 0x0000]);
@@ -322,6 +353,27 @@ for (const [name, base] of [["sbic", 0x9900], ["sbis", 0x9b00]]) {
         [base | (a << 3) | bit, 0x0000, 0x0000]);
   }
 }
+
+// --- skipping OVER a 32-bit instruction ------------------------------------
+//
+// **How far a skip goes is a property of the instruction being skipped**, and
+// every case above has a `nop` in the next slot, so all of them are one word
+// and none of them test the rule. Land one word short of a `jmp` and the PC
+// sits on a bare 16-bit target address, which decodes as whatever it happens
+// to look like -- the machine keeps running, executing a program nobody wrote.
+//
+// avr8js has `isTwoWordInstruction` for exactly this. All four wide encodings
+// an ATmega328P has appear below as the thing being skipped.
+//
+// IO address 0x1f is data 0x3f, which is zero here -- so `sbic` skips and
+// `sbis` does not. The last case is the one that matters in the other
+// direction: a core that read the width and skipped two words *regardless* of
+// the condition would pass every case above it.
+add("cpse r5, r5 skipping jmp", [reg2(0x1000, 5, 5), 0x940c, 0x0020]);
+add("cpse r5, r5 skipping lds", [reg2(0x1000, 5, 5), 0x9000, 0x0140]);
+add("sbic 0x1f, 7 skipping call", [0x9900 | (0x1f << 3) | 7, 0x940e, 0x0020]);
+add("sbic 0x1f, 7 skipping sts", [0x9900 | (0x1f << 3) | 7, 0x9200, 0x0150]);
+add("sbis 0x1f, 7 not skipping jmp", [0x9b00 | (0x1f << 3) | 7, 0x940c, 0x0020]);
 
 // --- run each case against the oracle --------------------------------------
 
@@ -343,22 +395,49 @@ for (const testcase of CASES) {
     for (let i = 0; i < 32; i++) cpu.data[i] = regs[i];
     cpu.data[SREG] = sreg;
 
-    // A stack with room to pop from, and something already on it.
+    // A stack with room to pop from, and a return address already on it.
+    // `rcall` writes the low byte at SP and the high byte at SP-1, so after a
+    // call SP+1 holds the high byte and SP+2 the low one -- which is the order
+    // `ret` reads them back in.
     const sp = SRAM_START + SRAM_BYTES - 32;
     cpu.data[SPL] = sp & 0xff;
     cpu.data[SPH] = (sp >> 8) & 0xff;
-    cpu.data[sp + 1] = 0x34;
-    cpu.data[sp + 2] = 0x00;
 
-    // Pointers that land inside SRAM rather than in the register file, so a
-    // store does not overwrite the operands and hide a bug.
+    // **Every byte this generator writes into data memory, by address.** It
+    // goes into the corpus, because `tests/avr/test_conformance.py` has to set
+    // the machine up *identically* or the comparison is against a different
+    // program: `ret` and `pop` read the stack, and a test that seeded nothing
+    // would watch the core return to 0 while the oracle returned here.
+    //
+    // It is also what the write diff below subtracts. The first version kept
+    // that list in a second place and got it wrong -- 0x200 and 0x220 counted
+    // as seeded even for cases that never set them, so every non-pointer case
+    // recorded two writes of 0x00 that never happened.
+    const seeded = {
+      [sp + 1]: (RETURN_ADDRESS >> 8) & 0xff,
+      [sp + 2]: RETURN_ADDRESS & 0xff,
+    };
+    // X, Y and Z, pointed somewhere a store cannot overwrite the operands and
+    // hide a bug.
+    //
+    // **Z is the exception and it needs one.** `lpm` reads PROGRAM memory
+    // through Z by *byte* address, so its cases point Z at the word seeded
+    // above; everything else points it into SRAM like X and Y. Z used to be
+    // 0x0080 for both, which is extended IO rather than SRAM -- so every
+    // `st Z` wrote below the range the diff below scans and no store through Z
+    // was checked at all.
     if (testcase.pointerIntoSram || testcase.lpm) {
-      for (const [low, high, at] of [[26, 27, 0x0200], [28, 29, 0x0220], [30, 31, 0x0080]]) {
+      const z = testcase.z ?? (testcase.lpm ? 0x0080 : 0x0240);
+      for (const [low, high, at] of [[26, 27, 0x0200], [28, 29, 0x0220], [30, 31, z]]) {
         cpu.data[low] = at & 0xff;
         cpu.data[high] = (at >> 8) & 0xff;
       }
-      cpu.data[0x0200] = 0xa5;
-      cpu.data[0x0220] = 0x5a;
+      seeded[0x0200] = 0xa5;
+      seeded[0x0220] = 0x5a;
+      seeded[0x0240] = 0x3c;
+    }
+    for (const [address, value] of Object.entries(seeded)) {
+      cpu.data[Number(address)] = value;
     }
 
     const before = {
@@ -369,17 +448,16 @@ for (const testcase of CASES) {
 
     avrInstruction(cpu);
 
+    // Every byte of the data space above the register file, minus the three
+    // the test compares by name. **Not just SRAM**: the register file is
+    // 0x00-0x1F, the IO window 0x20-0xFF and SRAM only starts at 0x100, so a
+    // scan that began at SRAM would never see a store into the IO window --
+    // which is exactly where a pointer set to 0x0080 used to land.
     const writes = {};
-    for (let address = SRAM_START; address < SRAM_START + SRAM_BYTES; address++) {
-      const value = cpu.data[address];
-      const wasSeeded =
-        (address === sp + 1 && 0x34) || (address === sp + 2 && 0x00) ||
-        address === 0x0200 || address === 0x0220;
-      const original = wasSeeded
-        ? (address === sp + 1 ? 0x34 : address === sp + 2 ? 0x00
-           : address === 0x0200 ? 0xa5 : 0x5a)
-        : 0;
-      if (value !== original) writes[address] = value;
+    for (let address = 0x20; address < cpu.data.length; address++) {
+      if (address === SPL || address === SPH || address === SREG) continue;
+      const original = address in seeded ? seeded[address] : 0;
+      if (cpu.data[address] !== original) writes[address] = cpu.data[address];
     }
 
     const [left, right] = operands(testcase.mnemonic, testcase.words, before.regs);
@@ -396,7 +474,10 @@ for (const testcase of CASES) {
         regs: before.regs,
         sreg: before.sreg,
         sp: before.sp,
-        pointers: Boolean(testcase.pointerIntoSram || testcase.lpm),
+        // Data memory, address -> byte. `before.regs` already holds the
+        // pointer registers, so the test needs no second rule about which
+        // cases set X, Y and Z: it writes these bytes and those registers.
+        memory: seeded,
       },
       avr8js: {
         pc: cpu.pc,

@@ -184,7 +184,11 @@ ORACLES: dict[str, str] = {
     "xtensa": "NONE. QEMU-xtensa and binutils-xtensa both derive from the same "
               "Tensilica archive via import_core.sh, so their agreement is a "
               "tautology (docs/architectures.md 2.1c)",
-    "avr": "simavr and avr-gdb exist; neither is hardware-captured",
+    "avr": "avr8js (MIT, hand-written from the Microchip datasheet) -- in use "
+           "here, and WRONG about the half-carry and about neg's overflow, so "
+           "those two are checked against the manual instead "
+           "(tests/avr/test_datasheet_edges.py). simavr and avr-gdb exist and "
+           "neither is hardware-captured either",
     "unknown": "the part is not confirmed to exist",
 }
 

@@ -22,15 +22,22 @@
 # that silently becomes a no-op when its oracle is missing is worse than one
 # that says it did not run.
 #
-# ## The two assertions, and why both are needed
+# ## The three assertions, and why each is needed
 #
 # **Nothing may be wrong.** Anything the core executes, it must execute exactly
-# as the oracle does — every register, SREG, SP, PC and byte of SRAM.
+# as the oracle does — every register, SREG, SP, PC, and every byte of the data
+# space above the register file.
 #
 # **The refused set must be exactly `STILL_MISSING`.** Without that, a core
 # which refused *everything* would have nothing wrong and would pass. It is the
-# same shape as `tests/rv32`'s pinned target sets: implementing an instruction
-# means deleting a line here on purpose, and losing one is loud.
+# same shape as `tests/rv32`'s pinned target sets. OH-58 emptied the set, so
+# the assertion now reads "nothing in the corpus is refused" — and it still
+# fails in both directions, which is the point: an instruction that stops
+# working is as loud as one that lands unrecorded.
+#
+# **And a floor on how many agreed.** Two assertions cannot tell a core that
+# executes everything correctly from one that has been handed an empty corpus;
+# the third can.
 
 import json
 import pathlib
@@ -48,26 +55,24 @@ CORPUS = pathlib.Path(__file__).resolve().parent / "corpus" / "isa.json"
 SREG = 0x5F
 SPL = 0x5D
 SPH = 0x5E
-SRAM_START = 0x100
 
 #: The half-carry bit in SREG. Held out of the oracle comparison and checked
 #: against the manual instead -- see `run_case`.
 H_MASK = 0x20
 
-#: Mnemonics `core/avr/exec.cc` does not implement yet, by base name.
+#: Mnemonics `core/avr/exec.cc` does not implement, by base name.
 #:
-#: **Deleting a line here is how an instruction lands.** OH-58 is the work of
-#: emptying this set; until then it is the honest record of what an Arduino
-#: sketch will stop on, and `test_the_refused_set_is_exactly_what_is_recorded`
-#: fails in both directions — an instruction that quietly stopped working shows
-#: up here just as loudly as one that started.
-STILL_MISSING = frozenset({
-    "adc", "add", "and", "andi", "asr", "call", "clc", "cli", "clz", "com",
-    "cp", "cpse", "dec", "inc", "jmp", "lds", "lpm", "lsr", "mov", "movw",
-    "mul", "muls", "mulsu", "neg", "nop", "or", "ori", "pop", "ret", "reti",
-    "ror", "sbc", "sbci", "sbic", "sbis", "sbiw", "sec", "sei", "sez", "sts",
-    "sub", "subi", "swap", "ld", "st",
-})
+#: **Empty since OH-58, and it stays a set rather than becoming an assertion
+#: that nothing is refused.** It held 45 names when the ticket opened and
+#: `test_the_refused_set_is_exactly_what_is_recorded` still fails in both
+#: directions: an instruction that quietly stops working shows up here just as
+#: loudly as one that lands without the record being updated.
+#:
+#: What is absent from the *corpus* is a different question and is not this
+#: set's job — `core/avr/exec.cc`'s header lists the encodings the manual has
+#: and this core refuses, and `tests/avr/test_datasheet_edges.py` pins the two
+#: places the oracle cannot be asked.
+STILL_MISSING: frozenset[str] = frozenset()
 
 
 def corpus() -> list[dict]:
@@ -96,17 +101,18 @@ def run_case(cpu, case: dict) -> tuple[str, str]:
     cpu.write_data(SPL, initial["sp"] & 0xFF)
     cpu.write_data(SPH, (initial["sp"] >> 8) & 0xFF)
 
+    # **Every byte the generator seeded, replayed from the corpus.** Not a
+    # second copy of the rule: `ret` and `pop` read the stack, and a test that
+    # left data memory zeroed would watch this core return to word 0 while the
+    # oracle returned to where the generator put the address -- a disagreement
+    # about the harness, reported as a disagreement about the core.
+    for address, value in initial["memory"].items():
+        cpu.write_data(int(address), value)
+
     for offset, word in enumerate(case["words"]):
         cpu.write_program(offset, int(word, 16))
     # What `lpm` reads, at the Z the generator seeds.
     cpu.write_program(0x40, 0xBEAD)
-
-    if initial["pointers"]:
-        for low, at in ((26, 0x0200), (28, 0x0220), (30, 0x0080)):
-            cpu.set_reg(low, at & 0xFF)
-            cpu.set_reg(low + 1, (at >> 8) & 0xFF)
-        cpu.write_data(0x0200, 0xA5)
-        cpu.write_data(0x0220, 0x5A)
 
     cpu.pc = 0
     try:
@@ -183,12 +189,13 @@ def test_nothing_the_core_executes_disagrees_with_the_oracle():
     assert not found["wrong"], "\n".join(
         f"  {label}: {detail}" for label, detail in found["wrong"][:25]
     )
-    # **A floor, not a pin.** 78 is what the fourteen instructions `core/avr`
-    # had when OH-58 opened, and it exists so that a run with nothing wrong and
+    # **A floor, not a pin.** It exists so that a run with nothing wrong and
     # nothing executed cannot pass -- the failure mode a differential test is
-    # most prone to. Raise it as instructions land; it must never fall.
-    assert len(found["agreed"]) >= 78, (
-        f"only {len(found['agreed'])} cases agreed, down from 78. Something "
+    # most prone to. It was 78 when OH-58 opened, which was the fourteen
+    # instructions `core/avr` had then; it is now every case in the corpus.
+    # Raise it when the corpus grows; it must never fall.
+    assert len(found["agreed"]) >= 570, (
+        f"only {len(found['agreed'])} cases agreed, down from 570. Something "
         f"that used to execute has stopped."
     )
 
