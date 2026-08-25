@@ -87,6 +87,27 @@ uint32_t avr_pc(const AvrCpu* cpu) { return as_handle(cpu)->cpu.pc(); }
 void avr_set_pc(AvrCpu* cpu, uint32_t value) { as_handle(cpu)->cpu.set_pc(value); }
 uint64_t avr_executed(const AvrCpu* cpu) { return as_handle(cpu)->cpu.executed(); }
 
+int avr_map_timer(AvrCpu* cpu, uint16_t counter, uint16_t flag, uint16_t enable,
+                  uint8_t bit, uint32_t vector, uint32_t instructions_per_tick) {
+    avr::Timer timer;
+    timer.counter = counter;
+    timer.flag = flag;
+    timer.enable = enable;
+    timer.bit = bit;
+    timer.vector = vector;
+    timer.instructions_per_tick = instructions_per_tick;
+    return as_handle(cpu)->cpu.map_timer(timer) ? 1 : 0;
+}
+
+int avr_interrupt_inhibited(const AvrCpu* cpu) {
+    return as_handle(cpu)->cpu.interrupt_inhibited() ? 1 : 0;
+}
+
+uint8_t avr_timer_count(const AvrCpu* cpu) {
+    const avr::Cpu& core = as_handle(cpu)->cpu;
+    return core.has_timer() ? core.timer_count() : 0;
+}
+
 int avr_step(AvrCpu* cpu) {
     avr::Cpu& core = as_handle(cpu)->cpu;
     const avr::StepResult result = avr::step(core);

@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 /// Bumped whenever this header's shape changes.
-#define AVR_ABI_VERSION 1
+#define AVR_ABI_VERSION 2
 
 typedef struct AvrCpu AvrCpu;
 
@@ -38,6 +38,29 @@ AVR_API void avr_reset(AvrCpu* cpu);
 AVR_API void avr_configure(AvrCpu* cpu, uint32_t program_words, uint32_t data_bytes);
 AVR_API uint32_t avr_program_words(const AvrCpu* cpu);
 AVR_API uint32_t avr_data_bytes(const AvrCpu* cpu);
+
+/// Give the machine timer 0. Call AFTER `avr_configure`, which resets.
+///
+/// Flat parameters rather than a struct pointer, so the Python binding is
+/// ctypes scalars and nothing has to agree about a layout across the boundary
+/// -- the same reason every other call here takes its arguments this way.
+///
+/// `counter`, `flag` and `enable` are DATA addresses; `vector` is a WORD
+/// address. Those two spaces overlap on this machine, which is why each is
+/// named. Returns 0 and maps nothing if any of them is out of range, if `bit`
+/// is not 0-7, or if `instructions_per_tick` is zero.
+AVR_API int avr_map_timer(AvrCpu* cpu, uint16_t counter, uint16_t flag,
+                          uint16_t enable, uint8_t bit, uint32_t vector,
+                          uint32_t instructions_per_tick);
+
+/// What `counter` reads. 0 with no timer mapped.
+AVR_API uint8_t avr_timer_count(const AvrCpu* cpu);
+
+/// 1 while an interrupt cannot be taken on the next step because `sei` or
+/// `reti` just ran. A property of the machine and not an implementation
+/// detail: it is the difference between the next step being an instruction
+/// and the next step being a vector.
+AVR_API int avr_interrupt_inhibited(const AvrCpu* cpu);
 
 /// 0 on a refused access, having read or written nothing.
 AVR_API int avr_read_program(const AvrCpu* cpu, uint32_t address, uint16_t* out);

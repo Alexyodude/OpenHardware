@@ -84,6 +84,43 @@ enum class StepResult : int {
     MemoryFault = 2,
 };
 
+/// An 8-bit timer in the data space, and the one interrupt it raises.
+///
+/// ## Why this is one struct and not a general interrupt table
+///
+/// There is exactly one interrupt source on this part today, and
+/// `.claude/CLAUDE.md`'s rule 6 says to build the concrete thing. A second
+/// source is a second ticket, and splitting this then is cheaper than
+/// un-generalising a table that only ever held one row.
+///
+/// It is also one struct rather than three calls — a counter, a flag, an
+/// interrupt — because those three are one mechanism. **The flag byte is what
+/// couples them**: the counter sets it on wrap and the interrupt reads it, so
+/// a `map_counter` that did not own the flag could not raise anything and a
+/// `map_interrupt` that did not own the counter could never be raised.
+///
+/// `webui/boards/rp2040.py` records the same shape from the other side. Its
+/// ALARM registers are deliberately unmapped, because "modelling ALARM0-3
+/// needs an IRQ to deliver, and this core has no exceptions". This is that
+/// IRQ, sized to the one peripheral that needs it.
+///
+/// ## What it does not model
+///
+/// A prescaler that can be changed, the compare-match interrupts, the PWM
+/// output modes, and any timer but 0. `TCCR0A` and `TCCR0B` are ordinary
+/// bytes: Arduino's `init()` writes them and nothing reads them back, so the
+/// *number* below is what the prescaler means here and the register is not
+/// consulted. That is an approximation and it is stated rather than implied —
+/// a sketch that set a different prescaler would be believed and ignored.
+struct Timer {
+    uint16_t counter = 0;             //< TCNT0, as a DATA address
+    uint16_t flag = 0;                //< TIFR0, holding the overflow flag
+    uint16_t enable = 0;              //< TIMSK0, holding the interrupt enable
+    uint8_t bit = 0;                  //< TOV0 in `flag`; TOIE0 in `enable`
+    uint32_t vector = 0;              //< the handler, as a WORD address
+    uint32_t instructions_per_tick = 1;
+};
+
 class Cpu {
 public:
     Cpu();
@@ -144,10 +181,46 @@ public:
     uint32_t pc() const { return pc_; }
     void set_pc(uint32_t value) { pc_ = value; }
 
+    // --- timer 0, and the interrupt it raises -----------------------------
+
+    /// Give this machine a timer. Call after `configure`, which resets.
+    ///
+    /// Returns false and maps nothing if any address is outside the sized
+    /// space, the bit is not a bit, the tick is zero, or the vector is outside
+    /// program memory. Checked here because the step path indexes `data_`
+    /// without bounds checks and cannot afford to.
+    bool map_timer(const Timer& timer);
+
+    bool has_timer() const { return has_timer_; }
+    const Timer& timer() const { return timer_; }
+
+    /// What `TCNT0` reads: retired instructions divided by the tick, low eight
+    /// bits. Computed rather than stored, so it cannot drift from `executed()`.
+    uint8_t timer_count() const;
+
+    /// True when the next step must take the vector instead of the next
+    /// instruction: the overflow flag is set, the overflow interrupt is
+    /// enabled, and SREG's I is set. All three, which is the ordering a
+    /// program relies on when it clears I around a read of a shared counter.
+    bool interrupt_pending() const;
+
+    /// Clear the overflow flag, as the hardware does when the vector is taken.
+    /// **Not the enable and not I** — those are the program's business, and
+    /// `reti` is what restores I.
+    void acknowledge_interrupt();
+
+    /// `sei` and `reti` protect exactly one following instruction from an
+    /// interrupt. A datasheet rule, and the one that stops a handler which
+    /// re-enables early from re-entering before it has made any progress.
+    void inhibit_interrupts() { inhibit_ = true; }
+    bool interrupt_inhibited() const { return inhibit_; }
+    void allow_interrupts() { inhibit_ = false; }
+
     /// Instructions retired. The other cores grew this for a timer; here it is
-    /// the only way a test can say how far a program got.
+    /// the only way a test can say how far a program got — and, with a timer
+    /// mapped, it is also the clock.
     uint64_t executed() const { return executed_; }
-    void note_executed() { ++executed_; }
+    void note_executed();
 
     /// The address of the most recent refused access, for the message.
     uint32_t fault_address() const { return fault_address_; }
@@ -162,6 +235,15 @@ private:
     std::vector<uint8_t> data_;
     uint32_t pc_ = 0;
     uint64_t executed_ = 0;
+
+    Timer timer_;
+    bool has_timer_ = false;
+    /// The counter's last value, so a wrap can be seen. `executed_` rises by
+    /// one per step and the tick divides it, so at most one wrap can happen
+    /// between two observations — which is why comparing the high bits is
+    /// enough and no modular arithmetic is needed.
+    uint64_t timer_ticks_ = 0;
+    bool inhibit_ = false;
 
     // `mutable` because the read path is const and a fault address is a
     // diagnostic rather than state the program can see — the same reasoning

@@ -226,6 +226,30 @@ bool is_two_word(uint16_t encoding) {
            (encoding & 0xFE0E) == 0x940E;     // call
 }
 
+/// Take the pending interrupt: push the return address, clear I, clear the
+/// source's flag, and jump to the vector.
+///
+/// **This happens INSTEAD of an instruction, not before one.** The step it
+/// occupies is the step the interrupted instruction would have had, which is
+/// why `step` returns straight afterwards rather than falling through to the
+/// fetch. On the silicon that entry costs four cycles; this core does not
+/// model cycles and charges it one.
+///
+/// I is cleared by the hardware and restored by `reti`. The overflow flag is
+/// cleared here for the same reason the silicon clears it: otherwise the
+/// handler would be re-entered the instant it returned.
+StepResult enter_interrupt(Cpu& cpu) {
+    const uint32_t ret = cpu.pc();
+    if (!push_byte(cpu, static_cast<uint8_t>(ret)) ||
+        !push_byte(cpu, static_cast<uint8_t>(ret >> 8))) {
+        return StepResult::MemoryFault;
+    }
+    cpu.acknowledge_interrupt();
+    cpu.set_flag(kFlagI, false);
+    cpu.set_pc(cpu.timer().vector);
+    return StepResult::Ok;
+}
+
 /// Move the PC past the next instruction, whether that is one word or two.
 StepResult skip_next(Cpu& cpu) {
     uint16_t next = 0;
@@ -239,6 +263,23 @@ StepResult skip_next(Cpu& cpu) {
 }  // namespace
 
 StepResult step(Cpu& cpu) {
+    // --- an interrupt, if one is due ---------------------------------------
+    //
+    // Before the fetch, because an interrupt is taken *instead of* the next
+    // instruction rather than between two of them.
+    //
+    // **`sei` and `reti` protect exactly one following instruction.** The
+    // datasheet says so, and the reason is a handler that re-enables early: a
+    // source still asserting would re-enter it before the interrupted code
+    // advanced a single word, and the machine would make no progress while
+    // looking perfectly busy. So the step after either instruction spends the
+    // inhibit rather than testing for a vector.
+    if (cpu.interrupt_inhibited()) {
+        cpu.allow_interrupts();
+    } else if (cpu.interrupt_pending()) {
+        return enter_interrupt(cpu);
+    }
+
     const uint32_t at = cpu.pc();
     uint16_t encoding = 0;
     if (!cpu.read_program(at, encoding)) {
@@ -277,6 +318,9 @@ StepResult step(Cpu& cpu) {
         cpu.set_pc(static_cast<uint32_t>(high) << 8 | low);
         if (encoding == 0x9518) {
             cpu.set_flag(kFlagI, true);
+            // One instruction of the interrupted code runs before another
+            // interrupt can be taken. See the top of `step`.
+            cpu.inhibit_interrupts();
         }
         return StepResult::Ok;
     }
@@ -303,7 +347,13 @@ StepResult step(Cpu& cpu) {
     // a bit number.
     if ((encoding & 0xFF0F) == 0x9408) {
         const uint8_t bit = (encoding >> 4) & 0x07;
-        cpu.set_flag(static_cast<uint8_t>(1u << bit), (encoding & 0x0080) == 0);
+        const bool setting = (encoding & 0x0080) == 0;
+        cpu.set_flag(static_cast<uint8_t>(1u << bit), setting);
+        // `sei` is `bset 7`, and it protects the next instruction. `cli` does
+        // not need to: clearing I stops interrupts immediately.
+        if (setting && bit == 7) {
+            cpu.inhibit_interrupts();
+        }
         return StepResult::Ok;
     }
 

@@ -14,6 +14,8 @@ Cpu::Cpu() { reset(); }
 void Cpu::reset() {
     pc_ = 0;
     executed_ = 0;
+    timer_ticks_ = 0;
+    inhibit_ = false;
     fault_address_ = 0;
     fault_was_program_ = false;
     std::fill(data_.begin(), data_.end(), static_cast<uint8_t>(0));
@@ -57,6 +59,13 @@ bool Cpu::write_program(uint32_t address, uint16_t value) {
 }
 
 bool Cpu::read_data(uint16_t address, uint8_t& out) const {
+    // The counter is computed, never stored. One compare on the read path,
+    // which is the cost of a register that answers something other than what
+    // was last written to it.
+    if (has_timer_ && address == timer_.counter) {
+        out = timer_count();
+        return true;
+    }
     if (address >= data_.size()) {
         note_fault(address, false);
         return false;
@@ -66,12 +75,89 @@ bool Cpu::read_data(uint16_t address, uint8_t& out) const {
 }
 
 bool Cpu::write_data(uint16_t address, uint8_t value) {
+    // **A write to the counter is refused, and the silicon allows it.**
+    //
+    // Deliberate. This model has nowhere to put the value: the count is
+    // derived from `executed()`, so accepting a write would mean either
+    // ignoring it or carrying an origin nothing has asked for. Ignoring it is
+    // the load-and-report-success failure this repository ranks worst -- a
+    // program that reset TCNT0 to zero would read back an unrelated number and
+    // conclude its own arithmetic was wrong.
+    //
+    // Nothing in `framework-arduino-avr` writes TCNT0; `analogWrite` touches
+    // OCR0A and OCR0B, and `Tone` uses timer 2. The day something does, this
+    // faults and names the address, which is the loud answer.
+    if (has_timer_ && address == timer_.counter) {
+        note_fault(address, false);
+        return false;
+    }
+    // **The flag register is write-one-to-clear.** Not a quirk of this model:
+    // the datasheet says TOV0 "is cleared by writing a logic one to the flag",
+    // and every AVR interrupt flag register works that way. A model that
+    // stored the byte would let a program *set* a pending interrupt by writing
+    // the bit it meant to acknowledge -- the exact inversion, and one that
+    // would show up as a handler that fires forever.
+    if (has_timer_ && address == timer_.flag) {
+        data_[address] &= static_cast<uint8_t>(~value);
+        return true;
+    }
     if (address >= data_.size()) {
         note_fault(address, false);
         return false;
     }
     data_[address] = value;
     return true;
+}
+
+// --- timer 0 -----------------------------------------------------------------
+
+bool Cpu::map_timer(const Timer& timer) {
+    // `note_executed` and `interrupt_pending` index `data_` without bounds
+    // checks -- they run on every step and a check there would be paid a
+    // hundred million times to catch a mistake that can only be made once.
+    // So it is caught once, here, and refused rather than trusted.
+    const uint32_t size = static_cast<uint32_t>(data_.size());
+    if (timer.counter >= size || timer.flag >= size || timer.enable >= size ||
+        timer.bit > 7 || timer.instructions_per_tick == 0 ||
+        timer.vector >= program_.size()) {
+        return false;
+    }
+    timer_ = timer;
+    has_timer_ = true;
+    timer_ticks_ = 0;
+    return true;
+}
+
+uint8_t Cpu::timer_count() const {
+    return static_cast<uint8_t>(executed_ / timer_.instructions_per_tick);
+}
+
+void Cpu::note_executed() {
+    ++executed_;
+    if (!has_timer_) {
+        return;
+    }
+    // The overflow flag is set **whether or not the interrupt is enabled**,
+    // because that is what makes `micros()` correct: it reads the flag
+    // directly to notice an overflow that has happened but not yet been
+    // serviced, and adds one to the count itself.
+    const uint64_t now = executed_ / timer_.instructions_per_tick;
+    if ((now >> 8) != (timer_ticks_ >> 8)) {
+        data_[timer_.flag] |= static_cast<uint8_t>(1u << timer_.bit);
+    }
+    timer_ticks_ = now;
+}
+
+bool Cpu::interrupt_pending() const {
+    if (!has_timer_ || !flag(kFlagI)) {
+        return false;
+    }
+    const uint8_t mask = static_cast<uint8_t>(1u << timer_.bit);
+    return (data_[timer_.enable] & mask) != 0 && (data_[timer_.flag] & mask) != 0;
+}
+
+void Cpu::acknowledge_interrupt() {
+    data_[timer_.flag] &= static_cast<uint8_t>(~(1u << timer_.bit));
 }
 
 }  // namespace avr

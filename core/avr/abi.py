@@ -34,7 +34,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match AVR_ABI_VERSION in abi.h.
-ABI_VERSION = 1
+ABI_VERSION = 2
 
 #: Must match avr::StepResult.
 OK = 0
@@ -68,6 +68,13 @@ _SIGNATURES = {
     "avr_free": ([ctypes.c_void_p], None),
     "avr_reset": ([ctypes.c_void_p], None),
     "avr_configure": ([ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32], None),
+    "avr_map_timer": (
+        [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_uint16, ctypes.c_uint16,
+         ctypes.c_uint8, ctypes.c_uint32, ctypes.c_uint32],
+        ctypes.c_int,
+    ),
+    "avr_timer_count": ([ctypes.c_void_p], ctypes.c_uint8),
+    "avr_interrupt_inhibited": ([ctypes.c_void_p], ctypes.c_int),
     "avr_program_words": ([ctypes.c_void_p], ctypes.c_uint32),
     "avr_data_bytes": ([ctypes.c_void_p], ctypes.c_uint32),
     "avr_read_program": (
@@ -170,6 +177,58 @@ class Cpu:
         SRAM, which is why it is one span rather than three.
         """
         self._lib.avr_configure(self._handle, program_words, data_bytes)
+
+    def map_timer(
+        self,
+        *,
+        counter: int,
+        flag: int,
+        enable: int,
+        bit: int,
+        vector: int,
+        instructions_per_tick: int,
+    ) -> None:
+        """Give the machine timer 0. Call after `configure`, which resets.
+
+        Keyword-only, because six integers in a row is six chances to swap two
+        of them and every one would be a plausible address. `counter`, `flag`
+        and `enable` are DATA addresses and `vector` is a WORD address -- the
+        two spaces overlap on this machine, so neither name is a default.
+        """
+        ok = self._lib.avr_map_timer(
+            self._handle, counter, flag, enable, bit, vector,
+            instructions_per_tick,
+        )
+        if not ok:
+            raise AbiError(
+                f"cannot map a timer with counter=0x{counter:04x}, "
+                f"flag=0x{flag:04x}, enable=0x{enable:04x} in "
+                f"{self.data_bytes} bytes of data, bit={bit}, "
+                f"vector=0x{vector:04x} in {self.program_words} words of "
+                f"program, instructions_per_tick={instructions_per_tick}"
+            )
+
+    @property
+    def timer_count(self) -> int:
+        """What the counter register reads. 0 with no timer mapped.
+
+        A property beside `sreg` and `sp` rather than a `read_data` of the
+        counter's address, so a test can ask what the timer says without
+        having to know where the board put it.
+        """
+        return int(self._lib.avr_timer_count(self._handle))
+
+    @property
+    def interrupt_inhibited(self) -> bool:
+        """True while `sei` or `reti` is protecting the next instruction.
+
+        The datasheet rule that one instruction runs after either before an
+        interrupt can be taken. Exposed because with a single interrupt source
+        it is otherwise unobservable -- the flag is cleared on entry, so a
+        handler cannot be re-entered soon enough to show the difference -- and
+        an ISA rule nothing can assert is an ISA rule that quietly rots.
+        """
+        return bool(self._lib.avr_interrupt_inhibited(self._handle))
 
     @property
     def program_words(self) -> int:
