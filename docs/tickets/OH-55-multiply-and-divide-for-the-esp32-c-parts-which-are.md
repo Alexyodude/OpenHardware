@@ -1,7 +1,7 @@
 ---
 id: OH-55
 title: Multiply and divide for the ESP32-C parts, which are all RV32IMC
-status: open
+status: done
 priority: P1
 created: '2026-08-25'
 touches:
