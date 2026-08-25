@@ -18,7 +18,17 @@
 # command. Setting it here fixes both, and `pytest` with no arguments now
 # works from the repo root -- which it never did before.
 addopts = "--import-mode=importlib"
-testpaths = ["tests/rules", "tests/webui", "tests/i8086", "tests/cortexm0", "tests/riscv32", "tests/rv32"]
+# **`tests/avr` was missing from this list and nothing noticed.** Measured
+# 2026-08-26: bare `pytest` collected 1,318 tests and the AVR suite's 35 were
+# not among them, so the core that `webui/boards/catalogue.py` claims runs
+# firmware on the Arduino Uno had never been exercised by the documented gate.
+# It passed only because somebody ran `pytest tests/avr/` by hand.
+#
+# `tests/rules/test_inventory.py::test_ast_count_matches_pytest_collection`
+# does not catch this and is not meant to -- it compares the ast model against
+# pytest for `tests/rules/` alone. A suite absent from here is absent from
+# every count that reads this file, which is the whole failure.
+testpaths = ["tests/rules", "tests/webui", "tests/i8086", "tests/avr", "tests/cortexm0", "tests/riscv32", "tests/rv32"]
 
 # tests/fixtures/ holds JSON data, not tests.
 norecursedirs = ["tests/fixtures", "third_party", ".git"]
