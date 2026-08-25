@@ -1134,21 +1134,31 @@ def load_firmware(
     """
     runtime = runtime_for(board_name)
 
-    image = firmware.load_image(
-        data, base=base, family=UF2_FAMILY_BY_CHIP.get(runtime.chip)
-    )
-    # `parse_uf2` answers an empty image rather than raising when the family
-    # asked for is not in the file -- every block is disregarded, exactly as
-    # the specification requires, and nothing is left. Loading nothing and
-    # reporting success is the failure this whole ticket is about, so it is
-    # caught here, where the chip that was wanted is known.
-    if not image.segments:
+    # **Two layers, and each says something the other cannot.**
+    #
+    # `firmware.EmptyImage` means the artefact parsed and holds nothing to
+    # load. The parser knows *what the file contains* -- which UF2 families,
+    # how many blocks -- and says so. It does not know which board anybody
+    # asked about, so this adds that and keeps the refusal's own slug:
+    # `unreadable-artefact` would tell a person to go and fix a file that is
+    # perfectly fine and simply built for a different chip.
+    #
+    # This used to be `if not image.segments` *after* the call, because
+    # `parse_uf2` returned an empty image rather than raising. That guard was
+    # the only thing standing between a wrong-family UF2 and a successful load
+    # of nothing, and a guard is the wrong place for it: every other caller of
+    # `firmware.load_image` had the bug. It is a raise in the parser now, and
+    # what is left here is the translation.
+    try:
+        image = firmware.load_image(
+            data, base=base, family=UF2_FAMILY_BY_CHIP.get(runtime.chip)
+        )
+    except firmware.EmptyImage as error:
         raise BoardRunError(
             "nothing-for-this-chip",
-            f"{runtime.board}: this {image.format} holds nothing for a "
-            f"{runtime.chip}. "
-            + ("; ".join(image.notes) if image.notes else "It has no segments at all")
-        )
+            f"{runtime.board}: this artefact holds nothing for a "
+            f"{runtime.chip}. {error}",
+        ) from error
 
     cpu = runtime.abi.Cpu()
     try:

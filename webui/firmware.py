@@ -113,6 +113,50 @@ class FirmwareError(Exception):
     """An artefact that cannot be read, or can be read two ways."""
 
 
+class EmptyImage(FirmwareError):
+    """The artefact parsed cleanly and holds nothing this caller can load.
+
+    **A separate type because it is a separate answer to the user.** A
+    `FirmwareError` means the file is broken; this means the file is fine and
+    is not for you -- a UF2 built for another chip, or a HEX with no data
+    records. `webui/emulator_server.py` turns the first into
+    `unreadable-artefact` and `webui/api.py` turns this into
+    `nothing-for-this-chip`, and those are two different things for a person to
+    go and fix.
+
+    Catching it by type rather than by reading the message is the point:
+    `api.py` needs to know *which* kind of failure this was, and matching on
+    prose is how that stops working the first time somebody improves a message.
+
+    ## Why every parser raises rather than returning an empty Image
+
+    Returning `Image(segments=())` is loading nothing and reporting success,
+    which is the failure this whole ticket exists to prevent. It was real:
+    `parse_uf2` did exactly that for a family the file did not hold -- and,
+    worse, labelled the result with the family that had been *asked for*, so a
+    caller saw `format="uf2", family="RP2040"` and no bytes. Found by OH-32,
+    reproduced 2026-08-26, and `parse_hex` turned out to have the same shape
+    for a file with only an end-of-file record.
+
+    ## The rule, in one sentence
+
+    **A well-formed artefact with nothing to load raises `EmptyImage`; a file
+    that is not a usable artefact at all raises `FirmwareError`.**
+
+    So an ELF with no `PT_LOAD` and a UF2 for another family are `EmptyImage` --
+    both are perfectly good files that this caller cannot use -- and a
+    zero-byte `.bin` is a plain `FirmwareError`, because zero bytes is not an
+    artefact anybody could use. `EmptyImage` subclasses `FirmwareError`, so a
+    caller that does not care about the difference still catches both, and
+    `webui/emulator_server.py`'s existing handler needed no change.
+
+    `parse_elf` and `parse_bin` already refused; this makes four of four rather
+    than inventing a rule for one.
+    `test_no_parser_reports_success_with_nothing_to_load` holds them together,
+    so a fifth format has to answer the question rather than inherit the bug.
+    """
+
+
 @dataclasses.dataclass(frozen=True)
 class Segment:
     """A run of bytes and the address they load at."""
@@ -308,9 +352,38 @@ def parse_uf2(data: bytes, *, family: int | str | None = None) -> Image:
         notes.append(
             f"header claims {claimed} blocks for this family, {len(pairs)} present")
 
+    segments = _merge(pairs)
+    if not any(segment.data for segment in segments):
+        # **The defect this ticket was reopened for.** Every block of a family
+        # that was not asked for is disregarded -- correct, and exactly what
+        # the specification requires -- and what was left was an Image with no
+        # segments, no exception, and `family` set to the family that had been
+        # *requested*. So a caller saw a successful parse claiming to be the
+        # thing it had asked for, holding nothing.
+        #
+        # The message names both sides because that is the whole of what the
+        # reader needs: what was wanted, and what the file actually holds.
+        present = ", ".join(
+            f"{uf2_family_name(f)} ({seen[f]} block{'s' if seen[f] != 1 else ''})"
+            for f in families
+        )
+        if wanted is not None and wanted not in families:
+            loose = seen.get(-1, 0)
+            held = present or (
+                f"no family id at all ({loose} "
+                f"block{'s' if loose != 1 else ''} without one)"
+            )
+            raise EmptyImage(
+                f"no blocks for {uf2_family_name(wanted)}; this file holds {held}"
+            )
+        reason = "; ".join(notes) if notes else "every block carried an empty payload"
+        raise EmptyImage(
+            f"the file is a valid UF2 and nothing in it could be loaded: {reason}"
+        )
+
     return Image(
         format="uf2",
-        segments=_merge(pairs),
+        segments=segments,
         entry=None,
         family=uf2_family_name(wanted) if wanted is not None else None,
         notes=tuple(notes),
@@ -336,7 +409,7 @@ def parse_elf(data: bytes) -> Image:
     entry, phoff = struct.unpack_from("<II", data, 0x18)
     phentsize, phnum = struct.unpack_from("<HH", data, 0x2A)
     if phnum == 0:
-        raise FirmwareError("ELF has no program headers, so nothing to load")
+        raise EmptyImage("ELF has no program headers, so nothing to load")
     if phentsize < 32:
         raise FirmwareError(f"program header entries are {phentsize} bytes, expected >= 32")
 
@@ -376,7 +449,7 @@ def parse_elf(data: bytes) -> Image:
                 "-- initialised data, copied by startup code")
 
     if not pairs:
-        raise FirmwareError("ELF has program headers but no loadable PT_LOAD bytes")
+        raise EmptyImage("ELF has program headers but no loadable PT_LOAD bytes")
     return Image(format="elf", segments=_merge(pairs), entry=entry, notes=tuple(notes))
 
 
@@ -435,7 +508,17 @@ def parse_hex(text: str | bytes) -> Image:
 
     if not saw_eof:
         raise FirmwareError("no end-of-file record (type 01) -- the file is truncated")
-    return Image(format="hex", segments=_merge(pairs), entry=entry)
+    segments = _merge(pairs)
+    if not any(segment.data for segment in segments):
+        # A well-formed HEX with no type-00 records: an end-of-file marker, an
+        # address record or two, and nothing to write anywhere. Rare from a
+        # compiler and ordinary from a script that filtered a file down to
+        # nothing, which is exactly when a silent empty result costs the most.
+        raise EmptyImage(
+            f"the file is a valid Intel HEX and carries no data: "
+            f"{number} record(s), none of them type 00"
+        )
+    return Image(format="hex", segments=segments, entry=entry)
 
 
 # --- raw binary -----------------------------------------------------------

@@ -25,6 +25,7 @@ from webui.firmware import (
     UF2_MAGIC_END,
     UF2_MAGIC_START0,
     UF2_MAGIC_START1,
+    EmptyImage,
     FirmwareError,
     Image,
     Segment,
@@ -39,6 +40,9 @@ from webui.firmware import (
 
 RP2040 = 0xE48BFF56
 RP2XXX_ABSOLUTE = 0xE48BFF57
+#: The other end of the wrong-family case: a real chip whose UF2 a person
+#: genuinely might hand to an RP2040 board, which is how OH-32 found the defect.
+ESP32C3 = 0xD42BA06C
 FLAG_FAMILY = 0x2000
 FLAG_NOT_MAIN_FLASH = 0x1
 
@@ -320,3 +324,84 @@ def test_overlapping_regions_raise_rather_than_silently_winning():
     with pytest.raises(FirmwareError, match="overlapping"):
         parse_uf2(uf2_block(0x10000000, b"\xaa" * 256)
                   + uf2_block(0x10000080, b"\xbb" * 256))
+
+
+# --- nothing to load is never a success ------------------------------------
+#
+# The defect OH-32 found and OH-10 fixed, and the tripwire that stops it
+# arriving through a format nobody has written yet.
+
+
+def test_no_parser_reports_success_with_nothing_to_load():
+    """**Every** parser, in one table, so a fifth format has to answer the
+    question rather than inherit the bug.
+
+    Two of the four had it. `parse_uf2` returned an empty Image for a family
+    the file did not hold -- and labelled it with the family that had been
+    *asked for* -- and `parse_hex` did the same for a file with no data
+    records. `parse_elf` and `parse_bin` already refused.
+
+    Written as a list rather than four separate tests because the point is the
+    *closure*: what would go wrong is somebody adding `parse_srec` and not
+    thinking about it, and a table with a missing row is visible in a way that
+    a missing test file is not.
+    """
+    # An extended-linear-address record and an end-of-file record:
+    # structurally valid, and not one byte of type-00 payload in it.
+    empty_hex = ":020000040800F2\n:00000001FF\n"
+    cases = (
+        ("uf2, family not in the file",
+         lambda: parse_uf2(uf2_block(0x10000000, b"\x11" * 16, family=RP2040),
+                           family="ESP32C3")),
+        ("uf2, every payload empty",
+         lambda: parse_uf2(uf2_block(0x10000000, b"", family=RP2040))),
+        ("hex, valid but no type-00 records",
+         lambda: parse_hex(empty_hex)),
+        ("elf, program headers but no PT_LOAD bytes",
+         lambda: parse_elf(elf32([(0x20000000, 0x20000000, b"", 1024)]))),
+    )
+    for name, parse in cases:
+        with pytest.raises(EmptyImage) as caught:
+            parse()
+        assert str(caught.value), f"{name}: raised with no message"
+
+
+def test_a_zero_byte_binary_is_a_broken_file_rather_than_an_empty_image():
+    """The other half of the rule, and the reason `EmptyImage` is a subclass.
+
+    A UF2 for another chip is a good file this board cannot use; zero bytes is
+    not a file anybody could use. The first sends a person to their board
+    picker and the second to their build, so they are different types -- and
+    both are `FirmwareError`, so a caller that does not care catches both.
+    """
+    with pytest.raises(FirmwareError) as caught:
+        parse_bin(b"", 0x08000000)
+    assert not isinstance(caught.value, EmptyImage), (
+        "zero bytes is a broken artefact, not a well-formed one holding nothing"
+    )
+    assert issubclass(EmptyImage, FirmwareError)
+
+
+def test_the_empty_uf2_names_what_was_asked_for_and_what_was_there():
+    """`.claude/CLAUDE.md` rule 9: errors carry the values that caused them.
+
+    The old behaviour carried none, because there was no error -- and the
+    Image it returned claimed `family="RP2040"` for a file holding no RP2040
+    block at all, which is worse than silence.
+    """
+    data = uf2_block(0x42000020, b"\x11" * 16, family=ESP32C3)
+    with pytest.raises(EmptyImage) as caught:
+        parse_uf2(data, family="RP2040")
+    message = str(caught.value)
+    assert "RP2040" in message, "what was asked for"
+    assert "ESP32C3" in message, "what the file holds"
+    assert "1 block" in message, "and how much of it"
+
+
+def test_load_image_lets_the_empty_result_through_as_itself():
+    """`load_image` dispatches on the file's own bytes and must not flatten the
+    distinction on the way -- `webui/api.py` catches `EmptyImage` by type to
+    decide between two refusals that send a person to different places."""
+    data = uf2_block(0x42000020, b"\x11" * 16, family=ESP32C3)
+    with pytest.raises(EmptyImage):
+        load_image(data, family="RP2040")

@@ -423,15 +423,37 @@ def test_an_image_for_another_chip_is_refused_on_its_addresses():
 
 def test_a_uf2_for_another_family_is_refused_rather_than_loaded_empty():
     """`parse_uf2` disregards every block of a family it was not asked for --
-    correct per the specification, and it leaves an Image with no segments and
-    no exception. Loading nothing and reporting success is the failure this
-    ticket exists to stop, so the empty result is caught here."""
+    correct per the specification, and it used to leave an Image with no
+    segments and no exception. Loading nothing and reporting success is the
+    failure this ticket exists to stop.
+
+    **This asserted the empty result until OH-10 fixed the parser.** It read
+
+        assert firmware.parse_uf2(wrong, family="RP2040").segments == ()
+
+    which pinned the defect in place: a test can hold a workaround steady just
+    as well as it holds a fix, and the seam catching it here meant every
+    *other* caller of `firmware.load_image` still had the bug. The parser
+    raises now, and what this checks is that the refusal still arrives as
+    itself rather than as a broken-file error.
+    """
     needs_core()
     wrong = uf2_block(0x42000020, blink_bytes(), ESP32C3_FAMILY, 0, 1)
-    assert firmware.parse_uf2(wrong, family="RP2040").segments == ()
 
+    # The library half: a specific type, so a caller can tell "not for you"
+    # from "unreadable" without reading the message.
+    with pytest.raises(firmware.EmptyImage) as parsed:
+        firmware.parse_uf2(wrong, family="RP2040")
+    assert "RP2040" in str(parsed.value), "name what was asked for"
+    assert "ESP32C3" in str(parsed.value), "and what the file did hold"
+
+    # The board half: the chip, which the parser has no way to know.
     with pytest.raises(api.BoardRunError) as caught:
         api.load_firmware(BOARD, wrong)
+    assert caught.value.reason == "nothing-for-this-chip", (
+        "an artefact built for another chip is not an unreadable one, and the "
+        "two send a person to different places"
+    )
     message = str(caught.value)
     assert "holds nothing for a RP2040" in message
     assert "ESP32C3" in message, "say what the file did hold"
