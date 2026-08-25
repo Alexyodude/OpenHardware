@@ -224,9 +224,21 @@ def test_a_multiply_is_illegal_without_m_and_unwritten_with_it(cpu):
         cpu.step()
 
 
-def test_a_compressed_encoding_is_illegal_without_c_and_unwritten_with_it(cpu):
+def test_a_compressed_encoding_is_illegal_without_c_and_executes_with_it(cpu):
     """The first halfword decides the width, so a 16-bit encoding is refused
-    before anything tries to read four bytes."""
+    before anything tries to read four bytes.
+
+    **This test used to end `..._and_unwritten_with_it`, asserting
+    `Unimplemented` on a part that has C**, and that was the honest answer for
+    as long as this core had no compressed decoder. OH-54 wrote one, so the
+    second half is now a real execution -- and updating the name as well as the
+    assertion is the point: a test called "unwritten" that checks something
+    else is a test nobody can read.
+
+    What has not changed is the first half, which is the one the `Extension`
+    mask exists for. A part told it has no C must *refuse* a compressed
+    encoding, not merely fail to know it.
+    """
     halfword = e.c_addi("ra", 1)
     word = halfword | (halfword << 16)
 
@@ -237,8 +249,10 @@ def test_a_compressed_encoding_is_illegal_without_c_and_unwritten_with_it(cpu):
 
     load(cpu, [word])
     cpu.set_extensions(abi.ESP32_C3)
-    with pytest.raises(abi.Unimplemented):
-        cpu.step()
+    cpu.set_regs([0] * 32, pc=PC)
+    cpu.step()
+    assert cpu.reg(1) == 1, "c.addi ra, 1 added one to ra"
+    assert cpu.pc == PC + 2, "and advanced two bytes, not four"
 
 
 def test_instruction_alignment_follows_the_c_extension(cpu):

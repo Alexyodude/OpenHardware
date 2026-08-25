@@ -12,6 +12,10 @@ touches:
 - core/riscv32/cpu.cc
 - tests/riscv32/test_rvc.py
 - tests/rv32/corpus/rv32c.json
+- tests/riscv32/c3blink/*
+- tests/riscv32/test_extension_gating.py
+- tests/rv32/test_gating.py
+- tests/rv32/conftest.py
 ---
 
 The blocker for all seven ESP32-C boards, and it is not an optional extension in any practical sense.
@@ -52,3 +56,34 @@ tests/rv32/corpus/rv32c.json holds 10 cases today, which is not coverage of ~30 
 kExtC is not Zca and cpu.h:62-70 explains why the two coincide on every part here and must not be conflated. Nothing in this slice may erode that distinction.
 
 Done when a real compiled ESP32-C3 blink executes end to end in this core, the ~30 RV32C encodings agree with rvcpp except the four named above, the 16-bit space is swept against objdump, and the extension gating still tells an ESP32-C3 from an RP2350.
+
+**Note 2026-08-25:** Delivered. A real compiled ESP32-C3 image runs in this core: 33 transitions of GPIO8 at a constant period of 606 instructions, with GPIO_ENABLE bit 8 set. Eleven of that image's sixteen instructions are compressed, so before this the core refused the second instruction it fetched.
+
+SHAPE: expanded, not re-implemented. Every RVC encoding is defined by the specification as exactly one base instruction, so expand_compressed turns the halfword into that 32-bit encoding and the existing execute path runs it. c.add cannot drift from add because they are the same code. What the expansion cannot carry is how far PC moves -- c.jal links to pc+2 and jal to pc+4 from an otherwise identical encoding -- so `width` travels beside the instruction. step() was split into fetch and execute for exactly that.
+
+VERIFICATION, two sweeps, because one of them proves less than it looks:
+
+ 1. LEGALITY. All 49,152 halfwords with (c&3)!=3, laid end to end, one objdump pass. 31,232 exact agreements and 17,920 divergences, EVERY ONE accounted for and every one in the safe direction:
+      8 x 2048  c.fld/flw/fsd/fsw and their sp forms -- Zcd and Zcf, needing D and F, and no part here has an FPU
+      1024      c.slli with shamt >= 32
+      256 + 256 c.srli / c.srai with shamt >= 32 -- RV64's six-bit field
+    ZERO cases in the dangerous direction: nothing objdump refuses that this core executes.
+
+ 2. OPERANDS. 26,472 encodings executed from a known state and compared against the operands objdump decoded for the same halfword. Legality agreement cannot catch a transposed immediate bit -- the encoding stays legal and means a different offset, which does not fault. 0 failures.
+
+FOUR TEST DEFECTS FOUND BY MUTATION, and they are the interesting part:
+
+ a. ACCOUNTED was a TOLERANCE, not an assertion. Making c.fldsp decode left the legality sweep green, because a core that wrongly decodes it agrees with objdump perfectly -- the allowance was doing the job of a check. Now every accounted class is positively asserted illegal.
+ b. Same hole for the RV64 shift amounts.
+ c. The jump check watched only the PC, so expanding c.j to `jal x1` instead of `jal x0` passed: right PC, and a silently clobbered return address. Now the register file is checked too.
+ d. My own harness read objdump's branch target as a displacement when it is an ABSOLUTE address inside the swept blob. 8,192 failures across all four pc-relative classes at once -- which is the shape of a harness bug, not four core bugs, and is written into the test header so the next person suspects the harness first.
+
+DEAD CODE REMOVED, found by mutation. The explicit bit-12 refusals in C.SLLI/C.SRLI/C.SRAI were redundant: a shift amount of 32 or more puts a one in imm[5], which is funct7's low bit, and the 32-bit shift already refuses any nonzero funct7 for the same reason. No input could tell the difference. Deleted, and the BEHAVIOUR pinned by test_a_compressed_shift_of_thirty_two_or_more_is_refused so moving the enforcement did not lose it -- verified by mutating the 32-bit SLLI gate and watching the new test catch it.
+
+TWO TRIPWIRES FIRED, both correctly, both updated deliberately rather than worked around:
+ - test_a_compressed_encoding_is_illegal_without_c_and_unwritten_with_it asserted Unimplemented on a part that has C. That was honest until this slice; the name and the assertion both changed.
+ - tests/rv32/test_gating.py's EXPECTED_HOLES named rv32c, and refusal_is_testable derives from it. Removing the entry tightened every compressed case from 'unimplemented is honest' to 'must be refused per part' in one edit, which is what its comment always promised.
+
+NOT IN THIS SLICE, and cpu.h still records them as absent rather than pretending the part lacks them: Zcb, Zcmp, Zcmt. The C5 needs all three (OH-57). M is OH-55.
+
+1,192 passed, 17 skipped; all eight checkers exit 0.

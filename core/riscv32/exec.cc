@@ -116,6 +116,341 @@ bool aligned(const Cpu& cpu, uint32_t target) {
     return target % cpu.instruction_alignment() == 0;
 }
 
+// --- the compressed instructions -----------------------------------------
+//
+// ## Expanded, not re-implemented
+//
+// Every RVC encoding is defined by the specification as *exactly* one base
+// instruction -- `c.add rd, rs2` is `add rd, rd, rs2` and not merely like it.
+// So this turns a halfword into that 32-bit encoding and hands it to
+// `execute`, and the arithmetic, the register writes, the alignment checks and
+// the fault reporting are the ones already in lockstep with rvcpp.
+//
+// The alternative is a second switch executing `c.add` beside `add`, which is
+// the two-things-that-must-agree arrangement `core/avr/cpu.h` refuses for the
+// AVR register file, applied to thirty instructions instead of one array.
+//
+// ## Where this core and its oracle must disagree, by name
+//
+// The eight `C.F*` encodings below are Zcf and Zcd -- compressed float loads
+// and stores. On RV32 with no F and no D they are **illegal**, and no part in
+// this repository has an FPU. rvcpp answers otherwise, and
+// `docs/architectures.md` 2.1b measures how at commit `8af9929`: its RVC
+// decoder has no XLEN gate, so `C_LD`, `C_SD`, `C_LDSP` and `C_SDSP` execute
+// as RV64 integer loads and stores whenever the register is **even**, and
+// reject on odd registers only because the generated masks carry a spurious
+// `rd[0] == 0` constraint. Half the register space rejects by coincidence.
+//
+// So lockstep is not the authority here and `tests/riscv32/test_rvc.py` says
+// so at those encodings specifically. Everywhere else it is.
+
+/// Bits `hi`..`lo` of a halfword, right-aligned. Named because every immediate
+/// below is a permutation of these and one transposed pair decodes as a
+/// different offset -- which does not fault, it jumps somewhere plausible.
+uint32_t bits(uint16_t c, unsigned hi, unsigned lo) {
+    return (static_cast<uint32_t>(c) >> lo) & ((1u << (hi - lo + 1)) - 1u);
+}
+
+/// A compressed register field, which names x8..x15 in three bits.
+unsigned creg(uint32_t three) { return static_cast<unsigned>(three) + 8u; }
+
+uint32_t r_type(uint32_t op, unsigned rd, uint32_t funct3, unsigned rs1,
+                unsigned rs2, uint32_t funct7) {
+    return op | (rd << 7) | (funct3 << 12) | (rs1 << 15) | (rs2 << 20) |
+           (funct7 << 25);
+}
+
+uint32_t i_type(uint32_t op, unsigned rd, uint32_t funct3, unsigned rs1,
+                uint32_t imm) {
+    return op | (rd << 7) | (funct3 << 12) | (rs1 << 15) | ((imm & 0xFFFu) << 20);
+}
+
+uint32_t s_type(uint32_t op, uint32_t funct3, unsigned rs1, unsigned rs2,
+                uint32_t imm) {
+    return op | ((imm & 0x1Fu) << 7) | (funct3 << 12) | (rs1 << 15) |
+           (rs2 << 20) | (((imm >> 5) & 0x7Fu) << 25);
+}
+
+uint32_t b_type(uint32_t op, uint32_t funct3, unsigned rs1, unsigned rs2,
+                uint32_t imm) {
+    return op | (((imm >> 11) & 0x1u) << 7) | (((imm >> 1) & 0xFu) << 8) |
+           (funct3 << 12) | (rs1 << 15) | (rs2 << 20) |
+           (((imm >> 5) & 0x3Fu) << 25) | (((imm >> 12) & 0x1u) << 31);
+}
+
+uint32_t u_type(uint32_t op, unsigned rd, uint32_t imm) {
+    return op | (rd << 7) | (imm & 0xFFFFF000u);
+}
+
+uint32_t j_type(uint32_t op, unsigned rd, uint32_t imm) {
+    return op | (rd << 7) | (((imm >> 12) & 0xFFu) << 12) |
+           (((imm >> 11) & 0x1u) << 20) | (((imm >> 1) & 0x3FFu) << 21) |
+           (((imm >> 20) & 0x1u) << 31);
+}
+
+//: The base opcodes an expansion targets.
+constexpr uint32_t kOpImm = 0x13u;
+constexpr uint32_t kOp = 0x33u;
+constexpr uint32_t kLoad = 0x03u;
+constexpr uint32_t kStore = 0x23u;
+constexpr uint32_t kBranch = 0x63u;
+constexpr uint32_t kJal = 0x6Fu;
+constexpr uint32_t kJalr = 0x67u;
+constexpr uint32_t kLui = 0x37u;
+constexpr uint32_t kSystem = 0x73u;
+
+/// What a halfword turned out to be.
+enum class Expansion {
+    Ok,       //< `out` holds the 32-bit instruction it means.
+    Illegal,  //< Reserved, or an encoding this part must refuse.
+};
+
+/// The RVC branch offset: `c[12]` and `c[6:2]` scattered across imm[8:1].
+uint32_t imm_cb(uint16_t c) {
+    const uint32_t value = (bits(c, 12, 12) << 8) | (bits(c, 6, 5) << 6) |
+                           (bits(c, 2, 2) << 5) | (bits(c, 11, 10) << 3) |
+                           (bits(c, 4, 3) << 1);
+    return sign_extend(value, 9);
+}
+
+/// The RVC jump offset, which is the same field in a different permutation.
+uint32_t imm_cj(uint16_t c) {
+    const uint32_t value = (bits(c, 12, 12) << 11) | (bits(c, 8, 8) << 10) |
+                           (bits(c, 10, 9) << 8) | (bits(c, 6, 6) << 7) |
+                           (bits(c, 7, 7) << 6) | (bits(c, 2, 2) << 5) |
+                           (bits(c, 11, 11) << 4) | (bits(c, 5, 3) << 1);
+    return sign_extend(value, 12);
+}
+
+/// `c[12]` and `c[6:2]` as a signed six-bit immediate -- ADDI, LI, ANDI, LUI.
+uint32_t imm_ci(uint16_t c) {
+    return sign_extend((bits(c, 12, 12) << 5) | bits(c, 6, 2), 6);
+}
+
+Expansion expand_quadrant0(uint16_t c, uint32_t& out) {
+    const unsigned rd = creg(bits(c, 4, 2));
+    const unsigned rs1 = creg(bits(c, 9, 7));
+
+    switch (bits(c, 15, 13)) {
+    case 0x0u: {  // C.ADDI4SPN -> addi rd', x2, nzuimm
+        const uint32_t imm = (bits(c, 10, 7) << 6) | (bits(c, 12, 11) << 4) |
+                             (bits(c, 5, 5) << 3) | (bits(c, 6, 6) << 2);
+        // The all-zero immediate is the reserved encoding, and it is also the
+        // all-zero halfword that `step` already answers before reaching here.
+        if (imm == 0) {
+            return Expansion::Illegal;
+        }
+        out = i_type(kOpImm, rd, 0x0u, 2, imm);
+        return Expansion::Ok;
+    }
+    case 0x2u: {  // C.LW -> lw rd', offset(rs1')
+        const uint32_t imm = (bits(c, 5, 5) << 6) | (bits(c, 12, 10) << 3) |
+                             (bits(c, 6, 6) << 2);
+        out = i_type(kLoad, rd, 0x2u, rs1, imm);
+        return Expansion::Ok;
+    }
+    case 0x6u: {  // C.SW -> sw rs2', offset(rs1')
+        const uint32_t imm = (bits(c, 5, 5) << 6) | (bits(c, 12, 10) << 3) |
+                             (bits(c, 6, 6) << 2);
+        out = s_type(kStore, 0x2u, rs1, rd, imm);
+        return Expansion::Ok;
+    }
+    default:
+        // 001 C.FLD, 011 C.FLW, 101 C.FSD, 111 C.FSW -- Zcd and Zcf, needing D
+        // and F. 100 is reserved in RVC and is where Zcb puts its byte and
+        // halfword accesses on the parts that have it; no part here does.
+        return Expansion::Illegal;
+    }
+}
+
+Expansion expand_quadrant1(uint16_t c, uint32_t& out) {
+    const unsigned rd = static_cast<unsigned>(bits(c, 11, 7));
+
+    switch (bits(c, 15, 13)) {
+    case 0x0u:  // C.NOP / C.ADDI -> addi rd, rd, imm
+        // rd == 0 is C.NOP when the immediate is zero and a HINT when it is
+        // not; both expand to a write of x0, which discards. No special case
+        // is needed and inventing one would be inventing a behaviour.
+        out = i_type(kOpImm, rd, 0x0u, rd, imm_ci(c));
+        return Expansion::Ok;
+
+    case 0x1u:  // C.JAL -> jal x1, offset  (RV32 only; RV64 makes this C.ADDIW)
+        out = j_type(kJal, 1, imm_cj(c));
+        return Expansion::Ok;
+
+    case 0x2u:  // C.LI -> addi rd, x0, imm
+        out = i_type(kOpImm, rd, 0x0u, 0, imm_ci(c));
+        return Expansion::Ok;
+
+    case 0x3u: {
+        if (rd == 2) {  // C.ADDI16SP -> addi x2, x2, nzimm
+            const uint32_t imm = sign_extend(
+                (bits(c, 12, 12) << 9) | (bits(c, 4, 3) << 7) |
+                    (bits(c, 5, 5) << 6) | (bits(c, 2, 2) << 5) |
+                    (bits(c, 6, 6) << 4),
+                10);
+            if (imm == 0) {
+                return Expansion::Illegal;
+            }
+            out = i_type(kOpImm, 2, 0x0u, 2, imm);
+            return Expansion::Ok;
+        }
+        // C.LUI -> lui rd, nzimm. The immediate lands in bits 17:12 of the
+        // result, which is `imm_ci` shifted up by twelve.
+        const uint32_t imm = imm_ci(c) << 12;
+        if (imm == 0) {
+            return Expansion::Illegal;
+        }
+        out = u_type(kLui, rd, imm);
+        return Expansion::Ok;
+    }
+
+    case 0x4u: {
+        const unsigned rsd = creg(bits(c, 9, 7));
+        const uint32_t shamt = (bits(c, 12, 12) << 5) | bits(c, 6, 2);
+        switch (bits(c, 11, 10)) {
+        case 0x0u:  // C.SRLI
+        case 0x1u:  // C.SRAI
+            // **Bit 12 set is RV64's six-bit shift amount and is reserved on
+            // RV32, and this does not check for it.** An explicit refusal here
+            // was written first and then deleted, because mutation showed no
+            // input could tell the difference: a shift amount of 32 or more
+            // puts a one in `imm[5]`, which is `funct7`'s low bit, and the
+            // 32-bit shift already refuses any nonzero funct7 for exactly this
+            // reason. Two checks of one fact, and the second one is the one
+            // every 32-bit shift is checked by.
+            //
+            // `test_a_compressed_shift_of_thirty_two_or_more_is_refused` pins
+            // the behaviour, so moving the enforcement does not lose it.
+            out = i_type(kOpImm, rsd, 0x5u, rsd,
+                         shamt | (bits(c, 11, 10) == 0x1u ? (0x20u << 5) : 0u));
+            return Expansion::Ok;
+        case 0x2u:  // C.ANDI -> andi rd', rd', imm
+            out = i_type(kOpImm, rsd, 0x7u, rsd, imm_ci(c));
+            return Expansion::Ok;
+        default: {  // register-register
+            const unsigned rs2 = creg(bits(c, 4, 2));
+            if (bits(c, 12, 12) != 0) {
+                // C.SUBW and C.ADDW are RV64. On RV32 the whole group is
+                // reserved.
+                return Expansion::Illegal;
+            }
+            switch (bits(c, 6, 5)) {
+            case 0x0u:  // C.SUB
+                out = r_type(kOp, rsd, 0x0u, rsd, rs2, 0x20u);
+                return Expansion::Ok;
+            case 0x1u:  // C.XOR
+                out = r_type(kOp, rsd, 0x4u, rsd, rs2, 0x0u);
+                return Expansion::Ok;
+            case 0x2u:  // C.OR
+                out = r_type(kOp, rsd, 0x6u, rsd, rs2, 0x0u);
+                return Expansion::Ok;
+            default:  // C.AND
+                out = r_type(kOp, rsd, 0x7u, rsd, rs2, 0x0u);
+                return Expansion::Ok;
+            }
+        }
+        }
+    }
+
+    case 0x5u:  // C.J -> jal x0, offset
+        out = j_type(kJal, 0, imm_cj(c));
+        return Expansion::Ok;
+
+    case 0x6u:  // C.BEQZ -> beq rs1', x0, offset
+        out = b_type(kBranch, 0x0u, creg(bits(c, 9, 7)), 0, imm_cb(c));
+        return Expansion::Ok;
+
+    default:  // C.BNEZ -> bne rs1', x0, offset
+        out = b_type(kBranch, 0x1u, creg(bits(c, 9, 7)), 0, imm_cb(c));
+        return Expansion::Ok;
+    }
+}
+
+Expansion expand_quadrant2(uint16_t c, uint32_t& out) {
+    const unsigned rd = static_cast<unsigned>(bits(c, 11, 7));
+    const unsigned rs2 = static_cast<unsigned>(bits(c, 6, 2));
+
+    switch (bits(c, 15, 13)) {
+    case 0x0u:  // C.SLLI -> slli rd, rd, shamt
+        // The whole six-bit amount, bit 12 included. An amount of 32 or more
+        // lands in funct7 and is refused by the 32-bit shift; see C.SRLI above
+        // for why that is one check rather than two.
+        out = i_type(kOpImm, rd, 0x1u, rd,
+                     (bits(c, 12, 12) << 5) | bits(c, 6, 2));
+        return Expansion::Ok;
+
+    case 0x2u: {  // C.LWSP -> lw rd, offset(x2)
+        // rd == 0 is reserved rather than a hint: this one writes a loaded
+        // value, and discarding it would make a reserved encoding look like a
+        // working load of nothing.
+        if (rd == 0) {
+            return Expansion::Illegal;
+        }
+        const uint32_t imm = (bits(c, 3, 2) << 6) | (bits(c, 12, 12) << 5) |
+                             (bits(c, 6, 4) << 2);
+        out = i_type(kLoad, rd, 0x2u, 2, imm);
+        return Expansion::Ok;
+    }
+
+    case 0x4u:
+        if (bits(c, 12, 12) == 0) {
+            if (rs2 == 0) {  // C.JR -> jalr x0, 0(rs1)
+                if (rd == 0) {
+                    return Expansion::Illegal;  // reserved
+                }
+                out = i_type(kJalr, 0, 0x0u, rd, 0);
+                return Expansion::Ok;
+            }
+            // C.MV -> add rd, x0, rs2
+            out = r_type(kOp, rd, 0x0u, 0, rs2, 0x0u);
+            return Expansion::Ok;
+        }
+        if (rs2 == 0) {
+            if (rd == 0) {  // C.EBREAK
+                // Expands to `ebreak`, which `execute` answers Unimplemented
+                // for -- this core has no traps. That is the same answer the
+                // 32-bit encoding gets, which is the point of expanding.
+                out = i_type(kSystem, 0, 0x0u, 0, 1);
+                return Expansion::Ok;
+            }
+            // C.JALR -> jalr x1, 0(rs1)
+            out = i_type(kJalr, 1, 0x0u, rd, 0);
+            return Expansion::Ok;
+        }
+        // C.ADD -> add rd, rd, rs2
+        out = r_type(kOp, rd, 0x0u, rd, rs2, 0x0u);
+        return Expansion::Ok;
+
+    case 0x6u: {  // C.SWSP -> sw rs2, offset(x2)
+        const uint32_t imm = (bits(c, 8, 7) << 6) | (bits(c, 12, 9) << 2);
+        out = s_type(kStore, 0x2u, 2, rs2, imm);
+        return Expansion::Ok;
+    }
+
+    default:
+        // 001 C.FLDSP, 011 C.FLWSP, 101 C.FSDSP, 111 C.FSWSP -- Zcd and Zcf.
+        // These are the four encodings rvcpp gets wrong; see the note above.
+        return Expansion::Illegal;
+    }
+}
+
+/// The 32-bit instruction a compressed halfword means, or Illegal.
+Expansion expand_compressed(uint16_t c, uint32_t& out) {
+    switch (c & 0x3u) {
+    case 0x0u:
+        return expand_quadrant0(c, out);
+    case 0x1u:
+        return expand_quadrant1(c, out);
+    default:
+        return expand_quadrant2(c, out);
+    }
+}
+
+/// Declared here and defined below `step`, so that reading this file top to
+/// bottom is fetch, then decode, then execute.
+StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width);
+
 }  // namespace
 
 StepResult step(Cpu& cpu) {
@@ -150,7 +485,21 @@ StepResult step(Cpu& cpu) {
         if (low == 0) {
             return StepResult::Illegal;
         }
-        return refuse(cpu, kExtC);
+        // A part told it has no C must refuse the encoding; one that has it
+        // executes. `refuse` keeps those two answers from being transposed,
+        // and this is the branch the whole `Extension` mask exists for after
+        // the atomics.
+        if (!cpu.has(kExtC)) {
+            return StepResult::Illegal;
+        }
+        uint32_t expanded = 0;
+        if (expand_compressed(low, expanded) != Expansion::Ok) {
+            // Reserved on RV32, or a compressed float access on a part with no
+            // FPU. Illegal rather than Unimplemented: nothing here is waiting
+            // to be written, the architecture refuses it.
+            return StepResult::Illegal;
+        }
+        return execute(cpu, pc, expanded, 2);
     }
 
     if (!cpu.executable_at(pc + 2)) {
@@ -163,7 +512,26 @@ StepResult step(Cpu& cpu) {
         return StepResult::MemoryFault;
     }
 
-    const uint32_t next = pc + 4;
+    return execute(cpu, pc, instr, 4);
+}
+
+/// One already-fetched 32-bit instruction, at `pc`, `width` bytes wide.
+///
+/// **`width` is a parameter and not the constant 4 because a compressed
+/// instruction executes through here too.** Every RVC encoding is defined by
+/// the specification as expanding to exactly one base instruction, so
+/// `expand_compressed` turns the halfword into the 32-bit encoding it means
+/// and this runs it -- which is why `c.add` cannot drift away from `add`.
+/// They are the same code.
+///
+/// What the expansion cannot carry is how far PC moves: `c.jal` links to
+/// `pc + 2` and `jal` links to `pc + 4`, and the encodings are otherwise
+/// identical. So the width comes in beside the instruction rather than being
+/// recovered from it.
+namespace {
+
+StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
+    const uint32_t next = pc + width;
     const unsigned rd = rd_of(instr);
     const unsigned rs1 = rs1_of(instr);
     const unsigned rs2 = rs2_of(instr);
@@ -507,5 +875,7 @@ StepResult step(Cpu& cpu) {
         return StepResult::Illegal;
     }
 }
+
+}  // namespace
 
 }  // namespace riscv32

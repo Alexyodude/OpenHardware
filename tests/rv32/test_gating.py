@@ -27,16 +27,21 @@ from tests.rv32.conftest import (
 #: failure. OH-34 is building the core now; when it lands, this set shrinks and
 #: `test_the_core_reports_its_own_holes` is what notices. Listing them is what
 #: keeps "unimplemented" from quietly absorbing "wrongly executed".
-EXPECTED_HOLES = {"rv32m_op", "rv32c", "rv32a"}
+#: `rv32c` left on 2026-08-25 under OH-54. `refusal_is_testable` derives
+#: from this set, so removing the entry tightened every compressed case
+#: from "unimplemented is honest" to "must be refused per part" in one
+#: edit -- which is what the comment below always promised it would.
+EXPECTED_HOLES = {"rv32m_op", "rv32a"}
 
 
 def refusal_is_testable(case: dict) -> bool:
     """Whether this core can yet be asked to *refuse* this encoding.
 
-    Gating a 16-bit encoding needs a 16-bit decoder, and this core has none
-    while `rv32c` is in EXPECTED_HOLES. Until then a compressed word cannot
-    distinguish "needs an extension I lack" from "is a shape I cannot read",
-    and `Unimplemented` is the honest answer rather than a wrong one.
+    Gating a 16-bit encoding needs a 16-bit decoder. While `rv32c` was in
+    EXPECTED_HOLES a compressed word could not distinguish "needs an extension
+    I lack" from "is a shape I cannot read", and `Unimplemented` was the honest
+    answer rather than a wrong one. OH-54 wrote the decoder, so every
+    compressed case is now testable and this returns True throughout.
 
     Derived from EXPECTED_HOLES rather than listed separately, so when OH-34
     lands the C decoder every caller tightens at once and there is no second
