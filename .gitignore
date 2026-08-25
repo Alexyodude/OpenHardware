@@ -33,6 +33,14 @@ third_party/
 /picsimlab/
 /picsimlab-reference/
 
+# --- ESP-IDF --------------------------------------------------------------
+# The SoC headers webui/boards/esp32c5.py and esp32c6.py cite. Same
+# arrangement as above: a sibling checkout (see docs/esp-idf-reference.md),
+# with these here so a tree of Espressif's source cannot be committed by
+# accident if someone clones it inside instead.
+/esp-idf/
+/esp-idf-reference/
+
 # --- Claude Code ----------------------------------------------------------
 # Installed from Alexyodude/claude-template, not committed per-project.
 #

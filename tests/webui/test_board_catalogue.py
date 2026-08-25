@@ -275,9 +275,28 @@ def test_only_the_board_a_real_image_ran_on_claims_to_have_run_one():
     `tests/riscv32/test_rvc.py` already ran the same image and would have been
     the wrong evidence, because it drives the ABI directly and so proves the
     compressed decoder rather than the board.
+
+    ESP32-C6 joined on 2026-08-25 under OH-57, and it is the first entry whose
+    tempting wrong argument is *the previous entry*. The core was built, the C3
+    board worked, and the two parts share an instruction set -- so a C6 looked
+    proven before anything had run on it. It is here because
+    `tests/riscv32/test_esp32c6_board.py` loads its own image at its own GPIO
+    base and watches GPIO8 move; the C3's image faults on this board at its
+    first store.
+
+    **ESP32-C5 was described in the same ticket and is deliberately not here.**
+    `webui/boards/esp32c5.py` exists and the two C5 boards are runnable, which
+    is the weaker fact this pin exists to keep separate from the stronger one.
+    Its ISA is `RV32IMAC + Zcb/Zcmp/Zcmt`, `core/riscv32` implements none of
+    the three Zc groups, and no image has been watched executing on it. Adding
+    it here without that would be exactly the diff this test's name refuses.
     """
     proven = {b.chip for b in catalogue.catalogue() if b.firmware_verified}
-    assert proven == {"RP2040", "SAMD21", "ATmega328P", "ESP32-C3"}
+    assert proven == {"RP2040", "SAMD21", "ATmega328P", "ESP32-C3", "ESP32-C6"}
+    assert "ESP32-C5" not in proven, (
+        "the C5 is described, which makes its boards runnable; nothing has "
+        "watched an image run on one"
+    )
 
 
 def test_every_firmware_claim_names_a_test_that_exists():

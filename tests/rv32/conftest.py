@@ -60,8 +60,26 @@ SANDBOX = RAM_BASE + 0x1000
 #: `test_the_c_and_zca_equivalence_is_only_claimed_for_partitions_without_an_fpu`
 #: pins that reasoning so it cannot be reused for a part with an FPU, where it
 #: is false.
+#: The ESP32-C5 row added under OH-57, when `webui/boards/esp32c5.py` gave that
+#: part a board description. It is the second row whose datasheet set exceeds
+#: `MODELLED`, and unlike the RP2350's it is a part this repository now has a
+#: *runnable board* for -- which is exactly why it belongs here rather than in
+#: that board file's prose. `docs/architectures.md` 4.3 records the Zc groups,
+#: and its 4.2 answers the obvious objection: ESP-IDF's own
+#: `tools/cmake/toolchain-esp32c5.cmake:10` compiles this part
+#: `-march=rv32imac_zicsr_zifencei`, with **no Zc at all**, because
+#: `ZCMP_WORKAROUND` gates them out of the default build. That is the answer to
+#: "what does a stock image contain"; this table answers "what does the silicon
+#: accept", and a decoder that took the first answer would trap a legal
+#: instruction.
+#:
+#: `Zcmt` appears in no other row and has no bit in `MODELLED`, so
+#: `faithfully_configurable` excludes any case requiring it -- of which the
+#: corpus has none today, `FAMILIES` having no Zc family. That is the honest
+#: state: the target is recorded, and nothing tests it yet.
 TARGETS = {
     "ESP32-C3": frozenset({"M", "C"}),
+    "ESP32-C5": frozenset({"M", "A", "C", "Zcb", "Zcmp", "Zcmt"}),
     "ESP32-C6": frozenset({"M", "A", "C"}),
     "RP2350": frozenset(
         {"M", "A", "C", "Zca", "Zba", "Zbb", "Zbs", "Zbkb", "Zcb", "Zcmp"}

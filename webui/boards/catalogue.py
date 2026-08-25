@@ -143,11 +143,29 @@ CHIPS: dict[str, tuple[str, str]] = {
 #: GPIO8 alternate at a constant period. `tests/riscv32/test_rvc.py` also runs
 #: that image and is **not** named here, because it drives the ABI directly and
 #: so proves the decoder rather than the board.
+#: The ESP32-C6 entry is the second RISC-V one, and what it had to survive is
+#: the argument its own predecessor makes available: the core was already
+#: built, the C3 board already worked, and the two parts share an instruction
+#: set. None of that is evidence. `tests/riscv32/test_esp32c6_board.py` loads
+#: `tests/riscv32/c6blink/blink.bin` -- its own image, compiled `-march=rv32imac`
+#: against its own linker script, at its own GPIO base of 0x60091000 -- and
+#: watches GPIO8 alternate at a constant period. The C3's image would fault on
+#: this board at its first store, which is the shortest statement of why the
+#: entry is not inherited.
+#:
+#: **The ESP32-C5 is described and is deliberately absent from this table.**
+#: `webui/boards/esp32c5.py` exists, so the C5 boards are runnable -- an image
+#: can be attempted on them -- and no image has been watched. Its ISA is
+#: `RV32IMAC + Zcb/Zcmp/Zcmt` and `core/riscv32` implements none of the three
+#: Zc groups, so the board is configured with the subset it can execute and
+#: says so; see that file's `EXECUTES`. This is the case the distinction at the
+#: top of this comment was written for.
 FIRMWARE_VERIFIED: dict[str, str] = {
     "RP2040": "tests/cortexm0/test_blink.py",
     "SAMD21": "tests/cortexm0/test_samd21_blink.py",
     "ATmega328P": "tests/avr/test_uno_board.py",
     "ESP32-C3": "tests/riscv32/test_esp32c3_board.py",
+    "ESP32-C6": "tests/riscv32/test_esp32c6_board.py",
 }
 
 #: What each instruction set would need before a core for it could be trusted.

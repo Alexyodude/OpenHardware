@@ -349,6 +349,27 @@ def test_the_extension_letters_match_the_abi_bitmasks(abi):
     assert abi.EXT_A & abi.ESP32_C3 == 0, "an ESP32-C3 is RV32IMC: no atomics"
     assert abi.EXT_A & abi.ESP32_C6 != 0, "an ESP32-C6 is RV32IMAC: atomics"
 
+    # The ESP32-C5, which has a board description and three extension groups
+    # this core has no bit for. Its mask is a C6's, and saying so here is what
+    # keeps `webui/boards/esp32c5.py`'s `EXECUTES` honest: that file configures
+    # the core as RV32IMAC and states in `ABSENT` what it left out, and this is
+    # where the two spellings are checked to be the same subtraction.
+    assert extension_mask(abi, TARGETS["ESP32-C5"]) == abi.ESP32_C6, (
+        "configured as far as this core can go, a C5 is a C6"
+    )
+    assert TARGETS["ESP32-C5"] - MODELLED == {"Zcb", "Zcmp", "Zcmt"}, (
+        f"the C5's unmodelled groups are "
+        f"{sorted(TARGETS['ESP32-C5'] - MODELLED)}; webui/boards/esp32c5.py's "
+        f"ABSENT names the same three, and a fourth here with no entry there "
+        f"would be a board configuring a part it does not describe"
+    )
+    # Imported here rather than at module scope: this is the only test in the
+    # file that reaches out of `core/riscv32` into a board description, and a
+    # top-level import would make every other one depend on `webui/`.
+    from webui.boards import esp32c5
+
+    assert set(esp32c5.ABSENT) == TARGETS["ESP32-C5"] - MODELLED
+
     # The RP2350 is the case where the two spellings can drift *silently*,
     # because its datasheet set is larger than what the core can be told.
     # `abi.RP2350_MODELLED` is the intersection written out by hand, and this

@@ -11,8 +11,8 @@
 # it wherever a compiler exists so it cannot drift. Every test below that
 # executes anything executes those bytes, unmodified.
 #
-# **Three containers around it are synthesised, and each says so by name.**
-# There is no PlatformIO installation and no ARM toolchain on this machine, so:
+# **Four things around it are synthesised, and each says so by name.** There is
+# no PlatformIO installation and no ARM toolchain on this machine, so:
 #
 #   * `platformio_tree` builds the `.pio/build/<env>/` layout that
 #     `tools/import_firmware.find_platformio` looks for, and puts the real
@@ -24,6 +24,11 @@
 #     self-identifying path can be exercised without a linker.
 #   * `uf2_block` builds UF2 blocks so a wrong-family file can be handed to a
 #     board that must refuse it.
+#   * `only_undescribed` builds a one-board catalogue whose core is built and
+#     whose chip nothing describes. Unlike the three above, this one is not a
+#     stand-in for something absent from the machine -- it stands in for
+#     something absent from the *repository*, and deliberately so. See
+#     `UNDESCRIBED`.
 #
 # Nothing synthesises an instruction, a pin number or a memory map.
 #
@@ -89,6 +94,51 @@ def watch_led(session: api.BoardSession, budget: int = BUDGET) -> list[tuple[int
             transitions.append((step, bool(now)))
             last = now
     return transitions
+
+
+#: The board name the synthesised catalogue below contains.
+#:
+#: **A real name in a fake catalogue**, which is the arrangement two tests here
+#: need: `chip-not-described` requires a board that is core-built and
+#: *undescribed*, and after OH-57 the real catalogue holds none.
+#:
+#: It held one every time anyone looked, and never the same one for long. The
+#: SAMD21 was the example until `webui/boards/samd21.py` landed under OH-39
+#: (`bdcc8c9`); the ESP32-C3 took over until OH-48 (`3ccfe87`); the ESP32-C6
+#: took over until this ticket. Each replacement was a test that kept working
+#: right up until somebody did the obvious next piece of work, and then either
+#: failed or -- worse, and this is what happened to
+#: `test_a_chip_nothing_describes_is_refused_even_with_a_built_core` --
+#: skipped, announcing that it had nothing left to check.
+#:
+#: There is no fifth name to move to: every remaining chip needs a core that is
+#: not built, so they answer `core-not-built` instead. So the case is built
+#: rather than found, which is what `test_a_built_core_without_a_board_
+#: description_is_not_runnable` has done since the SAMD21 evaporated.
+#:
+#: This one keeps the ESP32-C6's name because that is what it displaced, and
+#: because the name is now arbitrary: nothing about the chip matters, only that
+#: `riscv32` is built.
+UNDESCRIBED = "XIAO-ESP32-C6-DIP"
+
+
+def only_undescribed(monkeypatch, tmp_path) -> None:
+    """Replace the catalogue with one board: `UNDESCRIBED`, and no description.
+
+    `catalogue.catalogue(directory)` reads board JSON **and** board
+    descriptions out of the directory it is given, so a `tmp_path` holding one
+    `.json` and no `.py` is a catalogue whose single board has a built core and
+    nothing describing it -- the case that no longer occurs naturally.
+
+    Patched on the `catalogue` module rather than on `api`, because `api.py`
+    does `from webui.boards import catalogue` and then `catalogue.catalogue()`
+    -- so both names are the one module object, and the live server's thread
+    reads the patched attribute at request time rather than a copy taken at
+    import.
+    """
+    (tmp_path / f"{UNDESCRIBED}.json").write_text("{}", encoding="utf-8")
+    real = catalogue.catalogue
+    monkeypatch.setattr(catalogue, "catalogue", lambda directory=None: real(tmp_path))
 
 
 # --- the synthesised containers -------------------------------------------
@@ -189,18 +239,36 @@ def test_a_core_that_is_not_built_is_named_before_anything_else():
         assert board.core in str(caught.value), board.name
 
 
-def test_a_chip_nothing_describes_is_refused_even_with_a_built_core():
-    """The second join. A built core with no memory map has nowhere to load."""
-    undescribed = [
-        b for b in catalogue.catalogue() if b.core_built and not b.described
-    ]
-    if not undescribed:
-        pytest.skip("every board with a built core is described")
-    for board in undescribed:
-        with pytest.raises(api.BoardRunError) as caught:
-            api.runtime_for(board.name)
-        assert "describes" in str(caught.value), board.name
-        assert board.chip in str(caught.value)
+def test_a_chip_nothing_describes_is_refused_even_with_a_built_core(
+    monkeypatch, tmp_path
+):
+    """The second join. A built core with no memory map has nowhere to load.
+
+    **This searched the real catalogue for an example until OH-57**, with a
+    `pytest.skip("every board with a built core is described")` for the day
+    there was none. That day arrived when `webui/boards/esp32c6.py` and
+    `esp32c5.py` landed, and the test went from checking a rule to announcing
+    that it had nothing to check -- which is better than passing vacuously and
+    is still not a test.
+
+    So it builds the case rather than finding one. See `UNDESCRIBED`.
+
+    `runtime_for` asks about the core first and the description second, and
+    reaching this refusal at all is what proves the two joins are separate
+    rather than collapsed into one "cannot run this": the synthetic board's
+    core *is* built.
+    """
+    needs_core()
+    only_undescribed(monkeypatch, tmp_path)
+
+    board, = catalogue.catalogue()
+    assert board.core_built and not board.described, "the case being built"
+
+    with pytest.raises(api.BoardRunError) as caught:
+        api.runtime_for(board.name)
+    assert caught.value.reason == "chip-not-described"
+    assert "no module describes" in str(caught.value)
+    assert board.chip in str(caught.value)
 
 
 def test_an_unknown_board_says_what_there_is():
@@ -545,10 +613,15 @@ def test_every_refusal_has_a_reason_and_every_reason_is_documented():
             api.runtime_for(board.name)
         seen.add(caught.value.reason)
     assert seen <= set(api.REASONS), seen - set(api.REASONS)
-    assert {"core-not-built", "chip-not-described"} <= seen
+    # `chip-not-described` is asserted by
+    # `test_a_chip_nothing_describes_is_refused_even_with_a_built_core`
+    # instead: no board in the real catalogue can produce it any more, so
+    # that one synthesises the case. See `UNDESCRIBED`.
+    assert "core-not-built" in seen
 
     with pytest.raises(ValueError, match="unknown refusal reason"):
         api.BoardRunError("made-up", "message")
+
 
 
 # --- over HTTP, on a real loopback socket ---------------------------------
@@ -678,17 +751,14 @@ def test_each_refusal_arrives_as_itself(live_server):
     cases = (
         (upload(board="Raspberry Pi Pico", base=BLINK_LOAD), 404, "unknown-board"),
         (upload(board="XIAO-RP2350-DIP", base=BLINK_LOAD), 409, "core-not-built"),
-        # An ESP32-C6: riscv32 is built and no module describes that chip yet.
-        #
-        # **This was the C3 until OH-48 described it**, and the replacement is
-        # on a countdown of its own -- OH-57 describes the C6 and the C5, and
-        # after that no board in the catalogue is core-built-and-undescribed,
-        # because every remaining chip needs a core that is not built. When
-        # this fails again the fix is not another board name: it is the
-        # synthetic-directory treatment
-        # `test_a_built_core_without_a_board_description_is_not_runnable`
-        # already uses, for exactly this reason.
-        (upload(board="XIAO-ESP32-C6-DIP", base=BLINK_LOAD), 409, "chip-not-described"),
+        # **`chip-not-described` is not in this list, and cannot be.** It used
+        # to be the ESP32-C3, then the ESP32-C6, and each replacement lasted
+        # until somebody described that chip. OH-57 described the last two, so
+        # no board in the real catalogue is core-built-and-undescribed --
+        # every remaining chip needs a core that is not built and answers
+        # `core-not-built` instead. It is asserted over the transport in
+        # `test_the_chip_not_described_refusal_arrives_as_itself`, against a
+        # board synthesised for the purpose rather than a fourth board name.
         (upload(board=BOARD, base=0x42000020), 400, "outside-the-board-map"),
         (upload(b"\x00" * 64, board=BOARD, base=0x10000000), 400, "no-vector-table"),
         (upload(wrong_family, board=BOARD), 400, "nothing-for-this-chip"),
@@ -701,6 +771,24 @@ def test_each_refusal_arrives_as_itself(live_server):
         assert caught.value.code == status, (reason, answer)
         assert answer["reason"] == reason, answer
         assert answer["error"], "and the message that carries the values"
+
+
+def test_the_chip_not_described_refusal_arrives_as_itself(
+    live_server, monkeypatch, tmp_path
+):
+    """The refusal that left `test_each_refusal_arrives_as_itself`, still
+    checked at the transport where its 409 lives.
+
+    Separate rather than inlined there, because it needs the catalogue replaced
+    and every other case in that list needs the real one.
+    """
+    only_undescribed(monkeypatch, tmp_path)
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        post(live_server, "/api/board/load", upload(board=UNDESCRIBED, base=BLINK_LOAD))
+    answer = json.loads(caught.value.read())
+    assert caught.value.code == 409, answer
+    assert answer["reason"] == "chip-not-described", answer
+    assert answer["error"], "and the message that carries the values"
 
 
 def test_every_reason_the_api_can_raise_has_a_status():
