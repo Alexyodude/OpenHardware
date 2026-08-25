@@ -5,6 +5,8 @@
 
 #include "exec_core.h"
 
+#include "interrupt.h"
+
 #include "alu.h"
 #include "bcd.h"
 #include "muldiv.h"
@@ -112,38 +114,6 @@ std::uint16_t Pop(Cpu& cpu) {
     const std::uint16_t value = cpu.ReadWordAt(cpu.regs().ss, cpu.regs().sp);
     cpu.regs().sp = static_cast<std::uint16_t>(cpu.regs().sp + 2);
     return value;
-}
-
-/// Take an interrupt vector: push FLAGS, CS and IP, then jump through the
-/// table at the bottom of memory.
-///
-/// **`return_ip` is the address of the next instruction, not the faulting
-/// one.** Measured: `D4 00` at IP 0x8573 pushes 0x8575. Later x86 parts push
-/// the faulting address for a divide error, which is the difference between
-/// it being a fault there and a trap here -- an 8086 handler cannot retry the
-/// instruction, and was never meant to.
-///
-/// This lives here rather than in the `interrupt.*` that OH-5 claims. The
-/// only thing that raises an interrupt today is AAM with a zero divisor, and
-/// creating that file now to hold one function this ticket needs would leave
-/// OH-5 inheriting a header it did not design. It moves when OH-5 arrives and
-/// has INT n, INT3, INTO and the trap flag to put beside it.
-void RaiseInterrupt(Cpu& cpu, std::uint8_t vector, std::uint16_t return_ip) {
-    // FLAGS goes first, and it is the value the instruction has already
-    // computed -- the corpus pushes the adjusted word, not the one the
-    // instruction started with.
-    Push(cpu, cpu.regs().flags);
-    // Cleared after the push, so IRET restores them. A handler entered with
-    // interrupts still enabled would be re-entered by the next one.
-    SetFlag(cpu.regs().flags, kInterrupt, false);
-    SetFlag(cpu.regs().flags, kTrap, false);
-    Push(cpu, cpu.regs().cs);
-    Push(cpu, return_ip);
-
-    // The table is 256 entries of offset-then-segment at 0000:0000.
-    const std::uint16_t entry = static_cast<std::uint16_t>(vector * 4);
-    cpu.regs().ip = cpu.ReadWordAt(0x0000, entry);
-    cpu.regs().cs = cpu.ReadWordAt(0x0000, static_cast<std::uint16_t>(entry + 2));
 }
 
 /// What an undriven 8088 data bus reads as.
@@ -344,7 +314,7 @@ void WriteWordRegister(Registers& regs, std::uint8_t index, std::uint16_t value)
     }
 }
 
-StepStatus Step(Cpu& cpu) {
+StepStatus ExecuteOne(Cpu& cpu) {
     const Instruction instruction = Decode(cpu, cpu.regs().cs, cpu.regs().ip);
     if (!instruction.valid || !Lookup(instruction.opcode).implemented) {
         return StepStatus::kUnimplemented;
@@ -1041,6 +1011,31 @@ StepStatus Step(Cpu& cpu) {
             cpu.regs().ip = entry_ip;
             return StepStatus::kUnimplemented;
     }
+}
+
+StepStatus Step(Cpu& cpu) {
+    // **TF is sampled BEFORE the instruction, and checked again after.**
+    //
+    // Before, because that is what makes `POPF` behave the way an 8086 does:
+    // a POPF that SETS TF does not trap after itself, it traps after the
+    // instruction following. Reading TF only afterwards would trap
+    // immediately, which is a later-x86 behaviour and not this part's.
+    //
+    // After as well, because the interrupt sequence clears TF -- so an `INT n`
+    // executed while stepping has already taken its vector and must not take a
+    // second one on the way out. Checking both ends gets that for free rather
+    // than by naming the four opcodes that raise.
+    const bool stepping = (cpu.regs().flags & kTrap) != 0;
+    const StepStatus status = ExecuteOne(cpu);
+    if (status == StepStatus::kOk && stepping &&
+        (cpu.regs().flags & kTrap) != 0) {
+        // The return address is where the instruction left IP -- the next
+        // instruction, which is what every 8086 interrupt pushes. A single
+        // step is a TRAP and not a fault: the instruction completed, and the
+        // handler resumes after it rather than retrying it.
+        RaiseInterrupt(cpu, kVectorSingleStep, cpu.regs().ip);
+    }
+    return status;
 }
 
 }  // namespace i8086

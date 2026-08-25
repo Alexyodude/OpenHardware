@@ -10,6 +10,7 @@ add_library(i8086 SHARED
   shift.cc
   bcd.cc
   muldiv.cc
+  interrupt.cc
   exec_core.cc
   abi.cc
 )
