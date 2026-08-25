@@ -338,7 +338,7 @@ BOOT2_FIRST_WORD = 0x4B32B500
 
 def boot2_filler() -> bytes:
     """256 bytes standing in for boot2. Never executed; only skipped over."""
-    return struct.pack("<I", BOOT2_FIRST_WORD) * (api.RP2040_BOOT2_BYTES // 4)
+    return struct.pack("<I", BOOT2_FIRST_WORD) * (rp2040.BOOT2_BYTES // 4)
 
 
 def test_an_image_for_another_chip_is_refused_on_its_addresses():
@@ -378,7 +378,10 @@ def test_the_boot2_convention_is_found_rather_than_assumed():
     with api.load_firmware(BOARD, data, base=rp2040.FLASH) as session:
         report = session.as_json()
         transitions = watch_led(session)
-    assert report["vector_table"] == rp2040.FLASH + api.RP2040_BOOT2_BYTES
+    # `rp2040.BOOT2_BYTES` and not `api.RP2040_BOOT2_BYTES`: api.py no longer
+    # keeps a copy of where an RP2040 puts its vector table, because that is a
+    # fact about the chip. See webui/boards/contract.py.
+    assert report["vector_table"] == rp2040.FLASH + rp2040.BOOT2_BYTES
     assert report["stack_pointer"] == 0x20042000
     assert len(transitions) >= 2, "the image past boot2 still runs"
 
@@ -498,11 +501,20 @@ def test_state_shows_the_registers_and_a_window_of_memory():
         at_reset = session.state()
         session.run(5000)
         later = session.state()
-    assert at_reset["registers"][13] == 0x20042000, "SP"
-    assert at_reset["registers"][15] == BLINK_LOAD + 8, "PC at the reset handler"
+    # Registers arrive named rather than positional, because an AVR has
+    # thirty-two eight-bit ones and no sixteen-name Arm table can render them.
+    # Looked up by name here rather than by index for the same reason.
+    by_name = {r["name"]: r for r in at_reset["registers"]}
+    assert by_name["sp"]["value"] == 0x20042000, "SP"
+    assert by_name["pc"]["value"] == BLINK_LOAD + 8, "PC at the reset handler"
+    assert by_name["r0"]["width"] == 32, "an Armv6-M register is a word"
+    assert at_reset["pc"] == by_name["pc"]["value"], (
+        "the explicit field agrees with the register, so no caller has to "
+        "mean 'index 15'"
+    )
     assert at_reset["memory"]["at"] == BLINK_LOAD, "the vector table by default"
     assert bytes(at_reset["memory"]["bytes"][:4]) == struct.pack("<I", 0x20042000)
-    assert later["registers"][15] != at_reset["registers"][15], "it moved"
+    assert later["pc"] != at_reset["pc"], "it moved"
     assert later["status"] == "running"
 
 
@@ -618,8 +630,8 @@ def test_a_loaded_board_runs_and_can_be_looked_at_over_http(live_server):
     after = get(live_server, f"/api/board/state?words={hex(out)},{hex(oe)}")
 
     assert result == {"steps": 5000, "status": "running", "detail": ""}
-    assert before["registers"][15] == BLINK_LOAD + 8
-    assert after["registers"][15] != before["registers"][15]
+    assert before["pc"] == BLINK_LOAD + 8
+    assert after["pc"] != before["pc"]
     # The whole point, read back through the transport: the pin is an output
     # and the blink has driven it.
     assert [w["address"] for w in after["words"]] == [out, oe]

@@ -23,7 +23,7 @@ import types
 import typing
 
 from webui import firmware, targets
-from webui.boards import catalogue
+from webui.boards import catalogue, contract
 from webui.parts.schema import UNCONNECTED, PartSchema, SchemaError
 from webui.rcontrol import RControlClient, RControlCommandError, Response
 
@@ -512,6 +512,12 @@ REASONS = {
     "chip-not-described": "no module gives this chip a memory map",
     "nothing-for-this-chip": "the artefact holds no image for this chip",
     "outside-the-board-map": "the image loads where this board has no memory",
+    # The slug is older than the second machine and names the Armv6-M case;
+    # what it now covers is "this board could not be entered", whatever
+    # entering means on it -- and on a machine that starts at address zero,
+    # nothing can raise it. Left alone rather than renamed, because a slug is
+    # a wire contract: `webui/emulator_server.py` maps it to a 400, and
+    # `tests/webui/test_board_run.py` asserts a caller receives that slug.
     "no-vector-table": "no address in the image looks like one this board could enter",
     "budget-refused": "the number of instructions asked for is not usable",
     "window-refused": "the memory window asked for is not a usable size",
@@ -520,24 +526,21 @@ REASONS = {
 
 
 class Core(typing.Protocol):
-    """What this section needs of a core, which is less than a core has.
+    """What **this module** needs of a core, which is now two things.
 
-    Written out for the same reason `webui/boards/rp2040.py` writes out its
-    own `Cpu` protocol: the description modules and this one are the two
-    things that talk to a core, and each depending on the calls it actually
-    makes is what keeps a second core honest about what it has to provide.
+    It used to be twelve, and that list read like a description of "a core"
+    when it was nothing of the sort: it was the shape two flat-address 32-bit
+    machines happen to share. Measured against `core/avr/abi.py`, ten of the
+    twelve were absent -- not unwritten, but meaningless. A Harvard machine has
+    two address spaces that overlap, so `write_block(address, data)` cannot say
+    which one it means; an 8-bit machine has no `read_word`.
+
+    Everything that was architecture-shaped moved to `core/<core>/machine.py`,
+    resolved per core the way `listing_view` resolves `core.<core>.disasm`.
+    What is left here is what a *session* needs regardless of machine: run one
+    instruction, and give the native allocation back.
     """
 
-    def clear_memory(self) -> None: ...
-    def clear_registers(self) -> None: ...
-    def clear_regions(self) -> None: ...
-    def write_block(self, address: int, data: bytes) -> None: ...
-    def read_word(self, address: int) -> int: ...
-    def read_block(self, address: int, length: int) -> bytes: ...
-    def in_range(self, address: int, size: int = ...) -> bool: ...
-    def is_mapped(self, address: int) -> bool: ...
-    def get_regs(self) -> typing.Any: ...
-    def set_regs(self, regs: list[int], apsr: int) -> None: ...
     def step(self) -> None: ...
     def close(self) -> None: ...
 
@@ -555,31 +558,14 @@ class Core(typing.Protocol):
 #: formats that carry no family at all and for a single-family UF2.
 UF2_FAMILY_BY_CHIP: dict[str, str] = {"RP2040": "RP2040"}
 
-#: An RP2040 flash image begins with `boot2`, the 256-byte XIP setup stage,
-#: and the vector table follows it. `tests/cortexm0/blink/blink.ld` links past
-#: it to 0x10000100 for exactly this reason, and `firmware.read_vector_table`
-#: names the same address in its docstring.
-RP2040_BOOT2_BYTES = 256
-
-#: Where to look for a vector table, as offsets from the lowest loaded byte.
-#:
-#: **Every candidate is checked and none is assumed**, which is the whole
-#: difference between this and a guess -- see `_vector_table_at`, which
-#: validates both words against the board's own map before accepting either.
-#: Assuming the first convention is how `read_vector_table` once answered
-#: 0x4b32b500, which is two instructions of boot2, and called it a stack
-#: pointer.
-#:
-#: A bare-metal image linked past boot2 and a pico-sdk image that includes it
-#: are both ordinary, so the RP2040 genuinely has two conventions rather than
-#: one convention and one mistake.
-VECTOR_TABLE_OFFSETS: dict[str, tuple[int, ...]] = {
-    "RP2040": (0, RP2040_BOOT2_BYTES),
-}
-
-#: Every other chip: the vector table is the start of the image, which is the
-#: plain Cortex-M arrangement.
-DEFAULT_VECTOR_TABLE_OFFSETS = (0,)
+#: Where a vector table sits **used to be here**, as
+#: `VECTOR_TABLE_OFFSETS = {"RP2040": (0, 256)}`. It is not any more, and the
+#: deletion is the point rather than a tidy-up: that is a fact about a chip,
+#: and it now lives in `webui/boards/rp2040.py` and `samd21.py`, which is where
+#: a reader looking for what an RP2040 does would go. `core/cortexm0/machine.py`
+#: is what reads it, and asks only boards on a machine that has one --
+#: `core/avr/machine.py` declares no such requirement, because an AVR begins
+#: executing at address zero.
 
 
 @dataclasses.dataclass(frozen=True)
@@ -593,6 +579,11 @@ class Runtime:
     description: types.ModuleType
     #: `core.<core>.abi` -- the thing that executes.
     abi: types.ModuleType
+    #: `core.<core>.machine` -- how this kind of machine powers on, and what
+    #: its registers are called. Separate from `abi` because `abi` is the
+    #: library binding and this is the arrangement: two cores could share one
+    #: and not the other.
+    machine: types.ModuleType
 
 
 def description_module(chip: str) -> str:
@@ -656,13 +647,6 @@ def runtime_for(board_name: str) -> Runtime:
             f"{board_name}: the catalogue reports {board.chip} as described, "
             f"but {module_name} does not import: {error}"
         ) from error
-    if not hasattr(description, "install"):
-        raise BoardRunError(
-            "chip-not-described",
-            f"{module_name} has no install(cpu). A board description has to "
-            f"map the chip's memory before anything can be written into it"
-        )
-
     abi_name = f"core.{board.core}.abi"
     try:
         abi = importlib.import_module(abi_name)
@@ -673,7 +657,28 @@ def runtime_for(board_name: str) -> Runtime:
             f"does not import: {error}"
         ) from error
 
-    return Runtime(board.name, board.chip, board.core, description, abi)
+    # The machine module before the contract check, because the contract asks
+    # it what this board owes: `VECTOR_TABLE_OFFSETS` is required of an Armv6-M
+    # board and of nothing else. A core with no machine module cannot host a
+    # board at all, and `core_requirements` raises saying so rather than
+    # answering that the board owes nothing.
+    machine_name = f"core.{board.core}.machine"
+    try:
+        machine = importlib.import_module(machine_name)
+    except ModuleNotFoundError as error:
+        raise BoardRunError(
+            "core-not-built",
+            f"{board_name}: the {board.core} core is built, but nothing "
+            f"describes how that kind of machine powers on -- {machine_name} "
+            f"does not exist, so an image could be loaded and never entered"
+        ) from error
+
+    try:
+        contract.check(description, board.core)
+    except contract.RuntimeContractError as error:
+        raise BoardRunError("chip-not-described", str(error)) from error
+
+    return Runtime(board.name, board.chip, board.core, description, abi, machine)
 
 
 #: A ceiling on one `run` call. `webui/emulator.py` states the reasoning for
@@ -819,49 +824,6 @@ class RunResult:
     detail: str
 
 
-@dataclasses.dataclass(frozen=True)
-class Placement:
-    """Where the image sits, and the two words the core starts from."""
-
-    vector_table: int
-    stack_pointer: int
-    entry: int
-
-
-def _vector_table_at(cpu: Core, image: firmware.Image, address: int) -> Placement | str:
-    """A checked vector table at `address`, or the reason it is not one.
-
-    Armv6-M puts the initial stack pointer in the first word and the reset
-    handler in the second with bit 0 set for Thumb. Both are checked against
-    **the board's own map**, which is the authority: `in_range` asks the
-    regions `install` just built, so a chip with flash at zero and one with
-    flash at 0x10000000 are told apart without either address appearing here.
-
-    Returning a reason rather than raising, because the caller tries more than
-    one candidate and the interesting message is all of them at once.
-    """
-    words = firmware.read_vector_table(image, address)
-    if words is None:
-        return f"0x{address:08x}: the image does not cover both words"
-    sp, reset = words
-    if not sp or not cpu.in_range(sp - 4, 4):
-        return (
-            f"0x{address:08x}: first word 0x{sp:08x} is not a stack pointer "
-            f"this board could have, because nothing is mapped below it"
-        )
-    if not reset & 1:
-        return (
-            f"0x{address:08x}: second word 0x{reset:08x} has bit 0 clear, so "
-            f"it is not a Thumb reset address"
-        )
-    if not cpu.in_range(reset & ~1, 2):
-        return (
-            f"0x{address:08x}: reset address 0x{reset & ~1:08x} is in no "
-            f"region this board maps"
-        )
-    return Placement(address, sp, reset & ~1)
-
-
 def _check_fits(runtime: Runtime, cpu: Core, image: firmware.Image) -> None:
     """Every byte must land somewhere this board maps.
 
@@ -869,41 +831,59 @@ def _check_fits(runtime: Runtime, cpu: Core, image: firmware.Image) -> None:
     twenty thousand instructions later. Again the board is the authority: an
     ESP32-C3 image at 0x42000020 fails here on a board whose flash is at
     0x10000000, and no table in this module had to know either number.
+
+    `machine.refuses` rather than `cpu.in_range` because "can an image land
+    here" and "can a hexdump read here" are the same question only on a
+    machine with one address space. On an AVR an image loads into program
+    memory and the hexdump reads data memory, and a single predicate would
+    have to guess which was meant.
+
+    **It answers with a sentence rather than a bool**, and this composes rather
+    than writes the refusal. The reason is a lesson from the AVR: an odd
+    program address is a real refusal with a real explanation, and this module
+    -- which knows the board's name and the image's format but nothing about
+    words -- could only have called it "maps nothing there", which is both
+    false and a wrong lead.
     """
     for segment in image.segments:
-        if cpu.in_range(segment.address, len(segment.data)):
+        refusal = runtime.machine.refuses(cpu, segment.address, len(segment.data))
+        if refusal is None:
             continue
         raise BoardRunError(
             "outside-the-board-map",
-            f"{runtime.board} ({runtime.chip}) maps nothing at "
-            f"0x{segment.address:08x}..0x{segment.end:08x}, where this "
-            f"{image.format} image's {len(segment.data)}-byte segment loads"
+            f"{runtime.board} ({runtime.chip}) cannot take this "
+            f"{image.format} image's {len(segment.data)}-byte segment: "
+            f"{refusal}"
         )
 
 
 def _place(
     runtime: Runtime, cpu: Core, image: firmware.Image, requested: int | None
-) -> Placement:
-    """The vector table to enter at, checked rather than assumed."""
-    lowest = min(segment.address for segment in image.segments)
-    if requested is not None:
-        candidates: tuple[int, ...] = (requested,)
-    else:
-        offsets = VECTOR_TABLE_OFFSETS.get(runtime.chip, DEFAULT_VECTOR_TABLE_OFFSETS)
-        candidates = tuple(lowest + offset for offset in offsets)
+) -> typing.Any:
+    """Leave the board at reset, and say where that is.
 
-    reasons = []
-    for address in candidates:
-        found = _vector_table_at(cpu, image, address)
-        if isinstance(found, Placement):
-            return found
-        reasons.append(found)
-    raise BoardRunError(
-        "no-vector-table",
-        f"{runtime.board}: no vector table this board could enter. Tried "
-        + "; ".join(reasons)
-        + ". Pass vector_table= if the image is linked somewhere else"
-    )
+    Every decision here belongs to the machine and none to this module: what a
+    reset state *is*, whether there is a vector table to read, and what to do
+    when there is not. All this adds is the board's name and the name of the
+    keyword that overrides the search, which are facts about this layer's own
+    interface rather than about the silicon.
+    """
+    offsets = getattr(runtime.description, "VECTOR_TABLE_OFFSETS", ())
+    try:
+        return runtime.machine.enter(cpu, image, requested, offsets)
+    except runtime.machine.MachineError as error:
+        # The override is only advice on a machine that searches offsets at
+        # all. Suggesting `vector_table=` to someone whose board begins at
+        # address zero would send them looking for a table that does not
+        # exist -- a message that costs more than it saves.
+        advice = (
+            ". Pass vector_table= if the image is linked somewhere else"
+            if offsets
+            else ""
+        )
+        raise BoardRunError(
+            "no-vector-table", f"{runtime.board}: {error}{advice}"
+        ) from error
 
 
 class BoardSession:
@@ -921,7 +901,7 @@ class BoardSession:
         runtime: Runtime,
         cpu: Core,
         image: firmware.Image,
-        placement: Placement,
+        placement: typing.Any,
     ) -> None:
         self.runtime = runtime
         self.cpu = cpu
@@ -1017,12 +997,13 @@ class BoardSession:
                 "window-refused",
                 f"{len(words)} watched words is more than {MAX_WATCHED_WORDS}",
             )
-        address = self.placement.vector_table if memory_at is None else memory_at
-        if not self.cpu.in_range(address, memory_length):
+        machine = self.runtime.machine
+        address = self.placement.window if memory_at is None else memory_at
+        if not machine.readable(self.cpu, address, memory_length):
             hint = (
                 " -- that is a mapped register, not a region, so ask for it "
                 "with words="
-                if self.cpu.is_mapped(address)
+                if machine.is_register(self.cpu, address)
                 else ""
             )
             raise BoardRunError(
@@ -1033,31 +1014,46 @@ class BoardSession:
 
         watched = []
         for watch in words:
-            if not self.cpu.is_mapped(watch) and not self.cpu.in_range(watch, 4):
+            if not machine.is_register(self.cpu, watch) and not machine.readable(
+                self.cpu, watch, 4
+            ):
                 raise BoardRunError(
                     "window-outside-the-map",
                     f"{self.board} has nothing at 0x{watch:08x} to watch",
                 )
-            watched.append({"address": watch, "value": self.cpu.read_word(watch)})
+            watched.append(
+                {"address": watch, "value": machine.word(self.cpu, watch)}
+            )
 
-        registers = self.cpu.get_regs()
+        view = machine.view(self.cpu)
         return {
             "board": self.board,
             "chip": self.chip,
             "status": self.status,
             "detail": self.detail,
-            "registers": registers.as_list(),
-            "apsr": registers.apsr,
+            # **Named, not positional, and that is a wire change made on
+            # purpose.** A page cannot render an AVR's thirty-two eight-bit
+            # registers through a sixteen-name Arm table, and `width` is here
+            # so it does not print r0 as `0x000000a5` either. The machine
+            # module is the only thing that knows either fact.
+            "registers": [
+                {"name": r.name, "value": r.value, "width": r.width}
+                for r in view.registers
+            ],
+            "flags": [{"name": name, "on": on} for name, on in view.flags],
+            # Explicit, so no caller has to mean "index 15" -- which is true on
+            # Armv6-M and on nothing else here.
+            "pc": view.pc,
             "memory": {
                 "at": address,
-                "bytes": list(self.cpu.read_block(address, memory_length)),
+                "bytes": list(machine.read(self.cpu, address, memory_length)),
             },
             "words": watched,
             "uart": uart_view(self.runtime, self.cpu),
             # Around the program counter rather than the load address: what a
             # debugger shows is where execution *is*, and after a run that is
             # nowhere near where the image started.
-            "listing": listing_view(self.runtime, self.cpu, registers.as_list()[15]),
+            "listing": listing_view(self.runtime, self.cpu, view.pc),
         }
 
     def close(self) -> None:
@@ -1079,12 +1075,13 @@ class BoardSession:
         watching an unexpected instruction stream needs to be told which one
         the core actually took.
         """
-        notes = list(self.image.notes)
+        notes = list(self.image.notes) + list(self.placement.notes)
         if self.image.entry is not None and (self.image.entry & ~1) != self.placement.entry:
             notes.append(
                 f"the {self.image.format} declares entry "
-                f"0x{self.image.entry & ~1:08x}; entered at the vector table's "
-                f"0x{self.placement.entry:08x} instead"
+                f"0x{self.image.entry & ~1:08x}; entered at "
+                f"0x{self.placement.entry:08x} instead, which is where this "
+                f"board powers on"
             )
         return {
             "board": self.board,
@@ -1097,10 +1094,14 @@ class BoardSession:
                 {"address": segment.address, "bytes": len(segment.data)}
                 for segment in self.image.segments
             ],
-            "vector_table": self.placement.vector_table,
-            "stack_pointer": self.placement.stack_pointer,
             "entry": self.placement.entry,
             "notes": notes,
+            # `vector_table` and `stack_pointer` arrive through here on an Arm
+            # board and are **absent** on one that has neither, rather than
+            # null. Null would say "there is a stack-pointer word and its value
+            # is unknown"; absence says the machine has no such word, which is
+            # the true and the more useful claim.
+            **self.placement.detail,
         }
 
 
@@ -1122,8 +1123,10 @@ def load_firmware(
     pico-sdk RP2040 image and wrong for the bare-metal one in
     `tests/cortexm0/blink/`, which links to 0x10000100.
 
-    `vector_table` overrides the search in `VECTOR_TABLE_OFFSETS` for an image
-    linked somewhere neither convention covers.
+    `vector_table` overrides the board's `VECTOR_TABLE_OFFSETS` for an image
+    linked somewhere neither convention covers. It is passed to the machine
+    module, which is free to ignore it: a board whose core begins at address
+    zero has no search to override.
 
     Raises `BoardRunError` at four separate joins -- unknown board, chip with
     no description, core not built, image that does not belong on this chip --
@@ -1149,22 +1152,19 @@ def load_firmware(
 
     cpu = runtime.abi.Cpu()
     try:
-        cpu.clear_memory()
-        cpu.clear_registers()
-        cpu.clear_regions()
+        runtime.machine.blank(cpu)
         runtime.description.install(cpu)
 
         _check_fits(runtime, cpu, image)
         for segment in image.segments:
-            cpu.write_block(segment.address, segment.data)
+            runtime.machine.write(cpu, segment.address, segment.data)
 
+        # `enter` leaves the register file at reset as well as reporting where
+        # that is, because those are one act. What "at reset" means is the
+        # machine's to say: an Armv6-M loads a stack pointer and a reset
+        # handler out of two words; an AVR comes up at word zero with SP at
+        # RAMEND, which its own `configure` has already established.
         placement = _place(runtime, cpu, image, vector_table)
-        # r0..r12 zero, then SP, LR, PC. The core has no reset sequence of its
-        # own: a board description says what memory exists and this says where
-        # execution begins, which together are the whole of a power-on.
-        cpu.set_regs(
-            [0] * 13 + [placement.stack_pointer, 0, placement.entry], apsr=0
-        )
     except BaseException:
         # The core is a ctypes handle over a native allocation, so a refusal
         # after construction has to release it or the process leaks one per

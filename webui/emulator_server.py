@@ -66,15 +66,34 @@ that returns and posts a name back.
        "base": "0x10000100",      // raw .bin only; ELF/UF2/HEX carry their own
        "vector_table": "0x..."}   // optional, only if neither convention fits
       -> 200 {board, chip, core, format, family, bytes, segments,
-              vector_table, stack_pointer, entry, notes}
+              entry, notes,
+              vector_table, stack_pointer}   // Arm boards only; see below
 
     POST /api/board/run     {"steps": 5000}
       -> 200 {steps, status: "running"|"stopped", detail}
 
     GET  /api/board/state?at=0x10000100&len=64&words=0xd0000010,0xd0000020
-      -> 200 {board, chip, status, detail, registers[16], apsr,
+      -> 200 {board, chip, status, detail,
+              registers: [{name, value, width}], flags: [{name, on}], pc,
               memory: {at, bytes[]}, words: [{address, value}],
-              uart: {present, bytes, dropped_bytes, text, undecodable_bytes}}
+              uart: {present, bytes, dropped_bytes, text, undecodable_bytes},
+              listing: {present, at, lines[]}}
+
+**Registers are named and carry their width, and that is not decoration.**
+This used to be sixteen positional words plus an `apsr` integer, which is the
+Armv6-M register file and nothing else: an ATmega328P has thirty-two eight-bit
+registers, SP and PC, and eight flags numbered from the bottom of SREG rather
+than four from the top of APSR. `core/<core>/machine.py` reports what its
+machine has and this passes it through, so adding a core changes no code here
+and none in the page.
+
+`pc` is on the wire for the same reason: `registers[15]` is the program
+counter on one machine here and an ordinary working register on another.
+
+`vector_table` and `stack_pointer` are **absent** rather than null on a board
+that has neither. An AVR begins executing at word zero, so there is no table
+and no stack-pointer word in the image -- and null would claim there is one
+whose value is unknown. `entry` is on every board.
 
 `uart` is **cumulative**: `text` is everything the board has transmitted since
 the image was loaded, not what is new since the last poll. A console therefore

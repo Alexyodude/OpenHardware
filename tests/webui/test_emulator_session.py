@@ -130,6 +130,29 @@ def test_nothing_in_the_script_still_reaches_for_the_removed_selector():
     assert "selectTarget" not in script, "a function with no caller"
 
 
+def test_nothing_in_the_script_indexes_a_board_register_by_position():
+    """A defect a browser found, pinned so the next one does not have to.
+
+    `state.registers[15]` is the program counter on Armv6-M and an ordinary
+    working register on an AVR. When the wire changed to named registers, one
+    of the two places doing this was updated and the other was not -- and the
+    survivor rendered `pc 0x[object Object]` into the run report, on a page
+    with **zero console errors**, because indexing an array of objects is
+    perfectly legal JavaScript.
+
+    That is the failure class this repository ranks worst: not a crash, a
+    plausible wrong answer. A test over the source is what catches it, because
+    the value only looks wrong to a human reading the pane.
+    """
+    script = (STATIC / "emulator.js").read_text(encoding="utf-8")
+    assert "state.registers[15]" not in script, (
+        "the board's registers arrive named; index 15 is the pc on one machine "
+        "here and r15 on another"
+    )
+    assert "state.apsr" not in script, "flags arrive named too"
+    assert "ARM_REGISTERS" not in script, "no core's register names live in the page"
+
+
 def test_the_view_switch_is_still_two_valued():
     """The mechanism the move relied on. A third view would show both halves
     at once, because the rule is written as a pair rather than a state
@@ -160,11 +183,11 @@ def test_a_loaded_board_carries_a_listing_around_its_program_counter():
         state = session.state()
         listing = state["listing"]
         assert listing["present"]
-        assert listing["at"] == state["registers"][15]
+        assert listing["at"] == state["pc"]
         assert listing["lines"], "a listing with no lines is not a listing"
         current = [line for line in listing["lines"] if line["current"]]
         assert len(current) == 1, "exactly one line is where execution is"
-        assert current[0]["address"] == state["registers"][15]
+        assert current[0]["address"] == state["pc"]
 
 
 def test_the_listing_is_thumb_rather_than_whatever_ran_last():

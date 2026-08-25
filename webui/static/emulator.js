@@ -511,57 +511,71 @@ async function runLoadedBoard() {
   const stopped = result.status === "stopped"
     ? ` and stopped: ${result.detail}`
     : "";
+  // `$("where")` was set by `renderBoardState` just above, from the machine's
+  // own pc register and at that register's width. Read back rather than
+  // recomputed: this line indexed the register array at position 15 and so
+  // rendered `pc 0x[object Object]` the moment the wire carried named
+  // registers -- a second place that had to know the register file's shape
+  // and did not need to.
   boardSays(
     `${boardImage.board}: ${result.steps.toLocaleString()} instructions` +
-    `${stopped}. pc 0x${state.registers[15].toString(16).padStart(8, "0")}`,
+    `${stopped}. pc 0x${$("where").textContent}`,
     result.status === "stopped" ? result.detail : "",
   );
 }
 
-/** Arm register names, indexed the way the core delivers them.
- *
- *  A separate renderer from the i8086's rather than one made generic, because
- *  the two register sets differ in kind and not only in spelling: x86 arrives
- *  as an object keyed by name and carries segments, Armv6-M arrives as
- *  sixteen positional words and has none. Folding them together would need a
- *  flag at every line, which is the parameterise-instead-of-split move the
- *  house rules name. */
-const ARM_REGISTERS = [
-  "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7",
-  "r8", "r9", "r10", "r11", "r12", "sp", "lr", "pc",
-];
-
-/** The flags Armv6-M models, and only those. The core drops the rest on write
- *  rather than storing them, so showing more would show something the model
- *  does not have. */
-const ARM_FLAGS = [["N", 31], ["Z", 30], ["C", 29], ["V", 28]];
-
-/** The previous board register snapshot, for the "changed" highlight. Separate
- *  from `previous` so switching between the i8086 and a board does not mark
- *  every register as moved. */
+/** The previous board register snapshot, keyed by name, for the "changed"
+ *  highlight. Separate from `previous` so switching between the i8086 and a
+ *  board does not mark every register as moved, and keyed by name rather than
+ *  by index so switching between two *boards* does not either -- an Arm r13 and
+ *  an AVR r13 are both at index 13 and are not the same register. */
 let previousBoard = null;
 
-function renderBoardRegisters(values) {
-  $("registers").replaceChildren(...ARM_REGISTERS.map((name, index) => {
+/** Registers, as the machine that has them names them.
+ *
+ *  **This used to be an Arm table hard-coded here**, sixteen names and a fixed
+ *  eight hex digits, with a comment arguing that a generic renderer would be
+ *  the parameterise-instead-of-split move the house rules warn about. That
+ *  argument was right about the i8086, which arrives keyed by name and carries
+ *  segments, and it is still rendered separately below. It was wrong about
+ *  *boards*, and the Arduino Uno is what showed it: an AVR has thirty-two
+ *  eight-bit registers plus SP and PC, so the Arm table would have printed
+ *  sixteen wrong names and shown r0 as `0x000000A5`.
+ *
+ *  So the wire carries `{name, value, width}` and this renders what it is
+ *  given. There is no branch on machine here and no table -- adding a core does
+ *  not touch this function. `core/<core>/machine.py`'s `view()` is what
+ *  decides, which is the only place that knows. */
+function renderBoardRegisters(registers) {
+  $("registers").replaceChildren(...registers.map((register) => {
     const cell = document.createElement("div");
     cell.className = "reg";
-    if (previousBoard && previousBoard[index] !== values[index]) {
+    const was = previousBoard ? previousBoard[register.name] : undefined;
+    if (was !== undefined && was !== register.value) {
       cell.classList.add("moved");
     }
     const label = document.createElement("span");
     label.className = "name";
-    label.textContent = name;
+    label.textContent = register.name;
     const value = document.createElement("span");
     value.className = "value";
-    value.textContent = hex(values[index], 8);
+    // Digits from the register's own width: 32 bits is eight, an AVR's eight
+    // is two. Padding a byte to eight digits is not a cosmetic problem -- it
+    // states a width the machine does not have.
+    value.textContent = hex(register.value, register.width / 4);
     cell.append(label, value);
     return cell;
   }));
 }
 
-function renderBoardFlags(apsr) {
-  $("flags").replaceChildren(...ARM_FLAGS.map(([name, bit]) => {
-    const on = ((apsr >>> bit) & 1) === 1;
+/** The flags this machine models, and only those.
+ *
+ *  Named on the wire rather than decoded from a status word here, because
+ *  there is no status word two of these machines share: Armv6-M has four flags
+ *  in the top of APSR and an AVR has eight in SREG, numbered from the bottom.
+ *  `core/<core>/machine.py` reports `[{name, on}]` and this renders it. */
+function renderBoardFlags(flags) {
+  $("flags").replaceChildren(...flags.map(({ name, on }) => {
     const chip = document.createElement("span");
     chip.className = "flag";
     chip.dataset.on = String(on);
@@ -609,15 +623,26 @@ function renderBoardListing(listing) {
  *
  *  Memory goes through the i8086's `renderMemory` with one key renamed rather
  *  than a copy of it: a hexdump is a hexdump, and the two panes differ only in
- *  what the server calls the base address. Registers and the listing do not
- *  get that treatment, for the reason `ARM_REGISTERS` gives. */
+ *  what the server calls the base address. Registers and flags do not get that
+ *  treatment, because the i8086 session's own state arrives keyed by name and
+ *  carries segments, while a board's arrives as an ordered list a machine
+ *  module composed -- the same picture on screen, from two different shapes on
+ *  the wire. */
 function renderBoardState(state) {
   renderBoardRegisters(state.registers);
-  renderBoardFlags(state.apsr);
+  renderBoardFlags(state.flags);
   renderBoardListing(state.listing);
   renderMemory({ address: state.memory.at, bytes: state.memory.bytes });
-  $("where").textContent = hex(state.registers[15], 8);
-  previousBoard = state.registers;
+  // Found by name rather than at position 15, which is the program counter on
+  // Armv6-M and an ordinary working register on an AVR. Every machine's view carries a register
+  // called `pc` -- `test_every_machine_view_carries_a_register_called_pc` is
+  // what makes that safe to rely on rather than a hope, and the width comes
+  // from the same entry so an AVR's word-counting PC prints as four digits.
+  const pc = state.registers.find((register) => register.name === "pc");
+  $("where").textContent = hex(pc.value, pc.width / 4);
+  previousBoard = Object.fromEntries(
+    state.registers.map((register) => [register.name, register.value]),
+  );
 }
 
 /** What the board printed, or why there is nothing to print.

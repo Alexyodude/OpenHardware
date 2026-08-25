@@ -113,9 +113,19 @@ CHIPS: dict[str, tuple[str, str]] = {
 #: arm-none-eabi-gcc from `tests/cortexm0/samd21/blink.c` and watches PA17
 #: change state 45 times. Different chip, different flash address, different
 #: peripheral, its own compiled image.
+#: The ATmega328P entry is the first on a machine that is not Arm, and it is
+#: worth saying what made it admissible, because "the core was built and there
+#: is a blink test" is not the argument. `tests/avr/test_blink.py` has watched a
+#: real image toggle PB5 since 2026-08-25 and is *not* the evidence named here:
+#: it drives `core.avr.abi.Cpu` directly, configuring the machine and setting
+#: the PC itself, which proves the instruction set rather than the board. The
+#: claim this table makes is a board claim, so the evidence is
+#: `tests/avr/test_uno_board.py`, where a board name and a file of bytes go
+#: into `webui/api.py` and PB5 moves.
 FIRMWARE_VERIFIED: dict[str, str] = {
     "RP2040": "tests/cortexm0/test_blink.py",
     "SAMD21": "tests/cortexm0/test_samd21_blink.py",
+    "ATmega328P": "tests/avr/test_uno_board.py",
 }
 
 #: What each instruction set would need before a core for it could be trusted.

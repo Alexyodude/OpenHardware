@@ -1,7 +1,7 @@
 ---
 id: OH-49
 title: An AVR core for the Arduino Uno, and a blink that proves it
-status: open
+status: done
 priority: P1
 created: '2026-08-25'
 touches:
@@ -47,3 +47,5 @@ A third was found by mutation and could not be caught by the blink at all: cpc m
 NOT DONE, and the reason is a real design question rather than time: webui/boards/atmega328p.py, and Arduino Uno reporting runnable. webui/boards/contract.py requires VECTOR_TABLE_OFFSETS because webui/api.py's _place() needs it -- and _place reads an initial stack pointer and a reset handler out of the first two words, which is an Arm arrangement. An AVR simply begins executing at address zero. So an atmega328p.py could satisfy the contract literally, with VECTOR_TABLE_OFFSETS = (0,), and the catalogue would then report Arduino Uno runnable while api.load_firmware could not actually enter it -- the claim-something-you-cannot-do failure this repository refuses everywhere else.
 
 The board contract needs a notion of 'how does this board enter an image' that admits a machine with no vector table, and that belongs in a ticket of its own rather than being guessed at here. The AVR core is the first non-Arm board-capable core, so it is the first time the question could be asked.
+
+**Note 2026-08-25:** Closed here, remaining half moved to OH-52. The core half is delivered and committed at bb1e139. The board half -- webui/boards/atmega328p.py and Arduino Uno reporting runnable -- turned out not to be a small remainder of this ticket but a change to webui/api.py's machine surface: the Core protocol there is missing ten of its twelve methods on the AVR, so entry is one of eleven gaps rather than the gap. That is OH-52's subject and it owns webui/boards/atmega328p.py and core/avr/machine.py from now on. This ticket's Done-when is therefore NOT met and it is not being claimed as met; it is superseded.

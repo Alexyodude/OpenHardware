@@ -41,6 +41,21 @@ a requirement, it is a wish -- which is the failure mode the ticket warned
 about: *"The contract must not become a list of registers a board is expected
 to fill in."*
 
+## And then a machine arrived that had no vector table
+
+`VECTOR_TABLE_OFFSETS` was one of two universal requirements here, on the
+strength of a caller that could be named. The caller was real; what was wrong
+was the word *universal*. `core/avr` is the first non-Arm core a board can use,
+and an AVR begins executing at address zero -- so an Arduino Uno description
+could satisfy this contract only by declaring `(0,)` and meaning nothing by it,
+after which the catalogue would report the board runnable while nothing could
+enter it.
+
+The fix is to ask the core. `core_requirements(core)` reads `REQUIRES` out of
+`core/<core>/machine.py`, so "where does the reset vector sit" is asked of
+boards on a machine that has one and of no others. `REQUIRED` keeps only what
+survives that test on every machine, which today is `install`.
+
 ## What is deliberately not required, and why each
 
 **Peripherals.** Not one. `rp2040.py`'s growth rule is that a peripheral is
@@ -74,6 +89,8 @@ import importlib
 import pathlib
 import types
 
+from webui.boards import catalogue
+
 BOARDS_DIR = pathlib.Path(__file__).resolve().parent
 
 #: Modules beside this one that are not board descriptions.
@@ -104,28 +121,74 @@ class Requirement:
     why: str
 
 
-#: Everything a board module must define. Two entries, and each names a caller.
+#: What every board must define, whatever machine it is. **One entry.**
 #:
-#: Kept this short on purpose. The temptation with a contract is to write down
-#: what a board *ought* to have; what makes this one hold is that both entries
-#: break something specific when absent, and the failure is quoted in `why`.
+#: It used to be two. `VECTOR_TABLE_OFFSETS` was the other, and it was here on
+#: the strength of a caller -- `api.py _place()` -- that turned out to be
+#: asking on behalf of one instruction set rather than all of them. An AVR
+#: begins executing at address zero and has no such table, so a universal
+#: requirement for it would have forced `webui/boards/atmega328p.py` to declare
+#: `(0,)` and mean nothing by it. The catalogue would then have reported
+#: Arduino Uno runnable while nothing could enter it, which is the
+#: claim-you-cannot-keep failure `rules/board-claims.md` exists to prevent,
+#: arriving through a door nobody was watching.
+#:
+#: So it moved to `core_requirements`, below. What is left here is genuinely
+#: universal: a board with no `install(cpu)` maps no memory on any machine.
+#:
+#: Kept short on purpose. The temptation with a contract is to write down what
+#: a board *ought* to have; what makes this one hold is that every entry breaks
+#: something specific when absent, and the failure is quoted in `why`.
 REQUIRED: tuple[Requirement, ...] = (
     Requirement(
         "install",
         "webui/api.py runtime_for(): a board with no install(cpu) maps no "
         "memory, so an image has nothing to load into",
     ),
-    Requirement(
-        "VECTOR_TABLE_OFFSETS",
-        "webui/api.py _place(): where the reset vector sits relative to the "
-        "image base. An RP2040 image is linked past 256 bytes of boot2 and a "
-        "SAMD21 image is not, so guessing one for the other enters at a word "
-        "that is not a stack pointer",
-    ),
 )
 
 
-def missing(module: types.ModuleType) -> list[str]:
+def core_requirements(core: str) -> tuple[Requirement, ...]:
+    """What `core/<core>/machine.py` asks of a board, on top of `REQUIRED`.
+
+    **The core is asked rather than listed here**, which is the whole of the
+    entry-model fix. `core/cortexm0/machine.py` needs `VECTOR_TABLE_OFFSETS`
+    because it reads an initial stack pointer and a reset handler out of two
+    words; `core/avr/machine.py` needs nothing, because an AVR begins at word
+    zero. Neither fact belongs in a module that speaks HTTP, and neither
+    belongs to *boards in general*.
+
+    Raises when the core has no `machine` module, rather than answering "this
+    board owes nothing". A core that cannot host a board is a fact worth
+    saying: `core/riscv32` is built today and has no `machine.py`, so no
+    RISC-V board can be entered, and reporting an empty requirement list would
+    make that look like a board that satisfies everything.
+    """
+    name = f"core.{core}.machine"
+    try:
+        module = importlib.import_module(name)
+    except ModuleNotFoundError as error:
+        raise RuntimeContractError(
+            f"the {core} core cannot host a board: {name} does not exist, so "
+            f"nothing knows how this machine powers on or what its registers "
+            f"are called. See core/cortexm0/machine.py for the shape."
+        ) from error
+    return tuple(Requirement(part, why) for part, why in module.REQUIRES)
+
+
+def requirements(core: str | None = None) -> tuple[Requirement, ...]:
+    """Everything a board on `core` must supply.
+
+    `core=None` asks only what is universal, which is what a caller that does
+    not yet know the machine can check. It is the weaker question and it says
+    so by needing an argument to become the strong one.
+    """
+    if core is None:
+        return REQUIRED
+    return REQUIRED + core_requirements(core)
+
+
+def missing(module: types.ModuleType, core: str | None = None) -> list[str]:
     """Every required part `module` does not supply, named.
 
     A list rather than the first failure, so a board written from scratch
@@ -133,29 +196,31 @@ def missing(module: types.ModuleType) -> list[str]:
     """
     return [
         requirement.name
-        for requirement in REQUIRED
+        for requirement in requirements(core)
         if not hasattr(module, requirement.name)
     ]
 
 
-def check(module: types.ModuleType) -> None:
+def check(module: types.ModuleType, core: str | None = None) -> None:
     """Raise unless `module` supplies everything, naming what it does not.
 
     The message carries the `why` as well as the name, because "SAMD21 is
     missing VECTOR_TABLE_OFFSETS" tells a reader what to type and not what to
     put in it.
     """
-    absent = missing(module)
+    wanted = requirements(core)
+    absent = missing(module, core)
     if not absent:
         return
     reasons = "\n".join(
         f"  {requirement.name}: {requirement.why}"
-        for requirement in REQUIRED
+        for requirement in wanted
         if requirement.name in absent
     )
+    machine = "" if core is None else f" as a {core} board"
     raise RuntimeContractError(
-        f"{module.__name__} does not satisfy the runtime board contract. "
-        f"Missing {', '.join(absent)}:\n{reasons}"
+        f"{module.__name__} does not satisfy the runtime board contract"
+        f"{machine}. Missing {', '.join(absent)}:\n{reasons}"
     )
 
 
@@ -177,3 +242,28 @@ def board_module_names(directory: pathlib.Path | None = None) -> list[str]:
 def board_modules() -> list[types.ModuleType]:
     """Every board description, imported."""
     return [importlib.import_module(name) for name in board_module_names()]
+
+
+def core_for(module: types.ModuleType) -> str:
+    """Which core a board module's chip runs on -- `rp2040` -> `cortexm0`.
+
+    The inverse of `webui/api.py`'s `description_module`, and it has to
+    normalise the same way `catalogue.described_chips` does, because a module
+    stem is lowercase and undelimited while `catalogue.CHIPS` spells its keys
+    the way the vendor does: the file is `atmega328p.py` and the chip is
+    `ATmega328P`.
+
+    Raises rather than returning None. A board module whose chip is not in the
+    survey cannot be checked against any core's requirements, and answering
+    "no core" would let it pass a contract nobody applied.
+    """
+    stem = module.__name__.rsplit(".", 1)[-1]
+    wanted = stem.upper().replace("-", "")
+    for chip, (_isa, core) in catalogue.CHIPS.items():
+        if chip.upper().replace("-", "") == wanted:
+            return core
+    raise RuntimeContractError(
+        f"{module.__name__} describes a chip that catalogue.CHIPS does not "
+        f"list, so there is no core to check it against. Expected one of "
+        f"{', '.join(sorted(catalogue.CHIPS))}"
+    )

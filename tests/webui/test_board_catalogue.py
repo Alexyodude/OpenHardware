@@ -261,9 +261,17 @@ def test_only_the_board_a_real_image_ran_on_claims_to_have_run_one():
     -- that is the argument this pin exists to refuse, and it would have let an
     empty `samd21.py` in -- but because `tests/cortexm0/test_samd21_blink.py`
     watches a real compiled image toggle PA17.
+
+    ATmega328P joined them the same day, under OH-52, and the argument it had
+    to survive was subtler. A blink test already existed --
+    `tests/avr/test_blink.py`, watching PB5 through the ABI -- and citing it
+    would have been the mistake, because this table makes a claim about a
+    *board* and that file never mentions one. The evidence is
+    `tests/avr/test_uno_board.py`, where `api.load_firmware("Arduino Uno", ...)`
+    is what runs.
     """
     proven = {b.chip for b in catalogue.catalogue() if b.firmware_verified}
-    assert proven == {"RP2040", "SAMD21"}
+    assert proven == {"RP2040", "SAMD21", "ATmega328P"}
 
 
 def test_every_firmware_claim_names_a_test_that_exists():
@@ -292,7 +300,14 @@ def test_the_firmware_evidence_actually_runs_an_image():
         ]
         assert images, f"{chip}: {evidence} names no compiled image"
         assert ".read_bytes()" in text, f"{chip}: {evidence} never reads one off disk"
-        assert "cpu.step()" in text, f"{chip}: {evidence} never executes it"
+        # `.step(` and not `cpu.step()`. The stricter spelling was a spelling
+        # rather than a rule, and it disagreed with the checker this test
+        # shadows: `tools/check_board_claims.py` collects call *names* with
+        # `ast`, so `session.step()` satisfies it. It has to, because the
+        # ATmega328P evidence drives a board through `webui/api.py` rather than
+        # a core through its ABI -- which is the stronger claim of the two, and
+        # would have been refused here for naming its variable differently.
+        assert ".step(" in text, f"{chip}: {evidence} never executes it"
 
 
 # --- the description convention --------------------------------------------
