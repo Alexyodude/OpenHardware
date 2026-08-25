@@ -7,7 +7,6 @@ created: '2026-08-26'
 touches:
 - core/avr/*
 - tests/avr/*
-- tools/lockstep_avr.mjs
 - docs/architectures.md
 - tools/gen_avr_corpus.mjs
 - tests/avr/corpus/isa.json
