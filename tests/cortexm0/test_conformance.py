@@ -56,6 +56,16 @@ FAMILIES = (
 
 C_FLAG = 1 << 29
 
+#: How many cases the standard corpus holds: every family at `--count 500`,
+#: which is what `tools/get_armv6m_tests.sh` runs.
+#:
+#: A floor rather than an equality. Generating MORE is always fine and is what
+#: somebody chasing a rare flag case would do; generating fewer silently is
+#: the failure this guards, because `--count` is a command-line argument and
+#: forgetting it costs 99.6% of the check with nothing to show for it.
+CASES_PER_FAMILY = 500
+EXPECTED_CASES = len(FAMILIES) * CASES_PER_FAMILY
+
 
 def oracle_carry_bug(family: str, encoding: int, regs: list[int]) -> int | None:
     """The C flag rp2040js produces where its code is wrong, else None.
@@ -134,7 +144,24 @@ def test_the_whole_corpus_matches_except_where_the_oracle_is_wrong(corpus_dir, c
         f"{len(unexplained)} case(s) diverge from rp2040js in a way this file "
         f"does not explain:\n  " + "\n  ".join(unexplained[:10])
     )
-    assert total >= len(FAMILIES), "corpus is suspiciously small"
+    # **A floor, and not `>= len(FAMILIES)`.**
+    #
+    # That was the assertion here and it is worth naming what it allowed: the
+    # generator's `--count` is a command-line argument, so a corpus rebuilt
+    # with `--count 1` would be twenty-seven cases and pass. Every divergence
+    # explained, nothing wrong, and the core checked against a twenty-seventh
+    # of one per cent of what it used to be.
+    #
+    # `--count 500` is what `tools/get_armv6m_tests.sh` runs and what the
+    # committed arrangement means, so the floor is the number that produces:
+    # 27 families x 500. Regenerating smaller is a decision somebody has to
+    # make on purpose, here, rather than by forgetting a flag.
+    assert total >= EXPECTED_CASES, (
+        f"only {total} cases ran, against {EXPECTED_CASES} expected. A corpus "
+        f"generated with a smaller --count is not a smaller version of this "
+        f"check, it is a different one -- regenerate with "
+        f"tools/get_armv6m_tests.sh, or lower this on purpose."
+    )
     # Not `== 200`: the count scales with --count. What must hold is that
     # every divergence was predicted, which the assertion above already
     # proved, and that divergences did not somehow vanish -- which would mean

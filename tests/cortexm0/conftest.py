@@ -37,7 +37,11 @@ def corpus_dir() -> pathlib.Path:
             f"no Armv6-M corpus at {CORPUS}. Generate one:\n"
             "  git clone https://github.com/wokwi/rp2040js ../rp2040js\n"
             "  (cd ../rp2040js && npm install && npm run build)\n"
-            "  node tools/gen_armv6m_tests.mjs --count 500"
+            "  tools/get_armv6m_tests.sh\n"
+            "\n"
+            "The script is the supported path: it generates at the --count the\n"
+            "conformance floor expects, which a hand-typed command is one\n"
+            "forgotten flag away from getting wrong."
         )
     return CORPUS
 
