@@ -110,6 +110,31 @@ int riscv32_add_region(Riscv32Cpu* cpu, uint32_t base, uint32_t size,
 
 void riscv32_clear_regions(Riscv32Cpu* cpu) { as_cpu(cpu)->clear_regions(); }
 
+void riscv32_map_register(Riscv32Cpu* cpu, uint32_t address, uint32_t value) {
+    as_cpu(cpu)->map_register(address, value);
+}
+
+void riscv32_map_alias(Riscv32Cpu* cpu, uint32_t address, uint32_t target,
+                       int op, int readable) {
+    // An out-of-range `op` becomes Store rather than reinterpreting whatever
+    // integer arrived as an enumerator, which is undefined behaviour and would
+    // pick a behaviour at the compiler's discretion.
+    riscv32::WriteOp write_op = riscv32::WriteOp::Store;
+    switch (op) {
+    case 1: write_op = riscv32::WriteOp::Set; break;
+    case 2: write_op = riscv32::WriteOp::Clear; break;
+    case 3: write_op = riscv32::WriteOp::Xor; break;
+    default: break;
+    }
+    as_cpu(cpu)->map_alias(address, target, write_op, readable != 0);
+}
+
+int riscv32_is_mapped(const Riscv32Cpu* cpu, uint32_t address) {
+    return as_cpu(cpu)->is_mapped(address) ? 1 : 0;
+}
+
+void riscv32_clear_mmio(Riscv32Cpu* cpu) { as_cpu(cpu)->clear_mmio(); }
+
 int riscv32_step(Riscv32Cpu* cpu) {
     return static_cast<int>(riscv32::step(*as_cpu(cpu)));
 }

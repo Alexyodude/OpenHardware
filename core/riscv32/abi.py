@@ -37,7 +37,15 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match RISCV32_ABI_VERSION in abi.h.
-ABI_VERSION = 1
+ABI_VERSION = 2
+
+#: `riscv32::WriteOp`, by the name a board description uses.
+#:
+#: Named rather than numbered at the call site, because "2" and "clear" are
+#: equally short and only one of them is readable in a board file. The same
+#: four spellings `webui/boards/rp2040.py` and `samd21.py` already pass to the
+#: Cortex-M0 core, so a board author who has read one has read both.
+WRITE_OPS = {"store": 0, "set": 1, "clear": 2, "xor": 3}
 
 #: Must match `riscv32::Extension`. Nothing is enabled until a board says so,
 #: because a core that arrived believing it had M and C would be making a claim
@@ -157,6 +165,16 @@ _SIGNATURES = {
         ctypes.c_int,
     ),
     "riscv32_clear_regions": ([ctypes.c_void_p], None),
+    "riscv32_map_register": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32], None
+    ),
+    "riscv32_map_alias": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int,
+         ctypes.c_int],
+        None,
+    ),
+    "riscv32_is_mapped": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
+    "riscv32_clear_mmio": ([ctypes.c_void_p], None),
     "riscv32_step": ([ctypes.c_void_p], ctypes.c_int),
     "riscv32_fault_address": ([ctypes.c_void_p], ctypes.c_uint32),
     "riscv32_fault_was_fetch": ([ctypes.c_void_p], ctypes.c_int),
@@ -307,6 +325,38 @@ class Cpu:
 
     def clear_regions(self) -> None:
         self._lib.riscv32_clear_regions(self._handle)
+
+    # --- memory-mapped registers -----------------------------------------
+
+    def map_register(self, address: int, value: int = 0) -> None:
+        """An address that holds a word: reads answer it, writes replace it."""
+        self._lib.riscv32_map_register(self._handle, address, value)
+
+    def map_alias(self, address: int, target: int, op: str,
+                  readable: bool = True) -> None:
+        """An address whose write applies `op` to `target`'s word.
+
+        `op` is one of `store`, `set`, `clear`, `xor`. An unknown name raises
+        here rather than being passed through as a number the C side would
+        quietly read as `store` -- a board that meant `clear` and silently got
+        `store` would turn a W1TC register into one that overwrites.
+        """
+        try:
+            code = WRITE_OPS[op]
+        except KeyError:
+            raise AbiError(
+                f"unknown write op {op!r}; expected one of {sorted(WRITE_OPS)}"
+            ) from None
+        self._lib.riscv32_map_alias(
+            self._handle, address, target, code, 1 if readable else 0
+        )
+
+    def is_mapped(self, address: int) -> bool:
+        """Whether `address` is a mapped register rather than bulk memory."""
+        return bool(self._lib.riscv32_is_mapped(self._handle, address))
+
+    def clear_mmio(self) -> None:
+        self._lib.riscv32_clear_mmio(self._handle)
 
     def in_range(self, address: int, bytes_: int = 1) -> bool:
         return bool(self._lib.riscv32_in_range(self._handle, address, bytes_))

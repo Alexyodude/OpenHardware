@@ -42,6 +42,7 @@
 #include <stdint.h>
 
 #include <array>
+#include <unordered_map>
 #include <vector>
 
 namespace riscv32 {
@@ -106,6 +107,15 @@ enum class StepResult : int {
     Illegal = 3,
 };
 
+/// What a write to a mapped alias does to the register it names.
+///
+/// `Store` is an ordinary register. The other three are the ESP32's W1TS and
+/// W1TC and the RP2040's atomic aliases: one address that modifies another
+/// rather than holding a value of its own. Same set and same spelling as
+/// `core/cortexm0`, because the behaviours are bus arrangements rather than
+/// anything Arm or RISC-V.
+enum class WriteOp : uint8_t { Store, Set, Clear, Xor };
+
 class Cpu {
 public:
     Cpu();
@@ -149,6 +159,75 @@ public:
 
     /// Whether an instruction may be fetched from `address`. See `add_region`.
     bool executable_at(uint32_t address) const;
+
+    // --- memory-mapped registers -----------------------------------------
+    //
+    // ## Why a peripheral is not a region
+    //
+    // `add_region` gives back what was written. A peripheral does not: a
+    // status bit is set by hardware, a W1TC register clears bits rather than
+    // storing them, and a FIFO is not a word at all. Mapping peripheral space
+    // as a plain region turns every wait-for-ready poll into an **infinite
+    // loop** -- firmware that hangs instead of firmware that says what is
+    // missing, which is the failure that wastes the most time.
+    //
+    // So an address is either a region, or mapped here, or neither -- and
+    // neither faults, loudly, naming the address. That is the whole design:
+    // the fault is what tells a person which peripheral the board description
+    // is missing.
+    //
+    // ## Only two of the five, and that is deliberate
+    //
+    // `core/cortexm0` grew five behaviours -- register, alias, mirror,
+    // constant, stream -- each when a real image faulted without it.
+    // `map_register` and `map_alias` are what an ESP32-C3 GPIO blink needs.
+    // The other three came from a UART and a timer, and porting them now would
+    // be speculative generality in the one file that argues hardest against
+    // it. They arrive when an image here faults without them.
+
+    /// An address that holds a word: reads answer it, writes replace it.
+    ///
+    /// `value` is the register's reset value, which is a chip fact and comes
+    /// from the board. **The address is masked to a word boundary**, so all
+    /// four bytes of a register name the same entry and a byte-wide write
+    /// reaches it.
+    void map_register(uint32_t address, uint32_t value);
+
+    /// An address whose write applies `op` to another address's word.
+    ///
+    /// This is the ESP32's W1TS/W1TC pairs -- `GPIO_OUT_W1TS` sets the bits
+    /// written to it in `GPIO_OUT` and `GPIO_OUT_W1TC` clears them -- and
+    /// equally the RP2040's atomic aliases and STM32's BSRR. **The offsets are
+    /// not here**: which offset means "set" is a fact about the chip's bus, so
+    /// the caller passes both addresses and this stays architecture-only.
+    ///
+    /// `readable` separates two things that write identically and read
+    /// differently, and conflating them gives a wrong answer rather than a
+    /// loud one:
+    ///
+    ///  * A **bus alias window** is a second view of the register, so reading
+    ///    it returns that register.
+    ///  * A **dedicated write-only register** is its own address that happens
+    ///    to modify another, and hardware reads it as zero. The ESP32's W1TS
+    ///    and W1TC are these. Returning `GPIO_OUT` there is not a missing
+    ///    feature, it is a wrong value.
+    ///
+    /// Zero from a `readable == false` register is the *architecture's*
+    /// answer, not this model shrugging.
+    void map_alias(uint32_t address, uint32_t target, WriteOp op,
+                   bool readable = true);
+
+    /// Whether `address` is a mapped register rather than bulk memory.
+    ///
+    /// False for a region. The two are exclusive by construction: `map_*`
+    /// refuses nothing, but a board that maps a register inside a region has
+    /// described one address twice, and `in_range` and this both answering
+    /// true is how that shows up.
+    bool is_mapped(uint32_t address) const;
+
+    /// Forget every mapped register. Called by `clear_regions`, because a
+    /// machine with no board has no peripherals either.
+    void clear_mmio();
 
     /// False on a fault, having read or written nothing. The caller turns that
     /// into `StepResult::MemoryFault`.
@@ -246,10 +325,40 @@ private:
     const Region* region_for(uint32_t address, uint32_t bytes) const;
     Region* region_for(uint32_t address, uint32_t bytes);
 
+    /// One mapped word. `target` names the address whose storage a write
+    /// changes; for a plain register it is the address itself, which is what
+    /// keeps the lookup uniform and needs no "is this an alias" flag.
+    struct Mapped {
+        uint32_t value = 0;
+        uint32_t target = 0;
+        WriteOp op = WriteOp::Store;
+        bool readable = true;
+    };
+
+    /// A mapped read, or false if `address` is not mapped.
+    ///
+    /// Separate from `read_word` so the sub-word accessors can consult it too.
+    /// **That matters more here than it looks.** ESP32 peripheral registers
+    /// are word-accessed by convention, but nothing stops a compiler emitting
+    /// `lbu` against one, and a byte read that skipped this would fall through
+    /// to the region lookup, find nothing, and fault at an address the board
+    /// describes perfectly well.
+    bool mmio_read(uint32_t address, uint32_t& out) const;
+
+    /// A mapped write, or false if `address` is not mapped.
+    ///
+    /// `byte_mask` is which bytes of the word the access actually carries, so
+    /// a byte-wide store to a register leaves the other three alone. It is
+    /// applied to `Store` only: for Set, Clear and Xor the value has already
+    /// been positioned by the caller, and masking it again would clear bits
+    /// the write never named.
+    bool mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask);
+
     std::array<uint32_t, kRegisters> x_{};
     uint32_t pc_ = 0;
     uint32_t extensions_ = 0;
     std::vector<Region> regions_;
+    std::unordered_map<uint32_t, Mapped> mmio_;
     mutable uint32_t fault_address_ = 0;
     mutable bool fault_was_fetch_ = false;
 };

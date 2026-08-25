@@ -166,15 +166,30 @@ def test_the_failure_says_what_breaks_without_it():
 
 
 def test_a_core_with_no_machine_module_cannot_host_a_board():
-    """Not "this board owes nothing". `core/riscv32` is built today and has no
-    `machine.py`, so nothing knows how a RISC-V board powers on -- and an empty
-    requirement list would make that indistinguishable from a board that
-    satisfies everything, which is the vacuous-pass failure this repository
-    refuses everywhere else."""
+    """Not "this board owes nothing".
+
+    A core with no `machine.py` cannot say how its machine powers on, and an
+    empty requirement list would make that indistinguishable from a board that
+    satisfies everything -- the vacuous-pass failure this repository refuses
+    everywhere else.
+
+    **The example was `riscv32` until OH-47 gave it a machine module.** It is
+    `i8086` now, and that is the better example for a reason worth keeping: no
+    board in the catalogue carries an i8086, so this one is not waiting to be
+    written. `webui/api.py`'s `listing_view` makes the same observation about
+    that core's segmented disassembler.
+    """
     with pytest.raises(contract.RuntimeContractError) as caught:
-        contract.core_requirements("riscv32")
-    assert "core.riscv32.machine" in str(caught.value)
+        contract.core_requirements("i8086")
+    assert "core.i8086.machine" in str(caught.value)
     assert "cannot host a board" in str(caught.value)
+
+
+def test_the_three_board_capable_cores_all_have_a_machine_module():
+    """The other direction, so the test above cannot pass by every core lacking
+    one. Each of these hosts a real board with a real image behind it."""
+    for core in ("cortexm0", "avr", "riscv32"):
+        contract.core_requirements(core)      # raises if the module is missing
 
 
 def test_a_board_that_satisfies_the_contract_raises_nothing():

@@ -28,7 +28,10 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define RISCV32_ABI_VERSION 1
+//: Bumped to 2 on 2026-08-25 (OH-47), which added the four mmio
+//: entry points below. The binding refuses a library reporting a
+//: different number rather than calling a symbol that is not there.
+#define RISCV32_ABI_VERSION 2
 
 /// x0 through x31, then PC.
 ///
@@ -91,6 +94,17 @@ RISCV32_API void riscv32_clear_memory(Riscv32Cpu* cpu);
 RISCV32_API int riscv32_add_region(Riscv32Cpu* cpu, uint32_t base,
                                    uint32_t size, int executable, uint8_t fill);
 RISCV32_API void riscv32_clear_regions(Riscv32Cpu* cpu);
+
+/// Memory-mapped registers. See `cpu.h` for why a peripheral is not a region
+/// and why only two of the five behaviours are here.
+///
+/// `op` is `riscv32::WriteOp` as an int: 0 Store, 1 Set, 2 Clear, 3 Xor.
+RISCV32_API void riscv32_map_register(Riscv32Cpu* cpu, uint32_t address,
+                                      uint32_t value);
+RISCV32_API void riscv32_map_alias(Riscv32Cpu* cpu, uint32_t address,
+                                   uint32_t target, int op, int readable);
+RISCV32_API int riscv32_is_mapped(const Riscv32Cpu* cpu, uint32_t address);
+RISCV32_API void riscv32_clear_mmio(Riscv32Cpu* cpu);
 
 /// Execute one instruction at PC, advancing PC past it.
 ///

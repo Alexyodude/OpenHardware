@@ -41,6 +41,7 @@ void Cpu::reset() {
     pc_ = 0;
     extensions_ = 0;
     regions_.clear();
+    mmio_.clear();
     fault_address_ = 0;
     fault_was_fetch_ = false;
 }
@@ -74,6 +75,20 @@ bool Cpu::executable_at(uint32_t address) const {
 }
 
 bool Cpu::read_byte_checked(uint32_t address, uint8_t& out) const {
+    // **The sub-word paths consult MMIO too, and this is not decoration.**
+    // ESP32 peripheral registers are word-accessed by convention, but nothing
+    // stops a compiler emitting `lbu` against one -- and a byte read that fell
+    // through to the region lookup would fault at an address the board
+    // describes perfectly well. `core/cortexm0` shipped without this and had
+    // to have it added.
+    if (is_mapped(address)) {
+        uint32_t word = 0;
+        if (!mmio_read(address, word)) {
+            return false;
+        }
+        out = static_cast<uint8_t>(word >> ((address & 3u) * 8u));
+        return true;
+    }
     const Region* region = region_for(address, 1);
     if (region == nullptr) {
         note_fault(address, false);
@@ -84,6 +99,11 @@ bool Cpu::read_byte_checked(uint32_t address, uint8_t& out) const {
 }
 
 bool Cpu::write_byte_checked(uint32_t address, uint8_t value) {
+    if (is_mapped(address)) {
+        const unsigned shift = (address & 3u) * 8u;
+        return mmio_write(address, static_cast<uint32_t>(value) << shift,
+                          0xFFu << shift);
+    }
     Region* region = region_for(address, 1);
     if (region == nullptr) {
         note_fault(address, false);
@@ -94,6 +114,14 @@ bool Cpu::write_byte_checked(uint32_t address, uint8_t value) {
 }
 
 bool Cpu::read_halfword(uint32_t address, uint16_t& out) const {
+    if (is_mapped(address)) {
+        uint32_t word = 0;
+        if (!mmio_read(address, word)) {
+            return false;
+        }
+        out = static_cast<uint16_t>(word >> ((address & 2u) * 8u));
+        return true;
+    }
     const Region* region = region_for(address, 2);
     if (region == nullptr) {
         note_fault(address, false);
@@ -106,6 +134,11 @@ bool Cpu::read_halfword(uint32_t address, uint16_t& out) const {
 }
 
 bool Cpu::write_halfword(uint32_t address, uint16_t value) {
+    if (is_mapped(address)) {
+        const unsigned shift = (address & 2u) * 8u;
+        return mmio_write(address, static_cast<uint32_t>(value) << shift,
+                          0xFFFFu << shift);
+    }
     Region* region = region_for(address, 2);
     if (region == nullptr) {
         note_fault(address, false);
@@ -118,6 +151,9 @@ bool Cpu::write_halfword(uint32_t address, uint16_t value) {
 }
 
 bool Cpu::read_word(uint32_t address, uint32_t& out) const {
+    if (is_mapped(address)) {
+        return mmio_read(address, out);
+    }
     const Region* region = region_for(address, 4);
     if (region == nullptr) {
         note_fault(address, false);
@@ -132,6 +168,9 @@ bool Cpu::read_word(uint32_t address, uint32_t& out) const {
 }
 
 bool Cpu::write_word(uint32_t address, uint32_t value) {
+    if (is_mapped(address)) {
+        return mmio_write(address, value, 0xFFFFFFFFu);
+    }
     Region* region = region_for(address, 4);
     if (region == nullptr) {
         note_fault(address, false);
@@ -196,6 +235,102 @@ bool Cpu::add_region(uint32_t base, uint32_t size, bool executable,
     return true;
 }
 
-void Cpu::clear_regions() { regions_.clear(); }
+void Cpu::clear_regions() {
+    regions_.clear();
+    // A machine with no board has no peripherals either. Leaving `mmio_`
+    // behind would let a second board inherit the first one's registers, which
+    // is the kind of state that makes one test pass only when another ran
+    // first.
+    mmio_.clear();
+}
+
+void Cpu::clear_mmio() { mmio_.clear(); }
+
+void Cpu::map_register(uint32_t address, uint32_t value) {
+    const uint32_t at = address & ~3u;
+    Mapped entry;
+    entry.value = value;
+    entry.target = at;
+    mmio_[at] = entry;
+}
+
+void Cpu::map_alias(uint32_t address, uint32_t target, WriteOp op,
+                    bool readable) {
+    const uint32_t at = address & ~3u;
+    Mapped entry;
+    entry.target = target & ~3u;
+    entry.op = op;
+    entry.readable = readable;
+    mmio_[at] = entry;
+}
+
+bool Cpu::is_mapped(uint32_t address) const {
+    return mmio_.find(address & ~3u) != mmio_.end();
+}
+
+bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
+    const auto found = mmio_.find(address & ~3u);
+    if (found == mmio_.end()) {
+        return false;
+    }
+    const Mapped& entry = found->second;
+    if (!entry.readable) {
+        // The architecture's answer and not an absence: a W1TS register reads
+        // as zero on the part. See `map_alias`.
+        out = 0;
+        return true;
+    }
+    if (entry.target == (address & ~3u)) {
+        out = entry.value;
+        return true;
+    }
+    // A readable alias is a second view of its target, so it answers what the
+    // target holds. One hop only -- an alias of an alias would need a loop,
+    // and a loop needs a cycle check that nothing has asked for.
+    const auto origin = mmio_.find(entry.target);
+    if (origin == mmio_.end()) {
+        // An alias whose target was never mapped is a mistake in the board
+        // description. Faulting says so; answering zero would be the silent
+        // hang this whole design refuses.
+        note_fault(address, false);
+        return false;
+    }
+    out = origin->second.value;
+    return true;
+}
+
+bool Cpu::mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask) {
+    const uint32_t at = address & ~3u;
+    const auto found = mmio_.find(at);
+    if (found == mmio_.end()) {
+        return false;
+    }
+    const Mapped& entry = found->second;
+    const auto target = mmio_.find(entry.target);
+    if (target == mmio_.end()) {
+        note_fault(address, false);
+        return false;
+    }
+
+    uint32_t& stored = target->second.value;
+    switch (entry.op) {
+    case WriteOp::Store:
+        // The byte mask applies to a store and to nothing else. For the other
+        // three the value has already been positioned by the caller, and
+        // masking again would clear bits the write never named.
+        stored = (stored & ~byte_mask) | (value & byte_mask);
+        break;
+    case WriteOp::Set:
+        stored |= value;
+        break;
+    case WriteOp::Clear:
+        stored &= ~value;
+        break;
+    case WriteOp::Xor:
+        stored ^= value;
+        break;
+    }
+    return true;
+}
 
 }  // namespace riscv32
