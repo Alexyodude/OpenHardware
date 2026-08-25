@@ -30,39 +30,52 @@ python tools/tickets.py new "Decode the modrm byte" \
 
 `new` refuses on a resemblance and prints what it matched. `--force` overrides.
 
-## Installing the guard
-
-`tools/ticket_guard.py` is the only layer that stops a bad write *before* it
-happens. It runs as a `PreToolUse` hook.
-
-**It cannot ship with the code.** `.claude/` is git-ignored here, so the
-registration lives on your machine, not in the repository. Add this to
-`.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Edit|Write|NotebookEdit",
-        "hooks": [
-          { "type": "command", "command": "python tools/ticket_guard.py" }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Check it took:
+## Installing the enforcement
 
 ```bash
-python tools/ticket_guard.py --self-test      # 6 cases
+python tools/install_hooks.py
 ```
 
-Without it you still get `tools/check_ticket_claims.py` in CI, which catches
-the same mistakes after the fact rather than before. That gap is recorded in
-`rules/ticket-claims.md` §7 rather than glossed over.
+That is the whole install. Run it twice and the second run tells you there was
+nothing to do.
+
+It sets up two checks, deliberately different in strength:
+
+| | Catches | Ships? |
+|---|---|---|
+| `tools/ticket_guard.py` | the write, **before** it lands | no — registration only |
+| `tools/githooks/pre-commit` | the commit, after the write | **yes** — content is tracked |
+
+**The guard is the better check and the one that cannot travel.** It runs as a
+Claude Code `PreToolUse` hook, and the only place that can be registered is
+`.claude/settings.json`, which is git-ignored here — the note above it in
+`.gitignore` says it comes from a personal template and is not committed
+per-project. So `install_hooks.py` *generates* that registration rather than
+the repository carrying it.
+
+**The commit hook is the one that survives a clone**, because its content is a
+tracked file and installation is one command. It is weaker: it sees a write
+after it happened rather than refusing it, and `git commit --no-verify`
+bypasses it. That is not closed on purpose — a check nobody can bypass gets
+uninstalled instead, and an uninstalled check protects nothing. It also
+degrades to a warning rather than an error where python is not on `PATH`,
+because a hook that makes the repository uncommittable gets removed.
+
+Check they took:
+
+```bash
+python tools/ticket_guard.py --self-test    # 6 cases
+python tools/install_hooks.py --check       # reports, changes nothing
+python tools/check_ticket_claims.py --staged
+```
+
+`install_hooks.py` refuses rather than overwrites: a `core.hooksPath` someone
+else already set, or a `.claude/settings.json` it cannot parse. Silently taking
+over either would be a worse failure than not installing.
+
+Without any of it you still get `tools/check_ticket_claims.py` in CI, which
+catches the same mistakes after the fact. What is left of that gap is recorded
+in `rules/ticket-claims.md` §7.1 rather than glossed over.
 
 ## The file format
 

@@ -89,3 +89,51 @@ def test_check_only_never_reports_a_mutation():
     for line in (H.install_git_hooks(check_only=True), H.install_claude_hook(check_only=True)):
         assert not line.startswith("set "), line
         assert not line.startswith("registered "), line
+
+
+def test_the_ticket_docs_name_no_tool_that_does_not_exist():
+    """Documentation that names a missing tool is worse than none.
+
+    This is the failure that started the thread these hooks came out of:
+    `tickets check` was documented under Housekeeping and had never run once,
+    and OH-40 found error messages telling a reader to run a script that had
+    been deleted. A doc naming a tool that is not there is believed.
+
+    Matched in **command position** -- after `python` or `bash` -- rather than
+    anywhere the string appears. The first draft matched any path and failed
+    immediately on `tools/sub/x.py`, which is not a tool at all: it is the
+    example in the claim-pattern table of a path `tools/*.py` does *not*
+    match. Keying on the substring rather than on the instruction is the same
+    error `rules/board-claims.md` records for the word "firmware".
+    """
+    import re
+
+    docs = REPO / "docs" / "tickets" / "README.md"
+    text = docs.read_text(encoding="utf-8")
+    pattern = r"(?:python|bash)\s+(tools/[A-Za-z0-9_/]+\.(?:py|sh))\b"
+    named = set(re.findall(pattern, text))
+    assert named, "no runnable tools referenced; the pattern likely stopped matching"
+
+    missing = sorted(n for n in named if not (REPO / n).exists())
+    assert not missing, f"{docs.name} says to run tools that do not exist: {missing}"
+
+    # Negative control, against a string really in that file rather than a
+    # hypothetical: a path used to explain a glob is not an instruction.
+    assert "tools/sub/x.py" in text, "the claim-pattern example vanished"
+    assert "tools/sub/x.py" not in named
+
+
+def test_the_install_step_is_a_command_not_a_json_block():
+    """The install step used to be a JSON block a person retyped.
+
+    It could not be verified, could not be re-run, and drifted from the hook
+    it was meant to register. `install_hooks.py` replaced it precisely so the
+    instruction is executable, so the docs must not fall back to prose.
+    """
+    text = (REPO / "docs" / "tickets" / "README.md").read_text(encoding="utf-8")
+    section = text[text.index("## Installing"):text.index("## The file format")]
+    assert "tools/install_hooks.py" in section, "the install step is not the installer"
+    assert '"PreToolUse": [' not in section, (
+        "the hand-typed registration block is back in the docs; it drifts from "
+        "install_hooks.py's GUARD_HOOK and cannot be checked"
+    )
