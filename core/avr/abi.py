@@ -34,7 +34,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match AVR_ABI_VERSION in abi.h.
-ABI_VERSION = 2
+ABI_VERSION = 3
 
 #: Must match avr::StepResult.
 OK = 0
@@ -74,6 +74,15 @@ _SIGNATURES = {
         ctypes.c_int,
     ),
     "avr_timer_count": ([ctypes.c_void_p], ctypes.c_uint8),
+    "avr_map_usart": (
+        [ctypes.c_void_p, ctypes.c_uint16, ctypes.c_uint16, ctypes.c_uint16,
+         ctypes.c_uint8, ctypes.c_uint8],
+        ctypes.c_int,
+    ),
+    "avr_usart_output": (
+        [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32],
+        ctypes.c_uint32,
+    ),
     "avr_interrupt_inhibited": ([ctypes.c_void_p], ctypes.c_int),
     "avr_program_words": ([ctypes.c_void_p], ctypes.c_uint32),
     "avr_data_bytes": ([ctypes.c_void_p], ctypes.c_uint32),
@@ -207,6 +216,46 @@ class Cpu:
                 f"vector=0x{vector:04x} in {self.program_words} words of "
                 f"program, instructions_per_tick={instructions_per_tick}"
             )
+
+    def map_usart(
+        self,
+        *,
+        data: int,
+        status: int,
+        control: int,
+        enable_bit: int,
+        ready_mask: int,
+    ) -> None:
+        """Give the machine a USART. Call after `configure`, which resets.
+
+        Keyword-only for the reason `map_timer` is: three data addresses in a
+        row are three chances to swap two, and every one would be plausible.
+        """
+        ok = self._lib.avr_map_usart(
+            self._handle, data, status, control, enable_bit, ready_mask
+        )
+        if not ok:
+            raise AbiError(
+                f"cannot map a usart with data=0x{data:04x}, "
+                f"status=0x{status:04x}, control=0x{control:04x} in "
+                f"{self.data_bytes} bytes of data, enable_bit={enable_bit}"
+            )
+
+    def usart_output(self) -> bytes:
+        """Everything transmitted, oldest byte first.
+
+        Asked for its length first and read second rather than guessing a
+        buffer size: the C side returns the true length either way, so output
+        that grew between the two calls is caught by the second call's own
+        return rather than silently truncated. Same arrangement as
+        `core.cortexm0.abi.Cpu.stream`.
+        """
+        length = self._lib.avr_usart_output(self._handle, None, 0)
+        if length == 0:
+            return b""
+        buffer = (ctypes.c_uint8 * length)()
+        self._lib.avr_usart_output(self._handle, buffer, length)
+        return bytes(buffer)
 
     @property
     def timer_count(self) -> int:

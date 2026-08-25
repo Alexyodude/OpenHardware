@@ -16,6 +16,10 @@ void Cpu::reset() {
     executed_ = 0;
     timer_ticks_ = 0;
     inhibit_ = false;
+    // A reset is a new run of the program, so what the last one printed is not
+    // this one's output. The MAPPING survives -- a board wires the peripheral
+    // once -- but the bytes do not.
+    usart_output_.clear();
     fault_address_ = 0;
     fault_was_program_ = false;
     std::fill(data_.begin(), data_.end(), static_cast<uint8_t>(0));
@@ -66,6 +70,22 @@ bool Cpu::read_data(uint16_t address, uint8_t& out) const {
         out = timer_count();
         return true;
     }
+    if (has_usart_) {
+        // The status register reads back what was written, plus the bits that
+        // are always true of a transmitter that has already finished. Storing
+        // them instead would not survive `HardwareSerial::write`, which writes
+        // the register back with only U2X0 and TXC0 preserved -- and would
+        // therefore clear UDRE0 and drop the program into the interrupt path.
+        if (address == usart_.status) {
+            out = static_cast<uint8_t>(data_[address] | usart_.ready_mask);
+            return true;
+        }
+        // Nothing is wired to the receiver, so there is nothing to read.
+        if (address == usart_.data) {
+            out = 0;
+            return true;
+        }
+    }
     if (address >= data_.size()) {
         note_fault(address, false);
         return false;
@@ -99,6 +119,19 @@ bool Cpu::write_data(uint16_t address, uint8_t value) {
     // would show up as a handler that fires forever.
     if (has_timer_ && address == timer_.flag) {
         data_[address] &= static_cast<uint8_t>(~value);
+        return true;
+    }
+    // A write to the data register is a byte transmitted -- **but only while
+    // the transmitter is enabled.** A write made before `Serial.begin()` is
+    // discarded, which is what the silicon does and what
+    // `webui/boards/rp2040.py` already models for its own UART: "the emulated
+    // data register discards writes made while UARTEN is clear". Buffering
+    // them instead would make a missing `begin()` invisible, and a missing
+    // `begin()` is the commonest mistake there is in an Arduino sketch.
+    if (has_usart_ && address == usart_.data) {
+        if (data_[usart_.control] & (1u << usart_.enable_bit)) {
+            usart_output_.push_back(value);
+        }
         return true;
     }
     if (address >= data_.size()) {
@@ -158,6 +191,23 @@ bool Cpu::interrupt_pending() const {
 
 void Cpu::acknowledge_interrupt() {
     data_[timer_.flag] &= static_cast<uint8_t>(~(1u << timer_.bit));
+}
+
+// --- the transmitter ---------------------------------------------------------
+
+bool Cpu::map_usart(const Usart& usart) {
+    // Checked once here rather than on every access, the same trade `map_timer`
+    // makes: `write_data` indexes `data_[usart_.control]` without a bounds
+    // check and is on the path of every store a program makes.
+    const uint32_t size = static_cast<uint32_t>(data_.size());
+    if (usart.data >= size || usart.status >= size || usart.control >= size ||
+        usart.enable_bit > 7) {
+        return false;
+    }
+    usart_ = usart;
+    has_usart_ = true;
+    usart_output_.clear();
+    return true;
 }
 
 }  // namespace avr

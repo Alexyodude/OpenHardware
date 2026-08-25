@@ -49,13 +49,17 @@ need them: `DDRB` and `PORTB` are bytes of the data space, so a write to 0x24
 stores and a read returns what was stored, which is what the silicon does for
 those two registers.
 
-**Timer 0 is the exception, and it is exactly one call.** `TCNT0` cannot be a
+**Two peripherals are the exception, and each is exactly one call.** `TCNT0` cannot be a
 stored byte -- it has to answer something different each time it is read, or
 `delay()` never returns. OH-59 measured that: with the instruction set
 complete, a stock Arduino Blink reached `loop()`, drove PB5 high, and then
 spun in `micros()` forever. So `core/avr` grew a counter and the one interrupt
-it raises, and this file is where the addresses for them are written down. See
-`core/avr/cpu.h`'s `Timer` for what is modelled and what is not.
+it raises, and this file is where the addresses for them are written down.
+
+**USART0 is the other**, added by OH-63 for the same reason: a
+`Serial.println` sketch wrote into a data register that stored the byte and
+told nobody. See `core/avr/cpu.h`'s `Timer` and `Usart` for what each models
+and what neither does.
 
 **Where that stops being true, and it does:** `PINB` reads the *electrical
 level on the pins*, so on a pin driven as an output it follows `PORTB`, and on
@@ -73,10 +77,15 @@ yet; the day something does, that is the first claim to re-check.
 
 ## What is deliberately absent
 
-Timers 1 and 2, timer 0's compare-match interrupts and PWM outputs, the USART,
-the ADC, the EEPROM. Same growth rule the other two boards keep: a peripheral
-is added when a real image needs it and not before, and timer 0 is here
-because a real image spun forever without it.
+Timers 1 and 2, timer 0's compare-match interrupts and PWM outputs, USART
+reception, the ADC, the EEPROM. Same growth rule the other two boards keep: a
+peripheral is added when a real image needs it and not before -- timer 0 is
+here because a real image spun forever without it, and USART0's transmitter is
+here because a real image printed into a register nothing read.
+
+Reception is absent on purpose rather than by omission: nothing is wired to
+the other end, so `Serial.available()` answering false forever is the truth
+and not a gap.
 
 Here the rule bites differently, because a missing peripheral on this core
 does not fault -- it reads zero. `TCCR0A` and `TCCR0B` are the live example:
@@ -184,6 +193,52 @@ TIMER0_OVF_VECTOR = TIMER0_OVF_VECTOR_NUMBER * VECTOR_WORDS
 #: beside the `Timer` struct, where the next reader of the mechanism will see it.
 INSTRUCTIONS_PER_TICK = 64
 
+#: USART0, as **data** addresses. From `iom328p.h:737,747,757,771,781,787`:
+#:
+#:     #define UCSR0A _SFR_MEM8(0xC0)
+#:     #define UCSR0B _SFR_MEM8(0xC1)
+#:     #define UCSR0C _SFR_MEM8(0xC2)
+#:     #define UBRR0L _SFR_MEM8(0xC4)
+#:     #define UBRR0H _SFR_MEM8(0xC5)
+#:     #define UDR0   _SFR_MEM8(0xC6)
+#:
+#: All six are `_SFR_MEM8`, so none of them takes the +0x20 that PORTB and the
+#: timer registers do. That is the opposite trap to timer 0's, where four of
+#: five were `_SFR_IO8` and one was not.
+UCSR0A = 0xC0
+UCSR0B = 0xC1
+UCSR0C = 0xC2
+UBRR0L = 0xC4
+UBRR0H = 0xC5
+UDR0 = 0xC6
+
+#: Bit numbers within those, from `iom328p.h:739,743,744,751`.
+U2X0 = 1     #: double-speed; halves the divisor, so it changes the baud rate
+UDRE0 = 5    #: data register empty -- what Arduino's fast path tests
+TXC0 = 6     #: transmit complete -- what `flush()` waits for
+TXEN0 = 3    #: transmitter enable, in UCSR0B
+
+#: The bits of UCSR0A that always read set here, and the reason this board can
+#: print at all.
+#:
+#: **Measured 2026-08-26.** `HardwareSerial::write` has two paths. If the ring
+#: buffer is empty and UDRE0 is set it writes the byte straight to UDR0 and
+#: returns; otherwise it queues the byte and enables the USART_UDRE interrupt to
+#: drain it. With UDRE0 reading clear, a `Serial.println` sketch took the second
+#: path, set UDRIE0, and waited forever for an interrupt this core does not
+#: raise -- UCSR0B read 0xB8 and nothing was ever transmitted.
+#:
+#: TXC0 is here for `flush()`, which spins until transmission completes.
+#:
+#: Both are true of a transmitter whose byte is gone before the next
+#: instruction, which is what this models. See `core/avr/cpu.h`'s `Usart`.
+USART_READY = (1 << UDRE0) | (1 << TXC0)
+
+#: The Uno's crystal. A fact about the BOARD, not the chip -- an ATmega328P
+#: runs from 1 MHz internal by default and the Uno puts a 16 MHz crystal beside
+#: it. Named because `baud_rate` divides by it.
+F_CPU_HZ = 16_000_000
+
 #: The Uno's user LED. From Arduino's own variant file,
 #: `framework-arduino-avr/variants/standard/pins_arduino.h:54`, which defines
 #: `LED_BUILTIN` as 13, and its pinout comment at line 99: `PB5 (D 13)`.
@@ -205,6 +260,10 @@ class Cpu(typing.Protocol):
     def configure(self, program_words: int, data_bytes: int) -> None: ...
     def map_timer(self, *, counter: int, flag: int, enable: int, bit: int,
                   vector: int, instructions_per_tick: int) -> None: ...
+    def map_usart(self, *, data: int, status: int, control: int,
+                  enable_bit: int, ready_mask: int) -> None: ...
+    def usart_output(self) -> bytes: ...
+    def read_data(self, address: int) -> int: ...
 
 
 def install(cpu: Cpu) -> None:
@@ -229,3 +288,41 @@ def install(cpu: Cpu) -> None:
         vector=TIMER0_OVF_VECTOR,
         instructions_per_tick=INSTRUCTIONS_PER_TICK,
     )
+    cpu.map_usart(
+        data=UDR0,
+        status=UCSR0A,
+        control=UCSR0B,
+        enable_bit=TXEN0,
+        ready_mask=USART_READY,
+    )
+
+
+def uart0_output(cpu: Cpu) -> bytes:
+    """Everything USART0 has transmitted, oldest byte first.
+
+    **The name is the contract.** `webui/api.py`'s `uart_view` finds this by
+    `getattr(description, "uart0_output", None)` and reports `present: false`
+    when it is absent -- which is a claim about the *model* rather than about
+    the program, and is why an empty console and an unmodelled UART are
+    different answers. `webui/boards/rp2040.py` exports the same name for the
+    same reason.
+    """
+    return cpu.usart_output()
+
+
+def baud_rate(cpu: Cpu) -> int:
+    """The baud rate the program asked for, from UBRR0 and U2X0.
+
+    Reported rather than ignored, because the divisor is the one thing a
+    `Serial.begin()` actually configures that this model could otherwise drop
+    on the floor -- and a wrong baud rate is the classic reason a console shows
+    nothing on real hardware. Reading it back is what makes the difference
+    between modelling the register and merely accepting writes to it.
+
+    `F_CPU / ((u2x ? 8 : 16) * (UBRR0 + 1))`, per the datasheet's own table.
+    `Serial.begin(9600)` on a 16 MHz Uno gives UBRR0 = 207 with U2X0 set, which
+    is 9,615 -- the 0.16% error the part really has, not 9,600.
+    """
+    divisor = cpu.read_data(UBRR0L) | (cpu.read_data(UBRR0H) << 8)
+    prescale = 8 if cpu.read_data(UCSR0A) & (1 << U2X0) else 16
+    return F_CPU_HZ // (prescale * (divisor + 1))

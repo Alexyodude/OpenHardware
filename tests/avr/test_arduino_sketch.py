@@ -54,7 +54,8 @@ from webui import api
 from webui.boards import atmega328p
 
 HERE = pathlib.Path(__file__).resolve().parent
-SKETCH = HERE / "arduino" / "blink.cpp"
+BLINK = HERE / "arduino" / "blink.cpp"
+SERIAL = HERE / "arduino" / "serial.cpp"
 
 #: The board, spelled as `webui/boards/catalogue.py`'s `IRREGULAR` spells it.
 BOARD = "Arduino Uno"
@@ -93,6 +94,11 @@ BLINK_BUDGET = HALF_PERIOD * 2 + HALF_PERIOD // 5
 #: How often the LED is looked at. See the blink test for the arithmetic.
 SAMPLE_EVERY = 256
 
+#: `#define UDRIE0 5` at `iom328p.h:753`. Not exported by the board, because
+#: the board does not model the interrupt it enables -- it is named here only
+#: so a test can assert the sketch never needed it.
+UDRIE0 = 1 << 5
+
 
 def toolchain() -> tuple[pathlib.Path, pathlib.Path]:
     """Where avr-g++ and the Arduino core are, or a skip saying they are not.
@@ -121,11 +127,19 @@ def toolchain() -> tuple[pathlib.Path, pathlib.Path]:
     return gcc, framework
 
 
-@pytest.fixture(scope="module")
-def sketch() -> tuple[bytes, dict[str, int]]:
-    """Compile and link the sketch, and return its image and its symbols.
+#: The Arduino core files a `Serial` sketch needs beyond the four a blink does.
+#: `HardwareSerial` is the port, `Print` and `Stream` are what `println` is
+#: inherited from, `WString` is what a string literal becomes, and `abi`/`new`
+#: are what C++ virtual dispatch links against -- which is also what makes the
+#: image reach `ijmp`.
+SERIAL_SOURCES = ("HardwareSerial.cpp", "HardwareSerial0.cpp", "Print.cpp",
+                  "Stream.cpp", "WString.cpp", "abi.cpp", "new.cpp")
 
-    Module-scoped: five tests want the same image and the link takes a second.
+
+def compile_sketch(sketch: pathlib.Path,
+                   extra: tuple[str, ...] = ()) -> tuple[bytes, dict[str, int]]:
+    """Compile and link one sketch, and return its image and its symbols.
+
     The symbol table comes from `avr-nm` rather than from constants here,
     because addresses move whenever the framework version does — and a test
     that hardcoded 0xE8 for `loop` would go quietly wrong rather than loudly.
@@ -151,11 +165,12 @@ def sketch() -> tuple[bytes, dict[str, int]]:
     # three are what `pinMode`, `digitalWrite` and `delay` live in. Compiling
     # the whole core would work and take twenty times as long.
     sources = [
-        SKETCH,
+        sketch,
         core / "main.cpp",
         core / "hooks.c",
         core / "wiring.c",
         core / "wiring_digital.c",
+        *(core / name for name in extra),
     ]
 
     def run(command: list[str]) -> str:
@@ -199,6 +214,18 @@ def sketch() -> tuple[bytes, dict[str, int]]:
             if len(parts) == 3 and parts[1] in ("T", "t", "W"):
                 symbols[parts[2]] = int(parts[0], 16) // 2
         return image.read_bytes(), symbols
+
+
+@pytest.fixture(scope="module")
+def sketch() -> tuple[bytes, dict[str, int]]:
+    """The blink. Module-scoped: six tests want it and the link takes a second."""
+    return compile_sketch(BLINK)
+
+
+@pytest.fixture(scope="module")
+def serial_sketch() -> tuple[bytes, dict[str, int]]:
+    """The serial hello, which needs seven more of Arduino's own files."""
+    return compile_sketch(SERIAL, SERIAL_SOURCES)
 
 
 def entered(image: bytes, symbols: dict[str, int], budget: int = BUDGET) -> dict:
@@ -355,3 +382,65 @@ def test_the_sketch_blinks_at_the_period_it_asked_for(sketch):
             f"That is {gap / INSTRUCTIONS_PER_MICROSECOND / 1000:.1f} ms where the "
             f"sketch asked for 500."
         )
+
+
+# --- Serial, which is OH-63's Done-when -------------------------------------
+
+
+def test_a_vendor_serial_sketch_prints_through_the_board_console(serial_sketch):
+    """`Serial.begin(9600); Serial.println("hello")`, end to end.
+
+    Read through `webui/api.py`'s own view rather than off the core, because
+    the claim is that a person watching the page sees it -- and `uart_view` is
+    where "the board printed nothing" and "this board models no UART" are
+    turned into two different answers.
+
+    The `\r\n` is Arduino's, not the sketch's: `println` appends it. Asserting
+    the exact bytes is therefore also asserting that two bytes nobody wrote
+    arrive, in that order.
+    """
+    image, _ = serial_sketch
+    with api.load_firmware(BOARD, image, base=0) as session:
+        for _ in range(BUDGET):
+            session.step()
+        view = session.state()["uart"]
+
+    assert view["present"] is True, "the board reports no UART model"
+    assert view["text"] == "hello\r\n", view
+
+
+def test_the_serial_sketch_takes_the_fast_path_and_needs_no_interrupt(serial_sketch):
+    """**The measurement that shaped this ticket**, pinned so it cannot rot.
+
+    `HardwareSerial::write` queues the byte and sets UDRIE0 when UDRE0 reads
+    clear, and writes straight to UDR0 when it reads set. UDRIE0 left set after
+    the sketch has printed would mean the byte went into the ring buffer and is
+    waiting for an interrupt `core/avr` does not raise -- which is exactly the
+    state this board was in before OH-63, with UCSR0B at 0xB8.
+    """
+    image, _ = serial_sketch
+    with api.load_firmware(BOARD, image, base=0) as session:
+        for _ in range(BUDGET):
+            session.step()
+        control = session.cpu.read_data(atmega328p.UCSR0B)
+
+    assert control & (1 << atmega328p.TXEN0), "the transmitter is not enabled"
+    assert not control & UDRIE0, (
+        f"UCSR0B is {control:#04x}; UDRIE0 set means the byte is queued for an "
+        f"interrupt this core does not raise"
+    )
+
+
+def test_the_serial_sketch_configures_the_baud_rate_it_asked_for(serial_sketch):
+    """The divisor is read back and reported rather than accepted and dropped.
+
+    9,615 and not 9,600: `Serial.begin(9600)` on a 16 MHz part writes 207 with
+    double-speed set, and 16,000,000 / (8 * 208) is 9,615. The 0.16% error is
+    the silicon's, and reporting 9,600 here would be reporting the request
+    rather than the configuration.
+    """
+    image, _ = serial_sketch
+    with api.load_firmware(BOARD, image, base=0) as session:
+        for _ in range(BUDGET):
+            session.step()
+        assert atmega328p.baud_rate(session.cpu) == 9615

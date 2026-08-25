@@ -121,6 +121,43 @@ struct Timer {
     uint32_t instructions_per_tick = 1;
 };
 
+/// A transmitter: somewhere for a program's bytes to go.
+///
+/// One struct and one call, for the reason `Timer` gives above -- the data
+/// register, the status register and the enable are one peripheral, and a
+/// mapping that owned only one of them could not answer for the others.
+///
+/// ## The whole model is "transmission finishes before the next instruction"
+///
+/// `ready_mask` is what makes that true. Arduino's `HardwareSerial::write`
+/// takes a fast path when `UDRE0` is set -- it puts the byte straight in the
+/// data register and returns -- and falls back to a ring buffer drained by the
+/// USART_UDRE interrupt when it is clear. **Measured 2026-08-26**: with `UDRE0`
+/// reading clear, a `Serial.println` sketch queued its byte, set `UDRIE0`, and
+/// waited forever for an interrupt this core does not raise. With `UDRE0`
+/// reading set, the byte arrives here and no USART interrupt is needed at all.
+///
+/// `TXC0` reads set for the same reason, and `flush()` is what needs it: it
+/// spins until transmission completes, and here it already has.
+///
+/// So this models a UART with an infinitely fast sink. That is an
+/// approximation and it is stated rather than implied: nothing here takes any
+/// time, so a program timing its own output would measure zero.
+///
+/// ## What is not modelled
+///
+/// Reception. `UDR0` reads as zero and `RXC0` is not in `ready_mask`, so
+/// `Serial.available()` answers false forever -- which is the truth, because
+/// nothing is wired to the other end. The three USART interrupts are likewise
+/// absent, and the fast path above is the reason none is needed.
+struct Usart {
+    uint16_t data = 0;        //< UDR0: a write is a byte of output
+    uint16_t status = 0;      //< UCSR0A
+    uint16_t control = 0;     //< UCSR0B, holding the transmit enable
+    uint8_t enable_bit = 0;   //< TXEN0 in `control`
+    uint8_t ready_mask = 0;   //< bits of `status` that always read set
+};
+
 class Cpu {
 public:
     Cpu();
@@ -216,6 +253,23 @@ public:
     bool interrupt_inhibited() const { return inhibit_; }
     void allow_interrupts() { inhibit_ = false; }
 
+    // --- the transmitter --------------------------------------------------
+
+    /// Give this machine a USART. Call after `configure`, which resets.
+    ///
+    /// Returns false and maps nothing if any address is outside the sized
+    /// space or the enable bit is not a bit -- same contract as `map_timer`
+    /// and for the same reason.
+    bool map_usart(const Usart& usart);
+
+    bool has_usart() const { return has_usart_; }
+
+    /// Every byte transmitted, oldest first. Cumulative and never drained:
+    /// `webui/api.py`'s `uart_view` reports what is true rather than a delta,
+    /// because two browser tabs polling a delta would each consume bytes the
+    /// other never saw.
+    const std::vector<uint8_t>& usart_output() const { return usart_output_; }
+
     /// Instructions retired. The other cores grew this for a timer; here it is
     /// the only way a test can say how far a program got — and, with a timer
     /// mapped, it is also the clock.
@@ -244,6 +298,10 @@ private:
     /// enough and no modular arithmetic is needed.
     uint64_t timer_ticks_ = 0;
     bool inhibit_ = false;
+
+    Usart usart_;
+    bool has_usart_ = false;
+    std::vector<uint8_t> usart_output_;
 
     // `mutable` because the read path is const and a fault address is a
     // diagnostic rather than state the program can see — the same reasoning

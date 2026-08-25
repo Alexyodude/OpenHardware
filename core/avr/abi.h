@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 /// Bumped whenever this header's shape changes.
-#define AVR_ABI_VERSION 2
+#define AVR_ABI_VERSION 3
 
 typedef struct AvrCpu AvrCpu;
 
@@ -55,6 +55,23 @@ AVR_API int avr_map_timer(AvrCpu* cpu, uint16_t counter, uint16_t flag,
 
 /// What `counter` reads. 0 with no timer mapped.
 AVR_API uint8_t avr_timer_count(const AvrCpu* cpu);
+
+/// Give the machine a USART. Call AFTER `avr_configure`, which resets.
+///
+/// `data`, `status` and `control` are DATA addresses. `ready_mask` is the bits
+/// of `status` that always read set -- UDRE0 and TXC0, which is what makes
+/// Arduino's fast path fire and its `flush()` return. Returns 0 and maps
+/// nothing if any address is out of range or `enable_bit` is not 0-7.
+AVR_API int avr_map_usart(AvrCpu* cpu, uint16_t data, uint16_t status,
+                          uint16_t control, uint8_t enable_bit,
+                          uint8_t ready_mask);
+
+/// Everything the USART has transmitted, oldest byte first.
+///
+/// Returns the true length whether or not `out` is null, so a caller asks for
+/// the length first and reads second rather than guessing a buffer size --
+/// the arrangement `cortexm0_stream` already uses.
+AVR_API uint32_t avr_usart_output(const AvrCpu* cpu, uint8_t* out, uint32_t max);
 
 /// 1 while an interrupt cannot be taken on the next step because `sei` or
 /// `reti` just ran. A property of the machine and not an implementation

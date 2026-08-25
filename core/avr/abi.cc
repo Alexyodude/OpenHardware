@@ -99,6 +99,29 @@ int avr_map_timer(AvrCpu* cpu, uint16_t counter, uint16_t flag, uint16_t enable,
     return as_handle(cpu)->cpu.map_timer(timer) ? 1 : 0;
 }
 
+int avr_map_usart(AvrCpu* cpu, uint16_t data, uint16_t status, uint16_t control,
+                  uint8_t enable_bit, uint8_t ready_mask) {
+    avr::Usart usart;
+    usart.data = data;
+    usart.status = status;
+    usart.control = control;
+    usart.enable_bit = enable_bit;
+    usart.ready_mask = ready_mask;
+    return as_handle(cpu)->cpu.map_usart(usart) ? 1 : 0;
+}
+
+uint32_t avr_usart_output(const AvrCpu* cpu, uint8_t* out, uint32_t max) {
+    const std::vector<uint8_t>& sent = as_handle(cpu)->cpu.usart_output();
+    const uint32_t length = static_cast<uint32_t>(sent.size());
+    if (out != nullptr) {
+        const uint32_t take = length < max ? length : max;
+        for (uint32_t i = 0; i < take; ++i) {
+            out[i] = sent[i];
+        }
+    }
+    return length;
+}
+
 int avr_interrupt_inhibited(const AvrCpu* cpu) {
     return as_handle(cpu)->cpu.interrupt_inhibited() ? 1 : 0;
 }
