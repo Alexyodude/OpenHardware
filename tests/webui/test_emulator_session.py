@@ -130,6 +130,48 @@ def test_nothing_in_the_script_still_reaches_for_the_removed_selector():
     assert "selectTarget" not in script, "a function with no caller"
 
 
+def test_the_page_is_named_for_the_project_and_not_for_one_of_its_machines():
+    """The label drifted for five months and nothing noticed.
+
+    The page was built as OH-7's i8086 emulator UI, and boards, targets, the
+    board picker and the Arduino Uno were all added into it while the title,
+    the brand and the tab icon kept naming one core. By 2026-08-25 a person
+    could load an ATmega328P into a window headed "i8086 Emulator" -- a wrong
+    label on real data, which this repository ranks above a fault.
+
+    Asserted narrowly, on the **identity** sites only. The word "i8086" appears
+    all over this page legitimately: the Targets view explains which cores are
+    built, and the emulator half says at length that its panes are showing an
+    8086. A test forbidding the string outright would be forbidding the truth.
+    """
+    assert "<title>OpenHardware</title>" in HTML
+    brand = re.search(r'<div class="brand">(.*?)</div>', HTML, re.S)
+    assert brand is not None, "no brand element to check"
+    assert "OpenHardware" in brand.group(1)
+    assert "i8086" not in brand.group(1)
+    # The favicon drew the text `86`, url-encoded as `%3E86%3C` between the
+    # <text> tags. A tab icon is a name too.
+    assert "%3E86%3C" not in HTML
+
+
+def test_the_machine_that_really_is_an_i8086_is_still_called_one():
+    """The other half of the rename, and the one that is easier to get wrong.
+
+    `webui/emulator.py` is an 8086 session and nothing else -- its registers,
+    its segmented disassembly and its sample programs are all 8086 -- so
+    `DRIVING` and `DRIVABLE` naming it are **correct**. Renaming those to match
+    the page would replace a true specific name with a false general one, which
+    is the same defect as the one just fixed, pointing the other way.
+    """
+    from webui import emulator_server
+
+    assert emulator_server.DRIVING == "i8086"
+    assert emulator_server.DRIVABLE == frozenset({"i8086"})
+    assert emulator_server.SERVER_NAME == "OpenHardware", (
+        "the server names the project; the session inside it names its machine"
+    )
+
+
 def test_nothing_in_the_script_indexes_a_board_register_by_position():
     """A defect a browser found, pinned so the next one does not have to.
 

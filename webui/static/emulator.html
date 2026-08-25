@@ -1,9 +1,23 @@
 <!doctype html>
 <!--
-  OpenHardware — the i8086 emulator, in a browser.
+  OpenHardware — every machine this repository can run, in a browser.
 
   SPDX-License-Identifier: MIT
   Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+
+  This said "the i8086 emulator" until 2026-08-25, which is what it was built
+  as under OH-7, when core/i8086 was the only core. **Two machines share these
+  panes now**, and the distinction is worth keeping straight:
+
+    * the i8086 session — webui/emulator.py, the sample-program controls in
+      the toolbar below. Genuinely an 8086, and everything naming it so is
+      correct and stays.
+    * a board — webui/api.py, the picker in the first panel. 26 boards, and
+      the ones with a built core and a description actually run.
+
+  So the page's own name is the project's, because one half's name on the
+  whole window is how a person ends up loading an ATmega328P into something
+  labelled "i8086".
 
   Served by webui/emulator_server.py, which binds loopback only. The page
   talks to its own origin and nothing else, so there is no CDN, no font
@@ -14,17 +28,25 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>i8086 Emulator</title>
+<title>OpenHardware</title>
 <link rel="stylesheet" href="/emulator.css" />
 <!-- Inline, so the page makes exactly one request per asset it needs and
      none for one it does not. A 404 in the console is a thing someone
      will one day spend ten minutes on. -->
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%273%27 fill=%27%23111%27/%3E%3Ctext x=%278%27 y=%2712%27 font-size=%2710%27 font-family=%27monospace%27 text-anchor=%27middle%27 fill=%27%23f2a63b%27%3E86%3C/text%3E%3C/svg%3E" />
+<!-- `OH` and not `86`. The tab icon named one of the two machines on this
+     page, and it was the one a person is less likely to be driving. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%273%27 fill=%27%23111%27/%3E%3Ctext x=%278%27 y=%2712%27 font-size=%279%27 font-family=%27monospace%27 text-anchor=%27middle%27 fill=%27%23f2a63b%27%3EOH%3C/text%3E%3C/svg%3E" />
 </head>
 <body data-view="emulator">
 
 <div class="bar">
-  <div class="brand">i8086 <span>— OpenHardware</span></div>
+  <!-- The muted half names the two things this page can actually drive, which
+       is also the distinction the panes below keep blurring: a bare **core**
+       (the i8086 session, with its sample programs) and a **board** (a chip
+       with a memory map, taking a compiled image). It used to read
+       "i8086 — OpenHardware", naming one of the two as though it were the
+       page. -->
+  <div class="brand">OpenHardware <span>— cores and boards</span></div>
 
   <!-- Which view is showing lives on <body>, not on <main>, because the
        toolbar sits *before* main and CSS has no previous-sibling combinator.

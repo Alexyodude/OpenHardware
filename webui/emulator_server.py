@@ -1,4 +1,4 @@
-# OpenHardware - a loopback HTTP front end for the i8086 emulator.
+# OpenHardware - a loopback HTTP front end for the emulators and the boards.
 #
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
@@ -135,6 +135,14 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from webui import api, emulator, firmware, targets  # noqa: E402
 from webui.boards import catalogue as board_catalogue  # noqa: E402
+
+#: What this program calls itself, in the `Server:` header and on stdout.
+#:
+#: **The project, not one of the machines it runs.** It was
+#: `OpenHardware-i8086` while this server had board routes serving an
+#: ATmega328P -- see `DRIVING` below, which names a machine and is correct
+#: to. One constant so the two places cannot drift apart again.
+SERVER_NAME = "OpenHardware"
 
 DEFAULT_BIND = "127.0.0.1"
 DEFAULT_PORT = 8088
@@ -501,7 +509,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     allowed_origins: frozenset[str]
 
     protocol_version = "HTTP/1.1"
-    server_version = "OpenHardware-i8086"
+    server_version = SERVER_NAME
 
     def log_message(self, fmt: str, *args: object) -> None:
         """Quiet by default. The default handler writes a line per request to
@@ -647,7 +655,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     host, port = server.server_address[:2]
-    print(f"i8086 emulator on http://{host}:{port}/  (ctrl-c to stop)")
+    print(f"{SERVER_NAME} on http://{host}:{port}/  (ctrl-c to stop)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
