@@ -83,6 +83,28 @@ def changed_files(base: str) -> list[str]:
     return [T.normalise(line) for line in result.stdout.splitlines() if line.strip()]
 
 
+def staged_files() -> list[str]:
+    """Files staged for the next commit.
+
+    `changed_files` asks what a *branch* changed, which is the question CI
+    asks after the fact. A commit hook has to ask what is about to land, and
+    those are different sets: work in progress is staged but not committed,
+    and `merge-base..HEAD` cannot see it. Without this the enforcement ladder
+    has a rung in CI and a rung that does not ship, and nothing between.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=T.REPO,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return []
+    return [T.normalise(line) for line in result.stdout.splitlines() if line.strip()]
+
+
 def unmatched_claims(tickets) -> tuple[list[tuple[str, str]], int]:
     """(likely typos, count of tickets whose work is simply unwritten).
 
@@ -122,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     base = "master"
     if "--base" in argv:
         base = argv[argv.index("--base") + 1]
+    staged = "--staged" in argv
 
     try:
         tickets = T.load_tickets()
@@ -168,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"check_ticket_claims: named ticket {named} does not exist", file=sys.stderr)
             return 2
         mine = match[0]
-        for path in changed_files(base):
+        for path in (staged_files() if staged else changed_files(base)):
             owners = T.owners_of(path, tickets)
             if not owners:
                 continue

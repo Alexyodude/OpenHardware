@@ -124,3 +124,26 @@ That makes §3 opt-in per clone, which is weaker than §2 and weaker than this
 rule would like. It is recorded here rather than left implicit, because a rule
 that overstates its own enforcement is the failure this repository exists to
 prevent. §2 runs in CI regardless and catches the same mistakes after the fact.
+
+### 7.1 2026-08-25 — narrowed, not closed
+
+The gap above was that enforcement existed only in CI and on one developer's
+machine, with nothing in between. `tools/githooks/pre-commit` is that middle
+rung and it **is** a tracked file, so its content ships; `python
+tools/install_hooks.py` points `core.hooksPath` at it and is idempotent.
+
+It is deliberately the weaker of the two checks. It sees a write after it has
+happened rather than refusing it, and `git commit --no-verify` bypasses it —
+which this does not try to close, because a check nobody can bypass gets
+uninstalled instead, and an uninstalled check protects nothing.
+
+What is still true: the **registration** cannot be tracked, only generated.
+`.claude/` stays ignored on purpose — the note above it in `.gitignore` says it
+comes from a personal template and is not committed per-project, so
+un-ignoring it would commit one machine's settings to fix a repository's
+problem. `install_hooks.py` therefore writes that file rather than the
+repository carrying it, and refuses rather than overwriting when it finds a
+settings file it cannot parse or a `core.hooksPath` someone else already set.
+
+Demonstrated, not assumed: staging a file claimed by another ticket and running
+`git commit` exits 1 with `changed while holding OH-51, but claimed by OH-17`.

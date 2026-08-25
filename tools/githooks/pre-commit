@@ -1,0 +1,32 @@
+#!/bin/sh
+# OpenHardware - refuse a commit that stages another ticket's files.
+#
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+#
+# This file is the part of the guard that actually ships. tools/ticket_guard.py
+# is the better check -- it refuses a write before it lands -- but it runs as a
+# Claude Code PreToolUse hook registered in .claude/settings.json, and that
+# directory is git-ignored, so on a fresh clone nothing invokes it. See
+# rules/ticket-claims.md section 7.
+#
+# A commit hook is weaker and universal: it catches the write after the fact,
+# but it catches writes from any tool, and its content is tracked. Install it
+# with `python tools/install_hooks.py`, which points core.hooksPath here.
+#
+# Bypass with `git commit --no-verify` when you mean to. That is git's own
+# escape hatch and this does not try to close it -- a check nobody can bypass
+# gets uninstalled instead.
+
+set -e
+
+if command -v python >/dev/null 2>&1; then
+    PY=python
+elif command -v python3 >/dev/null 2>&1; then
+    PY=python3
+else
+    echo "pre-commit: no python on PATH; skipping the ticket-claim check" >&2
+    exit 0
+fi
+
+exec "$PY" tools/check_ticket_claims.py --staged
