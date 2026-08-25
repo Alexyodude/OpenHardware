@@ -10,6 +10,7 @@ touches:
 - docs/architectures.md
 - tools/gen_avr_corpus.mjs
 - tests/avr/corpus/isa.json
+- docs/HANDOFF_2026-08-26_the-avr-oracle-and-an-ide-that-cannot-exist-yet.md
 ---
 
 MEASURED 2026-08-26. A real Arduino sketch -- setup()/loop()/pinMode()/digitalWrite()/delay(), compiled against framework-arduino-avr with avr-gcc 7.3.0, 1058 bytes -- stops on its FIRST instruction on the Uno board:
