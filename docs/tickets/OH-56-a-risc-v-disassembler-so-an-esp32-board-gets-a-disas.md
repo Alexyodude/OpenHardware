@@ -2,7 +2,7 @@
 id: OH-56
 title: A RISC-V disassembler, so an ESP32 board gets a Disassembly pane instead of
   a note
-status: open
+status: done
 priority: P2
 created: '2026-08-25'
 touches:
