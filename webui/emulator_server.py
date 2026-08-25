@@ -134,6 +134,9 @@ import urllib.parse
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from webui import api, emulator, firmware, targets  # noqa: E402
+# Aliased, because `compile` is a builtin and shadowing it inside a module this
+# large is a trap somebody would eventually fall into.
+from webui import compile as compile_service  # noqa: E402
 from webui.boards import catalogue as board_catalogue  # noqa: E402
 
 #: What this program calls itself, in the `Server:` header and on stdout.
@@ -379,6 +382,40 @@ def handle_board_api(boards: BoardSlot, route: str,
         )
         boards.replace(loaded)
         return loaded.as_json()
+
+    if route == "/api/board/compile":
+        # **Build and load in one step, and the image never crosses the wire.**
+        #
+        # Not two routes. Returning bytes would mean base64 in a JSON body and
+        # a client holding an image it has no use for -- the only thing it can
+        # do with one is post it straight back. Doing both here also removes
+        # the state where a build succeeded and a load has not happened yet,
+        # which is a machine holding the previous sketch while the page shows
+        # the new one's success.
+        #
+        # A build that FAILS leaves the board untouched. `boards.replace` is
+        # reached only on success, so a syntax error does not cost a person the
+        # program that was running.
+        board = payload.get("board")
+        source = payload.get("source")
+        if not isinstance(board, str):
+            raise ApiError("board must be a string naming a board from /api/boards")
+        if not isinstance(source, str):
+            raise ApiError("source must be a string holding the sketch")
+        try:
+            built = compile_service.build(board, source)
+        except compile_service.CompileError as exc:
+            # Cannot be attempted: an unknown board, or a toolchain this
+            # machine does not have. Distinct from a sketch that does not
+            # compile, which is a 200 with `ok: false` and the diagnostics.
+            raise ApiError(str(exc)) from exc
+        if not built.ok:
+            return built.as_json()
+        loaded = api.load_firmware(
+            board, built.image, base=compile_service.recipe_for(board).base
+        )
+        boards.replace(loaded)
+        return {**built.as_json(), "board": loaded.as_json()}
 
     if route == "/api/board/run":
         result = boards.require().run(_int(payload, "steps", 10_000))
