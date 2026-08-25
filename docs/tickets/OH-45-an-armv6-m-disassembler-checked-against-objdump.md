@@ -1,7 +1,7 @@
 ---
 id: OH-45
 title: An Armv6-M disassembler, checked against objdump
-status: open
+status: done
 priority: P1
 created: '2026-08-25'
 touches:

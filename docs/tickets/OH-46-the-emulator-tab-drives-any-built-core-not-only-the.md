@@ -1,7 +1,7 @@
 ---
 id: OH-46
 title: The Emulator tab drives any built core, not only the i8086
-status: open
+status: done
 priority: P1
 created: '2026-08-25'
 touches:
@@ -35,3 +35,5 @@ So the research tracker owns the workflow and the workflow tab owns a one-item d
 The #target selector sits outside .only-emulator deliberately -- the comment says 'which machine you are driving is true in both views, and hiding it on the Targets tab would hide it exactly where someone went looking for it.' That reasoning was right while Targets owned the upload flow and stops being right the moment it does not.
 
 Intended end state: the Emulator tab carries ONE machine picker listing the i8086 sample machine and each runnable board, plus upload, run and the debug panes. The Targets tab becomes read-only -- what has progressed, and nothing to operate.
+
+**Note 2026-08-25:** Both halves delivered. 05aaf80 moved the program-and-upload workflow into the Emulator view and made the Targets view read-only; 9b2f397 gave a loaded board its own registers, Thumb listing and hexdump; 1d8ea1b removed the core selector that named no MCU and disabled itself, leaving #board-pick as the only machine selector. The i8086 is untouched and reachable through its own sample controls.
