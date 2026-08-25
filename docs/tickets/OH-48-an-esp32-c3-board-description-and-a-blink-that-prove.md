@@ -1,7 +1,7 @@
 ---
 id: OH-48
 title: An ESP32-C3 board description, and a blink that proves it
-status: open
+status: done
 priority: P1
 created: '2026-08-25'
 touches:
