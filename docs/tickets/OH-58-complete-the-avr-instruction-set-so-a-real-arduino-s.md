@@ -10,6 +10,9 @@ touches:
 - docs/architectures.md
 - tools/gen_avr_corpus.mjs
 - tests/avr/corpus/isa.json
+- pyproject.toml
+- tests/rules/test_testpaths.py
+- webui/boards/catalogue.py
 - docs/HANDOFF_2026-08-26_the-avr-oracle-and-an-ide-that-cannot-exist-yet.md
 ---
 
