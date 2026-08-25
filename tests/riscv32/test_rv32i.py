@@ -231,7 +231,11 @@ def test_a_refused_step_leaves_the_processor_completely_untouched(cpu):
     """PC included. A core that advanced past an encoding it did not know
     would let a case pass by accident whenever the unwritten instruction
     happened to behave like a NOP -- and on RV32 a great many do."""
-    load(cpu, [e.mul("t0", "t1", "t2")])
+    # `ecall` and not `mul`: OH-55 implemented M, so a multiply is no longer
+    # an encoding this core refuses. SYSTEM still is -- there are no traps and
+    # no CSRs here -- and picking something genuinely unwritten is what keeps
+    # this testing the refusal path rather than the arithmetic.
+    load(cpu, [e.ecall()])
     cpu.set_regs([0] * 5 + [9, 3, 4] + [0] * 24, pc=PC)
     before = cpu.get_regs().as_list()
     with pytest.raises(abi.AbiError):

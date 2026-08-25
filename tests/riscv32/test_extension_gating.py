@@ -209,10 +209,15 @@ def test_the_two_refusals_are_different_codes_at_the_abi_and_not_only_in_python(
     assert cpu._lib.riscv32_step(cpu._handle) == abi.UNIMPLEMENTED
 
 
-def test_a_multiply_is_illegal_without_m_and_unwritten_with_it(cpu):
+def test_a_multiply_is_illegal_without_m_and_executes_with_it(cpu):
     """Every ESP32-C part has M, so the illegal case is not one a board here
     will reach. It is checked anyway because it is the same gate as A, and a
-    gate that is only ever exercised in one direction is half tested."""
+    gate that is only ever exercised in one direction is half tested.
+
+    The second half read `Unimplemented` until OH-55 wrote the eight
+    instructions. Renamed with the assertion, for the reason the compressed
+    one was: a test called "unwritten" that checks something else cannot be
+    read."""
     load(cpu, [e.mul("t0", "t1", "t2")])
     cpu.set_extensions(0)
     with pytest.raises(abi.Illegal):
@@ -220,8 +225,9 @@ def test_a_multiply_is_illegal_without_m_and_unwritten_with_it(cpu):
 
     load(cpu, [e.mul("t0", "t1", "t2")])
     cpu.set_extensions(abi.EXT_M)
-    with pytest.raises(abi.Unimplemented):
-        cpu.step()
+    cpu.set_regs([0] * 6 + [6, 7] + [0] * 24, pc=PC)
+    cpu.step()
+    assert cpu.reg(5) == 42
 
 
 def test_a_compressed_encoding_is_illegal_without_c_and_executes_with_it(cpu):

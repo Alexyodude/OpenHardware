@@ -116,6 +116,77 @@ bool aligned(const Cpu& cpu, uint32_t target) {
     return target % cpu.instruction_alignment() == 0;
 }
 
+/// The M extension: one funct7, eight funct3 values, and four defined edges.
+///
+/// ## The arithmetic is the easy half
+///
+/// **RISC-V defines division by zero and signed overflow rather than leaving
+/// them undefined**, which is the opposite of the host language. So the two
+/// cases C++ calls undefined behaviour are answered *before* any divide
+/// happens, not after: `INT_MIN / -1` overflows signed division and is UB in
+/// C++, and on some hosts it raises rather than returning anything at all.
+///
+///     div  x / 0            -> -1            divu x / 0 -> 2^32 - 1
+///     rem  x / 0            -> x             remu x / 0 -> x
+///     div  INT_MIN / -1     -> INT_MIN       rem  INT_MIN / -1 -> 0
+///
+/// A model that inherited the host's behaviour would be right about six of
+/// eight instructions and crash on the seventh.
+///
+/// ## And the high halves are where the easy defect is
+///
+/// `mulhsu` is signed times **unsigned** and is the one every implementation
+/// gets wrong first, because it is the only place the two operands are
+/// extended differently. Each product is formed in 64 bits where it fits
+/// exactly, then the high word is taken with an *unsigned* shift -- right
+/// shift of a negative signed value was implementation-defined until C++20,
+/// the same reason `sign_extend` and `shift_right_arithmetic` above are
+/// spelled out.
+uint32_t multiply_or_divide(unsigned funct3, uint32_t a, uint32_t b) {
+    const int32_t sa = static_cast<int32_t>(a);
+    const int32_t sb = static_cast<int32_t>(b);
+    //: The bit pattern the two operands multiply as. Casting a sign-extended
+    //: int64 to uint64 is modular and well-defined, and the true product of
+    //: two 32-bit values always fits in 64 bits -- so the low 64 bits the
+    //: unsigned multiply produces *are* the exact product.
+    const uint64_t wide_a = static_cast<uint64_t>(static_cast<int64_t>(sa));
+    const uint64_t wide_b = static_cast<uint64_t>(static_cast<int64_t>(sb));
+
+    switch (funct3) {
+    case 0x0u:  // MUL -- the low word, and signedness cannot affect it
+        return static_cast<uint32_t>(static_cast<uint64_t>(a) * b);
+    case 0x1u:  // MULH   signed x signed
+        return static_cast<uint32_t>((wide_a * wide_b) >> 32);
+    case 0x2u:  // MULHSU signed x unsigned
+        return static_cast<uint32_t>((wide_a * static_cast<uint64_t>(b)) >> 32);
+    case 0x3u:  // MULHU  unsigned x unsigned
+        return static_cast<uint32_t>(
+            (static_cast<uint64_t>(a) * static_cast<uint64_t>(b)) >> 32);
+
+    case 0x4u:  // DIV
+        if (b == 0) {
+            return 0xFFFFFFFFu;
+        }
+        if (a == 0x80000000u && b == 0xFFFFFFFFu) {
+            return a;  // the quotient is not representable; the dividend is it
+        }
+        return static_cast<uint32_t>(sa / sb);
+    case 0x5u:  // DIVU
+        return b == 0 ? 0xFFFFFFFFu : a / b;
+
+    case 0x6u:  // REM
+        if (b == 0) {
+            return a;
+        }
+        if (a == 0x80000000u && b == 0xFFFFFFFFu) {
+            return 0;
+        }
+        return static_cast<uint32_t>(sa % sb);
+    default:    // REMU
+        return b == 0 ? a : a % b;
+    }
+}
+
 // --- the compressed instructions -----------------------------------------
 //
 // ## Expanded, not re-implemented
@@ -756,7 +827,18 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
         const uint32_t funct7 = funct7_of(instr);
         if (funct7 == 0x01u) {
             // MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU.
-            return refuse(cpu, kExtM);
+            //
+            // `Illegal` and not `refuse` now that all eight are written: a
+            // part told it has no M must trap here, and there is no longer a
+            // third answer where the extension is on and the encoding is
+            // unwritten. All eight funct3 values are covered, so nothing falls
+            // through.
+            if (!cpu.has(kExtM)) {
+                return StepResult::Illegal;
+            }
+            cpu.set_reg(rd, multiply_or_divide(funct3, cpu.reg(rs1), cpu.reg(rs2)));
+            cpu.set_pc(next);
+            return StepResult::Ok;
         }
         const uint32_t a = cpu.reg(rs1);
         const uint32_t b = cpu.reg(rs2);

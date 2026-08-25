@@ -188,6 +188,16 @@ def and_(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x7, rd, 0x33)
 def fence(): return i_type(0, "x0", 0x0, "x0", 0x0F)
 def ecall(): return i_type(0, "x0", 0x0, "x0", 0x73)
 
+def fence_i():
+    """Zifencei. **Unimplemented here on every part**, and it has no bit in
+    `Extension` because no board has needed one -- so this core has not decided
+    about it, which is different from a part refusing it.
+
+    Useful precisely because of that: it touches no memory, needs no operands,
+    and rvcpp treats it as a no-op, so it is the cheapest encoding that this
+    core stops on and the oracle runs straight through."""
+    return i_type(0, "x0", 0x1, "x0", 0x0F)
+
 # --- encodings this core must refuse ----------------------------------------
 #
 # Spelled out here so a test can name what it is refusing rather than paste a
@@ -195,7 +205,9 @@ def ecall(): return i_type(0, "x0", 0x0, "x0", 0x73)
 # malformed word proves nothing about extension gating.
 
 def mul(rd, rs1, rs2):
-    """M extension. Legal on every ESP32-C part; not implemented here yet."""
+    """M extension. Legal on every ESP32-C part, and implemented since OH-55 --
+    so this is no longer an encoding to reach for when a test wants one this
+    core refuses. `fence_i` and the atomics are."""
     return r_type(0x01, rs2, rs1, 0x0, rd, 0x33)
 
 

@@ -279,16 +279,22 @@ def test_the_rig_reports_a_divergence_rather_than_only_being_able_to_agree(
 
 def test_an_instruction_this_core_has_not_written_stops_the_run_and_says_so(
         oracle, tmp_path):
-    """rvcpp executes `mul`; this core does not implement M yet.
+    """rvcpp runs `fence.i` straight through; this core has no Zifencei.
 
     The report has to separate that from a disagreement. "We stopped after 3 of
     9" is a progress meter; "we disagreed at step 3" is a bug. Reading one as
     the other sends somebody hunting for a decoder fault that is not there.
+
+    **This used to use `mul`, until OH-55 implemented M and the test quietly
+    ran to completion instead** -- agreed=4, stopped=None, and an assertion
+    about stopping that no longer had anything to stop on. Any instruction this
+    core has not written will do; `fence.i` is the cheapest, because it touches
+    no memory and needs no operands.
     """
     body = [
         e.addi("t0", "x0", 6),
         e.addi("t1", "x0", 7),
-        e.mul("t2", "t0", "t1"),
+        e.fence_i(),
     ]
     report = lockstep.run(image(body), tmp_path)
 

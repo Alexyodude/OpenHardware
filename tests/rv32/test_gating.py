@@ -31,7 +31,8 @@ from tests.rv32.conftest import (
 #: from this set, so removing the entry tightened every compressed case
 #: from "unimplemented is honest" to "must be refused per part" in one
 #: edit -- which is what the comment below always promised it would.
-EXPECTED_HOLES = {"rv32m_op", "rv32a"}
+#: `rv32m_op` left on 2026-08-25 under OH-55, `rv32c` under OH-54.
+EXPECTED_HOLES = {"rv32a"}
 
 
 def refusal_is_testable(case: dict) -> bool:
