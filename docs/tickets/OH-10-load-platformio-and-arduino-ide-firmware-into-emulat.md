@@ -11,6 +11,8 @@ touches:
 - tests/webui/test_firmware.py
 - docs/features/firmware.md
 - tests/rules/test_import_firmware.py
+- webui/api.py
+- tests/webui/test_board_run.py
 ---
 
 A user writes firmware in PlatformIO or the Arduino IDE, builds it, and loads the artefact into an emulated board.
