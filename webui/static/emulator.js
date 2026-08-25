@@ -539,10 +539,9 @@ function renderDiagnostics(text, source) {
     const [whole, lineText, columnText] = match;
     const line = Number(lineText);
     const column = Number(columnText);
-    // Everything since the previous match, which is the message body of the
+    // Everything since the previous match, which is the tail of the
     // diagnostic before this one.
     pane.append(text.slice(last, match.index));
-    last = match.index + whole.length;
 
     const anchor = document.createElement("span");
     anchor.className = "diagnostic-at";
@@ -556,6 +555,23 @@ function renderDiagnostics(text, source) {
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); jump(); }
     });
     pane.append(anchor);
+
+    // **The rest of the message first, THEN the quote.** A caret belongs under
+    // the line it points at and after the sentence it explains. Appending the
+    // quote straight after the location split the diagnostic in half --
+    //
+    //     sketch.cpp:2:16:
+    //           int broken = ;
+    //                        ^ error: expected primary-expression
+    //
+    // -- which no test here noticed and a browser showed at once. It is the
+    // same lesson `renderMemory`'s mutation taught: a pane can be wrong in a
+    // way only a reader sees.
+    const afterLocation = match.index + whole.length;
+    const lineEnd = text.indexOf("\n", afterLocation);
+    const messageEnd = lineEnd === -1 ? text.length : lineEnd;
+    pane.append(text.slice(afterLocation, messageEnd));
+    last = messageEnd;
 
     const quoted = lines[line - 1];
     if (quoted !== undefined) {

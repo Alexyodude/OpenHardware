@@ -224,3 +224,28 @@ def test_the_diagnostics_pane_quotes_the_source_the_person_typed():
     assert "renderDiagnostics" in script
     assert "focusSourceLine" in script
     assert "setSelectionRange" in script, "clicking a location must move the cursor"
+
+
+def test_a_diagnostic_message_is_rendered_before_the_line_it_quotes():
+    """**A browser found this and no test here did.**
+
+    The first version appended the quoted source straight after the location,
+    which split every diagnostic in half:
+
+        sketch.cpp:2:16:
+              int broken = ;
+                           ^ error: expected primary-expression
+
+    A caret belongs under the line it points at and after the sentence it
+    explains. Checked by position in the source, because Python cannot render
+    the pane -- and the alternative was to keep finding it by looking.
+    """
+    script = SCRIPT.read_text(encoding="utf-8")
+    body = script[script.index("function renderDiagnostics"):]
+    body = body[:body.index("\nfunction focusSourceLine")]
+    message = body.index("text.slice(afterLocation, messageEnd)")
+    quote = body.index('shown.className = "diagnostic-source"')
+    assert message < quote, (
+        "the quoted source line is appended before the rest of the message, "
+        "which puts the caret above the sentence explaining it"
+    )
