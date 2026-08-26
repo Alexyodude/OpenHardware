@@ -377,6 +377,18 @@ main {
 }
 .detail:empty { display: none; }
 
+/* **A quiet aside, and not `.detail`.** `.detail` is the error style -- red on
+   a red wash -- and using it for the bench's own running commentary made
+   "every part is wired" look like something had gone wrong. The same mistake
+   in words rather than colour is the one this repository keeps catching in the
+   pins table, and it is worth a second class to not make it again. */
+.hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.hint:empty { display: none; }
+
 footer {
   padding: 4px 16px 20px;
   color: var(--muted);
@@ -577,6 +589,22 @@ table.grid tr.dim td { opacity: 0.72; }
  * also where `board3d.js` reads them from at runtime. That is what makes "one
  * board renders in both themes" a property of this block rather than a thing
  * the renderer has to get right twice. */
+/* The bench controls, above the canvas rather than beside it: the canvas is
+ * the widest thing in this panel at every breakpoint, and a control column
+ * next to it would take width from the one element that has a use for it. */
+.bench-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 10px;
+}
+
+.bench-bar .hint {
+  flex: 1 1 22ch;
+  min-width: 0;
+}
+
 .pins {
   display: flex;
   gap: 16px;
@@ -644,3 +672,96 @@ table.grid tr.dim td { opacity: 0.72; }
 .pins-table tr[data-state="low"] td:last-child { color: var(--ink); }
 .pins-table tr[data-state="input"] td:last-child { color: var(--muted); }
 .pins-table tr[data-state="unknown"] td { color: var(--muted); opacity: 0.7; }
+
+/* --- the bench: a folder tree and a wire list --------------------------- */
+
+/* `<details>` in flow rather than a popover: it pushes the canvas down while
+ * it is open, which is a page that visibly rearranged rather than a layer
+ * floating over a 3D view that is still taking pointer events. */
+.bench-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font: inherit;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  list-style: none;
+  user-select: none;
+}
+.bench-menu > summary::-webkit-details-marker { display: none; }
+.bench-menu > summary::after { content: "\25be"; color: var(--muted); }
+.bench-menu[open] > summary::after { content: "\25b4"; }
+.bench-menu > summary:hover { border-color: var(--muted); }
+
+.bench-tree {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--sunken);
+  max-height: 40vh;
+  overflow: auto;
+}
+.bench-tree details { margin-left: 2px; }
+.bench-tree details details { margin-left: 14px; }
+.bench-tree summary {
+  cursor: pointer;
+  padding: 2px 0;
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--muted);
+}
+.bench-tree .hint { margin: 8px 0 0; }
+
+/* A part reads as a row in a list rather than as a button in a toolbar: there
+ * are four of them today and there will be more, and a row of pills would
+ * wrap into a shape nobody can scan. */
+.bench-part {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 4px 8px;
+  margin-left: 14px;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.bench-part:hover:not(:disabled) { background: var(--accent-wash); color: var(--accent); }
+.bench-part:disabled { color: var(--muted); cursor: not-allowed; }
+
+.bench-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 16px 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.bench-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 4px 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--sunken);
+}
+.bench-off {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 1px 5px;
+  border-radius: 999px;
+}
+.bench-off:hover { color: var(--surface); background: var(--ink); }

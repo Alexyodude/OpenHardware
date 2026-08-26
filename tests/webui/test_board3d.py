@@ -112,18 +112,47 @@ def test_the_renderer_writes_down_no_colour_of_its_own():
     """OH-16 folded two pages into one so there would not be two palettes
     drifting apart. A hex literal here is a third."""
     source = RENDERER.read_text(encoding="utf-8")
-    # Two exceptions, both deliberate and both named in the source. `#888` is
-    # what a custom property nothing defines falls back to, so it cannot come
-    # from the stylesheet. `NEUTRAL_LIGHT` is illumination rather than a
-    # colour: white light leaves each material the colour the stylesheet said,
-    # and tinting it would shift all four states and the board together.
+    # Three exceptions, all deliberate, all named in the source, and all
+    # removed by name so that a fourth cannot arrive unnoticed.
+    #
+    # `#888` is what a custom property nothing defines falls back to, so it
+    # cannot itself come from the stylesheet. `NEUTRAL_LIGHT` is illumination
+    # rather than a colour: white light leaves each material the colour the
+    # stylesheet said, and tinting it would shift all four states and the
+    # board together.
+    #
+    # **`WIRE_COLOURS` is the third and it is the interesting one.** The rule
+    # this test enforces is about the UI's palette -- the colours this
+    # repository uses to *say* things, which must agree across two themes and
+    # two pages. A jumper lead is not one of those: it is a thing on a bench,
+    # it is the same colour in either theme, and six of them have to be told
+    # apart from each other, which a palette with one accent cannot do. The
+    # vendor's solder mask gets the same exemption by arriving in a mesh file
+    # rather than in this source.
     body = source.replace('|| "#888"', "")
     body = body.replace("const NEUTRAL_LIGHT = 0xffffff;", "")
+    wires = body.split("const WIRE_COLOURS = [", 1)
+    assert len(wires) == 2, "WIRE_COLOURS is gone; so is this exception's reason"
+    body = wires[0] + wires[1].split("];", 1)[1]
+
     found = [m for m in COLOUR_LITERAL.findall(body) if not _in_comment(body, m)]
     assert not found, f"colours written down rather than read: {found}"
     assert body.count("NEUTRAL_LIGHT") == 2, (
         "the light constant is used somewhere other than the two lights"
     )
+
+
+def test_the_only_colours_written_down_are_lead_colours():
+    """The exception above, bounded: `WIRE_COLOURS` and nothing else.
+
+    Six, because a bench with six wires on it needs six leads a person can
+    tell apart, and because past six a reader is counting rather than seeing.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    block = source.split("const WIRE_COLOURS = [", 1)[1].split("];", 1)[0]
+    leads = re.findall(r"0x[0-9a-fA-F]{6}", block)
+    assert len(leads) == 6, leads
+    assert len(set(leads)) == 6, "two leads are the same colour"
 
 
 def _in_comment(source: str, needle: str) -> bool:

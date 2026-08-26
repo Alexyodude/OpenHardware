@@ -165,6 +165,23 @@
         1.6&nbsp;mm and there are no components on it, because no board here
         publishes a 3D model. Drag to turn it.</p>
     </div>
+    <!-- The bench. One part today, deliberately: OH-73 builds one wire end to
+         end before widening, because a palette of three that nothing can be
+         wired to is a horizontal layer with a menu on it. -->
+    <!-- The catalogue is KiCad's own `kicad-packages3D` tree, one folder per
+         library, because a taxonomy invented here would be one more thing to
+         keep true and a reader who knows `LED_THT` can find the same file. -->
+    <div class="bench-bar">
+      <details class="bench-menu" id="bench-menu">
+        <summary>Add a part</summary>
+        <div class="bench-tree" id="bench-tree"></div>
+      </details>
+      <button id="bench-clear" disabled>Unwire all</button>
+      <span class="hint" id="bench-note">Drag from a pad to a part's terminal
+        to wire it. The part shows what that pin is doing; nothing flows back
+        into the chip.</span>
+    </div>
+    <ul class="bench-list" id="bench-list"></ul>
     <div class="pins">
       <div class="pins-stage">
         <canvas id="board-pins-canvas" aria-label="The board, in three dimensions"></canvas>

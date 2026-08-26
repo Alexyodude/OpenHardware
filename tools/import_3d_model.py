@@ -584,7 +584,8 @@ def normalise(normals: list[float]) -> None:
 
 
 def write_glb(mesh: Mesh, path: pathlib.Path, chip: str, source: str,
-              pcb: tuple[float, float, float]) -> int:
+              pcb: tuple[float, float, float],
+              extras: dict[str, object] | None = None) -> int:
     """Write the mesh as glTF 2.0 binary. Returns the byte count.
 
     One primitive and one material per colour. Hand-written rather than through
@@ -677,6 +678,7 @@ def write_glb(mesh: Mesh, path: pathlib.Path, chip: str, source: str,
                 # sunk into it.
                 "pcb": {"long": round(pcb[0], 4), "short": round(pcb[1], 4),
                         "thickness": round(pcb[2], 4)},
+                **(extras or {}),
             },
         },
         "scene": 0,
@@ -797,6 +799,207 @@ def read_extras(glb: pathlib.Path) -> dict[str, object]:
     return document.get("asset", {}).get("extras", {})
 
 
+# --- the parts a wire connects to -------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class Part:
+    """One component model from KiCad's own 3D library."""
+
+    #: The library folder it lives in, which is also the folder the page shows
+    #: it under. **KiCad's own tree, not a taxonomy invented here**: a reader
+    #: who knows `LED_THT` can find the same file, and a category this
+    #: repository made up would be one more thing to keep true.
+    library: str
+    name: str
+    label: str
+    #: The colour, in the file, of the surface that shows what the pin is
+    #: doing. **Stated per part rather than guessed**: "the least grey group"
+    #: works on an LED and not on a black buzzer, and a rule that works on one
+    #: file is a rule that will be wrong on the next one somebody adds.
+    lens: str
+    #: What the two leads are called, in the order this file's own geometry
+    #: puts them -- see `lead_tips`, which sorts them by x.
+    terminals: tuple[str, str]
+
+    @property
+    def slug(self) -> str:
+        """What the page and the mesh file call it."""
+        return self.name.replace(".", "_")
+
+    @property
+    def url(self) -> str:
+        return (f"https://raw.githubusercontent.com/KiCad/kicad-packages3D/"
+                f"master/{self.library}.3dshapes/{self.name}.step")
+
+
+#: **KiCad's `kicad-packages3D`, not a vendor's.** Seeed publishes no 3D model
+#: for the Grove modules -- checked 2026-08-27, the Grove Red LED wiki lists a
+#: schematic PDF and a Codecraft zip and nothing else -- and the only LEDs in
+#: the trees this repository already fetches are 0603 chips 1.6 mm long, which
+#: are real LEDs and not things anybody wires a jumper to.
+#:
+#: KiCad's library is the standard source for exactly this and these are real
+#: parts at real sizes, measured 2026-08-27 by tessellating each one: the LEDs
+#: are 3.4, 5.4 and 10.5 mm across on 2.540 mm leads, and the buzzer is 13 mm
+#: across on 7.600 mm leads. **Licence: CC-BY-SA-4.0 with the library
+#: exception**, which is why these are fetched and not vendored, the same as
+#: the vendors' board models and for the reason `rules/licence-hygiene.md`
+#: section 4 gives.
+#:
+#: **Only parts that can honestly show a pin state are here.** A tactile
+#: switch is in the same library and is not: it is an *input*, it would drive
+#: a pin, and OH-73 records at length that driving a pin needs the `PIN`
+#: registers this repository has already written down as unmodelled. A switch
+#: on this bench would be a part that does nothing, which is worse than no
+#: switch at all.
+PARTS: tuple[Part, ...] = (
+    Part(library="LED_THT", name="LED_D3.0mm", label="3 mm LED",
+         lens="#720301", terminals=("cathode", "anode")),
+    Part(library="LED_THT", name="LED_D5.0mm", label="5 mm LED",
+         lens="#720301", terminals=("cathode", "anode")),
+    Part(library="LED_THT", name="LED_D10.0mm", label="10 mm LED",
+         lens="#720301", terminals=("cathode", "anode")),
+    #: **The red mark on its case, and it means driven rather than sounding.**
+    #: A buzzer makes a noise and this page has no audio, so nothing here can
+    #: show what it is actually doing. Lighting its polarity mark says the one
+    #: thing that is true -- the pin wired to it is high -- and the panel says
+    #: the same in words. Inventing a sound would be the failure this
+    #: repository ranks worst; leaving a part on the bench that shows nothing
+    #: at all would be the one it ranks second.
+    Part(library="Buzzer_Beeper", name="Buzzer_12x9.5RM7.6", label="12 mm buzzer",
+         lens="#9e2705", terminals=("negative", "positive")),
+)
+
+
+#: KiCad's 3D library has one convention and every file in it keeps it: the
+#: part sits with the board's surface at z = 0, its body in +z and its leads
+#: in -z, in millimetres.
+#:
+#: **So a part needs none of `frame_for`'s heuristics and must not use them.**
+#: That function exists because four vendors disagreed about which axis was
+#: up; it decides from the assembly's thinnest extent, which is a fact about a
+#: flat board and nonsense about a 5 mm LED. Run on this file it answers x-up,
+#: because an LED on its leads is 14.1 mm tall and 5.4 mm across.
+PART_UP = 2
+
+#: Millimetres above the lowest vertex of a lead that still counts as its tip.
+#: A tessellated cylinder's end cap is flat, so its ring is all at one height
+#: and any small number does; 0.05 is the tessellation's own chord tolerance,
+#: which is the largest a vertex can be off by.
+LEAD_RING = 0.05
+
+
+def part_frame(shape) -> Frame:
+    """KiCad's convention, as a `Frame`: z up, and the board plane at zero.
+
+    The origin is the body's centre in x and y and **z = 0 exactly**, not the
+    model's own minimum: zero is where the part meets the board, and the leads
+    hang below it. Centring on the bounding box instead would bury a part by
+    half the length of its legs.
+    """
+    box = box_of(shape)
+    return Frame(
+        long_axis=0, up=PART_UP, short_axis=1,
+        handedness=handedness_of((0, PART_UP, 1)),
+        origin=((box.xmin + box.xmax) / 2, (box.ymin + box.ymax) / 2, 0.0),
+    )
+
+
+def lead_tips(mesh: Mesh, lens: str) -> list[list[float]]:
+    """Where a wire attaches, taken from the model rather than from a datasheet.
+
+    Every group that is not the lens is metal, so the leads are the lowest
+    points in it -- and there are two of them, one either side of the body.
+    Splitting on the sign of x and taking the lowest vertex of each gives the
+    two tips.
+
+    **Derived and not written down**, because a lead spacing typed in from a
+    datasheet is a second source that can disagree with the mesh, and it would
+    disagree silently: a wire would meet nothing, an inch from the leg.
+    """
+    tips: list[list[float]] = []
+    for side in (-1, 1):
+        here: list[tuple[float, float, float]] = []
+        for colour, (positions, _normals, _indices) in mesh.groups.items():
+            if colour == lens:
+                continue
+            for at in range(0, len(positions), 3):
+                x = positions[at]
+                if (x < 0) != (side < 0):
+                    continue
+                here.append((x, positions[at + 1], positions[at + 2]))
+        if not here:
+            continue
+        # **The whole ring at the tip, averaged, and not the single lowest
+        # vertex.** A lead is a cylinder, so its lowest vertices are a circle
+        # of them and which one comes first is an artefact of the
+        # tessellation: the first version of this took one each side and got
+        # -1.270 and +0.870 for a part whose leads are 2.54 mm apart -- one
+        # answer on the lead's axis and one on its rim, and no way to tell
+        # which from the number alone.
+        floor = min(point[1] for point in here)
+        ring = [point for point in here if point[1] <= floor + LEAD_RING]
+        tips.append([sum(point[axis] for point in ring) / len(ring)
+                     for axis in range(3)])
+    return tips
+
+
+def convert_part(part: Part, deflection: float, check: bool) -> int:
+    """Fetch, tessellate and write one part. Returns the glTF's byte count."""
+    print(f"{part.library}/{part.name}:")
+    CACHE.mkdir(parents=True, exist_ok=True)
+    step = CACHE / f"part-{part.slug}.step"
+    if not step.is_file():
+        print(f"  fetch  {part.url}")
+        with urllib.request.urlopen(part.url) as response:  # noqa: S310 - https
+            step.write_bytes(response.read())
+    print(f"  parse  {step.name}  {step.stat().st_size:,} bytes")
+
+    shape, styles, _document = read(step)
+    whole = box_of(shape)
+    frame = part_frame(shape)
+    mesh = tessellate(shape, styles, deflection, frame)
+    print(f"  size   {whole.width:.3f} x {whole.height:.3f} x "
+          f"{whole.thickness:.3f} mm, z-up by KiCad's convention")
+    print(f"  mesh   {mesh.triangles():,} triangles, {len(mesh.groups)} colours: "
+          f"{sorted(mesh.groups)}")
+    if part.lens not in mesh.groups:
+        raise SystemExit(
+            f"{part.name} names {part.lens} as its lens and the model has "
+            f"{sorted(mesh.groups)}. The file changed; re-read it before "
+            f"trusting a part that cannot light up."
+        )
+    tips = lead_tips(mesh, part.lens)
+    if len(tips) != 2:
+        raise SystemExit(
+            f"{part.name} has {len(tips)} lead tips and a wire needs two. "
+            f"Either the model is not a two-lead part or its leads do not "
+            f"straddle the origin."
+        )
+    print(f"  leads  {part.terminals[0]} at "
+          f"({tips[0][0]:.3f}, {tips[0][1]:.3f}, {tips[0][2]:.3f}), "
+          f"{part.terminals[1]} at "
+          f"({tips[1][0]:.3f}, {tips[1][1]:.3f}, {tips[1][2]:.3f})")
+
+    if check:
+        print("  write  skipped (--check)")
+        return 0
+    out = OUT / "parts" / f"{part.slug}.glb"
+    size = write_glb(mesh, out, part.slug, part.url, (whole.width, whole.height,
+                                                     whole.thickness),
+                     extras={"label": part.label, "lens": part.lens,
+                             "library": part.library,
+                             "terminals": [
+                                 {"name": part.terminals[i],
+                                  "at": [round(v, 4) for v in tips[i]]}
+                                 for i in range(2)],
+                             "licence": "CC-BY-SA-4.0 with the KiCad library "
+                                        "exception; fetched, not vendored"})
+    print(f"  write  {out.relative_to(REPO)}  {size:,} bytes")
+    return size
+
+
 def write_index() -> pathlib.Path:
     """Write `models/index.json`: which board has a model, and from where.
 
@@ -821,10 +1024,31 @@ def write_index() -> pathlib.Path:
             }
             if mesh.is_file():
                 boards[board]["pcb"] = read_extras(mesh).get("pcb")
+    # Grouped by KiCad's own library folder, which is what the page shows as
+    # a folder. Written whether or not each mesh is present, so a checkout
+    # that has not run the importer gets a menu that says what is missing
+    # rather than an empty one that says nothing exists.
+    libraries: dict[str, list[dict[str, object]]] = {}
+    for part in PARTS:
+        mesh = OUT / "parts" / f"{part.slug}.glb"
+        libraries.setdefault(part.library, []).append({
+            "slug": part.slug,
+            "name": part.name,
+            "label": part.label,
+            "file": f"/models/parts/{part.slug}.glb" if mesh.is_file() else None,
+            "bytes": mesh.stat().st_size if mesh.is_file() else 0,
+            "source": part.url,
+        })
+
     index = OUT / "index.json"
     index.parent.mkdir(parents=True, exist_ok=True)
     index.write_text(json.dumps({
         "units": "mm",
+        "parts": {
+            "source": "KiCad kicad-packages3D, CC-BY-SA-4.0 with the library "
+                      "exception; fetched, not vendored",
+            "libraries": libraries,
+        },
         "note": (
             "The vendor's own mechanical model, tessellated by "
             "tools/import_3d_model.py. A board absent here has no reachable "
@@ -839,18 +1063,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--chip", help="one chip from the table")
     parser.add_argument("--all", action="store_true", help="every model there is")
+    parser.add_argument("--parts", action="store_true",
+                        help="the component models a wire connects to")
     parser.add_argument("--check", action="store_true",
                         help="report and write nothing")
     parser.add_argument("--deflection", type=float, default=DEFLECTION,
                         help=f"chord error in mm (default {DEFLECTION})")
     args = parser.parse_args(argv)
 
-    if not args.all and not args.chip:
-        parser.error("one of --chip or --all")
-    wanted = MODELS if args.all else (model_for(args.chip),)
+    if not args.all and not args.chip and not args.parts:
+        parser.error("one of --chip, --all or --parts")
+    wanted = MODELS if args.all else () if args.parts else (model_for(args.chip),)
 
     try:
         total = sum(convert(model, args.deflection, args.check) for model in wanted)
+        if args.parts or args.all:
+            total += sum(convert_part(part, args.deflection, args.check)
+                         for part in PARTS)
     except Unavailable as exc:
         # The shape `CLAUDE.md` states for a checker that cannot find its
         # source: exit 3, say SKIPPED, never pass quietly.

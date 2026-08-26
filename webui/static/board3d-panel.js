@@ -25,6 +25,11 @@ const ROWS = "board-pins-rows";
 const NOTE = "board-pins-note";
 const FALLBACK = "board-pins-fallback";
 const CAPTION = "board-pins-caption";
+const MENU = "bench-menu";
+const TREE = "bench-tree";
+const BENCH_LIST = "bench-list";
+const UNWIRE = "bench-clear";
+const BENCH_NOTE = "bench-note";
 
 //: Where `tools/import_3d_model.py` writes which board it has a model for.
 const MODEL_INDEX = "/models/index.json";
@@ -196,6 +201,7 @@ async function reload() {
 
   const drawn = await renderer();
   if (drawn) drawn.showBoard(view, model);
+  renderBench();
 }
 
 /** How many pads this repository can answer for, right now.
@@ -232,12 +238,152 @@ function levels(pins) {
   }
   renderTable(layout.pads);
   renderCount();
-  if (scene) scene.setLevels(pins);
+  if (scene) {
+    scene.setLevels(pins);
+    renderBench();
+  }
 }
 
 /** Re-read the palette when the theme changes. */
 function theme() {
   if (scene) scene.refreshTheme();
 }
+
+/**
+ * The catalogue, as nested folders.
+ *
+ * **KiCad's own library tree and not a taxonomy invented here.** The index
+ * `tools/import_3d_model.py` writes has one entry per library folder --
+ * `LED_THT`, `Buzzer_Beeper` -- and this renders exactly that, so somebody who
+ * knows the library finds the same names and this page has no second
+ * classification to keep true.
+ *
+ * `<details>` rather than a `<select>` with `<optgroup>`: a select gives one
+ * level of grouping and this needs two, and a native disclosure is keyboard
+ * reachable and closes on Escape without a line of script.
+ */
+async function renderTree() {
+  const tree = $(TREE);
+  if (tree.dataset.built === "yes") return;
+  const index = await modelIndex();
+  const catalogue = index.parts;
+  tree.textContent = "";
+  if (!catalogue || !Object.keys(catalogue.libraries ?? {}).length) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent =
+      "No part models here. Run tools/import_3d_model.py --parts to fetch them.";
+    tree.append(empty);
+    tree.dataset.built = "yes";
+    return;
+  }
+
+  const root = document.createElement("details");
+  root.open = true;
+  const rootName = document.createElement("summary");
+  rootName.textContent = "KiCad packages3D";
+  root.append(rootName);
+
+  for (const [library, entries] of Object.entries(catalogue.libraries)) {
+    const folder = document.createElement("details");
+    const name = document.createElement("summary");
+    name.textContent = library;
+    folder.append(name);
+    for (const part of entries) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "bench-part";
+      item.textContent = part.label;
+      // A part whose mesh was never fetched is shown and refused, rather than
+      // hidden: "run the importer" is a fixable answer and an absence is not.
+      item.disabled = !part.file;
+      item.title = part.file ? part.name : `${part.name} — not imported`;
+      item.addEventListener("click", () => addPart(part.slug));
+      folder.append(item);
+    }
+    root.append(folder);
+  }
+  const note = document.createElement("p");
+  note.className = "hint";
+  note.textContent = catalogue.source;
+  root.append(note);
+  tree.append(root);
+  tree.dataset.built = "yes";
+}
+
+/** Put one part on the bench. */
+async function addPart(slug) {
+  // The renderer is loaded lazily, so the first part is also what pays for
+  // three.js. A browser with no WebGL gets the table and a message rather than
+  // a button that silently does nothing.
+  const drawn = await renderer();
+  if (!drawn) {
+    $(BENCH_NOTE).textContent =
+      "The 3D view could not start, so there is nowhere to put a part.";
+    return;
+  }
+  await drawn.addPart(slug);
+  $(MENU).open = false;
+  renderBench();
+}
+
+/** What is on the bench, and what is wired to what. */
+function renderBench() {
+  if (!scene) return;
+  const joined = scene.connections();
+  const onBench = scene.parts();
+  $(UNWIRE).disabled = joined.length === 0;
+
+  const list = $(BENCH_LIST);
+  list.textContent = "";
+  for (const wire of joined) {
+    const row = document.createElement("li");
+    const what = document.createElement("span");
+    // **Named, not counted.** "5 mm LED — anode on D0" is a sentence a reader
+    // can check against the table beside it; "1 connected" is one they have to
+    // trust.
+    what.textContent = `${wire.label} — ${wire.terminal} on ${wire.pin}`;
+    const off = document.createElement("button");
+    off.type = "button";
+    off.className = "bench-off";
+    off.textContent = "×";
+    off.title = `Unwire ${wire.label} from ${wire.pin}`;
+    off.setAttribute("aria-label", off.title);
+    off.addEventListener("click", () => {
+      scene.disconnect(wire.id);
+      renderBench();
+    });
+    row.append(what, off);
+    list.append(row);
+  }
+
+  if (!onBench.length) {
+    $(BENCH_NOTE).textContent =
+      "Drag from a pad to a part's terminal to wire it. The part shows what " +
+      "that pin is doing; nothing flows back into the chip.";
+    return;
+  }
+  const loose = onBench.length - joined.length;
+  $(BENCH_NOTE).textContent = loose
+    ? `${loose} part${loose === 1 ? "" : "s"} not wired yet. Drag from a pad ` +
+      `to a terminal.`
+    : "Every part is wired. Drag from another pad to wire another.";
+}
+
+/** Wire up the bench controls. Called once, when this module loads. */
+function mountBench() {
+  // A wire made by dragging happens inside the canvas and nothing else sees
+  // it; `board3d.js` says so with an event rather than calling in here.
+  $(CANVAS).addEventListener("wires-changed", renderBench);
+  $(MENU).addEventListener("toggle", () => {
+    if ($(MENU).open) renderTree();
+  });
+  $(UNWIRE).addEventListener("click", () => {
+    if (scene) scene.clearBench();
+    renderBench();
+  });
+}
+
+mountBench();
 
 window.boardPins = { reload, levels, theme };

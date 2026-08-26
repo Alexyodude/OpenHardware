@@ -43,6 +43,9 @@
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { Rope } from "./wires.js";
+import { dressPart, makeTarget, setPartState, terminalPoint, BENCH_GAP,
+         BENCH_PITCH } from "./parts.js";
 
 //: World units per image pixel. The same 0.1 `scene3d.js` uses, so a 196px
 //: XIAO becomes ~20 units and a 402px Uno ~40 -- both framed sanely by the
@@ -199,6 +202,10 @@ function readGlb(buffer) {
     const material = json.materials[primitive.material];
     const [red, green, blue] = material.pbrMetallicRoughness.baseColorFactor;
     group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+      // **The name is load-bearing.** `tools/import_3d_model.py` writes the
+      // colour there and `parts.js` finds a part's lens by it; three.js drops
+      // it silently if it is not asked for, and a part would then never light.
+      name: material.name ?? "",
       color: new THREE.Color(red, green, blue),
       roughness: material.pbrMetallicRoughness.roughnessFactor,
       metalness: material.pbrMetallicRoughness.metallicFactor,
@@ -217,7 +224,15 @@ const view = {
   controls: null,
   board: null,
   model: null,       // the vendor's mesh, once it has arrived
+  slab: null,        // the PCB alone, for collision; see refreshColliders
+  colliders: [],     // what a wire may not pass through; see refreshColliders
+  floor: -Infinity,  // the bench top
   pads: new Map(),   // pin name -> the marker drawn for it
+  bench: null,       // parts and wires; outlives a board change
+  parts: [],         // every part on the bench, in the order they arrived
+  wires: [],         // every wire, connected or being dragged
+  dragging: null,    // the wire under the pointer, if there is one
+  last: 0,           // the previous frame's timestamp, in milliseconds
   palette: {},
   frame: 0,
 };
@@ -263,6 +278,19 @@ export function mount(canvas) {
   key.position.set(12, 24, 10);
   view.scene.add(key);
 
+  view.bench = new THREE.Group();
+  view.scene.add(view.bench);
+
+  // **Capture phase, and that is the whole trick.** `OrbitControls` listens
+  // for `pointerdown` on this same canvas, and a wire drag that let the event
+  // through would turn the camera at the same time. Capture runs before any
+  // bubbling listener whenever it was registered, so this sees the press
+  // first and stops it going further when it starts a wire.
+  canvas.addEventListener("pointerdown", onPointerDown, true);
+  canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerUp);
+
   resize();
   window.addEventListener("resize", resize);
   animate();
@@ -278,11 +306,52 @@ function resize() {
   view.camera.updateProjectionMatrix();
 }
 
-function animate() {
+function animate(now = 0) {
   if (!view.renderer) return;
   view.frame = requestAnimationFrame(animate);
+  // **The timestamp `requestAnimationFrame` already hands us**, rather than
+  // `THREE.Clock`, which this build deprecates in favour of `THREE.Timer` and
+  // warns about in the console -- and this panel is held to no console message
+  // at warning or above. It is also one subtraction against a whole class.
+  //
+  // Real elapsed seconds and not a frame count: `Rope.advance` banks it into
+  // fixed substeps, so this is the one place the display's own rate enters and
+  // the one place it stops.
+  const delta = view.last ? Math.min((now - view.last) / 1000, 0.25) : 0;
+  view.last = now;
+  for (const wire of view.wires) {
+    wire.rope.moveHead(anchorOf(wire));
+    if (wire.terminal) wire.rope.moveTail(vecArray(terminalPoint(wire.terminal)));
+    wire.rope.advance(delta);
+    updateTube(wire.mesh.geometry, wire.rope, WIRE_RADIUS);
+  }
   view.controls.update();
   view.renderer.render(view.scene, view.camera);
+}
+
+/**
+ * Point the camera at everything there is, board and bench together.
+ *
+ * **Framed from the scene and not from the board**, which is the fix for a
+ * part that was placed correctly and drawn off the edge of the canvas: the
+ * board is about 18 units across and a part sits 6 beyond its edge, so a
+ * camera pulled back by the board's own size cannot see one.
+ *
+ * The pull is a multiple of the whole extent rather than a distance, so one
+ * number frames a bare XIAO, an Uno, and a XIAO with four parts beside it.
+ */
+function frameScene() {
+  if (!view.renderer || !view.board) return;
+  const box = new THREE.Box3().setFromObject(view.board);
+  if (view.bench && view.parts.length) box.expandByObject(view.bench);
+  const centre = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const reach = Math.max(size.x, size.z, size.y) * CAMERA_PULL;
+  view.camera.position.set(centre.x + reach * 0.1,
+                           centre.y + reach * 0.85,
+                           centre.z + reach * 0.75);
+  view.controls.target.copy(centre);
+  view.controls.update();
 }
 
 /** Throw away one object's geometry and material. */
@@ -364,10 +433,11 @@ export function showBoard(layout, model = null) {
 
   view.scene.add(view.board);
 
-  const reach = Math.max(width, depth) * CAMERA_PULL;
-  view.camera.position.set(reach * 0.1, reach * 0.85, reach * 0.75);
-  view.controls.target.set(0, 0, 0);
-  view.controls.update();
+  // The extruded footprint's own slab, until a vendor model replaces it.
+  view.slab = { x: width / 2, z: depth / 2,
+                bottom: -BOARD_THICKNESS / 2, top: BOARD_THICKNESS / 2 };
+  refreshColliders();
+  frameScene();
 
   // Last, and not awaited: a board with a vendor model is drawn twice --
   // once as the footprint, then again when a megabyte and a half of mesh has
@@ -449,6 +519,21 @@ function placeModel(loaded, layout) {
   const top = -BOARD_THICKNESS / 2 + pcb.thickness * scale
               + PAD_LIFT + PAD_HEIGHT / 2;
   for (const post of view.pads.values()) post.position.y = top;
+  // The board just changed shape, so what a wire may not pass through changed
+  // with it -- and it is the PCB that changed, not the assembly: a lead should
+  // drape over the connector rather than be stopped by the box around it.
+  view.slab = {
+    x: (pcb.long / 2) * scale,
+    z: (pcb.short / 2) * scale,
+    bottom: -BOARD_THICKNESS / 2,
+    top: -BOARD_THICKNESS / 2 + pcb.thickness * scale,
+  };
+  if (group.rotation.y !== 0) {
+    const swap = view.slab.x;
+    view.slab.x = view.slab.z;
+    view.slab.z = swap;
+  }
+  refreshColliders();
 }
 
 /** Paint one post from the state recorded on it. */
@@ -465,6 +550,11 @@ export function setLevels(levels) {
     post.userData.state = levels[pin] ?? "unknown";
     repaint(post);
   }
+  // **The parts follow the pads and not the payload**, which is the join that
+  // makes a wire mean anything: a part shows the state of the pad its wire
+  // reaches, read back off that pad, so there is exactly one place a pin state
+  // is decided and the picture cannot disagree with the table.
+  for (const wire of view.wires) applyState(wire);
 }
 
 /** Re-read the stylesheet. Called when the theme changes.
@@ -495,6 +585,9 @@ export function refreshTheme() {
 }
 
 function clearBoard() {
+  // The wires go with the board, because each one names a pad on it. The
+  // parts stay: they are on the bench, not on the board.
+  if (view.bench) clearBench();
   if (!view.board) return;
   view.board.traverse((object) => {
     if (object.isMesh || object.isLineSegments) release(object);
@@ -510,6 +603,7 @@ export function dispose() {
   if (!view.renderer) return;
   cancelAnimationFrame(view.frame);
   window.removeEventListener("resize", resize);
+  clearBench({ parts: true });
   clearBoard();
   view.controls.dispose();
   view.renderer.dispose();
@@ -522,4 +616,580 @@ export function dispose() {
 /** Whether a board is currently drawn. For the page, and for a test. */
 export function drawn() {
   return view.board !== null;
+}
+
+/**
+ * A world point as canvas pixels, or null before anything is mounted.
+ *
+ * **For driving the pointer from a test.** OH-73's Done-when is that a drag
+ * makes a wire and does not turn the camera, and a drag needs two screen
+ * positions -- the pad it starts on and the terminal it ends on. Both are
+ * known in world space and neither is reachable from the DOM, so this is the
+ * one thing a test cannot work out for itself.
+ */
+export function toScreen(point) {
+  if (!view.renderer) return null;
+  const at = new THREE.Vector3(point[0], point[1], point[2]).project(view.camera);
+  const box = view.renderer.domElement.getBoundingClientRect();
+  return [box.left + ((at.x + 1) / 2) * box.width,
+          box.top + ((1 - at.y) / 2) * box.height];
+}
+
+/**
+ * Where everything actually is, in world space.
+ *
+ * **For a test and for a person debugging one.** A WebGL scene cannot be
+ * asserted on from Python and a screenshot shows what a thing looks like
+ * rather than where it is -- which is exactly the gap that let a board render
+ * upside down while every DOM assertion passed. Numbers close that gap.
+ */
+export function describe() {
+  if (!view.renderer) return null;
+  const box = new THREE.Box3();
+  const at = new THREE.Vector3();
+  const pads = {};
+  for (const [pin, pad] of view.pads) pads[pin] = vecArray(pad.getWorldPosition(at));
+  return {
+    camera: vecArray(view.camera.position),
+    target: vecArray(view.controls.target),
+    terminals: view.parts.flatMap((part, index) =>
+      [...part.userData.terminals.entries()].map(([name, anchor]) => ({
+        part: index, name, at: vecArray(anchor.getWorldPosition(new THREE.Vector3())),
+      }))),
+    board: view.board ? vecArray(view.board.getWorldPosition(at)) : null,
+    model: view.model
+      ? { position: vecArray(view.model.getWorldPosition(at)),
+          scale: view.model.scale.x,
+          rotationY: view.model.rotation.y,
+          box: (box.setFromObject(view.model),
+                { min: vecArray(box.min), max: vecArray(box.max) }) }
+      : null,
+    pads,
+    parts: view.parts.map((part) => ({
+      kind: part.userData.kind,
+      state: part.userData.state,
+      position: vecArray(part.getWorldPosition(at)),
+      box: (box.setFromObject(part),
+            { min: vecArray(box.min), max: vecArray(box.max) }),
+    })),
+    wires: view.wires.map((wire) => ({
+      pin: wire.pin,
+      connected: Boolean(wire.terminal),
+      segment: wire.rope.segment,
+      stretch: wire.rope.worstStretch(),
+      head: wire.rope.point(0),
+      tail: wire.rope.point(wire.rope.count - 1),
+    })),
+  };
+}
+
+// --- the bench: parts, wires, and the drag that joins them -------------------
+//
+// **The rule this section keeps is that nothing here reads a register.** A
+// wire is geometry and a part is a lamp; what a pin is doing arrives from
+// `webui/api.py` through `setLevels` exactly as it did before any of this
+// existed. A part lit here is a picture of a state this repository measured,
+// which is the same sentence the file's header makes about a pad.
+
+//: How thick a jumper lead is drawn, and how many sides its tube has.
+//: Six is enough at this radius: the wire is about a pixel and a half across
+//: on screen and a heptagon would cost more triangles than it is worth.
+const WIRE_RADIUS = 0.16;
+const WIRE_SIDES = 6;
+
+//: Classic jumper colours, cycled. **Written down rather than read from the
+//: palette**, and it is the same argument the vendor's solder mask gets: the
+//: UI's palette is for what this repository is *saying*, and a lead's colour
+//: is a thing on a bench. They also have to be told apart from each other,
+//: which a palette with one accent cannot do.
+const WIRE_COLOURS = [0xd6402c, 0x2f7fd6, 0xe8b03a, 0x3fae62, 0xb266cc, 0xcfd6dd];
+
+/**
+ * A tube with the topology of a wire but no useful positions yet.
+ *
+ * **Built once and rewritten in place every frame.** `TubeGeometry` allocates
+ * a new geometry each time it is constructed, and a wire is rebuilt sixty
+ * times a second: eight wires would be five hundred allocations a second for a
+ * shape whose triangle list never changes. Only the vertices move.
+ */
+function makeTube(nodes, sides) {
+  const geometry = new THREE.BufferGeometry();
+  const count = nodes * sides;
+  geometry.setAttribute("position",
+    new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+  geometry.setAttribute("normal",
+    new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+
+  const index = [];
+  for (let i = 0; i < nodes - 1; i++) {
+    for (let j = 0; j < sides; j++) {
+      const a = i * sides + j;
+      const b = i * sides + ((j + 1) % sides);
+      index.push(a, b, a + sides, b, b + sides, a + sides);
+    }
+  }
+  geometry.setIndex(index);
+  return geometry;
+}
+
+const tangent = new THREE.Vector3();
+const normal = new THREE.Vector3();
+const binormal = new THREE.Vector3();
+const here = new THREE.Vector3();
+const next = new THREE.Vector3();
+
+/**
+ * Rewrite a tube's vertices to follow a rope.
+ *
+ * The ring at each node needs two axes across the wire, and picking them from
+ * the tangent alone twists: a Frenet frame flips wherever the curve is
+ * straight, which for a hanging cable is most of it. So the frame is carried
+ * along from the previous ring and re-orthogonalised -- parallel transport,
+ * which has no such discontinuity.
+ */
+function updateTube(geometry, rope, radius) {
+  const positions = geometry.attributes.position.array;
+  const normals = geometry.attributes.normal.array;
+  // Any direction not along the first tangent will do to start; the transport
+  // below makes every later ring agree with this one rather than with a fixed
+  // axis.
+  normal.set(0, 1, 0);
+
+  for (let i = 0; i < rope.count; i++) {
+    const at = i * 3;
+    here.set(rope.position[at], rope.position[at + 1], rope.position[at + 2]);
+    const other = i === rope.count - 1 ? i - 1 : i + 1;
+    const to = other * 3;
+    next.set(rope.position[to], rope.position[to + 1], rope.position[to + 2]);
+    tangent.subVectors(next, here);
+    if (i === rope.count - 1) tangent.negate();
+    if (tangent.lengthSq() === 0) tangent.set(0, 0, 1);
+    tangent.normalize();
+
+    // Re-orthogonalise the carried normal against this tangent. If the two
+    // have become parallel -- a wire doubled back on itself -- any other axis
+    // restarts the frame without a visible seam.
+    normal.addScaledVector(tangent, -normal.dot(tangent));
+    if (normal.lengthSq() < 1e-6) normal.set(tangent.z, tangent.x, tangent.y);
+    normal.normalize();
+    binormal.crossVectors(tangent, normal);
+
+    for (let j = 0; j < WIRE_SIDES; j++) {
+      const angle = (j / WIRE_SIDES) * Math.PI * 2;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const out = (i * WIRE_SIDES + j) * 3;
+      const nx = normal.x * cos + binormal.x * sin;
+      const ny = normal.y * cos + binormal.y * sin;
+      const nz = normal.z * cos + binormal.z * sin;
+      normals[out] = nx;
+      normals[out + 1] = ny;
+      normals[out + 2] = nz;
+      positions[out] = here.x + nx * radius;
+      positions[out + 1] = here.y + ny * radius;
+      positions[out + 2] = here.z + nz * radius;
+    }
+  }
+  geometry.attributes.position.needsUpdate = true;
+  geometry.attributes.normal.needsUpdate = true;
+  geometry.computeBoundingSphere();
+}
+
+const scratch = new THREE.Vector3();
+
+/** A three.js vector as the plain array `wires.js` speaks. */
+function vecArray(vector) {
+  return [vector.x, vector.y, vector.z];
+}
+
+/** Where a wire's board end is now, following the pad it was pulled from. */
+function anchorOf(wire) {
+  const pad = view.pads.get(wire.pin);
+  if (!pad) return wire.rope.point(0);
+  pad.getWorldPosition(scratch);
+  return vecArray(scratch);
+}
+
+/**
+ * Put a part on the bench, beside the board.
+ *
+ * Beside rather than on: a part standing on the board would cover the pads a
+ * wire has to be dragged from, which is the one thing this view exists to make
+ * possible.
+ */
+export async function addPart(kind) {
+  if (!view.renderer) return null;
+  const loaded = await loadPart(kind);
+  if (!loaded) return null;
+  const part = dressPart(loaded.group, loaded.extras, view.palette);
+  for (const anchor of part.userData.terminals.values()) {
+    makeTarget(anchor, view.palette);
+  }
+  const row = view.parts.length;
+  // **Clear of the board, measured rather than assumed.** The first version
+  // used a constant 6.0 and a XIAO is about 17 units across, so every part
+  // was placed inside the board's own footprint and the first one landed on
+  // the USB connector. The board's real half-width is the only number that
+  // makes this right for a 196px XIAO and a 402px Uno at once.
+  const edge = boardHalfWidth() + BENCH_GAP;
+  part.position.set(edge + (row % 3) * BENCH_PITCH,
+                    -BOARD_THICKNESS / 2,
+                    -BENCH_PITCH + Math.floor(row / 3) * BENCH_PITCH);
+  // Millimetres, like the board: the part's mesh is in the vendor's own
+  // units and the scene is image pixels at the same 8 px/mm.
+  part.scale.setScalar(PX_PER_MM * SCALE);
+  view.bench.add(part);
+  view.parts.push(part);
+  refreshColliders();
+  frameScene();
+  return part;
+}
+
+//: A counter rather than an index into `view.wires`: an index changes when
+//: an earlier wire is removed, and the page holds these across renders.
+let nextWireId = 1;
+
+//: Part meshes, fetched once each. A bench with six LEDs on it should ask
+//: for one file, and `dressPart` clones what it needs per part anyway.
+const partCache = new Map();
+
+/** Fetch and parse one part's mesh, or null if it is not there. */
+async function loadPart(kind) {
+  if (!partCache.has(kind)) {
+    partCache.set(kind, fetch(`/models/parts/${kind}.glb`)
+      .then((response) => (response.ok ? response.arrayBuffer() : null))
+      .then((buffer) => (buffer ? readGlb(buffer) : null))
+      .catch((error) => {
+        console.warn(`the model for ${kind} did not load:`, error);
+        return null;
+      }));
+  }
+  const loaded = await partCache.get(kind);
+  if (!loaded) return null;
+  // A clone per part: two LEDs on the bench are two objects, and they light
+  // independently because `dressPart` clones the lens material too.
+  return { group: loaded.group.clone(true), extras: loaded.extras };
+}
+
+//: How far below the board the bench top sits. A wire with nothing under it
+//: falls out of the scene, which is a worse picture than one lying on a table.
+const BENCH_DROP = 5.0;
+
+/**
+ * Tell every wire what it may not pass through.
+ *
+ * **Recomputed when the scene changes and not every frame.** Nothing here
+ * moves on its own: the board is placed once, a part is placed when it is
+ * added, and neither is dragged. Rebuilding three bounding boxes sixty times a
+ * second would be work to arrive at the same three numbers.
+ *
+ * The board is one box and each part is one box, which is coarser than their
+ * meshes and is the right coarseness: a wire that draped exactly around a USB
+ * connector's chamfers would cost a triangle test per node per pass, and the
+ * difference would be invisible at the size a lead is drawn.
+ */
+function refreshColliders() {
+  const solids = [];
+  const box = new THREE.Box3();
+  if (view.board) {
+    // **The PCB slab, not the board's bounding box.** The box a board casts
+    // includes its USB connector, which stands 2.4 mm proud -- so every pad on
+    // the top face was *inside* it, and a wire pinned to a pad inside a solid
+    // is a wire the constraint and the collider pull against each other
+    // forever. Measured before the fix: 161% over rest on a wire that had
+    // been sitting still for two seconds.
+    const half = view.slab;
+    solids.push({
+      owner: "board",
+      kind: "box",
+      min: [-half.x, half.bottom, -half.z],
+      max: [half.x, half.top, half.z],
+    });
+  }
+  for (const part of view.parts) {
+    box.setFromObject(part);
+    solids.push({ owner: part, kind: "box",
+                  min: vecArray(box.min), max: vecArray(box.max) });
+  }
+  const floor = -BOARD_THICKNESS / 2 - BENCH_DROP;
+  view.colliders = solids;
+  view.floor = floor;
+  for (const wire of view.wires) applyColliders(wire);
+}
+
+/**
+ * Give one wire the solids it may not pass through.
+ *
+ * **A wire is never blocked by the part it is plugged into.** Its tail is
+ * inside that part by construction -- a terminal is a point on the component
+ * -- so leaving the part's own box in the list would eject the node next to
+ * the tail on every pass and leave the cable permanently stretched. This is
+ * the same failure the board's box had, arriving from the other end.
+ */
+function applyColliders(wire) {
+  const own = wire.terminal?.userData?.part ?? null;
+  wire.rope.colliders = own
+    ? view.colliders.filter((solid) => solid.owner !== own)
+    : view.colliders;
+  wire.rope.floor = view.floor;
+}
+
+/** Half the drawn board's width, or a sane default before one is drawn. */
+function boardHalfWidth() {
+  if (!view.board) return BENCH_GAP;
+  const box = new THREE.Box3().setFromObject(view.board);
+  return Math.max(Math.abs(box.min.x), Math.abs(box.max.x));
+}
+
+/** Which pin a part is wired to, or null. */
+function connectionOf(part) {
+  for (const wire of view.wires) {
+    if (wire.terminal && wire.terminal.userData.part === part) return wire.pin;
+  }
+  return null;
+}
+
+/** Every part on the bench, for the page's own list. */
+export function parts() {
+  return view.parts.map((part) => ({
+    kind: part.userData.kind,
+    label: part.userData.label,
+    state: part.userData.state,
+    pin: connectionOf(part),
+  }));
+}
+
+/** Everything currently joined. For the page, and for a test. */
+export function connections() {
+  return view.wires
+    .filter((wire) => wire.terminal)
+    .map((wire) => ({
+      id: wire.id,
+      pin: wire.pin,
+      kind: wire.terminal.userData.part.userData.kind,
+      label: wire.terminal.userData.part.userData.label,
+      terminal: wire.terminal.userData.terminal,
+    }));
+}
+
+/**
+ * Take one wire off, and leave the part where it is.
+ *
+ * **The part goes back to `unknown` and not to `off`**, which is the same
+ * distinction every pad in this view keeps: an LED with nothing wired to it is
+ * not an LED being driven low, and showing them the same way would say the
+ * program had turned it off.
+ */
+export function disconnect(id) {
+  const wire = view.wires.find((candidate) => candidate.id === id);
+  if (!wire) return false;
+  const part = wire.terminal?.userData?.part ?? null;
+  discardWire(wire);
+  if (part && !view.wires.some((other) => other.terminal?.userData?.part === part)) {
+    setPartState(part, "unknown", view.palette);
+  }
+  return true;
+}
+
+/** Take a part off the bench, and any wire that reached it. */
+export function removePart(index) {
+  const part = view.parts[index];
+  if (!part) return false;
+  for (const wire of [...view.wires]) {
+    if (wire.terminal?.userData?.part === part) discardWire(wire);
+  }
+  part.traverse((object) => { if (object.isMesh) release(object); });
+  view.bench.remove(part);
+  view.parts.splice(index, 1);
+  refreshColliders();
+  frameScene();
+  return true;
+}
+
+/**
+ * Start a wire at a pad, optionally already reaching somewhere.
+ *
+ * **A wire made without an `end` begins with all of its nodes on the pad**,
+ * which is right for a drag -- the lead is being pulled out and has not gone
+ * anywhere yet. It is wrong for a wire that is created already connected: the
+ * far end teleports to the terminal and the other twenty-one nodes have to
+ * travel there through whatever is in the way, which on a board is a violent
+ * transient that leaves a residue. Measured 2026-08-27: 27.8% over rest after
+ * two and a half seconds, against 1.2% for the same wire laid out along its
+ * own line to begin with.
+ */
+function beginWire(pad, end = null) {
+  const start = vecArray(pad.getWorldPosition(scratch));
+  const rope = new Rope(start, end ?? start.slice());
+  const mesh = new THREE.Mesh(
+    makeTube(rope.count, WIRE_SIDES),
+    new THREE.MeshStandardMaterial({
+      color: WIRE_COLOURS[view.wires.length % WIRE_COLOURS.length],
+      roughness: 0.5,
+      metalness: 0.05,
+    })
+  );
+  const wire = { id: nextWireId++, pin: pad.userData.pin, rope, mesh,
+                 terminal: null };
+  applyColliders(wire);
+  view.bench.add(mesh);
+  view.wires.push(wire);
+  return wire;
+}
+
+/** Drop a wire that never reached a terminal. */
+function discardWire(wire) {
+  const at = view.wires.indexOf(wire);
+  if (at >= 0) view.wires.splice(at, 1);
+  view.bench.remove(wire.mesh);
+  release(wire.mesh);
+}
+
+const pointer = new THREE.Vector2();
+const raycaster = new THREE.Raycaster();
+const dragPlane = new THREE.Plane();
+const dragPoint = new THREE.Vector3();
+
+/** Put the pointer into the -1..1 box a raycaster wants. */
+function aim(event) {
+  const box = view.renderer.domElement.getBoundingClientRect();
+  pointer.x = ((event.clientX - box.left) / box.width) * 2 - 1;
+  pointer.y = -((event.clientY - box.top) / box.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, view.camera);
+}
+
+/** The nearest pad under the pointer, or null. */
+function padUnder() {
+  const hits = raycaster.intersectObjects([...view.pads.values()], false);
+  return hits.length ? hits[0].object : null;
+}
+
+/** The nearest part terminal under the pointer, or null. */
+function terminalUnder() {
+  const targets = [];
+  for (const part of view.parts) {
+    for (const anchor of part.userData.terminals.values()) {
+      targets.push(...anchor.children.filter((child) => child.isMesh));
+    }
+  }
+  const hits = raycaster.intersectObjects(targets, false);
+  // The target is a handle on the anchor; the anchor is what a wire ends at.
+  return hits.length ? hits[0].object.parent : null;
+}
+
+/**
+ * Take or give back the pointer, and never throw doing it.
+ *
+ * **Pointer capture is what keeps a drag working past the edge of the canvas**
+ * and it is not essential: without it a drag still works inside the canvas,
+ * which is where a wire is dragged anyway. It can fail -- a synthesised event
+ * has no active pointer behind it, and `setPointerCapture` throws
+ * `NotFoundError` rather than returning false -- and a console error from a
+ * nicety is worse than the nicety being absent.
+ */
+function capture(event, take) {
+  const canvas = view.renderer?.domElement;
+  if (!canvas) return;
+  try {
+    if (take) canvas.setPointerCapture(event.pointerId);
+    else canvas.releasePointerCapture(event.pointerId);
+  } catch {
+    // No active pointer with that id. The drag works without it.
+  }
+}
+
+/** Tell the page a wire appeared or went away, so it can redraw its list. */
+function announce() {
+  view.renderer?.domElement.dispatchEvent(
+    new CustomEvent("wires-changed", { bubbles: true }));
+}
+
+function onPointerDown(event) {
+  if (!view.renderer || event.button !== 0) return;
+  aim(event);
+  const pad = padUnder();
+  if (!pad) return;
+  // Only now is the camera's press taken away, and only because a wire really
+  // did start. A press that missed every pad still turns the board.
+  event.stopPropagation();
+  event.preventDefault();
+  view.controls.enabled = false;
+  view.dragging = beginWire(pad);
+  // The plane the loose end slides on: through the pad, facing the camera, so
+  // that dragging up the screen lifts the wire whatever angle the board is
+  // seen from.
+  view.camera.getWorldDirection(scratch);
+  dragPlane.setFromNormalAndCoplanarPoint(scratch, pad.getWorldPosition(dragPoint));
+  capture(event, true);
+}
+
+function onPointerMove(event) {
+  if (!view.dragging) return;
+  aim(event);
+  if (raycaster.ray.intersectPlane(dragPlane, dragPoint)) {
+    view.dragging.rope.moveTail(vecArray(dragPoint));
+  }
+}
+
+function onPointerUp(event) {
+  if (!view.dragging) return;
+  aim(event);
+  const terminal = terminalUnder();
+  if (terminal) {
+    view.dragging.terminal = terminal;
+    view.dragging.rope.moveTail(vecArray(terminalPoint(terminal)));
+    view.dragging.rope.slacken();
+    applyColliders(view.dragging);
+    applyState(view.dragging);
+  } else {
+    // **Dropped in mid-air is dropped.** A wire left dangling would be a
+    // connection the page could not explain, and this view's whole contract is
+    // that everything drawn stands for something read.
+    discardWire(view.dragging);
+  }
+  view.dragging = null;
+  view.controls.enabled = true;
+  capture(event, false);
+  // **The page cannot know a wire was made with a pointer**, because the drag
+  // happens entirely inside the canvas. An event rather than a callback so
+  // that the renderer still knows nothing about the page.
+  announce();
+}
+
+/** Show the pin's state on whatever this wire reaches. */
+function applyState(wire) {
+  if (!wire.terminal) return;
+  const pad = view.pads.get(wire.pin);
+  const state = pad ? pad.userData.state : "unknown";
+  setPartState(wire.terminal.userData.part, state, view.palette);
+}
+
+/**
+ * Drop every wire, and every part if asked.
+ *
+ * A board change drops the wires and keeps the parts: a wire names a pad on
+ * the board that has just gone, and a part is on the bench beside it and is
+ * nobody's but the reader's.
+ */
+export function clearBench({ parts: alsoParts = false } = {}) {
+  for (const wire of [...view.wires]) discardWire(wire);
+  if (!alsoParts) return;
+  for (const part of view.parts) {
+    part.traverse((object) => { if (object.isMesh) release(object); });
+    view.bench.remove(part);
+  }
+  view.parts.length = 0;
+}
+
+/** Wire a pad to a part's terminal without a pointer. For the page and tests. */
+export function connect(pin, part, terminalName) {
+  const pad = view.pads.get(pin);
+  const terminal = part?.userData?.terminals?.get(terminalName);
+  if (!pad || !terminal) return null;
+  const wire = beginWire(pad, vecArray(terminalPoint(terminal)));
+  wire.terminal = terminal;
+  applyColliders(wire);
+  wire.rope.slacken();
+  applyState(wire);
+  return wire;
 }
