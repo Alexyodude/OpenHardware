@@ -156,6 +156,100 @@ def test_a_third_port_group_is_refused_by_name_rather_than_computed(board):
     assert "2" in str(caught.value)
 
 
+# --- the clock tree, and the four polls that have to terminate --------------
+#
+# `tests/cortexm0/test_samd21_arduino.py` proves these end to end by running a
+# real image, and it needs an Arm toolchain to do it. These four run
+# everywhere, because a wrong poll direction is a HANG rather than a fault --
+# the one failure `core/cortexm0/cpu.h` cannot make loud, since the address is
+# modelled and the read does answer -- and it should not take a toolchain to
+# catch it.
+
+
+#: The five `PCLKSR` bits `startup.c` waits on, by position from
+#: `component/sysctrl.h:270-283`.
+#:
+#: **Spelled out here rather than compared against `samd21.CLOCKS_ALL_READY`**,
+#: and the first version of these tests did exactly that and stayed green when
+#: the constant was mutated to zero. A test whose expectation is read from the
+#: thing it is testing pins nothing -- the same defect
+#: `tests/cortexm0/test_conformance.py` records under a different name, where a
+#: floor of `len(FAMILIES)` moved with the corpus it was meant to hold still.
+XOSC32KRDY = 1 << 1
+OSC32KRDY = 1 << 2
+DFLLRDY = 1 << 4
+DFLLLCKF = 1 << 6
+DFLLLCKC = 1 << 7
+
+
+def test_every_clock_reports_ready_because_nothing_here_has_to_start(board):
+    """`PCLKSR` is waited on until a bit is SET, ten times in `SystemInit`.
+    Reading zero hangs the very first wait, before a sketch runs at all."""
+    status = board.read_word(samd21.SYSCTRL + samd21.SYSCTRL_PCLKSR)
+    for bit in (XOSC32KRDY, OSC32KRDY, DFLLRDY, DFLLLCKF, DFLLLCKC):
+        assert status & bit, f"PCLKSR bit 0x{bit:x} clear in 0x{status:08x}"
+
+
+def test_the_ready_register_is_read_only_as_the_header_marks_it(board):
+    """`__I` in `component/sysctrl.h:918`. A write that stuck would let one
+    line of firmware turn every ready bit off and hang the next wait -- and
+    `map_constant` is what makes the write inert, as hardware does."""
+    board.write_word(samd21.SYSCTRL + samd21.SYSCTRL_PCLKSR, 0)
+    status = board.read_word(samd21.SYSCTRL + samd21.SYSCTRL_PCLKSR)
+    assert status & DFLLRDY, f"a write cleared PCLKSR: 0x{status:08x}"
+
+
+def test_the_three_syncbusy_bits_read_clear_and_not_set(board):
+    """**The other direction, and getting it backwards hangs just as hard.**
+
+    `GCLK`, `ADC` and `DAC` are each waited on until `SYNCBUSY` is CLEAR, and
+    all three of those bits are bit 7 of a `STATUS` byte that shares a word
+    with registers firmware does write. So this checks the byte, not the word:
+    a model that mapped the word as a constant of all-ones, or that let a
+    neighbouring write spill into it, would spin forever with no diagnostic.
+    """
+    syncbusy = 1 << 7
+    # GCLK STATUS is byte 1 of the word at GCLK+0x00, ADC STATUS byte 1 of
+    # ADC+0x18, DAC STATUS byte 3 of DAC+0x04.
+    for address, byte in (
+        (samd21.GCLK + samd21.GCLK_CTRL, 1),
+        (samd21.ADC + samd21.ADC_INTFLAG, 1),
+        (samd21.DAC + samd21.DAC_INTENCLR, 3),
+    ):
+        status = (board.read_word(address) >> (8 * byte)) & 0xFF
+        assert status & syncbusy == 0, f"0x{address:08x} byte {byte} reads busy"
+
+
+def test_the_masks_start_at_the_reset_values_the_header_gives(board):
+    """`SystemInit` does `PM->APBAMASK.reg |= PM_APBAMASK_GCLK`, a
+    read-modify-write. A register starting at zero would write back six
+    enables cleared that a real part has set before the first instruction --
+    the class of wrong answer this board's own comments spend their length
+    refusing."""
+    assert board.read_word(samd21.PM + samd21.PM_APBAMASK) == 0x0000007F
+    assert board.read_word(samd21.PM + samd21.PM_APBCMASK) == 0x00010000
+    assert board.read_word(samd21.SYSCTRL + samd21.SYSCTRL_OSC8M) == 0x87070382
+
+
+def test_the_calibration_row_is_readable_flash_and_not_a_register(board):
+    """`NVMCTRL_OTP4` at 0x00806020, outside the 256K program flash. Erased,
+    because this model has no factory trim to offer -- see `install_memory`,
+    which says what that costs."""
+    assert board.in_range(samd21.CALIBRATION)
+    assert board.read_word(samd21.CALIBRATION) == 0xFFFFFFFF
+    assert board.read_word(samd21.CALIBRATION + 4) == 0xFFFFFFFF
+
+
+def test_pin_configuration_is_a_stored_byte_per_pin(board):
+    """`pinMode` read-modify-writes one byte of `PINCFG`, so a write to pin 17
+    must not disturb pin 16 -- which is the whole reason the core masks a byte
+    write rather than storing the word."""
+    base = samd21.group(samd21.PORTA) + samd21.PORT_PINCFG
+    board.write_word(base + 16, 0x00000002)
+    board.write_word(base + 16, board.read_word(base + 16) | 0x00020000)
+    assert board.read_word(base + 16) == 0x00020002
+
+
 # --- what this board does not model ----------------------------------------
 
 
@@ -185,11 +279,23 @@ def test_reading_the_input_register_faults_rather_than_answering_a_stale_zero(bo
 
 
 def test_a_peripheral_this_board_does_not_model_still_faults(board):
-    """PM at 0x40000400 and GCLK at 0x40000C00 are absent deliberately -- PORT
-    is clocked at reset, so a blink never reaches them. Absent must mean loud:
-    a poll of an unmodelled ready bit that answered zero would hang silently,
-    which is the failure `docs/architectures.md` §3 is about."""
-    for address in (0x40000400, 0x4000041C, 0x40000C00):
+    """Absent must mean loud: a poll of an unmodelled ready bit that answered
+    zero would hang silently, which is the failure `docs/architectures.md` §3
+    is about.
+
+    **This list shrank on 2026-08-26 and GCLK left it, deliberately.** It used
+    to hold `0x40000C00` as well, on the reasoning that PORT is clocked at
+    reset so a blink never reaches GCLK. That is still true of a blink and
+    stopped being true of the board: a vendor Arduino image configures the
+    whole clock tree before `main`, so GCLK is modelled now and
+    `tests/cortexm0/test_samd21_arduino.py` is the image that reaches it.
+
+    What is left is the two words of PM that **still** nothing reaches --
+    `CTRL`/`SLEEP` at 0x00, and `APBBMASK` at 0x1C, whose absence is the same
+    claim `test_samd21_blink.py` makes from the other end: PORT is already
+    clocked, so nobody has to enable it.
+    """
+    for address in (0x40000400, 0x4000041C):
         with pytest.raises(MemoryFault):
             board.read_word(address)
 
