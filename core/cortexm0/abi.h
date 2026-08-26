@@ -28,7 +28,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define CORTEXM0_ABI_VERSION 12
+#define CORTEXM0_ABI_VERSION 13
 
 /// r0-r15, then the flags.
 ///

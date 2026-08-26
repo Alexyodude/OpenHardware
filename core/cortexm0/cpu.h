@@ -65,6 +65,103 @@ constexpr unsigned kSp = 13;
 constexpr unsigned kLr = 14;
 constexpr unsigned kPc = 15;
 
+// --- the System Control Space -----------------------------------------------
+//
+// **The addresses below are the only ones in this file, and they are not an
+// exception to the rule at the top of it.** "The core owns no memory map"
+// means no address here names a *chip*: flash is where a board says, SIO is an
+// RP2040's word for it. 0xE000E000 names none -- the System Control Space is
+// Armv6-M itself, at the same address on an RP2040, a SAMD21 and every other
+// Cortex-M0+ ever made. Pushing it into the board files would put one
+// architectural constant into each of them and make two boards disagree about
+// a register neither of them owns.
+//
+// Only what an image actually reaches is here. Measured on 2026-08-26 against
+// a real Arduino-core SAMD21 sketch: it demands SYST_CSR, SYST_RVR, SYST_CVR,
+// ICSR and SHPR3, and nothing else in the space.
+
+/// SysTick's three registers, plus the calibration word.
+constexpr uint32_t kSystCsr = 0xE000E010u;
+constexpr uint32_t kSystRvr = 0xE000E014u;
+constexpr uint32_t kSystCvr = 0xE000E018u;
+constexpr uint32_t kSystCalib = 0xE000E01Cu;
+
+/// SYST_CSR bits.
+constexpr uint32_t kSystEnable = 1u << 0;
+constexpr uint32_t kSystTickInt = 1u << 1;
+constexpr uint32_t kSystClkSource = 1u << 2;
+constexpr uint32_t kSystCountFlag = 1u << 16;
+
+/// The System Control Block words a vectored core needs.
+///
+/// `VTOR` is on a Cortex-M0+ and not on a Cortex-M0, which this file's header
+/// already records as the reason the two are not the same part.
+constexpr uint32_t kScbIcsr = 0xE000ED04u;
+constexpr uint32_t kScbVtor = 0xE000ED08u;
+constexpr uint32_t kScbShpr2 = 0xE000ED1Cu;
+constexpr uint32_t kScbShpr3 = 0xE000ED20u;
+
+/// ICSR bits. `PENDSTSET` reads as whether SysTick is waiting to be taken and
+/// writes as a request to make it so; `PENDSTCLR` only writes.
+constexpr uint32_t kIcsrPendstClr = 1u << 25;
+constexpr uint32_t kIcsrPendstSet = 1u << 26;
+/// The exception number currently executing, which is IPSR.
+constexpr uint32_t kIcsrVectActive = 0x1FFu;
+
+/// SysTick's exception number. The vector table entry is at `4 * this`.
+constexpr unsigned kExceptionSysTick = 15;
+
+/// The lowest value that means "return from an exception" rather than "branch
+/// here". Armv6-M reserves 0xF0000000 upwards for it, and every EXC_RETURN
+/// this core produces is in the top sixteen bytes of the space.
+constexpr uint32_t kExcReturnBase = 0xF0000000u;
+/// Return to Thread mode on the main stack. The only frame this core stacks,
+/// because it models no process stack -- see `exception.h`.
+constexpr uint32_t kExcReturnThread = 0xFFFFFFF9u;
+/// Return to Handler mode on the main stack: an exception taken while another
+/// was already running. Not reachable with one exception source, and produced
+/// anyway so the value a handler sees is the architecture's rather than this
+/// core's simplification.
+constexpr uint32_t kExcReturnHandler = 0xFFFFFFF1u;
+
+/// EPSR.T, which is set in every xPSR an Armv6-M part stacks: there is no ARM
+/// state to return to, so a cleared T on an exception return is a fault on
+/// real silicon rather than a mode switch.
+constexpr uint32_t kEpsrThumb = 1u << 24;
+/// Bit 9 of a stacked xPSR: whether entry had to move SP down four bytes to
+/// reach an eight-byte boundary. Return puts back exactly what entry took.
+constexpr uint32_t kXpsrFrameAlign = 1u << 9;
+
+/// Everything the System Control Space holds, which is not everything it has.
+///
+/// A struct rather than five `map_register` calls because three of these are
+/// not words: `SYST_CVR` counts, `SYST_CSR.COUNTFLAG` clears when it is read,
+/// and `ICSR.PENDSTSET` is a request in one direction and a report in the
+/// other. `map_register`'s own comment sends exactly those elsewhere.
+struct SystemControl {
+    uint32_t systick_csr = 0;
+    uint32_t systick_reload = 0;
+    uint32_t systick_current = 0;
+    /// Where the vector table is. Zero at reset, which is where every image
+    /// this repository runs links its own.
+    uint32_t vector_table = 0;
+    /// SHPR2 and SHPR3, stored and never consulted. **They are here so that
+    /// writing them is not a fault, not because priority is modelled** --
+    /// `NVIC_SetPriority(SysTick_IRQn, ...)` is the second line of Arduino's
+    /// `init()`, and with one exception source there is nothing to arbitrate.
+    /// The day a second source exists, this is the field that has to start
+    /// meaning something.
+    uint32_t handler_priority[2] = {0, 0};
+    /// SysTick reached zero since this was last read. Cleared by the read.
+    bool countflag = false;
+    /// SysTick wrapped with TICKINT set and the exception has not been taken.
+    bool systick_pending = false;
+    /// PRIMASK: `CPSID i` sets it and `CPSIE i` clears it.
+    bool primask = false;
+    /// IPSR: 0 in Thread mode, the exception number in Handler mode.
+    uint32_t ipsr = 0;
+};
+
 /// What `step` did, and the only way a caller learns an instruction was not
 /// executed.
 ///
@@ -283,7 +380,34 @@ public:
 
     /// Called by `step` once an instruction has actually retired -- never on a
     /// fault, so a program stopped by one does not age while it is stopped.
-    void note_executed() { ++executed_; }
+    ///
+    /// **SysTick advances here and nowhere else**, which is what makes the
+    /// approximation a single visible line rather than a scattered one: this
+    /// core has no cycle model, so a SysTick tick *is* a retired instruction.
+    /// See `tick_systick`.
+    void note_executed() {
+        ++executed_;
+        tick_systick();
+    }
+
+    /// The System Control Space: SysTick, IPSR, PRIMASK and the vector table.
+    ///
+    /// Exposed rather than private because `exception.cc` drives all of it and
+    /// `exec.cc` reads PRIMASK and IPSR. A friend declaration would name two
+    /// files instead, which is a longer way of saying the same thing.
+    const SystemControl& scs() const { return scs_; }
+    SystemControl& scs() { return scs_; }
+
+    /// One SysTick tick. Counts down, reloads at zero, and raises the
+    /// exception when TICKINT says to.
+    ///
+    /// **The rate is an approximation and this is where it is made.** rp2040js,
+    /// which is this core's oracle, drives SysTick from simulated clock cycles;
+    /// there is no cycle model here, so one retired instruction is one tick.
+    /// The two therefore agree on *what happens at a wrap* and cannot agree on
+    /// *when the wrap happens* -- so a lockstep must compare the former. Same
+    /// trade, and the same wording, as `map_counter`.
+    void tick_systick();
 
     bool is_mapped(uint32_t address) const;
 
@@ -322,12 +446,19 @@ public:
     /// a reset machine has no board.
     void clear_regions();
 
-    /// Forget every mapped register.
+    /// Forget every mapped register, and reset the System Control Space.
     ///
     /// Separate from `clear_memory`, which clears memory *contents*. Which
     /// registers exist is configuration -- which board this is -- and a
     /// conformance run that zeroes RAM between cases must not also
     /// un-install the board.
+    ///
+    /// **The System Control Space is not un-installed, it is reset**, because
+    /// it is not a board's and cannot be absent. It goes here rather than only
+    /// in `reset` because a session-scoped core reused across tests would
+    /// otherwise carry an enabled SysTick -- and a pending exception -- into
+    /// the next test, which is the leak `streams_` and `counters_` each had
+    /// before them.
     void clear_registers();
 
     /// The address of the most recent failed access, and whether it was an
@@ -389,6 +520,24 @@ private:
     // remember to set it.
     mutable uint32_t fault_address_ = 0;
     mutable bool fault_was_fetch_ = false;
+
+    /// `mutable` for exactly one field of it: **`SYST_CSR.COUNTFLAG` clears
+    /// when it is read.** That is genuinely a read that changes state, so it
+    /// cannot be served from a `const` path without it -- and the alternative,
+    /// a COUNTFLAG that never clears, reports a wrap that already happened as
+    /// if it were new. This class spends its comments refusing wrong answers
+    /// in favour of loud ones, and there is no loud option here: the address is
+    /// modelled and the read does answer. Nothing else in here is written by a
+    /// read.
+    mutable SystemControl scs_;
+
+    /// Whether `address` is one of the System Control Space words modelled
+    /// above. Consulted by `is_mapped`, so every accessor -- word, halfword
+    /// and byte alike -- reaches the SCS by the path it already takes to
+    /// reach a peripheral.
+    static bool in_system_control(uint32_t address);
+    bool scs_read(uint32_t address, uint32_t& out) const;
+    bool scs_write(uint32_t address, uint32_t value, uint32_t byte_mask);
 
     /// One mapped word. `target` and `source` name the address whose storage
     /// a write changes and a read derives from; for a plain register both are

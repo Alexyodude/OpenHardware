@@ -62,6 +62,154 @@ void Cpu::clear_registers() {
     // next board installed over it.
     streams_.clear();
     counters_.clear();
+    // The System Control Space is reset rather than removed: it is the
+    // architecture's, not a board's, so no board can be installed without it
+    // and none can take it away. See cpu.h -- an enabled SysTick surviving
+    // into the next test is the same leak the two lines above prevent.
+    scs_ = SystemControl{};
+}
+
+void Cpu::tick_systick() {
+    if ((scs_.systick_csr & kSystEnable) == 0) {
+        return;
+    }
+    if (scs_.systick_current == 0) {
+        // Reload happens on the tick *after* the counter reads zero, so the
+        // sequence for a reload of 3 is 3, 2, 1, 0, 3, 2, 1, 0 -- and the
+        // **period is SYST_RVR plus one**, not SYST_RVR. That is the part's
+        // own behaviour and not an off-by-one: it is exactly why
+        // `SysTick_Config(n)` writes `n - 1`, and a model that fired every
+        // SYST_RVR ticks would make every Arduino `delay` fractionally short
+        // in a way no single test notices.
+        //
+        // A reload of zero leaves the counter stopped, which is what the
+        // architecture says and what `SysTick_Config` relies on to refuse a
+        // reload it cannot represent.
+        scs_.systick_current = scs_.systick_reload;
+        return;
+    }
+    --scs_.systick_current;
+    if (scs_.systick_current != 0) {
+        return;
+    }
+    scs_.countflag = true;
+    if ((scs_.systick_csr & kSystTickInt) != 0) {
+        // Pending, not taken. Taking it here would stack a frame in the middle
+        // of `note_executed`, where the instruction that just retired has
+        // already moved PC -- so the exception would return to the right place
+        // by luck rather than by construction. `ServicePending` takes it at the
+        // top of the next `step`, which is the only point where the machine is
+        // between instructions.
+        scs_.systick_pending = true;
+    }
+}
+
+bool Cpu::in_system_control(uint32_t address) {
+    switch (address & ~3u) {
+        case kSystCsr:
+        case kSystRvr:
+        case kSystCvr:
+        case kSystCalib:
+        case kScbIcsr:
+        case kScbVtor:
+        case kScbShpr2:
+        case kScbShpr3:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool Cpu::scs_read(uint32_t address, uint32_t& out) const {
+    switch (address & ~3u) {
+        case kSystCsr:
+            out = scs_.systick_csr | (scs_.countflag ? kSystCountFlag : 0u);
+            // The read is what clears it. See the `mutable` note in cpu.h.
+            scs_.countflag = false;
+            return true;
+        case kSystRvr:
+            out = scs_.systick_reload;
+            return true;
+        case kSystCvr:
+            out = scs_.systick_current;
+            return true;
+        case kSystCalib:
+            // **Zero is the answer, and it is not a shrug.** TENMS zero means
+            // "the calibration value is unknown", which is exactly true of a
+            // core whose clock is retired instructions. A made-up ten
+            // milliseconds would let firmware compute a tick rate from it and
+            // believe the result.
+            out = 0;
+            return true;
+        case kScbIcsr:
+            out = (scs_.systick_pending ? kIcsrPendstSet : 0u) |
+                  (scs_.ipsr & kIcsrVectActive);
+            return true;
+        case kScbVtor:
+            out = scs_.vector_table;
+            return true;
+        case kScbShpr2:
+            out = scs_.handler_priority[0];
+            return true;
+        case kScbShpr3:
+            out = scs_.handler_priority[1];
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool Cpu::scs_write(uint32_t address, uint32_t value, uint32_t byte_mask) {
+    // A byte or halfword write arrives already shifted into place with the
+    // rest zero, exactly as `mmio_write` documents, so the mask is applied the
+    // same way here: keep what this access does not address.
+    const auto merge = [&](uint32_t stored) {
+        return (stored & ~byte_mask) | (value & byte_mask);
+    };
+    switch (address & ~3u) {
+        case kSystCsr:
+            // COUNTFLAG is not writable, and is held outside the word anyway.
+            scs_.systick_csr = merge(scs_.systick_csr) & ~kSystCountFlag;
+            return true;
+        case kSystRvr:
+            scs_.systick_reload = merge(scs_.systick_reload) & 0x00FFFFFFu;
+            return true;
+        case kSystCvr:
+            // **Any write clears it, whatever the value.** That is the
+            // architecture, and it is what `SysTick_Config` depends on: it
+            // writes zero and expects the first period to be a full one rather
+            // than however far a previous count had got.
+            scs_.systick_current = 0;
+            scs_.countflag = false;
+            return true;
+        case kSystCalib:
+            // Read-only on the part. Ignored rather than refused, as hardware
+            // ignores it -- the same choice `map_constant` makes.
+            return true;
+        case kScbIcsr:
+            if ((value & kIcsrPendstSet) != 0) {
+                scs_.systick_pending = true;
+            }
+            // Clear is checked second and wins, because a write naming both is
+            // architecturally UNPREDICTABLE and the safer of the two readings
+            // is the one that does not leave an exception pending nobody asked
+            // for. No firmware here writes both; this is which way it falls.
+            if ((value & kIcsrPendstClr) != 0) {
+                scs_.systick_pending = false;
+            }
+            return true;
+        case kScbVtor:
+            scs_.vector_table = merge(scs_.vector_table);
+            return true;
+        case kScbShpr2:
+            scs_.handler_priority[0] = merge(scs_.handler_priority[0]);
+            return true;
+        case kScbShpr3:
+            scs_.handler_priority[1] = merge(scs_.handler_priority[1]);
+            return true;
+        default:
+            return false;
+    }
 }
 
 bool Cpu::add_region(uint32_t base, uint32_t size, bool executable, uint8_t fill) {
@@ -188,10 +336,16 @@ const std::vector<uint8_t>& Cpu::stream(uint32_t address) const {
 }
 
 bool Cpu::is_mapped(uint32_t address) const {
-    return mmio_.find(address & ~3u) != mmio_.end();
+    // The System Control Space is checked first and is always present: it is
+    // part of the processor rather than of the board, so there is no core
+    // without it and no board that can install one over it.
+    return in_system_control(address) || mmio_.find(address & ~3u) != mmio_.end();
 }
 
 bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
+    if (in_system_control(address)) {
+        return scs_read(address, out);
+    }
     const auto found = mmio_.find(address & ~3u);
     if (found == mmio_.end()) {
         return false;
@@ -234,6 +388,9 @@ bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
 }
 
 bool Cpu::mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask) {
+    if (in_system_control(address)) {
+        return scs_write(address, value, byte_mask);
+    }
     const uint32_t at = address & ~3u;
     const auto found = mmio_.find(at);
     if (found == mmio_.end()) {

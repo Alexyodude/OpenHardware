@@ -36,7 +36,13 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match CORTEXM0_ABI_VERSION in abi.h.
-ABI_VERSION = 12
+#:
+#: 13 adds no function and changes no struct -- it is bumped because the
+#: library's *behaviour* changed, not its shape: a core with SysTick takes
+#: exceptions where the previous one ran straight on. A stale library would
+#: load without complaint and then quietly never deliver a tick, which is the
+#: silent mismatch this number exists to turn into a message.
+ABI_VERSION = 13
 
 #: Must match cortexm0::WriteOp. Spelled at call sites rather than numbered.
 WRITE_OPS = {"store": 0, "set": 1, "clear": 2, "xor": 3}

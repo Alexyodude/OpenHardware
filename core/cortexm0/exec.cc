@@ -43,10 +43,28 @@
 
 #include "exec.h"
 
+#include "exception.h"
 #include "shift.h"
 
 namespace cortexm0 {
 namespace {
+
+/// A write to PC that might be an exception return rather than a branch.
+///
+/// **Only in Handler mode**, and that half is load-bearing: in Thread mode
+/// 0xFFFFFFF9 is an ordinary wild branch, and it should fault on the fetch
+/// saying so rather than unstack a frame nothing stacked. Both encodings that
+/// can write PC from a register go through here -- `BX` and `POP` with PC in
+/// the list -- because a handler written by a compiler returns through
+/// whichever of the two its prologue chose.
+StepResult write_pc_or_return(Cpu& cpu, uint32_t value) {
+    if (cpu.scs().ipsr != 0 && value >= kExcReturnBase) {
+        return ReturnFromException(cpu, value) ? StepResult::Ok
+                                               : StepResult::MemoryFault;
+    }
+    cpu.set_reg(kPc, value & ~1u);
+    return StepResult::Ok;
+}
 
 /// Low three bits at `position`. Formats 1-4 address only r0-r7.
 inline unsigned reg3(uint16_t encoding, unsigned position) {
@@ -297,9 +315,13 @@ StepResult execute_rest(Cpu& cpu, uint16_t encoding, uint32_t address) {
             // with bit 0 set for Thumb -- the return address, not this one.
             if ((encoding & 0x0080u) != 0) {
                 cpu.set_reg(kLr, (address + 2) | 1u);
+                // BLX with an EXC_RETURN is architecturally UNPREDICTABLE, so
+                // it is a branch here and not a return: LR has already been
+                // overwritten, which is not a state any return could undo.
+                cpu.set_reg(kPc, right & ~1u);
+                return StepResult::Ok;
             }
-            cpu.set_reg(kPc, right & ~1u);
-            return StepResult::Ok;
+            return write_pc_or_return(cpu, right);
         }
         const uint32_t left = rdn == kPc ? pc : cpu.reg(rdn);
         if (op == 0) {                       // ADD, and it sets no flags
@@ -508,13 +530,21 @@ StepResult execute_rest(Cpu& cpu, uint16_t encoding, uint32_t address) {
                 cpu.set_reg(i, word);
                 addr += 4;
             }
+            uint32_t popped_pc = 0;
             if (extra) {
-                uint32_t word = 0;
-                if (!cpu.read_word(addr, word)) return StepResult::MemoryFault;
-                cpu.set_reg(kPc, word & ~1u);
+                if (!cpu.read_word(addr, popped_pc)) return StepResult::MemoryFault;
                 addr += 4;
             }
+            // **SP is written before PC, and that ordering is what makes
+            // `pop {r4, pc}` work as an exception return.** A compiler-written
+            // handler pushes LR -- which holds EXC_RETURN -- and pops it into
+            // PC, and the exception frame sits immediately above what it just
+            // popped. So the unstack has to read from where SP ends up, not
+            // from where it started.
             cpu.set_reg(kSp, addr);
+            if (extra) {
+                return write_pc_or_return(cpu, popped_pc);
+            }
         } else {
             const uint32_t base = cpu.reg(kSp) - 4u * count;
             uint32_t addr = base;
@@ -531,8 +561,31 @@ StepResult execute_rest(Cpu& cpu, uint16_t encoding, uint32_t address) {
         return StepResult::Ok;
     }
 
-    // The hint space: NOP, YIELD, WFE, WFI, SEV. All behave as NOP here --
-    // this core has no interrupts to wait for, so a WFI that slept would hang.
+    // CPSIE i and CPSID i, 0xB662 and 0xB672. The low nibble is fixed at
+    // 0b0010 on Armv6-M: PRIMASK is the only mask there is, so `a` and `f`
+    // must be clear and an encoding with either set is not this instruction.
+    //
+    // **This exists because exception delivery without it would be wrong
+    // rather than incomplete.** A critical section that this core kept
+    // interrupting is a corrupted program with no message; the previous
+    // behaviour -- Unimplemented, stopping loudly -- was safe only while
+    // nothing could interrupt. Five of these are in the SAMD21 Arduino image
+    // measured on 2026-08-26, in the USB path and in the core's own
+    // interrupt-safe helpers.
+    if ((encoding & 0xFFEFu) == 0xB662u) {
+        cpu.scs().primask = (encoding & 0x0010u) != 0;
+        return StepResult::Ok;
+    }
+
+    // The hint space: NOP, YIELD, WFE, WFI, SEV. All behave as NOP here.
+    //
+    // WFI is the one worth a second look now that SysTick exists: a real part
+    // sleeps until an exception arrives, and this core has exactly one source
+    // whose tick is counted in retired instructions. So a WFI that slept would
+    // stop the clock it is waiting for -- it would hang for a reason the
+    // architecture does not have. Retiring as a NOP keeps the tick coming and
+    // the wait ends, which is the behaviour firmware expects even though the
+    // mechanism is not the part's.
     if ((encoding & 0xFF0Fu) == 0xBF00u) {
         return StepResult::Ok;
     }
@@ -563,9 +616,15 @@ StepResult execute_rest(Cpu& cpu, uint16_t encoding, uint32_t address) {
         return StepResult::Ok;
     }
 
-    // Format 17: SVC, 0xDF00-0xDFFF. Reported, not executed -- this core
-    // models no exceptions, and pretending an SVC returned would let a program
-    // continue past a call that never happened.
+    // Format 17: SVC, 0xDF00-0xDFFF. Reported, not executed.
+    //
+    // This core does now take exceptions, so the old reason -- "models no
+    // exceptions" -- has stopped being the reason. The remaining one is
+    // narrower and still decisive: taking an SVC needs a handler, and the
+    // vector table entry for it belongs to an operating system this project
+    // does not run. Entering exception 11 to land on whatever byte happens to
+    // sit at VTOR+0x2C would be worse than stopping, and pretending an SVC
+    // returned would let a program continue past a call that never happened.
     if ((encoding & 0xFF00u) == 0xDF00u) {
         return StepResult::Unimplemented;
     }
@@ -627,6 +686,20 @@ StepResult execute_wide(Cpu& cpu, uint16_t first, uint32_t address) {
 }  // namespace
 
 StepResult step(Cpu& cpu) {
+    // **An exception is taken between instructions, before the fetch.**
+    //
+    // Not inside `note_executed`, where the tick happens: by then the
+    // instruction that just retired has already moved PC, so an entry there
+    // would stack a return address that is right by luck. And not after the
+    // execute either -- the frame has to hold the address of the instruction
+    // that will run *next*, which is exactly what PC holds here.
+    //
+    // The step costs one instruction of virtual time and executes none. That
+    // is not free on real silicon either: entry stacks eight words.
+    if (ServicePending(cpu)) {
+        return StepResult::Ok;
+    }
+
     const uint32_t address = cpu.reg(kPc);
     uint16_t encoding = 0;
     if (!cpu.read_halfword(address, encoding) || !cpu.executable_at(address)) {
