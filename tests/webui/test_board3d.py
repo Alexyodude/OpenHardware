@@ -231,3 +231,72 @@ def test_the_stylesheet_keeps_the_table_readable_without_the_canvas():
     assert 'tr[data-state="unknown"]' in sheet, (
         "nothing distinguishes a pad nobody models from a pad reading low"
     )
+
+
+# --- the two sentences an `unknown` pad gets, which is OH-70's ---------------
+#
+# Both of these were found in a browser and neither failed a DOM assertion,
+# which is the third and fourth entry in this file's own list of reasons to go
+# and look. `webui/api.py` said `unknown` and meant it; what was wrong was the
+# words beside it and a number that had stopped moving.
+
+
+def test_an_unknown_pad_with_a_pin_behind_it_does_not_read_not_modelled():
+    """**The self-contradicting row.** `1 | PD1 | not modelled` names the pin
+    in the same row that says nothing models it.
+
+    An Arduino Uno running a `Serial` sketch produces it: the USART takes PD0
+    and PD1 and leaves no trace in `DDRD`, so `webui/boards/atmega328p.py`
+    answers `unknown` -- correctly, because what it cannot say is what the
+    transmitter is doing to the pad. A pad with no MCU pin behind it at all is
+    a different fact and needs different words.
+    """
+    panel = PANEL.read_text(encoding="utf-8")
+    assert "not modelled" in panel
+    assert "in use elsewhere" in panel
+    # The state column must not reach a single fixed string for `unknown`, or
+    # the two facts collapse back into one sentence.
+    assert '  unknown: "not modelled",' not in panel
+
+
+def test_the_two_sentences_are_told_apart_by_the_pin_and_not_by_a_guess():
+    """`chip_pin` is exact rather than convenient, and this is where that is
+    asserted rather than assumed.
+
+    `webui/api.py` fills `chip_pin` from the board's `PIN_NAMES`, which is
+    derived from the same `HEADER` its `pin_states` walks -- so a pad carries a
+    chip pin **if and only if** the board answered for it. A panel that guessed
+    from the label, or from the group, would be right on an Uno and wrong on
+    the next board.
+    """
+    panel = PANEL.read_text(encoding="utf-8")
+    chooser = panel.split("function unknownWords", 1)[1].split("\n}", 1)[0]
+    assert "chip_pin" in chooser
+    from webui.boards import atmega328p
+
+    assert set(atmega328p.PIN_NAMES) == set(atmega328p.HEADER)
+
+
+def test_the_answerable_count_is_recomputed_when_the_states_change():
+    """**The count moves now, and it did not used to.**
+
+    Before OH-70 a pad was `unknown` because the board's table had no row for
+    it, which is fixed for the life of a board -- so the number the layout
+    fetch carried stayed true however long a sketch ran. Then the Uno's USART
+    started taking PD0 and PD1 partway through a `Serial` sketch, and the note
+    went on reading `22 of 32` beside two rows that had stopped answering.
+
+    `/api/board/pins` still carries `unknown` and it is not wrong; it is that
+    endpoint's answer at the moment it was asked. It cannot be current, because
+    the states arrive afterwards from `/api/board/state`.
+    """
+    panel = PANEL.read_text(encoding="utf-8")
+    levels = panel.split("function levels", 1)[1].split("\n}", 1)[0]
+    assert "renderCount()" in levels, (
+        "a state poll repaints the rows and leaves the count where it was"
+    )
+    counter = panel.split("function renderCount", 1)[1].split("\n}", 1)[0]
+    assert "layout.pads.filter" in counter
+    assert "view.unknown" not in counter, (
+        "the count is read from the layout fetch, so it cannot follow a poll"
+    )

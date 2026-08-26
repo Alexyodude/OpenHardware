@@ -49,6 +49,12 @@ need them: `DDRB` and `PORTB` are bytes of the data space, so a write to 0x24
 stores and a read returns what was stored, which is what the silicon does for
 those two registers.
 
+**OH-70 is what that claim buys.** Making all three ports answer for their
+pins added nine constants and no mapping at all, because `DDRC`, `PORTC`,
+`DDRD` and `PORTD` were already storing correctly -- the sketch that proved it
+is quoted beside them. A board on either Arm part would have needed the
+registers built first.
+
 **Two peripherals are the exception, and each is exactly one call.** `TCNT0` cannot be a
 stored byte -- it has to answer something different each time it is read, or
 `delay()` never returns. OH-59 measured that: with the instruction set
@@ -61,19 +67,21 @@ it raises, and this file is where the addresses for them are written down.
 told nobody. See `core/avr/cpu.h`'s `Timer` and `Usart` for what each models
 and what neither does.
 
-**Where that stops being true, and it does:** `PINB` reads the *electrical
-level on the pins*, so on a pin driven as an output it follows `PORTB`, and on
-a pin driven as an input it follows whatever is wired to it. This model returns
-the stored zero. That is a wrong answer rather than a fault, which is the
-failure class this repository ranks worst -- and unlike `samd21.py`, which
-could leave its `PORT_IN` unmapped so a read faults instead of lying, there is
-nothing to unmap here: every byte of the data space exists.
+**Where that stops being true, and it does:** `PINB`, `PINC` and `PIND` read
+the *electrical level on the pins*, so on a pin driven as an output each
+follows its `PORTx`, and on a pin driven as an input it follows whatever is
+wired to it. This model returns the stored zero. That is a wrong answer rather
+than a fault, which is the failure class this repository ranks worst -- and
+unlike `samd21.py`, which could leave its `PORT_IN` unmapped so a read faults
+instead of lying, there is nothing to unmap here: every byte of the data space
+exists.
 
-So it is written down instead. `PINB` is exported below so a test can name it,
-`test_reading_the_input_register_is_not_yet_modelled` pins the limitation
-rather than the behaviour, and the fix -- a mirror of `PORTB` masked by `DDRB`
--- needs a mapping mechanism this core does not have. Nothing has read `PINB`
-yet; the day something does, that is the first claim to re-check.
+So it is written down instead. All three are exported below so a test can name
+them, `test_reading_the_input_register_is_not_yet_modelled` pins the
+limitation rather than the behaviour, and the fix -- a mirror of `PORTx`
+masked by `DDRx` -- needs a mapping mechanism this core does not have. Nothing
+has read any of the three yet; the day something does, that is the first claim
+to re-check.
 
 ## What is deliberately absent
 
@@ -127,19 +135,57 @@ DATA_BYTES = RAMEND + 1
 #: `push` uses and a test asserts it.
 STACK_TOP = RAMEND
 
-#: PORTB and its two companions, as **data** addresses. From `iom328p.h:54,64,74`:
+#: The three ports and their nine registers, as **data** addresses. From
+#: `iom328p.h:54,64,74`, `:84,93,102` and `:111,121,131`:
 #:
-#:     #define PINB  _SFR_IO8(0x03)
-#:     #define DDRB  _SFR_IO8(0x04)
-#:     #define PORTB _SFR_IO8(0x05)
+#:     #define PINB  _SFR_IO8(0x03)    #define PINC  _SFR_IO8(0x06)
+#:     #define DDRB  _SFR_IO8(0x04)    #define DDRC  _SFR_IO8(0x07)
+#:     #define PORTB _SFR_IO8(0x05)    #define PORTC _SFR_IO8(0x08)
+#:
+#:     #define PIND  _SFR_IO8(0x09)
+#:     #define DDRD  _SFR_IO8(0x0A)
+#:     #define PORTD _SFR_IO8(0x0B)
 #:
 #: `_SFR_IO8(x)` is `x + 0x20` in the data space, so an `in`/`out` instruction
 #: uses the small number and everything else uses the one below. **That +0x20
 #: is the likeliest off-by-something in an AVR model**, which is why both forms
 #: are written out here rather than one being derived at the call site.
+#:
+#: **Nine registers and not one line of new mapping**, which is the whole
+#: shape of OH-70 and worth reading beside `samd21.py`'s twenty-seven. A
+#: sketch driving pin 7, pin 3 and A0 was built and run before any of this was
+#: written (2026-08-26, 1,766 bytes, 200,000 instructions, no fault) and it
+#: left `DDRD` at 0b10001000 and `DDRC` at 0b00000001 -- correct, because on
+#: this part they were already bytes of the data space that store what is
+#: written to them. The gap OH-70 closed was a label table, not a peripheral.
 PINB_IO, PINB = 0x03, 0x23
 DDRB_IO, DDRB = 0x04, 0x24
 PORTB_IO, PORTB = 0x05, 0x25
+
+PINC_IO, PINC = 0x06, 0x26
+DDRC_IO, DDRC = 0x07, 0x27
+PORTC_IO, PORTC = 0x08, 0x28
+
+PIND_IO, PIND = 0x09, 0x29
+DDRD_IO, DDRD = 0x0A, 0x2A
+PORTD_IO, PORTD = 0x0B, 0x2B
+
+#: Port letter -> its direction and output registers, in that order.
+#:
+#: **The letter is the key rather than an index**, unlike `samd21.py`'s
+#: `PORTA`/`PORTB` integers, and the difference is that this part's ports are
+#: not evenly spaced -- `webui/boards/samd21.py` computes a group base with
+#: arithmetic and this cannot. Keying by the letter the datasheet uses also
+#: makes `PIN_NAMES` a one-line derivation and a `HEADER` row read as its own
+#: documentation: `("D", 7)` is PD7 and needs no lookup to check.
+#:
+#: `PIN{B,C,D}` are deliberately not here. Nothing reads them, and the section
+#: below says what happens when something does.
+PORTS: dict[str, tuple[int, int]] = {
+    "B": (DDRB, PORTB),
+    "C": (DDRC, PORTC),
+    "D": (DDRD, PORTD),
+}
 
 #: Timer 0, as **data** addresses. From `iom328p.h:141,221,229,237,438`:
 #:
@@ -212,11 +258,12 @@ UBRR0L = 0xC4
 UBRR0H = 0xC5
 UDR0 = 0xC6
 
-#: Bit numbers within those, from `iom328p.h:739,743,744,751`.
+#: Bit numbers within those, from `iom328p.h:739,743,744,751,752`.
 U2X0 = 1     #: double-speed; halves the divisor, so it changes the baud rate
 UDRE0 = 5    #: data register empty -- what Arduino's fast path tests
 TXC0 = 6     #: transmit complete -- what `flush()` waits for
 TXEN0 = 3    #: transmitter enable, in UCSR0B
+RXEN0 = 4    #: receiver enable, in UCSR0B; see `USART_PINS`, not `map_usart`
 
 #: The bits of UCSR0A that always read set here, and the reason this board can
 #: print at all.
@@ -247,32 +294,82 @@ F_CPU_HZ = 16_000_000
 #: test needs a pin and an arbitrary one would prove less.
 LED_PIN = 5
 
-#: Header label -> the bit of PORTB behind it.
+#: Header label -> the port letter and bit behind it.
 #:
 #: **From Arduino's own tables**, not from a pinout picture:
 #: `framework-arduino-avr/variants/standard/pins_arduino.h:150-194`, where
-#: `digital_pin_to_port_PGM` gives `PB` for pins 8 to 13 and
-#: `digital_pin_to_bit_mask_PGM` gives `_BV(0)` to `_BV(5)` for the same six.
-#: The labels are the ones `webui/boards/Arduino Uno.json` carries -- bare
-#: numbers, because that is what the silkscreen says.
+#: `digital_pin_to_port_PGM` gives `PD` for digital 0-7, `PB` for 8-13 and `PC`
+#: for 14-19, and `digital_pin_to_bit_mask_PGM` gives `_BV(0)` upwards within
+#: each. The labels are the ones `webui/boards/Arduino Uno.json` carries --
+#: bare numbers, because that is what the silkscreen says, and `A0`-`A5` and
+#: `SDA`/`SCL` because that is what it says there too.
 #:
-#: **Six of thirty-two pads, and the other twenty-six are the point.** Pins 0
-#: to 7 are PORTD and A0 to A5 are PORTC, and this board models neither: the
-#: module docstring's rule is that a register arrives when an image reaches it,
-#: and no image here has. So `pin_states` cannot answer for them and
-#: `webui.api.pin_view` reports them `unknown` -- a sentence about this model,
-#: where `low` would be a sentence about the program.
+#: **`SDA` and `SCL` are `A4` and `A5`**, not extra pins. `pins_arduino.h:48-51`
+#: makes them digital 18 and 19, which is PC4 and PC5, and the R3 header simply
+#: brings the same two pads out a second time beside `AREF`. Two labels, one
+#: piece of silicon each, and a sketch driving `A4` moves both rows of the
+#: picture -- which is the truth about the board rather than a duplication bug.
 #:
-#: `13` is in here and is the one that matters most: it is `LED_BUILTIN`, it is
-#: PB5, and it is what a stock Blink drives.
-HEADER: dict[str, int] = {"8": 0, "9": 1, "10": 2, "11": 3, "12": 4, "13": 5}
+#: **Twenty-two of thirty-two pads, and the other ten are the point.** `AREF`,
+#: `NC`, `IOREF`, `RESET`, `3V3`, `5V`, `VIN` and three `GND`s have no MCU pin
+#: behind them and never will, so they are absent here and `webui.api.pin_view`
+#: reports them `unknown` -- a sentence about this board, where `low` would be
+#: a sentence about the program.
+#:
+#: `13` is the one that matters most: it is `LED_BUILTIN`, it is PB5, and it is
+#: what a stock Blink drives.
+HEADER: dict[str, tuple[str, int]] = {
+    "0": ("D", 0),    # RX -- see USART_PINS
+    "1": ("D", 1),    # TX -- see USART_PINS
+    "2": ("D", 2),
+    "3": ("D", 3),
+    "4": ("D", 4),
+    "5": ("D", 5),
+    "6": ("D", 6),
+    "7": ("D", 7),
+    "8": ("B", 0),
+    "9": ("B", 1),
+    "10": ("B", 2),
+    "11": ("B", 3),
+    "12": ("B", 4),
+    "13": ("B", LED_PIN),
+    "A0": ("C", 0),
+    "A1": ("C", 1),
+    "A2": ("C", 2),
+    "A3": ("C", 3),
+    "A4": ("C", 4),
+    "A5": ("C", 5),
+    "SDA": ("C", 4),  # the same pad as A4
+    "SCL": ("C", 5),  # the same pad as A5
+}
 
 #: The same table read the other way: label -> the pin as the datasheet spells
 #: it, `13` -> `PB5`. Derived from `HEADER` so the two cannot disagree.
 #:
 #: One digit and not two, unlike the SAMD21's: `iom328p.h` writes `PB5`, and
 #: matching each part's own spelling matters more than matching each other.
-PIN_NAMES: dict[str, str] = {label: f"PB{bit}" for label, bit in HEADER.items()}
+PIN_NAMES: dict[str, str] = {
+    label: f"P{port}{bit}" for label, (port, bit) in HEADER.items()
+}
+
+#: Header label -> the `UCSR0B` bit that takes the pad away from PORTD.
+#:
+#: **`Serial.begin()` never writes `DDRD`, and this is the measurement that
+#: says so.** 2026-08-26: a sketch calling `Serial.begin(9600)` and
+#: `Serial.println` was built through `webui/compile.py`, run for 200,000
+#: instructions, printed `hi`, and finished with `UCSR0B` at 0b10011000 --
+#: `RXEN0` and `TXEN0` both set -- and `DDRD` still at 0b00000000. On the
+#: silicon the USART has taken PD0 and PD1 by then; in the direction register
+#: there is no trace of it.
+#:
+#: So without this, pins 0 and 1 would report `input`, which reads as "nobody
+#: is driving this" about a pin the transmitter is driving. `unknown` is the
+#: honest answer and the vocabulary already has it: `webui/api.py`'s four
+#: states separate a claim about the program from a claim about this model,
+#: and what this model cannot say is what the USART is doing to the pad.
+#:
+#: Bit numbers from `iom328p.h:751-752`.
+USART_PINS: dict[str, int] = {"0": RXEN0, "1": TXEN0}
 
 
 
@@ -346,21 +443,41 @@ def pin_states(cpu: Cpu) -> dict[str, str]:
     two different cores export one name, which is what keeps `webui/api.py`
     free of chip knowledge.
 
-    **DDRB decides before PORTB does.** On an AVR the same bit of `PORTB` means
-    "drive high" for an output and "enable the pull-up" for an input, so
-    reading it without `DDRB` reports a pull-up as a driven high -- a
-    plausible, wrong answer of exactly the kind this repository ranks below a
-    loud one. `input` is as far as this can honestly go.
+    **The direction register decides before the output register does.** On an
+    AVR the same bit of `PORTx` means "drive high" for an output and "enable
+    the pull-up" for an input, so reading it without `DDRx` reports a pull-up
+    as a driven high -- a plausible, wrong answer of exactly the kind this
+    repository ranks below a loud one. `input` is as far as this can honestly
+    go, because this model has no pulls and nothing is wired to the far end.
+
+    **A pad the USART has taken is `unknown` and not `input`**, which is the
+    one place this function looks at something that is not a port. See
+    `USART_PINS` for the measurement: `Serial.begin` leaves no trace in `DDRD`,
+    so the direction register alone would answer confidently and wrongly about
+    the two pins a `Serial` sketch is using.
+
+    **A pad a timer has taken is not**, and that is OH-71 rather than an
+    oversight. `analogWrite(3, 128)` sets `DDRD` bit 3, leaves `PORTD` bit 3
+    clear, and hands the pad to timer 2's compare output -- so this answers
+    `low` about a pin carrying a square wave. The fix wants the `COM` bits of
+    three timers and a pin-to-timer table, and it would move pins 9, 10 and 11
+    as well, so it is its own change.
+    `test_a_pwm_pad_reports_the_port_bit_and_not_the_waveform` pins the
+    behaviour so that closing OH-71 fails a test rather than passing quietly.
     """
-    direction = cpu.read_data(DDRB)
-    value = cpu.read_data(PORTB)
+    control = cpu.read_data(UCSR0B)
     states: dict[str, str] = {}
-    for label, bit in HEADER.items():
+    for label, (port, bit) in HEADER.items():
         mask = 1 << bit
-        if not direction & mask:
+        enable = USART_PINS.get(label)
+        if enable is not None and control & (1 << enable):
+            states[label] = "unknown"
+            continue
+        direction, output = PORTS[port]
+        if not cpu.read_data(direction) & mask:
             states[label] = "input"
         else:
-            states[label] = "high" if value & mask else "low"
+            states[label] = "high" if cpu.read_data(output) & mask else "low"
     return states
 
 def baud_rate(cpu: Cpu) -> int:

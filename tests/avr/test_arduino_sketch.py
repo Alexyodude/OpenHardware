@@ -56,6 +56,8 @@ from webui.boards import atmega328p
 HERE = pathlib.Path(__file__).resolve().parent
 BLINK = HERE / "arduino" / "blink.cpp"
 SERIAL = HERE / "arduino" / "serial.cpp"
+PINS = HERE / "arduino" / "pins.cpp"
+PINS_PWM = HERE / "arduino" / "pwm.cpp"
 
 #: The board, spelled as `webui/boards/catalogue.py`'s `IRREGULAR` spells it.
 BOARD = "Arduino Uno"
@@ -226,6 +228,26 @@ def sketch() -> tuple[bytes, dict[str, int]]:
 def serial_sketch() -> tuple[bytes, dict[str, int]]:
     """The serial hello, which needs seven more of Arduino's own files."""
     return compile_sketch(SERIAL, SERIAL_SOURCES)
+
+
+@pytest.fixture(scope="module")
+def pins_sketch() -> tuple[bytes, dict[str, int]]:
+    """One pin of each port driven, for OH-70. Same four core files as a blink."""
+    return compile_sketch(PINS)
+
+
+@pytest.fixture(scope="module")
+def pwm_sketch() -> tuple[bytes, dict[str, int]]:
+    """`analogWrite`, which needs a core file the IDE's recipe does not carry.
+
+    **`webui/compile.py`'s Uno row does not compile `wiring_analog.c`**, so a
+    sketch calling `analogWrite` fails to link through the browser -- measured
+    2026-08-26, `undefined reference to analogWrite`. It is asked for by hand
+    here because the limitation it demonstrates is real whatever links it, and
+    a test that could not build its own counter-example would leave OH-71
+    resting on an argument rather than on a run.
+    """
+    return compile_sketch(PINS_PWM, ("wiring_analog.c",))
 
 
 def entered(image: bytes, symbols: dict[str, int], budget: int = BUDGET) -> dict:
@@ -444,3 +466,142 @@ def test_the_serial_sketch_configures_the_baud_rate_it_asked_for(serial_sketch):
         for _ in range(BUDGET):
             session.step()
         assert atmega328p.baud_rate(session.cpu) == 9615
+
+
+# --- the three ports, which is OH-70's Done-when ----------------------------
+#
+# Read through `webui/api.py`'s `pin_levels` rather than off `PORTC` and
+# `PORTD` directly, for the reason the file header gives: what OH-70 changed is
+# what a person watching the page is told, and the register was already
+# correct before it. A test asserting `DDRD & 0x80` would have passed on the
+# day the panel said `6 of 32 answerable`.
+
+
+def levels(image: bytes, budget: int = BUDGET) -> dict[str, str]:
+    """Run the image and ask the board what each header pin is doing."""
+    with api.load_firmware(BOARD, image, base=0) as session:
+        for _ in range(budget):
+            session.step()
+        return api.pin_levels(session.runtime, session.cpu)
+
+
+def test_each_port_answers_for_its_own_pins(pins_sketch):
+    """**The headline.** One pin per port, three different answers.
+
+    The failure this rules out is a `HEADER` row pointing at the wrong port's
+    registers, which no single-pin sketch can see: `A0` reading `DDRD` instead
+    of `DDRC` looks like a working table right up until something drives both.
+    Here `7` is PD7 driven high, `A0` is PC0 driven high and `13` is PB5 driven
+    low, so a table that crossed any two of them reports a level the sketch
+    never asked for.
+
+    `13` is the control. It answered before OH-70 and it must still answer.
+    """
+    image, _ = pins_sketch
+    state = levels(image)
+    assert state["7"] == "high", "PD7 was driven high"
+    assert state["A0"] == "high", "PC0 was driven high"
+    assert state["13"] == "low", "PB5 was driven low, and answered before OH-70"
+
+
+def test_a_pin_nothing_configured_reads_input_rather_than_low(pins_sketch):
+    """`4` is PD4 and the sketch calls `pinMode(4, INPUT)` and stops.
+
+    `low` here would be a claim that something drives it low; the direction
+    register says nobody drives it at all. This is the distinction that makes
+    the newly live pads worth having rather than twenty more zeroes -- the
+    other twenty-six pins of these three ports are in the same state and would
+    all read `low` from a model that consulted `PORTx` first.
+    """
+    image, _ = pins_sketch
+    assert levels(image)["4"] == "input"
+
+
+def test_the_two_labels_on_the_shared_pad_move_together(pins_sketch):
+    """`A4` and `SDA` are PC4 twice, so driving one moves both.
+
+    `pins_arduino.h:48-51` makes `SDA` digital 18, which is `A4`. The R3 header
+    brings the pad out a second time beside `AREF` and the silkscreen gives it
+    the other name. A `HEADER` where the two had drifted apart would pass every
+    test that drove only one of them, which is why the sketch drives `A4` and
+    this reads the other.
+    """
+    image, _ = pins_sketch
+    state = levels(image)
+    assert state["A4"] == "high", "PC4 was driven high"
+    assert state["SDA"] == state["A4"], "SDA is the same pad as A4"
+    assert state["SCL"] == state["A5"], "and SCL is the same pad as A5"
+
+
+def test_a_pin_the_usart_has_taken_is_unknown_and_not_input(serial_sketch):
+    """**`Serial.begin` leaves no trace in `DDRD`, and this is that hole.**
+
+    Measured before the code was written: a `Serial` sketch prints, finishes
+    with `UCSR0B` at 0b10011000 -- `RXEN0` and `TXEN0` both set -- and leaves
+    `DDRD` at 0b00000000. So a model reading only the direction register
+    answers `input` about the two pads the USART is driving, which reads as
+    "nobody is driving this".
+
+    `unknown` is the honest answer and the vocabulary already has it: what this
+    repository cannot say is what the transmitter is doing to the pad.
+
+    **Both halves are asserted.** `2` is PD2, on the same port and the same
+    byte, and it must still read `input` -- otherwise this would pass just as
+    well for a model that gave up on all of PORTD the moment a UART started.
+    """
+    image, _ = serial_sketch
+    state = levels(image)
+    assert state["0"] == "unknown", "RXEN0 is set; the receiver has PD0"
+    assert state["1"] == "unknown", "TXEN0 is set; the transmitter has PD1"
+    assert state["2"] == "input", "PD2 is untouched and PORTD still answers"
+
+
+def test_the_input_registers_of_the_new_ports_are_not_modelled_either(pins_sketch):
+    """`PINC` and `PIND` inherit `PINB`'s limitation exactly, pinned here
+    because the pads that reach them are new.
+
+    Each reads the electrical level on the pins, so on PD7 driven high `PIND`
+    bit 7 should read high. This model returns the stored zero -- a wrong
+    answer rather than a fault, and there is nothing to unmap, because every
+    byte of an AVR's data space exists. `test_reading_the_input_register_is_
+    not_yet_modelled` in `tests/avr/test_uno_board.py` says the same of `PINB`.
+
+    When the mirror lands, this fails, and the failure is the notification.
+    """
+    image, _ = pins_sketch
+    with api.load_firmware(BOARD, image, base=0) as session:
+        for _ in range(BUDGET):
+            session.step()
+        assert session.cpu.read_data(atmega328p.PORTD) & (1 << 7), "PD7 is high"
+        assert session.cpu.read_data(atmega328p.PORTC) & (1 << 0), "PC0 is high"
+        assert session.cpu.read_data(atmega328p.PIND) == 0, (
+            "and PIND still reads zero, which is wrong on real silicon"
+        )
+        assert session.cpu.read_data(atmega328p.PINC) == 0, "and so does PINC"
+
+
+def test_a_pwm_pad_reports_the_port_bit_and_not_the_waveform(pwm_sketch):
+    """**OH-71's limitation, pinned rather than fixed, and this test is meant
+    to fail one day.**
+
+    `analogWrite(3, 128)` sets `DDRD` bit 3, leaves `PORTD` bit 3 clear, and
+    sets `COM2B1` in `TCCR2A` -- the timer's compare output now drives the pad
+    and `PORTD` has nothing to do with it. `pin_states` answers `low` about a
+    pin carrying a square wave, which is the confident-wrong-answer class this
+    repository ranks below a loud one.
+
+    It was split out of OH-70 rather than folded in because the fix wants the
+    `COM` bits of three timers and a pin-to-timer table, and it would move pins
+    9, 10 and 11, which a ticket about PORTC and PORTD does not otherwise
+    touch. `unknown` is the answer OH-71 will give.
+
+    `7` is asserted beside it so that this pins a *per-pad* defect: the honest
+    answer is still available on the same port and the same byte.
+    """
+    image, _ = pwm_sketch
+    state = levels(image)
+    assert state["7"] == "high", "PD7 is driven by PORTD and answers"
+    assert state["3"] == "low", (
+        "PD3 reports the PORT bit. When OH-71 lands this is 'unknown' and this "
+        "test fails, which is the notification"
+    )

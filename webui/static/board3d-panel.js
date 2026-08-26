@@ -29,12 +29,38 @@ const CAPTION = "board-pins-caption";
 //: What each state reads as in the table. The 3D view paints the same four
 //: from the same stylesheet; this spells them because a colour alone is not a
 //: readable answer, and one of the four is not a state at all.
+//:
+//: `unknown` is missing on purpose -- see `unknownWords` below, because it is
+//: the one state that needs two different sentences.
 const WORDS = {
   high: "high",
   low: "low",
   input: "input",
-  unknown: "not modelled",
 };
+
+//: The two ways a pad can be `unknown`, and they are not the same fact.
+//:
+//: **Found in a browser and by nothing else** (2026-08-26): a `Serial` sketch
+//: on an Arduino Uno makes pins 0 and 1 `unknown`, because the USART has taken
+//: PD0 and PD1 and the direction register has no trace of it. The row then
+//: read `1 | PD1 | not modelled`, which contradicts itself -- the pin is named
+//: in the same row that says nothing models it. Every assertion passed: the
+//: state really was `unknown`, and the words were what was wrong.
+//:
+//: `chip_pin` is the discriminator and it is exact rather than convenient.
+//: `webui/api.py` fills `chip_pin` from the board's `PIN_NAMES`, which is
+//: derived from the same `HEADER` its `pin_states` walks -- so a pad has a
+//: chip pin **if and only if** the board answered for it. A pad with none was
+//: never in the board's table at all.
+const NOT_MODELLED = "not modelled";
+const IN_USE = "in use elsewhere";
+
+/** Which of the two sentences an `unknown` pad gets. */
+function unknownWords(pad) {
+  return pad.chip_pin === null || pad.chip_pin === undefined
+    ? NOT_MODELLED
+    : IN_USE;
+}
 
 let scene = null;      // the board3d module, once it has loaded
 let layout = null;     // the last /api/board/pins answer
@@ -87,7 +113,12 @@ function renderTable(pads) {
     pin.textContent = pad.chip_pin ?? "—";
 
     const state = document.createElement("td");
-    state.textContent = WORDS[pad.state] ?? pad.state;
+    // Only `unknown` takes the two-sentence path. Anything else falls back to
+    // its own name, which is what makes a state this panel has never heard of
+    // show up as itself rather than as one of these sentences.
+    state.textContent = pad.state === "unknown"
+      ? unknownWords(pad)
+      : WORDS[pad.state] ?? pad.state;
 
     row.append(label, pin, state);
     body.append(row);
@@ -117,16 +148,35 @@ async function reload() {
 
   layout = view;
   renderTable(view.pads);
-  const answerable = view.pads.length - view.unknown;
-  // **The count is the honest half of this panel.** "6 of 32 answerable" is
-  // what tells a reader they are looking at a thin model rather than a quiet
-  // program, and it is the number a person would otherwise have to work out by
-  // reading every row.
-  $(NOTE).textContent =
-    `${answerable} of ${view.pads.length} pads answerable · ${view.board}`;
+  renderCount();
   $(CANVAS).hidden = false;
   const drawn = await renderer();
   if (drawn) drawn.showBoard(view);
+}
+
+/** How many pads this repository can answer for, right now.
+ *
+ * **Counted from the pads and not read from `view.unknown`, because the count
+ * moves.** It did not used to: before OH-70 a pad was `unknown` because the
+ * board's table had no row for it, which is fixed for the life of a board, so
+ * the number the layout fetch carried stayed true however long the sketch ran.
+ * Then the Uno's USART started taking PD0 and PD1 while a `Serial` sketch runs
+ * — and the note went on reading `22 of 32` beside two rows that had stopped
+ * answering. Recomputing costs one pass over thirty-two rows.
+ *
+ * `/api/board/pins` still carries its own `unknown`, and it is not wrong: it
+ * is that endpoint's answer at the moment it was asked. What it cannot be is
+ * current, because the states arrive afterwards from a different endpoint —
+ * `/api/board/state`, many times a second, carrying levels and no geometry.
+ *
+ * The count is the honest half of this panel: it is what tells a reader
+ * whether they are looking at a thin model or a quiet program, and it is the
+ * number a person would otherwise work out by reading every row.
+ */
+function renderCount() {
+  const answerable = layout.pads.filter((p) => p.state !== "unknown").length;
+  $(NOTE).textContent =
+    `${answerable} of ${layout.pads.length} pads answerable · ${layout.board}`;
 }
 
 /** Repaint from a state poll. `pins` is `{pinName: state}`, or null. */
@@ -137,6 +187,7 @@ function levels(pins) {
     pad.state = pins[pad.pin] ?? "unknown";
   }
   renderTable(layout.pads);
+  renderCount();
   if (scene) scene.setLevels(pins);
 }
 

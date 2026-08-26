@@ -98,11 +98,34 @@ def test_the_xiaos_led_is_a_pin_and_not_a_pad():
     assert samd21.HEADER["LED"] == (samd21.PORTA, samd21.LED_PIN)
 
 
-def test_the_uno_maps_only_the_port_its_board_models():
-    """Six of thirty-two pads. Pins 0-7 are PORTD and A0-A5 are PORTC, and
-    `webui/boards/atmega328p.py` models neither -- so they must be absent from
-    `HEADER` rather than present and answering zero."""
-    assert set(atmega328p.HEADER) == {"8", "9", "10", "11", "12", "13"}
+def test_the_uno_maps_every_pad_with_an_mcu_pin_behind_it():
+    """Twenty-two of thirty-two, and the ten it leaves out are the claim.
+
+    OH-70 took this from six by adding PORTC and PORTD. What must stay absent
+    is every pad with no MCU pin behind it -- `AREF`, `NC`, `IOREF`, `RESET`,
+    the supplies and the grounds -- because a `low` for `GND` would be a
+    sentence about the program when the truth is a sentence about the board.
+    """
+    assert len(atmega328p.HEADER) == 22
+    assert set(atmega328p.HEADER) >= {"0", "7", "13", "A0", "A5"}
+    # Spelled out rather than derived from the pad map, so that a pad map that
+    # grew a `GND` entry could not quietly make this test agree with it.
+    supplies = {"AREF", "NC", "IOREF", "RESET", "3V3", "5V", "VIN", "GND"}
+    assert not supplies & set(atmega328p.HEADER)
+
+
+def test_the_unos_two_i2c_labels_are_the_two_analog_pads_they_duplicate():
+    """`SDA` and `SCL` are not extra pins. `pins_arduino.h:48-51` makes them
+    digital 18 and 19, which is PC4 and PC5 -- the same silicon as `A4` and
+    `A5`, brought out a second time on the R3 header.
+
+    So a sketch driving `A4` must move both rows of the picture. Reporting one
+    of them and not the other would be a board that does not exist.
+    """
+    assert atmega328p.HEADER["SDA"] == atmega328p.HEADER["A4"]
+    assert atmega328p.HEADER["SCL"] == atmega328p.HEADER["A5"]
+    assert atmega328p.PIN_NAMES["SDA"] == "PC4"
+    assert atmega328p.PIN_NAMES["SCL"] == "PC5"
 
 
 # --- the join, with a real image --------------------------------------------
@@ -134,16 +157,21 @@ def test_a_power_pad_is_unknown_and_not_low():
 
 
 def test_the_unknown_count_is_reported_rather_than_left_to_be_counted():
-    """"6 of 32 answerable" is what tells a reader they are looking at a thin
-    model rather than a quiet program."""
+    """"22 of 32 answerable" is what tells a reader whether they are looking at
+    a thin model or a quiet program."""
     with built(UNO, UNO_DRIVE) as session:
         session.step(5000)
         view = api.pin_view(session.runtime, session.cpu, UNO)
     assert view["unknown"] == sum(
         1 for pad in view["pads"] if pad["state"] == "unknown"
     )
-    # Twenty-six of the Uno's thirty-two, because only PORTB is modelled.
-    assert view["unknown"] == 26
+    # Ten of the Uno's thirty-two, and every one of them is a pad with no MCU
+    # pin behind it. **Named rather than counted**: a count alone would still
+    # pass if PORTC went missing and five power pads appeared from somewhere.
+    assert sorted(pad["label"] for pad in view["pads"]
+                  if pad["state"] == "unknown") == [
+        "3V3", "5V", "AREF", "GND", "GND", "GND", "IOREF", "NC", "RESET", "VIN"
+    ]
 
 
 def test_the_silkscreens_pwm_tilde_does_not_stop_a_pin_being_found():
