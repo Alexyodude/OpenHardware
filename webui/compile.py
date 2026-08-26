@@ -190,10 +190,16 @@ class Recipe:
 #: board and this proves the service, and coupling them would make a compiler
 #: bug fail a core test.
 #:
-#: Twelve boards are runnable and this builds for four of them, because
-#: `recipe_for` keys on the *chip*: one XIAO SAMD21 row serves the DIP and the
-#: SMD, and the Uno row serves itself. The eight ESP32 boards have no row, and
-#: `recipe_for` says so by name rather than failing to find a compiler.
+#: **Twelve boards are runnable and this builds for three of them**, over two
+#: chips, because `recipe_for` keys on the *chip*: one SAMD21 row serves both
+#: the DIP and the SMD, and the Uno row serves itself. Counted rather than
+#: estimated -- an earlier version of this comment said four, from adding the
+#: rows to the boards.
+#:
+#: The nine without a row are seven ESP32s across three chips and two RP2040s,
+#: and `recipe_for` names the chip rather than failing to find a compiler. The
+#: RP2040 pair is the cheapest of the two remaining pieces of work: the core
+#: already runs them, so it needs a framework rather than a core.
 RECIPES: dict[str, Recipe] = {
     "ATmega328P": Recipe(
         toolchain="toolchain-atmelavr",

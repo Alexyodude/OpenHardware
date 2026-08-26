@@ -1,6 +1,6 @@
 ---
 id: OH-69
-title: A pin view, because three of the four buildable boards cannot print
+title: A pin view, because two of the three buildable boards cannot print
 status: open
 priority: P1
 created: '2026-08-26'
@@ -15,7 +15,7 @@ THE BROWSER FOUND THIS, on 2026-08-26, while closing OH-66. A sketch was built a
 
 THE CONSOLE PANE IS ALREADY HONEST ABOUT IT, in these words: 'webui.boards.samd21 models no UART, so nothing on a SAMD21 can print. This is a gap in the board description, not silence from the program.' That is the right sentence and it is not a substitute for showing the pin.
 
-WHY IT MATTERS MORE NOW THAN IT DID. Until OH-66 the IDE built for one board, and that board has a modelled USART -- so Serial.print WAS the feedback and a pin view looked optional. Four boards can be built for now and three of them cannot print at all. The user asked twice for 'standard development workflows like platformio and arduino style', and watching an LED is the first thing anybody does in that workflow.
+WHY IT MATTERS MORE NOW THAN IT DID. Until OH-66 the IDE built for one board, and that board has a modelled USART -- so Serial.print WAS the feedback and a pin view looked optional. Three boards can be built for now and two of them cannot print at all -- corrected the same day from 'four and three', which came from adding the recipe rows to the boards instead of counting the boards. The user asked twice for 'standard development workflows like platformio and arduino style', and watching an LED is the first thing anybody does in that workflow.
 
 WHAT EXISTS TO BUILD ON, and it is more than it looks. Every board carries a pin map: webui/boards/*.json has label-to-chip-pin from tools/import_pindefs.py, and webui/boards/samd21.py already exports LED_PIN with a citation to Seeed's own variant table. tests/webui/test_compile.py watches PA17 through exactly those constants. So the data is there and what is missing is the pane.
 

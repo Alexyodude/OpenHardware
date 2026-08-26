@@ -49,3 +49,7 @@ AND A SIXTH. Building without USBCON does not compile: USBAPI.h declares a membe
 MEASURED, END TO END, IN A REAL BROWSER: XIAO-SAMD21-DIP picked, a sketch typed, Build and run pressed -> 5324 bytes entered at 0x000002d0, then 200,000 instructions on Run. A syntax error renders identically to avr-gcc's and leaves the board untouched. Zero console messages at warning level or above. In tests, PA17 blinks at 48,083 instructions per half period against 48,000 derived.
 
 FOUR OF TWELVE RUNNABLE BOARDS can be built for now, because recipe_for keys on the chip: the Uno, and both XIAO SAMD21 variants. The eight ESP32 boards have no row and the refusal names both the chip it cannot build for and the chips it can.
+
+**Note 2026-08-26:** CORRECTION 2026-08-26, same day. The close note and 408f529's message both say FOUR buildable boards. It is THREE -- the Arduino Uno and both XIAO SAMD21 variants -- over two chips. Four came from adding the recipe rows to the boards rather than counting the boards, which is the arithmetic this repository's own inventory rule exists to prevent: do not write a count down, generate it. The comment in webui/compile.py is corrected and says where the wrong number came from.
+
+The nine runnable boards with no recipe are seven ESP32s across three chips and TWO RP2040s. The RP2040 pair is worth naming separately: core/cortexm0 already runs them and tests/cortexm0/test_blink.py is the firmware-verified test, so what they need is a framework rather than a core -- which makes them the cheapest third board, not the ESP32s.
