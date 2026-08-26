@@ -163,6 +163,12 @@ CONTENT_TYPES = {
     ".js": "text/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".svg": "image/svg+xml",
+    # The vendors' own board models and the index naming them, written by
+    # `tools/import_3d_model.py`. `model/gltf-binary` is glTF's registered
+    # type; the browser never sniffs it, because `board3d.js` reads the file
+    # as an ArrayBuffer, but a wrong type here would still be a wrong answer.
+    ".glb": "model/gltf-binary",
+    ".json": "application/json",
 }
 
 #: The largest program the API will accept, in bytes. The address space is a

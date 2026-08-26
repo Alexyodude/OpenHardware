@@ -189,13 +189,69 @@ def test_the_page_resolves_three_from_the_vendored_copy_and_not_a_cdn():
 
 def test_the_panel_says_it_is_a_footprint_and_not_a_model_of_the_board():
     """**OH-30's honest-degradation rule, in the page rather than in a
-    comment.** No board here publishes a 3D model, so the third dimension is a
-    stated constant -- and a reader who is not told will reasonably assume
-    they are looking at a render of the real thing."""
+    comment.** A reader who is not told will reasonably assume they are looking
+    at a render of the real thing.
+
+    This is the markup's caption, which is what a board with no vendor model
+    keeps -- three XIAO ESP32-C3 boards, and any board added before its model
+    is found. It is also what shows before the index has been fetched, so it
+    has to be the cautious one of the two rather than the confident one.
+    """
     page = PAGE.read_text(encoding="utf-8")
     caption = page.split('id="board-pins-caption"', 1)[1].split("</p>", 1)[0]
     assert "not a model of" in caption
     assert "vendor" in caption
+
+
+def test_the_caption_stops_disclaiming_a_model_once_there_is_one():
+    """**OH-72 made that sentence false for nine boards**, and a page that goes
+    on disclaiming a model it is showing is wrong in the same direction as one
+    claiming a model it has not got: either way a reader cannot tell which they
+    are looking at, which is the only thing the sentence was ever for.
+
+    Both captions live in the panel and the choice is the index's `file`, so a
+    board whose mesh has not been imported keeps the cautious one.
+    """
+    panel = PANEL.read_text(encoding="utf-8")
+    assert "FOOTPRINT_CAPTION" in panel
+    assert "MODEL_CAPTION" in panel
+    # **The last assignment, not the first.** There are two: a board with no
+    # header pins at all gets `view.note`, and only then does the model choice
+    # happen. Splitting on the first found the wrong one and this test failed
+    # on its own pattern before it ever failed on the code.
+    chooser = panel.rsplit("$(CAPTION).textContent =", 1)[1].split(";", 1)[0]
+    assert "model" in chooser and "file" in chooser, (
+        "the caption is not chosen by whether a model was actually found"
+    )
+
+
+def test_the_renderer_is_handed_the_model_rather_than_finding_one():
+    """`board3d.js` knows three.js and the page's palette and nothing else --
+    not which boards this repository has meshes for. That belongs to the panel,
+    which is already the file that fetches things and writes words.
+
+    It also means the renderer cannot go looking for `/models/index.json` on a
+    checkout that has never run the importer.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    assert "index.json" not in source, "the renderer fetches the model index itself"
+    assert "export function showBoard(layout, model" in source
+
+
+def test_the_vendors_own_colours_are_not_repainted_by_the_theme():
+    """A board's solder mask is a measurement and the pad states are this
+    repository's reading of a register. **Only the second follows the theme**,
+    because tinting the first would turn the one sourced thing in the picture
+    into decoration -- and `#116517` is that board's green in either theme.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    # Bounded to the function's own body: everything after it is another
+    # function, and `clearBoard` mentions `view.model` for a different reason.
+    theme = source.split("export function refreshTheme", 1)[1].split("\n}", 1)[0]
+    assert "repaint(post)" in theme, "the pad markers must still follow the theme"
+    assert "view.model" not in theme, (
+        "refreshTheme touches the vendor's mesh; its colours are the vendor's"
+    )
 
 
 def test_the_renderer_is_loaded_separately_from_the_rest_of_the_page():

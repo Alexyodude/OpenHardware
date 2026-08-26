@@ -58,11 +58,21 @@ const PX_PER_MM = 8.0;
 const BOARD_MM = 1.6;
 const BOARD_THICKNESS = BOARD_MM * PX_PER_MM * SCALE;
 
-//: A header pin, as a post standing on the top face. Radius is half the 0.1in
-//: pitch's pad, which is what makes fourteen of them look like a header rather
-//: than like fourteen dots.
+//: A header pin, as a disc lying on the board's top face.
+//:
+//: **It used to be a post standing 0.9 units proud, and that was a drawing of
+//: a board nobody makes.** A XIAO's header pins are castellated pads: plated
+//: half-holes in the edge of the PCB, flush with it. Once the vendor's own
+//: model arrived and those pads were visible in gold underneath, fourteen grey
+//: cylinders floating above them stopped reading as pins and started reading
+//: as a mistake -- which is what they were.
+//:
+//: So the marker lies *on* the board now. `PAD_LIFT` is the gap that keeps it
+//: from z-fighting with the surface it sits on, and it is the smallest number
+//: that reliably does: at 0.001 the two planes flicker as the camera turns.
 const PAD_RADIUS = 0.42;
-const PAD_HEIGHT = 0.9;
+const PAD_HEIGHT = 0.06;
+const PAD_LIFT = 0.01;
 
 //: How far back the camera sits, as a multiple of the board's longest side.
 //: Framing from the geometry rather than from a fixed distance is what lets
@@ -115,6 +125,89 @@ const STATE_VARIABLE = {
   unknown: "--line",
 };
 
+//: glTF's four-byte magic, `glTF`, and its two chunk types.
+const GLB_MAGIC = 0x46546c67;
+const CHUNK_JSON = 0x4e4f534a;
+const CHUNK_BIN = 0x004e4942;
+
+//: glTF component types, for the two this reader accepts.
+const FLOAT = 5126;
+const UNSIGNED_INT = 5125;
+
+/**
+ * Read the narrow slice of glTF that `tools/import_3d_model.py` writes.
+ *
+ * **Hand-written rather than `GLTFLoader`, and the reason is the narrowness
+ * rather than the dependency.** This repository already vendors one three.js
+ * addon, so vendoring a second would be no new kind of thing. What the loader
+ * would buy is support for scene graphs, skins, animations, textures, sparse
+ * accessors and a dozen KHR extensions -- none of which appears in a file this
+ * repository generated ninety lines away. Sixty lines that accept exactly what
+ * is written and **throw on anything else** are easier to be sure of than two
+ * hundred kilobytes that accept everything.
+ *
+ * That last clause is the point: every unsupported case below is a `throw`,
+ * because the file is ours, so anything unexpected means the writer changed
+ * and the reader did not.
+ */
+function readGlb(buffer) {
+  const head = new DataView(buffer);
+  if (head.getUint32(0, true) !== GLB_MAGIC) throw new Error("not a glb");
+  if (head.getUint32(4, true) !== 2) throw new Error("glTF 2.0 only");
+
+  let offset = 12;
+  let json = null;
+  let bin = null;
+  while (offset < buffer.byteLength) {
+    const length = head.getUint32(offset, true);
+    const kind = head.getUint32(offset + 4, true);
+    const body = buffer.slice(offset + 8, offset + 8 + length);
+    if (kind === CHUNK_JSON) json = JSON.parse(new TextDecoder().decode(body));
+    else if (kind === CHUNK_BIN) bin = body;
+    offset += 8 + length;
+  }
+  if (!json || !bin) throw new Error("a glb needs a JSON chunk and a BIN chunk");
+
+  const read = (index, Kind, per) => {
+    const accessor = json.accessors[index];
+    if (accessor.sparse) throw new Error("sparse accessors are not written here");
+    const view = json.bufferViews[accessor.bufferView];
+    if (view.byteStride) throw new Error("interleaved buffers are not written here");
+    const start = (view.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
+    return new Kind(bin, start, accessor.count * per);
+  };
+
+  const group = new THREE.Group();
+  for (const primitive of json.meshes[0].primitives) {
+    const geometry = new THREE.BufferGeometry();
+    const position = json.accessors[primitive.attributes.POSITION];
+    const normal = json.accessors[primitive.attributes.NORMAL];
+    const index = json.accessors[primitive.indices];
+    if (position.componentType !== FLOAT || normal.componentType !== FLOAT) {
+      throw new Error("positions and normals are written as floats");
+    }
+    if (index.componentType !== UNSIGNED_INT) {
+      throw new Error("indices are written as unsigned ints");
+    }
+    geometry.setAttribute("position", new THREE.BufferAttribute(
+      read(primitive.attributes.POSITION, Float32Array, 3), 3));
+    geometry.setAttribute("normal", new THREE.BufferAttribute(
+      read(primitive.attributes.NORMAL, Float32Array, 3), 3));
+    geometry.setIndex(new THREE.BufferAttribute(
+      read(primitive.indices, Uint32Array, 1), 1));
+
+    const material = json.materials[primitive.material];
+    const [red, green, blue] = material.pbrMetallicRoughness.baseColorFactor;
+    group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+      color: new THREE.Color(red, green, blue),
+      roughness: material.pbrMetallicRoughness.roughnessFactor,
+      metalness: material.pbrMetallicRoughness.metallicFactor,
+      side: THREE.DoubleSide,
+    })));
+  }
+  return { group, extras: json.asset.extras ?? {} };
+}
+
 //: Everything mutable, in one object rather than eight module-level `let`s.
 //: `dispose` empties it, and a reader can see the whole lifetime at once.
 const view = {
@@ -123,7 +216,8 @@ const view = {
   camera: null,
   controls: null,
   board: null,
-  pads: new Map(),   // pin name -> the post drawn for it
+  model: null,       // the vendor's mesh, once it has arrived
+  pads: new Map(),   // pin name -> the marker drawn for it
   palette: {},
   frame: 0,
 };
@@ -207,7 +301,7 @@ function release(object) {
  * the one thing this file is careful not to invent. The panel lists them
  * beside the canvas instead.
  */
-export function showBoard(layout) {
+export function showBoard(layout, model = null) {
   if (!view.renderer) return;
   clearBoard();
   if (!layout || !layout.width || !layout.height) return;
@@ -222,6 +316,9 @@ export function showBoard(layout) {
     })
   );
   view.board = new THREE.Group();
+  // Which board this group is, so a mesh that arrives after the reader has
+  // picked a different one is dropped rather than drawn on the wrong pads.
+  view.board.userData.board = layout.board;
   view.board.add(slab);
 
   // A wire outline in the accent colour, so the courtyard reads as an edge
@@ -232,7 +329,13 @@ export function showBoard(layout) {
   );
   view.board.add(edges);
 
-  const top = BOARD_THICKNESS / 2 + PAD_HEIGHT / 2;
+  // **The pads stand on whichever board is showing.** With the vendor's model
+  // loaded that is its own PCB, which is 1.61 mm on a SAMD21 and 1.20 mm on an
+  // RP2040 -- so a height fixed to the assumed 1.6 would sink four pads into
+  // one board and float them above another. `placeModel` raises them when the
+  // mesh arrives; until then they sit on the slab, which is also where they
+  // stay on a board with no model.
+  const top = BOARD_THICKNESS / 2 + PAD_LIFT + PAD_HEIGHT / 2;
   for (const pad of layout.pads) {
     if (pad.x === null || pad.y === null) continue;
     const post = new THREE.Mesh(
@@ -249,6 +352,7 @@ export function showBoard(layout) {
     // different pins is a wrong picture rather than an ugly one.
     post.position.set(pad.x * SCALE - width / 2, top, depth / 2 - pad.y * SCALE);
     post.userData.pin = pad.pin;
+    post.userData.label = pad.label;
     // **The state is kept on the mesh, not only in the colour it produced.**
     // A colour cannot be turned back into a state, so a theme change had
     // nothing to recolour from -- see `refreshTheme`, which is where that bug
@@ -264,6 +368,87 @@ export function showBoard(layout) {
   view.camera.position.set(reach * 0.1, reach * 0.85, reach * 0.75);
   view.controls.target.set(0, 0, 0);
   view.controls.update();
+
+  // Last, and not awaited: a board with a vendor model is drawn twice --
+  // once as the footprint, then again when a megabyte and a half of mesh has
+  // arrived. Waiting for it would leave the panel blank on a slow connection
+  // for the sake of a picture, and the table beside it is already correct.
+  if (model && model.file) loadModel(layout, model);
+}
+
+/**
+ * Replace the extruded slab with the vendor's own model.
+ *
+ * **A board with no model keeps the slab, and that is the whole degradation
+ * story.** The caller decides: `tools/import_3d_model.py` writes an index
+ * naming every board it has a model for, `board3d-panel.js` reads it, and
+ * three XIAO ESP32-C3 boards are absent from it because Seeed publishes that
+ * one on GrabCAD rather than on its own wiki. The panel says which of the two
+ * a reader is looking at rather than leaving them to notice that one board
+ * looks different from its neighbours.
+ */
+async function loadModel(layout, model) {
+  let loaded;
+  try {
+    const response = await fetch(model.file);
+    if (!response.ok) return;
+    loaded = readGlb(await response.arrayBuffer());
+  } catch (error) {
+    // The footprint is still on screen, which is the point of drawing it
+    // first. Reported once rather than swallowed.
+    console.warn(`the vendor model for ${layout.board} did not load:`, error);
+    return;
+  }
+  // `showBoard` may have run again while the mesh was in flight.
+  if (!view.board || view.board.userData.board !== layout.board) return;
+  placeModel(loaded, layout);
+}
+
+/** Put a loaded model where the footprint was, and stand the pads on it. */
+function placeModel(loaded, layout) {
+  const { group, extras } = loaded;
+  const pcb = extras.pcb;
+  if (!pcb) throw new Error("the model does not say how thick its PCB is");
+
+  const width = layout.width * SCALE;
+  const depth = layout.height * SCALE;
+  // The model is millimetres and the scene is image pixels; the board JSONs
+  // were generated at a stated 8 px/mm, which is the same `PX_PER_MM` the
+  // slab's thickness uses.
+  const scale = PX_PER_MM * SCALE;
+  group.scale.setScalar(scale);
+
+  // **The model is always landscape and half these pad maps are not.** Every
+  // model is emitted with the PCB's long side along x; `XIAO-SAMD21-SMD` and
+  // its three siblings are taller than they are wide. A quarter turn about the
+  // vertical is the whole correction, and it is decided from the data rather
+  // than tabulated per board.
+  if (layout.height > layout.width) group.rotation.y = Math.PI / 2;
+
+  // Centre it on the pads rather than on the image. The pad map's extent
+  // includes a courtyard margin that is a footprint artefact and is not the
+  // board; the pads are the thing both sources measured.
+  const placed = layout.pads.filter((pad) => pad.x !== null);
+  const xs = placed.map((pad) => pad.x);
+  const ys = placed.map((pad) => pad.y);
+  const centreX = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const centreY = (Math.min(...ys) + Math.max(...ys)) / 2;
+  group.position.set(
+    centreX * SCALE - width / 2,
+    -BOARD_THICKNESS / 2,
+    depth / 2 - centreY * SCALE
+  );
+
+  const [slab, edges] = view.board.children;
+  slab.visible = false;
+  edges.visible = false;
+  view.board.add(group);
+  view.model = group;
+
+  // Raise every pad to the real board's top face. See the note in `showBoard`.
+  const top = -BOARD_THICKNESS / 2 + pcb.thickness * scale
+              + PAD_LIFT + PAD_HEIGHT / 2;
+  for (const post of view.pads.values()) post.position.y = top;
 }
 
 /** Paint one post from the state recorded on it. */
@@ -300,6 +485,12 @@ export function refreshTheme() {
   const [slab, edges] = view.board.children;
   slab.material.color.copy(view.palette.surface);
   edges.material.color.copy(view.palette.line);
+  // **The vendor's model is deliberately not repainted.** Its colours are
+  // measurements -- #116517 for that board's solder mask, #ff9f37 for the gold
+  // on its castellated pads -- and tinting them to match a UI theme would turn
+  // the one part of this picture that is sourced into decoration. The pads
+  // stay theme-coloured because they are this repository's own reading of a
+  // register, which is exactly the distinction the palette is for.
   for (const post of view.pads.values()) repaint(post);
 }
 
@@ -310,6 +501,7 @@ function clearBoard() {
   });
   view.scene.remove(view.board);
   view.board = null;
+  view.model = null;
   view.pads.clear();
 }
 

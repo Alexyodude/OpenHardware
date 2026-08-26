@@ -75,6 +75,18 @@ python tools/build_core.py                 # once, to build libi8086
 python webui/emulator_server.py            # http://127.0.0.1:8088/
 ```
 
+Optionally, once, for the vendors' own board models:
+
+```bash
+pip install cadquery-ocp                   # a TOOL dependency, not a runtime one
+python tools/import_3d_model.py --all      # exits 3 and says SKIPPED without it
+```
+
+Nine of the twenty-six boards then draw Seeed's published mechanical model
+instead of an extruded footprint, and the pin panel says which of the two it is
+showing. The meshes are gitignored -- see `tools/import_3d_model.py` for the
+licence reason -- so a fresh checkout gets the footprint until this is run.
+
 Registers, flags, memory and disassembly, with step and run and six sample
 programs. It drives `core/i8086` directly and has nothing to do with
 PICSimLab or the bridge below.

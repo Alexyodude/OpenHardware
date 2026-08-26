@@ -160,21 +160,57 @@ button.primary:hover:not(:disabled) { opacity: 0.88; }
 
 /* --- layout ------------------------------------------------------------- */
 
+/* **Every panel is placed by name, including the two that used to fall where
+   the grid put them.** `#board-run` and `#sketch` carried no `grid-area` and
+   were auto-placed into implicit rows -- which worked, and meant the layout
+   could not be reasoned about from this block alone. It also produced the
+   fault that started this: on a wide screen the sketch panel sat in a column
+   of its own beside a much taller board panel, so a third of the page was
+   empty while the board was drawn in a 900 x 260 letterbox. */
 main {
   display: grid;
   gap: 12px;
   padding: 12px 16px 24px;
   grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-  grid-template-areas: "code state" "memory memory";
+  grid-template-areas:
+    "code   state"
+    "board  sketch"
+    "memory memory";
   align-items: start;
 }
 
+/* One column. Ordered by what a person needs first rather than by the order
+   the markup happens to be in: the board, then the code that is running on
+   it. */
 @media (max-width: 900px) {
   main {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "state" "code" "memory";
+    grid-template-areas: "state" "board" "sketch" "code" "memory";
   }
 }
+
+/* **Three columns once there is room for three**, which is the whole of the
+   wide-screen fix. The board takes a full-height column of its own, because
+   it is the one panel whose content is a picture rather than a table and the
+   only one that gets better with area; the other two columns keep the text
+   and the numbers at a width they are readable at instead of stretching a
+   forty-character disassembly line across half a metre.
+
+   1500px rather than a round 1440 or 1600: below it the third column is
+   narrower than the 280px `.pins-stage` asks for, and a column that cannot
+   hold its own contents is worse than two wide ones. */
+@media (min-width: 1500px) {
+  main {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1.05fr);
+    grid-template-areas:
+      "code   state  board"
+      "code   sketch board"
+      "memory memory board";
+  }
+}
+
+#board-run { grid-area: board; }
+#sketch { grid-area: sketch; }
 
 .panel {
   background: var(--surface);
@@ -375,6 +411,7 @@ body[data-view="emulator"] #targets { display: none; }
    mechanism: the switch is still the two-value rule above, and the panel is
    simply named among the ones the Targets view hides. */
 body[data-view="targets"] #board-run,
+body[data-view="targets"] #sketch,
 body[data-view="targets"] #code,
 body[data-view="targets"] #state,
 body[data-view="targets"] #memory { display: none; }
@@ -553,13 +590,24 @@ table.grid tr.dim td { opacity: 0.72; }
   min-width: 280px;
 }
 
-/* A fixed height rather than an aspect ratio: the canvas is sized from its
- * client box by `board3d.js`, and a box that grows with its own contents would
- * feed a resize loop. */
+/* **An aspect ratio rather than a fixed height, and the old comment here was
+ * right about the risk and wrong about the cause.** It said a box that grows
+ * with its own contents feeds a resize loop, and that is true -- but a canvas
+ * is replaced content, so `aspect-ratio` derives its height from a width that
+ * comes from the flex row above, never from anything the renderer draws. The
+ * loop it feared needs the height to reach the width, and here it cannot.
+ *
+ * The fixed 260px is what made a wide window worse than a narrow one: the
+ * canvas kept its height while the column grew, so the board was drawn in a
+ * 900 x 260 letterbox and the camera framed it from the shorter side. 4:3 is
+ * the shape a board is photographed in, and the bounds keep it from becoming
+ * a postage stamp in one column or taking the whole screen in another. */
 #board-pins-canvas {
   display: block;
   width: 100%;
-  height: 260px;
+  aspect-ratio: 4 / 3;
+  min-height: 240px;
+  max-height: 62vh;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--sunken);

@@ -26,6 +26,29 @@ const NOTE = "board-pins-note";
 const FALLBACK = "board-pins-fallback";
 const CAPTION = "board-pins-caption";
 
+//: Where `tools/import_3d_model.py` writes which board it has a model for.
+const MODEL_INDEX = "/models/index.json";
+
+//: What the caption says, and it is the honest-degradation rule in two
+//: sentences rather than one.
+//:
+//: **The static text in `emulator.html` said "a footprint, extruded -- not a
+//: model of the board" and was true of every board when OH-30 wrote it.** It
+//: stopped being true of nine of them, and a page that goes on disclaiming a
+//: model it is now showing is wrong in the same direction as one that claims a
+//: model it has not got: both leave a reader unable to tell which they are
+//: looking at, which is the only thing the sentence was ever for.
+const FOOTPRINT_CAPTION =
+  "A footprint, extruded — not a model of the board. Every pad position and " +
+  "the outline are the vendor's own KiCad footprint, exact to three decimals. " +
+  "The thickness is a stated 1.6 mm and there are no components on it, " +
+  "because this board publishes no 3D model. Drag to turn it.";
+const MODEL_CAPTION =
+  "The vendor's own 3D model. The board, its components and its connector are " +
+  "Seeed's published mechanical model, tessellated by " +
+  "tools/import_3d_model.py; the pad markers on it are this repository's " +
+  "reading of the chip's registers. Drag to turn it.";
+
 //: What each state reads as in the table. The 3D view paints the same four
 //: from the same stylesheet; this spells them because a colour alone is not a
 //: readable answer, and one of the four is not a state at all.
@@ -64,6 +87,22 @@ function unknownWords(pad) {
 
 let scene = null;      // the board3d module, once it has loaded
 let layout = null;     // the last /api/board/pins answer
+let models = null;     // the model index, fetched once and remembered
+
+/** Which board has a vendor model, from `models/index.json`.
+ *
+ * Fetched once and remembered **including the failure**: a checkout that has
+ * not run `tools/import_3d_model.py` has no such file, and asking for it again
+ * on every board change would put a 404 in the console for each.
+ */
+function modelIndex() {
+  if (models === null) {
+    models = fetch(MODEL_INDEX)
+      .then((response) => (response.ok ? response.json() : { boards: {} }))
+      .catch(() => ({ boards: {} }));
+  }
+  return models;
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -150,8 +189,13 @@ async function reload() {
   renderTable(view.pads);
   renderCount();
   $(CANVAS).hidden = false;
+
+  const model = (await modelIndex()).boards?.[view.board] ?? null;
+  $(CAPTION).textContent =
+    model && model.file ? MODEL_CAPTION : FOOTPRINT_CAPTION;
+
   const drawn = await renderer();
-  if (drawn) drawn.showBoard(view);
+  if (drawn) drawn.showBoard(view, model);
 }
 
 /** How many pads this repository can answer for, right now.

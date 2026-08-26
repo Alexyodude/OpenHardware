@@ -61,3 +61,16 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# The vendors' own 3D board models, and the meshes tools/import_3d_model.py
+# makes from them. **A licence question rather than a size one**, though they
+# are 3.3 MB: Seeed's OSHW-XIAO-Series repository is MIT and the board JSONs
+# record that, but these arrive from the wiki's file server, which states no
+# licence at all. `rules/licence-hygiene.md` §4 says a dependency in a
+# directory nobody exempted is a question for a person, not a header to
+# rewrite -- so this repository fetches them and does not carry them.
+#
+# A checkout without them draws the extruded footprint and says so, which is
+# the same degradation a board with no published model gets. Run
+# `python tools/import_3d_model.py --all` to have them.
+webui/static/models/
