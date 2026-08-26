@@ -1,12 +1,13 @@
 ---
 id: OH-68
 title: The SAMD21 peripherals a real Arduino image asks for before it reaches setup
-status: open
+status: done
 priority: P1
 created: '2026-08-26'
 touches:
 - webui/boards/samd21.py
 - tests/cortexm0/test_samd21_arduino.py
+- tests/cortexm0/test_board_samd21.py
 ---
 
 THE OTHER HALF OF WHAT STOPS OH-66, and the same measurement produced it. A real Arduino-core sketch compiled for the XIAO SAMD21 and run on webui/boards/samd21.py faults on its FIRST peripheral access, at NVMCTRL CTRLB, twelve instructions into SystemInit. The board models flash, SRAM and PORT DIR and OUT and nothing else, which was exactly right for the bare-metal blink it was written for and is not enough for a vendor core.
@@ -35,3 +36,19 @@ NOT IN SCOPE, deliberately. No USB, because main() only calls USBDevice.init() w
 DEPENDS ON OH-67. Even with every register above modelled, the image stalls in delay() because SysTick cannot deliver its exception. Do OH-67 first; this ticket is not verifiable without it.
 
 Done when the real Arduino-core image runs from its reset vector through SystemInit, init and setup into loop with no fault and no stub, and a named test watches PA17 toggle -- the pin webui/boards/samd21.py already cites Seeed's own variant table for.
+
+**Note 2026-08-26:** CLOSED 2026-08-26 in 1d3acbd. Twenty-seven registers, exactly the list this ticket predicted, and the prediction held because it was a measurement rather than a reading -- every fault stubbed, the image re-run, the address recorded, until it reached loop().
+
+THREE CORRECTIONS TO THE TICKET'S OWN LIST, all small and all worth having. PORT WRCONFIG is NOT reached: this framework's pinMode writes PINCFG directly, so WRCONFIG stays unmodelled and still faults. SYSCTRL DFLLVAL is NOT reached either -- startup.c writes it only inside its CRYSTALLESS branch and the XIAO has a crystal. And the calibration row is at 0x00806020, not 0x00800020: a region at 0x00800000 of 0x100 bytes looks right and covers neither word.
+
+PINCFG IS MODELLED AS A WHOLE ARRAY, sixteen words across both groups, where the image touches seven. A PINCFG where pin 20 answers and pin 21 faults would be a stranger model than either all of it or none of it, and init() calls pinMode on every pin on the board anyway.
+
+RESET VALUES MATTER MORE THAN EXPECTED. SystemInit read-modify-writes PM.APBAMASK, PM.APBCMASK and SYSCTRL.OSC8M. A register starting at zero would write back six enables cleared that a real part has set before the first instruction -- silently, with no fault. The header gives all three as RESETVALUE macros.
+
+ONE RESIDUAL, stated in the code rather than buried. GCLK.CTRL.SWRST is write-one-self-clearing on silicon and a stored register keeps it set. Nothing in this framework polls it alone -- startup.c:93 is an AND with STATUS, which reads zero -- so the loop ends on its second term. A constant reading zero would fix that and break CLKCTRL, which shares the word and is genuinely read/write.
+
+A MUTATION FOUND A DEFECT IN THE TESTS before this was called done. Two of them read their expectation from CLOCKS_ALL_READY, the constant they were meant to pin, and stayed green when it was zeroed -- the same shape as OH-17's floor of len(FAMILIES). They spell the five PCLKSR bit positions out now, cited to component/sysctrl.h:270-283.
+
+MEASURED: PA17 blinks at 48,083 instructions per half period against 48,000 derived from SysTick_Config(SystemCoreClock / 1000), and the handler itself runs at exactly 48,000 with no tolerance. The difference between those two numbers is the sketch's own digitalWrite and loop, which is why one test has a tolerance and the other does not.
+
+NOT DONE, and each for a stated reason: no USB, because there is no host to enumerate to; no SERCOM, so Serial1.begin() stops at a named address rather than transmitting into nothing; no converter behind the ADC, so analogRead faults at SWTRIG instead of returning a plausible voltage.
