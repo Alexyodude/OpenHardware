@@ -165,6 +165,13 @@ def variant() -> pathlib.Path:
 
 #: The Arduino core files this sketch reaches, and no more.
 #:
+#: **There is a second copy of this list**, in `webui/compile.py`'s SAMD21
+#: recipe, and it is deliberate for the reason `tests/avr/test_arduino_sketch.py`
+#: gives about its own: this file proves the *board* and that one proves the
+#: *service*, and building this through the service would make a compiler bug
+#: fail a core test. The two are kept identical by hand, and the flags below
+#: were trimmed to match rather than the other way round.
+#:
 #: Compiling the whole core would work and take twenty times as long, which is
 #: the trade `tests/avr/test_arduino_sketch.py` and `webui/compile.py` both
 #: make. `Uart.cpp` and `SERCOM.cpp` are here for a reason worth knowing:
@@ -218,11 +225,12 @@ def build() -> bytes:
     gxx = gcc.with_name(gcc.name.replace("gcc", "g++"))
     objcopy = gcc.with_name(gcc.name.replace("gcc", "objcopy"))
 
-    includes = [
-        f"-I{core}", f"-I{core / 'api' / 'deprecated'}",
-        f"-I{core / 'api' / 'deprecated-avr-comp'}",
-        f"-I{board}", f"-I{cmsis}", f"-I{atmel}",
-    ]
+    # **The same four include roots `webui/compile.py`'s SAMD21 recipe uses,
+    # and no more.** The core's `api/deprecated` directories are on the vendor
+    # IDE's include path and are not needed to compile this: dropping them
+    # produces a byte-identical image, checked. Keeping a flag the other copy
+    # does not have would make the two builds look different for no reason.
+    includes = [f"-I{core}", f"-I{board}", f"-I{cmsis}", f"-I{atmel}"]
     common = ["-mcpu=cortex-m0plus", "-mthumb", "-c", "-Os",
               "-ffunction-sections", "-fdata-sections", "-nostdlib"]
 
@@ -239,8 +247,8 @@ def build() -> bytes:
             # is how the AVR sibling's fixture failed first.
             run([
                 str(gxx if cxx else gcc), *common,
-                *(["-std=gnu++11", "-fno-threadsafe-statics", "-fno-rtti",
-                   "-fno-exceptions"] if cxx else ["-std=gnu11"]),
+                *(["-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics"]
+                  if cxx else []),
                 *DEFINES, *includes, str(source), "-o", str(obj),
             ])
             objects.append(str(obj))

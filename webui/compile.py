@@ -67,6 +67,7 @@ import subprocess
 import tempfile
 
 from webui.boards import catalogue as board_catalogue
+from webui.boards import samd21
 
 #: Where PlatformIO puts the toolchains and frameworks.
 #:
@@ -78,6 +79,14 @@ PACKAGES = pathlib.Path(
     os.environ.get("PLATFORMIO_CORE_DIR")
     or pathlib.Path(os.environ.get("USERPROFILE", pathlib.Path.home()), ".platformio")
 ) / "packages"
+
+#: Where the board-support packages this project fetches itself live.
+#:
+#: A second root, because PlatformIO does not have everything: a XIAO's variant
+#: is in Seeed's fork of the Arduino core, which is not a PlatformIO package.
+#: `tools/import_pindefs.py --fetch` puts it here, and this tree is
+#: git-ignored for the reason that file gives -- fetch, do not vendor.
+BOARD_SUPPORT = pathlib.Path(__file__).resolve().parents[1] / "third_party" / "bsp"
 
 #: How long a build may take before it is killed. A compiler that hangs would
 #: otherwise hold the server's lock forever, and this runs under one.
@@ -120,21 +129,71 @@ class Recipe:
     cxx_flags: tuple[str, ...]        #: added for C++ only; errors on C
     link_flags: tuple[str, ...]
     core_sources: tuple[str, ...]
-    #: The base address `webui/api.load_firmware` should be given. Zero on a
-    #: Harvard part whose program space starts there; an Arm board would carry
-    #: its flash origin here instead.
+    #: The base address `webui/api.load_firmware` should be given.
+    #:
+    #: **Taken from the board module, not written down here.** A flash origin
+    #: is a fact about the silicon and `webui/boards/` carries those with the
+    #: header line they were read from; a second copy in this table is a second
+    #: thing to keep right. The Uno is the exception and stays a literal,
+    #: because a Harvard part's program space starts at zero and there is no
+    #: board constant to point at.
     base: int
+
+    # --- what an Arm board needs and an AVR one does not --------------------
+    #
+    # Three fields, and each of them was a surprise to somebody. They are empty
+    # on the Uno row, which is what "an AVR toolchain already knows this"
+    # looks like in a table.
+
+    #: Where the variant tree is, when it is **not** the framework's own.
+    #:
+    #: A directory under `third_party/bsp`, or empty when the variant ships
+    #: with the framework. This is the single most surprising thing about
+    #: building for a XIAO: `framework-arduino-samd` ships *Arduino's* boards
+    #: -- zero, mzero, the MKRs -- and a XIAO is Seeed's, so its variant is in
+    #: Seeed's fork of the core and not in the framework at all.
+    #:
+    #: Arduino's `arduino_zero` variant would compile, and would be a different
+    #: board that happens to put `LED_BUILTIN` on the same pin -- the kind of
+    #: coincidence that looks right until a second pin is used.
+    variant_package: str
+
+    #: The linker script, relative to the variant directory. Empty for AVR.
+    #:
+    #: **`avr-gcc` knows where flash starts from `-mmcu` alone and an Arm
+    #: toolchain does not.** Worse, the *right* script is not the one the
+    #: vendor's `boards.txt` names: a XIAO SAMD21 has a UF2 bootloader owning
+    #: the first 8 KB, so a real sketch links at 0x2000 -- and there is no
+    #: bootloader in an emulator, so an image built that way puts its vector
+    #: table where a Cortex-M0+ never looks. It links, it loads, and it
+    #: executes erased flash.
+    linker_script: str
+
+    #: Include directories outside the framework, each `<package>/<path>`
+    #: under PlatformIO's packages.
+    #:
+    #: The Arduino SAMD core's second line is `#include <samd.h>`, which is
+    #: neither Arduino's nor Arm's: it is Microchip's device layer, in
+    #: `framework-cmsis-atmel`, and it needs Arm's `core_cm0plus.h` from
+    #: `framework-cmsis` beside it. Two packages that nothing else here
+    #: installs, which is why `toolchain_root` is not the only thing that can
+    #: refuse a build.
+    extra_includes: tuple[str, ...]
 
 
 #: One recipe per chip, keyed as `webui/boards/catalogue.py` spells the chip.
 #:
-#: **Only the Uno today, and that is the vertical slice on purpose.** OH-61
-#: says one board end to end before any second one, and the flags below are not
-#: guessed: they are what `tests/avr/test_arduino_sketch.py`'s fixture has been
-#: building real sketches with since OH-58, including the two things that
-#: fixture got wrong first -- `avr-gcc` for `.c` and `avr-g++` for `.cpp` are
-#: not interchangeable, and `-fno-threadsafe-statics` is a hard error on a C
-#: file.
+#: **Two rows, and the second one is why `Recipe` has the shape it has.** The
+#: flags in neither are guessed: each row is what a test in this repository has
+#: been building real sketches with, and the second copy is deliberate for the
+#: reason `tests/avr/test_arduino_sketch.py` gives -- a board test proves the
+#: board and this proves the service, and coupling them would make a compiler
+#: bug fail a core test.
+#:
+#: Twelve boards are runnable and this builds for four of them, because
+#: `recipe_for` keys on the *chip*: one XIAO SAMD21 row serves the DIP and the
+#: SMD, and the Uno row serves itself. The eight ESP32 boards have no row, and
+#: `recipe_for` says so by name rather than failing to find a compiler.
 RECIPES: dict[str, Recipe] = {
     "ATmega328P": Recipe(
         toolchain="toolchain-atmelavr",
@@ -157,7 +216,74 @@ RECIPES: dict[str, Recipe] = {
             "HardwareSerial.cpp", "HardwareSerial0.cpp", "Print.cpp",
             "Stream.cpp", "WString.cpp", "abi.cpp", "new.cpp",
         ),
+        # Zero, and the one row where this is a literal: a Harvard part's
+        # program space starts there and no board module has a constant to
+        # point at. See `Recipe.base`.
         base=0,
+        # Empty three times over, which is what "avr-gcc already knows" looks
+        # like: Arduino ships the Uno's variant, `-mmcu` places flash, and the
+        # framework's own headers are the only ones the core includes.
+        variant_package="",
+        linker_script="",
+        extra_includes=(),
+    ),
+    "SAMD21": Recipe(
+        toolchain="toolchain-gccarmnoneeabi",
+        prefix="arm-none-eabi-",
+        framework="framework-arduino-samd",
+        core="cores/arduino",
+        variant="variants/XIAO_m0",
+        # From Seeed's own `boards.txt:147-153`, minus the USB half.
+        #
+        # **`USBCON` is absent and `CDC_ENABLED` present**, which looks
+        # backwards and is not. `main()` calls `USBDevice.init()` and
+        # `attach()` only under `USBCON`, and a USB device with no host to
+        # enumerate to is a peripheral nothing could check -- so this build
+        # does not have one, and `Serial` on this board is USB CDC and
+        # therefore does not work. But `USBAPI.h` declares a member whose type
+        # exists only under `CDC_ENABLED`, so without it the *header* fails to
+        # compile. That is a bug in this version of the core, not a choice, and
+        # defining one and not the other is what compiles the declaration while
+        # skipping the device.
+        flags=(
+            "-mcpu=cortex-m0plus", "-mthumb",
+            "-DF_CPU=48000000L", "-DARDUINO=10808", "-DARDUINO_SAMD_ZERO",
+            "-DARDUINO_ARCH_SAMD", "-D__SAMD21__", "-D__SAMD21G18A__",
+            "-DARM_MATH_CM0PLUS", "-DSEEED_XIAO_M0", "-DCDC_ENABLED",
+            "-Os", "-ffunction-sections", "-fdata-sections", "-nostdlib",
+        ),
+        cxx_flags=("-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics"),
+        # `nano.specs` is newlib-nano and `nosys.specs` stubs the syscalls a
+        # freestanding image has no kernel for. Without them the link fails on
+        # `_write` and friends rather than warning about them.
+        link_flags=(
+            "-mcpu=cortex-m0plus", "-mthumb", "-Os", "-Wl,--gc-sections",
+            "--specs=nano.specs", "--specs=nosys.specs",
+        ),
+        # Longer than the Uno's, and the last two are the ones a reader would
+        # not predict: Seeed's `variant.cpp` *defines* `Serial1` over SERCOM4,
+        # so its static constructors reference `Uart` and `SERCOM` whether or
+        # not the sketch mentions either. `startup.c` is the clock tree,
+        # `cortex_handlers.c` is the vector table, and `variant.cpp` itself is
+        # added by `build` because it is not in the core directory.
+        core_sources=(
+            "main.cpp", "startup.c", "cortex_handlers.c", "delay.c", "hooks.c",
+            "wiring.c", "wiring_digital.c", "wiring_analog.c",
+            "wiring_private.c", "itoa.c", "WMath.cpp", "abi.cpp", "new.cpp",
+            "Reset.cpp", "WInterrupts.c", "Uart.cpp", "SERCOM.cpp",
+            "api/Common.cpp", "api/Print.cpp", "api/Stream.cpp",
+            "api/String.cpp", "api/IPAddress.cpp",
+        ),
+        base=samd21.FLASH,
+        variant_package="seeed-samd",
+        # WITHOUT the bootloader. See `Recipe.linker_script`: the vendor's own
+        # `boards.txt:154` names the other one, and it is right for a real
+        # XIAO and wrong for every emulated one.
+        linker_script="linker_scripts/gcc/flash_without_bootloader.ld",
+        extra_includes=(
+            "framework-cmsis/CMSIS/Core/Include",
+            "framework-cmsis-atmel/CMSIS/Device/ATMEL",
+        ),
     ),
 }
 
@@ -240,6 +366,67 @@ def framework_root(recipe: Recipe) -> pathlib.Path:
     return root
 
 
+def variant_root(recipe: Recipe) -> pathlib.Path:
+    """Where `pins_arduino.h` and the linker scripts are, or a refusal.
+
+    One path out, two places it can come from, and the refusal names a
+    different command for each -- which is the whole reason this is a function
+    rather than a `/` in `build`. A board whose vendor also wrote its framework
+    has its variant installed by PlatformIO; a XIAO does not, and telling
+    somebody to `pio pkg install` a package that does not exist would send them
+    in a circle.
+    """
+    if not recipe.variant_package:
+        root = framework_root(recipe)
+        fix = f"pio pkg install --global --tool {recipe.framework}"
+    else:
+        root = BOARD_SUPPORT / recipe.variant_package
+        fix = "python tools/import_pindefs.py --fetch"
+    path = root / recipe.variant
+    if not path.is_dir():
+        raise ToolchainMissing(f"no {recipe.variant} under {root}. Get it with:\n  {fix}")
+    return path
+
+
+def include_roots(recipe: Recipe) -> tuple[pathlib.Path, ...]:
+    """`extra_includes`, resolved, or a refusal naming the package that is out.
+
+    The package is the first segment of each path, so a missing
+    `framework-cmsis-atmel` says `framework-cmsis-atmel` rather than the
+    seventy characters of directory underneath it.
+    """
+    roots = []
+    for relative in recipe.extra_includes:
+        path = PACKAGES / relative
+        if not path.is_dir():
+            package = relative.split("/", 1)[0]
+            raise ToolchainMissing(
+                f"no {relative} under {PACKAGES}. Install it with:\n"
+                f"  pio pkg install --global --tool {package}"
+            )
+        roots.append(path)
+    return tuple(roots)
+
+
+def linker_script(recipe: Recipe) -> pathlib.Path | None:
+    """The script this board links with, or `None` where the toolchain knows.
+
+    `None` rather than an empty path, so `build` cannot accidentally pass
+    `-T` with nothing after it -- which the linker reads as the next argument
+    and fails on somewhere much less obvious.
+    """
+    if not recipe.linker_script:
+        return None
+    path = variant_root(recipe) / recipe.linker_script
+    if not path.is_file():
+        raise ToolchainMissing(
+            f"no {recipe.linker_script} under {variant_root(recipe)}. The "
+            f"variant is there and its linker scripts are not, which usually "
+            f"means the fetch was narrowed."
+        )
+    return path
+
+
 def _tool(root: pathlib.Path, recipe: Recipe, name: str) -> str:
     """One binary of the toolchain, with the platform's suffix if it needs one."""
     path = root / "bin" / f"{recipe.prefix}{name}"
@@ -262,13 +449,21 @@ def build(board: str, source: str) -> Build:
     tools = toolchain_root(recipe)
     framework = framework_root(recipe)
     core = framework / recipe.core
-    variant = framework / recipe.variant
+    variant = variant_root(recipe)
+    script = linker_script(recipe)
 
     gcc = _tool(tools, recipe, "gcc")
     gxx = _tool(tools, recipe, "g++")
     objcopy = _tool(tools, recipe, "objcopy")
 
-    includes = (f"-I{core}", f"-I{variant}")
+    includes = (f"-I{core}", f"-I{variant}",
+                *(f"-I{root}" for root in include_roots(recipe)))
+    # **A variant outside the framework is a source file as well as a header
+    # directory.** Arduino's own variants are compiled from the framework by
+    # naming them in `core_sources`; Seeed's cannot be, because it is not under
+    # the framework at all -- and `g_APinDescription` lives in it, so an image
+    # linked without it has no pin table and does not link.
+    extra_sources = ((variant / "variant.cpp",) if recipe.variant_package else ())
     with tempfile.TemporaryDirectory(prefix="openhardware-build-") as tmp:
         out = pathlib.Path(tmp)
         # **The one place untrusted input reaches the filesystem**, and it is
@@ -278,7 +473,8 @@ def build(board: str, source: str) -> Build:
         sketch.write_text(preamble(source), encoding="utf-8")
 
         objects: list[str] = []
-        for index, path in enumerate([sketch, *(core / n for n in recipe.core_sources)]):
+        sources = [sketch, *(core / n for n in recipe.core_sources), *extra_sources]
+        for index, path in enumerate(sources):
             cxx = path.suffix == ".cpp"
             # Numbered rather than named after the source: two framework files
             # could share a stem, and one silently overwriting the other's
@@ -300,7 +496,11 @@ def build(board: str, source: str) -> Build:
             objects.append(str(obj))
 
         elf = out / "sketch.elf"
-        link = (gxx, *recipe.link_flags, *objects, "-o", str(elf), "-lm")
+        link = (
+            gxx, *recipe.link_flags,
+            *(("-T", str(script)) if script is not None else ()),
+            *objects, "-o", str(elf), "-lm",
+        )
         done = _run(link)
         if done.returncode != 0:
             return Build(False, b"", _diagnostics(done, sketch), link)

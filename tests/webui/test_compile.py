@@ -29,8 +29,15 @@ import pytest
 from webui import api
 from webui import compile as compiler
 from webui.boards import atmega328p
+from webui.boards import samd21
 
 BOARD = "Arduino Uno"
+
+#: The second board, and a XIAO rather than an Arduino for a reason that is not
+#: arbitrary: it is the one whose variant is not in its framework, whose flash
+#: needs a linker script, and whose core needs two CMSIS packages. A second AVR
+#: board would have proved that a dictionary can hold two rows.
+SAMD_BOARD = "XIAO-SAMD21-DIP"
 
 BLINK = """
 void setup() { pinMode(13, OUTPUT); }
@@ -42,13 +49,44 @@ void loop() {
 }
 """
 
+#: The same sketch for the other board, and the two differences are both real.
+#:
+#: `LED_BUILTIN` rather than 13, because the whole point is that Seeed's
+#: variant is what maps it -- to PA17, which `webui/boards/samd21.py` cites the
+#: same two lines for.
+#:
+#: `delay(1)` rather than `delay(500)`, because virtual time on this core is
+#: retired instructions and a millisecond is 48,000 of them. `delay(500)` is
+#: twenty-four million steps through a ctypes boundary, which is a slow test
+#: rather than a better one.
+SAMD_BLINK = """
+void setup() { pinMode(LED_BUILTIN, OUTPUT); }
+void loop() {
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(1);
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(1);
+}
+"""
 
-def needs_toolchain() -> None:
-    """Skip with the reason, rather than failing, where nothing can build."""
-    recipe = compiler.recipe_for(BOARD)
+
+def needs_toolchain(board: str = BOARD) -> None:
+    """Skip with the reason, rather than failing, where nothing can build.
+
+    Takes a board because the two rows need different things installed and
+    would otherwise skip for each other's reasons: the Uno needs a compiler and
+    a framework, and a XIAO needs those plus two CMSIS packages and a
+    board-support tree that PlatformIO does not supply at all. Each resolver
+    raises `ToolchainMissing` naming its own fix, so the message a reader gets
+    is the command they have to run.
+    """
+    recipe = compiler.recipe_for(board)
     try:
         compiler.toolchain_root(recipe)
         compiler.framework_root(recipe)
+        compiler.variant_root(recipe)
+        compiler.include_roots(recipe)
+        compiler.linker_script(recipe)
     except compiler.ToolchainMissing as exc:
         pytest.skip(str(exc))
 
@@ -62,12 +100,29 @@ def test_a_board_resolves_to_the_recipe_for_its_chip():
     assert compiler.recipe_for(BOARD).toolchain == "toolchain-atmelavr"
 
 
+def test_both_xiao_samd21_boards_resolve_to_one_recipe():
+    """**The reason `recipe_for` keys on the chip.**
+
+    The DIP and the SMD are two catalogue entries, one part, and one build.
+    Keying on the board name would need a row each and they would drift.
+    """
+    assert (compiler.recipe_for("XIAO-SAMD21-DIP")
+            is compiler.recipe_for("XIAO-SAMD21-SMD"))
+
+
 def test_a_board_with_no_recipe_is_refused_and_names_its_chip():
     """"Unknown board" is not actionable; "carries an ESP32-C3 and nothing
-    here knows how to build for one" is."""
+    here knows how to build for one" is.
+
+    Still true with two rows, and the refusal now lists both chips it *can*
+    build for -- which is the half that turns a "no" into a next step.
+    """
     with pytest.raises(compiler.UnknownBoard) as caught:
         compiler.recipe_for("XIAO-ESP32-C3-DIP")
     assert "ESP32-C3" in str(caught.value)
+    assert "SAMD21" in str(caught.value), (
+        "the refusal should say what it can build for, not only what it cannot"
+    )
 
 
 def test_a_board_that_is_not_in_the_catalogue_is_refused():
@@ -79,6 +134,68 @@ def test_the_recipe_carries_the_base_address_the_loader_needs():
     """A raw `.bin` has no address of its own, so somebody must supply one.
     That somebody is the recipe and not the request."""
     assert compiler.recipe_for(BOARD).base == 0
+
+
+def test_the_base_address_is_the_board_modules_and_not_a_second_copy():
+    """**A flash origin is a fact about the silicon, and one place holds it.**
+
+    `webui/boards/samd21.py` cites `samd21g18a.h:531-538` for `FLASH_ADDR`
+    being zero -- which is the whole reason that file exists, since the RP2040
+    over the same core puts flash at 0x10000000. A literal here would be a
+    second copy with no citation, right today and unattached to the thing that
+    would change it.
+
+    Identity, not equality: both are zero, so `== 0` would pass against a
+    literal and prove nothing.
+    """
+    assert compiler.recipe_for(SAMD_BOARD).base is samd21.FLASH
+
+
+def test_the_arm_recipe_carries_a_linker_script_and_the_avr_one_does_not():
+    """`avr-gcc` places flash from `-mmcu` alone; an Arm toolchain cannot.
+
+    The emptiness on the AVR row is the assertion worth making: a field that
+    was required everywhere would have been a worse design than one that says
+    "this toolchain already knows".
+    """
+    assert compiler.recipe_for(BOARD).linker_script == ""
+    assert compiler.recipe_for(SAMD_BOARD).linker_script.endswith(".ld")
+
+
+def test_the_samd21_links_without_the_bootloader_the_vendor_assumes():
+    """**The trap, pinned by name.**
+
+    Seeed's `boards.txt:154` names `flash_with_bootloader.ld`, which is right
+    for a real XIAO: a UF2 bootloader owns the first 8 KB and a sketch links at
+    0x2000. There is no bootloader here, so an image built that way puts its
+    vector table where a Cortex-M0+ never looks -- and it links, and it loads,
+    and it executes erased flash.
+
+    `webui/boards/samd21.py` says the same thing from the other end, with
+    `VECTOR_TABLE_OFFSETS` of `(0,)` and a paragraph on why 0x2000 is not
+    offered.
+    """
+    script = compiler.recipe_for(SAMD_BOARD).linker_script
+    assert "without_bootloader" in script, script
+    assert samd21.VECTOR_TABLE_OFFSETS == (0,), (
+        "the board offers an entry offset this recipe does not link for"
+    )
+
+
+def test_the_samd21_variant_comes_from_seeed_and_not_from_the_framework():
+    """`framework-arduino-samd` ships *Arduino's* boards -- zero, mzero, the
+    MKRs -- and a XIAO is Seeed's.
+
+    Arduino's `arduino_zero` variant compiles for the same chip and puts
+    `LED_BUILTIN` on the same pin, which is exactly the coincidence that makes
+    a wrong variant look right until a second pin is used.
+    """
+    recipe = compiler.recipe_for(SAMD_BOARD)
+    assert recipe.variant_package == "seeed-samd"
+    assert recipe.variant == "variants/XIAO_m0"
+    assert compiler.recipe_for(BOARD).variant_package == "", (
+        "the Uno's variant is the framework's own and needs no second tree"
+    )
 
 
 def test_nothing_in_a_recipe_comes_from_a_request():
@@ -179,6 +296,92 @@ def test_the_compiled_sketch_blinks_at_the_period_it_asked_for():
     assert abs(gap - half_period) <= half_period // 1000, (
         f"a half-period of {gap} instructions, not {half_period}"
     )
+
+
+# --- the second board, which is OH-66 ---------------------------------------
+
+
+def test_a_sketch_builds_for_the_second_board_too():
+    """**OH-66's headline.** The same two strings in, a different chip's image
+    out, and nothing about the request said so."""
+    needs_toolchain(SAMD_BOARD)
+    built = compiler.build(SAMD_BOARD, SAMD_BLINK)
+    assert built.ok, built.diagnostics
+    # A Cortex-M0+ vector table opens with the initial stack pointer, which for
+    # this part is the top of its 32K SRAM. An image linked at the bootloader
+    # offset would open with erased flash instead, so this is the cheapest
+    # possible check that the right linker script was used.
+    stack = int.from_bytes(built.image[:4], "little")
+    assert stack == samd21.SRAM + samd21.SRAM_SIZE, f"0x{stack:08x}"
+
+
+def test_the_two_boards_do_not_produce_the_same_image():
+    """A table with two rows that both build for the Uno would pass every
+    other test in this file."""
+    needs_toolchain()
+    needs_toolchain(SAMD_BOARD)
+    uno = compiler.build(BOARD, BLINK)
+    xiao = compiler.build(SAMD_BOARD, SAMD_BLINK)
+    assert uno.ok and xiao.ok
+    assert uno.image[:2] == b"\x0c\x94", "no reset jmp; this is not an AVR image"
+    assert uno.image != xiao.image
+
+
+def test_the_second_boards_image_blinks_the_pin_its_variant_names():
+    """**OH-66's Done-when: the pin, the way the Uno's PB5 is checked above.**
+
+    PA17, and this test never says so -- `samd21.LED_PIN` does, from Seeed's
+    variant table, and the sketch says `LED_BUILTIN`. If those two ever
+    disagree the pin stops moving, which is the only way a test can tell that a
+    variant is the wrong one.
+
+    A millisecond is 48,000 retired instructions here, derived rather than
+    fitted: `SysTick_Config(SystemCoreClock / 1000)` writes 47999 and the
+    period is one more than the reload. What the sketch adds is its own
+    `digitalWrite`, measured at 83 instructions, so the tolerance is a
+    hundredth and the measurement is well inside it.
+    """
+    needs_toolchain(SAMD_BOARD)
+    built = compiler.build(SAMD_BOARD, SAMD_BLINK)
+    assert built.ok, built.diagnostics
+
+    half_period = 48_000
+    out = samd21.group(samd21.PORTA) + samd21.PORT_OUT
+    led = 1 << samd21.LED_PIN
+    transitions: list[int] = []
+    last = 0
+    with api.load_firmware(SAMD_BOARD, built.image,
+                           base=compiler.recipe_for(SAMD_BOARD).base) as session:
+        for batch in range(half_period * 4 // 256):
+            for _ in range(256):
+                session.step()
+            now = session.cpu.read_word(out) & led
+            if now != last:
+                transitions.append(batch * 256)
+                last = now
+                if len(transitions) == 2:
+                    break
+        # The direction register, not only the value: a blink on a pin still
+        # set to input is a lie the value register alone cannot catch.
+        assert session.cpu.read_word(
+            samd21.group(samd21.PORTA) + samd21.PORT_DIR) & led
+
+    assert len(transitions) == 2, f"the pin changed state {len(transitions)} times"
+    gap = transitions[1] - transitions[0]
+    assert abs(gap - half_period) <= half_period // 100, (
+        f"a half-period of {gap} instructions, not {half_period}"
+    )
+
+
+def test_a_syntax_error_in_a_sketch_for_the_second_board_is_still_a_result():
+    """The refusal shape does not change with the chip, and it is worth
+    checking on the row that has three more ways to fail before a compiler
+    even starts."""
+    needs_toolchain(SAMD_BOARD)
+    built = compiler.build(SAMD_BOARD, "void setup(){ int broken = ; }\nvoid loop(){}")
+    assert not built.ok
+    assert "sketch.cpp:1" in built.diagnostics, built.diagnostics
+    assert built.image == b""
 
 
 def test_a_syntax_error_is_a_result_and_not_an_exception():
