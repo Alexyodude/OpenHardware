@@ -247,6 +247,34 @@ F_CPU_HZ = 16_000_000
 #: test needs a pin and an arbitrary one would prove less.
 LED_PIN = 5
 
+#: Header label -> the bit of PORTB behind it.
+#:
+#: **From Arduino's own tables**, not from a pinout picture:
+#: `framework-arduino-avr/variants/standard/pins_arduino.h:150-194`, where
+#: `digital_pin_to_port_PGM` gives `PB` for pins 8 to 13 and
+#: `digital_pin_to_bit_mask_PGM` gives `_BV(0)` to `_BV(5)` for the same six.
+#: The labels are the ones `webui/boards/Arduino Uno.json` carries -- bare
+#: numbers, because that is what the silkscreen says.
+#:
+#: **Six of thirty-two pads, and the other twenty-six are the point.** Pins 0
+#: to 7 are PORTD and A0 to A5 are PORTC, and this board models neither: the
+#: module docstring's rule is that a register arrives when an image reaches it,
+#: and no image here has. So `pin_states` cannot answer for them and
+#: `webui.api.pin_view` reports them `unknown` -- a sentence about this model,
+#: where `low` would be a sentence about the program.
+#:
+#: `13` is in here and is the one that matters most: it is `LED_BUILTIN`, it is
+#: PB5, and it is what a stock Blink drives.
+HEADER: dict[str, int] = {"8": 0, "9": 1, "10": 2, "11": 3, "12": 4, "13": 5}
+
+#: The same table read the other way: label -> the pin as the datasheet spells
+#: it, `13` -> `PB5`. Derived from `HEADER` so the two cannot disagree.
+#:
+#: One digit and not two, unlike the SAMD21's: `iom328p.h` writes `PB5`, and
+#: matching each part's own spelling matters more than matching each other.
+PIN_NAMES: dict[str, str] = {label: f"PB{bit}" for label, bit in HEADER.items()}
+
+
 
 class Cpu(typing.Protocol):
     """What this module needs of a core, which is two calls.
@@ -309,6 +337,31 @@ def uart0_output(cpu: Cpu) -> bytes:
     """
     return cpu.usart_output()
 
+
+def pin_states(cpu: Cpu) -> dict[str, str]:
+    """What every header pin this board knows about is doing, right now.
+
+    The same contract `webui/boards/samd21.py` documents at length, and found
+    the same way -- `getattr(description, "pin_states", None)`. Two boards over
+    two different cores export one name, which is what keeps `webui/api.py`
+    free of chip knowledge.
+
+    **DDRB decides before PORTB does.** On an AVR the same bit of `PORTB` means
+    "drive high" for an output and "enable the pull-up" for an input, so
+    reading it without `DDRB` reports a pull-up as a driven high -- a
+    plausible, wrong answer of exactly the kind this repository ranks below a
+    loud one. `input` is as far as this can honestly go.
+    """
+    direction = cpu.read_data(DDRB)
+    value = cpu.read_data(PORTB)
+    states: dict[str, str] = {}
+    for label, bit in HEADER.items():
+        mask = 1 << bit
+        if not direction & mask:
+            states[label] = "input"
+        else:
+            states[label] = "high" if value & mask else "low"
+    return states
 
 def baud_rate(cpu: Cpu) -> int:
     """The baud rate the program asked for, from UBRR0 and U2X0.

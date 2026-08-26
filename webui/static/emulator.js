@@ -483,6 +483,7 @@ async function loadBoardImage() {
   // rather than as a stale pane.
   previousBoard = null;
   renderBoardState(await api("/api/board/state"));
+  window.boardPins?.reload();
   const notes = boardImage.notes.length ? ` — ${boardImage.notes.join("; ")}` : "";
   boardSays(
     `${file.name}: ${boardImage.bytes} bytes of ${boardImage.format} on ` +
@@ -575,6 +576,7 @@ async function loadArtefact() {
   $("board-console-note").textContent = "nothing transmitted yet";
   previousBoard = null;
   renderBoardState(await api("/api/board/state"));
+  window.boardPins?.reload();
   boardSays(
     `${chosen ? chosen.name : path}: ${boardImage.bytes} bytes of ` +
     `${boardImage.format} on ${boardImage.board}, a ${boardImage.chip} on the ` +
@@ -736,6 +738,7 @@ async function buildSketch() {
     $("board-console-note").textContent = "nothing transmitted yet";
     previousBoard = null;
     renderBoardState(await api("/api/board/state"));
+  window.boardPins?.reload();
     $("sketch-report").textContent =
       `${built.bytes} bytes on ${boardImage.board}, entered at ` +
       `0x${boardImage.entry.toString(16).padStart(8, "0")}. Press Run.`;
@@ -900,6 +903,10 @@ function renderBoardState(state) {
   // from the same entry so an AVR's word-counting PC prints as four digits.
   const pc = state.registers.find((register) => register.name === "pc");
   $("where").textContent = hex(pc.value, pc.width / 4);
+  // Optional by design. `board3d-panel.js` is a module loaded separately, so a
+  // page where it failed -- no WebGL, a vendored three.js that would not parse
+  // -- behaves exactly as this file did before the pin view existed.
+  window.boardPins?.levels(state.pins);
   previousBoard = Object.fromEntries(
     state.registers.map((register) => [register.name, register.value]),
   );
@@ -977,6 +984,11 @@ async function loadSelected() {
 function applyTheme(next) {
   document.documentElement.dataset.theme = next;
   try { localStorage.setItem("oh-theme", next); } catch { /* private mode */ }
+  // A WebGL scene is not styled by CSS, so it has to be told. Every colour it
+  // uses is read from this stylesheet's custom properties, which is what keeps
+  // the 3D board and the panes around it the same two themes rather than
+  // three.
+  window.boardPins?.theme();
 }
 
 function startingTheme() {

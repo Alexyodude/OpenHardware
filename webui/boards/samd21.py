@@ -172,6 +172,66 @@ PORT_PINCFG_WORDS = 8
 
 #: Group index of PORTA, the only group either XIAO SAMD21 wires an LED to.
 PORTA = 0
+#: And of PORTB, which two of the header pins are on. Named rather than
+#: written as `1` at the two places that need it, because `group(1)` says
+#: nothing and `group(PORTB)` says which half of the header it is.
+PORTB = 1
+
+#: The XIAO SAMD21's user LED, from Seeed's own pin table:
+#: `third_party/bsp/seeed-samd/variants/XIAO_m0/variant.h:67-69` defines
+#: `LED_BUILTIN` as pin 13, and entry 13 of `g_APinDescription` in
+#: `variant.cpp` is `{ PORTA, 17 }`. So the LED is PA17 -- a fact about the
+#: board rather than the chip, kept here because the blink test needs a pin
+#: and an arbitrary one would prove less.
+LED_PIN = 17
+
+#: Header label -> the pin behind it, as `(PORT group, bit)`.
+#:
+#: **From Seeed's own `g_APinDescription`**, not from a pinout picture:
+#: `third_party/bsp/seeed-samd/variants/XIAO_m0/variant.cpp`, whose entries 0
+#: to 10 are the eleven header pins in silkscreen order and whose entry 13 is
+#: the user LED. The labels are the ones
+#: `webui/boards/XIAO-SAMD21-DIP.json` carries, so a pad and its pin meet on a
+#: string both files got from the vendor rather than on one this file invented.
+#:
+#: Independently corroborated: `python tools/import_pindefs.py XIAO-SAMD21-DIP`
+#: resolves the same eleven from Zephyr's `seeed_xiao_connector.dtsi` *and*
+#: this variant, and reports zero disputed.
+#:
+#: **`LED` is here and is not a pad.** The XIAO's user LED is on the board
+#: rather than on the header, so it has no coordinate in the pad map and
+#: `webui.api.pin_view` reports it as a pin with no position. That is the pin
+#: `LED_BUILTIN` names and the one a stock Blink drives, so leaving it out
+#: would mean the commonest sketch there is moved nothing a person could see.
+HEADER: dict[str, tuple[int, int]] = {
+    "D0": (PORTA, 2),
+    "D1": (PORTA, 4),
+    "D2": (PORTA, 10),
+    "D3": (PORTA, 11),
+    "D4": (PORTA, 8),    # SDA
+    "D5": (PORTA, 9),    # SCL
+    "D6": (PORTB, 8),    # TX
+    "D7": (PORTB, 9),    # RX
+    "D8": (PORTA, 7),    # SCK
+    "D9": (PORTA, 5),    # MISO
+    "D10": (PORTA, 6),   # MOSI
+    "LED": (PORTA, LED_PIN),
+}
+
+#: The same table read the other way: label -> the pin as the datasheet spells
+#: it, `D6` -> `PB08`.
+#:
+#: **Derived from `HEADER` rather than typed out**, so the two cannot disagree.
+#: A second hand-written table is a second thing to get right, and this one
+#: would be checked by nobody -- it is a name, so a wrong one is wrong in a
+#: tooltip rather than in a register read.
+#:
+#: The two-digit form is Microchip's own: `samd21g18a.h` spells the pin
+#: `PIN_PA17` and `tools/import_pindefs.py` reports `PA17`, so a reader can
+#: paste it into either.
+PIN_NAMES: dict[str, str] = {
+    label: f"P{'AB'[index]}{bit:02d}" for label, (index, bit) in HEADER.items()
+}
 
 # --- the clock tree ---------------------------------------------------------
 #
@@ -291,14 +351,6 @@ DAC_INTENCLR = 0x04
 #: rather than `install_clocks` mapping it.
 CALIBRATION = 0x00806020
 CALIBRATION_SIZE = 8
-
-#: The XIAO SAMD21's user LED, from Seeed's own pin table:
-#: `third_party/bsp/seeed-samd/variants/XIAO_m0/variant.h:67-69` defines
-#: `LED_BUILTIN` as pin 13, and entry 13 of `g_APinDescription` in
-#: `variant.cpp` is `{ PORTA, 17 }`. So the LED is PA17 -- a fact about the
-#: board rather than the chip, kept here because the blink test needs a pin
-#: and an arbitrary one would prove less.
-LED_PIN = 17
 
 
 class Cpu(typing.Protocol):
@@ -489,6 +541,38 @@ def install_analog(cpu: Cpu) -> None:
 
     cpu.map_register(DAC + DAC_CTRLA, 0)
     cpu.map_register(DAC + DAC_INTENCLR, 0)
+
+
+def pin_states(cpu: Cpu) -> dict[str, str]:
+    """What every header pin this board knows about is doing, right now.
+
+    `"high"`, `"low"` or `"input"`, keyed by the label on the silkscreen.
+    `webui.api.pin_view` is the caller, and it finds this by `getattr` exactly
+    as it finds `uart0_output` -- so a board with no such function is reported
+    as a board that cannot answer, rather than as a board whose pins are low.
+
+    **A label absent from `HEADER` is absent from the result**, and that is the
+    contract rather than an accident. The three power pads a XIAO carries --
+    `3V3_OUT`, `GND`, `VBUS` -- have no MCU pin behind them and never will, and
+    returning `"low"` for `GND` would be a sentence about the program when the
+    truth is a sentence about the board.
+
+    **`DIR` decides before `OUT` does.** A pin configured as an input has no
+    driven level at all, and reading `OUT` for it would report the value the
+    output driver *would* use if it were enabled -- which is exactly the
+    plausible-but-wrong answer `install_port` refuses for `IN`. A pull-up makes
+    an input read high on real silicon and this model has no pulls, so `input`
+    is as far as it can honestly go.
+    """
+    states: dict[str, str] = {}
+    for label, (index, bit) in HEADER.items():
+        base = group(index)
+        mask = 1 << bit
+        if not cpu.read_word(base + PORT_DIR) & mask:
+            states[label] = "input"
+        else:
+            states[label] = "high" if cpu.read_word(base + PORT_OUT) & mask else "low"
+    return states
 
 
 def install(cpu: Cpu) -> None:

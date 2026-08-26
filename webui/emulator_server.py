@@ -554,6 +554,13 @@ def handle_board_api(boards: BoardSlot, route: str,
         return {"steps": result.steps, "status": result.status,
                 "detail": result.detail}
 
+    if route == "/api/board/pins":
+        # **Fetched once per load, not per poll.** Where a pad sits is a
+        # property of the board and the levels ride `/api/board/state`, which
+        # the page already asks for many times a second. See `api.pin_levels`.
+        session = boards.require()
+        return api.pin_view(session.runtime, session.cpu, session.board)
+
     if route == "/api/board/state":
         at = query.get("at")
         # `words=` is comma-separated because a peripheral view watches a

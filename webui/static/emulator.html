@@ -35,6 +35,18 @@
      will one day spend ten minutes on. -->
 <!-- `OH` and not `86`. The tab icon named one of the two machines on this
      page, and it was the one a person is less likely to be driving. -->
+<!-- three.js is VENDORED, not fetched: webui/static/vendor holds it and
+     LICENSE beside it. This page had no importmap until the pin view needed
+     one; `index.html` has carried the same two entries since the bridge page
+     was written, and they are spelled identically on purpose. -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three.module.js",
+    "three/addons/controls/OrbitControls.js": "/vendor/OrbitControls.js"
+  }
+}
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%273%27 fill=%27%23111%27/%3E%3Ctext x=%278%27 y=%2712%27 font-size=%279%27 font-family=%27monospace%27 text-anchor=%27middle%27 fill=%27%23f2a63b%27%3EOH%3C/text%3E%3C/svg%3E" />
 </head>
 <body data-view="emulator">
@@ -144,6 +156,25 @@
       <p id="board-report">Nothing loaded yet.</p>
     </div>
     <p class="detail" id="board-error"></p>
+    <h2 style="border-top:1px solid var(--line)">Pins
+      <span class="note" id="board-pins-note">GET /api/board/pins</span></h2>
+    <div class="prose">
+      <p id="board-pins-caption"><strong>A footprint, extruded — not a model of
+        the board.</strong> Every pad position and the outline are the vendor's
+        own KiCad footprint, exact to three decimals. The thickness is a stated
+        1.6&nbsp;mm and there are no components on it, because no board here
+        publishes a 3D model. Drag to turn it.</p>
+    </div>
+    <div class="pins">
+      <div class="pins-stage">
+        <canvas id="board-pins-canvas" aria-label="The board, in three dimensions"></canvas>
+        <p class="detail" id="board-pins-fallback" hidden></p>
+      </div>
+      <table class="pins-table">
+        <thead><tr><th>Pad</th><th>Pin</th><th>State</th></tr></thead>
+        <tbody id="board-pins-rows"></tbody>
+      </table>
+    </div>
     <h2 style="border-top:1px solid var(--line)">Console
       <span class="note" id="board-console-note">UART0, as the board transmitted it</span></h2>
     <pre class="hexdump" id="board-console"></pre>
@@ -503,5 +534,11 @@
 </footer>
 
 <script src="/emulator.js"></script>
+<!-- A module, and deliberately after the classic script above: `emulator.js`
+     defines `window.boardPins` for this to attach to, and a module is deferred
+     so it runs after the document is parsed either way. A page whose WebGL
+     context fails still has every other pane, which is why the 3D view is the
+     one thing here loaded separately. -->
+<script type="module" src="/board3d-panel.js"></script>
 </body>
 </html>

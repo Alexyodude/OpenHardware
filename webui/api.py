@@ -22,7 +22,7 @@ import re
 import types
 import typing
 
-from webui import firmware, targets
+from webui import firmware, pinmap, targets
 from webui.boards import catalogue, contract
 from webui.parts.schema import UNCONNECTED, PartSchema, SchemaError
 from webui.rcontrol import RControlClient, RControlCommandError, Response
@@ -760,6 +760,120 @@ def uart_view(runtime: Runtime, cpu: Core) -> dict[str, object]:
     }
 
 
+#: What a pad can be doing.
+#:
+#: **Three of these are claims about the program and one is a claim about this
+#: repository**, and keeping them in one vocabulary is the whole point of the
+#: distinction. `high`, `low` and `input` say what the firmware has done to a
+#: pin. `unknown` says nobody here can answer -- because the board module has
+#: no entry for that label, or because the label is a power pad with no MCU pin
+#: behind it at all.
+#:
+#: Reporting `unknown` as `low` would be the failure this project ranks worst:
+#: a picture of a board with every pad dark, indistinguishable from a program
+#: that has driven nothing, and no way for a reader to tell which they are
+#: looking at.
+PIN_STATES = ("high", "low", "input", "unknown")
+
+#: Arduino's silkscreen marks a PWM-capable pin with a leading tilde -- `~11`
+#: is pin 11. The pad map carries the silkscreen's spelling because that is
+#: what somebody reads off the board; a board module carries the pin's name.
+#: One character, stripped in one place.
+PWM_MARK = "~"
+
+
+def pin_levels(runtime: Runtime, cpu: Core) -> dict[str, str] | None:
+    """Just the states, keyed by pin name. `None` when the board maps no pins.
+
+    **Split from `pin_view` because the two things change at different rates.**
+    Where a pad is never changes; what it is doing changes every time the
+    program runs an instruction. So the geometry is fetched once when a board
+    is loaded and this rides the state poll, which happens many times a second
+    -- sending thirty-two coordinates twenty times a second to redraw the same
+    board would be the whole difference in the payload.
+    """
+    reader = getattr(runtime.description, "pin_states", None)
+    return None if reader is None else reader(cpu)
+
+
+def pin_view(runtime: Runtime, cpu: Core, board: str) -> dict[str, object]:
+    """Where a board's pads are, and what each one is doing.
+
+    Two sources joined on the pad label, and neither of them is this function's
+    own opinion. **Position** comes from `webui/pinmap.py`, which reads
+    `webui/boards/<board>.json` -- coordinates the vendor's own KiCad footprint
+    produced, exact to three decimals. **State** comes from the board module's
+    `pin_states`, found by `getattr` exactly as `uart_view` finds
+    `uart0_output`.
+
+    **A board with no `pin_states` says so**, and for the same reason a board
+    with no UART does: pads reported at their real positions with no state
+    would be a picture that looks like a board doing nothing.
+
+    **A pin with no pad is still reported.** The XIAO's user LED is on the
+    board rather than on the header, so `LED` has a state and no coordinate --
+    and it is the pin a stock Blink drives. Dropping it because it has nowhere
+    to go on the picture would hide the one thing most sketches move; the
+    caller gets `x: None` and puts it somewhere sensible.
+    """
+    live = pin_levels(runtime, cpu)
+    if live is None:
+        return {
+            "present": False,
+            "note": (
+                f"{runtime.description.__name__} maps no header pins, so "
+                f"nothing on a {runtime.chip} can be shown driving one. This "
+                f"is a gap in the board description, not a program that has "
+                f"driven nothing."
+            ),
+        }
+
+    # Which MCU pin each label reaches -- `D6` -> `PB08`. **The connection the
+    # view is named for**, and the board module derives it from the same table
+    # it reads levels through, so a label cannot have one pin here and another
+    # there. Absent for a board that does not publish it, which is a missing
+    # caption rather than a missing state.
+    names: dict[str, str] = getattr(runtime.description, "PIN_NAMES", {})
+
+    layout = pinmap.load(board)
+    pads: list[dict[str, object]] = []
+    placed: set[str] = set()
+    if layout is not None:
+        for pad in layout.pads:
+            name = pad.label.lstrip(PWM_MARK)
+            placed.add(name)
+            pads.append({
+                "label": pad.label,
+                "pin": name,
+                "chip_pin": names.get(name),
+                "x": pad.x,
+                "y": pad.y,
+                "group": pad.group,
+                "state": live.get(name, "unknown"),
+            })
+    # Pins the board can answer for that the pad map has nowhere to put. Listed
+    # after the placed ones so a caller can render them in order and stop.
+    for name in live:
+        if name not in placed:
+            pads.append({
+                "label": name, "pin": name, "chip_pin": names.get(name),
+                "x": None, "y": None,
+                "group": "on-board", "state": live[name],
+            })
+
+    return {
+        "present": True,
+        "board": board,
+        "width": layout.width if layout is not None else None,
+        "height": layout.height if layout is not None else None,
+        # **Named rather than left for the caller to count.** "17 of 32 pads
+        # cannot be answered for" is the sentence a reader needs in order to
+        # know whether they are looking at a quiet program or a thin model.
+        "unknown": sum(1 for pad in pads if pad["state"] == "unknown"),
+        "pads": pads,
+    }
+
+
 #: How many instructions a listing carries. Enough to fill the pane without
 #: making every poll disassemble a screenful nobody scrolls to.
 LISTING_LENGTH = 24
@@ -1050,6 +1164,10 @@ class BoardSession:
             },
             "words": watched,
             "uart": uart_view(self.runtime, self.cpu),
+            # Levels only, and `null` for a board that maps no pins. The
+            # geometry comes once from `/api/board/pins`; see `pin_levels` for
+            # why the two are not one call.
+            "pins": pin_levels(self.runtime, self.cpu),
             # Around the program counter rather than the load address: what a
             # debugger shows is where execution *is*, and after a run that is
             # nowhere near where the image started.
