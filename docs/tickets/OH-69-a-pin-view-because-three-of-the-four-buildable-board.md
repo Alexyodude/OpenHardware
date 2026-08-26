@@ -1,14 +1,10 @@
 ---
 id: OH-69
 title: A pin view, because two of the three buildable boards cannot print
-status: open
+status: duplicate
 priority: P1
 created: '2026-08-26'
-touches:
-- webui/static/emulator.html
-- webui/static/emulator.js
-- webui/static/emulator.css
-- tests/webui/test_pin_view.py
+duplicate-of: OH-30
 ---
 
 THE BROWSER FOUND THIS, on 2026-08-26, while closing OH-66. A sketch was built and run on a XIAO SAMD21 and there is nowhere on the page a pin appears. The board panel has a report line, an error line and a UART console, and that is all -- so on a board whose Serial is USB CDC the only feedback a person gets is 'XIAO-SAMD21-DIP: 200,000 instructions. pc 0x00000386'.
@@ -24,3 +20,5 @@ WHAT WOULD MAKE THIS WRONG RATHER THAN INCOMPLETE. A pin view that showed a pin 
 NOT A 3D VIEW AND NOT A PAD MAP. OH-30 is blocked on source material -- no board here has a mesh -- and this needs none: a list of pin names with a state each is enough to watch a blink, and it is what the Arduino IDE's own serial plotter is not.
 
 Done when a sketch built in the browser for a XIAO SAMD21 makes something on the page change twice, when a pin the board does not model reads as unknown rather than as low, and when a named test drives it in a real browser.
+
+Folded into OH-30.
