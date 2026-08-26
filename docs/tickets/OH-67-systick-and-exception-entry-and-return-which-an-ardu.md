@@ -2,7 +2,7 @@
 id: OH-67
 title: SysTick and exception entry and return, which an Arduino core needs to reach
   setup
-status: open
+status: done
 priority: P1
 created: '2026-08-26'
 touches:
@@ -36,3 +36,19 @@ WHAT IS DELIBERATELY NOT IN SCOPE. No NVIC, no external interrupts, no PendSV, n
 CLAIM NOTE. core/cortexm0/exec.cc and core/cortexm0/cpu.h were claimed by OH-64, which is blocked on an oracle it does not have and cannot use them meanwhile. Narrowed off both on 2026-08-26, with a note in that ticket saying it re-claims them when its oracle exists.
 
 Done when a compiled image enables SysTick with TICKINT set, takes the exception at the wrap, runs a handler that increments a counter in memory, returns through EXC_RETURN with r0 to r3, r12, LR, PC and xPSR restored exactly, and does it repeatedly at a steady period -- and when the entry frame is checked word by word against rp2040js rather than against this repository's own reading.
+
+**Note 2026-08-26:** CLOSED 2026-08-26. SysTick and exception entry and return landed in 20cf75e, with the System Control Space in the core rather than in a board -- 0xE000E000 names no chip, it is Armv6-M itself.
+
+WHAT THE ORACLE SETTLED, and it is the half a reading would have got wrong. tools/gen_armv6m_exception.mjs asks rp2040js for the entry frame directly, and one test re-derives it wherever a built rp2040js exists so the copies in the test file cannot drift. The alignment case is the one that pays: SP is forced down to an eight-byte boundary and bit 9 of the stacked xPSR remembers whether it had to move, so a model built from an aligned SP alone passes every test that fires ONE exception and corrupts a program that runs for a while.
+
+ONE HARNESS DIFFERENCE, recorded because it cost a debugging round. rp2040js takes the exception at the top of executeInstruction and then executes an instruction in the SAME call; this core makes entry its own step. So the oracle's entry cases use a handler of b-dot rather than bx-lr, because with bx-lr it enters and returns before anything can look. That is step accounting, not the machine.
+
+THE PERIOD IS RVR PLUS ONE, not RVR. Zero is a value the counter is seen at for one tick before the reload, which is exactly why SysTick_Config(n) writes n-1. The first version of the test asserted RVR and went red, which is how the comment in cpu.cc came to say the right thing.
+
+CPS CAME WITH IT and that was not scope creep. Exception delivery without PRIMASK is WRONG rather than incomplete -- a critical section this core kept interrupting is a corrupted program with no message -- and five cpsid/cpsie are in the measured SAMD21 image.
+
+MEASURED AFTER: the same Arduino-core sketch that stalled in delay() now reaches loop() and blinks PA17 at a steady 48,083-instruction period, which is delay(1) at a SysTick reload of 47999. It demands 27 chip registers and no architectural ones, which is precisely OH-68's list.
+
+FOUR MUTATIONS CONFIRMED RED before this was called done: dropping the frame realignment, swapping two frame slots, letting SysTick pre-empt its own handler, and ignoring PRIMASK.
+
+NOT DONE, deliberately: no NVIC, no external interrupts, no PendSV, no SVCall, no process stack. SVC still answers Unimplemented, and exec.cc now gives the narrower reason -- its vector belongs to an operating system this project does not run.
