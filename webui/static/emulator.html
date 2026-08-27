@@ -557,5 +557,20 @@
      context fails still has every other pane, which is why the 3D view is the
      one thing here loaded separately. -->
 <script type="module" src="/board3d-panel.js"></script>
+<!-- The run loop, across the same boundary and for the same reason.
+     `clock.js` is an ES module because that is what lets
+     `tests/webui/test_clock.py` run the real file under node against a fake
+     board -- and `emulator.js` above is a classic script, which cannot
+     `import`. So the class is published on `window` exactly as `boardPins` is,
+     and `runLoadedBoard` reads it lazily, which is what makes the order these
+     two scripts run in stop mattering.
+
+     Four lines here rather than a fourth file: a bridge whose whole content is
+     one assignment is easier to read beside the tags it bridges than in a
+     module of its own. -->
+<script type="module">
+  import { Clock, TICK_STEPS } from "/clock.js";
+  window.BoardClock = { Clock, TICK_STEPS };
+</script>
 </body>
 </html>

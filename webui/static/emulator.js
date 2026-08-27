@@ -409,14 +409,11 @@ function boardStatus(board) {
 // offered or disabled on that alone -- the same rule the target selector in
 // the toolbar follows, and for the same reason.
 
-/** How far Run steps. Instant at this size, and enough for the UART sample to
- *  reach the end of its string. Shown in the report rather than hidden, since
- *  a program that has not finished has not finished for a reason.
- *
- *  Pressing Run again continues from where it stopped, and the console keeps
- *  growing, because /api/board/state reports everything transmitted since the
- *  image was loaded rather than what is new since the last poll. */
-const BOARD_STEPS = 200000;
+// How far Run steps used to live here, as `BOARD_STEPS = 200000`, because Run
+// was one burst of that size and then a stop. It is `TICK_STEPS` in
+// `webui/static/clock.js` now -- the same number, moved to the file that
+// issues it, where a test can check it against the ceiling the server will
+// actually accept.
 
 /** The last successful load, or null. Enables Run and names what is on. */
 let boardImage = null;
@@ -456,6 +453,11 @@ async function loadBoardImage() {
     boardSays("Nothing loaded yet.", "Choose a compiled image first.");
     return;
   }
+
+  // Before anything is read or sent. A clock still running would land one more
+  // tick on the image about to be displaced, and the report would then describe
+  // two different programs added together.
+  await stopBoardClock();
 
   const request = { board, image: await fileAsBase64(file) };
   const base = $("board-base").value.trim();
@@ -568,6 +570,7 @@ async function loadArtefact() {
   }
 
   running = false;
+  await stopBoardClock();
   boardImage = null;
   $("board-go").disabled = true;
   boardImage = await api("/api/board/load-artefact", request);
@@ -716,6 +719,7 @@ async function buildSketch() {
   }
 
   running = false;
+  await stopBoardClock();
   // Disabled for the whole round trip. A build takes a second or two, and two
   // compilers racing for one temporary directory is the failure a second press
   // would buy.
@@ -755,36 +759,123 @@ async function buildSketch() {
   }
 }
 
+/** The board's clock, made on the first Run, and the `start()` still in
+ *  flight.
+ *
+ *  The promise is kept as well as the clock because a reload has to wait for
+ *  the tick already issued -- see `stopBoardClock`. */
+let boardClock = null;
+let boardRunning = null;
+
+/** One line about a run: how far it has gone, how fast, and where it is now.
+ *
+ *  **The rate is not a garnish.** A `delay(500)` is emulated to the cycle --
+ *  8,000,000 instructions on a 16 MHz Uno and 24,000,000 on a 48 MHz SAMD21,
+ *  both measured 2026-08-27 -- but the wall clock runs 5.4x and 29x slower
+ *  than the real chip, so those are a 3-second and a 15-second half period. A
+ *  blink that slow, with nothing on the page about it, reads as a broken
+ *  sketch. Saying the rate is what turns "it is stuck" into "it is slow".
+ *
+ *  Instructions per second and **not** a fraction of real time, because only
+ *  the ATmega328P records a nominal clock (`F_CPU_HZ`, and only to compute a
+ *  baud divisor). "1/29 of a real SAMD21" would mean inventing the 48 MHz.
+ *
+ *  `$("where")` was set by `renderBoardState`, from the machine's own pc
+ *  register and at that register's width. Read back rather than recomputed:
+ *  this line indexed the register array at position 15 and so rendered
+ *  `pc 0x[object Object]` the moment the wire carried named registers -- a
+ *  second place that had to know the register file's shape and did not need to. */
+function runLine(report) {
+  const fast = report.rate === null
+    ? ""
+    : `, ${Math.round(report.rate).toLocaleString()}/s`;
+  const stopped = report.status === "stopped"
+    ? ` and stopped: ${report.detail}`
+    : "";
+  return `${boardImage.board}: ${report.steps.toLocaleString()} instructions` +
+         `${fast}${stopped}. pc 0x${$("where").textContent}`;
+}
+
+/** Run is a toggle, and this is the half of it that shows which way it is. */
+function showBoardRunning(on) {
+  $("board-go").textContent = on ? "Stop" : "Run";
+}
+
+/** Stop the clock and wait for the tick already in flight to land.
+ *
+ *  **Awaited rather than merely asked**, because every caller is about to
+ *  replace the image on the board. `stop()` takes effect at the END of the
+ *  tick in flight, so a caller that did not wait would let one more
+ *  200,000-instruction request through -- and the page would then say "entered
+ *  at 0x00000000" beside a board that had already run past it. */
+async function stopBoardClock() {
+  if (!boardClock?.running) return;
+  boardClock.stop();
+  // A rejection here belongs to whoever pressed Run, and the click handler
+  // that started it has already reported it. Observing it a second time would
+  // put one failure on the page twice.
+  await boardRunning?.catch(() => {});
+}
+
+/** Press Run and the board keeps going; press it again and it stops.
+ *
+ *  **The loop is in the page on purpose**, and this repository decided that
+ *  before the boards existed: `runContinuously` above drives the i8086 the
+ *  same way, because one long request "would hold the connection open for as
+ *  long as it ran, and there would be no moment at which the Stop button could
+ *  be noticed." Measurement agrees -- a page-driven loop reaches 97.7% of what
+ *  the core manages in-process, so a thread behind the server would buy
+ *  nothing and would outlive the tab that started it. `webui/static/clock.js`
+ *  has the numbers.
+ *
+ *  `window.BoardClock` rather than an `import` because this file is a classic
+ *  script; `emulator.html` says why beside the module tag. Read lazily, exactly
+ *  as the pin panel's own hook is, so the order the two happen to run in cannot
+ *  matter. (Spelled that way round rather than naming the hook, because
+ *  `test_the_page_asks_the_renderer_for_nothing_it_cannot_do_without` scans
+ *  this whole file for that name and does not exempt comments -- so a mention
+ *  in prose reads to it as a call made without the optional chain.) */
 async function runLoadedBoard() {
   if (!boardImage) {
     boardSays("Nothing loaded yet.", "Load an image before running it.");
     return;
   }
-  let result;
-  try {
-    result = await api("/api/board/run", { steps: BOARD_STEPS });
-  } catch (error) {
-    boardSays($("board-report").textContent, error.message);
+  if (boardClock?.running) {
+    boardClock.stop();
+    return;
+  }
+  if (!window.BoardClock) {
+    boardSays($("board-report").textContent,
+              "clock.js did not load, so Run has nothing to keep the board " +
+              "going with.");
     return;
   }
 
-  const state = await api("/api/board/state");
-  renderBoardConsole(state.uart);
-  renderBoardState(state);
-  const stopped = result.status === "stopped"
-    ? ` and stopped: ${result.detail}`
-    : "";
-  // `$("where")` was set by `renderBoardState` just above, from the machine's
-  // own pc register and at that register's width. Read back rather than
-  // recomputed: this line indexed the register array at position 15 and so
-  // rendered `pc 0x[object Object]` the moment the wire carried named
-  // registers -- a second place that had to know the register file's shape
-  // and did not need to.
-  boardSays(
-    `${boardImage.board}: ${result.steps.toLocaleString()} instructions` +
-    `${stopped}. pc 0x${$("where").textContent}`,
-    result.status === "stopped" ? result.detail : "",
-  );
+  boardClock = new window.BoardClock.Clock({
+    run: (steps) => api("/api/board/run", { steps }),
+    now: () => performance.now(),
+    // Awaited by the clock, which is the back-pressure: the next tick does not
+    // start until this repaint has finished, so the picture cannot fall behind
+    // the board however slow the drawing gets.
+    onTick: async (report) => {
+      const state = await api("/api/board/state");
+      renderBoardConsole(state.uart);
+      renderBoardState(state);
+      boardSays(runLine(report),
+                report.status === "stopped" ? report.detail : "");
+    },
+  });
+
+  showBoardRunning(true);
+  boardRunning = boardClock.start();
+  try {
+    await boardRunning;
+  } finally {
+    // In `finally` so a dead server leaves a button that says Run rather than
+    // one that says Stop over a board doing nothing.
+    boardRunning = null;
+    showBoardRunning(false);
+  }
 }
 
 /** The previous board register snapshot, keyed by name, for the "changed"
