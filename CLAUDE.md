@@ -80,12 +80,23 @@ Optionally, once, for the vendors' own board models:
 ```bash
 pip install cadquery-ocp                   # a TOOL dependency, not a runtime one
 python tools/import_3d_model.py --all      # exits 3 and says SKIPPED without it
+python tools/compose_board_3d.py           # the boards nobody publishes a mesh for
 ```
 
 Nine of the twenty-six boards then draw Seeed's published mechanical model
-instead of an extruded footprint, and the pin panel says which of the two it is
-showing. The meshes are gitignored -- see `tools/import_3d_model.py` for the
-licence reason -- so a fresh checkout gets the footprint until this is run.
+instead of an extruded footprint, and the pin panel says which of the three
+things it is showing. The meshes are gitignored -- see
+`tools/import_3d_model.py` for the licence reason -- so a fresh checkout gets
+the footprint until this is run.
+
+**The second command is for a board whose vendor publishes no mesh at all**,
+and the Arduino Uno is the one that does. It stands KiCad's published
+component models on the outline and placements in Arduino's own EAGLE board
+file, so the board draws with its notch, its DIP-28 and its four headers
+without a height or a position being invented anywhere. It needs the vendor's
+`.brd`, which `python tools/get_board_sources.py arduino-uno` prints the URL
+for -- an `https-archive`, so it is downloaded by hand, as the Pico's is. A
+composed model says so in the panel rather than claiming to be the vendor's.
 
 Registers, flags, memory and disassembly, with step and run and six sample
 programs. It drives `core/i8086` directly and has nothing to do with
