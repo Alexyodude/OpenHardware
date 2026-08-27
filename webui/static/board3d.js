@@ -83,6 +83,43 @@ const PAD_LIFT = 0.01;
 //: one number serve a 196px XIAO and a 402px Uno.
 const CAMERA_PULL = 1.5;
 
+//: Which way the key light comes from, as a direction rather than a place.
+//:
+//: **It used to be a position, `(12, 24, 10)`, and that was a bug waiting for
+//: a shadow.** A `DirectionalLight` takes its direction from position minus
+//: target, so a fixed position is a fixed direction only while the target
+//: stays at the origin -- and the moment the light had to cast, the shadow
+//: camera had to be moved out to where it could see the whole board. The
+//: direction is what was meant; `frameScene` multiplies it by the scene's own
+//: radius. High, over the reader's left shoulder, which is where a bench lamp
+//: is and where the eye expects a shadow to fall away from.
+const KEY_FROM = { x: 0.42, y: 0.84, z: 0.35 };
+
+//: How hard the key light is, against the environment it shares the scene with.
+//:
+//: **Raised from 1.4 the day the key started casting, and the two are one
+//: change.** An image-based light comes from every direction at once, so it
+//: casts nothing and darkens no crevice; the only illumination in this scene
+//: that a shadow can subtract from is this one. At 1.4 the shadows arrived and
+//: were barely legible against a room that bright, which is a shadow map paid
+//: for and not spent.
+const KEY_STRENGTH = 2.4;
+
+//: The shadow map's resolution. 2,048 across a bounding sphere of about 45 mm
+//: is a texel every 44 um, which is finer than the 0.05 mm chord error every
+//: mesh in this scene was tessellated to -- so the shadow cannot resolve less
+//: than the geometry does, which is the right place to stop.
+const SHADOW_TEXELS = 2048;
+
+//: Millimetres a surface is pushed along its normal before it is tested
+//: against the shadow map, to stop it shadowing itself.
+//:
+//: **World units, which is why this is a number of millimetres and not a
+//: mystery.** 60 um is larger than one shadow texel across the Uno and smaller
+//: than a DIP-28's leg is thick, so a surface cannot shade itself and a shadow
+//: cannot come unstuck from the thing casting it.
+const SHADOW_BIAS_MM = 0.06;
+
 //: **The one number in this file that is a colour and is not from the
 //: palette, and it is not a palette colour.** It is illumination: white light
 //: leaves every material the colour the stylesheet said. Tinting it would
@@ -223,6 +260,7 @@ const view = {
   scene: null,
   camera: null,
   controls: null,
+  key: null,         // the one directional light, and the one that casts
   board: null,
   model: null,       // the vendor's mesh, once it has arrived
   slab: null,        // the PCB alone, for collision; see refreshColliders
@@ -294,18 +332,55 @@ function readPalette() {
 //: read as curved: the top of a pin catches the ceiling and its flank catches
 //: the wall, which is the whole reason to have an environment rather than
 //: another ambient light.
-const STUDIO = { ceiling: 1.0, wall: 0.42, floor: 0.12 };
+const STUDIO = { ceiling: 1.0, wall: 0.38, floor: 0.06 };
 
 //: How far the studio's walls sit from the origin. Only the ratios matter --
 //: an environment map records direction and not distance -- so this is just
 //: large enough to enclose the biggest board.
 const STUDIO_SIZE = 60;
 
-//: How far the prefilter blurs the room before storing it. Six flat planes
-//: meet at hard edges, and a mirror-smooth surface would reflect those edges
-//: as a visible box. `three.js` uses this same value for its own room, and it
-//: is small enough that the ceiling still reads as a ceiling.
-const STUDIO_BLUR = 0.04;
+//: How far the prefilter blurs the room before storing it.
+//:
+//: **This used to be 0.04, and the comment beside it predicted the bug it then
+//: had.** It said six flat planes meet at hard edges and a mirror-smooth
+//: surface would reflect those edges as a visible box -- and that is exactly
+//: what the Arduino Uno's two electrolytic cans did: each was cut by a
+//: dead-straight diagonal seam, cream on one side and black on the other,
+//: which is the corner between the ceiling and a wall seen in a polished
+//: aluminium lid. Measured at 4x magnification on 2026-08-28.
+//:
+//: The room is a gradient now rather than a box, so there is no corner left to
+//: reflect and this only has to take the edge off the softbox. Kept small for
+//: that reason: blurring further would dissolve the one highlight in the scene
+//: that is supposed to have a shape.
+const STUDIO_BLUR = 0.06;
+
+//: How many bands the graded sky is built from. A `SphereGeometry` at 24
+//: latitude segments puts a vertex every 7.5 degrees, which is finer than
+//: anything a prefiltered environment can resolve.
+const SKY_BANDS = { around: 32, up: 24 };
+
+//: The overhead softbox: how bright, how wide, and how high above the board.
+//:
+//: **Above 1.0 on purpose.** `PMREMGenerator` renders into a half-float
+//: target, so a value brighter than white survives prefiltering and is what
+//: gives a curved metal surface a highlight rather than a flat wash.
+//:
+//: **A DISC THAT FADES OUT AT ITS RIM, AND THE FADE IS THE WHOLE POINT.** The
+//: first version of this was a bright rectangle, and it reproduced exactly the
+//: fault it was written to remove: the Arduino Uno's electrolytic lids are
+//: domed metal, a dome sweeps its reflection across a wide arc of the sky, and
+//: any hard edge up there comes back as a dead-straight line drawn across the
+//: lid. The old six-plane room drew that line with the corner between its
+//: ceiling and its wall; a rectangular softbox drew the same line with its own
+//: border. Measured on 2026-08-28 at 4x magnification, three times: the box,
+//: the rectangle, and a sky with the gradient switched off -- the line
+//: survived all three, and the only thing they had in common was an edge.
+//:
+//: So there is no edge anywhere in this room now. `bright` is the centre and
+//: the rim falls to the ceiling's own luminance, so the disc has nothing to
+//: reflect but its own gradient.
+const SOFTBOX = { bright: 2.4, radius: 0.5, height: 0.62, segments: 48 };
 
 /**
  * A room, prefiltered into one texture, so that metal has something to reflect.
@@ -323,28 +398,62 @@ const STUDIO_BLUR = 0.04;
  */
 function studio(renderer) {
   const room = new THREE.Scene();
-  const face = (luminance, position, rotation) => {
-    const plane = new THREE.Mesh(
-      new THREE.PlaneGeometry(STUDIO_SIZE * 2, STUDIO_SIZE * 2),
-      new THREE.MeshBasicMaterial({
-        color: new THREE.Color().setScalar(luminance),
-        side: THREE.DoubleSide,
-      })
-    );
-    plane.position.copy(position);
-    plane.rotation.copy(rotation);
-    room.add(plane);
-  };
-  const at = (x, y, z) => new THREE.Vector3(x, y, z);
-  const turn = (x, y, z) => new THREE.Euler(x, y, z);
-  const half = Math.PI / 2;
 
-  face(STUDIO.ceiling, at(0, STUDIO_SIZE, 0), turn(half, 0, 0));
-  face(STUDIO.floor, at(0, -STUDIO_SIZE, 0), turn(-half, 0, 0));
-  face(STUDIO.wall, at(0, 0, -STUDIO_SIZE), turn(0, 0, 0));
-  face(STUDIO.wall, at(0, 0, STUDIO_SIZE), turn(0, Math.PI, 0));
-  face(STUDIO.wall, at(-STUDIO_SIZE, 0, 0), turn(0, half, 0));
-  face(STUDIO.wall, at(STUDIO_SIZE, 0, 0), turn(0, -half, 0));
+  // **A graded sphere, where this used to be six flat planes.** The luminances
+  // above are unchanged and so is the idea -- bright overhead, mid at the
+  // horizon, dark below -- but a sphere has no corners, and a corner is what
+  // the capacitor lids were reflecting as a hard black-and-cream seam. The
+  // gradient is the whole point: a curved metal surface sweeping through it
+  // gets a continuous ramp, which is what reads as curvature.
+  const sky = new THREE.SphereGeometry(STUDIO_SIZE, SKY_BANDS.around,
+                                       SKY_BANDS.up);
+  const height = sky.getAttribute("position");
+  const shade = new Float32Array(height.count * 3);
+  for (let vertex = 0; vertex < height.count; vertex++) {
+    // -1 at the floor, +1 at the ceiling. `smoothstep` rather than a straight
+    // ramp so the horizon is a band rather than a crease -- a linear blend
+    // still has a discontinuity in its slope, and a polished lid finds it.
+    const up = height.getY(vertex) / STUDIO_SIZE;
+    const t = Math.abs(up);
+    const eased = t * t * (3 - 2 * t);
+    const luminance = up >= 0
+      ? STUDIO.wall + (STUDIO.ceiling - STUDIO.wall) * eased
+      : STUDIO.wall + (STUDIO.floor - STUDIO.wall) * eased;
+    shade[vertex * 3] = luminance;
+    shade[vertex * 3 + 1] = luminance;
+    shade[vertex * 3 + 2] = luminance;
+  }
+  sky.setAttribute("color", new THREE.BufferAttribute(shade, 3));
+  room.add(new THREE.Mesh(sky, new THREE.MeshBasicMaterial({
+    // Seen from the inside, and the colours are read as-is: a vertex colour is
+    // already in the renderer's working space, which is where `setScalar`
+    // leaves a luminance too. So the two halves of this room are on one scale.
+    vertexColors: true, side: THREE.BackSide,
+  })));
+
+  // The softbox: a disc overhead, brightest at the middle and fading into the
+  // ceiling at its rim, so nothing in this room has an edge. See `SOFTBOX`.
+  const pool = new THREE.CircleGeometry(STUDIO_SIZE * SOFTBOX.radius,
+                                        SOFTBOX.segments);
+  const across = pool.getAttribute("position");
+  const glow = new Float32Array(across.count * 3);
+  const edge = STUDIO_SIZE * SOFTBOX.radius;
+  for (let vertex = 0; vertex < across.count; vertex++) {
+    const out = Math.hypot(across.getX(vertex), across.getY(vertex)) / edge;
+    const fade = 1 - out * out * (3 - 2 * out);
+    const luminance = STUDIO.ceiling
+                    + (SOFTBOX.bright - STUDIO.ceiling) * fade;
+    glow[vertex * 3] = luminance;
+    glow[vertex * 3 + 1] = luminance;
+    glow[vertex * 3 + 2] = luminance;
+  }
+  pool.setAttribute("color", new THREE.BufferAttribute(glow, 3));
+  const light = new THREE.Mesh(pool, new THREE.MeshBasicMaterial({
+    vertexColors: true, side: THREE.DoubleSide,
+  }));
+  light.position.set(0, STUDIO_SIZE * SOFTBOX.height, 0);
+  light.rotation.x = Math.PI / 2;
+  room.add(light);
 
   const pmrem = new THREE.PMREMGenerator(renderer);
   const built = pmrem.fromScene(room, STUDIO_BLUR);
@@ -365,6 +474,34 @@ export function mount(canvas) {
 
   view.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   view.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  // **Tone mapping, where there was none, and NOT the popular one.**
+  // The default is `NoToneMapping`, which clips every value above 1.0 flat --
+  // the default that matters least on a diffuse scene and most on this one,
+  // because a specular highlight on metal is exactly what goes above 1.0 and
+  // this board has nine metal surfaces. Measured on the Uno close-up: 0.30% of
+  // pixels had a channel at 255 before the softbox went in and 6.82% after,
+  // which is a picture whose brightest sixteenth carries no information.
+  //
+  // `NeutralToneMapping` rather than `ACESFilmicToneMapping` because THE
+  // COLOURS IN THIS SCENE ARE MEASUREMENTS. #313d63 is the Uno's solder mask
+  // read out of PICSimLab's own artwork, #ff9f37 is the XIAO's gold named in
+  // `refreshTheme`, and `FINISHES` in `tools/import_3d_model.py` cites every
+  // one of them. ACES is a film look: it shifts hue and desaturates on the way
+  // through, which would quietly restate every sourced colour as something
+  // else. Khronos PBR Neutral leaves an in-gamut colour alone and only
+  // compresses what is too bright to show, which is the only part this page
+  // has a right to change.
+  view.renderer.toneMapping = THREE.NeutralToneMapping;
+
+  // **Shadows, which this scene has never had.** The comment that used to sit
+  // below said "this scene has one object" -- true when the board was an
+  // extruded slab, false since OH-75 put fifteen components on it, and the
+  // reason the DIP-28 and the headers met the board at a hard edge and looked
+  // pasted on. A contact shadow is what says "this is attached to that".
+  view.renderer.shadowMap.enabled = true;
+  view.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
   view.scene = new THREE.Scene();
   view.scene.background = view.palette.ground;
 
@@ -383,14 +520,25 @@ export function mount(canvas) {
   // `FINISHES` in `tools/import_3d_model.py` are one change, and adding either
   // alone makes the picture worse.
   //
-  // Still no shadows. The comment that used to sit here said "this scene has
-  // one object", which was true when the board was an extruded slab and stopped
-  // being true the day OH-75 put fifteen components on it. It is its own
-  // ticket rather than a line in this one.
   view.scene.environment = studio(view.renderer);
-  const key = new THREE.DirectionalLight(NEUTRAL_LIGHT, 1.4);
-  key.position.set(12, 24, 10);
+  const key = new THREE.DirectionalLight(NEUTRAL_LIGHT, KEY_STRENGTH);
+  key.position.copy(KEY_FROM);
+  key.castShadow = true;
+  key.shadow.mapSize.set(SHADOW_TEXELS, SHADOW_TEXELS);
+  // **`normalBias` and not `bias`, and the units are why.** `bias` is a depth
+  // offset in the shadow camera's clip space, so its right value moves with
+  // that camera's near and far -- and this one is refitted to the scene every
+  // time a board or a part changes size. `normalBias` is in WORLD units and
+  // this scene's world units are millimetres, so 0.06 is 60 um: larger than a
+  // shadow texel across the Uno, small enough not to lift a shadow off the leg
+  // that casts it.
+  key.shadow.normalBias = SHADOW_BIAS_MM;
+  // A directional light aims at its target, and a target that is never added
+  // to the scene keeps its default matrix -- so this points at the origin no
+  // matter where `frameScene` moves it. Adding it is the whole fix.
+  view.scene.add(key.target);
   view.scene.add(key);
+  view.key = key;
 
   view.bench = new THREE.Group();
   view.scene.add(view.bench);
@@ -466,6 +614,47 @@ function frameScene() {
                            centre.z + reach * 0.75);
   view.controls.target.copy(centre);
   view.controls.update();
+  castShadows(box, centre);
+}
+
+/**
+ * Point the shadow camera at everything, and let everything cast into it.
+ *
+ * **Called from `frameScene` because that is already the one place that knows
+ * how big the scene is**, and both jobs need exactly that: the camera has to
+ * pull back far enough to see the board, and the shadow camera has to open
+ * wide enough to cover it. A second traversal to compute the same box would be
+ * a second answer that could disagree with the first.
+ *
+ * The flags are set here rather than at each place a mesh is made -- and there
+ * are six of them, between the slab, the pads, the vendor's model, the parts,
+ * the wires and the terminal targets. One traversal that runs after every
+ * change cannot be forgotten by the seventh.
+ */
+function castShadows(box, centre) {
+  if (!view.key) return;
+  const radius = box.getBoundingSphere(new THREE.Sphere()).radius || 1;
+
+  view.key.target.position.copy(centre);
+  view.key.position.set(centre.x + KEY_FROM.x * radius * 3,
+                        centre.y + KEY_FROM.y * radius * 3,
+                        centre.z + KEY_FROM.z * radius * 3);
+  const lens = view.key.shadow.camera;
+  // A little wider than the sphere, so a part dropped on the bench at the edge
+  // of the frame still has somewhere to cast.
+  lens.left = -radius * 1.2;
+  lens.right = radius * 1.2;
+  lens.top = radius * 1.2;
+  lens.bottom = -radius * 1.2;
+  lens.near = radius * 0.5;
+  lens.far = radius * 6;
+  lens.updateProjectionMatrix();
+
+  view.scene.traverse((object) => {
+    if (!object.isMesh) return;
+    object.castShadow = true;
+    object.receiveShadow = true;
+  });
 }
 
 /** Throw away one object's geometry and material. */

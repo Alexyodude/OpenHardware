@@ -86,6 +86,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import math
 import pathlib
 import struct
 import sys
@@ -112,9 +113,49 @@ OUT = REPO / "webui" / "static" / "models"
 #: three decimal places the pad map is exact to.
 DEFLECTION = 0.05
 
-#: Radians of angular deviation, OCC's second tessellation control. Its own
-#: default; named here so that both knobs are visible rather than one.
+#: Radians of angular deviation, OCC's second tessellation control.
+#:
+#: **AND IT IS THE ONE THAT BINDS, WHICH `DEFLECTION` ABOVE DOES NOT SAY.**
+#: That constant carries a measured paragraph and this one used to carry
+#: "OCC's own default; named here so that both knobs are visible rather than
+#: one" -- the reasoning was attached to the knob that was not deciding
+#: anything. Measured 2026-08-28 on the 5 mm LED, re-reading the STEP for each
+#: setting because `BRepMesh_IncrementalMesh` stores its triangulation ON the
+#: shape and a second call against the same shape is a silent no-op:
+#:
+#:      defl 0.05  ang 0.5      461 triangles
+#:      defl 0.01  ang 0.5    1,627          -- 5x finer chord, 3.5x the mesh
+#:      defl 0.05  ang 0.2    1,509          -- 2.5x tighter angle, 3.3x
+#:      defl 0.05  ang 0.1    4,959
+#:
+#: **Left at 0.5 anyway, and that is a decision rather than an omission.**
+#: Rebuilding the whole corpus at 0.2 costs 4,170,400 -> 9,146,360 bytes and
+#: changes 0.95% of the pixels in a close-up of the board. What looked like
+#: faceting turned out to be `weld_seams` below: a hard shading line where a
+#: periodic surface's parametrisation wraps, which costs nothing to remove and
+#: is most of what 0.2 was buying. Revisit this when something is measured
+#: that the weld does not fix.
 ANGULAR = 0.5
+
+#: Degrees a vertex's normal may sit from the mean of every normal at that
+#: exact point before the two count as different surfaces.
+#:
+#: **What this is for is a seam, not an edge.** Every B-rep face is meshed on
+#: its own and shares no vertex with its neighbours, so a cylinder or a sphere
+#: -- which OCC meshes as ONE periodic face -- comes back with its wrap line
+#: duplicated: two vertices at one point, each holding the average of only the
+#: triangles on its own side. The surface is smooth there and the shading is
+#: not, so a polished lid gets a dead-straight line across it. Measured on the
+#: Arduino Uno: 509 such pairs in the `#a5a392` group alone, the worst 22.1
+#: degrees apart, which is one facet's worth of normal concentrated onto a
+#: single edge.
+#:
+#: 20 degrees from the mean, so 40 across a pair. That keeps a real edge: a
+#: cube corner puts each of its three normals 54.7 degrees from their mean and
+#: a 45-degree chamfer puts each 22.5, so both stay sharp, while a seam at
+#: `ANGULAR`'s own 28.6 degrees puts each at 14.3 and welds. **Free in bytes:**
+#: no vertex is added or removed, only normals are averaged.
+SMOOTH_DEGREES = 20.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -752,9 +793,72 @@ def tessellate(shape, styles, deflection: float, frame: Frame) -> Mesh:
             indices.extend((base + a - 1, base + b - 1, base + c - 1))
         accumulate_normals(positions, normals, indices, first)
 
+    welded = 0
     for positions, normals, _ in groups.values():
+        welded += weld_seams(positions, normals)
         normalise(normals)
+    if welded:
+        print(f"  weld   {welded:,} vertices on a seam given one normal")
     return Mesh(groups=groups)
+
+
+def weld_seams(positions: list[float], normals: list[float]) -> int:
+    """Give coincident vertices facing the same way one shared normal.
+
+    Returns how many vertices were changed, so the caller can print it and a
+    reader can see the seams being closed rather than take it on trust.
+
+    **Clustered rather than simply averaged**, because a point where three
+    faces meet at right angles is also a point with coincident vertices, and
+    averaging there would round off a corner that is genuinely sharp. Each
+    group is split into runs whose directions agree to within
+    `SMOOTH_DEGREES`, and only a run with more than one member is merged -- so
+    a cube corner produces three clusters of one and is left exactly as it was.
+
+    The accumulated normals are summed rather than averaged, which keeps the
+    area weighting `accumulate_normals` established: a seam vertex carrying
+    half a cylinder's triangles on each side ends up with the sum of both,
+    which is what it would have had if the face had never been cut.
+    """
+    at_point: dict[tuple[float, float, float], list[int]] = {}
+    for vertex in range(0, len(positions), 3):
+        # 0.1 um, which is three orders below `DEFLECTION` -- fine enough that
+        # two vertices in one bucket are the same point, coarse enough that a
+        # seam's two copies land together.
+        at_point.setdefault((round(positions[vertex], 4),
+                             round(positions[vertex + 1], 4),
+                             round(positions[vertex + 2], 4)), []).append(vertex)
+
+    limit = math.cos(math.radians(SMOOTH_DEGREES))
+    changed = 0
+    for group in at_point.values():
+        if len(group) < 2:
+            continue
+        clusters: list[tuple[list[float], list[int]]] = []
+        for vertex in group:
+            here = normals[vertex:vertex + 3]
+            length = math.sqrt(sum(v * v for v in here))
+            if length == 0.0:
+                continue                       # a degenerate triangle's vertex
+            for total, members in clusters:
+                scale = math.sqrt(sum(v * v for v in total))
+                if scale == 0.0:
+                    continue
+                agreement = sum(a * b for a, b in zip(total, here)) / (scale * length)
+                if agreement >= limit:
+                    for axis in range(3):
+                        total[axis] += here[axis]
+                    members.append(vertex)
+                    break
+            else:
+                clusters.append(([*here], [vertex]))
+        for total, members in clusters:
+            if len(members) < 2:
+                continue
+            changed += len(members)
+            for vertex in members:
+                normals[vertex:vertex + 3] = total
+    return changed
 
 
 def accumulate_normals(positions: list[float], normals: list[float],

@@ -533,3 +533,239 @@ def test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert():
         convert_part(dataclasses.replace(part, lens="#abcdef"),
                      DEFLECTION, check=True)
     assert "#abcdef" in str(refused.value)
+
+
+def _gltf(glb: pathlib.Path):
+    """The JSON chunk and the binary chunk of a `.glb`, as a pair.
+
+    `read_extras` in the importer reads the first few hundred bytes and stops;
+    this needs the buffer too, so it is its own eight lines rather than a
+    parameter added to a function whose whole point is not to read the buffer.
+    """
+    raw = glb.read_bytes()
+    length, _kind = struct.unpack_from("<II", raw, 12)
+    return json.loads(raw[20:20 + length].decode("utf-8")), raw[20 + length + 8:]
+
+
+def _read(doc, body, index):
+    """One accessor's values, as a list of tuples."""
+    accessor = doc["accessors"][index]
+    view = doc["bufferViews"][accessor["bufferView"]]
+    start = view.get("byteOffset", 0) + accessor.get("byteOffset", 0)
+    letter = {5126: "f", 5125: "I", 5123: "H"}[accessor["componentType"]]
+    wide = {"SCALAR": 1, "VEC2": 2, "VEC3": 3}[accessor["type"]]
+    count = accessor["count"] * wide
+    flat = struct.unpack_from(f"<{count}{letter}", body, start)
+    return [flat[i:i + wide] for i in range(0, count, wide)]
+
+
+# --- a seam is not an edge --------------------------------------------------
+
+
+def test_a_periodic_surfaces_seam_is_given_one_normal():
+    """**The wrap line, which is the whole reason `weld_seams` exists.**
+
+    OCC meshes a cylinder as ONE periodic face and duplicates the vertices
+    where its parametrisation comes back round to zero. Each copy then gets the
+    average of only the triangles on its own side, so a surface that is smooth
+    comes back with a hard shading line down it -- and at `ANGULAR`'s 0.5 rad
+    that line is a whole facet's worth of normal, about 28 degrees, dropped on
+    a single edge.
+
+    Two vertices at one point, 20 degrees apart, which is what a seam looks
+    like. They must come out equal, and pointing between where they started.
+    """
+    from tools.import_3d_model import weld_seams
+
+    tilt = math.radians(10.0)
+    positions = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    normals = [math.sin(-tilt), math.cos(tilt), 0.0,
+               math.sin(tilt), math.cos(tilt), 0.0]
+    assert weld_seams(positions, normals) == 2
+    assert normals[0:3] == normals[3:6]
+    # Between the two, which for a symmetric pair is straight up.
+    assert normals[0] == pytest.approx(0.0, abs=1e-12)
+    assert normals[1] > 0
+
+
+def test_a_corner_where_three_faces_meet_stays_sharp():
+    """**The case that stops this being a smoothing pass.**
+
+    A cube's corner is three vertices at one point whose normals are 90 degrees
+    apart, and averaging them would round off an edge that is genuinely square
+    -- turning every chip package on the board into a bar of soap. Each of the
+    three sits 54.7 degrees from their mean, well past `SMOOTH_DEGREES`, so all
+    three are left exactly as they were.
+    """
+    from tools.import_3d_model import weld_seams
+
+    positions = [1.0, 2.0, 3.0] * 3
+    normals = [1.0, 0.0, 0.0,
+               0.0, 1.0, 0.0,
+               0.0, 0.0, 1.0]
+    before = list(normals)
+    assert weld_seams(positions, normals) == 0
+    assert normals == before
+
+
+def test_a_forty_five_degree_chamfer_is_not_smoothed_away():
+    """The nearest real edge to the threshold, checked from the other side.
+
+    `SMOOTH_DEGREES` is 20 from the mean, so 40 across a pair. A chamfer meets
+    its face at 45 degrees, which puts each normal 22.5 degrees out -- past it,
+    and deliberately so: the bevel on a DIP package and the rim of a capacitor
+    lid are both this shape, and both are meant to catch the light as an edge.
+    """
+    from tools.import_3d_model import weld_seams
+
+    half = math.radians(22.5)
+    positions = [0.0, 0.0, 0.0] * 2
+    normals = [math.sin(-half), math.cos(half), 0.0,
+               math.sin(half), math.cos(half), 0.0]
+    before = list(normals)
+    assert weld_seams(positions, normals) == 0
+    assert normals == before
+
+
+def test_two_vertices_a_hair_apart_are_two_vertices():
+    """Coincident means coincident, not nearby.
+
+    The key rounds to 0.1 um, three orders below `DEFLECTION`'s 50 um chord
+    error, so nothing the tessellator emits as two distinct points can land in
+    one bucket. A millimetre apart is very distinct.
+    """
+    from tools.import_3d_model import weld_seams
+
+    # 0.2 mm, which is four times `DEFLECTION`'s chord error and a distance
+    # the tessellator really does produce between neighbours. A key rounded to
+    # whole millimetres would put these two in one bucket and merge a pair of
+    # vertices that are nothing to do with each other.
+    positions = [0.0, 0.0, 0.0, 0.2, 0.0, 0.0]
+    normals = [0.0, 1.0, 0.0, 0.05, 1.0, 0.0]
+    before = list(normals)
+    assert weld_seams(positions, normals) == 0
+    assert normals == before
+
+
+def test_the_weld_keeps_the_area_weighting_it_was_given():
+    """Summed, not averaged, and the difference is a real one.
+
+    `accumulate_normals` leaves each normal scaled by twice the area of the
+    triangles that produced it, which is the standard weighting and the better
+    average. Summing a seam's two halves gives the vertex what it would have
+    had if the face had never been cut; averaging their directions would throw
+    that away and weight a sliver the same as a quad.
+    """
+    from tools.import_3d_model import weld_seams
+
+    # **Neither weight is 1, which is what makes this test able to fail.** The
+    # first version used 9 and 1: a version that normalised before summing
+    # produced 9 + 1 = 10 as well, because the cluster is SEEDED with the first
+    # normal unscaled and only later members would have been divided. Two
+    # weights that are both unequal to one separate the two behaviours -- 13
+    # against 10.
+    positions = [0.0, 0.0, 0.0] * 2
+    normals = [0.0, 9.0, 0.0, 0.0, 4.0, 0.0]
+    assert weld_seams(positions, normals) == 2
+    assert normals == [0.0, 13.0, 0.0, 0.0, 13.0, 0.0]
+
+
+def test_the_shipped_meshes_have_almost_no_seams_left():
+    """The measurement, on the files the page actually fetches.
+
+    Counted before the weld existed: 509 coincident pairs in the Arduino Uno's
+    `#a5a392` group whose normals disagreed by more than a degree, the worst
+    22.1 degrees apart, and 178 more in `#050505`. What is left is the handful
+    where three or more surfaces genuinely meet, which this must NOT merge.
+    """
+    model = REPO / "webui" / "static" / "models" / "Arduino-Uno.glb"
+    if not model.is_file():
+        pytest.skip("no composed Uno; run tools/compose_board_3d.py")
+    doc, body = _gltf(model)
+    worst: dict[str, int] = {}
+    for mesh in doc["meshes"]:
+        for primitive in mesh["primitives"]:
+            name = doc["materials"][primitive["material"]]["name"]
+            points = _read(doc, body, primitive["attributes"]["POSITION"])
+            normals = _read(doc, body, primitive["attributes"]["NORMAL"])
+            at: dict[tuple, list] = {}
+            for point, normal in zip(points, normals):
+                at.setdefault(tuple(round(v, 4) for v in point), []).append(normal)
+            unwelded = 0
+            for group in at.values():
+                if len(group) < 2:
+                    continue
+                spread = max(
+                    math.degrees(math.acos(max(-1.0, min(1.0, sum(
+                        a * b for a, b in zip(group[i], group[j]))))))
+                    for i in range(len(group)) for j in range(i + 1, len(group)))
+                if 1.0 < spread < 25.0:
+                    unwelded += 1
+            worst[name] = unwelded
+    assert worst.get("#a5a392", 0) <= 20, worst
+    assert worst.get("#050505", 0) <= 20, worst
+
+
+def test_the_tessellator_welds_what_it_meshes():
+    """**That `weld_seams` is correct and that anything CALLS it are two claims.**
+
+    The tests above drive the function directly, which leaves the whole of it
+    removable from `tessellate` without one of them noticing -- caught by
+    mutation on 2026-08-28, where stubbing the call out left every unit test
+    green because the shipped `.glb` on disk was already welded and nothing
+    re-meshed anything.
+
+    So this runs the real tessellator over the real STEP. The axial resistor is
+    the cheapest shape in the corpus that has a periodic face: a cylinder body
+    on two cylindrical leads, 1,950 triangles, and 378 vertices on a seam.
+    """
+    from tools.import_3d_model import CACHE, DEFLECTION, part_frame, read, tessellate
+
+    step = CACHE / "part-R_Axial_DIN0207_L6_3mm_D2_5mm_P7_62mm_Horizontal.step"
+    if not step.is_file():
+        pytest.skip("no cached STEP; run tools/import_3d_model.py --parts")
+    shape, styles, _document = read(step)
+    mesh = tessellate(shape, styles, DEFLECTION, part_frame(shape))
+
+    unwelded = 0
+    for positions, normals, _indices in mesh.groups.values():
+        at: dict[tuple, list[tuple[float, float, float]]] = {}
+        for vertex in range(0, len(positions), 3):
+            at.setdefault(tuple(round(positions[vertex + axis], 4)
+                                for axis in range(3)), []).append(
+                tuple(normals[vertex + axis] for axis in range(3)))
+        for group in at.values():
+            if len(group) < 2:
+                continue
+            spread = max(
+                math.degrees(math.acos(max(-1.0, min(1.0, sum(
+                    a * b for a, b in zip(group[i], group[j]))))))
+                for i in range(len(group)) for j in range(i + 1, len(group)))
+            # Between a degree and the smoothing threshold is the band that
+            # `weld_seams` exists to empty: closer than that is already one
+            # surface, wider is a real edge it must leave alone.
+            if 1.0 < spread < 25.0:
+                unwelded += 1
+    assert unwelded == 0, f"{unwelded} seams came out of the tessellator unwelded"
+
+    # And the real edges survived, or this passed by flattening the part.
+    sharp = 0
+    for positions, normals, _indices in mesh.groups.values():
+        at = {}
+        for vertex in range(0, len(positions), 3):
+            at.setdefault(tuple(round(positions[vertex + axis], 4)
+                                for axis in range(3)), []).append(
+                tuple(normals[vertex + axis] for axis in range(3)))
+        for group in at.values():
+            if len(group) < 2:
+                continue
+            spread = max(
+                math.degrees(math.acos(max(-1.0, min(1.0, sum(
+                    a * b for a, b in zip(group[i], group[j]))))))
+                for i in range(len(group)) for j in range(i + 1, len(group)))
+            if spread >= 25.0:
+                sharp += 1
+    assert sharp > 50, (
+        f"only {sharp} sharp edges left in a part with square-cut leads and a "
+        f"body that meets them at a right angle; the weld has rounded it off"
+    )

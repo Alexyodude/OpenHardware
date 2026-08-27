@@ -754,9 +754,32 @@ def test_the_environment_is_greyscale_and_writes_down_no_colour():
     studio = source.split("const STUDIO = {", 1)[1].split("};", 1)[0]
     assert "ceiling" in studio and "wall" in studio and "floor" in studio
     room = source.split("function studio(renderer) {", 1)[1].split("\n}", 1)[0]
-    assert "setScalar" in room
     found = [m for m in COLOUR_LITERAL.findall(room) if not _in_comment(room, m)]
     assert not found, f"the studio writes down a colour: {found}"
+
+    # **This used to assert `setScalar` was in the room, and that check went on
+    # passing after the room stopped calling it.** The six flat planes became a
+    # graded sphere and a graded disc, both of which write their luminance into
+    # a vertex-colour buffer instead -- and `setScalar` survived in a COMMENT
+    # explaining the colour space, so a proxy for the rule kept agreeing with a
+    # file that no longer contained the thing it named.
+    #
+    # So the rule is checked directly now: every colour this room writes sets
+    # its three channels from one value, which is what "greyscale" means and is
+    # what `setScalar` used to guarantee.
+    channels = re.findall(r"(\w+)\[vertex \* 3(?: \+ ([12]))?\] = (\w+);", room)
+    assert channels, "the room writes no vertex colours at all"
+    buffers: dict[str, list[tuple[str, str]]] = {}
+    for name, channel, value in channels:
+        buffers.setdefault(name, []).append((channel or "0", value))
+    for name, writes in buffers.items():
+        assert sorted(c for c, _ in writes) == ["0", "1", "2"], (
+            f"{name} does not write exactly red, green and blue: {writes}"
+        )
+        assert len({value for _, value in writes}) == 1, (
+            f"{name}'s three channels come from different values: {writes}, "
+            f"which is a colour and not a luminance"
+        )
 
 
 def test_the_ambient_light_was_replaced_rather_than_added_to():
@@ -771,7 +794,14 @@ def test_the_ambient_light_was_replaced_rather_than_added_to():
     assert "AmbientLight" not in source, (
         "an ambient light and an environment are two fills, not one"
     )
-    assert source.count("DirectionalLight") == 1
+    # **Constructions, not mentions, and the difference has cost a session
+    # already.** This counted the bare word `DirectionalLight` and went red the
+    # moment a comment above `KEY_FROM` explained how a directional light takes
+    # its direction from position minus target -- a true sentence, worth
+    # keeping, and nothing to do with how many lights are in the scene. The
+    # same shape of tripwire fired on `NEUTRAL_LIGHT` on 2026-08-27. What the
+    # test means is "one light is built", so that is what it counts now.
+    assert source.count("new THREE.DirectionalLight") == 1
 
 
 # --- a layout that reads more than the viewport's width ----------------------
@@ -880,4 +910,136 @@ def test_one_ratio_governs_the_canvas_and_the_wrap_it_forces():
     assert re.search(r"--stage:\s*\d+vh;", pins), (
         "--stage is not defined on .pins, so the canvas and the flex basis "
         "cannot be reading the same one"
+    )
+
+
+# --- shadows, tone mapping, and a room with no edge in it -------------------
+
+
+def test_the_scene_casts_shadows_and_everything_in_it_takes_part():
+    """**Fifteen components floated for as long as this scene had no shadow.**
+
+    The DIP-28, the header shrouds and the pad posts met the board at a hard
+    edge with nothing under them, which is what "pasted on" looks like: a
+    contact shadow is the thing that says one object is resting on another.
+
+    The flags are set in one traversal rather than at each place a mesh is
+    made, and this checks that, because there are six such places -- the slab,
+    the pads, the vendor's model, the parts, the wires and the terminal targets
+    -- and a seventh is the one that would be forgotten.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    assert "view.renderer.shadowMap.enabled = true;" in source
+    assert "PCFSoftShadowMap" in source
+    assert "key.castShadow = true;" in source
+    fit = source.split("function castShadows(box, centre) {", 1)[1].split("\n}", 1)[0]
+    assert "object.castShadow = true;" in fit
+    assert "object.receiveShadow = true;" in fit
+    assert "view.scene.traverse" in fit, (
+        "the flags are set on named objects rather than on whatever is in the "
+        "scene, so the next mesh added will float"
+    )
+    # And it runs after every change, which is what makes one traversal enough.
+    assert "castShadows(box, centre);" in source
+
+
+def test_the_shadow_camera_is_fitted_to_the_scene_and_not_to_a_number():
+    """A board is 68 mm and a XIAO is 20 mm, so a fixed frustum fits neither.
+
+    `frameScene` already computes the scene's box to place the camera, and the
+    shadow camera needs exactly that box: too small and the far edge of the
+    board casts nothing, too large and every shadow texel covers more than it
+    can resolve. Deriving both from one box is also what stops the two answers
+    disagreeing.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    fit = source.split("function castShadows(box, centre) {", 1)[1].split("\n}", 1)[0]
+    assert "box.getBoundingSphere" in fit
+    for edge in ("lens.left", "lens.right", "lens.top", "lens.bottom",
+                 "lens.near", "lens.far"):
+        assert f"{edge} = " in fit, f"{edge} is left at its default"
+    assert "lens.updateProjectionMatrix();" in fit, (
+        "a frustum changed without this is a frustum the GPU never hears about"
+    )
+    # The light is moved with it, or the frustum points somewhere else.
+    assert "view.key.position.set" in fit
+    assert "view.key.target.position.copy(centre);" in fit
+    # And its target has to be in the scene at all, or it keeps the identity
+    # matrix and the light aims at the origin whatever this sets.
+    assert "view.scene.add(key.target);" in source
+
+
+def test_the_shadow_bias_is_stated_in_millimetres():
+    """`normalBias` and not `bias`, because one of them has units this scene has.
+
+    `bias` is an offset in the shadow camera's clip space, and that camera is
+    refitted to the scene every time a board or a part changes size -- so a
+    value tuned against one board is wrong for the next. `normalBias` is in
+    world units, and this scene's world unit is the millimetre, so the number
+    can be reasoned about: 60 um is wider than a shadow texel across the Uno
+    and thinner than a DIP-28's leg.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    assert "key.shadow.normalBias = SHADOW_BIAS_MM;" in source
+    assert "key.shadow.bias" not in source, (
+        "a clip-space bias on a frustum that is refitted per board is a number "
+        "that cannot be right twice"
+    )
+    stated = float(re.search(r"const SHADOW_BIAS_MM = ([\d.]+);", source).group(1))
+    assert 0.0 < stated < 0.5, f"{stated} mm is not a plausible surface offset"
+
+
+def test_the_renderer_tone_maps_and_not_with_a_film_look():
+    """**The colours in this scene are measurements, so the transfer curve is
+    not free to move them.**
+
+    Without tone mapping every value above 1.0 clips flat, which is the default
+    that matters least on a diffuse scene and most on one with nine metal
+    surfaces and a softbox: measured on the Uno close-up, 6.82% of pixels had a
+    channel at 255. With `NeutralToneMapping` that is 0.011% and the frame uses
+    248 distinct luminances rather than 217.
+
+    ACES is the popular choice and is refused here on purpose. It is a film
+    look: it shifts hue and desaturates on the way through, and #313d63 is the
+    Uno's solder mask read out of PICSimLab's own artwork while #ff9f37 is the
+    XIAO's gold -- every one of them cited in `FINISHES`. Khronos PBR Neutral
+    leaves an in-gamut colour where it is and only compresses what is too
+    bright to show.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    assert "view.renderer.toneMapping = THREE.NeutralToneMapping;" in source
+    # Comments stripped first, the same way `test_the_renderer_writes_down_no
+    # _colour_of_its_own` does it: the reasoning above the line names ACES in
+    # order to refuse it, and a check that a sentence can trip is not a check.
+    code = "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "ACESFilmic" not in code
+    assert "toneMappingExposure" not in code, (
+        "an exposure other than 1.0 is a second place the picture's brightness "
+        "is decided, and the room already decides it"
+    )
+
+
+def test_the_room_has_no_hard_edge_anywhere_in_it():
+    """**Every hard edge up there comes back as a straight line on curved metal.**
+
+    The six flat planes this replaced put the corner between their ceiling and
+    their wall across the Arduino Uno's electrolytic lids as a dead-straight
+    seam, cream one side and black the other -- which the constant's own
+    comment had predicted and 0.04 of blur did not hide. A rectangular softbox
+    was tried next and drew the same line with its own border.
+
+    So both surfaces in this room are graded: the sky by height and the
+    softbox from its middle to its rim. Neither has an edge to reflect.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    room = source.split("function studio(renderer) {", 1)[1].split("\n}", 1)[0]
+    assert "SphereGeometry" in room and "PlaneGeometry" not in room, (
+        "a plane has a border and a border is an edge"
+    )
+    assert "CircleGeometry" in room
+    # Both gradients are eased rather than linear: a straight ramp still has a
+    # discontinuity in its slope, and a polished lid finds it.
+    assert room.count("(3 - 2 * ") == 2, (
+        "one of the two gradients is a straight ramp"
     )
