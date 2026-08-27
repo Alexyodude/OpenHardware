@@ -769,3 +769,81 @@ def test_the_tessellator_welds_what_it_meshes():
         f"only {sharp} sharp edges left in a part with square-cut leads and a "
         f"body that meets them at a right angle; the weld has rounded it off"
     )
+
+
+# --- a PCB is two layers ----------------------------------------------------
+
+
+def test_only_the_solder_masks_are_coated():
+    """**A coat is a claim about a substance, not a way of making things shiny.**
+
+    Solder mask is pigmented epoxy under a cured, near-transparent surface --
+    two layers, which is why a board brightens as you tilt it and a moulded body
+    does not. Everything else in this table is one layer and must stay that way:
+    a coated DIP package or a coated header pin would be this repository
+    inventing a material, which is the failure `FINISHES` exists to avoid.
+    """
+    from tools.import_3d_model import FINISHES
+
+    coated = {colour for colour, finish in FINISHES.items() if finish.coat}
+    assert coated == {"#313d63", "#116517"}, coated
+    for colour in coated:
+        assert "solder mask" in FINISHES[colour].why, (
+            f"{colour} is coated and its evidence does not say it is a mask"
+        )
+
+
+def test_a_coat_defaults_to_none_so_no_old_entry_changed():
+    """Every finish written before the coat existed keeps exactly its material.
+
+    `Finish` gained two fields, and a default of anything but zero would have
+    silently restated thirteen measured surfaces. The glTF says the same thing
+    a second way: a material with no coat carries no extension at all.
+    """
+    from tools.import_3d_model import DEFAULT_FINISH, Finish
+
+    plain = Finish(0.0, 0.5, "a" * 50)
+    assert (plain.coat, plain.coat_roughness) == (0.0, 0.0)
+    assert DEFAULT_FINISH.coat == 0.0
+
+
+def test_the_coat_is_written_as_the_registered_extension(tmp_path):
+    """`KHR_materials_clearcoat`, not a private key.
+
+    These files are glTF and other things read them -- and `extensionsUsed` is
+    a promise about the document, so it is declared when something uses it and
+    absent when nothing does. A file listing an extension no material carries
+    is a file that lies about itself in a way every validator believes.
+    """
+    from tools.import_3d_model import FINISHES, Mesh, write_glb
+
+    triangle = ([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+                [0, 1, 2])
+    for colours, expect in ((["#313d63"], True), (["#a5a392"], False)):
+        target = tmp_path / f"{colours[0][1:]}.glb"
+        write_glb(Mesh({c: triangle for c in colours}), target,
+                  "probe", "test", (1.0, 1.0, 1.0))
+        raw = target.read_bytes()
+        length, _kind = struct.unpack_from("<II", raw, 12)
+        document = json.loads(raw[20:20 + length].decode("utf-8"))
+        material = document["materials"][0]
+        assert ("KHR_materials_clearcoat" in material.get("extensions", {})) is expect
+        assert ("extensionsUsed" in document) is expect
+        if expect:
+            coat = material["extensions"]["KHR_materials_clearcoat"]
+            assert coat["clearcoatFactor"] == FINISHES[colours[0]].coat
+            assert coat["clearcoatRoughnessFactor"] == \
+                FINISHES[colours[0]].coat_roughness
+
+
+def test_the_shipped_board_carries_its_coat_and_nothing_else_does():
+    """The measurement, on the file the page actually fetches."""
+    model = REPO / "webui" / "static" / "models" / "Arduino-Uno.glb"
+    if not model.is_file():
+        pytest.skip("no composed Uno; run tools/compose_board_3d.py")
+    document, _body = _gltf(model)
+    assert document.get("extensionsUsed") == ["KHR_materials_clearcoat"]
+    coated = {material["name"] for material in document["materials"]
+              if "KHR_materials_clearcoat" in material.get("extensions", {})}
+    assert coated == {"#313d63"}, coated

@@ -128,7 +128,22 @@ const LIGHTS = [
 //: nothing and darkens no crevice: every unit of brightness that lives there
 //: is a unit no shadow can ever subtract from. Moving some of it here is the
 //: whole mechanism, and `ENVIRONMENT_SHARE` is the other half of the trade.
-const LIGHT_TOTAL = 5.2;
+//:
+//: **AND THEN BOTH WERE SCALED DOWN BY 0.62, WHICH IS A SEPARATE FACT.** This
+//: was 5.2 against a room of 0.45, and at that exposure the Arduino Uno's
+//: solder mask rendered with a median colour of rgb(150, 166, 206) -- against
+//: the #313d63 = rgb(49, 61, 99) that `tools/compose_board_3d.py` read out of
+//: PICSimLab's artwork. THREE TIMES ITS OWN ALBEDO, which is why a navy board
+//: came out pale periwinkle and why the blacks came out grey: over-lighting
+//: does not brighten a picture, it desaturates it. At 0.62 of that the median
+//: is rgb(115, 129, 163), which is a lit navy rather than a washed-out one.
+//:
+//: The RATIO is what OH-86 measured and it is held to within one percent --
+//: 5.2/0.45 is 11.56 and 3.2/0.28 is 11.43 -- so the crevice contrast that
+//: ticket bought survives the rescale intact. Measured after: the tonal
+//: entropy of the close-up went 4.855 to 5.635 bits and the darkest tenth of
+//: the DIP-28 crop fell from 0.244 of its mean to 0.170.
+const LIGHT_TOTAL = 3.2;
 
 //: How much of the room's own brightness survives, as `scene.environmentIntensity`.
 //:
@@ -149,6 +164,12 @@ const LIGHT_TOTAL = 5.2;
 //:      0.45         35.54              0.234
 //:      0.30         33.91              0.223
 //:
+//: **Those shares were measured against `LIGHT_TOTAL` 5.2 and this is 0.28
+//: because both were then scaled by 0.62** -- see that constant, which explains
+//: why. The ratio between them is what this table is about and it is unchanged
+//: to within one percent; the absolute level is a different question and was a
+//: different mistake.
+//:
 //: **The knee is at 0.45, and the step past it is where this stops being free.**
 //: Two thirds of the available darkening has happened by then; the remaining
 //: third costs the metals the only thing they have to reflect, and at 0.30 the
@@ -156,7 +177,7 @@ const LIGHT_TOTAL = 5.2;
 //: plastic beside them -- which inverts the one relationship anybody can check
 //: against a real board. That last sentence is a judgement and is written as
 //: one. The numbers above it are not.
-const ENVIRONMENT_SHARE = 0.45;
+const ENVIRONMENT_SHARE = 0.28;
 
 //: The shadow map's resolution. 2,048 across a bounding sphere of about 45 mm
 //: is a texel every 44 um, which is finer than the 0.05 mm chord error every
@@ -228,6 +249,66 @@ const CHUNK_BIN = 0x004e4942;
 const FLOAT = 5126;
 const UNSIGNED_INT = 5125;
 
+//: The one glTF extension this reader understands.
+//:
+//: **A PCB is two layers and every other surface here is one.** Solder mask is
+//: pigmented epoxy under a cured, near-transparent surface: the pigment
+//: scatters and the surface over it reflects, which is why a board brightens
+//: as you tilt it and a moulded body does not. `MeshStandardMaterial` has one
+//: roughness and it has to describe the pigment, so the board had no sheen
+//: whatever the environment did.
+//:
+//: Read here rather than by vendoring `GLTFLoader`: this file's reader is
+//: deliberately the narrow slice `tools/import_3d_model.py` writes, and the
+//: extension is two numbers.
+const CLEARCOAT = "KHR_materials_clearcoat";
+
+//: What a solder mask is made of, for the board this file draws ITSELF.
+//:
+//: **Duplicated from `FINISHES` in `tools/import_3d_model.py` on purpose, and
+//: this is the one place that is defensible.** Every other material in this
+//: scene arrives inside a mesh file, measured, and this file only reads them.
+//: The extruded slab has no mesh and no measurement: it is drawn for a board
+//: nobody publishes a model of, so there is nothing to read it out of. Copying
+//: three numbers is better than importing a Python table into a browser or
+//: teaching the API to serve it, and
+//: `test_the_extruded_slab_is_the_same_substance_as_a_measured_one` is what
+//: stops the two drifting apart.
+const SOLDER_MASK = { roughness: 0.35, coat: 0.85, coatRoughness: 0.08 };
+
+/**
+ * One glTF material, as the three.js material it describes.
+ *
+ * **`MeshPhysicalMaterial` only where there is a coat to justify it.** It is a
+ * superset of `MeshStandardMaterial` and a more expensive shader, and every
+ * surface in this scene except the two solder masks is a single layer that the
+ * cheaper one describes exactly. Building the expensive one everywhere would
+ * cost the whole board to make two faces right.
+ */
+function surfaceOf(material, red, green, blue) {
+  const pbr = material.pbrMetallicRoughness;
+  const settings = {
+    // **The name is load-bearing.** `tools/import_3d_model.py` writes the
+    // colour there and `parts.js` finds a part's lens by it; three.js drops it
+    // silently if it is not asked for, and a part would then never light.
+    name: material.name ?? "",
+    color: new THREE.Color(red, green, blue),
+    roughness: pbr.roughnessFactor,
+    metalness: pbr.metallicFactor,
+    side: THREE.DoubleSide,
+  };
+  const coat = material.extensions?.[CLEARCOAT];
+  if (!coat) return new THREE.MeshStandardMaterial(settings);
+  return new THREE.MeshPhysicalMaterial({
+    ...settings,
+    clearcoat: coat.clearcoatFactor ?? 0,
+    // glTF's default is 0 when the key is absent, which is a mirror-flat coat.
+    // Written by the importer either way; defaulted here so a file from
+    // somewhere else cannot turn the board into glass by omission.
+    clearcoatRoughness: coat.clearcoatRoughnessFactor ?? 0,
+  });
+}
+
 /**
  * Read the narrow slice of glTF that `tools/import_3d_model.py` writes.
  *
@@ -292,16 +373,7 @@ function readGlb(buffer) {
 
     const material = json.materials[primitive.material];
     const [red, green, blue] = material.pbrMetallicRoughness.baseColorFactor;
-    group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
-      // **The name is load-bearing.** `tools/import_3d_model.py` writes the
-      // colour there and `parts.js` finds a part's lens by it; three.js drops
-      // it silently if it is not asked for, and a part would then never light.
-      name: material.name ?? "",
-      color: new THREE.Color(red, green, blue),
-      roughness: material.pbrMetallicRoughness.roughnessFactor,
-      metalness: material.pbrMetallicRoughness.metallicFactor,
-      side: THREE.DoubleSide,
-    })));
+    group.add(new THREE.Mesh(geometry, surfaceOf(material, red, green, blue)));
   }
   return { group, extras: json.asset.extras ?? {} };
 }
@@ -443,7 +515,29 @@ const SKY_BANDS = { around: 32, up: 24 };
 //: So there is no edge anywhere in this room now. `bright` is the centre and
 //: the rim falls to the ceiling's own luminance, so the disc has nothing to
 //: reflect but its own gradient.
-const SOFTBOX = { bright: 2.4, radius: 0.5, height: 0.62, segments: 48 };
+//:
+//: **SMALL AND FIERCE RATHER THAN WIDE AND MILD, WHICH IS WHAT A HIGHLIGHT
+//: IS.** It was radius 0.5 at 2.4, which at this height subtends about 78
+//: degrees of sky -- most of it. A coated board reflecting that gets a wash
+//: rather than a sheen, and the measurement is the same coat under two skies,
+//: switched on and off under each:
+//:
+//:      sky            board's brightest tenth, coat off -> on
+//:      radius 0.50        179.3 -> 181.6      +1.3%
+//:      radius 0.16        148.0 -> 172.2     +16.3%
+//:
+//: **Twelve times the effect from the same two numbers in `FINISHES`.** A coat
+//: can only return what is up there to be returned, so the source has to be
+//: compact before a specular layer means anything -- a real softbox covers
+//: perhaps 30 degrees and at 0.16 this one does. (The two pairs sit at
+//: different exposures, so only the WITHIN-pair percentages are controlled;
+//: those are the ones quoted.)
+//:
+//: `bright` rises with the square of the shrink so the room keeps roughly the
+//: light it had: 0.5 to 0.16 is a nineteenth of the area, and 2.4 to 18.0 is
+//: seven and a half times the intensity. The rest of the exposure is
+//: `LIGHT_TOTAL`'s to settle, and it does.
+const SOFTBOX = { bright: 18.0, radius: 0.16, height: 0.62, segments: 48 };
 
 /**
  * A room, prefiltered into one texture, so that metal has something to reflect.
@@ -757,10 +851,19 @@ export function showBoard(layout, model = null) {
   const width = layout.width * SCALE;
   const depth = layout.height * SCALE;
 
+  // **The same substance as a real board's, because it is claiming to be
+  // one.** This was roughness 0.85 and nothing else -- a matte dielectric --
+  // while the two composed boards' solder masks are 0.35 under a clear coat.
+  // A reader switching from a board with a model to one without should see a
+  // different SHAPE, which is what the caption says, and not different
+  // physics. The colour stays the palette's, because a board with no model has
+  // no measured colour to use and inventing one is what that caption refuses.
   const slab = new THREE.Mesh(
     new THREE.BoxGeometry(width, BOARD_THICKNESS, depth),
-    new THREE.MeshStandardMaterial({
-      color: view.palette.surface, roughness: 0.85, metalness: 0.0,
+    new THREE.MeshPhysicalMaterial({
+      color: view.palette.surface, roughness: SOLDER_MASK.roughness,
+      metalness: 0.0, clearcoat: SOLDER_MASK.coat,
+      clearcoatRoughness: SOLDER_MASK.coatRoughness,
     })
   );
   view.board = new THREE.Group();

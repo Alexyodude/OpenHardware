@@ -1291,3 +1291,68 @@ def test_a_board_is_brought_into_view_once_and_not_on_every_poll():
     assert len(guarded) == 2, "the scroll is not guarded by a board change"
     assert "scrollIntoView" in guarded[1].split("}", 1)[0]
     assert "let shown = null;" in panel
+
+
+# --- the coat, on the renderer's side ---------------------------------------
+
+
+def test_the_reader_understands_the_clearcoat_extension():
+    """**This file's glTF reader is its own, and narrow on purpose.**
+
+    `readModel` takes `baseColorFactor`, `metallicFactor` and `roughnessFactor`
+    and nothing else, so an extension the importer writes is invisible here
+    unless this file is taught it. A board whose coat was written and not read
+    would be a measurement travelling in a file that nothing opens.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    assert 'const CLEARCOAT = "KHR_materials_clearcoat";' in source
+    surface = source.split("function surfaceOf(", 1)[1].split("\n}", 1)[0]
+    assert "material.extensions?.[CLEARCOAT]" in surface
+    assert "clearcoat: coat.clearcoatFactor" in surface
+    assert "clearcoatRoughness: coat.clearcoatRoughnessFactor" in surface
+
+
+def test_the_expensive_material_is_built_only_where_there_is_a_coat():
+    """`MeshPhysicalMaterial` is a superset and a heavier shader.
+
+    Every surface in this scene except the two solder masks is a single layer
+    that `MeshStandardMaterial` describes exactly, and there are ten materials
+    on the Arduino Uno. Building the expensive one for all of them to make one
+    of them right is a cost with no picture behind it.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    surface = source.split("function surfaceOf(", 1)[1].split("\n}", 1)[0]
+    assert "if (!coat) return new THREE.MeshStandardMaterial(settings);" in surface
+    assert surface.count("MeshPhysicalMaterial") == 1
+
+
+def test_the_extruded_slab_is_the_same_substance_as_a_measured_one():
+    """A board with no model is a different SHAPE, not a different material.
+
+    The slab is drawn for a board nobody publishes a mesh of, and its caption
+    says exactly that. What it must not also say is that the substance changed:
+    it was a matte dielectric at roughness 0.85 while the two composed boards
+    were 0.35 under a clear coat, so switching boards switched physics.
+
+    The three numbers are duplicated from `FINISHES` in
+    `tools/import_3d_model.py` because the slab has no mesh to read them out
+    of -- and this is what stops the two copies drifting.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    mask = source.split("const SOLDER_MASK = {", 1)[1].split("};", 1)[0]
+    numbers = {key: float(value) for key, value in
+               re.findall(r"(\w+):\s*([\d.]+)", mask)}
+    assert numbers == {"roughness": 0.35, "coat": 0.85, "coatRoughness": 0.08}
+
+    from tools.import_3d_model import FINISHES
+
+    for colour in ("#313d63", "#116517"):
+        finish = FINISHES[colour]
+        assert (finish.roughness, finish.coat, finish.coat_roughness) == (
+            numbers["roughness"], numbers["coat"], numbers["coatRoughness"]
+        ), f"{colour} and the slab no longer agree about what a PCB is"
+
+    # And the slab really is built with them, rather than them being unused.
+    slab = source.split("const slab = new THREE.Mesh(", 1)[1].split(");", 1)[0]
+    assert "MeshPhysicalMaterial" in slab
+    assert "SOLDER_MASK.coat" in slab and "SOLDER_MASK.roughness" in slab

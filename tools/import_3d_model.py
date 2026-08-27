@@ -473,6 +473,21 @@ class Finish:
     metalness: float
     roughness: float
     why: str
+    #: How much of a clear coat sits over the colour, and how smooth it is.
+    #:
+    #: **A third number because two could not say what a PCB is.** Solder mask
+    #: is pigmented epoxy under a cured, near-transparent surface -- two layers
+    #: with different behaviour, and `metalness`/`roughness` describe one. A
+    #: single roughness has to be either the pigment's diffuse scatter or the
+    #: coat's specular, and it was set to the first, which is why the board had
+    #: no sheen and nothing to reflect however good the environment got.
+    #:
+    #: `KHR_materials_clearcoat` in the glTF, `MeshPhysicalMaterial` in
+    #: three.js. **Zero by default, so every entry written before this keeps
+    #: exactly the material it had**: a coat is a claim about a specific
+    #: substance and not a way of making things shiny.
+    coat: float = 0.0
+    coat_roughness: float = 0.0
 
 
 #: What a colour with no entry gets: exactly what every material got before
@@ -615,16 +630,45 @@ FINISHES: dict[str, Finish] = {
         "the tactile switch's moulded actuator, the other half of the TS42 "
         "pair. Carries the same caveat as #c6c4a0"
     )),
+    # -- the two solder masks, and the only two surfaces here with a COAT.
+    # **Because a PCB is two layers and everything else here is one.** The
+    # pigment scatters and the cured surface over it reflects, which is why a
+    # board brightens as you tilt it and a moulded body does not. `roughness`
+    # stays where it was -- it describes the pigment, and nothing about the
+    # pigment changed -- and `coat` is the layer that was missing.
+    #
+    # `coat_roughness` 0.08 rather than 0: a cured mask is not glass, it has
+    # the faint orange-peel of a screened coating, and a mirror-flat coat
+    # reflects the softbox as a hard disc instead of a sheen.
+    #
+    # **WHERE THE COAT SHOWS IS NOT WHERE IT WAS EXPECTED TO, AND THE
+    # EXPECTATION WAS WRONG RATHER THAN THE COAT.** OH-90 was filed predicting
+    # that a coat brightens a board at a GRAZING angle, which is what Fresnel
+    # does in the open air. Measured on the Uno's mask, switching the coat off
+    # and on and changing nothing else:
+    #
+    #     camera      board's brightest tenth, off -> on
+    #     top-down        148.0 -> 172.2     +16.3%
+    #     default         132.9 -> 132.7      nothing
+    #     oblique         132.3 -> 128.2      -3.1%
+    #
+    # A coat returns whatever lies in the MIRROR direction, and in this room
+    # the bright thing is overhead. So a flat board shows its coat when the
+    # camera is above it and loses a little when the camera drops, because the
+    # mirror direction then points at a wall dimmer than the ceiling. That is
+    # the same physics the prediction came from, applied to a room that has a
+    # ceiling -- and the number that matters is the 16%, because the top-down
+    # view is the one a reader lands on.
     "#313d63": Finish(0.0, 0.35, (
         "the Arduino Uno's solder mask. `tools/compose_board_3d.py` reads it "
         "out of PICSimLab's own artwork and says why in its header. Solder "
         "mask is a cured semi-gloss coating: far smoother than a moulded body "
         "and not a mirror"
-    )),
+    ), coat=0.85, coat_roughness=0.08),
     "#116517": Finish(0.0, 0.35, (
         "the SAMD21 board's solder mask, named in `board3d.js`'s "
         "`refreshTheme` in the same sentence as #ff9f37"
-    )),
+    ), coat=0.85, coat_roughness=0.08),
     "#c07635": Finish(0.0, 0.55, (
         "the axial resistor's lacquered body. **Named by geometry, which is "
         "the strongest reading available on a two-colour part**: measured "
@@ -985,7 +1029,7 @@ def write_glb(mesh: Mesh, path: pathlib.Path, chip: str, source: str,
         # same substance and nothing in the scene had a material identity.
         # `FINISHES` says which is which, and says what the evidence was.
         finish = finish_for(colour)
-        materials.append({
+        material: dict[str, object] = {
             "name": colour,
             "pbrMetallicRoughness": {
                 "baseColorFactor": [red, green, blue, 1.0],
@@ -993,7 +1037,20 @@ def write_glb(mesh: Mesh, path: pathlib.Path, chip: str, source: str,
                 "roughnessFactor": finish.roughness,
             },
             "doubleSided": True,
-        })
+        }
+        # The coat, and only for a surface that has one. Written as the
+        # registered `KHR_materials_clearcoat` rather than as a private key,
+        # so this file stays a glTF anything can read -- and absent entirely
+        # from a material with no coat, which is what "every other surface is
+        # byte-for-byte what it was" means mechanically.
+        if finish.coat:
+            material["extensions"] = {
+                "KHR_materials_clearcoat": {
+                    "clearcoatFactor": finish.coat,
+                    "clearcoatRoughnessFactor": finish.coat_roughness,
+                }
+            }
+        materials.append(material)
         primitives.append({
             "attributes": {"POSITION": len(accessors) - 3,
                            "NORMAL": len(accessors) - 2},
@@ -1024,6 +1081,12 @@ def write_glb(mesh: Mesh, path: pathlib.Path, chip: str, source: str,
         "scene": 0,
         "scenes": [{"nodes": [0]}],
         "nodes": [{"mesh": 0, "name": chip}],
+        # Declared only when something in this file uses it. `extensionsUsed`
+        # is a promise about the document, and a file listing an extension no
+        # material carries is a file that lies about itself in a way every
+        # validator will believe.
+        **({"extensionsUsed": ["KHR_materials_clearcoat"]}
+           if any("extensions" in material for material in materials) else {}),
         "meshes": [{"name": chip, "primitives": primitives}],
         "accessors": accessors,
         "bufferViews": views,
