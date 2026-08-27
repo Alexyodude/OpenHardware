@@ -399,6 +399,17 @@ function renderBench() {
     what.textContent = part.label;
     head.append(what);
 
+    // **The broken indicator, and it is a word rather than only a colour.**
+    // `parts.js` paints a destroyed lens `--halt`, which is a cue and not a
+    // claim: at the size a 5 mm LED is drawn, a broken red one and a lit red
+    // one are both red. This is the half a reader can be sure of.
+    if (part.destroyed) {
+      const badge = document.createElement("span");
+      badge.className = "bench-dead";
+      badge.textContent = "destroyed";
+      head.append(badge);
+    }
+
     for (const wire of joined.filter((w) => w.part === index)) {
       const chip = document.createElement("span");
       chip.className = "bench-wire";
@@ -420,7 +431,11 @@ function renderBench() {
 
     if (part.reason) {
       const why = document.createElement("p");
-      why.className = "bench-why";
+      // A destroyed part's reason IS the warning -- it names the limit that
+      // killed it -- so it is red rather than the quiet grey every other
+      // verdict gets. `circuit.js` clears `warning` in that case for the same
+      // reason: one sentence, not the same fact twice.
+      why.className = part.destroyed ? "bench-warn" : "bench-why";
       // The current comes first when there is one, because it is the number a
       // reader is here for and the rest of the sentence is why it is that.
       why.textContent = part.reason;

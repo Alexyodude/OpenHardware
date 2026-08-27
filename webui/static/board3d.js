@@ -271,6 +271,9 @@ function readPalette() {
     // STATE_VARIABLE.
     surface: read("--surface"),
     line: read("--line"),
+    // What "this went wrong" is in whichever theme is on. `parts.js` paints a
+    // part destroyed by its own absolute maximum with it.
+    halt: read("--halt"),
     states: Object.fromEntries(
       Object.entries(STATE_VARIABLE).map(([state, name]) => [state, read(name)])
     ),
@@ -1143,6 +1146,7 @@ export function parts() {
     amps: report[at]?.amps ?? null,
     reason: report[at]?.reason ?? "",
     warning: report[at]?.warning ?? null,
+    destroyed: part.userData.destroyed === true,
     pin: connectionOf(part),
   }));
 }
@@ -1380,6 +1384,13 @@ function applyCircuit() {
       label: part.userData.label,
       terminals: [...part.userData.terminals.keys()],
       model: part.userData.electrical,
+      // **The latch, and it lives here rather than in the solver.** `analyse`
+      // is a pure function of a bench and must stay one, or a test could not
+      // ask it about a fresh circuit and a ruined one without a clock between
+      // them. What persists across polls is the part object, which is this
+      // file's to own -- so the verdict goes out with the bench and comes back
+      // on the report, and this is the only line that remembers it.
+      destroyed: part.userData.destroyed === true,
     })),
     wires: view.wires
       .filter((wire) => wire.terminal)
@@ -1389,6 +1400,10 @@ function applyCircuit() {
   });
   view.circuit = report;
   for (const [at, part] of view.parts.entries()) {
+    // Set and never cleared: past an absolute maximum is permanent, and the
+    // only thing that undoes it is `removePart`, which is what a person does
+    // with a burnt LED.
+    if (report.parts[at].destroyed) part.userData.destroyed = true;
     setPartState(part, report.parts[at].drive, view.palette);
   }
 }

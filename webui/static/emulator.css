@@ -759,6 +759,22 @@ table.grid tr.dim td { opacity: 0.72; }
    same colour a pin driven high is drawn in. `off` and `unanswerable` keep the
    quiet default, because neither is news. */
 .bench-list li[data-drive="lit"] { border-color: var(--changed); }
+/* **A destroyed part outranks a lit one**, and it is the only row on this
+   bench with a filled ground. A part past its datasheet's absolute maximum is
+   not a state to notice among others; it is the row a reader has to see. */
+.bench-list li[data-drive="damaged"] {
+  border-color: var(--halt);
+  background: color-mix(in srgb, var(--halt) 8%, var(--surface));
+}
+.bench-dead {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--surface);
+  background: var(--halt);
+}
 .bench-head {
   display: flex;
   flex-wrap: wrap;

@@ -304,13 +304,30 @@ export function milliamps(amps) {
  * `{drive, amps, reason, warning}`. `drive` is one of `parts.js`'s three words.
  */
 export function analyse(bench) {
-  const report = bench.parts.map(() => ({
-    drive: "unanswerable", amps: null, reason: "not wired to anything", warning: null,
+  const report = bench.parts.map((part) => (part.destroyed ? {
+    // **Latched, and it has to be.** A blink drives a pin high and then low; a
+    // verdict that cleared on the next poll would show a destroyed LED as
+    // healthy half a second later, which is the same lie in a smaller window.
+    // It is also what an absolute maximum means -- past it is permanent -- so
+    // the only thing that clears this is taking the part off the bench, which
+    // is what a person does with a burnt LED.
+    drive: "damaged", amps: null, destroyed: true, warning: null,
+    reason: "destroyed earlier by more current than its absolute maximum. " +
+            "What a destroyed part does electrically is not modelled, so the " +
+            "circuit shown here is still the intact one",
+  } : {
+    drive: "unanswerable", amps: null, destroyed: false,
+    reason: "not wired to anything", warning: null,
   }));
   const answer = (note) => ({ ok: true, note, parts: report });
 
+  // **A destroyed part is out of the reporting from here on.** Its verdict is
+  // already decided and permanent; every branch below writes a verdict, so the
+  // set they iterate is the wired parts that are still alive.
   const wired = new Set();
-  for (const wire of bench.wires) wired.add(wire.part);
+  for (const wire of bench.wires) {
+    if (!report[wire.part]?.destroyed) wired.add(wire.part);
+  }
   for (const index of wired) report[index].reason = "";
 
   if (!bench.parts.length) return answer(null);
@@ -426,6 +443,22 @@ export function analyse(bench) {
                    "Nothing is being shown for it rather than a guess." };
   }
 
+  // **What each DRIVEN PIN carries, which is not what any one part carries.**
+  // Two LEDs across one pad each draw 25 mA and the pad delivers 51 mA, so a
+  // warning that measured the part's current against the pin's rating would
+  // understate the pin by half -- found while writing the test for it. The
+  // pin's own current comes straight out of the solve: for a pad driven high
+  // it is the Thevenin source's, `(rail - node) / sourceOhms`, and for one
+  // driven low it is `node / sinkOhms`.
+  const pinAmps = new Map();
+  for (const pad of bench.pads) {
+    if (pad.state !== "high" && pad.state !== "low") continue;
+    const volts = solved.volts[nodeOf(`pad:${pad.name}`)];
+    pinAmps.set(pad.name, pad.state === "high"
+      ? Math.abs(bench.supply.volts - volts) / bench.supply.sourceOhms
+      : Math.abs(volts) / bench.supply.sinkOhms);
+  }
+
   for (const [index, part] of bench.parts.entries()) {
     if (!wired.has(index)) continue;
     const entry = report[index];
@@ -476,7 +509,27 @@ export function analyse(bench) {
     entry.reason = entry.amps === null
       ? "conducting, but a part with no electrical model is in the same circuit"
       : `at least ${milliamps(amps)} through it`;
-    entry.warning = warn(amps, bench.supply);
+    // The busiest driven pin this part reaches. One part can touch two of
+    // them -- an LED from a high pad to a low one -- and the one that is
+    // closest to its limit is the one worth naming.
+    let pin = null;
+    for (const wire of bench.wires) {
+      if (wire.part !== index || !pinAmps.has(wire.pad)) continue;
+      const carrying = pinAmps.get(wire.pad);
+      if (!pin || carrying > pin.amps) pin = { name: wire.pad, amps: carrying };
+    }
+    entry.warning = warn(amps, bench.supply, model, pin);
+    // **The verdict, and it outranks the picture.** A part carrying more than
+    // its datasheet's absolute maximum is not a lit part with a caption -- it
+    // is a destroyed one, and drawing it glowing beside a paragraph saying so
+    // lets the picture win the disagreement.
+    const killed = assumed ? null : destroys(amps, model);
+    if (killed) {
+      entry.drive = "damaged";
+      entry.destroyed = true;
+      entry.reason = killed;
+      entry.warning = null;
+    }
   }
 
   return answer(assumed
@@ -504,17 +557,59 @@ function groundOf(wiring, pads) {
  * **Only ever too large.** Every resistance the caller supplies is the upper
  * bound a datasheet guarantees, so `amps` is a lower bound on the real current:
  * over a rating it is a fact, under one it says nothing.
+ *
+ * **A rated current and an absolute maximum are different claims**, and this is
+ * the distinction the whole of `damaged` rests on. A rated continuous current
+ * is what a part is sold against: past it is outside its specification and is
+ * not destruction. An absolute maximum is a stress rating, and the datasheets
+ * say what that means in as many words -- DS40002061B, over the table this
+ * repository reads the ATmega328P's 40.0 mA from: *"Stresses beyond those
+ * listed under Absolute Maximum Ratings may cause permanent damage to the
+ * device."* So one produces a sentence and the other produces a verdict.
  */
-function warn(amps, supply) {
+function warn(amps, supply, model, pin) {
+  const said = [];
+  if (model?.ratedAmps && amps > model.ratedAmps) {
+    said.push(`No current limiting: at least ${milliamps(amps)} through it, ` +
+              `past the ${milliamps(model.ratedAmps)} this part is rated for.`);
+  }
+  // **The PIN is measured by the pin's own current**, which is the sum of
+  // everything hanging off it and not this part's share. It is also a separate
+  // sentence because it is a separate object: the part may be inside its
+  // ratings while the pad driving it is not.
   const over = [];
-  if (supply.ratedAmps && amps > supply.ratedAmps) {
+  if (pin && supply.ratedAmps && pin.amps > supply.ratedAmps) {
     over.push(`the ${milliamps(supply.ratedAmps)} this board rates a pin for`);
   }
-  if (supply.absoluteAmps && amps > supply.absoluteAmps) {
+  if (pin && supply.absoluteAmps && pin.amps > supply.absoluteAmps) {
     over.push(`the ${milliamps(supply.absoluteAmps)} absolute maximum in the ` +
-              `${supply.chip}'s datasheet`);
+              `${supply.chip}'s datasheet, which is permanent`);
   }
-  if (!over.length) return null;
-  return `No current limiting: at least ${milliamps(amps)}, past ` +
-         `${over.join(" and past ")}. A real one of these would destroy the pin.`;
+  if (over.length) {
+    said.push(`Pin ${pin.name} carries at least ${milliamps(pin.amps)}, past ` +
+              `${over.join(" and past ")}.`);
+  }
+  return said.length ? said.join(" ") : null;
+}
+
+/**
+ * Whether this current destroys this part, and the sentence saying which limit.
+ *
+ * **Only an absolute maximum answers yes**, and a part that publishes none can
+ * never be declared destroyed here however much current it carries. That is not
+ * caution for its own sake: the claim is that a physical object is ruined, and
+ * the only number that supports it is the one whose datasheet says so.
+ *
+ * The arithmetic is safe in both directions at once. `amps` is a LOWER bound,
+ * because every resistance behind it is a datasheet's worst corner; the limit
+ * is an UPPER bound, because `tools/import_3d_model.py` picks the generous end
+ * of the band for exactly this. A lower bound over an upper bound holds under
+ * every reading of both.
+ */
+function destroys(amps, model) {
+  if (!model?.absoluteAmps || amps <= model.absoluteAmps) return null;
+  return `Destroyed: at least ${milliamps(amps)} through a part whose absolute ` +
+         `maximum is ${milliamps(model.absoluteAmps)}. Past an absolute ` +
+         `maximum is permanent, so it stays destroyed until it is taken off ` +
+         `the bench.`;
 }

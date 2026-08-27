@@ -86,7 +86,14 @@ const LIT_GAIN = 3.0;
 //: collapse the one distinction `webui/api.py`'s four-value vocabulary exists
 //: to keep. It reads as a part connected to nothing this page understands,
 //: which is the truth.
-export const DRIVES = ["lit", "off", "unanswerable"];
+//:
+//: **`damaged` is its own word and not `lit`**, and it is the one the user
+//: asked for: a part carrying more than its datasheet's absolute maximum is
+//: not a working part with a caption beside it. Drawing it glowing while a
+//: paragraph said it would be destroyed let the picture win the disagreement,
+//: which is the same defect as the ungrounded LED in a smaller window.
+//: `circuit.js`'s `destroys` decides it, and only an ABSOLUTE MAXIMUM can.
+export const DRIVES = ["lit", "off", "unanswerable", "damaged"];
 
 /**
  * Turn a loaded mesh into a part: terminals, state and a lens to light.
@@ -159,6 +166,10 @@ function electricalOf(extras) {
     forwardVolts: spec.forward_volts,
     seriesOhms: spec.series_ohms,
     ratedAmps: spec.rated_amps,
+    //: The only number that can license "destroyed". Absent for a part whose
+    //: datasheet publishes no absolute maximum, and then nothing here will
+    //: ever declare it dead however much current it carries.
+    absoluteAmps: spec.absolute_amps,
     note: spec.note,
     cited: spec.cited ?? {},
   };
@@ -221,6 +232,25 @@ export function setPartState(part, drive, palette) {
 
   if (drive === "unanswerable") {
     lens.material.color.copy(palette.line);
+    lens.material.emissive.set(0, 0, 0);
+    lens.material.emissiveIntensity = 0;
+    return;
+  }
+  if (drive === "damaged") {
+    // **`--halt`, flat and unlit.** Not the part's own colour darkened: `off`
+    // is already dark, so dark is taken, and a broken LED that looked like an
+    // LED which is merely not being driven would say nothing. `--halt` is
+    // DEFINED as the colour that means "this went wrong" in whichever theme is
+    // on, which is the contrast-not-lightness rule this file's neighbour
+    // documents at length -- a hex literal for "charred" would be right in one
+    // theme and invisible in the other.
+    //
+    // **Colour is the only channel there is at this size**, and it is not
+    // enough on its own: a 5 mm LED is a few dozen pixels and a broken red one
+    // and a lit red one are both red. The unambiguous statement is the panel's
+    // -- a row that says which limit killed it, with the badge beside it. This
+    // is the cue, not the claim.
+    lens.material.color.copy(palette.halt);
     lens.material.emissive.set(0, 0, 0);
     lens.material.emissiveIntensity = 0;
     return;

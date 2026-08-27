@@ -600,3 +600,89 @@ def test_the_bench_lists_parts_and_not_wires():
     assert "joined.filter((w) => w.part === index)" in bench, (
         "the wires are not being grouped onto the part they reach"
     )
+
+
+# --- the broken indicator ----------------------------------------------------
+
+
+def test_the_destroyed_verdict_is_latched_by_the_renderer_and_never_cleared():
+    """**Without the latch the indicator is a flicker, not an indicator.**
+
+    A blink drives pin 13 high and then low. `circuit.js` is pure and recomputes
+    from the circuit alone, so it is this file that has to remember: the verdict
+    goes out with the bench, comes back on the report, and is set once. Nothing
+    clears it but `removePart`, which is what a person does with a burnt LED.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    solve = source.split("function applyCircuit() {", 1)[1].split("\n}", 1)[0]
+    assert "destroyed: part.userData.destroyed === true," in solve, (
+        "the solver is not told which parts are already destroyed, so a "
+        "verdict would clear on the next state poll"
+    )
+    assert "if (report.parts[at].destroyed) part.userData.destroyed = true;" in solve
+    # Set and never unset. A line that wrote `false` anywhere would be a way
+    # back from permanent, and there is not supposed to be one.
+    assert "userData.destroyed = false" not in source
+
+
+def test_a_destroyed_part_is_painted_from_the_stylesheet():
+    """`--halt` is what "this went wrong" is in whichever theme is on.
+
+    A hex literal for "charred" would be right in one theme and invisible in
+    the other, which is the contrast-not-lightness trap this file's own state
+    ramp records twice. And it cannot reuse `off`: dark is already taken by a
+    part that is simply not being driven, and a broken LED that looked like one
+    would say nothing.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    palette = source.split("function readPalette() {", 1)[1].split("\n}", 1)[0]
+    assert 'halt: read("--halt")' in palette
+    parts = (STATIC / "parts.js").read_text(encoding="utf-8")
+    damaged = parts.split('if (drive === "damaged") {', 1)[1].split("  }", 1)[0]
+    assert "palette.halt" in damaged
+    assert "emissiveIntensity = 0" in damaged, (
+        "a destroyed part must not glow, whatever colour it is"
+    )
+    sheet = SHEET.read_text(encoding="utf-8")
+    assert "--halt:" in sheet
+
+
+def test_the_bench_says_destroyed_in_words_and_not_only_in_colour():
+    """At the size a 5 mm LED is drawn, a broken red one and a lit red one are
+    both red.
+
+    Colour is the only channel the 3D view has, so it is a cue rather than the
+    claim. The row carries the word, and the reason -- which names the limit
+    that killed it -- goes red rather than the quiet grey every other verdict
+    gets.
+    """
+    panel = PANEL.read_text(encoding="utf-8")
+    assert "if (part.destroyed) {" in panel
+    assert 'badge.textContent = "destroyed";' in panel
+    assert 'why.className = part.destroyed ? "bench-warn" : "bench-why";' in panel
+    sheet = SHEET.read_text(encoding="utf-8")
+    dead = sheet.split(".bench-dead {", 1)[1].split("}", 1)[0]
+    assert "var(--halt)" in dead
+    assert '.bench-list li[data-drive="damaged"]' in sheet
+
+
+def test_every_number_a_part_publishes_crosses_into_the_renderer():
+    """A parameter added to the part and not to `electricalOf` is dropped
+    silently.
+
+    That is not hypothetical: `absolute_amps` was added to `LED_ELECTRICAL`
+    while `webui/static/parts.js` still mapped three fields, and the page
+    carried an LED that could never be declared destroyed while every test went
+    on passing. Both sides are checked from the Python table, so a new number
+    fails here rather than disappearing in transit.
+    """
+    from tools.import_3d_model import PARTS
+
+    parts = (STATIC / "parts.js").read_text(encoding="utf-8")
+    published = [part for part in PARTS if part.electrical is not None]
+    assert published, "no part publishes an electrical model, so this proves nothing"
+    for part in published:
+        for name in part.electrical.cited:
+            assert f"spec.{name}" in parts, (
+                f"{part.name} publishes {name} and parts.js never reads it"
+            )

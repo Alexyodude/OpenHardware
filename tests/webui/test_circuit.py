@@ -54,10 +54,29 @@ UNO = {
 }
 
 #: A 5 mm LED as `tools/import_3d_model.py`'s `LED_ELECTRICAL` describes it.
+#:
+#: **`absoluteAmps` is the only one taken at the generous end of its band**, and
+#: the inversion is deliberate: the other two make the computed CURRENT a lower
+#: bound, this makes the LIMIT an upper bound, so "past it" holds under every
+#: reading of both. It is also the only number that can license the word
+#: `damaged`.
 LED = {
     "label": "5 mm LED", "terminals": ["cathode", "anode"],
     "model": {"kind": "diode", "from": "anode", "to": "cathode",
-              "forwardVolts": 2.2, "seriesOhms": 30.0, "ratedAmps": 0.020},
+              "forwardVolts": 2.2, "seriesOhms": 30.0, "ratedAmps": 0.020,
+              "absoluteAmps": 0.030},
+}
+
+#: How `webui/static/parts.js` spells each of `LED_ELECTRICAL`'s numbers on the
+#: other side of the glTF. Listed so that a parameter added to the part without
+#: a name here fails a test rather than being silently dropped in transit --
+#: which is what happened to `absolute_amps` on the first pass, and every test
+#: in this file went on passing against an LED the page no longer loads.
+JS_NAME = {
+    "forward_volts": "forwardVolts",
+    "series_ohms": "seriesOhms",
+    "rated_amps": "ratedAmps",
+    "absolute_amps": "absoluteAmps",
 }
 
 #: An Uno's power and digital pads, as `webui/api.py` sends them. **Three GND
@@ -134,11 +153,15 @@ def test_an_led_with_one_leg_in_mid_air_does_not_light(tmp_path):
     assert "cathode" in got["reason"]
 
 
-def test_an_led_wired_to_ground_lights(tmp_path):
-    """The other half of the same report: a complete circuit still works.
+def test_an_led_wired_to_ground_conducts(tmp_path):
+    """The other half of the same report: a complete circuit still carries
+    current.
 
     A fix that made everything dark would satisfy the test above and be worse
-    than the bug.
+    than the bug. **It does not come out `lit`**, and that is not this test's
+    subject -- 40 mA through a part whose absolute maximum is 30 destroys it,
+    which `test_a_part_past_its_absolute_maximum_is_destroyed` is about. What
+    is asserted here is that the circuit closed and current flowed.
     """
     got = run(tmp_path, bench("""[
         {pad: "13", part: 0, terminal: "anode"},
@@ -146,8 +169,29 @@ def test_an_led_wired_to_ground_lights(tmp_path):
     ]""") + """
         console.log(JSON.stringify(report.parts[0]));
     """)
-    assert got["drive"] == "lit"
+    assert got["drive"] != "off"
     assert got["amps"] > 0.02
+
+
+def test_a_complete_circuit_inside_every_rating_is_simply_lit(tmp_path):
+    """And this is the one that shows a working LED, which is the point.
+
+    Two in series on one pin draw 6 mA -- under the part's rating, under the
+    board's, under every absolute maximum. No verdict, no warning, just a lit
+    LED, which is what the bench is for.
+    """
+    got = run(tmp_path, """
+        const report = analyse({supply: UNO, pads: PADS, parts: [LED, LED], wires: [
+          {pad: "13",  part: 0, terminal: "anode"},
+          {pad: "j",   part: 0, terminal: "cathode"},
+          {pad: "j",   part: 1, terminal: "anode"},
+          {pad: "GND", part: 1, terminal: "cathode"},
+        ]});
+        console.log(JSON.stringify(report.parts));
+    """)
+    assert [part["drive"] for part in got] == ["lit", "lit"]
+    assert [part["destroyed"] for part in got] == [False, False]
+    assert [part["warning"] for part in got] == [None, None]
 
 
 def test_an_led_wired_backwards_does_not_light(tmp_path):
@@ -243,7 +287,9 @@ def test_a_pin_sinking_from_the_rail_lights_it_too(tmp_path):
     """)
     want = (UNO["volts"] - LED["model"]["forwardVolts"]) / (
         LED["model"]["seriesOhms"] + UNO["sinkOhms"])
-    assert got["drive"] == "lit"
+    # 37 mA is past this LED's 30 mA absolute maximum too, so the verdict is
+    # the same as sourcing. The current is what this test is about.
+    assert got["drive"] == "damaged"
     assert abs(got["amps"] - want) < 1e-9
 
 
@@ -401,7 +447,10 @@ def test_the_three_ground_pads_are_one_net(tmp_path):
         ]});
         console.log(JSON.stringify(report.parts[0]));
     """)
-    assert got["drive"] == "lit"
+    # It conducts, which is the whole question here: an LED returned to the
+    # wrong one of three GND pads would have found no path at all.
+    assert got["drive"] != "off"
+    assert got["amps"] > 0.02
 
 
 def test_a_pad_this_repository_cannot_answer_for_stays_unanswerable(tmp_path):
@@ -529,28 +578,57 @@ def test_shorting_a_supply_to_ground_is_refused_rather_than_solved(tmp_path):
     assert got["part"]["drive"] != "lit"
 
 
-def test_the_warning_names_the_rating_it_passed(tmp_path):
-    """**The payoff the whole exercise was for.**
+def test_a_part_over_its_rating_and_inside_its_absolute_maximum_is_warned(tmp_path):
+    """**Warned, and not condemned.** The two limits are different claims.
 
-    An LED straight across a pin with no series resistor draws forty
-    milliamps by the most pessimistic reckoning available, against the twenty
-    Arduino rates an UNO pin for. The page says that in words, with both
-    numbers in it, rather than lighting it prettily.
+    Two LEDs in parallel across one pin draw 25 mA each: past the 20 mA a 5 mm
+    indicator is sold against, and short of the 30 mA absolute maximum. So they
+    are lit with a sentence, not destroyed, which is what the datasheet
+    supports and is the distinction the whole of `damaged` rests on.
 
-    And it says it only in that direction: every resistance in `UNO` is the
-    upper bound a datasheet guarantees, so the current is a lower bound — over
-    a rating is a fact, under one is not a clean bill of health.
+    Only in that direction: every resistance behind the current is a
+    datasheet's worst corner, so it is a lower bound. Over a rating is a fact,
+    under one is not a clean bill of health.
     """
-    got = run(tmp_path, bench("""[
-        {pad: "13", part: 0, terminal: "anode"},
-        {pad: "GND", part: 0, terminal: "cathode"},
-    ]""") + """
+    got = run(tmp_path, """
+        const report = analyse({supply: UNO, pads: PADS, parts: [LED, LED], wires: [
+          {pad: "13", part: 0, terminal: "anode"},
+          {pad: "GND", part: 0, terminal: "cathode"},
+          {pad: "13", part: 1, terminal: "anode"},
+          {pad: "GND", part: 1, terminal: "cathode"},
+        ]});
         console.log(JSON.stringify(report.parts[0]));
     """)
-    assert got["warning"]
-    assert "20 mA" in got["warning"]
-    assert "40 mA" in got["warning"]
+    assert got["drive"] == "lit"
+    assert got["destroyed"] is False
+    assert "past the 20 mA this part is rated for" in got["warning"]
     assert "limiting" in got["warning"]
+
+
+def test_the_warning_measures_a_pin_by_the_pins_own_current(tmp_path):
+    """**A pin carries what everything on it draws, not what one part draws.**
+
+    Two LEDs across pad 13 take 25 mA each and the pad delivers 51 mA. A
+    warning that compared one part's 25 mA against the pin's ratings would say
+    the pin was inside its absolute maximum when it is past it by a quarter.
+    Found while writing the test above, by no assertion that existed.
+
+    The two sentences are separate because the two objects are: the part is
+    inside its own absolute maximum here and the pin driving it is not.
+    """
+    got = run(tmp_path, """
+        const report = analyse({supply: UNO, pads: PADS, parts: [LED, LED], wires: [
+          {pad: "13", part: 0, terminal: "anode"},
+          {pad: "GND", part: 0, terminal: "cathode"},
+          {pad: "13", part: 1, terminal: "anode"},
+          {pad: "GND", part: 1, terminal: "cathode"},
+        ]});
+        console.log(JSON.stringify({one: report.parts[0].amps,
+                                    warning: report.parts[0].warning}));
+    """)
+    assert got["one"] < UNO["absoluteAmps"]
+    assert "Pin 13 carries at least 51 mA" in got["warning"]
+    assert "40 mA absolute maximum" in got["warning"]
 
 
 def test_a_current_inside_every_rating_raises_nothing(tmp_path):
@@ -636,7 +714,9 @@ def test_the_answer_does_not_depend_on_the_order_the_wires_were_made(tmp_path):
     """)
     assert got["orders"] == 24
     assert got["answers"] == 1
-    assert [part["drive"] for part in got["one"]] == ["lit", "lit"]
+    # Both are past their absolute maximum on these wires, and the point is
+    # that all twenty-four orderings agree rather than which word it is.
+    assert [part["drive"] for part in got["one"]] == ["damaged", "damaged"]
 
 
 def test_a_bench_with_nothing_on_it_is_not_an_error(tmp_path):
@@ -717,11 +797,16 @@ def test_the_led_the_page_loads_carries_the_parameters_the_tests_use():
     here fiction.
     """
     from tools.import_3d_model import LED_ELECTRICAL, PARTS
-    values = {name: value for name, (value, _why) in LED_ELECTRICAL.cited.items()}
     assert LED_ELECTRICAL.kind == LED["model"]["kind"]
     assert list(LED_ELECTRICAL.forward) == [LED["model"]["from"], LED["model"]["to"]]
-    assert values["forward_volts"] == LED["model"]["forwardVolts"]
-    assert values["series_ohms"] == LED["model"]["seriesOhms"]
+    # **Every published number, not a chosen few.** The first version checked
+    # two of them by name; `absolute_amps` was then added to the part and none
+    # of the twenty-odd tests here noticed they were exercising an LED the page
+    # no longer loads. A check made insensitive to a difference cannot report
+    # it, and the difference here is "a parameter appeared".
+    for name, (value, _why) in LED_ELECTRICAL.cited.items():
+        assert name in JS_NAME, f"{name} has no spelling on the JavaScript side"
+        assert LED["model"][JS_NAME[name]] == value, name
     # And every LED in the catalogue has one, while the buzzer deliberately
     # does not -- see its comment, and `test_a_part_with_no_electrical_model`.
     for part in PARTS:
@@ -730,3 +815,135 @@ def test_the_led_the_page_loads_carries_the_parameters_the_tests_use():
         if published:
             for name, (_value, why) in part.electrical.cited.items():
                 assert len(why) > 40, f"{part.name}: {name} has no real citation"
+
+
+# --- a part past its absolute maximum ---------------------------------------
+
+
+def test_a_part_past_its_absolute_maximum_is_destroyed_not_lit(tmp_path):
+    """**The user's second report, and it is the picture disagreeing with the
+    words.**
+
+    Verbatim: *"you should calculate the current that's flowing through and put
+    a broken indicator for the broken item according to the datasheet."* The
+    current was already calculated and the part was still drawn glowing beside
+    a paragraph saying it would be destroyed. When a picture and a caption
+    disagree the picture wins, which is the same defect as the ungrounded LED
+    in a smaller window.
+
+    40.0 mA against a 30 mA absolute maximum, and the sentence names both.
+    """
+    got = run(tmp_path, bench("""[
+        {pad: "13", part: 0, terminal: "anode"},
+        {pad: "GND", part: 0, terminal: "cathode"},
+    ]""") + """
+        console.log(JSON.stringify(report.parts[0]));
+    """)
+    assert got["drive"] == "damaged"
+    assert got["destroyed"] is True
+    assert "Destroyed" in got["reason"]
+    assert "30 mA" in got["reason"]
+    assert "40 mA" in got["reason"]
+    # One sentence, not the same fact twice: the verdict replaces the warning.
+    assert got["warning"] is None
+
+
+def test_only_an_absolute_maximum_can_declare_a_part_destroyed(tmp_path):
+    """A rated current is what a part is sold against; it is not destruction.
+
+    A part that publishes no absolute maximum can be warned about and can never
+    be condemned here, however much current it carries. The claim is that a
+    physical object is ruined, and the only number that supports it is the one
+    whose datasheet says so.
+    """
+    got = run(tmp_path, """
+        const bare = JSON.parse(JSON.stringify(LED));
+        delete bare.model.absoluteAmps;
+        const report = analyse({supply: UNO, pads: PADS, parts: [bare], wires: [
+          {pad: "13", part: 0, terminal: "anode"},
+          {pad: "GND", part: 0, terminal: "cathode"},
+        ]});
+        console.log(JSON.stringify(report.parts[0]));
+    """)
+    assert got["drive"] == "lit"
+    assert got["destroyed"] is False
+    assert "past the 20 mA this part is rated for" in got["warning"]
+
+
+def test_a_destroyed_part_stays_destroyed_when_the_pin_goes_low(tmp_path):
+    """**The latch, and without it the indicator would be a flicker.**
+
+    A blink drives pin 13 high and then low. A verdict recomputed from the
+    circuit alone would show a destroyed LED as merely dark half a second
+    later, which is the same lie in a smaller window -- and it is what an
+    absolute maximum MEANS: past it is not reversible.
+
+    The caller carries the latch, so this asserts the contract rather than a
+    clock: a bench whose part arrives `destroyed` stays destroyed on a pin that
+    is driven low, and its current is not reported, because what a burnt LED
+    does electrically is not something this can say.
+    """
+    got = run(tmp_path, """
+        const dead = {...LED, destroyed: true};
+        const quiet = [{name: "13", state: "low"}, {name: "GND", state: "unknown"}];
+        const report = analyse({supply: UNO, pads: quiet, parts: [dead], wires: [
+          {pad: "13", part: 0, terminal: "anode"},
+          {pad: "GND", part: 0, terminal: "cathode"},
+        ]});
+        console.log(JSON.stringify(report.parts[0]));
+    """)
+    assert got["drive"] == "damaged"
+    assert got["destroyed"] is True
+    assert got["amps"] is None
+    assert "destroyed earlier" in got["reason"]
+    assert "not modelled" in got["reason"]
+
+
+def test_a_destroyed_part_is_not_revived_by_unwiring_it(tmp_path):
+    """Taking the wires off a burnt LED does not unburn it.
+
+    `disconnect` re-solves, and every other part goes back to being one nothing
+    can be said about. This one does not, and the only thing that clears it is
+    taking it off the bench -- which is what a person does with a burnt LED.
+    """
+    got = run(tmp_path, """
+        const dead = {...LED, destroyed: true};
+        const report = analyse({supply: UNO, pads: PADS, parts: [dead], wires: []});
+        console.log(JSON.stringify(report.parts[0]));
+    """)
+    assert got["drive"] == "damaged"
+    assert got["destroyed"] is True
+
+
+def test_three_parts_inside_their_ratings_can_still_overload_the_pin(tmp_path):
+    """**The case that separates the two objects completely.**
+
+    Three LEDs across one pad draw 18.7 mA each -- under the 20 mA a 5 mm
+    indicator is sold against, under its 30 mA absolute maximum, so not one of
+    them is warned about and not one is destroyed. The pad delivers 56 mA,
+    past everything the ATmega328P publishes.
+
+    So the whole warning is about the pin, and it is the case that catches a
+    version of `warn` measuring the pin's ratings against a part's current:
+    18.7 mA is inside both of them and the sentence would lose half its
+    clauses. Found by mutation on 2026-08-27, when the two-LED case turned out
+    to fire the same clause either way.
+    """
+    got = run(tmp_path, """
+        const parts = [LED, LED, LED];
+        const wires = parts.flatMap((_, at) => [
+          {pad: "13", part: at, terminal: "anode"},
+          {pad: "GND", part: at, terminal: "cathode"},
+        ]);
+        const report = analyse({supply: UNO, pads: PADS, parts, wires});
+        console.log(JSON.stringify(report.parts));
+    """)
+    assert [part["drive"] for part in got] == ["lit", "lit", "lit"]
+    assert [part["destroyed"] for part in got] == [False, False, False]
+    for part in got:
+        # Every one of them is inside its own rating, so nothing is said about
+        # the parts at all -- the whole sentence is the pin's.
+        assert part["amps"] < LED["model"]["ratedAmps"]
+        assert "this part is rated for" not in part["warning"]
+        assert "past the 20 mA this board rates a pin for" in part["warning"]
+        assert "40 mA absolute maximum" in part["warning"]

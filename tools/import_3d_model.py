@@ -885,9 +885,26 @@ LED_ELECTRICAL = Electrical(
         )),
         "rated_amps": (0.020, (
             "the continuous forward current a 5 mm indicator LED is sold "
-            "against. Recorded for completeness -- the warning the page "
-            "actually raises is about the PIN, whose ratings are read out of a "
-            "datasheet in `webui/boards/atmega328p.py` rather than assumed here"
+            "against. A WARNING and not a death sentence -- see "
+            "`absolute_amps`, which is the one that licenses the page to say a "
+            "part is destroyed"
+        )),
+        #: **This one is taken at the GENEROUS end of its band, and the
+        #: inversion is the point.** The two numbers above are each chosen to
+        #: make the computed CURRENT a lower bound; this is chosen to make the
+        #: LIMIT an upper bound. So "a lower-bound current exceeds an
+        #: upper-bound limit" holds under every reading of both, which is what
+        #: makes a destruction claim safe to print. Choosing 20 mA here instead
+        #: would condemn parts that a more generous datasheet allows.
+        "absolute_amps": (0.030, (
+            "the top of the 20-30 mA DC absolute maximum a 5 mm through-hole "
+            "indicator LED is built to. A class value like the two above, and "
+            "the ONLY one taken at the generous end of its range -- because it "
+            "is a limit rather than a term in the current, so an upper bound "
+            "here is what makes 'past this' true under any reading. An "
+            "absolute maximum is a stress rating: DS40002061B's own wording "
+            "over the equivalent table is that stresses beyond it 'may cause "
+            "permanent damage to the device'"
         )),
     },
     note=(
