@@ -2,7 +2,7 @@
 id: OH-77
 title: 'The barrel jack pointed into the board, and nothing could see it: check placements
   against the vendor''s silkscreen'
-status: open
+status: done
 priority: P2
 created: '2026-08-27'
 touches:
@@ -30,3 +30,19 @@ THE SIGN OF THE FLIP WAS ALSO CHECKED, and separately, because the silk check an
 Done when `silk_miss` is computed for every placed component, a placement more than 1.5 mm from the vendor's drawn body is refused by name rather than drawn, X1 is at turn 270 and the Uno's barrel jack overhangs its left edge in a browser.
 
 NOT IN THIS TICKET: packages that draw no silkscreen, which get no check and say so by returning None -- every one on this board draws one; and circles or rectangles on the silk layers, which no package in this tree uses for a body and which would give a partial extent that looks complete.
+
+**Note 2026-08-27:** CLOSED 2026-08-27 in 100c13c. The barrel jack faces out over the board's edge, every placement is checked against the vendor's own silkscreen, and the worst miss across fifteen components is 0.40 mm.
+
+THE GENERALISATION, WHICH IS THE ONLY THING HERE WORTH CARRYING FORWARD: a part whose pins are symmetric about their own centre can be 180 degrees out and satisfy EVERY measurement taken from those pins. Three checks existed and all three were pad-based -- confirm() compares a footprint to the pad span, place() anchors the legs on the pad centre, and both leg tests compare the result back to the same pads. Each was written after a real bug and each is still right; they simply cannot see this class, because the thing they measure is invariant under it.
+
+SO THE EVIDENCE HAD TO COME FROM SOMEWHERE ELSE, and it was in the same file all along. The pads say where the pins are; the silkscreen says where the BODY is. Both are the vendor's, both go through the same placement transform, and neither comes from a table written here. Against it the four candidate turns for X1 miss by 5.36, 7.50, 5.35 and 0.01 mm. There is no ambiguity to resolve by taste.
+
+THE HABIT THIS SUGGESTS: when a check keeps passing, ask what it is invariant under rather than whether it is strict enough. Tightening the pad tolerance to a micron would not have caught this, ever.
+
+MEASURED BEFORE AND AFTER. Before: fourteen of fifteen agreed with the silk to 0.40 mm, X1 at 7.50. After: worst 0.40, and that one is X2, the USB socket modelled in OH-76 -- its body is this project's drawing measured against the vendor's courtyard, so a small disagreement is the honest outcome rather than a defect to chase.
+
+THE FLIP'S SIGN WAS CHECKED SEPARATELY, because silk_miss and place could in principle share an error and cancel. The board JSON's pad map is in ARTWORK pixels and was verified against the vendor's file to 0.008 mm in 2a80c94; putting it into the scene's frame WITHOUT reusing place()'s flip, each header encloses the pads the page draws on it -- IOL spans x 3.30..23.62 with pad 0 at 22.35, IOH spans -23.62..1.78 with pad 13 at -12.20, AD and POWER likewise. Two transforms sharing no code and agreeing is what makes the flip right rather than consistently wrong. Nine assertions against the documented Uno layout pass too.
+
+6 new tests. Seven mutations, all caught, after one round in which 'the silk check is never enforced' SURVIVED: every test called silk_miss itself and none drove compose(), so the raise was untested. A measurement nothing acts on is worth nothing -- the guard is driven directly now, with the jack put back to its wrong turn.
+
+NOT IN THIS TICKET: packages that draw no silkscreen get no check and say so by returning None -- every package on this board draws one, so that path is pinned by a synthetic test rather than by the Uno; and circles or rectangles on the silk layers, which no package in this tree uses for a body and which would give a partial extent that looks complete.
