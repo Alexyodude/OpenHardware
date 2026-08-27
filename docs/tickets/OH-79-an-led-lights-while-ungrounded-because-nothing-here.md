@@ -1,7 +1,7 @@
 ---
 id: OH-79
 title: An LED lights while ungrounded, because nothing here solves a circuit
-status: in-progress
+status: done
 priority: P2
 created: '2026-08-27'
 touches:
@@ -144,3 +144,17 @@ DONE WHEN, and each of these is a browser check as well as a test: an LED wired
 from D13 with its other leg in mid-air does NOT light; wiring that leg to GND
 lights it; reversing the two legs stops it; and the page states the current
 with the rating it is measured against.
+
+**Note 2026-08-27:** CLOSED 2026-08-27 in 08b1fb7. An LED needs a complete circuit, in the right direction, before it lights -- verified in Chromium against a running blink with pin 13 genuinely high, not against a stopped board where every pad reads `input` and an LED would be dark either way.
+
+THE GENERALISATION: a check that reads ONE input cannot notice that a second one is missing. `applyState` looked up the pad a wire came from and drove the part with its level; every case it was ever tried on had both legs wired, so it was right for a year by the shape of its inputs rather than by anything in it. The one-legged case was not a corner it handled badly -- it was a question it never asked.
+
+THE DESIGN THAT MADE THE NUMBERS SAFE, and it is the transferable part. Every resistance is derived from the WORST corner a datasheet guarantees: a minimum output voltage is a maximum output resistance, so the current computed through it is a LOWER bound on the real one. That asymmetry decides what may be said. A lower bound over a rating is a fact; a lower bound under one is not a clean bill of health. So the page warns and never reassures, and `circuit.js`'s header says so before any code.
+
+READ, NOT RECALLED. DS40002061B pages 322-323 for the ATmega328P's 40.0 mA absolute maximum and its VOL/VOH at 20 mA; DS40001882L page 916 for the SAM D21's, and page 906 for the fact that it states no per-pin absolute maximum AT ALL -- its limit is 46 mA source per CLUSTER, so that field is null rather than filled in with something plausible. Arduino's own `tech-specs.yml` in `arduino/docs-content` for the UNO's 5 V and 20 mA. Both PDFs were downloaded and read; `pdftotext -layout` and `grep` is enough and took four minutes.
+
+AND THE ONE NUMBER THAT COULD NOT BE SOURCED SAYS SO. KiCad's LED mesh is generic -- no manufacturer, no order code, no datasheet. Its forward drop and series resistance are CLASS values for a red indicator LED, each taken at the end of its range that keeps the bound a lower one (2.2 V of 1.8-2.2, 30 ohm of 10-30), and labelled as class values beside citations that are not. A part number would be strictly better.
+
+MUTATION TESTING FOUND TWO REAL WEAK TESTS out of 23 mutations, and both were the same shape: a circuit that cannot distinguish the fault. An LED from an INPUT pin to GROUND is dark whether that pin is high impedance or a dead short, and a reversed diode reads off through its current's sign whether or not the model blocks it. Both are wired from the RAIL now, where the two answers differ. The other two survivors were greps that matched a name inside a branch the mutation had turned off.
+
+NOT IN THIS TICKET, and the first is what a reader will want next: OH-80, a resistor on the bench, so the circuit the warning asks for can actually be built. Also unchanged: a part driving a pin, which still needs PINB/PINC/PIND and PORT_IN; AC, so no buzzer that sounds; and the lighting, which is still two lights and no shadows on a scene with fifteen objects.
