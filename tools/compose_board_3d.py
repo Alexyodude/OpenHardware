@@ -193,12 +193,17 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "POWERSUPPLY_DC-21MM", "Connector_BarrelJack", "BarrelJack_Horizontal",
-        "X1's nine through-hole pads span 5.99 x 5.77 mm and the vendor's own "
-        "package silk is 11.80 x 15.75 mm -- a 2.1 mm barrel jack. The model "
-        "is 14.20 x 9.30 x 14.60 mm. It is anchored on its LEGS rather than "
-        "its body, which is the whole reason `place` learned to do that: a "
-        "barrel is entirely to one side of its pins.",
-        turn=90.0,
+        "X1's nine through-hole pads span 5.99 x 5.77 mm and the vendor draws "
+        "its body from x -5.08 to 3.91 and y -6.35 to 7.14. The model is "
+        "14.20 x 9.30 x 14.60 mm. It is anchored on its LEGS rather than its "
+        "body, which is the whole reason `place` learned to do that: a barrel "
+        "is entirely to one side of its pins. "
+        "**270 and not 90, and every other check said 90 was fine.** Anchored "
+        "on pins that are symmetric about their own centre, a jack turned "
+        "180 degrees measures perfectly and points its barrel INTO the board. "
+        "Against the vendor's silkscreen the four turns miss by 5.36, 7.50, "
+        "5.35 and 0.01 mm, so the right one is not a matter of taste.",
+        turn=270.0,
     ),
     Component(
         "MLF32", "Package_DFN_QFN", "QFN-32-1EP_5x5mm_P0.5mm_EP3.3x3.3mm",
@@ -648,6 +653,56 @@ def confirm(element: eagle.Element, box, turn: float,
     return None
 
 
+#: How far a placed body may sit from where the vendor drew it before the
+#: placement is refused. A body and a silkscreen are different outlines -- one
+#: is the part and one is a drawing of where it goes -- so they do not agree
+#: exactly. 1.5 mm is loose against the 0.40 mm worst case among the fourteen
+#: parts that were right, and tight against the 7.50 mm of the one that was not.
+SILK_TOLERANCE_MM = 1.5
+
+
+def silk_miss(element: eagle.Element, put: Mesh,
+              centre: tuple[float, float]) -> float | None:
+    """How far the placed mesh sits from the body the vendor drew, in mm.
+
+    `None` where the package has no silkscreen and there is nothing to compare.
+
+    **This is the check that knows which way a part faces**, and it exists
+    because nothing else did. `confirm` measures a model against the pads, and
+    `place` anchors it on them -- both of which are blind to a part turned
+    180 degrees, because a pin field is very often symmetric about its own
+    centre. The Arduino Uno's barrel jack was exactly that: every earlier check
+    passed while its barrel pointed into the board instead of out over the
+    edge, 7.50 mm from where Arduino's own silkscreen puts it.
+
+    The silkscreen is the vendor saying where the body goes, in the same file
+    as the pads and transformed the same way, so this compares two things that
+    both came from the vendor and neither from a table written here.
+    """
+    if element.silk is None:
+        return None
+    x0, y0, x1, y1 = element.silk
+    spelling = ("MR" if element.mirrored else "R") + str(int(element.rotation))
+    corners = [eagle.place(cx, cy, (element.x_mm, element.y_mm), spelling)
+               for cx, cy in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+    drawn_x = [c[0] for c in corners]
+    drawn_y = [c[1] for c in corners]
+
+    # Back out of the scene's frame into the board's, undoing only the centring
+    # and the z flip -- so a sign error in `place` shows up here rather than
+    # cancelling.
+    mesh_x = [p[at] + centre[0]
+              for _c, (p, _n, _i) in put.groups.items()
+              for at in range(0, len(p), 3)]
+    mesh_y = [-p[at + 2] + centre[1]
+              for _c, (p, _n, _i) in put.groups.items()
+              for at in range(0, len(p), 3)]
+    return max(
+        abs((min(drawn_x) + max(drawn_x)) / 2 - (min(mesh_x) + max(mesh_x)) / 2),
+        abs((min(drawn_y) + max(drawn_y)) / 2 - (min(mesh_y) + max(mesh_y)) / 2),
+    )
+
+
 def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
           centre: tuple[float, float]) -> Mesh:
     """Move a component's mesh onto the board, the way its pads were moved.
@@ -799,6 +854,15 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 f"but {complaint}. Fix the table rather than the tolerance."
             )
         put = place(mesh, element, component.turn, spec.thickness_mm, centre)
+        miss = silk_miss(element, put, centre)
+        if miss is not None and miss > SILK_TOLERANCE_MM:
+            raise SystemExit(
+                f"{spec.board}: {element.name} ({element.package}) lands "
+                f"{miss:.2f} mm from the body Arduino's own silkscreen draws "
+                f"there, which is more than {SILK_TOLERANCE_MM} mm. Almost "
+                f"always a `turn` that is 180 degrees out: the pins are "
+                f"symmetric so every other check passes. Try the other three."
+            )
         pieces.append(put)
         drawn.append(f"{element.name} ({component.model})")
         if component.modelled:

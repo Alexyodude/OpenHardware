@@ -30,6 +30,7 @@
 #     on pin 1 and EAGLE in the middle of the pin field, which walked the
 #     6-pin analog header 2.54 mm off the end of the board.
 
+import dataclasses
 import json
 import pathlib
 import sys
@@ -566,3 +567,158 @@ def test_a_through_hole_components_legs_land_on_its_own_pads():
     assert worst < 0.5, (
         f"{worst_name}'s legs sit {worst:.2f} mm from the pads it is soldered to"
     )
+
+
+# --- which way a part faces (OH-77) ------------------------------------------------
+
+
+def test_the_silkscreen_is_read_off_the_package():
+    """The body outline, which is a different fact from the pads.
+
+    `eagle.Element.pad_extent` says where the pins are; this says where the
+    part is. Nothing before OH-77 read it, and that is why a barrel jack could
+    point the wrong way and measure perfectly.
+    """
+    board = eagle.read_board(_brd())
+    jack = board.element("X1")
+    assert jack.silk is not None
+    x0, y0, x1, y1 = jack.silk
+    assert (x0, y0, x1, y1) == pytest.approx((-5.08, -6.35, 3.9116, 7.1374),
+                                             abs=0.001)
+    # The USB socket's body runs a long way to one side of its pins, which is
+    # exactly the asymmetry that makes this worth reading.
+    usb = board.element("X2")
+    assert usb.silk == pytest.approx((-5.9, -10.15, 5.9, 5.6), abs=0.001)
+
+
+def test_every_component_lands_where_the_vendor_drew_its_body():
+    """The check the user asked for, against the file the parts came from.
+
+    Fourteen of fifteen already agreed to 0.40 mm. The fifteenth, the barrel
+    jack, was 7.50 mm out with its barrel pointing into the board -- and no
+    measurement taken from the pads could see it, because a pin field is
+    symmetric about its own centre whichever way the body faces.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    spec = compose.COMPOSITIONS[0]
+    _brd()
+    board = eagle.read_board(spec.brd)
+    header_pads = [pad for name in spec.headers
+                   for pad in board.element(name).pads]
+    hx = [pad.x_mm for pad in header_pads]
+    hy = [pad.y_mm for pad in header_pads]
+    centre = ((min(hx) + max(hx)) / 2, (min(hy) + max(hy)) / 2)
+
+    by_package = {c.package: c for c in compose.CORRESPONDENCE}
+    cache: dict[str, tuple[object, object]] = {}
+    worst, worst_name, checked = 0.0, "", 0
+    for element in board.elements:
+        component = by_package.get(element.package)
+        if component is None:
+            continue
+        if component.slug not in cache:
+            cache[component.slug] = compose.component_mesh(
+                component, compose.DEFLECTION)
+        mesh, _box = cache[component.slug]
+        put = compose.place(mesh, element, component.turn,
+                            spec.thickness_mm, centre)
+        miss = compose.silk_miss(element, put, centre)
+        if miss is None:
+            continue
+        checked += 1
+        if miss > worst:
+            worst, worst_name = miss, element.name
+
+    assert checked == 15, f"only {checked} components were checked against silk"
+    assert worst < compose.SILK_TOLERANCE_MM, (
+        f"{worst_name} lands {worst:.2f} mm from the body the vendor drew"
+    )
+
+
+def test_the_barrel_jack_faces_out_over_the_board_edge():
+    """The specific wrong picture, pinned so it cannot come back.
+
+    A DC jack is mounted at the edge so a plug can reach it. Turned 180
+    degrees it sits inside the board, which looks tidy and is not an Arduino.
+    """
+    jack = [c for c in compose.CORRESPONDENCE
+            if c.package == "POWERSUPPLY_DC-21MM"]
+    assert jack, "the barrel jack is not in the correspondence"
+    assert jack[0].turn == 270.0, (
+        "270 is the only turn within 5 mm of the vendor's silkscreen; the "
+        "other three miss by 5.36, 7.50 and 5.35"
+    )
+
+
+def test_a_component_turned_the_wrong_way_is_refused_by_the_silk_check():
+    """The check has to fail on the thing it was written for.
+
+    Built rather than fetched: a 20 x 4 mm body sitting on pins at the origin,
+    offset so that turning it moves it. Needs no OpenCASCADE and no network.
+    """
+    element = eagle.Element(
+        "X1", "lib", "JACK",
+        pads=(eagle.Pad("1", "thru_hole", 0.0, 0.0, 1.0, 1.0, None),
+              eagle.Pad("2", "thru_hole", 2.0, 0.0, 1.0, 1.0, None)),
+        x_mm=10.0, y_mm=10.0, rotation=0.0, mirrored=False,
+        # The body is all to one side of the pins, like a barrel.
+        silk=(-1.0, -1.0, 11.0, 1.0),
+    )
+    def slab_at(x0, x1):
+        """A body spanning `x0..x1` and board y 9..11, in the SCENE's frame.
+
+        Scene positions are `(x, height, -y)` -- the same flip `place` applies
+        -- so a fixture that puts board y straight into z measures 10.5 mm out
+        and looks like a broken check rather than a broken fixture. It did.
+        """
+        positions = []
+        for x in (x0, x1):
+            for board_y in (9.0, 11.0):
+                positions.extend((x, 0.5, -board_y))
+        return compose.Mesh({"#888888": (positions, [0.0] * len(positions),
+                                         [0, 1, 2, 1, 2, 3])})
+
+    centre = (0.0, 0.0)
+    facing = slab_at(9.0, 21.0)      # centred at x=15, where the silk is
+    reversed_ = slab_at(-1.0, 11.0)  # centred at x=5, a 10 mm flip
+
+    assert compose.silk_miss(element, facing, centre) == pytest.approx(0.0,
+                                                                      abs=0.01)
+    wrong = compose.silk_miss(element, reversed_, centre)
+    assert wrong > compose.SILK_TOLERANCE_MM, wrong
+
+
+def test_a_package_with_no_silkscreen_is_not_checked_rather_than_failed():
+    """Absent evidence is not evidence of a wrong placement.
+
+    Every package on this board draws a body, so this path is not exercised by
+    the Uno -- which is exactly why it is worth pinning before the next board.
+    """
+    element = eagle.Element(
+        "R1", "lib", "0603",
+        pads=(eagle.Pad("1", "smd", 0.0, 0.0, 1.0, 1.0, None),),
+        x_mm=0.0, y_mm=0.0, rotation=0.0, mirrored=False, silk=None,
+    )
+    mesh = compose.Mesh({"#888888": ([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0])})
+    assert compose.silk_miss(element, mesh, (0.0, 0.0)) is None
+
+
+def test_compose_refuses_a_board_whose_part_faces_the_wrong_way(monkeypatch):
+    """The guard, not just the measurement.
+
+    `silk_miss` returning a large number is worthless if nothing acts on it,
+    and a mutation removing the `raise` from `compose` survived every other
+    test here: they all call `silk_miss` themselves and assert on what it
+    returns. This drives the real thing, with the barrel jack put back to the
+    turn it had when it pointed into the board.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    _brd()
+    wrong = tuple(
+        dataclasses.replace(component, turn=90.0)
+        if component.package == "POWERSUPPLY_DC-21MM" else component
+        for component in compose.CORRESPONDENCE
+    )
+    monkeypatch.setattr(compose, "CORRESPONDENCE", wrong)
+    with pytest.raises(SystemExit, match="X1"):
+        compose.compose(compose.COMPOSITIONS[0], compose.DEFLECTION, check=True)

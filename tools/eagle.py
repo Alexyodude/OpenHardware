@@ -141,6 +141,16 @@ class Element:
     #: `place()` is the authority on the order these are applied in.
     rotation: float = 0.0
     mirrored: bool = False
+    #: `(min_x, min_y, max_x, max_y)` of the package's silkscreen, in the
+    #: package's own local millimetres, or `None` where it draws none.
+    #:
+    #: **The pads say where the pins are and this says where the BODY is**,
+    #: which is a different fact and the only one that pins down which way a
+    #: part faces. A barrel jack's pins are symmetric about their own centre
+    #: whichever way the barrel points, so anything anchored on pins alone can
+    #: be 180 degrees out and measure perfectly -- which is exactly what
+    #: happened to the Arduino Uno's, by 7.50 mm, until this was read.
+    silk: tuple[float, float, float, float] | None = None
 
     def pads_of(self, kind: str) -> tuple[Pad, ...]:
         return tuple(pad for pad in self.pads if pad.kind == kind)
@@ -327,6 +337,34 @@ def _element_pads(
     return tuple(pads)
 
 
+#: EAGLE's silkscreen layers: 21 is `tPlace`, the outline a component's body
+#: is drawn as, and 51 is `tDocu`, where a library that keeps the courtyard
+#: separate from the assembly drawing puts the rest of it. Both are read
+#: because vendors disagree about which to use and this needs the body, not a
+#: layer number.
+SILK_LAYERS = ("21", "51")
+
+
+def _silk_extent(package: ET.Element) -> tuple[float, float, float, float] | None:
+    """The package's drawn body, in its own local millimetres, or None.
+
+    Wires only. A `<text>` is a reference designator that EAGLE places outside
+    the part as often as on it, and including one would make a 5 mm capacitor
+    measure 15. Circles and rectangles are not read either: no package in the
+    tree this was written against draws its body with them, and a partial
+    extent that looks complete is worse than none at all.
+    """
+    xs: list[float] = []
+    ys: list[float] = []
+    for wire in package.findall("wire"):
+        if wire.get("layer") in SILK_LAYERS:
+            xs += [float(wire.get("x1")), float(wire.get("x2"))]
+            ys += [float(wire.get("y1")), float(wire.get("y2"))]
+    if not xs:
+        return None
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
 def _open(path: pathlib.Path, wanted: str) -> ET.Element:
     """The `<eagle>` root of `path`, or an error saying what the file is instead.
 
@@ -397,6 +435,7 @@ def read_board(path: pathlib.Path) -> Board:
                 _float(node, "y", where),
                 degrees,
                 mirrored,
+                _silk_extent(package),
             )
         )
     if not elements:
