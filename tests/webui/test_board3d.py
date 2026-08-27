@@ -772,3 +772,112 @@ def test_the_ambient_light_was_replaced_rather_than_added_to():
         "an ambient light and an environment are two fills, not one"
     )
     assert source.count("DirectionalLight") == 1
+
+
+# --- a layout that reads more than the viewport's width ----------------------
+
+
+def _rule(sheet: str, selector: str) -> str:
+    """The declarations of one rule, by its selector."""
+    assert selector in sheet, f"no {selector} rule in the stylesheet"
+    return sheet.split(selector, 1)[1].split("{", 1)[1].split("}", 1)[0]
+
+
+def test_the_one_column_rule_fires_on_shape_as_well_as_width():
+    """**A portrait monitor is not a narrow one, and the page used to conflate
+    them.**
+
+    1065 x 1920 is 1,065 px wide -- past every width threshold in this
+    stylesheet -- so it got two columns, and the board came out 382 px wide,
+    36% of the page, on a display with 1,920 px of height going spare. Two
+    columns costs width, and width is the dimension a portrait display has
+    least of.
+
+    Measured after: 999 x 749, 94% of the page.
+    """
+    sheet = SHEET.read_text(encoding="utf-8")
+    assert "(max-width: 900px), (max-aspect-ratio: 5 / 4)" in sheet, (
+        "the single-column layout is chosen by width alone, so a tall narrow "
+        "viewport is handed a layout meant for a wide one"
+    )
+
+
+def test_the_three_column_rule_is_not_gated_on_height():
+    """The fix that was tried, measured, and taken back out.
+
+    A wide short window did give a bad board -- 359 x 269 at 1585 x 620 -- and
+    requiring 700 px of height to use three columns looked like the answer.
+    Measured, it made things worse: the page went from 2.9 screens to 4.1,
+    because two columns stack what three place side by side and vertical room
+    is exactly what a short window lacks. The board was starved by a flex
+    basis, not by the column count.
+    """
+    sheet = SHEET.read_text(encoding="utf-8")
+    assert "@media (min-width: 1500px) {" in sheet
+    assert "min-width: 1500px) and (min-height" not in sheet, (
+        "gating the wide layout on height was measured to make a short window "
+        "scroll more, not less"
+    )
+
+
+def test_the_layout_is_not_capped_to_a_width_a_reader_did_not_choose():
+    """The other fix that was tried and measured away.
+
+    A `max-width` on `main` looked right for an ultrawide, and it cost the
+    board 47% of its width there: the canvas went 1037 -> 549 on a 3440 px
+    display, because a third of 2,100 is a much smaller column than a third of
+    3,425. What the cap was for is already done by `.prose p`'s 74ch, which
+    holds the longest measured text line at 558 px however wide the panel gets.
+    """
+    sheet = SHEET.read_text(encoding="utf-8")
+    main = _rule(sheet, "\nmain ")
+    # The DECLARATION, not the word: the comment in that rule explains at
+    # length why there is no max-width, and a check for the bare word finds
+    # the explanation and calls it the thing it explains.
+    assert "max-width:" not in main
+    # And the thing that made the cap unnecessary is still there.
+    assert "max-width: 74ch" in sheet
+
+
+def test_one_ratio_governs_the_canvas_and_the_wrap_it_forces():
+    """**Three places have to agree, so they are all written from one number.**
+
+    The canvas is 4:3. It bounds its height by `--stage` and its width by the
+    width that ratio implies -- without the second bound, `max-height` clamps
+    the height and leaves the width alone, and the canvas silently becomes a
+    letterbox again. And `.pins-stage`'s flex basis is the same expression,
+    because the honest rule for whether the 32-row pin table may sit beside the
+    board is *only while the board can still be as big as the viewport allows*.
+
+    Two hand-picked bases were tried first and both were wrong somewhere: 320
+    left the canvas at 25% of a 1905 x 1080 page, and 420 fixed one window and
+    not that one. A derived basis fixed every size at once.
+
+    This test reads the ratio out of the canvas and insists the other two are
+    written from it, so changing 4:3 to anything else cannot half-land.
+    """
+    sheet = SHEET.read_text(encoding="utf-8")
+    canvas = _rule(sheet, "#board-pins-canvas ")
+    ratio = re.search(r"aspect-ratio:\s*(\d+)\s*/\s*(\d+)", canvas)
+    assert ratio, "the canvas no longer states an aspect ratio"
+    wide, tall = ratio.group(1), ratio.group(2)
+    derived = f"calc(var(--stage) * {wide} / {tall})"
+    assert "max-height: var(--stage);" in canvas, (
+        "the canvas height is not bounded by the shared number"
+    )
+    assert derived in canvas, (
+        f"the canvas bounds its height but not its width, so a short viewport "
+        f"clamps one and not the other and the ratio becomes a letterbox; "
+        f"expected max-width: {derived}"
+    )
+    stage = _rule(sheet, ".pins-stage ")
+    assert derived in stage, (
+        f"the wrap threshold is not derived from the canvas's own ceiling, so "
+        f"it is a number rather than a reason; expected {derived}"
+    )
+    # `--stage` is declared once, on the parent both of them are inside.
+    pins = _rule(sheet, "\n.pins ")
+    assert re.search(r"--stage:\s*\d+vh;", pins), (
+        "--stage is not defined on .pins, so the canvas and the flex basis "
+        "cannot be reading the same one"
+    )

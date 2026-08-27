@@ -177,12 +177,36 @@ main {
     "board  sketch"
     "memory memory";
   align-items: start;
+  /* **There is deliberately no `max-width` here, and there was one for twenty
+     minutes.** An ultrawide looked like it wanted a ceiling -- so it got
+     2,100 px, and the measurement said that cost the board 47% of its width
+     on a 3440 px display: the canvas went from 1037 to 549 because a third of
+     2,100 is a much smaller column than a third of 3,425.
+
+     The thing the ceiling was for is already done and was already done before
+     this ticket: `.prose p` caps a paragraph at 74ch, so the TEXT never
+     stretches however wide its panel gets. A wide panel holding a
+     properly-measured column of text is not a fault, and the board is the one
+     panel that gets better with every pixel it is given. */
 }
 
 /* One column. Ordered by what a person needs first rather than by the order
    the markup happens to be in: the board, then the code that is running on
-   it. */
-@media (max-width: 900px) {
+   it.
+
+   **The aspect ratio is a second reason to be in one column, and it is not the
+   same reason as being narrow.** A 1065 x 1920 portrait monitor is 1,065 px
+   wide -- comfortably past every width threshold here -- and got two columns,
+   which drew the board 382 px wide, 36% of the page, on a display with 1,920
+   px of height going spare. Two columns is the wrong answer for a tall narrow
+   viewport whatever its pixel width is, because the thing two columns costs is
+   width and width is the dimension that is short.
+
+   1/1 is the wrong threshold and 5/4 is the point: a square window is a tall
+   window as far as this page is concerned, and so is one only slightly wider
+   than it is tall. Above 5/4 there is room to put the board beside something
+   without either of them suffering. */
+@media (max-width: 900px), (max-aspect-ratio: 5 / 4) {
   main {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "state" "board" "sketch" "code" "memory";
@@ -198,7 +222,19 @@ main {
 
    1500px rather than a round 1440 or 1600: below it the third column is
    narrower than the 280px `.pins-stage` asks for, and a column that cannot
-   hold its own contents is worse than two wide ones. */
+   hold its own contents is worse than two wide ones.
+
+   **No height condition here, and trying one is how the real cause was
+   found.** A wide short window -- 1585 x 620 -- did give a bad board, 359 x
+   269, so the first attempt was to require 700px of height and fall back to
+   two columns. Measured, that made it worse: the board grew to 513 x 384 and
+   the page went from 2.9 screens to 4.1, because two columns stack what three
+   place side by side, and vertical room is the thing a short window has least
+   of. Three columns is the RIGHT shape for a short wide window.
+
+   The board was starved by `.pins-stage`'s flex basis instead, which let the
+   32-row pin table sit beside a canvas that had no width to spare. That is
+   fixed where it lives, and this rule is left alone. */
 @media (min-width: 1500px) {
   main {
     grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1.05fr);
@@ -605,7 +641,12 @@ table.grid tr.dim td { opacity: 0.72; }
   min-width: 0;
 }
 
+/* `--stage` is the canvas's height ceiling and it lives here rather than on
+   the canvas because BOTH children need it: the canvas bounds itself by it in
+   two directions, and the flex basis below is derived from it. One number, so
+   the wrap rule and the size rule cannot disagree. */
 .pins {
+  --stage: 62vh;
   display: flex;
   gap: 16px;
   flex-wrap: wrap;
@@ -613,8 +654,26 @@ table.grid tr.dim td { opacity: 0.72; }
   padding: 12px 16px 16px;
 }
 
+/* **The basis is derived, not chosen, and deriving it is what fixed the most
+ * ordinary size on the page.** `.pins` wraps, so this number decides whether
+ * the 32-row pin table sits beside the board or drops below it -- and the
+ * honest rule is: *the table may sit beside the canvas only while the canvas
+ * can still be as big as the viewport would allow it to be.*
+ *
+ * The canvas stops growing at `--stage` tall, so at 4:3 it stops needing width
+ * at `--stage * 4/3`. Ask for exactly that, and the table wraps precisely when
+ * keeping it alongside would start costing the board area it could otherwise
+ * have had.
+ *
+ * Two hand-picked numbers were tried first and both were worse. 320 (the
+ * original) left the canvas 477 x 358 on a 1905 x 1080 display -- 25% of the
+ * page, on the commonest desktop size there is. 420 fixed a 1585 x 620 window
+ * and did nothing for that one, because 420 is a number and not a reason.
+ * Measured with the derivation: 1905 x 1080 goes 477 -> 658 wide, 1351 x 768
+ * goes 547 -> 687, and a 3440 ultrawide goes 1037 -> 1190, while every size
+ * that was already right is untouched. */
 .pins-stage {
-  flex: 1 1 320px;
+  flex: 1 1 calc(var(--stage) * 4 / 3);
   min-width: 280px;
 }
 
@@ -630,12 +689,24 @@ table.grid tr.dim td { opacity: 0.72; }
  * 900 x 260 letterbox and the camera framed it from the shorter side. 4:3 is
  * the shape a board is photographed in, and the bounds keep it from becoming
  * a postage stamp in one column or taking the whole screen in another. */
+/* **The width is capped from the same number as the height, or the ratio is a
+ * lie.** `aspect-ratio` sets the height from the width; `max-height` then
+ * clamps the height and does NOT pull the width back, so on a short window the
+ * canvas quietly became a letterbox again -- 870 x 384 at 1585 x 620,
+ * measured, which is the 900 x 260 fault above wearing a different number.
+ *
+ * Deriving both bounds from one custom property is what keeps them agreeing:
+ * whichever of the column's width and the viewport's height runs out first,
+ * the canvas is still 4:3 and the renderer still frames the board from a
+ * sensible side. */
 #board-pins-canvas {
   display: block;
   width: 100%;
   aspect-ratio: 4 / 3;
   min-height: 240px;
-  max-height: 62vh;
+  max-height: var(--stage);
+  max-width: calc(var(--stage) * 4 / 3);
+  margin-inline: auto;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--sunken);
