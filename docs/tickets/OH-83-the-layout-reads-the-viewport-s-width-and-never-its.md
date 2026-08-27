@@ -1,7 +1,7 @@
 ---
 id: OH-83
 title: The layout reads the viewport's width and never its height or its shape
-status: open
+status: done
 priority: P2
 created: '2026-08-27'
 touches:
@@ -101,3 +101,19 @@ NOT IN THIS TICKET: the board panel being 1,548 px tall at 1351 px, which is
 mostly its own caption prose and is a content question rather than a layout
 one -- that caption is load-bearing and this ticket is not going to hide it
 behind a disclosure to win a screenful.
+
+**Note 2026-08-27:** CLOSED 2026-08-27 in 4727481. The layout reads the viewport's shape now, not only its width, and the board is between 15% and 160% wider at every size that was wrong.
+
+THE FAULT IN ONE SENTENCE: a 1065 x 1920 portrait monitor is 1,065 px wide, past every threshold in the stylesheet, so it was handed the two-column layout meant for a laptop. Two columns costs WIDTH, and width is what a tall viewport has least of. The board came out 382 px, 36% of the page, on a display with 1,920 px of height going spare. It is 999 px and 94% now.
+
+TWO OF MY OWN FIXES WERE MEASURED BACK OUT, and that is the part worth carrying forward. (1) Gating the three-column rule on 700 px of height made a short wide window scroll MORE -- 2.9 screens to 4.1 -- because two columns stack what three place side by side, and vertical room is exactly what a short window lacks. (2) A `max-width: 2100px` on `main` cost the board 47% of its width on a 3440 display, canvas 1037 -> 549, because a third of 2,100 is a much smaller column than a third of 3,425. Neither was a bad idea; both were beaten by the probe, within twenty minutes of being written. Re-measure after every layout change, including your own.
+
+AND TWO COMPLAINTS DIED BEFORE THEY WERE FILED. Nothing overflows at any of the seven sizes -- `scrollWidth` equals the viewport width and zero elements escape a scrolling ancestor -- and the pin table's constant 154 px, which looked like a column that never uses its room, is the natural width of `Pad | Pin | State` and reads perfectly. Measure before filing.
+
+THE TECHNIQUE, WHICH IS REUSABLE: a `window.__probe()` installed once in the page that reports, per viewport, the sideways scroll, the count of elements escaping every scrolling ancestor, the canvas box and its ratio, the longest text line, and the page height in screens. Then resize and call it. Seven sizes, one number each, and every claim in the commit message is one of them.
+
+THE RULE THAT REPLACED A GUESS: `.pins-stage`'s flex basis decides whether the 32-row pin table sits beside the board or drops below it, and the honest form is 'only while the canvas can still be as big as the viewport would allow'. The canvas stops growing at `--stage` tall, so at 4:3 it stops needing width at `--stage * 4 / 3` -- ask for exactly that. Two hand-picked numbers were tried first and each fixed one size and missed another, because a number is not a reason.
+
+WHAT IT COSTS: the table drops below the canvas at more sizes, so the pins panel is taller and the page scrolls more -- 1905 x 1080 goes 1.6 screens to 2.0, 3425 x 1440 goes 1.2 to 1.8. Stated rather than hidden. The board is what that panel is for.
+
+STILL OPEN, AND DELIBERATELY NOT IN THIS TICKET: the board panel is 1,548 px tall at 1351 px and most of that is its own caption prose. That caption is the honest-degradation statement about a composed model and hiding it behind a disclosure to win a screenful would be trading the thing this repository is most careful about for a layout metric. If anybody does take it on, the question is whether the caption can be SHORTER rather than whether it can be HIDDEN.
