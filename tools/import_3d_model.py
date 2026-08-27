@@ -584,6 +584,17 @@ FINISHES: dict[str, Finish] = {
         "the SAMD21 board's solder mask, named in `board3d.js`'s "
         "`refreshTheme` in the same sentence as #ff9f37"
     )),
+    "#c07635": Finish(0.0, 0.55, (
+        "the axial resistor's lacquered body. **Named by geometry, which is "
+        "the strongest reading available on a two-colour part**: measured "
+        "2026-08-28, `R_Axial_DIN0207_L6.3mm_D2.5mm` tessellates to exactly "
+        "two colour groups, and this one spans x +-3.150 and z +-1.250 -- the "
+        "6.3 by 2.5 mm body the filename itself states -- while #a5a392, "
+        "already the LEG colour above, runs the full 8.2 mm out to the lead "
+        "tips. A resistor's coat is a cured lacquer over a ceramic core: not a "
+        "metal, and its gloss sits between a moulded body's 0.70 and a solder "
+        "mask's 0.35"
+    )),
     "#720301": Finish(0.0, 0.20, (
         "the LEDs' lens, which `Part.lens` already names on all three sizes. "
         "A moulded epoxy lens is the glossiest thing on this bench, which is "
@@ -1047,22 +1058,33 @@ class Electrical:
     #: conductor of unknown value -- see `analyse`, which then refuses to report
     #: a current for anything on that bench.
     kind: str
-    #: Which terminal current enters by and which it leaves by, in the names
-    #: `lead_tips` gives them.
-    forward: tuple[str, str]
     #: name -> (value in SI units, where the value came from).
     cited: dict[str, tuple[float, str]]
     note: str
+    #: Which terminal current enters by and which it leaves by, in the names
+    #: `lead_tips` gives them -- or `None` for a part that has no such
+    #: direction.
+    #:
+    #: **A resistor is that case and it is an absence rather than a gap.** It
+    #: conducts equally either way, so naming one lead as the one current
+    #: enters by would state a polarity the part does not have -- and a reader
+    #: who believed it would wire an LED round the right way and a resistor
+    #: round the "wrong" one. `analyse` takes the magnitude of a non-diode's
+    #: current for the same reason, so nothing downstream needs the direction.
+    forward: tuple[str, str] | None = None
 
     def extras(self) -> dict[str, object]:
         """The shape `circuit.js` reads, values and citations side by side."""
         out: dict[str, object] = {
             "kind": self.kind,
-            "from": self.forward[0],
-            "to": self.forward[1],
             "note": self.note,
             "cited": {name: why for name, (_value, why) in self.cited.items()},
         }
+        # Absent rather than null, for the reason `convert_part` gives about
+        # `electrical` itself: a missing key is what a part with no forward
+        # direction has, and `from: null` invites a reader to look for one.
+        if self.forward is not None:
+            out["from"], out["to"] = self.forward
         for name, (value, _why) in self.cited.items():
             out[name] = value
         return out
@@ -1140,6 +1162,66 @@ LED_ELECTRICAL = Electrical(
 )
 
 
+#: A 220 ohm axial resistor, and it is the part that makes the warning above
+#: mean something.
+#:
+#: **WHY IT IS LOAD-BEARING RATHER THAN A NICETY.** With only LEDs on the
+#: bench there was no way to light one on an Arduino Uno without destroying it:
+#: an LED straight across a pin draws at least 40 mA against the 20 mA the
+#: board rates a pin for, which `circuit.js` reported correctly and
+#: unhelpfully. Every circuit a reader could build was one the page warned
+#: about, and a warning that fires on everything is noise. Two LEDs in series
+#: at 6 mA was the only intact circuit available.
+#:
+#: **THE MODELLED VALUE IS 231 AND NOT 220, AND THAT IS THE ONE INVARIANT THIS
+#: AREA HAS.** Every resistance the solver is handed is a worst corner, so
+#: every current it computes is a LOWER bound -- which is exactly what lets the
+#: page say "at least 40 mA, past the 20 mA this board rates a pin for" and be
+#: right about it under any reading. A resistor entered at its nominal value
+#: would break that with the very part added to make the page usable: a real
+#: 220 ohm +-5% part may be 209 ohm, 209 passes MORE current than 220, and
+#: "at least 9.7 mA" would then have been false. 231 is the top of the band, so
+#: the current through it is the least this part can pass.
+#:
+#: **The label says 220 ohm and the mesh says nothing at all**, which is the
+#: question OH-80 was filed with open and it is settled by measurement rather
+#: than by argument. The fear was that a part called 220 ohm would carry
+#: painted colour bands reading something else -- a picture contradicting a
+#: label, which is the defect this area keeps re-learning. Measured 2026-08-28
+#: by tessellating it: `R_Axial_DIN0207` has exactly TWO styled colours,
+#: `#a5a392` on the leads and `#c07635` on the body, and NO BANDS. There is no
+#: claim in the picture for the label to contradict.
+#:
+#: **No current rating, and that is a measured absence rather than an
+#: oversight.** A resistor's limit is power, not current, and on this bench it
+#: cannot be reached: 5 V is the largest any rail offers, so the most this part
+#: can dissipate is 5^2 / 231 = 108 mW, and the smallest axial part sold in a
+#: 6.3 x 2.5 mm body is a quarter watt. `circuit.js` models no power at all,
+#: and adding a limit no circuit here can approach would be the config option
+#: with one call site that `.claude/CLAUDE.md` rule 6 refuses.
+RESISTOR_ELECTRICAL = Electrical(
+    kind="resistor",
+    cited={
+        "ohms": (231.0, (
+            "220 ohm +-5%, taken at the TOP of its tolerance band. 220 is the "
+            "classic Arduino series resistor for an indicator LED and +-5% is "
+            "what a carbon-film part in a hobby kit is sold to. Taken at the "
+            "top for the same reason every other resistance reaching this "
+            "solver is taken at its worst corner: a larger resistance computes "
+            "a smaller current, so the number the page prints stays a lower "
+            "bound on the real one. 220 nominal would not -- a part at the "
+            "bottom of the same band passes more than the page would claim"
+        )),
+    },
+    note=(
+        "220 ohm +-5%, modelled at 231 ohm -- the top of the band, so the "
+        "computed current stays a lower bound. No power rating: on a 5 V "
+        "bench this part cannot dissipate more than 108 mW, and the smallest "
+        "one sold in this body is 250 mW."
+    ),
+)
+
+
 @dataclasses.dataclass(frozen=True)
 class Part:
     """One component model from KiCad's own 3D library."""
@@ -1155,7 +1237,15 @@ class Part:
     #: doing. **Stated per part rather than guessed**: "the least grey group"
     #: works on an LED and not on a black buzzer, and a rule that works on one
     #: file is a rule that will be wrong on the next one somebody adds.
-    lens: str
+    #:
+    #: **`None` for a part that shows nothing**, which is the resistor. A
+    #: resistor has no surface whose appearance says what is going through it,
+    #: and nominating one would invent a display the part does not have --
+    #: which is the same failure as lighting an ungrounded LED, one step
+    #: earlier. `lead_tips` needs no lens to find the leads (measured: the same
+    #: two tips with and without) and `dressPart` already copes with a part
+    #: that has none.
+    lens: str | None
     #: What the two leads are called, in the order this file's own geometry
     #: puts them -- see `lead_tips`, which sorts them by x.
     terminals: tuple[str, str]
@@ -1247,6 +1337,29 @@ PARTS: tuple[Part, ...] = (
     #: letting a number invented here decide an LED's.
     Part(library="Buzzer_Beeper", name="Buzzer_12x9.5RM7.6", label="12 mm buzzer",
          lens="#9e2705", terminals=("negative", "positive")),
+    #: **The part that makes every other one usable**, and `RESISTOR_ELECTRICAL`
+    #: above carries the argument. A 5 mm LED from D13 through this to GND
+    #: carries at least 9.3 mA on an Uno -- inside the 20 mA a pin is rated for
+    #: and inside the LED's own -- so the page reports a current and says
+    #: nothing else. It is the first circuit this bench can build that raises
+    #: no warning at all.
+    #:
+    #: **DIN0207 at 7.62 mm pitch, which is the one in a person's drawer.** Its
+    #: body is 6.3 x 2.5 mm, the standard quarter-watt axial, and 7.62 mm is
+    #: the breadboard-friendly footprint among the five pitches KiCad publishes
+    #: for that body. Measured 2026-08-28 by tessellating it: 8.418 mm overall
+    #: on lead tips 7.608 mm apart, against the 7.62 the name claims -- 0.012 mm
+    #: out, which is the tessellation's own chord tolerance and not a
+    #: disagreement.
+    #:
+    #: **Terminals `lead A` and `lead B` rather than a polarity.** `lead_tips`
+    #: orders them by the sign of x and nothing else distinguishes them,
+    #: because nothing about the part does: naming one of them positive would
+    #: be a claim, and this part has none to make.
+    Part(library="Resistor_THT",
+         name="R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal",
+         label="220 Ω resistor", lens=None, terminals=("lead A", "lead B"),
+         electrical=RESISTOR_ELECTRICAL),
 )
 
 
@@ -1342,7 +1455,10 @@ def convert_part(part: Part, deflection: float, check: bool) -> int:
           f"{whole.thickness:.3f} mm, z-up by KiCad's convention")
     print(f"  mesh   {mesh.triangles():,} triangles, {len(mesh.groups)} colours: "
           f"{sorted(mesh.groups)}")
-    if part.lens not in mesh.groups:
+    # A part that names no lens is not checked for one -- but a part that names
+    # one and has lost it still fails loudly, which is the case this guard was
+    # written for.
+    if part.lens is not None and part.lens not in mesh.groups:
         raise SystemExit(
             f"{part.name} names {part.lens} as its lens and the model has "
             f"{sorted(mesh.groups)}. The file changed; re-read it before "
@@ -1364,8 +1480,9 @@ def convert_part(part: Part, deflection: float, check: bool) -> int:
     else:
         values = ", ".join(f"{name} {value:g}"
                            for name, (value, _why) in part.electrical.cited.items())
-        print(f"  circuit  {part.electrical.kind}, {part.electrical.forward[0]} "
-              f"to {part.electrical.forward[1]}: {values}")
+        forward = "" if part.electrical.forward is None else (
+            f", {part.electrical.forward[0]} to {part.electrical.forward[1]}")
+        print(f"  circuit  {part.electrical.kind}{forward}: {values}")
 
     if check:
         print("  write  skipped (--check)")

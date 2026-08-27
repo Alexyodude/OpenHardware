@@ -411,3 +411,125 @@ def test_the_writer_applies_the_finish_rather_than_a_constant(tmp_path):
     assert got[unnamed] == (DEFAULT_FINISH.metalness, DEFAULT_FINISH.roughness)
     # And the two really are different, or this proves nothing.
     assert got[named] != got[unnamed]
+
+def test_a_part_with_no_forward_direction_writes_none():
+    """**Absent, not `from: null`**, and the two are different claims.
+
+    A resistor conducts either way, so `Electrical.forward` is `None` for it and
+    `extras()` leaves the keys out entirely. `webui/static/parts.js` then reads
+    `undefined` for `from` and `to`, and `analyse` never asks a non-diode for
+    them. Writing `null` would put a key in the file inviting a reader to look
+    for a direction that does not exist -- the same reasoning `convert_part`
+    already applies to `electrical` itself for a part with no model at all.
+    """
+    from tools.import_3d_model import LED_ELECTRICAL, RESISTOR_ELECTRICAL
+
+    diode = LED_ELECTRICAL.extras()
+    assert (diode["from"], diode["to"]) == ("anode", "cathode")
+    resistor = RESISTOR_ELECTRICAL.extras()
+    assert "from" not in resistor and "to" not in resistor
+    assert resistor["kind"] == "resistor" and resistor["ohms"] == 231.0
+
+
+def test_the_resistors_body_is_not_a_metal_and_its_leads_still_are():
+    """The two colours the axial resistor has, and they are not the same thing.
+
+    `#c07635` is the lacquered body and `#a5a392` is the lead, which is the
+    colour the table already calls "every component's LEG". A resistor drawn as
+    a metal cylinder would be the finishes table saying something false about
+    the one part whose material is easiest to check by looking at it.
+    """
+    from tools.import_3d_model import FINISHES
+
+    assert FINISHES["#c07635"].metalness == 0.0
+    assert FINISHES["#a5a392"].metalness == 1.0
+    assert "resistor" in FINISHES["#c07635"].why
+
+
+def test_the_resistor_the_importer_writes_carries_its_value_and_no_lens():
+    """**The whole pipeline, on the file the page actually fetches.**
+
+    Every other check of the resistor is of a constant in Python or a fragment
+    in node. This one reads the glTF between them, because that is where a part
+    stops being a table and becomes something a browser loads: the value has to
+    survive `Electrical.extras`, the JSON chunk and `dressPart`.
+
+    `lens: null` is the assertion worth having. A resistor shows nothing, and a
+    part that named a lens would light one of its own surfaces to say a current
+    was flowing -- which is inventing a display the part does not have, one step
+    short of the ungrounded LED this area was rebuilt to stop.
+    """
+    from tools.import_3d_model import PARTS, read_extras
+
+    part = next(p for p in PARTS if p.library == "Resistor_THT")
+    glb = REPO / "webui" / "static" / "models" / "parts" / f"{part.slug}.glb"
+    if not glb.is_file():
+        pytest.skip("no imported resistor; run tools/import_3d_model.py --parts")
+    extras = read_extras(glb)
+    assert extras["lens"] is None
+    assert extras["label"] == part.label
+    assert extras["electrical"]["kind"] == "resistor"
+    assert extras["electrical"]["ohms"] == 231.0
+    assert "from" not in extras["electrical"]
+    assert [lead["name"] for lead in extras["terminals"]] == ["lead A", "lead B"]
+    # The leads are 7.62 mm apart by the part's own name, and the tips come out
+    # of the mesh rather than out of that name -- so this is the two agreeing.
+    left, right = (lead["at"][0] for lead in extras["terminals"])
+    assert right - left == pytest.approx(7.62, abs=0.05)
+
+
+def test_the_resistor_is_drawn_as_a_lacquered_body_on_metal_leads():
+    """The finishes reach the file, on the part the table gained an entry for.
+
+    `test_the_uno_is_made_of_more_than_one_material` makes the same check on
+    the composed board. This is the smallest model in the tree that has two
+    genuinely different materials in it, so it is the cheapest place for the
+    body-versus-lead assignment to fail visibly.
+    """
+    from tools.import_3d_model import FINISHES, PARTS
+
+    part = next(p for p in PARTS if p.library == "Resistor_THT")
+    glb = REPO / "webui" / "static" / "models" / "parts" / f"{part.slug}.glb"
+    if not glb.is_file():
+        pytest.skip("no imported resistor; run tools/import_3d_model.py --parts")
+    raw = glb.read_bytes()
+    length, _kind = struct.unpack_from("<II", raw, 12)
+    document = json.loads(raw[20:20 + length].decode("utf-8"))
+    got = {
+        material["name"]: (material["pbrMetallicRoughness"]["metallicFactor"],
+                           material["pbrMetallicRoughness"]["roughnessFactor"])
+        for material in document["materials"]
+    }
+    assert set(got) == {"#c07635", "#a5a392"}
+    assert got["#c07635"] == (FINISHES["#c07635"].metalness,
+                              FINISHES["#c07635"].roughness)
+    assert got["#a5a392"] == (FINISHES["#a5a392"].metalness,
+                              FINISHES["#a5a392"].roughness)
+    assert got["#c07635"] != got["#a5a392"]
+
+def test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert():
+    """**The guard OH-80 made conditional, and it has to still fire.**
+
+    `convert_part` refuses a part whose named lens is not a colour in the mesh,
+    because that is a file having changed underneath a part that is supposed to
+    light up. Making the check skip a part with no lens is one edit away from
+    making it skip everything, and the difference is invisible until a model
+    changes months later.
+
+    So both halves are exercised in one call each: the resistor names none and
+    converts, and the same part with a colour the mesh does not have is
+    refused. `--check` writes nothing; the STEP comes out of the cache.
+    """
+    import dataclasses
+
+    from tools.import_3d_model import CACHE, DEFLECTION, PARTS, convert_part
+
+    part = next(p for p in PARTS if p.library == "Resistor_THT")
+    if not (CACHE / f"part-{part.slug}.step").is_file():
+        pytest.skip("no cached STEP; run tools/import_3d_model.py --parts")
+
+    assert convert_part(part, DEFLECTION, check=True) == 0
+    with pytest.raises(SystemExit) as refused:
+        convert_part(dataclasses.replace(part, lens="#abcdef"),
+                     DEFLECTION, check=True)
+    assert "#abcdef" in str(refused.value)

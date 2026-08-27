@@ -77,6 +77,26 @@ JS_NAME = {
     "series_ohms": "seriesOhms",
     "rated_amps": "ratedAmps",
     "absolute_amps": "absoluteAmps",
+    "ohms": "ohms",
+}
+
+#: The 220 Ω resistor, as `tools/import_3d_model.py`'s `RESISTOR_ELECTRICAL`
+#: describes it — and **231 is not a typo for 220**.
+#:
+#: A resistor entered at its nominal value would break the one invariant this
+#: file rests on. Every resistance the solver is handed is a worst corner, so
+#: every current it computes is a lower bound and the page may warn but never
+#: reassure. A real 220 Ω ±5% part may be 209 Ω, and 209 passes MORE current
+#: than 220 — so a bench modelled at 220 would print "at least 9.7 mA" about a
+#: circuit that can carry 10.0. 231 is the top of the band.
+#:
+#: **No `ratedAmps` and no `absoluteAmps`, deliberately.** A resistor's limit is
+#: power, and on a 5 V bench this one cannot dissipate more than 108 mW against
+#: the 250 mW its body is sold at, so no circuit here can reach it.
+#: `test_a_resistor_publishes_no_limit_because_none_is_reachable` is the guard.
+RESISTOR = {
+    "label": "220 Ω resistor", "terminals": ["lead A", "lead B"],
+    "model": {"kind": "resistor", "ohms": 231.0},
 }
 
 #: An Uno's power and digital pads, as `webui/api.py` sends them. **Three GND
@@ -115,6 +135,7 @@ def run(tmp_path: pathlib.Path, body: str) -> dict:
         f"MAX_PASSES, ASSUMED_OHMS, milliamps }} from {CIRCUIT.as_uri()!r};\n"
         f"const UNO = {json.dumps(UNO)};\n"
         f"const LED = {json.dumps(LED)};\n"
+        f"const RESISTOR = {json.dumps(RESISTOR)};\n"
         f"const PADS = {json.dumps(PADS)};\n"
         + textwrap.dedent(body),
         encoding="utf-8")
@@ -807,14 +828,21 @@ def test_the_led_the_page_loads_carries_the_parameters_the_tests_use():
     for name, (value, _why) in LED_ELECTRICAL.cited.items():
         assert name in JS_NAME, f"{name} has no spelling on the JavaScript side"
         assert LED["model"][JS_NAME[name]] == value, name
-    # And every LED in the catalogue has one, while the buzzer deliberately
-    # does not -- see its comment, and `test_a_part_with_no_electrical_model`.
+    # And every part in the catalogue publishes a model except the buzzer,
+    # which deliberately does not -- see its comment, and
+    # `test_a_part_with_no_electrical_model_suppresses_every_current`. Stated
+    # as "the buzzer and nothing else" rather than "the LEDs and nothing else",
+    # which is what it said until a resistor joined them: the rule was never
+    # about the word LED, it is that a part whose behaviour cannot be stated
+    # gets no model, and exactly one part is in that position.
+    silent = {part.name for part in PARTS if part.electrical is None}
+    assert silent == {"Buzzer_12x9.5RM7.6"}, silent
     for part in PARTS:
-        published = part.electrical is not None
-        assert published == part.name.startswith("LED_"), part.name
-        if published:
-            for name, (_value, why) in part.electrical.cited.items():
-                assert len(why) > 40, f"{part.name}: {name} has no real citation"
+        if part.electrical is None:
+            continue
+        for name, (_value, why) in part.electrical.cited.items():
+            assert name in JS_NAME, f"{part.name}: {name} has no JavaScript spelling"
+            assert len(why) > 40, f"{part.name}: {name} has no real citation"
 
 
 # --- a part past its absolute maximum ---------------------------------------
@@ -947,3 +975,294 @@ def test_three_parts_inside_their_ratings_can_still_overload_the_pin(tmp_path):
         assert "this part is rated for" not in part["warning"]
         assert "past the 20 mA this board rates a pin for" in part["warning"]
         assert "40 mA absolute maximum" in part["warning"]
+
+
+# --- a resistor, so the warning can be made to stop -------------------------
+
+
+def test_a_resistor_makes_an_led_on_an_uno_a_circuit_that_warns_about_nothing(tmp_path):
+    """**OH-80's done-when, and it is the first quiet circuit this bench has.**
+
+    Before this part existed there was no way to light an LED on an Arduino Uno
+    without destroying it. An LED straight across a pin carries at least 40 mA
+    against the 20 mA the board rates a pin for and the 30 mA the LED's own
+    absolute maximum allows, so `circuit.js` correctly reported a ruined part —
+    and every LED circuit a reader could build was one the page warned about.
+    Two LEDs in series at 6 mA was the only intact circuit available, which is
+    the physically right answer and a bench nobody can demonstrate.
+
+    D13 → resistor → LED → GND is 2.8 V across 40 + 231 + 30 Ω, which is
+    9.3 mA: inside the pin's rating, inside the LED's, inside both absolute
+    maximums. **Nothing is said, and that is not the same as saying it is
+    safe** — the file's header is careful about the difference, and 9.3 mA is
+    still a lower bound.
+    """
+    got = run(tmp_path, """
+        const report = analyse({supply: UNO, pads: PADS,
+                                parts: [RESISTOR, LED], wires: [
+          {pad: "13",  part: 0, terminal: "lead A"},
+          {pad: "j",   part: 0, terminal: "lead B"},
+          {pad: "j",   part: 1, terminal: "anode"},
+          {pad: "GND", part: 1, terminal: "cathode"},
+        ]});
+        console.log(JSON.stringify({parts: report.parts, note: report.note}));
+    """)
+    resistor, led = got["parts"]
+    assert led["drive"] == "lit"
+    assert [resistor["warning"], led["warning"]] == [None, None]
+    assert [resistor["destroyed"], led["destroyed"]] == [False, False]
+    assert got["note"] is None
+    # 2.8 / 301, and both parts carry it because they are in series.
+    for part in (resistor, led):
+        assert part["amps"] == pytest.approx(2.8 / 301, rel=1e-9)
+        assert "at least 9.3 mA" in part["reason"]
+    # And it is under every number either the board or the part publishes.
+    assert led["amps"] < UNO["ratedAmps"] and led["amps"] < UNO["absoluteAmps"]
+    assert led["amps"] < LED["model"]["ratedAmps"]
+    assert led["amps"] < LED["model"]["absoluteAmps"]
+
+
+def test_a_resistor_does_not_suppress_the_current_through_the_led_beside_it(tmp_path):
+    """**The fault the netlist branch was one line away from having.**
+
+    `analyse` counted every non-diode part as `assumed` — a conductor of
+    unknown value, which suppresses the reported current through *everything*
+    on the bench, because a stand-in resistance decides them all. That branch
+    was written when no part had a stated resistance, and the first one added
+    would have turned every LED beside it into a part with no number.
+
+    A current-limiting resistor whose presence deletes the current it limits is
+    the opposite of the thing. The buzzer is still `assumed` and still does
+    exactly that, which is what makes this test about the distinction rather
+    than about the flag: the same bench, one part swapped.
+    """
+    got = run(tmp_path, """
+        const buzzer = {label: "12 mm buzzer",
+                        terminals: ["negative", "positive"], model: null};
+        const wires = [
+          {pad: "13",  part: 0, terminal: "lead A"},
+          {pad: "j",   part: 0, terminal: "lead B"},
+          {pad: "j",   part: 1, terminal: "anode"},
+          {pad: "GND", part: 1, terminal: "cathode"},
+        ];
+        const withR = analyse({supply: UNO, pads: PADS,
+                               parts: [RESISTOR, LED], wires});
+        const swapped = wires.map((w) => (w.part === 0
+          ? {...w, terminal: w.terminal === "lead A" ? "positive" : "negative"}
+          : w));
+        const withB = analyse({supply: UNO, pads: PADS,
+                               parts: [buzzer, LED], wires: swapped});
+        console.log(JSON.stringify({resistor: withR.parts, buzzer: withB.parts,
+                                    noteR: withR.note, noteB: withB.note}));
+    """)
+    assert got["resistor"][1]["amps"] is not None
+    assert got["noteR"] is None
+    # The unmodelled part still takes the LED's number with it, unchanged.
+    assert got["buzzer"][1]["amps"] is None
+    assert "no electrical model" in got["noteB"]
+
+
+def test_a_resistor_conducts_whichever_way_round_it_is_wired(tmp_path):
+    """**It has no forward direction, so it cannot be wired backwards.**
+
+    An LED wired the wrong way round is off and the page says `reversed`. A
+    resistor turned end for end is the same circuit, and this is the case that
+    catches a version reporting a diode's *signed* current for it: the two
+    wirings differ only in the sign, so one of them would come out negative,
+    below `LIT_AMPS`, and be reported as a part carrying nothing.
+
+    `tools/import_3d_model.py` publishes no `forward` for it for the same
+    reason — naming one lead as the one current enters by would state a
+    polarity the part does not have.
+    """
+    got = run(tmp_path, """
+        const one = [
+          {pad: "13",  part: 0, terminal: "lead A"},
+          {pad: "GND", part: 0, terminal: "lead B"},
+        ];
+        const other = one.map((w) => ({...w,
+          terminal: w.terminal === "lead A" ? "lead B" : "lead A"}));
+        const answer = (wires) => analyse({supply: UNO, pads: PADS,
+                                           parts: [RESISTOR], wires}).parts[0];
+        console.log(JSON.stringify([answer(one), answer(other)]));
+    """)
+    forwards, backwards = got
+    assert forwards["drive"] == backwards["drive"] == "lit"
+    assert forwards["amps"] == pytest.approx(backwards["amps"], rel=1e-12)
+    assert forwards["amps"] == pytest.approx(5.0 / 271, rel=1e-9)
+    for part in got:
+        assert "reversed" not in part["reason"]
+        assert "at least 18 mA" in part["reason"]
+
+
+def test_a_resistor_at_rest_says_why_in_its_own_words_and_not_the_diodes(tmp_path):
+    """Off, and for the reason that is true of a resistor rather than a diode.
+
+    A pin driven low and a ground pad are one net at zero volts, so a resistor
+    across them carries nothing — and the reason is that its two leads are at
+    one potential, which is a solved fact. A diode carrying nothing may instead
+    be reversed, or below its forward drop, so its sentence is the weaker "no
+    current: nothing is driving it".
+
+    **The two sentences are compared here rather than each checked alone**, and
+    that is the whole point of the test. Deleting the resistor's branch leaves
+    it falling through to the diode's, which reads `model.from` — undefined for
+    a part with no forward direction — subtracts two `undefined`s into `NaN`,
+    finds `NaN < 0` false and prints the *other* sentence, looking correct. The
+    two answers being different is the only observable that separates them.
+    """
+    got = run(tmp_path, """
+        const at = (parts, wires) => analyse({supply: UNO, pads: PADS,
+                                              parts, wires}).parts[0];
+        console.log(JSON.stringify({
+          resistor: at([RESISTOR], [
+            {pad: "12",  part: 0, terminal: "lead A"},
+            {pad: "GND", part: 0, terminal: "lead B"},
+          ]),
+          diode: at([LED], [
+            {pad: "12",  part: 0, terminal: "anode"},
+            {pad: "GND", part: 0, terminal: "cathode"},
+          ]),
+        }));
+    """)
+    assert got["resistor"]["drive"] == got["diode"]["drive"] == "off"
+    assert got["resistor"]["reason"] == (
+        "no current: both its leads are at the same voltage")
+    assert got["diode"]["reason"] == "no current: nothing is driving it"
+    assert got["resistor"]["reason"] != got["diode"]["reason"]
+    assert "NaN" not in got["resistor"]["reason"]
+
+
+def test_resistors_inside_their_own_ratings_still_overload_the_pin(tmp_path):
+    """The pin sentence is not the diode's either, and a resistor reaches it.
+
+    Three 220 Ω resistors across one pad are 77 Ω in parallel, so the pad
+    delivers 5 / (40 + 77) = 42.7 mA — past the ATmega328P's 40 mA absolute
+    maximum — while each part carries 14 mA and publishes no limit of its own
+    to exceed. So the whole warning is the pin's, on a part that can never be
+    declared destroyed, which is the combination `warn` has to keep separate.
+    """
+    got = run(tmp_path, """
+        const parts = [RESISTOR, RESISTOR, RESISTOR];
+        const wires = parts.flatMap((_, at) => [
+          {pad: "13",  part: at, terminal: "lead A"},
+          {pad: "GND", part: at, terminal: "lead B"},
+        ]);
+        console.log(JSON.stringify(
+          analyse({supply: UNO, pads: PADS, parts, wires}).parts));
+    """)
+    assert [part["destroyed"] for part in got] == [False, False, False]
+    for part in got:
+        assert part["amps"] == pytest.approx(5.0 / (40 + 231 / 3) / 3, rel=1e-9)
+        assert "this part is rated for" not in part["warning"]
+        assert "Pin 13 carries at least 43 mA" in part["warning"]
+        assert "40 mA absolute maximum" in part["warning"]
+
+
+def test_a_resistor_publishes_no_limit_because_none_is_reachable(tmp_path):
+    """**A measured absence, not a missing number**, and this is the measurement.
+
+    A resistor's limit is power rather than current, and `circuit.js` models no
+    power at all. `RESISTOR_ELECTRICAL` states that adding one would be a limit
+    no circuit on this bench can approach: 5 V is the largest any rail offers,
+    so the worst case is the part straight across the supply.
+
+    That claim is checked here rather than asserted in a comment. 5 / 231 is
+    21.6 mA, and 21.6 mA through 231 Ω is 108 mW against the 250 mW the
+    smallest part sold in a 6.3 × 2.5 mm body is rated for.
+    """
+    from tools.import_3d_model import RESISTOR_ELECTRICAL
+
+    assert set(RESISTOR_ELECTRICAL.cited) == {"ohms"}
+    assert RESISTOR_ELECTRICAL.forward is None
+
+    got = run(tmp_path, """
+        const report = analyse({supply: UNO, pads: PADS,
+                                parts: [RESISTOR], wires: [
+          {pad: "5V",  part: 0, terminal: "lead A"},
+          {pad: "GND", part: 0, terminal: "lead B"},
+        ]});
+        console.log(JSON.stringify(report.parts[0]));
+    """)
+    ohms = RESISTOR["model"]["ohms"]
+    assert got["amps"] == pytest.approx(5.0 / ohms, rel=1e-9)
+    assert got["destroyed"] is False and got["warning"] is None
+    watts = got["amps"] ** 2 * ohms
+    assert watts == pytest.approx(0.108, abs=0.001)
+    assert watts < 0.25
+
+
+def test_the_resistor_the_page_loads_carries_the_value_the_tests_use():
+    """`RESISTOR` above is `tools/import_3d_model.py`'s, or this fails.
+
+    The same join `test_the_led_the_page_loads_carries_the_parameters_the_tests_use`
+    makes for the LED. **231 rather than 220 is the whole point of checking
+    it**: a later edit "correcting" the constant to its nominal value would
+    make every current on a bench with a resistor on it larger than the page
+    reports, and the one thing this file guarantees is that they are smaller.
+    """
+    from tools.import_3d_model import PARTS, RESISTOR_ELECTRICAL
+
+    assert RESISTOR_ELECTRICAL.kind == RESISTOR["model"]["kind"]
+    for name, (value, _why) in RESISTOR_ELECTRICAL.cited.items():
+        assert name in JS_NAME, f"{name} has no spelling on the JavaScript side"
+        assert RESISTOR["model"][JS_NAME[name]] == value, name
+    part = next(p for p in PARTS if p.electrical is RESISTOR_ELECTRICAL)
+    assert part.label == RESISTOR["label"]
+    assert list(part.terminals) == RESISTOR["terminals"]
+    # The one part on the bench that shows nothing, and it names no lens.
+    assert part.lens is None
+    assert [p.name for p in PARTS if p.lens is None] == [part.name]
+
+def test_a_resistor_on_the_weakest_pin_is_still_well_clear_of_the_threshold(tmp_path):
+    """**The paragraph over `LIT_AMPS`, as two numbers rather than a claim.**
+
+    That comment used to say no circuit this bench could build landed anywhere
+    near the visibility threshold, *because there was no resistor to build a dim
+    one with*. Adding one made the sentence load-bearing instead of idle, so it
+    is measured here.
+
+    The dimmest ordinary circuit is this: the weakest pin in the catalogue — a
+    SAM D21 at its reset drive strength, specified to source 2 mA — with a
+    220 Ω resistor and an LED on it. 1.1 V across 330 + 231 + 30 Ω is 1.86 mA,
+    nearly four times the threshold and still inside the 2 mA the part is rated
+    for, so nothing is warned about either. Crossing the threshold takes eight
+    resistors in series, which nobody wires by accident.
+    """
+    got = run(tmp_path, """
+        const xiao = {chip: "SAMD21", volts: 3.3, sourceOhms: 330.0,
+                      sinkOhms: 264.0, ratedAmps: 0.002, absoluteAmps: null};
+        const pads = [{name: "D10", state: "high"},
+                      {name: "D9", state: "input"},
+                      {name: "GND", state: "unknown"}];
+        const chain = (count) => {
+          const parts = Array.from({length: count}, () => RESISTOR).concat([LED]);
+          const wires = [{pad: "D10", part: 0, terminal: "lead A"}];
+          for (let at = 1; at < count; at++) {
+            wires.push({pad: `n${at}`, part: at - 1, terminal: "lead B"},
+                       {pad: `n${at}`, part: at, terminal: "lead A"});
+          }
+          wires.push({pad: "D9", part: count - 1, terminal: "lead B"},
+                     {pad: "D9", part: count, terminal: "anode"},
+                     {pad: "GND", part: count, terminal: "cathode"});
+          return analyse({supply: xiao, pads, parts, wires}).parts[count];
+        };
+        console.log(JSON.stringify({one: chain(1), eight: chain(8),
+                                    lit: LIT_AMPS, rated: xiao.ratedAmps}));
+    """)
+    # `rel=1e-6` rather than the `1e-9` the other cases use, because this one
+    # has a floating junction in it: the spare input pad joining the resistor
+    # to the LED carries `GMIN` to ground like every other node, which bleeds
+    # about two parts in a billion out of the series current. That is the
+    # constant doing its job, not a disagreement.
+    one = (3.3 - 2.2) / (330.0 + 231.0 + 30.0)
+    assert got["one"]["amps"] == pytest.approx(one, rel=1e-6)
+    assert got["one"]["drive"] == "lit"
+    assert got["one"]["warning"] is None
+    # Four times the threshold, and inside the pin's own rating.
+    assert got["one"]["amps"] > 3.5 * got["lit"]
+    assert got["one"]["amps"] < got["rated"]
+    # And eight of them in series is where it finally goes dark, which is the
+    # other half of the claim: the margin is large but it is not infinite.
+    assert got["eight"]["drive"] == "off"
+    assert got["eight"]["amps"] is None

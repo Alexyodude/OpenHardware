@@ -73,9 +73,18 @@ export const RAILS = {
 //:
 //: A 5 mm red LED is faintly visible in a dark room somewhere below a tenth of
 //: a milliamp and is plainly on by one. Half a milliamp is inside that band and
-//: it is a judgement made once, here, rather than in three places: no circuit
-//: this bench can build lands anywhere near it, because there is no resistor on
-//: the bench to build a dim one with.
+//: it is a judgement made once, here, rather than in three places.
+//:
+//: **This used to say no circuit could land anywhere near it, because there was
+//: no resistor on the bench to build a dim one with. OH-80 put one there.** The
+//: claim is now a measurement rather than an absence: the dimmest ordinary
+//: circuit is a 220 ohm resistor and an LED on a XIAO SAMD21, whose pin is
+//: specified to source 2 mA -- 1.1 / (330 + 231 + 30) = 1.86 mA, still nearly
+//: four times this. Crossing it takes eight resistors in series on that board,
+//: which is not a thing anybody wires by accident.
+//: `test_a_resistor_on_the_weakest_pin_is_still_well_clear_of_the_threshold`
+//: pins both halves, so the next part that narrows the margin fails a test
+//: rather than quietly making this paragraph false.
 export const LIT_AMPS = 5e-4;
 
 //: Siemens from every node to ground. **SPICE's own trick, for SPICE's own
@@ -428,10 +437,22 @@ export function analyse(bench) {
                       a: nodeOf(terminalKey(index, model.from)),
                       b: nodeOf(terminalKey(index, model.to)),
                       volts: model.forwardVolts, ohms: model.seriesOhms });
+    } else if (model.ohms) {
+      // **A stated resistance is a published model like any other**, so this
+      // does NOT count towards `assumed`. It used to: the branch was written
+      // when no such part existed, and the first resistor on the bench would
+      // have suppressed the current through every LED beside it -- the exact
+      // opposite of what a current-limiting resistor is for.
+      elements.push({ kind: "resistor", id: `part:${index}`, a, b,
+                      ohms: model.ohms });
     } else {
+      // A model that is neither a diode nor a resistance is a part whose
+      // behaviour nobody has stated, whatever else it says about itself. It
+      // stands in as `ASSUMED_OHMS` and takes every current on this bench with
+      // it, which is what `assumed` means.
       assumed++;
       elements.push({ kind: "resistor", id: `part:${index}`, a, b,
-                      ohms: model.ohms ?? ASSUMED_OHMS });
+                      ohms: ASSUMED_OHMS });
     }
   }
 
@@ -481,12 +502,40 @@ export function analyse(bench) {
                      `is in mid-air`;
       continue;
     }
-    const amps = solved.amps[`part:${index}`] ?? 0;
+    const signed = solved.amps[`part:${index}`] ?? 0;
     const model = part.model;
-    if (!model || model.kind !== "diode") {
-      entry.drive = Math.abs(amps) > LIT_AMPS ? "lit" : "off";
+    // **A diode's current is signed and a resistor's is not**, and that is a
+    // fact about the parts rather than a convenience. A diode has a forward
+    // direction, so the sign of its current says whether it is being driven or
+    // reversed and the report below says which. A resistor conducts equally
+    // either way and has no forward direction to be reversed against -- see
+    // `Electrical.forward` in `tools/import_3d_model.py`, which is absent for
+    // exactly this reason -- so its magnitude is the whole of what it does.
+    const amps = model?.kind === "diode" ? signed : Math.abs(signed);
+    // A part with no model at all, and a model that states neither a forward
+    // drop nor a resistance, are the same thing to a reader: nothing here can
+    // say what it does.
+    if (!model || !(model.kind === "diode" || model.ohms)) {
+      entry.drive = amps > LIT_AMPS ? "lit" : "off";
       entry.reason = "no published electrical model for this part, so it is a " +
                      "conductor of unknown value and no current is claimed";
+      continue;
+    }
+    if (model.kind !== "diode" && amps <= LIT_AMPS) {
+      // **Its own sentence rather than the diode's, and the branch earns its
+      // place by saying something different.** A resistor carries current
+      // exactly when there is a voltage across it, so "nothing is driving it"
+      // understates what has been solved: its two leads are at one potential,
+      // which is a fact about this circuit rather than a guess about what is
+      // attached to it.
+      //
+      // Deleting this branch was tried and it PASSED: `model.from` is
+      // undefined for a part with no forward direction, the subtraction below
+      // is `NaN`, `NaN < 0` is false, and the fallthrough printed the right
+      // words by accident. A correctness resting on which way round somebody
+      // wrote a comparison is not one, so the case is handled where it belongs.
+      entry.drive = "off";
+      entry.reason = "no current: both its leads are at the same voltage";
       continue;
     }
     if (amps <= LIT_AMPS) {

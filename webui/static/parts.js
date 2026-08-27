@@ -161,10 +161,22 @@ function electricalOf(extras) {
   if (!spec) return null;
   return {
     kind: spec.kind,
+    //: Absent for a part with no forward direction, which a resistor has none
+    //: of: it conducts either way, and `analyse` takes the magnitude of its
+    //: current rather than a signed one. `Electrical.forward` carries the
+    //: argument on the Python side.
     from: spec.from,
     to: spec.to,
     forwardVolts: spec.forward_volts,
     seriesOhms: spec.series_ohms,
+    //: The resistance of a part that is a resistance. **Named here or it is
+    //: dropped in transit** -- `analyse` reads `model.ohms`, and a value the
+    //: glTF carries but this function does not copy makes the part a conductor
+    //: of unknown value that suppresses every current on the bench. That is
+    //: exactly what happened to `absolute_amps` on its first pass, which is
+    //: why `test_circuit.py`'s `JS_NAME` now checks every published number has
+    //: a spelling here.
+    ohms: spec.ohms,
     ratedAmps: spec.rated_amps,
     //: The only number that can license "destroyed". Absent for a part whose
     //: datasheet publishes no absolute maximum, and then nothing here will
