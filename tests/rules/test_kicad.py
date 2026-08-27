@@ -225,7 +225,7 @@ def test_the_real_vendor_library_parses():
     # only in their footprints. The retired tool took the footprint's own name
     # and would have failed here too -- the difference is that this one says
     # which names it does have.
-    pads = read_geometry(mod, select="XIAO-ESP32-C3-SMD").pads
+    pads = read_geometry(mod, select=("XIAO-ESP32-C3-SMD",)).pads
 
     assert len(pads) == 14, "the XIAO is a 14-pin board"
     # 2.54 mm is the 0.1 inch header pitch; pinmap.py treats that pitch as what

@@ -547,6 +547,75 @@ SOURCES: tuple[Source, ...] = (
         cite="OH-23 survey, docs/research/board-sources/sources.json: "
         "Olimex / OLIMEX/ESP32-POE (sampled)",
     ),
+    Source(
+        name="arduino-uno",
+        vendor="Arduino",
+        model="per-board CAD zip linked from the board's docs page",
+        size="303,265 bytes",
+        licence=Licence(
+            name="CC BY-SA 4.0",
+            covers="design files",
+            sampled=False,
+            evidence=Evidence.OPENED,
+            cite="License.txt inside A000066-cad-files.zip, 211 bytes, says so "
+            "explicitly and covers the hardware",
+        ),
+        fetch=Fetch(
+            transport=Transport.HTTPS_ARCHIVE,
+            # The hash in the path is the docs site's content-addressed asset
+            # name and is not a version anybody publishes. It is the only URL
+            # the board page links, so it is the one recorded; if it 404s, the
+            # page at docs.arduino.cc/hardware/uno-rev3/ names the current one.
+            url="https://docs.arduino.cc/static/"
+            "6bb7a3ca51ebee82a252f60c0b418787/A000066-cad-files.zip",
+            wanted=(),
+            skipped=(),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES,
+                Evidence.OPENED,
+                "UNO-TH_Rev3e.sch, 2,222,276 bytes. EAGLE 9.3.1, and the file "
+                "is XML rather than a binary",
+            ),
+            schematic_pdf=Artefact(
+                Published.YES,
+                Evidence.STATED,
+                "linked separately as A000066-schematics.pdf, not in this zip",
+            ),
+            pcb_layout=Artefact(
+                Published.YES,
+                Evidence.OPENED,
+                "UNO-TH_Rev3e.brd, 707,996 bytes. EAGLE 9.3.1 XML: a 68.580 x "
+                "53.340 mm outline in 12 segments on layer 20, 4 holes and 116 "
+                "placed elements. tools/eagle.py reads it",
+            ),
+            footprints_symbols=Artefact(
+                Published.NO,
+                Evidence.ABSENT,
+                "no .lbr in the zip; it has five entries and two are __MACOSX "
+                "resource forks",
+            ),
+            model_3d=Artefact(
+                Published.NO,
+                Evidence.ABSENT,
+                "no STEP, WRL or mesh of any kind, in the zip or linked from "
+                "the board page. Re-checked 2026-08-27 against KiCad's "
+                "kicad-packages3D as well, whose Module.3dshapes holds two "
+                "files and both are a Wemos D1 Mini. OH-75 composes a model "
+                "from this .brd's placements instead of fetching one",
+            ),
+            board_support=Artefact(
+                Published.YES,
+                Evidence.LISTED,
+                "arduino/ArduinoCore-avr, 19,021 KiB. GitHub reports no licence "
+                "for it and there is no LICENSE file at the repository root",
+            ),
+        ),
+        cite="OH-23 survey, docs/research/board-sources/sources.json: "
+        "Arduino / per-board CAD zip on docs.arduino.cc. Fetched and opened "
+        "again 2026-08-27 for OH-75",
+    ),
 )
 
 

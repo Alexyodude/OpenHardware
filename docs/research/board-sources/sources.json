@@ -437,7 +437,7 @@
     {
       "vendor": "Arduino",
       "source": "per-board CAD zip on docs.arduino.cc",
-      "url": "https://docs.arduino.cc/hardware/uno-rev3/",
+      "url": "https://docs.arduino.cc/static/6bb7a3ca51ebee82a252f60c0b418787/A000066-cad-files.zip",
       "model": "per-board download alongside the schematic PDF and pinout",
       "size": {
         "value": "303,265 bytes for the UNO R3 CAD zip",
@@ -492,7 +492,8 @@
         "Arduino is the only vendor in the survey whose licence file says the word 'hardware' in the sentence that grants the rights. Everyone else either grants broadly and leaves scope to inference, or says 'software' over a board design.",
         "webui/pinmap.py records that the UNO's pad centres had to be extracted from board.svg by hand. The .brd in this zip has them exactly -- so that was solvable, in a format nobody here reads yet.",
         "Correction to this survey's first pass, which recorded EAGLE as 'proprietary binary' from the extension alone. EAGLE has written XML since version 6, so this row's schematic is machine-readable today. Three vendors were mis-recorded the same way and all three were opened to fix it -- which is precisely the failure the `opened` class exists to prevent, committed by the survey that defined it."
-      ]
+      ],
+      "url_note": "The zip rather than the board page, because this source was ADOPTED for OH-75 on 2026-08-27 and an adopted row's URL is what tools/board_sources.py fetches. The page it is linked from is https://docs.arduino.cc/hardware/uno-rev3/ and remains the place to find the current asset name, which is content-addressed and carries no version."
     },
     {
       "vendor": "STMicroelectronics",

@@ -374,7 +374,7 @@ def test_the_eagle_import_flips_y_exactly_once():
     output. Flipping twice, or not at all, puts the header upside down and
     nothing downstream would notice.
     """
-    geometry = read_geometry(_brd(), select="J1")
+    geometry = read_geometry(_brd(), select=("J1",))
     pad = next(p for p in geometry.pads if p.number == "1")
     assert pad.y_mm == pytest.approx(58.42 - 52.07 + 1.0)
     assert pad.y_mm < geometry.height_mm / 2, "the top pad came out in the bottom half"
@@ -382,7 +382,7 @@ def test_the_eagle_import_flips_y_exactly_once():
 
 def test_the_eagle_import_names_pads_after_their_nets():
     """A package pad is a number. The name only exists in the signals."""
-    geometry = read_geometry(_brd(), select="J1")
+    geometry = read_geometry(_brd(), select=("J1",))
     labels = {pad.label for pad in geometry.pads}
     assert {"GND", "3.3V", "IO6/SDA"} <= labels, sorted(labels)
     assert len(geometry.pads) == 28
@@ -390,14 +390,14 @@ def test_the_eagle_import_names_pads_after_their_nets():
 
 def test_every_imported_pad_refuses_a_simulator_pin_index():
     """The same refusal 25 board files already make, and for the same reason."""
-    geometry = read_geometry(_brd(), select="J1")
+    geometry = read_geometry(_brd(), select=("J1",))
     board = build_board(geometry, VENDOR_BRD, {"vendor": "SparkFun"})
     assert all(pad["pin"] is None for pad in board["pads"])
     assert "guessed number would wire the circuit wrongly" in board["assumption"]
 
 
 def test_the_derivation_states_that_nothing_was_measured_off_an_image():
-    geometry = read_geometry(_brd(), select="J1")
+    geometry = read_geometry(_brd(), select=("J1",))
     board = build_board(geometry, VENDOR_BRD, {"vendor": "SparkFun"})
     assert board["derivation"].count("Nothing here was measured off an image.") == 1
     assert "EAGLE 9.6.2" in board["derivation"]
@@ -406,7 +406,7 @@ def test_the_derivation_states_that_nothing_was_measured_off_an_image():
 
 def test_the_board_records_the_file_it_came_from():
     """A path is always right; a name recorded from CAD may not be."""
-    geometry = read_geometry(_brd(), select="J1")
+    geometry = read_geometry(_brd(), select=("J1",))
     board = build_board(geometry, VENDOR_BRD, {"vendor": "SparkFun"})
     assert board["source"]["file"].endswith("Thing_Plus_ESP32_C6.brd")
 
@@ -426,7 +426,7 @@ def test_the_generic_importer_reproduces_a_committed_kicad_board_exactly():
     committed = json.loads(
         (REPO / "webui" / "boards" / "XIAO-RP2040-DIP.json").read_text(encoding="utf-8")
     )
-    geometry = read_geometry(footprint, select="XIAO-RP2040-SMD")
+    geometry = read_geometry(footprint, select=("XIAO-RP2040-SMD",))
     board = build_board(geometry, footprint, {"vendor": "Seeed Studio"})
 
     assert board["image"]["width"] == committed["image"]["width"]
@@ -460,7 +460,7 @@ def test_a_footprint_whose_declared_name_is_not_its_filename_is_not_used_silentl
     assert "XIAO-XIAO STM32C5-SMD" in message, "the wrong name it tried is not shown"
     assert "XIAO-STM32C5-SMD" in message, "nor the right one, which the library has"
 
-    geometry = read_geometry(footprint, select="XIAO-STM32C5-SMD")
+    geometry = read_geometry(footprint, select=("XIAO-STM32C5-SMD",))
     assert geometry.declared_name == "XIAO-XIAO STM32C5-SMD"
     board = build_board(geometry, footprint, {"vendor": "Seeed Studio"})
     assert board["board"] == "XIAO-STM32C5-SMD", "the board is named after its file"
@@ -489,7 +489,7 @@ def test_header_runs_are_read_from_the_pads_not_assumed(tmp_path):
     committed-board test above pins that KiCad still gets the same answer.
     """
     path = _synthetic(tmp_path, [("1", 0.0, 0.0), ("2", 0.0, 2.54), ("3", 5.0, 0.0)])
-    geometry = read_geometry(path, select="J1")
+    geometry = read_geometry(path, select=("J1",))
     assert {pad.group for pad in geometry.pads} == {"header-left", "header-right"}
 
 
@@ -500,6 +500,235 @@ def test_more_than_two_runs_are_numbered_rather_than_named(tmp_path):
         for row in range(3)
         for column in range(3)
     ]
-    geometry = read_geometry(_synthetic(tmp_path, grid), select="J1")
+    geometry = read_geometry(_synthetic(tmp_path, grid), select=("J1",))
     groups = {pad.group for pad in geometry.pads}
     assert groups == {"header-column-1", "header-column-2", "header-column-3"}, groups
+
+
+# --- a board whose pads span several placed elements (OH-75) ----------------------
+
+
+def test_several_elements_can_carry_one_boards_pads():
+    """The Arduino Uno is why this reader stopped taking a single name.
+
+    It breaks its 32 pads across four placed elements -- IOH and IOL along the
+    top edge, POWER and AD along the bottom -- and there is no correct quarter
+    of an Uno to describe. The SparkFun board stands in for it here because it
+    is the fetched fixture: J1 carries 28 header pads and MEAS two jumper pads,
+    and asking for both must produce all thirty rather than the first element's.
+    """
+    both = read_geometry(_brd(), select=("J1", "MEAS"))
+    one = read_geometry(_brd(), select=("J1",))
+
+    assert len(both.pads) == 30
+    assert len(one.pads) == 28
+    # Order must not matter: these are two placed elements, not a sequence.
+    reversed_order = read_geometry(_brd(), select=("MEAS", "J1"))
+    assert {(p.label, p.x_mm, p.y_mm) for p in reversed_order.pads} == {
+        (p.label, p.x_mm, p.y_mm) for p in both.pads
+    }
+
+
+def test_the_derivation_names_every_element_it_read():
+    """A board file that read four headers must not claim it read one.
+
+    The derivation is what a reader checks a board description against, and it
+    is the only place the element names survive.
+    """
+    geometry = read_geometry(_brd(), select=("J1", "MEAS"))
+    assert "elements J1 (THING_PLUS), MEAS (COMBO-JUMPER_2_NC_TRACE)" in (
+        geometry.derivation
+    ), geometry.derivation
+
+    single = read_geometry(_brd(), select=("J1",))
+    assert "element J1 (THING_PLUS)" in single.derivation, single.derivation
+
+
+def test_naming_the_same_element_twice_is_refused():
+    """An element is placed once, so its pads are read once.
+
+    Silently deduplicating would agree with half of what the caller believes:
+    somebody who names it twice thinks it holds two different things, and the
+    useful answer is that it does not.
+    """
+    with pytest.raises(BoardImportError, match="more than once"):
+        read_geometry(_brd(), select=("J1", "J1"))
+
+
+def test_a_bare_string_where_a_tuple_belongs_is_refused_by_name():
+    """The mistake this repository made the hour the signature changed.
+
+    A string is iterable, so `select="J1"` reads as the elements J and 1 and
+    fails with "no element called 'J'" -- naming an element nobody wrote and
+    sending the reader to the vendor's file to look for it. Nine tests here and
+    one in `test_kicad.py` did exactly that on 2026-08-27.
+    """
+    with pytest.raises(BoardImportError, match="must be a tuple"):
+        read_geometry(_brd(), select="J1")
+
+
+def test_a_kicad_footprint_takes_one_symbol_root():
+    """Several is an EAGLE answer. A footprint is one part.
+
+    Letting the first quietly win would turn a caller's confusion between a
+    footprint and a board into a board description of half of one.
+    """
+    footprint = _kicad("XIAO-RP2040-SMD")
+    with pytest.raises(BoardImportError, match="one symbol root"):
+        read_geometry(footprint, select=("XIAO-RP2040-SMD", "XIAO-SAMD21-SMD"))
+
+
+def test_the_arduino_unos_thirty_two_pads_come_off_its_four_headers():
+    """The board this change exists for, against the vendor's own file.
+
+    32 is exactly what `webui/boards/Arduino Uno.json` has, and it is 10 + 8 on
+    the top edge and 8 + 6 on the bottom. The labels are the nets the vendor's
+    own <signals> put those pads on, which is what makes them evidence rather
+    than a reading of a silkscreen: D13 is SCK because that is what D13 is.
+    """
+    brd = REPO / "third_party" / "arduino-uno" / "UNO-TH_Rev3e.brd"
+    if not brd.is_file():
+        pytest.skip(
+            "SKIPPED: UNO-TH_Rev3e.brd is not fetched. Run: "
+            "python tools/get_board_sources.py arduino-uno, which prints the "
+            "URL to download by hand -- it is an https-archive, like the Pico"
+        )
+    geometry = read_geometry(brd, select=("IOH", "IOL", "POWER", "AD"))
+
+    assert len(geometry.pads) == 32
+    rows = {}
+    for pad in geometry.pads:
+        rows[pad.group] = rows.get(pad.group, 0) + 1
+    assert rows == {"header-top": 18, "header-bottom": 14}, rows
+
+    labels = {pad.label for pad in geometry.pads}
+    assert {"IO0", "IO9", "SCK", "MISO", "MOSI", "SS"} <= labels, labels
+    assert {"AD0", "AD5/SCL", "AREF", "RESET", "VIN", "+3V3"} <= labels, labels
+    assert "68.58 x 53.34 mm outline" in geometry.derivation, geometry.derivation
+
+
+#: Least-squares scale and offset taking `source` onto `target`. One axis at a
+#: time, because `board.svg` is not uniformly scaled -- see the test below.
+def _fit(source: list[float], target: list[float]) -> tuple[float, float]:
+    count = len(source)
+    mean_s = sum(source) / count
+    mean_t = sum(target) / count
+    across = sum((s - mean_s) * (t - mean_t) for s, t in zip(source, target))
+    along = sum((s - mean_s) ** 2 for s in source)
+    return across / along, mean_t - (across / along) * mean_s
+
+
+def _uno_pairs():
+    """The landed Uno pads beside the vendor's, paired by row and by order.
+
+    Paired by position rather than by name on purpose: GND appears three times,
+    +5V twice and AD4/SDA twice, so a name join would need the very
+    correspondence this is checking.
+    """
+    brd = REPO / "third_party" / "arduino-uno" / "UNO-TH_Rev3e.brd"
+    if not brd.is_file():
+        pytest.skip(
+            "SKIPPED: UNO-TH_Rev3e.brd is not fetched. Run: "
+            "python tools/get_board_sources.py arduino-uno for the URL"
+        )
+    landed = json.loads(
+        (REPO / "webui" / "boards" / "Arduino Uno.json").read_text(encoding="utf-8")
+    )
+    height = landed["image"]["height"]
+    geometry = read_geometry(brd, select=("IOH", "IOL", "POWER", "AD"))
+
+    landed_top = sorted((p for p in landed["pads"] if p["y"] / height < 0.5),
+                        key=lambda p: p["x"])
+    landed_bottom = sorted((p for p in landed["pads"] if p["y"] / height >= 0.5),
+                           key=lambda p: p["x"])
+    vendor_top = sorted(
+        (p for p in geometry.pads if p.y_mm / geometry.height_mm < 0.5),
+        key=lambda p: p.x_mm)
+    vendor_bottom = sorted(
+        (p for p in geometry.pads if p.y_mm / geometry.height_mm >= 0.5),
+        key=lambda p: p.x_mm)
+    return list(zip(landed_top, vendor_top)) + list(zip(landed_bottom, vendor_bottom))
+
+
+def test_the_unos_traced_pads_still_agree_with_the_vendors_board_file():
+    """The check that turned an assumption in that file into a fact.
+
+    `webui/boards/Arduino Uno.json` is the ONLY one of 26 whose pad centres
+    were not derived from vendor CAD: they were traced out of PICSimLab's
+    `board.svg`, and the file carried an `assumption` about which pad was
+    which. Arduino's own EAGLE board file settles it.
+
+    The residual is what is left after the one scale and offset per axis that
+    separates artwork pixels from millimetres is fitted out -- subtracting raw
+    coordinates would report that frame difference on every pad and say nothing
+    about the trace. Measured 2026-08-27: median 0.005 mm, worst 0.008 mm,
+    against a 2.540 mm header pitch. The bound here is loose against that; what
+    would be a defect is a fraction of a pitch, which is what a mis-ordered pad
+    produces.
+    """
+    pairs = _uno_pairs()
+    assert len(pairs) == 32, f"paired {len(pairs)} pads, not 32"
+
+    scale_x, offset_x = _fit([v.x_mm for _, v in pairs], [l["x"] for l, _ in pairs])
+    scale_y, offset_y = _fit([v.y_mm for _, v in pairs], [l["y"] for l, _ in pairs])
+    residuals = [
+        max(abs((scale_x * v.x_mm + offset_x) - l["x"]) / scale_x,
+            abs((scale_y * v.y_mm + offset_y) - l["y"]) / scale_y)
+        for l, v in pairs
+    ]
+    assert max(residuals) < 0.1, (
+        f"worst pad is {max(residuals):.3f} mm from where the vendor puts it, "
+        f"against a 2.540 mm pitch"
+    )
+
+
+def test_the_unos_pad_labels_are_the_nets_the_vendor_put_them_on():
+    """Every label confirmed against the vendor, with no disagreements.
+
+    The three that look wrong and are not: D13..D10 carry SCK, MISO, MOSI and
+    SS because that is what those pins are on an Uno; A4 and A5 appear twice
+    because the R3 repeats them beside AREF; and IOREF sits on the +5V net
+    because the R3 ties it there.
+    """
+    expected = {
+        "SCL": "AD5/SCL", "SDA": "AD4/SDA", "AREF": "AREF", "GND": "GND",
+        "13": "SCK", "12": "MISO", "~11": "MOSI", "~10": "SS",
+        "~9": "IO9", "8": "IO8", "7": "IO7", "~6": "IO6", "~5": "IO5",
+        "4": "IO4", "~3": "IO3", "2": "IO2", "1": "IO1", "0": "IO0",
+        "NC": "1", "IOREF": "+5V", "RESET": "RESET", "3V3": "+3V3",
+        "5V": "+5V", "VIN": "VIN",
+        "A0": "AD0", "A1": "AD1", "A2": "AD2", "A3": "AD3",
+        "A4": "AD4/SDA", "A5": "AD5/SCL",
+    }
+    disagreed = [
+        (landed["label"], vendor.label)
+        for landed, vendor in _uno_pairs()
+        if expected[landed["label"]] != vendor.label
+    ]
+    assert not disagreed, disagreed
+
+
+def test_the_unos_artwork_is_not_uniformly_scaled_and_the_file_says_so():
+    """A real finding, and the only one the cross-check turned up.
+
+    `board.svg` is 5.6616 px/mm across and 5.6382 px/mm down -- 0.41%, or
+    0.28 mm over the board's 68.58 mm width. Nothing depends on it today, and
+    an importer that assumed one scale for both axes would be wrong by that
+    much, so the board file records it and this keeps that sentence true.
+    """
+    pairs = _uno_pairs()
+    scale_x, _ = _fit([v.x_mm for _, v in pairs], [l["x"] for l, _ in pairs])
+    scale_y, _ = _fit([v.y_mm for _, v in pairs], [l["y"] for l, _ in pairs])
+    assert abs(scale_x - scale_y) > 0.01, (
+        f"the artwork is uniformly scaled after all ({scale_x:.4f} vs "
+        f"{scale_y:.4f} px/mm); the board file claims otherwise and should be "
+        f"corrected"
+    )
+
+    landed = json.loads(
+        (REPO / "webui" / "boards" / "Arduino Uno.json").read_text(encoding="utf-8")
+    )
+    assert f"{scale_x:.4f} px/mm" in landed["assumption"], (
+        f"the board file does not record the measured {scale_x:.4f} px/mm"
+    )
+    assert f"{scale_y:.4f} px/mm" in landed["assumption"]
