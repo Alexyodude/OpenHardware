@@ -803,6 +803,102 @@ def read_extras(glb: pathlib.Path) -> dict[str, object]:
 
 
 @dataclasses.dataclass(frozen=True)
+class Electrical:
+    """How a part behaves in a circuit, and where each of its numbers came from.
+
+    **The pattern is `tools/model_from_datasheet.py`'s `SPECS` and it is copied
+    here deliberately**: a value and its provenance live in one mapping, so
+    neither can be edited without the other showing up in the diff. That file's
+    docstring gives the reason at length -- a plausible invented number that
+    renders nicely is the defect this area of the project keeps re-learning.
+
+    `webui/static/circuit.js` is the consumer. Everything here reaches it
+    through the glTF's `asset.extras`, so a part carries its own physics the
+    same way it already carries its own lead positions.
+    """
+
+    #: What kind of element this is in the netlist. `diode` is the only one so
+    #: far, and a part with no `Electrical` at all is honestly modelled as a
+    #: conductor of unknown value -- see `analyse`, which then refuses to report
+    #: a current for anything on that bench.
+    kind: str
+    #: Which terminal current enters by and which it leaves by, in the names
+    #: `lead_tips` gives them.
+    forward: tuple[str, str]
+    #: name -> (value in SI units, where the value came from).
+    cited: dict[str, tuple[float, str]]
+    note: str
+
+    def extras(self) -> dict[str, object]:
+        """The shape `circuit.js` reads, values and citations side by side."""
+        out: dict[str, object] = {
+            "kind": self.kind,
+            "from": self.forward[0],
+            "to": self.forward[1],
+            "note": self.note,
+            "cited": {name: why for name, (_value, why) in self.cited.items()},
+        }
+        for name, (value, _why) in self.cited.items():
+            out[name] = value
+        return out
+
+
+#: A 5 mm through-hole red indicator LED, electrically.
+#:
+#: **AND HERE IS THE HONEST PROBLEM, STATED RATHER THAN PAPERED OVER.** The two
+#: chips this bench can drive publish datasheets that were read to the page --
+#: see `SUPPLY` in `webui/boards/atmega328p.py` and `webui/boards/samd21.py`.
+#: KiCad's mesh is a **generic** part. `LED_D5.0mm.step` carries no
+#: manufacturer and no order code, so there is no datasheet to read and no
+#: honest way to pretend otherwise.
+#:
+#: So these are **class values for a red indicator LED**, and each is taken at
+#: the end of its range that makes the computed current a LOWER bound rather
+#: than an upper one. That choice is what lets `circuit.js` say "at least
+#: 40 mA, past the 20 mA this board rates a pin for" and be right about it: the
+#: real current is larger still. It is also why nothing may ever say a circuit
+#: is safe -- a lower bound under a rating establishes nothing.
+#:
+#: A specific part number would be strictly better than every line of this and
+#: should replace it. The obvious candidates -- Kingbright's WP7113 series,
+#: Vishay's TLHR5400 -- publish PDFs behind site searches that
+#: `tools/get_board_sources.py`'s `https-archive` note already describes, and
+#: none of them is the part KiCad drew.
+LED_ELECTRICAL = Electrical(
+    kind="diode",
+    forward=("anode", "cathode"),
+    cited={
+        "forward_volts": (2.2, (
+            "the top of the 1.8-2.2 V a red indicator LED drops at its rated "
+            "current. A class value and not a measurement: an LED's forward "
+            "voltage is set by the band gap of the semiconductor, which is why "
+            "every red one in the world sits in that band and why a generic "
+            "part can be given one at all. Taken at the TOP of the band "
+            "deliberately, because a larger drop leaves less across the "
+            "resistance and so computes less current"
+        )),
+        "series_ohms": (30.0, (
+            "the top of the 10-30 ohm a 5 mm LED's bulk and lead resistance "
+            "adds above its knee. Also a class value, also taken at the end "
+            "that reduces the computed current. Between them these two make "
+            "every number this part contributes a lower bound"
+        )),
+        "rated_amps": (0.020, (
+            "the continuous forward current a 5 mm indicator LED is sold "
+            "against. Recorded for completeness -- the warning the page "
+            "actually raises is about the PIN, whose ratings are read out of a "
+            "datasheet in `webui/boards/atmega328p.py` rather than assumed here"
+        )),
+    },
+    note=(
+        "Class values for a red indicator LED, not one part's datasheet: "
+        "KiCad's mesh is generic and names no manufacturer. Each is chosen at "
+        "the end of its range that makes the current a lower bound."
+    ),
+)
+
+
+@dataclasses.dataclass(frozen=True)
 class Part:
     """One component model from KiCad's own 3D library."""
 
@@ -821,6 +917,13 @@ class Part:
     #: What the two leads are called, in the order this file's own geometry
     #: puts them -- see `lead_tips`, which sorts them by x.
     terminals: tuple[str, str]
+    #: What it does in a circuit, or `None` for a part nobody has published one
+    #: for. **`None` is a real answer and not a gap**: `circuit.js` treats such
+    #: a part as a conductor of unknown value, which still needs a complete
+    #: circuit to do anything and produces no current claim for the bench it is
+    #: on. Inventing a resistance to fill this in would decide every other
+    #: part's current by it.
+    electrical: Electrical | None = None
 
     @property
     def slug(self) -> str:
@@ -869,12 +972,20 @@ KICAD_3D = "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/master"
 #: on this bench would be a part that does nothing, which is worse than no
 #: switch at all.
 PARTS: tuple[Part, ...] = (
+    #: All three carry the same electrical model, because all three are the
+    #: same die behind a different lens: a 10 mm LED is a 5 mm LED you can see
+    #: from further away, and neither KiCad's mesh nor the class values in
+    #: `LED_ELECTRICAL` distinguish them. Saying so once beats three copies
+    #: that could drift apart while all three parts stayed identical.
     Part(library="LED_THT", name="LED_D3.0mm", label="3 mm LED",
-         lens="#720301", terminals=("cathode", "anode")),
+         lens="#720301", terminals=("cathode", "anode"),
+         electrical=LED_ELECTRICAL),
     Part(library="LED_THT", name="LED_D5.0mm", label="5 mm LED",
-         lens="#720301", terminals=("cathode", "anode")),
+         lens="#720301", terminals=("cathode", "anode"),
+         electrical=LED_ELECTRICAL),
     Part(library="LED_THT", name="LED_D10.0mm", label="10 mm LED",
-         lens="#720301", terminals=("cathode", "anode")),
+         lens="#720301", terminals=("cathode", "anode"),
+         electrical=LED_ELECTRICAL),
     #: **The red mark on its case, and it means driven rather than sounding.**
     #: A buzzer makes a noise and this page has no audio, so nothing here can
     #: show what it is actually doing. Lighting its polarity mark says the one
@@ -882,6 +993,16 @@ PARTS: tuple[Part, ...] = (
     #: the same in words. Inventing a sound would be the failure this
     #: repository ranks worst; leaving a part on the bench that shows nothing
     #: at all would be the one it ranks second.
+    #:
+    #: **And it gets no electrical model, which is the honest answer rather
+    #: than a missing one.** A 12 mm buzzer is either a magnetic coil of a few
+    #: tens of ohms or a piezo element that is very nearly an open circuit at
+    #: DC, and those two draw currents three orders of magnitude apart. KiCad's
+    #: mesh does not say which it drew, and the two are not distinguishable
+    #: from the outside of a plastic can. So it is a conductor of unknown
+    #: value: it still needs a complete circuit before it shows anything, and
+    #: `circuit.js` reports no current for any bench it stands on rather than
+    #: letting a number invented here decide an LED's.
     Part(library="Buzzer_Beeper", name="Buzzer_12x9.5RM7.6", label="12 mm buzzer",
          lens="#9e2705", terminals=("negative", "positive")),
 )
@@ -996,21 +1117,34 @@ def convert_part(part: Part, deflection: float, check: bool) -> int:
           f"({tips[0][0]:.3f}, {tips[0][1]:.3f}, {tips[0][2]:.3f}), "
           f"{part.terminals[1]} at "
           f"({tips[1][0]:.3f}, {tips[1][1]:.3f}, {tips[1][2]:.3f})")
+    if part.electrical is None:
+        print("  circuit  none published -- a conductor of unknown value")
+    else:
+        values = ", ".join(f"{name} {value:g}"
+                           for name, (value, _why) in part.electrical.cited.items())
+        print(f"  circuit  {part.electrical.kind}, {part.electrical.forward[0]} "
+              f"to {part.electrical.forward[1]}: {values}")
 
     if check:
         print("  write  skipped (--check)")
         return 0
     out = OUT / "parts" / f"{part.slug}.glb"
+    extras: dict[str, object] = {
+        "label": part.label, "lens": part.lens, "library": part.library,
+        "terminals": [{"name": part.terminals[i],
+                       "at": [round(v, 4) for v in tips[i]]}
+                      for i in range(2)],
+        "licence": "CC-BY-SA-4.0 with the KiCad library exception; fetched, "
+                   "not vendored",
+    }
+    # Absent rather than null for a part with no published behaviour, so that
+    # `dressPart` reads the same "nobody has said" from a missing key as from
+    # an older file written before this existed.
+    if part.electrical is not None:
+        extras["electrical"] = part.electrical.extras()
     size = write_glb(mesh, out, part.slug, part.url, (whole.width, whole.height,
                                                      whole.thickness),
-                     extras={"label": part.label, "lens": part.lens,
-                             "library": part.library,
-                             "terminals": [
-                                 {"name": part.terminals[i],
-                                  "at": [round(v, 4) for v in tips[i]]}
-                                 for i in range(2)],
-                             "licence": "CC-BY-SA-4.0 with the KiCad library "
-                                        "exception; fetched, not vendored"})
+                     extras=extras)
     print(f"  write  {out.relative_to(REPO)}  {size:,} bytes")
     return size
 

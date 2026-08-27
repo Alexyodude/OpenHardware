@@ -5,12 +5,17 @@
 //
 // ## What a part is here, and what it is not
 //
-// **A part is a consumer of a pin state and nothing else.** `webui/api.py`'s
-// `pin_levels` says a pad reads `high`, and an LED wired to that pad lights.
-// Nothing flows the other way: no part drives a pin, no part loads one, and no
-// part changes what the CPU reads. That boundary is the reason this file needs
-// no core change and it is not a shortcut -- it is the line between showing a
-// measurement and inventing one.
+// **A part is a consumer of a circuit's verdict and nothing else.**
+// `webui/static/circuit.js` solves the bench and says this part is `lit`; this
+// file makes it look lit. Nothing flows the other way: no part drives a pin, no
+// part loads one, and no part changes what the CPU reads. That boundary is the
+// reason this file needs no core change and it is not a shortcut -- it is the
+// line between showing a measurement and inventing one.
+//
+// **This used to consume a pin state directly**, and the difference is the
+// whole of OH-79: `high` on a pad lit whatever was wired to it, so an LED with
+// one leg on D13 and the other in mid-air came on. A pin state is now one
+// input to a circuit rather than an answer about a part.
 //
 // The other direction is a genuinely different piece of work. A button pulling
 // a pin low would have to reach `PINB`, `PINC` and `PIND` on an AVR and
@@ -34,15 +39,19 @@
 // geometry, and it would disagree silently -- a wire meeting nothing, a
 // millimetre from the leg.
 //
-// ## The four states, and why a part has to answer for all of them
+// ## The third word, and why a part has to have one
 //
-// A pin is `high`, `low`, `input` or `unknown`. Only the first three are
-// claims about the program; `unknown` is a claim about this repository -- a
-// pad it cannot answer for. **An LED that was dark for `unknown` would be
-// lying**, in exactly the way `webui/api.py`'s vocabulary exists to prevent:
-// dark is what a driven-low pin looks like, and "nobody here knows" is not
-// that. So a part shows its own third state for it, and the panel's table says
-// the word beside it.
+// A part is `lit`, `off` or `unanswerable`. The first two are claims about a
+// circuit; the third is a claim about this repository -- a pad, a board or a
+// component it cannot answer for. **A part that was dark for that would be
+// lying**, in exactly the way `webui/api.py`'s pin vocabulary exists to
+// prevent: dark is what a real circuit carrying no current looks like, and
+// "nobody here knows" is not that. So a part shows its own third state for it,
+// and the panel says the word beside it.
+//
+// A pad reading `unknown` is one road into that third word; so is a board that
+// publishes no supply, and so is a part nobody published a datasheet for.
+// `circuit.js` decides which, and says which in a sentence.
 
 import * as THREE from "three";
 
@@ -63,19 +72,21 @@ const LIT = 1.2;
 //: real one does.
 const LIT_GAIN = 3.0;
 
-//: What each pin state does to a part.
+//: What a part can be shown doing, and **a circuit decides which** --
+//: `webui/static/circuit.js` solves the bench and hands one of these words per
+//: part.
 //:
-//: **`unknown` is its own answer and not `off`.** A pad this repository cannot
-//: answer for is not a pad that is driven low, and a part that showed them the
-//: same way would collapse the one distinction `webui/api.py`'s four-value
-//: vocabulary exists to keep. It reads as a part connected to nothing this
-//: page understands, which is the truth.
-export const DRIVE = {
-  high: "lit",
-  low: "off",
-  input: "off",
-  unknown: "unanswerable",
-};
+//: This used to be a map from a pin state to one of these, so `high` lit an
+//: LED whatever its other leg was doing -- or was not doing, which is how an
+//: LED with one leg in mid-air came to light. A pin state is now an input to a
+//: circuit rather than an answer about a part.
+//:
+//: **`unanswerable` is its own word and not `off`.** A part this page cannot
+//: answer for is not a part that is dark, and showing them the same way would
+//: collapse the one distinction `webui/api.py`'s four-value vocabulary exists
+//: to keep. It reads as a part connected to nothing this page understands,
+//: which is the truth.
+export const DRIVES = ["lit", "off", "unanswerable"];
 
 /**
  * Turn a loaded mesh into a part: terminals, state and a lens to light.
@@ -91,7 +102,8 @@ export const DRIVE = {
 export function dressPart(group, extras, palette) {
   group.userData.kind = extras.chip;
   group.userData.label = extras.label ?? extras.chip;
-  group.userData.state = "unknown";
+  group.userData.drive = "unanswerable";
+  group.userData.electrical = electricalOf(extras);
   group.userData.terminals = new Map();
 
   // The lens is named by colour because that is what the file has: a glTF
@@ -120,8 +132,36 @@ export function dressPart(group, extras, palette) {
     group.userData.terminals.set(terminal.name, anchor);
   }
 
-  setPartState(group, "unknown", palette);
+  setPartState(group, "unanswerable", palette);
   return group;
+}
+
+/**
+ * The part's own circuit model, in the spelling `circuit.js` reads.
+ *
+ * **Absent is an answer.** `tools/import_3d_model.py` writes this key only for
+ * a part whose behaviour it can state, and its `Electrical` docstring says why
+ * a made-up resistance for a generic buzzer would be worse than none: it would
+ * decide every other part's current on the same bench.
+ *
+ * The rename across the boundary is deliberate and it is the whole of it: the
+ * glTF is written by Python and spells its keys the way Python does, and this
+ * is the one place that knows both. A part model shared by reference between
+ * the two conventions would be a third convention.
+ */
+function electricalOf(extras) {
+  const spec = extras.electrical;
+  if (!spec) return null;
+  return {
+    kind: spec.kind,
+    from: spec.from,
+    to: spec.to,
+    forwardVolts: spec.forward_volts,
+    seriesOhms: spec.series_ohms,
+    ratedAmps: spec.rated_amps,
+    note: spec.note,
+    cited: spec.cited ?? {},
+  };
 }
 
 /** Where a wire attaches to a terminal, in world space. */
@@ -160,17 +200,23 @@ export function makeTarget(anchor, palette) {
 const TARGET_RADIUS = 0.55;
 
 /**
- * Show what the pin is doing. `state` is one of `webui/api.py`'s four.
+ * Show what the part is doing. `drive` is one of `DRIVES`.
+ *
+ * **It is not a pin state any more**, and that is this ticket's whole change:
+ * the caller solves a circuit and passes the answer. A word this file does not
+ * recognise falls back to `unanswerable`, which is the only safe direction to
+ * fall -- lighting a part on a word nobody defined is exactly the failure the
+ * circuit was added to stop.
  *
  * `palette` supplies `line` for the unanswerable case, so that a part nobody
  * can answer for is the same quiet grey as every other "not modelled" in this
  * UI rather than a colour of its own.
  */
-export function setPartState(part, state, palette) {
-  part.userData.state = state;
+export function setPartState(part, drive, palette) {
+  if (!DRIVES.includes(drive)) drive = "unanswerable";
+  part.userData.drive = drive;
   const lens = part.userData.lens;
   if (!lens) return;
-  const drive = DRIVE[state] ?? DRIVE.unknown;
   const base = lens.userData.baseColour;
 
   if (drive === "unanswerable") {

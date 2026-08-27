@@ -233,6 +233,65 @@ PIN_NAMES: dict[str, str] = {
     label: f"P{'AB'[index]}{bit:02d}" for label, (index, bit) in HEADER.items()
 }
 
+#: What a pin of this part can actually drive, so that a circuit can be solved.
+#: `webui/boards/atmega328p.py`'s `SUPPLY` carries the long version of why the
+#: resistances are stated as upper bounds; the short version is that each comes
+#: from a guaranteed datasheet corner, so every current computed through it is
+#: a lower bound and the page may warn but may never reassure.
+#:
+#: **This part is far weaker than the AVR and the numbers say so.** A SAM D21
+#: pin at its reset drive strength is specified to source two milliamps; an
+#: ATmega328P pin is specified at twenty. An LED on a XIAO is dim for a reason.
+#:
+#: **DRVSTR = 0 is an assumption, and it is the reset value.** `PORT.PINCFG`'s
+#: reset state has the bit clear, `install_port` above stores that byte without
+#: interpreting any bit of it, and the Arduino SAMD core's `pinMode` does not
+#: set it. Firmware that did would double these currents and nothing here would
+#: notice -- which is a limitation of the board description, recorded here
+#: rather than discovered later.
+SUPPLY: dict[str, object] = {
+    "chip": "SAMD21",
+    "volts": 3.3,
+    "source_ohms": 330.0,
+    "sink_ohms": 264.0,
+    "rated_amps": 0.002,
+    # **Absent, and it is a real absence.** The SAM D21 states no per-pin
+    # absolute maximum at all -- its limit is per CLUSTER, and this repository
+    # models no clusters. Filling this in with a plausible number would be the
+    # invention `circuit.js` exists to stop.
+    "absolute_amps": None,
+    "cited": {
+        "volts": (
+            "the board's own silkscreen: both XIAO SAMD21 pad maps carry a "
+            "`3V3_OUT` pad and no other rail but `VBUS`, and "
+            "`webui/boards/XIAO-SAMD21-DIP.json` got those labels from Seeed's "
+            "own CAD"
+        ),
+        "source_ohms": (
+            "derived: (3.3 - 0.8 * 3.3) / 0.002. SAM D21/DA1 Family datasheet "
+            "DS40001882L (Microchip, 2026), Table 37-15 `Normal I/O Pins "
+            "Characteristics` on page 916: VOH min 0.8*VDD at IOH max, and "
+            "IOH max 2 mA for VDD = 3 - 3.63 V with PORT.PINCFG.DRVSTR = 0"
+        ),
+        "sink_ohms": (
+            "derived: (0.2 * 3.3) / 0.0025. Same table, same page: VOL max "
+            "0.2*VDD at IOL max, and IOL max 2.5 mA for VDD = 3 - 3.63 V with "
+            "PORT.PINCFG.DRVSTR = 0"
+        ),
+        "rated_amps": (
+            "the smaller of the two limits in that table, the 2 mA source "
+            "figure. Sinking is rated 2.5 mA; one number is quoted and it is "
+            "the one that binds first"
+        ),
+        "absolute_amps": (
+            "there is not one. DS40001882L Table 37-2 on page 906 gives "
+            "absolute maxima per VDD and GND PIN, and its note 1 reads "
+            "`Maximum source current is 46mA and maximum sink current is 65mA "
+            "per cluster` -- a group of GPIOs, not a pin"
+        ),
+    },
+}
+
 # --- the clock tree ---------------------------------------------------------
 #
 # Every address in this section is read from the same generated headers as the

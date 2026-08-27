@@ -736,23 +736,56 @@ table.grid tr.dim td { opacity: 0.72; }
 .bench-part:hover:not(:disabled) { background: var(--accent-wash); color: var(--accent); }
 .bench-part:disabled { color: var(--muted); cursor: not-allowed; }
 
+/* One card per part rather than one pill per wire.
+   **It was a row of pills and a pill cannot carry a sentence.** A part's row
+   now says what the circuit found — "only its anode is wired, so no current
+   can return" — and that is the whole point of solving one. */
 .bench-list {
   list-style: none;
   margin: 0;
   padding: 0 16px 4px;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
 }
 .bench-list li {
-  display: inline-flex;
+  font-size: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--sunken);
+}
+/* The lit part is the one a reader is looking for, so its edge says so in the
+   same colour a pin driven high is drawn in. `off` and `unanswerable` keep the
+   quiet default, because neither is news. */
+.bench-list li[data-drive="lit"] { border-color: var(--changed); }
+.bench-head {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  padding: 3px 4px 3px 9px;
+}
+.bench-name { font-weight: 600; }
+.bench-wire {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 3px 1px 8px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: var(--sunken);
+  background: var(--surface);
+  color: var(--muted);
+}
+.bench-why {
+  margin: 3px 0 0;
+  color: var(--muted);
+}
+/* **Red, and it is the only red on this bench.** It marks a circuit that would
+   damage the real hardware — a current past what the board rates a pin for —
+   which is exactly what `--halt` means everywhere else on this page. */
+.bench-warn {
+  margin: 3px 0 0;
+  color: var(--halt);
 }
 .bench-off {
   border: none;

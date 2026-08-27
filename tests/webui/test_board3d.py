@@ -466,3 +466,137 @@ def test_the_renderer_can_report_how_far_a_wire_is_inside_something():
         "it must measure against the set the rope actually solved against, or "
         "it reports a fault on every wire's own part"
     )
+
+
+# --- a part is lit by a circuit, not by one pad's level ----------------------
+
+
+def test_no_part_is_driven_from_a_single_pads_level():
+    """**The defect OH-79 removed, pinned so it cannot walk back in.**
+
+    `applyState` was four lines: find the pad this one wire came from, read its
+    logic level, drive the part with it. That is what lit an LED whose other
+    leg was in mid-air -- the user's report, verbatim: *"the led is lighting up
+    even though not grounded"*.
+
+    Its absence is the assertion, and so is the absence of the shape it had: a
+    `view.pads.get` anywhere near a `setPartState` is that function returning
+    under another name.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    assert "function applyState" not in source
+    assert "import { analyse }" in source
+    solve = source.split("function applyCircuit() {", 1)[1].split("\n}", 1)[0]
+    assert "view.pads.get" not in solve, (
+        "the circuit is being told about one pad rather than all of them"
+    )
+    # Every part is handed the word the circuit decided, and there is exactly
+    # one place that happens.
+    assert source.count("setPartState(") == 1
+    assert "report.parts[at].drive" in solve
+
+
+def test_every_change_to_the_bench_solves_the_circuit_again():
+    """A stale answer is the same lie as a wrong one, arriving later.
+
+    Six things change what a circuit is: a state poll, a wire made by hand, a
+    wire made by `connect`, a wire removed, a part added, a part removed -- and
+    `clearBench`, which does the last two at once. Miss any of them and the
+    page keeps showing the previous circuit's verdict.
+
+    **`disconnect` is the one that would be missed**, and it is why this test
+    lists them rather than counting calls: it used to set the part back to
+    `unknown` itself, so it looks handled.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    for name in ("export function setLevels(levels) {",
+                 "export function disconnect(id) {",
+                 "export async function addPart(kind) {",
+                 "export function removePart(index) {",
+                 "export function connect(pin, part, terminalName) {",
+                 "function onPointerUp(event) {"):
+        body = source.split(name, 1)[1].split("\n}", 1)[0]
+        assert "applyCircuit()" in body, f"{name.strip()} leaves a stale circuit"
+    bench = source.split("export function clearBench(", 1)[1].split("\n}", 1)[0]
+    assert "applyCircuit()" in bench
+
+
+def test_the_boards_supply_reaches_the_renderer_from_the_api():
+    """The one number a circuit cannot be solved without, and it is not guessed.
+
+    `webui/boards/atmega328p.py` publishes it, `webui/api.py` sends it with the
+    pad map, and this reads it. A default written here would be a fourth place
+    a supply voltage lives and the only one with no datasheet behind it.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    supply = source.split("function supplyOf(layout) {", 1)[1].split("\n}", 1)[0]
+    assert "layout?.supply" in supply
+    assert "if (!spec) return null;" in supply, (
+        "a board with no published supply must get no circuit, not a default"
+    )
+    # And nothing here writes a voltage down.
+    assert "5.0" not in supply and "3.3" not in supply
+
+
+def test_a_part_carries_the_circuit_model_its_own_file_states():
+    """The parameters travel with the mesh, not with the renderer.
+
+    `tools/import_3d_model.py` writes them into the glTF's `asset.extras` with
+    their citations, exactly as `tools/model_from_datasheet.py` writes a
+    dimension with its source. A forward voltage typed into a JavaScript file
+    would be a second source that could disagree with the part silently --
+    which is the failure `lead_tips` records for a lead spacing.
+    """
+    parts = (STATIC / "parts.js").read_text(encoding="utf-8")
+    # The assignment and not merely the words. A version of this test that
+    # looked for `extras.electrical` anywhere survived a mutation that read the
+    # extras and then threw the answer away -- measured 2026-08-27.
+    assert "group.userData.electrical = electricalOf(extras);" in parts
+    assert "const spec = extras.electrical;" in parts
+    assert "forward_volts" in parts
+    assert "2.2" not in parts and "seriesOhms: 30" not in parts
+    # The old state -> drive map is gone, because a pin state is an input to a
+    # circuit now rather than an answer about a part.
+    assert "export const DRIVE = {" not in parts
+    assert 'high: "lit"' not in parts
+
+
+def test_the_bench_says_why_a_part_is_dark_rather_than_only_showing_it():
+    """**The half of this that a reader can check against the board.**
+
+    "off" is a picture to interpret; "only its anode is wired, so no current
+    can return" is a sentence. And the over-rating warning is the payoff the
+    whole exercise was for -- an LED across a pin with no resistor draws twice
+    what an UNO rates one for, and the page has to say so rather than lighting
+    it prettily.
+    """
+    panel = PANEL.read_text(encoding="utf-8")
+    # The conditions, not the words: a mutation that replaced both with
+    # `if (false)` left every mention of `part.reason` in the file and passed
+    # a test that only looked for the name.
+    assert "if (part.reason) {" in panel
+    assert "if (part.warning) {" in panel
+    assert "why.textContent = part.reason;" in panel
+    assert "warn.textContent = part.warning;" in panel
+    sheet = SHEET.read_text(encoding="utf-8")
+    warn = sheet.split(".bench-warn {", 1)[1].split("}", 1)[0]
+    # The same red every other "this went wrong" on the page uses, read from
+    # the stylesheet rather than written down -- the rule the whole of this
+    # file exists to keep.
+    assert "var(--halt)" in warn
+
+
+def test_the_bench_lists_parts_and_not_wires():
+    """A wire is not a claim about anything on its own.
+
+    An LED needs two of them and a return path before it can be said to be
+    doing something, so the row a reader looks at is the part, carrying its
+    wires. Listing wires put the same LED in two rows with no verdict on
+    either.
+    """
+    panel = PANEL.read_text(encoding="utf-8")
+    bench = panel.split("function renderBench() {", 1)[1].split("\n}", 1)[0]
+    assert "for (const [index, part] of onBench.entries())" in bench
+    assert "joined.filter((w) => w.part === index)" in bench, (
+        "the wires are not being grouped onto the part they reach"
+    )

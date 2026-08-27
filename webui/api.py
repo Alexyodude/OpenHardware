@@ -866,6 +866,17 @@ def pin_view(runtime: Runtime, cpu: Core, board: str) -> dict[str, object]:
         "board": board,
         "width": layout.width if layout is not None else None,
         "height": layout.height if layout is not None else None,
+        # **What a pin of this part can drive**, so that the 3D view can solve a
+        # circuit instead of lighting an LED because one pad reads high. Found
+        # by `getattr` exactly as `pin_states` and `PIN_NAMES` are, and `None`
+        # for a board whose module publishes no electrical model -- which
+        # `webui/static/circuit.js` reports in words rather than filling in.
+        #
+        # It rides the geometry fetch and not the state poll because it never
+        # changes: an output resistance is a property of silicon, and sending
+        # it twenty times a second beside the pin levels would be the same
+        # mistake `pin_levels` exists to avoid.
+        "supply": getattr(runtime.description, "SUPPLY", None),
         # **Named rather than left for the caller to count.** "17 of 32 pads
         # cannot be answered for" is the sentence a reader needs in order to
         # know whether they are looking at a quiet program or a thin model.

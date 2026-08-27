@@ -44,6 +44,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { Rope } from "./wires.js";
+import { analyse } from "./circuit.js";
 import { dressPart, makeTarget, setPartState, terminalPoint, BENCH_GAP,
          BENCH_PITCH } from "./parts.js";
 
@@ -241,6 +242,15 @@ const view = {
   mmScale: PX_PER_MM * SCALE,
   colliders: [],     // what a wire may not pass through; see refreshColliders
   floor: -Infinity,  // the bench top
+  //: What a pin of this board's chip can drive, from `/api/board/pins`, or
+  //: null for a board whose module publishes no electrical model. Without it
+  //: no circuit is solved and every wired part reports unanswerable, which is
+  //: the same honest degradation the panel's three captions make about a
+  //: board's 3D model.
+  supply: null,
+  //: The last thing `circuit.js` said about the bench, kept so that `parts()`
+  //: can hand the page a sentence per part without solving again.
+  circuit: null,
   pads: new Map(),   // pin name -> the marker drawn for it
   bench: null,       // parts and wires; outlives a board change
   parts: [],         // every part on the bench, in the order they arrived
@@ -387,6 +397,7 @@ function release(object) {
 export function showBoard(layout, model = null) {
   if (!view.renderer) return;
   clearBoard();
+  view.supply = supplyOf(layout);
   if (!layout || !layout.width || !layout.height) return;
 
   const width = layout.width * SCALE;
@@ -605,6 +616,33 @@ function placeModel(loaded, layout) {
   refreshColliders();
 }
 
+/**
+ * What a pin of this board can drive, in the spelling `circuit.js` reads.
+ *
+ * The rename across the boundary is the same one `parts.js`'s `electricalOf`
+ * makes and for the same reason: `webui/boards/atmega328p.py`'s `SUPPLY` spells
+ * its keys the way Python does, and one place knows both conventions rather
+ * than a third existing to reconcile them.
+ *
+ * **Null in, null out, and null is a real answer.** A board whose module
+ * publishes no `SUPPLY` gets no circuit at all rather than a plausible default,
+ * because a supply voltage guessed here would decide every current the page
+ * then printed.
+ */
+function supplyOf(layout) {
+  const spec = layout?.supply;
+  if (!spec) return null;
+  return {
+    chip: spec.chip,
+    volts: spec.volts,
+    sourceOhms: spec.source_ohms,
+    sinkOhms: spec.sink_ohms,
+    ratedAmps: spec.rated_amps,
+    absoluteAmps: spec.absolute_amps,
+    cited: spec.cited ?? {},
+  };
+}
+
 /** Paint one post from the state recorded on it. */
 function repaint(post) {
   const colour =
@@ -620,10 +658,10 @@ export function setLevels(levels) {
     repaint(post);
   }
   // **The parts follow the pads and not the payload**, which is the join that
-  // makes a wire mean anything: a part shows the state of the pad its wire
-  // reaches, read back off that pad, so there is exactly one place a pin state
-  // is decided and the picture cannot disagree with the table.
-  for (const wire of view.wires) applyState(wire);
+  // makes a wire mean anything: the circuit is solved from the states read
+  // back off the pads, so there is exactly one place a pin state is decided
+  // and the picture cannot disagree with the table.
+  applyCircuit();
 }
 
 /** Re-read the stylesheet. Called when the theme changes.
@@ -771,9 +809,14 @@ export function describe() {
                 { min: vecArray(box.min), max: vecArray(box.max) }) }
       : null,
     pads,
+    circuit: view.circuit
+      ? { ok: view.circuit.ok, note: view.circuit.note,
+          parts: view.circuit.parts }
+      : null,
+    supply: view.supply,
     parts: view.parts.map((part) => ({
       kind: part.userData.kind,
-      state: part.userData.state,
+      drive: part.userData.drive,
       position: vecArray(part.getWorldPosition(at)),
       box: (box.setFromObject(part),
             { min: vecArray(box.min), max: vecArray(box.max) }),
@@ -947,6 +990,10 @@ export async function addPart(kind) {
   view.bench.add(part);
   view.parts.push(part);
   refreshColliders();
+  // A part that has just arrived is wired to nothing, and the circuit is what
+  // says so -- this is also what puts an entry for it in `view.circuit`, so
+  // the page's list can name it before a wire reaches it.
+  applyCircuit();
   frameScene();
   return part;
 }
@@ -1079,14 +1126,32 @@ function connectionOf(part) {
   return null;
 }
 
-/** Every part on the bench, for the page's own list. */
+/**
+ * Every part on the bench, for the page's own list.
+ *
+ * **`reason` is the half of this that matters.** "off" is a picture a reader
+ * has to interpret; "only its anode is wired, so no current can return" is a
+ * sentence they can check against the board in front of them. `circuit.js`
+ * writes both and this hands them over unchanged.
+ */
 export function parts() {
-  return view.parts.map((part) => ({
+  const report = view.circuit?.parts ?? [];
+  return view.parts.map((part, at) => ({
     kind: part.userData.kind,
     label: part.userData.label,
-    state: part.userData.state,
+    drive: part.userData.drive,
+    amps: report[at]?.amps ?? null,
+    reason: report[at]?.reason ?? "",
+    warning: report[at]?.warning ?? null,
     pin: connectionOf(part),
   }));
+}
+
+/** What the last solve said about the bench as a whole, or null. */
+export function circuit() {
+  if (!view.circuit) return null;
+  return { ok: view.circuit.ok, note: view.circuit.note,
+           supply: view.supply };
 }
 
 /** Everything currently joined. For the page, and for a test. */
@@ -1096,6 +1161,10 @@ export function connections() {
     .map((wire) => ({
       id: wire.id,
       pin: wire.pin,
+      // Which entry of `parts()` this wire lands on. **A part needs two wires
+      // before anything can be said about it**, so the page groups them by
+      // part, and grouping by label would put two identical LEDs in one row.
+      part: view.parts.indexOf(wire.terminal.userData.part),
       kind: wire.terminal.userData.part.userData.kind,
       label: wire.terminal.userData.part.userData.label,
       terminal: wire.terminal.userData.terminal,
@@ -1105,19 +1174,18 @@ export function connections() {
 /**
  * Take one wire off, and leave the part where it is.
  *
- * **The part goes back to `unknown` and not to `off`**, which is the same
- * distinction every pad in this view keeps: an LED with nothing wired to it is
- * not an LED being driven low, and showing them the same way would say the
- * program had turned it off.
+ * **What the part then shows is the circuit's answer and not a special case
+ * here.** It used to be: this function set the part back to `unknown` itself,
+ * because nothing else could work it out. Re-solving says the same thing for a
+ * part left with no wires -- and says something better for a part left with
+ * one, which now goes dark for the reason it deserves rather than staying lit
+ * on the pin its remaining wire happens to touch.
  */
 export function disconnect(id) {
   const wire = view.wires.find((candidate) => candidate.id === id);
   if (!wire) return false;
-  const part = wire.terminal?.userData?.part ?? null;
   discardWire(wire);
-  if (part && !view.wires.some((other) => other.terminal?.userData?.part === part)) {
-    setPartState(part, "unknown", view.palette);
-  }
+  applyCircuit();
   return true;
 }
 
@@ -1132,6 +1200,7 @@ export function removePart(index) {
   view.bench.remove(part);
   view.parts.splice(index, 1);
   refreshColliders();
+  applyCircuit();
   frameScene();
   return true;
 }
@@ -1270,7 +1339,7 @@ function onPointerUp(event) {
     view.dragging.rope.moveTail(vecArray(terminalPoint(terminal)));
     view.dragging.rope.slacken();
     applyColliders(view.dragging);
-    applyState(view.dragging);
+    applyCircuit();
   } else {
     // **Dropped in mid-air is dropped.** A wire left dangling would be a
     // connection the page could not explain, and this view's whole contract is
@@ -1286,12 +1355,42 @@ function onPointerUp(event) {
   announce();
 }
 
-/** Show the pin's state on whatever this wire reaches. */
-function applyState(wire) {
-  if (!wire.terminal) return;
-  const pad = view.pads.get(wire.pin);
-  const state = pad ? pad.userData.state : "unknown";
-  setPartState(wire.terminal.userData.part, state, view.palette);
+/**
+ * Solve the whole bench, and show each part what the circuit says it is doing.
+ *
+ * **One solve for the bench and not one per wire**, because a part needs both
+ * of its legs and the circuit they close before anything can be said about it.
+ * The function this replaces read the pad one wire came from and drove the part
+ * with its logic level, which lit an LED with its other leg in mid-air --
+ * OH-79, and the user's own report.
+ *
+ * Called whenever the topology or the pin levels change: a wire made or
+ * dropped, a part added or removed, a state poll. It is cheap -- a dozen nodes
+ * and a Gaussian elimination -- and it is not on the frame loop, because
+ * nothing about a circuit changes between two frames on its own.
+ */
+function applyCircuit() {
+  const index = new Map(view.parts.map((part, at) => [part, at]));
+  const report = analyse({
+    supply: view.supply,
+    pads: [...view.pads.values()].map((post) => ({
+      name: post.userData.pin, state: post.userData.state,
+    })),
+    parts: view.parts.map((part) => ({
+      label: part.userData.label,
+      terminals: [...part.userData.terminals.keys()],
+      model: part.userData.electrical,
+    })),
+    wires: view.wires
+      .filter((wire) => wire.terminal)
+      .map((wire) => ({ pad: wire.pin,
+                        part: index.get(wire.terminal.userData.part),
+                        terminal: wire.terminal.userData.terminal })),
+  });
+  view.circuit = report;
+  for (const [at, part] of view.parts.entries()) {
+    setPartState(part, report.parts[at].drive, view.palette);
+  }
 }
 
 /**
@@ -1303,12 +1402,18 @@ function applyState(wire) {
  */
 export function clearBench({ parts: alsoParts = false } = {}) {
   for (const wire of [...view.wires]) discardWire(wire);
-  if (!alsoParts) return;
-  for (const part of view.parts) {
-    part.traverse((object) => { if (object.isMesh) release(object); });
-    view.bench.remove(part);
+  if (alsoParts) {
+    for (const part of view.parts) {
+      part.traverse((object) => { if (object.isMesh) release(object); });
+      view.bench.remove(part);
+    }
+    view.parts.length = 0;
   }
-  view.parts.length = 0;
+  // Every part left standing has just lost its wires, so every one of them is
+  // back to being a part nothing can be said about. Solving says that; a
+  // stale `view.circuit` would leave the page printing currents for wires
+  // that no longer exist.
+  applyCircuit();
 }
 
 /** Wire a pad to a part's terminal without a pointer. For the page and tests. */
@@ -1320,6 +1425,6 @@ export function connect(pin, part, terminalName) {
   wire.terminal = terminal;
   applyColliders(wire);
   wire.rope.slacken();
-  applyState(wire);
+  applyCircuit();
   return wire;
 }

@@ -352,6 +352,68 @@ PIN_NAMES: dict[str, str] = {
     label: f"P{port}{bit}" for label, (port, bit) in HEADER.items()
 }
 
+#: What a pin of this part can actually drive, so that a circuit can be solved.
+#:
+#: **Read out of the PDFs on 2026-08-27, not recalled.** `webui/api.py` sends
+#: this to the page beside the pad map and `webui/static/circuit.js` builds a
+#: netlist from it; a board that does not publish one gets no circuit and the
+#: panel says so rather than showing a part lighting for reasons nobody can
+#: state.
+#:
+#: **Every resistance here is an UPPER bound, and that is the whole design.**
+#: Each is derived from a *guaranteed* corner of the datasheet -- the worst
+#: output voltage at the stated test current -- so the real output resistance
+#: is at most this, so the current computed through it is at LEAST what the
+#: page reports. A lower bound over a rating is a fact; a lower bound under one
+#: says nothing. That is why `circuit.js` may warn and may never reassure.
+#:
+#: `volts` is a fact about the BOARD and the rest are facts about the chip.
+#: They are together because the Arduino Uno is the only ATmega328P board here
+#: and splitting them would be a second file to keep in step for no reader's
+#: benefit -- but the day a 3.3 V ATmega328P board arrives, `volts` is the
+#: field that moves and the two 3 V rows quoted below are what it moves to.
+SUPPLY: dict[str, object] = {
+    "chip": "ATmega328P",
+    "volts": 5.0,
+    "source_ohms": 40.0,
+    "sink_ohms": 45.0,
+    "rated_amps": 0.020,
+    "absolute_amps": 0.040,
+    "cited": {
+        "volts": (
+            "Arduino's own tech specs for the UNO R3, `I/O Voltage: 5V` -- "
+            "`content/hardware/02.uno/boards/uno-rev3/tech-specs.yml` in "
+            "`arduino/docs-content`, read 2026-08-27. A fact about the board "
+            "rather than the chip, which runs from 1.8 V to 5.5 V"
+        ),
+        "source_ohms": (
+            "derived: (5.0 - 4.2) / 0.020. ATmega48A/PA/88A/PA/168A/PA/328/P "
+            "datasheet DS40002061B (Microchip, 2020), Table 30-1 on page 323: "
+            "VOH, Output High Voltage except RESET pin, min 4.2 V at "
+            "IOH = -20 mA, VCC = 5 V, TA = 85 C. A MINIMUM output voltage is a "
+            "MAXIMUM resistance. The 3 V row of the same table is "
+            "IOH = -10 mA, VOH min 2.3 V -> 70 ohm"
+        ),
+        "sink_ohms": (
+            "derived: 0.9 / 0.020. Same datasheet, Table 30-1 on page 322: "
+            "VOL, Output Low Voltage except RESET pin, max 0.9 V at "
+            "IOL = 20 mA, VCC = 5 V, TA = 85 C. The 3 V row is IOL = 10 mA, "
+            "VOL max 0.6 V -> 60 ohm"
+        ),
+        "rated_amps": (
+            "Arduino's tech specs again, `DC Current per I/O Pin: 20 mA`. It "
+            "agrees with the datasheet's own test condition -- notes 3 and 4 "
+            "of Table 30-1 say a port can source or sink more than 20 mA at "
+            "VCC = 5 V but that VOH and VOL are then not ensured"
+        ),
+        "absolute_amps": (
+            "DS40002061B section 30.1, Absolute Maximum Ratings, page 322: "
+            "`DC Current per I/O Pin . . . 40.0mA`. A stress rating -- the "
+            "page above it says operation at these conditions is not implied"
+        ),
+    },
+}
+
 #: Header label -> the `UCSR0B` bit that takes the pad away from PORTD.
 #:
 #: **`Serial.begin()` never writes `DDRD`, and this is the measurement that

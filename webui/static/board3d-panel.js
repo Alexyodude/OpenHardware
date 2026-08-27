@@ -367,43 +367,90 @@ async function addPart(slug) {
   renderBench();
 }
 
-/** What is on the bench, and what is wired to what. */
+/**
+ * What is on the bench, what is wired to what, and what the circuit makes of it.
+ *
+ * **One row per PART rather than per wire, and that is this ticket's change.**
+ * A wire is not a claim about anything on its own -- an LED needs two of them
+ * and a return path before it can be said to be doing something -- so the row a
+ * reader looks at is the part, carrying its wires, the sentence `circuit.js`
+ * wrote about it, and any warning that came with it.
+ */
 function renderBench() {
   if (!scene) return;
   const joined = scene.connections();
   const onBench = scene.parts();
+  const solved = scene.circuit();
   $(UNWIRE).disabled = joined.length === 0;
 
   const list = $(BENCH_LIST);
   list.textContent = "";
-  for (const wire of joined) {
+  for (const [index, part] of onBench.entries()) {
     const row = document.createElement("li");
+    row.dataset.drive = part.drive;
+
+    const head = document.createElement("div");
+    head.className = "bench-head";
     const what = document.createElement("span");
+    what.className = "bench-name";
     // **Named, not counted.** "5 mm LED — anode on D0" is a sentence a reader
     // can check against the table beside it; "1 connected" is one they have to
     // trust.
-    what.textContent = `${wire.label} — ${wire.terminal} on ${wire.pin}`;
-    const off = document.createElement("button");
-    off.type = "button";
-    off.className = "bench-off";
-    off.textContent = "×";
-    off.title = `Unwire ${wire.label} from ${wire.pin}`;
-    off.setAttribute("aria-label", off.title);
-    off.addEventListener("click", () => {
-      scene.disconnect(wire.id);
-      renderBench();
-    });
-    row.append(what, off);
+    what.textContent = part.label;
+    head.append(what);
+
+    for (const wire of joined.filter((w) => w.part === index)) {
+      const chip = document.createElement("span");
+      chip.className = "bench-wire";
+      chip.append(document.createTextNode(`${wire.terminal} on ${wire.pin}`));
+      const off = document.createElement("button");
+      off.type = "button";
+      off.className = "bench-off";
+      off.textContent = "×";
+      off.title = `Unwire ${wire.label} from ${wire.pin}`;
+      off.setAttribute("aria-label", off.title);
+      off.addEventListener("click", () => {
+        scene.disconnect(wire.id);
+        renderBench();
+      });
+      chip.append(off);
+      head.append(chip);
+    }
+    row.append(head);
+
+    if (part.reason) {
+      const why = document.createElement("p");
+      why.className = "bench-why";
+      // The current comes first when there is one, because it is the number a
+      // reader is here for and the rest of the sentence is why it is that.
+      why.textContent = part.reason;
+      row.append(why);
+    }
+    if (part.warning) {
+      const warn = document.createElement("p");
+      warn.className = "bench-warn";
+      warn.textContent = part.warning;
+      row.append(warn);
+    }
     list.append(row);
   }
 
   if (!onBench.length) {
     $(BENCH_NOTE).textContent =
-      "Drag from a pad to a part's terminal to wire it. The part shows what " +
-      "that pin is doing; nothing flows back into the chip.";
+      "Drag from a pad to a part's terminal to wire it. A part needs a " +
+      "complete circuit — both legs, and a path back — before it does " +
+      "anything; nothing flows back into the chip.";
     return;
   }
-  const loose = onBench.length - joined.length;
+  // **The circuit's own sentence wins over the counting one**, because it is
+  // the one that says why nothing can be computed — no supply for this board,
+  // a part with no published model, a short. A count is what to say when there
+  // is nothing more interesting to say.
+  if (solved?.note) {
+    $(BENCH_NOTE).textContent = solved.note;
+    return;
+  }
+  const loose = onBench.length - new Set(joined.map((w) => w.part)).size;
   $(BENCH_NOTE).textContent = loose
     ? `${loose} part${loose === 1 ? "" : "s"} not wired yet. Drag from a pad ` +
       `to a terminal.`

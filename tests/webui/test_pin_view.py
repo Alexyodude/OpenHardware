@@ -276,3 +276,63 @@ def test_a_board_that_maps_no_pins_says_so_rather_than_reporting_none():
     assert "webui.boards.nothing" in view["note"]
     assert "gap in the board description" in view["note"]
     assert api.pin_levels(runtime, None) is None
+
+
+# --- what a pin can drive, for the circuit the 3D view solves ---------------
+
+
+def test_the_pin_view_carries_what_a_pin_of_this_board_can_drive():
+    """**The join OH-79 added**, and it rides the geometry rather than the poll.
+
+    `webui/static/circuit.js` cannot solve anything without a supply voltage
+    and an output resistance, and neither is derivable from a pin level. They
+    come with the pad map, once, because an output resistance is a property of
+    silicon and does not change while a sketch runs.
+    """
+    with built(UNO, UNO_DRIVE) as session:
+        session.step(5000)
+        view = api.pin_view(session.runtime, session.cpu, UNO)
+    supply = view["supply"]
+    assert supply is not None
+    assert supply["chip"] == "ATmega328P"
+    assert supply["volts"] == 5.0
+    # Every number carries where it came from. A supply whose provenance had
+    # been dropped in transit would let the page print a current nobody could
+    # trace back to a datasheet, which is the failure `Electrical` and `SPECS`
+    # are both shaped to prevent.
+    for name in ("volts", "source_ohms", "sink_ohms", "rated_amps",
+                 "absolute_amps"):
+        assert supply["cited"][name]
+
+
+def test_a_supply_is_json_and_not_a_python_object():
+    """It crosses to the browser, so every value in it has to survive the trip.
+
+    A dataclass or a tuple here would be a 500 from `/api/board/pins` on the
+    one board a reader is most likely to be looking at, and nothing else in
+    this file would have caught it.
+    """
+    import json
+
+    with built(XIAO, DRIVE) as session:
+        session.step(1000)
+        view = api.pin_view(session.runtime, session.cpu, XIAO)
+    back = json.loads(json.dumps(view))
+    assert back["supply"]["volts"] == 3.3
+    # **Null rather than a number, and it is a real absence.** The SAM D21
+    # states no per-pin absolute maximum at all -- its limit is per cluster.
+    assert back["supply"]["absolute_amps"] is None
+    assert "cluster" in back["supply"]["cited"]["absolute_amps"]
+
+
+def test_a_board_with_no_supply_model_says_null_rather_than_guessing():
+    """Nine of the ten boards with a 3D model publish no `SUPPLY`.
+
+    The page then solves no circuit and says why. A default of five volts here
+    would light a part on a 3.3 V board at half again the current it draws.
+    """
+    runtime = api.Runtime(
+        board="X", chip="Nothing", core="none",
+        description=_Silent(), abi=None, machine=None,
+    )
+    assert getattr(runtime.description, "SUPPLY", None) is None
