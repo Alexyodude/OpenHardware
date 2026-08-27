@@ -940,7 +940,24 @@ def test_the_scene_casts_shadows_and_everything_in_it_takes_part():
     """
     source = RENDERER.read_text(encoding="utf-8")
     assert "view.renderer.shadowMap.enabled = true;" in source
-    assert "PCFSoftShadowMap" in source
+    # **The effective value, not the written one.** This said
+    # `PCFSoftShadowMap` and passed while the renderer logged
+    # "PCFSoftShadowMap has been deprecated. Using PCFShadowMap
+    # instead." on every load -- a test agreeing with a comment rather
+    # than with the program. Deprecated names are refused by name so the
+    # next one cannot arrive the same way.
+    #
+    # Comments stripped before the refusal, because the sentence explaining WHY
+    # the deprecated name is refused necessarily contains it -- and the first
+    # version of this line went red on its own reasoning. That is the third
+    # time in this file: `NEUTRAL_LIGHT`, then `DirectionalLight`, now this.
+    assert "THREE.PCFShadowMap" in source
+    code = "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "PCFSoftShadowMap" not in code, (
+        "r185 deprecates it and silently substitutes PCFShadowMap, so the "
+        "source would be describing a setting the renderer does not use"
+    )
     assert "light.castShadow = true;" in source
     fit = source.split("function castShadows(box, centre) {", 1)[1].split("\n}", 1)[0]
     assert "object.castShadow = true;" in fit
@@ -1149,3 +1166,34 @@ def test_the_room_is_dimmed_by_exactly_what_the_lights_gained():
     # And the lights carry more than they did when the room was undimmed, or
     # the scene simply got darker rather than being re-lit.
     assert _numbers(source, "LIGHT_TOTAL") > 2.4
+
+
+def test_the_studio_blur_is_inside_what_the_prefilter_can_actually_do():
+    """**A setting the generator clips is a setting the source is wrong about.**
+
+    `PMREMGenerator._blur` computes `samples = 1 + floor(STANDARD_DEVIATIONS *
+    sigmaPixels)` and warns and clamps above `MAX_SAMPLES = 20`. Samples are
+    linear in sigma, and the console gave the conversion when this was briefly
+    0.06: *"is too large and will clip, as it requested 30 samples when the
+    maximum is set to 20"*. 30 samples at 0.06 puts 20 samples at 0.04, which
+    is the ceiling -- and is what three.js's own `RoomEnvironment` passes.
+
+    Every frame measured under OH-85 was rendered at 0.04 while the file said
+    0.06, so the picture was never wrong and the file was. The number is
+    checked against the vendored constant rather than written twice, so a
+    three.js upgrade that raises `MAX_SAMPLES` fails here instead of leaving
+    this paragraph quietly stale.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    blur = float(re.search(r"^const STUDIO_BLUR = ([\d.]+);", source,
+                           re.MULTILINE).group(1))
+    vendor = (STATIC / "vendor" / "three.module.js").read_text(encoding="utf-8")
+    most = int(re.search(r"const MAX_SAMPLES = (\d+);", vendor).group(1))
+    # 0.06 asked for 30, so one sample is 0.002 of sigma and the ceiling is
+    # `most` of them.
+    ceiling = 0.002 * most
+    assert blur <= ceiling + 1e-9, (
+        f"STUDIO_BLUR {blur} asks for more than the {most} samples "
+        f"PMREMGenerator will do; it would be clipped to {ceiling} and the "
+        f"source would be describing a blur that never happens"
+    )

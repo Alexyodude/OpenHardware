@@ -403,10 +403,20 @@ const STUDIO_SIZE = 60;
 //: aluminium lid. Measured at 4x magnification on 2026-08-28.
 //:
 //: The room is a gradient now rather than a box, so there is no corner left to
-//: reflect and this only has to take the edge off the softbox. Kept small for
-//: that reason: blurring further would dissolve the one highlight in the scene
-//: that is supposed to have a shape.
-const STUDIO_BLUR = 0.06;
+//: reflect and this only has to take the edge off the softbox.
+//:
+//: **AND 0.04 IS A CEILING, NOT A PREFERENCE.** It was briefly 0.06, and the
+//: prefilter clipped it back without the picture changing:
+//: `PMREMGenerator._blur` computes `samples = 1 + floor(STANDARD_DEVIATIONS *
+//: sigmaPixels)` and refuses to exceed `MAX_SAMPLES = 20`
+//: (`vendor/three.module.js:3224`). Samples scale linearly with sigma, and the
+//: console said 0.06 asked for 30 -- so 0.04 asks for exactly 20 and is the
+//: most this generator can do. It is also what three.js's own
+//: `RoomEnvironment` passes, for the same reason.
+//:
+//: Every frame measured under OH-85 was rendered at this blur while the source
+//: claimed more, which is the defect and not the picture.
+const STUDIO_BLUR = 0.04;
 
 //: How many bands the graded sky is built from. A `SphereGeometry` at 24
 //: latitude segments puts a vertex every 7.5 degrees, which is finer than
@@ -553,7 +563,12 @@ export function mount(canvas) {
   // reason the DIP-28 and the headers met the board at a hard edge and looked
   // pasted on. A contact shadow is what says "this is attached to that".
   view.renderer.shadowMap.enabled = true;
-  view.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // **`PCFShadowMap`, because `PCFSoftShadowMap` IS DEPRECATED IN r185** and
+  // the renderer substitutes this one anyway with a console warning
+  // (`vendor/three.module.js:9150`). So the shadows shipped under OH-85 were
+  // always PCF; what was wrong was the line saying otherwise, and a test that
+  // asserted the string rather than the behaviour agreed with it.
+  view.renderer.shadowMap.type = THREE.PCFShadowMap;
 
   view.scene = new THREE.Scene();
   view.scene.background = view.palette.ground;
