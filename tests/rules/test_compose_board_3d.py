@@ -228,14 +228,22 @@ def test_the_unos_outline_is_the_size_arduino_publishes():
 
 
 def test_the_composed_model_records_what_it_could_not_draw():
-    """A board with no USB socket must say why, not leave a person guessing.
+    """A part left off the board must say why, not leave a person guessing.
 
     The XIAO ESP32-C3 sets the precedent: its model is on GrabCAD, that is
     recorded, and nobody re-searches for it.
+
+    **The USB socket used to be on this list and is not any more**, because it
+    was modelled instead. What remains are the two parts with no honest source
+    of any kind, and each entry has to carry the measurement that rules the
+    obvious candidate out -- otherwise the next person re-runs the search.
     """
-    assert "PN61729" in compose.ABSENT
-    why = compose.ABSENT["PN61729"]
-    assert "USB" in why and "Connector_USB" in why, why
+    assert set(compose.ABSENT) == {"QS", "RESONATOR"}, sorted(compose.ABSENT)
+    assert "PN61729" not in compose.ABSENT, (
+        "the USB socket is drawn now; ABSENT should no longer claim otherwise"
+    )
+    for package, why in compose.ABSENT.items():
+        assert "mm" in why, f"{package} does not say what was measured"
 
 
 def test_the_uno_names_a_colour_it_actually_read_somewhere():
@@ -252,12 +260,20 @@ def test_the_uno_names_a_colour_it_actually_read_somewhere():
     assert "path" in spec.colour_source
 
 
-def test_the_composed_mesh_stands_entirely_on_its_own_board():
-    """Nothing may hang off the edge, and one thing did.
+def test_every_components_legs_land_on_the_board():
+    """A pin goes through a hole, so a leg that misses the board is misplaced.
 
     The analog header ran 2.54 mm past the right-hand edge, because KiCad
-    anchors a header on pin 1 and EAGLE anchors it in the middle. Measured
-    after the fix: every component is inside the outline, worst case 0.00 mm.
+    anchors a header on pin 1 and EAGLE anchors it in the middle.
+
+    **This asserted the whole BODY was on the board until the USB socket was
+    drawn**, and that was the wrong invariant wearing the right answer's
+    clothes: it held only while every part happened to be an interior one. A
+    connector is mounted at the edge precisely so that it can overhang -- the
+    Uno's USB shell stands 5.94 mm out over the edge and its barrel jack 0.07,
+    both correctly. What may never leave the outline is the geometry BELOW the
+    board, because that is the pins, and the pins are what the placement is
+    anchored on. Measured after the fix: 0.00 mm for all fifteen.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
     spec = compose.COMPOSITIONS[0]
@@ -287,11 +303,17 @@ def test_the_composed_mesh_stands_entirely_on_its_own_board():
         mesh, _box = cache[component.slug]
         put = compose.place(mesh, element, component.turn,
                             spec.thickness_mm, centre)
-        px = [v for _c, (p, _n, _i) in put.groups.items() for v in p[0::3]]
-        pz = [v for _c, (p, _n, _i) in put.groups.items() for v in p[2::3]]
+        below = [(p[at], p[at + 2])
+                 for _c, (p, _n, _i) in put.groups.items()
+                 for at in range(0, len(p), 3)
+                 if p[at + 1] < spec.thickness_mm - 0.5]
+        if not below:
+            continue  # surface-mount: it has no legs to land anywhere
+        px = [point[0] for point in below]
+        pz = [point[1] for point in below]
         worst = max(worst, limits[0] - min(px), max(px) - limits[1],
                     limits[2] - min(pz), max(pz) - limits[3])
-    assert worst < 0.5, f"a component hangs {worst:.2f} mm off the board"
+    assert worst < 0.5, f"a component's legs miss the board by {worst:.2f} mm"
 
 
 def test_the_written_model_carries_the_scale_the_page_cannot_assume():
@@ -325,3 +347,222 @@ def test_the_written_model_carries_the_scale_the_page_cannot_assume():
     # And the markers must ride the pin tips, not the board: an Uno's pads are
     # inside a header shroud and a marker at board level is buried by it.
     assert extras["pad_top"] > extras["pcb"]["thickness"] + 5, extras["pad_top"]
+
+
+# --- the parts this project had to make itself (OH-76) -----------------------------
+
+
+def test_a_through_hole_model_on_surface_mount_pads_is_refused():
+    """The check the size tolerance could not do, and the part that needed it.
+
+    `Y2` on the Uno is a 3.20 x 1.60 mm surface-mount resonator, by the
+    vendor's own silkscreen. KiCad's only three-pin resonators are 7 mm
+    through-hole cans standing 12.5 mm tall, and the size check *passed* one --
+    7 mm against 2 mm of pads is inside a tolerance that has to allow a body
+    wider than its pins. What tells them apart is that one has legs.
+    """
+    surface = eagle.Element(
+        "Y2", "lib", "RESONATOR",
+        pads=(eagle.Pad("1", "smd", 0.0, 0.0, 1.0, 1.0, None),
+              eagle.Pad("2", "smd", 2.0, 0.0, 1.0, 1.0, None)),
+        x_mm=0.0, y_mm=0.0, rotation=0.0, mirrored=False,
+    )
+
+    class Box:
+        def __init__(self, width, height):
+            self.width = width
+            self.height = height
+
+    legged = compose.Mesh({"#888888": ([0.0, 0.0, -2.0, 1.0, 0.0, -2.0,
+                                        0.5, 1.0, -2.0], [0.0] * 9, [0, 1, 2])})
+    flat = compose.Mesh({"#888888": ([0.0, 0.0, 0.5, 1.0, 0.0, 0.5,
+                                      0.5, 1.0, 0.5], [0.0] * 9, [0, 1, 2])})
+
+    assert compose.confirm(surface, Box(7.0, 2.5), 0.0) is None, (
+        "without the mesh the size check alone still accepts it, which is the "
+        "whole reason the mounting check exists"
+    )
+    complaint = compose.confirm(surface, Box(7.0, 2.5), 0.0, legged)
+    assert complaint is not None and "through-hole part" in complaint, complaint
+    assert compose.confirm(surface, Box(7.0, 2.5), 0.0, flat) is None
+
+
+def test_a_surface_mount_model_on_through_hole_pads_is_refused():
+    """The other direction, which is just as wrong and much easier to miss."""
+    through = eagle.Element(
+        "ZU4", "lib", "DIL28-3",
+        pads=(eagle.Pad("1", "thru_hole", 0.0, 0.0, 1.0, 1.0, None),
+              eagle.Pad("28", "thru_hole", 33.02, 7.62, 1.0, 1.0, None)),
+        x_mm=0.0, y_mm=0.0, rotation=0.0, mirrored=False,
+    )
+
+    class Box:
+        def __init__(self, width, height):
+            self.width = width
+            self.height = height
+
+    flat = compose.Mesh({"#888888": ([0.0, 0.0, 0.5, 1.0, 0.0, 0.5,
+                                      0.5, 1.0, 0.5], [0.0] * 9, [0, 1, 2])})
+    complaint = compose.confirm(through, Box(9.0, 34.0), 90.0, flat)
+    assert complaint is not None and "surface-mount part" in complaint, complaint
+
+
+def test_the_obj_reader_keeps_one_colour_group_per_material(tmp_path):
+    """Blender cannot write STEP, so a modelled part arrives as OBJ.
+
+    The material groups are the point: a shell, a cavity and a pin are three
+    colours in one file, and losing them would make the socket one grey lump.
+    """
+    (tmp_path / "part.mtl").write_text(
+        "newmtl shell\nKd 0.500000 0.500000 0.500000\n"
+        "newmtl pin\nKd 1.000000 0.000000 0.000000\n", encoding="utf-8")
+    (tmp_path / "part.obj").write_text(
+        "mtllib part.mtl\n"
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\n"
+        "vn 0 0 1\n"
+        "usemtl shell\nf 1//1 2//1 3//1\n"
+        "usemtl pin\nf 1//1 2//1 4//1\n", encoding="utf-8")
+
+    mesh, extent = compose.read_obj(tmp_path / "part.obj")
+    # 0.5 is 127.5 of 255 and Python rounds a half to even, so it is 0x80 --
+    # which is also `UNSTYLED`, the colour an OBJ with no material gets. That
+    # collision is harmless because the key is only ever a colour, but it is
+    # the sort of thing worth having written down before somebody chases it.
+    assert sorted(mesh.groups) == ["#808080", "#ff0000"]
+    assert mesh.triangles() == 2
+    assert (extent.width, extent.height, extent.thickness) == (1.0, 1.0, 1.0)
+
+
+def test_the_obj_reader_triangulates_a_quad(tmp_path):
+    """Blender exports box faces as quads, and a fan is right for a convex one.
+
+    Not a general polygon triangulation -- `ear_clip` is, and the board outline
+    is why it has to be.
+    """
+    (tmp_path / "q.obj").write_text(
+        "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvn 0 0 1\n"
+        "f 1//1 2//1 3//1 4//1\n", encoding="utf-8")
+    mesh, _extent = compose.read_obj(tmp_path / "q.obj")
+    assert mesh.triangles() == 2
+
+
+def test_the_obj_reader_refuses_a_face_that_is_not_a_polygon(tmp_path):
+    """Skipping it would draw most of a part, which is worse than refusing."""
+    (tmp_path / "bad.obj").write_text(
+        "v 0 0 0\nv 1 0 0\nvn 0 0 1\nf 1//1 2//1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="not a polygon"):
+        compose.read_obj(tmp_path / "bad.obj")
+
+
+def test_every_modelled_dimension_cites_where_it_came_from():
+    """The rule that makes a hand-built part safe to have in here at all.
+
+    A modelled mesh is the fourth and worst source of geometry in this project.
+    What keeps it honest is that each number it uses which is NOT in the
+    vendor's file carries its source -- so the diff shows a citation changing
+    whenever a number does.
+    """
+    from tools import model_from_datasheet
+
+    assert model_from_datasheet.SPECS, "nothing is modelled, so this is vacuous"
+    for spec in model_from_datasheet.SPECS:
+        assert spec.why_not_fetched.strip(), spec.name
+        assert spec.cited, f"{spec.name} cites nothing, so it invented nothing?"
+        for field, (value, why) in spec.cited.items():
+            assert isinstance(value, float), f"{spec.name}.{field}"
+            assert len(why) > 40, f"{spec.name}.{field} has no real citation"
+
+
+def test_the_modelled_usb_socket_is_built_from_the_vendors_own_footprint():
+    """Every number in plan is Arduino's, which is why it cannot drift.
+
+    A pad table retyped into the model would be a second source that can
+    disagree with the first, and it would disagree silently -- the same defect
+    `lead_tips` records in `tools/import_3d_model.py`.
+    """
+    from tools import model_from_datasheet
+
+    _brd()
+    spec = next(s for s in model_from_datasheet.SPECS
+                if s.package == "PN61729")
+    plan = model_from_datasheet.plan_geometry(spec)
+
+    assert len(plan["pins"]) == 4, plan["pins"]
+    assert len(plan["posts"]) == 2, plan["posts"]
+    assert plan["x"][1] - plan["x"][0] == pytest.approx(11.80, abs=0.001)
+    assert plan["y"][1] - plan["y"][0] == pytest.approx(15.75, abs=0.001)
+    # The four signal pins are a 2.5 x 2.0 mm rectangle; the shell posts are
+    # 12 mm apart. Both straight out of the vendor's package.
+    assert sorted({round(x, 3) for x, _y in plan["pins"]}) == [-1.25, 1.25]
+    assert sorted({round(x, 3) for x, _y in plan["posts"]}) == [-6.0, 6.0]
+
+
+def test_the_usb_socket_is_drawn_and_marked_as_modelled():
+    """It is on the board now, and the page has to say it was made here."""
+    usb = [c for c in compose.CORRESPONDENCE if c.package == "PN61729"]
+    assert usb, "the USB socket is not in the correspondence"
+    assert usb[0].modelled is True
+    assert usb[0].turn == 0.0, (
+        "a modelled part is built in the vendor package's own frame, so it "
+        "needs no turn -- that is the advantage of building rather than matching"
+    )
+
+
+def test_a_through_hole_components_legs_land_on_its_own_pads():
+    """The tight version of the test above, and the one the anchor needs.
+
+    "Legs somewhere on the board" is loose enough that reverting the anchor to
+    the body centre survived it: the barrel jack moved by millimetres and
+    stayed inside the outline. What `place` actually guarantees is stronger --
+    a part's legs sit on the pads that part is soldered to -- and that is only
+    true because a through-hole model is anchored on its legs rather than on
+    its body.
+
+    It matters for exactly the parts whose body is not centred on their pins.
+    A DIP or a header would pass either way; a barrel jack, whose barrel is all
+    to one side, and a USB socket, whose shell overhangs the board, would not.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    spec = compose.COMPOSITIONS[0]
+    _brd()
+    board = eagle.read_board(spec.brd)
+    header_pads = [pad for name in spec.headers
+                   for pad in board.element(name).pads]
+    hx = [pad.x_mm for pad in header_pads]
+    hy = [pad.y_mm for pad in header_pads]
+    centre = ((min(hx) + max(hx)) / 2, (min(hy) + max(hy)) / 2)
+
+    by_package = {c.package: c for c in compose.CORRESPONDENCE}
+    cache: dict[str, tuple[object, object]] = {}
+    worst, worst_name = 0.0, ""
+    checked = 0
+    for element in board.elements:
+        component = by_package.get(element.package)
+        if component is None or not element.pads_of("thru_hole"):
+            continue
+        if component.slug not in cache:
+            cache[component.slug] = compose.component_mesh(
+                component, compose.DEFLECTION)
+        mesh, _box = cache[component.slug]
+        put = compose.place(mesh, element, component.turn,
+                            spec.thickness_mm, centre)
+        legs = [(p[at], p[at + 2])
+                for _c, (p, _n, _i) in put.groups.items()
+                for at in range(0, len(p), 3)
+                if p[at + 1] < spec.thickness_mm - 0.5]
+        assert legs, f"{element.name} is through-hole and has no legs"
+        leg_x = (min(v[0] for v in legs) + max(v[0] for v in legs)) / 2
+        leg_z = (min(v[1] for v in legs) + max(v[1] for v in legs)) / 2
+
+        x0, y0, x1, y1 = element.pad_extent()
+        pad_x = (x0 + x1) / 2 - centre[0]
+        pad_z = -((y0 + y1) / 2 - centre[1])
+        miss = max(abs(leg_x - pad_x), abs(leg_z - pad_z))
+        checked += 1
+        if miss > worst:
+            worst, worst_name = miss, element.name
+
+    assert checked >= 8, f"only {checked} through-hole components were checked"
+    assert worst < 0.5, (
+        f"{worst_name}'s legs sit {worst:.2f} mm from the pads it is soldered to"
+    )

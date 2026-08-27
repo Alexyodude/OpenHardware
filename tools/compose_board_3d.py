@@ -58,13 +58,24 @@ That check has teeth because the pads are the one thing both sources describe.
 `ZU4`'s pads span 33.02 x 7.62 mm; `DIP-28_W7.62mm` is a 28-pin package on
 7.62 mm rows, and 33.02 is 13 x 2.54. They agree because they are the same part.
 
-## What is deliberately not drawn
+## When even that runs out
 
-The **USB-B connector**, element `X2`, package `PN61729`. It is the Uno's most
-recognisable feature after the headers and `Connector_USB.3dshapes` holds five
-entries, two of them STEP, and neither is a USB-B. There is no honest mesh, so
-there is no connector -- and `absent` carries the reason to the page, the same
-way the XIAO ESP32-C3 says its model is on GrabCAD.
+The Uno's **USB-B socket** is in none of those libraries: KiCad's
+`Connector_USB` holds three USB-A, seven USB-C, a Micro-B and a Mini-B and no
+type B of any kind. It is also the most recognisable thing on the board after
+the headers, so `tools/model_from_datasheet.py` builds it -- in Blender, out of
+Arduino's own package geometry, with the one dimension that is not in any file
+here cited to the USB standard. A component with `modelled=True` comes from
+there, and the panel says which parts those are rather than letting them pass
+as published.
+
+## What is still deliberately not drawn
+
+`ABSENT` is the honest end of the road: parts where no library has the right
+model and the vendor's own drawing says the near miss is a miss. Both of the
+Uno's remaining two are timing parts a few millimetres across, and each entry
+carries the measurement that rules the obvious candidate out -- so the next
+person reads the number rather than repeating the search.
 """
 
 from __future__ import annotations
@@ -84,7 +95,10 @@ from tools import eagle  # noqa: E402
 from tools.import_3d_model import (  # noqa: E402
     CACHE,
     DEFLECTION,
+    KICAD_3D,
     OUT,
+    UNSTYLED,
+    Extent,
     Frame,
     Mesh,
     Unavailable,
@@ -120,12 +134,18 @@ class Component:
     #: board 53.34 mm deep -- a picture that is obviously wrong once measured
     #: and looks like a rendering glitch on screen.
     turn: float = 0.0
-
+    #: True when the mesh is one this project MADE, in Blender, because nobody
+    #: publishes one -- `tools/model_from_datasheet.py` builds it and states
+    #: where each of its numbers came from. A fourth kind of source and the
+    #: worst, so it is a flag rather than a silent difference: the page says so.
+    modelled: bool = False
 
     @property
     def url(self) -> str:
-        return (f"https://raw.githubusercontent.com/KiCad/kicad-packages3D/"
-                f"master/{self.library}.3dshapes/{self.model}.step")
+        # `KICAD_3D` is GitLab, which is the library; the GitHub mirror this
+        # fetched from until 2026-08-27 is a different and smaller tree. See
+        # that constant for the counts.
+        return f"{KICAD_3D}/{self.library}.3dshapes/{self.model}.step"
 
     @property
     def slug(self) -> str:
@@ -171,6 +191,52 @@ CORRESPONDENCE: tuple[Component, ...] = (
         # matter either. Given for consistency with its neighbours.
         turn=90.0,
     ),
+    Component(
+        "POWERSUPPLY_DC-21MM", "Connector_BarrelJack", "BarrelJack_Horizontal",
+        "X1's nine through-hole pads span 5.99 x 5.77 mm and the vendor's own "
+        "package silk is 11.80 x 15.75 mm -- a 2.1 mm barrel jack. The model "
+        "is 14.20 x 9.30 x 14.60 mm. It is anchored on its LEGS rather than "
+        "its body, which is the whole reason `place` learned to do that: a "
+        "barrel is entirely to one side of its pins.",
+        turn=90.0,
+    ),
+    Component(
+        "MLF32", "Package_DFN_QFN", "QFN-32-1EP_5x5mm_P0.5mm_EP3.3x3.3mm",
+        "U3's 33 surface-mount pads span 4.90 x 4.90 mm and the model is "
+        "5.00 x 5.00 mm. MLF is Atmel's name for QFN and 32 pads on a 5 mm "
+        "body is a 0.5 mm pitch. The ATmega16U2 that does the Uno's USB.",
+    ),
+    Component(
+        "SOT223", "Package_TO_SOT_SMD", "SOT-223",
+        "U1's four surface-mount pads span 6.20 x 4.62 mm against a model of "
+        "7.00 x 6.50 mm. SOT-223 is the package in the EAGLE name and the "
+        "model's, which is as direct as a correspondence gets.",
+    ),
+    Component(
+        "PANASONIC_D", "Capacitor_SMD", "CP_Elec_6.3x5.4",
+        "PC1 and PC2 have two surface-mount pads 4.80 mm apart. Panasonic's D "
+        "case is a 6.3 mm diameter can 5.4 mm tall, which is this model's own "
+        "name, and its land pattern measures 8.61 x 8.60 mm.",
+    ),
+    Component(
+        "TS42", "Button_Switch_SMD", "SW_SPST_B3S-1000",
+        "RESET's five surface-mount pads span 8.40 x 4.50 mm and the model is "
+        "9.00 x 6.60 x 4.30 mm. Omron's B3S-1000 is the 6 mm surface-mount "
+        "tactile switch this footprint is drawn for.",
+    ),
+    Component(
+        "PN61729", "modelled", "USB_B_PN61729",
+        "X2's four signal pins and two 2.2 mm shell posts, and a body of "
+        "11.80 x 15.75 mm, are all Arduino's own package geometry -- this "
+        "model is BUILT from that table rather than matched to it, so it "
+        "cannot disagree. Only the 10.44 mm shell height comes from elsewhere, "
+        "and it is the USB Series-B standard rather than a guess. See "
+        "tools/model_from_datasheet.py, which cites every number it uses.",
+        # No turn: the model is built in the vendor package's own frame, which
+        # is the one thing a modelled part gets to choose and the reason it is
+        # worth building rather than matching.
+        modelled=True,
+    ),
 )
 
 #: Packages that are on the board, are worth seeing, and are NOT drawn -- with
@@ -178,11 +244,20 @@ CORRESPONDENCE: tuple[Component, ...] = (
 #: the omission: a person looking at a board with no USB socket should be told
 #: why rather than left to wonder whether the importer broke.
 ABSENT: dict[str, str] = {
-    "PN61729": (
-        "the USB-B socket. Connector_USB.3dshapes holds five entries and two "
-        "of them are STEP -- a Micro-B and a Mini-B -- and there is no USB_B "
-        "of any kind. Drawing one of the others would be a different connector "
-        "in the right place."
+    "QS": (
+        "the 16 MHz crystal. Arduino's own silkscreen makes its body "
+        "6.86 x 4.57 mm, and every through-hole crystal in KiCad's Crystal "
+        "library is an HC49 at 10.90 or 11.05 mm across -- near enough to pass "
+        "a footprint check and half as long again as the real can. The size "
+        "check would have accepted it; the vendor's own drawing is what says "
+        "no."
+    ),
+    "RESONATOR": (
+        "the ceramic resonator. Its pads are surface-mount and its body is "
+        "3.20 x 1.60 mm by the vendor's silkscreen; KiCad's only three-pin "
+        "resonators are 7 mm through-hole cans standing 12.5 mm tall. "
+        "`confirm` refuses it on mounting, which is the check that exists "
+        "because the size tolerance let this one through."
     ),
 }
 
@@ -234,6 +309,9 @@ SPAN_TOLERANCE_MM = 3.0
 
 #: KiCad's own convention, and the frame every component mesh arrives in.
 PART_UP = 2
+
+#: Where `tools/model_from_datasheet.py` leaves the parts it builds.
+MODELLED = REPO / "third_party" / "modelled"
 
 
 def loop(segments: tuple[eagle.Segment, ...]) -> list[tuple[float, float]]:
@@ -388,6 +466,15 @@ def component_mesh(component: Component, deflection: float) -> tuple[Mesh, objec
     about the board's vertical and that is KiCad's z -- permuting first would
     mean rotating about a different axis and remembering which.
     """
+    if component.modelled:
+        made = MODELLED / f"{component.model}.obj"
+        if not made.is_file():
+            raise Unavailable(
+                f"{made} has not been built. Run: "
+                f"python tools/model_from_datasheet.py --part {component.model}"
+            )
+        return read_obj(made)
+
     CACHE.mkdir(parents=True, exist_ok=True)
     step = CACHE / f"component-{component.slug}.step"
     if not step.is_file():
@@ -401,6 +488,76 @@ def component_mesh(component: Component, deflection: float) -> tuple[Mesh, objec
                   handedness=handedness_of((0, 1, 2)),
                   origin=(0.0, 0.0, 0.0))
     return tessellate(shape, styles, deflection, frame), box
+
+
+def read_obj(path: pathlib.Path) -> tuple[Mesh, Extent]:
+    """A Wavefront OBJ and its `.mtl`, as the same `Mesh` a STEP tessellates to.
+
+    **Narrow on purpose**, like `write_glb` at the other end of the pipeline:
+    triangles, vertex normals and one colour per material group. Blender writes
+    exactly that and nothing here needs more. Anything it cannot read it
+    refuses by line, rather than skipping a face and drawing most of a part.
+
+    Quads are triangulated by fanning, which is correct for the convex faces a
+    box export produces and is not a general polygon triangulation -- `slab`
+    has the real one, and needs it because a board outline is concave.
+    """
+    colours: dict[str, str] = {}
+    material = path.with_suffix(".mtl")
+    if material.is_file():
+        name = ""
+        for line in material.read_text(encoding="utf-8").splitlines():
+            if line.startswith("newmtl "):
+                name = line.split(None, 1)[1].strip()
+            elif line.startswith("Kd ") and name:
+                red, green, blue = (float(v) for v in line.split()[1:4])
+                colours[name] = (f"#{round(red * 255):02x}"
+                                 f"{round(green * 255):02x}"
+                                 f"{round(blue * 255):02x}")
+
+    vertices: list[tuple[float, float, float]] = []
+    normals: list[tuple[float, float, float]] = []
+    groups: dict[str, tuple[list[float], list[float], list[int]]] = {}
+    current = UNSTYLED
+
+    def emit(corner: str) -> int:
+        """One `v/vt/vn` reference, appended to the current group."""
+        parts = corner.split("/")
+        vertex = vertices[int(parts[0]) - 1]
+        normal = (normals[int(parts[2]) - 1]
+                  if len(parts) > 2 and parts[2] else (0.0, 0.0, 1.0))
+        positions, into_normals, _indices = groups.setdefault(
+            current, ([], [], []))
+        positions.extend(vertex)
+        into_normals.extend(normal)
+        return len(positions) // 3 - 1
+
+    for number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1):
+        if line.startswith("v "):
+            vertices.append(tuple(float(v) for v in line.split()[1:4]))
+        elif line.startswith("vn "):
+            normals.append(tuple(float(v) for v in line.split()[1:4]))
+        elif line.startswith("usemtl "):
+            current = colours.get(line.split(None, 1)[1].strip(), UNSTYLED)
+        elif line.startswith("f "):
+            corners = line.split()[1:]
+            if len(corners) < 3:
+                raise ValueError(f"{path}:{number}: a face with "
+                                 f"{len(corners)} corners is not a polygon")
+            made = [emit(corner) for corner in corners]
+            indices = groups[current][2]
+            for at in range(1, len(made) - 1):
+                indices.extend((made[0], made[at], made[at + 1]))
+
+    if not groups:
+        raise ValueError(f"{path}: no faces, so there is nothing to draw")
+    every = [v for v in vertices]
+    return Mesh(groups), Extent(
+        min(v[0] for v in every), max(v[0] for v in every),
+        min(v[1] for v in every), max(v[1] for v in every),
+        min(v[2] for v in every), max(v[2] for v in every),
+    )
 
 
 def footprint(box, turn: float, element: eagle.Element) -> tuple[float, float]:
@@ -417,12 +574,33 @@ def footprint(box, turn: float, element: eagle.Element) -> tuple[float, float]:
             box.width * sin + box.height * cos)
 
 
-def confirm(element: eagle.Element, box, turn: float) -> str | None:
+#: How far below the board plane a vertex has to be before it counts as a
+#: LEAD. KiCad models sit on z = 0 with through-hole legs hanging under it, so
+#: anything materially negative is a leg. Loose enough that a surface-mount
+#: pad's own plating, which is a few hundredths under, is not mistaken for one.
+LEAD_DEPTH_MM = 0.5
+
+
+def leads_of(mesh: Mesh) -> list[tuple[float, float]]:
+    """The xy of every vertex below the board plane: a through-hole part's legs.
+
+    Empty for a surface-mount model, which is the whole reason this is useful
+    twice -- it says which KIND of part a mesh is, and for a through-hole one
+    it says where the pins are without needing pad data a STEP does not carry.
+    """
+    return [(positions[at], positions[at + 1])
+            for _colour, (positions, _n, _i) in mesh.groups.items()
+            for at in range(0, len(positions), 3)
+            if positions[at + 2] < -LEAD_DEPTH_MM]
+
+
+def confirm(element: eagle.Element, box, turn: float,
+            mesh: Mesh | None = None) -> str | None:
     """Does this mesh fit the pads it is supposed to stand on, the way round
     it is about to be placed?
 
-    Returns a complaint, or `None` when they agree. Two things are checked and
-    the second was added after it was needed:
+    Returns a complaint, or `None` when they agree. Three things are checked
+    and the last two were each added after they were needed:
 
     * **Size.** The mesh's footprint must contain the pad span within a
       tolerance -- a body is generally at least as big as its pads and never
@@ -433,10 +611,28 @@ def confirm(element: eagle.Element, box, turn: float) -> str | None:
       EAGLE lays a `1X10` along x and KiCad lays a `PinHeader_1x10` along y, so
       every header on the Uno was placed across the board and the check said
       nothing, because 22.86 x 2.54 sorts the same as 2.54 x 22.86.
+    * **Mounting.** A through-hole model on surface-mount pads is a different
+      part in the right place, whatever its footprint measures. `Y2` on the Uno
+      is a 3.20 x 1.60 mm surface-mount resonator -- read off the vendor's own
+      silkscreen -- and KiCad's only three-pin resonators are 7 mm
+      through-hole cans 12.5 mm tall. The size check passed it, because 7 mm
+      against 2 mm of pads is inside a tolerance that has to allow a body wider
+      than its pins. Mounting is what tells them apart, and a mesh says which
+      it is by whether it has anything below the board.
     """
     x0, y0, x1, y1 = element.pad_extent()
     pads = (x1 - x0, y1 - y0)
     span = footprint(box, turn, element)
+
+    if mesh is not None:
+        through = bool(element.pads_of("thru_hole"))
+        legged = bool(leads_of(mesh))
+        if through and not legged:
+            return ("the element has through-hole pads and the model has "
+                    "nothing below the board, so it is a surface-mount part")
+        if not through and legged:
+            return ("the element has only surface-mount pads and the model "
+                    "has legs below the board, so it is a through-hole part")
     for axis, (mesh_side, pad_side) in enumerate(zip(span, pads)):
         which = "x" if axis == 0 else "y"
         if mesh_side < pad_side - SPAN_TOLERANCE_MM:
@@ -475,11 +671,17 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
     footprint centre is put on the element's own pad centre. The pads are the
     one thing both libraries describe, which is what makes them the anchor.
 
-    **The assumption that leaves**, stated because it is real: a component's
-    body must be centred on its pads. True of every part in `CORRESPONDENCE` --
-    a DIP's body and a header's shroud are both symmetric about their pins --
-    and false of, say, a barrel jack, whose barrel is all to one side. A part
-    like that needs its anchor derived some other way before it goes in here.
+    **The legs are the anchor when there are legs**, which removes the
+    assumption this used to carry. Centring a body on its pads is right for a
+    DIP and a header, whose shrouds are symmetric about their pins, and wrong
+    for a barrel jack, whose barrel is entirely to one side: centred on its
+    body, the jack sits a few millimetres too far into the board and its barrel
+    stops short of the edge it is supposed to overhang.
+
+    A through-hole model says where its own pins are -- they are the geometry
+    below the board plane -- and that is exactly what the pads describe. So the
+    anchor is the centre of the legs, and only a surface-mount model, which has
+    none, falls back to the centre of the body.
     """
     spin = math.radians(turn)
     turn_cos, turn_sin = math.cos(spin), math.sin(spin)
@@ -489,11 +691,15 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
     def turned(x: float, y: float) -> tuple[float, float]:
         return (x * turn_cos - y * turn_sin, x * turn_sin + y * turn_cos)
 
-    # The turned footprint's own centre, measured off the vertices rather than
-    # off the bounding box, so that it is the same number the placement uses.
-    every = [turned(positions[at], positions[at + 1])
-             for _colour, (positions, _n, _i) in mesh.groups.items()
-             for at in range(0, len(positions), 3)]
+    # The legs if it has any, the whole body if it has not. Measured off the
+    # vertices rather than off the bounding box, so it is the same number the
+    # placement below uses.
+    anchor_points = leads_of(mesh) or [
+        (positions[at], positions[at + 1])
+        for _colour, (positions, _n, _i) in mesh.groups.items()
+        for at in range(0, len(positions), 3)
+    ]
+    every = [turned(x, y) for x, y in anchor_points]
     mid_x = (min(p[0] for p in every) + max(p[0] for p in every)) / 2
     mid_y = (min(p[1] for p in every) + max(p[1] for p in every)) / 2
 
@@ -572,6 +778,10 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     by_package = {component.package: component for component in CORRESPONDENCE}
     pieces = [slab(ring, spec.thickness_mm, spec.colour, centre)]
     drawn: list[str] = []
+    #: The subset of `drawn` whose mesh this project made rather than fetched.
+    #: Carried separately all the way to the caption, because "KiCad's
+    #: published meshes" stops being the whole truth the moment one is not.
+    modelled: list[str] = []
     pad_top = spec.thickness_mm
     cache: dict[str, tuple[Mesh, object]] = {}
     for element in board.elements:
@@ -581,7 +791,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         if component.slug not in cache:
             cache[component.slug] = component_mesh(component, deflection)
         mesh, box = cache[component.slug]
-        complaint = confirm(element, box, component.turn)
+        complaint = confirm(element, box, component.turn, mesh)
         if complaint is not None:
             raise SystemExit(
                 f"{spec.board}: {element.name} is a {element.package} and "
@@ -591,6 +801,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         put = place(mesh, element, component.turn, spec.thickness_mm, centre)
         pieces.append(put)
         drawn.append(f"{element.name} ({component.model})")
+        if component.modelled:
+            modelled.append(f"{element.name} ({component.model})")
         # **How high a pad marker has to ride on THIS board.** A XIAO's pads
         # are castellations on the edge and a marker sits on the PCB. An Uno's
         # are inside a header shroud, so a marker left on the board is buried
@@ -604,6 +816,9 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 for value in positions[1::3]))
 
     print(f"  drawn   {len(drawn)}: {', '.join(drawn)}")
+    if modelled:
+        print(f"  modelled {len(modelled)}: {', '.join(modelled)} "
+              f"-- built here, not fetched; see tools/model_from_datasheet.py")
     print(f"  markers ride at {pad_top:.3f} mm, the top of the header pins; "
           f"the PCB's own top face is at {spec.thickness_mm:.3f}")
     for package, why in sorted(ABSENT.items()):
@@ -662,6 +877,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 "exception; fetched, not vendored"
             ),
             "drawn": drawn,
+            "modelled": modelled,
             "absent": [
                 {"package": package, "why": why,
                  "elements": [e.name for e in board.elements

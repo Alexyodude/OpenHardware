@@ -80,6 +80,7 @@ Optionally, once, for the vendors' own board models:
 ```bash
 pip install cadquery-ocp                   # a TOOL dependency, not a runtime one
 python tools/import_3d_model.py --all      # exits 3 and says SKIPPED without it
+python tools/model_from_datasheet.py       # the parts nobody publishes at all
 python tools/compose_board_3d.py           # the boards nobody publishes a mesh for
 ```
 
@@ -89,14 +90,28 @@ things it is showing. The meshes are gitignored -- see
 `tools/import_3d_model.py` for the licence reason -- so a fresh checkout gets
 the footprint until this is run.
 
-**The second command is for a board whose vendor publishes no mesh at all**,
-and the Arduino Uno is the one that does. It stands KiCad's published
-component models on the outline and placements in Arduino's own EAGLE board
-file, so the board draws with its notch, its DIP-28 and its four headers
-without a height or a position being invented anywhere. It needs the vendor's
-`.brd`, which `python tools/get_board_sources.py arduino-uno` prints the URL
-for -- an `https-archive`, so it is downloaded by hand, as the Pico's is. A
-composed model says so in the panel rather than claiming to be the vendor's.
+**The last command is for a board whose vendor publishes no mesh at all**, and
+the Arduino Uno is the one that does. It stands KiCad's published component
+models on the outline and placements in Arduino's own EAGLE board file, so the
+board draws with its notch, its DIP-28, its four headers, its barrel jack and
+its USB socket without a height or a position being invented anywhere. It needs
+the vendor's `.brd`, which `python tools/get_board_sources.py arduino-uno`
+prints the URL for -- an `https-archive`, so it is downloaded by hand, as the
+Pico's is.
+
+**Geometry has four sources here and the page names which one it is showing.**
+In order of preference: the vendor's own mechanical model; a published model of
+the same package, from KiCad's `kicad-packages3D`; the manufacturer's own STEP;
+and last, a mesh built in Blender by `tools/model_from_datasheet.py` because
+nothing published exists. Only one part is in that last category today, the
+Uno's USB-B, and every dimension in it is either read out of Arduino's own
+package or carries a citation beside it in `SPECS`. A part nothing can honestly
+draw is left off and says why.
+
+**Fetch KiCad models from GitLab, which is the library.** `KiCad/kicad-packages3D`
+on GitHub is a mirror and a different tree -- `Connector_USB` had 5 entries
+there against 13 on GitLab when this was measured. `KICAD_3D` in
+`tools/import_3d_model.py` is the one place that URL lives.
 
 Registers, flags, memory and disassembly, with step and run and six sample
 programs. It drives `core/i8086` directly and has nothing to do with

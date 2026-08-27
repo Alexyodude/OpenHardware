@@ -829,9 +829,24 @@ class Part:
 
     @property
     def url(self) -> str:
-        return (f"https://raw.githubusercontent.com/KiCad/kicad-packages3D/"
-                f"master/{self.library}.3dshapes/{self.name}.step")
+        return f"{KICAD_3D}/{self.library}.3dshapes/{self.name}.step"
 
+
+#: Where KiCad's 3D library actually lives.
+#:
+#: **GitLab, and not the GitHub mirror**, which is what this fetched until
+#: 2026-08-27. `KiCad/kicad-packages3D` on GitHub is a mirror and it is not the
+#: same tree: counted that day, `Connector_USB` had 5 entries there against 13
+#: here, `Connector_BarrelJack` 4 against 5, and `Button_Switch_THT` 127
+#: against 82 -- so it diverges in both directions and is not simply older.
+#:
+#: Nothing already imported was wrong: every model this repository had fetched
+#: was byte-for-byte identical in the two. What the mirror cost was COVERAGE,
+#: and a conclusion drawn from it -- "there is no model for this part" -- was
+#: a claim about the mirror wearing the library's name. That is the same defect
+#: as OH-29's census of Seeed's repository, which closed a question for a day
+#: by stating its conclusion without its scope.
+KICAD_3D = "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/master"
 
 #: **KiCad's `kicad-packages3D`, not a vendor's.** Seeed publishes no 3D model
 #: for the Grove modules -- checked 2026-08-27, the Grove Red LED wiki lists a
@@ -1044,6 +1059,7 @@ def write_index() -> pathlib.Path:
             "pcb": extras.get("pcb"),
             "pcb_offset": extras.get("pcb_offset"),
             "drawn": extras.get("drawn", []),
+            "modelled": extras.get("modelled", []),
             "absent": extras.get("absent", []),
             "components": extras.get("components", ""),
             "pcb_colour_source": extras.get("pcb_colour_source", ""),

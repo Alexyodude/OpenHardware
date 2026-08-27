@@ -131,10 +131,23 @@ function modelIndex() {
 function caption(model) {
   if (!model || !model.file) return FOOTPRINT_CAPTION;
   if (!model.composed) return MODEL_CAPTION;
+  const parts = [COMPOSED_CAPTION];
+  // **Named, not counted.** "One part was modelled" tells a reader that
+  // something in the picture is less trustworthy without telling them which,
+  // which is the worst of both. `modelled` is empty on a board where every
+  // mesh was published, and then the sentence is not there at all.
+  const made = model.modelled ?? [];
+  if (made.length) {
+    parts.push(
+      `Modelled here rather than published, from dimensions that each cite a ` +
+      `source: ${made.join(", ")}. See tools/model_from_datasheet.py.`
+    );
+  }
   const missing = (model.absent ?? [])
     .map((gap) => `${gap.elements.join("/")} is ${gap.why}`)
     .join(" ");
-  return missing ? `${COMPOSED_CAPTION} Not drawn: ${missing}` : COMPOSED_CAPTION;
+  if (missing) parts.push(`Not drawn: ${missing}`);
+  return parts.join(" ");
 }
 
 const $ = (id) => document.getElementById(id);
