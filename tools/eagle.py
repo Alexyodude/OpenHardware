@@ -120,15 +120,47 @@ class Segment:
 
 @dataclasses.dataclass(frozen=True)
 class Element:
-    """One placed component and the pads it puts on the board."""
+    """One placed component and the pads it puts on the board.
+
+    **The placement is carried as well as applied.** `pads` already has the
+    transform baked in, which is all a pad map needs; putting a *model* of the
+    part on the board needs the transform itself, because a mesh has to be
+    moved the same way the pads were. Added for OH-75, which stands a DIP-28
+    and four headers on an Arduino Uno.
+    """
 
     name: str
     library: str
     package: str
     pads: tuple[Pad, ...]
+    #: Where the package's own origin sits on the board, in millimetres.
+    x_mm: float = 0.0
+    y_mm: float = 0.0
+    #: Counter-clockwise degrees, and whether it is mirrored -- EAGLE's `rot`
+    #: already decoded, so a caller never parses `"MR180"` a second time.
+    #: `place()` is the authority on the order these are applied in.
+    rotation: float = 0.0
+    mirrored: bool = False
 
     def pads_of(self, kind: str) -> tuple[Pad, ...]:
         return tuple(pad for pad in self.pads if pad.kind == kind)
+
+    def pad_extent(self) -> tuple[float, float, float, float]:
+        """(min_x, min_y, max_x, max_y) over every pad, in board millimetres.
+
+        What a proposed 3D model for this package is checked against: a mesh
+        that does not span the pads its own footprint puts down is not that
+        part. Raises rather than returning an empty box, because "this element
+        has no pads" is a different answer from "its pads are at the origin".
+        """
+        if not self.pads:
+            raise EagleError(
+                f"element {self.name!r} ({self.package}) places no pads, so it "
+                f"has no extent to compare anything against"
+            )
+        xs = [pad.x_mm for pad in self.pads]
+        ys = [pad.y_mm for pad in self.pads]
+        return min(xs), min(ys), max(xs), max(ys)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -353,12 +385,18 @@ def read_board(path: pathlib.Path) -> Board:
                 f"{path}: element {name!r} places package {key[1]!r} from library "
                 f"{key[0]!r}, which the file does not contain"
             )
+        where = f"{path}: element {name!r}"
+        degrees, mirrored = _rotation(node.get("rot"))
         elements.append(
             Element(
                 name,
                 key[0],
                 key[1],
-                _element_pads(node, package, nets, f"{path}: element {name!r}"),
+                _element_pads(node, package, nets, where),
+                _float(node, "x", where),
+                _float(node, "y", where),
+                degrees,
+                mirrored,
             )
         )
     if not elements:

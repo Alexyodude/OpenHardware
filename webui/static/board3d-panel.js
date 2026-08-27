@@ -53,6 +53,17 @@ const MODEL_CAPTION =
   "Seeed's published mechanical model, tessellated by " +
   "tools/import_3d_model.py; the pad markers on it are this repository's " +
   "reading of the chip's registers. Drag to turn it.";
+//: **A third caption, because a composed model is neither of the other two.**
+//: Saying "the vendor's own 3D model" of a board assembled here from two
+//: libraries would be the same class of untruth as the footprint caption
+//: claiming a KiCad footprint the Arduino Uno never had. The parts that are
+//: missing are named by `composedCaption` from the model's own record of them,
+//: rather than written down here where they would rot.
+const COMPOSED_CAPTION =
+  "Composed, not published: nobody ships a 3D model of this board. The " +
+  "outline and every component's position are the vendor's own CAD, the " +
+  "components are KiCad's published meshes, and the board colour is read from " +
+  "PICSimLab's artwork. Drag to turn it.";
 
 //: What each state reads as in the table. The 3D view paints the same four
 //: from the same stylesheet; this spells them because a colour alone is not a
@@ -107,6 +118,23 @@ function modelIndex() {
       .catch(() => ({ boards: {} }));
   }
   return models;
+}
+
+/** Which of the three true sentences describes the board now on screen.
+ *
+ *  A composed model names what it could NOT draw, out of the record the
+ *  composer put in the file. Writing that list here instead would be a second
+ *  copy of a fact that changes whenever somebody finds a mesh -- and this
+ *  repository has twice caught a hand-kept list describing code it no longer
+ *  matched. `absent` is empty on a board that is complete, and then the
+ *  sentence simply is not added. */
+function caption(model) {
+  if (!model || !model.file) return FOOTPRINT_CAPTION;
+  if (!model.composed) return MODEL_CAPTION;
+  const missing = (model.absent ?? [])
+    .map((gap) => `${gap.elements.join("/")} is ${gap.why}`)
+    .join(" ");
+  return missing ? `${COMPOSED_CAPTION} Not drawn: ${missing}` : COMPOSED_CAPTION;
 }
 
 const $ = (id) => document.getElementById(id);
@@ -196,8 +224,7 @@ async function reload() {
   $(CANVAS).hidden = false;
 
   const model = (await modelIndex()).boards?.[view.board] ?? null;
-  $(CAPTION).textContent =
-    model && model.file ? MODEL_CAPTION : FOOTPRINT_CAPTION;
+  $(CAPTION).textContent = caption(model);
 
   const drawn = await renderer();
   if (drawn) drawn.showBoard(view, model);

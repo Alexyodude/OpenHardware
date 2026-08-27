@@ -474,6 +474,21 @@ async function loadModel(layout, model) {
   placeModel(loaded, layout);
 }
 
+/** Scene units per model millimetre, from the pad field both sources describe.
+ *
+ *  The longer axis decides it: a header row 22.86 mm long measured against the
+ *  same row in pixels is a far better lever arm than the 0 mm across a single
+ *  row, and one of a board's two spans is often exactly that. Falls back to the
+ *  constant when neither span is usable, which is a one-row board and not a
+ *  case any board here presents. */
+function scaleFromPads(xs, ys, span) {
+  const pixels = [Math.max(...xs) - Math.min(...xs),
+                  Math.max(...ys) - Math.min(...ys)];
+  const best = span[1] > span[0] ? 1 : 0;
+  if (!(span[best] > 0) || !(pixels[best] > 0)) return PX_PER_MM * SCALE;
+  return (pixels[best] / span[best]) * SCALE;
+}
+
 /** Put a loaded model where the footprint was, and stand the pads on it. */
 function placeModel(loaded, layout) {
   const { group, extras } = loaded;
@@ -485,7 +500,21 @@ function placeModel(loaded, layout) {
   // The model is millimetres and the scene is image pixels; the board JSONs
   // were generated at a stated 8 px/mm, which is the same `PX_PER_MM` the
   // slab's thickness uses.
-  const scale = PX_PER_MM * SCALE;
+  //
+  // **Unless the model says otherwise, and one does.** 8 px/mm is what
+  // `tools/import_board.py` generates a board JSON at, and PICSimLab's
+  // Arduino Uno artwork -- the one pad map in this repository that was traced
+  // rather than generated -- is about 5.66. A model carrying `pad_span` says
+  // how many millimetres its own pad field covers, and dividing the pixels
+  // this page has by the millimetres the model has gives the scale from the
+  // two descriptions of the same pads. Composed at the constant instead, the
+  // Uno came out 41% too large and stood its headers outside their markers.
+  const placed = layout.pads.filter((pad) => pad.x !== null);
+  const xs = placed.map((pad) => pad.x);
+  const ys = placed.map((pad) => pad.y);
+  const scale = extras.pad_span
+    ? scaleFromPads(xs, ys, extras.pad_span)
+    : PX_PER_MM * SCALE;
   group.scale.setScalar(scale);
 
   // **The model is always landscape and half these pad maps are not.** Every
@@ -498,9 +527,6 @@ function placeModel(loaded, layout) {
   // Centre it on the pads rather than on the image. The pad map's extent
   // includes a courtyard margin that is a footprint artefact and is not the
   // board; the pads are the thing both sources measured.
-  const placed = layout.pads.filter((pad) => pad.x !== null);
-  const xs = placed.map((pad) => pad.x);
-  const ys = placed.map((pad) => pad.y);
   const centreX = (Math.min(...xs) + Math.max(...xs)) / 2;
   const centreY = (Math.min(...ys) + Math.max(...ys)) / 2;
   group.position.set(
@@ -516,15 +542,32 @@ function placeModel(loaded, layout) {
   view.model = group;
 
   // Raise every pad to the real board's top face. See the note in `showBoard`.
-  const top = -BOARD_THICKNESS / 2 + pcb.thickness * scale
+  //
+  // **Or to the top of the header, when the board has one.** A XIAO's pads are
+  // castellations on its edge and a marker on the PCB is exactly right. An
+  // Arduino Uno's are inside a pin header, so a marker at board level is buried
+  // by the very component that makes it a header -- invisible, and unreachable
+  // by a drag. `pad_top` is the pin tip, measured off the header actually
+  // placed there, and it is where a person clips a lead in any case.
+  const top = -BOARD_THICKNESS / 2 + (extras.pad_top ?? pcb.thickness) * scale
               + PAD_LIFT + PAD_HEIGHT / 2;
   for (const post of view.pads.values()) post.position.y = top;
   // The board just changed shape, so what a wire may not pass through changed
   // with it -- and it is the PCB that changed, not the assembly: a lead should
   // drape over the connector rather than be stopped by the box around it.
+  // **Where the PCB is, which is not always where the model's origin is.**
+  // A model is positioned by the centre of the pad map, and on a XIAO that is
+  // the centre of its board too, because the castellations run down both long
+  // edges. It is not true in general: the Arduino Uno's composed model has all
+  // 32 of its pads on two edges of a board they are not centred on, and its
+  // PCB sits 6.86 mm from the origin. Fetched models omit `offset` and get
+  // zero, which is what they had before this existed.
+  const offset = extras.pcb_offset ?? [0, 0];
   view.slab = {
     x: (pcb.long / 2) * scale,
     z: (pcb.short / 2) * scale,
+    centreX: offset[0] * scale,
+    centreZ: offset[1] * scale,
     bottom: -BOARD_THICKNESS / 2,
     top: -BOARD_THICKNESS / 2 + pcb.thickness * scale,
   };
@@ -532,6 +575,12 @@ function placeModel(loaded, layout) {
     const swap = view.slab.x;
     view.slab.x = view.slab.z;
     view.slab.z = swap;
+    // The offset turns with the board. A quarter turn about the vertical
+    // takes (x, z) to (z, -x); leaving it alone would put the collider on the
+    // wrong side of a rotated board, which is only ever a composed one today.
+    const wasX = view.slab.centreX;
+    view.slab.centreX = view.slab.centreZ;
+    view.slab.centreZ = -wasX;
   }
   refreshColliders();
 }
@@ -899,11 +948,16 @@ function refreshColliders() {
     // forever. Measured before the fix: 161% over rest on a wire that had
     // been sitting still for two seconds.
     const half = view.slab;
+    // `centreX`/`centreZ` are zero for the extruded footprint and for every
+    // fetched model, whose PCB is centred on the pads. A composed model says
+    // where its board actually is -- see `placeModel`.
+    const cx = half.centreX ?? 0;
+    const cz = half.centreZ ?? 0;
     solids.push({
       owner: "board",
       kind: "box",
-      min: [-half.x, half.bottom, -half.z],
-      max: [half.x, half.top, half.z],
+      min: [cx - half.x, half.bottom, cz - half.z],
+      max: [cx + half.x, half.top, cz + half.z],
     });
   }
   for (const part of view.parts) {

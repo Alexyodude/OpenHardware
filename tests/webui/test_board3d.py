@@ -238,20 +238,29 @@ def test_the_caption_stops_disclaiming_a_model_once_there_is_one():
     claiming a model it has not got: either way a reader cannot tell which they
     are looking at, which is the only thing the sentence was ever for.
 
-    Both captions live in the panel and the choice is the index's `file`, so a
-    board whose mesh has not been imported keeps the cautious one.
+    All three captions live in the panel and the choice is the index's `file`,
+    so a board whose mesh has not been imported keeps the cautious one.
+
+    **Three, since OH-75.** The Arduino Uno's model is composed here from two
+    libraries rather than published by anybody, and calling that "the vendor's
+    own 3D model" would be the same untruth in the other direction.
     """
     panel = PANEL.read_text(encoding="utf-8")
     assert "FOOTPRINT_CAPTION" in panel
     assert "MODEL_CAPTION" in panel
-    # **The last assignment, not the first.** There are two: a board with no
-    # header pins at all gets `view.note`, and only then does the model choice
-    # happen. Splitting on the first found the wrong one and this test failed
-    # on its own pattern before it ever failed on the code.
-    chooser = panel.rsplit("$(CAPTION).textContent =", 1)[1].split(";", 1)[0]
-    assert "model" in chooser and "file" in chooser, (
+    assert "COMPOSED_CAPTION" in panel
+    # The body of `caption`, which is where the choice moved when there began
+    # to be three of them. Bounded to the function so that a later mention of
+    # `model.file` elsewhere in the panel cannot satisfy this by accident.
+    chooser = panel.split("function caption(model) {", 1)[1].split("\n}", 1)[0]
+    assert "model.file" in chooser, (
         "the caption is not chosen by whether a model was actually found"
     )
+    assert "model.composed" in chooser, (
+        "a composed model is not told apart from a vendor's own"
+    )
+    for name in ("FOOTPRINT_CAPTION", "MODEL_CAPTION", "COMPOSED_CAPTION"):
+        assert name in chooser, f"{name} is never returned"
 
 
 def test_the_renderer_is_handed_the_model_rather_than_finding_one():

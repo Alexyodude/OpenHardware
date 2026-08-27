@@ -17,6 +17,8 @@ touches:
 - tests/rules/test_kicad.py
 - tests/rules/test_board_sources.py
 - docs/research/board-sources/sources.json
+- webui/static/board3d.js
+- tests/rules/test_import_3d_model.py
 ---
 
 ASKED FOR BY THE USER, 2026-08-27: "arduino uno 3d model is not proper. It's just a flat board." Confirmed in the browser -- describe() reports model: null, so the Uno takes the extruded-footprint path. It is the only BUILDABLE board still drawn that way and the one most people open first.

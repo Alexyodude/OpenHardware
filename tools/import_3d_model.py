@@ -1000,6 +1000,20 @@ def convert_part(part: Part, deflection: float, check: bool) -> int:
     return size
 
 
+#: `(board, chip, file stem)` for every board whose model is COMPOSED by
+#: `tools/compose_board_3d.py` out of CAD, because no vendor publishes a mesh
+#: for it. Named here rather than in that module because `write_index` is the
+#: one writer of `index.json` and the composer already imports this file's
+#: tessellator -- naming them there and importing them here would be a cycle.
+#:
+#: The chip is repeated rather than looked up: `webui/boards/catalogue.py`
+#: knows it, and importing the board catalogue into a mesh tool to learn one
+#: string is the layering `tools/check_layering.py` exists to prevent.
+COMPOSED: tuple[tuple[str, str, str], ...] = (
+    ("Arduino Uno", "ATmega328P", "Arduino-Uno"),
+)
+
+
 def write_index() -> pathlib.Path:
     """Write `models/index.json`: which board has a model, and from where.
 
@@ -1013,6 +1027,27 @@ def write_index() -> pathlib.Path:
     is missing rather than an index that quietly says nothing exists.
     """
     boards: dict[str, dict[str, object]] = {}
+    for board, chip, slug in COMPOSED:
+        mesh = OUT / f"{slug}.glb"
+        extras = read_extras(mesh) if mesh.is_file() else {}
+        boards[board] = {
+            "chip": chip,
+            "file": f"/models/{slug}.glb" if mesh.is_file() else None,
+            "bytes": mesh.stat().st_size if mesh.is_file() else 0,
+            "source": extras.get("geometry", ""),
+            # **The page must be able to tell these apart.** A composed model
+            # is not the vendor's mesh and the caption may not claim it is:
+            # its outline is the vendor's CAD, its components are KiCad's
+            # published models, and its colour is somebody's artwork. Three
+            # sources, and the panel says so.
+            "composed": True,
+            "pcb": extras.get("pcb"),
+            "pcb_offset": extras.get("pcb_offset"),
+            "drawn": extras.get("drawn", []),
+            "absent": extras.get("absent", []),
+            "components": extras.get("components", ""),
+            "pcb_colour_source": extras.get("pcb_colour_source", ""),
+        }
     for model in MODELS:
         mesh = OUT / f"{model.chip}.glb"
         for board in model.boards:
