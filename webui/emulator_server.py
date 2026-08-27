@@ -790,6 +790,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+#: The three ways a socket says "the other end has already gone".
+#:
+#: Windows raises `ConnectionAbortedError` (WinError 10053) where POSIX raises
+#: `BrokenPipeError`, and either platform can produce `ConnectionResetError`
+#: first if the peer sent an RST. Named as a set so the three read as one fact
+#: rather than as three special cases.
+HUNG_UP = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)
+
+
+class Server(http.server.ThreadingHTTPServer):
+    """`ThreadingHTTPServer`, quiet about clients that go away mid-response."""
+
+    def handle_error(self, request, client_address) -> None:
+        """Report every failure except the peer closing the connection.
+
+        **A reload used to print a twenty-line traceback.** `emulator.js` polls
+        `/api/board/state` on a timer, so any reload of a running board leaves
+        a response half-written to a socket nobody is reading; the write then
+        raises WinError 10053 and `http.server`'s own `handle_error` prints the
+        stack. The user who reported this attached it to a question about the
+        3D view, which is exactly what a stack trace during normal use does --
+        it becomes the explanation for whatever else was confusing.
+
+        **This is not catch-and-default and the distinction is the whole
+        design.** No value is substituted, no failure becomes a success, and
+        nothing is retried: a peer hanging up is an ordinary event in HTTP and
+        not something this program did. Every other exception reaches the base
+        class with its traceback intact, which is what
+        `test_a_handler_that_fails_for_any_other_reason_still_says_so` holds in
+        place.
+        """
+        if isinstance(sys.exc_info()[1], HUNG_UP):
+            return
+        super().handle_error(request, client_address)
+
+
 def build_server(bind: str, port: int,
                  session: emulator.Session | None = None
                  ) -> http.server.ThreadingHTTPServer:
@@ -810,7 +846,7 @@ def build_server(bind: str, port: int,
     Bound.selection = Selection()
     Bound.boards = BoardSlot()
     Bound.lock = threading.Lock()
-    server = http.server.ThreadingHTTPServer((bind, port), Bound)
+    server = Server((bind, port), Bound)
 
     # **After binding, not before.** Port 0 means "any free port", and the
     # allowed-origin set was being built from the 0 rather than from whatever

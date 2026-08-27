@@ -414,3 +414,88 @@ def test_a_foreign_origin_is_refused(live_server):
 def test_the_pages_own_origin_is_allowed(live_server):
     port = live_server.rsplit(":", 1)[1]
     assert get(live_server, "/api/state", origin=f"http://127.0.0.1:{port}")
+
+
+# --- a client that goes away is not an error --------------------------------
+
+
+def _raise_inside_handle_error(server, exception: BaseException) -> str:
+    """Call `handle_error` with `exception` in flight, return what it printed.
+
+    `handle_error` reads `sys.exc_info()`, so the exception has to be genuinely
+    being handled -- constructing one and passing it in would exercise nothing.
+    """
+    import contextlib
+    import io
+
+    caught = io.StringIO()
+    try:
+        raise exception
+    except BaseException:  # noqa: BLE001 - re-raised into the thing under test
+        with contextlib.redirect_stderr(caught):
+            server.handle_error(None, ("127.0.0.1", 55568))
+    return caught.getvalue()
+
+
+def test_a_client_that_hangs_up_mid_response_prints_nothing():
+    """**The user's report, and the reason it arrived attached to another
+    question.**
+
+    `emulator.js` polls `/api/board/state` on a timer, so reloading a page with
+    a board running leaves a response half-written to a socket nobody is
+    reading. The write raises WinError 10053 on Windows, and
+    `http.server`'s own `handle_error` answers with a twenty-line traceback --
+    during entirely normal use. It was reported as part of "why is the 3D model
+    not loading", which is what a stack trace during normal use does: it becomes
+    the explanation for whatever else was confusing.
+
+    All three names are checked because the platforms disagree about which one
+    they raise, and a fix that only covered the POSIX spelling would leave the
+    Windows report exactly as it was.
+    """
+    from webui import emulator_server
+
+    server = emulator_server.build_server("127.0.0.1", 0)
+    try:
+        for name in (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            printed = _raise_inside_handle_error(server, name("the peer went"))
+            assert printed == "", f"{name.__name__} still printed {printed!r}"
+    finally:
+        server.server_close()
+
+
+def test_a_handler_that_fails_for_any_other_reason_still_says_so():
+    """**The half that stops this being catch-and-default.**
+
+    Declining to report a peer disconnect is only safe while everything else is
+    still reported in full. Without this test the fix could be widened to
+    `except Exception: return` and nothing would notice until a real failure in
+    a handler thread disappeared -- which is the exact shape
+    `.claude/rules/python.md` rule 1 refuses.
+    """
+    from webui import emulator_server
+
+    server = emulator_server.build_server("127.0.0.1", 0)
+    try:
+        printed = _raise_inside_handle_error(server, ValueError("a real bug"))
+        assert "ValueError" in printed and "a real bug" in printed, printed
+        assert "Traceback" in printed
+    finally:
+        server.server_close()
+
+
+def test_the_hung_up_set_is_the_three_that_mean_the_peer_left():
+    """Named as a set, so the three read as one fact and not three exceptions.
+
+    Nothing broader belongs here: `OSError` would swallow a full disk and a
+    refused bind along with them, and each of those is a failure this program
+    made rather than one its peer did.
+    """
+    from webui import emulator_server
+
+    assert set(emulator_server.HUNG_UP) == {
+        ConnectionAbortedError, ConnectionResetError, BrokenPipeError,
+    }
+    assert OSError not in emulator_server.HUNG_UP, (
+        "OSError covers failures this program made, not ones its peer did"
+    )
