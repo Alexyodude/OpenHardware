@@ -2,7 +2,7 @@
 id: OH-82
 title: Every material in every model is the same material, and metal has nothing to
   reflect
-status: open
+status: done
 priority: P2
 created: '2026-08-27'
 touches:
@@ -131,3 +131,21 @@ needs a new dependency.
 DONE WHEN the Uno's gold contacts, nickel shell and tin legs read as three
 different metals, `#808080` is demonstrably untouched, the importer prints its
 assignment for every group, and the before/after histogram is in the commit.
+
+**Note 2026-08-27:** CLOSED 2026-08-27 in 2c9d891. The Uno's gold contacts, nickel USB shell and tin legs read as three different metals, and the brightest pixel on the board went from 237 to 255 -- nothing in the old scene could produce a specular highlight, because there was nothing to reflect.
+
+THE ANSWER TO THE QUESTION WAS 'NO'. It was never a render engine issue. three.js r185 already does everything wanted here and the vendored core already exported PMREMGenerator and the tone mapping constants; the limits were a constant in the IMPORTER and an absent environment. Worth remembering before the next 'should we change renderer' -- measure what the scene is asking the renderer for first.
+
+AND THE PLAN WAS OVERTURNED BY THE FIRST MEASUREMENT. The previous handoff said the scene clips to white and that tone mapping was the top fix. `gl.readPixels` said 0 of 132,961 board pixels clipped and the brightest was 237: under-exposed, not blown out. After the change 0.01% clip, so tone mapping is STILL not wanted. Second time this session a handoff's advice has aged worse than its own numbers.
+
+THE EVIDENCE FOR THE TABLE, because the assignment is the part that could be wrong. Loading every model in `compose_board_3d.CORRESPONDENCE` and tallying colour groups: #b58136 appears on 1X10, 1X08, 1X06, 2X03 and 2X02 and on NOTHING ELSE, so that colour is contact geometry by construction rather than by my opinion of a hex value. #a5a392 is every component's leg across six packages AND is what `lead_tips` already treats as metal by rule on the LEDs -- two independent readings agreeing. Three more are named outright in `tools/blender/usb_b_receptacle.py`, which calls its own materials `shell`, `cavity` and `pin`. This is the technique to reuse: ask the composer which package contributed a colour instead of looking at the colour.
+
+THE BIGGEST GROUP IS THE ONE THAT MUST NOT BE TOUCHED. #808080 is UNSTYLED -- 48,301 triangles, more than every named colour on the Uno put together, and the most tempting thing in the corpus to 'improve'. It is a face the vendor did not style, so its material is unknown, and a test keeps it on the default. The four XIAO models therefore gain much less than the Uno, which is the honest outcome and not a gap to close.
+
+MY OWN TEST DELETED FOUR ENTRIES, and that is the result I would keep if I could keep one. `test_every_finish_says_what_the_evidence_was` refuses a citation too short to be a sentence. Made to write the evidence out for #10178b, #000ca4, #ebebe5 and #ffffff, there was none -- three of them are 16, 4 and 2 triangles, far too small to be the board faces I had called them. A test that asks for the reason is how a plausible table stops being a confident one.
+
+TWO OF MY TESTS PASSED FOR THE WRONG REASON and mutation found both. `NEUTRAL_LIGHT`'s use count stayed at 2 because a new COMMENT mentioned the constant while the ambient light it was counting was deleted -- a tripwire a sentence can reset is not a tripwire. And a `background` check used `in` on a string that appears twice, so changing one of the two assignments passed. Both count properly now.
+
+A CONSOLE WARNING THAT IS NOT OURS: X4122, a float-precision note from the D3D backend compiling three.js's own PMREM shader. Confirmed by disabling the environment and reloading -- 0 warnings without it, 1 with. No shader is written in this repository, so this is the vendored library's and the '0 warnings' bar now has one known exception.
+
+NEXT, IN THE ORDER I WOULD DO THEM: shadows or baked vertex ambient occlusion, which is what would make fifteen components look ATTACHED to the board rather than floating on it -- the stale 'this scene has one object' comment is finally gone but the shadows it was refusing are still absent. Then the tessellation angular tolerance, ANGULAR = 0.5 rad, which is about 29 degrees between facets and is why the barrel jack and the electrolytics are visibly polygonal; that is a one-line experiment. Then the PCB artwork as a planar-projected texture, which needs the licence question about PICSimLab's `board.svg` answered first -- the XIAO artwork is vendored but the Uno's is read out of a GPL install at runtime. Bloom last, and only it needs a new dependency.
