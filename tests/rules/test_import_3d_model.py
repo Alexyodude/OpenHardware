@@ -277,3 +277,137 @@ def test_every_imported_mesh_is_a_glb_the_renderers_reader_would_accept():
         extras = import_3d_model.read_extras(mesh)
         assert extras["units"] == "mm", mesh.name
         assert "pcb" in extras, mesh.name
+
+
+# --- what each surface is made of -------------------------------------------
+
+
+def test_the_unstyled_colour_is_given_no_material():
+    """**The largest colour group in the corpus, and it must stay neutral.**
+
+    `UNSTYLED` is what a face with no style of its own is painted -- 48,301
+    triangles across four vendor models, counted 2026-08-27, which is more than
+    every named colour on the Arduino Uno put together. Its own comment says it
+    exists "rather than pretending to be a material".
+
+    Giving it a finish would be exactly that pretence, at the largest scale
+    available, and it would be the tempting thing to do because it is the group
+    that would change the picture most.
+    """
+    from tools.import_3d_model import DEFAULT_FINISH, FINISHES, UNSTYLED, finish_for
+
+    assert UNSTYLED not in FINISHES
+    assert finish_for(UNSTYLED) is DEFAULT_FINISH
+
+
+def test_a_colour_nothing_says_anything_about_keeps_the_old_material():
+    """A model whose colours are not named draws today's picture, not a worse one.
+
+    The default is what every material in every model had before `FINISHES`
+    existed, so an unrecognised colour is unchanged rather than guessed at.
+    """
+    from tools.import_3d_model import DEFAULT_FINISH, finish_for
+
+    assert (DEFAULT_FINISH.metalness, DEFAULT_FINISH.roughness) == (0.1, 0.6)
+    assert finish_for("#123456") is DEFAULT_FINISH
+    assert "nothing here can say" in DEFAULT_FINISH.why
+
+
+def test_metalness_is_zero_or_one_and_never_between():
+    """**A surface is a conductor or it is not.**
+
+    `Finish`'s docstring draws the line this test enforces: metalness is
+    derived from what the thing is, and the values between 0 and 1 exist for
+    textures that blend two materials across one surface, which nothing here
+    has. A 0.5 in this table would be a way of saying "I am not sure" in a
+    field that has no vocabulary for it -- and the vocabulary for that is to
+    leave the colour out and let it take the default.
+    """
+    from tools.import_3d_model import FINISHES
+
+    for colour, finish in FINISHES.items():
+        assert finish.metalness in (0.0, 1.0), f"{colour} is {finish.metalness}"
+
+
+def test_every_finish_says_what_the_evidence_was():
+    """The assignment is the part that can be wrong, so it is the part written down.
+
+    A roughness inside a sensible band is hard to get badly wrong. Calling the
+    solder mask a metal is easy to get badly wrong, and the only defence is
+    that each entry says which thing in which model it is talking about.
+    """
+    from tools.import_3d_model import FINISHES
+
+    for colour, finish in FINISHES.items():
+        assert len(finish.why) > 40, f"{colour} has no real evidence recorded"
+        assert finish.why == finish.why.strip()
+
+
+def test_the_uno_is_made_of_more_than_one_material():
+    """The point of the exercise, asserted on the shipped file.
+
+    Before this the Arduino Uno's ten colours were ten copies of one material.
+    Gold contacts, a nickel shell, tin legs, epoxy and solder mask are four
+    metals-or-not and four roughnesses, and if the model on disk does not carry
+    them then the table is a document rather than a change.
+    """
+    import json
+    import struct
+
+    model = REPO / "webui" / "static" / "models" / "Arduino-Uno.glb"
+    if not model.is_file():
+        pytest.skip("no composed Uno; run tools/compose_board_3d.py")
+    raw = model.read_bytes()
+    length, _kind = struct.unpack_from("<II", raw, 12)
+    document = json.loads(raw[20:20 + length].decode("utf-8"))
+    finishes = {
+        material["name"]: (material["pbrMetallicRoughness"]["metallicFactor"],
+                           material["pbrMetallicRoughness"]["roughnessFactor"])
+        for material in document["materials"]
+    }
+    # The four the evidence is strongest for. `#b58136` is the header contacts,
+    # and it earned its entry by appearing on the five pin-header packages and
+    # on nothing else.
+    assert finishes["#b58136"] == (1.0, 0.30)
+    assert finishes["#9ea1a8"] == (1.0, 0.25)
+    assert finishes["#a5a392"] == (1.0, 0.35)
+    assert finishes["#050505"] == (0.0, 0.70)
+    # And more than one distinct material actually reaches the file.
+    assert len(set(finishes.values())) >= 5
+
+
+def test_the_writer_applies_the_finish_rather_than_a_constant(tmp_path):
+    """**The code path, not the file on disk.**
+
+    `test_the_uno_is_made_of_more_than_one_material` reads the shipped glTF,
+    which is the right thing to assert and the wrong thing to rely on: the
+    models are generated and gitignored, so that test passes on a stale file
+    however `write_glb` is edited. This one drives the writer.
+
+    Two colours, one in the table and one not, so both branches are exercised
+    in a single call.
+    """
+    from tools.import_3d_model import DEFAULT_FINISH, FINISHES, Mesh, write_glb
+
+    named = "#b58136"
+    unnamed = "#123456"
+    assert named in FINISHES and unnamed not in FINISHES
+    triangle = ([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+                [0, 1, 2])
+    mesh = Mesh({named: triangle, unnamed: triangle})
+    out = tmp_path / "probe.glb"
+    write_glb(mesh, out, "probe", "test", (1.0, 1.0, 1.0))
+
+    raw = out.read_bytes()
+    length, _kind = struct.unpack_from("<II", raw, 12)
+    document = json.loads(raw[20:20 + length].decode("utf-8"))
+    got = {
+        material["name"]: (material["pbrMetallicRoughness"]["metallicFactor"],
+                           material["pbrMetallicRoughness"]["roughnessFactor"])
+        for material in document["materials"]
+    }
+    assert got[named] == (FINISHES[named].metalness, FINISHES[named].roughness)
+    assert got[unnamed] == (DEFAULT_FINISH.metalness, DEFAULT_FINISH.roughness)
+    # And the two really are different, or this proves nothing.
+    assert got[named] != got[unnamed]

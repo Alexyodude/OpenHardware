@@ -396,7 +396,222 @@ def colour_of(styles, shape) -> str:
 #: not the vendor's, and a reader should be able to find every such number by
 #: searching. Mid grey reads as "unpainted" against every colour in the four
 #: models rather than pretending to be a material.
+#:
+#: **It is deliberately absent from `FINISHES` below**, and it is the largest
+#: colour group in the whole corpus -- 48,301 triangles across four vendor
+#: models, counted 2026-08-27. A face the vendor did not style is a face whose
+#: material nobody here knows, so giving it one would be exactly the pretending
+#: this constant exists to avoid. `test_the_unstyled_colour_is_given_no_material`
+#: is what keeps that true.
 UNSTYLED = "#808080"
+
+
+@dataclasses.dataclass(frozen=True)
+class Finish:
+    """How one colour group behaves in light, and where that came from.
+
+    **Two numbers of very different kinds, and keeping them apart is the point.**
+
+    `metalness` is DERIVED. Whether a material is an electrical conductor is a
+    fact about what the thing is, and 0 or 1 are the only physically meaningful
+    values -- a surface is a metal or it is not, and the in-between is a texture
+    blend for surfaces that are partly both. Gold plating is 1. Epoxy is 0.
+
+    `roughness` is a STATED CHOICE inside a band. Nobody publishes the RMS
+    slope of an Arduino's header pins. It is the same register as the USB-B's
+    `wall` in `tools/model_from_datasheet.py`, whose citation says outright
+    "not a measurement -- it is a drawing thickness"; the values here are the
+    conventional ones for plated metal, moulded plastic and solder mask, and
+    each entry says which kind of number it is claiming to be.
+
+    `why` carries the evidence for the ASSIGNMENT -- which thing in which model
+    is this colour. That is the part that could be wrong, so it is the part
+    written down.
+    """
+
+    metalness: float
+    roughness: float
+    why: str
+
+
+#: What a colour with no entry gets: exactly what every material got before
+#: this table existed, so a model whose colours are not named here draws today's
+#: picture rather than a worse one.
+#:
+#: **Not neutral by accident.** 0.1 metalness is "very slightly not a
+#: dielectric", which is wrong for everything and offensive to nothing; it is
+#: the value four models shipped with. Anything in this file that cannot say
+#: what a surface is made of falls back here and the importer prints that it
+#: did.
+DEFAULT_FINISH = Finish(
+    metalness=0.1, roughness=0.6,
+    why="no entry in FINISHES: nothing here can say what this surface is",
+)
+
+#: Colour -> what that surface actually is, for the colours whose identity is
+#: evidenced rather than guessed.
+#:
+#: **Keyed by colour because a colour group IS a material group here.** The
+#: importer groups faces by the colour the vendor's CAD styles them with, so a
+#: colour is already the finest division the file offers. The alternative --
+#: keying on the component -- does not survive `tools/compose_board_3d.py`,
+#: which merges fifteen components into one mesh by colour.
+#:
+#: ## How each assignment was arrived at, 2026-08-27
+#:
+#: The precedent for stating this rather than deriving it from the colour is
+#: `Part.lens` a hundred lines below, whose own comment settled the same
+#: argument: a rule that works on one file is a rule that will be wrong on the
+#: next one somebody adds. Three kinds of evidence were available and every
+#: entry says which one it rests on:
+#:
+#: 1. **This repository's own source names it.**
+#:    `tools/blender/usb_b_receptacle.py` builds the Arduino Uno's USB socket
+#:    out of materials it calls `shell`, `cavity` and `pin`.
+#: 2. **Which package contributes the colour**, from loading every model in
+#:    `compose_board_3d.CORRESPONDENCE` and tallying its groups. `#b58136` on
+#:    the five pin-header packages and on nothing else is the strongest result
+#:    of the lot: that colour is contact geometry by construction.
+#: 3. **A record already in the tree.** `webui/static/board3d.js` names two of
+#:    them in prose.
+#:
+#: A colour with none of the three is not in this table. `#6f6651` is the
+#: worked example: a hundred triangles shared by a QFN-32 and a SOT-223, very
+#: probably an exposed thermal pad and not evidenced enough to say so.
+#:
+#: **Four entries were written and then deleted**, and the thing that deleted
+#: them was `test_every_finish_says_what_the_evidence_was` refusing a citation
+#: too short to be a sentence. Made to write the evidence out, there was none:
+#: `#10178b`, `#000ca4` and `#ebebe5` are 16, 4 and 2 triangles -- far too
+#: small to be the board faces they had been called -- and `#ffffff` was 3,085
+#: triangles on the SAMD21 that nothing here can identify at all. They take the
+#: default now. A test that asks for the reason is how a plausible table stops
+#: being a confident one.
+FINISHES: dict[str, Finish] = {
+    # -- metals. `metalness` 1.0 throughout, because a plated contact is a
+    #    conductor and there is no honest fraction between the two.
+    "#b58136": Finish(1.0, 0.30, (
+        "gold-plated header contact. Tallied 2026-08-27 across every KiCad "
+        "model the Uno is composed from: 1,224 triangles, all of them on "
+        "1X10, 1X08, 1X06, 2X03 and 2X02, and NOT ONE anywhere else. A colour "
+        "that appears only on pin-header packages is those packages' pins"
+    )),
+    "#b8994c": Finish(1.0, 0.30, (
+        "the USB-B's contacts. Named in this repository's own source: "
+        "`tools/blender/usb_b_receptacle.py` calls the material `pin`"
+    )),
+    "#9ea1a8": Finish(1.0, 0.25, (
+        "the USB-B's shell, likewise named `shell` in "
+        "`tools/blender/usb_b_receptacle.py`. A Series-B receptacle shell is "
+        "folded nickel-plated steel, which is smoother than a plated contact"
+    )),
+    "#a5a392": Finish(1.0, 0.35, (
+        "every component's LEG. 8,497 triangles across the DIP-28, the "
+        "QFN-32, both electrolytics, the barrel jack, the SOT-223 and the "
+        "tactile switch -- and it is also the colour `lead_tips` already "
+        "treats as metal BY RULE on the LEDs and the buzzer: 'every group "
+        "that is not the lens is metal'. Two independent readings agreeing"
+    )),
+    "#c6c4a0": Finish(1.0, 0.30, (
+        "the tactile switch's metal cover. **The weakest entry here**: 440 "
+        "triangles on TS42 and nothing else, and which of its two colours is "
+        "the steel cover and which the moulded actuator is read off their "
+        "values rather than off anything named. A B3S-1000 is a black body "
+        "under a bright cover, and this is the bright one"
+    )),
+    "#ff9f37": Finish(1.0, 0.30, (
+        "the XIAO's gold castellated pads. Already recorded in the tree: "
+        "`webui/static/board3d.js`'s `refreshTheme` names it in prose, beside "
+        "#116517 below"
+    )),
+    "#ff9d36": Finish(1.0, 0.30, (
+        "the same gold, one value off, on the same board. Two nearly equal "
+        "colours are two styles in the vendor's CAD rather than two materials"
+    )),
+    "#e7c863": Finish(1.0, 0.30, (
+        "gold plating on the ESP32-S3 and nRF52840 models. **By ANALOGY with "
+        "#ff9f37 rather than from a record**: it is the same warm yellow, on "
+        "the same vendor's boards, on 9,084 triangles, and Seeed plates every "
+        "XIAO's pads. Analogy is weaker than the entries above and this says so"
+    )),
+    "#edbe51": Finish(1.0, 0.30, (
+        "the same, on the RP2040 model. The same analogy and the same caveat"
+    )),
+
+    # -- dielectrics. `metalness` 0.0, and the roughness is what separates a
+    #    moulded body from a solder mask from a lens.
+    # **The near-blacks are one derivation, not four assertions.** A metal's
+    # base colour IS its reflectance, and no metal used in electronics reflects
+    # under about 50% -- gold, silver, nickel, tin and copper are all bright.
+    # A surface the vendor styled at two percent grey is therefore not a metal,
+    # whatever else it is, and moulded plastic and epoxy are what near-black
+    # things on a board are made of. That argument covers every entry below and
+    # is why they are here while other guesses were dropped.
+    "#050505": Finish(0.0, 0.70, (
+        "moulded black plastic and epoxy: 3,598 triangles across the bodies "
+        "of the same six packages whose legs are #a5a392 above -- the QFN's "
+        "encapsulant, the barrel jack's housing, the electrolytics' sleeves, "
+        "the header shrouds, the DIP's body"
+    )),
+    "#0d0d0f": Finish(0.0, 0.70, (
+        "the USB-B's insulator, named `cavity` in "
+        "`tools/blender/usb_b_receptacle.py`"
+    )),
+    "#030303": Finish(0.0, 0.70, (
+        "near-black moulding on the SAMD21 model, 13,822 triangles. Not a "
+        "metal for the reflectance reason above; the specific plastic is not "
+        "claimed and does not need to be"
+    )),
+    "#020202": Finish(0.0, 0.70, (
+        "the same near-black, on the ESP32-S3, RP2040 and nRF52840 models"
+    )),
+    "#000000": Finish(0.0, 0.70, (
+        "the same near-black, on the ESP32-S3 model. Pure zero rather than "
+        "nearly zero, which is a vendor writing an ideal black rather than a "
+        "different material"
+    )),
+    "#383838": Finish(0.0, 0.65, (
+        "the tactile switch's moulded actuator, the other half of the TS42 "
+        "pair. Carries the same caveat as #c6c4a0"
+    )),
+    "#313d63": Finish(0.0, 0.35, (
+        "the Arduino Uno's solder mask. `tools/compose_board_3d.py` reads it "
+        "out of PICSimLab's own artwork and says why in its header. Solder "
+        "mask is a cured semi-gloss coating: far smoother than a moulded body "
+        "and not a mirror"
+    )),
+    "#116517": Finish(0.0, 0.35, (
+        "the SAMD21 board's solder mask, named in `board3d.js`'s "
+        "`refreshTheme` in the same sentence as #ff9f37"
+    )),
+    "#720301": Finish(0.0, 0.20, (
+        "the LEDs' lens, which `Part.lens` already names on all three sizes. "
+        "A moulded epoxy lens is the glossiest thing on this bench, which is "
+        "why it is the lowest roughness in the table -- and `setPartState` "
+        "replaces its colour and emissive at runtime without touching this"
+    )),
+}
+
+
+def finish_for(colour: str) -> Finish:
+    """The finish for a colour group, or the stated default."""
+    return FINISHES.get(colour, DEFAULT_FINISH)
+
+
+def report_finishes(mesh: Mesh) -> None:
+    """Print what each colour group was taken to be made of.
+
+    **So that the assignment can be audited against the picture**, which is the
+    only way to check it. A table of thirty colours nobody ever sees applied is
+    a table that rots; printing it per model, with the triangle counts, puts
+    the claim in front of whoever runs the importer.
+    """
+    for colour, (_positions, _normals, indices) in sorted(
+            mesh.groups.items(), key=lambda kv: -len(kv[1][2])):
+        finish = finish_for(colour)
+        named = "" if colour in FINISHES else "  DEFAULT, nothing says what this is"
+        print(f"  finish {colour} {len(indices) // 3:>7,} tri  "
+              f"metal {finish.metalness:.1f} rough {finish.roughness:.2f}{named}")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -594,6 +809,10 @@ def write_glb(mesh: Mesh, path: pathlib.Path, chip: str, source: str,
     positions, normals, a base colour. No scenes graph, no textures, no
     animation, nothing that would need a general writer.
     """
+    # **Here rather than in each caller**, so that the composed Arduino Uno
+    # reports its assignment too without `tools/compose_board_3d.py` having to
+    # know this table exists -- it already shares this writer.
+    report_finishes(mesh)
     buffer = bytearray()
     views: list[dict[str, object]] = []
     accessors: list[dict[str, object]] = []
@@ -645,12 +864,18 @@ def write_glb(mesh: Mesh, path: pathlib.Path, chip: str, source: str,
         red = int(colour[1:3], 16) / 255
         green = int(colour[3:5], 16) / 255
         blue = int(colour[5:7], 16) / 255
+        # **Per colour, not one constant for everything.** Until OH-82 these
+        # two were literals here, so the gold header contacts, the nickel USB
+        # shell, the tin legs, the black epoxy and the solder mask were all the
+        # same substance and nothing in the scene had a material identity.
+        # `FINISHES` says which is which, and says what the evidence was.
+        finish = finish_for(colour)
         materials.append({
             "name": colour,
             "pbrMetallicRoughness": {
                 "baseColorFactor": [red, green, blue, 1.0],
-                "metallicFactor": 0.1,
-                "roughnessFactor": 0.6,
+                "metallicFactor": finish.metalness,
+                "roughnessFactor": finish.roughness,
             },
             "doubleSided": True,
         })

@@ -280,6 +280,84 @@ function readPalette() {
   };
 }
 
+//: Luminances for the studio below: the ceiling, the walls, the floor.
+//:
+//: **Numbers rather than colours, and that is not a dodge.** A greyscale
+//: environment leaves every material the colour its own file said, which is the
+//: same argument `NEUTRAL_LIGHT` makes two constants up -- tinting the light
+//: would shift every material in the scene together and be wrong in whichever
+//: theme it was not chosen for. `setScalar` takes a luminance, so there is no
+//: colour written down here at all.
+//:
+//: Bright above, mid to the sides, dark below is what a bench under a ceiling
+//: light looks like, and it is the gradient that makes a curved metal surface
+//: read as curved: the top of a pin catches the ceiling and its flank catches
+//: the wall, which is the whole reason to have an environment rather than
+//: another ambient light.
+const STUDIO = { ceiling: 1.0, wall: 0.42, floor: 0.12 };
+
+//: How far the studio's walls sit from the origin. Only the ratios matter --
+//: an environment map records direction and not distance -- so this is just
+//: large enough to enclose the biggest board.
+const STUDIO_SIZE = 60;
+
+//: How far the prefilter blurs the room before storing it. Six flat planes
+//: meet at hard edges, and a mirror-smooth surface would reflect those edges
+//: as a visible box. `three.js` uses this same value for its own room, and it
+//: is small enough that the ceiling still reads as a ceiling.
+const STUDIO_BLUR = 0.04;
+
+/**
+ * A room, prefiltered into one texture, so that metal has something to reflect.
+ *
+ * **Built here rather than by vendoring `RoomEnvironment`.** That addon is not
+ * in `webui/static/vendor/` and does not need to be: `PMREMGenerator` is
+ * already exported by the vendored core, `fromScene` takes any scene, and what
+ * RoomEnvironment does is put a handful of emissive boxes in one. Six planes
+ * and three luminances is the whole of it, and it is easier to be sure of than
+ * a file nobody in this repository would otherwise read.
+ *
+ * The result is installed as `scene.environment` and NOT as `scene.background`:
+ * the background stays the palette's ground, because that is a UI surface and
+ * has to agree with the page around it. This is illumination.
+ */
+function studio(renderer) {
+  const room = new THREE.Scene();
+  const face = (luminance, position, rotation) => {
+    const plane = new THREE.Mesh(
+      new THREE.PlaneGeometry(STUDIO_SIZE * 2, STUDIO_SIZE * 2),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color().setScalar(luminance),
+        side: THREE.DoubleSide,
+      })
+    );
+    plane.position.copy(position);
+    plane.rotation.copy(rotation);
+    room.add(plane);
+  };
+  const at = (x, y, z) => new THREE.Vector3(x, y, z);
+  const turn = (x, y, z) => new THREE.Euler(x, y, z);
+  const half = Math.PI / 2;
+
+  face(STUDIO.ceiling, at(0, STUDIO_SIZE, 0), turn(half, 0, 0));
+  face(STUDIO.floor, at(0, -STUDIO_SIZE, 0), turn(-half, 0, 0));
+  face(STUDIO.wall, at(0, 0, -STUDIO_SIZE), turn(0, 0, 0));
+  face(STUDIO.wall, at(0, 0, STUDIO_SIZE), turn(0, Math.PI, 0));
+  face(STUDIO.wall, at(-STUDIO_SIZE, 0, 0), turn(0, half, 0));
+  face(STUDIO.wall, at(STUDIO_SIZE, 0, 0), turn(0, -half, 0));
+
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const built = pmrem.fromScene(room, STUDIO_BLUR);
+  pmrem.dispose();
+  // The room itself is finished with the moment it has been prefiltered: what
+  // survives is one cube texture. Leaving six planes and their materials alive
+  // would be six leaks that nothing ever draws.
+  room.traverse((object) => {
+    if (object.isMesh) release(object);
+  });
+  return built.texture;
+}
+
 /** Build the renderer, the scene and the camera. Idempotent. */
 export function mount(canvas) {
   if (view.renderer) return;
@@ -298,10 +376,19 @@ export function mount(canvas) {
   // to lose it with no way to find it again.
   view.controls.enablePan = false;
 
-  // Two lights and no shadows. A shadow map costs a second render pass to make
-  // a flat green slab look slightly rounder, and this scene has one object.
-  view.scene.add(new THREE.AmbientLight(NEUTRAL_LIGHT, 1.5));
-  const key = new THREE.DirectionalLight(NEUTRAL_LIGHT, 2.0);
+  // **An environment and one key light, where there used to be an ambient and
+  // one key light.** An image-based light IS the ambient term, with direction:
+  // it is what a metal reflects, and without it `metalness` is a lie -- a
+  // mirror with nothing in front of it renders black. So the environment and
+  // `FINISHES` in `tools/import_3d_model.py` are one change, and adding either
+  // alone makes the picture worse.
+  //
+  // Still no shadows. The comment that used to sit here said "this scene has
+  // one object", which was true when the board was an extruded slab and stopped
+  // being true the day OH-75 put fifteen components on it. It is its own
+  // ticket rather than a line in this one.
+  view.scene.environment = studio(view.renderer);
+  const key = new THREE.DirectionalLight(NEUTRAL_LIGHT, 1.4);
   key.position.set(12, 24, 10);
   view.scene.add(key);
 
@@ -715,6 +802,10 @@ export function dispose() {
   window.removeEventListener("resize", resize);
   clearBench({ parts: true });
   clearBoard();
+  // The prefiltered environment is a render target's texture and is nobody
+  // else's to free: it was made here and it dies here.
+  view.scene.environment?.dispose();
+  view.scene.environment = null;
   view.controls.dispose();
   view.renderer.dispose();
   view.renderer = null;

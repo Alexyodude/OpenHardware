@@ -137,9 +137,23 @@ def test_the_renderer_writes_down_no_colour_of_its_own():
 
     found = [m for m in COLOUR_LITERAL.findall(body) if not _in_comment(body, m)]
     assert not found, f"colours written down rather than read: {found}"
-    assert body.count("NEUTRAL_LIGHT") == 2, (
-        "the light constant is used somewhere other than the two lights"
+    # **Counted outside comments, and tied to the lights rather than to a
+    # number.** This used to be `count(...) == 2`, and when OH-82 replaced the
+    # ambient light with an environment the uses fell to one -- while a new
+    # COMMENT mentioning the constant took the count back to two, so the
+    # assertion went on passing without ever noticing. A tripwire that a
+    # sentence can reset is not a tripwire. What it is actually for is catching
+    # the light constant leaking into a material, so it counts uses and
+    # compares them with the number of lights there are.
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("//"))
+    lights = code.count("AmbientLight(") + code.count("DirectionalLight(")
+    assert code.count("NEUTRAL_LIGHT") == lights, (
+        f"NEUTRAL_LIGHT is used {code.count('NEUTRAL_LIGHT')} times outside "
+        f"comments and there are {lights} lights: it has reached something "
+        f"that is not illumination"
     )
+    assert lights >= 1, "the scene has no light at all"
 
 
 def test_the_only_colours_written_down_are_lead_colours():
@@ -686,3 +700,75 @@ def test_every_number_a_part_publishes_crosses_into_the_renderer():
             assert f"spec.{name}" in parts, (
                 f"{part.name} publishes {name} and parts.js never reads it"
             )
+
+
+# --- metal, and something for it to reflect ---------------------------------
+
+
+def test_the_scene_has_an_environment_for_metal_to_reflect():
+    """**Without this, `metalness` is a lie**, and the two are one change.
+
+    A metal's colour IS its reflection. Raise metalness with nothing in front
+    of the surface and it renders black, so the finish table in
+    `tools/import_3d_model.py` and this environment cannot be split across two
+    commits without the first one making the picture worse.
+
+    Built here rather than by vendoring `RoomEnvironment`: `PMREMGenerator` is
+    already in the vendored core and `fromScene` takes any scene.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    assert "view.scene.environment = studio(view.renderer)" in source
+    room = source.split("function studio(renderer) {", 1)[1].split("\n}", 1)[0]
+    assert "PMREMGenerator" in room
+    assert "pmrem.dispose()" in room
+    # The prefiltered texture is this file's to free, and the six planes that
+    # made it are finished with the moment it exists.
+    assert "release(object)" in room
+    assert "view.scene.environment?.dispose();" in source
+    # It is illumination, not a UI surface: the background stays the palette's.
+    #
+    # **Every assignment, not one of them.** `mount` and `refreshTheme` both
+    # set the background, so an `in` check on the string passed while one of
+    # the two was changed to show the environment instead -- caught by
+    # mutation 2026-08-27. A rule about a field has to be checked against every
+    # write to that field.
+    backgrounds = re.findall(r"scene\.background\s*=\s*([^;]+);", source)
+    assert len(backgrounds) >= 2
+    for assigned in backgrounds:
+        assert assigned.strip() == "view.palette.ground", (
+            f"the scene background is set to {assigned.strip()!r}, which is "
+            f"not the palette's ground"
+        )
+
+
+def test_the_environment_is_greyscale_and_writes_down_no_colour():
+    """The `NEUTRAL_LIGHT` argument, extended to a room.
+
+    White light leaves every material the colour its own file said. A tinted
+    environment would shift every material in the scene together and be wrong
+    in whichever theme it was not chosen for -- which is the trap this file's
+    state ramp records twice. `setScalar` takes a luminance, so the studio adds
+    no colour to a file whose whole rule is that it writes none down.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    studio = source.split("const STUDIO = {", 1)[1].split("};", 1)[0]
+    assert "ceiling" in studio and "wall" in studio and "floor" in studio
+    room = source.split("function studio(renderer) {", 1)[1].split("\n}", 1)[0]
+    assert "setScalar" in room
+    found = [m for m in COLOUR_LITERAL.findall(room) if not _in_comment(room, m)]
+    assert not found, f"the studio writes down a colour: {found}"
+
+
+def test_the_ambient_light_was_replaced_rather_than_added_to():
+    """An image-based light IS the ambient term, with direction.
+
+    Keeping both would double-count the fill and wash the scene out, and the
+    directional gradient is the whole reason to have an environment: the top of
+    a pin catches the ceiling while its flank catches the wall, which is what
+    makes a curved metal surface read as curved.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    assert "AmbientLight" not in source, (
+        "an ambient light and an environment are two fills, not one"
+    )
+    assert source.count("DirectionalLight") == 1
