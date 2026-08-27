@@ -37,8 +37,11 @@
 # So these tests do not replace looking. They stop the specific regressions
 # from coming back quietly.
 
+import math
 import pathlib
 import re
+
+import pytest
 
 STATIC = pathlib.Path(__file__).resolve().parents[2] / "webui" / "static"
 RENDERER = STATIC / "board3d.js"
@@ -1077,6 +1080,163 @@ def test_the_room_has_no_hard_edge_anywhere_in_it():
     # discontinuity in its slope, and a polished lid finds it.
     assert room.count("(3 - 2 * ") == 2, (
         "one of the two gradients is a straight ramp"
+    )
+
+
+# --- the softbox, and the direction it has to be in -------------------------
+#
+# **OH-92 is the ticket where the whole lighting chain was correct and aimed
+# past the reader.** The clear coat OH-90 measured worked, the albedos OH-91
+# corrected were right, and the softbox sat at the zenith while the default
+# camera's mirror direction was 48 degrees away -- so none of it reached the
+# only view most people ever see. Measured on the Uno, switching nothing but
+# the coat at the default camera: the mask's brightest tenth moved 132.7 to
+# 132.9 before, and 134.4 to 210.7 after.
+#
+# The tests below pin the RELATIONSHIP rather than the numbers, because the
+# numbers are allowed to move and the relationship is not.
+
+
+def camera_direction(source):
+    """`CAMERA_FROM`, as a dict of floats."""
+    written = re.search(r"^const CAMERA_FROM = \{([^}]*)\};$", source,
+                        re.MULTILINE)
+    assert written, "CAMERA_FROM is not one line of three named numbers"
+    return {axis: float(value) for axis, value in
+            re.findall(r"([xyz]):\s*(-?[\d.]+)", written.group(1))}
+
+
+def softbox_direction(source, camera):
+    """The vector `studio` builds, resolved against `CAMERA_FROM`.
+
+    Resolved rather than string-matched: the point is that the softbox's
+    direction IS the camera's, mirrored, and a test that accepts the literal
+    `(-0.1, 0.85, -0.75)` would pass while the two silently drifted apart --
+    which is the exact failure OH-92 existed to fix, and the same shape as the
+    sRGB conversion that lived in `readPalette` and not in the writer.
+    """
+    room = source.split("function studio(renderer) {", 1)[1].split("\n}", 1)[0]
+    built = re.search(r"new THREE\.Vector3\(([^)]*)\)\s*\.normalize\(\)", room,
+                      re.DOTALL)
+    assert built, "the softbox's direction is not built from a normalised vector"
+    resolved = []
+    for argument in built.group(1).split(","):
+        argument = argument.strip()
+        named = re.fullmatch(r"(-?)CAMERA_FROM\.([xyz])", argument)
+        assert named, (
+            f"the softbox's direction uses {argument!r} rather than a "
+            f"component of CAMERA_FROM, so the two can drift apart"
+        )
+        resolved.append((-1.0 if named.group(1) else 1.0)
+                        * camera[named.group(2)])
+    return resolved
+
+
+def elevation_and_azimuth(vector):
+    """Degrees above the board's plane, and around it. The board's normal is +y."""
+    across = math.hypot(vector[0], vector[2])
+    return (math.degrees(math.atan2(vector[1], across)),
+            math.degrees(math.atan2(vector[0], vector[2])) % 360)
+
+
+def test_the_softbox_sits_where_a_flat_board_reflects_the_default_camera():
+    """**A coat returns what lies in the MIRROR direction, and nothing else.**
+
+    The board's normal is +y, so a surface on it returns whatever sits at
+    `reflect(view, +y)` -- same elevation, opposite side. The softbox spent
+    three tickets at the zenith, where its own 14.5-degree half-angle put it 27
+    degrees clear of that direction at the default camera, and every
+    improvement made to the coat beneath it was therefore invisible.
+
+    This is the assertion that would have caught it: the two directions are
+    computed from the one constant and compared, so moving the camera without
+    moving the light fails here rather than in a screenshot nobody takes.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    camera = camera_direction(source)
+    up, around = elevation_and_azimuth([camera["x"], camera["y"], camera["z"]])
+    lit, opposite = elevation_and_azimuth(softbox_direction(source, camera))
+
+    assert lit == pytest.approx(up, abs=0.5), (
+        f"the softbox is {lit:.1f} degrees up and the board reflects toward "
+        f"{up:.1f}; a mirror does not compromise"
+    )
+    assert abs(opposite - around) == pytest.approx(180.0, abs=0.5), (
+        f"the softbox is at azimuth {opposite:.1f} and the reflection points "
+        f"at {(around + 180) % 360:.1f}"
+    )
+    assert lit > 0, "the softbox is under the board, which is not lit at all"
+
+
+def test_the_camera_direction_is_written_down_once():
+    """**`frameScene` used to hold these three numbers itself**, which is what
+    let the light and the camera disagree for as long as both existed. If the
+    framing goes back to literals, the test above still passes against a
+    `CAMERA_FROM` nothing reads."""
+    source = RENDERER.read_text(encoding="utf-8")
+    framing = source.split("function frameScene() {", 1)[1].split("\n}", 1)[0]
+    assert framing.count("CAMERA_FROM.") == 3, (
+        "frameScene does not take all three of its axes from CAMERA_FROM"
+    )
+    assert not re.search(r"reach \* [\d.]", framing), (
+        "frameScene multiplies reach by a literal again"
+    )
+
+
+def test_the_softbox_is_small_enough_to_cross_the_board_rather_than_cover_it():
+    """**A source as wide as the board's own sweep is a wash, not a highlight.**
+
+    Perspective makes the mirror direction swing 35 to 69 degrees between the
+    Uno's far and near edges -- 34 degrees, measured at the camera
+    `describe()` reports. The softbox subtends `2 * atan(radius / reach)`, and
+    the first version of OH-92 aimed a 28.9-degree source at the middle of
+    that, which lit the whole face evenly and read exactly as flat as the
+    zenith version it replaced. Half of the sweep is the ceiling; the measured
+    peak, 14.7 degrees, sits comfortably under it.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    written = re.search(r"^const SOFTBOX = \{([^}]*)\};$", source, re.MULTILINE)
+    assert written, "SOFTBOX is not one line"
+    numbers = {name: float(value) for name, value in
+               re.findall(r"(\w+):\s*([\d.]+)", written.group(1))}
+    subtends = 2 * math.degrees(math.atan(numbers["radius"] / numbers["reach"]))
+    assert subtends < 17.0, (
+        f"the softbox subtends {subtends:.1f} degrees against a 34-degree "
+        f"sweep across the board, which covers it rather than crossing it"
+    )
+    assert numbers["reach"] < 1.0, (
+        "the softbox is outside the sky sphere, which is drawn BackSide and "
+        "would hide it"
+    )
+    # **The room keeps the light it had, which is the rule both shrinks
+    # followed and neither wrote down as a check.** `bright` rises with the
+    # square of the shrink -- 0.5 to 0.16 took 2.4 to 18.0, and 0.16 to 0.08
+    # took 18.0 to 72.0 -- so that a radius sweep compares the SHAPE of the
+    # highlight rather than the exposure. Shrinking the disc without paying for
+    # it is how a measured setting turns into a dimmer picture nobody meant.
+    assert numbers["bright"] * numbers["radius"] ** 2 == pytest.approx(
+        18.0 * 0.16 ** 2, rel=0.02), (
+        f"radius {numbers['radius']} at bright {numbers['bright']} emits "
+        f"{numbers['bright'] * numbers['radius'] ** 2 / (18.0 * 0.16 ** 2):.2f} "
+        f"times the light the measured setting did"
+    )
+
+
+def test_the_softbox_turns_to_face_the_board_rather_than_holding_a_rotation():
+    """**`rotation.x = PI / 2` was right only while the disc hung overhead.**
+
+    Once the position is derived from `CAMERA_FROM`, a fixed rotation leaves
+    the disc edge-on to the board -- and a foreshortened disc is a smaller
+    source than the one `SOFTBOX`'s table was measured with, so the constant
+    would quietly stop meaning what its comment says.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    room = source.split("function studio(renderer) {", 1)[1].split("\n}", 1)[0]
+    code = "\n".join(line for line in room.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "light.lookAt(" in code
+    assert "rotation.x" not in code, (
+        "a fixed rotation cannot follow a derived position"
     )
 
 

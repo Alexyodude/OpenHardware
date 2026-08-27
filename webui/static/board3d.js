@@ -83,6 +83,26 @@ const PAD_LIFT = 0.01;
 //: one number serve a 196px XIAO and a 402px Uno.
 const CAMERA_PULL = 1.5;
 
+//: WHICH WAY THE READER IS LOOKING FROM, and it is a direction so that
+//: something else can be aimed at its reflection.
+//:
+//: **This used to be three literals inside `frameScene` and that is the whole
+//: reason OH-92 existed.** The softbox sat at the zenith, which is where a
+//: bench lamp goes and is not where a flat board sends its reflection: a
+//: surface with normal +y returns what lies in the MIRROR of the view
+//: direction, and the mirror of this vector about +y is `(-x, y, -z)`, or 48.3
+//: degrees of elevation on the far side of the board. The softbox's own
+//: half-angle is 14.5 degrees, so at the zenith it missed that by 27 -- the
+//: clear coat OH-90 measured and the albedos OH-91 corrected were both
+//: working, and both invisible at the only camera most readers ever see.
+//:
+//: So `studio()` reads this and puts the light where the board can return it.
+//: Keeping them as two numbers that happened to agree would be a thing to get
+//: out of step, and this file has already paid for that once: `#313d63` was
+//: converted to linear in `readPalette` and not in the writer twenty lines
+//: away, for as long as both have existed.
+const CAMERA_FROM = { x: 0.1, y: 0.85, z: 0.75 };
+
 //: Which way the key light comes from, as a direction rather than a place.
 //:
 //: **It used to be a position, `(12, 24, 10)`, and that was a bug waiting for
@@ -177,7 +197,41 @@ const LIGHT_TOTAL = 7.0;
 //: plastic beside them -- which inverts the one relationship anybody can check
 //: against a real board. That last sentence is a judgement and is written as
 //: one. The numbers above it are not.
-const ENVIRONMENT_SHARE = 0.61;
+//:
+//: **0.61 TO 0.35 UNDER OH-92, AND THE PREMISE OF THE PARAGRAPH ABOVE IS WHAT
+//: CHANGED.** That judgement was measured with the softbox at the zenith and
+//: `bright` at 18.0, where the environment was the only thing the metals had.
+//: OH-92 aimed the softbox at the board's mirror direction and made it four
+//: times brighter, so at a LOWER share the metals now have MORE to reflect
+//: than they did at 0.45 before. Re-checked rather than inherited: at 0.35 the
+//: USB shell, both capacitor lids and the barrel jack still read as metal, and
+//: at 0.30 the shell goes flat and grey -- so the knee moved, it did not
+//: vanish, and this sits one step above it.
+//:
+//: What it buys is the solder mask's colour back. The room is what washes a
+//: coated board out, and with the softbox where the board reflects it, the
+//: share is the only knob that separates the two claims:
+//:
+//:      share   sheen   the board where there is NO highlight
+//:      0.61    2.086   rgb(101, 112, 154)  saturation 0.344
+//:      0.45    2.252   rgb( 90, 102, 145)             0.379
+//:      0.40    2.320   rgb( 87,  99, 142)             0.387
+//:      0.35    2.341   rgb( 82,  95, 138)             0.406
+//:      0.30    2.322   rgb( 78,  91, 135)             0.422
+//:
+//: `sheen` is the mask's brightest tenth over the mean of its own darker half
+//: -- how far the highlight stands above the board carrying it, which is the
+//: whole of what the user asked for and is a RATIO, so dimming the picture
+//: cannot fake it. It is flat to within one percent across 0.30 to 0.40, so it
+//: does not choose; the colour does, and the metals set the floor.
+//:
+//: **The ratio to `LIGHT_TOTAL` is 20.0 here against OH-86's 11.4, and that is
+//: deliberate rather than drift.** OH-86 held that ratio because it was moving
+//: light between two sources that did the same job. This moves it out of the
+//: source that cannot cast a shadow and into one that can, which is the same
+//: direction OH-86's own table wanted and stopped short of for a reason that
+//: no longer applies.
+const ENVIRONMENT_SHARE = 0.35;
 
 //: The shadow map's resolution. 2,048 across a bounding sphere of about 45 mm
 //: is a texel every 44 um, which is finer than the 0.05 mm chord error every
@@ -537,7 +591,42 @@ const SKY_BANDS = { around: 32, up: 24 };
 //: light it had: 0.5 to 0.16 is a nineteenth of the area, and 2.4 to 18.0 is
 //: seven and a half times the intensity. The rest of the exposure is
 //: `LIGHT_TOTAL`'s to settle, and it does.
-const SOFTBOX = { bright: 18.0, radius: 0.16, height: 0.62, segments: 48 };
+//:
+//: **`reach` IS A DISTANCE ALONG `CAMERA_FROM`'S MIRROR, NOT A HEIGHT**, and
+//: the rename is the point of OH-92. It was `height: 0.62` and the disc hung
+//: at `(0, 0.62 * STUDIO_SIZE, 0)`, which put a 14.5-degree source 27 degrees
+//: away from the direction the board actually reflects toward the default
+//: camera. `reach` is unchanged because it is half of what sets the half-angle
+//: -- `atan(radius / reach)` -- and it is as far out as the disc can go and
+//: stay inside the sky sphere, which is `STUDIO_SIZE` and drawn `BackSide`.
+//:
+//: **AND THEN THE RADIUS HALVED AGAIN, BECAUSE AIMING IT REVEALED THE REAL
+//: SCALE.** At 0.16 the source subtends 28.9 degrees. Perspective makes the
+//: board's own mirror direction sweep 35 to 69 degrees between its far and
+//: near edges -- 34 degrees, measured from the camera `describe()` reports --
+//: so a 28.9-degree source aimed at the middle covers very nearly the whole
+//: face. That is not a highlight, it is a wash, and it is the same "wide and
+//: mild" the table above rejects, arrived at from the other direction: at the
+//: zenith the source was too wide to be a highlight and missed anyway, so the
+//: fault was invisible.
+//:
+//: Radius swept at the default camera with `bright` held at the inverse square
+//: so the comparison is of SHAPE and not exposure, at two different room
+//: brightnesses so the peak is not an artefact of one:
+//:
+//:      radius  subtends   sheen at share 0.61   sheen at share 0.35
+//:      0.160     28.9         1.612                  --
+//:      0.110     20.1         2.005                2.017
+//:      0.080     14.7         2.086                2.341
+//:      0.055     10.1         2.037                2.288
+//:
+//: 0.08 is the peak under both, which is what makes it a setting rather than a
+//: coincidence. Below it the source stops being able to cover the components'
+//: curved faces; above it, it starts covering the board it should be crossing.
+//:
+//: `bright` still rises with the square of the shrink, 18.0 to 72.0, so the
+//: room keeps the light it had -- the same rule as the 0.5-to-0.16 step above.
+const SOFTBOX = { bright: 72.0, radius: 0.08, reach: 0.62, segments: 48 };
 
 /**
  * A room, prefiltered into one texture, so that metal has something to reflect.
@@ -588,8 +677,9 @@ function studio(renderer) {
     vertexColors: true, side: THREE.BackSide,
   })));
 
-  // The softbox: a disc overhead, brightest at the middle and fading into the
-  // ceiling at its rim, so nothing in this room has an edge. See `SOFTBOX`.
+  // The softbox: a disc in the direction the board reflects the camera toward,
+  // brightest at the middle and fading into the ceiling at its rim, so nothing
+  // in this room has an edge. See `SOFTBOX` and `CAMERA_FROM`.
   const pool = new THREE.CircleGeometry(STUDIO_SIZE * SOFTBOX.radius,
                                         SOFTBOX.segments);
   const across = pool.getAttribute("position");
@@ -608,8 +698,20 @@ function studio(renderer) {
   const light = new THREE.Mesh(pool, new THREE.MeshBasicMaterial({
     vertexColors: true, side: THREE.DoubleSide,
   }));
-  light.position.set(0, STUDIO_SIZE * SOFTBOX.height, 0);
-  light.rotation.x = Math.PI / 2;
+  // **Where a flat board sends the default camera's reflection.** The board's
+  // normal is +y, so the mirror of `CAMERA_FROM` about it is `(-x, y, -z)`:
+  // the same elevation, the opposite side. Normalising first is what makes
+  // `reach` a distance rather than a scale factor on an arbitrary vector, so
+  // `atan(radius / reach)` stays the half-angle `SOFTBOX` was measured at.
+  const facing = new THREE.Vector3(-CAMERA_FROM.x, CAMERA_FROM.y,
+                                   -CAMERA_FROM.z).normalize();
+  light.position.copy(facing).multiplyScalar(STUDIO_SIZE * SOFTBOX.reach);
+  // `lookAt` and not a fixed rotation, because the direction is now derived.
+  // A `CircleGeometry` lies in the xy plane facing +z, and `Object3D.lookAt`
+  // on something that is not a camera or a light turns +z toward the target --
+  // so the disc squares up to the board instead of being seen as a foreshort-
+  // ened ellipse from it, which would shrink the source it was measured as.
+  light.lookAt(0, 0, 0);
   room.add(light);
 
   const pmrem = new THREE.PMREMGenerator(renderer);
@@ -775,9 +877,9 @@ function frameScene() {
   const centre = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   const reach = Math.max(size.x, size.z, size.y) * CAMERA_PULL;
-  view.camera.position.set(centre.x + reach * 0.1,
-                           centre.y + reach * 0.85,
-                           centre.z + reach * 0.75);
+  view.camera.position.set(centre.x + reach * CAMERA_FROM.x,
+                           centre.y + reach * CAMERA_FROM.y,
+                           centre.z + reach * CAMERA_FROM.z);
   view.controls.target.copy(centre);
   view.controls.update();
   castShadows(box, centre);
