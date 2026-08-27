@@ -1197,3 +1197,97 @@ def test_the_studio_blur_is_inside_what_the_prefilter_can_actually_do():
         f"PMREMGenerator will do; it would be clipped to {ceiling} and the "
         f"source would be describing a blur that never happens"
     )
+
+
+# --- a board a reader can actually see --------------------------------------
+
+
+def test_the_canvas_comes_before_the_caption_that_describes_it():
+    """**Two full screens, on the commonest laptop size there is.**
+
+    The caption, the bench bar and the bench list were all above the canvas, so
+    at 1366 x 768 the 3D view started 1,584 px down -- 2.06 screens -- and a
+    reader who loaded the page saw no board anywhere. Measured 2026-08-28 after
+    it was reported twice as "no 3D model on 127.0.0.1:8088".
+
+    Nothing was cut to make room, which matters: the caption is the
+    honest-degradation statement about a composed model and a previous session
+    refused to hide it. A caption belongs under its figure, and moving it there
+    costs the prose nothing.
+    """
+    page = PAGE.read_text(encoding="utf-8")
+    canvas = page.index('id="board-pins-canvas"')
+    caption = page.index('id="board-pins-caption"')
+    bench = page.index('class="bench-bar"')
+    assert canvas < caption, (
+        "the caption is above the thing it captions, which is what put the "
+        "board below the fold"
+    )
+    assert canvas < bench, "the bench controls are above the board again"
+
+
+def test_the_panel_says_what_it_is_waiting_for_when_no_board_is_loaded():
+    """**It used to set a variable and return, saying nothing at all.**
+
+    A reader who picked a board from the selector and stopped there got a blank
+    area with no explanation -- the canvas at its 300 x 150 default, the caption
+    still holding the static sentence from the HTML, and no hint that an image
+    has to be loaded first. The `!view.present` branch beside it has always
+    spoken, so this was the one exit that forgot to.
+
+    The load address is named in the message because that is the step people
+    miss: a raw `.bin` carries no addresses and is refused without one.
+    """
+    panel = PANEL.read_text(encoding="utf-8")
+    refusal = panel.split("if (!response.ok) {", 1)[1].split("return;", 1)[0]
+    assert "$(CAPTION).textContent = WAITING;" in refusal, (
+        "the no-board exit still says nothing"
+    )
+    assert "$(CANVAS).hidden = true;" in refusal, (
+        "a blank 300x150 rectangle is left where a board should be"
+    )
+    waiting = panel.split("const WAITING =", 1)[1].split(";", 1)[0]
+    assert ".bin" in waiting and "load address" in waiting, (
+        "the message does not name the step that is actually missed"
+    )
+
+
+def test_the_panel_asks_the_server_what_it_has_when_the_page_opens():
+    """**Nothing asked, so a fresh page never found out there was a board.**
+
+    `reload` was called only by `emulator.js`, after a load, a build or a reset.
+    A page opened cold therefore sat on the static caption in the HTML forever
+    -- and, because the server keeps its board selection across page loads,
+    RELOADING with a board already loaded showed an empty view until something
+    was clicked. The board was there; only this panel did not know.
+    """
+    panel = PANEL.read_text(encoding="utf-8")
+    code = "\n".join(line for line in panel.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert re.search(r"^reload\(\)", code, re.MULTILINE), (
+        "nothing calls reload at startup, so the panel never asks"
+    )
+
+
+def test_a_board_is_brought_into_view_once_and_not_on_every_poll():
+    """Moving the caption fixed every width measured except 1366 x 768.
+
+    There two columns put the whole load-and-run panel above the canvas in the
+    same column, and it still starts 1,266 px down. Shortening that panel's
+    prose to win a screenful is the trade this repository has refused before,
+    so the board comes to the reader instead.
+
+    **Once, and the guard is the point.** `reload` runs on a timer while a board
+    is running, so scrolling on every call would drag the page out from under
+    anyone reading the panel above while a blink ran. `block: "nearest"` is the
+    other half: a reader who can already see the board is not moved at all,
+    which is why the 1920 and 2560 cases scroll zero pixels.
+    """
+    panel = PANEL.read_text(encoding="utf-8")
+    assert 'scrollIntoView({ block: "nearest" })' in panel, (
+        "either it does not scroll, or it scrolls further than it needs to"
+    )
+    guarded = panel.split("if (view.board !== shown) {", 1)
+    assert len(guarded) == 2, "the scroll is not guarded by a board change"
+    assert "scrollIntoView" in guarded[1].split("}", 1)[0]
+    assert "let shown = null;" in panel

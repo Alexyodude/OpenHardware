@@ -158,6 +158,26 @@
     <p class="detail" id="board-error"></p>
     <h2 style="border-top:1px solid var(--line)">Pins
       <span class="note" id="board-pins-note">GET /api/board/pins</span></h2>
+    <!-- **THE PICTURE FIRST, AND THE CAPTION UNDER IT.** These were the other
+         way round, with the caption, the bench bar and the bench list all
+         above the canvas -- which put the 3D view 1,584 px down a 1366 x 768
+         page, two full screens, so a reader on the commonest laptop size there
+         is loaded the page and saw no board anywhere. Measured 2026-08-28,
+         after it was reported twice as "no 3D model".
+
+         Nothing was cut to make room. A caption belongs under its figure, and
+         the honest-degradation paragraph below says exactly what it always
+         said. -->
+    <div class="pins">
+      <div class="pins-stage">
+        <canvas id="board-pins-canvas" aria-label="The board, in three dimensions"></canvas>
+        <p class="detail" id="board-pins-fallback" hidden></p>
+      </div>
+      <table class="pins-table">
+        <thead><tr><th>Pad</th><th>Pin</th><th>State</th></tr></thead>
+        <tbody id="board-pins-rows"></tbody>
+      </table>
+    </div>
     <div class="prose">
       <p id="board-pins-caption"><strong>A footprint, extruded — not a model of
         the board.</strong> Every pad position and the outline are the vendor's
@@ -182,16 +202,6 @@
         back — before it does anything; nothing flows back into the chip.</span>
     </div>
     <ul class="bench-list" id="bench-list"></ul>
-    <div class="pins">
-      <div class="pins-stage">
-        <canvas id="board-pins-canvas" aria-label="The board, in three dimensions"></canvas>
-        <p class="detail" id="board-pins-fallback" hidden></p>
-      </div>
-      <table class="pins-table">
-        <thead><tr><th>Pad</th><th>Pin</th><th>State</th></tr></thead>
-        <tbody id="board-pins-rows"></tbody>
-      </table>
-    </div>
     <h2 style="border-top:1px solid var(--line)">Console
       <span class="note" id="board-console-note">UART0, as the board transmitted it</span></h2>
     <pre class="hexdump" id="board-console"></pre>

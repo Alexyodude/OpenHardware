@@ -43,6 +43,20 @@ const MODEL_INDEX = "/models/index.json";
 //: model it is now showing is wrong in the same direction as one that claims a
 //: model it has not got: both leave a reader unable to tell which they are
 //: looking at, which is the only thing the sentence was ever for.
+//: What the caption says when there is no board to caption.
+//:
+//: **The load address is named because that is the step people miss.** A raw
+//: `.bin` carries no addresses, so it is refused without one, and "Load" then
+//: does nothing visible while the reason sits in a field further up the page.
+//: ELF, UF2 and Intel HEX say where they belong and the field is ignored.
+//:
+//: Written as a caption rather than as an error, because nothing has gone
+//: wrong: this is the panel saying what it is waiting for, in the place the
+//: explanation of the picture already lives.
+const WAITING =
+  "Nothing is loaded yet, so there is no board to draw. Pick one above, " +
+  "choose a compiled image, and it appears here — a raw .bin also needs the " +
+  "load address beside it, because a .bin cannot say where it belongs.";
 const FOOTPRINT_CAPTION =
   "A footprint, extruded — not a model of the board. Every pad position and " +
   "the outline are the vendor's own KiCad footprint, exact to three decimals. " +
@@ -103,6 +117,10 @@ function unknownWords(pad) {
 
 let scene = null;      // the board3d module, once it has loaded
 let layout = null;     // the last /api/board/pins answer
+
+//: Which board was last brought into view, so it is brought once and not on
+//: every poll. See `reload`, which is called on a timer while a board runs.
+let shown = null;
 let models = null;     // the model index, fetched once and remembered
 
 /** Which board has a vendor model, from `models/index.json`.
@@ -214,7 +232,17 @@ function renderTable(pads) {
 async function reload() {
   const response = await fetch("/api/board/pins");
   if (!response.ok) {
+    // **It used to set `layout` and return, saying nothing at all.** The canvas
+    // kept its 300 x 150 default, the caption kept whatever it last held, and
+    // the page offered no hint that an image has to be loaded before there is
+    // a board to draw -- reported twice as "no 3D model on 127.0.0.1:8088",
+    // which is exactly what it looks like. The `!view.present` branch below
+    // has always spoken; this is the exit that forgot to.
     layout = null;
+    renderTable([]);
+    $(NOTE).textContent = "no board loaded";
+    $(CAPTION).textContent = WAITING;
+    $(CANVAS).hidden = true;
     return;
   }
   const view = await response.json();
@@ -242,6 +270,22 @@ async function reload() {
   const drawn = await renderer();
   if (drawn) drawn.showBoard(view, model);
   renderBench();
+
+  // **Bring it into view the first time it is drawn, and only then.**
+  // Moving the canvas above its caption got it on screen at every width
+  // measured except 1366 x 768, where two columns put the whole load-and-run
+  // panel above it in the same column and it starts 1,266 px down. Shortening
+  // that panel's prose to win a screenful is the trade this repository has
+  // refused before, so the board comes to the reader instead.
+  //
+  // `block: "nearest"` scrolls the least that will do, so a reader who can
+  // already see it is not moved at all -- and `shown` means this happens when
+  // the board CHANGES rather than on every poll, which would drag the page
+  // out from under anyone reading the panel above while a blink runs.
+  if (view.board !== shown) {
+    shown = view.board;
+    $(CANVAS).scrollIntoView({ block: "nearest" });
+  }
 }
 
 /** How many pads this repository can answer for, right now.
@@ -489,3 +533,20 @@ function mountBench() {
 mountBench();
 
 window.boardPins = { reload, levels, theme };
+
+// **Ask once at startup, which nothing did before.** `reload` was only ever
+// called by `emulator.js` after a load, a build or a reset, so a page opened
+// fresh never asked the server anything: the panel sat on the static caption
+// in the HTML, and the canvas sat at its 300 x 150 default with no word about
+// what it was waiting for. That is the state reported twice as "no 3D model".
+//
+// It also fixes the other half of the same omission. The server keeps its
+// board selection across page loads, so RELOADING the page with a board
+// already loaded used to show an empty view until something was clicked --
+// the board was there, and only this panel did not know.
+//
+// The failure is swallowed on purpose and it is the one case where that is
+// right: nothing has gone wrong if there is no board yet, `reload` has already
+// put the reason in the caption, and there is nobody to re-raise to on a page
+// that has only just opened.
+reload().catch(() => {});
