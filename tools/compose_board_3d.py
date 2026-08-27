@@ -464,6 +464,25 @@ def slab(ring: list[tuple[float, float]], thickness: float, colour: str,
     return Mesh({colour: (positions, normals, indices)})
 
 
+def box_around(name: str, put: Mesh) -> dict[str, object]:
+    """An axis-aligned box around a placed component, in the scene's frame.
+
+    What a wire may not pass through. A box and not the mesh: `wires.js`
+    resolves contact against boxes and spheres because a rope is stepped up to
+    eight times a frame, and a triangle test against seventeen thousand of them
+    is not a thing to do sixty times a second. A header is a box to within its
+    own gaps, and a wire resting on the top of one is the picture that matters.
+    """
+    points = [(p[at], p[at + 1], p[at + 2])
+              for _colour, (p, _n, _i) in put.groups.items()
+              for at in range(0, len(p), 3)]
+    return {
+        "name": name,
+        "min": [round(min(v[axis] for v in points), 4) for axis in range(3)],
+        "max": [round(max(v[axis] for v in points), 4) for axis in range(3)],
+    }
+
+
 def component_mesh(component: Component, deflection: float) -> tuple[Mesh, object]:
     """Fetch and tessellate one KiCad model, in its own z-up millimetres.
 
@@ -833,6 +852,12 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     by_package = {component.package: component for component in CORRESPONDENCE}
     pieces = [slab(ring, spec.thickness_mm, spec.colour, centre)]
     drawn: list[str] = []
+    #: A box around each placed component, for the renderer's wire physics.
+    #: **Measured here because it is measured here already** -- the same
+    #: vertices `silk_miss` and the overhang checks walk. A renderer that had
+    #: to work these out itself would be re-deriving, from a mesh, numbers this
+    #: tool had in its hand.
+    solids: list[dict[str, object]] = []
     #: The subset of `drawn` whose mesh this project made rather than fetched.
     #: Carried separately all the way to the caption, because "KiCad's
     #: published meshes" stops being the whole truth the moment one is not.
@@ -854,6 +879,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 f"but {complaint}. Fix the table rather than the tolerance."
             )
         put = place(mesh, element, component.turn, spec.thickness_mm, centre)
+        solids.append(box_around(element.name, put))
         miss = silk_miss(element, put, centre)
         if miss is not None and miss > SILK_TOLERANCE_MM:
             raise SystemExit(
@@ -942,6 +968,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             ),
             "drawn": drawn,
             "modelled": modelled,
+            "solids": solids,
             "absent": [
                 {"package": package, "why": why,
                  "elements": [e.name for e in board.elements

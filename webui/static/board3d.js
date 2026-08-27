@@ -225,6 +225,20 @@ const view = {
   board: null,
   model: null,       // the vendor's mesh, once it has arrived
   slab: null,        // the PCB alone, for collision; see refreshColliders
+  //: A box per component the board carries, in the model's own frame. Empty
+  //: for a fetched vendor model, which is a single mesh that never said where
+  //: its components are -- so a wire keeps passing through those, and that is
+  //: the honest default rather than a guess at where a chip might be.
+  solids: [],
+  //: Scene units per millimetre, decided once when a board is drawn.
+  //:
+  //: **One number, because there were two and they disagreed.** The board's
+  //: model derives its scale from the pad field it shares with the page;
+  //: `addPart` used the constant 8 px/mm that generated board JSONs use. On
+  //: the Arduino Uno, whose pad map was traced off artwork at 5.638, that drew
+  //: every bench part 1.42 times too large beside a board drawn at its real
+  //: size. Anything putting millimetres into this scene reads this.
+  mmScale: PX_PER_MM * SCALE,
   colliders: [],     // what a wire may not pass through; see refreshColliders
   floor: -Infinity,  // the bench top
   pads: new Map(),   // pin name -> the marker drawn for it
@@ -434,8 +448,11 @@ export function showBoard(layout, model = null) {
   view.scene.add(view.board);
 
   // The extruded footprint's own slab, until a vendor model replaces it.
-  view.slab = { x: width / 2, z: depth / 2,
-                bottom: -BOARD_THICKNESS / 2, top: BOARD_THICKNESS / 2 };
+  view.mmScale = PX_PER_MM * SCALE;
+  view.solids = [];
+  view.slab = { local: false,
+                min: [-width / 2, -BOARD_THICKNESS / 2, -depth / 2],
+                max: [width / 2, BOARD_THICKNESS / 2, depth / 2] };
   refreshColliders();
   frameScene();
 
@@ -516,6 +533,10 @@ function placeModel(loaded, layout) {
     ? scaleFromPads(xs, ys, extras.pad_span)
     : PX_PER_MM * SCALE;
   group.scale.setScalar(scale);
+  // Everything else that puts millimetres into this scene reads this, so a
+  // bench part is the size it would be beside the real board.
+  view.mmScale = scale;
+  view.solids = extras.solids ?? [];
 
   // **The model is always landscape and half these pad maps are not.** Every
   // model is emitted with the PCB's long side along x; `XIAO-SAMD21-SMD` and
@@ -555,33 +576,32 @@ function placeModel(loaded, layout) {
   // The board just changed shape, so what a wire may not pass through changed
   // with it -- and it is the PCB that changed, not the assembly: a lead should
   // drape over the connector rather than be stopped by the box around it.
-  // **Where the PCB is, which is not always where the model's origin is.**
-  // A model is positioned by the centre of the pad map, and on a XIAO that is
-  // the centre of its board too, because the castellations run down both long
-  // edges. It is not true in general: the Arduino Uno's composed model has all
-  // 32 of its pads on two edges of a board they are not centred on, and its
-  // PCB sits 6.86 mm from the origin. Fetched models omit `offset` and get
-  // zero, which is what they had before this existed.
+  // **The PCB, in the MODEL's own frame** -- not the scene's, which is the
+  // distinction this got wrong twice. A model is positioned by the centre of
+  // the pad map; on a XIAO that is also the centre of its board, because the
+  // castellations run down both long edges, so a slab stated in absolute scene
+  // coordinates happened to land correctly. It is not true in general. The
+  // Arduino Uno's pads are on two edges of a board they are not centred on, so
+  // its group sits 4.5 units off the origin and a slab that ignored that
+  // stopped 4.5 units short of the board's right-hand edge -- exactly where a
+  // wire dropped from pads 0 to 13 falls, and straight through the PCB.
+  //
+  // Stated in the model's frame and put through `matrixWorld` by
+  // `refreshColliders`, the same as every component box, there is one
+  // mechanism rather than two and no offset to forget.
   const offset = extras.pcb_offset ?? [0, 0];
+  const halfLong = pcb.long / 2;
+  const halfShort = pcb.short / 2;
   view.slab = {
-    x: (pcb.long / 2) * scale,
-    z: (pcb.short / 2) * scale,
-    centreX: offset[0] * scale,
-    centreZ: offset[1] * scale,
-    bottom: -BOARD_THICKNESS / 2,
-    top: -BOARD_THICKNESS / 2 + pcb.thickness * scale,
+    local: true,
+    min: [offset[0] - halfLong, 0, offset[1] - halfShort],
+    max: [offset[0] + halfLong, pcb.thickness, offset[1] + halfShort],
   };
-  if (group.rotation.y !== 0) {
-    const swap = view.slab.x;
-    view.slab.x = view.slab.z;
-    view.slab.z = swap;
-    // The offset turns with the board. A quarter turn about the vertical
-    // takes (x, z) to (z, -x); leaving it alone would put the collider on the
-    // wrong side of a rotated board, which is only ever a composed one today.
-    const wasX = view.slab.centreX;
-    view.slab.centreX = view.slab.centreZ;
-    view.slab.centreZ = -wasX;
-  }
+  // **No rotation fix-up here any more, and its absence is the improvement.**
+  // This used to swap the slab's x and z by hand when the model was turned a
+  // quarter, and then swap the offset too -- two corrections, each right, each
+  // one more thing to keep true. A box stated in the model's frame is turned
+  // by `matrixWorld` along with everything else in it.
   refreshColliders();
 }
 
@@ -660,6 +680,43 @@ export function dispose() {
   view.scene = null;
   view.camera = null;
   view.controls = null;
+}
+
+/**
+ * How deep the worst wire sits inside something it may not pass through.
+ *
+ * **For a test, and it is the only honest way to check this one.** A wire
+ * lying over a chip and a wire lying through it are the same picture from most
+ * angles, and the screenshot that made this look fixed was taken before the
+ * colliders existed. A number is not fooled by the camera.
+ *
+ * Zero means every node is outside every solid. Reported in scene units;
+ * divide by `view.mmScale` for millimetres.
+ */
+export function penetration() {
+  let worst = 0;
+  for (const wire of view.wires) {
+    const rope = wire.rope;
+    // The same set the rope is actually solving against, so this measures what
+    // happened rather than what should have. `applyColliders` drops the part a
+    // wire is plugged into, because its tail is inside that part by
+    // construction -- counting it here would report a fault on every wire.
+    for (let node = 0; node < rope.count; node += 1) {
+      const x = rope.position[node * 3];
+      const y = rope.position[node * 3 + 1];
+      const z = rope.position[node * 3 + 2];
+      for (const solid of rope.colliders) {
+        if (solid.kind !== "box") continue;
+        const [ax, ay, az] = solid.min;
+        const [bx, by, bz] = solid.max;
+        if (x < ax || x > bx || y < ay || y > by || z < az || z > bz) continue;
+        // Inside. How far it would have to move to get out the nearest face.
+        worst = Math.max(worst, Math.min(
+          x - ax, bx - x, y - ay, by - y, z - az, bz - z));
+      }
+    }
+  }
+  return worst;
 }
 
 /** Whether a board is currently drawn. For the page, and for a test. */
@@ -884,9 +941,9 @@ export async function addPart(kind) {
   part.position.set(edge + (row % 3) * BENCH_PITCH,
                     -BOARD_THICKNESS / 2,
                     -BENCH_PITCH + Math.floor(row / 3) * BENCH_PITCH);
-  // Millimetres, like the board: the part's mesh is in the vendor's own
-  // units and the scene is image pixels at the same 8 px/mm.
-  part.scale.setScalar(PX_PER_MM * SCALE);
+  // Millimetres, like the board -- and at the board's OWN scale, which is not
+  // always the 8 px/mm a generated board JSON uses. See `view.mmScale`.
+  part.scale.setScalar(view.mmScale);
   view.bench.add(part);
   view.parts.push(part);
   refreshColliders();
@@ -937,6 +994,29 @@ const BENCH_DROP = 5.0;
  * connector's chamfers would cost a triangle test per node per pass, and the
  * difference would be invisible at the size a lead is drawn.
  */
+/**
+ * One box the wire physics can use, from a box stated in the model's frame.
+ *
+ * `local` boxes go through the model's world matrix; anything else is already
+ * in scene coordinates, which is the extruded footprint's own slab. Having one
+ * function decide that is the point: the two used to be computed in two places
+ * and one of them forgot the model's position.
+ */
+function boardSolid(solid) {
+  if (!solid.local || !view.model) {
+    return { owner: "board", kind: "box", min: solid.min, max: solid.max };
+  }
+  const lo = new THREE.Vector3(...solid.min).applyMatrix4(view.model.matrixWorld);
+  const hi = new THREE.Vector3(...solid.max).applyMatrix4(view.model.matrixWorld);
+  return {
+    owner: "board",
+    kind: "box",
+    min: [Math.min(lo.x, hi.x), Math.min(lo.y, hi.y), Math.min(lo.z, hi.z)],
+    max: [Math.max(lo.x, hi.x), Math.max(lo.y, hi.y), Math.max(lo.z, hi.z)],
+  };
+}
+
+
 function refreshColliders() {
   const solids = [];
   const box = new THREE.Box3();
@@ -947,18 +1027,14 @@ function refreshColliders() {
     // is a wire the constraint and the collider pull against each other
     // forever. Measured before the fix: 161% over rest on a wire that had
     // been sitting still for two seconds.
-    const half = view.slab;
-    // `centreX`/`centreZ` are zero for the extruded footprint and for every
-    // fetched model, whose PCB is centred on the pads. A composed model says
-    // where its board actually is -- see `placeModel`.
-    const cx = half.centreX ?? 0;
-    const cz = half.centreZ ?? 0;
-    solids.push({
-      owner: "board",
-      kind: "box",
-      min: [cx - half.x, half.bottom, cz - half.z],
-      max: [cx + half.x, half.top, cz + half.z],
-    });
+    solids.push(boardSolid(view.slab));
+    // **And everything standing on it.** The PCB alone was the whole board
+    // until OH-75 put components on it; a wire dropped across the Uno went
+    // straight through its DIP-28 and all six headers, because geometry in the
+    // mesh is not geometry the physics knows about. The model states its own
+    // boxes -- see `tools/compose_board_3d.py`, which measures them anyway --
+    // and they are in its frame, so they scale and shift with it.
+    for (const solid of view.solids) solids.push(boardSolid(solid));
   }
   for (const part of view.parts) {
     box.setFromObject(part);

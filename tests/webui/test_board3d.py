@@ -394,3 +394,75 @@ def test_the_answerable_count_is_recomputed_when_the_states_change():
     assert "view.unknown" not in counter, (
         "the count is read from the layout fetch, so it cannot follow a poll"
     )
+
+
+def test_the_renderer_collides_a_wire_with_the_boards_components():
+    """The PCB slab was the whole board until there were components on it.
+
+    `refreshColliders` pushed one box, from `pcb`, and that was right while a
+    board was an extruded slab. OH-75 drew a DIP-28 and six headers on the Uno
+    and the collider set silently became a description of a board that no
+    longer existed.
+
+    The model states its own boxes -- `tools/compose_board_3d.py` measures them
+    to check the components land on the board anyway -- so the renderer places
+    them rather than deriving them from a mesh it would have to walk.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    colliders = source.split("function refreshColliders", 1)[1].split("\n}", 1)[0]
+    assert "view.solids" in colliders, (
+        "the board's own components are not colliders, so a wire goes through them"
+    )
+    # **The frame change lives in `boardSolid`, not here.** It was inline when
+    # this test was written, and then the PCB slab was moved into the same
+    # mechanism -- so both go through one place now and this looks there. That
+    # is the fix that mattered: the slab used to be built in scene coordinates
+    # of its own and ended up 4.5 units from the board it was supposed to be.
+    assert "boardSolid(view.slab)" in colliders, (
+        "the PCB does not go through the same frame conversion as the "
+        "components, which is how it ended up 4.5 units off the board"
+    )
+    frame = source.split("function boardSolid(solid) {", 1)[1].split("\n}", 1)[0]
+    assert "matrixWorld" in frame, (
+        "the boxes are in the model's frame and must be moved into the scene's"
+    )
+    # Emitted by the composer and read here: one name, so a rename breaks
+    # loudly rather than silently dropping every component collider.
+    composer = STATIC.parents[1] / "tools" / "compose_board_3d.py"
+    assert '"solids"' in composer.read_text(encoding="utf-8")
+
+
+def test_a_bench_part_is_drawn_at_the_boards_own_scale():
+    """8 px/mm is what a GENERATED board JSON uses, and the Uno's was traced.
+
+    `placeModel` learned to derive the scale from the pad field in OH-76;
+    `addPart` kept the constant, so a 5 mm LED was drawn 7.1 mm across beside a
+    board drawn at its real 68.58 -- exactly the 8 / 5.638 the two scales
+    differ by. One number now, decided when the board is drawn.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    bench = source.split("export async function addPart", 1)[1].split("\n}", 1)[0]
+    assert "view.mmScale" in bench, "the bench still uses its own scale"
+    assert "PX_PER_MM * SCALE" not in bench, (
+        "addPart hard-codes the generated-board scale again"
+    )
+    # And the one place it is decided has to be the one place a model changes it.
+    placed = source.split("function placeModel", 1)[1].split("\n}", 1)[0]
+    assert "view.mmScale = scale" in placed
+
+
+def test_the_renderer_can_report_how_far_a_wire_is_inside_something():
+    """A wire over a chip and a wire through it are the same picture.
+
+    The screenshot that made this look fixed was taken before the colliders
+    existed. `penetration` is the number that is not fooled by the camera, and
+    it is exported for exactly that reason -- measured 2.248 mm for a wire laid
+    straight from pad 12 through the DIP-28, and 0.000 once it settles.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    assert "export function penetration()" in source
+    body = source.split("export function penetration()", 1)[1].split("\n}", 1)[0]
+    assert "rope.colliders" in body, (
+        "it must measure against the set the rope actually solved against, or "
+        "it reports a fault on every wire's own part"
+    )

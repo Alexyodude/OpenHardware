@@ -722,3 +722,82 @@ def test_compose_refuses_a_board_whose_part_faces_the_wrong_way(monkeypatch):
     monkeypatch.setattr(compose, "CORRESPONDENCE", wrong)
     with pytest.raises(SystemExit, match="X1"):
         compose.compose(compose.COMPOSITIONS[0], compose.DEFLECTION, check=True)
+
+
+# --- what a wire may not pass through (OH-78) --------------------------------------
+
+
+def test_the_model_states_a_box_around_every_component_it_draws():
+    """A wire's physics knows about boxes, not about meshes.
+
+    `webui/static/board3d.js` collides a rope against the PCB slab and the
+    parts on the bench. The fifteen components OH-75 and OH-76 put ON the board
+    were geometry in the mesh and nothing else, so a wire went straight through
+    the DIP-28 and all six headers -- invisible until there were components to
+    pass through, and not a line of the collider code was wrong.
+
+    Measured rather than asserted by eye: a fresh wire laid straight from pad
+    12 to an LED sits 2.248 mm inside the DIP-28, and 0.000 mm once it settles.
+    """
+    glb = REPO / "webui" / "static" / "models" / "Arduino-Uno.glb"
+    if not glb.is_file():
+        pytest.skip("SKIPPED: run python tools/compose_board_3d.py first")
+    from tools.import_3d_model import read_extras
+
+    extras = read_extras(glb)
+    solids = extras["solids"]
+    drawn = extras["drawn"]
+    assert len(solids) == len(drawn), (
+        f"{len(drawn)} components drawn and {len(solids)} boxes emitted"
+    )
+    named = {solid["name"] for solid in solids}
+    assert {"ZU4", "IOH", "IOL", "POWER", "AD", "X1", "X2"} <= named, named
+
+    for solid in solids:
+        low, high = solid["min"], solid["max"]
+        assert all(a < b for a, b in zip(low, high)), solid
+        # Nothing on this board is a metre across or a micron thick.
+        for axis in range(3):
+            span = high[axis] - low[axis]
+            assert 0.05 < span < 80.0, f"{solid['name']} spans {span} on {axis}"
+
+
+def test_each_component_box_actually_contains_its_component():
+    """A box that does not enclose the mesh it names would stop nothing.
+
+    The boxes are emitted from the same placed vertices everything else here
+    measures, so this is a check that the right mesh was measured -- not a
+    check of arithmetic.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    spec = compose.COMPOSITIONS[0]
+    _brd()
+    board = eagle.read_board(spec.brd)
+    header_pads = [pad for name in spec.headers
+                   for pad in board.element(name).pads]
+    hx = [pad.x_mm for pad in header_pads]
+    hy = [pad.y_mm for pad in header_pads]
+    centre = ((min(hx) + max(hx)) / 2, (min(hy) + max(hy)) / 2)
+
+    by_package = {c.package: c for c in compose.CORRESPONDENCE}
+    cache: dict[str, tuple[object, object]] = {}
+    checked = 0
+    for element in board.elements:
+        component = by_package.get(element.package)
+        if component is None:
+            continue
+        if component.slug not in cache:
+            cache[component.slug] = compose.component_mesh(
+                component, compose.DEFLECTION)
+        mesh, _box = cache[component.slug]
+        put = compose.place(mesh, element, component.turn,
+                            spec.thickness_mm, centre)
+        solid = compose.box_around(element.name, put)
+        for _colour, (positions, _n, _i) in put.groups.items():
+            for at in range(0, len(positions), 3):
+                for axis in range(3):
+                    value = positions[at + axis]
+                    assert solid["min"][axis] - 1e-3 <= value, element.name
+                    assert value <= solid["max"][axis] + 1e-3, element.name
+        checked += 1
+    assert checked == 15, f"only {checked} components were boxed"
