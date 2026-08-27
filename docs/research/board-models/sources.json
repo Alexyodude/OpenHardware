@@ -1,0 +1,155 @@
+{
+  "measured": "2026-08-28",
+  "method": "the wiki's own sitemap.xml (2,766 pages), filtered per chip, each page fetched and every files.seeedstudio.com link classified; sizes are Content-Length from a HEAD request",
+  "control": {
+    "why": "These four chips are already imported by tools/import_3d_model.py. The SAME query finds all four, which is what makes the eight negative results evidence about Seeed rather than about the scraper.",
+    "found": {
+      "SAMD21": {
+        "url": "https://files.seeedstudio.com/wiki/Seeeduino-XIAO/res/seeeduino-xiao-samd21-3d-model.zip",
+        "status": 200,
+        "bytes": 18255477
+      },
+      "RP2040": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO-RP2040/res/seeed-studio-xiao-rp2040-3d-model.zip",
+        "status": 200,
+        "bytes": 3399090
+      },
+      "ESP32-S3": {
+        "url": "https://files.seeedstudio.com/wiki/SeeedStudio-XIAO-ESP32S3/res/seeed-studio-xiao-esp32s3-3d_model.zip",
+        "status": 200,
+        "bytes": 4382912
+      },
+      "nRF52840": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO-BLE/seeed-studio-xiao-nrf52840-3d-model.zip",
+        "status": 200,
+        "bytes": 8849412
+      }
+    }
+  },
+  "chips": {
+    "ESP32-C3": {
+      "boards": [
+        "XIAO-ESP32-C3-DIP",
+        "XIAO-ESP32-C3-DIP-SMD",
+        "XIAO-ESP32-C3-SMD"
+      ],
+      "mesh": null,
+      "pcb": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO_WiFi/Resources/XIAO_ESP32C3_v1.3_KiCad_260116.zip",
+        "status": 200,
+        "bytes": 339671
+      },
+      "outline": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO_WiFi/Resources/XIAO-ESP32C3-DXF.zip",
+        "status": 200,
+        "bytes": 115093
+      },
+      "schematic": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO_WiFi/Resources/XIAO_ESP32C3_v1.3_SCH_260116.pdf",
+        "status": 200,
+        "bytes": 424362
+      },
+      "modelable": true
+    },
+    "ESP32-C5": {
+      "boards": [
+        "XIAO-ESP32-C5-DIP",
+        "XIAO-ESP32-C5-SMD"
+      ],
+      "mesh": null,
+      "modelable": false
+    },
+    "ESP32-C6": {
+      "boards": [
+        "XIAO-ESP32-C6-DIP",
+        "XIAO-ESP32-C6-SMD"
+      ],
+      "mesh": null,
+      "pcb": {
+        "url": "https://files.seeedstudio.com/wiki/SeeedStudio-XIAO-ESP32C6/XIAO_ESP32_C6_v1.0_SCH&PCB_260114.zip",
+        "status": 200,
+        "bytes": 1126886
+      },
+      "schematic": {
+        "url": "https://files.seeedstudio.com/wiki/SeeedStudio-XIAO-ESP32C6/XIAO_ESP32_C6_v1.0_SCH_260114.pdf",
+        "status": 200,
+        "bytes": 614070
+      },
+      "modelable": true
+    },
+    "MG24": {
+      "boards": [
+        "XIAO-MG24-DIP",
+        "XIAO-MG24-SMD"
+      ],
+      "mesh": null,
+      "pcb": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO_MG24/Getting_Start/XIAO_MG24_v1.0_KiCad_260114.zip",
+        "status": 200,
+        "bytes": 1583091
+      },
+      "modelable": true
+    },
+    "RP2350": {
+      "boards": [
+        "XIAO-RP2350-DIP",
+        "XIAO-RP2350-SMD"
+      ],
+      "mesh": null,
+      "pcb": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO-RP2350/res/XIAO_RP2350_v1.0_SCH&PCB_240626.zip",
+        "status": 200,
+        "bytes": 1145969
+      },
+      "outline": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO-RP2350/res/XIAO-RP2350-dimension-v1.0.dxf",
+        "status": 200,
+        "bytes": 1418153
+      },
+      "modelable": true
+    },
+    "STM32C5": {
+      "boards": [
+        "XIAO-XIAO STM32C5-SMD"
+      ],
+      "mesh": null,
+      "modelable": false
+    },
+    "nRF54LM20A": {
+      "boards": [
+        "XIAO-nRF54LM20A-DIP",
+        "XIAO-nRF54LM20A-SMD"
+      ],
+      "mesh": null,
+      "pcb": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO_nRF54LM20A/getting_start/RES/XIAO_nRF54LM20A_V1.0_SCH&PCB_260508.zip",
+        "status": 200,
+        "bytes": 4307651
+      },
+      "schematic": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO_nRF54LM20A/getting_start/RES/XIAO_nRF54LM20A_Schematic.pdf",
+        "status": 200,
+        "bytes": 6158379
+      },
+      "modelable": true
+    },
+    "nRF54L15": {
+      "boards": [
+        "XIAO-nRF54l15-DIP",
+        "XIAO-nRF54l15-SMD"
+      ],
+      "mesh": null,
+      "pcb": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO_nRF54L15/Getting_Start/nRF54L15_KICAD.zip",
+        "status": 200,
+        "bytes": 1305099
+      },
+      "schematic": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO_nRF54L15/Getting_Start/nRF54L15_Schematic.pdf",
+        "status": 200,
+        "bytes": 862748
+      },
+      "modelable": true
+    }
+  }
+}
