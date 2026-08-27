@@ -796,12 +796,22 @@ def test_the_ambient_light_was_replaced_rather_than_added_to():
     )
     # **Constructions, not mentions, and the difference has cost a session
     # already.** This counted the bare word `DirectionalLight` and went red the
-    # moment a comment above `KEY_FROM` explained how a directional light takes
-    # its direction from position minus target -- a true sentence, worth
-    # keeping, and nothing to do with how many lights are in the scene. The
-    # same shape of tripwire fired on `NEUTRAL_LIGHT` on 2026-08-27. What the
-    # test means is "one light is built", so that is what it counts now.
-    assert source.count("new THREE.DirectionalLight") == 1
+    # moment a comment explained how a directional light takes its direction
+    # from position minus target -- a true sentence, worth keeping, and nothing
+    # to do with how many lights are in the scene. The same shape of tripwire
+    # fired on `NEUTRAL_LIGHT` on 2026-08-27.
+    #
+    # **And it no longer counts to one, because the answer is now three.**
+    # OH-86 samples the hemisphere with three shadowed lights rather than
+    # lighting from one direction and calling the rest ambient. What survives
+    # of the original rule is the part that was ever true: there is no
+    # `AmbientLight` beside the environment, and every directional light in the
+    # scene comes from the one table that says how many there are, so a fourth
+    # cannot be added anywhere else.
+    assert source.count("new THREE.DirectionalLight") == 1, (
+        "a light is built outside the LIGHTS table"
+    )
+    assert "LIGHTS.map((sample) =>" in source
 
 
 # --- a layout that reads more than the viewport's width ----------------------
@@ -931,7 +941,7 @@ def test_the_scene_casts_shadows_and_everything_in_it_takes_part():
     source = RENDERER.read_text(encoding="utf-8")
     assert "view.renderer.shadowMap.enabled = true;" in source
     assert "PCFSoftShadowMap" in source
-    assert "key.castShadow = true;" in source
+    assert "light.castShadow = true;" in source
     fit = source.split("function castShadows(box, centre) {", 1)[1].split("\n}", 1)[0]
     assert "object.castShadow = true;" in fit
     assert "object.receiveShadow = true;" in fit
@@ -955,6 +965,14 @@ def test_the_shadow_camera_is_fitted_to_the_scene_and_not_to_a_number():
     source = RENDERER.read_text(encoding="utf-8")
     fit = source.split("function castShadows(box, centre) {", 1)[1].split("\n}", 1)[0]
     assert "box.getBoundingSphere" in fit
+    # **All of them, and this is checked because it survived a mutation.**
+    # Fitting only the first leaves the other two with three.js's default 5x5
+    # frustum, which on a 68 mm board covers a tenth of it: their shadows would
+    # appear over a small square in the middle and stop, and every assertion
+    # below would still pass because the assignments are all still there.
+    assert "for (const light of view.lights) {" in fit, (
+        "the frustum is fitted for some of the lights rather than all of them"
+    )
     for edge in ("lens.left", "lens.right", "lens.top", "lens.bottom",
                  "lens.near", "lens.far"):
         assert f"{edge} = " in fit, f"{edge} is left at its default"
@@ -962,11 +980,11 @@ def test_the_shadow_camera_is_fitted_to_the_scene_and_not_to_a_number():
         "a frustum changed without this is a frustum the GPU never hears about"
     )
     # The light is moved with it, or the frustum points somewhere else.
-    assert "view.key.position.set" in fit
-    assert "view.key.target.position.copy(centre);" in fit
+    assert "light.position.set" in fit
+    assert "light.target.position.copy(centre);" in fit
     # And its target has to be in the scene at all, or it keeps the identity
     # matrix and the light aims at the origin whatever this sets.
-    assert "view.scene.add(key.target);" in source
+    assert "view.scene.add(light.target);" in source
 
 
 def test_the_shadow_bias_is_stated_in_millimetres():
@@ -980,8 +998,8 @@ def test_the_shadow_bias_is_stated_in_millimetres():
     and thinner than a DIP-28's leg.
     """
     source = RENDERER.read_text(encoding="utf-8")
-    assert "key.shadow.normalBias = SHADOW_BIAS_MM;" in source
-    assert "key.shadow.bias" not in source, (
+    assert "light.shadow.normalBias = SHADOW_BIAS_MM;" in source
+    assert "shadow.bias" not in source, (
         "a clip-space bias on a frustum that is refitted per board is a number "
         "that cannot be right twice"
     )
@@ -1043,3 +1061,91 @@ def test_the_room_has_no_hard_edge_anywhere_in_it():
     assert room.count("(3 - 2 * ") == 2, (
         "one of the two gradients is a straight ramp"
     )
+
+
+# --- the hemisphere, sampled three times ------------------------------------
+
+
+def _numbers(source: str, name: str) -> float:
+    """One `const NAME = <number>;` out of the renderer."""
+    found = re.search(rf"^const {name} = ([\d.]+);", source, re.MULTILINE)
+    assert found, f"no {name} in the renderer"
+    return float(found.group(1))
+
+
+def test_every_light_in_the_scene_casts_a_shadow():
+    """**A light that does not cast is a light no crevice can hide from.**
+
+    This is the whole mechanism of OH-86. An image-based light arrives from
+    every direction at once, so it casts nothing and darkens nothing: the gap
+    under a header shroud was lit exactly as brightly as open board because the
+    illumination reaching it did not come from a direction anything could block.
+
+    So the fill is directions now, and each one is blocked separately. Three is
+    a coarse estimate of an integral that a per-pixel method computes exactly,
+    and the source says so rather than calling it ambient occlusion.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    table = source.split("const LIGHTS = [", 1)[1].split("];", 1)[0]
+    entries = re.findall(r"\{[^}]*share:\s*([\d.]+)\s*\}", table)
+    assert len(entries) >= 2, (
+        "one light is one direction, which is what this ticket replaced"
+    )
+    # Built in one place, so `castShadow` cannot be set on some of them.
+    built = source.split("view.lights = LIGHTS.map", 1)[1].split("});", 1)[0]
+    assert "light.castShadow = true;" in built
+
+
+def test_the_lights_shares_add_up_to_one_whole_light():
+    """So the three can be rebalanced without the scene changing brightness.
+
+    `share` times `LIGHT_TOTAL` is each light's intensity. If the shares summed
+    to something else, moving energy between them would also move the exposure,
+    and the next person to adjust the balance would be adjusting two things.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    table = source.split("const LIGHTS = [", 1)[1].split("];", 1)[0]
+    shares = [float(value) for value in re.findall(r"share:\s*([\d.]+)", table)]
+    assert shares, "no shares in the table"
+    assert abs(sum(shares) - 1.0) < 1e-9, f"the shares sum to {sum(shares)}"
+
+
+def test_the_lights_point_down_at_the_board_and_not_up_at_it():
+    """A bench is lit from above, and a light from below is a stage effect.
+
+    Every direction in the table is a place the light comes FROM, so its `y`
+    has to be positive -- and the flattest of them still needs to be well clear
+    of the horizon, or a board 1.6 mm thick starts casting a shadow the length
+    of itself across the bench.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    table = source.split("const LIGHTS = [", 1)[1].split("];", 1)[0]
+    heights = [float(value) for value in re.findall(r"y:\s*(-?[\d.]+)", table)]
+    assert heights, "no directions in the table"
+    for height in heights:
+        assert height > 0.3, f"a light at y={height} is nearly edge-on"
+
+
+def test_the_room_is_dimmed_by_exactly_what_the_lights_gained():
+    """**The trade this ticket is, in one assertion.**
+
+    Every unit of brightness that lives in the environment is a unit no shadow
+    can ever subtract from, so the mechanism is moving some of it into lights
+    that cast. What it must not do is turn the room off: the environment is the
+    only thing a metal has to reflect, and at zero `metalness` is a lie again --
+    which is the argument OH-82 made when it built the room in the first place.
+
+    Measured rather than asserted by eye: at 0.30 the capacitor lids come out
+    duller than the moulded plastic beside them, which inverts the one
+    relationship anybody can check against a real board.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    assert "view.scene.environmentIntensity = ENVIRONMENT_SHARE;" in source
+    share = _numbers(source, "ENVIRONMENT_SHARE")
+    assert 0.0 < share < 1.0, (
+        f"{share} either turns the room off or leaves it undimmed, and the "
+        f"whole change is that it is neither"
+    )
+    # And the lights carry more than they did when the room was undimmed, or
+    # the scene simply got darker rather than being re-lit.
+    assert _numbers(source, "LIGHT_TOTAL") > 2.4

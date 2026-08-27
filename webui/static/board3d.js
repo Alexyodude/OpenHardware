@@ -93,17 +93,70 @@ const CAMERA_PULL = 1.5;
 //: direction is what was meant; `frameScene` multiplies it by the scene's own
 //: radius. High, over the reader's left shoulder, which is where a bench lamp
 //: is and where the eye expects a shadow to fall away from.
-const KEY_FROM = { x: 0.42, y: 0.84, z: 0.35 };
-
-//: How hard the key light is, against the environment it shares the scene with.
+//: The directions this scene is lit from, and EVERY ONE OF THEM CASTS.
 //:
-//: **Raised from 1.4 the day the key started casting, and the two are one
-//: change.** An image-based light comes from every direction at once, so it
-//: casts nothing and darkens no crevice; the only illumination in this scene
-//: that a shadow can subtract from is this one. At 1.4 the shadows arrived and
-//: were barely legible against a room that bright, which is a shadow map paid
-//: for and not spent.
-const KEY_STRENGTH = 2.4;
+//: **This is the hemisphere sampled three times, and it must not be called
+//: ambient occlusion.** It is the same integral -- how much of the sky a
+//: surface can see -- estimated with three samples instead of none. A crevice
+//: hidden from all three goes dark; one open to the side keeps that light. It
+//: is crude where a per-pixel method is exact, and it is honest about which it
+//: is.
+//:
+//: The alternative that was NOT taken is worth the two lines: baking occlusion
+//: into vertex colours needs somewhere to write it, and the composed Arduino
+//: Uno's PCB is 108 vertices over 68.6 x 53.3 mm -- one every six millimetres,
+//: measured 2026-08-28. The 0.3 mm gap beside a DIP-28's leg has nowhere to
+//: live. Its components have the density; the thing they sit on does not, and
+//: it is the thing they sit on that needs the shadow.
+//:
+//: `share` sums to one and is multiplied by `LIGHT_TOTAL`, so the three can be
+//: rebalanced without the scene changing brightness. The first is the key --
+//: high, over the reader's left shoulder, which is where a bench lamp is. The
+//: second is opposite and lower, so the side the key cannot reach is not black.
+//: The third is shallow and from the front, which is what stops a component's
+//: near face reading as a silhouette.
+const LIGHTS = [
+  { x: 0.42, y: 0.84, z: 0.35, share: 0.50 },
+  { x: -0.62, y: 0.58, z: -0.52, share: 0.28 },
+  { x: -0.18, y: 0.46, z: 0.87, share: 0.22 },
+];
+
+//: Their intensities added together.
+//:
+//: **Raised from the key's own 2.4 because the environment gave some back.**
+//: An image-based light comes from every direction at once, so it casts
+//: nothing and darkens no crevice: every unit of brightness that lives there
+//: is a unit no shadow can ever subtract from. Moving some of it here is the
+//: whole mechanism, and `ENVIRONMENT_SHARE` is the other half of the trade.
+const LIGHT_TOTAL = 5.2;
+
+//: How much of the room's own brightness survives, as `scene.environmentIntensity`.
+//:
+//: **Not zero, and it must never be.** The environment is what a metal
+//: reflects -- turn it down to nothing and `metalness` is a lie again, which is
+//: the whole argument OH-82 made. What it may not do is supply so much of the
+//: light that a shadowed crevice is still fully lit.
+//:
+//: Four settings were rendered and measured on a 4x crop of the DIP-28 where it
+//: meets the board, `LIGHT_TOTAL` raised each time to hold the exposure. The
+//: mean of the darkest tenth is the statistic a few hundred crevice pixels can
+//: actually move, and it is given against the crop's own mean so that dimming
+//: the whole picture does not read as a win:
+//:
+//:      share    darkest tenth    over the crop's mean
+//:      (before)     42.63              0.269
+//:      0.62         37.03              0.244
+//:      0.45         35.54              0.234
+//:      0.30         33.91              0.223
+//:
+//: **The knee is at 0.45, and the step past it is where this stops being free.**
+//: Two thirds of the available darkening has happened by then; the remaining
+//: third costs the metals the only thing they have to reflect, and at 0.30 the
+//: capacitor lids and the barrel jack come out visibly duller than the moulded
+//: plastic beside them -- which inverts the one relationship anybody can check
+//: against a real board. That last sentence is a judgement and is written as
+//: one. The numbers above it are not.
+const ENVIRONMENT_SHARE = 0.45;
 
 //: The shadow map's resolution. 2,048 across a bounding sphere of about 45 mm
 //: is a texel every 44 um, which is finer than the 0.05 mm chord error every
@@ -260,7 +313,7 @@ const view = {
   scene: null,
   camera: null,
   controls: null,
-  key: null,         // the one directional light, and the one that casts
+  lights: null,      // the three that light the scene, and all three cast
   board: null,
   model: null,       // the vendor's mesh, once it has arrived
   slab: null,        // the PCB alone, for collision; see refreshColliders
@@ -521,24 +574,28 @@ export function mount(canvas) {
   // alone makes the picture worse.
   //
   view.scene.environment = studio(view.renderer);
-  const key = new THREE.DirectionalLight(NEUTRAL_LIGHT, KEY_STRENGTH);
-  key.position.copy(KEY_FROM);
-  key.castShadow = true;
-  key.shadow.mapSize.set(SHADOW_TEXELS, SHADOW_TEXELS);
-  // **`normalBias` and not `bias`, and the units are why.** `bias` is a depth
-  // offset in the shadow camera's clip space, so its right value moves with
-  // that camera's near and far -- and this one is refitted to the scene every
-  // time a board or a part changes size. `normalBias` is in WORLD units and
-  // this scene's world units are millimetres, so 0.06 is 60 um: larger than a
-  // shadow texel across the Uno, small enough not to lift a shadow off the leg
-  // that casts it.
-  key.shadow.normalBias = SHADOW_BIAS_MM;
-  // A directional light aims at its target, and a target that is never added
-  // to the scene keeps its default matrix -- so this points at the origin no
-  // matter where `frameScene` moves it. Adding it is the whole fix.
-  view.scene.add(key.target);
-  view.scene.add(key);
-  view.key = key;
+  view.scene.environmentIntensity = ENVIRONMENT_SHARE;
+  view.lights = LIGHTS.map((sample) => {
+    const light = new THREE.DirectionalLight(NEUTRAL_LIGHT,
+                                             LIGHT_TOTAL * sample.share);
+    light.userData.from = sample;
+    light.castShadow = true;
+    light.shadow.mapSize.set(SHADOW_TEXELS, SHADOW_TEXELS);
+    // **`normalBias` and not `bias`, and the units are why.** `bias` is a
+    // depth offset in the shadow camera's clip space, so its right value moves
+    // with that camera's near and far -- and these are refitted to the scene
+    // every time a board or a part changes size. `normalBias` is in WORLD
+    // units and this scene's world units are millimetres, so 0.06 is 60 um:
+    // larger than a shadow texel across the Uno, small enough not to lift a
+    // shadow off the leg that casts it.
+    light.shadow.normalBias = SHADOW_BIAS_MM;
+    // A directional light aims at its target, and a target that is never added
+    // to the scene keeps its default matrix -- so it would point at the origin
+    // no matter where `frameScene` moves it. Adding it is the whole fix.
+    view.scene.add(light.target);
+    view.scene.add(light);
+    return light;
+  });
 
   view.bench = new THREE.Group();
   view.scene.add(view.bench);
@@ -632,23 +689,26 @@ function frameScene() {
  * change cannot be forgotten by the seventh.
  */
 function castShadows(box, centre) {
-  if (!view.key) return;
+  if (!view.lights) return;
   const radius = box.getBoundingSphere(new THREE.Sphere()).radius || 1;
 
-  view.key.target.position.copy(centre);
-  view.key.position.set(centre.x + KEY_FROM.x * radius * 3,
-                        centre.y + KEY_FROM.y * radius * 3,
-                        centre.z + KEY_FROM.z * radius * 3);
-  const lens = view.key.shadow.camera;
-  // A little wider than the sphere, so a part dropped on the bench at the edge
-  // of the frame still has somewhere to cast.
-  lens.left = -radius * 1.2;
-  lens.right = radius * 1.2;
-  lens.top = radius * 1.2;
-  lens.bottom = -radius * 1.2;
-  lens.near = radius * 0.5;
-  lens.far = radius * 6;
-  lens.updateProjectionMatrix();
+  for (const light of view.lights) {
+    const from = light.userData.from;
+    light.target.position.copy(centre);
+    light.position.set(centre.x + from.x * radius * 3,
+                       centre.y + from.y * radius * 3,
+                       centre.z + from.z * radius * 3);
+    const lens = light.shadow.camera;
+    // A little wider than the sphere, so a part dropped on the bench at the
+    // edge of the frame still has somewhere to cast.
+    lens.left = -radius * 1.2;
+    lens.right = radius * 1.2;
+    lens.top = radius * 1.2;
+    lens.bottom = -radius * 1.2;
+    lens.near = radius * 0.5;
+    lens.far = radius * 6;
+    lens.updateProjectionMatrix();
+  }
 
   view.scene.traverse((object) => {
     if (!object.isMesh) return;
