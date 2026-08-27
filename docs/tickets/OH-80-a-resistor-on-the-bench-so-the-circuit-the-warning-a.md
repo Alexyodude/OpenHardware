@@ -4,9 +4,7 @@ title: A resistor on the bench, so the circuit the warning asks for can be built
 status: open
 priority: P3
 created: '2026-08-27'
-touches:
-- tools/import_3d_model.py
-- tests/rules/test_import_3d_model.py
+touches: []
 ---
 
 WHAT OH-79 LEFT, AND IT IS VISIBLE ON EVERY BENCH. `webui/static/circuit.js`
@@ -44,3 +42,16 @@ carries its value in the panel rather than on the mesh.
 DONE WHEN a 5 mm LED wired D13 -> resistor -> GND lights, the page reports a
 current inside every rating the board publishes, and no warning is raised --
 and when the part's own label does not claim a value its picture contradicts.
+
+**Note 2026-08-27:** NARROWED OFF EVERY PATH, and this ticket re-claims them the
+day it starts: `tools/import_3d_model.py` and `tests/rules/test_import_3d_model.py`.
+
+It was filed claiming both, and OH-81 then needed the first of them to give the
+LED an absolute maximum -- so two open tickets claimed one file and
+`test_this_repositorys_tickets_parse_and_do_not_collide` failed the gate. That
+is the check working: the collision was latent from the moment this was filed
+and nothing would have surfaced it until a second ticket wanted the file.
+
+**The general shape, worth remembering when filing a follow-up:** a ticket that
+is not going to be started yet should claim nothing. A claim is a lock, and a
+lock taken for work nobody is doing only ever blocks work somebody is.
