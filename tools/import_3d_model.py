@@ -846,6 +846,38 @@ def tessellate(shape, styles, deflection: float, frame: Frame) -> Mesh:
     return Mesh(groups=groups)
 
 
+def linear(channel: int) -> float:
+    """One sRGB byte as the linear value glTF's `baseColorFactor` is defined in.
+
+    **This was `channel / 255` and that is a different colour.** The glTF
+    specification says `baseColorFactor` is linear, three.js reads it as
+    linear, and a CAD file's colours are sRGB -- so every albedo in every model
+    this repository has ever written was too bright, and DIFFERENTLY too bright
+    per channel because the transfer function is a curve. That flattens a
+    colour toward grey, which is what was reported: "the board is still matte
+    and greyish".
+
+    Measured on the corpus, written against what it should have been:
+
+        Uno solder mask #313d63   6.3x 5.1x 3.1x too bright, saturation .51 -> .75
+        SAMD21 mask     #116517  11.9x 3.0x 10.5x           saturation .83 -> .96
+        gold contact    #b58136   1.5x 2.3x  5.7x           saturation .70 -> .92
+        black epoxy     #050505  12.9x each                 (grey, not black)
+
+    **And the repository already had the right answer twenty lines away.**
+    `readPalette` in `webui/static/board3d.js` builds its colours from strings
+    with `new THREE.Color("#313d63")`, and `setStyle` applies this same
+    function -- so the extruded slab has been correct since it was written
+    while the composed board beside it was six times too bright. Two answers to
+    one question, disagreeing quietly.
+
+    The constants are the sRGB standard's own: the 0.0031308 knee lives in the
+    other direction, so the threshold here is 0.04045.
+    """
+    value = channel / 255
+    return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+
+
 def weld_seams(positions: list[float], normals: list[float]) -> int:
     """Give coincident vertices facing the same way one shared normal.
 
@@ -1020,9 +1052,9 @@ def write_glb(mesh: Mesh, path: pathlib.Path, chip: str, source: str,
         accessors.append({"bufferView": index_view, "componentType": 5125,
                           "count": len(indices), "type": "SCALAR"})
 
-        red = int(colour[1:3], 16) / 255
-        green = int(colour[3:5], 16) / 255
-        blue = int(colour[5:7], 16) / 255
+        red = linear(int(colour[1:3], 16))
+        green = linear(int(colour[3:5], 16))
+        blue = linear(int(colour[5:7], 16))
         # **Per colour, not one constant for everything.** Until OH-82 these
         # two were literals here, so the gold header contacts, the nickel USB
         # shell, the tin legs, the black epoxy and the solder mask were all the

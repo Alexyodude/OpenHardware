@@ -143,7 +143,7 @@ const LIGHTS = [
 //: ticket bought survives the rescale intact. Measured after: the tonal
 //: entropy of the close-up went 4.855 to 5.635 bits and the darkest tenth of
 //: the DIP-28 crop fell from 0.244 of its mean to 0.170.
-const LIGHT_TOTAL = 3.2;
+const LIGHT_TOTAL = 7.0;
 
 //: How much of the room's own brightness survives, as `scene.environmentIntensity`.
 //:
@@ -177,7 +177,7 @@ const LIGHT_TOTAL = 3.2;
 //: plastic beside them -- which inverts the one relationship anybody can check
 //: against a real board. That last sentence is a judgement and is written as
 //: one. The numbers above it are not.
-const ENVIRONMENT_SHARE = 0.28;
+const ENVIRONMENT_SHARE = 0.61;
 
 //: The shadow map's resolution. 2,048 across a bounding sphere of about 45 mm
 //: is a texel every 44 um, which is finer than the 0.05 mm chord error every

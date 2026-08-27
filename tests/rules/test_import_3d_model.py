@@ -847,3 +847,120 @@ def test_the_shipped_board_carries_its_coat_and_nothing_else_does():
     coated = {material["name"] for material in document["materials"]
               if "KHR_materials_clearcoat" in material.get("extensions", {})}
     assert coated == {"#313d63"}, coated
+
+
+# --- an albedo is linear, and a CAD file's colours are not ------------------
+
+
+def test_an_srgb_byte_becomes_the_linear_value_gltf_asks_for():
+    """**This was `channel / 255`, which is a different colour.**
+
+    glTF defines `baseColorFactor` as linear and three.js reads it as linear,
+    so writing an sRGB byte there made every albedo in every model too bright
+    -- and differently too bright per channel, because the transfer function is
+    a curve. That is what flattens a colour toward grey.
+
+    Checked at the ends, at the knee, and at the standard's own midpoint: 0.5
+    sRGB is 0.2140 linear, which is the number this function exists to produce
+    instead of 0.5.
+    """
+    from tools.import_3d_model import linear
+
+    assert linear(0) == 0.0
+    assert linear(255) == pytest.approx(1.0)
+    # Below the knee the curve is a straight 1/12.92, and 10/255 is below it.
+    assert linear(10) == pytest.approx((10 / 255) / 12.92)
+    # Above it, the power law. **0.2140 is the number everyone quotes and it is
+    # the answer for an input of exactly 0.5** -- byte 128 is 0.50196, which
+    # comes out at 0.21586. The first version of this test asserted 0.2140 for
+    # byte 128 and failed: the constant was right for a different input, which
+    # is the same class of mistake as the bug being fixed.
+    assert linear(128) == pytest.approx(0.21586, abs=1e-5)
+    assert ((0.5 + 0.055) / 1.055) ** 2.4 == pytest.approx(0.2140, abs=5e-4)
+    assert linear(128) != pytest.approx(128 / 255, abs=0.05), (
+        "the conversion is not happening at all"
+    )
+    # It is a monotonic darkening: never brighter than the sRGB value it came
+    # from, and never negative.
+    for byte in range(0, 256, 7):
+        assert 0.0 <= linear(byte) <= byte / 255 + 1e-12
+
+
+def test_the_written_albedos_are_linear_and_not_the_bytes():
+    """The measurement that started this, on the file the page fetches.
+
+    The Arduino Uno's solder mask is #313d63. Written as bytes over 255 that is
+    (0.192, 0.239, 0.388) -- six, five and three times too bright, and half as
+    saturated as the colour actually is. The board came out matte and greyish
+    and it was reported twice.
+    """
+    model = REPO / "webui" / "static" / "models" / "Arduino-Uno.glb"
+    if not model.is_file():
+        pytest.skip("no composed Uno; run tools/compose_board_3d.py")
+    from tools.import_3d_model import linear
+
+    document, _body = _gltf(model)
+    for material in document["materials"]:
+        name = material["name"]
+        want = [linear(int(name[at:at + 2], 16)) for at in (1, 3, 5)]
+        got = material["pbrMetallicRoughness"]["baseColorFactor"][:3]
+        assert got == pytest.approx(want, abs=1e-6), name
+        raw = [int(name[at:at + 2], 16) / 255 for at in (1, 3, 5)]
+        if max(raw) > 0.05:
+            assert got != pytest.approx(raw, abs=1e-6), (
+                f"{name} is still the sRGB bytes"
+            )
+
+
+def test_black_epoxy_renders_black_rather_than_grey():
+    """The clearest single symptom, and the easiest to check.
+
+    #050505 is as near black as a vendor writes. As a byte over 255 it reached
+    the renderer as 0.0196 -- THIRTEEN TIMES its linear value -- so the DIP-28,
+    the barrel jack and every header shroud were grey plastic.
+    """
+    model = REPO / "webui" / "static" / "models" / "Arduino-Uno.glb"
+    if not model.is_file():
+        pytest.skip("no composed Uno; run tools/compose_board_3d.py")
+    document, _body = _gltf(model)
+    epoxy = next(material for material in document["materials"]
+                 if material["name"] == "#050505")
+    assert max(epoxy["pbrMetallicRoughness"]["baseColorFactor"][:3]) < 0.005
+
+
+def test_the_writer_converts_every_channel_and_not_just_the_file_on_disk(tmp_path):
+    """**That `linear` is right and that `write_glb` CALLS it are two claims.**
+
+    The tests above read the shipped `.glb`, which is generated and gitignored,
+    so removing the conversion from the writer leaves them all green against a
+    file that was built while it was still there. Caught by mutation twice now,
+    on the same shape of gap that `test_the_tessellator_welds_what_it_meshes`
+    exists to close for the weld.
+
+    Three different bytes, because a mutation that converts one channel and not
+    the others is a colour shift rather than a brightness one -- and that is the
+    harder version of this bug to see.
+    """
+    from tools.import_3d_model import Mesh, linear, write_glb
+
+    triangle = ([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+                [0, 1, 2])
+    colour = "#1a80f0"
+    out = tmp_path / "probe.glb"
+    write_glb(Mesh({colour: triangle}), out, "probe", "test", (1.0, 1.0, 1.0))
+
+    raw = out.read_bytes()
+    length, _kind = struct.unpack_from("<II", raw, 12)
+    document = json.loads(raw[20:20 + length].decode("utf-8"))
+    written = document["materials"][0]["pbrMetallicRoughness"]["baseColorFactor"]
+
+    want = [linear(int(colour[at:at + 2], 16)) for at in (1, 3, 5)]
+    assert written[:3] == pytest.approx(want, abs=1e-9)
+    # And each channel individually differs from the byte it came from, so a
+    # conversion applied to some of them fails here rather than passing.
+    for channel, (value, byte) in enumerate(
+            zip(written, [0x1a / 255, 0x80 / 255, 0xf0 / 255])):
+        assert abs(value - byte) > 0.01, (
+            f"channel {channel} is still the sRGB byte {byte:.4f}"
+        )
