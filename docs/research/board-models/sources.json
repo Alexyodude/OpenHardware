@@ -82,13 +82,19 @@
         "XIAO-MG24-DIP",
         "XIAO-MG24-SMD"
       ],
-      "mesh": null,
+      "mesh": {
+        "inside": "https://files.seeedstudio.com/wiki/XIAO_MG24/Getting_Start/XIAO_MG24_v1.0_KiCad_260114.zip",
+        "member": "202003990_XIAO_MG24_v1.0_SCH&PCB_260114/XIAO_MGM240S_KICAD_Prj.step",
+        "bytes": 4144806,
+        "found": "2026-08-29",
+        "how": "unzipped the PCB archive and read its file list"
+      },
       "pcb": {
         "url": "https://files.seeedstudio.com/wiki/XIAO_MG24/Getting_Start/XIAO_MG24_v1.0_KiCad_260114.zip",
         "status": 200,
         "bytes": 1583091
       },
-      "modelable": true
+      "modelable": "imported, not composed: the vendor publishes a mesh"
     },
     "RP2350": {
       "boards": [
@@ -120,7 +126,13 @@
         "XIAO-nRF54LM20A-DIP",
         "XIAO-nRF54LM20A-SMD"
       ],
-      "mesh": null,
+      "mesh": {
+        "inside": "https://files.seeedstudio.com/wiki/XIAO_nRF54LM20A/getting_start/RES/XIAO_nRF54LM20A_V1.0_SCH&PCB_260508.zip",
+        "member": "XIAO_nRF54LM20A_V1.0_SCH&PCB_260508/XIAO nRF54LM20A.step",
+        "bytes": 17170992,
+        "found": "2026-08-29",
+        "how": "unzipped the PCB archive and read its file list"
+      },
       "pcb": {
         "url": "https://files.seeedstudio.com/wiki/XIAO_nRF54LM20A/getting_start/RES/XIAO_nRF54LM20A_V1.0_SCH&PCB_260508.zip",
         "status": 200,
@@ -131,7 +143,7 @@
         "status": 200,
         "bytes": 6158379
       },
-      "modelable": true
+      "modelable": "imported, not composed: the vendor publishes a mesh"
     },
     "nRF54L15": {
       "boards": [
@@ -151,5 +163,7 @@
       },
       "modelable": true
     }
-  }
+  },
+  "corrected": "2026-08-29",
+  "correction": "The MG24 and nRF54LM20A meshes DO exist: each is a KiCad assembly export inside the archive this file lists under `pcb`. `measured`/`method` describe the 2026-08-28 survey, which classified the LINKS on each wiki page and never opened an archive -- so a mesh behind a link whose text says PCB was invisible to it, and the control could not catch that because all four known meshes are behind links whose text says model. Only the two `mesh` fields below were changed; every byte count is still the Content-Length the survey measured, and both were re-checked 2026-08-29 and are unchanged. See the README beside this file."
 }

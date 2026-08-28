@@ -209,6 +209,52 @@ MODELS: tuple[Model, ...] = (
         size=8_849_412,
         boards=("XIAO-nRF52840-DIP", "XIAO-nRF52840-SMD"),
     ),
+    # --- OH-93 5.1: two meshes that were filed as not existing --------------
+    #
+    # **These two archives are the PCB downloads, and the mesh is INSIDE
+    # them.** `docs/research/board-models/sources.json` records `"mesh": null`
+    # for both, and that survey was careful -- it ran a positive control that
+    # found all four models above at the exact URLs this table already held.
+    # What it could not see is that Seeed ship a KiCad assembly export beside
+    # the board file, under a link whose text says PCB.
+    #
+    # So the survey measured what it looked at, correctly, and looked at the
+    # wrong thing: **it classified the LINKS on each wiki page and never
+    # opened an archive.** That is the third shape of this same miss -- OH-29
+    # read GitHub when the files were on the wiki, OH-93 read a GitHub census
+    # that said Seeed publish no PCB, and this one read the wiki but only its
+    # surface. Both were found by unzipping the five PCB archives for a
+    # different reason entirely and reading the file list.
+    #
+    # Each holds exactly one `.step`, so `extract_step` takes them unchanged.
+    Model(
+        chip="MG24",
+        url="https://files.seeedstudio.com/wiki/XIAO_MG24/Getting_Start/"
+            "XIAO_MG24_v1.0_KiCad_260114.zip",
+        size=1_583_091,
+        boards=("XIAO-MG24-DIP", "XIAO-MG24-SMD"),
+    ),
+    # **This one's STEP header names the WRONG BOARD and the mesh is still
+    # right.** `FILE_NAME('XIAO nRF54l15.step', ...)`, and the assembly root
+    # is `XIAO nRF54l15 1` -- Seeed exported it from a project carrying the
+    # sibling's name. A header is not evidence, so it was settled by content:
+    #
+    #   * The STEP holds `RGB4P-0.65-1X1X0.85MM` and `USON8-0.5-3X2MM`. Both
+    #     boards' `.kicad_pcb` files were read and both packages are on the
+    #     nRF54LM20A and on NEITHER the nRF54L15 -- the L15 has no RGB LED and
+    #     no USON-8 flash at all.
+    #   * Its four board solids are named `XIAO nRF54LM20A_PCB`, `_pad`,
+    #     `_silkscreen` and `_soldermask`.
+    #
+    # Recorded because the cheap check -- read the header -- says the
+    # opposite of the true answer, and somebody will run it again.
+    Model(
+        chip="nRF54LM20A",
+        url="https://files.seeedstudio.com/wiki/XIAO_nRF54LM20A/getting_start/"
+            "RES/XIAO_nRF54LM20A_V1.0_SCH&PCB_260508.zip",
+        size=4_307_651,
+        boards=("XIAO-nRF54LM20A-DIP", "XIAO-nRF54LM20A-SMD"),
+    ),
 )
 
 
@@ -1821,6 +1867,12 @@ COMPOSED: tuple[tuple[str, str, str], ...] = (
     ("XIAO-ESP32-C3-DIP", "ESP32-C3", "XIAO-ESP32-C3-DIP"),
     ("XIAO-ESP32-C3-DIP-SMD", "ESP32-C3", "XIAO-ESP32-C3-DIP"),
     ("XIAO-ESP32-C3-SMD", "ESP32-C3", "XIAO-ESP32-C3-DIP"),
+    ("XIAO-ESP32-C6-DIP", "ESP32-C6", "XIAO-ESP32-C6-DIP"),
+    ("XIAO-ESP32-C6-SMD", "ESP32-C6", "XIAO-ESP32-C6-DIP"),
+    ("XIAO-RP2350-DIP", "RP2350", "XIAO-RP2350-DIP"),
+    ("XIAO-RP2350-SMD", "RP2350", "XIAO-RP2350-DIP"),
+    ("XIAO-nRF54l15-DIP", "nRF54l15", "XIAO-nRF54l15-DIP"),
+    ("XIAO-nRF54l15-SMD", "nRF54l15", "XIAO-nRF54l15-DIP"),
 )
 
 

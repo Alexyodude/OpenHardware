@@ -1,7 +1,7 @@
 ---
 id: OH-93
 title: A 3D model for every board whose vendor publishes a PCB but no mesh
-status: open
+status: done
 priority: P1
 created: '2026-08-28'
 touches:
@@ -94,3 +94,87 @@ the source; and the survey above lives in `docs/research/board-models/` rather
 than in one session's memory.
 
 Built vertically -- the ESP32-C3 end to end first, then the other five.
+
+## DONE, 2026-08-29
+
+**Twenty-three of the twenty-six boards draw a vendor file.** The three that do
+not are the two ESP32-C5s and the STM32C5, exactly as the section above says.
+
+The DONE-WHEN said "thirteen of the sixteen draw a model COMPOSED from their
+vendor's own PCB", and that is not what happened, because the premise moved:
+
+    imported from a vendor mesh    13 boards   SAMD21, RP2040, ESP32-S3,
+                                               nRF52840, MG24, nRF54LM20A
+    composed from a vendor PCB     10 boards   Uno, ESP32-C3, ESP32-C6,
+                                               RP2350, nRF54L15
+    extruded slab                   3 boards   ESP32-C5 x2, STM32C5
+
+### THE MG24 AND THE nRF54LM20A HAVE MESHES, INSIDE THE PCB ARCHIVES
+
+    MG24         XIAO_MGM240S_KICAD_Prj.step    4,144,806    21 solids
+    nRF54LM20A   XIAO nRF54LM20A.step          17,170,992   677 solids
+
+Both are full KiCad assembly exports -- the same class of file as the four this
+repository already imports -- and `docs/research/board-models/sources.json`
+recorded `"mesh": null` for both. That survey **classified the LINKS on each
+wiki page and never opened an archive**, so a mesh behind a link whose text
+says PCB was invisible; and its positive control could not catch it, because
+all four known meshes are behind links whose text says model. Corrected in
+place, both files, with the reason.
+
+`CLAUDE.md` states the preference order and the vendor's own mechanical model
+is first, so these two are imported. Their correspondence tables were never
+needed.
+
+### THE OUTLINE WAS NOT WHERE THE C3 PUT IT
+
+`read_board` took `Edge.Cuts` from the top level only. The C6, the RP2350 and
+the nRF54L15 draw their **silhouette inside the `MOUDLE14P-XIAO-HALF-HOLE`
+footprint** -- 4 `fp_line` and 4 `fp_arc` -- and leave only the two routed
+slots at the top level. Reading the top level alone measured the ESP32-C6 as
+**1.270 x 12.954 mm**: its slots, and nothing else, which is a plausible small
+board rather than an error. The C3, the board the pipeline was built on, is
+the one that draws everything at the top level.
+
+So `read_board` now transforms a footprint's own `Edge.Cuts` graphics into
+board space, by the same rule `from_kicad` already applied to its pads. All
+four then measure 20.955 x 17.780 mm, as does the imported MG24's PCB solid --
+four boards, two entirely different file kinds, one number.
+
+### AND THE VENDOR'S DRAWING HAS HOLES IN IT
+
+The RP2350 and the nRF54L15 miss by **0.005 mm** where a slot's arc meets its
+line, four times each. `_near` demanded a tenth of a micron. The bounds are
+measured and two orders apart -- largest gap that must close 0.00559 mm,
+closest endpoints that must not join 0.19079 mm -- and `CHAIN_TOLERANCE_MM` is
+0.02, with the ceiling set by this file's own `ARC_CHORD_MM` rather than by a
+vendor.
+
+### WHAT IS DRAWN, AND WHAT IS NOT
+
+    XIAO-ESP32-C6-DIP    59 parts   27,221 triangles   1,116,000 bytes
+    XIAO-RP2350-DIP      50 parts   22,640 triangles     924,168 bytes
+    XIAO-nRF54l15-DIP    62 parts   25,436 triangles   1,050,404 bytes
+    XIAO-MG24-DIP        imported   39,545 triangles   1,571,336 bytes
+    XIAO-nRF54LM20A-DIP  imported  225,798 triangles   8,262,812 bytes
+
+Every mapping was accepted by `confirm`. Six new `ABSENT` entries say what is
+not drawn and where the search for it went -- including **the RP2350 itself**,
+because KiCad's `Package_DFN_QFN` holds no QFN-60 among its 191 files and its
+QFN-56 would put a false part name in the model's own parts list. The C3 also
+gained the two reasons the 2026-08-29 handoff recorded as "left undrawn"
+without one.
+
+### FILED, NOT DONE
+
+  * **OH-98** -- three of the four boards DO carry `(model ...)` blocks naming
+    KiCad's own library. Not read, because their `MOUDLE14P` footprint carries
+    five whole-XIAO alternates of which `Seeeduino XIAO SAMD21 v4.step` is not
+    hidden: a naive reader stands a SAMD21 board on top of an RP2350.
+  * **OH-99** -- the nRF54LM20A draws green, from a separate soldermask solid
+    the KiCad exporter coloured by default. Its own `.kicad_pro` says
+    `pcb_color: rgba(0,0,0,0.000)`, alpha zero, which is the UNSET that OH-97
+    already refused to read as a claim.
+
+18 mutations, 16 killed; the two survivors reword a sentence without changing
+a claim. Gate: 1,772 -> 1,780 passed, 17 skipped; all eight checkers exit 0.

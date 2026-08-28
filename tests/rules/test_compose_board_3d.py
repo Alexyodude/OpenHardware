@@ -133,6 +133,48 @@ def test_an_outline_that_chains_but_does_not_meet_itself_is_refused():
         compose.loop(open_path)
 
 
+def test_a_five_micron_gap_in_the_vendors_own_drawing_still_closes():
+    """Seeed's XIAO RP2350 and nRF54L15 miss by 0.005 mm four times each.
+
+    Where a routed slot's arc meets its line they write `66.6404` against
+    `66.6354`. Five microns is a tenth of what any fab holds, so the board is
+    made from that file exactly as drawn -- and a reader that demanded an
+    exact meeting called it "the outline does not chain", which reads like a
+    parse failure and is a correct parse of a drawing with a gap in it.
+    """
+    gapped = (
+        eagle.Segment("20", 0.0, 0.0, 10.0, 0.0),
+        eagle.Segment("20", 10.0, 0.005, 10.0, 5.0),
+        eagle.Segment("20", 10.0, 5.0, 0.0, 5.0),
+        eagle.Segment("20", 0.0, 5.0, 0.0, 0.0),
+    )
+    assert len(compose.loop(gapped)) == 4
+
+
+def test_a_gap_the_size_of_a_real_feature_is_still_refused():
+    """The tolerance has to sit between two measured things, and it does.
+
+    Across the five boards this composes, the largest gap that MUST close is
+    0.00559 mm and the closest endpoints that must NOT join are 0.19079 mm --
+    two consecutive points along an arc some other entity was expanded into,
+    at `ARC_CHORD_MM`. So the ceiling is this file's own chord length and not
+    a vendor's, and a tolerance approaching it would weld a curve to its
+    neighbour instead of reporting a hole in the drawing.
+    """
+    assert compose.CHAIN_TOLERANCE_MM < compose.ARC_CHORD_MM / 5, (
+        "a chaining tolerance near the chord length joins points that are "
+        "merely adjacent along a curve"
+    )
+    holed = (
+        eagle.Segment("20", 0.0, 0.0, 10.0, 0.0),
+        eagle.Segment("20", 10.0, 0.19, 10.0, 5.0),
+        eagle.Segment("20", 10.0, 5.0, 0.0, 5.0),
+        eagle.Segment("20", 0.0, 5.0, 0.0, 0.0),
+    )
+    with pytest.raises(ValueError, match="does not chain"):
+        compose.loop(holed)
+
+
 def test_a_concave_outline_is_triangulated_without_leaving_the_board():
     """The Uno's notch is why this is ear clipping and not a fan.
 
@@ -247,20 +289,177 @@ def test_the_unos_outline_is_the_size_arduino_publishes():
 def test_the_composed_model_records_what_it_could_not_draw():
     """A part left off the board must say why, not leave a person guessing.
 
-    The XIAO ESP32-C3 sets the precedent: its model is on GrabCAD, that is
-    recorded, and nobody re-searches for it.
-
     **The USB socket used to be on this list and is not any more**, because it
-    was modelled instead. What remains are the two parts with no honest source
-    of any kind, and each entry has to carry the measurement that rules the
-    obvious candidate out -- otherwise the next person re-runs the search.
+    was modelled instead. What remains are parts with no honest source of any
+    kind, and each entry has to carry the measurement that rules the obvious
+    candidate out -- otherwise the next person re-runs the search.
+
+    This asserted `set(ABSENT) == {"QS", "RESONATOR"}` while the Uno was the
+    only board that left anything off. A pinned literal is a tripwire against
+    a casual addition and nothing more, and OH-93's five boards turned it into
+    a line to re-pin rather than a check -- so the invariants below replace it
+    with things that stay true as boards are added.
     """
-    assert set(compose.ABSENT) == {"QS", "RESONATOR"}, sorted(compose.ABSENT)
     assert "PN61729" not in compose.ABSENT, (
         "the USB socket is drawn now; ABSENT should no longer claim otherwise"
     )
     for package, why in compose.ABSENT.items():
         assert "mm" in why, f"{package} does not say what was measured"
+        # **"We looked and it is not there" is only checkable if you say
+        # where you looked.** Every entry names the library it searched, so
+        # the claim can be re-run against that library rather than retaken on
+        # trust -- which is the whole reason these paragraphs are long.
+        assert "KiCad" in why, (
+            f"{package} does not name the library that was searched"
+        )
+
+
+def test_nothing_is_declared_absent_that_no_board_actually_has():
+    """An `ABSENT` key is a vendor's package name, typed out by hand.
+
+    Get one letter wrong and the entry is dead: the board draws without the
+    part and without the explanation, which is the exact state the dict exists
+    to prevent, and nothing else fails. **This is not hypothetical** -- Seeed
+    write the C3's load switch `PMOS_1.0_0.6_0.35MM` and the other three
+    boards' `PMOS_1.0X0.6X0.35MM`, so the obvious single key silently covered
+    three boards out of four.
+
+    Skips per layout rather than in one lump, so a checkout holding some of
+    the vendor files still checks those.
+    """
+    seen: set[str] = set()
+    for spec in compose.COMPOSITIONS:
+        if not spec.layout.is_file():
+            continue
+        seen |= {e.package for e in compose.read_layout(spec.layout).elements}
+    if not seen:
+        pytest.skip("SKIPPED: no vendor layout is fetched")
+    unused = [p for p in compose.ABSENT if p not in seen]
+    assert not unused, (
+        f"{unused} appear in ABSENT and on no fetched board. Either the "
+        f"package name is mistyped -- in which case the board draws without "
+        f"the part AND without the reason -- or the entry outlived its board."
+    )
+
+
+#: Board -> the omissions its model is expected to explain to a reader.
+#:
+#: **Pinned per board, where the old global pin was not.** `set(ABSENT) ==
+#: {"QS", "RESONATOR"}` had to be re-pinned every time a board was added and
+#: said nothing about any particular model. This says something true of each:
+#: *this* board's `.glb` carries *these* reasons. Adding a board makes it fail
+#: until its omissions are stated, which is the point.
+#:
+#: It is not "every part not drawn". The Arduino Uno leaves its SMB diode, its
+#: MSOP-8 and a dozen 0603s undrawn and always has; what has to be explained
+#: is what a person would look for and miss.
+EXPLAINS: dict[str, set[str]] = {
+    "Arduino Uno": {"QS", "RESONATOR"},
+    "XIAO-ESP32-C3-DIP": {"PMOS_1.0_0.6_0.35MM", "BUTTON_TD1183SA"},
+    "XIAO-ESP32-C6-DIP": {"ANT2P-5.2x2x1.1MM", "PMOS_1.0X0.6X0.35MM",
+                          "SW4-SMD-2.8-2.6X1.6X0.53MM"},
+    "XIAO-RP2350-DIP": {"QFN60-0.4-7X7X0.9MM", "PMOS_1.0X0.6X0.35MM",
+                        "SW4-SMD-2.8-2.6X1.6X0.53MM"},
+    "XIAO-nRF54l15-DIP": {"WLCSP47-0.3-2.451X2.245X0.42MM",
+                          "ANT2P-5.2x2x1.1MM", "BUTTON_TD1183SA",
+                          "IPEX-GEN4-SMD-1.7X1.7X1.0MM",
+                          "PMOS_1.0X0.6X0.35MM"},
+}
+
+
+def test_each_board_explains_the_parts_it_leaves_off():
+    """A missing part with no reason beside it reads as a broken importer.
+
+    **Seeed spell the same part differently from board to board**, and that is
+    what this catches. Their load switch is `PMOS_1.0_0.6_0.35MM` on the
+    ESP32-C3 and `PMOS_1.0X0.6X0.35MM` on the other three; their module
+    footprint gains a `-PRO`; a `QFN32G` becomes a `QFN32`. So one obvious key
+    silently covers three boards out of four, and the fourth loses its
+    explanation without anything failing.
+    """
+    assert set(EXPLAINS) == {spec.board for spec in compose.COMPOSITIONS}, (
+        "a composed board with no entry here has never had its omissions "
+        "stated -- add it rather than deleting this assertion"
+    )
+    for spec in compose.COMPOSITIONS:
+        if not spec.layout.is_file():
+            continue
+        packages = {e.package for e in compose.read_layout(spec.layout).elements}
+        for missing in EXPLAINS[spec.board]:
+            assert missing in packages, (
+                f"{spec.board} has no {missing!r}, so this expectation is "
+                f"stale or the package name is mistyped"
+            )
+            assert missing in compose.ABSENT, (
+                f"{spec.board} leaves {missing!r} off and says nothing about "
+                f"it. A reader sees a board with a part visibly gone and no "
+                f"reason, which is the state ABSENT exists to prevent."
+            )
+
+
+def test_a_composition_that_can_be_fetched_says_which_chip_fetches_it():
+    """`fetch_with` prints the command that gets a missing layout.
+
+    For the XIAOs that command is this tool itself, so it is only true if the
+    tool actually fetches -- and until `pcb_chip` existed it did not:
+    `fetch_pcb` had no caller anywhere in the repository, and the C3's
+    instruction was the command that had just printed it. The C3's file
+    happened to be on the disk already, unzipped by hand, so nothing noticed.
+    """
+    for spec in compose.COMPOSITIONS:
+        under_cache = spec.layout.parent == compose.PCB_CACHE
+        assert (spec.pcb_chip is not None) == under_cache, (
+            f"{spec.board}: a layout under {compose.PCB_CACHE.name} is one "
+            f"this tool downloads, and one elsewhere is not"
+        )
+        if spec.pcb_chip is not None:
+            assert spec.pcb_chip in compose.PCB_SOURCES, spec.board
+            assert spec.layout.name == f"{spec.pcb_chip}.kicad_pcb", (
+                f"{spec.board}: fetch_pcb writes <chip>.kicad_pcb, so a "
+                f"layout named anything else can never be the file it fetches"
+            )
+
+
+def test_a_missing_layout_is_fetched_rather_than_only_talked_about(monkeypatch,
+                                                                   tmp_path):
+    """The field is worth nothing unless `compose` calls it.
+
+    `fetch_pcb` sat in this module with **no caller anywhere in the
+    repository**: a missing XIAO layout printed "Run: python
+    tools/compose_board_3d.py --board XIAO-ESP32-C3-DIP", which is the command
+    that had just printed it. Nothing noticed because the C3's file was
+    already on the disk, unzipped by hand.
+
+    So the assertion is that the fetch is ATTEMPTED, not that it succeeds --
+    no network, and the mutation that removes the call is what this kills.
+    """
+    asked: list[str] = []
+    monkeypatch.setattr(compose, "fetch_pcb", lambda chip: asked.append(chip))
+    absent = dataclasses.replace(
+        _uno(),
+        board="Test board",
+        layout=tmp_path / "NOT-FETCHED.kicad_pcb",
+        pcb_chip="ESP32-C3",
+    )
+    assert compose.compose(absent, deflection=0.05, check=True) == 3
+    assert asked == ["ESP32-C3"], (
+        "compose printed the instruction to fetch and did not fetch"
+    )
+
+
+def test_a_layout_nobody_can_fetch_is_only_talked_about(monkeypatch, tmp_path):
+    """The Arduino Uno's board file is an `https-archive` a person has to
+    accept terms for, so `pcb_chip` is None and the message is all there is.
+
+    Split from the test above because one test accepting either behaviour
+    would pass with the `is not None` guard deleted -- and that guard is what
+    stops a missing Uno from raising `KeyError: None` out of `PCB_SOURCES`.
+    """
+    asked: list[str] = []
+    monkeypatch.setattr(compose, "fetch_pcb", lambda chip: asked.append(chip))
+    absent = dataclasses.replace(_uno(), layout=tmp_path / "no.brd")
+    assert compose.compose(absent, deflection=0.05, check=True) == 3
+    assert asked == []
 
 
 def test_the_uno_names_a_colour_it_actually_read_somewhere():

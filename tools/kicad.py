@@ -47,6 +47,7 @@ components procedurally anyway.
 from __future__ import annotations
 
 import dataclasses
+import math
 import pathlib
 import re
 
@@ -254,6 +255,21 @@ def read_footprint(path: pathlib.Path) -> Footprint:
 # blocks -- Seeed strips them -- so a placement names a FOOTPRINT and not a
 # mesh, and the step from one to the other is a judgement that has to be
 # confirmed against pad geometry rather than trusted. See OH-93.
+#
+# **An outline is not necessarily drawn on the board.** A footprint may carry
+# `Edge.Cuts` graphics too, and KiCad mills those exactly as it mills the
+# board's own -- so "the outline" is both, and where the vendor happened to
+# draw it is the incidental detail this module exists to hide.
+#
+# Four of Seeed's six projects do it that way and it is not a corner case:
+# their `MOUDLE14P-XIAO-HALF-HOLE` footprint IS the XIAO outline, 4 `fp_line`
+# and 4 `fp_arc` spanning 20.955 x 17.780 mm, and every board that uses it
+# leaves only the two routed slots at the top level. Reading the top level
+# alone measured the ESP32-C6 as **1.270 x 12.954 mm** -- the slots, and
+# nothing else. That is a plausible-looking board rather than an error, which
+# is what makes it worth the paragraph: the XIAO ESP32-C3 draws its whole
+# silhouette at the top level, so the first board read this way was the one
+# that hid the difference.
 
 
 @dataclasses.dataclass(frozen=True)
@@ -360,6 +376,73 @@ def _graphic(node: list, tag: str) -> tuple[str, list[float]] | None:
     return (layer[1] if layer and len(layer) > 1 else ""), [a[0], a[1], b[0], b[1]]
 
 
+def _on_board(placed: Placement, x_mm: float, y_mm: float) -> tuple[float, float]:
+    """A footprint-local point in the BOARD's millimetres, KiCad's own frame.
+
+    **This is the same transform `compose_board_3d.from_kicad` applies to
+    pads**, written in the other frame: that one converts to Y-up on the way
+    in, this one stays in KiCad's Y-down storage frame because that is the
+    frame `gr_line` coordinates are already in, and these two have to end up
+    in one tuple. Derived from that function rather than from first
+    principles, which is why the signs read backwards from the usual rotation:
+    a rotation that is counter-clockwise as DRAWN is clockwise in a frame
+    whose y runs down the page.
+    """
+    turn = math.radians(placed.rotation_deg)
+    cos, sin = math.cos(turn), math.sin(turn)
+    if placed.back:
+        # A part on the underside is mirrored across the footprint's own y
+        # axis before it is turned -- the same rule its pads follow, and for
+        # the same reason: it is seen through the board.
+        x_mm = -x_mm
+    return (placed.x_mm + x_mm * cos + y_mm * sin,
+            placed.y_mm - x_mm * sin + y_mm * cos)
+
+
+def _fp_graphics(node: list, layer: str, placed: Placement
+                 ) -> tuple[list[Segment], list[Arc]]:
+    """One footprint's `layer` graphics, in board coordinates.
+
+    `fp_rect` is expanded into four segments here for the same reason
+    `read_footprint` and `read_board` expand their own rects: every consumer
+    then works in one primitive. No vendor board here draws an edge that way
+    today -- what would be surprising is a rect on the outline layer silently
+    contributing nothing while the identical `gr_rect` beside it does.
+    """
+    segments: list[Segment] = []
+    arcs: list[Arc] = []
+
+    def put(x_mm: float, y_mm: float) -> tuple[float, float]:
+        return _on_board(placed, x_mm, y_mm)
+
+    for line in children(node, "fp_line"):
+        got = _graphic(line, "start")
+        if not got or got[0] != layer:
+            continue
+        x1, y1, x2, y2 = got[1]
+        segments.append(Segment(layer, *put(x1, y1), *put(x2, y2)))
+    for rect in children(node, "fp_rect"):
+        got = _graphic(rect, "start")
+        if not got or got[0] != layer:
+            continue
+        x1, y1, x2, y2 = got[1]
+        corners = [put(x1, y1), put(x2, y1), put(x2, y2), put(x1, y2)]
+        for start, end in zip(corners, corners[1:] + corners[:1]):
+            segments.append(Segment(layer, *start, *end))
+    for arc in children(node, "fp_arc"):
+        where = first(arc, "layer")
+        if not (where and len(where) > 1 and where[1] == layer):
+            continue
+        start, mid, end = first(arc, "start"), first(arc, "mid"), first(arc, "end")
+        if start is None or mid is None or end is None:
+            continue
+        a, m, b = _floats(start), _floats(mid), _floats(end)
+        if min(len(a), len(m), len(b)) < 2:
+            continue
+        arcs.append(Arc(layer, *put(a[0], a[1]), *put(m[0], m[1]), *put(b[0], b[1])))
+    return segments, arcs
+
+
 def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
     """Read one `.kicad_pcb`: the board outline and every placement on it.
 
@@ -411,7 +494,7 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
         if len(coords) < 2:
             continue
         side = first(node, "layer")
-        placements.append(Placement(
+        placed = Placement(
             library=library,
             reference=_reference_of(node),
             x_mm=coords[0],
@@ -421,7 +504,11 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
             rotation_deg=coords[2] if len(coords) > 2 else 0.0,
             back=bool(side and len(side) > 1 and str(side[1]).startswith("B.")),
             pads=tuple(_pads_of(node)),
-        ))
+        )
+        placements.append(placed)
+        drawn, curved = _fp_graphics(node, layer, placed)
+        outline += drawn
+        arcs += curved
 
     if not placements:
         raise KicadError(f"{path}: no footprints; refusing to report an empty board")

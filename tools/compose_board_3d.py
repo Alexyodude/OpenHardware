@@ -320,12 +320,120 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "U.FL-R-SMT-1 is Hirose's own part number and the vendor's footprint "
         "name is U-FL. The antenna socket.",
     ),
+    # --- the C6, the RP2350 and the nRF54L15, OH-93 -------------------------
+    #
+    # **These three state some of their own models and the C3 states none**,
+    # which is the difference between "SEEED STATES" and "MEASURED" below. A
+    # stated line is a reading of `(model "${KICAD7_3DMODEL_DIR}/<lib>.3dshapes
+    # /<name>.step")` in the vendor's own board file -- the correspondence, in
+    # their hand. It is still put through `confirm`, for a reason two lines in
+    # these same files make concrete: the RP2350 gives its ESD diode a
+    # RESISTOR's model, and the crystal it names does not exist in KiCad's
+    # library at all. A vendor statement is the best evidence there is here
+    # and it is not a proof.
+    Component(
+        "C0402", "Capacitor_SMD", "C_0402_1005Metric",
+        "SEEED STATES it, on all three boards: `Capacitor_SMD.3dshapes/"
+        "C_0402_1005Metric.step`. Two pads 0.925 mm apart on the C6, which is "
+        "an 0402 land -- 1.0 x 0.5 mm -- and agrees with what they wrote.",
+    ),
+    Component(
+        "L0603", "Inductor_SMD", "L_0603_1608Metric",
+        "SEEED STATES it on the ESP32-C6: `Inductor_SMD.3dshapes/"
+        "L_0603_1608Metric.step`. Two pads 1.524 mm apart, an 0603 land. "
+        "**The RP2350 states `R0603` for the same footprint** -- one of their "
+        "own files, which they do not ship -- so the two disagree and the one "
+        "naming a library anybody can fetch is the one that can be used.",
+    ),
+    Component(
+        "X2-SMD-1.6X1.0MM", "Crystal",
+        "Crystal_SMD_MicroCrystal_CM9V-T1A-2Pin_1.6x1.0mm",
+        "SEEED STATES it on the nRF54L15, whose X2 is two pads 1.100 mm apart "
+        "in the 1.6 x 1.0 mm package both names give. That is the same model "
+        "and the same spacing the C3's `X2-SMD-1.6X1.0X0.5MM` was mapped to by "
+        "measurement a day earlier -- a vendor confirming a judgement already "
+        "made here, which is the only entry in this table with that standing.",
+    ),
+    Component(
+        "LGA14-0.5-2.5X3X0.86MM", "Package_LGA",
+        "LGA-14_3x2.5mm_P0.5mm_LayoutBorder3x4y",
+        "SEEED STATES it on the nRF54L15, and their own STEP assembly for the "
+        "nRF54LM20A names the identical model for the identical part. "
+        "Fourteen pads spanning 1.900 x 2.400 mm; 3 x 2.5 mm at 0.5 mm pitch "
+        "in a 3-by-4 border is what both names say.",
+    ),
+    Component(
+        "QFN32-0.5-5X5MM", "Package_DFN_QFN",
+        "QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm",
+        "MEASURED: thirty-three pads spanning 4.900 x 4.900 mm, identical to "
+        "the C3's `QFN32G-0.5-5X5MM` in every figure -- the two vendor names "
+        "differ by one letter. The ESP32-C6 itself.",
+    ),
+    Component(
+        "USB2.0-TYPE-C_USB-31C-F-16P", "Connector_USB",
+        "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "MEASURED: eighteen pads spanning 4.525 x 10.240 mm on the RP2350 and "
+        "4.850 x 10.240 on the nRF54L15. The vendor's own name says 16P and "
+        "so does the model's. They state a model for it -- "
+        "`USB-31C-F-16P-L7.35.stp` and `320011419_ST-USB-3316T.stp` -- but "
+        "those are their files under a path they do not publish, so the part "
+        "is identified from the name and confirmed against the pads.",
+    ),
+    Component(
+        "USON8-0.5-3X2MM", "Package_SON",
+        "Winbond_USON-8-1EP_3x2mm_P0.5mm_EP0.2x1.6mm",
+        "MEASURED: nine pads spanning 2.700 x 1.500 mm. USON-8, 3 x 2 mm, "
+        "0.5 mm pitch is stated in the vendor's footprint name and repeated "
+        "in the model's. The RP2350's flash.",
+    ),
+    Component(
+        "X4-SMD-1.6X1.2MM", "Crystal",
+        "Crystal_SMD_WE_IQXC-26-4Pin_1.6x1.2mm",
+        "MEASURED: four pads spanning 0.800 x 1.050 mm in the 1.6 x 1.2 mm "
+        "package both names state. Seeed name their own "
+        "`CRYSTAL-SMD_4P-L1.6-W1.2-BL`, which they do not ship and which "
+        "says the same size.",
+    ),
+    Component(
+        "X4-SMD-2.5X2.0MM", "Crystal", "Crystal_SMD_2520-4Pin_2.5x2.0mm",
+        "MEASURED: four pads spanning 1.400 x 1.800 mm in a 2.5 x 2.0 mm "
+        "package -- the 2520 land, named in the vendor's footprint and in the "
+        "model. **Seeed state `Crystal_SMD_SeikoEpson_FA238-4Pin_2.5x2.0mm` "
+        "and KiCad's library has no such file**; the FA238V it does have is a "
+        "2.0 x 1.6 mm part. So the statement is unusable and the generic land "
+        "of the size they drew is what is left.",
+    ),
 )
 
 #: Packages that are on the board, are worth seeing, and are NOT drawn -- with
 #: the reason, which travels to the page. An empty reason would be worse than
 #: the omission: a person looking at a board with no USB socket should be told
 #: why rather than left to wonder whether the importer broke.
+#: Two reasons that each cover a part appearing under two vendor spellings.
+#: Bound here rather than repeated in `ABSENT`, which is keyed by the vendor's
+#: package name and so has to hold both spellings.
+_NO_CHIP_SCALE_MOSFET = (
+    "the load switch. Three pads spanning 0.650 x 0.350 mm -- a chip-scale "
+    "MOSFET one millimetre long. **The nRF54L15's own board file names the "
+    "package: `SOT-883.STEP`**, which settles what it is. KiCad's "
+    "`Package_TO_SOT_SMD` has no SOT-883 among its 79 files, and its smallest "
+    "SOT-23 is 2.9 mm long -- three times the part, and still inside "
+    "`confirm`'s size tolerance, so the check would not have caught it. This "
+    "is the part the 2026-08-29 handoff recorded as 'left undrawn' on the C3 "
+    "with no reason beside it."
+)
+
+_NO_TINY_BUTTON = (
+    "the two buttons a person actually presses: boot and reset. A side-"
+    "actuated switch a millimetre and a half wide -- 3.0 x 1.5 mm where the "
+    "vendor names the part (TD1183SA) and 2.6 x 1.6 x 0.53 mm where they give "
+    "only the size. **The smallest surface-mount switch in KiCad's 159-file "
+    "`Button_Switch_SMD` is the TS-1088 at 2.9 x 3.9 mm**, more than twice the "
+    "footprint either way. Of everything left off these boards this is the "
+    "absence most worth retiring, because it is the only one a reader would "
+    "reach for."
+)
+
 ABSENT: dict[str, str] = {
     "QS": (
         "the 16 MHz crystal. Arduino's own silkscreen makes its body "
@@ -341,6 +449,56 @@ ABSENT: dict[str, str] = {
         "resonators are 7 mm through-hole cans standing 12.5 mm tall. "
         "`confirm` refuses it on mounting, which is the check that exists "
         "because the size tolerance let this one through."
+    ),
+    # --- OH-93: the XIAOs' undrawn parts ------------------------------------
+    #
+    # **Every one of these is a part KiCad's library does not hold**, checked
+    # by listing the library folder rather than by a 404 -- so each says which
+    # folder was listed and what the nearest thing in it was. A model of
+    # nearly the right part is what `confirm`'s tolerances exist to refuse,
+    # and a 7 x 7 mm chip is not the place to spend that tolerance.
+    "QFN60-0.4-7X7X0.9MM": (
+        "the RP2350 itself. Sixty-one pads spanning 6.800 x 6.800 mm, which "
+        "is a QFN-60 on 0.4 mm pitch in a 7 x 7 mm body. **KiCad's "
+        "`Package_DFN_QFN` holds no QFN-60 at all** -- 191 files listed on "
+        "2026-08-29, and the nearest is `QFN-56-1EP_7x7mm_P0.4mm`. That is "
+        "the right body and the right pitch with four leads missing, and "
+        "drawing it would put `U4 (QFN-56...)` in this model's own parts "
+        "list, which is a false statement about what is on the board. "
+        "Retired the day that library gains a QFN-60 7x7 P0.4."
+    ),
+    "WLCSP47-0.3-2.451X2.245X0.42MM": (
+        "the nRF54L15 itself, a 47-ball wafer-level CSP 2.45 x 2.25 mm. "
+        "KiCad's `Package_CSP` holds 34 files and not one is a WLCSP-47; the "
+        "closest by ball count is a WLCSP-49 at 3.44 x 3.44 mm, which is "
+        "half again as large. Seeed state a model for it and it is one of "
+        "their own files under a path they do not publish."
+    ),
+    # **The same part under two vendor spellings is one absence, said once.**
+    # Seeed write the C3's load switch `PMOS_1.0_0.6_0.35MM` and the other
+    # three boards' `PMOS_1.0X0.6X0.35MM`; the buttons are `BUTTON_TD1183SA`
+    # on the C3 and the nRF54L15 and `SW4-SMD-...` on the C6 and the RP2350.
+    # Four keys, two reasons -- and writing the reason twice is how the two
+    # copies come to disagree.
+    "PMOS_1.0_0.6_0.35MM": _NO_CHIP_SCALE_MOSFET,
+    "PMOS_1.0X0.6X0.35MM": _NO_CHIP_SCALE_MOSFET,
+    "BUTTON_TD1183SA": _NO_TINY_BUTTON,
+    "SW4-SMD-2.8-2.6X1.6X0.53MM": _NO_TINY_BUTTON,
+    "ANT2P-5.2x2x1.1MM": (
+        "the chip antenna on the C6 and the nRF54L15 -- 5.2 x 2 x 1.1 mm, "
+        "and at that size the largest thing on either board after the USB "
+        "socket and the main chip. KiCad's `RF_Antenna` holds exactly four "
+        "models: two Johanson chip antennas, an AVX and a Pulse. None is "
+        "5.2 mm long. The nRF54L15 names Seeed's own `ANT_KH5220-A36`, which "
+        "they do not ship."
+    ),
+    "IPEX-GEN4-SMD-1.7X1.7X1.0MM": (
+        "the nRF54L15's external-antenna socket. IPEX MHF4 is 1.7 mm square "
+        "where the U.FL this repository already draws on the C3 is 2.6 mm, "
+        "and KiCad's `Connector_Coaxial` holds fifteen models of which the "
+        "only sub-miniature one is that U.FL. Drawing the bigger connector "
+        "would overhang the pads it is meant to sit on by half a millimetre "
+        "in each direction."
     ),
 }
 
@@ -359,6 +517,17 @@ class Composition:
     #: and a missing file should print the command that gets it rather than
     #: the one that gets somebody else's.
     fetch_with: str
+    #: The `PCB_SOURCES` key that downloads `layout`, when this tool can do it
+    #: itself. `None` for the Arduino Uno, whose board file is an
+    #: `https-archive` a person has to accept terms for -- the same reason
+    #: `tools/get_board_sources.py` prints its URL rather than fetching it.
+    #:
+    #: **This is what makes `fetch_with` true rather than circular.** Until it
+    #: existed `fetch_pcb` had no caller at all: a missing XIAO layout printed
+    #: "Run: python tools/compose_board_3d.py --board XIAO-ESP32-C3-DIP",
+    #: which is the command that had just printed it. The C3's file happened
+    #: to be on this disk, unzipped by hand, so nothing noticed.
+    pcb_chip: str | None
     #: What the model's `geometry` extra says, which the page shows a reader.
     geometry: str
     #: The elements whose pads are the board's pad map. The model is centred on
@@ -395,6 +564,21 @@ PCB_SOURCES: dict[str, tuple[str, int]] = {
         ("https://files.seeedstudio.com/wiki/XIAO_WiFi/Resources/"
          "XIAO_ESP32C3_v1.3_KiCad_260116.zip"),
         339_671,
+    ),
+    "ESP32-C6": (
+        ("https://files.seeedstudio.com/wiki/SeeedStudio-XIAO-ESP32C6/"
+         "XIAO_ESP32_C6_v1.0_SCH&PCB_260114.zip"),
+        1_126_886,
+    ),
+    "RP2350": (
+        ("https://files.seeedstudio.com/wiki/XIAO-RP2350/res/"
+         "XIAO_RP2350_v1.0_SCH&PCB_240626.zip"),
+        1_145_969,
+    ),
+    "nRF54L15": (
+        ("https://files.seeedstudio.com/wiki/XIAO_nRF54L15/Getting_Start/"
+         "nRF54L15_KICAD.zip"),
+        1_305_099,
     ),
 }
 
@@ -440,6 +624,7 @@ COMPOSITIONS: tuple[Composition, ...] = (
         board="Arduino Uno",
         layout=REPO / "third_party" / "arduino-uno" / "UNO-TH_Rev3e.brd",
         fetch_with="python tools/get_board_sources.py arduino-uno",
+        pcb_chip=None,
         geometry=(
             "Arduino's own EAGLE board file, CC BY-SA 4.0: the outline "
             "from layer 20 and every component's position, rotation and "
@@ -459,6 +644,7 @@ COMPOSITIONS: tuple[Composition, ...] = (
         board="XIAO-ESP32-C3-DIP",
         layout=PCB_CACHE / "ESP32-C3.kicad_pcb",
         fetch_with="python tools/compose_board_3d.py --board XIAO-ESP32-C3-DIP",
+        pcb_chip="ESP32-C3",
         geometry=(
             "Seeed's own KiCad project for the XIAO ESP32-C3 v1.3: the "
             "outline from Edge.Cuts and every component's position, rotation "
@@ -483,6 +669,80 @@ COMPOSITIONS: tuple[Composition, ...] = (
             "agree"
         ),
         serves=("XIAO-ESP32-C3-DIP-SMD", "XIAO-ESP32-C3-SMD"),
+    ),
+    # --- OH-93 5.1: the three XIAOs Seeed publish a PCB and no mesh for -----
+    #
+    # **Everything below the board name is the same on all three**, and that
+    # is a measurement rather than a copy: their `MOUDLE14P-XIAO-HALF-HOLE`
+    # footprint puts 56 pads on the identical 15.240 x 17.780 mm lattice the
+    # C3 builds its two headers on, and all four outlines measure
+    # 20.955 x 17.780 mm. A XIAO is a XIAO.
+    Composition(
+        board="XIAO-ESP32-C6-DIP",
+        layout=PCB_CACHE / "ESP32-C6.kicad_pcb",
+        fetch_with="python tools/compose_board_3d.py --board XIAO-ESP32-C6-DIP",
+        pcb_chip="ESP32-C6",
+        geometry=(
+            "Seeed's own KiCad project for the XIAO ESP32-C6 v1.0: the "
+            "outline from Edge.Cuts and every component's position, rotation "
+            "and side as the board file states them. Seeed publishes no mesh "
+            "for this board -- see docs/research/board-models/"
+        ),
+        # One footprint, not two: where the C3 draws its castellations as
+        # J1 and J2, these three draw all fourteen as the single module
+        # footprint the board outline is also inside.
+        headers=("U2",),
+        thickness_mm=1.2,
+        colour=BOARD_MASK,
+        colour_source=(
+            "BOARD_MASK, A JUDGEMENT rather than a reading -- see that "
+            "constant. This board's own .kicad_pcb has no (stackup ...) "
+            "either, so it adds nothing to the four searches recorded there"
+        ),
+        serves=("XIAO-ESP32-C6-SMD",),
+    ),
+    Composition(
+        board="XIAO-RP2350-DIP",
+        layout=PCB_CACHE / "RP2350.kicad_pcb",
+        fetch_with="python tools/compose_board_3d.py --board XIAO-RP2350-DIP",
+        pcb_chip="RP2350",
+        geometry=(
+            "Seeed's own KiCad project for the XIAO RP2350 v1.0: the outline "
+            "from Edge.Cuts and every component's position, rotation and side "
+            "as the board file states them. Seeed publishes no mesh for this "
+            "board -- see docs/research/board-models/"
+        ),
+        headers=("U2",),
+        thickness_mm=1.2,
+        colour=BOARD_MASK,
+        colour_source=(
+            "BOARD_MASK, A JUDGEMENT rather than a reading -- see that "
+            "constant. This board's own .kicad_pcb has no (stackup ...) "
+            "either, so it adds nothing to the four searches recorded there"
+        ),
+        serves=("XIAO-RP2350-SMD",),
+    ),
+    Composition(
+        board="XIAO-nRF54l15-DIP",
+        layout=PCB_CACHE / "nRF54L15.kicad_pcb",
+        fetch_with="python tools/compose_board_3d.py --board XIAO-nRF54l15-DIP",
+        pcb_chip="nRF54L15",
+        geometry=(
+            "Seeed's own KiCad project for the XIAO nRF54L15 v1.0: the "
+            "outline from Edge.Cuts and every component's position, rotation "
+            "and side as the board file states them. Seeed publishes no mesh "
+            "for this board -- see docs/research/board-models/"
+        ),
+        # `MOUDLE14P-XIAO-HALF-HOLE-PRO`, and the reference moved with it.
+        headers=("U9",),
+        thickness_mm=1.2,
+        colour=BOARD_MASK,
+        colour_source=(
+            "BOARD_MASK, A JUDGEMENT rather than a reading -- see that "
+            "constant. This board's own .kicad_pcb has no (stackup ...) "
+            "either, so it adds nothing to the four searches recorded there"
+        ),
+        serves=("XIAO-nRF54l15-SMD",),
     ),
 )
 
@@ -744,9 +1004,35 @@ def outer(segments: tuple[eagle.Segment, ...]
     return rings[0], rings[1:]
 
 
+#: How far apart two outline endpoints may be and still be the same corner.
+#:
+#: **A vendor's own drawing has gaps in it, and the board is still made.** This
+#: was a tenth of a micron -- EAGLE writes 3 decimals, so an EAGLE outline
+#: either meets exactly or does not meet -- until Seeed's XIAO RP2350 and
+#: nRF54L15, whose routed slots miss by 0.005 mm where an arc meets its line:
+#: `66.6404` against `66.6354`, four times per board. Five microns is a tenth
+#: of what any fab holds, so those are the same point in every sense except
+#: the file's.
+#:
+#: **The bounds are measured, not chosen, and they are two orders apart.**
+#: Across all five boards this composes:
+#:
+#:     largest gap that MUST close      0.00559 mm   nRF54L15
+#:     closest endpoints that must NOT  0.19079 mm   nRF54L15
+#:                                      1.41421 mm   Arduino Uno
+#:
+#: 0.02 mm is 3.6x the first and 9.5x below the second. The ceiling is this
+#: file's own `ARC_CHORD_MM`, not the vendors': those near-misses are
+#: consecutive points along an arc some OTHER entity was expanded into, so
+#: **anything approaching the chord length would weld a curve to its
+#: neighbour**. Any tolerance here must stay far under it.
+CHAIN_TOLERANCE_MM = 0.02
+
+
 def _near(a: tuple[float, float], b: tuple[float, float]) -> bool:
-    """Within a tenth of a micron. EAGLE writes coordinates to 3 decimals."""
-    return abs(a[0] - b[0]) < 1e-4 and abs(a[1] - b[1]) < 1e-4
+    """Are these two endpoints the same corner? See `CHAIN_TOLERANCE_MM`."""
+    return (abs(a[0] - b[0]) < CHAIN_TOLERANCE_MM
+            and abs(a[1] - b[1]) < CHAIN_TOLERANCE_MM)
 
 
 def _area(ring: list[tuple[float, float]]) -> float:
@@ -1208,6 +1494,8 @@ def merge(*meshes: Mesh) -> Mesh:
 def compose(spec: Composition, deflection: float, check: bool) -> int:
     """Read, confirm, compose and write one board. Returns the byte count."""
     print(f"{spec.board}:")
+    if not spec.layout.is_file() and spec.pcb_chip is not None:
+        fetch_pcb(spec.pcb_chip)
     if not spec.layout.is_file():
         print(f"  SKIPPED: {spec.layout} is not fetched. Run: {spec.fetch_with}")
         return 3

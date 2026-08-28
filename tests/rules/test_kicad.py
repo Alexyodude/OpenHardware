@@ -409,6 +409,138 @@ def test_an_arc_that_bulges_past_the_straight_edges_is_inside_the_extent(tmp_pat
     )
 
 
+# --- an outline drawn inside a footprint --------------------------------------------
+#
+# **Four of Seeed's six projects draw the board's own silhouette inside their
+# `MOUDLE14P-XIAO-HALF-HOLE` footprint** and leave only the routed slots at
+# the top level. Reading `gr_*` alone measured the XIAO ESP32-C6 as
+# 1.270 x 12.954 mm -- its two slots -- which is a plausible small board
+# rather than an error, and the ESP32-C3 (the first one read) draws everything
+# at the top level and so could not show the difference.
+
+INSIDE = """(kicad_pcb
+\t(version 20241229)
+\t(footprint "Module:MOUDLE14P"
+\t\t(layer "F.Cu")
+\t\t(at 100 50 90)
+\t\t(property "Reference" "U2"
+\t\t\t(at 0 0 0)
+\t\t\t(layer "F.SilkS")
+\t\t)
+\t\t(fp_line
+\t\t\t(start 2 0)
+\t\t\t(end 2 4)
+\t\t\t(stroke (width 0.05) (type solid))
+\t\t\t(layer "Edge.Cuts")
+\t\t)
+\t\t(fp_line
+\t\t\t(start -9 -9)
+\t\t\t(end 9 9)
+\t\t\t(stroke (width 0.12) (type solid))
+\t\t\t(layer "F.SilkS")
+\t\t)
+\t\t(fp_arc
+\t\t\t(start 2 4)
+\t\t\t(mid 3 5)
+\t\t\t(end 4 4)
+\t\t\t(stroke (width 0.05) (type solid))
+\t\t\t(layer "Edge.Cuts")
+\t\t)
+\t\t(fp_rect
+\t\t\t(start 0 0)
+\t\t\t(end 1 1)
+\t\t\t(stroke (width 0.05) (type solid))
+\t\t\t(layer "Edge.Cuts")
+\t\t)
+\t\t(pad "1" smd rect
+\t\t\t(at 0 0)
+\t\t\t(size 1 1)
+\t\t\t(layers "F.Cu")
+\t\t)
+\t)
+)
+"""
+
+
+@pytest.fixture
+def inside(tmp_path):
+    path = tmp_path / "INSIDE.kicad_pcb"
+    path.write_text(INSIDE, encoding="utf-8")
+    return path
+
+
+def test_a_footprints_edge_cuts_line_is_part_of_the_boards_outline(inside):
+    """Where a vendor drew it is the incidental detail this module hides.
+
+    KiCad mills a footprint's `Edge.Cuts` exactly as it mills the board's own,
+    so "the outline" is both. Without this the C6, the RP2350 and the
+    nRF54L15 have no silhouette at all.
+    """
+    got = read_board(inside)
+    #: The `F.SilkS` line is a diagonal across the whole part -- it would
+    #: double the outline's extent if the layer filter were dropped.
+    assert len(got.outline) == 1 + 4, "one fp_line and the fp_rect's four edges"
+    lines = [s for s in got.outline if (s.x1_mm, s.y1_mm) != (s.x2_mm, s.y2_mm)]
+    assert all(s.layer == "Edge.Cuts" for s in lines)
+
+
+def test_a_footprints_outline_is_turned_by_the_footprints_own_rotation(inside):
+    """Placed at (100, 50) and turned 90 degrees, by hand.
+
+    In KiCad's stored frame y runs DOWN the page, so a rotation that is
+    counter-clockwise as drawn takes `(lx, ly)` to
+    `(px + lx cos + ly sin, py - lx sin + ly cos)`. At 90 degrees that is
+    `(px + ly, py - lx)`, which turns the local vertical `(2,0)-(2,4)` into a
+    board horizontal at y = 48 running from x = 100 to x = 104.
+
+    **Getting this wrong still draws a board**, rotated or mirrored, with
+    every part in the right place on it -- which is why it is measured here
+    rather than looked at.
+    """
+    got = read_board(inside)
+    line = next(s for s in got.outline
+                if {(s.x1_mm, s.y1_mm), (s.x2_mm, s.y2_mm)} == {(100.0, 48.0),
+                                                                (104.0, 48.0)})
+    assert line.layer == "Edge.Cuts"
+
+    arc = got.arcs[0]
+    assert (arc.x1_mm, arc.y1_mm) == (104.0, 48.0), "the arc starts where the line ends"
+    assert (arc.xm_mm, arc.ym_mm) == (105.0, 47.0)
+    assert (arc.x2_mm, arc.y2_mm) == (104.0, 46.0)
+
+
+def test_a_footprint_on_the_back_has_its_outline_mirrored(tmp_path):
+    """The same rule its pads follow: a part on the underside is seen through
+    the board, so its x is negated before it is turned.
+
+    At rotation zero the local `(2,0)-(2,4)` lands at x = 98, not x = 102.
+    """
+    path = tmp_path / "back.kicad_pcb"
+    path.write_text(INSIDE.replace('(layer "F.Cu")', '(layer "B.Cu")')
+                          .replace("(at 100 50 90)", "(at 100 50)"),
+                    encoding="utf-8")
+    got = read_board(path)
+    assert got.placements[0].back is True
+    line = next(s for s in got.outline
+                if {(s.x1_mm, s.y1_mm), (s.x2_mm, s.y2_mm)} == {(98.0, 50.0),
+                                                                (98.0, 54.0)})
+    assert line.layer == "Edge.Cuts"
+
+
+def test_a_footprint_carrying_the_whole_outline_is_enough_of_one(tmp_path):
+    """`INSIDE` has no `gr_*` at all, and is not the empty board the "nothing
+    on Edge.Cuts" guard refuses. That guard runs after the footprints are
+    read for exactly this reason."""
+    path = tmp_path / "only-fp.kicad_pcb"
+    path.write_text(INSIDE, encoding="utf-8")
+    got = read_board(path)
+    #: By hand, at 90 degrees, where the transform is `(100 + ly, 50 - lx)`:
+    #: the rect's corners land on x 100..101 and y 49..50, the line on
+    #: (100,48)-(104,48), and the arc reaches x 105 and y 46. So x spans
+    #: 100..105 and y spans 46..50.
+    assert got.extent_mm() == (100.0, 46.0, 105.0, 50.0)
+
+
 def test_a_board_with_no_outline_is_refused(tmp_path):
     """A board drawn without `Edge.Cuts` would be a bounding box around its
     parts, which is not its shape and would be reported as though it were."""

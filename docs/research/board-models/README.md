@@ -4,24 +4,56 @@ Measured 2026-08-28 for OH-93. `sources.json` beside this file is the machine
 copy, and every byte count in it is a `Content-Length` the file server returned
 while the survey ran rather than a figure transcribed out of a terminal.
 
+> ## CORRECTION, 2026-08-29 — two of the meshes exist
+>
+> **The MG24 and the nRF54LM20A each ship a full KiCad assembly export INSIDE
+> the archive this table calls their PCB**, and both are now imported by
+> `tools/import_3d_model.py` rather than composed:
+>
+>     MG24         XIAO_MGM240S_KICAD_Prj.step    4,144,806   21 solids
+>     nRF54LM20A   XIAO nRF54LM20A.step          17,170,992  677 solids
+>
+> §1 below is right about what it measured and wrong about what it concluded.
+> The survey **classified the LINKS on each wiki page and never opened an
+> archive**, so a mesh behind a link whose text says PCB was invisible to it —
+> and the positive control could not catch that, because all four known meshes
+> are behind links whose text says model.
+>
+> That is the third time this shape of miss has happened here: OH-29 read
+> GitHub when the files were on the wiki; OH-93 read a GitHub census that said
+> Seeed publish no PCB; this read the wiki, but only its surface. **A control
+> proves the search finds what it looks at. It says nothing about what the
+> search never looked at**, and every one of the three was found by somebody
+> opening a file for an unrelated reason.
+>
+> Both byte counts here were re-checked on 2026-08-29 and both archives are
+> unchanged, so nothing else in this document has gone stale.
+
 Sixteen of the twenty-six boards draw an extruded slab. This is the answer to
 "what could be drawn instead", per chip, and to the prior question nobody had
 asked in one place: **what does Seeed publish at all?**
 
 ## The result
 
-| chip | boards | mesh | vendor KiCad PCB | outline | can be composed |
-|---|---|---|---|---|---|
-| ESP32-C3 | 3 | — | 339,671 | DXF 115,093 | **yes** |
-| ESP32-C6 | 2 | — | 1,126,886 | — | **yes** |
-| MG24 | 2 | — | 1,583,091 | — | **yes** |
-| RP2350 | 2 | — | 1,145,969 | DXF 1,418,153 | **yes** |
-| nRF54LM20A | 2 | — | 4,307,651 | — | **yes** |
-| nRF54L15 | 2 | — | 1,305,099 | — | **yes** |
-| ESP32-C5 | 2 | — | — | — | **no** |
-| STM32C5 | 1 | — | — | — | **no** |
+The `mesh` column is corrected per the note above; everything else is as
+measured on 2026-08-28.
 
-Thirteen boards are composable. Three are not, and §4 says what that means.
+| chip | boards | mesh | vendor KiCad PCB | outline | how it is drawn |
+|---|---|---|---|---|---|
+| ESP32-C3 | 3 | — | 339,671 | DXF 115,093 | composed |
+| ESP32-C6 | 2 | — | 1,126,886 | — | composed |
+| MG24 | 2 | **4,144,806, in the PCB zip** | 1,583,091 | — | **imported** |
+| RP2350 | 2 | — | 1,145,969 | DXF 1,418,153 | composed |
+| nRF54LM20A | 2 | **17,170,992, in the PCB zip** | 4,307,651 | — | **imported** |
+| nRF54L15 | 2 | — | 1,305,099 | — | composed |
+| ESP32-C5 | 2 | — | — | — | slab |
+| STM32C5 | 1 | — | — | — | slab |
+
+Thirteen boards are drawn from a vendor file. Three are not, and §4 says what
+that means. **The vendor's own mechanical model is preferred wherever one
+exists** — the order `CLAUDE.md` states — so the two chips that turned out to
+have one are imported rather than composed, and their correspondence
+judgements were never needed.
 
 ## 1. There is no mesh, and here is why that is a finding and not a shrug
 
