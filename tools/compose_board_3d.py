@@ -109,6 +109,7 @@ from tools.import_3d_model import (  # noqa: E402
     tessellate,
     write_glb,
 )
+from webui.boards.catalogue import chip_for  # noqa: E402
 
 
 @dataclasses.dataclass(frozen=True)
@@ -243,6 +244,81 @@ CORRESPONDENCE: tuple[Component, ...] = (
         # worth building rather than matching.
         modelled=True,
     ),
+    # --- Seeed's XIAO ESP32-C3 v1.3, OH-93 ----------------------------------
+    #
+    # **Seeed's PCB names its footprints in its OWN library, not KiCad's**, and
+    # it carries no `(model ...)` blocks at all -- so every line below is a
+    # judgement of the same kind as the EAGLE ones above, and gets the same
+    # treatment: `confirm` measures the placement's own pads against the mesh
+    # and refuses one that does not span them. Each span quoted was measured
+    # on 2026-08-29 with `from_kicad`.
+    Component(
+        "C0201", "Capacitor_SMD", "C_0201_0603Metric",
+        "two pads 0.559 mm apart, which is the land pattern of an 0201 -- "
+        "0.6 x 0.3 mm. Twenty-eight of them, the decoupling.",
+    ),
+    Component(
+        "R0201", "Resistor_SMD", "R_0201_0603Metric",
+        "two pads 0.559 mm apart, the same 0201 land as the capacitors and "
+        "the same size of part. Fourteen of them.",
+    ),
+    Component(
+        "L0201", "Inductor_SMD", "L_0201_0603Metric",
+        "two pads 0.559 mm apart on the x axis -- an 0201 laid the other way "
+        "round from the capacitors beside it.",
+    ),
+    Component(
+        "LED-0402", "LED_SMD", "LED_0402_1005Metric",
+        "two pads 0.766 mm apart, which is an 0402 land -- 1.0 x 0.5 mm. "
+        "Reference CHG0, the charge indicator.",
+    ),
+    Component(
+        "F0603", "Fuse", "Fuse_0603_1608Metric",
+        "two pads 1.600 mm apart, an 0603 land -- 1.6 x 0.8 mm.",
+    ),
+    Component(
+        "SOD-523", "Diode_SMD", "D_SOD-523",
+        "two pads 1.600 mm apart on x, which is SOD-523's land: a 1.2 x 0.8 "
+        "mm diode. The package name is the vendor's own and says so.",
+    ),
+    Component(
+        "SOT-25", "Package_TO_SOT_SMD", "SOT-23-5",
+        "five pads spanning 2.000 x 1.900 mm. SOT-25 is the JEDEC name for "
+        "the five-lead SOT-23, which is what KiCad calls SOT-23-5.",
+    ),
+    Component(
+        "QFN32G-0.5-5X5MM", "Package_DFN_QFN",
+        "QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm",
+        "thirty-three pads spanning 4.900 x 4.900 mm -- thirty-two leads on "
+        "0.5 mm pitch around a 5 x 5 mm body, plus the exposed pad that makes "
+        "thirty-three. The ESP32-C3 itself, and the name states all of it.",
+    ),
+    Component(
+        "USB2.0-TYPE-C", "Connector_USB",
+        "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "twenty pads spanning 4.812 x 8.636 mm: sixteen signal contacts and "
+        "four shell tabs. 8.94 mm is the width of a USB-C receptacle and "
+        "8.636 is its contact field, so this is the 16-pin part.",
+    ),
+    Component(
+        "X2-SMD-1.6X1.0X0.5MM", "Crystal",
+        "Crystal_SMD_MicroCrystal_CM9V-T1A-2Pin_1.6x1.0mm",
+        "two pads 1.100 mm apart in a 1.6 x 1.0 mm package, which the "
+        "vendor's own footprint name states and the model's name repeats.",
+    ),
+    Component(
+        "X4-SMD-2.0X1.6X0.5MM", "Crystal",
+        "Crystal_SMD_2016-4Pin_2.0x1.6mm",
+        "four pads spanning 1.000 x 1.200 mm in a 2.0 x 1.6 mm package -- "
+        "the 2016 four-pad land, named in both files.",
+    ),
+    Component(
+        "U-FL3P-SMD-2.6X2.6X1.0MM", "Connector_Coaxial",
+        "U.FL_Hirose_U.FL-R-SMT-1_Vertical",
+        "three pads spanning 1.397 x 2.540 mm in a 2.6 x 2.6 mm package. "
+        "U.FL-R-SMT-1 is Hirose's own part number and the vendor's footprint "
+        "name is U-FL. The antenna socket.",
+    ),
 )
 
 #: Packages that are on the board, are worth seeing, and are NOT drawn -- with
@@ -273,8 +349,17 @@ class Composition:
     """A board that is composed rather than fetched, and what it is made of."""
 
     board: str
-    #: Under `third_party/`, which is gitignored: this is a fetched input.
-    brd: pathlib.Path
+    #: The vendor's own layout, under `third_party/`, which is gitignored:
+    #: this is a fetched input. An EAGLE `.brd` or a KiCad `.kicad_pcb`, and
+    #: `read_layout` picks the reader by suffix -- the only place below this
+    #: line that knows which vendor's CAD it came from.
+    layout: pathlib.Path
+    #: How to fetch it, said in words, because the two are fetched differently
+    #: and a missing file should print the command that gets it rather than
+    #: the one that gets somebody else's.
+    fetch_with: str
+    #: What the model's `geometry` extra says, which the page shows a reader.
+    geometry: str
     #: The elements whose pads are the board's pad map. The model is centred on
     #: these, because `webui/static/board3d.js` centres it on the same pads --
     #: and unlike a XIAO, whose castellations are symmetric, an Uno's headers
@@ -287,12 +372,78 @@ class Composition:
     #: `#rrggbb`, and where it was read from.
     colour: str
     colour_source: str
+    #: The boards this one model serves, when it is more than the one named
+    #: above. A XIAO's DIP and SMD variants are the same PCB with a different
+    #: edge treatment, exactly as they are for the meshes
+    #: `tools/import_3d_model.py` fetches -- three C3 boards, one model.
+    serves: tuple[str, ...] = ()
+
+
+#: Where a vendor KiCad project lands. Gitignored with the rest of
+#: `third_party/`, and for the sharper of the two reasons: these archives are
+#: on Seeed's wiki file server and state no licence at all, exactly as the
+#: meshes in `tools/import_3d_model.py` do.
+PCB_CACHE = REPO / "third_party" / "seeed-pcb"
+
+#: chip -> (url, bytes). OH-93's survey; every size is a `Content-Length`
+#: measured on 2026-08-28 and re-checked on every fetch, because a vendor may
+#: replace a file and a board composed from a different revision than these
+#: numbers were measured on would be wrong in a way nothing else here catches.
+PCB_SOURCES: dict[str, tuple[str, int]] = {
+    "ESP32-C3": (
+        ("https://files.seeedstudio.com/wiki/XIAO_WiFi/Resources/"
+         "XIAO_ESP32C3_v1.3_KiCad_260116.zip"),
+        339_671,
+    ),
+}
+
+
+def fetch_pcb(chip: str) -> pathlib.Path:
+    """The vendor's `.kicad_pcb` for this chip, downloading it if need be.
+
+    Mirrors `import_3d_model.fetch` deliberately, including the size check: two
+    ways of fetching a vendor archive would be two things to keep true.
+    """
+    import zipfile
+
+    out = PCB_CACHE / f"{chip}.kicad_pcb"
+    if out.is_file():
+        return out
+    url, size = PCB_SOURCES[chip]
+    PCB_CACHE.mkdir(parents=True, exist_ok=True)
+    archive = PCB_CACHE / f"{chip}.zip"
+    if not archive.is_file():
+        print(f"  fetch  {url}")
+        with urllib.request.urlopen(url) as response:  # noqa: S310 - https, fixed
+            archive.write_bytes(response.read())
+    actual = archive.stat().st_size
+    if actual != size:
+        raise SystemExit(
+            f"{archive} is {actual:,} bytes and this file records {size:,}. "
+            f"The vendor's archive changed; re-measure before trusting a "
+            f"board composed from it."
+        )
+    with zipfile.ZipFile(archive) as zipped:
+        inside = [n for n in zipped.namelist() if n.endswith(".kicad_pcb")]
+        if len(inside) != 1:
+            raise SystemExit(
+                f"{archive} holds {len(inside)} .kicad_pcb files and this "
+                f"expects exactly one: {inside}"
+            )
+        out.write_bytes(zipped.read(inside[0]))
+    return out
 
 
 COMPOSITIONS: tuple[Composition, ...] = (
     Composition(
         board="Arduino Uno",
-        brd=REPO / "third_party" / "arduino-uno" / "UNO-TH_Rev3e.brd",
+        layout=REPO / "third_party" / "arduino-uno" / "UNO-TH_Rev3e.brd",
+        fetch_with="python tools/get_board_sources.py arduino-uno",
+        geometry=(
+            "Arduino's own EAGLE board file, CC BY-SA 4.0: the outline "
+            "from layer 20 and every component's position, rotation and "
+            "mirror as the file states them"
+        ),
         headers=("IOH", "IOL", "POWER", "AD"),
         thickness_mm=1.6,
         colour="#313d63",
@@ -302,6 +453,32 @@ COMPOSITIONS: tuple[Composition, ...] = (
             "silhouette, which is what makes it the board's colour rather "
             "than one that happens to be in the drawing"
         ),
+    ),
+    Composition(
+        board="XIAO-ESP32-C3-DIP",
+        layout=PCB_CACHE / "ESP32-C3.kicad_pcb",
+        fetch_with="python tools/compose_board_3d.py --board XIAO-ESP32-C3-DIP",
+        geometry=(
+            "Seeed's own KiCad project for the XIAO ESP32-C3 v1.3: the "
+            "outline from Edge.Cuts and every component's position, rotation "
+            "and side as the board file states them. Seeed publishes no mesh "
+            "for this board -- see docs/research/board-models/"
+        ),
+        headers=("J1", "J2"),
+        # Seeed's own board file says 1.0 mm nowhere this reads, and the XIAO
+        # is a 1.2 mm board by the RP2040 model's own PCB solid (0.00..1.20 in
+        # its extras). Reused rather than invented: the sibling the vendor DID
+        # publish a mesh of is the best evidence for a board of this family.
+        thickness_mm=1.2,
+        colour=UNSTYLED,
+        colour_source=(
+            "UNSTYLED. Seeed's own STEP files for the XIAO family give the "
+            "PCB #808080, which is the importer's marker for a surface the "
+            "vendor did not colour -- so the nine XIAOs that DO have a "
+            "published mesh already draw a neutral board, and inventing a "
+            "colour here would make this one disagree with its siblings"
+        ),
+        serves=("XIAO-ESP32-C3-DIP-SMD", "XIAO-ESP32-C3-SMD"),
     ),
 )
 
@@ -1027,13 +1204,20 @@ def merge(*meshes: Mesh) -> Mesh:
 def compose(spec: Composition, deflection: float, check: bool) -> int:
     """Read, confirm, compose and write one board. Returns the byte count."""
     print(f"{spec.board}:")
-    if not spec.brd.is_file():
-        print(f"  SKIPPED: {spec.brd} is not fetched. Run: "
-              f"python tools/get_board_sources.py arduino-uno")
+    if not spec.layout.is_file():
+        print(f"  SKIPPED: {spec.layout} is not fetched. Run: {spec.fetch_with}")
         return 3
 
-    board = eagle.read_board(spec.brd)
-    ring = loop(board.outline)
+    board = read_layout(spec.layout)
+    # **The silhouette, and the cutouts said out loud.** The Uno is one closed
+    # ring; a XIAO ESP32-C3 is its edge plus two 1.270 x 0.508 mm routed slots,
+    # which `loop` alone reported as "the outline does not chain".
+    ring, cutouts = outer(board.outline)
+    if cutouts:
+        print(f"  cutouts {len(cutouts)} not drawn: "
+              + ", ".join(f"{max(p[0] for p in c) - min(p[0] for p in c):.3f} x "
+                          f"{max(p[1] for p in c) - min(p[1] for p in c):.3f} mm"
+                          for c in cutouts))
     xs = [point[0] for point in ring]
     ys = [point[1] for point in ring]
     print(f"  outline {len(ring)} points, "
@@ -1130,7 +1314,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
 
     out = OUT / f"{_slug(spec.board)}.glb"
     size = write_glb(
-        whole, out, spec.board, str(spec.brd.name),
+        whole, out, spec.board, str(spec.layout.name),
         (max(xs) - min(xs), max(ys) - min(ys), spec.thickness_mm),
         extras={
             "composed": True,
@@ -1162,11 +1346,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             "pad_top": round(pad_top, 4),
             "pcb_colour": spec.colour,
             "pcb_colour_source": spec.colour_source,
-            "geometry": (
-                "Arduino's own EAGLE board file, CC BY-SA 4.0: the outline "
-                "from layer 20 and every component's position, rotation and "
-                "mirror as the file states them"
-            ),
+            "geometry": spec.geometry,
             "components": (
                 "KiCad kicad-packages3D, CC-BY-SA-4.0 with the library "
                 "exception; fetched, not vendored"
@@ -1218,7 +1398,14 @@ def main(argv: list[str] | None = None) -> int:
         total += written
     if not args.check and total:
         from tools.import_3d_model import write_index
-        index = write_index()
+        # **The composer's own list, not the importer's copy of it.** Every
+        # board a `Composition` serves gets the same file, exactly as a XIAO's
+        # DIP and SMD variants share one fetched mesh.
+        index = write_index(tuple(
+            (name, chip_for(spec.board), _slug(spec.board))
+            for spec in COMPOSITIONS
+            for name in (spec.board, *spec.serves)
+        ))
         print(f"{total:,} bytes of glTF; index at {index.relative_to(REPO)}")
     return 0
 

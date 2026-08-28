@@ -11,6 +11,8 @@ touches:
 - docs/research/board-models/*
 - tests/rules/test_kicad.py
 - tests/rules/test_compose_board_3d.py
+- tools/import_3d_model.py
+- tests/rules/test_import_3d_model.py
 ---
 
 **16 of the 26 boards draw an extruded slab.** Ten have a model: the Arduino

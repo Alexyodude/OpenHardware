@@ -58,6 +58,20 @@ def _brd() -> pathlib.Path:
     return BRD
 
 
+def _uno():
+    """The Arduino Uno's composition, BY NAME.
+
+    These tests used `COMPOSITIONS[0]`, which was the Uno while it was the only
+    composed board. OH-93 added the XIAO ESP32-C3, so a positional index is now
+    one reordering away from pointing every Uno assertion at a different board
+    -- and they would not fail, they would measure the wrong thing.
+    """
+    for spec in compose.COMPOSITIONS:
+        if spec.board == "Arduino Uno":
+            return spec
+    raise AssertionError("the Arduino Uno is no longer a composed board")
+
+
 def _segments(points):
     """A closed ring as EAGLE would write it: shuffled, and some reversed."""
     made = []
@@ -257,7 +271,7 @@ def test_the_uno_names_a_colour_it_actually_read_somewhere():
     element -- because an unsourced colour beside two sourced geometries is
     exactly the kind of quiet invention that gets believed.
     """
-    spec = compose.COMPOSITIONS[0]
+    spec = _uno()
     assert spec.colour.startswith("#") and len(spec.colour) == 7
     assert "board.svg" in spec.colour_source
     assert "path" in spec.colour_source
@@ -279,9 +293,9 @@ def test_every_components_legs_land_on_the_board():
     anchored on. Measured after the fix: 0.00 mm for all fifteen.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
-    spec = compose.COMPOSITIONS[0]
+    spec = _uno()
     _brd()
-    board = eagle.read_board(spec.brd)
+    board = compose.read_layout(spec.layout)
     ring = compose.loop(board.outline)
     xs = [point[0] for point in ring]
     ys = [point[1] for point in ring]
@@ -526,9 +540,9 @@ def test_a_through_hole_components_legs_land_on_its_own_pads():
     to one side, and a USB socket, whose shell overhangs the board, would not.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
-    spec = compose.COMPOSITIONS[0]
+    spec = _uno()
     _brd()
-    board = eagle.read_board(spec.brd)
+    board = compose.read_layout(spec.layout)
     header_pads = [pad for name in spec.headers
                    for pad in board.element(name).pads]
     hx = [pad.x_mm for pad in header_pads]
@@ -602,9 +616,9 @@ def test_every_component_lands_where_the_vendor_drew_its_body():
     symmetric about its own centre whichever way the body faces.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
-    spec = compose.COMPOSITIONS[0]
+    spec = _uno()
     _brd()
-    board = eagle.read_board(spec.brd)
+    board = compose.read_layout(spec.layout)
     header_pads = [pad for name in spec.headers
                    for pad in board.element(name).pads]
     hx = [pad.x_mm for pad in header_pads]
@@ -723,7 +737,7 @@ def test_compose_refuses_a_board_whose_part_faces_the_wrong_way(monkeypatch):
     )
     monkeypatch.setattr(compose, "CORRESPONDENCE", wrong)
     with pytest.raises(SystemExit, match="X1"):
-        compose.compose(compose.COMPOSITIONS[0], compose.DEFLECTION, check=True)
+        compose.compose(_uno(), compose.DEFLECTION, check=True)
 
 
 # --- what a wire may not pass through (OH-78) --------------------------------------
@@ -772,9 +786,9 @@ def test_each_component_box_actually_contains_its_component():
     check of arithmetic.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
-    spec = compose.COMPOSITIONS[0]
+    spec = _uno()
     _brd()
-    board = eagle.read_board(spec.brd)
+    board = compose.read_layout(spec.layout)
     header_pads = [pad for name in spec.headers
                    for pad in board.element(name).pads]
     hx = [pad.x_mm for pad in header_pads]
@@ -1018,3 +1032,41 @@ def test_a_pad_off_the_footprints_origin_is_flipped_and_then_rotated():
     assert u4.rotation == -90.0
     first = [p for p in u4.pads if p.number == "1"][0]
     assert (first.x_mm, first.y_mm) == pytest.approx((22.25, -25.75))
+
+
+def test_the_two_lists_of_composed_boards_agree():
+    """**`COMPOSED` in the importer is a copy and this is what stops it
+    drifting.**
+
+    `tools/compose_board_3d.py` owns the real list -- a `Composition` per
+    board, with its layout file, its headers and the boards it serves -- and
+    passes it to `write_index`. The importer keeps a copy for
+    `import_3d_model.py --all`, which writes the index without the composer
+    having run. Two lists of the same fact is how this repository has been
+    bitten twice; the answer here is one test rather than one list, because
+    the importer cannot import the composer without a cycle.
+    """
+    from tools.import_3d_model import COMPOSED
+    from webui.boards.catalogue import chip_for
+
+    expected = {
+        (name, chip_for(spec.board), compose._slug(spec.board))
+        for spec in compose.COMPOSITIONS
+        for name in (spec.board, *spec.serves)
+    }
+    assert set(COMPOSED) == expected, (
+        "the importer's copy of the composed-board list disagrees with the "
+        "composer's own; whichever is wrong, the index will name the wrong "
+        "file for a board"
+    )
+
+
+def test_every_composed_board_says_how_to_fetch_its_layout():
+    """A layout that is not fetched prints the command that gets it. Two
+    vendors are fetched two different ways -- Arduino's `.brd` by hand through
+    `get_board_sources.py`, Seeed's `.kicad_pcb` by this tool itself -- so a
+    single hard-coded sentence would send half of them to the wrong place."""
+    for spec in compose.COMPOSITIONS:
+        assert spec.fetch_with, spec.board
+        assert spec.geometry and len(spec.geometry) > 40, spec.board
+        assert spec.layout.suffix in (".brd", ".kicad_pcb"), spec.layout

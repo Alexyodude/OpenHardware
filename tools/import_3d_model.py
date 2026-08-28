@@ -1716,12 +1716,23 @@ def convert_part(part: Part, deflection: float, check: bool) -> int:
 #: The chip is repeated rather than looked up: `webui/boards/catalogue.py`
 #: knows it, and importing the board catalogue into a mesh tool to learn one
 #: string is the layering `tools/check_layering.py` exists to prevent.
+#: **The FALLBACK list, and `tools/compose_board_3d.py` owns the real one.**
+#: That module holds a `Composition` per composed board -- its layout file, its
+#: headers, its colour and the boards it serves -- and passing that list in is
+#: what keeps one answer to "which boards are composed". This copy exists only
+#: for `import_3d_model.py --all`, which writes the index without the composer
+#: having run, and `test_the_two_lists_of_composed_boards_agree` is what stops
+#: the two drifting apart.
 COMPOSED: tuple[tuple[str, str, str], ...] = (
     ("Arduino Uno", "ATmega328P", "Arduino-Uno"),
+    ("XIAO-ESP32-C3-DIP", "ESP32-C3", "XIAO-ESP32-C3-DIP"),
+    ("XIAO-ESP32-C3-DIP-SMD", "ESP32-C3", "XIAO-ESP32-C3-DIP"),
+    ("XIAO-ESP32-C3-SMD", "ESP32-C3", "XIAO-ESP32-C3-DIP"),
 )
 
 
-def write_index() -> pathlib.Path:
+def write_index(composed: tuple[tuple[str, str, str], ...] | None = None
+                ) -> pathlib.Path:
     """Write `models/index.json`: which board has a model, and from where.
 
     **Board name is the key, not chip**, because that is what the page has:
@@ -1734,7 +1745,7 @@ def write_index() -> pathlib.Path:
     is missing rather than an index that quietly says nothing exists.
     """
     boards: dict[str, dict[str, object]] = {}
-    for board, chip, slug in COMPOSED:
+    for board, chip, slug in (composed if composed is not None else COMPOSED):
         mesh = OUT / f"{slug}.glb"
         extras = read_extras(mesh) if mesh.is_file() else {}
         boards[board] = {
