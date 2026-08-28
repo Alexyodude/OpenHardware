@@ -564,8 +564,28 @@ def handle_board_api(boards: BoardSlot, route: str,
         # **Fetched once per load, not per poll.** Where a pad sits is a
         # property of the board and the levels ride `/api/board/state`, which
         # the page already asks for many times a second. See `api.pin_levels`.
-        session = boards.require()
-        return api.pin_view(session.runtime, session.cpu, session.board)
+        #
+        # **`?board=` answers for a board nobody has loaded, and OH-94 is why.**
+        # This used to call `require()` first, so the pin view existed only
+        # after a firmware load -- and since `reload()` in
+        # `webui/static/board3d-panel.js` is the only thing that draws the
+        # board, PICKING one drew nothing. The geometry never needed a session:
+        # `api.pad_view` reads it out of `webui/boards/<board>.json`.
+        #
+        # Liveness is an OVERLAY rather than a second endpoint. If the session
+        # is running the board being asked about, its levels are merged in;
+        # otherwise every pad reads `unknown`, which the page already writes a
+        # sentence for. One answer, so the picked board and the loaded board
+        # cannot come to disagree about what a board looks like.
+        asked = query.get("board", [""])[0] or None
+        session = boards.session
+        if asked is None:
+            # No parameter is the old contract, and it still refuses by name.
+            session = boards.require()
+            asked = session.board
+        if session is not None and session.board == asked:
+            return api.pin_view(session.runtime, session.cpu, asked)
+        return api.pad_view(asked, api.description_for(asked), None)
 
     if route == "/api/board/state":
         at = query.get("at")

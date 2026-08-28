@@ -499,3 +499,75 @@ def test_the_hung_up_set_is_the_three_that_mean_the_peer_left():
     assert OSError not in emulator_server.HUNG_UP, (
         "OSError covers failures this program made, not ones its peer did"
     )
+
+
+# --- a picked board, before anything is loaded (OH-94) ----------------------
+#
+# `/api/board/pins` used to call `boards.require()` first, so the pin view
+# existed only after a firmware load. `reload()` in board3d-panel.js is the
+# only thing that draws the board, so PICKING one drew nothing at all -- the
+# cause behind the symptom OH-89 fixed.
+
+
+def test_the_pins_of_a_board_nobody_has_loaded_are_served(session):
+    """**The whole of OH-94 in one call.** No session, no built core, and a
+    board that has no `webui/boards/mg24.py` at all -- and its twenty-four
+    pads come back, because where they sit is not an execution."""
+    view = emulator_server.handle_api(
+        session, emulator_server.Selection(), "/api/board/pins",
+        {"board": ["XIAO-MG24-DIP"]}, {}, emulator_server.BoardSlot(),
+    )
+    assert view["present"] is True
+    assert len(view["pads"]) == 24
+    assert view["unknown"] == 24, "nothing is running, so nothing is answerable"
+
+
+def test_asking_for_pins_with_no_board_and_no_session_still_refuses_by_name():
+    """The no-parameter form is the old contract and keeps it. A caller that
+    forgot the parameter must get the sentence that says what to do, not an
+    empty board."""
+    with pytest.raises(emulator_server.ApiError, match="no board is loaded"):
+        emulator_server.handle_api(
+            emulator.Session(), emulator_server.Selection(), "/api/board/pins",
+            {}, {}, emulator_server.BoardSlot(),
+        )
+
+
+def test_an_unknown_board_name_says_there_is_nothing_to_draw(session):
+    """Not a traceback out of the middle of a request, and not an empty board
+    either: a named `present: false` with the reason, which is the shape the
+    panel already renders."""
+    view = emulator_server.handle_api(
+        session, emulator_server.Selection(), "/api/board/pins",
+        {"board": ["no such board"]}, {}, emulator_server.BoardSlot(),
+    )
+    assert view["present"] is False
+    assert "no pad map" in view["note"]
+
+
+def test_a_picked_board_is_answered_for_and_not_the_one_that_is_running(session):
+    """**Liveness is an overlay, and it is keyed on the board.**
+
+    If the page asks about a board the session is not running, merging that
+    session's levels in would report one board's pins on another board's pads
+    -- the shape of mistake this repository ranks worst, because every pad
+    would show a state and every state would be about something else.
+    """
+    slot = emulator_server.BoardSlot()
+
+    class _Running:
+        """Just the three attributes the route reads off a session."""
+
+        board = "Arduino Uno"
+        runtime = None
+        cpu = None
+
+    slot.session = _Running()
+    view = emulator_server.handle_api(
+        session, emulator_server.Selection(), "/api/board/pins",
+        {"board": ["XIAO-MG24-DIP"]}, {}, slot,
+    )
+    # It reached `pad_view` rather than `pin_view`: had it taken the live path
+    # it would have raised on `runtime=None` instead of answering.
+    assert view["board"] == "XIAO-MG24-DIP"
+    assert view["unknown"] == len(view["pads"])

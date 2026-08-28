@@ -368,7 +368,17 @@ function fillBoardPicker(boards) {
   select.replaceChildren(...ordered.map((board) => {
     const option = document.createElement("option");
     option.value = board.name;
-    option.disabled = !board.runnable;
+    // **Selectable even with no core, which it was not until OH-94.** The
+    // paragraph above still holds against HIDING these, and the reason it
+    // gave for DISABLING them has expired: "a click that cannot be honoured"
+    // was true when picking a board only chose what to load onto. Picking now
+    // draws the board, and fourteen of the twenty-six have pads and no core --
+    // a XIAO-MG24 has twenty-four of them and could never be looked at.
+    //
+    // Only `Load` cannot be honoured, and it already refuses by name:
+    // `/api/board/load` raises a `BoardRunError` naming the missing core and
+    // `loadBoardImage` puts it in the panel. The suffix below is the warning,
+    // so nobody presses it expecting otherwise.
     // The reason comes from boardStatus, so the word beside a board here is
     // the word beside it in the table below. Two spellings of one fact is how
     // a UI starts contradicting itself.
@@ -379,6 +389,27 @@ function fillBoardPicker(boards) {
   }));
   const first = ordered.find((board) => board.runnable);
   if (first) select.value = first.name;
+
+  // **The board the server already has beats the first one in the list.**
+  // The server keeps its selection across page loads, and this list does not
+  // know that -- so reloading the page while an ESP32-C3 was running left the
+  // picker reading "Arduino Uno". That was survivable while the picker drove
+  // nothing; now that it drives the picture it would draw the wrong board and
+  // report its pins as unanswerable, which is a confident lie rather than a
+  // blank.
+  //
+  // The bare form of the pin view is what knows, and it refuses when there is
+  // nothing loaded -- which is not an error here, it is the answer "keep the
+  // default". Then draw, because setting `.value` fires no `change` event and
+  // a picker that opens on a board nobody drew is the bug this ticket is
+  // about.
+  //
+  // Optional-chained because the order of the two files is not fixed: this is
+  // a classic script and the panel is a module.
+  api("/api/board/pins")
+    .then((view) => { if (view.board) select.value = view.board; })
+    .catch(() => {})
+    .finally(() => window.boardPins?.reload().catch(() => {}));
 }
 
 /** Which of the three facts is missing, said as the reason it is not runnable.
@@ -1122,6 +1153,17 @@ function wire() {
   // These report into their own panel, not through `report`, which writes to
   // the disassembly panel's detail line -- invisible from the view this
   // control lives in.
+  // **Choosing a board draws it, which it did not until OH-94.** The picker
+  // had no listener at all: it was a value `loadBoardImage` read when the
+  // Load button was pressed, so the 3D view first appeared after a firmware
+  // load. Where a board's pads are does not depend on what is running on it,
+  // and a reader who picks a board expects to see one.
+  //
+  // Swallowed like the panel's own start-up call, and for the same reason:
+  // there is nothing to report to, `reload` puts any refusal in its own
+  // caption, and a board that cannot be drawn is not an error in the picker.
+  $("board-pick").addEventListener("change", () =>
+    window.boardPins?.reload().catch(() => {}));
   $("board-load").addEventListener("click", () =>
     loadBoardImage().catch((error) => boardSays("Nothing loaded yet.", String(error.message || error))));
   $("board-go").addEventListener("click", () =>

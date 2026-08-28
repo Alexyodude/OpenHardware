@@ -1420,13 +1420,34 @@ def test_the_panel_asks_the_server_what_it_has_when_the_page_opens():
     -- and, because the server keeps its board selection across page loads,
     RELOADING with a board already loaded showed an empty view until something
     was clicked. The board was there; only this panel did not know.
+
+    **OH-94 moved the caller and this test now asserts the BEHAVIOUR rather
+    than the file.** The panel used to run `reload()` at module scope, which
+    was the only startup path there was. It cannot stay there: it runs before
+    `/api/boards` has filled the picker, so it can only ask about no board in
+    particular -- a request that cannot succeed when nothing is loaded, and a
+    second console error beside the picker's own probe. `fillBoardPicker` now
+    owns startup. A test that had gone on naming the panel would have been
+    asserting where the code lives instead of what the page does.
     """
     panel = PANEL.read_text(encoding="utf-8")
-    code = "\n".join(line for line in panel.splitlines()
-                     if not line.lstrip().startswith("//"))
-    assert re.search(r"^reload\(\)", code, re.MULTILINE), (
-        "nothing calls reload at startup, so the panel never asks"
+    page = (STATIC / "emulator.js").read_text(encoding="utf-8")
+    both = "\n".join(
+        line for line in (panel + "\n" + page).splitlines()
+        if not line.lstrip().startswith("//")
     )
+    # Something, somewhere, draws without waiting to be clicked.
+    assert "boardPins?.reload()" in both, (
+        "nothing draws the board at startup, so a fresh page never asks"
+    )
+    # And it asks whether the server already has one, which is the half of
+    # OH-89 about reloading the page while a board is running.
+    picker = both.split("function fillBoardPicker", 1)[1].split("\n}", 1)[0]
+    assert 'api("/api/board/pins")' in picker, (
+        "the picker never asks what the server has, so reloading the page "
+        "while a board runs would show whichever board sorts first"
+    )
+    assert "select.value = view.board" in picker
 
 
 def test_a_board_is_brought_into_view_once_and_not_on_every_poll():
@@ -1516,3 +1537,83 @@ def test_the_extruded_slab_is_the_same_substance_as_a_measured_one():
     slab = source.split("const slab = new THREE.Mesh(", 1)[1].split(");", 1)[0]
     assert "MeshPhysicalMaterial" in slab
     assert "SOLDER_MASK.coat" in slab and "SOLDER_MASK.roughness" in slab
+
+
+# --- a picked board draws (OH-94) -------------------------------------------
+#
+# Two lines of JavaScript, and without either of them the picker still draws
+# nothing. Python cannot press a select box, so these are source-level -- the
+# same reason and the same technique as every other assertion in this file,
+# and comments are stripped first because three tripwires here have now fired
+# on their own prose.
+
+
+def test_choosing_a_board_asks_the_server_about_that_board():
+    """`reload()` used to fetch `/api/board/pins` bare, which answers for the
+    board the SESSION is running -- so a picked board could not be asked
+    about at all, whatever called it."""
+    source = PANEL.read_text(encoding="utf-8")
+    code = "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "board-pick" in code, (
+        "the panel does not read the picker, so it cannot name the board"
+    )
+    assert "/api/board/pins?board=" in code
+    assert "encodeURIComponent" in code, (
+        "board names carry spaces -- 'Arduino Uno' -- so an unencoded query "
+        "asks for a board that does not exist"
+    )
+
+
+def test_the_board_picker_redraws_when_it_changes():
+    """**The listener that did not exist.** `#board-pick` had none: it was a
+    value `loadBoardImage` read when Load was pressed, which is why the 3D
+    view first appeared after a firmware load rather than after a choice."""
+    source = (STATIC / "emulator.js").read_text(encoding="utf-8")
+    code = "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("//"))
+    wiring = code.split('$("board-pick").addEventListener("change"', 1)
+    assert len(wiring) == 2, "the picker has no change listener"
+    assert "boardPins?.reload()" in wiring[1].split(";", 1)[0], (
+        "the picker changes and nothing redraws the board"
+    )
+
+
+def test_the_board_the_picker_opens_on_is_drawn_without_being_touched():
+    """**Setting `.value` fires no `change` event.**
+
+    So the default selection has to draw itself, or the picker opens on a
+    board nobody drew and a reader has to pick a different one and come back
+    to see the one that was already chosen. The draw hangs off `finally` so it
+    happens whether or not the server had a board to tell us about.
+    """
+    source = (STATIC / "emulator.js").read_text(encoding="utf-8")
+    code = "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("//"))
+    picker = code.split("function fillBoardPicker", 1)[1].split("\n}", 1)[0]
+    assert ".finally(" in picker and "boardPins?.reload()" in picker, (
+        "filling the picker does not draw, so the default board never appears"
+    )
+
+
+def test_a_board_with_no_core_can_still_be_chosen_and_looked_at():
+    """**Fourteen of the twenty-six have pads and no built core.**
+
+    They were `disabled` in the picker, on the reasoning that offering them
+    would accept "a click that cannot be honoured". Picking a board now draws
+    it, so the click CAN be honoured -- only `Load` cannot, and that refuses
+    by name on its own. A XIAO-MG24 has twenty-four pads and was unreachable.
+
+    The label still carries the reason, which is the half of that reasoning
+    that has not expired.
+    """
+    source = (STATIC / "emulator.js").read_text(encoding="utf-8")
+    code = "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("//"))
+    picker = code.split("function fillBoardPicker", 1)[1].split("\n}", 1)[0]
+    assert "option.disabled" not in picker, (
+        "a board with no core cannot be selected, so it cannot be drawn"
+    )
+    assert "boardStatus(board)" in picker, (
+        "the option no longer says why a board is not runnable"
+    )

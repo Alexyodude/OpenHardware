@@ -228,9 +228,28 @@ function renderTable(pads) {
   }
 }
 
-/** Fetch the layout for whatever board is loaded, and draw it. */
+/** Fetch the layout for the board the picker names, and draw it.
+ *
+ * **"whatever board is loaded" is what this used to say, and it was the bug.**
+ * The pin view existed only after a firmware load, so choosing a board drew
+ * nothing at all -- and since this function is the ONLY thing that draws the
+ * board, there was no other way for a picked board to appear. OH-89 made the
+ * panel say what it was waiting for, which was the right fix to the symptom
+ * and left this.
+ *
+ * The board is named in the request, so the answer is about the board the
+ * reader is looking at rather than the one the server happens to be running.
+ * `webui/emulator_server.py` merges live levels in when those are the same
+ * board and reports every pad as `unknown` when they are not.
+ */
 async function reload() {
-  const response = await fetch("/api/board/pins");
+  // Read from the DOM rather than passed in, because all four callers would
+  // otherwise have to agree on it -- and a caller that forgot would silently
+  // ask about a different board than the one on screen.
+  const picked = document.getElementById("board-pick")?.value ?? "";
+  const response = await fetch(
+    picked ? `/api/board/pins?board=${encodeURIComponent(picked)}`
+           : "/api/board/pins");
   if (!response.ok) {
     // **It used to set `layout` and return, saying nothing at all.** The canvas
     // kept its 300 x 150 default, the caption kept whatever it last held, and
@@ -534,19 +553,20 @@ mountBench();
 
 window.boardPins = { reload, levels, theme };
 
-// **Ask once at startup, which nothing did before.** `reload` was only ever
-// called by `emulator.js` after a load, a build or a reset, so a page opened
-// fresh never asked the server anything: the panel sat on the static caption
-// in the HTML, and the canvas sat at its 300 x 150 default with no word about
-// what it was waiting for. That is the state reported twice as "no 3D model".
+// **Startup lives in `fillBoardPicker` now, and this is why it moved.**
 //
-// It also fixes the other half of the same omission. The server keeps its
-// board selection across page loads, so RELOADING the page with a board
-// already loaded used to show an empty view until something was clicked --
-// the board was there, and only this panel did not know.
+// OH-89 put an unconditional `reload()` here, because nothing asked the server
+// anything on a fresh page: the panel sat on the static caption and the canvas
+// sat at its 300 x 150 default. That was right, and OH-94 makes it redundant
+// -- `emulator.js` now draws whenever the picker is filled or changed, which
+// covers page load as well.
 //
-// The failure is swallowed on purpose and it is the one case where that is
-// right: nothing has gone wrong if there is no board yet, `reload` has already
-// put the reason in the caption, and there is nobody to re-raise to on a page
-// that has only just opened.
-reload().catch(() => {});
+// **Redundant is not free here.** This call runs before `/api/boards` has come
+// back, so the picker is still empty and it can only ask about no board in
+// particular. With nothing loaded that is a 400 -- the correct refusal, and a
+// second console error on every fresh page load beside the one the picker's
+// own probe already makes. Two requests to learn one thing, one of which
+// cannot succeed.
+//
+// So the single startup path is: `/api/boards` fills the picker, the picker
+// asks once whether the server already has a board, and then it draws.

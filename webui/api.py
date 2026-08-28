@@ -796,19 +796,53 @@ def pin_levels(runtime: Runtime, cpu: Core) -> dict[str, str] | None:
     return None if reader is None else reader(cpu)
 
 
-def pin_view(runtime: Runtime, cpu: Core, board: str) -> dict[str, object]:
-    """Where a board's pads are, and what each one is doing.
+def description_for(board: str) -> types.ModuleType | None:
+    """The board module for this board, or `None` where there is not one.
+
+    **Deliberately not `runtime_for`, and that is the whole point of OH-94.**
+    That function resolves everything needed to EXECUTE -- including a core
+    that has been built -- and refuses at each join. Fourteen of the
+    twenty-six boards have no core built, and a `XIAO-MG24-DIP` has no
+    `webui/boards/mg24.py` at all. It also has twenty-four pads, and where
+    they sit is not an execution: it must not need one.
+
+    So this asks the smallest question that gets `PIN_NAMES` and `SUPPLY`, and
+    answers `None` rather than raising when the module is absent -- which is a
+    board drawn without pin names, not a board that cannot be drawn.
+    """
+    try:
+        chip = catalogue.chip_for(board)
+    except catalogue.CatalogueError:
+        return None
+    try:
+        return importlib.import_module(description_module(chip))
+    except ModuleNotFoundError:
+        return None
+
+
+def pad_view(board: str, description: types.ModuleType | None,
+             live: dict[str, str] | None) -> dict[str, object]:
+    """Where a board's pads are, and what each one is doing if anything is.
 
     Two sources joined on the pad label, and neither of them is this function's
     own opinion. **Position** comes from `webui/pinmap.py`, which reads
     `webui/boards/<board>.json` -- coordinates the vendor's own KiCad footprint
     produced, exact to three decimals. **State** comes from the board module's
-    `pin_states`, found by `getattr` exactly as `uart_view` finds
-    `uart0_output`.
+    `pin_states`, read by `pin_levels` for a caller that has a session.
 
-    **A board with no `pin_states` says so**, and for the same reason a board
-    with no UART does: pads reported at their real positions with no state
-    would be a picture that looks like a board doing nothing.
+    **`live` is None when nothing is running, and that is now a picture rather
+    than a refusal.** It used to mean `present: False` -- draw nothing -- and
+    that hid two different boards for one reason. A board that has been PICKED
+    but not loaded has no levels; so does a board whose description models no
+    pins, which is twenty-four of the twenty-six. Both have pads, and the page
+    has words for a pad it cannot answer for: `unknownWords` writes a sentence
+    per row and the panel's note counts them.
+
+    So `present` now means **there is something to draw** -- a pad map exists,
+    or there are states to report -- and the two views are ONE implementation.
+    Keeping them apart is what let the picker draw nothing for as long as it
+    has: `webui/static/board3d-panel.js` asks one endpoint, and the answer for
+    a board you chose has to be the same answer as for a board you loaded.
 
     **A pin with no pad is still reported.** The XIAO's user LED is on the
     board rather than on the header, so `LED` has a state and no coordinate --
@@ -816,26 +850,27 @@ def pin_view(runtime: Runtime, cpu: Core, board: str) -> dict[str, object]:
     to go on the picture would hide the one thing most sketches move; the
     caller gets `x: None` and puts it somewhere sensible.
     """
-    live = pin_levels(runtime, cpu)
-    if live is None:
+    layout = pinmap.load(board)
+    if layout is None and not live:
+        module = getattr(description, "__name__", None)
         return {
             "present": False,
             "note": (
-                f"{runtime.description.__name__} maps no header pins, so "
-                f"nothing on a {runtime.chip} can be shown driving one. This "
-                f"is a gap in the board description, not a program that has "
-                f"driven nothing."
+                f"{module or 'no board description'} maps no header pins, and "
+                f"there is no pad map for {board!r} either, so there is "
+                f"nothing to draw and nothing to report. This is a gap in the "
+                f"board description, not a program that has driven nothing."
             ),
         }
+    live = live or {}
 
     # Which MCU pin each label reaches -- `D6` -> `PB08`. **The connection the
     # view is named for**, and the board module derives it from the same table
     # it reads levels through, so a label cannot have one pin here and another
     # there. Absent for a board that does not publish it, which is a missing
     # caption rather than a missing state.
-    names: dict[str, str] = getattr(runtime.description, "PIN_NAMES", {})
+    names: dict[str, str] = getattr(description, "PIN_NAMES", {})
 
-    layout = pinmap.load(board)
     pads: list[dict[str, object]] = []
     placed: set[str] = set()
     if layout is not None:
@@ -876,13 +911,25 @@ def pin_view(runtime: Runtime, cpu: Core, board: str) -> dict[str, object]:
         # changes: an output resistance is a property of silicon, and sending
         # it twenty times a second beside the pin levels would be the same
         # mistake `pin_levels` exists to avoid.
-        "supply": getattr(runtime.description, "SUPPLY", None),
+        "supply": getattr(description, "SUPPLY", None),
         # **Named rather than left for the caller to count.** "17 of 32 pads
         # cannot be answered for" is the sentence a reader needs in order to
         # know whether they are looking at a quiet program or a thin model.
         "unknown": sum(1 for pad in pads if pad["state"] == "unknown"),
         "pads": pads,
     }
+
+
+def pin_view(runtime: Runtime, cpu: Core, board: str) -> dict[str, object]:
+    """`pad_view` for a board that is loaded, with its levels read.
+
+    **One line, and it is the point.** The view of a board you picked and the
+    view of a board you loaded are the same view with and without states, so
+    they are one implementation. Two functions answering the same question is
+    how `readPalette` and the glTF writer disagreed about sRGB for as long as
+    both existed.
+    """
+    return pad_view(board, runtime.description, pin_levels(runtime, cpu))
 
 
 #: How many instructions a listing carries. Enough to fill the pane without

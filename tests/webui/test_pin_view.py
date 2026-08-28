@@ -30,7 +30,7 @@
 
 import pytest
 
-from webui import api
+from webui import api, pinmap
 from webui.boards import atmega328p, samd21
 
 UNO = "Arduino Uno"
@@ -263,19 +263,86 @@ class _Silent:
     __name__ = "webui.boards.nothing"
 
 
-def test_a_board_that_maps_no_pins_says_so_rather_than_reporting_none():
+def test_a_board_with_nothing_to_draw_and_nothing_to_report_says_so():
     """The same shape `uart_view` uses for a board with no UART, and for the
     same reason: an empty table reads as a program that has driven nothing,
-    which is a claim about the sketch."""
+    which is a claim about the sketch.
+
+    **`present` narrowed under OH-94 and this test had to say which meaning it
+    holds.** It used to mean "the description reports no pin states", which
+    hid twenty-four of the twenty-six boards -- every one whose chip has no
+    `pin_states` -- even though they have pad maps and could be drawn. It now
+    means "there is nothing to draw AND nothing to report", and board `"X"`
+    qualifies on both counts: no `webui/boards/X.json` and no levels.
+
+    Without this rewrite the test would keep passing for a reason it does not
+    state, which this repository has now been bitten by twice.
+    """
     runtime = api.Runtime(
         board="X", chip="Nothing", core="none",
         description=_Silent(), abi=None, machine=None,
     )
+    assert pinmap.load("X") is None, "the fixture board must have no pad map"
     view = api.pin_view(runtime, None, "X")
     assert view["present"] is False
     assert "webui.boards.nothing" in view["note"]
+    assert "no pad map" in view["note"]
     assert "gap in the board description" in view["note"]
     assert api.pin_levels(runtime, None) is None
+
+
+# --- a board that has been picked but not loaded (OH-94) --------------------
+
+
+def test_a_board_with_pads_and_no_core_still_reports_where_they_are():
+    """**The change OH-94 is for, and the board that proves it.**
+
+    A `XIAO-MG24-DIP` has twenty-four pads in `webui/boards/`, no built core,
+    and no `webui/boards/mg24.py` at all. Where its pads sit is not an
+    execution and must not need one -- `runtime_for` would refuse it at three
+    separate joins.
+    """
+    view = api.pad_view("XIAO-MG24-DIP", api.description_for("XIAO-MG24-DIP"),
+                        None)
+    assert view["present"] is True
+    assert len(view["pads"]) == 24
+    assert view["unknown"] == 24, "nothing is running, so nothing is answerable"
+    assert all(pad["state"] == "unknown" for pad in view["pads"])
+    assert view["width"] and view["height"], "the page needs a size to scale by"
+
+
+def test_a_board_with_no_description_module_is_drawn_rather_than_refused():
+    """`webui.boards.mg24` does not exist. That is a board without pin names,
+    not a board that cannot be drawn, so `description_for` answers None."""
+    assert api.description_for("XIAO-MG24-DIP") is None
+    assert api.description_for("Arduino Uno") is not None
+    # A board the catalogue has never heard of is also None rather than a
+    # traceback out of the middle of a request.
+    assert api.description_for("no such board") is None
+
+
+def test_picking_a_board_and_loading_one_give_the_same_geometry():
+    """**One implementation, and this is what says so.**
+
+    The view of a board you picked and the view of a board you loaded are the
+    same view with and without states. Two functions answering that question
+    is how `readPalette` and the glTF writer disagreed about sRGB for as long
+    as both existed, so `pin_view` is a caller of `pad_view` and the pads must
+    match position for position.
+    """
+    with built(UNO, UNO_DRIVE) as session:
+        session.step(5000)
+        loaded = api.pin_view(session.runtime, session.cpu, UNO)
+    picked = api.pad_view(UNO, api.description_for(UNO), None)
+
+    assert picked["present"] == loaded["present"] is True
+    assert [(p["label"], p["x"], p["y"]) for p in picked["pads"]] == \
+           [(p["label"], p["x"], p["y"]) for p in loaded["pads"]]
+    # The supply rides the geometry, so it survives without a session too.
+    assert picked["supply"] == loaded["supply"]
+    # And the ONE thing that differs is the states.
+    assert picked["unknown"] == len(picked["pads"])
+    assert loaded["unknown"] < len(loaded["pads"])
 
 
 # --- what a pin can drive, for the circuit the 3D view solves ---------------
