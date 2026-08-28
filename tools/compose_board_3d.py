@@ -82,6 +82,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import itertools
 import math
 import pathlib
 import sys
@@ -91,7 +92,7 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools import eagle  # noqa: E402
+from tools import eagle, kicad  # noqa: E402
 from tools.import_3d_model import (  # noqa: E402
     CACHE,
     DEFLECTION,
@@ -319,43 +320,247 @@ PART_UP = 2
 MODELLED = REPO / "third_party" / "modelled"
 
 
-def loop(segments: tuple[eagle.Segment, ...]) -> list[tuple[float, float]]:
-    """Chain drawn segments into one closed ring of points.
+# --- a KiCad board, presented as the one this already composes -----------------
+#
+# **An adapter, and deliberately not a mode.** `compose` needs a board with an
+# outline and placed elements; `tools/eagle.py` produces one from a `.brd` and
+# this produces the same one from a `.kicad_pcb`. Nothing below the reader
+# learns which vendor's CAD it came from, so there is no `if kicad:` anywhere
+# in the composing, the confirming or the placing -- which is what
+# `.claude/CLAUDE.md` rule 7 asks for when a second caller wants the same
+# behaviour from a different source.
+#
+# OH-93's survey is why this exists: Seeed publishes no mesh for six of the
+# eight unmodelled chips but does publish the vendor KiCad project, which is
+# the same class of source as the Arduino EAGLE file the Uno is built from.
 
-    EAGLE writes the outline in no particular order and in no particular
-    direction, so this walks from an end to whichever segment shares it. It
-    **refuses an outline that does not close** rather than joining the ends,
-    because a board whose outline has a gap is a board this cannot describe,
-    and a silently-closed polygon would be a plausible wrong shape.
+#: How finely an outline arc is chopped, in millimetres of chord.
+#:
+#: A XIAO's corner radius is about 1.5 mm, so 0.2 mm of chord puts roughly
+#: eleven segments on a quarter turn -- under a tenth of a degree of visible
+#: faceting at the size a 21 mm board is drawn, and far below the 0.05 mm
+#: `DEFLECTION` every component mesh is tessellated to. The outline is
+#: extruded once into a slab, so this costs almost nothing.
+ARC_CHORD_MM = 0.2
+
+
+def arc_points(arc: kicad.Arc, chord: float = ARC_CHORD_MM
+               ) -> list[tuple[float, float]]:
+    """The points of one KiCad arc, start to end, through its middle.
+
+    **KiCad stores three points on the curve and not a centre**, so the centre
+    is solved for: it is where the perpendicular bisectors of the two chords
+    meet. Three collinear points have no centre, and that is a straight line
+    rather than an error -- a board outline may legitimately carry a
+    zero-bulge arc, and refusing it would refuse the board.
+    """
+    (x1, y1), (xm, ym), (x2, y2) = ((arc.x1_mm, arc.y1_mm),
+                                    (arc.xm_mm, arc.ym_mm),
+                                    (arc.x2_mm, arc.y2_mm))
+    # Twice the signed area of the triangle; zero when the three are collinear.
+    twice_area = 2 * ((xm - x1) * (y2 - y1) - (ym - y1) * (x2 - x1))
+    if abs(twice_area) < 1e-12:
+        return [(x1, y1), (x2, y2)]
+
+    first = x1 * x1 + y1 * y1
+    middle = xm * xm + ym * ym
+    last = x2 * x2 + y2 * y2
+    cx = (first * (ym - y2) + middle * (y2 - y1) + last * (y1 - ym)) / twice_area
+    cy = (first * (x2 - xm) + middle * (x1 - x2) + last * (xm - x1)) / twice_area
+    radius = math.hypot(x1 - cx, y1 - cy)
+
+    # **The centre is equidistant from all three points or it is not the
+    # centre**, and this is the check that names the failure instead of
+    # letting it draw. Both numerators above were sign-flipped in the first
+    # version: the centre came out NEGATED, which for a board at x = 140 mm
+    # put it 360 mm away, turned a 90-degree corner into a 359.99-degree
+    # sweep, and produced an outline of 67,569 segments spanning 746 mm. The
+    # only local symptom was that the three radii disagreed in the fourth
+    # decimal place -- so that disagreement is what is tested for.
+    spread = max(abs(math.hypot(px - cx, py - cy) - radius)
+                 for px, py in ((xm, ym), (x2, y2)))
+    if spread > 1e-6 * max(radius, 1.0):
+        raise ValueError(
+            f"arc ({x1}, {y1}) -> ({x2}, {y2}) via ({xm}, {ym}): the solved "
+            f"centre ({cx:.4f}, {cy:.4f}) is {spread:.6f} mm from being "
+            f"equidistant, so it is not the centre of any circle through them"
+        )
+
+    start = math.atan2(y1 - cy, x1 - cx)
+    through = math.atan2(ym - cy, xm - cx)
+    end = math.atan2(y2 - cy, x2 - cx)
+
+    # Go the way that passes through the middle point. Taking the short way
+    # round without checking draws the complement of a reflex arc, which on a
+    # rounded corner is a three-quarter circle bitten out of the board.
+    def forward(a: float, b: float) -> float:
+        return (b - a) % (2 * math.pi)
+
+    sweep = forward(start, end)
+    if forward(start, through) > sweep:
+        sweep -= 2 * math.pi
+
+    steps = max(2, math.ceil(abs(sweep) * radius / chord))
+    return [(cx + radius * math.cos(start + sweep * step / steps),
+             cy + radius * math.sin(start + sweep * step / steps))
+            for step in range(steps + 1)]
+
+
+def from_kicad(path: pathlib.Path) -> eagle.Board:
+    """One `.kicad_pcb`, as the `eagle.Board` the composer already consumes.
+
+    **The one thing that is not bookkeeping is the sign of Y.** KiCad measures
+    down the page and `eagle.Pad` is documented as the board's space with Y
+    UPWARD, so every coordinate is negated on the way through. Getting this
+    wrong mirrors the whole board -- which draws perfectly, has the right
+    outline and the right parts, and puts pin 1 at the opposite corner.
+
+    Rotation survives unchanged, and that is the same fact rather than an
+    inconsistency: KiCad's positive rotation is counter-clockwise *as drawn*,
+    and flipping Y turns its down-the-page frame into the up-the-page one the
+    composer uses, where counter-clockwise means the same thing.
+    """
+    board = kicad.read_board(path)
+
+    outline: list[eagle.Segment] = []
+    for seg in board.outline:
+        outline.append(eagle.Segment("Dimension", seg.x1_mm, -seg.y1_mm,
+                                     seg.x2_mm, -seg.y2_mm))
+    for arc in board.arcs:
+        points = arc_points(arc)
+        for (ax, ay), (bx, by) in itertools.pairwise(points):
+            outline.append(eagle.Segment("Dimension", ax, -ay, bx, -by))
+
+    elements: list[eagle.Element] = []
+    for placed in board.placements:
+        turn = math.radians(placed.rotation_deg)
+        cos, sin = math.cos(turn), math.sin(turn)
+        pads: list[eagle.Pad] = []
+        for pad in placed.pads:
+            # Into the Y-up frame first, then rotated in it, then placed.
+            local_x, local_y = pad.x_mm, -pad.y_mm
+            if placed.back:
+                # A part on the underside is mirrored across the board's own
+                # x axis, which is what makes its pad 1 land where the copper
+                # is rather than diagonally opposite it.
+                local_x = -local_x
+            pads.append(eagle.Pad(
+                number=pad.number,
+                # `eagle.Pad.kind` uses this module's vocabulary, which IS
+                # KiCad's, so nothing is translated here -- except that a
+                # `np_thru_hole` is a mounting slot and not a contact.
+                kind="thru_hole" if pad.kind == "thru_hole" else "smd",
+                x_mm=placed.x_mm + local_x * cos - local_y * sin,
+                y_mm=-placed.y_mm + local_x * sin + local_y * cos,
+                width_mm=pad.width_mm,
+                height_mm=pad.height_mm,
+                net=None,
+            ))
+        elements.append(eagle.Element(
+            name=placed.reference or placed.library,
+            library=placed.library.split(":", 1)[0],
+            package=placed.name,
+            pads=tuple(pads),
+            x_mm=placed.x_mm,
+            y_mm=-placed.y_mm,
+            rotation=placed.rotation_deg,
+            mirrored=placed.back,
+        ))
+
+    return eagle.Board(name=path.stem, version="kicad_pcb",
+                       elements=tuple(elements), outline=tuple(outline))
+
+
+def read_layout(path: pathlib.Path) -> eagle.Board:
+    """Whichever vendor CAD this is, as one board. Chosen by suffix."""
+    if path.suffix == ".kicad_pcb":
+        return from_kicad(path)
+    return eagle.read_board(path)
+
+
+def contours(segments: tuple[eagle.Segment, ...]) -> list[list[tuple[float, float]]]:
+    """Chain drawn segments into every closed ring they form.
+
+    EAGLE and KiCad both write an outline in no particular order and no
+    particular direction, so this walks from an end to whichever segment
+    shares it. It **refuses a ring that does not close** rather than joining
+    the ends, because a board outline with a gap is a board this cannot
+    describe and a silently-closed polygon is a plausible wrong shape.
+
+    **More than one ring is normal and was not, until OH-93.** The Arduino Uno
+    draws a single silhouette. Seeed's XIAO ESP32-C3 draws its outer edge and
+    two 0.76 x 0.51 mm rounded slots inside it, and `loop`'s single-ring
+    assumption reported that as "the outline does not chain: 74 segments left"
+    -- which reads like a parse failure and is a correct parse of a shape it
+    could not hold.
     """
     if not segments:
         raise ValueError("no outline segments")
     remaining = [((s.x1_mm, s.y1_mm), (s.x2_mm, s.y2_mm)) for s in segments]
-    start, here = remaining.pop(0)
-    ring = [start, here]
+    rings: list[list[tuple[float, float]]] = []
     while remaining:
-        for index, (a, b) in enumerate(remaining):
-            if _near(a, here):
-                here = b
-            elif _near(b, here):
-                here = a
+        start, here = remaining.pop(0)
+        ring = [start, here]
+        while not _near(ring[0], here):
+            for index, (a, b) in enumerate(remaining):
+                if _near(a, here):
+                    here = b
+                elif _near(b, here):
+                    here = a
+                else:
+                    continue
+                remaining.pop(index)
+                ring.append(here)
+                break
             else:
-                continue
-            remaining.pop(index)
-            ring.append(here)
-            break
-        else:
-            raise ValueError(
-                f"the outline does not chain: {len(remaining)} segment(s) left "
-                f"and none touches {here}. A board outline with a gap in it is "
-                f"not a shape this can extrude."
-            )
-    if not _near(ring[0], ring[-1]):
+                # **Two different failures, and they are kept apart.** A
+                # segment that touches nothing is a gap in the drawing; a
+                # chain that simply runs out is a shape that encloses nothing.
+                # One message for both passes with either guard deleted, which
+                # a mutation found once already -- see the two tests above.
+                if remaining:
+                    raise ValueError(
+                        f"the outline does not chain: {len(remaining)} "
+                        f"segment(s) left and none touches {here}. A board "
+                        f"outline with a gap in it is not a shape this can "
+                        f"extrude."
+                    )
+                raise ValueError(
+                    f"the outline chains but does not close: it ends at "
+                    f"{here} having started at {ring[0]}"
+                )
+        rings.append(ring[:-1])
+    return rings
+
+
+def loop(segments: tuple[eagle.Segment, ...]) -> list[tuple[float, float]]:
+    """The one closed ring these segments form, refusing anything else.
+
+    Kept as the strict form so a board that was a single silhouette does not
+    quietly become several: `outer` is what a caller uses when it knows the
+    shape may have cutouts, and this is what it uses when it does not.
+    """
+    rings = contours(segments)
+    if len(rings) != 1:
         raise ValueError(
-            f"the outline chains but does not close: it ends at {ring[-1]} "
-            f"having started at {ring[0]}"
+            f"these segments form {len(rings)} closed rings, not one; use "
+            f"`outer` if cutouts are expected"
         )
-    return ring[:-1]
+    return rings[0]
+
+
+def outer(segments: tuple[eagle.Segment, ...]
+          ) -> tuple[list[tuple[float, float]], list[list[tuple[float, float]]]]:
+    """`(the board's silhouette, everything else)`, largest ring first.
+
+    The cutouts are RETURNED rather than dropped, so the caller reports what
+    it is not drawing. Extruding the outer ring alone is a board with its
+    slots filled in; saying nothing about them is the part that would be
+    wrong.
+    """
+    rings = sorted(contours(segments), key=lambda ring: abs(_area(ring)),
+                   reverse=True)
+    return rings[0], rings[1:]
 
 
 def _near(a: tuple[float, float], b: tuple[float, float]) -> bool:

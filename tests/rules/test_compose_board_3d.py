@@ -32,6 +32,7 @@
 
 import dataclasses
 import json
+import math
 import pathlib
 import sys
 
@@ -42,6 +43,7 @@ sys.path.insert(0, str(REPO))
 
 from tools import compose_board_3d as compose  # noqa: E402
 from tools import eagle  # noqa: E402
+from tools import kicad  # noqa: E402
 
 BRD = REPO / "third_party" / "arduino-uno" / "UNO-TH_Rev3e.brd"
 
@@ -801,3 +803,218 @@ def test_each_component_box_actually_contains_its_component():
                     assert value <= solid["max"][axis] + 1e-3, element.name
         checked += 1
     assert checked == 15, f"only {checked} components were boxed"
+
+
+# --- a KiCad board, presented as the one this already composes ----------------
+#
+# OH-93. Six of the eight unmodelled chips publish a vendor KiCad PCB and no
+# mesh, so `from_kicad` presents one as the `eagle.Board` `compose` already
+# consumes -- an adapter rather than a mode, so nothing below the reader knows
+# which vendor's CAD it came from.
+
+#: A board with one part at a known place, an outline, and a rotation. Written
+#: out per test rather than shared with `tests/rules/test_kicad.py`: that file
+#: pins the PARSER and this one pins the ADAPTER, and a fixture serving both
+#: would make a change to either a change to the other.
+KICAD_BOARD = """(kicad_pcb
+\t(version 20241229)
+\t(gr_line
+\t\t(start 10 20)
+\t\t(end 30 20)
+\t\t(stroke (width 0.05) (type solid))
+\t\t(layer "Edge.Cuts")
+\t)
+\t(gr_rect
+\t\t(start 10 20)
+\t\t(end 32 37)
+\t\t(stroke (width 0.05) (type solid))
+\t\t(layer "Edge.Cuts")
+\t)
+\t(footprint "XIAO TEST:QFN32G-0.5-5X5MM"
+\t\t(layer "F.Cu")
+\t\t(at 20.5 28.25 -90)
+\t\t(property "Reference" "U4"
+\t\t\t(at -1.5 1.9 0)
+\t\t\t(layer "F.SilkS")
+\t\t)
+\t\t(pad "1" smd roundrect
+\t\t\t(at -2.5 -1.75 90)
+\t\t\t(size 0.8 0.28)
+\t\t\t(layers "F.Cu")
+\t\t)
+\t\t(pad "33" smd rect
+\t\t\t(at 0 0)
+\t\t\t(size 3.7 3.7)
+\t\t\t(layers "F.Cu")
+\t\t)
+\t)
+)
+"""
+
+
+def _kicad_board_file():
+    """The fixture above, on disk, because the reader takes a path."""
+    import tempfile
+
+    path = pathlib.Path(tempfile.mkdtemp()) / "TEST.kicad_pcb"
+    path.write_text(KICAD_BOARD, encoding="utf-8")
+    return path
+
+
+def test_an_arc_is_flattened_onto_its_own_circle():
+    """**KiCad stores three points on the curve, not a centre.**
+
+    A quarter circle of radius 5 about (10, 10): every point produced must lie
+    on it, and the ends must be the ends. This is the assertion that would
+    have caught the sign error described below in one line.
+    """
+    arc = kicad.Arc("Edge.Cuts", 15.0, 10.0, 13.5355, 13.5355, 10.0, 15.0)
+    points = compose.arc_points(arc, chord=0.2)
+
+    assert points[0] == pytest.approx((15.0, 10.0))
+    assert points[-1] == pytest.approx((10.0, 15.0))
+    for x, y in points:
+        assert math.hypot(x - 10.0, y - 10.0) == pytest.approx(5.0, abs=1e-3)
+    # A quarter of a 5 mm circle is 7.85 mm of arc; at 0.2 mm of chord that is
+    # forty segments, so this is "enough points to be smooth" and not a
+    # transcription of the implementation.
+    assert 30 < len(points) < 60
+
+
+def test_the_real_boards_outline_is_the_size_two_vendor_files_agree_on():
+    """**The end-to-end check on the adapter, against a second source.**
+
+    Seeed's KiCad PCB and Seeed's XIAO footprint are two files neither made
+    from the other. `Edge.Cuts` here and `F.Fab` there are two measurements of
+    one rectangle: 20.955 x 17.780 against 20.975 x 17.800, 0.020 mm apart.
+
+    This also pins the shape, not just its size. The C3's outline is not one
+    ring -- it is the silhouette plus two 1.270 x 0.508 mm slots -- and the
+    silhouette must come back smaller than its own bounding box, because a
+    rounded rectangle does. The sign error described in `arc_points` produced
+    a "silhouette" of 67,569 segments spanning 746 mm, which is what this
+    would have caught in one line.
+    """
+    pcb = REPO / "third_party" / "seeed-pcb" / "ESP32-C3.kicad_pcb"
+    if not pcb.is_file():
+        pytest.skip(f"{pcb} absent; see docs/research/board-models/README.md")
+
+    board = compose.from_kicad(pcb)
+    left, bottom, right, top = board.extent_mm()
+    assert (right - left) == pytest.approx(20.955, abs=0.01)
+    assert (top - bottom) == pytest.approx(17.780, abs=0.01)
+
+    ring, cuts = compose.outer(board.outline)
+    assert len(cuts) == 2, "the C3 has two routed slots inside its edge"
+    area = abs(compose._area(ring)) / 2  # `_area` is TWICE the signed area
+    box = (right - left) * (top - bottom)
+    assert 0.97 * box < area < box, (
+        f"the silhouette is {area:.2f} mm^2 against a {box:.2f} mm^2 box; a "
+        f"rounded rectangle is a little under its box and nothing else is"
+    )
+
+
+def test_an_arc_goes_the_way_its_middle_point_says():
+    """A rounded corner taken the other way round is a three-quarter circle
+    bitten out of the board, and it still draws."""
+    short = compose.arc_points(
+        kicad.Arc("Edge.Cuts", 15.0, 10.0, 13.5355, 13.5355, 10.0, 15.0))
+    # Same ends, middle on the far side: the long way round the same circle.
+    long = compose.arc_points(
+        kicad.Arc("Edge.Cuts", 15.0, 10.0, 6.4645, 6.4645, 10.0, 15.0))
+    assert len(long) > 2 * len(short), (
+        "the reflex arc is not being taken the long way round"
+    )
+
+
+def test_three_collinear_points_are_a_straight_line_and_not_an_error():
+    """A zero-bulge arc is legal in an outline; refusing it refuses the board."""
+    assert compose.arc_points(
+        kicad.Arc("Edge.Cuts", 0.0, 0.0, 1.0, 0.0, 2.0, 0.0)
+    ) == [(0.0, 0.0), (2.0, 0.0)]
+
+
+def _square(x, y, side, layer="Dimension"):
+    corners = [(x, y), (x + side, y), (x + side, y + side), (x, y + side)]
+    return [eagle.Segment(layer, *corners[i], *corners[(i + 1) % 4])
+            for i in range(4)]
+
+
+def test_an_outline_with_a_cutout_chains_into_two_rings():
+    """**More than one ring is normal, and was not until OH-93.**
+
+    The Uno draws a single silhouette. The XIAO ESP32-C3 draws its edge and
+    two 0.76 x 0.51 mm slots inside it, which `loop` reported as "the outline
+    does not chain: 74 segment(s) left" -- a correct parse of a shape it could
+    not hold, reading exactly like a parse failure.
+    """
+    segments = tuple(_square(0, 0, 10) + _square(3, 3, 1))
+    rings = compose.contours(segments)
+    assert len(rings) == 2
+    assert sorted(len(r) for r in rings) == [4, 4]
+
+
+def test_the_silhouette_is_the_largest_ring_and_the_rest_are_returned():
+    """The cutouts come back rather than being dropped, so a caller can say
+    what it is not drawing. Extruding the outer ring alone fills the slots in;
+    saying nothing about them is the part that would be wrong."""
+    ring, cuts = compose.outer(tuple(_square(0, 0, 10) + _square(3, 3, 1)))
+    assert abs(compose._area(ring)) == pytest.approx(200.0)  # twice 10 x 10
+    assert len(cuts) == 1
+    assert abs(compose._area(cuts[0])) == pytest.approx(2.0)
+
+
+def test_loop_still_refuses_a_shape_it_cannot_hold():
+    """`loop` is kept strict so a single-silhouette board cannot quietly
+    become several; `outer` is what a caller uses when cutouts are expected."""
+    with pytest.raises(ValueError, match="2 closed rings"):
+        compose.loop(tuple(_square(0, 0, 10) + _square(3, 3, 1)))
+
+
+def test_kicad_measures_down_the_page_and_the_composer_measures_up():
+    """**The one thing in the adapter that is not bookkeeping.**
+
+    Getting this wrong mirrors the whole board: right outline, right parts,
+    right sizes, and pin 1 in the opposite corner. It draws perfectly.
+    """
+    board = _kicad_board_file()
+    got = compose.from_kicad(board)
+    placed = {e.name: e for e in got.elements}
+    # The fixture puts U4 at y = 28.25 in KiCad's frame.
+    assert placed["U4"].y_mm == pytest.approx(-28.25)
+    assert placed["U4"].x_mm == pytest.approx(20.5)
+    # And every outline point is negated with it, so the two still agree.
+    assert max(s.y1_mm for s in got.outline) == pytest.approx(-20.0)
+
+
+def test_a_placements_pads_arrive_in_board_space():
+    """`confirm` measures a candidate mesh against these, so a pad still in
+    the footprint's own frame would compare a part against the origin."""
+    got = compose.from_kicad(_kicad_board_file())
+    u4 = {e.name: e for e in got.elements}["U4"]
+    # Pad 33 sits at the footprint's own origin, so it lands on the placement.
+    centre = [p for p in u4.pads if p.number == "33"][0]
+    assert (centre.x_mm, centre.y_mm) == pytest.approx((20.5, -28.25))
+
+
+def test_a_pad_off_the_footprints_origin_is_flipped_and_then_rotated():
+    """**Pad 33 cannot catch either mistake and pad 1 catches both.**
+
+    A pad at the footprint's own origin is invariant under a Y-flip AND under
+    a rotation, so asserting on it tests the translation and nothing else --
+    which let two mutations through: dropping the rotation, and leaving a
+    pad's local Y measuring down the page.
+
+    Worked by hand, for U4 at (20.5, 28.25) turned -90 degrees:
+
+        pad 1 is at (-2.5, -1.75) in the footprint, KiCad's Y down
+        into the composer's Y-up frame:   (-2.5, +1.75)
+        turned -90 (cos 0, sin -1):       x = -2.5*0 - 1.75*-1 = +1.75
+                                          y = -2.5*-1 + 1.75*0 = +2.50
+        placed at (20.5, -28.25):         (22.25, -25.75)
+    """
+    got = compose.from_kicad(_kicad_board_file())
+    u4 = {e.name: e for e in got.elements}["U4"]
+    assert u4.rotation == -90.0
+    first = [p for p in u4.pads if p.number == "1"][0]
+    assert (first.x_mm, first.y_mm) == pytest.approx((22.25, -25.75))
