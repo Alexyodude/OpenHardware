@@ -94,6 +94,7 @@ if str(REPO) not in sys.path:
 
 from tools import eagle, kicad  # noqa: E402
 from tools.import_3d_model import (  # noqa: E402
+    BOARD_MASK,
     CACHE,
     DEFLECTION,
     KICAD_3D,
@@ -470,13 +471,16 @@ COMPOSITIONS: tuple[Composition, ...] = (
         # its extras). Reused rather than invented: the sibling the vendor DID
         # publish a mesh of is the best evidence for a board of this family.
         thickness_mm=1.2,
-        colour=UNSTYLED,
+        colour=BOARD_MASK,
         colour_source=(
-            "UNSTYLED. Seeed's own STEP files for the XIAO family give the "
-            "PCB #808080, which is the importer's marker for a surface the "
-            "vendor did not colour -- so the nine XIAOs that DO have a "
-            "published mesh already draw a neutral board, and inventing a "
-            "colour here would make this one disagree with its siblings"
+            "BOARD_MASK, and it is A JUDGEMENT rather than a reading -- see "
+            "that constant, which records the four places searched for a "
+            "stated colour and found none: Seeed's STEP files (the PCB is "
+            "UNSTYLED), their .kicad_pro (pcb_color has alpha 0, which is "
+            "KiCad's unset), the .kicad_pcb (no stackup), and their wiki (no "
+            "mention of a colour at all). The nine XIAOs with published "
+            "meshes take the same constant on their own PCB solid, so all ten "
+            "agree"
         ),
         serves=("XIAO-ESP32-C3-DIP-SMD", "XIAO-ESP32-C3-SMD"),
     ),

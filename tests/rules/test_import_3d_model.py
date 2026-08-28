@@ -786,7 +786,11 @@ def test_only_the_solder_masks_are_coated():
     from tools.import_3d_model import FINISHES
 
     coated = {colour for colour, finish in FINISHES.items() if finish.coat}
-    assert coated == {"#313d63", "#116517"}, coated
+    # `#1b1b1b` is BOARD_MASK, added by OH-97: the XIAO family's mask, whose
+    # COLOUR is a judgement and whose being a mask is not. It belongs here for
+    # the same reason the other two do, and this list is what stops a coat
+    # spreading to a part that is one layer.
+    assert coated == {"#313d63", "#116517", "#1b1b1b"}, coated
     for colour in coated:
         assert "solder mask" in FINISHES[colour].why, (
             f"{colour} is coated and its evidence does not say it is a mask"
@@ -964,3 +968,131 @@ def test_the_writer_converts_every_channel_and_not_just_the_file_on_disk(tmp_pat
         assert abs(value - byte) > 0.01, (
             f"channel {channel} is still the sRGB byte {byte:.4f}"
         )
+
+
+# --- the one judged colour in the file (OH-97) -------------------------------
+
+
+def test_the_board_mask_is_a_judgement_and_says_so():
+    """**Every other colour here is the vendor's; this one is not.**
+
+    Nobody publishes a XIAO's solder mask colour: Seeed's STEP files leave the
+    PCB `UNSTYLED`, their `.kicad_pro` has `pcb_color` with alpha 0 (KiCad's
+    unset, not a claim of black), their `.kicad_pcb` has no stackup, and their
+    wiki does not mention a colour. So the constant has to carry the search
+    that found nothing, or the next reader repeats it.
+    """
+    from tools.import_3d_model import BOARD_MASK, UNSTYLED
+
+    source = pathlib.Path(import_3d_model.__file__).read_text(encoding="utf-8")
+    note = source.split("BOARD_MASK = ", 1)[0].rsplit("UNSTYLED = ", 1)[1]
+    assert BOARD_MASK != UNSTYLED, "the board is still painted 'unknown'"
+    assert "JUDGEMENT" in note, "the constant does not admit what it is"
+    lowered = note.lower()
+    for evidence in ("kicad_pro", "alpha zero", "stackup", "wiki"):
+        assert evidence in lowered, f"the search for {evidence} is not recorded"
+
+
+def test_the_board_mask_is_finished_like_the_solder_mask_it_is():
+    """The COLOUR is judged; that a solder mask is a cured semi-gloss coating
+    is not, and it gets the same finish as the two masks whose colours were
+    read from a source."""
+    from tools.import_3d_model import BOARD_MASK, FINISHES
+
+    mask = FINISHES[BOARD_MASK]
+    navy = FINISHES["#313d63"]
+    assert (mask.metalness, mask.roughness) == (navy.metalness, navy.roughness)
+    assert (mask.coat, mask.coat_roughness) == (navy.coat, navy.coat_roughness)
+
+
+def test_only_the_pcb_solid_is_repainted_and_not_every_unstyled_face():
+    """**The narrow change, and the line it must not cross.**
+
+    `UNSTYLED` means "nobody here knows what this is" and
+    `test_the_unstyled_colour_is_given_no_material` keeps that true. A PCB is
+    the one unstyled solid whose material is NOT a mystery -- this module
+    already identifies it by shape, because the model's origin is the board's
+    centre rather than the assembly's.
+
+    So the repaint is keyed on that identification. Checked at the source,
+    because doing it in a mesh would need OpenCASCADE and a vendor download.
+    """
+    source = pathlib.Path(import_3d_model.__file__).read_text(encoding="utf-8")
+    body = source.split("def tessellate(", 1)[1].split("\ndef ", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("#"))
+    assert "board_faces is not None and face.TShape() in board_faces" in code, (
+        "the repaint is no longer restricted to the PCB solid's own faces"
+    )
+    assert "UNSTYLED" in code, "an unstyled face that is not the board lost its grey"
+
+
+def test_every_shipped_board_paints_its_pcb_and_nothing_taller():
+    """**The whole chain, measured on the meshes that shipped.**
+
+    The group painted `BOARD_MASK` must be exactly the PCB the model states in
+    its own extras -- its length, its width and its thickness. If the wrong
+    solid were repainted this is what would catch it: a component would be
+    black and would stand taller than the board it sits on.
+    """
+    from tools.import_3d_model import BOARD_MASK, OUT
+
+    seen = 0
+    for mesh in sorted(OUT.glob("*.glb")):
+        doc, body = _gltf(mesh)
+        extras = doc["asset"].get("extras", {})
+        pcb = extras.get("pcb")
+        # Composed boards state their own colour and are covered by
+        # tests/rules/test_compose_board_3d.py; this is the importer's half.
+        if not pcb or extras.get("composed"):
+            continue
+        painted = [prim for m in doc["meshes"] for prim in m["primitives"]
+                   if doc["materials"][prim["material"]]["name"] == BOARD_MASK]
+        if not painted:
+            continue
+        seen += 1
+        points = [p for prim in painted
+                  for p in _read(doc, body, prim["attributes"]["POSITION"])]
+        for axis, stated in ((0, pcb["long"]), (1, pcb["thickness"]),
+                             (2, pcb["short"])):
+            values = [p[axis] for p in points]
+            span = max(values) - min(values)
+            assert span == pytest.approx(stated, abs=0.1), (
+                f"{mesh.name}: the painted group spans {span:.2f} mm on axis "
+                f"{axis} against a stated PCB of {stated:.2f} -- so what was "
+                f"repainted is not the board"
+            )
+    if not seen:
+        pytest.skip("no imported board meshes on disk; "
+                    "run python tools/import_3d_model.py --all")
+
+
+def test_a_face_styled_with_nothing_is_not_a_colour_called_empty_string():
+    """**The bug this cost, and the reason `colour_key` is its own function.**
+
+    `colour_of` answers `""` for a face the file styles with nothing, and
+    `None` for one it does not mention. The `or UNSTYLED` that used to sit
+    here absorbed both; a rewrite that checked `is None` alone let the empty
+    string through as a colour key, and it reached `int("", 16)` in the writer
+    and stopped the import of every board.
+
+    Nothing caught it, because the tests read the SHIPPED `.glb` and a
+    mutation does not regenerate one. So the decision was lifted out of
+    `tessellate`, which needs OpenCASCADE and a 34 MB download to run.
+    """
+    from tools.import_3d_model import BOARD_MASK, UNSTYLED, colour_key
+
+    assert colour_key("", is_board=False) == UNSTYLED
+    assert colour_key(None, is_board=False) == UNSTYLED
+    assert colour_key("", is_board=True) == BOARD_MASK
+    assert colour_key(None, is_board=True) == BOARD_MASK
+
+
+def test_a_face_the_vendor_did_colour_keeps_its_colour_even_on_the_board():
+    """The repaint fills a gap; it never overrides a statement. A PCB whose
+    mask the vendor DID style keeps what they said, and that is the difference
+    between reading a source and preferring a judgement to one."""
+    from tools.import_3d_model import colour_key
+
+    assert colour_key("#00ff00", is_board=True) == "#00ff00"
+    assert colour_key("#313d63", is_board=True) == "#313d63"

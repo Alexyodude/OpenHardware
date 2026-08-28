@@ -446,6 +446,36 @@ def colour_of(styles, shape) -> str:
 #: is what keeps that true.
 UNSTYLED = "#808080"
 
+#: What an unstyled PRINTED CIRCUIT BOARD is painted, where the constant above
+#: would otherwise leave it grey.
+#:
+#: **THIS IS A JUDGEMENT AND IT IS THE ONLY ONE IN THIS FILE.** Every other
+#: colour here is the vendor's, read out of their own STEP. Nobody publishes
+#: this one. Searched on 2026-08-29 so that nobody repeats it:
+#:
+#:   * Seeed's STEP files give the PCB `#808080` -- `UNSTYLED`. On the RP2040
+#:     that is 16,682 of 18,723 vertices.
+#:   * `XIAO ESP32C3_v1.3.kicad_pro` holds `"pcb_color": "rgba(0, 0, 0,
+#:     0.000)"`. **Alpha zero is KiCad's UNSET**, not a claim that the board is
+#:     black, and reading it as black would be inventing a fact out of a
+#:     default.
+#:   * The `.kicad_pcb` has no `(stackup ...)`. Its only solder-mask entries in
+#:     697 KB are `solder_mask_margin`, which is a clearance.
+#:   * Seeed's wiki says nothing: `XIAO_ESP32C3_Getting_Started` and
+#:     `SeeedStudio_XIAO_Series_Introduction` fetched and searched for "black",
+#:     "colour", "color", "matte", "glossy" -- zero mentions.
+#:
+#: So the value is chosen, and what is chosen is a DARK GREY rather than a
+#: black: a solder mask is a thin translucent film over copper and glass-epoxy,
+#: and it never reaches the 0.2% reflectance `FINISHES` gives moulded black
+#: epoxy at `#050505`. Sitting it above that keeps the board readably a
+#: different material from the chips standing on it, which is a thing anybody
+#: can check against a real board.
+#:
+#: **What would retire this judgement**: Seeed stating a colour, or somebody
+#: measuring a board. Recorded so it can be replaced rather than inherited.
+BOARD_MASK = "#1b1b1b"
+
 
 @dataclasses.dataclass(frozen=True)
 class Finish:
@@ -665,6 +695,14 @@ FINISHES: dict[str, Finish] = {
         "mask is a cured semi-gloss coating: far smoother than a moulded body "
         "and not a mirror"
     ), coat=0.85, coat_roughness=0.08),
+    "#1b1b1b": Finish(0.0, 0.35, (
+        "the XIAO family's solder mask, which is BOARD_MASK -- the one "
+        "judged colour in this file, because no Seeed file states one. It "
+        "gets the same finish as the two masks below it because it is the "
+        "same kind of surface: a cured semi-gloss coating, smoother than a "
+        "moulded body and not a mirror. The COLOUR is a judgement; that a "
+        "solder mask is semi-gloss is not"
+    ), coat=0.85, coat_roughness=0.08),
     "#116517": Finish(0.0, 0.35, (
         "the SAMD21 board's solder mask, named in `board3d.js`'s "
         "`refreshTheme` in the same sentence as #ff9f37"
@@ -768,6 +806,44 @@ def handedness_of(order: tuple[int, int, int]) -> float:
     return parity
 
 
+def colour_key(styled: str | None, is_board: bool) -> str:
+    """Which colour group a face belongs to.
+
+    **Lifted out of `tessellate` so that it can be tested at all.** That
+    function needs OpenCASCADE and a 34 MB vendor download to run, so the one
+    decision inside it that has been wrong could only be checked by reading a
+    `.glb` that a mutation does not regenerate -- the gap this repository has
+    now been caught by twice.
+
+    And it HAS been wrong. `colour_of` answers `""` for a face the file styles
+    with nothing, as well as `None` for one it does not mention. A check for
+    `None` alone let the empty string through as a colour key, which reached
+    `int("", 16)` in the writer and stopped the import outright.
+    """
+    if styled:
+        return styled
+    return BOARD_MASK if is_board else UNSTYLED
+
+
+def board_faces_of(shape) -> frozenset:
+    """The faces of the PCB solid, by identity, for `tessellate` to recolour.
+
+    Identity rather than index: `TShape()` is the same object for a face
+    however it is explored, and a positional index would depend on the order
+    two different explorations happen to walk in.
+    """
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    faces = set()
+    walk = TopExp_Explorer(pcb_solid(shape, up_axis(shape)), TopAbs_FACE)
+    while walk.More():
+        faces.add(TopoDS.Face_s(walk.Current()).TShape())
+        walk.Next()
+    return frozenset(faces)
+
+
 def frame_for(shape) -> tuple[Frame, Extent, float, float]:
     """The canonical frame for a model, and the PCB's size in it.
 
@@ -792,8 +868,20 @@ def frame_for(shape) -> tuple[Frame, Extent, float, float]:
     return frame, pcb, size[long_axis], size[short_axis]
 
 
-def tessellate(shape, styles, deflection: float, frame: Frame) -> Mesh:
-    """Mesh every face, grouped by colour, in glTF axes and millimetres."""
+def tessellate(shape, styles, deflection: float, frame: Frame,
+               board_faces: frozenset | None = None) -> Mesh:
+    """Mesh every face, grouped by colour, in glTF axes and millimetres.
+
+    `board_faces` names the faces of the PCB solid, and they take `BOARD_MASK`
+    where the vendor styled them nothing. **Only those faces, and only when
+    unstyled** -- `UNSTYLED` still means "nobody here knows what this is" for
+    every other face, which is the position that constant exists to hold and
+    `test_the_unstyled_colour_is_given_no_material` still enforces.
+
+    A PCB is the one unstyled solid whose material is not a mystery: this
+    module already had to IDENTIFY it, by shape, because the model's origin is
+    the board's centre rather than the assembly's. See `BOARD_MASK`.
+    """
     from OCP.BRep import BRep_Tool
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED
@@ -813,7 +901,10 @@ def tessellate(shape, styles, deflection: float, frame: Frame) -> Mesh:
         if triangulation is None:
             continue
 
-        key = colour_of(styles, face) or UNSTYLED
+        key = colour_key(
+            colour_of(styles, face),
+            board_faces is not None and face.TShape() in board_faces,
+        )
         positions, normals, indices = groups.setdefault(key, ([], [], []))
         base = len(positions) // 3
         transform = location.Transformation()
@@ -1202,7 +1293,9 @@ def convert(model: Model, deflection: float, check: bool) -> int:
           f"   (assembly {whole.width:.3f} x {whole.height:.3f} x "
           f"{whole.thickness:.3f} mm in the file's own axes)")
 
-    mesh = tessellate(shape, styles, deflection, frame)
+    # **The PCB's own faces, so an unstyled BOARD is a board rather than a
+    # mystery.** Every other unstyled face stays grey; see `BOARD_MASK`.
+    mesh = tessellate(shape, styles, deflection, frame, board_faces_of(shape))
     print(f"  mesh   {mesh.triangles():,} triangles, {mesh.vertices():,} vertices, "
           f"{len(mesh.groups)} colours at {deflection} mm deflection")
     report_alignment(model, long, short, spans(pcb)[frame.up])
