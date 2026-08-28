@@ -78,6 +78,58 @@ const PAD_RADIUS = 0.42;
 const PAD_HEIGHT = 0.06;
 const PAD_LIFT = 0.01;
 
+//: Millimetres from a pad's centre that a triangle may be and still be that
+//: pad's pin.
+//:
+//: **The pins are on a 2.54 mm pitch, so anything under 1.27 cannot reach a
+//: neighbour** -- which is the only error that would matter, because it would
+//: light the wrong pin and look entirely convincing. An Arduino Uno's header
+//: pin is a 0.64 mm square post and a XIAO's castellation is a 1.0 mm plated
+//: half-hole, so 1.1 covers both with room and still stops 0.17 mm short of
+//: the midpoint between two pins.
+//:
+//: Measured on the shipped models, 2026-08-28: the Uno's `IOH` header holds
+//: 440 gold vertices above the board in eleven columns at exactly 2.54 mm --
+//: 44 per pin for ten pins -- and the XIAO-RP2040's PCB solid holds 1,660
+//: near its long edges in seven columns of 228.
+//:
+//: **AND THE DISTANCE FROM EACH PAD TO THE PIN UNDER IT IS NOT ONE NUMBER**,
+//: which is the thing this constant cannot fix and must not hide. On the
+//: Arduino Uno, whose pad map is the one in this repository that was TRACED
+//: off PICSimLab's artwork rather than generated from a footprint:
+//:
+//:      14 pads   0.05 - 0.07 mm    0-7, A0-A5, VIN -- exact
+//:      11 pads   0.65 - 0.77 mm    8-13, 5V, 3V3, RESET, IOREF, NC
+//:       5 pads   1.21 - 3.84 mm    GND, 6, SCL, AREF, SDA
+//:
+//: The middle group is two whole headers offset together; the last five are
+//: pads the traced map puts somewhere the model has no pin at all. Widening
+//: this constant to reach them would take it past 1.27 -- half the pitch --
+//: where a pad starts claiming its NEIGHBOUR's pin and lights the wrong one
+//: convincingly. So it stays here, those five keep an invisible collider, and
+//: the disagreement is OH-96 rather than a tolerance quietly stretched to
+//: cover it.
+const PIN_REACH_MM = 1.1;
+
+//: How brightly a real pin glows in its state's colour.
+//:
+//: **The state is EMITTED, not painted on, and the first attempt got that
+//: wrong.** Blending the state colour into the metal was tried first and
+//: measured: brass `#b58136` with `high` mixed 72% of the way in comes out
+//: `#66744b`, a dull green, while `input` comes out `#7e726c`. Two muddy
+//: browns three pixels wide -- the pin had stopped looking like brass and the
+//: state still could not be read.
+//:
+//: Emission is the right mechanism because it is the right metaphor: the pin
+//: is still made of the metal the vendor published, and what changed is that
+//: it is doing something. A lit pin is brass with a coloured light in it,
+//: which reads at three pixels where a hue shift does not.
+//:
+//: 0.85 rather than 1.0 so a driven pin is clearly lit without blowing out to
+//: flat colour under the tone curve, which would put it back where the
+//: painted version was.
+const PIN_GLOW = 0.85;
+
 //: How far back the camera sits, as a multiple of the board's longest side.
 //: Framing from the geometry rather than from a fixed distance is what lets
 //: one number serve a 196px XIAO and a 402px Uno.
@@ -1004,6 +1056,14 @@ export function showBoard(layout, model = null) {
     // mirrors the header end for end, which on a board whose two rows carry
     // different pins is a wrong picture rather than an ugly one.
     post.position.set(pad.x * SCALE - width / 2, top, depth / 2 - pad.y * SCALE);
+    // **Never drawn. OH-95.** This disc is a collider and an anchor, not a
+    // picture: `placeModel` replaces it with the vendor's own pin wherever
+    // there is one, and where there is not, a cylinder standing on a board
+    // that has no pins is the thing the reader objected to. Raycasting does
+    // not test visibility -- `Raycaster.intersectObjects` calls `raycast` on
+    // whatever it is handed -- so a wire can still be started from a pad
+    // nobody can see, on the sixteen boards drawn as a bare footprint.
+    post.visible = false;
     post.userData.pin = pad.pin;
     post.userData.label = pad.label;
     // **The state is kept on the mesh, not only in the colour it produced.**
@@ -1077,6 +1137,145 @@ function scaleFromPads(xs, ys, span) {
 }
 
 /** Put a loaded model where the footprint was, and stand the pads on it. */
+/**
+ * Take the vendor's own pins out of the model and make them the pad markers.
+ *
+ * **OH-95: the marker used to be a `CylinderGeometry` disc this file drew, and
+ * on an Arduino Uno it hovered over a gold header pin the model had already
+ * put there.** Reported as "the cylindrical shapes for wire connections should
+ * not exist and should use the real pins".
+ *
+ * The marker does three jobs -- it carries the state colour, it is the
+ * raycast target that starts a wire, and it is the anchor a wire's end
+ * follows -- so it cannot be deleted. What it can stop being is invented.
+ * `view.pads` is still a `Map<pin, Mesh>` afterwards, so `repaint`,
+ * `setLevels`, `refreshTheme`, `anchorOf`, `describe` and the drag all go on
+ * working without knowing the geometry changed underneath them.
+ *
+ * **Only metal is carved, and that is what stops a header's shroud turning
+ * blue.** A pin is a conductor; the black plastic around it is not. The
+ * models say which is which -- `FINISHES` in `tools/import_3d_model.py` sets
+ * `metalness` to 0 or 1 because a surface either conducts or does not -- so
+ * this reads the material rather than guessing at a height above the board.
+ *
+ * The triangles are MOVED, not copied: left in place they would be drawn
+ * twice, once in the vendor's colour and once in the state's, and two
+ * coincident surfaces z-fight.
+ *
+ * Returns the pins it found, so the caller can say how many pads have real
+ * geometry and how many are left as colliders nobody can see.
+ */
+function carvePins(group, pcbThickness) {
+  const wanted = [];
+  for (const [pin, post] of view.pads) {
+    post.getWorldPosition(scratch);
+    wanted.push({ pin, post, at: group.worldToLocal(scratch.clone()) });
+  }
+  if (!wanted.length) return [];
+
+  //: Triangles claimed by each pad: positions, normals, and the colour the
+  //: VENDOR gave the surface they came out of -- which is the pin's own metal
+  //: and not the state colour the cylinder happened to be wearing.
+  const claimed = new Map(wanted.map(
+    (pad) => [pad.pin, { positions: [], normals: [], metal: null }]));
+  const corner = new THREE.Vector3();
+  const centre = new THREE.Vector3();
+
+  group.traverse((object) => {
+    if (!object.isMesh || !(object.material?.metalness > 0.5)) return;
+    const geometry = object.geometry;
+    const position = geometry.getAttribute("position");
+    const normal = geometry.getAttribute("normal");
+    const index = geometry.getIndex();
+    if (!position || !index) return;
+
+    const keep = [];
+    const array = index.array;
+    for (let at = 0; at < array.length; at += 3) {
+      centre.set(0, 0, 0);
+      for (let corner_ = 0; corner_ < 3; corner_++) {
+        corner.fromBufferAttribute(position, array[at + corner_]);
+        centre.add(corner);
+      }
+      centre.divideScalar(3);
+      object.localToWorld(centre);
+      group.worldToLocal(centre);
+
+      // Above the PCB's own top face: a pin's tail passes through the board
+      // and out of the underside, and carving that would take the solder
+      // side of a part nobody is looking at.
+      let mine = null;
+      if (centre.y > pcbThickness) {
+        let nearest = PIN_REACH_MM;
+        for (const pad of wanted) {
+          const gap = Math.hypot(centre.x - pad.at.x, centre.z - pad.at.z);
+          if (gap < nearest) {
+            nearest = gap;
+            mine = pad.pin;
+          }
+        }
+      }
+      if (mine === null) {
+        keep.push(array[at], array[at + 1], array[at + 2]);
+        continue;
+      }
+      const take = claimed.get(mine);
+      take.metal ??= object.material.color.clone();
+      for (let corner_ = 0; corner_ < 3; corner_++) {
+        corner.fromBufferAttribute(position, array[at + corner_]);
+        object.localToWorld(corner);
+        group.worldToLocal(corner);
+        take.positions.push(corner.x, corner.y, corner.z);
+        if (normal) {
+          corner.fromBufferAttribute(normal, array[at + corner_]);
+          // A normal is a direction: rotated with the mesh, never translated.
+          corner.transformDirection(object.matrixWorld).normalize();
+          take.normals.push(corner.x, corner.y, corner.z);
+        }
+      }
+    }
+    if (keep.length !== array.length) {
+      geometry.setIndex(keep);
+    }
+  });
+
+  const found = [];
+  for (const pad of wanted) {
+    const { positions, normals, metal } = claimed.get(pad.pin);
+    if (positions.length < 9) continue;   // fewer than one triangle
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position",
+                          new THREE.Float32BufferAttribute(positions, 3));
+    if (normals.length === positions.length) {
+      geometry.setAttribute("normal",
+                            new THREE.Float32BufferAttribute(normals, 3));
+    } else {
+      geometry.computeVertexNormals();
+    }
+    const pin = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+      // The vendor's own finish, so a pin that is doing nothing looks like
+      // the metal it is. `repaint` mixes the state into this.
+      color: metal.clone(),
+      roughness: 0.35,
+      metalness: 1.0,
+    }));
+    pin.userData.pin = pad.pin;
+    pin.userData.label = pad.post.userData.label;
+    pin.userData.state = pad.post.userData.state;
+    // **The vendor's colour is remembered, because a state cannot be undone.**
+    // `repaint` blends toward the state colour, so blending twice would walk
+    // the pin away from brass one call at a time.
+    pin.userData.metal = metal.clone();
+    group.add(pin);
+    release(pad.post);
+    view.board.remove(pad.post);
+    view.pads.set(pad.pin, pin);
+    found.push(pad.pin);
+  }
+  return found;
+}
+
+
 function placeModel(loaded, layout) {
   const { group, extras } = loaded;
   const pcb = extras.pcb;
@@ -1143,6 +1342,26 @@ function placeModel(loaded, layout) {
   const top = -BOARD_THICKNESS / 2 + (extras.pad_top ?? pcb.thickness) * scale
               + PAD_LIFT + PAD_HEIGHT / 2;
   for (const post of view.pads.values()) post.position.y = top;
+
+  // **And then the drawn markers are replaced by the pins the vendor
+  // published, wherever there is one.** OH-95. The raise above still matters:
+  // it is what puts each cylinder at the pin tip so `carvePins` can find the
+  // pin under it, and it is what a pad keeps when no pin is found.
+  //
+  // The world matrices have to be current for the search, which walks
+  // triangles between the model's frame and each mesh's own, and nothing has
+  // rendered since the group was added.
+  view.board.updateWorldMatrix(true, true);
+  const real = carvePins(group, pcb.thickness);
+  view.realPins = real;
+  // **What is left is not drawn.** A cylinder standing where the vendor drew
+  // nothing is the thing this ticket removes; kept invisible it is still the
+  // raycast target that starts a wire and the anchor the wire's end follows,
+  // so the bench goes on working on the sixteen boards that have no pin
+  // geometry at all. Nothing renders it.
+  for (const [pin, post] of view.pads) {
+    if (!real.includes(pin)) post.visible = false;
+  }
   // The board just changed shape, so what a wire may not pass through changed
   // with it -- and it is the PCB that changed, not the assembly: a lead should
   // drape over the connector rather than be stopped by the box around it.
@@ -1206,6 +1425,26 @@ function supplyOf(layout) {
 function repaint(post) {
   const colour =
     view.palette.states[post.userData.state] ?? view.palette.states.unknown;
+  // **A carved pin KEEPS the metal the vendor gave it and emits the state.**
+  // It is still made of brass; what changed is that it is doing something.
+  // Painting the state into the colour was tried first and measured -- see
+  // `PIN_GLOW` -- and produced two indistinguishable muddy browns.
+  //
+  // `unknown` does not glow at all. It is most pads on most boards, and a
+  // board whose every pin is lit says nothing; an unanswerable pad should
+  // look like the plain metal it is, and the table beside the canvas is where
+  // "cannot be answered for" is written in words.
+  if (post.userData.metal) {
+    post.material.color.copy(post.userData.metal);
+    const live = post.userData.state && post.userData.state !== "unknown";
+    // `setScalar(0)` rather than a black Color, and the tripwire in
+    // `test_the_renderer_writes_down_no_colour_of_its_own` is right to insist:
+    // black here is not a colour this file chose, it is the absence of light.
+    if (live) post.material.emissive.copy(colour);
+    else post.material.emissive.setScalar(0);
+    post.material.emissiveIntensity = live ? PIN_GLOW : 0;
+    return;
+  }
   post.material.color.copy(colour);
 }
 
@@ -1359,6 +1598,12 @@ export function describe() {
   return {
     camera: vecArray(view.camera.position),
     target: vecArray(view.controls.target),
+    // **How many pads are the vendor's own pin rather than an invisible
+    // collider.** OH-95 replaced a drawn cylinder with carved geometry, and
+    // "the cylinders are hidden" and "the pins were found" are two different
+    // claims -- the first is true even when the carve finds nothing. This is
+    // the number that tells them apart, and it is what the test asserts.
+    realPins: view.realPins ?? [],
     terminals: view.parts.flatMap((part, index) =>
       [...part.userData.terminals.entries()].map(([name, anchor]) => ({
         part: index, name, at: vecArray(anchor.getWorldPosition(new THREE.Vector3())),

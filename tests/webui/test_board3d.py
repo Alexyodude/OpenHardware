@@ -1617,3 +1617,133 @@ def test_a_board_with_no_core_can_still_be_chosen_and_looked_at():
     assert "boardStatus(board)" in picker, (
         "the option no longer says why a board is not runnable"
     )
+
+
+# --- the pad marker is the vendor's pin, not a cylinder (OH-95) --------------
+#
+# Reported as "the cylindrical shapes for wire connections should not exist and
+# should use the real pins to connect the wires". On an Arduino Uno the fake
+# and the real were in the same place: a disc drawn here hovering over a gold
+# header pin the model had already put there.
+
+
+def test_no_pad_marker_is_ever_drawn():
+    """**The disc still exists and is never rendered, which is the whole
+    trick.** It does three jobs -- state colour, raycast target, and the
+    anchor a wire's end follows -- so deleting it would take the bench with
+    it. `placeModel` replaces it with real geometry where there is any, and
+    what is left is a collider nobody can see.
+
+    Raycasting does not test visibility: `Raycaster.intersectObjects` calls
+    `raycast` on whatever it is handed. So a wire can still be started from a
+    pad on the sixteen boards that are drawn as a bare footprint.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    made = source.split("const post = new THREE.Mesh(", 1)[1].split("view.pads.set", 1)[0]
+    assert "post.visible = false;" in made, (
+        "the drawn cylinder is back"
+    )
+
+
+def test_only_metal_is_carved_out_of_the_model():
+    """**A pin conducts and the shroud around it does not.**
+
+    Without this the black plastic within reach of a pad would be carved too
+    and turn blue when the pin went high -- a header with a glowing body,
+    which looks like a rendering fault rather than a pin state. The models say
+    which is which: `FINISHES` sets `metalness` to 0 or 1 because a surface
+    either conducts or it does not.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    carve = source.split("function carvePins(", 1)[1].split("\n}\n", 1)[0]
+    code = "\n".join(line for line in carve.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "metalness > 0.5" in code, (
+        "carving is not restricted to conductors, so a shroud can be a pin"
+    )
+
+
+def test_a_pad_cannot_claim_its_neighbours_pin():
+    """**Half the pitch is 1.27 mm and this must stay under it.**
+
+    Past that a pad takes the pin next to it, which lights the wrong one and
+    looks entirely convincing -- the failure mode this whole file is written
+    against. Five of the Uno's pads sit 1.2 to 3.8 mm from any pin (OH-96);
+    reaching them would mean crossing that line.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    reach = float(re.search(r"^const PIN_REACH_MM = ([\d.]+);", source,
+                            re.MULTILINE).group(1))
+    assert reach < 2.54 / 2, (
+        f"a reach of {reach} mm crosses the midpoint between two pins"
+    )
+
+
+def test_the_carved_triangles_are_moved_and_not_copied():
+    """Left in the model as well, a pin would be drawn twice -- once in the
+    vendor's colour and once in the state's -- and two coincident surfaces
+    z-fight, which reads as a flickering board."""
+    source = RENDERER.read_text(encoding="utf-8")
+    carve = source.split("function carvePins(", 1)[1].split("\n}\n", 1)[0]
+    assert "geometry.setIndex(keep)" in carve, (
+        "the source geometry keeps the triangles that were carved out of it"
+    )
+
+
+def test_a_real_pin_keeps_its_metal_and_emits_its_state():
+    """**The state is emitted, not painted, and that was measured.**
+
+    Blending the state into the metal was tried first: brass `#b58136` with
+    `high` mixed 72% of the way in comes out `#66744b`, and `input` comes out
+    `#7e726c`. Two muddy browns three pixels wide -- the pin had stopped
+    looking like brass and the state still could not be read.
+
+    So `color` stays the colour the vendor published and the state goes into
+    `emissive`, which is also the right metaphor: the pin is made of the same
+    metal it always was, and what changed is that it is doing something.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    paint = source.split("function repaint(", 1)[1].split("\n}", 1)[0]
+    assert "color.copy(post.userData.metal)" in paint, (
+        "a real pin no longer keeps the metal the vendor gave it"
+    )
+    assert "emissive" in paint, "the state is not emitted"
+    assert re.search(r"^const PIN_GLOW = 0\.\d+;", source, re.MULTILINE), (
+        "the glow is a hidden literal rather than a named constant"
+    )
+
+
+def test_a_pad_nobody_can_answer_for_does_not_glow():
+    """`unknown` is most pads on most boards -- twenty-two of the Uno's
+    thirty-two are answerable and every pad of a board with no `pin_states` is
+    not. A board whose every pin is lit says nothing, so an unanswerable pad
+    stays the plain metal it is and the table beside the canvas is where
+    "cannot be answered for" is written in words."""
+    source = RENDERER.read_text(encoding="utf-8")
+    paint = source.split("function repaint(", 1)[1].split("\n}", 1)[0]
+    assert '!== "unknown"' in paint, (
+        "an unanswerable pad glows as though something were known about it"
+    )
+
+
+def test_only_the_part_of_a_pin_above_the_board_is_carved():
+    """**A header pin is longer than the part you can clip a lead to.**
+
+    Its tail passes through the PCB and out of the underside, and carving that
+    would take the solder side of a board nobody is looking at -- and light it
+    when the pin went high, so an Uno seen from below would glow through its
+    own laminate.
+
+    It is also what keeps a XIAO's castellations OUT: they are plated
+    half-holes inside the board's own thickness rather than posts standing on
+    it, so they are not carved and their pads stay invisible colliders. That
+    is a limitation rather than a decision, and it is written down in OH-95
+    rather than left for someone to discover.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    carve = source.split("function carvePins(", 1)[1].split("\n}\n", 1)[0]
+    code = "\n".join(line for line in carve.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "centre.y > pcbThickness" in code, (
+        "a pin's tail below the board is carved with its head"
+    )
