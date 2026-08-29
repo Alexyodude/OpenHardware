@@ -395,6 +395,28 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "says the same size.",
     ),
     Component(
+        "QFN60-0.4-7X7X0.9MM", "modelled", "QFN_60_7x7_P0.4",
+        "the RP2350 itself, and **the only part on any XIAO that is MODELLED "
+        "rather than matched** -- so it is the one line in this table that is "
+        "not a claim about two libraries agreeing. Nobody publishes a QFN-60: "
+        "KiCad's `Package_DFN_QFN` has none among 191 files, Raspberry Pi "
+        "publish reference designs and no STEP for the chip, and Seeed ship a "
+        "STEP beside two of their board files and not this one. "
+        "**`QFN-56-1EP_7x7mm_P0.4mm` is the near miss and is deliberately not "
+        "used**: right body, right pitch, four leads short, and it would put "
+        "a false part name in this model's own list. "
+        "Every number is Seeed's, read at build time: the body is the "
+        "`fp_rect` on F.Fab at 7.000 x 7.000 mm, the 60 leads are their own "
+        "pads clipped to it, the exposed pad is 3.45 x 3.45 mm, and the "
+        "pin-1 dot is their `fp_circle`. Only the 0.900 mm height is not "
+        "geometry, and it is the last field of their own footprint NAME. See "
+        "tools/model_from_datasheet.py, which cites both numbers it draws.",
+        # No turn: like the USB-B, the model is built in the vendor package's
+        # own frame, which is the one thing a modelled part gets to choose and
+        # half the reason it is worth building rather than matching.
+        modelled=True,
+    ),
+    Component(
         "X4-SMD-2.5X2.0MM", "Crystal", "Crystal_SMD_2520-4Pin_2.5x2.0mm",
         "MEASURED: four pads spanning 1.400 x 1.800 mm in a 2.5 x 2.0 mm "
         "package -- the 2520 land, named in the vendor's footprint and in the "
@@ -457,16 +479,6 @@ ABSENT: dict[str, str] = {
     # folder was listed and what the nearest thing in it was. A model of
     # nearly the right part is what `confirm`'s tolerances exist to refuse,
     # and a 7 x 7 mm chip is not the place to spend that tolerance.
-    "QFN60-0.4-7X7X0.9MM": (
-        "the RP2350 itself. Sixty-one pads spanning 6.800 x 6.800 mm, which "
-        "is a QFN-60 on 0.4 mm pitch in a 7 x 7 mm body. **KiCad's "
-        "`Package_DFN_QFN` holds no QFN-60 at all** -- 191 files listed on "
-        "2026-08-29, and the nearest is `QFN-56-1EP_7x7mm_P0.4mm`. That is "
-        "the right body and the right pitch with four leads missing, and "
-        "drawing it would put `U4 (QFN-56...)` in this model's own parts "
-        "list, which is a false statement about what is on the board. "
-        "Retired the day that library gains a QFN-60 7x7 P0.4."
-    ),
     "WLCSP47-0.3-2.451X2.245X0.42MM": (
         "the nRF54L15 itself, a 47-ball wafer-level CSP 2.45 x 2.25 mm. "
         "KiCad's `Package_CSP` holds 34 files and not one is a WLCSP-47; the "

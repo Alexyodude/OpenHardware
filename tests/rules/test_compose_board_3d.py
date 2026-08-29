@@ -358,7 +358,8 @@ EXPLAINS: dict[str, set[str]] = {
     "XIAO-ESP32-C3-DIP": {"PMOS_1.0_0.6_0.35MM", "BUTTON_TD1183SA"},
     "XIAO-ESP32-C6-DIP": {"ANT2P-5.2x2x1.1MM", "PMOS_1.0X0.6X0.35MM",
                           "SW4-SMD-2.8-2.6X1.6X0.53MM"},
-    "XIAO-RP2350-DIP": {"QFN60-0.4-7X7X0.9MM", "PMOS_1.0X0.6X0.35MM",
+    # The RP2350's own chip was here until OH-100 modelled it.
+    "XIAO-RP2350-DIP": {"PMOS_1.0X0.6X0.35MM",
                         "SW4-SMD-2.8-2.6X1.6X0.53MM"},
     "XIAO-nRF54l15-DIP": {"WLCSP47-0.3-2.451X2.245X0.42MM",
                           "ANT2P-5.2x2x1.1MM", "BUTTON_TD1183SA",
@@ -680,13 +681,232 @@ def test_every_modelled_dimension_cites_where_it_came_from():
     """
     from tools import model_from_datasheet
 
-    assert model_from_datasheet.SPECS, "nothing is modelled, so this is vacuous"
-    for spec in model_from_datasheet.SPECS:
+    every = (*model_from_datasheet.SPECS, *model_from_datasheet.PACKS)
+    assert every, "nothing is modelled, so this is vacuous"
+    for spec in every:
         assert spec.why_not_fetched.strip(), spec.name
         assert spec.cited, f"{spec.name} cites nothing, so it invented nothing?"
         for field, (value, why) in spec.cited.items():
             assert isinstance(value, float), f"{spec.name}.{field}"
             assert len(why) > 40, f"{spec.name}.{field} has no real citation"
+
+
+def _rp2350() -> pathlib.Path:
+    path = compose.PCB_CACHE / "RP2350.kicad_pcb"
+    if not path.is_file():
+        pytest.skip(
+            f"SKIPPED: {path.name} is not fetched. Run: "
+            f"python tools/compose_board_3d.py --board XIAO-RP2350-DIP"
+        )
+    return path
+
+
+def test_the_modelled_qfn_is_built_from_the_vendors_own_footprint():
+    """Every number in plan is Seeed's, which is why it cannot drift.
+
+    The RP2350 is the only part on any XIAO that is modelled rather than
+    matched, and the reason is that **nobody publishes a QFN-60**. What makes
+    that safe is that only its HEIGHT is not in the vendor's file.
+    """
+    from tools import model_from_datasheet
+
+    _rp2350()
+    spec = next(s for s in model_from_datasheet.PACKS
+                if s.package == "QFN60-0.4-7X7X0.9MM")
+    plan = model_from_datasheet.pack_geometry(spec)
+
+    body = plan["body"]
+    assert body["x"][1] - body["x"][0] == pytest.approx(7.0, abs=0.001)
+    assert body["y"][1] - body["y"][0] == pytest.approx(7.0, abs=0.001)
+    assert len(plan["leads"]) == 60, "a QFN-60 has sixty leads"
+    assert plan["flag"]["w"] == pytest.approx(3.45, abs=0.001)
+    assert plan["flag"]["h"] == pytest.approx(3.45, abs=0.001)
+    # Fifteen a side on 0.4 mm pitch, the ring at +-3.4 mm. All Seeed's.
+    assert sorted({round(p["x"], 3) for p in plan["leads"]})[0] == -3.4
+    assert len({round(p["y"], 3) for p in plan["leads"] if p["x"] == -3.4}) == 15
+
+
+def test_every_lead_is_brought_into_the_composers_frame():
+    """**The lead RING cannot show this and the individual leads can.**
+
+    A QFN's ring is symmetric about y, so negating it or not gives the same
+    SET of positions and an identical mesh -- which means no assertion about
+    the ring as a whole can tell a mirrored reader from a correct one. Pad by
+    pad it is plain: the vendor's pad 16 sits at y +3.400 in a file that
+    measures y downward, and belongs at -3.400 in a frame that measures it up.
+    """
+    from tools import model_from_datasheet
+
+    path = _rp2350()
+    spec = next(s for s in model_from_datasheet.PACKS
+                if s.package == "QFN60-0.4-7X7X0.9MM")
+    plan = model_from_datasheet.pack_geometry(spec)
+
+    tree = kicad.parse_sexp(path.read_text(encoding="utf-8", errors="replace"))
+    node = next(n for n in kicad.children(tree, "footprint")
+                if str(n[1]).endswith("QFN60-0.4-7X7X0.9MM"))
+    vendor = [p for p in kicad._pads_of(node)
+              if p.width_mm * p.height_mm < 1.0]
+    assert len(vendor) == len(plan["leads"]), "read in the vendor's own order"
+    off = [(v.number, v.y_mm, got["y"])
+           for v, got in zip(vendor, plan["leads"])
+           if round(got["y"], 4) != round(-v.y_mm, 4)]
+    assert not off, (
+        f"{len(off)} lead(s) keep the file's own y instead of the composer's, "
+        f"first {off[:2]} -- a mirrored part, which draws perfectly"
+    )
+
+
+def test_the_modelled_qfns_height_is_the_one_the_vendor_named():
+    """The only number here that is not geometry, tied to where it came from.
+
+    A QFN is a moulded slab whose height is the one dimension a land pattern
+    cannot express, so Seeed state it in the footprint NAME --
+    `QFN60-0.4-7X7X0.9MM` -- or nowhere. Reading it out of that name is what
+    keeps `cited` from drifting into a number somebody liked the look of.
+    """
+    from tools import model_from_datasheet
+
+    spec = next(s for s in model_from_datasheet.PACKS
+                if s.package == "QFN60-0.4-7X7X0.9MM")
+    named = spec.package.rsplit("X", 1)[-1].removesuffix("MM")
+    assert spec.cited["height"][0] == pytest.approx(float(named), abs=0.0001), (
+        f"the vendor's footprint is named {spec.package}, whose last field is "
+        f"{named} mm, and this draws it {spec.cited['height'][0]} mm tall"
+    )
+
+
+def test_the_qfn_body_is_the_fab_outline_and_not_the_courtyard():
+    """They differ by 0.01 mm on this part, so the wrong one is invisible.
+
+    `F.Fab` is KiCad's own convention for where the plastic actually is;
+    `F.CrtYd` is the keep-out around it and is what a placement tool avoids.
+    Here they are 7.000 x 7.000 and 7.000 x 7.000 -- the courtyard is offset
+    rather than larger -- so nothing about the SIZE would give away a reader
+    that took the wrong rectangle, and the body would sit 0.01 mm off centre
+    for ever.
+    """
+    from tools import model_from_datasheet
+
+    path = _rp2350()
+    spec = next(s for s in model_from_datasheet.PACKS
+                if s.package == "QFN60-0.4-7X7X0.9MM")
+    plan = model_from_datasheet.pack_geometry(spec)
+
+    tree = kicad.parse_sexp(path.read_text(encoding="utf-8", errors="replace"))
+    node = next(n for n in kicad.children(tree, "footprint")
+                if str(n[1]).endswith("QFN60-0.4-7X7X0.9MM"))
+    on = {}
+    for rect in kicad.children(node, "fp_rect"):
+        layer = kicad.first(rect, "layer")
+        on[layer[1]] = (kicad._floats(kicad.first(rect, "start"))
+                        + kicad._floats(kicad.first(rect, "end")))
+    assert {"F.Fab", "F.CrtYd"} <= set(on), on
+    # **They differ in y ONLY** -- -3.51..3.49 against -3.50..3.50, the same
+    # 7.000 mm span shifted by a hundredth. So an assertion about x, or about
+    # either span, passes on both, and this has to compare the corner it
+    # actually took. The first version of this test asserted x and let the
+    # mutation through.
+    assert on["F.Fab"][1::2] != on["F.CrtYd"][1::2], (
+        "this test is only meaningful while the two rectangles differ in y"
+    )
+    assert plan["body"]["x"] == sorted([on["F.Fab"][0], on["F.Fab"][2]])
+    assert plan["body"]["y"] == sorted([-on["F.Fab"][1], -on["F.Fab"][3]])
+
+
+def test_the_modelled_qfn_is_not_mirrored():
+    """The one feature on a QFN that says which way round it is.
+
+    KiCad measures y DOWN the page and the composer works in a frame whose y
+    runs up, so a model built in the file's own frame is mirrored against the
+    placement that positions it. **The body is four-fold symmetric, so that
+    draws perfectly** -- and moves the pin-1 dot to the opposite corner.
+
+    Checked against pad 1 rather than against a remembered sign. **Not by
+    which lead is nearest**: a corner dot sits between the last lead of one
+    side and the first of the next, and here it is 0.438 mm from lead 1 and
+    0.434 mm from lead 60 -- four microns apart, so "nearest" is noise and a
+    test built on it would pass or fail on rounding. What mirroring actually
+    changes is the SIGN of y, so the quadrant is what to assert.
+    """
+    from tools import model_from_datasheet
+
+    path = _rp2350()
+    spec = next(s for s in model_from_datasheet.PACKS
+                if s.package == "QFN60-0.4-7X7X0.9MM")
+    mark = model_from_datasheet.pack_geometry(spec)["mark"]
+    assert mark is not None, "the vendor draws a pin-1 circle on F.Fab"
+
+    tree = kicad.parse_sexp(path.read_text(encoding="utf-8", errors="replace"))
+    node = next(n for n in kicad.children(tree, "footprint")
+                if str(n[1]).endswith("QFN60-0.4-7X7X0.9MM"))
+    pads = {p.number: p for p in kicad._pads_of(node)}
+    one = pads["1"]
+    corner = (math.copysign(1, one.x_mm), math.copysign(1, -one.y_mm))
+    assert (math.copysign(1, mark["x"]), math.copysign(1, mark["y"])) == corner, (
+        f"the pin-1 mark is at ({mark['x']:.3f}, {mark['y']:.3f}) and pad 1 is "
+        f"at ({one.x_mm:.3f}, {-one.y_mm:.3f}) -- different corners, so the "
+        f"model is mirrored. It draws a correct-looking part with the one "
+        f"feature that says which way round it is diagonally misplaced."
+    )
+    # And it really is a CORNER mark: the two leads that meet there are the
+    # ends of the numbering, which is what a pin-1 dot points between.
+    nearest = sorted(
+        (math.dist((mark["x"], mark["y"]), (pad.x_mm, -pad.y_mm)), number)
+        for number, pad in pads.items() if number != "61")[:2]
+    assert {n for _d, n in nearest} == {"1", "60"}, nearest
+
+
+def test_the_rp2350_is_drawn_and_the_near_miss_is_still_refused():
+    """A QFN-56 is right in body and pitch and wrong in lead count.
+
+    It would draw a handsome part in the right place and put
+    `U4 (QFN-56-1EP_7x7mm_P0.4mm...)` in this model's own list of what is on
+    the board, which is a false statement rather than an approximation. That
+    is the whole reason the part is modelled instead.
+    """
+    qfn = [c for c in compose.CORRESPONDENCE
+           if c.package == "QFN60-0.4-7X7X0.9MM"]
+    assert qfn, "the RP2350's own chip is not in the correspondence"
+    assert qfn[0].modelled is True
+    assert qfn[0].turn == 0.0, (
+        "a modelled part is built in the vendor package's own frame"
+    )
+    assert "QFN60-0.4-7X7X0.9MM" not in compose.ABSENT, (
+        "it is drawn now; ABSENT should no longer claim otherwise"
+    )
+    for component in compose.CORRESPONDENCE:
+        assert "QFN-56" not in component.model, (
+            f"{component.package} was given {component.model}. A 56-lead part "
+            f"is not a 60-lead part, however well it measures."
+        )
+
+
+def test_an_exposed_pad_that_is_not_alone_is_refused():
+    """The flag is told apart from a lead by AREA, not by pad number.
+
+    3.45 mm square against 0.6 x 0.18 is a factor of a hundred, so the split
+    is wide -- but a part with two large pads is a different animal and this
+    would silently pick whichever came first in the file.
+    """
+    from tools import model_from_datasheet
+
+    path = _rp2350()
+    body = path.read_text(encoding="utf-8", errors="replace")
+    # Turn one lead into a second flag by growing it, in a copy.
+    broken = body.replace('(size 0.6 0.18)', '(size 3.45 3.45)', 1)
+    assert broken != body, "the substitution did not take"
+    scratch = path.with_name("QFN-two-flags.kicad_pcb")
+    scratch.write_text(broken, encoding="utf-8")
+    try:
+        spec = dataclasses.replace(
+            next(s for s in model_from_datasheet.PACKS
+                 if s.package == "QFN60-0.4-7X7X0.9MM"),
+            pcb=scratch)
+        with pytest.raises(SystemExit, match="exactly one exposed pad"):
+            model_from_datasheet.pack_geometry(spec)
+    finally:
+        scratch.unlink()
 
 
 def test_the_modelled_usb_socket_is_built_from_the_vendors_own_footprint():

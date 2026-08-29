@@ -106,10 +106,19 @@ Pico's is.
 In order of preference: the vendor's own mechanical model; a published model of
 the same package, from KiCad's `kicad-packages3D`; the manufacturer's own STEP;
 and last, a mesh built in Blender by `tools/model_from_datasheet.py` because
-nothing published exists. Only one part is in that last category today, the
-Uno's USB-B, and every dimension in it is either read out of Arduino's own
-package or carries a citation beside it in `SPECS`. A part nothing can honestly
-draw is left off and says why.
+nothing published exists. **Two parts are in that last category today**, and
+every dimension in each is either read out of the vendor's own file at build
+time or carries a citation beside it:
+
+- the Uno's **USB-B**, from Arduino's EAGLE package `PN61729`, with the shell
+  height from the USB specification -- `SPECS`;
+- the XIAO RP2350's **QFN-60**, from Seeed's own footprint, with only the
+  0.9 mm height taken from the last field of that footprint's NAME -- `PACKS`.
+
+Nobody publishes a QFN-60 at all, and the near miss is refused on purpose:
+`QFN-56-1EP_7x7mm_P0.4mm` is the right body at the right pitch with four leads
+missing, and drawing it would put a false part name in the model's own list.
+A part nothing can honestly draw is left off and says why.
 
 **Fetch KiCad models from GitLab, which is the library.** `KiCad/kicad-packages3D`
 on GitHub is a mirror and a different tree -- `Connector_USB` had 5 entries

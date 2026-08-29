@@ -68,6 +68,8 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from tools import kicad  # noqa: E402
+
 #: Where a modelled part lands. Gitignored with every other generated mesh,
 #: and for the same reason: it is an output, and the inputs are in the tree.
 OUT = REPO / "third_party" / "modelled"
@@ -148,6 +150,227 @@ SPECS: tuple[Modelled, ...] = (
         ),
     ),
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class ModelledPack:
+    """One flat surface-mount chip, from the vendor's own KiCad footprint.
+
+    **Separate from `Modelled` rather than a mode of it**, because the two
+    share a sentence and not a shape. `Modelled` reads EAGLE XML for a
+    through-hole connector and asks it for signal pins, shell posts and a
+    silkscreen; this reads a `.kicad_pcb` footprint and asks it for a body
+    outline, a lead ring and an exposed pad. A single reader with a format
+    flag would be one function doing two jobs badly, and its payload -- which
+    is the part that actually differs -- would have to hold both vocabularies.
+
+    What they DO share is the last step, and that is `run_blender`.
+    """
+
+    name: str
+    #: The vendor's own footprint name, and the board file to read it out of.
+    #: **Read, not copied**: a pad table retyped here would be a second source
+    #: that can drift from the first.
+    package: str
+    pcb: pathlib.Path
+    script: pathlib.Path
+    #: Dimensions that are NOT geometry in that file, each with its source.
+    cited: dict[str, tuple[float, str]]
+    why_not_fetched: str
+
+
+PACKS: tuple[ModelledPack, ...] = (
+    ModelledPack(
+        name="QFN_60_7x7_P0.4",
+        package="QFN60-0.4-7X7X0.9MM",
+        pcb=REPO / "third_party" / "seeed-pcb" / "RP2350.kicad_pcb",
+        script=REPO / "tools" / "blender" / "qfn_flatpack.py",
+        cited={
+            "height": (0.9, (
+                "the only number here that is not geometry, and it is still "
+                "Seeed's own: their footprint is NAMED "
+                "`QFN60-0.4-7X7X0.9MM`, and the 0.9 is the last field of it. "
+                "A QFN is a moulded slab whose height is the one dimension "
+                "its land pattern cannot carry, so a footprint states it in "
+                "the name or nowhere"
+            )),
+            "terminal": (0.23, (
+                "how TALL a terminal is drawn, and nothing else -- their "
+                "plan is the vendor's own pad clipped to the body, with no "
+                "number of ours in it. A drawing thickness rather than a "
+                "measurement: a land pattern states where copper goes and "
+                "never how far a terminal wraps up the side of the moulding. "
+                "Nothing depends on it. The part is surface-mount so nothing "
+                "hangs below the board, this is under the chip where a wire "
+                "never goes, and it changes no span `confirm` measures"
+            )),
+        },
+        why_not_fetched=(
+            "KiCad's Package_DFN_QFN holds no QFN-60 at all -- 191 files "
+            "listed on 2026-08-29 against the canonical library on GitLab, "
+            "nothing matching a 60-lead name, and no Raspberry Pi or MCU "
+            "library among its 115 top-level directories. Raspberry Pi "
+            "publish KiCad reference designs for the RP2350A and RP2350B "
+            "minimal viable boards and no STEP for the chip. Seeed ship a "
+            "STEP inside the PCB archive for the MG24 and the nRF54LM20A and "
+            "not for this board. If any of those three appears it is strictly "
+            "better than this and should replace it. What must NOT replace it "
+            "is `QFN-56-1EP_7x7mm_P0.4mm`: right body, right pitch, four "
+            "leads short, and it would put a false part name in this model's "
+            "own list."
+        ),
+    ),
+)
+
+
+def pack_geometry(spec: ModelledPack) -> dict[str, object]:
+    """Body, lead ring and exposed pad of `spec.package`, from the vendor.
+
+    **Y is negated, exactly as `compose_board_3d.from_kicad` negates it for
+    pads.** KiCad measures down the page and the composer works in a frame
+    whose y runs up, so a model built in the file's own frame is MIRRORED
+    against the placement that will position it. A QFN body is four-fold
+    symmetric, so that draws perfectly and moves one thing: the pin-1 marker,
+    which is the only feature on the part that says which way round it is.
+    """
+    tree = kicad.parse_sexp(spec.pcb.read_text(encoding="utf-8", errors="replace"))
+    wanted = [n for n in kicad.children(tree, "footprint")
+              if (n[1] if len(n) > 1 and isinstance(n[1], str) else ""
+                  ).split(":", 1)[-1] == spec.package]
+    if not wanted:
+        raise SystemExit(f"{spec.pcb}: no footprint called {spec.package!r}")
+    node = wanted[0]
+
+    pads = kicad._pads_of(node)
+    #: The exposed pad is the one that is not a lead, and it is told apart by
+    #: AREA rather than by number: it is 3.45 mm square against a lead of
+    #: 0.6 x 0.18, which is a factor of a hundred. Pad "61" would work on this
+    #: part and is the vendor's numbering rather than a fact about QFNs.
+    leads = [p for p in pads if p.width_mm * p.height_mm < 1.0]
+    flags = [p for p in pads if p.width_mm * p.height_mm >= 1.0]
+    if len(flags) != 1:
+        raise SystemExit(
+            f"{spec.package}: {len(flags)} pads are larger than a lead and "
+            f"this expects exactly one exposed pad: "
+            f"{[p.number for p in flags]}"
+        )
+
+    #: `F.Fab` is KiCad's own convention for the part's body outline, which is
+    #: what makes the 7 x 7 mm a reading rather than a parse of the package
+    #: name. `F.CrtYd` is the keep-out around it and is 0.01 mm larger here,
+    #: so taking the wrong one would be invisible and wrong.
+    body = [g for g in kicad.children(node, "fp_rect")
+            if (lambda layer: layer and len(layer) > 1 and layer[1] == "F.Fab")(
+                kicad.first(g, "layer"))]
+    if len(body) != 1:
+        raise SystemExit(
+            f"{spec.package}: {len(body)} rectangles on F.Fab and this needs "
+            f"exactly one to be the body outline"
+        )
+    corners = kicad._floats(kicad.first(body[0], "start")) + \
+        kicad._floats(kicad.first(body[0], "end"))
+
+    #: The pin-1 marker, and it is optional: a part without one is drawn
+    #: without one rather than refused, because the alternative is inventing
+    #: which corner is pin 1.
+    mark = None
+    for circle in kicad.children(node, "fp_circle"):
+        layer = kicad.first(circle, "layer")
+        if not (layer and len(layer) > 1 and layer[1] == "F.Fab"):
+            continue
+        centre = kicad._floats(kicad.first(circle, "center"))
+        edge = kicad._floats(kicad.first(circle, "end"))
+        if len(centre) >= 2 and len(edge) >= 2:
+            mark = {"x": centre[0], "y": -centre[1],
+                    "radius": max(abs(edge[0] - centre[0]),
+                                  abs(edge[1] - centre[1]))}
+    return {
+        "body": {"x": sorted([corners[0], corners[2]]),
+                 "y": sorted([-corners[1], -corners[3]])},
+        "leads": [{"x": p.x_mm, "y": -p.y_mm,
+                   "w": p.width_mm, "h": p.height_mm} for p in leads],
+        # The negation here is CURRENTLY UNOBSERVABLE and is kept anyway: an
+        # exposed pad is centred, so this one is at (0, 0) and -0.0 == 0.0.
+        # A mutation removing it survives the suite, and that is a property of
+        # the part rather than a gap in the tests -- recorded so nobody hunts
+        # it twice. A flat pack with an off-centre flag would expose it.
+        "flag": {"x": flags[0].x_mm, "y": -flags[0].y_mm,
+                 "w": flags[0].width_mm, "h": flags[0].height_mm},
+        "mark": mark,
+    }
+
+
+def run_blender(name: str, script: pathlib.Path, payload: dict[str, object],
+                target: pathlib.Path) -> None:
+    """Hand a payload to a Blender script and require it to write the mesh.
+
+    The one step both kinds of modelled part share, and the one carrying every
+    lesson that cost a session: the payload goes in a FILE, the pipe is
+    decoded as UTF-8, and the script has to say `WROTE` before this believes
+    it.
+    """
+    # **The payload goes in a file, not on argv.** Passed inline it is a
+    # single argument full of quotes and braces, and Windows' command line is
+    # rebuilt from a string by the runtime -- the JSON arrived mangled and
+    # `subprocess` returned a `stdout` of None rather than an error anybody
+    # could read.
+    handover = OUT / f"{name}.json"
+    handover.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+    done = subprocess.run(
+        [blender(), "--background", "--python", str(script), "--",
+         str(handover)],
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=600, check=False)
+    # **`encoding` given explicitly**, because `text=True` alone decodes with
+    # the locale codec -- cp1252 on this machine -- and Blender's banner is not
+    # cp1252. The decode raised inside subprocess and `stdout` came back None,
+    # which reads as "Blender printed nothing" and is a two-hour wrong turn.
+    if done.stdout is None:
+        raise SystemExit(f"{name}: Blender produced no output at all")
+    if f"WROTE {str(target).replace(chr(92), '/')}" not in done.stdout:
+        raise SystemExit(
+            f"{name}: Blender did not write the mesh.\n"
+            f"--- stdout ---\n{done.stdout[-2000:]}\n"
+            f"--- stderr ---\n{done.stderr[-2000:]}"
+        )
+
+
+def build_pack(spec: ModelledPack, check: bool) -> int:
+    print(f"{spec.name}:")
+    if not spec.pcb.is_file():
+        print(f"  SKIPPED: {spec.pcb} is not fetched. Run: "
+              f"python tools/compose_board_3d.py --board XIAO-RP2350-DIP")
+        return 3
+    plan = pack_geometry(spec)
+    cited = {key: value for key, (value, _why) in spec.cited.items()}
+    body = plan["body"]
+    print(f"  vendor  body {body['x'][1] - body['x'][0]:.3f} x "
+          f"{body['y'][1] - body['y'][0]:.3f} mm from F.Fab, "
+          f"{len(plan['leads'])} leads, exposed pad "
+          f"{plan['flag']['w']:.2f} x {plan['flag']['h']:.2f} mm, "
+          f"pin-1 mark {'yes' if plan['mark'] else 'none'}")
+    for key, (value, why) in spec.cited.items():
+        print(f"  cited   {key} = {value} mm -- {why[:64]}...")
+    if check:
+        print("  build   skipped (--check)")
+        return 0
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    target = OUT / f"{spec.name}.obj"
+    run_blender(spec.name, spec.script, {
+        "out": str(target).replace("\\", "/"),
+        "body": {**body, "height": cited["height"]},
+        "leads": plan["leads"],
+        "flag": plan["flag"],
+        "mark": plan["mark"],
+        "terminal": cited["terminal"],
+        "colours": {"moulding": [0.06, 0.06, 0.07],
+                    "lead": [0.72, 0.73, 0.76],
+                    "mark": [0.30, 0.30, 0.32]},
+    }, target)
+    print(f"  build   {target.relative_to(REPO)}  "
+          f"{target.stat().st_size:,} bytes")
+    return 0
 
 
 def blender() -> str:
@@ -248,25 +471,7 @@ def build(spec: Modelled, check: bool) -> int:
     # rebuilt from a string by the runtime -- the JSON arrived mangled and
     # `subprocess` returned a `stdout` of None rather than an error anybody
     # could read.
-    handover = OUT / f"{spec.name}.json"
-    handover.write_text(json.dumps(payload, indent=1), encoding="utf-8")
-    done = subprocess.run(
-        [blender(), "--background", "--python", str(spec.script), "--",
-         str(handover)],
-        capture_output=True, text=True, encoding="utf-8",
-        errors="replace", timeout=600, check=False)
-    # **`encoding` given explicitly**, because `text=True` alone decodes with
-    # the locale codec -- cp1252 on this machine -- and Blender's banner is not
-    # cp1252. The decode raised inside subprocess and `stdout` came back None,
-    # which reads as "Blender printed nothing" and is a two-hour wrong turn.
-    if done.stdout is None:
-        raise SystemExit(f"{spec.name}: Blender produced no output at all")
-    if f"WROTE {payload['out']}" not in done.stdout:
-        raise SystemExit(
-            f"{spec.name}: Blender did not write the mesh.\n"
-            f"--- stdout ---\n{done.stdout[-2000:]}\n"
-            f"--- stderr ---\n{done.stderr[-2000:]}"
-        )
+    run_blender(spec.name, spec.script, payload, target)
     print(f"  build   {target.relative_to(REPO)}  "
           f"{target.stat().st_size:,} bytes")
     return 0
@@ -282,22 +487,28 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.list:
-        for spec in SPECS:
-            print(f"{spec.name}  (EAGLE package {spec.package})")
+        for spec in (*SPECS, *PACKS):
+            source = ("EAGLE package" if isinstance(spec, Modelled)
+                      else "KiCad footprint")
+            print(f"{spec.name}  ({source} {spec.package})")
             print(f"    not fetched because: {spec.why_not_fetched}")
             for key, (value, why) in spec.cited.items():
                 print(f"    {key} = {value} mm")
                 print(f"        {why}")
         return 0
 
-    wanted = [s for s in SPECS if args.part is None or s.name == args.part]
+    every = (*SPECS, *PACKS)
+    wanted = [s for s in every if args.part is None or s.name == args.part]
     if not wanted:
         print(f"no modelled part called {args.part!r}. Known: "
-              f"{', '.join(s.name for s in SPECS)}")
+              f"{', '.join(s.name for s in every)}")
         return 2
     for spec in wanted:
         try:
-            code = build(spec, args.check)
+            # Two kinds of part and two builders, dispatched by type
+            # rather than by a flag on one: see `ModelledPack`.
+            code = (build(spec, args.check) if isinstance(spec, Modelled)
+                    else build_pack(spec, args.check))
         except Unavailable as exc:
             print(f"SKIPPED: {exc}")
             return 3
