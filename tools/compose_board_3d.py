@@ -295,25 +295,27 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "thirty-three. The ESP32-C3 itself, and the name states all of it.",
     ),
     Component(
-        "USB2.0-TYPE-C", "Connector_USB",
-        "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
-        "twenty pads spanning 4.812 x 8.636 mm: sixteen signal contacts and "
-        "four shell tabs. 8.94 mm is the width of a USB-C receptacle and "
-        "8.636 is its contact field, so this is the 16-pin part. "
-        "**The turn is 270, and it was 0 and then 90 before that.** This model "
-        "carries its 8.940 mm WIDTH on its own local x, and a receptacle's "
-        "width lies along the board edge with its 7.37 mm depth pointing off "
-        "it -- Seeed's own F.Fab rectangle measures 7.341 x 8.992 mm and says "
-        "so, which rules out 0 and 180. "
-        "**Which of the remaining two is decided by `contact_miss` and not by "
-        "anybody's reading of a picture**: 270 puts this model's plated "
-        "contacts 0.922 mm from the pads they solder to and 90 puts them "
-        "2.465 mm away, the worst of the four. OH-105 chose 90 by measuring "
-        "which end had least triangle area in its plane, reasoning that a "
-        "mouth is a rim and a back is a filled face -- and what that actually "
-        "measured was the thin solder tails crossing the plane, so it named "
-        "the BACK as the mouth and faced the socket into the board.",
-        turn=270.0,
+        "USB2.0-TYPE-C", "modelled", "USB2.0-TYPE-C",
+        "MODELLED, not matched, and this is the one line in this table where "
+        "**Seeed state a model and the model they state is the wrong part**. "
+        "Their ESP32-C6 names KiCad's `USB_C_Receptacle_GCT_USB4105-xx-A_16P`, "
+        "which is 7.78 mm deep; the same footprint's own `Description` property "
+        "says `SMD USB Type-c;12P+4-8.9*7.3*3.2mm`. A vendor's statement is the "
+        "best evidence there is here and it is not a proof -- their own "
+        "dimensions win over their own hyperlink. "
+        "Everything drawn is theirs: the body 7.341 x 8.992 mm from their "
+        "F.Fab rectangle, agreeing with that Description to 0.092 mm; the "
+        "3.2 mm height from it, which is the dimension no layer of a land "
+        "pattern can carry; twelve contact pads naming sixteen of the "
+        "standard's contacts, which is what `16P` means; four through-hole "
+        "shell tabs. Only the 8.34 x 2.56 mm opening is not theirs and it is "
+        "the USB Type-C specification's, for the reason the Uno's USB-B shell "
+        "height is the standard's. "
+        "**No turn: the model is built in the vendor footprint's own frame**, "
+        "which is what a modelled part gets to choose and half the reason it "
+        "is worth building. The GCT it replaces needed 270 and was given 0 and "
+        "then 90 first -- see `contact_miss`, which now refuses all three.",
+        modelled=True,
     ),
     Component(
         "X2-SMD-1.6X1.0X0.5MM", "Crystal",
@@ -469,33 +471,30 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "differ by one letter. The ESP32-C6 itself.",
     ),
     Component(
-        "USB2.0-TYPE-C_USB-31C-F-16P", "Connector_USB",
-        "USB_C_Receptacle_Amphenol_12401610E4-2A",
-        "MEASURED: eighteen pads -- sixteen surface-mount contacts and TWO "
-        "through-hole board locks -- spanning 4.525 x 10.240 mm on the RP2350 "
-        "and 4.850 x 10.240 on the nRF54L15. "
-        "**The count of through-holes is what picks the model, not the pin "
-        "count**, and both parts are 16P. OH-93 gave this the GCT USB4105 "
-        "that its 20-pad sibling `USB2.0-TYPE-C` uses, and the GCT has FOUR "
-        "shell tabs spread front to back where this land has two, both at the "
-        "back with the contacts 3.5 mm away. `place` anchors a through-hole "
-        "part on its legs against the pad extent, so two different features "
-        "were matched and the connector slid half a millimetre forward: its "
-        "contact row ended up 0.42 mm PAST the board edge, hanging in air. "
-        "Amphenol's 12401610E4-2A has two board locks -- 56 leg points "
-        "against the GCT's 502 -- and spans 9.200 x 10.500 mm against this "
-        "land's 10.240, where the GCT spans 7.780 and was 2.46 mm short "
-        "inside a 3.0 mm tolerance. Seeed name their own "
-        "`USB-31C-F-16P-L7.35.stp` and `320011419_ST-USB-3316T.stp`, which "
-        "they do not publish -- and whose `L7.35` states the 7.37 mm depth "
-        "their F.Fab rectangle draws. "
-        "**The turn is 270 and it was 0 until OH-105.** Like the GCT above "
-        "this model carries its 9.200 mm width on its own local x, which "
-        "belongs along the board edge; at 0 it put that width off the edge "
-        "instead. 270 rather than 90 because the mouth must face off the "
-        "board, and it gives 4.24 mm2 of open rim outward against 14.89 "
-        "inward.",
-        turn=270.0,
+        "USB2.0-TYPE-C_USB-31C-F-16P", "modelled",
+        "USB2.0-TYPE-C_USB-31C-F-16P",
+        "MODELLED, not matched. **The vendor names this part and does not ship "
+        "it**: `USB-31C-F-16P-L7.35.stp` on the RP2350 and "
+        "`320011419_ST-USB-3316T.stp` on the nRF54L15 and the ESP32-C5, both "
+        "under a `Y:/01_Cadence_Library` path that is a drive on somebody's "
+        "desk -- and `L7.35` in the first of those states the length. Their "
+        "own `Description` says `SMD USB TYPE C-W/P;12+4P-7.35*8.94*3.25mm`, "
+        "which agrees with the F.Fab rectangle they drew to 0.020 mm and adds "
+        "the 3.25 mm height no land pattern can carry. "
+        "So all of it is read: twelve contact pads naming sixteen of the "
+        "standard's contacts, two smd shell feet, two through-hole board "
+        "locks, and one 8.34 x 2.56 mm opening from the USB Type-C "
+        "specification. "
+        "**Both published 16-pin receptacles were tried here and both are the "
+        "wrong length.** OH-93 used the GCT USB4105 that this land's four-tab "
+        "sibling uses, and the GCT's four shell tabs against this land's two "
+        "board locks left the contact row 0.42 mm past the board edge in "
+        "mid-air (OH-101). Amphenol's 12401610E4-2A has the right two locks "
+        "and is 10.50 mm deep against the 7.35 the vendor states -- 3.15 mm of "
+        "connector that is not on the board, which is what `BODY_ALLOWANCE_MM` "
+        "used to excuse and no longer has to. "
+        "**No turn: the model is built in the vendor footprint's own frame.**",
+        modelled=True,
     ),
     Component(
         "USON8-0.5-3X2MM", "Package_SON",
@@ -1581,53 +1580,23 @@ TURN_MARGIN_MM = 0.3
 #: is the part and one is a drawing of where it goes -- so they do not agree
 #: exactly. 1.5 mm is loose against the 0.40 mm worst case among the fourteen
 #: parts that were right, and tight against the 7.50 mm of the one that was not.
+#:
+#: **This is the only tolerance now, and there was a second one until OH-102.**
+#: `BODY_ALLOWANCE_MM` was a per-package admission that the model was A
+#: DIFFERENT PART from the one the vendor fitted -- 2.3 mm for the USB-C's
+#: four-tab land and 1.6 for its two-lock one, because KiCad's only two 16-pin
+#: receptacles are 0.43 and 3.15 mm longer than the 7.35 Seeed state. Modelling
+#: the part they name emptied it, so it is gone rather than left standing at
+#: zero entries: the misses are 0.275 and 0.350 mm now, against a bare 1.5.
+#:
+#: **If one is ever needed again, key it by PACKAGE and not by board**, and
+#: measure it against the body the vendor drew rather than the one this tool
+#: reads -- the first version of that table was calibrated against an `F.Fab`
+#: outline with a cable keep-out unioned into it, and was therefore excusing
+#: the very connector that was a quarter turn out. It landed on its first
+#: outing, and its C6 entry was still quoting the pre-OH-105 figure of 2.215
+#: when the real miss had been 0.500 for a day.
 SILK_TOLERANCE_MM = 1.5
-
-#: Packages where the published model is a DIFFERENT PART from the one the
-#: vendor fitted, and how far its body may therefore sit from theirs.
-#:
-#: **Not a tolerance, an admission.** `SILK_TOLERANCE_MM` says how much two
-#: drawings of the same part may disagree; this says the two are not the same
-#: part. Seeed fit a receptacle 7.37 mm deep -- `L7.35` in the part number in
-#: their own board file, and 7.370 x 8.950 mm on their `F.Fab` rectangle --
-#: and publish it nowhere. KiCad's two 16-pin receptacles are 7.78 and
-#: 10.50 mm deep, so a model anchored on the pads has its body centre further
-#: out than the vendor's drawing puts it.
-#:
-#: **Every number here was re-measured after OH-105**, because the ones
-#: before it were taken against a body outline that included a cable keep-out
-#: and were therefore excusing a connector that was a quarter turn out. That
-#: is the hazard of an allowance, and it landed on this table's first outing:
-#:
-#:     XIAO-ESP32-C6-DIP    USB1   2.215 mm   GCT, 7.78 deep
-#:     XIAO-nRF54l15-DIP    USB1   1.495      Amphenol, 10.50 deep
-#:     XIAO-RP2350-DIP      USB1   1.332      Amphenol
-#:     XIAO-ESP32-C3-DIP    USB0   --         draws no F.Fab at all
-#:
-#: The Amphenol's 1.495 is INSIDE `SILK_TOLERANCE_MM` and still has an entry,
-#: because five thousandths of a millimetre from a hard failure is not a
-#: margin -- it is luck, and the next tessellation would spend it.
-#:
-#: **Keyed by package, so it excuses one part and not a board.** Every other
-#: part on those boards is held to 1.5 mm and the C3's worst is 0.000.
-#: OH-102 retires this by modelling the receptacle the vendor names.
-BODY_ALLOWANCE_MM: dict[str, float] = {
-    "USB2.0-TYPE-C": 2.3,
-    "USB2.0-TYPE-C_USB-31C-F-16P": 1.6,
-}
-
-
-def body_allowance(package: str) -> float:
-    """How far THIS package's body may sit from the vendor's own drawing.
-
-    One line, extracted for the reason `import_3d_model.colour_key` was: the
-    decision it makes is invisible to every test while it is an expression
-    inside `compose`, which needs OpenCASCADE and a whole board to run. A
-    mutation replacing the lookup with `max(BODY_ALLOWANCE_MM.values())` --
-    granting every part on every board the widest allowance any one part has
-    -- survived the entire suite until this existed.
-    """
-    return BODY_ALLOWANCE_MM.get(package, SILK_TOLERANCE_MM)
 
 
 def silk_miss(element: eagle.Element, put: Mesh,
@@ -1672,6 +1641,46 @@ def silk_miss(element: eagle.Element, put: Mesh,
     )
 
 
+def anchor_of(element: eagle.Element, legged: bool) -> tuple[float, float]:
+    """Where a mesh's own anchor has to land: the centre of the pads it IS.
+
+    **Like against like, and that is the whole of it.** `place` anchors a
+    through-hole model on its legs, because a barrel jack's body is entirely to
+    one side of its pins; so the pads those legs go into are the through-hole
+    ones, and comparing them against every pad on the footprint is comparing
+    two different features. A surface-mount model has no legs, is anchored on
+    its body, and its body sits over all of them.
+
+    On a part whose pads are all of one kind -- every DIP, every header, the
+    Uno's barrel jack and its USB-B -- the two answers are identical, which is
+    why this was invisible until a part had both.
+
+    **The USB-C is that part.** OH-101 found half of it: the RP2350's land has
+    two board locks against the GCT model's four shell tabs, so `place` matched
+    two different features and the connector slid 0.42 mm off the board edge.
+    Giving it the two-lock Amphenol fixed the model and left the rule, and the
+    rule is still wrong -- those two locks sit 4.75 mm from the contact row, so
+    a model anchored on them lands 2.26 to 2.43 mm inboard of where it belongs
+    on the three boards that use that land, and 0.31 to 0.34 on the other two.
+
+    Extracted rather than left as an expression inside `place` for the reason
+    OH-103's `body_allowance` was: a decision buried there is invisible to
+    every test that has not got OpenCASCADE and a whole board, and a mutation
+    to it survives the suite.
+    """
+    pads = element.pads_of("thru_hole") if legged else element.pads
+    if not pads:
+        raise SystemExit(
+            f"{element.name} ({element.package}): its model has legs below the "
+            f"board and the footprint places no through-hole pad for them to "
+            f"go into, so there is nothing to anchor on. `confirm` refuses "
+            f"this pairing before it gets here."
+        )
+    xs = [pad.x_mm for pad in pads]
+    ys = [pad.y_mm for pad in pads]
+    return ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+
+
 def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
           centre: tuple[float, float]) -> Mesh:
     """Move a component's mesh onto the board, the way its pads were moved.
@@ -1706,6 +1715,10 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
     below the board plane -- and that is exactly what the pads describe. So the
     anchor is the centre of the legs, and only a surface-mount model, which has
     none, falls back to the centre of the body.
+
+    **And the pads it is put onto are the ones of that same kind**, which
+    `anchor_of` is where it says so. A legged model against every pad on the
+    footprint is the OH-101 mistake in general form.
     """
     spin = math.radians(turn)
     turn_cos, turn_sin = math.cos(spin), math.sin(spin)
@@ -1718,7 +1731,8 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
     # The legs if it has any, the whole body if it has not. Measured off the
     # vertices rather than off the bounding box, so it is the same number the
     # placement below uses.
-    anchor_points = leads_of(mesh) or [
+    legs = leads_of(mesh)
+    anchor_points = legs or [
         (positions[at], positions[at + 1])
         for _colour, (positions, _n, _i) in mesh.groups.items()
         for at in range(0, len(positions), 3)
@@ -1727,8 +1741,7 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
     mid_x = (min(p[0] for p in every) + max(p[0] for p in every)) / 2
     mid_y = (min(p[1] for p in every) + max(p[1] for p in every)) / 2
 
-    x0, y0, x1, y1 = element.pad_extent()
-    anchor = ((x0 + x1) / 2, (y0 + y1) / 2)
+    anchor = anchor_of(element, bool(legs))
 
     def onto_board(x: float, y: float, direction: bool = False) -> tuple[float, float]:
         tx, ty = turned(x, y)
@@ -1867,17 +1880,17 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 )
 
         miss = silk_miss(element, put, centre)
-        allowed = body_allowance(element.package)
-        if miss is not None and miss > allowed:
+        if miss is not None and miss > SILK_TOLERANCE_MM:
             raise SystemExit(
                 f"{spec.board}: {element.name} ({element.package}) lands "
                 f"{miss:.2f} mm from the body the vendor's own drawing puts "
-                f"there, which is more than {allowed} mm. Almost always a "
-                f"`turn` that is 180 degrees out: the pins are symmetric so "
-                f"every other check passes. Try the other three. If the model "
-                f"is simply a different SIZE from the part they fitted, that "
-                f"belongs in BODY_ALLOWANCE_MM with the measurement, not in "
-                f"a wider tolerance for every part on every board."
+                f"there, which is more than {SILK_TOLERANCE_MM} mm. Almost "
+                f"always a `turn` that is 180 degrees out: the pins are "
+                f"symmetric so every other check passes. Try the other three. "
+                f"If the model is simply a different SIZE from the part they "
+                f"fitted, the answer is to model the one they name -- see "
+                f"tools/model_from_datasheet.py -- and not a wider tolerance "
+                f"for every part on every board."
             )
         pieces.append(put)
         drawn.append(f"{element.name} ({component.model})")

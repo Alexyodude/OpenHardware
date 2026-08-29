@@ -108,14 +108,29 @@ Pico's is.
 In order of preference: the vendor's own mechanical model; a published model of
 the same package, from KiCad's `kicad-packages3D`; the manufacturer's own STEP;
 and last, a mesh built in Blender by `tools/model_from_datasheet.py` because
-nothing published exists. **Two parts are in that last category today**, and
-every dimension in each is either read out of the vendor's own file at build
-time or carries a citation beside it:
+nothing published exists.
 
-- the Uno's **USB-B**, from Arduino's EAGLE package `PN61729`, with the shell
-  height from the USB specification -- `SPECS`;
-- the XIAO RP2350's **QFN-60**, from Seeed's own footprint, with only the
-  0.9 mm height taken from the last field of that footprint's NAME -- `PACKS`.
+**What is in that last category, and why each of its numbers is defensible, is
+printed rather than listed here** — the count has been wrong in this file twice:
+
+```bash
+python tools/model_from_datasheet.py --list      # every part, and its citations
+python tools/model_from_datasheet.py --check     # what it reads, building nothing
+```
+
+There are four shapes of modelled part and they are separate types rather than
+one with a flag, because they share a sentence and not a shape: `SPECS` reads an
+EAGLE package for a through-hole connector, `PACKS` a KiCad footprint for a flat
+pack, `SLABS` a moulded body whose height is the last field of its footprint
+NAME, and `SOCKETS` a receptacle whose whole envelope the vendor states in the
+footprint's own `Description` property. Every dimension in each is either read
+out of the vendor's file at build time or carries a citation beside it, and
+`test_every_modelled_dimension_cites_where_it_came_from` is what holds that.
+
+Two of those citations are the same argument and it is worth knowing: the Uno's
+USB-B shell height and the XIAO's USB-C opening are the **USB specification's**,
+because a cable from any maker has to enter a socket from any other. Everything
+else is arithmetic on a vendor's own body.
 
 Nobody publishes a QFN-60 at all, and the near miss is refused on purpose:
 `QFN-56-1EP_7x7mm_P0.4mm` is the right body at the right pitch with four leads

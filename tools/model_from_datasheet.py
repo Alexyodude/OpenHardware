@@ -391,6 +391,415 @@ SLABS: tuple[ModelledSlab, ...] = (
 )
 
 
+@dataclasses.dataclass(frozen=True)
+class ModelledSocket:
+    """A USB Type-C receptacle, from the land pattern the vendor fitted it to.
+
+    **A fourth shape, and separate for the reason the other three are**: a
+    receptacle is a folded metal box with a hole in one end, a paddle inside
+    it and two kinds of pad under it -- signal tails, shell feet and board
+    locks. A `ModelledSlab` is one box and a `ModelledPack` is a box with a
+    ring of terminals; neither has an opening, and an opening is the whole
+    difference between a socket and a lump.
+
+    What all four share is the last step, `run_blender`, and the rule: every
+    number is either the vendor's or carries a citation beside it.
+    """
+
+    #: Seeed's own footprint name, and the board file to read it out of. Some
+    #: boards draw `F.Fab` for a package and others do not -- the ESP32-C3
+    #: draws none at all for its receptacle -- so this names one that does.
+    package: str
+    pcb: pathlib.Path
+    #: Dimensions that are NOT in that file, each with its source.
+    cited: dict[str, tuple[float, str]]
+    why_not_fetched: str
+
+    @property
+    def name(self) -> str:
+        """A file name. The package's, with what a path cannot hold removed."""
+        return re.sub(r"[^A-Za-z0-9_.-]", "_", self.package)
+
+
+#: `#rrggbb` per material, and where each was READ. Not one is chosen here:
+#: every value is what a shipped vendor STEP gives that material, which is the
+#: same standing `tools/import_3d_model.py` gives a colour it reads out of a
+#: file rather than one it decides.
+#:
+#: The contact gold is in `compose_board_3d.CONTACT_COLOURS` on purpose and
+#: not by luck: that set is what the composer reads to find a part's plated
+#: contacts, so a receptacle whose tails were some other gold would be a part
+#: with no measurable facing -- and the turn is the one thing about this part
+#: that has been wrong three times.
+SOCKET_COLOURS: dict[str, tuple[str, str]] = {
+    "shell": ("#a5a392", (
+        "the shell colour GCT's own STEP carries, which is also what the four "
+        "boards that draw a steel-looking socket already show. Amphenol's "
+        "model says #1d1d1d for the same steel, and drawing two of the five "
+        "XIAOs with a black connector and three with a metal one made them "
+        "look like different parts. They are not."
+    )),
+    "cavity": ("#050505", (
+        "the insulator colour Amphenol's own STEP carries -- the darkest thing "
+        "in either published model, which is what the inside of a socket is"
+    )),
+    "insulator": ("#0f0f0f", (
+        "the insulator colour GCT's own STEP carries. A shade off the cavity "
+        "above so that the tongue is visible against the hole it sits in, and "
+        "both are readings rather than a pair chosen to contrast"
+    )),
+    "contact": ("#b58136", (
+        "the gold BOTH published receptacles give their contacts, and one of "
+        "the four values in `compose_board_3d.CONTACT_COLOURS`"
+    )),
+}
+
+#: The envelope Seeed state in the footprint's own `Description` property:
+#: `SMD USB TYPE C-W/P;12+4P-7.35*8.94*3.25mm`. Length, width, height, in
+#: millimetres, and the height is the dimension no layer of a land pattern can
+#: carry -- the same absence the QFN's footprint NAME fills.
+_STATED_ENVELOPE = re.compile(
+    r"(\d+(?:\.\d+)?)\*(\d+(?:\.\d+)?)\*(\d+(?:\.\d+)?)\s*mm", re.IGNORECASE)
+
+#: A USB Type-C contact is named by the specification -- A1 to A12 along one
+#: row and B1 to B12 along the other -- and a USB 2.0 receptacle joins four
+#: pairs inside itself, which is why a 16-contact part arrives on 12 pads and
+#: says so: `A1_B12`, `A4_B9`, `B4_A9`, `B1_A12`.
+#:
+#: **This is how a contact is told from a shell tab**, and it is the vendor
+#: writing the standard's own vocabulary rather than a rule invented here. The
+#: shell pads are `S1` upward and the mounting slots carry no number at all.
+_SPEC_CONTACT = re.compile(r"^[AB]\d{1,2}(?:_[AB]\d{1,2})*$")
+
+#: How far apart the contact pads' own axis may spread before they are not a
+#: row. They share one coordinate exactly on both of these land patterns, so
+#: this is a guard against reading a footprint this script does not draw --
+#: one whose depth runs along y, say -- rather than a tolerance being spent.
+CONTACT_ROW_MM = 0.05
+
+#: The number of Type-C contacts a 16-pin receptacle has, which is what makes
+#: `16P` in the vendor's own package name a fact about the part rather than a
+#: string. Counted over the designations in the pad names: twelve pads, four
+#: of which name two contacts each.
+SPEC_CONTACTS = 16
+
+SOCKETS: tuple[ModelledSocket, ...] = (
+    ModelledSocket(
+        package="USB2.0-TYPE-C",
+        pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C6.kicad_pcb",
+        cited={
+            "opening_width": (8.34, (
+                "the USB Type-C specification's plug interface, which is what "
+                "the socket has to admit. Fixed by the standard rather than by "
+                "a manufacturer, for the same reason the Uno's USB-B shell "
+                "height is: a cable from any maker has to enter a socket from "
+                "any other. It is also the ONLY number in this part that is "
+                "not Seeed's, together with its height below"
+            )),
+            "opening_height": (2.56, (
+                "the same interface's height. Together with the width this is "
+                "the aperture the standard defines, and everything the shell "
+                "measures follows from it by subtraction from the vendor's own "
+                "body: 0.30 mm of folded sheet at the sides, 0.32 above and "
+                "below"
+            )),
+            "terminal": (0.20, (
+                "how THICK a solder tail is drawn and nothing else. The tails' "
+                "plan is the vendor's own pad clipped to the metal outside the "
+                "shell, with no number of ours in it; this is the one "
+                "dimension a land pattern cannot state, it is under the "
+                "connector against the board, and it changes no span `confirm` "
+                "measures"
+            )),
+            "post_depth": (1.0, (
+                "how far the shell tabs stand below the board. Not a datasheet "
+                "figure and not one either: it is how far "
+                "`compose_board_3d.leads_of` has to see them, and it is under "
+                "the PCB where nothing looks"
+            )),
+            "tongue_width": (6.70, (
+                "the paddle inside the opening, drawn so the socket reads as a "
+                "socket rather than a hole. A drawing quantity like the "
+                "USB-B's `mouth_width - 2.0`, not a measurement -- nothing "
+                "reaches it, nothing measures it, and it is 1.64 mm inside an "
+                "opening the standard fixes"
+            )),
+            "tongue_thickness": (0.70, (
+                "the same paddle's thickness, and the same standing: a drawing "
+                "quantity inside a cavity nothing enters"
+            )),
+            "tongue_setback": (1.00, (
+                "how far behind the shell's lip the paddle's front edge sits. "
+                "Drawn rather than measured, and it exists because a tongue "
+                "flush with the cavity would share a face with it and the two "
+                "would fight for the one surface anybody looks at"
+            )),
+        },
+        why_not_fetched=(
+            "**Seeed state the model for this one and it is still the wrong "
+            "length.** Their ESP32-C6 names "
+            "`Connector_USB.3dshapes/USB_C_Receptacle_GCT_USB4105-xx-A_16P_"
+            "TopMnt_Horizontal.step`, which is 7.78 mm deep where the same "
+            "footprint's own Description says 7.3 -- so the vendor's statement "
+            "and the vendor's dimensions disagree, and the dimensions are the "
+            "measurement. KiCad's `Connector_USB` holds thirteen files and "
+            "exactly two 16-pin receptacles, the GCT above at 7.78 and "
+            "Amphenol's 12401610E4-2A at 10.50, so there is no third to try."
+        ),
+    ),
+    ModelledSocket(
+        package="USB2.0-TYPE-C_USB-31C-F-16P",
+        pcb=REPO / "third_party" / "seeed-pcb" / "RP2350.kicad_pcb",
+        cited={
+            "opening_width": (8.34, (
+                "the USB Type-C specification's plug interface, as for the "
+                "four-tab land above and for the same reason"
+            )),
+            "opening_height": (2.56, (
+                "the same interface's height. On this part's 8.94 x 3.25 mm "
+                "envelope it leaves 0.30 mm of folded sheet at the sides and "
+                "0.345 above and below, which is what a stainless receptacle "
+                "shell is made from -- the numbers cohere rather than merely "
+                "fitting"
+            )),
+            "terminal": (0.20, (
+                "how THICK a solder tail is drawn, as above: under the "
+                "connector, against the board, measured by nothing"
+            )),
+            "post_depth": (1.0, (
+                "how far the two board locks stand below the board, which is "
+                "how far `compose_board_3d.leads_of` has to see them"
+            )),
+            "tongue_width": (6.70, (
+                "the paddle inside the opening, as for the four-tab land "
+                "above: a drawing quantity rather than a measurement, sitting "
+                "1.64 mm inside an opening the standard fixes, reached by "
+                "nothing and measured by nothing"
+            )),
+            "tongue_thickness": (0.70, (
+                "the same paddle's thickness, and the same standing: a drawing "
+                "quantity inside a cavity that nothing enters"
+            )),
+            "tongue_setback": (1.00, (
+                "how far behind the shell's lip the paddle's front edge sits, "
+                "as above -- drawn rather than measured, and it exists so that "
+                "the paddle and the cavity do not share the one face anybody "
+                "looks at"
+            )),
+        },
+        why_not_fetched=(
+            "the vendor names a part they do not publish -- "
+            "`USB-31C-F-16P-L7.35.stp` on the RP2350 and "
+            "`320011419_ST-USB-3316T.stp` on the nRF54L15 and the ESP32-C5, "
+            "both under a `Y:/01_Cadence_Library` path that is a drive on "
+            "somebody's desk. **`L7.35` is the body length and it is in the "
+            "file name**, which is what makes the absence measurable: KiCad's "
+            "two 16-pin receptacles are 7.78 and 10.50 mm deep, so the nearer "
+            "of them is 0.43 mm too long and the one this land pattern needs "
+            "-- it is the two-board-lock part, see OH-101 -- is 3.15 mm too "
+            "long."
+        ),
+    ),
+)
+
+
+def socket_geometry(spec: ModelledSocket) -> dict[str, object]:
+    """A receptacle's body, opening end, tails, feet and locks, from the vendor.
+
+    **Two of Seeed's own sources, and each checks the other.** `F.Fab` is
+    KiCad's assembly drawing and carries the plan to four decimals; the
+    footprint's `Description` property states length, width AND height, which
+    is the one dimension a land pattern cannot express. Comparing the two is
+    what proves the string was read correctly rather than merely parsed -- the
+    same argument `slab_geometry` rests on, against the same tolerance.
+
+    **Y is negated**, exactly as `pack_geometry` negates it and for the same
+    reason: KiCad measures down the page and the composer works in a frame
+    whose y runs up. Both of these land patterns are symmetric about their own
+    y, so this is currently unobservable and is done anyway -- a receptacle
+    mounted off its own centre line would expose it at once.
+    """
+    tree = kicad.parse_sexp(spec.pcb.read_text(encoding="utf-8", errors="replace"))
+    wanted = [n for n in kicad.children(tree, "footprint")
+              if (n[1] if len(n) > 1 and isinstance(n[1], str) else ""
+                  ).split(":", 1)[-1] == spec.package]
+    if not wanted:
+        raise SystemExit(f"{spec.pcb}: no footprint called {spec.package!r}")
+    node = wanted[0]
+
+    body = kicad._body_of(node)
+    if body is None:
+        raise SystemExit(
+            f"{spec.package}: {spec.pcb.name} draws no *.Fab outline for it, "
+            f"so there is no plan to read. Another board may; name that one."
+        )
+
+    described = ""
+    for prop in kicad.children(node, "property"):
+        if len(prop) > 2 and prop[1] == "Description" and isinstance(prop[2], str):
+            described = prop[2]
+    stated = _STATED_ENVELOPE.search(described)
+    if stated is None:
+        raise SystemExit(
+            f"{spec.package}: its Description is {described!r}, which states "
+            f"no length*width*height. The height is the one dimension no layer "
+            f"of a land pattern carries, and a body of invented thickness is "
+            f"what this whole file exists not to draw."
+        )
+    length, width, height = (float(g) for g in stated.groups())
+
+    drawn = sorted((body[2] - body[0], body[3] - body[1]))
+    claimed = sorted((length, width))
+    apart = max(abs(a - b) for a, b in zip(drawn, claimed))
+    if apart > NAMED_BODY_TOLERANCE_MM:
+        raise SystemExit(
+            f"{spec.package}: its Description says {length} x {width} mm and "
+            f"its F.Fab measures {drawn[1]:.3f} x {drawn[0]:.3f}, which are "
+            f"{apart:.3f} mm apart. Either the string was read wrongly or it "
+            f"does not describe this footprint; do not draw either."
+        )
+
+    pads = kicad._pads_of(node)
+    contacts = [p for p in pads
+                if p.kind == "smd" and _SPEC_CONTACT.match(p.number)]
+    feet = [p for p in pads
+            if p.kind == "smd" and not _SPEC_CONTACT.match(p.number)]
+    #: The mounting slots are neither: `np_thru_hole` is a hole with no copper
+    #: in it, so nothing solders to it and nothing is drawn for it.
+    posts = [p for p in pads if p.kind == "thru_hole"]
+
+    designations = [name for pad in contacts for name in pad.number.split("_")]
+    if len(set(designations)) != SPEC_CONTACTS:
+        raise SystemExit(
+            f"{spec.package}: its {len(contacts)} contact pads name "
+            f"{len(set(designations))} of the specification's contacts and a "
+            f"16-pin receptacle has {SPEC_CONTACTS}: "
+            f"{sorted(set(designations))}"
+        )
+    if not posts:
+        raise SystemExit(
+            f"{spec.package}: no through-hole pads, so the model would have "
+            f"no legs -- and `compose_board_3d.place` anchors a legged part on "
+            f"them. A receptacle with none is a different mounting."
+        )
+
+    spread = max(p.x_mm for p in contacts) - min(p.x_mm for p in contacts)
+    if spread > CONTACT_ROW_MM:
+        raise SystemExit(
+            f"{spec.package}: its contacts spread {spread:.3f} mm across x, so "
+            f"they are not a row and this footprint's depth does not run along "
+            f"x. `tools/blender/usb_c_receptacle.py` draws one that does."
+        )
+
+    bx0, bx1 = sorted((body[0], body[2]))
+    by0, by1 = sorted((-body[1], -body[3]))
+    #: **Which end the plug goes into, READ rather than assumed.** A
+    #: receptacle's contacts leave at its back and solder to pads, so the end
+    #: the tails are at is the back and the mouth is the other one -- the same
+    #: physical fact `compose_board_3d.contact_miss` rests on, and the one
+    #: OH-105 got backwards by measuring triangle area in each end plane.
+    row = sum(p.x_mm for p in contacts) / len(contacts)
+    back, front = (bx1, bx0) if row > (bx0 + bx1) / 2 else (bx0, bx1)
+
+    tails = []
+    for pad in contacts:
+        near, far = pad.x_mm - pad.width_mm / 2, pad.x_mm + pad.width_mm / 2
+        outside = (max(near, back), far) if back == bx1 else (near, min(far, back))
+        if outside[1] <= outside[0]:
+            raise SystemExit(
+                f"{spec.package}: pad {pad.number} spans x {near:.3f}..{far:.3f} "
+                f"and the shell's back face is at {back:.3f}, so none of it is "
+                f"outside the body. A tail entirely under the shell is not a "
+                f"tail, and the body or the row has been read wrongly."
+            )
+        tails.append({"x": list(outside),
+                      "y": [-pad.y_mm - pad.height_mm / 2,
+                            -pad.y_mm + pad.height_mm / 2]})
+
+    #: A shell foot entirely inside the body's own plan is INVISIBLE -- it is
+    #: under the folded metal that is drawn over it -- so it is not drawn.
+    #: Skipped rather than drawn anyway, because a box sharing a face with the
+    #: shell's own bottom plate is two surfaces fighting for one pixel.
+    standing = [pad for pad in feet
+                if not (bx0 <= pad.x_mm - pad.width_mm / 2
+                        and pad.x_mm + pad.width_mm / 2 <= bx1
+                        and by0 <= -pad.y_mm - pad.height_mm / 2
+                        and -pad.y_mm + pad.height_mm / 2 <= by1)]
+
+    def plan(pad) -> dict[str, list[float]]:
+        return {"x": [pad.x_mm - pad.width_mm / 2, pad.x_mm + pad.width_mm / 2],
+                "y": [-pad.y_mm - pad.height_mm / 2,
+                      -pad.y_mm + pad.height_mm / 2]}
+
+    return {
+        "body": {"x": [bx0, bx1], "y": [by0, by1], "height": height},
+        "front_face": front,
+        "back_face": back,
+        "contacts": tails,
+        "feet": [plan(pad) for pad in standing],
+        "posts": [plan(pad) for pad in posts],
+        "designations": sorted(set(designations)),
+        "hidden_feet": len(feet) - len(standing),
+        "stated": [length, width, height],
+        "apart": apart,
+    }
+
+
+def build_socket(spec: ModelledSocket, check: bool) -> int:
+    print(f"{spec.name}:")
+    if not spec.pcb.is_file():
+        print(f"  SKIPPED: {spec.pcb} is not fetched. Run: "
+              f"python tools/compose_board_3d.py")
+        return 3
+    plan = socket_geometry(spec)
+    cited = {key: value for key, (value, _why) in spec.cited.items()}
+    body = plan["body"]
+    length, width, height = plan["stated"]
+    print(f"  vendor  F.Fab {body['x'][1] - body['x'][0]:.3f} x "
+          f"{body['y'][1] - body['y'][0]:.3f} mm; its own Description says "
+          f"{length} x {width} x {height}, agreeing to {plan['apart']:.3f} mm")
+    print(f"  vendor  {len(plan['contacts'])} contact pads naming "
+          f"{len(plan['designations'])} of the standard's contacts, "
+          f"{len(plan['feet'])} shell feet ({plan['hidden_feet']} under the "
+          f"shell, not drawn), {len(plan['posts'])} board locks")
+    print(f"  vendor  the plug enters at x {plan['front_face']:.3f} and the "
+          f"tails leave at {plan['back_face']:.3f}")
+    for key, (value, why) in spec.cited.items():
+        print(f"  cited   {key} = {value} mm -- {why[:64]}...")
+    if check:
+        print("  build   skipped (--check)")
+        return 0
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    target = OUT / f"{spec.name}.obj"
+    run_blender(spec.name, REPO / "tools" / "blender" / "usb_c_receptacle.py", {
+        "out": str(target).replace("\\", "/"),
+        "body": body,
+        "front_face": plan["front_face"],
+        "back_face": plan["back_face"],
+        "opening": {"width": cited["opening_width"],
+                    "height": cited["opening_height"]},
+        #: The cavity runs the whole interior, so its depth is the body's less
+        #: the back plate rather than a number: what is behind a 2.56 mm slot
+        #: is never seen anyway.
+        "mouth_depth": abs(plan["back_face"] - plan["front_face"]) - (
+            (body["y"][1] - body["y"][0] - cited["opening_width"]) / 2),
+        "tongue": {"width": cited["tongue_width"],
+                   "thickness": cited["tongue_thickness"],
+                   "setback": cited["tongue_setback"]},
+        "terminal": cited["terminal"],
+        "post_depth": cited["post_depth"],
+        "contacts": plan["contacts"],
+        "feet": plan["feet"],
+        "posts": plan["posts"],
+        "colours": {name: [int(rgb[at:at + 2], 16) / 255.0 for at in (1, 3, 5)]
+                    for name, (rgb, _why) in SOCKET_COLOURS.items()},
+    }, target)
+    print(f"  build   {target.relative_to(REPO)}  "
+          f"{target.stat().st_size:,} bytes")
+    return 0
+
+
 def slab_geometry(spec: ModelledSlab) -> dict[str, object]:
     """The body of `spec.package`: plan from `F.Fab`, height from its name.
 
@@ -744,17 +1153,22 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.list:
-        for spec in (*SPECS, *PACKS, *SLABS):
+        for spec in (*SPECS, *PACKS, *SLABS, *SOCKETS):
             source = ("EAGLE package" if isinstance(spec, Modelled)
                       else "KiCad footprint")
             print(f"{spec.name}  ({source} {spec.package})")
             print(f"    not fetched because: {spec.why_not_fetched}")
-            for key, (value, why) in spec.cited.items():
+            # **A slab cites nothing and that is the point of it**: every
+            # number it draws is in the vendor's own file, so it carries no
+            # `cited` field at all. This printed one until OH-102 and the
+            # command died on the first slab with an `AttributeError` -- which
+            # is the command the handoff tells the next session to run first.
+            for key, (value, why) in getattr(spec, "cited", {}).items():
                 print(f"    {key} = {value} mm")
                 print(f"        {why}")
         return 0
 
-    every = (*SPECS, *PACKS, *SLABS)
+    every = (*SPECS, *PACKS, *SLABS, *SOCKETS)
     wanted = [s for s in every if args.part is None or s.name == args.part]
     if not wanted:
         print(f"no modelled part called {args.part!r}. Known: "
@@ -762,11 +1176,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     for spec in wanted:
         try:
-            # Two kinds of part and two builders, dispatched by type
+            # Four kinds of part and four builders, dispatched by type
             # rather than by a flag on one: see `ModelledPack`.
             code = (build(spec, args.check) if isinstance(spec, Modelled)
                     else build_pack(spec, args.check)
                     if isinstance(spec, ModelledPack)
+                    else build_socket(spec, args.check)
+                    if isinstance(spec, ModelledSocket)
                     else build_slab(spec, args.check))
         except Unavailable as exc:
             print(f"SKIPPED: {exc}")

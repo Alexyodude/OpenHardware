@@ -447,20 +447,24 @@ TOUCHING_THE_BOARD_MM = 0.35
 
 #: How far a contact that touches the board may lie outside the outline.
 #:
-#: **It should be zero and it is: every board is inside, with margin.**
-#: Measured on the shipped meshes after OH-107 settled the turns:
+#: **Zero, since OH-102 modelled the receptacle the vendor actually fitted.**
+#: It was 0.05 while two boards carried a connector 3.15 mm longer than the
+#: one Seeed name, and a hair of allowance is what a part of the wrong size
+#: needs. Measured on the shipped meshes, negative being inside:
 #:
 #:     Arduino Uno         -2.093 mm
 #:     XIAO-RP2350-DIP     -1.146
+#:     XIAO-ESP32-C5-DIP   -0.881
 #:     XIAO-ESP32-C3-DIP   -0.372
 #:     XIAO-nRF54l15-DIP   -0.156
 #:     XIAO-ESP32-C6-DIP   -0.152
 #:
-#: Negative is inside, so 0.05 is a hair for a contact drawn flush with the
-#: edge rather than an allowance for one hanging off it. The number that made
-#: this a test is 0.42: that is how far the WRONG receptacle put them, and it
-#: is what a person looking at the board saw as a connector in mid-air.
-CONTACT_OVERHANG_MM = 0.05
+#: The last three are the U.FL socket's own shell rather than a receptacle
+#: tail; every USB-C contact on every board is further in than that. The
+#: number that made this a test is 0.42: that is how far the WRONG receptacle
+#: put them, and it is what a person looking at the board saw as a connector
+#: hanging in mid-air.
+CONTACT_OVERHANG_MM = 0.0
 
 
 def test_no_soldered_contact_hangs_off_the_board():
@@ -503,19 +507,121 @@ def test_no_soldered_contact_hangs_off_the_board():
     assert not worst, "\n".join(worst)
 
 
-def test_the_allowance_is_granted_to_one_package_and_not_to_its_neighbours():
-    """The whole point of keying it by package, made checkable.
+def test_a_legged_model_is_anchored_on_the_holes_its_legs_go_into():
+    """Like against like, which is what OH-101 half-fixed and OH-102 finished.
 
-    A mutation replacing the lookup with the widest value in the table --
-    granting every part on every board the USB-C's 2.2 mm -- survived the
-    entire suite, because no board has a part that misses by between 1.5 and
-    2.2 mm except the connectors themselves. So the property has to be
-    asserted directly rather than through a composed board.
+    `place` anchors a through-hole model on its legs, because a barrel jack's
+    body is entirely to one side of its pins. The pads those legs go into are
+    the through-hole ones -- and until this, they were compared against EVERY
+    pad on the footprint, which is only the same answer when every pad is a
+    hole.
+
+    The USB-C is the part where they differ: its two board locks sit 4.75 mm
+    from its contact row, so the two answers are 2.26 mm apart on the RP2350
+    and the whole connector landed that far inboard of where it belongs.
     """
-    assert compose.body_allowance("USB2.0-TYPE-C") == 2.3
-    assert compose.body_allowance("C0201") == compose.SILK_TOLERANCE_MM
-    assert compose.body_allowance("QFN60-0.4-7X7X0.9MM") == compose.SILK_TOLERANCE_MM
-    assert compose.body_allowance("nothing draws this") == compose.SILK_TOLERANCE_MM
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    usb = next(e for e in board.elements
+               if e.package == "USB2.0-TYPE-C_USB-31C-F-16P")
+
+    locks = usb.pads_of("thru_hole")
+    assert len(locks) == 2, "this land pattern has two board locks"
+    legged = compose.anchor_of(usb, legged=True)
+    assert legged[0] == pytest.approx(locks[0].x_mm, abs=0.001), (
+        "both locks share one x, so the legged anchor is that x"
+    )
+    flat = compose.anchor_of(usb, legged=False)
+    assert abs(legged[0] - flat[0]) == pytest.approx(2.263, abs=0.01), (
+        "the two anchors are 2.26 mm apart, which is the whole bug"
+    )
+
+
+def test_a_surface_mount_model_is_anchored_on_every_pad_it_covers():
+    """The other half of the same rule, and it must not change.
+
+    A model with no legs is anchored on its body, and a body sits over all of
+    its pads -- so narrowing the anchor to the through-hole ones for everything
+    would put every surface-mount part in the wrong place, or crash on the
+    thousands that have no hole at all.
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    chip = next(e for e in board.elements if e.package == "QFN60-0.4-7X7X0.9MM")
+
+    assert not chip.pads_of("thru_hole"), "a QFN has no holes"
+    x0, y0, x1, y1 = chip.pad_extent()
+    assert compose.anchor_of(chip, legged=False) == pytest.approx(
+        ((x0 + x1) / 2, (y0 + y1) / 2))
+
+
+def test_a_legged_model_on_a_footprint_with_no_holes_is_refused():
+    """The case that would silently divide by nothing, said out loud.
+
+    `confirm` refuses this pairing before `place` sees it -- a model with legs
+    on a footprint with no holes is a through-hole part on surface-mount pads.
+    This is the belt behind that brace, and it exists because narrowing the
+    anchor is what created the possibility of an empty list.
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    chip = next(e for e in board.elements if e.package == "QFN60-0.4-7X7X0.9MM")
+
+    with pytest.raises(SystemExit, match="no through-hole pad"):
+        compose.anchor_of(chip, legged=True)
+
+
+def test_the_legged_anchor_is_the_one_place_actually_uses():
+    """`anchor_of` can be right while nothing consults it.
+
+    A mutation replacing `place`'s call with `anchor_of(element, False)` --
+    reverting the whole fix -- survived every test that called the function
+    directly, and survived the composed boards too, because the only board
+    `compose` is driven over in this suite is the ESP32-C3, whose receptacle
+    draws no `F.Fab` and so has no body for `silk_miss` to check. This drives
+    it through `place` on a board where the two anchors are 2.26 mm apart.
+
+    It is the same lesson OH-103's `body_allowance` and OH-107's
+    `contact_miss` each cost a round of: measure the guard, not only the
+    measurement.
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    made = compose.MODELLED / "USB2.0-TYPE-C_USB-31C-F-16P.obj"
+    if not made.is_file():
+        pytest.skip("SKIPPED: run python tools/model_from_datasheet.py")
+
+    board = compose.read_layout(spec.layout)
+    pads = [pad for name in spec.headers for pad in board.element(name).pads]
+    centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
+              (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
+    usb = next(e for e in board.elements
+               if e.package == "USB2.0-TYPE-C_USB-31C-F-16P")
+    component = next(c for c in compose.CORRESPONDENCE
+                     if c.package == usb.package)
+    mesh, _box = compose.component_mesh(component, compose.DEFLECTION)
+
+    put = compose.place(mesh, usb, component.turn, spec.thickness_mm, centre)
+    legs = [(p[at], p[at + 2]) for _c, (p, _n, _i) in put.groups.items()
+            for at in range(0, len(p), 3)
+            if p[at + 1] < spec.thickness_mm - compose.LEAD_DEPTH_MM]
+    assert legs, "the receptacle's board locks are not below the board"
+    leg_x = (min(v[0] for v in legs) + max(v[0] for v in legs)) / 2
+    leg_z = (min(v[1] for v in legs) + max(v[1] for v in legs)) / 2
+
+    lock_x, lock_y = compose.anchor_of(usb, legged=True)
+    assert leg_x == pytest.approx(lock_x - centre[0], abs=0.01), (
+        f"the locks are drawn at x {leg_x:.3f} and the holes they go into are "
+        f"at {lock_x - centre[0]:.3f}"
+    )
+    assert leg_z == pytest.approx(-(lock_y - centre[1]), abs=0.01)
 
 
 def test_every_modelled_slab_agrees_with_the_outline_the_vendor_drew():
@@ -665,15 +771,25 @@ def test_a_usb_socket_faces_off_the_board_a_cable_can_reach():
             zs = [p[at + 2] for _c, (p, _n, _i) in put.groups.items()
                   for at in range(0, len(p), 3)]
             along, across = max(zs) - min(zs), max(xs) - min(xs)
-            assert 8.5 < along < 9.5, (
+            #: The vendor's own stated envelope, 8.94 x 7.35 mm, as the FLOOR
+            #: rather than a window: the mesh reaches past the body at both
+            #: ends -- shell tabs across the edge, solder tails inboard -- so
+            #: it can only be larger. The window this used to be was measured
+            #: off the published models, and a modelled part's tabs broke it
+            #: while being more correct than what it was measuring.
+            assert along > 8.9, (
                 f"{spec.board} {element.name}: {along:.3f} mm lies along the "
-                f"board edge and a USB-C receptacle is 8.95 mm wide. It is "
-                f"turned a quarter out, so a cable would go in sideways."
+                f"board edge and a USB-C receptacle is 8.94 mm wide"
             )
-            assert across > 7.0, (
+            assert across > 7.3, (
                 f"{spec.board} {element.name}: only {across:.3f} mm points "
-                f"off the edge, and the shallowest published receptacle is "
-                f"7.37 mm deep"
+                f"off the edge, and Seeed's own Description says 7.35 mm deep"
+            )
+            assert along > across, (
+                f"{spec.board} {element.name}: {across:.3f} mm points off the "
+                f"edge against {along:.3f} along it, so the receptacle's DEPTH "
+                f"is lying along the edge. It is turned a quarter out, and a "
+                f"cable would go in sideways."
             )
             here = compose.contact_miss(element, put, centre)
             assert here is not None, f"{element.name} has no contacts to place"
@@ -729,11 +845,16 @@ def test_the_margin_is_a_margin():
 
     Negating `TURN_MARGIN_MM` makes every comparison vacuously true, and that
     mutation survived until this existed. The bound above it is the smallest
-    winning margin on any composed board -- the USB-C beats its runner-up by
-    0.94 mm -- so a margin larger than that would start refusing the right
-    answer.
+    winning margin on any composed board, so a margin larger than that would
+    start refusing the right answer.
+
+    **It was 0.94 mm while the receptacle was a published model of a different
+    part.** Modelling the one the vendor names widened it to 2.61 -- the
+    ESP32-C3, where turn 0 puts the contacts 0.996 mm from their pads and the
+    next best turn puts them 3.606 -- because a model built from the same
+    footprint as the pads agrees with them the way a substitute cannot.
     """
-    assert 0.0 < compose.TURN_MARGIN_MM < 0.94
+    assert 0.0 < compose.TURN_MARGIN_MM < 2.61
 
 
 def test_a_part_with_too_few_pads_has_no_facing_to_check():
@@ -760,9 +881,12 @@ def test_the_two_usb_c_land_patterns_are_given_different_receptacles():
 
     Both are 16-pin USB-C, so the PIN count says nothing. `USB2.0-TYPE-C` has
     four through-hole shell tabs and `USB2.0-TYPE-C_USB-31C-F-16P` has two
-    board locks, and KiCad's `Connector_USB` happens to hold exactly one
-    published receptacle of each kind. Giving them one entry is what OH-101
-    was.
+    board locks. Giving them one entry is what OH-101 was: a four-tab model on
+    a two-lock land left the contact row 0.42 mm past the board edge.
+
+    Both are modelled now rather than matched, and the property survives the
+    change unaltered -- each land pattern is built from its own footprint, so
+    they cannot collapse into one mesh by accident.
     """
     usb = {c.package: c.model for c in compose.CORRESPONDENCE
            if c.package.startswith("USB2.0-TYPE-C")}
@@ -1056,7 +1180,8 @@ def test_every_modelled_dimension_cites_where_it_came_from():
     """
     from tools import model_from_datasheet
 
-    every = (*model_from_datasheet.SPECS, *model_from_datasheet.PACKS)
+    every = (*model_from_datasheet.SPECS, *model_from_datasheet.PACKS,
+             *model_from_datasheet.SOCKETS)
     assert every, "nothing is modelled, so this is vacuous"
     for spec in every:
         assert spec.why_not_fetched.strip(), spec.name
@@ -1064,6 +1189,22 @@ def test_every_modelled_dimension_cites_where_it_came_from():
         for field, (value, why) in spec.cited.items():
             assert isinstance(value, float), f"{spec.name}.{field}"
             assert len(why) > 40, f"{spec.name}.{field} has no real citation"
+
+
+def test_listing_the_modelled_parts_does_not_die_on_the_ones_that_cite_nothing():
+    """`--list` is the first command the handoff tells a reader to run.
+
+    A slab carries no `cited` field at all, because every number it draws is in
+    the vendor's file -- and the loop that prints citations went straight at
+    the attribute, so the command died with an `AttributeError` on the first
+    slab from the moment OH-104 added one. It printed two parts and then a
+    traceback for a day.
+    """
+    from tools import model_from_datasheet
+
+    assert model_from_datasheet.SLABS, "nothing cites nothing, so this is vacuous"
+    assert not hasattr(model_from_datasheet.SLABS[0], "cited")
+    assert model_from_datasheet.main(["--list"]) == 0
 
 
 def _rp2350() -> pathlib.Path:
@@ -1276,6 +1417,177 @@ def test_the_rp2350_is_drawn_and_the_near_miss_is_still_refused():
         assert "QFN-56" not in component.model, (
             f"{component.package} was given {component.model}. A 56-lead part "
             f"is not a 60-lead part, however well it measures."
+        )
+
+
+# --- the receptacle the vendor names and does not ship (OH-102) ---------------
+
+
+def test_the_modelled_receptacle_is_the_length_the_vendor_states():
+    """The whole of OH-102, in one number per land pattern.
+
+    Both published 16-pin receptacles are longer than the part Seeed fitted --
+    the GCT by 0.43 mm and Amphenol's by 3.15 -- and there is no third in
+    KiCad's `Connector_USB` to try. What settles it is that the vendor states
+    the envelope twice in their own file: in the footprint's `Description`
+    property, and as the `F.Fab` rectangle they drew.
+    """
+    from tools import model_from_datasheet
+
+    assert model_from_datasheet.SOCKETS, "no receptacle is modelled"
+    for spec in model_from_datasheet.SOCKETS:
+        if not spec.pcb.is_file():
+            continue
+        plan = model_from_datasheet.socket_geometry(spec)
+        length, width, height = plan["stated"]
+        assert sorted((length, width)) == pytest.approx([7.3, 8.9], abs=0.06), (
+            f"{spec.package}: its Description states {length} x {width} mm, "
+            f"and a 16-pin USB-C receptacle is about 7.35 x 8.94"
+        )
+        assert 3.0 < height < 3.5, (
+            f"{spec.package}: {height} mm tall. Both published models measure "
+            f"3.28 and 3.31 mm over the shell, so this is the same part."
+        )
+        assert plan["apart"] <= model_from_datasheet.NAMED_BODY_TOLERANCE_MM
+
+
+def test_the_receptacles_contacts_are_named_by_the_standard():
+    """Sixteen contacts on twelve pads, and the pad names say which four join.
+
+    **This is how a contact is told from a shell tab**, and it is the vendor
+    writing the specification's own vocabulary rather than a rule invented
+    here: `A1_B12`, `A4_B9`, `B4_A9` and `B1_A12` are the four pairs a USB 2.0
+    receptacle joins inside itself, which is why a 16-pin part arrives on
+    twelve pads. Reading them by position instead would need a threshold.
+    """
+    from tools import model_from_datasheet
+
+    for spec in model_from_datasheet.SOCKETS:
+        if not spec.pcb.is_file():
+            continue
+        plan = model_from_datasheet.socket_geometry(spec)
+        assert len(plan["designations"]) == model_from_datasheet.SPEC_CONTACTS
+        assert len(plan["contacts"]) == 12, (
+            f"{spec.package}: {len(plan['contacts'])} contact pads, and a "
+            f"USB 2.0 Type-C receptacle lands its sixteen contacts on twelve"
+        )
+        assert plan["posts"], "a receptacle with no hole has nothing to anchor on"
+
+
+def test_a_footprint_that_draws_no_body_is_refused_rather_than_guessed():
+    """The ESP32-C3's own receptacle, which is why the C6 is read instead.
+
+    Its footprint carries no `F.Fab` outline and no `Description` either, so
+    nothing in that file says how large or how tall the part is. Two boards
+    share this package and only one of them drew it; naming the wrong one
+    would have to invent a body, which is what
+    `tools/model_from_datasheet.py` exists not to do.
+    """
+    from tools import model_from_datasheet
+
+    spec = next(s for s in model_from_datasheet.SOCKETS
+                if s.package == "USB2.0-TYPE-C")
+    c3 = compose.PCB_CACHE / "ESP32-C3.kicad_pcb"
+    if not c3.is_file():
+        pytest.skip("SKIPPED: ESP32-C3.kicad_pcb is not fetched")
+    with pytest.raises(SystemExit, match=r"draws no \*\.Fab outline"):
+        model_from_datasheet.socket_geometry(dataclasses.replace(spec, pcb=c3))
+
+
+def test_a_package_whose_description_states_no_envelope_is_refused():
+    """The height is the one dimension no layer of a land pattern carries.
+
+    Most of Seeed's own descriptions state two numbers rather than three --
+    `SMD IC Memory;16Mbit-SPI-USON-8-2*3mm` is a plan and no height -- so the
+    receptacles' three are a property of those footprints and not of the
+    field. A part whose description reads like that gets no height from it,
+    and a slab of invented thickness is the defect this whole file exists to
+    refuse.
+    """
+    from tools import model_from_datasheet
+
+    spec = next(s for s in model_from_datasheet.SOCKETS
+                if s.package == "USB2.0-TYPE-C_USB-31C-F-16P")
+    if not spec.pcb.is_file():
+        pytest.skip(f"SKIPPED: {spec.pcb.name} is not fetched")
+    with pytest.raises(SystemExit, match="states no length"):
+        model_from_datasheet.socket_geometry(
+            dataclasses.replace(spec, package="DFN6-0.5-1.45X1X0.6"))
+
+
+def test_a_description_that_disagrees_with_the_outline_is_refused():
+    """The comparison is what proves the string was read, and it must refuse.
+
+    Both real footprints agree to 0.020 and 0.092 mm, so the check never fires
+    on anything shipped -- and a mutation deleting it survived the whole suite
+    until this existed. A Description claiming twice the length its `F.Fab`
+    rectangle draws is the shape of a misread string, and it must not draw
+    either the plan it states or the height beside it.
+    """
+    from tools import model_from_datasheet
+
+    spec = next(s for s in model_from_datasheet.SOCKETS
+                if s.package == "USB2.0-TYPE-C_USB-31C-F-16P")
+    if not spec.pcb.is_file():
+        pytest.skip(f"SKIPPED: {spec.pcb.name} is not fetched")
+    board = spec.pcb.read_text(encoding="utf-8", errors="replace")
+    assert board.count("7.35*8.94*3.25mm") == 1, "the envelope is not unique"
+    scratch = spec.pcb.with_name("USB-lying.kicad_pcb")
+    scratch.write_text(board.replace("7.35*8.94*3.25mm", "14.7*8.94*3.25mm"),
+                       encoding="utf-8")
+    try:
+        with pytest.raises(SystemExit, match="mm apart"):
+            model_from_datasheet.socket_geometry(
+                dataclasses.replace(spec, pcb=scratch))
+    finally:
+        scratch.unlink()
+
+
+def test_the_receptacle_faces_the_way_its_own_tails_say():
+    """Which end the plug goes into is READ, not judged.
+
+    A receptacle's contacts leave at its back and solder to pads, so the end
+    the tails are at is the back and the mouth is the other one. OH-105 got
+    this backwards by measuring triangle area in each end plane -- reasoning
+    that a mouth is a rim and a back is a filled face, and measuring the thin
+    solder tails crossing the plane instead -- and faced the socket into the
+    board on four boards.
+
+    Stated as a distance rather than a direction, so it holds for a footprint
+    drawn either way round: every tail is FURTHER from the mouth than the back
+    of the shell is.
+    """
+    from tools import model_from_datasheet
+
+    for spec in model_from_datasheet.SOCKETS:
+        if not spec.pcb.is_file():
+            continue
+        plan = model_from_datasheet.socket_geometry(spec)
+        front, back = plan["front_face"], plan["back_face"]
+        assert front in plan["body"]["x"], "the mouth is a face of the body"
+        assert back in plan["body"]["x"], "and so is the back"
+        assert front != back
+        nearest = min(min(abs(edge - front) for edge in tail["x"])
+                      for tail in plan["contacts"])
+        assert nearest >= abs(back - front) - 1e-9, (
+            f"{spec.package}: a tail comes within {nearest:.3f} mm of the "
+            f"mouth, which is {abs(back - front):.3f} mm from the back face "
+            f"they were clipped to. The socket is facing into the board."
+        )
+
+
+def test_the_modelled_receptacles_are_drawn_and_marked_as_modelled():
+    """Two land patterns, two meshes, both built here rather than fetched."""
+    usb = [c for c in compose.CORRESPONDENCE
+           if c.package.startswith("USB2.0-TYPE-C")]
+    assert len(usb) == 2, usb
+    for component in usb:
+        assert component.modelled is True, component.package
+        assert component.library == "modelled", component.package
+        assert component.turn == 0.0, (
+            "a modelled part is built in the vendor footprint's own frame, so "
+            "it needs no turn -- and this one was given 0, then 90, then 270 "
+            "while it was a published model of a different part"
         )
 
 
