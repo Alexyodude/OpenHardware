@@ -121,8 +121,20 @@ font shipped; the handful of arcs, circles and polygons on that layer;
 **inner copper layers**, which are inside the laminate where nothing can see
 them; and a zone's **filled polygon**, which is a keyhole outline walking into
 every thermal relief and back out. The colours are judgements and say so, as
-`BOARD_MASK` does -- a `.kicad_pcb` states no surface finish, because that is a
-fabrication order and not a design file.
+`BOARD_MASK` does: six of Seeed's seven board files carry a full `(stackup
+...)` -- six copper layers with thicknesses, five FR4 dielectrics with their
+`epsilon_r`, both solder masks with a thickness -- and not one of them fills in
+the mask's colour or asks for a copper finish. That is where KiCad records
+both, so a vendor who completed that table and left those fields alone did not
+state either.
+
+**The one colour a vendor's file DOES carry that is overridden** is the
+nRF54LM20A's (OH-99). Its STEP is the only one of six that exports the solder
+mask as its own body -- two loose faces with the board's footprint to 0.0000
+mm, lying 0.05 mm off each of its faces -- and the exporter painted them green
+while the board under them drew `BOARD_MASK`. One missing fact answered two
+ways in one mesh is the defect; `is_mask_film` identifies the film by shape and
+never by colour, which is what makes repainting it safe.
 
 **And the underside is lit** (OH-111), because that is where a XIAO's pin
 names, its battery pads and the words "Seeed Studio" are printed. One light

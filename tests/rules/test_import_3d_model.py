@@ -977,10 +977,16 @@ def test_the_board_mask_is_a_judgement_and_says_so():
     """**Every other colour here is the vendor's; this one is not.**
 
     Nobody publishes a XIAO's solder mask colour: Seeed's STEP files leave the
-    PCB `UNSTYLED`, their `.kicad_pro` has `pcb_color` with alpha 0 (KiCad's
-    unset, not a claim of black), their `.kicad_pcb` has no stackup, and their
-    wiki does not mention a colour. So the constant has to carry the search
-    that found nothing, or the next reader repeats it.
+    PCB `UNSTYLED`, six of their seven board files carry a full `(stackup ...)`
+    that states the mask's thickness and no colour, and their wiki does not
+    mention one. So the constant has to carry the search that found nothing,
+    or the next reader repeats it.
+
+    **The stackup is the load-bearing half and it is asserted separately**,
+    because it is the field KiCad actually records a mask colour in. OH-97
+    cited `pcb_color` instead, which is a NET CLASS colour that has a
+    schematic half and nothing to do with the board; OH-99 found that out and
+    the note has to keep saying so, or the wrong citation comes back.
     """
     from tools.import_3d_model import BOARD_MASK, UNSTYLED
 
@@ -991,6 +997,14 @@ def test_the_board_mask_is_a_judgement_and_says_so():
     lowered = note.lower()
     for evidence in ("kicad_pro", "alpha zero", "stackup", "wiki"):
         assert evidence in lowered, f"the search for {evidence} is not recorded"
+    assert "net class" in lowered, (
+        "the note no longer says pcb_color is a net class colour, so the "
+        "citation OH-99 corrected can come back as evidence about the board"
+    )
+    assert "copper_finish" in lowered or "thickness 0.01" in lowered, (
+        "the note no longer shows the stackup was filled in and left the mask "
+        "colour empty, which is the whole of the absence it claims"
+    )
 
 
 def test_the_board_mask_is_finished_like_the_solder_mask_it_is():
@@ -1024,6 +1038,10 @@ def test_only_the_pcb_solid_is_repainted_and_not_every_unstyled_face():
     assert "board_faces is not None and face.TShape() in board_faces" in code, (
         "the repaint is no longer restricted to the PCB solid's own faces"
     )
+    assert "film_faces is not None and face.TShape() in film_faces" in code, (
+        "the mask-film repaint is no longer restricted to the faces "
+        "mask_film_faces_of identified"
+    )
     assert "UNSTYLED" in code, "an unstyled face that is not the board lost its grey"
 
 
@@ -1031,11 +1049,20 @@ def test_every_shipped_board_paints_its_pcb_and_nothing_taller():
     """**The whole chain, measured on the meshes that shipped.**
 
     The group painted `BOARD_MASK` must be exactly the PCB the model states in
-    its own extras -- its length, its width and its thickness. If the wrong
-    solid were repainted this is what would catch it: a component would be
-    black and would stand taller than the board it sits on.
+    its own extras in LENGTH and WIDTH, and its thickness plus at most the mask
+    film lying on it. If the wrong solid were repainted this is what would
+    catch it: a component would be black and would stand taller than the board
+    it sits on.
+
+    **The thickness is the loose one on purpose, and OH-99 is why.** The
+    painted group is the board plus, where the vendor exported one, the
+    solder-mask film 0.05 mm proud of each of its faces -- 1.61 mm against a
+    stated 1.51 on the nRF54LM20A. Asserting equality within 0.1 mm passed
+    that at exactly 0.1, on the boundary, while claiming something the code no
+    longer does. A test sitting on its own tolerance is a test about to fail
+    for the wrong reason, so this states the film instead of absorbing it.
     """
-    from tools.import_3d_model import BOARD_MASK, OUT
+    from tools.import_3d_model import BOARD_MASK, MASK_FILM_MM, OUT
 
     seen = 0
     for mesh in sorted(OUT.glob("*.glb")):
@@ -1053,8 +1080,7 @@ def test_every_shipped_board_paints_its_pcb_and_nothing_taller():
         seen += 1
         points = [p for prim in painted
                   for p in _read(doc, body, prim["attributes"]["POSITION"])]
-        for axis, stated in ((0, pcb["long"]), (1, pcb["thickness"]),
-                             (2, pcb["short"])):
+        for axis, stated in ((0, pcb["long"]), (2, pcb["short"])):
             values = [p[axis] for p in points]
             span = max(values) - min(values)
             assert span == pytest.approx(stated, abs=0.1), (
@@ -1062,6 +1088,13 @@ def test_every_shipped_board_paints_its_pcb_and_nothing_taller():
                 f"{axis} against a stated PCB of {stated:.2f} -- so what was "
                 f"repainted is not the board"
             )
+        thick = [p[1] for p in points]
+        span = max(thick) - min(thick)
+        assert pcb["thickness"] - 0.1 <= span <= pcb["thickness"] + 2 * MASK_FILM_MM, (
+            f"{mesh.name}: the painted group is {span:.2f} mm thick against a "
+            f"stated PCB of {pcb['thickness']:.2f} -- too thin to be the board "
+            f"or too thick to be the board and a film on it"
+        )
     if not seen:
         pytest.skip("no imported board meshes on disk; "
                     "run python tools/import_3d_model.py --all")
@@ -1082,17 +1115,226 @@ def test_a_face_styled_with_nothing_is_not_a_colour_called_empty_string():
     """
     from tools.import_3d_model import BOARD_MASK, UNSTYLED, colour_key
 
-    assert colour_key("", is_board=False) == UNSTYLED
-    assert colour_key(None, is_board=False) == UNSTYLED
-    assert colour_key("", is_board=True) == BOARD_MASK
-    assert colour_key(None, is_board=True) == BOARD_MASK
+    assert colour_key("", is_board=False, is_film=False) == UNSTYLED
+    assert colour_key(None, is_board=False, is_film=False) == UNSTYLED
+    assert colour_key("", is_board=True, is_film=False) == BOARD_MASK
+    assert colour_key(None, is_board=True, is_film=False) == BOARD_MASK
 
 
 def test_a_face_the_vendor_did_colour_keeps_its_colour_even_on_the_board():
     """The repaint fills a gap; it never overrides a statement. A PCB whose
     mask the vendor DID style keeps what they said, and that is the difference
-    between reading a source and preferring a judgement to one."""
+    between reading a source and preferring a judgement to one.
+
+    **Narrowed by OH-99, and narrowed with its argument rather than around
+    it.** There is now exactly one face this does not hold for -- the
+    solder-mask film lying on the board, which the nRF54LM20A's STEP styles
+    `#143324` while its own PCB solid, the same missing fact, draws
+    `BOARD_MASK`. That is not a statement being overridden: the vendor's
+    stackup gives that mask a thickness and no colour, so the green is the
+    exporter's default and the incoherence of answering one missing fact two
+    ways in one mesh is the defect. The last assertion is what stops the
+    narrowing being taken any wider.
+    """
     from tools.import_3d_model import colour_key
 
-    assert colour_key("#00ff00", is_board=True) == "#00ff00"
-    assert colour_key("#313d63", is_board=True) == "#313d63"
+    assert colour_key("#00ff00", is_board=True, is_film=False) == "#00ff00"
+    assert colour_key("#313d63", is_board=True, is_film=False) == "#313d63"
+    assert colour_key("#143324", is_board=False, is_film=False) == "#143324"
+    assert colour_key("#186b2a", is_board=False, is_film=False) == "#186b2a", (
+        "the nRF54LM20A's green LED is a real vendor colour on a real part "
+        "and is not the mask film; only the film may be repainted"
+    )
+
+
+# --- the solder-mask film, the one stated colour this file repaints (OH-99) --
+
+#: The nRF54LM20A's PCB solid and its two mask films, measured off
+#: `third_party/seeed-3d/nRF54LM20A.step` on 2026-08-30 with OpenCASCADE. z is
+#: that file's up axis. The films' x and y are the board's to 0.0000 mm -- not
+#: nearly, exactly -- and each is a sheet at one z, 0.05 mm off a board face.
+_LM20A_BOARD = ((-10.4775, -8.8900, 0.0000), (10.4775, 8.8900, 1.5100))
+_LM20A_FILM_ABOVE = ((-10.4775, -8.8900, 1.5600), (10.4775, 8.8900, 1.5600))
+_LM20A_FILM_BELOW = ((-10.4775, -8.8900, -0.0500), (10.4775, 8.8900, -0.0500))
+
+#: The whole `#ffffff` silkscreen group's box in the same file, which is the
+#: nearest thing to a false positive in any of the six vendor board STEPs: it
+#: misses the board's footprint by 0.505 mm because lettering is not drawn to
+#: the edge. Using the whole GROUP is deliberate -- if the most generous box
+#: silkscreen can offer fails, every individual face of it fails.
+_LM20A_SILKSCREEN = ((-9.9722, -7.9429, -0.0750), (10.0832, 8.8900, 2.0050))
+
+
+def test_the_mask_film_is_the_boards_own_footprint_at_its_own_face():
+    """**What identifies the film is geometry, and that is what makes
+    repainting its colour safe.**
+
+    Both sheets carry the board's own footprint to 0.0000 mm and lie 0.05 mm
+    off one of its two outer planes. Neither test looks at the colour, so the
+    rule cannot be accused of finding the green it went looking for.
+    """
+    from tools.import_3d_model import is_mask_film
+
+    low, high = _LM20A_BOARD
+    for name, (film_low, film_high) in (("above", _LM20A_FILM_ABOVE),
+                                        ("below", _LM20A_FILM_BELOW)):
+        assert is_mask_film(film_low, film_high, low, high, up=2), (
+            f"the film {name} the nRF54LM20A's PCB is no longer recognised as "
+            f"one, so its board goes back to drawing the exporter's green"
+        )
+
+
+def test_the_mask_film_rule_does_not_reach_the_silkscreen():
+    """The other thing this vendor exports as its own body, and it must stay
+    white. It is excluded by the footprint alone, with a factor of two in
+    hand: 0.505 mm out against a tolerance of 0.25."""
+    from tools.import_3d_model import MASK_FOOTPRINT_MM, is_mask_film
+
+    low, high = _LM20A_BOARD
+    silk_low, silk_high = _LM20A_SILKSCREEN
+    assert not is_mask_film(silk_low, silk_high, low, high, up=2)
+    # The LARGEST miss is what decides it: one edge outside the tolerance is
+    # enough to reject, so that is the margin the tolerance has to clear.
+    miss = max(abs(silk_low[0] - low[0]), abs(silk_high[0] - high[0]))
+    assert miss > 2 * MASK_FOOTPRINT_MM, (
+        f"the silkscreen now misses the board's footprint by only {miss:.3f} "
+        f"mm, so the tolerance no longer has room and could swallow it"
+    )
+
+
+def test_the_mask_film_rule_leaves_the_boards_own_edge_alone():
+    """A face reaching from the bottom plane to the top one has the board's
+    footprint and is the board's EDGE, not a film on it. This is why both ends
+    of a face are measured against the same plane rather than the nearer one
+    each -- the cheaper test passes this and would repaint the board's rim."""
+    from tools.import_3d_model import is_mask_film
+
+    low, high = _LM20A_BOARD
+    assert not is_mask_film(low, high, low, high, up=2)
+
+
+def test_the_mask_film_rule_leaves_a_board_sized_thing_standing_above_it():
+    """A shield can or a lid covering the whole board is not the mask. The
+    footprint cannot tell them apart; the height can, and that is the second
+    condition's whole job."""
+    from tools.import_3d_model import is_mask_film
+
+    low, high = _LM20A_BOARD
+    lid_low = (low[0], low[1], high[2] + 1.9)
+    lid_high = (high[0], high[1], high[2] + 2.0)
+    assert not is_mask_film(lid_low, lid_high, low, high, up=2)
+
+
+def test_the_solder_mask_film_takes_the_colour_of_the_board_it_lies_on():
+    """**The film and the board are the same missing fact**, and answering it
+    two ways inside one mesh is what OH-99 was filed for: the nRF54LM20A drew
+    `#143324` over a board already drawing `BOARD_MASK`. The film gets the
+    board's colour whatever the file styles it, because the vendor's stackup
+    gives that mask a thickness and no colour."""
+    from tools.import_3d_model import BOARD_MASK, colour_key
+
+    assert colour_key("#143324", is_board=False, is_film=True) == BOARD_MASK
+    assert colour_key("", is_board=False, is_film=True) == BOARD_MASK
+    assert colour_key(None, is_board=False, is_film=True) == BOARD_MASK
+
+
+def test_the_film_tolerances_say_what_they_were_measured_against():
+    """Both numbers are judgements about tolerance, so both have to carry
+    their measurement -- the same rule `BOARD_MASK` itself is held to."""
+    from tools.import_3d_model import MASK_FILM_MM, MASK_FOOTPRINT_MM
+
+    source = pathlib.Path(import_3d_model.__file__).read_text(encoding="utf-8")
+    note = source.split("MASK_FILM_MM = ", 1)[0].rsplit("BOARD_MASK = ", 1)[1]
+    assert 0.0 < MASK_FOOTPRINT_MM < 0.505, (
+        "the footprint tolerance now reaches the silkscreen, which misses the "
+        "board's own footprint by 0.505 mm"
+    )
+    assert 0.0 < MASK_FILM_MM < 1.51, (
+        "the film tolerance now spans the whole board, so its two outer "
+        "planes are no longer distinguishable"
+    )
+    for evidence in ("0.0000 mm", "six vendor board STEPs", "0.05 mm proud"):
+        assert evidence in note, f"the measurement {evidence!r} is not recorded"
+
+
+def test_the_shipped_nrf54lm20a_lost_its_green_board_and_kept_its_green_led():
+    """**Both halves of OH-99, measured on the mesh that ships.**
+
+    `#143324` is the exporter's default solder-mask colour -- it is (0.08,
+    0.20, 0.14) in floats to two decimals, a constant typed into a program --
+    and no board mesh may carry it any more. `#186b2a` is a different green
+    on a real part, the RGB LED, and it MUST survive: a repaint that took it
+    too would be the overreach this rule is written narrowly to avoid.
+    """
+    from tools.import_3d_model import OUT
+
+    seen = 0
+    for mesh in sorted(OUT.glob("*.glb")):
+        doc, _body = _gltf(mesh)
+        extras = doc["asset"].get("extras", {})
+        if not extras.get("pcb") or extras.get("composed"):
+            continue
+        seen += 1
+        names = {material["name"] for material in doc["materials"]}
+        assert "#143324" not in names, (
+            f"{mesh.name} still draws the exporter's default solder-mask "
+            f"green over a board that draws BOARD_MASK"
+        )
+        if mesh.stem == "nRF54LM20A":
+            assert "#186b2a" in names, (
+                "the nRF54LM20A's green LED went with the film; the repaint "
+                "is supposed to reach two faces and no part"
+            )
+    if not seen:
+        pytest.skip("no imported board meshes on disk; "
+                    "run python tools/import_3d_model.py --all")
+
+
+def test_the_pcb_solids_own_faces_are_never_taken_for_a_film_on_it():
+    """**The guard that keeps a vendor who DID style their board safe.**
+
+    The PCB solid's own top face passes every test in `is_mask_film`: it has
+    the board's footprint, because it IS the board's footprint, and it lies at
+    exactly one of its two outer planes. `mask_film_faces_of` excludes
+    `board_faces` for that reason, and without the exclusion the rule would
+    repaint the board itself -- which is the one thing OH-97 argued it must
+    not do to a board whose mask a vendor had coloured.
+
+    **Built here rather than read off a vendor STEP**, because the mutation
+    that drops the exclusion changes nothing on any of the six files we have:
+    all six leave the PCB solid unstyled, so it takes `BOARD_MASK` either way
+    and the meshes come out byte-identical. Two boxes is what makes the
+    difference observable at all.
+
+    The film is deliberately 0.1 mm inside the board on each edge rather than
+    flush with it, so this exercises `MASK_FOOTPRINT_MM` as a tolerance and
+    leaves the PCB the unambiguous winner of `pcb_solid`'s largest-area test.
+    """
+    try:
+        from OCP.BRep import BRep_Builder
+        from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+        from OCP.gp import gp_Pnt
+        from OCP.TopoDS import TopoDS_Compound
+    except ImportError:
+        pytest.skip("OpenCASCADE is not installed")
+
+    from tools.import_3d_model import board_faces_of, mask_film_faces_of
+
+    board = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), 20.0, 17.0, 1.5).Shape()
+    film = BRepPrimAPI_MakeBox(gp_Pnt(0.1, 0.1, 1.55), 19.8, 16.8, 0.01).Shape()
+    builder = BRep_Builder()
+    compound = TopoDS_Compound()
+    builder.MakeCompound(compound)
+    builder.Add(compound, board)
+    builder.Add(compound, film)
+
+    board_faces = board_faces_of(compound)
+    films = mask_film_faces_of(compound, board_faces)
+    assert films, (
+        "the film lying on the board was not found at all, so a board that "
+        "ships one goes back to drawing the exporter's colour over it"
+    )
+    assert not (films & board_faces), (
+        "the PCB solid's own faces were taken for a film on it, so the rule "
+        "would repaint a board whose mask the vendor DID colour"
+    )

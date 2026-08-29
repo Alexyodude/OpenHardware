@@ -501,12 +501,25 @@ UNSTYLED = "#808080"
 #:
 #:   * Seeed's STEP files give the PCB `#808080` -- `UNSTYLED`. On the RP2040
 #:     that is 16,682 of 18,723 vertices.
-#:   * `XIAO ESP32C3_v1.3.kicad_pro` holds `"pcb_color": "rgba(0, 0, 0,
-#:     0.000)"`. **Alpha zero is KiCad's UNSET**, not a claim that the board is
-#:     black, and reading it as black would be inventing a fact out of a
-#:     default.
-#:   * The `.kicad_pcb` has no `(stackup ...)`. Its only solder-mask entries in
-#:     697 KB are `solder_mask_margin`, which is a clearance.
+#:   * **The `(stackup ...)` is where KiCad records a solder-mask colour, and
+#:     six of the seven Seeed board files have one that states none.** Each
+#:     carries six copper layers with thicknesses, five FR4 dielectrics with
+#:     their `epsilon_r` and loss tangent, `(copper_finish "None")`, and both
+#:     mask layers with `(thickness 0.01)` and no `(color ...)`. A vendor who
+#:     filled in that table and left one field of it empty did not state a
+#:     colour, and that is a stronger absence than an unopened file.
+#:   * **`XIAO ESP32C3_v1.3.kicad_pcb` has no stackup at all**, which is what
+#:     OH-97 measured and read as "the `.kicad_pcb` has no stackup". It is the
+#:     one board of the seven that has none. Corrected 2026-08-30 by OH-99,
+#:     which needed the six that do.
+#:   * **The `pcb_color` this search used to cite is a NET CLASS field and not
+#:     the board's.** It sits at `net_settings.classes[0]` in the `.kicad_pro`,
+#:     beside `clearance`, `track_width`, `via_drill` and a `schematic_color`,
+#:     and it is how nets of that class are highlighted in the two editors --
+#:     which is why it has a schematic half at all. **Alpha zero is KiCad's
+#:     UNSET**, so it states nothing; but it was never about the board, and all
+#:     nine Seeed `.kicad_pro` files carry the identical default. Recorded
+#:     because OH-97 and OH-99 both cited it as the board's colour.
 #:   * Seeed's wiki says nothing: `XIAO_ESP32C3_Getting_Started` and
 #:     `SeeedStudio_XIAO_Series_Introduction` fetched and searched for "black",
 #:     "colour", "color", "matte", "glossy" -- zero mentions.
@@ -521,6 +534,47 @@ UNSTYLED = "#808080"
 #: **What would retire this judgement**: Seeed stating a colour, or somebody
 #: measuring a board. Recorded so it can be replaced rather than inherited.
 BOARD_MASK = "#1b1b1b"
+
+# --- the solder-mask film, and the one colour this file overrides (OH-99) ----
+#
+# **The nRF54LM20A drew green while its own board drew `BOARD_MASK`, and that
+# incoherence is the defect** -- one missing fact answered two different ways
+# inside one mesh. Its STEP is the only one of the six that exports the mask as
+# its own body, and what it exports is not a solid but TWO LOOSE FACES:
+#
+#     the PCB solid   x -10.4775..10.4775  y -8.8900..8.8900  z 0.0000..1.5100
+#     film, above     the same x and y to 0.0000 mm            z 1.5600
+#     film, below     the same x and y to 0.0000 mm            z -0.0500
+#
+# So the identification is geometric and does not touch the colour, which is
+# what makes overriding the colour safe: **a face with the board's own
+# footprint, lying a film's thickness off one of its two outer planes, is the
+# mask on that board.** Nothing else in six vendor board STEPs comes within
+# 0.25 mm of the PCB's footprint -- the silkscreen, the nearest miss, is 0.505
+# mm inside it and asymmetric, because lettering is not drawn to the edge.
+#
+# **Why this does not reverse "a face the vendor DID colour is untouched".**
+# The vendor did not colour it. Their stackup states this mask's THICKNESS and
+# no colour, as recorded above; `#143324` is the exporter's default, and it
+# reads as one -- it is (0.08, 0.20, 0.14) in floats to two decimals, a
+# constant somebody typed into a program rather than anything measured off a
+# board. The rule that replaces the old one is therefore narrower, not weaker:
+# *a face the vendor coloured is untouched unless it is the solder-mask film on
+# the board this module has already identified by shape* -- because that face's
+# colour comes from exactly where the board's does, which is nowhere, and
+# `BOARD_MASK` is the answer this module already gave to that question.
+
+#: How far a face's own edges may sit from the PCB solid's and still be the
+#: same rectangle. Measured 0.0000 mm on both films; the sweep that set it ran
+#: over all six vendor board STEPs and at this value returns those two faces
+#: and nothing else.
+MASK_FOOTPRINT_MM = 0.25
+
+#: How far off one of the board's two outer planes a mask film may lie. The
+#: exporter drew it 0.05 mm proud where the stackup states 0.01 mm thick, so
+#: this admits either convention with room to spare, and it is what makes the
+#: rule say "a film ON the board" rather than "anything board-shaped above it".
+MASK_FILM_MM = 0.2
 
 
 @dataclasses.dataclass(frozen=True)
@@ -852,7 +906,7 @@ def handedness_of(order: tuple[int, int, int]) -> float:
     return parity
 
 
-def colour_key(styled: str | None, is_board: bool) -> str:
+def colour_key(styled: str | None, is_board: bool, is_film: bool) -> str:
     """Which colour group a face belongs to.
 
     **Lifted out of `tessellate` so that it can be tested at all.** That
@@ -865,7 +919,16 @@ def colour_key(styled: str | None, is_board: bool) -> str:
     with nothing, as well as `None` for one it does not mention. A check for
     `None` alone let the empty string through as a colour key, which reached
     `int("", 16)` in the writer and stopped the import outright.
+
+    **`is_film` is the one case where a stated colour loses, and the order of
+    these three lines is the whole rule.** It is the solder mask lying on a
+    board this module has already identified by shape, and the vendor stated
+    no colour for it anywhere -- see the note beside `MASK_FOOTPRINT_MM`. It
+    is deliberately not a default: every caller says which of the three cases
+    a face is, because the case that was silently wrong is what OH-99 fixed.
     """
+    if is_film:
+        return BOARD_MASK
     if styled:
         return styled
     return BOARD_MASK if is_board else UNSTYLED
@@ -887,6 +950,75 @@ def board_faces_of(shape) -> frozenset:
     while walk.More():
         faces.add(TopoDS.Face_s(walk.Current()).TShape())
         walk.Next()
+    return frozenset(faces)
+
+
+Corners = tuple[float, float, float]
+
+
+def is_mask_film(low: Corners, high: Corners, board_low: Corners,
+                 board_high: Corners, up: int) -> bool:
+    """Whether one face's bounding box is solder-mask film lying on the PCB.
+
+    **Lifted out of `mask_film_faces_of` for the reason `colour_key` was
+    lifted out of `tessellate`**: that function needs OpenCASCADE and a 17 MB
+    vendor download to reach, and this repository has twice been caught by a
+    decision that could only be checked by reading a `.glb` no mutation
+    regenerates. Boxes in, a verdict out, and the numbers measured off the
+    nRF54LM20A go straight into a test.
+
+    Two conditions, and each earns its place. The footprint must be the PCB
+    solid's on both in-plane axes -- that is what does the identifying, and
+    nothing else in six vendor board STEPs comes within `MASK_FOOTPRINT_MM` of
+    it. And the whole face must lie within `MASK_FILM_MM` of ONE of the
+    board's two outer planes: both ends against the same plane, so that a face
+    reaching from the bottom to the top is the board's own edge and not a film
+    on it.
+    """
+    for axis in range(3):
+        if axis == up:
+            continue
+        if (abs(low[axis] - board_low[axis]) > MASK_FOOTPRINT_MM
+                or abs(high[axis] - board_high[axis]) > MASK_FOOTPRINT_MM):
+            return False
+    return any(abs(low[up] - face) <= MASK_FILM_MM
+               and abs(high[up] - face) <= MASK_FILM_MM
+               for face in (board_low[up], board_high[up]))
+
+
+def mask_film_faces_of(shape, board_faces: frozenset) -> frozenset:
+    """The faces of the solder-mask film lying on the PCB, by identity.
+
+    `is_mask_film` is the rule; this walks the shape and applies it. The
+    argument for repainting what it finds, and the measurement behind both
+    tolerances, is beside `MASK_FOOTPRINT_MM`.
+
+    **`board_faces` is excluded rather than recomputed**, and it is the
+    difference between the film and the board: the PCB solid's own top face
+    passes every test here, being its own footprint at its own plane. Taking
+    it out is what keeps this rule about a film ON the board -- and keeps a
+    vendor who DID style the board's own faces safe from it.
+    """
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    up = up_axis(shape)
+    board = box_of(pcb_solid(shape, up))
+    lows = (board.xmin, board.ymin, board.zmin)
+    highs = (board.xmax, board.ymax, board.zmax)
+
+    faces = set()
+    walk = TopExp_Explorer(shape, TopAbs_FACE)
+    while walk.More():
+        face = TopoDS.Face_s(walk.Current())
+        walk.Next()
+        if face.TShape() in board_faces:
+            continue
+        box = box_of(face)
+        if is_mask_film((box.xmin, box.ymin, box.zmin),
+                        (box.xmax, box.ymax, box.zmax), lows, highs, up):
+            faces.add(face.TShape())
     return frozenset(faces)
 
 
@@ -915,7 +1047,8 @@ def frame_for(shape) -> tuple[Frame, Extent, float, float]:
 
 
 def tessellate(shape, styles, deflection: float, frame: Frame,
-               board_faces: frozenset | None = None) -> Mesh:
+               board_faces: frozenset | None = None,
+               film_faces: frozenset | None = None) -> Mesh:
     """Mesh every face, grouped by colour, in glTF axes and millimetres.
 
     `board_faces` names the faces of the PCB solid, and they take `BOARD_MASK`
@@ -927,6 +1060,11 @@ def tessellate(shape, styles, deflection: float, frame: Frame,
     A PCB is the one unstyled solid whose material is not a mystery: this
     module already had to IDENTIFY it, by shape, because the model's origin is
     the board's centre rather than the assembly's. See `BOARD_MASK`.
+
+    `film_faces` names the solder mask lying ON that board, which one of the
+    six vendor STEPs exports as its own pair of faces, and those take
+    `BOARD_MASK` whatever the file styles them -- the single place this module
+    overrides a stated colour, argued beside `MASK_FOOTPRINT_MM`.
     """
     from OCP.BRep import BRep_Tool
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
@@ -950,6 +1088,7 @@ def tessellate(shape, styles, deflection: float, frame: Frame,
         key = colour_key(
             colour_of(styles, face),
             board_faces is not None and face.TShape() in board_faces,
+            film_faces is not None and face.TShape() in film_faces,
         )
         positions, normals, indices = groups.setdefault(key, ([], [], []))
         base = len(positions) // 3
@@ -1341,7 +1480,16 @@ def convert(model: Model, deflection: float, check: bool) -> int:
 
     # **The PCB's own faces, so an unstyled BOARD is a board rather than a
     # mystery.** Every other unstyled face stays grey; see `BOARD_MASK`.
-    mesh = tessellate(shape, styles, deflection, frame, board_faces_of(shape))
+    # **And the mask film lying on it**, where the vendor exported one as its
+    # own body -- one of the six does, and it drew green over its own dark
+    # board until OH-99. Printed, because a rule that repaints a vendor's
+    # stated colour should say out loud when it fired.
+    board_faces = board_faces_of(shape)
+    film_faces = mask_film_faces_of(shape, board_faces)
+    if film_faces:
+        print(f"  mask   {len(film_faces)} face(s) of solder-mask film on the"
+              " PCB take BOARD_MASK; see MASK_FOOTPRINT_MM")
+    mesh = tessellate(shape, styles, deflection, frame, board_faces, film_faces)
     print(f"  mesh   {mesh.triangles():,} triangles, {mesh.vertices():,} vertices, "
           f"{len(mesh.groups)} colours at {deflection} mm deflection")
     report_alignment(model, long, short, spans(pcb)[frame.up])
