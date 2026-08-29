@@ -162,9 +162,30 @@ a decoy, and it was opened this time: it does hold
 RP2040, SAMD21, C3, S3 and nRF52840 STEPs — the boilerplate list §2 already
 describes, and not one of them a C5.
 
-**`XIAO-XIAO STM32C5-SMD`** — the sitemap contains no XIAO STM32 page of any
-kind. The board is in this repository's catalogue and is not on the vendor's
-wiki.
+**`XIAO-XIAO STM32C5-SMD`** — the last board without a model, and the only
+one whose absence has been searched with a CONTROL. Every query below was run
+twice on 2026-08-29, once for it and once for the ESP32-C5 whose PCB is now
+composed:
+
+    query                                    ESP32-C5        STM32C5
+    the wiki's sitemap, 2,766 pages          14 pages        0 pages
+    files.seeedstudio.com/.../res/*.zip      200, 865,127    403
+    Seeed-Studio/OSHW-XIAO-Series, 778 paths 5 paths         1 path
+
+The wiki has 241 XIAO pages and not one is an STM32; its five STM32 pages are
+a LoRa-E5, two ODYSSEY boards, a SOM and an ADC hat.
+
+**The one path is a footprint**, `XIAO-STM32C5-SMD.kicad_mod`, and that is
+where this board entered our catalogue —
+`webui/boards/XIAO-XIAO STM32C5-SMD.json` names that repository and that
+footprint as its source, and the doubled `XIAO-XIAO` is the footprint's own
+name rather than a typo. So this is not a board whose vendor has not published
+its CAD; it is a footprint for a board that appears never to have shipped.
+
+Its 709 KB looks promising until it is measured: `User.1` holds 2,225 lines of
+median length 0.117 mm and `User.2` another 1,216 at 0.086 mm. Thousands of
+tenth-of-a-millimetre strokes is a traced PICTURE of the board, with no
+height, no part identity and no solid in it. See OH-109.
 
 **Every XIAO shares a 21 × 17.5 mm outline and a 14-pad castellated edge, and
 that is exactly why a sibling's mesh must not be substituted.** It would be

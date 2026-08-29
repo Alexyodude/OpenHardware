@@ -126,7 +126,28 @@
         "XIAO-XIAO STM32C5-SMD"
       ],
       "mesh": null,
-      "modelable": false
+      "modelable": false,
+      "searched": {
+        "when": "2026-08-29 (OH-109)",
+        "control": "every query run twice, once for the ESP32-C5 whose PCB is now composed; the control finds it each time",
+        "sitemap": {
+          "esp32c5": 14,
+          "stm32c5": 0,
+          "note": "241 XIAO pages, none an STM32; the five STM32 pages are a LoRa-E5, two ODYSSEY boards, a SOM and a Pi ADC"
+        },
+        "res_archive": {
+          "esp32c5": "200, 865127 bytes",
+          "stm32c5": "403 on three patterns"
+        },
+        "vendor_repo": {
+          "repo": "Seeed-Studio/OSHW-XIAO-Series",
+          "paths": 778,
+          "esp32c5": 5,
+          "stm32c5": 1,
+          "the_one": "Seeed Studio XIAO Series Library/XIAO-STM32C5-SMD.kicad_mod, a footprint"
+        },
+        "conclusion": "not a board whose CAD is unpublished -- a footprint for a board that appears never to have shipped. It is in this repository's catalogue because tools/import_board.py derives boards from that library."
+      }
     },
     "nRF54LM20A": {
       "boards": [
