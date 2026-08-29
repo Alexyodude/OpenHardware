@@ -480,6 +480,8 @@ export function analyse(bench) {
       : Math.abs(volts) / bench.supply.sinkOhms);
   }
 
+  //: How many wired parts have one leg in mid-air. See `JUNCTION_NOTE`.
+  let midAir = 0;
   for (const [index, part] of bench.parts.entries()) {
     if (!wired.has(index)) continue;
     const entry = report[index];
@@ -500,6 +502,10 @@ export function analyse(bench) {
       entry.reason = `only its ${reaching[0]} is wired, so no current can ` +
                      `return — ${names.filter((n) => n !== reaching[0]).join(" and ")} ` +
                      `is in mid-air`;
+      // Counted for `JUNCTION_NOTE` below: a part with one leg wired beside
+      // another part is what somebody trying to build a series circuit has in
+      // front of them. See OH-84.
+      midAir += 1;
       continue;
     }
     const signed = solved.amps[`part:${index}`] ?? 0;
@@ -581,10 +587,40 @@ export function analyse(bench) {
     }
   }
 
-  return answer(assumed
-    ? "One part on this bench publishes no electrical model, so no current is " +
-      "reported for any of them: a value stood in for it would decide theirs."
-    : null);
+  //: **Two parts cannot be wired to each other on this bench, and this is
+  //: where a reader finds that out** rather than by trying it and getting no
+  //: explanation. OH-84.
+  //:
+  //: Every wire here runs from a BOARD PAD to a part terminal --
+  //: `board3d.js`'s `connect(pin, part, terminalName)` looks the pin up in
+  //: `view.pads` and refuses anything it cannot find, and a wire above is
+  //: `{pad, part, terminal}`. There is no shape in either file for a wire
+  //: between two parts, so a series circuit has to borrow a pin.
+  //:
+  //: **That is not a trick and it is worth saying why**: a pad the firmware
+  //: leaves as an input is high impedance, stamps nothing into the netlist
+  //: above, and is therefore exactly a floating node. The circuit OH-80 exists
+  //: to make possible was verified that way.
+  //:
+  //: Shown only when there are two or more parts and one of them has a leg in
+  //: mid-air, which is what somebody trying to chain them is looking at. On a
+  //: bench with a single part the mid-air message is already the whole story
+  //: and this would be noise.
+  const JUNCTION_NOTE =
+    "A wire runs from a board pad to a part terminal, so two parts cannot be " +
+    "joined to each other directly. To put parts in series, use a pad the " +
+    "firmware leaves as an INPUT as the junction — an input is high impedance " +
+    "and stamps nothing into the netlist, so it is exactly a floating node. " +
+    "D13 → resistor → D12 → LED → GND is a current-limited LED wired that way.";
+
+  const notes = [];
+  if (assumed) {
+    notes.push("One part on this bench publishes no electrical model, so no " +
+               "current is reported for any of them: a value stood in for it " +
+               "would decide theirs.");
+  }
+  if (bench.parts.length > 1 && midAir) notes.push(JUNCTION_NOTE);
+  return answer(notes.length ? notes.join(" ") : null);
 }
 
 /** The two names a part's wires may land on. */

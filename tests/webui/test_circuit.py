@@ -1266,3 +1266,72 @@ def test_a_resistor_on_the_weakest_pin_is_still_well_clear_of_the_threshold(tmp_
     # other half of the claim: the margin is large but it is not infinite.
     assert got["eight"]["drive"] == "off"
     assert got["eight"]["amps"] is None
+
+
+# --- two parts cannot be joined to each other, and the page says so (OH-84) --
+
+
+def test_a_bench_trying_to_chain_two_parts_is_told_how_a_junction_is_made(tmp_path):
+    """**OH-84's answer, and the answer is a sentence rather than a feature.**
+
+    Every wire on this bench runs from a board pad to a part terminal:
+    `board3d.js`'s `connect(pin, part, terminalName)` looks the pin up in
+    `view.pads` and refuses anything it cannot find, and a wire here is
+    `{pad, part, terminal}`. So a series circuit has to borrow a pin, and
+    nothing said so -- which put the gap in front of the first thing a reader
+    tries once there is a resistor to put in series with something.
+
+    The borrowed pin is not a trick and the note says why: a pad the firmware
+    leaves as an input is high impedance, stamps nothing into the netlist, and
+    is exactly a floating node.
+
+    Shown when there are two parts and one has a leg in mid-air, which is what
+    somebody trying to chain them is looking at.
+    """
+    got = run(tmp_path, """
+        const report = analyse({supply: UNO, pads: PADS,
+                                parts: [RESISTOR, LED], wires: [
+            {pad: "13", part: 0, terminal: "a"},
+            {pad: "GND", part: 1, terminal: "cathode"},
+        ]});
+        console.log(JSON.stringify({note: report.note,
+                                    parts: report.parts.map((p) => p.reason)}));
+    """)
+    assert got["note"], "a bench with two half-wired parts gets no guidance"
+    assert "two parts cannot be" in got["note"]
+    assert "INPUT" in got["note"], "the note does not say what to use instead"
+    assert "floating node" in got["note"], (
+        "the note does not say WHY a spare input works, which is the half a "
+        "reader needs to trust it"
+    )
+    # And the per-part reasons are untouched: the note is bench-level advice,
+    # not a replacement for saying which leg is in mid-air.
+    assert any("mid-air" in reason for reason in got["parts"])
+
+
+def test_a_single_part_with_a_leg_in_mid_air_is_not_told_about_junctions(tmp_path):
+    """One part on the bench cannot be in series with anything, so the
+    junction note would be noise -- the mid-air reason is already the whole
+    story. The guidance appears when a reader is plausibly trying to chain."""
+    got = run(tmp_path, bench('[{pad: "13", part: 0, terminal: "anode"}]') + """
+        console.log(JSON.stringify({note: report.note,
+                                    reason: report.parts[0].reason}));
+    """)
+    assert "mid-air" in got["reason"]
+    assert not got["note"], (
+        f"a single half-wired part was given bench advice: {got['note']!r}"
+    )
+
+
+def test_a_bench_whose_parts_are_all_completely_wired_gets_no_junction_note(tmp_path):
+    """Nothing is stuck, so nothing needs explaining. A note that appeared on
+    a working circuit would train a reader to ignore the notes."""
+    got = run(tmp_path, """
+        const report = analyse({supply: UNO, pads: PADS,
+                                parts: [LED], wires: [
+            {pad: "13", part: 0, terminal: "anode"},
+            {pad: "GND", part: 0, terminal: "cathode"},
+        ]});
+        console.log(JSON.stringify({note: report.note}));
+    """)
+    assert not got["note"], f"a complete circuit was given advice: {got['note']!r}"
