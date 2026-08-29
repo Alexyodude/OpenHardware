@@ -300,16 +300,20 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "twenty pads spanning 4.812 x 8.636 mm: sixteen signal contacts and "
         "four shell tabs. 8.94 mm is the width of a USB-C receptacle and "
         "8.636 is its contact field, so this is the 16-pin part. "
-        "**The turn is 90 and it was 0 until OH-105**: this model carries its "
-        "8.940 mm WIDTH on its own local x, and a receptacle's width lies "
-        "along the board edge with its 7.37 mm depth pointing off it -- "
-        "Seeed's own F.Fab rectangle measures 7.341 x 8.992 mm and says so. "
-        "Turned wrongly it put the width off the edge, so a cable would have "
-        "gone in sideways. 90 rather than 270 because the mouth has to face "
-        "off the board: measured as triangle area in each end plane, an open "
-        "end being a rim and a closed one a filled face, 90 gives 0.38 mm2 "
-        "outward against 4.26 inward.",
-        turn=90.0,
+        "**The turn is 270, and it was 0 and then 90 before that.** This model "
+        "carries its 8.940 mm WIDTH on its own local x, and a receptacle's "
+        "width lies along the board edge with its 7.37 mm depth pointing off "
+        "it -- Seeed's own F.Fab rectangle measures 7.341 x 8.992 mm and says "
+        "so, which rules out 0 and 180. "
+        "**Which of the remaining two is decided by `contact_miss` and not by "
+        "anybody's reading of a picture**: 270 puts this model's plated "
+        "contacts 0.922 mm from the pads they solder to and 90 puts them "
+        "2.465 mm away, the worst of the four. OH-105 chose 90 by measuring "
+        "which end had least triangle area in its plane, reasoning that a "
+        "mouth is a rim and a back is a filled face -- and what that actually "
+        "measured was the thin solder tails crossing the plane, so it named "
+        "the BACK as the mouth and faced the socket into the board.",
+        turn=270.0,
     ),
     Component(
         "X2-SMD-1.6X1.0X0.5MM", "Crystal",
@@ -1460,6 +1464,78 @@ def confirm(element: eagle.Element, box, turn: float,
     return None
 
 
+#: The gold and brass a KiCad model gives a plated contact.
+#:
+#: **Colour is the vendor's statement about a material here**, which is the
+#: whole basis of `tools/import_3d_model.py`, so reading "these triangles are
+#: the plated contacts" off it is the same kind of reading as "this face is
+#: solder mask". Every value was taken from a shipped mesh rather than chosen.
+CONTACT_COLOURS = frozenset({"#b58136", "#ebbc51", "#edbe51", "#e7c863"})
+
+#: A part needs this many surface-mount pads before its turn is decided by
+#: where its contacts land.
+#:
+#: Two pads cannot say which way round a part is -- a chip capacitor is the
+#: same part rotated -- and neither can four in a square. Eight in a row is a
+#: pin field, and a pin field has an orientation. The USB-C has sixteen.
+TURN_FROM_CONTACTS_PADS = 8
+
+
+def contact_miss(element: eagle.Element, put: Mesh,
+                 centre: tuple[float, float]) -> float | None:
+    """How far the model's plated contacts land from the pads they solder to.
+
+    `None` when the part has too few surface-mount pads to have a facing, or
+    when its model states no contact colour.
+
+    **This is what decides which way a part faces, and until OH-107 nothing
+    did.** `confirm` measures a model against the pads and `silk_miss`
+    measures its body against the vendor's drawing; neither can see a half
+    turn, because a span and a centre both survive one. So `Component.turn`
+    was the only claim in `CORRESPONDENCE` that was taken on trust -- and the
+    USB-C was turned wrongly three times running, by three people looking at
+    pictures.
+
+    A receptacle's contacts leave at its back and solder to pads. The
+    footprint says where those pads are and the model says where its contacts
+    are, so putting one on the other is two vendor sources agreeing, with no
+    judgement in between. On the four composed boards the right turn wins by a
+    factor of two to five.
+    """
+    pads = [pad for pad in element.pads if pad.kind == "smd"]
+    if len(pads) < TURN_FROM_CONTACTS_PADS:
+        return None
+    plated = [(positions[at], positions[at + 2])
+              for colour, (positions, _n, _i) in put.groups.items()
+              if colour in CONTACT_COLOURS
+              for at in range(0, len(positions), 3)]
+    if not plated:
+        return None
+    #: Into the scene's frame, where `place` has already put the mesh: x is
+    #: unchanged and z is the board's y negated.
+    #:
+    #: **That negation is currently unobservable** and is kept anyway: every
+    #: part this runs on has a contact field centred on the board's own y, so
+    #: the centroid's z is within 0.044 mm of zero on all four boards and a
+    #: sign flip moves it less than the margin. A mutation removing it
+    #: survives, which is a property of these parts rather than a gap in the
+    #: tests -- recorded so nobody hunts it twice. A connector mounted off the
+    #: centre line would expose it immediately.
+    want = (sum(p.x_mm for p in pads) / len(pads) - centre[0],
+            -(sum(p.y_mm for p in pads) / len(pads) - centre[1]))
+    got = (sum(p[0] for p in plated) / len(plated),
+           sum(p[1] for p in plated) / len(plated))
+    return math.dist(got, want)
+
+
+#: How much better the stated turn has to be than the next one before it is
+#: believed to be a choice rather than a coin toss.
+#:
+#: On the four composed USB-C sockets the right turn beats the runner-up by
+#: 0.94 to 2.64 mm, so 0.3 is loose against every case that exists and still
+#: refuses the three wrong answers this part has been given.
+TURN_MARGIN_MM = 0.3
+
 #: How far a placed body may sit from where the vendor drew it before the
 #: placement is refused. A body and a silkscreen are different outlines -- one
 #: is the part and one is a drawing of where it goes -- so they do not agree
@@ -1723,6 +1799,33 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             )
         put = place(mesh, element, component.turn, spec.thickness_mm, centre)
         solids.append(box_around(element.name, put))
+        # **The turn, checked the way the model and the place already are.**
+        # Both other checks survive a half turn -- a span does and a centre
+        # does -- so without this one `turn` is the only line in
+        # `CORRESPONDENCE` taken on trust, and the USB-C was turned wrongly
+        # three times running because of it.
+        facing = contact_miss(element, put, centre)
+        if facing is not None:
+            rivals = []
+            for other in (0.0, 90.0, 180.0, 270.0):
+                if other == component.turn:
+                    continue
+                rival = contact_miss(
+                    element, place(mesh, element, other, spec.thickness_mm,
+                                   centre), centre)
+                if rival is not None:
+                    rivals.append((rival, other))
+            best = min(rivals, default=None)
+            if best is not None and facing > best[0] - TURN_MARGIN_MM:
+                raise SystemExit(
+                    f"{spec.board}: {element.name} ({element.package}) is "
+                    f"turned {component.turn:.0f}, which puts its contacts "
+                    f"{facing:.3f} mm from the pads they solder to -- and "
+                    f"{best[1]:.0f} puts them {best[0]:.3f}. The model says "
+                    f"where its contacts are and the footprint says where "
+                    f"their pads are; believe those rather than a picture."
+                )
+
         miss = silk_miss(element, put, centre)
         allowed = body_allowance(element.package)
         if miss is not None and miss > allowed:

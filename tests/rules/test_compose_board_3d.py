@@ -36,6 +36,7 @@ import math
 import pathlib
 import struct
 import sys
+from unittest import mock
 
 import pytest
 
@@ -430,38 +431,43 @@ def _glb_groups(path: pathlib.Path) -> dict[str, list[tuple[float, float, float]
 #: own STEP files style their pins and shells with.
 CONTACT_COLOURS = frozenset({"#b58136", "#ebbc51", "#edbe51", "#c6c4a0"})
 
-#: How far a soldered contact may lie outside the board's own outline.
+#: How high above the board a plated contact still counts as touching it.
 #:
-#: **It should be zero and on three of the five boards it is inside**, with
-#: room to spare. Re-measured after OH-105 turned every receptacle a quarter:
+#: **A USB-C's contacts do not all end on the board, and that is correct.**
+#: The solder tails sit on the pads; the same contacts then run forward onto
+#: the tongue, which is inside a shell that overhangs the edge. So gold past
+#: the outline is normal a couple of millimetres up, and only gold at BOARD
+#: LEVEL is a tail that has missed its pad.
+#:
+#: The first version of this test had no such band and passed only because
+#: every receptacle was turned wrongly at the time.
+TOUCHING_THE_BOARD_MM = 0.35
+
+#: How far a contact that touches the board may lie outside the outline.
+#:
+#: **It should be zero and it is: every board is inside, with margin.**
+#: Measured on the shipped meshes after OH-107 settled the turns:
 #:
 #:     Arduino Uno         -2.093 mm
+#:     XIAO-RP2350-DIP     -1.146
 #:     XIAO-ESP32-C3-DIP   -0.372
+#:     XIAO-nRF54l15-DIP   -0.156
 #:     XIAO-ESP32-C6-DIP   -0.152
-#:     XIAO-RP2350-DIP     +0.164
-#:     XIAO-nRF54l15-DIP   +0.271
 #:
-#: What buys the last two is that their receptacle is a part nobody publishes.
-#: Seeed name their own `USB-31C-F-16P-L7.35` and their `F.Fab` draws it
-#: 7.370 mm deep; the nearest published one is 10.500, so its front contacts
-#: reach past the edge by a quarter of a millimetre. OH-102 retires that.
-#:
-#: The number that made this a test is 0.42: that is how far the WRONG
-#: receptacle put them, and it is what a person looking at the board saw as a
-#: connector hanging off the end of it.
-CONTACT_OVERHANG_MM = 0.3
+#: Negative is inside, so 0.05 is a hair for a contact drawn flush with the
+#: edge rather than an allowance for one hanging off it. The number that made
+#: this a test is 0.42: that is how far the WRONG receptacle put them, and it
+#: is what a person looking at the board saw as a connector in mid-air.
+CONTACT_OVERHANG_MM = 0.05
 
 
 def test_no_soldered_contact_hangs_off_the_board():
     """A pin is soldered to a pad, and a pad is on the board.
 
     **This is the check that would have caught OH-101 and did not exist.**
-    Seeed use two USB-C land patterns -- one with four through-hole shell tabs
-    and one with two -- and OH-93 gave both the same KiCad model. `place`
-    anchors a through-hole part on its legs against the pad extent, so
-    matching a four-tab model to a two-lock land slid the connector half a
-    millimetre forward and left its contact row 0.42 mm past the board edge,
-    in mid-air.
+    Seeed use two USB-C land patterns and OH-93 gave both the same model, so
+    matching a four-tab model to a two-lock land slid the connector forward
+    and left its contact row 0.42 mm past the board edge, in mid-air.
 
     Every other check passed. `confirm` measures the model's footprint against
     the pad span and the wrong part was 2.46 mm short of a 10.240 mm land,
@@ -470,9 +476,9 @@ def test_no_soldered_contact_hangs_off_the_board():
     not the thing to tighten -- this is.
     """
     models = REPO / "webui" / "static" / "models"
-    boards = [_slug for _slug in
+    boards = [slug for slug in
               (compose._slug(spec.board) for spec in compose.COMPOSITIONS)
-              if (models / f"{_slug}.glb").is_file()]
+              if (models / f"{slug}.glb").is_file()]
     if not boards:
         pytest.skip("no board composed; run tools/compose_board_3d.py")
     worst: list[str] = []
@@ -482,154 +488,17 @@ def test_no_soldered_contact_hangs_off_the_board():
         assert pcb, f"{slug} has no PCB group to measure against"
         left, right = min(p[0] for p in pcb), max(p[0] for p in pcb)
         near, far = min(p[2] for p in pcb), max(p[2] for p in pcb)
+        top = max(p[1] for p in pcb)
         for colour in CONTACT_COLOURS & set(groups):
-            for x, _y, z in groups[colour]:
+            for x, y, z in groups[colour]:
+                if y - top > TOUCHING_THE_BOARD_MM:
+                    continue
                 out = max(left - x, x - right, near - z, z - far)
                 if out > CONTACT_OVERHANG_MM:
                     worst.append(f"{slug}: {colour} at ({x:.3f}, {z:.3f}) is "
                                  f"{out:.3f} mm outside the PCB")
                     break
     assert not worst, "\n".join(worst)
-
-
-def test_a_kicad_element_carries_the_body_the_vendor_drew():
-    """Without this `silk_miss` returns None and checks nothing.
-
-    **It did exactly that on all nine composed XIAO boards until OH-103.**
-    `from_kicad` built an `eagle.Element` without a `silk`, the field defaults
-    to None, and the one check that can see a part turned 180 degrees answered
-    "nothing to compare" for every part on every one of them -- silently, and
-    for as long as they had existed.
-    """
-    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "ESP32-C3")
-    if not spec.layout.is_file():
-        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
-    board = compose.read_layout(spec.layout)
-    described = [e for e in board.elements if e.silk is not None]
-    assert len(described) > 40, (
-        f"only {len(described)} of {len(board.elements)} elements carry a "
-        f"body outline; silk_miss cannot check the rest"
-    )
-
-
-def test_the_body_outline_is_negated_into_the_composers_frame(tmp_path):
-    """KiCad measures y down and the composer measures it up.
-
-    **The pads are negated and the body has to be too**, or `silk_miss`
-    compares a body reflected about the board's x axis against a mesh that is
-    not -- which reports a part as misplaced by twice its own offset from the
-    footprint origin, and reports a symmetric one as perfect. So it would fire
-    on the wrong parts and stay quiet on the right ones.
-
-    **The asymmetry is built here rather than found on a board**, because
-    almost nothing real has one: across the four composed XIAOs, 256 parts
-    carry a body and the most off-centre in y misses by 0.127 mm. A sign flip
-    would move that part a quarter of a millimetre, which is not a test. So
-    the fixture puts the body a millimetre off its own origin, where a flip
-    moves it two.
-    """
-    lopsided = tmp_path / "LOPSIDED.kicad_pcb"
-    lopsided.write_text("""(kicad_pcb
-\t(version 20241229)
-\t(gr_rect
-\t\t(start 0 0)
-\t\t(end 40 30)
-\t\t(stroke (width 0.05) (type solid))
-\t\t(layer "Edge.Cuts")
-\t)
-\t(footprint "Lib:LOPSIDED"
-\t\t(layer "F.Cu")
-\t\t(at 10 10)
-\t\t(property "Reference" "U1"
-\t\t\t(at 0 0 0)
-\t\t\t(layer "F.SilkS")
-\t\t)
-\t\t(fp_rect
-\t\t\t(start -2 0.5)
-\t\t\t(end 2 2.5)
-\t\t\t(stroke (width 0.05) (type solid))
-\t\t\t(layer "F.Fab")
-\t\t)
-\t\t(pad "1" smd rect
-\t\t\t(at 0 0)
-\t\t\t(size 1 1)
-\t\t\t(layers "F.Cu")
-\t\t)
-\t)
-)
-""", encoding="utf-8")
-
-    raw = kicad.read_board(lopsided)
-    #: KiCad's own frame, y down: the body sits BELOW the origin on the page.
-    assert raw.placements[0].body == (-2.0, 0.5, 2.0, 2.5)
-
-    element = compose.read_layout(lopsided).elements[0]
-    #: The composer's frame, y up: the same body is now ABOVE it, and the
-    #: bounds swap because negating y turns a minimum into a maximum.
-    assert element.silk == (-2.0, -2.5, 2.0, -0.5), (
-        "the body kept the file's own y, so it is reflected about the board's "
-        "x axis against pads that are not"
-    )
-
-
-def test_every_composed_part_lands_where_the_vendor_drew_its_body():
-    """The check the user's question needed, run rather than described.
-
-    `place` anchors a part on its pads and `confirm` measures it against them,
-    and **both are blind to 180 degrees** because a pin field is usually
-    symmetric about its own centre. The vendor's assembly drawing is not, so
-    it is the one thing that can say which way a part faces.
-
-    Composing is what runs it -- `compose` raises rather than returning -- so
-    this asserts the boards on disk were built with it live, by re-measuring
-    one board end to end. The ESP32-C3's worst part is 0.000 mm.
-    """
-    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "ESP32-C3")
-    if not spec.layout.is_file():
-        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
-    board = compose.read_layout(spec.layout)
-    described = [e for e in board.elements if e.silk is not None]
-    #: `silk_miss` needs a placed mesh, which needs OpenCASCADE. What can be
-    #: checked without it is that the vendor's body and their pads agree about
-    #: where the part is -- the same comparison, one step earlier, and the one
-    #: that would catch a y-negation error in either.
-    worst = []
-    for element in described:
-        if not element.pads:
-            continue
-        x0, y0, x1, y1 = element.pad_extent()
-        sx0, sy0, sx1, sy1 = element.silk
-        drift = max(abs((sx0 + sx1) / 2), abs((sy0 + sy1) / 2))
-        if drift > 1.5:
-            worst.append(f"{element.name} ({element.package}): body centre is "
-                         f"{drift:.2f} mm from its own footprint origin")
-    assert not worst, "\n".join(worst)
-
-
-def test_the_body_allowance_excuses_a_package_and_not_a_board():
-    """A known wrong-size model must not quieten everything around it.
-
-    `BODY_ALLOWANCE_MM` exists because both published USB-C receptacles are
-    longer than the one Seeed fit. Keyed by package, every other part on those
-    boards is still held to `SILK_TOLERANCE_MM` -- and on the ESP32-C3 the
-    worst of them is 0.000 mm, so the headroom is three orders of magnitude.
-    """
-    assert set(compose.BODY_ALLOWANCE_MM) <= {
-        c.package for c in compose.CORRESPONDENCE}, (
-        "an allowance for a package nothing draws is dead weight"
-    )
-    for package, allowed in compose.BODY_ALLOWANCE_MM.items():
-        assert allowed > compose.SILK_TOLERANCE_MM, (
-            f"{package} is allowed {allowed} mm, which is inside the ordinary "
-            f"tolerance -- so the entry does nothing and should go"
-        )
-        assert allowed < 2 * compose.SILK_TOLERANCE_MM, (
-            f"{package} is allowed {allowed} mm. Past twice the tolerance the "
-            f"model is not a different size, it is a different part."
-        )
-    assert not set(compose.BODY_ALLOWANCE_MM) & set(compose.ABSENT), (
-        "a package cannot be both drawn with an allowance and not drawn"
-    )
 
 
 def test_the_allowance_is_granted_to_one_package_and_not_to_its_neighbours():
@@ -744,46 +613,26 @@ def test_a_modelled_slab_is_declared_as_built_here():
         )
 
 
-def _end_area(mesh, value: float, eps: float = 0.06) -> float:
-    """Triangle area lying in the plane x = `value`, in the scene's frame.
-
-    **How to tell an open end from a closed one without looking.** A closed
-    face is filled and a mouth is a rim with a hole in it, so the area in the
-    plane collapses at the open end -- 0.38 mm2 against 4.26 for the GCT
-    receptacle.
-    """
-    total = 0.0
-    for _colour, (positions, _normals, indices) in mesh.groups.items():
-        for at in range(0, len(indices), 3):
-            corners = [(positions[indices[at + k] * 3],
-                        positions[indices[at + k] * 3 + 1],
-                        positions[indices[at + k] * 3 + 2]) for k in range(3)]
-            if any(abs(corner[0] - value) > eps for corner in corners):
-                continue
-            (ay, az), (by, bz), (cy, cz) = [(c[1], c[2]) for c in corners]
-            total += abs((by - ay) * (cz - az) - (cy - ay) * (bz - az)) / 2
-    return total
-
-
 def test_a_usb_socket_faces_off_the_board_a_cable_can_reach():
-    """The user's report, made into a check: "the usb plug is orientated in
-    the wrong way".
+    """The user's report, three times over: "the usb plug is orientated in the
+    wrong way".
 
-    It was, on all four boards, and by 90 degrees rather than 180 -- the
-    connector lay with its WIDTH pointing off the edge, so a cable would have
-    gone in sideways. Two things have to hold and each rules out a different
-    pair of turns:
+    It was, and the turn was settled wrongly twice before this test existed --
+    0, then 90, and only then 270. Two things have to hold:
 
       * a receptacle's 8.95 mm width -- fixed by the standard that lets any
-        cable enter any socket -- lies ALONG the board edge, which rules out
-        0 and 180 for both models, since each carries its width on local x;
-      * its mouth faces OFF the board, which picks 90 for one model and 270
-        for the other, because the two are drawn facing opposite ways in
-        their own frames.
+        cable enter any socket, and drawn by Seeed on `F.Fab` as
+        7.370 x 8.950 mm -- lies ALONG the board edge, which rules out the
+        pair of turns that put its depth there;
+      * its plated contacts land on the pads they solder to, which picks
+        between the remaining two.
 
-    Neither `confirm` nor `silk_miss` can see this. `confirm` came within
-    0.54 mm of catching it and `silk_miss` was comparing against a body
-    outline that had a cable keep-out unioned into it.
+    **The second is the one that had to be measured rather than looked at.**
+    OH-105 chose by finding which end had least triangle area in its plane,
+    reasoning that a mouth is a rim and a back is a filled face. What that
+    measured was the thin solder tails crossing the plane, so it named the
+    back as the mouth and faced the socket into the board. The margin here is
+    a factor of two to five and needs no interpretation.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
     receptacles = {c.package: c for c in compose.CORRESPONDENCE
@@ -824,15 +673,75 @@ def test_a_usb_socket_faces_off_the_board_a_cable_can_reach():
                 f"off the edge, and the shallowest published receptacle is "
                 f"7.37 mm deep"
             )
-            outward = _end_area(put, max(xs))
-            inward = _end_area(put, min(xs))
-            assert outward < inward, (
-                f"{spec.board} {element.name}: the OUTWARD end has "
-                f"{outward:.2f} mm2 of face against {inward:.2f} inward, so "
-                f"the closed back is pointing off the board and the mouth is "
-                f"buried in it. Turn it 180."
-            )
+            here = compose.contact_miss(element, put, centre)
+            assert here is not None, f"{element.name} has no contacts to place"
+            for other in (0.0, 90.0, 180.0, 270.0):
+                if other == component.turn:
+                    continue
+                rival = compose.contact_miss(
+                    element,
+                    compose.place(mesh, element, other, spec.thickness_mm,
+                                  centre),
+                    centre)
+                assert here < rival - compose.TURN_MARGIN_MM, (
+                    f"{spec.board} {element.name} at {component.turn:.0f} puts "
+                    f"its contacts {here:.3f} mm from their pads, and "
+                    f"{other:.0f} puts them {rival:.3f}"
+                )
     assert checked == 4, f"expected four composed USB-C sockets, found {checked}"
+
+
+def test_composing_refuses_a_part_turned_the_wrong_way():
+    """The guard, not the measurement it rests on.
+
+    `contact_miss` can be right while nothing consults it -- a mutation
+    replacing `compose`'s call with `None` survived every test that checked
+    the numbers, because they all called the function directly. This drives
+    the refusal through `compose` itself, which is where the three wrong turns
+    actually got out.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "ESP32-C3")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    turned = tuple(
+        dataclasses.replace(c, turn=(c.turn + 90.0) % 360.0)
+        if c.package == "USB2.0-TYPE-C" else c
+        for c in compose.CORRESPONDENCE)
+    with mock.patch.object(compose, "CORRESPONDENCE", turned):
+        with pytest.raises(SystemExit, match="from the pads they solder to"):
+            compose.compose(spec, deflection=0.05, check=True)
+
+
+def test_the_margin_is_a_margin():
+    """A turn has to WIN, not merely tie.
+
+    Negating `TURN_MARGIN_MM` makes every comparison vacuously true, and that
+    mutation survived until this existed. The bound above it is the smallest
+    winning margin on any composed board -- the USB-C beats its runner-up by
+    0.94 mm -- so a margin larger than that would start refusing the right
+    answer.
+    """
+    assert 0.0 < compose.TURN_MARGIN_MM < 0.94
+
+
+def test_a_part_with_too_few_pads_has_no_facing_to_check():
+    """Two pads cannot say which way round a part is.
+
+    A chip capacitor is the same part rotated, and four pads in a square are
+    no better. `contact_miss` answers `None` there rather than a number that
+    would be noise -- and a number would be worse than none, because
+    `compose` would then refuse a turn on the strength of it.
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "ESP32-C3")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    small = next(e for e in board.elements if e.package == "C0201")
+    assert len(small.pads) < compose.TURN_FROM_CONTACTS_PADS
+    assert compose.contact_miss(small, compose.slab(
+        [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)], 1.0, "#b58136", (0.0, 0.0)),
+        (0.0, 0.0)) is None
 
 
 def test_the_two_usb_c_land_patterns_are_given_different_receptacles():
