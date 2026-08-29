@@ -811,10 +811,16 @@ def test_the_ambient_light_was_replaced_rather_than_added_to():
     # `AmbientLight` beside the environment, and every directional light in the
     # scene comes from the one table that says how many there are, so a fourth
     # cannot be added anywhere else.
+    #
+    # **And the table grew a fourth entry in OH-111, which does not weaken
+    # this.** What it protects is that there is ONE construction site, so a
+    # light cannot be added anywhere else; the bounce is a named constant fed
+    # through that same site rather than a `new DirectionalLight` somewhere
+    # in a function.
     assert source.count("new THREE.DirectionalLight") == 1, (
         "a light is built outside the LIGHTS table"
     )
-    assert "LIGHTS.map((sample) =>" in source
+    assert "[...LIGHTS, BOUNCE].map((sample) =>" in source
 
 
 # --- a layout that reads more than the viewport's width ----------------------
@@ -961,7 +967,9 @@ def test_the_scene_casts_shadows_and_everything_in_it_takes_part():
         "r185 deprecates it and silently substitutes PCFShadowMap, so the "
         "source would be describing a setting the renderer does not use"
     )
-    assert "light.castShadow = true;" in source
+    # Set from the light's own table entry since OH-111 added one that does
+    # not cast, and set in the SAME one place, which is what this checks.
+    assert "light.castShadow = sample.casts !== false;" in source
     fit = source.split("function castShadows(box, centre) {", 1)[1].split("\n}", 1)[0]
     assert "object.castShadow = true;" in fit
     assert "object.receiveShadow = true;" in fit
@@ -1250,7 +1258,7 @@ def _numbers(source: str, name: str) -> float:
     return float(found.group(1))
 
 
-def test_every_light_in_the_scene_casts_a_shadow():
+def test_every_light_that_samples_the_sky_casts_a_shadow():
     """**A light that does not cast is a light no crevice can hide from.**
 
     This is the whole mechanism of OH-86. An image-based light arrives from
@@ -1261,6 +1269,15 @@ def test_every_light_in_the_scene_casts_a_shadow():
     So the fill is directions now, and each one is blocked separately. Three is
     a coarse estimate of an integral that a per-pixel method computes exactly,
     and the source says so rather than calling it ambient occlusion.
+
+    **OH-111 narrowed this from "every light" to "every light that samples the
+    sky", and the narrowing is argued rather than convenient.** The bounce off
+    the bench is not sky, and there is nothing under the board for it to be
+    blocked by: of the 1 to 21 parts each vendor places on the back of these
+    boards, `CORRESPONDENCE` draws none -- they are test points, logos and one
+    solder jumper, and not one of them has a body. What must not happen is a
+    light in the UPPER hemisphere quietly opting out, which is what the second
+    assertion holds.
     """
     source = RENDERER.read_text(encoding="utf-8")
     table = source.split("const LIGHTS = [", 1)[1].split("];", 1)[0]
@@ -1268,9 +1285,14 @@ def test_every_light_in_the_scene_casts_a_shadow():
     assert len(entries) >= 2, (
         "one light is one direction, which is what this ticket replaced"
     )
-    # Built in one place, so `castShadow` cannot be set on some of them.
-    built = source.split("view.lights = LIGHTS.map", 1)[1].split("});", 1)[0]
-    assert "light.castShadow = true;" in built
+    assert "casts" not in table, (
+        "a light in the upper hemisphere has opted out of casting; the three "
+        "that sample the sky are the estimate, and two of them is not it"
+    )
+    # Built in one place, so `castShadow` cannot be set on some of them
+    # anywhere but the light's own entry.
+    built = source.split("view.lights = [...LIGHTS, BOUNCE].map", 1)[1]
+    assert "light.castShadow = sample.casts !== false;" in built.split("});", 1)[0]
 
 
 def test_the_lights_shares_add_up_to_one_whole_light():
@@ -1747,3 +1769,75 @@ def test_only_the_part_of_a_pin_above_the_board_is_carved():
     assert "centre.y > pcbThickness" in code, (
         "a pin's tail below the board is carved with its head"
     )
+
+
+# --- the light that comes from below (OH-111) ----------------------------------
+
+
+def _lights() -> list[dict[str, float]]:
+    """Every `{x, y, z, share}` the renderer builds a directional light from."""
+    source = RENDERER.read_text(encoding="utf-8")
+    block = source.split("const LIGHTS = [", 1)[1].split("];", 1)[0]
+    bounce = source.split("const BOUNCE = ", 1)[1].split(";", 1)[0]
+    out = []
+    for entry in re.findall(r"\{[^}]*\}", block + bounce):
+        got = dict(re.findall(r"(\w+): (-?[0-9.]+)", entry))
+        out.append({key: float(value) for key, value in got.items()})
+    return out
+
+
+def test_something_lights_the_underside_of_the_board():
+    """**Every light in this scene used to have a positive y.**
+
+    Which was fine while the underside was a blank slab, and stopped being fine
+    when OH-110 put the vendor's own printing on it: 1,514 silkscreen strokes
+    on the ESP32-C3 including the words "Seeed Studio", the battery pads with
+    their + and -, and 44 castellated half-holes. Shot from beneath, the board
+    measured a MEDIAN LUMINANCE OF ZERO against 82.6 from above.
+    """
+    below = [light for light in _lights() if light["y"] < 0]
+    assert below, (
+        "no light in this scene comes from below, so the side of the board the "
+        "pin names are printed on renders black"
+    )
+    assert len(below) == 1, "one bounce, not a second key light"
+
+
+def test_the_three_that_cast_still_share_the_exposure_between_them():
+    """The bounce is ADDED to `LIGHT_TOTAL`, not taken out of it.
+
+    A light from below contributes nothing to a surface facing up, so sharing
+    it out of the three above would darken a picture it cannot brighten. The
+    measurement that says so: across a sweep of the bounce from 0.00 to 0.50
+    the topside mean moved 115.6 to 116.4, which is 0.7%.
+    """
+    above = [light for light in _lights() if light["y"] > 0]
+    assert len(above) == 3, "the upper hemisphere is sampled three times"
+    assert sum(light["share"] for light in above) == pytest.approx(1.0)
+
+
+def test_the_bounce_is_dimmer_than_the_key_and_does_not_cast():
+    """It is the return off a bench, not a fourth lamp.
+
+    Dimmer, because the underside has to stay the shaded side: at 0.25 its
+    median is 41% of the topside's, and at 0.50 the two sides are within a
+    fifth of each other and the board stops having a lit side at all.
+
+    Not casting, because the three above cast in order to estimate how much
+    sky a crevice can see and this is not sky -- and because there is nothing
+    under the board to occlude it. Of the 1 to 21 parts each vendor places on
+    the back of these boards, `CORRESPONDENCE` draws none: they are test
+    points, logos and one solder jumper, none of which has a body.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    bounce = source.split("const BOUNCE = ", 1)[1].split(";", 1)[0]
+    assert "casts: false" in bounce, bounce
+    key = max(light["share"] for light in _lights() if light["y"] > 0)
+    under = next(light for light in _lights() if light["y"] < 0)
+    assert 0.0 < under["share"] < key, (
+        f"the bounce is {under['share']} against a key of {key}"
+    )
+    # Mostly straight down: what sideways component it has is there so that a
+    # component's side face gets a hint of it, and it is small enough that the
+    # topside statistics did not move across the whole sweep.
+    assert abs(under["y"]) > 2 * max(abs(under["x"]), abs(under["z"]))

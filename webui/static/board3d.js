@@ -193,6 +193,53 @@ const LIGHTS = [
   { x: -0.18, y: 0.46, z: 0.87, share: 0.22 },
 ];
 
+//: The bench, and the only light in this scene that comes from below.
+//:
+//: **Every one of the three above has a positive y, so until OH-110 gave the
+//: board an underside worth seeing, nothing lit one.** A shot of the XIAO
+//: ESP32-C3 from beneath measured a MEDIAN LUMINANCE OF ZERO against 82.6 from
+//: above -- not "darker because it faces away", unlit. What is down there is
+//: the vendor's own printing: 1,514 silkscreen strokes including the words
+//: "Seeed Studio", the battery pads with their + and -, and 44 of the board's
+//: castellated half-holes.
+//:
+//: **It does not cast, and that is measured rather than saved effort.** The
+//: three above cast because they are a three-sample estimate of how much sky a
+//: crevice can see. This is not sky -- it is the diffuse return off whatever
+//: the board is lying on -- and there is nothing under the board to occlude
+//: it: of the 1 to 21 parts each vendor places on the back, `CORRESPONDENCE`
+//: draws NONE, so the underside is a flat plane of mask, copper and ink.
+//:
+//: **Its share is added to `LIGHT_TOTAL` rather than taken out of it.** The
+//: three above sum to one and were balanced against the topside exposure OH-86
+//: measured; a light from below contributes nothing to an upward-facing
+//: surface, so sharing it out would darken a picture it cannot brighten. It is
+//: nearly straight down for the same reason -- the 0.12 and 0.32 are there so
+//: that a component's side face gets a hint of it, which is what bounce does,
+//: and they are small enough that the topside statistics do not move.
+//:
+//: **0.25 was swept and measured, not chosen.** Five shares, each shot from
+//: above and below on the ESP32-C3 against the running server, luminance over
+//: every pixel that is not the page:
+//:
+//:      share    top median   under median   under p90   top mean
+//:       0.00          82.6            0.0        34.4      115.6
+//:       0.15          84.0           18.0       102.3      116.1
+//:       0.25          85.0           34.0       132.1      116.2
+//:       0.35          85.0           49.0       156.3      116.3
+//:       0.50          86.0           66.0       180.5      116.4
+//:
+//: **The top mean moves 0.7% across the whole sweep**, which is the design
+//: claim holding: a light from below cannot brighten a surface facing up, and
+//: what does move is component side faces.
+//:
+//: 0.25 puts the underside's median at 41% of the topside's -- the shaded side
+//: of a board lying over a bench, which is what it is -- while its 90th
+//: percentile, the ink and the copper, stands at 3.9x the mask around it, so
+//: the printing reads. At 0.50 the two sides are within a fifth of each other
+//: and the board stops having a lit side at all.
+const BOUNCE = { x: 0.12, y: -0.94, z: 0.32, share: 0.25, casts: false };
+
 //: Their intensities added together.
 //:
 //: **Raised from the key's own 2.4 because the environment gave some back.**
@@ -838,11 +885,15 @@ export function mount(canvas) {
   //
   view.scene.environment = studio(view.renderer);
   view.scene.environmentIntensity = ENVIRONMENT_SHARE;
-  view.lights = LIGHTS.map((sample) => {
+  view.lights = [...LIGHTS, BOUNCE].map((sample) => {
     const light = new THREE.DirectionalLight(NEUTRAL_LIGHT,
                                              LIGHT_TOTAL * sample.share);
     light.userData.from = sample;
-    light.castShadow = true;
+    // The bounce is the one that does not, and `BOUNCE` says why. It stays in
+    // this list so that `castShadows` still POSITIONS it -- a directional
+    // light aims from its position at its target, and a light left at the
+    // origin shines from nowhere in particular.
+    light.castShadow = sample.casts !== false;
     light.shadow.mapSize.set(SHADOW_TEXELS, SHADOW_TEXELS);
     // **`normalBias` and not `bias`, and the units are why.** `bias` is a
     // depth offset in the shadow camera's clip space, so its right value moves
