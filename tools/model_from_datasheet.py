@@ -134,6 +134,20 @@ SPECS: tuple[Modelled, ...] = (
                 "the same plug's height. Together with the width this is the "
                 "aperture the standard defines"
             )),
+            "mouth_chamfer": (2.4, (
+                "the two upper corners of a Series-B opening, cut off at 45 "
+                "degrees. **Their PRESENCE is the standard's and it is not "
+                "decoration: it is the KEY.** A Series-B plug's shell has the "
+                "same two corners cut, which is what makes the pair mate one "
+                "way up -- a socket drawn without them is a socket that would "
+                "take the plug upside down. It is also the feature that tells "
+                "a USB-B from an RJ45 at a glance, and a reader looking at "
+                "this board called it an ethernet port, which is exactly what "
+                "a plain rectangular metal socket is. "
+                "The SIZE is a drawing quantity, the same standing as `wall` "
+                "above: nothing measures it, nothing reaches it, and it is "
+                "chosen so the bevel reads at the size this part renders at."
+            )),
             "lead_depth": (3.0, (
                 "how far the pins stand below the board. Not a datasheet "
                 "figure and not one either: it is how far `leads_of` has to "
@@ -1113,8 +1127,13 @@ def build(spec: Modelled, check: bool) -> int:
         "pins": plan["pins"],
         "posts": plan["posts"],
         "post_radius": plan["post_radius"],
+        # `insulator` is GCT's own value for the moulding inside their USB-C,
+        # read out of the STEP `tools/compose_board_3d.py` fetches -- so the
+        # two connectors on this project's boards state the same material with
+        # the same number, and neither of them says the paddle is metal.
         "colours": {"shell": [0.62, 0.63, 0.66],
                     "cavity": [0.05, 0.05, 0.06],
+                    "insulator": [0.06, 0.06, 0.06],
                     "pin": [0.72, 0.60, 0.30]},
         "body": {
             "x": plan["x"],
@@ -1124,12 +1143,15 @@ def build(spec: Modelled, check: bool) -> int:
             "lead_depth": cited["lead_depth"],
             "mouth": {"width": cited["mouth_width"],
                       "height": cited["mouth_height"],
-                      "depth": 0.4,
-                      "floor": cited["wall"] + 0.6},
+                      "chamfer": cited["mouth_chamfer"]},
+            # **The tongue is placed IN the opening rather than at a height of
+            # its own**, which is one fewer number and cannot drift from the
+            # aperture the way `z: wall + 0.6 + 1.6` could. Its own three
+            # figures are drawing quantities, as the USB-C's are: inside a
+            # cavity nothing reaches, measured by nothing.
             "tongue": {"width": cited["mouth_width"] - 2.0,
-                       "depth": 0.6,
                        "thickness": 1.2,
-                       "z": cited["wall"] + 0.6 + 1.6},
+                       "setback": 1.0},
         },
     }
     # **The payload goes in a file, not on argv.** Passed inline it is a

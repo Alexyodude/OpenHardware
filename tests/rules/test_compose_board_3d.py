@@ -2709,3 +2709,95 @@ def test_a_via_joins_both_faces_and_is_drawn_on_each():
             f"{len(missing)} of 40 vias are not drawn on the face at {face}; "
             f"a via goes through the board and shows from either side"
         )
+
+
+# --- the Series-B key (OH-113) -------------------------------------------------
+
+
+def test_the_usb_b_opening_has_the_two_corners_the_standard_cuts():
+    """**A reader called this connector an ethernet port.**
+
+    Which is what a plain rectangular metal socket is. The two upper corners
+    of a Series-B opening are cut off at 45 degrees, and the bevel is not
+    decoration: it is the KEY. A Series-B plug's shell has the same two
+    corners cut, so the pair mate one way up, and a socket without them is one
+    that would take the plug upside down.
+
+    Read off the built mesh rather than the payload, because the payload can
+    carry a chamfer that the Blender script never draws -- which is exactly
+    what the first attempt did on one side, where the cavity was coplanar with
+    the front face and won the depth test.
+    """
+    from tools import model_from_datasheet
+
+    made = compose.MODELLED / "USB_B_PN61729.obj"
+    if not made.is_file():
+        pytest.skip("SKIPPED: run python tools/model_from_datasheet.py")
+    spec = next(s for s in model_from_datasheet.SPECS if s.package == "PN61729")
+    cited = {key: value for key, (value, _why) in spec.cited.items()}
+    half = cited["mouth_width"] / 2
+    tall = cited["mouth_height"]
+    cut = cited["mouth_chamfer"]
+    low = (cited["height"] - tall) / 2
+
+    mesh, extent = compose.read_obj(made)
+    front = {(round(p[at], 3), round(p[at + 2], 3))
+             for _c, (p, _n, _i) in mesh.groups.items()
+             for at in range(0, len(p), 3)
+             if abs(p[at + 1] - extent.ymin) < 1e-6}
+    assert front, "the model has no front face at all"
+    for corner in ((-half + cut, low + tall), (half - cut, low + tall),
+                   (-half, low + tall - cut), (half, low + tall - cut)):
+        assert (round(corner[0], 3), round(corner[1], 3)) in front, (
+            f"the opening has no bevel at {corner}: this is a rectangular "
+            f"hole, which is an RJ45 and not a USB-B"
+        )
+
+
+def test_the_chamfer_is_a_bevel_and_not_a_hole_of_its_own():
+    """Big enough to see, small enough to leave an opening.
+
+    A chamfer of half the width would meet in the middle and the aperture
+    would be a triangle; one of nothing would be the rectangle this replaced.
+    """
+    from tools import model_from_datasheet
+
+    spec = next(s for s in model_from_datasheet.SPECS if s.package == "PN61729")
+    cited = {key: value for key, (value, _why) in spec.cited.items()}
+    assert 0 < cited["mouth_chamfer"] < cited["mouth_width"] / 2
+    assert cited["mouth_chamfer"] < cited["mouth_height"]
+
+
+def test_the_usb_b_paddle_is_not_made_of_metal():
+    """It is an insulator, and the four contacts on it are not drawn.
+
+    Given the pin colour it rendered as a gold wedge filling the socket, which
+    is a statement about a material rather than a shape -- and a wrong one.
+    The value used is the moulding colour GCT put in their own USB-C STEP, so
+    the two connectors on these boards say the same thing with the same
+    number.
+    """
+    from tools import model_from_datasheet
+
+    made = compose.MODELLED / "USB_B_PN61729.obj"
+    if not made.is_file():
+        pytest.skip("SKIPPED: run python tools/model_from_datasheet.py")
+    spec = next(s for s in model_from_datasheet.SPECS if s.package == "PN61729")
+    cited = {key: value for key, (value, _why) in spec.cited.items()}
+    floor = (cited["height"] - cited["mouth_height"]) / 2
+
+    mesh, _extent = compose.read_obj(made)
+    #: The pins are the only brass in this part and they are the group that
+    #: reaches UNDER the board. Nothing of that colour may stand in the
+    #: aperture -- which is where the paddle is, and where it rendered as a
+    #: gold wedge for as long as it was given this material.
+    brass = "#" + "".join(f"{round(v * 255):02x}" for v in (0.72, 0.60, 0.30))
+    assert brass in mesh.groups, "the pins are still drawn"
+    positions = mesh.groups[brass][0]
+    highest = max(positions[at + 2] for at in range(0, len(positions), 3))
+    assert highest < floor, (
+        f"brass reaches {highest:.3f} mm, which is inside an opening whose "
+        f"floor is {floor:.3f}: the paddle is an insulator, and the four "
+        f"contacts on it are half a millimetre wide and are not drawn"
+    )
+    assert compose.leads_of(mesh), "the through-hole pins are still there"

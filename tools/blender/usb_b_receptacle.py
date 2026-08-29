@@ -77,6 +77,26 @@ def box(name, x0, x1, y0, y1, z0, z1, made) -> bpy.types.Object:
     return cube
 
 
+def panel(name, points, y, made) -> bpy.types.Object:
+    """A flat polygon in the x-z plane at `y`, facing -y.
+
+    **Which is how the opening becomes a HOLE rather than a picture of one.**
+    The rest of this file is boxes, and a box cannot have a hole in it without
+    a boolean -- the operation the shell is drawn as five plates specifically
+    to avoid. A front face built as a ring of polygons around the opening needs
+    no boolean and no subdivision: the hole is the space the polygons do not
+    cover.
+    """
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata([(x, y, z) for x, z in points], [],
+                     [list(range(len(points)))])
+    mesh.update()
+    made_object = bpy.data.objects.new(name, mesh)
+    made_object.data.materials.append(made)
+    bpy.context.collection.objects.link(made_object)
+    return made_object
+
+
 def post(name, x, y, radius, z0, z1, made) -> bpy.types.Object:
     bpy.ops.mesh.primitive_cylinder_add(radius=radius, depth=(z1 - z0),
                                         vertices=12,
@@ -97,13 +117,14 @@ def main() -> None:
     shell = material("shell", tuple(spec["colours"]["shell"]))
     cavity = material("cavity", tuple(spec["colours"]["cavity"]))
     pin = material("pin", tuple(spec["colours"]["pin"]))
+    insulator = material("insulator", tuple(spec["colours"]["insulator"]))
 
     x0, x1 = body["x"]
     y0, y1 = body["y"]
     height = body["height"]
     wall = body["wall"]
 
-    # The shell, as five plates rather than one solid: a receptacle is a folded
+    # The shell, as plates rather than one solid: a receptacle is a folded
     # metal box and the opening has to go somewhere. Plates also keep the
     # normals outward without a boolean, which is the operation most likely to
     # behave differently between Blender versions.
@@ -113,19 +134,56 @@ def main() -> None:
     box("shell_right", x1 - wall, x1, y0, y1, 0.0, height, shell)
     box("shell_back", x0, x1, y1 - wall, y1, 0.0, height, shell)
 
-    # The mouth: the dark recess a plug goes into. Inset from the front face so
-    # the shell reads as a shell rather than as a painted rectangle.
+    # **The front face, with a Series-B hole in it, and this is the whole of
+    # OH-113.** A reader called this connector an ethernet port -- which is
+    # what a plain rectangular metal socket is. The two upper corners of a
+    # Series-B opening are cut off at 45 degrees, and that bevel is not
+    # decoration: it is the KEY. A USB-B plug's shell has the same two corners
+    # cut, so the pair only mate one way up, and a socket drawn without them is
+    # a socket that would take the plug upside down.
     mouth = body["mouth"]
-    box("cavity", -mouth["width"] / 2, mouth["width"] / 2,
-        y0 + wall, y0 + wall + mouth["depth"],
-        mouth["floor"], mouth["floor"] + mouth["height"], cavity)
+    half, tall = mouth["width"] / 2, mouth["height"]
+    #: Centred in the shell rather than floated at a stated height, so this is
+    #: arithmetic on two numbers that are already cited rather than a third.
+    low = (height - tall) / 2
+    cut = mouth["chamfer"]
+    frame = [
+        # Under the opening, over it, and the two jambs.
+        [(x0, 0.0), (x1, 0.0), (x1, low), (x0, low)],
+        [(x0, low + tall), (x1, low + tall), (x1, height), (x0, height)],
+        [(x0, low), (-half, low), (-half, low + tall), (x0, low + tall)],
+        [(half, low), (x1, low), (x1, low + tall), (half, low + tall)],
+        # And the two corners the standard cuts.
+        [(-half, low + tall - cut), (-half + cut, low + tall),
+         (-half, low + tall)],
+        [(half - cut, low + tall), (half, low + tall - cut),
+         (half, low + tall)],
+    ]
+    for index, points in enumerate(frame):
+        panel(f"shell_front{index + 1}", points, y0, shell)
+
+    # **The back of the inside, and it is a PANEL rather than a solid.** The
+    # first version of this filled the whole interior with a dark box, which
+    # swallowed the tongue -- and started at `y0`, coplanar with the frame
+    # above, so the two chamfer triangles fought it for the same surface and
+    # only one of them won. What a plug actually goes into is a metal box with
+    # a dark end, and the shell's own plates already line the sides.
+    panel("cavity", [(-half, low), (half, low), (half, low + tall),
+                     (-half, low + tall)], y1 - wall, cavity)
 
     # The tongue the four contacts sit on, which is what makes the opening read
-    # as a USB socket rather than an empty box.
+    # as a socket rather than a hole. Centred in the aperture rather than
+    # floated at a height of its own, which is one fewer number to drift.
+    #
+    # **Moulded plastic, not brass.** Drawn in the pin colour it was a gold
+    # wedge filling the socket, which is a statement about a material that is
+    # wrong: the paddle is an insulator and the four contacts ON it are half a
+    # millimetre wide and are not drawn at all.
     tongue = body["tongue"]
+    thick = tongue["thickness"]
     box("tongue", -tongue["width"] / 2, tongue["width"] / 2,
-        y0 + wall, y0 + wall + tongue["depth"],
-        tongue["z"], tongue["z"] + tongue["thickness"], cavity)
+        y0 + tongue["setback"], y1 - wall,
+        low + (tall - thick) / 2, low + (tall + thick) / 2, insulator)
 
     # Legs. **These are the load-bearing part of the whole file**: everything
     # below the board plane is what `compose_board_3d.leads_of` reads to decide
