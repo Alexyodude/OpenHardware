@@ -59,6 +59,7 @@ import argparse
 import dataclasses
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -221,6 +222,230 @@ PACKS: tuple[ModelledPack, ...] = (
         ),
     ),
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class ModelledSlab:
+    """A moulded package whose whole body the vendor states, drawn as it is.
+
+    **Separate from `ModelledPack` for the reason that one is separate from
+    `Modelled`**: not a different format, a different SHAPE. A flat pack has a
+    lead ring and an exposed pad to read; this has neither, and the two
+    payloads share no field but the body. Merging them would mean one Blender
+    script branching on which half of its input was present.
+
+    A moulded chip package is a slab. Drawing its stated envelope is not an
+    approximation of the part -- it is the part, minus a lens or a port hole.
+    """
+
+    #: Seeed's own footprint name, which states length x width x HEIGHT, and
+    #: the board file to read its plan out of. Some boards draw `F.Fab` for a
+    #: package and others do not, so this names one that does.
+    package: str
+    pcb: pathlib.Path
+    #: `#rrggbb`, and one line saying what the material is.
+    colour: str
+    colour_source: str
+    why_not_fetched: str
+
+    @property
+    def name(self) -> str:
+        """A file name. The package's, with what a path cannot hold removed."""
+        return re.sub(r"[^A-Za-z0-9_.-]", "_", self.package)
+
+
+#: The three numbers a Seeed footprint name ends with: length, width, height.
+#: `WLCSP20-0.4-2.4X1.9X0.5MM_SMALL` is why this searches rather than anchors.
+_NAMED_BODY = re.compile(r"(\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)MM")
+
+#: How far the name's plan and `F.Fab`'s may disagree before the name is not
+#: believed. **This is what proves the parse**, and it is the whole safety of
+#: reading dimensions out of a string: `MIC6P-0.94-4X2X1.1MM` says 4 x 2 and
+#: its assembly outline measures 4.27 x 2.26, so a name read wrongly -- taking
+#: a pitch for a length, say -- misses by millimetres and not by a quarter.
+NAMED_BODY_TOLERANCE_MM = 0.5
+
+SLABS: tuple[ModelledSlab, ...] = (
+    ModelledSlab(
+        package="ANT2P-5.2x2x1.1MM",
+        pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
+        colour="#c6c4a0",
+        colour_source=(
+            "a chip antenna is a ceramic block, and this is the same "
+            "off-white `tools/import_3d_model.py` already gives ceramic in "
+            "FINISHES rather than a colour chosen here"
+        ),
+        why_not_fetched=(
+            "KiCad's RF_Antenna library holds exactly four models -- two "
+            "Johanson chip antennas, an AVX and a Pulse -- and none is 5.2 mm "
+            "long, counted 2026-08-29. The nRF54L15 names Seeed's own "
+            "`ANT_KH5220-A36`, under a path they do not publish."
+        ),
+    ),
+    ModelledSlab(
+        package="SW4-SMD-2.8-2.6X1.6X0.53MM",
+        pcb=REPO / "third_party" / "seeed-pcb" / "RP2350.kicad_pcb",
+        colour="#0f0f0f",
+        colour_source="moulded black plastic, the switch body",
+        why_not_fetched=(
+            "the smallest surface-mount switch in KiCad's 159-file "
+            "Button_Switch_SMD is the TS-1088 at 2.9 x 3.9 mm, against a "
+            "2.6 x 1.6 mm part -- more than twice the footprint."
+        ),
+    ),
+    ModelledSlab(
+        package="MIC6P-0.94-4X2X1.1MM",
+        pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
+        colour="#4e4e4e",
+        colour_source="a MEMS microphone's steel lid",
+        why_not_fetched=(
+            "the nRF54L15 names Seeed's own `312030722_MSM261DGT006`, which "
+            "they do not publish, and KiCad has no microphone library."
+        ),
+    ),
+    ModelledSlab(
+        package="WLCSP47-0.3-2.451X2.245X0.42MM",
+        pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
+        colour="#272b27",
+        colour_source=(
+            "a wafer-level CSP is a bare silicon die, which is what the dark "
+            "grey-green here is meant to read as rather than moulded epoxy"
+        ),
+        why_not_fetched=(
+            "KiCad's Package_CSP holds 34 files and not one WLCSP-47; the "
+            "closest by ball count is a WLCSP-49 at 3.44 x 3.44 mm, half "
+            "again as large. The nRF54L15 itself."
+        ),
+    ),
+    ModelledSlab(
+        package="WLCSP20-0.4-2.4X1.9X0.5MM_SMALL",
+        pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
+        colour="#272b27",
+        colour_source="a bare silicon die, as the WLCSP-47 above",
+        why_not_fetched=(
+            "KiCad has two WLCSP-20s, both 4x5 layouts at 1.7 x 2.1 and "
+            "1.94 x 2.4 mm, and each names the maker of a different part. "
+            "Seeed name their own `WLCSP20`, which they do not publish."
+        ),
+    ),
+    ModelledSlab(
+        package="IPEX-GEN4-SMD-1.7X1.7X1.0MM",
+        pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
+        colour="#a5a392",
+        colour_source="the plated shell of a coaxial socket",
+        why_not_fetched=(
+            "KiCad's Connector_Coaxial holds fifteen models and its only "
+            "sub-miniature one is the 2.6 mm U.FL, which would overhang a "
+            "1.7 mm part by half a millimetre in each direction."
+        ),
+    ),
+    ModelledSlab(
+        package="LED4-0.8-1.6X1.5X0.55MM",
+        pcb=REPO / "third_party" / "seeed-pcb" / "RP2350.kicad_pcb",
+        colour="#ebebe5",
+        colour_source="the diffuser over an RGB LED, unlit",
+        why_not_fetched=(
+            "KiCad's LED_SMD holds 39 files whose smallest RGB part is the "
+            "1210 at 3.2 x 2.5 mm, twice this one."
+        ),
+    ),
+    ModelledSlab(
+        package="LED4-0.85-1.6X1.5X0.6MM",
+        pcb=REPO / "third_party" / "seeed-pcb" / "RP2350.kicad_pcb",
+        colour="#ebebe5",
+        colour_source="the diffuser over an RGB LED, unlit",
+        why_not_fetched=(
+            "the same absence as the 0.8 mm pitch part above: no RGB LED in "
+            "KiCad's library is under 3.2 mm."
+        ),
+    ),
+)
+
+
+def slab_geometry(spec: ModelledSlab) -> dict[str, object]:
+    """The body of `spec.package`: plan from `F.Fab`, height from its name.
+
+    **Two vendor sources, and each checks the other.** `F.Fab` is KiCad's
+    assembly drawing and carries the plan to three decimals; the height is the
+    one dimension a land pattern cannot express, so it lives in the footprint
+    name or nowhere -- the same argument OH-100's QFN-60 rests on.
+
+    The name also states the plan, and that is not redundant: comparing the
+    two is what proves the name was parsed correctly. A string read wrongly --
+    a pitch mistaken for a length -- misses by millimetres, and
+    `NAMED_BODY_TOLERANCE_MM` is a half.
+    """
+    tree = kicad.parse_sexp(spec.pcb.read_text(encoding="utf-8", errors="replace"))
+    wanted = [n for n in kicad.children(tree, "footprint")
+              if (n[1] if len(n) > 1 and isinstance(n[1], str) else ""
+                  ).split(":", 1)[-1] == spec.package]
+    if not wanted:
+        raise SystemExit(f"{spec.pcb}: no footprint called {spec.package!r}")
+    body = kicad._body_of(wanted[0])
+    if body is None:
+        raise SystemExit(
+            f"{spec.package}: {spec.pcb.name} draws no *.Fab outline for it, "
+            f"so there is no plan to read. Another board may; name that one."
+        )
+
+    named = _NAMED_BODY.search(spec.package)
+    if named is None:
+        raise SystemExit(
+            f"{spec.package}: its name states no length x width x height, so "
+            f"the one dimension no layer carries is unknown. A body of "
+            f"invented thickness is what this whole file exists not to draw."
+        )
+    length, width, height = (float(g) for g in named.groups())
+
+    drawn = sorted((body[2] - body[0], body[3] - body[1]))
+    claimed = sorted((length, width))
+    apart = max(abs(a - b) for a, b in zip(drawn, claimed))
+    if apart > NAMED_BODY_TOLERANCE_MM:
+        raise SystemExit(
+            f"{spec.package}: its name says {length} x {width} mm and its "
+            f"F.Fab measures {drawn[1]:.3f} x {drawn[0]:.3f}, which are "
+            f"{apart:.3f} mm apart. Either the name was read wrongly or it "
+            f"does not describe this footprint; do not draw either."
+        )
+    #: Y negated into the composer's frame, as `pack_geometry` does and for the
+    #: same reason. A slab is symmetric so it cannot show, and the next one
+    #: might not be.
+    return {"x": sorted([body[0], body[2]]),
+            "y": sorted([-body[1], -body[3]]),
+            "height": height,
+            "named": [length, width, height],
+            "apart": apart}
+
+
+def build_slab(spec: ModelledSlab, check: bool) -> int:
+    print(f"{spec.name}:")
+    if not spec.pcb.is_file():
+        print(f"  SKIPPED: {spec.pcb} is not fetched. Run: "
+              f"python tools/compose_board_3d.py")
+        return 3
+    plan = slab_geometry(spec)
+    length, width, height = plan["named"]
+    print(f"  vendor  F.Fab {plan['x'][1] - plan['x'][0]:.3f} x "
+          f"{plan['y'][1] - plan['y'][0]:.3f} mm; its own name says "
+          f"{length} x {width} x {height}, agreeing to {plan['apart']:.3f} mm")
+    print(f"  colour  {spec.colour} -- {spec.colour_source}")
+    if check:
+        print("  build   skipped (--check)")
+        return 0
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    target = OUT / f"{spec.name}.obj"
+    run_blender(spec.name, REPO / "tools" / "blender" / "moulded_slab.py", {
+        "out": str(target).replace("\\", "/"),
+        "x": plan["x"],
+        "y": plan["y"],
+        "height": plan["height"],
+        "colour": [int(spec.colour[at:at + 2], 16) / 255.0
+                   for at in (1, 3, 5)],
+    }, target)
+    print(f"  build   {target.relative_to(REPO)}  "
+          f"{target.stat().st_size:,} bytes")
+    return 0
 
 
 def pack_geometry(spec: ModelledPack) -> dict[str, object]:
@@ -487,7 +712,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.list:
-        for spec in (*SPECS, *PACKS):
+        for spec in (*SPECS, *PACKS, *SLABS):
             source = ("EAGLE package" if isinstance(spec, Modelled)
                       else "KiCad footprint")
             print(f"{spec.name}  ({source} {spec.package})")
@@ -497,7 +722,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"        {why}")
         return 0
 
-    every = (*SPECS, *PACKS)
+    every = (*SPECS, *PACKS, *SLABS)
     wanted = [s for s in every if args.part is None or s.name == args.part]
     if not wanted:
         print(f"no modelled part called {args.part!r}. Known: "
@@ -508,7 +733,9 @@ def main(argv: list[str] | None = None) -> int:
             # Two kinds of part and two builders, dispatched by type
             # rather than by a flag on one: see `ModelledPack`.
             code = (build(spec, args.check) if isinstance(spec, Modelled)
-                    else build_pack(spec, args.check))
+                    else build_pack(spec, args.check)
+                    if isinstance(spec, ModelledPack)
+                    else build_slab(spec, args.check))
         except Unavailable as exc:
             print(f"SKIPPED: {exc}")
             return 3

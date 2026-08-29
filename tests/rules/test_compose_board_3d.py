@@ -357,15 +357,13 @@ def test_nothing_is_declared_absent_that_no_board_actually_has():
 EXPLAINS: dict[str, set[str]] = {
     "Arduino Uno": {"QS", "RESONATOR"},
     "XIAO-ESP32-C3-DIP": {"PMOS_1.0_0.6_0.35MM", "BUTTON_TD1183SA"},
-    "XIAO-ESP32-C6-DIP": {"ANT2P-5.2x2x1.1MM", "PMOS_1.0X0.6X0.35MM",
-                          "SW4-SMD-2.8-2.6X1.6X0.53MM"},
+    # Its antenna and buttons were here until OH-104 modelled them.
+    "XIAO-ESP32-C6-DIP": {"PMOS_1.0X0.6X0.35MM"},
     # The RP2350's own chip was here until OH-100 modelled it.
-    "XIAO-RP2350-DIP": {"PMOS_1.0X0.6X0.35MM",
-                        "SW4-SMD-2.8-2.6X1.6X0.53MM"},
-    "XIAO-nRF54l15-DIP": {"WLCSP47-0.3-2.451X2.245X0.42MM",
-                          "ANT2P-5.2x2x1.1MM", "BUTTON_TD1183SA",
-                          "IPEX-GEN4-SMD-1.7X1.7X1.0MM",
-                          "PMOS_1.0X0.6X0.35MM"},
+    "XIAO-RP2350-DIP": {"PMOS_1.0X0.6X0.35MM"},
+    # Its own processor, its antenna and its coaxial socket were here until
+    # OH-104 modelled all three; the buttons stay, having no stated height.
+    "XIAO-nRF54l15-DIP": {"BUTTON_TD1183SA", "PMOS_1.0X0.6X0.35MM"},
 }
 
 
@@ -640,6 +638,103 @@ def test_the_allowance_is_granted_to_one_package_and_not_to_its_neighbours():
     assert compose.body_allowance("C0201") == compose.SILK_TOLERANCE_MM
     assert compose.body_allowance("QFN60-0.4-7X7X0.9MM") == compose.SILK_TOLERANCE_MM
     assert compose.body_allowance("nothing draws this") == compose.SILK_TOLERANCE_MM
+
+
+def test_every_modelled_slab_agrees_with_the_outline_the_vendor_drew():
+    """Reading a dimension out of a STRING is only safe if something checks it.
+
+    A slab's height comes from the last field of the vendor's own footprint
+    name, because a land pattern cannot express it. The name states the plan
+    too -- and that is not redundant: comparing it against the `F.Fab`
+    assembly outline is what proves the name was parsed correctly. A name read
+    wrongly, a pitch taken for a length, misses by millimetres.
+
+    Measured 2026-08-29, the eight agree to between 0.000 and 0.267 mm.
+    """
+    from tools import model_from_datasheet
+
+    assert model_from_datasheet.SLABS, "nothing is modelled as a slab"
+    for spec in model_from_datasheet.SLABS:
+        if not spec.pcb.is_file():
+            continue
+        plan = model_from_datasheet.slab_geometry(spec)
+        assert plan["apart"] <= model_from_datasheet.NAMED_BODY_TOLERANCE_MM, spec
+        assert plan["height"] > 0.0, spec
+
+
+def test_a_package_that_states_no_height_is_not_modelled_as_a_slab():
+    """The one number no layer carries, so guessing it is the whole risk.
+
+    **A button is why this matters.** `BUTTON_TD1183SA` has an `F.Fab`
+    outline and no height anywhere -- and a button STANDS PROUD of the board,
+    which is the point of it, so a slab of invented thickness would be exactly
+    what this file exists not to draw. It stays in `ABSENT` while the C6's and
+    RP2350's switches, whose names DO state 0.53 mm, are drawn.
+    """
+    from tools import model_from_datasheet
+
+    spec = dataclasses.replace(model_from_datasheet.SLABS[0],
+                               package="BUTTON_TD1183SA",
+                               pcb=compose.PCB_CACHE / "nRF54L15.kicad_pcb")
+    if not spec.pcb.is_file():
+        pytest.skip("SKIPPED: nRF54L15.kicad_pcb is not fetched")
+    with pytest.raises(SystemExit, match="states no length x width x height"):
+        model_from_datasheet.slab_geometry(spec)
+    assert "BUTTON_TD1183SA" in compose.ABSENT
+    assert "no height" in compose.ABSENT["BUTTON_TD1183SA"], (
+        "the entry has to say WHICH number is missing, or the next person "
+        "models it from the F.Fab outline it does have"
+    )
+
+
+def test_a_name_that_disagrees_with_the_outline_is_refused():
+    """The check that makes the parse safe, shown refusing.
+
+    A package renamed to claim a body twice its drawn size is the shape of a
+    misread name, and it must not draw either dimension.
+    """
+    from tools import model_from_datasheet
+
+    spec = next(s for s in model_from_datasheet.SLABS
+                if s.package.startswith("ANT2P"))
+    if not spec.pcb.is_file():
+        pytest.skip("SKIPPED: nRF54L15.kicad_pcb is not fetched")
+    body = spec.pcb.read_text(encoding="utf-8", errors="replace")
+    lying = body.replace("ANT2P-5.2x2x1.1MM", "ANT2P-11.0x4.0x1.1MM")
+    assert lying != body, "the substitution did not take"
+    scratch = spec.pcb.with_name("ANT-lying.kicad_pcb")
+    scratch.write_text(lying, encoding="utf-8")
+    try:
+        wrong = dataclasses.replace(spec, package="ANT2P-11.0x4.0x1.1MM",
+                                    pcb=scratch)
+        with pytest.raises(SystemExit, match="mm apart"):
+            model_from_datasheet.slab_geometry(wrong)
+    finally:
+        scratch.unlink()
+
+
+def test_a_modelled_slab_is_declared_as_built_here():
+    """The page has to say which parts were made rather than fetched.
+
+    `modelled` is what carries that all the way to a reader, and a slab is the
+    furthest from a measurement anything here gets -- so it is the last thing
+    that should arrive looking like a vendor's own model.
+    """
+    from tools import model_from_datasheet
+
+    by_package = {c.package: c for c in compose.CORRESPONDENCE}
+    for spec in model_from_datasheet.SLABS:
+        component = by_package.get(spec.package)
+        assert component is not None, f"{spec.package} is modelled and not drawn"
+        assert component.modelled is True, spec.package
+        assert component.library == "modelled", spec.package
+        assert component.model == spec.name, spec.package
+        assert component.turn == 0.0, (
+            "a modelled part is built in the vendor package's own frame"
+        )
+        assert spec.package not in compose.ABSENT, (
+            f"{spec.package} is drawn now; ABSENT should not claim otherwise"
+        )
 
 
 def test_the_two_usb_c_land_patterns_are_given_different_receptacles():

@@ -320,6 +320,91 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "U.FL-R-SMT-1 is Hirose's own part number and the vendor's footprint "
         "name is U-FL. The antenna socket.",
     ),
+    # --- OH-104: the parts nobody publishes, drawn as the slabs the vendor
+    # --- already gave the size of. Each is `modelled`, so the page says it
+    # --- was built here rather than fetched -- see
+    # --- tools/model_from_datasheet.py, which refuses any package whose
+    # --- name and F.Fab outline disagree about the plan by half a
+    # --- millimetre, because that comparison is what proves the name was
+    # --- read correctly rather than merely parsed.
+    Component(
+        "ANT2P-5.2x2x1.1MM", "modelled", "ANT2P-5.2x2x1.1MM",
+        "MODELLED, not matched. Its body is 5.200 x 2.000 mm on Seeed's own "
+        "F.Fab assembly layer, 1.1 mm tall by the last field of their "
+        "footprint name, and those two sources agree about the plan to "
+        "0.000 mm. KiCad's RF_Antenna library holds exactly four models -- "
+        "two Johanson chip antennas, an AVX and a Pulse -- and none is 5.2 "
+        "mm long, counted 2026-08-29. The nRF54L15 names Seeed's own "
+        "`ANT_KH5220-A36`, under a path they do not publish.",
+        modelled=True,
+    ),
+    Component(
+        "SW4-SMD-2.8-2.6X1.6X0.53MM", "modelled", "SW4-SMD-2.8-2.6X1.6X0.53MM",
+        "MODELLED, not matched. Its body is 2.600 x 1.600 mm on Seeed's own "
+        "F.Fab assembly layer, 0.53 mm tall by the last field of their "
+        "footprint name, and those two sources agree about the plan to "
+        "0.000 mm. the smallest surface-mount switch in KiCad's 159-file "
+        "Button_Switch_SMD is the TS-1088 at 2.9 x 3.9 mm, against a 2.6 x "
+        "1.6 mm part -- more than twice the footprint.",
+        modelled=True,
+    ),
+    Component(
+        "MIC6P-0.94-4X2X1.1MM", "modelled", "MIC6P-0.94-4X2X1.1MM",
+        "MODELLED, not matched. Its body is 2.257 x 4.267 mm on Seeed's own "
+        "F.Fab assembly layer, 1.1 mm tall by the last field of their "
+        "footprint name, and those two sources agree about the plan to "
+        "0.267 mm. the nRF54L15 names Seeed's own `312030722_MSM261DGT006`, "
+        "which they do not publish, and KiCad has no microphone library.",
+        modelled=True,
+    ),
+    Component(
+        "WLCSP47-0.3-2.451X2.245X0.42MM", "modelled", "WLCSP47-0.3-2.451X2.245X0.42MM",
+        "MODELLED, not matched. Its body is 2.440 x 2.240 mm on Seeed's own "
+        "F.Fab assembly layer, 0.42 mm tall by the last field of their "
+        "footprint name, and those two sources agree about the plan to "
+        "0.011 mm. KiCad's Package_CSP holds 34 files and not one WLCSP-47; "
+        "the closest by ball count is a WLCSP-49 at 3.44 x 3.44 mm, half "
+        "again as large. The nRF54L15 itself.",
+        modelled=True,
+    ),
+    Component(
+        "WLCSP20-0.4-2.4X1.9X0.5MM_SMALL", "modelled", "WLCSP20-0.4-2.4X1.9X0.5MM_SMALL",
+        "MODELLED, not matched. Its body is 1.950 x 2.450 mm on Seeed's own "
+        "F.Fab assembly layer, 0.5 mm tall by the last field of their "
+        "footprint name, and those two sources agree about the plan to "
+        "0.050 mm. KiCad has two WLCSP-20s, both 4x5 layouts at 1.7 x 2.1 "
+        "and 1.94 x 2.4 mm, and each names the maker of a different part. "
+        "Seeed name their own `WLCSP20`, which they do not publish.",
+        modelled=True,
+    ),
+    Component(
+        "IPEX-GEN4-SMD-1.7X1.7X1.0MM", "modelled", "IPEX-GEN4-SMD-1.7X1.7X1.0MM",
+        "MODELLED, not matched. Its body is 1.700 x 1.700 mm on Seeed's own "
+        "F.Fab assembly layer, 1.0 mm tall by the last field of their "
+        "footprint name, and those two sources agree about the plan to "
+        "0.000 mm. KiCad's Connector_Coaxial holds fifteen models and its "
+        "only sub-miniature one is the 2.6 mm U.FL, which would overhang a "
+        "1.7 mm part by half a millimetre in each direction.",
+        modelled=True,
+    ),
+    Component(
+        "LED4-0.8-1.6X1.5X0.55MM", "modelled", "LED4-0.8-1.6X1.5X0.55MM",
+        "MODELLED, not matched. Its body is 1.500 x 1.600 mm on Seeed's own "
+        "F.Fab assembly layer, 0.55 mm tall by the last field of their "
+        "footprint name, and those two sources agree about the plan to "
+        "0.000 mm. KiCad's LED_SMD holds 39 files whose smallest RGB part "
+        "is the 1210 at 3.2 x 2.5 mm, twice this one.",
+        modelled=True,
+    ),
+    Component(
+        "LED4-0.85-1.6X1.5X0.6MM", "modelled", "LED4-0.85-1.6X1.5X0.6MM",
+        "MODELLED, not matched. Its body is 1.600 x 1.530 mm on Seeed's own "
+        "F.Fab assembly layer, 0.6 mm tall by the last field of their "
+        "footprint name, and those two sources agree about the plan to "
+        "0.030 mm. the same absence as the 0.8 mm pitch part above: no RGB "
+        "LED in KiCad's library is under 3.2 mm.",
+        modelled=True,
+    ),
     # --- the C6, the RP2350 and the nRF54L15, OH-93 -------------------------
     #
     # **These three state some of their own models and the C3 states none**,
@@ -457,14 +542,15 @@ _NO_CHIP_SCALE_MOSFET = (
 )
 
 _NO_TINY_BUTTON = (
-    "the two buttons a person actually presses: boot and reset. A side-"
-    "actuated switch a millimetre and a half wide -- 3.0 x 1.5 mm where the "
-    "vendor names the part (TD1183SA) and 2.6 x 1.6 x 0.53 mm where they give "
-    "only the size. **The smallest surface-mount switch in KiCad's 159-file "
-    "`Button_Switch_SMD` is the TS-1088 at 2.9 x 3.9 mm**, more than twice the "
-    "footprint either way. Of everything left off these boards this is the "
-    "absence most worth retiring, because it is the only one a reader would "
-    "reach for."
+    "boot and reset -- two of the buttons a person actually presses. The "
+    "smallest surface-mount switch in KiCad's 159-file `Button_Switch_SMD` is "
+    "the TS-1088 at 2.9 x 3.9 mm, against a 3.01 x 2.61 mm body. "
+    "**And unlike the C6's and RP2350's switches, which OH-104 modelled, this "
+    "one cannot be**: the vendor names the part (TD1183SA) and states no "
+    "height for it, in the footprint name or on any layer. A button STANDS "
+    "PROUD of the board -- its height is the whole point of it -- so a slab of "
+    "invented thickness would be exactly the defect that file exists not to "
+    "draw. What retires this is one number from Seeed or a datasheet."
 )
 
 ABSENT: dict[str, str] = {
@@ -490,13 +576,6 @@ ABSENT: dict[str, str] = {
     # folder was listed and what the nearest thing in it was. A model of
     # nearly the right part is what `confirm`'s tolerances exist to refuse,
     # and a 7 x 7 mm chip is not the place to spend that tolerance.
-    "WLCSP47-0.3-2.451X2.245X0.42MM": (
-        "the nRF54L15 itself, a 47-ball wafer-level CSP 2.45 x 2.25 mm. "
-        "KiCad's `Package_CSP` holds 34 files and not one is a WLCSP-47; the "
-        "closest by ball count is a WLCSP-49 at 3.44 x 3.44 mm, which is "
-        "half again as large. Seeed state a model for it and it is one of "
-        "their own files under a path they do not publish."
-    ),
     # **The same part under two vendor spellings is one absence, said once.**
     # Seeed write the C3's load switch `PMOS_1.0_0.6_0.35MM` and the other
     # three boards' `PMOS_1.0X0.6X0.35MM`; the buttons are `BUTTON_TD1183SA`
@@ -506,23 +585,6 @@ ABSENT: dict[str, str] = {
     "PMOS_1.0_0.6_0.35MM": _NO_CHIP_SCALE_MOSFET,
     "PMOS_1.0X0.6X0.35MM": _NO_CHIP_SCALE_MOSFET,
     "BUTTON_TD1183SA": _NO_TINY_BUTTON,
-    "SW4-SMD-2.8-2.6X1.6X0.53MM": _NO_TINY_BUTTON,
-    "ANT2P-5.2x2x1.1MM": (
-        "the chip antenna on the C6 and the nRF54L15 -- 5.2 x 2 x 1.1 mm, "
-        "and at that size the largest thing on either board after the USB "
-        "socket and the main chip. KiCad's `RF_Antenna` holds exactly four "
-        "models: two Johanson chip antennas, an AVX and a Pulse. None is "
-        "5.2 mm long. The nRF54L15 names Seeed's own `ANT_KH5220-A36`, which "
-        "they do not ship."
-    ),
-    "IPEX-GEN4-SMD-1.7X1.7X1.0MM": (
-        "the nRF54L15's external-antenna socket. IPEX MHF4 is 1.7 mm square "
-        "where the U.FL this repository already draws on the C3 is 2.6 mm, "
-        "and KiCad's `Connector_Coaxial` holds fifteen models of which the "
-        "only sub-miniature one is that U.FL. Drawing the bigger connector "
-        "would overhang the pads it is meant to sit on by half a millimetre "
-        "in each direction."
-    ),
 }
 
 
