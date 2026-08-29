@@ -636,6 +636,87 @@ def test_a_reference_designator_is_not_part_of_the_body(bodies):
     assert by_reference["U1"].body[1] == -0.95, "the label at y -9 is not the body"
 
 
+def test_a_closed_outline_beats_loose_lines_on_the_same_layer(tmp_path):
+    """Seeed draw a cable keep-out on `F.Fab` beside the body, and it is not
+    the part.
+
+    Their `USB2.0-TYPE-C` has an `fp_rect` of 7.341 x 8.992 mm -- the
+    receptacle -- and four `fp_line`s forming a 1.651 x 12.5 mm box behind it,
+    which is the room a plug needs. Unioning the two reported a 12.5 mm body,
+    and **every comparison against it was meaningless**: it is what let a
+    connector sit a quarter turn out with `silk_miss` agreeing (OH-105). The
+    RP2350 draws only the rectangle, and the disagreement between two boards
+    sharing a footprint is what gave it away.
+    """
+    path = tmp_path / "keepout.kicad_pcb"
+    path.write_text(BODIES.replace('''\t\t(fp_line
+\t\t\t(start -8 -8)
+\t\t\t(end 8 8)
+\t\t\t(stroke (width 0.12) (type solid))
+\t\t\t(layer "F.SilkS")
+\t\t)''', '''\t\t(fp_line
+\t\t\t(start -6 -6)
+\t\t\t(end 6 -6)
+\t\t\t(stroke (width 0.05) (type solid))
+\t\t\t(layer "F.Fab")
+\t\t)'''), encoding="utf-8")
+    got = read_board(path)
+    by_reference = {p.reference: p for p in got.placements}
+    assert by_reference["U1"].body == (-1.45, -0.95, 1.45, 0.95), (
+        "the keep-out line at y -6 was unioned into the body, which makes a "
+        "2.9 mm part measure 12"
+    )
+
+
+def test_loose_lines_are_read_where_there_is_no_closed_outline(tmp_path):
+    """A chamfered body is drawn edge by edge and is still a body.
+
+    Preferring a rectangle must not mean ignoring a footprint that draws its
+    outline as lines, which is why this is a preference and not a filter.
+    """
+    path = tmp_path / "chamfered.kicad_pcb"
+    path.write_text(BODIES.replace('''\t\t(fp_rect
+\t\t\t(start -1.45 -0.95)
+\t\t\t(end 1.45 0.95)
+\t\t\t(stroke (width 0.05) (type solid))
+\t\t\t(layer "F.Fab")
+\t\t)''', '''\t\t(fp_line
+\t\t\t(start -1.45 -0.95)
+\t\t\t(end 1.45 0.95)
+\t\t\t(stroke (width 0.05) (type solid))
+\t\t\t(layer "F.Fab")
+\t\t)'''), encoding="utf-8")
+    got = read_board(path)
+    by_reference = {p.reference: p for p in got.placements}
+    assert by_reference["U1"].body == (-1.45, -0.95, 1.45, 0.95)
+
+
+def test_a_polygon_body_is_read_like_a_rectangle(tmp_path):
+    """KiCad draws a chamfered body as an `fp_poly`, and it is still closed.
+
+    Which matters because a polygon has to beat loose lines the same way a
+    rectangle does: a footprint with a polygon body AND a keep-out line would
+    otherwise take both.
+    """
+    path = tmp_path / "poly.kicad_pcb"
+    path.write_text(BODIES.replace('''		(fp_rect
+			(start -1.45 -0.95)
+			(end 1.45 0.95)
+			(stroke (width 0.05) (type solid))
+			(layer "F.Fab")
+		)''', '''		(fp_poly
+			(pts
+				(xy -1.45 -0.95) (xy 1.45 -0.95) (xy 1.45 0.6)
+				(xy 1.1 0.95) (xy -1.45 0.95)
+			)
+			(stroke (width 0.05) (type solid))
+			(layer "F.Fab")
+		)'''), encoding="utf-8")
+    got = read_board(path)
+    by_reference = {p.reference: p for p in got.placements}
+    assert by_reference["U1"].body == (-1.45, -0.95, 1.45, 0.95)
+
+
 def test_a_footprint_that_draws_no_body_reports_none(bodies):
     """A test point has pads and no assembly drawing.
 

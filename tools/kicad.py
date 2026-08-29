@@ -466,18 +466,30 @@ def _body_of(node: list) -> tuple[float, float, float, float] | None:
     mounted on, and which side that is has already been decided by the
     placement's own `layer`.
 
-    **Text is not read**, for the reason `eagle._silk_extent` gives: a
+    **A closed outline wins over loose lines, and that is not a tidy-up.**
+    Seeed's `USB2.0-TYPE-C` draws its 7.341 x 8.992 mm body as an `fp_rect`
+    AND four `fp_line`s forming a 1.651 x 12.5 mm box behind it -- the
+    keep-out a cable needs, which is not the part. Taking everything on the
+    layer unioned the two and reported a 12.5 mm body, which is what let a
+    connector sit a quarter turn out with every check agreeing (OH-105). The
+    RP2350 draws only the rectangle, and its number was the right one all
+    along; that disagreement between two boards using the same footprint is
+    what gave this away.
+
+    So: a body is a SHAPE. Lines are read only where a footprint draws no
+    closed one, which is the case for a chamfered outline drawn edge by edge.
+
+    **Text is not read** either, for the reason `eagle._silk_extent` gives: a
     reference designator is placed wherever it is legible, as often beside a
     part as on it, and including one would make a 1 mm capacitor measure five.
     """
-    xs: list[float] = []
-    ys: list[float] = []
-    for tag in ("fp_line", "fp_rect"):
-        for graphic in children(node, tag):
-            got = _graphic(graphic, "start")
-            if got and got[0].endswith(".Fab"):
-                xs += [got[1][0], got[1][2]]
-                ys += [got[1][1], got[1][3]]
+    closed_x: list[float] = []
+    closed_y: list[float] = []
+    for graphic in children(node, "fp_rect"):
+        got = _graphic(graphic, "start")
+        if got and got[0].endswith(".Fab"):
+            closed_x += [got[1][0], got[1][2]]
+            closed_y += [got[1][1], got[1][3]]
     for graphic in children(node, "fp_poly"):
         where = first(graphic, "layer")
         if not (where and len(where) > 1 and str(where[1]).endswith(".Fab")):
@@ -486,8 +498,18 @@ def _body_of(node: list) -> tuple[float, float, float, float] | None:
         for point in children(points or [], "xy"):
             coords = _floats(point)
             if len(coords) >= 2:
-                xs.append(coords[0])
-                ys.append(coords[1])
+                closed_x.append(coords[0])
+                closed_y.append(coords[1])
+    if closed_x:
+        return (min(closed_x), min(closed_y), max(closed_x), max(closed_y))
+
+    xs: list[float] = []
+    ys: list[float] = []
+    for graphic in children(node, "fp_line"):
+        got = _graphic(graphic, "start")
+        if got and got[0].endswith(".Fab"):
+            xs += [got[1][0], got[1][2]]
+            ys += [got[1][1], got[1][3]]
     if not xs:
         return None
     return (min(xs), min(ys), max(xs), max(ys))

@@ -432,17 +432,24 @@ CONTACT_COLOURS = frozenset({"#b58136", "#ebbc51", "#edbe51", "#c6c4a0"})
 
 #: How far a soldered contact may lie outside the board's own outline.
 #:
-#: **It should be zero and on three of the five boards it is exactly zero.**
-#: The Arduino Uno, the ESP32-C3 and the ESP32-C6 have no gold whatever beyond
-#: their PCB. What buys the rest is that the RP2350's and nRF54L15's USB-C is
-#: a part nobody publishes -- Seeed name their own `USB-31C-F-16P-L7.35`,
-#: 7.35 mm long -- so the nearest published receptacle is a fraction large and
-#: its front contacts reach 0.099 and 0.206 mm past the edge.
+#: **It should be zero and on three of the five boards it is inside**, with
+#: room to spare. Re-measured after OH-105 turned every receptacle a quarter:
+#:
+#:     Arduino Uno         -2.093 mm
+#:     XIAO-ESP32-C3-DIP   -0.372
+#:     XIAO-ESP32-C6-DIP   -0.152
+#:     XIAO-RP2350-DIP     +0.164
+#:     XIAO-nRF54l15-DIP   +0.271
+#:
+#: What buys the last two is that their receptacle is a part nobody publishes.
+#: Seeed name their own `USB-31C-F-16P-L7.35` and their `F.Fab` draws it
+#: 7.370 mm deep; the nearest published one is 10.500, so its front contacts
+#: reach past the edge by a quarter of a millimetre. OH-102 retires that.
 #:
 #: The number that made this a test is 0.42: that is how far the WRONG
 #: receptacle put them, and it is what a person looking at the board saw as a
 #: connector hanging off the end of it.
-CONTACT_OVERHANG_MM = 0.25
+CONTACT_OVERHANG_MM = 0.3
 
 
 def test_no_soldered_contact_hangs_off_the_board():
@@ -634,7 +641,7 @@ def test_the_allowance_is_granted_to_one_package_and_not_to_its_neighbours():
     2.2 mm except the connectors themselves. So the property has to be
     asserted directly rather than through a composed board.
     """
-    assert compose.body_allowance("USB2.0-TYPE-C") == 2.2
+    assert compose.body_allowance("USB2.0-TYPE-C") == 2.3
     assert compose.body_allowance("C0201") == compose.SILK_TOLERANCE_MM
     assert compose.body_allowance("QFN60-0.4-7X7X0.9MM") == compose.SILK_TOLERANCE_MM
     assert compose.body_allowance("nothing draws this") == compose.SILK_TOLERANCE_MM
@@ -735,6 +742,97 @@ def test_a_modelled_slab_is_declared_as_built_here():
         assert spec.package not in compose.ABSENT, (
             f"{spec.package} is drawn now; ABSENT should not claim otherwise"
         )
+
+
+def _end_area(mesh, value: float, eps: float = 0.06) -> float:
+    """Triangle area lying in the plane x = `value`, in the scene's frame.
+
+    **How to tell an open end from a closed one without looking.** A closed
+    face is filled and a mouth is a rim with a hole in it, so the area in the
+    plane collapses at the open end -- 0.38 mm2 against 4.26 for the GCT
+    receptacle.
+    """
+    total = 0.0
+    for _colour, (positions, _normals, indices) in mesh.groups.items():
+        for at in range(0, len(indices), 3):
+            corners = [(positions[indices[at + k] * 3],
+                        positions[indices[at + k] * 3 + 1],
+                        positions[indices[at + k] * 3 + 2]) for k in range(3)]
+            if any(abs(corner[0] - value) > eps for corner in corners):
+                continue
+            (ay, az), (by, bz), (cy, cz) = [(c[1], c[2]) for c in corners]
+            total += abs((by - ay) * (cz - az) - (cy - ay) * (bz - az)) / 2
+    return total
+
+
+def test_a_usb_socket_faces_off_the_board_a_cable_can_reach():
+    """The user's report, made into a check: "the usb plug is orientated in
+    the wrong way".
+
+    It was, on all four boards, and by 90 degrees rather than 180 -- the
+    connector lay with its WIDTH pointing off the edge, so a cable would have
+    gone in sideways. Two things have to hold and each rules out a different
+    pair of turns:
+
+      * a receptacle's 8.95 mm width -- fixed by the standard that lets any
+        cable enter any socket -- lies ALONG the board edge, which rules out
+        0 and 180 for both models, since each carries its width on local x;
+      * its mouth faces OFF the board, which picks 90 for one model and 270
+        for the other, because the two are drawn facing opposite ways in
+        their own frames.
+
+    Neither `confirm` nor `silk_miss` can see this. `confirm` came within
+    0.54 mm of catching it and `silk_miss` was comparing against a body
+    outline that had a cable keep-out unioned into it.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    receptacles = {c.package: c for c in compose.CORRESPONDENCE
+                   if c.package.startswith("USB2.0-TYPE-C")}
+    assert receptacles, "no USB-C is drawn"
+    meshes = {package: compose.component_mesh(component, 0.05)
+              for package, component in receptacles.items()}
+
+    checked = 0
+    for spec in compose.COMPOSITIONS:
+        if spec.pcb_chip is None or not spec.layout.is_file():
+            continue
+        board = compose.read_layout(spec.layout)
+        pads = [pad for name in spec.headers
+                for pad in board.element(name).pads]
+        centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
+                  (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
+        for element in board.elements:
+            if element.package not in receptacles:
+                continue
+            checked += 1
+            component = receptacles[element.package]
+            mesh, _box = meshes[element.package]
+            put = compose.place(mesh, element, component.turn,
+                                spec.thickness_mm, centre)
+            xs = [p[at] for _c, (p, _n, _i) in put.groups.items()
+                  for at in range(0, len(p), 3)]
+            zs = [p[at + 2] for _c, (p, _n, _i) in put.groups.items()
+                  for at in range(0, len(p), 3)]
+            along, across = max(zs) - min(zs), max(xs) - min(xs)
+            assert 8.5 < along < 9.5, (
+                f"{spec.board} {element.name}: {along:.3f} mm lies along the "
+                f"board edge and a USB-C receptacle is 8.95 mm wide. It is "
+                f"turned a quarter out, so a cable would go in sideways."
+            )
+            assert across > 7.0, (
+                f"{spec.board} {element.name}: only {across:.3f} mm points "
+                f"off the edge, and the shallowest published receptacle is "
+                f"7.37 mm deep"
+            )
+            outward = _end_area(put, max(xs))
+            inward = _end_area(put, min(xs))
+            assert outward < inward, (
+                f"{spec.board} {element.name}: the OUTWARD end has "
+                f"{outward:.2f} mm2 of face against {inward:.2f} inward, so "
+                f"the closed back is pointing off the board and the mouth is "
+                f"buried in it. Turn it 180."
+            )
+    assert checked == 4, f"expected four composed USB-C sockets, found {checked}"
 
 
 def test_the_two_usb_c_land_patterns_are_given_different_receptacles():

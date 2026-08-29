@@ -299,7 +299,17 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
         "twenty pads spanning 4.812 x 8.636 mm: sixteen signal contacts and "
         "four shell tabs. 8.94 mm is the width of a USB-C receptacle and "
-        "8.636 is its contact field, so this is the 16-pin part.",
+        "8.636 is its contact field, so this is the 16-pin part. "
+        "**The turn is 90 and it was 0 until OH-105**: this model carries its "
+        "8.940 mm WIDTH on its own local x, and a receptacle's width lies "
+        "along the board edge with its 7.37 mm depth pointing off it -- "
+        "Seeed's own F.Fab rectangle measures 7.341 x 8.992 mm and says so. "
+        "Turned wrongly it put the width off the edge, so a cable would have "
+        "gone in sideways. 90 rather than 270 because the mouth has to face "
+        "off the board: measured as triangle area in each end plane, an open "
+        "end being a rim and a closed one a filled face, 90 gives 0.38 mm2 "
+        "outward against 4.26 inward.",
+        turn=90.0,
     ),
     Component(
         "X2-SMD-1.6X1.0X0.5MM", "Crystal",
@@ -473,7 +483,15 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "land's 10.240, where the GCT spans 7.780 and was 2.46 mm short "
         "inside a 3.0 mm tolerance. Seeed name their own "
         "`USB-31C-F-16P-L7.35.stp` and `320011419_ST-USB-3316T.stp`, which "
-        "they do not publish.",
+        "they do not publish -- and whose `L7.35` states the 7.37 mm depth "
+        "their F.Fab rectangle draws. "
+        "**The turn is 270 and it was 0 until OH-105.** Like the GCT above "
+        "this model carries its 9.200 mm width on its own local x, which "
+        "belongs along the board edge; at 0 it put that width off the edge "
+        "instead. 270 rather than 90 because the mouth must face off the "
+        "board, and it gives 4.24 mm2 of open rim outward against 14.89 "
+        "inward.",
+        turn=270.0,
     ),
     Component(
         "USON8-0.5-3X2MM", "Package_SON",
@@ -1454,23 +1472,32 @@ SILK_TOLERANCE_MM = 1.5
 #:
 #: **Not a tolerance, an admission.** `SILK_TOLERANCE_MM` says how much two
 #: drawings of the same part may disagree; this says the two are not the same
-#: part. Both USB-C receptacles are longer than the one Seeed actually fit --
-#: they name `USB-31C-F-16P-L7.35`, 7.35 mm, against 8.94 for KiCad's GCT and
-#: 9.20 for its Amphenol, and publish neither -- so a model anchored on the
-#: pads has its body centre further out than the vendor's own `F.Fab` puts it.
-#: Measured 2026-08-29, and each entry is the measurement plus a tenth:
+#: part. Seeed fit a receptacle 7.37 mm deep -- `L7.35` in the part number in
+#: their own board file, and 7.370 x 8.950 mm on their `F.Fab` rectangle --
+#: and publish it nowhere. KiCad's two 16-pin receptacles are 7.78 and
+#: 10.50 mm deep, so a model anchored on the pads has its body centre further
+#: out than the vendor's drawing puts it.
 #:
-#:     XIAO-ESP32-C6-DIP    USB1   2.01 mm
-#:     XIAO-nRF54l15-DIP    USB1   1.87
-#:     XIAO-RP2350-DIP      USB1   1.45   (inside the tolerance anyway)
-#:     XIAO-ESP32-C3-DIP    USB0   1.19   (inside the tolerance anyway)
+#: **Every number here was re-measured after OH-105**, because the ones
+#: before it were taken against a body outline that included a cable keep-out
+#: and were therefore excusing a connector that was a quarter turn out. That
+#: is the hazard of an allowance, and it landed on this table's first outing:
+#:
+#:     XIAO-ESP32-C6-DIP    USB1   2.215 mm   GCT, 7.78 deep
+#:     XIAO-nRF54l15-DIP    USB1   1.495      Amphenol, 10.50 deep
+#:     XIAO-RP2350-DIP      USB1   1.332      Amphenol
+#:     XIAO-ESP32-C3-DIP    USB0   --         draws no F.Fab at all
+#:
+#: The Amphenol's 1.495 is INSIDE `SILK_TOLERANCE_MM` and still has an entry,
+#: because five thousandths of a millimetre from a hard failure is not a
+#: margin -- it is luck, and the next tessellation would spend it.
 #:
 #: **Keyed by package, so it excuses one part and not a board.** Every other
-#: part on those boards is still held to 1.5 mm, and the C3's worst is 0.000.
+#: part on those boards is held to 1.5 mm and the C3's worst is 0.000.
 #: OH-102 retires this by modelling the receptacle the vendor names.
 BODY_ALLOWANCE_MM: dict[str, float] = {
-    "USB2.0-TYPE-C": 2.2,
-    "USB2.0-TYPE-C_USB-31C-F-16P": 2.0,
+    "USB2.0-TYPE-C": 2.3,
+    "USB2.0-TYPE-C_USB-31C-F-16P": 1.6,
 }
 
 
