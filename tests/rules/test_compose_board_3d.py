@@ -360,6 +360,8 @@ EXPLAINS: dict[str, set[str]] = {
     "XIAO-ESP32-C3-DIP": {"PMOS_1.0_0.6_0.35MM", "BUTTON_TD1183SA"},
     # Its antenna and buttons were here until OH-104 modelled them.
     "XIAO-ESP32-C6-DIP": {"PMOS_1.0X0.6X0.35MM"},
+    # The C5's only stated omission: its buttons, which name no height.
+    "XIAO-ESP32-C5-DIP": {"BUTTON_TD1183SA"},
     # The RP2350's own chip was here until OH-100 modelled it.
     "XIAO-RP2350-DIP": {"PMOS_1.0X0.6X0.35MM"},
     # Its own processor, its antenna and its coaxial socket were here until
@@ -688,7 +690,16 @@ def test_a_usb_socket_faces_off_the_board_a_cable_can_reach():
                     f"its contacts {here:.3f} mm from their pads, and "
                     f"{other:.0f} puts them {rival:.3f}"
                 )
-    assert checked == 4, f"expected four composed USB-C sockets, found {checked}"
+    #: Derived rather than pinned: every composed XIAO carries exactly one
+    #: USB-C, so this follows the board list instead of needing a new number
+    #: each time one is added -- and it still catches a loop that quietly ran
+    #: over nothing, which is what a bare count is for.
+    xiaos = [s for s in compose.COMPOSITIONS
+             if s.pcb_chip is not None and s.layout.is_file()]
+    assert checked == len(xiaos), (
+        f"{len(xiaos)} composed XIAOs are fetched and {checked} USB-C sockets "
+        f"were checked"
+    )
 
 
 def test_composing_refuses_a_part_turned_the_wrong_way():
@@ -1063,6 +1074,28 @@ def _rp2350() -> pathlib.Path:
             f"python tools/compose_board_3d.py --board XIAO-RP2350-DIP"
         )
     return path
+
+
+def test_a_body_drawn_as_lines_is_read_like_one_drawn_as_a_rectangle():
+    """`pack_geometry` had its own F.Fab reader and it looked for a rectangle.
+
+    The ESP32-C5 draws its QFN's body as four `fp_line`s, so a part whose
+    outline was perfectly present was refused as absent -- "0 rectangles on
+    F.Fab". Two readers of one layer meant only one of them learned what
+    OH-105 taught about closed outlines and keep-out lines, so this now goes
+    through `kicad._body_of` like everything else.
+    """
+    from tools import model_from_datasheet
+
+    spec = next(s for s in model_from_datasheet.PACKS
+                if s.package.startswith("QFN48"))
+    if not spec.pcb.is_file():
+        pytest.skip(f"SKIPPED: {spec.pcb.name} is not fetched")
+    plan = model_from_datasheet.pack_geometry(spec)
+    body = plan["body"]
+    assert body["x"][1] - body["x"][0] == pytest.approx(6.0, abs=0.001)
+    assert body["y"][1] - body["y"][0] == pytest.approx(6.0, abs=0.001)
+    assert len(plan["leads"]) == 48, "a QFN-48 has forty-eight leads"
 
 
 def test_the_modelled_qfn_is_built_from_the_vendors_own_footprint():

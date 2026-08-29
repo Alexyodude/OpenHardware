@@ -57,7 +57,14 @@
         "XIAO-ESP32-C5-SMD"
       ],
       "mesh": null,
-      "modelable": false
+      "modelable": true,
+      "pcb": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO_ESP32C5/res/Seeed_Studio_XIAO_ESP32C5.zip",
+        "status": 200,
+        "bytes": 865127,
+        "found": "2026-08-29",
+        "how": "read every link on the getting-started page, then OPENED the archive"
+      }
     },
     "ESP32-C6": {
       "boards": [
@@ -164,6 +171,7 @@
       "modelable": true
     }
   },
-  "corrected": "2026-08-29",
-  "correction": "The MG24 and nRF54LM20A meshes DO exist: each is a KiCad assembly export inside the archive this file lists under `pcb`. `measured`/`method` describe the 2026-08-28 survey, which classified the LINKS on each wiki page and never opened an archive -- so a mesh behind a link whose text says PCB was invisible to it, and the control could not catch that because all four known meshes are behind links whose text says model. Only the two `mesh` fields below were changed; every byte count is still the Content-Length the survey measured, and both were re-checked 2026-08-29 and are unchanged. See the README beside this file."
+  "corrected": "2026-08-29 (twice: see `correction` and `correction_2`)",
+  "correction": "The MG24 and nRF54LM20A meshes DO exist: each is a KiCad assembly export inside the archive this file lists under `pcb`. `measured`/`method` describe the 2026-08-28 survey, which classified the LINKS on each wiki page and never opened an archive -- so a mesh behind a link whose text says PCB was invisible to it, and the control could not catch that because all four known meshes are behind links whose text says model. Only the two `mesh` fields below were changed; every byte count is still the Content-Length the survey measured, and both were re-checked 2026-08-29 and are unchanged. See the README beside this file.",
+  "correction_2": "The ESP32-C5 DOES publish a full KiCad project: https://files.seeedstudio.com/wiki/XIAO_ESP32C5/res/Seeed_Studio_XIAO_ESP32C5.zip, 865,127 bytes, holding `Seeed Studio ESP32C5.kicad_pcb` with 98 placements. It is linked from the getting-started page among the twenty files.seeedstudio.com links this survey says it classified -- so the classifier SAW it and did not recognise it, because the archive is named after the BOARD where the C6's says `SCH&PCB` and the MG24's says `KiCad`. The shared `New_XIAO_Series_Footprints.zip` was a decoy: it does hold XIAO-ESP32-C5-DIP.kicad_mod, whose five (model ...) blocks name the RP2040, SAMD21, C3, S3 and nRF52840 STEPs -- the boilerplate list in section 2, and not one of them a C5. Re-checked 2026-08-29."
 }

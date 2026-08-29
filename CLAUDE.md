@@ -84,12 +84,14 @@ python tools/model_from_datasheet.py       # the parts nobody publishes at all
 python tools/compose_board_3d.py           # the boards nobody publishes a mesh for
 ```
 
-Twenty-three of the twenty-six boards then draw a vendor file instead of an
-extruded footprint: **thirteen from Seeed's own mechanical model** and **ten
-composed** from a published PCB, and the pin panel says which of the three
-things it is showing. The three left are the two ESP32-C5 boards and the
-STM32C5, for which Seeed publish nothing at all -- see
-`docs/research/board-models/`. The meshes are gitignored -- see
+Twenty-five of the twenty-six boards then draw a vendor file instead of an
+extruded footprint: **thirteen from Seeed's own mechanical model** and
+**twelve composed** from a published PCB, and the pin panel says which of the
+three things it is showing. The one left is `XIAO-XIAO STM32C5-SMD`, which has
+no page on the vendor's wiki at all -- see `docs/research/board-models/`,
+whose §5 also records that the same document twice said a board could not be
+drawn when the vendor was publishing its PCB the whole time. The meshes are
+gitignored -- see
 `tools/import_3d_model.py` for the licence reason -- so a fresh checkout gets
 the footprint until this is run.
 

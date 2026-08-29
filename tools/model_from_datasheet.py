@@ -182,6 +182,35 @@ class ModelledPack:
 
 PACKS: tuple[ModelledPack, ...] = (
     ModelledPack(
+        name="QFN_48_6x6_P0.4",
+        package="QFN48-0.4-6X6X0.9MM_small",
+        pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C5.kicad_pcb",
+        script=REPO / "tools" / "blender" / "qfn_flatpack.py",
+        cited={
+            "height": (0.9, (
+                "the last field of Seeed's own footprint name, "
+                "`QFN48-0.4-6X6X0.9MM_small`, and the same reasoning as the "
+                "QFN-60 below: a moulded slab's height is the one dimension a "
+                "land pattern cannot express, so a footprint states it in the "
+                "name or nowhere"
+            )),
+            "terminal": (0.23, (
+                "how TALL a terminal is drawn and nothing else, exactly as "
+                "for the QFN-60 below -- the leads' plan is the vendor's own "
+                "pad clipped to the body. Under the chip, on a "
+                "surface-mount part, changing no span `confirm` measures"
+            )),
+        },
+        why_not_fetched=(
+            "KiCad publishes `UQFN-48-1EP_6x6mm_P0.4mm_EP4.45x4.45mm`, which "
+            "has the right lead count, body and pitch and is a DIFFERENT "
+            "PART: `UQFN` is the ultra-thin height class, 0.6 mm or less, "
+            "where Seeed's own name says 0.9, and its exposed pad is 4.45 mm "
+            "against their 3.7. Its 6x6 neighbours are a Qorvo TQFN66 and a "
+            "52-lead VQFN, so there is no closer one. The ESP32-C5 itself."
+        ),
+    ),
+    ModelledPack(
         name="QFN_60_7x7_P0.4",
         package="QFN60-0.4-7X7X0.9MM",
         pcb=REPO / "third_party" / "seeed-pcb" / "RP2350.kicad_pcb",
@@ -480,20 +509,23 @@ def pack_geometry(spec: ModelledPack) -> dict[str, object]:
             f"{[p.number for p in flags]}"
         )
 
-    #: `F.Fab` is KiCad's own convention for the part's body outline, which is
+    #: `*.Fab` is KiCad's own convention for the part's body outline, which is
     #: what makes the 7 x 7 mm a reading rather than a parse of the package
-    #: name. `F.CrtYd` is the keep-out around it and is 0.01 mm larger here,
+    #: name. `F.CrtYd` is the keep-out around it and is 0.01 mm larger there,
     #: so taking the wrong one would be invisible and wrong.
-    body = [g for g in kicad.children(node, "fp_rect")
-            if (lambda layer: layer and len(layer) > 1 and layer[1] == "F.Fab")(
-                kicad.first(g, "layer"))]
-    if len(body) != 1:
+    #:
+    #: **Read through `kicad._body_of` rather than here**, which this did
+    #: until OH-108: it looked for an `fp_rect` and the ESP32-C5 draws its
+    #: QFN's body as four lines, so a part whose outline was perfectly present
+    #: was refused as absent. That function knows the difference between a
+    #: closed outline and the loose lines a keep-out is drawn with, learned in
+    #: OH-105, and having two readers of one layer meant only one of them did.
+    corners = kicad._body_of(node)
+    if corners is None:
         raise SystemExit(
-            f"{spec.package}: {len(body)} rectangles on F.Fab and this needs "
-            f"exactly one to be the body outline"
+            f"{spec.package}: nothing on *.Fab in {spec.pcb.name}, so there "
+            f"is no body outline to read. Another board may draw one."
         )
-    corners = kicad._floats(kicad.first(body[0], "start")) + \
-        kicad._floats(kicad.first(body[0], "end"))
 
     #: The pin-1 marker, and it is optional: a part without one is drawn
     #: without one rather than refused, because the alternative is inventing

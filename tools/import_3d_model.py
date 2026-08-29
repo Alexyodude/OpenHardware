@@ -1873,6 +1873,8 @@ COMPOSED: tuple[tuple[str, str, str], ...] = (
     ("XIAO-RP2350-SMD", "RP2350", "XIAO-RP2350-DIP"),
     ("XIAO-nRF54l15-DIP", "nRF54l15", "XIAO-nRF54l15-DIP"),
     ("XIAO-nRF54l15-SMD", "nRF54l15", "XIAO-nRF54l15-DIP"),
+    ("XIAO-ESP32-C5-DIP", "ESP32-C5", "XIAO-ESP32-C5-DIP"),
+    ("XIAO-ESP32-C5-SMD", "ESP32-C5", "XIAO-ESP32-C5-DIP"),
 )
 
 

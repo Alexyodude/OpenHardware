@@ -513,6 +513,18 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "says the same size.",
     ),
     Component(
+        "QFN48-0.4-6X6X0.9MM_small", "modelled", "QFN_48_6x6_P0.4",
+        "the ESP32-C5 itself, and MODELLED for the same reason as the "
+        "QFN-60 below: forty-nine pads spanning 5.850 x 5.850 mm with a "
+        "3.7 x 3.7 mm exposed pad, and the only published 48-lead 6 x 6 part "
+        "on a 0.4 mm pitch is KiCad's `UQFN-48`, whose exposed pad is "
+        "4.45 mm and whose `U` is the ultra-thin height class -- 0.6 mm or "
+        "less, where Seeed's own name says 0.9. Body 6.000 x 6.000 mm from "
+        "their F.Fab rectangle, leads from their own pads clipped to it, "
+        "height from the last field of their footprint name.",
+        modelled=True,
+    ),
+    Component(
         "QFN60-0.4-7X7X0.9MM", "modelled", "QFN_60_7x7_P0.4",
         "the RP2350 itself, and **the only part on any XIAO that is MODELLED "
         "rather than matched** -- so it is the one line in this table that is "
@@ -687,6 +699,13 @@ PCB_SOURCES: dict[str, tuple[str, int]] = {
          "nRF54L15_KICAD.zip"),
         1_305_099,
     ),
+    # **Named after the board rather than after its contents**, which is how
+    # a survey that classified link text walked past it. OH-108.
+    "ESP32-C5": (
+        ("https://files.seeedstudio.com/wiki/XIAO_ESP32C5/res/"
+         "Seeed_Studio_XIAO_ESP32C5.zip"),
+        865_127,
+    ),
 }
 
 
@@ -828,6 +847,27 @@ COMPOSITIONS: tuple[Composition, ...] = (
             "either, so it adds nothing to the four searches recorded there"
         ),
         serves=("XIAO-RP2350-SMD",),
+    ),
+    Composition(
+        board="XIAO-ESP32-C5-DIP",
+        layout=PCB_CACHE / "ESP32-C5.kicad_pcb",
+        fetch_with="python tools/compose_board_3d.py --board XIAO-ESP32-C5-DIP",
+        pcb_chip="ESP32-C5",
+        geometry=(
+            "Seeed's own KiCad project for the XIAO ESP32-C5 v1.1: the "
+            "outline from Edge.Cuts and every component's position, rotation "
+            "and side as the board file states them. Seeed publishes no mesh "
+            "for this board -- see docs/research/board-models/"
+        ),
+        headers=("U9",),
+        thickness_mm=1.2,
+        colour=BOARD_MASK,
+        colour_source=(
+            "BOARD_MASK, A JUDGEMENT rather than a reading -- see that "
+            "constant. This board's own .kicad_pcb has no (stackup ...) "
+            "either, so it adds nothing to the four searches recorded there"
+        ),
+        serves=("XIAO-ESP32-C5-SMD",),
     ),
     Composition(
         board="XIAO-nRF54l15-DIP",

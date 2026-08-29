@@ -46,10 +46,10 @@ measured on 2026-08-28.
 | RP2350 | 2 | — | 1,145,969 | DXF 1,418,153 | composed |
 | nRF54LM20A | 2 | **17,170,992, in the PCB zip** | 4,307,651 | — | **imported** |
 | nRF54L15 | 2 | — | 1,305,099 | — | composed |
-| ESP32-C5 | 2 | — | — | — | slab |
+| ESP32-C5 | 2 | — | **865,127, in `res/`** | — | composed |
 | STM32C5 | 1 | — | — | — | slab |
 
-Thirteen boards are drawn from a vendor file. Three are not, and §4 says what
+Twenty-five of the twenty-six boards are drawn from a vendor file. One is not, and §4 says what
 that means. **The vendor's own mechanical model is preferred wherever one
 exists** — the order `CLAUDE.md` states — so the two chips that turned out to
 have one are imported rather than composed, and their correspondence
@@ -141,11 +141,26 @@ refuses one that does not span them. `C0201` is a 0201 capacitor and
 believed *because the names rhyme* is the `DIL28-3`-to-`DIP-8` failure, which
 draws a plausible little part in exactly the right place and is wrong.
 
-## 5. The three that cannot be drawn
+## 5. The one that cannot be drawn (it was three)
 
-**`XIAO-ESP32-C5-DIP`, `XIAO-ESP32-C5-SMD`** — the C5 has wiki pages, and they
-offer the shared `New_XIAO_Series_Footprints.zip` and nothing else. No mesh, no
-PCB, no DXF, no dimensioned drawing.
+**`XIAO-ESP32-C5-DIP`, `XIAO-ESP32-C5-SMD`** — ~~the C5 has wiki pages, and
+they offer the shared `New_XIAO_Series_Footprints.zip` and nothing else. No
+mesh, no PCB, no DXF, no dimensioned drawing.~~
+
+**WRONG, corrected 2026-08-29 by OH-108.** Seeed publish the whole KiCad
+project at
+`files.seeedstudio.com/wiki/XIAO_ESP32C5/res/Seeed_Studio_XIAO_ESP32C5.zip`,
+865,127 bytes, holding a 1.4 MB `.kicad_pcb` with 98 placements. Both boards
+are composed now.
+
+It is on the getting-started page, among the twenty `files.seeedstudio.com`
+links this survey says it classified — so **the classifier saw it and did not
+recognise it**, because that archive is named after the BOARD where the C6's
+says `SCH&PCB` and the MG24's says `KiCad`. The shared footprint library was
+a decoy, and it was opened this time: it does hold
+`XIAO-ESP32-C5-DIP.kicad_mod`, whose five `(model ...)` blocks name the
+RP2040, SAMD21, C3, S3 and nRF52840 STEPs — the boilerplate list §2 already
+describes, and not one of them a C5.
 
 **`XIAO-XIAO STM32C5-SMD`** — the sitemap contains no XIAO STM32 page of any
 kind. The board is in this repository's catalogue and is not on the vendor's
