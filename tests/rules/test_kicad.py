@@ -856,3 +856,157 @@ def test_the_committed_xiao_boards_load(request):
         board = pinmap.load(name)
         assert board.pads, f"{name} has no pads"
         assert all(p.pin is None for p in board.pads), f"{name} has a non-null pin"
+
+
+# --- the models a vendor states, and why reading them changes little (OH-98) -
+
+
+def _kicad_boards():
+    """Every composed board whose layout is a `.kicad_pcb` and is on disk."""
+    from tools import compose_board_3d as compose
+
+    return [spec for spec in compose.COMPOSITIONS
+            if spec.layout.suffix == ".kicad_pcb" and spec.layout.is_file()]
+
+
+def test_the_model_blocks_are_read_and_four_boards_of_five_carry_them():
+    """**The claim this module made and OH-98 corrected.**
+
+    The header said `(model ...)` blocks were absent because "Seeed strips
+    them". That is true of the ESP32-C3 -- and the C3 is the only board of the
+    five it is true of, and it is the one the pipeline was built on. The other
+    four carry 59, 57, 91 and 83.
+    """
+    from tools import kicad
+
+    boards = _kicad_boards()
+    if not boards:
+        pytest.skip("no KiCad layouts on disk; run tools/get_board_sources.py")
+    carrying = 0
+    for spec in boards:
+        board = kicad.read_board(spec.layout)
+        stated = sum(len(placed.models) for placed in board.placements)
+        if stated:
+            carrying += 1
+    assert carrying >= 4, (
+        f"only {carrying} of {len(boards)} boards state any model at all, so "
+        f"the header's corrected claim is wrong in the other direction now"
+    )
+
+
+def test_a_whole_xiao_board_is_never_a_usable_model_for_a_part_on_one():
+    """**The catastrophe OH-98 describes, as a test rather than a paragraph.**
+
+    `MOUDLE14P-XIAO-HALF-HOLE` carries five alternates and every one of them
+    is a COMPLETE XIAO BOARD. Four are `(hide yes)`. `Seeeduino XIAO SAMD21
+    v4.step` is not -- so a reader that trusted the hide flag alone would
+    stand a whole SAMD21 on top of an RP2350, which looks like a rendering bug
+    rather than a data bug.
+
+    **What actually stops it is the path**, not the flag: all five are under
+    `${AMZPATH}`, Seeed's own library, which they do not publish. So the guard
+    that matters is "only `${KICAD7_3DMODEL_DIR}` can be fetched" -- and this
+    asserts both halves, because a future file could hide the SAMD21 and leave
+    a different whole board visible.
+    """
+    from tools import kicad
+
+    boards = _kicad_boards()
+    if not boards:
+        pytest.skip("no KiCad layouts on disk; run tools/get_board_sources.py")
+    seen = 0
+    for spec in boards:
+        board = kicad.read_board(spec.layout)
+        for placed in board.placements:
+            for model in placed.models:
+                if "XIAO" not in model.path or ".3dshapes" not in model.path:
+                    continue
+                seen += 1
+                assert model.variable != "KICAD7_3DMODEL_DIR", (
+                    f"{spec.board}: {placed.name} names {model.path!r} from "
+                    f"KiCad's own library, so it could be fetched and stood "
+                    f"on the board -- and it is a whole XIAO"
+                )
+    assert seen, "no whole-board alternate found at all; has the footprint changed?"
+
+
+def test_the_visible_alternate_on_the_half_hole_footprint_is_the_wrong_board():
+    """The specific fact, pinned so it cannot quietly stop being true.
+
+    Not because it must stay wrong, but because the guard above is only
+    interesting while it is: if Seeed ever hide the SAMD21, a test that
+    silently started passing for a different reason would take the teeth out
+    of the one above without anybody noticing.
+    """
+    from tools import kicad
+
+    boards = [spec for spec in _kicad_boards() if spec.pcb_chip == "RP2350"]
+    if not boards:
+        pytest.skip("no RP2350 layout on disk")
+    board = kicad.read_board(boards[0].layout)
+    placed = next(p for p in board.placements if "MOUDLE14P" in p.name)
+    visible = [m for m in placed.models if not m.hidden]
+    assert len(visible) == 1, [m.path for m in visible]
+    assert "SAMD21" in visible[0].path, (
+        f"the visible alternate is now {visible[0].path!r}. If Seeed have "
+        f"fixed this, say so here -- the guard in the test above is what "
+        f"matters and it is unaffected"
+    )
+    assert visible[0].variable == "AMZPATH", (
+        "the SAMD21 alternate moved to a library that CAN be fetched, which "
+        "is the one change that would make it dangerous"
+    )
+
+
+def test_a_stated_model_never_silently_replaces_the_measured_correspondence():
+    """**Why CORRESPONDENCE does not shrink, which is OH-98's real answer.**
+
+    That ticket expected reading these blocks to "turn most of CORRESPONDENCE
+    from a judgement into a reading". Counted across all five boards by
+    (board, package) pair, it does not: 17 name a model that can be fetched
+    and every one of those 17 already AGREES with what the table measured, 43
+    state nothing usable, and the single disagreement is one where the vendor
+    is wrong -- the C6's `USB2.0-TYPE-C`, stated as
+    `USB_C_Receptacle_GCT_USB4105-xx-A_16P`, which is 7.78 mm deep where the
+    same footprint's own Description says 7.3.
+
+    So reading the statements would change nothing except in the one place it
+    would make the picture worse. This asserts the shape of that count rather
+    than the exact numbers, which a new board would move.
+    """
+    from tools import compose_board_3d as compose
+    from tools import kicad
+
+    boards = _kicad_boards()
+    if not boards:
+        pytest.skip("no KiCad layouts on disk; run tools/get_board_sources.py")
+    table = {c.package: c for c in compose.CORRESPONDENCE}
+    agrees = disagrees = 0
+    for spec in boards:
+        board = kicad.read_board(spec.layout)
+        seen = set()
+        for placed in board.placements:
+            if placed.name in seen or placed.name not in table:
+                continue
+            seen.add(placed.name)
+            usable = [m for m in placed.models
+                      if not m.hidden and m.variable == "KICAD7_3DMODEL_DIR"]
+            if len(usable) != 1:
+                continue
+            parts = usable[0].path.split("/")
+            stated = (parts[-2].removesuffix(".3dshapes"),
+                      parts[-1].removesuffix(".step"))
+            component = table[placed.name]
+            if stated == (component.library, component.model):
+                agrees += 1
+            else:
+                disagrees += 1
+    assert agrees >= 15, (
+        f"only {agrees} stated models agree with CORRESPONDENCE; it was 17, "
+        f"and the argument for not reading them is that they add nothing"
+    )
+    assert disagrees <= 1, (
+        f"{disagrees} stated models now disagree with CORRESPONDENCE. It was "
+        f"one, and the vendor was wrong about it. More than one means the "
+        f"question of which source to believe is worth re-opening"
+    )

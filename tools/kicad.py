@@ -330,10 +330,26 @@ def read_footprint(path: pathlib.Path) -> Footprint:
 #
 # **What a board file gives, and what it does not.** Present: the outline on
 # `Edge.Cuts`, and every component's footprint name, position, rotation and
-# side, authored by the people who made the board. Absent: `(model ...)`
-# blocks -- Seeed strips them -- so a placement names a FOOTPRINT and not a
-# mesh, and the step from one to the other is a judgement that has to be
-# confirmed against pad geometry rather than trusted. See OH-93.
+# side, authored by the people who made the board.
+#
+# **`(model ...)` blocks are present on four boards of the five and this said
+# they were absent**, which was true of the ESP32-C3 -- the board the pipeline
+# was built on, and the only one that carries none. Corrected 2026-08-30 by
+# OH-98, which counted 59, 57, 91 and 83 of them on the C6, RP2350, C5 and
+# nRF54L15. `_models_of` reads them.
+#
+# **Reading them changes almost nothing, which is the surprise.** Counted
+# across all five boards, by (board, package) pair: 17 name a model that can
+# actually be fetched, and all 17 agree with the correspondence
+# `compose_board_3d` had already derived by measurement. 43 more state nothing
+# usable -- silent, or naming Seeed's own unpublished `${AMZPATH}`. And the
+# single disagreement is one where the VENDOR is wrong: the C6 states
+# `USB_C_Receptacle_GCT_USB4105-xx-A_16P`, which is 7.78 mm deep where the
+# same footprint's own `Description` says 7.3.
+#
+# So a placement still names a FOOTPRINT rather than a mesh in the cases that
+# matter, and the step from one to the other is still a judgement confirmed
+# against pad geometry. See OH-93 and OH-98.
 #
 # **An outline is not necessarily drawn on the board.** A footprint may carry
 # `Edge.Cuts` graphics too, and KiCad mills those exactly as it mills the
@@ -377,6 +393,47 @@ class Arc:
 
 
 @dataclasses.dataclass(frozen=True)
+class StatedModel:
+    """One `(model ...)` block: a mesh the footprint says it is.
+
+    **Evidence, not proof**, and OH-98 is the ticket that measured how it can
+    be wrong on the four files already here: most name a library the vendor
+    does not publish, one names a file KiCad's library does not hold, one
+    gives a resistor's mesh to a diode, and one carries five whole-XIAO
+    alternates of which the wrong one is the visible one. So this reports what
+    the file says and decides nothing; `compose_board_3d` is where a statement
+    is weighed against the pads.
+    """
+
+    path: str
+    #: `(hide yes)`. KiCad's own way of saying "an alternate, not this part".
+    hidden: bool = False
+    #: `(offset ...)`, `(rotate ...)` and `(scale ...)`, in the block's own
+    #: order and units -- millimetres and degrees. Carried rather than applied,
+    #: because a reader that dropped them would place a correct mesh wrongly
+    #: and look like a rendering bug.
+    offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    rotate: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+
+    @property
+    def variable(self) -> str:
+        """The `${...}` the path begins with, or `""`.
+
+        **This is the one guard that matters and it is why it has a name.**
+        `${KICAD7_3DMODEL_DIR}` is KiCad's own published library and can be
+        fetched; `${AMZPATH}` is Seeed's own and is not shipped anywhere. The
+        `MOUDLE14P-XIAO-HALF-HOLE` footprint carries five whole-XIAO
+        alternates under `${AMZPATH}` and the one that is NOT `(hide yes)` is
+        `Seeeduino XIAO SAMD21 v4.step` -- so a reader that trusted the hide
+        flag alone would stand a complete SAMD21 board on top of an RP2350.
+        """
+        if not self.path.startswith("${"):
+            return ""
+        return self.path[2:self.path.index("}")] if "}" in self.path else ""
+
+
+@dataclasses.dataclass(frozen=True)
 class Placement:
     """One component on a board: which footprint, where, and which way up."""
 
@@ -410,6 +467,13 @@ class Placement:
     #: against a placed model survives a half turn; the marker is the one
     #: feature on the drawing that does not. See `_mark_of`.
     mark: tuple[float, float] | None = None
+    #: Every `(model ...)` the footprint carries, hidden ones included.
+    #:
+    #: **Hidden ones are kept rather than filtered here** because which of
+    #: five alternates a vendor left visible is itself a fact worth reporting,
+    #: and a reader that never saw them could not say "four are hidden and the
+    #: fifth is a whole different board". See `StatedModel`.
+    models: tuple[StatedModel, ...] = ()
 
     @property
     def name(self) -> str:
@@ -793,6 +857,39 @@ def _mark_of(node: list) -> tuple[float, float] | None:
             sum(m[1] for m in marks) / len(marks))
 
 
+def _models_of(node: list) -> tuple[StatedModel, ...]:
+    """Every `(model ...)` a footprint carries, in the file's own order.
+
+    **Reported, not judged.** A block says a path, whether it is hidden, and
+    the three transforms to apply; whether any of that is TRUE of the part is
+    `compose_board_3d`'s question, and OH-98 records four separate ways these
+    statements are wrong on the four files already on this disk.
+    """
+    def triple(name: str, fallback: tuple[float, float, float]):
+        block = first(node_model, name)
+        if block is None:
+            return fallback
+        xyz = _floats(first(block, "xyz") or [])
+        return (xyz[0], xyz[1], xyz[2]) if len(xyz) >= 3 else fallback
+
+    out: list[StatedModel] = []
+    for node_model in children(node, "model"):
+        if len(node_model) < 2:
+            continue
+        hide = first(node_model, "hide")
+        out.append(StatedModel(
+            path=str(node_model[1]),
+            # `(hide yes)`. Anything else -- including its absence -- is
+            # visible, which is the reading that keeps the SAMD21 alternate
+            # dangerous rather than quietly safe.
+            hidden=bool(hide and len(hide) > 1 and str(hide[1]) == "yes"),
+            offset=triple("offset", (0.0, 0.0, 0.0)),
+            rotate=triple("rotate", (0.0, 0.0, 0.0)),
+            scale=triple("scale", (1.0, 1.0, 1.0)),
+        ))
+    return tuple(out)
+
+
 def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
     """Read one `.kicad_pcb`: the board outline and every placement on it.
 
@@ -858,6 +955,7 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
             pads=tuple(_pads_of(node)),
             body=_body_of(node),
             mark=_mark_of(node),
+            models=_models_of(node),
         )
         placements.append(placed)
         drawn, curved = _fp_graphics(node, layer, placed)
