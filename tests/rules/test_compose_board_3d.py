@@ -2532,8 +2532,10 @@ def test_the_artwork_pass_is_the_thing_that_cuts_copper_to_the_board():
         pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
     board = compose.read_layout(spec.layout)
     ring, _cut = compose.outer(board.outline)
-    meshes, tally = compose.artwork(board, ring, spec.thickness_mm, (0.0, 0.0))
+    meshes, tally = compose.artwork(board, ring, spec.thickness_mm, (0.0, 0.0),
+                                    spec.colour)
     assert tally["pads front"] > 200, tally
+    assert tally["track front"] > 200, tally
 
     copper = [(p[at], -p[at + 2])
               for mesh in meshes for _c, (p, _n, _i) in mesh.groups.items()
@@ -2546,3 +2548,164 @@ def test_the_artwork_pass_is_the_thing_that_cuts_copper_to_the_board():
         f"artwork put a vertex {out:.3f} mm outside the board. A castellated "
         f"half-hole is half a hole; drawn whole it hangs in the air."
     )
+
+
+# --- the routing (OH-112) ------------------------------------------------------
+
+
+def test_a_trace_keeps_its_boards_own_hue():
+    """**The bug this replaced showed up as silver tracery on a blue board.**
+
+    A trace is not exposed metal, it is the mask with something brighter
+    behind it: soldermask is translucent, so light goes through, reflects off
+    the copper, and comes back through. What changes is lightness, not hue.
+
+    The first version blended the mask toward `COPPER` by 0.30. Copper's blue
+    channel is 83 and the Arduino Uno's navy mask's is 99, so the blend pulled
+    blue DOWN while pushing red and green up, and rgb(49,61,99) came out
+    rgb(94,91,94) -- a neutral grey.
+    """
+    navy = compose.mask_over_copper("#313d63")
+    red, green, blue = (int(navy[at:at + 2], 16) for at in (1, 3, 5))
+    assert blue > green > red, (
+        f"#313d63 is a navy and its routing came out {navy}, which is not"
+    )
+    assert blue > 0x63, "and it is lighter than the mask, not darker"
+    # Black stays black and gets lighter, which is what a black board's
+    # routing looks like -- barely, and that is the honest answer.
+    assert compose.mask_over_copper("#1b1b1b") == "#2a2a2a"
+
+
+def test_a_trace_is_drawn_under_the_pads_it_runs_into():
+    """A pad is what a reader is looking for, so nothing may occlude one.
+
+    Physically the mask over a trace stands slightly PROUD of a bare pad --
+    copper plus the ink over it, against copper with the ink opened away. Drawn
+    that way a trace would cut the edge of every pad it reaches.
+    """
+    assert 0 < compose.TRACE_PROUD_MM < compose.COPPER_THICKNESS_MM
+
+
+def test_only_the_two_layers_anything_can_see_are_drawn():
+    """A four- and a six-layer board route inside the laminate.
+
+    The RP2350 lays 149 segments on In2 through In4 and the nRF54L15 381.
+    Nothing can see them from either side, so they are counted rather than
+    drawn -- and counted rather than dropped, because "544 traces" while
+    silently discarding 149 is a different claim from "544, and 149 inside".
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    assert board.traces, "this board is routed"
+    assert {t.layer for t in board.traces} <= set(kicad.OUTER_COPPER)
+    unread = dict(board.traces_unread)
+    assert any(name.startswith("In") for name in unread), unread
+    assert unread.get("zone", 0) > 0, (
+        "a zone's fill is a keyhole polygon and is not attempted; the count "
+        "is what says so"
+    )
+
+
+def test_an_airwire_is_not_a_trace():
+    """EAGLE layer 19 is `Unrouted`, and the Uno carries two.
+
+    An airwire is a connection the router has NOT made -- a straight line from
+    one pad to another through whatever is in the way. Drawn as copper it would
+    be a trace crossing the board that is not on it, and it would look
+    exactly like one.
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip is None)
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    assert {t.layer for t in board.traces} == {"F.Cu", "B.Cu"}
+    assert dict(board.traces_unread).get("layer 19") == 2, board.traces_unread
+
+
+def test_a_curved_trace_is_flattened_rather_than_dropped():
+    """The ESP32-C6 routes 43 of its 597 lengths of track as arcs.
+
+    Dropped, they would be 43 gaps in the routing -- and a gap in a trace is
+    what a broken render looks like. `arc_points` already solves an arc's
+    centre from the three points KiCad stores, for the board outline, so the
+    reader keeps them as arcs and the composer flattens them with it.
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "ESP32-C6")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    raw = kicad.read_board(spec.layout)
+    assert raw.trace_arcs, "this board routes curves"
+    assert all(arc.width_mm > 0 for arc in raw.trace_arcs), (
+        "a length of track has a width; an outline arc does not and says 0"
+    )
+    assert all(arc.width_mm == 0 for arc in raw.arcs), (
+        "an Edge.Cuts arc is a boundary, and its width means nothing"
+    )
+    # And they arrive as straight strokes on the way through `from_kicad`.
+    board = compose.read_layout(spec.layout)
+    assert len(board.traces) > len(raw.traces)
+
+
+def test_every_composed_board_draws_its_routing():
+    """The regression guard: a board with pads and no traces is half a board."""
+    drawn = 0
+    for spec in compose.COMPOSITIONS:
+        if not spec.layout.is_file():
+            continue
+        board = compose.read_layout(spec.layout)
+        assert board.traces, f"{spec.board} draws no routing"
+        assert board.vias, f"{spec.board} draws no vias"
+        assert any(t.layer == "F.Cu" for t in board.traces), spec.board
+        assert any(t.layer == "B.Cu" for t in board.traces), spec.board
+        drawn += 1
+    assert drawn >= 2, f"only {drawn} layouts are fetched, so this is thin"
+
+
+def test_a_via_joins_both_faces_and_is_drawn_on_each():
+    """It is a plated hole through the board, so it shows from either side.
+
+    Tented -- covered by mask -- which is why it takes a trace's colour and
+    not the bare copper of an exposed pad.
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    ring, _cut = compose.outer(board.outline)
+    meshes, tally = compose.artwork(board, ring, spec.thickness_mm, (0.0, 0.0),
+                                    spec.colour)
+    assert tally["vias"] > 100, tally
+    routed = compose.mask_over_copper(spec.colour)
+    faces: dict[float, set[tuple[float, float]]] = {}
+    for mesh in meshes:
+        for colour, (p, _n, _i) in mesh.groups.items():
+            if colour != routed:
+                continue
+            for at in range(0, len(p), 3):
+                faces.setdefault(round(p[at + 1], 4), set()).add(
+                    (round(p[at], 4), round(-p[at + 2], 4)))
+    assert len(faces) == 2, f"routing is drawn at {sorted(faces)}, not two faces"
+    assert max(faces) > 0 > min(faces)
+
+    # **Looked for by position, because counting cannot tell a via from a
+    # trace.** A mutation dropping the vias from the front group survived a
+    # test that only counted heights: the back traces kept that face alive.
+    # Every via is a ring of `VIA_SIDES` points at exactly its own radius, and
+    # the one at angle zero is `(x + d/2, y)`.
+    inside_only = [via for via in board.vias
+                   if all(compose.point_in(ring, corner) for corner in (
+                       (via.x_mm + via.diameter_mm / 2, via.y_mm),
+                       (via.x_mm - via.diameter_mm / 2, via.y_mm),
+                       (via.x_mm, via.y_mm + via.diameter_mm / 2),
+                       (via.x_mm, via.y_mm - via.diameter_mm / 2)))]
+    assert len(inside_only) > 100, "most vias are well inside the outline"
+    for face, corners in faces.items():
+        missing = [via for via in inside_only[:40]
+                   if (round(via.x_mm + via.diameter_mm / 2, 4),
+                       round(via.y_mm, 4)) not in corners]
+        assert not missing, (
+            f"{len(missing)} of 40 vias are not drawn on the face at {face}; "
+            f"a via goes through the board and shows from either side"
+        )

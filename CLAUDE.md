@@ -104,16 +104,31 @@ the vendor's `.brd`, which `python tools/get_board_sources.py arduino-uno`
 prints the URL for -- an `https-archive`, so it is downloaded by hand, as the
 Pico's is.
 
-**A composed board draws its own copper and its own silkscreen**, and until
-OH-110 it drew neither -- which is why it looked like a slate with boxes on it
-beside a vendor's own assembly export. Every pad is the vendor's size at the
-vendor's angle, every stroke their line at their width, and copper is cut to
-the board's edge so a castellated half-hole is half a hole. Two things are NOT
-read and the tool prints how many of each it left: silkscreen **text**, which
-needs a font shipped, and the handful of arcs, circles and polygons on that
-layer. The two colours are judgements and say so, as `BOARD_MASK` does -- a
-`.kicad_pcb` states no surface finish, because that is a fabrication order and
-not a design file.
+**A composed board draws its own copper, its own routing and its own
+silkscreen**, and until OH-110 and OH-112 it drew none of them -- which is why
+it looked like a slate with boxes on it beside a vendor's own assembly export.
+Every pad is the vendor's size at the vendor's angle, every stroke their line
+at their width, and copper is cut to the board's edge so a castellated
+half-hole is half a hole.
+
+A trace is drawn in that board's **own mask colour lifted**, not in copper: a
+trace is under a translucent film with something brighter behind it, so what
+changes is lightness and not hue. Blending toward copper instead turned the
+Uno's navy into a neutral grey, which is the picture that found the bug.
+
+What is NOT drawn is counted and printed: silkscreen **text**, which needs a
+font shipped; the handful of arcs, circles and polygons on that layer;
+**inner copper layers**, which are inside the laminate where nothing can see
+them; and a zone's **filled polygon**, which is a keyhole outline walking into
+every thermal relief and back out. The colours are judgements and say so, as
+`BOARD_MASK` does -- a `.kicad_pcb` states no surface finish, because that is a
+fabrication order and not a design file.
+
+**And the underside is lit** (OH-111), because that is where a XIAO's pin
+names, its battery pads and the words "Seeed Studio" are printed. One light
+from below, not casting, its share added to `LIGHT_TOTAL` rather than taken
+out of the three above -- a light from below cannot brighten a surface facing
+up, and the sweep that set its intensity moved the topside mean by 0.7%.
 
 **Geometry has four sources here and the page names which one it is showing.**
 In order of preference: the vendor's own mechanical model; a published model of

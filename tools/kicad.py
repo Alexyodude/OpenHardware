@@ -201,6 +201,27 @@ class Stroke:
 
 
 @dataclasses.dataclass(frozen=True)
+class Via:
+    """A plated hole joining layers, at its finished outside diameter.
+
+    Drawn because a board has 82 to 307 of them and a tented one is a visible
+    bump in the soldermask. The DRILL is not carried: a via on these boards is
+    covered, so what shows is the annular ring and not the hole.
+    """
+
+    x_mm: float
+    y_mm: float
+    diameter_mm: float
+
+
+#: The two copper layers anything can see. A four- or six-layer board's inner
+#: copper is inside the laminate, so it is counted and not drawn -- the RP2350
+#: routes 149 segments on In2 through In4 and the nRF54L15 381, none of which
+#: is visible from either side.
+OUTER_COPPER = ("F.Cu", "B.Cu")
+
+
+@dataclasses.dataclass(frozen=True)
 class Footprint:
     name: str
     pads: tuple[Pad, ...]
@@ -346,6 +367,13 @@ class Arc:
     ym_mm: float
     x2_mm: float
     y2_mm: float
+    #: The width it was drawn at, for an arc that is a length of TRACK. Zero
+    #: on an outline arc, where a width means nothing -- `Edge.Cuts` is a
+    #: boundary and every consumer of it chains endpoints. Defaulted rather
+    #: than split into a second type, because the flattening is the hard part
+    #: and it is identical: `compose_board_3d.arc_points` solves for the
+    #: centre from the three stored points and knows nothing about widths.
+    width_mm: float = 0.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -398,6 +426,19 @@ class Board:
     #: caption that says "232 strokes" while dropping 99 texts is worse than
     #: one that says both.
     silk_unread: tuple[tuple[str, int], ...] = ()
+    #: The routed copper on the two OUTER layers, in board millimetres. Inner
+    #: layers are inside the board and nothing can see them, so they are
+    #: counted in `traces_unread` rather than carried.
+    traces: tuple[Stroke, ...] = ()
+    #: Track laid as a curve. Kept as arcs because flattening one needs the
+    #: centre solved from three points, and `compose_board_3d.arc_points`
+    #: already does that for the outline.
+    trace_arcs: tuple[Arc, ...] = ()
+    vias: tuple[Via, ...] = ()
+    #: Copper that is not drawn, counted by why. Inner layers, and the filled
+    #: polygons of a zone -- see `compose_board_3d.artwork` for why a pour is
+    #: not attempted.
+    traces_unread: tuple[tuple[str, int], ...] = ()
 
     def extent_mm(self) -> tuple[float, float, float, float]:
         """`(min_x, min_y, max_x, max_y)` of the outline, in millimetres.
@@ -582,6 +623,64 @@ def _silk_of(node: list, prefix: str, put) -> tuple[list[Stroke], list[str]]:
     return strokes, unread
 
 
+def _routing_of(tree: list) -> tuple[list[Stroke], list[Arc], list[Via],
+                                     collections.Counter]:
+    """Every length of track, curve and via on the two outer copper layers.
+
+    **Track is not graphics and it is not read with the graphics.** A
+    `segment` carries a net and a width and no layer of drawing intent; it
+    lives at the top level of the board beside `via` and `zone`, not inside a
+    footprint. Reading it here rather than through `_silk_of` keeps that
+    difference visible, and the two want different things anyway: a stroke on
+    the silkscreen is ink and a segment is metal under it.
+
+    A `zone` is counted and never read. Its `filled_polygon` is a keyhole
+    outline that walks into every thermal relief and back out again -- 26,368
+    points across the RP2350's 95 of them -- and ear-clipping a polygon with
+    coincident edges is a different problem from ear-clipping a board.
+    """
+    strokes: list[Stroke] = []
+    arcs: list[Arc] = []
+    vias: list[Via] = []
+    unread: collections.Counter = collections.Counter()
+
+    for node in tree:
+        if not isinstance(node, list):
+            continue
+        tag = head(node)
+        if tag == "via":
+            at, size = first(node, "at"), first(node, "size")
+            if at is None or size is None:
+                continue
+            where, across = _floats(at), _floats(size)
+            if len(where) >= 2 and across:
+                vias.append(Via(where[0], where[1], across[0]))
+            continue
+        if tag not in ("segment", "arc"):
+            if tag == "zone":
+                unread["zone"] += 1
+            continue
+        layer = first(node, "layer")
+        named = layer[1] if layer and len(layer) > 1 else ""
+        if named not in OUTER_COPPER:
+            unread[str(named) or "no layer"] += 1
+            continue
+        width = _stroke_width(node)
+        if tag == "segment":
+            got = _graphic(node, "start")
+            if got is None:
+                continue
+            strokes.append(Stroke(named, *got[1], width))
+            continue
+        start, mid, end = first(node, "start"), first(node, "mid"), first(node, "end")
+        if start is None or mid is None or end is None:
+            continue
+        a, m, b = _floats(start), _floats(mid), _floats(end)
+        if min(len(a), len(m), len(b)) >= 2:
+            arcs.append(Arc(named, a[0], a[1], m[0], m[1], b[0], b[1], width))
+    return strokes, arcs, vias, unread
+
+
 def _stroke_width(node: list) -> float:
     """The width a graphic was drawn at, from either place KiCad puts it.
 
@@ -737,9 +836,13 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
         raise KicadError(f"{path}: nothing on {layer}, so there is no outline. "
                          f"A board drawn without one would be a bounding box "
                          f"around its parts, which is not its shape")
+    tracks, curves, vias, skipped = _routing_of(tree)
     return Board(path.stem, tuple(outline), tuple(arcs), tuple(placements),
                  silk=tuple(silk),
-                 silk_unread=tuple(sorted(collections.Counter(unread).items())))
+                 silk_unread=tuple(sorted(collections.Counter(unread).items())),
+                 traces=tuple(tracks), trace_arcs=tuple(curves),
+                 vias=tuple(vias),
+                 traces_unread=tuple(sorted(skipped.items())))
 
 
 # --- symbol libraries ----------------------------------------------------------

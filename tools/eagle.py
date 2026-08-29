@@ -150,6 +150,17 @@ class Stroke:
 
 
 @dataclasses.dataclass(frozen=True)
+class Via:
+    """A plated hole joining layers, at its outside diameter. Named to match
+    `tools/kicad.py`'s, and carrying no drill for the same reason: a via on
+    these boards is covered, so what shows is the ring and not the hole."""
+
+    x_mm: float
+    y_mm: float
+    diameter_mm: float
+
+
+@dataclasses.dataclass(frozen=True)
 class Element:
     """One placed component and the pads it puts on the board.
 
@@ -218,6 +229,12 @@ class Board:
     #: What was on those layers and is not in `silk`, counted by kind, so a
     #: caption can say what it left out.
     silk_unread: tuple[tuple[str, int], ...] = ()
+    #: The routed copper on the two outer layers, and the plated holes joining
+    #: them. Both readers fill these; what neither draws is counted below.
+    traces: tuple[Stroke, ...] = ()
+    trace_arcs: tuple[object, ...] = ()
+    vias: tuple[Via, ...] = ()
+    traces_unread: tuple[tuple[str, int], ...] = ()
 
     def element(self, name: str) -> Element:
         for candidate in self.elements:
@@ -527,7 +544,64 @@ def read_board(path: pathlib.Path) -> Board:
         for wire in board.findall("plain/wire")
         if wire.get("layer") == DIMENSION_LAYER
     ]
-    return Board(path.stem, root.get("version") or "unknown", tuple(elements), tuple(outline))
+    tracks, vias, unrouted = _routing(board, str(path))
+    return Board(path.stem, root.get("version") or "unknown", tuple(elements),
+                 tuple(outline), traces=tracks, vias=vias,
+                 traces_unread=unrouted)
+
+
+#: EAGLE's copper layers by number: 1 is the top and 16 the bottom, named here
+#: in `tools/kicad.py`'s vocabulary because that is what draws them.
+#:
+#: **Layer 19 is `Unrouted` and it must never be in this table.** An airwire is
+#: a connection the router has NOT made -- a straight line from one pad to
+#: another through whatever is in the way -- and the Arduino Uno carries two.
+#: Drawn as copper they would be two traces crossing the board that are not
+#: on it.
+COPPER_LAYERS = {"1": "F.Cu", "16": "B.Cu"}
+
+
+def _routing(board: ET.Element, where: str
+             ) -> tuple[tuple[Stroke, ...], tuple[Via, ...],
+                        tuple[tuple[str, int], ...]]:
+    """The routed copper: `<signal>` wires and vias, in board millimetres.
+
+    A signal's wires are already in board space -- EAGLE routes on the board,
+    not inside a package -- so unlike a pad there is no placement to apply.
+
+    **A `curve` attribute is not read**, and the Uno has none: EAGLE stores a
+    curved wire as its two endpoints plus a bulge in degrees, and taking the
+    endpoints alone would draw the chord. Counted rather than silently
+    straightened.
+    """
+    strokes: list[Stroke] = []
+    vias: list[Via] = []
+    unread: dict[str, int] = {}
+    for signal in board.findall("signals/signal"):
+        for wire in signal.findall("wire"):
+            layer = COPPER_LAYERS.get(wire.get("layer") or "")
+            if layer is None:
+                name = f"layer {wire.get('layer')}"
+                unread[name] = unread.get(name, 0) + 1
+                continue
+            if wire.get("curve"):
+                unread["curved"] = unread.get("curved", 0) + 1
+                continue
+            strokes.append(Stroke(
+                layer,
+                _float(wire, "x1", where), _float(wire, "y1", where),
+                _float(wire, "x2", where), _float(wire, "y2", where),
+                _float(wire, "width", where),
+            ))
+        for hole in signal.findall("via"):
+            # `diameter` is optional here for the reason it is optional on a
+            # pad: the design rules decide it when the file does not, and the
+            # drill is always written.
+            size = hole.get("diameter")
+            across = float(size) if size else _float(hole, "drill", where)
+            vias.append(Via(_float(hole, "x", where),
+                            _float(hole, "y", where), across))
+    return tuple(strokes), tuple(vias), tuple(sorted(unread.items()))
 
 
 # --- schematics ---------------------------------------------------------------

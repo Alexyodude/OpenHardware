@@ -1087,9 +1087,23 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
     silk = tuple(eagle.Stroke(s.layer, s.x1_mm, -s.y1_mm, s.x2_mm, -s.y2_mm,
                               s.width_mm)
                  for s in board.silk)
+    # The routed copper crosses the same way, and its curves are flattened
+    # here rather than in the reader: solving an arc's centre from three
+    # points is `arc_points`, which the outline already needs.
+    traces = [eagle.Stroke(t.layer, t.x1_mm, -t.y1_mm, t.x2_mm, -t.y2_mm,
+                           t.width_mm)
+              for t in board.traces]
+    for curve in board.trace_arcs:
+        points = arc_points(curve)
+        for (ax, ay), (bx, by) in itertools.pairwise(points):
+            traces.append(eagle.Stroke(curve.layer, ax, -ay, bx, -by,
+                                       curve.width_mm))
+    vias = tuple(eagle.Via(v.x_mm, -v.y_mm, v.diameter_mm) for v in board.vias)
     return eagle.Board(name=path.stem, version="kicad_pcb",
                        elements=tuple(elements), outline=tuple(outline),
-                       silk=silk, silk_unread=board.silk_unread)
+                       silk=silk, silk_unread=board.silk_unread,
+                       traces=tuple(traces), vias=vias,
+                       traces_unread=board.traces_unread)
 
 
 def read_layout(path: pathlib.Path) -> eagle.Board:
@@ -1335,6 +1349,43 @@ COPPER = "#c8a253"
 #: photographs, and KiCad stores no colour for the layer either.
 SILKSCREEN = "#e9e9e4"
 
+#: How much brighter a board's own mask is where there is copper under it.
+#:
+#: **A trace is not exposed metal, it is the mask with something brighter
+#: behind it** -- soldermask is a translucent film, so light goes through it,
+#: reflects off whatever is underneath, and comes back through. Copper returns
+#: far more than bare laminate does, and the film has filtered the light both
+#: ways, so what changes is the LIGHTNESS and not the hue.
+#:
+#: **The first version of this blended the mask toward `COPPER` by 0.30 and
+#: that was wrong in a way the picture showed.** Copper's blue channel is 83
+#: and the Arduino Uno's navy mask's is 99, so blending pulled blue down while
+#: pushing red and green up: rgb(49,61,99) came out rgb(94,91,94), a NEUTRAL
+#: GREY, and the Uno rendered with silver tracery on a blue board. Scaling
+#: keeps the hue by construction, and the same navy becomes rgb(76,95,153) --
+#: a lighter navy, which is what an Arduino's routing actually looks like.
+#:
+#: The factor is a drawing quantity, not a measurement, and it is low on
+#: purpose: the routing has to read as relief in the mask rather than as bare
+#: metal, and none of these boards is unmasked.
+TRACE_LIFT = 1.55
+
+
+def mask_over_copper(mask: str) -> str:
+    """This board's own mask colour, over copper instead of over laminate.
+
+    **Per board rather than one value written down.** Given a colour, the
+    Arduino Uno's blue board would have got whatever a black XIAO needed; this
+    way each board's routing is its own mask, and the boards stay as different
+    from each other as their vendors made them.
+    """
+    def channel(at: int) -> int:
+        # Clamped, which on a pale mask would flatten the hue -- none of the
+        # six boards here is pale, and the brightest channel any of them has
+        # is the Uno's 99 of 255.
+        return min(255, round(int(mask[at:at + 2], 16) * TRACE_LIFT))
+    return "#" + "".join(f"{channel(at):02x}" for at in (1, 3, 5))
+
 #: How far above the board's own top face the copper is drawn. One ounce of
 #: copper is 35 um, which is what this is -- so it is a real thickness rather
 #: than a nudge to beat depth fighting, and it does both jobs. A component
@@ -1345,6 +1396,21 @@ COPPER_THICKNESS_MM = 0.035
 #: And the ink over it. Screen-printed epoxy is 10 to 20 um; 15 keeps it above
 #: the copper it is never printed on top of anyway.
 SILK_THICKNESS_MM = 0.015
+
+#: Where a routed trace is drawn, and it is BELOW the pads on purpose.
+#:
+#: Physically the mask over a trace stands a little proud of a bare pad -- 35
+#: um of copper plus the ink over it, against 35 um of copper with the ink
+#: opened away. Drawn that way a trace would occlude the edge of every pad it
+#: runs into, and a pad is the thing a reader is looking for. So the routing
+#: goes under, by 15 um, and the pads win every overlap.
+TRACE_PROUD_MM = 0.020
+
+#: How many sides a via is drawn with. A via on these boards is 0.3 to 0.6 mm
+#: across and there are 82 to 307 of them, so this is where a sensible number
+#: of sides pays for itself: eight is a fifth of a pixel of chord error at the
+#: zoom the page opens at, and 307 x 6 triangles rather than 307 x 10.
+VIA_SIDES = 8
 
 #: Pad shapes this draws, and what it draws them as. `custom` is not here:
 #: KiCad states it as a list of primitives rather than a size, and the 60 on
@@ -2005,7 +2071,7 @@ def merge(*meshes: Mesh) -> Mesh:
 
 
 def artwork(board: eagle.Board, ring: list[tuple[float, float]],
-            thickness: float, centre: tuple[float, float]
+            thickness: float, centre: tuple[float, float], mask: str
             ) -> tuple[list[Mesh], dict[str, int]]:
     """The copper and the ink the vendor drew, and a tally of what was left.
 
@@ -2074,14 +2140,49 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             continue
         (ink_back if stroke.layer.startswith("B.") else ink).append(cut)
 
-    return ([flat(front, thickness + COPPER_THICKNESS_MM, COPPER, centre, True),
+    #: The routing, and it is drawn in the board's OWN mask warmed toward the
+    #: metal rather than in bare copper: a trace is under the soldermask and a
+    #: pad is not, and drawing both gold is a picture of a board with no mask
+    #: on it. Clipped like everything else, because a trace may run to a
+    #: castellation on the edge.
+    track: list[list[tuple[float, float]]] = []
+    track_back: list[list[tuple[float, float]]] = []
+    for stroke in board.traces:
+        shape = stroke_outline(stroke)
+        if shape is None:
+            left["zero-length trace"] = left.get("zero-length trace", 0) + 1
+            continue
+        cut = inside(shape)
+        if len(cut) < 3:
+            continue
+        (track_back if stroke.layer.startswith("B.") else track).append(cut)
+
+    #: A via joins the two faces, so it is drawn on both. Tented -- covered by
+    #: mask -- which is why it takes the same colour as a trace and not the
+    #: copper of an exposed pad.
+    holes = []
+    for via in board.vias:
+        ellipse = [(via.x_mm + via.diameter_mm / 2 * math.cos(step),
+                    via.y_mm + via.diameter_mm / 2 * math.sin(step))
+                   for step in (2 * math.pi * i / VIA_SIDES
+                                for i in range(VIA_SIDES))]
+        cut = inside(ellipse)
+        if len(cut) >= 3:
+            holes.append(cut)
+
+    routed = mask_over_copper(mask)
+    return ([flat(track + holes, thickness + TRACE_PROUD_MM, routed, centre, True),
+             flat(front, thickness + COPPER_THICKNESS_MM, COPPER, centre, True),
              flat(ink, thickness + COPPER_THICKNESS_MM + SILK_THICKNESS_MM,
                   SILKSCREEN, centre, True),
+             flat(track_back + holes, -TRACE_PROUD_MM, routed, centre, False),
              flat(back, -COPPER_THICKNESS_MM, COPPER, centre, False),
              flat(ink_back, -COPPER_THICKNESS_MM - SILK_THICKNESS_MM,
                   SILKSCREEN, centre, False)],
             {"pads front": len(front), "pads back": len(back),
              "ink front": len(ink), "ink back": len(ink_back),
+             "track front": len(track), "track back": len(track_back),
+             "vias": len(holes),
              "clipped to the outline": int(can_clip), **left})
 
 
@@ -2139,12 +2240,18 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     pieces = [slab(ring, spec.thickness_mm, spec.colour, centre)]
     # **The copper and the ink, before any component stands on them**, so a
     # part's own body hides the pads under it exactly as solder does.
-    drawn_art, tally = artwork(board, ring, spec.thickness_mm, centre)
+    drawn_art, tally = artwork(board, ring, spec.thickness_mm, centre,
+                               spec.colour)
     pieces.extend(drawn_art)
     print("  artwork " + ", ".join(f"{k} {v}" for k, v in tally.items()))
     if board.silk_unread:
         print("  not ink " + ", ".join(f"{k} {v}" for k, v in board.silk_unread)
               + " -- text needs a font; the rest is a handful per board")
+    if board.traces_unread:
+        print("  not cu  "
+              + ", ".join(f"{k} {v}" for k, v in board.traces_unread)
+              + " -- inner layers are inside the laminate; a zone's fill is a "
+                "keyhole polygon, see kicad._routing_of")
     drawn: list[str] = []
     #: A box around each placed component, for the renderer's wire physics.
     #: **Measured here because it is measured here already** -- the same
