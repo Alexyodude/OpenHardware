@@ -402,6 +402,14 @@ class Placement:
     #: is a different fact and the only one that pins down which way a part
     #: faces -- see `compose_board_3d.silk_miss`, which is blind without it.
     body: tuple[float, float, float, float] | None = None
+    #: Where the footprint draws its PIN-1 MARKER, in the same local frame as
+    #: `body`, or `None` where it draws none.
+    #:
+    #: **`body` says where the part sits and this says which way round it
+    #: is.** A body outline is symmetric on most packages, so comparing one
+    #: against a placed model survives a half turn; the marker is the one
+    #: feature on the drawing that does not. See `_mark_of`.
+    mark: tuple[float, float] | None = None
 
     @property
     def name(self) -> str:
@@ -756,6 +764,35 @@ def _body_of(node: list) -> tuple[float, float, float, float] | None:
     return (min(xs), min(ys), max(xs), max(ys))
 
 
+def _mark_of(node: list) -> tuple[float, float] | None:
+    """The footprint's pin-1 marker from its `*.Fab` layer, or None.
+
+    **`*.Fab` and an `fp_circle`, which is where KiCad puts a pin-1 dot.**
+    `tools/model_from_datasheet.py` already reads exactly this shape off
+    Seeed's own footprints to decide which corner of a modelled QFN is pin 1,
+    and OH-100's test asserts that circle sits in pad 1's quadrant. This makes
+    the same reading available to every placement rather than to one part.
+
+    The assembly layer rather than the silkscreen, for the reason `_body_of`
+    gives at length: silkscreen goes wherever it is legible and `*.Fab` is the
+    drawing of the part itself. The centroid of every circle on it is
+    returned, and the caller decides whether it is off-centre enough to be a
+    marker at all -- see `compose_board_3d.MARK_OFFSET_FRACTION`.
+    """
+    marks: list[tuple[float, float]] = []
+    for circle in children(node, "fp_circle"):
+        layer = first(circle, "layer")
+        if not (layer and len(layer) > 1 and str(layer[1]).endswith(".Fab")):
+            continue
+        at = _floats(first(circle, "center") or [])
+        if len(at) >= 2:
+            marks.append((at[0], at[1]))
+    if not marks:
+        return None
+    return (sum(m[0] for m in marks) / len(marks),
+            sum(m[1] for m in marks) / len(marks))
+
+
 def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
     """Read one `.kicad_pcb`: the board outline and every placement on it.
 
@@ -820,6 +857,7 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
             back=bool(side and len(side) > 1 and str(side[1]).startswith("B.")),
             pads=tuple(_pads_of(node)),
             body=_body_of(node),
+            mark=_mark_of(node),
         )
         placements.append(placed)
         drawn, curved = _fp_graphics(node, layer, placed)

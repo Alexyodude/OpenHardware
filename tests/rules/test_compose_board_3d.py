@@ -2909,3 +2909,279 @@ def test_rounding_the_shell_did_not_move_the_part():
             f"{spec.name}'s shell is {drawn:.3f} mm wide and its vendor's "
             f"Description says {width}"
         )
+
+
+# --- a half turn, and the parts nothing could see one on (OH-106) ------------
+
+
+def test_a_curved_wire_on_the_silkscreen_is_read_as_a_pin_one_marker():
+    """Arduino's own `DIL28-3` draws the DIP notch as a wire with a `curve`,
+    and it is the only curved thing on that package's silkscreen. The chord's
+    midpoint is at x -18.542, which is the end pad 1 is at."""
+    board = eagle.read_board(_uno().layout)
+    element = board.element("ZU4")
+    assert element.mark is not None, "the notch is no longer read"
+    assert element.mark[0] == pytest.approx(-18.542, abs=0.001)
+    assert element.mark[1] == pytest.approx(0.0, abs=0.001)
+    # **And it is at the end their own pad 1 is at**, which is the two vendor
+    # statements agreeing. Compared on the BOARD, through `mark_of`: ZU4 is
+    # placed at 180 degrees, so the package-frame -18.542 lands at +x and
+    # comparing the raw coordinate against a board offset gets the answer
+    # exactly backwards. That is what the first version of this test did.
+    on_board = compose.mark_of(element)
+    assert on_board is not None, "the notch is 0.500 of the package off centre"
+    one = next(pad for pad in element.pads if pad.number == "1")
+    assert math.copysign(1, on_board[0] - element.x_mm) == math.copysign(
+        1, one.x_mm - element.x_mm), (
+        f"the vendor's notch lands at x {on_board[0]:.3f} and their own pad 1 "
+        f"at {one.x_mm:.3f}, on opposite sides of the element origin "
+        f"{element.x_mm:.3f} -- so one of the two readings is wrong"
+    )
+
+
+def test_a_circle_on_the_silkscreen_is_read_as_a_pin_one_marker():
+    """The other spelling, on the same board: Arduino's `MLF32` marks pin 1
+    with a `<circle>` at (-1.600, 1.600) rather than a notch."""
+    board = eagle.read_board(_uno().layout)
+    element = board.element("U3")
+    assert element.mark is not None, "the corner dot is no longer read"
+    assert compose.mark_of(element) is not None, (
+        "the dot is 0.453 of the package's own size off its centre, which is "
+        "well past MARK_OFFSET_FRACTION"
+    )
+
+
+def test_a_curved_outline_is_not_a_pin_one_marker():
+    """**Curvature alone does not mean pin 1**, and both counter-examples are
+    on the Arduino Uno. `PANASONIC_D` draws an electrolytic can as two arcs
+    whose centroid is the package origin to 0.000 mm, and `TS42` draws a
+    button as two concentric circles at 0.021 of its size. Read as markers
+    they would point at nothing in particular and refuse a correct turn."""
+    board = eagle.read_board(_uno().layout)
+    for name in ("PC1", "RESET"):
+        element = board.element(name)
+        assert element.mark is not None, f"{name} draws curved silkscreen"
+        assert compose.mark_of(element) is None, (
+            f"{name} ({element.package}) is a round OUTLINE and is now being "
+            f"read as a pin-1 marker"
+        )
+
+
+def test_kicad_reads_the_fab_circle_as_a_pin_one_marker():
+    """The same fact in the other CAD. Seeed mark pin 1 with an `fp_circle` on
+    `F.Fab`, which `tools/model_from_datasheet.py` already reads for the
+    RP2350's QFN -- this makes the same reading available to every placement
+    rather than to one part."""
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    if not spec.layout.is_file():
+        pytest.skip(f"no layout; run {spec.fetch_with}")
+    board = kicad.read_board(spec.layout)
+    marked = [p for p in board.placements if p.mark is not None]
+    assert marked, "no footprint on the RP2350 marks pin 1 any more"
+    qfn = next(p for p in board.placements if p.name.startswith("QFN60"))
+    assert qfn.mark is not None, "the QFN-60's pin-1 circle is no longer read"
+
+
+def test_a_pin_header_is_the_same_part_turned_round():
+    """**A half turn that moves nothing is not a claim that can be wrong.**
+    Every pin header on the Uno is symmetric about its own anchor, so its
+    `turn` is a free choice and no check needs to have an opinion. Measured
+    rather than assumed, because this is what keeps the count of unpinned
+    parts honest: 23 of the 43 packages placed come out at exactly zero."""
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    spec = _uno()
+    if not spec.layout.is_file():
+        pytest.skip(f"no layout; run {spec.fetch_with}")
+    board = compose.read_layout(spec.layout)
+    pads = [pad for name in spec.headers for pad in board.element(name).pads]
+    centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
+              (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
+    element = board.element("IOH")
+    component = next(c for c in compose.CORRESPONDENCE
+                     if c.package == element.package)
+    mesh, _box = compose.component_mesh(component, 0.05)
+    moved = compose.half_turn_moves(mesh, element, component.turn,
+                                    spec.thickness_mm, centre)
+    assert moved == 0.0, (
+        f"a 1x10 header now moves {moved:.4f} of its own mesh under a half "
+        f"turn, so its turn has become a claim that something has to check"
+    )
+    # **And therefore it is not counted as an unseen turn either.** Both
+    # halves matter: a symmetric part needs no check, and counting one as a
+    # gap would inflate the number this ticket exists to make honest -- 23 of
+    # the 43 packages placed are symmetric, so the count would nearly treble.
+    put = compose.place(mesh, element, component.turn, spec.thickness_mm, centre)
+    assert not compose.turn_unseen(element, mesh, put, component.turn,
+                                   spec.thickness_mm, centre)
+
+
+def test_the_dip_is_turned_the_way_arduino_draw_their_own_notch():
+    """**The mutation this ticket was filed for.**
+
+    Turning `DIL28-3` from 90 to 270 survived the whole suite: `confirm`
+    compares spans and a half turn preserves one, `silk_miss` compares body
+    centres and a half turn preserves one of those too, and `contact_miss`
+    needs a pin field of plated metal that a DIP has not got.
+
+    What sees it is the notch. Arduino draw one at the end their pad 1 is at,
+    KiCad's model cuts one into the top of the body -- 1.5 x 0.8 mm of
+    `#050505` -- and at the stated turn the two land 1.542 mm apart against
+    25.15 for the nearest rival.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    spec = _uno()
+    if not spec.layout.is_file():
+        pytest.skip(f"no layout; run {spec.fetch_with}")
+    board = compose.read_layout(spec.layout)
+    pads = [pad for name in spec.headers for pad in board.element(name).pads]
+    centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
+              (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
+    element = board.element("ZU4")
+    component = next(c for c in compose.CORRESPONDENCE
+                     if c.package == "DIL28-3")
+    mesh, _box = compose.component_mesh(component, 0.05)
+    misses = compose.mark_turns(element, mesh, spec.thickness_mm, centre)
+    assert misses is not None, "the DIP's notch no longer decides its turn"
+    best = min((miss, turn) for turn, miss in misses.items())
+    assert best[1] == component.turn, (
+        f"CORRESPONDENCE turns the DIP-28 {component.turn:.0f} and its own "
+        f"notch lands nearest Arduino's at {best[1]:.0f} -- "
+        f"{ {t: round(m, 3) for t, m in misses.items()} }"
+    )
+    rival = min(miss for turn, miss in misses.items() if turn != component.turn)
+    assert rival - misses[component.turn] > compose.TURN_MARGIN_MM, (
+        f"the stated turn beats its nearest rival by only "
+        f"{rival - misses[component.turn]:.3f} mm, which is inside "
+        f"TURN_MARGIN_MM and therefore a coin toss"
+    )
+
+
+def test_every_part_whose_vendor_marks_pin_one_agrees_with_its_model():
+    """**The general rule, on every composed board.** Where the vendor draws a
+    pin-1 marker and the model has a feature a half turn moves, the stated
+    turn must put the two together and beat every other turn by the margin.
+
+    Six packages qualify across the six boards -- DIL28-3, MLF32, USON8,
+    QFN60, QFN48 and LGA14 -- and the smallest margin among them is 1.6 mm
+    against a `TURN_MARGIN_MM` of 0.3.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    by_package = {c.package: c for c in compose.CORRESPONDENCE}
+    cache: dict = {}
+    checked = 0
+    for spec in compose.COMPOSITIONS:
+        if not spec.layout.is_file():
+            continue
+        board = compose.read_layout(spec.layout)
+        pads = [pad for name in spec.headers for pad in board.element(name).pads]
+        centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
+                  (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
+        for element in board.elements:
+            component = by_package.get(element.package)
+            if component is None or compose.mark_of(element) is None:
+                continue
+            if component.slug not in cache:
+                cache[component.slug] = compose.component_mesh(component, 0.05)
+            mesh, _box = cache[component.slug]
+            misses = compose.mark_turns(element, mesh, spec.thickness_mm, centre)
+            if misses is None or component.turn not in misses:
+                continue
+            checked += 1
+            rival = min((miss for turn, miss in misses.items()
+                         if turn != component.turn), default=None)
+            assert rival is None or rival - misses[component.turn] > compose.TURN_MARGIN_MM, (
+                f"{spec.board}: {element.name} ({element.package}) is turned "
+                f"{component.turn:.0f} and the vendor's own pin-1 marker does "
+                f"not clearly agree -- {{t: round(m, 3) for t, m in misses.items()}}"
+            )
+    if not checked:
+        pytest.skip("no layouts on disk; run tools/get_board_sources.py")
+    assert checked >= 6, (
+        f"only {checked} placement(s) had both a vendor marker and a model "
+        f"feature to compare it with; six did when this was written, so a "
+        f"reader has been lost"
+    )
+
+
+def test_the_turn_nothing_can_see_is_counted_rather_than_passed_over():
+    """**A gap that is measured is one somebody can close.**
+
+    Eighteen placements move under a half turn with nothing here able to tell,
+    and the composer prints them per board rather than staying quiet -- the
+    same reason `Board.silk_unread` is counted. An 0402 LED is the clearest
+    case: it is not symmetric, its two pads are, its model carries no plated
+    pin field and Seeed draw it no marker.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "ESP32-C3")
+    if not spec.layout.is_file():
+        pytest.skip(f"no layout; run {spec.fetch_with}")
+    board = compose.read_layout(spec.layout)
+    pads = [pad for name in spec.headers for pad in board.element(name).pads]
+    centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
+              (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
+    element = board.element("CHG0")
+    component = next(c for c in compose.CORRESPONDENCE
+                     if c.package == element.package)
+    mesh, _box = compose.component_mesh(component, 0.05)
+    put = compose.place(mesh, element, component.turn, spec.thickness_mm, centre)
+    assert compose.turn_unseen(element, mesh, put, component.turn,
+                               spec.thickness_mm, centre), (
+        "the 0402 LED's turn is now checkable by something, which is good -- "
+        "update the count in the composer's own note and here"
+    )
+    assert compose.half_turn_moves(mesh, element, component.turn,
+                                   spec.thickness_mm, centre) > 0.0, (
+        "the LED is now symmetric under a half turn, so it should not be "
+        "counted as an unseen turn at all"
+    )
+
+
+def test_the_barrel_jack_is_not_counted_because_silk_already_refuses_it():
+    """The count asks whether an existing check would REJECT the half turn,
+    not whether some number changes. Arduino's barrel jack moves its silk miss
+    from 0.013 to 7.496 mm -- five times `SILK_TOLERANCE_MM` -- so it is seen,
+    and counting it would overstate the gap by the one part this whole family
+    of checks was originally written for."""
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    spec = _uno()
+    if not spec.layout.is_file():
+        pytest.skip(f"no layout; run {spec.fetch_with}")
+    board = compose.read_layout(spec.layout)
+    pads = [pad for name in spec.headers for pad in board.element(name).pads]
+    centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
+              (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
+    element = board.element("X1")
+    component = next(c for c in compose.CORRESPONDENCE
+                     if c.package == element.package)
+    mesh, _box = compose.component_mesh(component, 0.05)
+    put = compose.place(mesh, element, component.turn, spec.thickness_mm, centre)
+    assert not compose.turn_unseen(element, mesh, put, component.turn,
+                                   spec.thickness_mm, centre)
+    other = compose.place(mesh, element, (component.turn + 180.0) % 360.0,
+                          spec.thickness_mm, centre)
+    assert compose.silk_miss(element, other, centre) > compose.SILK_TOLERANCE_MM
+
+
+def test_compose_refuses_a_part_turned_away_from_the_pin_one_marker(monkeypatch):
+    """The guard for the marker, not just the measurement.
+
+    The same lesson `test_compose_refuses_a_board_whose_part_faces_the_wrong_way`
+    records, one check later: a mutation that stops the `raise` firing survives
+    every test that calls `mark_turns` itself and asserts on what it returns.
+    This drives the real thing with the DIP-28 half a turn out, which is the
+    mutation OH-106 was filed for.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    _brd()
+    wrong = tuple(
+        dataclasses.replace(component, turn=270.0)
+        if component.package == "DIL28-3" else component
+        for component in compose.CORRESPONDENCE
+    )
+    monkeypatch.setattr(compose, "CORRESPONDENCE", wrong)
+    with pytest.raises(SystemExit, match="ZU4") as refused:
+        compose.compose(_uno(), compose.DEFLECTION, check=True)
+    assert "pin-1 marker" in str(refused.value), (
+        f"the DIP was refused, but not by the marker: {refused.value}"
+    )

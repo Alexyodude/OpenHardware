@@ -193,6 +193,15 @@ class Element:
     #: be 180 degrees out and measure perfectly -- which is exactly what
     #: happened to the Arduino Uno's, by 7.50 mm, until this was read.
     silk: tuple[float, float, float, float] | None = None
+    #: Where the vendor draws the package's PIN-1 MARKER, in the package's own
+    #: local millimetres, or `None` where they draw none.
+    #:
+    #: **A body says where a part sits and this says which way round it is**,
+    #: which `silk` cannot: a body outline is symmetric on most packages, so
+    #: comparing it against a placed model survives a half turn. The marker is
+    #: the one thing on the drawing that does not. See
+    #: `compose_board_3d.mark_miss`, and `_silk_mark` for what counts as one.
+    mark: tuple[float, float] | None = None
 
     def pads_of(self, kind: str) -> tuple[Pad, ...]:
         return tuple(pad for pad in self.pads if pad.kind == kind)
@@ -457,6 +466,40 @@ def _silk_extent(package: ET.Element) -> tuple[float, float, float, float] | Non
     return (min(xs), min(ys), max(xs), max(ys))
 
 
+def _silk_mark(package: ET.Element) -> tuple[float, float] | None:
+    """The package's pin-1 marker, in its own local millimetres, or None.
+
+    **What counts as one is CURVATURE**, and that is a reading of the drawing
+    rather than a guess at intent. A package body is drawn with straight
+    wires; the two things a library curves on the silkscreen are the DIP
+    notch, written as a wire with a `curve` attribute, and the corner dot,
+    written as a `<circle>`. Arduino's own `DIL28-3` draws the first at
+    x -18.542, the end its pad 1 is at, and its `MLF32` draws the second at
+    (-1.600, 1.600), the corner its pad 1 is at.
+
+    The centroid of every such feature is returned, and the caller decides
+    whether it is off-centre enough to mean anything -- because curvature
+    alone does not: `PANASONIC_D` draws its can as two arcs whose centroid is
+    the package origin to the micron, and `TS42` draws a button as two
+    concentric circles. Both are outlines that happen to be round, and both
+    correctly say nothing about which way round the part goes. See
+    `compose_board_3d.MARK_OFFSET_FRACTION` for the number that separates them
+    and the margin it was measured to have.
+    """
+    marks: list[tuple[float, float]] = []
+    for wire in package.findall("wire"):
+        if wire.get("layer") in SILK_LAYERS and wire.get("curve") is not None:
+            marks.append(((float(wire.get("x1")) + float(wire.get("x2"))) / 2,
+                          (float(wire.get("y1")) + float(wire.get("y2"))) / 2))
+    for circle in package.findall("circle"):
+        if circle.get("layer") in SILK_LAYERS:
+            marks.append((float(circle.get("x")), float(circle.get("y"))))
+    if not marks:
+        return None
+    return (sum(m[0] for m in marks) / len(marks),
+            sum(m[1] for m in marks) / len(marks))
+
+
 def _open(path: pathlib.Path, wanted: str) -> ET.Element:
     """The `<eagle>` root of `path`, or an error saying what the file is instead.
 
@@ -528,6 +571,7 @@ def read_board(path: pathlib.Path) -> Board:
                 degrees,
                 mirrored,
                 _silk_extent(package),
+                _silk_mark(package),
             )
         )
     if not elements:

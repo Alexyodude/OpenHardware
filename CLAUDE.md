@@ -136,6 +136,22 @@ while the board under them drew `BOARD_MASK`. One missing fact answered two
 ways in one mesh is the defect; `is_mask_film` identifies the film by shape and
 never by colour, which is what makes repainting it safe.
 
+**Which way round a part goes is checked against the vendor's own pin-1
+marker** (OH-106), because a half turn is what every other check survives: a
+span does, and so does a body centre. So `mark_turns` reads the marker out of
+the footprint -- EAGLE's curved silkscreen wire, KiCad's `fp_circle` on
+`F.Fab` -- and asks where the model's own asymmetric feature lands, which it
+finds by seeing which of its vertices a half turn moves. Neither side is a
+table written here, and the feature is never named: on the Arduino's DIP-28 it
+is the notch in the top of the body, and the rule would hold as well for a
+bevel. Six packages qualify and the closest wins by 1.6 mm.
+
+**A half turn that moves nothing is not a claim that can be wrong**, and 23 of
+the 43 packages placed are in that position -- every pin header, every 0201.
+The ones that do move and that nothing can check are counted and printed per
+board, the same way unread silkscreen is: eighteen placements across eight
+packages, and the RP2350 has none.
+
 **And the underside is lit** (OH-111), because that is where a XIAO's pin
 names, its battery pads and the words "Seeed Studio" are printed. One light
 from below, not casting, its share added to `LIGHT_TOTAL` rather than taken

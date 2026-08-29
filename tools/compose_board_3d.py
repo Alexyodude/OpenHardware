@@ -1067,6 +1067,9 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
         # returned `None` for all nine composed XIAO boards and said nothing.
         body = placed.body
         silk = None if body is None else (body[0], -body[3], body[2], -body[1])
+        # The pin-1 marker crosses the same way and for the same reason: it is
+        # a coordinate in the footprint's own frame, so only its y is negated.
+        mark = None if placed.mark is None else (placed.mark[0], -placed.mark[1])
 
         elements.append(eagle.Element(
             name=placed.reference or placed.library,
@@ -1078,6 +1081,7 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
             rotation=placed.rotation_deg,
             mirrored=placed.back,
             silk=silk,
+            mark=mark,
         ))
 
     # The ink, y negated like every coordinate above it and for the same
@@ -1929,6 +1933,157 @@ def silk_miss(element: eagle.Element, put: Mesh,
     )
 
 
+#: How far off the centre of its own body a curved silkscreen feature has to
+#: sit before it is read as a pin-1 marker, as a fraction of that body's size.
+#:
+#: **Curvature alone does not mean pin 1**, and the two cases that prove it are
+#: on the same board. Arduino's `DIL28-3` draws the DIP notch at 0.500 of the
+#: package's size from its centre and their `MLF32` draws the corner dot at
+#: 0.453; their `PANASONIC_D` draws a can as two arcs whose centroid is the
+#: origin to 0.000, and their `TS42` draws a button as two concentric circles
+#: at 0.021. The KiCad footprints agree: five of them carry an `fp_circle` on
+#: `F.Fab`, at 0.441 to 0.641. So the gap this number sits in is 0.021 to
+#: 0.441, and 0.15 is loose against both sides of it.
+MARK_OFFSET_FRACTION = 0.15
+
+#: The cell a placed vertex is counted in when a mesh is compared with itself
+#: half-turned. A tenth of a millimetre is finer than any feature this is
+#: looking for and coarser than the tessellation, so two placements of the
+#: same vertex land in the same cell.
+TURN_CELL_MM = 0.10
+
+
+def _turn_cells(put: Mesh) -> set[tuple[int, int, int]]:
+    """A placed mesh's vertices, rounded onto a grid, as a set."""
+    return {(round(positions[at] / TURN_CELL_MM),
+             round(positions[at + 1] / TURN_CELL_MM),
+             round(positions[at + 2] / TURN_CELL_MM))
+            for _colour, (positions, _n, _i) in put.groups.items()
+            for at in range(0, len(positions), 3)}
+
+
+def half_turn_moves(mesh: Mesh, element: eagle.Element, turn: float,
+                    thickness: float, centre: tuple[float, float]) -> float:
+    """What fraction of a placed mesh a half turn moves.
+
+    **Zero means the turn cannot matter**, and that is the common case rather
+    than a failure: a 0201 capacitor IS the same part turned round, and so is
+    every pin header on the Arduino Uno. Measured on all six composed boards,
+    23 of the 43 packages placed come out at exactly 0.0000 -- so for those a
+    half turn is not a claim that can be wrong, and nothing needs to check it.
+
+    `place` is called rather than a separate model of what a turn does, so
+    this measures the half turn the composer would actually apply.
+    """
+    here = _turn_cells(place(mesh, element, turn, thickness, centre))
+    half = _turn_cells(place(mesh, element, (turn + 180.0) % 360.0,
+                             thickness, centre))
+    span = max(len(here), len(half))
+    return len(here ^ half) / span if span else 0.0
+
+
+def mark_of(element: eagle.Element) -> tuple[float, float] | None:
+    """Where the vendor's own pin-1 marker lands on the board, or None.
+
+    `None` where they draw none, where there is no body to measure it
+    against, or where what they drew is not off-centre enough to be a marker
+    at all -- see `MARK_OFFSET_FRACTION` for that last one and the two
+    packages on the Arduino Uno that make it necessary.
+
+    Transformed by `eagle.place` with the element's own spelling, which is
+    what `silk_miss` does to the body: the marker and the body come out of the
+    same file and have to be moved the same way as the pads.
+    """
+    if element.mark is None or element.silk is None:
+        return None
+    x0, y0, x1, y1 = element.silk
+    size = max(x1 - x0, y1 - y0)
+    if size <= 0:
+        return None
+    middle = ((x0 + x1) / 2, (y0 + y1) / 2)
+    if math.dist(element.mark, middle) / size < MARK_OFFSET_FRACTION:
+        return None
+    spelling = ("MR" if element.mirrored else "R") + str(int(element.rotation))
+    return eagle.place(element.mark[0], element.mark[1],
+                       (element.x_mm, element.y_mm), spelling)
+
+
+def mark_turns(element: eagle.Element, mesh: Mesh, thickness: float,
+               centre: tuple[float, float]) -> dict[float, float] | None:
+    """How far the model's own asymmetric feature lands from the vendor's
+    pin-1 marker, at each of the four turns. `None` when nothing to compare.
+
+    **This is what sees a half turn on a part the contacts cannot speak
+    for.** `contact_miss` needs a pin field of plated metal and decides the
+    USB-C; a DIP, a QFN and a land-grid array have no such field, and until
+    this existed `silk_miss` was all they had -- and `silk_miss` compares
+    CENTRES, which a half turn preserves. Twenty placements moved under a half
+    turn with nothing able to see it.
+
+    **Neither side of the comparison is a table written here.** The marker is
+    the vendor's, read off their own footprint; the feature is the model's
+    own, found by asking which of its vertices a half turn moves and where
+    they are. The feature is not named and does not need to be: on the DIP it
+    is the notch in the top of the body, 1.5 x 0.8 mm of `#050505` at the end
+    Arduino draw their notch at, and the rule would hold just as well if it
+    were a bevel or a dimple.
+
+    All four turns at once, because they cost four placements rather than
+    eight: the answer for a turn needs the placement half a turn away, which
+    is another of the four.
+
+    Measured on the six packages this can run on, the stated turn against its
+    nearest rival: DIL28-3 1.542 against 25.15, MLF32 0.158 against 3.27,
+    USON8 0.142 against 1.79, QFN60 0.014 against 6.34, QFN48 0.015 against
+    4.87, LGA14 0.231 against 1.95. Every one wins by more than a millimetre
+    and a half, against a `TURN_MARGIN_MM` of 0.3.
+    """
+    want = mark_of(element)
+    if want is None:
+        return None
+    placed = {turn: _turn_cells(place(mesh, element, turn, thickness, centre))
+              for turn in (0.0, 90.0, 180.0, 270.0)}
+    misses: dict[float, float] = {}
+    for turn, here in placed.items():
+        moved = here - placed[(turn + 180.0) % 360.0]
+        if not moved:
+            continue
+        count = len(moved)
+        # Out of the scene's frame and back into the board's -- x unchanged
+        # and z the board's y negated, the same undoing `silk_miss` does.
+        at = (sum(c[0] for c in moved) / count * TURN_CELL_MM + centre[0],
+              -sum(c[2] for c in moved) / count * TURN_CELL_MM + centre[1])
+        misses[turn] = math.dist(at, want)
+    return misses or None
+
+
+def turn_unseen(element: eagle.Element, mesh: Mesh, put: Mesh, turn: float,
+                thickness: float, centre: tuple[float, float]) -> bool:
+    """Whether a half turn would move this part and no check here would tell.
+
+    **The four questions in the order they cost, cheapest first.** Do the
+    contacts decide it; does a half turn move the mesh at all; does the vendor
+    draw a pin-1 marker; and would `silk_miss` actually REFUSE the half turn.
+
+    That last one is asked against `SILK_TOLERANCE_MM` rather than against
+    some new tolerance of its own, because the question is not "does the
+    number change" but "would the existing check reject it" -- and the
+    tolerance is that check. The Arduino Uno's barrel jack moves its silk miss
+    from 0.013 to 7.496 mm and its USB-B from 0.400 to 8.860, so both are
+    caught by a check that was already there and neither belongs in this
+    count.
+    """
+    if contact_miss(element, put, centre) is not None:
+        return False
+    if half_turn_moves(mesh, element, turn, thickness, centre) == 0.0:
+        return False
+    if mark_turns(element, mesh, thickness, centre) is not None:
+        return False
+    other = place(mesh, element, (turn + 180.0) % 360.0, thickness, centre)
+    half = silk_miss(element, other, centre)
+    return half is None or half <= SILK_TOLERANCE_MM
+
+
 def anchor_of(element: eagle.Element, legged: bool) -> tuple[float, float]:
     """Where a mesh's own anchor has to land: the centre of the pads it IS.
 
@@ -2263,6 +2418,12 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     #: Carried separately all the way to the caption, because "KiCad's
     #: published meshes" stops being the whole truth the moment one is not.
     modelled: list[str] = []
+    #: Placements whose turn IS observable -- a half turn moves the mesh -- and
+    #: which nothing here can check, because the model has no plated pin field
+    #: and the vendor drew no pin-1 marker. Counted and printed for the reason
+    #: `Board.silk_unread` is: a gap that is measured is a gap somebody can
+    #: close, and a gap that is silent is one nobody knows about. OH-106.
+    unpinned: list[str] = []
     pad_top = spec.thickness_mm
     cache: dict[str, tuple[Mesh, object]] = {}
     for element in board.elements:
@@ -2308,6 +2469,33 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                     f"their pads are; believe those rather than a picture."
                 )
 
+        # **And the turn again, for the parts the contacts cannot speak
+        # for.** `contact_miss` needs a pin field of plated metal, so it
+        # decides the USB-C and returns `None` for everything else on these
+        # six boards. This reads the vendor's own pin-1 marker instead and
+        # asks where the model's own asymmetric feature lands -- see
+        # `mark_turns`, which is where the argument and the margins are.
+        pointing = mark_turns(element, mesh, spec.thickness_mm, centre)
+        if pointing is not None and component.turn in pointing:
+            rivals = [(miss, turn) for turn, miss in pointing.items()
+                      if turn != component.turn]
+            best = min(rivals, default=None)
+            if best is not None and pointing[component.turn] > best[0] - TURN_MARGIN_MM:
+                raise SystemExit(
+                    f"{spec.board}: {element.name} ({element.package}) is "
+                    f"turned {component.turn:.0f}, which puts the model's own "
+                    f"asymmetric feature {pointing[component.turn]:.3f} mm "
+                    f"from the pin-1 marker the vendor drew -- and "
+                    f"{best[1]:.0f} puts it {best[0]:.3f}. Both of those come "
+                    f"out of vendor files and neither out of CORRESPONDENCE, "
+                    f"so believe them rather than a picture."
+                )
+        elif turn_unseen(element, mesh, put, component.turn,
+                         spec.thickness_mm, centre):
+            # Counted and printed rather than passed over: this part's turn IS
+            # observable and nothing here can check it.
+            unpinned.append(f"{element.name} ({element.package})")
+
         miss = silk_miss(element, put, centre)
         if miss is not None and miss > SILK_TOLERANCE_MM:
             raise SystemExit(
@@ -2341,6 +2529,9 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     if modelled:
         print(f"  modelled {len(modelled)}: {', '.join(modelled)} "
               f"-- built here, not fetched; see tools/model_from_datasheet.py")
+    if unpinned:
+        print(f"  turn    {len(unpinned)} placement(s) a half turn would move "
+              f"and nothing here can see: {', '.join(unpinned)}")
     print(f"  markers ride at {pad_top:.3f} mm, the top of the header pins; "
           f"the PCB's own top face is at {spec.thickness_mm:.3f}")
     for package, why in sorted(ABSENT.items()):
