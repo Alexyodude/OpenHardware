@@ -27,3 +27,15 @@ CLAIM NARROWED AGAIN 2026-08-26, off core/cortexm0/exec.cc and core/cortexm0/cpu
 CLAIM NARROWED 2026-08-26. This used to claim tests/cortexm0/* whole, which swept in tests/cortexm0/test_conformance.py -- the Armv6-M corpus run, which belongs to OH-17 and has nothing to do with Armv7E-M. Narrowed to the two paths this ticket's own work actually needs.
 
 Done when a Cortex-M4 image executes in lockstep against an oracle that is not QEMU alone, when webui/boards/nrf52840.py lands beside it, and when catalogue.FIRMWARE_VERIFIED names a test that watched a real image run on an nRF52840.
+
+**Note 2026-08-30:** the claim on `webui/boards/nrf52840.py` is DELIBERATE and
+the file does not exist, so `tools/check_ticket_claims.py` calls it a likely
+typo. It is not. The ticket's own "DO NOT WRITE webui/boards/nrf52840.py
+FIRST" paragraph is the reason: the board description belongs with the
+interpreter, and holding the name is what stops it being written before the
+oracle exists. Recorded so the checker's wording does not get somebody to
+"fix" the claim.
+
+Still blocked on the same thing, re-checked 2026-08-30: there is no Armv7E-M
+execution oracle here, and QEMU alone would be a single source even if it were
+installed.

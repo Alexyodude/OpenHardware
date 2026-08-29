@@ -45,3 +45,16 @@ TWELVE PREDICATES TESTED AGAINST THE 33, NONE SEPARATING: |q| odd, |r| odd, |d| 
 WHAT I WOULD TRY NEXT, in order. (a) The prefix finding in (5) is suspicious: if the 33 are all 3-4 byte encodings, check whether the discriminator is the instruction LENGTH or a prefix's effect on timing rather than an arithmetic property at all -- that would move this from a microcode question to a decode one. (b) The CF sub-rule in (2) says the byte equals AH for small products; find what it becomes for large ones by solving per-case for the byte set consistent with all three flags and looking for structure against |q| and |r|. (c) Ken Shirriff's published 8086 microcode disassembly is the only source that would settle either half without guessing, and this repository has not consulted it.
 
 Gate unchanged: 1,446 passed, 17 skipped; all eight checkers exit 0.
+
+**Note 2026-08-30:** the claim on `tests/i8086/test_muldiv.py` is DELIBERATE
+and the file does not exist yet, so `tools/check_ticket_claims.py` prints
+"claims 'tests/i8086/test_muldiv.py', which matches no file, while its other
+claims do match. Likely a typo." It is not a typo -- it is a forward claim on
+the file this ticket would write, and the 2026-08-23 note above already says
+so. Recorded here because the checker's wording invites somebody to "fix" it
+by pointing the claim at a file that exists, which would release the name this
+ticket is holding.
+
+Still open, still on the same blocker: the undefined flags and IDIV's quotient
+sign are intermediates of the 8088's CORX/CORD microcode, and two documented
+attempts have failed to recover them. Nothing in the tree has changed that.
