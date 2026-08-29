@@ -403,3 +403,132 @@ def test_a_board_with_no_supply_model_says_null_rather_than_guessing():
         description=_Silent(), abi=None, machine=None,
     )
     assert getattr(runtime.description, "SUPPLY", None) is None
+
+
+# --- a pad the timer took, at the register level (OH-71) ---------------------
+
+
+class _Registers:
+    """A data space that answers `read_data` and nothing else.
+
+    **`pin_states` needs exactly one call**, which is what its own `Cpu`
+    protocol says, so a dict behind that call reaches states a compiled sketch
+    cannot easily be made to produce -- specifically `COM` bits set while the
+    direction register still says input. Driving a real core there would mean
+    a sketch that enables a compare output without calling `pinMode`, which
+    `analogWrite` never does.
+    """
+
+    def __init__(self, values: dict[int, int]):
+        self._values = values
+
+    def read_data(self, address: int) -> int:
+        return self._values.get(address, 0)
+
+
+def _all_outputs() -> dict[int, int]:
+    """Every pad an output and nothing driven high, so the baseline is `low`."""
+    return {atmega328p.DDRB: 0xFF, atmega328p.DDRC: 0xFF, atmega328p.DDRD: 0xFF}
+
+
+def test_a_timer_pad_is_unknown_only_when_its_own_com_bits_are_set():
+    """One channel enabled leaves the other five pads alone.
+
+    A `TIMER_PINS` row pointing at the wrong register or the wrong COM pair
+    would show up here. **Pin 11 is the assertion that matters**: it is the
+    OTHER channel of the SAME register as pin 3, so a mask that read the whole
+    of `TCCR2A` rather than one channel's two bits would take it too, and a
+    test that only looked at other timers would not notice.
+    """
+    quiet = atmega328p.pin_states(_Registers(_all_outputs()))
+    assert quiet["3"] == "low" and quiet["11"] == "low", (
+        "with no COM bits set every tilde pad is its port's"
+    )
+
+    taken = _all_outputs()
+    taken[atmega328p.TCCR2A] = atmega328p.COM_B_MASK
+    states = atmega328p.pin_states(_Registers(taken))
+    assert states["3"] == "unknown", "OC2B has taken PD3"
+    assert states["11"] == "low", (
+        "OC2A shares TCCR2A with OC2B and was NOT enabled, so pin 11 is still "
+        "PORTB's -- a mask over the whole register would break this"
+    )
+    for label in ("5", "6", "9", "10"):
+        assert states[label] == "low", f"pad {label} is on another timer"
+
+
+def test_each_timer_pad_answers_to_its_own_register_and_no_other():
+    """Every one of the six, one at a time. Three registers and two channels
+    each, so a row that named timer 1 where it meant timer 2 -- or channel A
+    where it meant B -- moves the wrong pad and only a sweep sees it."""
+    for label, (register, mask) in atmega328p.TIMER_PINS.items():
+        values = _all_outputs()
+        values[register] = mask
+        states = atmega328p.pin_states(_Registers(values))
+        assert states[label] == "unknown", (
+            f"enabling {mask:#04x} in {register:#04x} did not take pad {label}"
+        )
+        others = [other for other in atmega328p.TIMER_PINS if other != label]
+        assert all(states[other] == "low" for other in others), (
+            f"enabling pad {label}'s compare output also took "
+            f"{[o for o in others if states[o] != 'low']}"
+        )
+
+
+def test_a_compare_output_does_not_reach_a_pad_the_direction_register_calls_an_input():
+    """**The datasheet is explicit and the order of the checks encodes it.**
+
+    "The Data Direction Register bit for the OCnx pin must be set as output
+    before the OCnx value is visible on the pin." So COM bits set with DDR
+    clear is a pad that is still an input, and answering `unknown` about it
+    would be this function's own confident wrong answer -- the very class
+    OH-71 was filed about, reintroduced by its own fix.
+    """
+    states = atmega328p.pin_states(
+        _Registers({atmega328p.TCCR2A: atmega328p.COM_B_MASK}))
+    assert states["3"] == "input", (
+        "DDRD bit 3 is clear, so the compare output does not reach the pad and "
+        "the honest answer is that nobody is driving it"
+    )
+
+
+def test_every_timer_pad_is_one_the_header_knows_and_they_are_the_six_tilde_pins():
+    """The table cannot name a pad the board does not have, and it is exactly
+    the six an Uno's silkscreen marks with a tilde -- 3, 5, 6, 9, 10 and 11,
+    from the vendor's own `digital_pin_to_timer_PGM`."""
+    assert set(atmega328p.TIMER_PINS) == {"3", "5", "6", "9", "10", "11"}
+    for label in atmega328p.TIMER_PINS:
+        assert label in atmega328p.HEADER, f"{label} is not a header pin"
+    assert not set(atmega328p.TIMER_PINS) & set(atmega328p.USART_PINS), (
+        "a pad cannot be taken by both peripherals in this model"
+    )
+
+
+def test_the_timer_control_registers_are_the_addresses_the_vendor_header_gives():
+    """**Restated here rather than derived, and that is the point.**
+
+    `test_each_timer_pad_answers_to_its_own_register_and_no_other` writes to
+    whatever address `TIMER_PINS` names and then reads it back, so it agrees
+    with itself however wrong the table is -- a right-hand side imported from
+    the thing under test, which is the defect this repository has been caught
+    by before. A mutation moving `TCCR1A` to 0xA0 survived it.
+
+    So the addresses are asserted against `iom328p.h` directly:
+
+        #define TCCR0A _SFR_IO8(0x24)     line 221  -> 0x24 + 0x20 = 0x44
+        #define TCCR1A _SFR_MEM8(0x80)    line 516  -> 0x80
+        #define TCCR2A _SFR_MEM8(0xB0)    line 625  -> 0xB0
+
+    **`_SFR_IO8` adds 0x20 and `_SFR_MEM8` does not**, which is the same trap
+    `TIFR0` records beside its own definition -- and it is why timer 0's
+    register is not simply the number in its macro.
+    """
+    assert atmega328p.TCCR0A == 0x44, "_SFR_IO8(0x24) is 0x44 in the data space"
+    assert atmega328p.TCCR1A == 0x80, "_SFR_MEM8(0x80) is 0x80 unchanged"
+    assert atmega328p.TCCR2A == 0xB0, "_SFR_MEM8(0xB0) is 0xB0 unchanged"
+    assert len({atmega328p.TCCR0A, atmega328p.TCCR1A, atmega328p.TCCR2A}) == 3
+    # And the two masks are two bits each and do not overlap: COMnx1:COMnx0 is
+    # one channel's pair, and the two channels share the byte.
+    assert bin(atmega328p.COM_A_MASK).count("1") == 2
+    assert bin(atmega328p.COM_B_MASK).count("1") == 2
+    assert not atmega328p.COM_A_MASK & atmega328p.COM_B_MASK

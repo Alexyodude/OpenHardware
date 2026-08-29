@@ -206,6 +206,31 @@ TCCR0B_IO, TCCR0B = 0x25, 0x45
 TCNT0_IO, TCNT0 = 0x26, 0x46
 TIMSK0 = 0x6E
 
+#: The other two timers' control register A, for `TIMER_PINS` below. Neither
+#: timer is MODELLED -- nothing here counts -- and these are read only to find
+#: out whether a compare output has taken a pad away from its port.
+#:
+#: `#define TCCR1A _SFR_MEM8(0x80)` at `iom328p.h:516` and
+#: `#define TCCR2A _SFR_MEM8(0xB0)` at 625. **Both are `_SFR_MEM8`, so the
+#: number in the header is already the data-space address** -- unlike
+#: `TCCR0A`, which is `_SFR_IO8(0x24)` and therefore 0x44. That is the same
+#: 0x20 trap `TIFR0` records above, in the other direction.
+TCCR1A = 0x80
+TCCR2A = 0xB0
+
+#: The two `COMnx1:COMnx0` bits of one compare output, as a mask.
+#:
+#: **Zero means the pin is the port's and anything else means it is the
+#: timer's**, which is the whole of the test: the datasheet's table gives
+#: `00` as "normal port operation, OCnx disconnected" and every other value
+#: connects the compare output.
+#:
+#: The same two pairs of bit numbers in all three timers -- `COM0B0 4`,
+#: `COM0B1 5`, `COM0A0 6`, `COM0A1 7` at `iom328p.h:224-227`, repeated exactly
+#: at 519-522 for timer 1 and 628-631 for timer 2.
+COM_B_MASK = (1 << 4) | (1 << 5)
+COM_A_MASK = (1 << 6) | (1 << 7)
+
 #: `#define TOV0 0` at `iom328p.h:142` and `#define TOIE0 0` at 439. The same
 #: number in both registers, which is what lets the core carry one `bit`.
 TOV0 = TOIE0 = 0
@@ -433,6 +458,36 @@ SUPPLY: dict[str, object] = {
 #: Bit numbers from `iom328p.h:751-752`.
 USART_PINS: dict[str, int] = {"0": RXEN0, "1": TXEN0}
 
+#: label -> the control register and COM mask of the compare output wired to
+#: that pad. The six pins an Uno's silkscreen marks with a tilde.
+#:
+#: **The same argument `USART_PINS` makes, for a second peripheral.** A timer
+#: that has taken a pad drives it from a compare unit this model does not
+#: count, so `PORTx` says nothing about the level -- and reading `PORTx`
+#: anyway answers `low` about a pin carrying a square wave. Measured
+#: 2026-08-26: `analogWrite(3, 128)` leaves `DDRD` 0b00001000, `PORTD`
+#: 0b00000000 and `TCCR2A` 0b00100001, `COM2B1` set.
+#:
+#: **`unknown` is the answer and a duty cycle is not.** `core/avr` models no
+#: PWM, and this repository's four states already have the word for "this
+#: model cannot say". Reporting a waveform would need a peripheral nobody has
+#: asked for; reporting `low` is the confident wrong answer this ranks below a
+#: loud one. OH-71.
+#:
+#: **Which pad belongs to which output is the vendor's own table**, not a
+#: recollection: `digital_pin_to_timer_PGM` in
+#: `framework-arduino-avr/variants/standard/pins_arduino.h:196-232` gives
+#: TIMER2B, TIMER0B, TIMER0A, TIMER1A, TIMER1B and TIMER2A for 3, 5, 6, 9, 10
+#: and 11, and nothing for the other fourteen.
+TIMER_PINS: dict[str, tuple[int, int]] = {
+    "3": (TCCR2A, COM_B_MASK),    # OC2B, PD3
+    "5": (TCCR0A, COM_B_MASK),    # OC0B, PD5
+    "6": (TCCR0A, COM_A_MASK),    # OC0A, PD6
+    "9": (TCCR1A, COM_A_MASK),    # OC1A, PB1
+    "10": (TCCR1A, COM_B_MASK),   # OC1B, PB2
+    "11": (TCCR2A, COM_A_MASK),   # OC2A, PB3
+}
+
 
 
 class Cpu(typing.Protocol):
@@ -518,14 +573,19 @@ def pin_states(cpu: Cpu) -> dict[str, str]:
     so the direction register alone would answer confidently and wrongly about
     the two pins a `Serial` sketch is using.
 
-    **A pad a timer has taken is not**, and that is OH-71 rather than an
-    oversight. `analogWrite(3, 128)` sets `DDRD` bit 3, leaves `PORTD` bit 3
-    clear, and hands the pad to timer 2's compare output -- so this answers
-    `low` about a pin carrying a square wave. The fix wants the `COM` bits of
-    three timers and a pin-to-timer table, and it would move pins 9, 10 and 11
-    as well, so it is its own change.
-    `test_a_pwm_pad_reports_the_port_bit_and_not_the_waveform` pins the
-    behaviour so that closing OH-71 fails a test rather than passing quietly.
+    **And a pad a TIMER has taken is `unknown` too** (OH-71), which is the
+    same argument for a second peripheral: `analogWrite(3, 128)` sets `DDRD`
+    bit 3, leaves `PORTD` bit 3 clear and hands the pad to timer 2's compare
+    output, so reading `PORTD` answers `low` about a pin carrying a square
+    wave. See `TIMER_PINS` for the six pads and the vendor table they come
+    from.
+
+    **The direction register is asked FIRST, and that is not just ordering.**
+    A compare output only reaches the pin when the DDR bit says output -- the
+    datasheet is explicit that "the Data Direction Register bit for the OCnx
+    pin must be set as output before the OCnx value is visible on the pin" --
+    so a pad with `COM` bits set and DDR clear really is an input, and saying
+    `unknown` about it would be this function's own confident wrong answer.
     """
     control = cpu.read_data(UCSR0B)
     states: dict[str, str] = {}
@@ -538,8 +598,12 @@ def pin_states(cpu: Cpu) -> dict[str, str]:
         direction, output = PORTS[port]
         if not cpu.read_data(direction) & mask:
             states[label] = "input"
-        else:
-            states[label] = "high" if cpu.read_data(output) & mask else "low"
+            continue
+        timer = TIMER_PINS.get(label)
+        if timer is not None and cpu.read_data(timer[0]) & timer[1]:
+            states[label] = "unknown"
+            continue
+        states[label] = "high" if cpu.read_data(output) & mask else "low"
     return states
 
 def baud_rate(cpu: Cpu) -> int:

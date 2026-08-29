@@ -580,28 +580,49 @@ def test_the_input_registers_of_the_new_ports_are_not_modelled_either(pins_sketc
         assert session.cpu.read_data(atmega328p.PINC) == 0, "and so does PINC"
 
 
-def test_a_pwm_pad_reports_the_port_bit_and_not_the_waveform(pwm_sketch):
-    """**OH-71's limitation, pinned rather than fixed, and this test is meant
-    to fail one day.**
+def test_a_pwm_pad_reports_unknown_rather_than_the_level_port_holds(pwm_sketch):
+    """**OH-71, and this test used to assert the opposite on purpose.**
+
+    It was `test_a_pwm_pad_reports_the_port_bit_and_not_the_waveform`, and it
+    pinned the defect so that fixing it would fail a test rather than pass
+    quietly. It failed, which was the notification, and this is what it became.
 
     `analogWrite(3, 128)` sets `DDRD` bit 3, leaves `PORTD` bit 3 clear, and
     sets `COM2B1` in `TCCR2A` -- the timer's compare output now drives the pad
-    and `PORTD` has nothing to do with it. `pin_states` answers `low` about a
-    pin carrying a square wave, which is the confident-wrong-answer class this
-    repository ranks below a loud one.
+    and `PORTD` has nothing to do with it. Reading `PORTD` anyway answered
+    `low` about a pin carrying a square wave, which is the confident-wrong
+    class this repository ranks below a loud one.
 
-    It was split out of OH-70 rather than folded in because the fix wants the
-    `COM` bits of three timers and a pin-to-timer table, and it would move pins
-    9, 10 and 11, which a ticket about PORTC and PORTD does not otherwise
-    touch. `unknown` is the answer OH-71 will give.
+    **`unknown` and not a duty cycle.** `core/avr` models no PWM; the four
+    states already have the word for what this model cannot say.
 
-    `7` is asserted beside it so that this pins a *per-pad* defect: the honest
-    answer is still available on the same port and the same byte.
+    `7` is asserted beside it so that this stays a *per-pad* fact: the honest
+    answer is still available on the same port and the same byte, so a
+    `TIMER_PINS` entry pointing at the wrong register would show up here as
+    both pads going quiet rather than as one.
     """
     image, _ = pwm_sketch
     state = levels(image)
     assert state["7"] == "high", "PD7 is driven by PORTD and answers"
-    assert state["3"] == "low", (
-        "PD3 reports the PORT bit. When OH-71 lands this is 'unknown' and this "
-        "test fails, which is the notification"
+    assert state["3"] == "unknown", (
+        "PD3 is driven by timer 2's compare output and this model does not "
+        "count it, so the level PORTD holds is not what the pin is doing"
     )
+
+
+def test_only_the_pad_the_timer_took_goes_quiet(pwm_sketch):
+    """**The other five tilde pads still answer**, and that is what separates
+    "read the COM bits" from "give up on every pin a timer could ever own".
+
+    `analogWrite(3, 128)` touches timer 2's B channel and nothing else, so 5,
+    6, 9, 10 and 11 are still their ports'. Their `COM` bits are clear and
+    `pinMode` was never called on them, so the honest answer for each is
+    `input` -- not `unknown`, and not a level.
+    """
+    image, _ = pwm_sketch
+    state = levels(image)
+    for label in ("5", "6", "9", "10", "11"):
+        assert state[label] == "input", (
+            f"pad {label} answered {state[label]!r}. Only pin 3's compare "
+            f"output was enabled, so every other tilde pad is still its port's"
+        )
