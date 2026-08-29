@@ -1,10 +1,15 @@
 ---
 id: OH-102
 title: Both published USB-C receptacles are longer than the one Seeed actually fit
-status: open
+status: done
 priority: P3
 created: '2026-08-29'
-touches: []
+touches:
+- tools/compose_board_3d.py
+- tools/model_from_datasheet.py
+- tools/blender/usb_c_receptacle.py
+- tests/rules/test_compose_board_3d.py
+- CLAUDE.md
 ---
 
 CLAIMS NOTHING; the same reason OH-97, OH-98 and OH-99 claim nothing.
@@ -56,3 +61,5 @@ better than either published model rather than a step down from them.
 The composed XIAOs draw a 7.35 mm receptacle; the worst gold vertex outside
 the PCB goes to 0.000 on all five boards, as it already is on three; and
 `CONTACT_OVERHANG_MM` drops from 0.25 to whatever the exact part needs.
+
+**Note 2026-08-30:** DONE. Seeed state the whole envelope in the footprint's own Description property -- `SMD USB TYPE C-W/P;12+4P-7.35*8.94*3.25mm` on the 16P land and `SMD USB Type-c;12P+4-8.9*7.3*3.2mm` on the four-tab one -- so the HEIGHT is the vendor's too and nothing had to be cited for it. Both agree with the F.Fab rectangle they drew, to 0.020 and 0.092 mm. Only the 8.34 x 2.56 mm opening is not theirs and it is the USB Type-C specification's. Both land patterns are modelled now; BODY_ALLOWANCE_MM is gone and CONTACT_OVERHANG_MM is 0.0. silk_miss 0.500/1.332/1.495 -> 0.350/0.275/0.275, the turn wins by 3.6x to 33x where it won by 2x to 5x.
