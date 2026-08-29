@@ -732,3 +732,73 @@ def test_the_unos_artwork_is_not_uniformly_scaled_and_the_file_says_so():
         f"the board file does not record the measured {scale_x:.4f} px/mm"
     )
     assert f"{scale_y:.4f} px/mm" in landed["assumption"]
+
+
+def test_the_unos_traced_pads_agree_under_one_scale_too_which_is_what_the_page_uses():
+    """**The measurement that settles OH-96, and it settles it as "neither".**
+
+    That ticket measured, in the browser, that five of the Uno's pads sit
+    1.21 to 3.84 mm from the nearest pin the vendor's model puts there and
+    eleven more are out by 0.7 -- and asked which of the two sources is wrong.
+
+    Neither is. The test above fits ONE SCALE PER AXIS and gets a worst of
+    0.008 mm, which is the honest fit but not the one the page performs:
+    `webui/static/board3d.js` calls `group.scale.setScalar(...)`, a single
+    isotropic scale for both axes, taken from `scaleFromPads`. So the question
+    that matters is whether the two sources still agree under THAT
+    simplification, given the artwork's 0.41% anisotropy.
+
+    They do, by a factor of nine: worst 0.072 mm, median 0.032, against the
+    0.65 mm that is the smallest disagreement the browser reported. Whatever
+    produces those, it is not the traced pad map and it is not the vendor's
+    board file -- so the disagreement is introduced downstream, where the model
+    group is aligned to the pad field's BOUNDING BOX rather than fitted to the
+    pads themselves.
+
+    Recorded here rather than left in a ticket because it is the fact that
+    stops the pad map being "corrected" into agreement with a placement bug.
+    """
+    pairs = _uno_pairs()
+    xs = [v.x_mm for _, v in pairs]
+    ys = [v.y_mm for _, v in pairs]
+    px = [landed["x"] for landed, _ in pairs]
+    py = [landed["y"] for landed, _ in pairs]
+    count = len(pairs)
+    mean_x, mean_y = sum(xs) / count, sum(ys) / count
+    mean_px, mean_py = sum(px) / count, sum(py) / count
+
+    # One magnitude for both axes, solved together -- which is what makes it
+    # ONE number rather than the two the test above fits. **No reflection
+    # here**: `read_geometry` has already flipped the board's y into the
+    # artwork's downward sense, which `test_the_eagle_import_flips_y_exactly_once`
+    # is the authority on, so both per-axis scales come out positive (5.6616
+    # and 5.6382). Flipping again was the first version of this and it
+    # reported a 68.9 mm residual, which is the board's own width.
+    across = (sum((x - mean_x) * (p - mean_px) for x, p in zip(xs, px))
+              + sum((y - mean_y) * (p - mean_py) for y, p in zip(ys, py)))
+    along = (sum((x - mean_x) ** 2 for x in xs)
+             + sum((y - mean_y) ** 2 for y in ys))
+    scale = across / along
+    offset_x = mean_px - scale * mean_x
+    offset_y = mean_py - scale * mean_y
+
+    residuals = [
+        max(abs((scale * v.x_mm + offset_x) - landed["x"]),
+            abs((scale * v.y_mm + offset_y) - landed["y"])) / abs(scale)
+        for landed, v in pairs
+    ]
+    worst = max(residuals)
+    assert worst < 0.2, (
+        f"under the single isotropic scale the page applies, the worst pad is "
+        f"{worst:.3f} mm from where Arduino's own board file puts it. It was "
+        f"0.076 mm when OH-96 was settled, so either the trace or the vendor "
+        f"reading has changed -- and OH-96's conclusion that neither source is "
+        f"wrong no longer holds"
+    )
+    # And it really is much smaller than what the browser reported, which is
+    # the whole argument: 0.65 mm was the SMALLEST disagreement there.
+    assert worst < 0.65 / 4, (
+        f"the single-scale residual is {worst:.3f} mm, which is no longer "
+        f"comfortably inside the 0.65 mm the browser reported -- so the two "
+        f"can no longer be told apart and OH-96's attribution is in doubt"
+    )

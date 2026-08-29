@@ -102,13 +102,25 @@ const PAD_LIFT = 0.01;
 //:      11 pads   0.65 - 0.77 mm    8-13, 5V, 3V3, RESET, IOREF, NC
 //:       5 pads   1.21 - 3.84 mm    GND, 6, SCL, AREF, SDA
 //:
-//: The middle group is two whole headers offset together; the last five are
-//: pads the traced map puts somewhere the model has no pin at all. Widening
-//: this constant to reach them would take it past 1.27 -- half the pitch --
-//: where a pad starts claiming its NEIGHBOUR's pin and lights the wrong one
-//: convincingly. So it stays here, those five keep an invisible collider, and
-//: the disagreement is OH-96 rather than a tolerance quietly stretched to
-//: cover it.
+//: The middle group is two whole headers offset together. Widening this
+//: constant to reach the last five would take it past 1.27 -- half the pitch
+//: -- where a pad starts claiming its NEIGHBOUR's pin and lights the wrong
+//: one convincingly. So it stays here and those five keep an invisible
+//: collider.
+//:
+//: **AND IT IS NOT THE TRACED PAD MAP THAT IS WRONG**, which is what OH-96
+//: settled and what this note said until it did. That map agrees with
+//: Arduino's own EAGLE board file to a worst of 0.008 mm per axis -- and,
+//: more to the point, to a worst of 0.072 mm under the SINGLE ISOTROPIC SCALE
+//: this file applies at `group.scale.setScalar`, which is nine times smaller
+//: than the smallest disagreement listed above.
+//: `test_the_unos_traced_pads_agree_under_one_scale_too_which_is_what_the_page_uses`
+//: holds both numbers.
+//:
+//: So the millimetres above are introduced HERE, between two sources that
+//: agree: `scaleFromPads` takes its scale from the pad field's bounding box
+//: on one axis, and `placeModel` aligns the model by that box's centre --
+//: two-point estimates where the pads offer thirty-two. That is OH-115.
 const PIN_REACH_MM = 1.1;
 
 //: How brightly a real pin glows in its state's colour.
