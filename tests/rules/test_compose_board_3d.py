@@ -34,6 +34,7 @@ import dataclasses
 import json
 import math
 import pathlib
+import struct
 import sys
 
 import pytest
@@ -396,6 +397,112 @@ def test_each_board_explains_the_parts_it_leaves_off():
                 f"it. A reader sees a board with a part visibly gone and no "
                 f"reason, which is the state ABSENT exists to prevent."
             )
+
+
+
+def _glb_groups(path: pathlib.Path) -> dict[str, list[tuple[float, float, float]]]:
+    """Vertices per colour out of a shipped `.glb`, in the scene's own frame.
+
+    Reading the ARTEFACT rather than recomposing it, deliberately: what a
+    person looked at and called broken is the file the page loads, and a test
+    that rebuilt the mesh in memory would be checking a different object. The
+    cost is that it skips in a checkout where nothing has been composed, which
+    is the same trade every shipped-mesh test here makes.
+    """
+    raw = path.read_bytes()
+    json_length = struct.unpack("<I", raw[12:16])[0]
+    doc = json.loads(raw[20:20 + json_length])
+    binary = raw[20 + json_length + 8:]
+    out: dict[str, list[tuple[float, float, float]]] = {}
+    for mesh in doc["meshes"]:
+        for primitive in mesh["primitives"]:
+            colour = doc["materials"][primitive["material"]]["name"]
+            access = doc["accessors"][primitive["attributes"]["POSITION"]]
+            view = doc["bufferViews"][access["bufferView"]]
+            at = view.get("byteOffset", 0) + access.get("byteOffset", 0)
+            flat = struct.unpack_from(f"<{access['count'] * 3}f", binary, at)
+            out.setdefault(colour, []).extend(
+                [(flat[i], flat[i + 1], flat[i + 2])
+                 for i in range(0, len(flat), 3)])
+    return out
+
+
+#: The gold and brass a KiCad model gives a plated contact. Every one of these
+#: was read off a shipped mesh rather than chosen: they are what the vendors'
+#: own STEP files style their pins and shells with.
+CONTACT_COLOURS = frozenset({"#b58136", "#ebbc51", "#edbe51", "#c6c4a0"})
+
+#: How far a soldered contact may lie outside the board's own outline.
+#:
+#: **It should be zero and on three of the five boards it is exactly zero.**
+#: The Arduino Uno, the ESP32-C3 and the ESP32-C6 have no gold whatever beyond
+#: their PCB. What buys the rest is that the RP2350's and nRF54L15's USB-C is
+#: a part nobody publishes -- Seeed name their own `USB-31C-F-16P-L7.35`,
+#: 7.35 mm long -- so the nearest published receptacle is a fraction large and
+#: its front contacts reach 0.099 and 0.206 mm past the edge.
+#:
+#: The number that made this a test is 0.42: that is how far the WRONG
+#: receptacle put them, and it is what a person looking at the board saw as a
+#: connector hanging off the end of it.
+CONTACT_OVERHANG_MM = 0.25
+
+
+def test_no_soldered_contact_hangs_off_the_board():
+    """A pin is soldered to a pad, and a pad is on the board.
+
+    **This is the check that would have caught OH-101 and did not exist.**
+    Seeed use two USB-C land patterns -- one with four through-hole shell tabs
+    and one with two -- and OH-93 gave both the same KiCad model. `place`
+    anchors a through-hole part on its legs against the pad extent, so
+    matching a four-tab model to a two-lock land slid the connector half a
+    millimetre forward and left its contact row 0.42 mm past the board edge,
+    in mid-air.
+
+    Every other check passed. `confirm` measures the model's footprint against
+    the pad span and the wrong part was 2.46 mm short of a 10.240 mm land,
+    inside a `SPAN_TOLERANCE_MM` of 3.0 that is deliberately generous because
+    a body and its pads are legitimately different sizes. So the tolerance is
+    not the thing to tighten -- this is.
+    """
+    models = REPO / "webui" / "static" / "models"
+    boards = [_slug for _slug in
+              (compose._slug(spec.board) for spec in compose.COMPOSITIONS)
+              if (models / f"{_slug}.glb").is_file()]
+    if not boards:
+        pytest.skip("no board composed; run tools/compose_board_3d.py")
+    worst: list[str] = []
+    for slug in boards:
+        groups = _glb_groups(models / f"{slug}.glb")
+        pcb = groups.get(compose.BOARD_MASK) or groups.get("#313d63")
+        assert pcb, f"{slug} has no PCB group to measure against"
+        left, right = min(p[0] for p in pcb), max(p[0] for p in pcb)
+        near, far = min(p[2] for p in pcb), max(p[2] for p in pcb)
+        for colour in CONTACT_COLOURS & set(groups):
+            for x, _y, z in groups[colour]:
+                out = max(left - x, x - right, near - z, z - far)
+                if out > CONTACT_OVERHANG_MM:
+                    worst.append(f"{slug}: {colour} at ({x:.3f}, {z:.3f}) is "
+                                 f"{out:.3f} mm outside the PCB")
+                    break
+    assert not worst, "\n".join(worst)
+
+
+def test_the_two_usb_c_land_patterns_are_given_different_receptacles():
+    """They differ in the count of holes, which is what picks the part.
+
+    Both are 16-pin USB-C, so the PIN count says nothing. `USB2.0-TYPE-C` has
+    four through-hole shell tabs and `USB2.0-TYPE-C_USB-31C-F-16P` has two
+    board locks, and KiCad's `Connector_USB` happens to hold exactly one
+    published receptacle of each kind. Giving them one entry is what OH-101
+    was.
+    """
+    usb = {c.package: c.model for c in compose.CORRESPONDENCE
+           if c.package.startswith("USB2.0-TYPE-C")}
+    assert len(usb) == 2, usb
+    assert len(set(usb.values())) == 2, (
+        f"both land patterns share {usb} -- they are two different parts, and "
+        f"the one with two board locks is not the one with four shell tabs"
+    )
 
 
 def test_a_composition_that_can_be_fetched_says_which_chip_fetches_it():

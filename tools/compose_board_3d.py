@@ -371,13 +371,24 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "USB2.0-TYPE-C_USB-31C-F-16P", "Connector_USB",
-        "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
-        "MEASURED: eighteen pads spanning 4.525 x 10.240 mm on the RP2350 and "
-        "4.850 x 10.240 on the nRF54L15. The vendor's own name says 16P and "
-        "so does the model's. They state a model for it -- "
-        "`USB-31C-F-16P-L7.35.stp` and `320011419_ST-USB-3316T.stp` -- but "
-        "those are their files under a path they do not publish, so the part "
-        "is identified from the name and confirmed against the pads.",
+        "USB_C_Receptacle_Amphenol_12401610E4-2A",
+        "MEASURED: eighteen pads -- sixteen surface-mount contacts and TWO "
+        "through-hole board locks -- spanning 4.525 x 10.240 mm on the RP2350 "
+        "and 4.850 x 10.240 on the nRF54L15. "
+        "**The count of through-holes is what picks the model, not the pin "
+        "count**, and both parts are 16P. OH-93 gave this the GCT USB4105 "
+        "that its 20-pad sibling `USB2.0-TYPE-C` uses, and the GCT has FOUR "
+        "shell tabs spread front to back where this land has two, both at the "
+        "back with the contacts 3.5 mm away. `place` anchors a through-hole "
+        "part on its legs against the pad extent, so two different features "
+        "were matched and the connector slid half a millimetre forward: its "
+        "contact row ended up 0.42 mm PAST the board edge, hanging in air. "
+        "Amphenol's 12401610E4-2A has two board locks -- 56 leg points "
+        "against the GCT's 502 -- and spans 9.200 x 10.500 mm against this "
+        "land's 10.240, where the GCT spans 7.780 and was 2.46 mm short "
+        "inside a 3.0 mm tolerance. Seeed name their own "
+        "`USB-31C-F-16P-L7.35.stp` and `320011419_ST-USB-3316T.stp`, which "
+        "they do not publish.",
     ),
     Component(
         "USON8-0.5-3X2MM", "Package_SON",
