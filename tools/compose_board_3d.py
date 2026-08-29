@@ -920,6 +920,18 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
                 height_mm=pad.height_mm,
                 net=None,
             ))
+        # **The body outline, which is what makes `silk_miss` able to run.**
+        # KiCad names its assembly layer, so this is `F.Fab` rather than the
+        # silkscreen EAGLE mixes it in with -- and it arrives in the local
+        # frame `silk_miss` expects, y negated like every pad above it and the
+        # mirror left to `eagle.place`, which applies it from the spelling.
+        #
+        # Until this existed the field defaulted to `None` on every KiCad
+        # element, so the one check that can see a part turned 180 degrees
+        # returned `None` for all nine composed XIAO boards and said nothing.
+        body = placed.body
+        silk = None if body is None else (body[0], -body[3], body[2], -body[1])
+
         elements.append(eagle.Element(
             name=placed.reference or placed.library,
             library=placed.library.split(":", 1)[0],
@@ -929,6 +941,7 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
             y_mm=-placed.y_mm,
             rotation=placed.rotation_deg,
             mirrored=placed.back,
+            silk=silk,
         ))
 
     return eagle.Board(name=path.stem, version="kicad_pcb",
@@ -1374,6 +1387,43 @@ def confirm(element: eagle.Element, box, turn: float,
 #: parts that were right, and tight against the 7.50 mm of the one that was not.
 SILK_TOLERANCE_MM = 1.5
 
+#: Packages where the published model is a DIFFERENT PART from the one the
+#: vendor fitted, and how far its body may therefore sit from theirs.
+#:
+#: **Not a tolerance, an admission.** `SILK_TOLERANCE_MM` says how much two
+#: drawings of the same part may disagree; this says the two are not the same
+#: part. Both USB-C receptacles are longer than the one Seeed actually fit --
+#: they name `USB-31C-F-16P-L7.35`, 7.35 mm, against 8.94 for KiCad's GCT and
+#: 9.20 for its Amphenol, and publish neither -- so a model anchored on the
+#: pads has its body centre further out than the vendor's own `F.Fab` puts it.
+#: Measured 2026-08-29, and each entry is the measurement plus a tenth:
+#:
+#:     XIAO-ESP32-C6-DIP    USB1   2.01 mm
+#:     XIAO-nRF54l15-DIP    USB1   1.87
+#:     XIAO-RP2350-DIP      USB1   1.45   (inside the tolerance anyway)
+#:     XIAO-ESP32-C3-DIP    USB0   1.19   (inside the tolerance anyway)
+#:
+#: **Keyed by package, so it excuses one part and not a board.** Every other
+#: part on those boards is still held to 1.5 mm, and the C3's worst is 0.000.
+#: OH-102 retires this by modelling the receptacle the vendor names.
+BODY_ALLOWANCE_MM: dict[str, float] = {
+    "USB2.0-TYPE-C": 2.2,
+    "USB2.0-TYPE-C_USB-31C-F-16P": 2.0,
+}
+
+
+def body_allowance(package: str) -> float:
+    """How far THIS package's body may sit from the vendor's own drawing.
+
+    One line, extracted for the reason `import_3d_model.colour_key` was: the
+    decision it makes is invisible to every test while it is an expression
+    inside `compose`, which needs OpenCASCADE and a whole board to run. A
+    mutation replacing the lookup with `max(BODY_ALLOWANCE_MM.values())` --
+    granting every part on every board the widest allowance any one part has
+    -- survived the entire suite until this existed.
+    """
+    return BODY_ALLOWANCE_MM.get(package, SILK_TOLERANCE_MM)
+
 
 def silk_miss(element: eagle.Element, put: Mesh,
               centre: tuple[float, float]) -> float | None:
@@ -1585,13 +1635,17 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         put = place(mesh, element, component.turn, spec.thickness_mm, centre)
         solids.append(box_around(element.name, put))
         miss = silk_miss(element, put, centre)
-        if miss is not None and miss > SILK_TOLERANCE_MM:
+        allowed = body_allowance(element.package)
+        if miss is not None and miss > allowed:
             raise SystemExit(
                 f"{spec.board}: {element.name} ({element.package}) lands "
-                f"{miss:.2f} mm from the body Arduino's own silkscreen draws "
-                f"there, which is more than {SILK_TOLERANCE_MM} mm. Almost "
-                f"always a `turn` that is 180 degrees out: the pins are "
-                f"symmetric so every other check passes. Try the other three."
+                f"{miss:.2f} mm from the body the vendor's own drawing puts "
+                f"there, which is more than {allowed} mm. Almost always a "
+                f"`turn` that is 180 degrees out: the pins are symmetric so "
+                f"every other check passes. Try the other three. If the model "
+                f"is simply a different SIZE from the part they fitted, that "
+                f"belongs in BODY_ALLOWANCE_MM with the measurement, not in "
+                f"a wider tolerance for every part on every board."
             )
         pieces.append(put)
         drawn.append(f"{element.name} ({component.model})")

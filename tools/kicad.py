@@ -301,6 +301,21 @@ class Placement:
     rotation_deg: float
     back: bool            #: on the underside, so its footprint is mirrored
     pads: tuple[Pad, ...]  #: in the FOOTPRINT's own space, before placement
+    #: `(min_x, min_y, max_x, max_y)` of the part's BODY, in the footprint's
+    #: own local millimetres and KiCad's own y-down frame, or `None` where it
+    #: draws none.
+    #:
+    #: **From `*.Fab`, which is KiCad's assembly layer and not its
+    #: silkscreen.** The distinction is the point: silkscreen is ink printed
+    #: on the board near a part, placed wherever it is legible, while `F.Fab`
+    #: is the drawing of where the part's own body sits. EAGLE has no such
+    #: separation, so `tools/eagle.py` reads layers 21 and 51 and gets the
+    #: body among other things; here the right layer exists and is named.
+    #:
+    #: The pads say where the PINS are and this says where the BODY is, which
+    #: is a different fact and the only one that pins down which way a part
+    #: faces -- see `compose_board_3d.silk_miss`, which is blind without it.
+    body: tuple[float, float, float, float] | None = None
 
     @property
     def name(self) -> str:
@@ -443,6 +458,41 @@ def _fp_graphics(node: list, layer: str, placed: Placement
     return segments, arcs
 
 
+def _body_of(node: list) -> tuple[float, float, float, float] | None:
+    """The footprint's body outline from its `*.Fab` layer, or None.
+
+    `F.Fab` on the front and `B.Fab` on the back, matched by suffix rather
+    than by name: a part is drawn on the assembly layer of the side it is
+    mounted on, and which side that is has already been decided by the
+    placement's own `layer`.
+
+    **Text is not read**, for the reason `eagle._silk_extent` gives: a
+    reference designator is placed wherever it is legible, as often beside a
+    part as on it, and including one would make a 1 mm capacitor measure five.
+    """
+    xs: list[float] = []
+    ys: list[float] = []
+    for tag in ("fp_line", "fp_rect"):
+        for graphic in children(node, tag):
+            got = _graphic(graphic, "start")
+            if got and got[0].endswith(".Fab"):
+                xs += [got[1][0], got[1][2]]
+                ys += [got[1][1], got[1][3]]
+    for graphic in children(node, "fp_poly"):
+        where = first(graphic, "layer")
+        if not (where and len(where) > 1 and str(where[1]).endswith(".Fab")):
+            continue
+        points = first(graphic, "pts")
+        for point in children(points or [], "xy"):
+            coords = _floats(point)
+            if len(coords) >= 2:
+                xs.append(coords[0])
+                ys.append(coords[1])
+    if not xs:
+        return None
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
 def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
     """Read one `.kicad_pcb`: the board outline and every placement on it.
 
@@ -504,6 +554,7 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
             rotation_deg=coords[2] if len(coords) > 2 else 0.0,
             back=bool(side and len(side) > 1 and str(side[1]).startswith("B.")),
             pads=tuple(_pads_of(node)),
+            body=_body_of(node),
         )
         placements.append(placed)
         drawn, curved = _fp_graphics(node, layer, placed)

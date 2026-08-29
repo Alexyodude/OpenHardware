@@ -487,6 +487,161 @@ def test_no_soldered_contact_hangs_off_the_board():
     assert not worst, "\n".join(worst)
 
 
+def test_a_kicad_element_carries_the_body_the_vendor_drew():
+    """Without this `silk_miss` returns None and checks nothing.
+
+    **It did exactly that on all nine composed XIAO boards until OH-103.**
+    `from_kicad` built an `eagle.Element` without a `silk`, the field defaults
+    to None, and the one check that can see a part turned 180 degrees answered
+    "nothing to compare" for every part on every one of them -- silently, and
+    for as long as they had existed.
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "ESP32-C3")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    described = [e for e in board.elements if e.silk is not None]
+    assert len(described) > 40, (
+        f"only {len(described)} of {len(board.elements)} elements carry a "
+        f"body outline; silk_miss cannot check the rest"
+    )
+
+
+def test_the_body_outline_is_negated_into_the_composers_frame(tmp_path):
+    """KiCad measures y down and the composer measures it up.
+
+    **The pads are negated and the body has to be too**, or `silk_miss`
+    compares a body reflected about the board's x axis against a mesh that is
+    not -- which reports a part as misplaced by twice its own offset from the
+    footprint origin, and reports a symmetric one as perfect. So it would fire
+    on the wrong parts and stay quiet on the right ones.
+
+    **The asymmetry is built here rather than found on a board**, because
+    almost nothing real has one: across the four composed XIAOs, 256 parts
+    carry a body and the most off-centre in y misses by 0.127 mm. A sign flip
+    would move that part a quarter of a millimetre, which is not a test. So
+    the fixture puts the body a millimetre off its own origin, where a flip
+    moves it two.
+    """
+    lopsided = tmp_path / "LOPSIDED.kicad_pcb"
+    lopsided.write_text("""(kicad_pcb
+\t(version 20241229)
+\t(gr_rect
+\t\t(start 0 0)
+\t\t(end 40 30)
+\t\t(stroke (width 0.05) (type solid))
+\t\t(layer "Edge.Cuts")
+\t)
+\t(footprint "Lib:LOPSIDED"
+\t\t(layer "F.Cu")
+\t\t(at 10 10)
+\t\t(property "Reference" "U1"
+\t\t\t(at 0 0 0)
+\t\t\t(layer "F.SilkS")
+\t\t)
+\t\t(fp_rect
+\t\t\t(start -2 0.5)
+\t\t\t(end 2 2.5)
+\t\t\t(stroke (width 0.05) (type solid))
+\t\t\t(layer "F.Fab")
+\t\t)
+\t\t(pad "1" smd rect
+\t\t\t(at 0 0)
+\t\t\t(size 1 1)
+\t\t\t(layers "F.Cu")
+\t\t)
+\t)
+)
+""", encoding="utf-8")
+
+    raw = kicad.read_board(lopsided)
+    #: KiCad's own frame, y down: the body sits BELOW the origin on the page.
+    assert raw.placements[0].body == (-2.0, 0.5, 2.0, 2.5)
+
+    element = compose.read_layout(lopsided).elements[0]
+    #: The composer's frame, y up: the same body is now ABOVE it, and the
+    #: bounds swap because negating y turns a minimum into a maximum.
+    assert element.silk == (-2.0, -2.5, 2.0, -0.5), (
+        "the body kept the file's own y, so it is reflected about the board's "
+        "x axis against pads that are not"
+    )
+
+
+def test_every_composed_part_lands_where_the_vendor_drew_its_body():
+    """The check the user's question needed, run rather than described.
+
+    `place` anchors a part on its pads and `confirm` measures it against them,
+    and **both are blind to 180 degrees** because a pin field is usually
+    symmetric about its own centre. The vendor's assembly drawing is not, so
+    it is the one thing that can say which way a part faces.
+
+    Composing is what runs it -- `compose` raises rather than returning -- so
+    this asserts the boards on disk were built with it live, by re-measuring
+    one board end to end. The ESP32-C3's worst part is 0.000 mm.
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "ESP32-C3")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    described = [e for e in board.elements if e.silk is not None]
+    #: `silk_miss` needs a placed mesh, which needs OpenCASCADE. What can be
+    #: checked without it is that the vendor's body and their pads agree about
+    #: where the part is -- the same comparison, one step earlier, and the one
+    #: that would catch a y-negation error in either.
+    worst = []
+    for element in described:
+        if not element.pads:
+            continue
+        x0, y0, x1, y1 = element.pad_extent()
+        sx0, sy0, sx1, sy1 = element.silk
+        drift = max(abs((sx0 + sx1) / 2), abs((sy0 + sy1) / 2))
+        if drift > 1.5:
+            worst.append(f"{element.name} ({element.package}): body centre is "
+                         f"{drift:.2f} mm from its own footprint origin")
+    assert not worst, "\n".join(worst)
+
+
+def test_the_body_allowance_excuses_a_package_and_not_a_board():
+    """A known wrong-size model must not quieten everything around it.
+
+    `BODY_ALLOWANCE_MM` exists because both published USB-C receptacles are
+    longer than the one Seeed fit. Keyed by package, every other part on those
+    boards is still held to `SILK_TOLERANCE_MM` -- and on the ESP32-C3 the
+    worst of them is 0.000 mm, so the headroom is three orders of magnitude.
+    """
+    assert set(compose.BODY_ALLOWANCE_MM) <= {
+        c.package for c in compose.CORRESPONDENCE}, (
+        "an allowance for a package nothing draws is dead weight"
+    )
+    for package, allowed in compose.BODY_ALLOWANCE_MM.items():
+        assert allowed > compose.SILK_TOLERANCE_MM, (
+            f"{package} is allowed {allowed} mm, which is inside the ordinary "
+            f"tolerance -- so the entry does nothing and should go"
+        )
+        assert allowed < 2 * compose.SILK_TOLERANCE_MM, (
+            f"{package} is allowed {allowed} mm. Past twice the tolerance the "
+            f"model is not a different size, it is a different part."
+        )
+    assert not set(compose.BODY_ALLOWANCE_MM) & set(compose.ABSENT), (
+        "a package cannot be both drawn with an allowance and not drawn"
+    )
+
+
+def test_the_allowance_is_granted_to_one_package_and_not_to_its_neighbours():
+    """The whole point of keying it by package, made checkable.
+
+    A mutation replacing the lookup with the widest value in the table --
+    granting every part on every board the USB-C's 2.2 mm -- survived the
+    entire suite, because no board has a part that misses by between 1.5 and
+    2.2 mm except the connectors themselves. So the property has to be
+    asserted directly rather than through a composed board.
+    """
+    assert compose.body_allowance("USB2.0-TYPE-C") == 2.2
+    assert compose.body_allowance("C0201") == compose.SILK_TOLERANCE_MM
+    assert compose.body_allowance("QFN60-0.4-7X7X0.9MM") == compose.SILK_TOLERANCE_MM
+    assert compose.body_allowance("nothing draws this") == compose.SILK_TOLERANCE_MM
+
+
 def test_the_two_usb_c_land_patterns_are_given_different_receptacles():
     """They differ in the count of holes, which is what picks the part.
 

@@ -541,6 +541,113 @@ def test_a_footprint_carrying_the_whole_outline_is_enough_of_one(tmp_path):
     assert got.extent_mm() == (100.0, 46.0, 105.0, 50.0)
 
 
+# --- the body, which is not the silkscreen -------------------------------------------
+
+BODIES = """(kicad_pcb
+\t(version 20241229)
+\t(gr_line
+\t\t(start 0 0)
+\t\t(end 40 0)
+\t\t(stroke (width 0.05) (type solid))
+\t\t(layer "Edge.Cuts")
+\t)
+\t(gr_rect
+\t\t(start 0 0)
+\t\t(end 40 30)
+\t\t(stroke (width 0.05) (type solid))
+\t\t(layer "Edge.Cuts")
+\t)
+\t(footprint "Lib:SOT-25"
+\t\t(layer "F.Cu")
+\t\t(at 10 10)
+\t\t(property "Reference" "U1"
+\t\t\t(at 0 0 0)
+\t\t\t(layer "F.SilkS")
+\t\t)
+\t\t(fp_rect
+\t\t\t(start -1.45 -0.95)
+\t\t\t(end 1.45 0.95)
+\t\t\t(stroke (width 0.05) (type solid))
+\t\t\t(layer "F.Fab")
+\t\t)
+\t\t(fp_line
+\t\t\t(start -8 -8)
+\t\t\t(end 8 8)
+\t\t\t(stroke (width 0.12) (type solid))
+\t\t\t(layer "F.SilkS")
+\t\t)
+\t\t(fp_text user "U1"
+\t\t\t(at 0 -9 0)
+\t\t\t(layer "F.Fab")
+\t\t)
+\t\t(pad "1" smd rect
+\t\t\t(at -1.1 -0.95)
+\t\t\t(size 0.6 0.7)
+\t\t\t(layers "F.Cu")
+\t\t)
+\t)
+\t(footprint "Lib:NOBODY"
+\t\t(layer "F.Cu")
+\t\t(at 20 20)
+\t\t(property "Reference" "TP1"
+\t\t\t(at 0 0 0)
+\t\t\t(layer "F.SilkS")
+\t\t)
+\t\t(pad "1" smd circle
+\t\t\t(at 0 0)
+\t\t\t(size 0.9 0.9)
+\t\t\t(layers "F.Cu")
+\t\t)
+\t)
+)
+"""
+
+
+@pytest.fixture
+def bodies(tmp_path):
+    path = tmp_path / "BODIES.kicad_pcb"
+    path.write_text(BODIES, encoding="utf-8")
+    return path
+
+
+def test_a_footprints_body_is_read_from_the_fab_layer(bodies):
+    """`F.Fab` is where KiCad draws the part; `F.SilkS` is ink near it.
+
+    EAGLE has no such separation, so `tools/eagle.py` takes layers 21 and 51
+    and gets the body among other things. Here the right layer is named, and
+    taking the silkscreen instead would measure this 2.9 x 1.9 mm part as
+    16 x 16 -- the diagonal stroke in the fixture is there to make that
+    failure loud rather than plausible.
+    """
+    got = read_board(bodies)
+    by_reference = {p.reference: p for p in got.placements}
+    assert by_reference["U1"].body == (-1.45, -0.95, 1.45, 0.95)
+
+
+def test_a_reference_designator_is_not_part_of_the_body(bodies):
+    """`fp_text` on F.Fab is a label, placed wherever it is legible.
+
+    The fixture puts one 9 mm above a part 0.95 mm tall, for the reason
+    `eagle._silk_extent` records: including it would make a 1 mm capacitor
+    measure five.
+    """
+    got = read_board(bodies)
+    by_reference = {p.reference: p for p in got.placements}
+    assert by_reference["U1"].body[1] == -0.95, "the label at y -9 is not the body"
+
+
+def test_a_footprint_that_draws_no_body_reports_none(bodies):
+    """A test point has pads and no assembly drawing.
+
+    `None` rather than an empty box, because `silk_miss` has to tell "the
+    vendor did not say" from "the vendor said zero" -- the first is nothing to
+    compare against and the second would fail every part that had one.
+    """
+    got = read_board(bodies)
+    by_reference = {p.reference: p for p in got.placements}
+    assert by_reference["TP1"].body is None
+
+
 def test_a_board_with_no_outline_is_refused(tmp_path):
     """A board drawn without `Edge.Cuts` would be a bounding box around its
     parts, which is not its shape and would be reported as though it were."""
