@@ -1,10 +1,10 @@
 ---
 id: OH-99
-title: The XIAO nRF54LM20A draws green because a STEP exporter's default was read as a colour
-status: open
+title: The XIAO nRF54LM20A draws green because a STEP exporter's default was read
+  as a colour
+status: done
 priority: P2
 created: '2026-08-29'
-touches: []
 ---
 
 CLAIMS NOTHING; OH-93's files, same reason as OH-97 and OH-98.
@@ -76,3 +76,55 @@ The nRF54LM20A draws the same board as the other twenty-two, or this ticket
 records why green is right after all; the rule that decides it is written
 where `BOARD_MASK` is; and a test covers a styled film over an unstyled board
 so the next four-solid export does not re-open it.
+
+## DONE, 2026-08-30, in 4c80cd2
+
+The board draws `BOARD_MASK` like its twenty-two siblings. `is_mask_film`
+identifies the film by shape and never by colour; `colour_key` gained the one
+case where a stated colour loses, and it is the only one.
+
+**Two things above are wrong and the measurement is recorded here rather than
+edited into them, because both were plausible and both cost a reader time.**
+
+  * **It is not four solids.** The STEP holds 794, and the mask is not one of
+    them: it is TWO LOOSE FACES belonging to no solid at all. The four names
+    `_PCB`, `_pad`, `_silkscreen`, `_soldermask` are real and are what the
+    claim came from, but they are XCAF labels rather than the topology.
+  * **The footprint claim was right and the thickness one was not.** The films
+    carry the PCB's x and y to 0.0000 mm, which is what "the same footprint to
+    the micron" says. They are NOT "thinner than it and straddling it": each is
+    a sheet at a single z, one 0.05 mm above the board's top face and one 0.05
+    below its bottom. A bounding-box straddle test would have found the board's
+    own rim as well, which is why both ends of a face are measured against the
+    SAME plane.
+
+**And the citation this ticket rests on is the wrong field.** `pcb_color` sits
+at `net_settings.classes[0]` in the `.kicad_pro`, beside `clearance`,
+`track_width`, `via_drill` and a `schematic_color`. It is a NET CLASS colour --
+how nets of that class are highlighted in the two editors, which is why it has
+a schematic half at all. Its alpha zero is KiCad's UNSET, so it states nothing,
+but it was never about the board and all nine Seeed project files carry the
+identical default. OH-97 introduced the citation and this ticket inherited it.
+
+**What replaces it is stronger.** Six of the seven Seeed board files carry a
+full `(stackup ...)` -- six copper layers with thicknesses, five FR4
+dielectrics with `epsilon_r` and loss tangent, `(copper_finish "None")`, and
+both mask layers with `(thickness 0.01)` and no `(color ...)`. That is where
+KiCad records a solder-mask colour. A vendor who completed that table and left
+that one field empty did not state a colour, which is a far better absence than
+an unopened file. The ESP32-C3 is the one board with no stackup at all, and it
+is the board OH-97 measured.
+
+So the invariant is narrowed rather than broken: *a face the vendor coloured is
+untouched unless it is the solder-mask film on the board this module has
+already identified by shape.* `#186b2a`, the RGB LED, is a real vendor colour
+on a real part and a test asserts it survives.
+
+Measured on the page against the running server, green excess over every
+non-background pixel: before mean 2.20 / p90 10.00; after mean 0.09 / p90 0.00;
+the MG24 sibling at the same camera mean 0.05 / p90 0.00. Frames are
+`.playwright-mcp/oh99-lm20a-before.png`, `-after.png` and `oh99-mg24-sibling.png`
+-- and the before frame shows the incoherence directly, a green top on a dark
+rim.
+
+Gate 1,850 -> 1,858 passed, 17 skipped. Seven mutations, all killed.
