@@ -2801,3 +2801,111 @@ def test_the_usb_b_paddle_is_not_made_of_metal():
         f"contacts on it are half a millimetre wide and are not drawn"
     )
     assert compose.leads_of(mesh), "the through-hole pins are still there"
+
+
+# --- the shape of a Type-C (OH-114) --------------------------------------------
+
+
+def test_the_usb_c_shell_is_an_obround_and_not_a_box():
+    """**A reader called this part blocky, and a square-cornered box is.**
+
+    A Type-C connector's cross-section is an obround -- a rectangle with a
+    SEMICIRCLE at each end, radius half its height. That pill is the most
+    recognisable thing about the connector: it is why the plug is reversible,
+    and it is why nobody mistakes one for anything else.
+
+    Measured as the ABSENCE of corners, which is what tells the two shapes
+    apart. On Seeed's 8.94 x 3.25 mm envelope the end radius is 1.625, so the
+    nearest the profile comes to a corner of its own bounding box is
+    1.625 x (root 2 - 1) = 0.673 mm. A box has a vertex sitting on it.
+    """
+    from tools import model_from_datasheet
+
+    checked = 0
+    for spec in model_from_datasheet.SOCKETS:
+        made = compose.MODELLED / f"{spec.name}.obj"
+        if not made.is_file():
+            continue
+        if not spec.pcb.is_file():
+            continue
+        checked += 1
+        plan = model_from_datasheet.socket_geometry(spec)
+        length, across, height = plan["stated"]
+        # The Description's first two numbers are in no fixed order -- the 16P
+        # land says `7.35*8.94*3.25` and the four-tab one `8.9*7.3*3.2` -- so
+        # the across-the-edge width is simply the larger of the two.
+        width = max(length, across)
+        mid = sum(plan["body"]["y"]) / 2
+
+        mesh, _extent = compose.read_obj(made)
+        steel = model_from_datasheet.SOCKET_COLOURS["shell"][0]
+        assert steel in mesh.groups, f"{spec.name} draws no shell"
+        positions = mesh.groups[steel][0]
+        # **The tube, without what lies on the board.** The shell feet and the
+        # board locks are the same metal and are pads rather than part of the
+        # section; every one of them is under 0.35 mm tall, and the first
+        # version of this test measured a foot's inner corner and called the
+        # connector square.
+        section = [(positions[at + 1], positions[at + 2])
+                   for at in range(0, len(positions), 3)
+                   if positions[at + 2] > 0.4]
+        assert section, f"{spec.name} has no shell above its own feet"
+        for corner in ((mid - width / 2, 0.0), (mid - width / 2, height),
+                       (mid + width / 2, 0.0), (mid + width / 2, height)):
+            nearest = min(math.dist(corner, point) for point in section)
+            assert nearest > 0.5, (
+                f"{spec.name} has metal {nearest:.3f} mm from the corner "
+                f"{corner} of the envelope its vendor states, so its ends are "
+                f"square and it is not a Type-C"
+            )
+    assert checked == 2, f"{checked} sockets are built, and there are two"
+
+
+def test_rounding_the_shell_did_not_move_the_part():
+    """The bounding box is what every other check measures.
+
+    `confirm` compares spans, `silk_miss` compares body centres and the
+    overhang test compares vertices against the outline. Rounding the ends
+    changes the CROSS-SECTION and must leave all three alone -- so the shell
+    still measures the envelope Seeed state, to the millimetre they state it.
+    """
+    from tools import model_from_datasheet
+
+    for spec in model_from_datasheet.SOCKETS:
+        made = compose.MODELLED / f"{spec.name}.obj"
+        if not (made.is_file() and spec.pcb.is_file()):
+            continue
+        plan = model_from_datasheet.socket_geometry(spec)
+        # **The Description's first two numbers are in no fixed order**: the
+        # 16P land says `7.35*8.94*3.25` and the four-tab one `8.9*7.3*3.2`,
+        # so the depth comes first on one and second on the other. That is
+        # why `socket_geometry` SORTS them before comparing with `F.Fab`, and
+        # the across-the-edge width is simply the larger of the two.
+        length, across, height = plan["stated"]
+        width = max(length, across)
+        mesh, extent = compose.read_obj(made)
+        assert extent.zmax == pytest.approx(height, abs=0.001), (
+            f"{spec.name} stands {extent.zmax:.3f} mm and its vendor says "
+            f"{height}"
+        )
+        steel = model_from_datasheet.SOCKET_COLOURS["shell"][0]
+        positions = mesh.groups[steel][0]
+        # Above the feet and the locks, which lie on the board rather than
+        # being part of the section -- the same 0.4 mm the test above uses.
+        across = [positions[at + 1] for at in range(0, len(positions), 3)
+                  if positions[at + 2] > 0.4]
+        drawn = max(across) - min(across)
+        # **Against the F.Fab rectangle, which is what the tube is built
+        # from**, and not against the Description: those two disagree by
+        # 0.020 and 0.092 mm on the two land patterns, which is a fact about
+        # the vendor's file that `socket_geometry` already checks and this
+        # test would otherwise re-measure as if it were an error here.
+        by0, by1 = plan["body"]["y"]
+        assert drawn == pytest.approx(by1 - by0, abs=0.001), (
+            f"{spec.name}'s shell is {drawn:.3f} mm wide and the F.Fab "
+            f"rectangle it is built from is {by1 - by0:.3f}"
+        )
+        assert drawn == pytest.approx(width, abs=0.1), (
+            f"{spec.name}'s shell is {drawn:.3f} mm wide and its vendor's "
+            f"Description says {width}"
+        )

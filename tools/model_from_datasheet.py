@@ -793,11 +793,6 @@ def build_socket(spec: ModelledSocket, check: bool) -> int:
         "back_face": plan["back_face"],
         "opening": {"width": cited["opening_width"],
                     "height": cited["opening_height"]},
-        #: The cavity runs the whole interior, so its depth is the body's less
-        #: the back plate rather than a number: what is behind a 2.56 mm slot
-        #: is never seen anyway.
-        "mouth_depth": abs(plan["back_face"] - plan["front_face"]) - (
-            (body["y"][1] - body["y"][0] - cited["opening_width"]) / 2),
         "tongue": {"width": cited["tongue_width"],
                    "thickness": cited["tongue_thickness"],
                    "setback": cited["tongue_setback"]},

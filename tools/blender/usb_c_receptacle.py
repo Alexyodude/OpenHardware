@@ -52,6 +52,7 @@
 # receptacle shell measures.
 
 import json
+import math
 import sys
 
 import bpy
@@ -93,6 +94,79 @@ def box(name, x0, x1, y0, y1, z0, z1, made) -> bpy.types.Object:
     return cube
 
 
+def obround(mid_y: float, mid_z: float, width: float, height: float,
+            steps: int) -> list:
+    """A stadium: a rectangle with a SEMICIRCLE at each end, counter-clockwise.
+
+    **This is the shape of a USB Type-C connector and the whole of OH-114.**
+    A reader called this part blocky, which a square-cornered box is: the
+    Type-C interface is an obround whose ends are half-circles of radius half
+    its height, and that pill is the single most recognisable thing about the
+    connector -- it is why the plug is reversible and why nobody mistakes one
+    for anything else.
+
+    Nothing new is cited for it. The radius IS half the height, so the shape
+    follows from dimensions this part already had: the shell's from Seeed's
+    own 8.94 x 3.25 mm envelope, the opening's from the standard's 8.34 x
+    2.56.
+    """
+    radius = height / 2
+    flat = max(0.0, width / 2 - radius)
+    points = []
+    for end, centre in ((0, mid_y + flat), (1, mid_y - flat)):
+        for step in range(steps + 1):
+            angle = (-math.pi / 2 + math.pi * end) + math.pi * step / steps
+            points.append((centre + radius * math.cos(angle),
+                           mid_z + radius * math.sin(angle)))
+    return points
+
+
+#: How many segments each half-circle is drawn with. A Type-C shell is 3.25 mm
+#: tall, so its end radius is 1.625 and eight segments put the chord within
+#: 12 um of the arc -- a third of the copper on the board it stands on.
+CAP_STEPS = 8
+
+
+def ring(name, outer, inner, x_at, made) -> None:
+    """The flat face between two closed profiles, at `x_at`. A frame."""
+    verts = ([(x_at, y, z) for y, z in outer]
+             + [(x_at, y, z) for y, z in inner])
+    count = len(outer)
+    faces = [[i, (i + 1) % count, count + (i + 1) % count, count + i]
+             for i in range(count)]
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    made_object = bpy.data.objects.new(name, mesh)
+    made_object.data.materials.append(made)
+    bpy.context.collection.objects.link(made_object)
+
+
+def skin(name, profile, x0: float, x1: float, made) -> None:
+    """One closed profile swept from `x0` to `x1`: the wall of a tube."""
+    verts = ([(x0, y, z) for y, z in profile] + [(x1, y, z) for y, z in profile])
+    count = len(profile)
+    faces = [[i, (i + 1) % count, count + (i + 1) % count, count + i]
+             for i in range(count)]
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    made_object = bpy.data.objects.new(name, mesh)
+    made_object.data.materials.append(made)
+    bpy.context.collection.objects.link(made_object)
+
+
+def cap(name, profile, x_at, made) -> None:
+    """One closed profile filled, at `x_at`: the end of a tube."""
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata([(x_at, y, z) for y, z in profile], [],
+                     [list(range(len(profile)))])
+    mesh.update()
+    made_object = bpy.data.objects.new(name, mesh)
+    made_object.data.materials.append(made)
+    bpy.context.collection.objects.link(made_object)
+
+
 def main() -> None:
     handover = sys.argv[sys.argv.index("--") + 1:][0]
     with open(handover, encoding="utf-8") as source:
@@ -105,7 +179,9 @@ def main() -> None:
     contact = material("contact", tuple(spec["colours"]["contact"]))
 
     body = spec["body"]
-    bx0, bx1 = body["x"]
+    # The body's own x is not read: the tube runs from `front_face` to
+    # `back_face`, which are the same two numbers named for which end is
+    # which. It was unpacked here while the shell was five boxes.
     by0, by1 = body["y"]
     height = body["height"]
     front = spec["front_face"]
@@ -125,34 +201,35 @@ def main() -> None:
     side = ((by1 - by0) - opening["width"]) / 2
     lid = (height - opening["height"]) / 2
 
-    # The shell, as five plates rather than one solid: a receptacle is a
-    # folded metal box and the opening has to go somewhere. Plates also keep
-    # the normals outward without a boolean, which is the operation most
-    # likely to behave differently between Blender versions.
-    box("shell_top", bx0, bx1, by0, by1, height - lid, height, shell)
-    box("shell_bottom", bx0, bx1, by0, by1, 0.0, lid, shell)
-    box("shell_left", bx0, bx1, by0, by0 + side, 0.0, height, shell)
-    box("shell_right", bx0, bx1, by1 - side, by1, 0.0, height, shell)
-    box("shell_back", back - inward * side, back, by0, by1, 0.0, height, shell)
+    # **The shell is a TUBE with a rounded section, not five flat plates.**
+    # It was five, and a reader called the result blocky, which a
+    # square-cornered box is: a Type-C connector's cross-section is an obround
+    # whose ends are half-circles, and that pill is the most recognisable
+    # thing about the part. Nothing new is cited for it -- the radius is half
+    # the height, so the shape follows from the envelope Seeed state and the
+    # aperture the standard fixes, both of which this part already had.
+    mid = (by0 + by1) / 2
+    outer = obround(mid, height / 2, by1 - by0, height, CAP_STEPS)
+    inner = obround(mid, height / 2, opening["width"], opening["height"],
+                    CAP_STEPS)
+    ring("shell_lip", outer, inner, front, shell)
+    skin("shell_outside", outer, front, back, shell)
+    skin("shell_inside", inner, front, back - inward * side, shell)
+    cap("shell_back", outer, back, shell)
 
-    # The mouth: the dark recess a plug goes into, inset from the front face
-    # so the shell reads as a shell rather than as a painted rectangle. Its
-    # cross-section is the standard's opening and its depth is a drawing
-    # quantity -- what is behind it is never seen through a 2.56 mm slot.
-    depth = spec["mouth_depth"]
-    box("cavity", front, front + inward * depth,
-        by0 + side, by1 - side, lid, height - lid, cavity)
+    # The dark end of the inside, seen down the length of the cavity. A PANEL
+    # and not a solid: filled, it would swallow the tongue, which is what the
+    # USB-B's did until OH-113 found it.
+    cap("cavity", inner, back - inward * side, cavity)
 
     # The tongue the contacts sit on, which is what makes the opening read as
-    # a USB socket rather than an empty box. It runs from `setback` behind the
-    # shell's lip to the back of the cavity, and it is given the insulator's
-    # own colour rather than the cavity's: a paddle flush with the hole would
-    # share the one face anybody looks at, and two coplanar surfaces fight for
-    # it. Centred on the BODY rather than on the origin, because a vendor's
-    # own outline is not obliged to straddle its footprint's zero.
+    # a socket rather than a slot. Set back from the lip so it does not share
+    # the one face anybody looks at, and given the insulator's own colour
+    # rather than the cavity's so it is visible against it. Centred on the
+    # BODY rather than on the origin, because a vendor's own outline is not
+    # obliged to straddle its footprint's zero.
     tongue = spec["tongue"]
-    mid = (by0 + by1) / 2
-    box("tongue", front + inward * tongue["setback"], front + inward * depth,
+    box("tongue", front + inward * tongue["setback"], back - inward * side,
         mid - tongue["width"] / 2, mid + tongue["width"] / 2,
         (height - tongue["thickness"]) / 2,
         (height + tongue["thickness"]) / 2, insulator)
