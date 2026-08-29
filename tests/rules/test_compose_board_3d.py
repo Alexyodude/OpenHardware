@@ -2198,3 +2198,351 @@ def test_every_composed_board_says_how_to_fetch_its_layout():
         assert spec.fetch_with, spec.board
         assert spec.geometry and len(spec.geometry) > 40, spec.board
         assert spec.layout.suffix in (".brd", ".kicad_pcb"), spec.layout
+
+
+# --- the copper and the ink the vendor drew (OH-110) ---------------------------
+
+
+def test_a_pad_is_drawn_at_the_angle_its_own_footprint_gives_it():
+    """A chip land's two pads face each other, and that is what rotation is for.
+
+    **The invariant is the part's, not this code's**: on every two-terminal
+    chip land ever made, each pad's long axis is square to the line joining
+    the two. So a pad drawn without its own rotation -- or with somebody
+    else's -- fails this on any component that is not axis-aligned, and the
+    RP2350 places 224 of its 316 pads at an angle.
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    turned = [e for e in board.elements
+              if e.package == "C0201" and len(e.pads) == 2
+              and round(e.pads[0].rotation_deg) % 180 != 0]
+    assert turned, "no 0201 on this board is placed at an angle, so this is vacuous"
+
+    element = turned[0]
+    one, two = element.pads
+    joining = math.atan2(two.y_mm - one.y_mm, two.x_mm - one.x_mm)
+    ring = compose.pad_outline(one)
+    assert ring is not None and len(ring) == 4
+    # The long axis of the drawn quad, taken from its own longest edge.
+    edges = [(ring[i], ring[(i + 1) % 4]) for i in range(4)]
+    long_edge = max(edges, key=lambda e: math.dist(e[0], e[1]))
+    across = math.atan2(long_edge[1][1] - long_edge[0][1],
+                        long_edge[1][0] - long_edge[0][0])
+    apart = math.degrees(joining - across) % 180.0
+    assert abs(apart - 90.0) < 1.0, (
+        f"{element.name}'s pads are joined along {math.degrees(joining):.1f} "
+        f"degrees and its pad is drawn along {math.degrees(across):.1f}, which "
+        f"is {apart:.1f} apart. A chip land's pads face each other."
+    )
+
+
+def test_a_pad_shape_nothing_can_draw_is_counted_rather_than_guessed():
+    """`custom` is a list of primitives, not a size, and there are 60 of them.
+
+    Each is the surface tab beside a castellated half-hole whose drilled
+    barrel is drawn anyway, so nothing is lost by leaving them -- and a
+    rectangle of their bounding size would be a shape the vendor did not draw.
+    The count travels to the caption, which is the difference between leaving
+    something out and hiding it.
+    """
+    custom = eagle.Pad("1", "smd", 0.0, 0.0, 1.6, 1.3, None, shape="custom")
+    assert compose.pad_outline(custom) is None
+    plain = dataclasses.replace(custom, shape="roundrect")
+    assert len(compose.pad_outline(plain)) == 4
+    round_pad = dataclasses.replace(custom, shape="circle")
+    assert len(compose.pad_outline(round_pad)) == compose.ROUND_PAD_SIDES
+
+
+def test_a_xiao_outline_is_convex_and_the_unos_is_not():
+    """Which decides whether copper can be cut to the board edge exactly.
+
+    Clipping a pad against a convex region is one half-plane per edge and is
+    exact. Against a concave one the same procedure removes area that is
+    inside the board, so a shape crossing a concave outline is dropped and
+    counted instead of being drawn wrongly.
+    """
+    xiao = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    uno = next(s for s in compose.COMPOSITIONS if s.pcb_chip is None)
+    if not (xiao.layout.is_file() and uno.layout.is_file()):
+        pytest.skip("SKIPPED: a layout is not fetched")
+    ring, _cut = compose.outer(compose.read_layout(xiao.layout).outline)
+    assert compose.convex(ring), "a XIAO is a rounded rectangle"
+    ring, _cut = compose.outer(compose.read_layout(uno.layout).outline)
+    assert not compose.convex(ring), "the Uno has a notch in its outline"
+
+
+def test_a_castellated_half_hole_is_cut_off_at_the_board_edge():
+    """Half a hole is half a pad, and the other half is not there.
+
+    42 of the RP2350's 316 pads cross its outline and every one is a
+    castellation on the edge. Drawn whole they hang in the air beside the
+    board, which is what the wrong USB receptacle looked like in OH-101 and is
+    just as wrong here.
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    ring, _cut = compose.outer(board.outline)
+    edge = max(point[1] for point in ring)
+    castellation = next(pad for pad in board.element("U2").pads
+                        if pad.shape == "circle" and abs(pad.y_mm - edge) < 0.001)
+
+    whole = compose.pad_outline(castellation)
+    assert max(p[1] for p in whole) > edge, "this pad does cross the edge"
+    cut = compose.clipped_to(ring, whole)
+    assert cut, "the half that is on the board is still copper"
+    assert max(p[1] for p in cut) == pytest.approx(edge, abs=0.001), (
+        "and the half that is off the board is not"
+    )
+
+
+def test_no_copper_is_drawn_outside_the_board():
+    """The shipped meshes, which is what a person actually looks at.
+
+    Reading the artefact rather than recomposing it, for the reason
+    `test_no_soldered_contact_hangs_off_the_board` gives: what somebody called
+    broken is the file the page loads.
+    """
+    models = REPO / "webui" / "static" / "models"
+    boards = [slug for slug in
+              (compose._slug(spec.board) for spec in compose.COMPOSITIONS)
+              if (models / f"{slug}.glb").is_file()]
+    if not boards:
+        pytest.skip("no board composed; run tools/compose_board_3d.py")
+    worst: list[str] = []
+    for slug in boards:
+        groups = _glb_groups(models / f"{slug}.glb")
+        pcb = groups.get(compose.BOARD_MASK) or groups.get("#313d63")
+        copper = groups.get(compose.COPPER)
+        assert copper, f"{slug} draws no copper at all, so it is a bare slab"
+        left, right = min(p[0] for p in pcb), max(p[0] for p in pcb)
+        near, far = min(p[2] for p in pcb), max(p[2] for p in pcb)
+        out = max(max(left - x, x - right, near - z, z - far)
+                  for x, _y, z in copper)
+        if out > 0.001:
+            worst.append(f"{slug}: copper reaches {out:.3f} mm past the outline")
+    assert not worst, "\n".join(worst)
+
+
+def test_the_copper_colour_is_not_one_a_contact_check_looks_for():
+    """Not aesthetics: a castellated half-hole is copper AT the board's edge.
+
+    `test_no_soldered_contact_hangs_off_the_board` finds a receptacle's solder
+    tails by colour and requires them inside the outline. Copper sharing one of
+    those values would make every XIAO fail a check about its USB socket, on
+    the strength of a feature that is supposed to reach the edge.
+    """
+    assert compose.COPPER not in compose.CONTACT_COLOURS
+    assert compose.COPPER not in CONTACT_COLOURS
+    assert compose.SILKSCREEN not in compose.CONTACT_COLOURS
+    assert compose.SILKSCREEN not in CONTACT_COLOURS
+
+
+def test_artwork_faces_one_way_whichever_way_its_ring_was_wound():
+    """Two builders, two windings, and half a mesh facing backwards.
+
+    `pad_outline` walks counter-clockwise and `stroke_outline` walks
+    clockwise, because the offset that turns a line into a rectangle goes left
+    and then right. Emitted as they came, the ink was back-facing while the
+    copper was not -- artwork present from one side of the board and absent
+    from the other, and only on whichever side the author did not look at.
+    """
+    square = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+    assert compose.signed_area(square) > 0
+    assert compose.signed_area(square[::-1]) < 0
+    forward = compose.flat([square], 1.0, "#c8a253", (0.0, 0.0), True)
+    backward = compose.flat([square[::-1]], 1.0, "#c8a253", (0.0, 0.0), True)
+    assert (forward.groups["#c8a253"][0]
+            == backward.groups["#c8a253"][0]), "the same four corners in order"
+    assert forward.groups["#c8a253"][2] == backward.groups["#c8a253"][2]
+
+
+def test_a_stroke_with_no_length_or_no_width_is_not_ink():
+    """A dot is a zero-area quad and a normal of nothing."""
+    assert compose.stroke_outline(
+        eagle.Stroke("F.SilkS", 1.0, 1.0, 1.0, 1.0, 0.15)) is None
+    assert compose.stroke_outline(
+        eagle.Stroke("F.SilkS", 1.0, 1.0, 2.0, 1.0, 0.0)) is None
+    drawn = compose.stroke_outline(
+        eagle.Stroke("F.SilkS", 1.0, 1.0, 2.0, 1.0, 0.2))
+    assert len(drawn) == 4
+    assert max(p[1] for p in drawn) - min(p[1] for p in drawn) == pytest.approx(0.2)
+
+
+def test_the_silkscreen_says_what_it_could_not_draw():
+    """Text is 47 to 99 pieces per board, and a caption hiding it would be
+    worse than one that names it. Text needs a font; the arcs, circles and
+    polygons are a handful per board and are named for the same reason."""
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    unread = dict(board.silk_unread)
+    assert unread.get("text", 0) >= 40, unread
+    assert board.silk, "the strokes it CAN draw are drawn"
+
+
+def test_the_uno_draws_copper_too():
+    """A second vendor and a second reader, and only one of them had shapes.
+
+    `tools/eagle.py` read `<pad>` and `<smd>` for their centres, because a pad
+    map is all this project wanted of them for a year. Drawing the copper
+    wants the shape and the angle as well, so an Uno composed without them was
+    a bare blue slab beside five XIAOs covered in gold.
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip is None)
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    pads = [pad for element in board.elements for pad in element.pads]
+    assert pads, "the Uno places pads"
+    drawn = [pad for pad in pads if compose.pad_outline(pad) is not None]
+    assert len(drawn) == len(pads), (
+        f"{len(pads) - len(drawn)} of the Uno's pads have no shape this can "
+        f"draw: {sorted({p.shape for p in pads if compose.pad_outline(p) is None})}"
+    )
+    # A drilled pad is copper on both faces; EAGLE has no per-pad layer for it.
+    holes = [pad for pad in pads if pad.kind == "thru_hole"]
+    assert holes and all(pad.front and pad.back for pad in holes)
+
+
+# --- what a pad carries beyond its centre (OH-110) -----------------------------
+
+
+def test_a_pads_stored_rotation_is_the_boards_and_not_the_footprints():
+    """The fact the whole drawing of copper rests on, measured rather than read.
+
+    KiCad could reasonably store a pad's angle either way round. On Seeed's
+    RP2350 it is ABSOLUTE: of the 20 pads in footprints placed at 90 degrees
+    every one says 90, and of the 79 in footprints at 180 every one says 180.
+    So `compose_board_3d.from_kicad` must NOT add the placement's rotation to
+    it -- doing so turns every pad on a rotated part by twice the angle, which
+    on a chip land is a rectangle lying across its own pair.
+    """
+    path = compose.PCB_CACHE / "RP2350.kicad_pcb"
+    if not path.is_file():
+        pytest.skip("SKIPPED: RP2350.kicad_pcb is not fetched")
+    board = kicad.read_board(path)
+    turned = [p for p in board.placements if round(p.rotation_deg) % 360 == 90]
+    assert turned, "no footprint on this board is placed at 90 degrees"
+    agree = [pad for placed in turned for pad in placed.pads
+             if round(pad.rotation_deg) % 360 == 90]
+    every = [pad for placed in turned for pad in placed.pads]
+    assert len(agree) == len(every), (
+        f"{len(every) - len(agree)} of the pads in 90-degree footprints do not "
+        f"themselves say 90, so the stored angle is not absolute after all"
+    )
+
+
+def test_a_pad_says_which_side_its_copper_is_on():
+    """The pad's own statement, not its footprint's.
+
+    The RP2350 has 16 pads on `B.Cu` inside front-side footprints and 24 on
+    `*.Cu`, which is both faces. Deciding by the footprint's own layer would
+    put a via's copper on one side and a surface pad's on the wrong one.
+    """
+    path = compose.PCB_CACHE / "RP2350.kicad_pcb"
+    if not path.is_file():
+        pytest.skip("SKIPPED: RP2350.kicad_pcb is not fetched")
+    board = kicad.read_board(path)
+    pads = [pad for placed in board.placements for pad in placed.pads]
+    both = [pad for pad in pads if pad.front and pad.back]
+    assert both, "a through-hole pad is copper on both faces"
+    assert all("*.Cu" in pad.layers or "F&B.Cu" in pad.layers for pad in both)
+    front_only = [pad for pad in pads if pad.front and not pad.back]
+    assert front_only and all("F.Cu" in pad.layers for pad in front_only)
+
+
+def test_the_silkscreen_is_read_with_the_width_it_was_drawn_at():
+    """Ink covers area, and the width is most of what makes it visible.
+
+    Seeed draw their board-level silkscreen at 0.152 mm and some of their
+    footprint silkscreen at 0.010 -- a hairline nobody can see. A reader that
+    dropped the width would draw both at the same weight, which is a picture
+    of a board nobody printed.
+    """
+    path = compose.PCB_CACHE / "RP2350.kicad_pcb"
+    if not path.is_file():
+        pytest.skip("SKIPPED: RP2350.kicad_pcb is not fetched")
+    board = kicad.read_board(path)
+    assert board.silk, "this board draws silkscreen"
+    assert all(stroke.width_mm > 0 for stroke in board.silk)
+    assert {round(stroke.width_mm, 3) for stroke in board.silk} != {0.0}
+    assert any(stroke.layer.startswith("F.") for stroke in board.silk)
+    assert any(stroke.layer.startswith("B.") for stroke in board.silk), (
+        "a XIAO prints its pin names on the underside"
+    )
+
+
+def test_a_width_written_either_way_is_read():
+    """Modern KiCad nests it and older files do not, and both are in the tree."""
+    nested = kicad.parse_sexp(
+        '(fp_line (start 0 0) (end 1 0) (stroke (width 0.15) (type solid))'
+        ' (layer "F.SilkS"))')
+    assert kicad._stroke_width(nested) == pytest.approx(0.15)
+    plain = kicad.parse_sexp(
+        '(fp_line (start 0 0) (end 1 0) (width 0.2) (layer "F.SilkS"))')
+    assert kicad._stroke_width(plain) == pytest.approx(0.2)
+    silent = kicad.parse_sexp('(fp_line (start 0 0) (end 1 0) (layer "F.SilkS"))')
+    assert kicad._stroke_width(silent) == 0.0
+
+
+def test_clipping_does_not_care_which_way_the_outline_was_wound():
+    """`contours` chains segments in whatever order the vendor wrote them.
+
+    Nothing upstream promises a direction, so which side of an edge is
+    "inside" has to be measured off the ring rather than assumed. Assuming it
+    survives on every board here -- all five happen to come out
+    counter-clockwise -- and would clip every pad away on the first one that
+    does not, a failure that looks exactly like "the vendor drew no copper".
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    ring, _cut = compose.outer(board.outline)
+    edge = max(point[1] for point in ring)
+    castellation = next(pad for pad in board.element("U2").pads
+                        if pad.shape == "circle" and abs(pad.y_mm - edge) < 0.001)
+    shape = compose.pad_outline(castellation)
+
+    forward = compose.clipped_to(ring, shape)
+    reversed_ring = compose.clipped_to(ring[::-1], shape)
+    assert forward, "the half on the board survives"
+    assert len(reversed_ring) == len(forward)
+    assert (max(p[1] for p in reversed_ring)
+            == pytest.approx(max(p[1] for p in forward), abs=1e-9))
+
+
+def test_the_artwork_pass_is_the_thing_that_cuts_copper_to_the_board():
+    """`clipped_to` can be right while nothing calls it.
+
+    A mutation handing `artwork` the raw pad instead of the cut one survived
+    every test here, because the one that measures copper against the outline
+    reads the SHIPPED mesh -- and a source mutation does not regenerate it.
+    That is the same gap `body_allowance` and `anchor_of` each cost a round
+    of: measure the guard, not only the measurement it rests on.
+    """
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    board = compose.read_layout(spec.layout)
+    ring, _cut = compose.outer(board.outline)
+    meshes, tally = compose.artwork(board, ring, spec.thickness_mm, (0.0, 0.0))
+    assert tally["pads front"] > 200, tally
+
+    copper = [(p[at], -p[at + 2])
+              for mesh in meshes for _c, (p, _n, _i) in mesh.groups.items()
+              for at in range(0, len(p), 3)]
+    assert copper, "the artwork pass drew nothing"
+    left, right = min(x for x, _y in ring), max(x for x, _y in ring)
+    near, far = min(y for _x, y in ring), max(y for _x, y in ring)
+    out = max(max(left - x, x - right, near - y, y - far) for x, y in copper)
+    assert out <= 0.001, (
+        f"artwork put a vertex {out:.3f} mm outside the board. A castellated "
+        f"half-hole is half a hole; drawn whole it hangs in the air."
+    )

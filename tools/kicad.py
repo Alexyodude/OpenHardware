@@ -46,6 +46,7 @@ components procedurally anyway.
 
 from __future__ import annotations
 
+import collections
 import dataclasses
 import math
 import pathlib
@@ -138,6 +139,31 @@ class Pad:
     y_mm: float
     width_mm: float
     height_mm: float
+    #: `rect | roundrect | circle | oval | custom`, the vendor's own token.
+    #: Needed to DRAW a pad and irrelevant to placing one, which is why it
+    #: arrived late: a castellated half-hole is a circle and a chip land is a
+    #: rectangle, and 253 of the 1,679 pads on the five composed XIAOs are
+    #: round.
+    shape: str = ""
+    #: The pad's own turn, in degrees, and **it is ABSOLUTE rather than
+    #: relative to the footprint**. Measured on the RP2350: of the 20 pads in
+    #: footprints placed at 90 degrees, all 20 say 90; of the 79 in footprints
+    #: at 180, all say 180. So a pad's angle in board space IS this number,
+    #: and a pad drawn without it is the wrong shape 224 times out of 316.
+    rotation_deg: float = 0.0
+    #: `("F.Cu", "F.Paste", "F.Mask")` and so on, the vendor's own list.
+    #: **Which side a pad's copper is on is the pad's statement, not its
+    #: footprint's**: the RP2350 has 16 pads on `B.Cu` inside front-side
+    #: footprints and 24 on `*.Cu`, which is both.
+    layers: tuple[str, ...] = ()
+
+    @property
+    def front(self) -> bool:
+        return bool({"F.Cu", "*.Cu", "F&B.Cu"} & set(self.layers))
+
+    @property
+    def back(self) -> bool:
+        return bool({"B.Cu", "*.Cu", "F&B.Cu"} & set(self.layers))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -149,6 +175,29 @@ class Segment:
     y1_mm: float
     x2_mm: float
     y2_mm: float
+
+
+@dataclasses.dataclass(frozen=True)
+class Stroke:
+    """A drawn line WITH the width it was drawn at, in board millimetres.
+
+    Separate from `Segment` rather than a width added to it, because the two
+    answer different questions. A `Segment` on `Edge.Cuts` is a boundary: it
+    has a position and its width is meaningless, and every consumer of the
+    outline chains segments end to end where a width would be noise. A stroke
+    on the silkscreen is INK: it covers area, and the width is most of what
+    makes it visible. The vendors bear this out -- Seeed draw their board-level
+    silk at 0.152 mm and some of their footprint silk at 0.010, which is a
+    hairline nobody can see and which a widthless reader would have drawn at
+    the same weight as the rest.
+    """
+
+    layer: str
+    x1_mm: float
+    y1_mm: float
+    x2_mm: float
+    y2_mm: float
+    width_mm: float
 
 
 @dataclasses.dataclass(frozen=True)
@@ -194,7 +243,16 @@ def _pads_of(tree: list) -> list[Pad]:
         coords, dims = _floats(at), _floats(size)
         if len(coords) < 2 or len(dims) < 2:
             continue
-        pads.append(Pad(number, kind, coords[0], coords[1], dims[0], dims[1]))
+        where = first(node, "layers")
+        pads.append(Pad(
+            number, kind, coords[0], coords[1], dims[0], dims[1],
+            shape=node[3] if isinstance(node[3], str) else "",
+            # Absent means zero, which is why this reads the length rather
+            # than indexing and hoping -- the same care `read_board` takes
+            # over a footprint's own optional rotation.
+            rotation_deg=coords[2] if len(coords) > 2 else 0.0,
+            layers=tuple(x for x in (where or [])[1:] if isinstance(x, str)),
+        ))
     return pads
 
 
@@ -331,6 +389,15 @@ class Board:
     outline: tuple[Segment, ...]
     arcs: tuple[Arc, ...]
     placements: tuple[Placement, ...]
+    #: The ink the vendor prints on the board, front and back, in board
+    #: millimetres -- both the board's own `gr_line`s and every footprint's.
+    #: Empty until OH-110; a composed board drew none of it and looked like a
+    #: slab with boxes on it beside a vendor's own assembly export.
+    silk: tuple[Stroke, ...] = ()
+    #: What was on those layers and is NOT in `silk`, counted by kind. A
+    #: caption that says "232 strokes" while dropping 99 texts is worse than
+    #: one that says both.
+    silk_unread: tuple[tuple[str, int], ...] = ()
 
     def extent_mm(self) -> tuple[float, float, float, float]:
         """`(min_x, min_y, max_x, max_y)` of the outline, in millimetres.
@@ -458,6 +525,81 @@ def _fp_graphics(node: list, layer: str, placed: Placement
     return segments, arcs
 
 
+#: Everything a vendor draws on the silkscreen that `_silk_of` does not read,
+#: named so that "232 strokes" is never quietly also saying "and 99 pieces of
+#: text you cannot see". Counted and reported rather than dropped.
+#:
+#: Text is the big one and it needs a font -- KiCad stores `gr_text` as a
+#: string and a size, and turning that into geometry means shipping glyph
+#: outlines. The rest is a handful per board: 2 to 16 arcs, 2 to 7 circles and
+#: 3 to 12 polygons across the five composed XIAOs, against 47 to 232 lines.
+SILK_UNREAD = ("text", "arc", "circle", "poly", "curve", "bbox")
+
+
+def _silk_of(node: list, prefix: str, put) -> tuple[list[Stroke], list[str]]:
+    """Silkscreen lines under `node`, in board millimetres, and what was not.
+
+    `prefix` is `"gr"` at the top level of a board and `"fp"` inside a
+    footprint, and `put` is the transform into board space -- the identity for
+    the first and `_on_board` for the second. One reader for both, because the
+    two differ in exactly those two things and in nothing else; a footprint's
+    silkscreen and a board's are the same ink on the same layer.
+    """
+    strokes: list[Stroke] = []
+    unread: list[str] = []
+    for child in node:
+        if not isinstance(child, list):
+            continue
+        tag = head(child)
+        if not tag.startswith(f"{prefix}_"):
+            continue
+        kind = tag[len(prefix) + 1:]
+        layer = first(child, "layer")
+        named = layer[1] if layer and len(layer) > 1 else ""
+        if not str(named).endswith("SilkS"):
+            continue
+        if kind in SILK_UNREAD:
+            unread.append(kind)
+            continue
+        if kind == "line":
+            got = _graphic(child, "start")
+            if got is None:
+                continue
+            x1, y1, x2, y2 = got[1]
+            strokes.append(Stroke(named, *put(x1, y1), *put(x2, y2),
+                                  _stroke_width(child)))
+        elif kind == "rect":
+            got = _graphic(child, "start")
+            if got is None:
+                continue
+            x1, y1, x2, y2 = got[1]
+            width = _stroke_width(child)
+            corners = [put(x1, y1), put(x2, y1), put(x2, y2), put(x1, y2)]
+            for start, end in zip(corners, corners[1:] + corners[:1]):
+                strokes.append(Stroke(named, *start, *end, width))
+        else:
+            unread.append(kind)
+    return strokes, unread
+
+
+def _stroke_width(node: list) -> float:
+    """The width a graphic was drawn at, from either place KiCad puts it.
+
+    Modern files nest it as `(stroke (width w) (type solid))` and older ones
+    write `(width w)` directly. Both spellings appear across the five vendor
+    boards here, so reading only one of them silently gives every stroke on
+    some boards a width of zero.
+    """
+    stroke = first(node, "stroke")
+    width = first(stroke, "width") if stroke is not None else first(node, "width")
+    if width is not None and len(width) > 1:
+        try:
+            return float(width[1])
+        except (TypeError, ValueError):
+            return 0.0
+    return 0.0
+
+
 def _body_of(node: list) -> tuple[float, float, float, float] | None:
     """The footprint's body outline from its `*.Fab` layer, or None.
 
@@ -556,6 +698,8 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
             continue
         arcs.append(Arc(layer, a[0], a[1], m[0], m[1], b[0], b[1]))
 
+    silk, unread = _silk_of(tree, "gr", lambda x, y: (x, y))
+
     placements: list[Placement] = []
     for node in children(tree, "footprint"):
         library = node[1] if len(node) > 1 and isinstance(node[1], str) else ""
@@ -582,6 +726,10 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
         drawn, curved = _fp_graphics(node, layer, placed)
         outline += drawn
         arcs += curved
+        printed, missed = _silk_of(
+            node, "fp", lambda x, y, at=placed: _on_board(at, x, y))
+        silk += printed
+        unread += missed
 
     if not placements:
         raise KicadError(f"{path}: no footprints; refusing to report an empty board")
@@ -589,7 +737,9 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
         raise KicadError(f"{path}: nothing on {layer}, so there is no outline. "
                          f"A board drawn without one would be a bounding box "
                          f"around its parts, which is not its shape")
-    return Board(path.stem, tuple(outline), tuple(arcs), tuple(placements))
+    return Board(path.stem, tuple(outline), tuple(arcs), tuple(placements),
+                 silk=tuple(silk),
+                 silk_unread=tuple(sorted(collections.Counter(unread).items())))
 
 
 # --- symbol libraries ----------------------------------------------------------

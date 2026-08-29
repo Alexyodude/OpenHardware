@@ -104,6 +104,17 @@ the vendor's `.brd`, which `python tools/get_board_sources.py arduino-uno`
 prints the URL for -- an `https-archive`, so it is downloaded by hand, as the
 Pico's is.
 
+**A composed board draws its own copper and its own silkscreen**, and until
+OH-110 it drew neither -- which is why it looked like a slate with boxes on it
+beside a vendor's own assembly export. Every pad is the vendor's size at the
+vendor's angle, every stroke their line at their width, and copper is cut to
+the board's edge so a castellated half-hole is half a hole. Two things are NOT
+read and the tool prints how many of each it left: silkscreen **text**, which
+needs a font shipped, and the handful of arcs, circles and polygons on that
+layer. The two colours are judgements and say so, as `BOARD_MASK` does -- a
+`.kicad_pcb` states no surface finish, because that is a fabrication order and
+not a design file.
+
 **Geometry has four sources here and the page names which one it is showing.**
 In order of preference: the vendor's own mechanical model; a published model of
 the same package, from KiCad's `kicad-packages3D`; the manufacturer's own STEP;

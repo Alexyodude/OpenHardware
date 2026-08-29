@@ -1042,6 +1042,19 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
                 width_mm=pad.width_mm,
                 height_mm=pad.height_mm,
                 net=None,
+                shape=pad.shape,
+                # **The stored angle is already the board's**, not the
+                # footprint's -- measured on the RP2350, where every pad of
+                # every footprint placed at 90 degrees says 90. So the
+                # placement's own rotation is NOT added here; it is already
+                # in. What the frames do to it: flipping y turns KiCad's
+                # down-the-page rotation into this one's up-the-page rotation
+                # of the same sign, and a part on the underside is mirrored
+                # in x, which reverses the sense.
+                rotation_deg=(-pad.rotation_deg if placed.back
+                              else pad.rotation_deg),
+                front=pad.front,
+                back=pad.back,
             ))
         # **The body outline, which is what makes `silk_miss` able to run.**
         # KiCad names its assembly layer, so this is `F.Fab` rather than the
@@ -1067,8 +1080,16 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
             silk=silk,
         ))
 
+    # The ink, y negated like every coordinate above it and for the same
+    # reason. A stroke's WIDTH is a length rather than a coordinate, so it
+    # crosses unchanged -- getting that wrong would be invisible, since the
+    # boards' widths are all positive.
+    silk = tuple(eagle.Stroke(s.layer, s.x1_mm, -s.y1_mm, s.x2_mm, -s.y2_mm,
+                              s.width_mm)
+                 for s in board.silk)
     return eagle.Board(name=path.stem, version="kicad_pcb",
-                       elements=tuple(elements), outline=tuple(outline))
+                       elements=tuple(elements), outline=tuple(outline),
+                       silk=silk, silk_unread=board.silk_unread)
 
 
 def read_layout(path: pathlib.Path) -> eagle.Board:
@@ -1293,6 +1314,207 @@ def slab(ring: list[tuple[float, float]], thickness: float, colour: str,
         indices.extend((corners[0], corners[2], corners[3]))
 
     return Mesh({colour: (positions, normals, indices)})
+
+
+#: The finish on a XIAO's exposed copper. **A JUDGEMENT, like `BOARD_MASK`**,
+#: and made the same way: nothing in a `.kicad_pcb` states a surface finish --
+#: it is a fabrication order, not a design file -- so this is the pale gold of
+#: immersion gold rather than a reading of anything. Seeed's own assembly
+#: export for the nRF54LM20A colours its pads a light tin grey, which is the
+#: other common finish; the boards in the photographs on their own wiki are
+#: gold, and that is as far as the evidence goes.
+#:
+#: **It must not be one of `CONTACT_COLOURS`**, and that is not aesthetics: the
+#: overhang test finds a receptacle's tails by colour, and a castellated
+#: half-hole is copper that is SUPPOSED to reach the board's edge. Sharing a
+#: value would make every XIAO fail a check about its USB socket.
+COPPER = "#c8a253"
+
+#: The white a board is screen-printed with. Also a judgement, and a shallow
+#: one: silkscreen is white on all five of these boards in the vendor's own
+#: photographs, and KiCad stores no colour for the layer either.
+SILKSCREEN = "#e9e9e4"
+
+#: How far above the board's own top face the copper is drawn. One ounce of
+#: copper is 35 um, which is what this is -- so it is a real thickness rather
+#: than a nudge to beat depth fighting, and it does both jobs. A component
+#: body sits at the board's top face and therefore 35 um INSIDE its own pads,
+#: which is invisible and is also what solder does.
+COPPER_THICKNESS_MM = 0.035
+
+#: And the ink over it. Screen-printed epoxy is 10 to 20 um; 15 keeps it above
+#: the copper it is never printed on top of anyway.
+SILK_THICKNESS_MM = 0.015
+
+#: Pad shapes this draws, and what it draws them as. `custom` is not here:
+#: KiCad states it as a list of primitives rather than a size, and the 60 on
+#: these five boards are all the surface tab beside a castellated half-hole
+#: whose drilled barrel is drawn anyway. Counted and reported, not dropped
+#: quietly.
+ROUND_PADS = frozenset({"circle", "oval"})
+SQUARE_PADS = frozenset({"rect", "roundrect"})
+
+#: How many sides a round pad is drawn with. A castellated half-hole is
+#: 1.27 mm across on a board 21 mm long, so twelve sides is a quarter of a
+#: pixel of chord error at any zoom the page offers.
+ROUND_PAD_SIDES = 12
+
+
+def pad_outline(pad: eagle.Pad) -> list[tuple[float, float]] | None:
+    """One pad as a closed ring in board millimetres, or None if not drawn.
+
+    The pad's own size and its own angle, both the vendor's. A rectangle is
+    four corners and a round pad is `ROUND_PAD_SIDES` points on its ellipse --
+    an oval pad's two axes differ, which is why this is an ellipse and not a
+    circle with one radius.
+    """
+    if pad.shape in SQUARE_PADS:
+        local = [(-pad.width_mm / 2, -pad.height_mm / 2),
+                 (pad.width_mm / 2, -pad.height_mm / 2),
+                 (pad.width_mm / 2, pad.height_mm / 2),
+                 (-pad.width_mm / 2, pad.height_mm / 2)]
+    elif pad.shape in ROUND_PADS:
+        local = [(pad.width_mm / 2 * math.cos(step),
+                  pad.height_mm / 2 * math.sin(step))
+                 for step in (2 * math.pi * i / ROUND_PAD_SIDES
+                              for i in range(ROUND_PAD_SIDES))]
+    else:
+        return None
+    turn = math.radians(pad.rotation_deg)
+    cos, sin = math.cos(turn), math.sin(turn)
+    return [(pad.x_mm + x * cos - y * sin, pad.y_mm + x * sin + y * cos)
+            for x, y in local]
+
+
+def convex(ring: list[tuple[float, float]]) -> bool:
+    """Does this ring turn the same way at every vertex?
+
+    **Which decides whether copper can be clipped to it exactly.** Clipping a
+    pad against a convex region -- one half-plane per edge, Sutherland and
+    Hodgman's algorithm -- is exact; against a concave one the same procedure
+    quietly removes area that is inside the board. Every XIAO's silhouette is
+    a rounded rectangle and convex; the Arduino Uno's has a notch and is not.
+    """
+    signs = []
+    for index, point in enumerate(ring):
+        nxt = ring[(index + 1) % len(ring)]
+        after = ring[(index + 2) % len(ring)]
+        cross = ((nxt[0] - point[0]) * (after[1] - nxt[1])
+                 - (nxt[1] - point[1]) * (after[0] - nxt[0]))
+        if abs(cross) > 1e-9:
+            signs.append(cross > 0)
+    return len(set(signs)) <= 1
+
+
+def clipped_to(ring: list[tuple[float, float]],
+               shape: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """`shape` with everything outside the convex `ring` cut away.
+
+    Sutherland-Hodgman, one half-plane at a time. **The caller must have
+    checked `convex(ring)`** -- this is where copper stops at the board's edge,
+    and a castellated half-hole is exactly that: 42 of the RP2350's 316 pads
+    cross the outline, and drawn whole they would hang in the air beside the
+    board.
+    """
+    # **Which side is "inside" is measured off the ring, not assumed.** The
+    # sign of a ring's own area says which way it winds, and nothing upstream
+    # promises a direction -- `contours` chains segments in whatever order the
+    # vendor wrote them. Guessing would clip every pad away on half the boards,
+    # which is a failure that looks exactly like "the vendor drew no copper".
+    inward = 1.0 if signed_area(ring) > 0 else -1.0
+    out = list(shape)
+    for index, edge_a in enumerate(ring):
+        if not out:
+            return []
+        edge_b = ring[(index + 1) % len(ring)]
+        along = (edge_b[0] - edge_a[0], edge_b[1] - edge_a[1])
+
+        def side(point, a=edge_a, d=along) -> float:
+            return (d[0] * (point[1] - a[1]) - d[1] * (point[0] - a[0])) * inward
+
+        nxt: list[tuple[float, float]] = []
+        for at, point in enumerate(out):
+            before = out[at - 1]
+            here, prior = side(point), side(before)
+            if here >= 0:
+                if prior < 0:
+                    nxt.append(_crossing(before, point, prior, here))
+                nxt.append(point)
+            elif prior >= 0:
+                nxt.append(_crossing(before, point, prior, here))
+        out = nxt
+    return out
+
+
+def signed_area(ring: list[tuple[float, float]]) -> float:
+    """Twice the ring's area, positive when it winds counter-clockwise."""
+    return sum(a[0] * b[1] - b[0] * a[1]
+               for a, b in zip(ring, ring[1:] + ring[:1]))
+
+
+def _crossing(a: tuple[float, float], b: tuple[float, float],
+              da: float, db: float) -> tuple[float, float]:
+    """Where the segment a-b crosses the edge, from the two signed distances."""
+    span = da - db
+    t = 0.0 if abs(span) < 1e-12 else da / span
+    return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+
+
+def flat(rings: list[list[tuple[float, float]]], up: float, colour: str,
+         centre: tuple[float, float], upward: bool) -> Mesh:
+    """Closed rings as flat faces at height `up`, in the scene's own axes.
+
+    Copper and ink are 15 to 35 um of a board 1.2 mm thick, so they are drawn
+    as single faces rather than as slabs with sides: at that thickness a side
+    is a fraction of a pixel at any zoom, and every one of them would be two
+    more triangles across the two thousand shapes on a board.
+    """
+    positions: list[float] = []
+    normals: list[float] = []
+    indices: list[int] = []
+    normal = (0.0, 1.0, 0.0) if upward else (0.0, -1.0, 0.0)
+
+    for ring in rings:
+        if len(ring) < 3:
+            continue
+        # **Every ring is wound the same way before it is emitted**, and this
+        # is not tidiness: `pad_outline` builds counter-clockwise and
+        # `stroke_outline` built clockwise, because the offset that makes a
+        # line into a rectangle naturally goes left-then-right. Two windings
+        # in one mesh means half of it is back-facing, which shows up as
+        # artwork that is there from one side of the board and gone from the
+        # other -- and only on whichever half the author did not look at.
+        if signed_area(ring) < 0:
+            ring = ring[::-1]
+        base = len(positions) // 3
+        for x, y in ring:
+            positions.extend((x - centre[0], up, -(y - centre[1])))
+            normals.extend(normal)
+        # A fan, which is correct for the convex shapes this is given: a pad
+        # is a rectangle or an ellipse, and a clipped one stays convex because
+        # `clipped_to` intersects it with half-planes. A stroke is a rectangle.
+        for corner in range(1, len(ring) - 1):
+            fan = (base, base + corner, base + corner + 1)
+            indices.extend(fan if upward else (fan[0], fan[2], fan[1]))
+    return Mesh({colour: (positions, normals, indices)})
+
+
+def stroke_outline(stroke: eagle.Stroke) -> list[tuple[float, float]] | None:
+    """One silkscreen stroke as the rectangle its width sweeps out.
+
+    None for a stroke of no length, which a vendor writes as a dot and which
+    would give a zero-area quad and a normal of nothing.
+    """
+    along = (stroke.x2_mm - stroke.x1_mm, stroke.y2_mm - stroke.y1_mm)
+    length = math.hypot(*along)
+    if length < 1e-9 or stroke.width_mm <= 0.0:
+        return None
+    half = stroke.width_mm / 2
+    across = (-along[1] / length * half, along[0] / length * half)
+    return [(stroke.x1_mm + across[0], stroke.y1_mm + across[1]),
+            (stroke.x2_mm + across[0], stroke.y2_mm + across[1]),
+            (stroke.x2_mm - across[0], stroke.y2_mm - across[1]),
+            (stroke.x1_mm - across[0], stroke.y1_mm - across[1])]
 
 
 def box_around(name: str, put: Mesh) -> dict[str, object]:
@@ -1782,6 +2004,98 @@ def merge(*meshes: Mesh) -> Mesh:
     return Mesh(groups)
 
 
+def artwork(board: eagle.Board, ring: list[tuple[float, float]],
+            thickness: float, centre: tuple[float, float]
+            ) -> tuple[list[Mesh], dict[str, int]]:
+    """The copper and the ink the vendor drew, and a tally of what was left.
+
+    **Every composed board was a slab with boxes standing on it until this**,
+    and the reason was not that the data was missing: Seeed's own board files
+    carry 211 to 362 pads and 47 to 232 board-level silkscreen strokes each,
+    all of which this project already parsed and none of which it drew. Put
+    beside their own KiCad assembly export for the nRF54LM20A -- castellated
+    barrels down both edges, copper under every part, outlines and letters --
+    a composed XIAO looked like a different and much worse thing.
+
+    Nothing here is invented. A pad is the vendor's own size at the vendor's
+    own angle; a stroke is their line at their width. The two colours are
+    judgements and say so, because a `.kicad_pcb` states neither -- a surface
+    finish is a fabrication order and not a design file.
+    """
+    left: dict[str, int] = {}
+    can_clip = convex(ring)
+
+    def inside(shape: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        """`shape` cut to the board, or emptied if it cannot be cut exactly."""
+        if can_clip:
+            return clipped_to(ring, shape)
+        # A concave silhouette -- the Arduino Uno -- cannot be clipped by
+        # half-planes without eating area that is inside the board. So a shape
+        # that is wholly inside is kept and one that is not is dropped and
+        # counted, rather than approximated. No Uno pad is affected: its
+        # copper is all well within its outline.
+        if all(point_in(ring, point) for point in shape):
+            return shape
+        left["outside a concave outline"] = (
+            left.get("outside a concave outline", 0) + 1)
+        return []
+
+    front: list[list[tuple[float, float]]] = []
+    back: list[list[tuple[float, float]]] = []
+    for element in board.elements:
+        for pad in element.pads:
+            if pad.kind == "np_thru_hole":
+                # A hole with no copper in it. Nothing solders to it and
+                # nothing is drawn for it.
+                left["np_thru_hole"] = left.get("np_thru_hole", 0) + 1
+                continue
+            shape = pad_outline(pad)
+            if shape is None:
+                left[pad.shape or "no shape"] = (
+                    left.get(pad.shape or "no shape", 0) + 1)
+                continue
+            cut = inside(shape)
+            if len(cut) < 3:
+                continue
+            if pad.front:
+                front.append(cut)
+            if pad.back:
+                back.append(cut)
+
+    ink: list[list[tuple[float, float]]] = []
+    ink_back: list[list[tuple[float, float]]] = []
+    for stroke in board.silk:
+        shape = stroke_outline(stroke)
+        if shape is None:
+            left["zero-length stroke"] = left.get("zero-length stroke", 0) + 1
+            continue
+        cut = inside(shape)
+        if len(cut) < 3:
+            continue
+        (ink_back if stroke.layer.startswith("B.") else ink).append(cut)
+
+    return ([flat(front, thickness + COPPER_THICKNESS_MM, COPPER, centre, True),
+             flat(ink, thickness + COPPER_THICKNESS_MM + SILK_THICKNESS_MM,
+                  SILKSCREEN, centre, True),
+             flat(back, -COPPER_THICKNESS_MM, COPPER, centre, False),
+             flat(ink_back, -COPPER_THICKNESS_MM - SILK_THICKNESS_MM,
+                  SILKSCREEN, centre, False)],
+            {"pads front": len(front), "pads back": len(back),
+             "ink front": len(ink), "ink back": len(ink_back),
+             "clipped to the outline": int(can_clip), **left})
+
+
+def point_in(ring: list[tuple[float, float]], point: tuple[float, float]) -> bool:
+    """Is this point inside the ring? Even-odd, by a ray along +x."""
+    hit = False
+    for a, b in zip(ring, ring[1:] + ring[:1]):
+        if (a[1] > point[1]) != (b[1] > point[1]):
+            span = b[1] - a[1]
+            if span and point[0] < (b[0] - a[0]) * (point[1] - a[1]) / span + a[0]:
+                hit = not hit
+    return hit
+
+
 def compose(spec: Composition, deflection: float, check: bool) -> int:
     """Read, confirm, compose and write one board. Returns the byte count."""
     print(f"{spec.board}:")
@@ -1823,6 +2137,14 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
 
     by_package = {component.package: component for component in CORRESPONDENCE}
     pieces = [slab(ring, spec.thickness_mm, spec.colour, centre)]
+    # **The copper and the ink, before any component stands on them**, so a
+    # part's own body hides the pads under it exactly as solder does.
+    drawn_art, tally = artwork(board, ring, spec.thickness_mm, centre)
+    pieces.extend(drawn_art)
+    print("  artwork " + ", ".join(f"{k} {v}" for k, v in tally.items()))
+    if board.silk_unread:
+        print("  not ink " + ", ".join(f"{k} {v}" for k, v in board.silk_unread)
+              + " -- text needs a font; the rest is a handful per board")
     drawn: list[str] = []
     #: A box around each placed component, for the renderer's wire physics.
     #: **Measured here because it is measured here already** -- the same

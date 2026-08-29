@@ -139,7 +139,9 @@ def test_an_empty_file_raises():
 def test_pads_are_read_with_position_and_size(footprint):
     smd = footprint.pads_of("smd")
     assert len(smd) == 1
-    assert smd[0] == Pad("1", "smd", 7.62, -8.455, 2.432, 1.524)
+    assert smd[0] == Pad("1", "smd", 7.62, -8.455, 2.432, 1.524,
+                         shape="roundrect", rotation_deg=90.0,
+                         layers=("F.Cu", "F.Mask"))
 
 
 def test_a_pad_without_rotation_still_parses(footprint):
@@ -346,7 +348,9 @@ def test_a_placement_carries_its_own_pads(board):
     placement that does not carry them cannot be checked at all."""
     got = {p.reference: p for p in read_board(board).placements}
     assert len(got["U4"].pads) == 2
-    assert got["U4"].pads[1] == Pad("33", "smd", 0.0, 0.0, 3.7, 3.7)
+    assert got["U4"].pads[1] == Pad("33", "smd", 0.0, 0.0, 3.7, 3.7,
+                                    shape="rect", rotation_deg=0.0,
+                                    layers=("F.Cu", "F.Paste", "F.Mask"))
 
 
 def test_only_the_outline_layer_is_taken_for_the_outline(board):

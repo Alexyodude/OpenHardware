@@ -105,6 +105,20 @@ class Pad:
     #: A package pad is numbered, not named; `GND` and `IO7/SCL` come from
     #: `<signals>`. None means the pad is not connected to anything.
     net: str | None
+    #: `rect | roundrect | circle | oval | custom`, and the ANGLE the pad's
+    #: own rectangle makes with the board's x axis once it has been placed --
+    #: not the angle stored in the file. Both are for DRAWING the copper and
+    #: neither affects where a pad is, which is why they default and why every
+    #: caller that only wants positions can ignore them.
+    #:
+    #: Empty and zero for an EAGLE board: `tools/eagle.py` reads `<smd>` and
+    #: `<pad>`, neither of which this project has yet needed the shape of.
+    shape: str = ""
+    rotation_deg: float = 0.0
+    #: Which side this pad's copper is on. A through-hole pad is on both, and
+    #: says so; a surface-mount pad is on the side its footprint states.
+    front: bool = True
+    back: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -116,6 +130,23 @@ class Segment:
     y1_mm: float
     x2_mm: float
     y2_mm: float
+
+
+@dataclasses.dataclass(frozen=True)
+class Stroke:
+    """A drawn line with the width it was drawn at. Named to match kicad's.
+
+    Silkscreen is ink, so it covers area and the width is most of what makes
+    it visible -- which is the whole difference from `Segment`, whose width on
+    a board OUTLINE means nothing.
+    """
+
+    layer: str
+    x1_mm: float
+    y1_mm: float
+    x2_mm: float
+    y2_mm: float
+    width_mm: float
 
 
 @dataclasses.dataclass(frozen=True)
@@ -179,6 +210,14 @@ class Board:
     version: str
     elements: tuple[Element, ...]
     outline: tuple[Segment, ...]
+    #: The ink printed on the board, in board millimetres with y upward.
+    #: Empty for an EAGLE board -- this reader does not gather layer 21 into
+    #: strokes today, and a composed Uno therefore has no silkscreen while a
+    #: composed XIAO does. Stated rather than silently uneven.
+    silk: tuple[Stroke, ...] = ()
+    #: What was on those layers and is not in `silk`, counted by kind, so a
+    #: caption can say what it left out.
+    silk_unread: tuple[tuple[str, int], ...] = ()
 
     def element(self, name: str) -> Element:
         for candidate in self.elements:
@@ -299,6 +338,7 @@ def _element_pads(
     name = node.get("name") or ""
     origin = (_float(node, "x", where), _float(node, "y", where))
     rot = node.get("rot")
+    turn, mirrored = _rotation(rot)
 
     pads: list[Pad] = []
     for drilled in package.findall("pad"):
@@ -313,16 +353,31 @@ def _element_pads(
         # exact either way.
         size = drilled.get("diameter")
         width = float(size) if size else _float(drilled, "drill", where)
-        pads.append(Pad(number, "thru_hole", x, y, width, width, nets.get((name, number))))
+        pads.append(Pad(
+            number, "thru_hole", x, y, width, width, nets.get((name, number)),
+            # **EAGLE's pad shapes are not KiCad's**, so they are translated
+            # here rather than passed through: `long` is an oval, `square`
+            # and `offset` are rectangles, and `round` and `octagon` are near
+            # enough a circle at the size a pad is drawn. A through-hole pad
+            # with no `shape` at all takes EAGLE's own default, which is
+            # round -- the Uno's 308 pads say nothing and are all round.
+            shape=_EAGLE_PAD_SHAPES.get(drilled.get("shape") or "round", "circle"),
+            rotation_deg=turn + _rotation(drilled.get("rot"))[0],
+            # A drilled pad goes through the board, so its copper is on both
+            # sides. EAGLE has no per-pad layer for it and does not need one.
+            front=True, back=True,
+        ))
 
     for surface in package.findall("smd"):
         number = surface.get("name") or ""
         x, y = place(
             _float(surface, "x", where), _float(surface, "y", where), origin, rot
         )
-        # dx/dy are the pad's own axes; a rotated element turns them too, but
-        # only the extent uses them and a swapped width and height changes
-        # nothing this importer emits. Left unrotated, and said so.
+        # dx/dy are the pad's own axes and the pad's own ANGLE turns them,
+        # which is why that angle is carried now: a pad map only ever wanted
+        # centres, and drawing the copper wants the rectangle. Layer 1 is
+        # EAGLE's top and 16 its bottom.
+        layer = surface.get("layer") or "1"
         pads.append(
             Pad(
                 number,
@@ -332,9 +387,29 @@ def _element_pads(
                 _float(surface, "dx", where),
                 _float(surface, "dy", where),
                 nets.get((name, number)),
+                shape="roundrect" if surface.get("roundness") else "rect",
+                rotation_deg=turn + _rotation(surface.get("rot"))[0],
+                front=layer == "1",
+                back=layer == "16",
             )
         )
+    if mirrored:
+        # A mirrored element is reflected in x before it is turned -- the rule
+        # `place` applies to every pad centre above -- and a reflection
+        # reverses the sense of an angle. The Uno places nothing mirrored, so
+        # this is the same care `from_kicad` takes over a back-side part
+        # rather than a case anything here exercises.
+        pads = [dataclasses.replace(pad, rotation_deg=-pad.rotation_deg)
+                for pad in pads]
     return tuple(pads)
+
+
+#: EAGLE's `<pad shape>` in `tools/kicad.py`'s vocabulary, which is the one
+#: `compose_board_3d.pad_outline` draws from. Two libraries, one drawing.
+_EAGLE_PAD_SHAPES = {
+    "round": "circle", "octagon": "circle",
+    "square": "rect", "offset": "rect", "long": "oval",
+}
 
 
 #: EAGLE's silkscreen layers: 21 is `tPlace`, the outline a component's body
