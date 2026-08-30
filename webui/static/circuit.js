@@ -482,6 +482,10 @@ export function analyse(bench) {
 
   //: How many wired parts have one leg in mid-air. See `JUNCTION_NOTE`.
   let midAir = 0;
+  //: Driven pins a surviving part warning names, so the bench-level pin note
+  //: below says each fact once. A warning `destroys` nulled is NOT in here --
+  //: the destroyed verdict names the part's current, not the pin's.
+  const named = new Set();
   for (const [index, part] of bench.parts.entries()) {
     if (!wired.has(index)) continue;
     const entry = report[index];
@@ -585,6 +589,9 @@ export function analyse(bench) {
       entry.reason = killed;
       entry.warning = null;
     }
+    if (entry.warning && pin && pinSentence(pin.name, pin.amps, bench.supply)) {
+      named.add(pin.name);
+    }
   }
 
   //: **Two parts cannot be wired to each other on this bench, and this is
@@ -614,6 +621,20 @@ export function analyse(bench) {
     "D13 → resistor → D12 → LED → GND is a current-limited LED wired that way.";
 
   const notes = [];
+  // **A pin past a limit is named whether or not anything lights** (OH-130).
+  // D13 driven high and wired with GND onto an LED's one wired leg is 5 V
+  // through the pin's own 40 ohms -- at least 125 mA, past the 40 mA absolute
+  // maximum -- and the whole report used to say only "off ... cathode is in
+  // mid-air": `warn` was reachable only through a lit part, and nothing in
+  // that circuit lights. The pin's current is already in `pinAmps` whatever
+  // the parts do, so the check belongs to the pin. A pin a surviving warning
+  // already names is skipped -- one sentence per fact, not one per place that
+  // noticed it.
+  for (const [name, amps] of pinAmps) {
+    if (named.has(name)) continue;
+    const sentence = pinSentence(name, amps, bench.supply);
+    if (sentence) notes.push(sentence);
+  }
   if (assumed) {
     notes.push("One part on this bench publishes no electrical model, so no " +
                "current is reported for any of them: a value stood in for it " +
@@ -662,19 +683,31 @@ function warn(amps, supply, model, pin) {
   // everything hanging off it and not this part's share. It is also a separate
   // sentence because it is a separate object: the part may be inside its
   // ratings while the pad driving it is not.
+  const sentence = pin ? pinSentence(pin.name, pin.amps, supply) : null;
+  if (sentence) said.push(sentence);
+  return said.length ? said.join(" ") : null;
+}
+
+/**
+ * The sentence naming a driven pin past a limit, or null inside them.
+ *
+ * One function for the two places the sentence is said -- a lit part's
+ * warning, and the bench-level note for a pin no surviving warning accounts
+ * for (OH-130) -- so the two cannot drift apart and a reader meets one shape
+ * either way.
+ */
+function pinSentence(name, amps, supply) {
   const over = [];
-  if (pin && supply.ratedAmps && pin.amps > supply.ratedAmps) {
+  if (supply.ratedAmps && amps > supply.ratedAmps) {
     over.push(`the ${milliamps(supply.ratedAmps)} this board rates a pin for`);
   }
-  if (pin && supply.absoluteAmps && pin.amps > supply.absoluteAmps) {
+  if (supply.absoluteAmps && amps > supply.absoluteAmps) {
     over.push(`the ${milliamps(supply.absoluteAmps)} absolute maximum in the ` +
               `${supply.chip}'s datasheet, which is permanent`);
   }
-  if (over.length) {
-    said.push(`Pin ${pin.name} carries at least ${milliamps(pin.amps)}, past ` +
-              `${over.join(" and past ")}.`);
-  }
-  return said.length ? said.join(" ") : null;
+  if (!over.length) return null;
+  return `Pin ${name} carries at least ${milliamps(amps)}, past ` +
+         `${over.join(" and past ")}.`;
 }
 
 /**

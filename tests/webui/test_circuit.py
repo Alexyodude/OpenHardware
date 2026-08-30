@@ -1325,13 +1325,111 @@ def test_a_single_part_with_a_leg_in_mid_air_is_not_told_about_junctions(tmp_pat
 
 def test_a_bench_whose_parts_are_all_completely_wired_gets_no_junction_note(tmp_path):
     """Nothing is stuck, so nothing needs explaining. A note that appeared on
-    a working circuit would train a reader to ignore the notes."""
+    a working circuit would train a reader to ignore the notes.
+
+    The bench is the current-limited series pair at 9.3 mA -- inside every
+    rating, so no note of ANY kind is owed. It used to be a bare LED straight
+    across D13, which was never a bench with nothing to explain: its pin
+    carries at least 40 mA, and when OH-130 gave that fact a sentence this
+    test's silence assertion met it. The junction note staying absent on a
+    working circuit is what this test pins, so the circuit has to work."""
     got = run(tmp_path, """
         const report = analyse({supply: UNO, pads: PADS,
-                                parts: [LED], wires: [
-            {pad: "13", part: 0, terminal: "anode"},
-            {pad: "GND", part: 0, terminal: "cathode"},
+                                parts: [RESISTOR, LED], wires: [
+            {pad: "13",  part: 0, terminal: "lead A"},
+            {pad: "j",   part: 0, terminal: "lead B"},
+            {pad: "j",   part: 1, terminal: "anode"},
+            {pad: "GND", part: 1, terminal: "cathode"},
         ]});
         console.log(JSON.stringify({note: report.note}));
     """)
     assert not got["note"], f"a complete circuit was given advice: {got['note']!r}"
+
+
+# --- a pin past a limit is named whether or not anything lights (OH-130) ----
+
+
+def test_a_pin_shorted_to_ground_is_named_while_the_part_is_off(tmp_path):
+    """**The 125 mA the report never mentioned.** D13 driven high and GND
+    wired to the same anode is 5 V across the pin's own 40 ohms -- at least
+    125 mA, past the 20 mA rating and the 40 mA absolute maximum -- and the
+    whole report used to be "off ... cathode is in mid-air": `warn` was
+    reachable only through a lit part, and nothing in this circuit lights.
+
+    The mid-air reason survives BESIDE the note, because both are true: the
+    part is off, and the pin is past a limit its datasheet calls permanent.
+    """
+    got = run(tmp_path, bench("""[
+        {pad: "13", part: 0, terminal: "anode"},
+        {pad: "GND", part: 0, terminal: "anode"},
+    ]""") + """
+        console.log(JSON.stringify({part: report.parts[0], note: report.note}));
+    """)
+    assert got["part"]["drive"] == "off"
+    assert "mid-air" in got["part"]["reason"]
+    assert got["note"], "a 125 mA short reported as nothing but mid-air"
+    assert "Pin 13 carries at least 125 mA" in got["note"]
+    assert "40 mA absolute maximum" in got["note"]
+    assert "permanent" in got["note"]
+
+
+def test_the_short_is_still_named_when_the_circuit_completes(tmp_path):
+    """GND to the cathode closes the LED's own loop, both its leads sit at
+    ground, and "no current: nothing is driving it" is true OF THE PART --
+    while the pin beside it still carries its 125 mA. Same short, second
+    probed topology, and the sentence must not depend on which one a person
+    built."""
+    got = run(tmp_path, bench("""[
+        {pad: "13", part: 0, terminal: "anode"},
+        {pad: "GND", part: 0, terminal: "anode"},
+        {pad: "GND", part: 0, terminal: "cathode"},
+    ]""") + """
+        console.log(JSON.stringify({part: report.parts[0], note: report.note}));
+    """)
+    assert got["part"]["drive"] == "off"
+    assert "nothing is driving it" in got["part"]["reason"]
+    assert got["note"]
+    assert "Pin 13 carries at least 125 mA" in got["note"]
+
+
+def test_a_pin_a_surviving_warning_names_is_not_named_twice(tmp_path):
+    """Two LEDs straight across D13 each carry ~25 mA -- past their 20 mA
+    rating, inside their 30 mA absolute maximum, so both survive -- and the
+    pin under them carries ~51 mA, which each part's warning already names.
+    The bench note stays out of it: one sentence per fact, not one per place
+    that noticed it."""
+    got = run(tmp_path, """
+        const report = analyse({supply: UNO, pads: PADS,
+                                parts: [LED, LED], wires: [
+            {pad: "13",  part: 0, terminal: "anode"},
+            {pad: "GND", part: 0, terminal: "cathode"},
+            {pad: "13",  part: 1, terminal: "anode"},
+            {pad: "GND", part: 1, terminal: "cathode"},
+        ]});
+        console.log(JSON.stringify({parts: report.parts, note: report.note}));
+    """)
+    for part in got["parts"]:
+        assert part["drive"] == "lit"
+        assert part["warning"] and "Pin 13" in part["warning"]
+    assert not (got["note"] and "Pin 13" in got["note"]), (
+        f"the pin was named twice: {got['note']!r}"
+    )
+
+
+def test_a_destroyed_parts_pin_is_still_named(tmp_path):
+    """`destroys` nulls the warning so a ruined part's card is a verdict and
+    nothing else -- which un-names the pin, so the pin's own fact moves to
+    the bench note. An LED straight across D13 is at least 40 mA through a
+    part whose absolute maximum is 30, and at least 40 mA through a pin rated
+    20."""
+    got = run(tmp_path, bench("""[
+        {pad: "13", part: 0, terminal: "anode"},
+        {pad: "GND", part: 0, terminal: "cathode"},
+    ]""") + """
+        console.log(JSON.stringify({part: report.parts[0], note: report.note}));
+    """)
+    assert got["part"]["drive"] == "damaged"
+    assert got["part"]["warning"] is None
+    assert got["note"]
+    assert "Pin 13 carries at least 40 mA" in got["note"]
+    assert "rates a pin for" in got["note"]
