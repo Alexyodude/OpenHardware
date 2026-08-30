@@ -686,3 +686,46 @@ def test_a_query_error_names_the_parameter(live_server):
         assert "invalid literal" not in body["error"], (
             "the reply is still int()'s own message, naming no field"
         )
+
+
+# --- a GET cannot mutate (OH-141) --------------------------------------------
+
+
+def test_a_get_cannot_reset_the_machine(live_server):
+    """**`<img src="/api/reset">` executed** (OH-141): a missing Origin is
+    allowed by design -- curl sends none -- and an img tag sends none
+    either, so any page in any tab could reset this session or burn steps
+    on a loaded board. Corruption, not disclosure (the tag cannot read the
+    reply), and a 405 closes it while the posture stays. The proof is
+    behavioural: the step count survives the refused GET, and the same
+    route still answers POST."""
+    post(live_server, "/api/step", {})
+    before = get(live_server, "/api/state?at=0&len=16")
+    request = urllib.request.Request(live_server + "/api/reset")
+    try:
+        with urllib.request.urlopen(request, timeout=10):
+            raise AssertionError("GET /api/reset was accepted")
+    except urllib.error.HTTPError as caught:
+        assert caught.code == 405
+        body = json.loads(caught.read())
+        assert "POST" in body["error"]
+    after = get(live_server, "/api/state?at=0&len=16")
+    assert after["steps"] == before["steps"], (
+        "the refused GET still reset the machine"
+    )
+    reset = post(live_server, "/api/reset", {})
+    assert isinstance(reset, dict), "POST /api/reset stopped working"
+
+
+def test_every_route_states_its_methods():
+    """The table and the dispatch are two lists of the same routes, and
+    this is what holds them together: a route added to `handle_api` without
+    a `ROUTE_METHODS` row fails HERE, by name, instead of shipping with
+    whatever verb reaches it first."""
+    import re
+    source = pathlib.Path(emulator_server.__file__).read_text(encoding="utf-8")
+    dispatched = set(re.findall(r'route == "(/api/[^"]+)"', source))
+    assert dispatched == set(emulator_server.ROUTE_METHODS), (
+        f"only in dispatch: {dispatched - set(emulator_server.ROUTE_METHODS)}; "
+        f"only in the table: {set(emulator_server.ROUTE_METHODS) - dispatched}"
+    )

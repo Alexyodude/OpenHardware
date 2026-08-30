@@ -711,6 +711,42 @@ def handle_api(session: emulator.Session, selection: Selection, route: str,
     raise ApiError(f"no such route: {route}")
 
 
+#: Every API route and the verbs that may reach it (OH-141).
+#:
+#: **A route that mutates answers only POST**, and the reason is the Origin
+#: policy's own edge: a MISSING Origin is allowed by design -- curl and the
+#: test suite send none -- and a cross-site `<img src="/api/reset">` sends
+#: none either. The tag cannot read the reply (no CORS), so nothing is
+#: disclosed; but before this table the request EXECUTED, and another tab
+#: could reset the session or burn steps on a loaded board. State
+#: corruption, not disclosure, and a 405 closes it. **The loopback-and-
+#: Origin posture itself is unchanged**; this is a gap inside it, not a
+#: challenge to it.
+#:
+#: Read-only routes accept both verbs: a POST-shaped read mutates nothing,
+#: and refusing it would break no attack. A route absent from this table
+#: does not exist; `test_every_route_states_its_methods` holds the two
+#: lists together.
+ROUTE_METHODS: dict[str, frozenset[str]] = {
+    "/api/board/load": frozenset({"POST"}),
+    "/api/board/compile": frozenset({"POST"}),
+    "/api/board/load-artefact": frozenset({"POST"}),
+    "/api/board/run": frozenset({"POST"}),
+    "/api/step": frozenset({"POST"}),
+    "/api/run": frozenset({"POST"}),
+    "/api/reset": frozenset({"POST"}),
+    "/api/load": frozenset({"POST"}),
+    "/api/target": frozenset({"POST"}),
+    "/api/board/artefacts": frozenset({"GET", "POST"}),
+    "/api/board/pins": frozenset({"GET", "POST"}),
+    "/api/board/state": frozenset({"GET", "POST"}),
+    "/api/targets": frozenset({"GET", "POST"}),
+    "/api/boards": frozenset({"GET", "POST"}),
+    "/api/samples": frozenset({"GET", "POST"}),
+    "/api/state": frozenset({"GET", "POST"}),
+}
+
+
 def prepare_compile(payload: dict[str, object]) -> tuple[str, object]:
     """The unlocked half of /api/board/compile: validate, then BUILD.
 
@@ -759,7 +795,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path.startswith("/api/"):
-            self._api(parsed.path, urllib.parse.parse_qs(parsed.query), {})
+            self._api(parsed.path, urllib.parse.parse_qs(parsed.query), {},
+                      "GET")
             return
         found = resolve_static(self.path)
         if found is None:
@@ -791,12 +828,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             self._json(400, {"error": "body must be a JSON object"})
             return
-        self._api(parsed.path, urllib.parse.parse_qs(parsed.query), payload)
+        self._api(parsed.path, urllib.parse.parse_qs(parsed.query), payload,
+                  "POST")
 
     # --- helpers ------------------------------------------------------------
 
     def _api(self, route: str, query: dict[str, list[str]],
-             payload: dict[str, object]) -> None:
+             payload: dict[str, object], verb: str) -> None:
+        # Before anything runs, even the unlocked compile prelude: a wrong
+        # verb is refused while the machine is still untouched (OH-141).
+        allowed = ROUTE_METHODS.get(route)
+        if allowed is not None and verb not in allowed:
+            self._json(405, {"error": (
+                f"{route} changes the machine and answers only "
+                f"{'/'.join(sorted(allowed))}; a {verb} must not mutate"
+            )})
+            return
         try:
             # **A compile BUILDS before the lock is taken** (OH-136): the
             # subprocess work touches no session state, so only the load
