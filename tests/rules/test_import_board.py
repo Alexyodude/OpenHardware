@@ -854,3 +854,94 @@ def test_the_pin_map_refuses_a_nonsense_scale_and_allows_none():
         pinmap.parse({**base, "px_per_mm": 0}, "here")
     with pytest.raises(pinmap.PinMapError):
         pinmap.parse({**base, "px_per_mm": "eight"}, "here")
+
+
+# --- the ink an EAGLE board prints (OH-122) ----------------------------------
+
+
+def test_the_unos_silkscreen_is_gathered_into_strokes():
+    """**The Uno was the only composed board with no white ink at all** --
+    `read_board` built `Board` with the silk default, so the most
+    recognisable board here had no part outlines, no polarity marks, and the
+    composer said `ink front 0` without even a `not ink` line. OH-110
+    recorded the gap and scoped it out; OH-122 closes it.
+
+    The counts are pinned to the vendor's file as it is: 428 package wires
+    plus 4 board-level on layer 21 minus the curved ones, and every unread
+    kind counted -- the same contract `kicad._silk_of` keeps.
+    """
+    board = eagle.read_board(_brd_uno())
+    front = [s for s in board.silk if s.layer == "F.SilkS"]
+    back = [s for s in board.silk if s.layer == "B.SilkS"]
+    assert len(front) == 407, f"front ink is {len(front)} strokes"
+    assert len(back) == 4, f"back ink is {len(back)} strokes"
+    unread = dict(board.silk_unread)
+    assert unread == {"arc": 21, "circle": 5, "rectangle": 16, "text": 24}, (
+        f"the unread tally moved: {unread}. If the vendor file changed, "
+        f"re-measure; if the reader changed, something stopped being counted"
+    )
+
+
+def test_a_package_stroke_is_placed_exactly_as_its_pads_are():
+    """The DIP-28's long body line, checked against NUMBERS and not against
+    `place` -- a right-hand side computed by the transform under test would
+    agree with itself however wrong it was.
+
+    ZU4 sits at (46.355, 16.383) R180, and the package draws its body line
+    from (-18.542, -2.794) to (18.542, -2.794) at 0.1524 mm. Rotated half a
+    turn about the element origin that is (64.897, 19.177) to (27.813,
+    19.177): origin + (18.542, 2.794) and origin - (18.542 - ... ) -- worked
+    by hand, and 64.897 = 46.355 + 18.542 while 19.177 = 16.383 + 2.794.
+    """
+    board = eagle.read_board(_brd_uno())
+    ends = {
+        frozenset({(round(s.x1_mm, 3), round(s.y1_mm, 3)),
+                   (round(s.x2_mm, 3), round(s.y2_mm, 3))})
+        for s in board.silk if abs(s.width_mm - 0.1524) < 1e-6
+    }
+    assert frozenset({(64.897, 19.177), (27.813, 19.177)}) in ends, (
+        "ZU4's body line is not where R180 about (46.355, 16.383) puts it -- "
+        "package ink is not being transformed the way the pads are"
+    )
+
+
+def test_a_mirrored_elements_ink_moves_to_the_other_face(tmp_path):
+    """EAGLE's MR puts the whole package on the underside, ink included. A
+    reader that kept tPlace ink on the front for a mirrored element would
+    print a bottom-mounted part's outline on the top of the board."""
+    path = tmp_path / "mirrored.brd"
+    path.write_text(
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<eagle version="9.6.2"><drawing><board>'
+        '<plain><wire x1="0" y1="0" x2="10" y2="0" width="0.2" layer="20"/>'
+        '<wire x1="0" y1="10" x2="10" y2="10" width="0.2" layer="20"/></plain>'
+        '<libraries><library name="L"><packages><package name="P">'
+        '<pad name="1" x="0" y="0" drill="1.016" diameter="1.8796"/>'
+        '<wire x1="-1" y1="0" x2="1" y2="0" width="0.15" layer="21"/>'
+        "</package></packages></library></libraries>"
+        '<elements>'
+        '<element name="A" library="L" package="P" x="2" y="2"/>'
+        '<element name="B" library="L" package="P" x="8" y="8" rot="MR0"/>'
+        "</elements><signals/>"
+        "</board></drawing></eagle>",
+        encoding="utf-8",
+    )
+    board = eagle.read_board(path)
+    layers = sorted(s.layer for s in board.silk)
+    assert layers == ["B.SilkS", "F.SilkS"], (
+        f"one plain element and one mirrored one should print one stroke a "
+        f"face, not {layers}"
+    )
+    mirrored = next(s for s in board.silk if s.layer == "B.SilkS")
+    # MR0 mirrors x about the element origin: the wire's ends land at 8 -/+ 1.
+    assert {round(mirrored.x1_mm, 3), round(mirrored.x2_mm, 3)} == {7.0, 9.0}
+
+
+def _brd_uno():
+    path = (REPO / "third_party" / "arduino-uno" / "UNO-TH_Rev3e.brd")
+    if not path.is_file():
+        pytest.skip(
+            "SKIPPED: UNO-TH_Rev3e.brd is not fetched. Run: "
+            "python tools/get_board_sources.py arduino-uno for the URL"
+        )
+    return path

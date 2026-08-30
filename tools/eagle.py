@@ -71,6 +71,7 @@ not, and a board with an asymmetric rotated package would settle it.
 
 from __future__ import annotations
 
+import collections
 import dataclasses
 import math
 import pathlib
@@ -527,6 +528,84 @@ def _open(path: pathlib.Path, wanted: str) -> ET.Element:
     return root
 
 
+#: EAGLE's two silkscreen INK layers in `tools/kicad.py`'s vocabulary, which
+#: is what draws them: 21 is `tPlace` and 22 is `bPlace`. Layer 51 (`tDocu`)
+#: deliberately stays out -- `_silk_extent` reads it for a BODY extent, but as
+#: ink it holds courtyards and keep-outs a real board does not print.
+INK_LAYERS = {"21": "F.SilkS", "22": "B.SilkS"}
+
+
+def _ink(board: ET.Element, elements: list[Element],
+         packages: dict) -> tuple[tuple[Stroke, ...], tuple[tuple[str, int], ...]]:
+    """Every straight silkscreen wire on the board, as placed strokes.
+
+    **The Arduino Uno printed nothing because this did not exist** (OH-122):
+    `read_board` built `Board` with the `silk` default, so `compose` said
+    `ink front 0, ink back 0` -- with no `not ink` line either -- while the
+    KiCad boards drew 81-1518 strokes a face. Counted in Arduino's file: 428
+    layer-21 wires on placed packages and 4 board-level, all straight, NO
+    FONT NEEDED.
+
+    Two sources, transformed exactly as their pads are:
+
+      * board-level `<plain>` wires, already in board coordinates;
+      * each element's package wires, through `place` with the element's own
+        spelling -- and **a mirrored element swaps its ink to the other
+        face**, because EAGLE's `MR` puts the whole package on the underside.
+
+    What is NOT read is counted by kind, the same contract `kicad._silk_of`
+    keeps: curved wires (the DIP notch), rectangles, circles, polygons and
+    text, so the composer prints what it left out instead of leaving silence.
+    """
+    strokes: list[Stroke] = []
+    unread: collections.Counter = collections.Counter()
+
+    def take(wire: ET.Element, layer: str,
+             transform=None) -> None:
+        if wire.get("curve") is not None:
+            unread["arc"] += 1
+            return
+        x1, y1 = float(wire.get("x1")), float(wire.get("y1"))
+        x2, y2 = float(wire.get("x2")), float(wire.get("y2"))
+        if transform is not None:
+            x1, y1 = transform(x1, y1)
+            x2, y2 = transform(x2, y2)
+        strokes.append(Stroke(layer, x1, y1, x2, y2,
+                              float(wire.get("width") or 0.0)))
+
+    for wire in board.findall("plain/wire"):
+        layer = INK_LAYERS.get(wire.get("layer"))
+        if layer is not None:
+            take(wire, layer)
+    for kind in ("rectangle", "circle", "polygon", "text"):
+        for node in board.findall(f"plain/{kind}"):
+            if node.get("layer") in INK_LAYERS:
+                unread[kind] += 1
+
+    for element in elements:
+        package = packages[(element.library, element.package)]
+        spelling = (("MR" if element.mirrored else "R")
+                    + str(int(element.rotation)))
+        origin = (element.x_mm, element.y_mm)
+
+        def placed(x: float, y: float,
+                   _origin=origin, _spelling=spelling) -> tuple[float, float]:
+            return place(x, y, _origin, _spelling)
+
+        for wire in package.findall("wire"):
+            layer = INK_LAYERS.get(wire.get("layer"))
+            if layer is None:
+                continue
+            if element.mirrored:
+                layer = "B.SilkS" if layer == "F.SilkS" else "F.SilkS"
+            take(wire, layer, placed)
+        for kind in ("rectangle", "circle", "polygon", "text"):
+            for node in package.findall(kind):
+                if node.get("layer") in INK_LAYERS:
+                    unread[kind] += 1
+    return tuple(strokes), tuple(sorted(unread.items()))
+
+
 def read_board(path: pathlib.Path) -> Board:
     """Read one EAGLE `.brd`.
 
@@ -589,8 +668,10 @@ def read_board(path: pathlib.Path) -> Board:
         if wire.get("layer") == DIMENSION_LAYER
     ]
     tracks, vias, unrouted = _routing(board, str(path))
+    silk, silk_unread = _ink(board, elements, packages)
     return Board(path.stem, root.get("version") or "unknown", tuple(elements),
-                 tuple(outline), traces=tracks, vias=vias,
+                 tuple(outline), silk=silk, silk_unread=silk_unread,
+                 traces=tracks, vias=vias,
                  traces_unread=unrouted)
 
 
