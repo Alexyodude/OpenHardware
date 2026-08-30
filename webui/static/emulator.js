@@ -170,12 +170,48 @@ function renderStatus(state) {
   $("stop").disabled = !running;
 }
 
+/**
+ * Hand the shared panes to one machine, say so, and stand the other's
+ * controls down (OH-137).
+ *
+ * Before this the 8086 toolbar stayed live over a loaded board: Step re-drew
+ * an AVR's 34 named registers as ax/bx/cx/dx, and a Run loop left going kept
+ * overwriting the board's panes on every 20,000-step burst. The sample Load
+ * button stays enabled either way, because loading a sample is how the 8086
+ * takes the panes back.
+ */
+function showMachine(name) {
+  panes = name;
+  const board = name !== "i8086";
+  $("machine").textContent = name;
+  // The run loop checks this flag every burst; `refresh` also refuses below,
+  // so a burst already in flight lands nowhere instead of on the board.
+  if (board) running = false;
+  for (const id of ["step", "run", "stop", "reset", "at"]) {
+    $(id).disabled = board;
+  }
+  // Handing the panes BACK re-enables all five; `renderStatus` re-derives
+  // step/run/stop from the run state on the next 8086 redraw.
+}
+
 // --- the loop -----------------------------------------------------------------
 
 let running = false;
 let watching = 0x0200;
 
+//: Which machine owns the shared panes -- "i8086", or a loaded board's name
+//: (OH-137). The registers, flags, disassembly and memory panes are ONE set
+//: of DOM with two writers, and this is the variable that says whose turn it
+//: is. It changes only through `showMachine`.
+let panes = "i8086";
+
 async function refresh(rememberPrevious = true) {
+  // The 8086's redraw, and it refuses while a board owns the panes: a run
+  // burst that was in flight when the board loaded would otherwise land its
+  // ax/bx/cx/dx over the board's registers -- the OH-137 desync. `panes`
+  // leaves "i8086" only through `showMachine`, which also stops the run
+  // loop, so `runContinuously` never dereferences the null this returns.
+  if (panes !== "i8086") return null;
   const state = await api(`/api/state?at=${watching}&len=256`);
   renderRegisters(state.registers);
   renderFlags(state.flags);
@@ -1032,6 +1068,11 @@ function renderBoardState(state) {
   previousBoard = Object.fromEntries(
     state.registers.map((register) => [register.name, register.value]),
   );
+  // Declared on every redraw, not only on load, so the toolbar cannot drift
+  // from the panes however this was reached -- a load, an artefact, a clock
+  // tick. `boardImage` is set before the first call on both load paths; the
+  // fallback word covers a redraw that somehow beats it.
+  showMachine(boardImage ? boardImage.board : "board");
 }
 
 /** What the board printed, or why there is nothing to print.
@@ -1100,6 +1141,7 @@ async function loadSelected() {
   watching = sample.watch;
   $("at").value = hex(watching, 4);
   previous = null;
+  showMachine("i8086");
   await refresh();
 }
 

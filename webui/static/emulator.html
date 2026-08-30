@@ -99,6 +99,10 @@
   <span class="spacer"></span>
 
   <span class="only-emulator">
+    <!-- Which machine the registers, flags, disassembly and memory panes
+         are showing. Two machines write into one set of panes, and before
+         OH-137 nothing said whose turn it was. -->
+    <span class="status" id="machine" title="the machine these panes show">i8086</span>
     <span class="status" id="status" data-state="running">ready</span>
     <span class="status" id="counter" title="instructions executed">0 steps</span>
 

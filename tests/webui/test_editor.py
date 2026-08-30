@@ -276,3 +276,71 @@ def test_typing_in_the_sketch_editor_does_not_step_the_emulator():
             f"{element} is missing from the keydown guard, so typing into it "
             f"steps the emulator instead"
         )
+
+
+# --- the 8086 toolbar over a loaded board (OH-137) ---------------------------
+
+
+def _stripped(body: str) -> str:
+    """Comment lines out, the OH-117 lesson: an assertion a comment can
+    satisfy is not an assertion about the code."""
+    return "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("//"))
+
+
+def test_the_8086_redraw_refuses_while_a_board_owns_the_panes():
+    """**Step over an Uno silently re-drew the AVR's 34 named registers as
+    ax/bx/cx/dx** (OH-137): the shared panes have two writers, and the 8086's
+    stayed live over a loaded board -- worst as a Run loop left going, which
+    overwrote the board's panes on every 20,000-step burst. The guard is in
+    `refresh` itself, before the fetch, so a burst already in flight lands
+    nowhere."""
+    source = SCRIPT.read_text(encoding="utf-8")
+    body = _stripped(source.split("async function refresh(", 1)[1]
+                     .split("\n}", 1)[0])
+    guard = body.index('if (panes !== "i8086") return null;')
+    fetch = body.index("await api(")
+    assert guard < fetch, (
+        "the refusal runs after the fetch, so the 8086 state is already drawn "
+        "over the board's panes by the time it fires"
+    )
+
+
+def test_loading_a_board_stands_the_8086_controls_down():
+    """`showMachine` is the one place the panes change hands: a board hand
+    kills the run loop and disables the five 8086-only controls; the sample
+    Load stays live because it is the way back, and `loadSelected` says so by
+    handing the panes to "i8086" again."""
+    source = SCRIPT.read_text(encoding="utf-8")
+    body = _stripped(source.split("function showMachine(", 1)[1]
+                     .split("\n}", 1)[0])
+    assert "running = false" in body, (
+        "a run loop left going keeps overwriting the board's panes every burst"
+    )
+    assert '["step", "run", "stop", "reset", "at"]' in body, (
+        "the 8086-only controls stay live over a board"
+    )
+    board_redraw = _stripped(source.split("function renderBoardState(", 1)[1]
+                             .split("\n}", 1)[0])
+    assert "showMachine(" in board_redraw, (
+        "a board redraw does not declare the owner, so the toolbar drifts "
+        "from the panes"
+    )
+    way_back = _stripped(source.split("async function loadSelected(", 1)[1]
+                         .split("\n}", 1)[0])
+    assert 'showMachine("i8086")' in way_back, (
+        "nothing hands the panes back, so the 8086 controls stay dead forever"
+    )
+
+
+def test_the_panes_say_which_machine_they_are_showing():
+    """The label the desync made necessary: one set of panes, two writers,
+    and a reader must not have to deduce the owner from register names."""
+    html = HTML.read_text(encoding="utf-8")
+    assert 'id="machine"' in html, "no element carries the machine name"
+    source = SCRIPT.read_text(encoding="utf-8")
+    body = _stripped(source.split("function showMachine(", 1)[1]
+                     .split("\n}", 1)[0])
+    assert '$("machine").textContent = name' in body, (
+        "the label exists and nothing writes it"
+    )
