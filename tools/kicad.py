@@ -795,37 +795,57 @@ def _body_of(node: list) -> tuple[float, float, float, float] | None:
     **Text is not read** either, for the reason `eagle._silk_extent` gives: a
     reference designator is placed wherever it is legible, as often beside a
     part as on it, and including one would make a 1 mm capacitor measure five.
-    """
-    closed_x: list[float] = []
-    closed_y: list[float] = []
-    for graphic in children(node, "fp_rect"):
-        got = _graphic(graphic, "start")
-        if got and got[0].endswith(".Fab"):
-            closed_x += [got[1][0], got[1][2]]
-            closed_y += [got[1][1], got[1][3]]
-    for graphic in children(node, "fp_poly"):
-        where = first(graphic, "layer")
-        if not (where and len(where) > 1 and str(where[1]).endswith(".Fab")):
-            continue
-        points = first(graphic, "pts")
-        for point in children(points or [], "xy"):
-            coords = _floats(point)
-            if len(coords) >= 2:
-                closed_x.append(coords[0])
-                closed_y.append(coords[1])
-    if closed_x:
-        return (min(closed_x), min(closed_y), max(closed_x), max(closed_y))
 
-    xs: list[float] = []
-    ys: list[float] = []
-    for graphic in children(node, "fp_line"):
-        got = _graphic(graphic, "start")
-        if got and got[0].endswith(".Fab"):
-            xs += [got[1][0], got[1][2]]
-            ys += [got[1][1], got[1][3]]
-    if not xs:
-        return None
-    return (min(xs), min(ys), max(xs), max(ys))
+    **`*.SilkS` is read only where `*.Fab` draws nothing** (OH-124). Seeed's
+    QFN32G -- the C3's and the C6's own processor -- draws its whole body on
+    the silkscreen and nothing on Fab at all, and a body of None disabled
+    the silk-extent check AND the mark check: the two most prominent parts
+    on those boards had no turn check of any kind. On silk the preference
+    INVERTS: lines win over closed shapes, because a silk `fp_poly` in these
+    libraries is a POLARITY MARK (the C3's D1, its U.FL antennas), and a
+    0.3 mm marker triangle taken as the body would misstate the extent every
+    offset is divided by. The failure mode left is safe by construction: a
+    body that IS the marker puts the mark at its own centre, and
+    `MARK_OFFSET_FRACTION` rejects a centred mark rather than calling a turn
+    off it. Courtyard, paste and adhesive layers are never read.
+    """
+    def closed_points(suffix: str) -> tuple[list[float], list[float]]:
+        xs: list[float] = []
+        ys: list[float] = []
+        for graphic in children(node, "fp_rect"):
+            got = _graphic(graphic, "start")
+            if got and got[0].endswith(suffix):
+                xs += [got[1][0], got[1][2]]
+                ys += [got[1][1], got[1][3]]
+        for graphic in children(node, "fp_poly"):
+            where = first(graphic, "layer")
+            if not (where and len(where) > 1 and str(where[1]).endswith(suffix)):
+                continue
+            points = first(graphic, "pts")
+            for point in children(points or [], "xy"):
+                coords = _floats(point)
+                if len(coords) >= 2:
+                    xs.append(coords[0])
+                    ys.append(coords[1])
+        return xs, ys
+
+    def line_points(suffix: str) -> tuple[list[float], list[float]]:
+        xs: list[float] = []
+        ys: list[float] = []
+        for graphic in children(node, "fp_line"):
+            got = _graphic(graphic, "start")
+            if got and got[0].endswith(suffix):
+                xs += [got[1][0], got[1][2]]
+                ys += [got[1][1], got[1][3]]
+        return xs, ys
+
+    for suffix, preference in ((".Fab", (closed_points, line_points)),
+                               (".SilkS", (line_points, closed_points))):
+        for gather in preference:
+            xs, ys = gather(suffix)
+            if xs:
+                return (min(xs), min(ys), max(xs), max(ys))
+    return None
 
 
 def _mark_of(node: list) -> tuple[float, float] | None:
@@ -837,24 +857,66 @@ def _mark_of(node: list) -> tuple[float, float] | None:
     and OH-100's test asserts that circle sits in pad 1's quadrant. This makes
     the same reading available to every placement rather than to one part.
 
-    The assembly layer rather than the silkscreen, for the reason `_body_of`
-    gives at length: silkscreen goes wherever it is legible and `*.Fab` is the
-    drawing of the part itself. The centroid of every circle on it is
+    The assembly layer AHEAD of the silkscreen, for the reason `_body_of`
+    gives at length: silkscreen goes wherever it is legible and `*.Fab` is
+    the drawing of the part itself. The centroid of what was read is
     returned, and the caller decides whether it is off-centre enough to be a
     marker at all -- see `compose_board_3d.MARK_OFFSET_FRACTION`.
+
+    **The vendors used five spellings and this read one** (OH-124). The
+    survey dumped every "nothing here can see" placement: the C3's and C6's
+    processors put the dot as an `fp_circle` on `F.SilkS`; the C3's SOT-25s
+    as an `fp_poly` on `F.Fab`; its D1 and the U.FL antennas as `fp_poly` on
+    `F.SilkS`; its charge LED as an `fp_arc` there. So each layer is read
+    for circles first, then polys, then arcs -- a circle is the
+    unambiguous dot, while a poly on Fab may equally be the body itself,
+    whose centroid sits at the body centre and is REJECTED by the offset
+    floor rather than mistaken for a corner mark -- and `*.SilkS` is
+    consulted only where `*.Fab` yields nothing at all.
     """
-    marks: list[tuple[float, float]] = []
-    for circle in children(node, "fp_circle"):
-        layer = first(circle, "layer")
-        if not (layer and len(layer) > 1 and str(layer[1]).endswith(".Fab")):
-            continue
-        at = _floats(first(circle, "center") or [])
-        if len(at) >= 2:
-            marks.append((at[0], at[1]))
-    if not marks:
-        return None
-    return (sum(m[0] for m in marks) / len(marks),
-            sum(m[1] for m in marks) / len(marks))
+    def on(shape: str, suffix: str):
+        for graphic in children(node, shape):
+            layer = first(graphic, "layer")
+            if layer and len(layer) > 1 and str(layer[1]).endswith(suffix):
+                yield graphic
+
+    def circles(suffix: str) -> list[tuple[float, float]]:
+        marks = []
+        for circle in on("fp_circle", suffix):
+            at = _floats(first(circle, "center") or [])
+            if len(at) >= 2:
+                marks.append((at[0], at[1]))
+        return marks
+
+    def polys(suffix: str) -> list[tuple[float, float]]:
+        marks = []
+        for poly in on("fp_poly", suffix):
+            points = [_floats(point)
+                      for point in children(first(poly, "pts") or [], "xy")]
+            points = [c for c in points if len(c) >= 2]
+            if points:
+                marks.append((sum(c[0] for c in points) / len(points),
+                              sum(c[1] for c in points) / len(points)))
+        return marks
+
+    def arcs(suffix: str) -> list[tuple[float, float]]:
+        marks = []
+        for arc in on("fp_arc", suffix):
+            points = [_floats(first(arc, name) or [])
+                      for name in ("start", "mid", "end")]
+            points = [c for c in points if len(c) >= 2]
+            if points:
+                marks.append((sum(c[0] for c in points) / len(points),
+                              sum(c[1] for c in points) / len(points)))
+        return marks
+
+    for suffix in (".Fab", ".SilkS"):
+        for gather in (circles, polys, arcs):
+            marks = gather(suffix)
+            if marks:
+                return (sum(m[0] for m in marks) / len(marks),
+                        sum(m[1] for m in marks) / len(marks))
+    return None
 
 
 def _models_of(node: list) -> tuple[StatedModel, ...]:

@@ -1483,11 +1483,14 @@ def test_the_receptacles_contacts_are_named_by_the_standard():
 def test_a_footprint_that_draws_no_body_is_refused_rather_than_guessed():
     """The ESP32-C3's own receptacle, which is why the C6 is read instead.
 
-    Its footprint carries no `F.Fab` outline and no `Description` either, so
-    nothing in that file says how large or how tall the part is. Two boards
-    share this package and only one of them drew it; naming the wrong one
-    would have to invent a body, which is what
-    `tools/model_from_datasheet.py` exists not to do.
+    Its footprint carries no `F.Fab` outline and no `Description` either.
+    Before OH-124 the refusal fired at the missing Fab outline; the widened
+    body reader now takes the silkscreen outline where Fab is silent, so
+    the file DOES say how large the part is -- and still not how TALL,
+    which no layer of a land pattern carries. The refusal moved one check
+    downstream, to the empty Description, and the boundary it guards is
+    unchanged: a body of invented thickness is what
+    `tools/model_from_datasheet.py` exists not to draw.
     """
     from tools import model_from_datasheet
 
@@ -1496,7 +1499,7 @@ def test_a_footprint_that_draws_no_body_is_refused_rather_than_guessed():
     c3 = compose.PCB_CACHE / "ESP32-C3.kicad_pcb"
     if not c3.is_file():
         pytest.skip("SKIPPED: ESP32-C3.kicad_pcb is not fetched")
-    with pytest.raises(SystemExit, match=r"draws no \*\.Fab outline"):
+    with pytest.raises(SystemExit, match=r"states no length\*width\*height"):
         model_from_datasheet.socket_geometry(dataclasses.replace(spec, pcb=c3))
 
 
@@ -3065,13 +3068,19 @@ def test_the_dip_is_turned_the_way_arduino_draw_their_own_notch():
 
 
 def test_every_part_whose_vendor_marks_pin_one_agrees_with_its_model():
-    """**The general rule, on every composed board.** Where the vendor draws a
-    pin-1 marker and the model has a feature a half turn moves, the stated
-    turn must put the two together and beat every other turn by the margin.
+    """**The general rule, on every composed board.** Where the vendor draws
+    a pin-1 marker and the model has a feature a half turn moves, no RIVAL
+    turn may beat the stated one by the margin.
 
-    Six packages qualify across the six boards -- DIL28-3, MLF32, USON8,
-    QFN60, QFN48 and LGA14 -- and the smallest margin among them is 1.6 mm
-    against a `TURN_MARGIN_MM` of 0.3.
+    Not "the stated turn must win by the margin", which is what this
+    asserted until OH-124 -- the widened marker reader gave the C3's U.FL
+    a mark, and its nearly four-fold-symmetric mesh puts every turn within
+    0.006 mm of every other: nobody wins, the comparison carries no
+    information, and the composer counts the part unseen. What stays fatal
+    here is what was always fatal: a rival turn decisively closer to the
+    vendor's own dot than the turn the table states -- the exact shape in
+    which the same reader caught the C3's processor a quarter turn wrong
+    the day it landed.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
     by_package = {c.package: c for c in compose.CORRESPONDENCE}
@@ -3097,10 +3106,11 @@ def test_every_part_whose_vendor_marks_pin_one_agrees_with_its_model():
             checked += 1
             rival = min((miss for turn, miss in misses.items()
                          if turn != component.turn), default=None)
-            assert rival is None or rival - misses[component.turn] > compose.TURN_MARGIN_MM, (
+            assert rival is None or misses[component.turn] < rival + compose.TURN_MARGIN_MM, (
                 f"{spec.board}: {element.name} ({element.package}) is turned "
-                f"{component.turn:.0f} and the vendor's own pin-1 marker does "
-                f"not clearly agree -- {{t: round(m, 3) for t, m in misses.items()}}"
+                f"{component.turn:.0f} and a rival turn puts the model's "
+                f"feature decisively closer to the vendor's own marker -- "
+                f"{ {t: round(m, 3) for t, m in misses.items()} }"
             )
     if not checked:
         pytest.skip("no layouts on disk; run tools/get_board_sources.py")

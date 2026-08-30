@@ -397,7 +397,18 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm",
         "thirty-three pads spanning 4.900 x 4.900 mm -- thirty-two leads on "
         "0.5 mm pitch around a 5 x 5 mm body, plus the exposed pad that makes "
-        "thirty-three. The ESP32-C3 itself, and the name states all of it.",
+        "thirty-three. The ESP32-C3 itself, and the name states all of it. "
+        "TURNED 90, and the first thing OH-124's widened pin-1 reader did "
+        "was catch this: the C3 draws the footprint with pad 1 entering on "
+        "a different edge than the C6's one-letter sibling -- pad 1 local "
+        "(-1.75, 2.45) against (-2.45, -1.75), axes swapped -- and "
+        "compensates in the placement (-90 against 0), so THIS pairing "
+        "needs the quarter turn the C6's does not. Measured: turn 0 put "
+        "the model's own feature 4.621 mm from the vendor's dot, 90 puts "
+        "it 1.540 -- a win past TURN_MARGIN_MM by a factor of ten. The "
+        "composed C3 had shown its processor a quarter turn wrong since "
+        "OH-93, invisible to a span, a centre, and a silk box alike.",
+        turn=90.0,
     ),
     Component(
         "USB2.0-TYPE-C", "modelled", "USB2.0-TYPE-C",
@@ -2721,16 +2732,29 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             rivals = [(miss, turn) for turn, miss in pointing.items()
                       if turn != component.turn]
             best = min(rivals, default=None)
-            if best is not None and pointing[component.turn] > best[0] - TURN_MARGIN_MM:
+            stated = pointing[component.turn]
+            if best is not None and best[0] <= stated - TURN_MARGIN_MM:
+                # A rival turn wins by the margin: the turn is WRONG.
                 raise SystemExit(
                     f"{spec.board}: {element.name} ({element.package}) is "
                     f"turned {component.turn:.0f}, which puts the model's own "
-                    f"asymmetric feature {pointing[component.turn]:.3f} mm "
+                    f"asymmetric feature {stated:.3f} mm "
                     f"from the pin-1 marker the vendor drew -- and "
                     f"{best[1]:.0f} puts it {best[0]:.3f}. Both of those come "
                     f"out of vendor files and neither out of CORRESPONDENCE, "
                     f"so believe them rather than a picture."
                 )
+            if best is not None and stated > best[0] - TURN_MARGIN_MM:
+                # **Nobody wins by the margin, and that is a THIRD case**
+                # (OH-124). OH-106's six packages all decided by 1.6 mm or
+                # more, so "not a decisive win" and "a rival won" were the
+                # same condition -- until the widened marker reader gave the
+                # C3's U.FL a mark and its nearly four-fold-symmetric mesh
+                # put every turn within 0.006 mm of every other. A margin
+                # test on a symmetric mesh carries no information: the turn
+                # IS observable and nothing here can check it, which is
+                # exactly what the unseen count is for.
+                unpinned.append(f"{element.name} ({element.package})")
         elif turn_unseen(element, mesh, put, component.turn,
                          spec.thickness_mm, centre):
             # Counted and printed rather than passed over: this part's turn IS

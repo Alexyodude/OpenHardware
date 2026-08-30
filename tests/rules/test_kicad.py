@@ -1024,3 +1024,123 @@ def test_a_stated_model_never_silently_replaces_the_measured_correspondence():
         f"one, and the vendor was wrong about it. More than one means the "
         f"question of which source to believe is worth re-opening"
     )
+
+
+# --- the pin-1 reader's other four spellings (OH-124) ------------------------
+
+#: One footprint per spelling the 2026-08-30 survey found in the vendor's own
+#: boards, plus the orderings that keep the old reading ahead of the new.
+SPELLINGS = """(kicad_pcb
+\t(version 20241229)
+\t(generator "pcbnew")
+\t(gr_line
+\t\t(start 0 0)
+\t\t(end 50 0)
+\t\t(stroke (width 0.05) (type solid))
+\t\t(layer "Edge.Cuts")
+\t)
+\t(footprint "T:FABDOT"
+\t\t(layer "F.Cu")
+\t\t(at 10 10)
+\t\t(property "Reference" "U1"
+\t\t\t(at 0 0 0)
+\t\t\t(layer "F.SilkS")
+\t\t)
+\t\t(fp_circle (center -2 -2) (end -1.8 -2) (stroke (width 0.1) (type solid)) (layer "F.Fab"))
+\t\t(fp_circle (center 2 2) (end 2.2 2) (stroke (width 0.1) (type solid)) (layer "F.SilkS"))
+\t\t(fp_rect (start -3 -3) (end 3 3) (stroke (width 0.1) (type solid)) (layer "F.Fab"))
+\t\t(fp_poly (pts (xy -3 -3) (xy 3 -3) (xy 3 3) (xy -3 3)) (stroke (width 0.1) (type solid)) (layer "F.Fab"))
+\t\t(pad "1" smd rect (at -2 -2) (size 0.5 0.5) (layers "F.Cu"))
+\t)
+\t(footprint "T:FABPOLY"
+\t\t(layer "F.Cu")
+\t\t(at 20 10)
+\t\t(property "Reference" "U2"
+\t\t\t(at 0 0 0)
+\t\t\t(layer "F.SilkS")
+\t\t)
+\t\t(fp_poly (pts (xy -1.9 -1.9) (xy -1.5 -1.9) (xy -1.9 -1.5)) (stroke (width 0.1) (type solid)) (layer "F.Fab"))
+\t\t(fp_rect (start -2 -2) (end 2 2) (stroke (width 0.1) (type solid)) (layer "F.Fab"))
+\t\t(pad "1" smd rect (at -1.8 -1.8) (size 0.5 0.5) (layers "F.Cu"))
+\t)
+\t(footprint "T:SILKMARKS"
+\t\t(layer "F.Cu")
+\t\t(at 30 10)
+\t\t(property "Reference" "D1"
+\t\t\t(at 0 0 0)
+\t\t\t(layer "F.SilkS")
+\t\t)
+\t\t(fp_line (start -2 -2) (end 2 -2) (stroke (width 0.12) (type solid)) (layer "F.SilkS"))
+\t\t(fp_line (start 2 -2) (end 2 2) (stroke (width 0.12) (type solid)) (layer "F.SilkS"))
+\t\t(fp_line (start 2 2) (end -2 2) (stroke (width 0.12) (type solid)) (layer "F.SilkS"))
+\t\t(fp_line (start -2 2) (end -2 -2) (stroke (width 0.12) (type solid)) (layer "F.SilkS"))
+\t\t(fp_poly (pts (xy -1.9 -1.9) (xy -1.6 -1.9) (xy -1.9 -1.6)) (stroke (width 0.1) (type solid)) (layer "F.SilkS"))
+\t\t(pad "1" smd rect (at -1.8 -1.8) (size 0.5 0.5) (layers "F.Cu"))
+\t)
+\t(footprint "T:SILKARC"
+\t\t(layer "F.Cu")
+\t\t(at 40 10)
+\t\t(property "Reference" "CHG0"
+\t\t\t(at 0 0 0)
+\t\t\t(layer "F.SilkS")
+\t\t)
+\t\t(fp_arc (start -2 -2.2) (mid -1.8 -2) (end -2 -1.8) (stroke (width 0.12) (type solid)) (layer "F.SilkS"))
+\t\t(pad "1" smd rect (at -2 -2) (size 0.5 0.5) (layers "F.Cu"))
+\t)
+)
+"""
+
+
+def _spellings(tmp_path):
+    path = tmp_path / "SPELLINGS.kicad_pcb"
+    path.write_text(SPELLINGS, encoding="utf-8")
+    return {p.reference: p for p in read_board(path).placements}
+
+
+def test_each_marker_spelling_the_vendors_used_is_read(tmp_path):
+    """**The reader knew one spelling and the vendors used five** (OH-124).
+    A poly on Fab, a poly on silk beside the outline lines, and an arc on
+    silk each answer with their centroid; the numbers are hand-worked from
+    the literals in `SPELLINGS`, not read back from the reader."""
+    placed = _spellings(tmp_path)
+    # U2: the SOT-25 shape -- a marker poly AND a body rect share F.Fab, and
+    # the poly's centroid wins because no circle is present. Hand-worked:
+    # ((-1.9)+(-1.5)+(-1.9))/3 = -5.3/3.
+    assert placed["U2"].mark == pytest.approx((-5.3 / 3, -5.3 / 3))
+    # D1: silk lines are the BODY (the inversion), the silk poly the mark.
+    assert placed["D1"].body == pytest.approx((-2.0, -2.0, 2.0, 2.0))
+    assert placed["D1"].mark == pytest.approx((-5.4 / 3, -5.4 / 3))
+    # CHG0: an arc alone -- (start + mid + end) / 3.
+    assert placed["CHG0"].mark == pytest.approx((-5.8 / 3, -2.0))
+
+
+def test_fab_stays_ahead_of_silk_and_a_dot_ahead_of_a_poly(tmp_path):
+    """The old reading keeps its rank: U1 carries a circle on BOTH layers
+    and the Fab one answers, so every placement read before OH-124 reads
+    exactly as it did -- the silkscreen is a fallback, not a vote. U1 also
+    carries a body-outline poly on Fab whose centroid is the body centre:
+    it is there to LOSE, because a poly outranking the dot would swap a
+    corner mark for a centred one the offset floor then discards."""
+    placed = _spellings(tmp_path)
+    assert placed["U1"].mark == pytest.approx((-2.0, -2.0))
+    assert placed["U1"].body == pytest.approx((-3.0, -3.0, 3.0, 3.0))
+
+
+def test_the_esp32_processors_pin_one_dot_is_read_from_the_silkscreen():
+    """**The C3's and C6's own processors had no turn check of any kind**
+    (OH-124): their QFN32G draws body and dot on F.SilkS and NOTHING on
+    F.Fab, so `body` and `mark` were both None and every check that needs
+    either was disabled. The literals are measured out of the vendor's own
+    board files by hand: the C3's dot at (-2.794, 2.794) against a
+    +/-2.54 mm silk box, the C6's at (-2.75, -2.8) against +/-2.5 mm --
+    each a corner dot well past the `MARK_OFFSET_FRACTION` floor."""
+    for name, dot, half in (("ESP32-C3", (-2.794, 2.794), 2.54),
+                            ("ESP32-C6", (-2.75, -2.8), 2.5)):
+        pcb = REPO / "third_party" / "seeed-pcb" / f"{name}.kicad_pcb"
+        if not pcb.is_file():
+            pytest.skip(f"{pcb} absent; see docs/research/board-models/README.md")
+        u4 = next(p for p in read_board(pcb).placements if p.reference == "U4")
+        assert u4.mark == pytest.approx(dot), f"{name} U4 mark"
+        assert u4.body == pytest.approx((-half, -half, half, half)), (
+            f"{name} U4 body is not its silk outline"
+        )
