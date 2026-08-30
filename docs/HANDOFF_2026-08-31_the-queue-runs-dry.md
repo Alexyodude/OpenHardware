@@ -180,7 +180,7 @@ tests/: eleven files grew ~45 tests; test_board3d.py holds the new
 
 ## 5. Open work, highest priority first
 
-### 5.1 Browser-verify the night's UI affordances — *software-only, START HERE*
+### 5.1 Browser-verify the night's UI affordances — **DONE 2026-08-31, see §9**
 
 Everything above is unit/node/source-verified; NOTHING drove a real browser
 over the new UI. On http://127.0.0.1:8088/ (server already current), with
@@ -277,3 +277,59 @@ OH-126's window).
 ### 8.6 `tools/tickets.py`: set OH_SESSION_ID explicitly on every command;
 `set --touch` takes ONE path per invocation (repeats silently keep only the
 last when passed in one call).
+
+---
+
+## 9. Addendum, 2026-08-31 morning: §5.1 executed — all five items green
+
+A playwright pass (headless chromium, REAL pointer events through the
+canvas's own raycast path, positions from `board3d.js`'s exported
+`describe()`/`toScreen()` harness) ran all of §5.1: **38/38 checks passed.**
+
+  1. **OH-116 direct wire**: dragging pad 13 → LED anode, LED cathode →
+     resistor lead A (terminal-to-terminal), GND → lead B all landed; the
+     panel chip reads `lead A ↔ 5 mm LED's cathode`; the junction note is
+     absent ("Every part is wired…"); and with the sketch below running,
+     both parts read **9.302 mA, "at least 9.3 mA through it"** —
+     2.8/301 to ten digits, matching `test_circuit`'s hand-worked case.
+  2. **OH-126 trimmer**: added from the menu with three terminals offered;
+     5V→lead A + GND→lead B reads **0.909 mA** (5/5500); unwiring lead B by
+     its chip's × and grounding the wiper instead reads **1.818 mA**
+     (5/2750). Both reasons word-for-word the tests' sentences.
+  3. **OH-140 Step + watch**: a sketch built through the page (2180 bytes,
+     real avr-gcc), Step advanced the pc 01F9→01FA on the stopped clock;
+     the watch box `0x0000,0x0002` showed its words after load and on run
+     ticks.
+  4. **OH-131/137**: the remove control took the LED off with BOTH its
+     wires (including the from-end one); `#machine` read `i8086` cold and
+     `Arduino Uno` after the load.
+  5. **OH-124 C3 QFN**: the composed DIP board's QFN renders its pin-1
+     dimple at one definite corner. The vendor's silk DOT itself is in the
+     deliberately-not-drawn set (silk circles are counted, not drawn), so
+     the visible-agreement half of this item overstated what a render can
+     show: the agreement's enforcer is the mark rule's own measurement
+     (turn 0 = 4.621 mm from the vendor's dot, turn 90 = 1.540 — the
+     `QFN32G` row in `COMPOSITIONS`), re-run green this morning
+     (15 mark/turn tests).
+
+Corrections and observations out of the pass:
+
+  * **The header's "server runs CURRENT code" was FALSE at resume.** The
+    detached process had started 8/30 21:22 — before the night's API
+    commits — so `/api/boards` had no `buildable` and the step route was
+    missing. Killed and restarted 2026-08-31 ~04:3x; verified `buildable`
+    rides the entries. Trap for §8: a detached server survives task
+    reaping *and code changes equally well* — after a night of server
+    commits, curl for a field the night added before trusting it.
+  * **A Step blanks the watch note**: the page posts `/api/board/step`
+    without `words=`, so the note fills on load/run fetches (which ride
+    `boardStateUrl()`) and clears on a step. Candidate follow-up beside
+    OH-140; deliberately not filed (§5.3 discipline).
+  * **The default blink is ~24 s per half-phase on the wall**: the sim ran
+    at ~337k instr/s against the real 16 MHz, so `delay(500)` is 8M
+    instructions. The pass drove D13 with a constant-HIGH sketch instead;
+    anyone re-verifying by hand should expect the blink to be *slow*, not
+    broken.
+  * Verification script, log and screenshots are session-local
+    (`scratchpad/verify_ui.py` and `shots/` of session d4fefe50); the
+    numbers above are the durable record.
