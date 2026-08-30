@@ -2,7 +2,7 @@
 id: OH-128
 title: A carved pin reports the group origin, so every wire anchors at the board's
   centre
-status: open
+status: done
 priority: P2
 created: '2026-08-30'
 ---
@@ -34,3 +34,26 @@ DONE WHEN a carved pad's world position is the pad's, not the group's; a wire
 dragged from any Uno pad anchors at that pad in the browser; and the fix is
 held by a test that would have caught this -- position-based, not a source
 grep.
+
+## DONE, 2026-08-30
+
+The carved mesh's vertices are re-baked relative to the pad's own point and
+that point becomes the mesh's POSITION -- same triangles, same places on
+screen, and `getWorldPosition` now answers where the pad is. Verified in the
+browser: the Uno's pads report 30 distinct world positions spread across
+25 x 27 scene units where every carved pad used to report the one group
+origin; 32 of 32 still find pins.
+
+**And fixing it surfaced a second defect this ticket now owns**: the claim
+buckets were keyed by PIN NAME, so after OH-117 the Uno's three GND pads
+shared one bucket and the tail loop built THREE coincident copies of the same
+mesh, each bucket slot holding a different one. The buckets live on the
+wanted entries now -- one pad mesh, one bucket.
+
+OH-95's record stands corrected as this ticket asked: the raycast survived
+the carve, the anchor did not.
+
+**Honest limit**: no headless harness can run `carvePins`, so the pin is a
+stripped-source assertion plus the browser measurement above, and both
+mutations (position never set; vertices left absolute so the offset doubles)
+are killed. A carve harness would upgrade this and OH-129's test too.

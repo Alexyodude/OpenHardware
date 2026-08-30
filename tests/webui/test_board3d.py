@@ -1968,3 +1968,39 @@ def test_image_y_maps_to_scene_z_with_the_same_sign_as_the_models_pins():
     )
     assert "depth / 2 - pad.y * SCALE" not in source
     assert "depth / 2 - centreY * SCALE" not in source
+
+
+def test_a_carved_pin_carries_its_place_on_the_mesh_and_not_only_in_the_vertices():
+    """**Every wire on a board with vendor pins anchored at the board's
+    centre-underside** (OH-128). `carvePins` baked the pad's offset into the
+    replacement mesh's GEOMETRY and never set its position, so
+    `getWorldPosition` -- which `anchorOf` calls every frame, and `beginWire`
+    and the drag plane call once each -- answered the model group's origin
+    for every carved pad. OH-95's close note claimed the anchor kept working
+    through the carve; the raycast did, the anchor did not.
+
+    Verified in the browser when it landed: the Uno's pads report 30 distinct
+    world positions spread across 25 x 27 scene units, where before the fix
+    every carved pad reported the one origin. Asserted here at the source
+    with comments stripped (the OH-117 lesson), because no headless harness
+    can run carvePins -- that gap is on OH-128's record.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    body = source.split("function carvePins(", 1)[1].split("\nfunction ", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "pin.position.copy(pad.at)" in code, (
+        "the carved mesh's position is no longer set, so every consumer of "
+        "getWorldPosition gets the model group's origin again"
+    )
+    assert "positions[at] -= pad.at.x" in code, (
+        "the vertices are no longer re-baked relative to the pad, so setting "
+        "the position DOUBLES the offset and every pin renders off-board"
+    )
+    # And the buckets live on the wanted ENTRIES, not in a map keyed by pin
+    # name: three pads called GND shared one bucket and built three
+    # coincident copies of the same mesh.
+    assert "claimed" not in code, (
+        "a per-name bucket is back, so a repeated name builds duplicate "
+        "z-fighting meshes and the slots point at different copies"
+    )

@@ -1261,8 +1261,16 @@ function carvePins(group, pcbThickness) {
   //: Triangles claimed by each pad: positions, normals, and the colour the
   //: VENDOR gave the surface they came out of -- which is the pin's own metal
   //: and not the state colour the cylinder happened to be wearing.
-  const claimed = new Map(wanted.map(
-    (pad) => [pad.pin, { positions: [], normals: [], metal: null }]));
+  //:
+  //: **On the ENTRY, not in a map keyed by name** (OH-128). Three of an
+  //: Uno's pads are called GND (OH-117), and a per-name bucket built the
+  //: same mesh three times over -- three coincident copies z-fighting, each
+  //: bucket slot holding a different one. One pad mesh, one bucket.
+  for (const pad of wanted) {
+    pad.positions = [];
+    pad.normals = [];
+    pad.metal = null;
+  }
   const corner = new THREE.Vector3();
   const centre = new THREE.Vector3();
 
@@ -1296,7 +1304,7 @@ function carvePins(group, pcbThickness) {
           const gap = Math.hypot(centre.x - pad.at.x, centre.z - pad.at.z);
           if (gap < nearest) {
             nearest = gap;
-            mine = pad.pin;
+            mine = pad;
           }
         }
       }
@@ -1304,7 +1312,7 @@ function carvePins(group, pcbThickness) {
         keep.push(array[at], array[at + 1], array[at + 2]);
         continue;
       }
-      const take = claimed.get(mine);
+      const take = mine;
       take.metal ??= object.material.color.clone();
       for (let corner_ = 0; corner_ < 3; corner_++) {
         corner.fromBufferAttribute(position, array[at + corner_]);
@@ -1326,8 +1334,22 @@ function carvePins(group, pcbThickness) {
 
   const found = [];
   for (const pad of wanted) {
-    const { positions, normals, metal } = claimed.get(pad.pin);
+    const { positions, normals, metal } = pad;
     if (positions.length < 9) continue;   // fewer than one triangle
+    // **The pad's place lives on the MESH, not in the vertices** (OH-128).
+    // Baked group-local, the mesh's own position was (0,0,0) and
+    // getWorldPosition answered the model group's origin -- the pad-map
+    // centroid on the board's UNDERSIDE -- for every carved pad. Every wire
+    // on a board with vendor pins anchored there, pinned inside the PCB slab
+    // collider, which is most of what "many issues with wire" was. So the
+    // vertices are re-baked relative to the pad's own point and that point
+    // becomes the mesh's position: the same triangles render in the same
+    // places, and getWorldPosition answers where the pad is.
+    for (let at = 0; at < positions.length; at += 3) {
+      positions[at] -= pad.at.x;
+      positions[at + 1] -= pad.at.y;
+      positions[at + 2] -= pad.at.z;
+    }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position",
                           new THREE.Float32BufferAttribute(positions, 3));
@@ -1351,6 +1373,7 @@ function carvePins(group, pcbThickness) {
     // `repaint` blends toward the state colour, so blending twice would walk
     // the pin away from brass one call at a time.
     pin.userData.metal = metal.clone();
+    pin.position.copy(pad.at);
     group.add(pin);
     release(pad.post);
     view.board.remove(pad.post);
