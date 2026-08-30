@@ -47,3 +47,40 @@ does not want, so it is per-variant, not per-PCB.
 Do not move the PAD MAP inboard to the castellations. The pads are the
 vendor's own DIP footprint and they are where the physical pins are; the model
 is the thing missing geometry.
+
+## CORRECTION, 2026-08-30, same day -- the geometry read the wrong way round
+
+The title says the pad map sits "outside" the model. Measured against the
+vendor's own footprints, it is INBOARD, and the map is right:
+
+    XIAO-RP2350-DIP.kicad_mod   58 pads, through-hole rows at y = +/-7.62
+                                -> 15.24 mm apart, the breadboard 0.6" DIP
+                                   convention, Seeed's own statement
+    XIAO-RP2350-SMD.kicad_mod   30 pads, castellation rows at y = +/-8.08
+                                -> 16.16 mm apart, at the board edge
+
+So the DIP variant's pins are on a 0.6" grid inboard of the castellations,
+the pad map (generated from the DIP footprint at 8 px/mm, self-consistent) is
+where the physical pins are, and the composed model -- built from the
+published SMD `.kicad_pcb`, which places no DIP holes -- has no metal within
+3.25 mm of any of them. The fix direction stands: the MODEL lacks the DIP
+variant's headers; the pad map must not move.
+
+## AND A SECOND DEFECT FELL OUT OF THE ARITHMETIC
+
+`pad_span` in the composed `.glb` is measured off the SMD castellation field
+(15.24 x 17.78 for the RP2350), but on a DIP board the page's pads are the
+DIP footprint's field (15.24 x 15.24). `scaleFromPads` then divides the page's
+121.9 px -- which is the 15.24 mm axis -- by the model's LONGER span, 17.78,
+and draws the model at 6.86 px/mm where the map is 8. **Every XIAO DIP model
+is drawn ~17% too small**, which compounds the missing-headers offset and
+scatters even the castellation pads.
+
+Two sub-fixes, then:
+  1. compose the DIP variants with two `PinHeader` models on the pad map's own
+     0.6" rows (KiCad publishes `PinHeader_1x07_P2.54mm_Vertical`; the Uno
+     already composes headers by this exact mechanism);
+  2. make the scale comparison compare like with like -- either emit
+     `pad_span` for the pad field the page actually shows, or fit the scale
+     from paired pads rather than from two bounding boxes of two different
+     fields.
