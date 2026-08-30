@@ -49,6 +49,17 @@ PANEL = STATIC / "board3d-panel.js"
 PAGE = STATIC / "emulator.html"
 SHEET = STATIC / "emulator.css"
 
+
+def stripped(source: str) -> str:
+    """`source` with its `//` comment lines removed, for source-level
+    assertions. **The OH-117 lesson, factored once**: an assertion a comment
+    can satisfy is not an assertion about the code, so every structural test
+    below greps a comment-stripped body -- and after the twenty-fourth
+    inline copy of the same three lines, the idiom earned a name.
+    """
+    return "\n".join(line for line in source.splitlines()
+                      if not line.lstrip().startswith("//"))
+
 #: `#abc`, `#aabbcc` or `0x` followed by six hex digits -- a colour written
 #: down rather than read from the stylesheet.
 COLOUR_LITERAL = re.compile(r"#[0-9a-fA-F]{3,8}\b|0x[0-9a-fA-F]{6}\b")
@@ -148,8 +159,7 @@ def test_the_renderer_writes_down_no_colour_of_its_own():
     # sentence can reset is not a tripwire. What it is actually for is catching
     # the light constant leaking into a material, so it counts uses and
     # compares them with the number of lights there are.
-    code = "\n".join(line for line in body.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(body)
     lights = code.count("AmbientLight(") + code.count("DirectionalLight(")
     assert code.count("NEUTRAL_LIGHT") == lights, (
         f"NEUTRAL_LIGHT is used {code.count('NEUTRAL_LIGHT')} times outside "
@@ -961,8 +971,7 @@ def test_the_scene_casts_shadows_and_everything_in_it_takes_part():
     # version of this line went red on its own reasoning. That is the third
     # time in this file: `NEUTRAL_LIGHT`, then `DirectionalLight`, now this.
     assert "THREE.PCFShadowMap" in source
-    code = "\n".join(line for line in source.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(source)
     assert "PCFSoftShadowMap" not in code, (
         "r185 deprecates it and silently substitutes PCFShadowMap, so the "
         "source would be describing a setting the renderer does not use"
@@ -1057,8 +1066,7 @@ def test_the_renderer_tone_maps_and_not_with_a_film_look():
     # Comments stripped first, the same way `test_the_renderer_writes_down_no
     # _colour_of_its_own` does it: the reasoning above the line names ACES in
     # order to refuse it, and a check that a sentence can trip is not a check.
-    code = "\n".join(line for line in source.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(source)
     assert "ACESFilmic" not in code
     assert "toneMappingExposure" not in code, (
         "an exposure other than 1.0 is a second place the picture's brightness "
@@ -1240,8 +1248,7 @@ def test_the_softbox_turns_to_face_the_board_rather_than_holding_a_rotation():
     """
     source = RENDERER.read_text(encoding="utf-8")
     room = source.split("function studio(renderer) {", 1)[1].split("\n}", 1)[0]
-    code = "\n".join(line for line in room.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(room)
     assert "light.lookAt(" in code
     assert "rotation.x" not in code, (
         "a fixed rotation cannot follow a derived position"
@@ -1454,10 +1461,7 @@ def test_the_panel_asks_the_server_what_it_has_when_the_page_opens():
     """
     panel = PANEL.read_text(encoding="utf-8")
     page = (STATIC / "emulator.js").read_text(encoding="utf-8")
-    both = "\n".join(
-        line for line in (panel + "\n" + page).splitlines()
-        if not line.lstrip().startswith("//")
-    )
+    both = stripped(panel + "\n" + page)
     # Something, somewhere, draws without waiting to be clicked.
     assert "boardPins?.reload()" in both, (
         "nothing draws the board at startup, so a fresh page never asks"
@@ -1575,8 +1579,7 @@ def test_choosing_a_board_asks_the_server_about_that_board():
     board the SESSION is running -- so a picked board could not be asked
     about at all, whatever called it."""
     source = PANEL.read_text(encoding="utf-8")
-    code = "\n".join(line for line in source.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(source)
     assert "board-pick" in code, (
         "the panel does not read the picker, so it cannot name the board"
     )
@@ -1592,8 +1595,7 @@ def test_the_board_picker_redraws_when_it_changes():
     value `loadBoardImage` read when Load was pressed, which is why the 3D
     view first appeared after a firmware load rather than after a choice."""
     source = (STATIC / "emulator.js").read_text(encoding="utf-8")
-    code = "\n".join(line for line in source.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(source)
     wiring = code.split('$("board-pick").addEventListener("change"', 1)
     assert len(wiring) == 2, "the picker has no change listener"
     # The listener's whole body, to its closing `});` -- it stopped being a
@@ -1615,8 +1617,7 @@ def test_the_board_the_picker_opens_on_is_drawn_without_being_touched():
     happens whether or not the server had a board to tell us about.
     """
     source = (STATIC / "emulator.js").read_text(encoding="utf-8")
-    code = "\n".join(line for line in source.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(source)
     picker = code.split("function fillBoardPicker", 1)[1].split("\n}", 1)[0]
     assert ".finally(" in picker and "boardPins?.reload()" in picker, (
         "filling the picker does not draw, so the default board never appears"
@@ -1635,8 +1636,7 @@ def test_a_board_with_no_core_can_still_be_chosen_and_looked_at():
     that has not expired.
     """
     source = (STATIC / "emulator.js").read_text(encoding="utf-8")
-    code = "\n".join(line for line in source.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(source)
     picker = code.split("function fillBoardPicker", 1)[1].split("\n}", 1)[0]
     assert "option.disabled" not in picker, (
         "a board with no core cannot be selected, so it cannot be drawn"
@@ -1683,8 +1683,7 @@ def test_only_metal_is_carved_out_of_the_model():
     """
     source = RENDERER.read_text(encoding="utf-8")
     carve = source.split("function carvePins(", 1)[1].split("\n}\n", 1)[0]
-    code = "\n".join(line for line in carve.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(carve)
     assert "metalness > 0.5" in code, (
         "carving is not restricted to conductors, so a shroud can be a pin"
     )
@@ -1769,8 +1768,7 @@ def test_only_the_part_of_a_pin_above_the_board_is_carved():
     """
     source = RENDERER.read_text(encoding="utf-8")
     carve = source.split("function carvePins(", 1)[1].split("\n}\n", 1)[0]
-    code = "\n".join(line for line in carve.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(carve)
     assert "centre.y > pcbThickness" in code, (
         "a pin's tail below the board is carved with its head"
     )
@@ -1992,8 +1990,7 @@ def test_a_carved_pin_carries_its_place_on_the_mesh_and_not_only_in_the_vertices
     """
     source = RENDERER.read_text(encoding="utf-8")
     body = source.split("function carvePins(", 1)[1].split("\nfunction ", 1)[0]
-    code = "\n".join(line for line in body.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(body)
     assert "pin.position.copy(pad.at)" in code, (
         "the carved mesh's position is no longer set, so every consumer of "
         "getWorldPosition gets the model group's origin again"
@@ -2027,8 +2024,7 @@ def test_a_maps_stated_scale_beats_the_fit_from_mismatched_fields():
     """
     source = RENDERER.read_text(encoding="utf-8")
     body = source.split("function placeModel(", 1)[1].split("\nfunction ", 1)[0]
-    code = "\n".join(line for line in body.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(body)
     at_statement = code.index("layout.px_per_mm")
     at_fit = code.index("scaleFromPads(")
     assert at_statement < at_fit, (
@@ -2054,8 +2050,7 @@ def test_a_wire_holding_a_released_pad_is_repointed_at_the_carved_pin():
     """
     source = RENDERER.read_text(encoding="utf-8")
     body = source.split("function carvePins(", 1)[1].split("\nfunction ", 1)[0]
-    code = "\n".join(line for line in body.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(body)
     assert "for (const wire of view.wires)" in code, (
         "carvePins no longer walks the wires, so a wire made during the "
         "model fetch keeps the released pad mesh forever"
@@ -2082,8 +2077,7 @@ def test_every_part_row_carries_the_hatch_the_destroyed_latch_depends_on():
     """
     panel = PANEL.read_text(encoding="utf-8")
     body = panel.split("function renderBench(", 1)[1].split("\nfunction ", 1)[0]
-    code = "\n".join(line for line in body.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(body)
     assert "scene.removePart(index)" in code, (
         "no part row calls removePart, so a destroyed part can never leave "
         "the bench"
@@ -2111,8 +2105,7 @@ def test_removing_a_part_takes_its_wires_and_its_verdict_with_it():
     renderer = RENDERER.read_text(encoding="utf-8")
     body = renderer.split("function removePart(", 1)[1].split(
         "\nfunction ", 1)[0]
-    code = "\n".join(line for line in body.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(body)
     assert "discardWire(wire)" in code, "the part's wires outlive it"
     assert "releasePart(part)" in code, (
         "the part's own meshes are not released -- and ONLY its own: OH-133 "
@@ -2133,8 +2126,7 @@ def test_a_wires_colour_is_keyed_off_its_id_and_not_the_live_count():
     the identical treatment. Comments stripped, the OH-117 lesson."""
     source = RENDERER.read_text(encoding="utf-8")
     body = source.split("function beginWire(", 1)[1].split("\n}", 1)[0]
-    code = "\n".join(line for line in body.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(body)
     assert "const id = nextWireId++" in code, (
         "the id is not taken first, so the colour has nothing stable to key on"
     )
@@ -2154,8 +2146,7 @@ def test_the_drag_in_progress_does_not_survive_a_cleared_bench():
     with them."""
     source = RENDERER.read_text(encoding="utf-8")
     body = source.split("export function clearBench(", 1)[1].split("\n}", 1)[0]
-    code = "\n".join(line for line in body.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(body)
     assert "view.dragging = null" in code, (
         "the drag survives clearBench and writes to a released wire"
     )
@@ -2173,8 +2164,7 @@ def test_removing_a_part_releases_only_what_is_the_parts_own():
     source = RENDERER.read_text(encoding="utf-8")
     for opener in ("export function removePart(", "export function clearBench("):
         body = source.split(opener, 1)[1].split("\n}", 1)[0]
-        code = "\n".join(line for line in body.splitlines()
-                         if not line.lstrip().startswith("//"))
+        code = stripped(body)
         assert "releasePart(part)" in code, (
             f"{opener} does not go through releasePart"
         )
@@ -2182,8 +2172,7 @@ def test_removing_a_part_releases_only_what_is_the_parts_own():
             f"{opener} blanket-releases shared geometry again"
         )
     helper = source.split("function releasePart(", 1)[1].split("\n}", 1)[0]
-    helper = "\n".join(line for line in helper.splitlines()
-                       if not line.lstrip().startswith("//"))
+    helper = stripped(helper)
     assert "part.userData.lens?.material?.dispose()" in helper, (
         "the cloned lens material leaks with every removed part"
     )
@@ -2201,8 +2190,7 @@ def test_the_cold_page_does_not_ask_about_no_board():
     without the doomed round-trip. Comments stripped."""
     panel = PANEL.read_text(encoding="utf-8")
     body = panel.split("async function reload(", 1)[1].split("\n}", 1)[0]
-    code = "\n".join(line for line in body.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(body)
     assert "if (!picked)" in code, "the cold page still asks about no board"
     assert code.index("if (!picked)") < code.index("await fetch"), (
         "the guard sits after the fetch it exists to prevent"
@@ -2218,8 +2206,7 @@ def test_the_panel_shows_the_composers_own_gaps():
     `model.not_drawn`, the composer's own measurement. Comments stripped,
     the OH-117 lesson."""
     panel = PANEL.read_text(encoding="utf-8")
-    code = "\n".join(line for line in panel.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(panel)
     assert "model.not_drawn" in code, (
         "the panel never reads the gaps the composer now ships"
     )
@@ -2239,8 +2226,7 @@ def test_the_drag_starts_on_a_part_terminal_too():
     bench wire carries its `from` end, and `removePart` takes the wires
     that BEGIN on the part with it."""
     source = RENDERER.read_text(encoding="utf-8")
-    code = "\n".join(line for line in source.splitlines()
-                     if not line.lstrip().startswith("//"))
+    code = stripped(source)
     assert "padUnder() ?? terminalUnder()" in code, (
         "a drag cannot start on a part terminal"
     )
@@ -2255,8 +2241,7 @@ def test_the_drag_starts_on_a_part_terminal_too():
         "removing a part leaves the wires that began on it dangling"
     )
     panel = PANEL.read_text(encoding="utf-8")
-    stripped = "\n".join(line for line in panel.splitlines()
-                         if not line.lstrip().startswith("//"))
-    assert "wire.fromLabel" in stripped, (
+    code = stripped(panel)
+    assert "wire.fromLabel" in code, (
         "the panel cannot say which part a part-to-part wire grips"
     )
