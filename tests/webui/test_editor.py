@@ -344,3 +344,18 @@ def test_the_panes_say_which_machine_they_are_showing():
     assert '$("machine").textContent = name' in body, (
         "the label exists and nothing writes it"
     )
+
+
+def test_the_client_reads_the_status_before_parsing_the_body():
+    """A non-JSON error -- the static handler\'s text/plain 404, an unknown
+    route -- surfaced as a SyntaxError from response.json() and the status
+    that told the story was lost behind it (OH-139). Comments stripped, the
+    OH-117 lesson."""
+    source = SCRIPT.read_text(encoding="utf-8")
+    body = source.split("async function api(", 1)[1].split("\n}", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert code.index("response.ok") < code.index("response.json()"), (
+        "the body is parsed before the status is read, so a text/plain "
+        "error is a SyntaxError instead of its status"
+    )

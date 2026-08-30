@@ -688,6 +688,18 @@ def _run(command: tuple[str, ...],
             )
         except subprocess.TimeoutExpired:
             pass
+        except FileNotFoundError:
+            # A toolchain whose gcc exists and whose objcopy does not is a
+            # broken INSTALL, not a bad sketch -- and it used to kill the
+            # whole request with no response at all (OH-139). Rule 9: the
+            # error carries the value that caused it. 127 is the shell's own
+            # "command not found".
+            return subprocess.CompletedProcess(
+                command, returncode=127, stdout="",
+                stderr=(f"no such tool: {command[0]} -- the compiler was "
+                        f"found, so the toolchain package is incomplete. "
+                        f"Reinstall it with pio pkg install."),
+            )
     return subprocess.CompletedProcess(
         command, returncode=124, stdout="",
         stderr=(f"the build ran out of its {BUILD_BUDGET_SECONDS} s budget "
@@ -719,6 +731,16 @@ def _diagnostics(done: subprocess.CompletedProcess[str],
     the `file:line:column:` shape an editor can parse.
     """
     text = (done.stderr or done.stdout or "").strip()
-    return text.replace(str(sketch), "sketch.cpp").replace(
+    text = text.replace(str(sketch), "sketch.cpp").replace(
         str(sketch).replace("\\", "/"), "sketch.cpp"
     )
+    # The build's other paths say nothing a caller can use (OH-139): the
+    # temporary directory is gone before anybody reads this, and sixty
+    # characters of toolchain install path bury the one line that matters --
+    # a SAMD21 link error led with eight of them. Both slash spellings of
+    # each, exactly as with the sketch above.
+    for root, label in ((str(sketch.parent), "<build>"),
+                        (str(PACKAGES), "<toolchain>")):
+        text = text.replace(root, label).replace(
+            root.replace("\\", "/"), label)
+    return text

@@ -669,3 +669,20 @@ def test_the_locked_handler_consumes_the_prepared_build():
         "the locked handler ignores the build the unlocked prelude already "
         "did, so every sketch compiles twice and the second holds the lock"
     )
+
+
+def test_a_query_error_names_the_parameter(live_server):
+    """`at=zz` used to answer "invalid literal for int() with base 0: \'zz\'"
+    -- true, and useless in a reply to a request carrying three parameters,
+    while the body path already named its fields (OH-139)."""
+    request = urllib.request.Request(live_server + "/api/state?at=zz&len=16")
+    try:
+        with urllib.request.urlopen(request, timeout=10):
+            raise AssertionError("at=zz was accepted")
+    except urllib.error.HTTPError as caught:
+        assert caught.code == 400
+        body = json.loads(caught.read())
+        assert "at" in body["error"] and "zz" in body["error"]
+        assert "invalid literal" not in body["error"], (
+            "the reply is still int()'s own message, naming no field"
+        )

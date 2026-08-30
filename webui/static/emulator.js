@@ -36,10 +36,17 @@ async function api(path, body) {
         body: JSON.stringify(body),
       };
   const response = await fetch(path, options);
-  const data = await response.json();
+  // Status FIRST (OH-139): a non-JSON error -- the static handler's
+  // text/plain 404, an unknown route -- used to surface as a SyntaxError
+  // from json(), and the status that told the story was lost behind it.
   if (!response.ok) {
-    throw new Error(data.error || `${response.status}`);
+    let reason = `${response.status}`;
+    try {
+      reason = (await response.json()).error || reason;
+    } catch { /* not JSON; the status is the story */ }
+    throw new Error(reason);
   }
+  const data = await response.json();
   return data;
 }
 

@@ -640,3 +640,38 @@ def test_a_deadline_already_passed_runs_nothing_at_all():
                          deadline=began - 1)
     assert done.returncode == 124
     assert time.monotonic() - began < 1, "the doomed command was still run"
+
+
+# --- the error paths carry their reasons (OH-139) ----------------------------
+
+
+def test_a_missing_tool_is_a_result_naming_it():
+    """A toolchain whose gcc exists and whose objcopy does not is a broken
+    INSTALL -- and it used to kill the whole request with no response: the
+    FileNotFoundError was in nobody's except list. 127 is the shell's own
+    "command not found", riding the same rail every compiler failure rides."""
+    import time
+    done = compiler._run(("definitely-no-such-tool-oh139",),
+                         deadline=time.monotonic() + 10)
+    assert done.returncode == 127
+    assert "definitely-no-such-tool-oh139" in done.stderr
+    assert "incomplete" in done.stderr
+
+
+def test_link_diagnostics_scrub_the_machines_paths():
+    """A link error used to lead with the temporary object path --
+    `C:\\Users\\...\\Temp\\openhardware-build-xyz\\00.o` -- sixty
+    characters that say nothing a caller can use about a directory that no
+    longer exists. The compiler's words survive; the paths become labels."""
+    needs_toolchain()
+    built = compiler.build(
+        BOARD,
+        "void undefined_fn();\nvoid setup(){ undefined_fn(); }\nvoid loop(){}",
+    )
+    assert not built.ok
+    assert "undefined_fn" in built.diagnostics, built.diagnostics
+    assert "<build>" in built.diagnostics, (
+        "the object path was not scrubbed to its label"
+    )
+    assert "Temp" not in built.diagnostics
+    assert str(compiler.PACKAGES) not in built.diagnostics

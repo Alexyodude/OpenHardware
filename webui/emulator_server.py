@@ -323,6 +323,22 @@ class BoardSlot:
         return self.session
 
 
+def _query_int(query: dict[str, list[str]], name: str, default: str) -> int:
+    """One query parameter as an int, or a refusal NAMING the parameter.
+
+    `int(value, 0)`'s own message reads "invalid literal for int() with
+    base 0: 'zz'" -- true, and useless in a reply to a request carrying
+    three parameters. The body path already names its field (`_int`,
+    `_optional_int`); the query path owed the same. (OH-139)
+    """
+    raw = query.get(name, [default])[0]
+    try:
+        return int(raw, 0)
+    except ValueError:
+        raise ApiError(f"{name} must be an integer, decimal or 0x hex, "
+                       f"got {raw!r}") from None
+
+
 def _optional_int(payload: dict[str, object], name: str) -> int | None:
     """An integer field that may be absent, and may arrive as a hex string.
 
@@ -593,7 +609,7 @@ def handle_board_api(boards: BoardSlot, route: str,
         ]
         return boards.require().state(
             memory_at=int(at[0], 0) if at else None,
-            memory_length=int(query.get("len", ["64"])[0], 0),
+            memory_length=_query_int(query, "len", "64"),
             words=watched,
         )
 
@@ -658,8 +674,8 @@ def handle_api(session: emulator.Session, selection: Selection, route: str,
         ]}
 
     if route == "/api/state":
-        at = int(query.get("at", ["512"])[0], 0)
-        length = int(query.get("len", ["256"])[0], 0)
+        at = _query_int(query, "at", "512")
+        length = _query_int(query, "len", "256")
         return session.state(memory_at=at, memory_length=length)
 
     if route == "/api/step":
