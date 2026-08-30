@@ -2,7 +2,7 @@
 id: OH-115
 title: A model is aligned to the pad field's bounding box where thirty-two pads are
   available
-status: open
+status: done
 priority: P2
 created: '2026-08-30'
 ---
@@ -115,3 +115,36 @@ that share a name is unmeasured.
 
 **Do not start by rewriting `scaleFromPads`.** That was this ticket's own
 advice and it is now measured to be worth 17 micrometres.
+
+## DONE, 2026-08-30 -- and the cause was a third thing
+
+Neither the estimators (disproved above) nor the lost GND pads (real, OH-117,
+but not this): **the page's image-y-to-scene-z mapping negated y, and image y
+is already the negation of board y.** A composed model's pins land at
+z = -board_y, so the double negation put every pad on the row OPPOSITE its
+pin.
+
+**Why it hid for so long**: the two header rows share a 2.54 mm grid, so 28 of
+the Uno's 32 mirrored pads still fell within `PIN_REACH_MM` of a pin -- the
+WRONG pin, carved silently. Only the five whose opposite x had no pin showed
+at all, and they showed as "five pads with no pin", which OH-96 read as a pad
+map error and this ticket read as an alignment error. Two tickets filed
+against the symptom's shadow before the cause. The 0.65-0.77 mm "middle
+group" OH-96 measured was the x-offset between the two rows' pins at those
+columns -- the fingerprint of the mirror, unrecognised.
+
+The line's own comment said "Getting this wrong mirrors the header end for
+end, which on a board whose two rows carry different pins is a wrong picture
+rather than an ugly one." It was wrong, and the warning came true silently.
+
+**Settled by measurement, not argument**: pairing every page pad with every
+vendor pad under each sign -- one sign puts all 32 on their OWN pin within
+0.1 mm (SCL on AD5/SCL, 13 on SCK, IOREF on the +5V the R3 ties it to);
+the other reproduces the browser's 28-wrong-4-missing exactly.
+
+**Verified in the browser after the fix**: Arduino Uno 32 of 32 real pins,
+missing none. The XIAO counts are unchanged -- their missing D-pads sit at
+header positions where the composed models genuinely have no metal, a
+separate gap -- but their found pads now carve the correct edge.
+
+The sign is pinned by test and two mutations flipping it back are killed.

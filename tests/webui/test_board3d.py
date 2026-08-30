@@ -1938,3 +1938,33 @@ def test_describe_reports_the_number_of_pads_and_not_only_of_names():
     how it went unnoticed."""
     source = RENDERER.read_text(encoding="utf-8")
     assert "padCount: padMeshes().length," in source
+
+
+def test_image_y_maps_to_scene_z_with_the_same_sign_as_the_models_pins():
+    """**The mirror OH-115 spent three measurements finding, pinned by its
+    sign** -- because it is one character away from returning and it fails
+    silently: 28 of the Uno's 32 pads still "found" a pin, each the OPPOSITE
+    row's, and only the five whose opposite x had no pin showed at all. That
+    is what OH-96 measured as "five pads with no pin", two tickets upstream
+    of the cause.
+
+    A composed model's pins land at z = -board_y, and the page's image y is
+    ALREADY the negation of board y -- so a pad's z takes image y with the
+    same sign, and the model group's centring must use the same convention or
+    the two halves mirror against each other again. Both lines are asserted.
+
+    Verified in the browser when it landed: all 32 of the Uno's pads found a
+    real pin, each its own within 0.1 mm against a 1.27 mm half-pitch.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    assert "post.position.set(pad.x * SCALE - width / 2, top, "\
+           "pad.y * SCALE - depth / 2);" in source, (
+        "the pad line negates image y again, which mirrors every pad onto "
+        "the row opposite its pin"
+    )
+    assert "centreY * SCALE - depth / 2" in source, (
+        "the model group's centring flipped back, so the model and the pads "
+        "mirror against each other"
+    )
+    assert "depth / 2 - pad.y * SCALE" not in source
+    assert "depth / 2 - centreY * SCALE" not in source

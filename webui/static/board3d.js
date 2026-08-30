@@ -1126,11 +1126,19 @@ export function showBoard(layout, model = null) {
         metalness: 0.1,
       })
     );
-    // Image space has y growing downward and three.js has z growing toward the
-    // camera, so the board is centred and y is negated. Getting this wrong
-    // mirrors the header end for end, which on a board whose two rows carry
-    // different pins is a wrong picture rather than an ugly one.
-    post.position.set(pad.x * SCALE - width / 2, top, depth / 2 - pad.y * SCALE);
+    // Image y maps to scene z with the SAME sign, and the sign was measured
+    // rather than argued (OH-115). This line negated it -- "image y grows
+    // downward, so y is negated" -- and its own comment warned that getting
+    // it wrong "mirrors the header end for end". It was wrong, and the
+    // warning came true silently: a composed model's pins land at
+    // z = -board_y with image y ALREADY the negation of board y, so negating
+    // again put every pad on the row OPPOSITE its pin. `carvePins` then
+    // matched 28 of the Uno's 32 pads to the wrong row's pins -- pin 13's
+    // marker carved SCK's opposite number -- and the five whose opposite x
+    // has no pin were OH-96's "five pads with no pin at all". Measured: under
+    // this sign every one of the 32 lands on its OWN pin within 0.1 mm,
+    // against a 1.27 mm half-pitch.
+    post.position.set(pad.x * SCALE - width / 2, top, pad.y * SCALE - depth / 2);
     // **Never drawn. OH-95.** This disc is a collider and an anchor, not a
     // picture: `placeModel` replaces it with the vendor's own pin wherever
     // there is one, and where there is not, a cylinder standing on a board
@@ -1401,7 +1409,11 @@ function placeModel(loaded, layout) {
   group.position.set(
     centreX * SCALE - width / 2,
     -BOARD_THICKNESS / 2,
-    depth / 2 - centreY * SCALE
+    // The same sign as the pads' own line, and the two must move together:
+    // this is where the model's origin -- the centre of its pad field -- is
+    // put on the centre of the page's, so the convention that places one has
+    // to place the other. OH-115.
+    centreY * SCALE - depth / 2
   );
 
   const [slab, edges] = view.board.children;
