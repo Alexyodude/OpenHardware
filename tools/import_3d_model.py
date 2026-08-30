@@ -714,6 +714,14 @@ FINISHES: dict[str, Finish] = {
         "the same gold, one value off, on the same board. Two nearly equal "
         "colours are two styles in the vendor's CAD rather than two materials"
     )),
+    "#c8a253": Finish(1.0, 0.35, (
+        "the composed boards' own exposed copper -- `compose_board_3d.COPPER`, "
+        "this repository's one constant for every pad, castellation and via "
+        "it draws (OH-110). A pad is plated metal and was shipping at "
+        "DEFAULT_FINISH, metalness 0.1: 203-400 pads a board rendered matte "
+        "tan while the header pins beside them shone, and `carvePins`'s "
+        "metalness > 0.5 gate could not claim a castellation at all (OH-120)"
+    )),
     "#e7c863": Finish(1.0, 0.30, (
         "gold plating on the ESP32-S3 and nRF52840 models. **By ANALOGY with "
         "#ff9f37 rather than from a record**: it is the same warm yellow, on "
@@ -726,6 +734,13 @@ FINISHES: dict[str, Finish] = {
 
     # -- dielectrics. `metalness` 0.0, and the roughness is what separates a
     #    moulded body from a solder mask from a lens.
+    "#e9e9e4": Finish(0.0, 0.55, (
+        "the composed boards' silkscreen -- `compose_board_3d.SILKSCREEN`. "
+        "Screen-printed epoxy ink: an insulator, so metalness 0, and matte "
+        "enough that lettering reads at any angle -- 0.55 sits between the "
+        "solder mask's 0.35 and moulded epoxy's 0.70, which is what a cured "
+        "ink over a gloss mask looks like (OH-120)"
+    )),
     # **The near-blacks are one derivation, not four assertions.** A metal's
     # base colour IS its reflectance, and no metal used in electronics reflects
     # under about 50% -- gold, silver, nickel, tin and copper are all bright.

@@ -1,7 +1,7 @@
 ---
 id: OH-120
 title: Composed copper and silkscreen are declared dielectrics and cannot be carved
-status: open
+status: done
 priority: P2
 created: '2026-08-30'
 ---
@@ -35,3 +35,26 @@ picture" and the composer never calls it -- which is how this sat unnoticed.
 DONE WHEN copper and silkscreen carry FINISHES entries with the evidence rule
 satisfied; the composer calls report_finishes before write; and the SMD
 boards' castellation copper becomes carveable, measured in the browser.
+
+## DONE, 2026-08-30
+
+`#c8a253` (COPPER) and `#e9e9e4` (SILKSCREEN) carry FINISHES entries -- metal
+1.0 / rough 0.35 and metal 0.0 / rough 0.55 -- with the evidence beside each,
+and the keys are test-pinned to the composer's own constants so neither can
+drift. The composer calls `report_finishes` before every write, which is the
+audit whose absence let this sit for a session.
+
+**The carve half was the bigger win.** With copper above the metalness gate,
+an SMD XIAO's castellations became candidate geometry, measured in the
+browser:
+
+    XIAO-RP2350-SMD     18 -> 29 of 30 real pins
+    XIAO-ESP32-C3-SMD    0 -> 20 of 22
+    every DIP board and the Uno hold at 100%
+
+The residual misses (one D7, one EN pair) are OH-121's scale mismatch, not
+this. Trace colours are per-board mask derivations and stay DEFAULT -- they
+are mask film over copper, for which a non-committal finish is roughly
+honest; recorded rather than swept in.
+
+Both mutations killed. Gate run in the OH-121 batch that follows.

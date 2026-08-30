@@ -1338,3 +1338,52 @@ def test_the_pcb_solids_own_faces_are_never_taken_for_a_film_on_it():
         "the PCB solid's own faces were taken for a film on it, so the rule "
         "would repaint a board whose mask the vendor DID colour"
     )
+
+
+def test_the_composed_copper_is_a_conductor_and_the_silkscreen_is_not():
+    """**203-400 pads a board shipped as a dielectric** (OH-120).
+
+    `compose_board_3d.COPPER` had no `FINISHES` entry, so every pad,
+    castellation and via the composer draws took DEFAULT_FINISH -- metalness
+    0.10, "nothing here can say what this surface is" -- and rendered matte
+    tan beside header pins at 1.0. And the same number gates the carve:
+    `carvePins` claims only `metalness > 0.5`, so an SMD XIAO's pads -- which
+    ARE castellated copper, there being no header part -- had no candidate
+    geometry at all, by material, before any question of geometry.
+
+    The keys are asserted against the composer's own constants so neither can
+    drift: a renamed colour with a stale FINISHES key is this bug again with
+    an extra step.
+    """
+    from tools import compose_board_3d as compose
+    from tools.import_3d_model import FINISHES
+
+    copper = FINISHES[compose.COPPER]
+    assert copper.metalness == 1.0, "a plated pad is a conductor"
+    assert copper.metalness > 0.5, (
+        "below carvePins' gate, so no castellation could ever be claimed"
+    )
+    silk = FINISHES[compose.SILKSCREEN]
+    assert silk.metalness == 0.0, "screen-printed epoxy ink is an insulator"
+    assert compose.COPPER == "#c8a253" and compose.SILKSCREEN == "#e9e9e4", (
+        "the constants moved; move the FINISHES keys with them or the "
+        "finishes silently detach again"
+    )
+
+
+def test_the_composer_audits_its_own_finishes():
+    """`report_finishes` exists so the assignment 'can be audited against the
+    picture', and the composer -- which writes six of the twelve .glb files
+    and every copper and silkscreen surface -- never called it. That silence
+    is how OH-120 sat unnoticed for a whole session. Comment lines stripped,
+    the OH-117 lesson."""
+    from tools import compose_board_3d as compose
+
+    source = pathlib.Path(compose.__file__).read_text(encoding="utf-8")
+    body = source.split("def compose(", 1)[1].split("\ndef ", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("#"))
+    assert "report_finishes(whole)" in code, (
+        "the composer stopped auditing its finishes, which is the silence "
+        "OH-120 grew in"
+    )

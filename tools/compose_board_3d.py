@@ -107,6 +107,7 @@ from tools.import_3d_model import (  # noqa: E402
     box_of,
     handedness_of,
     read,
+    report_finishes,
     tessellate,
     write_glb,
 )
@@ -2679,6 +2680,12 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     whole = merge(*pieces)
     print(f"  mesh    {whole.triangles():,} triangles, "
           f"{len(whole.groups)} colours")
+    # **The audit the importer already runs, on the files the composer makes**
+    # (OH-120). The composer writes six of the twelve .glb files and every
+    # copper, silkscreen and trace surface -- and its copper shipped at
+    # DEFAULT_FINISH for a session because nothing printed the assignment
+    # where somebody would see it.
+    report_finishes(whole)
     if check:
         print("  write   skipped (--check)")
         return 0
