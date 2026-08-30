@@ -2030,3 +2030,36 @@ def test_a_maps_stated_scale_beats_the_fit_from_mismatched_fields():
         "the fit runs before the map's own statement, so a generated map is "
         "back to being re-derived from mismatched pad fields"
     )
+
+
+def test_a_wire_holding_a_released_pad_is_repointed_at_the_carved_pin():
+    """**A wire made while the model was in flight kept a disposed cylinder**
+    (OH-129). `loadModel` is deliberately not awaited; `beginWire` stores the
+    pad MESH in `wire.post` -- the mesh and not the bucket slot, because
+    three of an Uno's pads are called GND -- and `carvePins` then released
+    that mesh and swapped the bucket. The wire kept the object: a
+    null-parented `getWorldPosition` answers board-local coordinates, the
+    head froze off the pin, and no later `setLevels` or `refreshTheme` pass
+    could repair it because `view.pads` no longer held the mesh. Distinct
+    from OH-128, which fixed where a LIVE carved pin reports itself.
+
+    Asserted at the source with comments stripped (the OH-117 lesson),
+    because no headless harness can run `carvePins` -- the gap OH-128's
+    record owns.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    body = source.split("function carvePins(", 1)[1].split("\nfunction ", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "for (const wire of view.wires)" in code, (
+        "carvePins no longer walks the wires, so a wire made during the "
+        "model fetch keeps the released pad mesh forever"
+    )
+    assert "wire.post === pad.post" in code, (
+        "the repoint lost its guard, so every wire is repointed at whatever "
+        "pin was carved last instead of only the ones holding this pad"
+    )
+    assert "wire.post = pin" in code, (
+        "the wire is never handed the carved pin, so its anchor still reads "
+        "a disposed, null-parented mesh"
+    )

@@ -1382,6 +1382,17 @@ function carvePins(group, pcbThickness) {
     view.board.remove(pad.post);
     const bucket = view.pads.get(pad.pin);
     bucket[bucket.indexOf(pad.post)] = pin;
+    // **A wire made while the model was in flight holds the pad MESH, not
+    // the bucket slot** (OH-129). `loadModel` is deliberately not awaited,
+    // and `beginWire` stores `post` as an object so the head follows one pad
+    // among namesakes -- so a wire pulled during the fetch kept the cylinder
+    // this just released: null-parented, `getWorldPosition` answering
+    // board-local numbers, and unreachable from `view.pads` for any later
+    // repair. Repointed here, at the one place the swap happens; the drag in
+    // progress is in `view.wires` too, so one loop covers it.
+    for (const wire of view.wires) {
+      if (wire.post === pad.post) wire.post = pin;
+    }
     pin.userData.carved = true;
     found.push(pad.pin);
   }
