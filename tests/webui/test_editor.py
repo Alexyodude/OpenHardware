@@ -359,3 +359,18 @@ def test_the_client_reads_the_status_before_parsing_the_body():
         "the body is parsed before the status is read, so a text/plain "
         "error is a SyntaxError instead of its status"
     )
+
+
+def test_the_default_sketch_actually_compiles():
+    """DEFAULT_SKETCH was the one sketch no test compiled -- the exact
+    criticism `emulator.js` makes of the old hard-coded samples (OH-142).
+    Read out of the page\'s own source, so an edit to the sketch is tested
+    as edited rather than as remembered here."""
+    needs_toolchain()
+    source = SCRIPT.read_text(encoding="utf-8")
+    block = source.split("const DEFAULT_SKETCH = [", 1)[1].split("].join", 1)[0]
+    lines = re.findall(r'"((?:[^"\\]|\\.)*)"', block)
+    sketch = "\n".join(lines)
+    assert "void setup" in sketch and "void loop" in sketch
+    built = compiler.build(BOARD, sketch)
+    assert built.ok, built.diagnostics

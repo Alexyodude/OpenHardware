@@ -227,6 +227,13 @@ def resolve_static(target: str) -> tuple[bytes, str] | None:
     path = urllib.parse.urlparse(target).path
     if path in ("", "/"):
         path = "/emulator.html"
+    if path == "/index.html":
+        # The bridge's page, not this server's (OH-142): both servers read
+        # one static/ directory, and this page dials a websocket this
+        # server does not speak -- served here it renders and then hangs,
+        # which reads as a broken UI rather than a wrong URL. The assets
+        # stay common property; the ENTRY pages name a transport each.
+        return None
 
     candidate = (STATIC_DIR / path.lstrip("/")).resolve()
     try:
@@ -273,21 +280,6 @@ def _not_drivable(name: str) -> str:
         f"{', '.join(sorted(DRIVABLE))}. webui/emulator.py is an i8086 session; "
         f"a core needs one of its own before it can be shown here."
     )
-
-
-class Selection:
-    """Which target the UI is pointed at, for the life of the server.
-
-    A class rather than a bare string because the handler shares one of these
-    across every request, exactly as it shares the session and the lock. It
-    holds a name and not a `Target`, because a target's *status* is read from
-    disk each time it is asked for -- deleting `build/lib/` under a running
-    server has to be visible, and a cached `Target` would keep reporting
-    `ready` at a library that is no longer there.
-    """
-
-    def __init__(self, name: str | None = None) -> None:
-        self.name = name if name is not None else DRIVING
 
 
 class BoardSlot:
@@ -555,6 +547,15 @@ def handle_board_api(boards: BoardSlot, route: str,
         if not isinstance(wanted, str):
             raise ApiError("path must be a string naming a file from /api/board/artefacts")
         path = SEARCH_ROOTS.resolve(wanted)
+        # The same ceiling the body path enforces (OH-142): this route
+        # skipped it, while the module docstring promised it everywhere an
+        # image comes in. Checked on the size before a byte is read.
+        size = path.stat().st_size
+        if size > MAX_IMAGE_BYTES:
+            raise ApiError(
+                f"{wanted}: {size} bytes is larger than the "
+                f"{MAX_IMAGE_BYTES}-byte ceiling"
+            )
         loaded = api.load_firmware(
             board,
             path.read_bytes(),
@@ -616,7 +617,7 @@ def handle_board_api(boards: BoardSlot, route: str,
     raise ApiError(f"no such route: {route}")
 
 
-def handle_api(session: emulator.Session, selection: Selection, route: str,
+def handle_api(session: emulator.Session, route: str,
                query: dict[str, list[str]],
                payload: dict[str, object],
                boards: BoardSlot | None = None, prepared=None) -> dict[str, object]:
@@ -645,26 +646,13 @@ def handle_api(session: emulator.Session, selection: Selection, route: str,
                 entry["detail"] = _not_drivable(target.name)
                 entry["selectable"] = False
             listing.append(entry)
-        return {"targets": listing, "selected": selection.name, "driving": DRIVING}
+        return {"targets": listing, "driving": DRIVING}
 
     if route == "/api/boards":
         return {
             "boards": [b.as_json() for b in board_catalogue.catalogue()],
             "waiting": board_catalogue.missing_cores(),
         }
-
-    if route == "/api/target":
-        name = payload.get("name")
-        if not isinstance(name, str):
-            raise ApiError("name must be a string naming a core under core/")
-        try:
-            chosen = targets.require_selectable(name)
-        except targets.TargetError as exc:
-            raise ApiError(str(exc)) from exc
-        if chosen.name not in DRIVABLE:
-            raise ApiError(_not_drivable(chosen.name))
-        selection.name = chosen.name
-        return {"selected": selection.name, "target": chosen.as_json()}
 
     if route == "/api/samples":
         return {"samples": [
@@ -736,7 +724,6 @@ ROUTE_METHODS: dict[str, frozenset[str]] = {
     "/api/run": frozenset({"POST"}),
     "/api/reset": frozenset({"POST"}),
     "/api/load": frozenset({"POST"}),
-    "/api/target": frozenset({"POST"}),
     "/api/board/artefacts": frozenset({"GET", "POST"}),
     "/api/board/pins": frozenset({"GET", "POST"}),
     "/api/board/state": frozenset({"GET", "POST"}),
@@ -776,7 +763,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
     """One session, shared by every request, guarded by one lock."""
 
     session: emulator.Session
-    selection: Selection
     boards: BoardSlot
     lock: threading.Lock
     allowed_origins: frozenset[str]
@@ -855,7 +841,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with self.lock:
                 self._json(
                     200,
-                    handle_api(self.session, self.selection, route, query,
+                    handle_api(self.session, route, query,
                                payload, self.boards, prepared=prepared),
                 )
         except api.BoardRunError as exc:
@@ -952,7 +938,6 @@ def build_server(bind: str, port: int,
         pass
 
     Bound.session = live
-    Bound.selection = Selection()
     Bound.boards = BoardSlot()
     Bound.lock = threading.Lock()
     server = Server((bind, port), Bound)

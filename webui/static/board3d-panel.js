@@ -247,9 +247,21 @@ async function reload() {
   // otherwise have to agree on it -- and a caller that forgot would silently
   // ask about a different board than the one on screen.
   const picked = document.getElementById("board-pick")?.value ?? "";
+  if (!picked) {
+    // **The cold page used to ask about no board in particular** (OH-142)
+    // and collect the 400 the server deliberately answers -- one console
+    // error on every fresh load, reported and re-explained in two
+    // handoffs. Nothing is picked, so there is nothing to ask: this is the
+    // 400 handler's exact outcome without the doomed round-trip.
+    layout = null;
+    renderTable([]);
+    $(NOTE).textContent = "no board loaded";
+    $(CAPTION).textContent = WAITING;
+    $(CANVAS).hidden = true;
+    return;
+  }
   const response = await fetch(
-    picked ? `/api/board/pins?board=${encodeURIComponent(picked)}`
-           : "/api/board/pins");
+    `/api/board/pins?board=${encodeURIComponent(picked)}`);
   if (!response.ok) {
     // **It used to set `layout` and return, saying nothing at all.** The canvas
     // kept its 300 x 150 default, the caption kept whatever it last held, and

@@ -340,7 +340,7 @@ def test_only_the_four_declared_extensions_are_served():
 def test_an_unknown_route_is_a_named_error(session):
     with pytest.raises(emulator_server.ApiError, match="no such route"):
         emulator_server.handle_api(
-            session, emulator_server.Selection(), "/api/nope", {}, {}
+            session, "/api/nope", {}, {}
         )
 
 
@@ -514,7 +514,7 @@ def test_the_pins_of_a_board_nobody_has_loaded_are_served(session):
     board that has no `webui/boards/mg24.py` at all -- and its twenty-four
     pads come back, because where they sit is not an execution."""
     view = emulator_server.handle_api(
-        session, emulator_server.Selection(), "/api/board/pins",
+        session, "/api/board/pins",
         {"board": ["XIAO-MG24-DIP"]}, {}, emulator_server.BoardSlot(),
     )
     assert view["present"] is True
@@ -528,7 +528,7 @@ def test_asking_for_pins_with_no_board_and_no_session_still_refuses_by_name():
     empty board."""
     with pytest.raises(emulator_server.ApiError, match="no board is loaded"):
         emulator_server.handle_api(
-            emulator.Session(), emulator_server.Selection(), "/api/board/pins",
+            emulator.Session(), "/api/board/pins",
             {}, {}, emulator_server.BoardSlot(),
         )
 
@@ -538,7 +538,7 @@ def test_an_unknown_board_name_says_there_is_nothing_to_draw(session):
     either: a named `present: false` with the reason, which is the shape the
     panel already renders."""
     view = emulator_server.handle_api(
-        session, emulator_server.Selection(), "/api/board/pins",
+        session, "/api/board/pins",
         {"board": ["no such board"]}, {}, emulator_server.BoardSlot(),
     )
     assert view["present"] is False
@@ -564,7 +564,7 @@ def test_a_picked_board_is_answered_for_and_not_the_one_that_is_running(session)
 
     slot.session = _Running()
     view = emulator_server.handle_api(
-        session, emulator_server.Selection(), "/api/board/pins",
+        session, "/api/board/pins",
         {"board": ["XIAO-MG24-DIP"]}, {}, slot,
     )
     # It reached `pad_view` rather than `pin_view`: had it taken the live path
@@ -729,3 +729,28 @@ def test_every_route_states_its_methods():
         f"only in dispatch: {dispatched - set(emulator_server.ROUTE_METHODS)}; "
         f"only in the table: {set(emulator_server.ROUTE_METHODS) - dispatched}"
     )
+
+
+def test_the_dead_target_route_is_gone(session):
+    """/api/target had no caller and only accepted the value already
+    selected (OH-142): the route, the `Selection` it wrote, and the
+    `selected` echo nobody read left together. A route that exists only to
+    be a no-op teaches a reader the server does something it does not."""
+    with pytest.raises(emulator_server.ApiError, match="no such route"):
+        emulator_server.handle_api(session, "/api/target", {},
+                                   {"name": "i8086"})
+    assert not hasattr(emulator_server, "Selection"), (
+        "the state the dead route wrote is still defined"
+    )
+
+
+def test_each_server_serves_only_its_own_page():
+    """Both servers read one static/ directory, and each served the
+    other\'s page broken there -- :8088/index.html renders and then hangs
+    dialing a websocket :8088 does not speak (OH-142). The assets stay
+    common property; the ENTRY pages name a transport each."""
+    assert emulator_server.resolve_static("/index.html") is None
+    assert emulator_server.resolve_static("/emulator.html") is not None
+    from webui import bridge
+    assert bridge.resolve_static("/emulator.html") is None
+    assert bridge.resolve_static("/index.html") is not None

@@ -2186,3 +2186,22 @@ def test_removing_a_part_releases_only_what_is_the_parts_own():
         "the target guard is gone, so releasePart is the blanket release "
         "under a new name"
     )
+
+
+def test_the_cold_page_does_not_ask_about_no_board():
+    """`reload()` with an empty picker fetched `/api/board/pins` bare and
+    collected the deliberate 400 -- one console error on every fresh page,
+    carried through two handoffs as "expected" (OH-142). Nothing picked
+    means nothing to ask: the early return is the 400 handler\'s outcome
+    without the doomed round-trip. Comments stripped."""
+    panel = PANEL.read_text(encoding="utf-8")
+    body = panel.split("async function reload(", 1)[1].split("\n}", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "if (!picked)" in code, "the cold page still asks about no board"
+    assert code.index("if (!picked)") < code.index("await fetch"), (
+        "the guard sits after the fetch it exists to prevent"
+    )
+    assert '"/api/board/pins")' not in code, (
+        "the bare no-board fetch is still reachable"
+    )

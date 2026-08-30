@@ -402,7 +402,7 @@ def test_the_boards_route_answers_without_raising():
     from webui import emulator_server
 
     payload = emulator_server.handle_api(
-        None, emulator_server.Selection(), "/api/boards", {}, {}
+        None, "/api/boards", {}, {}
     )
     assert payload["boards"] and payload["waiting"]
 
@@ -415,7 +415,7 @@ def test_the_boards_route_is_json_serialisable():
     from webui import emulator_server
 
     payload = emulator_server.handle_api(
-        None, emulator_server.Selection(), "/api/boards", {}, {}
+        None, "/api/boards", {}, {}
     )
     json.dumps(payload)
 
@@ -426,7 +426,7 @@ def test_the_boards_route_carries_what_the_ui_reads():
     from webui import emulator_server
 
     payload = emulator_server.handle_api(
-        None, emulator_server.Selection(), "/api/boards", {}, {}
+        None, "/api/boards", {}, {}
     )
     board = payload["boards"][0]
     for key in ("name", "chip", "isa", "core", "core_exists", "core_built",

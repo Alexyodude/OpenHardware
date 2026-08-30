@@ -525,6 +525,12 @@ def resolve_static(target: str) -> tuple[bytes, str] | None:
     if path in ("", "/"):
         path = "/index.html"
 
+    if path == "/emulator.html":
+        # The emulator server's page, not this one's (OH-142): it drives
+        # /api/ routes this bridge does not serve. See the twin refusal in
+        # emulator_server.resolve_static; assets stay shared, entries name
+        # a transport each.
+        return None
     candidate = (STATIC_DIR / path.lstrip("/")).resolve()
     try:
         candidate.relative_to(STATIC_DIR.resolve())

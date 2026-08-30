@@ -239,3 +239,22 @@ def test_something_under_webui_imports_the_discovery_tool():
     under `webui/` imported, so a person still picked one file by hand."""
     source = (pathlib.Path(emulator_server.__file__)).read_text(encoding="utf-8")
     assert "import_firmware" in source
+
+
+def test_an_artefact_over_the_ceiling_is_refused_before_a_byte_is_read(tmp_path):
+    """The body path enforced MAX_IMAGE_BYTES and this route skipped it,
+    while the module docstring promised the ceiling everywhere an image
+    comes in (OH-142). Checked on the stat, so an 8 GB file is refused
+    without being read."""
+    big = tmp_path / "huge.bin"
+    big.write_bytes(b"\0" * (emulator_server.MAX_IMAGE_BYTES + 1))
+    before = emulator_server.SEARCH_ROOTS.roots
+    emulator_server.SEARCH_ROOTS.roots = (tmp_path,)
+    try:
+        with pytest.raises(emulator_server.ApiError) as caught:
+            emulator_server.handle_board_api(
+                emulator_server.BoardSlot(), "/api/board/load-artefact", {},
+                {"board": "Arduino Uno", "path": str(big)})
+        assert str(emulator_server.MAX_IMAGE_BYTES) in str(caught.value)
+    finally:
+        emulator_server.SEARCH_ROOTS.roots = before

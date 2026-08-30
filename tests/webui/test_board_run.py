@@ -893,7 +893,7 @@ def test_the_board_routes_refuse_a_caller_with_no_slot():
     a slot nobody could step twice."""
     with pytest.raises(emulator_server.ApiError, match="needs a board slot"):
         emulator_server.handle_api(
-            None, emulator_server.Selection(), "/api/board/run", {}, {}
+            None, "/api/board/run", {}, {}
         )
 
 
