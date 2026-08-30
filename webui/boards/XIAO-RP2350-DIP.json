@@ -1,5 +1,6 @@
 {
   "board": "XIAO-RP2350-DIP",
+  "px_per_mm": 8.0,
   "image": {
     "width": 200,
     "height": 163,

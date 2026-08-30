@@ -2,7 +2,7 @@
 id: OH-121
 title: An SMD XIAO's pad_span is the envelope of 28 sub-pads, and the page pairs axes
   blind
-status: open
+status: done
 priority: P2
 created: '2026-08-30'
 ---
@@ -32,3 +32,36 @@ today.
 DONE WHEN every composed SMD variant's scale comes out at the map's own 8
 px/mm; the axis pairing survives the quarter turn; and a portrait board
 turned the wrong way fails a test.
+
+## DONE, 2026-08-30
+
+**A generated map states its scale as a FIELD, and the statement wins.**
+Every derivation always ended "scaled at 8.0 px/mm" and only a person could
+read it; `px_per_mm` now rides in the JSON, is emitted by
+`tools/import_board.py` for future maps, was stamped into the 25 existing
+generated maps FROM each file's own sentence (a migration that restates,
+never invents -- and a test holds field to prose per file), is validated by
+`pinmap.parse`, forwarded by the pins route, and preferred by `placeModel`
+over the two-field fit. The traced Uno map states nothing on purpose -- its
+artwork is anisotropic, it has no single true scale -- and keeps the fit,
+which is exact there (0.093 mm).
+
+The quarter-turn axis-pairing defect dies with the fit on every generated
+map, which is every board but the Uno; `scaleFromPads` survives only as the
+traced-map fallback.
+
+**Verified in the browser on a fresh server instance** (the user's own was
+not restarted; a second instance on 8091 served the changed Python and was
+killed after):
+
+    XIAO-RP2350-SMD     29 -> 30 of 30    scale 0.7272 -> 0.8000
+    XIAO-ESP32-C3-SMD   20 -> 22 of 22
+    XIAO-nRF54l15-SMD         34 of 34
+    XIAO-RP2350-DIP           24 of 24    Arduino Uno  32 of 32, 0.5638 kept
+
+**Every pad on every composed board now finds its own pin.** With OH-115
+(the mirror), OH-117 (the lost GNDs), OH-118 (the DIP headers), OH-120 (the
+copper finish) and this, the whole chain from board file to wirable pin is
+measured end to end.
+
+Three mutations, all killed. Gate 1,893 -> 1,900.

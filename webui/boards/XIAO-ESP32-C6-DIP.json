@@ -1,5 +1,6 @@
 {
   "board": "XIAO-ESP32-C6-DIP",
+  "px_per_mm": 8.0,
   "image": {
     "width": 196,
     "height": 163,

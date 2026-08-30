@@ -1,5 +1,6 @@
 {
   "board": "XIAO-SAMD21-SMD",
+  "px_per_mm": 8.0,
   "image": {
     "width": 167,
     "height": 196,

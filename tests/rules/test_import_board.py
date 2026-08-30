@@ -802,3 +802,55 @@ def test_the_unos_traced_pads_agree_under_one_scale_too_which_is_what_the_page_u
         f"comfortably inside the 0.65 mm the browser reported -- so the two "
         f"can no longer be told apart and OH-96's attribution is in doubt"
     )
+
+
+def test_every_generated_map_states_the_scale_its_own_derivation_claims():
+    """**A generated map states its scale as a FIELD, and the field is held to
+    the map's own prose** (OH-121).
+
+    Every derivation always ended "scaled at 8.0 px/mm" and the page could
+    not read prose, so it re-derived the number by dividing its pixel span by
+    a `pad_span` measured off a DIFFERENT pad field -- 28 castellation
+    sub-pads against one pad per castellation -- and drew every composed SMD
+    model 9% small, leaving their outermost pads past `PIN_REACH_MM`.
+
+    The one map that states nothing is the traced Uno's, on purpose: its
+    artwork is anisotropic by 0.41%, so it HAS no single true scale, and the
+    page fits one from the pads -- measured exact to 0.093 mm there.
+    """
+    import re
+
+    boards = REPO / "webui" / "boards"
+    checked = 0
+    for path in sorted(boards.glob("*.json")):
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        stated = re.search(r"[Ss]caled at ([0-9.]+) px/mm",
+                           doc.get("derivation", ""))
+        if stated is None:
+            assert "px_per_mm" not in doc, (
+                f"{path.name} carries a px_per_mm its derivation does not "
+                f"claim -- the field must restate the file's own sentence, "
+                f"never invent"
+            )
+            continue
+        checked += 1
+        assert doc.get("px_per_mm") == float(stated.group(1)), (
+            f"{path.name}: px_per_mm {doc.get('px_per_mm')!r} does not match "
+            f"the {stated.group(1)} its own derivation states"
+        )
+    assert checked >= 25, f"only {checked} generated maps found"
+
+
+def test_the_pin_map_refuses_a_nonsense_scale_and_allows_none():
+    """`px_per_mm` is optional -- a traced map states none -- but a stated one
+    must be a positive number, because 0 would divide the page by it."""
+    from webui import pinmap
+
+    base = {"board": "X", "image": {"width": 10, "height": 10},
+            "pads": [{"label": "A", "pin": 1, "x": 1, "y": 1}]}
+    assert pinmap.parse(base, "here").px_per_mm is None
+    assert pinmap.parse({**base, "px_per_mm": 8.0}, "here").px_per_mm == 8.0
+    with pytest.raises(pinmap.PinMapError):
+        pinmap.parse({**base, "px_per_mm": 0}, "here")
+    with pytest.raises(pinmap.PinMapError):
+        pinmap.parse({**base, "px_per_mm": "eight"}, "here")

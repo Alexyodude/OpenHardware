@@ -1,5 +1,6 @@
 {
   "board": "XIAO-RP2040-DIP",
+  "px_per_mm": 8.0,
   "image": {
     "width": 195,
     "height": 163,

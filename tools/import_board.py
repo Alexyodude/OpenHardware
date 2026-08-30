@@ -438,6 +438,15 @@ def build_board(
     scale = px_per_mm
     board = {
         "board": geometry.name,
+        # **The scale as a FIELD, not only a sentence** (OH-121). The
+        # derivation always said "Scaled at 8.0 px/mm" and the page could not
+        # read prose, so it re-derived the scale by dividing its pixel span by
+        # a pad_span measured off a DIFFERENT pad field -- 28 sub-pads against
+        # one pad per castellation -- and drew every composed SMD model 9%
+        # small. A generated map states its own scale; only the traced Uno
+        # map, which has no single true scale (its artwork is anisotropic),
+        # leaves it absent and lets the page fit one.
+        "px_per_mm": scale,
         "image": {
             "width": round(geometry.width_mm * scale),
             "height": round(geometry.height_mm * scale),

@@ -1,5 +1,6 @@
 {
   "board": "XIAO-XIAO STM32C5-SMD",
+  "px_per_mm": 8.0,
   "image": {
     "width": 196,
     "height": 166,

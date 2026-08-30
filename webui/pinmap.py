@@ -74,6 +74,13 @@ class PinMap:
     #: board's art. The wiring is exact either way; only the picture is
     #: schematic, and the UI says so rather than implying a real pinout.
     derived: bool = False
+    #: The map's own statement of its scale, or None for the one TRACED map
+    #: (the Arduino Uno's), whose artwork has no single true scale -- it is
+    #: anisotropic by 0.41% -- and whose scale the page fits from the pads.
+    #: A generated map is exact at a stated 8 px/mm, and OH-121 measured what
+    #: re-deriving that number from mismatched pad fields cost: every
+    #: composed SMD model drawn 9% small.
+    px_per_mm: float | None = None
 
     @property
     def wireable(self) -> tuple[Pad, ...]:
@@ -88,6 +95,7 @@ class PinMap:
             "width": self.width,
             "height": self.height,
             "derived": self.derived,
+            "px_per_mm": self.px_per_mm,
             "pads": [dataclasses.asdict(pad) for pad in self.pads],
         }
 
@@ -143,7 +151,14 @@ def parse(raw: object, where: str) -> PinMap:
             )
         pads.append(Pad(label=label, pin=pin, x=x, y=y, group=entry.get("group", "")))
 
-    return PinMap(board=raw["board"], width=width, height=height, pads=tuple(pads))
+    # Optional and validated only when present: a traced map states none.
+    scale = raw.get("px_per_mm")
+    if scale is not None and (not isinstance(scale, (int, float)) or scale <= 0):
+        raise PinMapError(f"{where}: px_per_mm must be a positive number, "
+                          f"not {scale!r}")
+    return PinMap(board=raw["board"], width=width, height=height,
+                  pads=tuple(pads),
+                  px_per_mm=float(scale) if scale is not None else None)
 
 
 def load(board: str, directory: pathlib.Path | None = None) -> PinMap | None:

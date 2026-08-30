@@ -117,10 +117,13 @@ const PAD_LIFT = 0.01;
 //: `test_the_unos_traced_pads_agree_under_one_scale_too_which_is_what_the_page_uses`
 //: holds both numbers.
 //:
-//: So the millimetres above are introduced HERE, between two sources that
-//: agree: `scaleFromPads` takes its scale from the pad field's bounding box
-//: on one axis, and `placeModel` aligns the model by that box's centre --
-//: two-point estimates where the pads offer thirty-two. That is OH-115.
+//: The cause was NONE of the estimators -- OH-115's own close note measured
+//: the bounding-box estimate as costing seventeen MICROmetres -- it was the
+//: image-y-to-scene-z mapping negating y twice, which mirrored every pad
+//: onto the row opposite its pin, silently right 28 times out of 32 because
+//: the rows share a grid. Fixed at the pad line above; the numbers in this
+//: table are the mirror's fingerprint, kept as the record of what a wrong
+//: sign looks like from the outside.
 const PIN_REACH_MM = 1.1;
 
 //: How brightly a real pin glows in its state's colour.
@@ -1408,9 +1411,19 @@ function placeModel(loaded, layout) {
   const placed = layout.pads.filter((pad) => pad.x !== null);
   const xs = placed.map((pad) => pad.x);
   const ys = placed.map((pad) => pad.y);
-  const scale = extras.pad_span
-    ? scaleFromPads(xs, ys, extras.pad_span)
-    : PX_PER_MM * SCALE;
+  // **A generated map STATES its scale, and the statement wins** (OH-121).
+  // The fit below divides this page's pixel span by the model's `pad_span`,
+  // and those are two different descriptions of two different pad fields on
+  // an SMD XIAO -- 28 castellation SUB-pads on the model side against one
+  // pad per castellation here -- so the quotient drew every composed SMD
+  // model 9% small. Only the traced Uno map, which has no single true scale
+  // (its artwork is anisotropic by 0.41%), leaves px_per_mm unset and takes
+  // the fit; the fit is exact there, measured at 0.093 mm worst.
+  const scale = layout.px_per_mm
+    ? layout.px_per_mm * SCALE
+    : extras.pad_span
+      ? scaleFromPads(xs, ys, extras.pad_span)
+      : PX_PER_MM * SCALE;
   group.scale.setScalar(scale);
   // Everything else that puts millimetres into this scene reads this, so a
   // bench part is the size it would be beside the real board.

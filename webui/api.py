@@ -901,6 +901,9 @@ def pad_view(board: str, description: types.ModuleType | None,
         "board": board,
         "width": layout.width if layout is not None else None,
         "height": layout.height if layout is not None else None,
+        # The map's own scale where it states one (every generated map), or
+        # None for the traced Uno map, whose scale the page fits. OH-121.
+        "px_per_mm": layout.px_per_mm if layout is not None else None,
         # **What a pin of this part can drive**, so that the 3D view can solve a
         # circuit instead of lighting an LED because one pad reads high. Found
         # by `getattr` exactly as `pin_states` and `PIN_NAMES` are, and `None`

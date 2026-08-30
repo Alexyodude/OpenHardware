@@ -2004,3 +2004,29 @@ def test_a_carved_pin_carries_its_place_on_the_mesh_and_not_only_in_the_vertices
         "a per-name bucket is back, so a repeated name builds duplicate "
         "z-fighting meshes and the slots point at different copies"
     )
+
+
+def test_a_maps_stated_scale_beats_the_fit_from_mismatched_fields():
+    """**A generated map states its scale, and the statement wins** (OH-121).
+
+    `scaleFromPads` divides this page's pixel span by the model's `pad_span`
+    -- two descriptions of two DIFFERENT pad fields on an SMD XIAO, 28
+    castellation sub-pads against one pad per castellation -- and the
+    quotient drew every composed SMD model 9% small, pushing their outermost
+    pads past `PIN_REACH_MM`. Verified in the browser when the field landed:
+    every SMD board's scale came out at exactly the map's own 8 px/mm and
+    every pad on every board found its pin -- 30/30, 22/22, 34/34 -- while
+    the traced Uno kept its fitted 5.638.
+
+    Comment lines stripped, the OH-117 lesson.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    body = source.split("function placeModel(", 1)[1].split("\nfunction ", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("//"))
+    at_statement = code.index("layout.px_per_mm")
+    at_fit = code.index("scaleFromPads(")
+    assert at_statement < at_fit, (
+        "the fit runs before the map's own statement, so a generated map is "
+        "back to being re-derived from mismatched pad fields"
+    )
