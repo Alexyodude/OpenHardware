@@ -1066,6 +1066,26 @@ function release(object) {
 }
 
 /**
+ * Throw away what is THIS part's own, and only that (OH-133).
+ *
+ * `loadPart` hands out `clone(true)` of the cached template, and a three.js
+ * clone SHARES geometry and materials with the template and every sibling
+ * clone -- verified against the vendored three. `release` over the whole
+ * tree therefore disposed buffers still in use: every sibling and the cache
+ * template redrew from a fresh GPU upload after every removal. What IS
+ * per-part is exactly two things: the lens material `dressPart` clones so
+ * two LEDs light independently, and the terminal target spheres
+ * `makeTarget` builds fresh, geometry and material both -- the targets are
+ * the meshes carrying `userData.terminal`.
+ */
+function releasePart(part) {
+  part.userData.lens?.material?.dispose();
+  part.traverse((object) => {
+    if (object.isMesh && object.userData.terminal !== undefined) release(object);
+  });
+}
+
+/**
  * Draw a board.
  *
  * `layout` is `webui/api.py`'s `pin_view` verbatim. Pads with a null `x` are
@@ -2160,7 +2180,7 @@ export function removePart(index) {
   for (const wire of [...view.wires]) {
     if (wire.terminal?.userData?.part === part) discardWire(wire);
   }
-  part.traverse((object) => { if (object.isMesh) release(object); });
+  releasePart(part);
   view.bench.remove(part);
   view.parts.splice(index, 1);
   refreshColliders();
@@ -2182,12 +2202,18 @@ export function removePart(index) {
  * own line to begin with.
  */
 function beginWire(pad, end = null) {
+  // The id first, and the colour keyed off it (OH-133): `view.wires.length`
+  // shrinks when a wire is disconnected, so the wire after any disconnect
+  // repeated a colour already on the bench. The id is the monotonic counter
+  // that exists because "an index changes when an earlier wire is removed"
+  // -- the colour needed the identical treatment.
+  const id = nextWireId++;
   const start = vecArray(pad.getWorldPosition(scratch));
   const rope = new Rope(start, end ?? start.slice());
   const mesh = new THREE.Mesh(
     makeTube(rope.count, WIRE_SIDES),
     new THREE.MeshStandardMaterial({
-      color: WIRE_COLOURS[view.wires.length % WIRE_COLOURS.length],
+      color: WIRE_COLOURS[(id - 1) % WIRE_COLOURS.length],
       roughness: 0.5,
       metalness: 0.05,
     })
@@ -2196,7 +2222,7 @@ function beginWire(pad, end = null) {
   // name**, and the two stopped being interchangeable at OH-117: three of an
   // Uno's pads are called GND. The name is what the netlist and the reports
   // speak; the mesh is what the wire's end has to follow.
-  const wire = { id: nextWireId++, pin: pad.userData.pin, post: pad, rope, mesh,
+  const wire = { id, pin: pad.userData.pin, post: pad, rope, mesh,
                  terminal: null };
   applyColliders(wire);
   view.bench.add(mesh);
@@ -2399,9 +2425,13 @@ function applyCircuit() {
  */
 export function clearBench({ parts: alsoParts = false } = {}) {
   for (const wire of [...view.wires]) discardWire(wire);
+  // The drag in progress was one of those wires (OH-133): a pointer held
+  // across a board change otherwise keeps writing to a wire whose mesh was
+  // just released, and the pointerup then discards it a second time.
+  view.dragging = null;
   if (alsoParts) {
     for (const part of view.parts) {
-      part.traverse((object) => { if (object.isMesh) release(object); });
+      releasePart(part);
       view.bench.remove(part);
     }
     view.parts.length = 0;

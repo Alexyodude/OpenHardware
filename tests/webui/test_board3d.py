@@ -2109,8 +2109,80 @@ def test_removing_a_part_takes_its_wires_and_its_verdict_with_it():
     code = "\n".join(line for line in body.splitlines()
                      if not line.lstrip().startswith("//"))
     assert "discardWire(wire)" in code, "the part's wires outlive it"
-    assert "release(object)" in code, "the part's meshes leak"
+    assert "releasePart(part)" in code, (
+        "the part's own meshes are not released -- and ONLY its own: OH-133 "
+        "narrowed the blanket release that disposed geometry shared with the "
+        "cache template and every sibling clone"
+    )
     assert "applyCircuit()" in code, (
         "the circuit is not re-solved, so every survivor's verdict still "
         "counts the removed part"
+    )
+
+
+def test_a_wires_colour_is_keyed_off_its_id_and_not_the_live_count():
+    """**After any disconnect, the next wire repeated a colour on the bench**
+    (OH-133): the palette indexed `view.wires.length`, which shrinks when a
+    wire is removed, while ids never do -- `nextWireId` exists because "an
+    index changes when an earlier wire is removed", and the colour needed
+    the identical treatment. Comments stripped, the OH-117 lesson."""
+    source = RENDERER.read_text(encoding="utf-8")
+    body = source.split("function beginWire(", 1)[1].split("\n}", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "const id = nextWireId++" in code, (
+        "the id is not taken first, so the colour has nothing stable to key on"
+    )
+    assert "WIRE_COLOURS[(id - 1) % WIRE_COLOURS.length]" in code, (
+        "the colour is not keyed off the wire's own id"
+    )
+    assert "view.wires.length % WIRE_COLOURS.length" not in code, (
+        "the colour indexes the live count again, which repeats after any "
+        "disconnect"
+    )
+
+
+def test_the_drag_in_progress_does_not_survive_a_cleared_bench():
+    """A pointer held across a board change kept writing to a wire whose
+    mesh `clearBench` had just released, and the pointerup discarded it a
+    second time (OH-133). The drag is one of the bench's wires, so it dies
+    with them."""
+    source = RENDERER.read_text(encoding="utf-8")
+    body = source.split("export function clearBench(", 1)[1].split("\n}", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "view.dragging = null" in code, (
+        "the drag survives clearBench and writes to a released wire"
+    )
+
+
+def test_removing_a_part_releases_only_what_is_the_parts_own():
+    """**`release` over a part's whole tree disposed buffers the part never
+    owned** (OH-133): `loadPart` hands out `clone(true)` of the cached
+    template, and a three.js clone shares geometry and materials with the
+    template and every sibling -- so every removal forced a fresh GPU upload
+    for every survivor. Per-part is exactly the lens material `dressPart`
+    clones and the target spheres `makeTarget` builds fresh; `releasePart`
+    is the one place that knows the split, and both removal paths go
+    through it. Comments stripped."""
+    source = RENDERER.read_text(encoding="utf-8")
+    for opener in ("export function removePart(", "export function clearBench("):
+        body = source.split(opener, 1)[1].split("\n}", 1)[0]
+        code = "\n".join(line for line in body.splitlines()
+                         if not line.lstrip().startswith("//"))
+        assert "releasePart(part)" in code, (
+            f"{opener} does not go through releasePart"
+        )
+        assert "release(object)" not in code, (
+            f"{opener} blanket-releases shared geometry again"
+        )
+    helper = source.split("function releasePart(", 1)[1].split("\n}", 1)[0]
+    helper = "\n".join(line for line in helper.splitlines()
+                       if not line.lstrip().startswith("//"))
+    assert "part.userData.lens?.material?.dispose()" in helper, (
+        "the cloned lens material leaks with every removed part"
+    )
+    assert "object.userData.terminal !== undefined" in helper, (
+        "the target guard is gone, so releasePart is the blanket release "
+        "under a new name"
     )
