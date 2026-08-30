@@ -212,6 +212,13 @@ class Recipe:
     #: file", which is the honest answer until somebody decides to fetch it.
     libraries: tuple[Library, ...]
 
+    #: (substring, note) pairs: when a failed build's diagnostics contain the
+    #: substring, the note is appended. **For errors this table CAUSED**
+    #: (OH-138): a recipe that deliberately builds without something owes the
+    #: person who reaches for it the reason and the alternative, in the pane
+    #: they are looking at -- not in a comment here they will never read.
+    hints: tuple[tuple[str, str], ...]
+
 
 #: One recipe per chip, keyed as `webui/boards/catalogue.py` spells the chip.
 #:
@@ -285,6 +292,7 @@ RECIPES: dict[str, Recipe] = {
                     ("libraries/Wire/src/Wire.cpp",
                      "libraries/Wire/src/utility/twi.c")),
         ),
+        hints=(),
     ),
     "SAMD21": Recipe(
         toolchain="toolchain-gccarmnoneeabi",
@@ -357,6 +365,17 @@ RECIPES: dict[str, Recipe] = {
             Library("Wire.h", "libraries/Wire",
                     ("libraries/Wire/Wire.cpp",)),
         ),
+        # The obvious thing to type at a page that shows a UART console is
+        # `Serial`, and this build refuses it ON PURPOSE -- the USBCON note
+        # up at `flags` is the argument. The refusal used to be gcc's bare
+        # "'Serial' was not declared in this scope; did you mean 'Serial_'?",
+        # which sends a person to `Serial_` -- a USB type that is more wrong.
+        hints=((
+            "'Serial' was not declared",
+            ("note: this build has no USB device on purpose -- `Serial` on a "
+             "XIAO is USB-CDC, and an emulated board has no host to enumerate "
+             "to. The UART this page's console shows is `Serial1`."),
+        ),),
     ),
 }
 
@@ -575,7 +594,9 @@ def build(board: str, source: str) -> Build:
                 # always the caller's -- but the command is returned either way
                 # so a framework file that stopped compiling is not mistaken
                 # for a syntax error in three lines of sketch.
-                return Build(False, b"", _diagnostics(done, sketch), command)
+                return Build(False, b"",
+                             _hinted(_diagnostics(done, sketch), recipe),
+                             command)
             objects.append(str(obj))
 
         elf = out / "sketch.elf"
@@ -637,6 +658,20 @@ def _run(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command, capture_output=True, text=True, timeout=TIMEOUT_SECONDS,
     )
+
+
+def _hinted(diagnostics: str, recipe: Recipe) -> str:
+    """`diagnostics`, with the recipe's note under any error its table caused.
+
+    Appended rather than rewritten: the compiler's own words stay intact and
+    first, because they carry the line number and the caret, and a hint that
+    replaced them would trade the where for the why.
+    """
+    said = [diagnostics]
+    for needle, note in recipe.hints:
+        if needle in diagnostics:
+            said.append(note)
+    return "\n".join(said)
 
 
 def _diagnostics(done: subprocess.CompletedProcess[str],

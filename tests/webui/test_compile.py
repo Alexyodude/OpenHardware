@@ -567,3 +567,45 @@ void loop() {}
         "PD3 is timer 2's compare output; the level PORTD holds is not what "
         "the pin is doing"
     )
+
+
+# --- the hint under a refusal the recipe caused (OH-138) ---------------------
+
+
+def test_the_samd21s_serial_refusal_names_the_uart_that_works():
+    """**The obvious line at a page that shows a UART console is `Serial`,
+    and this build refuses it on purpose** -- the USBCON choice the recipe
+    documents at length. The refusal used to be gcc's bare "'Serial' was not
+    declared ... did you mean 'Serial_'?", which sends a person to a USB
+    type that is more wrong. The compiler's words stay first and intact --
+    they carry the line number -- and the recipe's note lands under them."""
+    needs_toolchain(SAMD_BOARD)
+    built = compiler.build(
+        SAMD_BOARD, "void setup(){ Serial.begin(9600); } void loop(){}"
+    )
+    assert not built.ok
+    assert "'Serial' was not declared" in built.diagnostics, built.diagnostics
+    at_error = built.diagnostics.index("'Serial' was not declared")
+    at_note = built.diagnostics.index("Serial1")
+    assert at_error < at_note, "the note buried the compiler's own words"
+    assert "USB-CDC" in built.diagnostics
+
+
+def test_the_hint_does_not_fire_on_an_unrelated_error():
+    """A note under every failure is a note nobody reads."""
+    needs_toolchain(SAMD_BOARD)
+    built = compiler.build(SAMD_BOARD, "void setup(){}\nvoid loop(){ int x = ; }")
+    assert not built.ok
+    assert "Serial1" not in built.diagnostics, (
+        "the hint fired on a syntax error that has nothing to do with Serial"
+    )
+
+
+def test_the_unos_serial_still_just_works():
+    """The hint is the SAMD21's, because the absence is the SAMD21's: on the
+    Uno `Serial` is the hardware USART and compiles."""
+    needs_toolchain()
+    built = compiler.build(
+        BOARD, "void setup(){ Serial.begin(9600); } void loop(){}"
+    )
+    assert built.ok, built.diagnostics
