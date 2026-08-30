@@ -323,8 +323,9 @@ Corrections and observations out of the pass:
     commits, curl for a field the night added before trusting it.
   * **A Step blanks the watch note**: the page posts `/api/board/step`
     without `words=`, so the note fills on load/run fetches (which ride
-    `boardStateUrl()`) and clears on a step. Candidate follow-up beside
-    OH-140; deliberately not filed (§5.3 discipline).
+    `boardStateUrl()`) and clears on a step. FILED AND FIXED the same
+    morning as OH-143 at the user's nudge: `watchedUrl(route)` now serves
+    every fetch whose reply is a state render, browser-verified.
   * **The default blink is ~24 s per half-phase on the wall**: the sim ran
     at ~337k instr/s against the real 16 MHz, so `delay(500)` is 8M
     instructions. The pass drove D13 with a constant-HIGH sketch instead;

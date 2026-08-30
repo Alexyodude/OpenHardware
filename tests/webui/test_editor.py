@@ -376,6 +376,26 @@ def test_the_default_sketch_actually_compiles():
     assert built.ok, built.diagnostics
 
 
+def test_a_step_carries_the_watch_so_the_note_survives_it():
+    """The step reply is a state render, so a step fetched bare rewrote the
+    watch note from an absent `words` and blanked it (OH-143) -- found by
+    the 2026-08-31 browser pass, one step after typing an address, which is
+    the exact order OH-140's checklist promised. Pinned the way the state
+    fetches are: through the shared builder, bare literal forbidden."""
+    source = SCRIPT.read_text(encoding="utf-8")
+    code = "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert 'api(watchedUrl("/api/board/step")' in code, (
+        "the step fetch does not carry the watch, so a step blanks the note"
+    )
+    assert 'api("/api/board/step"' not in code, (
+        "a bare step fetch bypasses watchedUrl, so the watch dies on step"
+    )
+    assert 'watchedUrl("/api/board/state")' in code, (
+        "boardStateUrl no longer delegates to the shared builder"
+    )
+
+
 def test_the_sketch_survives_a_reload_and_the_watch_rides_every_state_fetch():
     """Two page-side affordances, pinned at the source with comments
     stripped (OH-140): the sketch is kept in localStorage on every input

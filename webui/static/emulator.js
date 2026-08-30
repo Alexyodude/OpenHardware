@@ -893,18 +893,26 @@ function runLine(report) {
          `${fast}${stopped}. pc 0x${$("where").textContent}`;
 }
 
-/** The state route, with whatever the watch box asks for riding it.
+/** A board route with whatever the watch box asks for riding it.
  *
  *  One builder for every fetch (OH-140): the route, its validation and a
  *  long docstring argued for `words=` and the page never sent it. The box
  *  is passed through verbatim -- comma-separated, 0x or decimal -- and the
- *  server's refusal for a bad address already names it.
+ *  server's refusal for a bad address already names it. The STEP goes
+ *  through here too (OH-143): its reply is a state render, so a step
+ *  fetched bare rewrote the note from an absent `words` -- one step after
+ *  typing an address, the watch it was meant to demonstrate went blank.
  */
-function boardStateUrl() {
+function watchedUrl(route) {
   const watch = $("board-watch").value.trim();
   return watch
-    ? `/api/board/state?words=${encodeURIComponent(watch)}`
-    : "/api/board/state";
+    ? `${route}?words=${encodeURIComponent(watch)}`
+    : route;
+}
+
+/** The state route, through the watch. */
+function boardStateUrl() {
+  return watchedUrl("/api/board/state");
 }
 
 /** Run is a toggle, and this is the half of it that shows which way it is. */
@@ -1262,7 +1270,7 @@ function wire() {
     // first so the step is the only thing that moves the machine.
     await stopBoardClock();
     showBoardRunning(false);
-    renderBoardState(await api("/api/board/step", {}));
+    renderBoardState(await api(watchedUrl("/api/board/step"), {}));
   });
   $("board-load").addEventListener("click", () =>
     loadBoardImage().catch((error) => boardSays("Nothing loaded yet.", String(error.message || error))));
