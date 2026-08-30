@@ -249,3 +249,30 @@ def test_a_diagnostic_message_is_rendered_before_the_line_it_quotes():
         "the quoted source line is appended before the rest of the message, "
         "which puts the caret above the sentence explaining it"
     )
+
+
+def test_typing_in_the_sketch_editor_does_not_step_the_emulator():
+    """**"s" is a letter before it is a shortcut** (OH-134).
+
+    The page-level keydown handler turns "s" and "r" into step and run, with
+    preventDefault. It excused INPUT and SELECT and not TEXTAREA -- and the
+    sketch editor is a textarea -- so typing "void setup" single-stepped the
+    8086 on the s and the letter never appeared. Serial, setup, return, for
+    and digitalWrite were all unwritable: an IDE nobody can use, and it was
+    reported as exactly that.
+
+    Checked as source because Python cannot type into it: the guard must name
+    all three text-entry elements, and it must come BEFORE the key checks.
+    """
+    source = SCRIPT.read_text(encoding="utf-8")
+    handler = source.split('document.addEventListener("keydown"', 1)[1]
+    handler = handler.split("});", 1)[0]
+    guard_at = handler.index('event.target.tagName')
+    step_at = handler.index('"F10"')
+    assert guard_at < step_at, "the guard runs after the shortcut fires"
+    for element in ('"INPUT"', '"SELECT"', '"TEXTAREA"'):
+        guard = handler[:step_at]
+        assert element in guard, (
+            f"{element} is missing from the keydown guard, so typing into it "
+            f"steps the emulator instead"
+        )

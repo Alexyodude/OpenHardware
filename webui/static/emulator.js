@@ -1198,7 +1198,14 @@ function wire() {
   });
 
   document.addEventListener("keydown", (event) => {
-    if (event.target.tagName === "INPUT" || event.target.tagName === "SELECT") return;
+    // **TEXTAREA is in this list because the sketch editor is one** (OH-134).
+    // Without it, typing "void setup" in the editor single-stepped the 8086
+    // on the s -- preventDefault ate the key, the register and disassembly
+    // panes redrew, and the letter never appeared. Serial, setup, return,
+    // for and digitalWrite were all unwritable, which is an IDE nobody can
+    // use, reported as exactly that.
+    if (event.target.tagName === "INPUT" || event.target.tagName === "SELECT"
+        || event.target.tagName === "TEXTAREA") return;
     // The step and run keys are for the emulator. Firing them while the
     // targets list is showing would advance a processor the reader cannot see.
     if (document.body.dataset.view !== "emulator") return;
