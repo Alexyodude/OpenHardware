@@ -910,7 +910,15 @@ def test_the_written_albedos_are_linear_and_not_the_bytes():
         got = material["pbrMetallicRoughness"]["baseColorFactor"][:3]
         assert got == pytest.approx(want, abs=1e-6), name
         raw = [int(name[at:at + 2], 16) / 255 for at in (1, 3, 5)]
-        if max(raw) > 0.05:
+        # **A channel of 0x00 or 0xff is a FIXED POINT of the sRGB
+        # transform** -- linear(0) is 0 and linear(255) is 1 -- so a colour
+        # made only of those, like the #0000ff a fetched LED lens brought in
+        # with OH-119, is identical in both encodings and cannot satisfy an
+        # inequality. The equality assertion above still fully checks such
+        # colours; this one only has meaning where the transform bends.
+        bent = any(int(name[at:at + 2], 16) not in (0x00, 0xFF)
+                   for at in (1, 3, 5))
+        if max(raw) > 0.05 and bent:
             assert got != pytest.approx(raw, abs=1e-6), (
                 f"{name} is still the sRGB bytes"
             )

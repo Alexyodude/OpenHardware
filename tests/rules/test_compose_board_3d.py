@@ -1779,7 +1779,8 @@ def test_every_component_lands_where_the_vendor_drew_its_body():
         if miss > worst:
             worst, worst_name = miss, element.name
 
-    assert checked == 15, f"only {checked} components were checked against silk"
+    assert checked == 47, (  # 15 until OH-119 mapped the Uno's small parts
+        f"only {checked} components were checked against silk")
     assert worst < compose.SILK_TOLERANCE_MM, (
         f"{worst_name} lands {worst:.2f} mm from the body the vendor drew"
     )
@@ -1950,7 +1951,8 @@ def test_each_component_box_actually_contains_its_component():
                     assert solid["min"][axis] - 1e-3 <= value, element.name
                     assert value <= solid["max"][axis] + 1e-3, element.name
         checked += 1
-    assert checked == 15, f"only {checked} components were boxed"
+    assert checked == 47, (  # 15 until OH-119 mapped the Uno's small parts
+        f"only {checked} components were boxed")
 
 
 # --- a KiCad board, presented as the one this already composes ----------------
@@ -3349,4 +3351,57 @@ def test_compose_injects_the_dip_headers_for_a_dip_spec():
     assert "dip_header_elements(header_pads) if spec.dip_headers" in code, (
         "compose no longer injects the DIP headers, so every XIAO DIP board "
         "goes back to a bare SMD model under pads that expect pins"
+    )
+
+
+# --- every part is drawn or its absence is stated (OH-119) -------------------
+
+
+def test_every_uno_package_is_drawn_or_its_absence_is_explained():
+    """**The composer dropped 99 of the Uno's 116 elements in silence** --
+    among them the pin-13 LED every Blink drives, on a project whose stated
+    purpose is watching one. `compose` skips any package in neither
+    `CORRESPONDENCE` nor `ABSENT` with no model and no line of output, so
+    the only thing that keeps the board honest is this closed-world check:
+    a package must be one or the other, by name.
+
+    This is deliberately the DONE-WHEN of OH-119 rather than a count: a count
+    survives a swapped part, and a new element in a vendor revision fails
+    loudly here instead of vanishing.
+    """
+    spec = _uno()
+    if not spec.layout.is_file():
+        pytest.skip(f"no layout; run {spec.fetch_with}")
+    board = compose.read_layout(spec.layout)
+    mapped = {c.package for c in compose.CORRESPONDENCE}
+    explained = set(compose.ABSENT)
+    orphans = sorted({e.package for e in board.elements}
+                     - mapped - explained)
+    assert not orphans, (
+        f"{orphans} are neither drawn nor explained. Add a CORRESPONDENCE "
+        f"row with a measured why, or an ABSENT row with the reason -- "
+        f"silence is the defect OH-119 was filed about"
+    )
+
+
+def test_the_pin_13_led_is_one_of_the_drawn_parts():
+    """The single part the project exists to show. Pinned by name on the
+    shipped mesh, so a table edit that quietly re-orphaned the LEDs would
+    fail here even without a recompose of the world."""
+    led = next((c for c in compose.CORRESPONDENCE
+                if c.package == "CHIP-LED0805"), None)
+    assert led is not None, "the Uno's indicator LEDs lost their row"
+    assert led.model == "LED_0805_2012Metric"
+    glb = REPO / "webui" / "static" / "models" / "Arduino-Uno.glb"
+    if not glb.is_file():
+        pytest.skip("no composed Uno; run tools/compose_board_3d.py")
+    from tools.import_3d_model import read_extras
+
+    drawn = read_extras(glb)["drawn"]
+    for name in ("L (LED_0805_2012Metric)", "ON (LED_0805_2012Metric)",
+                 "RX (LED_0805_2012Metric)", "TX (LED_0805_2012Metric)"):
+        assert name in drawn, f"{name} is not in the shipped mesh's own list"
+    assert len(drawn) >= 47, (
+        f"the Uno draws {len(drawn)} parts; it drew 47 when OH-119 closed, "
+        f"and fewer means something was silently lost"
     )

@@ -216,6 +216,89 @@ CORRESPONDENCE: tuple[Component, ...] = (
         turn=90.0,
         flip=True,
     ),
+    # --- the Uno's small parts, unmapped until OH-119 -----------------------
+    # The composer dropped 99 of the board's 116 elements with no model and
+    # no stated reason -- among them the pin-13 LED every Blink drives, on a
+    # project whose stated purpose is watching one. Each span below was
+    # measured with eagle.Element.pad_extent on 2026-08-30, and `confirm`
+    # re-measures on every run.
+    Component(
+        "CHIP-LED0805", "LED_SMD", "LED_0805_2012Metric",
+        "ON, RX, TX and L -- the pin-13 LED. Two pads 2.10 mm apart, which "
+        "is an 0805 land; the model is the 2.0 x 1.25 mm part the name "
+        "states. The XIAOs already draw their LEDs from this library.",
+    ),
+    Component(
+        "C0603-ROUND", "Capacitor_SMD", "C_0603_1608Metric",
+        "C1-C11, eleven of them. Two pads 1.778 mm apart -- an 0603 land -- "
+        "and the model is the 1.6 x 0.8 mm chip. The same model the XIAOs' "
+        "C0402/C0201 siblings come from, one size up.",
+    ),
+    Component(
+        "R0603-ROUND", "Resistor_SMD", "R_0603_1608Metric",
+        "R1 and R2. The same 1.778 mm 0603 land as the capacitors, and the "
+        "matching resistor body.",
+    ),
+    Component(
+        "CT/CN0603", "Capacitor_SMD", "C_0603_1608Metric",
+        "Z1 and Z2, the USB line varistors. Two pads 2.00 mm apart on an "
+        "0603-sized land, and a multilayer varistor IS a ceramic chip in an "
+        "0603 body -- the model is the body, borrowed from the capacitor "
+        "that shares it. The PART is a varistor; only the moulding is a "
+        "capacitor's, and both are ceramic blocks.",
+    ),
+    Component(
+        "0805", "Inductor_SMD", "L_0805_2012Metric",
+        "L1 and L2, the ferrites. Two pads 2.20 mm apart, an 0805 land, and "
+        "the 2.0 x 1.25 mm chip body.",
+    ),
+    Component(
+        "MINIMELF", "Diode_SMD", "D_MiniMELF",
+        "D2 and D3. Two pads 3.40 mm apart along y, and a MiniMELF is the "
+        "3.5 x 1.4 mm glass cylinder the package name states. The KiCad "
+        "model runs along x where EAGLE's runs along y, hence the turn.",
+        turn=90.0,
+    ),
+    Component(
+        "SMB", "Diode_SMD", "D_SMB",
+        "D1, the reverse-protection diode. Two pads 4.40 mm apart and the "
+        "SMB (DO-214AA) body is 4.3 x 3.6 mm -- the package name is the "
+        "JEDEC name the model uses.",
+    ),
+    Component(
+        "L1812", "Capacitor_SMD", "C_1812_4532Metric",
+        "F1, the resettable polyfuse. Two pads 3.90 mm apart along y on an "
+        "1812 land, and the model is the 4.5 x 3.2 mm 1812 BODY -- borrowed "
+        "from the capacitor library because KiCad's Fuse library stops at "
+        "1210 (checked against GitLab's own tree, 28 files, 2026-08-30). A "
+        "polyfuse is a rectangular chip; the PART is a fuse, only the "
+        "moulding is a capacitor's, the same argument as Z1/Z2 above. EAGLE "
+        "runs it along y.",
+        turn=90.0,
+    ),
+    Component(
+        "CAY16", "Resistor_SMD", "R_Array_Convex_4x0603",
+        "RN1-RN4, the resistor networks. Eight pads in two rows, 1.35 mm "
+        "across the rows and 2.40 mm along them -- four 0603 elements at an "
+        "0.8 mm pitch, which is what a CAY16 is and what this model draws.",
+    ),
+    Component(
+        "SOT-23", "Package_TO_SOT_SMD", "SOT-23",
+        "T1, the FDN340P power-switch FET. Three pads spanning 2.032 x "
+        "1.93 mm, and the package name is the model's own.",
+    ),
+    Component(
+        "SOT23-DBV", "Package_TO_SOT_SMD", "SOT-23-5",
+        "U2, the LMV358 that drives the ON LED. Five pads spanning 2.60 x "
+        "1.90 mm; DBV is TI's name for SOT-23-5, and the model is the one "
+        "the XIAO C3's SOT-25 already draws.",
+    ),
+    Component(
+        "MSOP08", "Package_SO", "MSOP-8_3x3mm_P0.65mm",
+        "U5, the other LMV358. Eight pads in two rows spanning 4.225 x "
+        "1.95 mm -- three 0.65 mm pitches along each row -- and MSOP-8 is "
+        "the 3 x 3 mm body those numbers describe.",
+    ),
     Component(
         "POWERSUPPLY_DC-21MM", "Connector_BarrelJack", "BarrelJack_Horizontal",
         "X1's nine through-hole pads span 5.99 x 5.77 mm and the vendor draws "
@@ -609,6 +692,26 @@ _NO_TINY_BUTTON = (
 )
 
 ABSENT: dict[str, str] = {
+    # --- pads with no body, stated rather than silent (OH-119) --------------
+    "TP-SP": (
+        "61 test points, each a bare 0.8 x 0.8 mm pad. A test point is the "
+        "copper itself, which OH-110 already draws, and any body stood on "
+        "one would be an invention. No KiCad library was searched: there is no body to look for."
+    ),
+    "FIDUCIA-MOUNT": (
+        "three fiducials, each a bare 1.016 mm copper disc the pick-and-place "
+        "camera sights on. Nothing is fitted to them, so nothing is drawn. No KiCad library was searched: there is no body to look for."
+    ),
+    "SJ": (
+        "two solder jumpers, GROUND and RESET-EN: two 1.168 x 1.600 mm "
+        "half-moon pads each, which a person may bridge with solder. "
+        "Unbridged from the factory there is no component to draw, and the "
+        "pads themselves are drawn as copper. No KiCad library was searched: there is no body to look for."
+    ),
+    "FRAME": (
+        "the schematic frame: zero pads and 0.0 mm of copper, a drawing "
+        "artefact in the board file rather than a part. No KiCad library was searched: there is no body to look for."
+    ),
     "QS": (
         "the 16 MHz crystal. Arduino's own silkscreen makes its body "
         "6.86 x 4.57 mm, and every through-hole crystal in KiCad's Crystal "
