@@ -65,6 +65,7 @@ import os
 import pathlib
 import subprocess
 import tempfile
+import time
 
 from webui.boards import catalogue as board_catalogue
 from webui.boards import samd21
@@ -88,9 +89,21 @@ PACKAGES = pathlib.Path(
 #: git-ignored for the reason that file gives -- fetch, do not vendor.
 BOARD_SUPPORT = pathlib.Path(__file__).resolve().parents[1] / "third_party" / "bsp"
 
-#: How long a build may take before it is killed. A compiler that hangs would
-#: otherwise hold the server's lock forever, and this runs under one.
+#: How long one INVOCATION may take before it is killed. For a while this was
+#: the whole story, and its comment claimed it stopped a hung compiler
+#: "holding the server's lock forever" -- untrue twice over (OH-136): a
+#: SAMD21 build is ~24 invocations plus a link and an objcopy, so the
+#: per-invocation cap allowed the better part of an hour; and the build no
+#: longer runs under the server's lock at all (see `emulator_server._api`).
+#: The whole-build cap is `BUILD_BUDGET_SECONDS`.
 TIMEOUT_SECONDS = 120
+
+#: The whole build's wall-clock budget, enforced by `_run` shrinking every
+#: invocation's timeout to what remains of it. Blowing it is a RESULT, not a
+#: raise: the synthetic exit rides the same nonzero-returncode rail every
+#: real compiler failure takes, and its message names the command that was
+#: running -- "the toolchain hung" is actionable where silence is not.
+BUILD_BUDGET_SECONDS = 300
 
 #: A sketch larger than this is refused before a compiler is started. Not a
 #: security boundary -- the body limit in `emulator_server.py` is that -- but a
@@ -537,6 +550,9 @@ def build(board: str, source: str) -> Build:
             f"sketch is {len(source.encode('utf-8'))} bytes, over the "
             f"{MAX_SOURCE_BYTES} this accepts"
         )
+    # One deadline for the WHOLE build (OH-136): ~24 invocations each
+    # entitled to TIMEOUT_SECONDS is not a bound anybody meant.
+    deadline = time.monotonic() + BUILD_BUDGET_SECONDS
     recipe = recipe_for(board)
     tools = toolchain_root(recipe)
     framework = framework_root(recipe)
@@ -588,7 +604,7 @@ def build(board: str, source: str) -> Build:
                 *(recipe.cxx_flags if cxx else ()),
                 str(path), "-o", str(obj),
             )
-            done = _run(command)
+            done = _run(command, deadline)
             if done.returncode != 0:
                 # The sketch is compiled first, so a failure here is almost
                 # always the caller's -- but the command is returned either way
@@ -605,13 +621,13 @@ def build(board: str, source: str) -> Build:
             *(("-T", str(script)) if script is not None else ()),
             *objects, "-o", str(elf), "-lm",
         )
-        done = _run(link)
+        done = _run(link, deadline)
         if done.returncode != 0:
             return Build(False, b"", _diagnostics(done, sketch), link)
 
         image = out / "sketch.bin"
         extract = (objcopy, "-O", "binary", "-R", ".eeprom", str(elf), str(image))
-        done = _run(extract)
+        done = _run(extract, deadline)
         if done.returncode != 0:
             return Build(False, b"", _diagnostics(done, sketch), extract)
 
@@ -654,9 +670,28 @@ def preamble(source: str) -> str:
     return ARDUINO_PREAMBLE + source
 
 
-def _run(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        command, capture_output=True, text=True, timeout=TIMEOUT_SECONDS,
+def _run(command: tuple[str, ...],
+         deadline: float) -> subprocess.CompletedProcess[str]:
+    """One invocation, inside what remains of the build's budget.
+
+    Running out of time COMES BACK as a failed command rather than raising:
+    every call site already turns a nonzero exit into a diagnosed `Build`,
+    so the budget message rides the rail real compiler failures ride. 124
+    because that is the exit code `timeout(1)` gave the idea to.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining > 0:
+        try:
+            return subprocess.run(
+                command, capture_output=True, text=True,
+                timeout=min(TIMEOUT_SECONDS, remaining),
+            )
+        except subprocess.TimeoutExpired:
+            pass
+    return subprocess.CompletedProcess(
+        command, returncode=124, stdout="",
+        stderr=(f"the build ran out of its {BUILD_BUDGET_SECONDS} s budget "
+                f"while running {command[0]}"),
     )
 
 

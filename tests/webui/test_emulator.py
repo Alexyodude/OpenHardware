@@ -571,3 +571,101 @@ def test_a_picked_board_is_answered_for_and_not_the_one_that_is_running(session)
     # it would have raised on `runtime=None` instead of answering.
     assert view["board"] == "XIAO-MG24-DIP"
     assert view["unknown"] == len(view["pads"])
+
+
+# --- a compile no longer freezes the page (OH-136) ---------------------------
+
+
+def test_a_state_poll_answers_while_a_build_runs(live_server):
+    """**The page looked hung for every second of every build**: one lock
+    wraps every route and the whole build used to run inside it -- measured
+    before the split, a GET /api/state issued 0.7 s into a SAMD21 build
+    answered after 15.79 s. The build now runs before the lock is taken, so
+    a poll lands while the compiler grinds.
+
+    The build is real and skips without the toolchain. The poll must land
+    while the build is STILL RUNNING -- a poll after a finished build
+    proves nothing, and the assertion says so rather than passing
+    vacuously."""
+    import time
+
+    from webui import compile as compile_service
+    try:
+        recipe = compile_service.recipe_for("XIAO-SAMD21-DIP")
+        compile_service.toolchain_root(recipe)
+        compile_service.framework_root(recipe)
+        compile_service.variant_root(recipe)
+        compile_service.include_roots(recipe)
+    except compile_service.CompileError as exc:
+        pytest.skip(str(exc))
+
+    finished: dict[str, object] = {}
+
+    def build() -> None:
+        finished["reply"] = post(live_server, "/api/board/compile", {
+            "board": "XIAO-SAMD21-DIP",
+            "source": "void setup(){} void loop(){}",
+        })
+
+    # Two attempts, and only the VACUOUS case retries: a cold toolchain can
+    # finish its (cached) build before the probe point, and a run where the
+    # build already ended proves nothing about the lock. A lock regression
+    # is structural and fails every attempt; cold-start noise clears on the
+    # second. The latency assertion stays strict on the attempt that counts.
+    for _attempt in range(2):
+        builder = threading.Thread(target=build)
+        builder.start()
+        time.sleep(0.7)                  # the survey's own probe point
+        began = time.monotonic()
+        state = get(live_server, "/api/state?at=0&len=16")
+        waited = time.monotonic() - began
+        still_building = builder.is_alive()
+        builder.join(timeout=120)
+        if still_building:
+            break
+    assert "registers" in state
+    assert still_building, (
+        "the build finished before the poll landed on both attempts, so "
+        "nothing here measured the lock; a SAMD21 build takes seconds"
+    )
+    assert waited < 3.0, (
+        f"a state poll waited {waited:.2f} s during a build; the lock is "
+        f"holding the page hostage again"
+    )
+    reply = finished.get("reply")
+    assert isinstance(reply, dict) and reply.get("ok"), f"the build itself failed: {reply}"
+
+
+def test_a_compile_with_a_wrong_shaped_body_is_refused_by_name(live_server):
+    """The validation moved out of the locked handler into
+    `prepare_compile` (OH-136), and the refusal must not have moved with
+    it: a number where a board name belongs is still a 400 naming the
+    field, from the same door the browser uses."""
+    request = urllib.request.Request(
+        live_server + "/api/board/compile",
+        data=json.dumps({"board": 5, "source": "void setup(){}"}).encode(),
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=10):
+            raise AssertionError("a non-string board was accepted")
+    except urllib.error.HTTPError as caught:
+        assert caught.code == 400
+        body = json.loads(caught.read())
+        assert "board must be a string" in body["error"]
+
+
+def test_the_locked_handler_consumes_the_prepared_build():
+    """A handler that rebuilt inside the lock would compile every sketch
+    TWICE and hold the lock for the second one -- the freeze OH-136
+    removed, wearing a disguise. Asserted at the source with comments
+    stripped, because the double build is invisible to a caller who only
+    reads the reply."""
+    source = pathlib.Path(emulator_server.__file__).read_text(encoding="utf-8")
+    body = source.split('if route == "/api/board/compile":', 1)[1]
+    body = body.split("\n    if route", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("#"))
+    assert "prepared if prepared is not None" in code, (
+        "the locked handler ignores the build the unlocked prelude already "
+        "did, so every sketch compiles twice and the second holds the lock"
+    )

@@ -609,3 +609,34 @@ def test_the_unos_serial_still_just_works():
         BOARD, "void setup(){ Serial.begin(9600); } void loop(){}"
     )
     assert built.ok, built.diagnostics
+
+
+# --- the whole-build budget (OH-136) -----------------------------------------
+
+
+def test_running_out_of_budget_is_a_result_on_the_failure_rail():
+    """`TIMEOUT_SECONDS` was per INVOCATION and its comment claimed it
+    stopped a hung compiler "holding the server's lock forever" -- a SAMD21
+    build is ~24 invocations, so the real bound was the better part of an
+    hour. The whole-build budget comes back as returncode 124 with the
+    budget and the command named -- the same nonzero rail every real
+    compiler failure rides, so each call site already knows what to do."""
+    import sys
+    import time
+    slow = (sys.executable, "-c", "import time; time.sleep(5)")
+    done = compiler._run(slow, deadline=time.monotonic() + 0.2)
+    assert done.returncode == 124
+    assert str(compiler.BUILD_BUDGET_SECONDS) in done.stderr
+    assert sys.executable in done.stderr
+
+
+def test_a_deadline_already_passed_runs_nothing_at_all():
+    """The doomed command is refused before it starts: a budget already
+    blown owes the caller an answer, not five more seconds of compiler."""
+    import sys
+    import time
+    began = time.monotonic()
+    done = compiler._run((sys.executable, "-c", "import time; time.sleep(5)"),
+                         deadline=began - 1)
+    assert done.returncode == 124
+    assert time.monotonic() - began < 1, "the doomed command was still run"

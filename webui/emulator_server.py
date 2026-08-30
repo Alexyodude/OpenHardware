@@ -446,7 +446,8 @@ SEARCH_ROOTS = ArtefactSearch()
 
 def handle_board_api(boards: BoardSlot, route: str,
                      query: dict[str, list[str]],
-                     payload: dict[str, object]) -> dict[str, object]:
+                     payload: dict[str, object],
+                     prepared=None) -> dict[str, object]:
     """Three routes: put an image on a board, run it, look at it.
 
     Thin, like everything else here. `webui/api.py` holds the behaviour and
@@ -511,19 +512,11 @@ def handle_board_api(boards: BoardSlot, route: str,
         # A build that FAILS leaves the board untouched. `boards.replace` is
         # reached only on success, so a syntax error does not cost a person the
         # program that was running.
-        board = payload.get("board")
-        source = payload.get("source")
-        if not isinstance(board, str):
-            raise ApiError("board must be a string naming a board from /api/boards")
-        if not isinstance(source, str):
-            raise ApiError("source must be a string holding the sketch")
-        try:
-            built = compile_service.build(board, source)
-        except compile_service.CompileError as exc:
-            # Cannot be attempted: an unknown board, or a toolchain this
-            # machine does not have. Distinct from a sketch that does not
-            # compile, which is a 200 with `ok: false` and the diagnostics.
-            raise ApiError(str(exc)) from exc
+        # Prepared OUTSIDE the lock by `_api` on the live server (OH-136);
+        # prepared here, equivalently, for the tests that drive this handler
+        # directly and for any second transport that grows one.
+        board, built = (prepared if prepared is not None
+                        else prepare_compile(payload))
         if not built.ok:
             return built.as_json()
         loaded = api.load_firmware(
@@ -610,7 +603,7 @@ def handle_board_api(boards: BoardSlot, route: str,
 def handle_api(session: emulator.Session, selection: Selection, route: str,
                query: dict[str, list[str]],
                payload: dict[str, object],
-               boards: BoardSlot | None = None) -> dict[str, object]:
+               boards: BoardSlot | None = None, prepared=None) -> dict[str, object]:
     """The whole API. Adding a route means adding it here, on purpose.
 
     `boards` is last and optional so that a caller with no board slot -- a
@@ -621,7 +614,8 @@ def handle_api(session: emulator.Session, selection: Selection, route: str,
     if route.startswith("/api/board/"):
         if boards is None:
             raise ApiError(f"{route} needs a board slot; this caller has none")
-        return handle_board_api(boards, route, query, payload)
+        return handle_board_api(boards, route, query, payload,
+                                prepared=prepared)
 
     if route == "/api/targets":
         listing = []
@@ -701,6 +695,31 @@ def handle_api(session: emulator.Session, selection: Selection, route: str,
     raise ApiError(f"no such route: {route}")
 
 
+def prepare_compile(payload: dict[str, object]) -> tuple[str, object]:
+    """The unlocked half of /api/board/compile: validate, then BUILD.
+
+    **A build is subprocess work against a temporary directory and touches
+    no session state until its image is loaded** (OH-136). It used to run
+    inside the session lock, and the page froze for the whole of it --
+    measured: a GET /api/state issued 0.7 s into a SAMD21 build answered
+    after 15.79 s. `_api` calls this before taking the lock; the locked
+    handler receives the finished build and does only the load.
+    """
+    board = payload.get("board")
+    source = payload.get("source")
+    if not isinstance(board, str):
+        raise ApiError("board must be a string naming a board from /api/boards")
+    if not isinstance(source, str):
+        raise ApiError("source must be a string holding the sketch")
+    try:
+        return board, compile_service.build(board, source)
+    except compile_service.CompileError as exc:
+        # Cannot be attempted: an unknown board, or a toolchain this machine
+        # does not have. Distinct from a sketch that does not compile, which
+        # is a 200 with `ok: false` and the diagnostics.
+        raise ApiError(str(exc)) from exc
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     """One session, shared by every request, guarded by one lock."""
 
@@ -763,11 +782,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _api(self, route: str, query: dict[str, list[str]],
              payload: dict[str, object]) -> None:
         try:
+            # **A compile BUILDS before the lock is taken** (OH-136): the
+            # subprocess work touches no session state, so only the load
+            # that follows it belongs inside. Every other route is
+            # unchanged: state stays guarded by the one lock.
+            prepared = None
+            if route == "/api/board/compile":
+                prepared = prepare_compile(payload)
             with self.lock:
                 self._json(
                     200,
                     handle_api(self.session, self.selection, route, query,
-                               payload, self.boards),
+                               payload, self.boards, prepared=prepared),
                 )
         except api.BoardRunError as exc:
             # **Each refusal reaches the caller as itself.** Flattening these
