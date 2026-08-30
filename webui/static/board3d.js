@@ -549,6 +549,8 @@ function readGlb(buffer) {
 //: Everything mutable, in one object rather than eight module-level `let`s.
 //: `dispose` empties it, and a reader can see the whole lifetime at once.
 const view = {
+  //: What the pointer is resting on, with what `dehover` must put back.
+  hovered: null,
   renderer: null,
   scene: null,
   camera: null,
@@ -949,6 +951,7 @@ export function mount(canvas) {
   canvas.addEventListener("pointerdown", onPointerDown, true);
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointerleave", dehover);
   canvas.addEventListener("pointercancel", onPointerUp);
 
   resize();
@@ -1079,6 +1082,7 @@ function release(object) {
  * the meshes carrying `userData.terminal`.
  */
 function releasePart(part) {
+  dehover();
   part.userData.lens?.material?.dispose();
   part.traverse((object) => {
     if (object.isMesh && object.userData.terminal !== undefined) release(object);
@@ -1272,6 +1276,7 @@ function scaleFromPads(xs, ys, span) {
  * geometry and how many are left as colliders nobody can see.
  */
 function carvePins(group, pcbThickness) {
+  dehover();
   const wanted = [];
   for (const [pin, posts] of view.pads) {
     for (const post of posts) {
@@ -1650,6 +1655,7 @@ export function refreshTheme() {
 }
 
 function clearBoard() {
+  dehover();
   // The wires go with the board, because each one names a pad on it. The
   // parts stay: they are on the bench, not on the board.
   if (view.bench) clearBench();
@@ -2301,6 +2307,64 @@ function terminalUnder() {
   return hits.length ? hits[0].object.parent : null;
 }
 
+//: A LUMINANCE, not a colour, for the reason STUDIO's numbers are: a tinted
+//: emissive would shift the vendor's metal toward whichever hue was chosen,
+//: and this cue only says "this one", never a state. `setScalar` takes it,
+//: so nothing here joins the palette -- the no-own-colours test agrees.
+const HOVER_GLOW = 0.6;
+
+/**
+ * Light whatever the pointer is resting on, so a reader learns it can be
+ * pulled before trying (OH-144).
+ *
+ * **Pads first, then part terminals -- the same order the drag itself
+ * uses**, so what glows is exactly what a press would grab. An invisible
+ * pad post is made visible for the stay: on the boards drawn as a bare
+ * footprint the pads are colliders nobody can see, and the hover is the
+ * one moment the page can honestly point at one.
+ */
+function hover() {
+  const over = padUnder() ?? terminalUnder();
+  if (over === (view.hovered?.object ?? null)) return;
+  dehover();
+  if (!over) return;
+  const meshes = (over.isMesh ? [over]
+    : over.children.filter((child) => child.isMesh))
+    .filter((mesh) => mesh.material?.emissive);
+  if (!meshes.length) return;
+  view.hovered = {
+    object: over,
+    meshes: meshes.map((mesh) => ({
+      mesh,
+      emissive: mesh.material.emissive.getHex(),
+      visible: mesh.visible,
+    })),
+  };
+  for (const { mesh } of view.hovered.meshes) {
+    mesh.material.emissive.setScalar(HOVER_GLOW);
+    mesh.visible = true;
+  }
+  view.renderer.domElement.style.cursor = "pointer";
+}
+
+/** Put back whatever `hover` lit -- emissive, visibility and cursor.
+ *
+ *  Called from every path that could invalidate the lit mesh, not only
+ *  from the next pointer move: a drag beginning, `releasePart`,
+ *  `clearBoard`, `carvePins` swapping a post for a carved pin, and the
+ *  pointer leaving the canvas. A restore that only ran on the next move
+ *  would leave a glow on a mesh whose material was already disposed. */
+function dehover() {
+  if (!view.hovered) return;
+  for (const { mesh, emissive, visible } of view.hovered.meshes) {
+    mesh.material.emissive.setHex(emissive);
+    mesh.visible = visible;
+  }
+  view.hovered = null;
+  const canvas = view.renderer?.domElement;
+  if (canvas) canvas.style.cursor = "";
+}
+
 /**
  * Take or give back the pointer, and never throw doing it.
  *
@@ -2336,6 +2400,7 @@ function onPointerDown(event) {
   // what every drag before part-to-part wiring existed did.
   const pad = padUnder() ?? terminalUnder();
   if (!pad) return;
+  dehover();
   // Only now is the camera's press taken away, and only because a wire really
   // did start. A press that missed every pad still turns the board.
   event.stopPropagation();
@@ -2351,8 +2416,12 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
-  if (!view.dragging) return;
+  if (!view.renderer) return;
   aim(event);
+  if (!view.dragging) {
+    hover();
+    return;
+  }
   if (raycaster.ray.intersectPlane(dragPlane, dragPoint)) {
     view.dragging.rope.moveTail(vecArray(dragPoint));
   }

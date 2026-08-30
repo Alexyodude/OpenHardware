@@ -380,6 +380,49 @@ def test_an_unknown_pad_with_a_pin_behind_it_does_not_read_not_modelled():
     assert '  unknown: "not modelled",' not in panel
 
 
+def test_the_pin_table_names_the_pin_first():
+    """`13 | PB5 | input` under headers reading `Pad | Pin | State` is
+    backwards to anyone who has written `digitalWrite(13, ...)` (OH-144):
+    "13" IS the pin, and PB5 is the chip's own name for it -- the field the
+    API itself calls `chip_pin`. The contents were always right; only the
+    words over them were swapped."""
+    page = PAGE.read_text(encoding="utf-8")
+    assert "<th>Pin</th><th>Chip pin</th><th>State</th>" in page
+    assert "<th>Pad</th>" not in page, (
+        "the pin-name column is labelled Pad again"
+    )
+
+
+def test_hovering_lights_what_a_press_would_grab():
+    """Resting the pointer on a pad or terminal lights it and turns the
+    cursor (OH-144), in the SAME `padUnder() ?? terminalUnder()` order the
+    drag uses -- so what glows is exactly what a press takes. The restore
+    runs from every path that could invalidate the lit mesh, because a glow
+    restored only on the next move would outlive a disposed material."""
+    code = stripped(RENDERER.read_text(encoding="utf-8"))
+    body = code.split("function hover() {")[1].split("\n}")[0]
+    assert "padUnder() ?? terminalUnder()" in body, (
+        "hover picks in a different order than the drag grabs"
+    )
+    assert "emissive.setScalar(HOVER_GLOW)" in body
+    assert "mesh.visible = true" in body, (
+        "an invisible pad post stays invisible under the pointer"
+    )
+    assert 'cursor = "pointer"' in body
+    undo = code.split("function dehover() {")[1].split("\n}")[0]
+    assert "setHex(emissive)" in undo, "the glow is never taken back"
+    assert "mesh.visible = visible" in undo
+    assert 'canvas.style.cursor = ""' in undo
+    move = code.split("function onPointerMove(event) {")[1].split("\n}")[0]
+    assert "hover();" in move, "a resting pointer never asks what it is on"
+    for owner in ("function releasePart(part) {", "function clearBoard() {",
+                  "function carvePins(group, pcbThickness) {"):
+        assert "dehover();" in code.split(owner)[1].split("\n}")[0], (
+            f"{owner} can invalidate the lit mesh without restoring it"
+        )
+    assert 'addEventListener("pointerleave", dehover)' in code
+
+
 def test_the_two_sentences_are_told_apart_by_the_pin_and_not_by_a_guess():
     """`chip_pin` is exact rather than convenient, and this is where that is
     asserted rather than assumed.
