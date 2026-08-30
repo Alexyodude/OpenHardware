@@ -3415,3 +3415,48 @@ def test_the_pin_13_led_is_one_of_the_drawn_parts():
         f"the Uno draws {len(drawn)} parts; it drew 47 when OH-119 closed, "
         f"and fewer means something was silently lost"
     )
+
+
+# --- the tallies reach a reader (OH-125) -------------------------------------
+
+
+def test_what_is_not_drawn_rides_in_extras():
+    """**The measurement stopped at stdout** (OH-125): `compose` printed
+    artwork tallies, unread ink and copper, cutouts and unchecked turns,
+    and the extras dict carried none of it -- the mechanism that let
+    OH-119 and OH-122 sit unnoticed. The page's claim about what is not
+    drawn is now the composer's own measurement, and this reads it back
+    out of a shipped board."""
+    glb = REPO / "webui" / "static" / "models" / "Arduino-Uno.glb"
+    if not glb.is_file():
+        pytest.skip("SKIPPED: run python tools/compose_board_3d.py first")
+    from tools.import_3d_model import read_extras
+
+    extras = read_extras(glb)
+    assert "artwork" in extras and extras["artwork"].get("ink front", 0) > 0
+    gaps = extras.get("not_drawn")
+    assert gaps is not None, "the composer's gaps still stop at stdout"
+    for key in ("ink", "copper", "cutouts", "turn_unseen", "unmodelled"):
+        assert key in gaps, f"not_drawn is missing {key}"
+    # The Uno prints text it cannot draw (no font shipped) -- the exact gap
+    # OH-122's close note records -- so the ink tally cannot be empty here.
+    assert gaps["ink"].get("text", 0) > 0
+
+
+def test_an_unmodelled_placement_is_counted_not_skipped():
+    """The bare `continue` was the silence itself: a placement with no
+    model and no ABSENT entry fell through without becoming a number.
+    Pinned at the source with comments stripped, because the counting
+    happens inside `compose` where no unit can reach it cheaply."""
+    source = (REPO / "tools" / "compose_board_3d.py").read_text(encoding="utf-8")
+    body = source.split("def compose(", 1)[1]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("#"))
+    assert "unmodelled.append" in code, (
+        "an unmapped placement falls through a bare continue again"
+    )
+    assert "element.package not in ABSENT" in code, (
+        "ABSENT packages are counted as unmodelled, double-reporting what "
+        "the absent list already explains"
+    )
+    assert '"not_drawn"' in code, "the gaps do not ride in extras"

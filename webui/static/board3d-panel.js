@@ -161,10 +161,30 @@ function caption(model) {
       `source: ${made.join(", ")}. See tools/model_from_datasheet.py.`
     );
   }
+  // **The composer's own measurement of what is not drawn** (OH-125),
+  // said in one compact clause per kind so the caption stays a sentence.
+  const gaps = [];
+  const notDrawn = model.not_drawn ?? {};
+  const ink = Object.entries(notDrawn.ink ?? {});
+  if (ink.length) {
+    gaps.push(`ink not drawn: ${ink.map(([kind, n]) => `${n} ${kind}`).join(", ")}`);
+  }
+  const copper = Object.entries(notDrawn.copper ?? {});
+  if (copper.length) {
+    gaps.push(`copper not drawn: ${copper.map(([kind, n]) => `${n} ${kind}`).join(", ")}`);
+  }
+  if (notDrawn.cutouts) gaps.push(`${notDrawn.cutouts} cutout(s) not cut`);
+  if (notDrawn.turn_unseen?.length) {
+    gaps.push(`${notDrawn.turn_unseen.length} turn(s) unchecked`);
+  }
+  if (notDrawn.unmodelled?.length) {
+    gaps.push(`${notDrawn.unmodelled.length} placement(s) unmodelled`);
+  }
   const missing = (model.absent ?? [])
     .map((gap) => `${gap.elements.join("/")} is ${gap.why}`)
     .join(" ");
   if (missing) parts.push(`Not drawn: ${missing}`);
+  parts.push(...gaps);
   return parts.join(" ");
 }
 

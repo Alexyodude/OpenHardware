@@ -2210,3 +2210,21 @@ def test_the_cold_page_does_not_ask_about_no_board():
     assert '"/api/board/pins")' not in code, (
         "the bare no-board fetch is still reachable"
     )
+
+
+def test_the_panel_shows_the_composers_own_gaps():
+    """**"Not drawn: Y1, Y2" about a board also missing four LEDs and 432
+    silkscreen strokes** (OH-125): the caption's claim is now built from
+    `model.not_drawn`, the composer's own measurement. Comments stripped,
+    the OH-117 lesson."""
+    panel = PANEL.read_text(encoding="utf-8")
+    code = "\n".join(line for line in panel.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "model.not_drawn" in code, (
+        "the panel never reads the gaps the composer now ships"
+    )
+    for clause in ("turn_unseen", "unmodelled", "cutouts"):
+        assert clause in code, f"the caption says nothing about {clause}"
+    assert "parts.push(...gaps)" in code, (
+        "the gap clauses are built and never reach the caption"
+    )

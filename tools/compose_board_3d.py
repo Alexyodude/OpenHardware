@@ -2677,9 +2677,15 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     # `confirm` measures them, `place` anchors them on their own pads -- so
     # everything downstream treats them as the placements they stand for.
     extra = dip_header_elements(header_pads) if spec.dip_headers else []
+    #: Placements with no model and no ABSENT entry -- until OH-125 these
+    #: fell through a bare `continue`, which is the mechanism that let
+    #: OH-119 and OH-122 sit unnoticed: the gap was not even a number.
+    unmodelled: list[str] = []
     for element in [*board.elements, *extra]:
         component = by_package.get(element.package)
         if component is None:
+            if element.package not in ABSENT:
+                unmodelled.append(f"{element.name} ({element.package})")
             continue
         if component.slug not in cache:
             cache[component.slug] = component_mesh(component, deflection)
@@ -2794,6 +2800,11 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     if modelled:
         print(f"  modelled {len(modelled)}: {', '.join(modelled)} "
               f"-- built here, not fetched; see tools/model_from_datasheet.py")
+    if unmodelled:
+        print(f"  no model {len(unmodelled)} placement(s) drawn as nothing, "
+              f"with no ABSENT entry saying why: "
+              + ", ".join(unmodelled[:8])
+              + (" ..." if len(unmodelled) > 8 else ""))
     if unpinned:
         print(f"  turn    {len(unpinned)} placement(s) a half turn would move "
               f"and nothing here can see: {', '.join(unpinned)}")
@@ -2869,6 +2880,20 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             "drawn": drawn,
             "modelled": modelled,
             "solids": solids,
+            # **What was measured and NOT drawn, riding to the page**
+            # (OH-125). The panel could only say "Not drawn: Y1, Y2" about
+            # a board also missing its silkscreen text and dozens of
+            # unmodelled placements -- the composer measured all of it and
+            # the measurement stopped at stdout. A gap that is measured is
+            # a gap somebody can close, and now a reader can see it too.
+            "artwork": dict(tally),
+            "not_drawn": {
+                "ink": dict(board.silk_unread),
+                "copper": dict(board.traces_unread),
+                "cutouts": len(cutouts),
+                "turn_unseen": unpinned,
+                "unmodelled": unmodelled,
+            },
             "absent": [
                 {"package": package, "why": why,
                  "elements": [e.name for e in board.elements
