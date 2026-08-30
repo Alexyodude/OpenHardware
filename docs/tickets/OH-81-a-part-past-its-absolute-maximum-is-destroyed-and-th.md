@@ -109,3 +109,12 @@ KNOWN LIMITATION, AND IT WAS THE 'least confident' NOTE IN THIS TICKET'S BODY: c
 AND WHAT THIS COSTS, WHICH IS NOT SMALL: there is now no way to light an LED on an Arduino Uno without destroying it. Two in series at 6 mA is the only intact circuit this bench can build, because there is no resistor on it. That is the physically correct answer and it makes OH-80 load-bearing rather than a nicety.
 
 A PROCESS FINDING: OH-80 was filed claiming `tools/import_3d_model.py` for work nobody had started, and this ticket then needed the same file. The collision failed the gate and was fixed in 9670b71 by narrowing OH-80 off every path. A claim is a lock; a lock held for work nobody is doing only ever blocks work somebody is.
+
+---
+
+**CORRECTION 2026-08-30 (OH-131).** The latch's justification above -- the
+only thing that undoes `destroyed` is `removePart`, "which is what a person
+does with a burnt LED" -- described a hatch that did not exist: `removePart`
+was exported and nothing in the page called it, so a burnt part sat on the
+bench for the life of the tab. OH-131 put a remove control on every part
+row, wired to it. The latch design itself is unchanged and right.

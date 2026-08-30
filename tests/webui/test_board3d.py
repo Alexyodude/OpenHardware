@@ -2063,3 +2063,54 @@ def test_a_wire_holding_a_released_pad_is_repointed_at_the_carved_pin():
         "the wire is never handed the carved pin, so its anchor still reads "
         "a disposed, null-parented mesh"
     )
+
+
+def test_every_part_row_carries_the_hatch_the_destroyed_latch_depends_on():
+    """**`removePart` had no caller** (OH-131). `destroyed` latches BY DESIGN
+    -- past an absolute maximum is permanent -- and the design's own words
+    are that the only thing undoing it is `removePart`, what a person does
+    with a burnt LED. The page never called it: the panel wired addPart,
+    disconnect and clearBench, and a burnt part sat on the bench for the
+    life of the tab.
+
+    Comments stripped, the OH-117 lesson.
+    """
+    panel = PANEL.read_text(encoding="utf-8")
+    body = panel.split("function renderBench(", 1)[1].split("\nfunction ", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "scene.removePart(index)" in code, (
+        "no part row calls removePart, so a destroyed part can never leave "
+        "the bench"
+    )
+    after = code.split("scene.removePart(index)", 1)[1]
+    assert "renderBench()" in after.split("head.append(drop)", 1)[0], (
+        "the bench is not redrawn after a removal, so the dead row lingers "
+        "until the next wires-changed event repaints it"
+    )
+    assert "aria-label" in code.split("bench-remove", 1)[1].split(
+        "addEventListener", 1)[0], (
+        "the remove control has no accessible name"
+    )
+    # And the renderer really exports what the panel calls.
+    assert "export function removePart(index)" in RENDERER.read_text(
+        encoding="utf-8")
+
+
+def test_removing_a_part_takes_its_wires_and_its_verdict_with_it():
+    """What the hatch has to do to be one: the part's own wires go with it
+    (a wire into a terminal that no longer exists would anchor on a released
+    mesh -- OH-129's disease by another door), its meshes are released, and
+    the circuit is re-solved so the survivors' verdicts stop carrying the
+    ghost's current. Comments stripped."""
+    renderer = RENDERER.read_text(encoding="utf-8")
+    body = renderer.split("function removePart(", 1)[1].split(
+        "\nfunction ", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "discardWire(wire)" in code, "the part's wires outlive it"
+    assert "release(object)" in code, "the part's meshes leak"
+    assert "applyCircuit()" in code, (
+        "the circuit is not re-solved, so every survivor's verdict still "
+        "counts the removed part"
+    )

@@ -490,6 +490,24 @@ function renderBench() {
       chip.append(off);
       head.append(chip);
     }
+    // **The hatch `destroyed` depends on** (OH-131). The verdict latches for
+    // the part's whole stay on the bench, and `circuit.js`'s justification
+    // for that is "the only thing that undoes it is removePart, which is
+    // what a person does with a burnt LED" -- but until this button,
+    // `removePart` was exported with no caller anywhere in the page, so a
+    // burnt part sat on the bench for the life of the tab. Not only for
+    // burnt parts: taking a part off is ordinary bench housekeeping.
+    const drop = document.createElement("button");
+    drop.type = "button";
+    drop.className = "bench-off bench-remove";
+    drop.textContent = "remove";
+    drop.title = `Take ${part.label} off the bench`;
+    drop.setAttribute("aria-label", drop.title);
+    drop.addEventListener("click", () => {
+      scene.removePart(index);
+      renderBench();
+    });
+    head.append(drop);
     row.append(head);
 
     if (part.reason) {

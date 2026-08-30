@@ -885,3 +885,10 @@ table.grid tr.dim td { opacity: 0.72; }
   border-radius: 999px;
 }
 .bench-off:hover { color: var(--surface); background: var(--ink); }
+/* The remove control sits at the row's far edge (the head is a flex row), so
+   taking a part off the bench is a deliberate reach and not a slip beside the
+   per-wire unwire chips. */
+.bench-remove {
+  margin-left: auto;
+  font-size: 12px;
+}
