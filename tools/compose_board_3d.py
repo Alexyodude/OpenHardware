@@ -142,6 +142,15 @@ class Component:
     #: where each of its numbers came from. A fourth kind of source and the
     #: worst, so it is a flag rather than a silent difference: the page says so.
     modelled: bool = False
+    #: True for a part mounted UNDER the board, pins pointing down (OH-118).
+    #:
+    #: A XIAO DIP's headers hang below the PCB so the module can stand in a
+    #: breadboard; KiCad's `PinHeader` models stand on top of it. `place`
+    #: turns a flipped part half a turn about a horizontal axis -- a proper
+    #: rotation, (x, z) -> (-x, -z), never a mirror -- and rests its body
+    #: against the board's UNDERSIDE, which leaves the solder tails proud of
+    #: the top face exactly where the pads are.
+    flip: bool = False
 
     @property
     def url(self) -> str:
@@ -193,6 +202,18 @@ CORRESPONDENCE: tuple[Component, ...] = (
         # Square, so the turn cannot be derived from the shape and cannot
         # matter either. Given for consistency with its neighbours.
         turn=90.0,
+    ),
+    Component(
+        "XIAO-DIP-1X07", "Connector_PinHeader_2.54mm",
+        "PinHeader_1x07_P2.54mm_Vertical",
+        "A synthetic element `dip_header_elements` makes for a XIAO DIP's two "
+        "header rows, seven through-hole pads spanning 15.24 mm -- 6 x 2.54, "
+        "the vendor's own XIAO-*-DIP.kicad_mod rows. FLIPPED, because the "
+        "headers hang below the board so the module can stand in a "
+        "breadboard: the body rests against the underside and the solder "
+        "tails come out proud of the top face, on the pads. OH-118.",
+        turn=90.0,
+        flip=True,
     ),
     Component(
         "POWERSUPPLY_DC-21MM", "Connector_BarrelJack", "BarrelJack_Horizontal",
@@ -661,10 +682,17 @@ class Composition:
     colour: str
     colour_source: str
     #: The boards this one model serves, when it is more than the one named
-    #: above. A XIAO's DIP and SMD variants are the same PCB with a different
-    #: edge treatment, exactly as they are for the meshes
-    #: `tools/import_3d_model.py` fetches -- three C3 boards, one model.
+    #: above. **Only variants that share the SAME FITTED PARTS may share a
+    #: model** (OH-118): a DIP variant hangs two header rows below the board
+    #: and an SMD variant does not, so the file that used to serve both was
+    #: right for neither -- the SMD boards each compose their own now.
     serves: tuple[str, ...] = ()
+    #: True for a DIP variant, whose two seven-pin header rows the published
+    #: SMD `.kicad_pcb` does not place -- see `dip_header_elements`, and
+    #: OH-118 for the measurement: without them every D-pad on a XIAO DIP
+    #: page sat 3.25 to 3.95 mm from the nearest metal, and the pad map is
+    #: the vendor's own DIP footprint and is right.
+    dip_headers: bool = False
 
 
 #: Where a vendor KiCad project lands. Gitignored with the rest of
@@ -793,7 +821,8 @@ COMPOSITIONS: tuple[Composition, ...] = (
             "meshes take the same constant on their own PCB solid, so all ten "
             "agree"
         ),
-        serves=("XIAO-ESP32-C3-DIP-SMD", "XIAO-ESP32-C3-SMD"),
+        serves=("XIAO-ESP32-C3-DIP-SMD",),
+        dip_headers=True,
     ),
     # --- OH-93 5.1: the three XIAOs Seeed publish a PCB and no mesh for -----
     #
@@ -824,7 +853,7 @@ COMPOSITIONS: tuple[Composition, ...] = (
             "constant. This board's own .kicad_pcb has no (stackup ...) "
             "either, so it adds nothing to the four searches recorded there"
         ),
-        serves=("XIAO-ESP32-C6-SMD",),
+        dip_headers=True,
     ),
     Composition(
         board="XIAO-RP2350-DIP",
@@ -845,7 +874,7 @@ COMPOSITIONS: tuple[Composition, ...] = (
             "constant. This board's own .kicad_pcb has no (stackup ...) "
             "either, so it adds nothing to the four searches recorded there"
         ),
-        serves=("XIAO-RP2350-SMD",),
+        dip_headers=True,
     ),
     Composition(
         board="XIAO-ESP32-C5-DIP",
@@ -866,7 +895,7 @@ COMPOSITIONS: tuple[Composition, ...] = (
             "constant. This board's own .kicad_pcb has no (stackup ...) "
             "either, so it adds nothing to the four searches recorded there"
         ),
-        serves=("XIAO-ESP32-C5-SMD",),
+        dip_headers=True,
     ),
     Composition(
         board="XIAO-nRF54l15-DIP",
@@ -888,9 +917,28 @@ COMPOSITIONS: tuple[Composition, ...] = (
             "constant. This board's own .kicad_pcb has no (stackup ...) "
             "either, so it adds nothing to the four searches recorded there"
         ),
-        serves=("XIAO-nRF54l15-SMD",),
+        dip_headers=True,
     ),
 )
+
+#: **The SMD variants, derived rather than written out** (OH-118). Each is
+#: its DIP sibling's PCB composed WITHOUT the two header rows the DIP hangs
+#: below the board -- which is the whole difference between the variants, and
+#: is why they stopped sharing one file: a model that served both was right
+#: for neither. `dataclasses.replace` keeps every other field identical by
+#: construction, so the two cannot drift apart.
+COMPOSITIONS = COMPOSITIONS + tuple(
+    dataclasses.replace(
+        spec,
+        board=spec.board.replace("-DIP", "-SMD"),
+        fetch_with=spec.fetch_with.replace("-DIP", "-SMD"),
+        serves=(),
+        dip_headers=False,
+    )
+    for spec in COMPOSITIONS if spec.dip_headers
+)
+
+
 
 #: How far a mesh's footprint may sit from the pads it is supposed to stand on
 #: before the mapping is refused. Generous, because a package's pads and its
@@ -2084,6 +2132,73 @@ def turn_unseen(element: eagle.Element, mesh: Mesh, put: Mesh, turn: float,
     return half is None or half <= SILK_TOLERANCE_MM
 
 
+# --- the DIP variant's headers (OH-118) --------------------------------------
+
+#: How far each header row sits from the module's centre, and it is the
+#: vendor's own number: every one of Seeed's twelve `XIAO-*-DIP.kicad_mod`
+#: footprints puts its two seven-pin through-hole rows at y = +/-7.62 --
+#: measured across all twelve on 2026-08-30 -- which is the breadboard 0.6"
+#: DIP convention, INBOARD of the castellations at +/-8.08. The published
+#: `.kicad_pcb` is the SMD board and places no hole there, which is why these
+#: rows have to be synthesized rather than read out of it.
+DIP_ROW_OFFSET_MM = 7.62
+
+#: Seven pins a row at the 0.1" pitch, from the same footprints.
+DIP_ROW_PINS = 7
+DIP_PITCH_MM = 2.54
+
+#: The drill's finished pad, for the synthetic pads' own size. A judgement in
+#: the same register as `BOARD_MASK`: the vendor's DIP footprint states 1.7 mm
+#: pads on a 1.0 mm drill, and nothing here draws these pads anyway -- the
+#: size only feeds `confirm`'s span arithmetic.
+DIP_PAD_MM = 1.7
+
+
+def dip_header_elements(header_pads) -> list[eagle.Element]:
+    """The two header rows a XIAO DIP hangs below its board, as elements.
+
+    **Placed relative to the castellation field the composer already has**,
+    not read out of a file: the DIP footprint and the module footprint share
+    an origin -- both are symmetric about the module's centre -- so the rows
+    sit `DIP_ROW_OFFSET_MM` either side of that centre, along the field's
+    SHORTER axis, which is the 15.24 mm the seven castellations per side span
+    against the 17.78 mm between the two sides. Measured on all five composed
+    boards: the field is axis-aligned on every one, so the shorter axis is a
+    coordinate axis and no rotation has to be solved for.
+    """
+    xs = [pad.x_mm for pad in header_pads]
+    ys = [pad.y_mm for pad in header_pads]
+    centre = ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+    rows_along_x = (max(xs) - min(xs)) < (max(ys) - min(ys))
+    made = []
+    for side in (-1.0, 1.0):
+        pads = []
+        for step in range(DIP_ROW_PINS):
+            along = (step - (DIP_ROW_PINS - 1) / 2) * DIP_PITCH_MM
+            if rows_along_x:
+                at = (centre[0] + along, centre[1] + side * DIP_ROW_OFFSET_MM)
+            else:
+                at = (centre[0] + side * DIP_ROW_OFFSET_MM, centre[1] + along)
+            pads.append(eagle.Pad(
+                number=str(step + 1), kind="thru_hole", x_mm=at[0], y_mm=at[1],
+                width_mm=DIP_PAD_MM, height_mm=DIP_PAD_MM, net=None))
+        made.append(eagle.Element(
+            name=f"DIP{1 if side < 0 else 2}",
+            library="composed",
+            package="XIAO-DIP-1X07",
+            pads=tuple(pads),
+            x_mm=(centre[0] if rows_along_x
+                  else centre[0] + side * DIP_ROW_OFFSET_MM),
+            y_mm=(centre[1] + side * DIP_ROW_OFFSET_MM if rows_along_x
+                  else centre[1]),
+            # The synthetic package is DEFINED to run along x, like EAGLE's
+            # own `1X07`; a board whose rows run along y says so here, the
+            # same way a real element would.
+            rotation=0.0 if rows_along_x else 90.0,
+        ))
+    return made
+
+
 def anchor_of(element: eagle.Element, legged: bool) -> tuple[float, float]:
     """Where a mesh's own anchor has to land: the centre of the pads it IS.
 
@@ -2125,7 +2240,7 @@ def anchor_of(element: eagle.Element, legged: bool) -> tuple[float, float]:
 
 
 def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
-          centre: tuple[float, float]) -> Mesh:
+          centre: tuple[float, float], flip: bool = False) -> Mesh:
     """Move a component's mesh onto the board, the way its pads were moved.
 
     `tools/eagle.py`'s `place` mirrors in x, then rotates counter-clockwise,
@@ -2169,6 +2284,14 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
     rot_cos, rot_sin = math.cos(rot), math.sin(rot)
 
     def turned(x: float, y: float) -> tuple[float, float]:
+        # **`flip` is half a turn about the horizontal y axis** (OH-118): x is
+        # negated here and z in the emission below, which together are a
+        # PROPER rotation -- one negated axis alone would mirror the mesh, the
+        # exact defect class OH-115 was. Applied before `turn` so that a
+        # flipped part's stated turn means the same thing an unflipped one's
+        # does.
+        if flip:
+            x = -x
         return (x * turn_cos - y * turn_sin, x * turn_sin + y * turn_cos)
 
     # The legs if it has any, the whole body if it has not. Measured off the
@@ -2203,11 +2326,19 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
             bx, by = anchor[0] + dx, anchor[1] + dy
             # KiCad z is up and rises from the board plane; glTF y is up and
             # the PCB's top face is at `thickness`.
-            out_positions.extend((bx - centre[0], thickness + positions[at + 2],
-                                  -(by - centre[1])))
+            #
+            # **A flipped part hangs from the board's UNDERSIDE**: its z is
+            # negated -- the other half of the rotation `turned` starts -- and
+            # its former bottom face, z = 0, comes to rest against glTF y = 0,
+            # which is where the board's bottom face is. The solder tails,
+            # which the raw mesh keeps below its own zero, end up proud of the
+            # top face, which is what lets `carvePins` find them on the pads.
+            lift = -positions[at + 2] if flip else thickness + positions[at + 2]
+            out_positions.extend((bx - centre[0], lift, -(by - centre[1])))
             # A normal is a direction, so it is turned but never translated.
             tnx, tny = onto_board(normals[at], normals[at + 1], direction=True)
-            out_normals.extend((tnx, normals[at + 2], -tny))
+            up = -normals[at + 2] if flip else normals[at + 2]
+            out_normals.extend((tnx, up, -tny))
         moved[colour] = (out_positions, out_normals, list(indices))
     return Mesh(moved)
 
@@ -2426,7 +2557,12 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     unpinned: list[str] = []
     pad_top = spec.thickness_mm
     cache: dict[str, tuple[Mesh, object]] = {}
-    for element in board.elements:
+    # **The DIP variant's headers, which the published PCB does not place**
+    # (OH-118). Synthesized here and composed exactly as a real element is --
+    # `confirm` measures them, `place` anchors them on their own pads -- so
+    # everything downstream treats them as the placements they stand for.
+    extra = dip_header_elements(header_pads) if spec.dip_headers else []
+    for element in [*board.elements, *extra]:
         component = by_package.get(element.package)
         if component is None:
             continue
@@ -2440,7 +2576,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 f"CORRESPONDENCE gives it {component.library}/{component.model}, "
                 f"but {complaint}. Fix the table rather than the tolerance."
             )
-        put = place(mesh, element, component.turn, spec.thickness_mm, centre)
+        put = place(mesh, element, component.turn, spec.thickness_mm,
+                    centre, component.flip)
         solids.append(box_around(element.name, put))
         # **The turn, checked the way the model and the place already are.**
         # Both other checks survive a half turn -- a span does and a centre
@@ -2455,7 +2592,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                     continue
                 rival = contact_miss(
                     element, place(mesh, element, other, spec.thickness_mm,
-                                   centre), centre)
+                                   centre, component.flip), centre)
                 if rival is not None:
                     rivals.append((rival, other))
             best = min(rivals, default=None)
@@ -2573,10 +2710,20 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             # lets the renderer divide one by the other and get the scale from
             # the two things that describe the same pads, rather than from a
             # constant that happens to be true of nine boards.
-            "pad_span": [
-                round(max(hx) - min(hx), 4),
-                round(max(hy) - min(hy), 4),
-            ],
+            # **For a DIP board, the span of the DIP FIELD and not the
+            # castellations** (OH-118): the page's pad map is the vendor's DIP
+            # footprint, and a span measured off a different pad field gave
+            # `scaleFromPads` 121.9 px over 17.78 mm where the pixels were the
+            # 15.24 mm axis -- every XIAO DIP model drawn 14% too small.
+            # Along the row and across the rows -- (7-1) x 2.54 and
+            # 2 x 7.62, and that both come to 15.24 is the vendor's own
+            # coincidence, not an assumption.
+            "pad_span": (
+                [round((DIP_ROW_PINS - 1) * DIP_PITCH_MM, 4),
+                 round(2 * DIP_ROW_OFFSET_MM, 4)]
+                if spec.dip_headers else
+                [round(max(hx) - min(hx), 4), round(max(hy) - min(hy), 4)]
+            ),
             "pad_top": round(pad_top, 4),
             "pcb_colour": spec.colour,
             "pcb_colour_source": spec.colour_source,

@@ -368,6 +368,12 @@ EXPLAINS: dict[str, set[str]] = {
     # OH-104 modelled all three; the buttons stay, having no stated height.
     "XIAO-nRF54l15-DIP": {"BUTTON_TD1183SA", "PMOS_1.0X0.6X0.35MM"},
 }
+# **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
+# same placements, same absences -- so the entries are derived the same way
+# `compose.COMPOSITIONS` derives the variants themselves (OH-118). Written as
+# a loop rather than five lines so the two derivations cannot disagree.
+for _dip in [name for name in EXPLAINS if name.endswith("-DIP")]:
+    EXPLAINS[_dip.replace("-DIP", "-SMD")] = EXPLAINS[_dip]
 
 
 def test_each_board_explains_the_parts_it_leaves_off():
@@ -3184,4 +3190,163 @@ def test_compose_refuses_a_part_turned_away_from_the_pin_one_marker(monkeypatch)
         compose.compose(_uno(), compose.DEFLECTION, check=True)
     assert "pin-1 marker" in str(refused.value), (
         f"the DIP was refused, but not by the marker: {refused.value}"
+    )
+
+
+# --- the DIP variant's headers, hung below the board (OH-118) ----------------
+
+
+def test_a_flipped_part_hangs_below_the_board_with_its_tails_proud_of_the_top():
+    """**The one new degree of freedom `flip` adds, measured on one vertex.**
+
+    A body point above the raw mesh's zero comes out BELOW the board -- the
+    body rests against the underside -- and a solder tail below the raw zero
+    comes out above the top face, which is what `carvePins` needs to find on
+    the pads. And x is negated along with z: one negated axis alone would be a
+    MIRROR, which is the defect class OH-115 was, so the pair is asserted
+    together.
+    """
+    mesh = compose.Mesh(groups={
+        "#b58136": ([1.0, 0.0, 2.0,    # a body corner, above the raw zero
+                     0.0, 0.0, -3.0],  # a tail tip, below it
+                    [0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+                    [0, 1, 1]),
+    })
+    element = eagle.Element(
+        "DIP1", "composed", "XIAO-DIP-1X07",
+        pads=(eagle.Pad("1", "thru_hole", 10.0, 20.0, 1.7, 1.7, None),),
+        x_mm=10.0, y_mm=20.0)
+    flat = compose.place(mesh, element, 0.0, 1.6, (0.0, 0.0))
+    flipped = compose.place(mesh, element, 0.0, 1.6, (0.0, 0.0), flip=True)
+    fx, fy, fz = flat.groups["#b58136"][0][0:3]
+    px, py, pz = flipped.groups["#b58136"][0][0:3]
+    assert fy == pytest.approx(1.6 + 2.0), "unflipped, the body stands on top"
+    assert py == pytest.approx(-2.0), "flipped, the body hangs below the board"
+    tail_y = flipped.groups["#b58136"][0][4]
+    assert tail_y == pytest.approx(3.0), (
+        "the tail should come out proud of the top face, where the pad is"
+    )
+    assert px - 10.0 == pytest.approx(-(fx - 10.0)), (
+        "x is not negated with z, so the flip is a MIRROR rather than the "
+        "half turn about a horizontal axis it claims to be"
+    )
+
+
+def test_the_dip_rows_sit_at_the_vendors_own_offset_from_the_module_centre():
+    """`dip_header_elements` from a synthetic castellation field: two rows of
+    seven through-hole pads, 7.62 mm either side of the field's centre along
+    its shorter axis, spanning 6 x 2.54 along the longer -- every number the
+    vendor's own `XIAO-*-DIP.kicad_mod`, measured across all twelve."""
+    field = [eagle.Pad(str(n), "thru_hole",
+                       100.0 + x, -50.0 + y, 0.8, 0.8, None)
+             for n, (x, y) in enumerate(
+                 [(dx, dy) for dx in (-7.62, 7.62) for dy in (-8.89, 8.89)])]
+    made = compose.dip_header_elements(field)
+    assert len(made) == 2
+    for element in made:
+        assert element.package == "XIAO-DIP-1X07"
+        assert len(element.pads) == compose.DIP_ROW_PINS
+        assert all(pad.kind == "thru_hole" for pad in element.pads)
+        xs = sorted(pad.x_mm for pad in element.pads)
+        assert xs[-1] - xs[0] == pytest.approx(6 * 2.54)
+        assert xs[1] - xs[0] == pytest.approx(compose.DIP_PITCH_MM)
+    rows = sorted(element.pads[0].y_mm for element in made)
+    # **7.62 as a literal, not `compose.DIP_ROW_OFFSET_MM`** -- a right-hand
+    # side imported from the module under test agrees with itself however
+    # wrong the constant is, and a mutation moving the rows out to the
+    # castellations survived this test while it read the constant back.
+    assert rows[0] == pytest.approx(-50.0 - 7.62)
+    assert rows[1] == pytest.approx(-50.0 + 7.62)
+    # And the synthetic package is in CORRESPONDENCE, flipped: the headers
+    # hang BELOW a XIAO so it can stand in a breadboard.
+    component = next(c for c in compose.CORRESPONDENCE
+                     if c.package == "XIAO-DIP-1X07")
+    assert component.flip, "the headers would stand on top of the board"
+
+
+def test_an_smd_variant_is_its_dip_siblings_pcb_without_the_headers():
+    """**The variants stopped sharing one file, and this is the shape of the
+    split.** Every -SMD composition shares its layout, thickness and colour
+    with its -DIP sibling and composes no headers; no composition serves an
+    -SMD board any more, because a model with headers is wrong for a board
+    without them and vice versa."""
+    by_board = {spec.board: spec for spec in compose.COMPOSITIONS}
+    smd = [spec for spec in compose.COMPOSITIONS if spec.board.endswith("-SMD")]
+    assert len(smd) >= 5, "the derived SMD variants are gone"
+    for spec in smd:
+        sibling = by_board[spec.board.replace("-SMD", "-DIP")]
+        assert spec.layout == sibling.layout
+        assert spec.thickness_mm == sibling.thickness_mm
+        assert spec.colour == sibling.colour
+        assert not spec.dip_headers
+        assert sibling.dip_headers, f"{sibling.board} lost its headers"
+    for spec in compose.COMPOSITIONS:
+        # `-DIP-SMD` is a HEADER variant despite the suffix -- its pad map is
+        # identical to the DIP's, measured pad for pad -- so serving it the
+        # DIP file is right and only a bare -SMD board may not be served one.
+        assert not any(name.endswith("-SMD") and "-DIP-" not in name
+                       for name in spec.serves), (
+            f"{spec.board} serves {spec.serves}: an SMD board is being handed "
+            f"a model with DIP headers on it"
+        )
+
+
+def test_the_composed_dip_board_has_pin_metal_at_both_header_rows():
+    """The whole point, measured on the mesh that ships: metal above the top
+    face AND below the board at both rows, z = +/-7.62 in the model's frame.
+    The below-board half is what makes the module read as a breadboard part;
+    the above-top half is what `carvePins` finds on the pads."""
+    from tools.import_3d_model import read_extras
+
+    glb = REPO / "webui" / "static" / "models" / "XIAO-RP2350-DIP.glb"
+    if not glb.is_file():
+        pytest.skip("no composed RP2350; run tools/compose_board_3d.py")
+    extras = read_extras(glb)
+    thickness = extras["pcb"]["thickness"]
+    assert extras["pad_span"] == [15.24, 15.24], (
+        "a DIP board's pad_span is its DIP field, or scaleFromPads divides "
+        "pixels of one field by millimetres of another and the model draws "
+        "14% too small"
+    )
+    brass = _glb_groups(glb).get("#b58136", [])
+    for row in (-7.62, 7.62):
+        near = [p for p in brass if abs(p[2] - row) < 0.6]
+        assert any(p[1] > thickness for p in near), (
+            f"no header metal above the top face at row z={row}: the tails "
+            f"are gone and no pad on that row can find a pin"
+        )
+        assert any(p[1] < -3.0 for p in near), (
+            f"no legs below the board at row z={row}: the header does not "
+            f"hang, so the module cannot stand in a breadboard"
+        )
+
+
+def test_the_smd_variants_mesh_is_the_old_bare_board():
+    """The SMD board is the same PCB with nothing hung below it: no geometry
+    anywhere near a breadboard leg's depth, which is what the bare composed
+    board always was."""
+    glb = REPO / "webui" / "static" / "models" / "XIAO-RP2350-SMD.glb"
+    if not glb.is_file():
+        pytest.skip("no composed RP2350-SMD; run tools/compose_board_3d.py")
+    lows = [p[1] for group in _glb_groups(glb).values() for p in group]
+    assert min(lows) > -3.0, (
+        f"the SMD variant reaches {min(lows):.2f} mm below the board, so the "
+        f"DIP headers leaked into the sibling that must not have them"
+    )
+
+
+def test_compose_injects_the_dip_headers_for_a_dip_spec():
+    """**The measurement was tested and its USE was not**, which is this
+    repository's most repeated failure: `dip_header_elements` was covered and
+    a mutation deleting its one call site survived, because the shipped-mesh
+    tests read a `.glb` no mutation recomposes. Asserted at the source with
+    comment lines stripped -- the OH-117 lesson, where a docstring quoting the
+    expression satisfied a source assertion after the code was gutted."""
+    source = pathlib.Path(compose.__file__).read_text(encoding="utf-8")
+    body = source.split("def compose(", 1)[1].split("\ndef ", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("#"))
+    assert "dip_header_elements(header_pads) if spec.dip_headers" in code, (
+        "compose no longer injects the DIP headers, so every XIAO DIP board "
+        "goes back to a bare SMD model under pads that expect pins"
     )

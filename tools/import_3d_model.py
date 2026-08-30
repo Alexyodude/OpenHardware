@@ -2010,19 +2010,24 @@ def convert_part(part: Part, deflection: float, check: bool) -> int:
 #: for `import_3d_model.py --all`, which writes the index without the composer
 #: having run, and `test_the_two_lists_of_composed_boards_agree` is what stops
 #: the two drifting apart.
+#: **An -SMD board gets its own file now** (OH-118): a DIP variant hangs two
+#: header rows below the board and an SMD one does not, so the one file that
+#: served both was right for neither. `-DIP-SMD` is the exception that proves
+#: the rule -- its pad map is identical to the DIP's, measured pad for pad, so
+#: it is a header variant under a different name and keeps the DIP file.
 COMPOSED: tuple[tuple[str, str, str], ...] = (
     ("Arduino Uno", "ATmega328P", "Arduino-Uno"),
     ("XIAO-ESP32-C3-DIP", "ESP32-C3", "XIAO-ESP32-C3-DIP"),
     ("XIAO-ESP32-C3-DIP-SMD", "ESP32-C3", "XIAO-ESP32-C3-DIP"),
-    ("XIAO-ESP32-C3-SMD", "ESP32-C3", "XIAO-ESP32-C3-DIP"),
+    ("XIAO-ESP32-C3-SMD", "ESP32-C3", "XIAO-ESP32-C3-SMD"),
     ("XIAO-ESP32-C6-DIP", "ESP32-C6", "XIAO-ESP32-C6-DIP"),
-    ("XIAO-ESP32-C6-SMD", "ESP32-C6", "XIAO-ESP32-C6-DIP"),
+    ("XIAO-ESP32-C6-SMD", "ESP32-C6", "XIAO-ESP32-C6-SMD"),
     ("XIAO-RP2350-DIP", "RP2350", "XIAO-RP2350-DIP"),
-    ("XIAO-RP2350-SMD", "RP2350", "XIAO-RP2350-DIP"),
+    ("XIAO-RP2350-SMD", "RP2350", "XIAO-RP2350-SMD"),
     ("XIAO-nRF54l15-DIP", "nRF54l15", "XIAO-nRF54l15-DIP"),
-    ("XIAO-nRF54l15-SMD", "nRF54l15", "XIAO-nRF54l15-DIP"),
+    ("XIAO-nRF54l15-SMD", "nRF54l15", "XIAO-nRF54l15-SMD"),
     ("XIAO-ESP32-C5-DIP", "ESP32-C5", "XIAO-ESP32-C5-DIP"),
-    ("XIAO-ESP32-C5-SMD", "ESP32-C5", "XIAO-ESP32-C5-DIP"),
+    ("XIAO-ESP32-C5-SMD", "ESP32-C5", "XIAO-ESP32-C5-SMD"),
 )
 
 

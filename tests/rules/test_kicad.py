@@ -862,11 +862,25 @@ def test_the_committed_xiao_boards_load(request):
 
 
 def _kicad_boards():
-    """Every composed board whose layout is a `.kicad_pcb` and is on disk."""
+    """Every composed board whose layout is a `.kicad_pcb` and is on disk.
+
+    **One spec per LAYOUT**, not per board: OH-118 split each XIAO's DIP and
+    SMD variants into their own compositions of the same PCB file, and a test
+    counting statements per spec counted every one of them twice -- the C6's
+    single vendor disagreement "became" two the day the variants split.
+    """
     from tools import compose_board_3d as compose
 
-    return [spec for spec in compose.COMPOSITIONS
-            if spec.layout.suffix == ".kicad_pcb" and spec.layout.is_file()]
+    seen: set = set()
+    out = []
+    for spec in compose.COMPOSITIONS:
+        if spec.layout.suffix != ".kicad_pcb" or not spec.layout.is_file():
+            continue
+        if spec.layout in seen:
+            continue
+        seen.add(spec.layout)
+        out.append(spec)
+    return out
 
 
 def test_the_model_blocks_are_read_and_four_boards_of_five_carry_them():
