@@ -515,3 +515,22 @@ def test_the_cortex_m33_boards_are_nine_and_wait_on_one_oracle():
     waiting = [b for b in catalogue.catalogue() if b.core == "cortexm33"]
     assert len(waiting) == 9, sorted(b.name for b in waiting)
     assert not any(b.runnable for b in waiting), "one claims to run without a core"
+
+
+def test_every_board_states_whether_a_sketch_can_be_built_for_it():
+    """**The picker offered Build on all 26 boards and 9 runnable ones
+    400ed only after the attempt** (OH-140). `buildable` rides /api/boards
+    -- stated at the route because `compile` imports the catalogue and
+    layering points one way -- and the Uno and the SAMD21s are the boards
+    with recipes today, which the recipe table itself says."""
+    from webui import compile as compile_service
+    from webui import emulator_server
+    payload = emulator_server.handle_api(None, "/api/boards", {}, {})
+    for entry in payload["boards"]:
+        assert isinstance(entry["buildable"], bool), entry["board" if "board" in entry else "name"]
+        assert entry["buildable"] == (entry["chip"] in compile_service.RECIPES)
+    by_name = {entry["name"]: entry for entry in payload["boards"]}
+    assert by_name["Arduino Uno"]["buildable"] is True
+    assert by_name["XIAO-RP2040-DIP"]["buildable"] is False, (
+        "the RP2040 has no recipe yet; if one landed, update this and OH-140"
+    )

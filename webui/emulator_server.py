@@ -598,23 +598,37 @@ def handle_board_api(boards: BoardSlot, route: str,
         return api.pad_view(asked, api.description_for(asked), None)
 
     if route == "/api/board/state":
-        at = query.get("at")
-        # `words=` is comma-separated because a peripheral view watches a
-        # handful of fixed addresses and repeating the key for each would make
-        # the query string harder to read than the thing it describes.
-        watched = [
-            int(word, 0)
-            for group in query.get("words", [])
-            for word in group.split(",")
-            if word
-        ]
-        return boards.require().state(
-            memory_at=int(at[0], 0) if at else None,
-            memory_length=_query_int(query, "len", "64"),
-            words=watched,
-        )
+        return _board_state(boards, query)
+
+    if route == "/api/board/step":
+        # `BoardSession.step` existed and no route exposed it (OH-140): the
+        # 8086 could be single-stepped from the page and a board could not.
+        # The stepped state comes back in the same reply so the page redraws
+        # in one round-trip, and `words=` rides it exactly as on /state.
+        boards.require().step(_int(payload, "count", 1))
+        return _board_state(boards, query)
 
     raise ApiError(f"no such route: {route}")
+
+
+def _board_state(boards: BoardSlot,
+                 query: dict[str, list[str]]) -> dict[str, object]:
+    """One reading of the board, as /api/board/state and /step both answer."""
+    at = query.get("at")
+    # `words=` is comma-separated because a peripheral view watches a
+    # handful of fixed addresses and repeating the key for each would make
+    # the query string harder to read than the thing it describes.
+    watched = [
+        int(word, 0)
+        for group in query.get("words", [])
+        for word in group.split(",")
+        if word
+    ]
+    return boards.require().state(
+        memory_at=int(at[0], 0) if at else None,
+        memory_length=_query_int(query, "len", "64"),
+        words=watched,
+    )
 
 
 def handle_api(session: emulator.Session, route: str,
@@ -649,8 +663,18 @@ def handle_api(session: emulator.Session, route: str,
         return {"targets": listing, "driving": DRIVING}
 
     if route == "/api/boards":
+        listing = []
+        for described in board_catalogue.catalogue():
+            entry = described.as_json()
+            # Which boards the sketch panel can BUILD for is a fact about
+            # this machine's recipes, stated here rather than discovered as
+            # a 400 after typing a sketch (OH-140). The catalogue cannot
+            # carry it: `compile` imports the catalogue, and layering points
+            # one way.
+            entry["buildable"] = entry["chip"] in compile_service.RECIPES
+            listing.append(entry)
         return {
-            "boards": [b.as_json() for b in board_catalogue.catalogue()],
+            "boards": listing,
             "waiting": board_catalogue.missing_cores(),
         }
 
@@ -720,6 +744,7 @@ ROUTE_METHODS: dict[str, frozenset[str]] = {
     "/api/board/compile": frozenset({"POST"}),
     "/api/board/load-artefact": frozenset({"POST"}),
     "/api/board/run": frozenset({"POST"}),
+    "/api/board/step": frozenset({"POST"}),
     "/api/step": frozenset({"POST"}),
     "/api/run": frozenset({"POST"}),
     "/api/reset": frozenset({"POST"}),

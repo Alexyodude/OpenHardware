@@ -1058,3 +1058,31 @@ def test_the_state_route_carries_the_uart_to_the_wire():
     assert set(state["uart"]) == {
         "present", "bytes", "dropped_bytes", "text", "undecodable_bytes",
     }, "the wire shape in emulator_server's docstring no longer matches"
+
+
+def test_the_step_route_moves_the_board_one_instruction():
+    """**`BoardSession.step` existed and no route exposed it** (OH-140): the
+    8086 could be single-stepped from the page and a board could not.
+    Driven through the routes with the load route\'s own wire shape, and
+    the stepped state comes back in the step reply -- one round-trip per
+    step, the same economy the clock\'s run ticks keep."""
+    import base64
+    slot = emulator_server.BoardSlot()
+    emulator_server.handle_board_api(slot, "/api/board/load", {}, {
+        "board": BOARD,
+        "image": base64.b64encode(blink_bytes()).decode(),
+        "base": hex(BLINK_LOAD),
+    })
+    try:
+        before = emulator_server.handle_board_api(
+            slot, "/api/board/state", {}, {})
+        after = emulator_server.handle_board_api(
+            slot, "/api/board/step", {}, {})
+        assert after["pc"] != before["pc"], "one step moved nothing"
+        assert after["registers"], "the stepped state did not come back"
+        # And the count is honoured: three more steps land somewhere else.
+        again = emulator_server.handle_board_api(
+            slot, "/api/board/step", {}, {"count": 3})
+        assert again["pc"] != after["pc"]
+    finally:
+        slot.session.close()

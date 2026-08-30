@@ -1596,7 +1596,12 @@ def test_the_board_picker_redraws_when_it_changes():
                      if not line.lstrip().startswith("//"))
     wiring = code.split('$("board-pick").addEventListener("change"', 1)
     assert len(wiring) == 2, "the picker has no change listener"
-    assert "boardPins?.reload()" in wiring[1].split(";", 1)[0], (
+    # The listener's whole body, to its closing `});` -- it stopped being a
+    # one-liner when OH-140 added the buildability reflection ahead of the
+    # redraw, and this test's claim is about the redraw existing, not about
+    # it being the first statement.
+    listener = wiring[1].split("});", 1)[0]
+    assert "boardPins?.reload()" in listener, (
         "the picker changes and nothing redraws the board"
     )
 

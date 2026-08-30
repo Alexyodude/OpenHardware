@@ -374,3 +374,30 @@ def test_the_default_sketch_actually_compiles():
     assert "void setup" in sketch and "void loop" in sketch
     built = compiler.build(BOARD, sketch)
     assert built.ok, built.diagnostics
+
+
+def test_the_sketch_survives_a_reload_and_the_watch_rides_every_state_fetch():
+    """Two page-side affordances, pinned at the source with comments
+    stripped (OH-140): the sketch is kept in localStorage on every input
+    and read back ahead of DEFAULT_SKETCH, and every /api/board/state
+    fetch goes through `boardStateUrl()` so the words= watch the server
+    always answered finally rides the wire."""
+    source = SCRIPT.read_text(encoding="utf-8")
+    code = "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert 'localStorage.getItem("oh-sketch")' in code, (
+        "a reload eats the sketch again"
+    )
+    assert 'localStorage.setItem("oh-sketch"' in code, (
+        "the sketch is never saved, so the restore reads nothing"
+    )
+    assert 'api("/api/board/state")' not in code, (
+        "a state fetch bypasses boardStateUrl, so the watch silently does "
+        "not apply there"
+    )
+    assert code.count("api(boardStateUrl())") >= 4
+    assert 'id="board-watch"' in HTML.read_text(encoding="utf-8")
+    assert '$("sketch-build").disabled = !can' in code, (
+        "the Build button is not greyed by buildability, so 9 boards 400 "
+        "only after the attempt again"
+    )

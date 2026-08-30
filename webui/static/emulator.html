@@ -149,6 +149,11 @@
              aria-label="Load address for a raw .bin" />
       <button id="board-load">Load</button>
       <button id="board-go" class="primary" disabled>Run</button>
+      <button id="board-step" disabled>Step</button>
+      <input id="board-watch" size="18" spellcheck="false"
+             placeholder="watch 0x40004400,…"
+             aria-label="Memory-mapped words to watch, comma-separated" />
+      <span class="note" id="board-watch-note"></span>
     </div>
     <div class="prose" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center"
          id="artefact-row" hidden>

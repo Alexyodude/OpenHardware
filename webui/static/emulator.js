@@ -404,8 +404,25 @@ async function fillBoards() {
  *  is the same choice the target selector in the toolbar makes. Hiding them
  *  would leave someone hunting for a board that is right there in the table
  *  below; offering them would accept a click that cannot be honoured. */
+//: Board name -> whether this machine can BUILD for it, from /api/boards'
+//: own `buildable` flag (OH-140). Read by `reflectBuildability` below.
+const BUILDABLE = new Map();
+
+/** Grey the Build button when the picked board has no compile recipe. */
+function reflectBuildability() {
+  const picked = $("board-pick").value;
+  const can = BUILDABLE.get(picked) ?? false;
+  $("sketch-build").disabled = !can;
+  $("sketch-build").title = can
+    ? ""
+    : `no compile recipe for ${picked || "this board"}'s chip -- the Build ` +
+      `button needs one. See webui/compile.py's RECIPES.`;
+}
+
 function fillBoardPicker(boards) {
   const select = $("board-pick");
+  BUILDABLE.clear();
+  for (const board of boards) BUILDABLE.set(board.name, !!board.buildable);
   const ordered = [...boards].sort((a, b) =>
     Number(b.runnable) - Number(a.runnable) || a.name.localeCompare(b.name));
   select.replaceChildren(...ordered.map((board) => {
@@ -451,6 +468,7 @@ function fillBoardPicker(boards) {
   // a classic script and the panel is a module.
   api("/api/board/pins")
     .then((view) => { if (view.board) select.value = view.board; })
+    .then(() => reflectBuildability())
     .catch(() => {})
     .finally(() => window.boardPins?.reload().catch(() => {}));
 }
@@ -542,6 +560,7 @@ async function loadBoardImage() {
 
   boardImage = null;
   $("board-go").disabled = true;
+  $("board-step").disabled = true;
   try {
     boardImage = await api("/api/board/load", request);
   } catch (error) {
@@ -551,6 +570,7 @@ async function loadBoardImage() {
   }
 
   $("board-go").disabled = false;
+  $("board-step").disabled = false;
   $("board-console").textContent = "";
   $("board-console-note").textContent = "nothing transmitted yet";
   // Draw the machine at its reset vector straight away. Without this the
@@ -558,7 +578,7 @@ async function loadBoardImage() {
   // an i8086, or the previous board -- which reads as this board's state
   // rather than as a stale pane.
   previousBoard = null;
-  renderBoardState(await api("/api/board/state"));
+  renderBoardState(await api(boardStateUrl()));
   window.boardPins?.reload();
   const notes = boardImage.notes.length ? ` — ${boardImage.notes.join("; ")}` : "";
   boardSays(
@@ -647,12 +667,14 @@ async function loadArtefact() {
   await stopBoardClock();
   boardImage = null;
   $("board-go").disabled = true;
+  $("board-step").disabled = true;
   boardImage = await api("/api/board/load-artefact", request);
   $("board-go").disabled = false;
+  $("board-step").disabled = false;
   $("board-console").textContent = "";
   $("board-console-note").textContent = "nothing transmitted yet";
   previousBoard = null;
-  renderBoardState(await api("/api/board/state"));
+  renderBoardState(await api(boardStateUrl()));
   window.boardPins?.reload();
   boardSays(
     `${chosen ? chosen.name : path}: ${boardImage.bytes} bytes of ` +
@@ -812,10 +834,11 @@ async function buildSketch() {
     }
     boardImage = built.board;
     $("board-go").disabled = false;
+  $("board-step").disabled = false;
     $("board-console").textContent = "";
     $("board-console-note").textContent = "nothing transmitted yet";
     previousBoard = null;
-    renderBoardState(await api("/api/board/state"));
+    renderBoardState(await api(boardStateUrl()));
   window.boardPins?.reload();
     $("sketch-report").textContent =
       `${built.bytes} bytes on ${boardImage.board}, entered at ` +
@@ -868,6 +891,20 @@ function runLine(report) {
     : "";
   return `${boardImage.board}: ${report.steps.toLocaleString()} instructions` +
          `${fast}${stopped}. pc 0x${$("where").textContent}`;
+}
+
+/** The state route, with whatever the watch box asks for riding it.
+ *
+ *  One builder for every fetch (OH-140): the route, its validation and a
+ *  long docstring argued for `words=` and the page never sent it. The box
+ *  is passed through verbatim -- comma-separated, 0x or decimal -- and the
+ *  server's refusal for a bad address already names it.
+ */
+function boardStateUrl() {
+  const watch = $("board-watch").value.trim();
+  return watch
+    ? `/api/board/state?words=${encodeURIComponent(watch)}`
+    : "/api/board/state";
 }
 
 /** Run is a toggle, and this is the half of it that shows which way it is. */
@@ -932,7 +969,7 @@ async function runLoadedBoard() {
     // start until this repaint has finished, so the picture cannot fall behind
     // the board however slow the drawing gets.
     onTick: async (report) => {
-      const state = await api("/api/board/state");
+      const state = await api(boardStateUrl());
       renderBoardConsole(state.uart);
       renderBoardState(state);
       boardSays(runLine(report),
@@ -1068,6 +1105,11 @@ function renderBoardState(state) {
   // from the same entry so an AVR's word-counting PC prints as four digits.
   const pc = state.registers.find((register) => register.name === "pc");
   $("where").textContent = hex(pc.value, pc.width / 4);
+  // The watched words, beside the box that asked for them (OH-140).
+  $("board-watch-note").textContent = (state.words ?? [])
+    .map((word) => `0x${word.address.toString(16)} = 0x${word.value
+      .toString(16).padStart(8, "0")}`)
+    .join("  ");
   // Optional by design. `board3d-panel.js` is a module loaded separately, so a
   // page where it failed -- no WebGL, a vendored three.js that would not parse
   // -- behaves exactly as this file did before the pin view existed.
@@ -1211,13 +1253,32 @@ function wire() {
   // Swallowed like the panel's own start-up call, and for the same reason:
   // there is nothing to report to, `reload` puts any refusal in its own
   // caption, and a board that cannot be drawn is not an error in the picker.
-  $("board-pick").addEventListener("change", () =>
-    window.boardPins?.reload().catch(() => {}));
+  $("board-pick").addEventListener("change", () => {
+    reflectBuildability();
+    window.boardPins?.reload().catch(() => {});
+  });
+  $("board-step").addEventListener("click", async () => {
+    // One instruction, through the same door Run uses; the clock is stopped
+    // first so the step is the only thing that moves the machine.
+    await stopBoardClock();
+    showBoardRunning(false);
+    renderBoardState(await api("/api/board/step", {}));
+  });
   $("board-load").addEventListener("click", () =>
     loadBoardImage().catch((error) => boardSays("Nothing loaded yet.", String(error.message || error))));
   $("board-go").addEventListener("click", () =>
     runLoadedBoard().catch((error) => boardSays($("board-report").textContent, String(error.message || error))));
-  $("sketch-source").value = DEFAULT_SKETCH;
+  // The sketch survives a reload (OH-140): localStorage held only the
+  // theme, so any crash or refresh ate the source unwarned. The same
+  // try/catch as the theme, for private mode.
+  let kept = null;
+  try { kept = localStorage.getItem("oh-sketch"); } catch { /* private */ }
+  $("sketch-source").value = kept ?? DEFAULT_SKETCH;
+  $("sketch-source").addEventListener("input", () => {
+    try {
+      localStorage.setItem("oh-sketch", $("sketch-source").value);
+    } catch { /* private mode: the page still works, the sketch does not keep */ }
+  });
   $("artefact-load").addEventListener("click", () =>
     loadArtefact().catch((error) =>
       boardSays("Nothing loaded yet.", String(error.message || error))));
