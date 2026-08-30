@@ -1661,7 +1661,7 @@ def test_no_pad_marker_is_ever_drawn():
     pad on the sixteen boards that are drawn as a bare footprint.
     """
     source = RENDERER.read_text(encoding="utf-8")
-    made = source.split("const post = new THREE.Mesh(", 1)[1].split("view.pads.set", 1)[0]
+    made = source.split("const post = new THREE.Mesh(", 1)[1].split("addPad(", 1)[0]
     assert "post.visible = false;" in made, (
         "the drawn cylinder is back"
     )
@@ -1841,3 +1841,100 @@ def test_the_bounce_is_dimmer_than_the_key_and_does_not_cast():
     # component's side face gets a hint of it, and it is small enough that the
     # topside statistics did not move across the whole sweep.
     assert abs(under["y"]) > 2 * max(abs(under["x"]), abs(under["z"]))
+
+
+# --- a name can mean several pads (OH-117) -----------------------------------
+
+
+def test_a_board_really_does_give_three_pads_the_same_name():
+    """**The situation the change below exists for, in the data.**
+
+    An Arduino Uno has three GND pads and `webui/boards/Arduino Uno.json`
+    lists all three, at three places, because that is what the board has. A
+    `Map` keyed by name kept whichever came last and the other two were never
+    made -- no raycast target, so no wire could start there, and nothing on
+    the page to say why. Measured with `describe()`: 32 pads in, 30 out.
+
+    Asserted against the board file rather than against the renderer, so that
+    the renderer's fix cannot be "correct" against a board file somebody has
+    quietly de-duplicated.
+    """
+    import collections
+    import json
+
+    boards = STATIC.parents[0] / "boards"
+    layout = json.loads((boards / "Arduino Uno.json")
+                        .read_text(encoding="utf-8"))
+    names = collections.Counter(pad["label"] for pad in layout["pads"])
+    repeated = {name: n for name, n in names.items() if n > 1}
+    assert repeated == {"GND": 3}, (
+        f"the Uno's repeated pad names are now {repeated}. Three GND is what "
+        f"the board has; if that changed, this test and the Map-of-lists it "
+        f"justifies both need re-reading"
+    )
+    places = {(pad["x"], pad["y"]) for pad in layout["pads"]
+              if pad["label"] == "GND"}
+    assert len(places) == 3, (
+        "the three GND entries are not three distinct places, so they are a "
+        "duplication in the file rather than three real pads"
+    )
+
+
+def test_every_pad_is_kept_and_not_only_the_last_of_its_name():
+    """`view.pads` groups by name and holds a LIST, so all three GND pads
+    exist.
+
+    **The two helpers are asserted by their BODIES and not by their names**,
+    and the first version of this test was not. It checked that the string
+    `[...view.pads.values()].flat()` appeared in the file -- and `padMeshes`
+    has a docstring saying "rather than `[...view.pads.values()].flat()` in
+    six places", so a mutation that gutted the body left the comment behind
+    and the test passed. A source assertion that a comment can satisfy is not
+    an assertion about the code. Both mutations survived until this was split.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    add = source.split("function addPad(pin, post) {", 1)[1].split("\n}", 1)[0]
+    assert "here.push(post)" in add, (
+        "addPad no longer appends, so a repeated name keeps only its last pad "
+        "-- which is the whole of OH-117 returning"
+    )
+    meshes = source.split("function padMeshes() {", 1)[1].split("\n}", 1)[0]
+    assert ".flat()" in meshes, (
+        "padMeshes no longer flattens, so a name with two pads yields one of "
+        "them and the other is invisible to every caller"
+    )
+    # The writers go through the helper; nothing sets a bare mesh as the value.
+    assert "view.pads.set(pad.pin, post)" not in source
+    assert "view.pads.set(pad.pin, pin)" not in source
+    # And nothing takes `.values()` as meshes any more.
+    for shape in ("[...view.pads.values()], false)",
+                  "for (const post of view.pads.values())"):
+        assert shape not in source, f"{shape!r} treats the value as a mesh"
+
+
+def test_a_wire_follows_the_pad_it_was_pulled_from_not_a_pad_with_that_name():
+    """**The half of OH-117 that is not about counting.**
+
+    A wire stored only `pin`, and `anchorOf` looked the name back up. That was
+    exact while one name meant one pad; with three called GND, a wire dragged
+    from the one beside AREF would have had its end snap across the board to
+    the one on the power header -- silently, and only once a second pad of
+    that name existed to snap to.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    anchor = source.split("function anchorOf(wire) {", 1)[1].split("\n}", 1)[0]
+    assert "wire.post" in anchor, "the wire no longer remembers its own pad"
+    assert "view.pads.get" not in anchor, (
+        "anchorOf is looking a pad up by name again, which picks the wrong "
+        "one of three"
+    )
+    assert "post: pad," in source, "beginWire no longer records the pad"
+
+
+def test_describe_reports_the_number_of_pads_and_not_only_of_names():
+    """The two differ wherever a name means several pads -- 32 against 30 on
+    an Uno -- and the number of PADS is the one that says whether any were
+    lost. Without it the loss is invisible from outside the module, which is
+    how it went unnoticed."""
+    source = RENDERER.read_text(encoding="utf-8")
+    assert "padCount: padMeshes().length," in source

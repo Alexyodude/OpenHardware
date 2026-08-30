@@ -579,7 +579,19 @@ const view = {
   //: The last thing `circuit.js` said about the bench, kept so that `parts()`
   //: can hand the page a sentence per part without solving again.
   circuit: null,
-  pads: new Map(),   // pin name -> the marker drawn for it
+  //: Pin name -> EVERY marker drawn for it, and the plural is OH-117.
+  //:
+  //: **A name can mean more than one pad and this held one.** An Arduino Uno
+  //: has three pads called GND -- the board file lists all three, at three
+  //: places, because that is what the board has -- and a `Map` keyed by name
+  //: kept whichever came last. The other two were never made: no raycast
+  //: target, so no wire could start there, and no explanation on the page
+  //: either. 32 pads went in and 30 came out, measured with `describe()`.
+  //:
+  //: They are one NET, which is what makes the name the right key: `analyse`
+  //: says so at `groundOf`, and `webui/api.py` sends one level per name. So
+  //: they light together and any of them can be wired.
+  pads: new Map(),
   bench: null,       // parts and wires; outlives a board change
   parts: [],         // every part on the bench, in the order they arrived
   wires: [],         // every wire, connected or being dragged
@@ -1135,7 +1147,7 @@ export function showBoard(layout, model = null) {
     // was and what this field is for.
     post.userData.state = pad.state;
     view.board.add(post);
-    view.pads.set(pad.pin, post);
+    addPad(pad.pin, post);
   }
 
   view.scene.add(view.board);
@@ -1230,9 +1242,11 @@ function scaleFromPads(xs, ys, span) {
  */
 function carvePins(group, pcbThickness) {
   const wanted = [];
-  for (const [pin, post] of view.pads) {
-    post.getWorldPosition(scratch);
-    wanted.push({ pin, post, at: group.worldToLocal(scratch.clone()) });
+  for (const [pin, posts] of view.pads) {
+    for (const post of posts) {
+      post.getWorldPosition(scratch);
+      wanted.push({ pin, post, at: group.worldToLocal(scratch.clone()) });
+    }
   }
   if (!wanted.length) return [];
 
@@ -1332,7 +1346,9 @@ function carvePins(group, pcbThickness) {
     group.add(pin);
     release(pad.post);
     view.board.remove(pad.post);
-    view.pads.set(pad.pin, pin);
+    const bucket = view.pads.get(pad.pin);
+    bucket[bucket.indexOf(pad.post)] = pin;
+    pin.userData.carved = true;
     found.push(pad.pin);
   }
   return found;
@@ -1404,7 +1420,7 @@ function placeModel(loaded, layout) {
   // placed there, and it is where a person clips a lead in any case.
   const top = -BOARD_THICKNESS / 2 + (extras.pad_top ?? pcb.thickness) * scale
               + PAD_LIFT + PAD_HEIGHT / 2;
-  for (const post of view.pads.values()) post.position.y = top;
+  for (const post of padMeshes()) post.position.y = top;
 
   // **And then the drawn markers are replaced by the pins the vendor
   // published, wherever there is one.** OH-95. The raise above still matters:
@@ -1422,8 +1438,8 @@ function placeModel(loaded, layout) {
   // raycast target that starts a wire and the anchor the wire's end follows,
   // so the bench goes on working on the sixteen boards that have no pin
   // geometry at all. Nothing renders it.
-  for (const [pin, post] of view.pads) {
-    if (!real.includes(pin)) post.visible = false;
+  for (const post of padMeshes()) {
+    if (!post.userData.carved) post.visible = false;
   }
   // The board just changed shape, so what a wire may not pass through changed
   // with it -- and it is the PCB that changed, not the assembly: a lead should
@@ -1514,9 +1530,11 @@ function repaint(post) {
 /** Recolour without rebuilding. `levels` is `{pinName: state}`. */
 export function setLevels(levels) {
   if (!view.renderer || !levels) return;
-  for (const [pin, post] of view.pads) {
-    post.userData.state = levels[pin] ?? "unknown";
-    repaint(post);
+  for (const [pin, posts] of view.pads) {
+    for (const post of posts) {
+      post.userData.state = levels[pin] ?? "unknown";
+      repaint(post);
+    }
   }
   // **The parts follow the pads and not the payload**, which is the join that
   // makes a wire mean anything: the circuit is solved from the states read
@@ -1549,7 +1567,7 @@ export function refreshTheme() {
   // the one part of this picture that is sourced into decoration. The pads
   // stay theme-coloured because they are this repository's own reading of a
   // register, which is exactly the distinction the palette is for.
-  for (const post of view.pads.values()) repaint(post);
+  for (const post of padMeshes()) repaint(post);
 }
 
 function clearBoard() {
@@ -1657,7 +1675,12 @@ export function describe() {
   const box = new THREE.Box3();
   const at = new THREE.Vector3();
   const pads = {};
-  for (const [pin, pad] of view.pads) pads[pin] = vecArray(pad.getWorldPosition(at));
+  // One position per NAME, which is what every caller of this has ever
+  // wanted; `padCount` beside it is the number of PADS, and the two differ
+  // wherever a name means more than one. On an Arduino Uno that is 30 and 32.
+  for (const [pin, posts] of view.pads) {
+    pads[pin] = vecArray(posts[0].getWorldPosition(at));
+  }
   return {
     camera: vecArray(view.camera.position),
     target: vecArray(view.controls.target),
@@ -1667,6 +1690,10 @@ export function describe() {
     // claims -- the first is true even when the carve finds nothing. This is
     // the number that tells them apart, and it is what the test asserts.
     realPins: view.realPins ?? [],
+    // The number of PADS, against `pads` above which is keyed by NAME.
+    // They differ wherever a name means several pads -- an Uno's three
+    // GND, which OH-117 stopped losing. 32 against 30 there.
+    padCount: padMeshes().length,
     terminals: view.parts.flatMap((part, index) =>
       [...part.userData.terminals.entries()].map(([name, anchor]) => ({
         part: index, name, at: vecArray(anchor.getWorldPosition(new THREE.Vector3())),
@@ -1822,11 +1849,17 @@ function vecArray(vector) {
   return [vector.x, vector.y, vector.z];
 }
 
-/** Where a wire's board end is now, following the pad it was pulled from. */
+/** Where a wire's board end is now, following the pad it was pulled from.
+ *
+ *  **The pad the wire was pulled from, not a pad with that name** (OH-117).
+ *  This used to be `view.pads.get(wire.pin)`, which was exact while one name
+ *  meant one pad and stopped being so the moment three of them did: an Uno
+ *  has three GND pads, so a wire dragged from the one beside AREF would have
+ *  had its end snap to the one on the power header.
+ */
 function anchorOf(wire) {
-  const pad = view.pads.get(wire.pin);
-  if (!pad) return wire.rope.point(0);
-  pad.getWorldPosition(scratch);
+  if (!wire.post) return wire.rope.point(0);
+  wire.post.getWorldPosition(scratch);
   return vecArray(scratch);
 }
 
@@ -2100,7 +2133,11 @@ function beginWire(pad, end = null) {
       metalness: 0.05,
     })
   );
-  const wire = { id: nextWireId++, pin: pad.userData.pin, rope, mesh,
+  // **`post` is the pad this was actually pulled from and `pin` is its
+  // name**, and the two stopped being interchangeable at OH-117: three of an
+  // Uno's pads are called GND. The name is what the netlist and the reports
+  // speak; the mesh is what the wire's end has to follow.
+  const wire = { id: nextWireId++, pin: pad.userData.pin, post: pad, rope, mesh,
                  terminal: null };
   applyColliders(wire);
   view.bench.add(mesh);
@@ -2129,9 +2166,27 @@ function aim(event) {
   raycaster.setFromCamera(pointer, view.camera);
 }
 
+/** Every pad mesh on the board, whatever name it carries.
+ *
+ *  `view.pads` groups by name because a name is a NET; almost everything that
+ *  touches a pad -- raising it, recolouring it, raycasting it, handing it to
+ *  the solver -- wants the meshes and does not care about the grouping. One
+ *  helper rather than `[...view.pads.values()].flat()` in six places.
+ */
+function padMeshes() {
+  return [...view.pads.values()].flat();
+}
+
+/** Put one pad mesh under its name, keeping any already there. */
+function addPad(pin, post) {
+  const here = view.pads.get(pin);
+  if (here) here.push(post);
+  else view.pads.set(pin, [post]);
+}
+
 /** The nearest pad under the pointer, or null. */
 function padUnder() {
-  const hits = raycaster.intersectObjects([...view.pads.values()], false);
+  const hits = raycaster.intersectObjects(padMeshes(), false);
   return hits.length ? hits[0].object : null;
 }
 
@@ -2245,7 +2300,7 @@ function applyCircuit() {
   const index = new Map(view.parts.map((part, at) => [part, at]));
   const report = analyse({
     supply: view.supply,
-    pads: [...view.pads.values()].map((post) => ({
+    pads: padMeshes().map((post) => ({
       name: post.userData.pin, state: post.userData.state,
     })),
     parts: view.parts.map((part) => ({
@@ -2301,7 +2356,13 @@ export function clearBench({ parts: alsoParts = false } = {}) {
 
 /** Wire a pad to a part's terminal without a pointer. For the page and tests. */
 export function connect(pin, part, terminalName) {
-  const pad = view.pads.get(pin);
+  // **The first pad of that name, and any of them would do** (OH-117). A
+  // name can now mean several pads -- an Uno has three called GND -- and they
+  // are one NET: `circuit.js` says so at `groundOf`, and `webui/api.py` sends
+  // one level for the name. So a caller naming a pin is naming a net, and
+  // which of its pads the wire lands on is a matter of where it looks best.
+  // A person dragging picks one with the pointer, which `padUnder` answers.
+  const pad = view.pads.get(pin)?.[0];
   const terminal = part?.userData?.terminals?.get(terminalName);
   if (!pad || !terminal) return null;
   const wire = beginWire(pad, vecArray(terminalPoint(terminal)));
