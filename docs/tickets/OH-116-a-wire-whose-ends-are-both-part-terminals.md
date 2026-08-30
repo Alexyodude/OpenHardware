@@ -1,9 +1,15 @@
 ---
 id: OH-116
 title: A wire whose ends are both part terminals
-status: open
+status: done
 priority: P3
 created: '2026-08-30'
+touches:
+- webui/static/board3d.js
+- webui/static/circuit.js
+- webui/static/board3d-panel.js
+- tests/webui/test_circuit.py
+- tests/webui/test_board3d.py
 ---
 
 _No description yet._
@@ -56,3 +62,45 @@ A reader can drag from one part's terminal to another's; `analyse` reports a
 series pair correctly with no pad between them; the junction note OH-84 added
 stops being shown for a bench that has done it; and the drag is covered by
 whatever harness exists by then, or its absence is stated.
+
+---
+
+**CLOSED 2026-08-31, both halves landing together as the ticket
+demanded.**
+
+**The shape is the one this ticket named**: a wire has two ends, and the
+far end is a pad OR another part's terminal. On the bench wire that is a
+`from: {part, terminal}` present exactly when `pad` is not; in
+`board3d.js` the wire's `post` is the object the drag began on -- a pad
+mesh or a terminal anchor -- and `pin` is undefined for the latter, which
+is the one bit every reader branches on.
+
+Each of the listed call sites was taught to walk both ends: the
+union-find joins whichever pair exists; `wired` collects the from-part
+(load-bearing in the test where the resistor is ONLY ever a from-end);
+`reaching` counts both directions; `blind` and the busiest-pin search
+were already safe for a wire with no pad and stayed untouched;
+`beginWire` starts from either object; the drop refuses the wire's own
+starting anchor; `removePart` takes the wires that BEGIN on the part;
+`connections` carries `fromLabel`/`fromTerminal` and the panel chip says
+"anode ↔ 220 Ω resistor's lead A" where a pad wire says "anode on 13".
+
+**The junction note narrows rather than dies**: it still teaches the
+borrowed-input trick, now alongside the direct drag, and it retires on
+any bench holding a part-to-part wire -- a page must not tell a reader it
+cannot do the thing it just did. The two tests that pinned the old
+"cannot be joined" wording moved to the new sentence.
+
+**The series pair the ticket asked for**: D13 → LED → (direct wire) →
+231 Ω → GND solves at 9.302 mA through both -- hand-worked, 2.8/301, the
+same current as the borrowed-pin bench with one wire fewer.
+
+**The drag**: covered at the source with comments stripped (press falls
+through to `terminalUnder`, self-anchor refused), because a THREE.js
+raycast has no headless harness here -- the same stated absence
+`carvePins` carries on OH-128's record.
+
+Six mutations, all killed; the survivor found on the first run (the
+from-side `wired` add unexercised) got the bench that makes it
+load-bearing, which is the mutation discipline doing its job.
+tests/webui 637 passed.

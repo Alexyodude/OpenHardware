@@ -343,6 +343,11 @@ export function analyse(bench) {
   const wired = new Set();
   for (const wire of bench.wires) {
     if (!report[wire.part]?.destroyed) wired.add(wire.part);
+    // The from-end is a part too (OH-116), and a part reached only that way
+    // is every bit as wired.
+    if (wire.from !== undefined && !report[wire.from.part]?.destroyed) {
+      wired.add(wire.from.part);
+    }
   }
   for (const index of wired) report[index].reason = "";
 
@@ -373,7 +378,14 @@ export function analyse(bench) {
     wiring.find(`pad:${pad.name}`);
   }
   const terminalKey = (index, name) => `part:${index}:${name}`;
-  for (const wire of bench.wires) wiring.join(`pad:${wire.pad}`, terminalKey(wire.part, wire.terminal));
+  for (const wire of bench.wires) {
+    // A wire's far end is a pad OR another part's terminal (OH-116); the
+    // union-find never cared which, and now the wire shape says so too.
+    const far = wire.from === undefined
+      ? `pad:${wire.pad}`
+      : terminalKey(wire.from.part, wire.from.terminal);
+    wiring.join(far, terminalKey(wire.part, wire.terminal));
+  }
   for (const [index, part] of bench.parts.entries()) {
     for (const name of terminalsOf(part)) wiring.find(terminalKey(index, name));
   }
@@ -512,7 +524,9 @@ export function analyse(bench) {
     const entry = report[index];
     const names = terminalsOf(part);
     const reaching = names.filter((name) =>
-      bench.wires.some((wire) => wire.part === index && wire.terminal === name));
+      bench.wires.some((wire) =>
+        (wire.part === index && wire.terminal === name)
+        || (wire.from?.part === index && wire.from?.terminal === name)));
     // A part touching a pad this repository cannot answer for is a part this
     // repository cannot answer for. The same distinction every pad keeps.
     const blind = bench.wires.some((wire) =>
@@ -621,9 +635,11 @@ export function analyse(bench) {
     }
   }
 
-  //: **Two parts cannot be wired to each other on this bench, and this is
-  //: where a reader finds that out** rather than by trying it and getting no
-  //: explanation. OH-84.
+  //: **How parts go in series, and this is where a reader finds out**
+  //: rather than by trying and getting no explanation. OH-84 wrote this
+  //: when two parts could NOT be wired to each other; OH-116 made the
+  //: direct wire real, so the note now offers both routes and retires on
+  //: any bench that has already joined parts directly.
   //:
   //: Every wire here runs from a BOARD PAD to a part terminal --
   //: `board3d.js`'s `connect(pin, part, terminalName)` looks the pin up in
@@ -641,11 +657,12 @@ export function analyse(bench) {
   //: bench with a single part the mid-air message is already the whole story
   //: and this would be noise.
   const JUNCTION_NOTE =
-    "A wire runs from a board pad to a part terminal, so two parts cannot be " +
-    "joined to each other directly. To put parts in series, use a pad the " +
-    "firmware leaves as an INPUT as the junction — an input is high impedance " +
-    "and stamps nothing into the netlist, so it is exactly a floating node. " +
-    "D13 → resistor → D12 → LED → GND is a current-limited LED wired that way.";
+    "To put parts in series, drag from one part's terminal to another's --\n" +
+    "a wire's ends may be two parts since OH-116 -- or borrow a pad the " +
+    "firmware leaves as an INPUT as the junction: an input is high "
+    + "impedance and stamps nothing into the netlist, so it is exactly a " +
+    "floating node. D13 \u2192 resistor \u2192 D12 \u2192 LED \u2192 GND is a current-limited " +
+    "LED wired the borrowed way.";
 
   const notes = [];
   // **A pin past a limit is named whether or not anything lights** (OH-130).
@@ -667,7 +684,10 @@ export function analyse(bench) {
                "current is reported for any of them: a value stood in for it " +
                "would decide theirs.");
   }
-  if (bench.parts.length > 1 && midAir) notes.push(JUNCTION_NOTE);
+  if (bench.parts.length > 1 && midAir
+      && !bench.wires.some((wire) => wire.from !== undefined)) {
+    notes.push(JUNCTION_NOTE);
+  }
   return answer(notes.length ? notes.join(" ") : null);
 }
 

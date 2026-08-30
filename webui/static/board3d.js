@@ -2145,6 +2145,13 @@ export function connections() {
     .map((wire) => ({
       id: wire.id,
       pin: wire.pin,
+      // The other PART end, for a wire that has one instead of a pin
+      // (OH-116): the panel's chip says "anode ↔ 220 Ω resistor's lead A"
+      // where a pad wire says "anode on 13".
+      fromLabel: wire.pin === undefined
+        ? wire.post.userData.part.userData.label : undefined,
+      fromTerminal: wire.pin === undefined
+        ? wire.post.userData.terminal : undefined,
       // Which entry of `parts()` this wire lands on. **A part needs two wires
       // before anything can be said about it**, so the page groups them by
       // part, and grouping by label would put two identical LEDs in one row.
@@ -2178,7 +2185,10 @@ export function removePart(index) {
   const part = view.parts[index];
   if (!part) return false;
   for (const wire of [...view.wires]) {
-    if (wire.terminal?.userData?.part === part) discardWire(wire);
+    // Either end (OH-116): a wire that lands on this part, and a wire that
+    // BEGINS on one of its terminals -- `post` is that anchor.
+    if (wire.terminal?.userData?.part === part
+        || wire.post?.userData?.part === part) discardWire(wire);
   }
   releasePart(part);
   view.bench.remove(part);
@@ -2218,10 +2228,13 @@ function beginWire(pad, end = null) {
       metalness: 0.05,
     })
   );
-  // **`post` is the pad this was actually pulled from and `pin` is its
-  // name**, and the two stopped being interchangeable at OH-117: three of an
-  // Uno's pads are called GND. The name is what the netlist and the reports
-  // speak; the mesh is what the wire's end has to follow.
+  // **`post` is the object this was actually pulled from and `pin` is its
+  // name when it has one.** The two stopped being interchangeable at
+  // OH-117 (three of an Uno's pads are called GND) -- and since OH-116 the
+  // start may be a part TERMINAL instead of a pad, in which case `pin` is
+  // undefined and the from-end is `post.userData.part`/`.terminal`. The
+  // netlist reads whichever pair exists; the mesh is what the wire's end
+  // has to follow either way.
   const wire = { id, pin: pad.userData.pin, post: pad, rope, mesh,
                  terminal: null };
   applyColliders(wire);
@@ -2318,7 +2331,10 @@ function announce() {
 function onPointerDown(event) {
   if (!view.renderer || event.button !== 0) return;
   aim(event);
-  const pad = padUnder();
+  // A pad first, a part terminal second (OH-116): the pads carry the
+  // levels, so where the two overlap on screen the pad wins, which is also
+  // what every drag before part-to-part wiring existed did.
+  const pad = padUnder() ?? terminalUnder();
   if (!pad) return;
   // Only now is the camera's press taken away, and only because a wire really
   // did start. A press that missed every pad still turns the board.
@@ -2346,7 +2362,10 @@ function onPointerUp(event) {
   if (!view.dragging) return;
   aim(event);
   const terminal = terminalUnder();
-  if (terminal) {
+  // Its own starting anchor is not a landing (OH-116): a wire from a
+  // terminal to itself would be a self-loop the solver erases and the page
+  // could not explain.
+  if (terminal && terminal !== view.dragging.post) {
     view.dragging.terminal = terminal;
     view.dragging.rope.moveTail(vecArray(terminalPoint(terminal)));
     view.dragging.rope.slacken();
@@ -2402,9 +2421,18 @@ function applyCircuit() {
     })),
     wires: view.wires
       .filter((wire) => wire.terminal)
-      .map((wire) => ({ pad: wire.pin,
-                        part: index.get(wire.terminal.userData.part),
-                        terminal: wire.terminal.userData.terminal })),
+      .map((wire) => ({
+        pad: wire.pin,
+        // **The from-end, when the wire began on a part instead of a pad**
+        // (OH-116). Exactly one of `pad` and `from` is meaningful, and
+        // `analyse` joins whichever pair exists.
+        from: wire.pin === undefined ? {
+          part: index.get(wire.post.userData.part),
+          terminal: wire.post.userData.terminal,
+        } : undefined,
+        part: index.get(wire.terminal.userData.part),
+        terminal: wire.terminal.userData.terminal,
+      })),
   });
   view.circuit = report;
   for (const [at, part] of view.parts.entries()) {

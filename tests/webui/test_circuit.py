@@ -1313,7 +1313,10 @@ def test_a_bench_trying_to_chain_two_parts_is_told_how_a_junction_is_made(tmp_pa
                                     parts: report.parts.map((p) => p.reason)}));
     """)
     assert got["note"], "a bench with two half-wired parts gets no guidance"
-    assert "two parts cannot be" in got["note"]
+    assert "terminal to another's" in got["note"], (
+        "the note no longer offers the direct part-to-part wire OH-116 made "
+        "real"
+    )
     assert "INPUT" in got["note"], "the note does not say what to use instead"
     assert "floating node" in got["note"], (
         "the note does not say WHY a spare input works, which is the half a "
@@ -1521,3 +1524,80 @@ def test_a_potentiometer_with_one_leg_wired_names_the_two_in_mid_air(tmp_path):
     """)
     assert got["part"]["drive"] == "off"
     assert "wiper and lead B is in mid-air" in got["part"]["reason"]
+
+
+# --- a wire whose ends are both part terminals (OH-116) ----------------------
+
+
+def test_a_direct_series_pair_solves_with_no_pad_between(tmp_path):
+    """**The junction stops being borrowed.** D13 into the LED, the LED\'s
+    cathode wired STRAIGHT to the resistor -- a wire with a `from` end and
+    no pad -- and the resistor to ground: (5 - 2.2) / (40 + 30 + 231) is
+    9.3 mA through both, the same current the borrowed-pin bench carries,
+    with one wire fewer and no spare input spent."""
+    got = run(tmp_path, """
+        const report = analyse({supply: UNO, pads: PADS,
+                                parts: [LED, RESISTOR], wires: [
+          {pad: "13", part: 0, terminal: "anode"},
+          {from: {part: 0, terminal: "cathode"}, part: 1, terminal: "lead A"},
+          {pad: "GND", part: 1, terminal: "lead B"},
+        ]});
+        console.log(JSON.stringify({parts: report.parts, note: report.note}));
+    """)
+    led, resistor = got["parts"]
+    for part in (led, resistor):
+        assert part["drive"] == "lit"
+        assert part["amps"] == pytest.approx(2.8 / 301, rel=1e-9)
+        assert "at least 9.3 mA" in part["reason"]
+    assert got["note"] is None
+
+
+def test_a_part_reached_only_by_a_part_wire_is_wired(tmp_path):
+    """`wired` used to collect one part per wire -- the landing end -- so a
+    part touched only at a wire\'s FROM end read "not wired to anything"
+    while current flowed through it."""
+    got = run(tmp_path, """
+        const report = analyse({supply: UNO, pads: PADS,
+                                parts: [LED, RESISTOR], wires: [
+          {pad: "13", part: 0, terminal: "anode"},
+          {pad: "12", part: 0, terminal: "cathode"},
+          {from: {part: 1, terminal: "lead A"}, part: 0, terminal: "anode"},
+          {from: {part: 1, terminal: "lead B"}, part: 0, terminal: "cathode"},
+        ]});
+        console.log(JSON.stringify({parts: report.parts}));
+    """)
+    resistor = got["parts"][1]
+    assert "not wired" not in resistor["reason"]
+    assert resistor["drive"] == "lit"
+    # Hand-worked: the LED runs D13 to D12 with the 231 bridged across it by
+    # the two from-wires; s = 0.114978 / 4.20130 A through the pins and the
+    # resistor's share is (5 - 85 s) / 231 = 11.575 mA. The resistor is ONLY
+    # ever a from-end here, which is what makes `wired`'s from-side add
+    # load-bearing.
+    assert resistor["amps"] == pytest.approx(0.0115748, rel=1e-4)
+
+
+def test_the_junction_note_retires_on_a_bench_that_joined_parts(tmp_path):
+    """OH-84\'s note taught the borrowed-pin trick because the direct wire
+    did not exist; a bench that HAS one has learned the lesson, and showing
+    the note there would teach a reader the page cannot do the thing it
+    just did."""
+    got = run(tmp_path, """
+        const half = [
+          {pad: "13", part: 0, terminal: "anode"},
+        ];
+        const joined = [
+          {pad: "13", part: 0, terminal: "anode"},
+          {from: {part: 0, terminal: "cathode"}, part: 1, terminal: "lead A"},
+        ];
+        const without = analyse({supply: UNO, pads: PADS,
+                                 parts: [LED, RESISTOR], wires: half});
+        const withOne = analyse({supply: UNO, pads: PADS,
+                                 parts: [LED, RESISTOR], wires: joined});
+        console.log(JSON.stringify({without: without.note,
+                                    withOne: withOne.note}));
+    """)
+    assert got["without"] and "terminal to another's" in got["without"]
+    assert not (got["withOne"] and "terminal to another's" in got["withOne"]), (
+        "the bench joined two parts directly and was still told it cannot"
+    )

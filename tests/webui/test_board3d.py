@@ -2228,3 +2228,35 @@ def test_the_panel_shows_the_composers_own_gaps():
     assert "parts.push(...gaps)" in code, (
         "the gap clauses are built and never reach the caption"
     )
+
+
+def test_the_drag_starts_on_a_part_terminal_too():
+    """**The UI half of OH-116, without which the netlist half is dead
+    code.** The drag is a THREE.js raycast with no headless harness -- the
+    same absence `carvePins` records -- so the wiring is pinned at the
+    source with comments stripped: the press falls through to
+    `terminalUnder`, the drop refuses the wire\'s own starting anchor, the
+    bench wire carries its `from` end, and `removePart` takes the wires
+    that BEGIN on the part with it."""
+    source = RENDERER.read_text(encoding="utf-8")
+    code = "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("//"))
+    assert "padUnder() ?? terminalUnder()" in code, (
+        "a drag cannot start on a part terminal"
+    )
+    assert "terminal !== view.dragging.post" in code, (
+        "a wire can land on its own starting anchor"
+    )
+    assert "wire.pin === undefined ? {" in code, (
+        "the bench wire never carries its from end, so analyse cannot join "
+        "part to part"
+    )
+    assert "wire.post?.userData?.part === part" in code, (
+        "removing a part leaves the wires that began on it dangling"
+    )
+    panel = PANEL.read_text(encoding="utf-8")
+    stripped = "\n".join(line for line in panel.splitlines()
+                         if not line.lstrip().startswith("//"))
+    assert "wire.fromLabel" in stripped, (
+        "the panel cannot say which part a part-to-part wire grips"
+    )

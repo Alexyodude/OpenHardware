@@ -508,12 +508,18 @@ function renderBench() {
     for (const wire of joined.filter((w) => w.part === index)) {
       const chip = document.createElement("span");
       chip.className = "bench-wire";
-      chip.append(document.createTextNode(`${wire.terminal} on ${wire.pin}`));
+      // A pad wire says "anode on 13"; a part-to-part wire (OH-116) says
+      // which part and terminal its other end grips instead.
+      chip.append(document.createTextNode(wire.pin === undefined
+        ? `${wire.terminal} \u2194 ${wire.fromLabel}'s ${wire.fromTerminal}`
+        : `${wire.terminal} on ${wire.pin}`));
       const off = document.createElement("button");
       off.type = "button";
       off.className = "bench-off";
       off.textContent = "×";
-      off.title = `Unwire ${wire.label} from ${wire.pin}`;
+      off.title = wire.pin === undefined
+        ? `Unwire ${wire.label} from ${wire.fromLabel}`
+        : `Unwire ${wire.label} from ${wire.pin}`;
       off.setAttribute("aria-label", off.title);
       off.addEventListener("click", () => {
         scene.disconnect(wire.id);
