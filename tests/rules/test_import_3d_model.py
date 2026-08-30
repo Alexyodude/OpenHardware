@@ -1395,3 +1395,25 @@ def test_the_composer_audits_its_own_finishes():
         "the composer stopped auditing its finishes, which is the silence "
         "OH-120 grew in"
     )
+
+
+def test_the_trimmer_is_the_first_three_terminal_part():
+    """**`Part.terminals` was a hard 2-tuple and this is the row that made
+    it a tuple of N** (OH-126). The wiper is the MIDDLE name because it is
+    Bourns' own pinout for the W style; the one cited number is the TOP of
+    the '502' code's ±10% band -- 5,500, the 220 Ω resistor's own
+    lower-bound argument -- and no current limit is cited, because the
+    3266's limit is a quarter watt no 5 V bench can reach through 5.5 kΩ,
+    so `destroys` can never claim it."""
+    from tools.import_3d_model import PARTS, POT_ELECTRICAL
+
+    pot = next(p for p in PARTS
+               if p.name == "Potentiometer_Bourns_3266W_Vertical")
+    assert pot.terminals == ("lead A", "wiper", "lead B")
+    assert pot.electrical is POT_ELECTRICAL
+    assert POT_ELECTRICAL.kind == "potentiometer"
+    assert POT_ELECTRICAL.cited["ohms"][0] == 5500.0
+    assert "top of" in POT_ELECTRICAL.cited["ohms"][1]
+    assert "rated_amps" not in POT_ELECTRICAL.cited
+    assert "absolute_amps" not in POT_ELECTRICAL.cited
+    assert pot.lens is None, "a trimmer displays nothing"

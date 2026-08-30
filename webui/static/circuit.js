@@ -87,6 +87,13 @@ export const RAILS = {
 //: rather than quietly making this paragraph false.
 export const LIT_AMPS = 5e-4;
 
+//: Where the wiper stands, as a fraction of the element from lead A. **A
+//: stated constant, not a measurement**: the bench has no knob to turn yet,
+//: so the trimmer sits at the middle of its travel and this is the one line
+//: that says so. Turning it is page UI for a ticket of its own; solving for
+//: any position already works, because the stamp below multiplies by it.
+export const POT_TRAVEL = 0.5;
+
 //: Siemens from every node to ground. **SPICE's own trick, for SPICE's own
 //: reason**: a node with no DC path anywhere — a part with one leg wired and
 //: one in mid-air, which is precisely the case this file exists for — leaves
@@ -429,6 +436,20 @@ export function analyse(bench) {
     if (!wired.has(index)) continue;
     const model = part.model;
     const names = terminalsOf(part);
+    if (model?.kind === "potentiometer") {
+      // **The first three-terminal part** (OH-126): electrically two
+      // resistors sharing the wiper node -- names[1], the middle pin by
+      // Bourns' own pinout. `POT_TRAVEL` places the wiper; either half at
+      // zero would be a short the solver handles like any other resistor.
+      const wiper = nodeOf(terminalKey(index, names[1]));
+      elements.push({ kind: "resistor", id: `part:${index}:aw`,
+                      a: nodeOf(terminalKey(index, names[0])), b: wiper,
+                      ohms: model.ohms * POT_TRAVEL });
+      elements.push({ kind: "resistor", id: `part:${index}:wb`,
+                      a: wiper, b: nodeOf(terminalKey(index, names[2])),
+                      ohms: model.ohms * (1 - POT_TRAVEL) });
+      continue;
+    }
     const a = nodeOf(terminalKey(index, names[0]));
     const b = nodeOf(terminalKey(index, names[1]));
     if (!model) { assumed++; elements.push({ kind: "resistor", id: `part:${index}`, a, b, ohms: ASSUMED_OHMS }); continue; }
@@ -512,8 +533,14 @@ export function analyse(bench) {
       midAir += 1;
       continue;
     }
-    const signed = solved.amps[`part:${index}`] ?? 0;
     const model = part.model;
+    // **A three-terminal part's number is its busiest leg** (OH-126): the
+    // two halves carry different currents whenever the wiper is wired, and
+    // the smaller one under-reports what the part is doing.
+    const signed = model?.kind === "potentiometer"
+      ? Math.max(Math.abs(solved.amps[`part:${index}:aw`] ?? 0),
+                 Math.abs(solved.amps[`part:${index}:wb`] ?? 0))
+      : (solved.amps[`part:${index}`] ?? 0);
     // **A diode's current is signed and a resistor's is not**, and that is a
     // fact about the parts rather than a convenience. A diode has a forward
     // direction, so the sign of its current says whether it is being driven or

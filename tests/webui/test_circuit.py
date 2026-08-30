@@ -99,6 +99,15 @@ RESISTOR = {
     "model": {"kind": "resistor", "ohms": 231.0},
 }
 
+#: The 5 kΩ trimmer, as `tools/import_3d_model.py`'s `POT_ELECTRICAL`
+#: describes it -- 5,500 is the TOP of the '502' code's ±10% band, the same
+#: lower-bound argument as the resistor's 231. Three terminals, wiper in the
+#: middle, which is Bourns' own pinout for the 3266W (OH-126).
+POT = {
+    "label": "5 kΩ trimmer", "terminals": ["lead A", "wiper", "lead B"],
+    "model": {"kind": "potentiometer", "ohms": 5500.0},
+}
+
 #: An Uno's power and digital pads, as `webui/api.py` sends them. **Three GND
 #: pads, because an Uno has three** — the pad map carries one on the digital
 #: header and two on the power header, and a circuit has to treat them as one
@@ -136,6 +145,7 @@ def run(tmp_path: pathlib.Path, body: str) -> dict:
         f"const UNO = {json.dumps(UNO)};\n"
         f"const LED = {json.dumps(LED)};\n"
         f"const RESISTOR = {json.dumps(RESISTOR)};\n"
+        f"const POT = {json.dumps(POT)};\n"
         f"const PADS = {json.dumps(PADS)};\n"
         + textwrap.dedent(body),
         encoding="utf-8")
@@ -1210,9 +1220,14 @@ def test_the_resistor_the_page_loads_carries_the_value_the_tests_use():
     part = next(p for p in PARTS if p.electrical is RESISTOR_ELECTRICAL)
     assert part.label == RESISTOR["label"]
     assert list(part.terminals) == RESISTOR["terminals"]
-    # The one part on the bench that shows nothing, and it names no lens.
+    # A part that shows nothing names no lens. It stopped being the ONLY
+    # lens-less part when OH-126 added the trimmer -- a display-less part is
+    # a class now, not a singleton -- so the set is pinned instead of the
+    # count.
     assert part.lens is None
-    assert [p.name for p in PARTS if p.lens is None] == [part.name]
+    assert {p.name for p in PARTS if p.lens is None} == {
+        part.name, "Potentiometer_Bourns_3266W_Vertical",
+    }
 
 def test_a_resistor_on_the_weakest_pin_is_still_well_clear_of_the_threshold(tmp_path):
     """**The paragraph over `LIT_AMPS`, as two numbers rather than a claim.**
@@ -1433,3 +1448,76 @@ def test_a_destroyed_parts_pin_is_still_named(tmp_path):
     assert got["note"]
     assert "Pin 13 carries at least 40 mA" in got["note"]
     assert "rates a pin for" in got["note"]
+
+
+# --- the first three-terminal part (OH-126) ----------------------------------
+
+
+def test_a_potentiometer_across_the_supply_conducts_through_both_halves(tmp_path):
+    """**The type could not say "wiper" before this** (OH-126). 5 V to lead
+    A and ground to lead B is the element end to end: 5 V across 5,500 Ω is
+    0.909 mA through both halves whatever the wiper does -- hand-worked,
+    5 / 5500, and the wiper is deliberately left in mid-air to prove two of
+    three wired legs already make a working circuit."""
+    got = run(tmp_path, bench("""[
+        {pad: "5V", part: 0, terminal: "lead A"},
+        {pad: "GND", part: 0, terminal: "lead B"},
+    ]""", parts="[POT]") + """
+        console.log(JSON.stringify({part: report.parts[0], note: report.note}));
+    """)
+    assert got["part"]["drive"] == "lit"
+    # rel 1e-6 and not the pure-resistor suites' 1e-9: the unwired wiper is
+    # a floating node the solver keeps invertible with GMIN, and that
+    # leakage lands in the tenth digit.
+    assert got["part"]["amps"] == pytest.approx(5 / 5500, rel=1e-6)
+    assert "at least 0.91 mA" in got["part"]["reason"]
+
+
+def test_a_driven_wiper_splits_between_the_two_halves(tmp_path):
+    """D13 into the wiper with both ends grounded is the halves in parallel
+    behind the pin's 40 Ω: 5 x 1375/1415 = 4.8587 V at the wiper, 1.767 mA
+    down each 2,750 Ω half -- hand-worked, and the part reports its BUSIEST
+    leg, which here is either. The pin carries the 3.53 mA sum, inside every
+    rating, so no warning rides the report."""
+    got = run(tmp_path, bench("""[
+        {pad: "13", part: 0, terminal: "wiper"},
+        {pad: "GND", part: 0, terminal: "lead A"},
+        {pad: "GND", part: 0, terminal: "lead B"},
+    ]""", parts="[POT]") + """
+        console.log(JSON.stringify({part: report.parts[0], note: report.note}));
+    """)
+    assert got["part"]["drive"] == "lit"
+    assert got["part"]["amps"] == pytest.approx((5 * 1375 / 1415) / 2750,
+                                                rel=1e-6)
+    assert "at least 1.8 mA" in got["part"]["reason"]
+    assert got["part"]["warning"] is None
+    assert got["note"] is None
+
+
+def test_a_pot_wired_to_the_wiper_and_one_end_uses_that_half_alone(tmp_path):
+    """5 V to lead A and ground to the WIPER is 2,750 Ω -- half the element
+    -- so 1.818 mA flows through the aw half while the wb half hangs in the
+    air carrying nothing. Hand-worked, 5 / 2750. This is the asymmetric
+    case that makes "the busiest leg" mean something: a report reading only
+    one fixed half would answer zero here or in its mirror."""
+    got = run(tmp_path, bench("""[
+        {pad: "5V", part: 0, terminal: "lead A"},
+        {pad: "GND", part: 0, terminal: "wiper"},
+    ]""", parts="[POT]") + """
+        console.log(JSON.stringify({part: report.parts[0]}));
+    """)
+    assert got["part"]["drive"] == "lit"
+    assert got["part"]["amps"] == pytest.approx(5 / 2750, rel=1e-6)
+    assert "at least 1.8 mA" in got["part"]["reason"]
+
+
+def test_a_potentiometer_with_one_leg_wired_names_the_two_in_mid_air(tmp_path):
+    """The mid-air sentence was already N-terminal-shaped -- it lists every
+    unwired name -- and this is the test that keeps it so."""
+    got = run(tmp_path, bench("""[
+        {pad: "13", part: 0, terminal: "lead A"},
+    ]""", parts="[POT]") + """
+        console.log(JSON.stringify({part: report.parts[0]}));
+    """)
+    assert got["part"]["drive"] == "off"
+    assert "wiper and lead B is in mid-air" in got["part"]["reason"]

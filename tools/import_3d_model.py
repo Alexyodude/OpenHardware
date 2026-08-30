@@ -1747,9 +1747,13 @@ class Part:
     #: two tips with and without) and `dressPart` already copes with a part
     #: that has none.
     lens: str | None
-    #: What the two leads are called, in the order this file's own geometry
-    #: puts them -- see `lead_tips`, which sorts them by x.
-    terminals: tuple[str, str]
+    #: What the leads are called, in the order this file's own geometry puts
+    #: them -- see `lead_tips`, which sorts tips by x. **A tuple of N, not a
+    #: pair** (OH-126): the hard 2-tuple was the single line that made a
+    #: potentiometer inexpressible, and every reader downstream -- the
+    #: extras, `dressPart`'s terminal loop, `circuit.terminalsOf` -- was
+    #: already generic.
+    terminals: tuple[str, ...]
     #: What it does in a circuit, or `None` for a part nobody has published one
     #: for. **`None` is a real answer and not a gap**: `circuit.js` treats such
     #: a part as a conductor of unknown value, which still needs a complete
@@ -1804,6 +1808,35 @@ KICAD_3D = "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/master"
 #: registers this repository has already written down as unmodelled. A switch
 #: on this bench would be a part that does nothing, which is worse than no
 #: switch at all.
+#: **The first three-terminal part, and why its one number is 5,500 and not
+#: 5,000.** Bourns' 3266 series sells the '502' code at 5 kOhm with a +/-10%
+#: element tolerance, and the TOP of that band computes the LEAST current --
+#: the 220 Ohm resistor's own 231 argument, kept so that every number this
+#: part contributes stays a lower bound. No rated or absolute current is
+#: cited, because the 3266's limit is a wattage (0.25 W at 70 C) and no 5 V
+#: bench can push a quarter watt through 5.5 kOhm; `destroys` therefore can
+#: never claim this part, which is the same honesty as the resistor's.
+#:
+#: **The wiper has no knob yet.** `circuit.js` stands the wiper at the middle
+#: of its travel and says so in its own constant -- turning it is page UI for
+#: a ticket of its own, and a stated constant beats an invented interaction.
+POT_ELECTRICAL = Electrical(
+    kind="potentiometer",
+    note=(
+        "class values for a 3266-series 5 kOhm trimmer; the wiper stands at "
+        "half its travel by circuit.js's POT_TRAVEL, a stated constant, "
+        "because this bench has no knob to turn yet"
+    ),
+    cited={
+        "ohms": (5500.0, (
+            "the top of a 5 kOhm +/-10% element -- the 3266 series' '502' "
+            "code -- because a smaller real resistance passes more current, "
+            "so the top of the band keeps every computed current a lower "
+            "bound, the 220 Ohm resistor's own argument"
+        )),
+    },
+)
+
 PARTS: tuple[Part, ...] = (
     #: All three carry the same electrical model, because all three are the
     #: same die behind a different lens: a 10 mm LED is a 5 mm LED you can see
@@ -1861,6 +1894,15 @@ PARTS: tuple[Part, ...] = (
          name="R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal",
          label="220 Ω resistor", lens=None, terminals=("lead A", "lead B"),
          electrical=RESISTOR_ELECTRICAL),
+    #: The 3266W measures 6.7 x 4.5 x 13.1 mm with its three pins in the
+    #: vendor's zig-zag -- x at -2.54, 0, +2.54, z alternating, measured off
+    #: the mesh -- and the wiper is the MIDDLE pin, which is Bourns' own
+    #: pinout for the W style. The first part on this bench with three
+    #: terminals, which is the whole reason it is here (OH-126).
+    Part("Potentiometer_THT", "Potentiometer_Bourns_3266W_Vertical",
+         label="5 kΩ trimmer", lens=None,
+         terminals=("lead A", "wiper", "lead B"),
+         electrical=POT_ELECTRICAL),
 )
 
 
@@ -1880,6 +1922,15 @@ PART_UP = 2
 #: and any small number does; 0.05 is the tessellation's own chord tolerance,
 #: which is the largest a vertex can be off by.
 LEAD_RING = 0.05
+
+#: How far above the lowest lead tip another lead's tip may sit and still be
+#: a lead. The five two-lead parts' legs are equal to the micron; 2 mm is
+#: slack for a moulding that is not.
+LEAD_SLACK_MM = 2.0
+
+#: One 0.1-inch pitch. Half of it separates lead clusters, because no two
+#: through-hole leads sit closer than a pitch.
+LEAD_APART_MM = 2.54
 
 
 def part_frame(shape) -> Frame:
@@ -1910,19 +1961,35 @@ def lead_tips(mesh: Mesh, lens: str) -> list[list[float]]:
     datasheet is a second source that can disagree with the mesh, and it would
     disagree silently: a wire would meet nothing, an inch from the leg.
     """
+    # **Clustered on (x, z), not split on the sign of x** (OH-126). Two-lead
+    # parts straddle the origin, but the 3266W trimmer's three pins zig-zag
+    # -- x at -2.54, 0, +2.54 with z alternating -1.27, +1.27, -1.27,
+    # measured off the vendor's own mesh -- and its middle pin has no side.
+    # Metal points within LEAD_SLACK_MM of the lowest vertex are grouped by
+    # xz proximity at half a 0.1-inch pitch; each cluster keeps its own
+    # floor ring, which is the same ring the per-side version took, so the
+    # five two-lead parts' tips do not move (verified by regenerating them).
+    metal = [(positions[at], positions[at + 1], positions[at + 2])
+             for colour, (positions, _normals, _indices) in mesh.groups.items()
+             if colour != lens
+             for at in range(0, len(positions), 3)]
+    if not metal:
+        return []
+    floor = min(point[1] for point in metal)
+    low = [point for point in metal if point[1] <= floor + LEAD_SLACK_MM]
+    clusters: list[list[tuple[float, float, float]]] = []
+    for point in low:
+        for cluster in clusters:
+            middle_x = sum(q[0] for q in cluster) / len(cluster)
+            middle_z = sum(q[2] for q in cluster) / len(cluster)
+            if math.hypot(point[0] - middle_x,
+                          point[2] - middle_z) < LEAD_APART_MM / 2:
+                cluster.append(point)
+                break
+        else:
+            clusters.append([point])
     tips: list[list[float]] = []
-    for side in (-1, 1):
-        here: list[tuple[float, float, float]] = []
-        for colour, (positions, _normals, _indices) in mesh.groups.items():
-            if colour == lens:
-                continue
-            for at in range(0, len(positions), 3):
-                x = positions[at]
-                if (x < 0) != (side < 0):
-                    continue
-                here.append((x, positions[at + 1], positions[at + 2]))
-        if not here:
-            continue
+    for cluster in clusters:
         # **The whole ring at the tip, averaged, and not the single lowest
         # vertex.** A lead is a cylinder, so its lowest vertices are a circle
         # of them and which one comes first is an artefact of the
@@ -1930,10 +1997,11 @@ def lead_tips(mesh: Mesh, lens: str) -> list[list[float]]:
         # -1.270 and +0.870 for a part whose leads are 2.54 mm apart -- one
         # answer on the lead's axis and one on its rim, and no way to tell
         # which from the number alone.
-        floor = min(point[1] for point in here)
-        ring = [point for point in here if point[1] <= floor + LEAD_RING]
+        here = min(point[1] for point in cluster)
+        ring = [point for point in cluster if point[1] <= here + LEAD_RING]
         tips.append([sum(point[axis] for point in ring) / len(ring)
                      for axis in range(3)])
+    tips.sort(key=lambda tip: tip[0])
     return tips
 
 
@@ -1966,16 +2034,17 @@ def convert_part(part: Part, deflection: float, check: bool) -> int:
             f"trusting a part that cannot light up."
         )
     tips = lead_tips(mesh, part.lens)
-    if len(tips) != 2:
+    if len(tips) != len(part.terminals):
         raise SystemExit(
-            f"{part.name} has {len(tips)} lead tips and a wire needs two. "
-            f"Either the model is not a two-lead part or its leads do not "
-            f"straddle the origin."
+            f"{part.name} has {len(tips)} lead tips and its terminals name "
+            f"{len(part.terminals)}. Either the model is a different part or "
+            f"the lead clustering mis-grouped; re-measure before trusting a "
+            f"wire to land."
         )
-    print(f"  leads  {part.terminals[0]} at "
-          f"({tips[0][0]:.3f}, {tips[0][1]:.3f}, {tips[0][2]:.3f}), "
-          f"{part.terminals[1]} at "
-          f"({tips[1][0]:.3f}, {tips[1][1]:.3f}, {tips[1][2]:.3f})")
+    print("  leads  " + ", ".join(
+        f"{part.terminals[i]} at "
+        f"({tips[i][0]:.3f}, {tips[i][1]:.3f}, {tips[i][2]:.3f})"
+        for i in range(len(part.terminals))))
     if part.electrical is None:
         print("  circuit  none published -- a conductor of unknown value")
     else:
@@ -1993,7 +2062,7 @@ def convert_part(part: Part, deflection: float, check: bool) -> int:
         "label": part.label, "lens": part.lens, "library": part.library,
         "terminals": [{"name": part.terminals[i],
                        "at": [round(v, 4) for v in tips[i]]}
-                      for i in range(2)],
+                      for i in range(len(part.terminals))],
         "licence": "CC-BY-SA-4.0 with the KiCad library exception; fetched, "
                    "not vendored",
     }
