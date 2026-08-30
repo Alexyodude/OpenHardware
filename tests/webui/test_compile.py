@@ -418,3 +418,152 @@ def test_a_failed_build_leaves_nothing_behind():
     leaked = [p for p in pathlib.Path(compiler.tempfile.gettempdir()).glob(
         "openhardware-build-*")]
     assert not leaked, f"left behind: {leaked}"
+
+
+# --- the rest of the core and the libraries, which is OH-135 ----------------
+
+#: Every idiom the 2026-08-30 survey probed, in one sketch. Before OH-135 the
+#: Uno recipe carried 11 core sources and 8 of 13 idioms were "undefined
+#: reference" -- map and random live in WMath, analogWrite/analogRead in
+#: wiring_analog, attachInterrupt in WInterrupts, tone in Tone, shiftOut in
+#: wiring_shift, pulseIn across wiring_pulse.c/.S -- and the library headers
+#: were "No such file or directory". One build proves the lot.
+IDIOMS = """
+#include <Wire.h>
+#include <SPI.h>
+#include <EEPROM.h>
+void bump() {}
+void setup() {
+  Wire.begin();
+  SPI.begin();
+  EEPROM.read(0);
+  long scaled = map(analogRead(A0), 0, 1023, 0, 255);
+  randomSeed(scaled);
+  analogWrite(3, random(256));
+  tone(8, 440, 100);
+  attachInterrupt(digitalPinToInterrupt(2), bump, RISING);
+  shiftOut(11, 13, MSBFIRST, 0x55);
+  pulseIn(7, HIGH, 1000);
+}
+void loop() {}
+"""
+
+#: The same idioms on pins a XIAO actually has (0-10), and no `EEPROM.h`: a
+#: SAMD21 has no EEPROM and its core ships no such library, so the include
+#: stays out rather than pretending. Its refusal is asserted separately.
+SAMD_IDIOMS = """
+#include <Wire.h>
+#include <SPI.h>
+void bump() {}
+void setup() {
+  Wire.begin();
+  SPI.begin();
+  long scaled = map(analogRead(A0), 0, 1023, 0, 255);
+  randomSeed(scaled);
+  analogWrite(4, random(256));
+  tone(3, 440, 100);
+  attachInterrupt(digitalPinToInterrupt(2), bump, RISING);
+  shiftOut(1, 2, MSBFIRST, 0x55);
+  pulseIn(5, HIGH, 1000);
+}
+void loop() {}
+"""
+
+
+def test_the_beginner_idioms_all_build():
+    """**OH-135's headline.** Eight of these were "undefined reference" and
+    three of the includes "No such file" while the page said "Type an Arduino
+    sketch and build it here". Now the whole set links in one image."""
+    needs_toolchain()
+    built = compiler.build(BOARD, IDIOMS)
+    assert built.ok, built.diagnostics
+
+
+def test_the_beginner_idioms_build_for_the_second_board_too():
+    """The SAMD21 row was missing its own four -- `Tone.cpp`,
+    `wiring_shift.c`, and pulse's pair, which this core spells
+    `pulse.c`/`pulse_asm.S` where AVR says `wiring_pulse.c`/`.S`."""
+    needs_toolchain(SAMD_BOARD)
+    built = compiler.build(SAMD_BOARD, SAMD_IDIOMS)
+    assert built.ok, built.diagnostics
+
+
+def test_a_library_is_compiled_only_for_a_sketch_that_names_it():
+    """**The opt-in, read out of the vector table.**
+
+    An AVR interrupt handler is pulled into the image by the vector table
+    whether or not anything calls it, which is exactly why `Library` compiles
+    nothing for a sketch that never names the header. The observable is
+    precise: `iom328p.h` places TWI_vect at vector 24 and SPM_READY at 25 --
+    4-byte `jmp` slots at 0x60 and 0x64 -- and a slot with no handler jumps
+    to `__bad_interrupt`, the same place every other unused slot jumps.
+
+    So blink's TWI slot equals its SPM slot byte for byte, and the Wire
+    build's does not. If the libraries ever became unconditional, the first
+    assertion is the one that fails.
+    """
+    needs_toolchain()
+    blink = compiler.build(BOARD, BLINK)
+    wire = compiler.build(
+        BOARD,
+        "#include <Wire.h>\nvoid setup(){ Wire.begin(); } void loop(){}",
+    )
+    assert blink.ok, blink.diagnostics
+    assert wire.ok, wire.diagnostics
+    assert blink.image[0x60:0x64] == blink.image[0x64:0x68], (
+        "blink grew a TWI handler; a library was compiled without being asked"
+    )
+    assert wire.image[0x60:0x64] != wire.image[0x64:0x68], (
+        "the Wire build has no TWI handler; the library its sketch names was "
+        "not compiled in"
+    )
+
+
+def test_a_library_neither_framework_ships_is_refused_in_the_compilers_words():
+    """`Servo.h` lives in a separate arduino-libraries repository and neither
+    framework bundles it, so neither recipe has a row -- and the refusal is
+    the compiler's own "No such file", a result rather than an exception.
+    The same asymmetry holds for `EEPROM.h` on the SAMD21: no EEPROM on the
+    silicon, no such library in its core."""
+    needs_toolchain()
+    servo = compiler.build(
+        BOARD, "#include <Servo.h>\nvoid setup(){} void loop(){}"
+    )
+    assert not servo.ok
+    assert "Servo.h" in servo.diagnostics, servo.diagnostics
+    needs_toolchain(SAMD_BOARD)
+    eeprom = compiler.build(
+        SAMD_BOARD, "#include <EEPROM.h>\nvoid setup(){} void loop(){}"
+    )
+    assert not eeprom.ok
+    assert "EEPROM.h" in eeprom.diagnostics, eeprom.diagnostics
+
+
+def test_an_analogwrite_sketch_built_at_the_front_door_reports_unknown():
+    """**OH-71's answer, reachable from the IDE at last.**
+
+    `tests/avr/test_arduino_sketch.py` proved the honest answer with an image
+    it assembled by hand, because until OH-135 this service could not link
+    `analogWrite` at all -- and OH-71's close note predicted this test by
+    name. Source in at the same door the browser uses; the pad the timer took
+    answers `unknown` while its neighbour on the same port still answers.
+    """
+    needs_toolchain()
+    built = compiler.build(BOARD, """
+void setup() {
+  pinMode(7, OUTPUT);
+  digitalWrite(7, HIGH);
+  analogWrite(3, 128);
+}
+void loop() {}
+""")
+    assert built.ok, built.diagnostics
+    with api.load_firmware(BOARD, built.image, base=0) as session:
+        for _ in range(50_000):
+            session.step()
+        state = api.pin_levels(session.runtime, session.cpu)
+    assert state["7"] == "high", "PD7 is driven by PORTD and answers"
+    assert state["3"] == "unknown", (
+        "PD3 is timer 2's compare output; the level PORTD holds is not what "
+        "the pin is doing"
+    )

@@ -111,6 +111,31 @@ class ToolchainMissing(CompileError):
 
 
 @dataclasses.dataclass(frozen=True)
+class Library:
+    """One framework library a sketch may `#include`, and what including costs.
+
+    **A library is compiled only for a sketch that names its header** -- the
+    Arduino IDE's own rule, kept for the reason the IDE keeps it: `Wire`
+    carries the TWI interrupt handler, and an interrupt handler is pulled into
+    the image by the vector table whether or not anything calls it, so
+    compiling every library into every build would put the TWI handler in
+    blink.
+
+    The lookup is the same test `preamble` applies to `Arduino.h`: the
+    header's name between angle brackets or quotes, anywhere in the source. A
+    mention in a comment therefore compiles the library too -- a false
+    positive that costs build time and image bytes, never a wrong refusal.
+
+    Selection chooses among rows written HERE; nothing from the request names
+    a path, which keeps the boundary the module docstring argues for.
+    """
+
+    header: str                #: what the sketch writes: "Wire.h"
+    include: str               #: include root, relative to the framework root
+    sources: tuple[str, ...]   #: compiled alongside the sketch, same root
+
+
+@dataclasses.dataclass(frozen=True)
 class Recipe:
     """Everything needed to build for one chip, and none of it from a request.
 
@@ -180,6 +205,13 @@ class Recipe:
     #: refuse a build.
     extra_includes: tuple[str, ...]
 
+    #: The framework's own bundled libraries, each an opt-in of `Library`'s
+    #: kind. What is NOT here is a statement too: neither framework ships
+    #: `Servo.h` -- it lives in a separate arduino-libraries repository -- so
+    #: a sketch including it is refused with the compiler's own "No such
+    #: file", which is the honest answer until somebody decides to fetch it.
+    libraries: tuple[Library, ...]
+
 
 #: One recipe per chip, keyed as `webui/boards/catalogue.py` spells the chip.
 #:
@@ -221,6 +253,15 @@ RECIPES: dict[str, Recipe] = {
             "main.cpp", "hooks.c", "wiring.c", "wiring_digital.c",
             "HardwareSerial.cpp", "HardwareSerial0.cpp", "Print.cpp",
             "Stream.cpp", "WString.cpp", "abi.cpp", "new.cpp",
+            # The second half is OH-135: with only the eleven above, 8 of 13
+            # beginner idioms were "undefined reference" -- map() and
+            # random() live in WMath, analogWrite/analogRead in
+            # wiring_analog, attachInterrupt in WInterrupts, tone in Tone,
+            # shiftOut in wiring_shift, and pulseIn spans wiring_pulse.c AND
+            # the cycle-counted loop in wiring_pulse.S. Measured by building
+            # each idiom, before and after.
+            "wiring_analog.c", "WMath.cpp", "WInterrupts.c", "Tone.cpp",
+            "wiring_shift.c", "wiring_pulse.c", "wiring_pulse.S",
         ),
         # Zero, and the one row where this is a literal: a Harvard part's
         # program space starts there and no board module has a constant to
@@ -232,6 +273,18 @@ RECIPES: dict[str, Recipe] = {
         variant_package="",
         linker_script="",
         extra_includes=(),
+        libraries=(
+            # AVR keeps library sources under `src/`, and `Wire` is two
+            # files: `Wire.cpp` is the API and `utility/twi.c` is the bus
+            # state machine its interrupt handler runs. `EEPROM.h` is
+            # header-only.
+            Library("EEPROM.h", "libraries/EEPROM/src", ()),
+            Library("SPI.h", "libraries/SPI/src",
+                    ("libraries/SPI/src/SPI.cpp",)),
+            Library("Wire.h", "libraries/Wire/src",
+                    ("libraries/Wire/src/Wire.cpp",
+                     "libraries/Wire/src/utility/twi.c")),
+        ),
     ),
     "SAMD21": Recipe(
         toolchain="toolchain-gccarmnoneeabi",
@@ -279,6 +332,11 @@ RECIPES: dict[str, Recipe] = {
             "Reset.cpp", "WInterrupts.c", "Uart.cpp", "SERCOM.cpp",
             "api/Common.cpp", "api/Print.cpp", "api/Stream.cpp",
             "api/String.cpp", "api/IPAddress.cpp",
+            # OH-135's four: tone, shiftOut and pulseIn were "undefined
+            # reference" here exactly as on the Uno, and this core spells
+            # pulse's pair `pulse.c`/`pulse_asm.S` where AVR says
+            # `wiring_pulse.c`/`.S`.
+            "Tone.cpp", "wiring_shift.c", "pulse.c", "pulse_asm.S",
         ),
         base=samd21.FLASH,
         variant_package="seeed-samd",
@@ -289,6 +347,15 @@ RECIPES: dict[str, Recipe] = {
         extra_includes=(
             "framework-cmsis/CMSIS/Core/Include",
             "framework-cmsis-atmel/CMSIS/Device/ATMEL",
+        ),
+        libraries=(
+            # This core keeps each library at its own root -- no `src/` --
+            # and its `Wire.cpp` is single-file: the bus state machine the
+            # AVR keeps in `utility/twi.c` lives in this core's own
+            # `SERCOM.cpp`, which `core_sources` already compiles.
+            Library("SPI.h", "libraries/SPI", ("libraries/SPI/SPI.cpp",)),
+            Library("Wire.h", "libraries/Wire",
+                    ("libraries/Wire/Wire.cpp",)),
         ),
     ),
 }
@@ -462,7 +529,15 @@ def build(board: str, source: str) -> Build:
     gxx = _tool(tools, recipe, "g++")
     objcopy = _tool(tools, recipe, "objcopy")
 
+    # Which of the recipe's libraries this sketch names. Scanned on the raw
+    # source rather than the preamble's output -- the preamble adds only
+    # `Arduino.h`, which is not a row.
+    wanted = tuple(
+        lib for lib in recipe.libraries
+        if f"<{lib.header}>" in source or f'"{lib.header}"' in source
+    )
     includes = (f"-I{core}", f"-I{variant}",
+                *(f"-I{framework / lib.include}" for lib in wanted),
                 *(f"-I{root}" for root in include_roots(recipe)))
     # **A variant outside the framework is a source file as well as a header
     # directory.** Arduino's own variants are compiled from the framework by
@@ -479,7 +554,9 @@ def build(board: str, source: str) -> Build:
         sketch.write_text(preamble(source), encoding="utf-8")
 
         objects: list[str] = []
-        sources = [sketch, *(core / n for n in recipe.core_sources), *extra_sources]
+        sources = [sketch, *(core / n for n in recipe.core_sources),
+                   *(framework / s for lib in wanted for s in lib.sources),
+                   *extra_sources]
         for index, path in enumerate(sources):
             cxx = path.suffix == ".cpp"
             # Numbered rather than named after the source: two framework files

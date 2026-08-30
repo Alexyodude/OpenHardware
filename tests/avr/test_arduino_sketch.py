@@ -238,14 +238,17 @@ def pins_sketch() -> tuple[bytes, dict[str, int]]:
 
 @pytest.fixture(scope="module")
 def pwm_sketch() -> tuple[bytes, dict[str, int]]:
-    """`analogWrite`, which needs a core file the IDE's recipe does not carry.
+    """`analogWrite`, compiled by hand even though the service now links it.
 
-    **`webui/compile.py`'s Uno row does not compile `wiring_analog.c`**, so a
-    sketch calling `analogWrite` fails to link through the browser -- measured
-    2026-08-26, `undefined reference to analogWrite`. It is asked for by hand
-    here because the limitation it demonstrates is real whatever links it, and
-    a test that could not build its own counter-example would leave OH-71
-    resting on an argument rather than on a run.
+    **`webui/compile.py`'s Uno row did not compile `wiring_analog.c`** when
+    OH-71 landed -- measured 2026-08-26, `undefined reference to analogWrite`
+    -- and OH-135 closed that on 2026-08-30. The fixture still asks for the
+    file by hand for the same reason the recipe is a second copy of what this
+    file builds with: a board test proves the board, and coupling it to the
+    compile service would make a recipe bug fail a board test. The front-door
+    twin OH-135 promised is
+    `test_an_analogwrite_sketch_built_at_the_front_door_reports_unknown` in
+    `tests/webui/test_compile.py`.
     """
     return compile_sketch(PINS_PWM, ("wiring_analog.c",))
 
