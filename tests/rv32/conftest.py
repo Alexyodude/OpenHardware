@@ -93,7 +93,7 @@ TARGETS = {
 #: and the honest response is to say which cases that affects rather than to
 #: shrink the target and assert that an RP2350 refuses `clz`. It does not; this
 #: core simply cannot be told that it has Zbb yet.
-MODELLED = frozenset({"M", "A", "C", "Zba", "Zbs"})
+MODELLED = frozenset({"M", "A", "C", "Zba", "Zbs", "Zcb", "Zcmp", "Zcmt"})
 
 
 def faithfully_configurable(case: dict, target: str) -> bool:

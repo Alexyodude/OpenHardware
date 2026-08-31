@@ -55,6 +55,9 @@ EXT_A = 2
 EXT_C = 4
 EXT_ZBA = 8
 EXT_ZBS = 16
+EXT_ZCB = 32
+EXT_ZCMP = 64
+EXT_ZCMT = 128
 
 #: The ISA of the parts this core is for, spelled once. `docs/
 #: architectures.md` 4.2 is the citation, and the C3 row is the one that
@@ -62,12 +65,20 @@ EXT_ZBS = 16
 ESP32_C3 = EXT_M | EXT_C
 ESP32_C6 = EXT_M | EXT_A | EXT_C
 
+#: The ESP32-C5, whole (OH-146): the datasheet spells it
+#: `RV32IMAC + Zcb/Zcmp/Zcmt` and every group now has a bit and an
+#: implementation, so unlike the RP2350 constant below this one describes
+#: the part rather than a modelled subset of it.
+ESP32_C5 = EXT_M | EXT_A | EXT_C | EXT_ZCB | EXT_ZCMP | EXT_ZCMT
+
 #: The RP2350's Hazard3, **as far as this core models it, which is not all of
 #: it.** The datasheet's own string is
 #:
 #:     rv32ima_zicsr_zifencei_zba_zbb_zbs_zbkb_zca_zcb_zcmp
 #:
-#: so Zbb, Zbkb, Zcb and Zcmp are missing here, and `kExtC` is standing in
+#: so Zbb and Zbkb are missing here -- Zcb and Zcmp arrived at OH-146, with
+#: the rv32 corpus asserting Zcb against rvcpp, Hazard3's own simulator --
+#: and `kExtC` is standing in
 #: for Zca -- see the note on `Extension` in cpu.h for why that is sound for a
 #: part with no FPU and would stop being sound for one with an FPU.
 #:
@@ -78,7 +89,8 @@ ESP32_C6 = EXT_M | EXT_A | EXT_C
 #: so an unmodelled extension shows up as a gap rather than as the silicon
 #: lacking it. Adding Zbb here without adding it there is the mistake this
 #: paragraph exists to prevent.
-RP2350_MODELLED = EXT_M | EXT_A | EXT_C | EXT_ZBA | EXT_ZBS
+RP2350_MODELLED = (EXT_M | EXT_A | EXT_C | EXT_ZBA | EXT_ZBS
+                   | EXT_ZCB | EXT_ZCMP)
 
 #: Must match `riscv32::StepResult` and abi.h's documented return values.
 OK = 0
@@ -293,6 +305,10 @@ class Cpu:
         A part described as RV32IMAC on a core that silently ignored the `A`
         would execute atomics an ESP32-C3 must trap, and would do it quietly --
         which is the one distinction this whole core is shaped around.
+
+        Underscore groups spell the named extensions, the way real ISA
+        strings do: `RV32IMAC_ZCB_ZCMP_ZCMT` is the ESP32-C5 (OH-146). An
+        unknown group name raises exactly as an unknown letter does.
         """
         text = letters.upper()
         if not text.startswith("RV32"):
@@ -300,7 +316,8 @@ class Cpu:
                 f"{letters!r} is not an RV32 ISA string; expected something "
                 f"like 'RV32IMC'"
             )
-        rest = text[len("RV32"):]
+        groups = text[len("RV32"):].split("_")
+        rest = groups[0]
         if not rest.startswith("I"):
             raise AbiError(
                 f"{letters!r} does not name the I base, which this core "
@@ -308,6 +325,7 @@ class Cpu:
             )
 
         known = {"M": EXT_M, "A": EXT_A, "C": EXT_C}
+        named = {"ZCB": EXT_ZCB, "ZCMP": EXT_ZCMP, "ZCMT": EXT_ZCMT}
         mask = 0
         for letter in rest[1:]:
             if letter not in known:
@@ -318,6 +336,16 @@ class Cpu:
                     f"look like one it is not."
                 )
             mask |= known[letter]
+        for group in groups[1:]:
+            if group not in named:
+                raise AbiError(
+                    f"{letters!r} names extension group {group!r}, which "
+                    f"this core cannot represent. Known: "
+                    f"{', '.join(sorted(named))}. An extension dropped "
+                    f"rather than refused would make a part look like one "
+                    f"it is not."
+                )
+            mask |= named[group]
         self.set_extensions(mask)
 
     def set_extensions(self, mask: int) -> None:

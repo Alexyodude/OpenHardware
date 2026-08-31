@@ -64,6 +64,9 @@ def extension_mask(abi, names) -> int:
         "A": abi.EXT_A,
         "C": abi.EXT_C,
         "Zba": abi.EXT_ZBA,
+        "Zcb": abi.EXT_ZCB,
+        "Zcmp": abi.EXT_ZCMP,
+        "Zcmt": abi.EXT_ZCMT,
         "Zbs": abi.EXT_ZBS,
     }
     assert set(bits) == set(MODELLED), (
@@ -350,18 +353,19 @@ def test_the_extension_letters_match_the_abi_bitmasks(abi):
     assert abi.EXT_A & abi.ESP32_C6 != 0, "an ESP32-C6 is RV32IMAC: atomics"
 
     # The ESP32-C5, which has a board description and three extension groups
-    # this core has no bit for. Its mask is a C6's, and saying so here is what
-    # keeps `webui/boards/esp32c5.py`'s `EXECUTES` honest: that file configures
-    # the core as RV32IMAC and states in `ABSENT` what it left out, and this is
-    # where the two spellings are checked to be the same subtraction.
-    assert extension_mask(abi, TARGETS["ESP32-C5"]) == abi.ESP32_C6, (
-        "configured as far as this core can go, a C5 is a C6"
+    # A C5 stopped being "a C6 as far as this core can go" at OH-146: all
+    # three Zc groups have bits and implementations now, so the full TARGETS
+    # row must equal the abi's own ESP32_C5 constant -- the mask
+    # `webui/boards/esp32c5.py` hands over once its EXECUTES grows the
+    # groups.
+    assert extension_mask(abi, TARGETS["ESP32-C5"]) == abi.ESP32_C5, (
+        "the C5's own mask covers every group the part has"
     )
-    assert TARGETS["ESP32-C5"] - MODELLED == {"Zcb", "Zcmp", "Zcmt"}, (
+    assert TARGETS["ESP32-C5"] - MODELLED == set(), (
         f"the C5's unmodelled groups are "
-        f"{sorted(TARGETS['ESP32-C5'] - MODELLED)}; webui/boards/esp32c5.py's "
-        f"ABSENT names the same three, and a fourth here with no entry there "
-        f"would be a board configuring a part it does not describe"
+        f"{sorted(TARGETS['ESP32-C5'] - MODELLED)}: OH-146 modelled all "
+        f"three Zc groups, so a nonempty set here is a regression -- or a "
+        f"new datasheet row nobody implemented"
     )
     # Imported here rather than at module scope: this is the only test in the
     # file that reaches out of `core/riscv32` into a board description, and a

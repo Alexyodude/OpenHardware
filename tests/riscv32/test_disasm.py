@@ -77,6 +77,17 @@ ACCOUNTED_THEIRS = {
 #: "shift by zero" and that is what is printed.
 HINT_SPELLINGS = {"c.slli64": "c.slli", "c.srli64": "c.srli", "c.srai64": "c.srai"}
 
+#: One slot, two extensions: quadrant 2's funct3=101 is Zcd's c.fsdsp on a
+#: part with D, and Zcmp/Zcmt's cm.* on a part with neither -- the spec's own
+#: acknowledged overlap, and a part cannot have both readings at once. objdump
+#: 8.4 knows only the D reading; this module renders the Zc reading because
+#: that is what `core/riscv32/exec.cc` executes (OH-146). Checked as a pair,
+#: like HINT_SPELLINGS, so a divergence that is not this overlay still trips.
+OVERLAY_SPELLINGS = {
+    "c.fsdsp": {"cm.push", "cm.pop", "cm.popret", "cm.popretz",
+                "cm.mvsa01", "cm.mva01s", "cm.jt", "cm.jalt"},
+}
+
 #: Whole 32-bit opcodes this core does not implement, and what each is.
 #:
 #: **Keyed by opcode rather than by mnemonic, and that is the point.** The
@@ -114,6 +125,14 @@ ACCOUNTED_MINE = {
     "bseti": "Zbs", "bclri": "Zbs", "binvi": "Zbs", "bexti": "Zbs",
     "sh1add": "Zba, absent from objdump's default rv32",
     "sh2add": "Zba", "sh3add": "Zba",
+    "c.lbu": "Zcb, ratified 2023; this binutils predates it",
+    "c.lhu": "Zcb", "c.lh": "Zcb", "c.sb": "Zcb", "c.sh": "Zcb",
+    "c.zext.b": "Zcb", "c.sext.b": "Zcb", "c.zext.h": "Zcb",
+    "c.sext.h": "Zcb", "c.not": "Zcb", "c.mul": "Zcb",
+    "cm.push": "Zcmp", "cm.pop": "Zcmp",
+    "cm.popret": "Zcmp", "cm.popretz": "Zcmp",
+    "cm.mvsa01": "Zcmp", "cm.mva01s": "Zcmp",
+    "cm.jt": "Zcmt", "cm.jalt": "Zcmt",
     "fence": "reserved rd/rs1 fields, which the ISA says to ignore",
     "fence.i": "same, for Zifencei",
 }
@@ -211,6 +230,8 @@ def excused(encoding: int, width: int, theirs: str, mine: str) -> bool:
     # entirely is still reported.
     if theirs_head in HINT_SPELLINGS:
         return mine_head == HINT_SPELLINGS[theirs_head]
+    if theirs_head in OVERLAY_SPELLINGS:
+        return mine_head in OVERLAY_SPELLINGS[theirs_head]
     return False
 
 
@@ -252,7 +273,11 @@ def test_every_compressed_encoding_renders_the_way_objdump_does(tmp_path):
     candidates = [c for c in range(1 << 16) if (c & 3) != 3]
     agreed, unexplained = compare(tmp_path, candidates, 2)
     assert unexplained == [], unexplained[:10]
-    assert agreed > 32_000, f"only {agreed} agreed; the sweep is not running"
+    # 31k, down from 32k at OH-146: the Zc renderings moved the whole
+    # quadrant-2 funct3=101 slot and quadrant 0's 100 slot out of the
+    # both-refused bucket -- objdump 8.4 predates Zc -- into accounted
+    # divergences. The floor only exists to prove the sweep ran.
+    assert agreed > 31_000, f"only {agreed} agreed; the sweep is not running"
 
 
 def test_every_opcode_and_function_field_renders_the_way_objdump_does(tmp_path):

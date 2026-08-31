@@ -7,17 +7,18 @@
 #
 # `tests/riscv32/test_esp32c6_board.py` is named by `FIRMWARE_VERIFIED` and
 # earns it: it loads a compiled image and watches a pin. **This one is not
-# named there and must not be.** An ESP32-C5 is `RV32IMAC + Zcb/Zcmp/Zcmt` and
-# `core/riscv32` implements none of the three Zc groups, so no image compiled
-# for this part with its own extensions on has been watched, and describing the
-# board does not change that.
+# named there and must not be** -- still, after OH-146. The core now
+# implements the C5's three Zc groups and `install` configures the part
+# whole, but executing hand-placed encodings is not a compiled image being
+# watched, and the chip stays out of that table until one is.
 #
-# What it does assert is the pair of facts that make describing it *safe*:
+# What it asserts is the pair of facts that make describing it honest:
 #
-#   1. the board configures the core as the subset it can represent, and says
-#      in `EXECUTES` that this is a subset rather than the part
-#   2. every encoding in the three absent groups' space is **refused** rather
-#      than decoded as something else
+#   1. the board hands the core the part's WHOLE ISA -- `EXECUTES` is the
+#      same set as the datasheet's string, in `set_isa`'s grammar
+#   2. every encoding in the three groups' space is classified: executed or
+#      architecturally refused on this part, refused whole on a C6, and
+#      never answered `Unimplemented` on either
 #
 # The second is the one that matters. A gap that stops and names an address is
 # a gap a reader can act on; a gap that decodes to a plausible other
@@ -84,7 +85,7 @@ def defines(header: pathlib.Path) -> dict[str, str]:
 def zc_encodings(group: str):
     """Every 16-bit encoding in the compressed space `group` occupies.
 
-    All three absent groups live in compressed slots base RVC leaves reserved,
+    All three groups live in compressed slots base RVC leaves reserved,
     which is what lets a whole space be swept rather than a list of mnemonics
     transcribed:
 
@@ -94,9 +95,9 @@ def zc_encodings(group: str):
         Zcmp/Zcmt  quadrant 2, funct3=101  -- 2048 encodings, the c.fsdsp slot,
                    illegal on any RV32 part without D and so on every ESP32
 
-    Both groups' verdict is the same either way -- reserved and RV64-only are
-    both refused on this part -- so the sweep asserts a single thing: **nothing
-    in here executes.**
+    Since OH-146 the sweep's question is per-part: on a C6 nothing in here
+    may execute, and on a C5 nothing in here may answer `Unimplemented` --
+    the space is fully classified, executed or refused.
     """
     if group == "Zcb":
         for low in range(1 << 11):
@@ -140,30 +141,30 @@ def test_the_datasheet_isa_cannot_be_handed_to_the_core_and_that_is_correct():
     assert "cannot represent" in str(caught.value)
 
 
-def test_installing_configures_the_subset_and_names_it_separately():
-    """What the board does about the raise above: it hands over `EXECUTES`,
-    which is a smaller and true thing, and keeps `ISA` as the part's own claim.
+def test_installing_configures_the_part_whole():
+    """What the board does since OH-146: it hands over `EXECUTES`, which is
+    the datasheet's whole set in `set_isa`'s grammar, and the mask that
+    comes back is the C5's own -- not a C6's, which is what this test
+    asserted for as long as the Zc groups had no bits.
 
-    The resulting mask is a C6's, and **that is the fact worth pinning** rather
-    than hiding: configured this way a C5 and a C6 are the same machine here,
-    and the only thing that distinguishes them is that this file says so and
-    `FIRMWARE_VERIFIED` does not name this chip.
+    The two strings stay two because they are two SPELLINGS: `ISA` is what
+    the datasheet prints and prose cannot be parsed; `EXECUTES` is the same
+    set the way the core is told it.
     """
     needs_core()
     from core.riscv32 import abi
 
-    assert esp32c5.EXECUTES == "RV32IMAC"
-    assert esp32c5.EXECUTES != esp32c5.ISA, "a subset, not the part"
-    assert esp32c5.ABSENT == ("Zcb", "Zcmp", "Zcmt")
-    for group in esp32c5.ABSENT:
-        assert group not in esp32c5.EXECUTES
+    assert esp32c5.EXECUTES == "RV32IMAC_ZCB_ZCMP_ZCMT"
+    assert esp32c5.EXECUTES != esp32c5.ISA, "two spellings, one set"
+    assert esp32c5.ABSENT == (), "nothing withheld since OH-146"
 
     with abi.Cpu() as cpu:
         esp32c5.install(cpu)
-        assert cpu.extensions() == abi.ESP32_C6, (
-            "told RV32IMAC, this core is configured exactly as a C6 -- which "
-            "is why the difference has to be written down somewhere a reader "
-            "will look"
+        assert cpu.extensions() == abi.ESP32_C5, (
+            "the C5's own mask, every group the part has"
+        )
+        assert cpu.extensions() != abi.ESP32_C6, (
+            "a C5 stopped being a C6 with three extensions filed off"
         )
 
 
@@ -188,14 +189,18 @@ def test_the_chip_is_described_and_claims_no_firmware():
 # --- the property that makes describing it safe ------------------------------
 
 
-def test_every_encoding_in_the_absent_groups_is_refused_rather_than_decoded():
-    """The load-bearing test in this file.
+def test_every_zc_encoding_is_classified_here_and_refused_whole_on_a_c6():
+    """The load-bearing test in this file, flipped by OH-146.
 
-    All 4,224 encodings the three Zc groups occupy are stepped on a core
-    configured as this board configures it, and **none may execute**. A single
-    one that did would mean this core decodes a C5 instruction as some other
-    instruction, which is the silent-wrong-answer class rather than a missing
-    feature.
+    All 4,224 encodings the three Zc groups occupy are stepped twice. On a
+    core configured as THIS board configures it, none may answer
+    `Unimplemented`: every one is either executed or architecturally
+    refused, because a part that has the groups has an answer for their
+    whole space. On a core configured as a C6 -- `webui/boards/esp32c6.py`
+    installing the same `core.riscv32` -- none may execute and none may
+    fault: the refusal must land before any memory is touched, so the only
+    answer is `Illegal`. A single misfiled encoding on either side is the
+    silent-wrong-answer class rather than a missing feature.
 
     Asserted positively over the whole space rather than by excusing the
     mnemonics, because an accounting entry that excuses a mnemonic excuses its
@@ -203,8 +208,10 @@ def test_every_encoding_in_the_absent_groups_is_refused_rather_than_decoded():
     """
     needs_core()
     from core.riscv32 import abi
+    from webui.boards import esp32c6
 
-    executed: list[str] = []
+    unimplemented: list[str] = []
+    executed = 0
     swept = 0
     with abi.Cpu() as cpu:
         esp32c5.install(cpu)
@@ -220,50 +227,85 @@ def test_every_encoding_in_the_absent_groups_is_refused_rather_than_decoded():
                 cpu.set_regs([0] * 32, pc=esp32c5.IROM)
                 try:
                     cpu.step()
-                except abi.AbiError:
+                except abi.Unimplemented:
+                    unimplemented.append(f"{group} 0x{half:04x}")
+                except (abi.Illegal, abi.MemoryFault):
+                    # Refused rows, and loads or stores whose zeroed base
+                    # register points at unmapped space: both are answers
+                    # about THIS part, not holes in the model.
                     continue
-                executed.append(f"{group} 0x{half:04x}")
+                else:
+                    executed += 1
     assert swept == 4224, f"the sweep covered {swept} encodings"
-    assert not executed, f"{len(executed)} executed, e.g. {executed[:5]}"
+    assert not unimplemented, (
+        f"{len(unimplemented)} answered Unimplemented on the part that has "
+        f"the groups, e.g. {unimplemented[:5]}"
+    )
+    # Exactly 160, derivably: with a zeroed register file every load,
+    # store, push, pop and table jump faults on an address near zero --
+    # refusal about the ADDRESS, not the encoding -- so what completes is
+    # the register-only work: 64 cm.mva01s + 56 cm.mvsa01 (the 8 same-
+    # register rows are reserved) + 32 c.mul + 8 unaries, the last two
+    # halved because the Zcb quadrant-1 sweep's fixed bit 9 reaches only
+    # rd' 0..3.
+    assert executed == 160, (
+        f"{executed} executed; the register-only Zc work is exactly 160"
+    )
+
+    misfiled: list[str] = []
+    with abi.Cpu() as cpu:
+        esp32c6.install(cpu)
+        for group in ("Zcb", "Zcmp/Zcmt"):
+            for half in zc_encodings(group):
+                word = half | (0x0001 << 16)
+                cpu.write_block(esp32c6.IROM, word.to_bytes(4, "little"))
+                cpu.set_regs([0] * 32, pc=esp32c6.IROM)
+                try:
+                    cpu.step()
+                except abi.Illegal:
+                    continue
+                except abi.AbiError as error:
+                    misfiled.append(f"{group} 0x{half:04x}: {type(error).__name__}")
+                else:
+                    misfiled.append(f"{group} 0x{half:04x}: executed")
+    assert not misfiled, (
+        f"a C6 answered something other than Illegal {len(misfiled)} "
+        f"times, e.g. {misfiled[:5]}"
+    )
 
 
-def test_an_absent_group_is_refused_as_illegal_which_is_the_weaker_true_thing():
-    """The cost of describing this part before the core can represent its ISA,
-    asserted rather than left in prose.
+def test_the_parts_own_instructions_run_on_the_boards_own_description():
+    """The flip the predecessor of this test promised.
 
-    `Illegal` and `Unimplemented` are two different claims, and telling them
-    apart is the whole reason `set_isa` exists. An ESP32-C6 gets the right one:
-    `core/riscv32/cpu.h` classifies A, so `amoor.w` is `Unimplemented` on a C6
-    board and `Illegal` on a C3 board, which
-    `tests/riscv32/test_esp32c6_board.py` pins as the strongest evidence those
-    two are different parts.
-
-    **A C5 does not get that.** There is no bit for Zcb, Zcmp or Zcmt, so
-    `set_isa` cannot be told the part has them -- it refuses letters it cannot
-    represent -- and the core answers with the only word it has. The address
-    and the encoding in the message are right and the word is wrong: it reads
-    as "an ESP32-C5 does not have cm.push", and an ESP32-C5 does.
-
-    This is asserted, not tolerated. Adding the three classification bits is
-    core work, it is what the withheld `FIRMWARE_VERIFIED` entry is waiting on,
-    and when someone does it **this test fails** -- naming the change it should
-    become rather than passing quietly on a message that improved.
+    `test_an_absent_group_is_refused_as_illegal_which_is_the_weaker_true
+    _thing` asserted, until OH-146, that `cm.push` stopped with the wrong
+    word -- `Illegal` on a part that has Zcmp -- and said that when the
+    classification bits arrived it should become the test of the change.
+    This is that test: the same `cm.push {ra}` encoding, on the same
+    `install`, now executes against the board's own SRAM -- and round-trips,
+    because `cm.pop {ra}` hands the pushed value back.
     """
     needs_core()
     from core.riscv32 import abi
 
+    sp = esp32c5.SRAM + 0x1000
     with abi.Cpu() as cpu:
         esp32c5.install(cpu)
-        cpu.write_block(esp32c5.IROM, (0xB842 | (0x0001 << 16)).to_bytes(4, "little"))
-        cpu.set_regs([0] * 32, pc=esp32c5.IROM)
-        with pytest.raises(abi.Illegal) as caught:
-            cpu.step()
-    assert "illegal" in str(caught.value)
-    assert "b842" in str(caught.value).lower(), "and it names the encoding"
-
-    # If this stops raising `Illegal` and starts raising `Unimplemented`, the
-    # bits exist -- and then `EXECUTES`, `ABSENT` and this test are all things
-    # to revisit together.
+        program = (0xB842 | (0xBA42 << 16)).to_bytes(4, "little")
+        cpu.write_block(esp32c5.IROM, program)
+        regs = [0] * 32
+        regs[1] = 0x1234
+        regs[2] = sp
+        cpu.set_regs(regs, pc=esp32c5.IROM)
+        cpu.step()
+        assert cpu.reg(2) == sp - 16, "cm.push moved sp on this board's SRAM"
+        assert cpu.read_word(sp - 4) == 0x1234, "and parked ra there"
+        regs = [0] * 32
+        regs[2] = sp - 16
+        cpu.set_regs(regs, pc=esp32c5.IROM + 2)
+        cpu.step()
+        assert cpu.reg(1) == 0x1234, "cm.pop handed ra back"
+        assert cpu.reg(2) == sp
 
 
 def test_the_named_instructions_from_each_group_are_among_them():

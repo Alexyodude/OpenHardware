@@ -20,11 +20,19 @@ makes the two XIAO ESP32-C5 boards *runnable*, meaning an image can be
 attempted on them; `rules/board-claims.md` governs the stronger word, and
 nothing here earns it.
 
-## The ISA: three names for three different questions
+## The ISA: two spellings of one set, since OH-146
 
-    ISA        RV32IMAC + Zcb/Zcmp/Zcmt   what the silicon has
-    EXECUTES   RV32IMAC                   what this core is told it is
-    ABSENT     Zcb, Zcmp, Zcmt            the difference, named
+    ISA        RV32IMAC + Zcb/Zcmp/Zcmt   what the silicon has, as the
+                                          datasheet prints it
+    EXECUTES   RV32IMAC_ZCB_ZCMP_ZCMT     the same set, in `set_isa`'s
+                                          grammar
+    ABSENT     ()                         nothing -- kept because two test
+                                          files assert the subtraction
+
+This section used to name three groups the core could not represent, and
+OH-146 is the core work its own paragraphs said it was waiting on: Zcb,
+Zcmp and Zcmt have bits, implementations and refusal sweeps now, so
+`install` configures the part whole.
 
 `docs/architectures.md` 4.2 settles which of these is the datasheet's answer
 and which is the toolchain's, and it is worth restating because both sources
@@ -43,48 +51,29 @@ hardware accepts, or you trap a legal instruction. So `ISA` above is the
 datasheet's string, and this file does not quietly shrink it to the toolchain's
 in order to look finished.
 
-`EXECUTES` is what `install` actually hands to `set_isa`, and it is a smaller
-thing than `ISA` on purpose. `core/riscv32/abi.py`'s `set_isa` **refuses** a
-letter it cannot represent rather than dropping it, so passing `ISA` here would
-raise -- correctly. Two constants say what one string cannot: this is the part,
-and this is the subset the core was configured as.
+`EXECUTES` is what `install` actually hands to `set_isa`. The datasheet's
+spelling above is prose -- a plus and slashes -- and `set_isa` speaks
+letters and underscore groups, so the two constants remain two: the same
+set, once as the datasheet prints it and once as the core is told it.
+`set_isa` still **refuses** anything it cannot represent rather than
+dropping it, which is what keeps this pair honest.
 
-## What happens when an image uses one of the absent groups
+## What happens when an image uses one of the Zc groups
 
-It stops, on that instruction, and names the encoding. All three groups live in
-compressed-encoding space that base RVC leaves reserved -- Zcb in quadrant 0's
-`funct3=100`, Zcmp and Zcmt in quadrant 2's `funct3=101`, which on RV32 without
-D is the illegal `c.fsdsp` slot -- so this core meets them as encodings it has
-no rule for and refuses them. It does **not** decode them as something else,
-which is the failure that would matter: a plausible wrong instruction executed
-silently, twenty thousand steps before anything looks wrong.
-`tests/riscv32/test_esp32c5_board.py` asserts each group is refused, so the
-paragraph above is a test rather than a hope.
+Since OH-146 it executes, on the C5. The three groups live in compressed
+slots base RVC leaves reserved -- Zcb in quadrant 0's `funct3=100` and the
+RV64 half of quadrant 1's register group, Zcmp and Zcmt in quadrant 2's
+`funct3=101`, the `c.fsdsp` slot no FPU-less part uses -- and
+`core/riscv32/exec.cc` gates each on its own bit. On a C3 or a C6 every one
+of those encodings is still refused as `Illegal`, which is now the RIGHT
+word: those parts genuinely lack the groups, and
+`tests/riscv32/test_esp32c5_board.py` sweeps all 4,224 encodings on both
+configurations to hold the split. Rows the Zc spec itself reserves refuse
+on the C5 too -- `tests/riscv32/test_zc.py` owns that half.
 
-That refusal is why describing this part is safe. A board whose gap shows up as
-a stop with an address is a board a reader can act on.
-
-**It says `Illegal` where the truthful word is `Unimplemented`, and that is a
-known cost of describing this part now.** Those two words are the whole point
-of `set_isa`: `Illegal` claims the silicon does not have the instruction, and
-`Unimplemented` admits this core has not written it. An ESP32-C6 gets the right
-one -- `core/riscv32/cpu.h` classifies A, so an atomic on a C6 board is
-correctly `Unimplemented` and the same encoding on a C3 board is correctly
-`Illegal`, which `tests/riscv32/test_esp32c6_board.py` pins. There is no such
-bit for Zcb, Zcmp or Zcmt, so this core cannot be *told* the part has them and
-answers with the only word it has.
-
-Loading a real C5 image therefore stops with, for example:
-
-    pc=0x42000008: encoding 0x0001b842 is illegal for extensions 0x7
-
-The address and the encoding are right; the word is not. Fixing it is core work
--- three classification bits and three letters `set_isa` can represent -- and
-it is the same work the `FIRMWARE_VERIFIED` entry is waiting on, so it is not
-being done here as a side effect of writing a board file.
-`test_an_absent_group_is_refused_as_illegal_which_is_the_weaker_true_thing`
-asserts the current wording so that adding those bits fails a test that says
-what to change.
+What `Illegal` no longer mislabels, `FIRMWARE_VERIFIED` still withholds:
+executing hand-placed encodings is not a compiled image being watched, and
+this chip stays out of that table until one is.
 
 ## Where these numbers come from
 
@@ -198,31 +187,21 @@ LED_PIN = 8
 #: `EXECUTES`.
 ISA = "RV32IMAC + Zcb/Zcmp/Zcmt"
 
-#: What `install` configures the core as: the part of `ISA` this core can be
-#: told about at all.
-#:
-#: `core/riscv32/abi.py`'s `set_isa` maps letters to bits and **raises** on one
-#: it cannot represent, rather than dropping it -- because an extension
-#: silently dropped makes a part look like one it is not. `ISA` above names
-#: three groups it has no bit for, so handing it over would raise, correctly.
-#:
-#: Naming the subset separately is the alternative to three worse options:
-#: shrinking `ISA` to `RV32IMAC` (a false claim about the silicon), catching
-#: the exception (a default where a fact belongs), or leaving this part
-#: undescribed (a board nobody can even attempt). What it costs is one constant
-#: that only this board has, and `webui/boards/esp32c6.py` deliberately does
-#: **not** grow an `EXECUTES` equal to its `ISA` for symmetry -- a second board
-#: with nothing to say would make this one's statement look like boilerplate.
-EXECUTES = "RV32IMAC"
+#: What `install` hands to `set_isa`: the whole of `ISA`, in the grammar
+#: `set_isa` speaks (OH-146). The datasheet's spelling above has a plus and
+#: slashes in it, so the two constants stay two -- one set, spelled for a
+#: reader and spelled for the core -- and `set_isa`'s refusal of anything it
+#: cannot represent is what keeps them the same set rather than drifting.
+#: `webui/boards/esp32c6.py` deliberately does **not** grow an `EXECUTES` of
+#: its own for symmetry -- a board whose ISA string IS the grammar has
+#: nothing to say twice.
+EXECUTES = "RV32IMAC_ZCB_ZCMP_ZCMT"
 
-#: The difference between the two above, as the groups' own names.
-#:
-#: Not derivable: `ISA` is a datasheet string with slashes and a plus in it,
-#: not a letter sequence anything can subtract from. Written out so
-#: `tests/riscv32/test_esp32c5_board.py` can assert each one is *refused* by
-#: this core rather than decoded as something else -- which is the property
-#: that makes describing this part safe rather than misleading.
-ABSENT: tuple[str, ...] = ("Zcb", "Zcmp", "Zcmt")
+#: Empty since OH-146, and kept rather than deleted: `tests/rv32/
+#: test_gating.py` asserts this equals the C5's unmodelled set -- so a new
+#: datasheet row nobody implements must land in both places or fail a test
+#: that names the other.
+ABSENT: tuple[str, ...] = ()
 
 
 class Cpu(typing.Protocol):
@@ -287,8 +266,8 @@ def install(cpu: Cpu) -> None:
     `blank` calls `reset`, which forgets the regions, the mapped registers and
     the extension mask together.
     """
-    # `EXECUTES` and not `ISA`, and the difference is the whole of what this
-    # board has to say. `set_isa(ISA)` would raise -- see `EXECUTES` above for
+    # `EXECUTES` and not `ISA`: the same set in the grammar `set_isa`
+    # speaks. The datasheet's own spelling would raise -- see `EXECUTES` for
     # why that is the right behaviour and why this is the right response to it.
     cpu.set_isa(EXECUTES)
     install_memory(cpu)

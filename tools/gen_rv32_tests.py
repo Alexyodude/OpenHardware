@@ -355,6 +355,37 @@ RV32ZBS_OP = (
 )
 
 
+#: Zcb, and only Zcb of the three Zc groups, because the corpus's trace
+#: model carries one writeback per instruction and that is all rvcpp prints:
+#: a cm.pop that reloads thirteen registers shows only its sp write
+#: (measured 2026-08-31 -- the ra and s0 reloads appear nowhere in the
+#: trace). Zcmp and Zcmt are hand-verified against the Zc specification in
+#: `tests/riscv32/test_zc.py` instead; every Zcb operation is a single
+#: writeback and fits here.
+#:
+#: Entries are (mnemonic, encoding, requires, why). The Zbb-only unaries
+#: ride along because their verdict is checkable even though no target has
+#: Zbb: every part must refuse them, and rvcpp -- which implements Zbb and
+#: gates nothing -- executes them, which is exactly the divergence the
+#: two-verdict design exists to record.
+RV32ZCB = (
+    ("c.lbu x9, 0(x8)", 0x8004, ["Zcb"],
+     "quadrant 0 funct3=100 [12:10]=000; uimm[0] at bit 6, uimm[1] at bit 5"),
+    ("c.lbu x9, 3(x8)", 0x8064, ["Zcb"], "both offset bits set: three"),
+    ("c.lhu x9, 0(x8)", 0x8404, ["Zcb"], "[12:10]=001 with bit 6 clear"),
+    ("c.lh x9, 0(x8)", 0x8444, ["Zcb"], "[12:10]=001 with bit 6 set: signed"),
+    ("c.sb x9, 0(x8)", 0x8804, ["Zcb"], "[12:10]=010"),
+    ("c.sh x9, 0(x8)", 0x8C04, ["Zcb"], "[12:10]=011 with bit 6 clear"),
+    ("c.zext.b x8", 0x9C61, ["Zcb"], "quadrant 1 unary slot 000"),
+    ("c.not x8", 0x9C75, ["Zcb"], "unary slot 101"),
+    ("c.mul x8, x9", 0x9C45, ["Zcb", "M"],
+     "funct2 10; the expansion rides the 32-bit mul and its M gate"),
+    ("c.sext.b x8", 0x9C65, ["Zcb", "Zbb"], "unary slot 001: Zbb only"),
+    ("c.zext.h x8", 0x9C69, ["Zcb", "Zbb"], "unary slot 010: Zbb only"),
+    ("c.sext.h x8", 0x9C6D, ["Zcb", "Zbb"], "unary slot 011: Zbb only"),
+)
+
+
 def build(count: int, want_oracle: bool) -> dict[str, list[dict]]:
     rng = random.Random(SEED)
     families: dict[str, list[dict]] = {}
@@ -426,6 +457,12 @@ def build(count: int, want_oracle: bool) -> dict[str, list[dict]]:
         emit("rv32c", mnemonic, word, 16, ["C"],
              "RV32C: 16-bit quadrant encoding, op field in bits [1:0]",
              {10: 0x1234, 11: 0x00FF, 2: SANDBOX, 8: SANDBOX})
+
+    for mnemonic, word, requires, why in RV32ZCB:
+        for a, b in operand_sets(count // 2 or 1, rng):
+            emit("rv32zcb", mnemonic, word, 16, list(requires),
+                 f"Zcb (Zc spec v1.0.4): {why}",
+                 {8: SANDBOX if "(x8)" in mnemonic else a, 9: b & 0xFF})
 
     for mnemonic, word, extension in ABSENT_EXTENSION:
         emit("absent_extension", mnemonic, word, 16, [extension],

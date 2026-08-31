@@ -39,6 +39,7 @@ Cpu::Cpu() { reset(); }
 void Cpu::reset() {
     x_.fill(0);
     pc_ = 0;
+    jvt_ = 0;
     extensions_ = 0;
     regions_.clear();
     mmio_.clear();

@@ -70,15 +70,20 @@ constexpr unsigned kRegisters = 32;
 /// before any part with an FPU arrives, and `tests/rv32/corpus/
 /// absent_extension.json` already holds the encodings that would separate them.
 ///
-/// Zbb, Zbkb, Zcb and Zcmp are still absent: the RP2350 has them and this core
-/// does not implement them yet, which `tests/rv32/conftest.py` records as a
-/// gap in `MODELLED` rather than by pretending the part lacks them.
+/// Zbb and Zbkb are still absent: the RP2350 has them and this core does not
+/// implement them yet, which `tests/rv32/conftest.py` records as a gap in
+/// `MODELLED` rather than by pretending the part lacks them. Zcb, Zcmp and
+/// Zcmt arrived at OH-146: the ESP32-C5's three groups, the first two also
+/// the RP2350's.
 enum Extension : uint32_t {
     kExtM = 1u << 0,
     kExtA = 1u << 1,
     kExtC = 1u << 2,
     kExtZba = 1u << 3,
     kExtZbs = 1u << 4,
+    kExtZcb = 1u << 5,
+    kExtZcmp = 1u << 6,
+    kExtZcmt = 1u << 7,
 };
 
 /// What `step` did.
@@ -142,6 +147,13 @@ public:
 
     uint32_t pc() const { return pc_; }
     void set_pc(uint32_t value) { pc_ = value; }
+
+    /// The Zcmt jump-vector table pointer -- the one CSR this core has,
+    /// because `cm.jt` reads its target through it and a part with Zcmt
+    /// cannot be modelled without it. Reachable from software only through
+    /// the Zicsr encodings `exec.cc` opens for exactly this address.
+    uint32_t jvt() const { return jvt_; }
+    void set_jvt(uint32_t value) { jvt_ = value; }
 
     uint32_t extensions() const { return extensions_; }
     void set_extensions(uint32_t mask) { extensions_ = mask; }
@@ -356,6 +368,7 @@ private:
 
     std::array<uint32_t, kRegisters> x_{};
     uint32_t pc_ = 0;
+    uint32_t jvt_ = 0;
     uint32_t extensions_ = 0;
     std::vector<Region> regions_;
     std::unordered_map<uint32_t, Mapped> mmio_;

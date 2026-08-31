@@ -1,0 +1,1826 @@
+[
+ {
+  "mnemonic": "c.lbu x9, 0(x8)",
+  "encoding": "0x8004",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 0 funct3=100 [12:10]=000; uimm[0] at bit 6, uimm[1] at bit 5",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 0(x8)",
+  "encoding": "0x8004",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 0 funct3=100 [12:10]=000; uimm[0] at bit 6, uimm[1] at bit 5",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 0(x8)",
+  "encoding": "0x8004",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 0 funct3=100 [12:10]=000; uimm[0] at bit 6, uimm[1] at bit 5",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 0(x8)",
+  "encoding": "0x8004",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 0 funct3=100 [12:10]=000; uimm[0] at bit 6, uimm[1] at bit 5",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 0(x8)",
+  "encoding": "0x8004",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 0 funct3=100 [12:10]=000; uimm[0] at bit 6, uimm[1] at bit 5",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 0(x8)",
+  "encoding": "0x8004",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 0 funct3=100 [12:10]=000; uimm[0] at bit 6, uimm[1] at bit 5",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 0(x8)",
+  "encoding": "0x8004",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 0 funct3=100 [12:10]=000; uimm[0] at bit 6, uimm[1] at bit 5",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 0(x8)",
+  "encoding": "0x8004",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 0 funct3=100 [12:10]=000; uimm[0] at bit 6, uimm[1] at bit 5",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 3(x8)",
+  "encoding": "0x8064",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): both offset bits set: three",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 3(x8)",
+  "encoding": "0x8064",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): both offset bits set: three",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 3(x8)",
+  "encoding": "0x8064",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): both offset bits set: three",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 3(x8)",
+  "encoding": "0x8064",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): both offset bits set: three",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 3(x8)",
+  "encoding": "0x8064",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): both offset bits set: three",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 3(x8)",
+  "encoding": "0x8064",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): both offset bits set: three",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 3(x8)",
+  "encoding": "0x8064",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): both offset bits set: three",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lbu x9, 3(x8)",
+  "encoding": "0x8064",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): both offset bits set: three",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lhu x9, 0(x8)",
+  "encoding": "0x8404",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lhu x9, 0(x8)",
+  "encoding": "0x8404",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lhu x9, 0(x8)",
+  "encoding": "0x8404",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lhu x9, 0(x8)",
+  "encoding": "0x8404",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lhu x9, 0(x8)",
+  "encoding": "0x8404",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lhu x9, 0(x8)",
+  "encoding": "0x8404",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lhu x9, 0(x8)",
+  "encoding": "0x8404",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lhu x9, 0(x8)",
+  "encoding": "0x8404",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lh x9, 0(x8)",
+  "encoding": "0x8444",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 set: signed",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lh x9, 0(x8)",
+  "encoding": "0x8444",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 set: signed",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lh x9, 0(x8)",
+  "encoding": "0x8444",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 set: signed",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lh x9, 0(x8)",
+  "encoding": "0x8444",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 set: signed",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lh x9, 0(x8)",
+  "encoding": "0x8444",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 set: signed",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lh x9, 0(x8)",
+  "encoding": "0x8444",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 set: signed",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lh x9, 0(x8)",
+  "encoding": "0x8444",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 set: signed",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.lh x9, 0(x8)",
+  "encoding": "0x8444",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=001 with bit 6 set: signed",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "9": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sb x9, 0(x8)",
+  "encoding": "0x8804",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=010",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sb x9, 0(x8)",
+  "encoding": "0x8804",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=010",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sb x9, 0(x8)",
+  "encoding": "0x8804",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=010",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sb x9, 0(x8)",
+  "encoding": "0x8804",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=010",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sb x9, 0(x8)",
+  "encoding": "0x8804",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=010",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sb x9, 0(x8)",
+  "encoding": "0x8804",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=010",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sb x9, 0(x8)",
+  "encoding": "0x8804",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=010",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sb x9, 0(x8)",
+  "encoding": "0x8804",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=010",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sh x9, 0(x8)",
+  "encoding": "0x8c04",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=011 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sh x9, 0(x8)",
+  "encoding": "0x8c04",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=011 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sh x9, 0(x8)",
+  "encoding": "0x8c04",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=011 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sh x9, 0(x8)",
+  "encoding": "0x8c04",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=011 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sh x9, 0(x8)",
+  "encoding": "0x8c04",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=011 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sh x9, 0(x8)",
+  "encoding": "0x8c04",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=011 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sh x9, 0(x8)",
+  "encoding": "0x8c04",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=011 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.sh x9, 0(x8)",
+  "encoding": "0x8c04",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): [12:10]=011 with bit 6 clear",
+  "initial": {
+   "8": "0x80001000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {}
+  }
+ },
+ {
+  "mnemonic": "c.zext.b x8",
+  "encoding": "0x9c61",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 1 unary slot 000",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.b x8",
+  "encoding": "0x9c61",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 1 unary slot 000",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.b x8",
+  "encoding": "0x9c61",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 1 unary slot 000",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.b x8",
+  "encoding": "0x9c61",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 1 unary slot 000",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.b x8",
+  "encoding": "0x9c61",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 1 unary slot 000",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.b x8",
+  "encoding": "0x9c61",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 1 unary slot 000",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.b x8",
+  "encoding": "0x9c61",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 1 unary slot 000",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.b x8",
+  "encoding": "0x9c61",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): quadrant 1 unary slot 000",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.not x8",
+  "encoding": "0x9c75",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 101",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "c.not x8",
+  "encoding": "0x9c75",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 101",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "c.not x8",
+  "encoding": "0x9c75",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 101",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "c.not x8",
+  "encoding": "0x9c75",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 101",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 4294967295
+   }
+  }
+ },
+ {
+  "mnemonic": "c.not x8",
+  "encoding": "0x9c75",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 101",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 4294967294
+   }
+  }
+ },
+ {
+  "mnemonic": "c.not x8",
+  "encoding": "0x9c75",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 101",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 4294967294
+   }
+  }
+ },
+ {
+  "mnemonic": "c.not x8",
+  "encoding": "0x9c75",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 101",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 4294967294
+   }
+  }
+ },
+ {
+  "mnemonic": "c.not x8",
+  "encoding": "0x9c75",
+  "width": 16,
+  "requires": [
+   "Zcb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 101",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 4294967294
+   }
+  }
+ },
+ {
+  "mnemonic": "c.mul x8, x9",
+  "encoding": "0x9c45",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "M"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): funct2 10; the expansion rides the 32-bit mul and its M gate",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.mul x8, x9",
+  "encoding": "0x9c45",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "M"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): funct2 10; the expansion rides the 32-bit mul and its M gate",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.mul x8, x9",
+  "encoding": "0x9c45",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "M"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): funct2 10; the expansion rides the 32-bit mul and its M gate",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.mul x8, x9",
+  "encoding": "0x9c45",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "M"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): funct2 10; the expansion rides the 32-bit mul and its M gate",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.mul x8, x9",
+  "encoding": "0x9c45",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "M"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): funct2 10; the expansion rides the 32-bit mul and its M gate",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.mul x8, x9",
+  "encoding": "0x9c45",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "M"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): funct2 10; the expansion rides the 32-bit mul and its M gate",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.mul x8, x9",
+  "encoding": "0x9c45",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "M"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): funct2 10; the expansion rides the 32-bit mul and its M gate",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 2
+   }
+  }
+ },
+ {
+  "mnemonic": "c.mul x8, x9",
+  "encoding": "0x9c45",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "M"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): funct2 10; the expansion rides the 32-bit mul and its M gate",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 255
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.b x8",
+  "encoding": "0x9c65",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 001: Zbb only",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.b x8",
+  "encoding": "0x9c65",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 001: Zbb only",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.b x8",
+  "encoding": "0x9c65",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 001: Zbb only",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.b x8",
+  "encoding": "0x9c65",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 001: Zbb only",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.b x8",
+  "encoding": "0x9c65",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 001: Zbb only",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.b x8",
+  "encoding": "0x9c65",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 001: Zbb only",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.b x8",
+  "encoding": "0x9c65",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 001: Zbb only",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.b x8",
+  "encoding": "0x9c65",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 001: Zbb only",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.h x8",
+  "encoding": "0x9c69",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 010: Zbb only",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.h x8",
+  "encoding": "0x9c69",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 010: Zbb only",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.h x8",
+  "encoding": "0x9c69",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 010: Zbb only",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.h x8",
+  "encoding": "0x9c69",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 010: Zbb only",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.h x8",
+  "encoding": "0x9c69",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 010: Zbb only",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.h x8",
+  "encoding": "0x9c69",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 010: Zbb only",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.h x8",
+  "encoding": "0x9c69",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 010: Zbb only",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.zext.h x8",
+  "encoding": "0x9c69",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 010: Zbb only",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.h x8",
+  "encoding": "0x9c6d",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 011: Zbb only",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.h x8",
+  "encoding": "0x9c6d",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 011: Zbb only",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.h x8",
+  "encoding": "0x9c6d",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 011: Zbb only",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.h x8",
+  "encoding": "0x9c6d",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 011: Zbb only",
+  "initial": {
+   "8": "0x00000000",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 0
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.h x8",
+  "encoding": "0x9c6d",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 011: Zbb only",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000000"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.h x8",
+  "encoding": "0x9c6d",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 011: Zbb only",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000001"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.h x8",
+  "encoding": "0x9c6d",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 011: Zbb only",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x00000002"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ },
+ {
+  "mnemonic": "c.sext.h x8",
+  "encoding": "0x9c6d",
+  "width": 16,
+  "requires": [
+   "Zcb",
+   "Zbb"
+  ],
+  "requires_source": "Zcb (Zc spec v1.0.4): unary slot 011: Zbb only",
+  "initial": {
+   "8": "0x00000001",
+   "9": "0x000000ff"
+  },
+  "rvcpp": {
+   "status": "executed",
+   "writes": {
+    "8": 1
+   }
+  }
+ }
+]

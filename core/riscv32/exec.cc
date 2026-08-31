@@ -298,7 +298,7 @@ uint32_t imm_ci(uint16_t c) {
     return sign_extend((bits(c, 12, 12) << 5) | bits(c, 6, 2), 6);
 }
 
-Expansion expand_quadrant0(uint16_t c, uint32_t& out) {
+Expansion expand_quadrant0(uint32_t extensions, uint16_t c, uint32_t& out) {
     const unsigned rd = creg(bits(c, 4, 2));
     const unsigned rs1 = creg(bits(c, 9, 7));
 
@@ -326,15 +326,48 @@ Expansion expand_quadrant0(uint16_t c, uint32_t& out) {
         out = s_type(kStore, 0x2u, rs1, rd, imm);
         return Expansion::Ok;
     }
+    case 0x4u: {
+        // The slot base RVC reserves and Zcb fills: byte and halfword loads
+        // and stores, with a two-bit offset whose bits sit SWAPPED -- bit 6
+        // is uimm[0] and bit 5 is uimm[1], the same low-bits-near-6 shape
+        // C.LW uses for uimm[2]. Zc spec v1.0.4, tables 4-8.
+        if (!(extensions & kExtZcb)) {
+            return Expansion::Illegal;
+        }
+        switch (bits(c, 12, 10)) {
+        case 0x0u: {  // C.LBU -> lbu rd', uimm(rs1')
+            const uint32_t imm = (bits(c, 5, 5) << 1) | bits(c, 6, 6);
+            out = i_type(kLoad, rd, 0x4u, rs1, imm);
+            return Expansion::Ok;
+        }
+        case 0x1u: {  // bit 6 tells C.LH (signed) from C.LHU
+            const uint32_t imm = bits(c, 5, 5) << 1;
+            out = i_type(kLoad, rd, bits(c, 6, 6) ? 0x1u : 0x5u, rs1, imm);
+            return Expansion::Ok;
+        }
+        case 0x2u: {  // C.SB -> sb rs2', uimm(rs1')
+            const uint32_t imm = (bits(c, 5, 5) << 1) | bits(c, 6, 6);
+            out = s_type(kStore, 0x0u, rs1, rd, imm);
+            return Expansion::Ok;
+        }
+        case 0x3u:  // C.SH; bit 6 set is reserved
+            if (bits(c, 6, 6) != 0) {
+                return Expansion::Illegal;
+            }
+            out = s_type(kStore, 0x1u, rs1, rd, bits(c, 5, 5) << 1);
+            return Expansion::Ok;
+        default:  // 100..111 stay reserved even with Zcb
+            return Expansion::Illegal;
+        }
+    }
     default:
         // 001 C.FLD, 011 C.FLW, 101 C.FSD, 111 C.FSW -- Zcd and Zcf, needing D
-        // and F. 100 is reserved in RVC and is where Zcb puts its byte and
-        // halfword accesses on the parts that have it; no part here does.
+        // and F. No part here has an FPU.
         return Expansion::Illegal;
     }
 }
 
-Expansion expand_quadrant1(uint16_t c, uint32_t& out) {
+Expansion expand_quadrant1(uint32_t extensions, uint16_t c, uint32_t& out) {
     const unsigned rd = static_cast<unsigned>(bits(c, 11, 7));
 
     switch (bits(c, 15, 13)) {
@@ -402,9 +435,40 @@ Expansion expand_quadrant1(uint16_t c, uint32_t& out) {
         default: {  // register-register
             const unsigned rs2 = creg(bits(c, 4, 2));
             if (bits(c, 12, 12) != 0) {
-                // C.SUBW and C.ADDW are RV64. On RV32 the whole group is
-                // reserved.
-                return Expansion::Illegal;
+                // C.SUBW and C.ADDW (funct2 00 and 01) are RV64. Base RV32
+                // reserved the rest; Zcb takes funct2 10 for C.MUL and 11
+                // for its unary group.
+                switch (bits(c, 6, 5)) {
+                case 0x2u:  // C.MUL -> mul rd', rd', rs2'
+                    // Zcb and M together: the expansion inherits the 32-bit
+                    // mul's own M gate, so a part with Zcb and no M still
+                    // refuses -- which is the spec's rule, not a shortcut.
+                    if (!(extensions & kExtZcb)) {
+                        return Expansion::Illegal;
+                    }
+                    out = r_type(kOp, rsd, 0x0u, rsd, rs2, 0x01u);
+                    return Expansion::Ok;
+                case 0x3u:
+                    if (!(extensions & kExtZcb)) {
+                        return Expansion::Illegal;
+                    }
+                    switch (bits(c, 4, 2)) {
+                    case 0x0u:  // C.ZEXT.B -> andi rd', rd', 0xff
+                        out = i_type(kOpImm, rsd, 0x7u, rsd, 0xFFu);
+                        return Expansion::Ok;
+                    case 0x5u:  // C.NOT -> xori rd', rd', -1
+                        out = i_type(kOpImm, rsd, 0x4u, rsd, 0xFFFu);
+                        return Expansion::Ok;
+                    default:
+                        // 001 C.SEXT.B, 010 C.ZEXT.H and 011 C.SEXT.H exist
+                        // only on parts with Zbb, and no part here has Zbb;
+                        // 100 C.ZEXT.W is RV64-only; 110 and 111 are
+                        // reserved. One answer covers all six.
+                        return Expansion::Illegal;
+                    }
+                default:
+                    return Expansion::Illegal;
+                }
             }
             switch (bits(c, 6, 5)) {
             case 0x0u:  // C.SUB
@@ -507,12 +571,12 @@ Expansion expand_quadrant2(uint16_t c, uint32_t& out) {
 }
 
 /// The 32-bit instruction a compressed halfword means, or Illegal.
-Expansion expand_compressed(uint16_t c, uint32_t& out) {
+Expansion expand_compressed(uint32_t extensions, uint16_t c, uint32_t& out) {
     switch (c & 0x3u) {
     case 0x0u:
-        return expand_quadrant0(c, out);
+        return expand_quadrant0(extensions, c, out);
     case 0x1u:
-        return expand_quadrant1(c, out);
+        return expand_quadrant1(extensions, c, out);
     default:
         return expand_quadrant2(c, out);
     }
@@ -521,6 +585,11 @@ Expansion expand_compressed(uint16_t c, uint32_t& out) {
 /// Declared here and defined below `step`, so that reading this file top to
 /// bottom is fetch, then decode, then execute.
 StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width);
+
+/// Zcmp and Zcmt, which do not expand: a push writes several words and
+/// several registers, and a table jump reads its target through JVT. Defined
+/// beside `execute` below.
+StepResult execute_zc(Cpu& cpu, uint32_t pc, uint16_t c);
 
 }  // namespace
 
@@ -563,8 +632,17 @@ StepResult step(Cpu& cpu) {
         if (!cpu.has(kExtC)) {
             return StepResult::Illegal;
         }
+        // Quadrant 2's funct3=101 -- the c.fsdsp slot, dead on every
+        // FPU-less part -- is where Zcmp and Zcmt live, and they are the two
+        // compressed groups that do not expand to one base instruction. A
+        // part with neither falls through to the expansion, whose answer for
+        // that slot is the Illegal it always was.
+        if ((low & 0x3u) == 0x2u && bits(low, 15, 13) == 0x5u &&
+            (cpu.has(kExtZcmp) || cpu.has(kExtZcmt))) {
+            return execute_zc(cpu, pc, low);
+        }
         uint32_t expanded = 0;
-        if (expand_compressed(low, expanded) != Expansion::Ok) {
+        if (expand_compressed(cpu.extensions(), low, expanded) != Expansion::Ok) {
             // Reserved on RV32, or a compressed float access on a part with no
             // FPU. Illegal rather than Unimplemented: nothing here is waiting
             // to be written, the architecture refuses it.
@@ -933,7 +1011,7 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
         }
         return StepResult::Illegal;
 
-    case 0x73u:
+    case 0x73u: {
         // SYSTEM: ECALL, EBREAK, and the Zicsr encodings.
         //
         // Unimplemented rather than Illegal, and not faked. All of these
@@ -942,7 +1020,33 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
         // inventing machine state, and ESP-IDF reads mstatus and mtvec within
         // its first hundred instructions -- so a wrong answer here is not a
         // small wrong answer.
+        //
+        // **Narrowed exactly once (OH-146): JVT, and only under Zcmt.** A
+        // table jump's semantics ARE that register -- `cm.jt` reads its
+        // target through it -- so a part with Zcmt cannot be modelled
+        // without it, and unlike mstatus it holds nothing this core would
+        // have to invent: software writes it, `execute_zc` reads it back.
+        const uint32_t csr = instr >> 20;
+        if (csr == 0x017u && cpu.has(kExtZcmt) && funct3 != 0x0u &&
+            funct3 != 0x4u) {
+            const uint32_t old = cpu.jvt();
+            // Immediate forms carry a five-bit zimm where rs1 sits.
+            const uint32_t operand = (funct3 & 0x4u) ? rs1 : cpu.reg(rs1);
+            uint32_t value = old;
+            switch (funct3 & 0x3u) {
+            case 0x1u: value = operand; break;                      // CSRRW(I)
+            case 0x2u: if (rs1 != 0) value = old | operand; break;  // CSRRS(I)
+            case 0x3u: if (rs1 != 0) value = old & ~operand; break; // CSRRC(I)
+            }
+            // WARL: bits 5:0 are the table mode, mode zero is the only one
+            // defined, so writes force it and reads answer it.
+            cpu.set_jvt(value & ~0x3Fu);
+            cpu.set_reg(rd, old);
+            cpu.set_pc(next);
+            return StepResult::Ok;
+        }
         return StepResult::Unimplemented;
+    }
 
     case 0x2Fu:
         // AMO: the A extension. **This is the case the whole `Extension` mask
@@ -956,6 +1060,153 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
         // program that has run off the end of memory reads.
         return StepResult::Illegal;
     }
+}
+
+/// The x-register a Zcmp list position names: 0 is ra, then s0..s11 --
+/// s0 and s1 are x8 and x9 and the rest are x18..x27, the same split
+/// `creg` exists for.
+unsigned saved(unsigned index) {
+    if (index == 0) {
+        return 1;
+    }
+    if (index <= 2) {
+        return 7u + index;
+    }
+    return 15u + index;
+}
+
+/// The Zcmp saved-register operand: 0..1 name s0..s1 (x8, x9) and 2..7 name
+/// s2..s7 (x18..x23).
+unsigned sreg(uint32_t three) {
+    return three < 2 ? 8u + three : 16u + three;
+}
+
+StepResult execute_zc(Cpu& cpu, uint32_t pc, uint16_t c) {
+    const uint32_t kind = bits(c, 12, 10);
+
+    if (kind == 0x0u) {  // cm.jt / cm.jalt -- Zcmt
+        if (!cpu.has(kExtZcmt)) {
+            return StepResult::Illegal;
+        }
+        const uint32_t index = bits(c, 9, 2);
+        const uint32_t slot = (cpu.jvt() & ~0x3Fu) + index * 4u;
+        uint32_t target = 0;
+        if (slot % 4u != 0 || !cpu.read_word(slot, target)) {
+            cpu.note_data_fault(slot);
+            return StepResult::MemoryFault;
+        }
+        // The table holds jump targets, so bit 0 clears the way jalr's does.
+        target &= ~1u;
+        if (!aligned(cpu, target)) {
+            cpu.note_fetch_fault(target);
+            return StepResult::MemoryFault;
+        }
+        if (index >= 32u) {  // cm.jalt links; cm.jt does not
+            cpu.set_reg(1, pc + 2u);
+        }
+        cpu.set_pc(target);
+        return StepResult::Ok;
+    }
+
+    if (kind == 0x3u) {  // cm.mvsa01 / cm.mva01s -- Zcmp
+        const uint32_t pair = bits(c, 6, 5);
+        if ((pair != 0x1u && pair != 0x3u) || !cpu.has(kExtZcmp)) {
+            return StepResult::Illegal;
+        }
+        const unsigned first = sreg(bits(c, 9, 7));
+        const unsigned second = sreg(bits(c, 4, 2));
+        if (pair == 0x1u) {  // cm.mvsa01: two saved registers from a0, a1
+            if (first == second) {
+                return StepResult::Illegal;  // reserved
+            }
+            cpu.set_reg(first, cpu.reg(10));
+            cpu.set_reg(second, cpu.reg(11));
+        } else {  // cm.mva01s: a0, a1 from two saved registers
+            cpu.set_reg(10, cpu.reg(first));
+            cpu.set_reg(11, cpu.reg(second));
+        }
+        cpu.set_pc(pc + 2u);
+        return StepResult::Ok;
+    }
+
+    if (kind == 0x6u || kind == 0x7u) {  // cm.push / cm.pop / cm.popret(z)
+        if (bits(c, 8, 8) != 0 || !cpu.has(kExtZcmp)) {
+            return StepResult::Illegal;  // the odd [12:8] rows are reserved
+        }
+        const uint32_t which = bits(c, 12, 9);  // 1100 push, 1101 pop,
+                                                // 1110 popretz, 1111 popret
+        const uint32_t rlist = bits(c, 7, 4);
+        if (rlist < 4u) {
+            return StepResult::Illegal;  // reserved
+        }
+        // rlist 15 jumps to the full {ra, s0-s11}: there is no 12-register
+        // set, the spec skips from {ra, s0-s9} straight to everything.
+        const unsigned count = rlist == 15u ? 13u : rlist - 3u;
+        const uint32_t adjust =
+            ((count * 4u + 15u) / 16u) * 16u + bits(c, 3, 2) * 16u;
+        const uint32_t sp = cpu.reg(2);
+
+        if (which == 0xCu) {  // cm.push
+            // Highest saved register nearest the old sp, ra at the bottom --
+            // the spec's own expansion order. Addresses are preflighted so an
+            // unmapped stack stores nothing rather than half a frame; a
+            // mapped register refusing a write can still stop it midway,
+            // which a stack pointed into MMIO has earned.
+            for (unsigned i = 0; i < count; ++i) {
+                const uint32_t address = sp - 4u * (i + 1u);
+                if (address % 4u != 0 || !cpu.in_range(address, 4)) {
+                    cpu.note_data_fault(address);
+                    return StepResult::MemoryFault;
+                }
+            }
+            for (unsigned i = 0; i < count; ++i) {
+                const uint32_t address = sp - 4u * (i + 1u);
+                if (!cpu.write_word(address, cpu.reg(saved(count - 1u - i)))) {
+                    cpu.note_data_fault(address);
+                    return StepResult::MemoryFault;
+                }
+            }
+            cpu.set_reg(2, sp - adjust);
+            cpu.set_pc(pc + 2u);
+            return StepResult::Ok;
+        }
+
+        // The three pops load into temporaries first, so a fault leaves
+        // every register untouched -- the same all-or-nothing the StepResult
+        // contract promises for refusals.
+        uint32_t loaded[13] = {};
+        for (unsigned i = 0; i < count; ++i) {
+            const uint32_t address = sp + adjust - 4u * (i + 1u);
+            if (address % 4u != 0 || !cpu.read_word(address, loaded[i])) {
+                cpu.note_data_fault(address);
+                return StepResult::MemoryFault;
+            }
+        }
+        for (unsigned i = 0; i < count; ++i) {
+            cpu.set_reg(saved(count - 1u - i), loaded[i]);
+        }
+        if (which == 0xEu) {  // cm.popretz zeroes a0 before returning
+            cpu.set_reg(10, 0);
+        }
+        cpu.set_reg(2, sp + adjust);
+        if (which == 0xDu) {  // cm.pop stays
+            cpu.set_pc(pc + 2u);
+            return StepResult::Ok;
+        }
+        // cm.popret / cm.popretz return through the ra just reloaded. The
+        // frame is already committed when a misaligned target faults, which
+        // is where real silicon would be when the jump traps.
+        const uint32_t target = cpu.reg(1) & ~1u;
+        if (!aligned(cpu, target)) {
+            cpu.note_fetch_fault(target);
+            return StepResult::MemoryFault;
+        }
+        cpu.set_pc(target);
+        return StepResult::Ok;
+    }
+
+    // [12:10] of 001, 010, 100 and the unused mv pairs: reserved.
+    return StepResult::Illegal;
 }
 
 }  // namespace

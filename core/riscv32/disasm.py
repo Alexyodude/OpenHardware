@@ -57,7 +57,7 @@ from core.riscv32.machine import REGISTER_NAMES
 #: disassembler and the executor agree about scope: an encoding one knows and
 #: the other does not is a divergence waiting to be found by a person rather
 #: than by a sweep.
-EXTENSIONS = ("I", "M", "C", "Zba", "Zbs")
+EXTENSIONS = ("I", "M", "C", "Zba", "Zbs", "Zcb", "Zcmp", "Zcmt")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -90,6 +90,22 @@ def _reg(index: int) -> str:
 def _creg(three: int) -> str:
     """A compressed register field, which names x8..x15 in three bits."""
     return REGISTER_NAMES[(three & 0x7) + 8]
+
+
+def _sreg(three: int) -> str:
+    """A Zcmp saved-register operand: 0..1 are s0..s1, 2..7 are s2..s7."""
+    return _reg(8 + three if three < 2 else 16 + three)
+
+
+def _rlist_text(rlist: int) -> str:
+    """A Zcmp register list, the spec's own spelling."""
+    if rlist == 4:
+        return "{ra}"
+    if rlist == 5:
+        return "{ra,s0}"
+    if rlist == 15:
+        return "{ra,s0-s11}"
+    return f"{{ra,s0-s{rlist - 5}}}"
 
 
 def _sign_extend(value: int, bits: int) -> int:
@@ -235,6 +251,15 @@ def _decode32(word: int, address: int) -> str:
             return "ecall"
         if word == 0x00100073:
             return "ebreak"
+        # JVT (0x017) is the one CSR the core executes (OH-146, Zcmt), so it
+        # is the one this renders -- in objdump's own spelling, `0x17` and
+        # all, so the sweep needs no excuse for it. Every other CSR encoding
+        # stays refused here exactly as it stays Unimplemented there.
+        if _bits(word, 31, 20) == 0x017 and funct3 not in (0x0, 0x4):
+            name = {0x1: "csrrw", 0x2: "csrrs", 0x3: "csrrc",
+                    0x5: "csrrwi", 0x6: "csrrsi", 0x7: "csrrci"}[funct3]
+            operand = _reg(rs1) if funct3 < 0x4 else str(rs1)
+            return f"{name}\t{_reg(rd)},0x17,{operand}"
         return ""
 
     return ""
@@ -266,6 +291,22 @@ def _decode16(c: int, address: int) -> str:
                    | (_bits(c, 6, 6) << 2))
             name = "c.lw" if funct3 == 0x2 else "c.sw"
             return f"{name}\t{rd},{imm}({rs1})"
+        if funct3 == 0x4:
+            # Zcb (OH-146). Rendered whether or not the part has it, the way
+            # bset is: the disassembler renders the union, the executor gates.
+            kind = _bits(c, 12, 10)
+            if kind == 0x0:
+                imm = (_bits(c, 5, 5) << 1) | _bits(c, 6, 6)
+                return f"c.lbu\t{rd},{imm}({rs1})"
+            if kind == 0x1:
+                name = "c.lh" if _bits(c, 6, 6) else "c.lhu"
+                return f"{name}\t{rd},{_bits(c, 5, 5) << 1}({rs1})"
+            if kind == 0x2:
+                imm = (_bits(c, 5, 5) << 1) | _bits(c, 6, 6)
+                return f"c.sb\t{rd},{imm}({rs1})"
+            if kind == 0x3 and _bits(c, 6, 6) == 0:
+                return f"c.sh\t{rd},{_bits(c, 5, 5) << 1}({rs1})"
+            return ""
         return ""
 
     if quadrant == 1:
@@ -301,7 +342,18 @@ def _decode16(c: int, address: int) -> str:
             if kind == 0x2:
                 return f"c.andi\t{rsd},{imm6}"
             if _bits(c, 12, 12):
-                return ""          # C.SUBW / C.ADDW are RV64
+                # C.SUBW / C.ADDW (funct2 00, 01) are RV64; Zcb (OH-146)
+                # takes 10 for C.MUL and 11 for its unary group. The Zbb
+                # unaries render too -- the union again -- though every part
+                # here refuses them.
+                pair = _bits(c, 6, 5)
+                if pair == 0x2:
+                    return f"c.mul\t{rsd},{_creg(_bits(c, 4, 2))}"
+                if pair == 0x3:
+                    name = {0x0: "c.zext.b", 0x1: "c.sext.b", 0x2: "c.zext.h",
+                            0x3: "c.sext.h", 0x5: "c.not"}.get(_bits(c, 4, 2))
+                    return f"{name}\t{rsd}" if name else ""
+                return ""
             rs2 = _creg(_bits(c, 4, 2))
             name = {0x0: "c.sub", 0x1: "c.xor", 0x2: "c.or", 0x3: "c.and"}[
                 _bits(c, 6, 5)]
@@ -338,6 +390,31 @@ def _decode16(c: int, address: int) -> str:
         if rs2 == 0:
             return "c.ebreak" if rd == 0 else f"c.jalr\t{_reg(rd)}"
         return f"c.add\t{_reg(rd)},{_reg(rs2)}"
+    if funct3 == 0x5:
+        # Zcmp and Zcmt (OH-146), in the c.fsdsp slot no FPU-less part uses.
+        kind = _bits(c, 12, 10)
+        if kind == 0x0:
+            index = _bits(c, 9, 2)
+            return f"cm.jalt\t{index}" if index >= 32 else f"cm.jt\t{index}"
+        if kind == 0x3:
+            pair = _bits(c, 6, 5)
+            first, second = _sreg(_bits(c, 9, 7)), _sreg(_bits(c, 4, 2))
+            if pair == 0x1 and first != second:
+                return f"cm.mvsa01\t{first},{second}"
+            if pair == 0x3:
+                return f"cm.mva01s\t{first},{second}"
+            return ""
+        if kind in (0x6, 0x7) and _bits(c, 8, 8) == 0:
+            rlist = _bits(c, 7, 4)
+            if rlist < 4:
+                return ""
+            count = 13 if rlist == 15 else rlist - 3
+            adjust = (count * 4 + 15) // 16 * 16 + _bits(c, 3, 2) * 16
+            name = {0xC: "cm.push", 0xD: "cm.pop",
+                    0xE: "cm.popretz", 0xF: "cm.popret"}[_bits(c, 12, 9)]
+            sign = "-" if name == "cm.push" else ""
+            return f"{name}\t{_rlist_text(rlist)},{sign}{adjust}"
+        return ""
     if funct3 == 0x6:
         imm = (_bits(c, 8, 7) << 6) | (_bits(c, 12, 9) << 2)
         return f"c.swsp\t{_reg(rs2)},{imm}(sp)"
