@@ -882,9 +882,14 @@ ABSENT: dict[str, str] = {
         "exists only in that same name, and a name that is wrong about the "
         "dimension a layer can check cannot be trusted for the one no "
         "layer carries -- which is the whole argument `slab_geometry` "
-        "makes, and it refuses this package by it. What retires this is one "
-        "corrected name from Seeed, or a height from the part's datasheet. "
-        "No KiCad library was searched: the model was never the problem."
+        "makes, and it refuses this package by it. **Nor can the "
+        "Description rescue it**, which is the other place OH-150 taught "
+        "that function to look: this footprint's reads `SMD IC PMIC;DCDC "
+        "Buck-ADJ-1A,Vin 1.95V to 5.5V,Vout 1.8V to 3.3V;WLCSP-6B` and "
+        "states no dimension at all, where the sibling it should have "
+        "matched states three. What retires this is one corrected name "
+        "from Seeed, or a height from the part's datasheet. No KiCad "
+        "library was searched: the model was never the problem."
     ),
     "TP-D45MIL": (
         "36 test points across all five KiCad XIAOs, each a bare "
