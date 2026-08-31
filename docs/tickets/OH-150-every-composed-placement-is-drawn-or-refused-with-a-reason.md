@@ -1,6 +1,6 @@
 ---
 id: OH-150
-title: 'Every composed placement is drawn or refused with a reason'
+title: Every composed placement is drawn or refused with a reason
 status: done
 priority: P2
 created: '2026-08-31'
@@ -8,8 +8,8 @@ touches:
 - tools/compose_board_3d.py
 - tools/model_from_datasheet.py
 - tests/rules/test_compose_board_3d.py
-- tools/model_from_datasheet.py
 - tests/rules/test_import_3d_model.py
+- docs/tickets/OH-104-the-parts-nobody-publishes-are-slabs-the-vendor-alr.md
 ---
 
 From the ralph run "fix all not modelled" (2026-08-31). The composer's own

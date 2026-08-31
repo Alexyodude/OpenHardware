@@ -124,5 +124,19 @@ ESD diodes, `BGA6`, `WLCSP4`, `DFN6-0.4`, `X2SON4` -- plus test points and
 logos, which are not components. Nothing forbids them; they are not what a
 person notices, and each is another judgement to keep true.
 
+> **SUPERSEDED 2026-08-31 by OH-150**, which drew all of them. This section
+> was a convenience call rather than a sourcing gap, and it said so -- which
+> is exactly why the reversal was possible without contradicting anything
+> measured here. What OH-150 could NOT draw it refused with a reason instead:
+> the test points and logos as bodies that do not exist, and
+> `BGA6-0.35-0.745X10.95X0.4MM` because its own name is wrong.
+>
+> One statement above is now doubtful on its own terms: this ticket says the
+> button's "name states none and no layer carries one", and the C3's
+> `BUTTON_TD1183SA` Description reads `2P-L3.0*W2.5*H1.5mm`. A property is
+> not a layer, so the sentence is defensible as written -- but the height it
+> calls missing is stated in the file. OH-150 deliberately did not act on
+> that; it wants its own ticket.
+
 8 new tests. Gate: 1,800 -> 1,804 passed, 17 skipped; all eight checkers
 exit 0. `ruff check tools/` reports the same 38 findings before and after.
