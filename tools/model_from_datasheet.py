@@ -379,10 +379,11 @@ SLABS: tuple[ModelledSlab, ...] = (
             "`SMD IC Diplexer;1.6*0.8*0.7mm`. Three vendor statements of "
             "that plan agree to 0.000 mm -- the name, the F.Fab outline and "
             "the Description -- which is tighter than any other row in this "
-            "file. KiCad's Filter library holds eight models, listed "
-            "2026-08-31: six Mini-Circuits FV1206 at 3.2 x 1.6 mm and two "
-            "five-terminal parts, the nearest a terminal short and 0.3 mm "
-            "too wide."
+            "file. **No KiCad filter library is among the fifteen this "
+            "repository has listed**, so the search that refuses a "
+            "near-miss elsewhere in this table has not been run for this "
+            "part: what draws it is the vendor stating every dimension "
+            "three times over, not a library coming up empty."
         ),
     ),
     ModelledSlab(
@@ -393,9 +394,10 @@ SLABS: tuple[ModelledSlab, ...] = (
         why_not_fetched=(
             "four balls at a 0.4 mm pitch under a 0.77 mm square die, on "
             "seven placements across the ESP32-C5, the nRF54L15 and the "
-            "RP2350. KiCad's Package_CSP holds no WLCSP-4 at all; its "
-            "smallest by ball count is a WLCSP-6 about twice this part's "
-            "area. Two different chips share the land pattern -- TI's "
+            "RP2350. KiCad's Package_CSP holds 34 files, listed 2026-08-31, "
+            "and not one is a WLCSP of any ball count under twenty -- the "
+            "only wafer-level part in it is a 20-ball 1.7 x 2.1 mm Diodes "
+            "Inc. array. Two different chips share this land pattern -- TI's "
             "TPS22916 and a 6SIGMA SX1801CCR -- and neither vendor "
             "publishes a mesh."
         ),
@@ -441,9 +443,9 @@ SLABS: tuple[ModelledSlab, ...] = (
             "Description says `DFN-6(0.7x1.1)` -- the same rectangle read "
             "the other way round, which is why the F.Fab cross-check "
             "sorts both pairs before comparing them. KiCad's "
-            "Package_DFN_QFN holds thirteen DFN-6 files, checked "
-            "2026-08-31, and the two without an exposed pad are both "
-            "0.4 mm pitch and larger in both dimensions."
+            "Package_DFN_QFN holds 191 files, six of them DFN-6, listed "
+            "2026-08-31 -- and every one of the six is larger than this "
+            "1.1 x 0.7 mm part in both dimensions."
         ),
     ),
     ModelledSlab(
@@ -457,8 +459,9 @@ SLABS: tuple[ModelledSlab, ...] = (
             "`1.45X1X0.6` and nothing after it -- which is why `_NAMED_BODY` "
             "takes the `mm` as optional; both boards' F.Fab measure "
             "1.460 x 1.000 mm, agreeing with the name to 0.010 mm and "
-            "settling that the three numbers are millimetres. KiCad's "
-            "thirteen DFN-6 files hold nothing at this pitch and size."
+            "settling that the three numbers are millimetres. Of the six "
+            "DFN-6 files in KiCad's Package_DFN_QFN, listed 2026-08-31, "
+            "none is a 0.5 mm-pitch part this size."
         ),
     ),
     ModelledSlab(
@@ -474,8 +477,10 @@ SLABS: tuple[ModelledSlab, ...] = (
             "layers agree the plan is 2.1 x 1.2 -- F.Fab, F.CrtYd and a "
             "User.1 rectangle -- and eight pads in two columns of four, "
             "0.5 mm apart within a column, confirm the pitch. TI publish "
-            "no mesh and KiCad's Package_SO holds no eight-lead part this "
-            "small."
+            "no mesh; KiCad's Package_TO_SOT_SMD holds 79 files, listed "
+            "2026-08-31, of which six are eight-lead -- an SC-70-8, a "
+            "SOT-23-8, a SOT-223-8, a SOT-583-8, a SuperSOT-8 and an "
+            "Infineon PG-HSOF-8, none of them a 2.1 x 1.2 mm body."
         ),
     ),
     ModelledSlab(
