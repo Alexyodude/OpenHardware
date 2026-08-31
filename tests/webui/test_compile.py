@@ -22,14 +22,14 @@
 # recipe rather than by trying to exploit it — an attempted exploit that fails
 # proves one payload was handled, and a structural check proves the shape.
 
+import itertools
 import pathlib
 
 import pytest
 
 from webui import api
 from webui import compile as compiler
-from webui.boards import atmega328p
-from webui.boards import samd21
+from webui.boards import atmega328p, esp32c3, samd21
 
 BOARD = "Arduino Uno"
 
@@ -111,15 +111,16 @@ def test_both_xiao_samd21_boards_resolve_to_one_recipe():
 
 
 def test_a_board_with_no_recipe_is_refused_and_names_its_chip():
-    """"Unknown board" is not actionable; "carries an ESP32-C3 and nothing
+    """"Unknown board" is not actionable; "carries an RP2040 and nothing
     here knows how to build for one" is.
 
-    Still true with two rows, and the refusal now lists both chips it *can*
-    build for -- which is the half that turns a "no" into a next step.
+    The example board used to be a C3, until OH-148 gave the C3 a recipe --
+    which is this test's own point working: the refusal names the chip, and
+    a chip gaining a row moves the example rather than the property.
     """
     with pytest.raises(compiler.UnknownBoard) as caught:
-        compiler.recipe_for("XIAO-ESP32-C3-DIP")
-    assert "ESP32-C3" in str(caught.value)
+        compiler.recipe_for("XIAO-RP2040-DIP")
+    assert "RP2040" in str(caught.value)
     assert "SAMD21" in str(caught.value), (
         "the refusal should say what it can build for, not only what it cannot"
     )
@@ -675,3 +676,135 @@ def test_link_diagnostics_scrub_the_machines_paths():
     )
     assert "Temp" not in built.diagnostics
     assert str(compiler.PACKAGES) not in built.diagnostics
+
+
+# --- the openhardware core: a Build whose output runs (OH-148) ---------------
+#
+# The third recipe is the first whose framework is this repository's own,
+# because the vendor's cannot execute on the described board -- see
+# `webui/arduino/cores/openhardware/Arduino.h` for the whole argument. The
+# tests below hold the three promises that make the Build button honest for
+# a C3: the image RUNS on the emulated board, the pin names are the
+# vendor's, and every absence a sketch can reach for names the modelling
+# decision it stands on.
+
+C3_BOARD = "XIAO-ESP32-C3-DIP"
+
+#: The vendor's D10 is GPIO10 -- `pins_arduino.h` in Seeed's own variant,
+#: which the recipe puts on the include path -- and the sketch deliberately
+#: uses the NAME, so a wrong pin table shows up as the wrong bit toggling.
+C3_BLINK = """
+void setup() { pinMode(D10, OUTPUT); }
+void loop() { digitalWrite(D10, HIGH); digitalWrite(D10, LOW); delay(1); }
+"""
+
+
+def c3_build(source: str) -> "compiler.Build":
+    try:
+        return compiler.build(C3_BOARD, source)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+
+
+def c3_transitions(image: bytes, budget: int = 60_000) -> list[tuple[int, bool]]:
+    """Every step at which the built image moves GPIO10, watched by name."""
+    recipe = compiler.recipe_for(C3_BOARD)
+    out = esp32c3.GPIO + esp32c3.GPIO_OUT
+    transitions: list[tuple[int, bool]] = []
+    last = 0
+    with api.load_firmware(C3_BOARD, image, base=recipe.base) as session:
+        for step in range(budget):
+            session.step()
+            now = session.cpu.read_word(out) & (1 << 10)
+            if now != last:
+                transitions.append((step, bool(now)))
+                last = now
+    return transitions
+
+
+def test_the_c3_recipe_builds_with_the_repositorys_own_core():
+    """The build succeeds and the framework is the in-repo one -- asserted
+    so a future edit cannot quietly point the row back at a vendor core
+    whose output would load and then stop."""
+    recipe = compiler.recipe_for(C3_BOARD)
+    assert recipe.framework == "openhardware"
+    assert recipe.base is esp32c3.IROM, "the flash origin has one home"
+    built = c3_build(C3_BLINK)
+    assert built.ok, built.diagnostics
+    assert len(built.image) > 0
+
+
+def test_a_built_c3_sketch_runs_on_the_described_board_and_toggles_its_pin():
+    """The whole point of OH-148: the Build button's output EXECUTES.
+
+    Loaded by board name at the recipe's own base, the sketch enables
+    GPIO10 -- the vendor's D10 -- and toggles it. Two transitions is a
+    blink; alternation says the toggle is a toggle."""
+    built = c3_build(C3_BLINK)
+    assert built.ok, built.diagnostics
+    transitions = c3_transitions(built.image)
+    assert len(transitions) >= 4, f"the bit changed {len(transitions)} times"
+    states = [state for _, state in transitions]
+    assert states[0] is True
+    assert all(a != b for a, b in itertools.pairwise(states)), states[:8]
+
+
+def test_delay_scales_with_its_argument_and_the_period_is_steady():
+    """delay's millisecond is a stated judgement (oh_board.h says what
+    kind), but WHATEVER it costs must scale: delay(3) between toggles must
+    take about three times delay(1), or the loop is not counting."""
+    one = c3_build(C3_BLINK)
+    three = c3_build(C3_BLINK.replace("delay(1)", "delay(3)"))
+    assert one.ok and three.ok
+
+    def period(image: bytes) -> int:
+        highs = [step for step, state in c3_transitions(image, 200_000)
+                 if state]
+        gaps = {b - a for a, b in itertools.pairwise(highs[1:])}
+        assert len(gaps) == 1, f"period varies: {sorted(gaps)}"
+        return gaps.pop()
+
+    ratio = period(three.image) / period(one.image)
+    assert 2.5 < ratio < 3.5, f"delay(3)/delay(1) = {ratio:.2f}"
+
+
+def test_each_absence_hints_the_model_decision_it_stands_on():
+    """digitalRead and Serial are not in the core because they are not in
+    the MODEL, and the person who reaches for one is told that in the pane
+    they are looking at -- the OH-138 pattern, one hint per decision."""
+    read = c3_build("void setup(){int x = digitalRead(D10);} void loop(){}")
+    assert not read.ok
+    assert "leaves GPIO_IN unmapped on purpose" in read.diagnostics
+
+    serial = c3_build(
+        "void setup(){Serial.begin(9600);} void loop(){}")
+    assert not serial.ok
+    assert "no UART is mapped" in serial.diagnostics
+
+
+def test_the_oh_board_header_restates_the_descriptions_own_numbers():
+    """`oh_board.h` is C and `esp32c3.py` is Python, and the register can
+    only live in one language per artefact -- so the two spellings are held
+    equal here, and a description change that forgets the variant header
+    fails a test that names it."""
+    variant = (pathlib.Path(compiler.ARDUINO_LITE)
+               / "variants" / "xiao_esp32c3")
+    header = (variant / "oh_board.h").read_text(encoding="utf-8")
+    defines = {}
+    for line in header.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[0] == "#define":
+            defines[parts[1]] = parts[2].rstrip("u")
+    gpio = esp32c3.GPIO
+    assert int(defines["OH_GPIO_OUT_W1TS"], 16) == gpio + esp32c3.GPIO_OUT_W1TS
+    assert int(defines["OH_GPIO_OUT_W1TC"], 16) == gpio + esp32c3.GPIO_OUT_W1TC
+    assert int(defines["OH_GPIO_ENABLE_W1TS"], 16) == (
+        gpio + esp32c3.GPIO_ENABLE_W1TS)
+    assert int(defines["OH_GPIO_ENABLE_W1TC"], 16) == (
+        gpio + esp32c3.GPIO_ENABLE_W1TC)
+    assert int(defines["OH_STACK_TOP"], 16) == (
+        esp32c3.DRAM + esp32c3.DRAM_SIZE - 16)
+
+    script = (variant / "link.ld").read_text(encoding="utf-8")
+    assert f"ORIGIN = 0x{esp32c3.IROM:08X}" in script
+    assert f"ORIGIN = 0x{esp32c3.DRAM:08X}" in script

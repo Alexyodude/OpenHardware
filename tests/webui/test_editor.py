@@ -118,14 +118,16 @@ def test_a_failed_build_leaves_the_board_exactly_as_it_was():
 
 def test_a_board_with_no_recipe_is_refused_by_name():
     """Refused before anything is compiled, and the answer names the chip --
-    which is the actionable half."""
+    which is the actionable half. The example board moved from a C3 to an
+    RP2040 when OH-148 gave the C3 a recipe: the property is the refusal
+    naming the chip, and a chip gaining a row moves the example."""
     slot = emulator_server.BoardSlot()
     with pytest.raises(emulator_server.ApiError) as caught:
         emulator_server.handle_board_api(
             slot, "/api/board/compile", {},
-            {"board": "XIAO-ESP32-C3-DIP", "source": GOOD},
+            {"board": "XIAO-RP2040-DIP", "source": GOOD},
         )
-    assert "ESP32-C3" in str(caught.value)
+    assert "RP2040" in str(caught.value)
 
 
 def test_a_request_without_a_source_is_refused():

@@ -68,7 +68,7 @@ import tempfile
 import time
 
 from webui.boards import catalogue as board_catalogue
-from webui.boards import samd21
+from webui.boards import esp32c3, samd21
 
 #: Where PlatformIO puts the toolchains and frameworks.
 #:
@@ -80,6 +80,16 @@ PACKAGES = pathlib.Path(
     os.environ.get("PLATFORMIO_CORE_DIR")
     or pathlib.Path(os.environ.get("USERPROFILE", pathlib.Path.home()), ".platformio")
 ) / "packages"
+
+#: The Arduino core this repository writes itself (OH-148), because no
+#: vendor's can execute on the described boards: Espressif's is a face on
+#: ESP-IDF, which boots FreeRTOS and calls a mask ROM, and Arduino's RP2040
+#: core is a face on mbed -- so an image built on either stops in its first
+#: hundred instructions, and a Build whose output does not run is the false
+#: affordance OH-140 removed. `webui/arduino/` implements exactly what the
+#: board descriptions model, bare-metal, the way the blink fixtures are
+#: built; its own header says the rest.
+ARDUINO_LITE = pathlib.Path(__file__).resolve().parent / "arduino"
 
 #: Where the board-support packages this project fetches itself live.
 #:
@@ -235,6 +245,13 @@ class Recipe:
 
 #: One recipe per chip, keyed as `webui/boards/catalogue.py` spells the chip.
 #:
+#: **Two KINDS of row.** The Uno and SAMD21 build the vendor's own Arduino
+#: core, because those cores run bare on the modelled parts. The ESP32 rows
+#: build `webui/arduino/` instead -- the vendor's cannot run without the
+#: RTOS and ROM nothing here models -- while the vendor still supplies what
+#: a vendor honestly can: the board's own `pins_arduino.h`, riding in
+#: through `extra_includes`, so `D10` is Seeed's number and not a copy.
+#:
 #: **Two rows, and the second one is why `Recipe` has the shape it has.** The
 #: flags in neither are guessed: each row is what a test in this repository has
 #: been building real sketches with, and the second copy is deliberate for the
@@ -242,16 +259,17 @@ class Recipe:
 #: board and this proves the service, and coupling them would make a compiler
 #: bug fail a core test.
 #:
-#: **Twelve boards are runnable and this builds for three of them**, over two
-#: chips, because `recipe_for` keys on the *chip*: one SAMD21 row serves both
-#: the DIP and the SMD, and the Uno row serves itself. Counted rather than
-#: estimated -- an earlier version of this comment said four, from adding the
-#: rows to the boards.
+#: **Fourteen boards are runnable and this builds for six of them**, over
+#: three chips, because `recipe_for` keys on the *chip*: one SAMD21 row
+#: serves both the DIP and the SMD, one ESP32-C3 row serves its three
+#: boards, and the Uno row serves itself. Counted rather than estimated --
+#: an earlier version of this comment said four, from adding the rows to
+#: the boards.
 #:
-#: The nine without a row are seven ESP32s across three chips and two RP2040s,
-#: and `recipe_for` names the chip rather than failing to find a compiler. The
-#: RP2040 pair is the cheapest of the two remaining pieces of work: the core
-#: already runs them, so it needs a framework rather than a core.
+#: The six without a row are the C5 and C6 pairs and the two RP2040s, all
+#: waiting on the same `openhardware` framework the C3 row uses --
+#: variants, not mechanisms -- and `recipe_for` names the chip rather than
+#: failing to find a compiler.
 RECIPES: dict[str, Recipe] = {
     "ATmega328P": Recipe(
         toolchain="toolchain-atmelavr",
@@ -306,6 +324,71 @@ RECIPES: dict[str, Recipe] = {
                      "libraries/Wire/src/utility/twi.c")),
         ),
         hints=(),
+    ),
+    "ESP32-C3": Recipe(
+        toolchain="toolchain-riscv32-esp",
+        prefix="riscv32-esp-elf-",
+        # The repository's own core (see ARDUINO_LITE): the API surface is
+        # exactly what webui/boards/esp32c3.py maps, and each absence a
+        # sketch can reach for has a hint below naming the model decision.
+        framework="openhardware",
+        core="cores/openhardware",
+        variant="variants/xiao_esp32c3",
+        # RV32IMC: the C3's own ISA string, the same subset the emulator is
+        # configured as. No F_CPU define -- this model claims no clock, and
+        # the delay constant in oh_board.h says what kind of number it is.
+        flags=(
+            "-march=rv32imc", "-mabi=ilp32",
+            "-Os", "-ffunction-sections", "-fdata-sections",
+        ),
+        cxx_flags=("-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics"),
+        # Bare metal, like the blink fixtures: no crt0, no libc start files;
+        # the core's own _start is the entry and link.ld keeps it first.
+        link_flags=(
+            "-march=rv32imc", "-mabi=ilp32", "-Os",
+            "-nostartfiles", "-nostdlib", "-Wl,--gc-sections",
+        ),
+        core_sources=("main.c", "wiring.c"),
+        base=esp32c3.IROM,
+        variant_package="",
+        linker_script="link.ld",
+        # The vendor's own pin names for this exact board -- a freestanding
+        # header of constants (#include <stdint.h> and nothing else), so
+        # using it costs no RTOS and no transcription.
+        extra_includes=(
+            "framework-arduinoespressif32/variants/XIAO_ESP32C3",
+        ),
+        libraries=(),
+        # Every hint names the modelling decision the absence stands on, in
+        # the pane the person is looking at (the OH-138 pattern).
+        hints=(
+            ("digitalRead",
+             ("digitalRead does not exist on this board's model: "
+             "webui/boards/esp32c3.py leaves GPIO_IN unmapped on purpose -- "
+             "on a driven pin IN follows OUT, and a stored zero would "
+             "answer firmware wrongly. The build fails rather than lie.")),
+            ("millis",
+             ("millis needs a timer and nothing on this board's model is "
+             "one; delay() exists, as a counted loop whose cost "
+             "webui/arduino/variants/xiao_esp32c3/oh_board.h states.")),
+            ("micros",
+             ("micros needs a timer and nothing on this board's model is "
+             "one; delay() exists, as a counted loop whose cost "
+             "webui/arduino/variants/xiao_esp32c3/oh_board.h states.")),
+            ("Serial",
+             ("Serial does not exist on this board's model: no UART is "
+             "mapped, so there is nowhere for the bytes to go. The board "
+             "console pane only shows what a modelled UART transmitted.")),
+            ("analogWrite",
+             ("analogWrite needs the LEDC peripheral and this board's model "
+             "maps GPIO only.")),
+            ("analogRead",
+             ("analogRead needs the ADC and this board's model maps GPIO "
+             "only.")),
+            ("attachInterrupt",
+             ("this model has no interrupt controller; the emulated core "
+             "executes straight-line code only.")),
+        ),
     ),
     "SAMD21": Recipe(
         toolchain="toolchain-gccarmnoneeabi",
@@ -461,7 +544,20 @@ def toolchain_root(recipe: Recipe) -> pathlib.Path:
 
 
 def framework_root(recipe: Recipe) -> pathlib.Path:
-    """Where the vendor core is, or a refusal naming the package."""
+    """Where the core is, or a refusal naming the package.
+
+    `openhardware` is the one framework that does not come from PlatformIO:
+    it is this repository's own tree, present whenever the checkout is --
+    see `ARDUINO_LITE`.
+    """
+    if recipe.framework == "openhardware":
+        root = ARDUINO_LITE
+        if not (root / recipe.core).is_dir():
+            raise ToolchainMissing(
+                f"no {recipe.core} under {root}; the checkout is missing its "
+                f"own webui/arduino tree"
+            )
+        return root
     root = PACKAGES / recipe.framework
     if not (root / recipe.core).is_dir():
         raise ToolchainMissing(
