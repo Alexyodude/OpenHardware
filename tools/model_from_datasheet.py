@@ -339,6 +339,17 @@ def _named_float(text: str) -> float:
 #: a pitch for a length, say -- misses by millimetres and not by a quarter.
 NAMED_BODY_TOLERANCE_MM = 0.5
 
+#: Two readings each shared by several of the packages below, named rather
+#: than retyped -- the argument `_NO_CHIP_SCALE_MOSFET` makes in
+#: `tools/compose_board_3d.py` about the same problem: writing one reason
+#: twice is how the two copies come to disagree.
+_MOULDED_IC = (
+    "moulded black plastic and epoxy, `tools/import_3d_model.py`'s own "
+    "`FINISHES['#050505']` -- the same reading the QFNs' encapsulant takes, "
+    "and these are the same kind of moulded IC body"
+)
+_BARE_DIE = "a bare silicon die, as the WLCSP-47 and WLCSP-20 above"
+
 SLABS: tuple[ModelledSlab, ...] = (
     # --- OH-150: the small silicon, which OH-104 deferred rather than
     # refused --------------------------------------------------------------
@@ -378,7 +389,7 @@ SLABS: tuple[ModelledSlab, ...] = (
         package="WLCSP4-0.4-0.77X0.77X0.33MM",
         pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
         colour="#272b27",
-        colour_source="a bare silicon die, as the WLCSP-47 and WLCSP-20 above",
+        colour_source=_BARE_DIE,
         why_not_fetched=(
             "four balls at a 0.4 mm pitch under a 0.77 mm square die, on "
             "seven placements across the ESP32-C5, the nRF54L15 and the "
@@ -393,7 +404,7 @@ SLABS: tuple[ModelledSlab, ...] = (
         package="WLCSP-0.4-0.92X1.16X0.4MM",
         pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
         colour="#272b27",
-        colour_source="a bare silicon die, as the WLCSP-47 and WLCSP-20 above",
+        colour_source=_BARE_DIE,
         why_not_fetched=(
             "SGMICRO's SGM40567 Li-Ion charger, on all four boards that "
             "carry one. **Its name states no ball count**, unlike its "
@@ -408,7 +419,7 @@ SLABS: tuple[ModelledSlab, ...] = (
         package="BGA6-0.35-0.85X1.2X0.4MM",
         pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
         colour="#272b27",
-        colour_source="a bare silicon die, as the WLCSP-47 and WLCSP-20 above",
+        colour_source=_BARE_DIE,
         why_not_fetched=(
             "a buck converter on the ESP32-C5 and the nRF54L15 -- SGMICRO's "
             "SGM6029 and TI's TPS628438 -- whose own Descriptions call the "
@@ -423,7 +434,7 @@ SLABS: tuple[ModelledSlab, ...] = (
         package="DFN6-0.4-1.1X0.7X0.45MM",
         pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
         colour="#050505",
-        colour_source="moulded black plastic and epoxy, `tools/import_3d_model.py`'s own `FINISHES['#050505']` -- the same reading the QFNs' encapsulant takes, and this is the same kind of moulded IC body",
+        colour_source=_MOULDED_IC,
         why_not_fetched=(
             "six leads on a 0.4 mm pitch, on the ESP32-C6 and the "
             "nRF54L15. The name says 1.1 x 0.7 mm and Seeed's own "
@@ -439,7 +450,7 @@ SLABS: tuple[ModelledSlab, ...] = (
         package="DFN6-0.5-1.45X1X0.6",
         pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
         colour="#050505",
-        colour_source="moulded black plastic and epoxy, `tools/import_3d_model.py`'s own `FINISHES['#050505']` -- the same reading the QFNs' encapsulant takes, and this is the same kind of moulded IC body",
+        colour_source=_MOULDED_IC,
         why_not_fetched=(
             "six leads on a 0.5 mm pitch, on the RP2350 and the nRF54L15. "
             "**The only name in this file that states no unit at all** -- "
@@ -454,7 +465,7 @@ SLABS: tuple[ModelledSlab, ...] = (
         package="SOT8_0d5_2_1x1_2x0_6mm",
         pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C5.kicad_pcb",
         colour="#050505",
-        colour_source="moulded black plastic and epoxy, `tools/import_3d_model.py`'s own `FINISHES['#050505']` -- the same reading the QFNs' encapsulant takes, and this is the same kind of moulded IC body",
+        colour_source=_MOULDED_IC,
         why_not_fetched=(
             "TI's TPS2116 power mux, U8 on the ESP32-C5, and **the name "
             "that made this file learn a second decimal point**: Seeed "
@@ -471,7 +482,7 @@ SLABS: tuple[ModelledSlab, ...] = (
         package="X2SON4-0.625-1x1x0.6mm",
         pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
         colour="#050505",
-        colour_source="moulded black plastic and epoxy, `tools/import_3d_model.py`'s own `FINISHES['#050505']` -- the same reading the QFNs' encapsulant takes, and this is the same kind of moulded IC body",
+        colour_source=_MOULDED_IC,
         why_not_fetched=(
             "SGMICRO's SGM2040 LDO, U3 on the nRF54L15, and the first name "
             "here to spell its unit in lower case. Two vendors name the "
