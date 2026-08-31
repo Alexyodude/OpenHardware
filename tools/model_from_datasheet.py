@@ -445,10 +445,14 @@ SLABS: tuple[ModelledSlab, ...] = (
         colour_source=_MOULDED_IC,
         why_not_fetched=(
             "six leads on a 0.4 mm pitch, on the ESP32-C6 and the "
-            "nRF54L15. The name says 1.1 x 0.7 mm and Seeed's own "
-            "Description says `DFN-6(0.7x1.1)` -- the same rectangle read "
-            "the other way round, which is why the F.Fab cross-check "
-            "sorts both pairs before comparing them. KiCad's "
+            "nRF54L15. The name says 1.1 x 0.7 mm, its own Description "
+            "agrees (`DFN-6(0.7x1.1)`, the same rectangle the other way "
+            "round, which the sorted cross-check makes equivalent), and "
+            "the F.Fab measures 0.96 x 1.32 -- so the two vendor "
+            "statements agree with each other and sit 0.260 mm from the "
+            "drawing, the widest gap of any row here and still half the "
+            "tolerance. The body drawn is the F.Fab's; only the height "
+            "comes from the name. KiCad's "
             "Package_DFN_QFN holds 191 files, six of them DFN-6, listed "
             "2026-08-31 -- and every one of the six is larger than this "
             "1.1 x 0.7 mm part in both dimensions."

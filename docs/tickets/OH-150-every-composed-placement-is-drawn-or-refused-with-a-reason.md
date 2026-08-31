@@ -38,8 +38,12 @@ green.
 ---
 
 **CLOSED 2026-08-31.** `compose --check` exits 0 over all eleven boards
-with **no "no model" line anywhere** -- 191 unaccounted placements to
-zero. Sixteen read-only scouts produced the evidence
+with **no "no model" line anywhere** -- 220 unaccounted placements to
+zero. (This note first said 191, which was simply wrong: the parent
+commit's own report gives 11 + 18 + 28 + 22 + 31 = 110 per variant set,
+and every board is composed twice, DIP and SMD. Corrected after review;
+the commit message for b9d6bd8 carries the wrong figure and cannot be
+amended.) Sixteen read-only scouts produced the evidence
 (`.omc/research/unmodelled/`); the integration was serial because every
 row lands in the same two tables.
 

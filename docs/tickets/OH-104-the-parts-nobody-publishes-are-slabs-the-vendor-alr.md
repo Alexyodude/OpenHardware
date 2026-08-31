@@ -131,12 +131,17 @@ person notices, and each is another judgement to keep true.
 > the test points and logos as bodies that do not exist, and
 > `BGA6-0.35-0.745X10.95X0.4MM` because its own name is wrong.
 >
-> One statement above is now doubtful on its own terms: this ticket says the
-> button's "name states none and no layer carries one", and the C3's
-> `BUTTON_TD1183SA` Description reads `2P-L3.0*W2.5*H1.5mm`. A property is
-> not a layer, so the sentence is defensible as written -- but the height it
-> calls missing is stated in the file. OH-150 deliberately did not act on
-> that; it wants its own ticket.
+> One statement above is doubtful on its own terms, though narrowly than
+> first written here: this ticket says the button's "name states none and no
+> layer carries one", and on the **nRF54L15** the same package's K1 and K2
+> carry `SMD Top Button 160gf;2P-L3.0*W2.5*H1.5mm`. The **ESP32-C3's** BOOT0
+> and RST0 -- the placements this refusal is actually about -- have EMPTY
+> Descriptions, so for the C3 the sentence is exactly true. (An earlier
+> version of this note put the string on the C3, which was wrong: a fresh
+> error made while correcting another one, caught in review.) A property is
+> not a layer either way. OH-150 deliberately did not act on this; it wants
+> its own ticket, and that ticket must also update
+> `tests/rules/test_compose_board_3d.py`, which pins the "no height" wording.
 
 8 new tests. Gate: 1,800 -> 1,804 passed, 17 skipped; all eight checkers
 exit 0. `ruff check tools/` reports the same 38 findings before and after.

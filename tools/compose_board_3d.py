@@ -630,8 +630,9 @@ CORRESPONDENCE: tuple[Component, ...] = (
     # --- OH-150: three chip diodes, in bodies their neighbours already
     # borrow -----------------------------------------------------------------
     #
-    # **KiCad publishes no 0201 or 0402 chip diode at all** -- Diode_SMD's
-    # smallest is an 0603, checked against the library's own listing -- so
+    # **KiCad publishes no 0201 or 0402 chip diode at all** -- Diode_SMD
+    # holds 39 files, listed 2026-08-31, and its smallest chip diode is an
+    # 0603 -- so
     # the choice is a resistor's moulding of exactly the right land pattern
     # or nothing. This table already makes that trade twice, for Z1/Z2's
     # varistor and F1's fuse: the PART is a diode and only the moulding is
@@ -872,24 +873,26 @@ ABSENT: dict[str, str] = {
         "look for."
     ),
     "BGA6-0.35-0.745X10.95X0.4MM": (
-        "the ESP32-C6's and RP2350's load switch, and **the one package "
-        "here whose own name is wrong**. It states 0.745 x 10.95 mm; the "
-        "footprint's own F.Fab measures 1.200 x 0.840 mm on both boards, "
-        "which is 9.750 mm apart -- a six-ball chip-scale part is not "
-        "eleven millimetres long, and the sibling `BGA6-0.35-0.85X1.2X0.4MM` "
-        "on the C5 and nRF54L15 shows what the name should have read. "
-        "The plan could be measured and drawn; the HEIGHT could not. It "
-        "exists only in that same name, and a name that is wrong about the "
-        "dimension a layer can check cannot be trusted for the one no "
-        "layer carries -- which is the whole argument `slab_geometry` "
-        "makes, and it refuses this package by it. **Nor can the "
-        "Description rescue it**, which is the other place OH-150 taught "
-        "that function to look: this footprint's reads `SMD IC PMIC;DCDC "
-        "Buck-ADJ-1A,Vin 1.95V to 5.5V,Vout 1.8V to 3.3V;WLCSP-6B` and "
-        "states no dimension at all, where the sibling it should have "
-        "matched states three. What retires this is one corrected name "
-        "from Seeed, or a height from the part's datasheet. No KiCad "
-        "library was searched: the model was never the problem."
+        "the ESP32-C6's U1, a DCDC buck converter by its own Description, "
+        "and **the one package here whose own name is wrong**: it states "
+        "0.745 x 10.95 mm where this footprint's F.Fab measures "
+        "0.840 x 1.200, which is 9.750 mm apart -- a six-ball chip-scale "
+        "part is not eleven millimetres long. **Every fact needed to draw "
+        "it exists, and saying otherwise would be the easy refusal rather "
+        "than the true one**: the ESP32-C5 places the same chip -- a "
+        "byte-identical Description, `DCDC Buck-ADJ-1A ... WLCSP-6B` -- "
+        "under the sound name `BGA6-0.35-0.85X1.2X0.4MM`, whose plan "
+        "agrees with THIS board's F.Fab to 0.010 mm, and both names end "
+        "`X0.4MM`, so even the height is stated twice. What is missing is "
+        "a MECHANISM rather than a number: `ModelledSlab` gives one "
+        "string two jobs -- the key that finds the footprint and the text "
+        "`_NAMED_BODY` reads dimensions out of -- and drawing this part "
+        "needs them separated, a believed name beside the literal one, "
+        "which would have exactly one caller here. This repository's own "
+        "rules say not to build that. So the refusal is a judgement about "
+        "scope and it lasts only until a second such part arrives or "
+        "Seeed correct the string. No KiCad library was searched: the "
+        "model was never the problem."
     ),
     "TP-D45MIL": (
         "36 test points across all five KiCad XIAOs, each a bare "
