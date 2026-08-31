@@ -305,16 +305,35 @@ class ModelledSlab:
 #: ESP32-C5's SOT8 writes `0_6mm`, and spells its pitch `0d5` in the same
 #: breath. A dimension is the same fact however it was punctuated, so the
 #: pattern accepts all three rather than this file holding a table of
-#: vendor typography -- and `NAMED_BODY_TOLERANCE_MM` below is what makes
-#: widening it safe: a pattern that matched the wrong substring would miss
-#: the footprint's own plan by millimetres and be refused.
+#: vendor typography.
 #:
-#: The unit is optional for the same reason and with the same protection:
-#: the RP2350's `DFN6-0.5-1.45X1X0.6` states three dimensions and no `mm`
-#: at all. What anchors the match is not the unit but the two `x`
-#: separators, and every one of the eleven names this file holds parses to
-#: the same three numbers with the unit optional as with it required --
-#: checked, not assumed.
+#: **What `NAMED_BODY_TOLERANCE_MM` protects, stated exactly, because this
+#: comment used to overstate it** (OH-152). `slab_geometry` compares two
+#: numbers and not three: groups 1 and 2 are sorted against the footprint's
+#: own `F.Fab` plan, and group 3 -- the height -- is compared to nothing.
+#: It cannot be. The height is the one dimension a land pattern cannot
+#: express, which is the premise this whole file rests on; there is no
+#: second source to check it against.
+#:
+#: So the tolerance proves the pattern locked onto the RIGHT SUBSTRING --
+#: a pitch mistaken for a length misses the plan by millimetres and is
+#: refused -- and that is what makes widening the pattern safe. That the
+#: third number is a THICKNESS rather than a lead count or a second pitch
+#: rides on the vendor writing their own name in the order they say they
+#: do, and on nothing here. Every name below has been read to confirm it,
+#: which is a different and weaker thing than a check.
+#:
+#: The unit is optional under exactly that argument, and it is worth being
+#: honest about how little it changed: of the sixteen `SLABS` rows, fifteen
+#: parse from their name (the CAF states no dimensions in its at all and
+#: comes from its `Description`), and making `MM` optional changes exactly
+#: ONE of them -- the RP2350's `DFN6-0.5-1.45X1X0.6`, which with the unit
+#: required matches nothing whatever. The other fourteen parse identically
+#: either way. What anchors a match is the two `x` separators, not the
+#: unit. (An earlier version of this paragraph said all eleven names parsed
+#: the same with the unit optional as with it required, which was both the
+#: wrong count and an argument against its own change: had it been true,
+#: there would have been no reason to make the unit optional.)
 _NAMED_NUMBER = r"\d+(?:[._d]\d+)?"
 _NAMED_BODY = re.compile(
     rf"({_NAMED_NUMBER})[xX]({_NAMED_NUMBER})[xX]({_NAMED_NUMBER})(?:MM)?",
@@ -354,7 +373,7 @@ _MOULDED_IC = (
     "`FINISHES['#050505']` -- the same reading the QFNs' encapsulant takes, "
     "and these are the same kind of moulded IC body"
 )
-_BARE_DIE = "a bare silicon die, as the WLCSP-47 and WLCSP-20 above"
+_BARE_DIE = "a bare silicon die, as the WLCSP-47 and WLCSP-20 below"
 
 SLABS: tuple[ModelledSlab, ...] = (
     # --- OH-150: the small silicon, which OH-104 deferred rather than
@@ -483,8 +502,9 @@ SLABS: tuple[ModelledSlab, ...] = (
         colour_source=_MOULDED_IC,
         why_not_fetched=(
             "six leads on a 0.5 mm pitch, on the RP2350 and the nRF54L15. "
-            "**The only name in this file that states no unit at all** -- "
-            "`1.45X1X0.6` and nothing after it -- which is why `_NAMED_BODY` "
+            "**The only name here that states three dimensions and no "
+            "unit** -- `1.45X1X0.6` and nothing after it -- which is why "
+            "`_NAMED_BODY` "
             "takes the `mm` as optional; both boards' F.Fab measure "
             "1.460 x 1.000 mm, agreeing with the name to 0.010 mm and "
             "settling that the three numbers are millimetres. Of the six "
@@ -517,8 +537,10 @@ SLABS: tuple[ModelledSlab, ...] = (
         colour="#050505",
         colour_source=_MOULDED_IC,
         why_not_fetched=(
-            "SGMICRO's SGM2040 LDO, U3 on the nRF54L15, and the first name "
-            "here to spell its unit in lower case. Two vendors name the "
+            "SGMICRO's SGM2040 LDO, U3 on the nRF54L15, and the SECOND "
+            "name here to spell its unit in lower case -- the SOT8 directly "
+            "above ends in a lower-case `mm` too, and this row claimed to "
+            "be the first until OH-152 read the order. Two vendors name the "
             "same body two ways -- SGMICRO's Description says "
             "`UTDFN-1x1-4AL`, Seeed's footprint says `X2SON4` -- and "
             "neither name is one KiCad's library holds. Its "
@@ -1059,6 +1081,11 @@ def slab_geometry(spec: ModelledSlab) -> dict[str, object]:
     named = _NAMED_BODY.search(spec.package)
     if named is not None:
         length, width, height = (_named_float(g) for g in named.groups())
+        #: Which vendor field these three came from, so the refusal below
+        #: sends a reader to the string that was actually misread.
+        #: `socket_geometry` has always done this; this branch said "its
+        #: name" on both paths until OH-152.
+        stated_by = "its name"
     else:
         # **The same three numbers, in the other field the vendor writes them
         # in** (OH-150). The ESP32-C5's diplexer is named `CAF-50P160X80-6N`
@@ -1086,16 +1113,17 @@ def slab_geometry(spec: ModelledSlab) -> dict[str, object]:
                 f"draw."
             )
         length, width, height = (float(g) for g in stated.groups())
+        stated_by = "its Description"
 
     drawn = sorted((body[2] - body[0], body[3] - body[1]))
     claimed = sorted((length, width))
     apart = max(abs(a - b) for a, b in zip(drawn, claimed))
     if apart > NAMED_BODY_TOLERANCE_MM:
         raise SystemExit(
-            f"{spec.package}: its name says {length} x {width} mm and its "
-            f"F.Fab measures {drawn[1]:.3f} x {drawn[0]:.3f}, which are "
-            f"{apart:.3f} mm apart. Either the name was read wrongly or it "
-            f"does not describe this footprint; do not draw either."
+            f"{spec.package}: {stated_by} says {length} x {width} mm and "
+            f"its F.Fab measures {drawn[1]:.3f} x {drawn[0]:.3f}, which are "
+            f"{apart:.3f} mm apart. Either {stated_by} was read wrongly or "
+            f"it does not describe this footprint; do not draw either."
         )
     #: Y negated into the composer's frame, as `pack_geometry` does and for the
     #: same reason. A slab is symmetric so it cannot show, and the next one

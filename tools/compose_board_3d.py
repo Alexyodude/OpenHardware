@@ -657,8 +657,16 @@ CORRESPONDENCE: tuple[Component, ...] = (
     Component(
         "DFN1006-2L", "Diode_SMD", "D_SOD-882",
         "five placements over three boards -- D1 and D3 on the ESP32-C6 "
-        "and the RP2350, D4 on the nRF54L15 -- sharing footprint UUIDs, so "
-        "one drawing rather than five. Two pads 0.70 mm between centres. "
+        "and the RP2350, D4 on the nRF54L15 -- of which FOUR share their "
+        "drawing and the fifth does not (OH-152, correcting this row): the "
+        "two D3s are both footprint uuid 74280228-6770-4ef7-a3f6-"
+        "1b9b72be3acb and the two D1s both ca26a40d-c599-4020-9350-"
+        "0c2ef85f72bb, while the nRF54L15's D4 is its own, and drawn to a "
+        "different size -- F.Fab 1.321 x 0.711 mm against the others' "
+        "0.749 x 0.508. Nothing here changes for that, because this row "
+        "borrows a KiCad body at the body's own size rather than measuring "
+        "the footprint; a row that DID measure would have to pick one. "
+        "Two pads 0.70 mm between centres. "
         "**This is the one row where the vendor names the industry outline "
         "rather than their own**: the C6's Description reads `SMD Diode "
         "Schottky 40V-1A;SOD-882`, which is the KiCad body used here, "
