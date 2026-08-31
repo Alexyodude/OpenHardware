@@ -91,3 +91,28 @@ ABSENT text says Seeed "states no height for it, in the footprint name
 or on any layer" -- but its own Description reads `2P-L3.0*W2.5*H1.5mm`.
 `_STATED_ENVELOPE` cannot parse that form, so nothing changed silently
 and the button stays refused; the justification wants its own ticket.
+
+**A correction to this ticket's own work, made before it was reviewed**
+(f63cb37). Five of the sentences that landed with the rows above could not
+be re-run against the library they named -- the failure this repository's
+own ABSENT tests exist to prevent, arrived through prose rather than
+through code. Checked against the fifteen KiCad library listings cached
+under `%TEMP%/kicad3d`, not against the research that produced them:
+
+  * two rows put thirteen DFN-6 files in `Package_DFN_QFN`. It holds 191
+    files, six of them DFN-6.
+  * the WLCSP4 row named a WLCSP-6 of twice the area as the nearest part.
+    `Package_CSP`'s 34 files hold no WLCSP under twenty balls at all.
+  * the SOT8 row named `Package_SO`, which this repository has never
+    listed. `Package_TO_SOT_SMD` has been, and its 79 files hold six
+    eight-lead parts, none a 2.1 x 1.2 mm body.
+  * the CAF row counted a KiCad filter library likewise never listed here.
+    It now says so: that part is drawn because the vendor states every
+    dimension three times over, not because a search came up empty.
+
+What was checkable held: `Diode_SMD`'s 39 files contain no 0201 or 0402
+diode and do contain `D_SOD-882`, and onsemi's `XDFN4-1EP_1.0x1.0mm` is
+the near-miss the X2SON4 row describes.
+
+Worth keeping as a lesson: a research subagent's confident sentence reads
+exactly like a measured one, and only the re-run tells them apart.
