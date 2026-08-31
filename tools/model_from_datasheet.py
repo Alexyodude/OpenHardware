@@ -329,6 +329,12 @@ def _named_float(text: str) -> float:
     `_` inside a numeric string as a digit separator, so `float("2_1")` is
     21.0 rather than 2.1 -- a SOT8's 2.1 mm body would parse as a 21 mm one,
     clear the regex, and be caught only by the F.Fab cross-check below.
+
+    It raises rather than guessing on a group holding two separators, and
+    `_NAMED_NUMBER` admits at most one, so that cannot happen today. It is
+    written down because widening the pattern is what would make it happen:
+    `1_2_3` becomes `1.2.3`, which is not a number, and a loud failure is
+    the right one.
     """
     return float(text.replace("_", ".").replace("d", ".").replace("D", "."))
 
