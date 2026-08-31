@@ -371,9 +371,15 @@ SLABS: tuple[ModelledSlab, ...] = (
         pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C5.kicad_pcb",
         colour="#c6c4a0",
         colour_source=(
-            "a multilayer ceramic filter is a ceramic block, the same "
-            "off-white the chip antenna above takes from "
-            "`tools/import_3d_model.py`'s FINISHES"
+            "a multilayer ceramic filter is a ceramic block, and this "
+            "off-white is the nearest reading available rather than a "
+            "ceramic one. **FINISHES has no ceramic entry**: "
+            "`tools/import_3d_model.py` documents this exact value as the "
+            "tactile switch's metal cover at metalness 1.0, so this part "
+            "draws shinier than a ceramic block should. Taken knowingly. "
+            "The ANT2P row above makes the same borrow while saying "
+            "FINISHES already gives ceramic, which it does not; one "
+            "ceramic entry would retire both"
         ),
         why_not_fetched=(
             "the diplexer that puts the ESP32-C5's 2.4 and 5 GHz paths on "
@@ -384,8 +390,10 @@ SLABS: tuple[ModelledSlab, ...] = (
             "a millimetre and no thickness, while the Description says "
             "`SMD IC Diplexer;1.6*0.8*0.7mm`. Three vendor statements of "
             "that plan agree to 0.000 mm -- the name, the F.Fab outline and "
-            "the Description -- which is tighter than any other row in this "
-            "file. **No KiCad filter library is among the fifteen this "
+            "the Description -- which TIES the tightest agreement in this "
+            "file rather than beating it: ANT2P, IPEX, LED4-0.8, X2SON4 and "
+            "the sibling BGA6 all reach 0.000 too. **No KiCad filter "
+            "library is among the fifteen this "
             "repository has listed**, so the search that refuses a "
             "near-miss elsewhere in this table has not been run for this "
             "part: what draws it is the vendor stating every dimension "
@@ -400,10 +408,12 @@ SLABS: tuple[ModelledSlab, ...] = (
         why_not_fetched=(
             "four balls at a 0.4 mm pitch under a 0.77 mm square die, on "
             "seven placements across the ESP32-C5, the nRF54L15 and the "
-            "RP2350. KiCad's Package_CSP holds 34 files, listed 2026-08-31, "
-            "and not one is a WLCSP of any ball count under twenty -- the "
-            "only wafer-level part in it is a 20-ball 1.7 x 2.1 mm Diodes "
-            "Inc. array. Two different chips share this land pattern -- TI's "
+            "RP2350. KiCad's Package_CSP holds 34 files, 15 of them "
+            "WLCSPs, listed 2026-08-31; the nearest by ball count is "
+            "`WLCSP-6_1.46x1.1mm_Layout3x2_P0.4mm`, which is 1.61 mm2 "
+            "against this part's 0.59 -- nearly three times the area, and "
+            "six balls where this has four. Two different chips share this "
+            "land pattern -- TI's "
             "TPS22916 and a 6SIGMA SX1801CCR -- and neither vendor "
             "publishes a mesh."
         ),
@@ -419,8 +429,11 @@ SLABS: tuple[ModelledSlab, ...] = (
             "WLCSP4/WLCSP20/WLCSP47 siblings above: Seeed's own "
             "Description says `WLCSP-6B-0.92*1.16` and the six pads -- "
             "three rows of two on a 0.4 mm pitch -- confirm it "
-            "independently. KiCad's Package_CSP holds 34 files and none "
-            "is six balls."
+            "independently. **KiCad does hold a six-ball part and it is "
+            "still the wrong one**: `WLCSP-6_1.46x1.1mm_Layout3x2_P0.4mm`, "
+            "the same 3x2 layout at the same 0.4 mm pitch, is 1.46 mm long "
+            "against this footprint's 0.92 -- 0.54 mm over, which is past "
+            "the half-millimetre this file trusts a body to within."
         ),
     ),
     ModelledSlab(
@@ -433,8 +446,13 @@ SLABS: tuple[ModelledSlab, ...] = (
             "SGM6029 and TI's TPS628438 -- whose own Descriptions call the "
             "body a WLCSP-6B and a DSBGA, so the `BGA6` prefix names a bare "
             "die rather than a moulded package. Six balls on a 0.35 mm "
-            "pitch; KiCad's Package_CSP holds no six-ball part near "
-            "0.85 x 1.2 mm. Both boards name a `Y:/01_Cadence_Library/...` "
+            "pitch, and **the near-miss has to be refused on the pitch "
+            "rather than the size**: KiCad's "
+            "`WLCSP-6_1.46x1.1mm_Layout3x2_P0.4mm` sorts to within 0.26 mm "
+            "of this body, inside the half-millimetre this file trusts, "
+            "but its balls sit 0.4 mm apart where these sit 0.35 -- the "
+            "same ground the QFN-56 is refused on. Both boards name a "
+            "`Y:/01_Cadence_Library/...` "
             "path for the step file, which is a drive on somebody's desk."
         ),
     ),
@@ -487,10 +505,10 @@ SLABS: tuple[ModelledSlab, ...] = (
             "layers agree the plan is 2.1 x 1.2 -- F.Fab, F.CrtYd and a "
             "User.1 rectangle -- and eight pads in two columns of four, "
             "0.5 mm apart within a column, confirm the pitch. TI publish "
-            "no mesh; KiCad's Package_TO_SOT_SMD holds 79 files, listed "
-            "2026-08-31, of which six are eight-lead -- an SC-70-8, a "
-            "SOT-23-8, a SOT-223-8, a SOT-583-8, a SuperSOT-8 and an "
-            "Infineon PG-HSOF-8, none of them a 2.1 x 1.2 mm body."
+            "no mesh; KiCad's Package_TO_SOT_SMD holds 78 models, listed "
+            "2026-08-31, of which eight are eight-lead. The nearest is "
+            "`TSOT-23-8` at about 2.9 x 1.6 mm -- half as long again as "
+            "this 2.1 x 1.2 mm body, refused on size as the QFN-56 is."
         ),
     ),
     ModelledSlab(

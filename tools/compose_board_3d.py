@@ -698,7 +698,7 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "MODELLED, not matched: the buck converter's bare die, which both "
         "boards' own Descriptions call a WLCSP-6B and a DSBGA. Its F.Fab "
         "measures 0.850 x 1.200 mm and its name says the same, agreeing to "
-        "0.000 mm -- the tightest of any row here.",
+        "0.000 mm, which several rows here reach and none beats.",
         modelled=True,
     ),
     Component(
@@ -875,8 +875,12 @@ ABSENT: dict[str, str] = {
     "BGA6-0.35-0.745X10.95X0.4MM": (
         "the ESP32-C6's U1, a DCDC buck converter by its own Description, "
         "and **the one package here whose own name is wrong**: it states "
-        "0.745 x 10.95 mm where this footprint's F.Fab measures "
-        "0.840 x 1.200, which is 9.750 mm apart -- a six-ball chip-scale "
+        "0.745 x 10.95 mm where the drawing says about 0.85 x 1.2 -- "
+        "**and the two boards say it on different layers**: the RP2350's "
+        "F.Fab rectangle gives 0.850 x 1.200, while the ESP32-C6 draws no "
+        "F.Fab for this footprint at all, so its 0.840 x 1.200 is the "
+        "silkscreen fallback OH-124 added and is worth not calling F.Fab. "
+        "Either way the name is 9.750 mm out -- a six-ball chip-scale "
         "part is not eleven millimetres long. **Every fact needed to draw "
         "it exists, and saying otherwise would be the easy refusal rather "
         "than the true one**: the ESP32-C5 places the same chip -- a "
