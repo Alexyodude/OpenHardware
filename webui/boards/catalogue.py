@@ -190,6 +190,7 @@ FIRMWARE_VERIFIED: dict[str, str] = {
     "ATmega328P": "tests/avr/test_uno_board.py",
     "ESP32-C3": "tests/riscv32/test_esp32c3_board.py",
     "ESP32-C6": "tests/riscv32/test_esp32c6_board.py",
+    "ESP32-C5": "tests/riscv32/test_esp32c5_board.py",
 }
 
 #: What each instruction set would need before a core for it could be trusted.

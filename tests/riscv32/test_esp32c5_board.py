@@ -47,9 +47,49 @@ HERE = pathlib.Path(__file__).resolve().parent
 #: footprint and not in silicon, so the description serves both.
 BOARD = "XIAO-ESP32-C5-DIP"
 
+IMAGE = HERE / "c5blink" / "blink.bin"
+
+LED = 1 << esp32c5.LED_PIN
+GPIO_OUT = esp32c5.GPIO + esp32c5.GPIO_OUT
+GPIO_ENABLE = esp32c5.GPIO + esp32c5.GPIO_ENABLE
+
+#: Several toggles at the measured 408-instruction period.
+BUDGET = 8_000
+
+#: The four Zc halfwords `c5blink/blink.c` hand-places, that image's whole
+#: reason to exist: watching it run is watching the part's own instruction
+#: set. Each is executed and asserted in `tests/riscv32/test_zc.py` before
+#: this file runs them in sequence.
+ZC_HALFWORDS = {
+    "cm.push {ra,s0},-16": 0xB852,
+    "cm.popret {ra,s0},16": 0xBE52,
+    "c.not s1": 0x9CF5,
+    "cm.jalt 32": 0xA082,
+}
+
+
+def load() -> api.BoardSession:
+    """A board name and a file of bytes, at the C5's own flash window."""
+    return api.load_firmware(BOARD, IMAGE.read_bytes(), base=esp32c5.IROM)
+
+
+def watch(session: api.BoardSession, budget: int = BUDGET) -> list[tuple[int, bool]]:
+    """Step, recording every step at which GPIO8 changes state."""
+    transitions: list[tuple[int, bool]] = []
+    last = 0
+    for step in range(budget):
+        session.step()
+        now = session.cpu.read_word(GPIO_OUT) & LED
+        if now != last:
+            transitions.append((step, bool(now)))
+            last = now
+    return transitions
+
 
 def needs_core() -> None:
     pytest.importorskip("core.riscv32.abi")
+    if not IMAGE.is_file():
+        pytest.skip(f"{IMAGE} is missing")
 
 
 def idf_root() -> pathlib.Path | None:
@@ -168,12 +208,12 @@ def test_installing_configures_the_part_whole():
         )
 
 
-def test_the_chip_is_described_and_claims_no_firmware():
-    """The two facts `rules/board-claims.md` keeps apart, asserted together so
-    neither can drift into the other.
+def test_the_chip_is_described_and_the_watching_is_named():
+    """The two facts `rules/board-claims.md` keeps apart, both earned now.
 
-    Describing a part makes its boards *runnable* -- an image can be attempted.
-    It is not evidence that one has run, and for this chip none has.
+    Until OH-147 this test asserted the second half's ABSENCE -- described,
+    runnable, and nothing watched. `c5blink` is the watching, this file is
+    where it happens, and `FIRMWARE_VERIFIED` names this file.
     """
     from webui.boards import catalogue
 
@@ -182,8 +222,59 @@ def test_the_chip_is_described_and_claims_no_firmware():
     for board in boards:
         assert board.described, "webui/boards/esp32c5.py exists"
         assert board.runnable, "a built core and a description"
-        assert not board.firmware_verified, "and nothing has been watched"
-    assert "ESP32-C5" not in catalogue.FIRMWARE_VERIFIED
+        assert board.firmware_verified, "c5blink has been watched (OH-147)"
+    assert catalogue.FIRMWARE_VERIFIED["ESP32-C5"] == (
+        "tests/riscv32/test_esp32c5_board.py"
+    )
+
+
+# --- the headline: the blink, with the part's own extensions on --------------
+
+
+def test_a_board_name_and_a_compiled_image_drive_a_gpio_register():
+    """The evidence for ESP32-C5, and the last two of the RISC-V family.
+
+    Two transitions is a blink. One is a bit that came on and stayed on,
+    which is what a broken toggle looks like from the outside.
+    """
+    needs_core()
+    with load() as session:
+        transitions = watch(session)
+    assert len(transitions) >= 2, f"the bit changed {len(transitions)} times"
+    states = [state for _, state in transitions]
+    assert states[0] is True
+    assert all(a != b for a, b in itertools.pairwise(states)), states[:8]
+
+
+def test_the_pin_is_an_output_and_the_zc_framed_delay_holds_its_period():
+    """The delay between toggles runs through cm.push, two hundred c.not
+    round-trips and cm.popret, and its period holding steady is those
+    instructions computing -- a wandering period here would be a Zcmp frame
+    losing its counter."""
+    needs_core()
+    with load() as session:
+        steps = [step for step, _ in watch(session)]
+        assert session.cpu.read_word(GPIO_ENABLE) & LED, "GPIO8 is an output"
+    periods = {b - a for a, b in itertools.pairwise(steps[1:])}
+    assert len(periods) == 1, f"period varies: {sorted(periods)}"
+    assert periods.pop() > 400, "two hundred c.not round-trips cost steps"
+
+
+def test_the_image_this_runs_uses_all_three_zc_groups():
+    """The claim "with its own extensions on", checked rather than
+    remembered: the watched image contains Zcmp's push and popret, Zcb's
+    c.not and Zcmt's cm.jalt -- plus the csrw that aims JVT -- so the blink
+    above cannot quietly degrade into the RV32IMAC subset every sibling
+    already proves."""
+    needs_core()
+    image = IMAGE.read_bytes()
+    halves = {int.from_bytes(image[at:at + 2], "little")
+              for at in range(0, len(image) - 1, 2)}
+    for name, encoding in ZC_HALFWORDS.items():
+        assert encoding in halves, f"{name} (0x{encoding:04X}) is not in the image"
+    words = {int.from_bytes(image[at:at + 4], "little")
+             for at in range(0, len(image) - 3, 2)}
+    assert 0x01729073 in words, "csrw jvt, t0 aims the table"
 
 
 # --- the property that makes describing it safe ------------------------------

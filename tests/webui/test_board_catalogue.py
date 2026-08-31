@@ -284,19 +284,21 @@ def test_only_the_board_a_real_image_ran_on_claims_to_have_run_one():
     base and watches GPIO8 move; the C3's image faults on this board at its
     first store.
 
-    **ESP32-C5 was described in the same ticket and is deliberately not here.**
-    `webui/boards/esp32c5.py` exists and the two C5 boards are runnable, which
-    is the weaker fact this pin exists to keep separate from the stronger one.
-    Its ISA is `RV32IMAC + Zcb/Zcmp/Zcmt`, `core/riscv32` implements none of
-    the three Zc groups, and no image has been watched executing on it. Adding
-    it here without that would be exactly the diff this test's name refuses.
+    ESP32-C5 joined on 2026-08-31 under OH-147, and it waited the longest
+    on purpose: it was described on 2026-08-25 and this paragraph spent six
+    days saying it was deliberately NOT here, because its ISA is
+    `RV32IMAC + Zcb/Zcmp/Zcmt` and the core implemented none of the three
+    Zc groups. The argument it had to survive is that OH-146 giving the
+    core those groups was still not the evidence -- bits are not a watched
+    image. It is here because `tests/riscv32/test_esp32c5_board.py` loads
+    `c5blink`, an image that frames its delay with cm.push/cm.popret,
+    counts through c.not and calls through cm.jalt and JVT, and watches
+    GPIO8 toggle with a steady period -- so what was watched is the part's
+    own instruction set, not the subset every sibling already proves.
     """
     proven = {b.chip for b in catalogue.catalogue() if b.firmware_verified}
-    assert proven == {"RP2040", "SAMD21", "ATmega328P", "ESP32-C3", "ESP32-C6"}
-    assert "ESP32-C5" not in proven, (
-        "the C5 is described, which makes its boards runnable; nothing has "
-        "watched an image run on one"
-    )
+    assert proven == {"RP2040", "SAMD21", "ATmega328P", "ESP32-C3",
+                      "ESP32-C6", "ESP32-C5"}
 
 
 def test_every_firmware_claim_names_a_test_that_exists():
