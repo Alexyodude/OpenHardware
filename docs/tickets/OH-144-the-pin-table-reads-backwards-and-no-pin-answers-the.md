@@ -1,7 +1,7 @@
 ---
 id: OH-144
 title: 'The pin table reads backwards, and no pin answers the pointer'
-status: open
+status: done
 priority: P3
 created: '2026-08-31'
 touches:
