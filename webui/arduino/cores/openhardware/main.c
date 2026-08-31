@@ -19,8 +19,12 @@
 #include "Arduino.h"
 
 /* setup() once, loop() forever: the Arduino contract, and small enough to
- * state rather than import. */
-static void oh_run(void) {
+ * state rather than import.
+ *
+ * **Not static**, which is the whole reason it is reachable: `_start`
+ * gets here with a `tail` to the symbol by name, and a static function
+ * may be renamed or inlined out from under one. */
+void oh_run(void) {
     setup();
     for (;;) {
         loop();
@@ -31,7 +35,7 @@ __attribute__((naked, section(".text.start"), used)) void _start(void) {
 #if defined(__riscv)
     __asm__ volatile(
         "li sp, %0\n"
-        "tail oh_run_trampoline\n"
+        "tail oh_run\n"
         :: "i"(OH_STACK_TOP)
     );
 #else
@@ -39,7 +43,3 @@ __attribute__((naked, section(".text.start"), used)) void _start(void) {
 #endif
 }
 
-/* `tail` needs an extern symbol; a static one may be renamed out of reach. */
-void oh_run_trampoline(void) {
-    oh_run();
-}
