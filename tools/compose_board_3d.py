@@ -627,6 +627,108 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "`CRYSTAL-SMD_4P-L1.6-W1.2-BL`, which they do not ship and which "
         "says the same size.",
     ),
+    # --- OH-150: three chip diodes, in bodies their neighbours already
+    # borrow -----------------------------------------------------------------
+    #
+    # **KiCad publishes no 0201 or 0402 chip diode at all** -- Diode_SMD's
+    # smallest is an 0603, checked against the library's own listing -- so
+    # the choice is a resistor's moulding of exactly the right land pattern
+    # or nothing. This table already makes that trade twice, for Z1/Z2's
+    # varistor and F1's fuse: the PART is a diode and only the moulding is
+    # borrowed, which is a statement about a 0.6 mm brick with no marking on
+    # it. Seeed themselves reached the same conclusion first: all seven
+    # ESD-0201 placements name `Resistor_SMD/R_0201_0603Metric` in the
+    # vendor's own board file.
+    Component(
+        "ESD-0201", "Resistor_SMD", "R_0201_0603Metric",
+        "seven ESD diodes across the RP2350, the ESP32-C5 and the "
+        "nRF54L15, all one land pattern: two pads 0.2794 x 0.3175 mm with "
+        "their centres 0.5094 mm apart. The vendor states this very model "
+        "on every one of the seven.",
+    ),
+    Component(
+        "ESD-0402", "Resistor_SMD", "R_0402_1005Metric",
+        "the ESP32-C6's D2, the one ESD diode drawn a size up: two pads "
+        "0.5 mm square, centres 0.925 mm apart. Seeed name no model for "
+        "this one, so the body is the 0402 resistor whose land pattern it "
+        "is -- the same borrow as its 0201 sibling above.",
+    ),
+    Component(
+        "DFN1006-2L", "Diode_SMD", "D_SOD-882",
+        "five placements over three boards -- D1 and D3 on the ESP32-C6 "
+        "and the RP2350, D4 on the nRF54L15 -- sharing footprint UUIDs, so "
+        "one drawing rather than five. Two pads 0.70 mm between centres. "
+        "**This is the one row where the vendor names the industry outline "
+        "rather than their own**: the C6's Description reads `SMD Diode "
+        "Schottky 40V-1A;SOD-882`, which is the KiCad body used here, "
+        "while the nRF54L15's copy of the same footprint calls itself "
+        "DFN1006-2L. Two names, one 1.0 x 0.6 mm two-lead package.",
+    ),
+    # --- OH-150: the small silicon OH-104 deferred, now drawn --------------
+    Component(
+        "CAF-50P160X80-6N", "modelled", "CAF-50P160X80-6N",
+        "MODELLED, not matched: Murata's LFD182G45DCHD277 diplexer, the "
+        "part that lets the ESP32-C5's two radios share one antenna. Its "
+        "1.6 x 0.8 mm plan is stated three times over -- by the name, the "
+        "F.Fab outline and the Description -- and the 0.7 mm height by the "
+        "Description alone, which is why `slab_geometry` learned to read "
+        "one.",
+        modelled=True,
+    ),
+    Component(
+        "WLCSP4-0.4-0.77X0.77X0.33MM", "modelled",
+        "WLCSP4-0.4-0.77X0.77X0.33MM",
+        "MODELLED, not matched: a 0.77 mm square die with four balls under "
+        "it. Body from Seeed's own F.Fab, height from the last field of "
+        "their footprint name, and the two agree about the plan to "
+        "0.010 mm on all three boards that place one.",
+        modelled=True,
+    ),
+    Component(
+        "WLCSP-0.4-0.92X1.16X0.4MM", "modelled", "WLCSP-0.4-0.92X1.16X0.4MM",
+        "MODELLED, not matched: SGMICRO's Li-Ion charger die, 0.900 x "
+        "1.175 mm on Seeed's own F.Fab against the 0.92 x 1.16 mm its name "
+        "claims -- 0.020 mm apart. The one name here that omits its ball "
+        "count, which the six pads and their own Description both supply.",
+        modelled=True,
+    ),
+    Component(
+        "BGA6-0.35-0.85X1.2X0.4MM", "modelled", "BGA6-0.35-0.85X1.2X0.4MM",
+        "MODELLED, not matched: the buck converter's bare die, which both "
+        "boards' own Descriptions call a WLCSP-6B and a DSBGA. Its F.Fab "
+        "measures 0.850 x 1.200 mm and its name says the same, agreeing to "
+        "0.000 mm -- the tightest of any row here.",
+        modelled=True,
+    ),
+    Component(
+        "DFN6-0.4-1.1X0.7X0.45MM", "modelled", "DFN6-0.4-1.1X0.7X0.45MM",
+        "MODELLED, not matched: a six-lead 0.4 mm-pitch flat pack, drawn as "
+        "the moulded body it is. Name and F.Fab state the same rectangle "
+        "the two ways round, which the sorted cross-check accepts.",
+        modelled=True,
+    ),
+    Component(
+        "DFN6-0.5-1.45X1X0.6", "modelled", "DFN6-0.5-1.45X1X0.6",
+        "MODELLED, not matched: a six-lead 0.5 mm-pitch flat pack whose "
+        "name states no unit -- the F.Fab's 1.460 x 1.000 mm is what says "
+        "the numbers are millimetres.",
+        modelled=True,
+    ),
+    Component(
+        "SOT8_0d5_2_1x1_2x0_6mm", "modelled", "SOT8_0d5_2_1x1_2x0_6mm",
+        "MODELLED, not matched: TI's TPS2116 power mux. Three of the "
+        "board's own layers put the body at 2.1 x 1.2 mm and the name's "
+        "last field gives the 0.6 mm height, in Seeed's underscore "
+        "spelling.",
+        modelled=True,
+    ),
+    Component(
+        "X2SON4-0.625-1x1x0.6mm", "modelled", "X2SON4-0.625-1x1x0.6mm",
+        "MODELLED, not matched: SGMICRO's SGM2040 LDO, a 1 mm square "
+        "moulded body whose F.Fab and courtyard both measure exactly "
+        "1.000 x 1.000 mm against the name's own 1x1.",
+        modelled=True,
+    ),
     Component(
         "QFN48-0.4-6X6X0.9MM_small", "modelled", "QFN_48_6x6_P0.4",
         "the ESP32-C5 itself, and MODELLED for the same reason as the "
@@ -751,6 +853,117 @@ ABSENT: dict[str, str] = {
     # on the C3 and the nRF54L15 and `SW4-SMD-...` on the C6 and the RP2350.
     # Four keys, two reasons -- and writing the reason twice is how the two
     # copies come to disagree.
+    # --- OH-150: the XIAOs' copper and ink, which have no body either -----
+    #
+    # **The same class the Uno's TP-SP and FIDUCIA-MOUNT are in**, found on
+    # the KiCad boards when OH-125 closed the silent `continue` that had
+    # been hiding every unmodelled placement. A test point is its pad, a
+    # logo is its ink, and a castellation is the board's own edge: none is
+    # a part that a library could hold, so each says so rather than being
+    # counted as a gap somebody might one day fill.
+    "H7-HALF-HOLE-2.54": (
+        "J1 and J2 on the ESP32-C3: **the module's own castellated edge**, "
+        "drawn as two seven-pin references where the C6, C5 and nRF54L15 "
+        "draw all fourteen on one MOUDLE14P footprint. Seeed mark both "
+        "`DNP` -- nothing is fitted. Seven pads of each row sit exactly on "
+        "Edge.Cuts, which the copper pass already halves into castellations, "
+        "and the other seven are a plain through-hole row 1.27 mm inboard on "
+        "the same nets. No KiCad library was searched: there is no body to "
+        "look for."
+    ),
+    "BGA6-0.35-0.745X10.95X0.4MM": (
+        "the ESP32-C6's and RP2350's load switch, and **the one package "
+        "here whose own name is wrong**. It states 0.745 x 10.95 mm; the "
+        "footprint's own F.Fab measures 1.200 x 0.840 mm on both boards, "
+        "which is 9.750 mm apart -- a six-ball chip-scale part is not "
+        "eleven millimetres long, and the sibling `BGA6-0.35-0.85X1.2X0.4MM` "
+        "on the C5 and nRF54L15 shows what the name should have read. "
+        "The plan could be measured and drawn; the HEIGHT could not. It "
+        "exists only in that same name, and a name that is wrong about the "
+        "dimension a layer can check cannot be trusted for the one no "
+        "layer carries -- which is the whole argument `slab_geometry` "
+        "makes, and it refuses this package by it. What retires this is one "
+        "corrected name from Seeed, or a height from the part's datasheet. "
+        "No KiCad library was searched: the model was never the problem."
+    ),
+    "TP-D45MIL": (
+        "36 test points across all five KiCad XIAOs, each a bare "
+        "1.143 x 1.143 mm pad -- 45 mil, which is what the package name "
+        "says -- on B.Cu and B.Mask only. Every other graphic on all 36 "
+        "sits on B.Fab or B.CrtYd, documentation and keepout layers that "
+        "plot to nothing, and each is sized to the pad's own bounding box "
+        "rather than to a body. A test point is the copper itself, which "
+        "OH-110 already draws. No KiCad library was searched: there is no "
+        "body to look for."
+    ),
+    "TP-1.6MM-ROUND": (
+        "16 test points on the nRF54L15 and the RP2350, each a bare 1.6 mm "
+        "round pad -- the name's own figure -- on B.Cu and B.Mask only. "
+        "The RP2350's eight carry a stray 0.01 mm B.Mask line the "
+        "nRF54L15's do not: ten microns is below any fabricator's minimum "
+        "feature, so it is a CAD artefact rather than a stated feature. A "
+        "test point is the copper itself, which OH-110 already draws. No "
+        "KiCad library was searched: there is no body to look for."
+    ),
+    "TP-80X40MIL": (
+        "12 test points across all five KiCad XIAOs, some named TPn and "
+        "some named for the net they sit on -- GND0, BAT0, BAT+1, BAT-1 -- "
+        "each a bare 2.032 x 1.016 mm pad, which is 80 x 40 mil as the "
+        "name says. A test point is the copper itself, which OH-110 "
+        "already draws. No KiCad library was searched: there is no body to "
+        "look for."
+    ),
+    "LOGO-SEEED-NEW-1X9.6MM": (
+        "Seeed's own logo -- U$2 on the ESP32-C3, REF** on the ESP32-C6, "
+        "G*** on the RP2350 -- with zero pads and no `(model ...)` on any "
+        "of the three. Ink and nothing else: 9.571 x 1.070 mm of it on the "
+        "C3 and C6, drawn as 1,505 `fp_line`, and 8.916 x 1.005 mm on the "
+        "RP2350, drawn as 12 `fp_poly` under the same package name. Both "
+        "readings are already accounted for -- `kicad._silk_of` takes every "
+        "footprint's silk whether or not this entry exists, so the lines "
+        "are drawn as board silk and the polygons are in that board's own "
+        "`not ink` count. No KiCad library was searched: there is no body "
+        "to look for."
+    ),
+    "LOGO-SEEED-NEW-0.83X7.5MM": (
+        "The smaller Seeed logo, G*** on the ESP32-C5: zero pads, no "
+        "`(model ...)`, and 7.498 x 0.846 mm of silkscreen -- the name's "
+        "own 0.83 x 7.5 to two thousandths -- drawn as the 12 `fp_poly` "
+        "that are the whole of that board's `not ink` polygon count. No "
+        "KiCad library was searched: there is no body to look for."
+    ),
+    "LOGO-CE_4.0x3.0mm_SilkScreen": (
+        "The CE mark on the nRF54L15, which Seeed's own `(descr \"CE "
+        "marking\")` names and their `exclude_from_pos_files "
+        "exclude_from_bom` says is never fitted. Zero pads, no "
+        "`(model ...)`, and 4.046 x 2.947 mm of silkscreen -- the name's "
+        "own 4.0 x 3.0 -- drawn as 942 `fp_line` and the 7 `fp_arc` that "
+        "are the whole of that board's `not ink` arc count. No KiCad "
+        "library was searched: there is no body to look for."
+    ),
+    "MOUDLE14P-XIAO-HALF-HOLE": (
+        "U2 on the ESP32-C6 and the RP2350: **the module's own edge**, not "
+        "a part standing on it. `tools/kicad.py` says the same thing from "
+        "the other side -- this footprint IS the XIAO outline -- and the "
+        "geometry agrees: its 14 pins carry 56 pad records spanning "
+        "15.240 x 17.780 mm on a 2.54 mm pitch, its castellation holes sit "
+        "exactly on the y-extent of the Edge.Cuts it draws itself, and "
+        "that outline measures 20.955 x 17.780 mm, which is the board. "
+        "Nothing inside the footprint reaches F.Fab except hidden empty "
+        "properties, so there is no body outline to read. The copper is "
+        "drawn as copper and the half-holes are cut with the edge. No "
+        "KiCad library was searched: there is no body to look for."
+    ),
+    "MOUDLE14P-XIAO-HALF-HOLE-PRO": (
+        "U9 on the ESP32-C5 and the nRF54L15, and the same edge as the "
+        "entry above: identical 15.240 x 17.780 mm pad span, identical "
+        "2.54 mm pitch, identical 20.955 x 17.780 mm Edge.Cuts. What the "
+        "`-PRO` names is a finer land pattern -- a uniform "
+        "1.626 x 1.725 mm flare pulled 0.862 mm off the edge on all 14 "
+        "pins, against the plain variant's mixed flares at 0.55 to "
+        "0.61 mm -- and a land pattern is not a body. No KiCad library was "
+        "searched: there is no body to look for."
+    ),
     "PMOS_1.0_0.6_0.35MM": _NO_CHIP_SCALE_MOSFET,
     "PMOS_1.0X0.6X0.35MM": _NO_CHIP_SCALE_MOSFET,
     "BUTTON_TD1183SA": _NO_TINY_BUTTON,

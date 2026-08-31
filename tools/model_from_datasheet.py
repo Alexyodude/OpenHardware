@@ -299,7 +299,38 @@ class ModelledSlab:
 
 #: The three numbers a Seeed footprint name ends with: length, width, height.
 #: `WLCSP20-0.4-2.4X1.9X0.5MM_SMALL` is why this searches rather than anchors.
-_NAMED_BODY = re.compile(r"(\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)MM")
+#:
+#: **Three spellings of one decimal point, because Seeed use three** (OH-150).
+#: Most names write `0.5MM`; the nRF54L15's X2SON4 writes `0.6mm`; the
+#: ESP32-C5's SOT8 writes `0_6mm`, and spells its pitch `0d5` in the same
+#: breath. A dimension is the same fact however it was punctuated, so the
+#: pattern accepts all three rather than this file holding a table of
+#: vendor typography -- and `NAMED_BODY_TOLERANCE_MM` below is what makes
+#: widening it safe: a pattern that matched the wrong substring would miss
+#: the footprint's own plan by millimetres and be refused.
+#:
+#: The unit is optional for the same reason and with the same protection:
+#: the RP2350's `DFN6-0.5-1.45X1X0.6` states three dimensions and no `mm`
+#: at all. What anchors the match is not the unit but the two `x`
+#: separators, and every one of the eleven names this file holds parses to
+#: the same three numbers with the unit optional as with it required --
+#: checked, not assumed.
+_NAMED_NUMBER = r"\d+(?:[._d]\d+)?"
+_NAMED_BODY = re.compile(
+    rf"({_NAMED_NUMBER})[xX]({_NAMED_NUMBER})[xX]({_NAMED_NUMBER})(?:MM)?",
+    re.IGNORECASE)
+
+
+def _named_float(text: str) -> float:
+    """One of `_NAMED_BODY`'s groups, whichever decimal point it was written
+    with.
+
+    **The replacement is not cosmetic and must happen first**: Python reads
+    `_` inside a numeric string as a digit separator, so `float("2_1")` is
+    21.0 rather than 2.1 -- a SOT8's 2.1 mm body would parse as a 21 mm one,
+    clear the regex, and be caught only by the F.Fab cross-check below.
+    """
+    return float(text.replace("_", ".").replace("d", ".").replace("D", "."))
 
 #: How far the name's plan and `F.Fab`'s may disagree before the name is not
 #: believed. **This is what proves the parse**, and it is the whole safety of
@@ -309,6 +340,151 @@ _NAMED_BODY = re.compile(r"(\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)[xX](\d+(?:\.\d+)?)
 NAMED_BODY_TOLERANCE_MM = 0.5
 
 SLABS: tuple[ModelledSlab, ...] = (
+    # --- OH-150: the small silicon, which OH-104 deferred rather than
+    # refused --------------------------------------------------------------
+    #
+    # **That ticket's own words were "not what a person notices... each is
+    # another judgement to keep true"** -- a convenience call, not a sourcing
+    # gap, and OH-125 made it visible by counting what had been silently
+    # skipped. Drawing them is the re-decision; every one below states its
+    # plan twice (the vendor's name and their own F.Fab) and is refused by
+    # `NAMED_BODY_TOLERANCE_MM` if the two disagree.
+    ModelledSlab(
+        package="CAF-50P160X80-6N",
+        pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C5.kicad_pcb",
+        colour="#c6c4a0",
+        colour_source=(
+            "a multilayer ceramic filter is a ceramic block, the same "
+            "off-white the chip antenna above takes from "
+            "`tools/import_3d_model.py`'s FINISHES"
+        ),
+        why_not_fetched=(
+            "the diplexer that puts the ESP32-C5's 2.4 and 5 GHz paths on "
+            "one antenna -- Murata's LFD182G45DCHD277, which Seeed name in "
+            "this footprint's own MPN property. **The only part here whose "
+            "height comes from its Description rather than its name**: "
+            "`CAF-50P160X80-6N` encodes the plan as 160 x 80 hundredths of "
+            "a millimetre and no thickness, while the Description says "
+            "`SMD IC Diplexer;1.6*0.8*0.7mm`. Three vendor statements of "
+            "that plan agree to 0.000 mm -- the name, the F.Fab outline and "
+            "the Description -- which is tighter than any other row in this "
+            "file. KiCad's Filter library holds eight models, listed "
+            "2026-08-31: six Mini-Circuits FV1206 at 3.2 x 1.6 mm and two "
+            "five-terminal parts, the nearest a terminal short and 0.3 mm "
+            "too wide."
+        ),
+    ),
+    ModelledSlab(
+        package="WLCSP4-0.4-0.77X0.77X0.33MM",
+        pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
+        colour="#272b27",
+        colour_source="a bare silicon die, as the WLCSP-47 and WLCSP-20 above",
+        why_not_fetched=(
+            "four balls at a 0.4 mm pitch under a 0.77 mm square die, on "
+            "seven placements across the ESP32-C5, the nRF54L15 and the "
+            "RP2350. KiCad's Package_CSP holds no WLCSP-4 at all; its "
+            "smallest by ball count is a WLCSP-6 about twice this part's "
+            "area. Two different chips share the land pattern -- TI's "
+            "TPS22916 and a 6SIGMA SX1801CCR -- and neither vendor "
+            "publishes a mesh."
+        ),
+    ),
+    ModelledSlab(
+        package="WLCSP-0.4-0.92X1.16X0.4MM",
+        pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
+        colour="#272b27",
+        colour_source="a bare silicon die, as the WLCSP-47 and WLCSP-20 above",
+        why_not_fetched=(
+            "SGMICRO's SGM40567 Li-Ion charger, on all four boards that "
+            "carry one. **Its name states no ball count**, unlike its "
+            "WLCSP4/WLCSP20/WLCSP47 siblings above: Seeed's own "
+            "Description says `WLCSP-6B-0.92*1.16` and the six pads -- "
+            "three rows of two on a 0.4 mm pitch -- confirm it "
+            "independently. KiCad's Package_CSP holds 34 files and none "
+            "is six balls."
+        ),
+    ),
+    ModelledSlab(
+        package="BGA6-0.35-0.85X1.2X0.4MM",
+        pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
+        colour="#272b27",
+        colour_source="a bare silicon die, as the WLCSP-47 and WLCSP-20 above",
+        why_not_fetched=(
+            "a buck converter on the ESP32-C5 and the nRF54L15 -- SGMICRO's "
+            "SGM6029 and TI's TPS628438 -- whose own Descriptions call the "
+            "body a WLCSP-6B and a DSBGA, so the `BGA6` prefix names a bare "
+            "die rather than a moulded package. Six balls on a 0.35 mm "
+            "pitch; KiCad's Package_CSP holds no six-ball part near "
+            "0.85 x 1.2 mm. Both boards name a `Y:/01_Cadence_Library/...` "
+            "path for the step file, which is a drive on somebody's desk."
+        ),
+    ),
+    ModelledSlab(
+        package="DFN6-0.4-1.1X0.7X0.45MM",
+        pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
+        colour="#050505",
+        colour_source="moulded black plastic and epoxy, `tools/import_3d_model.py`'s own `FINISHES['#050505']` -- the same reading the QFNs' encapsulant takes, and this is the same kind of moulded IC body",
+        why_not_fetched=(
+            "six leads on a 0.4 mm pitch, on the ESP32-C6 and the "
+            "nRF54L15. The name says 1.1 x 0.7 mm and Seeed's own "
+            "Description says `DFN-6(0.7x1.1)` -- the same rectangle read "
+            "the other way round, which is why the F.Fab cross-check "
+            "sorts both pairs before comparing them. KiCad's "
+            "Package_DFN_QFN holds thirteen DFN-6 files, checked "
+            "2026-08-31, and the two without an exposed pad are both "
+            "0.4 mm pitch and larger in both dimensions."
+        ),
+    ),
+    ModelledSlab(
+        package="DFN6-0.5-1.45X1X0.6",
+        pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
+        colour="#050505",
+        colour_source="moulded black plastic and epoxy, `tools/import_3d_model.py`'s own `FINISHES['#050505']` -- the same reading the QFNs' encapsulant takes, and this is the same kind of moulded IC body",
+        why_not_fetched=(
+            "six leads on a 0.5 mm pitch, on the RP2350 and the nRF54L15. "
+            "**The only name in this file that states no unit at all** -- "
+            "`1.45X1X0.6` and nothing after it -- which is why `_NAMED_BODY` "
+            "takes the `mm` as optional; both boards' F.Fab measure "
+            "1.460 x 1.000 mm, agreeing with the name to 0.010 mm and "
+            "settling that the three numbers are millimetres. KiCad's "
+            "thirteen DFN-6 files hold nothing at this pitch and size."
+        ),
+    ),
+    ModelledSlab(
+        package="SOT8_0d5_2_1x1_2x0_6mm",
+        pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C5.kicad_pcb",
+        colour="#050505",
+        colour_source="moulded black plastic and epoxy, `tools/import_3d_model.py`'s own `FINISHES['#050505']` -- the same reading the QFNs' encapsulant takes, and this is the same kind of moulded IC body",
+        why_not_fetched=(
+            "TI's TPS2116 power mux, U8 on the ESP32-C5, and **the name "
+            "that made this file learn a second decimal point**: Seeed "
+            "spell the pitch `0d5` and the body `2_1x1_2x0_6`, which is "
+            "0.5 mm and 2.1 x 1.2 x 0.6 mm. Three of that board's own "
+            "layers agree the plan is 2.1 x 1.2 -- F.Fab, F.CrtYd and a "
+            "User.1 rectangle -- and eight pads in two columns of four, "
+            "0.5 mm apart within a column, confirm the pitch. TI publish "
+            "no mesh and KiCad's Package_SO holds no eight-lead part this "
+            "small."
+        ),
+    ),
+    ModelledSlab(
+        package="X2SON4-0.625-1x1x0.6mm",
+        pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
+        colour="#050505",
+        colour_source="moulded black plastic and epoxy, `tools/import_3d_model.py`'s own `FINISHES['#050505']` -- the same reading the QFNs' encapsulant takes, and this is the same kind of moulded IC body",
+        why_not_fetched=(
+            "SGMICRO's SGM2040 LDO, U3 on the nRF54L15, and the first name "
+            "here to spell its unit in lower case. Two vendors name the "
+            "same body two ways -- SGMICRO's Description says "
+            "`UTDFN-1x1-4AL`, Seeed's footprint says `X2SON4` -- and "
+            "neither name is one KiCad's library holds. Its "
+            "Package_DFN_QFN's nearest is onsemi's own "
+            "`XDFN4-1EP_1.0x1.0mm_EP0.52x0.52mm`: the same 1 mm square "
+            "body by a different maker, whose exposed pad is 0.07 mm wider "
+            "than this footprint's own 0.45 mm -- the same-shape-different-"
+            "maker refusal the QFN-56 above already makes."
+        ),
+    ),
     ModelledSlab(
         package="ANT2P-5.2x2x1.1MM",
         pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
@@ -810,7 +986,8 @@ def build_socket(spec: ModelledSocket, check: bool) -> int:
 
 
 def slab_geometry(spec: ModelledSlab) -> dict[str, object]:
-    """The body of `spec.package`: plan from `F.Fab`, height from its name.
+    """The body of `spec.package`: plan from `F.Fab`, height from its name --
+    or, when the name states none, from the footprint's own `Description`.
 
     **Two vendor sources, and each checks the other.** `F.Fab` is KiCad's
     assembly drawing and carries the plan to three decimals; the height is the
@@ -836,13 +1013,35 @@ def slab_geometry(spec: ModelledSlab) -> dict[str, object]:
         )
 
     named = _NAMED_BODY.search(spec.package)
-    if named is None:
-        raise SystemExit(
-            f"{spec.package}: its name states no length x width x height, so "
-            f"the one dimension no layer carries is unknown. A body of "
-            f"invented thickness is what this whole file exists not to draw."
-        )
-    length, width, height = (float(g) for g in named.groups())
+    if named is not None:
+        length, width, height = (_named_float(g) for g in named.groups())
+    else:
+        # **The same three numbers, in the other field the vendor writes them
+        # in** (OH-150). The ESP32-C5's diplexer is named `CAF-50P160X80-6N`
+        # -- a plan in hundredths of a millimetre and no height at all --
+        # while its own `Description` reads `SMD IC Diplexer;1.6*0.8*0.7mm`.
+        # Refusing a part every dimension of which the vendor states, because
+        # the third one is one property to the left, would be a false absence:
+        # `_STATED_ENVELOPE` is the same reader `socket_geometry` already
+        # trusts for the same sentence. What does NOT change is the proof --
+        # whichever field supplied the plan is cross-checked against `F.Fab`
+        # below, so a Description belonging to some other part misses by
+        # millimetres and is refused exactly as a misparsed name is.
+        described = ""
+        for prop in kicad.children(wanted[0], "property"):
+            if (len(prop) > 2 and prop[1] == "Description"
+                    and isinstance(prop[2], str)):
+                described = prop[2]
+        stated = _STATED_ENVELOPE.search(described)
+        if stated is None:
+            raise SystemExit(
+                f"{spec.package}: its name states no length x width x height "
+                f"and neither does its Description ({described!r}), so the "
+                f"one dimension no layer carries is unknown. A body of "
+                f"invented thickness is what this whole file exists not to "
+                f"draw."
+            )
+        length, width, height = (float(g) for g in stated.groups())
 
     drawn = sorted((body[2] - body[0], body[3] - body[1]))
     claimed = sorted((length, width))
