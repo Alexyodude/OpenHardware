@@ -38,7 +38,7 @@ OPEN, one of them a real functional defect (§6.1).**
 | 10 no-body packages refused with reasons | ACHIEVED | `--check` "absent" lines carry designators + reason |
 | A sketch builds for the C3 AND RUNS | ACHIEVED | 174-byte image, GPIO10 first high step 31, ~24,000-step delay period (OH-148) |
 | `.data`/`.bss` contract locked by test | ACHIEVED | `tests/webui/test_compile.py::test_a_sketch_s_globals_survive_the_linker_script_having_no_crt0`, mutation-proved |
-| C++ global constructors run | **BLOCKED — NOT DONE** | measured 2026-08-31: ctor silently skipped, §6.1 |
+| C++ global constructors run | ACHIEVED (after this doc was written) | fe89baf / OH-151; `test_a_global_constructor_runs_and_runs_before_setup`, 4 of 4 mutations caught |
 | Independent review passed | **BLOCKED — 3 findings open** | §6.1–6.3 |
 | Full gate reliably green | **BLOCKED ON FLAKINESS** | §9.1 — 3 runs, 1 failure each, different test |
 
@@ -181,9 +181,23 @@ colour claiming a ceramic FINISHES entry that does not exist.
 
 ## 6. OPEN WORK — highest priority first
 
-### 6.1 C++ global constructors silently do not run — *software-only, START HERE*
+### 6.1 C++ global constructors silently do not run — **CLOSED, fe89baf (OH-151)**
 
-**The only silent failure in the openhardware core.** `webui/compile.py:684`
+**Fixed after this handoff was written.** `.init_array` is placed in irom
+under `KEEP` with `PROVIDE_HIDDEN` bounds and `oh_init_array` walks it from
+`oh_run` before `setup()`; the sketch below now links at 196 bytes with the
+section at 0x420000c0 and the pin rises.
+`test_a_global_constructor_runs_and_runs_before_setup` holds it, 4 of 4
+mutations caught. The diagnosis below was also incomplete in an instructive
+way: the section was not merely unplaced, **`--gc-sections` collected it** —
+the map showed the four bytes the sketch contributed while `readelf -S` on
+the ELF showed no such section, so the constructor's code was not in the
+image at all. And the destructor prediction in the original text was wrong:
+the compiler emits no destructor whatsoever (no `.fini_array`, no body, no
+`__cxa_atexit`), so `webui/compile.py` needed no change. **The next open item
+is 6.2.**
+
+**Was the only silent failure in the openhardware core.** `webui/compile.py:684`
 compiles the sketch as `sketch.cpp` through `g++`, but
 `webui/arduino/variants/xiao_esp32c3/link.ld` never places `.init_array`, and
 `cores/openhardware/main.c`'s `oh_run` calls `setup()` with no
