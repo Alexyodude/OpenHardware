@@ -841,6 +841,57 @@ void loop() {
     )
 
 
+def test_a_global_constructor_runs_and_runs_before_setup():
+    """**The absence that did not fail loudly**, which is why OH-151 exists.
+
+    Every other thing this core lacks is a compile error carrying a hint
+    that names the modelling decision behind it. A global C++ constructor
+    was different: the sketch built, reported ok, and the constructor
+    silently never ran -- and not because it was merely unreached.
+    `--gc-sections` COLLECTED it. The linker map showed the four bytes the
+    sketch object contributed to `.init_array` while `readelf -S` on the
+    linked ELF showed no such section at all, because nothing referenced
+    `__init_array_start` and nothing KEEPt it.
+
+    The witness is `volatile` for the reason the test above it is: at -Os,
+    gcc will happily prove a plain global was set to 5 by a constructor it
+    can see and fold the comparison away, and then this passes with the
+    constructor deleted from the image entirely.
+
+    Reading the witness into `at_setup` inside setup(), and testing THAT,
+    is what makes this an ordering assertion rather than only an existence
+    one -- a sketch expects its globals built before its setup() runs, and
+    a walk placed after setup() would satisfy a weaker test.
+
+    **Which mutations this catches, run rather than assumed.** Removing the
+    `oh_init_array()` call from `oh_run`, dropping `KEEP` from either line
+    of the `.init_array` section, and deleting that output section outright
+    each fail it. So does moving the call to after `setup()`, which is the
+    one a test that only asked "did it run" would miss.
+    """
+    built = c3_build("""
+volatile int witness = 0;
+volatile int at_setup = 0;
+struct Marker { Marker() { witness = 5; } };
+Marker m;
+void setup() { pinMode(D10, OUTPUT); at_setup = witness; }
+void loop() {
+  if (at_setup == 5) { digitalWrite(D10, HIGH); }
+  delay(1);
+  digitalWrite(D10, LOW);
+  delay(1);
+}
+""")
+    assert built.ok, built.diagnostics
+    rises = [state for _, state in c3_transitions(built.image, 200_000)
+             if state]
+    assert len(rises) >= 3, (
+        f"the pin rose {len(rises)} times: the global's constructor did not "
+        f"run before setup(), so `.init_array` was not walked (or was not "
+        f"kept, which looks identical from here)"
+    )
+
+
 def test_each_absence_hints_the_model_decision_it_stands_on():
     """digitalRead and Serial are not in the core because they are not in
     the MODEL, and the person who reaches for one is told that in the pane
