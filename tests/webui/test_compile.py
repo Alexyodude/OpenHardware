@@ -768,6 +768,79 @@ def test_delay_scales_with_its_argument_and_the_period_is_steady():
     assert 2.5 < ratio < 3.5, f"delay(3)/delay(1) = {ratio:.2f}"
 
 
+def test_a_sketch_s_globals_survive_the_linker_script_having_no_crt0():
+    """**The one thing `link.ld` gets to be unusual about, checked by
+    running it.** A real Arduino image copies `.data` out of flash and
+    zeroes `.bss` in its C runtime startup; this core has no crt0 at all,
+    so the script puts `.data` IN the flash window -- readable in place,
+    because this model's regions accept stores where real XIP flash would
+    not -- and `.bss` NOLOAD in a RAM region the model fills with zero.
+
+    Both halves are asserted through the pin, because that is the only
+    place the difference shows:
+
+      * an initialised global read on every pass proves `.data` arrived
+        with its value. Were it wrong, the pin would never go high.
+
+    **Both globals are `volatile`, and that is what makes this a test of
+    the SCRIPT rather than of gcc**: without it, -Os folds `initialised`
+    into a constant and keeps `counter` in a register across the inlined
+    loop, so neither section is touched and breaking their placement
+    changes nothing.
+
+    **What this test does and does not catch, measured rather than
+    assumed.** Pointing `dram` at an unmapped address fails it, which is
+    what proves it exercises the RAM at all. Two other mutations do NOT
+    fail it, and that is a fact about the linker rather than a hole here:
+    deleting the explicit `*(.data .data.*)` line changes nothing because
+    GNU ld places an orphan section anyway, and moving `.bss` into the
+    flash region changes nothing because a NOLOAD section emits no bytes
+    and lands where this model still reads zero. The region is the
+    load-bearing part of the script; the section lines are documentation
+    of intent.
+      * a zero-initialised global that is incremented goes high exactly
+        ONCE. Were `.bss` not zeroed it would never go high; were writes
+        to it not persistent it would go high on every pass. One high
+        rules out both.
+    """
+    initialised = c3_build("""
+volatile int initialised = 7;
+void setup() { pinMode(D10, OUTPUT); }
+void loop() {
+  if (initialised == 7) { digitalWrite(D10, HIGH); }
+  delay(1);
+  digitalWrite(D10, LOW);
+  delay(1);
+}
+""")
+    assert initialised.ok, initialised.diagnostics
+    rises = [state for _, state in c3_transitions(initialised.image, 200_000)
+             if state]
+    assert len(rises) >= 3, (
+        f"an initialised global read wrongly: the pin rose {len(rises)} "
+        f"times, so `.data` did not arrive with its value"
+    )
+
+    zeroed = c3_build("""
+volatile int counter;
+void setup() { pinMode(D10, OUTPUT); }
+void loop() {
+  if (counter == 0) { digitalWrite(D10, HIGH); }
+  counter = counter + 1;
+  delay(1);
+  digitalWrite(D10, LOW);
+  delay(1);
+}
+""")
+    assert zeroed.ok, zeroed.diagnostics
+    rises = [state for _, state in c3_transitions(zeroed.image, 200_000)
+             if state]
+    assert len(rises) == 1, (
+        f"the pin rose {len(rises)} times: 0 means `.bss` was not zeroed, "
+        f"more than 1 means a write to it did not persist"
+    )
+
+
 def test_each_absence_hints_the_model_decision_it_stands_on():
     """digitalRead and Serial are not in the core because they are not in
     the MODEL, and the person who reaches for one is told that in the pane
