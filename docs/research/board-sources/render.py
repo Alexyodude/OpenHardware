@@ -23,8 +23,10 @@ absence was inferred from a listing, and its licence scope is contested.
 
 from __future__ import annotations
 
+import difflib
 import json
 import pathlib
+import sys
 
 HERE = pathlib.Path(__file__).parent
 
@@ -131,10 +133,46 @@ def render(data: dict) -> str:
     return "\n".join(out) + "\n"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Write survey.md, or with --check verify the one on disk is current.
+
+    `--check` regenerates in memory and compares, rather than comparing
+    mtimes: a touch, a copy or a checkout reorders timestamps without
+    changing a byte, and the question here is whether the table on disk says
+    what sources.json says. Nobody has to remember to run this; it is a row
+    in tools/checkall.py.
+    """
+    args = list(sys.argv[1:] if argv is None else argv)
     data = json.loads((HERE / "sources.json").read_text(encoding="utf-8"))
     target = HERE / "survey.md"
-    target.write_text(render(data), encoding="utf-8")
+    fresh = render(data)
+
+    if args == ["--check"]:
+        if not target.exists():
+            print(f"render.py: {target} does not exist; run render.py",
+                  file=sys.stderr)
+            return 1
+        current = target.read_text(encoding="utf-8")
+        if current != fresh:
+            diff = difflib.unified_diff(
+                current.splitlines(), fresh.splitlines(),
+                fromfile="survey.md (on disk)", tofile="survey.md (from sources.json)",
+                lineterm="", n=0,
+            )
+            for line in list(diff)[:40]:
+                print(line, file=sys.stderr)
+            print("render.py: survey.md is not what sources.json renders to. "
+                  "Run `python docs/research/board-sources/render.py`.",
+                  file=sys.stderr)
+            return 1
+        print(f"render.py: survey.md is current ({len(data['sources'])} sources)")
+        return 0
+
+    if args:
+        print(f"render.py: unknown arguments {args!r}", file=sys.stderr)
+        return 2
+
+    target.write_text(fresh, encoding="utf-8")
     print(f"wrote {target} from {len(data['sources'])} sources")
     return 0
 

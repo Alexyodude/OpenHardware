@@ -1,0 +1,12 @@
+{
+  "claude-md:is-mask-film": {
+    "hash": "2efa4b8667e6f43a",
+    "file": "tools/import_3d_model.py",
+    "function": "is_mask_film"
+  },
+  "claude-md:mark-turns": {
+    "hash": "4b69dcf68f11ce22",
+    "file": "tools/compose_board_3d.py",
+    "function": "mark_turns"
+  }
+}

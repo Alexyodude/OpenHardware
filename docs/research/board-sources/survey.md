@@ -16,7 +16,7 @@ Evidence class per cell: `O` opened, `L` listed, `S` stated, `A` absent, `U` unr
 | Nordic Semiconductor | [nRF52840-DK hardware files 3.0.3](https://www.nordicsemi.com/Products/Development-hardware/nRF52840-DK/Download) | Nordic 5-clause BSD variant `O` | contested, see notes | yes `O` | yes `O` | yes `O` | yes `O` | no `A` | no `A` | 23,729,151 bytes |
 | Adafruit | [adafruit/Adafruit-HUZZAH32-ESP32-Feather-PCB (sampled)](https://github.com/adafruit/Adafruit-HUZZAH32-ESP32-Feather-PCB) | CC BY-SA 3.0 Unported `O` | design files | yes `O` | no `A` | yes `L` | no `A` | no `A` | no `A` | 1,614 KiB for the sampled board |
 | SparkFun | [sparkfun/SparkFun_Thing_Plus_ESP32_C6 (sampled)](https://github.com/sparkfun/SparkFun_Thing_Plus_ESP32_C6) | CC BY-SA 4.0 for hardware, separate terms for code `O` | design files, see notes | yes `O` | yes `L` | yes `L` | yes `L` | no `A` | no `A` | 34,208 KiB for the sampled board |
-| Arduino | [per-board CAD zip on docs.arduino.cc](https://docs.arduino.cc/hardware/uno-rev3/) | CC BY-SA 4.0 `O` | design files, said so explicitly | yes `O` | yes `S` | yes `O` | no `A` | no `A` | yes `L` | 303,265 bytes for the UNO R3 CAD zip |
+| Arduino | [per-board CAD zip on docs.arduino.cc](https://docs.arduino.cc/static/6bb7a3ca51ebee82a252f60c0b418787/A000066-cad-files.zip) | CC BY-SA 4.0 `O` | design files, said so explicitly | yes `O` | yes `S` | yes `O` | no `A` | no `A` | yes `L` | 303,265 bytes for the UNO R3 CAD zip |
 | STMicroelectronics | [st.com CAD resources (Nucleo / Discovery)](https://www.st.com/en/evaluation-tools/nucleo-c031c6.html) | unknown `U` | unknown | unknown `U` | unknown `U` | unknown `U` | unknown `U` | unknown `U` | yes `S` | unknown |
 | Texas Instruments | [ti.com LaunchPad tool pages](https://www.ti.com/tool/LP-MSPM0G3507) | none stated `S` | nothing found | not found `A` | unknown `O` | not found `A` | not found `A` | not found `A` | yes `S` | 1,815,326 bytes for the sampled user guide |
 | PJRC (Teensy) | [pjrc.com product pages](https://www.pjrc.com/store/teensy41.html) | none stated `S` | nothing stated | no `A` | no `A` | no `A` | no `A` | no `S` | yes `L` | n/a -- individual images, no package |
@@ -175,7 +175,7 @@ Evidence class per cell: `O` opened, `L` listed, `S` stated, `A` absent, `U` unr
 
 ### Arduino — per-board CAD zip on docs.arduino.cc
 
-<https://docs.arduino.cc/hardware/uno-rev3/>
+<https://docs.arduino.cc/static/6bb7a3ca51ebee82a252f60c0b418787/A000066-cad-files.zip>
 
 - **Shape** — per-board download alongside the schematic PDF and pinout
 - **Size** — 303,265 bytes for the UNO R3 CAD zip (O: downloaded 2026-08-25)

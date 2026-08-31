@@ -54,17 +54,23 @@ python tools/check_licenses.py
 python tools/check_deltas.py
 python tools/check_banned_symbols.py
 python tools/check_board_claims.py
+python tools/check_ticket_claims.py
 pytest
 ```
 
+Or all of it in one command, plus the ticket guard's self-test and the facts
+check: `python tools/checkall.py`. That runner refuses to start if a checker
+armed in `rules/` is missing from its table, and `--prove` prints how to break
+each row — a check that has never failed is evidence of nothing.
+
 Bare `pytest` is now correct and is what CI runs. `pyproject.toml` sets
-`--import-mode=importlib` and points `testpaths` at the two suites.
+`--import-mode=importlib` and points `testpaths` at the seven suites.
 
 The old instruction here was the opposite — "never run bare `pytest` from the
 repo root", because upstream's `tests/python/` was in the tree and imported an
 out-of-tree module. That tree is gone.
 
-The first four checkers need a PICSimLab **source** checkout and will skip
+The first three checkers need a PICSimLab **source** checkout and will skip
 without one. `pytest` skips the same tests via the `upstream` fixture rather
 than failing.
 

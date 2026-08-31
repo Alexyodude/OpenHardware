@@ -1,0 +1,187 @@
+<!doctype html>
+<!--
+  OpenHardware - the human side of the staleness store.
+
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2026 the OpenHardware authors. See LICENSE.
+
+  This header sits above <html> on purpose: check_licenses.py reads the
+  LEADING comment block, and that block ends at the first line which is not a
+  comment or the doctype. Below <html> the identifier is invisible to it.
+
+  Open this file in a browser — no server, no
+  network, no dependencies — and drop in the JSON store(s) your checks keep.
+  Search every entry; paste a piece of source text to see whether anything
+  still anchors it.
+
+  This file is copied, not served. Edit it like you edit stale.py.
+
+  THE ONE THING THAT MUST NOT DRIFT: keyOf() below must compute exactly what
+  stale.py's key_of() computes — whitespace-normalised text, UTF-8, SHA-1,
+  first 16 hex chars. If the two ever disagree, every verdict this page gives
+  is wrong while looking authoritative. Parity is checked by pasting a string
+  here and running key_of() on the same string in Python; do that after
+  touching either side.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NodeEngine store viewer</title>
+<style>
+  :root { --ink:#1a1a1a; --dim:#666; --line:#ddd; --bg:#fff; --panel:#f6f6f4;
+          --stale:#b3261e; --ok:#1a7f37; }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink:#e4e4e4; --dim:#999; --line:#333; --bg:#161616;
+            --panel:#1f1f1f; --stale:#ff6b61; --ok:#4ac26b; }
+  }
+  body { margin:2rem auto; max-width:60rem; padding:0 1rem; background:var(--bg);
+         color:var(--ink); font:15px/1.5 system-ui, sans-serif; }
+  h1 { font-size:1.2rem; } h1,h2 { font-weight:600; }
+  .dim { color:var(--dim); }
+  code, td.hash, #key { font:13px/1.4 ui-monospace, Consolas, monospace; }
+  #drop { border:1.5px dashed var(--line); border-radius:6px; padding:1.2rem;
+          text-align:center; margin:1rem 0; }
+  #drop.over { border-color:var(--ink); }
+  input[type=search], textarea { width:100%; box-sizing:border-box; padding:.5rem;
+          border:1px solid var(--line); border-radius:4px; background:var(--bg);
+          color:var(--ink); font:inherit; }
+  textarea { font-family:ui-monospace, Consolas, monospace; font-size:13px; }
+  table { border-collapse:collapse; width:100%; margin-top:.8rem; }
+  th, td { text-align:left; padding:.35rem .6rem; border-bottom:1px solid var(--line);
+           vertical-align:top; }
+  th { font-weight:600; } td.hash { white-space:nowrap; }
+  .panel { background:var(--panel); border-radius:6px; padding:1rem; margin:1.2rem 0; }
+  .stale { color:var(--stale); font-weight:600; }
+  .ok    { color:var(--ok);    font-weight:600; }
+  .hit   { outline:2px solid var(--ok); }
+</style>
+</head>
+<body>
+
+<h1>NodeEngine store viewer</h1>
+<p class="dim">Read-only. Confirming an entry stays a deliberate act in code
+(<code>store.confirm(...)</code>) — the one action this page must never offer
+is clearing a stale flag with a click.</p>
+
+<div id="drop">
+  Drop store JSON files here, or
+  <input type="file" id="pick" accept=".json,application/json" multiple>
+  <div class="dim">e.g. <code>tools/anchors.json</code> — anchored
+  (<code>id → {hash, …}</code>) and content-addressed
+  (<code>hash → text</code>) stores both work.</div>
+</div>
+
+<div class="panel">
+  <h2>Does anything still anchor this text?</h2>
+  <p class="dim">Paste the <em>current</em> source text. Its key is computed the
+  way <code>stale.py</code> computes it; entries whose stored hash matches are
+  confirmed-current for this exact text, everything else anchoring the same id
+  is stale.</p>
+  <textarea id="probe" rows="4" placeholder="paste source text…"></textarea>
+  <p>key: <span id="key" class="dim">—</span> <span id="verdict"></span></p>
+</div>
+
+<input type="search" id="q" placeholder="search ids, hashes, summaries, anything…" disabled>
+<p class="dim" id="count">no stores loaded</p>
+<table id="tbl" hidden>
+  <thead><tr><th>store</th><th>id</th><th class="hash">hash</th><th>fields</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<script>
+"use strict";
+const stores = [];            // {name, data} — data is the parsed JSON, verbatim
+
+/* Mirror of stale.py key_of(). Python's str.split() and JS /\s+/ agree on the
+   whitespace that occurs in real documents; if you feed either exotic Unicode
+   spacing, re-verify parity before trusting a verdict. */
+const normalise = t => t.split(/\s+/).filter(Boolean).join(" ");
+async function keyOf(text) {
+  const buf = await crypto.subtle.digest("SHA-1",
+      new TextEncoder().encode(normalise(text)));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0"))
+      .join("").slice(0, 16);
+}
+
+/* One row per entry, both store shapes:
+   anchored          {id: {hash: …, summary: …}}  → id, entry.hash, other fields
+   content-addressed {key: "derived text"}        → id IS the hash, text is the field */
+function rows() {
+  const out = [];
+  for (const s of stores)
+    for (const [id, v] of Object.entries(s.data))
+      out.push(typeof v === "object" && v !== null
+        ? { store:s.name, id, hash:v.hash ?? "", fields:Object.entries(v)
+              .filter(([k]) => k !== "hash").map(([k,x]) => `${k}: ${x}`).join("  ") }
+        : { store:s.name, id, hash:id, fields:String(v) });
+  return out;
+}
+
+function render(probeKey) {
+  const q = document.getElementById("q").value.toLowerCase();
+  const body = document.querySelector("#tbl tbody");
+  body.innerHTML = "";
+  let shown = 0;
+  const all = rows();
+  for (const r of all) {
+    if (q && !`${r.store} ${r.id} ${r.hash} ${r.fields}`.toLowerCase().includes(q))
+      continue;
+    shown++;
+    const tr = body.insertRow();
+    if (probeKey && (r.hash === probeKey || r.id === probeKey)) tr.className = "hit";
+    for (const cell of [r.store, r.id, r.hash, r.fields]) {
+      const td = tr.insertCell();
+      td.textContent = cell;
+      if (cell === r.hash && td.cellIndex === 2) td.className = "hash";
+    }
+  }
+  document.getElementById("tbl").hidden = all.length === 0;
+  document.getElementById("count").textContent = stores.length
+    ? `${shown} of ${all.length} entries, ${stores.length} store(s)` : "no stores loaded";
+  document.getElementById("q").disabled = all.length === 0;
+}
+
+async function load(files) {
+  for (const f of files) {
+    try { stores.push({ name: f.name, data: JSON.parse(await f.text()) }); }
+    catch (e) {
+      /* A store that does not parse is a finding, not a shrug — the silent
+         version of this branch is trap #3 in reference/traps.md. */
+      document.getElementById("count").textContent =
+        `${f.name}: does not parse as JSON — ${e.message}`;
+      return;
+    }
+  }
+  render();
+}
+
+async function probe() {
+  const text = document.getElementById("probe").value;
+  const keyEl = document.getElementById("key"), vEl = document.getElementById("verdict");
+  if (!text.trim()) { keyEl.textContent = "—"; vEl.textContent = ""; render(); return; }
+  const k = await keyOf(text);
+  keyEl.textContent = k;
+  const hits = rows().filter(r => r.hash === k || r.id === k);
+  vEl.innerHTML = hits.length
+    ? `<span class="ok">anchored — ${hits.length} entr${hits.length>1?"ies":"y"} confirmed against this exact text</span>`
+    : `<span class="stale">nothing anchors this text — either it was never confirmed, or it changed since it was</span>`;
+  render(k);
+}
+
+document.getElementById("pick").addEventListener("change", e => load(e.target.files));
+document.getElementById("q").addEventListener("input", () => render());
+document.getElementById("probe").addEventListener("input", probe);
+const drop = document.getElementById("drop");
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => {
+  e.preventDefault(); drop.classList.remove("over"); load(e.dataTransfer.files);
+});
+
+if (!crypto.subtle)
+  document.getElementById("verdict").innerHTML =
+    '<span class="stale">crypto.subtle unavailable — the probe cannot hash, browsing still works</span>';
+</script>
+</body>
+</html>
