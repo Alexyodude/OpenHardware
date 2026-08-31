@@ -198,6 +198,20 @@ the session-id resolution order; threshold 0.30; ticket_guard's "6 cases"
 (the self-test already counts `cases_run` at runtime — the docstrings copy
 it by hand).
 
+**tools/check_banned_symbols.py** (derive-live): `BANNED = ("rand", "time",
+"clock")` is spelled out again in rules/determinism.md:31. The existing test
+covers the `srand(` exclusion by behaviour and never asserts membership, so a
+fourth banned symbol would leave the rule prose silently short.
+
+**rules/*.md frontmatter itself** (derive-live): two unarmed TEST-ENFORCED
+mechanisms name checkers that do not exist —
+`tests/rules/test_fixtures_pass.py` (conformance-fixtures) and
+`tests/rules/test_replay_determinism.py` (determinism). Unarmed is the honest
+state for planned work, and `blocked_by` prose says why, so this is not a
+false claim today. It is a watch worth having anyway: nothing distinguishes
+"planned, not yet written" from "written, then moved", and the second reads
+identically to the first.
+
 **tools/check_board_claims.py** (derive-live): the run-claim phrase table,
 the weaker-fact vocabulary, and the exclusion table in rules/board-claims.md
 (the last is already diverged — §1 above).
