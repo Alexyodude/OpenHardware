@@ -37,9 +37,12 @@
 # So these tests do not replace looking. They stop the specific regressions
 # from coming back quietly.
 
+import json
 import math
 import pathlib
 import re
+import shutil
+import subprocess
 
 import pytest
 
@@ -378,6 +381,44 @@ def test_an_unknown_pad_with_a_pin_behind_it_does_not_read_not_modelled():
     # The state column must not reach a single fixed string for `unknown`, or
     # the two facts collapse back into one sentence.
     assert '  unknown: "not modelled",' not in panel
+
+
+def test_the_pin_table_sorts_pins_and_the_comparator_really_runs(tmp_path):
+    """The table listed rows in whatever order the layout walked the
+    vendor's file -- the C3 reads D6, D5, D4, D3, D2, D1, D0, D7 (OH-145).
+    `renderTable` now sorts a display copy through `pinOrder`, and the
+    comparator is proven by RUNNING it: its own text, extracted from the
+    panel, sorting a mixed sample under node -- a grep cannot see that
+    D9/BOOT lands before D10 and 13 lands after 2."""
+    panel = stripped(PANEL.read_text(encoding="utf-8"))
+    table = panel.split("function renderTable(pads) {")[1].split("\n}")[0]
+    assert "sort((a, b) => pinOrder(a.label, b.label))" in table, (
+        "the table renders the vendor's shuffle again"
+    )
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("no node on PATH; the comparator is plain JS and needs "
+                    "one to run")
+    comparator = ("function pinOrder"
+                  + panel.split("function pinOrder")[1].split("\n}")[0]
+                  + "\n}")
+    sample = ["GND", "D10", "D2", "13", "2", "A4", "3V3", "D9/BOOT",
+              "A0", "5V", "VBUS", "0", "~11", "~3"]
+    script = tmp_path / "probe.mjs"
+    script.write_text(
+        comparator + "\n"
+        + f"const sample = {json.dumps(sample)};\n"
+        + "console.log(JSON.stringify(sample.sort(pinOrder)));\n",
+        encoding="utf-8")
+    done = subprocess.run([node, str(script)], capture_output=True, text=True,
+                          check=False)
+    assert done.returncode == 0, done.stderr
+    got = json.loads(done.stdout.strip().splitlines()[-1])
+    # ~3 and ~11 hold the place their NUMBER earns -- the tilde is
+    # Arduino's PWM mark, not an address -- and digit-leading rails (3V3)
+    # follow the bare numbers, before the lettered names.
+    assert got == ["0", "2", "~3", "~11", "13", "3V3", "5V", "A0", "A4",
+                   "D2", "D9/BOOT", "D10", "GND", "VBUS"], got
 
 
 def test_the_pin_table_names_the_pin_first():

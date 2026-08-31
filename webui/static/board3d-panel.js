@@ -211,10 +211,50 @@ async function renderer() {
   return scene;
 }
 
+/**
+ * Numbered pins first in numeric order -- the pins a sketch drives -- then
+ * everything else in natural alphabetical order, digit runs compared as
+ * NUMBERS so D10 follows D9 rather than D1 (OH-145).
+ *
+ * **Self-contained on purpose**: the test that proves D9/BOOT sorts before
+ * D10 extracts this function's own text and runs it under node, which it
+ * can only do while nothing in here reaches for the DOM or a neighbour.
+ */
+function pinOrder(a, b) {
+  // The tilde is Arduino's PWM mark: part of ~11's LABEL, not of its
+  // place -- stripped for ordering only, so ~3 sits between 2 and 4
+  // instead of after VIN.
+  a = a.replace(/^~/, "");
+  b = b.replace(/^~/, "");
+  const digits = /^\d+$/;
+  if (digits.test(a) !== digits.test(b)) return digits.test(a) ? -1 : 1;
+  if (digits.test(a)) return Number(a) - Number(b);
+  const at = a.match(/\d+|\D+/g) ?? [];
+  const bt = b.match(/\d+|\D+/g) ?? [];
+  for (let i = 0; i < Math.max(at.length, bt.length); i += 1) {
+    const x = at[i];
+    const y = bt[i];
+    if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
+    const nx = digits.test(x);
+    const ny = digits.test(y);
+    if (nx !== ny) return nx ? -1 : 1;
+    if (nx) {
+      if (Number(x) !== Number(y)) return Number(x) - Number(y);
+    } else if (x !== y) {
+      return x < y ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
 function renderTable(pads) {
   const body = $(ROWS);
   body.textContent = "";
-  for (const pad of pads) {
+  // A sorted COPY: `layout.pads` keeps the vendor's order for the scene and
+  // the solver, which never cared. The table is the one place a reader looks
+  // a pin UP, and a lookup wants an order -- the C3's own file walks
+  // D6, D5, D4, D3, D2, D1, D0, D7 (OH-145).
+  for (const pad of [...pads].sort((a, b) => pinOrder(a.label, b.label))) {
     const row = document.createElement("tr");
     row.dataset.state = pad.state;
     row.dataset.pin = pad.pin;
