@@ -39,8 +39,10 @@ OPEN, one of them a real functional defect (§6.1).**
 | A sketch builds for the C3 AND RUNS | ACHIEVED | 174-byte image, GPIO10 first high step 31, ~24,000-step delay period (OH-148) |
 | `.data`/`.bss` contract locked by test | ACHIEVED | `tests/webui/test_compile.py::test_a_sketch_s_globals_survive_the_linker_script_having_no_crt0`, mutation-proved |
 | C++ global constructors run | ACHIEVED (after this doc was written) | fe89baf / OH-151; `test_a_global_constructor_runs_and_runs_before_setup`, 4 of 4 mutations caught |
-| Independent review passed | **BLOCKED — 3 findings open** | §6.1–6.3 |
-| Full gate reliably green | **BLOCKED ON FLAKINESS** | §9.1 — 3 runs, 1 failure each, different test |
+| Independent review passed | ACHIEVED (after this doc was written) | all three findings closed: fe89baf, 7618381, fae3040 |
+| No refused part is one the vendor described | ACHIEVED | 030b13a; `test_nothing_refused_is_a_part_this_file_could_have_drawn`, 3 of 3 mutations caught |
+| Every XIAO's stated-omission set empty | ACHIEVED | `EXPLAINS` in `tests/rules/test_compose_board_3d.py`; only the Uno still names two |
+| Full gate reliably green | LIKELY FIXED OR DORMANT — see §9.1 | four consecutive clean `checkall.py` runs on 2026-08-31 evening, 2,006–2,007 passed, zero failures |
 
 ---
 
@@ -181,6 +183,33 @@ colour claiming a ceramic FINISHES entry that does not exist.
 
 ## 6. OPEN WORK — highest priority first
 
+> **Read this box first.** Everything §6.1–6.4 listed when this document was
+> written is now CLOSED, in commits fe89baf, 7618381, fae3040 and 030b13a.
+> Those sections are kept below, annotated, because the *way* two of them
+> were wrong is worth more than the fact that they are fixed. The live
+> open-work list is §6.1-new and §6.5.
+
+### 6.1-new OH-155: two ceramic parts are shaded as metal — *software-only, START HERE*
+
+The diplexer (`CAF-50P160X80-6N`) and the chip antenna (`ANT2P-5.2x2x1.1MM`)
+both take colour `#c6c4a0`, which `tools/import_3d_model.py`'s FINISHES
+gives `metalness=1.0` and documents as *the tactile switch's metal cover* —
+its own "weakest entry". So a dielectric is shaded as a conductor, and under
+PBR that is not a nearby value but a different reflectance model.
+
+**Why it was filed rather than fixed:** every FINISHES entry is a reading
+taken from a published vendor mesh, and there is no published ceramic part in
+the tree to read — both ceramic parts are modelled precisely because nobody
+publishes them. The narrow fix escapes that (metalness 0.0 is what the
+parameter *means* for a dielectric, not an aesthetic call) but roughness is a
+judgement and must say so, and the wider question — whether one hex should go
+on denoting two materials, which is the shape of the OH-99 mask-film defect —
+wants deciding at the same time. It changes shipped `.glb` appearance on
+several boards, so it wants a look at the render and not only at the diff.
+Full analysis in `docs/tickets/OH-155-*.md`.
+
+
+
 ### 6.1 C++ global constructors silently do not run — **CLOSED, fe89baf (OH-151)**
 
 **Fixed after this handoff was written.** `.init_array` is placed in irom
@@ -219,7 +248,17 @@ a test in the shape of the globals test. Reviewer also flags an untested tail
 risk: `.init_array` is currently an orphan section, and if ld ever placed it
 after `.bss` in `dram` the flat image would span the ~37 MB inter-region gap.
 
-### 6.2 The height (group 3) is never cross-checked — *software-only*
+### 6.2 The height (group 3) is never cross-checked — **CLOSED, 7618381 (OH-152)**
+
+The comment now states what the tolerance actually proves — that the pattern
+locked onto the right substring — and says plainly that the height is
+compared to nothing and *cannot* be, no layer carrying it. The same commit
+corrected five more claims in the same class, including one the text below
+does not mention: the "eleven names" sentence was not merely miscounted (it
+is 15 of 16 slab rows) but argued against its own change, since making the
+unit optional alters exactly one name. Original finding follows.
+
+### 6.2-original (for the record) — *closed*
 
 `tools/model_from_datasheet.py:305-317` says the F.Fab tolerance "is what makes
 widening it safe". It compares groups 1 and 2 only; **the height is compared to
@@ -229,7 +268,17 @@ optional is what opened it (previously such a name did not match and raised).
 **Not live**: all 16 current names parse correctly. Either narrow the comment
 to what it actually guarantees, or gate the optional unit.
 
-### 6.3 The button's ABSENT rationale is now false on two of three boards — *software-only*
+### 6.3 The button's ABSENT rationale is false on two of three boards — **CLOSED, fae3040 (OH-153)**
+
+Resolved by drawing the button rather than rewording its refusal, which is
+what OH-150's own argument for the diplexer required. All six placements are
+drawn from `2P-L3.0*W2.5*H1.5mm`, read by a new `_LABELLED_ENVELOPE` whose
+labels are *required* so a vendor writing `H*W*L` is refused rather than
+guessed at. The finding below also undercounted: the button is on **three**
+boards, the C5 included, which the comment beside it omitted. Original
+finding follows.
+
+### 6.3-original (for the record) — *closed*
 
 `tools/compose_board_3d.py:800-801` says the vendor states no height "on any
 layer"; the C5's and nRF54L15's copies of `BUTTON_TD1183SA` both carry
@@ -242,7 +291,17 @@ outline and no height anywhere" — now false, passing only because
 `_STATED_ENVELOPE` cannot parse letters between the numbers. **A load-bearing
 test whose stated rationale is false.** Fix the test and the entry together.
 
-### 6.4 Smaller, from the same reviews — *software-only*
+### 6.4 Smaller, from the same reviews — **ALL CLOSED, 7618381 + fae3040**
+
+Every bullet below is fixed. The `its name says` misattribution turned out to
+have a **second** site the review did not name — the `--check` listing, not
+just the refusal message — which only became visibly wrong once the button
+was drawn, its name stating nothing at all; `slab_geometry` now returns
+`stated` and `stated_by`. The FINISHES ceramic bullet is the one item not
+fixed, and is now **OH-155**, described in §6.1-new below. Original list
+follows.
+
+### 6.4-original (for the record) — *closed*
 
 * `model_from_datasheet.py:1073` reports "its name says {…}" on BOTH height
   paths, so a Description-sourced mismatch names the wrong source.
@@ -269,6 +328,19 @@ take it)**, OH-38, OH-64.
 ---
 
 ## 7. Commits this session
+
+Written after the handoff, continuing from its own open-work list:
+
+```
+030b13a feat(tools): the load switch is drawn, and a sweep guards the class (OH-154)
+fae3040 feat(tools): the buttons are drawn, at the height four placements state
+7618381 docs(tools): six claims OH-150 left that measurement does not support
+9ee71c1 docs: the handoff's top open item is closed, and says so (OH-151)
+fe89baf fix(webui): a global constructor is kept, and runs before setup (OH-151)
+fc0ffa0 docs: handoff for drawn-or-refused (2026-08-31)
+```
+
+Written before it:
 
 ```
 4d2ace5 fix(tools): the WLCSP claims my own correction commit got wrong
@@ -311,7 +383,18 @@ nRF54l15-DIP 69→78.
 
 ## 9. Traps and limitations
 
-### 9.1 "Full gate green" is NOT currently demonstrable on this box
+### 9.1 The gate's flakiness did NOT recur — re-measured
+
+**Four consecutive full `tools/checkall.py` runs on the evening of
+2026-08-31 were clean**: 2,006 / 2,006 / 2,006 / 2,007 passed, 17 skipped,
+"all 12 checks pass" each time, zero failures. That is not a fix — nothing
+was changed in either flaky test — so treat it as dormant rather than
+solved, and keep the diagnosis below. The likeliest reading is that both
+failures are load-dependent, and these runs had the box to themselves.
+
+The original finding, unchanged:
+
+### 9.1-original "Full gate green" is NOT currently demonstrable on this box
 Three consecutive full runs each gave 2,003 passed / **1 failed**, with a
 *different* test failing each time, and each failing test passing in isolation:
 `test_a_failed_build_leaves_nothing_behind` (globs the SYSTEM-WIDE temp dir, so
