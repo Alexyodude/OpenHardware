@@ -579,6 +579,32 @@ SLABS: tuple[ModelledSlab, ...] = (
         ),
     ),
     ModelledSlab(
+        package="PMOS_1.0X0.6X0.35MM",
+        pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C6.kicad_pcb",
+        colour="#050505",
+        colour_source=_MOULDED_IC,
+        why_not_fetched=(
+            "the load switch: Q1 to Q3 on the ESP32-C6, Q1 and Q2 on the "
+            "RP2350 and the nRF54L15, and Q1 on the ESP32-C3 under the "
+            "other spelling. A chip-scale MOSFET one millimetre long, three "
+            "pads spanning 0.650 x 0.350 mm. **The nRF54L15's own board "
+            "file names the package -- `SOT-883.STEP` -- which settles what "
+            "it is**, and KiCad's Package_TO_SOT_SMD holds no SOT-883: its "
+            "smallest SOT-23 is 2.9 mm long, three times the part, and "
+            "still inside `confirm`'s size tolerance, so the check would "
+            "not have caught the substitution. That is a why-not-fetched, "
+            "which is what this field is, and OH-154 is where it stopped "
+            "being read as a reason to draw nothing at all. "
+            "**Which board's drawing this is matters, because the vendor "
+            "drew the same footprint two sizes.** The C6's three copies and "
+            "the RP2350's Q1 give an F.Fab of 0.600 x 1.000 mm, agreeing "
+            "with the name to 0.000; the nRF54L15's two and the RP2350's Q2 "
+            "give 0.508 x 0.762, which is 0.238 mm off it. The C6 is named "
+            "here because 1.0 x 0.6 is what the vendor's own NAME says the "
+            "part is, and one part has one size"
+        ),
+    ),
+    ModelledSlab(
         package="BUTTON_TD1183SA",
         pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C5.kicad_pcb",
         colour="#0f0f0f",

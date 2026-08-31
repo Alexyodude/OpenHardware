@@ -357,20 +357,21 @@ def test_nothing_is_declared_absent_that_no_board_actually_has():
 #: is what a person would look for and miss.
 EXPLAINS: dict[str, set[str]] = {
     "Arduino Uno": {"QS", "RESONATOR"},
-    "XIAO-ESP32-C3-DIP": {"PMOS_1.0_0.6_0.35MM"},
-    # Its antenna and buttons were here until OH-104 modelled them.
-    "XIAO-ESP32-C6-DIP": {"PMOS_1.0X0.6X0.35MM"},
-    # **Nothing.** The C5's buttons were its one stated omission until
-    # OH-153 drew them, and it places no load switch, so there is no longer
-    # a part on it that a person would look for and miss. An empty set is a
-    # claim like any other here: it fails the moment a new absence appears.
+    # **Every XIAO is empty, and that is the claim rather than the
+    # absence of one.** These sets held the antennas and the coaxial socket
+    # until OH-104, the RP2350's own processor until OH-100, the buttons
+    # until OH-153 and the load switch until OH-154 -- so what is left is a
+    # statement that nothing a person would look for is missing from any of
+    # them. It fails the moment a new absence appears, which is the only
+    # thing an empty set here has to do.
+    #
+    # The Arduino Uno above still has two, and they are the honest kind: a
+    # crystal can and a resonator that KiCad publishes no model of.
+    "XIAO-ESP32-C3-DIP": set(),
+    "XIAO-ESP32-C6-DIP": set(),
     "XIAO-ESP32-C5-DIP": set(),
-    # The RP2350's own chip was here until OH-100 modelled it.
-    "XIAO-RP2350-DIP": {"PMOS_1.0X0.6X0.35MM"},
-    # Its own processor, its antenna and its coaxial socket were here until
-    # OH-104 modelled all three, and its buttons until OH-153 -- which found
-    # the height stated in this board's own Description.
-    "XIAO-nRF54l15-DIP": {"PMOS_1.0X0.6X0.35MM"},
+    "XIAO-RP2350-DIP": set(),
+    "XIAO-nRF54l15-DIP": set(),
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
 # same placements, same absences -- so the entries are derived the same way
@@ -659,14 +660,14 @@ def test_every_modelled_slab_agrees_with_the_outline_the_vendor_drew():
 def test_a_package_that_states_no_height_is_not_modelled_as_a_slab():
     """The one number no layer carries, so guessing it is the whole risk.
 
-    **The load switch under Seeed's other spelling is the subject.** The C3
-    writes it `PMOS_1.0_0.6_0.35MM` where the other three boards write
-    `PMOS_1.0X0.6X0.35MM`, and `_NAMED_BODY` reads an `x` between the
-    numbers and not an underscore -- widening it to accept one would make
-    `SOT8_0d5_2_1x1_2x0_6mm` parse into nonsense. So this copy has an
-    `F.Fab` outline, a real moulded body under it, and no field this file
-    can read a height out of. That is precisely when a slab must not be
-    drawn.
+    **A test point is the subject, because nothing else is left.** OH-154
+    drew the last component body that had been refused, so the packages
+    still in `ABSENT` with an `F.Fab` outline are copper and ink:
+    `TP-80X40MIL` is twelve of them, a bare 80 x 40 mil pad on all five
+    XIAOs, and no field of it states a height because a pad has none to
+    state. The mechanism is what is under test -- a package whose height no
+    readable field gives must REFUSE rather than be drawn to a guess -- and
+    it holds whether the thing refused is a pad or a moulded body.
 
     **This test made the same point with `BUTTON_TD1183SA` until OH-153, and
     its premise was false.** It asserted the button had no height "anywhere"
@@ -679,16 +680,77 @@ def test_a_package_that_states_no_height_is_not_modelled_as_a_slab():
     from tools import model_from_datasheet
 
     spec = dataclasses.replace(model_from_datasheet.SLABS[0],
-                               package="PMOS_1.0_0.6_0.35MM",
+                               package="TP-80X40MIL",
                                pcb=compose.PCB_CACHE / "ESP32-C3.kicad_pcb")
     if not spec.pcb.is_file():
         pytest.skip("SKIPPED: ESP32-C3.kicad_pcb is not fetched")
     with pytest.raises(SystemExit, match="states no length x width x height"):
         model_from_datasheet.slab_geometry(spec)
-    assert "PMOS_1.0_0.6_0.35MM" in compose.ABSENT, (
-        "a part with a body and no readable height must still carry a "
-        "reason, or a reader sees it missing and nothing said about it"
+    assert "TP-80X40MIL" in compose.ABSENT, (
+        "a package left off must still carry a reason, or a reader sees it "
+        "missing and nothing said about it"
     )
+
+
+def test_nothing_refused_is_a_part_this_file_could_have_drawn():
+    """**The general form of the bug OH-153 and OH-154 each fixed one of.**
+
+    A false absence is a part refused for want of a dimension the vendor
+    states -- and both instances of it survived review because everybody,
+    including three reviewers, read the REASON beside the part and found it
+    persuasive. The reason was persuasive. It was also contradicted by the
+    board file it sat next to.
+
+    So this asks the question of the data instead: for every package in
+    `ABSENT` that a board actually places, building a slab from it must
+    FAIL. A success means the vendor states the envelope and it is being
+    refused anyway.
+
+    It sweeps every (package, board) pair rather than one board per package,
+    because that is exactly where the button hid: the ESP32-C3's two copies
+    carry an empty `Description` while the ESP32-C5's and nRF54L15's state
+    `2P-L3.0*W2.5*H1.5mm`. A sweep that stopped at the first board would
+    have agreed with the refusal.
+
+    **What this half cannot see, measured rather than assumed.** Putting
+    `BUTTON_TD1183SA` or `PMOS_1.0X0.6X0.35MM` back into `ABSENT` fails it,
+    but putting `PMOS_1.0_0.6_0.35MM` back does NOT -- and that survival is
+    correct rather than a hole. The C3's spelling of the load switch is one
+    `slab_geometry` genuinely cannot read, underscores where `_NAMED_BODY`
+    wants an `x`; it is drawn by borrowing the other spelling's model, which
+    is a fact about `CORRESPONDENCE` and not about the parser. The first
+    assertion below is what covers it, and it is the cheaper question
+    anyway: a package cannot be both refused and drawn.
+    """
+    from tools import model_from_datasheet
+
+    both = set(compose.ABSENT) & {c.package for c in compose.CORRESPONDENCE}
+    assert not both, (
+        f"{sorted(both)} are in ABSENT and in CORRESPONDENCE at once, so the "
+        f"board draws a part while the page says it was left off. Whichever "
+        f"is stale, a reader is being told two different things."
+    )
+
+    template = model_from_datasheet.SLABS[0]
+    checked = 0
+    for spec in compose.COMPOSITIONS:
+        if not spec.layout.is_file() or spec.layout.suffix != ".kicad_pcb":
+            continue
+        placed = {e.package for e in compose.read_layout(spec.layout).elements}
+        for package in sorted(placed & set(compose.ABSENT)):
+            trial = dataclasses.replace(template, package=package,
+                                        pcb=spec.layout)
+            with pytest.raises(SystemExit) as raised:
+                model_from_datasheet.slab_geometry(trial)
+            assert "draws no *.Fab outline" in str(raised.value) or \
+                   "states no length x width x height" in str(raised.value) or \
+                   "mm apart" in str(raised.value), (
+                f"{package} on {spec.board} refused for an unexpected "
+                f"reason: {raised.value}"
+            )
+            checked += 1
+    if not checked:
+        pytest.skip("SKIPPED: no board layouts are fetched")
 
 
 def test_a_name_that_disagrees_with_the_outline_is_refused():

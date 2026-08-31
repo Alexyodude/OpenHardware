@@ -685,6 +685,35 @@ CORRESPONDENCE: tuple[Component, ...] = (
         modelled=True,
     ),
     Component(
+        "PMOS_1.0X0.6X0.35MM", "modelled", "PMOS_1.0X0.6X0.35MM",
+        "MODELLED, not matched: the load switch, a SOT-883 chip-scale "
+        "MOSFET one millimetre long -- Q1 to Q3 on the ESP32-C6, Q1 and Q2 "
+        "on the RP2350 and the nRF54L15. Plan and height both from the "
+        "footprint's own name, 1.0 x 0.6 x 0.35 mm, which the C6's F.Fab "
+        "matches to 0.000 mm. **Seeed drew the same footprint two sizes** "
+        "-- the nRF54L15's copies and the RP2350's Q2 measure 0.508 x "
+        "0.762 rather than 0.600 x 1.000 -- so this is one drawing at the "
+        "size the vendor's own NAME states, which is the only one of the "
+        "two that every board agrees to call the part.",
+        modelled=True,
+    ),
+    Component(
+        "PMOS_1.0_0.6_0.35MM", "modelled", "PMOS_1.0X0.6X0.35MM",
+        "MODELLED, not matched: **the same part as the row above, under "
+        "Seeed's other spelling of its name** -- Q1 on the ESP32-C3, which "
+        "writes underscores where the other three boards write `x`. The "
+        "model is the row above's, deliberately: one part is one drawing, "
+        "and the C3's own F.Fab is 0.600 x 1.000 mm, the same rectangle the "
+        "ESP32-C6 draws for it. `_NAMED_BODY` cannot read this spelling and "
+        "must not learn to: measured 2026-08-31, allowing an "
+        "underscore separator makes `SOT8_0d5_2_1x1_2x0_6mm` parse as "
+        "**8 x 0.5 x 2.1 mm**, taking the `8` out of `SOT8` itself. So the "
+        "indirection "
+        "lives here, in the field that has always held a model name "
+        "different from a footprint name, rather than in the parser.",
+        modelled=True,
+    ),
+    Component(
         "BUTTON_TD1183SA", "modelled", "BUTTON_TD1183SA",
         "MODELLED, not matched: the boot and reset buttons, on the C3, the "
         "C5 and the nRF54L15. Plan from Seeed's own F.Fab, height from the "
@@ -803,17 +832,6 @@ CORRESPONDENCE: tuple[Component, ...] = (
 #: Two reasons that each cover a part appearing under two vendor spellings.
 #: Bound here rather than repeated in `ABSENT`, which is keyed by the vendor's
 #: package name and so has to hold both spellings.
-_NO_CHIP_SCALE_MOSFET = (
-    "the load switch. Three pads spanning 0.650 x 0.350 mm -- a chip-scale "
-    "MOSFET one millimetre long. **The nRF54L15's own board file names the "
-    "package: `SOT-883.STEP`**, which settles what it is. KiCad's "
-    "`Package_TO_SOT_SMD` has no SOT-883 among its 79 files, and its smallest "
-    "SOT-23 is 2.9 mm long -- three times the part, and still inside "
-    "`confirm`'s size tolerance, so the check would not have caught it. This "
-    "is the part the 2026-08-29 handoff recorded as 'left undrawn' on the C3 "
-    "with no reason beside it."
-)
-
 ABSENT: dict[str, str] = {
     # --- pads with no body, stated rather than silent (OH-119) --------------
     "TP-SP": (
@@ -857,17 +875,19 @@ ABSENT: dict[str, str] = {
     # folder was listed and what the nearest thing in it was. A model of
     # nearly the right part is what `confirm`'s tolerances exist to refuse,
     # and a 7 x 7 mm chip is not the place to spend that tolerance.
-    # **The same part under two vendor spellings is one absence, said once.**
-    # Seeed write the C3's load switch `PMOS_1.0_0.6_0.35MM` and the other
-    # three boards' `PMOS_1.0X0.6X0.35MM`: two keys, one reason, because
-    # writing the reason twice is how the two copies come to disagree.
+    # **Nothing here is a part any more.** This block held two pairs of
+    # keys -- the load switch under Seeed's two spellings and the buttons
+    # under theirs -- and both pairs turned out to be false absences that a
+    # sweep found rather than a reader: OH-153 drew the buttons from a
+    # height four of their six placements state, and OH-154 drew the load
+    # switch, whose name states all three dimensions and whose refusal was
+    # only ever that KiCad publishes no SOT-883. What is left below is
+    # copper, ink and holes, which is the only kind of thing that belongs.
     #
-    # The buttons were the second pair here until OH-153 modelled them, and
-    # the sentence that described them was wrong twice over: it said
-    # `BUTTON_TD1183SA` was on "the C3 and the nRF54L15" when the C5 places
-    # two as well, and it rested on a height the vendor states in four of
-    # those six placements. Both were found by listing every placement
-    # instead of trusting the note.
+    # Both notes were also wrong about which boards place what -- the
+    # buttons were said to be on "the C3 and the nRF54L15" when the C5
+    # carries two as well -- and both errors came of trusting the note
+    # beside a part instead of listing every placement of it.
     # --- OH-150: the XIAOs' copper and ink, which have no body either -----
     #
     # **The same class the Uno's TP-SP and FIDUCIA-MOUNT are in**, found on
@@ -990,8 +1010,6 @@ ABSENT: dict[str, str] = {
         "0.61 mm -- and a land pattern is not a body. No KiCad library was "
         "searched: there is no body to look for."
     ),
-    "PMOS_1.0_0.6_0.35MM": _NO_CHIP_SCALE_MOSFET,
-    "PMOS_1.0X0.6X0.35MM": _NO_CHIP_SCALE_MOSFET,
 }
 
 
