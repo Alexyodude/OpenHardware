@@ -685,6 +685,19 @@ CORRESPONDENCE: tuple[Component, ...] = (
         modelled=True,
     ),
     Component(
+        "BUTTON_TD1183SA", "modelled", "BUTTON_TD1183SA",
+        "MODELLED, not matched: the boot and reset buttons, on the C3, the "
+        "C5 and the nRF54L15. Plan from Seeed's own F.Fab, height from the "
+        "footprint's `Description` -- `2P-L3.0*W2.5*H1.5mm`, whose L, W and "
+        "H say which number is which -- and the two agree about the plan to "
+        "0.110 mm. **The C3's own two copies carry an empty Description and "
+        "are drawn from the C5's**, same vendor footprint name and same "
+        "vendor part number, their F.Fab 0.010 mm apart. This is the "
+        "refusal OH-104 deferred and OH-150 left standing, retired by "
+        "reading all six placements rather than the two the note named.",
+        modelled=True,
+    ),
+    Component(
         "WLCSP4-0.4-0.77X0.77X0.33MM", "modelled",
         "WLCSP4-0.4-0.77X0.77X0.33MM",
         "MODELLED, not matched: a 0.77 mm square die with four balls under "
@@ -801,18 +814,6 @@ _NO_CHIP_SCALE_MOSFET = (
     "with no reason beside it."
 )
 
-_NO_TINY_BUTTON = (
-    "boot and reset -- two of the buttons a person actually presses. The "
-    "smallest surface-mount switch in KiCad's 159-file `Button_Switch_SMD` is "
-    "the TS-1088 at 2.9 x 3.9 mm, against a 3.01 x 2.61 mm body. "
-    "**And unlike the C6's and RP2350's switches, which OH-104 modelled, this "
-    "one cannot be**: the vendor names the part (TD1183SA) and states no "
-    "height for it, in the footprint name or on any layer. A button STANDS "
-    "PROUD of the board -- its height is the whole point of it -- so a slab of "
-    "invented thickness would be exactly the defect that file exists not to "
-    "draw. What retires this is one number from Seeed or a datasheet."
-)
-
 ABSENT: dict[str, str] = {
     # --- pads with no body, stated rather than silent (OH-119) --------------
     "TP-SP": (
@@ -858,10 +859,15 @@ ABSENT: dict[str, str] = {
     # and a 7 x 7 mm chip is not the place to spend that tolerance.
     # **The same part under two vendor spellings is one absence, said once.**
     # Seeed write the C3's load switch `PMOS_1.0_0.6_0.35MM` and the other
-    # three boards' `PMOS_1.0X0.6X0.35MM`; the buttons are `BUTTON_TD1183SA`
-    # on the C3 and the nRF54L15 and `SW4-SMD-...` on the C6 and the RP2350.
-    # Four keys, two reasons -- and writing the reason twice is how the two
-    # copies come to disagree.
+    # three boards' `PMOS_1.0X0.6X0.35MM`: two keys, one reason, because
+    # writing the reason twice is how the two copies come to disagree.
+    #
+    # The buttons were the second pair here until OH-153 modelled them, and
+    # the sentence that described them was wrong twice over: it said
+    # `BUTTON_TD1183SA` was on "the C3 and the nRF54L15" when the C5 places
+    # two as well, and it rested on a height the vendor states in four of
+    # those six placements. Both were found by listing every placement
+    # instead of trusting the note.
     # --- OH-150: the XIAOs' copper and ink, which have no body either -----
     #
     # **The same class the Uno's TP-SP and FIDUCIA-MOUNT are in**, found on
@@ -986,7 +992,6 @@ ABSENT: dict[str, str] = {
     ),
     "PMOS_1.0_0.6_0.35MM": _NO_CHIP_SCALE_MOSFET,
     "PMOS_1.0X0.6X0.35MM": _NO_CHIP_SCALE_MOSFET,
-    "BUTTON_TD1183SA": _NO_TINY_BUTTON,
 }
 
 

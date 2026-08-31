@@ -579,6 +579,47 @@ SLABS: tuple[ModelledSlab, ...] = (
         ),
     ),
     ModelledSlab(
+        package="BUTTON_TD1183SA",
+        pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C5.kicad_pcb",
+        colour="#0f0f0f",
+        colour_source=(
+            "moulded black plastic, the same reading the SW4 switch above "
+            "takes and carrying the same uncertainty: a tactile switch is "
+            "TWO materials and a slab is one colour. "
+            "`tools/import_3d_model.py`'s FINISHES holds both of them -- "
+            "`#383838` for the moulded actuator and `#c6c4a0` for the metal "
+            "cover -- and marks the second **the weakest entry there**, "
+            "because which of a TS42's two colours is the cover was read "
+            "off their values rather than off anything named. Drawing the "
+            "body rather than the cover is what keeps the two switches on "
+            "these boards the same colour; a photograph of a TD1183SA is "
+            "what would settle it"
+        ),
+        why_not_fetched=(
+            "boot and reset, two of the buttons a person actually presses, "
+            "on the ESP32-C3, the ESP32-C5 and the nRF54L15. The smallest "
+            "surface-mount switch in KiCad's 159-file `Button_Switch_SMD` "
+            "is the TS-1088 at 2.9 x 3.9 mm against this 3.01 x 2.61 mm "
+            "body -- refused on size, as the QFN-56 is. "
+            "**The height is the vendor's, out of a field this file learned "
+            "to read for it** (OH-153): four of the six placements carry "
+            "`SMD Top Button 160gf;2P-L3.0*W2.5*H1.5mm`, and those labels "
+            "say which number is which, which the CAF's bare "
+            "`1.6*0.8*0.7mm` does not. Stated 3.0 x 2.5 against this "
+            "footprint's own F.Fab 3.010 x 2.610 is 0.110 mm apart. "
+            "**The ESP32-C3's two copies state nothing at all and are drawn "
+            "from this one**, which is what `pcb` above is for -- the same "
+            "vendor footprint name for the same vendor part number, their "
+            "F.Fab differing by 0.010 mm. That is the argument the "
+            "DFN1006-2L row makes for four placements out of five, and it "
+            "is stated here rather than left to be noticed. This row is "
+            "also where OH-104's deferral finally ends: the refusal it left "
+            "behind said no height was stated on any layer, which was true "
+            "of the C3 and false of the other two boards the moment they "
+            "were read"
+        ),
+    ),
+    ModelledSlab(
         package="MIC6P-0.94-4X2X1.1MM",
         pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
         colour="#4e4e4e",
@@ -716,6 +757,21 @@ SOCKET_COLOURS: dict[str, tuple[str, str]] = {
 #: carry -- the same absence the QFN's footprint NAME fills.
 _STATED_ENVELOPE = re.compile(
     r"(\d+(?:\.\d+)?)\*(\d+(?:\.\d+)?)\*(\d+(?:\.\d+)?)\s*mm", re.IGNORECASE)
+
+#: The same three numbers with the vendor saying which is which:
+#: `SMD Top Button 160gf;2P-L3.0*W2.5*H1.5mm` on the buttons (OH-153).
+#:
+#: **The letters are the reason this is a second pattern and not a widening
+#: of the one above.** `L`, `W` and `H` state the ORDER, which the bare form
+#: leaves to the convention that a vendor writes length first; accepting any
+#: letter -- `[A-Z]?` before each number -- would also accept `H1.5*W2.5*L3.0`
+#: and read the height as a length. So the labels are required, in that order,
+#: and a vendor who writes them in another one is refused rather than guessed
+#: at. The tolerance below would catch the swap for these particular numbers,
+#: but only because they differ; a cube would sail through.
+_LABELLED_ENVELOPE = re.compile(
+    r"L(\d+(?:\.\d+)?)\*W(\d+(?:\.\d+)?)\*H(\d+(?:\.\d+)?)\s*mm",
+    re.IGNORECASE)
 
 #: A USB Type-C contact is named by the specification -- A1 to A12 along one
 #: row and B1 to B12 along the other -- and a USB 2.0 receptacle joins four
@@ -1103,7 +1159,11 @@ def slab_geometry(spec: ModelledSlab) -> dict[str, object]:
             if (len(prop) > 2 and prop[1] == "Description"
                     and isinstance(prop[2], str)):
                 described = prop[2]
-        stated = _STATED_ENVELOPE.search(described)
+        # Bare form first, so no part already drawn can change its
+        # numbers; the labelled form only ever reaches a Description the
+        # bare one could not read at all (OH-153).
+        stated = (_STATED_ENVELOPE.search(described)
+                  or _LABELLED_ENVELOPE.search(described))
         if stated is None:
             raise SystemExit(
                 f"{spec.package}: its name states no length x width x height "
@@ -1131,7 +1191,12 @@ def slab_geometry(spec: ModelledSlab) -> dict[str, object]:
     return {"x": sorted([body[0], body[2]]),
             "y": sorted([-body[1], -body[3]]),
             "height": height,
-            "named": [length, width, height],
+            #: NOT `named`, which is what this key was called until a height
+            #: could come from a `Description` (OH-153): the button's name
+            #: states nothing at all, so a caller reading `named` would print
+            #: a field the vendor never wrote.
+            "stated": [length, width, height],
+            "stated_by": stated_by,
             "apart": apart}
 
 
@@ -1142,9 +1207,9 @@ def build_slab(spec: ModelledSlab, check: bool) -> int:
               f"python tools/compose_board_3d.py")
         return 3
     plan = slab_geometry(spec)
-    length, width, height = plan["named"]
+    length, width, height = plan["stated"]
     print(f"  vendor  F.Fab {plan['x'][1] - plan['x'][0]:.3f} x "
-          f"{plan['y'][1] - plan['y'][0]:.3f} mm; its own name says "
+          f"{plan['y'][1] - plan['y'][0]:.3f} mm; {plan['stated_by']} says "
           f"{length} x {width} x {height}, agreeing to {plan['apart']:.3f} mm")
     print(f"  colour  {spec.colour} -- {spec.colour_source}")
     if check:

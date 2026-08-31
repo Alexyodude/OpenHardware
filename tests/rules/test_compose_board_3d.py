@@ -357,16 +357,20 @@ def test_nothing_is_declared_absent_that_no_board_actually_has():
 #: is what a person would look for and miss.
 EXPLAINS: dict[str, set[str]] = {
     "Arduino Uno": {"QS", "RESONATOR"},
-    "XIAO-ESP32-C3-DIP": {"PMOS_1.0_0.6_0.35MM", "BUTTON_TD1183SA"},
+    "XIAO-ESP32-C3-DIP": {"PMOS_1.0_0.6_0.35MM"},
     # Its antenna and buttons were here until OH-104 modelled them.
     "XIAO-ESP32-C6-DIP": {"PMOS_1.0X0.6X0.35MM"},
-    # The C5's only stated omission: its buttons, which name no height.
-    "XIAO-ESP32-C5-DIP": {"BUTTON_TD1183SA"},
+    # **Nothing.** The C5's buttons were its one stated omission until
+    # OH-153 drew them, and it places no load switch, so there is no longer
+    # a part on it that a person would look for and miss. An empty set is a
+    # claim like any other here: it fails the moment a new absence appears.
+    "XIAO-ESP32-C5-DIP": set(),
     # The RP2350's own chip was here until OH-100 modelled it.
     "XIAO-RP2350-DIP": {"PMOS_1.0X0.6X0.35MM"},
     # Its own processor, its antenna and its coaxial socket were here until
-    # OH-104 modelled all three; the buttons stay, having no stated height.
-    "XIAO-nRF54l15-DIP": {"BUTTON_TD1183SA", "PMOS_1.0X0.6X0.35MM"},
+    # OH-104 modelled all three, and its buttons until OH-153 -- which found
+    # the height stated in this board's own Description.
+    "XIAO-nRF54l15-DIP": {"PMOS_1.0X0.6X0.35MM"},
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
 # same placements, same absences -- so the entries are derived the same way
@@ -655,25 +659,35 @@ def test_every_modelled_slab_agrees_with_the_outline_the_vendor_drew():
 def test_a_package_that_states_no_height_is_not_modelled_as_a_slab():
     """The one number no layer carries, so guessing it is the whole risk.
 
-    **A button is why this matters.** `BUTTON_TD1183SA` has an `F.Fab`
-    outline and no height anywhere -- and a button STANDS PROUD of the board,
-    which is the point of it, so a slab of invented thickness would be exactly
-    what this file exists not to draw. It stays in `ABSENT` while the C6's and
-    RP2350's switches, whose names DO state 0.53 mm, are drawn.
+    **The load switch under Seeed's other spelling is the subject.** The C3
+    writes it `PMOS_1.0_0.6_0.35MM` where the other three boards write
+    `PMOS_1.0X0.6X0.35MM`, and `_NAMED_BODY` reads an `x` between the
+    numbers and not an underscore -- widening it to accept one would make
+    `SOT8_0d5_2_1x1_2x0_6mm` parse into nonsense. So this copy has an
+    `F.Fab` outline, a real moulded body under it, and no field this file
+    can read a height out of. That is precisely when a slab must not be
+    drawn.
+
+    **This test made the same point with `BUTTON_TD1183SA` until OH-153, and
+    its premise was false.** It asserted the button had no height "anywhere"
+    while reading the nRF54L15 -- the very board file whose Description says
+    `2P-L3.0*W2.5*H1.5mm`. It passed because `_STATED_ENVELOPE` could not
+    parse letters between the numbers, which is a fact about a regex and not
+    about the vendor. A test can be green for years on a premise the data
+    contradicts; this one was.
     """
     from tools import model_from_datasheet
 
     spec = dataclasses.replace(model_from_datasheet.SLABS[0],
-                               package="BUTTON_TD1183SA",
-                               pcb=compose.PCB_CACHE / "nRF54L15.kicad_pcb")
+                               package="PMOS_1.0_0.6_0.35MM",
+                               pcb=compose.PCB_CACHE / "ESP32-C3.kicad_pcb")
     if not spec.pcb.is_file():
-        pytest.skip("SKIPPED: nRF54L15.kicad_pcb is not fetched")
+        pytest.skip("SKIPPED: ESP32-C3.kicad_pcb is not fetched")
     with pytest.raises(SystemExit, match="states no length x width x height"):
         model_from_datasheet.slab_geometry(spec)
-    assert "BUTTON_TD1183SA" in compose.ABSENT
-    assert "no height" in compose.ABSENT["BUTTON_TD1183SA"], (
-        "the entry has to say WHICH number is missing, or the next person "
-        "models it from the F.Fab outline it does have"
+    assert "PMOS_1.0_0.6_0.35MM" in compose.ABSENT, (
+        "a part with a body and no readable height must still carry a "
+        "reason, or a reader sees it missing and nothing said about it"
     )
 
 
