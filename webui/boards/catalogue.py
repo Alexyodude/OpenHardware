@@ -177,13 +177,15 @@ CHIPS: dict[str, tuple[str, str]] = {
 #: this board at its first store, which is the shortest statement of why the
 #: entry is not inherited.
 #:
-#: **The ESP32-C5 is described and is deliberately absent from this table.**
-#: `webui/boards/esp32c5.py` exists, so the C5 boards are runnable -- an image
-#: can be attempted on them -- and no image has been watched. Its ISA is
-#: `RV32IMAC + Zcb/Zcmp/Zcmt` and `core/riscv32` implements none of the three
-#: Zc groups, so the board is configured with the subset it can execute and
-#: says so; see that file's `EXECUTES`. This is the case the distinction at the
-#: top of this comment was written for.
+#: The ESP32-C5 entry is the third RISC-V one. For a while this paragraph said
+#: the C5 was "deliberately absent from this table" -- true when it was
+#: written, when `core/riscv32` implemented none of the C5's three Zc groups
+#: and the board was configured with the subset it could execute -- and it was
+#: left standing after OH-146 implemented Zcb, Zcmp and Zcmt and OH-147's
+#: `tests/riscv32/test_esp32c5_board.py` watched a real image drive the pin.
+#: Found and corrected by OH-158 (2026-09-04), whose whole subject is claims
+#: that outlived what they described; the table below is the fact and this
+#: comment follows it, not the other way round.
 FIRMWARE_VERIFIED: dict[str, str] = {
     "RP2040": "tests/cortexm0/test_blink.py",
     "SAMD21": "tests/cortexm0/test_samd21_blink.py",
@@ -200,9 +202,14 @@ FIRMWARE_VERIFIED: dict[str, str] = {
 ORACLES: dict[str, str] = {
     "cortexm0": "rp2040js (MIT, hand-written from DDI0419) -- in use here",
     "cortexm33": "none free that models Armv8-M security extensions; QEMU has m33 "
-                 "but not the RP2350's Hazard3 half",
+                 "but not the RP2350's Hazard3 half. A prebuilt Windows QEMU exists "
+                 "(qemu.weilnetz.de, checked 2026-09-04, not installed), so its "
+                 "absence is not what blocks this; being a single source is "
+                 "(docs/architectures.md 4.6)",
     "cortexm4": "QEMU has cortex-m4; no independent second source, so a "
-                "disagreement could not be adjudicated",
+                "disagreement could not be adjudicated. The same prebuilt Windows "
+                "QEMU applies here (docs/architectures.md 4.6): obtainable, not "
+                "installed, and single-source either way",
     "riscv32": "Hazard3's rvcpp (Apache-2.0) builds here, but has no extension "
                "gating at all -- right on the legal space, wrong at the "
                "illegal-instruction edge",

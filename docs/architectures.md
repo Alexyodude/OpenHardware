@@ -640,6 +640,51 @@ pin write/direction, I2C, SPI, UART tx, RMT events out, plus
 **So the value sits in the fork, not upstream.** Which makes the PICSimLab
 build blocker (OH-9) load-bearing for the entire ESP path — see §7.
 
+### 4.6 Prebuilt binaries, checked 2026-09-04 (OH-158)
+
+Three tickets -- OH-36, OH-64 and OH-9 -- were blocked on tools this machine
+does not have, and in each case the test performed was "can it be BUILT
+here", never "can a prebuilt be obtained". Asked directly, both answers are
+**yes** [V], and **neither was installed**: that is the machine owner's
+decision, not a ticket's.
+
+| Tool | Prebuilt? | Where | What is offered | Integrity | Licence |
+|---|---|---|---|---|---|
+| QEMU for Windows | **YES** [V] | `https://qemu.weilnetz.de/w64/`, the build qemu.org's own download page links | `qemu-w64-setup-20260811.exe`, described on the index as the QEMU 11.1.0 installer; 20260805 and 20260729 also listed | `qemu-w64-setup-20260811.sha512` beside it (`5bcf9eed...dbf543`); no `.sig` in the listing | GPLv2 |
+| PICSimLab for Windows | **YES** [V] | GitHub releases of `lcgamboa/picsimlab` | stable `v0.9.2` (2024-10-05): `PICSimLab_0.9.2_241005_win64_setup.exe` 60,517,223 B and `_win64.zip` 92,937,379 B; rolling prerelease `latestbuild` (2026-08-30): `PICSimLab_0.9.3_260830_win64_setup.exe` 67,200,934 B, `_win64.zip` 99,424,702 B, and `PICSimLab_NOGUI-0.9.3_260830_Ubuntu_22.04.5_LTS_x86_64.AppImage` 16,595,448 B | **no checksum or signature asset on any release** | GPL-2.0 (per the GitHub API) |
+
+**What was NOT verified, because it needs a download and nothing was
+downloaded** [U]: whether the weilnetz installer carries `qemu-system-arm.exe`
+(the index names it the QEMU installer and lists no per-target contents), and
+whether PICSimLab's win64 zip carries the `share/` tree `install_root()` needs
+(§7 records that the NOGUI AppImage bundles `lib/qemu`; the zip was not
+opened). Secondary routes qemu.org names, unchecked: MSYS2's QEMU package.
+
+Two more facts, from this machine rather than the network:
+
+* **A QEMU is already here and is not usable.** The Android SDK emulator
+  ships `qemu-system-armel.exe` and `qemu-system-aarch64.exe` under
+  `AppData/Local/Android/Sdk/emulator/qemu/windows-x86_64/` (it reports
+  "Android emulator version 36.2.12.0"). It is Google's fork: it needs the
+  emulator's own DLL directory on PATH to start at all, rejects `-machine`
+  as an unknown option, and `-cpu help` lists no Cortex-M. Not an oracle. [V]
+* **OH-36's blocker (b) is stale.** It records "arm-none-eabi-gcc is
+  absent". Resolved through the compile service's own toolchain table rather
+  than through PATH, `toolchain-gccarmnoneeabi` is installed and runs --
+  "xPack GNU Arm Embedded GCC x86_64" 12.3.1 -- and it is what builds the
+  SAMD21 recipe today. It is not on PATH, which is almost certainly why a
+  `which`-style check said otherwise; no cross toolchain here is. OH-36 is
+  held by another session, so the finding lives here and in OH-158 rather
+  than in that ticket. [V]
+
+What this does **not** change is the single-source objection (§2). A running
+QEMU turns "no oracle at all" for Armv7E-M and Armv8-M into "one source,
+limitation recorded" -- the bar OH-36 already set for itself: it can detect a
+disagreement and cannot adjudicate one. `ORACLES` in
+`webui/boards/catalogue.py` now says so, because that string is what
+`missing_cores()` shows a reader, and a stale entry there is what makes a
+board look deader than it is.
+
 ---
 
 ## 5. Raspberry Pi silicon

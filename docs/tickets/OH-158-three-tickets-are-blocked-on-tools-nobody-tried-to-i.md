@@ -2,7 +2,7 @@
 id: OH-158
 title: Three tickets are blocked on tools nobody tried to install, and one is already
   stale
-status: open
+status: done
 priority: P1
 created: '2026-09-03'
 touches:
@@ -85,3 +85,15 @@ STEPS:
 WHAT THIS IS NOT. It is not a request to vendor a binary into the repository,
 and it is not permission to weaken rules/conformance-fixtures.md. It is the
 one experiment that three separate tickets each assumed the answer to.
+
+**Note 2026-09-04:** DONE 2026-09-04, answered either way and recorded in docs/architectures.md 4.6 and catalogue.ORACLES. Nothing was installed and nothing was downloaded; installing is the machine owner's decision and is surfaced to them rather than taken here.
+
+QEMU for Windows: YES. qemu.weilnetz.de/w64/ (the build qemu.org's download page links) lists qemu-w64-setup-20260811.exe, described on its index as the QEMU 11.1.0 installer, with qemu-w64-setup-20260811.sha512 beside it (5bcf9eed...dbf543); 20260805 and 20260729 are also listed; no .sig in the listing; GPLv2. NOT verified without a download: that the installer carries qemu-system-arm.exe. The Android SDK emulator on this machine ships a qemu-system-armel.exe, and it is not usable: Google's fork, needs its own DLL dir on PATH, rejects -machine, lists no Cortex-M.
+
+PICSimLab: YES. GitHub releases of lcgamboa/picsimlab: stable v0.9.2 (2024-10-05) with PICSimLab_0.9.2_241005_win64_setup.exe (60,517,223 B) and _win64.zip (92,937,379 B); rolling prerelease latestbuild (2026-08-30) with PICSimLab_0.9.3_260830_win64_setup.exe (67,200,934 B), _win64.zip (99,424,702 B) and PICSimLab_NOGUI-0.9.3_260830_Ubuntu_22.04.5_LTS_x86_64.AppImage (16,595,448 B). No checksum or signature asset on any release. GPL-2.0. NOT verified: that the win64 zip carries share/ (the zip was not opened). known-issues 4a.6 and architectures.md 7 had already recorded the AppImage bundling lib/qemu; this ticket's own text missed that.
+
+OH-36's blocker (b) -- "arm-none-eabi-gcc is absent" -- is stale and is recorded in 4.6 and here WITHOUT editing OH-36, which another session holds: toolchain-gccarmnoneeabi is installed, is "xPack GNU Arm Embedded GCC x86_64" 12.3.1, runs, and builds the SAMD21 recipe. Not on PATH, like every cross toolchain here.
+
+The single-source objection is not relaxed: ORACLES for cortexm33 and cortexm4 now say the prebuilt exists, is not installed, and that being a single source is what blocks, not absence. One more stale claim fixed in passing in the same file: the FIRMWARE_VERIFIED comment said the ESP32-C5 was "deliberately absent from this table" three lines above the entry that lists it (OH-147's watched image).
+
+Step 2 of this ticket (run one image under QEMU and diff against the cortexm0 core) needs the install and was not done; ask before doing it.
