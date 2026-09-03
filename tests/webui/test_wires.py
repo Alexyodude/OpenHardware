@@ -329,7 +329,10 @@ def test_a_wire_resting_on_a_box_reports_the_contact_the_collider_resolved(tmp_p
     `contact` never reporting `proud` fails the `proud > 0` assertion;
     `proudOfBox` dropping its other-two-slabs test fails the `beside`
     assertion; pinned ends counted as free nodes fails `into.inside == 0`;
-    and the whole fix reverted fails on `rope.contact is not a function`.
+    the whole fix reverted fails on `rope.contact is not a function`; and,
+    after the review, `proudOfBox` measuring against the far face (the
+    first version) or ignoring the gap entirely each fails the `above` and
+    `near` assertions.
     **One it does NOT catch**: `depthInBox` with strict comparisons, because
     a node on the face then reads depth 0 a line later and `contact` counts
     only `depth > 0` -- the caller's gate, not this test, is what keeps a
@@ -354,9 +357,19 @@ def test_a_wire_resting_on_a_box_reports_the_contact_the_collider_resolved(tmp_p
         // rather than a count of everything at the same height.
         const beside = new Rope([-40, 3.5, 0], [-30, 3.5, 0]);
         beside.colliders = [box];
+        // Two more that the OH-132 review found the first version blind to:
+        // a wire in clear air ABOVE the box, within its x and z spans, and a
+        // wire whose centres sit 0.1 above the top face -- less than the
+        // tube's radius, so the tube reaches 0.06 in. Neither is stepped, so
+        // the nodes lie exactly where the endpoints put them.
+        const above = new Rope([-14, 40, 0], [14, 40, 0]);
+        above.colliders = [box];
+        const near = new Rope([-2, 3.6, 0], [2, 3.6, 0]);
+        near.colliders = [box];
         console.log(JSON.stringify({
           radius: R, over: over.contact(R), into: into.contact(R),
           beside: beside.contact(R), centres: over.contact(),
+          above: above.contact(R), near: near.contact(R),
         }));
     """)
     # The collider did its job on both wires, which is exactly why one number
@@ -380,3 +393,9 @@ def test_a_wire_resting_on_a_box_reports_the_contact_the_collider_resolved(tmp_p
     assert result["beside"] == {"inside": 0, "proud": 0, "pinned": 0}
     # And a caller that draws no tube gets centres, not contact.
     assert result["centres"]["proud"] == 0
+    # Clear air over the box is not contact either -- the review's case: the
+    # first `proudOfBox` measured against the FAR face and reported the whole
+    # tube for a wire 33 units up. Contact is the radius less the gap, so 0.1
+    # above the face with a 0.16 tube is 0.06 in, and 36.5 above is nothing.
+    assert result["above"] == {"inside": 0, "proud": 0, "pinned": 0}, result["above"]
+    assert abs(result["near"]["proud"] - (result["radius"] - 0.1)) < 1e-9, result["near"]

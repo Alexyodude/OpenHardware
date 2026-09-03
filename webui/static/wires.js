@@ -537,6 +537,15 @@ function depthInSphere(p, solid) {
  * chip but a board's width off to its left is not touching it, and without
  * that test every wire in the scene would report contact with everything at
  * its own height.
+ *
+ * **And the NEAR face is the only face**, which the first version of this
+ * got wrong and the OH-132 review caught: it took the larger of the two
+ * face terms, so a node above the box was always measured against the
+ * bottom face, always exceeded the radius, and always clamped to it -- a
+ * wire settled 33 units clear of the fixture reported its whole tube in
+ * contact. The measure is the tube radius less the gap from the centre to
+ * the slab on this axis: `radius` for a node on the face, less for one just
+ * off it, nothing once the gap exceeds the radius.
  */
 function proudOfBox(p, solid, radius) {
   let over = 0;
@@ -547,9 +556,8 @@ function proudOfBox(p, solid, radius) {
       if (p[other] <= solid.min[other] || p[other] >= solid.max[other]) across = false;
     }
     if (!across) continue;
-    over = Math.max(over,
-      (p[axis] + radius) - solid.min[axis],
-      solid.max[axis] - (p[axis] - radius));
+    const gap = Math.max(solid.min[axis] - p[axis], p[axis] - solid.max[axis], 0);
+    over = Math.max(over, radius - gap);
   }
   return Math.min(over, radius);
 }
