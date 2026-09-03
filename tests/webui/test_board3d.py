@@ -569,13 +569,29 @@ def test_the_renderer_can_report_how_far_a_wire_is_inside_something():
     existed. `penetration` is the number that is not fooled by the camera, and
     it is exported for exactly that reason -- measured 2.248 mm for a wire laid
     straight from pad 12 through the DIP-28, and 0.000 once it settles.
+
+    **OH-132: and 0.000 was also what it said for a node buried in a face.**
+    The arithmetic lives in `wires.js` now, where `test_wires.py` runs it under
+    node instead of grepping for it -- which is how a probe that reported
+    0.0000 for a half-buried wire survived four handoffs. What is asserted
+    here is only that this file goes through it.
     """
     source = RENDERER.read_text(encoding="utf-8")
     assert "export function penetration()" in source
+    assert "export function contact()" in source
     body = source.split("export function penetration()", 1)[1].split("\n}", 1)[0]
-    assert "rope.colliders" in body, (
+    assert "rope.contact()" in body, (
+        "penetration must go through Rope.contact, or the geometry is back in "
+        "the file no test can execute"
+    )
+    assert "wire.rope" in body, (
         "it must measure against the set the rope actually solved against, or "
         "it reports a fault on every wire's own part"
+    )
+    whole = source.split("export function contact()", 1)[1].split("\n}", 1)[0]
+    assert "WIRE_RADIUS" in whole, (
+        "surface contact is measured against the tube that is drawn, or the "
+        "number is about a centreline nobody can see"
     )
 
 

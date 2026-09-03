@@ -441,8 +441,115 @@ export class Rope {
     }
     return worst;
   }
+
+  /**
+   * How this wire sits against the solids it was solved against.
+   *
+   * **Three numbers, because the one number this replaces stood for three
+   * different facts and reported the wrong one.** `outOfBox` snaps a
+   * colliding node exactly onto the face and `step` runs `collide` LAST in
+   * every pass, so at the end of a step no free node is strictly inside
+   * anything -- and a probe that asks "how far inside is the worst node"
+   * answers 0 for precisely the nodes the collider handled. Measured
+   * 2026-09-04, a settled 28-unit wire over a 12 x 3.5 x 6 box: 0.0000, with
+   * node 5 sitting at x = -6.000, flush in the box's -X face.
+   *
+   *   `inside`  worst depth of a FREE node strictly inside a solid. A fault,
+   *             and the number OH-78 meant to be watching. Zero is the pass.
+   *   `proud`   worst distance a node's TUBE reaches past a face while its
+   *             centre is on or outside it. **Contact, not interpenetration**
+   *             -- a lead resting on a chip has half its tube in the chip by
+   *             construction, and calling that a fault would fail every wire
+   *             that works. Bounded by `radius`.
+   *   `pinned`  worst depth of a PINNED end inside a solid. `collide` skips
+   *             the two ends (see its loop bounds), so nothing in this file
+   *             ever moves them: a number here is a fault in whoever chose
+   *             the anchor -- OH-128's carved pad reporting the group origin,
+   *             inside the PCB slab -- and reporting it as the wire's
+   *             penetration is what the "0.289 mm" record was doing.
+   *
+   * `radius` is the drawn tube's, and defaults to 0 so a caller that does not
+   * draw gets centres only. This file still knows nothing about three.js.
+   *
+   * @param {number} radius
+   * @returns {{inside: number, proud: number, pinned: number}}
+   */
+  contact(radius = 0) {
+    const worst = { inside: 0, proud: 0, pinned: 0 };
+    for (let i = 0; i < this.count; i++) {
+      const at = i * 3;
+      const p = [this.position[at], this.position[at + 1], this.position[at + 2]];
+      const pinned = i === 0 || i === this.count - 1;
+      for (const solid of this.colliders) {
+        const depth = solid.kind === "sphere"
+          ? depthInSphere(p, solid)
+          : depthInBox(p, solid);
+        if (depth > 0) {
+          const key = pinned ? "pinned" : "inside";
+          worst[key] = Math.max(worst[key], depth);
+          continue;
+        }
+        // Outside, or exactly on a face. How far does the tube reach in?
+        if (radius <= 0) continue;
+        const over = solid.kind === "sphere"
+          ? radius - (distance(p, solid.at) - solid.r)
+          : proudOfBox(p, solid, radius);
+        if (over > 0) worst.proud = Math.max(worst.proud, Math.min(over, radius));
+      }
+    }
+    return worst;
+  }
 }
 
 function distance(a, b) {
   return Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+}
+
+/** How far a point is inside a box, or 0 if it is not. Nearest face. */
+function depthInBox(p, solid) {
+  let depth = Infinity;
+  for (let axis = 0; axis < 3; axis++) {
+    // `<=` and `>=`, matching `outOfBox`: a node the collider snapped ONTO a
+    // face is not inside it. The old probe used `<` and `>` here and so
+    // counted a snapped node as inside at depth exactly zero, which is the
+    // shape its 0.0000 actually had. **Measured 2026-09-04: a strict
+    // comparison here changes nothing today**, because a node on the face
+    // then reaches a depth of 0 on the next line and `contact` only counts
+    // `depth > 0`. The equality is written anyway, so this function's own
+    // answer is right and not merely masked by its caller's gate.
+    if (p[axis] <= solid.min[axis] || p[axis] >= solid.max[axis]) return 0;
+    depth = Math.min(depth, p[axis] - solid.min[axis], solid.max[axis] - p[axis]);
+  }
+  return depth;
+}
+
+/** How far a point is inside a sphere, or 0 if it is not. */
+function depthInSphere(p, solid) {
+  const gap = distance(p, solid.at);
+  return gap >= solid.r ? 0 : solid.r - gap;
+}
+
+/**
+ * How far a tube of `radius` centred at `p` reaches past a face of `solid`,
+ * given `p` itself is not inside it.
+ *
+ * **The other two slabs are the whole point.** A node level with the top of a
+ * chip but a board's width off to its left is not touching it, and without
+ * that test every wire in the scene would report contact with everything at
+ * its own height.
+ */
+function proudOfBox(p, solid, radius) {
+  let over = 0;
+  for (let axis = 0; axis < 3; axis++) {
+    let across = true;
+    for (let other = 0; other < 3; other++) {
+      if (other === axis) continue;
+      if (p[other] <= solid.min[other] || p[other] >= solid.max[other]) across = false;
+    }
+    if (!across) continue;
+    over = Math.max(over,
+      (p[axis] + radius) - solid.min[axis],
+      solid.max[axis] - (p[axis] - radius));
+  }
+  return Math.min(over, radius);
 }

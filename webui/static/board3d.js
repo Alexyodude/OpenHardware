@@ -1689,40 +1689,47 @@ export function dispose() {
 }
 
 /**
- * How deep the worst wire sits inside something it may not pass through.
+ * How deep the worst wire sits inside something it may not pass through,
+ * counting FREE nodes only.
  *
  * **For a test, and it is the only honest way to check this one.** A wire
  * lying over a chip and a wire lying through it are the same picture from most
  * angles, and the screenshot that made this look fixed was taken before the
  * colliders existed. A number is not fooled by the camera.
  *
- * Zero means every node is outside every solid. Reported in scene units;
- * divide by `view.mmScale` for millimetres.
+ * **Zero is what a working collider gives, and that is why this number alone
+ * was never enough** (OH-132). `collide` runs last in every pass and snaps a
+ * node onto the face, so a wire resting correctly on a chip and a wire with
+ * no colliders at all both report 0 here. `contact()` is what tells those two
+ * apart. And this one now says BY STATEMENT what it excludes: the two pinned
+ * ends, which `collide` never touches, so a depth there is the anchor's fault
+ * and not the wire's. That exclusion is the "0.289 mm" residual, re-derived.
+ *
+ * Reported in scene units; divide by `view.mmScale` for millimetres.
  */
 export function penetration() {
   let worst = 0;
-  for (const wire of view.wires) {
-    const rope = wire.rope;
-    // The same set the rope is actually solving against, so this measures what
-    // happened rather than what should have. `applyColliders` drops the part a
-    // wire is plugged into, because its tail is inside that part by
-    // construction -- counting it here would report a fault on every wire.
-    for (let node = 0; node < rope.count; node += 1) {
-      const x = rope.position[node * 3];
-      const y = rope.position[node * 3 + 1];
-      const z = rope.position[node * 3 + 2];
-      for (const solid of rope.colliders) {
-        if (solid.kind !== "box") continue;
-        const [ax, ay, az] = solid.min;
-        const [bx, by, bz] = solid.max;
-        if (x < ax || x > bx || y < ay || y > by || z < az || z > bz) continue;
-        // Inside. How far it would have to move to get out the nearest face.
-        worst = Math.max(worst, Math.min(
-          x - ax, bx - x, y - ay, by - y, z - az, bz - z));
-      }
-    }
-  }
+  // `rope.colliders`, not `view.colliders`: the same set the rope is actually
+  // solving against, so this measures what happened rather than what should
+  // have. `applyColliders` drops the part a wire is plugged into, because its
+  // tail is inside that part by construction.
+  for (const wire of view.wires) worst = Math.max(worst, wire.rope.contact().inside);
   return worst;
+}
+
+/**
+ * The whole contact picture: interpenetration, surface contact, and the ends.
+ *
+ * See `Rope.contact` for what the three mean and why one number was not
+ * enough. Scene units; divide by `view.mmScale` for millimetres.
+ */
+export function contact() {
+  const total = { inside: 0, proud: 0, pinned: 0 };
+  for (const wire of view.wires) {
+    const one = wire.rope.contact(WIRE_RADIUS);
+    for (const key of Object.keys(total)) total[key] = Math.max(total[key], one[key]);
+  }
+  return total;
 }
 
 /** Whether a board is currently drawn. For the page, and for a test. */

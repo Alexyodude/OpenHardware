@@ -304,3 +304,79 @@ def test_the_constants_are_the_ones_the_scene_was_tuned_against(tmp_path):
     )
     assert result["substep"] <= 1 / 60, "the substep is coarser than a frame"
     assert result["slack"] > 1.0, "a wire with no slack is a wire under tension"
+
+
+def test_a_wire_resting_on_a_box_reports_the_contact_the_collider_resolved(tmp_path):
+    """**The defect OH-132 found: the probe was blind to what it measured.**
+
+    `outOfBox` snaps a colliding node exactly onto the face and `collide` runs
+    last in every pass, so at the end of a step no free node is strictly
+    inside anything -- and a min-distance-inside probe answers 0.0000 for
+    exactly the nodes the collider handled. Measured 2026-09-04 on a settled
+    28-unit wire over a 12 x 3.5 x 6 box: the old probe reported 0.0000 while
+    node 5 sat at x = -6.000, flush in the box's -X face with the whole tube
+    radius, 0.16 units, inside it.
+
+    So the one number becomes three. `inside` staying 0 is the collider
+    working. `proud` is what a lead resting on a chip does, and is bounded by
+    the tube. `pinned` is the anchor's fault and not the wire's -- and it is
+    the only thing the old number could ever see, which is why the long-lived
+    "wire penetration 0.289 mm" residual was a pinned end and not a contact
+    tolerance. Measured here: a head pinned at the box's centre reports 1.7500
+    units, 0.3104 mm at the Uno's 5.638 scale.
+
+    **Which mutations this catches, run rather than assumed** (2026-09-04):
+    `contact` never reporting `proud` fails the `proud > 0` assertion;
+    `proudOfBox` dropping its other-two-slabs test fails the `beside`
+    assertion; pinned ends counted as free nodes fails `into.inside == 0`;
+    and the whole fix reverted fails on `rope.contact is not a function`.
+    **One it does NOT catch**: `depthInBox` with strict comparisons, because
+    a node on the face then reads depth 0 a line later and `contact` counts
+    only `depth > 0` -- the caller's gate, not this test, is what keeps a
+    snapped node out of `inside`. Recorded because the first draft of this
+    docstring claimed the opposite.
+    """
+    result = run(tmp_path, """
+        const box = {kind: "box", min: [-6, 0, -3], max: [6, 3.5, 3]};
+        const R = 0.16;
+        function settle(head) {
+          const rope = new Rope(head, [14, 4, 0]);
+          rope.colliders = [box];
+          rope.floor = -5;
+          rope.slacken();
+          for (let f = 0; f < 600; f++) rope.advance(1 / 60);
+          return rope;
+        }
+        const over = settle([-14, 4, 0]);
+        const into = settle([0, 1.75, 0]);
+        // A node level with the box's top face but well off to the side is
+        // not touching it, and saying so is what keeps `proud` a measurement
+        // rather than a count of everything at the same height.
+        const beside = new Rope([-40, 3.5, 0], [-30, 3.5, 0]);
+        beside.colliders = [box];
+        console.log(JSON.stringify({
+          radius: R, over: over.contact(R), into: into.contact(R),
+          beside: beside.contact(R), centres: over.contact(),
+        }));
+    """)
+    # The collider did its job on both wires, which is exactly why one number
+    # was not enough: this is 0 whether a wire rests correctly on the box or
+    # has no colliders at all.
+    assert result["over"]["inside"] == 0
+    assert result["into"]["inside"] == 0
+    # ...and the contact it resolved is visible now. THIS is the ticket.
+    assert result["over"]["proud"] > 0, (
+        "a wire draped over a box reports no contact at all; the probe is "
+        "still blind to exactly the nodes the collider handled"
+    )
+    assert result["over"]["proud"] <= result["radius"] + 1e-9, (
+        "contact deeper than the tube is interpenetration and belongs in "
+        "`inside`, not in `proud`"
+    )
+    # A pinned end is not the wire's contact tolerance. 0.289 mm was this.
+    assert result["over"]["pinned"] == 0
+    assert result["into"]["pinned"] > 1.0, result["into"]
+    # A wire that never reaches the box says nothing about it.
+    assert result["beside"] == {"inside": 0, "proud": 0, "pinned": 0}
+    # And a caller that draws no tube gets centres, not contact.
+    assert result["centres"]["proud"] == 0
