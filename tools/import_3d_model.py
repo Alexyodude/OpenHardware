@@ -495,9 +495,9 @@ UNSTYLED = "#808080"
 #: What an unstyled PRINTED CIRCUIT BOARD is painted, where the constant above
 #: would otherwise leave it grey.
 #:
-#: **THIS IS A JUDGEMENT AND IT IS THE ONLY ONE IN THIS FILE.** Every other
-#: colour here is the vendor's, read out of their own STEP. Nobody publishes
-#: this one. Searched on 2026-08-29 so that nobody repeats it:
+#: **THIS IS A JUDGEMENT, AND `CERAMIC` BELOW IS THE ONLY OTHER ONE IN THIS
+#: FILE.** Every other colour here is the vendor's, read out of their own STEP.
+#: Nobody publishes this one. Searched on 2026-08-29 so that nobody repeats it:
 #:
 #:   * Seeed's STEP files give the PCB `#808080` -- `UNSTYLED`. On the RP2040
 #:     that is 16,682 of 18,723 vertices.
@@ -534,6 +534,36 @@ UNSTYLED = "#808080"
 #: **What would retire this judgement**: Seeed stating a colour, or somebody
 #: measuring a board. Recorded so it can be replaced rather than inherited.
 BOARD_MASK = "#1b1b1b"
+
+#: The colour a fired ceramic block draws in: the ESP32-C5's LTCC diplexer and
+#: the nRF54L15's chip antenna, both built by `tools/model_from_datasheet.py`
+#: because nobody publishes a mesh of either.
+#:
+#: **THE SECOND JUDGEMENT IN THIS FILE, AND THE SAME KIND AS THE FIRST.** Every
+#: entry in `FINISHES` is a reading off a vendor mesh, and a part with no mesh
+#: has nothing to read. Until OH-155 the two ceramic parts borrowed `#c6c4a0`,
+#: the tactile switch's steel cover, and drew at metalness 1.0 -- a dielectric
+#: shaded as a conductor, which under the PBR model is a different reflectance
+#: law and not a nearby value on a slider. And the borrowed key could not
+#: simply be re-declared for them: `FINISHES` is keyed by colour, and tallied
+#: 2026-09-04 across the shipped boards `#c6c4a0` is on 13 of the 17, including
+#: both ESP32-C3s at 604 triangles each, which carry neither a TS42 nor a
+#: ceramic part -- so vendor models style faces with it too. One hex meaning
+#: two materials is the shape of the defect OH-99 fixed on the nRF54LM20A's
+#: mask film, and the cure is the same: the ceramic gets its own.
+#:
+#: Searched 2026-09-04 so that nobody repeats it: the three Murata LFD-series
+#: diplexer datasheets fetched for OH-150 (LFD152G45MT1D824, LFD182G45MJFE023,
+#: LFD182G45DCHD277) mention no colour, appearance or material anywhere in
+#: their text, and Seeed's `ANT_KH5220-A36` antenna has no datasheet in the
+#: tree at all. So the value is chosen: a pale warm ivory, which is what LTCC
+#: and alumina fire to, set LIGHTER than the switch cover it replaces so that
+#: the two are never read as one, in this table or on a board.
+#:
+#: **What would retire this judgement**: a vendor STEP that styles either
+#: block, or a photographed board measured. Recorded so it can be replaced
+#: rather than inherited, exactly as `BOARD_MASK` is.
+CERAMIC = "#d9d3c0"
 
 # --- the solder-mask film, and the one colour this file overrides (OH-99) ----
 #
@@ -703,7 +733,12 @@ FINISHES: dict[str, Finish] = {
         "triangles on TS42 and nothing else, and which of its two colours is "
         "the steel cover and which the moulded actuator is read off their "
         "values rather than off anything named. A B3S-1000 is a black body "
-        "under a bright cover, and this is the bright one"
+        "under a bright cover, and this is the bright one. **And it is not "
+        "only on TS42**: tallied 2026-09-04, the shipped ESP32-C3 boards "
+        "carry 604 triangles of it with no switch on them, so vendor models "
+        "of small passives style faces with it too -- which is why the two "
+        "ceramic parts that borrowed this hex until OH-155 could not have it "
+        "re-declared for them, and draw in `CERAMIC` instead"
     )),
     "#ff9f37": Finish(1.0, 0.30, (
         "the XIAO's gold castellated pads. Already recorded in the tree: "
@@ -775,6 +810,17 @@ FINISHES: dict[str, Finish] = {
         "the tactile switch's moulded actuator, the other half of the TS42 "
         "pair. Carries the same caveat as #c6c4a0"
     )),
+    CERAMIC: Finish(0.0, 0.60, (
+        "the two ceramic blocks `tools/model_from_datasheet.py` builds -- the "
+        "ESP32-C5's LTCC diplexer and the nRF54L15's chip antenna -- in the "
+        "judged colour `CERAMIC` above, whose comment says what was searched "
+        "before it was chosen. Metalness 0 is not a judgement: a fired "
+        "ceramic is a dielectric and the parameter has no other honest value "
+        "for one. The roughness IS a judgement, in the same register as "
+        "BOARD_MASK's colour: an unglazed LTCC or alumina block is matte, so "
+        "0.60 sits between the silkscreen ink's 0.55 and moulded epoxy's "
+        "0.70, and a vendor mesh of either part would retire it"
+    )),
     # -- the two solder masks, and the only two surfaces here with a COAT.
     # **Because a PCB is two layers and everything else here is one.** The
     # pigment scatters and the cured surface over it reflects, which is why a
@@ -811,8 +857,8 @@ FINISHES: dict[str, Finish] = {
         "and not a mirror"
     ), coat=0.85, coat_roughness=0.08),
     "#1b1b1b": Finish(0.0, 0.35, (
-        "the XIAO family's solder mask, which is BOARD_MASK -- the one "
-        "judged colour in this file, because no Seeed file states one. It "
+        "the XIAO family's solder mask, which is BOARD_MASK -- a judged "
+        "colour, because no Seeed file states one (CERAMIC is the other). It "
         "gets the same finish as the two masks below it because it is the "
         "same kind of surface: a cured semi-gloss coating, smoother than a "
         "moulded body and not a mirror. The COLOUR is a judgement; that a "

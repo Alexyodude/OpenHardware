@@ -1417,3 +1417,31 @@ def test_the_trimmer_is_the_first_three_terminal_part():
     assert "rated_amps" not in POT_ELECTRICAL.cited
     assert "absolute_amps" not in POT_ELECTRICAL.cited
     assert pot.lens is None, "a trimmer displays nothing"
+
+
+def test_a_ceramic_block_is_a_dielectric_in_its_own_colour():
+    """OH-155: the two ceramic parts stop borrowing the switch cover's steel.
+
+    `FINISHES` is keyed by colour, and `#c6c4a0` is on thirteen of the
+    seventeen shipped boards -- both ESP32-C3s among them, which carry neither
+    a tactile switch nor a ceramic part -- so it could not be re-declared for
+    two of its users without changing the other eleven. A ceramic therefore
+    needs its own key, and the key needs a dielectric's metalness, which is
+    what the parameter means rather than a choice. The roughness IS a choice,
+    and the entry has to say so in the same voice `BOARD_MASK` uses.
+    """
+    from tools.import_3d_model import CERAMIC, FINISHES
+    from tools.model_from_datasheet import SLABS
+
+    assert CERAMIC in FINISHES
+    assert CERAMIC != "#c6c4a0", "a ceramic in the cover's own hex is the defect"
+    assert FINISHES[CERAMIC].metalness == 0.0
+    assert FINISHES["#c6c4a0"].metalness == 1.0, "the switch cover keeps its steel"
+    assert "judgement" in FINISHES[CERAMIC].why, (
+        "the roughness is a stated choice and the entry must say which kind "
+        "of number it is"
+    )
+    ceramic = {spec.package for spec in SLABS if spec.colour == CERAMIC}
+    assert ceramic == {"CAF-50P160X80-6N", "ANT2P-5.2x2x1.1MM"}, ceramic
+    borrowers = [spec.package for spec in SLABS if spec.colour == "#c6c4a0"]
+    assert not borrowers, f"still shaded as the switch cover: {borrowers}"

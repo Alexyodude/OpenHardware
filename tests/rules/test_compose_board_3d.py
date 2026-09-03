@@ -3536,3 +3536,45 @@ def test_an_unmodelled_placement_is_counted_not_skipped():
         "the absent list already explains"
     )
     assert '"not_drawn"' in code, "the gaps do not ride in extras"
+
+
+def test_the_ceramic_parts_reach_the_shipped_boards_as_dielectrics():
+    """OH-155 on the artefact: the material in the file, not the row in the table.
+
+    A slab is one box, so its colour group is exactly twelve triangles, and
+    that count is what says the group IS the ceramic part rather than some
+    vendor face that happens to share the hex. Metalness 0 and the table's
+    own roughness are what a reader's renderer will shade it with.
+
+    Skips where nothing has been composed, the same trade every shipped-mesh
+    test in this file makes.
+    """
+    from tools.import_3d_model import CERAMIC, FINISHES
+
+    for board in ("XIAO-ESP32-C5-DIP", "XIAO-nRF54l15-DIP"):
+        path = REPO / "webui" / "static" / "models" / f"{board}.glb"
+        if not path.is_file():
+            pytest.skip(f"no composed {board}; run tools/compose_board_3d.py")
+        raw = path.read_bytes()
+        json_length = struct.unpack("<I", raw[12:16])[0]
+        doc = json.loads(raw[20:20 + json_length])
+        finishes = {}
+        triangles: dict[str, int] = {}
+        for mesh in doc["meshes"]:
+            for primitive in mesh["primitives"]:
+                material = doc["materials"][primitive["material"]]
+                pbr = material["pbrMetallicRoughness"]
+                finishes[material["name"]] = (pbr["metallicFactor"],
+                                              pbr["roughnessFactor"])
+                count = doc["accessors"][primitive["indices"]]["count"] // 3
+                triangles[material["name"]] = (
+                    triangles.get(material["name"], 0) + count)
+        assert CERAMIC in finishes, f"{board}: no ceramic material in the file"
+        assert finishes[CERAMIC] == (0.0, FINISHES[CERAMIC].roughness), board
+        assert triangles[CERAMIC] == 12, (
+            f"{board}: {triangles[CERAMIC]} triangles of {CERAMIC}, "
+            "not the one box a slab is"
+        )
+        # The cover it used to borrow is still steel wherever it remains.
+        if "#c6c4a0" in finishes:
+            assert finishes["#c6c4a0"][0] == 1.0, board

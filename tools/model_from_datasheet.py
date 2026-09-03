@@ -70,6 +70,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from tools import kicad  # noqa: E402
+from tools.import_3d_model import CERAMIC  # noqa: E402
 
 #: Where a modelled part lands. Gitignored with every other generated mesh,
 #: and for the same reason: it is an output, and the inputs are in the tree.
@@ -388,17 +389,15 @@ SLABS: tuple[ModelledSlab, ...] = (
     ModelledSlab(
         package="CAF-50P160X80-6N",
         pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C5.kicad_pcb",
-        colour="#c6c4a0",
+        colour=CERAMIC,
         colour_source=(
-            "a multilayer ceramic filter is a ceramic block, and this "
-            "off-white is the nearest reading available rather than a "
-            "ceramic one. **FINISHES has no ceramic entry**: "
-            "`tools/import_3d_model.py` documents this exact value as the "
-            "tactile switch's metal cover at metalness 1.0, so this part "
-            "draws shinier than a ceramic block should. Taken knowingly. "
-            "The ANT2P row above makes the same borrow while saying "
-            "FINISHES already gives ceramic, which it does not; one "
-            "ceramic entry would retire both"
+            "a multilayer ceramic filter is a fired ceramic block: `CERAMIC` "
+            "in `tools/import_3d_model.py`, the judged colour that file "
+            "records beside BOARD_MASK, with a dielectric's finish. Until "
+            "OH-155 this row borrowed `#c6c4a0`, the tactile switch's steel "
+            "cover, and the diplexer drew as polished metal; the ANT2P row "
+            "made the same borrow while saying FINISHES already gave "
+            "ceramic, which it did not"
         ),
         why_not_fetched=(
             "the diplexer that puts the ESP32-C5's 2.4 and 5 GHz paths on "
@@ -554,11 +553,13 @@ SLABS: tuple[ModelledSlab, ...] = (
     ModelledSlab(
         package="ANT2P-5.2x2x1.1MM",
         pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
-        colour="#c6c4a0",
+        colour=CERAMIC,
         colour_source=(
-            "a chip antenna is a ceramic block, and this is the same "
-            "off-white `tools/import_3d_model.py` already gives ceramic in "
-            "FINISHES rather than a colour chosen here"
+            "a chip antenna is a fired ceramic block: `CERAMIC` in "
+            "`tools/import_3d_model.py`, whose comment records what was "
+            "searched before the colour was chosen. Until OH-155 this row "
+            "claimed FINISHES already gave ceramic while borrowing the "
+            "tactile switch's metal cover, which drew the antenna as steel"
         ),
         why_not_fetched=(
             "KiCad's RF_Antenna library holds exactly four models -- two "
