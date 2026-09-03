@@ -38,9 +38,11 @@
  * The choice, then the measurement: 4,000 iterations of the volatile spin
  * loop (six instructions each at this toolchain's -Os) makes delay(1)
  * cost ~24,000 emulator steps -- measured 2026-08-31, transitions 24,031
- * steps apart for a HIGH/LOW/delay(1) sketch -- the same order as the
- * 16,000 a real timer-driven millisecond costs on the AVR board at its
- * cited 16 MHz. One page, two families, comparable blinks. */
+ * steps apart for a HIGH/LOW/delay(1) sketch (re-measured 2026-09-04 by
+ * OH-156 at 24,043, the figure the C5 and C6 give the same day) -- the
+ * same order as the 16,000 a real timer-driven millisecond costs on the
+ * AVR board at its cited 16 MHz. One page, three families, comparable
+ * blinks. */
 #define OH_DELAY_LOOPS_PER_MS 4000u
 
 #endif

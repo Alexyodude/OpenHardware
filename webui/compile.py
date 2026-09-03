@@ -68,7 +68,7 @@ import tempfile
 import time
 
 from webui.boards import catalogue as board_catalogue
-from webui.boards import esp32c3, samd21
+from webui.boards import esp32c3, esp32c5, esp32c6, samd21
 
 #: Where PlatformIO puts the toolchains and frameworks.
 #:
@@ -228,6 +228,23 @@ class Recipe:
     #: refuse a build.
     extra_includes: tuple[str, ...]
 
+    #: Include directories under `third_party/bsp`, each `<package>/<path>`
+    #: of a checkout `tools/import_pindefs.py --fetch` makes: the same job as
+    #: `extra_includes`, from the other root.
+    #:
+    #: **Because PlatformIO does not have every vendor pin table.** The
+    #: framework-arduinoespressif32 it installs ships the XIAO_ESP32C3 and
+    #: XIAO_ESP32S3 variants and no other XIAO, while Espressif's own
+    #: repository has the C5's and the C6's -- and `import_pindefs.py`
+    #: already fetches that repository's whole `variants/` tree, blobless
+    #: and sparse, to write the pin-map reports. So the file that tells a
+    #: board page which GPIO `D10` reaches is the file a sketch compiles
+    #: against, from one checkout at one revision; and it is fetched rather
+    #: than vendored for the reason that tool gives. Refused, naming the
+    #: fetch, when the checkout is absent -- the SAMD21's `variant_package`
+    #: refusal, for a header instead of a source tree.
+    bsp_includes: tuple[str, ...]
+
     #: The framework's own bundled libraries, each an opt-in of `Library`'s
     #: kind. What is NOT here is a statement too: neither framework ships
     #: `Servo.h` -- it lives in a separate arduino-libraries repository -- so
@@ -259,17 +276,90 @@ class Recipe:
 #: board and this proves the service, and coupling them would make a compiler
 #: bug fail a core test.
 #:
-#: **Fourteen boards are runnable and this builds for six of them**, over
-#: three chips, because `recipe_for` keys on the *chip*: one SAMD21 row
+#: **Twelve boards are runnable and this builds for ten of them**, over
+#: five chips, because `recipe_for` keys on the *chip*: one SAMD21 row
 #: serves both the DIP and the SMD, one ESP32-C3 row serves its three
-#: boards, and the Uno row serves itself. Counted rather than estimated --
-#: an earlier version of this comment said four, from adding the rows to
-#: the boards.
+#: boards, the C5 and C6 rows serve a pair each, and the Uno row serves
+#: itself. Counted from `catalogue.catalogue()` against this table on
+#: 2026-09-04 rather than estimated -- earlier versions of this comment
+#: said four, then fourteen and six, each from adding rows to boards.
 #:
-#: The six without a row are the C5 and C6 pairs and the two RP2040s, all
-#: waiting on the same `openhardware` framework the C3 row uses --
-#: variants, not mechanisms -- and `recipe_for` names the chip rather than
-#: failing to find a compiler.
+#: The two without a row are the RP2040s, waiting on the same `openhardware`
+#: framework the ESP32 rows use -- a Cortex-M0+ `_start` and vector table,
+#: which `main.c` refuses loudly rather than guesses -- and `recipe_for`
+#: names the chip rather than failing to find a compiler.
+def _openhardware(*, variant: str, march: str, base: int,
+                  extra_includes: tuple[str, ...] = (),
+                  bsp_includes: tuple[str, ...] = ()) -> Recipe:
+    """A row for a board the repository's own core serves (see ARDUINO_LITE).
+
+    **The three ESP32 rows differ in exactly four things** -- the variant,
+    the ISA string the compiler is told, the flash origin, and which root the
+    vendor's pin names come from -- and everything else is the mechanism
+    OH-148 built once for the C3. Written out three times it is the copy
+    the C3 row's own comments warned against, so the mechanism lives here
+    and each row states only what is its own. The API surface is exactly
+    what the board descriptions map, and each absence a sketch can reach
+    for has a hint below naming the model decision -- the hint names the
+    row's OWN `oh_board.h`, which is why this is a function and not a
+    constant.
+    """
+    header = f"webui/arduino/{variant}/oh_board.h"
+    no_timer = (f"needs a timer and nothing on this board's model is one; "
+                f"delay() exists, as a counted loop whose cost {header} states.")
+    return Recipe(
+        toolchain="toolchain-riscv32-esp",
+        prefix="riscv32-esp-elf-",
+        framework="openhardware",
+        core="cores/openhardware",
+        variant=variant,
+        # No F_CPU define -- this model claims no clock, and the delay
+        # constant in oh_board.h says what kind of number it is.
+        flags=(
+            f"-march={march}", "-mabi=ilp32",
+            "-Os", "-ffunction-sections", "-fdata-sections",
+        ),
+        cxx_flags=("-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics"),
+        # Bare metal, like the blink fixtures: no crt0, no libc start files;
+        # the core's own _start is the entry and link.ld keeps it first.
+        link_flags=(
+            f"-march={march}", "-mabi=ilp32", "-Os",
+            "-nostartfiles", "-nostdlib", "-Wl,--gc-sections",
+        ),
+        core_sources=("main.c", "wiring.c"),
+        base=base,
+        variant_package="",
+        linker_script="link.ld",
+        extra_includes=extra_includes,
+        bsp_includes=bsp_includes,
+        libraries=(),
+        # Every hint names the modelling decision the absence stands on, in
+        # the pane the person is looking at (the OH-138 pattern).
+        hints=(
+            ("digitalRead",
+             ("digitalRead does not exist on this board's model: its "
+              "webui/boards/ description leaves GPIO_IN unmapped on purpose "
+              "-- on a driven pin IN follows OUT, and a stored zero would "
+              "answer firmware wrongly. The build fails rather than lie.")),
+            ("millis", "millis " + no_timer),
+            ("micros", "micros " + no_timer),
+            ("Serial",
+             ("Serial does not exist on this board's model: no UART is "
+              "mapped, so there is nowhere for the bytes to go. The board "
+              "console pane only shows what a modelled UART transmitted.")),
+            ("analogWrite",
+             ("analogWrite needs the LEDC peripheral and this board's model "
+              "maps GPIO only.")),
+            ("analogRead",
+             ("analogRead needs the ADC and this board's model maps GPIO "
+              "only.")),
+            ("attachInterrupt",
+             ("this model has no interrupt controller; the emulated core "
+              "executes straight-line code only.")),
+        ),
+    )
+
+
 RECIPES: dict[str, Recipe] = {
     "ATmega328P": Recipe(
         toolchain="toolchain-atmelavr",
@@ -311,6 +401,7 @@ RECIPES: dict[str, Recipe] = {
         variant_package="",
         linker_script="",
         extra_includes=(),
+        bsp_includes=(),
         libraries=(
             # AVR keeps library sources under `src/`, and `Wire` is two
             # files: `Wire.cpp` is the API and `utility/twi.c` is the bus
@@ -325,70 +416,53 @@ RECIPES: dict[str, Recipe] = {
         ),
         hints=(),
     ),
-    "ESP32-C3": Recipe(
-        toolchain="toolchain-riscv32-esp",
-        prefix="riscv32-esp-elf-",
-        # The repository's own core (see ARDUINO_LITE): the API surface is
-        # exactly what webui/boards/esp32c3.py maps, and each absence a
-        # sketch can reach for has a hint below naming the model decision.
-        framework="openhardware",
-        core="cores/openhardware",
+    "ESP32-C3": _openhardware(
         variant="variants/xiao_esp32c3",
         # RV32IMC: the C3's own ISA string, the same subset the emulator is
-        # configured as. No F_CPU define -- this model claims no clock, and
-        # the delay constant in oh_board.h says what kind of number it is.
-        flags=(
-            "-march=rv32imc", "-mabi=ilp32",
-            "-Os", "-ffunction-sections", "-fdata-sections",
-        ),
-        cxx_flags=("-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics"),
-        # Bare metal, like the blink fixtures: no crt0, no libc start files;
-        # the core's own _start is the entry and link.ld keeps it first.
-        link_flags=(
-            "-march=rv32imc", "-mabi=ilp32", "-Os",
-            "-nostartfiles", "-nostdlib", "-Wl,--gc-sections",
-        ),
-        core_sources=("main.c", "wiring.c"),
+        # configured as.
+        march="rv32imc",
         base=esp32c3.IROM,
-        variant_package="",
-        linker_script="link.ld",
         # The vendor's own pin names for this exact board -- a freestanding
         # header of constants (#include <stdint.h> and nothing else), so
         # using it costs no RTOS and no transcription.
         extra_includes=(
             "framework-arduinoespressif32/variants/XIAO_ESP32C3",
         ),
-        libraries=(),
-        # Every hint names the modelling decision the absence stands on, in
-        # the pane the person is looking at (the OH-138 pattern).
-        hints=(
-            ("digitalRead",
-             ("digitalRead does not exist on this board's model: "
-             "webui/boards/esp32c3.py leaves GPIO_IN unmapped on purpose -- "
-             "on a driven pin IN follows OUT, and a stored zero would "
-             "answer firmware wrongly. The build fails rather than lie.")),
-            ("millis",
-             ("millis needs a timer and nothing on this board's model is "
-             "one; delay() exists, as a counted loop whose cost "
-             "webui/arduino/variants/xiao_esp32c3/oh_board.h states.")),
-            ("micros",
-             ("micros needs a timer and nothing on this board's model is "
-             "one; delay() exists, as a counted loop whose cost "
-             "webui/arduino/variants/xiao_esp32c3/oh_board.h states.")),
-            ("Serial",
-             ("Serial does not exist on this board's model: no UART is "
-             "mapped, so there is nowhere for the bytes to go. The board "
-             "console pane only shows what a modelled UART transmitted.")),
-            ("analogWrite",
-             ("analogWrite needs the LEDC peripheral and this board's model "
-             "maps GPIO only.")),
-            ("analogRead",
-             ("analogRead needs the ADC and this board's model maps GPIO "
-             "only.")),
-            ("attachInterrupt",
-             ("this model has no interrupt controller; the emulated core "
-             "executes straight-line code only.")),
-        ),
+    ),
+    "ESP32-C5": _openhardware(
+        variant="variants/xiao_esp32c5",
+        # RV32IMAC: the base of the C5's datasheet ISA, in the spelling this
+        # toolchain accepts. The riscv32-esp-elf-gcc PlatformIO installs here
+        # is 8.4.0 (esp-2021r2), for which `_zicsr_zifencei` is not yet a
+        # suffix (that arrives with GCC 12; Zicsr is implicit) and the Zc
+        # groups the C5 also has do not exist at all. ESP-IDF's own build of
+        # the part makes the same omission on purpose -- `esp32c5.py`'s
+        # docstring records its ZCMP_WORKAROUND -- so the core executes the
+        # datasheet's set and the compiler emits the toolchain's subset,
+        # which is the normal relationship between the two.
+        march="rv32imac",
+        base=esp32c5.IROM,
+        # From the board-support checkout and not from PlatformIO, whose
+        # framework-arduinoespressif32 (3.20017.241212 here) ships the
+        # XIAO_ESP32C3 and XIAO_ESP32S3 variants and no other XIAO --
+        # measured 2026-09-04 by listing its `variants/`. Espressif's own
+        # repository has this table (last changed a850760, 2025-12-01) and
+        # `tools/import_pindefs.py --fetch` already brings it; see
+        # `Recipe.bsp_includes`. A freestanding header, like the C3's.
+        bsp_includes=("arduino-esp32/variants/XIAO_ESP32C5",),
+    ),
+    "ESP32-C6": _openhardware(
+        variant="variants/xiao_esp32c6",
+        # RV32IMAC: the whole of the C6's ISA string, in the same spelling
+        # and for the same toolchain reason as the C5 row above.
+        march="rv32imac",
+        base=esp32c6.IROM,
+        # The same checkout, for the C5 row's reason (this table last changed
+        # 38d6ed5, 2024-08-02). NOT freestanding: its first line includes
+        # ESP-IDF's `soc/soc_caps.h` and then uses nothing from it, so the
+        # variant directory carries an empty header of that name, and that
+        # header's comment is where the argument lives.
+        bsp_includes=("arduino-esp32/variants/XIAO_ESP32C6",),
     ),
     "SAMD21": Recipe(
         toolchain="toolchain-gccarmnoneeabi",
@@ -452,6 +526,7 @@ RECIPES: dict[str, Recipe] = {
             "framework-cmsis/CMSIS/Core/Include",
             "framework-cmsis-atmel/CMSIS/Device/ATMEL",
         ),
+        bsp_includes=(),
         libraries=(
             # This core keeps each library at its own root -- no `src/` --
             # and its `Wire.cpp` is single-file: the bus state machine the
@@ -590,11 +665,12 @@ def variant_root(recipe: Recipe) -> pathlib.Path:
 
 
 def include_roots(recipe: Recipe) -> tuple[pathlib.Path, ...]:
-    """`extra_includes`, resolved, or a refusal naming the package that is out.
+    """`extra_includes` and `bsp_includes`, resolved, or a refusal naming what is out.
 
     The package is the first segment of each path, so a missing
     `framework-cmsis-atmel` says `framework-cmsis-atmel` rather than the
-    seventy characters of directory underneath it.
+    seventy characters of directory underneath it. A board-support checkout
+    is one fetch for every package, so its refusal names the fetch.
     """
     roots = []
     for relative in recipe.extra_includes:
@@ -604,6 +680,14 @@ def include_roots(recipe: Recipe) -> tuple[pathlib.Path, ...]:
             raise ToolchainMissing(
                 f"no {relative} under {PACKAGES}. Install it with:\n"
                 f"  pio pkg install --global --tool {package}"
+            )
+        roots.append(path)
+    for relative in recipe.bsp_includes:
+        path = BOARD_SUPPORT / relative
+        if not path.is_dir():
+            raise ToolchainMissing(
+                f"no {relative} under {BOARD_SUPPORT}. Fetch it with:\n"
+                f"  python tools/import_pindefs.py --fetch"
             )
         roots.append(path)
     return tuple(roots)

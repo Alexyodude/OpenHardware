@@ -29,7 +29,7 @@ import pytest
 
 from webui import api
 from webui import compile as compiler
-from webui.boards import atmega328p, esp32c3, samd21
+from webui.boards import atmega328p, esp32c3, esp32c5, esp32c6, samd21
 
 BOARD = "Arduino Uno"
 
@@ -706,20 +706,31 @@ def c3_build(source: str) -> "compiler.Build":
         pytest.skip(str(exc))
 
 
-def c3_transitions(image: bytes, budget: int = 60_000) -> list[tuple[int, bool]]:
-    """Every step at which the built image moves GPIO10, watched by name."""
-    recipe = compiler.recipe_for(C3_BOARD)
-    out = esp32c3.GPIO + esp32c3.GPIO_OUT
+def gpio_transitions(board: str, description, gpio: int, image: bytes,
+                     budget: int) -> list[tuple[int, bool]]:
+    """Every step at which `image`, run on `board`, moves one GPIO's OUT bit.
+
+    Read through the description's own `GPIO_OUT`, which is the register the
+    W1TS/W1TC writes land in, so a variant header pointing the core at a
+    neighbour's register file shows up here as a bit that never moves.
+    """
+    recipe = compiler.recipe_for(board)
+    out = description.GPIO + description.GPIO_OUT
     transitions: list[tuple[int, bool]] = []
     last = 0
-    with api.load_firmware(C3_BOARD, image, base=recipe.base) as session:
+    with api.load_firmware(board, image, base=recipe.base) as session:
         for step in range(budget):
             session.step()
-            now = session.cpu.read_word(out) & (1 << 10)
+            now = session.cpu.read_word(out) & (1 << gpio)
             if now != last:
                 transitions.append((step, bool(now)))
                 last = now
     return transitions
+
+
+def c3_transitions(image: bytes, budget: int = 60_000) -> list[tuple[int, bool]]:
+    """Every step at which the built image moves GPIO10, watched by name."""
+    return gpio_transitions(C3_BOARD, esp32c3, 10, image, budget)
 
 
 def test_the_c3_recipe_builds_with_the_repositorys_own_core():
@@ -906,29 +917,153 @@ def test_each_absence_hints_the_model_decision_it_stands_on():
     assert "no UART is mapped" in serial.diagnostics
 
 
-def test_the_oh_board_header_restates_the_descriptions_own_numbers():
-    """`oh_board.h` is C and `esp32c3.py` is Python, and the register can
+#: variant -> (its description, the name that description gives the RAM the
+#: stack lives in). The C3 maps a separate DRAM alias; the C5 and C6 have one
+#: SRAM window and say so. **Three rows and no loop over a directory**, so a
+#: variant added without a row here is a test failure rather than a silence.
+VARIANT_DESCRIPTIONS = {
+    "xiao_esp32c3": (esp32c3, "DRAM"),
+    "xiao_esp32c5": (esp32c5, "SRAM"),
+    "xiao_esp32c6": (esp32c6, "SRAM"),
+}
+
+
+def test_every_variant_has_a_row_above():
+    variants = pathlib.Path(compiler.ARDUINO_LITE) / "variants"
+    assert {p.name for p in variants.iterdir() if p.is_dir()} == set(
+        VARIANT_DESCRIPTIONS)
+
+
+@pytest.mark.parametrize("variant", sorted(VARIANT_DESCRIPTIONS))
+def test_the_oh_board_header_restates_the_descriptions_own_numbers(variant):
+    """`oh_board.h` is C and the description is Python, and the register can
     only live in one language per artefact -- so the two spellings are held
     equal here, and a description change that forgets the variant header
-    fails a test that names it."""
-    variant = (pathlib.Path(compiler.ARDUINO_LITE)
-               / "variants" / "xiao_esp32c3")
-    header = (variant / "oh_board.h").read_text(encoding="utf-8")
+    fails a test that names it.
+
+    Per variant against its OWN description (OH-156): the C5 shares the C6's
+    GPIO base and not its ENABLE offsets, so a header copied from a
+    neighbour would pass a test that only checked one of them."""
+    description, ram = VARIANT_DESCRIPTIONS[variant]
+    root = pathlib.Path(compiler.ARDUINO_LITE) / "variants" / variant
+    header = (root / "oh_board.h").read_text(encoding="utf-8")
     defines = {}
     for line in header.splitlines():
         parts = line.split()
         if len(parts) >= 3 and parts[0] == "#define":
             defines[parts[1]] = parts[2].rstrip("u")
-    gpio = esp32c3.GPIO
-    assert int(defines["OH_GPIO_OUT_W1TS"], 16) == gpio + esp32c3.GPIO_OUT_W1TS
-    assert int(defines["OH_GPIO_OUT_W1TC"], 16) == gpio + esp32c3.GPIO_OUT_W1TC
+    gpio = description.GPIO
+    assert int(defines["OH_GPIO_OUT_W1TS"], 16) == gpio + description.GPIO_OUT_W1TS
+    assert int(defines["OH_GPIO_OUT_W1TC"], 16) == gpio + description.GPIO_OUT_W1TC
     assert int(defines["OH_GPIO_ENABLE_W1TS"], 16) == (
-        gpio + esp32c3.GPIO_ENABLE_W1TS)
+        gpio + description.GPIO_ENABLE_W1TS)
     assert int(defines["OH_GPIO_ENABLE_W1TC"], 16) == (
-        gpio + esp32c3.GPIO_ENABLE_W1TC)
-    assert int(defines["OH_STACK_TOP"], 16) == (
-        esp32c3.DRAM + esp32c3.DRAM_SIZE - 16)
+        gpio + description.GPIO_ENABLE_W1TC)
+    ram_base = getattr(description, ram)
+    ram_size = getattr(description, f"{ram}_SIZE")
+    assert int(defines["OH_STACK_TOP"], 16) == ram_base + ram_size - 16
 
-    script = (variant / "link.ld").read_text(encoding="utf-8")
-    assert f"ORIGIN = 0x{esp32c3.IROM:08X}" in script
-    assert f"ORIGIN = 0x{esp32c3.DRAM:08X}" in script
+    script = (root / "link.ld").read_text(encoding="utf-8")
+    assert f"ORIGIN = 0x{description.IROM:08X}" in script
+    assert f"ORIGIN = 0x{ram_base:08X}" in script
+    assert f"LENGTH = {description.IROM_SIZE // (1 << 20)}M" in script
+    assert f"LENGTH = {ram_size // (1 << 10)}K" in script
+
+
+# --- the ESP32-C5 and C6, on the same core (OH-156) ---------------------------
+#
+# The C3 block above is the pattern and is left as written. These two boards
+# joined it on the same three promises -- the image RUNS on the described
+# board, the pin names are the vendor's, every absence carries a hint -- and
+# what differs between them is exactly what their variant headers state:
+# which register file the writes land in, and which GPIO the vendor's D10
+# reaches.
+
+#: board -> (its description, the GPIO its vendor's D10 names). The numbers
+#: are read off `third_party/bsp/arduino-esp32/variants/XIAO_ESP32C{5,6}/
+#: pins_arduino.h` at 2787dab -- Seeed's own tables via Espressif's core, the
+#: checkout `Recipe.bsp_includes` compiles against -- and written here AS
+#: NUMBERS on purpose: the sketch uses the name, so a wrong table shows up as
+#: the wrong bit toggling, which it could not if this test read the file the
+#: sketch does. The C5's D10 is GPIO10; the C6's is GPIO18.
+OPENHARDWARE_BOARDS = {
+    "XIAO-ESP32-C5-DIP": (esp32c5, 10),
+    "XIAO-ESP32-C6-DIP": (esp32c6, 18),
+}
+
+
+def oh_build(board: str, source: str) -> "compiler.Build":
+    try:
+        return compiler.build(board, source)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+
+
+@pytest.mark.parametrize("board", sorted(OPENHARDWARE_BOARDS))
+def test_the_c5_and_c6_recipes_build_with_the_repositorys_own_core(board):
+    description, _gpio = OPENHARDWARE_BOARDS[board]
+    recipe = compiler.recipe_for(board)
+    assert recipe.framework == "openhardware"
+    assert recipe.base is description.IROM, "the flash origin has one home"
+    assert recipe.bsp_includes, "the vendor's pin table comes from the checkout"
+    built = oh_build(board, C3_BLINK)
+    assert built.ok, built.diagnostics
+    assert len(built.image) > 0
+
+
+@pytest.mark.parametrize("board", sorted(OPENHARDWARE_BOARDS))
+def test_a_built_sketch_runs_on_the_described_c5_or_c6_and_toggles_its_pin(board):
+    """The OH-148 shape for each new board: loaded by name at the recipe's
+    own base, the sketch enables the vendor's D10 and toggles it, watched on
+    the bit that board's table says D10 is. **Which mutations this catches,
+    run rather than assumed** (2026-09-04): giving the C5 header the C6's
+    ENABLE offsets, or either header the other's D10 GPIO in this table,
+    fails it -- the first because ENABLE_W1TS at +0x24 is nothing the C5
+    description maps, the second because the wrong bit is watched."""
+    description, gpio = OPENHARDWARE_BOARDS[board]
+    built = oh_build(board, C3_BLINK)
+    assert built.ok, built.diagnostics
+    transitions = gpio_transitions(board, description, gpio, built.image,
+                                   60_000)
+    assert len(transitions) >= 4, f"the bit changed {len(transitions)} times"
+    states = [state for _, state in transitions]
+    assert states[0] is True
+    assert all(a != b for a, b in itertools.pairwise(states)), states[:8]
+
+
+@pytest.mark.parametrize("board", sorted(OPENHARDWARE_BOARDS))
+def test_the_c5_and_c6_delay_is_steady_and_scales(board):
+    """The C3's delay test, on each new part: whatever a millisecond costs
+    here (its `oh_board.h` says, and says what kind of number it is), the
+    period must be steady and delay(3) must cost about three delay(1)s.
+
+    **What this does not catch, run rather than assumed** (2026-09-04):
+    dividing a header's OH_DELAY_LOOPS_PER_MS by a hundred passes it, because
+    the VALUE is the judgement the header labels it as and only the scaling
+    is a claim. The measured period lives in that header's comment, beside
+    the date it was taken."""
+    description, gpio = OPENHARDWARE_BOARDS[board]
+    one = oh_build(board, C3_BLINK)
+    three = oh_build(board, C3_BLINK.replace("delay(1)", "delay(3)"))
+    assert one.ok and three.ok
+
+    def period(image: bytes) -> int:
+        highs = [step for step, state in gpio_transitions(
+            board, description, gpio, image, 200_000) if state]
+        gaps = {b - a for a, b in itertools.pairwise(highs[1:])}
+        assert len(gaps) == 1, f"period varies: {sorted(gaps)}"
+        return gaps.pop()
+
+    ratio = period(three.image) / period(one.image)
+    assert 2.5 < ratio < 3.5, f"delay(3)/delay(1) = {ratio:.2f}"
+
+
+@pytest.mark.parametrize("board", sorted(OPENHARDWARE_BOARDS))
+def test_each_absence_hints_its_own_variant_header(board):
+    """The hint for a missing timer names the header of the board being
+    built, not the C3's -- the reason `_openhardware` is a function."""
+    recipe = compiler.recipe_for(board)
+    built = oh_build(board, "void setup(){} void loop(){ millis(); }")
+    assert not built.ok
+    assert recipe.variant in built.diagnostics, built.diagnostics
+    assert "xiao_esp32c3" not in built.diagnostics
