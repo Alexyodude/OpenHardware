@@ -699,11 +699,16 @@ void loop() { digitalWrite(D10, HIGH); digitalWrite(D10, LOW); delay(1); }
 """
 
 
-def c3_build(source: str) -> "compiler.Build":
+def oh_build(board: str, source: str) -> "compiler.Build":
+    """Build for a board, or skip when the toolchain is not installed here."""
     try:
-        return compiler.build(C3_BOARD, source)
+        return compiler.build(board, source)
     except compiler.ToolchainMissing as exc:
         pytest.skip(str(exc))
+
+
+def c3_build(source: str) -> "compiler.Build":
+    return oh_build(C3_BOARD, source)
 
 
 def gpio_transitions(board: str, description, gpio: int, image: bytes,
@@ -990,13 +995,6 @@ OPENHARDWARE_BOARDS = {
     "XIAO-ESP32-C5-DIP": (esp32c5, 10),
     "XIAO-ESP32-C6-DIP": (esp32c6, 18),
 }
-
-
-def oh_build(board: str, source: str) -> "compiler.Build":
-    try:
-        return compiler.build(board, source)
-    except compiler.ToolchainMissing as exc:
-        pytest.skip(str(exc))
 
 
 @pytest.mark.parametrize("board", sorted(OPENHARDWARE_BOARDS))
