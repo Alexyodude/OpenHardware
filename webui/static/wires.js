@@ -115,6 +115,20 @@ export class Rope {
     //: The height of the bench. A wire with nothing under it falls forever,
     //: and a wire that has left the scene is worse than one lying on a table.
     this.floor = -Infinity;
+    //: Half the thickness of the lead, in the same units. Plain data the
+    //: caller supplies, exactly like `colliders` -- this file has never seen
+    //: the tube that is drawn around these points and is not about to start.
+    //:
+    //: **Zero is the default and it is the old behaviour**, so a caller that
+    //: draws nothing still gets the centreline solver, and every test written
+    //: before OH-162 still describes what it did.
+    //:
+    //: What it buys, in one sentence: `collide` keeps a node's CENTRE this far
+    //: off every surface, so the tube rests ON a chip rather than half inside
+    //: one. Measured 2026-09-04 on a settled 28-unit wire over a 12 x 3.5 x 6
+    //: box -- the OH-132 probe read `proud` 0.16, the whole radius, with the
+    //: solver unaware of it.
+    this.radius = 0;
 
     const gap = distance(head, tail);
     // A rope whose ends coincide still needs a rest length, or every segment
@@ -342,69 +356,167 @@ export class Rope {
    * The correction moves the position and leaves `previous` alone, so the
    * node loses the velocity it had into the surface -- which is what makes a
    * cable land and stay rather than bounce.
+   *
+   * **What is pushed out is the tube and not the centreline** (OH-162). Every
+   * surface below is offset by `radius` rather than the node being tested
+   * against the surface itself: the bench rises by it, the sphere and the box
+   * grow by it. That is the standard way to collide a sphere with a solid, and
+   * is why there is one number here and no per-shape special case.
+   *
+   * **And it runs twice, because a radius is a preference and being outside a
+   * solid is a requirement.** Growth is per solid and resolution is
+   * sequential, so a node ejected onto solid B's grown face can land inside
+   * solid A's real box, and with A already done nothing pushes it out again.
+   * That is not a corner case: a chip sitting flush on a board has its grown
+   * bottom face a radius BELOW the slab's top. Measured 2026-09-04 on a wire
+   * pinned to two pads over a board with one chip on it -- `inside` went from
+   * 0 to 0.16, the number this file itself calls the fault. So the wanted
+   * radius is resolved first, then the UNGROWN solids are resolved again,
+   * which is character for character the guarantee this file had before
+   * OH-162 and restores that same 0.
+   *
+   * The second pass is skipped for a node the first one never pushed, which
+   * is most of them: a node outside a grown solid is outside the real one, so
+   * there is nothing for it to find. Measured on that fixture, it ran on
+   * 133,885 of 336,000 node visits. **Skipping on that condition rather than
+   * on the node having MOVED is the review's second finding, and the
+   * difference is a fixed point**: two solids 0.05 apart push a node out and
+   * straight back within one pass, so its coordinates come out identical to
+   * what they went in as while both pushes really happened. A net-position
+   * guard sees nothing to do and leaves the node 0.11 inside the first
+   * solid, for ever, because it is a fixed point. Whether a push EXECUTED
+   * cannot be fooled that way, and it is the same skip rate.
    */
   collide() {
+    // The bench is a plane, so the centre stops a radius above it. Written as
+    // its own name rather than folded into `this.floor`, because the caller's
+    // floor is where the bench is and not where a wire's middle may go.
+    const bench = this.floor + this.radius;
     for (let i = 1; i < this.count - 1; i++) {
       const at = i * 3;
-      if (this.position[at + 1] < this.floor) this.position[at + 1] = this.floor;
-      for (const solid of this.colliders) {
-        if (solid.kind === "sphere") this.outOfSphere(at, solid);
-        else this.outOfBox(at, solid);
-      }
+      if (this.position[at + 1] < bench) this.position[at + 1] = bench;
+      if (this.outOfSolids(at, this.radius)) this.outOfSolids(at, 0);
     }
   }
 
-  /** Push one node to the surface of a sphere it is inside. */
-  outOfSphere(at, solid) {
+  /**
+   * Push one node clear of every collider, each grown by `r`.
+   *
+   * Returns whether any of them pushed, which is what `collide` gates its
+   * second pass on. **Not short-circuited**: every solid is asked even after
+   * one has moved the node, because a node ejected by one may now be inside
+   * the next.
+   */
+  outOfSolids(at, r) {
+    let pushed = false;
+    for (const solid of this.colliders) {
+      const moved = solid.kind === "sphere"
+        ? this.outOfSphere(at, solid, r)
+        : this.outOfBox(at, solid, r);
+      pushed = pushed || moved;
+    }
+    return pushed;
+  }
+
+  /**
+   * Push one node clear of a sphere, as though the node had radius `r`.
+   *
+   * `r` is the caller's and not `this.radius`, because `collide` runs this
+   * twice at two different radii -- see its second paragraph. Returns whether
+   * it pushed, which is what gates that second pass.
+   */
+  outOfSphere(at, solid, r) {
+    // Two spheres touch when their centres are a radius plus a radius apart,
+    // so the whole of this function is the old one with `solid.r` replaced by
+    // that sum -- which at `r` 0 is the same number, and so the same answer.
+    const reach = solid.r + r;
     const dx = this.position[at] - solid.at[0];
     const dy = this.position[at + 1] - solid.at[1];
     const dz = this.position[at + 2] - solid.at[2];
     const length = Math.hypot(dx, dy, dz);
-    if (length >= solid.r) return;
+    if (length >= reach) return false;
     // A node exactly at the centre has no direction to leave by; up is as
     // good as any and cannot be a division by zero.
     if (length === 0) {
-      this.position[at + 1] += solid.r;
-      return;
+      this.position[at + 1] += reach;
+      return true;
     }
-    const scale = solid.r / length;
+    const scale = reach / length;
     this.position[at] = solid.at[0] + dx * scale;
     this.position[at + 1] = solid.at[1] + dy * scale;
     this.position[at + 2] = solid.at[2] + dz * scale;
+    return true;
   }
 
   /**
-   * Push one node out of an axis-aligned box, by the shortest way.
+   * Push one node clear of an axis-aligned box, by the shortest way, as
+   * though the node had radius `r`.
    *
    * Shortest rather than "the way it came": a node that has been pushed deep
    * by its neighbours has no memory of a way in, and choosing the face it is
    * nearest is what makes a wire drape over a board rather than squirt out of
    * its side.
+   *
+   * **The box this sees is the drawn one grown by `r` on every axis**
+   * (OH-162), which keeps the tube out rather than the centreline. `r` is the
+   * caller's rather than `this.radius` because `collide` runs this twice at
+   * two different radii; see its second paragraph for why. At `r` 0 every line
+   * below is the arithmetic this had before OH-162.
+   *
+   * The price of a grown box is square corners where a swept tube would have
+   * round ones, so a node passing a chip's corner clears it by up to
+   * `r * (sqrt(3) - 1)` more than it needs to -- 0.117 units at the 0.16 a
+   * lead is drawn at, and smaller than the tube whose position is in question.
+   *
+   * **In millimetres that is 0.208 on the Uno and 0.146 on a generated board**,
+   * and getting this conversion wrong is easy enough that it is worth writing
+   * out: `view.mmScale` is scene units PER MILLIMETRE, and the Uno's is
+   * `5.638 px/mm * SCALE` = 0.5638, not 5.638. A review caught this comment
+   * dividing by the px/mm figure and stating 0.021 mm, ten times too small.
+   * The same slip is older than this change and is in
+   * `test_a_wire_resting_on_a_box_reports_the_contact_the_collider_resolved`
+   * and in OH-132's own ticket.
+   *
+   * Rounding the corner properly means clamping to the box and pushing along
+   * the residual, which is a different function; it can arrive when a picture
+   * shows this one.
+   *
+   * **A box with no thickness on an axis becomes a `2 * r` obstacle** where
+   * it used to be nothing, since the early-out below is `<=`/`>=` and could
+   * never be entered before. Latent rather than live: measured 2026-09-05,
+   * the eleven shipped board models carry 775 solids between them, none
+   * degenerate on any axis, and the thinnest real one is 0.23 mm -- the
+   * height of an 0201 resistor on the XIAO ESP32-C3.
+   *
+   * Returns whether it pushed, which is what gates `collide`'s second pass.
    */
-  outOfBox(at, solid) {
+  outOfBox(at, solid, r) {
     for (let axis = 0; axis < 3; axis++) {
-      if (this.position[at + axis] <= solid.min[axis]) return;
-      if (this.position[at + axis] >= solid.max[axis]) return;
+      if (this.position[at + axis] <= solid.min[axis] - r) return false;
+      if (this.position[at + axis] >= solid.max[axis] + r) return false;
     }
     let bestAxis = 0;
     let bestDepth = Infinity;
     let bestTo = 0;
     for (let axis = 0; axis < 3; axis++) {
       const here = this.position[at + axis];
-      const below = here - solid.min[axis];
-      const above = solid.max[axis] - here;
+      const under = solid.min[axis] - r;
+      const over = solid.max[axis] + r;
+      const below = here - under;
+      const above = over - here;
       if (below < bestDepth) {
         bestDepth = below;
         bestAxis = axis;
-        bestTo = solid.min[axis];
+        bestTo = under;
       }
       if (above < bestDepth) {
         bestDepth = above;
         bestAxis = axis;
-        bestTo = solid.max[axis];
+        bestTo = over;
       }
     }
     this.position[at + bestAxis] = bestTo;
+    return true;
   }
 
   /**
@@ -458,9 +570,27 @@ export class Rope {
    *             and the number OH-78 meant to be watching. Zero is the pass.
    *   `proud`   worst distance a node's TUBE reaches past a face while its
    *             centre is on or outside it. **Contact, not interpenetration**
-   *             -- a lead resting on a chip has half its tube in the chip by
-   *             construction, and calling that a fault would fail every wire
-   *             that works. Bounded by `radius`.
+   *             -- and until OH-162 it was unavoidable: `collide` moved node
+   *             centres, so a lead resting on a chip had half its tube inside
+   *             it by construction and calling that a fault would have failed
+   *             every wire that worked. **A FREE node of a wire the solver
+   *             was given a `radius` for reads 0 here**, and that is OH-162
+   *             step 1 as a number.
+   *
+   *             **The wire as a whole does not, and an earlier draft of this
+   *             line claimed it did.** This loop runs `0` to `count`, so the
+   *             pinned ends are measured for `proud` as well -- the `pinned`
+   *             bucket only takes them when they are strictly INSIDE -- and
+   *             `collide` never moves an end. A pad's centre sits 0.04 above
+   *             the board slab, so a head anchored there has 0.12 of a 0.16
+   *             tube in the board by construction. Measured 2026-09-04 on a
+   *             wire pinned to two pads over a slab: 0.12, from the head and
+   *             from no free node at all. What a free node still reports is
+   *             a place a tube does not fit, such as a gap narrower than two
+   *             radii. Whether a pinned end belongs in this bucket is
+   *             OH-132's question and not this change's.
+   *
+   *             Bounded by `radius`.
    *   `pinned`  worst depth of a PINNED end inside a solid. `collide` skips
    *             the two ends (see its loop bounds), so nothing in this file
    *             ever moves them: a number here is a fault in whoever chose
@@ -470,6 +600,12 @@ export class Rope {
    *
    * `radius` is the drawn tube's, and defaults to 0 so a caller that does not
    * draw gets centres only. This file still knows nothing about three.js.
+   *
+   * **It is a separate argument from `this.radius` on purpose.** That one is
+   * the tube the solver keeps out; this one is the tube being measured, and
+   * `penetration()` in `board3d.js` deliberately passes nothing so that
+   * `inside` is a statement about centres. They are the same number whenever
+   * the caller means them to be.
    *
    * @param {number} radius
    * @returns {{inside: number, proud: number, pinned: number}}
@@ -546,6 +682,15 @@ function depthInSphere(p, solid) {
  * contact. The measure is the tube radius less the gap from the centre to
  * the slab on this axis: `radius` for a node on the face, less for one just
  * off it, nothing once the gap exceeds the radius.
+ *
+ * **Being a slab test is also what makes it blind at an EDGE**, which
+ * OH-162's review found and which is not fixed here. A centre 0.01 past both
+ * the +X and the +Y face is 0.0141 from the box's edge, well inside a 0.16
+ * tube, and satisfies neither axis's other-two-slabs test, so this answers 0.
+ * For a FREE node that is harmless once `collide` has run: being outside the
+ * grown box means some axis clears by a whole radius, and the distance to the
+ * box is at least that. It bites a PINNED end, which `collide` never moves,
+ * and any rope measured without having been solved.
  */
 function proudOfBox(p, solid, radius) {
   let over = 0;

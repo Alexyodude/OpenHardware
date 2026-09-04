@@ -1698,12 +1698,36 @@ export function dispose() {
  * colliders existed. A number is not fooled by the camera.
  *
  * **Zero is what a working collider gives, and that is why this number alone
- * was never enough** (OH-132). `collide` runs last in every pass and snaps a
- * node onto the face, so a wire resting correctly on a chip and a wire with
- * no colliders at all both report 0 here. `contact()` is what tells those two
- * apart. And this one now says BY STATEMENT what it excludes: the two pinned
+ * was never enough** (OH-132). `collide` runs last in every pass, so a wire
+ * resting correctly on a chip and a wire with no colliders at all both report
+ * 0 here. And this one now says BY STATEMENT what it excludes: the two pinned
  * ends, which `collide` never touches, so a depth there is the anchor's fault
  * and not the wire's. That exclusion is the "0.289 mm" residual, re-derived.
+ *
+ * **What `contact()`'s `proud` means changed at OH-162, and this comment used
+ * to name the wrong thing.** It used to be the contact itself: the solver
+ * moved node CENTRES onto a face, so a resting wire's free nodes read the
+ * whole 0.16 and a wire in clear air read 0. The solver keeps the tube out
+ * now, so a correctly resting FREE node reads 0 -- and what is left comes
+ * from the PINNED head, which `collide` never moves and `Rope.contact`
+ * measures anyway. A pad's centre is `PAD_LIFT + PAD_HEIGHT / 2` = 0.04 above
+ * the slab's top face, and the slab is in every rope's list, so an app wire's
+ * head has 0.12 of its tube in the board by construction.
+ *
+ * Measured 2026-09-04, wires pinned to two pads with the solver told 0.16 --
+ * these are the reference numbers for reading the export:
+ *
+ *   over the slab                proud 0.12   the head; no free node
+ *   over the slab and one chip   proud 0.16   a free node in the seam, where
+ *                                             a 0.32-wide tube does not fit
+ *   no colliders at all          proud 0
+ *
+ * So it still separates "solving against solids" from "solving against
+ * none". It no longer separates "resting on a chip" from "clear of one",
+ * because 0.12 of it is the anchor in both cases -- and `inside` is 0 in all
+ * three, which is the pass. Excluding a pinned end from `proud` the way
+ * `inside` already excludes it would fix that, and belongs to OH-132's
+ * question rather than to OH-162's step 1.
  *
  * Reported in scene units; divide by `view.mmScale` for millimetres.
  */
@@ -2098,6 +2122,12 @@ function refreshColliders() {
  * -- so leaving the part's own box in the list would eject the node next to
  * the tail on every pass and leave the cable permanently stretched. This is
  * the same failure the board's box had, arriving from the other end.
+ *
+ * **And how thick it is** (OH-162). `WIRE_RADIUS` was a drawing parameter and
+ * the solver moved centrelines, so a settled lead lay with half its tube
+ * inside whatever it rested on -- the OH-132 probe read `proud` 0.16, the
+ * whole radius. This is the one place a wire is told about the scene, so it
+ * is where the number crosses over.
  */
 function applyColliders(wire) {
   const own = wire.terminal?.userData?.part ?? null;
@@ -2105,6 +2135,7 @@ function applyColliders(wire) {
     ? view.colliders.filter((solid) => solid.owner !== own)
     : view.colliders;
   wire.rope.floor = view.floor;
+  wire.rope.radius = WIRE_RADIUS;
 }
 
 /** Half the drawn board's width, or a sane default before one is drawn. */

@@ -543,6 +543,48 @@ def test_the_renderer_collides_a_wire_with_the_boards_components():
     assert '"solids"' in composer.read_text(encoding="utf-8")
 
 
+def test_a_wire_is_told_how_thick_it_is_and_not_only_how_thick_to_draw():
+    """**OH-162 step 1, at the one place a wire hears about the scene.**
+
+    `WIRE_RADIUS` was a drawing parameter: `updateTube` built a tube of it and
+    the solver moved the centreline, so every settled lead lay with half its
+    thickness inside whatever it rested on. `tests/webui/test_wires.py` runs
+    the arithmetic and measures that -- 0.16 units of tube in the box, the
+    whole radius -- and what is asserted here is only that this file hands the
+    number over, next to the colliders and the floor it already hands over.
+
+    **One constant, not two.** A second number written down here would be a
+    wire drawn at one thickness and solved at another, which is the shape the
+    4.5-unit slab offset had: one quantity arrived at in two places, and the
+    fix was to make both go through one.
+
+    **The assertion is a whole line and not a substring**, which the OH-162
+    review is why: `wire.rope.radius = WIRE_RADIUS * 0;` and
+    `if (own) wire.rope.radius = WIRE_RADIUS;` both CONTAIN the substring the
+    first version looked for, both neuter the hand-off, and nothing else in
+    this repository executes `board3d.js` -- so either would have survived the
+    whole suite. Anchoring both ends of the line is what a grep can do about
+    that, and it is the honest limit of a grep.
+
+    Six mutations run, all failing: the line deleted, the constant replaced by
+    a literal 0.2, the line left in place as a comment (which is what
+    `stripped` is for), the constant multiplied by zero, the line put behind
+    `if (own)`, and the assignment aimed at `wire.radius` instead of
+    `wire.rope.radius`.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    applied = stripped(
+        source.split("function applyColliders(wire) {", 1)[1].split("\n}", 1)[0])
+    whole_line = re.compile(r"^\s*wire\.rope\.radius = WIRE_RADIUS;$", re.MULTILINE)
+    assert whole_line.search(applied), (
+        "the solver is never told the tube's radius, so a lead settles with "
+        "half of itself inside the chip it is resting on"
+    )
+    assert "wire.rope.floor" in applied, (
+        "the radius arrived and the floor left; both belong to this one place"
+    )
+
+
 def test_a_bench_part_is_drawn_at_the_boards_own_scale():
     """8 px/mm is what a GENERATED board JSON uses, and the Uno's was traced.
 

@@ -323,7 +323,20 @@ def test_a_wire_resting_on_a_box_reports_the_contact_the_collider_resolved(tmp_p
     the only thing the old number could ever see, which is why the long-lived
     "wire penetration 0.289 mm" residual was a pinned end and not a contact
     tolerance. Measured here: a head pinned at the box's centre reports 1.7500
-    units, 0.3104 mm at the Uno's 5.638 scale.
+    units, which is 3.104 mm on the Uno.
+
+    **That millimetre figure said 0.3104 until OH-162's review, and the slip
+    changes an argument.** `view.mmScale` is scene units PER MILLIMETRE and
+    the Uno's is `5.638 px/mm * SCALE` = 0.5638, not 5.638, so every scene
+    unit here is 1.774 mm and not 0.1774. The consequence is not cosmetic:
+    0.16 units of tube is 0.284 mm, so the historical 0.289 is 1.018 wire
+    radii and not the 10.2 that OH-132's ticket computes. The pinned-end
+    explanation above still stands on its own evidence -- a head at the box's
+    centre really does report 1.75 units through this probe -- but the
+    arithmetic that ticket offered AGAINST the older "contact tolerance under
+    the wire's own radius" reading was wrong, and that reading is arithmetically
+    ordinary. Which of the two the 2026-08 number actually was is not decided
+    by this file, and the ticket is not this ticket's to edit.
 
     **Which mutations this catches, run rather than assumed** (2026-09-04):
     `contact` never reporting `proud` fails the `proud > 0` assertion;
@@ -399,3 +412,418 @@ def test_a_wire_resting_on_a_box_reports_the_contact_the_collider_resolved(tmp_p
     # above the face with a 0.16 tube is 0.06 in, and 36.5 above is nothing.
     assert result["above"] == {"inside": 0, "proud": 0, "pinned": 0}, result["above"]
     assert abs(result["near"]["proud"] - (result["radius"] - 0.1)) < 1e-9, result["near"]
+
+
+def test_a_wire_told_its_thickness_rests_its_tube_on_a_solid_not_its_centre(tmp_path):
+    """**OH-162 step 1: the radius was a drawing parameter and now it solves.**
+
+    `collide` moved node CENTRES onto a face, so a settled lead lay with half
+    its tube inside whatever it rested on. That is what the OH-132 probe above
+    was built to see, and what it saw on a 28-unit wire over a 12 x 3.5 x 6
+    box: `proud` 0.16, the whole radius, with `inside` 0. The collider was
+    working perfectly and the picture was still wrong.
+
+    `radius` is plain data the caller supplies, exactly like `colliders`, and
+    every solid grows by it. Measured 2026-09-04, this fixture:
+
+    | fixture                        | never told | radius 0.16 |
+    |--------------------------------|------------|-------------|
+    | box drape, `proud`             | 0.16       | 0           |
+    | box drape, `inside`            | 0          | 0           |
+    | sphere, nearest free centre    | 3.000      | 3.160       |
+    | sphere, `proud`                | 0.16       | 0           |
+    | bench at 2, lowest free centre | 2.000      | 2.160       |
+
+    **The left column is the control and it is half of this test.** An "after"
+    number with nothing to compare against is not a measurement. It is also
+    what keeps every test written before OH-162 honest: those ropes are never
+    told a radius, so the default has to leave them solving centrelines --
+    which is why the control sets nothing rather than setting zero. Setting
+    zero was the first version, and a mutation defaulting the field to 0.16
+    survived it, because the fixture overwrote the value it was testing.
+
+    **`air` and `beside` are the fixtures that must report nothing** -- the
+    OH-132 lesson, where every fixture the author wrote TOUCHED the box and
+    the reviewer's clear-air case is what found the bug. Growing a box is
+    precisely the change that can shove something it should never have
+    reached, so both are stepped through `collide` and checked for movement
+    rather than only asked for a contact number.
+
+    `proud` is asserted at exactly 0 rather than under a tolerance because it
+    is exactly 0 here: `3.5 + 0.16` less `3.5` is 0.16000000000000014, a hair
+    MORE than the radius, so the tube reaches a negative distance in and the
+    probe's own `> 0` gate drops it. A box on other coordinates could leave a
+    rounding bit; this one does not.
+
+    **Seven mutations run against this, 2026-09-04**, each failing the
+    assertion named for it: `outOfBox` snapping to the ungrown face
+    (`aboveTheTop`); its early-out testing the ungrown box while its faces
+    stay grown, which parks a node in the band between the two
+    (`aboveTheTop`); `radius` defaulting to 0.16 rather than 0 (`bare`);
+    `collide` leaving the bench where the caller put it (`benchSolved`);
+    `outOfSphere` reaching only `solid.r` (`ballSolved`); `collide`'s first
+    pass growing every solid by twice the radius (`aboveTheTop`); and the
+    whole change reverted (`solved.proud`).
+
+    Two more, against `collide`'s second resolution pass, are in
+    `test_a_node_pushed_off_one_solid_is_not_left_inside_the_one_beside_it`,
+    which is where that pass is measured.
+
+    **On the one-behaviour rule**: this is one behaviour -- the tube rests on
+    a solid rather than the centre -- asserted against the three shapes the
+    solver knows, because a growth applied to two of them and not the third
+    is exactly the defect worth catching, and a reader comparing the box's
+    number with the sphere's needs them side by side. The two things that are
+    NOT that behaviour were split out below rather than added here: which
+    AXES grow, and the sphere's at-the-centre branch.
+    """
+    result = run(tmp_path, """
+        const R = 0.16;
+        const box = {kind: "box", min: [-6, 0, -3], max: [6, 3.5, 3]};
+        const ball = {kind: "sphere", at: [0, 0, 0], r: 3};
+
+        // No argument means the rope is never TOLD a radius, which is the
+        // state every test written before OH-162 leaves one in and is the
+        // whole reason the default is 0. Passing an explicit 0 instead would
+        // leave that default unexercised -- which it was, until a mutation
+        // setting it to 0.16 survived this test.
+        function settle(solid, radius) {
+          const rope = new Rope([-14, 6, 0], [14, 6, 0]);
+          rope.colliders = [solid];
+          rope.floor = -2;
+          if (radius !== undefined) rope.radius = radius;
+          rope.slacken();
+          for (let f = 0; f < 600; f++) rope.advance(1 / 60);
+          return rope;
+        }
+
+        // How far the lowest free node draped across the box's top face sits
+        // above it. Only the nodes within the footprint count: the rest of
+        // this wire hangs down the sides and says nothing about the top.
+        function aboveTheTop(rope) {
+          let lowest = Infinity;
+          for (let i = 1; i < rope.count - 1; i++) {
+            const [x, y, z] = rope.point(i);
+            if (x < box.min[0] || x > box.max[0]) continue;
+            if (z < box.min[2] || z > box.max[2]) continue;
+            if (y < box.max[1]) continue;
+            lowest = Math.min(lowest, y);
+          }
+          // `null` rather than an Infinity that JSON turns into one anyway:
+          // a mutation that sinks the drape leaves nothing on the top face,
+          // and the assertion should name that instead of failing on the
+          // arithmetic of a missing number.
+          return lowest === Infinity ? null : lowest - box.max[1];
+        }
+
+        // Nearest a free node's centre gets to the ball's centre.
+        function nearestToBall(rope) {
+          let nearest = Infinity;
+          for (let i = 1; i < rope.count - 1; i++) {
+            const [x, y, z] = rope.point(i);
+            nearest = Math.min(nearest, Math.hypot(x, y, z));
+          }
+          return nearest;
+        }
+
+        // Nothing in the way at all: the lowest centre is the bench itself.
+        // No argument means never told, as above.
+        function onTheBench(radius) {
+          const rope = new Rope([-6, 6, 0], [6, 6, 0]);
+          rope.floor = 2;
+          if (radius !== undefined) rope.radius = radius;
+          for (let f = 0; f < 400; f++) rope.advance(1 / 60);
+          let lowest = Infinity;
+          for (let i = 1; i < rope.count - 1; i++) {
+            lowest = Math.min(lowest, rope.point(i)[1]);
+          }
+          return lowest;
+        }
+
+        // Neither of these two is stepped: their nodes lie exactly where the
+        // endpoints put them, so ANY movement is the grown box reaching
+        // something it never touched before.
+        function untouched(head, tail) {
+          const rope = new Rope(head, tail);
+          rope.colliders = [box];
+          rope.radius = R;
+          const was = [];
+          for (let i = 0; i < rope.count * 3; i++) was.push(rope.position[i]);
+          rope.collide();
+          let moved = 0;
+          for (let i = 0; i < rope.count * 3; i++) {
+            moved = Math.max(moved, Math.abs(rope.position[i] - was[i]));
+          }
+          return {moved, contact: rope.contact(R)};
+        }
+
+        const bare = settle(box);
+        const solved = settle(box, R);
+        console.log(JSON.stringify({
+          radius: R, ballRadius: ball.r, bench: 2,
+          bare: bare.contact(R), solved: solved.contact(R),
+          solvedCentres: solved.contact(),
+          bareAboveTheTop: aboveTheTop(bare),
+          aboveTheTop: aboveTheTop(solved),
+          bareStretch: bare.worstStretch(), stretch: solved.worstStretch(),
+          ballBare: nearestToBall(settle(ball)),
+          ballSolved: nearestToBall(settle(ball, R)),
+          ballBareProud: settle(ball).contact(R).proud,
+          ballSolvedProud: settle(ball, R).contact(R).proud,
+          benchBare: onTheBench(), benchSolved: onTheBench(R),
+          air: untouched([-14, 40, 0], [14, 40, 0]),
+          beside: untouched([-40, 3.5, 0], [-30, 3.5, 0]),
+        }));
+    """)
+    # Both drapes have to have settled ON the box's top face, or the two
+    # numbers below are about nodes that are not there.
+    assert result["bareAboveTheTop"] is not None, "the control never reached the box"
+    assert result["aboveTheTop"] is not None, "nothing settled on the box's top face"
+    # The control: without the radius the solver still buries half the tube,
+    # which is the number this whole step exists to move.
+    assert result["bare"]["proud"] == result["radius"], result["bare"]
+    assert abs(result["bareAboveTheTop"]) < 1e-9, (
+        "the control's resting nodes are not on the face, so the 0.16 above "
+        "is measuring something other than a buried tube"
+    )
+    # And with it, the tube rests ON the box: no contact at all, and the
+    # centres are a radius clear of the face rather than in it.
+    assert result["solved"]["proud"] == 0, result["solved"]
+    assert abs(result["aboveTheTop"] - result["radius"]) < 1e-9, result["aboveTheTop"]
+    # `inside` was 0 before and must stay 0: pushing a node further out cannot
+    # be allowed to leave it further in, and this is the assertion that would
+    # catch a sign error in the growth.
+    assert result["solved"]["inside"] == 0, result["solved"]
+    assert result["solvedCentres"]["inside"] == 0, result["solvedCentres"]
+    # A thicker wire is a slightly longer path over the same box, so the
+    # segments take up a little more of their slack. 1.38% to 1.51% measured;
+    # what would be a defect is the tens a fighting constraint produces.
+    assert result["stretch"] < 0.05, f"{result['stretch'] * 100:.2f}% over rest"
+    # The sphere is a separate branch and would otherwise go unmeasured.
+    assert abs(result["ballBare"] - result["ballRadius"]) < 1e-9, result["ballBare"]
+    assert result["ballBareProud"] == result["radius"], result["ballBareProud"]
+    assert abs(result["ballSolved"] - (result["ballRadius"] + result["radius"])) < 1e-9
+    assert result["ballSolvedProud"] == 0, result["ballSolvedProud"]
+    # So is the bench, which is a plane and neither of the two.
+    assert abs(result["benchBare"] - result["bench"]) < 1e-9, result["benchBare"]
+    assert abs(result["benchSolved"] - (result["bench"] + result["radius"])) < 1e-9, (
+        result["benchSolved"]
+    )
+    # And the two that must report nothing. A grown box is exactly the change
+    # that reaches something it should not have.
+    assert result["air"]["moved"] == 0, result["air"]
+    assert result["air"]["contact"] == {"inside": 0, "proud": 0, "pinned": 0}
+    assert result["beside"]["moved"] == 0, result["beside"]
+    assert result["beside"]["contact"] == {"inside": 0, "proud": 0, "pinned": 0}
+
+
+def test_a_node_pushed_off_one_solid_is_not_left_inside_the_one_beside_it(tmp_path):
+    """**The defect OH-162's own review found in OH-162's first version.**
+
+    Growing each solid by the radius is done per solid and resolved
+    sequentially, so a node ejected onto solid B's grown face can land inside
+    solid A's REAL box -- and with A already done, nothing pushes it out
+    again. It is not a corner case. A chip sits flush on a board, so the
+    chip's grown bottom face is a radius BELOW the slab's top, and every
+    resting node in the seam between them went there.
+
+    Measured 2026-09-04 on a wire pinned to two pads over a board slab with
+    one chip on it, `contact().inside`, which this file calls the fault and
+    for which zero is the pass:
+
+    | version                          | `inside` |
+    |----------------------------------|----------|
+    | before OH-162                    | 0        |
+    | OH-162 with one resolution pass  | 0.16     |
+    | OH-162 as it stands              | 0        |
+
+    The fix is that a radius is a preference and being outside a solid is a
+    requirement: `collide` resolves the grown solids, then resolves the
+    UNGROWN ones again for any node the first pass moved. That second pass is
+    what the file did before OH-162, so the invariant is restored rather than
+    approximated.
+
+    **`proud` 0.16 in the seam is not a fault and must not be asserted away.**
+    A 0.32-wide lead does not fit in a zero gap, and reporting the overlap is
+    the honest answer -- the same answer the file gave before any of this.
+
+    `clear` is the fixture that must report nothing: the same two solids, with
+    the wire strung far enough away that neither is ever reached.
+
+    **Four mutations run, 2026-09-05**, each failing here: the second pass
+    deleted; the second pass run at `this.radius` instead of 0, which is the
+    same thing because the first pass already left the node on a grown face;
+    the second pass gated on the node having MOVED rather than on a push
+    having happened, which is the fixed point above; and `outOfSolids`
+    short-circuiting once one solid has pushed, so the node is never offered
+    to the solid it was just pushed into.
+    """
+    result = run(tmp_path, """
+        // A board slab with one chip standing on it: the chip's bottom face
+        // and the slab's top face are the same plane, which is what makes
+        // this the everyday case rather than a contrivance.
+        const slab = {kind: "box", min: [-20, -0.9, -20], max: [20, 0, 20]};
+        const chip = {kind: "box", min: [-6, 0, -3], max: [6, 3.5, 3]};
+        const R = 0.16;
+        // A pad's centre: PAD_LIFT + PAD_HEIGHT / 2 in board3d.js, which is
+        // where a wire's head is actually anchored.
+        const LIFT = 0.04;
+
+        function settle(head, tail, radius) {
+          const rope = new Rope(head, tail);
+          rope.colliders = [slab, chip];
+          rope.floor = -2;
+          if (radius !== undefined) rope.radius = radius;
+          rope.slacken();
+          for (let f = 0; f < 600; f++) rope.advance(1 / 60);
+          return rope;
+        }
+
+        // **The same defect's other half, and it is a fixed point.** Two
+        // solids 0.05 apart push a node out and straight back inside ONE
+        // pass, so its coordinates come out identical to what they went in
+        // as while both pushes really happened. A guard that skipped the
+        // ungrown pass when the node had not MOVED therefore saw nothing to
+        // do, and left it 0.11 inside the first box for ever. The guard asks
+        // whether a push EXECUTED instead, which cannot be fooled that way.
+        const near = {kind: "box", min: [-4, 0, -3], max: [-0.025, 6, 3]};
+        const far = {kind: "box", min: [0.025, 0, -3], max: [4, 6, 3]};
+        function fromX(startX) {
+          const rope = new Rope([-10, 3, 0], [10, 3, 0], 3);
+          rope.colliders = [near, far];
+          rope.floor = -6.28;
+          rope.radius = R;
+          rope.position[3] = startX;
+          rope.position[4] = 3;
+          rope.position[5] = 0;
+          for (let pass = 0; pass < 14; pass++) rope.collide();
+          return rope.position[3];
+        }
+
+        const bare = settle([-14, LIFT, 0], [14, LIFT, 0]);
+        const solved = settle([-14, LIFT, 0], [14, LIFT, 0], R);
+        // Far from both solids, and high enough that the bench catches it.
+        const clear = settle([-60, 8, 0], [-40, 8, 0], R);
+        console.log(JSON.stringify({
+          radius: R,
+          bare: bare.contact(R), solved: solved.contact(R),
+          solvedCentres: solved.contact(),
+          clear: clear.contact(R),
+          nearFace: near.max[0], fixedPoint: far.min[0] - R,
+          fromTheFixedPoint: fromX(far.min[0] - R),
+          fromWellInside: fromX(-2),
+        }));
+    """)
+    # THIS is the regression. A node the chip pushed down must not be left in
+    # the board, and it was: 0.16, exactly one radius.
+    assert result["solved"]["inside"] == 0, (
+        "a node ejected onto one solid's grown face was left inside another "
+        "solid's real box; the second, ungrown resolution pass is not running"
+    )
+    assert result["solvedCentres"]["inside"] == 0, result["solvedCentres"]
+    # And it was 0 before the radius existed, which is the number being kept.
+    assert result["bare"]["inside"] == 0, result["bare"]
+    # The seam has no room for a tube and saying so is not a fault.
+    assert result["solved"]["proud"] == result["radius"], result["solved"]
+    # The fixture that must report nothing.
+    assert result["clear"] == {"inside": 0, "proud": 0, "pinned": 0}, result["clear"]
+    # And the fixed point, which a net-position guard could never leave: the
+    # node must end on the near box's face, wherever it started.
+    assert result["fromTheFixedPoint"] == result["nearFace"], (
+        f"a node starting at the cycle's fixed point {result['fixedPoint']} "
+        f"stayed {result['nearFace'] - result['fromTheFixedPoint']} inside the "
+        f"box; the second pass is gated on the node having moved rather than "
+        f"on a push having happened"
+    )
+    assert result["fromWellInside"] == result["nearFace"], result["fromWellInside"]
+
+
+def test_a_solid_is_grown_on_all_three_axes_and_not_only_the_two_drawn(tmp_path):
+    """**Every other fixture in this file is planar at z = 0**, and the OH-162
+    review is what noticed.
+
+    A drape is measured over a box's top and down its sides, which is x and y;
+    `aboveTheTop` filters on z rather than testing it. So `outOfBox` growing x
+    and y and leaving z alone passed every assertion in the two tests above,
+    while a lead laid diagonally across a chip lands on a z face.
+
+    Three nudges, one per axis, each from a point inside the box nearer to one
+    face than to any other: the node must come to rest a radius outside THAT
+    face and nowhere else. The three starting points are the same 0.26 from
+    their respective grown faces, so the three answers are the same shape and
+    a growth applied to two axes out of three cannot hide.
+
+    Not settled, deliberately: one `collide` call on a rope whose nodes were
+    placed by hand. A settled drape is an emergent shape and would say less.
+
+    **Mutations run, 2026-09-05**, each failing here: growing only x and y
+    (`pushedZ`), only y and z (`pushedX`), only x and z (`pushedY`), and
+    growing the min faces without the max ones (all three).
+    """
+    result = run(tmp_path, """
+        const R = 0.16;
+        const box = {kind: "box", min: [-6, 0, -3], max: [6, 3.5, 3]};
+        // Placed by hand into the middle slot of a three-node rope, then
+        // resolved once. The two ends are pinned and far away, so nothing
+        // but `collide` touches the node under test.
+        function nudge(to) {
+          const rope = new Rope([-40, 20, 0], [40, 20, 0], 3);
+          rope.colliders = [box];
+          rope.floor = -50;
+          rope.radius = R;
+          rope.position[3] = to[0];
+          rope.position[4] = to[1];
+          rope.position[5] = to[2];
+          rope.collide();
+          return [rope.position[3], rope.position[4], rope.position[5]];
+        }
+        console.log(JSON.stringify({
+          radius: R, box,
+          pushedX: nudge([5.9, 1.75, 0]),
+          pushedY: nudge([0, 3.4, 0]),
+          pushedZ: nudge([0, 1.75, 2.9]),
+        }));
+    """)
+    radius = result["radius"]
+    top = result["box"]["max"]
+    assert result["pushedX"] == [top[0] + radius, 1.75, 0], result["pushedX"]
+    assert result["pushedY"] == [0, top[1] + radius, 0], result["pushedY"]
+    assert result["pushedZ"] == [0, 1.75, top[2] + radius], result["pushedZ"]
+
+
+def test_a_node_at_a_spheres_centre_leaves_by_the_two_radii_together(tmp_path):
+    """A node exactly at a sphere's centre has no direction to leave by, so
+    `outOfSphere` sends it up rather than dividing by zero -- and that branch
+    was reached by no test at all until the OH-162 review said so.
+
+    It is not a contrived position. A wire's tail is placed at a part's
+    terminal, and a small enough part with a spherical collider puts the next
+    node at its centre on the frame it is dropped.
+
+    The distance is both radii together, the same rule the ordinary branch
+    follows, which is the whole reason to test it: keeping `solid.r` there
+    would leave the tube half inside the ball and no other assertion in this
+    file would notice.
+
+    **Mutations run, 2026-09-05**, both failing here: that branch pushing by
+    `solid.r`, and pushing by `r` alone.
+    """
+    result = run(tmp_path, """
+        const R = 0.16;
+        const ball = {kind: "sphere", at: [0, 0, 0], r: 3};
+        const rope = new Rope([-40, 20, 0], [40, 20, 0], 3);
+        rope.colliders = [ball];
+        rope.floor = -50;
+        rope.radius = R;
+        rope.position[3] = 0;
+        rope.position[4] = 0;
+        rope.position[5] = 0;
+        rope.collide();
+        console.log(JSON.stringify({
+          radius: R, ballRadius: ball.r,
+          landed: [rope.position[3], rope.position[4], rope.position[5]],
+        }));
+    """)
+    assert result["landed"] == [0, result["ballRadius"] + result["radius"], 0], (
+        result["landed"]
+    )
