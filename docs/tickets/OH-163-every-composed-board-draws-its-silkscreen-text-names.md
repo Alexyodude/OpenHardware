@@ -1,0 +1,44 @@
+---
+id: OH-163
+title: Every composed board draws its silkscreen text, names its default-finish colours,
+  and stops double-reporting its test points
+status: open
+priority: P2
+created: '2026-09-04'
+touches:
+- tools/compose_board_3d.py
+- tools/import_3d_model.py
+- tools/model_from_datasheet.py
+- tests/rules/test_compose_board_3d.py
+- tests/rules/test_import_3d_model.py
+---
+
+Twenty-five of twenty-six boards draw a vendor file or a board composed from the vendor's PCB, every placement is drawn or refused with a reason (OH-150), and what a person sees is still short of a photograph in four measurable ways. This ticket is those four, counted from `python tools/compose_board_3d.py --check` on 2026-09-04 (11 composed boards) and from the shipped .glb files.
+
+    1. Silkscreen TEXT is drawn on no board. Per board: 47 to 99 text items "not
+       drawn -- text needs a font", plus a handful of arcs, circles and polygons.
+       The pin labels, "Seeed Studio", the version string: all of it. OH-111 lit
+       the underside because that is where the labels are printed; they are
+       still not there to light.
+    2. 6 to 10 colour groups per board fall to DEFAULT_FINISH -- "nothing says
+       what this is" -- metalness 0.1, roughness 0.6. On the RP2350 and the C5
+       that is 10 of ~19 groups; #2a2a2a alone is 5,126 triangles on the C5.
+       They render as the same matte grey whatever they are.
+    3. 4 to 6 placements per board are ABSENT with a stated reason: the two
+       Seeed logos (silkscreen artwork), the MOUDLE14P module outline, and 12 +
+       36 test points across the five KiCad XIAOs. Explained, but not drawn.
+    4. One board, XIAO-XIAO STM32C5-SMD, draws an extruded footprint: no vendor
+       page, no PCB, no board-support package (OH-26: 0 of 35 pads).
+
+Also counted and left alone on purpose, because the reason still holds: inner copper layers and zone fills (inside the laminate), and the two 1.270 x 0.508 mm cutouts per XIAO.
+
+Comparison, read 2026-09-04: Xplora3D draws a generic breadboard (choice of colours), snaps pins, exports GLB/PNG, and its parts are library models of generic components; it has no vendor board geometry at all. Simulator86 has no 3D view. This repository's differentiator is that every millimetre is the vendor's; the gaps above are the labelling and the materials on top of that geometry, not the geometry.
+
+STEPS, each with its own evidence:
+
+1. Silkscreen text. KiCad renders its own text with a stroke font, and the text items the composer skips carry the vendor's font size and thickness in the PCB file. Draw them with a stroke font as ink strokes, the same way tracks are drawn -- which needs a font file with a licence this repository can carry; establish which (KiCad's own stroke font ships under its licence, to be checked, not assumed) before writing a glyph. Done when the "text N" count in --check reaches 0 on every board and a pin label is readable in the screenshot.
+2. The default-finish colours. Same method as FINISHES' own entries: load every model that contributes each colour, tally triangles per package, and name the material from what the package is -- a QFN body, a crystal can, a connector shell -- with the evidence in the entry's `why`. A colour that cannot be named stays default and is listed as such in the page's own inventory rather than silently grey.
+3. The absent classes, decided per class not per placement: a logo is silkscreen artwork (an SVG or polygon in the PCB -- draw it as ink if the file carries the geometry, refuse if it is a bitmap); test points are bare copper pads and are ALREADY drawn as copper by OH-110 -- so their "absent" is a double report to remove; the module outline is a courtyard with nothing to draw, and should stop being counted as a placement.
+4. The STM32C5 board: docs/research/board-models/ records that Seeed publishes no wiki page for it. Re-check the vendor once, dated; if still nothing, the footprint extrusion is the honest picture and the page already says so.
+
+Every number above is from --check; do not restate the counts in prose anywhere else (CLAUDE.md's inventory rule) -- the generator is the record.
