@@ -159,6 +159,36 @@ jobs:
         run: tools/apply_patches.sh
 
 
+      # The board-support packages, for the same reason the corpus slice above
+      # is fetched: without them the two tests that hold the COMMITTED pin
+      # tables against the packages they were generated from -- the `HEADER`
+      # block in four board modules and the `chip_pin` in twenty-five board
+      # files -- skip, and a run in which the only check of a generated
+      # artefact never executes is the vacuous green this file's own comments
+      # keep naming. Six repositories, blobless and sparse, for eleven small
+      # text files; `--fetch` prints each one's revision, which is what the
+      # generated blocks cite.
+      #
+      # A pin that MOVED upstream is a legitimate failure here and is meant to
+      # be loud: the fix is to re-run the two writers.
+      #
+      # **A pin, and not a revision.** This clones each repository at today's
+      # default-branch HEAD, while the committed artefacts cite the revision
+      # they were read at, so the two tests compare with that string
+      # normalised (`_pins_only` in tests/rules/test_import_pindefs.py says
+      # how and why). Without that, any commit to any of the six repositories
+      # -- for any reason, to any file -- failed all four modules and all 25
+      # board files at once while every pin still agreed, and the remedy it
+      # demanded was a 29-file diff changing nothing but provenance.
+      #
+      # Checking out the cited revisions instead was the other option and is
+      # worse: it would verify the tables against the very commits they were
+      # generated from, so a pin that moved upstream could never fail, which
+      # is the whole reason this step exists.
+      - name: Fetch the board-support packages
+        run: python tools/import_pindefs.py --fetch
+
+
       # **Bare `pytest`, which is what CLAUDE.md tells a person to run.**
       #
       # It used to be three named directories -- tests/i8086, tests/rules and

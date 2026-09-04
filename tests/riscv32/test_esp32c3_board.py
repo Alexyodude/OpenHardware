@@ -324,3 +324,79 @@ def test_the_image_begins_with_its_startup_and_not_with_main():
     first = int.from_bytes(IMAGE.read_bytes()[:4], "little")
     assert first & 0x7F == 0x37, "the first instruction is a LUI"
     assert (first >> 7) & 0x1F == 2, "and its destination is sp"
+
+
+# --- the pin view: a pad answers for the register behind it (OH-160) ---------
+
+#: The ticket's sentence as a sketch: the vendor's own name for the pad, from
+#: the same `pins_arduino.h` the module's `HEADER` was generated from.
+D10_BLINK = """
+void setup() { pinMode(D10, OUTPUT); }
+void loop() { digitalWrite(D10, HIGH); delay(1); digitalWrite(D10, LOW); delay(1); }
+"""
+
+#: `delay(1)` is ~24,000 steps on this core (`oh_board.h` says what kind of
+#: number that is), so two highs need two of them and a little.
+SKETCH_BUDGET = 80_000
+
+
+def test_the_pad_the_blink_drives_follows_the_register_in_the_pin_view():
+    """GPIO8 is the pad silkscreened `D8` on a XIAO ESP32-C3 -- the vendor's
+    table, read into `esp32c3.HEADER` -- so the level the pin view reports
+    for `D8` must be the bit `watch` already reads, at every change, through
+    `pin_states` and not through the register. The three power pads stay
+    unanswerable: nothing is behind them."""
+    needs_core()
+    seen: list[tuple[bool, str]] = []
+    with load() as session:
+        last = 0
+        for _ in range(BUDGET):
+            session.step()
+            now = session.cpu.read_word(GPIO_OUT) & LED
+            if now != last:
+                seen.append((bool(now), api.pin_levels(session.runtime, session.cpu)["D8"]))
+                last = now
+        view = api.pin_view(session.runtime, session.cpu, BOARD)
+    assert len(seen) >= 2, seen
+    assert all(level == ("high" if bit else "low") for bit, level in seen), seen
+    pad = next(pad for pad in view["pads"] if pad["label"] == "D8")
+    assert (pad["pin"], pad["chip_pin"]) == ("D8", "GPIO8")
+    assert pad["state"] in ("high", "low")
+    assert view["unknown"] == 3, "3V3_OUT, GND and VBUS have no register behind them"
+    assert {pad["label"] for pad in view["pads"] if pad["state"] == "unknown"} == {
+        "3V3_OUT", "GND", "VBUS"
+    }
+
+
+def test_a_sketch_naming_d10_moves_the_d10_pad():
+    """A wire from the pad silkscreened `D10` reaches GPIO10 in the model.
+
+    Three tables meet here and none of them is this test's: the sketch names
+    `D10` through the vendor's `pins_arduino.h`, the core's `digitalWrite`
+    lands in `GPIO_OUT` at the bit that header says, and the pin view -- which
+    knows only the generated `HEADER` -- reports the pad. A `HEADER` row that
+    sent `D10` anywhere but GPIO10 would read as a pad that never moves, and a
+    `pinMode` that never reached `ENABLE` as one that never leaves `input`.
+    Skips by name where the toolchain is not installed.
+    """
+    needs_core()
+    from webui import compile as compiler
+
+    try:
+        built = compiler.build(BOARD, D10_BLINK)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    assert built.ok, built.diagnostics
+    seen: list[str] = []
+    with api.load_firmware(BOARD, built.image, base=compiler.recipe_for(BOARD).base) as session:
+        for _ in range(SKETCH_BUDGET):
+            session.step()
+            level = api.pin_levels(session.runtime, session.cpu)["D10"]
+            if not seen or level != seen[-1]:
+                seen.append(level)
+            if seen.count("high") == 2:
+                break
+    assert seen == ["input", "low", "high", "low", "high"], (
+        "before setup() nothing is enabled; pinMode enables the driver at zero; "
+        "then the sketch's own sequence, watched until its second high"
+    )

@@ -453,6 +453,15 @@ def build_board(
             "file": f"webui/boards/{geometry.name}.svg",
         },
         "derivation": f"{geometry.derivation} Scaled at {scale} px/mm.",
+        # **This is the geometry half only, and it is not the last word on a
+        # registered board.** Since OH-160 `tools/import_pindefs.py
+        # --write-boards` rewrites this `assumption` and adds `chip_pin`,
+        # `chip_index`, `why_null` and a `pindefs` block, all read out of the
+        # board-support packages -- so re-importing a board that is in that
+        # tool's registry STRIPS the pin join until it is run again. Run it
+        # after this; `test_the_committed_board_files_match_the_generator`
+        # names the file if it is forgotten, in a different suite and only
+        # where the packages have been fetched.
         "assumption": (
             "Every `pin` is null. That field is the simulator's pin index, defined "
             "by a PICSimLab board implementation, and none exists for this board "

@@ -13,11 +13,13 @@ electrics blank on purpose, and said so:
     `rules/conformance-fixtures.md` exists to stop: a config that looks valid
     and wires the circuit wrongly.
 
-Every generated board file repeats the consequence in its own `assumption`
-field: *a pad with pin null draws and refuses a wire*. This is the other half
-of that join. A footprint knows pad 7 sits at 30.4 x 20.8 and is silkscreened
-`D6`. It cannot know that `D6` reaches GPIO0 on a XIAO RP2040 and GPIO21 on a
-XIAO ESP32-C3 -- same label, same connector position, different wire.
+Every generated board file used to repeat the consequence in its own
+`assumption` field -- *a pad with pin null draws and refuses a wire* -- and
+since OH-160 this tool writes those fields itself, so what they now say is
+`assumption_for` below. This is the other half of that join. A footprint knows
+pad 7 sits at 30.4 x 20.8 and is silkscreened `D6`. It cannot know that `D6`
+reaches GPIO0 on a XIAO RP2040 and GPIO21 on a XIAO ESP32-C3 -- same label,
+same connector position, different wire.
 
 ## Where the mapping lives
 
@@ -71,6 +73,38 @@ there would wire a battery terminal to an ADC input. So the readers keep
 a time. Today that is `NFC1` and `NFC2` on the XIAO nRF52840, which genuinely
 are P0.09 and P0.10.
 
+## Where the answer goes (OH-160)
+
+From OH-26 (2026-08-25) to OH-160 the report above was written and nothing
+read it: `webui/api.py` fills a pad's `chip_pin` from the board MODULE's
+`PIN_NAMES`, and only `atmega328p.py` and `samd21.py` had one. So the same
+resolution now lands in two places, both generated, and a test holds them
+equal:
+
+**The board module.** `--write-headers` rewrites a `HEADER` block between two
+markers in every `webui/boards/<chip>.py` that carries them -- label -> GPIO
+number, with the packages and revisions it was read from in the block's own
+comment. The module derives `PIN_NAMES` from it and reads levels through it,
+which is the shape `samd21.py` established by hand: one table, so a label
+cannot mean one pin in a register read and another in a tooltip. The block is
+emitted only for chips whose vendor publishes a flat number; SAMD21's `PA02`
+has none, so its module keeps its own `(group, bit)` table and this generator
+refuses to write one.
+
+**The board file.** `--write-boards` adds `chip_pin` and `chip_index` to every
+pad of every registered `webui/boards/*.json`, a `why_null` on every pad that
+resolves to nothing, and a `pindefs` object naming the packages. **`pin` stays
+null**, because that field means something else: `webui/pinmap.py` defines it
+as the rcontrol pin index of a PICSimLab board, 1..99, and no PICSimLab board
+exists for any XIAO. Writing a GPIO number there would be a different fact in
+a field that already has one -- and on a XIAO RP2040 `D6` is GPIO0, which that
+field's own validator refuses.
+
+`tools/import_board.py` regenerates the geometry from the vendor's CAD and
+writes `pin: null` and a fresh `assumption` of its own; run `--write-boards`
+after it, and `test_the_committed_board_files_match_the_generator` names the
+file that was not.
+
 ## Usage
 
     python tools/import_pindefs.py --fetch                # ~70 MB, git-ignored
@@ -78,10 +112,9 @@ are P0.09 and P0.10.
     python tools/import_pindefs.py XIAO-RP2040-DIP        # one board's report
     python tools/import_pindefs.py --all -o pindefs.json  # every board
     python tools/import_pindefs.py --all --summary        # counts, computed
-
-This deliberately does **not** write `webui/boards/*.json`. Those files are
-another ticket's to edit, and the report carries the pad number so the join
-can be made on it rather than on label order.
+    python tools/import_pindefs.py --emit-header ESP32-C3 # the module block
+    python tools/import_pindefs.py --write-headers        # into every marked module
+    python tools/import_pindefs.py --write-boards         # into every board file
 """
 
 from __future__ import annotations
@@ -94,6 +127,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import textwrap
 import typing
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
@@ -273,14 +307,21 @@ def select_labels(constants: dict[str, int], extras: tuple[str, ...]) -> dict[st
     """
     wanted = {label: value for label, value in constants.items() if _D_LABEL.match(label)}
     for extra in extras:
-        for spelling in (extra, f"PIN_{extra}"):
+        # Three spellings, because the packages use all three for one thing:
+        # seeed-nrf52 writes `PIN_NFC1`, arduino-pico `PIN_LED`, and
+        # arduino-esp32 `LED_BUILTIN` -- Arduino's own name for the board LED,
+        # which arduino-pico defines too but as an alias of `PIN_LED`, and an
+        # alias is not a number, so on that core it is the `PIN_` spelling
+        # that carries the value.
+        spellings = (extra, f"PIN_{extra}", f"{extra}_BUILTIN")
+        for spelling in spellings:
             if spelling in constants:
                 wanted[extra] = constants[spelling]
                 break
         else:
             raise PindefError(
                 f"{extra!r} is registered as an extra label, but the file "
-                f"defines neither it nor PIN_{extra}. It defines "
+                f"defines none of {list(spellings)} as an integer. It defines "
                 f"{sorted(constants)[:12]}..."
             )
     if not wanted:
@@ -436,6 +477,14 @@ class Board:
 
     chip: str
     sources: tuple[Source, ...]
+    #: Labels with a pin and no pad: the board's own LED, which is on the
+    #: board rather than on the header and so has no coordinate in the pad
+    #: map. Resolved from the same packages as the pads -- the label must be
+    #: opted in as a source's `extras` too, or no package will claim it --
+    #: reported under `on_board`, and emitted into the module's `HEADER`, so
+    #: that a stock Blink moves something a person can see. `samd21.py` made
+    #: the same choice by hand and says why at its `HEADER`.
+    on_board: tuple[str, ...] = ()
 
 
 PACKAGES = {
@@ -491,8 +540,12 @@ def zephyr_connector(board: str, naming: PinNaming) -> Source:
     )
 
 
-def arduino_flat(package: str, variant: str) -> Source:
-    return Source(package, (f"variants/{variant}/pins_arduino.h",), read_flat_pins)
+def arduino_flat(package: str, variant: str, extras: tuple[str, ...] = ()) -> Source:
+    return Source(
+        package,
+        (f"variants/{variant}/pins_arduino.h",),
+        functools.partial(read_flat_pins, extras=extras),
+    )
 
 
 def arduino_indexed(
@@ -511,9 +564,17 @@ def arduino_indexed(
 
 # DIP and SMD are two footprints of one board, so they take the same sources.
 # The SMD files carry more pads, not different pins.
+#
+# `LED` is opted in where the Arduino variant defines the board's own LED
+# with a number: `PIN_LED (17u)` on the XIAO RP2040, `LED_BUILTIN = 27` on
+# the C5 and `= 15` on the C6, each in the file named below. The XIAO
+# ESP32-C3's variant defines no LED at all -- `webui/boards/esp32c3.py`
+# measured that -- so it opts nothing in, and the Zephyr connector files
+# never claim one because a connector describes the header. It is an
+# `on_board` label on the Board rows, not a pad: see `Board.on_board`.
 _RP2040 = (
     zephyr_connector("xiao_rp2040", flat_gpio),
-    arduino_flat("arduino-pico", "seeed_xiao_rp2040"),
+    arduino_flat("arduino-pico", "seeed_xiao_rp2040", extras=("LED",)),
 )
 _RP2350 = (
     zephyr_connector("xiao_rp2350", flat_gpio),
@@ -525,11 +586,11 @@ _ESP32C3 = (
 )
 _ESP32C5 = (
     zephyr_connector("xiao_esp32c5", flat_gpio),
-    arduino_flat("arduino-esp32", "XIAO_ESP32C5"),
+    arduino_flat("arduino-esp32", "XIAO_ESP32C5", extras=("LED",)),
 )
 _ESP32C6 = (
     zephyr_connector("xiao_esp32c6", flat_gpio),
-    arduino_flat("arduino-esp32", "XIAO_ESP32C6"),
+    arduino_flat("arduino-esp32", "XIAO_ESP32C6", extras=("LED",)),
 )
 _ESP32S3 = (
     zephyr_connector("xiao_esp32s3", flat_gpio),
@@ -575,17 +636,17 @@ BOARDS = {
     "XIAO-ESP32-C3-DIP": Board("ESP32-C3", _ESP32C3),
     "XIAO-ESP32-C3-DIP-SMD": Board("ESP32-C3", _ESP32C3),
     "XIAO-ESP32-C3-SMD": Board("ESP32-C3", _ESP32C3),
-    "XIAO-ESP32-C5-DIP": Board("ESP32-C5", _ESP32C5),
-    "XIAO-ESP32-C5-SMD": Board("ESP32-C5", _ESP32C5),
-    "XIAO-ESP32-C6-DIP": Board("ESP32-C6", _ESP32C6),
-    "XIAO-ESP32-C6-SMD": Board("ESP32-C6", _ESP32C6),
+    "XIAO-ESP32-C5-DIP": Board("ESP32-C5", _ESP32C5, on_board=("LED",)),
+    "XIAO-ESP32-C5-SMD": Board("ESP32-C5", _ESP32C5, on_board=("LED",)),
+    "XIAO-ESP32-C6-DIP": Board("ESP32-C6", _ESP32C6, on_board=("LED",)),
+    "XIAO-ESP32-C6-SMD": Board("ESP32-C6", _ESP32C6, on_board=("LED",)),
     "XIAO-ESP32-S3-DIP": Board("ESP32-S3", _ESP32S3),
     "XIAO-ESP32-S3-SMD": Board("ESP32-S3", _ESP32S3),
     "XIAO-ESP32-S3-SMD_PAD": Board("ESP32-S3", _ESP32S3),
     "XIAO-MG24-DIP": Board("EFR32MG24", _MG24),
     "XIAO-MG24-SMD": Board("EFR32MG24", _MG24),
-    "XIAO-RP2040-DIP": Board("RP2040", _RP2040),
-    "XIAO-RP2040-SMD": Board("RP2040", _RP2040),
+    "XIAO-RP2040-DIP": Board("RP2040", _RP2040, on_board=("LED",)),
+    "XIAO-RP2040-SMD": Board("RP2040", _RP2040, on_board=("LED",)),
     "XIAO-RP2350-DIP": Board("RP2350", _RP2350),
     "XIAO-RP2350-SMD": Board("RP2350", _RP2350),
     "XIAO-SAMD21-DIP": Board("SAMD21", _SAMD21),
@@ -622,7 +683,9 @@ class Claim:
 class Resolved:
     """A pad on the board, and everything the packages say about its label."""
 
-    pad: str
+    #: The footprint's pad number, or None for an `on_board` pin, which has
+    #: a label and a package's claim and nowhere on the board to be.
+    pad: str | None
     label: str
     #: The alternative a package recognised. `D9/BOOT` is one pad silkscreened
     #: twice, and it is `D9` that the packages define.
@@ -700,15 +763,31 @@ def published_pins(board: Board, bsp_dir: pathlib.Path) -> dict[str, list[Claim]
     return claims
 
 
-def resolve(name: str, bsp_dir: pathlib.Path = BSP_DIR) -> list[Resolved]:
-    """Join one board file's pads against what the packages publish."""
+def board_path(name: str, boards_dir: pathlib.Path = BOARDS_DIR) -> pathlib.Path:
+    """The board file a registry name stands for, or an error naming both."""
     if name not in BOARDS:
         raise PindefError(f"no registry entry for {name!r}. Known: {sorted(BOARDS)}")
-    path = BOARDS_DIR / f"{name}.json"
+    path = boards_dir / f"{name}.json"
     if not path.is_file():
         raise PindefError(f"{path} does not exist, but {name!r} is in the registry")
-    pads = json.loads(path.read_text(encoding="utf-8"))["pads"]
-    claims = published_pins(BOARDS[name], bsp_dir)
+    return path
+
+
+def resolve(
+    name: str,
+    bsp_dir: pathlib.Path = BSP_DIR,
+    boards_dir: pathlib.Path = BOARDS_DIR,
+) -> tuple[list[Resolved], list[Resolved]]:
+    """Join one board file's pads against what the packages publish.
+
+    Two lists: the pads, in the file's order, and then the board's `on_board`
+    labels -- pins with no pad, so `pad` is None on those and `matched` is
+    the label itself. Kept apart because a caller counting pads must not
+    count the LED as one, and a caller drawing the LED has nowhere to put it.
+    """
+    pads = json.loads(board_path(name, boards_dir).read_text(encoding="utf-8"))["pads"]
+    board = BOARDS[name]
+    claims = published_pins(board, bsp_dir)
 
     resolved = []
     for pad in pads:
@@ -721,7 +800,16 @@ def resolve(name: str, bsp_dir: pathlib.Path = BSP_DIR) -> list[Resolved]:
                 claims=tuple(claims[matched]) if matched else (),
             )
         )
-    return resolved
+    on_board = [
+        Resolved(
+            pad=None,
+            label=label,
+            matched=label if label in claims else None,
+            claims=tuple(claims.get(label, ())),
+        )
+        for label in board.on_board
+    ]
+    return resolved, on_board
 
 
 # --------------------------------------------------------------------------
@@ -736,8 +824,37 @@ DERIVATION = (
     "file that stated it."
 )
 
+#: The board FILE's version of the sentence: its pads carry no `sources`
+#: list, so it points at the command that prints them instead.
+BOARD_DERIVATION = (
+    "Generated by tools/import_pindefs.py from the board-support packages in "
+    "`packages`, at those revisions. Nothing was inferred from the CAD, the "
+    "silkscreen or a pinout image: a label resolves only when every package "
+    "covering the board that defines it names the same pin, and "
+    "`python tools/import_pindefs.py <board>` prints the file that named it."
+)
+
+#: And for a board no package covers, where the sentence above would cite an
+#: empty list as though something had been read from it.
+BOARD_DERIVATION_UNCOVERED = (
+    "Generated by tools/import_pindefs.py, which found no board-support package "
+    "covering this board: `packages` is empty because there are none to name, "
+    "not because none was read. Every pad's `chip_pin` is null and says so in "
+    "its own `why_null`."
+)
+
 NOT_PUBLISHED = "no board-support package covering this board defines this label"
 DISPUTED = "the packages disagree; recorded rather than averaged, so the pad stays null"
+
+#: The reason on a board no package covers, which is a different fact from
+#: `NOT_PUBLISHED` and reads identically if it is not told apart: "no package
+#: covering this board defines this label" is vacuously true of all 35 pads of
+#: the XIAO STM32C5 and hides that the count of packages covering it is zero.
+#: OH-26 searched and found no Zephyr board and no Seeed core for that part.
+NO_PACKAGE_AT_ALL = (
+    "no board-support package covers this board at all, so no label on it "
+    "resolves; this is a gap in what the vendor has published, not in this tool"
+)
 
 
 def pad_report(entry: Resolved) -> dict:
@@ -766,11 +883,25 @@ def pad_report(entry: Resolved) -> dict:
     return report
 
 
-def board_report(name: str, bsp_dir: pathlib.Path = BSP_DIR) -> dict:
-    """Everything known about one board's pads, and where each claim came from."""
+def board_report(
+    name: str,
+    bsp_dir: pathlib.Path = BSP_DIR,
+    boards_dir: pathlib.Path = BOARDS_DIR,
+) -> dict:
+    """Everything known about one board's pads, and where each claim came from.
+
+    The counts are of pads. An `on_board` pin is listed under its own key and
+    counted in neither `resolved` nor `unresolved`, because "11 of 14 pads
+    resolve" is a sentence about the header and the LED is not on it.
+    """
     board = BOARDS[name]
-    entries = resolve(name, bsp_dir)
+    entries, on_board = resolve(name, bsp_dir, boards_dir)
     pads = [pad_report(entry) for entry in entries]
+    if not board.sources:
+        # Every pad of this board is null for ONE reason, and it is not the
+        # per-label one `pad_report` can see from a pad alone.
+        for pad in pads:
+            pad["reason"] = NO_PACKAGE_AT_ALL
     packages = sorted({source.package for source in board.sources})
     return {
         "board": name,
@@ -790,14 +921,18 @@ def board_report(name: str, bsp_dir: pathlib.Path = BSP_DIR) -> dict:
         "unresolved": sum(1 for pad in pads if not pad["chip_pin"]),
         "disputed": sum(1 for pad in pads if "disputed" in pad),
         "pads": pads,
+        "on_board": [pad_report(entry) for entry in on_board],
     }
 
 
-def full_report(bsp_dir: pathlib.Path = BSP_DIR) -> dict:
+def full_report(
+    bsp_dir: pathlib.Path = BSP_DIR,
+    boards_dir: pathlib.Path = BOARDS_DIR,
+) -> dict:
     """Every board in `webui/boards/`, including the ones with no registry entry."""
-    boards = [board_report(name, bsp_dir) for name in sorted(BOARDS)]
+    boards = [board_report(name, bsp_dir, boards_dir) for name in sorted(BOARDS)]
     unregistered = sorted(
-        path.stem for path in BOARDS_DIR.glob("*.json") if path.stem not in BOARDS
+        path.stem for path in boards_dir.glob("*.json") if path.stem not in BOARDS
     )
     return {
         "generated_by": "tools/import_pindefs.py",
@@ -820,6 +955,404 @@ def totals(boards: list[dict]) -> dict:
         "unresolved": sum(board["unresolved"] for board in boards),
         "disputed": sum(board["disputed"] for board in boards),
     }
+
+
+# --------------------------------------------------------------------------
+# The board module's table (OH-160)
+# --------------------------------------------------------------------------
+
+#: The two lines a board module carries so that this tool can find where its
+#: `HEADER` goes. Both are matched whole; a module with one and not the other,
+#: or with two of either, is refused rather than guessed at.
+HEADER_BEGIN = (
+    "# --- BEGIN HEADER: generated by "
+    "`python tools/import_pindefs.py --write-headers`; do not edit by hand ---"
+)
+HEADER_END = "# --- END HEADER ---"
+
+_D_NUMBER = re.compile(r"^D(\d+)$")
+
+
+@dataclasses.dataclass(frozen=True)
+class HeaderTable:
+    """One chip's label -> pin table, and the files it was read out of."""
+
+    chip: str
+    #: The board files that contributed, so the block can name them.
+    boards: tuple[str, ...]
+    #: Label -> pin, in the order the block will print them: `D0` upward,
+    #: then the on-board labels, then anything else in the order first seen.
+    #: Keyed by the label the PACKAGES define -- `D9`, not the DIP's
+    #: `D9/BOOT` -- because that is the name `pin_states` answers under and
+    #: `webui.api.header_key` joins a pad label onto it.
+    pins: dict[str, ChipPin]
+    #: `zephyr boards/seeed/... @ 0a2e408`, one per package file, deduplicated.
+    citations: tuple[str, ...]
+    #: Labels with no pad, so the block can say which rows are not header.
+    on_board: tuple[str, ...]
+
+
+def _label_order(label: str) -> tuple[int, int]:
+    number = _D_NUMBER.match(label)
+    return (0, int(number.group(1))) if number else (1, 0)
+
+
+def header_table(
+    chip: str,
+    bsp_dir: pathlib.Path = BSP_DIR,
+    boards_dir: pathlib.Path = BOARDS_DIR,
+) -> HeaderTable:
+    """The union of every registered board file of one chip, and one table.
+
+    DIP and SMD are two footprints of one board, and the SMD file carries
+    more pads: the C3's underside `D3/MTDI` is the same GPIO5 as its
+    castellated `D3`. So the table is the union over the chip's files, keyed
+    by the label the packages define -- and a label that two files send to
+    two different pins is refused, because one chip has one table and a
+    module cannot carry two.
+    """
+    names = tuple(name for name, board in sorted(BOARDS.items()) if board.chip == chip)
+    if not names:
+        raise PindefError(
+            f"no registered board has chip {chip!r}; chips: "
+            f"{sorted({board.chip for board in BOARDS.values()})}"
+        )
+    pins: dict[str, ChipPin] = {}
+    first_seen: dict[str, str] = {}
+    citations: list[str] = []
+    on_board: list[str] = []
+    for name in names:
+        report = board_report(name, bsp_dir, boards_dir)
+        for entry in report["pads"] + report["on_board"]:
+            if entry["chip_pin"] is None:
+                continue
+            label = entry["matched"]
+            pin = ChipPin(entry["chip_pin"], entry["index"])
+            if label in pins and pins[label] != pin:
+                raise PindefError(
+                    f"{chip}: {label} is {pins[label].name} in {first_seen[label]} "
+                    f"and {pin.name} in {name}; one chip has one table"
+                )
+            pins.setdefault(label, pin)
+            first_seen.setdefault(label, name)
+            for source in entry["sources"]:
+                if source not in citations:
+                    citations.append(source)
+        for entry in report["on_board"]:
+            if entry["chip_pin"] is not None and entry["matched"] not in on_board:
+                on_board.append(entry["matched"])
+    if not pins:
+        raise PindefError(f"{chip}: no pad on {names} resolves to a pin; nothing to emit")
+    ordered = dict(sorted(pins.items(), key=lambda item: _label_order(item[0])))
+    return HeaderTable(chip, names, ordered, tuple(citations), tuple(on_board))
+
+
+def render_header(table: HeaderTable) -> str:
+    """The Python block a board module embeds, from `HEADER_BEGIN` to `HEADER_END`.
+
+    Emitted only where every pin has a flat number. `SAMD21`'s `PA02` has
+    none, and a module for such a chip keys its own table as `(group, bit)`
+    the way `samd21.py` does; writing `"D0": None` into it would be a table
+    that parses and answers nothing.
+    """
+    unnumbered = [label for label, pin in table.pins.items() if pin.index is None]
+    if unnumbered:
+        raise PindefError(
+            f"{table.chip}: {unnumbered} name a chip pin with no flat number "
+            f"({table.pins[unnumbered[0]].name}); a module for this chip keys "
+            f"its own table the way samd21.py does, and this generator does "
+            f"not write one"
+        )
+    lines = [
+        HEADER_BEGIN,
+        "#: Header label -> GPIO number: the pin `pin_states` reads a level",
+        "#: through and `PIN_NAMES` spells. Read out of the board-support",
+        "#: packages, never typed here:",
+    ]
+    lines.extend(f"#:     {citation}" for citation in table.citations)
+    # **Not "every package agrees on every row"**, which is what this said
+    # until it was reviewed and is false wherever one package alone defines a
+    # row: only arduino-esp32 names the C5's and C6's `LED`, only arduino-pico
+    # the RP2040's, and no Zephyr connector names any of them. What is true is
+    # the rule `agree` enforces -- a row that two packages define twice and
+    # differently resolves to nothing and never reaches this block.
+    sentences = [
+        (
+            f"for {', '.join(table.boards)}. A row is here only where every package "
+            f"that defines it names the same pin; a row only one package defines is "
+            f"that package's."
+        )
+    ]
+    if table.on_board:
+        rows = ", ".join(f"`{label}`" for label in table.on_board)
+        sentences.append(
+            f"{rows} has no pad: it is the board's own LED, which the Arduino "
+            f"variant above defines and the header does not carry."
+        )
+    sentences.append(
+        "`tests/rules/test_import_pindefs.py` holds this block equal to what the "
+        "generator emits from the fetched packages."
+    )
+    for sentence in sentences:
+        lines.extend(textwrap.wrap(sentence, width=76, initial_indent="#: ",
+                                   subsequent_indent="#: "))
+    lines.append("HEADER: dict[str, int] = {")
+    lines.extend(f'    "{label}": {pin.index},' for label, pin in table.pins.items())
+    lines.append("}")
+    lines.append(HEADER_END)
+    return "\n".join(lines)
+
+
+def module_path(chip: str, boards_dir: pathlib.Path = BOARDS_DIR) -> pathlib.Path:
+    """`ESP32-C3` -> `webui/boards/esp32c3.py`: `webui.api.description_module`'s rule."""
+    return boards_dir / f"{chip.lower().replace('-', '')}.py"
+
+
+def chips_with_header_markers(boards_dir: pathlib.Path = BOARDS_DIR) -> list[str]:
+    """Which chips take a generated block: read off the modules, not listed here.
+
+    A module opts in by carrying the two markers. A marked module that no
+    registered chip maps to is an error, because the alternative is a block
+    that is never regenerated and looks exactly like one that is.
+    """
+    by_path = {module_path(board.chip, boards_dir): board.chip for board in BOARDS.values()}
+    chips = []
+    for path in sorted(boards_dir.glob("*.py")):
+        if HEADER_BEGIN not in path.read_text(encoding="utf-8"):
+            continue
+        if path not in by_path:
+            raise PindefError(
+                f"{path} carries {HEADER_BEGIN!r} but no registered board's chip "
+                f"maps to it; add the board to BOARDS or take the markers out"
+            )
+        chips.append(by_path[path])
+    return chips
+
+
+def splice_header(text: str, block: str, where: str) -> str:
+    """`text` with what lies between the markers replaced by `block`."""
+    begin = text.find(HEADER_BEGIN)
+    end = text.find(HEADER_END)
+    if begin < 0 or end < 0:
+        raise PindefError(
+            f"{where}: needs both {HEADER_BEGIN!r} and {HEADER_END!r} to write "
+            f"between, and has {'the first' if begin >= 0 else 'neither' if end < 0 else 'the second'}"
+        )
+    if end < begin:
+        raise PindefError(f"{where}: {HEADER_END!r} comes before {HEADER_BEGIN!r}")
+    if text.find(HEADER_BEGIN, begin + 1) >= 0 or text.find(HEADER_END, end + 1) >= 0:
+        raise PindefError(f"{where}: carries more than one HEADER block")
+    return text[:begin] + block + text[end + len(HEADER_END):]
+
+
+def write_header(
+    chip: str,
+    bsp_dir: pathlib.Path = BSP_DIR,
+    boards_dir: pathlib.Path = BOARDS_DIR,
+) -> bool:
+    """Regenerate one module's block in place. True when the file changed."""
+    path = module_path(chip, boards_dir)
+    if not path.is_file():
+        raise PindefError(f"{path} does not exist; no module describes {chip}")
+    text = path.read_text(encoding="utf-8")
+    block = render_header(header_table(chip, bsp_dir, boards_dir))
+    new = splice_header(text, block, str(path))
+    if new == text:
+        return False
+    path.write_text(new, encoding="utf-8")
+    return True
+
+
+# --------------------------------------------------------------------------
+# The board file (OH-160)
+# --------------------------------------------------------------------------
+
+
+#: How many spellings the sentence below shows before it stops. Three is
+#: enough to recognise `PA02` from `P2.08` from `PC6`; an SMD file has
+#: fifteen and the rest are the same fact again.
+UNNUMBERED_EXAMPLES = 3
+
+
+def unnumbered_sentence(chip: str, pins: list[str], described: bool) -> str:
+    """Why `chip_index` is null on a pad whose `chip_pin` is not.
+
+    OH-26's one real blocker, and the clause of OH-160 that would otherwise
+    have no home: on the SAMD21, EFR32MG24, nRF54L15 and nRF54LM20A a
+    resolved pad names `PA02`, `PC6` or `P2.08` and no flat integer, because
+    those vendors publish no flat GPIO numbering -- an nRF54L15's P0 is five
+    pins wide, so the 32-per-port arithmetic that is right for an nRF52840
+    would invent a number appearing in no Nordic document (`ChipPin`).
+
+    `webui/boards/samd21.py` is the shape such a chip's module takes when it
+    gets one: its own `(group, bit)` table, and `PIN_NAMES` derived from it.
+    Three of the four chips have no module at all, so this sentence in the
+    board file is the only place the fact is written for them.
+    """
+    shown = ", ".join(pins[:UNNUMBERED_EXAMPLES])
+    more = "" if len(pins) <= UNNUMBERED_EXAMPLES else ", and so on"
+    # The module sentence differs by which chip this is: on a SAMD21 the file
+    # being pointed at is this board's own, and telling a reader to look at
+    # the way another chip does it would send them to the file they are
+    # already reading about.
+    module = f"webui/boards/{chip.lower().replace('-', '')}.py"
+    keying = (
+        f"so {module} keys its own table by port and bit instead, and derives "
+        f"`PIN_NAMES` from that"
+        if described
+        else f"so a module for it would key its own table the way "
+             f"webui/boards/samd21.py does, and until one exists no level is "
+             f"read for any pad here"
+    )
+    return (
+        f" {len(pins)} pins on this board are named with NO flat number -- "
+        f"{shown}{more} -- so every pad reaching one carries `chip_index` null "
+        f"for that reason and not for a missing reading: no flat GPIO numbering "
+        f"is published for the {chip} at all, {keying}."
+    )
+
+
+def assumption_for(chip: str, described: bool, covered: bool,
+                   unnumbered: list[str] | None = None) -> str:
+    """What a board file says about its own `pin`, `chip_pin` and `chip_index`.
+
+    Three shapes, because three things can be true of a board. `pin` is null
+    on every one of them and still means what `webui/pinmap.py` says -- the
+    rcontrol index of a PICSimLab board that does not exist. What varies is
+    whether any package publishes this board's pins at all, and, where one
+    does, whether a module here reads a level through the same table.
+
+    The uncovered case is its own sentence rather than the undescribed one
+    with an empty `packages` list: "the join is ready, not made" would be
+    false on a board with nothing to join, and that is the XIAO STM32C5.
+    """
+    head = (
+        "Every `pin` is null: that field is the rcontrol pin index of a PICSimLab "
+        "board implementation (webui/pinmap.py), and none exists for this board. "
+    )
+    if not covered:
+        return head + (
+            f"`chip_pin` and `chip_index` are null on every pad here, and `pindefs` "
+            f"names no package, because no board-support package covers this board "
+            f"at all -- no Zephyr board and no vendor core publishes a {chip} XIAO "
+            f"(OH-26). Each pad says the same in its own `why_null`. The pin view "
+            f"reports every pad as not modelled, and will until the vendor "
+            f"publishes something to read."
+        )
+    head += (
+        "`chip_pin` and `chip_index` are what tools/import_pindefs.py read out of "
+        "the board-support packages named in `pindefs`; a pad whose `chip_pin` is "
+        "null says why in `why_null`. "
+    )
+    if described:
+        body = (
+            f"webui/boards/{chip.lower().replace('-', '')}.py reads a level through "
+            f"the same table, so a pad with a `chip_pin` answers for itself in the "
+            f"pin view; a pad without one is drawn and reported as not modelled."
+        )
+    else:
+        body = (
+            f"No board module describes {chip} here, so no level is read for any pad "
+            f"and the pin view reports every one as not modelled until a module and a "
+            f"core exist; `chip_pin` is recorded so that the join is ready, not made."
+        )
+    if unnumbered:
+        body += unnumbered_sentence(chip, unnumbered, described)
+    return head + body
+
+
+def filled_board(
+    name: str,
+    bsp_dir: pathlib.Path = BSP_DIR,
+    boards_dir: pathlib.Path = BOARDS_DIR,
+) -> dict:
+    """The board file's document with the report written into it.
+
+    Joined by POSITION, which is exact because `board_report` below reads
+    this same file in this same call and returns one entry per pad in its
+    order. The pad NUMBER the report carries for other consumers is not a
+    key and could not be one: the nRF54LM20A SMD footprint numbers all three
+    of its `GND` pads `46`, which is how Seeed's CAD names a multi-pad net.
+    Everything else in the document is kept as it is.
+    """
+    path = board_path(name, boards_dir)
+    document = json.loads(path.read_text(encoding="utf-8"))
+    report = board_report(name, bsp_dir, boards_dir)
+    pads = []
+    # `strict` rather than a length check and a per-row comparison: both lists
+    # are this one call's reading of this one file, so a mismatch is not a
+    # state that can arise, and a hand-written guard for it would be a branch
+    # no test could ever enter. `strict` still refuses to truncate silently if
+    # that ever stops being true.
+    for pad, entry in zip(document["pads"], report["pads"], strict=True):
+        filled = {
+            "label": pad["label"],
+            "pin": pad.get("pin"),
+            "chip_pin": entry["chip_pin"],
+            "chip_index": entry["index"],
+        }
+        if entry["chip_pin"] is None:
+            filled["why_null"] = entry["reason"]
+        for key, value in pad.items():
+            if key not in filled and key != "why_null":
+                filled[key] = value
+        pads.append(filled)
+
+    covered = bool(report["packages"])
+    # The PINS the packages resolved to a name with no number, in the file's
+    # own order, deduplicated so the sentence quotes real pins off this board
+    # rather than a class.
+    #
+    # **Pins and not pads, and the two are one number here only by accident
+    # of the data.** Two pads can reach one pin -- the ESP32-C3 SMD has four
+    # such pairs, `D3` and its underside `D3/MTDI` among them -- but on all
+    # eight boards that have unnumbered pins, no pin is on two pads (measured
+    # 2026-09-04). Counting pads would therefore be an unfalsifiable choice:
+    # nothing in the tree could tell the two counts apart.
+    spellings = list(dict.fromkeys(
+        pad["chip_pin"] for pad in pads
+        if pad["chip_pin"] is not None and pad["chip_index"] is None
+    ))
+    pindefs = {
+        "generated_by": "tools/import_pindefs.py",
+        "derivation": BOARD_DERIVATION if covered else BOARD_DERIVATION_UNCOVERED,
+        "packages": report["packages"],
+        "resolved": report["resolved"],
+        "unresolved": report["unresolved"],
+        "disputed": report["disputed"],
+        "on_board": report["on_board"],
+    }
+    described = module_path(report["chip"], boards_dir).is_file()
+    filled_document: dict = {}
+    for key, value in document.items():
+        if key == "pads":
+            filled_document["pads"] = pads
+        elif key in ("pindefs",):
+            continue
+        else:
+            filled_document[key] = value
+        if key == "assumption":
+            filled_document["assumption"] = assumption_for(
+                report["chip"], described, covered, spellings
+            )
+            filled_document["pindefs"] = pindefs
+    if "pindefs" not in filled_document:
+        raise PindefError(f"{path}: has no `assumption` field to put `pindefs` after")
+    return filled_document
+
+
+def write_board(
+    name: str,
+    bsp_dir: pathlib.Path = BSP_DIR,
+    boards_dir: pathlib.Path = BOARDS_DIR,
+) -> bool:
+    """Write the filled document back. True when the file changed."""
+    path = board_path(name, boards_dir)
+    text = json.dumps(filled_board(name, bsp_dir, boards_dir), indent=2, ensure_ascii=False) + "\n"
+    if path.read_text(encoding="utf-8") == text:
+        return False
+    path.write_text(text, encoding="utf-8")
+    return True
 
 
 # --------------------------------------------------------------------------
@@ -908,7 +1441,10 @@ def summarise(boards: list[dict], not_in_registry: list[str]) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Extract label -> chip pin from board-support packages.",
-        epilog="Writes a report. It never edits webui/boards/*.json.",
+        epilog=(
+            "Writes a report by default. --write-headers and --write-boards "
+            "write the same answer into the board modules and the board files."
+        ),
     )
     parser.add_argument("board", nargs="?", help="a board in webui/boards/")
     parser.add_argument("--fetch", action="store_true", help="clone or update every package")
@@ -916,6 +1452,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--all", action="store_true", help="report every registered board")
     parser.add_argument("--summary", action="store_true", help="counts instead of JSON")
     parser.add_argument("-o", "--output", type=pathlib.Path, help="write JSON here, not to stdout")
+    parser.add_argument(
+        "--emit-header", metavar="CHIP", help="print the HEADER block a module embeds"
+    )
+    parser.add_argument(
+        "--write-headers", action="store_true",
+        help="regenerate the HEADER block in every module that carries the markers",
+    )
+    parser.add_argument(
+        "--write-boards", action="store_true",
+        help="write chip_pin, chip_index and why_null into every registered board file",
+    )
     args = parser.parse_args(argv)
 
     if args.fetch:
@@ -928,6 +1475,24 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.list:
         print(describe_registry())
+        return 0
+
+    if args.emit_header:
+        print(render_header(header_table(args.emit_header)))
+        return 0
+
+    if args.write_headers or args.write_boards:
+        if args.write_headers:
+            chips = chips_with_header_markers()
+            if not chips:
+                raise PindefError(f"no module under {BOARDS_DIR} carries {HEADER_BEGIN!r}")
+            for chip in chips:
+                changed = write_header(chip)
+                print(f"{'wrote' if changed else 'unchanged'}  {module_path(chip)}")
+        if args.write_boards:
+            for name in sorted(BOARDS):
+                changed = write_board(name)
+                print(f"{'wrote' if changed else 'unchanged'}  {board_path(name)}")
         return 0
 
     if args.all:

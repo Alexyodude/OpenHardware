@@ -224,10 +224,13 @@ def collect_boards(boards_dir: pathlib.Path = BOARDS_DIR) -> list[Board]:
     """Every board under `webui/boards/`, with its pad and wiring counts.
 
     `wired` is the number of pads carrying a simulator pin index, and it is the
-    only field here that says whether a board *does* anything. A pad whose
-    `pin` is null draws and refuses a wire — every XIAO file states exactly
-    that in its own `assumption` field, and gives the reason: a guessed pin
-    number would wire the circuit wrongly and report success.
+    only field here that says whether a board *does* anything over rcontrol.
+    A pad whose `pin` is null has no PICSimLab pin behind it — every XIAO file
+    says so in its own `assumption` field, and gives the reason: a guessed pin
+    number would wire the circuit wrongly and report success. Since OH-160 the
+    same files also carry a `chip_pin`, the MCU pin the board's own module
+    reads a level through; that is the 3D view's join and a different count,
+    printed by `python tools/import_pindefs.py --all --summary`, not this one.
 
     So the count that matters is not how many boards exist. Reporting "26
     boards" without the wiring split would claim twenty-five that cannot be
@@ -737,6 +740,15 @@ def render_text() -> str:
         f"BOARDS — {len(inv.boards)} definitions; {len(wired)} wired to the "
         f"simulator, {len(inv.boards) - len(wired)} outline only"
     )
+    # **"Outline only" is about the rcontrol pin index and not about the MCU
+    # pin**, and the two have been separate counts since OH-160. Printed
+    # rather than left for a reader to assume, because the number below is
+    # 0/14 for a board whose every header pad now names a GPIO and follows a
+    # register.
+    lines.append(
+        "         (the pin index a PICSimLab board defines; `chip_pin` is the "
+        "other join — python tools/import_pindefs.py --all --summary)"
+    )
     for board in _boards_by_reach(inv.boards):
         lines.append(
             f"  {board.wired:>3}/{board.pads:<3} pins  {board.name:<24}"
@@ -829,6 +841,13 @@ def render_markdown() -> str:
         "A board is *wired* when its pads carry simulator pin indices. The rest "
         "draw to scale and deliberately refuse connections: a pad with a null "
         "pin would otherwise wire the circuit wrongly and report success.",
+        "",
+        "**That is the PICSimLab pin index and not the MCU pin.** Since OH-160 "
+        "every board file also carries a `chip_pin` read out of the vendor's "
+        "board-support package, and the boards whose chip has a module report a "
+        "running program's pin levels through the same table — so an "
+        "*outline only* row here is not a board that answers nothing. "
+        "`python tools/import_pindefs.py --all --summary` counts that join.",
         "",
         "| board | pads | wired | artwork | provenance |",
         "|---|---|---|---|---|",

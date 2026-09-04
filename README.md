@@ -83,6 +83,15 @@ scale and deliberately refuse connections: a pad whose `pin` is null has no
 simulator pin index, and a guessed one would wire the circuit wrongly *and
 report success*. Each board file says so in its own `assumption` field.
 
+**"Wired" here means that one field and nothing else.** Since OH-160 every
+board file also carries a `chip_pin` — the MCU pin the vendor's own
+board-support package says each label reaches — and on the eleven files whose
+chip has a board module, a running program's pin levels are reported through
+the same table. So a board in the second group below is not a board that can
+do nothing; it is a board with no PICSimLab pin index, which is a different
+join with a different count. `python tools/import_pindefs.py --all --summary`
+prints that one.
+
 Wired to the simulator:
 
 - `Arduino Uno`

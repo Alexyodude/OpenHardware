@@ -782,6 +782,24 @@ PIN_STATES = ("high", "low", "input", "unknown")
 PWM_MARK = "~"
 
 
+def header_key(label: str, names: typing.Mapping[str, object]) -> str:
+    """The board module's key for a pad label, or the label itself.
+
+    A XIAO's silkscreen writes two names on one pad where two things reach
+    it: the ESP32-C3's `D9/BOOT` is its `D9`, and the same board's underside
+    `D3/MTDI` is its `D3`. The board-support packages define `D9` and `D3`,
+    so that is what `HEADER` and `pin_states` are keyed by (OH-160), and this
+    is the one place a pad's spelling is joined onto the module's: the first
+    `/`-separated part the module knows, after the PWM mark is stripped.
+
+    A label the module knows nothing about comes back as itself, so a pad
+    nobody answers for keeps its own name in the table -- `GND` stays `GND`
+    rather than becoming whichever half of it happened to match nothing.
+    """
+    name = label.lstrip(PWM_MARK)
+    return next((part for part in name.split("/") if part in names), name)
+
+
 def pin_levels(runtime: Runtime, cpu: Core) -> dict[str, str] | None:
     """Just the states, keyed by pin name. `None` when the board maps no pins.
 
@@ -834,9 +852,13 @@ def pad_view(board: str, description: types.ModuleType | None,
     than a refusal.** It used to mean `present: False` -- draw nothing -- and
     that hid two different boards for one reason. A board that has been PICKED
     but not loaded has no levels; so does a board whose description models no
-    pins, which is twenty-four of the twenty-six. Both have pads, and the page
-    has words for a pad it cannot answer for: `unknownWords` writes a sentence
-    per row and the panel's note counts them.
+    pins, which is fourteen of the twenty-six: OH-160 gave the ESP32-C3, C5,
+    C6 and RP2040 modules a generated `HEADER`, so twelve boards now answer
+    where three did. (This sentence said "twenty-four" from OH-94 until then,
+    and that was one too many: `samd21.py` already had a `pin_states`, so the
+    boards that could not answer were twenty-three.) Both have pads, and the
+    page has words for a pad it cannot answer for: `unknownWords` writes a
+    sentence per row and the panel's note counts them.
 
     So `present` now means **there is something to draw** -- a pad map exists,
     or there are states to report -- and the two views are ONE implementation.
@@ -875,7 +897,12 @@ def pad_view(board: str, description: types.ModuleType | None,
     placed: set[str] = set()
     if layout is not None:
         for pad in layout.pads:
-            name = pad.label.lstrip(PWM_MARK)
+            # `pin` is the module's key and `label` the silkscreen's, and
+            # they differ on a pad written `D9/BOOT`: `header_key` says how
+            # they meet. The page wires and polls by `pin`, so two pads that
+            # are one GPIO -- the C3 SMD's `D3` and its underside `D3/MTDI`
+            # -- share a name and a state, as they share a wire.
+            name = header_key(pad.label, names)
             placed.add(name)
             pads.append({
                 "label": pad.label,

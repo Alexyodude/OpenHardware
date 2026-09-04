@@ -270,8 +270,11 @@ def test_a_board_with_nothing_to_draw_and_nothing_to_report_says_so():
 
     **`present` narrowed under OH-94 and this test had to say which meaning it
     holds.** It used to mean "the description reports no pin states", which
-    hid twenty-four of the twenty-six boards -- every one whose chip has no
-    `pin_states` -- even though they have pad maps and could be drawn. It now
+    hid every board whose chip has no `pin_states` -- twenty-three of the
+    twenty-six then and fourteen since OH-160 -- even though they have pad
+    maps and could be drawn. (Both this docstring and `api.pad_view`'s said
+    twenty-four until OH-160 measured it; `samd21.py` had a `pin_states` when
+    the sentence was written, so its two boards were never among them.) It now
     means "there is nothing to draw AND nothing to report", and board `"X"`
     qualifies on both counts: no `webui/boards/X.json` and no levels.
 
@@ -532,3 +535,106 @@ def test_the_timer_control_registers_are_the_addresses_the_vendor_header_gives()
     assert bin(atmega328p.COM_A_MASK).count("1") == 2
     assert bin(atmega328p.COM_B_MASK).count("1") == 2
     assert not atmega328p.COM_A_MASK & atmega328p.COM_B_MASK
+
+
+# --- the four generated tables, and the join a compound label needs (OH-160) --
+
+
+def test_a_pad_label_with_two_names_joins_on_the_one_the_module_defines():
+    """`D9/BOOT` is one pad silkscreened twice, and the packages define `D9`.
+
+    `header_key` is the one place a pad's spelling meets the module's, and it
+    must be exact in both directions: a compound label lands on the half the
+    module knows whichever order the silkscreen wrote it in, and a label the
+    module knows nothing about comes back whole rather than as a fragment.
+    """
+    from webui.boards import esp32c3
+
+    names = esp32c3.PIN_NAMES
+    assert api.header_key("D9/BOOT", names) == "D9"
+    assert api.header_key("BOOT/D9", names) == "D9"
+    assert api.header_key("D3/MTDI", names) == "D3"
+    assert api.header_key("GND", names) == "GND"
+    assert api.header_key("MTMS/MTDI", names) == "MTMS/MTDI"
+    assert api.header_key("~11", atmega328p.PIN_NAMES) == "11"
+
+    dip = api.pad_view("XIAO-ESP32-C3-DIP", api.description_for("XIAO-ESP32-C3-DIP"), None)
+    boot = next(pad for pad in dip["pads"] if pad["label"] == "D9/BOOT")
+    assert (boot["pin"], boot["chip_pin"]) == ("D9", "GPIO9")
+    gnd = next(pad for pad in dip["pads"] if pad["label"] == "GND")
+    assert (gnd["pin"], gnd["chip_pin"]) == ("GND", None)
+
+    smd = api.pad_view("XIAO-ESP32-C3-SMD", api.description_for("XIAO-ESP32-C3-SMD"), None)
+    d3 = [pad for pad in smd["pads"] if pad["pin"] == "D3"]
+    assert {pad["label"] for pad in d3} == {"D3", "D3/MTDI"}, (
+        "the castellation and the underside pad are one GPIO, and share a name"
+    )
+    assert {pad["chip_pin"] for pad in d3} == {"GPIO5"}
+
+
+def test_the_four_generated_tables_derive_their_names_and_fit_one_register():
+    """`PIN_NAMES` is `HEADER` read the other way, every value is a bit of one
+    32-bit `OUT` register (`esp32c3.pin_states` says why that matters), and
+    the ticket's own example holds: one label, four different pins."""
+    from webui.boards import esp32c3, esp32c5, esp32c6, rp2040
+
+    # The bound is each part's OWN, cited where its module's `pin_states`
+    # cites it, because `< 32` would pass a table this silicon cannot hold:
+    # the C3's `GPIO_OUT_DATA` is `bitpos:[25:0]` (gpio_reg.h:59), the C5's
+    # and C6's `GPIO_OUT_DATA_ORIG` is `[31:0]` (:39 and :30), and the
+    # RP2040's `GPIO_OUT` is "bits 29-0" (rp2040_v2/rp2040_sio.json).
+    for module, led, width in (
+        (esp32c3, None, 26), (esp32c5, 27, 32), (esp32c6, 15, 32), (rp2040, 17, 30)
+    ):
+        assert set(module.PIN_NAMES) == set(module.HEADER), module.__name__
+        for label, gpio in module.HEADER.items():
+            assert 0 <= gpio < width, (
+                f"{module.__name__} {label} = {gpio}, outside this part's "
+                f"{width}-bit register"
+            )
+            assert module.PIN_NAMES[label] == f"GPIO{gpio}", f"{module.__name__} {label}"
+        assert {f"D{n}" for n in range(11)} <= set(module.HEADER), module.__name__
+        assert module.HEADER.get("LED") == led, module.__name__
+        assert "GND" not in module.HEADER and "3V3_OUT" not in module.HEADER
+    assert (esp32c3.HEADER["D10"], esp32c5.HEADER["D10"], esp32c6.HEADER["D10"],
+            rp2040.HEADER["D10"]) == (10, 10, 18, 3)
+    assert (esp32c3.HEADER["D6"], rp2040.HEADER["D6"]) == (21, 0), "OH-26's example"
+
+
+class _Words:
+    """A bus that answers `read_word` from a dict and nothing else, so each
+    module's `pin_states` can be shown a driven-but-disabled pin -- which a
+    sketch reaches only by writing `OUT` without ever calling `pinMode`."""
+
+    def __init__(self, values: dict[int, int]):
+        self._values = values
+
+    def read_word(self, address: int) -> int:
+        return self._values.get(address, 0)
+
+
+def test_the_esp32_and_rp2040_pin_states_read_the_enable_before_the_out():
+    """`input` beats whatever `OUT` holds, `low` is an enabled pin at zero,
+    and one bit moves exactly one label: the other rows of the table stay
+    `input` when only `D10`'s bits are set."""
+    from webui.boards import esp32c3, esp32c5, esp32c6, rp2040
+
+    cases = (
+        (esp32c3, esp32c3.GPIO + esp32c3.GPIO_ENABLE, esp32c3.GPIO + esp32c3.GPIO_OUT),
+        (esp32c5, esp32c5.GPIO + esp32c5.GPIO_ENABLE, esp32c5.GPIO + esp32c5.GPIO_OUT),
+        (esp32c6, esp32c6.GPIO + esp32c6.GPIO_ENABLE, esp32c6.GPIO + esp32c6.GPIO_OUT),
+        (rp2040, rp2040.SIO + rp2040.SIO_GPIO_OE, rp2040.SIO + rp2040.SIO_GPIO_OUT),
+    )
+    for module, enable, out in cases:
+        bit = 1 << module.HEADER["D10"]
+        assert module.pin_states(_Words({}))["D10"] == "input", module.__name__
+        assert module.pin_states(_Words({out: bit}))["D10"] == "input", (
+            f"{module.__name__}: a driven pin whose output is not enabled has no level"
+        )
+        assert module.pin_states(_Words({enable: bit}))["D10"] == "low", module.__name__
+        states = module.pin_states(_Words({enable: bit, out: bit}))
+        assert states["D10"] == "high", module.__name__
+        assert set(states) == set(module.HEADER), module.__name__
+        assert {state for label, state in states.items() if label != "D10"} == {"input"}, (
+            f"{module.__name__}: one bit moved more than one label"
+        )
