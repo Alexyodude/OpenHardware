@@ -28,10 +28,12 @@
 # of chip knowledge, so both are exercised here rather than whichever was
 # convenient.
 
+import types
+
 import pytest
 
 from webui import api, pinmap
-from webui.boards import atmega328p, samd21
+from webui.boards import atmega328p, catalogue, samd21
 
 UNO = "Arduino Uno"
 XIAO = "XIAO-SAMD21-DIP"
@@ -638,3 +640,163 @@ def test_the_esp32_and_rp2040_pin_states_read_the_enable_before_the_out():
         assert {state for label, state in states.items() if label != "D10"} == {"input"}, (
             f"{module.__name__}: one bit moved more than one label"
         )
+
+
+def test_a_view_says_whether_any_levels_were_read_at_all():
+    """**OH-164: a board you picked told you its pins were in use elsewhere.**
+
+    A pad with no state is one of three things, and only two of them are
+    about the pin: no module models it, or a running program has taken it
+    somewhere the direction register cannot show. The third is that nobody
+    has loaded anything, and every pad of every modelled board is in it.
+
+    The page could not tell the third from the second, so it said the second.
+    Measured 2026-09-05 over `catalogue.board_names()`, counting pads that are
+    `unknown` with a `chip_pin` -- which is exactly the input the panel's
+    `unknownWords` reads -- for a board picked and not loaded:
+
+        Arduino Uno                1 board,  22 of 32
+        the three C3 files         3 boards, 11, 11 and 15
+        the C5, C6 and RP2040      6 boards, 11 each
+        the two SAMD21 files       2 boards, 11 each
+        the rest                  14 boards,  0 (no module, so no chip_pin)
+                                  --
+                                  26
+
+    Twelve of them, which is the number OH-160 made it: TWO modules answered
+    before it -- `atmega328p` and `samd21`, over three board files, since the
+    SAMD21 has a DIP and an SMD -- and it gave the ESP32-C3, C5, C6 and
+    RP2040 a generated `HEADER` between them.
+
+    So the fact is stated. `read_levels` is false exactly when `pad_view` was
+    given no levels to read, which is `live is None` and nothing else --
+    `pin_view` always passes `pin_levels(...)`, so an empty dict is a program
+    that drove nothing and not the absence of one. The page cannot work this
+    out: `unknown == len(pads)` is equally true of a loaded sketch that has
+    driven nothing, and re-deriving what the file could state is what OH-121
+    paid for once already.
+
+    **Four mutations die here, 2026-09-05, two of them only here**: the field
+    always true, and the field read AFTER the coalesce that loses the
+    distinction -- which is the mistake the code comment is placed to
+    prevent. The other two are the field never reported and an empty poll
+    counted as no program, which would make a sketch that drives nothing
+    indistinguishable from one that was never loaded.
+    """
+    boards = catalogue.board_names()
+    assert len(boards) == 26, boards
+    # Every board, picked and not loaded: nothing was read.
+    picked = {board: api.pad_view(board, api.description_for(board), None)
+              for board in boards}
+    assert all(view["read_levels"] is False
+               for view in picked.values() if view.get("present")), [
+        board for board, view in picked.items()
+        if view.get("present") and view["read_levels"] is not False
+    ]
+    # And the twelve that would otherwise have lied, named rather than counted
+    # so that a board losing its module shows up as a change here.
+    would_have_lied = sorted(
+        board for board, view in picked.items()
+        if view.get("present") and any(
+            pad["state"] == "unknown" and pad["chip_pin"] is not None
+            for pad in view["pads"])
+    )
+    assert would_have_lied == [
+        "Arduino Uno",
+        "XIAO-ESP32-C3-DIP", "XIAO-ESP32-C3-DIP-SMD", "XIAO-ESP32-C3-SMD",
+        "XIAO-ESP32-C5-DIP", "XIAO-ESP32-C5-SMD",
+        "XIAO-ESP32-C6-DIP", "XIAO-ESP32-C6-SMD",
+        "XIAO-RP2040-DIP", "XIAO-RP2040-SMD",
+        "XIAO-SAMD21-DIP", "XIAO-SAMD21-SMD",
+    ], would_have_lied
+    # A dict, even an empty one, is a program that was asked.
+    asked = api.pad_view(UNO, api.description_for(UNO), {})
+    assert asked["read_levels"] is True
+    driven = api.pad_view(UNO, api.description_for(UNO), {"13": "high"})
+    assert driven["read_levels"] is True
+
+
+def test_a_running_board_still_reports_the_pins_its_timers_took():
+    """**The clear-air case, and it is the one the third sentence must not
+    eat.** OH-71: an Uno running a sketch has pads that are genuinely
+    unanswerable, because a peripheral has taken the pin and the direction
+    register carries no trace of it. Those keep "in use elsewhere"; only a
+    board with no program at all gets the new words.
+
+    So this asserts the opposite of the test above on the same board: levels
+    WERE read, and pads that are still unknown with a chip pin behind them
+    are the real thing rather than the absence of a program.
+    """
+    with built(UNO, UNO_DRIVE) as session:
+        session.step(5000)
+        view = api.pin_view(session.runtime, session.cpu, UNO)
+    assert view["read_levels"] is True
+    # The sketch drives pin 13, so at least one pad is answerable and the
+    # view is not the empty one the picked case gives.
+    assert view["unknown"] < len(view["pads"])
+    assert any(pad["state"] == "high" for pad in view["pads"])
+
+
+def test_a_running_board_whose_module_reads_no_pins_still_says_one_is_running():
+    """**The invariant `read_levels` needs, kept where it can be kept.**
+
+    `pad_view` decides on `live is None`, and `pin_view` is what guarantees
+    that means "picked and not loaded". It did not: `pin_levels` answers
+    `None` for a description with no `pin_states`, so a board that was RUNNING
+    could arrive as `None` and report that nothing was running -- every
+    modelled pad reading "no program running" while a program ran.
+
+    Nothing has that shape today. All six modules with `PIN_NAMES` also have
+    `pin_states`, so this was a comment claiming a property of the type where
+    only a property of today's board modules held. **OH-160 is precisely the
+    shape that produces one without the other**: it generates `PIN_NAMES` from
+    a `HEADER` and leaves `pin_states` hand-written, so the next module to get
+    a generated header and no reader would have hit it.
+
+    So `pin_view` coalesces, and this is the fixture that says so: a
+    description with names and no reader, which is the combination no shipped
+    module has and the generator can make. A stub rather than a real session,
+    because the thing under test is one `or {}` and a real board would need a
+    toolchain to prove less.
+
+    **Three mutations die here, 2026-09-05, one of them only here**: the
+    coalesce removed. The other two are the field never reported and an empty
+    poll counted as no program.
+    """
+    named_but_silent = types.SimpleNamespace(
+        __name__="stub_with_names_and_no_reader",
+        PIN_NAMES={"D0": "PA02", "D1": "PA04"},
+    )
+    assert not hasattr(named_but_silent, "pin_states")
+    runtime = types.SimpleNamespace(description=named_but_silent)
+    assert api.pin_levels(runtime, None) is None, (
+        "the stub answers levels after all, so it is not the case this test "
+        "is for"
+    )
+    view = api.pin_view(runtime, None, XIAO)
+    assert view["read_levels"] is True, (
+        "a board with a session reported that no levels were read, so every "
+        "modelled pad would say no program is running while one does"
+    )
+    # And the pads are all unknown, which is the honest half: there really
+    # are no levels. The difference is what the page says about WHY.
+    assert view["unknown"] == len(view["pads"])
+    # The coupling that makes this unreachable today, stated so that a module
+    # gaining a generated header and no reader is a change here rather than a
+    # silent one.
+    from webui.boards import catalogue
+
+    with_names = sorted(
+        module.__name__.rsplit(".", 1)[-1]
+        for module in {
+            api.description_for(board) for board in catalogue.board_names()
+        }
+        if module is not None and getattr(module, "PIN_NAMES", None)
+    )
+    assert with_names == ["atmega328p", "esp32c3", "esp32c5", "esp32c6",
+                          "rp2040", "samd21"], with_names
+    assert all(
+        hasattr(api.description_for(board), "pin_states")
+        for board in catalogue.board_names()
+        if getattr(api.description_for(board), "PIN_NAMES", None)
+    ), "a module publishes names it cannot read levels for"

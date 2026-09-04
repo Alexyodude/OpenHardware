@@ -482,6 +482,146 @@ def test_the_two_sentences_are_told_apart_by_the_pin_and_not_by_a_guess():
     assert set(atmega328p.PIN_NAMES) == set(atmega328p.HEADER)
 
 
+def test_a_third_sentence_says_when_there_is_no_program_at_all():
+    """**OH-164: a board you picked said 22 of its 32 pads were in use.**
+
+    Two of the three sentences are claims about a RUNNING program -- nothing
+    models this pin, or something running has taken it -- and a board that has
+    been picked and not loaded satisfies neither. It took the second, so an
+    Uno you had merely chosen reported 22 pads in use while nothing was using
+    anything. Twelve of the twenty-six boards did, which is the number OH-160
+    made it by giving four more modules a generated `HEADER`.
+
+    `tests/webui/test_pin_view.py` measures the counts and asserts the API
+    field. What is asserted here is the panel's half, which Python cannot
+    execute: the third case exists, it is decided on the fetch and not on the
+    pad, and the ORDER is right -- a pin no module knows keeps "not modelled"
+    whether or not a program is running, because that is a fact about the
+    board description rather than about the moment.
+
+    **The poll does NOT write the fact down**, and an earlier version of this
+    change had it do exactly that. `levels(pins)` has no idea which board the
+    levels belong to: `/api/board/state` carries no board identity and the
+    picker does not stop the clock, so a page showing board B while the
+    session runs board A marked B as running a program and B went straight
+    back to saying its pins were in use. `/api/board/pins` already decides it
+    and decides it WITH the identity check, returning `pin_view` only when
+    `session.board == asked`; loading firmware calls `reload()` at once, so
+    the answer is re-fetched exactly when it changes.
+
+    **Nine mutations die here, 2026-09-05, and every one of them only here**:
+    the third sentence never reached; the third sentence eating the second;
+    the ternary SWAPPED, which tells a running board nothing is running and a
+    picked one that its pins are in use; the order inverted, which takes "not
+    modelled" away from a pin no module knows; the table inferring the case
+    from a count instead of reading the field; the chooser handed a literal
+    instead of the value the table read; the fallback flipped to true; the
+    poll marking the layout again; and the words replaced by ones that name a
+    state rather than say what is true.
+
+    **Four assertions here were wrong first, all in one way**, and it is the
+    way this file is most prone to: looking for a string rather than for a
+    use. One compared `NOT_MODELLED` against the PARAMETER `readLevels`,
+    named in the signature before any sentence. One searched the whole file
+    for the guess it rejects, which this docstring and the panel's block
+    comment both spell out -- `stripped` takes `//` lines only. One asserted
+    that the table READS the field without asserting that it HANDS it over,
+    so `unknownWords(pad, true)` restored the entire defect with the suite
+    green. And one pinned the order of the two sentences without pinning
+    which branch reaches which, so swapping the ternary survived.
+    """
+    panel = PANEL.read_text(encoding="utf-8")
+    chooser = stripped(
+        panel.split("function unknownWords", 1)[1].split("\n}", 1)[0])
+    # Decided on the fetch, not on the pad: a second argument and not a field.
+    assert "readLevels" in chooser, (
+        "the third case is not decided by whether any levels were read, so a "
+        "picked board still reports its pins as in use elsewhere"
+    )
+    # Order: unmodelled is decided first, so it wins over the third case.
+    # Compared against the SENTENCE and not the parameter, which is named in
+    # the signature before any of them and made a first draft of this pass
+    # for the wrong reason.
+    assert "IN_USE" in chooser and "NOTHING_RUNNING" in chooser
+    assert chooser.index("NOT_MODELLED") < chooser.index("NOTHING_RUNNING"), (
+        "a pin no module knows is 'not modelled' whether or not a program is "
+        "running; only the other sentence is about there being one"
+    )
+    # **Which way round, and a swap survives every assertion above.** The
+    # order check passes on `readLevels ? NOTHING_RUNNING : IN_USE`, which
+    # says a running board has no program and a picked one has pins in use --
+    # the original bug with its sign reversed. So the branch is pinned.
+    branch = re.compile(r"readLevels\s*\?\s*IN_USE\s*:\s*NOTHING_RUNNING")
+    assert branch.search(chooser), (
+        "levels having been read is the branch that gives 'in use elsewhere'; "
+        "the other way round tells a running board that nothing is running"
+    )
+    # The words themselves say what is true rather than naming a state.
+    # **Over the stripped source**, because the pattern this looks for is one
+    # a `//` line can carry: a decoy comment plus a real constant reading
+    # "unknown" passed the unstripped version. That is this file's own OH-117
+    # hazard, in the test written to record it.
+    words = re.search(r'NOTHING_RUNNING = "([^"]+)"', stripped(panel))
+    assert words and "running" in words.group(1), (
+        "the third sentence names a state instead of saying that no program "
+        "is running, which is the one thing the reader cannot see for himself"
+    )
+    # The API supplies it and the panel does not infer it. **Checked in the
+    # function bodies and not in the file**, because this docstring and the
+    # panel's own comments both spell the guess out in order to reject it --
+    # `stripped` only takes `//` lines, so a `/** */` block would satisfy a
+    # whole-file search. That is the OH-117 lesson arriving from a new angle.
+    table = stripped(
+        panel.split("function renderTable", 1)[1].split("\n}", 1)[0])
+    assert "layout?.read_levels" in table, (
+        "the panel works the third case out for itself instead of reading the "
+        "field the API states, which is OH-121's re-derivation again"
+    )
+    assert "pads.length" not in table + chooser, (
+        "the third case is inferred from how many pads are unanswerable, "
+        "which is equally true of a loaded sketch that has driven nothing"
+    )
+    # **And that the value REACHES the chooser**, which the two assertions
+    # above do not say: `unknownWords(pad, true)` restores the whole defect
+    # with every one of them still passing, because the string they look for
+    # stays where it is and simply stops being used. The argument has to be
+    # the local the line above computed.
+    handed = re.compile(r"unknownWords\(pad,\s*readLevels\)")
+    assert handed.search(table), (
+        "the table reads `read_levels` and then hands `unknownWords` "
+        "something else, so a picked board says its pins are in use again"
+    )
+    # **The fallback, which nothing on screen can reach and which is asserted
+    # anyway.** `layout` is either null, and then the table has no rows, or a
+    # view that carries the field. So `?? true` changes no picture today and
+    # survives every assertion above -- it would only decide if the API
+    # stopped sending the field, which is exactly when the wrong answer would
+    # be "a program is running" for every board there is.
+    assert "?? false" in table, (
+        "the table's fallback for a missing `read_levels` is not false, so a "
+        "view without the field would report every pad as in use elsewhere"
+    )
+    # **And a poll does NOT mark the layout**, which an earlier version of
+    # this change did. `/api/board/state` carries no board identity and the
+    # picker does not stop the clock, so a page showing board B while the
+    # session runs board A would have marked B as running a program.
+    # `/api/board/pins` already decides it and decides it WITH the identity
+    # check, which is the assertion below.
+    levels = stripped(panel.split("function levels", 1)[1].split("\n}", 1)[0])
+    assert "read_levels" not in levels, (
+        "a state poll marks whatever layout is on screen as having levels, "
+        "and it cannot know which board they came from"
+    )
+    server = (STATIC.parents[1] / "webui" / "emulator_server.py").read_text(
+        encoding="utf-8")
+    route = server.split('if route == "/api/board/pins"', 1)[1]
+    pins = route.split("\n    if ", 1)[0]
+    assert "session.board == asked" in pins and "pin_view" in pins, (
+        "the pins route no longer checks that the session is running the "
+        "board being asked about, so the panel has nothing else that does"
+    )
+
+
 def test_the_answerable_count_is_recomputed_when_the_states_change():
     """**The count moves now, and it did not used to.**
 

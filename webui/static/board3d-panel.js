@@ -107,12 +107,31 @@ const WORDS = {
 //: never in the board's table at all.
 const NOT_MODELLED = "not modelled";
 const IN_USE = "in use elsewhere";
+//: The third sentence (OH-164), and it is about there being no program rather
+//: than about the pin. Both of the others are claims about a RUNNING one --
+//: nothing models this pin, or something running has taken it -- and a board
+//: you have picked and not loaded satisfies neither. It read as `IN_USE`,
+//: which told you 22 of an Uno's 32 pads were in use while nothing was using
+//: anything.
+const NOTHING_RUNNING = "no program running";
 
-/** Which of the two sentences an `unknown` pad gets. */
-function unknownWords(pad) {
-  return pad.chip_pin === null || pad.chip_pin === undefined
-    ? NOT_MODELLED
-    : IN_USE;
+/**
+ * Which of the three sentences an `unknown` pad gets.
+ *
+ * **Order matters and this is the order.** A pin no module knows is "not
+ * modelled" whether or not a program is running, because that is a permanent
+ * fact about the board description; only the OTHER branch is about the
+ * moment. So a picked board's unmodelled pads keep the words they had, and
+ * only the pads that could have been answered for change.
+ *
+ * `readLevels` comes from the view rather than from the pad, because it is a
+ * fact about the fetch and not about any one pin. Working it out here from
+ * `unknown === pads.length` would be a guess that is also true of a loaded
+ * program driving nothing, which is OH-121's re-derivation all over again.
+ */
+function unknownWords(pad, readLevels) {
+  if (pad.chip_pin === null || pad.chip_pin === undefined) return NOT_MODELLED;
+  return readLevels ? IN_USE : NOTHING_RUNNING;
 }
 
 let scene = null;      // the board3d module, once it has loaded
@@ -250,6 +269,11 @@ function pinOrder(a, b) {
 function renderTable(pads) {
   const body = $(ROWS);
   body.textContent = "";
+  // Read once for the whole table, from the same place `renderCount` reads
+  // `layout.pads`: it is a fact about the fetch, so every row shares it. The
+  // three callers that pass no pads leave `layout` null and render nothing,
+  // so the default never reaches a screen.
+  const readLevels = layout?.read_levels ?? false;
   // A sorted COPY: `layout.pads` keeps the vendor's order for the scene and
   // the solver, which never cared. The table is the one place a reader looks
   // a pin UP, and a lookup wants an order -- the C3's own file walks
@@ -276,11 +300,11 @@ function renderTable(pads) {
     pin.textContent = pad.chip_pin ?? "—";
 
     const state = document.createElement("td");
-    // Only `unknown` takes the two-sentence path. Anything else falls back to
-    // its own name, which is what makes a state this panel has never heard of
-    // show up as itself rather than as one of these sentences.
+    // Only `unknown` takes the three-sentence path. Anything else falls back
+    // to its own name, which is what makes a state this panel has never heard
+    // of show up as itself rather than as one of these sentences.
     state.textContent = pad.state === "unknown"
-      ? unknownWords(pad)
+      ? unknownWords(pad, readLevels)
       : WORDS[pad.state] ?? pad.state;
 
     row.append(label, pin, state);
@@ -408,6 +432,26 @@ function renderCount() {
 function levels(pins) {
   if (!layout) return;
   if (!pins) return;
+  // **A poll does NOT mark the layout as having levels**, and an earlier
+  // draft of OH-164 did exactly that -- which was wrong, because this
+  // function has no idea which board the levels belong to. `/api/board/state`
+  // carries no board identity, the picker does not stop the clock, and the
+  // page is a module that can be showing board B while the session runs
+  // board A. Marking on arrival made B claim a program was running on it.
+  //
+  // Nothing is needed here instead: `/api/board/pins` already decides it, and
+  // it decides it WITH the identity check this function cannot make -- see
+  // `emulator_server.py`, which returns `pin_view` only when
+  // `session.board == asked` and `pad_view(..., None)` otherwise. Loading
+  // firmware calls `reload()` immediately (`emulator.js`), so the answer is
+  // re-fetched at exactly the moment it changes.
+  //
+  // **The cost is one stale frame**, which is worth knowing and is not worth
+  // the marking: `loadBoardImage` paints the state one line before it calls
+  // `reload()`, and does not await it, so a board just loaded can show "no
+  // program running" for a round trip. A wrong frame, not a wrong resting
+  // state -- and the marking traded it for a wrong resting state on whatever
+  // board happened to be on screen.
   for (const pad of layout.pads) {
     pad.state = pins[pad.pin] ?? "unknown";
   }

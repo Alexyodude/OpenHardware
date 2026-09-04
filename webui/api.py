@@ -884,6 +884,18 @@ def pad_view(board: str, description: types.ModuleType | None,
                 f"board description, not a program that has driven nothing."
             ),
         }
+    # **Whether anything was READ, which the next line is about to forget.**
+    # `None` is a board that has been picked and not loaded; a dict, even an
+    # empty one, is a board with a session that was asked. Kept before the
+    # coalesce because after it there is nothing left to tell them apart with,
+    # which is the whole of OH-164.
+    #
+    # **The invariant that makes those the only two cases lives in `pin_view`,
+    # not here**, and a first draft of this comment claimed it lived in the
+    # type: `pin_levels` returns `None` for a description with no `pin_states`,
+    # so a running board could have arrived with `None` and reported that
+    # nothing was running. `pin_view` coalesces for that reason and says so.
+    read_levels = live is not None
     live = live or {}
 
     # Which MCU pin each label reaches -- `D6` -> `PB08`. **The connection the
@@ -946,6 +958,19 @@ def pad_view(board: str, description: types.ModuleType | None,
         # cannot be answered for" is the sentence a reader needs in order to
         # know whether they are looking at a quiet program or a thin model.
         "unknown": sum(1 for pad in pads if pad["state"] == "unknown"),
+        # **Stated rather than inferred** (OH-164). A pad with no state is one
+        # of three things and the page could only tell two of them apart: a
+        # pin no module models, a pin a running program has taken elsewhere,
+        # and every pin of a board nobody has loaded. The third read as the
+        # second, so a board you had merely picked told you 22 of its 32 pads
+        # were in use while nothing was running.
+        #
+        # The page cannot work it out for itself, and the shape it would reach
+        # for -- `unknown == len(pads)` -- is a guess that is also true of a
+        # loaded program which happens to drive nothing. This is the fact, and
+        # it is known here: OH-121 paid once already for a view re-deriving a
+        # number the file could have said.
+        "read_levels": read_levels,
         "pads": pads,
     }
 
@@ -959,7 +984,26 @@ def pin_view(runtime: Runtime, cpu: Core, board: str) -> dict[str, object]:
     how `readPalette` and the glTF writer disagreed about sRGB for as long as
     both existed.
     """
-    return pad_view(board, runtime.description, pin_levels(runtime, cpu))
+    # **`or {}` and not the bare call**, because `pin_levels` answers `None`
+    # for a description with no `pin_states` -- and a board that is RUNNING
+    # with no reader is still a board that was asked. Without this, such a
+    # board would report `read_levels` false while its program ran, and every
+    # modelled pad would read "no program running".
+    #
+    # Nothing has that shape today: all six modules with `PIN_NAMES` also have
+    # `pin_states`. But OH-160 generates the first from a `HEADER` and leaves
+    # the second hand-written, so the shape it produces is precisely a module
+    # that could have one without the other. Coalescing here is what makes
+    # `pad_view`'s `read_levels` mean what it says rather than what happens to
+    # be true of today's board modules.
+    #
+    # **What such a board would then say**, stated here rather than found
+    # later: every modelled pad reads "in use elsewhere" instead of "no
+    # program running". Neither is literally true of a module that publishes
+    # names it cannot read, and "in use elsewhere" is the better of the two --
+    # it is already the bucket for a pin that is answerable in principle and
+    # unanswerable now, which is exactly that module's every pin.
+    return pad_view(board, runtime.description, pin_levels(runtime, cpu) or {})
 
 
 #: How many instructions a listing carries. Enough to fill the pane without
