@@ -326,7 +326,7 @@ def _openhardware(*, variant: str, march: str, base: int,
             f"-march={march}", "-mabi=ilp32", "-Os",
             "-nostartfiles", "-nostdlib", "-Wl,--gc-sections",
         ),
-        core_sources=("main.c", "wiring.c"),
+        core_sources=("main.c", "wiring.c", "serial.cpp"),
         base=base,
         variant_package="",
         linker_script="link.ld",
@@ -335,6 +335,14 @@ def _openhardware(*, variant: str, march: str, base: int,
         libraries=(),
         # Every hint names the modelling decision the absence stands on, in
         # the pane the person is looking at (the OH-138 pattern).
+        #
+        # **`Serial` used to be one of these and is not any more** (OH-161):
+        # the three ESP32 descriptions map UART0's transmit FIFO, so the
+        # symbol exists and the bytes have somewhere to go. A hint naming an
+        # absence that has been filled would send a reader to look for a
+        # decision nobody is making any more. What is still absent of that
+        # peripheral -- the receive half, the divisors, `TXFIFO_CNT` -- is
+        # unmapped rather than hinted, so it faults at a named address.
         hints=(
             ("digitalRead",
              ("digitalRead does not exist on this board's model: its "
@@ -343,10 +351,6 @@ def _openhardware(*, variant: str, march: str, base: int,
               "answer firmware wrongly. The build fails rather than lie.")),
             ("millis", "millis " + no_timer),
             ("micros", "micros " + no_timer),
-            ("Serial",
-             ("Serial does not exist on this board's model: no UART is "
-              "mapped, so there is nowhere for the bytes to go. The board "
-              "console pane only shows what a modelled UART transmitted.")),
             ("analogWrite",
              ("analogWrite needs the LEDC peripheral and this board's model "
               "maps GPIO only.")),

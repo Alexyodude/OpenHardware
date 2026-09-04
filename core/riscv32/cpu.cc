@@ -43,6 +43,7 @@ void Cpu::reset() {
     extensions_ = 0;
     regions_.clear();
     mmio_.clear();
+    streams_.clear();
     fault_address_ = 0;
     fault_was_fetch_ = false;
 }
@@ -241,11 +242,17 @@ void Cpu::clear_regions() {
     // A machine with no board has no peripherals either. Leaving `mmio_`
     // behind would let a second board inherit the first one's registers, which
     // is the kind of state that makes one test pass only when another ran
-    // first.
+    // first. A stream carries BYTES as well as a mapping, so leaving one
+    // behind would also let a second board answer with what the first one
+    // printed.
     mmio_.clear();
+    streams_.clear();
 }
 
-void Cpu::clear_mmio() { mmio_.clear(); }
+void Cpu::clear_mmio() {
+    mmio_.clear();
+    streams_.clear();
+}
 
 void Cpu::map_register(uint32_t address, uint32_t value) {
     const uint32_t at = address & ~3u;
@@ -263,6 +270,29 @@ void Cpu::map_alias(uint32_t address, uint32_t target, WriteOp op,
     entry.op = op;
     entry.readable = readable;
     mmio_[at] = entry;
+}
+
+void Cpu::map_stream(uint32_t address, uint32_t enable_address,
+                     uint32_t enable_mask) {
+    const uint32_t at = address & ~3u;
+    // Registered in `mmio_` as well, so `is_mapped` sees it and a READ answers
+    // this entry's value, which stays zero. The stream table alone would make
+    // the address respond to writes and fault on reads -- and a UART data
+    // register that faults on read is a board that cannot be probed.
+    Mapped entry;
+    entry.target = at;
+    mmio_[at] = entry;
+
+    Stream stream;
+    stream.enable = enable_address & ~3u;
+    stream.enable_mask = enable_mask;
+    streams_[at] = stream;
+}
+
+const std::vector<uint8_t>& Cpu::stream(uint32_t address) const {
+    static const std::vector<uint8_t> none;
+    const auto found = streams_.find(address & ~3u);
+    return found == streams_.end() ? none : found->second.bytes;
 }
 
 bool Cpu::is_mapped(uint32_t address) const {
@@ -306,6 +336,57 @@ bool Cpu::mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask) {
     if (found == mmio_.end()) {
         return false;
     }
+    // **Before the word behaviours, because a stream is not one**: its write
+    // appends rather than stores, and falling through would latch the byte
+    // into a register nobody reads.
+    const auto stream = streams_.find(at);
+    if (stream != streams_.end()) {
+        uint32_t gate_bits = 0;
+        if (!mmio_read(stream->second.enable, gate_bits)) {
+            // The gate register was never mapped: a board description
+            // mistake, and faulting says so. Capturing regardless would
+            // print bytes a real part would have discarded.
+            //
+            // **`note_fault` explicitly, and it was dropped once.** The
+            // first version of this branch said `mmio_read` had already
+            // recorded the address; it has not, and cannot -- its
+            // `mmio_.find` miss returns false WITHOUT noting, because every
+            // other caller falls through to the region lookup after it. So
+            // the fault kept its reset value and an executed store reported
+            // `access at 0x00000000` instead of naming the FIFO, which is a
+            // wrong address rather than a missing one. Found by review;
+            // `test_an_executed_store_through_an_unmapped_gate_names_the_fifo`
+            // is what holds it, and it has to go through `step()` because
+            // `write_word` formats the address the caller passed rather than
+            // the one the core recorded.
+            //
+            // **Through `mmio_read` rather than off `Mapped::value`**, which
+            // is what this did until the OH-161 review: reading the stored
+            // word directly ignores `Mapped::target`, so a gate mapped as a
+            // readable ALIAS answered its own zero forever and the stream
+            // went silent while `read_word` on the same address gave the bit
+            // correctly. No board here aliases a clock register, so nothing
+            // was wrong on the three described parts -- and the next board
+            // that does would have found a peripheral that reads right and
+            // transmits nothing.
+            note_fault(address, false);
+            return false;
+        }
+        // **The access must actually carry byte 0.** A FIFO's data field is
+        // `[7:0]` on all three parts described here, so a byte store to
+        // FIFO+1 lands in a reserved lane and transmits nothing; taking the
+        // low byte of that access regardless would append a zero the part
+        // never sent. `byte_mask` is the one thing that can tell them apart,
+        // because `at` has already been rounded to the word.
+        const bool carries_data = (byte_mask & 0xFFu) != 0;
+        if (carries_data && (gate_bits & stream->second.enable_mask) != 0) {
+            // The low byte only, whatever the width of the access. See
+            // `map_stream`.
+            stream->second.bytes.push_back(static_cast<uint8_t>(value));
+        }
+        return true;
+    }
+
     const Mapped& entry = found->second;
     const auto target = mmio_.find(entry.target);
     if (target == mmio_.end()) {

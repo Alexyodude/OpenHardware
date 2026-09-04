@@ -59,12 +59,18 @@ keeps that check runnable rather than leaving it as this paragraph.
 
 ## What is deliberately absent
 
-Every timer, the UART, the ADC, SPI, I2C, the LP core and its LP_SRAM, and the
+Every timer, the ADC, SPI, I2C, the LP core and its LP_SRAM, and the
 whole clock and reset subsystem. Same growth rule the other boards keep: a
 peripheral is added when a real image faults on it and not before. Here the
 rule has teeth -- `core/riscv32/cpu.h` faults on any address no region and no
 register covers, so a program that touches an undescribed peripheral stops and
 names the address rather than reading zero and hanging.
+
+**The UART is half here since OH-161**: UART0's transmit FIFO and the clock
+bit that gates it, which is what a `Serial.print` needs. Its receive half, its
+baud divisors and `UART_TXFIFO_CNT` stay unmapped, so firmware that waits for
+room in the FIFO faults at a named address rather than spinning on a zero;
+`webui/boards/esp32c3.py` carries the argument in full.
 
 The mask ROM is not modelled and cannot be, for the reason `esp32c3.py` gives
 at length: it is Espressif's, it is not redistributable, and an ESP-IDF
@@ -160,6 +166,52 @@ GPIO_ENABLE_W1TS = 0x24
 GPIO_ENABLE_W1TC = 0x28
 GPIO_IN = 0x3C
 
+#: UART0's base, `register/soc/reg_base.h:13` -- `#define DR_REG_UART_BASE 0x60000000`. UART0 is the base itself and the only one modelled.
+#:
+#: **Not because it is where a XIAO's `Serial` goes by default.** On these
+#: parts Arduino's default is USB_SERIAL_JTAG; Seeed's own
+#: `XIAO_ESP32C6_Pin_Multiplexing.md:65-73` documents the hardware UART as
+#: `D6` for TX and `D7` for RX, to an external device. `esp32c3.py` carries
+#: the argument in full, including the research file that recorded this in
+#: August and that this comment contradicted until the OH-161 review: UART0
+#: is modelled because it is the ROM console, not because it is the default
+#: `Serial`.
+UART0 = 0x60000000
+
+#: The transmit FIFO, `register/soc/uart_reg.h:17` -- `UART_FIFO_REG(i)`
+#: at `REG_UART_BASE(i) + 0x0`, data field `UART_RXFIFO_RD_BYTE` `bitpos: [7:0]`
+#: (:21).
+#:
+#: **A queue, not a word.** `core/riscv32` grew `map_stream` for exactly this:
+#: a `map_register` here would keep the last byte written, so a program
+#: printing `hello` would leave an `o` behind -- a plausible letter rather than
+#: a loud absence.
+UART_FIFO = 0x00
+
+#: The clock register, `register/soc/uart_reg.h:1477`, and the bit
+#: that gates the transmitter: `UART_TX_SCLK_EN` at `BIT(24)` (:1481),
+#: `default: 1`.
+#:
+#: **+ 0x88 here, and + 0x78 on an ESP32-C3.** The same peripheral, the same
+#: bit, a different offset -- the same shape of difference this file's GPIO
+#: block already carries, and the reason each part reads its own header rather
+#: than importing a neighbour's constants.
+UART_CLK_CONF = 0x88
+UART_TX_SCLK_EN = 1 << 24
+
+#: What that register holds out of reset. This part documents four fields in
+#: it -- `TX_SCLK_EN` [24] 1, `RX_SCLK_EN` [25] 1, `TX_RST_CORE` [26] 0,
+#: `RX_RST_CORE` [27] 0 -- and no divider fields at all, where an ESP32-C3
+#: carries `SCLK_SEL` and three divisors in the same register. The clock
+#: source moved to the PCR block on this part, which is why the reset word is
+#: two bits rather than the C3's `0x03701000`. **Checked rather than assumed**
+#: (OH-161 review): `register/soc/pcr_reg.h:51` puts
+#: `PCR_UART0_SCLK_DIV_NUM` at `bitpos: [19:12]` of `PCR_UART0_SCLK_CONF_REG`
+#: -- the same field, at the same bit positions, that a C3 carries inside
+#: `UART_CLK_CONF_REG` itself.
+UART_CLK_CONF_AT_RESET = (1 << 24) | (1 << 25)
+
+
 #: The pin the fixture watches. **Not the board's LED.** GPIO8 is ESP-IDF's
 #: own blink default -- `examples/get-started/blink/main/Kconfig.projbuild:34-37`,
 #: `default 8` -- and a real output on this part either way; on a XIAO it is
@@ -234,6 +286,9 @@ class Cpu(typing.Protocol):
     def map_register(self, address: int, value: int = ...) -> None: ...
     def map_alias(self, address: int, target: int, op: str, *,
                   readable: bool = ...) -> None: ...
+    def map_stream(self, address: int, *, enable: int,
+                   enable_mask: int) -> None: ...
+    def stream(self, address: int) -> bytes: ...
     def read_word(self, address: int) -> int: ...
 
 
@@ -286,6 +341,29 @@ def install_gpio(cpu: Cpu) -> None:
                   readable=False)
 
 
+def install_uart0(cpu: Cpu) -> None:
+    """UART0, far enough for a `Serial.print` to arrive and no further.
+
+    The FIFO as a stream and the clock register that gates it.
+    `webui/boards/esp32c3.py`'s `install_uart0` carries the argument in full,
+    including what is deliberately absent: `UART_TXFIFO_CNT` is unmapped, so
+    firmware that waits for room in the FIFO faults at a named address instead
+    of spinning on a zero, and the baud divisors are unmapped because nothing
+    here has a wire or a bit rate.
+    """
+    cpu.map_register(UART0 + UART_CLK_CONF, UART_CLK_CONF_AT_RESET)
+    cpu.map_stream(UART0 + UART_FIFO, enable=UART0 + UART_CLK_CONF,
+                   enable_mask=UART_TX_SCLK_EN)
+
+
+def uart0_output(cpu: Cpu) -> bytes:
+    """Every byte this board has transmitted, oldest first.
+
+    The name `webui/api.py`'s `uart_view` finds by `getattr`.
+    """
+    return cpu.stream(UART0 + UART_FIFO)
+
+
 def pin_states(cpu: Cpu) -> dict[str, str]:
     """What every header pin this board knows about is doing, right now.
 
@@ -329,3 +407,4 @@ def install(cpu: Cpu) -> None:
     cpu.set_isa(ISA)
     install_memory(cpu)
     install_gpio(cpu)
+    install_uart0(cpu)

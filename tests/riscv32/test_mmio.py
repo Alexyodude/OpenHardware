@@ -286,3 +286,215 @@ def test_a_program_can_set_a_gpio_bit_through_the_alias(gpio):
     for _ in range(len(program)):
         gpio.step()
     assert gpio.read_word(GPIO_OUT) == 0x100
+
+
+# --- a stream, because a transmit FIFO is not a register (OH-161) ------------
+#
+# The addresses are the ESP32-C3's UART0, from
+# `framework-arduinoespressif32/tools/sdk/esp32c3/include/soc/esp32c3/include/
+# soc/uart_reg.h`: `UART_FIFO_REG(i)` at `REG_UART_BASE(i) + 0x0` (:22) and
+# `UART_CLK_CONF_REG(i)` at `+ 0x78` (:1160), whose `UART_TX_SCLK_EN` is
+# `BIT(24)` (:1181) with `default: 1'b1`. **Those are that file's line
+# numbers and not the ESP-IDF v5.5 copy's**, which has the same four defines
+# eight lines earlier; the two trees are both in reach here and citing one
+# while reading the other is the drift `docs/esp-idf-reference.md` exists to
+# prevent. Used here for the same reason the
+# GPIO addresses above are: they are the block `webui/boards/esp32c3.py`
+# describes, so a change shows up in both places.
+
+UART0 = 0x60000000
+UART_FIFO = UART0 + 0x00
+UART_CLK_CONF = UART0 + 0x78
+UART_TX_SCLK_EN = 1 << 24
+
+
+@pytest.fixture
+def uart():
+    """A bare machine with UART0's FIFO and its transmit gate, gate open."""
+    cpu = abi.Cpu()
+    cpu.map_register(UART_CLK_CONF, UART_TX_SCLK_EN)
+    cpu.map_stream(UART_FIFO, enable=UART_CLK_CONF, enable_mask=UART_TX_SCLK_EN)
+    return cpu
+
+
+def test_a_stream_keeps_every_byte_where_a_register_would_keep_the_last(uart):
+    """The whole reason this behaviour exists. A `map_register` at the FIFO
+    would answer `o` after a program printed `hello`, which reads as a
+    plausible single character rather than as a wrong answer."""
+    for byte in b"hello":
+        uart.write_word(UART_FIFO, byte)
+    assert uart.stream(UART_FIFO) == b"hello"
+
+
+def test_the_fifo_reads_as_zero_rather_than_faulting(uart):
+    """A data register that faulted on read would be a board nothing could
+    probe, and `is_mapped` has to see it so `webui/api.py`'s memory window
+    refuses it by name rather than dumping it as bulk memory."""
+    uart.write_word(UART_FIFO, ord("q"))
+    assert uart.is_mapped(UART_FIFO)
+    assert uart.read_word(UART_FIFO) == 0
+
+
+def test_nothing_is_captured_while_the_transmit_gate_is_clear(uart):
+    """The clear-air case: firmware that switched the transmitter off is
+    silent, exactly as the part is. Without the gate a model lets a program
+    appear to print before it enabled the peripheral."""
+    uart.write_word(UART_CLK_CONF, 0)
+    for byte in b"lost":
+        uart.write_word(UART_FIFO, byte)
+    assert uart.stream(UART_FIFO) == b""
+
+    uart.write_word(UART_CLK_CONF, UART_TX_SCLK_EN)
+    uart.write_word(UART_FIFO, ord("k"))
+    assert uart.stream(UART_FIFO) == b"k", "and it transmits again when re-enabled"
+
+
+def test_a_stream_whose_gate_was_never_mapped_faults_rather_than_capturing():
+    """A board naming the wrong gate address is a description mistake, and
+    faulting says so. Capturing regardless would print bytes a real part
+    would have discarded -- the wrong answer this core refuses to give."""
+    cpu = abi.Cpu()
+    cpu.map_stream(UART_FIFO, enable=UART_CLK_CONF, enable_mask=UART_TX_SCLK_EN)
+    with pytest.raises(abi.MemoryFault) as caught:
+        cpu.write_word(UART_FIFO, ord("x"))
+    assert hex(UART_FIFO) in str(caught.value)
+    assert cpu.stream(UART_FIFO) == b""
+
+
+def test_an_executed_store_through_an_unmapped_gate_names_the_fifo():
+    """A fault's whole job is to say WHICH address the board does not model.
+
+    **No `uart` fixture**, deliberately and unlike every test around it: that
+    fixture maps the gate, which is the one thing this test needs absent. It
+    took the fixture and ignored it until the OH-161 review pointed out that
+    a reader following the signature would be sent the wrong way.
+
+    **Through `step()` and not `write_word`**, because only `step()` reads
+    the address the core recorded: `abi.py`'s `write_word` formats the
+    address the caller just passed, so it prints the right number whatever
+    the core stored, and the sibling test above cannot see this at all.
+
+    Found by review after a fix of mine deleted the `note_fault` in that
+    branch, on the assumption `mmio_read` had already recorded it. It has
+    not: `mmio_read`'s `mmio_.find` miss returns false WITHOUT noting,
+    because every other caller falls through to the region lookup after it.
+    So the fault kept its reset value and this store reported `access at
+    0x00000000` -- a wrong address rather than a missing one, which is the
+    failure `cpu.h` argues hardest against.
+    """
+    cpu = abi.Cpu()
+    cpu.map_stream(UART_FIFO, enable=UART_CLK_CONF, enable_mask=UART_TX_SCLK_EN)
+    cpu.add_region(0x42000000, 0x100, executable=True)
+    program = [
+        e.lui("a4", 0x60000),        # a4 = UART0
+        e.addi("a5", "x0", 0x41),    # 'A'
+        e.sb("a5", "a4", 0),         # the gate was never mapped
+    ]
+    for index, word in enumerate(program):
+        cpu.write_word(0x42000000 + index * 4, word)
+    cpu.set_regs([0] * 32, pc=0x42000000)
+    cpu.step()
+    cpu.step()
+    with pytest.raises(abi.MemoryFault) as caught:
+        cpu.step()
+    message = str(caught.value)
+    assert f"0x{UART_FIFO:08x}" in message, message
+    assert "0x00000000" not in message, "the reset value, which is not an address"
+    assert cpu.stream(UART_FIFO) == b""
+
+
+def test_an_address_that_is_not_a_stream_has_no_bytes(uart):
+    """Empty, not an error: the caller registered the address and knows. The
+    fixture that must report nothing."""
+    assert uart.stream(UART_CLK_CONF) == b""
+    assert uart.stream(GPIO_OUT) == b""
+
+
+def test_a_reset_machine_has_no_stream_and_no_bytes(uart):
+    """Bytes as well as a mapping, so a second board cannot answer with what
+    the first one printed -- which is the state that makes one test pass only
+    when another ran first."""
+    uart.write_word(UART_FIFO, ord("a"))
+    assert uart.stream(UART_FIFO) == b"a"
+    uart.clear_regions()
+    assert uart.stream(UART_FIFO) == b""
+    assert not uart.is_mapped(UART_FIFO)
+
+
+def test_a_gate_mapped_as_an_alias_is_read_through_to_its_target(uart):
+    """Found by review, not by a board: no description here aliases a clock
+    register, so nothing was wrong on the three ESP32 parts.
+
+    The write path used to read the gate's stored word straight off its
+    `Mapped` entry, which ignores `target` -- so a gate mapped as a readable
+    ALIAS held its own zero, the stream went silent, and `read_word` on that
+    same address answered the bit correctly. A peripheral that reads right and
+    transmits nothing is the wrong-value class this core refuses, and it would
+    have waited for the next board that aliases a clock register.
+    """
+    alias = UART_CLK_CONF + 0x18
+    uart.map_alias(alias, UART_CLK_CONF, "store", readable=True)
+    uart.map_stream(UART_FIFO, enable=alias, enable_mask=UART_TX_SCLK_EN)
+    uart.write_word(UART_FIFO, ord("A"))
+    assert uart.stream(UART_FIFO) == b"A", "the alias answers what its target holds"
+
+    # And it keeps following: clearing the TARGET closes the gate the alias
+    # only points at.
+    uart.write_word(UART_CLK_CONF, 0)
+    uart.write_word(UART_FIFO, ord("B"))
+    assert uart.stream(UART_FIFO) == b"A"
+
+
+def test_a_write_only_gate_reads_zero_and_so_captures_nothing(uart):
+    """The other half, and it is not a bug: a W1TS-style register reads as
+    zero on the part, so a board that gated a stream on one has described a
+    transmitter that never transmits. The model says what the architecture
+    says rather than second-guessing the description."""
+    write_only = UART_CLK_CONF + 0x1C
+    uart.map_alias(write_only, UART_CLK_CONF, "store", readable=False)
+    uart.map_stream(UART_FIFO, enable=write_only, enable_mask=UART_TX_SCLK_EN)
+    uart.write_word(UART_FIFO, ord("C"))
+    assert uart.stream(UART_FIFO) == b""
+
+
+def test_the_c_side_reports_the_true_length_even_into_a_small_buffer(uart):
+    """`riscv32_stream`'s contract, which `abi.py`'s wrapper depends on for
+    sizing and which nothing else exercises: the return is what the stream
+    HOLDS, not what was copied, so a caller with its own buffer can tell it
+    was short rather than reading a prefix and believing it whole."""
+    import ctypes
+
+    for byte in b"12345678":
+        uart.write_word(UART_FIFO, byte)
+    buffer = (ctypes.c_uint8 * 3)()
+    held = uart._lib.riscv32_stream(uart._handle, UART_FIFO, buffer, 3)
+    assert held == 8, "the true length, not the three copied"
+    assert bytes(buffer) == b"123"
+    assert uart.stream(UART_FIFO) == b"12345678", "and the wrapper sizes correctly"
+
+
+def test_a_program_can_print_through_the_fifo(uart):
+    """Executed rather than called, and the one place the byte-lane rule can
+    be reached: `sb` is what a compiler emits for a character store.
+
+    Byte 0 of the FIFO word carries the data field -- `UART_RXFIFO_RD_BYTE` is
+    `0x000000FF` at uart_reg.h:25 -- so a store to lane 1 lands in a reserved
+    lane and transmits nothing. Taking the low byte of that access regardless
+    would append a zero the part never sent.
+    """
+    uart.add_region(0x42000000, 0x100, executable=True)
+    program = [
+        e.lui("a4", 0x60000),        # a4 = UART0
+        e.addi("a5", "x0", 0x48),  # 'H'
+        e.sb("a5", "a4", 0),         # the data lane: transmits
+        e.addi("a5", "x0", 0x49),  # 'I'
+        e.sb("a5", "a4", 1),         # a reserved lane: transmits nothing
+        e.addi("a5", "x0", 0x21),  # '!'
+        e.sb("a5", "a4", 0),
+    ]
+    for index, word in enumerate(program):
+        uart.write_word(0x42000000 + index * 4, word)
+    uart.set_regs([0] * 32, pc=0x42000000)
+    for _ in program:
+        uart.step()
+    assert uart.stream(UART_FIFO) == b"H!"

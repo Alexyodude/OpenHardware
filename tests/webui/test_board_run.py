@@ -909,8 +909,16 @@ HELLO = REPO / "tests" / "cortexm0" / "uart" / "hello.bin"
 HELLO_LOAD = 0x10000100
 
 #: A SAMD21 board and its own image. Used for the no-UART case, because a
-#: board that models no UART is a real state -- 25 of 26 boards are in it --
-#: and asserting it against a synthesised module would prove nothing.
+#: board that models no UART is a real state -- **16 of the 26**, measured
+#: through `api.description_for` over `catalogue.board_names()` on
+#: 2026-09-04 -- and asserting it against a synthesised module would prove
+#: nothing.
+#:
+#: The number moved and was wrong before it moved: this said 25 when the Uno
+#: and the two XIAO RP2040s already reported one, so the figure was 23, and
+#: OH-161 took it to 16 by giving the seven ESP32-C3, C5 and C6 entries a
+#: transmit FIFO. A SAMD21 is still the right board for this test, which is
+#: why the number is the only thing that changed.
 QUIET_BOARD = "XIAO-SAMD21-DIP"
 QUIET_IMAGE = REPO / "tests" / "cortexm0" / "samd21" / "blink.bin"
 

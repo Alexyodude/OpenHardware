@@ -404,9 +404,14 @@ class Cpu:
         """Everything written to a `map_stream` address, oldest first.
 
         Asked for its length first and read second, rather than guessing a
-        buffer size: the C side returns the true length either way, so a stream
-        that grew between the two calls is caught by the second call's own
-        return rather than silently truncated.
+        buffer size.
+
+        **The second call's return is discarded**, which this docstring said
+        was "caught" until the OH-161 review read the next two lines. It is
+        safe anyway, for a reason worth stating rather than implying: this
+        core advances only when Python steps it, so nothing can write to the
+        stream between the two calls. The C side does report the true length
+        either way, which is what a caller sizing its own buffer needs.
         """
         length = self._lib.cortexm0_stream(self._handle, address, None, 0)
         if length == 0:

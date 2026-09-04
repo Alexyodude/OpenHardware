@@ -64,4 +64,51 @@ void delay(unsigned long ms);
 }
 #endif
 
+#ifdef __cplusplus
+
+/* `Serial`, present because the board's description maps a transmit FIFO --
+ * the same rule as everything above: a function is here when every register
+ * it needs is mapped. On the three ESP32 parts that is `OH_UART_FIFO`, a
+ * *stream* rather than a register, and `OH_UART_CLK_CONF`'s transmit bit.
+ *
+ * **A class of this project's own, not Arduino's `HardwareSerial`.** That
+ * one inherits `Print` and `Stream`, which bring `String`, virtual dispatch
+ * and a receive path -- none of which this model has anywhere to put. The
+ * methods below are the ones a sketch actually writes; anything else is a
+ * missing symbol at the moment gcc says so, which is where this core prefers
+ * to have the conversation.
+ *
+ * **No `read`, `available` or `peek`.** The description maps no receive
+ * FIFO, nothing in this project drives RX, and a `read` that answered zero
+ * would be a wrong value rather than a missing feature.
+ *
+ * `serial.cpp` says what `begin` does with the baud rate it is given, and why
+ * ignoring it is a statement about the model. */
+class OhSerial {
+public:
+    void begin(unsigned long baud);
+    void end(void);
+
+    void write(uint8_t byte);
+
+    void print(const char* text);
+    void print(char value);
+    void print(int value);
+    void print(long value);
+    void print(unsigned int value);
+    void print(unsigned long value);
+
+    void println(void);
+    void println(const char* text);
+    void println(char value);
+    void println(int value);
+    void println(long value);
+    void println(unsigned int value);
+    void println(unsigned long value);
+};
+
+extern OhSerial Serial;
+
+#endif /* __cplusplus */
+
 #endif

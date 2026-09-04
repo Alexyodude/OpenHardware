@@ -35,6 +35,15 @@
 #define OH_GPIO_ENABLE_W1TS  0x60091024u
 #define OH_GPIO_ENABLE_W1TC  0x60091028u
 
+/* UART0's transmit FIFO at 0x60000000, and the clock register whose bit 24
+ * (+0x88 on this part) gates the transmitter. `register/soc/uart_reg.h:17` and `:1477`, via webui/boards/esp32c6.py.
+ *
+ * The FIFO is a STREAM in the description, not a register: every byte
+ * written to it is kept, which is what makes a print arrive whole. */
+#define OH_UART_FIFO         0x60000000u
+#define OH_UART_CLK_CONF     0x60000088u
+#define OH_UART_TX_SCLK_EN   0x01000000u   /* UART_TX_SCLK_EN, bit 24 */
+
 /* The top of HP SRAM (0x40880000, soc.h's SOC_DRAM_HIGH), minus a word so
  * the first push stays inside it -- the C3 header's arithmetic applied to
  * this part's own bound. One window here where the C3 has two: the C6's

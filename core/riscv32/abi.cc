@@ -7,6 +7,8 @@
 // that appeared in this file would be behaviour the C++ tests cannot reach and
 // only the Python side exercises.
 
+#include <algorithm>
+
 #include "abi.h"
 
 #include "cpu.h"
@@ -127,6 +129,25 @@ void riscv32_map_alias(Riscv32Cpu* cpu, uint32_t address, uint32_t target,
     default: break;
     }
     as_cpu(cpu)->map_alias(address, target, write_op, readable != 0);
+}
+
+void riscv32_map_stream(Riscv32Cpu* cpu, uint32_t address,
+                        uint32_t enable_address, uint32_t enable_mask) {
+    as_cpu(cpu)->map_stream(address, enable_address, enable_mask);
+}
+
+uint32_t riscv32_stream(const Riscv32Cpu* cpu, uint32_t address, uint8_t* out,
+                        uint32_t capacity) {
+    const std::vector<uint8_t>& bytes = as_cpu(cpu)->stream(address);
+    const uint32_t length = static_cast<uint32_t>(bytes.size());
+    // Copy what fits and report what there is. A caller that sized its buffer
+    // from a previous call can tell the stream grew, rather than reading a
+    // prefix and believing it complete.
+    if (out != nullptr && capacity != 0) {
+        const uint32_t copied = length < capacity ? length : capacity;
+        std::copy(bytes.begin(), bytes.begin() + copied, out);
+    }
+    return length;
 }
 
 int riscv32_is_mapped(const Riscv32Cpu* cpu, uint32_t address) {

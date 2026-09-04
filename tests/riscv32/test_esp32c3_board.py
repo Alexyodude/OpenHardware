@@ -278,7 +278,11 @@ def test_an_undescribed_peripheral_faults_rather_than_reading_zero():
     from core.riscv32 import abi
 
     with load() as session, pytest.raises(abi.MemoryFault) as caught:
-        session.cpu.read_word(0x60008000)          # UART0, not described
+        # RTC_CNTL, `soc.h:48` -- the clock and reset block, and NOT UART0,
+        # which this comment said until OH-161 described UART0 and made the
+        # example wrong twice over: 0x60008000 was never UART0 (that is
+        # 0x60000000, `soc.h:42`), and UART0 now answers.
+        session.cpu.read_word(0x60008000)
     assert "60008000" in str(caught.value).lower()
 
 
@@ -400,3 +404,88 @@ def test_a_sketch_naming_d10_moves_the_d10_pad():
         "before setup() nothing is enabled; pinMode enables the driver at zero; "
         "then the sketch's own sequence, watched until its second high"
     )
+
+
+# --- UART0: what a program printed (OH-161) ---------------------------------
+
+
+def test_the_transmit_gate_holds_the_vendors_reset_value():
+    """`uart_reg.h:1181` gives `UART_TX_SCLK_EN` as `BIT(24)` with
+    `default: 1'b1`, and the rest of the word is that header's own field
+    defaults rather than the one bit this model reads.
+
+    A bare-metal image transmits without touching the clock register, because
+    the vendor sets the bit out of reset -- so this is a fact about the part
+    that the model must not quietly improve on.
+    """
+    needs_core()
+    from core.riscv32 import abi
+
+    assert esp32c3.UART_CLK_CONF_AT_RESET & esp32c3.UART_TX_SCLK_EN, "bit 24 is set at reset"
+    assert esp32c3.UART_CLK_CONF_AT_RESET == 0x03701000
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        assert cpu.read_word(esp32c3.UART0 + esp32c3.UART_CLK_CONF) == (
+            esp32c3.UART_CLK_CONF_AT_RESET
+        )
+
+
+def test_every_byte_written_to_the_fifo_comes_back_and_not_just_the_last():
+    """The reason the FIFO is a stream rather than a register: a register
+    there would answer `o` after a program printed `hello`, which reads as a
+    plausible letter rather than as a wrong answer."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        for byte in b"hello":
+            cpu.write_word(esp32c3.UART0 + esp32c3.UART_FIFO, byte)
+        assert esp32c3.uart0_output(cpu) == b"hello"
+
+
+def test_nothing_is_transmitted_while_the_clock_bit_is_clear():
+    """The clear-air case: firmware that switched the transmitter off is
+    silent, which is what the part does and the whole reason the stream takes
+    a gate."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        cpu.write_word(esp32c3.UART0 + esp32c3.UART_CLK_CONF, 0)
+        for byte in b"lost":
+            cpu.write_word(esp32c3.UART0 + esp32c3.UART_FIFO, byte)
+        assert esp32c3.uart0_output(cpu) == b""
+
+
+def test_a_board_that_has_run_nothing_has_printed_nothing():
+    """Empty, and it is the truth rather than a missing feature: `uart_view`
+    tells this apart from a board that models no UART at all by whether
+    `uart0_output` exists, which is why the callable is asserted too."""
+    needs_core()
+    from core.riscv32 import abi
+
+    assert callable(esp32c3.uart0_output)
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        assert esp32c3.uart0_output(cpu) == b""
+
+
+def test_the_status_register_this_uart_does_not_model_faults_by_name():
+    """`UART_TXFIFO_CNT` lives in `UART_STATUS_REG` (+ 0x1c) and is what
+    firmware polls for room in the FIFO. Unmapped on purpose, so that wait
+    faults at a named address instead of spinning on a zero that never
+    changes. `docs/research/peripheral-layer/design.md` states that
+    failure mode generally and `core/cortexm0/cpu.h:246-249` cites it for
+    the same reason; this said `docs/architectures.md` 3 until the OH-161
+    review pointed out that section 3 is Arm Cortex-M and these are not
+    Arm parts."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        with pytest.raises(abi.MemoryFault) as caught:
+            cpu.read_word(esp32c3.UART0 + 0x1C)
+    assert "0x6000001c" in str(caught.value)

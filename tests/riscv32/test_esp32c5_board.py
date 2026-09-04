@@ -626,3 +626,129 @@ def test_the_three_described_esp32_c_boards_have_distinct_memory_maps():
     }
     for (one, first), (other, second) in itertools.combinations(maps.items(), 2):
         assert first != second, f"{one} and {other} describe the same machine"
+
+
+# --- UART0: what a program printed (OH-161) ---------------------------------
+
+
+def test_the_transmit_gate_holds_the_vendors_reset_value():
+    """`register/soc/uart_reg.h:1554` gives `UART_TX_SCLK_EN` as `BIT(24)`
+    with `default: 1`, and this part documents only bits 24-27 in that
+    register.
+
+    A bare-metal image transmits without touching the clock register, because
+    the vendor sets the bit out of reset -- so this is a fact about the part
+    that the model must not quietly improve on.
+    """
+    needs_core()
+    from core.riscv32 import abi
+
+    assert esp32c5.UART_CLK_CONF_AT_RESET & esp32c5.UART_TX_SCLK_EN, "bit 24 is set at reset"
+    assert esp32c5.UART_CLK_CONF_AT_RESET == (1 << 24) | (1 << 25)
+    with abi.Cpu() as cpu:
+        esp32c5.install(cpu)
+        assert cpu.read_word(esp32c5.UART0 + esp32c5.UART_CLK_CONF) == (
+            esp32c5.UART_CLK_CONF_AT_RESET
+        )
+
+
+def test_every_byte_written_to_the_fifo_comes_back_and_not_just_the_last():
+    """The reason the FIFO is a stream rather than a register: a register
+    there would answer `o` after a program printed `hello`, which reads as a
+    plausible letter rather than as a wrong answer."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c5.install(cpu)
+        for byte in b"hello":
+            cpu.write_word(esp32c5.UART0 + esp32c5.UART_FIFO, byte)
+        assert esp32c5.uart0_output(cpu) == b"hello"
+
+
+def test_nothing_is_transmitted_while_the_clock_bit_is_clear():
+    """The clear-air case: firmware that switched the transmitter off is
+    silent, which is what the part does and the whole reason the stream takes
+    a gate."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c5.install(cpu)
+        cpu.write_word(esp32c5.UART0 + esp32c5.UART_CLK_CONF, 0)
+        for byte in b"lost":
+            cpu.write_word(esp32c5.UART0 + esp32c5.UART_FIFO, byte)
+        assert esp32c5.uart0_output(cpu) == b""
+
+
+def test_a_board_that_has_run_nothing_has_printed_nothing():
+    """Empty, and it is the truth rather than a missing feature: `uart_view`
+    tells this apart from a board that models no UART at all by whether
+    `uart0_output` exists, which is why the callable is asserted too."""
+    needs_core()
+    from core.riscv32 import abi
+
+    assert callable(esp32c5.uart0_output)
+    with abi.Cpu() as cpu:
+        esp32c5.install(cpu)
+        assert esp32c5.uart0_output(cpu) == b""
+
+
+def test_the_status_register_this_uart_does_not_model_faults_by_name():
+    """`UART_TXFIFO_CNT` lives in `UART_STATUS_REG` (+ 0x1c) and is what
+    firmware polls for room in the FIFO. Unmapped on purpose, so that wait
+    faults at a named address instead of spinning on a zero that never
+    changes. `docs/research/peripheral-layer/design.md` states that
+    failure mode generally and `core/cortexm0/cpu.h:246-249` cites it for
+    the same reason; this said `docs/architectures.md` 3 until the OH-161
+    review pointed out that section 3 is Arm Cortex-M and these are not
+    Arm parts."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c5.install(cpu)
+        with pytest.raises(abi.MemoryFault) as caught:
+            cpu.read_word(esp32c5.UART0 + 0x1C)
+    assert "0x6000001c" in str(caught.value)
+
+
+def test_the_c5_and_c6_gate_the_transmitter_where_the_c3_does_not():
+    """The same collision shape as the GPIO one above, in a second peripheral.
+
+    All three parts put `UART_TX_SCLK_EN` at bit 24 of a clock register at the
+    same UART base, and the C3 puts that register at + 0x78 where these two
+    put it at + 0x88.
+
+    **What this asserts is that a correctly installed C5 leaves + 0x78
+    unmapped**, and that is all it can assert. The first version of this
+    docstring said a copied board "faults rather than working wrongly", which
+    is not what would happen: a copied `install_uart0` calls `map_register` on
+    its own gate address, so it would MAP + 0x78 itself and nothing would
+    fault there at all. It would run silently wrong, and the loud failure
+    would arrive later and elsewhere, when firmware touched the real + 0x88.
+    Corrected after the OH-161 review; the assertion was right and the story
+    bolted onto it was not.
+    """
+    needs_core()
+    from core.riscv32 import abi
+    from webui.boards import esp32c3
+
+    assert esp32c5.UART0 == esp32c6.UART0 == esp32c3.UART0, "one base, as with GPIO"
+    assert esp32c5.UART_FIFO == esp32c6.UART_FIFO == esp32c3.UART_FIFO
+    assert esp32c5.UART_CLK_CONF == esp32c6.UART_CLK_CONF == 0x88
+    assert esp32c3.UART_CLK_CONF == 0x78
+    assert esp32c5.UART_TX_SCLK_EN == esp32c6.UART_TX_SCLK_EN == esp32c3.UART_TX_SCLK_EN
+
+    # The reset words differ because the register does: a C3 carries
+    # `SCLK_SEL` and three divisor fields that moved to PCR on these parts:
+    # `register/soc/pcr_reg.h:58` puts `PCR_UART0_SCLK_DIV_NUM` at the same
+    # `[19:12]` a C3 carries inside `UART_CLK_CONF_REG`.
+    assert esp32c5.UART_CLK_CONF_AT_RESET == esp32c6.UART_CLK_CONF_AT_RESET
+    assert esp32c3.UART_CLK_CONF_AT_RESET != esp32c5.UART_CLK_CONF_AT_RESET
+
+    with abi.Cpu() as cpu:
+        esp32c5.install(cpu)
+        assert not cpu.is_mapped(esp32c5.UART0 + esp32c3.UART_CLK_CONF), (
+            "a C3-shaped gate address is unmapped here, so a copy faults loudly"
+        )

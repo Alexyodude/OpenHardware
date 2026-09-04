@@ -185,6 +185,15 @@ _SIGNATURES = {
          ctypes.c_int],
         None,
     ),
+    "riscv32_map_stream": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32],
+        None,
+    ),
+    "riscv32_stream": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint8),
+         ctypes.c_uint32],
+        ctypes.c_uint32,
+    ),
     "riscv32_is_mapped": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
     "riscv32_clear_mmio": ([ctypes.c_void_p], None),
     "riscv32_step": ([ctypes.c_void_p], ctypes.c_int),
@@ -419,6 +428,44 @@ class Cpu:
         self._lib.riscv32_map_alias(
             self._handle, address, target, code, 1 if readable else 0
         )
+
+    def map_stream(self, address: int, *, enable: int, enable_mask: int) -> None:
+        """An address whose writes append a byte to a captured stream.
+
+        A UART's transmit FIFO, where `map_register` would keep only the last
+        character written -- so a program that printed `hello` would leave an
+        `o` behind, which reads back as a plausible letter rather than as a
+        wrong answer.
+
+        `enable`/`enable_mask` name the bit that has to be set for the bytes
+        to be captured. On the three ESP32 parts described here that is
+        `UART_TX_SCLK_EN`, bit 24 of each part's `UART_CLK_CONF_REG`, whose
+        reset value the vendor sets to 1; the gate exists so that firmware
+        which switched the transmitter off goes quiet, as the part does.
+        """
+        self._lib.riscv32_map_stream(self._handle, address, enable, enable_mask)
+
+    def stream(self, address: int) -> bytes:
+        """Everything written to a `map_stream` address, oldest first.
+
+        Asked for its length first and read second, rather than guessing a
+        buffer size.
+
+        **The second call's return is discarded, and that is safe here for a
+        reason worth stating**: this core advances only when Python steps it,
+        so nothing can write to the stream between the two calls and the
+        length cannot change. The C side reports the true length either way --
+        `riscv32_stream` with a three-byte buffer over eight buffered bytes
+        answers 8 and copies 3 -- which is what a caller sizing its own buffer
+        needs. This docstring claimed that return was checked here until the
+        OH-161 review read the next two lines.
+        """
+        length = self._lib.riscv32_stream(self._handle, address, None, 0)
+        if length == 0:
+            return b""
+        buffer = (ctypes.c_uint8 * length)()
+        self._lib.riscv32_stream(self._handle, address, buffer, length)
+        return bytes(buffer)
 
     def is_mapped(self, address: int) -> bool:
         """Whether `address` is a mapped register rather than bulk memory."""

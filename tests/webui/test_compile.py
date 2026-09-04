@@ -909,17 +909,26 @@ void loop() {
 
 
 def test_each_absence_hints_the_model_decision_it_stands_on():
-    """digitalRead and Serial are not in the core because they are not in
+    """digitalRead and analogRead are not in the core because they are not in
     the MODEL, and the person who reaches for one is told that in the pane
-    they are looking at -- the OH-138 pattern, one hint per decision."""
+    they are looking at -- the OH-138 pattern, one hint per decision.
+
+    **`Serial` was the second example here until OH-161** and is now the
+    opposite one: the three ESP32 descriptions map UART0's transmit FIFO, so
+    the symbol exists, the sketch builds, and the hint is gone. A test still
+    asserting that refusal would hold the model to a gap it no longer has --
+    so it asserts the fill instead, and `analogRead` takes the place of the
+    absence."""
     read = c3_build("void setup(){int x = digitalRead(D10);} void loop(){}")
     assert not read.ok
     assert "leaves GPIO_IN unmapped on purpose" in read.diagnostics
 
-    serial = c3_build(
-        "void setup(){Serial.begin(9600);} void loop(){}")
-    assert not serial.ok
-    assert "no UART is mapped" in serial.diagnostics
+    analog = c3_build("void setup(){int x = analogRead(D10);} void loop(){}")
+    assert not analog.ok
+    assert "needs the ADC" in analog.diagnostics
+
+    serial = c3_build('void setup(){Serial.println("ok");} void loop(){}')
+    assert serial.ok, serial.diagnostics
 
 
 #: variant -> (its description, the name that description gives the RAM the
@@ -964,6 +973,20 @@ def test_the_oh_board_header_restates_the_descriptions_own_numbers(variant):
         gpio + description.GPIO_ENABLE_W1TS)
     assert int(defines["OH_GPIO_ENABLE_W1TC"], 16) == (
         gpio + description.GPIO_ENABLE_W1TC)
+    # The UART, on the same terms and for the same reason (OH-161): the C3
+    # gates its transmitter at + 0x78 and these two at + 0x88, so a header
+    # copied from a neighbour would write the enable bit into an address
+    # that part does not map.
+    assert int(defines["OH_UART_FIFO"], 16) == description.UART0 + description.UART_FIFO
+    assert int(defines["OH_UART_CLK_CONF"], 16) == (
+        description.UART0 + description.UART_CLK_CONF)
+    assert int(defines["OH_UART_TX_SCLK_EN"], 16) == description.UART_TX_SCLK_EN, (
+        "the gate bit. Written as a hex literal in the header rather than as "
+        "`(1u << 24)`, because the parser above takes one whitespace-separated "
+        "token and a shift is three -- it read `(1u` and this test could not "
+        "have compared anything."
+    )
+
     ram_base = getattr(description, ram)
     ram_size = getattr(description, f"{ram}_SIZE")
     assert int(defines["OH_STACK_TOP"], 16) == ram_base + ram_size - 16
@@ -1065,3 +1088,207 @@ def test_each_absence_hints_its_own_variant_header(board):
     assert not built.ok
     assert recipe.variant in built.diagnostics, built.diagnostics
     assert "xiao_esp32c3" not in built.diagnostics
+
+
+# --- a sketch can print, and the hint that said it could not is gone (OH-161)
+
+
+#: Every kind of thing `Serial` can be handed, in one sketch, so a formatting
+#: bug shows up as the wrong text rather than as a missing line. The negative
+#: is deliberate: it is the one path with a branch in it. Eighteen bytes,
+#: measured, and the assertions below spell all eighteen.
+PRINTING_SKETCH = """
+void setup() {
+  Serial.begin(115200);
+  Serial.println("hello");
+  Serial.print("n=");
+  Serial.println(-42);
+  Serial.print('x');
+  Serial.println(7u);
+}
+void loop() { }
+"""
+
+#: Measured on the C3 rather than estimated (2026-09-04): the sketch's first
+#: byte arrives at step 39 and its last at step 189. 200,000 is three orders
+#: of margin, and the loop below stops when the output stands still rather
+#: than running the budget out.
+#:
+#: This comment said "a few hundred instructions per character" and "22 of
+#: them" until the OH-161 review traced the arrivals: 18 bytes, and the whole
+#: sketch finishes in 189 steps.
+PRINT_BUDGET = 200_000
+
+#: How long the output must stand still before a sketch counts as finished
+#: printing. **Measured, because this constant is what decides whether the
+#: helper can return a prefix**: the largest gap between two bytes of that
+#: sketch on the C3 is 29 steps (2026-09-04, every arrival traced), so 20,000
+#: is nearly three orders of margin -- and the budget above still bounds the
+#: whole run. The first draft said "a few hundred instructions", which was a
+#: guess standing where the measurement belonged.
+STALL_STEPS = 20_000
+
+
+def printed(board: str, description, source: str, budget: int = PRINT_BUDGET) -> bytes:
+    """Build `source` for `board`, run it, and return what reached the PANE.
+
+    **Through `session.state()`, not through the board module**, which is the
+    precedent `tests/webui/test_board_run.py:936` set for the RP2040 in its
+    own words: "because the browser has no other way to reach it and the
+    point of this ticket is that the wire carries it". That path runs
+    `uart_view`'s `getattr(description, "uart0_output")` -- the seam all three
+    new module docstrings claim works -- and its decode, neither of which
+    reading `uart0_output` directly touches. **Not the byte cap**: these
+    sketches print 18 bytes against a 64 KiB limit, so `dropped` is never
+    non-zero here, and `tests/webui/test_board_run.py` is where that case is
+    covered. This docstring claimed the cap until the OH-161 review pointed
+    out that no sketch here can reach it, and this helper read `uart0_output`
+    directly until the same review.
+
+    The module's own reader still drives the stopping condition, because it is
+    the cheap call in a loop that may run 200,000 times; the two are asserted
+    equal at the end, so the layer this returns cannot silently disagree with
+    the layer it watched.
+
+    Stops when the output stops growing, so a sketch that prints nothing costs
+    the whole budget and says so by returning empty.
+    """
+    built = oh_build(board, source)
+    assert built.ok, built.diagnostics
+    recipe = compiler.recipe_for(board)
+    with api.load_firmware(board, built.image, base=recipe.base) as session:
+        # Stops when the output STOPS GROWING, not at the first line
+        # ending: stopping on a line ending returned after `hello` and
+        # every assertion below would have been comparing a prefix.
+        # `loop()` is empty in these sketches, so a stall means setup()
+        # has finished printing.
+        stalled = 0
+        seen = b""
+        for _ in range(budget):
+            session.step()
+            now = description.uart0_output(session.cpu)
+            stalled = 0 if now != seen else stalled + 1
+            seen = now
+            if seen and stalled >= STALL_STEPS:
+                break
+        view = session.state()["uart"]
+        assert view["present"], f"{board}: the pane says this board models no UART"
+        assert view["bytes"] == len(seen), (
+            f"{board}: the pane counted {view['bytes']} bytes and the board "
+            f"module transmitted {len(seen)}"
+        )
+        assert view["text"] == seen.decode("utf-8", "backslashreplace")
+        return seen
+
+
+def test_a_sketch_that_prints_reaches_the_console_on_every_esp32_board():
+    """The watched test OH-161 step 1 is done when. Three tables have to
+    agree for this to pass and none of them is this test's: the sketch names
+    `Serial`, the core writes `OH_UART_FIFO` from the variant header, and the
+    board description maps that address as a stream gated by a bit the vendor
+    sets at reset. A header pointing at a neighbour's offset, or a FIFO
+    mapped as a register, shows up here as the wrong text.
+    """
+    needs_toolchain(C3_BOARD)
+    expected = b"hello\r\nn=-42\r\nx7\r\n"
+    assert printed(C3_BOARD, esp32c3, PRINTING_SKETCH) == expected
+    for board, (description, _gpio) in sorted(OPENHARDWARE_BOARDS.items()):
+        needs_toolchain(board)
+        assert printed(board, description, PRINTING_SKETCH) == expected, board
+
+
+#: The bounds of both integer paths, and the zero neither of them reaches by
+#: accident. `LONG_MIN` is spelled as a subtraction because the literal cannot
+#: be written directly: -2147483648 does not fit a 32-bit `long`, so C++ makes
+#: it `long long` and the call is ambiguous across the print overloads. Found
+#: while writing this test, and `serial.cpp` says the same at its negation.
+BOUNDS_SKETCH = """
+void setup() {
+  Serial.println(-2147483647L - 1L);
+  Serial.println(4294967295UL);
+  Serial.println(0);
+  Serial.println(0u);
+  Serial.println(2147483647L);
+  Serial.print('|');
+  Serial.println(-1);
+}
+void loop() { }
+"""
+
+
+def test_the_integer_formatter_is_right_at_both_types_bounds():
+    """`-42` and `7u` exercise one branch each and neither bound.
+
+    A regression in the sign branch, in the negate-as-unsigned that keeps
+    `LONG_MIN` from overflowing, or in the do-while that makes zero print at
+    all would be invisible to the sketch above -- so the bounds are their own
+    test. `kDigits` is 11, which is exactly what `4294967295` needs.
+    """
+    needs_toolchain(C3_BOARD)
+    assert printed(C3_BOARD, esp32c3, BOUNDS_SKETCH) == (
+        b"-2147483648\r\n4294967295\r\n0\r\n0\r\n2147483647\r\n|-1\r\n"
+    )
+
+
+def test_a_sketch_that_never_calls_begin_still_prints():
+    """Because the vendor sets `UART_TX_SCLK_EN` at reset on all three parts,
+    and this model must not require what the silicon does not. `begin` exists
+    for the sketch that writes it, not because the transmitter needs it."""
+    needs_toolchain(C3_BOARD)
+    source = 'void setup() { Serial.println("no begin"); }\nvoid loop() { }'
+    assert printed(C3_BOARD, esp32c3, source) == b"no begin\r\n"
+
+
+def test_a_sketch_that_ends_the_port_goes_quiet():
+    """`Serial.end` clears the same bit the description gates its stream on,
+    so the bytes after it are discarded rather than queued -- which is what
+    the part does. The two halves are asserted in one run so the second
+    cannot pass by the first never having printed."""
+    needs_toolchain(C3_BOARD)
+    source = (
+        'void setup() { Serial.println("before"); Serial.end();'
+        ' Serial.println("after"); }\nvoid loop() { }'
+    )
+    assert printed(C3_BOARD, esp32c3, source) == b"before\r\n"
+
+
+def test_begin_reopens_a_port_that_end_closed():
+    """The one thing `begin` does, and until this test nothing held it: it
+    sets the transmit clock bit. On a fresh part that is invisible, because
+    the vendor sets the bit at reset and a sketch prints without calling
+    `begin` at all -- so the only way to see `begin` work is to close the
+    port first, which is what `end` does to the same bit.
+
+    Found by mutation: clearing the gate at the top of `begin` changed
+    nothing, because the next line set it again. That said the assertion set
+    could not see `begin` at all.
+    """
+    needs_toolchain(C3_BOARD)
+    source = (
+        'void setup() { Serial.println("one"); Serial.end();'
+        ' Serial.println("lost"); Serial.begin(9600); Serial.println("two"); }'
+        "\nvoid loop() { }"
+    )
+    assert printed(C3_BOARD, esp32c3, source) == b"one\r\ntwo\r\n"
+
+
+def test_the_serial_hint_is_gone_where_the_uart_is_modelled():
+    """A hint names a modelling decision, and this one named an absence that
+    has been filled. What is still absent of that peripheral is unmapped
+    rather than hinted, so it faults at a named address instead."""
+    for board in (C3_BOARD, *OPENHARDWARE_BOARDS):
+        hints = dict(compiler.recipe_for(board).hints)
+        assert "Serial" not in hints, board
+        assert "digitalRead" in hints, f"{board}: the unfilled absences still speak"
+        assert "millis" in hints and "analogRead" in hints, board
+
+
+def test_a_sketch_reading_the_serial_port_still_fails_to_build():
+    """The receive half is not modelled, so `Serial.read` is a missing symbol
+    at the moment gcc says so -- which is where this core prefers to have the
+    conversation. A `read` answering zero would be a wrong value, which is
+    the one failure this project treats as worse than a loud one."""
+    needs_toolchain(C3_BOARD)
+    built = oh_build(C3_BOARD, "void setup(){ Serial.read(); }\nvoid loop(){}")
+    assert not built.ok
+    assert "read" in built.diagnostics

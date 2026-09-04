@@ -96,13 +96,33 @@ RISCV32_API int riscv32_add_region(Riscv32Cpu* cpu, uint32_t base,
 RISCV32_API void riscv32_clear_regions(Riscv32Cpu* cpu);
 
 /// Memory-mapped registers. See `cpu.h` for why a peripheral is not a region
-/// and why only two of the five behaviours are here.
+/// and why three of the five behaviours are here.
 ///
 /// `op` is `riscv32::WriteOp` as an int: 0 Store, 1 Set, 2 Clear, 3 Xor.
 RISCV32_API void riscv32_map_register(Riscv32Cpu* cpu, uint32_t address,
                                       uint32_t value);
 RISCV32_API void riscv32_map_alias(Riscv32Cpu* cpu, uint32_t address,
                                    uint32_t target, int op, int readable);
+
+/// An address whose writes append a byte to a captured stream: a TX FIFO,
+/// where a plain register would keep only the last character written.
+///
+/// Captured only while `enable_address & enable_mask` is non-zero -- a
+/// transmitter whose clock is off sends nothing, and a model without the gate
+/// lets firmware appear to print before it enabled the peripheral. See cpu.h.
+RISCV32_API void riscv32_map_stream(Riscv32Cpu* cpu, uint32_t address,
+                                    uint32_t enable_address,
+                                    uint32_t enable_mask);
+
+/// Copy up to `capacity` bytes of the stream at `address` into `out`, and
+/// return how many bytes the stream holds.
+///
+/// The return value is the true length, not the number copied, so a caller
+/// that passed too small a buffer can tell -- rather than silently reading a
+/// truncated prefix as if it were the whole output.
+RISCV32_API uint32_t riscv32_stream(const Riscv32Cpu* cpu, uint32_t address,
+                                    uint8_t* out, uint32_t capacity);
+
 RISCV32_API int riscv32_is_mapped(const Riscv32Cpu* cpu, uint32_t address);
 RISCV32_API void riscv32_clear_mmio(Riscv32Cpu* cpu);
 

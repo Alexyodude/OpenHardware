@@ -188,14 +188,24 @@ public:
     // the fault is what tells a person which peripheral the board description
     // is missing.
     //
-    // ## Only two of the five, and that is deliberate
+    // ## Three of the six, and the third arrived the way this comment said
     //
-    // `core/cortexm0` grew five behaviours -- register, alias, mirror,
-    // constant, stream -- each when a real image faulted without it.
-    // `map_register` and `map_alias` are what an ESP32-C3 GPIO blink needs.
-    // The other three came from a UART and a timer, and porting them now would
-    // be speculative generality in the one file that argues hardest against
-    // it. They arrive when an image here faults without them.
+    // `core/cortexm0` grew six behaviours -- register, alias, mirror,
+    // constant, stream, counter -- each when a real image faulted without it.
+    // (This comment said five until the OH-161 review counted them:
+    // `map_counter` is the sixth, and it is the one a timer needs.)
+    // `map_register` and `map_alias` are what an ESP32-C3 GPIO blink needs,
+    // and this comment used to end "the other three arrive when an image here
+    // faults without them". `map_stream` is the first of them to arrive, on
+    // exactly that trigger: OH-161 needed a sketch to print, an ESP32's
+    // `UART_FIFO_REG` is a queue rather than a word, and a `map_register`
+    // there keeps the last byte written -- so a program printing "hello"
+    // leaves an `o` behind and a test reading it back sees a plausible single
+    // letter instead of a wrong answer. `map_mirror`, `map_constant` and
+    // `map_counter` are still absent, still on the same terms -- and the
+    // last of those is what OH-161's own step 2 will want, because a
+    // millisecond counted in a spin loop is a judgement and a free-running
+    // counter is a register read.
 
     /// An address that holds a word: reads answer it, writes replace it.
     ///
@@ -228,6 +238,32 @@ public:
     /// answer, not this model shrugging.
     void map_alias(uint32_t address, uint32_t target, WriteOp op,
                    bool readable = true);
+
+    /// An address whose writes append a byte to a captured stream.
+    ///
+    /// A transmit FIFO. `enable_address` and `enable_mask` name the bit that
+    /// must be set for the bytes to be kept, because a transmitter whose
+    /// clock is off sends nothing and a model without the gate lets firmware
+    /// appear to print before it enabled the peripheral. On the three ESP32
+    /// parts described here that bit is `UART_TX_SCLK_EN`, whose reset value
+    /// the vendor sets to 1 -- so a bare-metal image transmits without
+    /// touching it, and one that clears it goes quiet.
+    ///
+    /// **The gate must itself be mapped**, and a write through an unmapped
+    /// gate faults rather than capturing: a board that named the wrong
+    /// address would otherwise print bytes the part would have discarded.
+    ///
+    /// Only the low byte of each write is taken. A word-wide store to a FIFO
+    /// whose data field is `[7:0]` transmits one character on this hardware,
+    /// and taking four would invent three.
+    void map_stream(uint32_t address, uint32_t enable_address,
+                    uint32_t enable_mask);
+
+    /// Everything written to a `map_stream` address so far, oldest first.
+    ///
+    /// Empty for an address that is not one, which is the same answer as a
+    /// stream nothing has written to -- the caller registered it and knows.
+    const std::vector<uint8_t>& stream(uint32_t address) const;
 
     /// Whether `address` is a mapped register rather than bulk memory.
     ///
@@ -366,12 +402,25 @@ private:
     /// the write never named.
     bool mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask);
 
+    /// A `map_stream` address: what gates it, and what has been written.
+    ///
+    /// Held beside `mmio_` rather than inside `Mapped` because a stream is
+    /// the one behaviour that is not a word. Three more fields on every
+    /// mapped register to serve one of them would be the tail wagging the
+    /// dog, and `Mapped` is copied on every lookup.
+    struct Stream {
+        uint32_t enable = 0;
+        uint32_t enable_mask = 0;
+        std::vector<uint8_t> bytes;
+    };
+
     std::array<uint32_t, kRegisters> x_{};
     uint32_t pc_ = 0;
     uint32_t jvt_ = 0;
     uint32_t extensions_ = 0;
     std::vector<Region> regions_;
     std::unordered_map<uint32_t, Mapped> mmio_;
+    std::unordered_map<uint32_t, Stream> streams_;
     mutable uint32_t fault_address_ = 0;
     mutable bool fault_was_fetch_ = false;
 };

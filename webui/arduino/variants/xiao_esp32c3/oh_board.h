@@ -28,6 +28,15 @@
 #define OH_GPIO_ENABLE_W1TS  0x60004024u
 #define OH_GPIO_ENABLE_W1TC  0x60004028u
 
+/* UART0's transmit FIFO at 0x60000000, and the clock register whose bit 24
+ * (+0x78 on this part) gates the transmitter. `uart_reg.h:22` and `:1160`, via webui/boards/esp32c3.py.
+ *
+ * The FIFO is a STREAM in the description, not a register: every byte
+ * written to it is kept, which is what makes a print arrive whole. */
+#define OH_UART_FIFO         0x60000000u
+#define OH_UART_CLK_CONF     0x60000078u
+#define OH_UART_TX_SCLK_EN   0x01000000u   /* UART_TX_SCLK_EN, bit 24 */
+
 /* The top of DRAM (0x3FCE0000), minus a word so the first push stays
  * inside it -- the same arithmetic the blink fixtures state. */
 #define OH_STACK_TOP         0x3FCDFFF0u
