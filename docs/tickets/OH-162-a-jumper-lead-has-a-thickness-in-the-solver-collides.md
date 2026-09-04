@@ -9,7 +9,6 @@ touches:
 - webui/static/wires.js
 - webui/static/board3d.js
 - tests/webui/test_wires.py
-- tests/webui/test_board3d.py
 ---
 
 A jumper lead here is a chain of points. It falls, sags, springs and stays out of the chips -- and it has no thickness in the solver, passes straight through other wires, and settles with half its tube inside whatever it rests on. OH-132 just made that last fact measurable: every settled wire reports `proud` = the full radius, 0.16 units, because collide() pushes the node's CENTRE to the face and the tube is drawn around it afterwards.
@@ -103,3 +102,5 @@ Twenty-four mutations on step 2, all killed. Nine test gaps found across the two
 Ten new tests, nine in tests/webui/test_wires.py and one in test_board3d.py.
 
 NOT done, and it is the ticket's own words for step 1 as well: no screenshot. Everything above is a number this session measured rather than a picture anybody looked at.
+
+**Note 2026-09-05:** Claim released on tests/webui/test_board3d.py, 2026-09-05. Steps 1 and 2 needed it and are done; steps 3 (plastic set) and 4 (the photograph oracle) are both inside the solver and its own test, so holding the renderer's test file would only block OH-164, which needs it for the third sentence its own ticket describes. webui/static/board3d.js stays claimed because step 3 may yet want the drawn tube to follow a bent lead. The rule is that no two open tickets claim one file, and blocked counts as open -- so a claim that is no longer needed is a claim that has to go back.
