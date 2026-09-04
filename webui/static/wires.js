@@ -129,6 +129,15 @@ export class Rope {
     //: box -- the OH-132 probe read `proud` 0.16, the whole radius, with the
     //: solver unaware of it.
     this.radius = 0;
+    //: The other wires on the bench, as `Rope`s. Plain data the caller
+    //: supplies each frame, exactly like `colliders` -- and the array it
+    //: passes may include this rope, which `offNeighbours` skips, so a caller
+    //: can hand every wire the same list.
+    //:
+    //: **Empty is the default and it is the old behaviour**: two leads laid
+    //: across each other occupied the same space, which is what OH-162 step 2
+    //: is about.
+    this.neighbours = [];
 
     const gap = distance(head, tail);
     // A rope whose ends coincide still needs a rest length, or every segment
@@ -276,6 +285,60 @@ export class Rope {
       this.stiffen();
       this.collide();
     }
+    // **Wire against wire once a step and not once a pass** (OH-162 step 2).
+    // Every segment against every segment is the first quadratic thing in
+    // this solver, so where it runs is a decision and not a detail.
+    //
+    // Measured 2026-09-05, the SAME code in both positions -- eight leads
+    // over a slab and eight component boxes, median of three runs of 1,500
+    // steps after a 600-step warm-up. A 60 Hz frame is TWO substeps, not
+    // eight: `advance(1/60)` returns 2, and `MAX_SUBSTEPS` is only reached
+    // below 15 fps.
+    //
+    //                    us/rope-step   ms/frame   two crossed   twelve
+    //   before step 2        23.1         0.37       0.2748      0.0053
+    //   once a step          35.6         0.57       0.3704      0.3159
+    //   once a pass         184.9         2.96       0.4917      0.3193
+    //
+    // The last two columns are the nearest centre-to-centre gap after three
+    // thousand frames, against the 0.32 two tubes need; twelve leads crossed
+    // at one point cannot all have it and 0.0053 is what "no wire-wire at
+    // all" looks like. **Once a pass is 5.2 times dearer and buys nothing**,
+    // and it is worse where it matters most: those twelve leads still carry
+    // 0.233 of energy after three thousand frames where once a step has
+    // 6.5e-15. Fourteen passes over neighbours that cannot answer within the
+    // step keeps a crowded pile stirring.
+    //
+    // **An earlier draft of this comment justified the same decision with a
+    // number that did not mean what it said**: 1,665 microseconds, measured
+    // before the bounds rejections existed, so it compared two algorithms and
+    // called it two placements. The review caught it. The decision survived
+    // the honest measurement, which is luck rather than method.
+    //
+    // **And the solids run once more afterwards if anything moved**, because
+    // a lead pushed off a lead can be pushed into the board -- which is the
+    // same defect the review found in step 1, arriving from the other side.
+    // A board is a harder thing to be inside than a wire, so the solids win
+    // the last word and wire-wire is a preference within the step.
+    //
+    // **What shows this line is needed is a lead pinned LOW across another**,
+    // not a crowd. Leads crossing each other in mid-air push each other
+    // sideways and up; a lead whose own ends are pinned at the height the
+    // lower one rests at has nowhere to send it but down. Measured
+    // 2026-09-05, worst `contact().inside` over 600 frames, four such leads
+    // over one resting on a slab: 0.085 without this line and 0 with it, and
+    // 0.106 for ten of them. Six leads merely crossing give 0 either way,
+    // which is what an earlier fixture here did and why it proved nothing.
+    //
+    // Running the wire pass twice here would not be wrong, and no test can
+    // tell it apart: the second run refines the same answer rather than
+    // giving a different one. Once is what the cost above paid for.
+    //
+    // `advance` calls this up to `MAX_SUBSTEPS` times a frame, so what a
+    // reader should carry away is the middle column and not the first: at
+    // 60 Hz the whole bench of eight wires costs 0.57 of a 16.7 millisecond
+    // frame.
+    if (this.offNeighbours()) this.collide();
   }
 
   /** One pass of the distance constraint, over every segment. */
@@ -520,6 +583,250 @@ export class Rope {
   }
 
   /**
+   * Push this wire's segments off every other wire's (OH-162 step 2).
+   *
+   * **A lead is a capsule and not a chain of points**, so the test is between
+   * SEGMENTS and not between nodes: two leads crossing at right angles have
+   * no node anywhere near each other and still occupy the same space. The
+   * nearest pair of NODES there can be half a segment apart -- 0.9 units on
+   * a 28-unit lead, whose segments are 1.8 -- while the segments themselves
+   * touch. A node-to-node test would need a radius nearly six times the one
+   * a lead is drawn at before it noticed, and would then report contact
+   * between leads that are nowhere near each other.
+   *
+   * **This wire moves and the other does not**, which looks one-sided and is
+   * not. Every wire on the bench is advanced every frame, in `board3d.js`'s
+   * own loop, so each one pushes itself off the others in its own turn and
+   * the pair separates. Writing into another rope's array instead would let
+   * one rope's step change a rope the caller has ALREADY stepped this frame,
+   * undoing work that is finished rather than adding to work that is not.
+   *
+   * It is not that the answer would start depending on the order the caller
+   * steps in -- an earlier draft of this comment claimed that and it was
+   * false, because each rope already reads its neighbours where they are
+   * now, so `animate`'s iteration order changes the answer today. What is
+   * true is the narrower thing above, and it is enough.
+   *
+   * **The separation is both radii**, so a thick lead crossing a thin one
+   * parts by the sum, and a caller that told only one of them a radius gets
+   * that one held off the other's centreline. Both zero is the old behaviour
+   * and costs nothing: the pair is dropped before any geometry runs.
+   *
+   * The correction is shared between the segment's two ends by how near the
+   * contact is to each, and a pinned end takes none of it -- the same rule
+   * `relax` follows, for the same reason.
+   *
+   * Returns whether anything was pushed, which is what `step` gates its extra
+   * solids pass on.
+   */
+  offNeighbours() {
+    let pushed = false;
+    for (const other of this.neighbours) {
+      // The caller may hand every wire the same array, so this is not an
+      // error to guard against; it is the expected way to call it.
+      if (other === this) continue;
+      const want = this.radius + other.radius;
+      if (want <= 0) continue;
+      // **Two rejections, and between them is why this is affordable.** The
+      // first drops a whole pair of leads that are nowhere near each other,
+      // for the cost of reading both ropes once per PAIR -- `mayReach` walks
+      // this rope's own nodes again for every neighbour, which is a hoist
+      // nobody has needed at the sizes measured. The second drops a pair of
+      // SEGMENTS, which is what matters when the leads do cross: two wires
+      // over one board overlap as boxes while only a handful of their 441
+      // segment pairs are within a tube of one another.
+      if (!this.mayReach(other, want)) continue;
+      const mine = this.position;
+      const theirs = other.position;
+      for (let i = 0; i < this.count - 1; i++) {
+        const a = i * 3;
+        const b = a + 3;
+        for (let j = 0; j < other.count - 1; j++) {
+          const c = j * 3;
+          const d = c + 3;
+          let apart = false;
+          for (let axis = 0; axis < 3; axis++) {
+            const lo = Math.min(mine[a + axis], mine[b + axis]);
+            const hi = Math.max(mine[a + axis], mine[b + axis]);
+            const theirLo = Math.min(theirs[c + axis], theirs[d + axis]);
+            const theirHi = Math.max(theirs[c + axis], theirs[d + axis]);
+            if (theirLo - hi > want || lo - theirHi > want) {
+              apart = true;
+              break;
+            }
+          }
+          if (apart) continue;
+          if (this.partSegments(i, other, j, want)) pushed = true;
+        }
+      }
+    }
+    return pushed;
+  }
+
+  /**
+   * Whether the two wires' bounding boxes come within `want`.
+   *
+   * **Read once per pair and then gone stale on purpose.** The pushes that
+   * follow move this wire, so by the time a later neighbour is tested its
+   * bounds are the ones from before those pushes -- and a lead shoved off one
+   * neighbour can land within reach of a neighbour already passed over. What
+   * that costs is one step of delay, 1/120 s, because the next step tests
+   * again from where everything now is. Re-reading the bounds after every
+   * push would make this quadratic in the thing it exists to keep linear.
+   */
+  mayReach(other, want) {
+    for (let axis = 0; axis < 3; axis++) {
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let i = 0; i < this.count; i++) {
+        const here = this.position[i * 3 + axis];
+        if (here < lo) lo = here;
+        if (here > hi) hi = here;
+      }
+      let theirLo = Infinity;
+      let theirHi = -Infinity;
+      for (let i = 0; i < other.count; i++) {
+        const here = other.position[i * 3 + axis];
+        if (here < theirLo) theirLo = here;
+        if (here > theirHi) theirHi = here;
+      }
+      if (hi + want < theirLo || theirHi + want < lo) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Part this wire's segment `i` from `other`'s segment `j`, to `want`.
+   *
+   * Returns whether it pushed, which is what the tests count.
+   */
+  partSegments(i, other, j, want) {
+    const a = i * 3;
+    const b = a + 3;
+    const c = j * 3;
+    const d = c + 3;
+    closestOnSegments(this.position, a, b, other.position, c, d);
+    const s = CLOSEST[0];
+    const t = CLOSEST[1];
+    // The two closest points, and the axis between them.
+    const mine = this.position;
+    const theirs = other.position;
+    let nx = along(mine, a, b, 0, s) - along(theirs, c, d, 0, t);
+    let ny = along(mine, a, b, 1, s) - along(theirs, c, d, 1, t);
+    let nz = along(mine, a, b, 2, s) - along(theirs, c, d, 2, t);
+    let gap = Math.hypot(nx, ny, nz);
+    if (gap >= want) return false;
+    let push = want - gap;
+    if (gap === 0) {
+      // **Exactly crossing, so the positions hold no direction to part in.**
+      // The way a crossing opens is perpendicular to both leads, which is
+      // their cross product -- and two PARALLEL leads touching along their
+      // length have no such axis at all. Those are left alone rather than
+      // pushed somewhere invented; the next step's gravity parts them, and a
+      // wire lying exactly along another to the last bit is not a picture
+      // anybody is looking at.
+      const ux = this.position[b] - this.position[a];
+      const uy = this.position[b + 1] - this.position[a + 1];
+      const uz = this.position[b + 2] - this.position[a + 2];
+      const vx = other.position[d] - other.position[c];
+      const vy = other.position[d + 1] - other.position[c + 1];
+      const vz = other.position[d + 2] - other.position[c + 2];
+      nx = uy * vz - uz * vy;
+      ny = uz * vx - ux * vz;
+      nz = ux * vy - uy * vx;
+      gap = Math.hypot(nx, ny, nz);
+      if (gap === 0) return false;
+      push = want;
+    }
+    nx /= gap;
+    ny /= gap;
+    nz /= gap;
+    // Shared by nearness, and a pinned end takes none of it.
+    const wa = i === 0 ? 0 : 1 - s;
+    const wb = i + 1 === this.count - 1 ? 0 : s;
+    // **This is not the divisor guard it replaced, and it earns its line for
+    // a different reason.** Two zero weights would add zero to both ends
+    // anyway, so deleting it changes no position -- but it would then report
+    // a push that did not happen, and `step` runs a whole extra solids pass
+    // on that word. A contact exactly on a pinned node is the case: the wire
+    // cannot answer it, and the other wire will in its own turn.
+    if (wa === 0 && wb === 0) return false;
+    // **The ends move by `push`, so the CONTACT moves by less, and that is
+    // deliberate.** The contact point travels `wa(1-s) + wb·s` of whatever
+    // the ends do, between a half and one for a segment with two free ends.
+    // Dividing by that would resolve the whole overlap in a single pass, and
+    // it is how this was first written -- but on a head segment `wa` is 0 and
+    // the divisor is `s²`, so a contact near the pinned end sends the free
+    // end `push / s` away. Measured before the review found it: two leads
+    // pinned at one terminal reached a coordinate of 6.4e17 in six hundred
+    // frames. Swept at 0.01, every separation from 0 to 0.31 blew up and the
+    // worst of it is not the degenerate end but the band from 0.12 to 0.18,
+    // which reaches 3.7e13.
+    //
+    // Under-correcting cannot do that: nothing is divided, so nothing is
+    // unbounded, and the overlap is taken out over the following steps
+    // instead of all at once.
+    //
+    // **What it costs is that the separation becomes approximate under a
+    // sustained press**, because the resting state is where one pass's push
+    // balances one frame of gravity rather than where the tubes exactly
+    // touch. Measured 2026-09-05 at 1,200 frames, nearest centre to centre
+    // against the 0.32 two tubes want: one lead pressing on another 0.3293,
+    // four 0.3203, ten 0.3192. The worst of those is a quarter of one per
+    // cent short and it is bounded, not drifting -- but "at least two radii"
+    // is a statement about a lead left alone, not about one at the bottom of
+    // a pile. It is better on SETTLING even where nothing was in danger,
+    // and worse on exactness, which is the paragraph above:
+    // a crossed pair settles to 1.9e-13 against 3.3e-8, and
+    // twelve leads crossing at one place are down to 5.8e-6 by the third
+    // thousand frames where the division was still at 0.316. Both do settle
+    // in the end; the division takes about five orders of magnitude longer
+    // to get there, which a first draft of this comment called "for ever".
+    this.position[a] += nx * wa * push;
+    this.position[a + 1] += ny * wa * push;
+    this.position[a + 2] += nz * wa * push;
+    this.position[b] += nx * wb * push;
+    this.position[b + 1] += ny * wb * push;
+    this.position[b + 2] += nz * wb * push;
+    return true;
+  }
+
+  /**
+   * The closest a free node of this wire comes to any other wire's segment.
+   *
+   * **Here for a test**, and it is to step 2 what `contact` is to step 1: the
+   * number that says two leads are not in the same place. Centre to centre,
+   * so a pass is `>= 2 * radius` and the caller does the comparing.
+   *
+   * Pinned ends are excluded, as everywhere else in this file -- a pad and a
+   * terminal are placed by whoever placed them, and two wires plugged into
+   * neighbouring pads are legitimately closer than their two tubes.
+   */
+  nearestNeighbour() {
+    let nearest = Infinity;
+    for (const other of this.neighbours) {
+      if (other === this) continue;
+      const theirs = other.position;
+      for (let i = 1; i < this.count - 1; i++) {
+        const at = i * 3;
+        for (let j = 0; j < other.count - 1; j++) {
+          const c = j * 3;
+          const d = c + 3;
+          // `at` twice: this end of it is a NODE, which the solver takes as
+          // a segment of no length and answers `t` alone for.
+          closestOnSegments(this.position, at, at, theirs, c, d);
+          const t = CLOSEST[1];
+          nearest = Math.min(nearest, Math.hypot(
+            this.position[at] - along(theirs, c, d, 0, t),
+            this.position[at + 1] - along(theirs, c, d, 1, t),
+            this.position[at + 2] - along(theirs, c, d, 2, t)));
+        }
+      }
+    }
+    return nearest;
+  }
+
+  /**
    * The sum of the squared speeds of the free nodes.
    *
    * **Here for a test rather than for the simulation**, and it is the one
@@ -639,6 +946,96 @@ export class Rope {
 
 function distance(a, b) {
   return Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+}
+
+//: Where `closestOnSegments` leaves its two answers.
+//:
+//: **A module-level pair rather than a returned array**, for the reason the
+//: constructor gives about `position`: this runs up to 21 x 21 times per wire
+//: pair per constraint pass, fourteen passes a step and eight steps a frame,
+//: and an array returned from it would be that many allocations a frame for
+//: two numbers. Nothing here is re-entrant or asynchronous, so the one pair
+//: is safe; read it before calling again.
+const CLOSEST = [0, 0];
+
+function clamped(value) {
+  return value < 0 ? 0 : value > 1 ? 1 : value;
+}
+
+/**
+ * One axis of the point `f` of the way from `P[from]` to `P[to]`.
+ *
+ * Seven call sites between `partSegments` and `nearestNeighbour`, each of
+ * which is otherwise the same forty characters with a different index.
+ */
+function along(P, from, to, axis, f) {
+  return P[from + axis] + (P[to + axis] - P[from + axis]) * f;
+}
+
+/**
+ * The closest pair of points on two segments, as parameters along each.
+ *
+ * `P[a..a+2]` to `P[b..b+2]` is the first, `Q[c..c+2]` to `Q[d..d+2]` the
+ * second; the answers land in `CLOSEST` as `[s, t]`. Taking flat arrays and
+ * offsets rather than points is the same allocation argument.
+ *
+ * The method is the standard one: minimise the squared distance over the
+ * square `s, t in [0, 1]`, and where the unconstrained minimum falls outside
+ * it, clamp one parameter and re-solve for the other. **Both degenerate cases
+ * have to be handled and neither is hypothetical here** -- a rope whose two
+ * ends coincide has zero-length segments at the moment it is made, and two
+ * leads laid out straight and parallel are exactly the case with no unique
+ * answer, where any point along the overlap is as close as any other.
+ * Parallel takes `s = 0`, which is a point on the segment and is enough,
+ * because a segment resolved at one end and still overlapping is offered
+ * again on the next of fourteen passes.
+ */
+function closestOnSegments(P, a, b, Q, c, d) {
+  const ux = P[b] - P[a];
+  const uy = P[b + 1] - P[a + 1];
+  const uz = P[b + 2] - P[a + 2];
+  const vx = Q[d] - Q[c];
+  const vy = Q[d + 1] - Q[c + 1];
+  const vz = Q[d + 2] - Q[c + 2];
+  const wx = P[a] - Q[c];
+  const wy = P[a + 1] - Q[c + 1];
+  const wz = P[a + 2] - Q[c + 2];
+  const uu = ux * ux + uy * uy + uz * uz;
+  const vv = vx * vx + vy * vy + vz * vz;
+  const uw = ux * wx + uy * wy + uz * wz;
+  const vw = vx * wx + vy * wy + vz * wz;
+  if (uu === 0 && vv === 0) {
+    CLOSEST[0] = 0;
+    CLOSEST[1] = 0;
+    return;
+  }
+  if (uu === 0) {
+    CLOSEST[0] = 0;
+    CLOSEST[1] = clamped(vw / vv);
+    return;
+  }
+  if (vv === 0) {
+    CLOSEST[0] = clamped(-uw / uu);
+    CLOSEST[1] = 0;
+    return;
+  }
+  const uv = ux * vx + uy * vy + uz * vz;
+  const denominator = uu * vv - uv * uv;
+  // Zero when the two are parallel, and then there is no unique answer.
+  let s = denominator === 0 ? 0 : clamped((uv * vw - uw * vv) / denominator);
+  let t = (uv * s + vw) / vv;
+  // The unconstrained answer can leave the square on `t`. Pin it to the end
+  // it left by and find the best `s` for that, which is a one-dimensional
+  // problem and has a closed form.
+  if (t < 0) {
+    t = 0;
+    s = clamped(-uw / uu);
+  } else if (t > 1) {
+    t = 1;
+    s = clamped((uv - uw) / uu);
+  }
+  CLOSEST[0] = s;
+  CLOSEST[1] = t;
 }
 
 /** How far a point is inside a box, or 0 if it is not. Nearest face. */

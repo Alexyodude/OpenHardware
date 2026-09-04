@@ -827,3 +827,907 @@ def test_a_node_at_a_spheres_centre_leaves_by_the_two_radii_together(tmp_path):
     assert result["landed"] == [0, result["ballRadius"] + result["radius"], 0], (
         result["landed"]
     )
+
+
+def test_the_distance_between_two_segments_is_the_one_worked_out_by_hand(tmp_path):
+    """**OH-162 step 2 rests on this and nothing else in the file needed it.**
+
+    Two leads crossing at right angles have no node anywhere near each other
+    and still occupy the same space, so wire against wire is a test between
+    SEGMENTS. That is a different piece of arithmetic from anything here: the
+    squared distance minimised over a unit square, clamped back onto it where
+    the free minimum falls outside.
+
+    Five placements, each with an answer that can be checked without running
+    a solver:
+
+    | placement                        | distance   |
+    |----------------------------------|------------|
+    | perpendicular, one above         | 0.5        |
+    | parallel, side by side           | 0.75       |
+    | skew, closest at neither middle  | sqrt(13)   |
+    | one stopping short of the other  | 16         |
+    | a lead whose nodes all coincide  | 3          |
+
+    **They do NOT reach five different branches, and a first version of this
+    table said they did.** `nearestNeighbour` measures from a NODE, so the
+    first of the two things is always a point, and the solver returns at its
+    zero-length guard on every row above -- including the first. What the
+    five check is the answer, not the path to it; the paragraph below says
+    which test reaches which branch.
+
+    Nothing is stepped. Every node is placed, so each answer is arithmetic and
+    not the emergent shape of a settle, and a reader can check the table with
+    a pencil.
+
+    **The third and fourth were wrong when first written down and the code was
+    right.** `nearestNeighbour` measures from this wire's FREE nodes, and a
+    three-node rope has one; the numbers assumed an endpoint. Recorded because
+    the temptation on a disagreement is to trust the expectation.
+
+    **What this catches, and what it does NOT, run rather than assumed**
+    (2026-09-05). One mutation dies here: `clamped` returning its argument,
+    which fails `stoppingShort`. Four that a first draft of this docstring
+    claimed do not -- the parallel guard, either zero-length guard, and both
+    end clamps all survive every assertion above.
+
+    The reason is structural and worth knowing before writing another case
+    into this test. `nearestNeighbour` measures from a NODE, so the first of
+    the two things is always a point, and the solver takes its zero-length
+    branch before any of those four can run. Reaching them needs two real
+    segments, which means going through the pushing path:
+    `test_the_solver_parts_the_shapes_with_no_single_closest_point` and
+    `test_a_contact_off_the_end_of_a_segment_is_measured_to_the_end` are
+    where they die.
+    """
+    result = run(tmp_path, """
+        // A rope with every node placed rather than solved.
+        function laid(points) {
+          const rope = new Rope(points[0], points[points.length - 1],
+                                points.length);
+          for (let i = 0; i < points.length; i++) {
+            for (let axis = 0; axis < 3; axis++) {
+              rope.position[i * 3 + axis] = points[i][axis];
+              rope.previous[i * 3 + axis] = points[i][axis];
+            }
+          }
+          return rope;
+        }
+        function apart(oneAt, twoAt) {
+          const one = laid(oneAt);
+          const two = laid(twoAt);
+          // The array a caller hands every wire includes the wire itself.
+          one.neighbours = [one, two];
+          return one.nearestNeighbour();
+        }
+        console.log(JSON.stringify({
+          perpendicular: apart([[-5, 0.5, 0], [0, 0.5, 0], [5, 0.5, 0]],
+                               [[0, 0, -5], [0, 0, 0], [0, 0, 5]]),
+          parallel: apart([[-5, 0, 0], [0, 0, 0], [5, 0, 0]],
+                          [[-5, 0, 0.75], [0, 0, 0.75], [5, 0, 0.75]]),
+          skew: apart([[-5, 0, 0], [0, 0, 0], [5, 0, 0]],
+                      [[3, 2, -5], [3, 2, 0], [3, 2, 5]]),
+          stoppingShort: apart([[0, 0, 0], [4, 0, 0], [8, 0, 0]],
+                               [[20, 0, 0], [23, 0, 0], [26, 0, 0]]),
+          coincident: apart([[-5, 0, 0], [0, 0, 0], [5, 0, 0]],
+                            [[0, 3, 0], [0, 3, 0], [0, 3, 0]]),
+        }));
+    """)
+    assert result["perpendicular"] == 0.5, result["perpendicular"]
+    assert result["parallel"] == 0.75, result["parallel"]
+    assert abs(result["skew"] - 13 ** 0.5) < 1e-12, result["skew"]
+    assert result["stoppingShort"] == 16, result["stoppingShort"]
+    assert result["coincident"] == 3, result["coincident"]
+
+
+def test_one_pass_parts_a_crossing_and_leaves_the_other_wire_where_it_was(tmp_path):
+    """**This wire moves and the other does not, which looks one-sided.**
+
+    It is not. Every wire on the bench is advanced every frame in the
+    renderer's own loop, so each pushes itself off the others in its turn and
+    the pair separates. Writing into another rope's array would make `step`
+    depend on the order the caller happens to step in, and would let one
+    rope's step change a rope the caller has already stepped this frame.
+
+    So one unstepped pass, on a crossing 0.1 apart that wants 0.32: the
+    pushed wire must clear, and the other must be untouched to the bit.
+
+    **A contact at a pinned end moves nothing**, which is the same rule the
+    rest of this file follows -- a pad and a terminal are placed by whoever
+    placed them. The share of a correction is weighted by how near the contact
+    is to each end of the segment, so a contact exactly on a pinned node gives
+    the free end a share of zero and the pass declines rather than inventing
+    somewhere to put it. The other wire will part from it in its own turn.
+
+    **`shares` is the arithmetic with nothing else in it**, and it is here
+    because the first version of this test could not see a real defect. Two
+    leads crossing touch on several segment pairs at once, so a correction of
+    the wrong size still adds up to enough over four pushes, and both a share
+    scaled wrongly and a pinned end taking one survived it.
+
+    So the fixture is placed so that each contact is the ONLY pair within a
+    tube of its segment: a seven-node lead along x, and three leads standing
+    at x = 0.5, 3.5 and 5.5 running away in z. Each meets the middle of one
+    segment and is 0.5385 from the next, past the 0.32 that would bring it
+    into reach. Every number is then closed form -- 0.2 apart wanting 0.32 is
+    a push of 0.12, and each end that may move takes half, which is 0.06.
+
+    **Three shares in one fixture**, which is the point: the first contact is
+    on the HEAD segment, the last on the TAIL segment, and the middle one
+    between two free nodes. The tail's exemption was asserted by nothing at
+    all until this, and the head's only incidentally, through a separation
+    bound rather than a statement about where the head is.
+
+    **Nine mutations die here, 2026-09-05, and four of them nowhere else**:
+    the wanted separation taken as twice the THICKER lead rather than the sum
+    of both, which every other fixture in this file hides by giving the two
+    ropes the same radius; the pinned HEAD taking a share; the pinned TAIL
+    taking a share, which survived every fixture in the file until the
+    seven-node lead above put a contact on the last segment; and a contact
+    exactly on a pinned node being resolved rather than declined. The rest
+    are the correction written into the other rope, the division restored
+    with a floor under its divisor, the separation taken as one radius, and
+    either bounds rejection inverted.
+    """
+    result = run(tmp_path, """
+        const R = 0.16;
+        function laid(points, radius) {
+          const rope = new Rope(points[0], points[points.length - 1],
+                                points.length);
+          for (let i = 0; i < points.length; i++) {
+            for (let axis = 0; axis < 3; axis++) {
+              rope.position[i * 3 + axis] = points[i][axis];
+              rope.previous[i * 3 + axis] = points[i][axis];
+            }
+          }
+          rope.radius = radius;
+          return rope;
+        }
+        // A crossing 0.1 apart in y, which two 0.16 tubes cannot have.
+        const one = laid([[-5, 0.1, 0], [0, 0.1, 0], [5, 0.1, 0]], R);
+        const two = laid([[0, 0, -5], [0, 0, 0], [0, 0, 5]], R);
+        one.neighbours = [one, two];
+        const before = one.nearestNeighbour();
+        const twoWas = Array.from(two.position);
+        const headWas = one.point(0);
+        one.offNeighbours();
+        // And the same crossing placed exactly under the pinned head.
+        const three = laid([[0, 0.1, 0], [5, 0.1, 0], [10, 0.1, 0]], R);
+        const four = laid([[0, 0, -5], [0, 0, 0], [0, 0, 5]], R);
+        three.neighbours = [three, four];
+        const threeWas = Array.from(three.position);
+        three.offNeighbours();
+        // **Two different thicknesses**, which every other fixture in this
+        // file gives the same value to -- so `Math.max(a, b) * 2` in place of
+        // `a + b` passed the whole suite until the review said so. A 0.16
+        // lead against an 0.08 one wants 0.24 between their centres, which
+        // is neither twice the one nor twice the other.
+        const thick = laid([[-5, 0.1, 0], [0, 0.1, 0], [5, 0.1, 0]], R);
+        const thin = laid([[0, 0, -5], [0, 0, 0], [0, 0, 5]], R / 2);
+        thick.neighbours = [thick, thin];
+        thick.offNeighbours();
+        // **One contact on each of three segments, and no two interacting.**
+        // A seven-node lead along x, and three leads standing at x = 0.5,
+        // 3.5 and 5.5 running away in z, so each meets the middle of exactly
+        // one of the lead's segments and is 0.539 from the next -- past the
+        // 0.32 that would bring it into reach. Every contact is 0.2 from its
+        // neighbour and wants 0.32, so each pushes 0.12 and every end that
+        // may move takes half of it.
+        //
+        // The first lands on the HEAD segment, the last on the TAIL segment,
+        // and the middle one between two free nodes, so one fixture pins all
+        // three shares at once.
+        const lead = laid([[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0],
+                           [4, 0, 0], [5, 0, 0], [6, 0, 0]], R);
+        const standingAt = (x) => laid([[x, 0.2, 0], [x, 0.2, 1], [x, 0.2, 2]], R);
+        lead.neighbours = [lead, standingAt(0.5), standingAt(3.5), standingAt(5.5)];
+        lead.offNeighbours();
+        console.log(JSON.stringify({
+          want: R * 2, before, after: one.nearestNeighbour(),
+          theOtherMoved: twoWas.some((v, i) => v !== two.position[i]),
+          headMoved: headWas.some((v, i) => v !== one.point(0)[i]),
+          movedNodeY: one.position[4],
+          pinnedHead: [threeWas[0], threeWas[1], threeWas[2]],
+          pinnedHeadNow: three.point(0),
+          shares: {
+            nodes: [lead.point(0), lead.point(1), lead.point(2), lead.point(3),
+                    lead.point(4), lead.point(5), lead.point(6)],
+          },
+          mixed: {
+            wanted: R + R / 2, twiceTheThick: R * 2, twiceTheThin: R,
+            movedTo: thick.position[4],
+          },
+        }));
+    """)
+    # It was too close, and one pass is enough to part it.
+    assert result["before"] < result["want"], result["before"]
+    assert result["after"] >= result["want"], (
+        f"one pass left the crossing {result['after']} apart, and two tubes "
+        f"need {result['want']}"
+    )
+    # The other wire is read and never written.
+    assert result["theOtherMoved"] is False
+    # Pinned ends are not this file's to move, here as everywhere else.
+    assert result["headMoved"] is False
+    assert result["pinnedHeadNow"] == result["pinnedHead"], result["pinnedHeadNow"]
+    # The crossing opens upward, which is the only way it can: the two leads
+    # are along x and along z, so the axis between them is y.
+    assert result["movedNodeY"] >= result["want"], result["movedNodeY"]
+    # And the closed-form one, exactly. Each contact is 0.2 from its
+    # neighbour and wants 0.32, so each pushes 0.12 and every end that may
+    # move takes half of it. **Under, and on purpose**: resolving the whole
+    # 0.12 in one pass means dividing by how far the contact travels, which
+    # is `s * s` on a segment with a pinned end and sends a wire to 1e17.
+    #
+    # Both pins are asserted, and the tail one is here because a mutation
+    # that let the tail take a share survived every other fixture in this
+    # file -- all of them put their crossing on a segment away from it.
+    assert result["shares"]["nodes"] == [
+        [0, 0, 0],        # the pinned head, which takes no share
+        [1, -0.06, 0],    # its free neighbour, which takes the whole half
+        [2, 0, 0],        # nothing reaches this one
+        [3, -0.06, 0],    # two free ends, sharing evenly
+        [4, -0.06, 0],
+        [5, -0.06, 0],    # the tail's free neighbour
+        [6, 0, 0],        # the pinned tail, which takes no share either
+    ], result["shares"]["nodes"]
+    # Two thicknesses, parted by the SUM and not by twice either of them.
+    # Measured 0.24009 against a wanted 0.24, a twice-the-thick 0.32 and a
+    # twice-the-thin 0.16, so the three are told apart by one number.
+    mixed = result["mixed"]
+    assert mixed["movedTo"] >= mixed["wanted"], mixed
+    assert mixed["movedTo"] < mixed["twiceTheThick"], (
+        "a 0.16 lead and an 0.08 one parted by twice the thicker, so the "
+        "separation is a maximum where it should be a sum"
+    )
+    assert mixed["movedTo"] > mixed["twiceTheThin"], mixed
+
+
+def test_the_solver_parts_the_shapes_with_no_single_closest_point(tmp_path):
+    """**Four placements where "the closest pair of points" is not a pair**,
+    and each reaches a branch that the by-hand distance test above cannot.
+
+    That test measures from a NODE, so the first of the two things is always a
+    point and three branches are unreachable through it. The mutation run said
+    so: dropping the parallel guard, either zero-length guard, or the
+    cross-product fallback all survived it. These go through the pushing path
+    instead, where both things are real segments.
+
+    | placement                              | branch it reaches         |
+    |----------------------------------------|---------------------------|
+    | parallel and overlapping, 0.2 apart    | no unique answer at all   |
+    | meeting EXACTLY, so the gap is 0       | no direction in the gap   |
+    | a wire as it is MADE, every node alike | zero-length on this side  |
+    | a real wire against one of those       | zero-length on that side  |
+
+    The third is not contrived, and it is on the live path rather than near
+    it. **A wire begins with both ends on the same pad** -- `slacken`'s own
+    docstring says so, and `board3d.js`'s `beginWire` builds exactly that,
+    `new Rope(start, end ?? start.slice())` -- so every node coincides and
+    every segment has zero length for as long as the drag has not moved. That
+    rope is pushed into `view.wires` immediately, so on the very next frame
+    every other lead on the bench is solving against it. A solver that divides
+    by that length answers `NaN`, and a `NaN` position is a wire that vanishes
+    from the scene and never comes back.
+
+    Measured 2026-09-05, one pass each, nothing stepped: 0.2 becomes 0.32009,
+    0 becomes 0.32066, 0.1 becomes 0.32 exactly, and 0.1 becomes 0.32031. The
+    assertion is the bound and not those numbers, because how much past 0.32 a
+    pass lands is a property of how many segment pairs happened to be in
+    reach. Every coordinate is checked to be a finite number as well, which is
+    the assertion the two zero-length guards actually fail.
+
+    **Ten mutations die here, 2026-09-05, and four of them nowhere else**:
+    either zero-length guard dropped, the cross-product fallback replaced by
+    no push at all, and the same fallback pushing by HALF what it should --
+    which survived until `fallbackMagnitude` was added, because a lower bound
+    satisfied between several segment pairs cannot see a magnitude. The other
+    six die elsewhere too: the parallel guard dropped, `clamped` not
+    clamping, the division restored behind a floor, the separation taken as
+    one radius, and either bounds rejection inverted.
+    """
+    result = run(tmp_path, """
+        const R = 0.16;
+        function laid(points) {
+          const rope = new Rope(points[0], points[points.length - 1],
+                                points.length);
+          for (let i = 0; i < points.length; i++) {
+            for (let axis = 0; axis < 3; axis++) {
+              rope.position[i * 3 + axis] = points[i][axis];
+              rope.previous[i * 3 + axis] = points[i][axis];
+            }
+          }
+          rope.radius = R;
+          return rope;
+        }
+        function finite(rope) {
+          for (let i = 0; i < rope.position.length; i++) {
+            if (!Number.isFinite(rope.position[i])) return false;
+          }
+          return true;
+        }
+        function part(one, two) {
+          one.neighbours = [one, two];
+          const before = one.nearestNeighbour();
+          one.offNeighbours();
+          return { before, after: one.nearestNeighbour(), finite: finite(one) };
+        }
+        // Both ends on the same pad, which is how every wire starts.
+        function freshAt(at) {
+          const rope = new Rope(at, at);
+          rope.radius = R;
+          return rope;
+        }
+        function freshlyMade() { return freshAt([0, 1, 0]); }
+        console.log(JSON.stringify({
+          want: R * 2,
+          parallel: part(laid([[-5, 0, 0], [0, 0, 0], [5, 0, 0]]),
+                         laid([[-5, 0.2, 0], [0, 0.2, 0], [5, 0.2, 0]])),
+          exactlyCrossing: part(laid([[-5, 0, 0], [0, 0, 0], [5, 0, 0]]),
+                                laid([[0, 0, -5], [0, 0, 0], [0, 0, 5]])),
+          freshlyMade: part(freshlyMade(),
+                            laid([[-5, 0.9, 0], [0, 0.9, 0], [5, 0.9, 0]])),
+          againstAFreshOne: part(laid([[-5, 0.9, 0], [0, 0.9, 0], [5, 0.9, 0]]),
+                                 freshlyMade()),
+          // The same just-made wire placed just PAST the far end of its
+          // neighbour, and just before its near end. Both conditions at once
+          // -- no length on this side, and a contact off the end of that one
+          // -- and it is the pair only the zero-length guard handles.
+          freshPastTheEnd: part(freshAt([2.1, 0.1, 0]),
+                                laid([[0, 0, 0], [1, 0, 0], [2, 0, 0]])),
+          freshBeforeTheStart: part(freshAt([-0.1, 0.1, 0]),
+                                    laid([[0, 0, 0], [1, 0, 0], [2, 0, 0]])),
+          // The fallback's MAGNITUDE, which the `exactlyCrossing` bound above
+          // cannot see. One pair only: a five-node lead along x, and a second
+          // starting on it and running away in z, so its first segment meets
+          // the middle of a free-free segment exactly and its second is a
+          // whole unit away. The push has no direction in the positions, so
+          // it is taken perpendicular to both leads at the full separation,
+          // shared evenly: each end moves half of 0.32.
+          fallbackMagnitude: (() => {
+            const along = laid([[0, 0, 0], [1, 0, 0], [2, 0, 0],
+                                [3, 0, 0], [4, 0, 0]]);
+            const across = laid([[1.5, 0, 0], [1.5, 0, 1], [1.5, 0, 2]]);
+            along.neighbours = [along, across];
+            along.offNeighbours();
+            return {nodes: [along.point(0), along.point(1),
+                            along.point(2), along.point(3)]};
+          })(),
+        }));
+    """)
+    want = result["want"]
+    # Each was too close to begin with, or the fixture proves nothing.
+    assert result["parallel"]["before"] < want, result["parallel"]
+    assert result["exactlyCrossing"]["before"] == 0, result["exactlyCrossing"]
+    assert result["freshlyMade"]["before"] < want, result["freshlyMade"]
+    assert result["againstAFreshOne"]["before"] < want, result["againstAFreshOne"]
+    # One pass parts every one of them. **The ulp is not slack**: a pass aims
+    # a node at exactly `want` from the other lead, and measuring the gap
+    # again from the moved coordinates need not give that number back. The
+    # just-made wire lands on 0.9 + 0.32, and 1.22 less 0.9 is
+    # 0.31999999999999995. Five parts in 10^17 of a tube is not an overlap.
+    close = want - 1e-12
+    assert result["parallel"]["after"] >= close, result["parallel"]
+    assert result["exactlyCrossing"]["after"] >= close, result["exactlyCrossing"]
+    assert result["freshlyMade"]["after"] >= close, result["freshlyMade"]
+    assert result["againstAFreshOne"]["after"] >= close, result["againstAFreshOne"]
+    # And a wire whose position is not a number has left the scene for good.
+    assert result["parallel"]["finite"], "a parallel pair divided by zero"
+    assert result["exactlyCrossing"]["finite"], "an exact crossing divided by zero"
+    assert result["freshlyMade"]["finite"], "a just-made wire divided by zero"
+    assert result["againstAFreshOne"]["finite"], "a just-made neighbour did"
+    # **These two are the ones that actually fail without the guard**, and the
+    # first three do not: a zero-length segment only reaches the division when
+    # the contact ALSO falls off the end of the other segment. Every
+    # coordinate of the wire becomes NaN, which is a lead that leaves the
+    # scene and never comes back.
+    assert result["freshPastTheEnd"]["finite"], (
+        "a just-made wire past the end of its neighbour divided by zero"
+    )
+    assert result["freshBeforeTheStart"]["finite"], (
+        "a just-made wire before the start of its neighbour divided by zero"
+    )
+    assert result["freshPastTheEnd"]["after"] >= close, result["freshPastTheEnd"]
+    assert result["freshBeforeTheStart"]["after"] >= close, (
+        result["freshBeforeTheStart"]
+    )
+    # **And the fallback's magnitude, exactly.** A bound cannot see it: the
+    # crossing above is resolved by several segment pairs between them, so
+    # halving the one push that has no direction in the positions is
+    # invisible there. Here there is one pair, the contact is the middle of a
+    # segment with two free ends, and each end takes half of 0.32.
+    assert result["fallbackMagnitude"]["nodes"] == [
+        [0, 0, 0], [1, -0.16, 0], [2, -0.16, 0], [3, 0, 0],
+    ], result["fallbackMagnitude"]["nodes"]
+
+
+def test_a_contact_off_the_end_of_a_segment_is_measured_to_the_end(tmp_path):
+    """**A segment is not the line through it, and a bound cannot see the
+    difference.**
+
+    Where the nearest point of the infinite line lies beyond the segment's
+    end, the answer is the end. Drop that and the solver parts the leads along
+    the wrong axis -- and it still parts them, by MORE than they need, so
+    every "at least two radii" assertion in this file passes and the mutation
+    survives. The gap has to be asserted as the number it is.
+
+    Measured 2026-09-05, one unstepped pass on a single pair placed so the
+    contact falls 0.25 before the neighbour's first node:
+
+    | | free node lands at | gap |
+    |---|---|---|
+    | as it stands   | 1.5, 0.0628, -0.3138 | 0.32 exactly |
+    | without the pin | 1.5, 0.32, -0.25    | 0.4061       |
+
+    The second is a lead shoved straight up when the thing it is avoiding is
+    off to one side, which is both wrong and invisible to a reader looking at
+    a settled scene.
+
+    **Mutations run, 2026-09-05**, failing here: the `t < 0` pin dropped, and
+    `clamped` returning its argument.
+    """
+    result = run(tmp_path, """
+        const R = 0.16;
+        function laid(points) {
+          const rope = new Rope(points[0], points[points.length - 1],
+                                points.length);
+          for (let i = 0; i < points.length; i++) {
+            for (let axis = 0; axis < 3; axis++) {
+              rope.position[i * 3 + axis] = points[i][axis];
+              rope.previous[i * 3 + axis] = points[i][axis];
+            }
+          }
+          rope.radius = R;
+          return rope;
+        }
+        // One lead lying across the z axis short of the origin, and a second
+        // that STARTS at the origin and runs away from it. The nearest point
+        // of the line through the second is at negative z, off its end.
+        const one = laid([[1.5, 0.05, -0.6], [1.5, 0.05, -0.25], [1.5, 0.05, 0.1]]);
+        const two = laid([[1.5, 0, 0], [1.5, 0, 1], [1.5, 0, 2]]);
+        one.neighbours = [one, two];
+        const before = one.nearestNeighbour();
+        one.offNeighbours();
+        console.log(JSON.stringify({
+          want: R * 2, before, after: one.nearestNeighbour(),
+          moved: one.point(1),
+        }));
+    """)
+    assert result["before"] < result["want"], result["before"]
+    # Exactly the wanted gap, not merely at least it: parting along the wrong
+    # axis overshoots to 0.4061 and would satisfy any lower bound.
+    assert abs(result["after"] - result["want"]) < 1e-9, (
+        f"one pass left the pair {result['after']} apart, wanting exactly "
+        f"{result['want']}; a bigger number here means the contact was taken "
+        f"off the end of the segment rather than at it"
+    )
+    # And where it went, which is the other half of the table above and was
+    # collected without being asserted until the review said so. Parting
+    # along the wrong axis sends it to (1.5, 0.32, -0.25) instead.
+    assert result["moved"][0] == 1.5, result["moved"]
+    assert abs(result["moved"][1] - 0.062757163) < 1e-9, result["moved"]
+    assert abs(result["moved"][2] + 0.313785816) < 1e-9, result["moved"]
+
+
+def test_a_wire_pushed_off_a_wire_is_never_left_inside_the_board(tmp_path):
+    """**A lead pinned LOW across another is what shows this, not a crowd.**
+
+    A lead pushed off a lead can be pushed into the board, so `step` resolves
+    the solids once more after the wire pass. Finding a fixture that proves
+    that line is needed took three tries, and the two that failed are worth
+    recording because both looked convincing.
+
+    Leads crossing each other in mid-air push each other sideways and upward
+    and their ends rise out of the way, so it takes a great many of them
+    before the board is reached at all. A lead whose own ends are PINNED at
+    the height the lower one rests at has nowhere to send it but down, and
+    four of those do what twelve of the others barely manage.
+
+    Measured 2026-09-05, worst `contact().inside` over 600 frames, watched on
+    every frame because the transient is where a push is largest:
+
+    | fixture                                   | with it | without it |
+    |-------------------------------------------|---------|------------|
+    | six leads crossing on a slab              | 0       | 0          |
+    | six dropped on a chip                     | 0       | 0          |
+    | twelve leads crossing on a slab           | 0       | 0.2273     |
+    | four pinned at 0.16 over a resting lead   | 0       | 0.0853     |
+    | ten pinned at 0.16 over a resting lead    | 0       | 0.1057     |
+
+    **A first version of this docstring said mid-air crossings never reach
+    the board however many there are.** They do at twelve; six was simply too
+    few. The fixture below is the pinned one because four of those is cheaper
+    than twelve of anything.
+
+    Zero is the pass, as everywhere `inside` appears in this file.
+
+    **The first two rows used to read 0.1834 and 0.2614**, and they did while
+    a pass resolved each contact in full. The review's blocker took that
+    division out, corrections got smaller, and the fixture that had been
+    catching this stopped catching anything -- which is why the numbers above
+    are the second set measured and not the first.
+
+    Two mutations die here, 2026-09-05: the solids never resolved again after
+    the wire pass, and a rope offered itself as a neighbour. Neither only
+    here, but this is the fixture the first was written for.
+    """
+    result = run(tmp_path, """
+        const R = 0.16;
+        const slab = {kind: "box", min: [-20, -0.9, -20], max: [20, 0, 20]};
+        // One lead along x, which settles resting on the slab.
+        const under = new Rope([-8, 0.04, 0], [8, 0.04, 0]);
+        under.colliders = [slab];
+        under.floor = -2;
+        under.radius = R;
+        under.slacken();
+        const ropes = [under];
+        // Four crossing it, pinned at the height it rests at, so their ends
+        // cannot rise out of the way and it has nowhere to go but down.
+        for (let w = 0; w < 4; w++) {
+          const z = -6 + w * 3;
+          const rope = new Rope([-1 + w * 0.3, R, z], [1 + w * 0.3, R, z + 12]);
+          rope.colliders = [slab];
+          rope.floor = -2;
+          rope.radius = R;
+          rope.slacken();
+          ropes.push(rope);
+        }
+        for (const rope of ropes) rope.neighbours = ropes;
+        let worst = 0;
+        let worstFrame = -1;
+        for (let f = 0; f < 600; f++) {
+          for (const rope of ropes) rope.advance(1 / 60);
+          for (const rope of ropes) {
+            const inside = rope.contact().inside;
+            if (inside > worst) { worst = inside; worstFrame = f; }
+          }
+        }
+        console.log(JSON.stringify({worst, worstFrame, wires: ropes.length}));
+    """)
+    assert result["worst"] == 0, (
+        f"a node was {result['worst']} inside the board on frame "
+        f"{result['worstFrame']}; the solids are not resolved again after the "
+        f"wire pass"
+    )
+
+
+def test_two_leads_crossed_at_right_angles_do_not_occupy_the_same_space(tmp_path):
+    """**The ticket's own Done-when for OH-162 step 2, in its own words:**
+    "two leads crossed at right angles settle with a centre gap of at least
+    2 x radius at the crossing".
+
+    Measured 2026-09-05, two 16-unit leads pinned on pads over a board slab,
+    crossed at the middle, 900 frames at 1/60:
+
+    | | never told a radius | told 0.16 |
+    |---|---|---|
+    | nearest centre to centre | 0.2243 | 0.4086 |
+    | needed for two tubes     | --     | 0.32   |
+    | `inside`, both wires     | 0      | 0      |
+
+    0.4086 rather than something nearer 0.32 because a lead that has been
+    pushed off another is also being held up by it: the upper one rests on
+    the lower and the pair sits a little further apart than the minimum. What
+    is asserted is the minimum, since where above it they land is the shape
+    the solver finds and not a specification.
+
+    **The minimum is exact for two leads left alone and approximate under a
+    sustained press**, which is the price of under-correcting rather than
+    resolving each contact in full. The resting state is where one pass's
+    push balances one frame of gravity: measured at 1,200 frames, one lead
+    pressing on another settles 0.3293 apart, four 0.3203 and ten 0.3192, the
+    last a quarter of one per cent short of what two tubes want. Bounded, not
+    drifting, and `partSegments` says so beside the arithmetic.
+
+    The control is the point: without it they settle 0.2243 apart, which is
+    less than one tube across, so the two leads really are in the same place
+    and a picture of them is a lie. It is not zero because two leads sagging
+    onto a board cross at slightly different heights anyway -- which is
+    exactly why "they look about right" was never evidence.
+
+    `inside` staying 0 is the other half. A lead pushed off a lead can be
+    pushed into the board, so `step` resolves the solids once more after the
+    wire pass, and this is the assertion that says it worked.
+
+    `clear` is the fixture that must report nothing: two leads told a radius
+    with forty units between them, neither moved by a single bit.
+
+    **Four mutations die here, 2026-09-05**: the wire pass never called from
+    `step`; either bounds rejection inverted, whole-rope or per-segment,
+    which drops the pairs that are actually close; and `clamped` not
+    clamping. None of the four dies only here.
+
+    **Two that a first draft claimed die here and do not.** The pass called
+    but its result ignored, so the solids never resolve again: two leads do
+    not push each other into the board, and what does is a lead pinned low
+    across another, in
+    `test_a_wire_pushed_off_a_wire_is_never_left_inside_the_board`. And the
+    correction written into the other rope as well, which this fixture is too
+    forgiving to notice.
+    """
+    result = run(tmp_path, """
+        const R = 0.16;
+        const slab = {kind: "box", min: [-20, -0.9, -20], max: [20, 0, 20]};
+        function crossed(radius) {
+          const one = new Rope([-8, 0.04, 0], [8, 0.04, 0]);
+          const two = new Rope([0, 0.04, -8], [0, 0.04, 8]);
+          for (const rope of [one, two]) {
+            rope.colliders = [slab];
+            rope.floor = -2;
+            rope.radius = radius;
+            rope.slacken();
+          }
+          one.neighbours = [one, two];
+          two.neighbours = [one, two];
+          for (let f = 0; f < 900; f++) { one.advance(1 / 60); two.advance(1 / 60); }
+          return {
+            nearest: one.nearestNeighbour(),
+            oneInside: one.contact().inside,
+            twoInside: two.contact().inside,
+          };
+        }
+        // Forty units apart and told a radius: nothing may happen at all.
+        const far = new Rope([-5, 0.04, 0], [5, 0.04, 0]);
+        const alsoFar = new Rope([-5, 40, 0], [5, 40, 0]);
+        for (const rope of [far, alsoFar]) { rope.radius = R; rope.floor = -50; }
+        far.neighbours = [far, alsoFar];
+        const farWas = Array.from(far.position);
+        far.offNeighbours();
+        console.log(JSON.stringify({
+          want: R * 2, bare: crossed(0), told: crossed(R),
+          clearMoved: farWas.some((v, i) => v !== far.position[i]),
+          clearApart: far.nearestNeighbour(),
+        }));
+    """)
+    # The control: two leads in the same place, and it is not zero, which is
+    # why looking at them was never going to settle it.
+    assert result["bare"]["nearest"] < result["want"], result["bare"]
+    # The ticket's sentence.
+    assert result["told"]["nearest"] >= result["want"], (
+        f"two crossed leads settled {result['told']['nearest']} apart, and "
+        f"two tubes need {result['want']}"
+    )
+    # Pushed off a wire, not into the board.
+    assert result["told"]["oneInside"] == 0, result["told"]
+    assert result["told"]["twoInside"] == 0, result["told"]
+    # The fixture that must report nothing. 39.96 and not 40: the near wire
+    # is pinned at a pad's own height, 0.04 above the slab, like the others.
+    assert result["clearMoved"] is False
+    assert abs(result["clearApart"] - (40 - 0.04)) < 1e-12, result["clearApart"]
+
+
+def test_a_wire_pushed_off_another_wire_still_comes_to_rest(tmp_path):
+    """**The one way a Verlet chain fails, asked again now that two of them
+    push each other.**
+
+    `test_a_hanging_wire_loses_energy_rather_than_gaining_it` covers a wire on
+    its own. Two wires resolving against each other are a different system:
+    each treats the other as fixed for the length of its own step, so each can
+    overshoot what the other has just done, and a pair like that can sit in a
+    limit cycle for ever without either one gaining energy on its own.
+
+    Measured 2026-09-05, the crossed pair above. It does not settle as flatly
+    as a lone wire and it does settle: energy peaks at 5.4e-4 after the first
+    two hundred frames, wanders down unevenly, and reaches 1.9e-13 by three
+    thousand frames and 2.1e-27 by six thousand.
+
+    **That wander is the price of resolving wire against wire once a step
+    instead of once a constraint pass**, and the trade is recorded in `step`
+    with the numbers behind it. Once a pass is 5.2 times dearer and settles a
+    crowded bench WORSE, not better.
+
+    Asserted as a bound and a decay rather than a fixed number, because the
+    exact figure is a property of the damping. Three thousand frames of two
+    ropes is about a fifth of a second here.
+
+    **Nine mutations die here, 2026-09-05**, none of them only here: the
+    `t < 0` clamp dropped, `clamped` not clamping, the correction written into
+    the other rope, the separation taken as one radius, the pass never
+    running, the solids never resolved again after it, either bounds
+    rejection inverted, and a rope offered ITSELF as a neighbour -- a wire
+    resolving against its own segments pushes every node away from its own
+    neighbours for ever, which no gap assertion notices because the gap it
+    reports is to another wire.
+    """
+    result = run(tmp_path, """
+        const R = 0.16;
+        const slab = {kind: "box", min: [-20, -0.9, -20], max: [20, 0, 20]};
+        const one = new Rope([-8, 0.04, 0], [8, 0.04, 0]);
+        const two = new Rope([0, 0.04, -8], [0, 0.04, 8]);
+        for (const rope of [one, two]) {
+          rope.colliders = [slab];
+          rope.floor = -2;
+          rope.radius = R;
+          rope.slacken();
+        }
+        one.neighbours = [one, two];
+        two.neighbours = [one, two];
+        let peak = 0;
+        for (let f = 0; f < 3000; f++) {
+          one.advance(1 / 60);
+          two.advance(1 / 60);
+          // After the drop, which is a real transient and not the question.
+          if (f > 200) peak = Math.max(peak, one.energy(), two.energy());
+        }
+        console.log(JSON.stringify({
+          peak, one: one.energy(), two: two.energy(),
+          nearest: one.nearestNeighbour(), want: R * 2,
+        }));
+    """)
+    assert result["peak"] < 1e-3, f"the pair is swapping pushes: peak {result['peak']}"
+    assert result["one"] < 1e-6, f"one wire is still moving: {result['one']}"
+    assert result["two"] < 1e-6, f"the other is still moving: {result['two']}"
+    # And it settled where it should have, not merely quietly.
+    assert result["nearest"] >= result["want"], result["nearest"]
+
+
+def test_two_wires_pinned_too_close_do_not_leave_the_scene(tmp_path):
+    """**The defect the OH-162 step 2 review found, and it was catastrophic.**
+
+    A pass shared its correction between a segment's two ends and then divided
+    by how far the contact point itself travels, so that one pass resolved the
+    whole overlap. On a HEAD segment that divisor is `s * s`, because the
+    pinned end takes no share -- and a contact near the pinned end therefore
+    sent the free end `push / s` away.
+
+    Two wires can be pinned at the same terminal: `onPointerUp` refuses only a
+    wire's own starting post. Measured on the shipped file, two leads pinned
+    side by side and stepped 600 frames, worst absolute coordinate reached:
+
+    | heads apart | before the fix | now  |
+    |-------------|----------------|------|
+    | 0           | 6.4e17         | 8.23 |
+    | 0.1         | 5.3e6          | 8.26 |
+    | 0.2         | 6.0e4          | 8.16 |
+    | 0.31        | 45.2           | 8.09 |
+    | 0.32        | 8.24           | 8.24 |
+
+    Every separation under the 0.32 two tubes want blew up, not merely the
+    degenerate one, and 8.2 is where the wire actually is: its own length.
+    A reviewer swept the whole range at 0.01 and found the worst of it is not
+    at zero but in the band from 0.12 to 0.18, at 3.7e13; the rows above are
+    four samples of a curve, not its peak. After the fix the same sweep's
+    worst is 8.2607, at 0.11.
+    Nothing saw it -- `nearestNeighbour` excludes pinned ends by design, a
+    finiteness check passes because 1e17 is a number, and the energy bounds
+    were only ever asserted on the crossed pair.
+
+    The fix is not a floor on the divisor. A floor at 1e-6 still let 0.1 apart
+    reach 220, because the band between is bad too. The division went instead:
+    a pass under-corrects and the overlap comes out over the following steps,
+    which cannot diverge because nothing is divided.
+
+    **Three mutations die here, 2026-09-05**: the division restored, the
+    division restored while declining whenever its divisor is under 1e-6 --
+    which is the fix that looks obvious and is not enough -- and the parallel
+    guard dropped. None only here; the two division mutations also fail
+    `test_a_crowded_bench_comes_to_rest_and_does_not_stir_for_ever`, which is
+    the same defect showing up as noise rather than as flight.
+    """
+    result = run(tmp_path, """
+        const R = 0.16;
+        function pinnedApart(apartBy) {
+          const one = new Rope([0, 0.04, 0], [8, 0.04, 0]);
+          const two = new Rope([0, 0.04, apartBy], [8, 0.04, apartBy]);
+          for (const rope of [one, two]) {
+            rope.floor = -2;
+            rope.radius = R;
+            rope.slacken();
+          }
+          one.neighbours = [one, two];
+          two.neighbours = [one, two];
+          let worst = 0;
+          for (let f = 0; f < 600; f++) {
+            one.advance(1 / 60);
+            two.advance(1 / 60);
+            for (const rope of [one, two]) {
+              for (let i = 0; i < rope.position.length; i++) {
+                worst = Math.max(worst, Math.abs(rope.position[i]));
+              }
+            }
+          }
+          return worst;
+        }
+        console.log(JSON.stringify({
+          want: R * 2, span: 8,
+          together: pinnedApart(0),
+          tenth: pinnedApart(0.1),
+          fifth: pinnedApart(0.2),
+          nearlyEnough: pinnedApart(0.31),
+          enough: pinnedApart(0.32),
+        }));
+    """)
+    # Nothing may travel further than the wire is long. Ten times its span is
+    # a loose bound on purpose: what this catches is 1e4 and upwards, and a
+    # tight one would fail on a wire that merely swings wide.
+    roomy = result["span"] * 10
+    assert result["together"] < roomy, result["together"]
+    assert result["tenth"] < roomy, result["tenth"]
+    assert result["fifth"] < roomy, result["fifth"]
+    assert result["nearlyEnough"] < roomy, result["nearlyEnough"]
+    assert result["enough"] < roomy, result["enough"]
+
+
+def test_a_crowded_bench_comes_to_rest_and_does_not_stir_for_ever(tmp_path):
+    """**Twelve leads through one point, which is the case that broke twice.**
+
+    Two wires resolving against each other are a different system from one
+    wire, and twelve are a different system again: each treats the others as
+    fixed for the length of its own step, so a crowded pile can keep swapping
+    pushes long after any one of them would have stopped.
+
+    It did. Measured 2026-09-05, peak total energy per thousand frames, while
+    a pass still resolved each contact in full by dividing by how far the
+    contact travels:
+
+    | frames    | six wires | twelve wires |
+    |-----------|-----------|--------------|
+    | 0-1000    | 58.5      | 116          |
+    | 1000-2000 | 2.0e-5    | 10           |
+    | 2000-3000 | 6.2e-8    | 0.316        |
+    | 3000-7000 | to 8.1e-12| between 2.4e-4 and 3.6e-3 |
+    | 7000-8000 | 1.1e-12   | 6.8e-5       |
+
+    Twelve fell five orders and then wandered in a band for five thousand
+    frames. **That was not a property of a crowded bench, which is what a
+    first draft of this docstring said it was. It was the over-correction**,
+    and it went when the division did -- the same change the review's blocker
+    forced. It did settle in the end, about five orders of magnitude more
+    slowly; "for ever" was this docstring overstating its own measurement,
+    which a second reviewer caught by running it to eight thousand frames.
+    The same measurement on the same fixtures now:
+
+    | frames    | six wires | twelve wires |
+    |-----------|-----------|--------------|
+    | 0-1000    | 58.4      | 113          |
+    | 1000-2000 | 9.0e-4    | 1.5e-4       |
+    | 2000-3000 | 1.6e-4    | 5.8e-6       |
+    | 7000-8000 | 1.3e-9    | 8.9e-10      |
+
+    So this asserts rest, not a bound: the last thousand frames of three
+    thousand hold under 1e-3, measured at 5.8e-6, where the first thousand
+    contain a drop of 113.
+
+    Three thousand frames of twelve ropes is about three seconds here, which
+    makes this the most expensive test in the file and is why it stops there
+    rather than at the eight thousand the tables needed.
+
+    **Eight mutations die here, 2026-09-05, and one of them nowhere else**:
+    the `t > 1` clamp dropped. A crowded pile is where a wrong closest point
+    shows up as motion that never stops, and it is the only fixture patient
+    enough to see it. The other seven are the `t < 0` clamp, `clamped` not
+    clamping, the correction written into the other rope, both division
+    mutations, the solids never resolved again, and a rope offered itself.
+    """
+    result = run(tmp_path, """
+        const R = 0.16;
+        const slab = {kind: "box", min: [-20, -0.9, -20], max: [20, 0, 20]};
+        const ropes = [];
+        for (let w = 0; w < 12; w++) {
+          const angle = (w / 12) * Math.PI;
+          const rope = new Rope([-Math.cos(angle) * 8, 0.04, -Math.sin(angle) * 8],
+                                [Math.cos(angle) * 8, 0.04, Math.sin(angle) * 8]);
+          rope.colliders = [slab];
+          rope.floor = -2;
+          rope.radius = R;
+          rope.slacken();
+          ropes.push(rope);
+        }
+        for (const rope of ropes) rope.neighbours = ropes;
+        let dropping = 0;
+        let holding = 0;
+        for (let f = 0; f < 3000; f++) {
+          for (const rope of ropes) rope.advance(1 / 60);
+          let total = 0;
+          for (const rope of ropes) total += rope.energy();
+          if (f < 1000) dropping = Math.max(dropping, total);
+          else if (f >= 2000) holding = Math.max(holding, total);
+        }
+        console.log(JSON.stringify({dropping, holding, wires: ropes.length}));
+    """)
+    assert result["holding"] < 1e-3, (
+        f"twelve crossed leads are still carrying {result['holding']} of "
+        f"energy after two thousand frames, against the drop's "
+        f"{result['dropping']}; a crowded bench has to come to rest and not "
+        f"merely stay bounded"
+    )

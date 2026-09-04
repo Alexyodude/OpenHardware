@@ -600,6 +600,10 @@ const view = {
   bench: null,       // parts and wires; outlives a board change
   parts: [],         // every part on the bench, in the order they arrived
   wires: [],         // every wire, connected or being dragged
+  //: The same wires' ropes, refilled once a frame and handed to each of them
+  //: as what it may not pass through. Derived, never the source of truth:
+  //: see the animation loop, which is the only thing that writes it.
+  ropes: [],
   dragging: null,    // the wire under the pointer, if there is one
   last: 0,           // the previous frame's timestamp, in milliseconds
   palette: {},
@@ -982,9 +986,20 @@ function animate(now = 0) {
   // the one place it stops.
   const delta = view.last ? Math.min((now - view.last) / 1000, 0.25) : 0;
   view.last = now;
+  // **Which other leads a lead may not pass through, refreshed here rather
+  // than where a wire is made** (OH-162 step 2). The set changes when a wire
+  // is added, when one is dropped before it reaches a terminal, and when a
+  // part is removed and takes its wires with it -- three places, each of
+  // which would have had to remember. This loop already reads every wire once
+  // a frame, so a list built here cannot be stale. One array, refilled and
+  // shared: `offNeighbours` skips the rope it belongs to, so every wire can
+  // hold the same one.
+  view.ropes.length = 0;
+  for (const wire of view.wires) view.ropes.push(wire.rope);
   for (const wire of view.wires) {
     wire.rope.moveHead(anchorOf(wire));
     if (wire.terminal) wire.rope.moveTail(vecArray(terminalPoint(wire.terminal)));
+    wire.rope.neighbours = view.ropes;
     wire.rope.advance(delta);
     updateTube(wire.mesh.geometry, wire.rope, WIRE_RADIUS);
   }

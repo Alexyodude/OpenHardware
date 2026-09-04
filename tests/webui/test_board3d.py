@@ -585,6 +585,52 @@ def test_a_wire_is_told_how_thick_it_is_and_not_only_how_thick_to_draw():
     )
 
 
+def test_every_wire_is_told_about_the_others_on_every_frame():
+    """**OH-162 step 2, and the place it is done is the point.**
+
+    A lead may not pass through another lead, so each rope needs the others.
+    Which others there are changes in three places -- a wire made, a wire
+    dropped before it reaches a terminal, and a part removed taking its wires
+    with it -- and a list built at any of them is a list the other two have to
+    remember to update. `animate` already reads every wire once a frame to
+    move its ends, so a list built there cannot go stale.
+
+    Asserted as three facts about that one function: it refills the shared
+    array from `view.wires` rather than keeping a second source of truth, it
+    hands that array to each rope, and it does both BEFORE advancing, or the
+    first wire of the frame would be solved against the previous frame's set.
+
+    One array shared by every rope, not a copy each: `offNeighbours` skips the
+    rope it belongs to, which is what makes that safe and is why the renderer
+    does not have to build a different list per wire.
+
+    Three mutations die here and nowhere else in the suite, 2026-09-05: the
+    list never rebuilt, no rope told about the others, and the list filled
+    after the wires are advanced.
+    """
+    source = RENDERER.read_text(encoding="utf-8")
+    loop = stripped(source.split("function animate(now = 0) {", 1)[1]
+                    .split("\n}", 1)[0])
+    refill = re.compile(r"^\s*view\.ropes\.length = 0;$", re.MULTILINE)
+    assert refill.search(loop), (
+        "the neighbour list is not rebuilt each frame, so a wire added or "
+        "removed leaves every other wire solving against a set that is gone"
+    )
+    hand_over = re.compile(r"^\s*wire\.rope\.neighbours = view\.ropes;$", re.MULTILINE)
+    assert hand_over.search(loop), (
+        "no rope is told about the others, so two leads pass through one"
+    )
+    assert loop.index("view.ropes.push") < loop.index("wire.rope.advance"), (
+        "the list is filled after the wires are advanced, so the first wire "
+        "of every frame is solved against the previous frame's neighbours"
+    )
+    # Derived and not a second source of truth: the only writes are here.
+    assert source.count("view.ropes.push") == 1, (
+        "view.ropes is written in more than one place, which is the staleness "
+        "this arrangement exists to avoid"
+    )
+
+
 def test_a_bench_part_is_drawn_at_the_boards_own_scale():
     """8 px/mm is what a GENERATED board JSON uses, and the Uno's was traced.
 
