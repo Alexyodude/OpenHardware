@@ -911,10 +911,17 @@ _ESP32C5 = (
 _ESP32C6 = (
     zephyr_connector("xiao_esp32c6", flat_gpio),
     arduino_flat("arduino-esp32", "XIAO_ESP32C6", extras=("LED",)),
-    # As the C5 above: four more pads are readable from
-    # `ESP32-C6.kicad_pcb` and wait on OH-161 releasing `esp32c6.py`. Its
-    # `BOOT` is NOT among them -- that net is called simply `BOOT` and names
-    # no pin, where the C5's is `Boot{slash}GPIO28`.
+    # As the C5 above: FIVE more pads are readable from `ESP32-C6.kicad_pcb`
+    # and wait on OH-161 releasing `esp32c6.py` -- MTMS 4, MTDI 5, MTDO 7,
+    # MTCK 6, and BOOT 9.
+    #
+    # **BOOT needs the tracer and not the net names**, which is worth writing
+    # down because a first pass here said it was unreadable. The C5's net is
+    # `Boot{slash}GPIO28` and states the pin; the C6's is called simply
+    # `BOOT`. But the C6 module's own pad on that net is named `GPIO9`, so
+    # `seeed_pcb_traced` answers it where `seeed_pcb` cannot -- two readers
+    # over one file, and which one a label needs is a property of how the
+    # vendor drew that sheet rather than of the label.
 )
 #: The ESP32-S3's JTAG and USB pads, which are the part's and not the board's
 #: (OH-170 US-1). Seeed's own variant names none of them -- it defines
