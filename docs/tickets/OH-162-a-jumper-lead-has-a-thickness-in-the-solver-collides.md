@@ -7,7 +7,6 @@ priority: P2
 created: '2026-09-04'
 touches:
 - webui/static/wires.js
-- webui/static/board3d.js
 - tests/webui/test_wires.py
 ---
 
@@ -188,3 +187,5 @@ Six further mutations against the new test: `payOut`'s guard removed and `payOut
 A first draft of the control asserted that nothing moved at all, and it failed: a settled lead still creeps by parts in a billion under its own weight, so the control is two leads run for the same frames rather than one lead compared with itself.
 
 **NOT done, and it is this step's own words as well as steps 1 and 2's:** no screenshot. Every number here is one measured by running the solver under node.
+
+**Note 2026-09-05:** Claim released on webui/static/board3d.js. It was kept after step 2 on the grounds that step 3 might want the drawn tube to follow a bent lead; step 3 is done, declined, and never touched that file. Step 4 is one photograph of a lead's sag, which retires GRAVITY, DAMPING and SLACK -- all three in webui/static/wires.js -- so nothing left on this ticket needs the renderer. OH-169 needs it to light a board's own LED, and the rule is that no two open tickets claim one file.
