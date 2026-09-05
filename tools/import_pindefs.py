@@ -361,7 +361,14 @@ def read_chip_pins(
         esp32     MTMS 14  MTDI 12  MTDO 15  MTCK 13   2 variants, agree
 
     Agreement inside a chip and difference across chips is what says these are
-    the part's and not the board's. **OH-26's first trap is the opposite
+    the part's and not the board's.
+
+    **And the five are five vendors, not five copies.** `XIAO_ESP32S3_Plus`
+    is Seeed's, `esp32s3usbotg` is Espressif's own development kit,
+    `fobe_quill_esp32s3_mesh` is Fobe's, `kodedot` is Kode Dot's and
+    `uPesy_esp32s3_basic` is uPesy's -- files of 79 to 110 lines that share no
+    text. One of them is the company that makes the silicon, which is as close
+    to a first-hand statement as this tree holds for these pads. **OH-26's first trap is the opposite
     case**: `D6` is GPIO0 on an RP2040 and GPIO21 on an ESP32-C3, which is two
     chips, and a label a board chooses would show exactly the scatter these do
     not show.
