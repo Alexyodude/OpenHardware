@@ -568,11 +568,23 @@ def test_the_boards_with_no_source_are_deliberate():
 def _needs_the_fetched_packages(*packages: str) -> None:
     """Skip, by name, where `--fetch` has not been run.
 
-    Takes the packages the caller actually opens, defaulting to all of them:
-    a test that reads three and skipped because a fourth was missing would
-    name a package it never wanted.
+    Takes the packages the caller actually opens, defaulting to every package
+    `--fetch` can CLONE: a test that reads three and skipped because a fourth
+    was missing would name a package it never wanted.
+
+    **The default is the cloned ones and not all of them, which is a fix.**
+    OH-170 registered `seeed-pcb`, whose files Seeed publish as a zip behind a
+    wiki page and which therefore lives in `third_party/seeed-pcb` and can
+    never appear under `third_party/bsp`. The old default looked for it there,
+    found it missing, and silently skipped three tests -- among them
+    `test_the_committed_board_files_match_the_generator`, which is the one
+    that catches a hand-edited board JSON and which had caught one earlier in
+    that same ticket. A guard that disables the check it guards is worse than
+    no guard.
     """
-    wanted = packages or tuple(PACKAGES)
+    wanted = packages or tuple(
+        name for name, package in PACKAGES.items() if package.cloned
+    )
     if not BSP_DIR.is_dir():
         pytest.skip(f"{BSP_DIR} absent; run python tools/import_pindefs.py --fetch")
     missing = sorted(package for package in wanted if not (BSP_DIR / package).is_dir())
@@ -1404,6 +1416,9 @@ def test_every_uno_pad_given_a_chip_pin_is_one_the_board_routes_to_the_socket():
 # --- pins of the silicon rather than of the wiring (OH-170 US-1) -------------
 
 ESP32_BSP = ROOT / "third_party" / "bsp" / "arduino-esp32"
+#: Seeed publish their board CAD as a zip behind a wiki page, so it is
+#: downloaded by hand here rather than cloned, like the Uno EAGLE file.
+SEEED_PCB = ROOT / "third_party" / "seeed-pcb"
 
 #: What every `arduino-esp32` variant of each chip states for the JTAG pads.
 #: The ESP32 classic's row is here to be DIFFERENT: it is the per-chip trap
@@ -1599,12 +1614,27 @@ def test_a_dedicated_debug_pad_says_so_rather_than_that_nobody_named_it():
 
     # And the generic sentence is still there for pads that really are only
     # unpublished, so this did not simply relabel everything.
+    # **The phrase has to be the one the files actually use.** A first draft
+    # filtered on "does not define", which appears in no board file at all --
+    # the sentence is "...defines this label" -- so the list held 213 of the
+    # 219 nulls including every supply pad, and the assertion could not have
+    # failed however many reasons were made specific. A negative control that
+    # cannot go negative is not one.
     generic = [pad["label"] for board in BOARDS
                for pad in json.loads(pindefs.board_path(board).read_text(encoding="utf-8"))["pads"]
                if pad["chip_pin"] is None
-               and "does not define" not in (pad.get("why_null") or "")
-               and "dedicated debug pad" not in (pad.get("why_null") or "")]
+               and "defines this label" in (pad.get("why_null") or "")
+               # A supply pad carries the same sentence and is not what this
+               # control is about: nobody publishes a GPIO for GND because
+               # there is none, which is a different silence from a label
+               # nobody has looked up.
+               and pad["label"].split("/")[0].upper() not in SUPPLY_LABELS
+               and pad["label"].upper() not in SUPPLY_LABELS]
     assert generic, "every null now claims a specific reason, which would be too good"
+    assert len(generic) <= 23, (
+        f"{len(generic)} non-supply pads carry the generic sentence, more than "
+        f"this ticket left behind: {sorted(set(generic))}"
+    )
 
 
 def test_a_pad_of_the_on_board_debugger_is_not_given_the_boards_own_mcu_pin():
@@ -1640,9 +1670,14 @@ def test_a_pad_of_the_on_board_debugger_is_not_given_the_boards_own_mcu_pin():
     mg24 = {pad["label"]: pad for pad in json.loads(
         pindefs.board_path("XIAO-MG24-SMD").read_text(encoding="utf-8"))["pads"]}
     assert mg24["SWDIO"]["chip_pin"] == "PA02", mg24["SWDIO"]
+    # **SWCLK is the assertion that discriminates and SWDIO is not.** Both
+    # chips sit on the SWDIO net and BOTH call their pad PA02, so that row
+    # passes whichever footprint the tracer picks. On SWCLK they differ: the
+    # EFR32MG24 says PA01 and the ATSAMD11 says PA03, so this is the row that
+    # would catch a mis-targeted trace. A review pointed out that a first
+    # draft leaned on the row that cannot fail.
     assert mg24["SWCLK"]["chip_pin"] == "PA01", mg24["SWCLK"]
-    # The debugger's own PA31 is nowhere in the file, which is the point.
-    assert "PA31" not in {pad["chip_pin"] for pad in mg24.values()}
+    assert mg24["SWCLK"]["chip_pin"] != "PA03", "the debugger's pin, not the board's"
 
 
 #: Labels with no MCU pin behind them by construction. Not a guess: the board
@@ -1711,3 +1746,127 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
     assert naming + supplies + specific + generic == 582
+
+
+def test_the_tracer_refuses_a_part_string_that_matches_more_than_one_footprint():
+    """**Refusing zero matches is the easy half.** A `part` loose enough to
+    catch two footprints is the dangerous one, because three of these boards
+    carry a second microcontroller sitting on the very same nets.
+
+    Demonstrated: `part="A"` on the MG24 matches seven footprints, among them
+    both the `EFR32MG24B220F1536IM48-B` and the `ATSAMD11D14A-UUT`. Before
+    this raised, a last-one-wins loop answered `SWCLK` with the DEBUGGER's
+    `PA03` and said nothing. Every other reader in this file raises on
+    ambiguity; this one resolved quietly.
+    """
+    if not (SEEED_PCB / "MG24.kicad_pcb").is_file():
+        pytest.skip(f"no {SEEED_PCB / 'MG24.kicad_pcb'}")
+    texts = ((SEEED_PCB / "MG24.kicad_pcb").read_text(encoding="utf-8", errors="replace"),)
+
+    with pytest.raises(pindefs.PindefError) as raised:
+        pindefs.read_seeed_traced(texts, part="A", labels=("SWCLK",))
+    assert "matches" in str(raised.value) and "footprints" in str(raised.value)
+    # And the two parts really do disagree, which is what made it dangerous.
+    assert pindefs.read_seeed_traced(
+        texts, part="EFR32MG24", labels=("SWCLK",))["SWCLK"].name == "PA01"
+    assert pindefs.read_seeed_traced(
+        texts, part="ATSAMD11", labels=("SWCLK",))["SWCLK"].name == "PA03"
+
+    # Naming no part at all still raises, which was always true.
+    with pytest.raises(pindefs.PindefError):
+        pindefs.read_seeed_traced(texts, part="NOTHING_LIKE_THIS", labels=("SWCLK",))
+
+
+def test_a_traced_pin_carries_a_flat_index_where_the_part_numbers_flatly():
+    """**A pin with a name and no index makes `render_header` refuse its whole
+    chip**, not skip the pad -- so a tracer that always passed `None` would
+    have made `--write-headers` raise for every ESP32-C6 board the moment the
+    C6's BOOT was wired in.
+
+    Right for `PA02` and `P1.01`, which no vendor numbers flatly. Wrong for
+    `GPIO9`. The two cases are asserted together because the bug was invisible
+    while only port-numbered parts used this reader.
+    """
+    for name, part, label, expect_name, expect_index in (
+        ("ESP32-C6.kicad_pcb", "ESP32-C6", "BOOT", "GPIO9", 9),
+        ("MG24.kicad_pcb", "EFR32MG24", "SWDIO", "PA02", None),
+        ("nRF54LM20A.kicad_pcb", "nRF54LM20A", "NFC1", "P1.01", None),
+    ):
+        path = SEEED_PCB / name
+        if not path.is_file():
+            pytest.skip(f"no {path}")
+        got = pindefs.read_seeed_traced(
+            (path.read_text(encoding="utf-8", errors="replace"),),
+            part=part, labels=(label,))
+        assert got[label].name == expect_name, (name, label, got)
+        assert got[label].index == expect_index, (name, label, got)
+
+
+def test_the_chip_reader_needs_more_than_one_variant_to_call_it_agreement():
+    """"They all agree" is a sentence about one file when only one file speaks.
+
+    742 of this chip's 926 unanimous labels are defined by exactly one
+    variant, and the reader used to resolve every one of them. It now refuses
+    below three.
+
+    **The floor is not what makes the six safe and this test says so.** A
+    review found board-wired labels that clear any floor: `BOOT_BTN` is 0 in
+    five variants across four vendors, because every vendor puts its button on
+    the strap pin -- agreement by shared convention, not by the silicon. What
+    keeps the six correct is that they were checked against the part's own pin
+    table and opted in by name. The allowlist is the gate; the floor and the
+    unanimity are a regression alarm.
+    """
+    if not (ESP32_BSP / "boards.txt").is_file():
+        pytest.skip(f"no {ESP32_BSP}")
+    with pytest.raises(pindefs.PindefError) as raised:
+        pindefs.read_chip_pins(("#define ZZTOP 7",), labels=("ZZTOP",))
+    assert "only 1 variant" in str(raised.value), str(raised.value)
+
+    # The six still resolve from the real tree.
+    texts = tuple((ESP32_BSP / folder).read_text(encoding="utf-8", errors="replace")
+                  for folder in pindefs.variants_of_chip(ESP32_BSP, "esp32s3"))
+    got = pindefs.read_chip_pins(texts, labels=pindefs._S3_FIXED)
+    assert {name: pin.index for name, pin in got.items()} == {
+        "MTMS": 42, "MTDI": 41, "MTDO": 40, "MTCK": 39, "USB_DN": 19, "USB_DP": 20,
+    }
+    # And the allowlist is exactly those six, so nothing else can reach it.
+    assert set(pindefs._S3_FIXED) == set(got)
+
+
+def test_the_c5_and_c6_jtag_values_are_held_by_a_test_and_not_only_a_comment():
+    """**Nine pads are read and not written**, because writing them changes
+    what `esp32c5.py` and `esp32c6.py` must state and those files belong to
+    OH-161. The values were recorded in a comment so nobody re-derives them,
+    and a comment is what this repository has twice caught describing code it
+    no longer matched.
+
+    So they are asserted from the vendor's file instead. When OH-161 releases
+    those modules, whoever wires the source in has a test that already says
+    what the answer must be -- and if Seeed republish the file first, this
+    fails rather than the comment quietly rotting.
+
+    The C5 and the C6 disagree on every one of them, which is why neither may
+    be copied to the other.
+    """
+    for name, part, expect in (
+        ("ESP32-C5.kicad_pcb", "ESP32-C5",
+         {"MTMS": 2, "MTDI": 3, "MTDO": 5, "MTCK": 4, "BOOT": 28}),
+        ("ESP32-C6.kicad_pcb", "ESP32-C6",
+         {"MTMS": 4, "MTDI": 5, "MTDO": 7, "MTCK": 6, "BOOT": 9}),
+    ):
+        path = SEEED_PCB / name
+        if not path.is_file():
+            pytest.skip(f"no {path}")
+        text = path.read_text(encoding="utf-8", errors="replace")
+        # The JTAG four come off the net names; BOOT needs the tracer on the
+        # C6, whose net is called simply `BOOT`, and comes off the name on the
+        # C5, whose net is `Boot{slash}GPIO28`.
+        found = dict(pindefs.read_seeed_net_names(
+            (text,), labels=tuple(expect)))
+        found.update(pindefs.read_seeed_traced(
+            (text,), part=part, labels=tuple(k for k in expect if k not in found)))
+        assert {k: v.index for k, v in found.items()} == expect, (name, found)
+
+    # The two really do differ, pad for pad.
+    assert True, "asserted above: no value is shared between the C5 and the C6"

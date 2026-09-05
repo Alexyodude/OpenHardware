@@ -360,15 +360,31 @@ def read_chip_pins(
                   USB_DN 19  USB_DP 20                 5 variants, agree
         esp32     MTMS 14  MTDI 12  MTDO 15  MTCK 13   2 variants, agree
 
-    Agreement inside a chip and difference across chips is what says these are
-    the part's and not the board's.
+    **What this test does NOT establish, and a review was right to press it.**
+    Unanimity does not separate a pin the silicon fixes from a pin every board
+    in the sample happens to wire alike. Measured across the same 158 esp32s3
+    variants: `RST_LoRa` is 12 in all nine that define it, `DIO0` is 14 in all
+    ten, and `WS_LCD_R5` is 42 in all seven -- the same number as `MTMS`.
+    Those are Heltec's and Waveshare's board wiring, unanimous because
+    same-vendor variants copy one another.
 
-    **And the five are five vendors, not five copies.** `XIAO_ESP32S3_Plus`
-    is Seeed's, `esp32s3usbotg` is Espressif's own development kit,
-    `fobe_quill_esp32s3_mesh` is Fobe's, `kodedot` is Kode Dot's and
-    `uPesy_esp32s3_basic` is uPesy's -- files of 79 to 110 lines that share no
-    text. One of them is the company that makes the silicon, which is as close
-    to a first-hand statement as this tree holds for these pads. **OH-26's first trap is the opposite
+    So the agreement is a CONSISTENCY CHECK and not a proof. What keeps the
+    six labels below correct is that they were checked against the part's
+    IO_MUX table and then opted in BY NAME: nothing is swept in by pattern,
+    and the allowlist is the safeguard. This function's job is to catch a
+    typo or a revision that moved one of them, which it does.
+
+    **The five are not five independent statements, and a first draft of this
+    comment said they were.** It claimed the files "share no text". Measured:
+    `XIAO_ESP32S3_Plus` and `uPesy_esp32s3_basic` share 27 of the smaller
+    file's 67 non-blank lines, and three of the five write the JTAG block
+    character-identically as `static const uint8_t MTCK = 39;`. So it is two
+    distinct spellings across five files, and one of the five is Seeed's own
+    sibling board, which is not independent evidence about a XIAO at all.
+
+    What is worth leaning on is narrower: `esp32s3usbotg` is Espressif's own
+    development kit, so one of the two spellings comes from the company that
+    makes the silicon. That is the strongest thing here. **OH-26's first trap is the opposite
     case**: `D6` is GPIO0 on an RP2040 and GPIO21 on an ESP32-C3, which is two
     chips, and a label a board chooses would show exactly the scatter these do
     not show.
@@ -379,6 +395,11 @@ def read_chip_pins(
     has opted in the wrong one. Every label here is named explicitly for that
     reason -- nothing is swept in by pattern.
     """
+    #: Below this, "they all agree" is a sentence about one file. A single
+    #: variant defining a label used to resolve it outright, which is not
+    #: agreement at all -- 742 of this chip's 926 unanimous labels are defined
+    #: by exactly one variant.
+    minimum = 3
     seen: dict[str, dict[int, int]] = {}
     for text in texts:
         for label, number in read_c_pin_constants(text).items():
@@ -387,6 +408,13 @@ def read_chip_pins(
                 seen[label][number] = seen[label].get(number, 0) + 1
     pins: dict[str, ChipPin] = {}
     for label, counts in seen.items():
+        if sum(counts.values()) < minimum:
+            raise PindefError(
+                f"{label} is defined by only {sum(counts.values())} variant(s) "
+                f"of this chip; below {minimum} there is no agreement to read, "
+                f"and a label opted in here is one somebody has checked "
+                f"against the part's own pin table"
+            )
         if len(counts) > 1:
             raise PindefError(
                 f"{label} is opted in as a pin the silicon fixes, but the "
@@ -410,10 +438,20 @@ _NET_NAME = re.compile(r'\(net (?:\d+ )?"([^"]*)"\)')
 
 #: What a pad function looks like when it names a pin of the part: Espressif
 #: and Raspberry Pi number flatly, Silicon Labs by port and pin, Nordic by
-#: port and bit. A function that is not one of these -- `SWDIO`, `XIN`,
-#: `IOVDD` -- is a pad outside the part's GPIO numbering, and there is no pin
-#: number for it to have.
-_CHIP_PIN_NAME = re.compile(r"^(?:GPIO\d+|P[A-D]\d{1,2}|P\d\.\d{1,2})$")
+#: port and bit.
+#:
+#: **Anchored at the start and not at both ends**, because Nordic's newer
+#: footprints append the ball: the nRF54LM20A writes `P1.01/NFC1_J6` and
+#: `P0.00_K3` where the nRF54L15 writes `P1.01`. A pattern anchored at both
+#: ends matched neither, so `read_seeed_traced` on that file returned nothing
+#: at all while citing it as a source -- 2.4 MB read to say nothing, and no
+#: test noticing.
+#:
+#: The start still has to BE the pin: `SWDIO_G2` does not begin with one, so
+#: it is refused as it should be. A pad outside the part's numbering --
+#: `SWDIO`, `XIN`, `IOVDD` -- has no pin number to report, and that is the
+#: distinction this makes.
+_CHIP_PIN_NAME = re.compile(r"^(GPIO\d+|P[A-D]\d{1,2}|P\d\.\d{1,2})(?:[/_]|$)")
 
 _PIN_TOKEN = re.compile(r"^(?:GPIO(\d+)|P(\d)\.(\d+))$")
 
@@ -517,13 +555,29 @@ def read_seeed_traced(
     """
     pins: dict[str, ChipPin] = {}
     for text in texts:
-        mine = [by_net for value, by_net in _footprints(text) if part in value]
-        if not mine:
+        matched = [(value, by_net) for value, by_net in _footprints(text)
+                   if part in value]
+        if not matched:
             raise PindefError(
                 f"no footprint in this board file has {part!r} in its value, "
                 f"so which of its parts is the MCU is not established and "
                 f"nothing may be traced to it"
             )
+        # **More than one match is refused, and that is the half that matters.**
+        # Refusing zero is easy; a `part` loose enough to catch two footprints
+        # is the dangerous case, because these boards carry a second
+        # microcontroller on the same nets. `part="A"` on the MG24 matches both
+        # the EFR32MG24 and the ATSAMD11, and a last-one-wins loop answered
+        # SWCLK with the DEBUGGER's PA03 without a word. Every other reader in
+        # this file raises on ambiguity; this one used to resolve quietly.
+        if len(matched) > 1:
+            raise PindefError(
+                f"{part!r} matches {len(matched)} footprints on this board "
+                f"({sorted(value for value, _ in matched)}); it must name one "
+                f"part, because a board carrying two microcontrollers puts "
+                f"them on nets with the same names"
+            )
+        mine = [by_net for _, by_net in matched]
         for label in labels:
             wanted = label.upper()
             for by_net in mine:
@@ -531,9 +585,29 @@ def read_seeed_traced(
                     plain = net.replace("{slash}", "/").rsplit("/", 1)[-1].upper()
                     if plain != wanted:
                         continue
-                    named = [one for one in functions if _CHIP_PIN_NAME.match(one)]
-                    if len(named) == 1:
-                        pins[label] = ChipPin(named[0], None)
+                    named = {match.group(1) for match in
+                             (_CHIP_PIN_NAME.match(one) for one in functions)
+                             if match}
+                    if len(named) > 1:
+                        raise PindefError(
+                            f"{label} reaches {sorted(named)} on this part, so "
+                            f"the board file names more than one pin for one "
+                            f"pad and a reader must not choose between them"
+                        )
+                    if named:
+                        # **The flat index, where the part has one.** This used
+                        # to pass `None` always: right for `PA02` and `P1.01`,
+                        # which no vendor numbers flatly, and wrong for
+                        # `GPIO9`. `render_header` refuses an entire chip whose
+                        # pin has a name and no index, so the C6's BOOT would
+                        # have made `--write-headers` raise for every ESP32-C6
+                        # board rather than skip one pad. `_PIN_TOKEN` already
+                        # knew how to tell the two apart.
+                        one = next(iter(named))
+                        token = _PIN_TOKEN.match(one)
+                        flat = token.group(1) if token else None
+                        pins[label] = ChipPin(
+                            one, int(flat) if flat is not None else None)
     return pins
 
 
@@ -1029,12 +1103,16 @@ _RP2350_DEBUG = tuple(
 #: The same shape on Nordic's part, which numbers its GPIOs by port and bit:
 #: `nRF54L15.kicad_pcb` gives U6 thirty-two pads named `Pn.nn` and names
 #: `SWDIO` and `SWDCLK` apart from them.
+#: The pad's own name is passed rather than derived. A first version built
+#: it with `label.replace("nRF54_", "SWD")`, which turned `nRF54_SWDIO` into
+#: `SWDSWDIO` -- a name the board file does not contain, quoted inside a
+#: sentence claiming the board file names it.
 _NRF54L15_DEBUG = tuple(
     (label, _DEDICATED_DEBUG.format(
         chip="nRF54L15", where="Seeed's own nRF54L15.kicad_pcb",
         which="thirty-two", gpio="P0.00 through P2.10 by port and bit",
-        label=label.replace("nRF54_", "SWD")))
-    for label in ("nRF54_SWDIO", "nRF54_SWCLK")
+        label=named))
+    for label, named in (("nRF54_SWDIO", "SWDIO"), ("nRF54_SWCLK", "SWDCLK"))
 )
 
 #: **A pin of the wrong chip is worse than no pin**, so these are answered in
@@ -1059,10 +1137,13 @@ _MG24_DEBUGGER = tuple((label, _SECOND_CHIP) for label in _SAMD11_PADS)
 #: `SWDCLK_G1` -- outside the `Pn.nn` numbering its GPIOs use, so there is no
 #: pin number for them to have. The same shape as the RP2350's and the
 #: nRF54L15's, with this part's own spelling.
+#: **Sixty-six, not thirty-two.** The count was copied from the nRF54L15's
+#: reason, where it is right. This part's footprint carries P0.00-P0.09,
+#: P1.00-P1.31, P2.00-P2.10 and P3.00-P3.12.
 _NRF54LM20A_DEBUG = tuple(
     (label, _DEDICATED_DEBUG.format(
         chip="nRF54LM20A", where="Seeed's own nRF54LM20A.kicad_pcb",
-        which="thirty-two", gpio="P0.00 upward by port and bit",
+        which="sixty-six", gpio="P0.00 through P3.12 by port and bit",
         label=named))
     for label, named in (("nRF54_SWDIO", "SWDIO_G2"), ("nRF54_SWCLK", "SWDCLK_G1"))
 )
