@@ -1731,3 +1731,238 @@ def test_a_crowded_bench_comes_to_rest_and_does_not_stir_for_ever(tmp_path):
         f"{result['dropping']}; a crowded bench has to come to rest and not "
         f"merely stay bounded"
     )
+
+
+def test_a_settled_lead_takes_the_shape_its_two_ends_give_it(tmp_path):
+    """**OH-162 step 3's own test, answering what is true rather than what was
+    hoped for.** The step asked for plastic set -- "record the rest angle at
+    each node when a wire stops moving and relax toward it, so a bent lead
+    stays bent; the test is that a lead dragged into an arc does not return to
+    a catenary". It does return, this is the number, and the mechanism was
+    measured and declined. `stiffen` carries the reason.
+
+    The manoeuvre is the only one a person can perform on a finished lead.
+    **Its two ends never move again**: `board3d.js` places a part once from the
+    bench slot its index gives, `removePart` splices the list without
+    re-laying out the rest, no pointer handler reaches a part at all, and a
+    wire touching a removed part is discarded rather than left to swing.
+    `moveHead` and `moveTail` are called every frame and hand over the same
+    point every frame -- measured over six hundred frames of the animation
+    loop's own calls, an end moves by exactly 0. What CAN change is what is
+    underneath, because `refreshColliders` runs on every add and every remove.
+
+    **One path does move an end, and it is worth naming.** `carvePins` swaps a
+    wire's `post` to the carved pin when a vendor model lands, and the pin sits
+    at the model's own millimetre position while the placeholder sat at layout
+    pixels, so `anchorOf` answers a different point the frame after. It fires
+    once per board load, for a wire made while the model was still being
+    fetched, which is the OH-129 case. Not a gesture, and not something a
+    person can repeat.
+
+    So: a lead hangs, a part arrives under it, the lead drapes over it, the
+    part goes. Measured 2026-09-05, a 10-unit lead with the file's own slack:
+
+    | | |
+    |---|---|
+    | hanging free, lowest node | 1.9629 |
+    | resting on the part | 2.6600 |
+    | after the part goes | 1.9629 |
+    | worst node moved between the first and the last | 6.7e-8 |
+
+    Six parts in ten million of a unit, on a lead the same solver moves 0.7 of
+    a unit while the part is there.
+
+    **"Nothing else" would be wrong, and the second arm is why.** A lead does
+    carry one memory: its own length. `payOut` only ever grows, so a tail
+    dragged out to 16 and brought back to 10 leaves the rest length 21% longer
+    and the settled shape **1.75 units** from where it hung. That is the same
+    measurement on the same fixture, and it is seven orders of magnitude above
+    the drape's. It is here so that "the lead came back" is a measurement and
+    not a blunt instrument -- a test that cannot see a memory that is there
+    says nothing about one that is not.
+
+    It is also this test's live mutation. Take the `if (needed > this.segment)`
+    guard out of `payOut` and the lead shortens on the way back instead of
+    keeping its length, so `lengthKept` goes negative.
+
+    **The part has to be wider than the lead dips into it or this measures the
+    collider instead.** `outOfBox` sends a node out by its NEAREST face, so two
+    neighbours inside a narrow solid leave by opposite ones and are held apart
+    at its width: a first version of this fixture used a box three units across
+    under a lead dipping two and a half into it, and the SHIPPED solver
+    reported 416% over rest for as long as the box was there. This one is eight
+    across and two and a half tall, five nodes come to rest on its top face,
+    and the worst stretch is 0.55%.
+
+    `clear` is the fixture that must report nothing: the same part arriving
+    twenty units to the side, where the lead cannot reach it, against the same
+    lead with no part at all -- every bit the same. Not "nothing moves": a
+    settled lead still creeps by parts in a billion under its own weight, and
+    a first draft of this asserted that and failed on it.
+
+    **What a plastic set would do to this test is break it, deliberately.**
+    Anyone implementing OH-162 step 3 should expect this assertion to fail and
+    should replace it, not repair it -- it says the shape has no memory, which
+    is the thing that step exists to change.
+
+    **And that is checked rather than hoped for.** The mechanism was patched
+    into a copy of `wires.js` -- a per-pair remembered rest length creeping
+    toward the bend the wire has -- and this test's own body run against it.
+    `returnedTo`, against the 1e-6 asserted below:
+
+    | rate | 1e-5 | 1e-4 | 3e-4 | 1e-3 | 3e-3 | 0.01 | 0.1 | 1 |
+    |---|---|---|---|---|---|---|---|---|
+    | returned to | 8.3e-4 | 6.2e-3 | 1.0e-2 | 1.1e-2 | 2.6e-3 | 3.5e-4 | 8.2e-9 | 2.4e-9 |
+
+    Killed at every rate from 1e-5 to 0.01, which is the whole band in which
+    the mechanism does anything.
+
+    **The two survivors are a test gap and are recorded as one.** A first draft
+    called them equivalent, on the grounds that at 0.1 and 1 the memory tracks
+    so closely that the constraint is always satisfied and there is nothing
+    left to see. The review measured the second half of that and it is false:
+    the bendless wire is a DIFFERENT wire, and the same memory moves a lead
+    nobody has touched by 0.0095 units. They survive because **nothing in this
+    file kills deleting `stiffen` outright** --
+    `test_a_stiff_wire_hangs_less_deeply_than_a_limp_one` still passes with the
+    whole function gone, few 2.85 against many 3.24, energy still falling and
+    stretch still under one per cent. That is a live gap older than this test,
+    and it is written into OH-162 rather than excused here.
+    """
+    result = run(tmp_path, """
+        const R = 0.16;
+        // Wider than the lead dips into it, so every node it catches leaves
+        // by the top face and the lead drapes rather than being torn across.
+        const PART = {kind: "box", min: [1, 0, -3], max: [9, 2.5, 3]};
+        const BESIDE = {kind: "box", min: [20, 0, -3], max: [28, 2.5, 3]};
+        function lead() {
+          const rope = new Rope([0, 6, 0], [10, 6, 0]);
+          rope.slacken();
+          rope.floor = 0;
+          rope.radius = R;
+          return rope;
+        }
+        function settle(rope, frames) {
+          for (let f = 0; f < frames; f++) rope.advance(1 / 60);
+        }
+        function lowest(rope) {
+          let low = Infinity;
+          for (let i = 0; i < rope.count; i++) low = Math.min(low, rope.point(i)[1]);
+          return low;
+        }
+        function apart(a, b) {
+          let worst = 0;
+          for (let i = 0; i < a.length; i += 3) {
+            worst = Math.max(worst, Math.hypot(
+              a[i] - b[i], a[i + 1] - b[i + 1], a[i + 2] - b[i + 2]));
+          }
+          return worst;
+        }
+        // On its top face, within a rounding of a radius above it.
+        function restingOn(rope, solid) {
+          let count = 0;
+          for (let i = 0; i < rope.count; i++) {
+            const p = rope.point(i);
+            if (Math.abs(p[1] - (solid.max[1] + R)) < 1e-6
+                && p[0] > solid.min[0] && p[0] < solid.max[0]) count += 1;
+          }
+          return count;
+        }
+
+        const rope = lead();
+        settle(rope, 900);
+        const hanging = Array.from(rope.position);
+        const hungAt = lowest(rope);
+        const segment = rope.segment;
+
+        rope.colliders = [PART];
+        settle(rope, 3600);
+        const onIt = {lowest: lowest(rope), stretch: rope.worstStretch(),
+                      nodes: restingOn(rope, PART)};
+
+        rope.colliders = [];
+        settle(rope, 1800);
+
+        // The part that arrives out of reach must make no difference at all.
+        // Not "nothing moves" -- a settled lead still creeps by parts in a
+        // billion under its own weight, and a first draft of this asserted
+        // that and failed. Two leads, the same frames, one of them given a
+        // part it cannot reach: every bit the same.
+        const clear = lead();
+        const alsoClear = lead();
+        settle(clear, 900);
+        settle(alsoClear, 900);
+        clear.colliders = [BESIDE];
+        settle(clear, 600);
+        settle(alsoClear, 600);
+        const clearDiffers = Array.from(clear.position)
+          .some((v, i) => v !== alsoClear.position[i]);
+
+        // **The one memory a lead really does have**, so that "returns to
+        // where it was" is a measurement and not a blunt instrument. `payOut`
+        // only ever grows, so an end dragged past the lead's reach and brought
+        // back leaves it longer, and a longer lead hangs somewhere else.
+        const pulled = lead();
+        settle(pulled, 900);
+        const hungBefore = Array.from(pulled.position);
+        const wasSegment = pulled.segment;
+        for (let f = 1; f <= 90; f++) {
+          pulled.moveTail([10 + 6 * (f / 90), 6, 0]);
+          pulled.advance(1 / 60);
+        }
+        settle(pulled, 300);
+        for (let f = 1; f <= 90; f++) {
+          pulled.moveTail([16 - 6 * (f / 90), 6, 0]);
+          pulled.advance(1 / 60);
+        }
+        settle(pulled, 900);
+
+        console.log(JSON.stringify({
+          hungAt, onIt, afterAt: lowest(rope),
+          returnedTo: apart(hanging, Array.from(rope.position)),
+          paidOut: rope.segment - segment,
+          stretchAfter: rope.worstStretch(),
+          energyAfter: rope.energy(),
+          clearDiffers,
+          lengthKept: pulled.segment - wasSegment,
+          lengthShowsAs: apart(hungBefore, Array.from(pulled.position)),
+        }));
+    """)
+    # The part really did hold the lead up -- without this the return below is
+    # a lead that never went anywhere.
+    assert result["onIt"]["lowest"] - result["hungAt"] > 0.5, result["onIt"]
+    assert result["onIt"]["nodes"] >= 3, (
+        f"only {result['onIt']['nodes']} nodes came to rest on the part's top "
+        f"face, so the lead is not draped over it and this fixture measures "
+        f"the collider rather than the shape"
+    )
+    # And the collider is not tearing it, which is what makes the rest mean
+    # anything: 0.55% measured, against 0.27% for the same lead hanging free.
+    assert result["onIt"]["stretch"] < 0.02, result["onIt"]
+    # The lead is not longer than it was: a pay-out would be a second memory
+    # and would answer this question the wrong way for the wrong reason.
+    assert result["paidOut"] == 0, result["paidOut"]
+    # The shape has no memory of the part. The bound is 1e-3 and not the
+    # 6.7e-8 measured: pinning float noise as a requirement would make this
+    # fail on any harmless change to the solver, and 1e-3 is still an order
+    # below the least a plastic set produced at any rate that did anything.
+    assert result["returnedTo"] < 1e-3, (
+        f"the lead came back {result['returnedTo']} from where it hung before "
+        f"the part arrived, and the solver has no plastic set, so it should "
+        f"come back to itself"
+    )
+    assert abs(result["afterAt"] - result["hungAt"]) < 1e-3, result
+    # The fixture that must report nothing.
+    assert result["clearDiffers"] is False
+    # And the memory a lead DOES have, which is what makes the above a
+    # measurement rather than a blunt instrument. Only ever longer: with
+    # `payOut`'s guard removed the lead shrinks on the way back instead.
+    assert result["lengthKept"] > 0, (
+        f"the lead came back from being dragged past its reach with its rest "
+        f"length changed by {result['lengthKept']}, and `payOut` only grows"
+    )
+    assert result["lengthShowsAs"] > 0.1, (
+        f"being paid out moved the settled shape by only "
+        f"{result['lengthShowsAs']}, so this test cannot see a memory that is "
+        f"there and its answer about plastic set means nothing"
+    )

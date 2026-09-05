@@ -104,3 +104,75 @@ Ten new tests, nine in tests/webui/test_wires.py and one in test_board3d.py.
 NOT done, and it is the ticket's own words for step 1 as well: no screenshot. Everything above is a number this session measured rather than a picture anybody looked at.
 
 **Note 2026-09-05:** Claim released on tests/webui/test_board3d.py, 2026-09-05. Steps 1 and 2 needed it and are done; steps 3 (plastic set) and 4 (the photograph oracle) are both inside the solver and its own test, so holding the renderer's test file would only block OH-164, which needs it for the third sentence its own ticket describes. webui/static/board3d.js stays claimed because step 3 may yet want the drawn tube to follow a bent lead. The rule is that no two open tickets claim one file, and blocked counts as open -- so a claim that is no longer needed is a claim that has to go back.
+
+**Note 2026-09-05:** Step 3 of four ASKED AND ANSWERED 2026-09-05, and the answer is no. The mechanism was built and measured and is not shipped; the ticket's own words are "plastic set, **if it earns its place**", and this is the measurement that says it does not. Step 4 (the photograph oracle) is untouched and the ticket stays open.
+
+**Nothing in this product bends a lead that is connected at both ends, and that is the shortest reason.** Step 3's own acceptance test -- "a lead dragged into an arc does not return to a catenary" -- describes an interaction the interface does not have. A finished lead's two ends never move again: `addPart` sets a part's position once from the bench slot its index gives, `removePart` splices the list without re-laying out the rest, no pointer handler reaches a part at all, and a wire touching a removed part is discarded rather than left to swing. `moveHead` and `moveTail` are called every frame for every wire and hand over the same point every frame -- worst end movement over six hundred frames of the animation loop's own calls is exactly 0, so a gate on "an end moved" would in fact be a perfect signal and would simply never fire.
+
+**One path does move an end**, and the review found it: `carvePins` swaps a wire's `post` to the carved pin when a vendor model lands (board3d.js:1419-1433), and the pin sits at the model's own millimetre position while the placeholder sat at layout pixels, so `anchorOf` answers a different point the frame after. It fires once per board load, for a wire made while the model was still in flight, which is OH-129's case. Not a gesture and not repeatable by a person.
+
+So the one manipulation left is a collider arriving under a lead or leaving from under it, because `refreshColliders` runs on every add and every remove -- and that is the manoeuvre this step has to be measured on.
+
+**The bending constraint has almost no authority at the node count this ships.** A 10-unit lead with the file's own slack settles with a sag of 4.0371; with `stiffen` doing nothing at all, 4.0493. It is worth 0.30% of the drape at `NODES` 22, because a smooth catenary over twenty-two nodes is locally almost straight -- every pair settles within 0.104% of the `segment * 2` it is measured against, and a lead draped over a part reaches 0.28% where it leaves the edge.
+
+**That 0.30% explains the parity below; it does not prove it**, and the review was right to stop it carrying the argument. It is the gap between a straight rest and no constraint at all, which is the straightening direction only; a remembered rest SHORTER than the current bend pushes the other way, which the shipped constraint never does, and nothing measures that bound. What is measured is the outcome.
+
+That is the node count and not the mechanism. The same memory, on the same manoeuvre, keeps 0.452 units of shape on an 8-node lead, 0.230 on a 12-node one, 0.0106 at the 22 this ships and 0.0009 at 40 -- and the part lifted every one of them by between 0.51 and 0.73, so they were all bent by the same amount. A pair spanning two of seven segments has authority over the shape; a pair spanning two of twenty-one has none. (A 6-node lead is not in that list because it is too stiff to reach the part at all: it bows upward and the part never touches it.)
+
+**And a memory that tracks well is worth nothing**, which is the step 2 blocker's shape arriving from the other side: a constraint always satisfied exerts nothing, so a rope with a perfect memory lands on the bendless rope, 4.0476 against 4.0493. Step 2's version diverged; this one evaporates.
+
+**The decisive reading is a ratio, not a ceiling.** What the memory keeps, over what it costs a lead nobody has touched:
+
+  rate      keeps    costs    kept over cost
+  3e-5      0.0023   0.0026   0.90
+  1e-4      0.0062   0.0061   1.01
+  3e-4      0.0104   0.0088   1.18
+  1e-3      0.0106   0.0095   1.12
+  2e-3      0.0057   0.0095   0.60
+  5e-3      0.0016   0.0095   0.17
+  1         2.4e-9   0.0095   0
+
+**No rate keeps more than it costs by more than 1.18**, so the argument does not depend on picking one. The best of them is 0.0106 units, which is 0.066 of a wire radius and 0.019 mm on the Uno. On the product's own path -- pad, drag, release, `slacken`, settle -- an arcing drag leaves 0.0029 units against a straight one after three seconds and 0.0147 after thirty, against 3.1e-13 shipped.
+
+**A second dimension, swept because the first sweep was over rate alone.** Every probe weights the memory term at `STIFFNESS` 0.4. Weight against rate, best retained: 1.15 radii at 0.4, 1.08 at 0.7, 1.18 at 1.0. The one point that beats them, weight 1.0 at rate 0.004, collapses the drape from 4.04 to 0.75 with 24.9% stretch, and at rate 0.02 it diverges to an energy of 3.7e9. **The ceiling is bounded by instability rather than by taste.**
+
+**The ticket's own trigger is unsafe on top of all that.** Its words are "record the rest angle when a wire stops moving". A lead threaded through a solid narrower than it dips into is perfectly still -- `energy()` reads 3.7e-28 while a segment sits at 5.2 times its rest length -- so a stillness gate fires on exactly the state that must never be remembered. That is an independent reason the formulation as written cannot be used, and it holds whatever the node count.
+
+**A yield threshold cannot be tuned either**, and the real numbers are worse than a test-made rope suggests. Worst bend from straight, where 1 is straight and 0 is folded back:
+
+  real birth, dragged off a pad through `beginWire`   0.5305
+  the `slacken()` jump that follows on release        0.2303
+  a probe-made rope dropped from a straight line      0.1971
+  the worst a pointer can hold, dragged out to 30
+    and back to 3, leaving the lead 10.2x slack       0.0154
+  settled                                             0.0010
+
+The largest bend a lead ever sees is its own creation, thirty-four times anything a hand can hold. Any threshold that records a hand records the birth, and recording the birth changes the drape of every lead on every board: measured at yield 0.02, resting sag 4.04 becomes 1.49.
+
+**Three of my own measurements were wrong first and the third nearly settled it the wrong way.** A first probe read 0.153 units of "shape memory" that was entirely `payOut`: pulling a lead's ends further apart lengthens it for good, so the shape it came back to was a longer lead's shape. A second manoeuvre swung the tail a quarter turn about the head at constant distance, which only ROTATES the lead -- a bend ratio is rotation-invariant, so it measured nothing and read 9.3e-6. And the whole first case was built on a fold, the tail walked in to 30% of the span and back, which is not reachable at all.
+
+**The fixture trap, which is the one worth remembering.** On the reachable manoeuvre I first read 0.85 units kept, 5.3 wire radii, and it looked like the decision flipping. It was the memory recording a torn wire. `outOfBox` sends a node out by its NEAREST face, so two neighbours inside a solid narrower than the lead dips into it leave by opposite faces and are held apart at the solid's width: with the memory OFF and the shipped solver, a box three units across under a lead dipping two and a half into it reported **417% over rest**, and one 1.6 across reported 199%. The memory then recorded that and enforced it: unclamped it reached bend ratios of 3.1626, which two segments cannot span, and left the lead 68% over rest with nothing touching it. A part eight units across and two and a half tall is one a lead drapes over -- five nodes rest on its top face and the worst stretch is 0.55% -- and on that fixture the kept shape is the 0.0106 above.
+
+**A memory of a length has to be clamped to what the geometry allows.** Clamping the recorded ratio at 1 takes the same jammed fixture from 68% over rest to 2.3%. Anyone implementing this later needs that line before anything else.
+
+**That tearing is a defect and it is now OH-165**, filed 2026-09-05, along with the larger finding it led to: a solid narrower than the gap between two nodes falls BETWEEN them and the lead threads through it, with `inside`, `proud` and `worstStretch` all reading clean. On a real Uno header at real scale a 28-unit lead's segment passes through the full half-width while stretch reads 1.46%. A first draft of this note called that "a few per cent and invisible"; it was measuring the wrong quantity, in exactly the way OH-132's own probe did, and the review caught it. OH-165 has the table.
+
+**Two gaps recorded rather than excused.** Nothing in `tests/webui/test_wires.py` kills deleting `stiffen` outright: `test_a_stiff_wire_hangs_less_deeply_than_a_limp_one` still passes with the whole function gone, few 2.85 against many 3.24, energy still falling and stretch still under one per cent. That test's docstring also gives a reason measurement refutes -- it says a 4-node wire sags less because "there is nothing for it to bend between", but deleting the constraint WIDENS that gap from 0.2045 to 0.3930, and at 4 nodes the constraint increases sag rather than reducing it. The inequality holds because a 3-segment chain of the same total length sags less than a 21-segment one, which is arithmetic and not stiffness. And `test_a_settled_wire_keeps_its_own_length` asserts under 1% with no collider in its fixture, while a lead over a real header reads 2.0%.
+
+**What was NOT measured, and it is the honest gap in the decline.** A directional memory. The distance from a node to the one two along is degenerate about the bend axis: it can hold a lead bunched but never bent in a chosen plane, and gravity picks the plane. Everything above says this scalar formulation does not earn its place; none of it says no formulation does.
+
+**What would change the answer** is a lead whose bending mattered -- `NODES`, `STIFFNESS`, or a pair spanning further than two segments -- and every one of those changes the drape of every lead on every board. It also needs a gesture, because there is nothing here that bends a connected lead. Step 4's photograph is the wrong oracle for this: it is about sag and retires `GRAVITY`, `DAMPING` and `SLACK`. Reopening step 3 wants a different photograph, of a lead bent by hand that stayed bent, and a way to bend one here.
+
+**A separate bug found on the same read of board3d.js**, recorded here because it has no other home yet: `addPart` positions from `row = view.parts.length` and `removePart` splices without renumbering, so removing part 0 of three and adding a fourth places it at row 2, on top of the part already there. No wire's end moves, so the claim above holds, but it is the sharpest reachable way to put a solid under a settled lead.
+
+**What was committed.** No behaviour change. `stiffen` gains the reasoning above as its docstring, because a reader asking "why does this always want straight" should not have to find this ticket. `tests/webui/test_wires.py` gains `test_a_settled_lead_takes_the_shape_its_two_ends_give_it`: a part arrives under a settled lead, the lead drapes over it and its lowest node rises from 1.9629 to 2.6600, the part goes, and the lead returns to within 6.7e-8 of where it hung. It is asserted at 1e-3 rather than at what was measured, because pinning float noise as a requirement makes a test fail on any harmless change, and 1e-3 is still an order below the least a plastic set produced at any rate that did anything.
+
+**Its second arm is what makes the first a measurement.** A lead does carry one memory -- its own length -- and `payOut` only ever grows, so a tail dragged out to 16 and brought back to 10 leaves the rest length 21% longer and the settled shape **1.75 units** from where it hung. Seven orders of magnitude above the drape's. A test that cannot see a memory that is there says nothing about one that is not. Its controls are that the part must lift the lead by half a unit, at least three nodes must come to rest on its top face, worst stretch under 2% so the fixture is not the torn one, nothing paid out, and a part arriving twenty units to the side leaving the lead bit-identical to one that never saw it.
+
+**The test was proved able to fail rather than assumed to be.** The mechanism was patched into a copy of `wires.js` and this test's own body run against it. Against the 1e-6 first asserted: 1e-5 gives 8.3e-4, 1e-4 gives 6.2e-3, 3e-4 gives 1.0e-2, 1e-3 gives 1.1e-2, 3e-3 gives 2.6e-3, 0.01 gives 3.5e-4 -- killed at every rate in the whole band where the mechanism does anything. **The two survivors at 0.1 and 1 are a test gap and not equivalents**, which a first draft got wrong: the bendless wire is a DIFFERENT wire and the same memory moves a lead nobody has touched by 0.0095 units, so there is something to see and nothing that sees it. They are the `stiffen`-deletion gap above wearing another hat.
+
+Six further mutations against the new test: `payOut`'s guard removed and `payOut` never lengthening are both killed by the second arm, and contact not run last in the pass is killed by the nodes on the top face. Three collider mutations survive it -- the second solids pass never running, the radius ignored by `collide`, and `outOfBox` not growing the box -- and each was checked to die elsewhere in the suite rather than assumed to.
+
+A first draft of the control asserted that nothing moved at all, and it failed: a settled lead still creeps by parts in a billion under its own weight, so the control is two leads run for the same frames rather than one lead compared with itself.
+
+**NOT done, and it is this step's own words as well as steps 1 and 2's:** no screenshot. Every number here is one measured by running the solver under node.

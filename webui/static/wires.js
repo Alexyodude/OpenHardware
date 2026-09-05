@@ -381,6 +381,74 @@ export class Rope {
    * "the other end takes it all" case, because a bend at the very end of a
    * wire is exactly where a real lead is stiffest and it should not be
    * specially floppy there.
+   *
+   * ## Why the rest length is straight and is not remembered
+   *
+   * OH-162 step 3 asked for plastic set -- "record the rest angle at each node
+   * when a wire stops moving and relax toward it, so a bent lead stays bent",
+   * with `if it earns its place` attached. It does not, and the reason is a
+   * number rather than a preference. Measured 2026-09-05 on a 10-unit lead
+   * with this file's own slack, sag of the settled shape:
+   *
+   *   with this function            4.0371
+   *   with it doing nothing at all  4.0493
+   *
+   * **The bending constraint is worth 0.30% of the drape at `NODES` 22.** A
+   * smooth catenary over twenty-two nodes is locally almost straight: every
+   * pair of that same free-hanging lead settles within 0.104% of the
+   * `segment * 2` below, and a lead draped over a part reaches 0.28% where it
+   * leaves the edge. So the constraint is very nearly satisfied everywhere.
+   *
+   * **That 0.30% explains the parity below; it does not prove it**, and a
+   * review was right to stop it carrying the argument. It is the gap between
+   * a straight rest and no constraint at all, which is the straightening
+   * direction only -- a remembered rest SHORTER than the current bend pushes
+   * the other way, which the shipped constraint never does, and nothing
+   * measures that bound. What is measured is the outcome.
+   *
+   * **It is the node count and not the mechanism.** The same memory, on the
+   * same manoeuvre, keeps 0.452 units of shape on an 8-node lead, 0.230 on a
+   * 12-node one, 0.0106 at the 22 this ships and 0.0009 at 40 -- and the part
+   * lifted every one of them by between half a unit and three quarters, so
+   * they were all bent by the same amount. A pair spanning two of seven
+   * segments has authority over the shape; a pair spanning two of twenty-one
+   * has none.
+   *
+   * And a memory that tracks the bend perfectly is worth nothing at all: the
+   * constraint is then always satisfied, exerts nothing, and the wire lands on
+   * the bendless one -- 4.0476 against 4.0493, 0.04% apart. **That is the step
+   * 2 blocker's shape arriving again**, a correction that resolves itself
+   * fully in one pass, and here it does not diverge, it evaporates.
+   *
+   * Swept from a rate of 1e-5 to 1 on the only manoeuvre a person can perform
+   * -- a part arriving under a settled lead and later being taken away, since
+   * a finished lead's two ends never move again -- **no rate keeps more shape
+   * than it costs.** Kept over cost, at 3e-5, 1e-4, 3e-4, 1e-3, 2e-3, 5e-3
+   * and 1: 0.90, 1.01, 1.18, 1.12, 0.60, 0.17, 0. The best of them is 1.18,
+   * on 0.0106 units kept against 0.0095 units of drape given up by a lead
+   * nobody has touched. That is the argument, and it does not depend on
+   * picking a rate. `test_a_settled_lead_takes_the_shape_its_two_ends_give_it`
+   * is the assertion that says so.
+   *
+   * **The ticket's own trigger is unsafe on top of that.** Its words are
+   * "record the rest angle when a wire stops moving", and a wire threaded
+   * through a solid narrower than it dips into is perfectly still: `energy()`
+   * reads 3.7e-28 while a segment sits at 5.2 times its rest length. A
+   * stillness gate fires on exactly the state that must not be remembered.
+   *
+   * What would change the answer is a wire whose bending mattered: `NODES`,
+   * `STIFFNESS`, or a pair spanning further than two segments -- and each
+   * changes the drape of every lead on every board. **A directional memory is
+   * the one formulation nobody has measured**: the distance from a node to the
+   * one two along is degenerate about the bend axis, so it can hold a lead
+   * bunched but never bent in a chosen plane, and gravity picks the plane.
+   *
+   * It also needs a gesture. Nothing in this product bends a lead that is
+   * connected at both ends, so step 3's own acceptance test describes an
+   * interaction the interface does not have. OH-162 step 4's photograph is
+   * about sag and retires `GRAVITY`, `DAMPING` and `SLACK`; it says nothing
+   * about this. Reopening step 3 wants a different photograph -- a lead bent
+   * by hand that stayed bent -- and a way to bend one here.
    */
   stiffen() {
     if (STIFFNESS <= 0) return;
