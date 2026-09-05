@@ -700,15 +700,16 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     with a `chip_pin` -- which is exactly the input the panel's `unknownWords`
     reads -- for a board picked and not loaded.
 
-    **It was twelve boards and OH-167 made it twenty-five**, which is the
-    whole of that change seen from here. A chip pin used to come only from the
-    board module's `PIN_NAMES`, and fourteen boards have no module; it now
-    falls back to the `chip_pin` the board file has carried since OH-26, so
-    343 pads of 582 name their MCU pin where 147 did. Every board with a pin
-    map now qualifies except `XIAO-XIAO STM32C5-SMD`, whose file states no
-    chip pin for any of its 35 pads because no board-support package covers
-    it -- so the one board excluded here is excluded by an absence of data and
-    not by an absence of code.
+    **It was twelve boards, OH-167 made it twenty-five and OH-170 made it all
+    twenty-six.** A chip pin used to come only from the board module's
+    `PIN_NAMES`, and fourteen boards have no module; it now falls back to the
+    `chip_pin` the board file has carried since OH-26. The last exclusion was
+    `XIAO-XIAO STM32C5-SMD`, whose file stated no chip pin for any of its 35
+    pads because no board-support package covers it -- and that stayed true
+    while Seeed's own schematic symbol library named two of them `SWDIO/PA13`
+    and `SWCLK/PA14`. Reading those left no board in the catalogue whose file
+    names no pin at all, so the exclusion is asserted empty rather than
+    deleted: a board that loses its chip pins has to show up here.
 
     Before OH-167 the twelve were the number OH-160 made it: TWO modules
     answered before that -- `atmega328p` and `samd21`, over three board files,
@@ -741,10 +742,10 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
         if view.get("present") and view["read_levels"] is not False
     ]
     # And the boards that would otherwise have lied, named rather than counted
-    # so that a board losing its chip pins shows up as a change here. Every
-    # one with a pin map, since OH-167 -- so this is written as the exclusion,
-    # which is the fact worth pinning: the STM32C5 is out because its file
-    # states no chip pin, not because no code looks for one.
+    # so that a board losing its chip pins shows up as a change here. All of
+    # them, since OH-170 -- still written as the exclusion, because an empty
+    # list is what says the last board with no chip pin at all has gone, and
+    # a board losing its pins again would refill it.
     would_have_lied = sorted(
         board for board, view in picked.items()
         if view.get("present") and any(
@@ -752,8 +753,8 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
             for pad in view["pads"])
     )
     silent = sorted(set(boards) - set(would_have_lied))
-    assert silent == ["XIAO-XIAO STM32C5-SMD"], silent
-    assert len(would_have_lied) == 25, would_have_lied
+    assert silent == [], silent
+    assert len(would_have_lied) == 26, would_have_lied
     assert "Arduino Uno" in would_have_lied
     assert "XIAO-MG24-SMD" in would_have_lied, (
         "the MG24 has no board module at all, so its 19 chip pins can only "

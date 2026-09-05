@@ -9,6 +9,17 @@ touches:
 - webui/boards/Arduino Uno.json
 - tools/import_pindefs.py
 - tests/rules/test_import_pindefs.py
+- webui/boards/XIAO-ESP32-S3-SMD.json
+- webui/boards/XIAO-ESP32-S3-SMD_PAD.json
+- webui/boards/XIAO-MG24-DIP.json
+- webui/boards/XIAO-MG24-SMD.json
+- webui/boards/XIAO-RP2350-SMD.json
+- webui/boards/XIAO-nRF54LM20A-DIP.json
+- webui/boards/XIAO-nRF54LM20A-SMD.json
+- webui/boards/XIAO-nRF54l15-DIP.json
+- webui/boards/XIAO-nRF54l15-SMD.json
+- webui/boards/XIAO-XIAO STM32C5-SMD.json
+- tests/webui/test_pin_view.py
 ---
 
 261 of 582 pads still name no chip pin, and the reasons are three different things wearing one null.
@@ -65,3 +76,53 @@ WHAT DONE LOOKS LIKE. Not "582 of 582", which would mean inventing a GPIO for ev
 **Note 2026-09-06:** Step 1 done 2026-09-06: the Uno's file states its 22 chip pins and every null pad says why. Board files now state 343 of 582, which is exactly what the page shows -- before, the files said 321 and the page 343, the difference being the Uno's module propping it up. Pads with no chip pin and no recorded reason: 0, down from 32. Steps 2 and 3 remain, and step 3 is blocked on a vendor source that does not exist.
 
 **Note 2026-09-06:** Steps 1-3 done 2026-09-06; 321 -> 363 of 582 pads name a chip pin, and every pad now sits in one of four counted states (363 named, 153 supply, 43 with a specific reason, 23 generic). Three new sources in import_pindefs.py: arduino_chip reads every variant of a chip and refuses on disagreement (the ESP32-S3's JTAG and USB, five agreeing variants); seeed_pcb reads Seeed's own KiCad net names (the C5/C6 JTAG, the NFC pairs); seeed_pcb_traced follows a pad's net to the board's own MCU footprint (the MG24's SWDIO=PA02, SWCLK=PA01). Per-label reasons replace the generic sentence where the fact is different: a dedicated debug pad outside the GPIO numbering (RP2350, nRF54L15, nRF54LM20A), a pin of the on-board ATSAMD11 debugger, and a pin of the nPM1300 power IC. STILL OUTSTANDING, 23 pads: the C5's and C6's ten are READ and blocked only on OH-161 releasing webui/boards/esp32c5.py and esp32c6.py, with the values in the registry's comments; SWDIO/SWCLK on the RP2040, SAMD21 and nRF52840 need a datasheet because Seeed publish no KiCad for those three in this tree; and BOOT on the C6 and RP2350, MG24_EN, nRF54_EN, nRF54_RST, USER_LED, 54L15_RX20/TX20 have nets naming no pin. The STM32C5's 35 already carried the specific 'no package covers this board at all'.
+
+**Note 2026-09-06:** STEP 3 was called `blocked on a vendor source` with the reason "there is
+nothing to read". That is now measured to be wrong about two of its pads, and
+the source had been in the tree the whole time.
+
+`third_party/seeed-xiao/Seeed Studio XIAO Series Library/Seeed_Studio_XIAO_Series.kicad_sym`
+is Seeed's own schematic symbol library, fetched by
+`python tools/get_board_sources.py seeed-xiao`. Its `XIAO-STM32C5-SMD` symbol
+has 35 pins, and pins 23 and 24 are named `SWDIO/PA13` and `SWCLK/PA14`. The
+board file's own pad labels came from that library -- `import_kicad_board.py`
+says so in its `derivation`, "Pin names joined from the symbol library on pad
+number" -- so the pin was being printed on the pad and reported as unpublished
+in the same file.
+
+Read now, with a reader that sweeps the whole symbol and refuses if a pin it
+was not opted in to read names one, so the board file's claim that the CAD
+"names a pin beside those pad names and beside no others" is enforced rather
+than asserted. Two of 35; the other 33 are unchanged and the ticket's own
+sentence about them stands.
+
+What is still blocked, and it is the part that mattered: `D0` through `D15`.
+No source in the tree names a pin for any of them, the symbol library included
+-- it prints them as bare `D0`..`D15`. That is 22 of this board's pads and
+they need Seeed to publish something.
+
+Three sentences the generator emitted were false the moment anything here
+resolved, and all three are now derived rather than written down:
+
+  - the board file's `derivation` said "`packages` is empty because there are
+    none to name". It is not empty now.
+  - its `assumption` said "null on every pad here". It counts them instead.
+  - each pad's `why_null` said "no label on it resolves". It now says the CAD
+    names no pin beside THIS pad, which is the per-pad fact.
+
+`Package.firmware` is what keeps "no board-support package covers this board"
+true across all of that. A schematic symbol library is CAD, not firmware, and
+the three sentences key on that rather than on whether the board has any
+source at all -- which was the same test only while it had none.
+
+Also this pass: `nRF54_RST` on the nRF54LM20A SMD carried the generic sentence
+while its two neighbours in the same debug cluster explained themselves. Seeed's
+`nRF54LM20A.kicad_pcb` names that part's reset `nRESET_F2` on the net
+`~{nRF54_RESET}`, apart from all sixty-six of its `Pn.nn` pads, so a reset has
+no GPIO number to have. NOT claimed, because it was not traced: that the
+exposed pad is on that net. No net in the file is called `nRF54_RST`; the
+nearest, `nRF54_RST_CTL`, runs from the on-board ATSAMD11's `PA04_A3` to a
+MOSFET gate whose drain sits on the reset net.
+
+Counts after this pass, recomputed over every `webui/boards/*.json`:
+naming 365, supplies 153, specific 42, generic 22, total 582.

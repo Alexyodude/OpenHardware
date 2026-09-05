@@ -265,7 +265,7 @@
       "pin": null,
       "chip_pin": null,
       "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label",
+      "why_null": "a reset pad of the nRF54LM20A, not a GPIO: Seeed's own nRF54LM20A.kicad_pcb names that part's reset 'nRESET_F2' on the net '~{nRF54_RESET}', apart from all sixty-six of its pads numbered P0.00 through P3.12 by port and bit. A reset is a dedicated pin of the silicon, so there is no GPIO number for this label to have",
       "x": 141.1,
       "y": 73.1,
       "group": "header-top",

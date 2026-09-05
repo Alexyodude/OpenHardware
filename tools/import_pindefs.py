@@ -611,6 +611,105 @@ def read_seeed_traced(
     return pins
 
 
+_SYMBOL = re.compile(r'^\t\(symbol "([^"]+)"', re.M)
+_SYMBOL_PIN_NAME = re.compile(r'\(name "([^"]*)"')
+
+
+def read_symbol_pin_names(
+    texts: tuple[str, ...], *, symbol: str, labels: tuple[str, ...]
+) -> dict[str, ChipPin]:
+    """A pad whose name in the vendor's schematic symbol also names its pin.
+
+    **The only source there is for the one board nothing else covers.** No
+    Zephyr board and no vendor core publishes a STM32C5 XIAO, so every one of
+    its 35 pads was null -- and two of them were null while Seeed's own symbol
+    library called them `SWDIO/PA13` and `SWCLK/PA14`. A pad reported as "a
+    gap in what the vendor has published" when the vendor has published it is
+    the report being wrong, not the board being unknowable.
+
+    Two pads of 582 across the catalogue, which is why this reader is last.
+    It reaches nothing another source would have: on the other nineteen
+    symbols in that library the pins are named `D0` through `D15` with no pin
+    beside them, exactly as they are here.
+
+    Keyed on the LABEL half and not the whole name, because `resolve` matches
+    a pad through `alternatives`, which splits `SWDIO/PA13` into its two
+    names. A dict keyed `SWDIO/PA13` would have matched no pad at all.
+
+    **Every pin of the symbol is swept, not only the opted-in ones**, and a
+    pin naming a pin that nobody opted in is refused. The board file's
+    `assumption` tells a reader this CAD "names a pin beside those pad names
+    and beside no others", and until this swept the whole symbol that half of
+    the sentence was a hand-check written into generated prose. It is also the
+    alarm that matters: if Seeed republish this library having named more
+    pins, the generator stops rather than quietly resolving two of them.
+    """
+    (text,) = texts
+    starts = [(match.group(1), match.start()) for match in _SYMBOL.finditer(text)]
+    if not starts:
+        raise PindefError(
+            "this file has no top-level symbol, so it is not the symbol "
+            "library this reader was pointed at"
+        )
+    mine = [i for i, (name, _) in enumerate(starts) if name == symbol]
+    if len(mine) != 1:
+        raise PindefError(
+            f"{symbol!r} names {len(mine)} of this library's {len(starts)} "
+            f"symbols ({sorted(name for name, _ in starts)}); it must name "
+            f"exactly one, because a pin read off the wrong board is a wrong "
+            f"answer that looks like a right one"
+        )
+    index = mine[0]
+    end = starts[index + 1][1] if index + 1 < len(starts) else len(text)
+    body = text[starts[index][1]:end]
+
+    pins: dict[str, ChipPin] = {}
+    unclaimed = [
+        name for name in _SYMBOL_PIN_NAME.findall(body)
+        if any(_CHIP_PIN_NAME.match(alt) for alt in alternatives(name))
+        and not any(alt in labels for alt in alternatives(name))
+    ]
+    if unclaimed:
+        raise PindefError(
+            f"{symbol} names a pin on {sorted(set(unclaimed))}, which nobody "
+            f"opted in; every pin this symbol publishes must be listed, "
+            f"because the board file states that it names a pin beside the "
+            f"listed pads and beside no others"
+        )
+    for name in _SYMBOL_PIN_NAME.findall(body):
+        alts = alternatives(name)
+        mentioned = [alt for alt in alts if alt in labels]
+        if len(mentioned) != 1:
+            continue
+        named = {match.group(1) for match in
+                 (_CHIP_PIN_NAME.match(alt) for alt in alts) if match}
+        if len(named) > 1:
+            raise PindefError(
+                f"the symbol pin {name!r} names {sorted(named)}, so one pad "
+                f"claims more than one pin and a reader must not choose"
+            )
+        if not named:
+            raise PindefError(
+                f"the symbol pin {name!r} was opted in as naming its pin and "
+                f"does not; a label is listed here because somebody read it"
+            )
+        one = named.pop()
+        token = _PIN_TOKEN.match(one)
+        pins[mentioned[0]] = ChipPin(
+            one, int(token.group(1)) if token and token.group(1) else None)
+    return pins
+
+
+def seeed_symbol(symbol: str, labels: tuple[str, ...]) -> Source:
+    """Seeed's schematic symbol library, read for the pads that name a pin."""
+    return Source(
+        "seeed-xiao",
+        ("Seeed Studio XIAO Series Library/Seeed_Studio_XIAO_Series.kicad_sym",),
+        functools.partial(read_symbol_pin_names, symbol=symbol, labels=labels),
+        root=REPO / "third_party" / "seeed-xiao",
+    )
+
+
 def seeed_pcb_traced(board_file: str, part: str, labels: tuple[str, ...]) -> Source:
     """Seeed's own board file, followed one hop from the pad to the MCU."""
     return Source(
@@ -746,6 +845,17 @@ class Package:
     #: `tools/get_board_sources.py` prints the URL and refuses to fetch an
     #: https archive itself, for the reason that file gives.
     cloned: bool = True
+    #: False for a source that is CAD rather than firmware. **"No
+    #: board-support package covers this board" stays true of a board whose
+    #: schematic symbol names two of its pins**, and three sentences this tool
+    #: generates turn on that fact -- the board file's `derivation`, its
+    #: `assumption`, and `NO_PACKAGE_AT_ALL` on each pad. Keying them on
+    #: "has no sources at all" was right only while the uncovered board had
+    #: none; the moment its symbol library was read, that test would have had
+    #: the file claim a core publishes its pins. Keying them on `cloned` would
+    #: have worked today by coincidence and rotted, because `cloned` is about
+    #: how a file arrives and not about what it is.
+    firmware: bool = True
 
 
 @dataclasses.dataclass(frozen=True)
@@ -800,12 +910,25 @@ class Board:
 PACKAGES = {
     package.name: package
     for package in (
+        # A git checkout like the BSPs, but fetched by
+        # `tools/get_board_sources.py seeed-xiao` into `third_party/seeed-xiao`
+        # rather than by `--fetch` into `third_party/bsp/`, so `cloned` is
+        # False and its citations carry a digest of the file read.
+        Package(
+            "seeed-xiao",
+            "https://github.com/Seeed-Studio/OSHW-XIAO-Series.git",
+            (),
+            "MIT, per LICENSE at the repository root",
+            cloned=False,
+            firmware=False,
+        ),
         Package(
             "seeed-pcb",
             "https://wiki.seeedstudio.com/ -- each XIAO's own page, as a zip",
             (),
             "OSHW, per Seeed's XIAO series repository",
             cloned=False,
+            firmware=False,
         ),
         Package(
             "zephyr",
@@ -1148,6 +1271,36 @@ _NRF54LM20A_DEBUG = tuple(
     for label, named in (("nRF54_SWDIO", "SWDIO_G2"), ("nRF54_SWCLK", "SWDCLK_G1"))
 )
 
+#: **Reset, which is neither a GPIO nor a debug pad.** Seeed's own
+#: `nRF54LM20A.kicad_pcb` gives the MCU footprint a pad `nRESET_F2` on the net
+#: `~{nRF54_RESET}`, apart from all sixty-six of its `Pn.nn` pads. A part's
+#: reset is a dedicated pin, so there is no port and bit for this label to
+#: name -- the same fact `_DEDICATED_DEBUG` states about SWDIO and SWCLK, and
+#: the reason those two say it while this one said "no package defines this
+#: label" was that nobody had written it down.
+#:
+#: **What is NOT claimed here: that this pad is on that net.** No net in that
+#: file is called `nRF54_RST`; the nearest, `nRF54_RST_CTL`, runs from the
+#: on-board ATSAMD11 debugger's `PA04_A3` to the gate of an LN237N3T5G whose
+#: drain sits on `~{nRF54_RESET}`. So the board's reset line is switched
+#: rather than driven straight through, and which side of that switch this
+#: exposed pad is on has not been read. It does not need to be: the sentence
+#: below is about the part's reset being a dedicated pin, which is true either
+#: way, and a `why_null` that claimed a trace it had not followed would be the
+#: mistake this ticket has already had to correct twice.
+_DEDICATED_RESET = (
+    "a reset pad of the {chip}, not a GPIO: {where} names that part's reset "
+    "{pin!r} on the net {net!r}, apart from all {which} of its pads numbered "
+    "{gpio}. A reset is a dedicated pin of the silicon, so there is no GPIO "
+    "number for this label to have"
+)
+_NRF54LM20A_RESET = (
+    ("nRF54_RST", _DEDICATED_RESET.format(
+        chip="nRF54LM20A", where="Seeed's own nRF54LM20A.kicad_pcb",
+        pin="nRESET_F2", net="~{nRF54_RESET}", which="sixty-six",
+        gpio="P0.00 through P3.12 by port and bit")),
+)
+
 #: **A third chip, and not even a microcontroller.** `SHPHLD` reaches an
 #: `nPM1300-CAAA` -- Nordic's power-management IC -- on its `SHPHLD_D4` pad.
 #: Ship-hold is that part's own function, so the label names nothing on the
@@ -1183,7 +1336,13 @@ BOARDS = {
     # Nobody has published this one. Zephyr has no xiao_stm32c5 board and
     # Seeed has released no core for it, so every pad stays null and the
     # report says why rather than the board going missing from the run.
-    "XIAO-XIAO STM32C5-SMD": Board("STM32C5", ()),
+    # The one board no board-support package covers. Seeed's schematic
+    # symbol library names a pin for two of its 35 pads and for none of the
+    # others, which is the whole of what has been published about this part.
+    "XIAO-XIAO STM32C5-SMD": Board(
+        "STM32C5",
+        (seeed_symbol("XIAO-STM32C5-SMD", ("SWDIO", "SWCLK")),),
+    ),
     "XIAO-nRF52840-DIP": Board("nRF52840", _NRF52840),
     "XIAO-nRF52840-SMD": Board("nRF52840", _NRF52840),
     "XIAO-nRF54LM20A-DIP": Board(
@@ -1191,7 +1350,8 @@ BOARDS = {
     ),
     "XIAO-nRF54LM20A-SMD": Board(
         "nRF54LM20A", _NRF54LM20A,
-        reasons=_MG24_DEBUGGER + _NRF54LM20A_DEBUG + _NRF54LM20A_OTHER,
+        reasons=(_MG24_DEBUGGER + _NRF54LM20A_DEBUG + _NRF54LM20A_RESET
+                 + _NRF54LM20A_OTHER),
     ),
     "XIAO-nRF54l15-DIP": Board("nRF54L15", _NRF54L15),
     "XIAO-nRF54l15-SMD": Board(
@@ -1400,9 +1560,10 @@ BOARD_DERIVATION = (
 #: empty list as though something had been read from it.
 BOARD_DERIVATION_UNCOVERED = (
     "Generated by tools/import_pindefs.py, which found no board-support package "
-    "covering this board: `packages` is empty because there are none to name, "
-    "not because none was read. Every pad's `chip_pin` is null and says so in "
-    "its own `why_null`."
+    "covering this board. Anything named in `packages` is a source read anyway "
+    "-- the vendor's own CAD rather than firmware -- and resolves a pad only "
+    "where it names the pin outright. Every pad it does not reach is null and "
+    "says why in its own `why_null`."
 )
 
 NOT_PUBLISHED = "no board-support package covering this board defines this label"
@@ -1414,8 +1575,9 @@ DISPUTED = "the packages disagree; recorded rather than averaged, so the pad sta
 #: the XIAO STM32C5 and hides that the count of packages covering it is zero.
 #: OH-26 searched and found no Zephyr board and no Seeed core for that part.
 NO_PACKAGE_AT_ALL = (
-    "no board-support package covers this board at all, so no label on it "
-    "resolves; this is a gap in what the vendor has published, not in this tool"
+    "no board-support package covers this board at all, and the vendor's own "
+    "CAD does not name a pin beside this pad; that is a gap in what the vendor "
+    "has published, not in this tool"
 )
 
 
@@ -1459,11 +1621,16 @@ def board_report(
     board = BOARDS[name]
     entries, on_board = resolve(name, bsp_dir, boards_dir)
     pads = [pad_report(entry) for entry in entries]
-    if not board.sources:
-        # Every pad of this board is null for ONE reason, and it is not the
-        # per-label one `pad_report` can see from a pad alone.
+    # A pad still null on a board no FIRMWARE package covers is null for ONE
+    # reason, and it is not the per-label one `pad_report` can see from a pad
+    # alone. The condition is `firmware` and not `board.sources`: this board
+    # has a source now -- Seeed's schematic symbols -- and two of its pads
+    # resolve from it, while the sentence about board-support packages stays
+    # exactly as true of the other thirty-three as it ever was.
+    if not any(PACKAGES[source.package].firmware for source in board.sources):
         for pad in pads:
-            pad["reason"] = NO_PACKAGE_AT_ALL
+            if pad["chip_pin"] is None:
+                pad["reason"] = NO_PACKAGE_AT_ALL
     # A label the registry has a better reason for, applied only where nothing
     # resolved it -- a reason never overrides an answer.
     reasons = dict(board.reasons)
@@ -1794,7 +1961,8 @@ def unnumbered_sentence(chip: str, pins: list[str], described: bool) -> str:
 
 
 def assumption_for(chip: str, described: bool, covered: bool,
-                   unnumbered: list[str] | None = None) -> str:
+                   unnumbered: list[str] | None = None,
+                   resolved: int = 0, unresolved: int = 0) -> str:
     """What a board file says about its own `pin`, `chip_pin` and `chip_index`.
 
     Three shapes, because three things can be true of a board. `pin` is null
@@ -1806,20 +1974,48 @@ def assumption_for(chip: str, described: bool, covered: bool,
     The uncovered case is its own sentence rather than the undescribed one
     with an empty `packages` list: "the join is ready, not made" would be
     false on a board with nothing to join, and that is the XIAO STM32C5.
+
+    **The uncovered sentence counts its pads and does not assert them.** It
+    used to read "null on every pad here", which was true only while nothing
+    at all had been read for that board. Two of its pads now resolve from
+    Seeed's own schematic symbols, and a number written into prose that the
+    code does not derive is one that goes stale without a test noticing --
+    which has already happened twice in this file.
     """
     head = (
         "Every `pin` is null: that field is the rcontrol pin index of a PICSimLab "
         "board implementation (webui/pinmap.py), and none exists for this board. "
     )
     if not covered:
-        return head + (
-            f"`chip_pin` and `chip_index` are null on every pad here, and `pindefs` "
-            f"names no package, because no board-support package covers this board "
-            f"at all -- no Zephyr board and no vendor core publishes a {chip} XIAO "
-            f"(OH-26). Each pad says the same in its own `why_null`. The pin view "
-            f"reports every pad as not modelled, and will until the vendor "
-            f"publishes something to read."
+        why = (
+            f"because no board-support package covers this board at all -- no "
+            f"Zephyr board and no vendor core publishes a {chip} XIAO (OH-26)"
         )
+        if not resolved:
+            return head + (
+                f"`chip_pin` and `chip_index` are null on every pad here, and "
+                f"`pindefs` names no package, {why}. Each pad says the same in "
+                f"its own `why_null`. The pin view reports every pad as not "
+                f"modelled, and will until the vendor publishes something to read."
+            )
+        body = (
+            f"`chip_pin` and `chip_index` are null on {unresolved} of these "
+            f"{resolved + unresolved} pads, {why}. The other {resolved} were "
+            f"read from the vendor's own CAD, named in `pindefs`, which is a "
+            f"schematic and not firmware: it names a pin beside those pad names "
+            f"and beside no others. Each null pad says which of the two it is in "
+            f"its own `why_null`. The pin view reports every null pad as not "
+            f"modelled, and will until the vendor publishes something to read."
+        )
+        # **The uncovered branch owes this sentence too**, and returning
+        # before it was a hole the moment anything resolved here: the XIAO
+        # STM32C5's two pads are `PA13` and `PA14`, port-and-bit names with no
+        # flat number, which is OH-26's own category. Every other file
+        # carrying such a pin says why `chip_index` is null on it, and this
+        # one would have been the single file that did not.
+        if unnumbered:
+            body += unnumbered_sentence(chip, unnumbered, described)
+        return head + body
     head += (
         "`chip_pin` and `chip_index` are what tools/import_pindefs.py read out of "
         "the board-support packages named in `pindefs`; a pad whose `chip_pin` is "
@@ -1879,7 +2075,12 @@ def filled_board(
                 filled[key] = value
         pads.append(filled)
 
-    covered = bool(report["packages"])
+    # **Not `bool(packages)`.** The XIAO STM32C5 now names a package -- Seeed's
+    # schematic symbol library -- and no board-support package covers it, so a
+    # truthiness test would have `assumption_for` tell a reader that a core
+    # publishes this board's pins. It is CAD; see `Package.firmware`.
+    covered = any(PACKAGES[entry["name"]].firmware
+                  for entry in report["packages"])
     # The PINS the packages resolved to a name with no number, in the file's
     # own order, deduplicated so the sentence quotes real pins off this board
     # rather than a class.
@@ -1914,7 +2115,8 @@ def filled_board(
             filled_document[key] = value
         if key == "assumption":
             filled_document["assumption"] = assumption_for(
-                report["chip"], described, covered, spellings
+                report["chip"], described, covered, spellings,
+                report["resolved"], report["unresolved"],
             )
             filled_document["pindefs"] = pindefs
     if "pindefs" not in filled_document:
