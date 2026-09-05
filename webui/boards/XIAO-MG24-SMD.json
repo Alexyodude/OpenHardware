@@ -169,7 +169,7 @@
       "pin": null,
       "chip_pin": null,
       "chip_index": null,
-      "why_null": "this pad reaches the on-board debugger, an ATSAMD11D14A, and not this board's own MCU; `chip_pin` names a pin of the board's MCU, so a number here would be a pin of the wrong chip. Seeed's own board file names both parts, and the debugger's pins are reachable from it if they are ever wanted under a field that says which chip it means",
+      "why_null": "this pad is named for the on-board debugger, an ATSAMD11D14A, and not for this board's own MCU; `chip_pin` names a pin of the board's MCU, so a number here would be a pin of the wrong chip. NOT claimed: which pin it reaches. No net in Seeed's own board file carries this pad's name, so unlike the SWDIO and SWCLK pads on the same header nothing here was traced",
       "x": 119.9,
       "y": 70.5,
       "group": "header-top",

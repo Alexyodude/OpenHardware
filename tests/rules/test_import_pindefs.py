@@ -18,11 +18,19 @@
 #   silabs-arduino 6128e93  variants/xiao_mg24/{pins_arduino.h,arduino_variant.cpp}
 #   zephyr         0a2e408  boards/seeed/xiao_rp2040/seeed_xiao_connector.dtsi
 #
-# Four tests are the exception and skip loudly by name when the fetch has not
-# been run: `test_the_real_packages_resolve_a_board`,
-# `test_the_real_tree_never_resolves_a_pad_from_nothing`, and the two OH-160
-# added -- `test_the_committed_modules_match_the_generator` and
-# `test_the_committed_board_files_match_the_generator`.
+# The exceptions skip loudly by name, through `_needs_the_fetched_packages`:
+# `test_the_real_packages_resolve_a_board`,
+# `test_the_real_tree_never_resolves_a_pad_from_nothing`,
+# `test_the_fetch_skip_names_only_the_packages_its_caller_reads`, and the two
+# OH-160 added -- `test_the_committed_modules_match_the_generator` and
+# `test_the_committed_board_files_match_the_generator`. Others skip when a
+# vendor CAD file or Seeed's symbol library is absent, which is a different
+# and quieter condition.
+#
+# This paragraph said "Four tests" and named four, while five call that helper
+# and twenty of this file's tests can skip on a missing vendor tree. The count
+# is gone rather than corrected: a number here is a claim nothing recomputes,
+# and OH-170 spent four review rounds on exactly that shape.
 #
 # **Those last two are the only check that the committed `HEADER` blocks and
 # board files are what the packages say**, so a run where they skip proves
@@ -580,7 +588,7 @@ def test_the_board_no_firmware_package_covers_is_deliberate():
     # **`--list` has to show it too, and it stopped.** `describe_registry`
     # printed the note when `board.sources` was empty, which is now true of no
     # board at all -- so the one board a reader would run `--list` to find
-    # became indistinguishable from the twenty-five a vendor core covers, and
+    # became indistinguishable from the twenty-four a vendor core covers, and
     # the fallback became a branch nothing could enter. Held here rather than
     # by reading the output by eye, which is how it went unnoticed.
     listed = pindefs.describe_registry().splitlines()
@@ -1309,17 +1317,29 @@ def test_the_committed_files_with_unnumbered_pins_are_the_ones_oh_26_named():
     under the same rule as a comment, and this one had already been noticed
     and shipped anyway.
 
-    **OH-26 measured 123 and it is 131 now**, which is the count doing its
-    job rather than drifting. OH-170 added four pads on parts that number by
-    port: `NFC1` and `NFC2` on the two nRF54L15 files, where Seeed's nets are
-    named `P1.02{slash}NFC1` and `P1.03{slash}NFC2`; and `SWDIO` and `SWCLK`
-    on the MG24, traced through Seeed's board file to the EFR32MG24's own
-    pads `PA02` and `PA01`; and the nRF54LM20A's own NFC pair, `P1.01` and
-    `P1.02`, which are NOT the nRF54L15's `P1.02` and `P1.03` -- two Nordic
-    parts a generation apart, and the reason every board reads its own file.
-    Silicon Labs and Nordic both name by port, so a pad resolved on either
-    lands here with a name and no flat index. The eight boards are unchanged;
-    four of them gained pads.
+    **OH-26 measured 123 and it is 133 now**, which is the count doing its
+    job rather than drifting. This paragraph said 131 and "four pads" and was
+    left behind when the STM32C5's own pair landed in c6015aa -- caught by a
+    review, three lines under a sentence about a number in a test name being
+    a claim like any other. The ladder is spelled out in the assertion below,
+    which is where it is derived rather than restated.
+
+    The ten OH-170 added, all on parts that number by port and bit:
+
+      +2  NFC1 and NFC2 on the two nRF54L15 files, where Seeed's nets are
+          named `P1.02{slash}NFC1` and `P1.03{slash}NFC2`
+      +2  SWDIO and SWCLK on the MG24, traced through Seeed's board file to
+          the EFR32MG24's own pads `PA02` and `PA01`
+      +4  the nRF54LM20A's own NFC pair, `P1.01` and `P1.02`, across its two
+          files -- NOT the nRF54L15's `P1.02` and `P1.03`. Two Nordic parts a
+          generation apart, and the reason every board reads its own file
+      +2  the XIAO STM32C5's SWDIO and SWCLK, `PA13` and `PA14`, off Seeed's
+          schematic symbol library
+
+    ST, Silicon Labs and Nordic all number by port, so a pad resolved on any
+    of them lands here with a name and no flat index. The board list below
+    gained a ninth entry and not a tenth: the STM32C5 is the only board this
+    ticket resolved anything on that was not already in it.
     """
     carrying = sorted(
         name for name in BOARDS
@@ -1995,8 +2015,9 @@ def test_the_symbol_reader_refuses_a_symbol_that_is_not_exactly_one():
 def test_the_symbol_reader_refuses_a_pin_it_was_not_opted_in_to_read():
     """**The board file states a claim this test is the enforcement of.**
 
-    The XIAO STM32C5's `assumption` says the vendor's CAD "names a pin beside
-    those pad names and beside no others". The reader used to look only at the
+    The XIAO STM32C5's `assumption` says the two resolved pads "are the only
+    ones in the symbol read for this board whose name carries a pin in a
+    spelling this tool recognises". The reader used to look only at the
     pads it had been given, so that half of the sentence was a hand-check
     written into generated prose -- the shape of claim this ticket has already
     retracted twice. It now sweeps every pin of the symbol.
@@ -2027,13 +2048,19 @@ def test_the_symbol_reader_refuses_a_pin_it_was_not_opted_in_to_read():
 
 
 def test_every_refusal_in_the_symbol_reader_can_be_reached():
-    """Four of its raises had no test, and one is a line away from the data.
+    """Seven refusals, and every one of them is reached here.
 
     A review counted them: deleting `if len(named) > 1` or `if not named`
     killed none of the mutations this ticket had listed, because nothing
     exercised either. A raise nothing reaches is the same shape as the three
     permanently-skipped tests found earlier here -- code that reads like a
     guarantee and is not one.
+
+    **The first version of this test named `len(named) > 1` in this very
+    docstring as a raise nothing exercised, and then did not cover it.** A
+    second review replaced that raise with a silent pick-first and the whole
+    suite stayed green. An absolute in a test name, on the commit that
+    renamed another test for exactly that.
 
     The last two branches are new, and both were silent before: a pin naming
     two opted-in labels used to `continue`, and a label named twice used to
@@ -2067,7 +2094,17 @@ def test_every_refusal_in_the_symbol_reader_can_be_reached():
             (two,), symbol="XIAO-STM32C5-SMD", labels=("SWDIO", "SWCLK"))
     assert "two opted-in labels on one pin" in str(raised.value)
 
-    # 4. One label named twice with different pins -- a disagreement, which
+    # 4. One pin naming TWO pins. The raise this test's docstring named and
+    #    then did not cover; a review swapped it for a silent pick-first and
+    #    nothing went red.
+    both = library.replace('(name "SWDIO/PA13"', '(name "SWDIO/PA13/PA15"', 1)
+    assert both != library
+    with pytest.raises(pindefs.PindefError) as raised:
+        pindefs.read_symbol_pin_names(
+            (both,), symbol="XIAO-STM32C5-SMD", labels=("SWDIO", "SWCLK"))
+    assert "names ['PA13', 'PA15']" in str(raised.value)
+
+    # 5. One label named twice with different pins -- a disagreement, which
     #    this file records rather than averaging. Last-write-wins would have
     #    answered PA15 with nothing said.
     twice = library.replace('(name "SWCLK/PA14"', '(name "SWDIO/PA15"', 1)
@@ -2077,7 +2114,7 @@ def test_every_refusal_in_the_symbol_reader_can_be_reached():
             (twice,), symbol="XIAO-STM32C5-SMD", labels=("SWDIO",))
     assert "saying two things" in str(raised.value)
 
-    # 5. A pin named in KiCad's OTHER place for one. The sweep speaks for the
+    # 6. A pin named in KiCad's OTHER place for one. The sweep speaks for the
     #    whole library, so a name it cannot see is a way past the alarm. This
     #    file has none today, which is why the alternate is only ever refused
     #    and never resolved from.
@@ -2098,6 +2135,22 @@ def test_every_refusal_in_the_symbol_reader_can_be_reached():
             (alternate,), symbol="XIAO-STM32C5-SMD",
             labels=("SWDIO", "SWCLK"))
     assert "PA09" in str(raised.value)
+
+    # 7. An alternate carrying an OPTED-IN label beside a pin. **A third
+    #    state, and the one the guard above did not have.** The opt-in
+    #    exemption used to apply to alternates as well, so this passed the
+    #    sweep and was then read by nothing: the reader returned PA13 and
+    #    PA14 as if the library had said nothing more. Refused now, because
+    #    an alternate is never resolved FROM and an opt-in cannot excuse
+    #    what nothing reads.
+    at2 = library.index('(symbol "XIAO-STM32C5-SMD"')
+    opted = library[:at2] + library[at2:].replace(
+        '(name "D0"', '(alternate "SWDIO/PA15" line none)(name "D0"', 1)
+    assert opted != library
+    with pytest.raises(pindefs.PindefError) as raised:
+        pindefs.read_symbol_pin_names(
+            (opted,), symbol="XIAO-STM32C5-SMD", labels=("SWDIO", "SWCLK"))
+    assert "SWDIO/PA15" in str(raised.value)
 
 
 def test_the_nrf54lm20a_reset_pad_says_which_kind_of_null_it_is():
@@ -2145,13 +2198,23 @@ def test_the_nrf54lm20a_reset_pad_says_which_kind_of_null_it_is():
     # here; the span was not, so a vendor adding a P3.13 would have left the
     # reason reading correctly and describing the wrong part.
     ports = {}
-    for pad in numbered:
-        port, bit = re.match(r"^P(\d)\.(\d\d)", pad).groups()
+    for one in numbered:
+        port, bit = re.match(r"^P(\d)\.(\d\d)", one).groups()
         ports.setdefault(port, set()).add(int(bit))
-    span = {port: (min(bits), max(bits)) for port, bits in ports.items()}
-    assert span == {"0": (0, 9), "1": (0, 31), "2": (0, 10), "3": (0, 12)}, span
+    lowest = min(f"P{port}.{min(bits):02d}" for port, bits in ports.items())
+    highest = max(f"P{port}.{max(bits):02d}" for port, bits in ports.items())
+    # **Derived from the vendor's file and then checked against the SENTENCE**,
+    # rather than against a copy of the answer kept here. A literal span was
+    # the first version: it goes red when Seeed add a `P3.13`, but so would a
+    # dozen unrelated edits, and it would not say that the thing which had
+    # become wrong was the reason text a reader sees. This couples the claim
+    # to the file it claims to have read.
+    assert f"{lowest} through {highest}" in pad["why_null"], (
+        lowest, highest, pad["why_null"])
     # And no net carries the pad's own name, which is why nothing was traced.
     assert "\"nRF54_RST\"" not in board
+
+
 def test_a_traced_label_that_reaches_nothing_is_refused_rather_than_silent():
     """Two silences looked alike and only one of them was a fact.
 
@@ -2203,3 +2266,146 @@ def test_a_traced_label_that_reaches_nothing_is_refused_rather_than_silent():
     # review said it was. `_CHIP_PIN_NAME` reads straight through one.
     assert pindefs._CHIP_PIN_NAME.match("P0.00_K3").group(1) == "P0.00"
     assert pindefs._CHIP_PIN_NAME.match("SWDIO_G2") is None
+
+
+def test_the_spellings_the_board_file_advertises_are_the_ones_the_pattern_takes():
+    """The shipped sentence names three spellings, and it drifted once.
+
+    It read `` `GPIOn`, `PXn`, `Pn.nn` `` while the pattern's port branch is
+    `P[A-D]`, so it advertised any port letter and accepted four. That is a
+    regex restated by hand in prose a user reads, which is the drift this
+    checks for -- not the wording, but that every spelling the board file
+    offers is one `_CHIP_PIN_NAME` actually takes, and that the letters it
+    excludes really are excluded.
+    """
+    assumption = json.loads(pindefs.board_path("XIAO-XIAO STM32C5-SMD")
+                            .read_text(encoding="utf-8"))["assumption"]
+    assert "`GPIOn`, `PAn` through `PDn`, `Pn.nn`" in assumption, assumption
+
+    # Every spelling it advertises is one the pattern takes...
+    for good in ("GPIO0", "GPIO29", "PA13", "PB3", "PC10", "PD15", "P1.02"):
+        assert pindefs._CHIP_PIN_NAME.match(good), good
+    # ...and the letters the sentence says are outside really are.
+    assert "Ports E through H are not among those spellings" in assumption
+    for bad in ("PE2", "PF1", "PG0", "PH2"):
+        assert pindefs._CHIP_PIN_NAME.match(bad) is None, bad
+
+
+def test_a_generated_reason_reads_the_supplies_the_crystal_and_the_debugger():
+    """Two clauses in generated reasons cite vendor facts nothing re-derived.
+
+    `_DEDICATED_DEBUG` ends "alongside the supplies and the crystal" and
+    `_SECOND_CHIP` says the debugger is "an ATSAMD11D14A". Both are true of
+    every part using them today -- measured before this was written -- and
+    neither was checked, so a fourth part with no crystal, or a board Seeed
+    fitted a different debugger to, would keep the sentence and lose the fact.
+
+    **This is the class two reviews on this ticket kept finding**, not another
+    instance of it: a clause asserting something out of a vendor file that no
+    test reads back. "sixty-six" and "P0.00 through P3.12" were the same shape
+    and are derived now; these two were still prose.
+
+    Each debug reason names the file it came from, so this opens THAT file
+    rather than a mapping written here -- the same reason the STM32C5's own
+    `derivation` is what found its two published pins.
+    """
+    crystals = debuggers = reaches = untraced = 0
+    for board in BOARDS:
+        document = json.loads(
+            pindefs.board_path(board).read_text(encoding="utf-8"))
+        for pad in document["pads"]:
+            why = pad.get("why_null") or ""
+
+            if "alongside the supplies and the crystal" in why:
+                cited = re.search(r"Seeed's own (\S+\.kicad_pcb)", why)
+                assert cited, f"{board} {pad['label']}: the reason cites no file"
+                path = SEEED_PCB / cited.group(1)
+                if not path.is_file():
+                    pytest.skip(f"no {path}")
+                chip = re.search(r"pad of the (\w+), not a GPIO", why).group(1)
+                text = path.read_text(encoding="utf-8", errors="replace")
+                mcu = [by_net for value, by_net in pindefs._footprints(text)
+                       if chip in value]
+                assert len(mcu) == 1, (board, chip, len(mcu))
+                names = {one for pads in mcu[0].values() for one in pads}
+                # Three parts reach this line and two spellings cover them:
+                # Raspberry `XIN`/`XOUT` on the RP2350, Nordic `XC1`/`XC2` on
+                # both nRF54s. Nothing wider, on purpose. A draft added
+                # `XL\d` and `XTAL` "so an MG24 would pass", which was three
+                # mistakes at once: no MG24 pad carries this reason so that
+                # footprint is never opened here, Nordic's XL pins are named
+                # `P1.00/XL1` which `^XL\d` cannot match anyway, and a branch
+                # nothing reaches is not a safeguard. A fourth part with a
+                # third spelling should turn this red and be widened then.
+                assert any(re.match(r"X(C\d|IN|OUT)", one)
+                           for one in names), (
+                    f"{chip}: the reason says 'the crystal' and this "
+                    f"footprint names no crystal pad")
+                assert any(re.match(r"(VDD|VSS|IOVDD|DVDD|AVDD|DEC)", one)
+                           for one in names), (
+                    f"{chip}: the reason says 'the supplies' and this "
+                    f"footprint names no supply pad")
+                crystals += 1
+
+            if "this pad reaches the on-board debugger" in why:
+                # **"Reaches" is a topology claim, so the net is what checks
+                # it.** Asserting only that the board carries a SAMD11 left
+                # the strongest word in the sentence unread -- and three
+                # other pads were making the same claim with no net of their
+                # name anywhere, which is what split the reason in two.
+                stem = board.replace("XIAO-", "").replace("-SMD", "").lower()
+                files = [one for one in SEEED_PCB.glob("*.kicad_pcb")
+                         if one.stem.lower() == stem]
+                if not files:
+                    pytest.skip(f"no {stem}.kicad_pcb in {SEEED_PCB}")
+                text = files[0].read_text(encoding="utf-8", errors="replace")
+                samd = [by_net for value, by_net in pindefs._footprints(text)
+                        if "SAMD11" in value.upper()]
+                assert len(samd) == 1, (board, len(samd))
+                nets = {net.replace("{slash}", "/").rsplit("/", 1)[-1].upper()
+                        for net in samd[0]}
+                assert pad["label"].upper() in nets, (
+                    f"{board} {pad['label']}: the reason says it reaches the "
+                    f"debugger and no net of its name is on that footprint")
+                reaches += 1
+
+            if "named for the on-board debugger" in why:
+                # The three that were NOT traced say so, and the file agrees
+                # that there is nothing to trace.
+                assert "NOT claimed: which pin it reaches" in why
+                stem = board.replace("XIAO-", "").replace("-SMD", "").lower()
+                files = [one for one in SEEED_PCB.glob("*.kicad_pcb")
+                         if one.stem.lower() == stem]
+                if not files:
+                    pytest.skip(f"no {stem}.kicad_pcb in {SEEED_PCB}")
+                text = files[0].read_text(encoding="utf-8", errors="replace")
+                everywhere = {net.replace("{slash}", "/").rsplit("/", 1)[-1].upper()
+                              for _, by_net in pindefs._footprints(text)
+                              for net in by_net}
+                assert pad["label"].upper() not in everywhere, (
+                    f"{board} {pad['label']}: a net of this name DOES exist, "
+                    f"so this pad can be traced and should not say otherwise")
+                untraced += 1
+
+            if "an ATSAMD11D14A" in why:
+                # **Matched case-insensitively on purpose.** The board key is
+                # `XIAO-nRF54l15-SMD` and the committed file is
+                # `nRF54L15.kicad_pcb`; building the path by string resolves
+                # on a Windows worktree and fails on a Linux CI, which is a
+                # test passing for the wrong reason in one of the two places
+                # it runs.
+                stem = board.replace("XIAO-", "").replace("-SMD", "").lower()
+                files = [one for one in SEEED_PCB.glob("*.kicad_pcb")
+                         if one.stem.lower() == stem]
+                if not files:
+                    pytest.skip(f"no {stem}.kicad_pcb in {SEEED_PCB}")
+                assert len(files) == 1, files
+                text = files[0].read_text(encoding="utf-8", errors="replace")
+                found = [value for value, _ in pindefs._footprints(text)
+                         if "SAMD11" in value.upper()]
+                assert found == ["ATSAMD11D14A-UUT"], (board, found)
+                debuggers += 1
+
+    # Not vacuous. These are the pads the two reasons actually cover.
+    assert (crystals, debuggers, reaches, untraced) == (6, 9, 6, 3), (
+        crystals, debuggers, reaches, untraced)

@@ -280,3 +280,92 @@ excluded every nested unit); `covered` consistent across both call sites;
 1ac7294e54a5 despite the CRLF worktree; `_PIN_TOKEN` correct for a
 port-numbered part with no falsy-zero bug; and the un-claimed trace boundary
 on `nRF54_RST` holding, with `"reaches" not in why_null` a real discriminator.
+
+**Note 2026-09-06:** A second adversarial review, this one an architect verifying c6015aa and then
+the working tree, returned findings in four rounds. Every pin VALUE was
+confirmed correct again. What it found, again, was claims outrunning their
+checks -- and three of those claims were in prose I had written while fixing
+the previous round's claims.
+
+THE DEBUGGER REASON SAID "REACHES" FOR THREE PADS NOTHING TRACED.
+
+`_SECOND_CHIP` read "this pad reaches the on-board debugger, an ATSAMD11D14A".
+Measured across the nine pads carrying it:
+
+  6  SAMD11_SWDIO, SAMD11_SWCLK on XIAO-MG24-SMD, XIAO-nRF54l15-SMD and
+     XIAO-nRF54LM20A-SMD -- each sits on a net of its own name on the
+     ATSAMD11D14A-UUT footprint in Seeed's own board file. Traced.
+  3  SAMD11_EN on the MG24 and the nRF54L15, and SAMD11_RST2 on the
+     nRF54LM20A -- no net of that name exists anywhere in any of the three
+     board files. Never traced, and the sentence said otherwise.
+
+This is exactly the split `nRF54_RST` forced earlier on this same ticket: a
+CATEGORY claim (the label is not the board's MCU, which is what `chip_pin`
+means) is provable from the label alone; a TOPOLOGY claim (this pad reaches
+that part) needs a trace. Saying both in one sentence made three shipped board
+files assert something nobody had looked up.
+
+Fixed, not deferred. `_SECOND_CHIP_UNTRACED` now carries those three and says
+"NOT claimed: which pin it reaches. No net in Seeed's own board file carries
+this pad's name". Regenerated: 6 pads say reaches, 3 say the weaker thing,
+three board files rewritten. The test asserts the traced six against the net
+on the debugger footprint and asserts, for the untraced three, that no net of
+that name exists anywhere -- so if Seeed ever publish one, the weaker sentence
+goes red rather than staying quietly pessimistic.
+
+THREE CLAIMS I WROTE THIS PASS THAT WERE NOT READ FROM ANYTHING.
+
+All three were in prose justifying a check, never in a check:
+
+  1. "this same STM32 part has ports E through H". No source. `PA13` and
+     `PA14` are the STM32C5's only pin names in this tree.
+  2. The retraction of (1) then said "`P100` appears nowhere in this tree".
+     Also false: `document/SeeedStudio_XIAO_RA4M1/XIAO-RA4M1.md` names
+     `BAT_DET_PIN/P105` and `BAT_READ_EN/P400`, neither matching
+     `_CHIP_PIN_NAME`. The Renesas example was sourced all along; only the
+     token `P100` was invented. A retraction is the easiest place to be
+     wrong twice.
+  3. "Seeed's document folder covers eleven XIAOs". Eleven directories, one
+     of which is an expansion board. Ten are boards.
+
+The paragraph now names no part at all. The gap it explains is a property of
+the regex, and every part named beside it was decoration that had to be
+verified and three times was not.
+
+TWO MORE OF THE SAME SHAPE, in tests I had just written:
+
+  - The crystal pattern was widened with `XL\d` and `XTAL` "so an MG24 would
+    pass". No MG24 pad carries that reason so the footprint is never opened;
+    Nordic's XL pins are `P1.00/XL1`, which `^XL\d` cannot match; and a
+    branch nothing reaches is not a safeguard. Narrowed to `X(C\d|IN|OUT)`,
+    which covers the three parts that do reach it, so a fourth spelling turns
+    it red and gets widened then.
+  - `test_every_refusal_in_the_symbol_reader_can_be_reached` named
+    `len(named) > 1` in its own docstring as a raise nothing exercised, and
+    then did not cover it. The reviewer swapped that raise for a silent
+    pick-first and the whole suite stayed green.
+
+AND ONE REAL BEHAVIOURAL HOLE, in the alternate sweep added earlier this pass.
+An `(alternate ...)` naming a pin was refused, and a `(name ...)` carrying an
+opted-in label was resolved, but an ALTERNATE carrying an opted-in label was
+neither: it passed the sweep on the opt-in and was then read by nothing.
+`(alternate "SWDIO/PA15")` returned PA13 and PA14 with nothing raised. The
+opt-in exemption now applies to `(name ...)` only, because an alternate is
+never resolved FROM and an opt-in cannot excuse what nothing reads.
+
+STILL OPEN, deliberately:
+
+  - `Pn.nn` in the shipped sentence understates `P\d\.\d{1,2}`, which
+    accepts `P1.4`. Left alone: no pad function in either Nordic file uses a
+    single bit digit, so `Pn.n` would misdescribe every pad that exists, and
+    the error is in the direction that cannot promise a reader more than the
+    tool delivers.
+  - 11 ruff findings in these two files. Identical at HEAD, so pre-existing
+    and not this ticket's.
+  - The six SWDIO/SWCLK pads on the RP2040, SAMD21 and nRF52840 still carry
+    the generic reason. Seeed publish no .kicad_pcb for those three parts, so
+    there is nothing in the tree to cite and OH-26 forbids citing memory.
+
+Verified after: 70 tests in tests/rules/test_import_pindefs.py, eleven
+non-pytest checkers OK, `--write-boards` prints 25 unchanged. Every guard added
+across this pass was broken on purpose and seen to go red.

@@ -674,12 +674,14 @@ def read_symbol_pin_names(
 
     **What the other nineteen carry is not `D0` through `D15`**, which is
     what this paragraph said until a review swept them. They run `D0` through
-    `D27`, and 51 of their names are not `Dn` at all -- supplies (`3V3_OUT`,
-    `VBUS`, `VBAT`, `BAT`, `VIN`, `EN`, `PAD`), functions (`NFC1`, `SHPHLD`,
-    `USER_LED`, `MTMS`, `SWDIO`, `USB_DN`, `MG24_EN`, `54L15_TX20`), and on
-    `XIAO-Add-On-Plus` nine pins named `"15"` through `"23"`. The half that
-    is load-bearing is the other one, and it is the half that is checked:
-    none of them names a pin.
+    `D27`, and 51 of their names are not a bare `Dn` -- pads and supplies
+    (`3V3_OUT`, `VBUS`, `VBAT`, `BAT`, `VIN`, `EN`, `PAD`), functions
+    (`NFC1`, `SHPHLD`, `USER_LED`, `MTMS`, `SWDIO`, `USB_DN`, `MG24_EN`,
+    `54L15_TX20`), and on `XIAO-Add-On-Plus` nine pins named `"15"` through
+    `"23"`. Nine of the 51 are compounds like `D15/MTMS` whose
+    `alternatives()` do include a `Dn`, so "not a bare `Dn`" is the accurate
+    form and "not `Dn` at all" was not. The half that is load-bearing is the
+    other one, and it is the half that is checked: none of them names a pin.
 
     Keyed on the LABEL half and not the whole name, because `resolve` matches
     a pad through `alternatives`, which splits `SWDIO/PA13` into its two
@@ -690,17 +692,40 @@ def read_symbol_pin_names(
     `assumption` used to tell a reader this CAD names a pin beside those pad
     names "and beside no others", and until this swept the whole symbol that
     half of the sentence was a hand-check written into generated prose. The
-    sweep is what made it a claim the tool stands behind; the sentence itself
-    was then narrowed again, for the reason below.
+    sweep is what made it a claim the tool stands behind; the sentence was
+    then narrowed twice more, to the spellings actually recognised and to
+    THIS symbol rather than the whole library, for the reasons below.
 
     **The sweep recognises a pin by `_CHIP_PIN_NAME`, and that is the exact
-    strength of the alarm.** If Seeed republish this library naming pins in
-    a spelling that pattern knows -- `GPIO7`, `PB3`, `P1.04` -- the generator
-    stops. A spelling it does not know goes past: this same STM32 part has
-    ports E through H, and `PE2` matches no branch of it, nor would a Renesas
-    `P100` on the RA4M1 symbol. So the sentence the board file generates says
-    the library names none of the pin spellings this tool recognises, which is
-    what is enforced, rather than claiming a universal nothing checked.
+    strength of the alarm.** Its branches are `GPIO\\d+`, `P[A-D]\\d{1,2}` and
+    `P\\d\\.\\d{1,2}`. Republish this library naming a pin in one of those and
+    the generator stops; name one in any other spelling and it goes past,
+    `PE2` being the nearest miss to what is already read here. So the
+    sentence the board file generates speaks for the symbol read for that
+    board and names the spellings this tool recognises, which is what is
+    enforced, rather than claiming a universal nothing checked.
+
+    **Retracted from this paragraph, twice over.** It claimed "this same
+    STM32 part has ports E through H", then a correction claimed "`P100`
+    appears nowhere in this tree". Both were written rather than read, and
+    the second was wrong about the first in a way worth keeping:
+
+      - The STM32C5's ports really are unsourced here. `PA13` and `PA14` are
+        its only pin names in the tree, and Seeed's document folder has no
+        STM32 among its boards. (A draft said "eleven XIAOs". There are
+        eleven `SeeedStudio_XIAO_*` directories and one is an expansion
+        board, so the count was decoration and wrong in a paragraph whose
+        subject is decoration being wrong. The half that carries the
+        argument is that none of them is an STM32.)
+      - Renesas `Pnnn` was NOT unsourced. `document/SeeedStudio_XIAO_RA4M1/`
+        names `BAT_DET_PIN/P105` and `BAT_READ_EN/P400`, and neither matches
+        `_CHIP_PIN_NAME`. Only the token `P100` was invented; the example it
+        was standing in for was in the repository the whole time.
+
+    The lesson is not "check harder before writing a fact". It is that a
+    paragraph justifying a pattern does not need silicon in it at all: the
+    gap is a property of the regex, and every part named beside it was
+    decoration that had to be verified and twice was not.
     """
     if len(texts) != 1:
         raise PindefError(
@@ -728,21 +753,31 @@ def read_symbol_pin_names(
 
     pins: dict[str, ChipPin] = {}
     # Both places KiCad puts a pin's function, because the sweep speaks for
-    # the whole symbol. An `(alternate ...)` is never resolved FROM -- it is
-    # only refused, so that a republished library naming a pin there stops the
-    # generator instead of slipping past a claim about "no others".
+    # the whole symbol. An `(alternate ...)` is never resolved FROM, so a
+    # republished library naming a pin there must stop the generator instead
+    # of slipping past the sentence the board file emits.
+    #
+    # **The opt-in exemption applies to `(name ...)` only, and that asymmetry
+    # is the point.** A pin name carrying an opted-in label is exempt because
+    # the loop below reads it. An ALTERNATE carrying one is read by nothing,
+    # so exempting it would leave a third state beside refused and resolved:
+    # `(alternate "SWDIO/PA15")` with `SWDIO` opted in used to pass the sweep
+    # on the opt-in and then be ignored, returning PA13 with nothing raised.
     unclaimed = [
-        name for name in (_SYMBOL_PIN_NAME.findall(body)
-                          + _SYMBOL_ALTERNATE.findall(body))
+        name for name in _SYMBOL_PIN_NAME.findall(body)
         if any(_CHIP_PIN_NAME.match(alt) for alt in alternatives(name))
         and not any(alt in labels for alt in alternatives(name))
+    ] + [
+        name for name in _SYMBOL_ALTERNATE.findall(body)
+        if any(_CHIP_PIN_NAME.match(alt) for alt in alternatives(name))
     ]
     if unclaimed:
         raise PindefError(
             f"{symbol} names a pin on {sorted(set(unclaimed))}, which nobody "
             f"opted in; every pin this symbol publishes must be listed, "
-            f"because the board file states that it names a pin beside the "
-            f"listed pads and beside no others"
+            f"because the board file states that the listed pads are the only "
+            f"ones in this symbol whose name carries a pin in a spelling this "
+            f"tool recognises"
         )
     for name in _SYMBOL_PIN_NAME.findall(body):
         alts = alternatives(name)
@@ -753,7 +788,7 @@ def read_symbol_pin_names(
         # was `if len(mentioned) != 1: continue`, so `SWDIO/SWCLK/PA13` -- a
         # pin that DOES name a pin, and passes the sweep above because both
         # its labels are opted in -- fell out silently and resolved neither
-        # pad. It is the one path where the "beside no others" chain broke
+        # pad. It is the one path where the only-these-pads chain broke
         # quietly, in a function otherwise built entirely from raises.
         if len(mentioned) > 1:
             raise PindefError(
@@ -1385,8 +1420,30 @@ _SECOND_CHIP = (
     "parts, and the debugger's pins are reachable from it if they are ever "
     "wanted under a field that says which chip it means"
 )
-_SAMD11_PADS = ("SAMD11_SWDIO", "SAMD11_SWCLK", "SAMD11_EN", "SAMD11_RST2")
-_MG24_DEBUGGER = tuple((label, _SECOND_CHIP) for label in _SAMD11_PADS)
+#: **"Reaches" is a topology claim and only six of these nine were traced.**
+#: `SAMD11_SWDIO` and `SAMD11_SWCLK` sit on a net of their own name on the
+#: debugger's own footprint, on all three boards that carry them. `SAMD11_EN`
+#: and `SAMD11_RST2` sit on no net of that name anywhere in the vendor's
+#: file, so where they go has not been read and the sentence must not say.
+#:
+#: This is the same split `nRF54_RST` already forced: a category claim, that
+#: the label is not the board's MCU, is provable from the label and from what
+#: `chip_pin` means. A topology claim needs a trace. Saying both in one
+#: sentence made three pads assert something nothing had looked up.
+_SECOND_CHIP_UNTRACED = (
+    "this pad is named for the on-board debugger, an ATSAMD11D14A, and not "
+    "for this board's own MCU; `chip_pin` names a pin of the board's MCU, so "
+    "a number here would be a pin of the wrong chip. NOT claimed: which pin "
+    "it reaches. No net in Seeed's own board file carries this pad's name, "
+    "so unlike the SWDIO and SWCLK pads on the same header nothing here was "
+    "traced"
+)
+_SAMD11_TRACED = ("SAMD11_SWDIO", "SAMD11_SWCLK")
+_SAMD11_UNTRACED = ("SAMD11_EN", "SAMD11_RST2")
+_MG24_DEBUGGER = (
+    tuple((label, _SECOND_CHIP) for label in _SAMD11_TRACED)
+    + tuple((label, _SECOND_CHIP_UNTRACED) for label in _SAMD11_UNTRACED)
+)
 
 #: The nRF54LM20A's own debug pads, which its footprint names `SWDIO_G2` and
 #: `SWDCLK_G1` -- outside the `Pn.nn` numbering its GPIOs use, so there is no
@@ -2144,10 +2201,11 @@ def assumption_for(chip: str, described: bool, covered: bool,
             f"{resolved + unresolved} pads, {why}. The other {resolved} were "
             f"read from the vendor's own CAD, named in `pindefs`, which is a "
             f"schematic and not firmware. Those {resolved} pads are the only "
-            f"ones in that library whose name carries a pin in a spelling this "
-            f"tool recognises (`GPIOn`, `PXn`, `Pn.nn`); a reader is checked "
-            f"against that and not against a claim about every spelling there "
-            f"could be. Each null pad says which of the two it is in "
+            f"ones in the symbol read for this board whose name carries a pin "
+            f"in a spelling this tool recognises: `GPIOn`, `PAn` through "
+            f"`PDn`, `Pn.nn`. Ports E through H are not among those "
+            f"spellings, so what was checked is those three and not every "
+            f"spelling there could be. Each null pad says which of the two it is in "
             f"its own `why_null`. The pin view reports every null pad as not "
             f"modelled, and will until the vendor publishes something to read."
         )
@@ -2342,7 +2400,7 @@ def describe_registry() -> str:
     as "no package publishes this board" only while the uncovered board named
     nothing at all. The XIAO STM32C5 now names `seeed-xiao` -- a schematic
     symbol library, which is CAD -- so `--list` showed it exactly like the
-    twenty-five boards a vendor core covers, and `not board.sources` became a
+    twenty-four boards a vendor core covers, and `not board.sources` became a
     branch nothing in the registry can enter.
     """
     lines = []
