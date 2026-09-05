@@ -1856,11 +1856,19 @@ def test_a_settled_lead_takes_the_shape_its_two_ends_give_it(tmp_path):
     left to see. The review measured the second half of that and it is false:
     the bendless wire is a DIFFERENT wire, and the same memory moves a lead
     nobody has touched by 0.0095 units. They survive because **nothing in this
-    file kills deleting `stiffen` outright** --
-    `test_a_stiff_wire_hangs_less_deeply_than_a_limp_one` still passes with the
-    whole function gone, few 2.85 against many 3.24, energy still falling and
-    stretch still under one per cent. That is a live gap older than this test,
-    and it is written into OH-162 rather than excused here.
+    file checks what the bending constraint is FOR.** Stub `stiffen` with an
+    early return and 23 of the 25 tests here pass, including
+    `test_a_stiff_wire_hangs_less_deeply_than_a_limp_one`, which is the one
+    named for it -- few 2.85 against many 3.24, energy still falling, stretch
+    still under one per cent.
+
+    **Two do fail, and how they fail is the point.** The wire-wire pair reaches
+    0.31995 where two tubes need 0.32, short by sixteen parts in a hundred
+    thousand, because a bendless lead drapes a little differently. That is an
+    accident of the drape rather than a check on bending, so it is not the
+    check that is missing. A first draft of this paragraph said nothing kills
+    it at all -- a claim about the whole file taken from a review that had run
+    one test, which is the same mistake as the bound, twenty lines above.
     """
     result = run(tmp_path, """
         const R = 0.16;
