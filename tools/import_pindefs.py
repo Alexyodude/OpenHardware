@@ -341,6 +341,56 @@ def read_flat_pins(texts: tuple[str, ...], *, extras: tuple[str, ...] = ()) -> d
     }
 
 
+def read_chip_pins(
+    texts: tuple[str, ...], *, labels: tuple[str, ...]
+) -> dict[str, ChipPin]:
+    """Labels the SILICON fixes, read from every variant of the same chip.
+
+    **The one reader that looks outside the board's own package files, and the
+    reason it is safe is the reason it exists.** `MTMS` on an ESP32-S3 is an
+    IO_MUX function of the part: no board can move it, and Seeed's own
+    `XIAO_ESP32S3` variant does not name it because a board variant lists what
+    the BOARD chose. So the evidence is every variant of that chip, and the
+    agreement between them is the check.
+
+    Measured 2026-09-06 across every variant `boards.txt` maps to a chip:
+
+        esp32s3   MTMS 42  MTDI 41  MTDO 40  MTCK 39   5 variants, agree
+                  USB_DN 19  USB_DP 20                 5 variants, agree
+        esp32     MTMS 14  MTDI 12  MTDO 15  MTCK 13   2 variants, agree
+
+    Agreement inside a chip and difference across chips is what says these are
+    the part's and not the board's. **OH-26's first trap is the opposite
+    case**: `D6` is GPIO0 on an RP2040 and GPIO21 on an ESP32-C3, which is two
+    chips, and a label a board chooses would show exactly the scatter these do
+    not show.
+
+    **A disagreement raises rather than resolving to a majority.** For a pin
+    the silicon fixes there is no such thing as two right answers, so variants
+    that differ mean the label is not silicon-fixed after all and the caller
+    has opted in the wrong one. Every label here is named explicitly for that
+    reason -- nothing is swept in by pattern.
+    """
+    seen: dict[str, dict[int, int]] = {}
+    for text in texts:
+        for label, number in read_c_pin_constants(text).items():
+            if label in labels:
+                seen.setdefault(label, {})
+                seen[label][number] = seen[label].get(number, 0) + 1
+    pins: dict[str, ChipPin] = {}
+    for label, counts in seen.items():
+        if len(counts) > 1:
+            raise PindefError(
+                f"{label} is opted in as a pin the silicon fixes, but the "
+                f"variants of this chip disagree: {dict(sorted(counts.items()))} "
+                f"(value -> how many variants). A pin a board can move is not "
+                f"one this reader may answer for"
+            )
+        (number,) = counts
+        pins[label] = ChipPin(f"GPIO{number}", number)
+    return pins
+
+
 def read_indexed_pins(
     texts: tuple[str, ...],
     *,
@@ -469,6 +519,13 @@ class Source:
     package: str
     paths: tuple[str, ...]
     read: typing.Callable[[tuple[str, ...]], dict[str, ChipPin]]
+    #: Given the checkout, the files to read instead of `paths`. Only
+    #: `arduino_chip` sets it, because only that source cannot know its files
+    #: until it has read the package's own board table -- every variant of one
+    #: chip, which is a different set at every revision. `paths` is what the
+    #: citation names either way, so a file records what it consulted rather
+    #: than a list that would rot.
+    expand: typing.Callable[[pathlib.Path], tuple[str, ...]] | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -548,6 +605,45 @@ def arduino_flat(package: str, variant: str, extras: tuple[str, ...] = ()) -> So
     )
 
 
+def variants_of_chip(checkout: pathlib.Path, chip: str) -> tuple[str, ...]:
+    """Every `variants/<v>/pins_arduino.h` the package builds for one chip.
+
+    `boards.txt` is the only in-tree statement of which chip a variant belongs
+    to: a board row names both its `build.variant` and its `build.mcu`, and
+    several boards share one variant. Sorted so the file a run produces does
+    not depend on a directory's order.
+    """
+    text = (checkout / "boards.txt").read_text(encoding="utf-8", errors="replace")
+    variant: dict[str, str] = {}
+    mcu: dict[str, str] = {}
+    for line in text.splitlines():
+        for pattern, into in ((r"([\w.\-]+)\.build\.variant=(.+)", variant),
+                              (r"([\w.\-]+)\.build\.mcu=(.+)", mcu)):
+            found = re.match(pattern, line.strip())
+            if found:
+                into[found.group(1)] = found.group(2).strip()
+    wanted = {folder for board, folder in variant.items() if mcu.get(board) == chip}
+    return tuple(sorted(
+        f"variants/{folder}/pins_arduino.h" for folder in wanted
+        if (checkout / "variants" / folder / "pins_arduino.h").is_file()
+    ))
+
+
+def arduino_chip(package: str, chip: str, labels: tuple[str, ...]) -> Source:
+    """Labels the silicon fixes, from every variant of that chip.
+
+    For pins no board can move and which the board's OWN variant therefore
+    does not list. See `read_chip_pins`, which refuses when the variants
+    disagree rather than taking a majority.
+    """
+    return Source(
+        package,
+        (f"variants/*/pins_arduino.h for every {chip} board in boards.txt",),
+        functools.partial(read_chip_pins, labels=labels),
+        expand=functools.partial(variants_of_chip, chip=chip),
+    )
+
+
 def arduino_indexed(
     package: str,
     labels: str,
@@ -592,9 +688,21 @@ _ESP32C6 = (
     zephyr_connector("xiao_esp32c6", flat_gpio),
     arduino_flat("arduino-esp32", "XIAO_ESP32C6", extras=("LED",)),
 )
+#: The ESP32-S3's JTAG and USB pads, which are the part's and not the board's
+#: (OH-170 US-1). Seeed's own variant names none of them -- it defines
+#: `LED_BUILTIN` and stops -- because a board variant lists what the board
+#: chose, and a board chooses none of these. `arduino_chip` reads every
+#: variant of the chip instead and refuses if they disagree. Measured
+#: 2026-09-06: five esp32s3 variants define each of the six, and all five
+#: agree on every one -- MTMS 42, MTDI 41, MTDO 40, MTCK 39, USB_DN 19,
+#: USB_DP 20. A first draft of this comment said the USB pair rested on a
+#: single variant; that came from a scan whose chip detection missed most
+#: variants, and re-counting through `variants_of_chip` refuted it.
+_S3_FIXED = ("MTMS", "MTDI", "MTDO", "MTCK", "USB_DN", "USB_DP")
 _ESP32S3 = (
     zephyr_connector("xiao_esp32s3", flat_gpio),
     arduino_flat("arduino-esp32", "XIAO_ESP32S3"),
+    arduino_chip("arduino-esp32", "esp32s3", _S3_FIXED),
 )
 _MG24 = (
     zephyr_connector("xiao_mg24", silabs_port_pin),
@@ -745,7 +853,12 @@ def published_pins(board: Board, bsp_dir: pathlib.Path) -> dict[str, list[Claim]
                 f"{PACKAGES[source.package].repository}"
             )
         texts = []
-        for relative in source.paths:
+        # `expand` names files the source could not know until it read the
+        # package's own board table; `paths` is still what the citation says,
+        # because "every esp32s3 variant at this revision" is the honest
+        # description and a list of thirty filenames is not.
+        wanted = source.expand(checkout) if source.expand else source.paths
+        for relative in wanted:
             path = checkout / relative
             if not path.is_file():
                 raise PindefError(

@@ -25,8 +25,8 @@
         "licence": "Apache-2.0"
       }
     ],
-    "resolved": 11,
-    "unresolved": 14,
+    "resolved": 17,
+    "unresolved": 8,
     "disputed": 0,
     "on_board": []
   },
@@ -83,9 +83,8 @@
     {
       "label": "MTMS",
       "pin": null,
-      "chip_pin": null,
-      "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label",
+      "chip_pin": "GPIO42",
+      "chip_index": 42,
       "x": 73.3,
       "y": 55.6,
       "group": "header-top",
@@ -94,9 +93,8 @@
     {
       "label": "MTCK",
       "pin": null,
-      "chip_pin": null,
-      "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label",
+      "chip_pin": "GPIO39",
+      "chip_index": 39,
       "x": 93.6,
       "y": 55.6,
       "group": "header-top",
@@ -126,9 +124,8 @@
     {
       "label": "USB_DN",
       "pin": null,
-      "chip_pin": null,
-      "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label",
+      "chip_pin": "GPIO19",
+      "chip_index": 19,
       "x": 73.3,
       "y": 76.0,
       "group": "header-top",
@@ -137,9 +134,8 @@
     {
       "label": "USB_DP",
       "pin": null,
-      "chip_pin": null,
-      "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label",
+      "chip_pin": "GPIO20",
+      "chip_index": 20,
       "x": 93.6,
       "y": 76.0,
       "group": "header-top",
@@ -169,9 +165,8 @@
     {
       "label": "MTDO",
       "pin": null,
-      "chip_pin": null,
-      "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label",
+      "chip_pin": "GPIO40",
+      "chip_index": 40,
       "x": 47.9,
       "y": 86.1,
       "group": "header-top",
@@ -202,9 +197,8 @@
     {
       "label": "MTDI",
       "pin": null,
-      "chip_pin": null,
-      "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label",
+      "chip_pin": "GPIO41",
+      "chip_index": 41,
       "x": 47.9,
       "y": 101.3,
       "group": "header-top",

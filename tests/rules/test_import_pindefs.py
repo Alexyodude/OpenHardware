@@ -1368,3 +1368,168 @@ def test_every_uno_pad_given_a_chip_pin_is_one_the_board_routes_to_the_socket():
 
     named = sum(1 for pad in uno_pads() if pad.get("chip_pin") is not None)
     assert named == len(gpio), (named, len(gpio))
+
+
+# --- pins of the silicon rather than of the wiring (OH-170 US-1) -------------
+
+ESP32_BSP = ROOT / "third_party" / "bsp" / "arduino-esp32"
+
+#: What every `arduino-esp32` variant of each chip states for the JTAG pads.
+#: The ESP32 classic's row is here to be DIFFERENT: it is the per-chip trap
+#: OH-26 names, and the two rows are what make the argument below checkable.
+JTAG_BY_CHIP = {
+    "esp32s3": {"MTMS": 42, "MTDI": 41, "MTDO": 40, "MTCK": 39},
+    "esp32": {"MTMS": 14, "MTDI": 12, "MTDO": 15, "MTCK": 13},
+}
+
+
+def esp32_variant_pins(name: str) -> dict[str, set[int]]:
+    """Every value any variant of `boards.txt` gives this pin, by chip."""
+    text = (ESP32_BSP / "boards.txt").read_text(encoding="utf-8", errors="replace")
+    variant, mcu = {}, {}
+    for line in text.splitlines():
+        got = re.match(r"([A-Za-z0-9_.\-]+)\.build\.variant=(.+)", line.strip())
+        if got:
+            variant[got.group(1)] = got.group(2).strip()
+        got = re.match(r"([A-Za-z0-9_.\-]+)\.build\.mcu=(.+)", line.strip())
+        if got:
+            mcu[got.group(1)] = got.group(2).strip()
+    chips: dict[str, set[int]] = {}
+    for board, folder in variant.items():
+        chip = mcu.get(board)
+        header = ESP32_BSP / "variants" / folder / "pins_arduino.h"
+        if chip is None or not header.is_file():
+            continue
+        found = re.search(
+            rf"^\s*(?:static\s+const\s+uint8_t\s+{name}\s*=\s*|#define\s+{name}\s+)(\d+)",
+            header.read_text(encoding="utf-8", errors="replace"), re.M)
+        if found:
+            chips.setdefault(chip, set()).add(int(found.group(1)))
+    return chips
+
+
+def test_the_s3s_jtag_pads_are_the_ones_every_variant_of_that_chip_states():
+    """**OH-170 US-1: a pin the silicon fixes, read from another board.**
+
+    `MTMS`, `MTDI`, `MTDO` and `MTCK` are IO_MUX functions of the ESP32-S3, not
+    board wiring, and Seeed's own `XIAO_ESP32S3` variant names none of them --
+    it defines `LED_BUILTIN` and stops. So the values come from other boards
+    using the same chip, which is exactly the move OH-26's first trap warns
+    against, and the warning is about a different case.
+
+    **This is what makes it a different case, and it is measurable.** Across
+    every variant `boards.txt` maps to a chip, the values agree perfectly
+    inside a chip and differ completely between chips:
+
+        esp32s3   MTMS 42  MTDI 41  MTDO 40  MTCK 39
+        esp32     MTMS 14  MTDI 12  MTDO 15  MTCK 13
+
+    A board can move `D6`; five unrelated vendors' boards cannot agree by
+    accident on a pad a board could move. OH-26's trap is `D6` being GPIO0 on
+    an RP2040 and GPIO21 on an ESP32-C3 -- a different chip, which is the row
+    below and not the row above.
+
+    The board files are gitignored, as is the checkout, so this skips rather
+    than fails where neither has been fetched.
+    """
+    if not (ESP32_BSP / "boards.txt").is_file():
+        pytest.skip(f"no {ESP32_BSP}; see tools/import_pindefs.py --fetch")
+
+    for name, expect in JTAG_BY_CHIP["esp32s3"].items():
+        chips = esp32_variant_pins(name)
+        assert chips.get("esp32s3") == {expect}, (name, chips.get("esp32s3"))
+        # The whole argument: a different chip puts it somewhere else, and its
+        # own variants agree with each other just as firmly.
+        assert chips.get("esp32") == {JTAG_BY_CHIP["esp32"][name]}, (name, chips)
+        assert expect != JTAG_BY_CHIP["esp32"][name]
+
+    for board in ("XIAO-ESP32-S3-SMD", "XIAO-ESP32-S3-SMD_PAD"):
+        pads = {p["label"]: p for p in json.loads(
+            (ROOT / "webui" / "boards" / f"{board}.json").read_text(encoding="utf-8"))["pads"]}
+        for name, expect in JTAG_BY_CHIP["esp32s3"].items():
+            assert pads[name]["chip_pin"] == f"GPIO{expect}", (board, name, pads[name])
+            assert pads[name]["chip_index"] == expect
+            # And never the other chip's, which is the failure this guards.
+            assert pads[name]["chip_pin"] != f"GPIO{JTAG_BY_CHIP['esp32'][name]}"
+        # A pad given a value drops the reason it carried for not having one,
+        # which the file's own shape test also holds for every board.
+        assert "why_null" not in pads["MTMS"]
+    # And the report names the source as what it is: every variant of the
+    # chip, not a filename that would rot at the next revision.
+    where = pindefs.board_report("XIAO-ESP32-S3-SMD")
+    said = {pad["label"]: pad.get("sources") for pad in where["pads"]}
+    assert any("every esp32s3 board" in one for one in said["MTMS"]), said["MTMS"]
+
+
+def test_the_s3s_usb_pads_rest_on_the_same_five_variants_as_its_jtag():
+    """`USB_DN` and `USB_DP` are the ESP32-S3's USB PHY pads, fixed by the
+    part like the JTAG four, and read the same way.
+
+    **A first draft of this file said they rested on a single variant** and
+    treated them as weaker evidence. That came from a scan whose chip
+    detection missed most variants; counting through `variants_of_chip`, which
+    reads the package's own `boards.txt`, gives five for these exactly as for
+    the JTAG four, and all five agree. The wrong number is recorded because it
+    is the same mistake in miniature as the one this whole source exists to
+    avoid: a count taken from the wrong population.
+    """
+    if not (ESP32_BSP / "boards.txt").is_file():
+        pytest.skip(f"no {ESP32_BSP}")
+    folders = pindefs.variants_of_chip(ESP32_BSP, "esp32s3")
+    for name, expect in (("USB_DN", 19), ("USB_DP", 20), ("MTMS", 42)):
+        stated = {}
+        for folder in folders:
+            found = re.search(
+                rf"^\s*(?:static\s+const\s+uint8_t\s+{name}\s*=\s*|#define\s+{name}\s+)(\d+)",
+                (ESP32_BSP / folder).read_text(encoding="utf-8", errors="replace"), re.M)
+            if found:
+                stated.setdefault(int(found.group(1)), []).append(folder)
+        assert set(stated) == {expect}, (name, {k: len(v) for k, v in stated.items()})
+        assert len(stated[expect]) == 5, (name, len(stated[expect]))
+    pads = {p["label"]: p for p in json.loads(
+        (ROOT / "webui" / "boards" / "XIAO-ESP32-S3-SMD.json").read_text(encoding="utf-8"))["pads"]}
+    assert pads["USB_DN"]["chip_pin"] == "GPIO19"
+    assert pads["USB_DP"]["chip_pin"] == "GPIO20"
+
+
+def test_a_board_wired_label_is_refused_by_the_chip_reader():
+    """**The property that makes reading another board's variant safe.**
+
+    `arduino_chip` exists because a pad the silicon fixes is not in the
+    board's own variant. The danger is obvious: read another board's file and
+    you get another board's wiring. What separates the two is measurable, and
+    this is the measurement.
+
+    A pin the part fixes has ONE value across every variant of that chip. A
+    pin the board chooses scatters, because that is what choosing means:
+
+        MTMS          42 in all five variants that name it
+        LED_BUILTIN   0, 1, 2, 5, 11, 13, 21, 35, 38 and more
+        SDA           1 through 11 and beyond, 8 in thirty-two of them
+
+    So the reader refuses rather than taking a majority -- for a pin the
+    silicon fixes there is no second right answer, and a disagreement means
+    the label was opted in wrongly. `SDA`'s commonest value is held by
+    thirty-two variants, which is exactly the kind of majority that would look
+    convincing and be a board's habit rather than a chip's pinout.
+    """
+    if not (ESP32_BSP / "boards.txt").is_file():
+        pytest.skip(f"no {ESP32_BSP}")
+    texts = tuple((ESP32_BSP / folder).read_text(encoding="utf-8", errors="replace")
+                  for folder in pindefs.variants_of_chip(ESP32_BSP, "esp32s3"))
+
+    fixed = pindefs.read_chip_pins(texts, labels=("MTMS", "MTDI", "MTDO", "MTCK",
+                                                  "USB_DN", "USB_DP"))
+    assert fixed["MTMS"].index == 42 and fixed["USB_DP"].index == 20
+
+    for label in ("LED_BUILTIN", "TX", "SDA"):
+        with pytest.raises(pindefs.PindefError) as raised:
+            pindefs.read_chip_pins(texts, labels=(label,))
+        # The message carries the scatter, so whoever opted the label in can
+        # see why it was refused without re-running the survey.
+        assert "disagree" in str(raised.value), str(raised.value)
+        assert label in str(raised.value)
+
+    # And the registry only ever opts in the six, so no board-wired label can
+    # reach this reader by accident.
+    assert set(pindefs._S3_FIXED) == {"MTMS", "MTDI", "MTDO", "MTCK", "USB_DN", "USB_DP"}
