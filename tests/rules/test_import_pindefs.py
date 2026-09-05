@@ -1263,3 +1263,108 @@ def test_the_eight_committed_files_with_unnumbered_pins_are_the_eight_oh_26_name
             pad["chip_index"] is not None
             for pad in document["pads"] if pad["chip_pin"] is not None
         ), name
+
+
+# --- the Arduino Uno, which this tool has never seen (OH-170 step 1) ---------
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+UNO_FILE = ROOT / "webui" / "boards" / "Arduino Uno.json"
+UNO_BRD = ROOT / "third_party" / "arduino-uno" / "UNO-TH_Rev3e.brd"
+
+
+def uno_pads() -> list[dict]:
+    return json.loads(UNO_FILE.read_text(encoding="utf-8"))["pads"]
+
+
+def test_the_uno_states_in_its_file_the_chip_pins_its_module_states():
+    """**OH-170 step 1: the one board whose file was silent while its module
+    spoke.**
+
+    Every XIAO file carries `chip_pin` from `import_pindefs.py`. The Uno's
+    carried `label`, `pin`, `x`, `y` and `group` and nothing else, because this
+    tool's board table is keyed on XIAO names and has never seen it -- so its
+    thirty-two nulls were also the only ones in the tree with no `why_null`
+    beside them. The page was right anyway, because `atmega328p.PIN_NAMES`
+    supplied all twenty-two, which made this the exact inverse of the thirteen
+    boards OH-167 fixed.
+
+    **The two are asserted equal rather than one generated from the other.**
+    They transcribe the same vendor table -- Arduino's
+    `variants/standard/pins_arduino.h` -- so what this catches is one drifting
+    from the other, which is the same relationship
+    `test_the_pin_names_are_derived_from_the_same_table_the_levels_come_from`
+    already holds between `PIN_NAMES` and `HEADER`.
+
+    The join is through `header_key` and not the raw label, because the Uno
+    prints its PWM pins with a tilde and the variant file does not: a naive
+    lookup names 16 pads of 22, which is how this was caught.
+    """
+    from webui import api
+    from webui.boards import atmega328p
+
+    stated = {}
+    for pad in uno_pads():
+        if pad.get("chip_pin") is not None:
+            key = api.header_key(pad["label"], atmega328p.PIN_NAMES)
+            stated[key] = pad["chip_pin"]
+    assert stated == atmega328p.PIN_NAMES, {
+        "in the file only": {k: v for k, v in stated.items()
+                             if atmega328p.PIN_NAMES.get(k) != v},
+        "in the module only": {k: v for k, v in atmega328p.PIN_NAMES.items()
+                               if stated.get(k) != v},
+    }
+    assert len(stated) == 22
+
+    # Every pad without one says why, which no Uno pad did before.
+    for pad in uno_pads():
+        if pad.get("chip_pin") is None:
+            assert pad.get("why_null"), pad["label"]
+    # And the flat index is null throughout: an AVR numbers by port and bit and
+    # publishes no flat GPIO numbering, as Silicon Labs does not for the MG24.
+    assert {pad.get("chip_index") for pad in uno_pads()} == {None}
+
+
+def test_every_uno_pad_given_a_chip_pin_is_one_the_board_routes_to_the_socket():
+    """The cross-check the variant file cannot make, from Arduino's own board
+    file: a label named as a GPIO must sit on a net that reaches the ATmega
+    socket, and the pads left null must be the supplies and references.
+
+    `ZU4` is the DIP-28 socket and its nets are named by the vendor for the
+    Arduino pin numbers -- `IO0` to `IO9`, `AD0` to `AD5`, and the two doubled
+    `AD4/SDA` and `AD5/SCL` that bring A4 and A5 out twice on the R3 header,
+    which is why 22 named pads sit on 20 GPIO nets.
+
+    The board file is downloaded by hand and gitignored, so this skips rather
+    than fails where nobody has fetched it.
+    """
+    if not UNO_BRD.is_file():
+        pytest.skip(f"no {UNO_BRD}; see tools/get_board_sources.py arduino-uno")
+    import xml.etree.ElementTree as ET
+
+    root = ET.parse(UNO_BRD).getroot()
+    gpio = set()
+    supplies = set()
+    for signal in root.findall(".//signals/signal"):
+        refs = [(c.get("element"), c.get("pad")) for c in signal.findall("contactref")]
+        if not any(element == "ZU4" for element, _ in refs):
+            continue
+        where = gpio if signal.get("name").startswith(("IO", "AD")) or \
+            signal.get("name") in ("SS", "MOSI", "MISO", "SCK") else supplies
+        for element, pad in refs:
+            if element in ("IOL", "IOH", "AD", "POWER"):
+                where.add((element, int(pad)))
+
+    assert len(gpio) == 22, sorted(gpio)
+    # The header runs, as the pad map groups them, and their sizes.
+    counts = {"IOL": 8, "IOH": 8, "AD": 6}
+    for connector, expect in counts.items():
+        got = sum(1 for element, _ in gpio if element == connector)
+        assert got == expect, (connector, got, expect)
+    # Nothing on the power header carries a GPIO.
+    assert not [pad for element, pad in gpio if element == "POWER"]
+    # And the pads that reach the socket without being GPIOs are the four the
+    # module deliberately leaves out.
+    assert supplies, "no supply net reaches the socket, which cannot be right"
+
+    named = sum(1 for pad in uno_pads() if pad.get("chip_pin") is not None)
+    assert named == len(gpio), (named, len(gpio))

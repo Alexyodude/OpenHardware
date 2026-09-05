@@ -13,224 +13,317 @@
       "pin": 28,
       "x": 119.9,
       "y": 16.1,
-      "group": "digital-high"
+      "group": "digital-high",
+      "chip_pin": "PC5",
+      "chip_index": null
     },
     {
       "label": "SDA",
       "pin": 27,
       "x": 134.3,
       "y": 16.1,
-      "group": "digital-high"
+      "group": "digital-high",
+      "chip_pin": "PC4",
+      "chip_index": null
     },
     {
       "label": "AREF",
       "pin": 21,
       "x": 148.6,
       "y": 16.1,
-      "group": "digital-high"
+      "group": "digital-high",
+      "chip_pin": null,
+      "chip_index": null,
+      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "GND",
       "pin": 22,
       "x": 163.0,
       "y": 16.1,
-      "group": "digital-high"
+      "group": "digital-high",
+      "chip_pin": null,
+      "chip_index": null,
+      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "13",
       "pin": 19,
       "x": 177.4,
       "y": 16.1,
-      "group": "digital-high"
+      "group": "digital-high",
+      "chip_pin": "PB5",
+      "chip_index": null
     },
     {
       "label": "12",
       "pin": 18,
       "x": 191.8,
       "y": 16.1,
-      "group": "digital-high"
+      "group": "digital-high",
+      "chip_pin": "PB4",
+      "chip_index": null
     },
     {
       "label": "~11",
       "pin": 17,
       "x": 206.2,
       "y": 16.1,
-      "group": "digital-high"
+      "group": "digital-high",
+      "chip_pin": "PB3",
+      "chip_index": null
     },
     {
       "label": "~10",
       "pin": 16,
       "x": 220.5,
       "y": 16.1,
-      "group": "digital-high"
+      "group": "digital-high",
+      "chip_pin": "PB2",
+      "chip_index": null
     },
     {
       "label": "~9",
       "pin": 15,
       "x": 234.9,
       "y": 16.1,
-      "group": "digital-high"
+      "group": "digital-high",
+      "chip_pin": "PB1",
+      "chip_index": null
     },
     {
       "label": "8",
       "pin": 14,
       "x": 249.3,
       "y": 16.1,
-      "group": "digital-high"
+      "group": "digital-high",
+      "chip_pin": "PB0",
+      "chip_index": null
     },
     {
       "label": "7",
       "pin": 13,
       "x": 272.3,
       "y": 16.1,
-      "group": "digital-low"
+      "group": "digital-low",
+      "chip_pin": "PD7",
+      "chip_index": null
     },
     {
       "label": "~6",
       "pin": 12,
       "x": 286.7,
       "y": 16.1,
-      "group": "digital-low"
+      "group": "digital-low",
+      "chip_pin": "PD6",
+      "chip_index": null
     },
     {
       "label": "~5",
       "pin": 11,
       "x": 301.1,
       "y": 16.1,
-      "group": "digital-low"
+      "group": "digital-low",
+      "chip_pin": "PD5",
+      "chip_index": null
     },
     {
       "label": "4",
       "pin": 6,
       "x": 315.4,
       "y": 16.1,
-      "group": "digital-low"
+      "group": "digital-low",
+      "chip_pin": "PD4",
+      "chip_index": null
     },
     {
       "label": "~3",
       "pin": 5,
       "x": 329.8,
       "y": 16.1,
-      "group": "digital-low"
+      "group": "digital-low",
+      "chip_pin": "PD3",
+      "chip_index": null
     },
     {
       "label": "2",
       "pin": 4,
       "x": 344.2,
       "y": 16.1,
-      "group": "digital-low"
+      "group": "digital-low",
+      "chip_pin": "PD2",
+      "chip_index": null
     },
     {
       "label": "1",
       "pin": 3,
       "x": 358.6,
       "y": 16.1,
-      "group": "digital-low"
+      "group": "digital-low",
+      "chip_pin": "PD1",
+      "chip_index": null
     },
     {
       "label": "0",
       "pin": 2,
       "x": 373.0,
       "y": 16.1,
-      "group": "digital-low"
+      "group": "digital-low",
+      "chip_pin": "PD0",
+      "chip_index": null
     },
     {
       "label": "NC",
       "pin": null,
       "x": 171.6,
       "y": 288.2,
-      "group": "power"
+      "group": "power",
+      "chip_pin": null,
+      "chip_index": null,
+      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "IOREF",
       "pin": null,
       "x": 186.0,
       "y": 288.2,
-      "group": "power"
+      "group": "power",
+      "chip_pin": null,
+      "chip_index": null,
+      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "RESET",
       "pin": 1,
       "x": 200.4,
       "y": 288.2,
-      "group": "power"
+      "group": "power",
+      "chip_pin": null,
+      "chip_index": null,
+      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "3V3",
       "pin": null,
       "x": 214.8,
       "y": 288.2,
-      "group": "power"
+      "group": "power",
+      "chip_pin": null,
+      "chip_index": null,
+      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "5V",
       "pin": 7,
       "x": 229.2,
       "y": 288.2,
-      "group": "power"
+      "group": "power",
+      "chip_pin": null,
+      "chip_index": null,
+      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "GND",
       "pin": 8,
       "x": 243.5,
       "y": 288.2,
-      "group": "power"
+      "group": "power",
+      "chip_pin": null,
+      "chip_index": null,
+      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "GND",
       "pin": 22,
       "x": 257.9,
       "y": 288.2,
-      "group": "power"
+      "group": "power",
+      "chip_pin": null,
+      "chip_index": null,
+      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "VIN",
       "pin": null,
       "x": 272.3,
       "y": 288.2,
-      "group": "power"
+      "group": "power",
+      "chip_pin": null,
+      "chip_index": null,
+      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "A0",
       "pin": 23,
       "x": 301.1,
       "y": 288.2,
-      "group": "analog"
+      "group": "analog",
+      "chip_pin": "PC0",
+      "chip_index": null
     },
     {
       "label": "A1",
       "pin": 24,
       "x": 315.4,
       "y": 288.2,
-      "group": "analog"
+      "group": "analog",
+      "chip_pin": "PC1",
+      "chip_index": null
     },
     {
       "label": "A2",
       "pin": 25,
       "x": 329.8,
       "y": 288.2,
-      "group": "analog"
+      "group": "analog",
+      "chip_pin": "PC2",
+      "chip_index": null
     },
     {
       "label": "A3",
       "pin": 26,
       "x": 344.2,
       "y": 288.2,
-      "group": "analog"
+      "group": "analog",
+      "chip_pin": "PC3",
+      "chip_index": null
     },
     {
       "label": "A4",
       "pin": 27,
       "x": 358.6,
       "y": 288.2,
-      "group": "analog"
+      "group": "analog",
+      "chip_pin": "PC4",
+      "chip_index": null
     },
     {
       "label": "A5",
       "pin": 28,
       "x": 373.0,
       "y": 288.2,
-      "group": "analog"
+      "group": "analog",
+      "chip_pin": "PC5",
+      "chip_index": null
     }
-  ]
+  ],
+  "pindefs": {
+    "generated_by": "OH-170 step 1, by hand; this board is not in tools/import_pindefs.py, whose table is keyed on XIAO names",
+    "derivation": "`chip_pin` is the port and bit from Arduino's own AVR variant, `framework-arduino-avr/variants/standard/pins_arduino.h` -- line 54 defines LED_BUILTIN as 13 and the pinout comment from line 99 gives each digital and analog pin its port and bit. `webui/boards/atmega328p.py` transcribes the same table for PIN_NAMES, and the two are asserted equal rather than one generated from the other. Cross-checked against Arduino's own board file third_party/arduino-uno/UNO-TH_Rev3e.brd, whose nets are named IO0..IO9, AD0..AD5, AD4/SDA and AD5/SCL: every label given a chip pin here sits on a net that reaches the ATmega socket ZU4, and every label left null sits on none. That is what the board file can check and the variant file cannot. `chip_index` is null throughout: an AVR names its pins by port and bit and publishes no flat GPIO numbering, as Silicon Labs does not for the MG24.",
+    "packages": [
+      {
+        "name": "framework-arduino-avr",
+        "repository": "https://github.com/arduino/ArduinoCore-avr",
+        "file": "variants/standard/pins_arduino.h",
+        "licence": "LGPL-2.1-or-later"
+      },
+      {
+        "name": "Arduino UNO Rev3 CAD",
+        "repository": "https://docs.arduino.cc/hardware/uno-rev3",
+        "file": "UNO-TH_Rev3e.brd",
+        "licence": "CC BY-SA 4.0",
+        "used_for": "which pads route to the ATmega socket, and which do not"
+      }
+    ]
+  }
 }
