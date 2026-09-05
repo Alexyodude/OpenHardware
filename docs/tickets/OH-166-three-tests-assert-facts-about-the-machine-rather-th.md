@@ -34,3 +34,5 @@ STEPS:
 4. And a check, since this repository's own position is that a check which has never failed is evidence of nothing: whatever is done, run the whole suite twice concurrently and confirm it passes, because that is the condition all three failed under.
 
 Filed after two independent reviews of OH-162 step 3 each hit one of these while the other was running.
+
+**Note 2026-09-06:** Item 2's mechanism is now observed rather than hypothesised, 2026-09-06. test_emulator.py::test_a_state_poll_answers_while_a_build_runs fails DETERMINISTICALLY while an emulator server is listening on 8088, and passes as soon as that process is stopped -- measured three times each way in one sitting. Not a flake and not a shared temp path: the test asserts a wall clock under 3 seconds while a real build runs, and a second process on the same machine building and serving is enough to blow it. That makes item 2 the same shape as item 1 after all -- a test asserting a fact about the machine -- but through CPU rather than through a namespace, and it is reproducible on demand, which item 1's was not until a second pytest run happened to collide with it.
