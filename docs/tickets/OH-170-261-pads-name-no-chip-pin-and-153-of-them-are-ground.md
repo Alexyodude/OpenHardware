@@ -98,8 +98,15 @@ sentence about them stands.
 
 What is still blocked, and it is the part that mattered: `D0` through `D15`.
 No source in the tree names a pin for any of them, the symbol library included
--- it prints them as bare `D0`..`D15`. That is 22 of this board's pads and
+-- it prints them as bare `D0`..`D15`. That is 16 of this board's pads and
 they need Seeed to publish something.
+
+CORRECTED: this said 22, which is a real count of a different set. 22 is
+the non-supply pads still null on this board -- the 16 bare `Dn` plus
+`CANH`, `CANL`, `STM32C5_BOOT`, `STM32C5_RST`, `USB_D-` and `USB_D+`. The
+sentence names `D0` through `D15` and there are 16 of those, counted from
+the committed board file. No checker recomputes a number in a ticket note,
+so this one is the reader's to verify and was wrong until a review did.
 
 Three sentences the generator emitted were false the moment anything here
 resolved, and all three are now derived rather than written down:
@@ -126,3 +133,150 @@ MOSFET gate whose drain sits on the reset net.
 
 Counts after this pass, recomputed over every `webui/boards/*.json`:
 naming 365, supplies 153, specific 42, generic 22, total 582.
+
+**Note 2026-09-06:** A review of this ticket's work said `read_seeed_traced` "does not require
+exactly one footprint" and that the nRF54LM20A's traced source "can never
+answer" because "every pad function there carries a ball suffix". The first
+was true and is fixed. The second found something real and named the wrong
+cause, so it is recorded here with what was measured.
+
+THE BALL SUFFIX IS NOT THE CAUSE. `_CHIP_PIN_NAME` ends `(?:[/_]|$)` and reads
+straight through one: `P0.00_K3` gives `P0.00`, `P1.01_J1` gives `P1.01`. What
+returns nothing is `SWDIO_G2`, and it returns nothing because SWDIO is not a
+pin name on any part, suffix or no suffix.
+
+WHAT WAS ACTUALLY WRONG. The source asked for four labels and two of them were
+on no net of the MCU footprint at all, so the reader returned the same empty
+answer for two different situations:
+
+  nRF54_SWDIO   net found, MCU pad `SWDIO_G2`   -> nothing. CORRECT: the
+  nRF54_SWCLK   net found, MCU pad `SWDCLK_G1`  -> nothing. silicon has no
+                                                   GPIO number for a debug
+                                                   pad, and `_NRF54LM20A_DEBUG`
+                                                   says exactly that in words.
+  SHPHLD        NO net on the MCU               -> nothing. WRONG SHAPE: this
+  nRF54_RST     NO net on the MCU               -> nothing. is a citation that
+                                                   names something absent.
+
+`SHPHLD` is a pin of the board's nPM1300 -- the net exists, on that part's
+`SHPHLD_D4` pad, and the pad's own `why_null` has said so correctly all along.
+`nRF54_RST`'s net is spelled `~{nRF54_RESET}` and no net carries the pad's own
+name, which this ticket already recorded when the reset reason was written.
+
+THE COST WAS NEVER THOSE TWO PADS. Both were answered by `Board.reasons`, so
+removing them changes no output: `--write-boards` prints 25 unchanged. The cost
+is that a traced label reaching nothing was indistinguishable from one reaching
+a dedicated pad. If a vendor revision renamed the `SWDIO` net in
+`MG24.kicad_pcb`, that board's `PA02` and `PA01` would have vanished exactly
+this quietly and its two pads would have fallen back to a generic null with
+nothing raised. That is the same shape as the three permanently-skipped tests
+and the negative control filtering on an absent phrase, both found earlier on
+this ticket: a check that cannot fail.
+
+FIX. `read_seeed_traced` now raises when a label is on no net of the part,
+and keeps returning nothing when the label reaches the part and the pad is
+outside its GPIO numbering. `SHPHLD` and `nRF54_RST` are removed from the
+traced tuple, because with the raise in place they would refuse the generator.
+
+`test_a_traced_label_that_reaches_nothing_is_refused_rather_than_silent` holds
+both halves and was verified to discriminate: with the raise replaced by `if
+False:` it fails with `DID NOT RAISE`, and it also asserts the ball-suffix
+claim above is false, so the wrong cause cannot be re-adopted.
+
+Measured after: 67 tests in tests/rules/test_import_pindefs.py (was 66), all
+25 board files unchanged, eleven non-pytest checkers OK.
+
+**Note 2026-09-06:** An adversarial review of c6015aa returned 18 findings. Every pin VALUE it
+checked was confirmed correct, and no board file changed except the STM32C5's
+`assumption`, whose sentence was weakened to what is actually enforced. What
+the review found was claims stronger than their checks, which is the same
+failure this ticket has now hit five times.
+
+FIXED, code:
+
+  - The reader's docstring said the other nineteen symbols name `D0` through
+    `D15`. Swept: they run D0 through D27, and 51 of their names are not `Dn`
+    at all -- supplies, function names, and nine pins literally named "15"
+    through "23" on XIAO-Add-On-Plus. The load-bearing half (none of them
+    names a pin) was true and is what the sweep checks; the decorative half
+    was measured wrong. Same class as the "thirty-two pads that was 66".
+
+  - `describe_registry` still keyed on `board.sources` being empty, so
+    `--list` no longer marked the one board no firmware package covers -- the
+    exact question its own docstring says it answers -- and its fallback
+    became a branch no board can enter. Now keys on `firmware`, and a test
+    asserts the mark appears on exactly one line.
+
+  - `--fetch` printed "download by hand" for `seeed-xiao`, which
+    `tools/get_board_sources.py seeed-xiao` fetches in one command, and the
+    missing-checkout error told the user to run `--fetch`, which skips every
+    `cloned=False` package -- a loop. `cloned=False` was carrying two
+    meanings, which is what `Package.firmware`'s own docstring warns about.
+    New `Package.fetch` and `how_to_fetch()`; both messages now name the
+    command that works.
+
+  - The sweep recognises a pin by `_CHIP_PIN_NAME`, which has no `P[E-H]`
+    branch -- so a republished library naming `PE2` on this same STM32 part,
+    or a Renesas `P100`, would pass it. The board file was generating "names
+    a pin beside those pad names and beside no others", an absolute nothing
+    checked. It now states the enforced claim: the only names carrying a pin
+    in a spelling this tool recognises.
+
+  - The sweep read only `(name "...")`. KiCad publishes a pin's function in
+    `(alternate "...")` too, and the file has zero today, so an alternate is
+    now refused (never resolved from) rather than being a second way past an
+    alarm the board file's sentence rests on.
+
+  - A pin naming two opted-in labels used to `continue` silently, and a label
+    named twice took the last write. `read_seeed_net_names` refuses both, so
+    one file held two rules for one situation. Both now raise.
+
+  - `(text,) = texts` raised `ValueError`, which `main` does not catch, so a
+    second path would have printed a traceback where every sibling prints a
+    message.
+
+  - The digest justification claimed a hand-downloaded source has no commit
+    and `git rev-parse` inside it answers OpenHardware's own head. True of
+    `seeed-pcb`, which has no `.git`. False of `seeed-xiao`, which has one
+    answering f07e6ff. Both comments now state the reason that covers both:
+    neither lives under `third_party/bsp/`, which is all `revision()` reads.
+
+FIXED, tests:
+
+  - The sweep's non-vacuity half named three of the nineteen symbols, 16% of
+    a set the docstring and the board file both rest on. Derived from
+    `_SYMBOL.findall` now, so all nineteen are checked.
+
+  - Four raises in the symbol reader had no test at all, and `not named` is
+    one line from the data (`XIAO-RP2040-SMD`, `SWDIO`). All five refusals are
+    now reached by `test_every_refusal_in_the_symbol_reader_can_be_reached`.
+
+  - `test_the_eight_committed_files_..._are_the_eight_oh_26_named` asserted
+    nine, and an inline comment said so. A number in a test name is a claim
+    under the same rule as a comment. Renamed; the count lives in the list.
+
+  - `test_the_boards_with_no_source_are_deliberate` asserts the board HAS a
+    source. Renamed to `test_the_board_no_firmware_package_covers_is_deliberate`.
+
+  - "P0.00 through P3.12" was the one quoted number nothing recomputed -- the
+    net name and the count of 66 were held, the span was not. Now derived per
+    port from the vendor file.
+
+Every new guard was verified to discriminate by breaking it on purpose: all
+six go red (two opted-in labels, a label named twice, more than one library,
+the alternate sweep, a traced label reaching nothing, and `describe_registry`
+keyed back on `bool(sources)`).
+
+NOT FIXED, and it is not mine to fix: `docs/tickets/OH-171-*.md` line 36 names
+`test_the_boards_with_no_source_are_deliberate`, which is now
+`test_the_board_no_firmware_package_covers_is_deliberate`. That file is
+claimed by OH-171 and a ticket owns its own file, so whoever takes OH-171
+should update the reference.
+
+WHAT THE REVIEW CONFIRMED, so it is not re-litigated: every written pin value;
+the symbol slicing (`^\t\(symbol` matched exactly the 20 top-level symbols and
+excluded every nested unit); `covered` consistent across both call sites;
+`--write-boards` exactly reproducible; the digest newline-stable at
+1ac7294e54a5 despite the CRLF worktree; `_PIN_TOKEN` correct for a
+port-numbered part with no falsy-zero bug; and the un-claimed trace boundary
+on `nRF54_RST` holding, with `"reaches" not in why_null` a real discriminator.

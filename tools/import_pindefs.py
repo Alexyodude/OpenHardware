@@ -552,6 +552,12 @@ def read_seeed_traced(
     A pad whose function is not a pin name -- `SWDIO`, `XIN`, `IOVDD` -- is
     outside the part's GPIO numbering and resolves to nothing. That is the
     RP2350's case, and `Board.reasons` answers it in words instead.
+
+    **A label that is on no net of the part at all raises instead of
+    resolving to nothing.** Those two silences used to be one: the first is
+    the silicon saying it has no GPIO number for this pad, the second is a
+    citation naming something that is not there, and only the first is a
+    fact worth keeping quiet about.
     """
     pins: dict[str, ChipPin] = {}
     for text in texts:
@@ -580,11 +586,13 @@ def read_seeed_traced(
         mine = [by_net for _, by_net in matched]
         for label in labels:
             wanted = label.upper()
+            reached = False
             for by_net in mine:
                 for net, functions in by_net.items():
                     plain = net.replace("{slash}", "/").rsplit("/", 1)[-1].upper()
                     if plain != wanted:
                         continue
+                    reached = True
                     named = {match.group(1) for match in
                              (_CHIP_PIN_NAME.match(one) for one in functions)
                              if match}
@@ -608,11 +616,44 @@ def read_seeed_traced(
                         flat = token.group(1) if token else None
                         pins[label] = ChipPin(
                             one, int(flat) if flat is not None else None)
+            # **Two different silences, and only one of them is a fact.**
+            # A label that REACHES this part and whose pad is not a pin name
+            # resolves to nothing above, and that is right: `SWDIO_G2` says
+            # the silicon has no GPIO number for it, which `Board.reasons`
+            # then answers in words. A label that is on no net of this part
+            # at all says nothing about silicon -- it is a citation naming
+            # something that is not there, and it used to return the same
+            # empty answer as the real fact.
+            #
+            # Measured on the nRF54LM20A, which asked for four: `SHPHLD` is a
+            # pin of the board's nPM1300 and never was on the MCU, and
+            # `nRF54_RST`'s net is `~{nRF54_RESET}`. Both were answered
+            # correctly in words while still being asked for here, so the
+            # request could not fail however wrong it got. The cost is not
+            # those two: if a vendor revision renamed `MG24.kicad_pcb`'s
+            # `SWDIO` net, the MG24's `PA02` and `PA01` would vanish exactly
+            # this quietly and the pads would fall back to a generic null.
+            if not reached:
+                raise PindefError(
+                    f"{label!r} is on no net of the {part} footprint in this "
+                    f"board file, so there is nothing to trace to. A label "
+                    f"traced here must reach this part: a pad that reaches it "
+                    f"and is not a GPIO resolves to nothing, which is a fact "
+                    f"about the silicon, but a net that is absent is a "
+                    f"citation that names nothing"
+                )
     return pins
 
 
 _SYMBOL = re.compile(r'^\t\(symbol "([^"]+)"', re.M)
 _SYMBOL_PIN_NAME = re.compile(r'\(name "([^"]*)"')
+#: KiCad's second place to put a pin's function. A symbol may publish
+#: `(alternate "PA13" ...)` beside a pin whose `(name ...)` is plain, and the
+#: sweep below asserts what the board file says about the WHOLE library, so a
+#: name it cannot see is a way past the alarm. This file has zero of them
+#: today -- measured, which is why nothing resolves from one and why the
+#: sweep only has to refuse them.
+_SYMBOL_ALTERNATE = re.compile(r'\(alternate "([^"]*)"')
 
 
 def read_symbol_pin_names(
@@ -627,10 +668,18 @@ def read_symbol_pin_names(
     gap in what the vendor has published" when the vendor has published it is
     the report being wrong, not the board being unknowable.
 
-    Two pads of 582 across the catalogue, which is why this reader is last.
-    It reaches nothing another source would have: on the other nineteen
-    symbols in that library the pins are named `D0` through `D15` with no pin
-    beside them, exactly as they are here.
+    Two pads of 582 across the catalogue. It reaches nothing another source
+    would have: measured over all twenty symbols, `SWDIO/PA13` and
+    `SWCLK/PA14` are the only names in the library that name a pin at all.
+
+    **What the other nineteen carry is not `D0` through `D15`**, which is
+    what this paragraph said until a review swept them. They run `D0` through
+    `D27`, and 51 of their names are not `Dn` at all -- supplies (`3V3_OUT`,
+    `VBUS`, `VBAT`, `BAT`, `VIN`, `EN`, `PAD`), functions (`NFC1`, `SHPHLD`,
+    `USER_LED`, `MTMS`, `SWDIO`, `USB_DN`, `MG24_EN`, `54L15_TX20`), and on
+    `XIAO-Add-On-Plus` nine pins named `"15"` through `"23"`. The half that
+    is load-bearing is the other one, and it is the half that is checked:
+    none of them names a pin.
 
     Keyed on the LABEL half and not the whole name, because `resolve` matches
     a pad through `alternatives`, which splits `SWDIO/PA13` into its two
@@ -638,12 +687,26 @@ def read_symbol_pin_names(
 
     **Every pin of the symbol is swept, not only the opted-in ones**, and a
     pin naming a pin that nobody opted in is refused. The board file's
-    `assumption` tells a reader this CAD "names a pin beside those pad names
-    and beside no others", and until this swept the whole symbol that half of
-    the sentence was a hand-check written into generated prose. It is also the
-    alarm that matters: if Seeed republish this library having named more
-    pins, the generator stops rather than quietly resolving two of them.
+    `assumption` used to tell a reader this CAD names a pin beside those pad
+    names "and beside no others", and until this swept the whole symbol that
+    half of the sentence was a hand-check written into generated prose. The
+    sweep is what made it a claim the tool stands behind; the sentence itself
+    was then narrowed again, for the reason below.
+
+    **The sweep recognises a pin by `_CHIP_PIN_NAME`, and that is the exact
+    strength of the alarm.** If Seeed republish this library naming pins in
+    a spelling that pattern knows -- `GPIO7`, `PB3`, `P1.04` -- the generator
+    stops. A spelling it does not know goes past: this same STM32 part has
+    ports E through H, and `PE2` matches no branch of it, nor would a Renesas
+    `P100` on the RA4M1 symbol. So the sentence the board file generates says
+    the library names none of the pin spellings this tool recognises, which is
+    what is enforced, rather than claiming a universal nothing checked.
     """
+    if len(texts) != 1:
+        raise PindefError(
+            f"this reader takes one symbol library and was given {len(texts)}; "
+            f"a pin read from the wrong file is a wrong answer that looks right"
+        )
     (text,) = texts
     starts = [(match.group(1), match.start()) for match in _SYMBOL.finditer(text)]
     if not starts:
@@ -664,8 +727,13 @@ def read_symbol_pin_names(
     body = text[starts[index][1]:end]
 
     pins: dict[str, ChipPin] = {}
+    # Both places KiCad puts a pin's function, because the sweep speaks for
+    # the whole symbol. An `(alternate ...)` is never resolved FROM -- it is
+    # only refused, so that a republished library naming a pin there stops the
+    # generator instead of slipping past a claim about "no others".
     unclaimed = [
-        name for name in _SYMBOL_PIN_NAME.findall(body)
+        name for name in (_SYMBOL_PIN_NAME.findall(body)
+                          + _SYMBOL_ALTERNATE.findall(body))
         if any(_CHIP_PIN_NAME.match(alt) for alt in alternatives(name))
         and not any(alt in labels for alt in alternatives(name))
     ]
@@ -679,8 +747,20 @@ def read_symbol_pin_names(
     for name in _SYMBOL_PIN_NAME.findall(body):
         alts = alternatives(name)
         mentioned = [alt for alt in alts if alt in labels]
-        if len(mentioned) != 1:
+        if not mentioned:
             continue
+        # **A pin naming two opted-in labels is refused, not skipped.** This
+        # was `if len(mentioned) != 1: continue`, so `SWDIO/SWCLK/PA13` -- a
+        # pin that DOES name a pin, and passes the sweep above because both
+        # its labels are opted in -- fell out silently and resolved neither
+        # pad. It is the one path where the "beside no others" chain broke
+        # quietly, in a function otherwise built entirely from raises.
+        if len(mentioned) > 1:
+            raise PindefError(
+                f"the symbol pin {name!r} carries {sorted(mentioned)}, which "
+                f"are two opted-in labels on one pin; which pad it names is "
+                f"not for a reader to choose"
+            )
         named = {match.group(1) for match in
                  (_CHIP_PIN_NAME.match(alt) for alt in alts) if match}
         if len(named) > 1:
@@ -693,10 +773,22 @@ def read_symbol_pin_names(
                 f"the symbol pin {name!r} was opted in as naming its pin and "
                 f"does not; a label is listed here because somebody read it"
             )
+        # **Last-write-wins is a disagreement averaged**, and the sibling
+        # reader refuses exactly this. Two pins named `SWDIO/PA13` and
+        # `SWDIO/PA15` would each pass every check above -- one opted-in
+        # label, one pin name apiece -- and the second would replace the
+        # first with nothing said. `read_seeed_net_names` guards it; this
+        # did not, and one file should not hold both rules.
         one = named.pop()
         token = _PIN_TOKEN.match(one)
-        pins[mentioned[0]] = ChipPin(
-            one, int(token.group(1)) if token and token.group(1) else None)
+        pin = ChipPin(one, int(token.group(1)) if token and token.group(1) else None)
+        if mentioned[0] in pins and pins[mentioned[0]] != pin:
+            raise PindefError(
+                f"{symbol} names {mentioned[0]!r} twice, as "
+                f"{pins[mentioned[0]].name} and {pin.name}; the symbol is "
+                f"saying two things and a reader must not choose between them"
+            )
+        pins[mentioned[0]] = pin
     return pins
 
 
@@ -856,6 +948,24 @@ class Package:
     #: have worked today by coincidence and rotted, because `cloned` is about
     #: how a file arrives and not about what it is.
     firmware: bool = True
+    #: The command that produces this checkout, where `--fetch` is not it.
+    #: **`cloned=False` was carrying two meanings and one of them was a lie
+    #: to the user.** It is true that `--fetch` clones neither `seeed-pcb`
+    #: nor `seeed-xiao`, but only the first is a hand download: the second is
+    #: a `git-sparse` source that `tools/get_board_sources.py seeed-xiao`
+    #: fetches in one command, which `--list` on that tool prints. Both the
+    #: `--fetch` summary and the missing-checkout error said "download by
+    #: hand" for it, and the second named `--fetch` as the cure -- a loop,
+    #: since `--fetch` skips every `cloned=False` package.
+    fetch: str | None = None
+
+    def how_to_fetch(self) -> str:
+        """What to actually run to get this package, as a sentence."""
+        if self.cloned:
+            return "run `python tools/import_pindefs.py --fetch` to clone it"
+        if self.fetch is not None:
+            return f"run `{self.fetch}`"
+        return f"download it by hand from {self.repository}"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -873,11 +983,21 @@ class Source:
     #: than a list that would rot.
     expand: typing.Callable[[pathlib.Path], tuple[str, ...]] | None = None
     #: Where this source's files live, when they are not a `--fetch` clone
-    #: under `third_party/bsp/`. Seeed publish their board CAD as a zip on a
-    #: wiki page rather than in a repository, so it is downloaded by hand into
-    #: `third_party/seeed-pcb/` exactly as the Arduino Uno's EAGLE file is --
-    #: see `tools/get_board_sources.py`, which prints the URL and refuses to
-    #: fetch an https archive itself.
+    #: under `third_party/bsp/`. Two packages sit here and they arrive
+    #: differently, which this said of only the first:
+    #:
+    #:   seeed-pcb   board CAD published as a zip on a wiki page rather than
+    #:               in a repository, downloaded by hand into
+    #:               `third_party/seeed-pcb/` exactly as the Arduino Uno's
+    #:               EAGLE file is. `tools/get_board_sources.py` prints the
+    #:               URL and refuses to fetch an https archive itself.
+    #:   seeed-xiao  a real git checkout, fetched by one command --
+    #:               `python tools/get_board_sources.py seeed-xiao` -- into
+    #:               `third_party/seeed-xiao/`. Not under `third_party/bsp/`,
+    #:               which is the only reason it needs a `root` at all.
+    #:
+    #: `Package.how_to_fetch` is where that difference is stated to a user;
+    #: saying "downloaded by hand" of both is what sent one into a loop.
     root: pathlib.Path | None = None
 
 
@@ -921,6 +1041,7 @@ PACKAGES = {
             "MIT, per LICENSE at the repository root",
             cloned=False,
             firmware=False,
+            fetch="python tools/get_board_sources.py seeed-xiao",
         ),
         Package(
             "seeed-pcb",
@@ -1195,14 +1316,25 @@ _NRF54L15 = (
 #: answers, and a family resemblance would have got one of them wrong --
 #: OH-26's first trap, met again on parts closer than any it named.
 #:
-#: `SHPHLD` and the nRF54's own debug pads are traced instead: Seeed name
-#: those nets for the function and leave the pin to the footprint.
+#: The nRF54's own debug pads are traced instead: Seeed name those nets for
+#: the function and leave the pin to the footprint. Tracing them resolves
+#: nothing and is still worth doing -- it establishes that they reach THIS
+#: part and that its pads for them (`SWDIO_G2`, `SWDCLK_G1`) are outside the
+#: `Pn.nn` numbering, which is what `_NRF54LM20A_DEBUG` then says in words.
+#:
+#: **`SHPHLD` and `nRF54_RST` were asked for here and could never answer.**
+#: `SHPHLD` is a pin of the board's nPM1300, not of the MCU; `nRF54_RST`'s
+#: net is `~{nRF54_RESET}` and no net carries the pad's own name. Both are
+#: answered by `Board.reasons`, so nothing changes by removing them -- but
+#: while they were listed, a traced label that reached nothing was
+#: indistinguishable from one that reached a dedicated pad, and
+#: `read_seeed_traced` now refuses the first.
 _NRF54LM20A = (
     zephyr_connector("xiao_nrf54lm20a", nordic_port_pin),
     seeed_pcb("nRF54LM20A.kicad_pcb", ("NFC1", "NFC2")),
     seeed_pcb_traced(
         "nRF54LM20A.kicad_pcb", "nRF54LM20A",
-        ("SHPHLD", "nRF54_SWDIO", "nRF54_SWCLK", "nRF54_RST"),
+        ("nRF54_SWDIO", "nRF54_SWCLK"),
     ),
 )
 
@@ -1448,9 +1580,8 @@ def published_pins(board: Board, bsp_dir: pathlib.Path) -> dict[str, list[Claim]
         checkout = source.root if source.root is not None else bsp_dir / source.package
         if not checkout.is_dir():
             raise PindefError(
-                f"{checkout} is missing; run "
-                f"`python tools/import_pindefs.py --fetch` to clone "
-                f"{PACKAGES[source.package].repository}"
+                f"{checkout} is missing; "
+                f"{PACKAGES[source.package].how_to_fetch()}"
             )
         texts = []
         # `expand` names files the source could not know until it read the
@@ -1470,13 +1601,23 @@ def published_pins(board: Board, bsp_dir: pathlib.Path) -> dict[str, list[Claim]
         # Every path, not just the first: on the nRF52840, SAMD21 and MG24
         # the labels are in one file and the pin table in another, and the
         # answer is not checkable without both.
-        # **A hand-downloaded file has no commit, and citing one would be a
-        # lie of a particular kind**: `third_party/seeed-pcb/` sits inside this
-        # repository's working tree, so `git rev-parse` there answers with
-        # OpenHardware's OWN head -- a revision that says nothing about the
-        # vendor's file and changes every time this project commits. The
-        # content's own digest is the honest identifier, and it is what a
-        # reader would compare a fresh download against.
+        # **The digest is the identifier because neither of these checkouts
+        # is one `revision()` can read**, which looks at
+        # `third_party/bsp/<name>`. The two `cloned=False` packages are not
+        # alike beyond that, and a first draft of this comment described only
+        # one of them:
+        #
+        #   seeed-pcb    a zip extracted into the working tree, with no `.git`
+        #                of its own -- so `git rev-parse` there answers with
+        #                OpenHardware's OWN head, a revision that says nothing
+        #                about the vendor's file and moves every time this
+        #                project commits. That is the trap this guards.
+        #   seeed-xiao   a real git checkout with its own head (`f07e6ff` when
+        #                measured), so the trap above does NOT apply to it.
+        #
+        # The digest still wins for both: it names the bytes that were read,
+        # which is what a reader compares a fresh download against, and it is
+        # the same answer whether or not the source happens to carry history.
         stamp = (f"sha256:{_digest(texts)}" if source.root is not None
                  else revision(checkout))
         citation = f"{source.package} {', '.join(source.paths)} @ {stamp}"
@@ -1647,12 +1788,12 @@ def board_report(
             {
                 "name": package,
                 "repository": PACKAGES[package].repository,
-                # A hand-downloaded source has no commit to name, and naming
-                # this repository's own -- which is what `git rev-parse` in a
-                # directory inside it would answer -- would be a revision that
-                # changes whenever OpenHardware commits and says nothing about
-                # the vendor's file. Its per-pin citations carry a digest of
-                # the file instead; see `_digest`.
+                # Neither `cloned=False` checkout lives under
+                # `third_party/bsp/`, which is the only place `revision()`
+                # looks, so both are identified by a digest of the bytes read.
+                # `seeed-pcb` additionally has no `.git` of its own and would
+                # answer OpenHardware's head; `seeed-xiao` does have one. The
+                # long form of this is beside `stamp` in `published_pins`.
                 "revision": (revision(bsp_dir / package)
                              if PACKAGES[package].cloned
                              else _digest(tuple(
@@ -2002,8 +2143,11 @@ def assumption_for(chip: str, described: bool, covered: bool,
             f"`chip_pin` and `chip_index` are null on {unresolved} of these "
             f"{resolved + unresolved} pads, {why}. The other {resolved} were "
             f"read from the vendor's own CAD, named in `pindefs`, which is a "
-            f"schematic and not firmware: it names a pin beside those pad names "
-            f"and beside no others. Each null pad says which of the two it is in "
+            f"schematic and not firmware. Those {resolved} pads are the only "
+            f"ones in that library whose name carries a pin in a spelling this "
+            f"tool recognises (`GPIOn`, `PXn`, `Pn.nn`); a reader is checked "
+            f"against that and not against a claim about every spelling there "
+            f"could be. Each null pad says which of the two it is in "
             f"its own `why_null`. The pin view reports every null pad as not "
             f"modelled, and will until the vendor publishes something to read."
         )
@@ -2191,12 +2335,23 @@ def fetch(package: Package, bsp_dir: pathlib.Path = BSP_DIR) -> pathlib.Path:
 
 
 def describe_registry() -> str:
-    """Which packages cover which board, and which board no package covers."""
+    """Which packages cover which board, and which board no firmware covers.
+
+    **The second half of that sentence stopped working and this is the fix.**
+    The column keyed on `board.sources` being empty, which was the same test
+    as "no package publishes this board" only while the uncovered board named
+    nothing at all. The XIAO STM32C5 now names `seeed-xiao` -- a schematic
+    symbol library, which is CAD -- so `--list` showed it exactly like the
+    twenty-five boards a vendor core covers, and `not board.sources` became a
+    branch nothing in the registry can enter.
+    """
     lines = []
     for name in sorted(BOARDS):
         board = BOARDS[name]
         sources = ", ".join(f"{s.package}:{s.paths[0]}" for s in board.sources)
-        lines.append(f"{name:24s} {board.chip:11s} {sources or '(no package publishes this board)'}")
+        covered = any(PACKAGES[s.package].firmware for s in board.sources)
+        note = "" if covered else "  <- no board-support package publishes this board"
+        lines.append(f"{name:24s} {board.chip:11s} {sources}{note}")
     return "\n".join(lines)
 
 
@@ -2260,8 +2415,8 @@ def main(argv: list[str] | None = None) -> int:
         # looks like a run that covered everything.
         for package in PACKAGES.values():
             if not package.cloned:
-                print(f"{package.name:16s} not cloned: download by hand from "
-                      f"{package.repository}")
+                print(f"{package.name:16s} not cloned by --fetch: "
+                      f"{package.how_to_fetch()}")
         return 0
 
     if args.list:
