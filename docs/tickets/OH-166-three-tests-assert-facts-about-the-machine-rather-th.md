@@ -19,11 +19,13 @@ None is a flake in the usual sense. Each asserts a fact about a resource the tes
 
 Observed, 2026-09-05: (1) failed for one review session under two concurrent pytest runs; (3) failed twice for the session holding OH-162, under concurrent node probes. Different sessions, different loads, same shape.
 
+**For (1) the mechanism is observed and not inferred.** Both of those concurrent runs were `pytest tests/webui`, which includes `test_compile.py`, and that file really does build on this machine -- 61 tests, none skipped, 54 seconds, and `compile.build` opens its directory as `tempfile.TemporaryDirectory(prefix="openhardware-build-")` at `webui/compile.py:767`. So two live builds shared the global temp namespace at the moment one of them asserted nothing of that name existed. (2) and (3) have no such account and are not given one here.
+
 **What is NOT claimed: a single root cause.** A first reading was that all three are one shared temp path or port collision. Only the first is a temp path. The second is a clock and the third is a socket. What they share is the shape of the assertion and not its mechanism, and a ticket that guessed at one cause would send the next session looking for something that is not there.
 
 STEPS:
 
-1. The temp one is the one with a clean fix and the clearest harm. `compile.build` should create its directory under a root the test controls rather than under `tempfile.gettempdir()`, or the test should assert that the directory THIS build made is gone rather than that none exists. Either makes the assertion about this code. The second is smaller; the first is better and touches `webui/compile.py`.
+1. The temp one is the one with a clean fix and the clearest harm. `compile.build` should create its directory under a root the caller controls rather than under `tempfile.gettempdir()`. The alternative -- asserting that the directory THIS build made is gone -- needs `build` to hand its path back, which is a test-visible surface added to production code to make a test honest; a caller-supplied root costs the same edit and leaves the API alone. Touches `webui/compile.py`.
 
 2. The latency one wants a bound that is not a wall clock, or an explicit skip when the machine is loaded. Judgement either way, and it should be labelled.
 
