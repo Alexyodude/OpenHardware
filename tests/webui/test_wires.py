@@ -1803,6 +1803,20 @@ def test_a_settled_lead_takes_the_shape_its_two_ends_give_it(tmp_path):
     across and two and a half tall, five nodes come to rest on its top face,
     and the worst stretch is 0.55%.
 
+    **Why the node count is asserted at three when the fixture gives five.**
+    It is a precondition and not a detector. The stretch while on the part is
+    what separates a drape from a tear -- 0.55% here against the 199% and 417%
+    of parts too narrow to drape over -- and `returnedTo` is what detects a
+    memory. All this one has to say is that the lead really touches the part,
+    and it fails readily: dropping the part's top from 2.5 to 2.2 takes the
+    count from five to two, and a narrow part takes it to zero.
+
+    It sits one node above its margin deliberately. A patched-in plastic set
+    at a rate of 0.01 leaves exactly three, so asserting four would make a
+    precondition fire on a mechanism change and hand the next reader two
+    failures with no way to tell which is the signal. `returnedTo` already
+    kills that rate.
+
     `clear` is the fixture that must report nothing: the same part arriving
     twenty units to the side, where the lead cannot reach it, against the same
     lead with no part at all -- every bit the same. Not "nothing moves": a
