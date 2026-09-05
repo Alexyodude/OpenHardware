@@ -319,6 +319,33 @@ F_CPU_HZ = 16_000_000
 #: test needs a pin and an arbitrary one would prove less.
 LED_PIN = 5
 
+#: The component on the board that the `13` pin lights, as Arduino's own board
+#: file names it, mapped to the header label that drives it.
+#:
+#: **Traced rather than known** (OH-169), because an Uno carries four LEDs and
+#: three of them are not the user's: `ON` is power, `RX` and `TX` are the
+#: serial bridge. Lighting the wrong one would be a picture that lies while
+#: reporting success. From `third_party/arduino-uno/UNO-TH_Rev3e.brd`:
+#:
+#:   `ZU4` pad 19    the ATmega328P's PB5, which is digital 13
+#:     -> net `SCK`, also reaching `ICSP.3`, `IOH.6` and a test point that the
+#:        file itself names `TP_13`
+#:     -> `U5` pad 5, the LMV358's input: Arduino buffers this pin so the LED
+#:        does not load it, which is why the trace is five hops and not one
+#:   `U5` pads 6 and 7
+#:     -> net `L13`, and a test point named `TP_LCMD`
+#:     -> `RN2` pad 8, a resistor network
+#:   `RN2` pad 1
+#:     -> net `N$1` -> `L` pad A, the LED's anode. `L` pad C is on `GND`.
+#:
+#: Two of those net names, `L13` and `TP_13`, state the pin number in the
+#: vendor's own file, so this is a reading and not a recollection.
+#:
+#: A board with no entry here draws no LED and says nothing, which is
+#: twenty-five of the twenty-six on the day this was written -- see the
+#: ticket for which boards lack a modelled LED and which lack a traced one.
+LED_PARTS = {"L": "13"}
+
 #: Header label -> the port letter and bit behind it.
 #:
 #: **From Arduino's own tables**, not from a pinout picture:

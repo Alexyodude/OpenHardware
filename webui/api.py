@@ -980,6 +980,16 @@ def pad_view(board: str, description: types.ModuleType | None,
         # it twenty times a second beside the pin levels would be the same
         # mistake `pin_levels` exists to avoid.
         "supply": getattr(description, "SUPPLY", None),
+        # **Which component on the board a pin lights** (OH-169), as the
+        # vendor's board file names it, mapped to the header label that drives
+        # it. Found by `getattr` exactly as `SUPPLY` and `PIN_NAMES` are, so
+        # this function still does not know what an LED is -- and `None` for a
+        # board whose module names none, which is twenty-five of twenty-six.
+        #
+        # It rides the geometry fetch rather than the state poll for the reason
+        # `supply` does: which component is the LED never changes, and only its
+        # level does.
+        "led_parts": getattr(description, "LED_PARTS", None),
         # **Named rather than left for the caller to count.** "17 of 32 pads
         # cannot be answered for" is the sentence a reader needs in order to
         # know whether they are looking at a quiet program or a thin model.

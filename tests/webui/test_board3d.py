@@ -2493,3 +2493,83 @@ def test_the_drag_starts_on_a_part_terminal_too():
     assert "wire.fromLabel" in code, (
         "the panel cannot say which part a part-to-part wire grips"
     )
+
+
+def test_the_board_s_own_led_is_lit_from_the_same_levels_the_table_reads():
+    """**OH-169: the LED never lit, however hard the sketch blinked.**
+
+    The levels were live the whole time -- a compiled blink toggles pin `13`
+    forty times in forty samples -- and `setLevels` recoloured every pad and
+    re-solved the bench on every poll. What nothing did was light the lamp
+    printed on the board, because a user LED is a pin and not a pad: it has a
+    state and no coordinate, and the only place it appeared was the table.
+
+    Three joins are asserted here and each is a call site rather than a word,
+    which is the OH-164 lesson: a test that finds a string can be satisfied by
+    a comment mentioning it.
+
+    **Placed after the model, because it joins the model to the solids.**
+    `placeLeds` needs `view.model` set (it parents the glow to it) and
+    `view.solids` filled (it looks the component up there), so its call has to
+    follow both assignments and not merely appear in the same function.
+
+    **Lit from `setLevels`**, which is the one place a pin's state is decided
+    -- the same argument the file already makes for solving the bench circuit
+    there. A second source would let the lamp and the row disagree.
+
+    **`high` and nothing else.** `low` is a driven pin with the lamp off,
+    `input` is a pin nobody drives, and `unknown` is a board nobody has
+    loaded. A board sitting there glowing because its state is unknown would
+    be OH-164's mistake in a different medium.
+    """
+    code = stripped(RENDERER.read_text(encoding="utf-8"))
+
+    # Placed after both of the things it joins.
+    assert code.index("view.model = group;") < code.index("placeLeds("), (
+        "the glow is parented to a model that has not been set yet"
+    )
+    assert code.index("view.solids = extras.solids") < code.index("placeLeds("), (
+        "the component is looked up in solids that have not been filled yet"
+    )
+
+    # Lit from the level poll, inside `setLevels` rather than anywhere else.
+    levels = code.split("export function setLevels(levels) {", 1)[1]
+    levels = levels.split("\n}", 1)[0]
+    assert "lightLeds(levels)" in levels, (
+        "the board's LEDs are not lit from the levels the table reads"
+    )
+
+    # Only `high`, and it is the emissive intensity that moves.
+    lighting = code.split("function lightLeds(levels) {", 1)[1].split("\n}", 1)[0]
+    assert '=== "high"' in lighting, (
+        "the lamp does not test for high, so some other state can light it"
+    )
+    assert "emissiveIntensity" in lighting
+
+    # A component the model does not draw is skipped rather than invented.
+    placing = code.split("function placeLeds(parts) {", 1)[1].split("\n}\n", 1)[0]
+    assert "if (!solid) continue;" in placing, (
+        "a board naming a component its mesh has not got would throw or, "
+        "worse, draw a lamp at a guessed place"
+    )
+    # And the body writes down no colour of its own, which the renderer's own
+    # rule requires: both come from the palette the stylesheet fills.
+    assert "view.palette.states.high" in placing
+    assert not COLOUR_LITERAL.search(placing), COLOUR_LITERAL.findall(placing)
+
+
+def test_a_board_drawn_as_a_footprint_keeps_no_lamp_from_the_last_one():
+    """An extruded footprint has no components, so it has no LED to light. The
+    list is emptied on that path and when the board is torn down, because a
+    stale entry is a freed geometry that `lightLeds` still writes to -- and,
+    before that, the previous board's lamp glowing on this one."""
+    code = stripped(RENDERER.read_text(encoding="utf-8"))
+    footprint = code.split("view.mmScale = PX_PER_MM * SCALE;", 1)[1]
+    footprint = footprint.split("refreshColliders();", 1)[0]
+    assert "view.leds = []" in footprint, (
+        "the footprint path keeps whatever lamp the last model left"
+    )
+    teardown = code.split("view.model = null;", 1)[1].split("}", 1)[0]
+    assert "view.leds = []" in teardown, (
+        "the torn-down board leaves its lamps in the list"
+    )

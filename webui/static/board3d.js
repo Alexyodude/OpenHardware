@@ -564,6 +564,13 @@ const view = {
   //: its components are -- so a wire keeps passing through those, and that is
   //: the honest default rather than a guess at where a chip might be.
   solids: [],
+  //: The board's own LEDs that a pin drives, as `{label, mesh}` (OH-169).
+  //: Refilled whenever a model is drawn, from the board module's `LED_PARTS`
+  //: joined to `solids` on the component's name -- so a board that names no
+  //: LED, or names one its model does not draw, gets an empty list and draws
+  //: nothing. That is twenty-five of the twenty-six boards, so it is the
+  //: ordinary path rather than the error path.
+  leds: [],
   //: Scene units per millimetre, decided once when a board is drawn.
   //:
   //: **One number, because there were two and they disagreed.** The board's
@@ -1205,6 +1212,10 @@ export function showBoard(layout, model = null) {
   // The extruded footprint's own slab, until a vendor model replaces it.
   view.mmScale = PX_PER_MM * SCALE;
   view.solids = [];
+  // **An extrusion has no components, so it has no LED to light.** The list
+  // is emptied rather than left, because a board drawn as a footprint after
+  // one drawn from a model would otherwise keep the old board's lamp.
+  view.leds = [];
   view.slab = { local: false,
                 min: [-width / 2, -BOARD_THICKNESS / 2, -depth / 2],
                 max: [width / 2, BOARD_THICKNESS / 2, depth / 2] };
@@ -1508,6 +1519,8 @@ function placeModel(loaded, layout) {
   edges.visible = false;
   view.board.add(group);
   view.model = group;
+  // After `view.model` and `view.solids` are both set, because it joins them.
+  placeLeds(layout.led_parts);
 
   // Raise every pad to the real board's top face. See the note in `showBoard`.
   //
@@ -1599,6 +1612,75 @@ function supplyOf(layout) {
   };
 }
 
+/**
+ * Put a glow on every component this board lights from a pin (OH-169).
+ *
+ * **A user LED is a pin and not a pad**, so it has a state and no coordinate,
+ * and until this the only place it appeared was the table beside the canvas.
+ * A board's components are one merged mesh here, so nothing in the model can
+ * be recoloured on its own -- what CAN be done is to put a small body at the
+ * box the composer measured for that component and light that.
+ *
+ * **Added to the model group and not to the scene**, which is the whole
+ * reason this is safe: `solids` are stated in the model's own frame, so a
+ * child of that group is turned, scaled and moved with it and there is no
+ * second transform to keep true. The board's quarter turn for a portrait pad
+ * map is the case that would otherwise be got wrong.
+ *
+ * Which component is the LED comes from the board module and is traced out of
+ * the vendor's board file -- see `atmega328p.LED_PARTS`, which is five hops
+ * through Arduino's own netlist, because an Uno has four LEDs and three of
+ * them are not the user's.
+ */
+function placeLeds(parts) {
+  for (const led of view.leds) {
+    led.mesh.parent?.remove(led.mesh);
+    release(led.mesh);
+  }
+  view.leds = [];
+  if (!parts || !view.model) return;
+  for (const [component, label] of Object.entries(parts)) {
+    // A board may name a component its model does not draw -- the SAMD21 and
+    // the RP2040 have a user LED in the module and no LED in the mesh at all.
+    // Nothing is drawn and nothing is said: an invented body at a guessed
+    // place is exactly the failure this repository refuses elsewhere.
+    const solid = view.solids.find((each) => each.name === component);
+    if (!solid) continue;
+    const size = [0, 1, 2].map((axis) => solid.max[axis] - solid.min[axis]);
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(...size),
+      // **No colour of its own**, which the renderer's own tripwire insists
+      // on: the body is the palette's `unknown` and the light it emits is the
+      // palette's `high`, the same two the pads and the table use. An LED
+      // that glowed a colour written down here would be the one thing in this
+      // scene that did.
+      new THREE.MeshStandardMaterial({
+        color: view.palette.states.unknown,
+        emissive: view.palette.states.high,
+        emissiveIntensity: 0,
+      }));
+    mesh.position.set(...[0, 1, 2].map(
+      (axis) => (solid.min[axis] + solid.max[axis]) / 2));
+    view.model.add(mesh);
+    view.leds.push({ label, mesh });
+  }
+}
+
+/**
+ * Light the board's own LEDs from the levels the table is reading.
+ *
+ * **`high` and nothing else.** `low` is a driven pin with the lamp off,
+ * `input` is a pin nobody is driving, and `unknown` is a board nobody has
+ * loaded -- a board sitting there glowing because its state is unknown is
+ * OH-164's mistake in a different medium.
+ */
+function lightLeds(levels) {
+  for (const led of view.leds) {
+    const on = levels[led.label] === "high";
+    led.mesh.material.emissiveIntensity = on ? PIN_GLOW : 0;
+  }
+}
+
 /** Paint one post from the state recorded on it. */
 function repaint(post) {
   const colour =
@@ -1635,6 +1717,11 @@ export function setLevels(levels) {
       repaint(post);
     }
   }
+  // **The board's own LEDs follow the same payload the table reads** (OH-169),
+  // for the reason below: one place decides a pin's state, so the lamp on the
+  // board and the row in the table cannot disagree. A user LED is a pin with
+  // no pad, so it is not in the loop above and needs its own line.
+  lightLeds(levels);
   // **The parts follow the pads and not the payload**, which is the join that
   // makes a wire mean anything: the circuit is solved from the states read
   // back off the pads, so there is exactly one place a pin state is decided
@@ -1681,6 +1768,11 @@ function clearBoard() {
   view.scene.remove(view.board);
   view.board = null;
   view.model = null;
+  // The meshes themselves were released by the traverse above -- they are
+  // children of the model, which is a child of the board. What is dropped
+  // here is the list holding them, which would otherwise be a handful of
+  // freed geometries that `lightLeds` still writes to.
+  view.leds = [];
   view.pads.clear();
 }
 

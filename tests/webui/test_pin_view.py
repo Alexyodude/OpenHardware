@@ -28,6 +28,9 @@
 # of chip knowledge, so both are exercised here rather than whichever was
 # convenient.
 
+import json
+import pathlib
+import struct
 import types
 
 import pytest
@@ -37,6 +40,48 @@ from webui.boards import atmega328p, catalogue, samd21
 
 UNO = "Arduino Uno"
 XIAO = "XIAO-SAMD21-DIP"
+
+MODELS = (pathlib.Path(__file__).resolve().parents[2]
+          / "webui" / "static" / "models")
+
+
+def board_solids(model: pathlib.Path) -> list[dict]:
+    """Every component box a composed board model states, by name.
+
+    A `.glb` is a length-prefixed JSON chunk followed by binary, and only the
+    JSON is wanted -- so this reads the container by hand rather than adding a
+    glTF dependency to the test suite for one lookup.
+    """
+    raw = model.read_bytes()
+    at = 12
+    doc = None
+    while at < len(raw):
+        size, kind = struct.unpack_from("<II", raw, at)
+        at += 8
+        if kind == 0x4E4F534A:                        # the ASCII "JSON"
+            doc = json.loads(raw[at:at + size].decode("utf-8"))
+            break
+        at += size
+    if doc is None:
+        raise AssertionError(f"{model} has no JSON chunk")
+
+    def find(node: object) -> list[dict] | None:
+        if isinstance(node, dict):
+            extras = node.get("extras")
+            if isinstance(extras, dict) and isinstance(extras.get("solids"), list):
+                return extras["solids"]
+            for value in node.values():
+                found = find(value)
+                if found is not None:
+                    return found
+        elif isinstance(node, list):
+            for value in node:
+                found = find(value)
+                if found is not None:
+                    return found
+        return None
+
+    return find(doc) or []
 
 #: A sketch that drives one header pin and the on-board LED, so a test can tell
 #: a pin that moved from a pin that was never configured. `D0` is a pad and
@@ -892,3 +937,63 @@ def test_the_board_module_wins_where_it_names_a_pin_and_the_file_fills_the_rest(
     assert others, "the fixture needs a pad the module does not name"
     for label, pin in others.items():
         assert shown[label] == pin, (label, pin, shown[label])
+
+
+def test_the_uno_names_the_component_its_led_pin_lights_and_no_other_board_does():
+    """**OH-169: the board's own LED never lit, however hard a sketch blinked.**
+
+    The levels were always live -- a compiled blink toggles pin `13` -- and
+    `setLevels` recoloured every pad on every poll. What nothing did was light
+    the lamp printed on the board, because a user LED is a pin and not a pad,
+    so it has a state and no coordinate and appeared only in the table.
+
+    The component is named here rather than in the renderer, by the same
+    `getattr` that finds `SUPPLY` and `PIN_NAMES`, so `webui/api.py` still does
+    not know what an LED is.
+
+    **An Uno carries four and three of them are not the user's**: `ON` is
+    power, `RX` and `TX` are the serial bridge. Which one to light was traced
+    through Arduino's own `UNO-TH_Rev3e.brd` in five hops, and two of the net
+    names on the way -- `L13` and the test point `TP_13` -- state the pin
+    number in the vendor's file. The trace is written out beside `LED_PARTS`.
+
+    Every other board names none, and that is the honest answer rather than a
+    gap: measured 2026-09-05, the SAMD21 and RP2040 have a user LED in their
+    module and no LED component in their 3D model at all, the C5 and C6 have
+    LED components nobody has traced to a pin, and `esp32c3.py` records that
+    its board has no user LED whatsoever.
+    """
+    assert atmega328p.LED_PARTS == {"L": "13"}
+    # The label it is keyed to has to be a pin the board actually reports, or
+    # the renderer would look up a level that never arrives.
+    assert set(atmega328p.LED_PARTS.values()) <= set(atmega328p.HEADER)
+    # And it is the pin the module already calls the LED, not a second opinion.
+    assert atmega328p.HEADER["13"] == ("B", atmega328p.LED_PIN)
+
+    named = {board: api.pad_view(board, api.description_for(board), None)["led_parts"]
+             for board in catalogue.board_names()}
+    assert named["Arduino Uno"] == {"L": "13"}
+    assert [b for b, v in named.items() if v] == ["Arduino Uno"], named
+
+
+def test_the_named_led_component_is_one_the_shipped_board_model_actually_draws():
+    """A component named here and absent from the mesh would light nothing and
+    say nothing, which is survivable -- the renderer skips it. Naming one that
+    is *misspelled* is the same silence for a worse reason, so the join is
+    checked rather than assumed.
+
+    The model is gitignored, so this skips rather than fails where nobody has
+    run `tools/compose_board_3d.py`: a fresh checkout draws the extruded
+    footprint, which has no components at all.
+    """
+    model = MODELS / "Arduino-Uno.glb"
+    if not model.is_file():
+        pytest.skip(f"no {model}; run tools/compose_board_3d.py")
+    solids = {solid["name"] for solid in board_solids(model)}
+    assert solids, "the model states no component boxes at all"
+    for component in atmega328p.LED_PARTS:
+        assert component in solids, (
+            f"{component!r} is named as an LED and the model does not draw it; "
+            f"the four it does draw are "
+            f"{sorted(s for s in solids if s in {'L', 'ON', 'RX', 'TX'})}"
+        )
