@@ -11,7 +11,7 @@ A jumper lead passes clean through an Arduino Uno pin header and every number th
 
 `outOfBox` pushes NODES out of a solid. A lead is a chain of nodes with segments between them, and a segment is not tested against anything -- so a solid narrower than the gap between two nodes falls BETWEEN them, and the lead threads through it. `contact()` reports `inside` 0 and `proud` 0, because both nodes really are outside; `worstStretch` reports a couple of per cent, because the two nodes are only slightly further apart than their rest length. Nothing is wrong with any of those numbers. They are all about nodes.
 
-Measured 2026-09-05 on the shipped solver, a lead pinned at both ends and draped over one Arduino Uno header -- 2.54 mm across and 11.54 mm tall, which at the Uno's own `mmScale` of 0.5638 is 1.432 by 6.506 scene units. `segmentThroughSolid` is how far the closest point of the worst segment lies inside the box; the header's half-width is 0.716.
+Measured 2026-09-05 on the shipped solver, a lead pinned at y 8 at both ends and draped over one Arduino Uno header -- 2.54 mm across and 11.54 mm tall, which at the Uno's own `mmScale` of 0.5638 is 1.432 by 6.506 scene units. `segmentThroughSolid` is how far the closest point of the worst segment lies inside the box; the header's half-width is 0.716.
 
   span   segment   stretch free   stretch over it   through the solid   of the half-width   inside   proud
     3     0.193       0.58%           0.58%              0.0000              0.000            0        0
@@ -23,7 +23,7 @@ Measured 2026-09-05 on the shipped solver, a lead pinned at both ends and draped
 
 At 28 units the segment passes through the exact centre of the header while stretch reads 1.46% and all three contact numbers read zero.
 
-The condition is `segment > solid width`, and it is met by ordinary geometry rather than a contrived case. A lead's segment is its span times SLACK over 21, so the header's 1.432 units is crossed once the span exceeds about 22 units -- a 39 mm lead on a 68 mm board. And the shape is everywhere: 687 of the 775 solids the eleven shipped board models carry are narrower than they are tall. The worst are the Uno's four headers, at nine times the half-width; an everyday bench part is an LED at about 5 by 8 mm, which is 2.8 by 4.5 scene units.
+The condition is `segment > solid width`, and it is met by ordinary geometry rather than a contrived case. A lead's segment is its span times SLACK over 21, so the header's 1.432 units is crossed once the span exceeds about 22 units -- a 39 mm lead on a 68 mm board. And the shape is everywhere. Of the 775 solids the eleven shipped board models carry, 211 are strictly narrower than they are tall and 687 have half their narrow axis under their height, which is the criterion that matters because a node goes out by its nearest face. Fourteen tie for the worst at nine times the half-width -- the Uno's four headers and ten XIAO DIP headers, all 2.54 by 11.54 mm; an everyday bench part is an LED at about 5 by 8 mm, which is 2.8 by 4.5 scene units.
 
 **This is the third instance of one blindness, and OH-132 named the first.** That ticket found `penetration` unable to see a contact the collider had resolved. OH-162 step 1 found `proudOfBox` answering 0 at a box EDGE, because it is a slab test and a corner satisfies neither axis. This is the same shape again: a probe that asks about nodes cannot see what happens between them, and the file's answer looks clean in all three.
 
