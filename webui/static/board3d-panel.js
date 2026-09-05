@@ -24,7 +24,6 @@ const CANVAS = "board-pins-canvas";
 const ROWS = "board-pins-rows";
 const NOTE = "board-pins-note";
 const FALLBACK = "board-pins-fallback";
-const CAPTION = "board-pins-caption";
 const MENU = "bench-menu";
 const TREE = "bench-tree";
 const BENCH_LIST = "bench-list";
@@ -52,33 +51,10 @@ const MODEL_INDEX = "/models/index.json";
 //:
 //: Written as a caption rather than as an error, because nothing has gone
 //: wrong: this is the panel saying what it is waiting for, in the place the
-//: explanation of the picture already lives.
 const WAITING =
   "Nothing is loaded yet, so there is no board to draw. Pick one above, " +
   "choose a compiled image, and it appears here — a raw .bin also needs the " +
   "load address beside it, because a .bin cannot say where it belongs.";
-const FOOTPRINT_CAPTION =
-  "A footprint, extruded — not a model of the board. Every pad position and " +
-  "the outline are the vendor's own KiCad footprint, exact to three decimals. " +
-  "The thickness is a stated 1.6 mm and there are no components on it, " +
-  "because this board publishes no 3D model. Drag to turn it.";
-const MODEL_CAPTION =
-  "The vendor's own 3D model. The board, its components and its connector are " +
-  "Seeed's published mechanical model, tessellated by " +
-  "tools/import_3d_model.py; the pad markers on it are this repository's " +
-  "reading of the chip's registers. Drag to turn it.";
-//: **A third caption, because a composed model is neither of the other two.**
-//: Saying "the vendor's own 3D model" of a board assembled here from two
-//: libraries would be the same class of untruth as the footprint caption
-//: claiming a KiCad footprint the Arduino Uno never had. The parts that are
-//: missing are named by `composedCaption` from the model's own record of them,
-//: rather than written down here where they would rot.
-const COMPOSED_CAPTION =
-  "Composed, not published: nobody ships a 3D model of this board. The " +
-  "outline and every component's position are the vendor's own CAD, the " +
-  "components are KiCad's published meshes, and the board colour is read from " +
-  "PICSimLab's artwork. Drag to turn it.";
-
 //: What each state reads as in the table. The 3D view paints the same four
 //: from the same stylesheet; this spells them because a colour alone is not a
 //: readable answer, and one of the four is not a state at all.
@@ -157,55 +133,6 @@ function modelIndex() {
   return models;
 }
 
-/** Which of the three true sentences describes the board now on screen.
- *
- *  A composed model names what it could NOT draw, out of the record the
- *  composer put in the file. Writing that list here instead would be a second
- *  copy of a fact that changes whenever somebody finds a mesh -- and this
- *  repository has twice caught a hand-kept list describing code it no longer
- *  matched. `absent` is empty on a board that is complete, and then the
- *  sentence simply is not added. */
-function caption(model) {
-  if (!model || !model.file) return FOOTPRINT_CAPTION;
-  if (!model.composed) return MODEL_CAPTION;
-  const parts = [COMPOSED_CAPTION];
-  // **Named, not counted.** "One part was modelled" tells a reader that
-  // something in the picture is less trustworthy without telling them which,
-  // which is the worst of both. `modelled` is empty on a board where every
-  // mesh was published, and then the sentence is not there at all.
-  const made = model.modelled ?? [];
-  if (made.length) {
-    parts.push(
-      `Modelled here rather than published, from dimensions that each cite a ` +
-      `source: ${made.join(", ")}. See tools/model_from_datasheet.py.`
-    );
-  }
-  // **The composer's own measurement of what is not drawn** (OH-125),
-  // said in one compact clause per kind so the caption stays a sentence.
-  const gaps = [];
-  const notDrawn = model.not_drawn ?? {};
-  const ink = Object.entries(notDrawn.ink ?? {});
-  if (ink.length) {
-    gaps.push(`ink not drawn: ${ink.map(([kind, n]) => `${n} ${kind}`).join(", ")}`);
-  }
-  const copper = Object.entries(notDrawn.copper ?? {});
-  if (copper.length) {
-    gaps.push(`copper not drawn: ${copper.map(([kind, n]) => `${n} ${kind}`).join(", ")}`);
-  }
-  if (notDrawn.cutouts) gaps.push(`${notDrawn.cutouts} cutout(s) not cut`);
-  if (notDrawn.turn_unseen?.length) {
-    gaps.push(`${notDrawn.turn_unseen.length} turn(s) unchecked`);
-  }
-  if (notDrawn.unmodelled?.length) {
-    gaps.push(`${notDrawn.unmodelled.length} placement(s) unmodelled`);
-  }
-  const missing = (model.absent ?? [])
-    .map((gap) => `${gap.elements.join("/")} is ${gap.why}`)
-    .join(" ");
-  if (missing) parts.push(`Not drawn: ${missing}`);
-  parts.push(...gaps);
-  return parts.join(" ");
-}
 
 const $ = (id) => document.getElementById(id);
 
@@ -339,8 +266,13 @@ async function reload() {
     // 400 handler's exact outcome without the doomed round-trip.
     layout = null;
     renderTable([]);
-    $(NOTE).textContent = "no board loaded";
-    $(CAPTION).textContent = WAITING;
+    // **The waiting sentence goes on the note line** (OH-168). The
+    // caption under the canvas was removed with the geometry sentences it
+    // carried, and this one is not about geometry: it is the only place
+    // the page says why the canvas is blank and what to do about it. The
+    // panel's own comments record that silence being reported twice as
+    // "no 3D model on 127.0.0.1:8088".
+    $(NOTE).textContent = WAITING;
     $(CANVAS).hidden = true;
     return;
   }
@@ -355,8 +287,13 @@ async function reload() {
     // has always spoken; this is the exit that forgot to.
     layout = null;
     renderTable([]);
-    $(NOTE).textContent = "no board loaded";
-    $(CAPTION).textContent = WAITING;
+    // **The waiting sentence goes on the note line** (OH-168). The
+    // caption under the canvas was removed with the geometry sentences it
+    // carried, and this one is not about geometry: it is the only place
+    // the page says why the canvas is blank and what to do about it. The
+    // panel's own comments record that silence being reported twice as
+    // "no 3D model on 127.0.0.1:8088".
+    $(NOTE).textContent = WAITING;
     $(CANVAS).hidden = true;
     return;
   }
@@ -367,8 +304,8 @@ async function reload() {
     // nothing, which is a claim about the sketch rather than about the model.
     layout = null;
     renderTable([]);
-    $(NOTE).textContent = "no header pins in this board description";
-    $(CAPTION).textContent = view.note;
+    $(NOTE).textContent =
+      `no header pins in this board description — ${view.note}`;
     $(CANVAS).hidden = true;
     (await renderer()) && scene.showBoard(null);
     return;
@@ -380,7 +317,6 @@ async function reload() {
   $(CANVAS).hidden = false;
 
   const model = (await modelIndex()).boards?.[view.board] ?? null;
-  $(CAPTION).textContent = caption(model);
 
   const drawn = await renderer();
   if (drawn) drawn.showBoard(view, model);

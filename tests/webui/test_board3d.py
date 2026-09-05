@@ -246,53 +246,6 @@ def test_the_page_resolves_three_from_the_vendored_copy_and_not_a_cdn():
     assert (STATIC / "vendor" / "three.module.js").is_file()
 
 
-def test_the_panel_says_it_is_a_footprint_and_not_a_model_of_the_board():
-    """**OH-30's honest-degradation rule, in the page rather than in a
-    comment.** A reader who is not told will reasonably assume they are looking
-    at a render of the real thing.
-
-    This is the markup's caption, which is what a board with no vendor model
-    keeps -- three XIAO ESP32-C3 boards, and any board added before its model
-    is found. It is also what shows before the index has been fetched, so it
-    has to be the cautious one of the two rather than the confident one.
-    """
-    page = PAGE.read_text(encoding="utf-8")
-    caption = page.split('id="board-pins-caption"', 1)[1].split("</p>", 1)[0]
-    assert "not a model of" in caption
-    assert "vendor" in caption
-
-
-def test_the_caption_stops_disclaiming_a_model_once_there_is_one():
-    """**OH-72 made that sentence false for nine boards**, and a page that goes
-    on disclaiming a model it is showing is wrong in the same direction as one
-    claiming a model it has not got: either way a reader cannot tell which they
-    are looking at, which is the only thing the sentence was ever for.
-
-    All three captions live in the panel and the choice is the index's `file`,
-    so a board whose mesh has not been imported keeps the cautious one.
-
-    **Three, since OH-75.** The Arduino Uno's model is composed here from two
-    libraries rather than published by anybody, and calling that "the vendor's
-    own 3D model" would be the same untruth in the other direction.
-    """
-    panel = PANEL.read_text(encoding="utf-8")
-    assert "FOOTPRINT_CAPTION" in panel
-    assert "MODEL_CAPTION" in panel
-    assert "COMPOSED_CAPTION" in panel
-    # The body of `caption`, which is where the choice moved when there began
-    # to be three of them. Bounded to the function so that a later mention of
-    # `model.file` elsewhere in the panel cannot satisfy this by accident.
-    chooser = panel.split("function caption(model) {", 1)[1].split("\n}", 1)[0]
-    assert "model.file" in chooser, (
-        "the caption is not chosen by whether a model was actually found"
-    )
-    assert "model.composed" in chooser, (
-        "a composed model is not told apart from a vendor's own"
-    )
-    for name in ("FOOTPRINT_CAPTION", "MODEL_CAPTION", "COMPOSED_CAPTION"):
-        assert name in chooser, f"{name} is never returned"
-
-
 def test_the_renderer_is_handed_the_model_rather_than_finding_one():
     """`board3d.js` knows three.js and the page's palette and nothing else --
     not which boards this repository has meshes for. That belongs to the panel,
@@ -1719,30 +1672,6 @@ def test_the_studio_blur_is_inside_what_the_prefilter_can_actually_do():
 # --- a board a reader can actually see --------------------------------------
 
 
-def test_the_canvas_comes_before_the_caption_that_describes_it():
-    """**Two full screens, on the commonest laptop size there is.**
-
-    The caption, the bench bar and the bench list were all above the canvas, so
-    at 1366 x 768 the 3D view started 1,584 px down -- 2.06 screens -- and a
-    reader who loaded the page saw no board anywhere. Measured 2026-08-28 after
-    it was reported twice as "no 3D model on 127.0.0.1:8088".
-
-    Nothing was cut to make room, which matters: the caption is the
-    honest-degradation statement about a composed model and a previous session
-    refused to hide it. A caption belongs under its figure, and moving it there
-    costs the prose nothing.
-    """
-    page = PAGE.read_text(encoding="utf-8")
-    canvas = page.index('id="board-pins-canvas"')
-    caption = page.index('id="board-pins-caption"')
-    bench = page.index('class="bench-bar"')
-    assert canvas < caption, (
-        "the caption is above the thing it captions, which is what put the "
-        "board below the fold"
-    )
-    assert canvas < bench, "the bench controls are above the board again"
-
-
 def test_the_panel_says_what_it_is_waiting_for_when_no_board_is_loaded():
     """**It used to set a variable and return, saying nothing at all.**
 
@@ -1757,8 +1686,16 @@ def test_the_panel_says_what_it_is_waiting_for_when_no_board_is_loaded():
     """
     panel = PANEL.read_text(encoding="utf-8")
     refusal = panel.split("if (!response.ok) {", 1)[1].split("return;", 1)[0]
-    assert "$(CAPTION).textContent = WAITING;" in refusal, (
+    # **The note line and not the caption** (OH-168). The caption under the
+    # canvas was removed with the three geometry sentences it carried, and this
+    # message went with it -- so it moved here, which is the only line left that
+    # speaks. What is asserted is that the exit still SAYS something and still
+    # names the step people miss, which is what this test was always for.
+    assert "$(NOTE).textContent = WAITING;" in refusal, (
         "the no-board exit still says nothing"
+    )
+    assert "CAPTION" not in panel, (
+        "the caption is back; this test guards the message, not the element"
     )
     assert "$(CANVAS).hidden = true;" in refusal, (
         "a blank 300x150 rectangle is left where a board should be"
@@ -2525,23 +2462,6 @@ def test_the_cold_page_does_not_ask_about_no_board():
     )
     assert '"/api/board/pins")' not in code, (
         "the bare no-board fetch is still reachable"
-    )
-
-
-def test_the_panel_shows_the_composers_own_gaps():
-    """**"Not drawn: Y1, Y2" about a board also missing four LEDs and 432
-    silkscreen strokes** (OH-125): the caption's claim is now built from
-    `model.not_drawn`, the composer's own measurement. Comments stripped,
-    the OH-117 lesson."""
-    panel = PANEL.read_text(encoding="utf-8")
-    code = stripped(panel)
-    assert "model.not_drawn" in code, (
-        "the panel never reads the gaps the composer now ships"
-    )
-    for clause in ("turn_unseen", "unmodelled", "cutouts"):
-        assert clause in code, f"the caption says nothing about {clause}"
-    assert "parts.push(...gaps)" in code, (
-        "the gap clauses are built and never reach the caption"
     )
 
 
