@@ -58,6 +58,24 @@ class Pad:
     x: float
     y: float
     group: str
+    #: The MCU pin this pad reaches, as its vendor names it -- `GPIO5`, `PA02`,
+    #: `P2.08`. **A caption and not a handle**: `pin` above is what the
+    #: protocol addresses, and only the Arduino Uno has one. Every XIAO file
+    #: says so at length in its own `assumption` field, and pressing
+    #: `chip_index` into `pin` would be inventing a protocol index the board
+    #: has not got.
+    #:
+    #: Read out of six board-support packages by `tools/import_pindefs.py`
+    #: (OH-26), each value naming the vendor file and revision that resolved
+    #: it. **It was written into the board files and then dropped here**, so
+    #: for fourteen boards the page had no source for it at all and said
+    #: "not modelled" over 196 pads whose answer was on disk beside it.
+    chip_pin: str | None = None
+    #: The same pin as a flat integer, where the vendor publishes flat
+    #: numbering. Null on the SAMD21, MG24, nRF54L15 and nRF54LM20A, whose
+    #: vendors number by port and bit (`PA02`) and never flatly -- which is
+    #: why `chip_pin` is the string and this is the extra.
+    chip_index: int | None = None
 
     @property
     def wireable(self) -> bool:
@@ -149,7 +167,27 @@ def parse(raw: object, where: str) -> PinMap:
                 f"{where}: pad {label!r} at ({x}, {y}) is outside the "
                 f"{width}x{height} image"
             )
-        pads.append(Pad(label=label, pin=pin, x=x, y=y, group=entry.get("group", "")))
+        # **Read rather than ignored, which is OH-167.** These two were in the
+        # files from OH-26 and this function dropped them, so the page's only
+        # source for a chip pin was the board module's `PIN_NAMES` -- and
+        # fourteen boards have no module. Validated rather than coerced: a
+        # number where a name belongs is a board file to fix, not a caption to
+        # render as `5`.
+        chip_pin = entry.get("chip_pin")
+        if chip_pin is not None and not isinstance(chip_pin, str):
+            raise PinMapError(
+                f"{where}: pad {label!r} has chip_pin {chip_pin!r}; must be a "
+                f"name like 'GPIO5' or 'PA02', or null"
+            )
+        chip_index = entry.get("chip_index")
+        if chip_index is not None and not isinstance(chip_index, int):
+            raise PinMapError(
+                f"{where}: pad {label!r} has chip_index {chip_index!r}; must "
+                f"be an integer or null"
+            )
+        pads.append(Pad(label=label, pin=pin, x=x, y=y,
+                        group=entry.get("group", ""),
+                        chip_pin=chip_pin, chip_index=chip_index))
 
     # Optional and validated only when present: a traced map states none.
     scale = raw.get("px_per_mm")

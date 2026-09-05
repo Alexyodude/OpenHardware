@@ -838,6 +838,32 @@ def description_for(board: str) -> types.ModuleType | None:
         return None
 
 
+def chip_pin_of(name: str, names: dict[str, str], pad: pinmap.Pad) -> str | None:
+    """Which MCU pin a pad reaches, from the module first and the file second.
+
+    **Two sources and a fixed order, not a merge.** `PIN_NAMES` is the board
+    module's, and it wins wherever it has an entry, because it is the same
+    table `pin_states` reads levels through -- so a label cannot carry one pin
+    in the caption and another in the state. The board file's `chip_pin` fills
+    the holes: it comes from `tools/import_pindefs.py` reading the vendor's own
+    board-support package, and it is the only source there is for the fourteen
+    boards that have no module at all.
+
+    **The fallback can only ever fill a hole and never overrule one** (OH-167).
+    Measured 2026-09-05 across all 26 boards: 125 pads where both state a pin
+    and agree, 0 where they disagree, and 196 where only the file states one
+    and the page therefore said "not modelled" over an answer sitting on disk
+    beside it -- 19 of the MG24's 24 pads, 28 of the nRF54LM20A SMD's 48.
+
+    A disagreement is left to the caller to notice rather than resolved here,
+    for the reason OH-26 gives about two vendor readings in conflict: it is
+    recorded, not averaged. There are none today, which is what makes this
+    order safe to fix rather than a preference between two answers.
+    """
+    stated = names.get(name)
+    return stated if stated is not None else pad.chip_pin
+
+
 def pad_view(board: str, description: types.ModuleType | None,
              live: dict[str, str] | None) -> dict[str, object]:
     """Where a board's pads are, and what each one is doing if anything is.
@@ -919,7 +945,7 @@ def pad_view(board: str, description: types.ModuleType | None,
             pads.append({
                 "label": pad.label,
                 "pin": name,
-                "chip_pin": names.get(name),
+                "chip_pin": chip_pin_of(name, names, pad),
                 "x": pad.x,
                 "y": pad.y,
                 "group": pad.group,

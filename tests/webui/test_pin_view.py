@@ -651,22 +651,24 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     has loaded anything, and every pad of every modelled board is in it.
 
     The page could not tell the third from the second, so it said the second.
-    Measured 2026-09-05 over `catalogue.board_names()`, counting pads that are
-    `unknown` with a `chip_pin` -- which is exactly the input the panel's
-    `unknownWords` reads -- for a board picked and not loaded:
+    Measured over `catalogue.board_names()`, counting pads that are `unknown`
+    with a `chip_pin` -- which is exactly the input the panel's `unknownWords`
+    reads -- for a board picked and not loaded.
 
-        Arduino Uno                1 board,  22 of 32
-        the three C3 files         3 boards, 11, 11 and 15
-        the C5, C6 and RP2040      6 boards, 11 each
-        the two SAMD21 files       2 boards, 11 each
-        the rest                  14 boards,  0 (no module, so no chip_pin)
-                                  --
-                                  26
+    **It was twelve boards and OH-167 made it twenty-five**, which is the
+    whole of that change seen from here. A chip pin used to come only from the
+    board module's `PIN_NAMES`, and fourteen boards have no module; it now
+    falls back to the `chip_pin` the board file has carried since OH-26, so
+    343 pads of 582 name their MCU pin where 147 did. Every board with a pin
+    map now qualifies except `XIAO-XIAO STM32C5-SMD`, whose file states no
+    chip pin for any of its 35 pads because no board-support package covers
+    it -- so the one board excluded here is excluded by an absence of data and
+    not by an absence of code.
 
-    Twelve of them, which is the number OH-160 made it: TWO modules answered
-    before it -- `atmega328p` and `samd21`, over three board files, since the
-    SAMD21 has a DIP and an SMD -- and it gave the ESP32-C3, C5, C6 and
-    RP2040 a generated `HEADER` between them.
+    Before OH-167 the twelve were the number OH-160 made it: TWO modules
+    answered before that -- `atmega328p` and `samd21`, over three board files,
+    since the SAMD21 has a DIP and an SMD -- and it gave the ESP32-C3, C5, C6
+    and RP2040 a generated `HEADER` between them.
 
     So the fact is stated. `read_levels` is false exactly when `pad_view` was
     given no levels to read, which is `live is None` and nothing else --
@@ -693,22 +695,25 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
         board for board, view in picked.items()
         if view.get("present") and view["read_levels"] is not False
     ]
-    # And the twelve that would otherwise have lied, named rather than counted
-    # so that a board losing its module shows up as a change here.
+    # And the boards that would otherwise have lied, named rather than counted
+    # so that a board losing its chip pins shows up as a change here. Every
+    # one with a pin map, since OH-167 -- so this is written as the exclusion,
+    # which is the fact worth pinning: the STM32C5 is out because its file
+    # states no chip pin, not because no code looks for one.
     would_have_lied = sorted(
         board for board, view in picked.items()
         if view.get("present") and any(
             pad["state"] == "unknown" and pad["chip_pin"] is not None
             for pad in view["pads"])
     )
-    assert would_have_lied == [
-        "Arduino Uno",
-        "XIAO-ESP32-C3-DIP", "XIAO-ESP32-C3-DIP-SMD", "XIAO-ESP32-C3-SMD",
-        "XIAO-ESP32-C5-DIP", "XIAO-ESP32-C5-SMD",
-        "XIAO-ESP32-C6-DIP", "XIAO-ESP32-C6-SMD",
-        "XIAO-RP2040-DIP", "XIAO-RP2040-SMD",
-        "XIAO-SAMD21-DIP", "XIAO-SAMD21-SMD",
-    ], would_have_lied
+    silent = sorted(set(boards) - set(would_have_lied))
+    assert silent == ["XIAO-XIAO STM32C5-SMD"], silent
+    assert len(would_have_lied) == 25, would_have_lied
+    assert "Arduino Uno" in would_have_lied
+    assert "XIAO-MG24-SMD" in would_have_lied, (
+        "the MG24 has no board module at all, so its 19 chip pins can only "
+        "have come from its board file -- which is what OH-167 changed"
+    )
     # A dict, even an empty one, is a program that was asked.
     asked = api.pad_view(UNO, api.description_for(UNO), {})
     assert asked["read_levels"] is True
@@ -800,3 +805,90 @@ def test_a_running_board_whose_module_reads_no_pins_still_says_one_is_running():
         for board in catalogue.board_names()
         if getattr(api.description_for(board), "PIN_NAMES", None)
     ), "a module publishes names it cannot read levels for"
+
+
+def test_a_pad_names_its_chip_pin_on_a_board_with_no_module_at_all():
+    """**OH-167: the answer was on disk and the page said "not modelled".**
+
+    A chip pin had one source, the board module's `PIN_NAMES`. Fourteen of the
+    twenty-six boards have no module -- `webui/boards/mg24.py` does not exist
+    -- so every pad of those boards reported `chip_pin` null, which the panel
+    renders as the sentence OH-164 defined to mean "nothing models this pin".
+
+    The board files have carried the answer since OH-26, which read it out of
+    six board-support packages and named the vendor file and revision for
+    every value. `webui/pinmap.py` dropped it while parsing. Measured
+    2026-09-05 across all 26 boards, comparing each board FILE against what
+    `pad_view` reported:
+
+        196   the file states a chip pin and the page showed none
+        125   both state it and they agree
+          0   they disagree, on any pad of any board
+
+    The MG24 is the sharpest case because it has no module at all: 19 of its
+    24 pads name a chip pin in the file, and every one of them read null.
+
+    **Zero disagreements is what makes the fallback safe and it is also why
+    this went unseen.** Nothing showed a WRONG pin; it showed a missing one,
+    and a missing chip pin on a board with no module is indistinguishable from
+    the honest answer until you open the JSON beside it.
+    """
+    # `D1` on each, spelled out rather than derived, so that a board file
+    # re-imported from a different source shows up here as a change. The MG24
+    # names by port and bit because Silicon Labs publishes no flat numbering,
+    # which is why `chip_pin` is the string and `chip_index` the extra.
+    for board, expect in (("XIAO-MG24-SMD", "PC1"), ("XIAO-RP2350-DIP", "GPIO27")):
+        layout = pinmap.load(board)
+        assert layout is not None, board
+        # The loader keeps it.
+        stated = {pad.label: pad.chip_pin for pad in layout.pads}
+        assert any(v is not None for v in stated.values()), board
+        # And the view reports it, with no module in sight.
+        assert api.description_for(board) is None, (
+            f"{board} has a module now, so it is the wrong witness for this"
+        )
+        view = api.pad_view(board, None, None)
+        shown = {pad["label"]: pad["chip_pin"] for pad in view["pads"]}
+        assert shown == stated, board
+        assert expect in shown.values(), (board, expect, sorted(
+            v for v in shown.values() if v))
+    # And the flat index, which is the half that is NOT always there. Silicon
+    # Labs numbers the MG24 by port and bit and publishes nothing flat, so
+    # every one of its pads carries a chip pin and no index; the RP2350 has
+    # both. A reader who treats `chip_index` as the answer gets nulls on four
+    # families, which is why `chip_pin` is the string the page shows.
+    mg24 = {pad.label: pad.chip_index for pad in pinmap.load("XIAO-MG24-SMD").pads}
+    assert set(mg24.values()) == {None}, mg24
+    rp = {pad.label: pad.chip_index for pad in pinmap.load("XIAO-RP2350-DIP").pads}
+    assert rp["D1"] == 27, rp
+
+
+def test_the_board_module_wins_where_it_names_a_pin_and_the_file_fills_the_rest():
+    """**Two sources, a fixed order, and no merge.**
+
+    `PIN_NAMES` wins wherever it has an entry because it is the same table
+    `pin_states` reads levels through, so a label cannot carry one pin in the
+    caption and another in the state. The file fills only the holes.
+
+    Asserted against a stub whose table deliberately contradicts the file, so
+    the direction is pinned rather than inferred from real data that agrees:
+    across all 26 boards there are 125 agreements and no disagreement, which
+    means live data can never show which source won.
+    """
+    board = "XIAO-MG24-SMD"
+    layout = pinmap.load(board)
+    stated = {pad.label: pad.chip_pin for pad in layout.pads}
+    named = next(label for label, pin in stated.items() if pin is not None)
+
+    module = types.SimpleNamespace(PIN_NAMES={named: "CONTRADICTION"})
+    view = api.pad_view(board, module, None)
+    shown = {pad["label"]: pad["chip_pin"] for pad in view["pads"]}
+    assert shown[named] == "CONTRADICTION", (
+        "the board module has to win where it names a pin, or a caption can "
+        "disagree with the level read through the same table"
+    )
+    # And every other pad still gets the file's answer.
+    others = {k: v for k, v in stated.items() if k != named and v is not None}
+    assert others, "the fixture needs a pad the module does not name"
+    for label, pin in others.items():
+        assert shown[label] == pin, (label, pin, shown[label])
