@@ -616,6 +616,16 @@ class Board:
     #: that a stock Blink moves something a person can see. `samd21.py` made
     #: the same choice by hand and says why at its `HEADER`.
     on_board: tuple[str, ...] = ()
+    #: Labels whose null has a better reason than "no package names it", as
+    #: `(label, why)` pairs. **The generic sentence is true and unhelpful**: it
+    #: says nobody published a mapping, when for some pads the fact is that
+    #: there is no mapping to publish. A dedicated debug pad is not an unread
+    #: label, and telling a reader which one they are looking at is the whole
+    #: point of `why_null` carrying prose rather than a flag.
+    #:
+    #: Every reason here cites where it was read. A reason is a claim like any
+    #: other and gets no easier ride for being about an absence.
+    reasons: tuple[tuple[str, str], ...] = ()
 
 
 PACKAGES = {
@@ -870,6 +880,34 @@ _NRF54L15 = (
 )
 _NRF54LM20A = (zephyr_connector("xiao_nrf54lm20a", nordic_port_pin),)
 
+#: **A dedicated pad is not an unread label**, and the chip's own footprint in
+#: the vendor's board file is what tells the two apart. The RP2350's footprint
+#: in `third_party/seeed-pcb/RP2350.kicad_pcb` names thirty pads `GPIO0`
+#: through `GPIO29` and names `SWDIO` (pad 25) and `SWDCLK` (pad 24)
+#: separately, alongside the supplies, the QSPI flash pins, USB and the
+#: crystal. A pin outside the GPIO numbering has no GPIO number to report.
+_DEDICATED_DEBUG = (
+    "a dedicated debug pad of the {chip}, not a GPIO: {where} names its {which} "
+    "pads {gpio} and names this one {label!r} separately, alongside the "
+    "supplies and the crystal, so there is no GPIO number for it to have"
+)
+_RP2350_DEBUG = tuple(
+    (label, _DEDICATED_DEBUG.format(
+        chip="RP2350", where="Seeed's own RP2350.kicad_pcb", which="thirty GPIO",
+        gpio="GPIO0 through GPIO29", label=label))
+    for label in ("SWDIO", "SWDCLK")
+)
+#: The same shape on Nordic's part, which numbers its GPIOs by port and bit:
+#: `nRF54L15.kicad_pcb` gives U6 thirty-two pads named `Pn.nn` and names
+#: `SWDIO` and `SWDCLK` apart from them.
+_NRF54L15_DEBUG = tuple(
+    (label, _DEDICATED_DEBUG.format(
+        chip="nRF54L15", where="Seeed's own nRF54L15.kicad_pcb",
+        which="thirty-two", gpio="P0.00 through P2.10 by port and bit",
+        label=label.replace("nRF54_", "SWD")))
+    for label in ("nRF54_SWDIO", "nRF54_SWCLK")
+)
+
 BOARDS = {
     "XIAO-ESP32-C3-DIP": Board("ESP32-C3", _ESP32C3),
     "XIAO-ESP32-C3-DIP-SMD": Board("ESP32-C3", _ESP32C3),
@@ -886,7 +924,7 @@ BOARDS = {
     "XIAO-RP2040-DIP": Board("RP2040", _RP2040, on_board=("LED",)),
     "XIAO-RP2040-SMD": Board("RP2040", _RP2040, on_board=("LED",)),
     "XIAO-RP2350-DIP": Board("RP2350", _RP2350),
-    "XIAO-RP2350-SMD": Board("RP2350", _RP2350),
+    "XIAO-RP2350-SMD": Board("RP2350", _RP2350, reasons=_RP2350_DEBUG),
     "XIAO-SAMD21-DIP": Board("SAMD21", _SAMD21),
     "XIAO-SAMD21-SMD": Board("SAMD21", _SAMD21),
     # Nobody has published this one. Zephyr has no xiao_stm32c5 board and
@@ -898,7 +936,7 @@ BOARDS = {
     "XIAO-nRF54LM20A-DIP": Board("nRF54LM20A", _NRF54LM20A),
     "XIAO-nRF54LM20A-SMD": Board("nRF54LM20A", _NRF54LM20A),
     "XIAO-nRF54l15-DIP": Board("nRF54L15", _NRF54L15),
-    "XIAO-nRF54l15-SMD": Board("nRF54L15", _NRF54L15),
+    "XIAO-nRF54l15-SMD": Board("nRF54L15", _NRF54L15, reasons=_NRF54L15_DEBUG),
 }
 
 
@@ -1166,6 +1204,12 @@ def board_report(
         # per-label one `pad_report` can see from a pad alone.
         for pad in pads:
             pad["reason"] = NO_PACKAGE_AT_ALL
+    # A label the registry has a better reason for, applied only where nothing
+    # resolved it -- a reason never overrides an answer.
+    reasons = dict(board.reasons)
+    for pad in pads:
+        if pad["chip_pin"] is None and pad["label"] in reasons:
+            pad["reason"] = reasons[pad["label"]]
     packages = sorted({source.package for source in board.sources})
     return {
         "board": name,

@@ -1552,3 +1552,44 @@ def test_a_board_wired_label_is_refused_by_the_chip_reader():
     # And the registry only ever opts in the six, so no board-wired label can
     # reach this reader by accident.
     assert set(pindefs._S3_FIXED) == {"MTMS", "MTDI", "MTDO", "MTCK", "USB_DN", "USB_DP"}
+
+
+def test_a_dedicated_debug_pad_says_so_rather_than_that_nobody_named_it():
+    """**Two different facts wore one sentence** (OH-170 US-2).
+
+    "No board-support package covering this board defines this label" is true
+    of a pad nobody has published a mapping for, and it was also being said of
+    pads that have no mapping to publish. A reader cannot tell those apart, and
+    the second is the more useful answer: there is nothing to wait for.
+
+    The chip's own footprint in the vendor's board file is what separates them.
+    `RP2350.kicad_pcb` gives the part thirty pads named `GPIO0` through
+    `GPIO29` and names `SWDIO` (pad 25) and `SWDCLK` (pad 24) apart from them,
+    beside the supplies, the QSPI pins, USB and the crystal. A pin outside the
+    GPIO numbering has no GPIO number to report. Nordic's part is the same
+    shape with its own naming: thirty-two pads `Pn.nn`, and `SWDIO`/`SWDCLK`
+    separately.
+
+    A reason never overrides an answer -- it is applied only where nothing
+    resolved the label -- so this cannot hide a pin that a package does name.
+    """
+    for board, labels in (("XIAO-RP2350-SMD", ("SWDIO", "SWDCLK")),
+                          ("XIAO-nRF54l15-SMD", ("nRF54_SWDIO", "nRF54_SWCLK"))):
+        pads = {pad["label"]: pad for pad in json.loads(
+            pindefs.board_path(board).read_text(encoding="utf-8"))["pads"]}
+        for label in labels:
+            assert pads[label]["chip_pin"] is None, (board, label)
+            why = pads[label]["why_null"]
+            assert "dedicated debug pad" in why, (board, label, why)
+            assert "not a GPIO" in why
+            # It names where it was read, like every other claim on this ticket.
+            assert "kicad_pcb" in why, why
+
+    # And the generic sentence is still there for pads that really are only
+    # unpublished, so this did not simply relabel everything.
+    generic = [pad["label"] for board in BOARDS
+               for pad in json.loads(pindefs.board_path(board).read_text(encoding="utf-8"))["pads"]
+               if pad["chip_pin"] is None
+               and "does not define" not in (pad.get("why_null") or "")
+               and "dedicated debug pad" not in (pad.get("why_null") or "")]
+    assert generic, "every null now claims a specific reason, which would be too good"
