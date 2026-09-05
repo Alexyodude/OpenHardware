@@ -978,7 +978,22 @@ _NRF54L15 = (
     zephyr_connector("xiao_nrf54l15", nordic_port_pin),
     seeed_pcb("nRF54L15.kicad_pcb", ("NFC1", "NFC2")),
 )
-_NRF54LM20A = (zephyr_connector("xiao_nrf54lm20a", nordic_port_pin),)
+#: **The NFC pair is P1.01 and P1.02 here and P1.02 and P1.03 on the
+#: nRF54L15**, which is why every one of these reads its own board's file
+#: rather than a sibling's. Two Nordic parts one generation apart, two
+#: answers, and a family resemblance would have got one of them wrong --
+#: OH-26's first trap, met again on parts closer than any it named.
+#:
+#: `SHPHLD` and the nRF54's own debug pads are traced instead: Seeed name
+#: those nets for the function and leave the pin to the footprint.
+_NRF54LM20A = (
+    zephyr_connector("xiao_nrf54lm20a", nordic_port_pin),
+    seeed_pcb("nRF54LM20A.kicad_pcb", ("NFC1", "NFC2")),
+    seeed_pcb_traced(
+        "nRF54LM20A.kicad_pcb", "nRF54LM20A",
+        ("SHPHLD", "nRF54_SWDIO", "nRF54_SWCLK", "nRF54_RST"),
+    ),
+)
 
 #: **A dedicated pad is not an unread label**, and the chip's own footprint in
 #: the vendor's board file is what tells the two apart. The RP2350's footprint
@@ -1026,6 +1041,31 @@ _SECOND_CHIP = (
 _SAMD11_PADS = ("SAMD11_SWDIO", "SAMD11_SWCLK", "SAMD11_EN", "SAMD11_RST2")
 _MG24_DEBUGGER = tuple((label, _SECOND_CHIP) for label in _SAMD11_PADS)
 
+#: The nRF54LM20A's own debug pads, which its footprint names `SWDIO_G2` and
+#: `SWDCLK_G1` -- outside the `Pn.nn` numbering its GPIOs use, so there is no
+#: pin number for them to have. The same shape as the RP2350's and the
+#: nRF54L15's, with this part's own spelling.
+_NRF54LM20A_DEBUG = tuple(
+    (label, _DEDICATED_DEBUG.format(
+        chip="nRF54LM20A", where="Seeed's own nRF54LM20A.kicad_pcb",
+        which="thirty-two", gpio="P0.00 upward by port and bit",
+        label=named))
+    for label, named in (("nRF54_SWDIO", "SWDIO_G2"), ("nRF54_SWCLK", "SWDCLK_G1"))
+)
+
+#: **A third chip, and not even a microcontroller.** `SHPHLD` reaches an
+#: `nPM1300-CAAA` -- Nordic's power-management IC -- on its `SHPHLD_D4` pad.
+#: Ship-hold is that part's own function, so the label names nothing on the
+#: board's MCU at all, which is a different answer again from a debugger's
+#: pin and from a dedicated debug pad.
+_POWER_IC = (
+    "this pad reaches the board's power-management IC, an nPM1300, on its "
+    "SHPHLD_D4 pin -- not the board's MCU and not its debugger. `chip_pin` "
+    "names a pin of the board's MCU, and this label names none. Read from "
+    "Seeed's own nRF54LM20A.kicad_pcb, which carries all three parts"
+)
+_NRF54LM20A_OTHER = (("SHPHLD", _POWER_IC),)
+
 BOARDS = {
     "XIAO-ESP32-C3-DIP": Board("ESP32-C3", _ESP32C3),
     "XIAO-ESP32-C3-DIP-SMD": Board("ESP32-C3", _ESP32C3),
@@ -1051,9 +1091,12 @@ BOARDS = {
     "XIAO-XIAO STM32C5-SMD": Board("STM32C5", ()),
     "XIAO-nRF52840-DIP": Board("nRF52840", _NRF52840),
     "XIAO-nRF52840-SMD": Board("nRF52840", _NRF52840),
-    "XIAO-nRF54LM20A-DIP": Board("nRF54LM20A", _NRF54LM20A),
+    "XIAO-nRF54LM20A-DIP": Board(
+        "nRF54LM20A", _NRF54LM20A, reasons=_NRF54LM20A_OTHER
+    ),
     "XIAO-nRF54LM20A-SMD": Board(
-        "nRF54LM20A", _NRF54LM20A, reasons=_MG24_DEBUGGER
+        "nRF54LM20A", _NRF54LM20A,
+        reasons=_MG24_DEBUGGER + _NRF54LM20A_DEBUG + _NRF54LM20A_OTHER,
     ),
     "XIAO-nRF54l15-DIP": Board("nRF54L15", _NRF54L15),
     "XIAO-nRF54l15-SMD": Board(

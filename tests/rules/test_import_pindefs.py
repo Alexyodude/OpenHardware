@@ -1239,14 +1239,17 @@ def test_the_eight_committed_files_with_unnumbered_pins_are_the_eight_oh_26_name
     bit rather than flatly, so `chip_index` is null on them and the file says
     so in its own words.
 
-    **OH-26 measured 123 and it is 127 now**, which is the count doing its
+    **OH-26 measured 123 and it is 131 now**, which is the count doing its
     job rather than drifting. OH-170 added four pads on parts that number by
     port: `NFC1` and `NFC2` on the two nRF54L15 files, where Seeed's nets are
     named `P1.02{slash}NFC1` and `P1.03{slash}NFC2`; and `SWDIO` and `SWCLK`
     on the MG24, traced through Seeed's board file to the EFR32MG24's own
-    pads `PA02` and `PA01`. Silicon Labs and Nordic both name by port, so a
-    pad resolved on either lands here with a name and no flat index. The
-    eight boards are unchanged; three of them gained pads.
+    pads `PA02` and `PA01`; and the nRF54LM20A's own NFC pair, `P1.01` and
+    `P1.02`, which are NOT the nRF54L15's `P1.02` and `P1.03` -- two Nordic
+    parts a generation apart, and the reason every board reads its own file.
+    Silicon Labs and Nordic both name by port, so a pad resolved on either
+    lands here with a name and no flat index. The eight boards are unchanged;
+    four of them gained pads.
     """
     carrying = sorted(
         name for name in BOARDS
@@ -1274,12 +1277,14 @@ def test_the_eight_committed_files_with_unnumbered_pins_are_the_eight_oh_26_name
         assert f"{len(pins)} pins on this board are named with NO flat number" in (
             document["assumption"]
         ), name
-    assert unnumbered == 127, (
+    assert unnumbered == 131, (
         "recomputed rather than restated. 123 when OH-26 measured it; 125 once "
         "OH-170 read NFC1 and NFC2 off Seeed's nRF54L15 board file; 127 once it "
-        "traced the MG24's SWDIO to PA02 and SWCLK to PA01. Silicon Labs and "
-        "Nordic both number by port, so every pad this ticket resolved on those "
-        "parts lands in this bucket"
+        "traced the MG24's SWDIO to PA02 and SWCLK to PA01; 131 once the "
+        "nRF54LM20A's own NFC pair was read off its file too, as P1.01 and "
+        "P1.02 -- which are NOT the nRF54L15's P1.02 and P1.03, two Nordic "
+        "parts a generation apart. Silicon Labs and Nordic both number by "
+        "port, so every pad this ticket resolved on either lands in this bucket"
     )
     # Every other board's resolved pads carry a number, so the sentence would
     # be false on them.
@@ -1638,3 +1643,71 @@ def test_a_pad_of_the_on_board_debugger_is_not_given_the_boards_own_mcu_pin():
     assert mg24["SWCLK"]["chip_pin"] == "PA01", mg24["SWCLK"]
     # The debugger's own PA31 is nowhere in the file, which is the point.
     assert "PA31" not in {pad["chip_pin"] for pad in mg24.values()}
+
+
+#: Labels with no MCU pin behind them by construction. Not a guess: the board
+#: modules already take this position, and
+#: `test_the_uno_maps_every_pad_with_an_mcu_pin_behind_it` holds
+#: `atmega328p.HEADER` free of exactly this set.
+SUPPLY_LABELS = frozenset({
+    "GND", "3V3_OUT", "VBUS", "VBAT", "VIN", "5V", "3V3", "EN", "NC",
+    "AREF", "IOREF", "RESET", "PAD", "BAT", "VDD", "VCC", "RST",
+})
+
+
+def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
+    """**The whole of OH-170, as one arithmetic** (US-6).
+
+    A pad is in exactly one of four states, and the point of this test is that
+    the fourth is small and named rather than a bucket nobody has looked in:
+
+      it names a chip pin
+      it is a supply or a ground, which has no MCU pin by construction
+      it has a specific reason -- a dedicated debug pad, a pin of the on-board
+        debugger, a pin of the power-management IC, or a board no package
+        covers at all
+      it has only the generic "no package covering this board defines this
+        label", which means nobody has looked yet
+
+    The counts are asserted so that a change to any of them is a decision
+    somebody made rather than a drift, and the fourth group is named board by
+    board in the message, because a number alone would not tell the next
+    session where to go.
+    """
+    naming = supplies = specific = generic = 0
+    outstanding: dict[str, list[str]] = {}
+    # Every board FILE and not the registry: the Arduino Uno is not in
+    # `import_pindefs`'s table -- that tool reads XIAO board-support packages
+    # and the Uno's pins come from its own variant -- and a count that skipped
+    # it would be a count of most of the boards.
+    files = sorted(pindefs.BOARDS_DIR.glob("*.json"))
+    assert len(files) == 26, [one.stem for one in files]
+    for path in files:
+        board = path.stem
+        for pad in json.loads(path.read_text(encoding="utf-8"))["pads"]:
+            label = pad["label"]
+            if pad["chip_pin"] is not None:
+                naming += 1
+            elif label.split("/")[0].upper() in SUPPLY_LABELS or label.upper() in SUPPLY_LABELS:
+                supplies += 1
+            elif "defines this label" in (pad.get("why_null") or ""):
+                generic += 1
+                outstanding.setdefault(board, []).append(label)
+            else:
+                specific += 1
+
+    # **No pad anywhere has a null and no reason at all.** OH-170 step 1
+    # established that for the Uno, whose file carried thirty-two of them.
+    for path in files:
+        for pad in json.loads(path.read_text(encoding="utf-8"))["pads"]:
+            assert (pad["chip_pin"] is None) == bool(pad.get("why_null")), (
+                path.stem, pad["label"])
+
+    assert naming == 363, naming
+    assert supplies == 153, supplies
+    assert specific == 43, specific
+    assert generic == 23, (
+        f"{generic} pads still carry only the generic sentence: "
+        f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
+    )
+    assert naming + supplies + specific + generic == 582
