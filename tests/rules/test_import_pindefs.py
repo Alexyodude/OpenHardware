@@ -1239,13 +1239,14 @@ def test_the_eight_committed_files_with_unnumbered_pins_are_the_eight_oh_26_name
     bit rather than flatly, so `chip_index` is null on them and the file says
     so in its own words.
 
-    **OH-26 measured 123 and it is 125 now**, which is the count doing its
-    job rather than a drift: OH-170 added `NFC1` and `NFC2` on the two
-    nRF54L15 files from Seeed's own board file, where the nets are named
-    `P1.02{slash}NFC1` and `P1.03{slash}NFC2`. Nordic number by port and bit,
-    so those two pads resolve with a name and no index and land in exactly
-    this bucket. The eight boards are unchanged; two of them gained a pad
-    each.
+    **OH-26 measured 123 and it is 127 now**, which is the count doing its
+    job rather than drifting. OH-170 added four pads on parts that number by
+    port: `NFC1` and `NFC2` on the two nRF54L15 files, where Seeed's nets are
+    named `P1.02{slash}NFC1` and `P1.03{slash}NFC2`; and `SWDIO` and `SWCLK`
+    on the MG24, traced through Seeed's board file to the EFR32MG24's own
+    pads `PA02` and `PA01`. Silicon Labs and Nordic both name by port, so a
+    pad resolved on either lands here with a name and no flat index. The
+    eight boards are unchanged; three of them gained pads.
     """
     carrying = sorted(
         name for name in BOARDS
@@ -1273,7 +1274,13 @@ def test_the_eight_committed_files_with_unnumbered_pins_are_the_eight_oh_26_name
         assert f"{len(pins)} pins on this board are named with NO flat number" in (
             document["assumption"]
         ), name
-    assert unnumbered == 125, "recomputed rather than restated; 123 before OH-170 added the two NFC pads"
+    assert unnumbered == 127, (
+        "recomputed rather than restated. 123 when OH-26 measured it; 125 once "
+        "OH-170 read NFC1 and NFC2 off Seeed's nRF54L15 board file; 127 once it "
+        "traced the MG24's SWDIO to PA02 and SWCLK to PA01. Silicon Labs and "
+        "Nordic both number by port, so every pad this ticket resolved on those "
+        "parts lands in this bucket"
+    )
     # Every other board's resolved pads carry a number, so the sentence would
     # be false on them.
     for name in set(BOARDS) - set(carrying):
@@ -1593,3 +1600,41 @@ def test_a_dedicated_debug_pad_says_so_rather_than_that_nobody_named_it():
                and "does not define" not in (pad.get("why_null") or "")
                and "dedicated debug pad" not in (pad.get("why_null") or "")]
     assert generic, "every null now claims a specific reason, which would be too good"
+
+
+def test_a_pad_of_the_on_board_debugger_is_not_given_the_boards_own_mcu_pin():
+    """**A pin of the wrong chip is worse than no pin** (OH-170 US-3).
+
+    Three XIAOs carry two microcontrollers: the part the board is named for,
+    and an `ATSAMD11D14A` acting as the on-board debugger. Its pads are
+    brought out as `SAMD11_SWDIO`, `SAMD11_SWCLK` and friends, and they sit on
+    nets with the same names as the main part's own debug nets.
+
+    `chip_pin` means "the pin of THIS board's MCU that this pad reaches", so
+    those pads get words rather than a number. The trap is real and traceable:
+    on the MG24 the debugger's `SAMD11_SWDIO` reaches its `PA31`, while the
+    board's own `SWDIO` reaches the EFR32MG24's `PA02`. Both are `PAnn`, both
+    look like an answer, and only one belongs in the field.
+
+    That is also why `read_seeed_traced` matches a footprint by its VALUE and
+    not its reference: `EFR32MG24B220F1536IM48-B` says which chip, `U5` does
+    not, and the two parts sit on the same nets.
+    """
+    for board in ("XIAO-MG24-SMD", "XIAO-nRF54l15-SMD", "XIAO-nRF54LM20A-SMD"):
+        pads = {pad["label"]: pad for pad in json.loads(
+            pindefs.board_path(board).read_text(encoding="utf-8"))["pads"]}
+        debugger = [label for label in pads if label.startswith("SAMD11_")]
+        assert debugger, board
+        for label in debugger:
+            assert pads[label]["chip_pin"] is None, (board, label, pads[label])
+            why = pads[label]["why_null"]
+            assert "on-board debugger" in why and "ATSAMD11D14A" in why, (board, label, why)
+
+    # And the board's OWN debug pads are answered, on the one board where the
+    # vendor's file says they are GPIOs -- so this did not blanket the subject.
+    mg24 = {pad["label"]: pad for pad in json.loads(
+        pindefs.board_path("XIAO-MG24-SMD").read_text(encoding="utf-8"))["pads"]}
+    assert mg24["SWDIO"]["chip_pin"] == "PA02", mg24["SWDIO"]
+    assert mg24["SWCLK"]["chip_pin"] == "PA01", mg24["SWCLK"]
+    # The debugger's own PA31 is nowhere in the file, which is the point.
+    assert "PA31" not in {pad["chip_pin"] for pad in mg24.values()}

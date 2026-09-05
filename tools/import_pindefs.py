@@ -396,6 +396,18 @@ def read_chip_pins(
 #: ways in one directory -- `GPIO4{slash}MTMS`, `Boot{slash}GPIO28`,
 #: `MTMS_GPIO2_ADC1_CH1`, `P1.02{slash}NFC1` -- so the pin is found as a token
 #: rather than by position, and `{slash}` is KiCad's escape for `/`.
+#: `(net 3 "NAME")` in KiCad 8 and `(net "NAME")` in KiCad 10, which Seeed
+#: used for the nRF54LM20A. One expression rather than a version check,
+#: because the number is the only difference and nothing here wants it.
+_NET_NAME = re.compile(r'\(net (?:\d+ )?"([^"]*)"\)')
+
+#: What a pad function looks like when it names a pin of the part: Espressif
+#: and Raspberry Pi number flatly, Silicon Labs by port and pin, Nordic by
+#: port and bit. A function that is not one of these -- `SWDIO`, `XIN`,
+#: `IOVDD` -- is a pad outside the part's GPIO numbering, and there is no pin
+#: number for it to have.
+_CHIP_PIN_NAME = re.compile(r"^(?:GPIO\d+|P[A-D]\d{1,2}|P\d\.\d{1,2})$")
+
 _PIN_TOKEN = re.compile(r"^(?:GPIO(\d+)|P(\d)\.(\d+))$")
 
 
@@ -425,7 +437,7 @@ def read_seeed_net_names(
     wanted = {label.upper() for label in labels}
     found: dict[str, dict[str, ChipPin]] = {}
     for text in texts:
-        for raw in set(re.findall(r'\(net \d+ "([^"]*)"\)', text)):
+        for raw in set(_NET_NAME.findall(text)):
             parts = [p for p in re.split(r"\{slash\}|/|_", raw) if p]
             tokens = [p.upper() for p in parts]
             hit = wanted & set(tokens)
@@ -450,6 +462,82 @@ def read_seeed_net_names(
             )
         pins[label] = next(iter(distinct))
     return pins
+
+
+def _footprints(text: str) -> list[tuple[str, dict[str, list[str]]]]:
+    """Every footprint as `(value, {net: [pad function, ...]})`.
+
+    Keyed on the value rather than the reference, because a reference is a
+    position on a board and a value is the part: `EFR32MG24B220F1536IM48-B`
+    says which chip this is and `U5` does not.
+    """
+    out = []
+    for block in re.split(r"\n\t\(footprint ", text)[1:]:
+        value = re.search(r'\(property "Value" "([^"]*)"', block)
+        by_net: dict[str, list[str]] = {}
+        for pad in re.finditer(r'\(pad "[^"]*"[^\n]*(?:\n(?!\t\t\(pad ).*)*', block):
+            chunk = pad.group(0)
+            function = re.search(r'\(pinfunction "([^"]*)"', chunk)
+            net = _NET_NAME.search(chunk)
+            if function and net:
+                by_net.setdefault(net.group(1), []).append(function.group(1))
+        out.append((value.group(1) if value else "", by_net))
+    return out
+
+
+def read_seeed_traced(
+    texts: tuple[str, ...], *, part: str, labels: tuple[str, ...]
+) -> dict[str, ChipPin]:
+    """Follow a pad's net to the board's own MCU and read that pad's function.
+
+    **For labels the net name does not spell out.** Seeed name a net `SWDIO`
+    and leave the pin to the footprint, so the answer is one hop away: find
+    the net, find the MCU's pad on it, and that pad's own function names the
+    pin. On the XIAO MG24 it gives `SWDIO` -> `PA02` and `SWCLK` -> `PA01`,
+    ordinary GPIOs of that part.
+
+    **Which footprint is the MCU matters more here than anywhere else on this
+    ticket, because these boards carry two.** The MG24 has an
+    `ATSAMD11D14A-UUT` beside its `EFR32MG24...`, and that SAMD11 is the
+    on-board debugger -- its pads sit on nets with the very same names, and
+    its own `PA02` is a different pin of a different chip. Matching the part's
+    value string is what keeps the debugger out of a field that means "a pin
+    of this board's MCU".
+
+    A pad whose function is not a pin name -- `SWDIO`, `XIN`, `IOVDD` -- is
+    outside the part's GPIO numbering and resolves to nothing. That is the
+    RP2350's case, and `Board.reasons` answers it in words instead.
+    """
+    pins: dict[str, ChipPin] = {}
+    for text in texts:
+        mine = [by_net for value, by_net in _footprints(text) if part in value]
+        if not mine:
+            raise PindefError(
+                f"no footprint in this board file has {part!r} in its value, "
+                f"so which of its parts is the MCU is not established and "
+                f"nothing may be traced to it"
+            )
+        for label in labels:
+            wanted = label.upper()
+            for by_net in mine:
+                for net, functions in by_net.items():
+                    plain = net.replace("{slash}", "/").rsplit("/", 1)[-1].upper()
+                    if plain != wanted:
+                        continue
+                    named = [one for one in functions if _CHIP_PIN_NAME.match(one)]
+                    if len(named) == 1:
+                        pins[label] = ChipPin(named[0], None)
+    return pins
+
+
+def seeed_pcb_traced(board_file: str, part: str, labels: tuple[str, ...]) -> Source:
+    """Seeed's own board file, followed one hop from the pad to the MCU."""
+    return Source(
+        "seeed-pcb",
+        (board_file,),
+        functools.partial(read_seeed_traced, part=part, labels=labels),
+        root=REPO / "third_party" / "seeed-pcb",
+    )
 
 
 def read_indexed_pins(
@@ -837,8 +925,20 @@ _ESP32S3 = (
     arduino_flat("arduino-esp32", "XIAO_ESP32S3"),
     arduino_chip("arduino-esp32", "esp32s3", _S3_FIXED),
 )
+#: `SWDIO` and `SWCLK` are ordinary GPIOs on this part, and Seeed's own
+#: board file is what says which: the net named `SWDIO` reaches the
+#: EFR32MG24's pad `PA02` and `SWCLK` reaches `PA01`. Traced rather than
+#: read off a net name, because Seeed name these nets for the function and
+#: leave the pin to the footprint.
+#:
+#: **The part is named because this board carries two.** An
+#: `ATSAMD11D14A-UUT` sits beside the MG24 as the on-board debugger, its
+#: pads are on nets with the same names, and its own `PA02` is a different
+#: pin of a different chip. Its pads are `SAMD11_*` on the header and are
+#: answered in words below, not with a number.
 _MG24 = (
     zephyr_connector("xiao_mg24", silabs_port_pin),
+    seeed_pcb_traced("MG24.kicad_pcb", "EFR32MG24", ("SWDIO", "SWCLK")),
     arduino_indexed(
         "silabs-arduino",
         "variants/xiao_mg24/pins_arduino.h",
@@ -908,6 +1008,24 @@ _NRF54L15_DEBUG = tuple(
     for label in ("nRF54_SWDIO", "nRF54_SWCLK")
 )
 
+#: **A pin of the wrong chip is worse than no pin**, so these are answered in
+#: words. `chip_pin` means "the pin of THIS board's MCU that this pad
+#: reaches", and every label below reaches the on-board debugger instead --
+#: an `ATSAMD11D14A-UUT`, which Seeed's own board files name beside the main
+#: part. Traced, the MG24's `SAMD11_SWDIO` reaches that chip's `PA31` and
+#: `SAMD11_SWCLK` its `PA30`; writing either into `chip_pin` would put a
+#: SAMD11 pin in a field the page reads as an MG24 pin, and the page has no
+#: way to tell.
+_SECOND_CHIP = (
+    "this pad reaches the on-board debugger, an ATSAMD11D14A, and not this "
+    "board's own MCU; `chip_pin` names a pin of the board's MCU, so a number "
+    "here would be a pin of the wrong chip. Seeed's own board file names both "
+    "parts, and the debugger's pins are reachable from it if they are ever "
+    "wanted under a field that says which chip it means"
+)
+_SAMD11_PADS = ("SAMD11_SWDIO", "SAMD11_SWCLK", "SAMD11_EN", "SAMD11_RST2")
+_MG24_DEBUGGER = tuple((label, _SECOND_CHIP) for label in _SAMD11_PADS)
+
 BOARDS = {
     "XIAO-ESP32-C3-DIP": Board("ESP32-C3", _ESP32C3),
     "XIAO-ESP32-C3-DIP-SMD": Board("ESP32-C3", _ESP32C3),
@@ -920,7 +1038,7 @@ BOARDS = {
     "XIAO-ESP32-S3-SMD": Board("ESP32-S3", _ESP32S3),
     "XIAO-ESP32-S3-SMD_PAD": Board("ESP32-S3", _ESP32S3),
     "XIAO-MG24-DIP": Board("EFR32MG24", _MG24),
-    "XIAO-MG24-SMD": Board("EFR32MG24", _MG24),
+    "XIAO-MG24-SMD": Board("EFR32MG24", _MG24, reasons=_MG24_DEBUGGER),
     "XIAO-RP2040-DIP": Board("RP2040", _RP2040, on_board=("LED",)),
     "XIAO-RP2040-SMD": Board("RP2040", _RP2040, on_board=("LED",)),
     "XIAO-RP2350-DIP": Board("RP2350", _RP2350),
@@ -934,9 +1052,13 @@ BOARDS = {
     "XIAO-nRF52840-DIP": Board("nRF52840", _NRF52840),
     "XIAO-nRF52840-SMD": Board("nRF52840", _NRF52840),
     "XIAO-nRF54LM20A-DIP": Board("nRF54LM20A", _NRF54LM20A),
-    "XIAO-nRF54LM20A-SMD": Board("nRF54LM20A", _NRF54LM20A),
+    "XIAO-nRF54LM20A-SMD": Board(
+        "nRF54LM20A", _NRF54LM20A, reasons=_MG24_DEBUGGER
+    ),
     "XIAO-nRF54l15-DIP": Board("nRF54L15", _NRF54L15),
-    "XIAO-nRF54l15-SMD": Board("nRF54L15", _NRF54L15, reasons=_NRF54L15_DEBUG),
+    "XIAO-nRF54l15-SMD": Board(
+        "nRF54L15", _NRF54L15, reasons=_NRF54L15_DEBUG + _MG24_DEBUGGER
+    ),
 }
 
 
