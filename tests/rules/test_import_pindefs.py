@@ -541,6 +541,15 @@ def test_every_registry_source_belongs_to_a_known_package():
         for source in board.sources:
             assert source.package in PACKAGES, f"{name} cites unknown package {source.package}"
             assert source.paths, f"{name} cites {source.package} with no path"
+            if not PACKAGES[source.package].cloned:
+                # A package `--fetch` cannot clone has no sparse checkout to
+                # be inside. Seeed publish their board CAD as a zip behind a
+                # wiki page, so it is downloaded by hand into
+                # `third_party/seeed-pcb/` -- the arrangement the Arduino
+                # Uno's EAGLE file already has, and `--fetch` names it rather
+                # than passing over it in silence.
+                assert source.root is not None, f"{name}: {source.package} is not cloned "
+                continue
             root = source.paths[0].split("/")[0]
             assert any(
                 sparse.startswith(root) for sparse in PACKAGES[source.package].sparse
@@ -1226,8 +1235,18 @@ def test_the_chip_with_its_own_table_is_not_sent_to_read_its_own_file(tmp_path, 
 
 
 def test_the_eight_committed_files_with_unnumbered_pins_are_the_eight_oh_26_named():
-    """Needs no fetch. OH-26 measured 123 resolved pads on 8 boards with no
-    flat integer; those 8 files, and only those, carry the sentence."""
+    """Needs no fetch. Eight boards name pins their vendor numbers by port and
+    bit rather than flatly, so `chip_index` is null on them and the file says
+    so in its own words.
+
+    **OH-26 measured 123 and it is 125 now**, which is the count doing its
+    job rather than a drift: OH-170 added `NFC1` and `NFC2` on the two
+    nRF54L15 files from Seeed's own board file, where the nets are named
+    `P1.02{slash}NFC1` and `P1.03{slash}NFC2`. Nordic number by port and bit,
+    so those two pads resolve with a name and no index and land in exactly
+    this bucket. The eight boards are unchanged; two of them gained a pad
+    each.
+    """
     carrying = sorted(
         name for name in BOARDS
         if "NO flat number" in pindefs.board_path(name).read_text(encoding="utf-8")
@@ -1254,7 +1273,7 @@ def test_the_eight_committed_files_with_unnumbered_pins_are_the_eight_oh_26_name
         assert f"{len(pins)} pins on this board are named with NO flat number" in (
             document["assumption"]
         ), name
-    assert unnumbered == 123, "OH-26's count, recomputed rather than restated"
+    assert unnumbered == 125, "recomputed rather than restated; 123 before OH-170 added the two NFC pads"
     # Every other board's resolved pads carry a number, so the sentence would
     # be false on them.
     for name in set(BOARDS) - set(carrying):

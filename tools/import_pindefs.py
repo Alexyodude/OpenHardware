@@ -122,6 +122,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import functools
+import hashlib
 import json
 import pathlib
 import re
@@ -391,6 +392,66 @@ def read_chip_pins(
     return pins
 
 
+#: A net name that carries the pin beside the label. Seeed write these four
+#: ways in one directory -- `GPIO4{slash}MTMS`, `Boot{slash}GPIO28`,
+#: `MTMS_GPIO2_ADC1_CH1`, `P1.02{slash}NFC1` -- so the pin is found as a token
+#: rather than by position, and `{slash}` is KiCad's escape for `/`.
+_PIN_TOKEN = re.compile(r"^(?:GPIO(\d+)|P(\d)\.(\d+))$")
+
+
+def read_seeed_net_names(
+    texts: tuple[str, ...], *, labels: tuple[str, ...]
+) -> dict[str, ChipPin]:
+    """Labels the VENDOR names beside their pin, in their own board file.
+
+    **The strongest source in this tree for these pads, and the only one that
+    is per board.** Seeed's KiCad projects name a net for what it carries, and
+    where a pad is both a header label and a chip pin the name says both:
+
+        GPIO4{slash}MTMS        the C6's MTMS is GPIO4
+        MTMS_GPIO2_ADC1_CH1     the C5's MTMS is GPIO2
+        P1.02{slash}NFC1        the nRF54L15's NFC1 is P1.02
+
+    The C5 and the C6 disagreeing about MTMS is not a fault: they are
+    different chips, which is OH-26's first trap, and this reader answers per
+    board so it never has to generalise. That is why it is preferred over
+    `arduino_chip`, which infers from a chip's other boards.
+
+    A net is used only when the label appears as a whole token and exactly one
+    pin token sits beside it. Two pin tokens, or none, and the label is left
+    for another source: `BOOT` on the C6 is a net called simply `BOOT`, which
+    names no pin and is correctly not answered here.
+    """
+    wanted = {label.upper() for label in labels}
+    found: dict[str, dict[str, ChipPin]] = {}
+    for text in texts:
+        for raw in set(re.findall(r'\(net \d+ "([^"]*)"\)', text)):
+            parts = [p for p in re.split(r"\{slash\}|/|_", raw) if p]
+            tokens = [p.upper() for p in parts]
+            hit = wanted & set(tokens)
+            if not hit:
+                continue
+            pins = [m for m in (_PIN_TOKEN.match(p) for p in parts) if m]
+            if len(pins) != 1:
+                continue
+            gpio, port, bit = pins[0].groups()
+            pin = (ChipPin(f"GPIO{gpio}", int(gpio)) if gpio is not None
+                   else ChipPin(f"P{port}.{bit}", None))
+            for label in hit:
+                found.setdefault(label, {})[raw] = pin
+    pins: dict[str, ChipPin] = {}
+    for label, byname in found.items():
+        distinct = {pin for pin in byname.values()}
+        if len(distinct) > 1:
+            raise PindefError(
+                f"{label} appears on {len(byname)} nets naming different pins "
+                f"({sorted(byname)}); the board file is saying two things and "
+                f"a reader must not choose between them"
+            )
+        pins[label] = next(iter(distinct))
+    return pins
+
+
 def read_indexed_pins(
     texts: tuple[str, ...],
     *,
@@ -510,6 +571,12 @@ class Package:
     repository: str
     sparse: tuple[str, ...]
     licence: str
+    #: False for a source `--fetch` cannot clone. Seeed publish their board
+    #: CAD as a zip behind a wiki page, so it is downloaded by hand into
+    #: `third_party/seeed-pcb/` exactly as the Arduino Uno's EAGLE file is --
+    #: `tools/get_board_sources.py` prints the URL and refuses to fetch an
+    #: https archive itself, for the reason that file gives.
+    cloned: bool = True
 
 
 @dataclasses.dataclass(frozen=True)
@@ -526,6 +593,13 @@ class Source:
     #: citation names either way, so a file records what it consulted rather
     #: than a list that would rot.
     expand: typing.Callable[[pathlib.Path], tuple[str, ...]] | None = None
+    #: Where this source's files live, when they are not a `--fetch` clone
+    #: under `third_party/bsp/`. Seeed publish their board CAD as a zip on a
+    #: wiki page rather than in a repository, so it is downloaded by hand into
+    #: `third_party/seeed-pcb/` exactly as the Arduino Uno's EAGLE file is --
+    #: see `tools/get_board_sources.py`, which prints the URL and refuses to
+    #: fetch an https archive itself.
+    root: pathlib.Path | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -547,6 +621,13 @@ class Board:
 PACKAGES = {
     package.name: package
     for package in (
+        Package(
+            "seeed-pcb",
+            "https://wiki.seeedstudio.com/ -- each XIAO's own page, as a zip",
+            (),
+            "OSHW, per Seeed's XIAO series repository",
+            cloned=False,
+        ),
         Package(
             "zephyr",
             "https://github.com/zephyrproject-rtos/zephyr.git",
@@ -644,6 +725,26 @@ def arduino_chip(package: str, chip: str, labels: tuple[str, ...]) -> Source:
     )
 
 
+def seeed_pcb(board_file: str, labels: tuple[str, ...]) -> Source:
+    """Seeed's own KiCad board file for one XIAO, read for its net names.
+
+    Per board and per chip at once, which is what makes it the best source
+    here: the C5 and the C6 name different pins for `MTMS` and this reader
+    never has to know that, because it reads each board's own file.
+
+    Not a `--fetch` clone. Seeed publish the CAD as a zip from a wiki page, so
+    it is downloaded by hand into `third_party/seeed-pcb/`, like the Uno's
+    EAGLE file. A board whose file is absent raises with the path, the same as
+    a stale sparse checkout does.
+    """
+    return Source(
+        "seeed-pcb",
+        (board_file,),
+        functools.partial(read_seeed_net_names, labels=labels),
+        root=REPO / "third_party" / "seeed-pcb",
+    )
+
+
 def arduino_indexed(
     package: str,
     labels: str,
@@ -680,13 +781,35 @@ _ESP32C3 = (
     zephyr_connector("xiao_esp32c3", flat_gpio),
     arduino_flat("arduino-esp32", "XIAO_ESP32C3"),
 )
+#: The JTAG pads and the boot strap. **Per board and not per chip**: Seeed's
+#: own file puts the C5's MTMS on GPIO2 and the C6's on GPIO4, which is
+#: exactly OH-26's first trap, and reading each board's own file is how this
+#: never has to be generalised. `BOOT` is here for the C5, whose net is
+#: `Boot{slash}GPIO28`, and NOT for the C6, whose net is called simply `BOOT`
+#: and names no pin -- so the C6's stays null and says so.
+_ESP32_JTAG = ("MTMS", "MTDI", "MTDO", "MTCK", "BOOT")
 _ESP32C5 = (
     zephyr_connector("xiao_esp32c5", flat_gpio),
     arduino_flat("arduino-esp32", "XIAO_ESP32C5", extras=("LED",)),
+    # **Seeed's own board file resolves five more pads here and it is not
+    # wired in, which is a claim and not an oversight.** `ESP32-C5.kicad_pcb`
+    # names `MTMS_GPIO2_ADC1_CH1`, `MTDI_GPIO3_...`, `MTDO_GPIO5_...`,
+    # `MTCK_GPIO4_...` and `Boot{slash}GPIO28`, all read cleanly by
+    # `read_seeed_net_names`. Adding them changes what this board's module
+    # must claim -- `test_the_board_file_and_the_module_agree_on_every_labelled_pad`
+    # holds the file and `PIN_NAMES` equal in both directions -- and
+    # `webui/boards/esp32c5.py` is OH-161's file, not OH-170's. It goes in
+    # when that ticket releases it. The C6 is the same, with its own values:
+    # MTMS 4, MTDI 5, MTDO 7, MTCK 6, which is why neither may be copied to
+    # the other.
 )
 _ESP32C6 = (
     zephyr_connector("xiao_esp32c6", flat_gpio),
     arduino_flat("arduino-esp32", "XIAO_ESP32C6", extras=("LED",)),
+    # As the C5 above: four more pads are readable from
+    # `ESP32-C6.kicad_pcb` and wait on OH-161 releasing `esp32c6.py`. Its
+    # `BOOT` is NOT among them -- that net is called simply `BOOT` and names
+    # no pin, where the C5's is `Boot{slash}GPIO28`.
 )
 #: The ESP32-S3's JTAG and USB pads, which are the part's and not the board's
 #: (OH-170 US-1). Seeed's own variant names none of them -- it defines
@@ -737,7 +860,14 @@ _NRF52840 = (
 )
 # One source each: Nordic ships these boards inside nRF Connect rather than as
 # an Arduino core, and Zephyr upstream already carries the same connector node.
-_NRF54L15 = (zephyr_connector("xiao_nrf54l15", nordic_port_pin),)
+#: `NFC1` and `NFC2` are GPIOs on this part when the NFC protection bit is
+#: clear, and Seeed name them beside their pin -- `P1.02{slash}NFC1`. The
+#: SAMD11 and nRF54 debug pads on the same board are NOT here: they belong
+#: to a second chip and are OH-170 US-3's question, not this source's.
+_NRF54L15 = (
+    zephyr_connector("xiao_nrf54l15", nordic_port_pin),
+    seeed_pcb("nRF54L15.kicad_pcb", ("NFC1", "NFC2")),
+)
 _NRF54LM20A = (zephyr_connector("xiao_nrf54lm20a", nordic_port_pin),)
 
 BOARDS = {
@@ -825,6 +955,18 @@ def agree(claims: tuple[Claim, ...]) -> ChipPin | None:
     return ChipPin(names.pop(), indices.pop() if indices else None)
 
 
+def _digest(texts: tuple[str, ...]) -> str:
+    """The first twelve hex of a sha256 over the files a source read.
+
+    For sources that are not a git checkout. Stable across machines and across
+    a re-download of the same file, which a commit id would not be.
+    """
+    digest = hashlib.sha256()
+    for text in texts:
+        digest.update(text.encode("utf-8"))
+    return digest.hexdigest()[:12]
+
+
 def revision(checkout: pathlib.Path) -> str:
     """The short commit a package checkout is at, so a claim can be re-read."""
     result = subprocess.run(
@@ -845,7 +987,7 @@ def published_pins(board: Board, bsp_dir: pathlib.Path) -> dict[str, list[Claim]
     """Every claim every package covering this board makes, keyed by label."""
     claims: dict[str, list[Claim]] = {}
     for source in board.sources:
-        checkout = bsp_dir / source.package
+        checkout = source.root if source.root is not None else bsp_dir / source.package
         if not checkout.is_dir():
             raise PindefError(
                 f"{checkout} is missing; run "
@@ -870,7 +1012,16 @@ def published_pins(board: Board, bsp_dir: pathlib.Path) -> dict[str, list[Claim]
         # Every path, not just the first: on the nRF52840, SAMD21 and MG24
         # the labels are in one file and the pin table in another, and the
         # answer is not checkable without both.
-        citation = f"{source.package} {', '.join(source.paths)} @ {revision(checkout)}"
+        # **A hand-downloaded file has no commit, and citing one would be a
+        # lie of a particular kind**: `third_party/seeed-pcb/` sits inside this
+        # repository's working tree, so `git rev-parse` there answers with
+        # OpenHardware's OWN head -- a revision that says nothing about the
+        # vendor's file and changes every time this project commits. The
+        # content's own digest is the honest identifier, and it is what a
+        # reader would compare a fresh download against.
+        stamp = (f"sha256:{_digest(texts)}" if source.root is not None
+                 else revision(checkout))
+        citation = f"{source.package} {', '.join(source.paths)} @ {stamp}"
         for label, pin in source.read(tuple(texts)).items():
             claims.setdefault(label, []).append(Claim(pin, citation))
     return claims
@@ -1025,7 +1176,20 @@ def board_report(
             {
                 "name": package,
                 "repository": PACKAGES[package].repository,
-                "revision": revision(bsp_dir / package),
+                # A hand-downloaded source has no commit to name, and naming
+                # this repository's own -- which is what `git rev-parse` in a
+                # directory inside it would answer -- would be a revision that
+                # changes whenever OpenHardware commits and says nothing about
+                # the vendor's file. Its per-pin citations carry a digest of
+                # the file instead; see `_digest`.
+                "revision": (revision(bsp_dir / package)
+                             if PACKAGES[package].cloned
+                             else _digest(tuple(
+                                 (source.root / one).read_text(
+                                     encoding="utf-8", errors="replace")
+                                 for source in board.sources
+                                 if source.package == package and source.root
+                                 for one in source.paths))),
                 "licence": PACKAGES[package].licence,
             }
             for package in packages
@@ -1579,11 +1743,19 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.fetch:
-        for package in PACKAGES.values():
+        clonable = [one for one in PACKAGES.values() if one.cloned]
+        for package in clonable:
             print(f"--- {package.name}: {package.repository}")
             fetch(package)
-        for package in PACKAGES.values():
+        for package in clonable:
             print(f"{package.name:16s} {revision(BSP_DIR / package.name)}  {package.licence}")
+        # Named rather than skipped silently: a source this cannot fetch is
+        # one somebody has to go and get, and a run that says nothing about it
+        # looks like a run that covered everything.
+        for package in PACKAGES.values():
+            if not package.cloned:
+                print(f"{package.name:16s} not cloned: download by hand from "
+                      f"{package.repository}")
         return 0
 
     if args.list:
