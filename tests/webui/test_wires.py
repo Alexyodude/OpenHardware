@@ -1741,23 +1741,32 @@ def test_a_settled_lead_takes_the_shape_its_two_ends_give_it(tmp_path):
     a catenary". It does return, this is the number, and the mechanism was
     measured and declined. `stiffen` carries the reason.
 
-    The manoeuvre is the only one a person can perform on a finished lead.
-    **Its two ends never move again**: `board3d.js` places a part once from the
-    bench slot its index gives, `removePart` splices the list without
-    re-laying out the rest, no pointer handler reaches a part at all, and a
-    wire touching a removed part is discarded rather than left to swing.
-    `moveHead` and `moveTail` are called every frame and hand over the same
-    point every frame -- measured over six hundred frames of the animation
-    loop's own calls, an end moves by exactly 0. What CAN change is what is
-    underneath, because `refreshColliders` runs on every add and every remove.
+    The manoeuvre is the only one a PERSON can perform on a finished lead.
+    `board3d.js` places a part once from the bench slot its index gives,
+    `removePart` splices the list without re-laying out the rest, no pointer
+    handler reaches a part at all, and a wire touching a removed part is
+    discarded rather than left to swing. `moveHead` and `moveTail` are called
+    every frame and hand over the same point every frame -- measured over six
+    hundred frames of the animation loop's own calls, an end moves by exactly
+    0. What CAN change is what is underneath, because `refreshColliders` runs
+    on every add and every remove.
 
-    **One path does move an end, and it is worth naming.** `carvePins` swaps a
-    wire's `post` to the carved pin when a vendor model lands, and the pin sits
-    at the model's own millimetre position while the placeholder sat at layout
-    pixels, so `anchorOf` answers a different point the frame after. It fires
-    once per board load, for a wire made while the model was still being
-    fetched, which is the OH-129 case. Not a gesture, and not something a
-    person can repeat.
+    **Two paths do move an end, and a first draft of this said none did.**
+    `placeModel` raises every pad to the real board's top face, and on the Uno
+    that is 0.68 to 5.12 scene units, so the head of a wire made while the
+    model was still in flight jumps 4.44 -- six times what a part lifts a lead
+    in the fixture below. `carvePins` then swaps that wire's `post` to the
+    carved pin, which sits at the model's own millimetre position. Both fire
+    once per board load, for a wire made during the fetch, which is OH-129's
+    case and is tested at `test_board3d.py`'s own OH-129 test.
+
+    **That is where a bend memory would have had its best case, and it is
+    still not one.** Retention on the pad raise reaches 0.209 units at a rate
+    of 0.01, twenty times the 0.0106 the decline rests on. But a lead cannot
+    be dragged into that shape on purpose, it happens once and never again,
+    and what would be remembered is the bend a pad had before it moved to
+    where it belongs. A shape nobody asked for, kept from a position that no
+    longer exists, is a defect rather than the feature step 3 wanted.
 
     So: a lead hangs, a part arrives under it, the lead drapes over it, the
     part goes. Measured 2026-09-05, a 10-unit lead with the file's own slack:
@@ -1807,15 +1816,25 @@ def test_a_settled_lead_takes_the_shape_its_two_ends_give_it(tmp_path):
 
     **And that is checked rather than hoped for.** The mechanism was patched
     into a copy of `wires.js` -- a per-pair remembered rest length creeping
-    toward the bend the wire has -- and this test's own body run against it.
-    `returnedTo`, against the 1e-6 asserted below:
+    toward the bend the wire has -- and this test's own body run against it,
+    with every one of the assertions below evaluated at each rate:
 
     | rate | 1e-5 | 1e-4 | 3e-4 | 1e-3 | 3e-3 | 0.01 | 0.1 | 1 |
     |---|---|---|---|---|---|---|---|---|
     | returned to | 8.3e-4 | 6.2e-3 | 1.0e-2 | 1.1e-2 | 2.6e-3 | 3.5e-4 | 8.2e-9 | 2.4e-9 |
+    | at a bound of 1e-4 | kill | kill | kill | kill | kill | kill | -- | -- |
+    | at a bound of 1e-3 | -- | kill | kill | kill | kill | -- | -- | -- |
 
     Killed at every rate from 1e-5 to 0.01, which is the whole band in which
     the mechanism does anything.
+
+    **The second row is why the bound is 1e-4 and not the 1e-3 a first draft
+    shipped.** That draft loosened the bound on a review's advice and did not
+    re-derive this table, so it claimed six kills while making four: at 1e-5
+    and at 0.01 the memory is doing real work -- at 0.01 the nodes resting on
+    the part drop from five to three and the stretch there from 0.55% to
+    0.11% -- and the test could not see it. Loosening an assertion without
+    re-running the evidence written beside it is the whole of that mistake.
 
     **The two survivors are a test gap and are recorded as one.** A first draft
     called them equivalent, on the grounds that at 0.1 and 1 the memory tracks
@@ -1942,16 +1961,29 @@ def test_a_settled_lead_takes_the_shape_its_two_ends_give_it(tmp_path):
     # The lead is not longer than it was: a pay-out would be a second memory
     # and would answer this question the wrong way for the wrong reason.
     assert result["paidOut"] == 0, result["paidOut"]
-    # The shape has no memory of the part. The bound is 1e-3 and not the
-    # 6.7e-8 measured: pinning float noise as a requirement would make this
-    # fail on any harmless change to the solver, and 1e-3 is still an order
-    # below the least a plastic set produced at any rate that did anything.
-    assert result["returnedTo"] < 1e-3, (
+    # The shape has no memory of the part. The bound is 1e-4 rather than the
+    # 6.7e-8 measured, because pinning float noise as a requirement makes a
+    # test fail on any harmless change -- and rather than the 1e-3 a first
+    # draft used, which let the mechanism through at two of the eight rates it
+    # was checked against. 1e-4 is 1,490 times the noise and still kills every
+    # rate that does anything. See the table in the docstring.
+    assert result["returnedTo"] < 1e-4, (
         f"the lead came back {result['returnedTo']} from where it hung before "
         f"the part arrived, and the solver has no plastic set, so it should "
         f"come back to itself"
     )
-    assert abs(result["afterAt"] - result["hungAt"]) < 1e-3, result
+    assert abs(result["afterAt"] - result["hungAt"]) < 1e-4, result
+    # Still a wire afterwards, and still. Collected without being asserted in
+    # a first draft, which is the exact pattern a step-2 review already caught
+    # on this ticket.
+    assert result["stretchAfter"] < 0.01, (
+        f"the lead is {result['stretchAfter'] * 100:.2f}% over its rest length "
+        f"once the part has gone, against 0.27% for one that never saw a part"
+    )
+    assert result["energyAfter"] < 1e-9, (
+        f"the lead is still moving at {result['energyAfter']} after eighteen "
+        f"hundred frames, so nothing above was measured on a settled shape"
+    )
     # The fixture that must report nothing.
     assert result["clearDiffers"] is False
     # And the memory a lead DOES have, which is what makes the above a

@@ -399,12 +399,15 @@ export class Rope {
    * `segment * 2` below, and a lead draped over a part reaches 0.28% where it
    * leaves the edge. So the constraint is very nearly satisfied everywhere.
    *
-   * **That 0.30% explains the parity below; it does not prove it**, and a
-   * review was right to stop it carrying the argument. It is the gap between
+   * **That 0.30% explains the parity below; it does not prove it**, and two
+   * reviews were right to stop it carrying the argument. It is the gap between
    * a straight rest and no constraint at all, which is the straightening
    * direction only -- a remembered rest SHORTER than the current bend pushes
    * the other way, which the shipped constraint never does, and nothing
-   * measures that bound. What is measured is the outcome.
+   * measures that bound. The shipped error is small because the rest length
+   * IS the chord; a memory holding 0.8 would carry a 20% error and a force
+   * this constraint never produces. So it is not that a memory cannot be worth
+   * more than the constraint. It is that measurement says it is not.
    *
    * **It is the node count and not the mechanism.** The same memory, on the
    * same manoeuvre, keeps 0.452 units of shape on an 8-node lead, 0.230 on a
@@ -422,13 +425,22 @@ export class Rope {
    *
    * Swept from a rate of 1e-5 to 1 on the only manoeuvre a person can perform
    * -- a part arriving under a settled lead and later being taken away, since
-   * a finished lead's two ends never move again -- **no rate keeps more shape
-   * than it costs.** Kept over cost, at 3e-5, 1e-4, 3e-4, 1e-3, 2e-3, 5e-3
-   * and 1: 0.90, 1.01, 1.18, 1.12, 0.60, 0.17, 0. The best of them is 1.18,
-   * on 0.0106 units kept against 0.0095 units of drape given up by a lead
-   * nobody has touched. That is the argument, and it does not depend on
-   * picking a rate. `test_a_settled_lead_takes_the_shape_its_two_ends_give_it`
-   * is the assertion that says so.
+   * nothing here bends a lead that is connected at both ends -- **no rate
+   * keeps more shape than it costs.** Kept over cost, at 3e-5, 1e-4, 3e-4,
+   * 1e-3, 2e-3, 5e-3 and 1: 0.90, 1.01, 1.18, 1.12, 0.60, 0.17, 0. The best
+   * of them is 1.18, on 0.0106 units kept against 0.0095 units of drape given
+   * up by a lead nobody has touched. That is the argument, and it does not
+   * depend on picking a rate.
+   * `test_a_settled_lead_takes_the_shape_its_two_ends_give_it` is the
+   * assertion that says so, and names the two load-time paths that DO move an
+   * end, neither of them a gesture.
+   *
+   * **And the ticket's own sentence, measured.** "A lead dragged into an arc"
+   * is a drag, which is the one thing a person really does here -- so an
+   * arcing drag off a pad, released, slackened and settled, against the same
+   * lead dragged straight to the same place. It leaves 0.0095 units at every
+   * rate from 3e-3 up, which is the side-effect drift exactly. The manoeuvre
+   * the step is named for produces nothing but the memory's own cost.
    *
    * **The ticket's own trigger is unsafe on top of that.** Its words are
    * "record the rest angle when a wire stops moving", and a wire threaded
