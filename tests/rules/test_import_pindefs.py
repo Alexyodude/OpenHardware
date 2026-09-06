@@ -1834,9 +1834,13 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     assert naming == 365, naming
     assert supplies == 153, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
-    # same debug cluster already carried.
-    assert specific == 42, specific
-    assert generic == 22, (
+    # same debug cluster already carried; 42 until the six SWD pads on the
+    # RP2040, SAMD21 and nRF52840 stopped saying nobody had published them.
+    # Seeed's own wiki page for each names the interface -- the pages were
+    # in the tree the whole time and only `third_party/seeed-pcb/` had been
+    # looked at, which holds no board file for those three parts.
+    assert specific == 48, specific
+    assert generic == 16, (
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
@@ -2289,6 +2293,74 @@ def test_the_spellings_the_board_file_advertises_are_the_ones_the_pattern_takes(
     assert "Ports E through H are not among those spellings" in assumption
     for bad in ("PE2", "PF1", "PG0", "PH2"):
         assert pindefs._CHIP_PIN_NAME.match(bad) is None, bad
+
+
+def test_the_swd_pads_quote_a_vendor_page_that_says_what_they_quote():
+    """Six pads called it unpublished while Seeed's own page named it.
+
+    The RP2040, SAMD21 and nRF52840 SWD pads carried "no board-support
+    package covering this board defines this label", which was true and
+    unhelpful. `third_party/seeed-pcb/` holds no board file for those three
+    parts, so the trace that answered the RP2350's and both Nordics' pads was
+    not available -- and that was taken as the end of it. Seeed publish a wiki
+    page for every one of them, fetched by the same command as the symbol
+    library, and each names SWD among the board's interfaces.
+
+    **The reason quotes those pages, so this reads them back.** A quotation is
+    the easiest kind of claim to get wrong: the OH-170 pass that added this
+    had already shipped a pad name that was in no file and a pin count that
+    was off by thirty-four.
+
+    It also holds the two NOT-claims. The sentence must not say the silicon
+    has no GPIO behind the pad, which is true of some parts and false of
+    others and is stated by no file here; and it must not say SWD sits
+    outside the header pin count, which only the nRF52840's page settles.
+    """
+    docs = ROOT / "third_party" / "seeed-xiao" / "document"
+    if not docs.is_dir():
+        pytest.skip(f"no {docs}; run python tools/get_board_sources.py seeed-xiao")
+
+    quoted = 0
+    for board in ("XIAO-RP2040-SMD", "XIAO-SAMD21-SMD", "XIAO-nRF52840-SMD"):
+        document = json.loads(
+            pindefs.board_path(board).read_text(encoding="utf-8"))
+        for pad in document["pads"]:
+            if pad["label"] not in ("SWDIO", "SWCLK"):
+                continue
+            why = pad["why_null"]
+            assert pad["chip_pin"] is None, (board, pad["label"])
+            assert "the SWD debug interface" in why, (board, why)
+
+            # The page it names must exist and must contain what it quotes.
+            named = re.search(r"([\w.-]+\.md) says '([^']+)'", why)
+            assert named, why
+            pages = [one for one in docs.rglob(named.group(1))]
+            assert len(pages) == 1, (named.group(1), pages)
+            text = pages[0].read_text(encoding="utf-8", errors="replace")
+            assert named.group(2) in text, (named.group(1), named.group(2))
+
+            # And the claim about the packages is true: every file this tool
+            # reads for this board really does mention neither label.
+            for source in pindefs.BOARDS[board].sources:
+                root = (source.root if source.root is not None
+                        else ROOT / "third_party" / "bsp" / source.package)
+                for relative in source.paths:
+                    one = root / relative
+                    if not one.is_file():
+                        continue
+                    body = one.read_text(encoding="utf-8", errors="replace").upper()
+                    assert "SWDIO" not in body and "SWCLK" not in body, (
+                        f"{one} names SWD after all, so this pad can be "
+                        f"resolved and the reason is now wrong")
+
+            # Both boundaries the pages do not settle.
+            assert "NOT claimed: whether the chip has a GPIO" in why
+            assert "dedicated" not in why, (
+                "the other debug reasons say dedicated because a footprint "
+                "showed it; no footprint here does")
+            quoted += 1
+
+    assert quoted == 6, quoted
 
 
 def test_a_generated_reason_reads_the_supplies_the_crystal_and_the_debugger():

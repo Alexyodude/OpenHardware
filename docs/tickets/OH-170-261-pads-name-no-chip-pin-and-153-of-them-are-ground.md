@@ -19,6 +19,9 @@ touches:
 - webui/boards/XIAO-nRF54l15-DIP.json
 - webui/boards/XIAO-nRF54l15-SMD.json
 - webui/boards/XIAO-XIAO STM32C5-SMD.json
+- webui/boards/XIAO-RP2040-SMD.json
+- webui/boards/XIAO-SAMD21-SMD.json
+- webui/boards/XIAO-nRF52840-SMD.json
 - tests/webui/test_pin_view.py
 ---
 

@@ -1384,6 +1384,51 @@ _DEDICATED_DEBUG = (
     "pads {gpio} and names this one {label!r} separately, alongside the "
     "supplies and the crystal, so there is no GPIO number for it to have"
 )
+#: **The three boards Seeed publish no `.kicad_pcb` for.** The RP2350's and
+#: both Nordics' debug pads were answered by tracing the vendor's own board
+#: file; `third_party/seeed-pcb/` holds none for the RP2040, the SAMD21 or the
+#: nRF52840, so there is nothing here to trace and these six pads carried the
+#: generic "no package defines this label" instead.
+#:
+#: What Seeed DO publish for each is a wiki page, fetched into
+#: `third_party/seeed-xiao/document/` by the same command as the symbol
+#: library, and every one of the three names SWD among the board's
+#: interfaces. That is a source, and not having looked at it was the gap.
+#:
+#: **NOT claimed: that the silicon has no GPIO behind the pad.** The other
+#: debug reasons say that because a footprint showed it; nothing here does.
+#: It is true of some parts and false of others, and which is a fact about
+#: the chip that no file in this tree states.
+#:
+#: **Also not claimed: that SWD sits outside the header pin count.** Only the
+#: nRF52840's page is unambiguous, listing `1xSWD` beside `11xGPIO(PWM)`. The
+#: RP2040's and the SAMD21's read either way -- "14 GPIO PINs, on which there
+#: are ... 1 SWD Bonding pad interface" can be parsed with SWD inside or
+#: outside the fourteen. So the sentence claims only what all three support:
+#: the vendor documents the interface and publishes no pin number for it.
+_SWD_DOCUMENTED = (
+    "the SWD debug interface, which Seeed's own page for this board names: "
+    "{where} says {quote!r}. No pin number for it is published anywhere in "
+    "this tree -- no board-support package file this tool reads for this "
+    "board mentions SWDIO or SWCLK, and Seeed publish no board CAD for this "
+    "part as they do for the RP2350 and both nRF54s. NOT claimed: whether "
+    "the chip has a GPIO behind this pad, which no file here states"
+)
+_RP2040_SWD = tuple(
+    (label, _SWD_DOCUMENTED.format(
+        where="XIAO-RP2040.md", quote="1 SWD Bonding pad interface"))
+    for label in ("SWDIO", "SWCLK")
+)
+_SAMD21_SWD = tuple(
+    (label, _SWD_DOCUMENTED.format(
+        where="Seeeduino-XIAO.md", quote="1 SWD pad interface"))
+    for label in ("SWDIO", "SWCLK")
+)
+_NRF52840_SWD = tuple(
+    (label, _SWD_DOCUMENTED.format(
+        where="XIAO_BLE.md", quote="1xSWD"))
+    for label in ("SWDIO", "SWCLK")
+)
 _RP2350_DEBUG = tuple(
     (label, _DEDICATED_DEBUG.format(
         chip="RP2350", where="Seeed's own RP2350.kicad_pcb", which="thirty GPIO",
@@ -1517,11 +1562,13 @@ BOARDS = {
     "XIAO-MG24-DIP": Board("EFR32MG24", _MG24),
     "XIAO-MG24-SMD": Board("EFR32MG24", _MG24, reasons=_MG24_DEBUGGER),
     "XIAO-RP2040-DIP": Board("RP2040", _RP2040, on_board=("LED",)),
-    "XIAO-RP2040-SMD": Board("RP2040", _RP2040, on_board=("LED",)),
+    "XIAO-RP2040-SMD": Board(
+        "RP2040", _RP2040, on_board=("LED",), reasons=_RP2040_SWD
+    ),
     "XIAO-RP2350-DIP": Board("RP2350", _RP2350),
     "XIAO-RP2350-SMD": Board("RP2350", _RP2350, reasons=_RP2350_DEBUG),
     "XIAO-SAMD21-DIP": Board("SAMD21", _SAMD21),
-    "XIAO-SAMD21-SMD": Board("SAMD21", _SAMD21),
+    "XIAO-SAMD21-SMD": Board("SAMD21", _SAMD21, reasons=_SAMD21_SWD),
     # Nobody has published this one. Zephyr has no xiao_stm32c5 board and
     # Seeed has released no core for it, so every pad stays null and the
     # report says why rather than the board going missing from the run.
@@ -1533,7 +1580,7 @@ BOARDS = {
         (seeed_symbol("XIAO-STM32C5-SMD", ("SWDIO", "SWCLK")),),
     ),
     "XIAO-nRF52840-DIP": Board("nRF52840", _NRF52840),
-    "XIAO-nRF52840-SMD": Board("nRF52840", _NRF52840),
+    "XIAO-nRF52840-SMD": Board("nRF52840", _NRF52840, reasons=_NRF52840_SWD),
     "XIAO-nRF54LM20A-DIP": Board(
         "nRF54LM20A", _NRF54LM20A, reasons=_NRF54LM20A_OTHER
     ),
