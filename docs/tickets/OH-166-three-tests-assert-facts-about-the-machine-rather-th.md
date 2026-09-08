@@ -5,6 +5,8 @@ title: Three tests assert facts about the machine rather than the code, and fail
 status: open
 priority: P3
 created: '2026-09-05'
+touches:
+- tests/webui/test_emulator.py
 ---
 
 Three tests in tests/webui assert something that is not a property of this code, and each has now failed for a different session doing something else on the same machine.
@@ -42,3 +44,54 @@ Filed after two independent reviews of OH-162 step 3 each hit one of these while
 Measured properly afterwards, five consecutive runs with a server listening on 8088: **five passes**. So the server is not the cause, deterministic or otherwise, and the single failure that looked like one was a coincidence of load I have not isolated. Item 2 goes back to what item 2 said at filing: a test asserting a wall clock, which fails under load nobody has identified.
 
 Item 1 gained a second sighting on the same day and it is the honest kind. A full `pytest tests` run failed `test_a_failed_build_leaves_nothing_behind`, and a check straight afterwards found ZERO `openhardware-build-*` directories in the system temp -- so the collision was live rather than debris, which is exactly the global namespace this ticket describes and not a leak.
+
+**Note 2026-09-08:** ITEM 2 DONE 2026-09-08. ITEMS 1 AND 3 ARE BLOCKED, and the blocker is this
+board rather than anything about the tests.
+
+ITEM 2, the wall clock. `test_a_state_poll_answers_while_a_build_runs`
+asserted `waited < 3.0`, which is a fact about the machine: three seconds is
+generous on an idle box and not enough on a loaded one, which is exactly how
+it failed for a session doing something else.
+
+It now asserts against the build's OWN duration instead: `waited < built / 4`.
+That is the property the test is actually about. The poll is issued 0.7 s in,
+so a handler serialised behind the build answers when the build does and the
+ratio is near 1 -- OH-136 measured 15.79 s against a build of about the same.
+With the build outside the lock the ratio is near zero. Load moves both
+numbers together and leaves the ratio alone.
+
+Measured by tightening the bound until it printed the values: the poll waited
+0.0018 s of a 4.07 s build, 0.04%, against a bound of 25%. About three orders
+of magnitude between passing and the regression, which is the headroom the
+wall clock did not have.
+
+Demonstrated under the condition it failed under, not asserted: a full
+`pytest tests/webui/test_compile.py` was started, and three seconds into it --
+with real builds running -- the state-poll test was run and passed. 52 tests
+in tests/webui/test_emulator.py pass.
+
+ITEMS 1 AND 3 CANNOT BE DONE FROM THIS TICKET. Both need files another open
+ticket owns:
+
+    webui/compile.py             claimed by OH-161
+    tests/webui/test_compile.py  claimed by OH-161
+    tests/webui/test_board_run.py claimed by OH-161
+
+`rules/ticket-claims.md` §2 is explicit that an open ticket still owns its
+files, and OH-161 is open. Item 1's fix -- give `compile.build` a
+caller-supplied root instead of `tempfile.gettempdir()` -- is a change inside
+`webui/compile.py`, which is precisely the file OH-161 is rewriting to add the
+UART. Two sessions in that file is the thing the claim system exists to stop,
+so this is the system working rather than an obstacle to route around.
+
+NOT DONE and not attempted: item 3 has still never been diagnosed. Nobody has
+looked at whether `ConnectionAbortedError` under load is the accept backlog, a
+port in use, or the client giving up, and this ticket still records that it is
+the one of the three where the failure might be a real defect in what is being
+tested rather than in the test.
+
+ORDER THAT UNBLOCKS THIS: whoever does OH-161 either does item 1 in passing --
+it is four lines in a file they are already editing -- or releases the file,
+after which this ticket can be finished. Item 4, running the whole suite twice
+concurrently, is deliberately left until items 1 and 3 land, because running
+it now would only re-measure item 2.

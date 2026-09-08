@@ -614,6 +614,7 @@ def test_a_state_poll_answers_while_a_build_runs(live_server):
     # second. The latency assertion stays strict on the attempt that counts.
     for _attempt in range(2):
         builder = threading.Thread(target=build)
+        started = time.monotonic()
         builder.start()
         time.sleep(0.7)                  # the survey's own probe point
         began = time.monotonic()
@@ -621,6 +622,7 @@ def test_a_state_poll_answers_while_a_build_runs(live_server):
         waited = time.monotonic() - began
         still_building = builder.is_alive()
         builder.join(timeout=120)
+        built = time.monotonic() - started
         if still_building:
             break
     assert "registers" in state
@@ -628,9 +630,29 @@ def test_a_state_poll_answers_while_a_build_runs(live_server):
         "the build finished before the poll landed on both attempts, so "
         "nothing here measured the lock; a SAMD21 build takes seconds"
     )
-    assert waited < 3.0, (
-        f"a state poll waited {waited:.2f} s during a build; the lock is "
-        f"holding the page hostage again"
+    # **Against the build's own duration, not a wall clock** (OH-166 item 2).
+    # This read `waited < 3.0`, which is a fact about the machine: three
+    # seconds is generous on an idle box and not enough on a loaded one, and
+    # the test failed for a session that was doing something else entirely.
+    #
+    # What the lock regression actually looks like is a RATIO. The poll is
+    # issued 0.7 s in, so if the handler serialises behind the build it
+    # answers when the build does and `waited` is very nearly the whole
+    # build: OH-136 measured 15.79 s against a build of about the same,
+    # which is a ratio near 1. With the build outside the lock the poll
+    # answers in milliseconds, a ratio near zero. Load moves both numbers
+    # together and leaves the ratio alone, which is the property this test
+    # is actually about.
+    #
+    # Measured here 2026-09-08 by tightening the bound until it printed:
+    # the poll waited 0.0018 s of a 4.07 s build, 0.04%. The bound is 25%
+    # and a serialised handler is near 100%, so there are about three
+    # orders of magnitude between passing and the regression -- which is
+    # the headroom the wall clock did not have.
+    assert waited < built / 4, (
+        f"a state poll waited {waited:.2f} s of a {built:.2f} s build "
+        f"({waited / built:.0%} of it); the lock is holding the page "
+        f"hostage again"
     )
     reply = finished.get("reply")
     assert isinstance(reply, dict) and reply.get("ok"), f"the build itself failed: {reply}"
