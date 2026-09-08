@@ -152,7 +152,7 @@
       "pin": null,
       "chip_pin": null,
       "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label",
+      "why_null": "the board's user LED. Two sources name its pin and neither names this pad: Seeed's own nRF54L15.kicad_pcb has a net 'P2.00{slash}USR_LED' carrying the nRF54L15's own P2.00 pad, a green LED and a test point, and Zephyr's xiao_nrf54l15 board states the same pin independently as `led0 = <&gpio2 0>`. NOT written into `chip_pin`: the vendor spells this pad USER_LED in the symbol library the labels come from and USR_LED in the board file, and no file here says those are one pad",
       "x": 123.7,
       "y": 39.4,
       "group": "header-top",

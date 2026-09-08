@@ -1839,8 +1839,12 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # Seeed's own wiki page for each names the interface -- the pages were
     # in the tree the whole time and only `third_party/seeed-pcb/` had been
     # looked at, which holds no board file for those three parts.
-    assert specific == 48, specific
-    assert generic == 16, (
+    # 49 once the nRF54L15's USER_LED stopped saying nobody had published it:
+    # Seeed's board file and Zephyr both put it on P2.00, which the reason
+    # names while `chip_pin` stays null, because the vendor spells that pad
+    # two ways and no file here joins them.
+    assert specific == 49, specific
+    assert generic == 15, (
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
@@ -2293,6 +2297,55 @@ def test_the_spellings_the_board_file_advertises_are_the_ones_the_pattern_takes(
     assert "Ports E through H are not among those spellings" in assumption
     for bad in ("PE2", "PF1", "PG0", "PH2"):
         assert pindefs._CHIP_PIN_NAME.match(bad) is None, bad
+
+
+def test_the_user_led_reports_the_pin_two_sources_name_and_writes_neither():
+    """A pad whose pin is known and deliberately not written.
+
+    Seeed's board file and Zephyr independently put the nRF54L15's user LED
+    on P2.00. The pad is labelled `USER_LED` and the vendor's net says
+    `USR_LED`, and nothing in this tree joins the two spellings -- the net
+    carries the MCU pad, a green LED and a test point, and no castellated pad
+    at all. So the reason names the pin and `chip_pin` stays null.
+
+    **Both halves are the test.** If the pin were written, a reader would take
+    it for something established; if the reason were dropped, a real answer
+    that two vendors agree on would be thrown away. This holds it in between,
+    and re-derives both sources rather than restating them.
+    """
+    pad = next(
+        one for one in json.loads(pindefs.board_path("XIAO-nRF54l15-SMD")
+                                  .read_text(encoding="utf-8"))["pads"]
+        if one["label"] == "USER_LED")
+    assert pad["chip_pin"] is None, "the spellings are still unjoined"
+    assert pad["chip_index"] is None
+    why = pad["why_null"]
+    assert "P2.00{slash}USR_LED" in why and "led0 = <&gpio2 0>" in why
+    assert "NOT written into `chip_pin`" in why
+
+    # Source one: the vendor's own board file, and the three things on it.
+    board = SEEED_PCB / "nRF54L15.kicad_pcb"
+    if not board.is_file():
+        pytest.skip(f"no {board}")
+    text = board.read_text(encoding="utf-8", errors="replace")
+    on_it = [(value, sorted(pads)) for value, by_net in pindefs._footprints(text)
+             for net, pads in by_net.items() if net == "P2.00{slash}USR_LED"]
+    assert len(on_it) == 3, on_it
+    assert ["P2.00"] in [pads for _, pads in on_it], on_it
+    # ...and no exposed pad of this board is among them, which is the gap.
+    assert not any("XIAO" in value.upper() for value, _ in on_it), on_it
+    # The pad's own label appears nowhere in the vendor's file.
+    assert "USER_LED" not in text
+
+    # Source two: Zephyr, stating the same pin without reference to the first.
+    dts = (BSP_DIR / "zephyr" / "boards" / "seeed" / "xiao_nrf54l15"
+           / "xiao_nrf54l15_common.dtsi")
+    if not dts.is_file():
+        pytest.skip(f"no {dts}")
+    body = dts.read_text(encoding="utf-8")
+    assert "gpios = <&gpio2 0 GPIO_ACTIVE_LOW>" in body, (
+        "Zephyr no longer puts led0 on P2.00, so the reason's second source "
+        "is stale and the sentence must be re-read against it")
 
 
 def test_the_swd_pads_quote_a_vendor_page_that_says_what_they_quote():

@@ -1384,6 +1384,33 @@ _DEDICATED_DEBUG = (
     "pads {gpio} and names this one {label!r} separately, alongside the "
     "supplies and the crystal, so there is no GPIO number for it to have"
 )
+#: **Two sources name this pad's pin and it is still not written**, which is
+#: the honest end of a search rather than a shrug. Seeed's own
+#: `nRF54L15.kicad_pcb` calls a net `P2.00{slash}USR_LED` and puts exactly
+#: three things on it: the MCU's own `P2.00` pad, a green LED, and a test
+#: point. Zephyr states the same pin independently -- `led0` in
+#: `boards/seeed/xiao_nrf54l15/xiao_nrf54l15_common.dtsi` is `<&gpio2 0>`,
+#: which is P2.00. Two vendors, one answer, no disagreement to record.
+#:
+#: **The gap is one letter and it is not mine to close.** The pad is labelled
+#: `USER_LED`; the vendor's net says `USR_LED`. No file here joins the two
+#: spellings. `resolve` matches a pad through `alternatives(label)`, so
+#: nothing keyed `USR_LED` reaches this pad, and the net carries no
+#: castellated-pad footprint -- only the LED and a test point -- so which
+#: exposed pad sits on it was never read. Matching them would be a join made
+#: from resemblance, which is the trap OH-26 exists for. So the pin is
+#: reported in words and left out of `chip_pin`, where a reader would take it
+#: for something this tool had established.
+_NRF54L15_USER_LED = (
+    ("USER_LED",
+     "the board's user LED. Two sources name its pin and neither names this "
+     "pad: Seeed's own nRF54L15.kicad_pcb has a net 'P2.00{slash}USR_LED' "
+     "carrying the nRF54L15's own P2.00 pad, a green LED and a test point, "
+     "and Zephyr's xiao_nrf54l15 board states the same pin independently as "
+     "`led0 = <&gpio2 0>`. NOT written into `chip_pin`: the vendor spells "
+     "this pad USER_LED in the symbol library the labels come from and "
+     "USR_LED in the board file, and no file here says those are one pad"),
+)
 #: **The three boards Seeed publish no `.kicad_pcb` for.** The RP2350's and
 #: both Nordics' debug pads were answered by tracing the vendor's own board
 #: file; `third_party/seeed-pcb/` holds none for the RP2040, the SAMD21 or the
@@ -1591,7 +1618,8 @@ BOARDS = {
     ),
     "XIAO-nRF54l15-DIP": Board("nRF54L15", _NRF54L15),
     "XIAO-nRF54l15-SMD": Board(
-        "nRF54L15", _NRF54L15, reasons=_NRF54L15_DEBUG + _MG24_DEBUGGER
+        "nRF54L15", _NRF54L15,
+        reasons=_NRF54L15_DEBUG + _MG24_DEBUGGER + _NRF54L15_USER_LED,
     ),
 }
 
