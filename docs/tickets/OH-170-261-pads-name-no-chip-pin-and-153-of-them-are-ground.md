@@ -2,7 +2,7 @@
 id: OH-170
 title: '261 pads name no chip pin, and 153 of them are ground: the other 108 are three
   separate jobs'
-status: open
+status: done
 priority: P1
 created: '2026-09-06'
 touches:
@@ -372,3 +372,70 @@ STILL OPEN, deliberately:
 Verified after: 70 tests in tests/rules/test_import_pindefs.py, eleven
 non-pytest checkers OK, `--write-boards` prints 25 unchanged. Every guard added
 across this pass was broken on purpose and seen to go red.
+
+**Note 2026-09-08:** CLOSING MEASUREMENT. The ticket set out to move the 108 non-power pads that
+named no chip pin. Measured today over every `webui/boards/*.json`, using the
+suite's own SUPPLY_LABELS rather than a list written here:
+
+    582 pads
+    153  power and ground, correctly null. Unchanged, and always was the
+         largest group; nothing here was ever the work.
+    365  name a chip pin. Was 321 when this ticket was filed.
+     49  null with a reason specific to the pad.
+     15  null with only "no board-support package covering this board
+         defines this label".
+
+So the 108 is now 64, and 49 of those 64 say what they are instead of what
+nobody published. Every pad in the tree sits in one of those four counted
+states, and `test_every_pad_either_names_its_pin_or_says_why_it_has_none`
+holds `(chip_pin is None) == bool(why_null)` across all 582.
+
+THE 15 THAT REMAIN, and neither group is undone work:
+
+  10  MTDI, MTDO, MTMS, MTCK and BOOT on the ESP32-C5 and C6 SMD boards.
+      The values are READ and asserted by
+      `test_the_c5_and_c6_jtag_values_are_held_by_a_test_and_not_only_a_comment`.
+      Writing them changes what `webui/boards/esp32c5.py` and `esp32c6.py`
+      must state, and those belong to OH-161. Deliberately not taken.
+
+   5  MG24_EN; BOOT on the RP2350; nRF54_EN, 54L15_RX20 and 54L15_TX20 on
+      the nRF54L15. No source in this tree names anything for them. All 88
+      nets of `nRF54L15.kicad_pcb` were listed and the three nRF54 labels
+      appear on none of them under any spelling; `MG24_EN` has no net in
+      `MG24.kicad_pcb` and nothing usable in Seeed's MG24 pages; `BOOT` has
+      no net in `RP2350.kicad_pcb` and the vendor page calls it a button,
+      which says nothing about a pin.
+
+WHAT THIS TICKET LEARNED, twice, and it is the same lesson both times.
+"Blocked, there is nothing to read" was recorded three times and was wrong
+twice:
+
+  - STEP 3 said the STM32C5 had no source. Seeed's schematic symbol library
+    was in the tree and named two of its pads, and the board file's own
+    `derivation` pointed straight at it.
+  - The SWD pads on the RP2040, SAMD21 and nRF52840 were called blocked
+    because `third_party/seeed-pcb/` holds no board file for those parts.
+    Seeed's wiki pages for all three were already in the tree, fetched by
+    the same command as the symbol library, and each names the interface.
+
+Both times the conclusion was drawn from one directory. The third case, the
+five above, was reached by listing every net in the file rather than
+searching for the names expected, which is the difference.
+
+ONE ANSWER FOUND AND DELIBERATELY NOT WRITTEN. `USER_LED` on the nRF54L15 is
+P2.00 by two independent sources -- Seeed's `P2.00{slash}USR_LED` net and
+Zephyr's `led0 = <&gpio2 0>`. `chip_pin` stays null because the vendor spells
+that pad `USER_LED` in the symbol library and `USR_LED` in the board file, and
+no file here joins the spellings. Closing that needs a label-alias mechanism
+with one call site, or a join asserted from resemblance. The pin is reported
+in words instead.
+
+NOT CLOSED BY THIS TICKET, and filed rather than forgotten:
+  - OH-161 releases the ten above.
+  - OH-172, `chip_pin` carrying two meanings.
+  - OH-173, per-pad provenance: 12 resolved pads rest on other boards' files
+    and read identically to the rest.
+  - OH-171, the doubled board name.
+
+Gate at close: full suite 2,130 passed / 17 skipped, pytest exit 0 read
+directly; eleven non-pytest checkers OK; `--write-boards` prints 25 unchanged.
