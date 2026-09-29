@@ -6,14 +6,15 @@
 ESP32-C3 (rules/board-claims.md §7, OH-188), made as the QT Py ESP32-C3's
 is (`tests/webui/test_qtpy_esp32c3_board.py`), on another pin.
 
-Its `SDA` is the QT Py's, GPIO5, so an `SDA` blink built for it is the QT
-Py's image byte for byte. The pin watched is `MOSI` instead: GPIO3 in its
-own variant, GPIO7 in the QT Py's and GPIO10 in the XIAO's, and all three
-header pads here. A sketch compiled for this board by name against its own
-variant, `sparkfun_pro_micro_esp32c3/promicro_blink.bin` -- rebuilt here
-byte for byte where the toolchain is installed -- loaded onto the described
-ESP32-C3 and stepped, moves the pad whose `chip_index` is its own `MOSI`,
-and never the pads whose `chip_index` is either sibling's.
+Its `SDA` is a sibling's -- the QT Py's GPIO5 -- so an `SDA` blink built
+for it would be that sibling's image byte for byte. The pin watched is
+`MOSI` instead, which differs from the `MOSI` of every other row on the
+ESP32-C3 in `tools/board_manifest.py` and of the XIAO's table, each read
+from its own variant (`siblings`). A sketch compiled for this board by name
+against its own variant, `sparkfun_pro_micro_esp32c3/promicro_blink.bin` --
+rebuilt here byte for byte where the toolchain is installed -- loaded onto
+the described ESP32-C3 and stepped, moves the pad whose `chip_index` is its
+own `MOSI`, and never a sibling's `MOSI`.
 """
 
 import itertools
@@ -63,6 +64,20 @@ def named(root: pathlib.Path, include: str, label: str) -> int:
     return import_pindefs.read_flat_pins((text,), extras=(label,))[label].index
 
 
+def siblings(label: str) -> dict[str, int]:
+    """`label` in every other row on this board's chip, each from its own
+    variant, and in the chip's XIAO table: what a build against another
+    table would drive instead."""
+    row = board_manifest.row(BOARD)
+    found = {other.board: named(compiler.BOARD_SUPPORT,
+                                f"{other.package}/variants/{other.variant}", label)
+             for other in board_manifest.ROWS
+             if other.chip == row.chip and other.board != BOARD}
+    (xiao,) = compiler.RECIPES[row.chip].extra_includes
+    found[xiao] = named(compiler.PACKAGES, xiao, label)
+    return found
+
+
 def test_the_image_is_this_sketch_built_for_this_board_against_its_own_variant():
     needs_table()
     (include,) = compiler.recipe_for(BOARD).bsp_includes
@@ -80,27 +95,23 @@ def test_the_image_is_this_sketch_built_for_this_board_against_its_own_variant()
 def test_the_image_blinks_the_gpio_this_boards_mosi_names_on_its_own_pad():
     """The pad is the one whose `chip_index` is the GPIO this board's own
     variant calls `MOSI`, and SparkFun's net names that GPIO as its module
-    symbol does: `IOA3/PICO`. The pads whose `chip_index` is the QT Py's or
-    the XIAO's `MOSI` read `input` throughout."""
+    symbol does: `IOA3/PICO`. No sibling's `MOSI` is enabled or driven, and
+    the pads whose `chip_index` is one read `input` throughout."""
     pytest.importorskip("core.riscv32.abi")
     needs_table()
     recipe = compiler.recipe_for(BOARD)
     (own,) = recipe.bsp_includes
-    (qtpy,) = compiler.recipe_for("Adafruit QT Py ESP32-C3").bsp_includes
-    (xiao,) = compiler.RECIPES["ESP32-C3"].extra_includes
     gpio = named(compiler.BOARD_SUPPORT, own, "MOSI")
-    not_gpio = {named(compiler.BOARD_SUPPORT, qtpy, "MOSI"),
-                named(compiler.PACKAGES, xiao, "MOSI")}
-    # Why not `SDA`, as on the QT Py: if the two stop sharing it, so should
-    # this test stop avoiding it.
-    assert (named(compiler.BOARD_SUPPORT, own, "SDA")
-            == named(compiler.BOARD_SUPPORT, qtpy, "SDA"))
-    assert gpio not in not_gpio and len(not_gpio) == 2, (gpio, not_gpio)
+    theirs = siblings("MOSI")
+    assert gpio not in theirs.values(), (gpio, theirs)
+    not_gpio = set(theirs.values())
+    # Why not `SDA`: a sibling shares it. If none does, watch it again.
+    assert named(compiler.BOARD_SUPPORT, own, "SDA") in siblings("SDA").values()
     pads = json.loads((pinmap.BOARDS_DIR / f"{BOARD}.json").read_text(encoding="utf-8"))
     (pad,) = [pad for pad in pads["pads"] if pad["chip_index"] == gpio]
     assert f"IOA{gpio}" in pad["label"].split("/"), pad["label"]
     others = [pad for pad in pads["pads"] if pad["chip_index"] in not_gpio]
-    assert len(others) == 2, others
+    assert others, f"no sibling's MOSI {sorted(not_gpio)} is a pad here to read"
 
     rises, levels, still, driven = [], [], set(), 0
     with api.load_firmware(BOARD, IMAGE.read_bytes(), base=recipe.base) as session:
