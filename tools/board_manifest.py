@@ -131,8 +131,9 @@ ESP32_C6_WROOM_1 = PinTable(
 )
 RP2040_QFN56 = PinTable(
     "QFN56_7MM_REDUCEDEPAD", "RP2040_QFN56",
-    "RP2040 Datasheet build-date 2025-02-20 build-version 3184e62-clean, pp. "
-    "613-615, 5.5.2.2 Pin List, Tables 615 and 617-621: Name against Number",
+    "RP2040 Datasheet build-date 2025-02-20 build-version 3184e62-clean, PDF pp. "
+    "613-615 (printed 612-614), 5.5.2.2 Pin List, Tables 615 and 617-621: Name "
+    "against Number",
     "https://datasheets.raspberrypi.com/rp2040/rp2040-datasheet.pdf",
     "be56fbb75ba0ae9e26558a73c93ac3e75c2ad4e6878d3b6703de2a76d886ea8c",
     57,
