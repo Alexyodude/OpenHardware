@@ -2337,13 +2337,16 @@ def assumption_for(chip: str, described: bool, covered: bool,
     )
     if described and keyed_by:
         # A manifest board (OH-176): the module describes the chip, and its
-        # table is keyed by `keyed_by`'s labels rather than this board's.
+        # table is keyed by `keyed_by`'s labels rather than this board's, so
+        # webui/api.py's `row_levels` reads each pad at its own `chip_index`
+        # (OH-179).
         body = (
             f"webui/boards/{chip.lower().replace('-', '')}.py describes the "
             f"{chip}, and its table is keyed by the labels of "
             f"{', '.join(keyed_by)}, which are not this board's; no level is "
-            f"read through it for any pad here, and `chip_pin` is recorded so "
-            f"that the join is ready, not made."
+            f"read through it for any pad here. The pin view reads a pad's "
+            f"level at its own `chip_index` instead, so a pad with one answers "
+            f"for itself and a pad without one is reported as not modelled."
         )
     elif described:
         body = (

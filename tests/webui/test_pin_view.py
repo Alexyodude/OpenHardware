@@ -823,7 +823,8 @@ def test_a_running_board_whose_module_reads_no_pins_still_says_one_is_running():
         PIN_NAMES={"D0": "PA02", "D1": "PA04"},
     )
     assert not hasattr(named_but_silent, "pin_states")
-    runtime = types.SimpleNamespace(description=named_but_silent)
+    # `board` because `pin_levels` asks whether it is a manifest row (OH-179).
+    runtime = types.SimpleNamespace(board=XIAO, description=named_but_silent)
     assert api.pin_levels(runtime, None) is None, (
         "the stub answers levels after all, so it is not the case this test "
         "is for"
@@ -1002,3 +1003,74 @@ def test_the_named_led_component_is_one_the_shipped_board_model_actually_draws()
             f"the four it does draw are "
             f"{sorted(s for s in solids if s in {'L', 'ON', 'RX', 'TX'})}"
         )
+
+
+# --- a board from tools/board_manifest.py (OH-179) ----------------------------
+#
+# Its chip module's `HEADER` is keyed by a XIAO's labels. Before OH-179 a
+# running Thing Plus listed the XIAO's D0..D10 and LED as its own on-board
+# pins; its levels now come from its own file.
+
+#: A chip's own blink fixture per row chip: any image that runs will do, since
+#: what is asserted is which pads the view lists, not what the image drives.
+CHIP_BLINKS = {"ESP32-C3": "c3blink", "ESP32-C6": "c6blink"}
+
+
+def test_a_running_manifest_board_lists_its_own_pads_and_no_xiao_label():
+    """The ticket's condition, on each row: the view lists the board file's
+    pads in its order and nothing else -- the pilot's 28 -- and no label of
+    the chip module's table; a pad with a `chip_index` has a level and one
+    without is unknown."""
+    pytest.importorskip("core.riscv32.abi")
+    from tools import board_manifest
+
+    blinks = pathlib.Path(__file__).resolve().parents[1] / "riscv32"
+    counts = {}
+    for row in board_manifest.ROWS:
+        module = api.description_for(row.board)
+        own = json.loads((pinmap.BOARDS_DIR / f"{row.board}.json").read_text(encoding="utf-8"))
+        image = (blinks / CHIP_BLINKS[row.chip] / "blink.bin").read_bytes()
+        with api.load_firmware(row.board, image, base=module.IROM) as session:
+            session.step(2000)
+            view = api.pin_view(session.runtime, session.cpu, row.board)
+        pins = [pad["pin"] for pad in view["pads"]]
+        assert pins == [pad["label"] for pad in own["pads"]], row.board
+        assert not set(pins) & set(module.HEADER), (row.board, set(pins) & set(module.HEADER))
+        assert [pad["state"] != "unknown" for pad in view["pads"]] == [
+            pad["chip_index"] is not None for pad in own["pads"]], row.board
+        counts[row.board] = len(pins)
+    assert counts["SparkFun Thing Plus ESP32-C6"] == 28, counts
+
+
+def test_a_manifest_boards_levels_agree_with_its_chip_module_on_every_gpio_both_name():
+    """`api.row_levels` reads the registers the chip module's `pin_states`
+    reads, so on every GPIO a row's pad and the module's table both name,
+    for each register state, the two say the same thing."""
+    from tools import board_manifest
+
+    shared = {}
+    for row in board_manifest.ROWS:
+        module = api.description_for(row.board)
+        runtime = api.Runtime(board=row.board, chip=row.chip, core="riscv32",
+                              description=module, abi=None, machine=None)
+        label_of = {gpio: label for label, gpio in module.HEADER.items()}
+        own = [pad for pad in pinmap.load(row.board).pads if pad.chip_index in label_of]
+        enable, out = module.GPIO + module.GPIO_ENABLE, module.GPIO + module.GPIO_OUT
+        for words in ({}, {enable: 0xFFFFFFFF}, {enable: 0xFFFFFFFF, out: 0xFFFFFFFF},
+                      {enable: 0xAAAAAAAA, out: 0x66666666}):
+            ours = api.row_levels(runtime, _Words(words))
+            theirs = module.pin_states(_Words(words))
+            assert [ours[pad.label] for pad in own] == [
+                theirs[label_of[pad.chip_index]] for pad in own], (row.board, words)
+        shared[row.board] = len(own)
+    assert all(shared.values()), f"a row shares no GPIO with its chip's table: {shared}"
+
+
+def test_a_manifest_pad_is_never_captioned_by_its_chip_modules_table():
+    """Today no row's label shares a part with its chip's table, so this
+    shows the module one that does: the pad keeps its own name and its own
+    file's `chip_pin`, and the module's GPIO99 appears nowhere."""
+    module = types.SimpleNamespace(__name__="webui.boards.fake", PIN_NAMES={"IO6": "GPIO99"})
+    view = api.pad_view("SparkFun Thing Plus ESP32-C6", module, None)
+    pad = next(pad for pad in view["pads"] if pad["label"] == "IO6/SDA")
+    assert (pad["pin"], pad["chip_pin"]) == ("IO6/SDA", "GPIO6")

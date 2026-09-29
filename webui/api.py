@@ -22,6 +22,7 @@ import re
 import types
 import typing
 
+from tools import board_manifest
 from webui import firmware, pinmap, targets
 from webui.boards import catalogue, contract
 from webui.parts.schema import UNCONNECTED, PartSchema, SchemaError
@@ -810,8 +811,44 @@ def pin_levels(runtime: Runtime, cpu: Core) -> dict[str, str] | None:
     -- sending thirty-two coordinates twenty times a second to redraw the same
     board would be the whole difference in the payload.
     """
+    if is_row(runtime.board):
+        return row_levels(runtime, cpu)
     reader = getattr(runtime.description, "pin_states", None)
     return None if reader is None else reader(cpu)
+
+
+def is_row(board: str) -> bool:
+    """A board from `tools/board_manifest.py`, whose chip module's pin table
+    is keyed by another board's labels (rules/board-claims.md §6)."""
+    return any(row.board == board for row in board_manifest.ROWS)
+
+
+def row_levels(runtime: Runtime, cpu: Core) -> dict[str, str] | None:
+    """A row's levels, keyed by its own pad labels, each read at the pad's
+    `chip_index` from the board file (OH-179).
+
+    The chip module's `pin_states` would answer in a XIAO's labels, so this
+    reads the module's `GPIO_ENABLE` and `GPIO_OUT` words itself, `ENABLE`
+    deciding before `OUT` as those modules do; a test holds the two equal
+    on every GPIO both name. `None` where the module names no such words,
+    and a pad with no `chip_index` gets no level.
+    """
+    description = runtime.description
+    words = [getattr(description, name, None) for name in ("GPIO", "GPIO_ENABLE", "GPIO_OUT")]
+    layout = pinmap.load(runtime.board)
+    if None in words or layout is None:
+        return None
+    base, enable_at, out_at = words
+    enable = cpu.read_word(base + enable_at)
+    out = cpu.read_word(base + out_at)
+    levels: dict[str, str] = {}
+    for pad in layout.pads:
+        if pad.chip_index is None:
+            continue
+        mask = 1 << pad.chip_index
+        levels[header_key(pad.label, {})] = ("input" if not enable & mask
+                                             else "high" if out & mask else "low")
+    return levels
 
 
 def description_for(board: str) -> types.ModuleType | None:
@@ -928,8 +965,10 @@ def pad_view(board: str, description: types.ModuleType | None,
     # view is named for**, and the board module derives it from the same table
     # it reads levels through, so a label cannot have one pin here and another
     # there. Absent for a board that does not publish it, which is a missing
-    # caption rather than a missing state.
-    names: dict[str, str] = getattr(description, "PIN_NAMES", {})
+    # caption rather than a missing state. A row's chip module spells another
+    # board's labels, so a row keys each pad by its own and captions it from
+    # its own file (`row_levels`).
+    names: dict[str, str] = {} if is_row(board) else getattr(description, "PIN_NAMES", {})
 
     pads: list[dict[str, object]] = []
     placed: set[str] = set()

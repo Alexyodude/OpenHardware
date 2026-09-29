@@ -648,7 +648,9 @@ def test_the_c6_recipes_variant_numbers_the_pilots_sda_and_scl_as_other_gpios():
 
 def test_no_row_label_keys_its_chips_module_table():
     """Each row's `assumption` says no level is read through its chip
-    module's table for any pad; `webui.api.header_key` is that join."""
+    module's table for any pad; `webui.api.header_key` is that join. It
+    says a level is read at the pad's own `chip_index` instead, which
+    `webui.api.row_levels` does (OH-179)."""
     from webui import api
 
     checked = []
@@ -658,6 +660,7 @@ def test_no_row_label_keys_its_chips_module_table():
             continue
         committed = _committed(row)
         assert "no level is read through it for any pad here" in committed["assumption"]
+        assert "reads a pad's level at its own `chip_index`" in committed["assumption"]
         for pad in committed["pads"]:
             assert api.header_key(pad["label"], names) not in names, (row.board, pad)
         checked.append(row.board)
