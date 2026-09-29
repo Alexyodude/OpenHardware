@@ -24,8 +24,10 @@
  * explanation at the moment gcc says "undefined reference".
  *
  * The pin NAMES are still the vendor's: each recipe puts the board's own
- * `pins_arduino.h` -- plain constants, freestanding -- on the include path,
- * so `D10` means what Seeed says it means without a copy here to drift.
+ * `pins_arduino.h` -- plain constants, and at most ESP-IDF's
+ * `soc/soc_caps.h`, which the variant directory stands in for -- on the
+ * include path, so `D10` means what the vendor says it means without a copy
+ * here to drift.
  */
 
 #ifndef OPENHARDWARE_ARDUINO_H
@@ -33,7 +35,7 @@
 
 #include <stdint.h>
 
-#include "pins_arduino.h"  /* the vendor's names, via extra_includes */
+#include "pins_arduino.h"  /* the vendor's names, via extra_ or bsp_includes */
 #include "oh_board.h"      /* this board's modelled registers, cited */
 
 #define LOW 0
@@ -51,9 +53,33 @@ void setup(void);
 void loop(void);
 
 /* `pin` is the GPIO number, which on an ESP32-family variant is what the
- * vendor's D-constants already are. */
-void pinMode(uint8_t pin, uint8_t mode);
-void digitalWrite(uint8_t pin, uint8_t value);
+ * vendor's D-constants already are.
+ *
+ * A pin at or past the chip's GPIO count, `OH_GPIO_PIN_COUNT` in the
+ * variant's `oh_board.h`, is no GPIO. `wiring.c` writes no bit for one, and
+ * one the compiler knows -- a constant such as an RGB board's
+ * `LED_BUILTIN`, which arduino-esp32 numbers `SOC_GPIO_PIN_COUNT` plus the
+ * LED's pin -- stops the build at the call, where the recipe's hint says
+ * what it is, rather than building a sketch that moves nothing. The two
+ * functions are these inline checks in front of `wiring.c`'s own. */
+void oh_pin_mode(uint8_t pin, uint8_t mode);
+void oh_digital_write(uint8_t pin, uint8_t value);
+void oh_pin_is_past_this_chips_gpio_count(void)
+    __attribute__((error("the pin is at or past this chip's GPIO count")));
+
+static inline __attribute__((always_inline)) void pinMode(uint8_t pin, uint8_t mode) {
+    if (__builtin_constant_p(pin) && pin >= OH_GPIO_PIN_COUNT) {
+        oh_pin_is_past_this_chips_gpio_count();
+    }
+    oh_pin_mode(pin, mode);
+}
+
+static inline __attribute__((always_inline)) void digitalWrite(uint8_t pin, uint8_t value) {
+    if (__builtin_constant_p(pin) && pin >= OH_GPIO_PIN_COUNT) {
+        oh_pin_is_past_this_chips_gpio_count();
+    }
+    oh_digital_write(pin, value);
+}
 
 /* A counted busy loop, because nothing on these boards models a timer.
  * What one millisecond COSTS is the variant's `OH_DELAY_LOOPS_PER_MS`,

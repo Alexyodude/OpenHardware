@@ -13,13 +13,18 @@
 
 #include "Arduino.h"
 
-/* GPIO numbers on these parts fit one 32-bit bank; a pin past it writes
- * nothing rather than someone else's bit. */
+/* A pin at or past the chip's GPIO count, `OH_GPIO_PIN_COUNT` from the
+ * variant's `oh_board.h`, is no GPIO, so it writes no bit: not the bit of a
+ * GPIO the part does not have, and not, past 31, another GPIO's bit through
+ * the shift. Every count here fits the one 32-bit bank these registers are. */
+_Static_assert(OH_GPIO_PIN_COUNT <= 32, "the GPIO registers here are one 32-bit bank");
+
 static uint32_t mask_of(uint8_t pin) {
-    return pin < 32u ? (1u << pin) : 0u;
+    return pin < OH_GPIO_PIN_COUNT ? (1u << pin) : 0u;
 }
 
-void pinMode(uint8_t pin, uint8_t mode) {
+/* `pinMode` and `digitalWrite` in `Arduino.h` call these two. */
+void oh_pin_mode(uint8_t pin, uint8_t mode) {
     if (mode == OUTPUT) {
         OH_REG(OH_GPIO_ENABLE_W1TS) = mask_of(pin);
     } else {
@@ -27,7 +32,7 @@ void pinMode(uint8_t pin, uint8_t mode) {
     }
 }
 
-void digitalWrite(uint8_t pin, uint8_t value) {
+void oh_digital_write(uint8_t pin, uint8_t value) {
     if (value) {
         OH_REG(OH_GPIO_OUT_W1TS) = mask_of(pin);
     } else {

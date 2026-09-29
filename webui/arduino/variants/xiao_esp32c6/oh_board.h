@@ -27,6 +27,13 @@
 
 #define OH_REG(address) (*(volatile uint32_t *)(address))
 
+/* The chip's GPIO count, ESP-IDF's SOC_GPIO_PIN_COUNT from this variant's
+ * `soc/soc_caps.h`, which cites where it was read. The core's `mask_of`
+ * writes no bit for a pin at or past it, and a pin number known when the
+ * sketch compiles that is at or past it does not compile (`Arduino.h`). */
+#include "soc/soc_caps.h"
+#define OH_GPIO_PIN_COUNT SOC_GPIO_PIN_COUNT
+
 /* GPIO base 0x60091000 (reg_base.h:48); OUT at +0x04 with W1TS/W1TC at
  * +0x08/+0x0C; ENABLE at +0x20 with W1TS/W1TC at +0x24/+0x28 -- gpio_reg.h
  * as esp32c6.py quotes it, line numbers and all. */

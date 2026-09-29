@@ -350,6 +350,16 @@ def _openhardware(*, variant: str, march: str, base: int,
               "webui/boards/ description leaves GPIO_IN unmapped on purpose "
               "-- on a driven pin IN follows OUT, and a stored zero would "
               "answer firmware wrongly. The build fails rather than lie.")),
+            # Arduino.h stops a build at a pin number it knows to be past
+            # the chip's GPIO count, and this is the why (OH-185).
+            ("oh_pin_is_past_this_chips_gpio_count",
+             (f"that pin number is at or past this chip's GPIO count, which "
+              f"{header} takes from ESP-IDF's SOC_GPIO_PIN_COUNT, so no GPIO "
+              f"has it. arduino-esp32 numbers a board's RGB LED as "
+              f"SOC_GPIO_PIN_COUNT plus the LED's own pin, so where "
+              f"LED_BUILTIN is such a number it is that RGB LED, which this "
+              f"board's model does not drive. Blink a GPIO the board's pins "
+              f"name instead.")),
             ("millis", "millis " + no_timer),
             ("micros", "micros " + no_timer),
             ("analogWrite",

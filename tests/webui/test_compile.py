@@ -27,6 +27,7 @@ import dataclasses
 import itertools
 import os
 import pathlib
+import re
 
 import pytest
 
@@ -297,6 +298,88 @@ def test_each_rows_verdict_is_the_compilers_own(tmp_path, monkeypatch):
     refused = refused_row(tmp_path, monkeypatch)
     verdict(board_manifest.find(refused))
     assert (True in dict(seen).values()) and (False in dict(seen).values()), seen
+
+
+#: Each ESP32 chip's XIAO, and the two rows whose LED_BUILTIN is an RGB LED,
+#: with the description each runs on.
+PAST_THE_COUNT_BOARDS = {
+    "XIAO-ESP32-C3-DIP": esp32c3,
+    "XIAO-ESP32-C5-DIP": esp32c5,
+    "XIAO-ESP32-C6-DIP": esp32c6,
+    "SparkFun Thing Plus ESP32-C6": esp32c6,
+    "Adafruit QT Py ESP32-C3": esp32c3,
+}
+
+#: Every pin number from the chip's GPIO count up to 255, then the last GPIO,
+#: each made unknown to the compiler so it reaches `wiring.c` at run time.
+PAST_THE_COUNT_SKETCH = """
+static uint8_t unknown(uint8_t pin) { __asm__ volatile("" : "+r"(pin)); return pin; }
+
+void setup() {
+  for (unsigned pin = OH_GPIO_PIN_COUNT; pin < 256; ++pin) {
+    pinMode(unknown(pin), OUTPUT);
+    digitalWrite(unknown(pin), HIGH);
+  }
+  pinMode(unknown(OH_GPIO_PIN_COUNT - 1), OUTPUT);
+  digitalWrite(unknown(OH_GPIO_PIN_COUNT - 1), HIGH);
+}
+
+void loop() {}
+"""
+
+
+def gpio_count(board: str) -> int:
+    """`SOC_GPIO_PIN_COUNT` from the `soc/soc_caps.h` the board's build reads."""
+    header = (compiler.ARDUINO_LITE / compiler.recipe_for(board).variant / "soc"
+              / "soc_caps.h").read_text(encoding="utf-8")
+    (count,) = re.findall(r"^#define SOC_GPIO_PIN_COUNT (\d+)$", header, re.MULTILINE)
+    return int(count)
+
+
+def test_a_pin_past_the_chips_gpio_count_writes_no_bit():
+    """OH-185's review: `mask_of` bounded pins at 32, so a pin past the
+    chip's GPIO count and under 32 -- the QT Py's LED_BUILTIN is 24 on a
+    22-GPIO part -- set a bit no GPIO has. Every pin from the count to 255,
+    at run time, writes nothing to ENABLE or OUT; the last GPIO, written
+    after them, is the only bit set in either."""
+    for board, description in PAST_THE_COUNT_BOARDS.items():
+        if board_manifest.find(board) is not None:
+            needs_table(board)
+        count = gpio_count(board)
+        built = oh_build(board, PAST_THE_COUNT_SKETCH)
+        assert built.ok, (board, built.diagnostics)
+        recipe = compiler.recipe_for(board)
+        with api.load_firmware(board, built.image, base=recipe.base) as session:
+            for _ in range(60_000):
+                session.step()
+            enabled = session.cpu.read_word(description.GPIO + description.GPIO_ENABLE)
+            out = session.cpu.read_word(description.GPIO + description.GPIO_OUT)
+        last = 1 << (count - 1)
+        assert (hex(enabled), hex(out)) == (hex(last), hex(last)), (board, count)
+
+
+def test_a_pin_the_compiler_knows_is_past_the_count_stops_the_build_and_says_why():
+    """An RGB board's LED_BUILTIN is SOC_GPIO_PIN_COUNT plus the LED's pin, so
+    Arduino's stock Blink names no GPIO there: refused at the call, with the
+    hint saying it is an RGB LED this model does not drive, naming the
+    board's own variant header. A XIAO handed its chip's count is refused
+    the same way, and one under it builds."""
+    blink = ("void setup() { pinMode(LED_BUILTIN, OUTPUT); }\n"
+             "void loop() { digitalWrite(LED_BUILTIN, HIGH); delay(1); }\n")
+    for board in ("SparkFun Thing Plus ESP32-C6", "Adafruit QT Py ESP32-C3"):
+        needs_table(board)
+        built = oh_build(board, blink)
+        assert not built.ok, board
+        assert "oh_pin_is_past_this_chips_gpio_count" in built.diagnostics, built.diagnostics
+        assert ("so where LED_BUILTIN is such a number it is that RGB LED, which "
+                "this board's model does not drive") in built.diagnostics, built.diagnostics
+        assert compiler.recipe_for(board).variant in built.diagnostics, built.diagnostics
+    for board in ("XIAO-ESP32-C3-DIP", "XIAO-ESP32-C5-DIP", "XIAO-ESP32-C6-DIP"):
+        count = gpio_count(board)
+        past = oh_build(board, f"void setup() {{ digitalWrite({count}, HIGH); }} void loop() {{}}")
+        assert not past.ok and "at or past this chip's GPIO count" in past.diagnostics, board
+        last = oh_build(board, f"void setup() {{ digitalWrite({count - 1}, HIGH); }} void loop() {{}}")
+        assert last.ok, (board, last.diagnostics)
 
 
 def fake_table(tmp_path, monkeypatch, text: str) -> "compiler.Recipe":

@@ -67,7 +67,9 @@ SECTIONS {
    * `readelf -S` of the sketch object lists `.text`, `.text.setup`,
    * `.text.loop`, `.text.startup._GLOBAL__sub_I_*` and `.init_array` -- no
    * `.fini_array`, and no destructor body anywhere -- while `nm -u` on the
-   * same object names only `pinMode` and `digitalWrite`, so there is no
+   * same object names only `pinMode` and `digitalWrite` (since OH-185,
+   * `oh_pin_mode` and `oh_digital_write`, which those two call inline;
+   * re-measured 2026-09-30), so there is no
    * `__cxa_atexit` or `atexit` registration either. The compiler drops it
    * before the linker can see it, so nothing here is being discarded
    * quietly. (This paragraph first predicted the opposite -- an unresolved
