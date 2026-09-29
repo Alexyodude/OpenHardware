@@ -170,6 +170,29 @@ def test_an_arduino_pico_row_is_checked_against_build_chip():
     assert "build.chip=['rp2040']" in str(caught.value), caught.value
 
 
+def test_a_part_under_a_menu_is_read_once_per_option():
+    """`rpipico2` names no top-level `build.chip`; each `arch` option names one."""
+    table = import_pindefs.BSP_DIR / "arduino-pico" / "boards.txt"
+    if not table.is_file():
+        pytest.skip("SKIPPED: arduino-pico is not fetched; run python tools/import_pindefs.py --fetch")
+    assert board_manifest.chips_building(table, "rpipico2", "build.chip") == {
+        "rp2350", "rp2350-riscv"}
+
+
+# --- only a registered row is written ----------------------------------------
+
+
+def test_a_row_not_in_rows_is_refused_before_anything_is_written(tmp_path, monkeypatch):
+    """import_pindefs registers ROWS as it loads, so a row built elsewhere has
+    no pin registration to fill it: it is refused, naming why."""
+    _fetched(ROWS[0])
+    monkeypatch.setattr(board_manifest, "BOARDS_DIR", tmp_path)
+    with pytest.raises(ManifestError) as caught:
+        board_manifest.write(dataclasses.replace(ROWS[0], board="Nowhere"))
+    assert "only a row in ROWS is written" in str(caught.value), caught.value
+    assert list(tmp_path.iterdir()) == []
+
+
 # --- the committed file is what its row generates ----------------------------
 
 
@@ -188,6 +211,22 @@ def test_every_row_file_is_what_import_board_writes_from_the_row():
         assert [{k: pad[k] for k in fields} for pad in committed["pads"]] == [
             {k: pad[k] for k in fields} for pad in generated["pads"]
         ], row.board
+
+
+def test_a_row_written_into_an_empty_directory_is_the_committed_file(tmp_path, monkeypatch):
+    """`write()` whole, as `python tools/board_manifest.py` runs it, into a
+    directory holding no chip module: the chip's module is read from where
+    the modules are, not from where the file is written. Compared byte for
+    byte, newlines normalised because this worktree checks files out CRLF."""
+    for row in ROWS:
+        _fetched(row)
+    monkeypatch.setattr(board_manifest, "BOARDS_DIR", tmp_path)
+    for row in ROWS:
+        path = board_manifest.write(row)
+        assert path == tmp_path / f"{row.board}.json"
+        committed = (COMMITTED / f"{row.board}.json").read_bytes()
+        assert path.read_bytes().replace(b"\r\n", b"\n") == committed.replace(
+            b"\r\n", b"\n"), row.board
 
 
 def test_every_pad_is_where_the_vendors_board_file_puts_it():
