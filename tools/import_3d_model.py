@@ -93,6 +93,12 @@ import sys
 import urllib.request
 import zipfile
 
+try:
+    from tools import board_manifest
+except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from tools import board_manifest
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
 #: Where fetched archives land. Gitignored -- `.gitignore:26` -- because
@@ -2140,6 +2146,10 @@ def convert_part(part: Part, deflection: float, check: bool) -> int:
 #: for `import_3d_model.py --all`, which writes the index without the composer
 #: having run, and `test_the_two_lists_of_composed_boards_agree` is what stops
 #: the two drifting apart.
+#: **Only the boards that are not manifest rows are written out** (OH-186).
+#: A row in `tools/board_manifest.py` is composed by construction, so its
+#: entry is derived from the row below rather than kept by hand: the KB2040's
+#: row arrived without one here and turned master red.
 #: **An -SMD board gets its own file now** (OH-118): a DIP variant hangs two
 #: header rows below the board and an SMD one does not, so the one file that
 #: served both was right for neither. `-DIP-SMD` is the exception that proves
@@ -2158,9 +2168,14 @@ COMPOSED: tuple[tuple[str, str, str], ...] = (
     ("XIAO-nRF54l15-SMD", "nRF54l15", "XIAO-nRF54l15-SMD"),
     ("XIAO-ESP32-C5-DIP", "ESP32-C5", "XIAO-ESP32-C5-DIP"),
     ("XIAO-ESP32-C5-SMD", "ESP32-C5", "XIAO-ESP32-C5-SMD"),
-    ("SparkFun Thing Plus ESP32-C6", "ESP32-C6", "SparkFun-Thing-Plus-ESP32-C6"),
-    ("Adafruit QT Py ESP32-C3", "ESP32-C3", "Adafruit-QT-Py-ESP32-C3"),
-    ("Adafruit Feather ESP32-C6", "ESP32-C6", "Adafruit-Feather-ESP32-C6"),
+)
+#: Every manifest row whose board file is EAGLE's, which is every row the
+#: composer composes: it refuses any other by name (`manifest_composition`).
+#: The chip is the row's own, which `webui/boards/catalogue.py` also reads.
+COMPOSED += tuple(
+    (row.board, row.chip, row.board.replace(" ", "-"))
+    for row in board_manifest.ROWS
+    if pathlib.PurePosixPath(row.cad).suffix.lower() == ".brd"
 )
 
 
