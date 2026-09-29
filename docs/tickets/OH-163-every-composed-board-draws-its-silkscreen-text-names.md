@@ -8,9 +8,6 @@ created: '2026-09-04'
 touches:
 - tools/model_from_datasheet.py
 - tests/rules/test_import_3d_model.py
-- tools/compose_board_3d.py
-- tests/rules/test_compose_board_3d.py
-- tools/import_3d_model.py
 ---
 
 Twenty-five of twenty-six boards draw a vendor file or a board composed from the vendor's PCB, every placement is drawn or refused with a reason (OH-150), and what a person sees is still short of a photograph in four measurable ways. This ticket is those four, counted from `python tools/compose_board_3d.py --check` on 2026-09-04 (11 composed boards) and from the shipped .glb files.
@@ -50,3 +47,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-09-29:** 2026-09-29: tools/import_3d_model.py also lent to OH-180, for three rows in COMPOSED: test_the_two_lists_of_composed_boards_agree requires COMPOSED to equal the boards in compose_board_3d.COMPOSITIONS, and OH-180 adds the three manifest boards there. Add it back with the other two when OH-180 closes.
 
 **Note 2026-09-30:** 2026-09-30: tools/compose_board_3d.py, tests/rules/test_compose_board_3d.py and tools/import_3d_model.py returned to this ticket; OH-180 is done.
+
+**Note 2026-09-30:** 2026-09-30: tools/compose_board_3d.py, tests/rules/test_compose_board_3d.py and tools/import_3d_model.py lent to OH-186 (master red: the KB2040 is composed by construction and missing from COMPOSED and EXPLAINS) and then OH-187 (passives drawn as the wrong kind), in that order. Return them when OH-187 closes.
