@@ -353,6 +353,20 @@ def test_a_placement_carries_its_own_pads(board):
                                     layers=("F.Cu", "F.Paste", "F.Mask"))
 
 
+def test_a_pads_net_is_read_with_its_number_and_without(tmp_path):
+    """A pad's net is `(net 29 "/GPIO-14")` or `(net "GND")`, and the name is
+    last in both: reading the second field as the name would label a header
+    pad `29`. A pad with no net is on nothing."""
+    text = BOARD.replace(
+        '(size 0.8 0.28)', '(size 0.8 0.28) (net 29 "/GPIO-14")'
+    ).replace('(size 0.3 0.35)', '(size 0.3 0.35) (net "GND")')
+    path = tmp_path / "nets.kicad_pcb"
+    path.write_text(text, encoding="utf-8")
+    got = {p.reference: p for p in read_board(path).placements}
+    assert [pad.net for pad in got["U4"].pads] == ["/GPIO-14", ""]
+    assert [pad.net for pad in got["C13"].pads] == ["GND"]
+
+
 def test_only_the_outline_layer_is_taken_for_the_outline(board):
     """A `gr_line` on `F.SilkS` is not the edge of the board.
 

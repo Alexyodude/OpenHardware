@@ -156,6 +156,10 @@ class Pad:
     #: footprint's**: the RP2350 has 16 pads on `B.Cu` inside front-side
     #: footprints and 24 on `*.Cu`, which is both.
     layers: tuple[str, ...] = ()
+    #: The net the pad is on, which only a board states: a pad in a lone
+    #: `.kicad_mod` is on nothing yet, and so is an unconnected one. `""`
+    #: then. `tools/import_board.py` names a `.kicad_pcb`'s pads by it.
+    net: str = ""
 
     @property
     def front(self) -> bool:
@@ -265,6 +269,9 @@ def _pads_of(tree: list) -> list[Pad]:
         if len(coords) < 2 or len(dims) < 2:
             continue
         where = first(node, "layers")
+        # `(net 29 "/GPIO-14")` or `(net "GND")`: with the net's number or
+        # without it, and the name last in both.
+        net = first(node, "net")
         pads.append(Pad(
             number, kind, coords[0], coords[1], dims[0], dims[1],
             shape=node[3] if isinstance(node[3], str) else "",
@@ -273,6 +280,7 @@ def _pads_of(tree: list) -> list[Pad]:
             # over a footprint's own optional rotation.
             rotation_deg=coords[2] if len(coords) > 2 else 0.0,
             layers=tuple(x for x in (where or [])[1:] if isinstance(x, str)),
+            net=net[-1] if net is not None and len(net) > 1 and isinstance(net[-1], str) else "",
         ))
     return pads
 

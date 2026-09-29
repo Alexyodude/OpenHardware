@@ -9,8 +9,9 @@ import pathlib
 
 import pytest
 
-from tools import eagle
+from tools import eagle, kicad
 from tools.import_board import (
+    MARGIN_MM,
     READERS,
     REFUSED,
     BoardImportError,
@@ -286,9 +287,8 @@ def test_a_pdf_is_refused_naming_what_is_missing(tmp_path):
         read_geometry(paper)
     message = str(caught.value)
     assert "no pad coordinates" in message
-    assert ".brd" in message and ".kicad_mod" in message, (
-        "refusing has to say what would have worked"
-    )
+    for suffix in READERS:
+        assert suffix in message, f"refusing has to say what would have worked: {suffix}"
     assert "board_sources" in message, "and where to find out who publishes one"
 
 
@@ -1016,3 +1016,176 @@ def _brd_uno():
             "python tools/get_board_sources.py arduino-uno for the URL"
         )
     return path
+
+
+# --- merged pads share a net, on both paths (OH-182) -------------------------
+
+
+def test_an_eagle_connect_whose_pads_are_on_two_nets_is_refused_naming_both(tmp_path):
+    """OH-177's review: a connect like '1 1C 2 2C' would make one pin of two
+    pins' pads, keep the first pad's net and drop the other's without a word.
+    One pin is on one net."""
+    path = _synthetic(tmp_path, [("1", 0.0, 0.0), ("2", 0.0, 2.54)])
+    with pytest.raises(BoardImportError) as caught:
+        read_geometry(path, ("J1",), connects={"J1": ("P", (("1", "2"),))})
+    assert ("J1's connect '1 2' makes one pin of pads on different nets: "
+            "1 on NET1, 2 on NET2") in str(caught.value), caught.value
+
+
+# --- a whole KiCad board, as an EAGLE one (OH-182) ----------------------------
+
+#: PCBCUPID's Glyph Mini RP2040, which publishes this board file and no
+#: footprint of the board. Fetched, so absent from a fresh clone.
+GLYPH = REPO / "third_party" / "pcbcupid-glyph-mini-2040" / "glyph-mini-rp2040.kicad_pcb"
+#: The references of the three castellated headers its pins are on.
+GLYPH_HEADERS = ("J3", "J4", "J5")
+
+
+def _glyph() -> pathlib.Path:
+    if not GLYPH.is_file():
+        pytest.skip(
+            f"SKIPPED: {GLYPH.name} is not fetched. Run: "
+            f"python tools/get_board_sources.py pcbcupid-glyph-mini-2040"
+        )
+    return GLYPH
+
+
+def _copper_ends(path: pathlib.Path) -> dict[str, list[tuple[float, float]]]:
+    """Every track end and via of each net, by net name, in the import's frame.
+
+    Off the raw tree rather than the reader: a track names only its net's
+    number, `(net 29)`, and the board's own `(net 29 "/GPIO-14")` table names
+    that. The outline's corner and `MARGIN_MM` move it into the import's frame,
+    and that corner is the one thing taken from `kicad.read_board`.
+    """
+    tree = kicad.parse_sexp(path.read_text(encoding="utf-8"))
+    names = {node[1]: node[2] for node in kicad.children(tree, "net")}
+    min_x, min_y, _, _ = kicad.read_board(path).extent_mm()
+    ends: dict[str, list[tuple[float, float]]] = {}
+    for tag, points in (("segment", ("start", "end")), ("arc", ("start", "end")),
+                        ("via", ("at",))):
+        for node in kicad.children(tree, tag):
+            net = names[kicad.first(node, "net")[1]]
+            for point in points:
+                x, y = kicad._floats(kicad.first(node, point))[:2]
+                ends.setdefault(net, []).append((x - min_x + MARGIN_MM, y - min_y + MARGIN_MM))
+    return ends
+
+
+def test_a_kicad_boards_header_pads_sit_on_their_own_nets_copper():
+    """The placement transform, checked against data it does not use: the
+    KiCad twin of `test_routed_copper_lands_on_the_computed_pad_centres`.
+
+    A track has to end on the pad it connects, and a track's coordinates are
+    the board's own, placed by no footprint. The Glyph Mini's three headers
+    are turned 0, 180 and -90 degrees, so a rotation read wrongly or not at all
+    moves two of them off their copper; and each pin is a hole and a half-hole
+    1.5 mm apart, so keeping the wrong one of the two misses too.
+    """
+    path = _glyph()
+    turns = sorted(placed.rotation_deg for placed in kicad.read_board(path).placements
+                   if placed.reference in GLYPH_HEADERS)
+    assert turns == [-90.0, 0.0, 180.0], turns
+    ends = _copper_ends(path)
+    geometry = read_geometry(path, select=GLYPH_HEADERS)
+    off = [
+        (pad.number, pad.label, round(min(math.hypot(pad.x_mm - x, pad.y_mm - y)
+                                          for x, y in ends[pad.label]), 3))
+        for pad in geometry.pads
+    ]
+    assert len(off) == 23
+    assert [miss for miss in off if miss[2] >= 0.01] == [], off
+
+
+def test_the_glyph_minis_pins_are_one_pad_each_named_after_their_nets():
+    """Each castellated pin is two pads numbered alike, and one pad here. The
+    labels are the nets, `/GPIO-n` and the three supplies; which chip pin a
+    `/GPIO-n` is, is OH-178's work."""
+    geometry = read_geometry(_glyph(), select=GLYPH_HEADERS)
+    gpios = [f"/GPIO-{n}" for n in (*range(16), *range(26, 30))]
+    assert sorted(pad.label for pad in geometry.pads) == sorted(gpios + ["+3V3", "GND", "/5V"])
+    assert "; 23 pads were merged so." in geometry.derivation, geometry.derivation
+
+
+def _kicad_board(tmp_path, pads, rotation=0):
+    """A minimal `.kicad_pcb`: a 20 x 10 mm outline, header J1 at (5, 5) and a
+    resistor R1 beside it. `pads` is J1's `(number, x, y, net)`, in the
+    footprint's own frame. Written as the text KiCad 9 writes, so a reviewer
+    can see it is one."""
+    pad_text = "".join(
+        f'(pad "{number}" thru_hole circle (at {x} {y} {rotation}) (size 1.7 1.7) '
+        f'(drill 1) (layers "*.Cu" "*.Mask") (net {index} "{net}"))'
+        for index, (number, x, y, net) in enumerate(pads, 1)
+    )
+    path = tmp_path / "probe.kicad_pcb"
+    path.write_text(
+        '(kicad_pcb (version 20241229) (generator "pcbnew")'
+        '(gr_rect (start 0 0) (end 20 10) (stroke (width 0.05) (type solid)) '
+        '(layer "Edge.Cuts"))'
+        f'(footprint "Connector:Header" (layer "F.Cu") (at 5 5 {rotation})'
+        f'(property "Reference" "J1") {pad_text})'
+        '(footprint "Resistor_SMD:R_0402" (layer "F.Cu") (at 15 5)'
+        '(property "Reference" "R1")'
+        '(pad "1" smd rect (at 0 0) (size 0.5 0.5) (layers "F.Cu")))'
+        ")",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_pads_one_number_on_one_net_are_one_pad_at_the_first_placed_by_hand(tmp_path):
+    """J1 at (5, 5) turned 90 degrees, worked by hand: KiCad turns a
+    footprint counter-clockwise as drawn, so its pad 2.54 mm below the
+    origin lands 2.54 mm right of it, at (7.54, 5); the 1 mm margin makes
+    that (8.54, 6). Pad 1 is two pads, and it is the first, at (6, 6)."""
+    path = _kicad_board(
+        tmp_path, [("1", 0, 0, "A"), ("1", 1.5, 0, "A"), ("2", 0, 2.54, "B")], rotation=90)
+    geometry = read_geometry(path, select=("J1",))
+    assert {(pad.label, pad.number, pad.x_mm, pad.y_mm) for pad in geometry.pads} == {
+        ("A", "1", 6.0, 6.0), ("B", "2", 8.54, 6.0)}
+    assert "; 1 pads were merged so." in geometry.derivation, geometry.derivation
+
+
+def test_pads_one_number_on_two_nets_are_refused_naming_each(tmp_path):
+    path = _kicad_board(tmp_path, [("1", 0, 0, "A"), ("1", 1.5, 0, "B")])
+    with pytest.raises(BoardImportError) as caught:
+        read_geometry(path, select=("J1",))
+    assert ("J1 numbers 2 pads 1, which makes them one pin, and puts them on "
+            "different nets: pad 1 at (0, 0) on A, pad 1 at (1.5, 0) on B"
+            ) in str(caught.value), caught.value
+
+
+def test_a_kicad_board_reference_not_in_the_file_is_refused_naming_it(tmp_path):
+    path = _kicad_board(tmp_path, [("1", 0, 0, "A")])
+    with pytest.raises(BoardImportError) as caught:
+        read_geometry(path, select=("J1", "J9"))
+    assert ("0 footprints have the reference 'J9', and --select needs exactly "
+            "one. Those with through-hole pads: J1 (1 pads, Header)"
+            ) in str(caught.value), caught.value
+
+
+def test_a_kicad_board_without_select_lists_the_footprints_to_choose_from(tmp_path):
+    path = _kicad_board(tmp_path, [("1", 0, 0, "A")])
+    with pytest.raises(BoardImportError) as caught:
+        read_geometry(path)
+    assert "Name them by reference with --select: J1 (1 pads, Header)" in str(caught.value)
+
+
+def test_a_kicad_board_reference_named_twice_is_refused(tmp_path):
+    path = _kicad_board(tmp_path, [("1", 0, 0, "A")])
+    with pytest.raises(BoardImportError, match="--select names J1 more than once"):
+        read_geometry(path, select=("J1", "J1"))
+
+
+def test_a_kicad_board_footprint_with_no_through_hole_pad_is_refused(tmp_path):
+    path = _kicad_board(tmp_path, [("1", 0, 0, "A")])
+    with pytest.raises(BoardImportError, match="R1 is a R_0402, which has no through-hole pads"):
+        read_geometry(path, select=("R1",))
+
+
+def test_a_kicad_board_takes_no_symbols_and_no_connects(tmp_path):
+    path = _kicad_board(tmp_path, [("1", 0, 0, "A")])
+    with pytest.raises(BoardImportError, match="nothing to join"):
+        read_geometry(path, select=("J1",), symbols=tmp_path / "any.kicad_sym")
+    with pytest.raises(BoardImportError, match="nothing to join"):
+        read_geometry(path, select=("J1",), connects={"J1": ("P", (("1",),))})

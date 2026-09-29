@@ -43,11 +43,13 @@ reads the image's width and height -- so the run says on stderr that the
 file was not made, rather than leaving the name looking like a file.
 
     python tools/import_board.py <board.brd> --select J1
+    python tools/import_board.py <board.kicad_pcb> --select J3 --select J4
     python tools/import_board.py <footprint.kicad_mod> --select <symbol root>
 
-`--select` names the part of the file to read: an EAGLE board places many
-elements and only one of them is the header, and a KiCad symbol library holds
-many symbols and only one names this footprint's pins. Neither is guessed.
+`--select` names the part of the file to read: a board places many elements
+or footprints and only some of them are the header, and a KiCad symbol
+library holds many symbols and only one names this footprint's pins. None of
+it is guessed.
 """
 
 from __future__ import annotations
@@ -254,6 +256,16 @@ def _from_eagle(
                 f"{path}: {element.name}'s pads {unsure} are not each in exactly "
                 f"one of the schematic's connects {[' '.join(p) for p in pins]}"
             )
+        # One pin is on one net. A connect whose pads the board puts on two
+        # would keep the first pad's net and drop the other's without a word.
+        nets = {pad.number: pad.net or "no net" for pad in element.pads}
+        for pads in pins:
+            if len({nets[pad] for pad in pads}) > 1:
+                where = ", ".join(f"{pad} on {nets[pad]}" for pad in pads)
+                raise BoardImportError(
+                    f"{path}: {element.name}'s connect '{' '.join(pads)}' makes "
+                    f"one pin of pads on different nets: {where}"
+                )
         first[element.name] = {pads[0] for pads in pins}
     kept = [
         (element, pad)
@@ -394,11 +406,132 @@ def _symbol_library(footprint: pathlib.Path) -> pathlib.Path:
     )
 
 
+def _from_kicad_board(
+    path: pathlib.Path,
+    select: tuple[str, ...],
+    symbols: pathlib.Path | None,
+    connects: Connects | None,
+) -> Geometry:
+    """Read a whole KiCad board, taking the header pads off the footprints named.
+
+    `select` names them by reference, as it names an EAGLE board's elements,
+    and is always needed: a board places many footprints and which of them is
+    the header is not something to guess.
+
+    **One pin is one pad, and here the board file says which pads are one
+    pin.** KiCad joins a footprint's pads to its symbol's pins by number, so
+    pads that share a number are one pin: a castellated header gives each pin
+    a hole and a half-hole at the edge, numbered alike. They are one pad here,
+    at the first of them in the file. Pads that share a number and sit on
+    different nets are refused, because one pin is on one net.
+
+    A pad is named after its net, as an EAGLE board's is, and a pad on no net
+    keeps its number.
+    """
+    if symbols is not None or connects is not None:
+        raise BoardImportError(
+            f"{path}: --symbols and connects join a footprint's or an EAGLE "
+            f"board's pads to their pins. A .kicad_pcb's pads carry their own "
+            f"nets and numbers, so there is nothing to join."
+        )
+    board = kicad.read_board(path)
+
+    def through(placed: kicad.Placement) -> list[kicad.Pad]:
+        return [pad for pad in placed.pads if pad.kind == "thru_hole"]
+
+    offered = ", ".join(
+        f"{placed.reference} ({len(through(placed))} pads, {placed.name})"
+        for placed in board.placements
+        if through(placed)
+    )
+    if not select:
+        raise BoardImportError(
+            f"{path}: which footprints carry the header is not something to "
+            f"guess. Name them by reference with --select: {offered}"
+        )
+    repeated = sorted({name for name in select if select.count(name) > 1})
+    if repeated:
+        raise BoardImportError(
+            f"{path}: --select names {', '.join(repeated)} more than once. "
+            f"A footprint is placed once and its pads are read once."
+        )
+    chosen = []
+    for name in select:
+        placed = [one for one in board.placements if one.reference == name]
+        if len(placed) != 1:
+            raise BoardImportError(
+                f"{path}: {len(placed)} footprints have the reference {name!r}, "
+                f"and --select needs exactly one. Those with through-hole pads: "
+                f"{offered}"
+            )
+        if not through(placed[0]):
+            raise BoardImportError(
+                f"{path}: {name} is a {placed[0].name}, which has no "
+                f"through-hole pads"
+            )
+        chosen.append(placed[0])
+
+    kept: list[tuple[kicad.Placement, kicad.Pad]] = []
+    for placed in chosen:
+        pins: dict[str, list[kicad.Pad]] = {}
+        for pad in through(placed):
+            pins.setdefault(pad.number, []).append(pad)
+        for number, pads in pins.items():
+            if len({pad.net for pad in pads}) > 1:
+                where = ", ".join(
+                    f"pad {number} at ({pad.x_mm:g}, {pad.y_mm:g}) on "
+                    f"{pad.net or 'no net'}"
+                    for pad in pads
+                )
+                raise BoardImportError(
+                    f"{path}: {placed.reference} numbers {len(pads)} pads "
+                    f"{number}, which makes them one pin, and puts them on "
+                    f"different nets: {where}"
+                )
+            kept.append((placed, pads[0]))
+    merged = sum(len(through(placed)) for placed in chosen) - len(kept)
+
+    min_x, min_y, max_x, max_y = board.extent_mm()
+    entries = []
+    for placed, pad in kept:
+        # Placed by the footprint's own position, rotation and side, as
+        # tools/kicad.py places the footprint's graphics. KiCad's Y already
+        # runs down, so nothing is flipped.
+        x, y = kicad._on_board(placed, pad.x_mm, pad.y_mm)
+        entries.append(
+            (pad.net or pad.number, pad.number, x - min_x + MARGIN_MM, y - min_y + MARGIN_MM)
+        )
+    named = ", ".join(f"{placed.reference} ({placed.name})" for placed in chosen)
+    pins_rule = (
+        f"Where a footprint gives several pads one number, they are one pin "
+        f"and one pad here, at the first of them in the file; {merged} pads "
+        f"were merged so. " if merged else ""
+    )
+    return Geometry(
+        name=path.stem,
+        width_mm=max_x - min_x + 2 * MARGIN_MM,
+        height_mm=max_y - min_y + 2 * MARGIN_MM,
+        pads=_grouped(entries),
+        derivation=(
+            f"Generated by tools/import_board.py from the vendor's own KiCad "
+            f"board file, {'footprint' if len(chosen) == 1 else 'footprints'} "
+            f"{named}. Pad centres are the coordinates the file states, in "
+            f"millimetres, placed by each footprint's position and rotation "
+            f"against a {max_x - min_x:.2f} x {max_y - min_y:.2f} mm outline "
+            f"taken from Edge.Cuts, plus a {MARGIN_MM} mm margin. Pad names are "
+            f"the net each pad is on. {pins_rule}Nothing here was measured off "
+            f"an image."
+        ),
+        declared_name=None,
+    )
+
+
 #: Suffix to reader. Short on purpose: these are the formats a machine can
-#: take pad coordinates out of, and there are two.
+#: take pad coordinates out of.
 READERS = {
     ".brd": _from_eagle,
     ".kicad_mod": _from_kicad,
+    ".kicad_pcb": _from_kicad_board,
 }
 
 #: Suffix to the reason it is refused. Longer than `READERS`, which is the
@@ -433,7 +566,7 @@ _NOT_MEASURED = (
     "Arduino Uno's had to be done that way by hand, and every board file in "
     "this repository carries a derivation ending 'Nothing here was measured "
     "off an image.' What is needed instead is a file with coordinates in it: "
-    "EAGLE .brd or KiCad .kicad_mod. tools/board_sources.py records which "
+    "EAGLE .brd, KiCad .kicad_pcb or .kicad_mod. tools/board_sources.py records which "
     "vendors publish one."
 )
 
@@ -448,10 +581,13 @@ def read_geometry(
 
     `select` is a tuple because EAGLE needs several -- see `_from_eagle`. It
     stays one parameter rather than two because both readers are answering the
-    same question, "which part of this file is the header"; KiCad simply has
-    one answer, and `_from_kicad` says so rather than quietly using the first.
+    same question, "which part of this file is the header"; a KiCad footprint
+    simply has one answer, and `_from_kicad` says so rather than quietly using
+    the first. A KiCad board's answer is several references, as an EAGLE
+    board's is several elements.
 
-    `connects`, for an EAGLE board, makes each pin one pad; see `Connects`.
+    `connects`, for an EAGLE board, makes each pin one pad; see `Connects`. A
+    KiCad board needs none: its pads say which are one pin by their number.
     """
     # **A bare string is refused rather than iterated.** `select` took one name
     # until 2026-08-27; a caller that still passes `"J1"` would otherwise be
@@ -561,7 +697,8 @@ def main() -> int:
         metavar="NAME",
         help="EAGLE: which placed element carries the header. Repeat it for a "
         "board whose pads are split across several, as the Arduino Uno's are. "
-        "KiCad: the symbol root to take pin names from, once",
+        "KiCad board: a footprint reference carrying the header, repeated the "
+        "same way. KiCad footprint: the symbol root to take pin names from, once",
     )
     parser.add_argument(
         "--symbols", type=pathlib.Path, help="KiCad symbol library (.kicad_sym)"
