@@ -206,6 +206,8 @@ BOARD_FIRMWARE_VERIFIED: dict[str, str] = {
     "SparkFun Thing Plus ESP32-C6": "tests/webui/test_sparkfun_esp32c6_board.py",
     "Adafruit QT Py ESP32-C3": "tests/webui/test_qtpy_esp32c3_board.py",
     "SparkFun Pro Micro ESP32-C3": "tests/webui/test_sparkfun_pro_micro_esp32c3_board.py",
+    "SparkFun Qwiic Pocket ESP32-C6":
+        "tests/webui/test_sparkfun_qwiic_pocket_esp32c6_board.py",
 }
 
 #: What each instruction set would need before a core for it could be trusted.

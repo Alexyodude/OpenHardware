@@ -301,5 +301,16 @@ The SparkFun Pro Micro ESP32-C3 (OH-188) holds
 shape: its `SDA` pad is `IO5/SDA/I2S_SDI/MTDI`, and the GPIO the XIAO's
 `SDA` names is this board's `SCL` pad, which the test holds at `input`
 throughout.
+
+The pin watched need not be `SDA`. It has to be one the board's own
+variant names, on a header pad, at a GPIO other than the one the XIAO's
+variant gives the same name, so that a build against the wrong table moves
+another pad or none. The SparkFun Qwiic Pocket ESP32-C6's `SDA` reaches no
+header pad and its `TX` is the XIAO's, so
+`tests/webui/test_sparkfun_qwiic_pocket_esp32c6_board.py` watches `MOSI`:
+the pad whose `chip_index` is its own variant's `MOSI` moves, and the pad
+whose `chip_index` is the XIAO's reads `input` throughout. The test asserts
+both reasons for not watching `SDA` or `TX`, so it fails if either stops
+being true.
 `test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence`
 pins every entry.

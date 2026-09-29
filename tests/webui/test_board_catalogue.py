@@ -312,14 +312,17 @@ def test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence():
     move on the pad its board file labels `SDA`. The SparkFun Thing Plus
     ESP32-C6 and the QT Py ESP32-C3 joined under OH-185, once their own
     tables compiled here, each with its own test of the same shape. The
-    SparkFun Pro Micro ESP32-C3 joined under OH-188 the same way.
+    SparkFun Pro Micro ESP32-C3 joined under OH-188 the same way, and the
+    SparkFun Qwiic Pocket ESP32-C6 watching `MOSI`, since its `SDA` reaches
+    no header pad.
     """
     from tools import board_manifest
 
     rows = {r.board for r in board_manifest.ROWS}
     proven = {b.name for b in catalogue.catalogue() if b.firmware_verified and b.name in rows}
     assert proven == {"Adafruit Feather ESP32-C6", "SparkFun Thing Plus ESP32-C6",
-                      "Adafruit QT Py ESP32-C3", "SparkFun Pro Micro ESP32-C3"}
+                      "Adafruit QT Py ESP32-C3", "SparkFun Pro Micro ESP32-C3",
+                      "SparkFun Qwiic Pocket ESP32-C6"}
     assert set(catalogue.BOARD_FIRMWARE_VERIFIED) == proven
 
 
