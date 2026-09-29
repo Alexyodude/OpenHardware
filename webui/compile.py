@@ -715,10 +715,18 @@ def compiled_gaps(recipe: Recipe, tools: pathlib.Path) -> tuple[list[str], str]:
             ("c", "gcc", (), f"answered by {gcc} -fsyntax-only, after {gxx} passed it")):
         command = (_tool(tools, recipe, tool), "-fsyntax-only", "-x", language,
                    *recipe.flags, *extra, *includes, str(core / "Arduino.h"))
-        errors = _syntax_errors(command, read)
+        try:
+            errors = _syntax_errors(command, read)
+        except _NoAnswer as exc:
+            return [str(exc)], f"not answered by {recipe.prefix}{tool} -fsyntax-only"
         if errors:
             return list(errors), answered
     return [], f"answered by {gxx} and {gcc} -fsyntax-only"
+
+
+class _NoAnswer(Exception):
+    """The compiler timed out (124) or was not there (127): what it said is
+    not about the table."""
 
 
 #: Each command's last answer: the files it read, each as (path, mtime, size)
@@ -739,22 +747,46 @@ def _stamps(paths: tuple[str, ...]) -> tuple[tuple[str, int, int], ...]:
     return tuple(out)
 
 
+#: A header the compiler looked for and did not find: the file that
+#: included it, and the name it was included by.
+_NOT_FOUND = re.compile(r"^(.+?):\d+:\d+: fatal error: (.+?): ", re.MULTILINE)
+
+
+def _where_it_would_appear(command: tuple[str, ...], stderr: str) -> list[str]:
+    """For each header `command` did not find, in the including file's own
+    directory and in each `-I` directory, the deepest directory there is on
+    the way to it: the one whose entries change when it is added."""
+    searched = [pathlib.Path(arg[2:]) for arg in command if arg.startswith("-I")]
+    out = []
+    for includer, name in _NOT_FOUND.findall(stderr):
+        for root in (pathlib.Path(includer).parent, *searched):
+            at = (root / name).parent
+            while at != root and not at.is_dir():
+                at = at.parent
+            if at.is_dir():
+                out.append(str(at))
+    return out
+
+
 def _syntax_errors(command: tuple[str, ...],
                    read: tuple[pathlib.Path, ...]) -> tuple[str, ...]:
     """`command`'s errors, each `file:line: what`, asked again only when a
-    file it read has changed.
+    file it read, or a directory a header it did not find would be added
+    to, has changed.
 
     `/api/boards` asks of every board on every request. The files are the
     compiler's own list (`-MD -MF -`) and `read`, which a compile that
-    stops at a missing header leaves out of it. A header that was missing
-    and is added later is not in either list, so it is seen after a
-    restart. A compiler that timed out (124) or was not there (127) gave no
-    answer, so none is kept.
+    stops at a missing header leaves out of it; the directories are
+    `_where_it_would_appear`'s. A compiler that timed out (124) or was not
+    there (127) gave no answer, so none is kept, and `_NoAnswer` says so
+    rather than its words standing as the table's errors.
     """
     held = _ASKED.get(command)
     if held is not None and _stamps(tuple(p for p, _, _ in held[0])) == held[0]:
         return held[1]
     done = _run((*command, "-MD", "-MF", "-"), time.monotonic() + TIMEOUT_SECONDS)
+    if done.returncode in (124, 127):
+        raise _NoAnswer(f"{command[0]} exited {done.returncode}: {done.stderr.strip()}")
     errors: tuple[str, ...] = ()
     if done.returncode != 0:
         errors = tuple(dict.fromkeys(
@@ -762,11 +794,11 @@ def _syntax_errors(command: tuple[str, ...],
             for where, line, what in _ERROR.findall(done.stderr)))
         errors = errors or (f"{command[0]} exited {done.returncode} naming no "
                             f"error: {done.stderr.strip()}",)
-    if done.returncode not in (124, 127):
-        body = done.stdout.replace("\\\n", " ").split(": ", 1)[-1]
-        listed = [w.replace("\\ ", " ") for w in re.split(r"(?<!\\)\s+", body.strip()) if w]
-        paths = tuple(dict.fromkeys([*listed, *(str(p) for p in read)]))
-        _ASKED[command] = (_stamps(paths), errors)
+    body = done.stdout.replace("\\\n", " ").split(": ", 1)[-1]
+    listed = [w.replace("\\ ", " ") for w in re.split(r"(?<!\\)\s+", body.strip()) if w]
+    paths = tuple(dict.fromkeys([*listed, *(str(p) for p in read),
+                                 *_where_it_would_appear(command, done.stderr)]))
+    _ASKED[command] = (_stamps(paths), errors)
     return errors
 
 

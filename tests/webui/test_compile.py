@@ -352,20 +352,80 @@ def test_a_header_the_table_includes_is_asked_again_when_it_changes(
 
 
 def test_a_compiler_that_was_not_there_or_timed_out_is_asked_again(tmp_path, monkeypatch):
-    """127 and 124 are no answer about the table, so neither is kept."""
+    """127 and 124 are no answer about the table, so neither is kept, and
+    the refusal says nothing answered (OH-183's review): from g++, and from
+    gcc once g++ has passed the table."""
     try:
         compiler.toolchain_root(compiler.RECIPES["ESP32-C6"])
     except compiler.ToolchainMissing as exc:
         pytest.skip(str(exc))
     run = compiler._run
     for code in (127, 124):
-        recipe = fake_table(tmp_path / str(code), monkeypatch, "static const uint8_t A = 1;\n")
-        monkeypatch.setattr(compiler, "_run", lambda command, deadline, code=code: (
-            compiler.subprocess.CompletedProcess(command, code, "", f"exit {code}")))
-        (gap,) = compiler.unmet(recipe)[0]
-        assert f"exited {code} naming no error" in gap, gap
-        monkeypatch.setattr(compiler, "_run", run)
-        assert compiler.unmet(recipe)[0] == [], code
+        for tool in ("g++", "gcc"):
+            recipe = fake_table(tmp_path / f"{code}{tool}", monkeypatch,
+                                "static const uint8_t A = 1;\n")
+
+            def silent(command, deadline, code=code, tool=tool):
+                if pathlib.Path(command[0]).stem.endswith(tool):
+                    return compiler.subprocess.CompletedProcess(command, code, "", f"exit {code}")
+                return run(command, deadline)
+
+            monkeypatch.setattr(compiler, "_run", silent)
+            path = compiler._tool(compiler.toolchain_root(recipe), recipe, tool)
+            assert compiler.unmet(recipe) == (
+                [f"{path} exited {code}: exit {code}"],
+                f"not answered by riscv32-esp-elf-{tool} -fsyntax-only"), (code, tool)
+            monkeypatch.setattr(compiler, "_run", run)
+            assert compiler.unmet(recipe)[0] == [], (code, tool)
+
+
+def test_a_header_not_found_is_asked_for_again_once_it_is_added(tmp_path, monkeypatch):
+    """Review of OH-183: a header the compiler did not find is on no list of
+    what it read, so where it would be added is stamped instead -- in the
+    including file's own directory and in each `-I` directory, under a
+    subdirectory there already or not yet there."""
+    try:
+        compiler.toolchain_root(compiler.RECIPES["ESP32-C6"])
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    monkeypatch.setattr(compiler, "_ASKED", {})
+    both = "answered by riscv32-esp-elf-g++ and riscv32-esp-elf-gcc -fsyntax-only"
+    inner = '#include "inner/second.h"\n'
+    cases = (  # the table, the missing header, and where it is added
+        ('#include "extra.h"\n', "extra.h", "extra.h"),
+        ('#include "new/extra.h"\n', "new/extra.h", "new/extra.h"),
+        ('#include "old/extra.h"\n', "old/extra.h", "old/extra.h"),
+        (inner, "third.h", "inner/third.h"),     # beside the file including it
+        (inner, "third.h", "third.h"),           # on an -I directory only
+    )
+    for index, (table, missing, added) in enumerate(cases):
+        recipe = fake_table(tmp_path / str(index), monkeypatch, table)
+        here = tmp_path / str(index) / "pkg" / "variants" / "fake"
+        (here / "old").mkdir()
+        (here / "inner").mkdir()
+        (here / "inner" / "second.h").write_text('#include "third.h"\n', encoding="utf-8")
+        (gap,), _ = compiler.unmet(recipe)
+        assert f"{missing}: No such file" in gap, (added, gap)
+        (here / added).parent.mkdir(exist_ok=True)
+        (here / added).write_text("static const uint8_t A = 1;\n", encoding="utf-8")
+        assert compiler.unmet(recipe) == ([], both), added
+
+
+def test_a_table_that_stopped_at_a_missing_header_is_asked_again_when_it_changes(
+        tmp_path, monkeypatch):
+    """A compile that stops at a missing header lists nothing it read, so
+    the table and `Arduino.h` are stamped as well (OH-183's review)."""
+    try:
+        compiler.toolchain_root(compiler.RECIPES["ESP32-C6"])
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    monkeypatch.setattr(compiler, "_ASKED", {})
+    recipe = fake_table(tmp_path, monkeypatch, '#include "gone.h"\n')
+    (gap,), _ = compiler.unmet(recipe)
+    assert "gone.h: No such file" in gap, gap
+    fake_table(tmp_path, monkeypatch, "static const uint8_t A = FROM_THE_EDIT;\n")
+    (gap,), _ = compiler.unmet(recipe)
+    assert "FROM_THE_EDIT" in gap, gap
 
 
 def test_a_compiler_that_cannot_be_run_refuses_that_board_and_nothing_else(monkeypatch):
