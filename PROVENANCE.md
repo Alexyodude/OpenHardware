@@ -139,8 +139,11 @@ as every XIAO's come from its own packages.
 **Position:** the same as 2b. What is kept is where each header pad of a real
 board sits, what the vendor named its net, and which GPIO a label means.
 
-**Risk:** low. `source.file` names the drawing, so every value can be re-read
-from it.
+**Risk:** low. Each value can be re-read from where it came from: the pads and
+their labels from the drawing `source.file` names, each `chip_pin` from the
+variant `pindefs.packages` names at its revision, and the three reasons from
+SparkFun's `Hardware/Thing_Plus_ESP32_C6.sch`, which
+`tests/rules/test_board_manifest.py` reads.
 
 ---
 
