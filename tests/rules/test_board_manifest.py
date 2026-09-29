@@ -372,6 +372,26 @@ def test_every_other_fact_in_the_pilots_reasons_is_read_off_its_schematic():
             "of the WS2812 D5") in reasons["LED_DO"]
 
 
+def test_the_c6_recipes_variant_numbers_the_pilots_sda_and_scl_as_other_gpios():
+    """rules/board-claims.md §6: built with the variant the ESP32-C6 recipe
+    reads, the pilot's `SDA` and `SCL` would be other GPIOs than its own
+    variant names."""
+    from webui import compile as compiler
+
+    row = ROWS[0]
+    _fetched(row)
+    (include,) = compiler.RECIPES[row.chip].bsp_includes
+
+    def sda_scl(variant):
+        text = (variant / "pins_arduino.h").read_text(encoding="utf-8", errors="replace")
+        pins = import_pindefs.read_flat_pins((text,), extras=("SDA", "SCL"))
+        return pins["SDA"].index, pins["SCL"].index
+
+    theirs = sda_scl(compiler.BOARD_SUPPORT / include)
+    ours = sda_scl(import_pindefs.BSP_DIR / row.package / "variants" / row.variant)
+    assert theirs[0] != ours[0] and theirs[1] != ours[1], (theirs, ours)
+
+
 def test_no_row_label_keys_its_chips_module_table():
     """Each row's `assumption` says no level is read through its chip
     module's table for any pad; `webui.api.header_key` is that join."""
