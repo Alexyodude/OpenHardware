@@ -2,12 +2,14 @@
 id: OH-186
 title: 'Every manifest row is composed by construction: the KB2040 made whole, and
   the importer''s list derived rather than hand-kept'
-status: in-review
+status: in-progress
 priority: P1
 created: '2026-09-30'
 touches:
 - docs/tickets/OH-186-*
 - tools/import_3d_model.py
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
 ---
 
 Part of OH-174. MASTER IS RED ON TWO TESTS BECAUSE OF THIS. Since OH-180 every manifest row is composed by construction, and OH-181 added the Adafruit KB2040 row, so the composer now composes it while `import_3d_model.COMPOSED` and the composer tests' `EXPLAINS` do not name it: test_the_two_lists_of_composed_boards_agree and test_each_board_explains_the_parts_it_leaves_off fail on master at 9f60dfd. Its model cell reads `footprint:no source`. Its vendor publishes an EAGLE `.brd` (CC BY-SA 3.0, fetched by the registry), which is the case the composer already handles for three manifest boards and the Uno.
