@@ -203,6 +203,10 @@ class Element:
     #: the one thing on the drawing that does not. See
     #: `compose_board_3d.mark_miss`, and `_silk_mark` for what counts as one.
     mark: tuple[float, float] | None = None
+    #: The element's `value`. The package alone can mislead: Adafruit's
+    #: Feather ESP32-C6 places its module as package `ESP32-PICO-MINI`, value
+    #: `ESP32-C6-MINI_MINI`.
+    value: str | None = None
 
     def pads_of(self, kind: str) -> tuple[Pad, ...]:
         return tuple(pad for pad in self.pads if pad.kind == kind)
@@ -501,16 +505,17 @@ def _silk_mark(package: ET.Element) -> tuple[float, float] | None:
             sum(m[1] for m in marks) / len(marks))
 
 
-def _open(path: pathlib.Path, wanted: str) -> ET.Element:
+def _open(path: pathlib.Path, wanted: str, text: str | None = None) -> ET.Element:
     """The `<eagle>` root of `path`, or an error saying what the file is instead.
 
     Shared by the board and schematic readers because the way an EAGLE file
     fails to be one is the same either way, and the message that matters --
     naming the binary formats that share these extensions — should not exist
-    in two versions that can drift apart.
+    in two versions that can drift apart. `text`, where given, is parsed in
+    place of the file, and `path` only names it.
     """
     try:
-        tree = ET.parse(path)
+        root = ET.fromstring(text) if text is not None else ET.parse(path).getroot()
     except ET.ParseError as exc:
         raise EagleError(
             f"{path}: not XML, so not an EAGLE 6-or-later {wanted} ({exc}). "
@@ -520,7 +525,6 @@ def _open(path: pathlib.Path, wanted: str) -> ET.Element:
     except OSError as exc:
         raise EagleError(f"{path}: {exc}") from exc
 
-    root = tree.getroot()
     if root.tag != "eagle":
         raise EagleError(
             f"{path}: XML, but the root element is <{root.tag}>, not <eagle>"
@@ -606,8 +610,8 @@ def _ink(board: ET.Element, elements: list[Element],
     return tuple(strokes), tuple(sorted(unread.items()))
 
 
-def read_board(path: pathlib.Path) -> Board:
-    """Read one EAGLE `.brd`.
+def read_board(path: pathlib.Path, text: str | None = None) -> Board:
+    """Read one EAGLE `.brd`, or `text` already read from it.
 
     Refuses anything that is not EAGLE XML **by name**. The extension is not
     enough: Cadence Allegro writes `.brd` too, and the Raspberry Pi Pico
@@ -615,7 +619,7 @@ def read_board(path: pathlib.Path) -> Board:
     would fail somewhere deep with a message about byte 0, so the check is up
     front and says which format was found instead.
     """
-    root = _open(path, "board")
+    root = _open(path, "board", text)
     board = root.find("drawing/board")
     if board is None:
         raise EagleError(
@@ -651,6 +655,7 @@ def read_board(path: pathlib.Path) -> Board:
                 mirrored,
                 _silk_extent(package),
                 _silk_mark(package),
+                node.get("value"),
             )
         )
     if not elements:
