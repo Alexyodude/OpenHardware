@@ -2,11 +2,13 @@
 id: OH-181
 title: An arduino-pico board's pins are read through common.h, so the KB2040 and every
   RP2040 variant can be a row
-status: open
+status: in-progress
 priority: P1
 created: '2026-09-29'
 touches:
 - docs/tickets/OH-181-*
+- tools/import_pindefs.py
+- tests/rules/test_import_pindefs.py
 ---
 
 Part of OH-174, found by OH-177. The Adafruit KB2040 and the PCBCUPID Glyph Mini RP2040 have registry rows and fetched board files, and no manifest row, because `check()` refuses both before anything is written:
