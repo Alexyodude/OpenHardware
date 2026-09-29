@@ -57,8 +57,9 @@ named file has to name a firmware image that exists beside it, read that image
 off disk, and step a CPU over it -- all three, in that one file. Evidence you
 have to chase through three modules is evidence nobody checks. A board's own
 entry also has to load that board: its name is the first argument of a
-`load_firmware` call in the file, spelled out or as a module-level name last
-bound to it spelled out.
+`load_firmware` call in the file, spelled out, or as a name `_resolved`
+resolves to it -- one plain module-level assignment that nothing enclosing
+the call rebinds, and nothing else.
 
 **What this does not catch.** It is a check on vocabulary, not on meaning. A
 surface that claims a board works while avoiding the word "firmware" passes,
@@ -536,28 +537,88 @@ def _image_names(tree: ast.Module) -> set[str]:
     }
 
 
+#: What a name can be bound inside of, other than the module.
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef,
+           ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _binds(node: ast.AST, name: str) -> bool:
+    """Does `node` itself bind `name`, by any of Python's ways of binding one?"""
+    if isinstance(node, ast.Name):
+        return node.id == name and isinstance(node.ctx, (ast.Store, ast.Del))
+    if isinstance(node, ast.arg):
+        return node.arg == name
+    if isinstance(node, ast.alias):
+        return (node.asname or node.name.split(".")[0]) == name
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                         ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+        return node.name == name
+    if isinstance(node, ast.MatchMapping):
+        return node.rest == name
+    if isinstance(node, (ast.Global, ast.Nonlocal)):
+        return name in node.names
+    return False
+
+
+def _resolved(tree: ast.Module, enclosing: tuple[ast.AST, ...], name: str) -> str | None:
+    """The literal `name` stands for at a call inside `enclosing`, or None.
+
+    Only through one plain `NAME = "..."` directly in the module's body,
+    where that is the name's only module-level binding -- a `global NAME` in
+    any function counts as another -- and no function, class body, lambda
+    or comprehension enclosing the call binds it. Anything else is
+    unresolved, and the entry fails rather than trust it.
+    """
+    sites: list[tuple[ast.AST, ast.AST]] = []
+
+    def visit(node: ast.AST, scope: ast.AST) -> None:
+        if _binds(node, name):
+            sites.append((tree if isinstance(node, ast.Global) else scope, node))
+        inner = node if isinstance(node, _SCOPES) else scope
+        for child in ast.iter_child_nodes(node):
+            visit(child, inner)
+
+    visit(tree, tree)
+    if any(scope in enclosing for scope, _ in sites):
+        return None
+    module = [site for scope, site in sites if scope is tree]
+    if len(module) != 1:
+        return None
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and node.targets[0] is module[0]
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)):
+            return node.value.value
+    return None
+
+
 def _loads_board(tree: ast.Module, board: str) -> bool:
     """Is `board` the first argument of a `load_firmware` call in the file?
 
-    Spelled out, or a module-level name whose last binding spells it out. A
-    name elsewhere in the file, used or not, is not the board the test runs.
+    Spelled out, or a name `_resolved` resolves to it. A name elsewhere in
+    the file, used or not, is not the board the test runs. Only the call's
+    name is read: a wrapper called `load_firmware`, or a monkeypatch of the
+    real one, is not seen.
     """
-    bound: dict[str, ast.expr] = {}
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            bound.update({t.id: node.value for t in node.targets if isinstance(t, ast.Name)})
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value:
-            bound[node.target.id] = node.value
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
+    calls: list[tuple[ast.Call, tuple[ast.AST, ...]]] = []
+
+    def visit(node: ast.AST, enclosing: tuple[ast.AST, ...]) -> None:
+        if isinstance(node, ast.Call):
+            calls.append((node, enclosing))
+        inner = (*enclosing, node) if isinstance(node, _SCOPES) else enclosing
+        for child in ast.iter_child_nodes(node):
+            visit(child, inner)
+
+    visit(tree, ())
+    for call, enclosing in calls:
+        func = call.func
         if (func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)) != _LOADER:
             continue
-        for arg in (*node.args[:1], *(k.value for k in node.keywords if k.arg == "board_name")):
-            if isinstance(arg, ast.Name):
-                arg = bound.get(arg.id, arg)
+        for arg in (*call.args[:1], *(k.value for k in call.keywords if k.arg == "board_name")):
             if isinstance(arg, ast.Constant) and arg.value == board:
+                return True
+            if isinstance(arg, ast.Name) and _resolved(tree, enclosing, arg.id) == board:
                 return True
     return False
 
@@ -604,8 +665,8 @@ def evidence_that_never_loads_an_image(root: pathlib.Path | None = None) -> list
         if key in boards and not _loads_board(tree, key):
             why.append(
                 f"never loads {key!r}, the board it is evidence for (no {_LOADER} "
-                f"call whose first argument is that name, or a module-level name "
-                f"bound to it)"
+                f"call whose first argument is that name, or a name bound to it "
+                f"once, plainly, at module level)"
             )
         if why:
             problems.append(f"{key}: {evidence} " + "; ".join(why))

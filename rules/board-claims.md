@@ -208,10 +208,18 @@ the image, steps it, and watches a GPIO the variant names move on a pad the
 board file maps. `FIRMWARE_VERIFIED` keeps its meaning for every board that
 is not a row. `tools/check_board_claims.py` holds a board's entry to checks
 4 and 5 as it holds a chip's, and to loading its board: the board's name is
-the first argument of a `load_firmware` call in the named test, spelled out
-or as a module-level name last bound to it spelled out. A chip's test loads
-and steps an image too, and what makes a test one board's is that it runs
-that board; the name in a variable nothing loads does not (OH-183).
+the first argument, or `board_name=`, of a call to something named
+`load_firmware` in the named test -- spelled out, or as a name bound by
+exactly one plain `NAME = "..."` directly in the module's body that no
+function, class body, lambda or comprehension enclosing the call binds.
+Any other binding -- a local, a parameter or its default, a `global`
+rebinding in `setup_module` or anywhere, tuple unpacking, an annotated
+assignment, an assignment under `if` or `for`, an `import ... as` -- leaves
+the name unresolved, and the entry fails. Only the call's name is read: a
+wrapper called `load_firmware`, or a monkeypatch of the real one, is not
+detected. A chip's test loads and steps an image too, and what makes a test
+one board's is that it runs that board; the name in a variable nothing
+loads does not (OH-183).
 `test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence`
 pins the set, as §3 pins the chips.
 

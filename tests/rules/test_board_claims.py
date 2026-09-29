@@ -510,7 +510,8 @@ def test_the_led_actually_blinks():
 #: What check 5 says of a board entry whose test does not load that board.
 NEVER_LOADS = ("Some Feather: tests/cortexm0/test_blink.py never loads 'Some Feather', "
                "the board it is evidence for (no load_firmware call whose first "
-               "argument is that name, or a module-level name bound to it)")
+               "argument is that name, or a name bound to it once, plainly, at "
+               "module level)")
 
 
 def test_a_board_entry_whose_test_loads_it_and_runs_an_image_reports_nothing(tmp_path):
@@ -552,6 +553,43 @@ def test_a_board_name_rebound_before_the_load_is_not_the_board(tmp_path):
     root = build_root(tmp_path, catalogue=BOARD_CATALOGUE, evidence=evidence)
     found = C.evidence_that_never_loads_an_image(root)
     assert found == [NEVER_LOADS], found
+
+
+def test_a_board_name_bound_any_way_but_one_plain_module_assignment_is_unresolved(
+        tmp_path):
+    """Review of OH-183: each of these leaves `BOARD` at the load call not
+    provably the board, so the entry fails rather than trusts it."""
+    cases = {
+        "local rebinding": ("    with api.load_firmware(BOARD,",
+                            '    BOARD = "XIAO-ESP32-C6-DIP"\n'
+                            "    with api.load_firmware(BOARD,"),
+        "parameter default": ("def test_the_led_actually_blinks():",
+                              'def test_the_led_actually_blinks(BOARD="XIAO-ESP32-C6-DIP"):'),
+        "global rebound in setup_module": (
+            "def test_the_led_actually_blinks():",
+            "def setup_module():\n    global BOARD\n    BOARD = \"XIAO-ESP32-C6-DIP\"\n\n\n"
+            "def test_the_led_actually_blinks():"),
+        "tuple unpacking": ('BOARD = "Some Feather"\n', 'BOARD, OTHER = "Some Feather", 1\n'),
+        "rebinding under if": ('BOARD = "Some Feather"\n',
+                               'BOARD = "Some Feather"\nif IMAGE:\n    BOARD = "XIAO"\n'),
+        "rebinding under for": ('BOARD = "Some Feather"\n',
+                                'BOARD = "Some Feather"\nfor BOARD in ("XIAO",):\n    pass\n'),
+        "import-as": ('BOARD = "Some Feather"\n',
+                      'BOARD = "Some Feather"\nfrom os import sep as BOARD\n'),
+        "annotated": ('BOARD = "Some Feather"\n', 'BOARD: str = "Some Feather"\n'),
+    }
+    for index, (label, (old, new)) in enumerate(cases.items()):
+        assert BOARD_EVIDENCE.count(old) == 1, label
+        root = build_root(tmp_path / str(index), catalogue=BOARD_CATALOGUE,
+                          evidence=BOARD_EVIDENCE.replace(old, new))
+        found = C.evidence_that_never_loads_an_image(root)
+        assert found == [NEVER_LOADS], (label, found)
+
+
+def test_a_binding_in_a_function_not_enclosing_the_load_does_not_unresolve_it(tmp_path):
+    evidence = BOARD_EVIDENCE + '\n\ndef helper():\n    BOARD = "XIAO-ESP32-C6-DIP"\n'
+    root = build_root(tmp_path, catalogue=BOARD_CATALOGUE, evidence=evidence)
+    assert problems(root) == []
 
 
 def test_a_board_entry_loading_its_board_spelled_out_reports_nothing(tmp_path):
