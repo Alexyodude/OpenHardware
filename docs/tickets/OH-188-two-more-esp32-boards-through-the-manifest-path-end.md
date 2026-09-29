@@ -2,7 +2,7 @@
 id: OH-188
 title: 'Two more ESP32 boards through the manifest path end to end: SparkFun Pro Micro
   ESP32-C3 and Qwiic Pocket ESP32-C6'
-status: in-review
+status: in-progress
 priority: P1
 created: '2026-09-30'
 touches:
@@ -25,6 +25,7 @@ touches:
 - PROVENANCE.md
 - tests/rules/test_board_claims.py
 - rules/board-claims.md
+- tools/import_pindefs.py
 ---
 
 Part of OH-174. Three boards now hold all four layers through the manifest path (OH-176 to OH-185): a row, pins from the variant and the traced copper, a composed model, and a run test compiled against the board's own variant. This ticket runs two more boards through that path end to end, both ESP32 chips with EAGLE files and variants on disk (surveyed 2026-09-29, .omc/research/twin-candidates.md in the main checkout):
