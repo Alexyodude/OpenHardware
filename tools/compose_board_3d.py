@@ -82,6 +82,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import hashlib
 import itertools
 import math
 import pathlib
@@ -1053,12 +1054,44 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "and two mounting pads spanning 5.60 x 3.90 mm, and a body Adafruit "
         "draw 6.1 x 4.25 mm -- the SM04B-SRSS-TB SparkFun's Qwiic port is.",
     ),
+    # **One rule for an exposed pad, and it is that the pad decides nothing.**
+    # It is under the body and drawn nowhere, and a land's pad is the vendor's
+    # own paste choice rather than the part's: Adafruit and Seeed both land
+    # the ESP32-C3 at 3.0 x 3.0 mm, and Seeed's C3 row above has drawn it with
+    # the EP3.45 model since OH-93. So a model is matched on its leads, its
+    # pitch and its body, the land's pad is stated where the model's name
+    # differs, and among KiCad models that share a body the choice is (1) the
+    # one this table already gives the same chip -- one part, one drawing --
+    # else (2) the one whose pad is nearest the land's, a JUDGEMENT.
     Component(
         "QFN32_5MM", "Package_DFN_QFN",
         "QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm",
         "U2 on the QT Py, the ESP32-C3FH4 itself: thirty-three pads spanning "
-        "4.90 x 4.90 mm, thirty-two leads round a 5 x 5 mm body and the "
-        "exposed pad. The same chip and the same model as Seeed's C3.",
+        "4.90 x 4.90 mm, thirty-two leads round a 5 x 5 mm body. Adafruit "
+        "land its exposed pad at 3.00 x 3.00 mm and the model's name says "
+        "3.45: by the rule above the chip governs, and this is the model "
+        "Seeed's C3 row gives the same chip on the same 3.00 mm land.",
+    ),
+    Component(
+        "DFN-8", "Package_DFN_QFN", "DFN-8-1EP_2x2mm_P0.5mm_EP0.6x1.2mm",
+        "U4 on the Thing Plus, the MAX17048 fuel gauge: eight pads on a "
+        "0.5 mm pitch round a 1.38 x 0.80 mm exposed pad, 2 x 2 mm by "
+        "SparkFun's tDocu. KiCad has six 2 x 2 mm eight-lead models on that "
+        "pitch, listed 2026-09-29 in Package_DFN_QFN and Package_SON: one "
+        "with no exposed pad, one named for Micrel, and four whose pads are "
+        "0.6 x 1.2, 0.9 x 1.6, 0.9 x 1.7 and 1.05 x 1.75 mm. By the rule "
+        "above this chip has no drawing yet, so the pad nearest the land "
+        "chooses, and 0.6 x 1.2 is 0.20 mm off it at worst against 0.22 for "
+        "the next -- a JUDGEMENT the land nearly ties. TURNED 90: SparkFun "
+        "lay the leads along x and KiCad's footprint along y.",
+        turn=90.0,
+    ),
+    Component(
+        "TDFN8_2X2MM", "Package_DFN_QFN", "DFN-8-1EP_2x2mm_P0.5mm_EP0.6x1.2mm",
+        "X2 on the Feather, the same MAX17048 on Adafruit's land for it, "
+        "whose exposed pad is the same 0.80 x 1.38 mm as SparkFun's: one "
+        "part, one drawing, the DFN-8 row's model. Adafruit lay the leads "
+        "along y, as KiCad's footprint does, so no turn.",
     ),
     Component(
         "LED3535_FULLPADS", "LED_SMD", "LED_WS2812B-Mini_PLCC4_3.5x3.5mm",
@@ -1075,6 +1108,11 @@ CORRESPONDENCE: tuple[Component, ...] = (
 #: Two reasons that each cover a part appearing under two vendor spellings.
 #: Bound here rather than repeated in `ABSENT`, which is keyed by the vendor's
 #: package name and so has to hold both spellings.
+#: The words every `ABSENT` reason for copper, ink or a hole ends on -- a
+#: package that has no body, as against a part nobody publishes a model of.
+#: `compose` counts the two apart by this phrase (OH-180).
+NO_BODY = "there is no body to look for"
+
 ABSENT: dict[str, str] = {
     # --- pads with no body, stated rather than silent (OH-119) --------------
     "TP-SP": (
@@ -1386,31 +1424,20 @@ ABSENT: dict[str, str] = {
     ),
     "SK6805_1515": (
         "LED1 on the QT Py: four pads under a 1.5 x 1.5 mm body, an SK6805 "
-        "in its 1515 package. KiCad's LED_SMD, 38 models, has no addressable "
-        "LED under the 3.5 x 3.5 mm WS2812B-Mini."
-    ),
-    "DFN-8": (
-        "U4 on the Thing Plus, the MAX17048 fuel gauge: eight 0.5 mm-pitch "
-        "pads round a 1.38 x 0.80 mm exposed pad, 2 x 2 mm by SparkFun's "
-        "tDocu. KiCad's five 2 x 2 mm eight-lead models state exposed pads "
-        "of 0.6 x 1.2, 0.9 x 1.6, 0.9 x 1.7 and 1.05 x 1.75 mm or none, and "
-        "a model's name that states the wrong pad is the near miss "
-        "QFN-56 is refused for. Listed 2026-09-29 in Package_DFN_QFN and "
-        "Package_SON."
-    ),
-    "TDFN8_2X2MM": (
-        "X2 on the Feather, the same MAX17048 on Adafruit's land for it: a "
-        "0.80 x 1.38 mm exposed pad, 2 x 2 mm, and the same five KiCad "
-        "models, none of them this pad."
+        "in its 1515 package. The smallest addressable LED in KiCad's "
+        "LED_SMD, 38 models listed 2026-09-29, is the reverse-mount "
+        "SK6812MINI-E at 3.2 x 2.8 mm, about twice this one's side."
     ),
     "LONGAN-IC_SNR6-1.0-3X3X1MM": (
         "U4 on the Feather, an AHT20 humidity sensor by value: six pads on a "
         "1.0 mm pitch and no exposed pad, 3 x 3 x 1 mm by its own name. "
         "KiCad's Sensor_Humidity holds one model, TI's HDC2080, and the "
         "3 x 3 mm DFN-6 in Package_DFN_QFN is a 0.95 mm pitch round a "
-        "1.7 x 2.6 mm pad. Listed 2026-09-29. The name states a height, but "
-        "tools/model_from_datasheet.py builds slabs out of KiCad footprints "
-        "and this is an EAGLE package."
+        "1.7 x 2.6 mm pad. Listed 2026-09-29. **Every dimension is stated, "
+        "so this is the OH-153 kind of absence and not an honest one**: "
+        "tools/model_from_datasheet.py builds a slab from a name like this "
+        "one, but reads it out of a KiCad footprint and this is an EAGLE "
+        "package. The gap is that reader, filed in OH-180's note."
     ),
     "MOUDLE14P-XIAO-HALF-HOLE-PRO": (
         "U9 on the ESP32-C5 and the nRF54L15, and the same edge as the "
@@ -1738,6 +1765,12 @@ COMPOSITIONS = COMPOSITIONS + tuple(
 #: `test_a_manifest_boards_thickness_is_its_own_note_or_the_unos_stack`.
 MANIFEST_THICKNESS_MM = 1.6
 
+#: A `MANIFEST_STATED` colour that is not typed in: `manifest_composition`
+#: reads it out of the board file with `preview_mask`. Left as this string
+#: -- which is not a colour and cannot be drawn -- only while the board file
+#: is not fetched, when `compose` refuses the board before any colour is used.
+FROM_PREVIEW = "the board file's own manufacturing preview, not yet read"
+
 #: What a manifest board's own files DO state that its row does not carry.
 #: A board with no entry takes `MANIFEST_THICKNESS_MM` and `BOARD_MASK`, and
 #: says on the page that the colour is a judgement. Every number in these
@@ -1748,27 +1781,67 @@ MANIFEST_STATED: dict[str, dict[str, object]] = {
         # The note on layer 51 in the board file's own <plain> section reads
         # "Board thickness: 1.6mm" as well as "Soldermask: Red".
         "thickness_mm": 1.6,
-        "colour": "#e2180f",
+        "colour": FROM_PREVIEW,
         "colour_source": (
             "SparkFun's own board file, which states it twice: a note on its "
             "tDocu layer reading 'Soldermask: Red', and a manufacturing-"
-            "preview solder mask of 0xC8FF0000 -- red at alpha 200/255, "
-            "where the Arduino Uno's file carries 0xC8008000, the value left "
-            "when nobody sets one. Drawn as that preview draws mask over bare "
+            "preview solder mask of 0xC8FF0000 -- red at alpha 200/255. "
+            "Drawn, A JUDGEMENT, the way that preview draws mask over bare "
             "laminate: 0xFF0000 at that alpha over the file's own substrate "
-            "colour, 0x786E46"
+            "colour, 0x786E46, which `preview_mask` computes from those "
+            "numbers. That 0xC8FF0000 is a choice rather than a default is "
+            "a judgement too: the Arduino Uno's file carries 0xC8008000 under "
+            "a board this table draws navy, and that is taken for the value "
+            "EAGLE leaves when nobody sets one"
         ),
     },
 }
 
 
+def preview_mask(layout: pathlib.Path) -> str:
+    """The solder mask an EAGLE file's manufacturing preview draws over bare
+    laminate, as `#rrggbb`.
+
+    EAGLE writes each preview colour as ARGB. The mask is drawn at its own
+    alpha over the file's `substratecolor`, and this is that blend, done on
+    the file's own numbers -- the reading is the file's, the idea that the
+    preview is what the board looks like is a judgement (`MANIFEST_STATED`).
+    """
+    colours = {node.get("name"): node.get("color")
+               for node in eagle._open(layout, "board").iter("mfgpreviewcolor")}
+    mask, laminate = colours["soldermaskcolor"], colours["substratecolor"]
+    alpha = int(mask[2:4], 16) / 255
+    return "#" + "".join(
+        f"{round(int(mask[at:at + 2], 16) * alpha + int(laminate[at:at + 2], 16) * (1 - alpha)):02x}"
+        for at in (4, 6, 8))
+
+
 def manifest_composition(entry: board_manifest.Row) -> Composition:
-    """A `tools/board_manifest.py` row, as the composition it describes."""
+    """A `tools/board_manifest.py` row, as the composition it describes.
+
+    **An EAGLE row only**, and refused by name otherwise: every value read
+    here beyond the row -- the preview colour `BOARD_MASK` is judged against,
+    the design-rule stack the thickness is judged against -- is an EAGLE
+    field, and a KiCad board file states both its own way, in `(general
+    (thickness ...))` and a `(stackup ...)`. Composing one with these
+    readings would put an EAGLE sentence on a KiCad board.
+    """
+    suffix = pathlib.PurePosixPath(entry.cad).suffix.lower()
+    if suffix != ".brd":
+        raise ValueError(
+            f"{entry.board}: composition from a {suffix} manifest row is not "
+            f"supported yet -- its thickness and mask colour are read from "
+            f"EAGLE's own fields, which a {suffix} does not have"
+        )
     source = board_sources.source(entry.source)
     stated = MANIFEST_STATED.get(entry.board, {})
+    layout = board_manifest.cad_path(entry)
+    colour = stated.get("colour", BOARD_MASK)
+    if colour == FROM_PREVIEW and layout.is_file():
+        colour = preview_mask(layout)
     return Composition(
         board=entry.board,
-        layout=board_manifest.cad_path(entry),
+        layout=layout,
         fetch_with=f"python tools/get_board_sources.py {entry.source}",
         pcb_chip=None,
         geometry=(
@@ -1779,19 +1852,33 @@ def manifest_composition(entry: board_manifest.Row) -> Composition:
         ),
         headers=entry.select,
         thickness_mm=stated.get("thickness_mm", MANIFEST_THICKNESS_MM),
-        colour=stated.get("colour", BOARD_MASK),
+        colour=colour,
         colour_source=stated.get("colour_source", (
             "BOARD_MASK, A JUDGEMENT rather than a reading: the board file's "
             "manufacturing-preview solder mask is 0xC8008000, which the "
             "Arduino Uno's own file also carries under a board this table "
-            "draws navy -- the value EAGLE leaves when nobody sets one, not a "
-            "statement"
+            "draws navy -- taken, a judgement too, for the value EAGLE "
+            "leaves when nobody sets one rather than a statement"
         )),
     )
 
 
-COMPOSITIONS = COMPOSITIONS + tuple(
-    manifest_composition(entry) for entry in board_manifest.ROWS)
+def manifest_compositions(rows) -> tuple[tuple[Composition, ...], dict[str, str]]:
+    """Every row's composition, and each row refused with its reason."""
+    made: list[Composition] = []
+    refused: dict[str, str] = {}
+    for entry in rows:
+        try:
+            made.append(manifest_composition(entry))
+        except ValueError as exc:
+            refused[entry.board] = str(exc)
+    return tuple(made), refused
+
+
+#: Manifest rows that are NOT composed, and why -- printed by `main`, so a
+#: row that draws its footprint says so rather than going quiet.
+_MANIFEST, MANIFEST_REFUSED = manifest_compositions(board_manifest.ROWS)
+COMPOSITIONS = COMPOSITIONS + _MANIFEST
 
 
 
@@ -2526,7 +2613,7 @@ def component_mesh(component: Component, deflection: float) -> tuple[Mesh, objec
         return read_obj(made)
 
     CACHE.mkdir(parents=True, exist_ok=True)
-    step = CACHE / f"component-{component.slug}.step"
+    step = cached(component, component.url, ".step")
     if not step.is_file():
         print(f"  fetch  {component.url}")
         with urllib.request.urlopen(component.url) as response:  # noqa: S310
@@ -2574,24 +2661,45 @@ def correspondence_for(element: eagle.Element) -> Component | None:
     return fallback
 
 
+def cached(component: Component, url: str, suffix: str) -> pathlib.Path:
+    """Where a fetched model file is kept.
+
+    A KiCad model keeps the name it always had. A manufacturer's file is keyed
+    by its URL too, which carries the pinned commit, so re-pinning
+    `ESPRESSIF_KICAD` fetches afresh instead of reading the old commit's file
+    under the new commit's name.
+    """
+    name = f"component-{component.slug}"
+    if component.step is not None:
+        name += "-" + hashlib.sha256(url.encode("utf-8")).hexdigest()[:12]
+    return CACHE / f"{name}{suffix}"
+
+
 def pads_origin(component: Component) -> tuple[float, float] | None:
     """Where the middle of the model's own pads is, in the model's own frame.
 
     None for a model from KiCad's library, which `place` anchors as it always
     has. For a manufacturer's model, read out of the manufacturer's footprint:
-    the centre of its pads, taken back through the `(offset ...)` its one
-    `(model ...)` block places this STEP with. KiCad's footprint y runs down
-    the page and a model's y runs up it, so `y` is negated on the way.
+    the centre of its pads, taken back through the x and y of the `(offset
+    ...)` its one `(model ...)` block places this STEP with. KiCad's footprint
+    y runs down the page and a model's y runs up it, so `y` is negated on the
+    way.
+
+    **The offset's z is ignored, and that is a JUDGEMENT.** `place` rests a
+    model's own z = 0 on the board, and Espressif's MINI-1 footprint lifts its
+    model 0.5 mm while the STEP's lowest point is already at z = -0.02 mm:
+    honoured, the module would float half a millimetre over the board it is
+    soldered to. `test_a_manufacturers_model_sits_on_the_board_whatever_its_z`
+    reads both numbers.
 
     Refuses a footprint whose block also turns or scales the model, or that
-    names some other file: this reads an offset and nothing else, and a
-    rotated model read as a translated one would be placed wrongly and still
-    look like a module.
+    names some other file: a rotated model read as a translated one would be
+    placed wrongly and still look like a module.
     """
     if component.footprint is None:
         return None
     CACHE.mkdir(parents=True, exist_ok=True)
-    local = CACHE / f"component-{component.slug}.kicad_mod"
+    local = cached(component, component.footprint, ".kicad_mod")
     if not local.is_file():
         print(f"  fetch  {component.footprint}")
         with urllib.request.urlopen(component.footprint) as response:  # noqa: S310
@@ -3265,7 +3373,8 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
         return (tx * rot_cos - ty * rot_sin, tx * rot_sin + ty * rot_cos)
 
     #: **A MIRRORED element is on the underside too** (OH-180), and until the
-    #: manifest boards no composed board drew one: EAGLE's `M` is the package
+    #: manifest boards no composed board stood a MODEL on one -- the Uno's one
+    #: mirrored element, its GROUND jumper, is copper: EAGLE's `M` is the package
     #: turned over onto the bottom face, so its model hangs there exactly as a
     #: flipped one does. `onto_board` negates x for it; negating z as well is
     #: what makes the pair a turn rather than a reflection -- a reflection
@@ -3661,15 +3770,23 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
               f"and nothing here can see: {', '.join(unpinned)}")
     print(f"  markers ride at {pad_top:.3f} mm, the top of the header pins; "
           f"the PCB's own top face is at {spec.thickness_mm:.3f}")
-    refused = [e for e in board.elements if e.package in ABSENT]
-    if refused:
-        print(f"  refused {len(refused)} placement(s) of "
-              f"{len({e.package for e in refused})} package(s), each with its "
-              f"reason:")
-    for package, why in sorted(ABSENT.items()):
-        here = [e.name for e in board.elements if e.package == package]
-        if here:
-            print(f"  absent  {'/'.join(here)} ({package}): {why[:60]}...")
+    # **A part refused and a pad with no part are two different gaps**, and
+    # they are counted apart: the first is something a reader will look for
+    # and not find, the second is drawn already as copper, ink or a hole.
+    absent = [e for e in board.elements if e.package in ABSENT]
+    for label, group, what in (
+            ("refused", [e for e in absent if NO_BODY not in ABSENT[e.package]],
+             "a part with no published model, each with its reason"),
+            ("bodyless", [e for e in absent if NO_BODY in ABSENT[e.package]],
+             "copper, ink or a hole, with no body to draw")):
+        packages = sorted({e.package for e in group})
+        if packages:
+            print(f"  {label} {len(group)} placement(s) of {len(packages)} "
+                  f"package(s): {what}")
+        for package in packages:
+            here = [e.name for e in group if e.package == package]
+            print(f"  absent  {'/'.join(here)} ({package}): "
+                  f"{ABSENT[package][:60]}...")
 
     whole = merge(*pieces)
     print(f"  mesh    {whole.triangles():,} triangles, "
@@ -3780,6 +3897,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--deflection", type=float, default=DEFLECTION)
     args = parser.parse_args(argv)
 
+    # A manifest row that is not composed says so, by name, every run.
+    for board, why in MANIFEST_REFUSED.items():
+        if args.board is None or args.board == board:
+            print(f"{board}:\n  REFUSED {why}")
+    if args.board in MANIFEST_REFUSED:
+        return 2
     wanted = [spec for spec in COMPOSITIONS
               if args.board is None or spec.board == args.board]
     if not wanted:

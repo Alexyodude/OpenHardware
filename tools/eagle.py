@@ -410,8 +410,9 @@ def _element_pads(
         # EAGLE's top and 16 its bottom -- **of the PACKAGE**, and a mirrored
         # element puts the whole package on the other face, which `_ink`
         # already did for its silkscreen and this did not do for its copper
-        # (OH-180): the QT Py's ESP32-C3 is mirrored, and its 33 pads were
-        # drawn on the top face of a board whose file puts them underneath.
+        # (OH-180): the Uno's GROUND solder jumper is mirrored and its two
+        # pads were drawn on top from OH-110 on, and the QT Py's ESP32-C3's
+        # 33 pads with it, on a board whose file puts them underneath.
         layer = surface.get("layer") or "1"
         if mirrored:
             layer = {"1": "16", "16": "1"}.get(layer, layer)
@@ -433,9 +434,11 @@ def _element_pads(
     if mirrored:
         # A mirrored element is reflected in x before it is turned -- the rule
         # `place` applies to every pad centre above -- and a reflection
-        # reverses the sense of an angle. The Uno places nothing mirrored, so
-        # this is the same care `from_kicad` takes over a back-side part
-        # rather than a case anything here exercises.
+        # reverses the sense of an angle -- the same care `from_kicad` takes
+        # over a back-side part. The Uno's GROUND jumper is mirrored (MR0),
+        # as are the QT Py's ESP32-C3 and the Thing Plus's underside
+        # resistors, which is what exercises it. (This said the Uno placed
+        # nothing mirrored until OH-180 read the file.)
         pads = [dataclasses.replace(pad, rotation_deg=-pad.rotation_deg)
                 for pad in pads]
     return tuple(pads)

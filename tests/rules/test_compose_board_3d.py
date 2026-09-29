@@ -378,13 +378,12 @@ EXPLAINS: dict[str, set[str]] = {
     # are drawn as copper, so they are not here.
     "SparkFun Thing Plus ESP32-C6": {
         "THING_PLUS", "USB-C-16P_4LAYER-PADS", "JST-2-SMD", "MICROSD_TINY",
-        "WS2812-2020", "DFN-8",
+        "WS2812-2020",
     },
     "Adafruit QT Py ESP32-C3": {"USB_C_CUSB31-CFM2AX-01-X", "SK6805_1515"},
     "Adafruit Feather ESP32-C6": {
         "1X16_ROUND", "1X12_ROUND", "USB_C_CUSB31-CFM2AX-01-X",
-        "JSTPH2_BATT", "JST_SH4_RA", "TDFN8_2X2MM",
-        "LONGAN-IC_SNR6-1.0-3X3X1MM",
+        "JSTPH2_BATT", "JST_SH4_RA", "LONGAN-IC_SNR6-1.0-3X3X1MM",
     },
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
@@ -759,9 +758,27 @@ def test_nothing_refused_is_a_part_this_file_could_have_drawn():
     template = model_from_datasheet.SLABS[0]
     checked = 0
     for spec in compose.COMPOSITIONS:
-        if not spec.layout.is_file() or spec.layout.suffix != ".kicad_pcb":
+        if not spec.layout.is_file():
             continue
         placed = {e.package for e in compose.read_layout(spec.layout).elements}
+        if spec.layout.suffix != ".kicad_pcb":
+            # **An EAGLE layout, which the slab reader cannot open** (OH-180).
+            # The question is the same one asked of the name alone: a
+            # refused package whose own name states length x width x height
+            # is the OH-153 kind of absence, and its reason must say that the
+            # gap is the reader and not the part -- or it is a false one.
+            for package in sorted(placed & set(compose.ABSENT)):
+                if model_from_datasheet._NAMED_BODY.search(package) is None:
+                    continue
+                why = compose.ABSENT[package]
+                assert ("tools/model_from_datasheet.py" in why
+                        and "EAGLE package" in why), (
+                    f"{package} on {spec.board} states its own body in its "
+                    f"name and is refused without saying the reader is the "
+                    f"gap: {why}"
+                )
+                checked += 1
+            continue
         for package in sorted(placed & set(compose.ABSENT)):
             trial = dataclasses.replace(template, package=package,
                                         pcb=spec.layout)
@@ -3645,9 +3662,12 @@ def test_every_manifest_row_is_composed_from_that_row():
     from tools import board_manifest
 
     for row, spec in _manifest_specs():
+        if row.board in compose.MANIFEST_REFUSED:
+            assert spec is None, f"{row.board} is refused and composed at once"
+            continue
         assert spec is not None, (
-            f"{row.board} is a row in tools/board_manifest.py and is not "
-            f"composed, so the page draws its footprint"
+            f"{row.board} is a row in tools/board_manifest.py and is neither "
+            f"composed nor refused, so the page draws its footprint silently"
         )
         assert spec.layout == board_manifest.cad_path(row), row.board
         assert spec.headers == row.select, (
@@ -3695,7 +3715,7 @@ def test_a_manufacturers_model_sits_where_its_own_footprint_puts_its_pads(
         "PKG", "maker", "PART", "a test part, two 1 mm pads 2 mm apart",
         step="https://example.invalid/PART.STEP",
         footprint="https://example.invalid/PART.kicad_mod")
-    local = tmp_path / f"component-{part.slug}.kicad_mod"
+    local = compose.cached(part, part.footprint, ".kicad_mod")
 
     def footprint(rotate: str) -> str:
         return (
@@ -3734,7 +3754,7 @@ def test_the_module_lands_on_the_body_its_vendor_drew():
     board = compose.read_layout(spec.layout)
     module = board.element("U1")
     component = compose.correspondence_for(module)
-    step = compose.CACHE / f"component-{component.slug}.step"
+    step = compose.cached(component, component.url, ".step")
     if not step.is_file():
         pytest.skip("SKIPPED: the module's STEP is not fetched; run "
                     "tools/compose_board_3d.py")
@@ -3874,26 +3894,38 @@ def test_every_placement_is_drawn_refused_or_padless_and_counted(capsys):
         pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
     board = compose.read_layout(spec.layout)
     padless = [e for e in board.elements if not e.pads]
-    refused = [e for e in board.elements if e.package in compose.ABSENT]
+    absent = [e for e in board.elements if e.package in compose.ABSENT]
     rest = [e for e in board.elements if e.pads and e.package not in compose.ABSENT]
-    assert padless and refused and rest, "the board no longer shows all three"
+    assert padless and absent and rest, "the board no longer shows all three"
+    # **A refused part and a bodyless pad are counted apart**, and which is
+    # which on this board is written here rather than derived, so a reason
+    # that loses its "no body" words -- or gains them -- is caught.
+    parts = {"USB_C_CUSB31-CFM2AX-01-X", "SK6805_1515"}
+    refused = [e for e in absent if e.package in parts]
+    bodyless = [e for e in absent if e.package not in parts]
+    assert {e.package for e in bodyless} == {
+        "1X07_CASTEL", "B1,27", "FIDUCIAL_1MM", "TESTPOINT_MINUS_1X3MM",
+        "TESTPOINT_PLUS_1X3MM"}
 
     with mock.patch.object(compose, "CORRESPONDENCE", ()):
         compose.compose(spec, deflection=0.05, check=True)
     out = capsys.readouterr().out
     assert f"no pads {len(padless)} placement(s)" in out, out
     assert f"no model {len(rest)} placement(s)" in out, out
-    assert f"refused {len(refused)} placement(s)" in out, out
-    assert len(padless) + len(refused) + len(rest) == len(board.elements)
+    assert f"refused {len(refused)} placement(s) of {len(parts)} package(s)" in out, out
+    assert (f"bodyless {len(bodyless)} placement(s) of "
+            f"{len({e.package for e in bodyless})} package(s)") in out, out
+    assert len(padless) + len(absent) + len(rest) == len(board.elements)
 
 
 def test_a_mirrored_elements_copper_is_on_the_other_face(tmp_path):
     """EAGLE's `M` turns the whole package over onto the bottom face, and
     `eagle._ink` already moved its silkscreen there while its surface pads
-    stayed on the top. Nothing composed had drawn a mirrored part until the
-    manifest boards, and the QT Py's ESP32-C3 is one: 33 pads on the top face
-    of a board whose file puts them underneath (OH-180). Lives here because
-    the composer's artwork is the one reader of a pad's face.
+    stayed on the top. The Uno's GROUND solder jumper is mirrored and its two
+    pads were drawn on the top face from OH-110 until this; the QT Py's
+    ESP32-C3 is mirrored too, and it was 33 pads on the top face of a board
+    whose file puts them underneath (OH-180). Lives here because the
+    composer's artwork is the one reader of a pad's face.
     """
     path = tmp_path / "mirrored.brd"
     path.write_text(
@@ -3929,16 +3961,7 @@ def test_a_mirrored_element_hangs_under_the_board():
     ESP32-C3 first came out. Negating z with it is the half turn that puts
     the part underneath, and the pair is a rotation.
     """
-    box = compose.slab([(-1.0, -0.5), (1.0, -0.5), (1.0, 0.5), (-1.0, 0.5)],
-                       1.0, "#050505", (0.0, 0.0))
-    # `slab` builds in the scene's axes; a model arrives z-up, so swap back.
-    groups = {}
-    for colour, (p, n, i) in box.groups.items():
-        groups[colour] = (
-            [v for at in range(0, len(p), 3) for v in (p[at], -p[at + 2], p[at + 1])],
-            [v for at in range(0, len(n), 3) for v in (n[at], -n[at + 2], n[at + 1])],
-            list(i))
-    model = compose.Mesh(groups)
+    model = _model_box(2.0, 1.0, 1.0, "#050505")
     pads = (eagle.Pad("1", "smd", -0.85, 0.0, 0.5, 0.5, None),
             eagle.Pad("2", "smd", 0.85, 0.0, 0.5, 0.5, None))
     thickness = 1.6
@@ -3954,3 +3977,180 @@ def test_a_mirrored_element_hangs_under_the_board():
             )
         else:
             assert min(heights) >= thickness - 1e-9
+
+
+def _model_box(length: float, width: float, height: float, colour: str,
+               at: tuple[float, float] = (0.0, 0.0)) -> compose.Mesh:
+    """A box in a model's own z-up frame, centred on `at`, for placing parts
+    without OpenCASCADE. `slab` builds in the scene's axes, so it is swapped
+    back: scene (x, up, -y) is model (x, y, up)."""
+    x, y = at
+    box = compose.slab([(x - length / 2, y - width / 2), (x + length / 2, y - width / 2),
+                        (x + length / 2, y + width / 2), (x - length / 2, y + width / 2)],
+                       height, colour, (0.0, 0.0))
+    groups = {}
+    for name, (p, n, i) in box.groups.items():
+        groups[name] = (
+            [v for k in range(0, len(p), 3) for v in (p[k], -p[k + 2], p[k + 1])],
+            [v for k in range(0, len(n), 3) for v in (n[k], -n[k + 2], n[k + 1])],
+            list(i))
+    return compose.Mesh(groups)
+
+
+def test_compose_draws_each_0603_from_its_own_library(monkeypatch, capsys):
+    """**The lookup `compose` actually uses**, end to end: the Thing Plus's
+    fourteen resistors come out as resistors and its nine capacitors as
+    capacitors. `correspondence_for` can be right while `compose` keys its own
+    table by package and draws all twenty-three as whichever row came last --
+    that mutant survived until this drove `compose` itself.
+
+    No OpenCASCADE: only the two 0603 rows are kept, and each is given a
+    1.6 x 0.8 mm box, so nothing is fetched or tessellated.
+    """
+    spec = next(s for s in compose.COMPOSITIONS
+                if s.board == "SparkFun Thing Plus ESP32-C6")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    rows = tuple(c for c in compose.CORRESPONDENCE if c.package == "0603")
+    assert {c.vendor_library for c in rows} == {"SparkFun-Resistors",
+                                                "SparkFun-Capacitors"}
+    monkeypatch.setattr(compose, "CORRESPONDENCE", rows)
+    monkeypatch.setattr(
+        compose, "component_mesh",
+        lambda component, deflection: (
+            _model_box(1.6, 0.8, 0.5, "#101010"),
+            compose.Extent(-0.8, 0.8, -0.4, 0.4, 0.0, 0.5)))
+    compose.compose(spec, deflection=0.05, check=True)
+    out = capsys.readouterr().out
+    drawn_line = next(line for line in out.splitlines()
+                      if line.startswith("  drawn "))
+    drawn = dict(part.rsplit(" (", 1) for part in
+                 drawn_line.split(": ", 1)[1].split(", "))
+    want = {"SparkFun-Resistors": "R_0603_1608Metric)",
+            "SparkFun-Capacitors": "C_0603_1608Metric)"}
+    board = compose.read_layout(spec.layout)
+    placed = [e for e in board.elements if e.package == "0603"]
+    assert len(placed) == len(drawn), (drawn_line, len(placed))
+    for element in placed:
+        assert drawn[element.name] == want[element.library], (
+            f"{element.name} is from {element.library} and was drawn as "
+            f"{drawn[element.name]}"
+        )
+
+
+def test_a_kicad_manifest_row_is_refused_by_name(capsys):
+    """Every reading `manifest_composition` makes beyond the row is an EAGLE
+    field -- the preview colour, the design-rule stack -- so a `.kicad_pcb`
+    row would be composed with an EAGLE sentence about a KiCad file. Until
+    somebody reads KiCad's own `(general (thickness ...))` and `(stackup
+    ...)`, such a row is refused by name, and the refusal is printed.
+    """
+    from tools import board_manifest
+
+    kicad_row = dataclasses.replace(board_manifest.ROWS[0],
+                                    board="A KiCad row",
+                                    cad="Hardware/board.kicad_pcb")
+    made, refused = compose.manifest_compositions(
+        (board_manifest.ROWS[0], kicad_row))
+    assert [spec.board for spec in made] == [board_manifest.ROWS[0].board]
+    assert "composition from a .kicad_pcb manifest row is not supported yet" in (
+        refused["A KiCad row"])
+    with mock.patch.object(compose, "MANIFEST_REFUSED", refused):
+        assert compose.main(["--board", "A KiCad row", "--check"]) == 2
+    out = capsys.readouterr().out
+    assert "A KiCad row:" in out and "REFUSED" in out and "not supported yet" in out
+
+
+def test_a_manufacturers_model_sits_on_the_board_whatever_its_z():
+    """`pads_origin` reads an offset's x and y and ignores its z, a
+    judgement with numbers under it: Espressif's MINI-1 footprint lifts its
+    model half a millimetre, and the STEP's own lowest point is already on
+    the board plane -- honoured, the module would float over the board it is
+    soldered to. So what is checked is the premise: every manufacturer's
+    model here bottoms out at its own z = 0, and at least one footprint
+    states a z that would have lifted it.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    from tools import kicad as kicad_reader
+
+    makers = [c for c in compose.CORRESPONDENCE if c.footprint is not None]
+    assert makers, "no manufacturer's model is drawn"
+    lifted = 0
+    for component in makers:
+        step = compose.cached(component, component.url, ".step")
+        footprint = compose.cached(component, component.footprint, ".kicad_mod")
+        if not step.is_file() or not footprint.is_file():
+            pytest.skip("SKIPPED: run tools/compose_board_3d.py to fetch them")
+        tree = kicad_reader.parse_sexp(footprint.read_text(encoding="utf-8"))
+        z = [m.offset[2] for m in kicad_reader._models_of(tree)
+             if pathlib.PurePosixPath(m.path).stem == component.model]
+        lifted += any(value != 0.0 for value in z)
+        _mesh, box = compose.component_mesh(component, compose.DEFLECTION)
+        assert abs(box.zmin) < 0.05, (
+            f"{component.model}'s lowest point is {box.zmin:.3f} mm from its "
+            f"own z = 0, so resting that on the board is not right either"
+        )
+    assert lifted, "no footprint states a z, so ignoring one decides nothing"
+
+
+def test_a_part_flipped_and_mirrored_is_the_right_way_up():
+    """`under` is `flip != mirrored`, and the case nothing on a board has yet
+    is both at once: a part hung under the board by its table row AND on the
+    bottom face by its element is turned over twice -- the right way up, and
+    in the same place as a part that is neither."""
+    model = _model_box(2.0, 1.0, 1.0, "#050505", at=(0.7, 0.0))
+    pads = (eagle.Pad("1", "smd", -0.85, 0.0, 0.5, 0.5, None),
+            eagle.Pad("2", "smd", 0.85, 0.0, 0.5, 0.5, None))
+    plain = compose.place(model, eagle.Element("C1", "L", "P", pads=pads),
+                          0.0, 1.6, (0.0, 0.0))
+    both = compose.place(model, eagle.Element("C1", "L", "P", pads=pads,
+                                              mirrored=True),
+                         0.0, 1.6, (0.0, 0.0), flip=True)
+    for colour, (positions, _n, _i) in plain.groups.items():
+        assert both.groups[colour][0] == pytest.approx(positions), colour
+
+
+def test_a_modules_pads_land_on_the_pads_at_every_turn():
+    """`place` turns an `OverPads` origin with the model, so the point under
+    the middle of the module's pads lands on the middle of the element's
+    pads whatever the table's turn, the element's rotation or its mirror --
+    a module is not always drawn at turn 0."""
+    origin = (0.4, -1.1)
+    body = _model_box(3.0, 5.0, 1.0, "#808080", at=(0.0, 0.0))
+    marker = _model_box(0.001, 0.001, 0.001, "#ff00ff", at=origin)
+    groups = {**body.groups, **marker.groups}
+    module = compose.OverPads(groups, origin)
+    pads = (eagle.Pad("1", "smd", 10.0, 20.0, 0.5, 0.5, None),
+            eagle.Pad("2", "smd", 12.0, 21.0, 0.5, 0.5, None))
+    anchor = (11.0, 20.5)
+    for turn in (0.0, 90.0, 180.0, 270.0):
+        for rotation in (0.0, 30.0):
+            for mirrored in (False, True):
+                element = eagle.Element("U1", "L", "P", pads=pads,
+                                        rotation=rotation, mirrored=mirrored)
+                put = compose.place(module, element, turn, 1.6, (0.0, 0.0))
+                p = put.groups["#ff00ff"][0]
+                x = sum(p[0::3]) / (len(p) // 3)
+                y = -sum(p[2::3]) / (len(p) // 3)
+                assert (x, y) == pytest.approx(anchor, abs=1e-6), (
+                    f"turn {turn}, rotation {rotation}, mirrored {mirrored}: "
+                    f"the module's pad origin lands at ({x:.3f}, {y:.3f})"
+                )
+
+
+def test_a_manufacturers_file_is_cached_by_the_commit_it_came_from():
+    """Re-pinning `ESPRESSIF_KICAD` must fetch the new commit's files. Keyed
+    by name alone, the old commit's STEP would be read under the new pin and
+    nothing would say so; a KiCad model keeps its old name, so nothing
+    already fetched is fetched again."""
+    module = next(c for c in compose.CORRESPONDENCE if c.step is not None)
+    repinned = dataclasses.replace(
+        module, step=module.step.replace(compose.ESPRESSIF_KICAD.rsplit("/", 1)[1],
+                                         "0" * 40))
+    assert repinned.step != module.step
+    assert (compose.cached(module, module.url, ".step")
+            != compose.cached(repinned, repinned.url, ".step"))
+    kicad_part = next(c for c in compose.CORRESPONDENCE
+                      if c.step is None and not c.modelled)
+    assert compose.cached(kicad_part, kicad_part.url, ".step") == (
+        compose.CACHE / f"component-{kicad_part.slug}.step")
