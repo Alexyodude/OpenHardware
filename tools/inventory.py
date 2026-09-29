@@ -54,7 +54,8 @@ import typing
 try:
     from tools import board_sources, kicad
     from tools.import_3d_model import COMPOSED, MODELS
-    from tools.import_pindefs import NOT_PUBLISHED
+    from tools.import_board import READERS
+    from tools.import_pindefs import DISPUTED, NO_PACKAGE_AT_ALL, NOT_PUBLISHED
     from tools.ledger import LedgerError, parse_ledger
     from tools.rules_meta import RuleParseError, load_rules
     from webui.boards import catalogue
@@ -69,7 +70,8 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
     from tools import board_sources, kicad
     from tools.import_3d_model import COMPOSED, MODELS
-    from tools.import_pindefs import NOT_PUBLISHED
+    from tools.import_board import READERS
+    from tools.import_pindefs import DISPUTED, NO_PACKAGE_AT_ALL, NOT_PUBLISHED
     from tools.ledger import LedgerError, parse_ledger
     from tools.rules_meta import RuleParseError, load_rules
     from webui.boards import catalogue
@@ -634,7 +636,7 @@ TWIN_LAYERS = (
     ("geometry", "the board file's `source` names vendor CAD found on this disk"),
     ("model", "the 3D view draws a vendor or composed mesh, not the footprint"),
     ("pins", "every non-supply pad names a `chip_pin` or says specifically why not"),
-    ("runs", "the chip is in catalogue.FIRMWARE_VERIFIED"),
+    ("runs", "catalogue.catalogue() gives the board firmware evidence"),
 )
 #: The two ways a named CAD file is not found, which must not read alike.
 NOT_FETCHED = "not fetched"
@@ -645,6 +647,8 @@ GEOMETRY_FALLBACKS = (
 )
 #: What a vendor footprint is, for `source.footprint`.
 FOOTPRINT_SUFFIXES = (".kicad_mod",)
+#: The `why_null` reasons that leave a pad unanswered; see `_pins_layer`.
+UNANSWERED = frozenset({NOT_PUBLISHED, NO_PACKAGE_AT_ALL, DISPUTED})
 #: The two ways the 3D view falls back to the footprint, which must not read alike.
 NOT_BUILT = "footprint:not built"
 NO_SOURCE = "footprint:no source"
@@ -678,9 +682,9 @@ class Twin(typing.NamedTuple):
 def supply_labels(source: pathlib.Path = SUPPLY_SOURCE) -> frozenset[str]:
     """`SUPPLY_LABELS` as `source` assigns it, read without importing a test.
 
-    Refused unless it is assigned once, as `frozenset({...})` of strings: a
-    second binding is the one Python would use, and `frozenset("GND")` is a
-    set of three letters.
+    Refused unless it is assigned once at module level, as `frozenset({...})`
+    of strings: a second binding is the one Python would use, and
+    `frozenset("GND")` is a set of three letters.
     """
     try:
         tree = ast.parse(source.read_text(encoding="utf-8"))
@@ -688,7 +692,7 @@ def supply_labels(source: pathlib.Path = SUPPLY_SOURCE) -> frozenset[str]:
         raise InventoryError(f"{source}: {exc}") from exc
     assigned = [
         node
-        for node in ast.walk(tree)
+        for node in tree.body
         if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign))
         and any(
             isinstance(target, ast.Name) and target.id == "SUPPLY_LABELS"
@@ -697,8 +701,8 @@ def supply_labels(source: pathlib.Path = SUPPLY_SOURCE) -> frozenset[str]:
     ]
     if len(assigned) != 1:
         raise InventoryError(
-            f"{source}: SUPPLY_LABELS is assigned {len(assigned)} times; "
-            f"one assignment is the only form read"
+            f"{source}: SUPPLY_LABELS is assigned {len(assigned)} times at module "
+            f"level; one assignment is the only form read"
         )
     call = assigned[0].value
     if (
@@ -751,25 +755,40 @@ def _declared_footprints(tree: _Tree) -> dict[str, str]:
 
 
 def _file_geometry(named: str) -> Layer:
+    """A file tools/import_board.py reads, inside a registry source's tree."""
     path = pathlib.Path(named)
-    if path.is_file():
-        return Layer(True, "file", path.as_posix())
+    if path.suffix.lower() not in READERS:
+        return Layer(
+            False,
+            f"file:{NAMES_NOTHING}",
+            f"{named} is not one of the formats tools/import_board.py reads: "
+            f"{', '.join(sorted(READERS))}",
+        )
+    resolved = path.resolve()
     owner = next(
         (
             candidate
             for candidate in board_sources.sources()
-            if path.is_relative_to(candidate.dest(pathlib.Path(".")))
+            if resolved.is_relative_to(candidate.dest(pathlib.Path(".")).resolve())
         ),
         None,
     )
-    if owner is not None and not owner.dest(pathlib.Path(".")).is_dir():
+    if owner is None:
+        return Layer(
+            False,
+            f"file:{NAMES_NOTHING}",
+            f"{named} is inside no source in tools/board_sources.py",
+        )
+    if not owner.dest(pathlib.Path(".")).is_dir():
         return Layer(
             False,
             f"file:{NOT_FETCHED}",
             f"{named}: {owner.dest(pathlib.Path('.')).as_posix()} is not fetched here; "
             f"run: python tools/get_board_sources.py {owner.name}",
         )
-    return Layer(False, f"file:{NAMES_NOTHING}", f"{named} is not a file here")
+    if not resolved.is_file():
+        return Layer(False, f"file:{NAMES_NOTHING}", f"{named} is not a file here")
+    return Layer(True, "file", path.as_posix())
 
 
 def _footprint_geometry(footprint: str, tree: _Tree, declared_names: dict[str, str]) -> Layer:
@@ -838,8 +857,9 @@ def _model_layer(name: str, index: dict | None, builders: dict[str, str]) -> Lay
 
 def _pins_layer(pads: list, supplies: frozenset[str]) -> Layer:
     """A non-supply pad answers if it names a `chip_pin` or its `why_null` is
-    specific. tools/import_pindefs.py's `NOT_PUBLISHED` is not specific, and
-    neither is no reason at all.
+    specific. No reason at all is not, and neither are three of
+    tools/import_pindefs.py's: `NOT_PUBLISHED` and `NO_PACKAGE_AT_ALL` say no
+    package covers the pad, and `DISPUTED` says the packages disagree.
     """
     signal = named = reasoned = 0
     unanswered = []
@@ -851,7 +871,7 @@ def _pins_layer(pads: list, supplies: frozenset[str]) -> Layer:
         why = pad.get("why_null")
         if pad.get("chip_pin") is not None:
             named += 1
-        elif why and why != NOT_PUBLISHED:
+        elif why and why not in UNANSWERED:
             reasoned += 1
         else:
             unanswered.append(label)
@@ -865,15 +885,24 @@ def _pins_layer(pads: list, supplies: frozenset[str]) -> Layer:
     return Layer(bool(signal) and not unanswered, summary, detail)
 
 
-def _runs_layer(name: str) -> Layer:
-    try:
-        chip = catalogue.chip_for(name)
-    except catalogue.CatalogueError as exc:
-        return Layer(False, "no chip", str(exc))
-    evidence = catalogue.FIRMWARE_VERIFIED.get(chip)
-    if evidence is None:
-        return Layer(False, f"{chip}:no", f"{chip} is not in FIRMWARE_VERIFIED")
-    return Layer(True, chip, evidence)
+def _runs_layer(stem: str, placed: dict, refused: str | None) -> Layer:
+    """The catalogue's own firmware evidence for this board.
+
+    `catalogue.catalogue()` places every board or raises, and `api.runtime_for`
+    asks it before running anything, so a refusal is every board's answer.
+    """
+    if refused is not None:
+        return Layer(False, "refused", f"catalogue.catalogue() refuses: {refused}")
+    board = placed.get(stem)
+    if board is None:
+        return Layer(False, "unlisted", f"catalogue.catalogue() lists no {stem!r}")
+    if board.firmware_evidence is None:
+        return Layer(
+            False,
+            f"{board.chip}:no",
+            f"the catalogue gives {board.chip} on this board no firmware evidence",
+        )
+    return Layer(True, board.chip, board.firmware_evidence)
 
 
 def collect_twins(
@@ -903,6 +932,11 @@ def collect_twins(
     builders.update(
         (board, "python tools/compose_board_3d.py") for board, _, _ in COMPOSED
     )
+    try:
+        placed = {board.name: board for board in catalogue.catalogue(boards_dir)}
+        refused = None
+    except catalogue.CatalogueError as exc:
+        placed, refused = {}, str(exc)
 
     twins = []
     for path in paths:
@@ -922,7 +956,7 @@ def collect_twins(
                 geometry=_geometry_layer(data.get("source") or {}, tree, declared_names),
                 model=_model_layer(name, index, builders),
                 pins=_pins_layer(pads, supplies),
-                runs=_runs_layer(name),
+                runs=_runs_layer(path.stem, placed, refused),
             )
         )
     return twins

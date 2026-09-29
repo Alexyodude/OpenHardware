@@ -4,6 +4,7 @@
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 
 import ast
+import dataclasses
 import json
 import pathlib
 import re
@@ -14,7 +15,7 @@ import pytest
 
 import webui.emulator_server as server
 from tools import board_sources
-from tools.import_pindefs import NOT_PUBLISHED
+from tools.import_pindefs import DISPUTED, NO_PACKAGE_AT_ALL, NOT_PUBLISHED
 from tools.inventory import (
     MODEL_INDEX,
     NO_SOURCE,
@@ -870,8 +871,9 @@ def test_a_blanked_chip_pin_fails_the_pins_layer_unless_it_says_specifically_why
 
     pins = rewrite("D0", chip_pin=None)
     assert not pins.holds and pins.detail.endswith("unanswered on D0"), pins.detail
-    pins = rewrite("D0", why_null=NOT_PUBLISHED)
-    assert not pins.holds, "import_pindefs' generic sentence says nobody looked"
+    for unanswered in (NOT_PUBLISHED, NO_PACKAGE_AT_ALL, DISPUTED):
+        pins = rewrite("D0", why_null=unanswered)
+        assert not pins.holds, f"import_pindefs' {unanswered!r} answers nothing"
     pins = rewrite("D0", why_null="a dedicated debug pad, not a GPIO")
     assert (pins.holds, pins.summary) == (True, "10+1/11")
 
@@ -896,6 +898,32 @@ def test_a_chip_dropped_from_firmware_verified_fails_the_runs_layer(tmp_path, mo
     monkeypatch.delitem(catalogue.FIRMWARE_VERIFIED, "ESP32-C6")
     runs = collect_twins(boards)[0].runs
     assert (runs.holds, runs.summary) == (False, "ESP32-C6:no")
+
+
+def test_runs_follows_the_catalogue_s_evidence_for_the_board_not_the_chip(
+    tmp_path, monkeypatch
+):
+    """OH-176 lets the catalogue withhold evidence from one board whose chip runs."""
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _real_board(boards, "XIAO-ESP32-C6-DIP")
+    _real_board(boards, "XIAO-ESP32-C6-SMD")
+    placed = catalogue.catalogue
+
+    def withheld(directory=None):
+        return [
+            dataclasses.replace(board, firmware_evidence=None)
+            if board.name == "XIAO-ESP32-C6-DIP" else board
+            for board in placed(directory)
+        ]
+
+    monkeypatch.setattr(catalogue, "catalogue", withheld)
+    assert "ESP32-C6" in catalogue.FIRMWARE_VERIFIED
+    runs = {twin.name: twin.runs for twin in collect_twins(boards)}
+    assert (runs["XIAO-ESP32-C6-DIP"].holds, runs["XIAO-ESP32-C6-DIP"].summary) == (
+        False, "ESP32-C6:no"
+    )
+    assert runs["XIAO-ESP32-C6-SMD"].holds
 
 
 def test_a_footprint_resolves_by_file_name_or_declared_name_and_otherwise_says_which_failure(
@@ -951,6 +979,33 @@ def test_a_named_file_must_be_on_disk_and_says_which_way_it_is_not(tmp_path, mon
     assert away[:2] == (False, "file:not fetched")
     assert f"get_board_sources.py {unfetched.name}" in away.detail
 
+    # A real file inside a fetched source that tools/import_board.py cannot read.
+    (tmp_path / "third_party" / fetched.name / "README.md").write_text("x", encoding="utf-8")
+    notes = _file_geometry(f"third_party/{fetched.name}/README.md")
+    assert notes[:2] == (False, "file:names nothing") and ".brd" in notes.detail
+
+    # A real CAD file outside every source, reached directly or by climbing out.
+    (tmp_path / "other").mkdir()
+    (tmp_path / "other" / "board.brd").write_text("x", encoding="utf-8")
+    for outside in (
+        (tmp_path / "other" / "board.brd").as_posix(),
+        f"third_party/{fetched.name}/../../other/board.brd",
+    ):
+        assert _file_geometry(outside)[:2] == (False, "file:names nothing"), outside
+
+
+def test_a_named_file_that_is_not_vendor_cad_does_not_hold(monkeypatch):
+    """Each of these exists, or may, and none is a board's CAD."""
+    monkeypatch.chdir(REPO)
+    for fake in (
+        "README.md",
+        "webui/boards/Arduino Uno.json",
+        "C:/Windows/win.ini",
+        "third_party/seeed-xiao/../../README.md",
+    ):
+        layer = _file_geometry(fake)
+        assert layer[:2] == (False, "file:names nothing"), (fake, layer)
+
 
 def test_a_new_board_nothing_knows_is_a_row_with_its_layers_missing(tmp_path, monkeypatch):
     """A board that is not a XIAO, with no model and no pindefs, must not crash
@@ -975,6 +1030,9 @@ def test_a_new_board_nothing_knows_is_a_row_with_its_layers_missing(tmp_path, mo
     assert late.pins.summary == "0/1"
     assert not late.runs.holds
     assert late.missing() == ("geometry", "model", "pins", "runs")
+    # The catalogue places every board or none, and runtime_for asks it first.
+    assert after["XIAO-ESP32-C6-DIP"].runs.summary == "refused"
+    assert "Late arrival" in after["XIAO-ESP32-C6-DIP"].runs.detail
 
 
 def test_the_supply_rule_is_read_from_its_one_home_and_a_missing_one_raises(tmp_path):
@@ -1009,6 +1067,12 @@ def test_the_supply_rule_refuses_every_form_it_would_misread(tmp_path):
             pytest.fail(f"{case}: read without complaint")
 
     copy.write_text(real, encoding="utf-8")
+    assert supply_labels(copy) == supply_labels()
+    # A name bound inside a function is that function's, not the module's.
+    copy.write_text(
+        real + '\ndef local():\n    SUPPLY_LABELS = frozenset({"X"})\n',
+        encoding="utf-8",
+    )
     assert supply_labels(copy) == supply_labels()
 
 
