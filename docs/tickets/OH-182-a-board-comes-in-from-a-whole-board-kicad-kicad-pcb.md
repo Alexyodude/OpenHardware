@@ -2,7 +2,7 @@
 id: OH-182
 title: A board comes in from a whole-board KiCad .kicad_pcb, as it does from an EAGLE
   .brd
-status: in-review
+status: in-progress
 priority: P2
 created: '2026-09-29'
 touches:
