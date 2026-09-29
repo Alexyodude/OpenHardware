@@ -36,3 +36,15 @@ ASSETS model3d is answering a different question, and it is not wrong. It search
 Failed on purpose, in temp copies: renamed RP2040.glb -> `footprint:not built`, "/models/RP2040.glb is not served; python tools/import_3d_model.py --all builds it". Blanked D0's chip_pin on ESP32-C6-DIP -> pins 10/11, "none on D0". Dropped ESP32-C6 from FIRMWARE_VERIFIED -> runs `ESP32-C6:no`. Removed `source` -> geometry `none`. A non-XIAO board with no model or pindefs -> a row missing model, pins and runs, with no crash. Seven mutants of inventory.py were each killed by a test.
 
 Full pytest: 2 failed, 2123 passed, 31 skipped. The 2 failures are test_import_3d_model's lens and weld tests, `No module named 'OCP'`, and they fail identically at f77cfc4. check_ticket_claims OK.
+
+**Note 2026-09-29:** Review fixes (REQUEST CHANGES, 8 items), measured 2026-09-29. Commits b4656d3, 142d7b0 and 410c08e.
+
+New headline, as this worktree prints it: "TWINS — 0 of 26 boards hold all four; by layer: geometry 25, model 0 (25 not built here), pins 21, runs 12". The models are not served here because of the junction. With the same models copied into a plain static dir: "TWINS — 9 of 26 boards hold all four; by layer: geometry 25, model 25, pins 21, runs 12". The review's 9 is confirmed: RP2040-SMD and SAMD21-SMD join, because their SWD pads carry specific reasons.
+
+Pins reading: a non-supply pad answers with a `chip_pin` or a specific `why_null`. It fails on `import_pindefs.NOT_PUBLISHED`, which is imported, or on no reason. Geometry now resolves: `source.file` must be a file, `source.footprint` must be a .kicad_mod found by name or by declared name. STM32C5 resolves through `XIAO-STM32C5-SMD.kicad_mod`. Each has a `:not fetched` / `:names nothing` split.
+
+Duplication: `inventory.is_supply` copies the condition test_import_pindefs.py's counting test applies to SUPPLY_LABELS. test_inventory_calls_supply_exactly_the_pads_test_import_pindefs_does evaluates that condition, read by ast, against every pad and five probe labels. tools/DUPLICATION.md is claimed by OH-149, so the copy is recorded here rather than there. It ends when OH-172 moves the rule into a tools module.
+
+Mutants: the review's five (whole = len(twins), inverted tallies, reversed sort, no text rows, no markdown rows) are each killed, along with 20 more over every layer, the supply parser and the heading. That is 25 of 25.
+
+Full pytest: 2 failed, 2129 passed, 31 skipped. The two are the same `No module named 'OCP'` tests in test_import_3d_model.py that fail at f77cfc4. check_ticket_claims OK.
