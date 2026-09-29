@@ -38,6 +38,15 @@ GPIO_ENABLE = esp32c6.GPIO + esp32c6.GPIO_ENABLE
 BUDGET = 110_000
 
 
+def needs_table() -> None:
+    """Skip, naming the fetch, before anything asks for this board's recipe
+    or reads its table (OH-183)."""
+    table = (compiler.BOARD_SUPPORT / "arduino-esp32" / "variants"
+             / "adafruit_feather_esp32c6" / "pins_arduino.h")
+    if not table.is_file():
+        pytest.skip(f"SKIPPED: no {table}; python tools/import_pindefs.py --fetch")
+
+
 def sda(include: str) -> int:
     """The GPIO a variant's own `pins_arduino.h` names `SDA`."""
     table = compiler.BOARD_SUPPORT / include / "pins_arduino.h"
@@ -48,6 +57,7 @@ def sda(include: str) -> int:
 
 
 def test_the_image_is_this_sketch_built_for_this_board_against_its_own_variant():
+    needs_table()
     (include,) = compiler.recipe_for(BOARD).bsp_includes
     assert include == "arduino-esp32/variants/adafruit_feather_esp32c6"
     try:
@@ -62,6 +72,7 @@ def test_the_image_is_this_sketch_built_for_this_board_against_its_own_variant()
 
 def test_the_image_blinks_the_gpio_this_boards_sda_names_on_its_sda_pad():
     pytest.importorskip("core.riscv32.abi")
+    needs_table()
     recipe = compiler.recipe_for(BOARD)
     (own,) = recipe.bsp_includes
     (xiao,) = compiler.RECIPES["ESP32-C6"].bsp_includes
