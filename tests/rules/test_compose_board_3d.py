@@ -386,9 +386,9 @@ EXPLAINS: dict[str, set[str]] = {
         "1X16_ROUND", "1X12_ROUND", "USB_C_CUSB31-CFM2AX-01-X",
         "JSTPH2_BATT", "JST_SH4_RA", "LONGAN-IC_SNR6-1.0-3X3X1MM",
     },
-    # The QT Py's two, on a board shaped like it (OH-186): its castellated
-    # edge is copper, as the QT Py's is, and every chip on it is drawn.
-    "Adafruit KB2040": {"USB_C_CUSB31-CFM2AX-01-X", "SK6805_1515"},
+    # The QT Py's two and its own flash (OH-186). Its castellated edge is
+    # copper, as the QT Py's is, and so is not here.
+    "Adafruit KB2040": {"USB_C_CUSB31-CFM2AX-01-X", "SK6805_1515", "USON8_4X4"},
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
 # same placements, same absences -- so the entries are derived the same way

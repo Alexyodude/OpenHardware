@@ -1141,22 +1141,6 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "where KiCad's footprint puts it, and the vendor's dot says so.",
     ),
     Component(
-        "USON8_4X4", "Package_DFN_QFN", "DFN-8-1EP_4x4mm_P0.8mm_EP2.5x3.6mm",
-        "U5 on the KB2040, value 8MB QSPI Flash and no maker: nine pads "
-        "spanning 2.40 x 3.70 mm, eight leads on a 0.8 mm pitch round a "
-        "2.0 x 3.0 mm exposed pad, and a 4 x 4 mm body Adafruit draw on "
-        "tPlace. KiCad has two eight-lead 4 x 4 mm parts on that pitch, "
-        "listed 2026-09-30 in Package_DFN_QFN and Package_SON: WSON-8_4x4mm"
-        "_P0.8mm, with no exposed pad, and this one. By the rule above the "
-        "pad nearest the land chooses, a JUDGEMENT. A SECOND JUDGEMENT: "
-        "Adafruit name the land USON, and U is the ultra-thin height class "
-        "the QFN-48 row turns a model down for, where this one stands "
-        "0.92 mm and the WSON 0.82. The QFN-48 could be modelled from its "
-        "vendor's KiCad footprint instead; an EAGLE package cannot be yet "
-        "(the Feather's AHT20 is refused for that gap), and this name states "
-        "no height to build from.",
-    ),
-    Component(
         "SOD-323F", "Diode_SMD", "D_SOD-323F",
         "D1 and D3 on the KB2040, NSR0320 by value: two pads 2.00 mm apart, "
         "and SOD-323F, the flat-lead SOD-323, is the package Adafruit's "
@@ -1536,6 +1520,17 @@ ABSENT: dict[str, str] = {
         "tools/model_from_datasheet.py builds a slab from a name like this "
         "one, but reads it out of a KiCad footprint and this is an EAGLE "
         "package. The gap is that reader, filed in OH-180's note."
+    ),
+    "USON8_4X4": (
+        "a QSPI flash on Adafruit's USON land, valued by its size and naming "
+        "no maker: eight leads on a 0.8 mm pitch round a 2.0 x 3.0 mm "
+        "exposed pad, under a 4 x 4 mm body. KiCad's only eight-lead "
+        "4 x 4 mm parts on that pitch, listed 2026-09-30 in Package_DFN_QFN "
+        "and Package_SON, are DFN-8-1EP_4x4mm_P0.8mm_EP2.5x3.6mm, 0.92 mm "
+        "tall over a 2.5 x 3.6 mm pad, and WSON-8_4x4mm_P0.8mm, 0.82 mm "
+        "tall over none. U names the ultra-thin height class and neither "
+        "is in it, so either would draw a thicker part than the land is "
+        "named for; and the name states no height to build one from."
     ),
     "MOUDLE14P-XIAO-HALF-HOLE-PRO": (
         "U9 on the ESP32-C5 and the nRF54L15, and the same edge as the "
