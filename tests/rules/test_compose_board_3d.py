@@ -2346,6 +2346,56 @@ def test_the_two_lists_of_composed_boards_agree():
     )
 
 
+def test_the_importers_boards_are_real_and_each_named_once():
+    """**On the values the importer holds, not on its source text** (OH-186).
+
+    `tools/check_facts.py` asks the same two questions of `COMPOSED` by
+    reading its literal, and the manifest rows are appended to it rather
+    than written in it -- so there the rows go unasked. A board both
+    fetched and composed would have two answers in `index.json`, and a board
+    named here that `webui/boards/` does not hold is a model for nothing.
+    """
+    from tools.import_3d_model import COMPOSED, MODELS
+
+    held = {json.loads(path.read_text(encoding="utf-8"))["board"]
+            for path in (REPO / "webui" / "boards").glob("*.json")}
+    fetched = {board for model in MODELS for board in model.boards}
+    composed = {board for board, _chip, _slug in COMPOSED}
+    assert not fetched & composed, (
+        f"{sorted(fetched & composed)} are both fetched (MODELS) and composed")
+    assert composed | fetched <= held, (
+        f"{sorted((composed | fetched) - held)} have a model and no board "
+        f"file in webui/boards/")
+
+
+def test_a_manifest_row_the_composer_refuses_is_not_in_the_importers_list(
+        monkeypatch):
+    """The importer's `.brd`-only filter, pinned: a KiCad row is refused by
+    the composer (`manifest_composition`), so it must not reach `COMPOSED`
+    either, and an EAGLE row beside it must. The importer is loaded afresh
+    over the patched rows, because it reads them as it loads."""
+    import importlib.util
+
+    from tools import board_manifest
+
+    kicad_row = dataclasses.replace(board_manifest.ROWS[0], board="A KiCad Board",
+                                    cad="board.kicad_pcb")
+    eagle_row = dataclasses.replace(board_manifest.ROWS[0], board="An EAGLE Board",
+                                    cad="board.brd")
+    monkeypatch.setattr(board_manifest, "ROWS", (kicad_row, eagle_row))
+    spec = importlib.util.spec_from_file_location(
+        "import_3d_model_over_patched_rows", REPO / "tools" / "import_3d_model.py")
+    fresh = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, fresh)
+    spec.loader.exec_module(fresh)
+    named = {board for board, _chip, _slug in fresh.COMPOSED}
+    assert "An EAGLE Board" in named, "the importer no longer reads the rows"
+    assert "A KiCad Board" not in named, (
+        "a KiCad row reached COMPOSED, and the composer refuses it")
+    _made, refused = compose.manifest_compositions((kicad_row,))
+    assert "A KiCad Board" in refused
+
+
 def test_every_composed_board_says_how_to_fetch_its_layout():
     """A layout that is not fetched prints the command that gets it. Two
     vendors are fetched two different ways -- Arduino's `.brd` by hand through
@@ -3266,6 +3316,64 @@ def test_every_part_whose_vendor_marks_pin_one_agrees_with_its_model():
         f"feature to compare it with; six did when this was written, so a "
         f"reader has been lost"
     )
+
+
+def test_a_diodes_band_lands_on_the_pad_its_vendor_names_the_cathode():
+    """**A diode's turn, checked by its own two names** (OH-186 review).
+
+    An EAGLE diode names its pads A and C, and a KiCad diode model marks its
+    cathode with a band -- the one colour of the model whose centroid sits
+    furthest off the model's own centre. So the band must land nearer pad C
+    than pad A. Adafruit's cathode marker for the KB2040's SOD-323F is a
+    straight tPlace bar, which `mark_of` does not read, so without this the
+    row's half turn was checked by nothing. Run on the manifest boards.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    cache: dict = {}
+    checked = []
+    for _row, spec in _manifest_specs():
+        if spec is None or not spec.layout.is_file():
+            continue
+        board = compose.read_layout(spec.layout)
+        pads = [pad for name in spec.headers for pad in board.element(name).pads]
+        centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
+                  (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
+        for element in board.elements:
+            named = {pad.number: pad for pad in element.pads}
+            component = compose.correspondence_for(element)
+            if (component is None or component.library != "Diode_SMD"
+                    or set(named) != {"A", "C"}):
+                continue
+            if component.slug not in cache:
+                cache[component.slug] = compose.component_mesh(component, 0.05)
+            mesh, _box = cache[component.slug]
+            everything = [value for positions, _n, _i in mesh.groups.values()
+                          for value in positions]
+            middle = [(max(everything[axis::3]) + min(everything[axis::3])) / 2
+                      for axis in (0, 1)]
+
+            def off_centre(colour):
+                positions = mesh.groups[colour][0]
+                return math.dist(middle, (sum(positions[0::3]) / (len(positions) // 3),
+                                          sum(positions[1::3]) / (len(positions) // 3)))
+            band = max(mesh.groups, key=off_centre)
+            put = compose.place(mesh, element, component.turn, spec.thickness_mm,
+                                centre, component.flip)
+            positions = put.groups[band][0]
+            got = (sum(positions[0::3]) / (len(positions) // 3),
+                   sum(positions[2::3]) / (len(positions) // 3))
+
+            def scene(pad):
+                return (pad.x_mm - centre[0], -(pad.y_mm - centre[1]))
+            to_c, to_a = math.dist(got, scene(named["C"])), math.dist(got, scene(named["A"]))
+            assert to_c < to_a, (
+                f"{spec.board}: {element.name} ({element.package}) turned "
+                f"{component.turn:.0f} puts its band {to_c:.3f} mm from pad C "
+                f"and {to_a:.3f} from pad A")
+            checked.append((spec.board, element.name))
+    if not checked:
+        pytest.skip("SKIPPED: no board layouts are fetched")
+    assert ("Adafruit KB2040", "D1") in checked, checked
 
 
 def test_the_turn_nothing_can_see_is_counted_rather_than_passed_over():
