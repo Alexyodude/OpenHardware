@@ -73,8 +73,8 @@ python tools/inventory.py     # computed, never claimed
 
 ## Boards
 
-Board definitions live in `webui/boards/`, each a JSON pad map beside an SVG
-outline. They are imported from vendor CAD by `tools/import_board.py`;
+Board definitions live in `webui/boards/` as JSON pad maps, each XIAO's beside
+an SVG outline. They are imported from vendor CAD by `tools/import_board.py`;
 pad centres are exact to three decimal places in millimetres, and nothing is
 measured off an image.
 
@@ -110,7 +110,7 @@ Outline and pad labels only, not yet wired:
 - `XIAO-nRF52840-DIP` · `XIAO-nRF52840-SMD`
 - `XIAO-nRF54LM20A-DIP` · `XIAO-nRF54LM20A-SMD`
 - `XIAO-nRF54l15-DIP` · `XIAO-nRF54l15-SMD`
-- `SparkFun Thing Plus ESP32-C6`
+- `SparkFun Thing Plus ESP32-C6`, pad labels only: no SVG outline is generated for it
 
 All XIAO artwork is Seeed Studio's, MIT, from
 [OSHW-XIAO-Series](https://github.com/Seeed-Studio/OSHW-XIAO-Series).

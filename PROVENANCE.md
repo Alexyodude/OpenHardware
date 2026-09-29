@@ -71,8 +71,8 @@ covered in §2.
 
 ## 2. The grey areas, stated plainly
 
-Two categories are defensible rather than obvious. Both are documented in the
-files themselves, which is why the audit could be done at all.
+Three categories are defensible rather than obvious. All three are documented
+in the files themselves, which is why the audit could be done at all.
 
 ### 2a. Part schemas — `webui/parts/schemas/*.json` (12 files)
 
@@ -119,6 +119,28 @@ space, which is the only thread tying them to that file. `webui/pinmap.py`
 notes that pad position is **cosmetic** — wiring is by pin number — so this
 data could be re-derived from an Arduino mechanical drawing at any time
 without changing behaviour.
+
+### 2c. Board pad map — `webui/boards/SparkFun Thing Plus ESP32-C6.json`
+
+The pad centres and the net names that label them are read by
+`tools/board_manifest.py` out of SparkFun's own EAGLE board file,
+`Hardware/Thing_Plus_ESP32_C6.brd`, which is fetched into `third_party/` and
+not tracked here. That file places `FRAME1`, whose package reads "Released
+under the Creative Commons Attribution Share-Alike 4.0 License". The board
+file's `source.licence_evidence` quotes that sentence, and the tool refuses
+the row if the CAD file does not carry it. The vendor repository's README
+points at a `LICENSE.md` the repository does not contain, so this sentence is
+the licence statement the vendor's files make.
+
+Its `chip_pin` values come from arduino-esp32's
+`variants/sparkfun_esp32c6_thing_plus/pins_arduino.h` (LGPL-2.1-or-later),
+as every XIAO's come from its own packages.
+
+**Position:** the same as 2b. What is kept is where each header pad of a real
+board sits, what the vendor named its net, and which GPIO a label means.
+
+**Risk:** low. `source.file` names the drawing, so every value can be re-read
+from it.
 
 ---
 
