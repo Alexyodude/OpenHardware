@@ -910,52 +910,40 @@ CORRESPONDENCE: tuple[Component, ...] = (
     # `stated_kinds` -- and never the package's.
     Component(
         "0603-NO", "Resistor_SMD", "R_0603_1608Metric",
-        "the Feather's resistors on its 0603 land: two pads 1.70 mm apart, "
-        "and the 1.6 x 0.8 mm resistor.",
+        "a resistor on Adafruit's 0603 land: two pads 1.70 mm apart, and the "
+        "1.6 x 0.8 mm resistor.",
     ),
     Component(
         "0603-NO", "Capacitor_SMD", "C_0603_1608Metric",
-        "C4 and C10 on the Feather and C15 on the KB2040, 1 uF each and "
-        "placed from CAP_CERAMIC: the same 1.70 mm land as the row above, "
-        "and the capacitor that stands on it.",
+        "a capacitor on the same 1.70 mm 0603 land, and the 1.6 x 0.8 mm "
+        "chip that stands on it.",
     ),
     Component(
         "0805-NO", "Capacitor_SMD", "C_0805_2012Metric",
-        "the 10 and 22 uF capacitors on the QT Py and the Feather: two pads "
-        "1.90 mm apart, an 0805 land, and the 2.0 x 1.25 mm chip.",
-    ),
-    Component(
-        "0805-NO", "Resistor_SMD", "R_0805_2012Metric",
-        "R8 on the KB2040, on the same 0805 land -- two pads 1.90 mm apart, "
-        "and the 2.0 x 1.25 mm resistor. Its schematic places it from "
-        "microbuilder/RESISTOR, prefix R, and values it FUSE -- a word "
-        "and not ohms -- so the deviceset decides alone, and a resettable "
-        "fuse is drawn as the resistor its vendor's symbol says it is: A "
-        "JUDGEMENT the rule makes, stated here rather than hidden.",
+        "a capacitor on Adafruit's 0805 land: two pads 1.90 mm apart, and the "
+        "2.0 x 1.25 mm chip.",
     ),
     Component(
         "_0805MP", "Capacitor_SMD", "C_0805_2012Metric",
-        "C12 on the Feather, 10 uF: two pads 2.03 mm apart, Adafruit's other "
-        "0805 land, and the same 2.0 x 1.25 mm chip.",
+        "a capacitor on Adafruit's other 0805 land: two pads 2.03 mm apart, "
+        "and the same 2.0 x 1.25 mm chip.",
     ),
     Component(
         "_0402NO", "Capacitor_SMD", "C_0402_1005Metric",
-        "the capacitors on the 0402 land the QT Py and the KB2040 share: "
-        "two pads 1.02 mm apart, and the 1.0 x 0.5 mm chip.",
+        "a capacitor on Adafruit's 0402 land: two pads 1.02 mm apart, and "
+        "the 1.0 x 0.5 mm chip.",
     ),
     Component(
         "_0402NO", "Resistor_SMD", "R_0402_1005Metric",
-        "the resistors on that same land, two pads 1.02 mm apart, placed from "
-        "the same package and library as the capacitors: R1-R6 on the QT Py, "
-        "which were drawn as capacitors until the schematic was read, and "
-        "eleven on the KB2040.",
+        "a resistor on the same 1.02 mm 0402 land, placed from the same "
+        "package and library as the capacitors -- which is why a table keyed "
+        "by package drew them as capacitors until the schematic was read.",
     ),
     Component(
         "_0402", "Inductor_SMD", "L_0402_1005Metric",
-        "L1 on the QT Py, the antenna match, 2 nH from microbuilder/INDUCTOR: "
-        "two pads 1.02 mm apart, an 0402 land, and the 1.0 x 0.5 mm chip. "
-        "L2 beside it is placed from the same deviceset and valued '0 ohm', "
-        "so it is refused rather than drawn as either.",
+        "an inductor on Adafruit's other 0402 land, the antenna match: two "
+        "pads 1.02 mm apart, and the 1.0 x 0.5 mm chip. A part on it that "
+        "its schematic values in ohms is refused rather than drawn as either.",
     ),
     Component(
         "_0603MP_TWO6MIL", "Resistor_SMD", "R_0603_1608Metric",
@@ -1162,9 +1150,8 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "_0603MP", "Capacitor_SMD", "C_0603_1608Metric",
-        "C10 and C12 on the KB2040, 1 uF, both capacitors by their value: "
-        "two pads 1.52 mm apart, the land Adafruit's own description calls "
-        "0603 MicroPitch, and the 1.6 x 0.8 mm chip.",
+        "a capacitor on the land Adafruit's own description calls 0603 "
+        "MicroPitch: two pads 1.52 mm apart, and the 1.6 x 0.8 mm chip.",
     ),
 )
 
@@ -2756,11 +2743,16 @@ class OverPads(Mesh):
 #: The KiCad library folders that each hold one kind of passive, which is
 #: the kind a row drawing from one of them draws.
 PASSIVE_KINDS = {"Resistor_SMD": "resistor", "Capacitor_SMD": "capacitor",
-                 "Inductor_SMD": "inductor"}
+                 "Inductor_SMD": "inductor", "Fuse": "fuse"}
 
 #: EAGLE's `prefix`, which a deviceset states once for every part placed from
-#: it -- the letter a reference designator is numbered after.
+#: it: the letters a reference designator is numbered after. Only an EMPTY
+#: prefix is silence. Any other names a kind, and one not in this table names
+#: a kind that is none of these three -- `D`, `U`, `FB`, `LED`, `CONN`.
 PREFIX_KINDS = {"R": "resistor", "C": "capacitor", "L": "inductor"}
+
+#: The kind a prefix outside `PREFIX_KINDS` states.
+OTHER = "other"
 
 #: A value that can only be a resistance: a unit (`0 ohm`, `10Ω`, `4R7`), or a
 #: multiplier and nothing else (`10K`, `5.1K`, `4K7`). A bare number states no
@@ -2768,53 +2760,90 @@ PREFIX_KINDS = {"R": "resistor", "C": "capacitor", "L": "inductor"}
 _OHMS = re.compile(r"\s*\d+(?:\.\d+)?\s*(?:[kKM]?\s*(?:ohms?|Ohms?|OHMS?|Ω)|[kKMR]\d*)\s*")
 #: A value that can only be a capacitance: a number, a multiplier, farads.
 _FARADS = re.compile(r"\s*\d+(?:\.\d+)?\s*[pnuµμ]?[Ff]\s*")
+#: Values that name a kind in a word. Closed: a word is read only once it is
+#: in this table, because a value is free text.
+KIND_WORDS = {"FUSE": "fuse"}
+#: Values that say a part is NOT fitted, and the one that says nobody has
+#: decided. Either way drawing the part would assert it is there.
+NOT_FITTED = frozenset({"DNP", "NC", "NF", "DNF", "DNI"})
+UNDECIDED = frozenset({"TBD"})
 
 
 def value_kind(value: str) -> str | None:
-    """The kind of passive a value's unit states, or None where it states none."""
+    """The kind of part a value states -- by its unit, or by a word in
+    `KIND_WORDS` -- or None where it states none."""
     if _OHMS.fullmatch(value):
         return "resistor"
     if _FARADS.fullmatch(value):
         return "capacitor"
-    return None
+    return KIND_WORDS.get(value.strip().upper())
 
 
-def stated_kinds(schematic: pathlib.Path) -> dict[str, tuple[str | None, str]]:
-    """Each part's kind of passive as the vendor's schematic states it, with
-    the words saying which statement decided -- or None, and why not.
+@dataclasses.dataclass(frozen=True)
+class Statement:
+    """What a vendor's schematic says about one part (OH-187)."""
 
-    Two statements and nothing else: the `prefix` of the deviceset the part is
-    placed from, and its value where that parses as ohms or farads. Where both
-    speak and disagree the part is refused, as a connector whose name and land
-    disagree is (`JST_SH4_RA`): drawing either would be choosing between two
-    statements of the vendor's.
+    #: A kind in `PREFIX_KINDS`, `KIND_WORDS` or `OTHER`; None where neither
+    #: the prefix nor the value speaks, or where they disagree.
+    kind: str | None
+    #: The deviceset's prefix where it spoke, and the value where it spoke.
+    prefix: str | None
+    value: str | None
+    #: Why the part is not drawn at all, or None.
+    refused: str | None = None
+
+
+def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
+    """Each part as the vendor's schematic states it.
+
+    Two statements of kind and nothing else: the `prefix` of the deviceset
+    the part is placed from, and its value where that is ohms, farads or a
+    word in `KIND_WORDS`. Where both speak and disagree the part is refused,
+    as a connector whose name and land disagree is (`JST_SH4_RA`): drawing
+    either would be choosing between two statements of the vendor's. A part
+    the schematic says is not fitted -- by its value, or `populate="no"` --
+    or whose value is still `TBD` is refused whatever its kind.
+
+    Devicesets are keyed by library AND urn, because one schematic can carry
+    two libraries under one name; the Feather's carries two `supply1`s.
     """
     root = eagle._open(schematic, "schematic").find("drawing/schematic")
-    prefixes = {(library.get("name"), deviceset.get("name")): deviceset.get("prefix", "")
+    prefixes = {(library.get("name"), library.get("urn", ""), deviceset.get("name")):
+                deviceset.get("prefix", "")
                 for library in root.iter("library")
                 for deviceset in library.iter("deviceset")}
-    stated: dict[str, tuple[str | None, str]] = {}
+    stated: dict[str, Statement] = {}
     for part in root.iter("part"):
         name, value = part.get("name"), part.get("value", "")
         where = f"{part.get('library')}/{part.get('deviceset')}"
-        prefix = prefixes.get((part.get("library"), part.get("deviceset")), "")
-        by_prefix, by_value = PREFIX_KINDS.get(prefix), value_kind(value)
-        said = " and ".join(
-            [f"deviceset {where}'s prefix {prefix}"] * bool(by_prefix)
-            + [f"value {value!r}"] * bool(by_value))
-        if by_prefix and by_value and by_prefix != by_value:
-            stated[name] = (None, (
-                f"{schematic.name} places {name} from {where}, whose prefix "
-                f"{prefix} says {by_prefix}, and values it {value!r}, which "
-                f"says {by_value}: two statements of its kind that disagree, "
-                f"and drawing either would be choosing between them"))
-        elif said:
-            stated[name] = (by_prefix or by_value, said)
+        prefix = prefixes.get((part.get("library"), part.get("library_urn", ""),
+                               part.get("deviceset")), "")
+        by_prefix = (PREFIX_KINDS.get(prefix, OTHER) if prefix else None)
+        by_value = value_kind(value)
+        spoke = {"prefix": prefix if by_prefix else None,
+                 "value": value if by_value else None}
+        word = value.strip().upper()
+        if part.get("populate") == "no":
+            refused = f'{schematic.name} places {name} with populate="no": not fitted'
+        elif word in NOT_FITTED:
+            refused = f"{schematic.name} values {name} {value!r}: not fitted"
+        elif word in UNDECIDED:
+            refused = (f"{schematic.name} values {name} {value!r}: whether it is "
+                       f"fitted is not stated, and drawing it would say it is")
+        elif (by_prefix and by_value and by_prefix != by_value
+              and not (by_prefix == OTHER and by_value not in PREFIX_KINDS.values())):
+            prefix_says = ("a kind none of R, C and L" if by_prefix == OTHER
+                           else by_prefix)
+            refused = (f"{schematic.name} places {name} from {where}, whose prefix "
+                       f"{prefix} says {prefix_says}, "
+                       f"and values it {value!r}, which says {by_value}: two "
+                       f"statements of its kind that disagree, and drawing either "
+                       f"would be choosing between them")
         else:
-            stated[name] = (None, (
-                f"nothing in {schematic.name} states what kind of part {name} "
-                f"is: {where}'s prefix is {prefix!r} and its value {value!r} "
-                f"is neither ohms nor farads"))
+            refused = None
+        kind = None if refused else (
+            by_value if by_prefix in (None, OTHER) and by_value else by_prefix)
+        stated[name] = Statement(kind, refused=refused, **spoke)
     return stated
 
 
@@ -2824,21 +2853,49 @@ def correspondence_for(element: eagle.Element,
 
     A row naming the element's own vendor library wins over one that names
     none, because the library is the vendor saying which part a shared package
-    name is -- see `Component.vendor_library`. Given the `kind` the vendor's
-    schematic states (`stated_kinds`), a row drawing a passive is returned
-    only if it draws that kind.
+    name is -- see `Component.vendor_library`. Given a `kind` the vendor's
+    schematic states (`stated_kinds`), only a row drawing that kind is
+    returned. Without one, a package with two rows naming no library is
+    answered with None: which of them is not this function's to guess.
     """
-    fallback = None
+    fallbacks = []
     for component in CORRESPONDENCE:
         if component.package != element.package:
             continue
-        if kind is not None and PASSIVE_KINDS.get(component.library, kind) != kind:
+        if kind is not None and PASSIVE_KINDS.get(component.library) != kind:
             continue
         if component.vendor_library == element.library:
             return component
-        if component.vendor_library is None and fallback is None:
-            fallback = component
-    return fallback
+        if component.vendor_library is None:
+            fallbacks.append(component)
+    return fallbacks[0] if len(fallbacks) == 1 else None
+
+
+def drawn_from(element: eagle.Element, statements: dict[str, Statement] | None,
+               schematic: str = "the schematic") -> tuple[Component | None, str | None]:
+    """The row a placement is drawn from, or why it is not drawn at all.
+
+    `statements` is None for a board with no schematic -- the Uno, the XIAOs
+    -- which compose from the table alone, as they always have. Otherwise a
+    part the schematic refuses is refused; a resistor, capacitor, inductor or
+    fuse is drawn only from a row of the kind stated; and a part whose kind
+    nothing states is refused where its package is a passive's. A part stated
+    to be another kind -- an ESD diode in a resistor's moulding -- is drawn
+    from its row as before: the gate is what the part is, not the row.
+    """
+    if statements is None:
+        return correspondence_for(element), None
+    said = statements.get(element.name)
+    if said is not None and said.refused:
+        return None, said.refused
+    if said is not None and said.kind in PASSIVE_KINDS.values():
+        return correspondence_for(element, said.kind), None
+    if (said is None or said.kind is None) and any(
+            row.package == element.package and row.library in PASSIVE_KINDS
+            for row in CORRESPONDENCE):
+        return None, (f"nothing in {schematic} states what kind of part "
+                      f"{element.name} is, and its package is a passive's")
+    return correspondence_for(element), None
 
 
 def cached(component: Component, url: str, suffix: str) -> pathlib.Path:
@@ -3817,27 +3874,29 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     #: rather than given an ABSENT entry apiece, because SparkFun's file alone
     #: places 63 pin labels, each its own package.
     padless: list[str] = []
-    #: Each passive drawn, as `kind, by what said so`; and each one refused
-    #: because nothing states its kind or two statements disagree (OH-187).
-    #: Only for a board with a schematic to read -- the Uno and the XIAOs
-    #: compose as they always have.
-    statements = stated_kinds(spec.schematic) if spec.schematic is not None else {}
-    kinds: dict[str, str] = {}
+    #: Each passive drawn, and which of its schematic's statements said what
+    #: kind it is; and each part that schematic refuses (OH-187). Only for a
+    #: board with a schematic to read -- the Uno and the XIAOs compose as they
+    #: always have.
+    statements = (stated_kinds(spec.schematic) if spec.schematic is not None
+                  else None)
+    kinds: dict[str, dict[str, str]] = {}
     kind_refused: list[tuple[eagle.Element, str]] = []
     for element in [*board.elements, *extra]:
-        component = correspondence_for(element)
-        if (component is not None and spec.schematic is not None
-                and component.library in PASSIVE_KINDS):
-            kind, why = statements.get(element.name, (
-                None, f"{spec.schematic.name} places no part {element.name}"))
-            if kind is None:
-                kind_refused.append((element, why))
-                continue
-            component = correspondence_for(element, kind)
-            if component is None:
-                unmodelled.append(f"{element.name} ({element.package}, a {kind})")
-                continue
-            kinds[element.name] = f"{kind}, by {why}"
+        component, refused = drawn_from(
+            element, statements,
+            spec.schematic.name if spec.schematic is not None else "")
+        if refused is not None:
+            kind_refused.append((element, refused))
+            continue
+        said = statements.get(element.name) if statements is not None else None
+        if (component is not None and said is not None
+                and said.kind in PASSIVE_KINDS.values()):
+            kinds[element.name] = {
+                key: text for key, text in (("kind", said.kind),
+                                            ("prefix", said.prefix),
+                                            ("value", said.value))
+                if text is not None}
         if component is None:
             if element.package not in ABSENT:
                 if element.pads:
@@ -3959,16 +4018,13 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         print(f"  modelled {len(modelled)}: {', '.join(modelled)} "
               f"-- built here, not fetched; see tools/model_from_datasheet.py")
     if kinds:
-        prefix = sum("'s prefix " in why for why in kinds.values())
-        value = sum(" value '" in f" {why}" for why in kinds.values())
+        prefix = sum("prefix" in said for said in kinds.values())
+        value = sum("value" in said for said in kinds.values())
         both = prefix + value - len(kinds)
         print(f"  kinds   {len(kinds)} passive(s) drawn as the kind "
               f"{spec.schematic.name} states: {both} by the deviceset's prefix "
-              f"and a value in ohms or farads, {prefix - both} by the prefix "
-              f"alone, {value - both} by the value alone")
-    for element, why in kind_refused:
-        print(f"  refused {element.name} ({element.package}), a passive not "
-              f"drawn as a guess: {why}")
+              f"and the value, {prefix - both} by the prefix alone, "
+              f"{value - both} by the value alone")
     if unmodelled:
         print(f"  no model {len(unmodelled)} placement(s) drawn as nothing, "
               f"with no ABSENT entry saying why: "
@@ -3985,20 +4041,31 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     # **A part refused and a pad with no part are two different gaps**, and
     # they are counted apart: the first is something a reader will look for
     # and not find, the second is drawn already as copper, ink or a hole.
-    absent = [e for e in board.elements if e.package in ABSENT]
-    for label, group, what in (
-            ("refused", [e for e in absent if NO_BODY not in ABSENT[e.package]],
-             "a part with no published model, each with its reason"),
-            ("bodyless", [e for e in absent if NO_BODY in ABSENT[e.package]],
-             "copper, ink or a hole, with no body to draw")):
+    #: A part its schematic refuses is counted there and nowhere else, whatever
+    #: its package: a not-fitted part is not absent for want of a model.
+    stated_off = {element.name for element, _why in kind_refused}
+    absent = [e for e in board.elements
+              if e.package in ABSENT and e.name not in stated_off]
+    parts = [e for e in absent if NO_BODY not in ABSENT[e.package]]
+    if parts or kind_refused:
+        stated = ("" if spec.schematic is None else
+                  f", and {len(kind_refused)} by what their own schematic states")
+        print(f"  refused {len(parts) + len(kind_refused)} placement(s): "
+              f"{len(parts)} of {len({e.package for e in parts})} package(s) "
+              f"with no published model{stated} -- each with its reason")
+    for label, group in (("absent ", parts), ("bodyless", [
+            e for e in absent if NO_BODY in ABSENT[e.package]])):
         packages = sorted({e.package for e in group})
-        if packages:
-            print(f"  {label} {len(group)} placement(s) of {len(packages)} "
-                  f"package(s): {what}")
+        if packages and label == "bodyless":
+            print(f"  bodyless {len(group)} placement(s) of {len(packages)} "
+                  f"package(s): copper, ink or a hole, with no body to draw")
         for package in packages:
             here = [e.name for e in group if e.package == package]
             print(f"  absent  {'/'.join(here)} ({package}): "
                   f"{ABSENT[package][:60]}...")
+        if label == "absent ":
+            for element, why in kind_refused:
+                print(f"  refused {element.name} ({element.package}): {why}")
 
     whole = merge(*pieces)
     print(f"  mesh    {whole.triangles():,} triangles, "
@@ -4087,10 +4154,9 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             },
             "absent": [
                 {"package": package, "why": why,
-                 "elements": [e.name for e in board.elements
-                              if e.package == package]}
+                 "elements": [e.name for e in absent if e.package == package]}
                 for package, why in sorted(ABSENT.items())
-                if any(e.package == package for e in board.elements)
+                if any(e.package == package for e in absent)
             ] + [
                 # A passive refused for its kind is refused alone, not its
                 # package: the same land carries parts that are drawn.
