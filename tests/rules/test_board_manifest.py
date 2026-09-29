@@ -329,6 +329,49 @@ def test_the_pilots_reasons_are_what_its_schematic_says():
                     if import_schematic.gpio_of(ref.pin) is not None], label
 
 
+def test_every_other_fact_in_the_pilots_reasons_is_read_off_its_schematic():
+    """The part and pin per net are above. Each other fact the prose states
+    is here: the words in the reason, and the schematic saying it."""
+    row = ROWS[0]
+    _fetched(row)
+    schematic = eagle.read_schematic(board_manifest.cad_path(row).with_suffix(".sch"))
+    nets = {net.name: net for net in schematic.nets}
+    reasons = dict(row.reasons)
+
+    def parts_on(net: str) -> set[str]:
+        """The parts on a net other than the header pad the reason is for."""
+        return {ref.part for ref in nets[net].pins} - {"J1"}
+
+    # ESP_EN: "U1's `EN`, the RESET switch, R11 and C5, and U1's GPIOs are
+    # its `IOn` pins".
+    assert parts_on("ESP_EN") == {"U1", "RESET", "R11", "C5"}
+    assert "SWITCH" in schematic.part("RESET").deviceset
+    gpios = [pin for pin in schematic.pins_of("U1") if pin not in ("3V3", "EN", "GND")]
+    assert gpios and all(re.search(r"(^|/)IO\d+$", pin) for pin in gpios), gpios
+    for words in ("U1's `EN`", "the RESET switch, R11 and C5", "its `IOn` pins"):
+        assert words in reasons["ESP_EN"], words
+
+    # VREG_EN: "U2's `EN` (an RT9080-33GJ5, whose `OUT` is the 3.3V net)
+    # and R8, and on no pin of U1".
+    assert parts_on("VREG_EN") == {"U2", "R8"}
+    assert schematic.part("U2").value == "RT9080-33GJ5"
+    assert ("U2", "OUT") in {(ref.part, ref.pin) for ref in nets["3.3V"].pins}
+    for words in ("U2's `EN` (an RT9080-33GJ5, whose `OUT` is the 3.3V net) and R8",
+                  "on no pin of U1"):
+        assert words in reasons["VREG_EN"], words
+
+    # LED_DO: "this pad and pin 1 of the jumper RGB (JUMPER-SMT_2_NO), whose
+    # pin 2 is the `DO` of the WS2812 D5".
+    assert parts_on("LED_DO") == {"RGB"}
+    assert schematic.part("RGB").deviceset == "JUMPER-SMT_2_NO"
+    (beyond,) = [net for net in schematic.nets
+                 if ("RGB", "2") in {(ref.part, ref.pin) for ref in net.pins}]
+    assert ("D5", "DO") in {(ref.part, ref.pin) for ref in beyond.pins}
+    assert schematic.part("D5").deviceset == "WS2812"
+    assert ("pin 1 of the jumper RGB (JUMPER-SMT_2_NO), whose pin 2 is the `DO` "
+            "of the WS2812 D5") in reasons["LED_DO"]
+
+
 def test_no_row_label_keys_its_chips_module_table():
     """Each row's `assumption` says no level is read through its chip
     module's table for any pad; `webui.api.header_key` is that join."""
