@@ -792,7 +792,7 @@ def test_every_rows_chip_is_the_catalogues():
         assert import_pindefs.BOARDS[row.board].chip == row.chip
 
 
-def test_no_row_inherits_its_chips_evidence():
+def test_no_row_inherits_its_chips_evidence(monkeypatch):
     """rules/board-claims.md §6 and §7: the register stays keyed by chip, and
     a row carries none of it -- only its own `BOARD_FIRMWARE_VERIFIED` entry,
     or nothing and the reason."""
@@ -804,10 +804,15 @@ def test_no_row_inherits_its_chips_evidence():
         assert board.firmware_evidence == own, board
         assert board.firmware_evidence != catalogue.FIRMWARE_VERIFIED[row.chip]
         assert (board.firmware_withheld is None) == (own is not None), board
-    withheld = boards["SparkFun Thing Plus ESP32-C6"].firmware_withheld
-    assert "variants/sparkfun_esp32c6_thing_plus" in withheld, withheld
-    assert "BOARD_FIRMWARE_VERIFIED names no test" in withheld, withheld
     assert boards["Adafruit Feather ESP32-C6"].firmware_verified is True
+    assert boards["SparkFun Thing Plus ESP32-C6"].firmware_verified is True
+    # With its own entry (OH-185) taken out, it is withheld again, naming its
+    # own variant, and its chip's entry is still not its own.
+    monkeypatch.delitem(catalogue.BOARD_FIRMWARE_VERIFIED, "SparkFun Thing Plus ESP32-C6")
+    pilot = {b.name: b for b in catalogue.catalogue()}["SparkFun Thing Plus ESP32-C6"]
+    assert pilot.firmware_evidence is None, pilot
+    assert "variants/sparkfun_esp32c6_thing_plus" in pilot.firmware_withheld, pilot
+    assert "BOARD_FIRMWARE_VERIFIED names no test" in pilot.firmware_withheld, pilot
     # And the XIAO sibling keeps the chip's: the register was not weakened.
     assert boards["XIAO-ESP32-C6-DIP"].firmware_verified is True
     assert boards["XIAO-ESP32-C6-DIP"].firmware_withheld is None
