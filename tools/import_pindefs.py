@@ -1638,9 +1638,15 @@ MANIFEST: dict[str, Board] = {
     entry.board: Board(
         entry.chip,
         (arduino_flat(entry.package, entry.variant, extras=entry.labels),),
+        reasons=entry.reasons,
     )
     for entry in board_manifest.ROWS
 }
+if set(MANIFEST) & set(BOARDS):
+    raise PindefError(
+        f"tools/board_manifest.py has a row for {sorted(set(MANIFEST) & set(BOARDS))}, "
+        f"which BOARDS already registers; a row may not replace a board"
+    )
 BOARDS.update(MANIFEST)
 
 
@@ -2360,6 +2366,7 @@ def filled_board(
     name: str,
     bsp_dir: pathlib.Path = BSP_DIR,
     boards_dir: pathlib.Path = BOARDS_DIR,
+    modules_dir: pathlib.Path | None = None,
 ) -> dict:
     """The board file's document with the report written into it.
 
@@ -2369,6 +2376,10 @@ def filled_board(
     key and could not be one: the nRF54LM20A SMD footprint numbers all three
     of its `GND` pads `46`, which is how Seeed's CAD names a multi-pad net.
     Everything else in the document is kept as it is.
+
+    `modules_dir` is where the chip modules are when the file is not beside
+    them: `tools/board_manifest.py` builds a whole board file from pads it
+    staged elsewhere, so that a failure leaves `webui/boards/` untouched.
     """
     path = board_path(name, boards_dir)
     document = json.loads(path.read_text(encoding="utf-8"))
@@ -2422,7 +2433,9 @@ def filled_board(
         "disputed": report["disputed"],
         "on_board": report["on_board"],
     }
-    described = module_path(report["chip"], boards_dir).is_file()
+    described = module_path(
+        report["chip"], boards_dir if modules_dir is None else modules_dir
+    ).is_file()
     keyed_by = header_boards(report["chip"]) if name in MANIFEST else ()
     filled_document: dict = {}
     for key, value in document.items():

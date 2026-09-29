@@ -295,11 +295,16 @@ def chip_for(board_name: str) -> str:
     board someone must look at -- silently filing it under an invented chip is
     how a catalogue starts lying.
     """
+    rows = [row.chip for row in board_manifest.ROWS if row.board == board_name]
+    if board_name in IRREGULAR and rows:
+        raise CatalogueError(
+            f"{board_name!r} is in IRREGULAR as {IRREGULAR[board_name]} and a row "
+            f"in tools/board_manifest.py as {rows[0]}; name it in one place"
+        )
     if board_name in IRREGULAR:
         return IRREGULAR[board_name]
-    for row in board_manifest.ROWS:
-        if row.board == board_name:
-            return row.chip
+    if rows:
+        return rows[0]
     if not board_name.startswith("XIAO-"):
         raise CatalogueError(
             f"cannot tell which chip is on {board_name!r}: it does not start "

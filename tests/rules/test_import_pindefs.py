@@ -1779,7 +1779,8 @@ def test_a_pad_of_the_on_board_debugger_is_not_given_the_boards_own_mcu_pin():
 #: Labels with no MCU pin behind them by construction. Not a guess: the board
 #: modules already take this position, and
 #: `test_the_uno_maps_every_pad_with_an_mcu_pin_behind_it` holds
-#: `atmega328p.HEADER` free of exactly this set.
+#: `atmega328p.HEADER` free of eight of them: `AREF`, `NC`, `IOREF`,
+#: `RESET`, `3V3`, `5V`, `VIN` and `GND`.
 SUPPLY_LABELS = frozenset({
     "GND", "3V3_OUT", "VBUS", "VBAT", "VIN", "5V", "3V3", "EN", "NC",
     "AREF", "IOREF", "RESET", "PAD", "BAT", "VDD", "VCC", "RST",
@@ -1841,7 +1842,8 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # symbol library; they moved out of `specific`, which is why that number
     # falls by exactly what this one rises by. 365 until the SparkFun Thing
     # Plus ESP32-C6 (OH-176) added its 28 pads: 5 named by its arduino-esp32
-    # variant, 4 supplies, and 19 generic.
+    # variant, 4 supplies, 3 with a reason read off its schematic, and 16
+    # generic.
     assert naming == 370, naming
     assert supplies == 157, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
@@ -1853,9 +1855,10 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # 49 once the nRF54L15's USER_LED stopped saying nobody had published it:
     # Seeed's board file and Zephyr both put it on P2.00, which the reason
     # names while `chip_pin` stays null, because the vendor spells that pad
-    # two ways and no file here joins them.
-    assert specific == 49, specific
-    assert generic == 34, (
+    # two ways and no file here joins them. 52 with the Thing Plus's ESP_EN,
+    # VREG_EN and LED_DO.
+    assert specific == 52, specific
+    assert generic == 31, (
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
