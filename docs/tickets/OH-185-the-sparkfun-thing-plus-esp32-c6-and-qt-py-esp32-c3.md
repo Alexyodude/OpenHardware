@@ -7,6 +7,31 @@ priority: P1
 created: '2026-09-29'
 touches:
 - docs/tickets/OH-185-*
+- docs/esp-idf-reference.md
+- rules/board-claims.md
+- tests/rules/test_board_claims.py
+- tests/rules/test_board_manifest.py
+- tests/webui/feather_esp32c6/blink.bin
+- tests/webui/qtpy_esp32c3/qtpy_blink.bin
+- tests/webui/qtpy_esp32c3/qtpy_blink.ino
+- tests/webui/sparkfun_esp32c6/sparkfun_blink.bin
+- tests/webui/sparkfun_esp32c6/sparkfun_blink.ino
+- tests/webui/test_board_catalogue.py
+- tests/webui/test_compile.py
+- tests/webui/test_qtpy_esp32c3_board.py
+- tests/webui/test_soc_caps.py
+- tests/webui/test_sparkfun_esp32c6_board.py
+- webui/arduino/cores/openhardware/Arduino.h
+- webui/arduino/cores/openhardware/wiring.c
+- webui/arduino/variants/xiao_esp32c3/link.ld
+- webui/arduino/variants/xiao_esp32c3/oh_board.h
+- webui/arduino/variants/xiao_esp32c3/soc/soc_caps.h
+- webui/arduino/variants/xiao_esp32c5/oh_board.h
+- webui/arduino/variants/xiao_esp32c5/soc/soc_caps.h
+- webui/arduino/variants/xiao_esp32c6/oh_board.h
+- webui/arduino/variants/xiao_esp32c6/soc/soc_caps.h
+- webui/boards/catalogue.py
+- webui/compile.py
 ---
 
 Part of OH-174. The SparkFun Thing Plus ESP32-C6 and the Adafruit QT Py ESP32-C3 hold geometry and pins, and OH-180 composes their models, but neither builds against its own variant, so neither can hold the runs layer. OH-179 and OH-183 measured why, by asking the compiler:
@@ -31,3 +56,5 @@ webui/arduino/** is OH-161's and is lent to this ticket for its duration.
 **Note 2026-09-30:** Correction and close-out, after rebasing lane2 onto master with OH-181 done. HASHES: the notes above name commits from before two rebases. The first note's 4a55c25 (BUILD) is now 232ed06 and its ef9c833 (RUNS) is now bd2f9ba; the review round's 726c5ac is now b06b753, 91a7121 is 634a746 and d809dba is 1177dcb. The ticket-note commits are d0b40ec and 988a6f4. XIAO IMAGES: the ticket's done-criterion "the XIAO images are byte-identical" is no longer literally met, and the orchestrator accepted that. Since 634a746, every ESP32 image that calls pinMode or digitalWrite differs in exactly three instructions, mask_of's limit (li 31 -> 21 on the C3, 28 on the C5, 30 on the C6), at the same size. With that limit forced back to 32, every recipe, command and image of the other boards was identical, and their commands still are. TEST_BOARD_MANIFEST (2f8976b): with OH-181 closed the file was free. test_no_row_inherits_its_chips_evidence now asserts the Thing Plus is verified, and that with its entry removed by monkeypatch.delitem it has no evidence and its firmware_withheld names variants/sparkfun_esp32c6_thing_plus. It fails with the delitem line removed. The KB2040's inputs are fetched into lane2's third_party (python tools/get_board_sources.py adafruit-kb2040; its .sch was missing), so its manifest tests run here instead of skipping: 48 of 48 in that file pass. test_each_rows_verdict_is_the_compilers_own passes with the KB2040 row. SUITE: 2 failed (the OCP pair in test_import_3d_model), 2334 passed, 33 skipped. Every CLAUDE.md checker, check_facts and ticket_guard --self-test (6/6) OK. Still open: OH-185's claims on the paths it edited were never added, because this session was not permitted to run tickets set --touch.
 
 **Note 2026-09-30:** 2026-09-30: approved by an independent review over two rounds (cited values, XIAO identity over 372 commands, run evidence under image swaps, claims-checker cases, and the pin-limit change as exactly mask_of's three li immediates). Merged to master by fast-forward at c456ea1. Full suite on master run by the orchestrator: 2 failed (the OCP pair in test_import_3d_model, OH-163), 2334 passed, 33 skipped; with that file deselected, 2278 passed, 0 failed. TWINS: 9 of 30; runs 15 (SparkFun Thing Plus ESP32-C6 and QT Py ESP32-C3 now hold runs). Their model layer waits on OH-180 (lane3), which is held for three COMPOSED rows the permission classifier would not let an agent add. This ticket's own path claims were never recorded: the classifier refused the agent's tickets set --touch; left for the operator. webui/arduino/**, webui/compile.py and tests/webui/test_compile.py return to OH-161.
+
+**Note 2026-09-30:** 2026-09-30: the paths this ticket edited are now recorded in touches, read from git log of its commits (the operator asked for it once lane3 was cleared; the earlier refusals were the agent's, and this attempt was allowed). The ticket is done, so it owns nothing now; the list is the record.
