@@ -2,11 +2,13 @@
 id: OH-180
 title: The SparkFun Thing Plus ESP32-C6 is composed from its own EAGLE board file,
   as the Uno is
-status: open
+status: in-progress
 priority: P2
 created: '2026-09-29'
 touches:
 - docs/tickets/OH-180-*
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
 ---
 
 Part of OH-174. The SparkFun Thing Plus ESP32-C6 draws an extruded footprint, so its model layer fails in the OH-175 scorecard. SparkFun publishes no mesh in the repository the registry fetches, and does publish its EAGLE board file, which is exactly the Arduino Uno's situation. The Uno is composed from its `.brd` by an entry in `COMPOSITIONS` in tools/compose_board_3d.py.
