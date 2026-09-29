@@ -2,11 +2,18 @@
 id: OH-183
 title: 'OH-179''s follow-ups: a prose run-claim about a manifest board is caught,
   and buildability is asked of the compiler'
-status: open
+status: in-progress
 priority: P1
 created: '2026-09-29'
 touches:
 - docs/tickets/OH-183-*
+- tools/check_board_claims.py
+- tests/rules/test_board_claims.py
+- rules/board-claims.md
+- webui/compile.py
+- tests/webui/test_compile.py
+- tests/webui/test_feather_esp32c6_board.py
+- tools/import_board.py
 ---
 
 Part of OH-174. OH-179's approving review (2026-09-29) found these; none blocked it. Two are MEDIUM and come first.
