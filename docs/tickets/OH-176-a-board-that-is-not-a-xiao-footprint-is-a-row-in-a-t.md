@@ -2,7 +2,7 @@
 id: OH-176
 title: A board that is not a XIAO footprint is a row in a table, and the SparkFun
   Thing Plus ESP32-C6 is the first row
-status: open
+status: in-review
 priority: P1
 created: '2026-09-29'
 touches:
@@ -26,3 +26,5 @@ Pilot: the SparkFun Thing Plus ESP32-C6. Every input is already on disk: third_p
 Keep the XIAO path working unchanged: the 25 XIAO files must regenerate byte-identical. Moving the Uno onto the table is welcome if it falls out; if its derivation or pindefs would change, say what changed and why rather than forcing it.
 
 Done when the pilot board file is generated from its row, its pads trace to the vendor's .brd coordinates, its signal pads name chip pins from the arduino-esp32 variant with the file that named each, the README board list and every existing test agree, and a row pointing at a missing file has been shown to fail.
+
+**Note 2026-09-29:** 2026-09-29: tools/board_manifest.py holds one row (source, CAD, --select, chip, package, variant, opted-in labels); import_board.py writes the pads, import_pindefs.py the pins, catalogue.chip_for reads the chip. webui/boards/SparkFun Thing Plus ESP32-C6.json: 28 pads off J1 of Thing_Plus_ESP32_C6.brd, labels = the vendor's nets; 5 name a chip pin (IO6/SDA, IO7/SCL, IO16/TX, IO17/RX, IO19/SCK) from arduino-esp32 variants/sparkfun_esp32c6_thing_plus/pins_arduino.h @ 2787dab, each agreeing with the IO number in the net name. The variant's A0-A5, MOSI, MISO name no pad label here (the schematic's J1 pin names do: A0 is on net IO0), so those pads stay null; joining them needs the .sch, not done. A row with a missing CAD and variant exits 2 naming both files. The 25 XIAO files and 4 module HEADER blocks regenerate identical to their HEAD blobs. Full pytest: 4 failed, 2124 passed, 31 skipped. 2 are test_check_facts: CLAUDE.md says 25 of 26 boards draw a model and the one left is the STM32C5; now 27 boards and the SparkFun board has no model. CLAUDE.md is OH-149's, not edited. 2 are test_import_3d_model (No module named OCP), which fail the same way at f77cfc4. No SVG is generated for the new board.
