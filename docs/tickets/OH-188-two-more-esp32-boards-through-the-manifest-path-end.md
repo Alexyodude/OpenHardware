@@ -2,11 +2,24 @@
 id: OH-188
 title: 'Two more ESP32 boards through the manifest path end to end: SparkFun Pro Micro
   ESP32-C3 and Qwiic Pocket ESP32-C6'
-status: open
+status: in-progress
 priority: P1
 created: '2026-09-30'
 touches:
 - docs/tickets/OH-188-*
+- tools/board_sources.py
+- tools/board_manifest.py
+- webui/boards/SparkFun Pro Micro ESP32-C3.json
+- webui/boards/SparkFun Qwiic Pocket ESP32-C6.json
+- README.md
+- tests/rules/test_board_manifest.py
+- tests/rules/test_board_sources.py
+- webui/boards/catalogue.py
+- tests/webui/test_board_catalogue.py
+- tests/webui/test_sparkfun_pro_micro_esp32c3_board.py
+- tests/webui/sparkfun_pro_micro_esp32c3/**
+- tests/webui/test_sparkfun_qwiic_pocket_esp32c6_board.py
+- tests/webui/sparkfun_qwiic_pocket_esp32c6/**
 ---
 
 Part of OH-174. Three boards now hold all four layers through the manifest path (OH-176 to OH-185): a row, pins from the variant and the traced copper, a composed model, and a run test compiled against the board's own variant. This ticket runs two more boards through that path end to end, both ESP32 chips with EAGLE files and variants on disk (surveyed 2026-09-29, .omc/research/twin-candidates.md in the main checkout):
