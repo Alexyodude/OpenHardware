@@ -2,11 +2,15 @@
 id: OH-182
 title: A board comes in from a whole-board KiCad .kicad_pcb, as it does from an EAGLE
   .brd
-status: open
+status: in-progress
 priority: P2
 created: '2026-09-29'
 touches:
 - docs/tickets/OH-182-*
+- tools/import_board.py
+- tools/kicad.py
+- tests/rules/test_import_board.py
+- tests/rules/test_kicad.py
 ---
 
 Part of OH-174, split out of OH-177. tools/import_board.py reads an EAGLE `.brd` and a KiCad `.kicad_mod` footprint (`import_board.READERS`), not a whole-board KiCad `.kicad_pcb`. Every XIAO came in as a footprint, and every manifest board so far is EAGLE, so nothing has needed it yet. The PCBCUPID Glyph Mini RP2040 does: its vendor publishes `glyph-mini-rp2040.kicad_pcb` (MIT) and no footprint of the board.
