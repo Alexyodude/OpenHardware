@@ -931,9 +931,16 @@ def pad_view(board: str, description: types.ModuleType | None,
 
     **A pin with no pad is still reported.** The XIAO's user LED is on the
     board rather than on the header, so `LED` has a state and no coordinate --
-    and it is the pin a stock Blink drives. Dropping it because it has nowhere
-    to go on the picture would hide the one thing most sketches move; the
-    caller gets `x: None` and puts it somewhere sensible.
+    and it is the pin a stock Blink drives on a XIAO. Dropping it because it
+    has nowhere to go on the picture would hide the one thing most sketches
+    move; the caller gets `x: None` and puts it somewhere sensible.
+
+    **A manifest board reports its pads and nothing else** (`row_levels`), so
+    its `LED_BUILTIN` moves the page only where a pad's `chip_index` is that
+    GPIO. On the Adafruit Feather ESP32-C6 one is: its own variant's
+    `LED_BUILTIN` is `IO15`'s `chip_index` (OH-178), and
+    `test_a_stock_blink_moves_the_pad_its_led_builtin_reaches` watches a stock
+    Blink move that pad here (OH-183).
     """
     layout = pinmap.load(board)
     if layout is None and not live:

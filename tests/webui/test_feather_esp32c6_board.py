@@ -48,13 +48,13 @@ def needs_table() -> None:
         pytest.skip(f"SKIPPED: no {table}; python tools/import_pindefs.py --fetch")
 
 
-def sda(include: str) -> int:
-    """The GPIO a variant's own `pins_arduino.h` names `SDA`."""
+def named(include: str, label: str) -> int:
+    """The GPIO a variant's own `pins_arduino.h` names `label`."""
     table = compiler.BOARD_SUPPORT / include / "pins_arduino.h"
     if not table.is_file():
         pytest.skip(f"SKIPPED: no {table}; python tools/import_pindefs.py --fetch")
     text = table.read_text(encoding="utf-8", errors="replace")
-    return import_pindefs.read_flat_pins((text,), extras=("SDA",))["SDA"].index
+    return import_pindefs.read_flat_pins((text,), extras=(label,))[label].index
 
 
 def test_the_image_is_this_sketch_built_for_this_board_against_its_own_variant():
@@ -77,7 +77,7 @@ def test_the_image_blinks_the_gpio_this_boards_sda_names_on_its_sda_pad():
     recipe = compiler.recipe_for(BOARD)
     (own,) = recipe.bsp_includes
     (xiao,) = compiler.RECIPES["ESP32-C6"].bsp_includes
-    gpio, not_gpio = sda(own), sda(xiao)
+    gpio, not_gpio = named(own, "SDA"), named(xiao, "SDA")
     pads = json.loads((pinmap.BOARDS_DIR / f"{BOARD}.json").read_text(encoding="utf-8"))
     assert [pad["chip_index"] for pad in pads["pads"] if pad["label"] == "SDA"] == [gpio]
     assert gpio != not_gpio, "the XIAO's SDA is this board's, so nothing here tells them apart"
@@ -103,3 +103,62 @@ def test_the_image_blinks_the_gpio_this_boards_sda_names_on_its_sda_pad():
     assert len(gaps) == 1, f"the period varies: {sorted(gaps)}"
     assert enabled & (1 << gpio) and not enabled & (1 << not_gpio)
     assert not driven & (1 << not_gpio), "the XIAO's SDA moved"
+
+
+#: Arduino's stock Blink (File > Examples > 01.Basics > Blink), by
+#: `LED_BUILTIN`, with `delay(1)` for its `delay(1000)` so that `BUDGET`
+#: covers it.
+STOCK_BLINK = """
+void setup() { pinMode(LED_BUILTIN, OUTPUT); }
+
+void loop() {
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(1);
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(1);
+}
+"""
+
+
+def test_a_stock_blink_moves_the_pad_its_led_builtin_reaches():
+    """OH-183 item 5. `LED_BUILTIN`, read from this board's own variant, is
+    the `chip_index` of one pad, `IO15` (OH-178), and a stock Blink compiled
+    for this board by name moves that pad on the page's own path:
+    `api.pin_view`, whose levels a manifest board reads at each pad's
+    `chip_index` (`api.row_levels`). High first, then alternating, at one
+    period."""
+    pytest.importorskip("core.riscv32.abi")
+    needs_table()
+    recipe = compiler.recipe_for(BOARD)
+    (own,) = recipe.bsp_includes
+    assert own == "arduino-esp32/variants/adafruit_feather_esp32c6", own
+    led = named(own, "LED_BUILTIN")
+    pads = json.loads((pinmap.BOARDS_DIR / f"{BOARD}.json").read_text(encoding="utf-8"))
+    assert [pad["label"] for pad in pads["pads"] if pad["chip_index"] == led] == ["IO15"]
+    try:
+        built = compiler.build(BOARD, STOCK_BLINK)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    assert built.ok, built.diagnostics
+
+    rises, levels = [], []
+    with api.load_firmware(BOARD, built.image, base=recipe.base) as session:
+        view = api.pin_view(session.runtime, session.cpu, BOARD)
+        before = next(pad["state"] for pad in view["pads"] if pad["label"] == "IO15")
+        last = 0
+        for step in range(BUDGET):
+            session.step()
+            now = session.cpu.read_word(GPIO_OUT) & (1 << led)
+            if now != last:
+                view = api.pin_view(session.runtime, session.cpu, BOARD)
+                levels.append(next(pad["state"] for pad in view["pads"]
+                                   if pad["label"] == "IO15"))
+                rises += [step] if now else []
+                last = now
+
+    assert before == "input", before
+    assert len(levels) >= 5, f"IO15 changed {len(levels)} times"
+    assert all(a != b for a, b in itertools.pairwise(levels)), levels
+    assert levels[0] == "high", levels
+    gaps = {b - a for a, b in itertools.pairwise(rises)}
+    assert len(gaps) == 1, f"the period varies: {sorted(gaps)}"
