@@ -78,6 +78,10 @@ class PinTable:
     pins: int
     gpio: tuple[tuple[str, int], ...]
     not_gpio: tuple[tuple[str, str], ...]
+    #: `(footprint pad, page number)` where the footprint names a pin other
+    #: than by the number the page gives it; every other pad's name is its
+    #: number.
+    footprint_pads: tuple[tuple[str, str], ...] = ()
 
 
 _DOCS = "https://www.espressif.com/sites/default/files/documentation/"
@@ -381,12 +385,12 @@ def check(entry: Row) -> None:
             f"{table.relative_to(REPO).as_posix()} builds {entry.variant} for "
             f"{key}={sorted(built_for) or 'nothing'}"
         )
-    # What import_pindefs will read, read now: a label the variant does not
-    # number is refused here rather than after a file is half written.
+    # What import_pindefs will read, read now and the same way: a label the
+    # variant does not number is refused here rather than after a file is
+    # half written.
     try:
-        import_pindefs.read_flat_pins(
-            (variant.read_text(encoding="utf-8", errors="replace"),),
-            extras=entry.labels,
+        import_pindefs.variant_source(entry).pins(
+            checkout, (variant.read_text(encoding="utf-8", errors="replace"),)
         )
     except import_pindefs.PindefError as exc:
         raise ManifestError(

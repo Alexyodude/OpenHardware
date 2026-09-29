@@ -115,6 +115,7 @@ file that was not.
     python tools/import_pindefs.py --emit-header ESP32-C3 # the module block
     python tools/import_pindefs.py --write-headers        # into every marked module
     python tools/import_pindefs.py --write-boards         # into every board file
+    python tools/import_pindefs.py --pico-variants        # arduino-pico, three ways (OH-181)
 """
 
 from __future__ import annotations
@@ -127,6 +128,7 @@ import hashlib
 import json
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 import textwrap
@@ -883,7 +885,9 @@ def read_eagle_traced(
     through one resistor whose other net holds that resistor and one chip
     pad and nothing else: the QT Py's TX, through R4. Any other part stops
     the trace: an LED, a jumper, a capacitor, a switch, a connector. A pad
-    numbered past the table's `pins` is on the chip and is no pin of it.
+    numbered past the table's `pins` is on the chip and is no pin of it, and
+    a pad the footprint names otherwise than by the page's number -- the
+    KB2040's central `P$1` -- is read as the number `footprint_pads` gives.
 
     A net on one GPIO names it. A net on pads the table gives no GPIO
     (3V3, EN, GND) names none and says which. A net on a pad the table
@@ -906,11 +910,19 @@ def read_eagle_traced(
         )
     (chip,) = chips
     gpio = dict(table.gpio)
+    page = dict(table.footprint_pads)
+
+    def number(pad: str) -> str:
+        """The page's number for a footprint pad: its name, unless the table
+        says the footprint names that pin otherwise."""
+        return page.get(pad, pad)
+
     # A pad the footprint numbers past the page's count is on the chip and
     # is no pin of it: reached, so no resistor is crossed from it, and named.
     named = {**dict(table.not_gpio), **{
-        pad.number: f"not a pin of the part (past the page's {table.pins})"
-        for pad in chip.pads if pad.number.isdigit() and int(pad.number) > table.pins}}
+        number(pad.number): f"not a pin of the part (past the page's {table.pins})"
+        for pad in chip.pads
+        if number(pad.number).isdigit() and int(number(pad.number)) > table.pins}}
     contacts = collections.Counter(
         pad.net for element in board.elements for pad in element.pads if pad.net)
 
@@ -930,23 +942,23 @@ def read_eagle_traced(
                 crossed.append(f"{part.name} ({part.value.strip()})")
                 reached += pads_on(far)
         chain = [net, ", ".join(crossed)] if crossed else [net]
-        loose = [number for number in reached if number not in gpio and number not in named]
+        loose = [pad for pad in reached if number(pad) not in gpio and number(pad) not in named]
         if loose:
             raise PindefError(
                 f"{net!r} reaches {chip.name} pad {', '.join(loose)}, which the "
                 f"table from {table.cite} does not transcribe; a pad left out "
                 f"is refused, never read as no GPIO"
             )
-        numbered = [gpio[number] for number in reached if number in gpio]
+        numbered = [gpio[number(pad)] for pad in reached if number(pad) in gpio]
         if numbered and len(reached) > 1:
             raise PindefError(
-                f"{net!r} reaches pads {sorted(reached, key=int)} of {chip.name}, "
-                f"so one header pad would name more than one pin"
+                f"{net!r} reaches pads {sorted(reached, key=lambda pad: int(number(pad)))} "
+                f"of {chip.name}, so one header pad would name more than one pin"
             )
         by_name: dict[str, list[str]] = {}
-        for number in reached:
-            by_name.setdefault(f"GPIO{gpio[number]}" if number in gpio
-                               else named[number], []).append(number)
+        for pad in reached:
+            by_name.setdefault(f"GPIO{gpio[number(pad)]}" if number(pad) in gpio
+                               else named[number(pad)], []).append(pad)
         at = "; ".join(f"pad {pads[0]} = {name}" if len(pads) == 1
                        else f"{len(pads)} pads = {name}" for name, pads in by_name.items())
         stated = sorted({int(found.group(1)) for part in net.split("/")
@@ -1072,6 +1084,372 @@ def read_samd_pin_description(text: str) -> tuple[ChipPin, ...]:
 
 
 # --------------------------------------------------------------------------
+# Reading arduino-pico through its preprocessor (OH-181)
+# --------------------------------------------------------------------------
+#
+# **Most arduino-pico boards number no pin in their own file.** A board's
+# `pins_arduino.h` sets its bus pins, perhaps some `__PIN_D<n>`, and then
+# includes `variants/generic/common.h`, which declares `D<n>` behind
+# `#ifdef __PIN_D<n>` and `A<n>` behind a guard on the chip. `read_flat_pins`
+# reads one file's text, so it found no `D<n>` in such a file and refused
+# it, and it read a `D<n>` under `#if 0` as though it were compiled.
+#
+# So an arduino-pico variant is read the way its build reads it: by the
+# preprocessor, with the flags that board is compiled with. Where no
+# preprocessor is installed, a file the preprocessor could not change is
+# still read by hand, and any other is refused; `--pico-variants` prints
+# what each way resolves across every variant.
+
+#: Where the compiler an arduino-pico recipe names is found: the PlatformIO
+#: package that installs it, under `webui/compile.py`'s `PACKAGES`.
+_PICO_COMPILERS = {"arm-none-eabi-g++": "toolchain-gccarmnoneeabi"}
+
+#: What of a compile command can change what the preprocessor answers:
+#: macro definitions and undefinitions, and the options that set the
+#: compiler's own predefined macros -- target, language standard, `-f`
+#: features, optimisation. A response file, `@path`, is kept and read.
+#: Include paths are not kept; the variant's own directory is the one given.
+_PICO_KEPT = ("-D", "-U", "-m", "-f", "-std=", "-O")
+
+#: The translation unit: what every source of a build reaches the variant
+#: through, `#include <pins_arduino.h>` with the variant's directory on the
+#: include path.
+_PICO_UNIT = "#include <pins_arduino.h>\n"
+
+_PROPERTY = re.compile(r"\{([^{}]+)\}")
+#: `-dU` writes each macro a conditional tested or the text expanded as a
+#: `#define` or, where it was not defined when asked, an `#undef`.
+_CONSULTED = re.compile(r"^#(?:define|undef) (\w+)", re.M)
+_DIRECTIVE = re.compile(r"^[ \t]*#[ \t]*(\w+)", re.M)
+#: `static const uint8_t D0 = (26u);`, any type, any initialiser.
+_DECLARATION = re.compile(
+    r"\bstatic\s+const\s+[A-Za-z_][\w\s]*?\b([A-Za-z_]\w*)\s*=\s*([^;]*);"
+)
+_INTEGER = re.compile(r"^\(?\s*(\d+)\s*[uUlL]*\s*\)?$")
+
+
+@dataclasses.dataclass(frozen=True)
+class PicoBuild:
+    """What an arduino-pico build of one board gives the preprocessor."""
+
+    #: The `boards.txt` key whose `build.variant` is the variant.
+    board: str
+    #: `compiler.cpp.cmd`: the compiler the recipe runs on a sketch.
+    program: str
+    #: The recipe's flags `_PICO_KEPT` keeps, in its order.
+    flags: tuple[str, ...]
+    #: Macro flags the recipe builds from a property the package does not
+    #: set -- arduino-cli supplies it, as `{runtime.ide.version}` -- and so
+    #: left out. `pico_constants` refuses a variant that consults one.
+    unset: tuple[str, ...]
+
+
+def _properties(lines: typing.Iterable[str]) -> dict[str, str]:
+    """`key=value` lines, as `boards.txt` and `platform.txt` write them."""
+    found: dict[str, str] = {}
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            found[key.strip()] = value.strip()
+    return found
+
+
+def _expand(text: str, properties: dict[str, str]) -> str:
+    """`{name}` replaced by its property until nothing changes; an unknown
+    name is left as written, as arduino-cli leaves it."""
+    for _ in range(32):
+        expanded = _PROPERTY.sub(lambda m: properties.get(m.group(1), m.group(0)), text)
+        if expanded == text:
+            return expanded
+        text = expanded
+    raise PindefError(f"properties still expanding after 32 rounds: {text[:160]!r}")
+
+
+def pico_build(checkout: pathlib.Path, variant: str) -> PicoBuild:
+    """The flags `platform.txt`'s `recipe.cpp.o.pattern` compiles a sketch
+    with, for the one board in `boards.txt` that builds `variant`.
+
+    Properties are the platform's, then the board's over them, then each of
+    the board's menus at its FIRST option over those -- the option
+    arduino-cli takes for a board named without options.
+    """
+    table = _properties(
+        (checkout / "boards.txt").read_text(encoding="utf-8", errors="replace").splitlines()
+    )
+    building = sorted(
+        key.split(".")[0] for key, value in table.items()
+        if key.count(".") == 2 and key.endswith(".build.variant") and value == variant
+    )
+    if len(building) != 1:
+        raise PindefError(
+            f"boards.txt builds variants/{variant} for {building or 'no board'}; "
+            f"a variant is read with exactly one board's flags"
+        )
+    (board,) = building
+    properties = _properties(
+        (checkout / "platform.txt").read_text(encoding="utf-8", errors="replace").splitlines()
+    )
+    prefix = f"{board}."
+    menus: dict[str, str] = {}
+    for key, value in table.items():
+        if not key.startswith(prefix):
+            continue
+        rest = key[len(prefix):].split(".")
+        if rest[0] != "menu":
+            properties[".".join(rest)] = value
+        elif len(rest) == 3:
+            menus.setdefault(rest[1], rest[2])
+    for menu, option in menus.items():
+        chosen = f"{prefix}menu.{menu}.{option}."
+        properties.update({
+            key[len(chosen):]: value for key, value in table.items() if key.startswith(chosen)
+        })
+    properties["runtime.platform.path"] = checkout.as_posix()
+    command = _expand(properties["recipe.cpp.o.pattern"], properties)
+    try:
+        tokens = shlex.split(command)
+    except ValueError as exc:
+        raise PindefError(f"{board}'s compile command does not split: {exc}: {command[:160]!r}") from exc
+    return PicoBuild(
+        board=board,
+        program=_expand(properties["compiler.cpp.cmd"], properties),
+        flags=tuple(token for token in tokens if "{" not in token
+                    and token.startswith((*_PICO_KEPT, "@"))),
+        unset=tuple(token for token in tokens if "{" in token
+                    and token.startswith(("-D", "-U"))),
+    )
+
+
+def pico_compiler(program: str) -> pathlib.Path | None:
+    """The compiler a recipe names, where PlatformIO has installed it."""
+    package = _PICO_COMPILERS.get(program)
+    if package is None:
+        return None
+    from webui import compile as webui_compile  # the one place PlatformIO's root is
+
+    for name in (program, f"{program}.exe"):
+        path = webui_compile.PACKAGES / package / "bin" / name
+        if path.is_file():
+            return path
+    return None
+
+
+def _response_file(checkout: pathlib.Path, flag: str) -> list[str]:
+    """A recipe's `@file`, as the flags in it that `_PICO_KEPT` keeps.
+
+    arduino-pico's are under `lib/`, which `Package.sparse` does not check
+    out, so a file not on disk is read from the checkout's own commit -- which
+    a blobless clone fetches the first time it is asked for.
+    """
+    relative = pathlib.Path(flag[1:]).relative_to(checkout).as_posix()
+    path = checkout / relative
+    if path.is_file():
+        text = path.read_text(encoding="utf-8", errors="replace")
+    else:
+        shown = subprocess.run(
+            ["git", "-C", str(checkout), "show", f"HEAD:{relative}"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            check=False,
+        )
+        if shown.returncode != 0:
+            raise PindefError(
+                f"the recipe reads {relative}, which is neither on disk nor in "
+                f"{checkout}'s commit: git said {shown.stderr.strip()!r}"
+            )
+        text = shown.stdout
+    return [token for token in shlex.split(text) if token.startswith(_PICO_KEPT)]
+
+
+def _pico_integers(declarations: str, macros: str, where: str) -> dict[str, int]:
+    """Every integer constant: `static const` declarations out of one text,
+    `#define`s out of the other, as `read_c_pin_constants` takes them.
+
+    **A `D<n>` whose initialiser is not an integer is refused**, where
+    `read_c_pin_constants` leaves it out: a pad missing its pin reads as a
+    label nobody numbered, which is a different fact.
+    """
+    found = {name: int(value) for name, value in _C_DEFINE.findall(macros)}
+    unread = []
+    for name, value in _DECLARATION.findall(declarations):
+        literal = _INTEGER.match(value.strip())
+        if literal:
+            found.setdefault(name, int(literal.group(1)))
+        elif _D_LABEL.match(name):
+            unread.append(f"{name} = {value.strip()}")
+    if unread:
+        raise PindefError(f"{where} declares {unread}, which is not an integer")
+    return found
+
+
+def pico_constants(
+    checkout: pathlib.Path, variant: str, build: PicoBuild, compiler: pathlib.Path
+) -> dict[str, int]:
+    """What `#include <pins_arduino.h>` declares and defines, preprocessed
+    with the board's flags: the declarations out of `-E -dU`, the macros out
+    of `-E -dM`. Refused if the variant consults a macro in `build.unset`,
+    whose value this cannot know."""
+    flags: list[str] = []
+    for flag in build.flags:
+        flags += _response_file(checkout, flag) if flag.startswith("@") else [flag]
+    command = [str(compiler), *flags, "-I", str(checkout / "variants" / variant),
+               "-x", "c++", "-E"]
+    where = f"arduino-pico variants/{variant}/pins_arduino.h as {build.board}"
+    texts = []
+    for mode in (("-P", "-dU"), ("-dM",)):
+        done = subprocess.run(
+            [*command, *mode, "-"], input=_PICO_UNIT, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=60, check=False,
+        )
+        if done.returncode != 0:
+            said = [line for line in done.stderr.splitlines() if "error" in line]
+            raise PindefError(
+                f"{compiler.name} could not preprocess {where}: "
+                f"{said or done.stderr.strip()}"
+            )
+        texts.append(done.stdout)
+    consulted = set(_CONSULTED.findall(texts[0]))
+    for flag in build.unset:
+        name = flag[2:].split("=", 1)[0]
+        pattern = "".join(r"\w*" if piece.startswith("{") else re.escape(piece)
+                          for piece in re.split(r"(\{[^{}]*\})", name))
+        tested = sorted(macro for macro in consulted if re.fullmatch(pattern, macro))
+        if tested:
+            raise PindefError(
+                f"{where} consults {tested}, which the build defines with "
+                f"{flag!r} from a property arduino-cli supplies and the "
+                f"package does not"
+            )
+    return _pico_integers(texts[0], texts[1], where)
+
+
+def pico_constants_by_hand(text: str, where: str, program: str) -> dict[str, int]:
+    """The fallback, where `program`, the recipe's compiler, is not installed.
+
+    A file whose only directives are `#define` and `#pragma` is read by
+    hand. Any other -- a conditional, an `#include`, an `#undef` -- makes
+    what it declares depend on the preprocessor, so it is refused rather
+    than read past.
+    """
+    code = _LINE_COMMENT.sub("", _BLOCK_COMMENT.sub("", text))
+    others = sorted({name for name in _DIRECTIVE.findall(code)
+                     if name not in ("define", "pragma")})
+    if others:
+        package = _PICO_COMPILERS.get(program)
+        raise PindefError(
+            f"{where} has {', '.join('#' + name for name in others)}, so only "
+            f"the preprocessor can say what it declares, and no {program} is "
+            f"installed here. "
+            + (f"Install it with:\n  pio pkg install --global --tool {package}"
+               if package else f"No PlatformIO package for {program} is known here.")
+        )
+    return _pico_integers(code, code, where)
+
+
+def read_pico_pins(
+    texts: tuple[str, ...],
+    *,
+    checkout: pathlib.Path,
+    variant: str,
+    extras: tuple[str, ...] = (),
+) -> dict[str, ChipPin]:
+    """arduino-pico: the Arduino pin number is the GPIO, as `read_flat_pins`
+    says, read through the preprocessor where one is installed."""
+    (text,) = texts
+    build = pico_build(checkout, variant)
+    compiler = pico_compiler(build.program)
+    constants = (
+        pico_constants(checkout, variant, build, compiler) if compiler is not None
+        else pico_constants_by_hand(
+            text, f"arduino-pico variants/{variant}/pins_arduino.h", build.program)
+    )
+    return {
+        label: ChipPin(f"GPIO{number}", number)
+        for label, number in select_labels(constants, extras).items()
+    }
+
+
+_A_LABEL = re.compile(r"^A\d+$")
+
+
+@dataclasses.dataclass(frozen=True)
+class PicoReading:
+    """One arduino-pico variant's `D<n>` and `A<n>`, read three ways; None
+    where that way refused it, and `why` says why."""
+
+    variant: str
+    #: As a variant was read before OH-181: `read_c_pin_constants` over its
+    #: own file's text, past any guard, with no `#include` followed.
+    before: dict[str, int]
+    by_hand: dict[str, int] | None
+    #: None where refused, and where no preprocessor is installed.
+    preprocessed: dict[str, int] | None
+    why: tuple[str, str]
+
+
+def _analog_and_digital(constants: dict[str, int]) -> dict[str, int]:
+    return {name: value for name, value in constants.items()
+            if _D_LABEL.match(name) or _A_LABEL.match(name)}
+
+
+def survey_pico(checkout: pathlib.Path) -> list[PicoReading]:
+    """Every arduino-pico variant, read before OH-181, by hand, and through
+    the preprocessor where one is installed."""
+    readings = []
+    for path in sorted((checkout / "variants").glob("*/pins_arduino.h")):
+        variant = path.parent.name
+        text = path.read_text(encoding="utf-8", errors="replace")
+        before = _analog_and_digital(read_c_pin_constants(text))
+        try:
+            build = pico_build(checkout, variant)
+        except PindefError as exc:
+            readings.append(PicoReading(variant, before, None, None, (str(exc), str(exc))))
+            continue
+        compiler = pico_compiler(build.program)
+        found: list[dict[str, int] | None] = []
+        why: list[str] = []
+        for read in (
+            lambda: pico_constants_by_hand(text, variant, build.program),
+            lambda: (pico_constants(checkout, variant, build, compiler)
+                     if compiler is not None else None),
+        ):
+            try:
+                constants = read()
+            except PindefError as exc:
+                found.append(None)
+                why.append(str(exc).splitlines()[0])
+                continue
+            found.append(None if constants is None else _analog_and_digital(constants))
+            why.append("" if constants is not None else "no preprocessor installed")
+        readings.append(PicoReading(variant, before, found[0], found[1], (why[0], why[1])))
+    return readings
+
+
+def summarise_pico(readings: list[PicoReading], checkout: pathlib.Path) -> str:
+    """How many variants each way resolves a `D<n>` and an `A<n>` for, how
+    many it refuses, and how many it gives a label a number the preprocessor
+    does not."""
+    compiler = pico_compiler(pico_build(checkout, readings[0].variant).program)
+    lines = [
+        f"arduino-pico @ {revision(checkout)}: {len(readings)} variants; "
+        f"preprocessor {compiler or 'not installed'}",
+        f"{'':26s} {'D<n>':>5s} {'A<n>':>5s} {'refused':>8s} {'wrong':>6s}",
+    ]
+    for name, pick in (("before (the file's text)", lambda one: one.before),
+                       ("by hand (the fallback)", lambda one: one.by_hand),
+                       ("preprocessor", lambda one: one.preprocessed)):
+        answers = [(pick(one), one.preprocessed) for one in readings]
+        wrong = sum(1 for mine, theirs in answers if mine and theirs is not None
+                    and any(theirs.get(label) != value for label, value in mine.items()))
+        lines.append(
+            f"{name:26s} "
+            f"{sum(1 for mine, _ in answers if mine and any(map(_D_LABEL.match, mine))):5d} "
+            f"{sum(1 for mine, _ in answers if mine and any(map(_A_LABEL.match, mine))):5d} "
+            f"{sum(1 for mine, _ in answers if mine is None):8d} {wrong:6d}")
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
 # The registry: which packages publish which board
 # --------------------------------------------------------------------------
 
@@ -1155,6 +1533,17 @@ class Source:
     #: `Package.how_to_fetch` is where that difference is stated to a user;
     #: saying "downloaded by hand" of both is what sent one into a loop.
     root: pathlib.Path | None = None
+    #: True where `read` is given the checkout too, as `checkout=`: only
+    #: `arduino_pico`, whose preprocessor follows the variant's `#include`s
+    #: and reads the package's `boards.txt` and `platform.txt` (OH-181).
+    reads_checkout: bool = False
+
+    def pins(self, checkout: pathlib.Path, texts: tuple[str, ...]) -> dict[str, ChipPin]:
+        """What `read` makes of the files' texts, given the checkout they
+        were read from where it takes one."""
+        if self.reads_checkout:
+            return self.read(texts, checkout=checkout)
+        return self.read(texts)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1265,6 +1654,17 @@ def arduino_flat(package: str, variant: str, extras: tuple[str, ...] = ()) -> So
     )
 
 
+def arduino_pico(variant: str, extras: tuple[str, ...] = ()) -> Source:
+    """arduino-pico's variant for one board, read through the preprocessor:
+    `read_pico_pins`."""
+    return Source(
+        "arduino-pico",
+        (f"variants/{variant}/pins_arduino.h",),
+        functools.partial(read_pico_pins, variant=variant, extras=extras),
+        reads_checkout=True,
+    )
+
+
 def variants_of_chip(checkout: pathlib.Path, chip: str) -> tuple[str, ...]:
     """Every `variants/<v>/pins_arduino.h` the package builds for one chip.
 
@@ -1350,11 +1750,11 @@ def arduino_indexed(
 # `on_board` label on the Board rows, not a pad: see `Board.on_board`.
 _RP2040 = (
     zephyr_connector("xiao_rp2040", flat_gpio),
-    arduino_flat("arduino-pico", "seeed_xiao_rp2040", extras=("LED",)),
+    arduino_pico("seeed_xiao_rp2040", extras=("LED",)),
 )
 _RP2350 = (
     zephyr_connector("xiao_rp2350", flat_gpio),
-    arduino_flat("arduino-pico", "seeed_xiao_rp2350"),
+    arduino_pico("seeed_xiao_rp2350"),
 )
 _ESP32C3 = (
     zephyr_connector("xiao_esp32c3", flat_gpio),
@@ -1745,10 +2145,18 @@ BOARDS = {
 }
 
 
+def variant_source(entry: board_manifest.Row) -> Source:
+    """A row's variant, by the labels the row opts in: through the
+    preprocessor for arduino-pico (OH-181), read flat for the others."""
+    if entry.package == "arduino-pico":
+        return arduino_pico(entry.variant, extras=entry.labels)
+    return arduino_flat(entry.package, entry.variant, extras=entry.labels)
+
+
 def manifest_board(entry: board_manifest.Row) -> Board:
     """A row's board: its variant, by the labels the row opts in, and its own
     CAD traced to its chip (OH-178), registered as the package `entry.source`."""
-    sources = [arduino_flat(entry.package, entry.variant, extras=entry.labels)]
+    sources = [variant_source(entry)]
     if entry.pin_table is not None:
         root = board_sources.source(entry.source).dest(REPO)
         sources.append(Source(
@@ -1931,7 +2339,7 @@ def published_pins(board: Board, bsp_dir: pathlib.Path) -> dict[str, list[Claim]
         stamp = (f"sha256:{_digest(texts)}" if source.root is not None
                  else revision(checkout))
         citation = f"{source.package} {', '.join(source.paths)} @ {stamp}"
-        for label, found in source.read(tuple(texts)).items():
+        for label, found in source.pins(checkout, tuple(texts)).items():
             claims.setdefault(label, []).append(
                 Claim(found.pin, f"{citation}: {found.via}", source.package, found.via)
                 if isinstance(found, Traced) else Claim(found, citation, source.package))
@@ -2811,7 +3219,22 @@ def main(argv: list[str] | None = None) -> int:
         "--write-boards", action="store_true",
         help="write chip_pin, chip_index and why_null into every registered board file",
     )
+    parser.add_argument(
+        "--pico-variants", action="store_true",
+        help="every arduino-pico variant read before OH-181, by hand and preprocessed",
+    )
     args = parser.parse_args(argv)
+
+    if args.pico_variants:
+        checkout = BSP_DIR / "arduino-pico"
+        readings = survey_pico(checkout)
+        print(summarise_pico(readings, checkout))
+        for one in readings:
+            cells = [f"{len(found)}" if found is not None else f"refused ({why[:70]})"
+                     for found, why in ((one.before, ""), (one.by_hand, one.why[0]),
+                                        (one.preprocessed, one.why[1]))]
+            print(f"{one.variant:36s} " + " | ".join(cells))
+        return 0
 
     if args.fetch:
         clonable = [one for one in PACKAGES.values() if one.cloned]

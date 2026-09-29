@@ -46,9 +46,12 @@
 # test_ast_count_matches_pytest_collection fails on the divergence. Cases are
 # looped inside one test instead.
 
+import dataclasses
 import json
+import os
 import pathlib
 import re
+import subprocess
 
 import pytest
 
@@ -2726,3 +2729,297 @@ def test_a_manifest_board_and_a_xiao_each_report_their_own_derivation():
         assert report["derivation"] == pindefs.MANIFEST_DERIVATION
         (own,) = [one for one in report["packages"] if one["name"] == row.source]
         assert re.fullmatch(r"sha256:[0-9a-f]{12}", own["revision"]), own
+
+
+def test_a_pad_the_footprint_names_otherwise_is_read_as_the_page_number_the_table_gives():
+    """The KB2040's RP2040 footprint calls its central pad `P$1`, which the
+    datasheet numbers 57 (`footprint_pads`). Here U1's pad 5, past this
+    table's 4 pins, is read as the page's pin 1 once the table says so, and
+    the path still names the footprint's pad."""
+    signals = {"TX": ["J1.1", "U1.5"]}
+    assert _traced(_traced_board(signals)) == {"TX": None}
+    (found,) = pindefs.read_eagle_traced(
+        (_traced_board(signals),), path=pathlib.Path("probe.brd"), select=("J1",),
+        table=dataclasses.replace(_TABLE, footprint_pads=(("5", "1"),))).values()
+    assert found == pindefs.Traced(
+        ChipPin("GPIO4", 4), "TX -> U1 pad 5 = GPIO4 (this test's own table)")
+
+
+# --- arduino-pico, read through its preprocessor (OH-181) ---------------------
+#
+# The fixtures below stand for the real files they are named after, as the
+# rest of this file's do. Where a test needs the real checkout and the
+# compiler its recipe names, it skips by name without them.
+
+#: `variants/adafruit_kb2040/pins_arduino.h`'s shape: bus pins, and then
+#: every `D<n>` from a file it includes.
+PICO_INCLUDING_H = """\
+#pragma once
+#define PIN_LED        (31u)
+#define PIN_SPI0_SCK   (18u)
+#include "../generic/common.h"
+"""
+
+#: `variants/pimoroni_plasma2040/pins_arduino.h`'s shape: pins under `#if 0`.
+PICO_IF_0_H = """\
+#pragma once
+#define PIN_LED        (16u)
+#if 0
+static const uint8_t D0 = (26u);
+#endif
+"""
+
+
+def _needs_the_pico_preprocessor() -> pathlib.Path:
+    """The arduino-pico checkout, where it and the compiler its recipe names
+    are both here; a skip naming the missing one where not."""
+    _needs_the_fetched_packages("arduino-pico")
+    checkout = BSP_DIR / "arduino-pico"
+    program = pindefs.pico_build(checkout, "adafruit_kb2040").program
+    if pindefs.pico_compiler(program) is None:
+        pytest.skip(f"SKIPPED: no {program} installed; pio pkg install --global "
+                    f"--tool toolchain-gccarmnoneeabi")
+    return checkout
+
+
+def _pico_fixture(root: pathlib.Path, pins_arduino_h: str) -> pathlib.Path:
+    """A checkout of one board, `fake`, whose recipe names the compiler and
+    passes one flag of its board's and one it cannot know."""
+    (root / "variants" / "fake").mkdir(parents=True)
+    (root / "variants" / "fake" / "pins_arduino.h").write_text(pins_arduino_h, encoding="utf-8")
+    (root / "boards.txt").write_text(
+        "fake.build.variant=fake\nfake.build.board=FAKE\n", encoding="utf-8")
+    (root / "platform.txt").write_text(
+        "compiler.cpp.cmd=arm-none-eabi-g++\n"
+        'recipe.cpp.o.pattern="{compiler.path}{compiler.cpp.cmd}" '
+        '-DARDUINO={runtime.ide.version} -DARDUINO_{build.board} "{source_file}"\n',
+        encoding="utf-8")
+    return root
+
+
+def test_a_variants_flags_are_its_boards_with_each_menu_at_its_first_option(tmp_path):
+    """Platform properties, the board's over them, and the first option of
+    each of the board's menus over those; what is kept is what can change a
+    macro, and a macro flag built from a property the package never sets is
+    set aside, named."""
+    (tmp_path / "boards.txt").write_text(
+        "menu.os=Operating System\n"
+        "fake.build.variant=fake\n"
+        "fake.build.board=FAKE\n"
+        "fake.build.chip=rp2040\n"
+        "fake.build.extra_flags=-DFROM_BOARD\n"
+        "fake.menu.os.none=None\n"
+        "fake.menu.os.none.build.os=\n"
+        "fake.menu.os.freertos=FreeRTOS\n"
+        "fake.menu.os.freertos.build.os=-D__FREERTOS\n"
+        "other.build.variant=other\n",
+        encoding="utf-8")
+    (tmp_path / "platform.txt").write_text(
+        "build.extra_flags=-DFROM_PLATFORM\n"
+        "build.os=-DPLATFORM_OS\n"
+        "compiler.cpp.cmd=arm-none-eabi-g++\n"
+        'recipe.cpp.o.pattern="{compiler.path}{compiler.cpp.cmd}" -c -g {build.os} '
+        "{build.extra_flags} -mthumb -I{runtime.platform.path}/include "
+        '"@{runtime.platform.path}/lib/{build.chip}/platform_def.txt" '
+        '-DARDUINO={runtime.ide.version} -DARDUINO_{build.board} "{source_file}"\n',
+        encoding="utf-8")
+    build = pindefs.pico_build(tmp_path, "fake")
+    assert (build.board, build.program) == ("fake", "arm-none-eabi-g++")
+    assert build.flags == ("-DFROM_BOARD", "-mthumb",
+                           f"@{tmp_path.as_posix()}/lib/rp2040/platform_def.txt",
+                           "-DARDUINO_FAKE")
+    assert build.unset == ("-DARDUINO={runtime.ide.version}",)
+
+
+def test_a_variant_is_read_with_exactly_one_boards_flags(tmp_path):
+    (tmp_path / "boards.txt").write_text(
+        "fake.build.variant=fake\ntwin.build.variant=fake\n", encoding="utf-8")
+    with pytest.raises(PindefError, match=r"builds variants/fake for \['fake', 'twin'\]"):
+        pindefs.pico_build(tmp_path, "fake")
+    with pytest.raises(PindefError, match="builds variants/none for no board"):
+        pindefs.pico_build(tmp_path, "none")
+
+
+def test_a_response_file_neither_on_disk_nor_committed_is_refused_naming_it(tmp_path):
+    with pytest.raises(PindefError, match="the recipe reads lib/rp2040/platform_def.txt, "
+                                          "which is neither on disk nor in"):
+        pindefs._response_file(tmp_path, f"@{tmp_path.as_posix()}/lib/rp2040/platform_def.txt")
+
+
+def test_without_a_preprocessor_a_variant_that_includes_a_file_is_refused():
+    with pytest.raises(PindefError) as caught:
+        pindefs.pico_constants_by_hand(PICO_INCLUDING_H, "kb2040", "arm-none-eabi-g++")
+    message = str(caught.value)
+    assert "kb2040 has #include, so only the preprocessor can say" in message, message
+    assert "pio pkg install --global --tool toolchain-gccarmnoneeabi" in message, message
+
+
+def test_without_a_preprocessor_a_pin_under_if_0_is_refused_where_the_text_reading_took_it():
+    """The reading this replaces took `D0` out from under `#if 0`."""
+    assert read_flat_pins((PICO_IF_0_H,))["D0"] == ChipPin("GPIO26", 26)
+    with pytest.raises(PindefError, match="plasma has #endif, #if, so only the preprocessor"):
+        pindefs.pico_constants_by_hand(PICO_IF_0_H, "plasma", "arm-none-eabi-g++")
+
+
+def test_without_a_preprocessor_a_file_of_defines_and_constants_reads_as_the_text_does():
+    """The XIAO RP2040's shape, and the byte-identity of its board file where
+    no compiler is installed rests on this."""
+    by_hand = pindefs.pico_constants_by_hand(PICO_PINS_ARDUINO_H, "xiao", "arm-none-eabi-g++")
+    assert select_labels(by_hand, ("LED",)) == select_labels(
+        read_c_pin_constants(PICO_PINS_ARDUINO_H), ("LED",))
+
+
+def test_a_d_pin_declared_through_a_name_is_refused_rather_than_left_out():
+    text = "#define PIN_X (5u)\nstatic const uint8_t D0 = PIN_X;\nstatic const uint8_t D1 = (1u);\n"
+    assert "D0" not in read_c_pin_constants(text)
+    with pytest.raises(PindefError, match=r"declares \['D0 = PIN_X'\], which is not an integer"):
+        pindefs.pico_constants_by_hand(text, "named", "arm-none-eabi-g++")
+
+
+def test_with_no_preprocessor_installed_the_kb2040_is_refused_and_the_xiao_read_by_hand(
+        monkeypatch):
+    _needs_the_fetched_packages("arduino-pico")
+    checkout = BSP_DIR / "arduino-pico"
+    monkeypatch.setattr(pindefs, "pico_compiler", lambda program: None)
+
+    def read(variant, extras=()):
+        text = (checkout / "variants" / variant / "pins_arduino.h").read_text(encoding="utf-8")
+        return pindefs.read_pico_pins((text,), checkout=checkout, variant=variant, extras=extras)
+
+    with pytest.raises(PindefError, match="variants/adafruit_kb2040/pins_arduino.h has #include"):
+        read("adafruit_kb2040")
+    assert read("seeed_xiao_rp2040", ("LED",))["D6"] == ChipPin("GPIO0", 0)
+
+
+def test_the_kb2040s_pins_are_read_through_common_h():
+    """Its own file numbers no `D<n>` and no `A<n>`; preprocessed with its
+    board's flags, `variants/generic/common.h` numbers `D0`..`D29` as the
+    GPIOs of the same number and `A0`..`A3` as GPIO26..29."""
+    checkout = _needs_the_pico_preprocessor()
+    text = (checkout / "variants" / "adafruit_kb2040" / "pins_arduino.h").read_text(
+        encoding="utf-8")
+    assert not [name for name in read_c_pin_constants(text) if re.fullmatch(r"[DA]\d+", name)]
+    pins = pindefs.read_pico_pins((text,), checkout=checkout, variant="adafruit_kb2040",
+                                  extras=("A0", "A1", "A2", "A3"))
+    assert pins == {**{f"D{n}": ChipPin(f"GPIO{n}", n) for n in range(30)},
+                    **{f"A{n}": ChipPin(f"GPIO{26 + n}", 26 + n) for n in range(4)}}
+
+
+def _kb2040_against(tmp_path: pathlib.Path, common_h: str) -> dict[str, ChipPin]:
+    """The KB2040 read against a `common.h` of the test's own, every other
+    file its build reads copied from the checkout; the recipe's response
+    files come from its commit, since `Package.sparse` leaves `lib/` out."""
+    real = BSP_DIR / "arduino-pico"
+    copy = tmp_path / "arduino-pico"
+    for relative in ("boards.txt", "platform.txt", "variants/adafruit_kb2040/pins_arduino.h"):
+        (copy / relative).parent.mkdir(parents=True, exist_ok=True)
+        (copy / relative).write_bytes((real / relative).read_bytes())
+    for relative in [flag[len(real.as_posix()) + 2:] for flag in
+                     pindefs.pico_build(real, "adafruit_kb2040").flags if flag.startswith("@")]:
+        (copy / relative).parent.mkdir(parents=True, exist_ok=True)
+        (copy / relative).write_bytes(subprocess.run(
+            ["git", "-C", str(real), "show", f"HEAD:{relative}"],
+            capture_output=True, check=True).stdout)
+    (copy / "variants" / "generic").mkdir(parents=True)
+    (copy / "variants" / "generic" / "common.h").write_text(common_h, encoding="utf-8")
+    text = (copy / "variants" / "adafruit_kb2040" / "pins_arduino.h").read_text(encoding="utf-8")
+    return pindefs.read_pico_pins((text,), checkout=copy, variant="adafruit_kb2040",
+                                  extras=("A0",))
+
+
+_CHIP_GUARD = "#if defined(PICO_RP2040) || (defined(PICO_RP2350) && PICO_RP2350A)"
+
+
+def test_common_h_read_as_it_is_gives_the_kb2040_its_analog_pins(tmp_path):
+    """The control for the two inversions below: the copy, unchanged, reads
+    as the checkout does."""
+    checkout = _needs_the_pico_preprocessor()
+    common_h = (checkout / "variants" / "generic" / "common.h").read_text(encoding="utf-8")
+    assert _kb2040_against(tmp_path, common_h)["A0"] == ChipPin("GPIO26", 26)
+
+
+def test_common_h_with_its_chip_guard_inverted_gives_the_kb2040_no_analog_pins(tmp_path):
+    """Inverted, the RP2040's branch is skipped and so is the RP2350B's, so
+    there is no `A0` to read: a guard read rather than read past."""
+    checkout = _needs_the_pico_preprocessor()
+    common_h = (checkout / "variants" / "generic" / "common.h").read_text(encoding="utf-8")
+    assert common_h.count(_CHIP_GUARD) == 1
+    inverted = common_h.replace(_CHIP_GUARD, f"#if !({_CHIP_GUARD[4:]})")
+    with pytest.raises(PindefError, match="'A0' is registered as an extra label, but the "
+                                          "file defines none of"):
+        _kb2040_against(tmp_path, inverted)
+
+
+def test_common_h_with_a_pin_guard_inverted_is_refused_for_the_kb2040(tmp_path):
+    """`#ifndef __PIN_D0`, on a board that defines no `__PIN_D0`, declares
+    `D0 = __PIN_D0`, which names no number, and is refused."""
+    checkout = _needs_the_pico_preprocessor()
+    common_h = (checkout / "variants" / "generic" / "common.h").read_text(encoding="utf-8")
+    assert common_h.count("#ifdef __PIN_D0\n") == 1
+    with pytest.raises(PindefError, match=r"declares \['D0 = __PIN_D0'\], which is not an integer"):
+        _kb2040_against(tmp_path, common_h.replace("#ifdef __PIN_D0\n", "#ifndef __PIN_D0\n"))
+
+
+def test_a_pin_under_if_0_is_not_read_by_the_preprocessor():
+    """pimoroni_plasma2040's `D<n>` are all under `#if 0`: the text reading
+    numbered them, and the preprocessor finds none."""
+    checkout = _needs_the_pico_preprocessor()
+    text = (checkout / "variants" / "pimoroni_plasma2040" / "pins_arduino.h").read_text(
+        encoding="utf-8")
+    assert "#if 0" in text
+    assert read_flat_pins((text,))["D0"] == ChipPin("GPIO26", 26)
+    with pytest.raises(PindefError, match="no D<n> constants among the"):
+        pindefs.read_pico_pins((text,), checkout=checkout, variant="pimoroni_plasma2040")
+
+
+def test_a_guard_on_the_boards_own_flag_is_read_with_that_flag(tmp_path):
+    """`-DARDUINO_{build.board}` is `-DARDUINO_FAKE` for this board, and the
+    variant's `#ifdef ARDUINO_FAKE` sees it."""
+    _needs_the_pico_preprocessor()
+    checkout = _pico_fixture(tmp_path, (
+        "#ifdef ARDUINO_FAKE\nstatic const uint8_t D0 = (1u);\n"
+        "#else\nstatic const uint8_t D0 = (2u);\n#endif\n"))
+    assert pindefs.read_pico_pins(("",), checkout=checkout, variant="fake") == {
+        "D0": ChipPin("GPIO1", 1)}
+
+
+def test_a_guard_on_a_flag_the_build_cannot_know_is_refused(tmp_path):
+    """`-DARDUINO={runtime.ide.version}` is arduino-cli's to fill, so it is
+    left out, and a variant that tests `ARDUINO` would read as though it were
+    undefined: refused instead."""
+    _needs_the_pico_preprocessor()
+    checkout = _pico_fixture(tmp_path, (
+        "#ifdef ARDUINO\nstatic const uint8_t D0 = (1u);\n"
+        "#else\nstatic const uint8_t D0 = (2u);\n#endif\n"))
+    with pytest.raises(PindefError, match=r"consults \['ARDUINO'\], which the build defines "
+                                          r"with '-DARDUINO=\{runtime.ide.version\}'"):
+        pindefs.read_pico_pins(("",), checkout=checkout, variant="fake")
+
+
+def test_the_xiao_variants_read_the_same_by_hand_and_preprocessed():
+    """What keeps the XIAO RP2040 and RP2350 board files byte-identical
+    whichever answers: with the compiler here, and without it, as CI runs."""
+    checkout = _needs_the_pico_preprocessor()
+    for variant, extras in (("seeed_xiao_rp2040", ("LED",)), ("seeed_xiao_rp2350", ())):
+        text = (checkout / "variants" / variant / "pins_arduino.h").read_text(encoding="utf-8")
+        build = pindefs.pico_build(checkout, variant)
+        preprocessed = pindefs.pico_constants(
+            checkout, variant, build, pindefs.pico_compiler(build.program))
+        by_hand = pindefs.pico_constants_by_hand(text, variant, build.program)
+        assert select_labels(preprocessed, extras) == select_labels(by_hand, extras), variant
+
+
+def test_every_variant_the_fallback_reads_it_reads_as_the_preprocessor_does():
+    """Every arduino-pico variant: where the hand reading answers, it is the
+    preprocessor's answer, and the text reading's wrong answers are counted.
+
+    Slow -- two preprocessor runs a variant -- so run only with `OH_SLOW=1`."""
+    if os.environ.get("OH_SLOW") != "1":
+        pytest.skip("SKIPPED: slow; run it with OH_SLOW=1 pytest "
+                    "tests/rules/test_import_pindefs.py -k every_variant_the_fallback -s")
+    checkout = _needs_the_pico_preprocessor()
+    readings = pindefs.survey_pico(checkout)
+    print("\n" + pindefs.summarise_pico(readings, checkout))
+    differ = [one.variant for one in readings
+              if one.by_hand is not None and one.by_hand != one.preprocessed]
+    assert differ == [], differ
