@@ -268,14 +268,21 @@ is matched only as the chip it names, which passes wherever that chip holds
 evidence. `test_a_paraphrase_of_a_rows_name_is_read_only_as_its_chip` holds
 that limit where it is.
 
-## 9. 2026-09-29 — the SparkFun Thing Plus ESP32-C6 and the QT Py ESP32-C3 hold their own
+## 9. 2026-09-30 — the SparkFun Thing Plus ESP32-C6 and the QT Py ESP32-C3 hold their own
 
 What refused their tables (§7) was ESP-IDF's capability header, which this
-build does not have. So each chip's variant directory under
-`webui/arduino/` carries a `soc/soc_caps.h` defining exactly the `SOC_`
-names the tables built with that chip's recipe use, each value read from
-ESP-IDF v5.5 and cited by file and line; `tests/webui/test_soc_caps.py`
-reads the cited line and the tables (OH-185).
+build does not have. So the ESP32-C6 and ESP32-C3 variant directories under
+`webui/arduino/` carry a `soc/soc_caps.h`, as the C5's now does for its
+`oh_board.h`, each defining exactly the `SOC_` names that chip's build
+uses, each value read from ESP-IDF v5.5 and cited by file and line;
+`tests/webui/test_soc_caps.py` holds the values to the reference, the
+citations to their lines, and the names to the build (OH-185).
+
+`LED_BUILTIN` on both boards is `SOC_GPIO_PIN_COUNT` plus the RGB LED's
+pin: no pad's `chip_index`, and no GPIO. A stock Blink is refused for it
+with a hint saying it is an RGB LED this model does not drive
+(`test_a_pin_the_compiler_knows_is_past_the_count_stops_the_build_and_says_why`
+in `tests/webui/test_compile.py`), so the pin watched is `SDA`.
 
 Each board then holds an entry of the Feather's shape:
 `tests/webui/test_sparkfun_esp32c6_board.py` and
