@@ -16,3 +16,5 @@ tools/kicad.py already parses `.kicad_pcb` for tools/compose_board_3d.py, which 
 Pads must trace to the vendor's coordinates the way the EAGLE rows do, with the same position test. KiCad pads carry their net, so a pad's label is its net name as in the EAGLE rows. The Glyph Mini's nets are `/GPIO-n`: turning those into chip pins is OH-178's work, not this ticket's.
 
 Done when a `.kicad_pcb` row imports with pad positions checked against the file, a `.kicad_pcb` naming a reference that is not there is refused naming it, and the Glyph Mini row exists once OH-181 lets its variant through (or this ticket says which of the two is still missing).
+
+**Note 2026-09-29:** From OH-177's approving re-review, 2026-09-29, for whoever next edits tools/import_board.py: the merge in _from_eagle collapses the pads one schematic <connect> names into one pad, and nothing checks that those pads share a net. A connect like '1 1C 2 2C' would give 13 pads and silently drop one. Refuse a connect whose pads sit on more than one net, and make the KiCad path apply the same rule if a .kicad_pcb footprint maps one pin to several pads.
