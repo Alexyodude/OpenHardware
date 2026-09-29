@@ -108,26 +108,60 @@ def _clone(url: str, dest: pathlib.Path) -> None:
     _git(["sparse-checkout", "init", "--cone"], cwd=dest)
 
 
-def _narrow(dest: pathlib.Path, wanted: tuple[str, ...], everything: bool) -> None:
-    """Restrict the working tree to `wanted`, or open it up completely."""
-    if everything or not wanted:
-        _git(["sparse-checkout", "disable"], cwd=dest)
-    else:
-        # `ls-tree` answers from the commit, before anything is checked out.
-        files = {
-            name for name in wanted
-            if _git(["ls-tree", "HEAD", "--", name], cwd=dest).split()[1:2] == ["blob"]
+def _top(dest: pathlib.Path) -> list[str]:
+    """The fetched commit's top level, as git lists it."""
+    return sorted(
+        {
+            line.strip().rstrip("/")
+            for line in _git(["ls-tree", "--name-only", "HEAD"], cwd=dest).splitlines()
+            if line.strip()
         }
-        if files:
-            # Cone mode takes directories, and every file at the top level
-            # with them, so a file on its own is a gitignore-style pattern,
-            # its glob characters escaped so that it matches only itself.
-            _git(["sparse-checkout", "set", "--no-cone", *(
-                "/" + re.sub(r"([\\*?\[])", r"\\\1", name) + ("" if name in files else "/")
-                for name in wanted
-            )], cwd=dest)
-        else:
-            _git(["sparse-checkout", "set", "--cone", *wanted], cwd=dest)
+    )
+
+
+def _kinds(src: Source, dest: pathlib.Path) -> dict[str, str]:
+    """Each wanted name's type in the fetched commit, `blob` or `tree`.
+
+    Matched exactly, case and all, against the path git lists: a name it does
+    not list as itself -- `License.txt` for `license.txt`, or `Hardware/`,
+    whose listing is its contents -- is refused before anything is checked
+    out, rather than guessed to be a directory.
+    """
+    kinds: dict[str, str] = {}
+    for name in src.fetch.wanted:
+        for record in _git(["ls-tree", "-z", "HEAD", "--", name], cwd=dest).split("\0"):
+            meta, _, path = record.partition("\t")
+            if path == name:
+                kinds[name] = meta.split()[1]
+    missing = [name for name in src.fetch.wanted if name not in kinds]
+    if missing:
+        # What is on disk is not the useful answer: nothing is checked out
+        # yet. The repository's own top level says what the row should have
+        # asked for instead.
+        raise SourceError(
+            f"{src.name}: the table asked for {missing}, which {src.fetch.url} "
+            f"does not hold at HEAD under exactly those names. Its top level "
+            f"holds {_top(dest) or 'nothing'}. Either it has moved them, or the "
+            f"row is wrong."
+        )
+    return kinds
+
+
+def _narrow(dest: pathlib.Path, kinds: dict[str, str]) -> None:
+    """Restrict the working tree to the names in `kinds`, or open it up
+    completely when there are none."""
+    if not kinds:
+        _git(["sparse-checkout", "disable"], cwd=dest)
+    elif "blob" in kinds.values():
+        # Cone mode takes directories, and every file at the top level
+        # with them, so a file on its own is a gitignore-style pattern,
+        # its glob characters escaped so that it matches only itself.
+        _git(["sparse-checkout", "set", "--no-cone", *(
+            "/" + re.sub(r"([\\*?\[])", r"\\\1", name) + ("/" if kind == "tree" else "")
+            for name, kind in kinds.items()
+        )], cwd=dest)
+    else:
+        _git(["sparse-checkout", "set", "--cone", *kinds], cwd=dest)
     _git(["checkout"], cwd=dest)
 
 
@@ -140,36 +174,34 @@ def _files_under(dest: pathlib.Path) -> list[pathlib.Path]:
     ]
 
 
-def _verify(src: Source, dest: pathlib.Path, everything: bool) -> None:
-    """Refuse to report success over a tree that did not arrive.
+def _verify(src: Source, dest: pathlib.Path, kinds: dict[str, str]) -> None:
+    """Refuse to report success over a tree that is not what the table says.
 
     The generic form of the retiring script's footprint count: whatever the
     table asked for has to be there afterwards. A fetch that silently lands
     nothing is the failure that reads most like success, so it is the one
-    checked hardest.
+    checked hardest. And nothing else may be at the top level, except, in
+    cone mode, the top-level files git's cone always checks out.
     """
-    if not everything and src.fetch.wanted:
-        missing = [name for name in src.fetch.wanted if not (dest / name).exists()]
+    if kinds:
+        missing = [name for name in kinds if not (dest / name).exists()]
         if missing:
-            # What is on disk is not the useful answer: a sparse checkout that
-            # matched nothing leaves an empty tree, so reporting it says only
-            # "nothing", which is what the caller already knows. The
-            # repository's own top level says what the row should have asked
-            # for instead.
-            top = sorted(
-                {
-                    line.strip().rstrip("/")
-                    for line in _git(
-                        ["ls-tree", "--name-only", "HEAD"], cwd=dest
-                    ).splitlines()
-                    if line.strip()
-                }
-            )
             raise SourceError(
                 f"{src.name}: the table asked for {missing} and the fetch did not "
                 f"land them in {dest}. The repository's top level holds "
-                f"{top or 'nothing'}. Either {src.fetch.url} has moved them, or "
-                f"the row is wrong."
+                f"{_top(dest) or 'nothing'}."
+            )
+        asked = {pathlib.PurePosixPath(name).parts[0] for name in kinds}
+        cone = "blob" not in kinds.values()
+        stray = sorted(
+            path.name for path in dest.iterdir()
+            if path.name != ".git" and path.name not in asked
+            and not (cone and path.is_file())
+        )
+        if stray:
+            raise SourceError(
+                f"{src.name}: {stray} are in {dest} and the table asked for "
+                f"{list(kinds)} only. Refusing to report success over them."
             )
         return
 
@@ -197,8 +229,9 @@ def fetch(src: Source, root: pathlib.Path, everything: bool = False) -> pathlib.
     dest = src.dest(root)
     if not (dest / ".git").is_dir():
         _clone(src.fetch.url, dest)
-    _narrow(dest, src.fetch.wanted, everything)
-    _verify(src, dest, everything)
+    kinds = {} if everything else _kinds(src, dest)
+    _narrow(dest, kinds)
+    _verify(src, dest, kinds)
     return dest
 
 

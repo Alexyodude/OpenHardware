@@ -355,6 +355,55 @@ def test_a_file_name_with_glob_characters_is_fetched_as_written(tmp_path):
     assert _tree(dest) == ["board [rev A].brd"]
 
 
+def test_a_wanted_name_in_the_wrong_case_is_refused_before_anything_lands(tmp_path):
+    """Windows' filesystem would find `License.txt` as `license.txt`; git's
+    tree does not, and it is git's tree the name is checked against."""
+    origin = _origin(
+        tmp_path / "origin",
+        {"license.txt": "terms", "board.brd": "layout", "board.sch": "schematic"},
+    )
+    row = _source(origin.as_uri(), wanted=("License.txt",))
+
+    with pytest.raises(SourceError) as caught:
+        fetch(row, tmp_path / "root")
+    assert "License.txt" in str(caught.value), caught.value
+    assert _tree(row.dest(tmp_path / "root")) == []
+
+
+def test_a_directory_named_with_a_trailing_slash_is_refused(tmp_path):
+    """`Hardware/` is not a path git lists as itself, so it is not guessed at."""
+    origin = _origin(tmp_path / "origin", {"Hardware/board.brd": "layout"})
+    row = _source(origin.as_uri(), wanted=("Hardware/",))
+
+    with pytest.raises(SourceError) as caught:
+        fetch(row, tmp_path / "root")
+    assert "Hardware/" in str(caught.value), caught.value
+
+
+def test_a_top_level_path_outside_wanted_is_refused(tmp_path):
+    """A tree holding more than the table asked for is not what it says."""
+    origin = _origin(tmp_path / "origin", {"board.brd": "layout", "notes.txt": "notes"})
+    row = _source(origin.as_uri(), wanted=("board.brd",))
+    dest = fetch(row, tmp_path / "root")
+    (dest / "stray.txt").write_text("left here", encoding="utf-8")
+
+    with pytest.raises(SourceError) as caught:
+        fetch(row, tmp_path / "root")
+    assert "stray.txt" in str(caught.value), caught.value
+
+
+def test_a_row_of_directories_still_lands_the_top_level_files_cone_mode_does(tmp_path):
+    """seeed-xiao's licence is its top-level LICENSE, which cone mode lands."""
+    origin = _origin(
+        tmp_path / "origin",
+        {"LICENSE": "terms", "Hardware/board.brd": "layout", "pinout/p.png": "picture"},
+    )
+    row = _source(origin.as_uri(), wanted=("Hardware",), skipped=(("pinout", "big"),))
+
+    dest = fetch(row, tmp_path / "root")
+    assert _tree(dest) == ["Hardware/board.brd", "LICENSE"]
+
+
 def test_a_fetch_that_does_not_land_the_wanted_paths_raises(tmp_path):
     """The generic form of the retiring script's footprint count.
 
