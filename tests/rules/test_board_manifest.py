@@ -404,169 +404,123 @@ def test_a_licence_file_that_is_not_on_disk_is_refused_naming_it(tmp_path, monke
     assert list(tmp_path.iterdir()) == []
 
 
-# --- the pins come from the variant the row names -----------------------------
+# --- the pins: the variant by label, the vendor's CAD by copper (OH-178) -------
 
 
-def test_every_resolved_pad_was_named_by_the_rows_variant():
-    """And every label the row opts in names a pad: an opt-in that matches
-    nothing is a claim in the table that the file never uses."""
+def _variant_numbers(row: board_manifest.Row) -> dict[str, int]:
+    variant = import_pindefs.BSP_DIR / row.package / "variants" / row.variant
+    return import_pindefs.read_c_pin_constants(
+        (variant / "pins_arduino.h").read_text(encoding="utf-8", errors="replace"))
+
+
+def test_every_resolved_pad_says_which_sources_named_it():
+    """OH-173's question, answered in the file: `chip_pin_from` names the
+    variant where one of the pad's labels is a label the row opts in, and the
+    row's own CAD, which traces every resolved pad on these three rows. Every
+    opted-in label names a pad: an opt-in that matches nothing is a claim in
+    the table that the file never uses."""
     for row in ROWS:
         _fetched(row)
-        report = import_pindefs.board_report(row.board)
-        resolved = [pad for pad in report["pads"] if pad["chip_pin"]]
+        matched = set()
+        resolved = [pad for pad in _committed(row)["pads"] if pad["chip_pin"]]
         assert resolved, row.board
-        cited = f"{row.package} variants/{row.variant}/pins_arduino.h @ "
-        for pad in resolved:
-            assert [s[:len(cited)] for s in pad["sources"]] == [cited], pad
-            assert pad["matched"] in row.labels, pad
-        assert sorted({pad["matched"] for pad in resolved}) == sorted(row.labels), (
-            row.board
-        )
-
-
-#: Pad number to GPIO for each chip, as `(package, value)` in a row's CAD,
-#: that a row whose nets name no `IO<n>` places. Transcribed from Espressif's
-#: datasheets, which are not fetched here, and only the rows a net on these
-#: boards also names, so that
-#: `test_every_chip_pads_row_is_the_gpio_its_board_names` reads every one:
-#:   ESP32-C3FH4     ESP32-C3 Series Datasheet v2.4, p. 67, "ESP32-C3
-#:                   Consolidated Pin Overview": Pin No. against IO MUX
-#:                   Function 1. https://www.espressif.com/sites/default/
-#:                   files/documentation/esp32-c3_datasheet_en.pdf
-#:   ESP32-C6-MINI   ESP32-C6-MINI-1 & MINI-1U Datasheet v1.5, pp. 10-11,
-#:                   Table 3-1 Pin Definitions: No. against the GPIO its
-#:                   Function names. https://www.espressif.com/sites/default/
-#:                   files/documentation/esp32-c6-mini-1_mini-1u_datasheet_en.pdf
-CHIP_PADS = {
-    ("QFN32_5MM", "ESP32-C3FH4"): {
-        "4": 0, "5": 1, "6": 2, "8": 3, "9": 4, "10": 5, "12": 6, "13": 7,
-        "14": 8, "15": 9, "16": 10, "27": 20, "28": 21,
-    },
-    ("ESP32-PICO-MINI", "ESP32-C6-MINI_MINI"): {
-        "5": 2, "6": 3, "9": 4, "10": 5, "12": 0, "13": 1, "15": 6, "16": 7,
-        "19": 14, "20": 15, "22": 8, "23": 9, "24": 18, "25": 19, "26": 20,
-        "27": 21, "28": 22, "29": 23, "30": 17, "31": 16,
-    },
-}
-#: Nets off the header that a row's variant numbers under another name. The
-#: join is written here; each side is read from its own vendor's file.
-OFF_HEADER = {
-    "Adafruit QT Py ESP32-C3": {"NEOPIX": "PIN_NEOPIXEL", "BOOT": "BUTTON"},
-    "Adafruit Feather ESP32-C6": {"I2C_PWR": "NEOPIXEL_I2C_POWER"},
-}
-
-
-def _chip(row: board_manifest.Row) -> tuple[eagle.Board, eagle.Element | None, dict]:
-    """The row's board, and the one element on it `CHIP_PADS` describes."""
-    path = board_manifest.cad_path(row)
-    parts = ET.parse(path).getroot().findall("drawing/board/elements/element")
-    known = [(part.get("name"), CHIP_PADS[key]) for part in parts
-             if (key := (part.get("package"), part.get("value"))) in CHIP_PADS]
-    assert len(known) <= 1, (row.board, known)
-    board = eagle.read_board(path)
-    if not known:
-        return board, None, {}
-    name, pads = known[0]
-    return board, board.element(name), pads
-
-
-def _gpios_reached(board: eagle.Board, chip: eagle.Element, pads: dict, net: str) -> list[int]:
-    """The GPIOs of the chip's pads on `net`, or, where there are none, on
-    the net beyond a two-pad part in series: the QT Py's TX reaches its
-    ESP32-C3 through R4."""
-    direct = [pads[pad.number] for pad in chip.pads if pad.net == net and pad.number in pads]
-    if direct:
-        return direct
-    beyond = []
-    for part in board.elements:
-        nets = [pad.net for pad in part.pads]
-        if part is not chip and len(nets) == 2 and net in nets:
-            other = nets[1 - nets.index(net)]
-            beyond += [pads[pad.number] for pad in chip.pads
-                       if pad.net == other and pad.number in pads]
-    return beyond
+        for pad in _committed(row)["pads"]:
+            if pad["chip_pin"] is None:
+                assert "chip_pin_from" not in pad, (row.board, pad["label"])
+                continue
+            named = {alt for alt in import_pindefs.alternatives(pad["label"])
+                     if alt in row.labels}
+            matched |= named
+            assert pad["chip_pin_from"] == sorted(
+                {row.source} | ({row.package} if named else set())), (row.board, pad)
+        assert matched == set(row.labels), row.board
 
 
 def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
-    """Two vendors, one answer. Where the vendor's net names `IO<n>`, as
-    SparkFun's `IO16/TX` does, the net is the second statement. Where it
-    does not, as Adafruit's `TX` does not, it is the chip pad the net
-    reaches, read against Espressif's pin table in `CHIP_PADS`. Every
-    resolved pad is checked one way or both, and every way agrees."""
+    """The trace is one statement, and every resolved pad has another that
+    agrees: the `IO<n>` in the vendor's net name, as SparkFun's `IO8`, or the
+    variant's number for a label the row opts in, as Adafruit's `TX`."""
     for row in ROWS:
         _fetched(row)
-        board, chip, pads = _chip(row)
-        resolved = [pad for pad in _committed(row)["pads"] if pad["chip_pin"]]
-        assert resolved, row.board
-        for pad in resolved:
-            stated = [int(found.group(1)) for part in pad["label"].split("/")
-                      if (found := re.fullmatch(r"IO(\d+)", part))]
-            reached = _gpios_reached(board, chip, pads, pad["label"]) if chip else []
-            assert stated or reached, (row.board, pad["label"], "nothing checks it")
-            assert set(stated + reached) == {pad["chip_index"]}, (
-                row.board, pad["label"], stated, reached, pad["chip_index"])
-
-
-def test_every_chip_pads_row_is_the_gpio_its_board_names():
-    """Each `CHIP_PADS` row, on the board that places the chip: the net on
-    that pad names `IO<n>`, or the row's variant numbers the net's label or
-    its `OFF_HEADER` join. A net naming nothing is read across one two-pad
-    part, as the QT Py's N$1 reaches TX through R4."""
-    checked = []
-    for row in ROWS:
-        _fetched(row)
-        board, chip, pads = _chip(row)
-        if chip is None:
-            continue
-        variant = import_pindefs.BSP_DIR / row.package / "variants" / row.variant
-        numbers = import_pindefs.read_c_pin_constants(
-            (variant / "pins_arduino.h").read_text(encoding="utf-8", errors="replace"))
-
-        def named(net: str) -> set[int]:
-            parts = net.split("/")
-            return ({int(found.group(1)) for part in parts
-                     if (found := re.fullmatch(r"IO(\d+)", part))}
-                    | {numbers[part] for part in parts if part in row.labels}
-                    | {numbers[joined] for joined in [OFF_HEADER.get(row.board, {}).get(net)]
-                       if joined in numbers})
-
-        for pad in chip.pads:
-            if pad.number not in pads:
+        numbers = _variant_numbers(row)
+        for pad in _committed(row)["pads"]:
+            if pad["chip_pin"] is None:
                 continue
-            claims = named(pad.net or "")
-            for part in board.elements if not claims else ():
-                nets = [one.net for one in part.pads]
-                if part is not chip and len(nets) == 2 and pad.net in nets:
-                    claims |= named(nets[1 - nets.index(pad.net)] or "")
-            assert claims == {pads[pad.number]}, (row.board, pad.number, pad.net, claims)
-            checked.append((row.board, pad.number))
-        assert sorted((n for b, n in checked if b == row.board), key=int) == sorted(
-            pads, key=int), row.board
-    assert checked, "no row's chip is in CHIP_PADS, so nothing was checked"
+            parts = pad["label"].split("/")
+            stated = {int(found.group(1)) for part in parts
+                      if (found := re.fullmatch(r"IO(\d+)", part))}
+            stated |= {numbers[part] for part in parts if part in row.labels}
+            assert stated == {pad["chip_index"]}, (row.board, pad["label"], stated)
 
 
-def test_no_supply_pad_reaches_a_gpio_of_its_chip():
+def test_every_pin_table_row_is_a_pad_the_rows_header_reaches():
+    """A table keeps only rows some board uses (OH-178): a row nothing
+    reaches is a transcription nothing checks."""
+    for row in ROWS:
+        _fetched(row)
+        text = board_manifest.cad_path(row).read_text(encoding="utf-8")
+        traced = import_pindefs.read_eagle_traced(
+            (text,), select=row.select, table=row.pin_table)
+        gpios = [gpio for _, gpio in row.pin_table.gpio]
+        assert len(set(gpios)) == len(gpios), row.board
+        assert {pin.index for pin in traced.values()} == set(gpios), row.board
+
+
+def test_no_supply_pad_names_a_pin_or_is_on_a_gpio_pad_of_its_chip():
     """What makes a label a supply (`SUPPLY_LABELS` in
-    tests/rules/test_import_pindefs.py): on each row whose chip `CHIP_PADS`
-    describes, no supply pad's net is on a GPIO pad of that chip. Direct
-    connections only, and not across a two-pad part as `_gpios_reached`
-    reads a signal: a supply reaches GPIOs through pull-up resistors by
-    design, as 3.3V does on both Adafruit boards."""
+    tests/rules/test_import_pindefs.py): its pad names no chip pin, and its
+    net is on no GPIO pad of the chip. Across one part 3.3V reaches a GPIO
+    through a pull-up on all three boards; the trace stops at the chip's own
+    supply pads, which is what keeps it off them."""
     from tests.rules.test_import_pindefs import SUPPLY_LABELS
 
     checked = []
     for row in ROWS:
         _fetched(row)
-        board, chip, pads = _chip(row)
-        if chip is None:
-            continue
+        board = eagle.read_board(board_manifest.cad_path(row))
+        (chip,) = [element for element in board.elements if (element.package, element.value)
+                   == (row.pin_table.package, row.pin_table.value)]
+        gpio = dict(row.pin_table.gpio)
         for pad in _committed(row)["pads"]:
             label = pad["label"]
             if label.split("/")[0].upper() in SUPPLY_LABELS or label.upper() in SUPPLY_LABELS:
+                assert pad["chip_pin"] is None, (row.board, label)
                 assert not [one.number for one in chip.pads
-                            if one.net == label and one.number in pads], (row.board, label)
-                checked.append((row.board, label))
-    assert checked, "no row's chip is in CHIP_PADS, so nothing was checked"
+                            if one.net == label and one.number in gpio], (row.board, label)
+                checked.append(row.board)
+    assert set(checked) == {row.board for row in ROWS}
+
+
+def test_a_net_renamed_for_another_gpio_is_refused_on_the_pilot():
+    """The ticket's condition: a deliberately wrong net name is refused
+    rather than resolved. SparkFun's `IO8` renamed `IO12`: its copper still
+    reaches U1's pad 10, GPIO8."""
+    row = row_named("SparkFun Thing Plus ESP32-C6")
+    _fetched(row)
+    text = board_manifest.cad_path(row).read_text(encoding="utf-8")
+    assert text.count('<signal name="IO8">') == 1
+    wrong = text.replace('<signal name="IO8">', '<signal name="IO12">')
+    with pytest.raises(import_pindefs.PindefError,
+                       match=r"'IO12' is named for GPIO12 and its copper reaches GPIO8"):
+        import_pindefs.read_eagle_traced((wrong,), select=row.select, table=row.pin_table)
+
+
+def test_a_variant_and_a_trace_that_disagree_leave_the_pad_disputed(monkeypatch):
+    """Never resolved by preference. The Feather's table told that its SDA
+    pad, 25, is GPIO20: the variant says 19, the trace 20, and the pad stays
+    null with both claims beside it."""
+    row = row_named("Adafruit Feather ESP32-C6")
+    _fetched(row)
+    table = dataclasses.replace(row.pin_table, gpio=tuple(
+        (pad, 20 if pad == "25" else gpio) for pad, gpio in row.pin_table.gpio))
+    monkeypatch.setitem(import_pindefs.BOARDS, row.board,
+                        import_pindefs.manifest_board(dataclasses.replace(row, pin_table=table)))
+    (sda,) = [pad for pad in import_pindefs.board_report(row.board)["pads"]
+              if pad["label"] == "SDA"]
+    assert (sda["chip_pin"], sda["reason"]) == (None, import_pindefs.DISPUTED)
+    assert [(one["chip_pin"], [s.split()[0] for s in one["sources"]])
+            for one in sda["disputed"]] == [
+        ("GPIO19", [row.package]), ("GPIO20", [row.source])]
 
 
 def test_every_reason_is_on_a_pad_and_carried_by_it():

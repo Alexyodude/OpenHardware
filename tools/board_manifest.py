@@ -10,7 +10,8 @@ A XIAO is found by its name. Any other board was a hand-written exception in
 is a row, and the tools that already read each input do the rest:
 
     tools/import_board.py      the pads, from the CAD file and the elements named
-    tools/import_pindefs.py    each pad's `chip_pin`, from the variant named
+    tools/import_pindefs.py    each pad's `chip_pin`, from the variant named,
+                               and from the chip pad its net reaches in the CAD
     webui/boards/catalogue.py  the chip, from the row
 
 A row is checked before anything is written, and the refusal names what it
@@ -57,6 +58,49 @@ class ManifestError(Exception):
 
 
 @dataclasses.dataclass(frozen=True)
+class PinTable:
+    """Pad number to GPIO for one part, as its datasheet's pin table states it.
+
+    The part is the element a row's CAD places as `package` with `value`.
+    Only pads some row's header reaches are listed (OH-178).
+    """
+
+    package: str
+    value: str
+    cite: str
+    gpio: tuple[tuple[str, int], ...]
+
+
+ESP32_C3FH4 = PinTable(
+    "QFN32_5MM", "ESP32-C3FH4",
+    "ESP32-C3 Series Datasheet v2.4, p. 67, ESP32-C3 Consolidated Pin Overview: "
+    "Pin No. against IO MUX Function 1. https://www.espressif.com/sites/default/"
+    "files/documentation/esp32-c3_datasheet_en.pdf",
+    (("4", 0), ("5", 1), ("8", 3), ("9", 4), ("10", 5), ("12", 6), ("13", 7),
+     ("14", 8), ("16", 10), ("27", 20), ("28", 21)),
+)
+ESP32_C6_MINI_1 = PinTable(
+    "ESP32-PICO-MINI", "ESP32-C6-MINI_MINI",
+    "ESP32-C6-MINI-1 & MINI-1U Datasheet v1.5, pp. 10-11, Table 3-1 Pin "
+    "Definitions: No. against the GPIO its Function names. https://www.espressif"
+    ".com/sites/default/files/documentation/esp32-c6-mini-1_mini-1u_datasheet_en.pdf",
+    (("5", 2), ("6", 3), ("9", 4), ("10", 5), ("12", 0), ("13", 1), ("15", 6),
+     ("16", 7), ("19", 14), ("20", 15), ("22", 8), ("23", 9), ("24", 18),
+     ("25", 19), ("27", 21), ("28", 22), ("29", 23), ("30", 17), ("31", 16)),
+)
+ESP32_C6_WROOM_1 = PinTable(
+    "ESP32-C6-WROOM-1-NARROW", "ESP32-C6-WROOM-1-NARROW",
+    "ESP32-C6-WROOM-1 & WROOM-1U Datasheet v1.4, p. 11, Table 3-1 Pin "
+    "Definitions: No. against the GPIO its Function names. https://www.espressif"
+    ".com/sites/default/files/documentation/esp32-c6-wroom-1_wroom-1u_datasheet_en.pdf",
+    (("4", 4), ("5", 5), ("6", 6), ("7", 7), ("8", 0), ("9", 1), ("10", 8),
+     ("11", 10), ("12", 11), ("15", 9), ("16", 18), ("17", 19), ("18", 20),
+     ("19", 21), ("20", 22), ("21", 23), ("23", 15), ("24", 17), ("25", 16),
+     ("26", 3), ("27", 2)),
+)
+
+
+@dataclasses.dataclass(frozen=True)
 class Row:
     """One board, as the inputs its file is generated from."""
 
@@ -88,6 +132,9 @@ class Row:
     #: `(label, why)` for a pad whose null has a better reason than "no
     #: package defines this label"; `import_pindefs.Board.reasons`.
     reasons: tuple[tuple[str, str], ...] = ()
+    #: The chip's pads in the CAD, read so that a pad names the GPIO its net
+    #: reaches: `import_pindefs.read_eagle_traced`.
+    pin_table: PinTable | None = None
 
 
 _THING_PLUS_SCH = "SparkFun's Thing_Plus_ESP32_C6.sch"
@@ -122,6 +169,7 @@ ROWS = (
              f"this pad and pin 1 of the jumper RGB (JUMPER-SMT_2_NO), whose "
              f"pin 2 is the `DO` of the WS2812 D5"),
         ),
+        pin_table=ESP32_C6_WROOM_1,
     ),
     Row(
         board="Adafruit QT Py ESP32-C3",
@@ -133,6 +181,7 @@ ROWS = (
         package="arduino-esp32",
         variant="adafruit_qtpy_esp32c3",
         labels=("A0", "A1", "A2", "A3", "SDA", "SCL", "TX", "RX", "SCK", "MISO", "MOSI"),
+        pin_table=ESP32_C3FH4,
     ),
     Row(
         board="Adafruit Feather ESP32-C6",
@@ -145,6 +194,7 @@ ROWS = (
         variant="adafruit_feather_esp32c6",
         labels=("A0", "A1", "A2", "A3", "A4", "A5", "SDA", "SCL", "TX", "RX", "SCK",
                 "MISO", "MOSI"),
+        pin_table=ESP32_C6_MINI_1,
     ),
 )
 

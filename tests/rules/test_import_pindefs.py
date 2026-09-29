@@ -52,6 +52,7 @@ import re
 
 import pytest
 
+from tools import board_manifest
 from tools import import_pindefs as pindefs
 from tools.import_pindefs import (
     BOARDS,
@@ -1060,6 +1061,10 @@ def test_the_two_artefacts_cite_the_same_revisions_as_each_other():
         block = module.read_text(encoding="utf-8")
         block = block[block.find(pindefs.HEADER_BEGIN):block.find(pindefs.HEADER_END)]
         for package, revision in recorded.items():
+            # A manifest board's own CAD is read for its pads and never into
+            # its chip's table, which is keyed by other boards (OH-178).
+            if name in pindefs.MANIFEST and package == board_manifest.row(name).source:
+                continue
             assert f"{package} " in block, f"{name} names {package}, {module.name} does not"
             assert f" @ {revision}" in block, (
                 f"{name} records {package} at {revision} and {module.name} cites "
@@ -1788,7 +1793,7 @@ SUPPLY_LABELS = frozenset({
     # them. Its schematic puts no ESP32-C6 GPIO on any of the three.
     "3.3V", "V_USB", "V_BATT",
     # The Adafruit QT Py ESP32-C3's 5 V rail, as its EAGLE file names it.
-    # `test_no_supply_pad_reaches_a_gpio_of_its_chip` in
+    # `test_no_supply_pad_names_a_pin_or_is_on_a_gpio_pad_of_its_chip` in
     # tests/rules/test_board_manifest.py reads that file for it.
     "+5V",
 })
@@ -1850,8 +1855,9 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # generic. 370 and 157 until the Adafruit QT Py ESP32-C3 (OH-177) added
     # 14, one per pin: 11 named by its variant and 3 supplies. 381 and 160
     # until the Adafruit Feather ESP32-C6 (OH-177) added 28: 15 named by its
-    # variant, 7 supplies and 6 generic.
-    assert naming == 396, naming
+    # variant, 7 supplies and 6 generic. 396 and 37 until OH-178 traced each
+    # row's nets to its chip: the pilot's 16 generic pads and the Feather's 6.
+    assert naming == 418, naming
     assert supplies == 167, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
     # same debug cluster already carried; 42 until the six SWD pads on the
@@ -1865,7 +1871,7 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # two ways and no file here joins them. 52 with the Thing Plus's ESP_EN,
     # VREG_EN and LED_DO.
     assert specific == 52, specific
-    assert generic == 37, (
+    assert generic == 15, (
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
@@ -2555,3 +2561,97 @@ def test_a_generated_reason_reads_the_supplies_the_crystal_and_the_debugger():
     # Not vacuous. These are the pads the two reasons actually cover.
     assert (crystals, debuggers, reaches, untraced) == (6, 9, 6, 3), (
         crystals, debuggers, reaches, untraced)
+
+
+# --- a manifest board's own board file, traced to its chip (OH-178) ----------
+
+#: A part's pin table for the traced reader's own tests. Pads 1 and 2 are
+#: GPIOs; pad 3 is not in it, as a 3V3 or EN pad is not.
+_TABLE = board_manifest.PinTable("QFN", "PART", "this test's own table", (("1", 4), ("2", 5)))
+
+
+def _traced_board(signals: dict[str, list[str]], parts: dict[str, int] | None = None,
+                  chips: int = 1) -> str:
+    """A minimal EAGLE board: header J1 of four pads, `chips` elements U1...
+    placed as the table's part with three pads each, and `parts` of `n` pads;
+    `signals` maps a net to its `element.pad` contacts. Written as text so
+    the fixture reads as the format."""
+    parts = parts or {}
+
+    def package(name: str, count: int) -> str:
+        return (f'<package name="{name}">'
+                + "".join(f'<smd name="{n}" x="{n}" y="0" dx="1" dy="1" layer="1"/>'
+                          for n in range(1, count + 1))
+                + "</package>")
+    packages = package("HDR", 4) + package("QFN", 3) + "".join(
+        package(f"P{count}", count) for count in sorted(set(parts.values())))
+    placed = ('<element name="J1" library="L" package="HDR" x="0" y="0"/>'
+              + "".join(f'<element name="U{n}" library="L" package="QFN" value="PART" '
+                        f'x="10" y="0"/>' for n in range(1, chips + 1))
+              + "".join(f'<element name="{name}" library="L" package="P{count}" x="20" y="0"/>'
+                        for name, count in parts.items()))
+    nets = "".join(
+        f'<signal name="{net}">'
+        + "".join('<contactref element="{}" pad="{}"/>'.format(*one.split("."))
+                  for one in contacts)
+        + "</signal>"
+        for net, contacts in signals.items())
+    return ('<?xml version="1.0" encoding="utf-8"?><eagle version="9.6.2"><drawing><board>'
+            f'<libraries><library name="L"><packages>{packages}</packages></library></libraries>'
+            f"<elements>{placed}</elements><signals>{nets}</signals>"
+            "</board></drawing></eagle>")
+
+
+def _traced(text: str) -> dict[str, str]:
+    return {net: pin.name for net, pin in
+            pindefs.read_eagle_traced((text,), select=("J1",), table=_TABLE).items()}
+
+
+def test_a_net_on_a_chip_pad_names_the_gpio_the_datasheet_row_gives():
+    assert _traced(_traced_board({"TX": ["J1.1", "U1.1"]})) == {"TX": "GPIO4"}
+
+
+def test_a_net_reaches_its_chip_through_one_part_in_series_and_not_two():
+    """One two-pad part whose far net holds only it and the chip pad: the QT
+    Py's TX, through R4. A second part in series, a far net with anything
+    else on it -- a divider's midpoint -- or a part of three pads is not a
+    series path, and the pad is not resolved."""
+    one = {"TX": ["J1.1", "R1.1"], "N1": ["R1.2", "U1.1"]}
+    assert _traced(_traced_board(one, {"R1": 2})) == {"TX": "GPIO4"}
+    two = {"TX": ["J1.1", "R1.1"], "N1": ["R1.2", "R2.1"], "N2": ["R2.2", "U1.1"]}
+    assert _traced(_traced_board(two, {"R1": 2, "R2": 2})) == {}
+    divider = {"VBAT": ["J1.1", "R1.1"], "SENSE": ["R1.2", "R2.1", "U1.1"],
+               "GND": ["R2.2", "J1.2"]}
+    assert _traced(_traced_board(divider, {"R1": 2, "R2": 2})) == {}
+    three = {"TX": ["J1.1", "Q1.1"], "N1": ["Q1.2", "U1.1"]}
+    assert _traced(_traced_board(three, {"Q1": 3})) == {}
+
+
+def test_a_net_on_a_chip_pad_the_table_does_not_number_stops_there():
+    """A rail on the chip's 3V3 pad and, through a pull-up, on a GPIO names
+    no pin."""
+    signals = {"3V3": ["J1.1", "U1.3", "R1.1"], "IO4": ["R1.2", "U1.1"]}
+    assert _traced(_traced_board(signals, {"R1": 2})) == {}
+
+
+def test_a_net_named_for_another_gpio_than_its_copper_reaches_is_refused():
+    """The name is a cross-check and never the source."""
+    assert _traced(_traced_board({"IO4/TX": ["J1.1", "U1.1"]})) == {"IO4/TX": "GPIO4"}
+    with pytest.raises(PindefError, match=r"'IO5/TX' is named for GPIO5 and its copper "
+                                          r"reaches GPIO4"):
+        _traced(_traced_board({"IO5/TX": ["J1.1", "U1.1"]}))
+    with pytest.raises(PindefError, match=r"'IO4' is named for GPIO4 and its copper "
+                                          r"reaches no GPIO"):
+        _traced(_traced_board({"IO4": ["J1.1"]}))
+
+
+def test_a_net_on_two_pads_of_the_chip_is_refused():
+    for other in ("U1.2", "U1.3"):
+        with pytest.raises(PindefError, match=r"'TX' reaches pads \['1', '[23]'\] of U1"):
+            _traced(_traced_board({"TX": ["J1.1", "U1.1", other]}))
+
+
+def test_the_table_is_read_against_exactly_one_element():
+    for chips in (0, 2):
+        with pytest.raises(PindefError, match=f"{chips} elements in this board file"):
+            _traced(_traced_board({"TX": ["J1.1"]}, chips=chips))
