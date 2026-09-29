@@ -251,6 +251,10 @@ class Board:
     core_built: bool
     described: bool
     firmware_evidence: str | None
+    #: Why the chip's evidence is not this board's, where it is not. A row in
+    #: `tools/board_manifest.py` has no recipe built against its own variant
+    #: (rules/board-claims.md §6), so the page may not say what its chip did.
+    firmware_withheld: str | None = None
 
     @property
     def runnable(self) -> bool:
@@ -280,6 +284,7 @@ class Board:
             "runnable": self.runnable,
             "firmware_verified": self.firmware_verified,
             "firmware_evidence": self.firmware_evidence,
+            "firmware_withheld": self.firmware_withheld,
         }
 
 
@@ -366,6 +371,17 @@ def catalogue(directory: pathlib.Path | None = None) -> list[Board]:
                 built = build_core.library_path(core).is_file()
             except build_core.BuildError:
                 built = False
+        evidence = FIRMWARE_VERIFIED.get(chip)
+        withheld = None
+        row = next((r for r in board_manifest.ROWS if r.board == name), None)
+        if row is not None and evidence is not None:
+            withheld = (
+                f"{evidence} is the {chip}'s evidence, and it does not carry to "
+                f"this board: it is a row in tools/board_manifest.py, and no "
+                f"recipe builds against its own variant, {row.package} "
+                f"variants/{row.variant}, until OH-179 (rules/board-claims.md §6)"
+            )
+            evidence = None
         out.append(Board(
             name=name,
             chip=chip,
@@ -374,7 +390,8 @@ def catalogue(directory: pathlib.Path | None = None) -> list[Board]:
             core_exists=core_exists,
             core_built=built,
             described=chip.upper().replace("-", "") in described,
-            firmware_evidence=FIRMWARE_VERIFIED.get(chip),
+            firmware_evidence=evidence,
+            firmware_withheld=withheld,
         ))
     return out
 

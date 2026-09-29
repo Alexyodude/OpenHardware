@@ -190,3 +190,19 @@ def test_every_rows_chip_is_the_catalogues():
         assert row.chip in catalogue.CHIPS, row
         assert catalogue.chip_for(row.board) == row.chip
         assert import_pindefs.BOARDS[row.board].chip == row.chip
+
+
+def test_no_row_inherits_its_chips_evidence():
+    """rules/board-claims.md §6: the register stays keyed by chip, and a row,
+    which no recipe builds against its own variant, carries none of it."""
+    boards = {board.name: board for board in catalogue.catalogue()}
+    for row in ROWS:
+        assert row.chip in catalogue.FIRMWARE_VERIFIED, row.chip
+        board = boards[row.board]
+        assert board.firmware_evidence is None, board
+        assert board.firmware_verified is False
+        assert f"variants/{row.variant}" in board.firmware_withheld
+        assert "OH-179" in board.firmware_withheld
+    # And the XIAO sibling keeps it: the register was not weakened.
+    assert boards["XIAO-ESP32-C6-DIP"].firmware_verified is True
+    assert boards["XIAO-ESP32-C6-DIP"].firmware_withheld is None

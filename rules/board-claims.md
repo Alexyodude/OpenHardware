@@ -160,3 +160,26 @@ different cell entirely.
 points at a test that touches a real image. A test that loads an image and then
 asserts nothing satisfies check 5 completely. That is what review is for, and
 saying so here is cheaper than a rule that overstates its own enforcement.
+
+## 6. 2026-09-29 — keyed by chip only while siblings build identically
+
+§1 keys the register by chip because `XIAO-RP2040-DIP` and `XIAO-RP2040-SMD`
+build one image from one variant. That reason is the whole licence for
+sharing the claim, and it holds only while it is true of the boards sharing
+it.
+
+The SparkFun Thing Plus ESP32-C6 (OH-176) is the first board where it is not.
+Its chip is in the register, and `webui/compile.py`'s ESP32-C6 recipe reads
+its pin names from `arduino-esp32/variants/XIAO_ESP32C6`, not from the
+board's own `sparkfun_esp32c6_thing_plus`. Built that way, `SDA` is GPIO22
+and `SCL` GPIO23, which on this board are the nets SparkFun names
+`IO22/!SD_DET!` and `IO23/STAT`.
+
+**A board built against another board's variant does not inherit the claim.**
+So for a row in `tools/board_manifest.py`, `recipe_for` refuses with
+`UnknownBoard` naming the row's own variant, and `catalogue()` gives the
+board no `firmware_evidence` and says why in `firmware_withheld`, while
+`FIRMWARE_VERIFIED` stays keyed by chip. OH-179 is where such a row gets a
+recipe of its own; the two refusals change with it, and not before.
+`test_a_manifest_board_is_refused_rather_than_built_with_a_siblings_variant`
+and `test_no_row_inherits_its_chips_evidence` hold them.

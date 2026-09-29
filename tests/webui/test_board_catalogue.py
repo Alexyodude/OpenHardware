@@ -525,14 +525,21 @@ def test_every_board_states_whether_a_sketch_can_be_built_for_it():
     -- stated at the route because `compile` imports the catalogue and
     layering points one way -- and the Uno and the SAMD21s are the boards
     with recipes today, which the recipe table itself says."""
+    from tools import board_manifest
     from webui import compile as compile_service
     from webui import emulator_server
     payload = emulator_server.handle_api(None, "/api/boards", {}, {})
+    # A row in tools/board_manifest.py has a chip with a recipe and is still
+    # refused, because that recipe is another board's (OH-176).
+    rows = {row.board for row in board_manifest.ROWS}
     for entry in payload["boards"]:
         assert isinstance(entry["buildable"], bool), entry["board" if "board" in entry else "name"]
-        assert entry["buildable"] == (entry["chip"] in compile_service.RECIPES)
+        assert entry["buildable"] == (
+            entry["chip"] in compile_service.RECIPES and entry["name"] not in rows
+        ), entry["name"]
     by_name = {entry["name"]: entry for entry in payload["boards"]}
     assert by_name["Arduino Uno"]["buildable"] is True
+    assert by_name["SparkFun Thing Plus ESP32-C6"]["buildable"] is False
     assert by_name["XIAO-RP2040-DIP"]["buildable"] is False, (
         "the RP2040 has no recipe yet; if one landed, update this and OH-140"
     )

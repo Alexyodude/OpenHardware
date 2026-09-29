@@ -67,6 +67,7 @@ import subprocess
 import tempfile
 import time
 
+from tools import board_manifest
 from webui.boards import catalogue as board_catalogue
 from webui.boards import esp32c3, esp32c5, esp32c6, samd21
 
@@ -601,6 +602,19 @@ def recipe_for(board: str) -> Recipe:
         # it would leave "unknown board" and nothing else.
         raise UnknownBoard(f"{board!r}: {exc}") from exc
     recipe = RECIPES.get(chip)
+    # **Keyed on the chip only while siblings build identically**, which a row
+    # in tools/board_manifest.py does not: the chip's recipe takes another
+    # board's pin names. Refused until OH-179 gives such a row its own.
+    row = next((r for r in board_manifest.ROWS if r.board == board), None)
+    if row is not None:
+        sibling = (f"; the {chip} recipe reads {', '.join(recipe.bsp_includes)}"
+                   if recipe is not None and recipe.bsp_includes else "")
+        raise UnknownBoard(
+            f"{board} is a row in tools/board_manifest.py whose pins are "
+            f"{row.package} variants/{row.variant}, and no recipe here builds "
+            f"against that variant{sibling}. OH-179 gives a manifest board a "
+            f"recipe of its own."
+        )
     if recipe is None:
         buildable = ", ".join(sorted(RECIPES)) or "none"
         raise UnknownBoard(

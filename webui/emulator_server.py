@@ -670,8 +670,14 @@ def handle_api(session: emulator.Session, route: str,
             # this machine's recipes, stated here rather than discovered as
             # a 400 after typing a sketch (OH-140). The catalogue cannot
             # carry it: `compile` imports the catalogue, and layering points
-            # one way.
-            entry["buildable"] = entry["chip"] in compile_service.RECIPES
+            # one way. Asked of `recipe_for` rather than of `RECIPES`, which
+            # has a row for the chip of a board it refuses (OH-176).
+            try:
+                compile_service.recipe_for(entry["name"])
+            except compile_service.UnknownBoard:
+                entry["buildable"] = False
+            else:
+                entry["buildable"] = True
             listing.append(entry)
         return {
             "boards": listing,

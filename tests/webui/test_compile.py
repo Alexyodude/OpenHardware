@@ -131,6 +131,18 @@ def test_a_board_that_is_not_in_the_catalogue_is_refused():
         compiler.recipe_for("not a board")
 
 
+def test_a_manifest_board_is_refused_rather_than_built_with_a_siblings_variant():
+    """The ESP32-C6 has a recipe, and it reads the XIAO's pin names. On the
+    SparkFun Thing Plus those put SDA and SCL on other nets, so until OH-179
+    gives the row its own recipe the build is refused, naming its variant."""
+    with pytest.raises(compiler.UnknownBoard) as caught:
+        compiler.recipe_for("SparkFun Thing Plus ESP32-C6")
+    message = str(caught.value)
+    assert "arduino-esp32 variants/sparkfun_esp32c6_thing_plus" in message, message
+    assert "OH-179" in message, message
+    assert "arduino-esp32/variants/XIAO_ESP32C6" in message, message
+
+
 def test_the_recipe_carries_the_base_address_the_loader_needs():
     """A raw `.bin` has no address of its own, so somebody must supply one.
     That somebody is the recipe and not the request."""
