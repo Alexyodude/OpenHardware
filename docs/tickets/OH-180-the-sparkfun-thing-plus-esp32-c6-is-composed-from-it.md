@@ -2,7 +2,7 @@
 id: OH-180
 title: The SparkFun Thing Plus ESP32-C6 is composed from its own EAGLE board file,
   as the Uno is
-status: in-review
+status: done
 priority: P2
 created: '2026-09-29'
 touches:
@@ -36,3 +36,5 @@ Until they are in, tests/rules/test_compose_board_3d.py::test_the_two_lists_of_c
 **Note 2026-09-29:** 2026-09-29: approved by an independent review after two rounds (every drawn part's footprint pads land within 0.34 mm of the vendor's; modules in 10 rotated/mirrored cases; XIAO placements unchanged, the Uno's GROUND jumper correctly moves underneath; MAX17048 pads 1-8 within 0.04 mm and pin 1 confirmed; 12+7 reviewer mutants, all red after the fix round). Composer suites under miniconda python: 456 passed, 1 failed - test_the_two_lists_of_composed_boards_agree, BLOCKED ON THE USER: three COMPOSED rows in tools/import_3d_model.py (listed in the note above) could not be added because the permission classifier refused this agent's claim on that file. lane3 is not merged to master until they are. Follow-ups moved to OH-184.
 
 **Note 2026-09-30:** 2026-09-30, the operator (the owner's stand-in): the blocker is cleared. tools/import_3d_model.py was unclaimed (tickets.py owner), so it is claimed for OH-180 and the three COMPOSED rows from the note above are added. tests/rules/test_compose_board_3d.py and tests/rules/test_import_3d_model.py: 203 passed, including test_the_two_lists_of_composed_boards_agree; check_ticket_claims OK. Ready to merge into master.
+
+**Note 2026-09-30:** 2026-09-30: merged to master by fast-forward (fc509d7) after the operator added the three COMPOSED rows (d42be9f on lane3). The three boards and the Uno were recomposed in the main checkout with miniconda python: Thing Plus 35 drawn / 4 refused, QT Py 33 / 2, Feather 32 / 4, Uno 47 / 2. TWINS on master: 12 of 30 boards hold all four; geometry 29, model 28, pins 24, runs 15; the Feather ESP32-C6, QT Py ESP32-C3 and SparkFun Thing Plus ESP32-C6 hold all four. Found in that output and filed separately: some passives are drawn with the other kind's model (QT Py resistors R1-R7 as C_0402, Feather capacitors C4 and C10 as R_0603). tools/compose_board_3d.py, tests/rules/test_compose_board_3d.py and tools/import_3d_model.py return to OH-163.
