@@ -54,10 +54,19 @@ def test_the_led_actually_blinks(cpu):
 '''
 
 
+#: A manifest with one row, whose name carries a chip.
+MANIFEST = '''
+ROWS = (
+    Row(board="Some Thing ESP32-C6", chip="ESP32-C6"),
+)
+'''
+
+
 def build_root(
     tmp_path: pathlib.Path,
     *,
     catalogue: str = CATALOGUE,
+    manifest: str | None = MANIFEST,
     evidence: str | None = EVIDENCE,
     image: bool = True,
     files: dict[str, str] | None = None,
@@ -66,6 +75,9 @@ def build_root(
     boards = tmp_path / "webui" / "boards"
     boards.mkdir(parents=True)
     (boards / "catalogue.py").write_text(catalogue, encoding="utf-8")
+    if manifest is not None:
+        (tmp_path / "tools").mkdir()
+        (tmp_path / "tools" / "board_manifest.py").write_text(manifest, encoding="utf-8")
 
     suite = tmp_path / "tests" / "cortexm0"
     suite.mkdir(parents=True)
@@ -176,6 +188,81 @@ def test_a_part_that_merely_starts_with_a_known_chip_is_not_that_chip(tmp_path):
         tmp_path, files={"docs/boards.md": "XIAO-ESP32-C61-DIP runs firmware."}
     )
     assert C.unevidenced_chip_claims(root) == []
+
+
+# --- 1, for a row of tools/board_manifest.py (OH-183) -------------------------
+
+#: The miniature, with the chip the row carries verified: its name alone would
+#: pass on the chip's evidence.
+C6_CATALOGUE = CATALOGUE.replace(
+    'FIRMWARE_VERIFIED = {"RP2040": "tests/cortexm0/test_blink.py"}',
+    'FIRMWARE_VERIFIED = {"RP2040": "tests/cortexm0/test_blink.py", '
+    '"ESP32-C6": "tests/cortexm0/test_blink.py"}',
+)
+
+
+def test_a_row_named_beside_a_run_claim_needs_its_own_entry_not_its_chips(tmp_path):
+    root = build_root(tmp_path, catalogue=C6_CATALOGUE,
+                      files={"docs/boards.md": "The Some Thing ESP32-C6 runs firmware."})
+    found = C.unevidenced_chip_claims(root)
+    assert len(found) == 1, found
+    assert found[0].startswith(
+        "docs/boards.md:1: says Some Thing ESP32-C6 runs firmware, but Some Thing "
+        "ESP32-C6 is a row in tools/board_manifest.py and names no test in "
+        "BOARD_FIRMWARE_VERIFIED"), found
+
+
+def test_a_row_with_its_own_entry_may_say_it(tmp_path):
+    catalogue = C6_CATALOGUE.replace(
+        "BOARD_FIRMWARE_VERIFIED = {}",
+        'BOARD_FIRMWARE_VERIFIED = {"Some Thing ESP32-C6": "tests/cortexm0/test_blink.py"}')
+    root = build_root(tmp_path, catalogue=catalogue,
+                      files={"docs/boards.md": "The Some Thing ESP32-C6 runs firmware."})
+    assert C.unevidenced_chip_claims(root) == []
+
+
+def test_the_chip_in_a_rows_name_is_not_read_as_a_second_claim(tmp_path):
+    """Its own entry licenses the row; the ESP32-C6 in its name is its name,
+    and an unverified chip beside it on the line is still caught."""
+    catalogue = CATALOGUE.replace(
+        "BOARD_FIRMWARE_VERIFIED = {}",
+        'BOARD_FIRMWARE_VERIFIED = {"Some Thing ESP32-C6": "tests/cortexm0/test_blink.py"}')
+    root = build_root(tmp_path, catalogue=catalogue, files={"docs/boards.md": (
+        "The Some Thing ESP32-C6 runs firmware.\n"
+        "The Some Thing ESP32-C6 and the SAMD21 run firmware.\n")})
+    found = C.unevidenced_chip_claims(root)
+    assert len(found) == 1, found
+    assert found[0].startswith("docs/boards.md:2: says SAMD21 runs firmware"), found
+
+
+def test_the_pilot_beside_a_run_claim_fails_and_the_feather_passes(tmp_path):
+    """The ticket's two sentences, against this repository's own register and
+    manifest: the SparkFun Thing Plus ESP32-C6 has no entry of its own and its
+    chip has one; the Adafruit Feather ESP32-C6 has its own."""
+    root = build_root(
+        tmp_path,
+        catalogue=(REPO / C.CATALOGUE).read_text(encoding="utf-8"),
+        manifest=(REPO / C.MANIFEST).read_text(encoding="utf-8"),
+        files={"docs/boards.md": ("The SparkFun Thing Plus ESP32-C6 runs firmware.\n"
+                                  "The Adafruit Feather ESP32-C6 runs firmware.\n")},
+    )
+    found = C.unevidenced_chip_claims(root)
+    assert len(found) == 1, found
+    assert found[0].startswith(
+        "docs/boards.md:1: says SparkFun Thing Plus ESP32-C6 runs firmware"), found
+
+
+def test_a_manifest_that_is_not_there_is_an_error_not_a_pass(tmp_path):
+    """With no rows read, every row's name passes on its chip's evidence."""
+    root = build_root(tmp_path, manifest=None)
+    with pytest.raises(C.ClaimError, match="the manifest is not there"):
+        C.unevidenced_chip_claims(root)
+
+
+def test_a_row_whose_name_is_not_a_literal_is_an_error_not_a_pass(tmp_path):
+    root = build_root(tmp_path, manifest='ROWS = (Row(board=NAME, chip="ESP32-C6"),)\n')
+    with pytest.raises(C.ClaimError, match='a row with no literal board='):
+        C.unevidenced_chip_claims(root)
 
 
 # --- 2. a code surface that never reads the register ------------------------
@@ -458,7 +545,6 @@ def test_a_fabricated_claim_fails_the_checker_end_to_end(tmp_path):
     """The whole thing, as a commit would run it: exit 1 and the line to fix."""
     build_root(tmp_path, files={"docs/boards.md": "The SAMD21 board runs firmware."})
     tools = tmp_path / "tools"
-    tools.mkdir()
     checker = tools / "check_board_claims.py"
     checker.write_bytes((REPO / "tools" / "check_board_claims.py").read_bytes())
 

@@ -22,6 +22,11 @@ entry in `FIRMWARE_VERIFIED`. That is the sentence somebody writes when a chip
 whose core is built and whose siblings work looks runnable, which is exactly
 when it is easiest to believe and hardest to check.
 
+A row of `tools/board_manifest.py` is matched first, as the board, and needs
+its own `BOARD_FIRMWARE_VERIFIED` entry; its name is then taken out of the
+line before chips are matched. A row's name carries its chip's; matched as
+the chip, it would pass on evidence that is not its own (OH-183).
+
 ## 2. A code surface makes the claim without ever reading the register
 
 `ungrounded_code_claims`. Check 1 can only see a chip that is spelled out, and
@@ -77,6 +82,10 @@ SKIPPED = 3
 
 #: The register, relative to the repository root.
 CATALOGUE = "webui/boards/catalogue.py"
+
+#: The rows: boards whose claim is `BOARD_FIRMWARE_VERIFIED`'s and never their
+#: chip's (rules/board-claims.md §7), relative to the repository root.
+MANIFEST = "tools/board_manifest.py"
 
 #: The words that assert a board has run something. Deliberately narrow: every
 #: entry is a phrase that would be a lie if no image had executed. "runnable",
@@ -279,8 +288,45 @@ def chips(root: pathlib.Path | None = None) -> list[str]:
     return list(value)
 
 
-def _chip_pattern(names: list[str]) -> re.Pattern[str]:
-    """Chip names, longest first, ending at a delimiter.
+def manifest_boards(root: pathlib.Path | None = None) -> list[str]:
+    """Every row's `board` in `tools/board_manifest.py`, read without importing it.
+
+    Parsed for `catalogue`'s reason. Every element of `ROWS` has to be a call
+    with a literal `board=`, or this is an error: a row this cannot read is a
+    row whose name passes check 1 on its chip's evidence.
+    """
+    root = REPO if root is None else root
+    path = root / MANIFEST
+    if not path.is_file():
+        raise ClaimError(f"{path}: the manifest is not there, so no row can be told "
+                         f"from its chip")
+    try:
+        tree = ast.parse(_text(path), filename=str(path))
+    except SyntaxError as exc:
+        raise ClaimError(f"{path}: will not parse: {exc}") from exc
+    rows = next(
+        (node.value for node in tree.body
+         if isinstance(node, ast.Assign)
+         and [getattr(t, "id", None) for t in node.targets] == ["ROWS"]),
+        None,
+    )
+    if not isinstance(rows, (ast.Tuple, ast.List)):
+        raise ClaimError(f"{path}: no module-level ROWS = (...)")
+    names: list[str] = []
+    for element in rows.elts:
+        board = next((keyword.value for keyword in getattr(element, "keywords", ())
+                      if keyword.arg == "board"), None)
+        if not (isinstance(board, ast.Constant) and isinstance(board.value, str)):
+            raise ClaimError(
+                f"{path}:{element.lineno}: a row with no literal board=\"...\"; its "
+                f"name could not be told from its chip's"
+            )
+        names.append(board.value)
+    return names
+
+
+def _names_pattern(names: list[str]) -> re.Pattern[str]:
+    """Chip or board names, longest first, ending at a delimiter.
 
     The delimiter guard is the one `catalogue.chip_for` needs and for the same
     reason: without it `ESP32-C6` matches inside `ESP32-C61`, which is a
@@ -310,10 +356,17 @@ def surfaces(root: pathlib.Path | None = None) -> list[pathlib.Path]:
 
 
 def unevidenced_chip_claims(root: pathlib.Path | None = None) -> list[str]:
-    """1. A chip is named beside a run-claim and names no test."""
+    """1. A row or a chip is named beside a run-claim and names no test.
+
+    The row first, against `BOARD_FIRMWARE_VERIFIED`, and then the chips in
+    what is left of the line once its name is taken out.
+    """
     root = REPO if root is None else root
     verified = {chip.lower() for chip in register(root)}
-    pattern = _chip_pattern(chips(root))
+    boards_verified = {board.lower() for board in board_register(root)}
+    pattern = _names_pattern(chips(root))
+    names = manifest_boards(root)
+    rows = _names_pattern(names) if names else None
 
     problems: list[str] = []
     for path in surfaces(root):
@@ -321,7 +374,19 @@ def unevidenced_chip_claims(root: pathlib.Path | None = None) -> list[str]:
         for number, line in enumerate(_text(path).splitlines(), start=1):
             if not _asserts_a_run(line):
                 continue
-            for chip in sorted({m.group(1) for m in pattern.finditer(line)}):
+            rest = line
+            if rows is not None:
+                for board in sorted({m.group(1) for m in rows.finditer(line)}):
+                    if board.lower() in boards_verified:
+                        continue
+                    problems.append(
+                        f"{rel}:{number}: says {board} runs firmware, but {board} is a "
+                        f"row in {MANIFEST} and names no test in "
+                        f"BOARD_FIRMWARE_VERIFIED; its chip's entry is not its own: "
+                        f"{line.strip()!r}"
+                    )
+                rest = rows.sub(" ", line)
+            for chip in sorted({m.group(1) for m in pattern.finditer(rest)}):
                 if chip.lower() in verified:
                     continue
                 problems.append(
@@ -479,7 +544,8 @@ def evidence_that_never_loads_an_image(root: pathlib.Path | None = None) -> list
 
 
 CHECKS = (
-    ("a chip named beside a run-claim with no test behind it", unevidenced_chip_claims),
+    ("a board or chip named beside a run-claim with no test behind it",
+     unevidenced_chip_claims),
     (
         "a code surface claiming firmware runs without reading the register",
         ungrounded_code_claims,
