@@ -773,3 +773,41 @@ def test_a_row_named_like_a_registered_board_stops_import_pindefs_loading():
     assert result.returncode != 0, result.stdout
     assert "a row may not replace a board" in result.stderr, result.stderr
     assert "XIAO-RP2040-DIP" in result.stderr, result.stderr
+
+
+# --- one answer to "is this a manifest board" (OH-183) ------------------------
+
+
+def test_find_is_each_row_by_its_name_and_none_for_any_other_board():
+    for entry in ROWS:
+        assert board_manifest.find(entry.board) is entry
+        assert board_manifest.row(entry.board) is entry
+    rows = {entry.board for entry in ROWS}
+    others = [name for name in catalogue.board_names() if name not in rows]
+    assert others, "every board file is a row, so nothing here is asked of None"
+    assert [name for name in others if board_manifest.find(name) is not None] == []
+    assert board_manifest.find("Nowhere") is None
+    with pytest.raises(ManifestError, match="no row called 'Nowhere'"):
+        board_manifest.row("Nowhere")
+
+
+def test_the_api_the_compiler_and_the_catalogue_each_ask_find(tmp_path, monkeypatch):
+    """A row that only `find` knows, with `ROWS` emptied, is a row to each
+    of the four places that walked `ROWS` for themselves: `api.is_row`,
+    `recipe_for`, `chip_for` and `catalogue`."""
+    from webui import api
+    from webui import compile as compiler
+
+    fake = dataclasses.replace(ROWS[0], board="Only Find Knows", chip="SAMD21")
+    monkeypatch.setattr(board_manifest, "ROWS", ())
+    monkeypatch.setattr(board_manifest, "find",
+                        lambda name: fake if name == fake.board else None)
+    assert api.is_row(fake.board)
+    assert catalogue.chip_for(fake.board) == "SAMD21"
+    with pytest.raises(compiler.UnknownBoard,
+                       match="Only Find Knows is a row in tools/board_manifest.py"):
+        compiler.recipe_for(fake.board)
+    (tmp_path / f"{fake.board}.json").write_text("{}", encoding="utf-8")
+    (board,) = catalogue.catalogue(tmp_path)
+    assert board.chip == "SAMD21" and board.firmware_evidence is None
+    assert f"variants/{fake.variant}" in board.firmware_withheld, board.firmware_withheld

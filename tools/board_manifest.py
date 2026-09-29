@@ -226,14 +226,21 @@ ROWS = (
 )
 
 
+def find(name: str) -> Row | None:
+    """The row called `name`, or None where `name` is not a row: the one
+    answer to "is this a manifest board", which `webui/api.py`,
+    `webui/compile.py` and `webui/boards/catalogue.py` ask."""
+    return next((candidate for candidate in ROWS if candidate.board == name), None)
+
+
 def row(name: str) -> Row:
     """The row called `name`, or an error naming every row there is."""
-    for candidate in ROWS:
-        if candidate.board == name:
-            return candidate
-    raise ManifestError(
-        f"no row called {name!r}. Rows: {', '.join(r.board for r in ROWS)}"
-    )
+    found = find(name)
+    if found is None:
+        raise ManifestError(
+            f"no row called {name!r}. Rows: {', '.join(r.board for r in ROWS)}"
+        )
+    return found
 
 
 def cad_path(entry: Row) -> pathlib.Path:

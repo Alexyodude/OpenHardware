@@ -610,7 +610,7 @@ def recipe_for(board: str) -> Recipe:
             f"{board} carries a {chip} and nothing here knows how to build for "
             f"one. Chips with a recipe: {buildable}."
         )
-    row = next((r for r in board_manifest.ROWS if r.board == board), None)
+    row = board_manifest.find(board)
     if row is None:
         return recipe
     recipe = own_variant(row, recipe)

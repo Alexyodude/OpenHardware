@@ -820,7 +820,7 @@ def pin_levels(runtime: Runtime, cpu: Core) -> dict[str, str] | None:
 def is_row(board: str) -> bool:
     """A board from `tools/board_manifest.py`, whose chip module's pin table
     is keyed by another board's labels (rules/board-claims.md §6)."""
-    return any(row.board == board for row in board_manifest.ROWS)
+    return board_manifest.find(board) is not None
 
 
 def row_levels(runtime: Runtime, cpu: Core) -> dict[str, str] | None:

@@ -305,16 +305,16 @@ def chip_for(board_name: str) -> str:
     board someone must look at -- silently filing it under an invented chip is
     how a catalogue starts lying.
     """
-    rows = [row.chip for row in board_manifest.ROWS if row.board == board_name]
-    if board_name in IRREGULAR and rows:
+    row = board_manifest.find(board_name)
+    if board_name in IRREGULAR and row is not None:
         raise CatalogueError(
             f"{board_name!r} is in IRREGULAR as {IRREGULAR[board_name]} and a row "
-            f"in tools/board_manifest.py as {rows[0]}; name it in one place"
+            f"in tools/board_manifest.py as {row.chip}; name it in one place"
         )
     if board_name in IRREGULAR:
         return IRREGULAR[board_name]
-    if rows:
-        return rows[0]
+    if row is not None:
+        return row.chip
     if not board_name.startswith("XIAO-"):
         raise CatalogueError(
             f"cannot tell which chip is on {board_name!r}: it does not start "
@@ -388,7 +388,7 @@ def catalogue(directory: pathlib.Path | None = None) -> list[Board]:
                 built = False
         evidence = FIRMWARE_VERIFIED.get(chip)
         withheld = None
-        row = next((r for r in board_manifest.ROWS if r.board == name), None)
+        row = board_manifest.find(name)
         if row is not None:
             own = BOARD_FIRMWARE_VERIFIED.get(name)
             if own is None and evidence is not None:
