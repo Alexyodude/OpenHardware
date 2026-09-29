@@ -971,6 +971,9 @@ def render_text() -> str:
         f"  Vendor CAD is searched for under {VENDOR_DIR.as_posix()}/, where"
     )
     lines.append("  python tools/get_board_sources.py seeed-xiao puts it.")
+    lines.append(
+        "  model3d is a mesh file in that tree, not what the 3D view draws."
+    )
     lines.append("  Evidence, strongest first:")
     for evidence in Evidence:
         lines.append(f"    {evidence.label:<13} {evidence.gloss}")
@@ -1093,7 +1096,8 @@ def render_markdown() -> str:
         f"By cell: {_asset_tallies(inv.assets)}. Vendor CAD is searched for under "
         f"`{VENDOR_DIR.as_posix()}/`, where `python tools/get_board_sources.py seeed-xiao` puts it; "
         "a cell reading `unsearchable` means that tree is absent from this "
-        "checkout, which is a fact about the checkout and not about the vendor.",
+        "checkout, which is a fact about the checkout and not about the vendor. "
+        "`model3d` is a mesh file in that tree, not what the 3D view draws.",
         "",
     ]
     out += [f"* `{evidence.label}` — {evidence.gloss}" for evidence in Evidence]
