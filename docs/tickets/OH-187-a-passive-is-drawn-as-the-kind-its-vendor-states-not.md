@@ -2,11 +2,13 @@
 id: OH-187
 title: A passive is drawn as the kind its vendor states, not the kind its package
   shares
-status: in-review
+status: in-progress
 priority: P2
 created: '2026-09-30'
 touches:
 - docs/tickets/OH-187-*
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
 ---
 
 Part of OH-174, found when OH-180 merged (2026-09-30). The composer draws some passives with the other kind's model. From `tools/compose_board_3d.py --board`'s own drawn list on master:
