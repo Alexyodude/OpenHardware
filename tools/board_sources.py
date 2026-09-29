@@ -236,7 +236,6 @@ _ADAFRUIT_CC_BY_SA_3 = Licence(
     file="license.txt",
     quote="Attribution-ShareAlike 3.0 Unported",
 )
-_UNREAD_SCHEMATIC = "the EAGLE schematic. Nothing reads it yet; the pads and nets are in the .brd"
 _PINOUT_PICTURE = "a pinout diagram, opened 2026-09-29: no pad coordinates and no nets"
 _ADAFRUIT_README = "not needed: the licence is read from license.txt, which is fetched"
 _NO_LBR = "no .lbr in the tree listing; the .brd carries the libraries it uses"
@@ -732,14 +731,14 @@ SOURCES: tuple[Source, ...] = (
         name="adafruit-kb2040",
         vendor="Adafruit",
         model="one repository per board",
-        size="1,105,914 + 22,239 bytes, the two blobs fetched, as GitHub's tree lists them",
+        size="1,105,914 + 304,799 + 22,239 bytes, the three blobs fetched, as "
+        "GitHub's tree lists them",
         licence=_ADAFRUIT_CC_BY_SA_3,
         fetch=Fetch(
             transport=Transport.GIT_SPARSE,
             url="https://github.com/adafruit/Adafruit-KB2040-PCB.git",
-            wanted=("Adafruit KB2040.brd", "license.txt"),
+            wanted=("Adafruit KB2040.brd", "Adafruit KB2040.sch", "license.txt"),
             skipped=(
-                ("Adafruit KB2040.sch", _UNREAD_SCHEMATIC),
                 ("Adafruit KB2040 Pinout.pdf", _PINOUT_PICTURE),
                 ("README.md", _ADAFRUIT_README),
                 ("assets", "one product photograph, 5302.jpg"),
@@ -749,8 +748,9 @@ SOURCES: tuple[Source, ...] = (
         ),
         artefacts=Artefacts(
             schematic_source=Artefact(
-                Published.YES, Evidence.LISTED,
-                "'Adafruit KB2040.sch', EAGLE; listed, not fetched",
+                Published.YES, Evidence.OPENED,
+                "'Adafruit KB2040.sch', EAGLE XML; fetched here for its devices' "
+                "pin-to-pad connects",
             ),
             schematic_pdf=Artefact(
                 Published.NO, Evidence.ABSENT,

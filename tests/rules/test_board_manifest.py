@@ -408,19 +408,25 @@ def test_a_licence_file_that_is_not_on_disk_is_refused_naming_it(tmp_path, monke
 
 
 def _variant_numbers(row: board_manifest.Row) -> dict[str, int]:
-    variant = import_pindefs.BSP_DIR / row.package / "variants" / row.variant
-    return import_pindefs.read_c_pin_constants(
-        (variant / "pins_arduino.h").read_text(encoding="utf-8", errors="replace"))
+    """What the row's variant numbers -- its `D<n>` and the labels it opts
+    in -- read as import_pindefs reads it: through the preprocessor for
+    arduino-pico, whose `D<n>` are in `variants/generic/common.h` (OH-181)."""
+    checkout = import_pindefs.BSP_DIR / row.package
+    text = (checkout / "variants" / row.variant / "pins_arduino.h").read_text(
+        encoding="utf-8", errors="replace")
+    pins = import_pindefs.variant_source(row).pins(checkout, (text,))
+    return {label: pin.index for label, pin in pins.items()}
 
 
 def test_every_resolved_pad_says_which_sources_named_it():
     """OH-173's question, answered in the file: `chip_pin_from` names the
-    variant where one of the pad's labels is a label the row opts in, and the
-    row's own CAD, which traces every resolved pad on these three rows. Every
-    opted-in label names a pad: an opt-in that matches nothing is a claim in
-    the table that the file never uses."""
+    variant where one of the pad's labels is a label it numbers -- a `D<n>`,
+    or one the row opts in -- and the row's own CAD, which traces every
+    resolved pad on every row. Every opted-in label names a pad: an opt-in
+    that matches nothing is a claim in the table that the file never uses."""
     for row in ROWS:
         _fetched(row)
+        numbers = _variant_numbers(row)
         matched = set()
         resolved = [pad for pad in _committed(row)["pads"] if pad["chip_pin"]]
         assert resolved, row.board
@@ -429,28 +435,49 @@ def test_every_resolved_pad_says_which_sources_named_it():
                 assert "chip_pin_from" not in pad, (row.board, pad["label"])
                 continue
             named = {alt for alt in import_pindefs.alternatives(pad["label"])
-                     if alt in row.labels}
-            matched |= named
+                     if alt in numbers}
+            matched |= named & set(row.labels)
             assert pad["chip_pin_from"] == sorted(
                 {row.source} | ({row.package} if named else set())), (row.board, pad)
         assert matched == set(row.labels), row.board
 
 
+def _schematic_gpio(row: board_manifest.Row) -> dict[str, set[int]]:
+    """Net -> the GPIOs the row's schematic names on the traced chip's pins
+    there: `GPIO26/AD0` on the KB2040's `A0`."""
+    board = eagle.read_board(board_manifest.cad_path(row))
+    (chip,) = [element.name for element in board.elements if (element.package, element.value)
+               == (row.pin_table.package, row.pin_table.value)]
+    schematic = eagle.read_schematic(
+        board_sources.source(row.source).dest(board_manifest.REPO) / row.schematic)
+    return {net.name: {int(found.group(1)) for ref in net.pins if ref.part == chip
+                       for part in ref.pin.split("/")
+                       if (found := re.fullmatch(r"(?:GPIO|IO)(\d+)", part, re.I))}
+            for net in schematic.nets}
+
+
 def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
     """The trace is one statement, and every resolved pad has another that
-    agrees: the GPIO the vendor's net name carries, as SparkFun's `IO8`, or
-    the variant's number for a label the row opts in, as Adafruit's `TX`."""
+    agrees: the GPIO the vendor's net name carries, as SparkFun's `IO8`; the
+    variant's number for a label it numbers, as Adafruit's `TX`; or the GPIO
+    the vendor's schematic names the chip's pin on that net, as the KB2040's
+    `SCLK` on `GPIO18`, which its variant calls `SCK`."""
     for row in ROWS:
         _fetched(row)
         numbers = _variant_numbers(row)
+        named = _schematic_gpio(row)
         for pad in _committed(row)["pads"]:
             if pad["chip_pin"] is None:
                 continue
             parts = pad["label"].split("/")
             stated = {int(found.group(1)) for part in parts
                       if (found := re.fullmatch(r"(?:GPIO|IO)(\d+)", part, re.I))}
-            stated |= {numbers[part] for part in parts if part in row.labels}
+            stated |= {numbers[part] for part in parts if part in numbers}
+            stated |= named.get(pad["label"], set())
             assert stated == {pad["chip_index"]}, (row.board, pad["label"], stated)
+    kb2040 = row_named("Adafruit KB2040")
+    assert "SCLK" not in _variant_numbers(kb2040)
+    assert _schematic_gpio(kb2040)["SCLK"] == {18}
 
 
 def _trace(row: board_manifest.Row, text: str | None = None,
@@ -474,6 +501,31 @@ def test_every_pin_table_is_what_its_page_numbers_once_each():
         assert len(set(gpio.values())) == len(gpio), table.value
         assert {int(pad) for pad in (*gpio, *other)} <= set(range(1, table.pins + 1)), (
             table.value)
+        # A footprint's other name for a pin is for a pin the page numbers.
+        assert {int(number) for _, number in table.footprint_pads} <= set(
+            range(1, table.pins + 1)), table.value
+
+
+def test_the_kb2040s_p1_is_the_central_pad_its_rp2040_page_numbers_57():
+    """`RP2040_QFN56.footprint_pads` reads the footprint's `P$1` as the
+    page's 57, "Common ground connection via central pad". `P$1` is the one
+    pad of the part the footprint does not number, it sits at the centre of
+    the 56 it does, and without the table saying so the KB2040's GND is
+    refused as a pad the table does not transcribe."""
+    row = row_named("Adafruit KB2040")
+    _fetched(row)
+    board = eagle.read_board(board_manifest.cad_path(row))
+    (chip,) = [element for element in board.elements if (element.package, element.value)
+               == (row.pin_table.package, row.pin_table.value)]
+    ring = [pad for pad in chip.pads if pad.number.isdigit()]
+    (central,) = [pad for pad in chip.pads if not pad.number.isdigit()]
+    assert central.number == "P$1"
+    assert sorted(int(pad.number) for pad in ring) == list(range(1, 57))
+    assert (round(central.x_mm - sum(pad.x_mm for pad in ring) / 56, 3),
+            round(central.y_mm - sum(pad.y_mm for pad in ring) / 56, 3)) == (0, 0)
+    assert dict(row.pin_table.not_gpio)[dict(row.pin_table.footprint_pads)["P$1"]] == "GND"
+    with pytest.raises(import_pindefs.PindefError, match="'GND' reaches IC2 pad P\\$1, which"):
+        _trace(row, table=dataclasses.replace(row.pin_table, footprint_pads=()))
 
 
 def test_every_gpio_row_of_a_table_is_a_pad_some_header_reaches():
@@ -697,25 +749,35 @@ def test_the_c6_recipes_variant_numbers_the_pilots_sda_and_scl_as_other_gpios():
     assert theirs[0] != ours[0] and theirs[1] != ours[1], (theirs, ours)
 
 
-def test_no_row_label_keys_its_chips_module_table():
+def test_no_row_pad_is_read_through_its_chips_module_table():
     """Each row's `assumption` says no level is read through its chip
-    module's table for any pad; `webui.api.header_key` is that join. It
-    says a level is read at the pad's own `chip_index` instead, which
-    `webui.api.row_levels` does (OH-179)."""
+    module's table for any pad, and that a level is read at the pad's own
+    `chip_index` instead, which `webui.api.row_levels` does (OH-179). The
+    page's other join is `webui.api.pad_view`: it keys and captions a row's
+    pad by the pad's own label and file, never by the module's table.
+
+    That table can key a row's labels: the KB2040's `D0` is one of its keys,
+    which on the XIAO RP2040 it is keyed for is GPIO26, while the KB2040's
+    own `D0` is GPIO0 (OH-181)."""
     from webui import api
 
     checked = []
     for row in ROWS:
-        names = getattr(api.description_for(row.board), "PIN_NAMES", None)
-        if names is None:
+        description = api.description_for(row.board)
+        if getattr(description, "PIN_NAMES", None) is None:
             continue
         committed = _committed(row)
         assert "no level is read through it for any pad here" in committed["assumption"]
         assert "reads a pad's level at its own `chip_index`" in committed["assumption"]
-        for pad in committed["pads"]:
-            assert api.header_key(pad["label"], names) not in names, (row.board, pad)
+        view = api.pad_view(row.board, description, None)
+        assert [(pad["pin"], pad["chip_pin"]) for pad in view["pads"]] == [
+            (pad["label"].lstrip(api.PWM_MARK), pad["chip_pin"])
+            for pad in committed["pads"]], row.board
         checked.append(row.board)
-    assert checked, "no row's chip has a module, so nothing here was checked"
+    kb2040 = {pad["label"]: pad for pad in _committed(row_named("Adafruit KB2040"))["pads"]}
+    xiao = api.description_for("Adafruit KB2040").PIN_NAMES
+    assert (xiao["D0"], kb2040["D0"]["chip_pin"]) == ("GPIO26", "GPIO0")
+    assert "Adafruit KB2040" in checked
 
 
 # --- the chip comes from the row --------------------------------------------

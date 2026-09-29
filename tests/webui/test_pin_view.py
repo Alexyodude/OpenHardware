@@ -735,8 +735,9 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     # 26 until OH-176 added the SparkFun Thing Plus ESP32-C6, whose file names
     # five chip pins from its arduino-esp32 variant; 27 until OH-177 added
     # the Adafruit QT Py ESP32-C3, whose file names 11; 28 until the
-    # Adafruit Feather ESP32-C6, whose file names 15.
-    assert len(boards) == 29, boards
+    # Adafruit Feather ESP32-C6, whose file names 15; 29 until OH-181 added
+    # the Adafruit KB2040, whose file names 18.
+    assert len(boards) == 30, boards
     # Every board, picked and not loaded: nothing was read.
     picked = {board: api.pad_view(board, api.description_for(board), None)
               for board in boards}
@@ -758,7 +759,7 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     )
     silent = sorted(set(boards) - set(would_have_lied))
     assert silent == [], silent
-    assert len(would_have_lied) == 29, would_have_lied
+    assert len(would_have_lied) == 30, would_have_lied
     assert "Arduino Uno" in would_have_lied
     assert "XIAO-MG24-SMD" in would_have_lied, (
         "the MG24 has no board module at all, so its 19 chip pins can only "
@@ -1026,7 +1027,11 @@ def test_a_running_manifest_board_lists_its_own_pads_and_no_xiao_label():
 
     blinks = pathlib.Path(__file__).resolve().parents[1] / "riscv32"
     counts = {}
-    for row in board_manifest.ROWS:
+    # The rows no blink here runs on, and what is true of those instead is
+    # `test_a_row_whose_chip_module_names_no_gpio_words_reports_no_levels`.
+    assert [row.board for row in board_manifest.ROWS if row.chip not in CHIP_BLINKS] == [
+        "Adafruit KB2040"]
+    for row in [row for row in board_manifest.ROWS if row.chip in CHIP_BLINKS]:
         module = api.description_for(row.board)
         own = json.loads((pinmap.BOARDS_DIR / f"{row.board}.json").read_text(encoding="utf-8"))
         image = (blinks / CHIP_BLINKS[row.chip] / "blink.bin").read_bytes()
@@ -1049,7 +1054,11 @@ def test_a_manifest_boards_levels_agree_with_its_chip_module_on_every_gpio_both_
     from tools import board_manifest
 
     shared = {}
-    for row in board_manifest.ROWS:
+    worded = [row for row in board_manifest.ROWS
+              if hasattr(api.description_for(row.board), "GPIO")]
+    assert [row.board for row in board_manifest.ROWS if row not in worded] == [
+        "Adafruit KB2040"]
+    for row in worded:
         module = api.description_for(row.board)
         runtime = api.Runtime(board=row.board, chip=row.chip, core="riscv32",
                               description=module, abi=None, machine=None)
@@ -1066,10 +1075,28 @@ def test_a_manifest_boards_levels_agree_with_its_chip_module_on_every_gpio_both_
     assert all(shared.values()), f"a row shares no GPIO with its chip's table: {shared}"
 
 
+def test_a_row_whose_chip_module_names_no_gpio_words_reports_no_levels():
+    """The KB2040 (OH-181): `webui/boards/rp2040.py` names no `GPIO`,
+    `GPIO_ENABLE` or `GPIO_OUT`, so `api.row_levels` reads no level for it,
+    and its view lists its own pads, in its file's order, each with its own
+    `chip_pin` and no state."""
+    module = api.description_for("Adafruit KB2040")
+    assert [hasattr(module, word) for word in ("GPIO", "GPIO_ENABLE", "GPIO_OUT")] == [
+        False, False, False]
+    runtime = api.Runtime(board="Adafruit KB2040", chip="RP2040", core="cortexm0",
+                          description=module, abi=None, machine=None)
+    assert api.row_levels(runtime, _Words({})) is None
+    own = json.loads((pinmap.BOARDS_DIR / "Adafruit KB2040.json").read_text(encoding="utf-8"))
+    view = api.pad_view("Adafruit KB2040", module, api.row_levels(runtime, _Words({})))
+    assert [(pad["pin"], pad["chip_pin"], pad["state"]) for pad in view["pads"]] == [
+        (pad["label"], pad["chip_pin"], "unknown") for pad in own["pads"]]
+
+
 def test_a_manifest_pad_is_never_captioned_by_its_chip_modules_table():
-    """Today no row's label shares a part with its chip's table, so this
-    shows the module one that does: the pad keeps its own name and its own
-    file's `chip_pin`, and the module's GPIO99 appears nowhere."""
+    """A module table keyed by a row's own label: the pad keeps its own
+    name and its own file's `chip_pin`, and the module's GPIO99 appears
+    nowhere. The KB2040's `D0`..`D10` are keys of the RP2040 module's table
+    in fact (OH-181)."""
     module = types.SimpleNamespace(__name__="webui.boards.fake", PIN_NAMES={"IO6": "GPIO99"})
     view = api.pad_view("SparkFun Thing Plus ESP32-C6", module, None)
     pad = next(pad for pad in view["pads"] if pad["label"] == "IO6/SDA")

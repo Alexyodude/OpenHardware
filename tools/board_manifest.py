@@ -129,6 +129,27 @@ ESP32_C6_WROOM_1 = PinTable(
     (("1", "GND"), ("2", "3V3"), ("3", "EN"), ("22", "NC"), ("28", "GND"),
      ("29", "EPAD")),
 )
+RP2040_QFN56 = PinTable(
+    "QFN56_7MM_REDUCEDEPAD", "RP2040_QFN56",
+    "RP2040 Datasheet build-date 2025-02-20 build-version 3184e62-clean, pp. "
+    "613-615, 5.5.2.2 Pin List, Tables 615 and 617-621: Name against Number",
+    "https://datasheets.raspberrypi.com/rp2040/rp2040-datasheet.pdf",
+    "be56fbb75ba0ae9e26558a73c93ac3e75c2ad4e6878d3b6703de2a76d886ea8c",
+    57,
+    (("2", 0), ("3", 1), ("4", 2), ("5", 3), ("6", 4), ("7", 5), ("8", 6), ("9", 7),
+     ("11", 8), ("12", 9), ("13", 10), ("29", 18), ("30", 19), ("31", 20),
+     ("38", 26), ("39", 27), ("40", 28), ("41", 29)),
+    # Pins 51-56 are the QSPI pins of Table 616, a table apart from the GPIO
+    # one, so they are in neither list.
+    (("1", "IOVDD"), ("10", "IOVDD"), ("19", "TESTEN"), ("20", "XIN"), ("21", "XOUT"),
+     ("22", "IOVDD"), ("23", "DVDD"), ("24", "SWCLK"), ("25", "SWD"), ("26", "RUN"),
+     ("33", "IOVDD"), ("42", "IOVDD"), ("43", "ADC_AVDD"), ("44", "VREG_VIN"),
+     ("45", "VREG_VOUT"), ("46", "USB_DM"), ("47", "USB_DP"), ("48", "USB_VDD"),
+     ("49", "IOVDD"), ("50", "DVDD"), ("57", "GND")),
+    # The page's 57 is "Common ground connection via central pad"; the KB2040's
+    # footprint names its central pad `P$1`.
+    footprint_pads=(("P$1", "57"),),
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -226,6 +247,22 @@ ROWS = (
         labels=("A0", "A1", "A2", "A3", "A4", "A5", "SDA", "SCL", "TX", "RX", "SCK",
                 "MISO", "MOSI"),
         pin_table=ESP32_C6_MINI_1,
+    ),
+    # Its variant numbers no pin itself: `D<n>` and `A<n>` are declared in
+    # arduino-pico's `variants/generic/common.h`, which it includes, and
+    # `import_pindefs.read_pico_pins` reads them through the preprocessor
+    # (OH-181).
+    Row(
+        board="Adafruit KB2040",
+        source="adafruit-kb2040",
+        cad="Adafruit KB2040.brd",
+        schematic="Adafruit KB2040.sch",
+        select=("JP1", "JP2"),
+        chip="RP2040",
+        package="arduino-pico",
+        variant="adafruit_kb2040",
+        labels=("A0", "A1", "A2", "A3", "MISO", "MOSI"),
+        pin_table=RP2040_QFN56,
     ),
 )
 

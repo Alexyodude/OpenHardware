@@ -112,6 +112,7 @@ Outline and pad labels only, not yet wired:
 - `XIAO-nRF54l15-DIP` · `XIAO-nRF54l15-SMD`
 - `SparkFun Thing Plus ESP32-C6`, pad labels only: no SVG outline is generated for it
 - `Adafruit QT Py ESP32-C3` · `Adafruit Feather ESP32-C6`, pad labels only, the same way
+- `Adafruit KB2040`, pad labels only, the same way
 
 All XIAO artwork is Seeed Studio's, MIT, from
 [OSHW-XIAO-Series](https://github.com/Seeed-Studio/OSHW-XIAO-Series).
