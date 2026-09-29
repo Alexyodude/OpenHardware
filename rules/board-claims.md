@@ -296,21 +296,23 @@ pins the three.
 
 ## 10. 2026-09-30 — a row that builds holds its own by a test of that shape
 
-The SparkFun Pro Micro ESP32-C3 (OH-188) holds
-`tests/webui/test_sparkfun_pro_micro_esp32c3_board.py`, of the QT Py's
-shape: its `SDA` pad is `IO5/SDA/I2S_SDI/MTDI`, and the GPIO the XIAO's
-`SDA` names is this board's `SCL` pad, which the test holds at `input`
-throughout.
-
 The pin watched need not be `SDA`. It has to be one the board's own
 variant names, on a header pad, at a GPIO other than the one the XIAO's
-variant gives the same name, so that a build against the wrong table moves
-another pad or none. The SparkFun Qwiic Pocket ESP32-C6's `SDA` reaches no
-header pad and its `TX` is the XIAO's, so
-`tests/webui/test_sparkfun_qwiic_pocket_esp32c6_board.py` watches `MOSI`:
-the pad whose `chip_index` is its own variant's `MOSI` moves, and the pad
-whose `chip_index` is the XIAO's reads `input` throughout. The test asserts
-both reasons for not watching `SDA` or `TX`, so it fails if either stops
-being true.
+variant gives the same name, and other than a sibling row's on the same
+chip, so that a build against the wrong table moves another pad or none
+and the image is this board's alone. The pad is found by its `chip_index`
+and must also carry that GPIO in the vendor's own net name.
+
+The SparkFun Pro Micro ESP32-C3 (OH-188) shares `SDA`, GPIO5, with the QT
+Py, whose `SDA` image is the same bytes, so
+`tests/webui/test_sparkfun_pro_micro_esp32c3_board.py` watches `MOSI`:
+GPIO3 on its `IOA3/PICO` pad, while the QT Py's `MOSI` and the XIAO's are
+two other pads here, never enabled or driven and read `input` throughout.
+The SparkFun Qwiic Pocket ESP32-C6's `SDA` reaches no header pad and its
+`TX` is the XIAO's, so
+`tests/webui/test_sparkfun_qwiic_pocket_esp32c6_board.py` watches `MOSI`
+too: its `IO3` pad moves and the XIAO's, `IO18`, reads `input`
+throughout. Each test asserts its reasons for not watching `SDA` or `TX`,
+so it fails if one stops being true.
 `test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence`
 pins every entry.

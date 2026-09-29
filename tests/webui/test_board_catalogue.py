@@ -312,9 +312,8 @@ def test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence():
     move on the pad its board file labels `SDA`. The SparkFun Thing Plus
     ESP32-C6 and the QT Py ESP32-C3 joined under OH-185, once their own
     tables compiled here, each with its own test of the same shape. The
-    SparkFun Pro Micro ESP32-C3 joined under OH-188 the same way, and the
-    SparkFun Qwiic Pocket ESP32-C6 watching `MOSI`, since its `SDA` reaches
-    no header pad.
+    SparkFun Pro Micro ESP32-C3 and Qwiic Pocket ESP32-C6 joined under
+    OH-188, each watching `MOSI` for the reasons board-claims §10 gives.
     """
     from tools import board_manifest
 

@@ -86,6 +86,10 @@ def test_the_image_blinks_the_gpio_this_boards_mosi_names_on_its_own_pad():
     pads = json.loads((pinmap.BOARDS_DIR / f"{BOARD}.json").read_text(encoding="utf-8"))
     (pad,) = [pad for pad in pads["pads"] if pad["chip_index"] == gpio]
     (other,) = [pad for pad in pads["pads"] if pad["chip_index"] == not_gpio]
+    # SparkFun's own net names the GPIO too, so the pad is not found by the
+    # traced `chip_index` alone.
+    assert f"IO{gpio}" in pad["label"].split("/"), pad["label"]
+    assert f"IO{not_gpio}" in other["label"].split("/"), other["label"]
     assert gpio != not_gpio, "the XIAO's MOSI is this board's, so nothing here tells them apart"
     # Why not `SDA` or `TX`, as on the other rows: if either changes, so
     # should the pin this test watches.
