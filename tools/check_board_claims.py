@@ -14,7 +14,7 @@ not inherit its chip's entry, to its own test; checks 4 and 5 hold both.
 
 Five checks, each a different way the claim comes loose from its evidence.
 
-## 1. A chip named beside a run-claim has no test behind it
+## 1. A board or chip named beside a run-claim has no test behind it
 
 `unevidenced_chip_claims`. Any surface -- prose, template, script -- where the
 words "runs firmware" land on the same line as a chip from `CHIPS` that has no
@@ -23,9 +23,12 @@ whose core is built and whose siblings work looks runnable, which is exactly
 when it is easiest to believe and hardest to check.
 
 A row of `tools/board_manifest.py` is matched first, as the board, and needs
-its own `BOARD_FIRMWARE_VERIFIED` entry; its name is then taken out of the
-line before chips are matched. A row's name carries its chip's; matched as
-the chip, it would pass on evidence that is not its own (OH-183).
+its own `BOARD_FIRMWARE_VERIFIED` entry; its name is then taken out before
+chips are matched. A row's name carries its chip's; matched as the chip, it
+would pass on evidence that is not its own (OH-183). The name is matched as
+the manifest spells it, case-insensitively, with any run of whitespace or
+`&nbsp;` between its words, in the claim line joined to the line above it, so
+a name hard-wrapped across the two is read.
 
 ## 2. A code surface makes the claim without ever reading the register
 
@@ -61,7 +64,10 @@ bound to it spelled out.
 surface that claims a board works while avoiding the word "firmware" passes,
 and so does a named test that loads an image and then asserts nothing. The
 first is a gap in the phrase table below, and widening it is cheap; the second
-is what review is for. Never report a passing run as evidence that a board
+is what review is for. A row is read only in the manifest's spelling,
+whitespace-normalised: "Thing Plus ESP32-C6", "SparkFun Thing Plus -
+ESP32-C6" or "QT Py ESP32-C3" is not the row, and is matched as the chip it
+names. Never report a passing run as evidence that a board
 works. It proves only that every claim points at a test that touches a real
 image.
 """
@@ -331,14 +337,29 @@ def manifest_boards(root: pathlib.Path | None = None) -> list[str]:
     return names
 
 
+#: What may stand between two words of a name: any whitespace, a line break
+#: included, or an HTML non-breaking space. A chip's name has one word.
+_GAP = r"(?:\s|&nbsp;)+"
+
+
+def _spelled(text: str) -> str:
+    """`text` as the manifest spells a name: one space between words, lower case."""
+    return " ".join(re.sub("&nbsp;", " ", text, flags=re.IGNORECASE).lower().split())
+
+
 def _names_pattern(names: list[str]) -> re.Pattern[str]:
-    """Chip or board names, longest first, ending at a delimiter.
+    """Chip or board names, longest first, ending at a delimiter, with any
+    `_GAP` between two words.
 
     The delimiter guard is the one `catalogue.chip_for` needs and for the same
     reason: without it `ESP32-C6` matches inside `ESP32-C61`, which is a
-    different real part.
+    different real part. Longest first for the same reason, among the names:
+    a row named for a prefix of another row's name must not take its match.
     """
-    alternatives = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+    alternatives = "|".join(
+        _GAP.join(re.escape(word) for word in name.split())
+        for name in sorted(names, key=len, reverse=True)
+    )
     return re.compile(
         rf"(?<![0-9A-Za-z])({alternatives})(?![0-9A-Za-z])", re.IGNORECASE
     )
@@ -364,34 +385,48 @@ def surfaces(root: pathlib.Path | None = None) -> list[pathlib.Path]:
 def unevidenced_chip_claims(root: pathlib.Path | None = None) -> list[str]:
     """1. A row or a chip is named beside a run-claim and names no test.
 
-    The row first, against `BOARD_FIRMWARE_VERIFIED`, and then the chips in
-    what is left of the line once its name is taken out.
+    The row first, against `BOARD_FIRMWARE_VERIFIED`, in the claim line
+    joined to the line above it; then the chips, in what is left of the
+    claim line once the row's name is taken out. A name on the line above
+    that line's own claim already reported is not reported again.
     """
     root = REPO if root is None else root
     verified = {chip.lower() for chip in register(root)}
-    boards_verified = {board.lower() for board in board_register(root)}
+    boards_verified = {_spelled(board) for board in board_register(root)}
     pattern = _names_pattern(chips(root))
     names = manifest_boards(root)
+    spelled = {_spelled(name): name for name in names}
     rows = _names_pattern(names) if names else None
 
     problems: list[str] = []
     for path in surfaces(root):
         rel = path.relative_to(root).as_posix()
-        for number, line in enumerate(_text(path).splitlines(), start=1):
+        lines = _text(path).splitlines()
+        reported: set[tuple[int, int]] = set()
+        for index, line in enumerate(lines):
             if not _asserts_a_run(line):
                 continue
+            number = index + 1
             rest = line
             if rows is not None:
-                for board in sorted({m.group(1) for m in rows.finditer(line)}):
-                    if board.lower() in boards_verified:
+                above = lines[index - 1] if index else ""
+                joined = f"{above}\n{line}"
+                for match in rows.finditer(joined):
+                    start = match.start(1)
+                    where = ((index - 1, start) if start < len(above)
+                             else (index, start - len(above) - 1))
+                    board = spelled[_spelled(match.group(1))]
+                    if where in reported or _spelled(board) in boards_verified:
                         continue
+                    reported.add(where)
                     problems.append(
                         f"{rel}:{number}: says {board} runs firmware, but {board} is a "
                         f"row in {MANIFEST} and names no test in "
                         f"BOARD_FIRMWARE_VERIFIED; its chip's entry is not its own: "
                         f"{line.strip()!r}"
                     )
-                rest = rows.sub(" ", line)
+                masked = rows.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), joined)
+                rest = masked[len(above) + 1:]
             for chip in sorted({m.group(1) for m in pattern.finditer(rest)}):
                 if chip.lower() in verified:
                     continue

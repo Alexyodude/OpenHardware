@@ -223,7 +223,7 @@ the first for a `SOC_GPIO_PIN_COUNT` nothing here defines, the second for a
 `soc/soc_caps.h` on none of its include directories, as
 `tests/webui/test_compile.py` asserts.
 
-## 8. 2026-09-29 — a row named beside a run-claim is the row's claim
+## 8. 2026-09-29 — a row's name as the manifest spells it, beside a run-claim, is the row's claim
 
 Check 1 matched chips only, and a row carries its chip in its name, so "The
 SparkFun Thing Plus ESP32-C6 runs firmware." passed on the ESP32-C6's
@@ -231,10 +231,20 @@ SparkFun Thing Plus ESP32-C6 runs firmware." passed on the ESP32-C6's
 
 `unevidenced_chip_claims` now reads each row's `board=` out of
 `tools/board_manifest.py`, without importing it, and matches those names
-first. A row named on a line that says firmware runs needs its own
-`BOARD_FIRMWARE_VERIFIED` entry, and its name is taken out of the line
-before chips are matched. A manifest that is not there, or a row with no
-literal `board=`, is an error rather than a pass.
-`test_the_pilot_beside_a_run_claim_fails_and_the_feather_passes` in
-`tests/rules/test_board_claims.py` holds the two sentences against this
-repository's own register and manifest.
+first, in the claim line joined to the line above it: as the manifest
+spells them, case-insensitively, with any run of whitespace or `&nbsp;`
+between two words, so a name hard-wrapped across the two lines, as §7
+wraps the pilot's, is read. A row so named needs its own
+`BOARD_FIRMWARE_VERIFIED` entry, and its name is taken out before chips
+are matched. A manifest that is not there, or a row with no literal
+`board=`, is an error rather than a pass.
+`test_the_pilot_beside_a_run_claim_fails_and_the_feather_passes` and
+`test_the_pilot_hard_wrapped_across_two_lines_is_still_the_pilot` in
+`tests/rules/test_board_claims.py` hold it against this repository's own
+register and manifest.
+
+**Only that spelling is read.** A paraphrase -- "Thing Plus ESP32-C6",
+"SparkFun Thing Plus - ESP32-C6", "QT Py ESP32-C3" -- is not the row, and
+is matched only as the chip it names, which passes wherever that chip holds
+evidence. `test_a_paraphrase_of_a_rows_name_is_read_only_as_its_chip` holds
+that limit where it is.

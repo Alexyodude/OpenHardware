@@ -252,6 +252,73 @@ def test_the_pilot_beside_a_run_claim_fails_and_the_feather_passes(tmp_path):
         "docs/boards.md:1: says SparkFun Thing Plus ESP32-C6 runs firmware"), found
 
 
+def test_the_pilot_hard_wrapped_across_two_lines_is_still_the_pilot(tmp_path):
+    """How this repository's own prose spells it: `SparkFun Thing Plus`, a
+    line break, `ESP32-C6`."""
+    root = build_root(
+        tmp_path,
+        catalogue=(REPO / C.CATALOGUE).read_text(encoding="utf-8"),
+        manifest=(REPO / C.MANIFEST).read_text(encoding="utf-8"),
+        files={"docs/boards.md": "The SparkFun Thing Plus\nESP32-C6 runs firmware.\n"},
+    )
+    found = C.unevidenced_chip_claims(root)
+    assert len(found) == 1, found
+    assert found[0].startswith(
+        "docs/boards.md:2: says SparkFun Thing Plus ESP32-C6 runs firmware"), found
+
+
+def test_a_rows_name_is_read_with_any_whitespace_between_its_words(tmp_path):
+    """A line break, `&nbsp;`, two spaces, lower case: each is the row, and
+    its chip is not read a second time."""
+    for index, text in enumerate((
+        "The Some Thing\nESP32-C6 runs firmware.\n",
+        "The Some Thing ESP32-C6\nruns firmware.\n",
+        "The Some&nbsp;Thing&nbsp;ESP32-C6 runs firmware.\n",
+        "The Some  Thing ESP32-C6 runs firmware.\n",
+        "the some thing esp32-c6 runs firmware.\n",
+    )):
+        root = build_root(tmp_path / str(index), files={"docs/boards.md": text})
+        found = C.unevidenced_chip_claims(root)
+        assert len(found) == 1, (text, found)
+        assert "says Some Thing ESP32-C6 runs firmware" in found[0], (text, found)
+
+
+def test_a_name_on_the_line_above_its_own_claim_is_reported_once(tmp_path):
+    root = build_root(tmp_path, files={"docs/boards.md": (
+        "The Some Thing ESP32-C6 runs firmware.\nIt runs firmware all day.\n")})
+    found = C.unevidenced_chip_claims(root)
+    assert len(found) == 1 and found[0].startswith("docs/boards.md:1:"), found
+
+
+def test_a_row_named_for_a_prefix_of_another_does_not_take_its_match(tmp_path):
+    manifest = ('ROWS = (\n    Row(board="Some Thing", chip="ESP32-C6"),\n'
+                '    Row(board="Some Thing Pro", chip="ESP32-C6"),\n)\n')
+    catalogue = CATALOGUE.replace(
+        "BOARD_FIRMWARE_VERIFIED = {}",
+        'BOARD_FIRMWARE_VERIFIED = {"Some Thing Pro": "tests/cortexm0/test_blink.py"}')
+    root = build_root(tmp_path, catalogue=catalogue, manifest=manifest,
+                      files={"docs/boards.md": "The Some Thing Pro runs firmware.\n"})
+    assert C.unevidenced_chip_claims(root) == []
+
+
+def test_a_row_with_its_own_entry_passes_in_any_case(tmp_path):
+    catalogue = CATALOGUE.replace(
+        "BOARD_FIRMWARE_VERIFIED = {}",
+        'BOARD_FIRMWARE_VERIFIED = {"Some Thing ESP32-C6": "tests/cortexm0/test_blink.py"}')
+    root = build_root(tmp_path, catalogue=catalogue,
+                      files={"docs/boards.md": "the SOME thing esp32-c6 runs firmware.\n"})
+    assert C.unevidenced_chip_claims(root) == []
+
+
+def test_a_paraphrase_of_a_rows_name_is_read_only_as_its_chip(tmp_path):
+    """What §8 says is not read: not the manifest's spelling, so not the row."""
+    for index, text in enumerate(("The Thing ESP32-C6 runs firmware.\n",
+                                  "The Some Thing - ESP32-C6 runs firmware.\n")):
+        root = build_root(tmp_path / str(index), catalogue=C6_CATALOGUE,
+                          files={"docs/boards.md": text})
+        assert C.unevidenced_chip_claims(root) == [], text
+
+
 def test_a_manifest_that_is_not_there_is_an_error_not_a_pass(tmp_path):
     """With no rows read, every row's name passes on its chip's evidence."""
     root = build_root(tmp_path, manifest=None)
