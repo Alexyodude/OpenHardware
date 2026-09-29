@@ -1862,7 +1862,7 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # and the Uno's pins come from its own variant -- and a count that skipped
     # it would be a count of most of the boards.
     files = sorted(pindefs.BOARDS_DIR.glob("*.json"))
-    assert len(files) == 30, [one.stem for one in files]
+    assert len(files) == 31, [one.stem for one in files]
     for path in files:
         board = path.stem
         for pad in json.loads(path.read_text(encoding="utf-8"))["pads"]:
@@ -1895,9 +1895,11 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # variant, 7 supplies and 6 generic. 396 and 37 until OH-178 traced each
     # row's nets to its chip: the pilot's 16 generic pads and the Feather's 6.
     # 418 and 167 until the Adafruit KB2040 (OH-181) added 26: 18 named, and
-    # 5 supplies -- three GND, 3.3V and RAW.
-    assert naming == 436, naming
-    assert supplies == 172, supplies
+    # 5 supplies -- three GND, 3.3V and RAW. 436 and 172 until the SparkFun
+    # Pro Micro ESP32-C3 (OH-188) added 18: 12 traced, and 5 supplies -- three
+    # GND, 3.3V and V_USB.
+    assert naming == 448, naming
+    assert supplies == 177, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
     # same debug cluster already carried; 42 until the six SWD pads on the
     # RP2040, SAMD21 and nRF52840 stopped saying nobody had published them.
@@ -1909,13 +1911,14 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # names while `chip_pin` stays null, because the vendor spells that pad
     # two ways and no file here joins them. 52 with the Thing Plus's ESP_EN,
     # VREG_EN and LED_DO. 55 with the KB2040's D+ and D-, traced through R3
-    # and R4 to the RP2040's USB_DP and USB_DM, and its !RESET, to RUN.
-    assert specific == 55, specific
+    # and R4 to the RP2040's USB_DP and USB_DM, and its !RESET, to RUN. 56
+    # with the Pro Micro ESP32-C3's !RESET!, traced to the module's EN.
+    assert specific == 56, specific
     assert generic == 15, (
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
-    assert naming + supplies + specific + generic == 678
+    assert naming + supplies + specific + generic == 696
 
 
 def test_the_tracer_refuses_a_part_string_that_matches_more_than_one_footprint():

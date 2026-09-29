@@ -101,6 +101,26 @@ ESP32_C3FH4 = PinTable(
      ("11", "VDD3P3_RTC"), ("17", "VDD3P3_CPU"), ("29", "XTAL_N"), ("30", "XTAL_P"),
      ("31", "VDDA"), ("32", "VDDA"), ("33", "GND")),
 )
+ESP32_C3_MINI_1 = PinTable(
+    "ESP32-C3-MINI-1", "ESP32-C3_MINI-1",
+    "ESP32-C3-MINI-1 & MINI-1U Datasheet v2.2, pp. 10-11, 3.2 Pin Description "
+    "and Table 3-1 Pin Definitions: No. against the GPIO its Function names",
+    _DOCS + "esp32-c3-mini-1_datasheet_en.pdf",
+    "de7361381348d82a1abd337f10170be7a420675987568f71fe3c5b100deed270",
+    53,
+    (("5", 2), ("6", 3), ("12", 0), ("13", 1), ("16", 10), ("18", 4), ("19", 5),
+     ("20", 6), ("21", 7), ("22", 8), ("30", 20), ("31", 21)),
+    # Pins 23, 26 and 27 are GPIO9, GPIO18 and GPIO19, which no header
+    # reaches, so they are in neither list.
+    (("1", "GND"), ("2", "GND"), ("3", "3V3"), ("4", "NC"), ("7", "NC"), ("8", "EN"),
+     ("9", "NC"), ("10", "NC"), ("11", "GND"), ("14", "GND"), ("15", "NC"),
+     ("17", "NC"), ("24", "NC"), ("25", "NC"), ("28", "NC"), ("29", "NC"),
+     *((str(pin), "NC") for pin in range(32, 36)),
+     *((str(pin), "GND") for pin in range(36, 54))),
+    # SparkFun's footprint splits the page's 49, the central ground pad, into
+    # nine pads named 49.1 to 49.9.
+    footprint_pads=tuple((f"49.{part}", "49") for part in range(1, 10)),
+)
 ESP32_C6_MINI_1 = PinTable(
     "ESP32-PICO-MINI", "ESP32-C6-MINI_MINI",
     "ESP32-C6-MINI-1 & MINI-1U Datasheet v1.5, pp. 10-11, 3.2 Pin Description "
@@ -264,6 +284,18 @@ ROWS = (
         variant="adafruit_kb2040",
         labels=("A0", "A1", "A2", "A3", "MISO", "MOSI"),
         pin_table=RP2040_QFN56,
+    ),
+    Row(
+        board="SparkFun Pro Micro ESP32-C3",
+        source="sparkfun-pro-micro-esp32-c3",
+        cad="Hardware/SparkFun_Dev_ESP32_C3_MINI.brd",
+        schematic="Hardware/SparkFun_Dev_ESP32_C3_MINI.sch",
+        select=("J6", "J7"),
+        chip="ESP32-C3",
+        package="arduino-esp32",
+        variant="sparkfun_pro_micro_esp32c3",
+        labels=("SDA", "SCL"),
+        pin_table=ESP32_C3_MINI_1,
     ),
 )
 

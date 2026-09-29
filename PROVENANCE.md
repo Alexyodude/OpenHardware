@@ -169,6 +169,22 @@ board's row names (Adafruit's own, fetched beside the board file), and each
 `chip_pin` from the sources its `chip_pin_from` names, at the revisions
 `pindefs.packages` records.
 
+### 2e. Board pad maps from SparkFun's other EAGLE files
+
+`webui/boards/SparkFun Pro Micro ESP32-C3.json` is written as 2c is, out of
+SparkFun's own EAGLE board file, `Hardware/SparkFun_Dev_ESP32_C3_MINI.brd`,
+fetched into `third_party/` and not tracked here. Its repository carries
+`License.md`, which puts SparkFun hardware under CC BY-SA 4.0;
+`tools/board_sources.py` records that sentence, the tool refuses the row
+unless the fetched file reads it, and `source.licence_evidence` quotes it.
+Each `chip_pin` comes from arduino-esp32's
+`variants/sparkfun_pro_micro_esp32c3/` (LGPL-2.1-or-later), or from the pad
+of the ESP32-C3-MINI-1 the pad's net reaches in SparkFun's board file, read
+against Espressif's datasheet pin table; `chip_pin_from` names which.
+
+**Position and risk:** as 2c. Which pads are one pin is read from
+`Hardware/SparkFun_Dev_ESP32_C3_MINI.sch`, fetched beside the board file.
+
 ---
 
 ## 3. What is unambiguously GPL, and stays GPL
