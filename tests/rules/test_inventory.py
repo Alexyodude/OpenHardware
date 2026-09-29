@@ -19,6 +19,9 @@ from tools.inventory import (
     VENDOR_DIR,
     Evidence,
     InventoryError,
+    Layer,
+    Twin,
+    _twin_heading,
     collect_assets,
     collect_boards,
     collect_files,
@@ -759,6 +762,40 @@ def test_the_twin_report_covers_exactly_the_boards_on_disk():
     listed = sorted(board.name for board in collect_boards(REPO / "webui" / "boards"))
     reported = sorted(twin.name for twin in collect_twins(REPO / "webui" / "boards"))
     assert reported == listed
+
+
+def test_the_twin_heading_counts_whole_boards_and_each_layer():
+    held = Layer(True, "x", "x")
+    whole = Twin("Whole", held, held, held, held)
+    partial = Twin("Partial", held, held, Layer(False, "0/1", "none on D0"), held)
+    assert _twin_heading([whole, partial]) == (
+        "1 of 2 boards hold all four; by layer: geometry 2, model 2, pins 1, runs 2"
+    )
+
+
+def _twin_order():
+    """Most complete first, then by name, worked out here rather than by inventory."""
+    twins = collect_twins()
+    return [twin.name for twin in sorted(twins, key=lambda t: (len(t.missing()), t.name))]
+
+
+def test_the_text_twins_section_has_one_row_per_board_most_complete_first():
+    lines = render_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("TWINS — "))
+    header = next(i for i in range(start, len(lines)) if lines[i].startswith("  geometry"))
+    rows = [line for line in lines[header + 1:] if line.strip()]
+    expected = _twin_order()
+    assert len(rows) == len(expected), rows
+    for row, name in zip(rows, expected):
+        assert row.endswith(f"  {name}"), (row, name)
+
+
+def test_the_markdown_twins_section_has_one_row_per_board_most_complete_first():
+    lines = render_markdown().splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("## Twins — "))
+    rows = [line for line in lines[start:] if line.startswith("| `")]
+    names = [re.match(r"\| `([^`]+)`", row).group(1) for row in rows]
+    assert names == _twin_order()
 
 
 def test_the_model_layer_is_what_the_page_draws_and_a_renamed_mesh_is_not(
