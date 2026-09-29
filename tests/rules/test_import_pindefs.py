@@ -1820,7 +1820,7 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # and the Uno's pins come from its own variant -- and a count that skipped
     # it would be a count of most of the boards.
     files = sorted(pindefs.BOARDS_DIR.glob("*.json"))
-    assert len(files) == 28, [one.stem for one in files]
+    assert len(files) == 29, [one.stem for one in files]
     for path in files:
         board = path.stem
         for pad in json.loads(path.read_text(encoding="utf-8"))["pads"]:
@@ -1848,9 +1848,11 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # Plus ESP32-C6 (OH-176) added its 28 pads: 5 named by its arduino-esp32
     # variant, 4 supplies, 3 with a reason read off its schematic, and 16
     # generic. 370 and 157 until the Adafruit QT Py ESP32-C3 (OH-177) added
-    # 28: 22 named by its variant and 6 supplies.
-    assert naming == 392, naming
-    assert supplies == 163, supplies
+    # 28: 22 named by its variant and 6 supplies. 392 and 163 until the
+    # Adafruit Feather ESP32-C6 (OH-177) added 28: 15 named by its variant,
+    # 7 supplies and 6 generic.
+    assert naming == 407, naming
+    assert supplies == 170, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
     # same debug cluster already carried; 42 until the six SWD pads on the
     # RP2040, SAMD21 and nRF52840 stopped saying nobody had published them.
@@ -1863,11 +1865,11 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # two ways and no file here joins them. 52 with the Thing Plus's ESP_EN,
     # VREG_EN and LED_DO.
     assert specific == 52, specific
-    assert generic == 31, (
+    assert generic == 37, (
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
-    assert naming + supplies + specific + generic == 638
+    assert naming + supplies + specific + generic == 666
 
 
 def test_the_tracer_refuses_a_part_string_that_matches_more_than_one_footprint():

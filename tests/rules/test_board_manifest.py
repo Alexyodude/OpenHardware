@@ -349,11 +349,18 @@ def test_every_resolved_pad_was_named_by_the_rows_variant():
 #: datasheets, which are not fetched here:
 #:   ESP32-C3FH4     ESP32-C3 Series Datasheet v2.4, "ESP32-C3 Consolidated
 #:                   Pin Overview": Pin No. against IO MUX Function 1.
+#:   ESP32-C6-MINI   ESP32-C6-MINI-1 & MINI-1U Datasheet v1.5, Table 3-1
+#:                   Pin Definitions: No. against the GPIO its Function names.
 CHIP_PADS = {
     ("QFN32_5MM", "ESP32-C3FH4"): {
         "4": 0, "5": 1, "6": 2, "8": 3, "9": 4, "10": 5, "12": 6, "13": 7,
         "14": 8, "15": 9, "16": 10, "18": 11, "19": 12, "20": 13, "21": 14,
         "22": 15, "23": 16, "24": 17, "25": 18, "26": 19, "27": 20, "28": 21,
+    },
+    ("ESP32-PICO-MINI", "ESP32-C6-MINI_MINI"): {
+        "5": 2, "6": 3, "9": 4, "10": 5, "12": 0, "13": 1, "15": 6, "16": 7,
+        "17": 12, "18": 13, "19": 14, "20": 15, "22": 8, "23": 9, "24": 18,
+        "25": 19, "26": 20, "27": 21, "28": 22, "29": 23, "30": 17, "31": 16,
     },
 }
 

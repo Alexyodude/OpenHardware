@@ -129,6 +129,17 @@ ROWS = (
         variant="adafruit_qtpy_esp32c3",
         labels=("A0", "A1", "A2", "A3", "SDA", "SCL", "TX", "RX", "SCK", "MISO", "MOSI"),
     ),
+    Row(
+        board="Adafruit Feather ESP32-C6",
+        source="adafruit-feather-esp32-c6",
+        cad="Adafruit Feather ESP32-C6.brd",
+        select=("JP1", "JP3"),
+        chip="ESP32-C6",
+        package="arduino-esp32",
+        variant="adafruit_feather_esp32c6",
+        labels=("A0", "A1", "A2", "A3", "A4", "A5", "SDA", "SCL", "TX", "RX", "SCK",
+                "MISO", "MOSI"),
+    ),
 )
 
 
