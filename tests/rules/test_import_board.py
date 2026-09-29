@@ -567,6 +567,77 @@ def test_a_bare_string_where_a_tuple_belongs_is_refused_by_name():
         read_geometry(_brd(), select="J1")
 
 
+# --- one pin is one pad, by the schematic's word (OH-177) ----------------------
+
+#: A castellated board: each 1X07_CASTEL pin is a hole and a half-hole at the
+#: edge, `1` and `1C`, and its schematic's device connects both to one pin.
+QTPY_BRD = REPO / "third_party" / "adafruit-qt-py-esp32-c3" / "Adafruit QT Py ESP32-C3.brd"
+#: `Adafruit QT Py ESP32-C3.sch`'s HEADER-1X7 _CASTEL device, as it reads.
+CASTEL = ("1X07_CASTEL", tuple((f"{n}", f"{n}C") for n in range(1, 8)))
+
+
+def _qtpy() -> pathlib.Path:
+    if not QTPY_BRD.is_file():
+        pytest.skip(
+            f"SKIPPED: {QTPY_BRD.name} is not fetched. Run: "
+            f"python tools/get_board_sources.py adafruit-qt-py-esp32-c3"
+        )
+    return QTPY_BRD
+
+
+def test_the_pads_one_connect_names_are_one_pad_at_the_first_it_names():
+    geometry = read_geometry(_qtpy(), ("JP1",), connects={"JP1": CASTEL})
+    element = eagle.read_board(QTPY_BRD).element("JP1")
+    min_x, _, _, max_y = eagle.read_board(QTPY_BRD).extent_mm()
+    assert sorted(pad.number for pad in geometry.pads) == [str(n) for n in range(1, 8)]
+    for pad in geometry.pads:
+        (vendor,) = [one for one in element.pads if one.number == pad.number]
+        assert pad.x_mm == round(vendor.x_mm - min_x + 1.0, 4), pad
+        assert pad.y_mm == round(max_y - vendor.y_mm + 1.0, 4), pad
+    assert ("at the pad its <connect> names first; 7 pads were merged so"
+            in geometry.derivation), geometry.derivation
+
+
+def test_two_pins_on_one_net_stay_two_pads():
+    """`1` and `1C` are both on A0. Stated as two pins, they stay two pads:
+    a net or a name is never what makes pads one pin."""
+    apart = ("1X07_CASTEL", tuple((pad,) for n in range(1, 8) for pad in (f"{n}", f"{n}C")))
+    geometry = read_geometry(_qtpy(), ("JP1",), connects={"JP1": apart})
+    assert len(geometry.pads) == 14
+    assert [pad.label for pad in geometry.pads].count("A0") == 2
+    assert "merged" not in geometry.derivation
+
+
+def test_a_schematic_that_names_another_footprint_is_refused():
+    with pytest.raises(BoardImportError) as caught:
+        read_geometry(_qtpy(), ("JP1",), connects={"JP1": ("1X07", CASTEL[1])})
+    assert "a 1X07_CASTEL on the board and a 1X07 in the schematic" in str(caught.value)
+
+
+def test_a_pad_in_no_connect_or_in_two_is_refused():
+    missing = ("1X07_CASTEL", CASTEL[1][:-1] + (("7",),))
+    with pytest.raises(BoardImportError) as caught:
+        read_geometry(_qtpy(), ("JP1",), connects={"JP1": missing})
+    assert "pads ['7C'] are not each in exactly one" in str(caught.value), caught.value
+
+    twice = ("1X07_CASTEL", CASTEL[1] + (("1",),))
+    with pytest.raises(BoardImportError) as caught:
+        read_geometry(_qtpy(), ("JP1",), connects={"JP1": twice})
+    assert "pads ['1'] are not each in exactly one" in str(caught.value), caught.value
+
+
+def test_an_element_the_schematic_states_no_device_for_is_refused():
+    with pytest.raises(BoardImportError) as caught:
+        read_geometry(_qtpy(), ("JP1", "JP3"), connects={"JP1": CASTEL})
+    assert "states no device for JP3" in str(caught.value), caught.value
+
+
+def test_a_kicad_footprint_takes_no_connects():
+    with pytest.raises(BoardImportError) as caught:
+        read_geometry(_kicad("XIAO-RP2040-SMD"), connects={"J1": CASTEL})
+    assert "connects are an EAGLE board's" in str(caught.value), caught.value
+
+
 def test_a_kicad_footprint_takes_one_symbol_root():
     """Several is an EAGLE answer. A footprint is one part.
 

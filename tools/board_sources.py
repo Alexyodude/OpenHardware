@@ -648,14 +648,16 @@ SOURCES: tuple[Source, ...] = (
         name="adafruit-qt-py-esp32-c3",
         vendor="Adafruit",
         model="one repository per board",
-        size="652,776 + 22,239 bytes, the two blobs fetched, as GitHub's tree lists them",
+        size="652,776 + 332,929 + 22,239 bytes, the three blobs fetched, as "
+        "GitHub's tree lists them",
         licence=_ADAFRUIT_CC_BY_SA_3,
         fetch=Fetch(
             transport=Transport.GIT_SPARSE,
             url="https://github.com/adafruit/Adafruit-QT-Py-ESP32-C3-PCB.git",
-            wanted=("Adafruit QT Py ESP32-C3.brd", "license.txt"),
+            wanted=(
+                "Adafruit QT Py ESP32-C3.brd", "Adafruit QT Py ESP32-C3.sch", "license.txt",
+            ),
             skipped=(
-                ("Adafruit QT Py ESP32-C3.sch", _UNREAD_SCHEMATIC),
                 ("Adafruit QT Py ESP32-C3 Pinout.pdf", _PINOUT_PICTURE),
                 ("README.md", _ADAFRUIT_README),
                 ("assets", "one product photograph, 5405.jpg"),
@@ -665,8 +667,9 @@ SOURCES: tuple[Source, ...] = (
         ),
         artefacts=Artefacts(
             schematic_source=Artefact(
-                Published.YES, Evidence.LISTED,
-                "'Adafruit QT Py ESP32-C3.sch', EAGLE; listed, not fetched",
+                Published.YES, Evidence.OPENED,
+                "'Adafruit QT Py ESP32-C3.sch', EAGLE XML; fetched here for its devices' "
+                "pin-to-pad connects",
             ),
             schematic_pdf=Artefact(
                 Published.NO, Evidence.ABSENT,
@@ -687,14 +690,16 @@ SOURCES: tuple[Source, ...] = (
         name="adafruit-feather-esp32-c6",
         vendor="Adafruit",
         model="one repository per board",
-        size="2,161,595 + 22,239 bytes, the two blobs fetched, as GitHub's tree lists them",
+        size="2,161,595 + 580,205 + 22,239 bytes, the three blobs fetched, as "
+        "GitHub's tree lists them",
         licence=_ADAFRUIT_CC_BY_SA_3,
         fetch=Fetch(
             transport=Transport.GIT_SPARSE,
             url="https://github.com/adafruit/Adafruit-ESP32-C6-Feather-PCB.git",
-            wanted=("Adafruit Feather ESP32-C6.brd", "license.txt"),
+            wanted=(
+                "Adafruit Feather ESP32-C6.brd", "Adafruit Feather ESP32-C6.sch", "license.txt",
+            ),
             skipped=(
-                ("Adafruit Feather ESP32-C6.sch", _UNREAD_SCHEMATIC),
                 ("Adafruit Feather ESP32-C6 PrettyPins 2.pdf", _PINOUT_PICTURE),
                 ("Adafruit Feather ESP32-C6 PrettyPins 2.svg",
                  "named as the pinout PDF beside it is; not opened"),
@@ -706,8 +711,9 @@ SOURCES: tuple[Source, ...] = (
         ),
         artefacts=Artefacts(
             schematic_source=Artefact(
-                Published.YES, Evidence.LISTED,
-                "'Adafruit Feather ESP32-C6.sch', EAGLE; listed, not fetched",
+                Published.YES, Evidence.OPENED,
+                "'Adafruit Feather ESP32-C6.sch', EAGLE XML; fetched here for its devices' "
+                "pin-to-pad connects",
             ),
             schematic_pdf=Artefact(
                 Published.NO, Evidence.ABSENT,

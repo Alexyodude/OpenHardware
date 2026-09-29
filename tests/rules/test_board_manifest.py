@@ -237,21 +237,90 @@ def test_a_row_written_into_an_empty_directory_is_the_committed_file(tmp_path, m
             b"\r\n", b"\n"), row.board
 
 
+def row_named(name: str) -> board_manifest.Row:
+    return next(row for row in ROWS if row.board == name)
+
+
+def _pins_stated(row: board_manifest.Row) -> dict[str, list[list[str]]]:
+    """Per selected element, the pads each pin connects to, read straight off
+    the vendor's schematic: part, then its library's device, then `<connect>`."""
+    path = board_sources.source(row.source).dest(board_manifest.REPO) / row.schematic
+    root = ET.parse(path).getroot().find("drawing/schematic")
+    stated = {}
+    for name in row.select:
+        part = root.find(f"parts/part[@name='{name}']")
+        (device,) = root.findall(
+            f"libraries/library[@name='{part.get('library')}']/devicesets/deviceset"
+            f"[@name='{part.get('deviceset')}']/devices/device[@name='{part.get('device')}']")
+        stated[name] = [c.get("pad").split() for c in device.findall("connects/connect")]
+    return stated
+
+
+def test_every_pin_the_schematic_states_is_one_pad():
+    """The QT Py's castellated pins are two pads each, `1` and `1C`, and its
+    schematic connects both to one pin: 14 pins, not 28 pads. The rule that
+    places the one pad is stated in the file whenever it merged anything."""
+    for row in ROWS:
+        _fetched(row)
+        stated = _pins_stated(row)
+        committed = _committed(row)
+        merged = sum(len(pads) - 1 for pins in stated.values() for pads in pins)
+        assert len(committed["pads"]) == sum(len(pins) for pins in stated.values()), row.board
+        rule = ("Where the schematic's device connects one pin to several pads, they "
+                "are one pad here, at the pad its <connect> names first; "
+                f"{merged} pads were merged so.")
+        assert (rule in committed["derivation"]) == bool(merged), (row.board, merged)
+    assert len(_committed(row_named("Adafruit QT Py ESP32-C3"))["pads"]) == 14
+
+
+def test_the_feathers_two_33v_pins_stay_two_pads():
+    """Two pins on one net, each its own `<connect>`: two pads."""
+    row = row_named("Adafruit Feather ESP32-C6")
+    _fetched(row)
+    assert [["14"], ["15"]] == [pads for pads in _pins_stated(row)["JP1"]
+                                if pads in (["14"], ["15"])]
+    assert sorted(pad["pad"] for pad in _committed(row)["pads"]
+                  if pad["label"] == "3.3V") == ["14", "15"]
+
+
+def test_a_row_whose_schematic_is_missing_is_refused_naming_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(board_manifest, "BOARDS_DIR", tmp_path)
+    row = dataclasses.replace(ROWS[0], board="Nowhere", schematic="Hardware/Missing.sch")
+    with pytest.raises(ManifestError) as caught:
+        board_manifest.write(row)
+    message = str(caught.value)
+    assert f"third_party/{row.source}/Hardware/Missing.sch" in message, message
+    assert f"python tools/get_board_sources.py {row.source}" in message, message
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_schematic_that_places_no_part_of_that_name_is_refused():
+    """The pilot's schematic asked for an Adafruit header's name."""
+    _fetched(ROWS[0])
+    with pytest.raises(ManifestError) as caught:
+        board_manifest.connects(dataclasses.replace(ROWS[0], select=("JP1",)))
+    assert "places no part 'JP1'" in str(caught.value), caught.value
+
+
 def test_every_pad_is_where_the_vendors_board_file_puts_it():
     """Read the elements again, straight off the vendor's file, and match every
     committed pad to one of them by number and millimetres: EAGLE's Y points
     up, the file's down, and the file adds `MARGIN_MM` on each side. Keyed by
-    element and number, because two elements can both have a pad 1."""
+    element and number, because two elements can both have a pad 1. The pad
+    kept for a pin is the first its schematic `<connect>` names."""
     for row in ROWS:
         _fetched(row)
         board = eagle.read_board(board_manifest.cad_path(row))
         min_x, _, _, max_y = board.extent_mm()
         margin = import_board.MARGIN_MM
+        firsts = {(name, pads[0]) for name, pins in _pins_stated(row).items() for pads in pins}
         vendor = {
             (name, pad.number): pad
             for name in row.select
             for pad in board.element(name).pads_of("thru_hole")
+            if (name, pad.number) in firsts
         }
+        assert len(vendor) == len(firsts), row.board
         committed = _committed(row)
         scale = committed["px_per_mm"]
         matched = []

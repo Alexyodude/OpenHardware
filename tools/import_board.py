@@ -110,6 +110,13 @@ class Geometry(typing.NamedTuple):
     declared_name: str | None
 
 
+#: For an EAGLE board, each selected element's device as the vendor's
+#: schematic states it: element name to `(package, pads)`, where `pads`
+#: holds, per pin, the pads that pin's `<connect>` names. A castellated
+#: header's pin is a hole and its half-hole at the edge, `pad="1 1C"`.
+Connects = typing.Mapping[str, tuple[str, tuple[tuple[str, ...], ...]]]
+
+
 def _runs(points: list[float]) -> list[float]:
     """The distinct coordinate lines in `points`, in order."""
     lines: list[float] = []
@@ -153,7 +160,10 @@ def _grouped(pads: list[tuple[str, str, float, float]]) -> tuple[PadSpec, ...]:
 
 
 def _from_eagle(
-    path: pathlib.Path, select: tuple[str, ...], symbols: pathlib.Path | None
+    path: pathlib.Path,
+    select: tuple[str, ...],
+    symbols: pathlib.Path | None,
+    connects: Connects | None,
 ) -> Geometry:
     """Read an EAGLE board, taking the header pads off the placed elements named.
 
@@ -219,6 +229,40 @@ def _from_eagle(
                 )
             chosen.append(element)
 
+    # One pin is one pad. Which pads are one pin is the schematic's
+    # statement, never inferred from pad names or nets: two GND pins on one
+    # header are two pins.
+    first: dict[str, set[str]] = {}
+    for element in chosen if connects is not None else ():
+        if element.name not in connects:
+            raise BoardImportError(
+                f"{path}: the schematic states no device for {element.name}"
+            )
+        package, pins = connects[element.name]
+        if package != element.package:
+            raise BoardImportError(
+                f"{path}: {element.name} is a {element.package} on the board and "
+                f"a {package} in the schematic; the two files disagree about "
+                f"which footprint it is"
+            )
+        listed = [pad for pads in pins for pad in pads]
+        numbers = [pad.number for pad in element.pads]
+        unsure = sorted({number for number in numbers if listed.count(number) != 1}
+                        | set(listed) - set(numbers))
+        if unsure:
+            raise BoardImportError(
+                f"{path}: {element.name}'s pads {unsure} are not each in exactly "
+                f"one of the schematic's connects {[' '.join(p) for p in pins]}"
+            )
+        first[element.name] = {pads[0] for pads in pins}
+    kept = [
+        (element, pad)
+        for element in chosen
+        for pad in element.pads_of("thru_hole")
+        if element.name not in first or pad.number in first[element.name]
+    ]
+    merged = sum(len(element.pads_of("thru_hole")) for element in chosen) - len(kept)
+
     min_x, min_y, max_x, max_y = board.extent_mm()
     pads = [
         (
@@ -232,12 +276,16 @@ def _from_eagle(
             # Y-down like the SVG it becomes.
             max_y - pad.y_mm + MARGIN_MM,
         )
-        for element in chosen
-        for pad in element.pads_of("thru_hole")
+        for _, pad in kept
     ]
     width = max_x - min_x + 2 * MARGIN_MM
     height = max_y - min_y + 2 * MARGIN_MM
     named = ", ".join(f"{e.name} ({e.package})" for e in chosen)
+    pins = (
+        f"Where the schematic's device connects one pin to several pads, they "
+        f"are one pad here, at the pad its <connect> names first; {merged} "
+        f"pads were merged so. " if merged else ""
+    )
     return Geometry(
         name=path.stem,
         width_mm=width,
@@ -252,14 +300,17 @@ def _from_eagle(
             f"{max_x - min_x:.2f} x {max_y - min_y:.2f} mm outline taken from "
             f"layer {eagle.DIMENSION_LAYER} (Dimension), plus a {MARGIN_MM} mm "
             f"margin. Pad names are the net each pad is on, from <signals>. "
-            f"Nothing here was measured off an image."
+            f"{pins}Nothing here was measured off an image."
         ),
         declared_name=None,
     )
 
 
 def _from_kicad(
-    path: pathlib.Path, select: tuple[str, ...], symbols: pathlib.Path | None
+    path: pathlib.Path,
+    select: tuple[str, ...],
+    symbols: pathlib.Path | None,
+    connects: Connects | None,
 ) -> Geometry:
     """Read a KiCad footprint, joined to a symbol library for the pin names.
 
@@ -274,6 +325,11 @@ def _from_kicad(
     the first quietly win: a footprint is a single part, so a caller passing two
     roots has confused this file with a board.
     """
+    if connects is not None:
+        raise BoardImportError(
+            f"{path}: connects are an EAGLE board's, read from its schematic; a "
+            f"KiCad footprint's pins are joined through --symbols."
+        )
     if len(select) > 1:
         raise BoardImportError(
             f"{path}: --select given {len(select)} times, but a KiCad footprint "
@@ -386,6 +442,7 @@ def read_geometry(
     path: pathlib.Path,
     select: tuple[str, ...] = (),
     symbols: pathlib.Path | None = None,
+    connects: Connects | None = None,
 ) -> Geometry:
     """Read any supported CAD file, or refuse it saying what is missing.
 
@@ -393,6 +450,8 @@ def read_geometry(
     stays one parameter rather than two because both readers are answering the
     same question, "which part of this file is the header"; KiCad simply has
     one answer, and `_from_kicad` says so rather than quietly using the first.
+
+    `connects`, for an EAGLE board, makes each pin one pad; see `Connects`.
     """
     # **A bare string is refused rather than iterated.** `select` took one name
     # until 2026-08-27; a caller that still passes `"J1"` would otherwise be
@@ -421,7 +480,7 @@ def read_geometry(
         raise BoardImportError(f"{path}: {suffix} is {reason}. {_NOT_MEASURED}")
 
     try:
-        return reader(path, select, symbols)
+        return reader(path, select, symbols, connects)
     except (eagle.EagleError, kicad.KicadError) as exc:
         # Both parsers raise their own type. Re-raised as one so a caller
         # catches once, with the parser's message kept whole.

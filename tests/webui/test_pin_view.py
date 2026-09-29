@@ -734,7 +734,7 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     boards = catalogue.board_names()
     # 26 until OH-176 added the SparkFun Thing Plus ESP32-C6, whose file names
     # five chip pins from its arduino-esp32 variant; 27 until OH-177 added
-    # the Adafruit QT Py ESP32-C3, whose file names 22; 28 until the
+    # the Adafruit QT Py ESP32-C3, whose file names 11; 28 until the
     # Adafruit Feather ESP32-C6, whose file names 15.
     assert len(boards) == 29, boards
     # Every board, picked and not loaded: nothing was read.

@@ -1848,11 +1848,11 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # Plus ESP32-C6 (OH-176) added its 28 pads: 5 named by its arduino-esp32
     # variant, 4 supplies, 3 with a reason read off its schematic, and 16
     # generic. 370 and 157 until the Adafruit QT Py ESP32-C3 (OH-177) added
-    # 28: 22 named by its variant and 6 supplies. 392 and 163 until the
-    # Adafruit Feather ESP32-C6 (OH-177) added 28: 15 named by its variant,
-    # 7 supplies and 6 generic.
-    assert naming == 407, naming
-    assert supplies == 170, supplies
+    # 14, one per pin: 11 named by its variant and 3 supplies. 381 and 160
+    # until the Adafruit Feather ESP32-C6 (OH-177) added 28: 15 named by its
+    # variant, 7 supplies and 6 generic.
+    assert naming == 396, naming
+    assert supplies == 167, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
     # same debug cluster already carried; 42 until the six SWD pads on the
     # RP2040, SAMD21 and nRF52840 stopped saying nobody had published them.
@@ -1869,7 +1869,7 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
-    assert naming + supplies + specific + generic == 666
+    assert naming + supplies + specific + generic == 652
 
 
 def test_the_tracer_refuses_a_part_string_that_matches_more_than_one_footprint():

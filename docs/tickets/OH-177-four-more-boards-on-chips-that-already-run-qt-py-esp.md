@@ -18,6 +18,8 @@ touches:
 - tools/get_board_sources.py
 - tests/rules/test_import_pindefs.py
 - tests/webui/test_pin_view.py
+- tools/import_board.py
+- tests/rules/test_import_board.py
 ---
 
 Part of OH-174. Once OH-176 makes a board a table row, the next boards are rows. These four are on chips that already run here, publish their PCB in a format this repo reads, and have a pin variant on disk. Surveyed and opened 2026-09-29; the files were fetched to scratch and parsed, not yet added to the registry.

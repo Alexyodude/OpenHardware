@@ -66,6 +66,9 @@ class Row:
     source: str
     #: The CAD file, relative to that source's checkout.
     cad: str
+    #: The vendor's schematic of the same board, relative to the same checkout.
+    #: Its devices say which pads are one pin: `import_board.Connects`.
+    schematic: str
     #: The placed elements carrying the header: `tools/import_board.py --select`.
     select: tuple[str, ...]
     #: A key of `webui/boards/catalogue.py`'s `CHIPS`.
@@ -94,6 +97,7 @@ ROWS = (
         board="SparkFun Thing Plus ESP32-C6",
         source="sparkfun-thing-plus-esp32-c6",
         cad="Hardware/Thing_Plus_ESP32_C6.brd",
+        schematic="Hardware/Thing_Plus_ESP32_C6.sch",
         select=("J1",),
         chip="ESP32-C6",
         package="arduino-esp32",
@@ -123,6 +127,7 @@ ROWS = (
         board="Adafruit QT Py ESP32-C3",
         source="adafruit-qt-py-esp32-c3",
         cad="Adafruit QT Py ESP32-C3.brd",
+        schematic="Adafruit QT Py ESP32-C3.sch",
         select=("JP1", "JP3"),
         chip="ESP32-C3",
         package="arduino-esp32",
@@ -133,6 +138,7 @@ ROWS = (
         board="Adafruit Feather ESP32-C6",
         source="adafruit-feather-esp32-c6",
         cad="Adafruit Feather ESP32-C6.brd",
+        schematic="Adafruit Feather ESP32-C6.sch",
         select=("JP1", "JP3"),
         chip="ESP32-C6",
         package="arduino-esp32",
@@ -160,6 +166,34 @@ def cad_path(entry: Row) -> pathlib.Path:
     except board_sources.SourceError as exc:
         raise ManifestError(f"{entry.board}: {exc}") from exc
     return source.dest(REPO) / entry.cad
+
+
+def connects(entry: Row) -> import_board.Connects:
+    """Each selected element's device, as the row's schematic states it."""
+    path = board_sources.source(entry.source).dest(REPO) / entry.schematic
+    root = ET.parse(path).getroot().find("drawing/schematic")
+    stated = {}
+    for name in entry.select:
+        part = root.find(f"parts/part[@name='{name}']")
+        if part is None:
+            raise ManifestError(f"{entry.board}: {entry.schematic} places no part {name!r}")
+        devices = root.findall(
+            f"libraries/library[@name='{part.get('library')}']/devicesets/"
+            f"deviceset[@name='{part.get('deviceset')}']/devices/"
+            f"device[@name='{part.get('device')}']"
+        )
+        if len(devices) != 1:
+            raise ManifestError(
+                f"{entry.board}: {entry.schematic} defines {len(devices)} devices "
+                f"for part {name!r} ({part.get('library')}/{part.get('deviceset')}"
+                f"/{part.get('device')!r}), not one"
+            )
+        stated[name] = (
+            devices[0].get("package"),
+            tuple(tuple(connect.get("pad").split())
+                  for connect in devices[0].findall("connects/connect")),
+        )
+    return stated
 
 
 def chips_building(table: pathlib.Path, variant: str, key: str) -> set[str]:
@@ -232,6 +266,8 @@ def check(entry: Row) -> None:
     wanted = [
         (cad_path(entry),
          f"python tools/get_board_sources.py {entry.source}"),
+        (board_sources.source(entry.source).dest(REPO) / entry.schematic,
+         f"python tools/get_board_sources.py {entry.source}"),
         (variant, package.how_to_fetch()),
         (table, package.how_to_fetch()),
     ]
@@ -279,7 +315,7 @@ def geometry(entry: Row) -> dict:
     """The board file as `tools/import_board.py` builds it: pads, no pins."""
     path = cad_path(entry)
     try:
-        read = import_board.read_geometry(path, entry.select)
+        read = import_board.read_geometry(path, entry.select, connects=connects(entry))
     except import_board.BoardImportError as exc:
         raise ManifestError(f"{entry.board}: {exc}") from exc
     source = board_sources.source(entry.source)
