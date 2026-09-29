@@ -2,7 +2,7 @@
 id: OH-183
 title: 'OH-179''s follow-ups: a prose run-claim about a manifest board is caught,
   and buildability is asked of the compiler'
-status: in-review
+status: in-progress
 priority: P1
 created: '2026-09-29'
 touches:
@@ -16,6 +16,9 @@ touches:
 - webui/boards/catalogue.py
 - webui/emulator_server.py
 - tests/webui/test_board_catalogue.py
+- tools/board_manifest.py
+- webui/api.py
+- tests/rules/test_board_manifest.py
 ---
 
 Part of OH-174. OH-179's approving review (2026-09-29) found these; none blocked it. Two are MEDIUM and come first.
