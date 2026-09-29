@@ -896,6 +896,84 @@ SOURCES: tuple[Source, ...] = (
         cite="OH-188: GitHub's tree listing of the default branch, read 2026-09-30; "
         "the board file, the schematic and the licence fetched here and opened",
     ),
+    Source(
+        name="sparkfun-qwiic-pocket-esp32-c6",
+        vendor="SparkFun",
+        model="one repository per board",
+        size="326,995 + 1,240,410 bytes, the two blobs fetched, as GitHub's tree "
+        "lists them",
+        licence=Licence(
+            name="CC BY-SA 4.0",
+            covers="the board design its sentence is placed in; the repository "
+            "holds no licence file, and its README points at a LICENSE.md that "
+            "GitHub's tree listing does not hold",
+            sampled=True,
+            evidence=Evidence.OPENED,
+            cite="Hardware/Qwiic_Pocket_Dev_ESP32_C6.brd, fetched here and read "
+            "2026-09-30: the package of its FRAME1, SparkFun-Aesthetics/"
+            "CREATIVE_COMMONS, carries the sentence, as the Thing Plus's does",
+            file="Hardware/Qwiic_Pocket_Dev_ESP32_C6.brd",
+            quote="Released under the Creative Commons Attribution Share-Alike 4.0 License",
+        ),
+        fetch=Fetch(
+            transport=Transport.GIT_SPARSE,
+            url="https://github.com/sparkfun/SparkFun_Qwiic_Pocket_Dev_Board_ESP32_C6.git",
+            wanted=(
+                "Hardware/Qwiic_Pocket_Dev_ESP32_C6.brd",
+                "Hardware/Qwiic_Pocket_Dev_ESP32_C6.sch",
+            ),
+            skipped=(
+                ("Hardware/ESP32-C6-MINI-1.lbr", "the module's EAGLE library; the "
+                 ".brd and .sch carry every library they use"),
+                ("Production", "panel gerbers, a panelised .brd, a zip of them and "
+                 "design rules: fabrication output derived from the design in Hardware/"),
+                ("Documents", "copies of Espressif's chip and module datasheets, "
+                 "design guidelines and technical reference manual; the pin table "
+                 "cites Espressif's own download of the module datasheet"),
+                ("Examples", "WatchDemoC6.ino, one demonstration sketch; no pin "
+                 "definitions"),
+                ("docs", "the product documentation site: photographs, the "
+                 "schematic as a PDF, a zip of the EAGLE files, and copies of "
+                 "Documents/"),
+                ("README.md", "points at a LICENSE.md the repository does not hold; "
+                 "the licence is read from the board file, which is fetched"),
+                ("mkdocs.yml", "the documentation site's configuration, with "
+                 "overrides/ and .github/ beside it; none describes the board"),
+            ),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES, Evidence.OPENED,
+                "Hardware/Qwiic_Pocket_Dev_ESP32_C6.sch, EAGLE 9.6.2 XML; fetched "
+                "here for its devices' pin-to-pad connects",
+            ),
+            schematic_pdf=Artefact(
+                Published.YES, Evidence.OPENED,
+                "docs/assets/board_files/Qwiic_Pocket_Dev_ESP32_C6.pdf, opened "
+                "2026-09-30 and a rendering of the schematic; this row does not "
+                "fetch it",
+            ),
+            pcb_layout=Artefact(
+                Published.YES, Evidence.OPENED,
+                "Hardware/Qwiic_Pocket_Dev_ESP32_C6.brd, EAGLE 9.6.2 XML, read by "
+                "tools/eagle.py",
+            ),
+            footprints_symbols=Artefact(
+                Published.YES, Evidence.LISTED,
+                "Hardware/ESP32-C6-MINI-1.lbr, an EAGLE library for the module; "
+                "not fetched",
+            ),
+            model_3d=Artefact(Published.NO, Evidence.ABSENT, _NO_MESH),
+            board_support=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "no pin definitions in the tree listing; Examples/ holds one "
+                "demonstration sketch",
+            ),
+        ),
+        cite="OH-188: GitHub's tree listing of the default branch, read 2026-09-30; "
+        "the board file and the schematic fetched here and opened, the licence "
+        "read from the board file",
+    ),
 )
 
 
