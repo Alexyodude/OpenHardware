@@ -665,7 +665,8 @@ def test_the_real_tree_never_resolves_a_pad_from_nothing():
     """Across every registered board: a number implies a named file, always."""
     _needs_the_fetched_packages()
 
-    for name in sorted(BOARDS):
+    unread = _unread_without_a_compiler()
+    for name in sorted(set(BOARDS) - set(unread)):
         report = board_report(name)
         for pad in report["pads"]:
             if pad["chip_pin"] is not None:
@@ -674,6 +675,25 @@ def test_the_real_tree_never_resolves_a_pad_from_nothing():
             else:
                 assert pad["index"] is None
                 assert "reason" in pad, f"{name} {pad['label']} is null with no reason"
+    _skip_the_unread(unread)
+
+
+def _unread_without_a_compiler() -> list[str]:
+    """The manifest boards read through the preprocessor, where no
+    arm-none-eabi-g++ is installed: their variants include `common.h`, which
+    the hand reading refuses (OH-181). Empty where the compiler is here."""
+    if pindefs.pico_compiler("arm-none-eabi-g++") is not None:
+        return []
+    return [name for name in sorted(pindefs.MANIFEST)
+            if any(source.reads_checkout for source in BOARDS[name].sources)]
+
+
+def _skip_the_unread(unread: list[str]) -> None:
+    """A skip naming the boards left out and the command that would read them."""
+    if unread:
+        pytest.skip(f"SKIPPED for {unread} only, every other board checked: no "
+                    f"arm-none-eabi-g++ installed; pio pkg install --global --tool "
+                    f"{pindefs._PICO_COMPILERS['arm-none-eabi-g++']}")
 
 
 def test_a_board_the_registry_does_not_know_is_an_error():
@@ -1108,19 +1128,13 @@ def test_the_committed_board_files_match_the_generator():
     after checking every other board: its variant includes `common.h`, which
     the hand reading refuses (OH-181)."""
     _needs_the_fetched_packages()
-    program = "arm-none-eabi-g++"
-    unread = [name for name in sorted(pindefs.MANIFEST)
-              if pindefs.pico_compiler(program) is None
-              and any(source.reads_checkout for source in BOARDS[name].sources)]
+    unread = _unread_without_a_compiler()
     for name in sorted(set(BOARDS) - set(unread)):
         on_disk = json.loads(pindefs.board_path(name).read_text(encoding="utf-8"))
         assert _document_pins_only(pindefs.filled_board(name)) == _document_pins_only(
             on_disk
         ), name
-    if unread:
-        pytest.skip(f"SKIPPED for {unread} only, every other board checked: no {program} "
-                    f"installed; pio pkg install --global --tool "
-                    f"{pindefs._PICO_COMPILERS[program]}")
+    _skip_the_unread(unread)
 
 
 def test_every_registered_board_file_carries_the_join():
@@ -2741,13 +2755,15 @@ def test_a_manifest_board_and_a_xiao_each_report_their_own_derivation():
     git revision."""
     _needs_the_fetched_packages("zephyr", "arduino-esp32")
     assert board_report("XIAO-ESP32-C3-DIP")["derivation"] == pindefs.DERIVATION
-    for row in board_manifest.ROWS:
+    unread = _unread_without_a_compiler()
+    for row in [row for row in board_manifest.ROWS if row.board not in unread]:
         if not board_manifest.cad_path(row).is_file():
             pytest.skip(f"{row.source} is not fetched")
         report = board_report(row.board)
         assert report["derivation"] == pindefs.MANIFEST_DERIVATION
         (own,) = [one for one in report["packages"] if one["name"] == row.source]
         assert re.fullmatch(r"sha256:[0-9a-f]{12}", own["revision"]), own
+    _skip_the_unread(unread)
 
 
 def test_a_pad_the_footprint_names_otherwise_is_read_as_the_page_number_the_table_gives():
@@ -3223,3 +3239,28 @@ def test_the_survey_counts_each_way_against_the_preprocessor():
     ]
     assert pindefs.count_pico(readings) == {
         "before": (2, 1, 0, 1), "by hand": (1, 1, 1, 0), "preprocessor": (1, 2, 0, None)}
+
+
+def test_a_value_an_if_reads_while_undefined_is_refused(tmp_path):
+    """`-dU` does not report `#if ARDUINO_PICO_MAJOR >= 6`, which reads the
+    name as a value; `-Wundef` does. Read here it would take the `#else`,
+    where a sketch, after the core's RP2040Version.h, takes the `#if`."""
+    _needs_the_pico_preprocessor()
+    checkout = _pico_fixture(tmp_path, (
+        "#if ARDUINO_PICO_MAJOR >= 6\nstatic const uint8_t D0 = (1u);\n"
+        "#else\nstatic const uint8_t D0 = (2u);\n#endif\n"))
+    with pytest.raises(PindefError, match=r"variants/fake/pins_arduino.h test "
+                                          r"\['ARDUINO_PICO_MAJOR'\] while undefined"):
+        pindefs.read_pico_pins(("",), checkout=checkout, variant="fake")
+
+
+def test_a_value_an_if_reads_from_a_flag_the_build_cannot_know_is_refused(tmp_path):
+    """`#if ARDUINO >= 100` consults the `ARDUINO` that
+    `-DARDUINO={runtime.ide.version}` would define, as `#ifdef ARDUINO` does."""
+    _needs_the_pico_preprocessor()
+    checkout = _pico_fixture(tmp_path, (
+        "#if ARDUINO >= 100\nstatic const uint8_t D0 = (1u);\n"
+        "#else\nstatic const uint8_t D0 = (2u);\n#endif\n"))
+    with pytest.raises(PindefError, match=r"consults \['ARDUINO'\], which the build defines "
+                                          r"with '-DARDUINO=\{runtime.ide.version\}'"):
+        pindefs.read_pico_pins(("",), checkout=checkout, variant="fake")

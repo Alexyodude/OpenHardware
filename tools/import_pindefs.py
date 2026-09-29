@@ -1375,7 +1375,8 @@ class Preprocessed:
     #: The checkout's files it read, under the checkout, in the order it
     #: opened them: what the numbers came from, and what a claim cites.
     files: tuple[str, ...]
-    #: The macros those files tested while undefined.
+    #: The macros those files tested while undefined, as `-dU` reports them
+    #: and as `-Wundef` reports a value `#if` read.
     undefined: tuple[str, ...]
 
 
@@ -1406,30 +1407,53 @@ def _read_by_the_preprocessor(checkout: pathlib.Path, text: str) -> tuple[
     return tuple(files), tuple(undefined)
 
 
+#: `-Wundef`'s warning: `C:/.../pins_arduino.h:3:5: warning: "ARDUINO" is
+#: not defined, evaluates to 0 [-Wundef]`. The lazy file match steps over a
+#: Windows drive's colon.
+_UNDEFINED_VALUE = re.compile(r'^(.+?):\d+:\d+: warning: "(\w+)" is not defined', re.M)
+
+
+def _undefined_values(checkout: pathlib.Path, warnings: str) -> tuple[str, ...]:
+    """The names `-Wundef` says an `#if` in one of the checkout's own files
+    read as a value while undefined."""
+    root = checkout.resolve()
+    found: list[str] = []
+    for where, name in _UNDEFINED_VALUE.findall(warnings):
+        try:
+            pathlib.Path(where).resolve().relative_to(root)
+        except ValueError:
+            continue  # a toolchain header's own test, not the variant's
+        if name not in found:
+            found.append(name)
+    return tuple(found)
+
+
 def pico_constants(
     checkout: pathlib.Path, variant: str, build: PicoBuild, compiler: pathlib.Path
 ) -> Preprocessed:
     """What `#include <pins_arduino.h>` declares and defines, preprocessed
     with the board's flags: the declarations out of `-E -dU`, the macros out
     of `-E -dM`. Refused if the variant consults a macro in `build.unset`,
-    whose value this cannot know, or tests one while undefined that is not
-    in `_UNDEFINED_OK`."""
+    whose value this cannot know, or tests one while undefined -- by
+    `#ifdef` or as a value in `#if` -- that is not in `_UNDEFINED_OK`."""
     flags: list[str] = []
     for flag in build.flags:
         flags += _response_file(checkout, flag) if flag.startswith("@") else [flag]
     command = [str(compiler), *flags, "-I", str(checkout / "variants" / variant),
                "-x", "c++", "-E"]
     where = f"arduino-pico variants/{variant}/pins_arduino.h as {build.board}"
-    texts = []
-    for mode in ("-dU", "-dM"):
+    texts, warned = [], ""
+    # `-Wundef` because `-dU` does not report a name `#if` reads as a VALUE
+    # while it is undefined -- `#if ARDUINO >= 100` -- and the warning does.
+    for mode in (("-dU", "-Wundef"), ("-dM",)):
         try:
             done = subprocess.run(
-                [*command, mode, "-"], input=_PICO_UNIT, capture_output=True, text=True,
+                [*command, *mode, "-"], input=_PICO_UNIT, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=60, check=False,
             )
         except subprocess.TimeoutExpired as exc:
             raise PindefError(
-                f"{compiler.name} {mode} took more than {exc.timeout} s on {where}"
+                f"{compiler.name} {mode[0]} took more than {exc.timeout} s on {where}"
             ) from exc
         if done.returncode != 0:
             said = [line for line in done.stderr.splitlines() if "error" in line]
@@ -1438,7 +1462,11 @@ def pico_constants(
                 f"{said or done.stderr.strip()}"
             )
         texts.append(done.stdout)
-    consulted = set(_CONSULTED.findall(texts[0]))
+        warned = warned or done.stderr
+    files, undefined = _read_by_the_preprocessor(checkout, texts[0])
+    valued = _undefined_values(checkout, warned)
+    undefined = tuple(dict.fromkeys((*undefined, *valued)))
+    consulted = set(_CONSULTED.findall(texts[0])) | set(valued)
     for flag in build.unset:
         name = flag[2:].split("=", 1)[0]
         pattern = "".join(r"\w*" if piece.startswith("{") else re.escape(piece)
@@ -1450,7 +1478,6 @@ def pico_constants(
                 f"{flag!r} from a property arduino-cli supplies and the "
                 f"package does not"
             )
-    files, undefined = _read_by_the_preprocessor(checkout, texts[0])
     unknown = [macro for macro in undefined
                if not any(re.fullmatch(allowed, macro) for allowed in _UNDEFINED_OK)]
     if unknown:

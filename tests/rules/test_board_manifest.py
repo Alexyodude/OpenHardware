@@ -29,11 +29,13 @@ COMMITTED = board_manifest.BOARDS_DIR
 
 
 def _fetched(row: board_manifest.Row) -> None:
-    """Skip, naming what is missing, where a row's inputs were never fetched."""
+    """Skip, naming what is missing, where a row's inputs were never fetched,
+    or where its variant can be read only by a preprocessor this machine does
+    not have -- the refusal names the command that installs it (OH-181)."""
     try:
         board_manifest.check(row)
     except ManifestError as exc:
-        if "not on disk" not in str(exc):
+        if "not on disk" not in str(exc) and "only the preprocessor can say" not in str(exc):
             raise
         pytest.skip(f"SKIPPED: {exc}")
 
@@ -173,7 +175,7 @@ def test_an_arduino_pico_row_is_checked_against_build_chip():
     pico = dataclasses.replace(
         ROWS[0], chip="RP2040", package="arduino-pico", variant="rpipico", labels=("LED",)
     )
-    board_manifest.check(pico)
+    _fetched(pico)
     with pytest.raises(ManifestError) as caught:
         board_manifest.check(dataclasses.replace(pico, chip="RP2350"))
     assert "build.chip=['rp2040']" in str(caught.value), caught.value
