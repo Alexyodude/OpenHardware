@@ -164,6 +164,11 @@ class Licence(typing.NamedTuple):
     sampled: bool
     evidence: Evidence
     cite: str
+    #: The file in this source's fetched tree the licence was read from, and
+    #: words it contains; empty where it was read anywhere else.
+    #: `tests/rules/test_board_sources.py` reads the file for the words.
+    file: str = ""
+    quote: str = ""
 
 
 class Fetch(typing.NamedTuple):
@@ -171,8 +176,8 @@ class Fetch(typing.NamedTuple):
 
     transport: Transport
     url: str
-    #: Directories worth fetching. Empty means the whole tree — there is
-    #: nothing to narrow.
+    #: Directories or files worth fetching. Empty means the whole tree —
+    #: there is nothing to narrow.
     wanted: tuple[str, ...]
     #: `(path, why it is not fetched)`. The reason is required, because the
     #: only thing that stops a skip list becoming folklore is the sentence
@@ -216,6 +221,29 @@ class Source(typing.NamedTuple):
             if getattr(self.artefacts, name).evidence is Evidence.ABSENT
         )
 
+
+#: Shared by the rows OH-177 added, which did not come from the OH-23 survey.
+_LISTED_FOR_OH_177 = (
+    "OH-177: GitHub's tree listing of the default branch, read 2026-09-29; "
+    "the board file and the licence fetched here and opened"
+)
+_ADAFRUIT_CC_BY_SA_3 = Licence(
+    name="CC BY-SA 3.0 Unported",
+    covers="the repository, per its README's License section, which points "
+    "at license.txt",
+    sampled=True,
+    evidence=Evidence.OPENED,
+    cite="license.txt at the repository root, fetched here and read "
+    "2026-09-29. GitHub reports NOASSERTION",
+    file="license.txt",
+    quote="Attribution-ShareAlike 3.0 Unported",
+)
+_UNREAD_SCHEMATIC = "the EAGLE schematic. Nothing reads it yet; the pads and nets are in the .brd"
+_PINOUT_PICTURE = "a pinout diagram, opened 2026-09-29: no pad coordinates and no nets"
+_ADAFRUIT_README = "its License section points at license.txt, which is fetched"
+_NO_LBR = "no .lbr in the tree listing; the .brd carries the libraries it uses"
+_NO_MESH = "no .step, .stp, .wrl or .stl in the tree listing"
+_NO_PIN_HEADER = "no pin definitions in the tree listing; factory-reset/ holds a firmware image"
 
 #: The registry. **The only hand-written thing in this module**, and the only
 #: place a vendor's name appears anywhere in the fetch path — see
@@ -615,6 +643,181 @@ SOURCES: tuple[Source, ...] = (
         cite="OH-23 survey, docs/research/board-sources/sources.json: "
         "Arduino / per-board CAD zip on docs.arduino.cc. Fetched and opened "
         "again 2026-08-27 for OH-75",
+    ),
+    Source(
+        name="adafruit-qt-py-esp32-c3",
+        vendor="Adafruit",
+        model="one repository per board",
+        size="652,776 + 22,239 bytes, the two blobs fetched, as GitHub's tree lists them",
+        licence=_ADAFRUIT_CC_BY_SA_3,
+        fetch=Fetch(
+            transport=Transport.GIT_SPARSE,
+            url="https://github.com/adafruit/Adafruit-QT-Py-ESP32-C3-PCB.git",
+            wanted=("Adafruit QT Py ESP32-C3.brd", "license.txt"),
+            skipped=(
+                ("Adafruit QT Py ESP32-C3.sch", _UNREAD_SCHEMATIC),
+                ("Adafruit QT Py ESP32-C3 Pinout.pdf", _PINOUT_PICTURE),
+                ("README.md", _ADAFRUIT_README),
+                ("assets", "one product photograph, 5405.jpg"),
+                ("factory-reset", "QTPy_ESP32_C3_FactoryTest.zip and a README: "
+                 "a firmware image to flash, not a description of the board"),
+            ),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES, Evidence.LISTED,
+                "'Adafruit QT Py ESP32-C3.sch', EAGLE; listed, not fetched",
+            ),
+            schematic_pdf=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "the one PDF, 'Adafruit QT Py ESP32-C3 Pinout.pdf', was opened "
+                "and is a pinout diagram",
+            ),
+            pcb_layout=Artefact(
+                Published.YES, Evidence.OPENED,
+                "'Adafruit QT Py ESP32-C3.brd', EAGLE 9.6.2 XML, read by tools/eagle.py",
+            ),
+            footprints_symbols=Artefact(Published.NO, Evidence.ABSENT, _NO_LBR),
+            model_3d=Artefact(Published.NO, Evidence.ABSENT, _NO_MESH),
+            board_support=Artefact(Published.NO, Evidence.ABSENT, _NO_PIN_HEADER),
+        ),
+        cite=_LISTED_FOR_OH_177,
+    ),
+    Source(
+        name="adafruit-feather-esp32-c6",
+        vendor="Adafruit",
+        model="one repository per board",
+        size="2,161,595 + 22,239 bytes, the two blobs fetched, as GitHub's tree lists them",
+        licence=_ADAFRUIT_CC_BY_SA_3,
+        fetch=Fetch(
+            transport=Transport.GIT_SPARSE,
+            url="https://github.com/adafruit/Adafruit-ESP32-C6-Feather-PCB.git",
+            wanted=("Adafruit Feather ESP32-C6.brd", "license.txt"),
+            skipped=(
+                ("Adafruit Feather ESP32-C6.sch", _UNREAD_SCHEMATIC),
+                ("Adafruit Feather ESP32-C6 PrettyPins 2.pdf", _PINOUT_PICTURE),
+                ("Adafruit Feather ESP32-C6 PrettyPins 2.svg",
+                 "named as the pinout PDF beside it is; not opened"),
+                ("README.md", _ADAFRUIT_README),
+                ("assets", "one product photograph, 5933.jpg"),
+                ("factory-reset", "Adafruit_ESP32-C6_Feather_FactoryReset.bin and "
+                 "a README: a firmware image to flash, not a description of the board"),
+            ),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES, Evidence.LISTED,
+                "'Adafruit Feather ESP32-C6.sch', EAGLE; listed, not fetched",
+            ),
+            schematic_pdf=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "the one PDF, 'Adafruit Feather ESP32-C6 PrettyPins 2.pdf', was "
+                "opened and is a pinout diagram",
+            ),
+            pcb_layout=Artefact(
+                Published.YES, Evidence.OPENED,
+                "'Adafruit Feather ESP32-C6.brd', EAGLE 9.6.2 XML, read by tools/eagle.py",
+            ),
+            footprints_symbols=Artefact(Published.NO, Evidence.ABSENT, _NO_LBR),
+            model_3d=Artefact(Published.NO, Evidence.ABSENT, _NO_MESH),
+            board_support=Artefact(Published.NO, Evidence.ABSENT, _NO_PIN_HEADER),
+        ),
+        cite=_LISTED_FOR_OH_177,
+    ),
+    Source(
+        name="adafruit-kb2040",
+        vendor="Adafruit",
+        model="one repository per board",
+        size="1,105,914 + 22,239 bytes, the two blobs fetched, as GitHub's tree lists them",
+        licence=_ADAFRUIT_CC_BY_SA_3,
+        fetch=Fetch(
+            transport=Transport.GIT_SPARSE,
+            url="https://github.com/adafruit/Adafruit-KB2040-PCB.git",
+            wanted=("Adafruit KB2040.brd", "license.txt"),
+            skipped=(
+                ("Adafruit KB2040.sch", _UNREAD_SCHEMATIC),
+                ("Adafruit KB2040 Pinout.pdf", _PINOUT_PICTURE),
+                ("README.md", _ADAFRUIT_README),
+                ("assets", "one product photograph, 5302.jpg"),
+                ("factory-reset", "kb2040-factory-reset.uf2 and a README: a "
+                 "firmware image to flash, not a description of the board"),
+            ),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES, Evidence.LISTED,
+                "'Adafruit KB2040.sch', EAGLE; listed, not fetched",
+            ),
+            schematic_pdf=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "the one PDF, 'Adafruit KB2040 Pinout.pdf', was opened and is a "
+                "pinout diagram",
+            ),
+            pcb_layout=Artefact(
+                Published.YES, Evidence.OPENED,
+                "'Adafruit KB2040.brd', EAGLE 9.6.2 XML, read by tools/eagle.py",
+            ),
+            footprints_symbols=Artefact(Published.NO, Evidence.ABSENT, _NO_LBR),
+            model_3d=Artefact(Published.NO, Evidence.ABSENT, _NO_MESH),
+            board_support=Artefact(Published.NO, Evidence.ABSENT, _NO_PIN_HEADER),
+        ),
+        cite=_LISTED_FOR_OH_177,
+    ),
+    Source(
+        name="pcbcupid-glyph-mini-2040",
+        vendor="PCBCUPID",
+        model="one repository per board, this one among 46 under org:pcbcupid",
+        size="597,832 + 1,066 bytes, the two blobs fetched, as GitHub's tree lists them",
+        licence=Licence(
+            name="MIT",
+            covers="the repository; its LICENSE is MIT's text with no scope named",
+            sampled=True,
+            evidence=Evidence.OPENED,
+            cite="LICENSE at the repository root, fetched here and read "
+            "2026-09-29. GitHub reports MIT",
+            file="LICENSE",
+            quote="MIT License",
+        ),
+        fetch=Fetch(
+            transport=Transport.GIT_SPARSE,
+            url="https://github.com/pcbcupid/glyph-mini-2040.git",
+            wanted=("glyph-mini-rp2040.kicad_pcb", "LICENSE"),
+            skipped=(
+                ("glyph-mini-rp2040.kicad_sch", "the KiCad schematic. Nothing "
+                 "reads it yet; the pads and nets are in the .kicad_pcb"),
+                ("glyph-mini-rp2040.kicad_pro", "KiCad's project settings file; "
+                 "nothing here reads one"),
+                ("README.md", "34 bytes: the repository's name and the board's"),
+            ),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES, Evidence.LISTED,
+                "glyph-mini-rp2040.kicad_sch, KiCad; listed, not fetched",
+            ),
+            schematic_pdf=Artefact(
+                Published.NO, Evidence.ABSENT, "the tree holds five files and no PDF"
+            ),
+            pcb_layout=Artefact(
+                Published.YES, Evidence.OPENED,
+                "glyph-mini-rp2040.kicad_pcb, KiCad version 20241229, read by "
+                "tools/kicad.py",
+            ),
+            footprints_symbols=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "no .kicad_mod or .kicad_sym among the five files; the "
+                "footprints are inside the .kicad_pcb",
+            ),
+            model_3d=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "no .step, .stp, .wrl or .stl among the five files",
+            ),
+            board_support=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "none of the five files defines pins for firmware",
+            ),
+        ),
+        cite=_LISTED_FOR_OH_177,
     ),
 )
 

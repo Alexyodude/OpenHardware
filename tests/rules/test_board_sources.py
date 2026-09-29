@@ -5,6 +5,7 @@
 
 import json
 import pathlib
+import re
 import subprocess
 
 import pytest
@@ -182,10 +183,40 @@ def test_every_skipped_path_carries_a_reason():
             )
 
 
-def test_every_row_cites_the_survey_it_came_from():
+def _from_the_survey(candidate: Source) -> bool:
+    return candidate.cite.startswith("OH-23 survey")
+
+
+def test_every_row_cites_the_survey_or_the_ticket_that_opened_it():
+    """A row the OH-23 survey did not carry names the ticket that listed the
+    repository, and reads its licence from a file it fetches."""
     for candidate in SOURCES:
-        assert "OH-23" in candidate.cite, f"{candidate.name} cites no survey row"
         assert candidate.licence.cite.strip(), f"{candidate.name}: licence with no cite"
+        if _from_the_survey(candidate):
+            continue
+        assert re.match(r"OH-\d+: ", candidate.cite), f"{candidate.name} cites no ticket"
+        assert candidate.licence.evidence is Evidence.OPENED, candidate.name
+        assert candidate.licence.file in candidate.fetch.wanted, candidate.name
+        assert candidate.licence.quote.strip(), candidate.name
+
+
+def test_a_licence_read_from_a_fetched_file_is_in_that_file():
+    """Whitespace is normalised: the checkout is CRLF here and the text wraps."""
+    checked, unfetched = [], []
+    for candidate in SOURCES:
+        if not candidate.licence.file:
+            continue
+        path = candidate.dest(REPO) / candidate.licence.file
+        if not path.is_file():
+            unfetched.append(candidate.name)
+            continue
+        text = " ".join(path.read_text(encoding="utf-8", errors="replace").split())
+        assert " ".join(candidate.licence.quote.split()) in text, (
+            f"{path} does not read {candidate.licence.quote!r}")
+        checked.append(candidate.name)
+    if not checked:
+        pytest.skip(f"SKIPPED: none fetched: {unfetched}; "
+                    f"run python tools/get_board_sources.py <name>")
 
 
 def test_a_licence_read_from_one_of_many_repositories_says_so():
@@ -295,6 +326,35 @@ def test_a_source_with_nothing_to_narrow_fetches_everything(tmp_path):
     assert _tree(dest) == ["a.sch", "b/c.brd"]
 
 
+def test_a_file_named_in_wanted_lands_without_its_neighbours(tmp_path):
+    """A board repository keeps its CAD at the top level beside a schematic
+    and pictures, where a directory cannot separate them."""
+    origin = _origin(
+        tmp_path / "origin",
+        {
+            "board.brd": "layout",
+            "board.sch": "schematic",
+            "license.txt": "terms",
+            "assets/photo.jpg": "picture",
+        },
+    )
+    row = _source(origin.as_uri(), wanted=("board.brd", "license.txt"))
+
+    dest = fetch(row, tmp_path / "root")
+    assert _tree(dest) == ["board.brd", "license.txt"]
+
+
+def test_a_file_name_with_glob_characters_is_fetched_as_written(tmp_path):
+    """`[rev A]` unescaped is a character class, which matches `r.brd`."""
+    origin = _origin(
+        tmp_path / "origin", {"board [rev A].brd": "layout", "board r.brd": "other"}
+    )
+    row = _source(origin.as_uri(), wanted=("board [rev A].brd",))
+
+    dest = fetch(row, tmp_path / "root")
+    assert _tree(dest) == ["board [rev A].brd"]
+
+
 def test_a_fetch_that_does_not_land_the_wanted_paths_raises(tmp_path):
     """The generic form of the retiring script's footprint count.
 
@@ -377,7 +437,7 @@ def test_every_registry_row_still_matches_the_survey_row_it_cites():
     and then pinned.
     """
     survey = _survey()
-    for candidate in SOURCES:
+    for candidate in filter(_from_the_survey, SOURCES):
         row = _survey_row(survey, candidate.fetch.url)
         assert row is not None, (
             f"{candidate.name} cites the survey but no survey row has its URL "

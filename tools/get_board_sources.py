@@ -35,8 +35,8 @@ The retiring script counted `.kicad_mod` and `.kicad_sym` after checkout and
 refused to report success over an empty tree, because a silent empty fetch
 makes the importer report zero boards over zero footprints — which reads
 exactly like success. That check was written in terms of one vendor's file
-extensions. The generic form is: every directory the table asked for must
-exist afterwards. It is checked here for every source, on every fetch.
+extensions. The generic form is: every directory or file the table asked for
+must exist afterwards. It is checked here for every source, on every fetch.
 
     python tools/get_board_sources.py --list
     python tools/get_board_sources.py <source>
@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -112,7 +113,21 @@ def _narrow(dest: pathlib.Path, wanted: tuple[str, ...], everything: bool) -> No
     if everything or not wanted:
         _git(["sparse-checkout", "disable"], cwd=dest)
     else:
-        _git(["sparse-checkout", "set", *wanted], cwd=dest)
+        # `ls-tree` answers from the commit, before anything is checked out.
+        files = {
+            name for name in wanted
+            if _git(["ls-tree", "HEAD", "--", name], cwd=dest).split()[1:2] == ["blob"]
+        }
+        if files:
+            # Cone mode takes directories, and every file at the top level
+            # with them, so a file on its own is a gitignore-style pattern,
+            # its glob characters escaped so that it matches only itself.
+            _git(["sparse-checkout", "set", "--no-cone", *(
+                "/" + re.sub(r"([\\*?\[])", r"\\\1", name) + ("" if name in files else "/")
+                for name in wanted
+            )], cwd=dest)
+        else:
+            _git(["sparse-checkout", "set", "--cone", *wanted], cwd=dest)
     _git(["checkout"], cwd=dest)
 
 
@@ -134,7 +149,7 @@ def _verify(src: Source, dest: pathlib.Path, everything: bool) -> None:
     checked hardest.
     """
     if not everything and src.fetch.wanted:
-        missing = [name for name in src.fetch.wanted if not (dest / name).is_dir()]
+        missing = [name for name in src.fetch.wanted if not (dest / name).exists()]
         if missing:
             # What is on disk is not the useful answer: a sparse checkout that
             # matched nothing leaves an empty tree, so reporting it says only
