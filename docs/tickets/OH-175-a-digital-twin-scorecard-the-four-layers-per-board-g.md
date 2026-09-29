@@ -48,3 +48,12 @@ Duplication: `inventory.is_supply` copies the condition test_import_pindefs.py's
 Mutants: the review's five (whole = len(twins), inverted tallies, reversed sort, no text rows, no markdown rows) are each killed, along with 20 more over every layer, the supply parser and the heading. That is 25 of 25.
 
 Full pytest: 2 failed, 2129 passed, 31 skipped. The two are the same `No module named 'OCP'` tests in test_import_3d_model.py that fail at f77cfc4. check_ticket_claims OK.
+
+**Note 2026-09-29:** Correction, 2026-09-29, after the coordinator rebased oh-175 onto master 7553061. The notes above cite SHAs from before the rebase (897cdd0, dd2afed, b4656d3, 142d7b0, 410c08e) and counts over 26 boards. On the rebased branch (`git log --oneline 7553061..oh-175`) they are: edf3489 feat TWINS section; 70b498a ASSETS model3d scope; 9a95714 ticket note; bf338a2 ASSETS schematic/pcb scope; e5e0e1b heading and row tests; 7615159 geometry resolves, middle pins reading, strict supply parse; 0099012 ticket note; and on top 3458b57, the re-review: file geometry must be vendor CAD inside a source; DISPUTED and NO_PACKAGE_AT_ALL are unanswered; runs reads catalogue.catalogue()'s per-board evidence; supply parse is module-level only.
+
+Measured headline now, with 27 boards (master added the SparkFun Thing Plus ESP32-C6). With the models served from a temp static copy: "TWINS — 9 of 27 boards hold all four; by layer: geometry 26, model 25, pins 20, runs 13". As this worktree prints it: "TWINS — 0 of 27 boards hold all four; by layer: geometry 26, model 0 (25 not built here), pins 20, runs 13". Pins fell from 21 to 20 because the STM32C5's NO_PACKAGE_AT_ALL pads are now unanswered (2/26). The SparkFun board holds geometry and runs, and misses model (no source) and pins (5/24).
+
+33 mutants, each killed. Full suite: 5 failed, 2140 passed, 31 skipped.
+- Two are the OCP tests, as before.
+- Two are test_check_facts: CLAUDE.md says 26 boards and master has 27. They fail identically with the tree at 7553061.
+- One is test_compile's test_a_failed_build_leaves_nothing_behind. It saw another session's %TEMP%\openhardware-build-* directory, then passed when re-run alone (OH-166's class of test).
