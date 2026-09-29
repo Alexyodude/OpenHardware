@@ -214,8 +214,8 @@ def test_a_licence_read_from_a_fetched_file_is_in_that_file():
         assert " ".join(candidate.licence.quote.split()) in text, (
             f"{path} does not read {candidate.licence.quote!r}")
         checked.append(candidate.name)
-    if not checked:
-        pytest.skip(f"SKIPPED: none fetched: {unfetched}; "
+    if unfetched:
+        pytest.skip(f"SKIPPED after checking {checked}: {unfetched} not fetched; "
                     f"run python tools/get_board_sources.py <name>")
 
 
@@ -486,6 +486,11 @@ def test_every_registry_row_still_matches_the_survey_row_it_cites():
     and then pinned.
     """
     survey = _survey()
+    # A row that does not cite the survey is not a surveyed repository cited
+    # some other way to leave this check.
+    for candidate in SOURCES:
+        if not _from_the_survey(candidate):
+            assert _survey_row(survey, candidate.fetch.url) is None, candidate.name
     for candidate in filter(_from_the_survey, SOURCES):
         row = _survey_row(survey, candidate.fetch.url)
         assert row is not None, (

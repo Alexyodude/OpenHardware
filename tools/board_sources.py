@@ -229,18 +229,16 @@ _LISTED_FOR_OH_177 = (
 )
 _ADAFRUIT_CC_BY_SA_3 = Licence(
     name="CC BY-SA 3.0 Unported",
-    covers="the repository, per its README's License section, which points "
-    "at license.txt",
+    covers="not stated: license.txt is the licence's legal code and names no work",
     sampled=True,
     evidence=Evidence.OPENED,
-    cite="license.txt at the repository root, fetched here and read "
-    "2026-09-29. GitHub reports NOASSERTION",
+    cite="license.txt at the repository root, fetched here and read 2026-09-29",
     file="license.txt",
     quote="Attribution-ShareAlike 3.0 Unported",
 )
 _UNREAD_SCHEMATIC = "the EAGLE schematic. Nothing reads it yet; the pads and nets are in the .brd"
 _PINOUT_PICTURE = "a pinout diagram, opened 2026-09-29: no pad coordinates and no nets"
-_ADAFRUIT_README = "its License section points at license.txt, which is fetched"
+_ADAFRUIT_README = "not needed: the licence is read from license.txt, which is fetched"
 _NO_LBR = "no .lbr in the tree listing; the .brd carries the libraries it uses"
 _NO_MESH = "no .step, .stp, .wrl or .stl in the tree listing"
 _NO_PIN_HEADER = "no pin definitions in the tree listing; factory-reset/ holds a firmware image"
@@ -776,11 +774,11 @@ SOURCES: tuple[Source, ...] = (
         size="597,832 + 1,066 bytes, the two blobs fetched, as GitHub's tree lists them",
         licence=Licence(
             name="MIT",
-            covers="the repository; its LICENSE is MIT's text with no scope named",
+            covers="not stated beyond MIT's own 'this software and associated "
+            "documentation files'",
             sampled=True,
             evidence=Evidence.OPENED,
-            cite="LICENSE at the repository root, fetched here and read "
-            "2026-09-29. GitHub reports MIT",
+            cite="LICENSE at the repository root, fetched here and read 2026-09-29",
             file="LICENSE",
             quote="MIT License",
         ),
@@ -793,7 +791,8 @@ SOURCES: tuple[Source, ...] = (
                  "reads it yet; the pads and nets are in the .kicad_pcb"),
                 ("glyph-mini-rp2040.kicad_pro", "KiCad's project settings file; "
                  "nothing here reads one"),
-                ("README.md", "34 bytes: the repository's name and the board's"),
+                ("README.md", "34 bytes, as the tree lists it; the licence is read "
+                 "from LICENSE, which is fetched"),
             ),
         ),
         artefacts=Artefacts(
