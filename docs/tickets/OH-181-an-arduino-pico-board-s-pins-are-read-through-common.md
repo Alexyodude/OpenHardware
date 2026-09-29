@@ -13,6 +13,8 @@ touches:
 - tests/rules/test_board_manifest.py
 - webui/boards/Adafruit KB2040.json
 - tools/board_sources.py
+- tests/webui/test_pin_view.py
+- README.md
 ---
 
 Part of OH-174, found by OH-177. The Adafruit KB2040 and the PCBCUPID Glyph Mini RP2040 have registry rows and fetched board files, and no manifest row, because `check()` refuses both before anything is written:
