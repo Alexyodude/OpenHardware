@@ -864,11 +864,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             # **A compile BUILDS before the lock is taken** (OH-136): the
             # subprocess work touches no session state, so only the load
-            # that follows it belongs inside. Every other route is
-            # unchanged: state stays guarded by the one lock.
+            # that follows it belongs inside. Every other route but
+            # /api/boards is unchanged: state stays guarded by the one lock.
             prepared = None
             if route == "/api/board/compile":
                 prepared = prepare_compile(payload)
+            if route == "/api/boards":
+                # **Never under the lock** (OH-183): it reads the catalogue
+                # and asks `recipe_for` of every board, which runs a
+                # compiler for a manifest board's table, and it touches no
+                # session state -- OH-136's reason, for a listing.
+                self._json(200, handle_api(self.session, route, query,
+                                           payload, self.boards))
+                return
             with self.lock:
                 self._json(
                     200,

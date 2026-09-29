@@ -568,6 +568,35 @@ def test_every_board_states_whether_a_sketch_can_be_built_for_it():
     )
 
 
+def test_the_board_listing_is_answered_while_the_session_lock_is_held():
+    """`/api/boards` asks `recipe_for` of every board, which runs a compiler
+    for a manifest board's table (OH-183), and touches no session state: it
+    is answered without the lock, so a listing never stalls a step."""
+    import json
+    import threading
+    import urllib.request
+
+    from webui import compile as compile_service
+    from webui import emulator_server
+
+    compile_service._ASKED.clear()
+    server = emulator_server.build_server("127.0.0.1", 0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    lock = server.RequestHandlerClass.lock
+    lock.acquire()
+    try:
+        host, port = server.server_address[:2]
+        with urllib.request.urlopen(f"http://{host}:{port}/api/boards", timeout=10) as reply:
+            names = {entry["name"] for entry in json.loads(reply.read())["boards"]}
+    finally:
+        lock.release()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert "Adafruit Feather ESP32-C6" in names, sorted(names)
+
+
 def test_one_boards_compiler_failing_to_run_is_that_boards_refusal_only(monkeypatch):
     """An `OSError` running a manifest board's compiler turns that board's
     Build off and leaves the listing, and every other board, standing."""
