@@ -2,11 +2,28 @@
 id: OH-179
 title: A manifest board compiles against its own variant and shows only its own pads,
   not a XIAO sibling's
-status: open
+status: in-progress
 priority: P1
 created: '2026-09-29'
 touches:
 - docs/tickets/OH-179-*
+- webui/compile.py
+- tests/webui/test_compile.py
+- webui/api.py
+- webui/boards/catalogue.py
+- tools/board_manifest.py
+- tools/import_pindefs.py
+- webui/boards/SparkFun*
+- webui/boards/Adafruit*
+- rules/board-claims.md
+- tools/check_board_claims.py
+- tests/rules/test_board_claims.py
+- tests/webui/test_board_catalogue.py
+- tests/rules/test_board_manifest.py
+- tests/rules/test_import_pindefs.py
+- tests/webui/test_pin_view.py
+- tests/webui/test_feather_esp32c6_board.py
+- tests/webui/feather_esp32c6/**
 ---
 
 Part of OH-174, found by OH-176. The page picks a board's compile recipe and its pin module by chip. For the XIAO boards that was the same thing as picking by board. For the SparkFun Thing Plus ESP32-C6 it is not: per OH-176's report, the page would build a sketch for it with the XIAO ESP32-C6 variant and list XIAO labels such as D0 and LED as its on-board pins. Those are another board's pins presented as this one's.
