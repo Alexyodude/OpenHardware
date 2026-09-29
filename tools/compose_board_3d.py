@@ -913,9 +913,11 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "0805-NO", "Capacitor_SMD", "C_0805_2012Metric",
-        "the 10 and 22 uF capacitors on both Adafruit boards, every one a "
-        "capacitor by its value: two pads 1.90 mm apart, an 0805 land, and "
-        "the 2.0 x 1.25 mm chip.",
+        "the 10 and 22 uF capacitors on the QT Py and the Feather, every one "
+        "a capacitor by its value: two pads 1.90 mm apart, an 0805 land, and "
+        "the 2.0 x 1.25 mm chip. The KB2040's R8 on this land reads FUSE, "
+        "and is drawn in the capacitor's moulding as the QT Py's resistors "
+        "are.",
     ),
     Component(
         "_0805MP", "Capacitor_SMD", "C_0805_2012Metric",
@@ -983,8 +985,9 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "SOT23-5", "Package_TO_SOT_SMD", "SOT-23-5",
-        "five pads spanning 1.90 x 2.60 mm on all three manifest boards -- "
-        "SparkFun's regulator and charger, Adafruit's AP2112 and MCP73831 -- "
+        "five pads spanning 1.90 x 2.60 mm on SparkFun's and Adafruit's "
+        "boards alike -- SparkFun's regulator and charger, Adafruit's AP2112 "
+        "and MCP73831 -- "
         "which is the Uno's SOT23-DBV land stood on end, so the same model "
         "turned a quarter.",
         turn=90.0,
@@ -1098,6 +1101,64 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "LED1 on the Feather, value WS2812B_3535FULL: four pads spanning "
         "3.40 x 1.75 mm and a body Adafruit draw 3.5 x 3.5 mm -- the WS2812B "
         "in its 3535 package, which is what this model names.",
+    ),
+    # --- the Adafruit KB2040, OH-186 ----------------------------------------
+    #
+    # Its row in tools/board_manifest.py composed it by construction, and
+    # these are the packages none of the rows above already drew. Each span
+    # was measured with `eagle.Element.pad_extent` on 2026-09-30, and each
+    # element's device is the one Adafruit's own schematic names.
+    Component(
+        "QFN56_7MM_REDUCEDEPAD", "Package_DFN_QFN",
+        "QFN-56-1EP_7x7mm_P0.4mm_EP3.2x3.2mm",
+        "IC2 on the KB2040, the RP2040 itself: fifty-seven pads spanning "
+        "6.90 x 6.90 mm, fifty-six leads on a 0.4 mm pitch round a 7 x 7 mm "
+        "body Adafruit draw on tDocu, and a 3.20 x 3.20 mm exposed pad. "
+        "KiCad's Package_DFN_QFN, 191 models listed 2026-09-30, holds three "
+        "56-lead 7 x 7 mm parts on that pitch, whose pads are 3.2, 4 and "
+        "5.6 mm square. By the exposed-pad rule above this chip has no "
+        "drawing yet, so the pad nearest the land chooses -- a JUDGEMENT, "
+        "and not a close one: this model's is the land's own size. Pin 1 is "
+        "where KiCad's footprint puts it, and the vendor's dot says so.",
+    ),
+    Component(
+        "USON8_4X4", "Package_DFN_QFN", "DFN-8-1EP_4x4mm_P0.8mm_EP2.5x3.6mm",
+        "U5 on the KB2040, value 8MB QSPI Flash and no maker: nine pads "
+        "spanning 2.40 x 3.70 mm, eight leads on a 0.8 mm pitch round a "
+        "2.0 x 3.0 mm exposed pad, and a 4 x 4 mm body Adafruit draw on "
+        "tPlace. KiCad has two eight-lead 4 x 4 mm parts on that pitch, "
+        "listed 2026-09-30 in Package_DFN_QFN and Package_SON: WSON-8_4x4mm"
+        "_P0.8mm, with no exposed pad, and this one. By the rule above the "
+        "pad nearest the land chooses, a JUDGEMENT. A SECOND JUDGEMENT: "
+        "Adafruit name the land USON, and U is the ultra-thin height class "
+        "the QFN-48 row turns a model down for, where this one stands "
+        "0.92 mm and the WSON 0.82. The QFN-48 could be modelled from its "
+        "vendor's KiCad footprint instead; an EAGLE package cannot be yet "
+        "(the Feather's AHT20 is refused for that gap), and this name states "
+        "no height to build from.",
+    ),
+    Component(
+        "SOD-323F", "Diode_SMD", "D_SOD-323F",
+        "D1 and D3 on the KB2040, NSR0320 by value: two pads 2.00 mm apart, "
+        "and SOD-323F, the flat-lead SOD-323, is the package Adafruit's "
+        "name and the model's both state. The QT Py places the same value "
+        "on a land it names SOD-323, and each is drawn as its own land is "
+        "named. TURNED 180: Adafruit put the cathode pad C at +x, and "
+        "KiCad's footprint puts pad 1, the cathode, at -x.",
+        turn=180.0,
+    ),
+    Component(
+        "CRYSTAL_2.5X2", "Crystal", "Crystal_SMD_2520-4Pin_2.5x2.0mm",
+        "Y1 on the KB2040, 12 MHz: four pads spanning 1.65 x 1.25 mm, and "
+        "Adafruit draw the body 2.5 x 2.0 mm on tDocu -- the 2520 part the "
+        "model's name states, and the one Seeed's RP2350 crystal draws. Pad "
+        "1 is where KiCad's footprint puts it, so no turn.",
+    ),
+    Component(
+        "_0603MP", "Capacitor_SMD", "C_0603_1608Metric",
+        "C10 and C12 on the KB2040, 1 uF, both capacitors by their value: "
+        "two pads 1.52 mm apart, the land Adafruit's own description calls "
+        "0603 MicroPitch, and the 1.6 x 0.8 mm chip.",
     ),
 )
 
@@ -1366,6 +1427,23 @@ ABSENT: dict[str, str] = {
         "plated ring. Copper and a hole, and nothing fitted. No KiCad library "
         "was searched: there is no body to look for."
     ),
+    # --- OH-186: the KB2040's copper ----------------------------------------
+    "1X13_CASTEL": (
+        "JP1 and JP2 on the KB2040: **the board's own castellated edge**, "
+        "thirteen half-holes each on 2.54 mm, 30.48 mm long, with a plated "
+        "hole 1.524 mm inboard of each. Copper and the board's edge, drawn "
+        "by the copper pass. No KiCad library was searched: there is no body "
+        "to look for."
+    ),
+    "SOLDERJUMPER_ARROW_NOPASTE": (
+        "SJ1 on the KB2040's underside: two 0.762 x 1.524 mm pads and the "
+        "copper between them that a person bridges with solder. No KiCad "
+        "library was searched: there is no body to look for."
+    ),
+    "TESTPOINT_ROUND_1.5MM_NO": (
+        "TP1 on the KB2040's underside, a bare 1.5 mm round pad. No KiCad "
+        "library was searched: there is no body to look for."
+    ),
     # And the parts: each names what was listed and what the nearest thing
     # in it was, so the next reader re-runs the search rather than retakes it.
     "USB-C-16P_4LAYER-PADS": (
@@ -1379,7 +1457,7 @@ ABSENT: dict[str, str] = {
         "undid on the XIAOs."
     ),
     "USB_C_CUSB31-CFM2AX-01-X": (
-        "the USB-C socket on both Adafruit boards, whose package name is the "
+        "the USB-C socket on each Adafruit board, whose package name is the "
         "part: CUI's CUSB31-CFM2AX-01-X, twelve contact pads and four shell "
         "tabs spanning 8.64 x 4.76 mm. KiCad's Connector_USB, 12 models "
         "listed 2026-09-29, holds nothing of CUI's; its two 16-pin "
@@ -1423,7 +1501,8 @@ ABSENT: dict[str, str] = {
         "3.5 x 3.5 mm WS2812B-Mini -- the Feather's, which is drawn."
     ),
     "SK6805_1515": (
-        "LED1 on the QT Py: four pads under a 1.5 x 1.5 mm body, an SK6805 "
+        "LED1 on the QT Py and the KB2040: four pads under a 1.5 x 1.5 mm "
+        "body, an SK6805 "
         "in its 1515 package. The smallest addressable LED in KiCad's "
         "LED_SMD, 38 models listed 2026-09-29, is the reverse-mount "
         "SK6812MINI-E at 3.2 x 2.8 mm, about twice this one's side."

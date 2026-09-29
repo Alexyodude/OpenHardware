@@ -34,6 +34,7 @@ import dataclasses
 import json
 import math
 import pathlib
+import re
 import struct
 import sys
 from unittest import mock
@@ -385,6 +386,9 @@ EXPLAINS: dict[str, set[str]] = {
         "1X16_ROUND", "1X12_ROUND", "USB_C_CUSB31-CFM2AX-01-X",
         "JSTPH2_BATT", "JST_SH4_RA", "LONGAN-IC_SNR6-1.0-3X3X1MM",
     },
+    # The QT Py's two, on a board shaped like it (OH-186): its castellated
+    # edge is copper, as the QT Py's is, and every chip on it is drawn.
+    "Adafruit KB2040": {"USB_C_CUSB31-CFM2AX-01-X", "SK6805_1515"},
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
 # same placements, same absences -- so the entries are derived the same way
@@ -1537,11 +1541,29 @@ def test_the_rp2350_is_drawn_and_the_near_miss_is_still_refused():
     assert "QFN60-0.4-7X7X0.9MM" not in compose.ABSENT, (
         "it is drawn now; ABSENT should no longer claim otherwise"
     )
-    for component in compose.CORRESPONDENCE:
-        assert "QFN-56" not in component.model, (
-            f"{component.package} was given {component.model}. A 56-lead part "
-            f"is not a 60-lead part, however well it measures."
-        )
+    # **Not "no row is a QFN-56"**, which is what this asserted until the
+    # KB2040's RP2040 arrived (OH-186): a 56-lead chip whose model IS one.
+    # The near miss is a model naming a different number of leads from the
+    # land it stands on, so that is what is checked, on every fetched board.
+    named = re.compile(r"(?:QFN|DFN|SON)-(\d+)-1EP")
+    checked = 0
+    for spec in compose.COMPOSITIONS:
+        if not spec.layout.is_file():
+            continue
+        for element in compose.read_layout(spec.layout).elements:
+            component = compose.correspondence_for(element)
+            leads = component and named.search(component.model)
+            if not leads:
+                continue
+            checked += 1
+            assert len(element.pads) == int(leads.group(1)) + 1, (
+                f"{spec.board}: {element.name} ({element.package}) puts down "
+                f"{len(element.pads)} pads and was given {component.model}. "
+                f"A {leads.group(1)}-lead part and its exposed pad is not "
+                f"that land, however well it measures."
+            )
+    if not checked:
+        pytest.skip("SKIPPED: no board layouts are fetched")
 
 
 # --- the receptacle the vendor names and does not ship (OH-102) ---------------
@@ -2302,6 +2324,12 @@ def test_the_two_lists_of_composed_boards_agree():
     having run. Two lists of the same fact is how this repository has been
     bitten twice; the answer here is one test rather than one list, because
     the importer cannot import the composer without a cycle.
+
+    **A manifest row's entry is derived on both sides now** (OH-186): the
+    importer reads `tools/board_manifest.py` for itself, with its own slug
+    and its own rule for which rows compose, so this still fails when the
+    two derivations disagree -- a slug spelled differently, or a row one
+    side composes and the other refuses -- rather than when a row is added.
     """
     from tools.import_3d_model import COMPOSED
     from webui.boards.catalogue import chip_for
@@ -3510,6 +3538,37 @@ def test_every_uno_package_is_drawn_or_its_absence_is_explained():
         f"{orphans} are neither drawn nor explained. Add a CORRESPONDENCE "
         f"row with a measured why, or an ABSENT row with the reason -- "
         f"silence is the defect OH-119 was filed about"
+    )
+
+
+def test_every_composed_boards_placements_are_drawn_or_explained():
+    """**The same closed world, on every composed board** (OH-186).
+
+    A manifest row is composed by construction, so a board arrives with no
+    table edit at all -- and the KB2040 did, with eleven of its placements
+    drawn as nothing and one line of output saying so. The lookup is the
+    composer's own, `correspondence_for`, because SparkFun's `0603` is two
+    rows told apart by library. A padless element is ink and is counted
+    apart by `compose`, so only a placement with a pad must be one or the
+    other.
+    """
+    orphans: dict[str, list[str]] = {}
+    checked = 0
+    for spec in compose.COMPOSITIONS:
+        if not spec.layout.is_file():
+            continue
+        checked += 1
+        for element in compose.read_layout(spec.layout).elements:
+            if (element.pads and element.package not in compose.ABSENT
+                    and compose.correspondence_for(element) is None):
+                orphans.setdefault(spec.board, []).append(
+                    f"{element.name} ({element.package})")
+    if not checked:
+        pytest.skip("SKIPPED: no board layouts are fetched")
+    assert not orphans, (
+        f"placements neither drawn nor explained: {orphans}. Add a "
+        f"CORRESPONDENCE row with a measured why, or an ABSENT row with the "
+        f"reason"
     )
 
 
