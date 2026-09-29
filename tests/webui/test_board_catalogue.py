@@ -568,6 +568,31 @@ def test_every_board_states_whether_a_sketch_can_be_built_for_it():
     )
 
 
+def test_one_boards_compiler_failing_to_run_is_that_boards_refusal_only(monkeypatch):
+    """An `OSError` running a manifest board's compiler turns that board's
+    Build off and leaves the listing, and every other board, standing."""
+    from webui import compile as compile_service
+    from webui import emulator_server
+    table = (compile_service.BOARD_SUPPORT / "arduino-esp32" / "variants"
+             / "adafruit_feather_esp32c6" / "pins_arduino.h")
+    if not table.is_file():
+        pytest.skip(f"SKIPPED: no {table}; python tools/import_pindefs.py --fetch")
+    try:
+        compile_service.toolchain_root(compile_service.RECIPES["ESP32-C6"])
+    except compile_service.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+
+    def denied(command, deadline):
+        raise PermissionError(f"access denied running {command[0]}")
+
+    monkeypatch.setattr(compile_service, "_ASKED", {})
+    monkeypatch.setattr(compile_service, "_run", denied)
+    payload = emulator_server.handle_api(None, "/api/boards", {}, {})
+    by_name = {entry["name"]: entry["buildable"] for entry in payload["boards"]}
+    assert by_name["Adafruit Feather ESP32-C6"] is False
+    assert by_name["XIAO-ESP32-C6-DIP"] is True
+
+
 def test_a_manifest_board_is_buildable_exactly_where_its_own_table_compiles():
     """The route asks `recipe_for`, so a row's Build button is on where its
     own variant builds and off where it is refused (OH-179): the Feather

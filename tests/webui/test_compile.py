@@ -187,8 +187,8 @@ def test_a_refusal_says_the_compiler_answered_where_one_is_installed():
     with pytest.raises(compiler.UnknownBoard) as caught:
         compiler.recipe_for("SparkFun Thing Plus ESP32-C6")
     message = str(caught.value)
-    assert ("cannot be compiled here (asked of riscv32-esp-elf-g++ and "
-            "riscv32-esp-elf-gcc -fsyntax-only): third_party/bsp/arduino-esp32/"
+    assert ("cannot be compiled here (answered by riscv32-esp-elf-g++ "
+            "-fsyntax-only): third_party/bsp/arduino-esp32/"
             "variants/sparkfun_esp32c6_thing_plus/pins_arduino.h:") in message, message
     assert "'SOC_GPIO_PIN_COUNT' was not declared in this scope" in message, message
 
@@ -225,7 +225,7 @@ def test_each_rows_verdict_is_the_compilers_own(monkeypatch):
         needs_table(row.board)
         recipe = compiler.own_variant(row, compiler.RECIPES[row.chip])
         try:
-            asked = compiler.compiled_gaps(recipe, compiler.toolchain_root(recipe))
+            asked, _ = compiler.compiled_gaps(recipe, compiler.toolchain_root(recipe))
         except compiler.ToolchainMissing as exc:
             pytest.skip(str(exc))
         read = compiler.read_gaps(recipe)
@@ -264,14 +264,15 @@ def test_the_compiler_passes_the_tables_the_header_reading_refused(tmp_path, mon
         "static const uint8_t TXD0 = 1, TX0 = 1;\n"))
     assert compiler.read_gaps(recipe) == ["it uses TX0, which no header it reaches defines"]
     assert compiler.unmet(recipe) == (
-        [], "asked of riscv32-esp-elf-g++ and riscv32-esp-elf-gcc -fsyntax-only")
-    assert compiler.compiled_gaps(recipe, tools) == []
+        [], "answered by riscv32-esp-elf-g++ and riscv32-esp-elf-gcc -fsyntax-only")
+    assert compiler.compiled_gaps(recipe, tools)[0] == []
 
 
 def test_the_table_is_asked_of_in_both_languages_a_build_compiles_it_in(
         tmp_path, monkeypatch):
     """The sketch is C++ and `main.c` is C, and each includes the table:
-    `bool` with no `<stdbool.h>` is C's error alone, `delete` C++'s."""
+    `bool` with no `<stdbool.h>` is C's error alone, `delete` C++'s -- and
+    the answer names the compiler that gave it."""
     try:
         tools = compiler.toolchain_root(compiler.RECIPES["ESP32-C6"])
     except compiler.ToolchainMissing as exc:
@@ -279,11 +280,14 @@ def test_the_table_is_asked_of_in_both_languages_a_build_compiles_it_in(
     as_c = fake_table(tmp_path / "c", monkeypatch, "static const bool FLAG = 1;\n")
     as_cxx = fake_table(tmp_path / "cxx", monkeypatch, "static const uint8_t delete = 1;\n")
     monkeypatch.setattr(compiler, "BOARD_SUPPORT", tmp_path / "c")
-    (c_gap,) = compiler.compiled_gaps(as_c, tools)
+    (c_gap,), c_by = compiler.compiled_gaps(as_c, tools)
     monkeypatch.setattr(compiler, "BOARD_SUPPORT", tmp_path / "cxx")
-    (cxx_gap,) = compiler.compiled_gaps(as_cxx, tools)
+    (cxx_gap,), cxx_by = compiler.compiled_gaps(as_cxx, tools)
     assert "'bool'" in c_gap, c_gap
+    assert c_by == ("answered by riscv32-esp-elf-gcc -fsyntax-only, after "
+                    "riscv32-esp-elf-g++ passed it"), c_by
     assert "'delete'" in cxx_gap, cxx_gap
+    assert cxx_by == "answered by riscv32-esp-elf-g++ -fsyntax-only", cxx_by
 
 
 def test_the_table_is_compiled_with_the_builds_own_cxx_flags(tmp_path, monkeypatch):
@@ -293,8 +297,19 @@ def test_the_table_is_compiled_with_the_builds_own_cxx_flags(tmp_path, monkeypat
     except compiler.ToolchainMissing as exc:
         pytest.skip(str(exc))
     recipe = fake_table(tmp_path, monkeypatch, "static inline void f(void) { throw 1; }\n")
-    (gap,) = compiler.compiled_gaps(recipe, tools)
+    (gap,), _ = compiler.compiled_gaps(recipe, tools)
     assert "exception handling disabled" in gap, gap
+
+
+def test_the_table_is_compiled_with_the_builds_own_flags(tmp_path, monkeypatch):
+    """`-Os` is the recipe's, and defines `__OPTIMIZE_SIZE__`."""
+    try:
+        tools = compiler.toolchain_root(compiler.RECIPES["ESP32-C6"])
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    recipe = fake_table(tmp_path, monkeypatch, (
+        "#ifndef __OPTIMIZE_SIZE__\n#error compiled without the recipe's -Os\n#endif\n"))
+    assert compiler.compiled_gaps(recipe, tools)[0] == []
 
 
 def test_the_compiler_is_asked_once_per_table_and_again_when_it_changes(
@@ -317,6 +332,62 @@ def test_the_compiler_is_asked_once_per_table_and_again_when_it_changes(
     fake_table(tmp_path, monkeypatch, "static const uint8_t A = FROM_NOWHERE;\n")
     (gap,) = compiler.unmet(recipe)[0]
     assert "FROM_NOWHERE" in gap, gap
+
+
+def test_a_header_the_table_includes_is_asked_again_when_it_changes(
+        tmp_path, monkeypatch):
+    """The compiler's own list of what it read keys the answer, so an edit
+    to an included header -- the Feather's `soc/soc_caps.h` -- is seen."""
+    try:
+        compiler.toolchain_root(compiler.RECIPES["ESP32-C6"])
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    recipe = fake_table(tmp_path, monkeypatch, '#include "extra.h"\n')
+    extra = tmp_path / "pkg" / "variants" / "fake" / "extra.h"
+    extra.write_text("static const uint8_t A = 1;\n", encoding="utf-8")
+    assert compiler.unmet(recipe)[0] == []
+    extra.write_text("static const uint8_t A = FROM_THE_HEADER;\n", encoding="utf-8")
+    (gap,) = compiler.unmet(recipe)[0]
+    assert "FROM_THE_HEADER" in gap, gap
+
+
+def test_a_compiler_that_was_not_there_or_timed_out_is_asked_again(tmp_path, monkeypatch):
+    """127 and 124 are no answer about the table, so neither is kept."""
+    try:
+        compiler.toolchain_root(compiler.RECIPES["ESP32-C6"])
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    run = compiler._run
+    for code in (127, 124):
+        recipe = fake_table(tmp_path / str(code), monkeypatch, "static const uint8_t A = 1;\n")
+        monkeypatch.setattr(compiler, "_run", lambda command, deadline, code=code: (
+            compiler.subprocess.CompletedProcess(command, code, "", f"exit {code}")))
+        (gap,) = compiler.unmet(recipe)[0]
+        assert f"exited {code} naming no error" in gap, gap
+        monkeypatch.setattr(compiler, "_run", run)
+        assert compiler.unmet(recipe)[0] == [], code
+
+
+def test_a_compiler_that_cannot_be_run_refuses_that_board_and_nothing_else(monkeypatch):
+    """An `OSError` from running it is the board's refusal, naming it, not
+    an exception out of `recipe_for` into `/api/boards`."""
+    needs_table("Adafruit Feather ESP32-C6")
+    try:
+        compiler.toolchain_root(compiler.RECIPES["ESP32-C6"])
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+
+    def denied(command, deadline):
+        raise PermissionError(f"access denied running {command[0]}")
+
+    monkeypatch.setattr(compiler, "_ASKED", {})
+    monkeypatch.setattr(compiler, "_run", denied)
+    with pytest.raises(compiler.UnknownBoard) as caught:
+        compiler.recipe_for("Adafruit Feather ESP32-C6")
+    message = str(caught.value)
+    assert ("(not answered: riscv32-esp-elf-gcc could not be asked): "
+            "PermissionError: access denied running") in message, message
+    assert compiler.recipe_for("XIAO-ESP32-C6-DIP") is compiler.RECIPES["ESP32-C6"]
 
 
 def test_every_upstream_variants_verdict_is_the_compilers(monkeypatch):
@@ -348,7 +419,7 @@ def test_every_upstream_variants_verdict_is_the_compilers(monkeypatch):
 
     def verdicts(name: str) -> tuple[str, bool, bool, bool]:
         built = compiler.build(name, "void setup() {} void loop() {}")
-        return (name, built.ok, not compiler.compiled_gaps(recipes[name], tools),
+        return (name, built.ok, not compiler.compiled_gaps(recipes[name], tools)[0],
                 not compiler.read_gaps(recipes[name]))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
@@ -400,6 +471,19 @@ def test_a_row_never_fetched_is_refused_when_built_naming_the_fetch_as_a_xiao_is
         "Fetch it with:\n  python tools/import_pindefs.py --fetch"), rows.value
 
 
+def test_a_row_whose_package_is_fetched_and_its_variant_is_not_is_never_fetched(
+        tmp_path, monkeypatch):
+    """What `unmet` asks is whether the row's own variant directory is
+    there, not its package's: this one resolves and is refused when built,
+    naming the fetch."""
+    (tmp_path / "arduino-esp32" / "variants").mkdir(parents=True)
+    monkeypatch.setattr(compiler, "BOARD_SUPPORT", tmp_path)
+    recipe = compiler.recipe_for("Adafruit Feather ESP32-C6")
+    with pytest.raises(compiler.ToolchainMissing) as caught:
+        compiler.include_roots(recipe)
+    assert "no arduino-esp32/variants/adafruit_feather_esp32c6 under" in str(caught.value)
+
+
 def test_a_fetched_variant_with_no_table_is_refused_by_both_answerers(tmp_path, monkeypatch):
     """Fetched, so asked: a directory with no `pins_arduino.h` in it."""
     (tmp_path / "pkg" / "variants" / "fake").mkdir(parents=True)
@@ -412,7 +496,7 @@ def test_a_fetched_variant_with_no_table_is_refused_by_both_answerers(tmp_path, 
         tools = compiler.toolchain_root(recipe)
     except compiler.ToolchainMissing as exc:
         pytest.skip(str(exc))
-    (gap,) = compiler.compiled_gaps(recipe, tools)
+    (gap,), _ = compiler.compiled_gaps(recipe, tools)
     assert "pins_arduino.h: No such file or directory" in gap, gap
 
 

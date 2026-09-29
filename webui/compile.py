@@ -61,7 +61,6 @@ readable to somebody who never compiles anything.
 from __future__ import annotations
 
 import dataclasses
-import functools
 import os
 import pathlib
 import re
@@ -670,7 +669,9 @@ def unmet(recipe: Recipe) -> tuple[list[str], str]:
     (`compiled_gaps`); the header, read, where it is not (`read_gaps`).
     Neither where the table's directory was never fetched: that build is
     attempted, and `include_roots` refuses it naming the fetch, as it does
-    a XIAO's in the same state (OH-183).
+    a XIAO's in the same state (OH-183). A compiler that cannot be run at
+    all is this board's refusal, naming why, and not every board's: the
+    caller asking of all of them is `/api/boards`.
     """
     (own,) = recipe.bsp_includes
     if not (BOARD_SUPPORT / own).is_dir():
@@ -680,8 +681,11 @@ def unmet(recipe: Recipe) -> tuple[list[str], str]:
     except ToolchainMissing:
         return (read_gaps(recipe),
                 f"read from the header, with no {recipe.prefix}gcc here to ask")
-    return (compiled_gaps(recipe, tools),
-            f"asked of {recipe.prefix}g++ and {recipe.prefix}gcc -fsyntax-only")
+    try:
+        return compiled_gaps(recipe, tools)
+    except (ToolchainMissing, OSError) as exc:
+        return ([f"{type(exc).__name__}: {exc}"],
+                f"not answered: {recipe.prefix}gcc could not be asked")
 
 
 def _shown(path: pathlib.Path) -> str:
@@ -695,39 +699,75 @@ def _shown(path: pathlib.Path) -> str:
 _ERROR = re.compile(r"^(.+?):(\d+):\d+: (?:fatal )?error: (.*)$", re.MULTILINE)
 
 
-def compiled_gaps(recipe: Recipe, tools: pathlib.Path) -> list[str]:
+def compiled_gaps(recipe: Recipe, tools: pathlib.Path) -> tuple[list[str], str]:
     """The errors of `Arduino.h`, which every source of a build includes and
     which includes the table, compiled syntax-only with the build's flags
     and include path: as C++, the sketch's language, then as C, `main.c`'s;
-    the first that fails."""
+    the first that fails, and which compiler answered."""
     core = framework_root(recipe) / recipe.core
     includes = (f"-I{core}", f"-I{variant_root(recipe)}",
                 *(f"-I{root}" for root in include_roots(recipe)))
     (own,) = recipe.bsp_includes
-    table = BOARD_SUPPORT / own / "pins_arduino.h"
-    text = table.read_bytes() if table.is_file() else b""
-    for language, tool, extra in (("c++", "g++", recipe.cxx_flags), ("c", "gcc", ())):
+    read = (BOARD_SUPPORT / own / "pins_arduino.h", core / "Arduino.h")
+    gxx, gcc = f"{recipe.prefix}g++", f"{recipe.prefix}gcc"
+    for language, tool, extra, answered in (
+            ("c++", "g++", recipe.cxx_flags, f"answered by {gxx} -fsyntax-only"),
+            ("c", "gcc", (), f"answered by {gcc} -fsyntax-only, after {gxx} passed it")):
         command = (_tool(tools, recipe, tool), "-fsyntax-only", "-x", language,
                    *recipe.flags, *extra, *includes, str(core / "Arduino.h"))
-        errors = _syntax_errors(command, text)
+        errors = _syntax_errors(command, read)
         if errors:
-            return list(errors)
-    return []
+            return list(errors), answered
+    return [], f"answered by {gxx} and {gcc} -fsyntax-only"
 
 
-@functools.lru_cache(maxsize=None)
-def _syntax_errors(command: tuple[str, ...], table: bytes) -> tuple[str, ...]:
-    """`command`'s errors, each `file:line: what`, once per command and
-    table text: `/api/boards` asks of every board on every request, and
-    `table` is here as the key, so a table fetched again is asked again."""
-    done = _run(command, time.monotonic() + TIMEOUT_SECONDS)
-    if done.returncode == 0:
-        return ()
-    errors = tuple(dict.fromkeys(
-        f"{_shown(pathlib.Path(where))}:{line}: {what}"
-        for where, line, what in _ERROR.findall(done.stderr)))
-    return errors or (f"{command[0]} exited {done.returncode} naming no error: "
-                      f"{done.stderr.strip()}",)
+#: Each command's last answer: the files it read, each as (path, mtime, size)
+#: when it was asked, and its errors. See `_syntax_errors`.
+_ASKED: dict[tuple[str, ...], tuple[tuple[tuple[str, int, int], ...], tuple[str, ...]]] = {}
+
+
+def _stamps(paths: tuple[str, ...]) -> tuple[tuple[str, int, int], ...]:
+    """Each path with its modification time and size; (-1, -1) where it is gone."""
+    out = []
+    for path in paths:
+        try:
+            stat = os.stat(path)
+        except FileNotFoundError:
+            out.append((path, -1, -1))
+        else:
+            out.append((path, stat.st_mtime_ns, stat.st_size))
+    return tuple(out)
+
+
+def _syntax_errors(command: tuple[str, ...],
+                   read: tuple[pathlib.Path, ...]) -> tuple[str, ...]:
+    """`command`'s errors, each `file:line: what`, asked again only when a
+    file it read has changed.
+
+    `/api/boards` asks of every board on every request. The files are the
+    compiler's own list (`-MD -MF -`) and `read`, which a compile that
+    stops at a missing header leaves out of it. A header that was missing
+    and is added later is not in either list, so it is seen after a
+    restart. A compiler that timed out (124) or was not there (127) gave no
+    answer, so none is kept.
+    """
+    held = _ASKED.get(command)
+    if held is not None and _stamps(tuple(p for p, _, _ in held[0])) == held[0]:
+        return held[1]
+    done = _run((*command, "-MD", "-MF", "-"), time.monotonic() + TIMEOUT_SECONDS)
+    errors: tuple[str, ...] = ()
+    if done.returncode != 0:
+        errors = tuple(dict.fromkeys(
+            f"{_shown(pathlib.Path(where))}:{line}: {what}"
+            for where, line, what in _ERROR.findall(done.stderr)))
+        errors = errors or (f"{command[0]} exited {done.returncode} naming no "
+                            f"error: {done.stderr.strip()}",)
+    if done.returncode not in (124, 127):
+        body = done.stdout.replace("\\\n", " ").split(": ", 1)[-1]
+        listed = [w.replace("\\ ", " ") for w in re.split(r"(?<!\\)\s+", body.strip()) if w]
+        paths = tuple(dict.fromkeys([*listed, *(str(p) for p in read)]))
+        _ASKED[command] = (_stamps(paths), errors)
+    return errors
 
 
 def read_gaps(recipe: Recipe) -> list[str]:
