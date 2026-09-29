@@ -668,13 +668,13 @@ def unmet(recipe: Recipe) -> tuple[list[str], str]:
 
     The compiler, where the recipe's toolchain is installed
     (`compiled_gaps`); the header, read, where it is not (`read_gaps`).
-    Neither where the table was never fetched.
+    Neither where the table's directory was never fetched: that build is
+    attempted, and `include_roots` refuses it naming the fetch, as it does
+    a XIAO's in the same state (OH-183).
     """
     (own,) = recipe.bsp_includes
-    table = BOARD_SUPPORT / own / "pins_arduino.h"
-    if not table.is_file():
-        return ([f"there is no {_shown(table)}; fetch it with python "
-                 f"tools/import_pindefs.py --fetch"], "not asked")
+    if not (BOARD_SUPPORT / own).is_dir():
+        return [], "not asked: never fetched"
     try:
         tools = toolchain_root(recipe)
     except ToolchainMissing:

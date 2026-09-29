@@ -382,16 +382,38 @@ def test_a_name_reached_through_a_macro_counts_and_an_unused_macro_does_not(
     assert compiler.read_gaps(recipe) == ["it uses FROM_A, which no header it reaches defines"]
 
 
-def test_a_row_whose_table_is_not_on_disk_is_refused_naming_the_fetch(monkeypatch):
-    row = dataclasses.replace(board_manifest.row("Adafruit Feather ESP32-C6"),
-                              board="Nowhere C6", variant="no_such_variant")
-    monkeypatch.setattr(board_manifest, "ROWS", (*board_manifest.ROWS, row))
-    with pytest.raises(compiler.UnknownBoard) as caught:
-        compiler.recipe_for("Nowhere C6")
-    message = str(caught.value)
-    assert ("there is no third_party/bsp/arduino-esp32/variants/no_such_variant/"
-            "pins_arduino.h; fetch it with python tools/import_pindefs.py --fetch"
-            ) in message, message
+def test_a_row_never_fetched_is_refused_when_built_naming_the_fetch_as_a_xiao_is(
+        tmp_path, monkeypatch):
+    """One behaviour for both (OH-183): with nothing fetched, each resolves
+    to its recipe -- the Build button stays on -- and the build is refused,
+    naming the fetch, by `include_roots`."""
+    monkeypatch.setattr(compiler, "BOARD_SUPPORT", tmp_path)
+    xiao = compiler.recipe_for("XIAO-ESP32-C6-DIP")
+    row = compiler.recipe_for("Adafruit Feather ESP32-C6")
+    with pytest.raises(compiler.ToolchainMissing) as xiaos:
+        compiler.include_roots(xiao)
+    with pytest.raises(compiler.ToolchainMissing) as rows:
+        compiler.include_roots(row)
+    assert str(xiaos.value) == str(rows.value).replace(
+        "adafruit_feather_esp32c6", "XIAO_ESP32C6"), (xiaos.value, rows.value)
+    assert str(rows.value).endswith(
+        "Fetch it with:\n  python tools/import_pindefs.py --fetch"), rows.value
+
+
+def test_a_fetched_variant_with_no_table_is_refused_by_both_answerers(tmp_path, monkeypatch):
+    """Fetched, so asked: a directory with no `pins_arduino.h` in it."""
+    (tmp_path / "pkg" / "variants" / "fake").mkdir(parents=True)
+    monkeypatch.setattr(compiler, "BOARD_SUPPORT", tmp_path)
+    recipe = dataclasses.replace(compiler.RECIPES["ESP32-C6"], extra_includes=(),
+                                 bsp_includes=("pkg/variants/fake",))
+    assert compiler.read_gaps(recipe) == [
+        f"there is no {tmp_path / 'pkg' / 'variants' / 'fake' / 'pins_arduino.h'}"]
+    try:
+        tools = compiler.toolchain_root(recipe)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    (gap,) = compiler.compiled_gaps(recipe, tools)
+    assert "pins_arduino.h: No such file or directory" in gap, gap
 
 
 def test_a_row_whose_chips_recipe_compiles_a_variant_of_its_own_is_refused(monkeypatch):
