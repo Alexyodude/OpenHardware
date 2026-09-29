@@ -216,10 +216,13 @@ exactly one plain `NAME = "..."` directly in the module's body that no
 function, class body, lambda or comprehension enclosing the call binds.
 Any other binding -- a local, a parameter or its default, a `global`
 rebinding in `setup_module` or anywhere, tuple unpacking, an annotated
-assignment, an assignment under `if` or `for`, an `import ... as` -- leaves
-the name unresolved, and the entry fails. Only the call's name is read: a
-wrapper called `load_firmware`, or a monkeypatch of the real one, is not
-detected. A chip's test loads and steps an image too, and what makes a test
+assignment, an assignment under `if` or `for`, an `import ... as`, or a
+`from ... import *` anywhere in the module, read as binding every name --
+leaves the name unresolved, and the entry fails. Only the file's text is
+read. A name rebound as the test runs -- `globals()[...] =`, `setattr` on
+the module, a monkeypatch of it from an autouse fixture or any other -- is
+not detected, and nor is a wrapper called `load_firmware` or a monkeypatch
+of the real one. A chip's test loads and steps an image too, and what makes a test
 one board's is that it runs that board; the name in a variable nothing
 loads does not (OH-183).
 `test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence`
@@ -241,17 +244,23 @@ SparkFun Thing Plus ESP32-C6 runs firmware." passed on the ESP32-C6's
 
 `unevidenced_chip_claims` now reads each row's `board=` out of
 `tools/board_manifest.py`, without importing it, and matches those names
-first, in the claim line joined to the line above it: as the manifest
-spells them, case-insensitively, with any run of whitespace or `&nbsp;`
-between two words, so a name hard-wrapped across the two lines, as §7
-wraps the pilot's, is read. A row so named needs its own
-`BOARD_FIRMWARE_VERIFIED` entry, and its name is taken out before chips
-are matched. A manifest that is not there, or a row with no literal
-`board=`, is an error rather than a pass.
+first: as the manifest spells them, case-insensitively, with any run of
+whitespace, `&nbsp;` or `<br>` between two words, in the claim line joined
+to the rest of its sentence on the lines above. That reaches back to a
+`.`, `!` or `?` before a space or a line's end, never past a blank line
+or a table row, and over no more lines than the longest row's name has
+words. So a name hard-wrapped across lines, as §7 wraps the pilot's, is
+read, and a name in the sentence before an unrelated claim is not. A row
+so named needs its own `BOARD_FIRMWARE_VERIFIED` entry, and its name is
+taken out before chips are matched. A manifest that is not there, or a
+row with no literal `board=`, is an error rather than a pass.
 `test_the_pilot_beside_a_run_claim_fails_and_the_feather_passes` and
 `test_the_pilot_hard_wrapped_across_two_lines_is_still_the_pilot` in
 `tests/rules/test_board_claims.py` hold it against this repository's own
-register and manifest.
+register and manifest;
+`test_a_row_named_anywhere_in_the_claims_sentence_above_it_is_read` and
+`test_a_row_named_above_an_unrelated_claim_is_not_that_claim` hold the
+reach both ways.
 
 **Only that spelling is read.** A paraphrase -- "Thing Plus ESP32-C6",
 "SparkFun Thing Plus - ESP32-C6", "QT Py ESP32-C3" -- is not the row, and

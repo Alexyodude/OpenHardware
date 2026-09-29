@@ -284,10 +284,53 @@ def test_a_rows_name_is_read_with_any_whitespace_between_its_words(tmp_path):
 
 
 def test_a_name_on_the_line_above_its_own_claim_is_reported_once(tmp_path):
-    root = build_root(tmp_path, files={"docs/boards.md": (
-        "The Some Thing ESP32-C6 runs firmware.\nIt runs firmware all day.\n")})
-    found = C.unevidenced_chip_claims(root)
-    assert len(found) == 1 and found[0].startswith("docs/boards.md:1:"), found
+    for index, text in enumerate((
+        "The Some Thing ESP32-C6 runs firmware.\nIt runs firmware all day.\n",
+        "The Some Thing ESP32-C6 runs firmware, and\nit runs firmware all day.\n",
+        "Done. The Some Thing ESP32-C6 runs firmware, and\nit runs firmware all day.\n",
+    )):
+        root = build_root(tmp_path / str(index), files={"docs/boards.md": text})
+        found = C.unevidenced_chip_claims(root)
+        assert len(found) == 1 and found[0].startswith("docs/boards.md:1:"), (text, found)
+
+
+def test_a_row_named_above_an_unrelated_claim_is_not_that_claim(tmp_path):
+    """Review of OH-183: the join reads only the claim's own sentence. A
+    sentence that ended on the line above, a blank line, or a table row is
+    not part of it, and nor is a line further up than the longest row's
+    name has words -- three here."""
+    for index, text in enumerate((
+        "The Some Thing ESP32-C6 is refused.\nThe Other Board runs firmware.\n",
+        'It is "the Some Thing ESP32-C6." The Other\nBoard runs firmware.\n',
+        "The Some Thing ESP32-C6 and\n\nthe Other Board run firmware.\n",
+        "| Some Thing ESP32-C6 | refused |\n| Other Board | runs firmware |\n",
+        "Below, the Some Thing ESP32-C6 and\n| Other Board | runs firmware |\n",
+        "The Some Thing ESP32-C6 and\none\ntwo\nthree\nfour runs firmware.\n",
+    )):
+        root = build_root(tmp_path / str(index), files={"docs/boards.md": text})
+        assert C.unevidenced_chip_claims(root) == [], text
+
+
+def test_a_row_named_anywhere_in_the_claims_sentence_above_it_is_read(tmp_path):
+    """Three lines up, a three-line wrap, an HTML line break between words,
+    and the pilot a word a line: each is the row, reported once, on the
+    claim's line."""
+    pilot = {"catalogue": (REPO / C.CATALOGUE).read_text(encoding="utf-8"),
+             "manifest": (REPO / C.MANIFEST).read_text(encoding="utf-8")}
+    for index, (text, row, line, real) in enumerate((
+        ("The Some Thing ESP32-C6 and\none\ntwo\nthree runs firmware.\n",
+         "Some Thing ESP32-C6", 4, False),
+        ("Done. The Some\nThing\nESP32-C6 runs firmware.\n", "Some Thing ESP32-C6", 3, False),
+        ("The Some<br>Thing<BR />ESP32-C6 runs firmware.\n", "Some Thing ESP32-C6", 1, False),
+        ("The SparkFun\nThing\nPlus\nESP32-C6 runs firmware.\n",
+         "SparkFun Thing Plus ESP32-C6", 4, True),
+    )):
+        root = build_root(tmp_path / str(index), files={"docs/boards.md": text},
+                          **(pilot if real else {}))
+        found = C.unevidenced_chip_claims(root)
+        assert len(found) == 1, (text, found)
+        assert found[0].startswith(f"docs/boards.md:{line}: says {row} runs firmware"), (
+            text, found)
 
 
 def test_a_row_named_for_a_prefix_of_another_does_not_take_its_match(tmp_path):
@@ -577,6 +620,8 @@ def test_a_board_name_bound_any_way_but_one_plain_module_assignment_is_unresolve
         "import-as": ('BOARD = "Some Feather"\n',
                       'BOARD = "Some Feather"\nfrom os import sep as BOARD\n'),
         "annotated": ('BOARD = "Some Feather"\n', 'BOARD: str = "Some Feather"\n'),
+        "import *": ('BOARD = "Some Feather"\n',
+                     'BOARD = "Some Feather"\nfrom somewhere import *\n'),
     }
     for index, (label, (old, new)) in enumerate(cases.items()):
         assert BOARD_EVIDENCE.count(old) == 1, label
@@ -584,6 +629,28 @@ def test_a_board_name_bound_any_way_but_one_plain_module_assignment_is_unresolve
                           evidence=BOARD_EVIDENCE.replace(old, new))
         found = C.evidence_that_never_loads_an_image(root)
         assert found == [NEVER_LOADS], (label, found)
+
+
+def test_a_board_name_rebound_as_the_test_runs_is_not_detected(tmp_path):
+    """What §7 says is not read, held where it is: the file's text binds
+    `BOARD` once, plainly, and each of these rebinds it to a XIAO only when
+    the test runs, so each passes."""
+    load = "    with api.load_firmware(BOARD,"
+    xiao = '"BOARD", "XIAO-ESP32-C6-DIP"'
+    cases = {
+        "globals()": (load, f'    globals()["BOARD"] = "XIAO-ESP32-C6-DIP"\n{load}'),
+        "setattr on the module": (load, f"    setattr(sys.modules[__name__], {xiao})\n{load}"),
+        "autouse monkeypatch": (
+            "def test_the_led_actually_blinks():",
+            "@pytest.fixture(autouse=True)\ndef xiao(monkeypatch):\n"
+            f"    monkeypatch.setattr(sys.modules[__name__], {xiao})\n\n\n"
+            "def test_the_led_actually_blinks():"),
+    }
+    for index, (label, (old, new)) in enumerate(cases.items()):
+        assert BOARD_EVIDENCE.count(old) == 1, label
+        root = build_root(tmp_path / str(index), catalogue=BOARD_CATALOGUE,
+                          evidence=BOARD_EVIDENCE.replace(old, new))
+        assert problems(root) == [], label
 
 
 def test_a_binding_in_a_function_not_enclosing_the_load_does_not_unresolve_it(tmp_path):

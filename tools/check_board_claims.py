@@ -26,9 +26,12 @@ A row of `tools/board_manifest.py` is matched first, as the board, and needs
 its own `BOARD_FIRMWARE_VERIFIED` entry; its name is then taken out before
 chips are matched. A row's name carries its chip's; matched as the chip, it
 would pass on evidence that is not its own (OH-183). The name is matched as
-the manifest spells it, case-insensitively, with any run of whitespace or
-`&nbsp;` between its words, in the claim line joined to the line above it, so
-a name hard-wrapped across the two is read.
+the manifest spells it, case-insensitively, with any run of whitespace,
+`&nbsp;` or `<br>` between its words, in the claim line joined to the rest of
+its sentence on the lines above: back to a `.`, `!` or `?` before a space or a
+line's end, not past a blank line or a table row, and no more lines than the
+longest row's name has words. So a name hard-wrapped across lines is read,
+and a name in the sentence before an unrelated claim is not.
 
 ## 2. A code surface makes the claim without ever reading the register
 
@@ -59,13 +62,15 @@ have to chase through three modules is evidence nobody checks. A board's own
 entry also has to load that board: its name is the first argument of a
 `load_firmware` call in the file, spelled out, or as a name `_resolved`
 resolves to it -- one plain module-level assignment that nothing enclosing
-the call rebinds, and nothing else.
+the call rebinds, with no `import *` in the module, and nothing else.
 
 **What this does not catch.** It is a check on vocabulary, not on meaning. A
 surface that claims a board works while avoiding the word "firmware" passes,
 and so does a named test that loads an image and then asserts nothing. The
 first is a gap in the phrase table below, and widening it is cheap; the second
-is what review is for. A row is read only in the manifest's spelling,
+is what review is for. A board's name rebound as its test runs --
+`globals()[...] =`, `setattr` on the module, a monkeypatch -- is not seen
+by check 5. A row is read only in the manifest's spelling,
 whitespace-normalised: "Thing Plus ESP32-C6", "SparkFun Thing Plus -
 ESP32-C6" or "QT Py ESP32-C3" is not the row, and is matched as the chip it
 names. Never report a passing run as evidence that a board
@@ -76,6 +81,7 @@ image.
 from __future__ import annotations
 
 import ast
+import bisect
 import os
 import pathlib
 import re
@@ -339,13 +345,41 @@ def manifest_boards(root: pathlib.Path | None = None) -> list[str]:
 
 
 #: What may stand between two words of a name: any whitespace, a line break
-#: included, or an HTML non-breaking space. A chip's name has one word.
-_GAP = r"(?:\s|&nbsp;)+"
+#: included, an HTML non-breaking space, or an HTML line break. A chip's
+#: name has one word.
+_GAP = r"(?:\s|&nbsp;|<br\s*/?>)+"
+
+#: Where a sentence ends: `.`, `!` or `?`, and any closing quote, bracket or
+#: emphasis after it, before whitespace or the line's end.
+_SENTENCE_END = re.compile(r"[.!?][\"')\]*_`]*(?=\s|$)")
+
+#: A Markdown table row, which no sentence wraps into or out of.
+_TABLE_ROW = re.compile(r"^\s*\|")
 
 
 def _spelled(text: str) -> str:
     """`text` as the manifest spells a name: one space between words, lower case."""
-    return " ".join(re.sub("&nbsp;", " ", text, flags=re.IGNORECASE).lower().split())
+    text = re.sub(r"&nbsp;|<br\s*/?>", " ", text, flags=re.IGNORECASE)
+    return " ".join(text.lower().split())
+
+
+def _sentence_above(lines: list[str], index: int, reach: int) -> list[tuple[int, int]]:
+    """The part of the sentence running into `lines[index]` that is on the
+    lines above it, top first, as (line, column read from): back to the last
+    sentence end, not past a blank line, a table row, or `reach` lines, and
+    none where `lines[index]` is itself a table row."""
+    if _TABLE_ROW.match(lines[index]):
+        return []
+    taken: list[tuple[int, int]] = []
+    for above in range(index - 1, max(index - 1 - reach, -1), -1):
+        text = lines[above]
+        if not text.strip() or _TABLE_ROW.match(text):
+            break
+        ends = [end.end() for end in _SENTENCE_END.finditer(text)]
+        taken.append((above, ends[-1] if ends else 0))
+        if ends:
+            break
+    return taken[::-1]
 
 
 def _names_pattern(names: list[str]) -> re.Pattern[str]:
@@ -387,9 +421,11 @@ def unevidenced_chip_claims(root: pathlib.Path | None = None) -> list[str]:
     """1. A row or a chip is named beside a run-claim and names no test.
 
     The row first, against `BOARD_FIRMWARE_VERIFIED`, in the claim line
-    joined to the line above it; then the chips, in what is left of the
-    claim line once the row's name is taken out. A name on the line above
-    that line's own claim already reported is not reported again.
+    joined to the part of its sentence on the lines above
+    (`_sentence_above`), which reaches as many lines as the longest row's
+    name has words; then the chips, in what is left of the claim line once
+    the row's name is taken out. A name above that an earlier claim line
+    already reported is not reported again.
     """
     root = REPO if root is None else root
     verified = {chip.lower() for chip in register(root)}
@@ -398,6 +434,7 @@ def unevidenced_chip_claims(root: pathlib.Path | None = None) -> list[str]:
     names = manifest_boards(root)
     spelled = {_spelled(name): name for name in names}
     rows = _names_pattern(names) if names else None
+    reach = max((len(name.split()) for name in names), default=0)
 
     problems: list[str] = []
     for path in surfaces(root):
@@ -410,12 +447,14 @@ def unevidenced_chip_claims(root: pathlib.Path | None = None) -> list[str]:
             number = index + 1
             rest = line
             if rows is not None:
-                above = lines[index - 1] if index else ""
-                joined = f"{above}\n{line}"
+                read = [*_sentence_above(lines, index, reach), (index, 0)]
+                parts = [lines[at][column:] for at, column in read]
+                starts = [sum(len(part) + 1 for part in parts[:k]) for k in range(len(parts))]
+                joined = "\n".join(parts)
                 for match in rows.finditer(joined):
                     start = match.start(1)
-                    where = ((index - 1, start) if start < len(above)
-                             else (index, start - len(above) - 1))
+                    k = bisect.bisect_right(starts, start) - 1
+                    where = (read[k][0], read[k][1] + start - starts[k])
                     board = spelled[_spelled(match.group(1))]
                     if where in reported or _spelled(board) in boards_verified:
                         continue
@@ -427,7 +466,7 @@ def unevidenced_chip_claims(root: pathlib.Path | None = None) -> list[str]:
                         f"{line.strip()!r}"
                     )
                 masked = rows.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), joined)
-                rest = masked[len(above) + 1:]
+                rest = masked[starts[-1]:]
             for chip in sorted({m.group(1) for m in pattern.finditer(rest)}):
                 if chip.lower() in verified:
                     continue
@@ -549,7 +588,8 @@ def _binds(node: ast.AST, name: str) -> bool:
     if isinstance(node, ast.arg):
         return node.arg == name
     if isinstance(node, ast.alias):
-        return (node.asname or node.name.split(".")[0]) == name
+        # `from x import *` may bind any name, and which is not in this file.
+        return node.name == "*" or (node.asname or node.name.split(".")[0]) == name
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
                          ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
         return node.name == name
@@ -565,9 +605,10 @@ def _resolved(tree: ast.Module, enclosing: tuple[ast.AST, ...], name: str) -> st
 
     Only through one plain `NAME = "..."` directly in the module's body,
     where that is the name's only module-level binding -- a `global NAME` in
-    any function counts as another -- and no function, class body, lambda
-    or comprehension enclosing the call binds it. Anything else is
-    unresolved, and the entry fails rather than trust it.
+    any function counts as another, and a `from ... import *` as one of
+    every name -- and no function, class body, lambda or comprehension
+    enclosing the call binds it. Anything else is unresolved, and the entry
+    fails rather than trust it.
     """
     sites: list[tuple[ast.AST, ast.AST]] = []
 
@@ -599,7 +640,9 @@ def _loads_board(tree: ast.Module, board: str) -> bool:
     Spelled out, or a name `_resolved` resolves to it. A name elsewhere in
     the file, used or not, is not the board the test runs. Only the call's
     name is read: a wrapper called `load_firmware`, or a monkeypatch of the
-    real one, is not seen.
+    real one, is not seen. Nor is the name rebound as the test runs rather
+    than in the file's text: `globals()[...] =`, `setattr` on the module, or
+    a monkeypatch of it, from an autouse fixture or any other.
     """
     calls: list[tuple[ast.Call, tuple[ast.AST, ...]]] = []
 
