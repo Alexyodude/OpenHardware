@@ -90,10 +90,18 @@ python tools/model_from_datasheet.py       # the parts nobody publishes at all
 python tools/compose_board_3d.py           # the boards nobody publishes a mesh for
 ```
 
-Twenty-five of the twenty-six boards then draw a vendor file instead of an
-extruded footprint: **thirteen from Seeed's own mechanical model** and
-**twelve composed** from a published PCB, and the pin panel says which of the
-three things it is showing. The one left is `XIAO-XIAO STM32C5-SMD`, which has
+A board then draws a vendor file instead of an extruded footprint wherever
+one exists -- the vendor's own mechanical model, or one composed from a
+published PCB -- and the pin panel says which of the three things it is
+showing. **Which boards draw which is printed, not written here.** This
+paragraph carried the counts, and the first board added through
+`tools/board_manifest.py` made them wrong:
+
+```bash
+python tools/inventory.py      # TWINS: the model column, per board
+```
+
+`XIAO-XIAO STM32C5-SMD` has
 no page on the vendor's wiki at all -- see `docs/research/board-models/`,
 whose §5 also records that the same document twice said a board could not be
 drawn when the vendor was publishing its PCB the whole time. The meshes are

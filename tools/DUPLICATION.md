@@ -115,8 +115,11 @@ Derive-live, in `tools/check_facts.py` (source → the copy watched):
 - pyproject.toml `testpaths` → CLAUDE.md's "the N suites".
 - `webui/emulator.py` SAMPLES → CLAUDE.md's "six sample programs".
 - `tools/import_3d_model.py` MODELS + COMPOSED vs `webui/boards/*.json` →
-  CLAUDE.md's "Twenty-five of the twenty-six … thirteen … twelve … the one
-  left is `XIAO-XIAO STM32C5-SMD`" paragraph, all four numerals and the name.
+  RETIRED as a copy 2026-09-29. CLAUDE.md's model paragraph stated four
+  numerals and a name until OH-176's board made two of them wrong; it now
+  points at `python tools/inventory.py` (TWINS), which derives them. The row
+  still watches the pointer, and that the two tables name no board that is
+  gone and none twice.
 - `git grep` for the GitLab URL → CLAUDE.md's "`KICAD_3D` … is the one place
   that URL lives" (exactly one tracked file).
 - `webui/parts/schemas/*.json` count → PROVENANCE.md:77 "(12 files)".

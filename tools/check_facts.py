@@ -248,18 +248,23 @@ def sample_count(text: str) -> list[str]:
 
 
 def board_model_split(text: str) -> list[str]:
-    flat = _flat(text)
-    match = re.search(
-        r"(\S+) of the (\S+) boards then draw a vendor file instead of an "
-        r"extruded footprint: \*\*(\S+) from Seeed's own mechanical model\*\* "
-        r"and \*\*(\S+) composed\*\*",
-        flat,
-    )
-    if not match:
-        return _dead("CLAUDE.md", "'N of the M boards draw a vendor file'")
-    left = re.search(r"The one left is `([^`]+)`", flat)
-    if not left:
-        return _dead("CLAUDE.md", "'The one left is …'")
+    """The model paragraph sends the reader to TWINS instead of counting.
+
+    It stated four counts and a name until OH-176's board made two of them
+    wrong. The counts now come from `python tools/inventory.py`, so what is
+    left to watch here is the pointer, and the two table errors a count used
+    to expose: a model named for a board that is gone, and a board in both.
+    """
+    # The command must be the first code block after the sentence: CLAUDE.md
+    # names `python tools/inventory.py` again further down, and a lazy `.*?`
+    # found that one when this block was deleted.
+    if not re.search(
+        r"Which boards draw which is printed, not written here\."
+        r"(?:(?!```).)*```bash python tools/inventory\.py # TWINS",
+        _flat(text),
+    ):
+        return _dead("CLAUDE.md", "'Which boards draw which is printed' "
+                                  "followed by the inventory command")
 
     models, composed = _model_and_composed_boards()
     boards = _catalogue_boards()
@@ -272,26 +277,7 @@ def board_model_split(text: str) -> list[str]:
     overlap = models & composed
     if overlap:
         out.append(
-            f"MODELS and COMPOSED overlap on {sorted(overlap)} — "
-            f"'thirteen and twelve' double-counts them"
-        )
-    uncovered = boards - models - composed
-    checks = (
-        ("boards drawing a vendor file", as_number(match.group(1)),
-         len((models | composed) & boards)),
-        ("boards in webui/boards/", as_number(match.group(2)), len(boards)),
-        ("from Seeed's own mechanical model", as_number(match.group(3)),
-         len(models & boards)),
-        ("composed from a published PCB", as_number(match.group(4)),
-         len(composed & boards)),
-    )
-    for what, claimed, actual in checks:
-        if claimed != actual:
-            out.append(f"CLAUDE.md: says {claimed} {what}; the tree says {actual}")
-    if uncovered != {left.group(1)}:
-        out.append(
-            f"CLAUDE.md: says the one board left out is {left.group(1)!r}; "
-            f"the uncovered set is {sorted(uncovered)}"
+            f"MODELS and COMPOSED overlap on {sorted(overlap)}"
         )
     return out
 
@@ -378,8 +364,8 @@ FACTS: list[tuple[str, str, str, object]] = [
      "a sample added to webui/emulator.py without the prose count following",
      sample_count),
     ("claude-md:board-model-split", "CLAUDE.md",
-     "a board gaining or losing a vendor model while the 25/26/13/12 "
-     "paragraph stands still",
+     "the model paragraph losing its pointer to TWINS, or MODELS and "
+     "COMPOSED naming a board that is gone or naming one twice",
      board_model_split),
     ("claude-md:kicad-url", "CLAUDE.md",
      "a second copy of the KiCad GitLab URL appearing anywhere tracked",

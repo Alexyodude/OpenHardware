@@ -98,24 +98,35 @@ def test_the_claude_md_precommit_block_names_every_armed_checker():
                for line in check_facts.precommit_checkers(extra))
 
 
-def test_the_board_split_reads_the_two_tables_and_the_directory():
-    """25/26/13/12 and the one board left out, all four from the tree.
+def test_the_board_split_points_at_twins_and_reads_the_two_tables(monkeypatch):
+    """The model paragraph counts nothing now; TWINS does.
 
-    Also pins the two structural errors a hand-written total would hide: a
-    board named in the model tables that no longer exists, and an overlap
-    between them that would let 13 + 12 double-count.
+    What stays watched is the pointer, and the two structural errors a
+    hand-written total used to expose: a board named in the model tables that
+    no longer exists, and a board named in both. Each is broken once here.
     """
     models, composed = check_facts._model_and_composed_boards()
     boards = check_facts._catalogue_boards()
     assert not (models & composed), "MODELS and COMPOSED overlap"
     assert (models | composed) <= boards, "a model names a board that is gone"
-    assert boards - models - composed == {"XIAO-XIAO STM32C5-SMD"}
 
     text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
     assert check_facts.board_model_split(text) == []
-    wrong = text.replace("**twelve composed**", "**eleven composed**")
-    assert any("composed from a published PCB" in line
-               for line in check_facts.board_model_split(wrong))
+
+    unpointed = text.replace("python tools/inventory.py      # TWINS", "# TWINS")
+    assert unpointed != text
+    assert any("pattern is dead" in line
+               for line in check_facts.board_model_split(unpointed))
+
+    some = sorted(composed)[0]
+    monkeypatch.setattr(check_facts, "_model_and_composed_boards",
+                        lambda: (models | {"XIAO-GONE"}, composed))
+    assert any("'XIAO-GONE'" in line
+               for line in check_facts.board_model_split(text))
+    monkeypatch.setattr(check_facts, "_model_and_composed_boards",
+                        lambda: (models | {some}, composed))
+    assert any("overlap" in line
+               for line in check_facts.board_model_split(text))
 
 
 def test_the_kicad_url_check_counts_tracked_files_not_mentions():
