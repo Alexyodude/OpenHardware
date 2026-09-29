@@ -61,6 +61,7 @@ readable to somebody who never compiles anything.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import os
 import pathlib
 import re
@@ -616,13 +617,13 @@ def recipe_for(board: str) -> Recipe:
     if row is None:
         return recipe
     recipe = own_variant(row, recipe)
-    missing = unmet(recipe)
+    missing, answered = unmet(recipe)
     if missing:
         # rules/board-claims.md §6: never the chip's table in its place.
         raise UnknownBoard(
             f"{board} is a row in tools/board_manifest.py, and its own pin "
             f"table, {row.package} variants/{row.variant}/pins_arduino.h, "
-            f"cannot be compiled here: {'; '.join(missing)}"
+            f"cannot be compiled here ({answered}): {'; '.join(missing)}"
         )
     return recipe
 
@@ -663,23 +664,90 @@ _CONSTANT = re.compile(r"^[ \t]*static[ \t]+const[ \t]+\w+[ \t]+(\w+)[ \t]*=([^;
 _IDENTIFIER = re.compile(r"\b[A-Za-z_]\w*")
 
 
-def unmet(recipe: Recipe) -> list[str]:
-    """What an `own_variant` recipe's pin table needs and its include path lacks.
+def unmet(recipe: Recipe) -> tuple[list[str], str]:
+    """What an `own_variant` recipe's pin table needs and this build lacks,
+    and which answered.
 
-    Read, not compiled, so `/api/boards` can ask it: every quoted `#include`
-    must be a file on the path the build gives, and every name a
-    `static const` initialiser uses, through any macro it names, must be
-    defined in the table or a header it includes. A macro no initialiser
-    uses is compiled only where a sketch does, so it is not asked of.
+    The compiler, where the recipe's toolchain is installed
+    (`compiled_gaps`); the header, read, where it is not (`read_gaps`).
+    Neither where the table was never fetched.
     """
-    def shown(path: pathlib.Path) -> str:
-        root = ARDUINO_LITE.parents[1]
-        return path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path)
-
     (own,) = recipe.bsp_includes
     table = BOARD_SUPPORT / own / "pins_arduino.h"
     if not table.is_file():
-        return [f"there is no {shown(table)}; fetch it with python tools/import_pindefs.py --fetch"]
+        return ([f"there is no {_shown(table)}; fetch it with python "
+                 f"tools/import_pindefs.py --fetch"], "not asked")
+    try:
+        tools = toolchain_root(recipe)
+    except ToolchainMissing:
+        return (read_gaps(recipe),
+                f"read from the header, with no {recipe.prefix}gcc here to ask")
+    return (compiled_gaps(recipe, tools),
+            f"asked of {recipe.prefix}g++ and {recipe.prefix}gcc -fsyntax-only")
+
+
+def _shown(path: pathlib.Path) -> str:
+    """`path` from this checkout's root where it is under it."""
+    root = ARDUINO_LITE.parents[1]
+    return path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path)
+
+
+#: One compiler error: its file (a Windows path's drive colon is stepped
+#: over by the lazy match), its line, and what it says.
+_ERROR = re.compile(r"^(.+?):(\d+):\d+: (?:fatal )?error: (.*)$", re.MULTILINE)
+
+
+def compiled_gaps(recipe: Recipe, tools: pathlib.Path) -> list[str]:
+    """The errors of `Arduino.h`, which every source of a build includes and
+    which includes the table, compiled syntax-only with the build's flags
+    and include path: as C++, the sketch's language, then as C, `main.c`'s;
+    the first that fails."""
+    core = framework_root(recipe) / recipe.core
+    includes = (f"-I{core}", f"-I{variant_root(recipe)}",
+                *(f"-I{root}" for root in include_roots(recipe)))
+    (own,) = recipe.bsp_includes
+    table = BOARD_SUPPORT / own / "pins_arduino.h"
+    text = table.read_bytes() if table.is_file() else b""
+    for language, tool, extra in (("c++", "g++", recipe.cxx_flags), ("c", "gcc", ())):
+        command = (_tool(tools, recipe, tool), "-fsyntax-only", "-x", language,
+                   *recipe.flags, *extra, *includes, str(core / "Arduino.h"))
+        errors = _syntax_errors(command, text)
+        if errors:
+            return list(errors)
+    return []
+
+
+@functools.lru_cache(maxsize=None)
+def _syntax_errors(command: tuple[str, ...], table: bytes) -> tuple[str, ...]:
+    """`command`'s errors, each `file:line: what`, once per command and
+    table text: `/api/boards` asks of every board on every request, and
+    `table` is here as the key, so a table fetched again is asked again."""
+    done = _run(command, time.monotonic() + TIMEOUT_SECONDS)
+    if done.returncode == 0:
+        return ()
+    errors = tuple(dict.fromkeys(
+        f"{_shown(pathlib.Path(where))}:{line}: {what}"
+        for where, line, what in _ERROR.findall(done.stderr)))
+    return errors or (f"{command[0]} exited {done.returncode} naming no error: "
+                      f"{done.stderr.strip()}",)
+
+
+def read_gaps(recipe: Recipe) -> list[str]:
+    """What an `own_variant` recipe's pin table needs and its include path
+    lacks, read rather than compiled, for a machine with no compiler.
+
+    Every quoted `#include` must be a file on the path the build gives, and
+    every name a `static const` initialiser uses, through any macro it
+    names, must be defined in the table or a header it includes. A macro no
+    initialiser uses is compiled only where a sketch does, so it is not
+    asked of. C read with regexes, so it can be wrong where the compiler is
+    not: `test_every_upstream_variants_verdict_is_the_compilers` counts
+    where.
+    """
+    (own,) = recipe.bsp_includes
+    table = BOARD_SUPPORT / own / "pins_arduino.h"
+    if not table.is_file():
+        return [f"there is no {_shown(table)}"]
     path = (table.parent, ARDUINO_LITE / recipe.core, ARDUINO_LITE / recipe.variant)
     missing: list[str] = []
     defined: set[str] = set()
@@ -693,7 +761,7 @@ def unmet(recipe: Recipe) -> list[str]:
             found = next((d / name for d in path if (d / name).is_file()), None)
             if found is None:
                 missing.append(f"it includes {name}, which is in none of "
-                               f"{', '.join(shown(d) for d in path)}")
+                               f"{', '.join(_shown(d) for d in path)}")
             elif found not in seen:
                 seen.add(found)
                 pending.append(found)
