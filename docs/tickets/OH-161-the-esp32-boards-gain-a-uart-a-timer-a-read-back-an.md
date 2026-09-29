@@ -118,3 +118,5 @@ Gate: all 12 checks pass, run clean with nothing else building or editing (three
 **Note 2026-09-29:** 2026-09-29: webui/compile.py and tests/webui/test_compile.py lent to OH-176 and then OH-179, nobody holding this ticket. OH-176's review found recipe_for builds the SparkFun Thing Plus ESP32-C6 against the XIAO ESP32-C6 variant, because it keys on chip; the gate that refuses that, and OH-179's per-board recipe that replaces the gate, both live in recipe_for. Add both paths back with tickets set OH-161 --touch when OH-179 closes.
 
 **Note 2026-09-29:** 2026-09-29, held for one line by the OH-174 orchestrator: test_an_unknown_board_says_what_there_is asserted the literal 'XIAO' in runtime_for's refusal, which lists the first three sorted board names. OH-177's 'Adafruit QT Py ESP32-C3' sorts first, so the test failed on sort order, not on the refusal. It now asserts the first sorted catalogue board name appears. Made to fail once with a name no board has.
+
+**Note 2026-09-29:** Correction to the note above: at a3cac44 the first sorted board is 'Adafruit Feather ESP32-C6', not the QT Py. The test computes the name, so it is unaffected.
