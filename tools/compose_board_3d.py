@@ -86,6 +86,7 @@ import hashlib
 import itertools
 import math
 import pathlib
+import re
 import sys
 import urllib.request
 
@@ -903,21 +904,34 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "SparkFun-Capacitors -- which is SparkFun saying which part it is.",
         vendor_library="SparkFun-Capacitors",
     ),
+    # **Adafruit place resistors and capacitors on one package from one
+    # library** (OH-187), so a package below may have a row per kind, and
+    # which a placement takes is the kind its vendor's schematic states --
+    # `stated_kinds` -- and never the package's.
     Component(
         "0603-NO", "Resistor_SMD", "R_0603_1608Metric",
-        "the Feather's 0603s: two pads 1.70 mm apart. Adafruit place nine "
-        "resistors and two capacitors (C4, C10) on this one package from "
-        "one library, and a package is what this table is keyed by, so the "
-        "capacitors are drawn in the resistor's moulding -- the borrow Z1/Z2 "
-        "make above, a 1.6 x 0.8 mm ceramic chip either way.",
+        "the Feather's resistors on its 0603 land: two pads 1.70 mm apart, "
+        "and the 1.6 x 0.8 mm resistor.",
+    ),
+    Component(
+        "0603-NO", "Capacitor_SMD", "C_0603_1608Metric",
+        "C4 and C10 on the Feather and C15 on the KB2040, 1 uF each and "
+        "placed from CAP_CERAMIC: the same 1.70 mm land as the row above, "
+        "and the capacitor that stands on it.",
     ),
     Component(
         "0805-NO", "Capacitor_SMD", "C_0805_2012Metric",
-        "the 10 and 22 uF capacitors on the QT Py and the Feather, every one "
-        "a capacitor by its value: two pads 1.90 mm apart, an 0805 land, and "
-        "the 2.0 x 1.25 mm chip. The KB2040's R8 on this land reads FUSE, "
-        "and is drawn in the capacitor's moulding as the QT Py's resistors "
-        "are.",
+        "the 10 and 22 uF capacitors on the QT Py and the Feather: two pads "
+        "1.90 mm apart, an 0805 land, and the 2.0 x 1.25 mm chip.",
+    ),
+    Component(
+        "0805-NO", "Resistor_SMD", "R_0805_2012Metric",
+        "R8 on the KB2040, on the same 0805 land -- two pads 1.90 mm apart, "
+        "and the 2.0 x 1.25 mm resistor. Its schematic places it from "
+        "microbuilder/RESISTOR, prefix R, and values it FUSE -- a word "
+        "and not ohms -- so the deviceset decides alone, and a resettable "
+        "fuse is drawn as the resistor its vendor's symbol says it is: A "
+        "JUDGEMENT the rule makes, stated here rather than hidden.",
     ),
     Component(
         "_0805MP", "Capacitor_SMD", "C_0805_2012Metric",
@@ -926,17 +940,22 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "_0402NO", "Capacitor_SMD", "C_0402_1005Metric",
-        "the QT Py's 0402s: two pads 1.02 mm apart. Adafruit place twelve "
-        "capacitors and six resistors on this one package from one library, "
-        "so the resistors are drawn in the capacitor's moulding, as the "
-        "Feather's two capacitors are in a resistor's -- a 1.0 x 0.5 mm "
-        "ceramic chip either way.",
+        "the capacitors on the 0402 land the QT Py and the KB2040 share: "
+        "two pads 1.02 mm apart, and the 1.0 x 0.5 mm chip.",
+    ),
+    Component(
+        "_0402NO", "Resistor_SMD", "R_0402_1005Metric",
+        "the resistors on that same land, two pads 1.02 mm apart, placed from "
+        "the same package and library as the capacitors: R1-R6 on the QT Py, "
+        "which were drawn as capacitors until the schematic was read, and "
+        "eleven on the KB2040.",
     ),
     Component(
         "_0402", "Inductor_SMD", "L_0402_1005Metric",
-        "L1 and L2 on the QT Py, the antenna match -- 2 nH and a 0-ohm link "
-        "by their values: two pads 1.02 mm apart, an 0402 land, and the "
-        "1.0 x 0.5 mm chip.",
+        "L1 on the QT Py, the antenna match, 2 nH from microbuilder/INDUCTOR: "
+        "two pads 1.02 mm apart, an 0402 land, and the 1.0 x 0.5 mm chip. "
+        "L2 beside it is placed from the same deviceset and valued '0 ohm', "
+        "so it is refused rather than drawn as either.",
     ),
     Component(
         "_0603MP_TWO6MIL", "Resistor_SMD", "R_0603_1608Metric",
@@ -1582,6 +1601,10 @@ class Composition:
     #: page sat 3.25 to 3.95 mm from the nearest metal, and the pad map is
     #: the vendor's own DIP footprint and is right.
     dip_headers: bool = False
+    #: The vendor's schematic of the same board, where there is one to read:
+    #: what says which kind of passive each placement is (OH-187). None for
+    #: the Uno and the XIAOs, which compose from their board file alone.
+    schematic: pathlib.Path | None = None
 
 
 #: Where a vendor KiCad project lands. Gitignored with the rest of
@@ -1939,6 +1962,7 @@ def manifest_composition(entry: board_manifest.Row) -> Composition:
             "draws navy -- taken, a judgement too, for the value EAGLE "
             "leaves when nobody sets one rather than a statement"
         )),
+        schematic=source.dest(REPO) / entry.schematic,
     )
 
 
@@ -2722,20 +2746,98 @@ class OverPads(Mesh):
     origin: tuple[float, float] = (0.0, 0.0)
 
 
-def correspondence_for(element: eagle.Element) -> Component | None:
+# --- which kind of passive a placement is (OH-187) -----------------------------
+#
+# **Adafruit place a resistor and a capacitor on one package from one
+# library**, so neither the package nor `vendor_library` can say which a
+# placement is, and a table keyed by them drew the QT Py's resistors as
+# capacitors. The vendor's schematic says, twice over, and nothing else here
+# is read for it.
+
+#: The KiCad library folders that each hold one kind of passive, which is
+#: the kind a row drawing from one of them draws.
+PASSIVE_KINDS = {"Resistor_SMD": "resistor", "Capacitor_SMD": "capacitor",
+                 "Inductor_SMD": "inductor"}
+
+#: EAGLE's `prefix`, which a deviceset states once for every part placed from
+#: it -- the letter a reference designator is numbered after.
+PREFIX_KINDS = {"R": "resistor", "C": "capacitor", "L": "inductor"}
+
+#: A value that can only be a resistance: a unit (`0 ohm`, `10Ω`, `4R7`), or a
+#: multiplier and nothing else (`10K`, `5.1K`, `4K7`). A bare number states no
+#: unit -- `27` -- and a lowercase `m` is milli, so neither is one.
+_OHMS = re.compile(r"\s*\d+(?:\.\d+)?\s*(?:[kKM]?\s*(?:ohms?|Ohms?|OHMS?|Ω)|[kKMR]\d*)\s*")
+#: A value that can only be a capacitance: a number, a multiplier, farads.
+_FARADS = re.compile(r"\s*\d+(?:\.\d+)?\s*[pnuµμ]?[Ff]\s*")
+
+
+def value_kind(value: str) -> str | None:
+    """The kind of passive a value's unit states, or None where it states none."""
+    if _OHMS.fullmatch(value):
+        return "resistor"
+    if _FARADS.fullmatch(value):
+        return "capacitor"
+    return None
+
+
+def stated_kinds(schematic: pathlib.Path) -> dict[str, tuple[str | None, str]]:
+    """Each part's kind of passive as the vendor's schematic states it, with
+    the words saying which statement decided -- or None, and why not.
+
+    Two statements and nothing else: the `prefix` of the deviceset the part is
+    placed from, and its value where that parses as ohms or farads. Where both
+    speak and disagree the part is refused, as a connector whose name and land
+    disagree is (`JST_SH4_RA`): drawing either would be choosing between two
+    statements of the vendor's.
+    """
+    root = eagle._open(schematic, "schematic").find("drawing/schematic")
+    prefixes = {(library.get("name"), deviceset.get("name")): deviceset.get("prefix", "")
+                for library in root.iter("library")
+                for deviceset in library.iter("deviceset")}
+    stated: dict[str, tuple[str | None, str]] = {}
+    for part in root.iter("part"):
+        name, value = part.get("name"), part.get("value", "")
+        where = f"{part.get('library')}/{part.get('deviceset')}"
+        prefix = prefixes.get((part.get("library"), part.get("deviceset")), "")
+        by_prefix, by_value = PREFIX_KINDS.get(prefix), value_kind(value)
+        said = " and ".join(
+            [f"deviceset {where}'s prefix {prefix}"] * bool(by_prefix)
+            + [f"value {value!r}"] * bool(by_value))
+        if by_prefix and by_value and by_prefix != by_value:
+            stated[name] = (None, (
+                f"{schematic.name} places {name} from {where}, whose prefix "
+                f"{prefix} says {by_prefix}, and values it {value!r}, which "
+                f"says {by_value}: two statements of its kind that disagree, "
+                f"and drawing either would be choosing between them"))
+        elif said:
+            stated[name] = (by_prefix or by_value, said)
+        else:
+            stated[name] = (None, (
+                f"nothing in {schematic.name} states what kind of part {name} "
+                f"is: {where}'s prefix is {prefix!r} and its value {value!r} "
+                f"is neither ohms nor farads"))
+    return stated
+
+
+def correspondence_for(element: eagle.Element,
+                       kind: str | None = None) -> Component | None:
     """The `CORRESPONDENCE` row for this placement, or None.
 
     A row naming the element's own vendor library wins over one that names
     none, because the library is the vendor saying which part a shared package
-    name is -- see `Component.vendor_library`.
+    name is -- see `Component.vendor_library`. Given the `kind` the vendor's
+    schematic states (`stated_kinds`), a row drawing a passive is returned
+    only if it draws that kind.
     """
     fallback = None
     for component in CORRESPONDENCE:
         if component.package != element.package:
             continue
+        if kind is not None and PASSIVE_KINDS.get(component.library, kind) != kind:
+            continue
         if component.vendor_library == element.library:
             return component
-        if component.vendor_library is None:
+        if component.vendor_library is None and fallback is None:
             fallback = component
     return fallback
 
@@ -3634,6 +3736,10 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     if not spec.layout.is_file():
         print(f"  SKIPPED: {spec.layout} is not fetched. Run: {spec.fetch_with}")
         return 3
+    if spec.schematic is not None and not spec.schematic.is_file():
+        print(f"  SKIPPED: {spec.schematic} is not fetched, and it is what says "
+              f"which kind each passive is. Run: {spec.fetch_with}")
+        return 3
 
     board = read_layout(spec.layout)
     # **The silhouette, and the cutouts said out loud.** The Uno is one closed
@@ -3714,8 +3820,27 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     #: rather than given an ABSENT entry apiece, because SparkFun's file alone
     #: places 63 pin labels, each its own package.
     padless: list[str] = []
+    #: Each passive drawn, as `kind, by what said so`; and each one refused
+    #: because nothing states its kind or two statements disagree (OH-187).
+    #: Only for a board with a schematic to read -- the Uno and the XIAOs
+    #: compose as they always have.
+    statements = stated_kinds(spec.schematic) if spec.schematic is not None else {}
+    kinds: dict[str, str] = {}
+    kind_refused: list[tuple[eagle.Element, str]] = []
     for element in [*board.elements, *extra]:
         component = correspondence_for(element)
+        if (component is not None and spec.schematic is not None
+                and component.library in PASSIVE_KINDS):
+            kind, why = statements.get(element.name, (
+                None, f"{spec.schematic.name} places no part {element.name}"))
+            if kind is None:
+                kind_refused.append((element, why))
+                continue
+            component = correspondence_for(element, kind)
+            if component is None:
+                unmodelled.append(f"{element.name} ({element.package}, a {kind})")
+                continue
+            kinds[element.name] = f"{kind}, by {why}"
         if component is None:
             if element.package not in ABSENT:
                 if element.pads:
@@ -3836,6 +3961,17 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     if modelled:
         print(f"  modelled {len(modelled)}: {', '.join(modelled)} "
               f"-- built here, not fetched; see tools/model_from_datasheet.py")
+    if kinds:
+        prefix = sum("'s prefix " in why for why in kinds.values())
+        value = sum(" value '" in f" {why}" for why in kinds.values())
+        both = prefix + value - len(kinds)
+        print(f"  kinds   {len(kinds)} passive(s) drawn as the kind "
+              f"{spec.schematic.name} states: {both} by the deviceset's prefix "
+              f"and a value in ohms or farads, {prefix - both} by the prefix "
+              f"alone, {value - both} by the value alone")
+    for element, why in kind_refused:
+        print(f"  refused {element.name} ({element.package}), a passive not "
+              f"drawn as a guess: {why}")
     if unmodelled:
         print(f"  no model {len(unmodelled)} placement(s) drawn as nothing, "
               f"with no ABSENT entry saying why: "
@@ -3958,7 +4094,15 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                               if e.package == package]}
                 for package, why in sorted(ABSENT.items())
                 if any(e.package == package for e in board.elements)
+            ] + [
+                # A passive refused for its kind is refused alone, not its
+                # package: the same land carries parts that are drawn.
+                {"package": element.package, "why": why,
+                 "elements": [element.name]}
+                for element, why in kind_refused
             ],
+            # Which kind each passive is drawn as, and what said so (OH-187).
+            "kinds": kinds,
         })
     print(f"  write   {out.relative_to(REPO)}  {size:,} bytes")
     return size
