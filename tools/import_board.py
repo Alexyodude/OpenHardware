@@ -38,9 +38,9 @@ it after looking inside rather than producing nonsense from a binary blob.
 
 **It does not write into `webui/boards/`.** The output goes to stdout, or to a
 directory given with `--out`. It emits the JSON and not the SVG artwork the
-`image.file` field names, so what it produces is a board *proposal*: landing
-it needs artwork alongside, and the run says so on stderr rather than leaving
-a description pointing at a file nobody made.
+`image.file` field names, and nothing reads that field -- `webui/pinmap.py`
+reads the image's width and height -- so the run says on stderr that the
+file was not made, rather than leaving the name looking like a file.
 
     python tools/import_board.py <board.brd> --select J1
     python tools/import_board.py <footprint.kicad_mod> --select <symbol root>
@@ -597,9 +597,8 @@ def main() -> int:
         print(text, end="")
 
     print(
-        f"note: {board['image']['file']} was NOT generated. This is a board "
-        f"proposal, not a landed board — it needs artwork at that path before "
-        f"anything can draw it.",
+        f"note: {board['image']['file']} was NOT generated, and nothing reads "
+        f"image.file; webui/pinmap.py reads the image's width and height.",
         file=sys.stderr,
     )
     if geometry.declared_name:

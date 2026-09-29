@@ -279,19 +279,17 @@ class Recipe:
 #: board and this proves the service, and coupling them would make a compiler
 #: bug fail a core test.
 #:
-#: **Twelve boards are runnable and this builds for ten of them**, over
-#: five chips, because `recipe_for` keys on the *chip*: one SAMD21 row
-#: serves both the DIP and the SMD, one ESP32-C3 row serves its three
-#: boards, the C5 and C6 rows serve a pair each, and the Uno row serves
-#: itself. Counted from `catalogue.catalogue()` against this table on
-#: 2026-09-04 rather than estimated -- earlier versions of this comment
-#: said four, then fourteen and six, each from adding rows to boards. A row
-#: in `tools/board_manifest.py` is keyed on the board instead: `recipe_for`.
+#: **One row builds for every board carrying its chip**, because
+#: `recipe_for` keys on the *chip*: the SAMD21 row serves both the DIP and
+#: the SMD. Which boards that is, `/api/boards` says in each board's
+#: `buildable`, asked of `recipe_for`; this comment carried the count, and
+#: it was wrong each time a board was added. A row in
+#: `tools/board_manifest.py` is keyed on the board instead: `recipe_for`.
 #:
-#: The two without a row are the RP2040s, waiting on the same `openhardware`
-#: framework the ESP32 rows use -- a Cortex-M0+ `_start` and vector table,
-#: which `main.c` refuses loudly rather than guesses -- and `recipe_for`
-#: names the chip rather than failing to find a compiler.
+#: The runnable boards without a row are the RP2040s, waiting on the same
+#: `openhardware` framework the ESP32 rows use -- a Cortex-M0+ `_start` and
+#: vector table, which `main.c` refuses loudly rather than guesses -- and
+#: `recipe_for` names the chip rather than failing to find a compiler.
 def _openhardware(*, variant: str, march: str, base: int,
                   extra_includes: tuple[str, ...] = (),
                   bsp_includes: tuple[str, ...] = ()) -> Recipe:

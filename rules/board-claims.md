@@ -186,11 +186,11 @@ So for a row in `tools/board_manifest.py`, `recipe_for` refuses with
 board no `firmware_evidence` and says why in `firmware_withheld`, while
 `FIRMWARE_VERIFIED` stays keyed by chip. OH-179 is where such a row gets a
 recipe of its own; the two refusals change with it, and not before.
-`test_a_manifest_board_is_refused_rather_than_built_with_a_siblings_variant`
-in `tests/webui/test_compile.py` and `test_no_row_inherits_its_chips_evidence`
-in `tests/rules/test_board_manifest.py` hold them;
+`test_no_row_inherits_its_chips_evidence` in
+`tests/rules/test_board_manifest.py` holds the second, which §7 keeps; §7
+replaced the first, and the test that held it went with it.
 `test_the_c6_recipes_variant_numbers_the_pilots_sda_and_scl_as_other_gpios`,
-beside the second, holds the `SDA` and `SCL` sentence.
+beside it, holds the `SDA` and `SCL` sentence.
 
 ## 7. 2026-09-29 — a manifest board holds its own evidence, or none
 
