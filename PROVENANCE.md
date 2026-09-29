@@ -141,8 +141,9 @@ board sits, what the vendor named its net, and which GPIO a label means.
 
 **Risk:** low. Each value can be re-read from where it came from: the pads and
 their labels from the drawing `source.file` names, each `chip_pin` from the
-variant `pindefs.packages` names at its revision, and the three reasons from
-SparkFun's `Hardware/Thing_Plus_ESP32_C6.sch`, which
+variant the board's row in `tools/board_manifest.py` names, at the revision
+`pindefs.packages` records, and which pads are one pin and the three reasons
+from SparkFun's `Hardware/Thing_Plus_ESP32_C6.sch`, which the row names and
 `tests/rules/test_board_manifest.py` reads.
 
 ### 2d. Board pad maps from Adafruit's EAGLE files
@@ -157,8 +158,10 @@ the fetched file reads so, and `source.licence_evidence` quotes it. Each
 `variants/adafruit_feather_esp32c6/` (LGPL-2.1-or-later).
 
 **Position and risk:** as 2c. The pads and labels can be re-read from the
-drawing `source.file` names, and each `chip_pin` from the variant
-`pindefs.packages` names.
+drawing `source.file` names, which pads are one pin from the schematic the
+board's row names (Adafruit's own, fetched beside the board file), and each
+`chip_pin` from the variant the row names, at the revision `pindefs.packages`
+records.
 
 ---
 
