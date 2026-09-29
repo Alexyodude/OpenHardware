@@ -1,9 +1,10 @@
 # The ESP-IDF reference
 
 `webui/boards/esp32c5.py` and `webui/boards/esp32c6.py` cite Espressif's SoC
-headers by file and line. This is how to get a copy of the tree those lines
-point into, and why it is a second reference checkout rather than the one this
-repository already had.
+headers by file and line, and so does each ESP32 variant's `soc/soc_caps.h`
+under `webui/arduino/variants/`. This is how to get a copy of the tree those
+lines point into, and why it is a second reference checkout rather than the one
+this repository already had.
 
 ## Why a second tree
 
@@ -46,15 +47,16 @@ above are what the board files and their tests cite:
 | path | what is read from it |
 |---|---|
 | `components/soc/<chip>/include/soc/soc.h` | the memory map |
-| `components/soc/<chip>/include/soc/soc_caps.h` | whether the busses share an address, whether the MMU page size is a build option |
+| `components/soc/<chip>/include/soc/soc_caps.h` | whether the busses share an address, whether the MMU page size is a build option, and `SOC_GPIO_PIN_COUNT`, which each ESP32 variant's `soc/soc_caps.h` restates |
 | `components/soc/<chip>/include/soc/ext_mem_defs.h` | the MMU page size and entry count the C6's flash window is computed from |
 | `components/soc/<chip>/register/soc/reg_base.h` | `DR_REG_GPIO_BASE` |
 | `components/soc/<chip>/register/soc/gpio_reg.h` | the GPIO register offsets |
 | `tools/cmake/toolchain-<chip>.cmake` | the `-march` string ESP-IDF compiles each part with |
 | `examples/get-started/blink/main/Kconfig.projbuild` | `BLINK_GPIO`, the pin the fixtures watch |
 
-`esp32c3` is in that list on purpose. It is not needed to describe anything —
-it is the control, and the reason this tree is trusted at all.
+`esp32c3` is in that list on purpose. It was not needed to describe anything —
+it is the control, and the reason this tree is trusted at all. Since OH-185 the
+C3 build's `soc/soc_caps.h` reads its GPIO count from it too.
 
 **Note the layout moved.** In IDF 4.4.7 the register bases and the GPIO
 register file were inside `include/soc/soc.h` and `include/soc/gpio_reg.h`; in
@@ -73,7 +75,9 @@ Nothing enforces the pin, and that is deliberate: the tests read the headers by
 **define name**, not by line, so a newer tag that moved a line still passes and
 a newer tag that changed a *number* fails loudly with both values. The line
 numbers in the board files are there to make a value findable by a human, and
-the tests are what make it correct.
+the tests are what make it correct. `tests/webui/test_soc_caps.py` keeps its
+citations findable as well: a separate test holds each one to the line that
+defines its name, so a tag that moved a line fails that test alone.
 
 ## How the code finds it
 
