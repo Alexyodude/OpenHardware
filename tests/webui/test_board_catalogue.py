@@ -562,7 +562,7 @@ def test_every_board_states_whether_a_sketch_can_be_built_for_it():
         ), entry["name"]
     by_name = {entry["name"]: entry for entry in payload["boards"]}
     assert by_name["Arduino Uno"]["buildable"] is True
-    assert by_name["SparkFun Thing Plus ESP32-C6"]["buildable"] is False
+    assert by_name["SparkFun Thing Plus ESP32-C6"]["buildable"] is True
     assert by_name["XIAO-RP2040-DIP"]["buildable"] is False, (
         "the RP2040 has no recipe yet; if one landed, update this and OH-140"
     )
@@ -622,18 +622,37 @@ def test_one_boards_compiler_failing_to_run_is_that_boards_refusal_only(monkeypa
     assert by_name["XIAO-ESP32-C6-DIP"] is True
 
 
-def test_a_manifest_board_is_buildable_exactly_where_its_own_table_compiles():
+def test_a_manifest_board_is_buildable_exactly_where_its_own_table_compiles(
+        tmp_path, monkeypatch):
     """The route asks `recipe_for`, so a row's Build button is on where its
-    own variant builds and off where it is refused (OH-179): the Feather
-    on; the Thing Plus and the QT Py, whose tables this build cannot
-    compile (`tests/webui/test_compile.py`), off."""
+    own variant builds and off where it is refused (OH-179). Since OH-185
+    all three ESP32 rows are on; with the Thing Plus's table copied under a
+    `tmp_path` root, the capability it uses renamed to one no header here
+    defines, its Build is off and the other two stay on."""
+    from tools import board_manifest
     from webui import compile as compile_service
     from webui import emulator_server
-    table = (compile_service.BOARD_SUPPORT / "arduino-esp32" / "variants"
-             / "adafruit_feather_esp32c6" / "pins_arduino.h")
-    if not table.is_file():
-        pytest.skip(f"SKIPPED: no {table}; python tools/import_pindefs.py --fetch")
-    payload = emulator_server.handle_api(None, "/api/boards", {}, {})
-    by_name = {entry["name"]: entry["buildable"] for entry in payload["boards"]}
-    assert (by_name["Adafruit Feather ESP32-C6"], by_name["SparkFun Thing Plus ESP32-C6"],
-            by_name["Adafruit QT Py ESP32-C3"]) == (True, False, False)
+    pilot = "SparkFun Thing Plus ESP32-C6"
+    tables = {}
+    for board in (pilot, "Adafruit Feather ESP32-C6", "Adafruit QT Py ESP32-C3"):
+        row = board_manifest.row(board)
+        table = pathlib.Path(row.package, "variants", row.variant, "pins_arduino.h")
+        tables[board] = table
+        if not (compile_service.BOARD_SUPPORT / table).is_file():
+            pytest.skip(f"SKIPPED: no {table}; python tools/import_pindefs.py --fetch")
+
+    def buildable() -> dict[str, bool]:
+        payload = emulator_server.handle_api(None, "/api/boards", {}, {})
+        return {entry["name"]: entry["buildable"] for entry in payload["boards"]
+                if entry["name"] in tables}
+
+    assert buildable() == dict.fromkeys(tables, True)
+    for board, table in tables.items():
+        text = (compile_service.BOARD_SUPPORT / table).read_text(encoding="utf-8")
+        if board == pilot:
+            assert "SOC_GPIO_PIN_COUNT" in text
+            text = text.replace("SOC_GPIO_PIN_COUNT", "NOT_IN_ANY_HEADER")
+        (tmp_path / table).parent.mkdir(parents=True)
+        (tmp_path / table).write_text(text, encoding="utf-8")
+    monkeypatch.setattr(compile_service, "BOARD_SUPPORT", tmp_path)
+    assert buildable() == {**dict.fromkeys(tables, True), pilot: False}

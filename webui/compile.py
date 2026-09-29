@@ -464,9 +464,10 @@ RECIPES: dict[str, Recipe] = {
         base=esp32c6.IROM,
         # The same checkout, for the C5 row's reason (this table last changed
         # 38d6ed5, 2024-08-02). NOT freestanding: its first line includes
-        # ESP-IDF's `soc/soc_caps.h` and then uses nothing from it, so the
-        # variant directory carries an empty header of that name, and that
-        # header's comment is where the argument lives.
+        # ESP-IDF's `soc/soc_caps.h`, so the variant directory carries a
+        # header of that name, defining only what the tables this recipe
+        # builds use from it, and that header's comment is where the
+        # argument lives.
         bsp_includes=("arduino-esp32/variants/XIAO_ESP32C6",),
     ),
     "SAMD21": Recipe(

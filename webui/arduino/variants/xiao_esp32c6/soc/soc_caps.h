@@ -1,19 +1,21 @@
-/* OpenHardware - the one line Seeed's XIAO ESP32-C6 pin table includes.
+/* OpenHardware - the ESP-IDF capability header the ESP32-C6 pin tables include.
  *
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 the OpenHardware authors. See LICENSE.
  *
- * `third_party/bsp/arduino-esp32/variants/XIAO_ESP32C6/pins_arduino.h`
- * opens with `#include "soc/soc_caps.h"`, ESP-IDF's per-chip capability
- * header, and then uses NOTHING from it: every line after that include is
- * a `static const uint8_t` or a `#define` of a literal (counted 2026-09-04
- * at revision 2787dab -- zero `SOC_` tokens in the file). The C3's and the
- * C5's tables do not include it at all.
- *
- * This build has no ESP-IDF, on purpose (see `Arduino.h`), so the include
- * would fail on a file whose every fact the build wants. This empty header
- * sits on the variant's include path so the vendor's file is used
+ * A vendor's `pins_arduino.h` for an ESP32-C6 board may open with
+ * `#include "soc/soc_caps.h"`, ESP-IDF's per-chip capability header. This
+ * build has no ESP-IDF, on purpose (see `Arduino.h`), so this header sits
+ * on the ESP32-C6 build's include path and the vendor's table is used
  * VERBATIM from its checkout rather than copied here with a line removed.
- * If a future revision of that table starts using a capability macro, the
- * compile error will name it, and this file is where the answer goes.
+ *
+ * It defines what the tables this build compiles use from it, and nothing
+ * else. Each value is ESP-IDF v5.5's (docs/esp-idf-reference.md), cited by
+ * the file and line it was read from; `tests/webui/test_soc_caps.py` reads
+ * that line and holds the value to it, and holds the names defined here to
+ * the names those tables use. A table that uses one more fails to compile
+ * naming it, and this file is where the answer goes.
  */
+
+/* components/soc/esp32c6/include/soc/soc_caps.h:188 */
+#define SOC_GPIO_PIN_COUNT 31

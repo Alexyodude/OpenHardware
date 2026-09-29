@@ -156,87 +156,146 @@ def test_a_manifest_board_builds_against_its_own_variant_and_no_other():
         compiler.RECIPES["ESP32-C6"], bsp_includes=recipe.bsp_includes)
 
 
-def test_the_pilot_is_refused_naming_its_variant_and_what_its_table_lacks():
-    """The ticket's own condition: compiled against
-    `sparkfun_esp32c6_thing_plus`, or refused naming it -- by whichever of
-    `unmet`'s two answerers this machine has."""
+#: The two rows OH-185 made build, each with its chip and its own variant.
+NOW_BUILDING = (
+    ("SparkFun Thing Plus ESP32-C6", "ESP32-C6", "sparkfun_esp32c6_thing_plus"),
+    ("Adafruit QT Py ESP32-C3", "ESP32-C3", "adafruit_qtpy_esp32c3"),
+)
+
+
+def refused_row(tmp_path, monkeypatch) -> str:
+    """A row that is refused, now that every real one builds (OH-185): the
+    pilot, named `Nowhere ESP32-C6`, whose own table is the pilot's with
+    the capability it uses renamed to one no header here defines, under a
+    `tmp_path` board-support root. Its name."""
     needs_table("SparkFun Thing Plus ESP32-C6")
-    with pytest.raises(compiler.UnknownBoard) as caught:
-        compiler.recipe_for("SparkFun Thing Plus ESP32-C6")
-    message = str(caught.value)
-    assert "arduino-esp32 variants/sparkfun_esp32c6_thing_plus/pins_arduino.h" in message
-    assert "SOC_GPIO_PIN_COUNT" in message, message
-    assert "XIAO" not in message, message
+    pilot = board_manifest.row("SparkFun Thing Plus ESP32-C6")
+    text = (compiler.BOARD_SUPPORT / pilot.package / "variants" / pilot.variant
+            / "pins_arduino.h").read_text(encoding="utf-8")
+    assert "SOC_GPIO_PIN_COUNT" in text
+    fake = dataclasses.replace(pilot, board="Nowhere ESP32-C6", variant="nowhere")
+    table = tmp_path / fake.package / "variants" / fake.variant / "pins_arduino.h"
+    table.parent.mkdir(parents=True)
+    table.write_text(text.replace("SOC_GPIO_PIN_COUNT", "NOT_IN_ANY_HEADER"), encoding="utf-8")
+    monkeypatch.setattr(compiler, "BOARD_SUPPORT", tmp_path)
+    find = board_manifest.find
+    monkeypatch.setattr(board_manifest, "find",
+                        lambda name: fake if name == fake.board else find(name))
+    return fake.board
 
 
-def test_the_qt_py_is_refused_naming_the_header_its_table_includes():
-    needs_table("Adafruit QT Py ESP32-C3")
-    with pytest.raises(compiler.UnknownBoard) as caught:
-        compiler.recipe_for("Adafruit QT Py ESP32-C3")
-    message = str(caught.value)
-    assert "arduino-esp32 variants/adafruit_qtpy_esp32c3/pins_arduino.h" in message
-    assert "soc/soc_caps.h" in message, message
+def test_the_pilot_builds_against_its_own_variant_and_no_other():
+    """The ticket's own condition (OH-179), met by OH-185: compiled against
+    `sparkfun_esp32c6_thing_plus`, whose `SOC_GPIO_PIN_COUNT` the C6's
+    `soc/soc_caps.h` now defines (`tests/webui/test_soc_caps.py`)."""
+    board, chip, variant = NOW_BUILDING[0]
+    needs_table(board)
+    recipe = compiler.recipe_for(board)
+    assert recipe.bsp_includes == (f"arduino-esp32/variants/{variant}",)
+    assert recipe == dataclasses.replace(
+        compiler.RECIPES[chip], extra_includes=(), bsp_includes=recipe.bsp_includes)
 
 
-def test_a_refusal_says_the_compiler_answered_where_one_is_installed():
-    needs_table("SparkFun Thing Plus ESP32-C6")
+def test_the_qt_py_builds_with_the_header_its_table_includes_on_its_path():
+    """Its table includes `soc/soc_caps.h`, and the C3's variant directory now
+    carries one; the XIAO's table, from PlatformIO, is gone from its path."""
+    board, chip, variant = NOW_BUILDING[1]
+    needs_table(board)
+    recipe = compiler.recipe_for(board)
+    assert recipe.bsp_includes == (f"arduino-esp32/variants/{variant}",)
+    assert recipe == dataclasses.replace(
+        compiler.RECIPES[chip], extra_includes=(), bsp_includes=recipe.bsp_includes)
+    table = (compiler.BOARD_SUPPORT / recipe.bsp_includes[0] / "pins_arduino.h").read_text(
+        encoding="utf-8")
+    assert '#include "soc/soc_caps.h"' in table
+    assert (compiler.ARDUINO_LITE / recipe.variant / "soc" / "soc_caps.h").is_file()
+
+
+def test_a_refusal_says_the_compiler_answered_where_one_is_installed(tmp_path, monkeypatch):
+    """Both rows are asked of the compiler and pass it; a row whose table
+    uses a name nothing defines is refused, the compiler named."""
+    for board, _, _ in NOW_BUILDING:
+        needs_table(board)
     try:
         compiler.toolchain_root(compiler.RECIPES["ESP32-C6"])
     except compiler.ToolchainMissing as exc:
         pytest.skip(str(exc))
+    for board, _, _ in NOW_BUILDING:
+        assert compiler.unmet(compiler.recipe_for(board)) == (
+            [], "answered by riscv32-esp-elf-g++ and riscv32-esp-elf-gcc -fsyntax-only"), board
+    board = refused_row(tmp_path, monkeypatch)
     with pytest.raises(compiler.UnknownBoard) as caught:
-        compiler.recipe_for("SparkFun Thing Plus ESP32-C6")
+        compiler.recipe_for(board)
     message = str(caught.value)
-    assert ("cannot be compiled here (answered by riscv32-esp-elf-g++ "
-            "-fsyntax-only): third_party/bsp/arduino-esp32/"
-            "variants/sparkfun_esp32c6_thing_plus/pins_arduino.h:") in message, message
-    assert "'SOC_GPIO_PIN_COUNT' was not declared in this scope" in message, message
+    assert ("its own pin table, arduino-esp32 variants/nowhere/pins_arduino.h, "
+            "cannot be compiled here (answered by riscv32-esp-elf-g++ "
+            "-fsyntax-only): ") in message, message
+    assert "'NOT_IN_ANY_HEADER' was not declared in this scope" in message, message
 
 
-def test_the_header_answers_where_no_compiler_is_installed_and_says_so(monkeypatch):
-    needs_table("SparkFun Thing Plus ESP32-C6")
-    needs_table("Adafruit QT Py ESP32-C3")
+def test_the_header_answers_where_no_compiler_is_installed_and_says_so(tmp_path, monkeypatch):
+    """With no compiler, the header reading reaches each row's
+    `soc/soc_caps.h` through its chip's variant directory and passes both;
+    the refused row is refused by it, saying so."""
+    for board, _, _ in NOW_BUILDING:
+        needs_table(board)
 
     def missing(recipe):
         raise compiler.ToolchainMissing(f"no {recipe.prefix}gcc on this machine")
 
     monkeypatch.setattr(compiler, "toolchain_root", missing)
-    with pytest.raises(compiler.UnknownBoard) as pilot:
-        compiler.recipe_for("SparkFun Thing Plus ESP32-C6")
-    with pytest.raises(compiler.UnknownBoard) as qt_py:
-        compiler.recipe_for("Adafruit QT Py ESP32-C3")
+    for board, _, _ in NOW_BUILDING:
+        recipe = compiler.recipe_for(board)
+        assert compiler.unmet(recipe) == (
+            [], "read from the header, with no riscv32-esp-elf-gcc here to ask"), board
+    board = refused_row(tmp_path, monkeypatch)
+    with pytest.raises(compiler.UnknownBoard) as caught:
+        compiler.recipe_for(board)
     assert ("(read from the header, with no riscv32-esp-elf-gcc here to ask): "
-            "it uses SOC_GPIO_PIN_COUNT, which no header it reaches defines"
-            ) in str(pilot.value), pilot.value
-    assert ("it includes soc/soc_caps.h, which is in none of "
-            "third_party/bsp/arduino-esp32/variants/adafruit_qtpy_esp32c3, "
-            "webui/arduino/cores/openhardware, webui/arduino/variants/xiao_esp32c3"
-            ) in str(qt_py.value), qt_py.value
+            "it uses NOT_IN_ANY_HEADER, which no header it reaches defines"
+            ) in str(caught.value), caught.value
 
 
-def test_each_rows_verdict_is_the_compilers_own(monkeypatch):
+def test_each_rows_verdict_is_the_compilers_own(tmp_path, monkeypatch):
     """Both of `unmet`'s answerers, held to a real build: built anyway with
     its own table, a row builds exactly when the compiler's syntax-only
     answer and the header reading each find nothing, and a refused row's
-    build fails on the first thing each names."""
+    build fails on the first thing each names. Every real row builds
+    (OH-185), so `refused_row` is the refused one."""
     sketch = "void setup() {} void loop() {}"
     seen = []
-    for row in board_manifest.ROWS:
-        needs_table(row.board)
+
+    def verdict(row: board_manifest.Row) -> None:
         recipe = compiler.own_variant(row, compiler.RECIPES[row.chip])
         try:
             asked, _ = compiler.compiled_gaps(recipe, compiler.toolchain_root(recipe))
         except compiler.ToolchainMissing as exc:
             pytest.skip(str(exc))
         read = compiler.read_gaps(recipe)
-        monkeypatch.setattr(compiler, "recipe_for", lambda board, r=recipe: r)
-        built = oh_build(row.board, sketch)
+        # Undone after the build, so no later row is answered with this recipe.
+        with monkeypatch.context() as patched:
+            patched.setattr(compiler, "recipe_for", lambda board, r=recipe: r)
+            built = oh_build(row.board, sketch)
         assert built.ok is not bool(asked), (row.board, asked, built.diagnostics)
         assert built.ok is not bool(read), (row.board, read, built.diagnostics)
         named = [words.split(": ", 1)[1] for words in asked[:1]]
         named += [words.split()[2].rstrip(",") for words in read[:1]]
         assert all(name in built.diagnostics for name in named), (named, built.diagnostics)
         seen.append((row.board, built.ok))
+
+    for row in board_manifest.ROWS:
+        if row.chip not in compiler.RECIPES:
+            # Nothing here builds for its chip, so there is no table to ask
+            # of: refused, saying so, before any compiler is asked.
+            with pytest.raises(compiler.UnknownBoard,
+                               match=f"carries a {row.chip} and nothing here knows how"):
+                compiler.recipe_for(row.board)
+            continue
+        needs_table(row.board)
+        verdict(row)
+    # Last: its board-support root is a `tmp_path` the real rows are not under.
+    refused = refused_row(tmp_path, monkeypatch)
+    verdict(board_manifest.find(refused))
     assert (True in dict(seen).values()) and (False in dict(seen).values()), seen
 
 
