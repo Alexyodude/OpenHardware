@@ -14,6 +14,8 @@ touches:
 - webui/boards/esp32c6.py
 - tests/webui/test_board_run.py
 - core/cortexm0/abi.py
+- webui/compile.py
+- tests/webui/test_compile.py
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
@@ -122,3 +124,5 @@ Gate: all 12 checks pass, run clean with nothing else building or editing (three
 **Note 2026-09-29:** Correction to the note above: at a3cac44 the first sorted board is 'Adafruit Feather ESP32-C6', not the QT Py. The test computes the name, so it is unaffected.
 
 **Note 2026-09-29:** 2026-09-29 from OH-179: (1) webui/compile.py and tests/webui/test_compile.py are unclaimed while OH-183 finishes buildability work in compile.py; add both back to this ticket when OH-183 closes. (2) The Adafruit Feather ESP32-C6 now builds with -I webui/arduino/variants/xiao_esp32c6 for its chip-level files (link script, oh_board.h, soc/soc_caps.h), not for pins; soc_caps.h's comment speaks only of Seeed's table. Consider naming that folder for the chip. (3) The SparkFun Thing Plus ESP32-C6 and Adafruit QT Py ESP32-C3 are refused a build because their own pins_arduino.h use SOC_GPIO_PIN_COUNT, which nothing here defines, and the QT Py's includes soc/soc_caps.h, absent from the C3 build's include path. Both live in webui/arduino/**, this ticket's.
+
+**Note 2026-09-29:** 2026-09-29: webui/compile.py and tests/webui/test_compile.py returned to this ticket; OH-179 and OH-183 are done.
