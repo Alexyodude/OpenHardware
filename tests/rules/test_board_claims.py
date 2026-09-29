@@ -36,6 +36,7 @@ CHIPS = {
     "ESP32-C6": ("RV32IMAC", "riscv32"),
 }
 FIRMWARE_VERIFIED = {"RP2040": "tests/cortexm0/test_blink.py"}
+BOARD_FIRMWARE_VERIFIED = {}
 '''
 
 #: A named test that does everything check 5 asks: names an image that is
@@ -99,6 +100,8 @@ def test_the_repository_passes_today():
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "RP2040 -> tests/cortexm0/test_blink.py" in result.stdout
+    assert ("Adafruit Feather ESP32-C6 -> tests/webui/test_feather_esp32c6_board.py"
+            in result.stdout)
 
 
 def test_the_rule_arms_this_checker():
@@ -324,6 +327,58 @@ def test_the_led_actually_blinks(cpu):
 '''
     root = build_root(tmp_path, evidence=evidence)
     assert C.evidence_that_never_loads_an_image(root) == []
+
+
+# --- 4 and 5 for a board's own entry (rules/board-claims.md §7) ---------------
+
+#: One manifest board with its own entry, naming the chip miniature's test.
+BOARD_CATALOGUE = CATALOGUE.replace(
+    "BOARD_FIRMWARE_VERIFIED = {}",
+    'BOARD_FIRMWARE_VERIFIED = {"Some Feather": "tests/cortexm0/test_blink.py"}',
+)
+
+#: `EVIDENCE`, naming the board it is evidence for.
+BOARD_EVIDENCE = 'BOARD = "Some Feather"\n' + EVIDENCE
+
+
+def test_a_board_entry_whose_test_names_it_and_runs_an_image_reports_nothing(tmp_path):
+    root = build_root(tmp_path, catalogue=BOARD_CATALOGUE, evidence=BOARD_EVIDENCE)
+    assert C.board_register(root) == {"Some Feather": "tests/cortexm0/test_blink.py"}
+    assert problems(root) == []
+
+
+def test_a_board_entry_whose_test_never_names_the_board_fails(tmp_path):
+    """Check 5 alone would take the chip's test for the board's: it loads
+    and steps an image. What makes it this board's is that it names it."""
+    root = build_root(tmp_path, catalogue=BOARD_CATALOGUE)
+    found = C.evidence_that_never_loads_an_image(root)
+    assert found == ["Some Feather: tests/cortexm0/test_blink.py never names "
+                     "'Some Feather', the board it is evidence for"], found
+
+
+def test_a_board_entry_naming_a_test_that_is_not_there_fails(tmp_path):
+    catalogue = BOARD_CATALOGUE.replace(
+        '{"Some Feather": "tests/cortexm0/test_blink.py"}',
+        '{"Some Feather": "tests/webui/test_some_feather.py"}',
+    )
+    root = build_root(tmp_path, catalogue=catalogue)
+    found = C.missing_evidence(root)
+    assert len(found) == 1 and "tests/webui/test_some_feather.py" in found[0], found
+
+
+def test_a_board_entry_whose_test_never_steps_the_image_fails(tmp_path):
+    evidence = BOARD_EVIDENCE.replace("        cpu.step()\n", "        pass\n")
+    root = build_root(tmp_path, catalogue=BOARD_CATALOGUE, evidence=evidence)
+    found = C.evidence_that_never_loads_an_image(root)
+    # The chip's entry names the same file, so both say it.
+    assert found and all("never executes it" in line for line in found), found
+    assert any(line.startswith("Some Feather:") for line in found), found
+
+
+def test_a_catalogue_with_no_board_register_is_an_error_not_a_pass(tmp_path):
+    root = build_root(tmp_path, catalogue=CATALOGUE.replace("BOARD_FIRMWARE_VERIFIED = {}", ""))
+    with pytest.raises(C.ClaimError, match="no module-level BOARD_FIRMWARE_VERIFIED"):
+        C.missing_evidence(root)
 
 
 # --- what is not a surface --------------------------------------------------

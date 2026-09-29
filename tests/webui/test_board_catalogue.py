@@ -301,10 +301,31 @@ def test_only_the_board_a_real_image_ran_on_claims_to_have_run_one():
                       "ESP32-C6", "ESP32-C5"}
 
 
+def test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence():
+    """§3's pin, for the per-board register (rules/board-claims.md §7).
+
+    The Adafruit Feather ESP32-C6 joined on 2026-09-29 under OH-179. Its chip
+    was already in `FIRMWARE_VERIFIED`, and that was not the argument: the
+    XIAO's image has the XIAO's pins. It is here because
+    `tests/webui/test_feather_esp32c6_board.py` compiles a sketch for it
+    against its own variant and watches the GPIO that variant calls `SDA`
+    move on the pad its board file labels `SDA`. The SparkFun Thing Plus
+    ESP32-C6 and the QT Py ESP32-C3 are not: their own tables do not compile
+    here (`tests/webui/test_compile.py`).
+    """
+    from tools import board_manifest
+
+    rows = {r.board for r in board_manifest.ROWS}
+    proven = {b.name for b in catalogue.catalogue() if b.firmware_verified and b.name in rows}
+    assert proven == {"Adafruit Feather ESP32-C6"}
+    assert set(catalogue.BOARD_FIRMWARE_VERIFIED) == proven
+
+
 def test_every_firmware_claim_names_a_test_that_exists():
     """The claim is tied to a file so it cannot be asserted into being."""
     repo = pathlib.Path(__file__).resolve().parents[2]
-    for chip, evidence in catalogue.FIRMWARE_VERIFIED.items():
+    for chip, evidence in {**catalogue.FIRMWARE_VERIFIED,
+                           **catalogue.BOARD_FIRMWARE_VERIFIED}.items():
         assert (repo / evidence).is_file(), f"{chip} cites a missing {evidence}"
 
 
@@ -319,7 +340,8 @@ def test_the_firmware_evidence_actually_runs_an_image():
     read yet.
     """
     repo = pathlib.Path(__file__).resolve().parents[2]
-    for chip, evidence in catalogue.FIRMWARE_VERIFIED.items():
+    for chip, evidence in {**catalogue.FIRMWARE_VERIFIED,
+                           **catalogue.BOARD_FIRMWARE_VERIFIED}.items():
         text = (repo / evidence).read_text(encoding="utf-8")
         images = [
             line for line in text.splitlines()

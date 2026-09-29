@@ -191,3 +191,31 @@ in `tests/webui/test_compile.py` and `test_no_row_inherits_its_chips_evidence`
 in `tests/rules/test_board_manifest.py` hold them;
 `test_the_c6_recipes_variant_numbers_the_pilots_sda_and_scl_as_other_gpios`,
 beside the second, holds the `SDA` and `SCL` sentence.
+
+## 7. 2026-09-29 — a manifest board holds its own evidence, or none
+
+OH-179 replaced §6's two refusals. A row in `tools/board_manifest.py` now
+builds with its chip's recipe and its own variant as the only pin table
+(`own_variant` in `webui/compile.py`), or `recipe_for` refuses, naming what
+that table needs and this build lacks (`unmet`, which
+`test_each_rows_verdict_is_the_compilers_own` holds to the compiler). It
+still never inherits its chip's `FIRMWARE_VERIFIED` entry.
+
+**A row's claim is its own.** `BOARD_FIRMWARE_VERIFIED`, beside
+`FIRMWARE_VERIFIED` in `webui/boards/catalogue.py`, maps a row to a named
+test that compiles a sketch for that board against its own variant, loads
+the image, steps it, and watches a GPIO the variant names move on a pad the
+board file maps. `FIRMWARE_VERIFIED` keeps its meaning for every board that
+is not a row. `tools/check_board_claims.py` holds a board's entry to checks
+4 and 5 as it holds a chip's, and to naming its board: a chip's test loads
+and steps an image too, and what makes a test one board's is that it runs
+that board. `test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence`
+pins the set, as §3 pins the chips.
+
+On the day: the Adafruit Feather ESP32-C6 holds one,
+`tests/webui/test_feather_esp32c6_board.py`, which watches the GPIO its own
+variant calls `SDA` and the XIAO's does not. The SparkFun Thing Plus
+ESP32-C6 and the Adafruit QT Py ESP32-C3 hold none: their tables are refused,
+the first for a `SOC_GPIO_PIN_COUNT` nothing here defines, the second for a
+`soc/soc_caps.h` on none of its include directories, as
+`tests/webui/test_compile.py` asserts.

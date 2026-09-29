@@ -196,6 +196,15 @@ FIRMWARE_VERIFIED: dict[str, str] = {
     "ESP32-C5": "tests/riscv32/test_esp32c5_board.py",
 }
 
+#: A row of `tools/board_manifest.py` to the test that compiled a sketch for
+#: it against its own variant and watched the image run (rules/board-claims.md
+#: §7). A row does not inherit its chip's `FIRMWARE_VERIFIED` entry (§6), so
+#: this is its only licence; `tools/check_board_claims.py` holds each entry
+#: as it holds that table's, and to naming its board.
+BOARD_FIRMWARE_VERIFIED: dict[str, str] = {
+    "Adafruit Feather ESP32-C6": "tests/webui/test_feather_esp32c6_board.py",
+}
+
 #: What each instruction set would need before a core for it could be trusted.
 #: From `docs/architectures.md`, which records the evidence class for each.
 #: Ordering the backlog needs this: "how many boards" says what to build first,
@@ -252,8 +261,8 @@ class Board:
     described: bool
     firmware_evidence: str | None
     #: Why the chip's evidence is not this board's, where it is not. A row in
-    #: `tools/board_manifest.py` has no recipe built against its own variant
-    #: (rules/board-claims.md §6), so the page may not say what its chip did.
+    #: `tools/board_manifest.py` does not inherit it (rules/board-claims.md
+    #: §6), and has only what `BOARD_FIRMWARE_VERIFIED` gives it (§7).
     firmware_withheld: str | None = None
 
     @property
@@ -269,7 +278,8 @@ class Board:
 
     @property
     def firmware_verified(self) -> bool:
-        """A real compiled image has been watched executing on this chip."""
+        """A real compiled image has been watched executing on this chip, or,
+        for a row of `tools/board_manifest.py`, on this board."""
         return self.firmware_evidence is not None
 
     def as_json(self) -> dict[str, object]:
@@ -379,14 +389,17 @@ def catalogue(directory: pathlib.Path | None = None) -> list[Board]:
         evidence = FIRMWARE_VERIFIED.get(chip)
         withheld = None
         row = next((r for r in board_manifest.ROWS if r.board == name), None)
-        if row is not None and evidence is not None:
-            withheld = (
-                f"{evidence} is the {chip}'s evidence, and it does not carry to "
-                f"this board: it is a row in tools/board_manifest.py, and no "
-                f"recipe builds against its own variant, {row.package} "
-                f"variants/{row.variant}, until OH-179 (rules/board-claims.md §6)"
-            )
-            evidence = None
+        if row is not None:
+            own = BOARD_FIRMWARE_VERIFIED.get(name)
+            if own is None and evidence is not None:
+                withheld = (
+                    f"{evidence} is the {chip}'s evidence, and it does not carry "
+                    f"to this board: it is a row in tools/board_manifest.py, and "
+                    f"BOARD_FIRMWARE_VERIFIED names no test that built a sketch "
+                    f"against its own variant, {row.package} variants/"
+                    f"{row.variant}, and watched it run (rules/board-claims.md §7)"
+                )
+            evidence = own
         out.append(Board(
             name=name,
             chip=chip,

@@ -678,17 +678,22 @@ def test_every_rows_chip_is_the_catalogues():
 
 
 def test_no_row_inherits_its_chips_evidence():
-    """rules/board-claims.md §6: the register stays keyed by chip, and a row,
-    which no recipe builds against its own variant, carries none of it."""
+    """rules/board-claims.md §6 and §7: the register stays keyed by chip, and
+    a row carries none of it -- only its own `BOARD_FIRMWARE_VERIFIED` entry,
+    or nothing and the reason."""
     boards = {board.name: board for board in catalogue.catalogue()}
     for row in ROWS:
         assert row.chip in catalogue.FIRMWARE_VERIFIED, row.chip
         board = boards[row.board]
-        assert board.firmware_evidence is None, board
-        assert board.firmware_verified is False
-        assert f"variants/{row.variant}" in board.firmware_withheld
-        assert "OH-179" in board.firmware_withheld
-    # And the XIAO sibling keeps it: the register was not weakened.
+        own = catalogue.BOARD_FIRMWARE_VERIFIED.get(row.board)
+        assert board.firmware_evidence == own, board
+        assert board.firmware_evidence != catalogue.FIRMWARE_VERIFIED[row.chip]
+        assert (board.firmware_withheld is None) == (own is not None), board
+    withheld = boards["SparkFun Thing Plus ESP32-C6"].firmware_withheld
+    assert "variants/sparkfun_esp32c6_thing_plus" in withheld, withheld
+    assert "BOARD_FIRMWARE_VERIFIED names no test" in withheld, withheld
+    assert boards["Adafruit Feather ESP32-C6"].firmware_verified is True
+    # And the XIAO sibling keeps the chip's: the register was not weakened.
     assert boards["XIAO-ESP32-C6-DIP"].firmware_verified is True
     assert boards["XIAO-ESP32-C6-DIP"].firmware_withheld is None
 

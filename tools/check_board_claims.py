@@ -8,7 +8,9 @@
 `webui/boards/catalogue.py` holds the register: `FIRMWARE_VERIFIED` maps a chip
 to the test that watched a real compiled image execute on it. That dict is the
 only thing in this repository licensed to say a board runs firmware, and this
-checker is what makes it binding on everything outside it.
+checker is what makes it binding on everything outside it. Beside it,
+`BOARD_FIRMWARE_VERIFIED` maps a row of `tools/board_manifest.py`, which does
+not inherit its chip's entry, to its own test; checks 4 and 5 hold both.
 
 Five checks, each a different way the claim comes loose from its evidence.
 
@@ -252,6 +254,22 @@ def register(root: pathlib.Path | None = None) -> dict[str, str]:
     return value
 
 
+def board_register(root: pathlib.Path | None = None) -> dict[str, str]:
+    """`BOARD_FIRMWARE_VERIFIED` -- a manifest board to its own test (§7)."""
+    tree, path = _catalogue_tree(REPO if root is None else root)
+    value = _module_constant(tree, "BOARD_FIRMWARE_VERIFIED", path)
+    if not isinstance(value, dict):
+        raise ClaimError(
+            f"{path}: BOARD_FIRMWARE_VERIFIED is a {type(value).__name__}, not a dict"
+        )
+    return value
+
+
+def _entries(root: pathlib.Path) -> list[tuple[str, str]]:
+    """Every entry of both registers: what it licenses, and its test."""
+    return sorted(register(root).items()) + sorted(board_register(root).items())
+
+
 def chips(root: pathlib.Path | None = None) -> list[str]:
     """Every chip name the catalogue knows, in its canonical spelling."""
     tree, path = _catalogue_tree(REPO if root is None else root)
@@ -361,11 +379,11 @@ def claims_decided_by_a_weaker_fact(root: pathlib.Path | None = None) -> list[st
 
 
 def missing_evidence(root: pathlib.Path | None = None) -> list[str]:
-    """4. The register names a test that is not there."""
+    """4. A register names a test that is not there."""
     root = REPO if root is None else root
     return [
-        f"{chip}: FIRMWARE_VERIFIED names {evidence}, which does not exist under {root}"
-        for chip, evidence in sorted(register(root).items())
+        f"{key}: the register names {evidence}, which does not exist under {root}"
+        for key, evidence in _entries(root)
         if not (root / evidence).is_file()
     ]
 
@@ -419,10 +437,12 @@ def _found_beside(test: pathlib.Path, name: str) -> bool:
 
 
 def evidence_that_never_loads_an_image(root: pathlib.Path | None = None) -> list[str]:
-    """5. The named test names no image, or never reads one, or never steps."""
+    """5. The named test names no image, or never reads one, or never steps;
+    or, for a board's own entry, never names that board."""
     root = REPO if root is None else root
+    boards = board_register(root)
     problems: list[str] = []
-    for chip, evidence in sorted(register(root).items()):
+    for key, evidence in _entries(root):
         test = root / evidence
         if not test.is_file():
             continue  # missing_evidence reports it; saying it twice helps nobody.
@@ -430,7 +450,7 @@ def evidence_that_never_loads_an_image(root: pathlib.Path | None = None) -> list
             tree = ast.parse(_text(test), filename=str(test))
         except SyntaxError as exc:
             raise ClaimError(
-                f"{evidence}: cited as evidence for {chip}, and will not parse: {exc}"
+                f"{evidence}: cited as evidence for {key}, and will not parse: {exc}"
             ) from exc
 
         named = _image_names(tree)
@@ -449,8 +469,12 @@ def evidence_that_never_loads_an_image(root: pathlib.Path | None = None) -> list
             )
         if not (_calls(tree) & _STEPPERS):
             why.append("never executes it (no .step() call)")
+        if key in boards and not any(
+            isinstance(node, ast.Constant) and node.value == key for node in ast.walk(tree)
+        ):
+            why.append(f"never names {key!r}, the board it is evidence for")
         if why:
-            problems.append(f"{chip}: {evidence} " + "; ".join(why))
+            problems.append(f"{key}: {evidence} " + "; ".join(why))
     return problems
 
 
@@ -488,7 +512,7 @@ def main() -> int:
             print(f"{label}:", file=sys.stderr)
             for problem in problems:
                 print(f"  {problem}", file=sys.stderr)
-        claims = register()
+        claims = _entries(REPO)
         scanned = len(surfaces())
     except ClaimError as exc:
         print(f"check_board_claims: {exc}", file=sys.stderr)
@@ -502,7 +526,7 @@ def main() -> int:
         )
         return 1
 
-    evidence = ", ".join(f"{chip} -> {path}" for chip, path in sorted(claims.items()))
+    evidence = ", ".join(f"{key} -> {path}" for key, path in claims)
     print(f"check_board_claims: OK ({scanned} surfaces, {len(claims)} claim: {evidence})")
     return 0
 
