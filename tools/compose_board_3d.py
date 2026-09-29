@@ -979,8 +979,8 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "CHIPLED_0603_NOOUTLINE", "LED_SMD", "LED_0603_1608Metric",
-        "CHG and D3 on the Feather: two pads 1.50 mm apart, an 0603 land, "
-        "and the 1.6 x 0.8 mm LED. TURNED 270: Adafruit put the cathode pad "
+        "Adafruit's 0603 LED land: two pads 1.50 mm apart, and the "
+        "1.6 x 0.8 mm LED. TURNED 270: Adafruit put the cathode pad "
         "C at +y, where KiCad's footprint puts pad 1, the cathode, at -x.",
         turn=270.0,
     ),
@@ -1004,11 +1004,10 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "SOT23-5", "Package_TO_SOT_SMD", "SOT-23-5",
-        "five pads spanning 1.90 x 2.60 mm on SparkFun's and Adafruit's "
-        "boards alike -- SparkFun's regulator and charger, Adafruit's AP2112 "
-        "and MCP73831 -- "
-        "which is the Uno's SOT23-DBV land stood on end, so the same model "
-        "turned a quarter.",
+        "SparkFun's and Adafruit's five-lead SOT-23 land, under regulators "
+        "and chargers alike: five pads spanning 1.90 x 2.60 mm, which is the "
+        "Uno's SOT23-DBV land stood on end, so the same model turned a "
+        "quarter.",
         turn=90.0,
     ),
     Component(
@@ -1048,8 +1047,8 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "BTN_KMR2_4.6X2.8", "Button_Switch_SMD", "SW_Push_1P1T_NO_CK_KMR2",
-        "Q1 on the QT Py, BOOT0: four pads spanning 4.10 x 1.60 mm, the "
-        "same land as SparkFun's, and the package name is C&K's KMR2.",
+        "Adafruit's KMR2 button land: four pads spanning 4.10 x 1.60 mm, "
+        "the same land as SparkFun's, and the package name is C&K's KMR2.",
     ),
     Component(
         "BTN_KMR2_SLIM", "Button_Switch_SMD", "SW_Push_1P1T_NO_CK_KMR2",
@@ -1072,9 +1071,10 @@ CORRESPONDENCE: tuple[Component, ...] = (
     Component(
         "JST_SH4_SKINNY", "Connector_JST",
         "JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal",
-        "CONN1 on the QT Py, the STEMMA QT port: four 1 mm-pitch contacts "
-        "and two mounting pads spanning 5.60 x 3.90 mm, and a body Adafruit "
-        "draw 6.1 x 4.25 mm -- the SM04B-SRSS-TB SparkFun's Qwiic port is.",
+        "Adafruit's STEMMA QT port on its skinny land: four 1 mm-pitch "
+        "contacts and two mounting pads spanning 5.60 x 3.90 mm, and a body "
+        "Adafruit draw 6.1 x 4.25 mm -- the SM04B-SRSS-TB SparkFun's Qwiic "
+        "port is.",
     ),
     # **One rule for an exposed pad, and it is that the pad decides nothing.**
     # It is under the body and drawn nowhere, and a land's pad is the vendor's
@@ -1130,7 +1130,8 @@ CORRESPONDENCE: tuple[Component, ...] = (
     Component(
         "QFN56_7MM_REDUCEDEPAD", "Package_DFN_QFN",
         "QFN-56-1EP_7x7mm_P0.4mm_EP3.2x3.2mm",
-        "IC2 on the KB2040, the RP2040 itself: fifty-seven pads spanning "
+        "Adafruit's RP2040 land, its exposed pad reduced by its own name: "
+        "fifty-seven pads spanning "
         "6.90 x 6.90 mm, fifty-six leads on a 0.4 mm pitch round a 7 x 7 mm "
         "body Adafruit draw on tDocu, and a 3.20 x 3.20 mm exposed pad. "
         "KiCad's Package_DFN_QFN, 191 models listed 2026-09-30, holds three "
@@ -1142,17 +1143,19 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "SOD-323F", "Diode_SMD", "D_SOD-323F",
-        "D1 and D3 on the KB2040, NSR0320 by value: two pads 2.00 mm apart, "
-        "and SOD-323F, the flat-lead SOD-323, is the package Adafruit's "
-        "name and the model's both state. The QT Py places the same value "
-        "on a land it names SOD-323, and each is drawn as its own land is "
-        "named. TURNED 180: Adafruit put the cathode pad C at +x, and "
-        "KiCad's footprint puts pad 1, the cathode, at -x.",
+        "Adafruit's SOD-323F land: two pads 2.00 mm apart, and SOD-323F, "
+        "the flat-lead SOD-323, is the package Adafruit's name and the "
+        "model's both state. Adafruit also place the same NSR0320 on a land "
+        "they name SOD-323_MINI, drawn as D_SOD-323: each is drawn as its "
+        "own land is named. TURNED 180: Adafruit put the cathode pad C at "
+        "+x, and KiCad's footprint puts pad 1, the cathode, at -x; a test "
+        "holds the model's band to pad C.",
         turn=180.0,
     ),
     Component(
         "CRYSTAL_2.5X2", "Crystal", "Crystal_SMD_2520-4Pin_2.5x2.0mm",
-        "Y1 on the KB2040, 12 MHz: four pads spanning 1.65 x 1.25 mm, and "
+        "Adafruit's 2.5 x 2.0 mm crystal land: four pads spanning "
+        "1.65 x 1.25 mm, and "
         "Adafruit draw the body 2.5 x 2.0 mm on tDocu -- the 2520 part the "
         "model's name states, and the one Seeed's RP2350 crystal draws. Pad "
         "1 is where KiCad's footprint puts it, so no turn.",
@@ -1378,8 +1381,9 @@ ABSENT: dict[str, str] = {
         "pad. No KiCad library was searched: there is no body to look for."
     ),
     "FIDUCIAL_1MM": (
-        "two fiducials on each Adafruit board, each a bare 1.0 mm copper "
-        "pad. No KiCad library was searched: there is no body to look for."
+        "Adafruit's fiducial, a bare 1.0 mm copper pad the pick-and-place "
+        "camera sights on. No KiCad library was searched: there is no body "
+        "to look for."
     ),
     "SMT-JUMPER_2_NC_TRACE_SILK": (
         "five solder jumpers on the Thing Plus -- SHLD, CHG, PWR, SD_DET, "
@@ -1432,19 +1436,19 @@ ABSENT: dict[str, str] = {
     ),
     # --- OH-186: the KB2040's copper ----------------------------------------
     "1X13_CASTEL": (
-        "JP1 and JP2 on the KB2040: **the board's own castellated edge**, "
-        "thirteen half-holes each on 2.54 mm, 30.48 mm long, with a plated "
+        "**a board's own castellated edge**, "
+        "thirteen half-holes on 2.54 mm, 30.48 mm long, with a plated "
         "hole 1.524 mm inboard of each. Copper and the board's edge, drawn "
         "by the copper pass. No KiCad library was searched: there is no body "
         "to look for."
     ),
     "SOLDERJUMPER_ARROW_NOPASTE": (
-        "SJ1 on the KB2040's underside: two 0.762 x 1.524 mm pads and the "
-        "copper between them that a person bridges with solder. No KiCad "
+        "a solder jumper: two 0.762 x 1.524 mm pads and the copper between "
+        "them that a person bridges with solder. No KiCad "
         "library was searched: there is no body to look for."
     ),
     "TESTPOINT_ROUND_1.5MM_NO": (
-        "TP1 on the KB2040's underside, a bare 1.5 mm round pad. No KiCad "
+        "a test point, a bare 1.5 mm round pad. No KiCad "
         "library was searched: there is no body to look for."
     ),
     # And the parts: each names what was listed and what the nearest thing
@@ -1460,7 +1464,7 @@ ABSENT: dict[str, str] = {
         "undid on the XIAOs."
     ),
     "USB_C_CUSB31-CFM2AX-01-X": (
-        "the USB-C socket on each Adafruit board, whose package name is the "
+        "Adafruit's USB-C socket, whose package name is the "
         "part: CUI's CUSB31-CFM2AX-01-X, twelve contact pads and four shell "
         "tabs spanning 8.64 x 4.76 mm. KiCad's Connector_USB, 12 models "
         "listed 2026-09-29, holds nothing of CUI's; its two 16-pin "
@@ -1504,7 +1508,7 @@ ABSENT: dict[str, str] = {
         "3.5 x 3.5 mm WS2812B-Mini -- the Feather's, which is drawn."
     ),
     "SK6805_1515": (
-        "LED1 on the QT Py and the KB2040: four pads under a 1.5 x 1.5 mm "
+        "Adafruit's addressable LED: four pads under a 1.5 x 1.5 mm "
         "body, an SK6805 "
         "in its 1515 package. The smallest addressable LED in KiCad's "
         "LED_SMD, 38 models listed 2026-09-29, is the reverse-mount "
@@ -3234,9 +3238,9 @@ def half_turn_moves(mesh: Mesh, element: eagle.Element, turn: float,
 
     **Zero means the turn cannot matter**, and that is the common case rather
     than a failure: a 0201 capacitor IS the same part turned round, and so is
-    every pin header on the Arduino Uno. Measured on all six composed boards,
-    23 of the 43 packages placed come out at exactly 0.0000 -- so for those a
-    half turn is not a claim that can be wrong, and nothing needs to check it.
+    every pin header on the Arduino Uno. A package that comes out at exactly
+    0.0000 is one whose half turn is not a claim that can be wrong, and
+    nothing needs to check it; `compose` counts the rest.
 
     `place` is called rather than a separate model of what a turn does, so
     this measures the half turn the composer would actually apply.
@@ -3298,11 +3302,9 @@ def mark_turns(element: eagle.Element, mesh: Mesh, thickness: float,
     eight: the answer for a turn needs the placement half a turn away, which
     is another of the four.
 
-    Measured on the six packages this can run on, the stated turn against its
-    nearest rival: DIL28-3 1.542 against 25.15, MLF32 0.158 against 3.27,
-    USON8 0.142 against 1.79, QFN60 0.014 against 6.34, QFN48 0.015 against
-    4.87, LGA14 0.231 against 1.95. Every one wins by more than a millimetre
-    and a half, against a `TURN_MARGIN_MM` of 0.3.
+    Whether the stated turn beats its rivals by `TURN_MARGIN_MM` is asked of
+    every composed board by `compose` and by
+    `test_every_part_whose_vendor_marks_pin_one_agrees_with_its_model`.
     """
     want = mark_of(element)
     if want is None:

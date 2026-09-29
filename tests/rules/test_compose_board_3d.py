@@ -3194,7 +3194,7 @@ def test_a_pin_header_is_the_same_part_turned_round():
     Every pin header on the Uno is symmetric about its own anchor, so its
     `turn` is a free choice and no check needs to have an opinion. Measured
     rather than assumed, because this is what keeps the count of unpinned
-    parts honest: 23 of the 43 packages placed come out at exactly zero."""
+    parts honest: a part that comes out at exactly zero is not counted."""
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
     spec = _uno()
     if not spec.layout.is_file():
