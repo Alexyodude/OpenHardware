@@ -2,11 +2,25 @@
 id: OH-177
 title: 'Four more boards on chips that already run: QT Py ESP32-C3, Feather ESP32-C6,
   KB2040 and Glyph Mini RP2040'
-status: open
+status: in-progress
 priority: P1
 created: '2026-09-29'
 touches:
 - docs/tickets/OH-177-*
+- tools/board_sources.py
+- tools/board_manifest.py
+- webui/boards/Adafruit*
+- webui/boards/PCBCUPID*
+- tests/rules/test_board_manifest.py
+- tests/rules/test_board_sources.py
+- README.md
+- rules/board-claims.md
+- PROVENANCE.md
+- tools/import_board.py
+- tests/rules/test_import_board.py
+- tools/get_board_sources.py
+- tests/rules/test_import_pindefs.py
+- tests/webui/test_pin_view.py
 ---
 
 Part of OH-174. Once OH-176 makes a board a table row, the next boards are rows. These four are on chips that already run here, publish their PCB in a format this repo reads, and have a pin variant on disk. Surveyed and opened 2026-09-29; the files were fetched to scratch and parsed, not yet added to the registry.

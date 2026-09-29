@@ -278,7 +278,8 @@ def write(entry: Row) -> pathlib.Path:
             json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
         filled = import_pindefs.filled_board(
-            entry.board, import_pindefs.BSP_DIR, staged, modules_dir=BOARDS_DIR
+            entry.board, import_pindefs.BSP_DIR, staged,
+            modules_dir=import_pindefs.BOARDS_DIR,
         )
     path = BOARDS_DIR / f"{entry.board}.json"
     path.write_text(json.dumps(filled, indent=2, ensure_ascii=False) + "\n",
