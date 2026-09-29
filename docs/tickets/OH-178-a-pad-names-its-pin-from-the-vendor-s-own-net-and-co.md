@@ -2,11 +2,13 @@
 id: OH-178
 title: A pad names its pin from the vendor's own net and connector names where the
   BSP does not, and says which source it was
-status: open
+status: in-progress
 priority: P1
 created: '2026-09-29'
 touches:
 - docs/tickets/OH-178-*
+- tools/eagle.py
+- PROVENANCE.md
 ---
 
 Part of OH-174, found by OH-176. The SparkFun Thing Plus ESP32-C6 names a chip pin on 5 of its 28 pads, and the pins layer of the OH-175 scorecard fails it. The other 23 are null because the only pin source read for a manifest board is the arduino-esp32 variant, and the variant either does not define the pad's label or defines it under a name no pad carries. OH-176's ticket note records which pads fall in each case.
