@@ -42,3 +42,5 @@ STEPS, each with its own evidence:
 4. The STM32C5 board: docs/research/board-models/ records that Seeed publishes no wiki page for it. Re-check the vendor once, dated; if still nothing, the footprint extrusion is the honest picture and the page already says so.
 
 Every number above is from --check; do not restate the counts in prose anywhere else (CLAUDE.md's inventory rule) -- the generator is the record.
+
+**Note 2026-09-29:** Found 2026-09-29 by the OH-175 review, not caused by it. Two tests in tests/rules/test_import_3d_model.py fail with ModuleNotFoundError: No module named 'OCP' on a machine where the cached part-R_Axial STEP files exist and OCP is not installed for the python running pytest. Their guards (lines 529 and 726 at 4f5b2dd) skip only when the cached STEP is missing, while the file's header (lines 23-25) says those tests skip unless BOTH OCP is installed and the archive is on disk. Reproduced at f77cfc4 in a temporary worktree, so it predates OH-175 and OH-176. The fix is the guard, not the header: check for OCP the same way the header describes.
