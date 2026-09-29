@@ -275,7 +275,9 @@ def test_an_unknown_board_says_what_there_is():
     with pytest.raises(api.BoardRunError) as caught:
         api.runtime_for("Raspberry Pi Pico")
     assert "Raspberry Pi Pico" in str(caught.value)
-    assert "XIAO" in str(caught.value)
+    # The refusal names boards that exist. Which ones is sort order, and a
+    # non-XIAO board sorting first (OH-177) is not a regression.
+    assert sorted(catalogue.board_names())[0] in str(caught.value)
 
 
 def test_a_chip_name_maps_to_its_description_module():
