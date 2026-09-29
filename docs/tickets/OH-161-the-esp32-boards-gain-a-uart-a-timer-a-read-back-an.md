@@ -13,8 +13,6 @@ touches:
 - webui/boards/esp32c6.py
 - tests/webui/test_board_run.py
 - core/cortexm0/abi.py
-- webui/compile.py
-- tests/webui/test_compile.py
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
@@ -127,3 +125,5 @@ Gate: all 12 checks pass, run clean with nothing else building or editing (three
 **Note 2026-09-29:** 2026-09-29: webui/compile.py and tests/webui/test_compile.py returned to this ticket; OH-179 and OH-183 are done.
 
 **Note 2026-09-29:** 2026-09-29: webui/arduino/** lent to OH-185 (SOC_GPIO_PIN_COUNT and a C3 soc/soc_caps.h, read from the ESP-IDF v5.5 reference, so the SparkFun Thing Plus ESP32-C6 and QT Py ESP32-C3 build against their own variants). Add it back with tickets set OH-161 --touch when OH-185 closes.
+
+**Note 2026-09-29:** 2026-09-29: webui/compile.py and tests/webui/test_compile.py lent again, to OH-185: its SoC definitions make the SparkFun Thing Plus ESP32-C6 and QT Py ESP32-C3 build, so the tests asserting their refusals and the ESP32-C6 recipe comment about an empty soc_caps.h change. Add both back with the webui/arduino/** loan when OH-185 closes.
