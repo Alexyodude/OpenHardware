@@ -135,6 +135,17 @@ ESP32_C6_MINI_1 = PinTable(
      ("11", "GND"), ("14", "GND"), ("21", "NC"), ("32", "NC"), ("33", "NC"),
      ("34", "NC"), ("35", "NC"), *((str(pin), "GND") for pin in range(36, 54))),
 )
+#: The same page, for the module as SparkFun's library places it, under a
+#: package and value of its own: the GPIO rows a header of the Qwiic Pocket
+#: reaches, and a footprint that splits the page's 49, the central ground
+#: pad, into nine pads named 49.1 to 49.9.
+ESP32_C6_MINI_1_SPARKFUN = dataclasses.replace(
+    ESP32_C6_MINI_1,
+    package="ESP32-C6-MINI-1", value="ESP32-C6-MINI-1",
+    gpio=(("5", 2), ("6", 3), ("9", 4), ("10", 5), ("24", 18), ("25", 19),
+          ("30", 17), ("31", 16)),
+    footprint_pads=tuple((f"49.{part}", "49") for part in range(1, 10)),
+)
 ESP32_C6_WROOM_1 = PinTable(
     "ESP32-C6-WROOM-1-NARROW", "ESP32-C6-WROOM-1-NARROW",
     "ESP32-C6-WROOM-1 & WROOM-1U Datasheet v1.4, pp. 10-11, 3.2 Pin Description "
@@ -296,6 +307,22 @@ ROWS = (
         variant="sparkfun_pro_micro_esp32c3",
         labels=("SDA", "SCL"),
         pin_table=ESP32_C3_MINI_1,
+    ),
+    Row(
+        board="SparkFun Qwiic Pocket ESP32-C6",
+        source="sparkfun-qwiic-pocket-esp32-c6",
+        cad="Hardware/Qwiic_Pocket_Dev_ESP32_C6.brd",
+        schematic="Hardware/Qwiic_Pocket_Dev_ESP32_C6.sch",
+        select=("J2", "J3"),
+        chip="ESP32-C6",
+        package="arduino-esp32",
+        variant="sparkfun_esp32c6_qwiic_pocket",
+        labels=("TX", "RX"),
+        licence_statement=(
+            "FRAME1",
+            "Released under the Creative Commons Attribution Share-Alike 4.0 License",
+        ),
+        pin_table=ESP32_C6_MINI_1_SPARKFUN,
     ),
 )
 

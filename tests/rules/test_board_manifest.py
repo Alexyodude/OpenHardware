@@ -4,6 +4,7 @@
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 
 import dataclasses
+import itertools
 import json
 import re
 import subprocess
@@ -528,6 +529,25 @@ def test_every_pin_table_is_what_its_page_numbers_once_each():
         # A footprint's other name for a pin is for a pin the page numbers.
         assert {int(number) for _, number in table.footprint_pads} <= set(
             range(1, table.pins + 1)), table.value
+
+
+def test_two_tables_read_off_one_page_agree_on_every_pad_both_transcribe():
+    """One datasheet page, two placements of the part: the ESP32-C6-MINI-1
+    as Adafruit's library places it and as SparkFun's does. Each table keeps
+    the GPIO rows its own boards reach, and a pad both transcribe is the
+    same pin in both, with the same cite, pin count and sha256."""
+    pages: dict[str, list[board_manifest.PinTable]] = {}
+    for table in {row.pin_table for row in ROWS}:
+        pages.setdefault(table.url, []).append(table)
+    shared = [tables for tables in pages.values() if len(tables) > 1]
+    assert shared, "no page is read for two placements, so this checks nothing"
+    for tables in shared:
+        assert len({(t.cite, t.pdf_sha256, t.pins) for t in tables}) == 1, tables
+        for one, other in itertools.combinations(tables, 2):
+            first = {**dict(one.gpio), **dict(one.not_gpio)}
+            second = {**dict(other.gpio), **dict(other.not_gpio)}
+            assert {pad: first[pad] for pad in set(first) & set(second)} == {
+                pad: second[pad] for pad in set(first) & set(second)}, (one.value, other.value)
 
 
 def test_the_kb2040s_p1_is_the_central_pad_its_rp2040_page_numbers_57():

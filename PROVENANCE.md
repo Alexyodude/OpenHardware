@@ -182,8 +182,16 @@ Each `chip_pin` comes from arduino-esp32's
 of the ESP32-C3-MINI-1 the pad's net reaches in SparkFun's board file, read
 against Espressif's datasheet pin table; `chip_pin_from` names which.
 
-**Position and risk:** as 2c. Which pads are one pin is read from
-`Hardware/SparkFun_Dev_ESP32_C3_MINI.sch`, fetched beside the board file.
+`webui/boards/SparkFun Qwiic Pocket ESP32-C6.json` is written the same way,
+out of `Hardware/Qwiic_Pocket_Dev_ESP32_C6.brd`. Its repository carries no
+licence file and its README points at one it does not hold, so, as in 2c,
+the licence is the sentence the board file's `FRAME1` places, which
+`source.licence_evidence` quotes and the tool refuses the row without. Its
+`chip_pin` values come from `variants/sparkfun_esp32c6_qwiic_pocket/` or from
+the pad of the ESP32-C6-MINI-1 each net reaches.
+
+**Position and risk:** as 2c. Which pads are one pin is read from each
+board's `.sch`, fetched beside its board file.
 
 ---
 

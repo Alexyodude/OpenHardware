@@ -737,8 +737,9 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     # the Adafruit QT Py ESP32-C3, whose file names 11; 28 until the
     # Adafruit Feather ESP32-C6, whose file names 15; 29 until OH-181 added
     # the Adafruit KB2040, whose file names 18; 30 until OH-188 added the
-    # SparkFun Pro Micro ESP32-C3, whose file names 12.
-    assert len(boards) == 31, boards
+    # SparkFun Pro Micro ESP32-C3, whose file names 12; 31 until the SparkFun
+    # Qwiic Pocket ESP32-C6, whose file names 8.
+    assert len(boards) == 32, boards
     # Every board, picked and not loaded: nothing was read.
     picked = {board: api.pad_view(board, api.description_for(board), None)
               for board in boards}
@@ -760,7 +761,7 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     )
     silent = sorted(set(boards) - set(would_have_lied))
     assert silent == [], silent
-    assert len(would_have_lied) == 31, would_have_lied
+    assert len(would_have_lied) == 32, would_have_lied
     assert "Arduino Uno" in would_have_lied
     assert "XIAO-MG24-SMD" in would_have_lied, (
         "the MG24 has no board module at all, so its 19 chip pins can only "
