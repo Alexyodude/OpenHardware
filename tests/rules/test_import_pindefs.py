@@ -2882,6 +2882,28 @@ def test_a_d_pin_declared_through_a_name_is_refused_rather_than_left_out():
         pindefs.pico_constants_by_hand(text, "named", "arm-none-eabi-g++")
 
 
+def test_an_a_pin_declared_through_a_name_is_refused_too():
+    """challenger_2350_nbiot's shape: read by hand, its `A5` went missing
+    where the preprocessor numbers it, which the all-variants comparison
+    below found."""
+    text = ("#define PIN_SPI0_SS (17u)\nstatic const uint8_t D0 = (13u);\n"
+            "static const uint8_t A5 = PIN_SPI0_SS;\n")
+    assert "A5" not in read_c_pin_constants(text)
+    with pytest.raises(PindefError,
+                       match=r"declares \['A5 = PIN_SPI0_SS'\], which is not an integer"):
+        pindefs.pico_constants_by_hand(text, "challenger", "arm-none-eabi-g++")
+
+
+def test_an_integer_in_the_parentheses_a_macro_wrapped_it_in_is_read():
+    """challenger_2350_bconnect's `A5 = (PIN_SPI0_SS)`, preprocessed, is
+    `A5 = ((17u))`; a stray parenthesis is not an integer."""
+    assert pindefs.pico_constants_by_hand(
+        "static const uint8_t A5 = ((17u));\n", "bconnect", "arm-none-eabi-g++")["A5"] == 17
+    with pytest.raises(PindefError, match=r"declares \['A5 = \(\(17u\)'\]"):
+        pindefs.pico_constants_by_hand(
+            "static const uint8_t A5 = ((17u);\n", "bconnect", "arm-none-eabi-g++")
+
+
 def test_with_no_preprocessor_installed_the_kb2040_is_refused_and_the_xiao_read_by_hand(
         monkeypatch):
     _needs_the_fetched_packages("arduino-pico")

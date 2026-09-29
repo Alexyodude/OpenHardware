@@ -1125,7 +1125,9 @@ _DIRECTIVE = re.compile(r"^[ \t]*#[ \t]*(\w+)", re.M)
 _DECLARATION = re.compile(
     r"\bstatic\s+const\s+[A-Za-z_][\w\s]*?\b([A-Za-z_]\w*)\s*=\s*([^;]*);"
 )
-_INTEGER = re.compile(r"^\(?\s*(\d+)\s*[uUlL]*\s*\)?$")
+#: An integer in as many parentheses as a macro wrapped it in: challenger_
+#: 2350_bconnect's `A5 = (PIN_SPI0_SS)` preprocesses to `((17u))`.
+_INTEGER = re.compile(r"^[(\s]*(\d+)\s*[uUlL]*[\s)]*$")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1265,17 +1267,19 @@ def _pico_integers(declarations: str, macros: str, where: str) -> dict[str, int]
     """Every integer constant: `static const` declarations out of one text,
     `#define`s out of the other, as `read_c_pin_constants` takes them.
 
-    **A `D<n>` whose initialiser is not an integer is refused**, where
-    `read_c_pin_constants` leaves it out: a pad missing its pin reads as a
-    label nobody numbered, which is a different fact.
+    **A `D<n>` or `A<n>` whose initialiser is not an integer is refused**,
+    where `read_c_pin_constants` leaves it out: a pad missing its pin reads
+    as a label nobody numbered, which is a different fact. challenger_2350_
+    nbiot's `A5 = PIN_SPI0_SS` is why `A<n>` is here too: read by hand it
+    went missing where the preprocessor numbers it.
     """
     found = {name: int(value) for name, value in _C_DEFINE.findall(macros)}
     unread = []
     for name, value in _DECLARATION.findall(declarations):
         literal = _INTEGER.match(value.strip())
-        if literal:
+        if literal and value.count("(") == value.count(")"):
             found.setdefault(name, int(literal.group(1)))
-        elif _D_LABEL.match(name):
+        elif _D_LABEL.match(name) or _A_LABEL.match(name):
             unread.append(f"{name} = {value.strip()}")
     if unread:
         raise PindefError(f"{where} declares {unread}, which is not an integer")
