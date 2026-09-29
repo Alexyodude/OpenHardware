@@ -120,7 +120,7 @@ A board that is not a XIAO is a row in `tools/board_manifest.py`: its CAD
 file, the elements carrying its header, its chip, the board-support variant
 that names pins by label, and the chip's datasheet pin table, against which
 each pad's net is traced to the chip pad it reaches. Each pad's
-`chip_pin_from` says which of the two named its pin.
+`chip_pin_from` says which of the two, or both, named its pin.
 `python tools/board_manifest.py` writes its file from that row, and writes no
 SVG beside it.
 
