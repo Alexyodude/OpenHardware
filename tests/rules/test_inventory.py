@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 
+import ast
 import json
 import pathlib
 import re
@@ -12,6 +13,8 @@ import sys
 import pytest
 
 import webui.emulator_server as server
+from tools import board_sources
+from tools.import_pindefs import NOT_PUBLISHED
 from tools.inventory import (
     MODEL_INDEX,
     NO_SOURCE,
@@ -21,6 +24,7 @@ from tools.inventory import (
     InventoryError,
     Layer,
     Twin,
+    _file_geometry,
     _twin_heading,
     collect_assets,
     collect_boards,
@@ -29,6 +33,7 @@ from tools.inventory import (
     collect_mechanisms,
     collect_tests,
     collect_twins,
+    is_supply,
     render_markdown,
     render_text,
     supply_labels,
@@ -767,9 +772,12 @@ def test_the_twin_report_covers_exactly_the_boards_on_disk():
 def test_the_twin_heading_counts_whole_boards_and_each_layer():
     held = Layer(True, "x", "x")
     whole = Twin("Whole", held, held, held, held)
-    partial = Twin("Partial", held, held, Layer(False, "0/1", "none on D0"), held)
-    assert _twin_heading([whole, partial]) == (
-        "1 of 2 boards hold all four; by layer: geometry 2, model 2, pins 1, runs 2"
+    partial = Twin("Partial", held, held, Layer(False, "0/1", "unanswered on D0"), held)
+    unbuilt = Twin("Unbuilt", held, Layer(False, NOT_BUILT, "x"), held, held)
+    unfetched = Twin("Unfetched", Layer(False, "footprint:not fetched", "x"), held, held, held)
+    assert _twin_heading([whole, partial, unbuilt, unfetched]) == (
+        "1 of 4 boards hold all four; by layer: geometry 3 (1 not fetched here), "
+        "model 3 (1 not built here), pins 3, runs 4"
     )
 
 
@@ -843,25 +851,29 @@ def test_not_built_here_and_cannot_be_built_read_differently(tmp_path, monkeypat
     assert "builds it" in unbuilt.detail and "builds it" not in sourceless.detail
 
 
-def test_a_blanked_chip_pin_fails_the_pins_layer_and_a_supply_pad_does_not(tmp_path):
+def test_a_blanked_chip_pin_fails_the_pins_layer_unless_it_says_specifically_why(tmp_path):
     boards = tmp_path / "boards"
     boards.mkdir()
     document = _real_board(boards, "XIAO-ESP32-C6-DIP")
     assert collect_twins(boards)[0].pins.holds
 
-    for pad in document["pads"]:
-        if pad["label"] == "GND":
-            pad["chip_pin"] = None
-    (boards / "XIAO-ESP32-C6-DIP.json").write_text(json.dumps(document), encoding="utf-8")
-    assert collect_twins(boards)[0].pins.holds, "GND is a supply pad"
+    def rewrite(label, **fields):
+        for pad in document["pads"]:
+            if pad["label"] == label:
+                pad.update(fields)
+        (boards / "XIAO-ESP32-C6-DIP.json").write_text(
+            json.dumps(document), encoding="utf-8"
+        )
+        return collect_twins(boards)[0].pins
 
-    for pad in document["pads"]:
-        if pad["label"] == "D0":
-            pad["chip_pin"] = None
-    (boards / "XIAO-ESP32-C6-DIP.json").write_text(json.dumps(document), encoding="utf-8")
-    pins = collect_twins(boards)[0].pins
-    assert not pins.holds
-    assert pins.detail.endswith("none on D0"), pins.detail
+    assert rewrite("GND", chip_pin=None).holds, "GND is a supply pad"
+
+    pins = rewrite("D0", chip_pin=None)
+    assert not pins.holds and pins.detail.endswith("unanswered on D0"), pins.detail
+    pins = rewrite("D0", why_null=NOT_PUBLISHED)
+    assert not pins.holds, "import_pindefs' generic sentence says nobody looked"
+    pins = rewrite("D0", why_null="a dedicated debug pad, not a GPIO")
+    assert (pins.holds, pins.summary) == (True, "10+1/11")
 
 
 def test_a_board_with_only_supply_pads_does_not_hold_the_pins_layer(tmp_path):
@@ -886,20 +898,58 @@ def test_a_chip_dropped_from_firmware_verified_fails_the_runs_layer(tmp_path, mo
     assert (runs.holds, runs.summary) == (False, "ESP32-C6:no")
 
 
-def test_geometry_names_the_cad_file_or_says_there_is_none(tmp_path):
+def test_a_footprint_resolves_by_file_name_or_declared_name_and_otherwise_says_which_failure(
+    tmp_path,
+):
     boards = tmp_path / "boards"
     boards.mkdir()
-    _board_file(boards, "Footprint", footprint="XIAO-RP2040-DIP")
+    for name, footprint in (
+        ("Named", "Named"),
+        ("Declared", "Long Name"),
+        ("Ghost", "XIAO-NO-SUCH-BOARD"),
+        ("Sparse", "Gone"),
+    ):
+        _board_file(boards, name, footprint=footprint)
     _board_file(boards, "Unsourced")
-    (boards / "Filed.json").write_text(json.dumps({
-        "board": "Filed", "pads": [], "source": {"file": "third_party/x/board.brd"},
-    }), encoding="utf-8")
+    pad = '(pad "1" smd rect (at 0 0) (size 1 1) (layers "F.Cu"))'
+    vendor = _vendor_checkout(tmp_path / "vendor", {
+        "lib/Named.kicad_mod": f'(footprint "Named" {pad})',
+        "lib/Short.kicad_mod": f'(footprint "Long Name" {pad})',
+        "lib/Gone.kicad_mod": f'(footprint "Gone" {pad})',
+    })
+    (vendor / "lib" / "Gone.kicad_mod").unlink()
 
-    geometry = {twin.name: twin.geometry for twin in collect_twins(boards)}
-    assert geometry["Filed"] == (True, "file", "third_party/x/board.brd")
-    assert geometry["Footprint"] == (True, "footprint", "XIAO-RP2040-DIP")
-    assert not geometry["Unsourced"].holds
-    assert "source.file" in geometry["Unsourced"].detail
+    geometry = {twin.name: twin.geometry for twin in collect_twins(boards, vendor)}
+    assert geometry["Named"].holds and geometry["Named"].detail.endswith("lib/Named.kicad_mod")
+    assert geometry["Declared"].holds, "STM32C5's file is not named for its footprint"
+    assert "lib/Short.kicad_mod, declaring Long Name" in geometry["Declared"].detail
+    assert geometry["Ghost"][:2] == (False, "footprint:names nothing")
+    assert geometry["Sparse"][:2] == (False, "footprint:not fetched")
+    assert geometry["Unsourced"][:2] == (False, "none")
+
+    unfetched = {
+        twin.name: twin.geometry for twin in collect_twins(boards, tmp_path / "never")
+    }
+    assert unfetched["Named"][:2] == (False, "footprint:not fetched")
+    assert "get_board_sources.py" in unfetched["Named"].detail
+
+
+def test_a_named_file_must_be_on_disk_and_says_which_way_it_is_not(tmp_path, monkeypatch):
+    """`source.file` is what import_board.py writes, and a string is not a file."""
+    monkeypatch.chdir(tmp_path)
+    fetched, unfetched = board_sources.sources()[:2]
+    (tmp_path / "third_party" / fetched.name).mkdir(parents=True)
+    (tmp_path / "third_party" / fetched.name / "board.brd").write_text("x", encoding="utf-8")
+
+    here = _file_geometry(f"third_party/{fetched.name}/board.brd")
+    assert here == (True, "file", f"third_party/{fetched.name}/board.brd")
+    assert _file_geometry(f"third_party/{fetched.name}/nowhere.brd")[:2] == (
+        False, "file:names nothing"
+    )
+    assert _file_geometry("nowhere/at/all.brd")[:2] == (False, "file:names nothing")
+    away = _file_geometry(f"third_party/{unfetched.name}/board.brd")
+    assert away[:2] == (False, "file:not fetched")
+    assert f"get_board_sources.py {unfetched.name}" in away.detail
 
 
 def test_a_new_board_nothing_knows_is_a_row_with_its_layers_missing(tmp_path, monkeypatch):
@@ -920,11 +970,11 @@ def test_a_new_board_nothing_knows_is_a_row_with_its_layers_missing(tmp_path, mo
 
     assert set(after) - before == {"Late arrival"}
     late = after["Late arrival"]
-    assert late.geometry.holds
+    assert late.geometry.summary == "file:names nothing"
     assert late.model.summary == NO_SOURCE
     assert late.pins.summary == "0/1"
     assert not late.runs.holds
-    assert late.missing() == ("model", "pins", "runs")
+    assert late.missing() == ("geometry", "model", "pins", "runs")
 
 
 def test_the_supply_rule_is_read_from_its_one_home_and_a_missing_one_raises(tmp_path):
@@ -937,3 +987,72 @@ def test_the_supply_rule_is_read_from_its_one_home_and_a_missing_one_raises(tmp_
     elsewhere.write_text("OTHER = 1\n", encoding="utf-8")
     with pytest.raises(InventoryError, match="SUPPLY_LABELS"):
         supply_labels(elsewhere)
+
+
+def test_the_supply_rule_refuses_every_form_it_would_misread(tmp_path):
+    """Each case is a temp copy of the real file, changed in one place."""
+    real = (REPO / "tests" / "rules" / "test_import_pindefs.py").read_text(encoding="utf-8")
+    literal = re.compile(r"SUPPLY_LABELS = frozenset\(\{.*?\}\)", re.S)
+    assert len(literal.findall(real)) == 1
+    copy = tmp_path / "test_import_pindefs.py"
+    cases = {
+        "rebound later": real + '\nSUPPLY_LABELS = SUPPLY_LABELS | frozenset({"VUSB"})\n',
+        "extended in place": real + '\nSUPPLY_LABELS |= frozenset({"VUSB"})\n',
+        "a string, not a set": literal.sub('SUPPLY_LABELS = frozenset("GND")', real),
+        "another call": literal.sub('SUPPLY_LABELS = set({"GND"})', real),
+        "no argument": literal.sub("SUPPLY_LABELS = frozenset()", real),
+    }
+    for case, text in cases.items():
+        copy.write_text(text, encoding="utf-8")
+        with pytest.raises(InventoryError, match="SUPPLY_LABELS"):
+            supply_labels(copy)
+            pytest.fail(f"{case}: read without complaint")
+
+    copy.write_text(real, encoding="utf-8")
+    assert supply_labels(copy) == supply_labels()
+
+
+def test_inventory_calls_supply_exactly_the_pads_test_import_pindefs_does():
+    """`is_supply` copies the predicate OH-170's count applies; this holds the
+    copy to the original, pad by pad, until OH-172 gives the rule one home.
+
+    The original is the condition in `test_every_pad_either_names_its_pin_or_
+    says_why_it_has_none` that tests `SUPPLY_LABELS`, read out of that test
+    and evaluated as written.
+    """
+    from tests.rules import test_import_pindefs as counted
+
+    ours = supply_labels()
+    assert ours == counted.SUPPLY_LABELS
+    source = pathlib.Path(counted.__file__).read_text(encoding="utf-8")
+    counting = next(
+        node for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "test_every_pad_either_names_its_pin_or_says_why_it_has_none"
+    )
+    conditions = [
+        node.test for node in ast.walk(counting)
+        if isinstance(node, ast.If) and "SUPPLY_LABELS" in ast.unparse(node.test)
+    ]
+    assert len(conditions) == 1, [ast.unparse(test) for test in conditions]
+    theirs = compile(ast.Expression(conditions[0]), counted.__file__, "eval")
+
+    labels = [
+        (path.stem, pad["label"])
+        for path in sorted((REPO / "webui" / "boards").glob("*.json"))
+        for pad in json.loads(path.read_text(encoding="utf-8"))["pads"]
+    ]
+    # No label on disk is lower case or joins a supply to a pin with `/`, so
+    # these reach the two halves of the predicate the boards never exercise.
+    labels += [("probe", label) for label in ("gnd", "Vbus", "GND/PA0", "D0/GND", "d0")]
+    supplies = 0
+    for board, label in labels:
+        # This repository's own test code, with no builtins in reach.
+        expected = eval(theirs, {
+            "__builtins__": {},
+            "SUPPLY_LABELS": counted.SUPPLY_LABELS,
+            "label": label,
+        })
+        assert is_supply(label, ours) == expected, (board, label)
+        supplies += expected
+    assert supplies, "no pad on any board is a supply, so nothing was compared"

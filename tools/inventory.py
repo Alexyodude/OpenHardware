@@ -52,7 +52,9 @@ import sys
 import typing
 
 try:
+    from tools import board_sources, kicad
     from tools.import_3d_model import COMPOSED, MODELS
+    from tools.import_pindefs import NOT_PUBLISHED
     from tools.ledger import LedgerError, parse_ledger
     from tools.rules_meta import RuleParseError, load_rules
     from webui.boards import catalogue
@@ -65,7 +67,9 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     # convention CLAUDE.md documents for every other tool, put the repo root on
     # the path and retry. Both invocations then work.
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from tools import board_sources, kicad
     from tools.import_3d_model import COMPOSED, MODELS
+    from tools.import_pindefs import NOT_PUBLISHED
     from tools.ledger import LedgerError, parse_ledger
     from tools.rules_meta import RuleParseError, load_rules
     from webui.boards import catalogue
@@ -627,11 +631,20 @@ def collect_assets(
 
 #: The four layers OH-174 defines, in report order, each with when it holds.
 TWIN_LAYERS = (
-    ("geometry", "the board file's `source` names the vendor's CAD"),
+    ("geometry", "the board file's `source` names vendor CAD found on this disk"),
     ("model", "the 3D view draws a vendor or composed mesh, not the footprint"),
-    ("pins", "every non-supply pad names a `chip_pin`"),
+    ("pins", "every non-supply pad names a `chip_pin` or says specifically why not"),
     ("runs", "the chip is in catalogue.FIRMWARE_VERIFIED"),
 )
+#: The two ways a named CAD file is not found, which must not read alike.
+NOT_FETCHED = "not fetched"
+NAMES_NOTHING = "names nothing"
+GEOMETRY_FALLBACKS = (
+    (f"...:{NOT_FETCHED}", "it is in a vendor tree this checkout has not fetched"),
+    (f"...:{NAMES_NOTHING}", "the tree is here and holds no such file"),
+)
+#: What a vendor footprint is, for `source.footprint`.
+FOOTPRINT_SUFFIXES = (".kicad_mod",)
 #: The two ways the 3D view falls back to the footprint, which must not read alike.
 NOT_BUILT = "footprint:not built"
 NO_SOURCE = "footprint:no source"
@@ -663,32 +676,133 @@ class Twin(typing.NamedTuple):
 
 
 def supply_labels(source: pathlib.Path = SUPPLY_SOURCE) -> frozenset[str]:
-    """`SUPPLY_LABELS` as `source` assigns it, read without importing a test."""
+    """`SUPPLY_LABELS` as `source` assigns it, read without importing a test.
+
+    Refused unless it is assigned once, as `frozenset({...})` of strings: a
+    second binding is the one Python would use, and `frozenset("GND")` is a
+    set of three letters.
+    """
     try:
         tree = ast.parse(source.read_text(encoding="utf-8"))
     except (OSError, SyntaxError) as exc:
         raise InventoryError(f"{source}: {exc}") from exc
-    for node in tree.body:
-        if not isinstance(node, ast.Assign) or not any(
+    assigned = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+        and any(
             isinstance(target, ast.Name) and target.id == "SUPPLY_LABELS"
-            for target in node.targets
-        ):
+            for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        )
+    ]
+    if len(assigned) != 1:
+        raise InventoryError(
+            f"{source}: SUPPLY_LABELS is assigned {len(assigned)} times; "
+            f"one assignment is the only form read"
+        )
+    call = assigned[0].value
+    if (
+        not isinstance(call, ast.Call)
+        or not isinstance(call.func, ast.Name)
+        or call.func.id != "frozenset"
+        or len(call.args) != 1
+        or call.keywords
+        or not isinstance(call.args[0], ast.Set)
+    ):
+        raise InventoryError(
+            f"{source}: SUPPLY_LABELS is not frozenset({{...}}) of a set literal"
+        )
+    try:
+        labels = frozenset(ast.literal_eval(call.args[0]))
+    except ValueError as exc:
+        raise InventoryError(f"{source}: SUPPLY_LABELS: {exc}") from exc
+    if not labels or not all(isinstance(label, str) for label in labels):
+        raise InventoryError(f"{source}: SUPPLY_LABELS is not a non-empty set of strings")
+    return labels
+
+
+def is_supply(label: str, supplies: frozenset[str]) -> bool:
+    """The predicate tests/rules/test_import_pindefs.py applies to SUPPLY_LABELS.
+
+    A copy until OH-172 gives the rule one home;
+    `test_inventory_calls_supply_exactly_the_pads_test_import_pindefs_does`
+    holds the two together.
+    """
+    return label.split("/")[0].upper() in supplies or label.upper() in supplies
+
+
+def _declared_footprints(tree: _Tree) -> dict[str, str]:
+    """Declared footprint name -> the fetched `.kicad_mod` declaring it.
+
+    A file's name is not always its footprint's: `XIAO-STM32C5-SMD.kicad_mod`
+    declares `XIAO-XIAO STM32C5-SMD`.
+    """
+    declared: dict[str, str] = {}
+    for relative in tree.on_disk:
+        if pathlib.PurePosixPath(relative).suffix.lower() not in FOOTPRINT_SUFFIXES:
             continue
         try:
-            labels = frozenset(ast.literal_eval(node.value.args[0]))
-        except (AttributeError, IndexError, ValueError) as exc:
-            raise InventoryError(
-                f"{source}: SUPPLY_LABELS is not frozenset({{...}}): {exc}"
-            ) from exc
-        if labels:
-            return labels
-    raise InventoryError(f"{source}: assigns no non-empty SUPPLY_LABELS")
+            footprint = kicad.read_footprint(tree.root / relative)
+        except kicad.KicadError:
+            # A footprint with no pads is nobody's board.
+            continue
+        declared.setdefault(footprint.name, relative)
+    return declared
 
 
-def _geometry_layer(source: dict) -> Layer:
-    for key in ("file", "footprint"):
-        if source.get(key):
-            return Layer(True, key, source[key])
+def _file_geometry(named: str) -> Layer:
+    path = pathlib.Path(named)
+    if path.is_file():
+        return Layer(True, "file", path.as_posix())
+    owner = next(
+        (
+            candidate
+            for candidate in board_sources.sources()
+            if path.is_relative_to(candidate.dest(pathlib.Path(".")))
+        ),
+        None,
+    )
+    if owner is not None and not owner.dest(pathlib.Path(".")).is_dir():
+        return Layer(
+            False,
+            f"file:{NOT_FETCHED}",
+            f"{named}: {owner.dest(pathlib.Path('.')).as_posix()} is not fetched here; "
+            f"run: python tools/get_board_sources.py {owner.name}",
+        )
+    return Layer(False, f"file:{NAMES_NOTHING}", f"{named} is not a file here")
+
+
+def _footprint_geometry(footprint: str, tree: _Tree, declared_names: dict[str, str]) -> Layer:
+    if tree.unsearchable:
+        return Layer(False, f"footprint:{NOT_FETCHED}", tree.unsearchable)
+    hit = _named_for(tree.on_disk, footprint, FOOTPRINT_SUFFIXES)
+    if hit:
+        return Layer(True, "footprint", f"{tree.root.as_posix()}/{hit}")
+    declared = declared_names.get(footprint)
+    if declared:
+        return Layer(
+            True, "footprint", f"{tree.root.as_posix()}/{declared}, declaring {footprint}"
+        )
+    hit = _named_for(tree.indexed, footprint, FOOTPRINT_SUFFIXES)
+    if hit:
+        return Layer(
+            False,
+            f"footprint:{NOT_FETCHED}",
+            f"{hit} — in the vendor's git tree, not fetched",
+        )
+    return Layer(
+        False,
+        f"footprint:{NAMES_NOTHING}",
+        f"no .kicad_mod under {tree.root.as_posix()} is named {footprint} or declares it",
+    )
+
+
+def _geometry_layer(source: dict, tree: _Tree, declared_names: dict[str, str]) -> Layer:
+    """`source.file` first, because a path is exact; else `source.footprint`."""
+    if source.get("file"):
+        return _file_geometry(source["file"])
+    if source.get("footprint"):
+        return _footprint_geometry(source["footprint"], tree, declared_names)
     return Layer(
         False,
         "none",
@@ -723,24 +837,32 @@ def _model_layer(name: str, index: dict | None, builders: dict[str, str]) -> Lay
 
 
 def _pins_layer(pads: list, supplies: frozenset[str]) -> Layer:
-    signal = []
-    missing = []
+    """A non-supply pad answers if it names a `chip_pin` or its `why_null` is
+    specific. tools/import_pindefs.py's `NOT_PUBLISHED` is not specific, and
+    neither is no reason at all.
+    """
+    signal = named = reasoned = 0
+    unanswered = []
     for pad in pads:
         label = pad.get("label") or ""
-        # The predicate test_import_pindefs.py applies to SUPPLY_LABELS.
-        if label.split("/")[0].upper() in supplies or label.upper() in supplies:
+        if is_supply(label, supplies):
             continue
-        signal.append(label)
-        if pad.get("chip_pin") is None:
-            missing.append(label)
-    named = len(signal) - len(missing)
+        signal += 1
+        why = pad.get("why_null")
+        if pad.get("chip_pin") is not None:
+            named += 1
+        elif why and why != NOT_PUBLISHED:
+            reasoned += 1
+        else:
+            unanswered.append(label)
     detail = (
-        f"{named} of {len(signal)} non-supply pads name a `chip_pin`; "
-        f"{len(pads) - len(signal)} supply pads excluded"
+        f"{named} of {signal} non-supply pads name a `chip_pin` and {reasoned} "
+        f"say why not; {len(pads) - signal} supply pads excluded"
     )
-    if missing:
-        detail += f"; none on {', '.join(missing)}"
-    return Layer(bool(signal) and not missing, f"{named}/{len(signal)}", detail)
+    if unanswered:
+        detail += f"; unanswered on {', '.join(unanswered)}"
+    summary = f"{named}+{reasoned}/{signal}" if reasoned else f"{named}/{signal}"
+    return Layer(bool(signal) and not unanswered, summary, detail)
 
 
 def _runs_layer(name: str) -> Layer:
@@ -754,7 +876,10 @@ def _runs_layer(name: str) -> Layer:
     return Layer(True, chip, evidence)
 
 
-def collect_twins(boards_dir: pathlib.Path = BOARDS_DIR) -> list[Twin]:
+def collect_twins(
+    boards_dir: pathlib.Path = BOARDS_DIR,
+    vendor_dir: pathlib.Path = VENDOR_DIR,
+) -> list[Twin]:
     """Per board, the four layers, each read from the code that owns it."""
     if not boards_dir.is_dir():
         raise InventoryError(f"{boards_dir}: boards directory does not exist")
@@ -762,6 +887,8 @@ def collect_twins(boards_dir: pathlib.Path = BOARDS_DIR) -> list[Twin]:
     if not paths:
         raise InventoryError(f"{boards_dir}: contains no board definitions")
 
+    tree = _vendor_tree(vendor_dir)
+    declared_names = _declared_footprints(tree)
     supplies = supply_labels()
     served = resolve_static(MODEL_INDEX)
     try:
@@ -792,7 +919,7 @@ def collect_twins(boards_dir: pathlib.Path = BOARDS_DIR) -> list[Twin]:
         twins.append(
             Twin(
                 name=name,
-                geometry=_geometry_layer(data.get("source") or {}),
+                geometry=_geometry_layer(data.get("source") or {}, tree, declared_names),
                 model=_model_layer(name, index, builders),
                 pins=_pins_layer(pads, supplies),
                 runs=_runs_layer(name),
@@ -885,12 +1012,26 @@ def _twins_by_completeness(twins: list[Twin]) -> list[Twin]:
 
 
 def _twin_heading(twins: list[Twin]) -> str:
+    """The summary line. A fetch or build this checkout has not run is counted
+    beside its layer, so a fresh clone's zeros do not read as facts about boards.
+    """
     whole = sum(1 for twin in twins if not twin.missing())
-    tallies = ", ".join(
-        f"{name} {sum(1 for twin in twins if getattr(twin, name).holds)}"
-        for name, _ in TWIN_LAYERS
+    unfetched = sum(
+        1 for twin in twins if twin.geometry.summary.endswith(f":{NOT_FETCHED}")
     )
-    return f"{whole} of {len(twins)} boards hold all four; by layer: {tallies}"
+    unbuilt = sum(1 for twin in twins if twin.model.summary == NOT_BUILT)
+    tallies = []
+    for name, _ in TWIN_LAYERS:
+        held = f"{name} {sum(1 for twin in twins if getattr(twin, name).holds)}"
+        if name == "geometry" and unfetched:
+            held += f" ({unfetched} not fetched here)"
+        if name == "model" and unbuilt:
+            held += f" ({unbuilt} not built here)"
+        tallies.append(held)
+    return (
+        f"{whole} of {len(twins)} boards hold all four; "
+        f"by layer: {', '.join(tallies)}"
+    )
 
 
 def _asset_md(asset: Asset) -> str:
@@ -990,12 +1131,15 @@ def render_text() -> str:
         )
         lines.append(f"  {cells}{report.name}")
 
-    widths = (11, 21, 8, 15)
+    widths = (25, 21, 9, 15)
     lines.append("")
     lines.append(f"TWINS — {_twin_heading(inv.twins)}")
     lines.append("  A layer holds when:")
     for name, gloss in TWIN_LAYERS:
         lines.append(f"    {name:<20} {gloss}")
+    lines.append("  A named file is not found two ways, after `footprint:` or `file:`:")
+    for token, gloss in GEOMETRY_FALLBACKS:
+        lines.append(f"    {token:<20} {gloss}")
     lines.append("  The model layer falls back to the footprint two ways:")
     for token, gloss in MODEL_FALLBACKS:
         lines.append(f"    {token:<20} {gloss}")
@@ -1122,7 +1266,10 @@ def render_markdown() -> str:
 
     out += ["", f"## Twins — {_twin_heading(inv.twins)}", ""]
     out += [f"* `{name}` holds when {gloss}" for name, gloss in TWIN_LAYERS]
-    out += [f"* `{token}` — {gloss}" for token, gloss in MODEL_FALLBACKS]
+    out += [
+        f"* `{token}` — {gloss}"
+        for token, gloss in GEOMETRY_FALLBACKS + MODEL_FALLBACKS
+    ]
     out += [
         "",
         "| board | " + " | ".join(name for name, _ in TWIN_LAYERS) + " |",
