@@ -46,7 +46,8 @@ and it did.
 
 The two boards that do not start with `XIAO-` at all (`Arduino Uno`, and
 `XIAO-XIAO STM32C5-SMD` with its doubled prefix) are named explicitly rather
-than silently mis-parsed.
+than silently mis-parsed. A board that is a row in `tools/board_manifest.py`
+takes its chip from that row (OH-176).
 """
 
 from __future__ import annotations
@@ -56,10 +57,10 @@ import pathlib
 import sys
 
 try:
-    from tools import build_core
+    from tools import board_manifest, build_core
 except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
-    from tools import build_core
+    from tools import board_manifest, build_core
 
 BOARDS_DIR = pathlib.Path(__file__).resolve().parent
 
@@ -291,10 +292,14 @@ def chip_for(board_name: str) -> str:
     """
     if board_name in IRREGULAR:
         return IRREGULAR[board_name]
+    for row in board_manifest.ROWS:
+        if row.board == board_name:
+            return row.chip
     if not board_name.startswith("XIAO-"):
         raise CatalogueError(
             f"cannot tell which chip is on {board_name!r}: it does not start "
-            f"with XIAO-. Add it to IRREGULAR."
+            f"with XIAO- and is not a row in tools/board_manifest.py. Add a "
+            f"row there, or name it in IRREGULAR."
         )
     rest = board_name[len("XIAO-"):]
     # Longest first, so `ESP32-C3` wins over a hypothetical `ESP32`, and

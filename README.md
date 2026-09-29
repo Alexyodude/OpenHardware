@@ -110,9 +110,15 @@ Outline and pad labels only, not yet wired:
 - `XIAO-nRF52840-DIP` · `XIAO-nRF52840-SMD`
 - `XIAO-nRF54LM20A-DIP` · `XIAO-nRF54LM20A-SMD`
 - `XIAO-nRF54l15-DIP` · `XIAO-nRF54l15-SMD`
+- `SparkFun Thing Plus ESP32-C6`
 
 All XIAO artwork is Seeed Studio's, MIT, from
 [OSHW-XIAO-Series](https://github.com/Seeed-Studio/OSHW-XIAO-Series).
+
+A board that is not a XIAO is a row in `tools/board_manifest.py`: its CAD
+file, the elements carrying its header, its chip, and the board-support
+variant that names its pins. `python tools/board_manifest.py` writes its file
+from that row, and writes no SVG beside it.
 
 This list is not maintained by hand.
 `test_readme_board_list_matches_the_directory` fails if it drifts from

@@ -131,6 +131,12 @@ import sys
 import textwrap
 import typing
 
+try:
+    from tools import board_manifest
+except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from tools import board_manifest
+
 REPO = pathlib.Path(__file__).resolve().parents[1]
 BSP_DIR = REPO / "third_party" / "bsp"
 BOARDS_DIR = REPO / "webui" / "boards"
@@ -1623,6 +1629,20 @@ BOARDS = {
     ),
 }
 
+#: Boards that are rows in `tools/board_manifest.py` (OH-176), each read from
+#: the one variant its row names, with the labels its row opts in. Registered
+#: like any other, and kept out of one thing: a chip module's table, which is
+#: keyed by the labels of the other boards of that chip. One chip has one
+#: table, and a row brings labels of its own.
+MANIFEST: dict[str, Board] = {
+    entry.board: Board(
+        entry.chip,
+        (arduino_flat(entry.package, entry.variant, extras=entry.labels),),
+    )
+    for entry in board_manifest.ROWS
+}
+BOARDS.update(MANIFEST)
+
 
 # --------------------------------------------------------------------------
 # Resolving a board
@@ -2018,6 +2038,14 @@ def _label_order(label: str) -> tuple[int, int]:
     return (0, int(number.group(1))) if number else (1, 0)
 
 
+def header_boards(chip: str) -> tuple[str, ...]:
+    """The registered boards whose labels key this chip's module table."""
+    return tuple(
+        name for name, board in sorted(BOARDS.items())
+        if board.chip == chip and name not in MANIFEST
+    )
+
+
 def header_table(
     chip: str,
     bsp_dir: pathlib.Path = BSP_DIR,
@@ -2032,7 +2060,7 @@ def header_table(
     two different pins is refused, because one chip has one table and a
     module cannot carry two.
     """
-    names = tuple(name for name, board in sorted(BOARDS.items()) if board.chip == chip)
+    names = header_boards(chip)
     if not names:
         raise PindefError(
             f"no registered board has chip {chip!r}; chips: "
@@ -2235,7 +2263,8 @@ def unnumbered_sentence(chip: str, pins: list[str], described: bool) -> str:
 
 def assumption_for(chip: str, described: bool, covered: bool,
                    unnumbered: list[str] | None = None,
-                   resolved: int = 0, unresolved: int = 0) -> str:
+                   resolved: int = 0, unresolved: int = 0,
+                   keyed_by: tuple[str, ...] = ()) -> str:
     """What a board file says about its own `pin`, `chip_pin` and `chip_index`.
 
     Three shapes, because three things can be true of a board. `pin` is null
@@ -2243,6 +2272,8 @@ def assumption_for(chip: str, described: bool, covered: bool,
     rcontrol index of a PICSimLab board that does not exist. What varies is
     whether any package publishes this board's pins at all, and, where one
     does, whether a module here reads a level through the same table.
+    `keyed_by` is a fourth: a module describes the chip, and its table is
+    keyed by those boards' labels and not this one's.
 
     The uncovered case is its own sentence rather than the undescribed one
     with an empty `packages` list: "the join is ready, not made" would be
@@ -2298,7 +2329,17 @@ def assumption_for(chip: str, described: bool, covered: bool,
         "the board-support packages named in `pindefs`; a pad whose `chip_pin` is "
         "null says why in `why_null`. "
     )
-    if described:
+    if described and keyed_by:
+        # A manifest board (OH-176): the module describes the chip, and its
+        # table is keyed by `keyed_by`'s labels rather than this board's.
+        body = (
+            f"webui/boards/{chip.lower().replace('-', '')}.py describes the "
+            f"{chip}, and its table is keyed by the labels of "
+            f"{', '.join(keyed_by)}, which are not this board's; no level is "
+            f"read through it for any pad here, and `chip_pin` is recorded so "
+            f"that the join is ready, not made."
+        )
+    elif described:
         body = (
             f"webui/boards/{chip.lower().replace('-', '')}.py reads a level through "
             f"the same table, so a pad with a `chip_pin` answers for itself in the "
@@ -2382,6 +2423,7 @@ def filled_board(
         "on_board": report["on_board"],
     }
     described = module_path(report["chip"], boards_dir).is_file()
+    keyed_by = header_boards(report["chip"]) if name in MANIFEST else ()
     filled_document: dict = {}
     for key, value in document.items():
         if key == "pads":
@@ -2393,7 +2435,7 @@ def filled_board(
         if key == "assumption":
             filled_document["assumption"] = assumption_for(
                 report["chip"], described, covered, spellings,
-                report["resolved"], report["unresolved"],
+                report["resolved"], report["unresolved"], keyed_by,
             )
             filled_document["pindefs"] = pindefs
     if "pindefs" not in filled_document:

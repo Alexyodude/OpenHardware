@@ -1128,7 +1128,10 @@ def test_the_board_file_and_the_module_agree_on_every_labelled_pad():
     for name in sorted(BOARDS):
         module = api.description_for(name)
         names = getattr(module, "PIN_NAMES", None)
-        if names is None:
+        # A row in tools/board_manifest.py shares its chip's module and not
+        # its labels. `test_no_row_label_keys_its_chips_module_table` holds
+        # the other side of that: none of its labels reaches this table.
+        if names is None or name in pindefs.MANIFEST:
             continue
         header = module.HEADER
         document = json.loads(pindefs.board_path(name).read_text(encoding="utf-8"))
@@ -1710,7 +1713,10 @@ def test_a_dedicated_debug_pad_says_so_rather_than_that_nobody_named_it():
     # 219 nulls including every supply pad, and the assertion could not have
     # failed however many reasons were made specific. A negative control that
     # cannot go negative is not one.
-    generic = [pad["label"] for board in BOARDS
+    # The XIAO boards only: a row in tools/board_manifest.py is not what
+    # OH-170 left behind, and `test_every_pad_either_names_its_pin_or_says_why_it_has_none`
+    # counts its pads.
+    generic = [pad["label"] for board in BOARDS if board not in pindefs.MANIFEST
                for pad in json.loads(pindefs.board_path(board).read_text(encoding="utf-8"))["pads"]
                if pad["chip_pin"] is None
                and "defines this label" in (pad.get("why_null") or "")
@@ -1777,6 +1783,9 @@ def test_a_pad_of_the_on_board_debugger_is_not_given_the_boards_own_mcu_pin():
 SUPPLY_LABELS = frozenset({
     "GND", "3V3_OUT", "VBUS", "VBAT", "VIN", "5V", "3V3", "EN", "NC",
     "AREF", "IOREF", "RESET", "PAD", "BAT", "VDD", "VCC", "RST",
+    # The SparkFun Thing Plus ESP32-C6's rail nets, as its EAGLE files name
+    # them. Its schematic puts no ESP32-C6 GPIO on any of the three.
+    "3.3V", "V_USB", "V_BATT",
 })
 
 
@@ -1806,7 +1815,7 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # and the Uno's pins come from its own variant -- and a count that skipped
     # it would be a count of most of the boards.
     files = sorted(pindefs.BOARDS_DIR.glob("*.json"))
-    assert len(files) == 26, [one.stem for one in files]
+    assert len(files) == 27, [one.stem for one in files]
     for path in files:
         board = path.stem
         for pad in json.loads(path.read_text(encoding="utf-8"))["pads"]:
@@ -1830,9 +1839,11 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
 
     # 363 before the XIAO STM32C5's two pads were read off Seeed's schematic
     # symbol library; they moved out of `specific`, which is why that number
-    # falls by exactly what this one rises by.
-    assert naming == 365, naming
-    assert supplies == 153, supplies
+    # falls by exactly what this one rises by. 365 until the SparkFun Thing
+    # Plus ESP32-C6 (OH-176) added its 28 pads: 5 named by its arduino-esp32
+    # variant, 4 supplies, and 19 generic.
+    assert naming == 370, naming
+    assert supplies == 157, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
     # same debug cluster already carried; 42 until the six SWD pads on the
     # RP2040, SAMD21 and nRF52840 stopped saying nobody had published them.
@@ -1844,11 +1855,11 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # names while `chip_pin` stays null, because the vendor spells that pad
     # two ways and no file here joins them.
     assert specific == 49, specific
-    assert generic == 15, (
+    assert generic == 34, (
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
-    assert naming + supplies + specific + generic == 582
+    assert naming + supplies + specific + generic == 610
 
 
 def test_the_tracer_refuses_a_part_string_that_matches_more_than_one_footprint():
