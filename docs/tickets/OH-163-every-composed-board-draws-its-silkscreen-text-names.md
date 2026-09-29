@@ -6,7 +6,6 @@ status: open
 priority: P2
 created: '2026-09-04'
 touches:
-- tools/import_3d_model.py
 - tools/model_from_datasheet.py
 - tests/rules/test_import_3d_model.py
 ---
@@ -44,3 +43,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-09-29:** Found 2026-09-29 by the OH-175 review, not caused by it. Two tests in tests/rules/test_import_3d_model.py fail with ModuleNotFoundError: No module named 'OCP' on a machine where the cached part-R_Axial STEP files exist and OCP is not installed for the python running pytest. Their guards (lines 529 and 726 at 4f5b2dd) skip only when the cached STEP is missing, while the file's header (lines 23-25) says those tests skip unless BOTH OCP is installed and the archive is on disk. Reproduced at f77cfc4 in a temporary worktree, so it predates OH-175 and OH-176. The fix is the guard, not the header: check for OCP the same way the header describes.
 
 **Note 2026-09-29:** 2026-09-29: tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py lent to OH-180 (compose the manifest boards from their own EAGLE board files, as the Uno is), nobody holding this ticket. Add both back with tickets set OH-163 --touch when OH-180 closes. Nothing in this ticket's four items is changed by the loan.
+
+**Note 2026-09-29:** 2026-09-29: tools/import_3d_model.py also lent to OH-180, for three rows in COMPOSED: test_the_two_lists_of_composed_boards_agree requires COMPOSED to equal the boards in compose_board_3d.COMPOSITIONS, and OH-180 adds the three manifest boards there. Add it back with the other two when OH-180 closes.
