@@ -2655,6 +2655,19 @@ def test_a_net_on_a_chip_pad_the_table_gives_no_gpio_names_none_and_stops_there(
     assert _traced(_traced_board(signals, {"R1": (2, "10k")})) == {"3V3": None}
 
 
+def test_a_pad_past_the_pins_the_page_numbers_is_reached_and_names_no_pin():
+    """The footprint's own pad past the page's count: the net touches the
+    chip there, so no resistor is crossed from it, and the path says what
+    that pad is rather than dropping it."""
+    signals = {"GNDPAD": ["J1.1", "U1.5", "R1.1"], "N1": ["R1.2", "U1.1"]}
+    (found,) = pindefs.read_eagle_traced(
+        (_traced_board(signals, {"R1": (2, "10k")}),), path=pathlib.Path("probe.brd"),
+        select=("J1",), table=_TABLE).values()
+    assert found == pindefs.Traced(None, (
+        "GNDPAD -> U1 pad 5 = not a pin of the part (past the page's 4) "
+        "(this test's own table)"))
+
+
 def test_a_pad_the_table_does_not_transcribe_is_refused_and_never_read_as_no_gpio():
     """Directly, through a resistor, and under a name that carries a GPIO:
     the refusal says the table left the pad out, not that the copper
@@ -2674,7 +2687,7 @@ def test_a_net_named_for_another_gpio_than_its_copper_reaches_is_refused():
     assert _traced(_traced_board({"IO4/TX": ["J1.1", "U1.1"]})) == {"IO4/TX": "GPIO4"}
     assert _traced(_traced_board({"tx/gpio4": ["J1.1", "U1.1"]})) == {"tx/gpio4": "GPIO4"}
     for net, reaches in (("TX/IO5", r"U1 pad 1 = GPIO4"), ("GPIO5", r"U1 pad 1 = GPIO4"),
-                         ("tx/io5", r"U1 pad 1 = GPIO4"), ("IO4", r"no pin of U1"),
+                         ("tx/io5", r"U1 pad 1 = GPIO4"), ("IO4", r"no pad of U1"),
                          ("IO4/3V3", r"U1 pad 3 = 3V3")):
         contacts = {"IO4": ["J1.1"], "IO4/3V3": ["J1.1", "U1.3"]}.get(net, ["J1.1", "U1.1"])
         with pytest.raises(PindefError, match=f"'{re.escape(net)}' is named for GPIO\\d+ "

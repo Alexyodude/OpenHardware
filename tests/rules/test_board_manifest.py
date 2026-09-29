@@ -593,6 +593,22 @@ def test_a_regenerated_pad_keeps_nothing_from_an_earlier_run(tmp_path):
     assert filled["pads"] == committed["pads"]
 
 
+def test_no_null_pad_says_only_that_no_package_names_it():
+    """The CAD was traced too, so a null pad says what that found: a pad of
+    the chip with no GPIO, no pad of the chip (`NOT_TRACED`), or the row's
+    own reason. V_USB is the pilot's `NOT_TRACED`, and the pilot's GND names
+    the eight footprint pads past the page's 29."""
+    for row in ROWS:
+        for pad in _committed(row)["pads"]:
+            if pad["chip_pin"] is None:
+                assert pad["why_null"] != import_pindefs.NOT_PUBLISHED, (row.board, pad)
+    pilot = {pad["label"]: pad for pad in _committed(row_named("SparkFun Thing Plus ESP32-C6"))["pads"]}
+    assert pilot["V_USB"]["why_null"] == import_pindefs.NOT_TRACED
+    assert pilot["GND"]["why_null"].startswith(
+        "no GPIO: the vendor's board file traces GND -> U1 2 pads = GND; pad 29 = EPAD; "
+        "8 pads = not a pin of the part (past the page's 29) (")
+
+
 def test_every_reason_is_on_a_pad_and_carried_by_it():
     for row in ROWS:
         pads = {pad["label"]: pad for pad in _committed(row)["pads"]}

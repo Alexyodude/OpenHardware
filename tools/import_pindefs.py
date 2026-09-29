@@ -879,11 +879,11 @@ def read_eagle_traced(
     file (`path`) and read against the chip's datasheet table (OH-178).
 
     The chip is the one element placed as the table's package and value. A
-    net reaches it directly, or, where it touches no pin of the chip,
+    net reaches it directly, or, where it touches no pad of the chip,
     through one resistor whose other net holds that resistor and one chip
     pad and nothing else: the QT Py's TX, through R4. Any other part stops
     the trace: an LED, a jumper, a capacitor, a switch, a connector. A pad
-    numbered past the table's `pins` is not a pin of the part.
+    numbered past the table's `pins` is on the chip and is no pin of it.
 
     A net on one GPIO names it. A net on pads the table gives no GPIO
     (3V3, EN, GND) names none and says which. A net on a pad the table
@@ -905,26 +905,30 @@ def read_eagle_traced(
             f"against exactly one"
         )
     (chip,) = chips
-    gpio, named = dict(table.gpio), dict(table.not_gpio)
+    gpio = dict(table.gpio)
+    # A pad the footprint numbers past the page's count is on the chip and
+    # is no pin of it: reached, so no resistor is crossed from it, and named.
+    named = {**dict(table.not_gpio), **{
+        pad.number: f"not a pin of the part (past the page's {table.pins})"
+        for pad in chip.pads if pad.number.isdigit() and int(pad.number) > table.pins}}
     contacts = collections.Counter(
         pad.net for element in board.elements for pad in element.pads if pad.net)
 
-    def pins_on(net: str) -> list[str]:
-        return [pad.number for pad in chip.pads if pad.net == net
-                and not (pad.number.isdigit() and int(pad.number) > table.pins)]
+    def pads_on(net: str) -> list[str]:
+        return [pad.number for pad in chip.pads if pad.net == net]
 
     traced: dict[str, Traced] = {}
     for net in dict.fromkeys(net for net in header if net):
-        reached, crossed = pins_on(net), []
+        reached, crossed = pads_on(net), []
         for part in board.elements if not reached else ():
             nets = [pad.net for pad in part.pads]
             if (len(nets) != 2 or net not in nets or not _RESISTOR.fullmatch(part.name)
                     or not _OHMS.fullmatch((part.value or "").strip())):
                 continue
             far = nets[1 - nets.index(net)]
-            if contacts[far] == 2 and pins_on(far):
+            if contacts[far] == 2 and pads_on(far):
                 crossed.append(f"{part.name} ({part.value.strip()})")
-                reached += pins_on(far)
+                reached += pads_on(far)
         chain = [net, ", ".join(crossed)] if crossed else [net]
         loose = [number for number in reached if number not in gpio and number not in named]
         if loose:
@@ -951,7 +955,7 @@ def read_eagle_traced(
             raise PindefError(
                 f"the net {net!r} is named for "
                 f"{', '.join(f'GPIO{n}' for n in stated)} and its copper reaches "
-                f"{f'{chip.name} {at}' if reached else f'no pin of {chip.name}'}; "
+                f"{f'{chip.name} {at}' if reached else f'no pad of {chip.name}'}; "
                 f"the board file says two things"
             )
         if reached:
@@ -2038,7 +2042,14 @@ MANIFEST_DERIVATION = (
 )
 
 NOT_PUBLISHED = "no board-support package covering this board defines this label"
-DISPUTED = "the packages disagree; recorded rather than averaged, so the pad stays null"
+#: The same search on a manifest board whose own CAD was traced too, and
+#: which found nothing either: `tools/inventory.py` counts it unanswered.
+NOT_TRACED = (
+    "no board-support package covering this board defines this label, and in "
+    "the vendor's board file this pad's net reaches no pad of the chip, "
+    "directly or through one resistor"
+)
+DISPUTED ="the packages disagree; recorded rather than averaged, so the pad stays null"
 
 #: The reason on a board no package covers, which is a different fact from
 #: `NOT_PUBLISHED` and reads identically if it is not told apart: "no package
@@ -2120,6 +2131,9 @@ def board_report(
                     for rival in pad["disputed"]]
             elif traced := [claim.via for claim in entry.claims if claim.pin is None]:
                 pad["reason"] = f"no GPIO: the vendor's board file traces {traced[0]}"
+            elif not entry.claims and any(PACKAGES[source.package].pin_table
+                                          for source in board.sources):
+                pad["reason"] = NOT_TRACED
     # A label the registry has a better reason for, applied only where nothing
     # resolved it -- a reason never overrides an answer.
     reasons = dict(board.reasons)

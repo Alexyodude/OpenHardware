@@ -15,7 +15,7 @@ import pytest
 
 import webui.emulator_server as server
 from tools import board_sources
-from tools.import_pindefs import DISPUTED, NO_PACKAGE_AT_ALL, NOT_PUBLISHED
+from tools.import_pindefs import DISPUTED, NO_PACKAGE_AT_ALL, NOT_PUBLISHED, NOT_TRACED
 from tools.inventory import (
     MODEL_INDEX,
     NO_SOURCE,
@@ -871,7 +871,7 @@ def test_a_blanked_chip_pin_fails_the_pins_layer_unless_it_says_specifically_why
 
     pins = rewrite("D0", chip_pin=None)
     assert not pins.holds and pins.detail.endswith("unanswered on D0"), pins.detail
-    for unanswered in (NOT_PUBLISHED, NO_PACKAGE_AT_ALL, DISPUTED):
+    for unanswered in (NOT_PUBLISHED, NO_PACKAGE_AT_ALL, NOT_TRACED, DISPUTED):
         pins = rewrite("D0", why_null=unanswered)
         assert not pins.holds, f"import_pindefs' {unanswered!r} answers nothing"
     pins = rewrite("D0", why_null="a dedicated debug pad, not a GPIO")

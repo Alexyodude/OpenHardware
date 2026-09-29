@@ -55,7 +55,7 @@ try:
     from tools import board_sources, kicad
     from tools.import_3d_model import COMPOSED, MODELS
     from tools.import_board import READERS
-    from tools.import_pindefs import DISPUTED, NO_PACKAGE_AT_ALL, NOT_PUBLISHED
+    from tools.import_pindefs import DISPUTED, NO_PACKAGE_AT_ALL, NOT_PUBLISHED, NOT_TRACED
     from tools.ledger import LedgerError, parse_ledger
     from tools.rules_meta import RuleParseError, load_rules
     from webui.boards import catalogue
@@ -71,7 +71,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools import board_sources, kicad
     from tools.import_3d_model import COMPOSED, MODELS
     from tools.import_board import READERS
-    from tools.import_pindefs import DISPUTED, NO_PACKAGE_AT_ALL, NOT_PUBLISHED
+    from tools.import_pindefs import DISPUTED, NO_PACKAGE_AT_ALL, NOT_PUBLISHED, NOT_TRACED
     from tools.ledger import LedgerError, parse_ledger
     from tools.rules_meta import RuleParseError, load_rules
     from webui.boards import catalogue
@@ -648,7 +648,7 @@ GEOMETRY_FALLBACKS = (
 #: What a vendor footprint is, for `source.footprint`.
 FOOTPRINT_SUFFIXES = (".kicad_mod",)
 #: The `why_null` reasons that leave a pad unanswered; see `_pins_layer`.
-UNANSWERED = frozenset({NOT_PUBLISHED, NO_PACKAGE_AT_ALL, DISPUTED})
+UNANSWERED = frozenset({NOT_PUBLISHED, NO_PACKAGE_AT_ALL, NOT_TRACED, DISPUTED})
 #: The two ways the 3D view falls back to the footprint, which must not read alike.
 NOT_BUILT = "footprint:not built"
 NO_SOURCE = "footprint:no source"
@@ -857,9 +857,10 @@ def _model_layer(name: str, index: dict | None, builders: dict[str, str]) -> Lay
 
 def _pins_layer(pads: list, supplies: frozenset[str]) -> Layer:
     """A non-supply pad answers if it names a `chip_pin` or its `why_null` is
-    specific. No reason at all is not, and neither are three of
+    specific. No reason at all is not, and neither are four of
     tools/import_pindefs.py's: `NOT_PUBLISHED` and `NO_PACKAGE_AT_ALL` say no
-    package covers the pad, and `DISPUTED` says the packages disagree.
+    package covers the pad, `NOT_TRACED` adds that the vendor's CAD reached
+    no pad of the chip either, and `DISPUTED` says the packages disagree.
     """
     signal = named = reasoned = 0
     unanswered = []
