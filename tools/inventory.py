@@ -12,7 +12,7 @@ and `upstream-sync.md` each drifted from the code they described inside a single
 session. An inventory is exactly the kind of document that rots fastest, so
 this one is generated on demand instead of written down.
 
-Six collectors, one per thing worth counting:
+Seven collectors, one per thing worth counting:
 
 * `collect_tests`   — parses each test file with `ast`
 * `collect_mechanisms` — reads `rules/*.md` frontmatter
@@ -20,6 +20,7 @@ Six collectors, one per thing worth counting:
 * `collect_ledgers` — parses every ledger under `docs/features/`
 * `collect_boards`  — reads every board definition under `webui/boards/`
 * `collect_assets`  — searches for the CAD behind each board, and grades it
+* `collect_twins`   — the four digital-twin layers per board (OH-174)
 
 Each raises rather than returning an empty result. A report that renders
 cheerfully with nothing in it is indistinguishable from a report of a healthy
@@ -51,8 +52,11 @@ import sys
 import typing
 
 try:
+    from tools.import_3d_model import COMPOSED, MODELS
     from tools.ledger import LedgerError, parse_ledger
     from tools.rules_meta import RuleParseError, load_rules
+    from webui.boards import catalogue
+    from webui.emulator_server import resolve_static
 except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     # Unlike the four checkers, this tool imports its siblings. Running it as
     # `python tools/inventory.py` puts `tools/` on sys.path rather than the repo
@@ -61,8 +65,11 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     # convention CLAUDE.md documents for every other tool, put the repo root on
     # the path and retry. Both invocations then work.
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from tools.import_3d_model import COMPOSED, MODELS
     from tools.ledger import LedgerError, parse_ledger
     from tools.rules_meta import RuleParseError, load_rules
+    from webui.boards import catalogue
+    from webui.emulator_server import resolve_static
 
 TESTS_DIR = pathlib.Path("tests/rules")
 RULES_DIR = pathlib.Path("rules")
@@ -80,6 +87,12 @@ BOARDS_DIR = pathlib.Path("webui/boards")
 #: this one is read by every `--markdown` run. `test_the_vendor_dir_is_the
 #: _registry_s_own_path` binds the two instead, so they cannot drift quietly.
 VENDOR_DIR = pathlib.Path("third_party/seeed-xiao")
+#: The one list of supply labels, OH-170's. `tools/import_pindefs.py` has no
+#: supply rule of its own, so the set is read out of the test that counts
+#: supply pads, by `ast`, rather than copied here.
+SUPPLY_SOURCE = pathlib.Path("tests/rules/test_import_pindefs.py")
+#: What `webui/static/board3d-panel.js` fetches to learn which board has a model.
+MODEL_INDEX = "/models/index.json"
 #: Top-level directories, in the order the report lists them. Anything
 #: outside them lands in `other`, which is deliberately visible: the
 #: separation from upstream is only kept by noticing when something
@@ -611,6 +624,182 @@ def collect_assets(
     return reports
 
 
+#: The four layers OH-174 defines, in report order, each with when it holds.
+TWIN_LAYERS = (
+    ("geometry", "the board file's `source` names the vendor's CAD"),
+    ("model", "the 3D view draws a vendor or composed mesh, not the footprint"),
+    ("pins", "every non-supply pad names a `chip_pin`"),
+    ("runs", "the chip is in catalogue.FIRMWARE_VERIFIED"),
+)
+#: The two ways the 3D view falls back to the footprint, which must not read alike.
+NOT_BUILT = "footprint:not built"
+NO_SOURCE = "footprint:no source"
+MODEL_FALLBACKS = (
+    (NOT_BUILT, "a mesh is named for this board and not served on this disk"),
+    (NO_SOURCE, "nothing here names a mesh for this board, so none can be built"),
+)
+
+
+class Layer(typing.NamedTuple):
+    """One layer of one board: whether it holds, a short token, and what it rests on."""
+
+    holds: bool
+    summary: str
+    detail: str
+
+
+class Twin(typing.NamedTuple):
+    """One board's four layers."""
+
+    name: str
+    geometry: Layer
+    model: Layer
+    pins: Layer
+    runs: Layer
+
+    def missing(self) -> tuple[str, ...]:
+        return tuple(name for name, _ in TWIN_LAYERS if not getattr(self, name).holds)
+
+
+def supply_labels(source: pathlib.Path = SUPPLY_SOURCE) -> frozenset[str]:
+    """`SUPPLY_LABELS` as `source` assigns it, read without importing a test."""
+    try:
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError) as exc:
+        raise InventoryError(f"{source}: {exc}") from exc
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or not any(
+            isinstance(target, ast.Name) and target.id == "SUPPLY_LABELS"
+            for target in node.targets
+        ):
+            continue
+        try:
+            labels = frozenset(ast.literal_eval(node.value.args[0]))
+        except (AttributeError, IndexError, ValueError) as exc:
+            raise InventoryError(
+                f"{source}: SUPPLY_LABELS is not frozenset({{...}}): {exc}"
+            ) from exc
+        if labels:
+            return labels
+    raise InventoryError(f"{source}: assigns no non-empty SUPPLY_LABELS")
+
+
+def _geometry_layer(source: dict) -> Layer:
+    for key in ("file", "footprint"):
+        if source.get(key):
+            return Layer(True, key, source[key])
+    return Layer(
+        False,
+        "none",
+        "the board file records no `source.file` or `source.footprint`",
+    )
+
+
+def _model_layer(name: str, index: dict | None, builders: dict[str, str]) -> Layer:
+    """What `board3d-panel.js` would draw, from what the server would serve.
+
+    The page reads `boards[name].file` out of the index and draws the mesh if
+    that URL serves; `resolve_static` is what serves both.
+    """
+    entry = (index or {}).get(name) or {}
+    url = entry.get("file")
+    if url and resolve_static(url) is not None:
+        kind = "composed" if entry.get("composed") else "vendor"
+        return Layer(True, kind, url)
+    if name not in builders:
+        return Layer(
+            False,
+            NO_SOURCE,
+            "neither MODELS nor COMPOSED in tools/import_3d_model.py names this board",
+        )
+    if index is None:
+        unserved = f"{MODEL_INDEX} is not served"
+    elif url:
+        unserved = f"{url} is not served"
+    else:
+        unserved = f"{MODEL_INDEX} names no mesh for it"
+    return Layer(False, NOT_BUILT, f"{unserved}; {builders[name]} builds it")
+
+
+def _pins_layer(pads: list, supplies: frozenset[str]) -> Layer:
+    signal = []
+    missing = []
+    for pad in pads:
+        label = pad.get("label") or ""
+        # The predicate test_import_pindefs.py applies to SUPPLY_LABELS.
+        if label.split("/")[0].upper() in supplies or label.upper() in supplies:
+            continue
+        signal.append(label)
+        if pad.get("chip_pin") is None:
+            missing.append(label)
+    named = len(signal) - len(missing)
+    detail = (
+        f"{named} of {len(signal)} non-supply pads name a `chip_pin`; "
+        f"{len(pads) - len(signal)} supply pads excluded"
+    )
+    if missing:
+        detail += f"; none on {', '.join(missing)}"
+    return Layer(bool(signal) and not missing, f"{named}/{len(signal)}", detail)
+
+
+def _runs_layer(name: str) -> Layer:
+    try:
+        chip = catalogue.chip_for(name)
+    except catalogue.CatalogueError as exc:
+        return Layer(False, "no chip", str(exc))
+    evidence = catalogue.FIRMWARE_VERIFIED.get(chip)
+    if evidence is None:
+        return Layer(False, f"{chip}:no", f"{chip} is not in FIRMWARE_VERIFIED")
+    return Layer(True, chip, evidence)
+
+
+def collect_twins(boards_dir: pathlib.Path = BOARDS_DIR) -> list[Twin]:
+    """Per board, the four layers, each read from the code that owns it."""
+    if not boards_dir.is_dir():
+        raise InventoryError(f"{boards_dir}: boards directory does not exist")
+    paths = sorted(boards_dir.glob("*.json"))
+    if not paths:
+        raise InventoryError(f"{boards_dir}: contains no board definitions")
+
+    supplies = supply_labels()
+    served = resolve_static(MODEL_INDEX)
+    try:
+        index = json.loads(served[0])["boards"] if served else None
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise InventoryError(f"{MODEL_INDEX}: {exc!r}") from exc
+    builders = {
+        board: "python tools/import_3d_model.py --all"
+        for model in MODELS
+        for board in model.boards
+    }
+    builders.update(
+        (board, "python tools/compose_board_3d.py") for board, _, _ in COMPOSED
+    )
+
+    twins = []
+    for path in paths:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise InventoryError(f"{path}: {exc}") from exc
+        pads = data.get("pads")
+        if not isinstance(pads, list):
+            raise InventoryError(
+                f"{path}: expected a `pads` list, got {type(pads).__name__}"
+            )
+        name = data.get("board", path.stem)
+        twins.append(
+            Twin(
+                name=name,
+                geometry=_geometry_layer(data.get("source") or {}),
+                model=_model_layer(name, index, builders),
+                pins=_pins_layer(pads, supplies),
+                runs=_runs_layer(name),
+            )
+        )
+    return twins
+
+
 def _head() -> str:
     try:
         result = subprocess.run(
@@ -631,6 +820,7 @@ class _Inventory(typing.NamedTuple):
     ledgers: dict[str, collections.Counter]
     boards: list[Board]
     assets: list[BoardAssets]
+    twins: list[Twin]
 
 
 def _gather() -> _Inventory:
@@ -642,6 +832,7 @@ def _gather() -> _Inventory:
         collect_ledgers(),
         collect_boards(),
         collect_assets(),
+        collect_twins(),
     )
 
 
@@ -685,6 +876,20 @@ def _asset_tallies(assets: list[BoardAssets]) -> str:
         f"{cell} {sum(1 for report in assets if cell not in report.missing())}"
         for cell in ASSET_CELLS
     )
+
+
+def _twins_by_completeness(twins: list[Twin]) -> list[Twin]:
+    """Most complete first, then alphabetical — as `_assets_by_completeness`."""
+    return sorted(twins, key=lambda twin: (len(twin.missing()), twin.name))
+
+
+def _twin_heading(twins: list[Twin]) -> str:
+    whole = sum(1 for twin in twins if not twin.missing())
+    tallies = ", ".join(
+        f"{name} {sum(1 for twin in twins if getattr(twin, name).holds)}"
+        for name, _ in TWIN_LAYERS
+    )
+    return f"{whole} of {len(twins)} boards hold all four; by layer: {tallies}"
 
 
 def _asset_md(asset: Asset) -> str:
@@ -776,6 +981,28 @@ def render_text() -> str:
             f"{getattr(report, cell).summary():<15}" for cell in ASSET_CELLS
         )
         lines.append(f"  {cells}{report.name}")
+
+    widths = (11, 21, 8, 15)
+    lines.append("")
+    lines.append(f"TWINS — {_twin_heading(inv.twins)}")
+    lines.append("  A layer holds when:")
+    for name, gloss in TWIN_LAYERS:
+        lines.append(f"    {name:<20} {gloss}")
+    lines.append("  The model layer falls back to the footprint two ways:")
+    for token, gloss in MODEL_FALLBACKS:
+        lines.append(f"    {token:<20} {gloss}")
+    lines.append("")
+    lines.append(
+        "  "
+        + "".join(f"{name:<{width}}" for (name, _), width in zip(TWIN_LAYERS, widths))
+        + "board"
+    )
+    for twin in _twins_by_completeness(inv.twins):
+        cells = "".join(
+            f"{getattr(twin, name).summary:<{width}}"
+            for (name, _), width in zip(TWIN_LAYERS, widths)
+        )
+        lines.append(f"  {cells}{twin.name}")
 
     return "\n".join(lines)
 
@@ -880,6 +1107,24 @@ def render_markdown() -> str:
         + " | ".join(_asset_md(getattr(report, cell)) for cell in ASSET_CELLS)
         + " |"
         for report in _assets_by_completeness(inv.assets)
+    ]
+
+    out += ["", f"## Twins — {_twin_heading(inv.twins)}", ""]
+    out += [f"* `{name}` holds when {gloss}" for name, gloss in TWIN_LAYERS]
+    out += [f"* `{token}` — {gloss}" for token, gloss in MODEL_FALLBACKS]
+    out += [
+        "",
+        "| board | " + " | ".join(name for name, _ in TWIN_LAYERS) + " |",
+        "|---" * (len(TWIN_LAYERS) + 1) + "|",
+    ]
+    out += [
+        f"| `{twin.name}` | "
+        + " | ".join(
+            f"`{getattr(twin, name).summary}` {getattr(twin, name).detail}"
+            for name, _ in TWIN_LAYERS
+        )
+        + " |"
+        for twin in _twins_by_completeness(inv.twins)
     ]
 
     return "\n".join(out) + "\n"

@@ -11,7 +11,11 @@ import sys
 
 import pytest
 
+import webui.emulator_server as server
 from tools.inventory import (
+    MODEL_INDEX,
+    NO_SOURCE,
+    NOT_BUILT,
     VENDOR_DIR,
     Evidence,
     InventoryError,
@@ -21,9 +25,12 @@ from tools.inventory import (
     collect_ledgers,
     collect_mechanisms,
     collect_tests,
+    collect_twins,
     render_markdown,
     render_text,
+    supply_labels,
 )
+from webui.boards import catalogue
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
@@ -185,6 +192,7 @@ def test_text_render_names_every_section():
         "LEDGERS",
         "BOARDS",
         "ASSETS",
+        "TWINS",
     ):
         assert heading in out
 
@@ -194,7 +202,7 @@ def test_markdown_render_has_a_table_per_section_and_states_provenance():
     # Count separator *lines*, not occurrences: a four-column table contains
     # "|---" four times on one line.
     separators = sum(1 for line in out.splitlines() if line.startswith("|---"))
-    assert separators == 6, "expected one table per section"
+    assert separators == 7, "expected one table per section"
     assert "Generated from" in out
     assert "do not edit this by hand" in out
 
@@ -715,3 +723,180 @@ def test_nothing_tells_anyone_to_run_the_retired_fetcher():
     # starts telling someone to run the retired script, which is the thing
     # worth catching, and it lets the exemption empty out on its own.
     assert set(telling) <= {"tools/import_kicad_board.py"}, telling
+
+
+# --- collect_twins ---------------------------------------------------------
+#
+# Each layer is made to fail on purpose in a temp copy: a check that has never
+# failed is evidence of nothing.
+
+
+def _real_board(directory, name):
+    """Copy one committed board file into `directory` and return its document."""
+    text = (REPO / "webui" / "boards" / f"{name}.json").read_text(encoding="utf-8")
+    (directory / f"{name}.json").write_text(text, encoding="utf-8")
+    return json.loads(text)
+
+
+def _static(tmp_path, monkeypatch, boards):
+    """A served `static/` whose model index names `boards` as {name: (file, composed)}."""
+    static = tmp_path / "static"
+    (static / "models").mkdir(parents=True)
+    for url, _ in boards.values():
+        (static / url.lstrip("/")).write_bytes(b"glTF")
+    index = {
+        name: {"file": url, "composed": composed}
+        for name, (url, composed) in boards.items()
+    }
+    (static / MODEL_INDEX.lstrip("/")).write_text(
+        json.dumps({"boards": index}), encoding="utf-8"
+    )
+    monkeypatch.setattr(server, "STATIC_DIR", static)
+    return static
+
+
+def test_the_twin_report_covers_exactly_the_boards_on_disk():
+    listed = sorted(board.name for board in collect_boards(REPO / "webui" / "boards"))
+    reported = sorted(twin.name for twin in collect_twins(REPO / "webui" / "boards"))
+    assert reported == listed
+
+
+def test_the_model_layer_is_what_the_page_draws_and_a_renamed_mesh_is_not(
+    tmp_path, monkeypatch
+):
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _real_board(boards, "XIAO-RP2040-DIP")
+    _real_board(boards, "Arduino Uno")
+    static = _static(tmp_path, monkeypatch, {
+        "XIAO-RP2040-DIP": ("/models/RP2040.glb", False),
+        "Arduino Uno": ("/models/Arduino-Uno.glb", True),
+    })
+
+    twins = {twin.name: twin.model for twin in collect_twins(boards)}
+    assert twins["XIAO-RP2040-DIP"] == (True, "vendor", "/models/RP2040.glb")
+    assert twins["Arduino Uno"] == (True, "composed", "/models/Arduino-Uno.glb")
+
+    (static / "models" / "RP2040.glb").rename(static / "models" / "RP2040.glb.bak")
+    renamed = {twin.name: twin.model for twin in collect_twins(boards)}
+    assert renamed["XIAO-RP2040-DIP"].summary == NOT_BUILT
+    assert "/models/RP2040.glb is not served" in renamed["XIAO-RP2040-DIP"].detail
+    assert "import_3d_model.py --all" in renamed["XIAO-RP2040-DIP"].detail
+    assert renamed["Arduino Uno"].holds
+
+    (static / MODEL_INDEX.lstrip("/")).unlink()
+    unindexed = {twin.name: twin.model for twin in collect_twins(boards)}
+    assert unindexed["Arduino Uno"].summary == NOT_BUILT
+    assert f"{MODEL_INDEX} is not served" in unindexed["Arduino Uno"].detail
+    assert "compose_board_3d.py" in unindexed["Arduino Uno"].detail
+
+
+def test_not_built_here_and_cannot_be_built_read_differently(tmp_path, monkeypatch):
+    """The meshes are gitignored, so a fresh checkout is not a board with no model."""
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _real_board(boards, "XIAO-RP2040-DIP")
+    _real_board(boards, "XIAO-XIAO STM32C5-SMD")
+    monkeypatch.setattr(server, "STATIC_DIR", tmp_path / "no-static")
+
+    twins = {twin.name: twin.model for twin in collect_twins(boards)}
+    unbuilt, sourceless = twins["XIAO-RP2040-DIP"], twins["XIAO-XIAO STM32C5-SMD"]
+    assert not unbuilt.holds and not sourceless.holds
+    assert (unbuilt.summary, sourceless.summary) == (NOT_BUILT, NO_SOURCE)
+    assert "builds it" in unbuilt.detail and "builds it" not in sourceless.detail
+
+
+def test_a_blanked_chip_pin_fails_the_pins_layer_and_a_supply_pad_does_not(tmp_path):
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    document = _real_board(boards, "XIAO-ESP32-C6-DIP")
+    assert collect_twins(boards)[0].pins.holds
+
+    for pad in document["pads"]:
+        if pad["label"] == "GND":
+            pad["chip_pin"] = None
+    (boards / "XIAO-ESP32-C6-DIP.json").write_text(json.dumps(document), encoding="utf-8")
+    assert collect_twins(boards)[0].pins.holds, "GND is a supply pad"
+
+    for pad in document["pads"]:
+        if pad["label"] == "D0":
+            pad["chip_pin"] = None
+    (boards / "XIAO-ESP32-C6-DIP.json").write_text(json.dumps(document), encoding="utf-8")
+    pins = collect_twins(boards)[0].pins
+    assert not pins.holds
+    assert pins.detail.endswith("none on D0"), pins.detail
+
+
+def test_a_board_with_only_supply_pads_does_not_hold_the_pins_layer(tmp_path):
+    """0 of 0 is a check that matched nothing, not a pass."""
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "B", pads=[{"label": "GND", "chip_pin": None}])
+    pins = collect_twins(boards)[0].pins
+    assert (pins.holds, pins.summary) == (False, "0/0")
+
+
+def test_a_chip_dropped_from_firmware_verified_fails_the_runs_layer(tmp_path, monkeypatch):
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _real_board(boards, "XIAO-ESP32-C6-DIP")
+    assert collect_twins(boards)[0].runs == (
+        True, "ESP32-C6", catalogue.FIRMWARE_VERIFIED["ESP32-C6"]
+    )
+
+    monkeypatch.delitem(catalogue.FIRMWARE_VERIFIED, "ESP32-C6")
+    runs = collect_twins(boards)[0].runs
+    assert (runs.holds, runs.summary) == (False, "ESP32-C6:no")
+
+
+def test_geometry_names_the_cad_file_or_says_there_is_none(tmp_path):
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "Footprint", footprint="XIAO-RP2040-DIP")
+    _board_file(boards, "Unsourced")
+    (boards / "Filed.json").write_text(json.dumps({
+        "board": "Filed", "pads": [], "source": {"file": "third_party/x/board.brd"},
+    }), encoding="utf-8")
+
+    geometry = {twin.name: twin.geometry for twin in collect_twins(boards)}
+    assert geometry["Filed"] == (True, "file", "third_party/x/board.brd")
+    assert geometry["Footprint"] == (True, "footprint", "XIAO-RP2040-DIP")
+    assert not geometry["Unsourced"].holds
+    assert "source.file" in geometry["Unsourced"].detail
+
+
+def test_a_new_board_nothing_knows_is_a_row_with_its_layers_missing(tmp_path, monkeypatch):
+    """A board that is not a XIAO, with no model and no pindefs, must not crash
+    the report: it shows up missing layers without anyone editing the report."""
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _real_board(boards, "XIAO-ESP32-C6-DIP")
+    monkeypatch.setattr(server, "STATIC_DIR", tmp_path / "no-static")
+    before = {twin.name for twin in collect_twins(boards)}
+
+    (boards / "Late arrival.json").write_text(json.dumps({
+        "board": "Late arrival",
+        "pads": [{"label": "IO5", "pin": None}, {"label": "GND", "pin": None}],
+        "source": {"file": "third_party/late/arrival.brd"},
+    }), encoding="utf-8")
+    after = {twin.name: twin for twin in collect_twins(boards)}
+
+    assert set(after) - before == {"Late arrival"}
+    late = after["Late arrival"]
+    assert late.geometry.holds
+    assert late.model.summary == NO_SOURCE
+    assert late.pins.summary == "0/1"
+    assert not late.runs.holds
+    assert late.missing() == ("model", "pins", "runs")
+
+
+def test_the_supply_rule_is_read_from_its_one_home_and_a_missing_one_raises(tmp_path):
+    assert {"GND", "VBUS", "3V3_OUT"} <= supply_labels()
+
+    elsewhere = tmp_path / "test_x.py"
+    elsewhere.write_text('SUPPLY_LABELS = frozenset({"RAIL"})\n', encoding="utf-8")
+    assert supply_labels(elsewhere) == {"RAIL"}
+
+    elsewhere.write_text("OTHER = 1\n", encoding="utf-8")
+    with pytest.raises(InventoryError, match="SUPPLY_LABELS"):
+        supply_labels(elsewhere)
