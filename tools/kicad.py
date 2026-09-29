@@ -67,6 +67,42 @@ class KicadError(Exception):
 
 _TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"|[()]|[^\s()]+')
 
+#: A backslash escape inside a quoted string, as KiCad's own reader takes it
+#: (`DSNLEXER::NextTok` in common/dsnlexer.cpp): one to two hex digits after
+#: `x`, one to three octal digits, or one character. Matched on the UTF-8
+#: bytes, because that reader works on bytes and a numeric escape is a byte.
+_ESCAPE = re.compile(rb"\\(x[0-9A-Fa-f]{1,2}|[0-7]{1,3}|.)", re.DOTALL)
+_ESCAPED = {
+    b'"': b'"', b"\\": b"\\", b"a": b"\x07", b"b": b"\x08", b"f": b"\x0c",
+    b"n": b"\n", b"r": b"\r", b"t": b"\t", b"v": b"\x0b",
+    # A goofed hex escape, `\x` with no digit, is an `x`.
+    b"x": b"x",
+}
+
+
+def _unescape(quoted: str) -> str:
+    """A quoted string's contents as KiCad reads them.
+
+    KiCad writes `\\\\` for a backslash, `\\"` for a quote and `\\n`, `\\r`
+    for line breaks (`OUTPUTFORMATTER::Quotes`), so a net named
+    `/GPIO5\\SPI_CS` is stored with its backslash doubled. Anything its
+    reader does not take as an escape keeps the backslash.
+    """
+    def one(match: re.Match) -> bytes:
+        sequence = match.group(1)
+        if sequence[:1] == b"x" and len(sequence) > 1:
+            return bytes([int(sequence[1:], 16)])
+        if sequence[:1] in b"01234567":
+            return bytes([int(sequence, 8) & 0xFF])
+        return _ESCAPED.get(sequence, b"\\" + sequence)
+
+    try:
+        return _ESCAPE.sub(one, quoted.encode("utf-8")).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise KicadError(
+            f"the string {quoted!r} un-escapes to bytes that are not UTF-8"
+        ) from exc
+
 
 def parse_sexp(text: str) -> list:
     """Parse one s-expression into nested lists. Strings keep their quotes off."""
@@ -91,7 +127,7 @@ def parse_sexp(text: str) -> list:
                 return out
             else:
                 pos += 1
-                out.append(tok[1:-1].replace('\\"', '"') if tok.startswith('"') else tok)
+                out.append(_unescape(tok[1:-1]) if tok.startswith('"') else tok)
         raise KicadError("unbalanced parentheses")
 
     tree = node()
@@ -160,6 +196,9 @@ class Pad:
     #: `.kicad_mod` is on nothing yet, and so is an unconnected one. `""`
     #: then. `tools/import_board.py` names a `.kicad_pcb`'s pads by it.
     net: str = ""
+    #: `(property pad_prop_castellated)`: KiCad's flag for a plated half-hole
+    #: cut by the board's edge, as against the whole hole beside it.
+    castellated: bool = False
 
     @property
     def front(self) -> bool:
@@ -281,6 +320,8 @@ def _pads_of(tree: list) -> list[Pad]:
             rotation_deg=coords[2] if len(coords) > 2 else 0.0,
             layers=tuple(x for x in (where or [])[1:] if isinstance(x, str)),
             net=net[-1] if net is not None and len(net) > 1 and isinstance(net[-1], str) else "",
+            castellated=any(prop[1:] == ["pad_prop_castellated"]
+                            for prop in children(node, "property")),
         ))
     return pads
 
@@ -595,11 +636,32 @@ def _on_board(placed: Placement, x_mm: float, y_mm: float) -> tuple[float, float
     cos, sin = math.cos(turn), math.sin(turn)
     if placed.back:
         # A part on the underside is mirrored across the footprint's own y
-        # axis before it is turned -- the same rule its pads follow, and for
-        # the same reason: it is seen through the board.
+        # axis before it is turned, as `compose_board_3d.from_kicad` mirrors
+        # its pads. **`pad_on_board` does not mirror a pad**, and the copper
+        # says it is right not to. Whether a footprint's graphics are stored
+        # already flipped as its pads are is not settled here; OH-182's note
+        # records what dropping this mirror would change.
         x_mm = -x_mm
     return (placed.x_mm + x_mm * cos + y_mm * sin,
             placed.y_mm - x_mm * sin + y_mm * cos)
+
+
+def pad_on_board(placed: Placement, pad: Pad) -> tuple[float, float]:
+    """A placed footprint's pad centre in the BOARD's millimetres, KiCad's own frame.
+
+    **Turned and moved, never mirrored, on either side of the board.** When
+    KiCad flips a footprint onto the back it flips the pads' own offsets and
+    stores them flipped, so mirroring them again as `_on_board` mirrors a
+    graphic puts every pad off the footprint's centre line on the wrong side
+    of it. The copper is what settles it: a track ends on the pad it
+    connects, and `test_a_back_side_headers_pads_sit_on_their_own_nets_copper`
+    finds each of the Olimex ESP32-PoE's two back-side headers on its copper
+    only this way.
+    """
+    turn = math.radians(placed.rotation_deg)
+    cos, sin = math.cos(turn), math.sin(turn)
+    return (placed.x_mm + pad.x_mm * cos + pad.y_mm * sin,
+            placed.y_mm - pad.x_mm * sin + pad.y_mm * cos)
 
 
 def _fp_graphics(node: list, layer: str, placed: Placement
@@ -1036,6 +1098,15 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
         silk += printed
         unread += missed
 
+    if not placements and children(tree, "module"):
+        # KiCad 5 called a placed part `(module ...)`, and nothing here has
+        # been checked against that format, so it is refused by name rather
+        # than read as though it were a footprint.
+        raise KicadError(
+            f"{path}: places {len(children(tree, 'module'))} parts as (module "
+            f"...), which is KiCad 5's format; KiCad 5 format (module) is not "
+            f"read. KiCad 6 or later writes (footprint ...)"
+        )
     if not placements:
         raise KicadError(f"{path}: no footprints; refusing to report an empty board")
     if not outline and not arcs:

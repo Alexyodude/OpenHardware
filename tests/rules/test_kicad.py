@@ -21,6 +21,8 @@ import pytest
 from tools.kicad import (
     KicadError,
     Pad,
+    Placement,
+    pad_on_board,
     parse_sexp,
     read_board,
     read_footprint,
@@ -365,6 +367,50 @@ def test_a_pads_net_is_read_with_its_number_and_without(tmp_path):
     got = {p.reference: p for p in read_board(path).placements}
     assert [pad.net for pad in got["U4"].pads] == ["/GPIO-14", ""]
     assert [pad.net for pad in got["C13"].pads] == ["GND"]
+
+
+def test_a_pad_kicad_flags_castellated_says_so(tmp_path):
+    text = BOARD.replace('(size 0.8 0.28)', '(size 0.8 0.28) (property pad_prop_castellated)')
+    path = tmp_path / "castellated.kicad_pcb"
+    path.write_text(text, encoding="utf-8")
+    got = {p.reference: p for p in read_board(path).placements}
+    assert [pad.castellated for pad in got["U4"].pads] == [True, False]
+
+
+def test_a_back_side_pad_is_turned_and_moved_and_not_mirrored():
+    """KiCad stores a flipped footprint's pad offsets already flipped. A part
+    on the back at (10, 20) turned 90 degrees, pad stored at (1.5, 0): the
+    turn takes (1.5, 0) to (0, -1.5) in KiCad's y-down frame, so (10, 18.5).
+    Mirroring first would put it at (10, 21.5)."""
+    placed = Placement(library="L:P", reference="J1", x_mm=10.0, y_mm=20.0,
+                       rotation_deg=90.0, back=True, pads=())
+    pad = Pad("1", "thru_hole", 1.5, 0.0, 1.7, 1.7)
+    assert tuple(round(v, 9) for v in pad_on_board(placed, pad)) == (10.0, 18.5)
+
+
+def test_a_quoted_string_is_unescaped_as_kicads_reader_does():
+    """`common/dsnlexer.cpp`'s rules: a doubled backslash is one, an escaped
+    quote is a quote, `\\n` is a line break, one to three octal digits or `x`
+    and one or two hex digits are a byte, a lone `\\x` is an `x`, and anything
+    else keeps its backslash."""
+    tree = parse_sexp(r'(net "/GPIO5\\SPI_CS" "say \"hi\"" "a\nb" "\101\x42" "\x" "\q")')
+    assert tree[1:] == ["/GPIO5\\SPI_CS", 'say "hi"', "a\nb", "AB", "x", "\\q"]
+
+
+def test_a_string_that_unescapes_to_bytes_that_are_not_utf8_is_refused():
+    with pytest.raises(KicadError, match="not UTF-8"):
+        parse_sexp(r'(net "\377")')
+
+
+def test_a_kicad_5_board_is_refused_by_name(tmp_path):
+    """KiCad 5 placed parts as `(module ...)`, and reading none of them
+    reported "no footprints", which says nothing about why."""
+    path = tmp_path / "old.kicad_pcb"
+    path.write_text('(kicad_pcb (version 20171130) (module "R_0402" (at 1 2) '
+                    '(pad "1" smd rect (at 0 0) (size 0.5 0.5) (layers F.Cu))))',
+                    encoding="utf-8")
+    with pytest.raises(KicadError, match=r"KiCad 5 format \(module\) is not read"):
+        read_board(path)
 
 
 def test_only_the_outline_layer_is_taken_for_the_outline(board):
