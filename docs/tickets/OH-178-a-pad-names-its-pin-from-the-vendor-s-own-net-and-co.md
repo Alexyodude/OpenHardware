@@ -2,7 +2,7 @@
 id: OH-178
 title: A pad names its pin from the vendor's own net and connector names where the
   BSP does not, and says which source it was
-status: in-review
+status: in-progress
 priority: P1
 created: '2026-09-29'
 touches:
