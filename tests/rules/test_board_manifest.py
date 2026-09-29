@@ -8,10 +8,18 @@ import json
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 
 import pytest
 
-from tools import board_manifest, eagle, import_board, import_pindefs, import_schematic
+from tools import (
+    board_manifest,
+    board_sources,
+    eagle,
+    import_board,
+    import_pindefs,
+    import_schematic,
+)
 from tools.board_manifest import ROWS, ManifestError
 from webui.boards import catalogue
 
@@ -260,14 +268,60 @@ def test_every_pad_is_where_the_vendors_board_file_puts_it():
         assert sorted(matched) == sorted(vendor), row.board
 
 
-def test_the_licence_is_what_the_cad_file_states():
-    """The registry infers this vendor's licence from a sibling repository;
-    the board file quotes the sentence its own CAD file places."""
+def test_the_licence_is_what_the_vendors_own_files_state():
+    """SparkFun's registry licence is inferred from a sibling repository, so
+    that board quotes the sentence its own CAD file places; a row whose
+    registry licence was read from a file it fetches quotes that file."""
     for row in ROWS:
         _fetched(row)
         evidence = _committed(row)["source"]["licence_evidence"]
         assert evidence == board_manifest.licence_evidence(row)
-        assert repr(row.licence_statement[1]) in evidence
+        quote = (row.licence_statement[1] if row.licence_statement
+                 else board_sources.source(row.source).licence.quote)
+        assert repr(quote) in evidence
+
+
+def test_a_row_whose_licence_is_stated_nowhere_is_refused():
+    """SparkFun's registry licence came from a sibling repository, not a file."""
+    _fetched(ROWS[0])
+    with pytest.raises(ManifestError) as caught:
+        board_manifest.check(dataclasses.replace(ROWS[0], licence_statement=None))
+    assert "licence from no file it fetches" in str(caught.value), caught.value
+
+
+def _file_licensed() -> board_manifest.Row:
+    row = next(row for row in ROWS if row.licence_statement is None)
+    _fetched(row)
+    return row
+
+
+def _registry_with(monkeypatch, name: str, **licence) -> None:
+    """The registry with one source's licence fields replaced."""
+    monkeypatch.setattr(board_sources, "SOURCES", tuple(
+        source._replace(licence=source.licence._replace(**licence))
+        if source.name == name else source
+        for source in board_sources.SOURCES
+    ))
+
+
+def test_a_licence_file_that_does_not_read_the_registrys_words_is_refused(monkeypatch):
+    row = _file_licensed()
+    _registry_with(monkeypatch, row.source, quote="Attribution-ShareAlike 4.0 International")
+    with pytest.raises(ManifestError) as caught:
+        board_manifest.check(row)
+    assert "does not read 'Attribution-ShareAlike 4.0 International'" in str(caught.value)
+
+
+def test_a_licence_file_that_is_not_on_disk_is_refused_naming_it(tmp_path, monkeypatch):
+    row = _file_licensed()
+    _registry_with(monkeypatch, row.source, file="LICENCE-nowhere.txt")
+    monkeypatch.setattr(board_manifest, "BOARDS_DIR", tmp_path)
+    with pytest.raises(ManifestError) as caught:
+        board_manifest.write(row)
+    message = str(caught.value)
+    assert f"third_party/{row.source}/LICENCE-nowhere.txt" in message, message
+    assert f"python tools/get_board_sources.py {row.source}" in message, message
+    assert list(tmp_path.iterdir()) == []
 
 
 # --- the pins come from the variant the row names -----------------------------
@@ -290,18 +344,90 @@ def test_every_resolved_pad_was_named_by_the_rows_variant():
         )
 
 
-def test_every_resolved_pin_is_the_gpio_the_vendors_net_names():
-    """Two vendors, one answer: the variant says `TX = 16`, and SparkFun's
-    own net on that pad is `IO16/TX`. Every resolved pad is cross-checked,
-    so a row whose nets name no `IO<n>` has to decide what to check instead."""
+#: Pad number to GPIO for each chip, as `(package, value)` in a row's CAD,
+#: that a row whose nets name no `IO<n>` places. Transcribed from Espressif's
+#: datasheets, which are not fetched here:
+#:   ESP32-C3FH4     ESP32-C3 Series Datasheet v2.4, "ESP32-C3 Consolidated
+#:                   Pin Overview": Pin No. against IO MUX Function 1.
+CHIP_PADS = {
+    ("QFN32_5MM", "ESP32-C3FH4"): {
+        "4": 0, "5": 1, "6": 2, "8": 3, "9": 4, "10": 5, "12": 6, "13": 7,
+        "14": 8, "15": 9, "16": 10, "18": 11, "19": 12, "20": 13, "21": 14,
+        "22": 15, "23": 16, "24": 17, "25": 18, "26": 19, "27": 20, "28": 21,
+    },
+}
+
+
+def _chip(row: board_manifest.Row) -> tuple[eagle.Board, eagle.Element | None, dict]:
+    """The row's board, and the one element on it `CHIP_PADS` describes."""
+    path = board_manifest.cad_path(row)
+    parts = ET.parse(path).getroot().findall("drawing/board/elements/element")
+    known = [(part.get("name"), CHIP_PADS[key]) for part in parts
+             if (key := (part.get("package"), part.get("value"))) in CHIP_PADS]
+    assert len(known) <= 1, (row.board, known)
+    board = eagle.read_board(path)
+    if not known:
+        return board, None, {}
+    name, pads = known[0]
+    return board, board.element(name), pads
+
+
+def _gpios_reached(board: eagle.Board, chip: eagle.Element, pads: dict, net: str) -> list[int]:
+    """The GPIOs of the chip's pads on `net`, or, where there are none, on
+    the net beyond a two-pad part in series: the QT Py's TX reaches its
+    ESP32-C3 through R4."""
+    direct = [pads[pad.number] for pad in chip.pads if pad.net == net and pad.number in pads]
+    if direct:
+        return direct
+    beyond = []
+    for part in board.elements:
+        nets = [pad.net for pad in part.pads]
+        if part is not chip and len(nets) == 2 and net in nets:
+            other = nets[1 - nets.index(net)]
+            beyond += [pads[pad.number] for pad in chip.pads
+                       if pad.net == other and pad.number in pads]
+    return beyond
+
+
+def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
+    """Two vendors, one answer. Where the vendor's net names `IO<n>`, as
+    SparkFun's `IO16/TX` does, the net is the second statement. Where it
+    does not, as Adafruit's `TX` does not, it is the chip pad the net
+    reaches, read against Espressif's pin table in `CHIP_PADS`. Every
+    resolved pad is checked one way or both, and every way agrees."""
     for row in ROWS:
         _fetched(row)
+        board, chip, pads = _chip(row)
         resolved = [pad for pad in _committed(row)["pads"] if pad["chip_pin"]]
         assert resolved, row.board
         for pad in resolved:
             stated = [int(found.group(1)) for part in pad["label"].split("/")
                       if (found := re.fullmatch(r"IO(\d+)", part))]
-            assert stated == [pad["chip_index"]], (row.board, pad)
+            reached = _gpios_reached(board, chip, pads, pad["label"]) if chip else []
+            assert stated or reached, (row.board, pad["label"], "nothing checks it")
+            assert set(stated + reached) == {pad["chip_index"]}, (
+                row.board, pad["label"], stated, reached, pad["chip_index"])
+
+
+def test_no_supply_pad_reaches_a_gpio_of_its_chip():
+    """What makes a label a supply (`SUPPLY_LABELS` in
+    tests/rules/test_import_pindefs.py), checked on each row whose chip
+    `CHIP_PADS` describes."""
+    from tests.rules.test_import_pindefs import SUPPLY_LABELS
+
+    checked = []
+    for row in ROWS:
+        _fetched(row)
+        board, chip, pads = _chip(row)
+        if chip is None:
+            continue
+        for pad in _committed(row)["pads"]:
+            label = pad["label"]
+            if label.split("/")[0].upper() in SUPPLY_LABELS or label.upper() in SUPPLY_LABELS:
+                assert not [one.number for one in chip.pads
+                            if one.net == label and one.number in pads], (row.board, label)
+                checked.append((row.board, label))
+    assert checked, "no row's chip is in CHIP_PADS, so nothing was checked"
 
 
 def test_every_reason_is_on_a_pad_and_carried_by_it():

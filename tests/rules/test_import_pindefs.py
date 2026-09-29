@@ -1787,6 +1787,10 @@ SUPPLY_LABELS = frozenset({
     # The SparkFun Thing Plus ESP32-C6's rail nets, as its EAGLE files name
     # them. Its schematic puts no ESP32-C6 GPIO on any of the three.
     "3.3V", "V_USB", "V_BATT",
+    # The Adafruit QT Py ESP32-C3's 5 V rail, as its EAGLE file names it.
+    # `test_no_supply_pad_reaches_a_gpio_of_its_chip` in
+    # tests/rules/test_board_manifest.py reads that file for it.
+    "+5V",
 })
 
 
@@ -1816,7 +1820,7 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # and the Uno's pins come from its own variant -- and a count that skipped
     # it would be a count of most of the boards.
     files = sorted(pindefs.BOARDS_DIR.glob("*.json"))
-    assert len(files) == 27, [one.stem for one in files]
+    assert len(files) == 28, [one.stem for one in files]
     for path in files:
         board = path.stem
         for pad in json.loads(path.read_text(encoding="utf-8"))["pads"]:
@@ -1843,9 +1847,10 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # falls by exactly what this one rises by. 365 until the SparkFun Thing
     # Plus ESP32-C6 (OH-176) added its 28 pads: 5 named by its arduino-esp32
     # variant, 4 supplies, 3 with a reason read off its schematic, and 16
-    # generic.
-    assert naming == 370, naming
-    assert supplies == 157, supplies
+    # generic. 370 and 157 until the Adafruit QT Py ESP32-C3 (OH-177) added
+    # 28: 22 named by its variant and 6 supplies.
+    assert naming == 392, naming
+    assert supplies == 163, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
     # same debug cluster already carried; 42 until the six SWD pads on the
     # RP2040, SAMD21 and nRF52840 stopped saying nobody had published them.
@@ -1862,7 +1867,7 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
-    assert naming + supplies + specific + generic == 610
+    assert naming + supplies + specific + generic == 638
 
 
 def test_the_tracer_refuses_a_part_string_that_matches_more_than_one_footprint():

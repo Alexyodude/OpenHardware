@@ -145,6 +145,20 @@ variant `pindefs.packages` names at its revision, and the three reasons from
 SparkFun's `Hardware/Thing_Plus_ESP32_C6.sch`, which
 `tests/rules/test_board_manifest.py` reads.
 
+### 2d. Board pad maps from Adafruit's EAGLE files
+
+`webui/boards/Adafruit QT Py ESP32-C3.json` is written the same way, out of
+Adafruit's own EAGLE board file, fetched into `third_party/` and not tracked
+here. Its repository carries `license.txt`, the legal code of CC BY-SA 3.0
+Unported; `tools/board_sources.py` records it, the tool refuses the row unless
+the fetched file reads so, and `source.licence_evidence` quotes it. Each
+`chip_pin` comes from arduino-esp32's `variants/adafruit_qtpy_esp32c3/`
+(LGPL-2.1-or-later).
+
+**Position and risk:** as 2c. The pads and labels can be re-read from the
+drawing `source.file` names, and each `chip_pin` from the variant
+`pindefs.packages` names.
+
 ---
 
 ## 3. What is unambiguously GPL, and stays GPL

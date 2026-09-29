@@ -733,8 +733,9 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     """
     boards = catalogue.board_names()
     # 26 until OH-176 added the SparkFun Thing Plus ESP32-C6, whose file names
-    # five chip pins from its arduino-esp32 variant.
-    assert len(boards) == 27, boards
+    # five chip pins from its arduino-esp32 variant; 27 until OH-177 added
+    # the Adafruit QT Py ESP32-C3, whose file names 22.
+    assert len(boards) == 28, boards
     # Every board, picked and not loaded: nothing was read.
     picked = {board: api.pad_view(board, api.description_for(board), None)
               for board in boards}
@@ -756,7 +757,7 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     )
     silent = sorted(set(boards) - set(would_have_lied))
     assert silent == [], silent
-    assert len(would_have_lied) == 27, would_have_lied
+    assert len(would_have_lied) == 28, would_have_lied
     assert "Arduino Uno" in would_have_lied
     assert "XIAO-MG24-SMD" in would_have_lied, (
         "the MG24 has no board module at all, so its 19 chip pins can only "

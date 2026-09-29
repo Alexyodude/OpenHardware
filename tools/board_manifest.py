@@ -16,7 +16,7 @@ is a row, and the tools that already read each input do the rest:
 A row is checked before anything is written, and the refusal names what it
 looked for: every input file not on disk, a chip the package's own
 `boards.txt` does not build the variant for, a label the variant does not
-number, a licence the CAD file does not state. The whole file is built before
+number, a licence the vendor's own files do not state. The whole file is built before
 it is written, so a row that fails leaves `webui/boards/` as it was.
 
     python tools/board_manifest.py --check    # every row's inputs; writes nothing
@@ -79,8 +79,9 @@ class Row:
     labels: tuple[str, ...]
     #: Where the CAD file states its licence: a placed element, and the text
     #: its package carries. Checked against the file, and quoted in the board
-    #: file's `source`.
-    licence_statement: tuple[str, str]
+    #: file's `source`. None where the registry read the licence from a file
+    #: its source fetches, `Licence.file`, which is checked the same way.
+    licence_statement: tuple[str, str] | None = None
     #: `(label, why)` for a pad whose null has a better reason than "no
     #: package defines this label"; `import_pindefs.Board.reasons`.
     reasons: tuple[tuple[str, str], ...] = ()
@@ -117,6 +118,16 @@ ROWS = (
              f"this pad and pin 1 of the jumper RGB (JUMPER-SMT_2_NO), whose "
              f"pin 2 is the `DO` of the WS2812 D5"),
         ),
+    ),
+    Row(
+        board="Adafruit QT Py ESP32-C3",
+        source="adafruit-qt-py-esp32-c3",
+        cad="Adafruit QT Py ESP32-C3.brd",
+        select=("JP1", "JP3"),
+        chip="ESP32-C3",
+        package="arduino-esp32",
+        variant="adafruit_qtpy_esp32c3",
+        labels=("A0", "A1", "A2", "A3", "SDA", "SCL", "TX", "RX", "SCK", "MISO", "MOSI"),
     ),
 )
 
@@ -159,7 +170,23 @@ def chips_building(table: pathlib.Path, variant: str, key: str) -> set[str]:
 
 
 def licence_evidence(entry: Row) -> str:
-    """The sentence the CAD file carries about its licence, where the row says."""
+    """The words the vendor's own files state its licence in, checked there."""
+    if entry.licence_statement is None:
+        licence = board_sources.source(entry.source).licence
+        if not licence.file:
+            raise ManifestError(
+                f"{entry.board}: the row names no licence statement in "
+                f"{entry.cad}, and tools/board_sources.py read {entry.source}'s "
+                f"licence from no file it fetches"
+            )
+        path = board_sources.source(entry.source).dest(REPO) / licence.file
+        text = " ".join(path.read_text(encoding="utf-8", errors="replace").split())
+        if " ".join(licence.quote.split()) not in text:
+            raise ManifestError(
+                f"{entry.board}: {path.relative_to(REPO).as_posix()} does not "
+                f"read {licence.quote!r}"
+            )
+        return f"the repository's {licence.file} reads {licence.quote!r}"
     element_name, text = entry.licence_statement
     board = ET.parse(cad_path(entry)).getroot().find("drawing/board")
     element = board.find(f"elements/element[@name='{element_name}']")
@@ -197,6 +224,12 @@ def check(entry: Row) -> None:
         (variant, package.how_to_fetch()),
         (table, package.how_to_fetch()),
     ]
+    licence = board_sources.source(entry.source).licence
+    if entry.licence_statement is None and licence.file:
+        wanted.append((
+            board_sources.source(entry.source).dest(REPO) / licence.file,
+            f"python tools/get_board_sources.py {entry.source}",
+        ))
     missing = [(path, how) for path, how in wanted if not path.is_file()]
     if missing:
         raise ManifestError(
