@@ -9,6 +9,13 @@ touches:
 - docs/tickets/OH-178-*
 - tools/eagle.py
 - PROVENANCE.md
+- tools/import_pindefs.py
+- tools/board_manifest.py
+- webui/boards/SparkFun*
+- webui/boards/Adafruit*
+- tests/rules/test_import_pindefs.py
+- tests/rules/test_board_manifest.py
+- README.md
 ---
 
 Part of OH-174, found by OH-176. The SparkFun Thing Plus ESP32-C6 names a chip pin on 5 of its 28 pads, and the pins layer of the OH-175 scorecard fails it. The other 23 are null because the only pin source read for a manifest board is the arduino-esp32 variant, and the variant either does not define the pad's label or defines it under a name no pad carries. OH-176's ticket note records which pads fall in each case.
