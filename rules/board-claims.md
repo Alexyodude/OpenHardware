@@ -293,3 +293,13 @@ move through the pad whose label names `SDA`, its `chip_index` read from
 the board file, and never the GPIO the XIAO's `SDA` names.
 `test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence`
 pins the three.
+
+## 10. 2026-09-30 — a row that builds holds its own by a test of that shape
+
+The SparkFun Pro Micro ESP32-C3 (OH-188) holds
+`tests/webui/test_sparkfun_pro_micro_esp32c3_board.py`, of the QT Py's
+shape: its `SDA` pad is `IO5/SDA/I2S_SDI/MTDI`, and the GPIO the XIAO's
+`SDA` names is this board's `SCL` pad, which the test holds at `input`
+throughout.
+`test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence`
+pins every entry.

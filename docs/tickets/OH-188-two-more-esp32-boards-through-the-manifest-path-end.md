@@ -23,6 +23,8 @@ touches:
 - tests/rules/test_import_pindefs.py
 - tests/webui/test_pin_view.py
 - PROVENANCE.md
+- tests/rules/test_board_claims.py
+- rules/board-claims.md
 ---
 
 Part of OH-174. Three boards now hold all four layers through the manifest path (OH-176 to OH-185): a row, pins from the variant and the traced copper, a composed model, and a run test compiled against the board's own variant. This ticket runs two more boards through that path end to end, both ESP32 chips with EAGLE files and variants on disk (surveyed 2026-09-29, .omc/research/twin-candidates.md in the main checkout):
