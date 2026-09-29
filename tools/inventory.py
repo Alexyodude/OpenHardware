@@ -297,7 +297,8 @@ class Evidence(enum.Enum):
 
     The two weakest classes are the ones to read carefully, because they look
     alike and are not. `ABSENT` means the search ran and there is nothing --
-    a finding about the vendor. `UNSEARCHABLE` means the search could not run
+    a finding about the tree searched, which is not everything the vendor
+    publishes. `UNSEARCHABLE` means the search could not run
     at all, which is a finding about *this checkout*: `third_party/` is
     git-ignored, so a fresh clone has no vendor tree, and reporting `absent`
     there would manufacture twenty-six negative results out of a fetch nobody
@@ -972,8 +973,12 @@ def render_text() -> str:
     )
     lines.append("  python tools/get_board_sources.py seeed-xiao puts it.")
     lines.append(
-        "  model3d is a mesh file in that tree, not what the 3D view draws."
+        "  schematic, pcb and model3d count only files named for the footprint in"
     )
+    lines.append(
+        "  that tree; CAD fetched anywhere else is not searched, and model3d is"
+    )
+    lines.append("  not what the 3D view draws.")
     lines.append("  Evidence, strongest first:")
     for evidence in Evidence:
         lines.append(f"    {evidence.label:<13} {evidence.gloss}")
@@ -1097,7 +1102,9 @@ def render_markdown() -> str:
         f"`{VENDOR_DIR.as_posix()}/`, where `python tools/get_board_sources.py seeed-xiao` puts it; "
         "a cell reading `unsearchable` means that tree is absent from this "
         "checkout, which is a fact about the checkout and not about the vendor. "
-        "`model3d` is a mesh file in that tree, not what the 3D view draws.",
+        "`schematic`, `pcb` and `model3d` count only files named for the "
+        "footprint in that tree; CAD fetched anywhere else is not searched, and "
+        "`model3d` is not what the 3D view draws.",
         "",
     ]
     out += [f"* `{evidence.label}` — {evidence.gloss}" for evidence in Evidence]
