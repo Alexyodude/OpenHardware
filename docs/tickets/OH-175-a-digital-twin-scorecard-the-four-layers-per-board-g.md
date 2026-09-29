@@ -2,7 +2,7 @@
 id: OH-175
 title: 'A digital-twin scorecard: the four layers per board, generated, so every board
   has a number'
-status: in-review
+status: done
 priority: P1
 created: '2026-09-29'
 touches:
@@ -57,3 +57,5 @@ Measured headline now, with 27 boards (master added the SparkFun Thing Plus ESP3
 - Two are the OCP tests, as before.
 - Two are test_check_facts: CLAUDE.md says 26 boards and master has 27. They fail identically with the tree at 7553061.
 - One is test_compile's test_a_failed_build_leaves_nothing_behind. It saw another session's %TEMP%\openhardware-build-* directory, then passed when re-run alone (OH-166's class of test).
+
+**Note 2026-09-29:** 2026-09-29: approved by an independent review after two rounds (13 original mutants: 12 killed, 1 equivalent; 12 new: 11 killed, 1 equivalent; final round's fake-source cases all refused). Merged to master by fast-forward at 4566b96. Headline on master with models served: 9 of 27 boards hold all four; geometry 26, model 25, pins 20, runs 12. Follow-up noted by the review, not done here: when catalogue() refuses, every runs cell reads refused and the heading says runs 0 without marking it the way it marks 'not built here'.
