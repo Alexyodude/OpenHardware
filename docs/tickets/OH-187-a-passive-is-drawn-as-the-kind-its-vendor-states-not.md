@@ -2,7 +2,7 @@
 id: OH-187
 title: A passive is drawn as the kind its vendor states, not the kind its package
   shares
-status: in-review
+status: in-progress
 priority: P2
 created: '2026-09-30'
 touches:
