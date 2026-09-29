@@ -4097,6 +4097,149 @@ def test_compose_draws_each_0603_from_its_own_library(monkeypatch, capsys):
         )
 
 
+# --- a passive is drawn as the kind its vendor states (OH-187) -----------------
+
+
+def test_a_value_states_a_kind_only_in_ohms_or_farads():
+    """Every value these four boards carry, and the answer each one gives.
+
+    A bare number states no unit, so `27` and `0` decide nothing; `2nH` is
+    henries, which is not what this reads; `TBD`, `DNP` and `FUSE` are words.
+    """
+    for value in ("10K", "5.1K", "100k", "1k", "4.7k", "0 ohm", "4K7", "4R7",
+                  "10Ω", "1M"):
+        assert compose.value_kind(value) == "resistor", value
+    for value in ("0.1uF", "22pF", "10µF", "10μF", "2.2uF", "0.01uF", "1uF"):
+        assert compose.value_kind(value) == "capacitor", value
+    for value in ("27", "0", "2nH", "TBD", "DNP", "FUSE", "", "10m", "100n"):
+        assert compose.value_kind(value) is None, value
+
+
+def test_the_schematic_decides_a_passives_kind_and_says_which_statement_did(
+        tmp_path):
+    """The two statements, each alone, both agreeing, both disagreeing, and
+    neither -- and the words beside each kind name which one decided."""
+    schematic = tmp_path / "board.sch"
+    schematic.write_text(
+        '<eagle version="9.6.2"><drawing><schematic><libraries>'
+        '<library name="lib"><devicesets>'
+        '<deviceset name="RESISTOR" prefix="R"/>'
+        '<deviceset name="CAP" prefix="C"/>'
+        '<deviceset name="INDUCTOR" prefix="L"/>'
+        '<deviceset name="CHIP" prefix="U"/>'
+        '</devicesets></library></libraries><parts>'
+        '<part name="R1" library="lib" deviceset="RESISTOR" value="10K"/>'
+        '<part name="R3" library="lib" deviceset="RESISTOR" value="27"/>'
+        '<part name="C7" library="lib" deviceset="CAP" value="TBD"/>'
+        '<part name="X1" library="lib" deviceset="CHIP" value="0.1uF"/>'
+        '<part name="L2" library="lib" deviceset="INDUCTOR" value="0 ohm"/>'
+        '<part name="C9" library="lib" deviceset="CAP" value="10K"/>'
+        '<part name="U1" library="lib" deviceset="CHIP" value="RP2040"/>'
+        '</parts></schematic></drawing></eagle>', encoding="utf-8")
+    stated = compose.stated_kinds(schematic)
+    assert stated["R1"] == ("resistor",
+                            "deviceset lib/RESISTOR's prefix R and value '10K'")
+    assert stated["R3"] == ("resistor", "deviceset lib/RESISTOR's prefix R")
+    assert stated["C7"] == ("capacitor", "deviceset lib/CAP's prefix C")
+    assert stated["X1"] == ("capacitor", "value '0.1uF'")
+    # **A swapped kind is refused, not drawn as either**: a capacitor's
+    # deviceset valued in ohms, and the QT Py's own L2.
+    for name, said in (("L2", "says inductor"), ("C9", "says capacitor")):
+        kind, why = stated[name]
+        assert kind is None and said in why and "disagree" in why, (name, why)
+    kind, why = stated["U1"]
+    assert kind is None and "nothing in board.sch states" in why, why
+
+
+def _manifest_passives():
+    """Every placement on a fetched manifest board that a passive's row would
+    draw, with the kind its schematic states: `(board, element, kind, why)`."""
+    found = []
+    for row, spec in _manifest_specs():
+        if spec is None or not spec.layout.is_file() or not spec.schematic.is_file():
+            continue
+        stated = compose.stated_kinds(spec.schematic)
+        for element in compose.read_layout(spec.layout).elements:
+            row_ = compose.correspondence_for(element)
+            if row_ is None or row_.library not in compose.PASSIVE_KINDS:
+                continue
+            kind, why = stated.get(element.name, (None, "not in the schematic"))
+            found.append((spec.board, element, kind, why))
+    if not found:
+        pytest.skip("SKIPPED: no manifest board and schematic are fetched")
+    return found
+
+
+def test_every_manifest_passive_is_drawn_as_the_kind_its_vendor_states():
+    """**The rows, held to the schematics**: each passive a manifest board
+    places resolves to a row drawing the kind its vendor states, and the only
+    ones refused are the ones written here -- so a row whose kind is swapped,
+    or a package that loses its row for one kind, fails by name.
+    """
+    refused: dict[str, set[str]] = {}
+    for board, element, kind, why in _manifest_passives():
+        if kind is None:
+            refused.setdefault(board, set()).add(element.name)
+            continue
+        row = compose.correspondence_for(element, kind)
+        assert row is not None, (
+            f"{board}: {element.name} ({element.package}) is a {kind} by "
+            f"{why}, and no row draws a {kind} on that package")
+        assert compose.PASSIVE_KINDS[row.library] == kind, (
+            f"{board}: {element.name} is a {kind} by {why} and is drawn as "
+            f"{row.model}")
+    # Which is refused is written down rather than derived, so a reader that
+    # loses a statement -- or gains a false one -- is caught.
+    assert refused == {"Adafruit QT Py ESP32-C3": {"L2"}}, refused
+
+
+def test_compose_draws_each_passive_as_the_kind_its_schematic_states(
+        monkeypatch, capsys):
+    """**The lookup `compose` actually uses**, on the two boards OH-187 was
+    filed from: the QT Py's R1-R6 were C_0402 and the Feather's C4 and C10
+    were R_0603. No OpenCASCADE: only the two-pad passive rows are kept, each
+    a 1.6 x 0.8 mm box, so nothing is fetched or tessellated.
+    """
+    rows = tuple(c for c in compose.CORRESPONDENCE
+                 if c.package in ("_0402NO", "0603-NO", "_0402"))
+    monkeypatch.setattr(compose, "CORRESPONDENCE", rows)
+    monkeypatch.setattr(
+        compose, "component_mesh",
+        lambda component, deflection: (
+            _model_box(1.6, 0.8, 0.5, "#101010"),
+            compose.Extent(-0.8, 0.8, -0.4, 0.4, 0.0, 0.5)))
+    want = {
+        "Adafruit QT Py ESP32-C3": {
+            **{f"R{n}": "R_0402_1005Metric" for n in range(1, 7)},
+            "C2": "C_0402_1005Metric", "L1": "L_0402_1005Metric"},
+        "Adafruit Feather ESP32-C6": {
+            "C4": "C_0603_1608Metric", "C10": "C_0603_1608Metric",
+            "R1": "R_0603_1608Metric"},
+    }
+    for board, expected in want.items():
+        spec = next(s for s in compose.COMPOSITIONS if s.board == board)
+        if not spec.layout.is_file() or not spec.schematic.is_file():
+            pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+        compose.compose(spec, deflection=0.05, check=True)
+        out = capsys.readouterr().out
+        drawn_line = next(line for line in out.splitlines()
+                          if line.startswith("  drawn "))
+        drawn = dict(part[:-1].rsplit(" (", 1) for part in
+                     drawn_line.split(": ", 1)[1].split(", "))
+        for name, model in expected.items():
+            assert drawn.get(name) == model, (board, name, drawn.get(name))
+        assert "  kinds   " in out, out
+    # The one the QT Py's own schematic contradicts is refused by name, with
+    # both statements, rather than drawn as either.
+    spec = next(s for s in compose.COMPOSITIONS
+                if s.board == "Adafruit QT Py ESP32-C3")
+    compose.compose(spec, deflection=0.05, check=True)
+    out = capsys.readouterr().out
+    assert "L2 (" not in next(line for line in out.splitlines()
+                              if line.startswith("  drawn "))
+    assert "  refused L2 (_0402)" in out and "'0 ohm'" in out, out
+
+
 def test_a_kicad_manifest_row_is_refused_by_name(capsys):
     """Every reading `manifest_composition` makes beyond the row is an EAGLE
     field -- the preview colour, the design-rule stack -- so a `.kicad_pcb`
