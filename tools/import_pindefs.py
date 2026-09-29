@@ -2639,10 +2639,14 @@ MANIFEST_DERIVATION = (
 NOT_PUBLISHED = "no board-support package covering this board defines this label"
 #: The same search on a manifest board whose own CAD was traced too, and
 #: which found nothing either: `tools/inventory.py` counts it unanswered.
+#: "In series" is `read_eagle_traced`'s rule, and the words are its: a net
+#: through a resistor into a divider -- the Qwiic Pocket's V_BATT -- does
+#: reach the chip, and is not followed.
 NOT_TRACED = (
     "no board-support package covering this board defines this label, and in "
     "the vendor's board file this pad's net reaches no pad of the chip, "
-    "directly or through one resistor"
+    "directly or through one resistor in series, whose other net holds only "
+    "that resistor and the chip's pad"
 )
 DISPUTED ="the packages disagree; recorded rather than averaged, so the pad stays null"
 

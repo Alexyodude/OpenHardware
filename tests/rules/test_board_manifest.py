@@ -757,6 +757,35 @@ def test_every_other_fact_in_the_pilots_reasons_is_read_off_its_schematic():
             "of the WS2812 D5") in reasons["LED_DO"]
 
 
+def test_the_pockets_v_batt_reason_is_its_divider_as_its_files_draw_it():
+    """"V_BATT on R13 (1M), whose other net, IO1/V_BATT_2, holds U1's
+    `XTAL_32K_N/IO1` (pad 13) and R14 (1M) to GND": each fact read off the
+    Qwiic Pocket's schematic, pad 13 off its board file, and the words in
+    the reason. The trace stops there, which is why the row says it."""
+    row = row_named("SparkFun Qwiic Pocket ESP32-C6")
+    _fetched(row)
+    schematic = eagle.read_schematic(
+        board_sources.source(row.source).dest(board_manifest.REPO) / row.schematic)
+    nets = {net.name: {(ref.part, ref.pin) for ref in net.pins} for net in schematic.nets}
+    (r13_far,) = [pin for part, pin in nets["V_BATT"] if part == "R13"]
+    (divided,) = [name for name, on in nets.items()
+                  if ("R13", "1" if r13_far == "2" else "2") in on]
+    assert divided == "IO1/V_BATT_2"
+    assert {part for part, _ in nets[divided]} == {"R13", "R14", "U1"}
+    assert ("U1", "XTAL_32K_N/IO1") in nets[divided]
+    assert {schematic.part("R13").value, schematic.part("R14").value} == {"1M"}
+    assert {part for part, _ in nets["GND"]} >= {"R14"}
+    board = eagle.read_board(board_manifest.cad_path(row))
+    (u1,) = [element for element in board.elements if element.name == "U1"]
+    assert [pad.number for pad in u1.pads if pad.net == divided] == ["13"]
+    with pytest.raises(KeyError):
+        _trace(row)["V_BATT"]
+    why = dict(row.reasons)["V_BATT"]
+    for words in ("puts V_BATT on R13 (1M)", "other net, IO1/V_BATT_2",
+                  "U1's `XTAL_32K_N/IO1` (pad 13)", "R14 (1M) to GND"):
+        assert words in why, words
+
+
 def test_the_c6_recipes_variant_numbers_the_pilots_sda_and_scl_as_other_gpios():
     """rules/board-claims.md §6: built with the variant the ESP32-C6 recipe
     reads, the pilot's `SDA` and `SCL` would be other GPIOs than its own

@@ -222,6 +222,7 @@ class Row:
 
 
 _THING_PLUS_SCH = "SparkFun's Thing_Plus_ESP32_C6.sch"
+_POCKET_SCH = "SparkFun's Qwiic_Pocket_Dev_ESP32_C6.sch"
 
 ROWS = (
     Row(
@@ -321,6 +322,14 @@ ROWS = (
         licence_statement=(
             "FRAME1",
             "Released under the Creative Commons Attribution Share-Alike 4.0 License",
+        ),
+        reasons=(
+            ("V_BATT",
+             f"the battery, not a pin of the ESP32-C6: {_POCKET_SCH} puts V_BATT on "
+             f"R13 (1M), whose other net, IO1/V_BATT_2, holds U1's `XTAL_32K_N/IO1` "
+             f"(pad 13) and R14 (1M) to GND -- a divider onto IO1 that senses the "
+             f"battery, which the trace does not cross because that net holds more "
+             f"than R13 and the chip"),
         ),
         pin_table=ESP32_C6_MINI_1_SPARKFUN,
     ),

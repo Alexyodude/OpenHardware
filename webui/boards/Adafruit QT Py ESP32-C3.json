@@ -62,7 +62,7 @@
       "pin": null,
       "chip_pin": null,
       "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label, and in the vendor's board file this pad's net reaches no pad of the chip, directly or through one resistor",
+      "why_null": "no board-support package covering this board defines this label, and in the vendor's board file this pad's net reaches no pad of the chip, directly or through one resistor in series, whose other net holds only that resistor and the chip's pad",
       "x": 140.1,
       "y": 29.8,
       "group": "header-right",
