@@ -194,12 +194,14 @@ beside it, holds the `SDA` and `SCL` sentence.
 
 ## 7. 2026-09-29 — a manifest board holds its own evidence, or none
 
-OH-179 replaced §6's two refusals. A row in `tools/board_manifest.py` now
-builds with its chip's recipe and its own variant as the only pin table
-(`own_variant` in `webui/compile.py`), or `recipe_for` refuses, naming what
-that table needs and this build lacks (`unmet`, which
-`test_each_rows_verdict_is_the_compilers_own` holds to the compiler). It
-still never inherits its chip's `FIRMWARE_VERIFIED` entry.
+OH-179 replaced §6's two refusals. A row in `tools/board_manifest.py` is
+in one of three states. It builds with its chip's recipe and its own
+variant as the only pin table (`own_variant` in `webui/compile.py`); or
+`recipe_for` refuses, naming what that table needs and this build lacks
+(`unmet`, which `test_each_rows_verdict_is_the_compilers_own` holds to the
+compiler); or its variant directory was never fetched, and `recipe_for`
+resolves while the build is refused naming the fetch, as a XIAO's is
+(OH-183). It still never inherits its chip's `FIRMWARE_VERIFIED` entry.
 
 **A row's claim is its own.** `BOARD_FIRMWARE_VERIFIED`, beside
 `FIRMWARE_VERIFIED` in `webui/boards/catalogue.py`, maps a row to a named

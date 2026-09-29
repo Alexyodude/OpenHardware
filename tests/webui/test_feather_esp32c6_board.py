@@ -20,7 +20,7 @@ import pathlib
 
 import pytest
 
-from tools import import_pindefs
+from tools import board_manifest, import_pindefs
 from webui import api, pinmap
 from webui import compile as compiler
 from webui.boards import esp32c6
@@ -41,8 +41,9 @@ BUDGET = 110_000
 def needs_table() -> None:
     """Skip, naming the fetch, before anything asks for this board's recipe
     or reads its table (OH-183)."""
-    table = (compiler.BOARD_SUPPORT / "arduino-esp32" / "variants"
-             / "adafruit_feather_esp32c6" / "pins_arduino.h")
+    row = board_manifest.row(BOARD)
+    table = (compiler.BOARD_SUPPORT / row.package / "variants" / row.variant
+             / "pins_arduino.h")
     if not table.is_file():
         pytest.skip(f"SKIPPED: no {table}; python tools/import_pindefs.py --fetch")
 
