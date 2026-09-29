@@ -446,8 +446,11 @@ def test_every_resolved_pad_says_which_sources_named_it():
 
 
 def _schematic_gpio(row: board_manifest.Row) -> dict[str, set[int]]:
-    """Net -> the GPIOs the row's schematic names on the traced chip's pins
-    there: `GPIO26/AD0` on the KB2040's `A0`."""
+    """Net -> the GPIOs the row's schematic names on the traced chip's own
+    pins there: `GPIO26/AD0` on the KB2040's `A0`, and `IOA0` on the Pro
+    Micro ESP32-C3's `IOA0/SCLK`, where SparkFun's ESP32-C3_MINI-1 symbol
+    names its five ADC1 pins `IOA<n>` and every other GPIO `IO<n>`. Read on
+    the chip's pins only: nowhere else is `IOA<n>` the chip's name for a pin."""
     board = eagle.read_board(board_manifest.cad_path(row))
     (chip,) = [element.name for element in board.elements if (element.package, element.value)
                == (row.pin_table.package, row.pin_table.value)]
@@ -455,30 +458,17 @@ def _schematic_gpio(row: board_manifest.Row) -> dict[str, set[int]]:
         board_sources.source(row.source).dest(board_manifest.REPO) / row.schematic)
     return {net.name: {int(found.group(1)) for ref in net.pins if ref.part == chip
                        for part in ref.pin.split("/")
-                       if (found := re.fullmatch(r"(?:GPIO|IO)(\d+)", part, re.I))}
+                       if (found := re.fullmatch(r"(?:GPIO|IOA?)(\d+)", part, re.I))}
             for net in schematic.nets}
-
-
-def _variant_number(row: board_manifest.Row, label: str) -> int:
-    """The number the row's variant gives one label it does not opt in."""
-    checkout = import_pindefs.BSP_DIR / row.package
-    text = (checkout / "variants" / row.variant / "pins_arduino.h").read_text(
-        encoding="utf-8", errors="replace")
-    pins, _ = import_pindefs.variant_source(dataclasses.replace(row, labels=(label,))).pins(
-        checkout, (text,))
-    return pins[label].index
 
 
 def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
     """The trace is one statement, and every resolved pad has another that
     agrees: the GPIO the vendor's net name carries, as SparkFun's `IO8`; the
-    variant's number for a label it numbers, as Adafruit's `TX`; the GPIO
+    variant's number for a label it numbers, as Adafruit's `TX`; or the GPIO
     the vendor's schematic names the chip's pin on that net, as the KB2040's
-    `SCLK` on `GPIO18`, which its variant calls `SCK`; or, where a net is
-    SparkFun's `IOA<n>` -- its `IO` on the Arduino label `A<n>`, as the Pro
-    Micro ESP32-C3's `IOA0/SCLK` -- the variant's number for `A<n>`. That
-    last is a reading of SparkFun's spelling, and it can only fail a pad:
-    the pin itself is the trace's."""
+    `SCLK` on `GPIO18`, which its variant calls `SCK`, and the Pro Micro
+    ESP32-C3's `IOA0/SCLK` on its module's `IOA0`."""
     for row in ROWS:
         _fetched(row)
         numbers = _variant_numbers(row)
@@ -491,18 +481,12 @@ def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
                       if (found := re.fullmatch(r"(?:GPIO|IO)(\d+)", part, re.I))}
             stated |= {numbers[part] for part in parts if part in numbers}
             stated |= named.get(pad["label"], set())
-            stated |= {_variant_number(row, f"A{found.group(1)}") for part in parts
-                       if (found := re.fullmatch(r"IOA(\d+)", part))}
             assert stated == {pad["chip_index"]}, (row.board, pad["label"], stated)
     kb2040 = row_named("Adafruit KB2040")
     assert "SCLK" not in _variant_numbers(kb2040)
     assert _schematic_gpio(kb2040)["SCLK"] == {18}
     pro_micro = row_named("SparkFun Pro Micro ESP32-C3")
-    _fetched(pro_micro)
-    assert sorted((pad["label"].split("/")[0], pad["chip_index"])
-                  for pad in _committed(pro_micro)["pads"]
-                  if pad["label"].startswith("IOA")) == [
-        ("IOA0", 0), ("IOA1", 1), ("IOA2", 2), ("IOA3", 3), ("IOA4", 4)]
+    assert _schematic_gpio(pro_micro)["IOA0/SCLK"] == {0}
 
 
 def _trace(row: board_manifest.Row, text: str | None = None,
