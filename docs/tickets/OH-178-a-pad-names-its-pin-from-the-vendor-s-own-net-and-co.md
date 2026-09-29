@@ -20,3 +20,5 @@ Read the pin a pad reaches from the vendor's own board and schematic files where
 Done when the pilot's pins layer is measured again and every pad either names its pin with the file that said so or carries a specific reason, and a deliberately wrong net name has been shown to be refused rather than resolved.
 
 **Paths this will need**, claimed when the ticket is started (they are held by other tickets at filing): `tools/import_pindefs.py`, `tools/eagle.py`, `webui/boards/SparkFun*`, `tests/rules/test_import_pindefs.py`.
+
+**Note 2026-09-29:** From OH-176's review, 2026-09-29. (1) Nine of the pilot's null pads are GPIOs the arduino-esp32 variant names under another spelling: IO0-IO5 (A0-A5, and SS=5), IO20/PICO and IO21/POCI (MOSI/MISO), IO23/STAT (PIN_RGB_LED 23). (2) Trap: J1's SCHEMATIC pin names GPIO0-GPIO6 are Feather header positions, not ESP32 GPIO numbers (the reviewer found 'GPIO5' on net IO23, 'GPIO0' on IO18, 'GPIO4' on IO8). Joining through those names would resolve pads to the wrong pin while reading as vendor-sourced. The net names are the ones that carry the ESP GPIO number. Verify both against the files before relying on them.
