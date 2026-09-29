@@ -372,6 +372,20 @@ EXPLAINS: dict[str, set[str]] = {
     "XIAO-ESP32-C5-DIP": set(),
     "XIAO-RP2350-DIP": set(),
     "XIAO-nRF54l15-DIP": set(),
+    # **The manifest boards (OH-180) leave off what nobody publishes**, and
+    # a person looking at one would look first for its USB socket and its
+    # battery lead. Solder jumpers, fiducials and test pads are copper and
+    # are drawn as copper, so they are not here.
+    "SparkFun Thing Plus ESP32-C6": {
+        "THING_PLUS", "USB-C-16P_4LAYER-PADS", "JST-2-SMD", "MICROSD_TINY",
+        "WS2812-2020", "DFN-8",
+    },
+    "Adafruit QT Py ESP32-C3": {"USB_C_CUSB31-CFM2AX-01-X", "SK6805_1515"},
+    "Adafruit Feather ESP32-C6": {
+        "1X16_ROUND", "1X12_ROUND", "USB_C_CUSB31-CFM2AX-01-X",
+        "JSTPH2_BATT", "JST_SH4_RA", "TDFN8_2X2MM",
+        "LONGAN-IC_SNR6-1.0-3X3X1MM",
+    },
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
 # same placements, same absences -- so the entries are derived the same way
@@ -410,6 +424,17 @@ def test_each_board_explains_the_parts_it_leaves_off():
                 f"reason, which is the state ABSENT exists to prevent."
             )
 
+
+
+def _mask_of(slug: str) -> str:
+    """The colour a composed board's PCB slab is drawn in, by file stem.
+
+    Read off the composition rather than listed here: this was
+    `BOARD_MASK or "#313d63"`, which held while every board was a XIAO or
+    the Uno and found no PCB at all on the first red one (OH-180).
+    """
+    return next(spec.colour for spec in compose.COMPOSITIONS
+                if compose._slug(spec.board) == slug)
 
 
 def _glb_groups(path: pathlib.Path) -> dict[str, list[tuple[float, float, float]]]:
@@ -501,7 +526,7 @@ def test_no_soldered_contact_hangs_off_the_board():
     worst: list[str] = []
     for slug in boards:
         groups = _glb_groups(models / f"{slug}.glb")
-        pcb = groups.get(compose.BOARD_MASK) or groups.get("#313d63")
+        pcb = groups.get(_mask_of(slug))
         assert pcb, f"{slug} has no PCB group to measure against"
         left, right = min(p[0] for p in pcb), max(p[0] for p in pcb)
         near, far = min(p[2] for p in pcb), max(p[2] for p in pcb)
@@ -2403,7 +2428,7 @@ def test_no_copper_is_drawn_outside_the_board():
     worst: list[str] = []
     for slug in boards:
         groups = _glb_groups(models / f"{slug}.glb")
-        pcb = groups.get(compose.BOARD_MASK) or groups.get("#313d63")
+        pcb = groups.get(_mask_of(slug))
         copper = groups.get(compose.COPPER)
         assert copper, f"{slug} draws no copper at all, so it is a bare slab"
         left, right = min(p[0] for p in pcb), max(p[0] for p in pcb)
@@ -3159,7 +3184,6 @@ def test_every_part_whose_vendor_marks_pin_one_agrees_with_its_model():
     the day it landed.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
-    by_package = {c.package: c for c in compose.CORRESPONDENCE}
     cache: dict = {}
     checked = 0
     for spec in compose.COMPOSITIONS:
@@ -3170,7 +3194,9 @@ def test_every_part_whose_vendor_marks_pin_one_agrees_with_its_model():
         centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
                   (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
         for element in board.elements:
-            component = by_package.get(element.package)
+            # The composer's own lookup: SparkFun's `0603` is two rows,
+            # told apart by library, and a dict keyed by package keeps one.
+            component = compose.correspondence_for(element)
             if component is None or compose.mark_of(element) is None:
                 continue
             if component.slug not in cache:
@@ -3578,3 +3604,353 @@ def test_the_ceramic_parts_reach_the_shipped_boards_as_dielectrics():
         # The cover it used to borrow is still steel wherever it remains.
         if "#c6c4a0" in finishes:
             assert finishes["#c6c4a0"][0] == 1.0, board
+
+
+# --- the manifest boards, composed from their rows (OH-180) --------------------
+
+
+def _manifest_specs():
+    """Each `tools/board_manifest.py` row's composition, row first."""
+    from tools import board_manifest
+
+    by_board = {spec.board: spec for spec in compose.COMPOSITIONS}
+    return [(row, by_board.get(row.board)) for row in board_manifest.ROWS]
+
+
+def _preview(path: pathlib.Path, name: str) -> str:
+    """One `<mfgpreviewcolor>` of an EAGLE board file, as EAGLE writes it."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.parse(path).getroot()
+    found = root.findall(f".//mfgpreviewcolors/mfgpreviewcolor[@name='{name}']")
+    assert len(found) == 1, f"{path.name} states {name} {len(found)} times"
+    return found[0].get("color")
+
+
+def _plain_notes(path: pathlib.Path) -> list[str]:
+    """The words on the board file's own documentation layer, 51 (tDocu)."""
+    import xml.etree.ElementTree as ET
+
+    board = ET.parse(path).getroot().find("drawing/board")
+    return [text.text or "" for text in board.findall("plain/text")
+            if text.get("layer") == "51"]
+
+
+def test_every_manifest_row_is_composed_from_that_row():
+    """**A row already names the board file and the pads**, so the
+    composition is derived from it rather than written out a second time --
+    and the model is centred on the very elements the row builds the pad map
+    from, so the two cannot disagree about where the middle of the board is.
+    """
+    from tools import board_manifest
+
+    for row, spec in _manifest_specs():
+        assert spec is not None, (
+            f"{row.board} is a row in tools/board_manifest.py and is not "
+            f"composed, so the page draws its footprint"
+        )
+        assert spec.layout == board_manifest.cad_path(row), row.board
+        assert spec.headers == row.select, (
+            f"{row.board}: the model is centred on {spec.headers} and the pad "
+            f"map is built from {row.select}"
+        )
+        assert spec.fetch_with.endswith(f"get_board_sources.py {row.source}"), (
+            row.board)
+
+
+def test_a_package_two_libraries_share_is_told_apart_by_the_library():
+    """SparkFun's `0603` is a resistor from one library and a capacitor from
+    another, under one package name. A table keyed by package alone draws
+    all twenty-three as one of them; the library is the vendor saying which.
+    """
+    def placed(library: str, package: str) -> eagle.Element:
+        return eagle.Element(
+            "X1", library, package,
+            pads=(eagle.Pad("1", "smd", -0.85, 0.0, 1.1, 1.0, None),
+                  eagle.Pad("2", "smd", 0.85, 0.0, 1.1, 1.0, None)))
+
+    resistor = compose.correspondence_for(placed("SparkFun-Resistors", "0603"))
+    capacitor = compose.correspondence_for(placed("SparkFun-Capacitors", "0603"))
+    assert resistor is not None and resistor.model == "R_0603_1608Metric"
+    assert capacitor is not None and capacitor.model == "C_0603_1608Metric"
+    assert compose.correspondence_for(placed("somebody-else", "0603")) is None, (
+        "no row for 0603 names no library, so a third library's 0603 is a "
+        "part nobody has matched yet"
+    )
+    # A row that names no library answers for every library's copy.
+    for library in ("SparkFun-IC-Power", "adafruit_power", "microbuilder"):
+        row = compose.correspondence_for(placed(library, "SOT23-5"))
+        assert row is not None and row.model == "SOT-23-5", library
+
+
+def test_a_manufacturers_model_sits_where_its_own_footprint_puts_its_pads(
+        monkeypatch, tmp_path):
+    """`pads_origin` is the one new number in placing a module, so it is
+    checked against a footprint whose answer is known by hand: pads centred
+    on (0, -2) in KiCad's down-the-page frame, and the model offset by
+    (-3, -4), put the middle of the pads at (3, 6) in the model's own frame.
+    """
+    monkeypatch.setattr(compose, "CACHE", tmp_path)
+    part = compose.Component(
+        "PKG", "maker", "PART", "a test part, two 1 mm pads 2 mm apart",
+        step="https://example.invalid/PART.STEP",
+        footprint="https://example.invalid/PART.kicad_mod")
+    local = tmp_path / f"component-{part.slug}.kicad_mod"
+
+    def footprint(rotate: str) -> str:
+        return (
+            '(footprint "PART"\n'
+            '  (pad "1" smd rect (at -1 -2) (size 1 1) (layers "F.Cu"))\n'
+            '  (pad "2" smd rect (at 1 -2) (size 1 1) (layers "F.Cu"))\n'
+            '  (model "${X}/maker.3dshapes/PART.STEP"\n'
+            '    (offset (xyz -3 -4 0)) (scale (xyz 1 1 1))\n'
+            f'    (rotate (xyz {rotate}))))\n')
+
+    local.write_text(footprint("0 0 0"), encoding="utf-8")
+    assert compose.pads_origin(part) == pytest.approx((3.0, 6.0))
+
+    # A block that also TURNS the model is refused, not read as an offset.
+    local.write_text(footprint("0 0 90"), encoding="utf-8")
+    with pytest.raises(SystemExit, match="turns or scales"):
+        compose.pads_origin(part)
+
+    # And a part from KiCad's own library keeps the anchor it always had.
+    kicad_part = dataclasses.replace(part, step=None, footprint=None)
+    assert compose.pads_origin(kicad_part) is None
+
+
+def test_the_module_lands_on_the_body_its_vendor_drew():
+    """**The guard, on the real module**: SparkFun draw the WROOM-1's body
+    three millimetres off the middle of its pads, towards the antenna, and
+    Espressif's own footprint puts its model there too. Anchored the old
+    way -- the body's middle on the pads' -- it misses SparkFun's drawing by
+    that much, which `silk_miss` refuses; anchored by `pads_origin` it lands.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    spec = next(s for s in compose.COMPOSITIONS
+                if s.board == "SparkFun Thing Plus ESP32-C6")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    board = compose.read_layout(spec.layout)
+    module = board.element("U1")
+    component = compose.correspondence_for(module)
+    step = compose.CACHE / f"component-{component.slug}.step"
+    if not step.is_file():
+        pytest.skip("SKIPPED: the module's STEP is not fetched; run "
+                    "tools/compose_board_3d.py")
+    pads = [pad for name in spec.headers for pad in board.element(name).pads]
+    centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
+              (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
+    mesh, _box = compose.component_mesh(component, compose.DEFLECTION)
+    assert isinstance(mesh, compose.OverPads), (
+        "the module arrives without where its own pads are"
+    )
+
+    placed = compose.place(mesh, module, component.turn, spec.thickness_mm,
+                           centre)
+    assert compose.silk_miss(module, placed, centre) < 0.5
+    # The same triangles as a plain mesh: anchored the old way.
+    centred = compose.place(compose.Mesh(mesh.groups), module, component.turn,
+                            spec.thickness_mm, centre)
+    assert compose.silk_miss(module, centred, centre) > compose.SILK_TOLERANCE_MM, (
+        "centred on its pads the module should miss SparkFun's drawing of it; "
+        "if it does not, `pads_origin` is doing nothing this test can see"
+    )
+
+
+def test_a_manifest_boards_colour_is_read_where_its_file_states_one():
+    """**The colour is the vendor's where their file states one, and a
+    judgement where it does not -- and which is which is read, not
+    remembered.** EAGLE writes a manufacturing-preview solder mask into
+    every board file whether anybody chose one or not. The Arduino Uno's
+    file carries one under a board this table draws navy from PICSimLab's
+    own artwork, so that value is what nobody choosing looks like; a board
+    drawn in `BOARD_MASK` must carry it, and a board drawn in anything else
+    must not, and must be drawn in what its file states.
+    """
+    uno = _brd()
+    unset = _preview(uno, "soldermaskcolor")
+    checked = 0
+    for row, spec in _manifest_specs():
+        if spec is None or not spec.layout.is_file():
+            continue
+        checked += 1
+        stated = _preview(spec.layout, "soldermaskcolor")
+        if spec.colour == compose.BOARD_MASK:
+            assert stated == unset, (
+                f"{row.board} is drawn in BOARD_MASK and its file states a "
+                f"mask of {stated}; read it"
+            )
+            assert stated in spec.colour_source, row.board
+            continue
+        assert stated != unset, (
+            f"{row.board} is drawn in {spec.colour} and its file states only "
+            f"EAGLE's unset {unset}"
+        )
+        # ARGB, drawn as EAGLE's preview draws it: over the file's own
+        # substrate at the stated alpha.
+        substrate = _preview(spec.layout, "substratecolor")
+        alpha = int(stated[2:4], 16) / 255
+        drawn = "#" + "".join(
+            f"{round(int(stated[at:at + 2], 16) * alpha + int(substrate[at:at + 2], 16) * (1 - alpha)):02x}"
+            for at in (4, 6, 8))
+        assert spec.colour == drawn, (
+            f"{row.board}: its file states {stated} over {substrate}, which "
+            f"draws {drawn}, and the composition says {spec.colour}"
+        )
+        # Every figure the source quotes is the file's, read here.
+        for quoted in (stated, unset, f"0x{stated[4:]}", f"0x{substrate[4:]}",
+                       f"alpha {int(stated[2:4], 16)}/255"):
+            assert quoted in spec.colour_source, (
+                f"{row.board}: the colour source does not say {quoted}, which "
+                f"is what the files read"
+            )
+        # And the words the source quotes are on the board's own note.
+        said = [line.strip() for note in _plain_notes(spec.layout)
+                for line in note.splitlines() if line.startswith("Soldermask:")]
+        assert said and all(f"'{line}'" in spec.colour_source for line in said), (
+            f"{row.board}: the note reads {said}, and the colour source "
+            f"quotes something else"
+        )
+    if not checked:
+        pytest.skip("SKIPPED: no manifest board is fetched")
+
+
+def test_a_manifest_boards_thickness_is_its_own_note_or_the_unos_stack():
+    """1.6 mm is the Uno's reused assumption, and it is only honest where the
+    board file states nothing better. An EAGLE file's design rules carry a
+    layer stack, and where it is the stack the Uno's own file carries it is
+    EAGLE's and nobody's statement; where a board's note states a
+    thickness, that is the number drawn.
+    """
+    import xml.etree.ElementTree as ET
+
+    def stack(path: pathlib.Path) -> dict[str, str]:
+        rules = ET.parse(path).getroot().find("drawing/board/designrules")
+        return {param.get("name"): param.get("value")
+                for param in rules.findall("param")
+                if param.get("name") in ("mtCopper", "mtIsolate")}
+
+    uno = stack(_brd())
+    checked = 0
+    for row, spec in _manifest_specs():
+        if spec is None or not spec.layout.is_file():
+            continue
+        checked += 1
+        stated = "thickness_mm" in compose.MANIFEST_STATED.get(row.board, {})
+        if not stated:
+            assert spec.thickness_mm == _uno().thickness_mm, (
+                f"{row.board} states no thickness and is not drawn at the "
+                f"Uno's, which is the assumption it claims to reuse"
+            )
+            assert stack(spec.layout) == uno, (
+                f"{row.board}'s design rules carry a stack of their own; "
+                f"read its thickness rather than assuming the Uno's"
+            )
+            continue
+        notes = " ".join(_plain_notes(spec.layout))
+        assert f"Board thickness: {spec.thickness_mm:g}mm" in notes, (
+            f"{row.board} is drawn {spec.thickness_mm} mm thick and its "
+            f"note does not say so"
+        )
+    if not checked:
+        pytest.skip("SKIPPED: no manifest board is fetched")
+
+
+def test_every_placement_is_drawn_refused_or_padless_and_counted(capsys):
+    """Every element of a board is accounted for exactly once, and the
+    refusals are counted in the output, not only listed.
+
+    Run with nothing matched, so no model is fetched or tessellated: every
+    element with a pad is then either refused by `ABSENT` or unmodelled, and
+    one with no pad at all -- a logo, a pin label -- is neither, because
+    nothing is soldered there for a part to stand on. SparkFun's file places
+    63 pin labels, each its own package, which is why that is a count and
+    not an `ABSENT` entry apiece.
+    """
+    spec = next(s for s in compose.COMPOSITIONS
+                if s.board == "Adafruit QT Py ESP32-C3")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    board = compose.read_layout(spec.layout)
+    padless = [e for e in board.elements if not e.pads]
+    refused = [e for e in board.elements if e.package in compose.ABSENT]
+    rest = [e for e in board.elements if e.pads and e.package not in compose.ABSENT]
+    assert padless and refused and rest, "the board no longer shows all three"
+
+    with mock.patch.object(compose, "CORRESPONDENCE", ()):
+        compose.compose(spec, deflection=0.05, check=True)
+    out = capsys.readouterr().out
+    assert f"no pads {len(padless)} placement(s)" in out, out
+    assert f"no model {len(rest)} placement(s)" in out, out
+    assert f"refused {len(refused)} placement(s)" in out, out
+    assert len(padless) + len(refused) + len(rest) == len(board.elements)
+
+
+def test_a_mirrored_elements_copper_is_on_the_other_face(tmp_path):
+    """EAGLE's `M` turns the whole package over onto the bottom face, and
+    `eagle._ink` already moved its silkscreen there while its surface pads
+    stayed on the top. Nothing composed had drawn a mirrored part until the
+    manifest boards, and the QT Py's ESP32-C3 is one: 33 pads on the top face
+    of a board whose file puts them underneath (OH-180). Lives here because
+    the composer's artwork is the one reader of a pad's face.
+    """
+    path = tmp_path / "mirrored.brd"
+    path.write_text(
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<eagle version="9.6.2"><drawing><board>'
+        '<plain><wire x1="0" y1="0" x2="10" y2="0" width="0.2" layer="20"/></plain>'
+        '<libraries><library name="L"><packages><package name="P">'
+        '<smd name="1" x="-1" y="0" dx="0.5" dy="0.5" layer="1"/>'
+        '<smd name="2" x="1" y="0" dx="0.5" dy="0.5" layer="16"/>'
+        "</package></packages></library></libraries>"
+        '<elements>'
+        '<element name="TOP" library="L" package="P" x="2" y="2"/>'
+        '<element name="BOT" library="L" package="P" x="8" y="8" rot="MR0"/>'
+        "</elements><signals/>"
+        "</board></drawing></eagle>",
+        encoding="utf-8",
+    )
+    board = eagle.read_board(path)
+    sides = {(e.name, p.number): (p.front, p.back)
+             for e in board.elements for p in e.pads}
+    assert sides[("TOP", "1")] == (True, False)
+    assert sides[("TOP", "2")] == (False, True)
+    assert sides[("BOT", "1")] == (False, True), (
+        "a mirrored element's top-layer pad is on the bottom of the board"
+    )
+    assert sides[("BOT", "2")] == (True, False)
+
+
+def test_a_mirrored_element_hangs_under_the_board():
+    """**A part on the bottom face is turned over, not reflected.** EAGLE's
+    `M` negates x, and a model moved by that alone is a mirror image standing
+    on the TOP of the board, inside out -- which is how the QT Py's
+    ESP32-C3 first came out. Negating z with it is the half turn that puts
+    the part underneath, and the pair is a rotation.
+    """
+    box = compose.slab([(-1.0, -0.5), (1.0, -0.5), (1.0, 0.5), (-1.0, 0.5)],
+                       1.0, "#050505", (0.0, 0.0))
+    # `slab` builds in the scene's axes; a model arrives z-up, so swap back.
+    groups = {}
+    for colour, (p, n, i) in box.groups.items():
+        groups[colour] = (
+            [v for at in range(0, len(p), 3) for v in (p[at], -p[at + 2], p[at + 1])],
+            [v for at in range(0, len(n), 3) for v in (n[at], -n[at + 2], n[at + 1])],
+            list(i))
+    model = compose.Mesh(groups)
+    pads = (eagle.Pad("1", "smd", -0.85, 0.0, 0.5, 0.5, None),
+            eagle.Pad("2", "smd", 0.85, 0.0, 0.5, 0.5, None))
+    thickness = 1.6
+    for mirrored in (False, True):
+        element = eagle.Element("C1", "L", "P", pads=pads, mirrored=mirrored)
+        put = compose.place(model, element, 0.0, thickness, (0.0, 0.0))
+        heights = [p[at + 1] for _c, (p, _n, _i) in put.groups.items()
+                   for at in range(0, len(p), 3)]
+        if mirrored:
+            assert max(heights) <= 0.0 + 1e-9, (
+                f"a bottom-side part reaches {max(heights):.3f} mm, above the "
+                f"board's underside at 0"
+            )
+        else:
+            assert min(heights) >= thickness - 1e-9

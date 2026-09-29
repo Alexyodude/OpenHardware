@@ -92,7 +92,7 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from tools import eagle, kicad  # noqa: E402
+from tools import board_manifest, board_sources, eagle, kicad  # noqa: E402
 from tools.import_3d_model import (  # noqa: E402
     BOARD_MASK,
     CACHE,
@@ -152,9 +152,31 @@ class Component:
     #: against the board's UNDERSIDE, which leaves the solder tails proud of
     #: the top face exactly where the pads are.
     flip: bool = False
+    #: The vendor library the package has to come from, or None for any.
+    #:
+    #: **For one package name used for two different parts** (OH-180):
+    #: SparkFun's board file places `0603` from SparkFun-Resistors for fourteen
+    #: resistors and from SparkFun-Capacitors for nine capacitors. The library
+    #: is the vendor saying which, so a row naming it wins over one that does
+    #: not -- see `correspondence_for`.
+    vendor_library: str | None = None
+    #: The MANUFACTURER's own STEP, for a part KiCad's library does not hold,
+    #: and the manufacturer's own footprint published beside it (OH-180).
+    #:
+    #: **The footprint is not optional, and it is what makes the model
+    #: placeable.** A module's antenna overhangs its pads, so the body is not
+    #: centred on them and `place`'s "centre the body on the pads" would put it
+    #: millimetres off. The footprint places the model over its own pads with a
+    #: stated `(offset ...)`, so `pads_origin` can say which point of the model
+    #: sits over the middle of its pads -- and the anchor is pads on pads again,
+    #: with `silk_miss` left free to check the body against the vendor's.
+    step: str | None = None
+    footprint: str | None = None
 
     @property
     def url(self) -> str:
+        if self.step is not None:
+            return self.step
         # `KICAD_3D` is GitLab, which is the library; the GitHub mirror this
         # fetched from until 2026-08-27 is a different and smaller tree. See
         # that constant for the counts.
@@ -164,6 +186,14 @@ class Component:
     def slug(self) -> str:
         return f"{self.library}-{self.model}".replace(".", "_")
 
+
+#: Espressif's own KiCad library, at the commit read on 2026-09-29, for the
+#: two ESP32-C6 modules KiCad's library does not hold (OH-180). Its LICENSE.md:
+#: CC-BY-SA 4.0 with the same exception as KiCad's own libraries. Pinned to a
+#: commit rather than a branch, because `pads_origin` reads an offset out of
+#: the footprint and a moved offset would move the module.
+ESPRESSIF_KICAD = ("https://raw.githubusercontent.com/espressif/kicad-libraries/"
+                   "dd76561812ab300351234ba6e0ec1295641796f0")
 
 #: EAGLE package name -> the KiCad model of that part. Each span quoted below
 #: was measured on 2026-08-27 with `eagle.Element.pad_extent`, and `confirm`
@@ -823,6 +853,219 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "2.0 x 1.6 mm part. So the statement is unusable and the generic land "
         "of the size they drew is what is left.",
     ),
+    # --- the three manifest boards, OH-180 ----------------------------------
+    #
+    # SparkFun's and Adafruit's EAGLE files, read the way the Uno's is. Every
+    # span quoted was measured with `eagle.Element.pad_extent` on 2026-09-29
+    # and `confirm` re-measures it on every run.
+    Component(
+        "ESP32-C6-WROOM-1-NARROW", "espressif", "ESP32-C6-WROOM-1",
+        "U1 on the SparkFun Thing Plus, value ESP32-C6-WROOM-1-NARROW. "
+        "SparkFun draw its body on tDocu as 18.0 x 25.5 mm, the WROOM-1's "
+        "own outline, with 37 pads spanning 16.50 x 16.51 mm at the end away "
+        "from the antenna. KiCad's RF_Module holds no ESP32-C6 module at all, "
+        "listed 2026-09-29, so this is ESPRESSIF's own STEP and footprint -- "
+        "the manufacturer's, under their LICENSE.md: CC-BY-SA 4.0 with the "
+        "same exception as KiCad's libraries. Their footprint's pads span "
+        "17.50 x 16.51 mm, SparkFun's NARROW land 1.0 mm narrower across its "
+        "two side rows. Placed by `pads_origin`, "
+        "so `silk_miss` is left to compare Espressif's body with SparkFun's "
+        "drawing of it.",
+        step=f"{ESPRESSIF_KICAD}/3dmodels/espressif.3dshapes/ESP32-C6-WROOM-1.STEP",
+        footprint=(f"{ESPRESSIF_KICAD}/footprints/Espressif.pretty/"
+                   f"ESP32-C6-WROOM-1.kicad_mod"),
+    ),
+    Component(
+        "ESP32-PICO-MINI", "espressif", "ESP32-C6-MINI-1",
+        "U1 on the Adafruit Feather ESP32-C6, value ESP32-C6-MINI_MINI on a "
+        "land Adafruit named for the PICO-MINI, which is the same 13.2 x "
+        "16.6 mm outline -- and that is what they draw on tDocu, the MINI-1 "
+        "with its PCB antenna rather than the shorter -1U. 61 pads spanning "
+        "11.90 x 9.90 mm in the package's own frame, the count and span of "
+        "Espressif's own footprint. KiCad publishes no ESP32-C6 module; this "
+        "is Espressif's STEP and footprint, as for the WROOM above.",
+        step=f"{ESPRESSIF_KICAD}/3dmodels/espressif.3dshapes/ESP32-C6-MINI-1.STEP",
+        footprint=(f"{ESPRESSIF_KICAD}/footprints/Espressif.pretty/"
+                   f"ESP32-C6-MINI-1.kicad_mod"),
+    ),
+    Component(
+        "0603", "Resistor_SMD", "R_0603_1608Metric",
+        "the Thing Plus's fourteen resistors, R1-R14: two pads 1.70 mm "
+        "apart, an 0603 land. SparkFun place this package name from TWO "
+        "libraries, and this row is the one from SparkFun-Resistors.",
+        vendor_library="SparkFun-Resistors",
+    ),
+    Component(
+        "0603", "Capacitor_SMD", "C_0603_1608Metric",
+        "the Thing Plus's nine capacitors, C1-C9: the same 1.70 mm 0603 land "
+        "as the resistors, under the same package name, from "
+        "SparkFun-Capacitors -- which is SparkFun saying which part it is.",
+        vendor_library="SparkFun-Capacitors",
+    ),
+    Component(
+        "0603-NO", "Resistor_SMD", "R_0603_1608Metric",
+        "the Feather's 0603s: two pads 1.70 mm apart. Adafruit place nine "
+        "resistors and two capacitors (C4, C10) on this one package from "
+        "one library, and a package is what this table is keyed by, so the "
+        "capacitors are drawn in the resistor's moulding -- the borrow Z1/Z2 "
+        "make above, a 1.6 x 0.8 mm ceramic chip either way.",
+    ),
+    Component(
+        "0805-NO", "Capacitor_SMD", "C_0805_2012Metric",
+        "the 10 and 22 uF capacitors on both Adafruit boards, every one a "
+        "capacitor by its value: two pads 1.90 mm apart, an 0805 land, and "
+        "the 2.0 x 1.25 mm chip.",
+    ),
+    Component(
+        "_0805MP", "Capacitor_SMD", "C_0805_2012Metric",
+        "C12 on the Feather, 10 uF: two pads 2.03 mm apart, Adafruit's other "
+        "0805 land, and the same 2.0 x 1.25 mm chip.",
+    ),
+    Component(
+        "_0402NO", "Capacitor_SMD", "C_0402_1005Metric",
+        "the QT Py's 0402s: two pads 1.02 mm apart. Adafruit place twelve "
+        "capacitors and six resistors on this one package from one library, "
+        "so the resistors are drawn in the capacitor's moulding, as the "
+        "Feather's two capacitors are in a resistor's -- a 1.0 x 0.5 mm "
+        "ceramic chip either way.",
+    ),
+    Component(
+        "_0402", "Inductor_SMD", "L_0402_1005Metric",
+        "L1 and L2 on the QT Py, the antenna match -- 2 nH and a 0-ohm link "
+        "by their values: two pads 1.02 mm apart, an 0402 land, and the "
+        "1.0 x 0.5 mm chip.",
+    ),
+    Component(
+        "_0603MP_TWO6MIL", "Resistor_SMD", "R_0603_1608Metric",
+        "R7 on the QT Py, 10k: two pads 1.58 mm apart, Adafruit's tighter "
+        "0603 land, and the 1.6 x 0.8 mm resistor.",
+    ),
+    Component(
+        "RESPACK_4X0603", "Resistor_SMD", "R_Array_Convex_4x0603",
+        "R3 on the Feather, 10k x 4: eight pads in two rows spanning "
+        "1.70 x 2.60 mm, four 0603 elements side by side, and Adafruit draw "
+        "the body 3.2 x 1.6 mm on tDocu -- the size of this model.",
+        turn=90.0,
+    ),
+    Component(
+        "LED-0603", "LED_SMD", "LED_0603_1608Metric",
+        "D1 and D4 on the Thing Plus, the power and charge LEDs: two pads "
+        "1.75 mm apart, an 0603 land, and the 1.6 x 0.8 mm LED. TURNED 180: "
+        "SparkFun put the cathode pad C at +x, and KiCad's own footprint "
+        "for this model puts pad 1, the cathode, at -x.",
+        turn=180.0,
+    ),
+    Component(
+        "CHIPLED_0603_NOOUTLINE", "LED_SMD", "LED_0603_1608Metric",
+        "CHG and D3 on the Feather: two pads 1.50 mm apart, an 0603 land, "
+        "and the 1.6 x 0.8 mm LED. TURNED 270: Adafruit put the cathode pad "
+        "C at +y, where KiCad's footprint puts pad 1, the cathode, at -x.",
+        turn=270.0,
+    ),
+    Component(
+        "SOD-323", "Diode_SMD", "D_SOD-323",
+        "D3 on the Thing Plus: two pads 2.30 mm apart, and SOD-323 is the "
+        "package the vendor's name and the model's both state. The cathode "
+        "pad C is at -x, where KiCad's footprint puts pad 1, so no turn.",
+    ),
+    Component(
+        "SOD-323_MINI", "Diode_SMD", "D_SOD-323",
+        "D1 and D2 on the QT Py, NSR0320 by value: two pads 2.14 mm apart, "
+        "Adafruit's smaller SOD-323 land and the same 1.7 x 1.25 mm body, "
+        "cathode at -x like the model's.",
+    ),
+    Component(
+        "SOD-123", "Diode_SMD", "D_SOD-123",
+        "D4 on the Feather, MBR540 by value: two pads 3.70 mm apart, and "
+        "SOD-123 is the package both names state; cathode at -x like the "
+        "model's.",
+    ),
+    Component(
+        "SOT23-5", "Package_TO_SOT_SMD", "SOT-23-5",
+        "five pads spanning 1.90 x 2.60 mm on all three manifest boards -- "
+        "SparkFun's regulator and charger, Adafruit's AP2112 and MCP73831 -- "
+        "which is the Uno's SOT23-DBV land stood on end, so the same model "
+        "turned a quarter.",
+        turn=90.0,
+    ),
+    Component(
+        "SOT23-3", "Package_TO_SOT_SMD", "SOT-23-3",
+        "Q1 and Q2 on the Thing Plus: three pads spanning 1.90 x 2.10 mm, "
+        "and SOT-23-3 is the name SparkFun give the package. TURNED 90: "
+        "SparkFun lay pins 1 and 2 along x with pin 3 across from them, and "
+        "KiCad's footprint lays them along y.",
+        turn=90.0,
+    ),
+    Component(
+        "SOT23-R", "Package_TO_SOT_SMD", "SOT-23",
+        "Q3 on the Feather, DMG3415U by value: three pads spanning 1.90 x "
+        "2.00 mm, the three-lead SOT-23 the Uno's T1 already draws, turned "
+        "90 for the reason SparkFun's SOT23-3 is.",
+        turn=90.0,
+    ),
+    Component(
+        "CRYSTAL_2X1.6", "Crystal", "Crystal_SMD_2016-4Pin_2.0x1.6mm",
+        "Y1 on the QT Py, 40 MHz: four pads spanning 1.35 x 1.00 mm, and "
+        "Adafruit draw the body 2.0 x 1.6 mm on tDocu -- the 2016 part the "
+        "model's name states, and the one Seeed's C3 crystal draws. Pad 1 "
+        "is where KiCad's footprint puts it, so no turn.",
+    ),
+    Component(
+        "ANT_2450AT18B100", "RF_Antenna", "Johanson_2450AT18x100",
+        "X1 on the QT Py: two pads 2.80 mm apart. The package name is "
+        "Johanson's own part number, 2450AT18B100, and this model is "
+        "Johanson's 2450AT18x100 family -- the x is the letter B stands in.",
+    ),
+    Component(
+        "TACTILE_SWITCH_SMD_4.6X2.8MM", "Button_Switch_SMD",
+        "SW_Push_1P1T_NO_CK_KMR2",
+        "RESET and BOOT on the Thing Plus: four pads spanning 4.10 x "
+        "1.60 mm. SparkFun's own package description links C&K's KMR2 "
+        "datasheet, and this is C&K's KMR2.",
+    ),
+    Component(
+        "BTN_KMR2_4.6X2.8", "Button_Switch_SMD", "SW_Push_1P1T_NO_CK_KMR2",
+        "Q1 on the QT Py, BOOT0: four pads spanning 4.10 x 1.60 mm, the "
+        "same land as SparkFun's, and the package name is C&K's KMR2.",
+    ),
+    Component(
+        "BTN_KMR2_SLIM", "Button_Switch_SMD", "SW_Push_1P1T_NO_CK_KMR2",
+        "Q2 on the QT Py, reset: four pads spanning 4.10 x 1.65 mm, a slimmer "
+        "copy of the land above under a name that is still C&K's KMR2.",
+    ),
+    Component(
+        "BTN_RKB2_4.6X2.8", "Button_Switch_SMD", "SW_Push_1P1T_NO_CK_KMR2",
+        "SW1 and SW2 on the Feather: four pads spanning 3.95 x 2.15 mm. "
+        "Adafruit name the land RKB2 and give both parts the value KMR2; the "
+        "value is the part, and KiCad publishes no RKB2.",
+    ),
+    Component(
+        "JST04_1MM_RA", "Connector_JST",
+        "JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal",
+        "J4 on the Thing Plus, the Qwiic port: four 1 mm-pitch contacts and "
+        "two mounting pads, spanning 3.68 x 5.60 mm, and a body SparkFun "
+        "draw 6.0 x 4.25 mm -- JST's SH right-angle SM04B-SRSS-TB.",
+    ),
+    Component(
+        "JST_SH4_SKINNY", "Connector_JST",
+        "JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal",
+        "CONN1 on the QT Py, the STEMMA QT port: four 1 mm-pitch contacts "
+        "and two mounting pads spanning 5.60 x 3.90 mm, and a body Adafruit "
+        "draw 6.1 x 4.25 mm -- the SM04B-SRSS-TB SparkFun's Qwiic port is.",
+    ),
+    Component(
+        "QFN32_5MM", "Package_DFN_QFN",
+        "QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm",
+        "U2 on the QT Py, the ESP32-C3FH4 itself: thirty-three pads spanning "
+        "4.90 x 4.90 mm, thirty-two leads round a 5 x 5 mm body and the "
+        "exposed pad. The same chip and the same model as Seeed's C3.",
+    ),
+    Component(
+        "LED3535_FULLPADS", "LED_SMD", "LED_WS2812B-Mini_PLCC4_3.5x3.5mm",
+        "LED1 on the Feather, value WS2812B_3535FULL: four pads spanning "
+        "3.40 x 1.75 mm and a body Adafruit draw 3.5 x 3.5 mm -- the WS2812B "
+        "in its 3535 package, which is what this model names.",
+    ),
 )
 
 #: Packages that are on the board, are worth seeing, and are NOT drawn -- with
@@ -999,6 +1242,175 @@ ABSENT: dict[str, str] = {
         "properties, so there is no body outline to read. The copper is "
         "drawn as copper and the half-holes are cut with the edge. No "
         "KiCad library was searched: there is no body to look for."
+    ),
+    # --- OH-180: the manifest boards' copper, and the parts nobody publishes
+    #
+    # Copper first: a pad with no body is its own drawing, which OH-110's
+    # artwork pass already makes.
+    "THING_PLUS": (
+        "J1 on the Thing Plus, the pad map itself: 28 plated holes on the "
+        "2.54 mm pitch in two rows 20.32 mm apart, 38.10 mm long. SparkFun "
+        "give it no PROD_ID, where every part they fit carries one, so the "
+        "file places the holes and no header; the holes are drawn as copper. "
+        "No KiCad library was searched: there is no body to look for."
+    ),
+    "1X16_ROUND": (
+        "JP1 on the Feather, sixteen plated holes on 2.54 mm, 38.10 mm long, "
+        "which Adafruit give no value -- as they give none to its solder "
+        "jumper, and a value to every part they fit. The holes are drawn as "
+        "copper. No KiCad library was searched: there is no body to look for."
+    ),
+    "1X12_ROUND": (
+        "JP3 on the Feather, twelve plated holes on 2.54 mm, 27.94 mm long, "
+        "with no value, as JP1. The holes are drawn as copper. No KiCad "
+        "library was searched: there is no body to look for."
+    ),
+    "1X07_CASTEL": (
+        "JP1 and JP3 on the QT Py: **the module's own castellated edge**, "
+        "seven pads each on 2.54 mm, 15.24 mm long, with a plated hole in "
+        "each. Copper and the board's edge, drawn by the copper pass. No "
+        "KiCad library was searched: there is no body to look for."
+    ),
+    "FIDUCIAL-MICRO": (
+        "four fiducials on the Thing Plus, each a bare 0.635 mm copper "
+        "pad. No KiCad library was searched: there is no body to look for."
+    ),
+    "FIDUCIAL_1MM": (
+        "two fiducials on each Adafruit board, each a bare 1.0 mm copper "
+        "pad. No KiCad library was searched: there is no body to look for."
+    ),
+    "SMT-JUMPER_2_NC_TRACE_SILK": (
+        "five solder jumpers on the Thing Plus -- SHLD, CHG, PWR, SD_DET, "
+        "ALRT -- two 0.66 x 1.27 mm pads each, closed by a trace a person "
+        "may cut. Copper, drawn as copper. No KiCad library was searched: "
+        "there is no body to look for."
+    ),
+    "SMT-JUMPER_2_NO_SILK": (
+        "RGB on the Thing Plus: two 0.635 x 1.27 mm pads a person may bridge "
+        "with solder, open from the factory. No KiCad library was searched: "
+        "there is no body to look for."
+    ),
+    "SMT-JUMPER_3_1-NC_TRACE_SILK": (
+        "LP on the Thing Plus: three 0.66 x 1.27 mm pads, two joined by a "
+        "trace a person may cut. No KiCad library was searched: there is no "
+        "body to look for."
+    ),
+    "SMT-JUMPER_3_2-NC_TRACE_SILK": (
+        "I2C on the Thing Plus: three 0.66 x 1.27 mm pads, the pull-ups' "
+        "jumper. No KiCad library was searched: there is no body to look for."
+    ),
+    "COMBO-JUMPER_2_NC_TRACE": (
+        "MEAS on the Thing Plus: two 0.635 x 1.27 mm pads joined by a trace "
+        "and two 1.88 mm plated holes beside them, for a meter's leads once "
+        "the trace is cut. No KiCad library was searched: there is no body "
+        "to look for."
+    ),
+    "SOLDERJUMPER_CLOSEDWIRE": (
+        "SJ1 on the Feather: two 1.168 x 1.600 mm pads closed by a "
+        "0.2 mm wire of copper. No KiCad library was searched: there is no "
+        "body to look for."
+    ),
+    "B1,27": (
+        "SWC1 and SWC2 on the QT Py, test pads: a bare 1.27 mm copper pad "
+        "each. No KiCad library was searched: there is no body to look for."
+    ),
+    "TESTPOINT_PLUS_1X3MM": (
+        "VBAT on the QT Py, a bare 0.5 mm pad on the underside for a "
+        "battery's lead. No KiCad library was searched: there is no body to "
+        "look for."
+    ),
+    "TESTPOINT_MINUS_1X3MM": (
+        "GND on the QT Py, the other bare 0.5 mm battery pad. No KiCad "
+        "library was searched: there is no body to look for."
+    ),
+    "MOUNTINGHOLE_2.5_PLATED": (
+        "two mounting holes on the Feather, 2.5 mm drilled in a 3.2 mm "
+        "plated ring. Copper and a hole, and nothing fitted. No KiCad library "
+        "was searched: there is no body to look for."
+    ),
+    # And the parts: each names what was listed and what the nearest thing
+    # in it was, so the next reader re-runs the search rather than retakes it.
+    "USB-C-16P_4LAYER-PADS": (
+        "J2 on the Thing Plus, the USB-C socket: twelve contact pads and "
+        "four shell tabs spanning 8.64 x 4.76 mm. SparkFun's file names no "
+        "maker for it -- only their own PROD_ID, CONN-14122 -- and KiCad's "
+        "Connector_USB, 12 models listed 2026-09-29, holds two 16-pin "
+        "receptacles, GCT's USB4105 and Amphenol's 12401610E4-2A, each a "
+        "named part of its own length. Drawing either would put a maker's "
+        "name on a part nobody here can say was fitted, the mistake OH-102 "
+        "undid on the XIAOs."
+    ),
+    "USB_C_CUSB31-CFM2AX-01-X": (
+        "the USB-C socket on both Adafruit boards, whose package name is the "
+        "part: CUI's CUSB31-CFM2AX-01-X, twelve contact pads and four shell "
+        "tabs spanning 8.64 x 4.76 mm. KiCad's Connector_USB, 12 models "
+        "listed 2026-09-29, holds nothing of CUI's; its two 16-pin "
+        "receptacles are GCT's and Amphenol's, and one of them on this land "
+        "would be a different maker's part under Adafruit's name for this one."
+    ),
+    "JST-2-SMD": (
+        "J3 on the Thing Plus, the battery socket, SparkFun PRT-08612: two "
+        "1.0 x 4.6 mm contact pads 2.0 mm apart and two mounting pads, a "
+        "surface-mount JST PH. KiCad's Connector_JST holds 30 PH models, "
+        "listed 2026-09-29, and every one is the through-hole -K; `confirm` "
+        "refuses a legged model on these pads anyway."
+    ),
+    "JSTPH2_BATT": (
+        "X1 on the Feather, the battery socket: the same two 1.0 x 4.6 mm "
+        "contacts 2.0 mm apart and two mounting pads as SparkFun's J3, a "
+        "surface-mount JST PH, and KiCad's 30 PH models are all through-hole."
+    ),
+    "JST_SH4_RA": (
+        "CONN1 on the Feather, the STEMMA QT port, **whose name and land "
+        "disagree**. Adafruit name it a right-angle SH, and its four 1 mm "
+        "contacts sit 2.548 mm from its two mounting pads and are numbered "
+        "from +x -- where KiCad's own right-angle SM04B-SRSS-TB footprint "
+        "puts them 3.875 mm apart numbered from -x. The land matches KiCad's "
+        "VERTICAL BM04B-SRSS-TB to 0.023 mm instead, turned half round. "
+        "Drawing either model would be choosing between two statements of "
+        "the vendor's; the QT Py's STEMMA QT port, on the SM04B land, is "
+        "drawn."
+    ),
+    "MICROSD_TINY": (
+        "J5 on the Thing Plus, the microSD socket, value MICRO-SDFRICTION: "
+        "fifteen pads spanning 10.68 x 7.24 mm. SparkFun's file names no "
+        "maker -- only PROD_ID CONN-13500 -- and KiCad's Connector_Card holds "
+        "three models, listed 2026-09-29: two Hirose microSD sockets, each "
+        "a named part, and a nano-SIM."
+    ),
+    "WS2812-2020": (
+        "D5 on the Thing Plus, the STAT LED: four pads under a body SparkFun "
+        "draw 2.2 x 2.0 mm, a WS2812 in its 2020 package. KiCad's LED_SMD "
+        "holds 38 models, listed 2026-09-29, and its smallest WS2812 is the "
+        "3.5 x 3.5 mm WS2812B-Mini -- the Feather's, which is drawn."
+    ),
+    "SK6805_1515": (
+        "LED1 on the QT Py: four pads under a 1.5 x 1.5 mm body, an SK6805 "
+        "in its 1515 package. KiCad's LED_SMD, 38 models, has no addressable "
+        "LED under the 3.5 x 3.5 mm WS2812B-Mini."
+    ),
+    "DFN-8": (
+        "U4 on the Thing Plus, the MAX17048 fuel gauge: eight 0.5 mm-pitch "
+        "pads round a 1.38 x 0.80 mm exposed pad, 2 x 2 mm by SparkFun's "
+        "tDocu. KiCad's five 2 x 2 mm eight-lead models state exposed pads "
+        "of 0.6 x 1.2, 0.9 x 1.6, 0.9 x 1.7 and 1.05 x 1.75 mm or none, and "
+        "a model's name that states the wrong pad is the near miss "
+        "QFN-56 is refused for. Listed 2026-09-29 in Package_DFN_QFN and "
+        "Package_SON."
+    ),
+    "TDFN8_2X2MM": (
+        "X2 on the Feather, the same MAX17048 on Adafruit's land for it: a "
+        "0.80 x 1.38 mm exposed pad, 2 x 2 mm, and the same five KiCad "
+        "models, none of them this pad."
+    ),
+    "LONGAN-IC_SNR6-1.0-3X3X1MM": (
+        "U4 on the Feather, an AHT20 humidity sensor by value: six pads on a "
+        "1.0 mm pitch and no exposed pad, 3 x 3 x 1 mm by its own name. "
+        "KiCad's Sensor_Humidity holds one model, TI's HDC2080, and the "
+        "3 x 3 mm DFN-6 in Package_DFN_QFN is a 0.95 mm pitch round a "
+        "1.7 x 2.6 mm pad. Listed 2026-09-29. The name states a height, but "
+        "tools/model_from_datasheet.py builds slabs out of KiCad footprints "
+        "and this is an EAGLE package."
     ),
     "MOUDLE14P-XIAO-HALF-HOLE-PRO": (
         "U9 on the ESP32-C5 and the nRF54L15, and the same edge as the "
@@ -1308,6 +1720,78 @@ COMPOSITIONS = COMPOSITIONS + tuple(
     )
     for spec in COMPOSITIONS if spec.dip_headers
 )
+
+
+# --- the manifest boards, composed from their rows (OH-180) -------------------
+#
+# **A row in tools/board_manifest.py already names everything a composition
+# needs except two numbers**: the vendor's board file; the elements whose pads
+# are the pad map, which the model is centred on, so the two agree by
+# construction; and the registry source, which says who the vendor is, under
+# what licence, and how the file is fetched. So a row is composed without a
+# second hand-written entry, and only what a row does not carry is below.
+
+#: The thickness of a manifest board whose files state none, and it is the
+#: Arduino Uno's reasoning reused: 1.6 mm is what `board3d.js` assumes for
+#: every extruded footprint. An EAGLE file's design rules carry a layer stack,
+#: and where it is the one the Uno's own file carries it states nothing -- see
+#: `test_a_manifest_boards_thickness_is_its_own_note_or_the_unos_stack`.
+MANIFEST_THICKNESS_MM = 1.6
+
+#: What a manifest board's own files DO state that its row does not carry.
+#: A board with no entry takes `MANIFEST_THICKNESS_MM` and `BOARD_MASK`, and
+#: says on the page that the colour is a judgement. Every number in these
+#: entries is read back out of the board file by
+#: `test_a_manifest_boards_colour_is_read_where_its_file_states_one`.
+MANIFEST_STATED: dict[str, dict[str, object]] = {
+    "SparkFun Thing Plus ESP32-C6": {
+        # The note on layer 51 in the board file's own <plain> section reads
+        # "Board thickness: 1.6mm" as well as "Soldermask: Red".
+        "thickness_mm": 1.6,
+        "colour": "#e2180f",
+        "colour_source": (
+            "SparkFun's own board file, which states it twice: a note on its "
+            "tDocu layer reading 'Soldermask: Red', and a manufacturing-"
+            "preview solder mask of 0xC8FF0000 -- red at alpha 200/255, "
+            "where the Arduino Uno's file carries 0xC8008000, the value left "
+            "when nobody sets one. Drawn as that preview draws mask over bare "
+            "laminate: 0xFF0000 at that alpha over the file's own substrate "
+            "colour, 0x786E46"
+        ),
+    },
+}
+
+
+def manifest_composition(entry: board_manifest.Row) -> Composition:
+    """A `tools/board_manifest.py` row, as the composition it describes."""
+    source = board_sources.source(entry.source)
+    stated = MANIFEST_STATED.get(entry.board, {})
+    return Composition(
+        board=entry.board,
+        layout=board_manifest.cad_path(entry),
+        fetch_with=f"python tools/get_board_sources.py {entry.source}",
+        pcb_chip=None,
+        geometry=(
+            f"{source.vendor}'s own board file, "
+            f"{pathlib.PurePosixPath(entry.cad).name}, {source.licence.name}: "
+            f"the outline and every component's position, rotation and "
+            f"mirror as the file states them"
+        ),
+        headers=entry.select,
+        thickness_mm=stated.get("thickness_mm", MANIFEST_THICKNESS_MM),
+        colour=stated.get("colour", BOARD_MASK),
+        colour_source=stated.get("colour_source", (
+            "BOARD_MASK, A JUDGEMENT rather than a reading: the board file's "
+            "manufacturing-preview solder mask is 0xC8008000, which the "
+            "Arduino Uno's own file also carries under a board this table "
+            "draws navy -- the value EAGLE leaves when nobody sets one, not a "
+            "statement"
+        )),
+    )
+
+
+COMPOSITIONS = COMPOSITIONS + tuple(
+    manifest_composition(entry) for entry in board_manifest.ROWS)
 
 
 
@@ -2053,7 +2537,86 @@ def component_mesh(component: Component, deflection: float) -> tuple[Mesh, objec
     frame = Frame(long_axis=0, up=1, short_axis=2,
                   handedness=handedness_of((0, 1, 2)),
                   origin=(0.0, 0.0, 0.0))
-    return tessellate(shape, styles, deflection, frame), box
+    mesh = tessellate(shape, styles, deflection, frame)
+    origin = pads_origin(component)
+    if origin is not None:
+        mesh = OverPads(mesh.groups, origin)
+    return mesh, box
+
+
+@dataclasses.dataclass
+class OverPads(Mesh):
+    """A model that is not centred over its own pads, and where they are.
+
+    `origin` is the middle of the model's pads in its own frame, read by
+    `pads_origin` out of the manufacturer's footprint; `place` anchors that
+    point on the element's pads instead of the middle of the body.
+    """
+
+    origin: tuple[float, float] = (0.0, 0.0)
+
+
+def correspondence_for(element: eagle.Element) -> Component | None:
+    """The `CORRESPONDENCE` row for this placement, or None.
+
+    A row naming the element's own vendor library wins over one that names
+    none, because the library is the vendor saying which part a shared package
+    name is -- see `Component.vendor_library`.
+    """
+    fallback = None
+    for component in CORRESPONDENCE:
+        if component.package != element.package:
+            continue
+        if component.vendor_library == element.library:
+            return component
+        if component.vendor_library is None:
+            fallback = component
+    return fallback
+
+
+def pads_origin(component: Component) -> tuple[float, float] | None:
+    """Where the middle of the model's own pads is, in the model's own frame.
+
+    None for a model from KiCad's library, which `place` anchors as it always
+    has. For a manufacturer's model, read out of the manufacturer's footprint:
+    the centre of its pads, taken back through the `(offset ...)` its one
+    `(model ...)` block places this STEP with. KiCad's footprint y runs down
+    the page and a model's y runs up it, so `y` is negated on the way.
+
+    Refuses a footprint whose block also turns or scales the model, or that
+    names some other file: this reads an offset and nothing else, and a
+    rotated model read as a translated one would be placed wrongly and still
+    look like a module.
+    """
+    if component.footprint is None:
+        return None
+    CACHE.mkdir(parents=True, exist_ok=True)
+    local = CACHE / f"component-{component.slug}.kicad_mod"
+    if not local.is_file():
+        print(f"  fetch  {component.footprint}")
+        with urllib.request.urlopen(component.footprint) as response:  # noqa: S310
+            local.write_bytes(response.read())
+    tree = kicad.parse_sexp(local.read_text(encoding="utf-8"))
+    stated = [m for m in kicad._models_of(tree)
+              if pathlib.PurePosixPath(m.path).stem == component.model]
+    if len(stated) != 1:
+        raise SystemExit(
+            f"{component.footprint} places {len(stated)} models named "
+            f"{component.model}, not one, so where its pads sit under the "
+            f"model is not stated once"
+        )
+    model = stated[0]
+    if model.rotate != (0.0, 0.0, 0.0) or model.scale != (1.0, 1.0, 1.0):
+        raise SystemExit(
+            f"{component.footprint} turns or scales {component.model} "
+            f"(rotate {model.rotate}, scale {model.scale}); only an offset is "
+            f"read here"
+        )
+    pads = kicad._pads_of(tree)
+    xs = [pad.x_mm for pad in pads]
+    ys = [pad.y_mm for pad in pads]
+    middle = ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+    return (middle[0] - model.offset[0], -middle[1] - model.offset[1])
 
 
 def read_obj(path: pathlib.Path) -> tuple[Mesh, Extent]:
@@ -2648,7 +3211,17 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
     **And the pads it is put onto are the ones of that same kind**, which
     `anchor_of` is where it says so. A legged model against every pad on the
     footprint is the OH-101 mistake in general form.
+
+    **An `OverPads` mesh is the third case: a model whose pads are not under
+    the middle of its body** (OH-180). An ESP32 module's antenna overhangs its
+    pad field by three millimetres, so centring its body on its pads draws it
+    that far off. Its manufacturer's footprint says where its pads sit under
+    it -- `pads_origin` -- and that point goes on the centre of every pad the
+    element places, which is still pads on pads. It rides on the mesh rather
+    than as an argument, so every check that places a model places this one
+    the same way without being told.
     """
+    origin = mesh.origin if isinstance(mesh, OverPads) else None
     spin = math.radians(turn)
     turn_cos, turn_sin = math.cos(spin), math.sin(spin)
     rot = math.radians(element.rotation)
@@ -2668,15 +3241,18 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
     # The legs if it has any, the whole body if it has not. Measured off the
     # vertices rather than off the bounding box, so it is the same number the
     # placement below uses.
-    legs = leads_of(mesh)
-    anchor_points = legs or [
-        (positions[at], positions[at + 1])
-        for _colour, (positions, _n, _i) in mesh.groups.items()
-        for at in range(0, len(positions), 3)
-    ]
-    every = [turned(x, y) for x, y in anchor_points]
-    mid_x = (min(p[0] for p in every) + max(p[0] for p in every)) / 2
-    mid_y = (min(p[1] for p in every) + max(p[1] for p in every)) / 2
+    legs = [] if origin is not None else leads_of(mesh)
+    if origin is not None:
+        mid_x, mid_y = turned(*origin)
+    else:
+        anchor_points = legs or [
+            (positions[at], positions[at + 1])
+            for _colour, (positions, _n, _i) in mesh.groups.items()
+            for at in range(0, len(positions), 3)
+        ]
+        every = [turned(x, y) for x, y in anchor_points]
+        mid_x = (min(p[0] for p in every) + max(p[0] for p in every)) / 2
+        mid_y = (min(p[1] for p in every) + max(p[1] for p in every)) / 2
 
     anchor = anchor_of(element, bool(legs))
 
@@ -2688,6 +3264,14 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
             tx = -tx
         return (tx * rot_cos - ty * rot_sin, tx * rot_sin + ty * rot_cos)
 
+    #: **A MIRRORED element is on the underside too** (OH-180), and until the
+    #: manifest boards no composed board drew one: EAGLE's `M` is the package
+    #: turned over onto the bottom face, so its model hangs there exactly as a
+    #: flipped one does. `onto_board` negates x for it; negating z as well is
+    #: what makes the pair a turn rather than a reflection -- a reflection
+    #: alone stood the QT Py's ESP32-C3 on the TOP of the board, inside out.
+    #: Both at once is a part turned over twice, which is the right way up.
+    under = flip != element.mirrored
     moved: dict[str, tuple[list[float], list[float], list[int]]] = {}
     for colour, (positions, normals, indices) in mesh.groups.items():
         out_positions: list[float] = []
@@ -2704,11 +3288,11 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
             # which is where the board's bottom face is. The solder tails,
             # which the raw mesh keeps below its own zero, end up proud of the
             # top face, which is what lets `carvePins` find them on the pads.
-            lift = -positions[at + 2] if flip else thickness + positions[at + 2]
+            lift = -positions[at + 2] if under else thickness + positions[at + 2]
             out_positions.extend((bx - centre[0], lift, -(by - centre[1])))
             # A normal is a direction, so it is turned but never translated.
             tnx, tny = onto_board(normals[at], normals[at + 1], direction=True)
-            up = -normals[at + 2] if flip else normals[at + 2]
+            up = -normals[at + 2] if under else normals[at + 2]
             out_normals.extend((tnx, up, -tny))
         moved[colour] = (out_positions, out_normals, list(indices))
     return Mesh(moved)
@@ -2893,7 +3477,6 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
           f"({centre[0]:.3f}, {centre[1]:.3f}) mm; the PCB's own centre is "
           f"({(min(xs) + max(xs)) / 2:.3f}, {(min(ys) + max(ys)) / 2:.3f})")
 
-    by_package = {component.package: component for component in CORRESPONDENCE}
     pieces = [slab(ring, spec.thickness_mm, spec.colour, centre)]
     # **The copper and the ink, before any component stands on them**, so a
     # part's own body hides the pads under it exactly as solder does.
@@ -2937,11 +3520,20 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     #: fell through a bare `continue`, which is the mechanism that let
     #: OH-119 and OH-122 sit unnoticed: the gap was not even a number.
     unmodelled: list[str] = []
+    #: Placements that put down no pad at all (OH-180). Nothing is soldered to
+    #: them, so no part stands there: every one on the manifest boards is ink
+    #: -- a logo, a pin label, an ordering note -- or a bare hole. Counted
+    #: rather than given an ABSENT entry apiece, because SparkFun's file alone
+    #: places 63 pin labels, each its own package.
+    padless: list[str] = []
     for element in [*board.elements, *extra]:
-        component = by_package.get(element.package)
+        component = correspondence_for(element)
         if component is None:
             if element.package not in ABSENT:
-                unmodelled.append(f"{element.name} ({element.package})")
+                if element.pads:
+                    unmodelled.append(f"{element.name} ({element.package})")
+                else:
+                    padless.append(element.name)
             continue
         if component.slug not in cache:
             cache[component.slug] = component_mesh(component, deflection)
@@ -3061,11 +3653,19 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
               f"with no ABSENT entry saying why: "
               + ", ".join(unmodelled[:8])
               + (" ..." if len(unmodelled) > 8 else ""))
+    if padless:
+        print(f"  no pads {len(padless)} placement(s) put down no pad, so no "
+              f"part stands on them -- ink or a bare hole")
     if unpinned:
         print(f"  turn    {len(unpinned)} placement(s) a half turn would move "
               f"and nothing here can see: {', '.join(unpinned)}")
     print(f"  markers ride at {pad_top:.3f} mm, the top of the header pins; "
           f"the PCB's own top face is at {spec.thickness_mm:.3f}")
+    refused = [e for e in board.elements if e.package in ABSENT]
+    if refused:
+        print(f"  refused {len(refused)} placement(s) of "
+              f"{len({e.package for e in refused})} package(s), each with its "
+              f"reason:")
     for package, why in sorted(ABSENT.items()):
         here = [e.name for e in board.elements if e.package == package]
         if here:
@@ -3132,6 +3732,11 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             "components": (
                 "KiCad kicad-packages3D, CC-BY-SA-4.0 with the library "
                 "exception; fetched, not vendored"
+                + "".join(sorted({
+                    f"; and the manufacturer's own STEP, {component.url}"
+                    for component in CORRESPONDENCE
+                    if component.step is not None
+                    and component.slug in cache}))
             ),
             "drawn": drawn,
             "modelled": modelled,
@@ -3149,6 +3754,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 "cutouts": len(cutouts),
                 "turn_unseen": unpinned,
                 "unmodelled": unmodelled,
+                "no_pads": padless,
             },
             "absent": [
                 {"package": package, "why": why,

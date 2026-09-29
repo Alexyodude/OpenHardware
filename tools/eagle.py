@@ -407,8 +407,14 @@ def _element_pads(
         # dx/dy are the pad's own axes and the pad's own ANGLE turns them,
         # which is why that angle is carried now: a pad map only ever wanted
         # centres, and drawing the copper wants the rectangle. Layer 1 is
-        # EAGLE's top and 16 its bottom.
+        # EAGLE's top and 16 its bottom -- **of the PACKAGE**, and a mirrored
+        # element puts the whole package on the other face, which `_ink`
+        # already did for its silkscreen and this did not do for its copper
+        # (OH-180): the QT Py's ESP32-C3 is mirrored, and its 33 pads were
+        # drawn on the top face of a board whose file puts them underneath.
         layer = surface.get("layer") or "1"
+        if mirrored:
+            layer = {"1": "16", "16": "1"}.get(layer, layer)
         pads.append(
             Pad(
                 number,
