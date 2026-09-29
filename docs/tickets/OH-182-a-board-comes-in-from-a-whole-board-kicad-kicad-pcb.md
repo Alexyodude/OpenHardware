@@ -2,7 +2,7 @@
 id: OH-182
 title: A board comes in from a whole-board KiCad .kicad_pcb, as it does from an EAGLE
   .brd
-status: in-review
+status: done
 priority: P2
 created: '2026-09-29'
 touches:
@@ -43,3 +43,5 @@ GLYPH MINI now (`--select J3 --select J4 --select J5`): 23 pads, the same labels
 BYTE-IDENTITY: the 744 imports dumped at 3bd115b (before these changes) and after are identical by `diff -r`, md5 eade83bcc599ba5215bf9ee64a56d757 for both, the same as at the first round. That is every XIAO .kicad_mod against every symbol root (740, 20 refusals), the three manifest rows through board_manifest.geometry, and the Uno.
 RED ON PURPOSE: 29 mutants, each restored. Back-side pad mirrored again; pad rotation dropped; first pad kept regardless of the flag; last kept when all flagged; flag never read; unnumbered merged; no-net merged; KiCad net check off; KiCad net check on two pads only; EAGLE net check off; EAGLE check on the first connect only; shared reference taken; unknown reference taken; no-net label empty; np_thru_hole taken; grouped by runs; backslash left doubled; unknown escape losing its backslash; non-UTF-8 replaced; KiCad 5 reported as no footprints; no --select, repeated reference, no through-hole pad, --symbols or connects each accepted; merged count off by one; refusal text without .kicad_pcb; net read from the second field; outline 1 mm wider; the test's _copper_ends ignoring a KiCad 10 track's name.
 SUITE: 3 failed, 2271 passed, 32 skipped, 8 errors. The failures are the OCP pair (test_import_3d_model), which is the baseline, and tests/webui/test_emulator.py::test_a_state_poll_answers_while_a_build_runs ('the build itself failed: None'). That test also fails with these changes stashed at bba0ba2, so it is not this ticket's. The 8 errors are tests/cortexm0/test_samd21_arduino.py setup: arm-none-eabi-gcc exited 1 with no diagnostic, during the full run only. The same file run alone afterwards: 8 passed. All CLAUDE.md checkers, ticket_guard --self-test and check_facts OK. Commit 2a0de4a.
+
+**Note 2026-09-29:** 2026-09-29: approved by an independent review after one fix round (EXT1/EXT2 and the Glyph re-derived with the reviewer's own parser, 0.0 difference, every pad 0.000 mm from its copper; 14 of 14 reviewer mutants red; 30-import byte-identity spot check matches). Suite at 2a0de4a: 3 failed (the OCP pair, and the state-poll test, which fails identically on master, OH-166), 8 errors in the SAMD21 build setup under full-run load that pass 8/8 alone. The review also settled the graphics question this ticket left open: back-side graphics are stored flipped too, and the composed models mirror them wrongly; filed as its own ticket with the Gerber evidence.
