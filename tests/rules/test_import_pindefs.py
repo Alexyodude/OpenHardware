@@ -1050,7 +1050,11 @@ def test_the_two_artefacts_cite_the_same_revisions_as_each_other():
             for package in document["pindefs"]["packages"]
         }
         for package, revision in recorded.items():
-            assert re.fullmatch(r"[0-9a-f]{7,40}", revision), f"{name} {package}"
+            # A manifest board's own CAD says `sha256:`, so as not to read as
+            # a git revision (OH-178).
+            own = name in pindefs.MANIFEST and package == board_manifest.row(name).source
+            assert re.fullmatch(r"sha256:[0-9a-f]{12}" if own else r"[0-9a-f]{7,40}",
+                                revision), f"{name} {package}"
         module = pindefs.module_path(pindefs.BOARDS[name].chip)
         # Most chips have no module, and three that do carry no block: the
         # SAMD21's table is its own and the Uno is not in this registry.
@@ -2565,31 +2569,37 @@ def test_a_generated_reason_reads_the_supplies_the_crystal_and_the_debugger():
 
 # --- a manifest board's own board file, traced to its chip (OH-178) ----------
 
-#: A part's pin table for the traced reader's own tests. Pads 1 and 2 are
-#: GPIOs; pad 3 is not in it, as a 3V3 or EN pad is not.
-_TABLE = board_manifest.PinTable("QFN", "PART", "this test's own table", (("1", 4), ("2", 5)))
+#: A part's pin table for the traced reader's own tests: of its four pins,
+#: 1 and 2 are GPIOs, 3 is a supply, and 4 is not transcribed. A fifth pad
+#: on the footprint is past the pins it numbers.
+_TABLE = board_manifest.PinTable(
+    "QFN", "PART", "this test's own table", "https://example.invalid/part.pdf",
+    "0" * 64, 4, (("1", 4), ("2", 5)), (("3", "3V3"),))
+
+#: The two-pad parts a trace must not cross, as a board file names them.
+_NOT_RESISTORS = {"D1": "RED", "SJ1": "JUMPER-SMT_2_NO_SILK", "C1": "0.1uF",
+                  "SW1": "SWITCH", "J2": "CONN_02", "R9": "DNP", "X1": "1k"}
 
 
-def _traced_board(signals: dict[str, list[str]], parts: dict[str, int] | None = None,
-                  chips: int = 1) -> str:
-    """A minimal EAGLE board: header J1 of four pads, `chips` elements U1...
-    placed as the table's part with three pads each, and `parts` of `n` pads;
+def _traced_board(signals: dict[str, list[str]],
+                  parts: dict[str, tuple[int, str]] | None = None) -> str:
+    """A minimal EAGLE board: header J1 of four pads, U1 placed as the
+    table's part with five pads, and `parts` as `name: (pads, value)`;
     `signals` maps a net to its `element.pad` contacts. Written as text so
     the fixture reads as the format."""
-    parts = parts or {}
+    parts = {"U1": (5, "PART"), **(parts or {})}
 
     def package(name: str, count: int) -> str:
         return (f'<package name="{name}">'
                 + "".join(f'<smd name="{n}" x="{n}" y="0" dx="1" dy="1" layer="1"/>'
                           for n in range(1, count + 1))
                 + "</package>")
-    packages = package("HDR", 4) + package("QFN", 3) + "".join(
-        package(f"P{count}", count) for count in sorted(set(parts.values())))
-    placed = ('<element name="J1" library="L" package="HDR" x="0" y="0"/>'
-              + "".join(f'<element name="U{n}" library="L" package="QFN" value="PART" '
-                        f'x="10" y="0"/>' for n in range(1, chips + 1))
-              + "".join(f'<element name="{name}" library="L" package="P{count}" x="20" y="0"/>'
-                        for name, count in parts.items()))
+    packages = package("HDR", 4) + "".join(
+        package("QFN" if count == 5 else f"P{count}", count)
+        for count in sorted({count for count, _ in parts.values()}))
+    placed = '<element name="J1" library="L" package="HDR" x="0" y="0"/>' + "".join(
+        f'<element name="{name}" library="L" package="{"QFN" if count == 5 else f"P{count}"}"'
+        f' value="{value}" x="10" y="0"/>' for name, (count, value) in parts.items())
     nets = "".join(
         f'<signal name="{net}">'
         + "".join('<contactref element="{}" pad="{}"/>'.format(*one.split("."))
@@ -2602,47 +2612,74 @@ def _traced_board(signals: dict[str, list[str]], parts: dict[str, int] | None = 
             "</board></drawing></eagle>")
 
 
-def _traced(text: str) -> dict[str, str]:
-    return {net: pin.name for net, pin in
-            pindefs.read_eagle_traced((text,), select=("J1",), table=_TABLE).items()}
+def _traced(text: str) -> dict[str, str | None]:
+    return {net: found.pin.name if found.pin else None for net, found in
+            pindefs.read_eagle_traced((text,), path=pathlib.Path("probe.brd"),
+                                      select=("J1",), table=_TABLE).items()}
 
 
 def test_a_net_on_a_chip_pad_names_the_gpio_the_datasheet_row_gives():
     assert _traced(_traced_board({"TX": ["J1.1", "U1.1"]})) == {"TX": "GPIO4"}
 
 
-def test_a_net_reaches_its_chip_through_one_part_in_series_and_not_two():
-    """One two-pad part whose far net holds only it and the chip pad: the QT
-    Py's TX, through R4. A second part in series, a far net with anything
-    else on it -- a divider's midpoint -- or a part of three pads is not a
-    series path, and the pad is not resolved."""
+def test_a_net_reaches_its_chip_through_one_resistor_in_series_and_nothing_else():
+    """One resistor, `R<n>` with a value in ohms, whose far net holds only it
+    and the chip pad: the QT Py's TX, through R4, and the path names it. Two
+    resistors, a divider's midpoint, a part of three pads, and every other
+    two-pad part -- an LED, an open jumper, a capacitor, a switch, a
+    connector, a resistor not fitted, a part that is not named as one --
+    stop the trace, and the pad is not resolved."""
     one = {"TX": ["J1.1", "R1.1"], "N1": ["R1.2", "U1.1"]}
-    assert _traced(_traced_board(one, {"R1": 2})) == {"TX": "GPIO4"}
+    assert _traced(_traced_board(one, {"R1": (2, "1k")})) == {"TX": "GPIO4"}
+    (found,) = pindefs.read_eagle_traced(
+        (_traced_board(one, {"R1": (2, "1k")}),), path=pathlib.Path("probe.brd"),
+        select=("J1",), table=_TABLE).values()
+    assert found.via == "TX -> R1 (1k) -> U1 pad 1 = GPIO4 (this test's own table)"
     two = {"TX": ["J1.1", "R1.1"], "N1": ["R1.2", "R2.1"], "N2": ["R2.2", "U1.1"]}
-    assert _traced(_traced_board(two, {"R1": 2, "R2": 2})) == {}
+    assert _traced(_traced_board(two, {"R1": (2, "1k"), "R2": (2, "1k")})) == {}
     divider = {"VBAT": ["J1.1", "R1.1"], "SENSE": ["R1.2", "R2.1", "U1.1"],
                "GND": ["R2.2", "J1.2"]}
-    assert _traced(_traced_board(divider, {"R1": 2, "R2": 2})) == {}
-    three = {"TX": ["J1.1", "Q1.1"], "N1": ["Q1.2", "U1.1"]}
-    assert _traced(_traced_board(three, {"Q1": 3})) == {}
+    assert _traced(_traced_board(divider, {"R1": (2, "1k"), "R2": (2, "1k")})) == {}
+    assert _traced(_traced_board(
+        {"TX": ["J1.1", "R1.1"], "N1": ["R1.2", "U1.1"]}, {"R1": (3, "1k")})) == {}
+    for name, value in _NOT_RESISTORS.items():
+        signals = {"TX": ["J1.1", f"{name}.1"], "N1": [f"{name}.2", "U1.1"]}
+        assert _traced(_traced_board(signals, {name: (2, value)})) == {}, name
 
 
-def test_a_net_on_a_chip_pad_the_table_does_not_number_stops_there():
-    """A rail on the chip's 3V3 pad and, through a pull-up, on a GPIO names
-    no pin."""
-    signals = {"3V3": ["J1.1", "U1.3", "R1.1"], "IO4": ["R1.2", "U1.1"]}
-    assert _traced(_traced_board(signals, {"R1": 2})) == {}
+def test_a_net_on_a_chip_pad_the_table_gives_no_gpio_names_none_and_stops_there():
+    """A rail on the chip's 3V3 pad, and through a pull-up on a GPIO whose
+    net holds nothing else: it names no pin, and the path says what it
+    reached. A pad past the pins the table numbers is not one of them."""
+    signals = {"3V3": ["J1.1", "U1.3", "U1.5", "R1.1"], "IO4": ["R1.2", "U1.1"]}
+    assert _traced(_traced_board(signals, {"R1": (2, "10k")})) == {"3V3": None}
+
+
+def test_a_pad_the_table_does_not_transcribe_is_refused_and_never_read_as_no_gpio():
+    """Directly, through a resistor, and under a name that carries a GPIO:
+    the refusal says the table left the pad out, not that the copper
+    reaches no GPIO."""
+    for signals, parts in (({"BOOT": ["J1.1", "U1.4"]}, {}),
+                           ({"IO9/BOOT": ["J1.1", "U1.4"]}, {}),
+                           ({"TX": ["J1.1", "R1.1"], "N1": ["R1.2", "U1.4"]},
+                            {"R1": (2, "1k")})):
+        with pytest.raises(PindefError, match=r"reaches U1 pad 4, which the table from "
+                                              r"this test's own table does not transcribe"):
+            _traced(_traced_board(signals, parts))
 
 
 def test_a_net_named_for_another_gpio_than_its_copper_reaches_is_refused():
-    """The name is a cross-check and never the source."""
+    """The name is a cross-check and never the source, read in every
+    `/`-part, as `IO<n>` or `GPIO<n>`, in either case."""
     assert _traced(_traced_board({"IO4/TX": ["J1.1", "U1.1"]})) == {"IO4/TX": "GPIO4"}
-    with pytest.raises(PindefError, match=r"'IO5/TX' is named for GPIO5 and its copper "
-                                          r"reaches GPIO4"):
-        _traced(_traced_board({"IO5/TX": ["J1.1", "U1.1"]}))
-    with pytest.raises(PindefError, match=r"'IO4' is named for GPIO4 and its copper "
-                                          r"reaches no GPIO"):
-        _traced(_traced_board({"IO4": ["J1.1"]}))
+    assert _traced(_traced_board({"tx/gpio4": ["J1.1", "U1.1"]})) == {"tx/gpio4": "GPIO4"}
+    for net, reaches in (("TX/IO5", r"U1 pad 1 = GPIO4"), ("GPIO5", r"U1 pad 1 = GPIO4"),
+                         ("tx/io5", r"U1 pad 1 = GPIO4"), ("IO4", r"no pin of U1"),
+                         ("IO4/3V3", r"U1 pad 3 = 3V3")):
+        contacts = {"IO4": ["J1.1"], "IO4/3V3": ["J1.1", "U1.3"]}.get(net, ["J1.1", "U1.1"])
+        with pytest.raises(PindefError, match=f"'{re.escape(net)}' is named for GPIO\\d+ "
+                                              f"and its copper reaches {reaches}"):
+            _traced(_traced_board({net: contacts}))
 
 
 def test_a_net_on_two_pads_of_the_chip_is_refused():
@@ -2651,7 +2688,28 @@ def test_a_net_on_two_pads_of_the_chip_is_refused():
             _traced(_traced_board({"TX": ["J1.1", "U1.1", other]}))
 
 
-def test_the_table_is_read_against_exactly_one_element():
-    for chips in (0, 2):
-        with pytest.raises(PindefError, match=f"{chips} elements in this board file"):
-            _traced(_traced_board({"TX": ["J1.1"]}, chips=chips))
+def test_the_table_is_read_against_exactly_one_element_of_its_package_and_value():
+    """Another element on the same package with another value is not the
+    chip; none, or two, and the file is refused, naming itself."""
+    assert _traced(_traced_board({"TX": ["J1.1", "U1.1"]}, {"U2": (5, "OTHER")})) == {
+        "TX": "GPIO4"}
+    for parts, count in (({"U1": (5, "OTHER")}, 0), ({"U2": (5, "PART")}, 2)):
+        with pytest.raises(PindefError, match=f"{count} elements in probe.brd"):
+            _traced(_traced_board({"TX": ["J1.1"]}, parts))
+    with pytest.raises(PindefError, match="probe.brd: not XML"):
+        _traced("not a board")
+
+
+def test_a_manifest_board_and_a_xiao_each_report_their_own_derivation():
+    """What `python tools/import_pindefs.py <board>` prints above the pads,
+    and a row's own CAD at a `sha256:` rather than something that reads as a
+    git revision."""
+    _needs_the_fetched_packages("zephyr", "arduino-esp32")
+    assert board_report("XIAO-ESP32-C3-DIP")["derivation"] == pindefs.DERIVATION
+    for row in board_manifest.ROWS:
+        if not board_manifest.cad_path(row).is_file():
+            pytest.skip(f"{row.source} is not fetched")
+        report = board_report(row.board)
+        assert report["derivation"] == pindefs.MANIFEST_DERIVATION
+        (own,) = [one for one in report["packages"] if one["name"] == row.source]
+        assert re.fullmatch(r"sha256:[0-9a-f]{12}", own["revision"]), own

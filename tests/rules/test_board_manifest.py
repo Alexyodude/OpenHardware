@@ -438,8 +438,8 @@ def test_every_resolved_pad_says_which_sources_named_it():
 
 def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
     """The trace is one statement, and every resolved pad has another that
-    agrees: the `IO<n>` in the vendor's net name, as SparkFun's `IO8`, or the
-    variant's number for a label the row opts in, as Adafruit's `TX`."""
+    agrees: the GPIO the vendor's net name carries, as SparkFun's `IO8`, or
+    the variant's number for a label the row opts in, as Adafruit's `TX`."""
     for row in ROWS:
         _fetched(row)
         numbers = _variant_numbers(row)
@@ -448,30 +448,56 @@ def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
                 continue
             parts = pad["label"].split("/")
             stated = {int(found.group(1)) for part in parts
-                      if (found := re.fullmatch(r"IO(\d+)", part))}
+                      if (found := re.fullmatch(r"(?:GPIO|IO)(\d+)", part, re.I))}
             stated |= {numbers[part] for part in parts if part in row.labels}
             assert stated == {pad["chip_index"]}, (row.board, pad["label"], stated)
 
 
-def test_every_pin_table_row_is_a_pad_the_rows_header_reaches():
-    """A table keeps only rows some board uses (OH-178): a row nothing
-    reaches is a transcription nothing checks."""
+def _trace(row: board_manifest.Row, text: str | None = None,
+           table: board_manifest.PinTable | None = None) -> dict:
+    path = board_manifest.cad_path(row)
+    return import_pindefs.read_eagle_traced(
+        (path.read_text(encoding="utf-8") if text is None else text,),
+        path=path, select=row.select, table=table or row.pin_table)
+
+
+def test_every_pin_table_is_what_its_page_numbers_once_each():
+    """A pad is a GPIO, a named pad with none, or left out, and never two;
+    no GPIO twice; every pad within the pins the page numbers; and the PDF
+    it was read from named by an address and a whole sha256."""
+    for table in {row.pin_table for row in ROWS}:
+        assert table.url.startswith("https://") and table.url.endswith(".pdf"), table.value
+        assert re.fullmatch(r"[0-9a-f]{64}", table.pdf_sha256), table.value
+        gpio, other = dict(table.gpio), dict(table.not_gpio)
+        assert len(gpio) == len(table.gpio) and len(other) == len(table.not_gpio), table.value
+        assert not set(gpio) & set(other), table.value
+        assert len(set(gpio.values())) == len(gpio), table.value
+        assert {int(pad) for pad in (*gpio, *other)} <= set(range(1, table.pins + 1)), (
+            table.value)
+
+
+def test_every_gpio_row_of_a_table_is_a_pad_some_header_reaches():
+    """A table keeps only the GPIO rows some board uses (OH-178), across
+    every row that shares it: a row nothing reaches is a transcription
+    nothing checks. Its pads with no GPIO are all listed, from the same page,
+    so that a pad left out is refused rather than read as none."""
+    reached: dict[board_manifest.PinTable, set[int]] = {}
     for row in ROWS:
         _fetched(row)
-        text = board_manifest.cad_path(row).read_text(encoding="utf-8")
-        traced = import_pindefs.read_eagle_traced(
-            (text,), select=row.select, table=row.pin_table)
-        gpios = [gpio for _, gpio in row.pin_table.gpio]
-        assert len(set(gpios)) == len(gpios), row.board
-        assert {pin.index for pin in traced.values()} == set(gpios), row.board
+        reached.setdefault(row.pin_table, set()).update(
+            found.pin.index for found in _trace(row).values() if found.pin)
+    for table, gpios in reached.items():
+        assert gpios == {gpio for _, gpio in table.gpio}, table.value
 
 
 def test_no_supply_pad_names_a_pin_or_is_on_a_gpio_pad_of_its_chip():
     """What makes a label a supply (`SUPPLY_LABELS` in
     tests/rules/test_import_pindefs.py): its pad names no chip pin, and its
-    net is on no GPIO pad of the chip. Across one part 3.3V reaches a GPIO
-    through a pull-up on all three boards; the trace stops at the chip's own
-    supply pads, which is what keeps it off them."""
+    net is on no GPIO pad of the chip. Through a resistor 3.3V reaches a GPIO
+    by a pull-up on all three boards, and on each that GPIO's net holds three
+    or more contacts, so the series rule alone keeps the rail off it here;
+    the stop at a chip pad with no GPIO is held by the reader's own test,
+    `test_a_net_on_a_chip_pad_the_table_gives_no_gpio_names_none_and_stops_there`."""
     from tests.rules.test_import_pindefs import SUPPLY_LABELS
 
     checked = []
@@ -491,6 +517,13 @@ def test_no_supply_pad_names_a_pin_or_is_on_a_gpio_pad_of_its_chip():
     assert set(checked) == {row.board for row in ROWS}
 
 
+def test_the_qt_pys_tx_is_traced_through_its_resistor():
+    """R4, a resistor by name and value, is the one part a trace crosses."""
+    row = row_named("Adafruit QT Py ESP32-C3")
+    _fetched(row)
+    assert _trace(row)["TX"].via.startswith("TX -> R4 (1k) -> U2 pad 28 = GPIO21 (")
+
+
 def test_a_net_renamed_for_another_gpio_is_refused_on_the_pilot():
     """The ticket's condition: a deliberately wrong net name is refused
     rather than resolved. SparkFun's `IO8` renamed `IO12`: its copper still
@@ -499,28 +532,65 @@ def test_a_net_renamed_for_another_gpio_is_refused_on_the_pilot():
     _fetched(row)
     text = board_manifest.cad_path(row).read_text(encoding="utf-8")
     assert text.count('<signal name="IO8">') == 1
-    wrong = text.replace('<signal name="IO8">', '<signal name="IO12">')
     with pytest.raises(import_pindefs.PindefError,
-                       match=r"'IO12' is named for GPIO12 and its copper reaches GPIO8"):
-        import_pindefs.read_eagle_traced((wrong,), select=row.select, table=row.pin_table)
+                       match=r"'IO12' is named for GPIO12 and its copper reaches "
+                             r"U1 pad 10 = GPIO8"):
+        _trace(row, text.replace('<signal name="IO8">', '<signal name="IO12">'))
+
+
+def test_a_header_pad_moved_onto_a_pad_the_table_leaves_out_is_refused():
+    """The QT Py's JP1 pad 1 moved off A0 onto BOOT, U2 pad 15, which is
+    GPIO9 on the page and which the table leaves out because no header
+    reaches it: refused as not transcribed, under either name, rather than
+    read as no GPIO."""
+    row = row_named("Adafruit QT Py ESP32-C3")
+    _fetched(row)
+    text = board_manifest.cad_path(row).read_text(encoding="utf-8")
+    pad, boot = '<contactref element="JP1" pad="1"/>', '<signal name="BOOT">'
+    assert text.count(pad) == 1 and text.count(boot) == 1
+    moved = text.replace(pad, "").replace(boot, boot + pad)
+    for net in ("BOOT", "IO9/BOOT"):
+        with pytest.raises(import_pindefs.PindefError,
+                           match=r"reaches U2 pad 15, which the table from ESP32-C3 "
+                                 r"Series Datasheet v2\.4, p\. 67"):
+            _trace(row, moved.replace(boot, f'<signal name="{net}">'))
 
 
 def test_a_variant_and_a_trace_that_disagree_leave_the_pad_disputed(monkeypatch):
     """Never resolved by preference. The Feather's table told that its SDA
-    pad, 25, is GPIO20: the variant says 19, the trace 20, and the pad stays
-    null with both claims beside it."""
+    pad, 25, is GPIO20, and then that it is NC: the variant says 19 both
+    times, and the pad is null with each source named beside its answer."""
     row = row_named("Adafruit Feather ESP32-C6")
     _fetched(row)
-    table = dataclasses.replace(row.pin_table, gpio=tuple(
-        (pad, 20 if pad == "25" else gpio) for pad, gpio in row.pin_table.gpio))
-    monkeypatch.setitem(import_pindefs.BOARDS, row.board,
-                        import_pindefs.manifest_board(dataclasses.replace(row, pin_table=table)))
-    (sda,) = [pad for pad in import_pindefs.board_report(row.board)["pads"]
-              if pad["label"] == "SDA"]
-    assert (sda["chip_pin"], sda["reason"]) == (None, import_pindefs.DISPUTED)
-    assert [(one["chip_pin"], [s.split()[0] for s in one["sources"]])
-            for one in sda["disputed"]] == [
-        ("GPIO19", [row.package]), ("GPIO20", [row.source])]
+    gpio = tuple(one for one in row.pin_table.gpio if one[0] != "25")
+    for table, traced in (
+            (dataclasses.replace(row.pin_table, gpio=(*gpio, ("25", 20))), "GPIO20"),
+            (dataclasses.replace(row.pin_table, gpio=gpio,
+                                 not_gpio=(*row.pin_table.not_gpio, ("25", "NC"))), None)):
+        monkeypatch.setitem(import_pindefs.BOARDS, row.board, import_pindefs.manifest_board(
+            dataclasses.replace(row, pin_table=table)))
+        (sda,) = [pad for pad in import_pindefs.board_report(row.board)["pads"]
+                  if pad["label"] == "SDA"]
+        assert (sda["chip_pin"], sda["reason"]) == (None, import_pindefs.DISPUTED)
+        assert sda["disputed_by"] == [
+            {"chip_pin": "GPIO19", "chip_pin_from": [row.package]},
+            {"chip_pin": traced, "chip_pin_from": [row.source]}]
+
+
+def test_a_regenerated_pad_keeps_nothing_from_an_earlier_run(tmp_path):
+    """`chip_pin_from`, `why_null` and `disputed_by` are written from this
+    run's report or not at all."""
+    row = row_named("SparkFun Thing Plus ESP32-C6")
+    _fetched(row)
+    committed = _committed(row)
+    stale = json.loads(json.dumps(committed))
+    for pad in stale["pads"]:
+        pad.update({"chip_pin_from": ["stale"], "why_null": "stale",
+                    "disputed_by": [{"chip_pin": "GPIO99", "chip_pin_from": ["stale"]}]})
+    (tmp_path / f"{row.board}.json").write_text(json.dumps(stale), encoding="utf-8")
+    filled = import_pindefs.filled_board(row.board, import_pindefs.BSP_DIR, tmp_path,
+                                         modules_dir=import_pindefs.BOARDS_DIR)
+    assert filled["pads"] == committed["pads"]
 
 
 def test_every_reason_is_on_a_pad_and_carried_by_it():

@@ -854,28 +854,45 @@ def seeed_pcb_traced(board_file: str, part: str, labels: tuple[str, ...]) -> Sou
     )
 
 
-_NAMED_GPIO = re.compile(r"IO(\d+)")
+@dataclasses.dataclass(frozen=True)
+class Traced:
+    """What a traced source found for one net: a pin, or None where the net
+    reaches only pads its table gives no GPIO, and the path that says so."""
+
+    pin: ChipPin | None
+    via: str
+
+
+#: A GPIO named in a net: `IO8`, `GPIO5`, `io8`. Read in every `/`-part.
+_NAMED_GPIO = re.compile(r"(?:GPIO|IO)(\d+)", re.I)
+#: A resistor, the one part a trace crosses: a reference `R<n>` and a value
+#: that reads as ohms -- `1k`, `4.7k`, `100K`, `0`, `4K7`, `22R`.
+_RESISTOR = re.compile(r"R\d+")
+_OHMS = re.compile(r"(?:\d+(?:\.\d+)?\s*(?:[kmr]|ohms?|\u03a9)?|\d+[rkm]\d+)", re.I)
 
 
 def read_eagle_traced(
-    texts: tuple[str, ...], *, select: tuple[str, ...], table: board_manifest.PinTable
-) -> dict[str, ChipPin]:
-    """Each header net's GPIO: the chip pad it reaches in the vendor's own
-    EAGLE board file, read against the chip's datasheet table (OH-178).
+    texts: tuple[str, ...], *, path: pathlib.Path, select: tuple[str, ...],
+    table: board_manifest.PinTable,
+) -> dict[str, Traced]:
+    """Each header net, traced to its chip in the vendor's own EAGLE board
+    file (`path`) and read against the chip's datasheet table (OH-178).
 
     The chip is the one element placed as the table's package and value. A
-    net reaches it directly, or, where it touches no pad of the chip,
-    through one two-pad part whose other net holds that part and one chip
-    pad and nothing else: the QT Py's TX, through R4. A net that touches
-    the chip only at pads the table does not number reaches no GPIO, which
-    keeps 3.3V off the GPIOs its pull-ups hold.
+    net reaches it directly, or, where it touches no pin of the chip,
+    through one resistor whose other net holds that resistor and one chip
+    pad and nothing else: the QT Py's TX, through R4. Any other part stops
+    the trace: an LED, a jumper, a capacitor, a switch, a connector. A pad
+    numbered past the table's `pins` is not a pin of the part.
 
-    A net's name is a cross-check and never the source: an `IO<n>` in it
-    that is not the GPIO its copper reaches is refused.
+    A net on one GPIO names it. A net on pads the table gives no GPIO
+    (3V3, EN, GND) names none and says which. A net on a pad the table
+    does not transcribe, or on a GPIO and another pad, is refused, and so
+    is a net whose name carries a GPIO its copper does not reach.
     """
     (text,) = texts
     try:
-        board = eagle.read_board(pathlib.Path(f"{table.value}.brd"), text)
+        board = eagle.read_board(path, text)
         header = [pad.net for name in select for pad in board.element(name).pads]
     except eagle.EagleError as exc:
         raise PindefError(str(exc)) from exc
@@ -883,42 +900,65 @@ def read_eagle_traced(
              if (element.package, element.value) == (table.package, table.value)]
     if len(chips) != 1:
         raise PindefError(
-            f"{len(chips)} elements in this board file are placed as package "
+            f"{len(chips)} elements in {path.name} are placed as package "
             f"{table.package!r}, value {table.value!r}; its pin table is read "
             f"against exactly one"
         )
     (chip,) = chips
-    gpio = dict(table.gpio)
+    gpio, named = dict(table.gpio), dict(table.not_gpio)
     contacts = collections.Counter(
         pad.net for element in board.elements for pad in element.pads if pad.net)
-    pins: dict[str, ChipPin] = {}
+
+    def pins_on(net: str) -> list[str]:
+        return [pad.number for pad in chip.pads if pad.net == net
+                and not (pad.number.isdigit() and int(pad.number) > table.pins)]
+
+    traced: dict[str, Traced] = {}
     for net in dict.fromkeys(net for net in header if net):
-        reached = [pad.number for pad in chip.pads if pad.net == net]
+        reached, crossed = pins_on(net), []
         for part in board.elements if not reached else ():
             nets = [pad.net for pad in part.pads]
-            if part is chip or part.name in select or len(nets) != 2 or net not in nets:
+            if (len(nets) != 2 or net not in nets or not _RESISTOR.fullmatch(part.name)
+                    or not _OHMS.fullmatch((part.value or "").strip())):
                 continue
             far = nets[1 - nets.index(net)]
-            if contacts[far] == 2:
-                reached += [pad.number for pad in chip.pads if pad.net == far]
+            if contacts[far] == 2 and pins_on(far):
+                crossed.append(f"{part.name} ({part.value.strip()})")
+                reached += pins_on(far)
+        chain = [net, ", ".join(crossed)] if crossed else [net]
+        loose = [number for number in reached if number not in gpio and number not in named]
+        if loose:
+            raise PindefError(
+                f"{net!r} reaches {chip.name} pad {', '.join(loose)}, which the "
+                f"table from {table.cite} does not transcribe; a pad left out "
+                f"is refused, never read as no GPIO"
+            )
         numbered = [gpio[number] for number in reached if number in gpio]
         if numbered and len(reached) > 1:
             raise PindefError(
                 f"{net!r} reaches pads {sorted(reached, key=int)} of {chip.name}, "
                 f"so one header pad would name more than one pin"
             )
+        by_name: dict[str, list[str]] = {}
+        for number in reached:
+            by_name.setdefault(f"GPIO{gpio[number]}" if number in gpio
+                               else named[number], []).append(number)
+        at = "; ".join(f"pad {pads[0]} = {name}" if len(pads) == 1
+                       else f"{len(pads)} pads = {name}" for name, pads in by_name.items())
         stated = sorted({int(found.group(1)) for part in net.split("/")
-                         if (found := _NAMED_GPIO.fullmatch(part))})
+                         if (found := _NAMED_GPIO.fullmatch(part.strip()))})
         if stated and stated != numbered:
-            reaches = f"GPIO{numbered[0]}" if numbered else "no GPIO"
             raise PindefError(
                 f"the net {net!r} is named for "
                 f"{', '.join(f'GPIO{n}' for n in stated)} and its copper reaches "
-                f"{reaches} of {chip.name}; the board file says two things"
+                f"{f'{chip.name} {at}' if reached else f'no pin of {chip.name}'}; "
+                f"the board file says two things"
             )
-        if numbered:
-            pins[net] = ChipPin(f"GPIO{numbered[0]}", numbered[0])
-    return pins
+        if reached:
+            via = f"{' -> '.join(chain)} -> {chip.name} {at} ({table.cite})"
+            pin = ChipPin(f"GPIO{numbered[0]}", numbered[0]) if numbered else None
+            traced[net] = Traced(pin, via)
+    return traced
 
 
 def read_indexed_pins(
@@ -1068,8 +1108,8 @@ class Package:
     #: since `--fetch` skips every `cloned=False` package.
     fetch: str | None = None
     #: Where a board file's pins are read against a chip's datasheet table,
-    #: that table's citation: `board_manifest.PinTable.cite`.
-    pin_table: str = ""
+    #: that table.
+    pin_table: board_manifest.PinTable | None = None
 
     def how_to_fetch(self) -> str:
         """What to actually run to get this package, as a sentence."""
@@ -1706,12 +1746,13 @@ def manifest_board(entry: board_manifest.Row) -> Board:
     CAD traced to its chip (OH-178), registered as the package `entry.source`."""
     sources = [arduino_flat(entry.package, entry.variant, extras=entry.labels)]
     if entry.pin_table is not None:
+        root = board_sources.source(entry.source).dest(REPO)
         sources.append(Source(
             entry.source,
             (entry.cad,),
-            functools.partial(read_eagle_traced, select=entry.select,
-                              table=entry.pin_table),
-            root=board_sources.source(entry.source).dest(REPO),
+            functools.partial(read_eagle_traced, path=root / entry.cad,
+                              select=entry.select, table=entry.pin_table),
+            root=root,
         ))
     return Board(entry.chip, tuple(sources), reasons=entry.reasons)
 
@@ -1727,7 +1768,7 @@ PACKAGES.update({
         cloned=False,
         firmware=False,
         fetch=f"python tools/get_board_sources.py {entry.source}",
-        pin_table=entry.pin_table.cite,
+        pin_table=entry.pin_table,
     )
     for entry in board_manifest.ROWS if entry.pin_table is not None
 })
@@ -1755,15 +1796,21 @@ BOARDS.update(MANIFEST)
 
 @dataclasses.dataclass(frozen=True)
 class Claim:
-    """One package's answer for one label, and the file that gave it."""
+    """One package's answer for one label, and the file that gave it.
 
-    pin: ChipPin
+    `pin` is None only for a traced source whose net reaches pads its table
+    gives no GPIO: an answer, and one a pin from another source disputes.
+    """
+
+    pin: ChipPin | None
     #: `zephyr boards/seeed/xiao_rp2040/seeed_xiao_connector.dtsi @ 0a2e408`,
     #: in the spirit of the `derivation` field already naming a footprint.
     source: str
     #: The `Package` the claim was read from, which a manifest board's file
     #: names per pad as `chip_pin_from`.
     package: str = ""
+    #: A traced source's path, `Traced.via`, which `source` ends with.
+    via: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1791,9 +1838,9 @@ def agree(claims: tuple[Claim, ...]) -> ChipPin | None:
     A claim naming a pin without numbering it does not contradict one that
     numbers it: Zephyr's `&gpio1 11` says P1.11 and stops, while the nRF52840
     Arduino core's table says P1.11 *and* calls it 43. So names must be equal,
-    and indices must be equal or absent.
+    and indices must be equal or absent. A claim of no pin agrees with nothing.
     """
-    if not claims:
+    if not claims or any(claim.pin is None for claim in claims):
         return None
     names = {claim.pin.name for claim in claims}
     if len(names) != 1:
@@ -1880,8 +1927,10 @@ def published_pins(board: Board, bsp_dir: pathlib.Path) -> dict[str, list[Claim]
         stamp = (f"sha256:{_digest(texts)}" if source.root is not None
                  else revision(checkout))
         citation = f"{source.package} {', '.join(source.paths)} @ {stamp}"
-        for label, pin in source.read(tuple(texts)).items():
-            claims.setdefault(label, []).append(Claim(pin, citation, source.package))
+        for label, found in source.read(tuple(texts)).items():
+            claims.setdefault(label, []).append(
+                Claim(found.pin, f"{citation}: {found.via}", source.package, found.via)
+                if isinstance(found, Traced) else Claim(found, citation, source.package))
     return claims
 
 
@@ -1975,14 +2024,17 @@ BOARD_DERIVATION_UNCOVERED = (
 #: And for a row in `tools/board_manifest.py`, whose own CAD is read too.
 MANIFEST_DERIVATION = (
     "Generated by tools/import_pindefs.py from the sources in `packages`, at "
-    "those revisions. The board-support package names a pin by a pad's label. "
-    "The vendor's board file names one by copper: the chip pad the pad's net "
-    "reaches, directly or through one two-pad part in series, read against "
-    "the datasheet table its `pin_table` cites; an `IO<n>` in the net's name "
-    "that disagrees is refused. Each resolved pad's `chip_pin_from` names the "
-    "sources that named it, and where two name a pad they agree or it stays "
-    "null. `python tools/import_pindefs.py <board>` prints the file that "
-    "named each."
+    "those revisions; a board file's `sha256:` is the first twelve hex of the "
+    "sha256 of its text, newlines as LF. The board-support package names a "
+    "pin by a pad's label. The "
+    "vendor's board file names one by copper: the chip pad the pad's net "
+    "reaches, directly or through one resistor in series, read against the "
+    "datasheet table its `pin_table` cites. A net on pads that table gives no "
+    "GPIO says so in `why_null`; one on a pad it does not transcribe, or "
+    "named for a GPIO it does not reach, is refused. Each resolved pad's "
+    "`chip_pin_from` names the sources that named it; where two disagree the "
+    "pad is null and `disputed_by` names them. `python tools/import_pindefs.py "
+    "<board>` prints the path each trace took."
 )
 
 NOT_PUBLISHED = "no board-support package covering this board defines this label"
@@ -2013,15 +2065,17 @@ def pad_report(entry: Resolved) -> dict:
     }
     if pin:
         return report
-    if not entry.claims:
+    if not any(claim.pin for claim in entry.claims):
         report["reason"] = NOT_PUBLISHED
         return report
-    rivals: dict[str, list[str]] = {}
+    # A traced claim of no pin is a rival too, listed last as `chip_pin` null.
+    rivals: dict[str | None, list[str]] = {}
     for claim in entry.claims:
-        rivals.setdefault(claim.pin.name, []).append(claim.source)
+        rivals.setdefault(claim.pin.name if claim.pin else None, []).append(claim.source)
     report["reason"] = DISPUTED
     report["disputed"] = [
-        {"chip_pin": name, "sources": sources} for name, sources in sorted(rivals.items())
+        {"chip_pin": name, "sources": sources} for name, sources in
+        sorted(rivals.items(), key=lambda rival: (rival[0] is None, rival[0] or ""))
     ]
     return report
 
@@ -2050,18 +2104,28 @@ def board_report(
         for pad in pads:
             if pad["chip_pin"] is None:
                 pad["reason"] = NO_PACKAGE_AT_ALL
+    # OH-173's question -- how is this pin known -- answered in a manifest
+    # board's own file: which sources named a pin, which disputed one, and
+    # what the trace reached where it named none. The XIAO files are left as
+    # they are.
+    if name in MANIFEST:
+        for pad, entry in zip(pads, entries, strict=True):
+            if pad["chip_pin"] is not None:
+                pad["chip_pin_from"] = sorted({claim.package for claim in entry.claims})
+            elif "disputed" in pad:
+                pad["disputed_by"] = [
+                    {"chip_pin": rival["chip_pin"], "chip_pin_from": sorted(
+                        {claim.package for claim in entry.claims
+                         if claim.source in rival["sources"]})}
+                    for rival in pad["disputed"]]
+            elif traced := [claim.via for claim in entry.claims if claim.pin is None]:
+                pad["reason"] = f"no GPIO: the vendor's board file traces {traced[0]}"
     # A label the registry has a better reason for, applied only where nothing
     # resolved it -- a reason never overrides an answer.
     reasons = dict(board.reasons)
     for pad in pads:
         if pad["chip_pin"] is None and pad["label"] in reasons:
             pad["reason"] = reasons[pad["label"]]
-    # OH-173's question -- how is this pin known -- answered in a manifest
-    # board's own file. The XIAO files are left as they are.
-    if name in MANIFEST:
-        for pad, entry in zip(pads, entries, strict=True):
-            if pad["chip_pin"] is not None:
-                pad["chip_pin_from"] = sorted({claim.package for claim in entry.claims})
     packages = sorted({source.package for source in board.sources})
     return {
         "board": name,
@@ -2078,17 +2142,20 @@ def board_report(
                 # `seeed-pcb` additionally has no `.git` of its own and would
                 # answer OpenHardware's head; `seeed-xiao` does have one. The
                 # long form of this is beside `stamp` in `published_pins`.
+                # A row's own CAD says `sha256:` so that nobody reads it as a
+                # git revision; the XIAO files keep the bare digest.
                 "revision": (revision(bsp_dir / package)
                              if PACKAGES[package].cloned
-                             else _digest(tuple(
+                             else ("sha256:" if name in MANIFEST else "") + _digest(tuple(
                                  (source.root / one).read_text(
                                      encoding="utf-8", errors="replace")
                                  for source in board.sources
                                  if source.package == package and source.root
                                  for one in source.paths))),
                 "licence": PACKAGES[package].licence,
-                **({"pin_table": PACKAGES[package].pin_table}
-                   if PACKAGES[package].pin_table else {}),
+                **({"pin_table": {"cite": table.cite, "url": table.url,
+                                  "sha256": table.pdf_sha256}}
+                   if (table := PACKAGES[package].pin_table) else {}),
             }
             for package in packages
         ],
@@ -2534,8 +2601,12 @@ def filled_board(
             filled["chip_pin_from"] = entry["chip_pin_from"]
         if entry["chip_pin"] is None:
             filled["why_null"] = entry["reason"]
+        if "disputed_by" in entry:
+            filled["disputed_by"] = entry["disputed_by"]
+        # Written from this report or not at all: a staged pad's own copy of
+        # any of the three is from an earlier run.
         for key, value in pad.items():
-            if key not in filled and key not in ("why_null", "chip_pin_from"):
+            if key not in filled and key not in ("chip_pin_from", "why_null", "disputed_by"):
                 filled[key] = value
         pads.append(filled)
 

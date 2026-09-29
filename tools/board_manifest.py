@@ -59,44 +59,71 @@ class ManifestError(Exception):
 
 @dataclasses.dataclass(frozen=True)
 class PinTable:
-    """Pad number to GPIO for one part, as its datasheet's pin table states it.
+    """One part's pins, as its datasheet's pin table numbers them.
 
     The part is the element a row's CAD places as `package` with `value`.
-    Only pads some row's header reaches are listed (OH-178).
+    `gpio` holds only the pads some row's header reaches (OH-178);
+    `not_gpio` every pad the page gives no GPIO, by the name it gives; and
+    `pins` how many pins the page numbers. A pad within `pins` in neither
+    list is refused where a header reaches it, never read as no GPIO.
     """
 
     package: str
     value: str
+    #: The document, its version, and where in it.
     cite: str
+    url: str
+    #: Of the PDF at `url` when it was read: the URL names no version.
+    pdf_sha256: str
+    pins: int
     gpio: tuple[tuple[str, int], ...]
+    not_gpio: tuple[tuple[str, str], ...]
 
+
+_DOCS = "https://www.espressif.com/sites/default/files/documentation/"
 
 ESP32_C3FH4 = PinTable(
     "QFN32_5MM", "ESP32-C3FH4",
     "ESP32-C3 Series Datasheet v2.4, p. 67, ESP32-C3 Consolidated Pin Overview: "
-    "Pin No. against IO MUX Function 1. https://www.espressif.com/sites/default/"
-    "files/documentation/esp32-c3_datasheet_en.pdf",
+    "Pin No. against IO MUX Function 1",
+    _DOCS + "esp32-c3_datasheet_en.pdf",
+    "833fc000b4b3c3d39c496fcbd597fed5806956503ce7390b19cc8ae82f19f968",
+    33,
     (("4", 0), ("5", 1), ("8", 3), ("9", 4), ("10", 5), ("12", 6), ("13", 7),
      ("14", 8), ("16", 10), ("27", 20), ("28", 21)),
+    # Pin 18, VDD_SPI, is a Power pin whose IO MUX Function 1 is GPIO11, so
+    # it is in neither list.
+    (("1", "LNA_IN"), ("2", "VDD3P3"), ("3", "VDD3P3"), ("7", "CHIP_EN"),
+     ("11", "VDD3P3_RTC"), ("17", "VDD3P3_CPU"), ("29", "XTAL_N"), ("30", "XTAL_P"),
+     ("31", "VDDA"), ("32", "VDDA"), ("33", "GND")),
 )
 ESP32_C6_MINI_1 = PinTable(
     "ESP32-PICO-MINI", "ESP32-C6-MINI_MINI",
-    "ESP32-C6-MINI-1 & MINI-1U Datasheet v1.5, pp. 10-11, Table 3-1 Pin "
-    "Definitions: No. against the GPIO its Function names. https://www.espressif"
-    ".com/sites/default/files/documentation/esp32-c6-mini-1_mini-1u_datasheet_en.pdf",
+    "ESP32-C6-MINI-1 & MINI-1U Datasheet v1.5, pp. 10-11, 3.2 Pin Description "
+    "and Table 3-1 Pin Definitions: No. against the GPIO its Function names",
+    _DOCS + "esp32-c6-mini-1_mini-1u_datasheet_en.pdf",
+    "26691033f31cbebf623842c16624e61151b152533c13a850c091c8e858c510a2",
+    53,
     (("5", 2), ("6", 3), ("9", 4), ("10", 5), ("12", 0), ("13", 1), ("15", 6),
      ("16", 7), ("19", 14), ("20", 15), ("22", 8), ("23", 9), ("24", 18),
      ("25", 19), ("27", 21), ("28", 22), ("29", 23), ("30", 17), ("31", 16)),
+    (("1", "GND"), ("2", "GND"), ("3", "3V3"), ("4", "NC"), ("7", "NC"), ("8", "EN"),
+     ("11", "GND"), ("14", "GND"), ("21", "NC"), ("32", "NC"), ("33", "NC"),
+     ("34", "NC"), ("35", "NC"), *((str(pin), "GND") for pin in range(36, 54))),
 )
 ESP32_C6_WROOM_1 = PinTable(
     "ESP32-C6-WROOM-1-NARROW", "ESP32-C6-WROOM-1-NARROW",
-    "ESP32-C6-WROOM-1 & WROOM-1U Datasheet v1.4, p. 11, Table 3-1 Pin "
-    "Definitions: No. against the GPIO its Function names. https://www.espressif"
-    ".com/sites/default/files/documentation/esp32-c6-wroom-1_wroom-1u_datasheet_en.pdf",
+    "ESP32-C6-WROOM-1 & WROOM-1U Datasheet v1.4, pp. 10-11, 3.2 Pin Description "
+    "and Table 3-1 Pin Definitions: No. against the GPIO its Function names",
+    _DOCS + "esp32-c6-wroom-1_wroom-1u_datasheet_en.pdf",
+    "163020762fa6d499e0c611c5a13e78ad9d4720b421c6bc5e14e16fc748862b73",
+    29,
     (("4", 4), ("5", 5), ("6", 6), ("7", 7), ("8", 0), ("9", 1), ("10", 8),
      ("11", 10), ("12", 11), ("15", 9), ("16", 18), ("17", 19), ("18", 20),
      ("19", 21), ("20", 22), ("21", 23), ("23", 15), ("24", 17), ("25", 16),
      ("26", 3), ("27", 2)),
+    (("1", "GND"), ("2", "3V3"), ("3", "EN"), ("22", "NC"), ("28", "GND"),
+     ("29", "EPAD")),
 )
 
 
