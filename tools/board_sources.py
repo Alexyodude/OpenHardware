@@ -824,6 +824,78 @@ SOURCES: tuple[Source, ...] = (
         ),
         cite=_LISTED_FOR_OH_177,
     ),
+    Source(
+        name="sparkfun-pro-micro-esp32-c3",
+        vendor="SparkFun",
+        model="one repository per board",
+        size="336,944 + 986,014 + 2,883 bytes, the three blobs fetched, as GitHub's "
+        "tree lists them",
+        licence=Licence(
+            name="CC BY-SA 4.0",
+            covers="SparkFun hardware, in License.md's words; the same file puts "
+            "SparkFun code, firmware and software under MIT",
+            sampled=True,
+            evidence=Evidence.OPENED,
+            cite="License.md at the repository root, fetched here and read 2026-09-30",
+            file="License.md",
+            quote="SparkFun hardware is released under [Creative Commons Share-alike "
+            "4.0 International](http://creativecommons.org/licenses/by-sa/4.0/)",
+        ),
+        fetch=Fetch(
+            transport=Transport.GIT_SPARSE,
+            url="https://github.com/sparkfun/SparkFun_Pro_Micro-ESP32C3.git",
+            wanted=(
+                "Hardware/SparkFun_Dev_ESP32_C3_MINI.brd",
+                "Hardware/SparkFun_Dev_ESP32_C3_MINI.sch",
+                "License.md",
+            ),
+            skipped=(
+                ("Production", "a panelised gerber set, its drill file and a zip of "
+                 "them: fabrication output derived from the design in Hardware/"),
+                ("Documents", "copies of Espressif's module datasheet, design "
+                 "guidelines and technical reference manual; the pin table cites "
+                 "Espressif's own download of the datasheet"),
+                ("Arduino_Board_Files", "SparkFun's boards.txt entry and "
+                 "pins_arduino.h for this board; the pins are read from "
+                 "arduino-esp32's variants/sparkfun_pro_micro_esp32c3, which the "
+                 "manifest row names"),
+                ("docs", "the product documentation site: photographs, a schematic "
+                 "PDF rendering the .sch fetched here, a zip of the EAGLE files, and "
+                 "copies of Documents/"),
+                ("README.md", "names the product and its hookup guide; the licence "
+                 "is read from License.md, which is fetched"),
+                ("mkdocs.yml", "the documentation site's configuration, with "
+                 "overrides/, .github/ and .cache/ beside it; none describes the board"),
+            ),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES, Evidence.OPENED,
+                "Hardware/SparkFun_Dev_ESP32_C3_MINI.sch, EAGLE 9.6.2 XML; fetched "
+                "here for its devices' pin-to-pad connects",
+            ),
+            schematic_pdf=Artefact(
+                Published.YES, Evidence.LISTED,
+                "docs/assets/board_files/SparkFun_ESP32_C3_Pro_Micro_Schematic.pdf, "
+                "which this row does not fetch",
+            ),
+            pcb_layout=Artefact(
+                Published.YES, Evidence.OPENED,
+                "Hardware/SparkFun_Dev_ESP32_C3_MINI.brd, EAGLE 9.6.2 XML, read by "
+                "tools/eagle.py",
+            ),
+            footprints_symbols=Artefact(Published.NO, Evidence.ABSENT, _NO_LBR),
+            model_3d=Artefact(Published.NO, Evidence.ABSENT, _NO_MESH),
+            board_support=Artefact(
+                Published.YES, Evidence.LISTED,
+                "Arduino_Board_Files/sparkfun_boards.txt and "
+                "Arduino_Board_Files/sparkfun_pro_micro_esp32c3/pins_arduino.h, "
+                "not fetched",
+            ),
+        ),
+        cite="OH-188: GitHub's tree listing of the default branch, read 2026-09-30; "
+        "the board file, the schematic and the licence fetched here and opened",
+    ),
 )
 
 
