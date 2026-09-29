@@ -2,7 +2,7 @@
 id: OH-181
 title: An arduino-pico board's pins are read through common.h, so the KB2040 and every
   RP2040 variant can be a row
-status: in-review
+status: in-progress
 priority: P1
 created: '2026-09-29'
 touches:
