@@ -1111,15 +1111,31 @@ _PICO_COMPILERS = {"arm-none-eabi-g++": "toolchain-gccarmnoneeabi"}
 #: Include paths are not kept; the variant's own directory is the one given.
 _PICO_KEPT = ("-D", "-U", "-m", "-f", "-std=", "-O")
 
-#: The translation unit: what every source of a build reaches the variant
-#: through, `#include <pins_arduino.h>` with the variant's directory on the
-#: include path.
+#: The translation unit is `#include <pins_arduino.h>` alone, with the
+#: variant's directory on the include path. A sketch reaches that file
+#: through the core's `Arduino.h`, after pico-sdk's `pico.h` and the core's
+#: own headers and an `#undef PICO_RP2350A` (`cores/rp2040/Arduino.h` at the
+#: checkout's commit; a test reads it), and none of those is fetched. So a
+#: macro the variant's own files test while it is undefined here might be
+#: defined there, and each is refused but those in `_UNDEFINED_OK`.
 _PICO_UNIT = "#include <pins_arduino.h>\n"
+
+#: What a variant's own files may test while undefined: its own overrides
+#: of the pins `common.h` numbers, its LED, its SPI peripheral, and the chip
+#: macro of the other chip, which the recipe's flags define for this one.
+#: That is every such macro across every variant the preprocessor reads,
+#: and `test_every_variant_the_fallback_reads_it_reads_as_the_preprocessor_does`
+#: holds that each alternative here is one of them.
+_UNDEFINED_OK = (r"__PIN_D\d+", r"__PIN_A\d+", r"PIN_LED", r"__SPI\d+_DEVICE",
+                 r"PICO_RP2040", r"PICO_RP2350")
 
 _PROPERTY = re.compile(r"\{([^{}]+)\}")
 #: `-dU` writes each macro a conditional tested or the text expanded as a
 #: `#define` or, where it was not defined when asked, an `#undef`.
 _CONSULTED = re.compile(r"^#(?:define|undef) (\w+)", re.M)
+#: A line marker, `# 12 "variants/generic/common.h" 2`, whose file name the
+#: preprocessor writes with its backslashes doubled.
+_LINE_MARKER = re.compile(r'^# \d+ "((?:[^"\\]|\\.)*)"')
 _DIRECTIVE = re.compile(r"^[ \t]*#[ \t]*(\w+)", re.M)
 #: `static const uint8_t D0 = (26u);`, any type, any initialiser.
 _DECLARATION = re.compile(
@@ -1130,6 +1146,49 @@ _DECLARATION = re.compile(
 _INTEGER = re.compile(r"^[(\s]*(\d+)\s*[uUlL]*[\s)]*$")
 
 
+def _c_integer(digits: str) -> int | None:
+    """A C integer literal's digits as C reads them: a leading 0 is octal,
+    so `010` is 8, and `09` is no integer at all."""
+    if len(digits) > 1 and digits.startswith("0"):
+        return int(digits, 8) if set(digits) <= set("01234567") else None
+    return int(digits)
+
+
+def _split_quoted(command: str) -> list[str]:
+    """A command line split as arduino-cli splits a recipe's.
+
+    A port of `SplitQuotedString` in arduino/go-properties-orderedmap's
+    strings.go (at 7f62575), which arduino-cli's
+    internal/arduino/builder/builder.go (at 9b810c7) calls as
+    ``SplitQuotedString(commandLine, `"'`, false)``: split on each single
+    space; a quote opens an argument only as its first character and closes
+    it only as a word's last; the quotes are dropped and a quote anywhere
+    else is kept. So `-DBOARD_NAME="X"` reaches the compiler with its quotes
+    and `'-DUSB_MANUFACTURER="L'atelier d'Arnoz"'` is one argument.
+    arduino-cli ignores an unclosed quote; here it is refused.
+    """
+    arguments: list[str] = []
+    quote = ""
+    held = ""
+    for current in command.split(" "):
+        if not quote:
+            if current[:1] not in ("\"", "'"):
+                if current.strip():
+                    arguments.append(current)
+                continue
+            quote, current, held = current[0], current[1:], ""
+        if current[-1:] != quote:
+            held += current + " "
+            continue
+        held += current[:-1]
+        if held.strip():
+            arguments.append(held)
+        quote = ""
+    if quote:
+        raise PindefError(f"no closing {quote} in the command {command[:160]!r}")
+    return arguments
+
+
 @dataclasses.dataclass(frozen=True)
 class PicoBuild:
     """What an arduino-pico build of one board gives the preprocessor."""
@@ -1138,7 +1197,7 @@ class PicoBuild:
     board: str
     #: `compiler.cpp.cmd`: the compiler the recipe runs on a sketch.
     program: str
-    #: The recipe's flags `_PICO_KEPT` keeps, in its order.
+    #: The recipe's arguments `_PICO_KEPT` keeps, in its order.
     flags: tuple[str, ...]
     #: Macro flags the recipe builds from a property the package does not
     #: set -- arduino-cli supplies it, as `{runtime.ide.version}` -- and so
@@ -1208,18 +1267,28 @@ def pico_build(checkout: pathlib.Path, variant: str) -> PicoBuild:
             key[len(chosen):]: value for key, value in table.items() if key.startswith(chosen)
         })
     properties["runtime.platform.path"] = checkout.as_posix()
-    command = _expand(properties["recipe.cpp.o.pattern"], properties)
-    try:
-        tokens = shlex.split(command)
-    except ValueError as exc:
-        raise PindefError(f"{board}'s compile command does not split: {exc}: {command[:160]!r}") from exc
+    wanted = ("recipe.cpp.o.pattern", "compiler.cpp.cmd")
+    missing = [key for key in wanted if key not in properties]
+    if missing:
+        raise PindefError(f"platform.txt and boards.txt give {board} no {missing}")
+    flags, unset = [], []
+    for token in _split_quoted(_expand(properties["recipe.cpp.o.pattern"], properties)):
+        if not token.startswith((*_PICO_KEPT, "@")):
+            continue
+        if not _PROPERTY.search(token):
+            flags.append(token)
+        elif token.startswith(("-D", "-U")):
+            unset.append(token)
+        else:
+            raise PindefError(
+                f"{board}'s compile command passes {token!r}, which names a "
+                f"property neither platform.txt nor boards.txt sets"
+            )
     return PicoBuild(
         board=board,
         program=_expand(properties["compiler.cpp.cmd"], properties),
-        flags=tuple(token for token in tokens if "{" not in token
-                    and token.startswith((*_PICO_KEPT, "@"))),
-        unset=tuple(token for token in tokens if "{" in token
-                    and token.startswith(("-D", "-U"))),
+        flags=tuple(flags),
+        unset=tuple(unset),
     )
 
 
@@ -1244,7 +1313,13 @@ def _response_file(checkout: pathlib.Path, flag: str) -> list[str]:
     out, so a file not on disk is read from the checkout's own commit -- which
     a blobless clone fetches the first time it is asked for.
     """
-    relative = pathlib.Path(flag[1:]).relative_to(checkout).as_posix()
+    try:
+        relative = pathlib.Path(flag[1:]).relative_to(checkout).as_posix()
+    except ValueError as exc:
+        raise PindefError(
+            f"the recipe reads the response file {flag[1:]!r}, which is not "
+            f"under the checkout {checkout}"
+        ) from exc
     path = checkout / relative
     if path.is_file():
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -1260,7 +1335,11 @@ def _response_file(checkout: pathlib.Path, flag: str) -> list[str]:
                 f"{checkout}'s commit: git said {shown.stderr.strip()!r}"
             )
         text = shown.stdout
-    return [token for token in shlex.split(text) if token.startswith(_PICO_KEPT)]
+    kept = [token for token in shlex.split(text) if token.startswith(_PICO_KEPT)]
+    named = [token for token in kept if _PROPERTY.search(token)]
+    if named:
+        raise PindefError(f"{relative} passes {named}, which name a property nothing sets")
+    return kept
 
 
 def _pico_integers(declarations: str, macros: str, where: str) -> dict[str, int]:
@@ -1273,12 +1352,14 @@ def _pico_integers(declarations: str, macros: str, where: str) -> dict[str, int]
     nbiot's `A5 = PIN_SPI0_SS` is why `A<n>` is here too: read by hand it
     went missing where the preprocessor numbers it.
     """
-    found = {name: int(value) for name, value in _C_DEFINE.findall(macros)}
+    found = {name: number for name, value in _C_DEFINE.findall(macros)
+             if (number := _c_integer(value)) is not None}
     unread = []
     for name, value in _DECLARATION.findall(declarations):
         literal = _INTEGER.match(value.strip())
-        if literal and value.count("(") == value.count(")"):
-            found.setdefault(name, int(literal.group(1)))
+        number = _c_integer(literal.group(1)) if literal else None
+        if number is not None and value.count("(") == value.count(")"):
+            found.setdefault(name, number)
         elif _D_LABEL.match(name) or _A_LABEL.match(name):
             unread.append(f"{name} = {value.strip()}")
     if unread:
@@ -1286,13 +1367,53 @@ def _pico_integers(declarations: str, macros: str, where: str) -> dict[str, int]
     return found
 
 
+@dataclasses.dataclass(frozen=True)
+class Preprocessed:
+    """What the preprocessor made of one variant."""
+
+    constants: dict[str, int]
+    #: The checkout's files it read, under the checkout, in the order it
+    #: opened them: what the numbers came from, and what a claim cites.
+    files: tuple[str, ...]
+    #: The macros those files tested while undefined.
+    undefined: tuple[str, ...]
+
+
+def _read_by_the_preprocessor(checkout: pathlib.Path, text: str) -> tuple[
+        tuple[str, ...], tuple[str, ...]]:
+    """The checkout's files a `-dU` output's line markers name, and the
+    macros it reports tested within them while undefined."""
+    root = checkout.resolve()
+    files: list[str] = []
+    undefined: list[str] = []
+    current = None
+    for line in text.splitlines():
+        marker = _LINE_MARKER.match(line)
+        if marker:
+            name = re.sub(r"\\(.)", r"\1", marker.group(1))
+            current = None
+            if not name.startswith("<"):
+                try:
+                    current = pathlib.Path(name).resolve().relative_to(root).as_posix()
+                except ValueError:
+                    current = None  # the toolchain's own headers
+            if current is not None and current not in files:
+                files.append(current)
+            continue
+        tested = re.fullmatch(r"#undef (\w+)", line)
+        if tested and current is not None and tested.group(1) not in undefined:
+            undefined.append(tested.group(1))
+    return tuple(files), tuple(undefined)
+
+
 def pico_constants(
     checkout: pathlib.Path, variant: str, build: PicoBuild, compiler: pathlib.Path
-) -> dict[str, int]:
+) -> Preprocessed:
     """What `#include <pins_arduino.h>` declares and defines, preprocessed
     with the board's flags: the declarations out of `-E -dU`, the macros out
     of `-E -dM`. Refused if the variant consults a macro in `build.unset`,
-    whose value this cannot know."""
+    whose value this cannot know, or tests one while undefined that is not
+    in `_UNDEFINED_OK`."""
     flags: list[str] = []
     for flag in build.flags:
         flags += _response_file(checkout, flag) if flag.startswith("@") else [flag]
@@ -1300,11 +1421,16 @@ def pico_constants(
                "-x", "c++", "-E"]
     where = f"arduino-pico variants/{variant}/pins_arduino.h as {build.board}"
     texts = []
-    for mode in (("-P", "-dU"), ("-dM",)):
-        done = subprocess.run(
-            [*command, *mode, "-"], input=_PICO_UNIT, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=60, check=False,
-        )
+    for mode in ("-dU", "-dM"):
+        try:
+            done = subprocess.run(
+                [*command, mode, "-"], input=_PICO_UNIT, capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=60, check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise PindefError(
+                f"{compiler.name} {mode} took more than {exc.timeout} s on {where}"
+            ) from exc
         if done.returncode != 0:
             said = [line for line in done.stderr.splitlines() if "error" in line]
             raise PindefError(
@@ -1324,7 +1450,16 @@ def pico_constants(
                 f"{flag!r} from a property arduino-cli supplies and the "
                 f"package does not"
             )
-    return _pico_integers(texts[0], texts[1], where)
+    files, undefined = _read_by_the_preprocessor(checkout, texts[0])
+    unknown = [macro for macro in undefined
+               if not any(re.fullmatch(allowed, macro) for allowed in _UNDEFINED_OK)]
+    if unknown:
+        raise PindefError(
+            f"{where}: {', '.join(files)} test {unknown} while undefined; a sketch "
+            f"reaches pins_arduino.h after pico-sdk's pico.h and the core's own "
+            f"headers, which are not read here and might define them"
+        )
+    return Preprocessed(_pico_integers(texts[0], texts[1], where), files, undefined)
 
 
 def pico_constants_by_hand(text: str, where: str, program: str) -> dict[str, int]:
@@ -1356,21 +1491,23 @@ def read_pico_pins(
     checkout: pathlib.Path,
     variant: str,
     extras: tuple[str, ...] = (),
-) -> dict[str, ChipPin]:
+) -> tuple[dict[str, ChipPin], tuple[str, ...]]:
     """arduino-pico: the Arduino pin number is the GPIO, as `read_flat_pins`
-    says, read through the preprocessor where one is installed."""
+    says, read through the preprocessor where one is installed; and the
+    checkout's files the numbers were read from."""
     (text,) = texts
     build = pico_build(checkout, variant)
     compiler = pico_compiler(build.program)
-    constants = (
-        pico_constants(checkout, variant, build, compiler) if compiler is not None
-        else pico_constants_by_hand(
-            text, f"arduino-pico variants/{variant}/pins_arduino.h", build.program)
-    )
+    if compiler is not None:
+        read = pico_constants(checkout, variant, build, compiler)
+        constants, files = read.constants, read.files
+    else:
+        files = (f"variants/{variant}/pins_arduino.h",)
+        constants = pico_constants_by_hand(text, f"arduino-pico {files[0]}", build.program)
     return {
         label: ChipPin(f"GPIO{number}", number)
         for label, number in select_labels(constants, extras).items()
-    }
+    }, files
 
 
 _A_LABEL = re.compile(r"^A\d+$")
@@ -1389,6 +1526,8 @@ class PicoReading:
     #: None where refused, and where no preprocessor is installed.
     preprocessed: dict[str, int] | None
     why: tuple[str, str]
+    #: What the variant's own files tested while undefined, preprocessed.
+    undefined: tuple[str, ...] = ()
 
 
 def _analog_and_digital(constants: dict[str, int]) -> dict[str, int]:
@@ -1410,46 +1549,59 @@ def survey_pico(checkout: pathlib.Path) -> list[PicoReading]:
             readings.append(PicoReading(variant, before, None, None, (str(exc), str(exc))))
             continue
         compiler = pico_compiler(build.program)
-        found: list[dict[str, int] | None] = []
-        why: list[str] = []
-        for read in (
-            lambda: pico_constants_by_hand(text, variant, build.program),
-            lambda: (pico_constants(checkout, variant, build, compiler)
-                     if compiler is not None else None),
-        ):
+        try:
+            by_hand, why_by_hand = pico_constants_by_hand(text, variant, build.program), ""
+        except PindefError as exc:
+            by_hand, why_by_hand = None, str(exc).splitlines()[0]
+        preprocessed, why, undefined = None, "no preprocessor installed", ()
+        if compiler is not None:
             try:
-                constants = read()
+                read = pico_constants(checkout, variant, build, compiler)
+                preprocessed, why, undefined = read.constants, "", read.undefined
             except PindefError as exc:
-                found.append(None)
-                why.append(str(exc).splitlines()[0])
-                continue
-            found.append(None if constants is None else _analog_and_digital(constants))
-            why.append("" if constants is not None else "no preprocessor installed")
-        readings.append(PicoReading(variant, before, found[0], found[1], (why[0], why[1])))
+                why = str(exc).splitlines()[0]
+        readings.append(PicoReading(
+            variant, before,
+            None if by_hand is None else _analog_and_digital(by_hand),
+            None if preprocessed is None else _analog_and_digital(preprocessed),
+            (why_by_hand, why), undefined))
     return readings
 
 
+def count_pico(readings: list[PicoReading]) -> dict[str, tuple[int, int, int, int | None]]:
+    """For each way of reading: how many variants it gives a `D<n>`, an
+    `A<n>`, how many it refuses, and how many it gives a label a number the
+    preprocessor does not -- None for the preprocessor, which is what the
+    others are measured against."""
+    counts: dict[str, tuple[int, int, int, int | None]] = {}
+    for name, pick in (("before", lambda one: one.before),
+                       ("by hand", lambda one: one.by_hand),
+                       ("preprocessor", lambda one: one.preprocessed)):
+        answers = [(pick(one), one.preprocessed) for one in readings]
+        counts[name] = (
+            sum(1 for mine, _ in answers if mine and any(map(_D_LABEL.match, mine))),
+            sum(1 for mine, _ in answers if mine and any(map(_A_LABEL.match, mine))),
+            sum(1 for mine, _ in answers if mine is None),
+            None if name == "preprocessor" else sum(
+                1 for mine, theirs in answers if mine and theirs is not None
+                and any(theirs.get(label) != value for label, value in mine.items())),
+        )
+    return counts
+
+
 def summarise_pico(readings: list[PicoReading], checkout: pathlib.Path) -> str:
-    """How many variants each way resolves a `D<n>` and an `A<n>` for, how
-    many it refuses, and how many it gives a label a number the preprocessor
-    does not."""
+    """`count_pico`, as the table `--pico-variants` prints."""
     compiler = pico_compiler(pico_build(checkout, readings[0].variant).program)
     lines = [
         f"arduino-pico @ {revision(checkout)}: {len(readings)} variants; "
         f"preprocessor {compiler or 'not installed'}",
         f"{'':26s} {'D<n>':>5s} {'A<n>':>5s} {'refused':>8s} {'wrong':>6s}",
     ]
-    for name, pick in (("before (the file's text)", lambda one: one.before),
-                       ("by hand (the fallback)", lambda one: one.by_hand),
-                       ("preprocessor", lambda one: one.preprocessed)):
-        answers = [(pick(one), one.preprocessed) for one in readings]
-        wrong = sum(1 for mine, theirs in answers if mine and theirs is not None
-                    and any(theirs.get(label) != value for label, value in mine.items()))
-        lines.append(
-            f"{name:26s} "
-            f"{sum(1 for mine, _ in answers if mine and any(map(_D_LABEL.match, mine))):5d} "
-            f"{sum(1 for mine, _ in answers if mine and any(map(_A_LABEL.match, mine))):5d} "
-            f"{sum(1 for mine, _ in answers if mine is None):8d} {wrong:6d}")
+    names = {"before": "before (the file's text)", "by hand": "by hand (the fallback)",
+             "preprocessor": "preprocessor"}
+    for name, (digital, analog, refused, wrong) in count_pico(readings).items():
+        lines.append(f"{names[name]:26s} {digital:5d} {analog:5d} {refused:8d} "
+                     f"{'-' if wrong is None else wrong:>6}")
     return "\n".join(lines)
 
 
@@ -1542,12 +1694,15 @@ class Source:
     #: and reads the package's `boards.txt` and `platform.txt` (OH-181).
     reads_checkout: bool = False
 
-    def pins(self, checkout: pathlib.Path, texts: tuple[str, ...]) -> dict[str, ChipPin]:
-        """What `read` makes of the files' texts, given the checkout they
-        were read from where it takes one."""
+    def pins(self, checkout: pathlib.Path,
+             texts: tuple[str, ...]) -> tuple[dict[str, typing.Any], tuple[str, ...]]:
+        """What `read` makes of the files' texts, and the files a claim from
+        it cites: `paths`, or, for a reader given the checkout, the files it
+        says it read -- `variants/generic/common.h` too, for a variant that
+        includes it (OH-181)."""
         if self.reads_checkout:
             return self.read(texts, checkout=checkout)
-        return self.read(texts)
+        return self.read(texts), self.paths
 
 
 @dataclasses.dataclass(frozen=True)
@@ -2342,8 +2497,9 @@ def published_pins(board: Board, bsp_dir: pathlib.Path) -> dict[str, list[Claim]
         # the same answer whether or not the source happens to carry history.
         stamp = (f"sha256:{_digest(texts)}" if source.root is not None
                  else revision(checkout))
-        citation = f"{source.package} {', '.join(source.paths)} @ {stamp}"
-        for label, found in source.pins(checkout, tuple(texts)).items():
+        pins, cited = source.pins(checkout, tuple(texts))
+        citation = f"{source.package} {', '.join(cited)} @ {stamp}"
+        for label, found in pins.items():
             claims.setdefault(label, []).append(
                 Claim(found.pin, f"{citation}: {found.via}", source.package, found.via)
                 if isinstance(found, Traced) else Claim(found, citation, source.package))

@@ -414,7 +414,7 @@ def _variant_numbers(row: board_manifest.Row) -> dict[str, int]:
     checkout = import_pindefs.BSP_DIR / row.package
     text = (checkout / "variants" / row.variant / "pins_arduino.h").read_text(
         encoding="utf-8", errors="replace")
-    pins = import_pindefs.variant_source(row).pins(checkout, (text,))
+    pins, _ = import_pindefs.variant_source(row).pins(checkout, (text,))
     return {label: pin.index for label, pin in pins.items()}
 
 
