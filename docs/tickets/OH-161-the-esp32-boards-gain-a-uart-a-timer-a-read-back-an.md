@@ -6,7 +6,6 @@ status: open
 priority: P1
 created: '2026-09-04'
 touches:
-- webui/arduino/**
 - core/riscv32/**
 - tests/riscv32/**
 - webui/boards/esp32c3.py
@@ -126,3 +125,5 @@ Gate: all 12 checks pass, run clean with nothing else building or editing (three
 **Note 2026-09-29:** 2026-09-29 from OH-179: (1) webui/compile.py and tests/webui/test_compile.py are unclaimed while OH-183 finishes buildability work in compile.py; add both back to this ticket when OH-183 closes. (2) The Adafruit Feather ESP32-C6 now builds with -I webui/arduino/variants/xiao_esp32c6 for its chip-level files (link script, oh_board.h, soc/soc_caps.h), not for pins; soc_caps.h's comment speaks only of Seeed's table. Consider naming that folder for the chip. (3) The SparkFun Thing Plus ESP32-C6 and Adafruit QT Py ESP32-C3 are refused a build because their own pins_arduino.h use SOC_GPIO_PIN_COUNT, which nothing here defines, and the QT Py's includes soc/soc_caps.h, absent from the C3 build's include path. Both live in webui/arduino/**, this ticket's.
 
 **Note 2026-09-29:** 2026-09-29: webui/compile.py and tests/webui/test_compile.py returned to this ticket; OH-179 and OH-183 are done.
+
+**Note 2026-09-29:** 2026-09-29: webui/arduino/** lent to OH-185 (SOC_GPIO_PIN_COUNT and a C3 soc/soc_caps.h, read from the ESP-IDF v5.5 reference, so the SparkFun Thing Plus ESP32-C6 and QT Py ESP32-C3 build against their own variants). Add it back with tickets set OH-161 --touch when OH-185 closes.
