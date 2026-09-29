@@ -14,6 +14,7 @@ touches:
 - README.md
 - tests/rules/test_board_manifest.py
 - tests/rules/test_import_pindefs.py
+- tests/webui/test_pin_view.py
 ---
 
 Part of the digital-twin program ticket. Today a board that is not a Seeed XIAO footprint is a hand-written exception in several places: `chip_for` in webui/boards/catalogue.py raises unless the name starts `XIAO-` or is in `IRREGULAR`; tools/import_pindefs.py's table is keyed on XIAO names (the Uno's pindefs say "by hand; this board is not in tools/import_pindefs.py"); the Uno's pads came off PICSimLab's board.svg and were only checked against the vendor's .brd afterwards. At that cost, "all open-source hardware" means one bespoke change per board, forever.
