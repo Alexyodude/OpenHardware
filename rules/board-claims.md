@@ -228,13 +228,13 @@ loads does not (OH-183).
 `test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence`
 pins the set, as §3 pins the chips.
 
-On the day: the Adafruit Feather ESP32-C6 holds one,
+On the day: the Adafruit Feather ESP32-C6 held one,
 `tests/webui/test_feather_esp32c6_board.py`, which watches the GPIO its own
 variant calls `SDA` and the XIAO's does not. The SparkFun Thing Plus
-ESP32-C6 and the Adafruit QT Py ESP32-C3 hold none: their tables are refused,
-the first for a `SOC_GPIO_PIN_COUNT` nothing here defines, the second for a
-`soc/soc_caps.h` on none of its include directories, as
-`tests/webui/test_compile.py` asserts.
+ESP32-C6 and the Adafruit QT Py ESP32-C3 held none: their tables were
+refused, the first for a `SOC_GPIO_PIN_COUNT` nothing here defined, the
+second also for a `soc/soc_caps.h` on none of its include directories. §9
+is how they came to hold their own.
 
 ## 8. 2026-09-29 — a row's name as the manifest spells it, beside a run-claim, is the row's claim
 
@@ -257,7 +257,7 @@ row with no literal `board=`, is an error rather than a pass.
 `test_the_pilot_beside_a_run_claim_fails_and_the_feather_passes` and
 `test_the_pilot_hard_wrapped_across_two_lines_is_still_the_pilot` in
 `tests/rules/test_board_claims.py` hold it against this repository's own
-register and manifest;
+register and manifest, the pilot's own entry (§9) taken out;
 `test_a_row_named_anywhere_in_the_claims_sentence_above_it_is_read` and
 `test_a_row_named_above_an_unrelated_claim_is_not_that_claim` hold the
 reach both ways.
@@ -267,3 +267,22 @@ reach both ways.
 is matched only as the chip it names, which passes wherever that chip holds
 evidence. `test_a_paraphrase_of_a_rows_name_is_read_only_as_its_chip` holds
 that limit where it is.
+
+## 9. 2026-09-29 — the SparkFun Thing Plus ESP32-C6 and the QT Py ESP32-C3 hold their own
+
+What refused their tables (§7) was ESP-IDF's capability header, which this
+build does not have. So each chip's variant directory under
+`webui/arduino/` carries a `soc/soc_caps.h` defining exactly the `SOC_`
+names the tables built with that chip's recipe use, each value read from
+ESP-IDF v5.5 and cited by file and line; `tests/webui/test_soc_caps.py`
+reads the cited line and the tables (OH-185).
+
+Each board then holds an entry of the Feather's shape:
+`tests/webui/test_sparkfun_esp32c6_board.py` and
+`tests/webui/test_qtpy_esp32c3_board.py` each compile an `SDA` blink for
+their board by name against its own variant, rebuild the image beside
+them byte for byte, run it, and watch the GPIO that variant calls `SDA`
+move through the pad whose label names `SDA`, its `chip_index` read from
+the board file, and never the GPIO the XIAO's `SDA` names.
+`test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence`
+pins the three.

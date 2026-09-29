@@ -18,6 +18,7 @@ divergence. Where a case repeats, it repeats inside one test.
 from __future__ import annotations
 
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -113,6 +114,10 @@ def test_the_repository_passes_today():
     assert result.returncode == 0, result.stdout + result.stderr
     assert "RP2040 -> tests/cortexm0/test_blink.py" in result.stdout
     assert ("Adafruit Feather ESP32-C6 -> tests/webui/test_feather_esp32c6_board.py"
+            in result.stdout)
+    assert ("SparkFun Thing Plus ESP32-C6 -> tests/webui/test_sparkfun_esp32c6_board.py"
+            in result.stdout)
+    assert ("Adafruit QT Py ESP32-C3 -> tests/webui/test_qtpy_esp32c3_board.py"
             in result.stdout)
 
 
@@ -235,17 +240,31 @@ def test_the_chip_in_a_rows_name_is_not_read_as_a_second_claim(tmp_path):
     assert found[0].startswith("docs/boards.md:2: says SAMD21 runs firmware"), found
 
 
+def without_the_pilots_entry() -> str:
+    """This repository's catalogue with the SparkFun Thing Plus ESP32-C6's
+    own `BOARD_FIRMWARE_VERIFIED` entry taken out. It has held one since
+    OH-185, so this is how it is again a row whose chip has an entry and
+    which has none."""
+    text = (REPO / C.CATALOGUE).read_text(encoding="utf-8")
+    kept, cut = re.subn(r'^[ \t]*"SparkFun Thing Plus ESP32-C6": "[^"]*",\r?\n', "",
+                        text, flags=re.MULTILINE)
+    assert cut == 1, "the pilot's own entry is not one line of the register"
+    return kept
+
+
 def test_the_pilot_beside_a_run_claim_fails_and_the_feather_passes(tmp_path):
     """The ticket's two sentences, against this repository's own register and
-    manifest: the SparkFun Thing Plus ESP32-C6 has no entry of its own and its
-    chip has one; the Adafruit Feather ESP32-C6 has its own."""
-    root = build_root(
-        tmp_path,
-        catalogue=(REPO / C.CATALOGUE).read_text(encoding="utf-8"),
-        manifest=(REPO / C.MANIFEST).read_text(encoding="utf-8"),
-        files={"docs/boards.md": ("The SparkFun Thing Plus ESP32-C6 runs firmware.\n"
-                                  "The Adafruit Feather ESP32-C6 runs firmware.\n")},
-    )
+    manifest: with its own entry, each passes (OH-185); with the SparkFun
+    Thing Plus ESP32-C6's taken out, it fails on its chip's entry, and the
+    Adafruit Feather ESP32-C6 still passes on its own."""
+    files = {"docs/boards.md": ("The SparkFun Thing Plus ESP32-C6 runs firmware.\n"
+                                "The Adafruit Feather ESP32-C6 runs firmware.\n")}
+    manifest = (REPO / C.MANIFEST).read_text(encoding="utf-8")
+    root = build_root(tmp_path / "own", manifest=manifest, files=files,
+                      catalogue=(REPO / C.CATALOGUE).read_text(encoding="utf-8"))
+    assert C.unevidenced_chip_claims(root) == []
+    root = build_root(tmp_path / "cut", manifest=manifest, files=files,
+                      catalogue=without_the_pilots_entry())
     found = C.unevidenced_chip_claims(root)
     assert len(found) == 1, found
     assert found[0].startswith(
@@ -257,7 +276,7 @@ def test_the_pilot_hard_wrapped_across_two_lines_is_still_the_pilot(tmp_path):
     line break, `ESP32-C6`."""
     root = build_root(
         tmp_path,
-        catalogue=(REPO / C.CATALOGUE).read_text(encoding="utf-8"),
+        catalogue=without_the_pilots_entry(),
         manifest=(REPO / C.MANIFEST).read_text(encoding="utf-8"),
         files={"docs/boards.md": "The SparkFun Thing Plus\nESP32-C6 runs firmware.\n"},
     )
@@ -315,7 +334,7 @@ def test_a_row_named_anywhere_in_the_claims_sentence_above_it_is_read(tmp_path):
     """Three lines up, a three-line wrap, an HTML line break between words,
     and the pilot a word a line: each is the row, reported once, on the
     claim's line."""
-    pilot = {"catalogue": (REPO / C.CATALOGUE).read_text(encoding="utf-8"),
+    pilot = {"catalogue": without_the_pilots_entry(),
              "manifest": (REPO / C.MANIFEST).read_text(encoding="utf-8")}
     for index, (text, row, line, real) in enumerate((
         ("The Some Thing ESP32-C6 and\none\ntwo\nthree runs firmware.\n",
