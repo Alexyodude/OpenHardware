@@ -330,6 +330,9 @@ def geometry(entry: Row) -> dict:
             "registry": source.name,
         },
     )
+    # No `image.file` (OH-179): nothing reads it -- webui/pinmap.py reads the
+    # width and height -- and nothing here writes the SVG it would name.
+    del document["image"]["file"]
     # `tools/import_board.py` alone does not reproduce this file: the name,
     # the source and the pins come from the row.
     document["derivation"] = document["derivation"].replace(
@@ -386,11 +389,6 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             path = write(entry)
             print(f"wrote  {path}")
-            print(
-                f"note: webui/boards/{entry.board}.svg was NOT generated; "
-                f"tools/import_board.py writes no artwork.",
-                file=sys.stderr,
-            )
     except (ManifestError, import_pindefs.PindefError) as exc:
         print(f"board_manifest: {exc}", file=sys.stderr)
         return 2

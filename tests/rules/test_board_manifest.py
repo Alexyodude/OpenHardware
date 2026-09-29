@@ -21,6 +21,7 @@ from tools import (
     import_schematic,
 )
 from tools.board_manifest import ROWS, ManifestError
+from webui import pinmap
 from webui.boards import catalogue
 
 #: The real directory, kept before any test points `BOARDS_DIR` elsewhere.
@@ -219,6 +220,16 @@ def test_every_row_file_is_what_import_board_writes_from_the_row():
         assert [{k: pad[k] for k in fields} for pad in committed["pads"]] == [
             {k: pad[k] for k in fields} for pad in generated["pads"]
         ], row.board
+
+
+def test_a_row_names_no_artwork_file():
+    """OH-179: `image.file` named an SVG nothing generates. A row's `image`
+    is the width and height `webui/pinmap.py` reads, and no file."""
+    for row in ROWS:
+        _fetched(row)
+        assert set(board_manifest.geometry(row)["image"]) == {"width", "height"}, row.board
+        assert set(_committed(row)["image"]) == {"width", "height"}, row.board
+        assert pinmap.load(row.board).width == _committed(row)["image"]["width"]
 
 
 def test_a_row_written_into_an_empty_directory_is_the_committed_file(tmp_path, monkeypatch):
