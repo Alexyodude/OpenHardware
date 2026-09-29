@@ -2158,6 +2158,9 @@ COMPOSED: tuple[tuple[str, str, str], ...] = (
     ("XIAO-nRF54l15-SMD", "nRF54l15", "XIAO-nRF54l15-SMD"),
     ("XIAO-ESP32-C5-DIP", "ESP32-C5", "XIAO-ESP32-C5-DIP"),
     ("XIAO-ESP32-C5-SMD", "ESP32-C5", "XIAO-ESP32-C5-SMD"),
+    ("SparkFun Thing Plus ESP32-C6", "ESP32-C6", "SparkFun-Thing-Plus-ESP32-C6"),
+    ("Adafruit QT Py ESP32-C3", "ESP32-C3", "Adafruit-QT-Py-ESP32-C3"),
+    ("Adafruit Feather ESP32-C6", "ESP32-C6", "Adafruit-Feather-ESP32-C6"),
 )
 
 
