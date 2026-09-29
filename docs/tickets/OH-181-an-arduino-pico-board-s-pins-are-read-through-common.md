@@ -2,7 +2,7 @@
 id: OH-181
 title: An arduino-pico board's pins are read through common.h, so the KB2040 and every
   RP2040 variant can be a row
-status: in-review
+status: done
 priority: P1
 created: '2026-09-29'
 touches:
@@ -56,3 +56,5 @@ SUITE: at adc1dd0, 4 failed, 2321 passed, 33 skipped. Three are the expected one
 RED ON PURPOSE (each restored): -Wundef dropped (both fixtures red); the warnings never read (both red); values not checked against the withheld flags (the ARDUINO fixture red).
 [LOW] NO COMPILER: with the KB2040's CAD here and pico_compiler patched to None (a pytest plugin for that run only), there were 14 failures before the change: 12 in test_board_manifest and 2 in test_import_pindefs. After it there are 0 failures: 177 passed, 28 skipped over test_board_manifest, test_import_pindefs and test_pin_view, and every skip names `pio pkg install --global --tool toolchain-gccarmnoneeabi`. The manifest tests skip through _fetched on the no-compiler refusal; test_an_arduino_pico_row_is_checked_against_build_chip now goes through _fetched too. test_the_real_tree_never_resolves_a_pad_from_nothing and test_a_manifest_board_and_a_xiao_each_report_their_own_derivation check every other board first and then skip naming the KB2040, as the committed-files test does.
 SUITE at 55010c9: 3 failed, 2324 passed, 33 skipped. These are the expected three: the OCP pair (test_import_3d_model) and tests/webui/test_compile.py::test_each_rows_verdict_is_the_compilers_own (KeyError 'RP2040', lent to OH-185, not edited). All CLAUDE.md checkers OK.
+
+**Note 2026-09-30:** 2026-09-30: approved by an independent review over two rounds (flags identical to an arduino-cli-style expander on all 151 boards; KB2040 pads, 18 pins and all 39 datasheet rows re-derived; 16 reviewer mutants red). The final -Wundef fix was verified by the orchestrator: the reviewer's two fixtures are tests and pass. Author's suite at 55010c9: 3 failed (the OCP pair, and test_each_rows_verdict_is_the_compilers_own, which OH-185 fixes on merge), 2324 passed, 33 skipped. TWINS: 9 of 30; the KB2040 holds geometry and pins (18+3/21), misses model and runs (no run evidence for RP2040 manifest boards yet). The Glyph Mini is not a row: a KiCad manifest row needs its own work, recorded above.
