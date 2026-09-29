@@ -134,15 +134,19 @@ the licence statement the vendor's files make.
 
 Its `chip_pin` values come from arduino-esp32's
 `variants/sparkfun_esp32c6_thing_plus/pins_arduino.h` (LGPL-2.1-or-later),
-as every XIAO's come from its own packages.
+as every XIAO's come from its own packages, and from the same board file: the
+pad of the ESP32-C6-WROOM-1 each pad's net reaches, read against Espressif's
+datasheet pin table, which `pindefs.packages` cites. Each pad's
+`chip_pin_from` names which.
 
 **Position:** the same as 2b. What is kept is where each header pad of a real
 board sits, what the vendor named its net, and which GPIO a label means.
 
 **Risk:** low. Each value can be re-read from where it came from: the pads and
 their labels from the drawing `source.file` names, each `chip_pin` from the
-variant the board's row in `tools/board_manifest.py` names, at the revision
-`pindefs.packages` records, and which pads are one pin and the three reasons
+sources its `chip_pin_from` names -- the variant the board's row in
+`tools/board_manifest.py` names, or that drawing and the pin table -- at the
+revisions `pindefs.packages` records, and which pads are one pin and the three reasons
 from SparkFun's `Hardware/Thing_Plus_ESP32_C6.sch`, which the row names and
 `tests/rules/test_board_manifest.py` reads.
 
@@ -155,13 +159,15 @@ tracked here. Each repository carries `license.txt`, the legal code of CC BY-SA 
 Unported; `tools/board_sources.py` records it, the tool refuses the row unless
 the fetched file reads so, and `source.licence_evidence` quotes it. Each
 `chip_pin` comes from arduino-esp32's `variants/adafruit_qtpy_esp32c3/` or
-`variants/adafruit_feather_esp32c6/` (LGPL-2.1-or-later).
+`variants/adafruit_feather_esp32c6/` (LGPL-2.1-or-later), or from the chip
+pad the pad's net reaches in Adafruit's board file, read against Espressif's
+datasheet pin table, as 2c; `chip_pin_from` names which.
 
 **Position and risk:** as 2c. The pads and labels can be re-read from the
 drawing `source.file` names, which pads are one pin from the schematic the
 board's row names (Adafruit's own, fetched beside the board file), and each
-`chip_pin` from the variant the row names, at the revision `pindefs.packages`
-records.
+`chip_pin` from the sources its `chip_pin_from` names, at the revisions
+`pindefs.packages` records.
 
 ---
 
