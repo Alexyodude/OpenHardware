@@ -529,13 +529,14 @@ def test_every_board_states_whether_a_sketch_can_be_built_for_it():
     from webui import compile as compile_service
     from webui import emulator_server
     payload = emulator_server.handle_api(None, "/api/boards", {}, {})
-    # A row in tools/board_manifest.py has a chip with a recipe and is still
-    # refused, because that recipe is another board's (OH-176).
+    # A row in tools/board_manifest.py is buildable only against its own
+    # variant (OH-179), which `test_a_manifest_board_is_buildable_exactly_
+    # where_its_own_table_compiles` holds; every other board by its chip.
     rows = {row.board for row in board_manifest.ROWS}
     for entry in payload["boards"]:
         assert isinstance(entry["buildable"], bool), entry["board" if "board" in entry else "name"]
-        assert entry["buildable"] == (
-            entry["chip"] in compile_service.RECIPES and entry["name"] not in rows
+        assert entry["name"] in rows or entry["buildable"] == (
+            entry["chip"] in compile_service.RECIPES
         ), entry["name"]
     by_name = {entry["name"]: entry for entry in payload["boards"]}
     assert by_name["Arduino Uno"]["buildable"] is True
@@ -543,3 +544,20 @@ def test_every_board_states_whether_a_sketch_can_be_built_for_it():
     assert by_name["XIAO-RP2040-DIP"]["buildable"] is False, (
         "the RP2040 has no recipe yet; if one landed, update this and OH-140"
     )
+
+
+def test_a_manifest_board_is_buildable_exactly_where_its_own_table_compiles():
+    """The route asks `recipe_for`, so a row's Build button is on where its
+    own variant builds and off where it is refused (OH-179): the Feather
+    on; the Thing Plus and the QT Py, whose tables this build cannot
+    compile (`tests/webui/test_compile.py`), off."""
+    from webui import compile as compile_service
+    from webui import emulator_server
+    table = (compile_service.BOARD_SUPPORT / "arduino-esp32" / "variants"
+             / "adafruit_feather_esp32c6" / "pins_arduino.h")
+    if not table.is_file():
+        pytest.skip(f"SKIPPED: no {table}; python tools/import_pindefs.py --fetch")
+    payload = emulator_server.handle_api(None, "/api/boards", {}, {})
+    by_name = {entry["name"]: entry["buildable"] for entry in payload["boards"]}
+    assert (by_name["Adafruit Feather ESP32-C6"], by_name["SparkFun Thing Plus ESP32-C6"],
+            by_name["Adafruit QT Py ESP32-C3"]) == (True, False, False)

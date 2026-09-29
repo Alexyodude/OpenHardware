@@ -22,11 +22,13 @@
 # recipe rather than by trying to exploit it — an attempted exploit that fails
 # proves one payload was handled, and a structural check proves the shape.
 
+import dataclasses
 import itertools
 import pathlib
 
 import pytest
 
+from tools import board_manifest
 from webui import api
 from webui import compile as compiler
 from webui.boards import atmega328p, esp32c3, esp32c5, esp32c6, samd21
@@ -131,16 +133,115 @@ def test_a_board_that_is_not_in_the_catalogue_is_refused():
         compiler.recipe_for("not a board")
 
 
-def test_a_manifest_board_is_refused_rather_than_built_with_a_siblings_variant():
-    """The ESP32-C6 has a recipe, and it reads the XIAO's pin names. On the
-    SparkFun Thing Plus those put SDA and SCL on other nets, so until OH-179
-    gives the row its own recipe the build is refused, naming its variant."""
+def needs_table(board: str) -> None:
+    """Skip, naming the fetch, where a row's variant was never fetched."""
+    row = board_manifest.row(board)
+    table = (compiler.BOARD_SUPPORT / row.package / "variants" / row.variant
+             / "pins_arduino.h")
+    if not table.is_file():
+        pytest.skip(f"SKIPPED: no {table}; python tools/import_pindefs.py --fetch")
+
+
+def test_a_manifest_board_builds_against_its_own_variant_and_no_other():
+    """rules/board-claims.md §6 (OH-179): the Feather's recipe is the
+    ESP32-C6's with the row's own table as its only pin table -- the XIAO's
+    is gone from it, not shadowed."""
+    needs_table("Adafruit Feather ESP32-C6")
+    recipe = compiler.recipe_for("Adafruit Feather ESP32-C6")
+    assert recipe.bsp_includes == ("arduino-esp32/variants/adafruit_feather_esp32c6",)
+    assert recipe.extra_includes == ()
+    assert recipe == dataclasses.replace(
+        compiler.RECIPES["ESP32-C6"], bsp_includes=recipe.bsp_includes)
+
+
+def test_the_pilot_is_refused_naming_its_variant_and_what_its_table_lacks():
+    """The ticket's own condition: compiled against
+    `sparkfun_esp32c6_thing_plus`, or refused naming it."""
+    needs_table("SparkFun Thing Plus ESP32-C6")
     with pytest.raises(compiler.UnknownBoard) as caught:
         compiler.recipe_for("SparkFun Thing Plus ESP32-C6")
     message = str(caught.value)
-    assert "arduino-esp32 variants/sparkfun_esp32c6_thing_plus" in message, message
-    assert "OH-179" in message, message
-    assert "arduino-esp32/variants/XIAO_ESP32C6" in message, message
+    assert "arduino-esp32 variants/sparkfun_esp32c6_thing_plus/pins_arduino.h" in message
+    assert "it uses SOC_GPIO_PIN_COUNT, which no header it reaches defines" in message
+    assert "XIAO" not in message, message
+
+
+def test_the_qt_py_is_refused_naming_the_header_its_table_includes():
+    needs_table("Adafruit QT Py ESP32-C3")
+    with pytest.raises(compiler.UnknownBoard) as caught:
+        compiler.recipe_for("Adafruit QT Py ESP32-C3")
+    message = str(caught.value)
+    assert "arduino-esp32 variants/adafruit_qtpy_esp32c3/pins_arduino.h" in message
+    assert ("it includes soc/soc_caps.h, which is in none of "
+            "third_party/bsp/arduino-esp32/variants/adafruit_qtpy_esp32c3, "
+            "webui/arduino/cores/openhardware, webui/arduino/variants/xiao_esp32c3"
+            ) in message, message
+
+
+def test_each_rows_verdict_is_the_compilers_own(monkeypatch):
+    """`unmet` reads a table instead of compiling it, so it is held to the
+    compiler: built anyway with its own table, a row builds exactly when
+    nothing is unmet, and a refused row's build fails on the first thing
+    its refusal names."""
+    sketch = "void setup() {} void loop() {}"
+    seen = []
+    for row in board_manifest.ROWS:
+        needs_table(row.board)
+        recipe = compiler.own_variant(row, compiler.RECIPES[row.chip])
+        missing = compiler.unmet(recipe)
+        monkeypatch.setattr(compiler, "recipe_for", lambda board, r=recipe: r)
+        built = oh_build(row.board, sketch)
+        assert built.ok is not bool(missing), (row.board, missing, built.diagnostics)
+        named = [words.split()[2].rstrip(",") for words in missing[:1]]
+        assert all(name in built.diagnostics for name in named), (named, built.diagnostics)
+        seen.append((row.board, built.ok))
+    assert (True in dict(seen).values()) and (False in dict(seen).values()), seen
+
+
+def test_a_name_reached_through_a_macro_counts_and_an_unused_macro_does_not(
+        tmp_path, monkeypatch):
+    """What `unmet` asks of a table, on a table written to say it: a
+    `static const` compiles in every file, through the macros it names; a
+    macro nothing uses compiles nowhere; comments are not code."""
+    table = tmp_path / "pkg" / "variants" / "fake" / "pins_arduino.h"
+    table.parent.mkdir(parents=True)
+    table.write_text(
+        "#define PIN_A (FROM_A + 1)  // FROM_LINE_COMMENT\n"
+        "#define UNUSED (FROM_UNUSED + 1)\n"
+        "static const uint8_t A = PIN_A;\n"
+        "static const uint8_t B = 7;  /* FROM_BLOCK_COMMENT */\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(compiler, "BOARD_SUPPORT", tmp_path)
+    recipe = dataclasses.replace(
+        compiler.RECIPES["ESP32-C6"], bsp_includes=("pkg/variants/fake",))
+    assert compiler.unmet(recipe) == ["it uses FROM_A, which no header it reaches defines"]
+
+
+def test_a_row_whose_table_is_not_on_disk_is_refused_naming_the_fetch(monkeypatch):
+    row = dataclasses.replace(board_manifest.row("Adafruit Feather ESP32-C6"),
+                              board="Nowhere C6", variant="no_such_variant")
+    monkeypatch.setattr(board_manifest, "ROWS", (*board_manifest.ROWS, row))
+    with pytest.raises(compiler.UnknownBoard) as caught:
+        compiler.recipe_for("Nowhere C6")
+    message = str(caught.value)
+    assert ("there is no third_party/bsp/arduino-esp32/variants/no_such_variant/"
+            "pins_arduino.h; fetch it with python tools/import_pindefs.py --fetch"
+            ) in message, message
+
+
+def test_a_row_whose_chips_recipe_compiles_a_variant_of_its_own_is_refused(monkeypatch):
+    """The SAMD21 recipe compiles Seeed's XIAO_m0 variant as sources, so a
+    row on that chip cannot swap a pin table in: refused, never built as
+    the XIAO."""
+    row = dataclasses.replace(board_manifest.ROWS[0], board="Nowhere SAMD21",
+                              chip="SAMD21")
+    monkeypatch.setattr(board_manifest, "ROWS", (*board_manifest.ROWS, row))
+    with pytest.raises(compiler.UnknownBoard) as caught:
+        compiler.recipe_for("Nowhere SAMD21")
+    message = str(caught.value)
+    assert "compiles variants/XIAO_m0 from seeed-samd, which is another board's" in message
+    assert f"nothing here builds against {row.package} variants/{row.variant}" in message
 
 
 def test_the_recipe_carries_the_base_address_the_loader_needs():

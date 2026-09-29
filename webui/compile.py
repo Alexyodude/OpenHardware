@@ -63,6 +63,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import time
@@ -283,7 +284,8 @@ class Recipe:
 #: boards, the C5 and C6 rows serve a pair each, and the Uno row serves
 #: itself. Counted from `catalogue.catalogue()` against this table on
 #: 2026-09-04 rather than estimated -- earlier versions of this comment
-#: said four, then fourteen and six, each from adding rows to boards.
+#: said four, then fourteen and six, each from adding rows to boards. A row
+#: in `tools/board_manifest.py` is keyed on the board instead: `recipe_for`.
 #:
 #: The two without a row are the RP2040s, waiting on the same `openhardware`
 #: framework the ESP32 rows use -- a Cortex-M0+ `_start` and vector table,
@@ -592,7 +594,9 @@ def recipe_for(board: str) -> Recipe:
 
     Keyed on the chip rather than the board name because four XIAO variants of
     one part build identically -- and because the catalogue is already the one
-    place that maps a board to its silicon.
+    place that maps a board to its silicon. A row in tools/board_manifest.py
+    is the exception: its chip's recipe with its own pin table, `own_variant`,
+    or a refusal naming what that table needs and this build lacks.
     """
     try:
         chip = board_catalogue.chip_for(board)
@@ -602,26 +606,108 @@ def recipe_for(board: str) -> Recipe:
         # it would leave "unknown board" and nothing else.
         raise UnknownBoard(f"{board!r}: {exc}") from exc
     recipe = RECIPES.get(chip)
-    # **Keyed on the chip only while siblings build identically**, which a row
-    # in tools/board_manifest.py does not: the chip's recipe takes another
-    # board's pin names. Refused until OH-179 gives such a row its own.
-    row = next((r for r in board_manifest.ROWS if r.board == board), None)
-    if row is not None:
-        sibling = (f"; the {chip} recipe reads {', '.join(recipe.bsp_includes)}"
-                   if recipe is not None and recipe.bsp_includes else "")
-        raise UnknownBoard(
-            f"{board} is a row in tools/board_manifest.py whose pins are "
-            f"{row.package} variants/{row.variant}, and no recipe here builds "
-            f"against that variant{sibling}. OH-179 gives a manifest board a "
-            f"recipe of its own."
-        )
     if recipe is None:
         buildable = ", ".join(sorted(RECIPES)) or "none"
         raise UnknownBoard(
             f"{board} carries a {chip} and nothing here knows how to build for "
             f"one. Chips with a recipe: {buildable}."
         )
+    row = next((r for r in board_manifest.ROWS if r.board == board), None)
+    if row is None:
+        return recipe
+    recipe = own_variant(row, recipe)
+    missing = unmet(recipe)
+    if missing:
+        # rules/board-claims.md §6: never the chip's table in its place.
+        raise UnknownBoard(
+            f"{board} is a row in tools/board_manifest.py, and its own pin "
+            f"table, {row.package} variants/{row.variant}/pins_arduino.h, "
+            f"cannot be compiled here: {'; '.join(missing)}"
+        )
     return recipe
+
+
+def own_variant(row: board_manifest.Row, recipe: Recipe) -> Recipe:
+    """`recipe`, the row's chip's, with the row's variant as its only pin table.
+
+    Only an `openhardware` recipe takes its pin names from `extra_includes`
+    and `bsp_includes` alone, so only one can swap them; its `variant`
+    directory keeps the chip's link script and registers, which
+    `test_the_oh_board_header_restates_the_descriptions_own_numbers` holds
+    to the chip's description. Any other recipe compiles a variant's
+    sources, and is refused rather than built against a sibling's.
+    """
+    if recipe.framework != "openhardware":
+        raise UnknownBoard(
+            f"{row.board} is a row in tools/board_manifest.py, and the {row.chip} "
+            f"recipe compiles {recipe.variant} from {recipe.variant_package or recipe.framework}"
+            f", which is another board's; nothing here builds against "
+            f"{row.package} variants/{row.variant}"
+        )
+    return dataclasses.replace(
+        recipe,
+        extra_includes=(),
+        bsp_includes=(f"{row.package}/variants/{row.variant}",),
+    )
+
+
+_COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
+#: `#include "..."`; an angle-bracket include is the toolchain's.
+_QUOTED_INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.MULTILINE)
+#: `#define NAME body`, the body possibly empty.
+_MACRO = re.compile(r"^[ \t]*#[ \t]*define[ \t]+(\w+)[ \t]*(.*)$", re.MULTILINE)
+#: `static const <type> NAME = <expression>;`
+_CONSTANT = re.compile(r"^[ \t]*static[ \t]+const[ \t]+\w+[ \t]+(\w+)[ \t]*=([^;]+);",
+                       re.MULTILINE)
+#: A C identifier; a numeral's suffix does not start one.
+_IDENTIFIER = re.compile(r"\b[A-Za-z_]\w*")
+
+
+def unmet(recipe: Recipe) -> list[str]:
+    """What an `own_variant` recipe's pin table needs and its include path lacks.
+
+    Read, not compiled, so `/api/boards` can ask it: every quoted `#include`
+    must be a file on the path the build gives, and every name a
+    `static const` initialiser uses, through any macro it names, must be
+    defined in the table or a header it includes. A macro no initialiser
+    uses is compiled only where a sketch does, so it is not asked of.
+    """
+    def shown(path: pathlib.Path) -> str:
+        root = ARDUINO_LITE.parents[1]
+        return path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path)
+
+    (own,) = recipe.bsp_includes
+    table = BOARD_SUPPORT / own / "pins_arduino.h"
+    if not table.is_file():
+        return [f"there is no {shown(table)}; fetch it with python tools/import_pindefs.py --fetch"]
+    path = (table.parent, ARDUINO_LITE / recipe.core, ARDUINO_LITE / recipe.variant)
+    missing: list[str] = []
+    defined: set[str] = set()
+    bodies: dict[str, str] = {}
+    pending, seen = [table], {table}
+    while pending:
+        text = _COMMENT.sub("", pending.pop().read_text(encoding="utf-8", errors="replace"))
+        bodies.update(_MACRO.findall(text))
+        defined |= set(bodies) | {name for name, _ in _CONSTANT.findall(text)}
+        for name in _QUOTED_INCLUDE.findall(text):
+            found = next((d / name for d in path if (d / name).is_file()), None)
+            if found is None:
+                missing.append(f"it includes {name}, which is in none of "
+                               f"{', '.join(shown(d) for d in path)}")
+            elif found not in seen:
+                seen.add(found)
+                pending.append(found)
+    text = _COMMENT.sub("", table.read_text(encoding="utf-8", errors="replace"))
+    used = {n for _, value in _CONSTANT.findall(text) for n in _IDENTIFIER.findall(value)}
+    reached = list(used)
+    while reached:
+        for name in _IDENTIFIER.findall(bodies.get(reached.pop(), "")):
+            if name not in used:
+                used.add(name)
+                reached.append(name)
+    missing += [f"it uses {name}, which no header it reaches defines"
+                for name in sorted(used - defined)]
+    return missing
 
 
 def toolchain_root(recipe: Recipe) -> pathlib.Path:
