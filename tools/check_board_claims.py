@@ -52,7 +52,10 @@ it cannot come back quietly.
 `evidence_that_never_loads_an_image`. Naming any file satisfies check 4. The
 named file has to name a firmware image that exists beside it, read that image
 off disk, and step a CPU over it -- all three, in that one file. Evidence you
-have to chase through three modules is evidence nobody checks.
+have to chase through three modules is evidence nobody checks. A board's own
+entry also has to load that board: its name is the first argument of a
+`load_firmware` call in the file, spelled out or as a module-level name last
+bound to it spelled out.
 
 **What this does not catch.** It is a check on vocabulary, not on meaning. A
 surface that claims a board works while avoiding the word "firmware" passes,
@@ -203,6 +206,9 @@ _READERS = frozenset({"read_bytes"})
 
 #: Executing it.
 _STEPPERS = frozenset({"step"})
+
+#: Putting it on a named board: `webui.api.load_firmware(board_name, data, ...)`.
+_LOADER = "load_firmware"
 
 
 class ClaimError(Exception):
@@ -495,6 +501,32 @@ def _image_names(tree: ast.Module) -> set[str]:
     }
 
 
+def _loads_board(tree: ast.Module, board: str) -> bool:
+    """Is `board` the first argument of a `load_firmware` call in the file?
+
+    Spelled out, or a module-level name whose last binding spells it out. A
+    name elsewhere in the file, used or not, is not the board the test runs.
+    """
+    bound: dict[str, ast.expr] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            bound.update({t.id: node.value for t in node.targets if isinstance(t, ast.Name)})
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value:
+            bound[node.target.id] = node.value
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if (func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)) != _LOADER:
+            continue
+        for arg in (*node.args[:1], *(k.value for k in node.keywords if k.arg == "board_name")):
+            if isinstance(arg, ast.Name):
+                arg = bound.get(arg.id, arg)
+            if isinstance(arg, ast.Constant) and arg.value == board:
+                return True
+    return False
+
+
 def _found_beside(test: pathlib.Path, name: str) -> bool:
     """Is a file of that name anywhere under the named test's own directory?"""
     basename = pathlib.PurePosixPath(name).name
@@ -503,7 +535,7 @@ def _found_beside(test: pathlib.Path, name: str) -> bool:
 
 def evidence_that_never_loads_an_image(root: pathlib.Path | None = None) -> list[str]:
     """5. The named test names no image, or never reads one, or never steps;
-    or, for a board's own entry, never names that board."""
+    or, for a board's own entry, never loads that board."""
     root = REPO if root is None else root
     boards = board_register(root)
     problems: list[str] = []
@@ -534,10 +566,12 @@ def evidence_that_never_loads_an_image(root: pathlib.Path | None = None) -> list
             )
         if not (_calls(tree) & _STEPPERS):
             why.append("never executes it (no .step() call)")
-        if key in boards and not any(
-            isinstance(node, ast.Constant) and node.value == key for node in ast.walk(tree)
-        ):
-            why.append(f"never names {key!r}, the board it is evidence for")
+        if key in boards and not _loads_board(tree, key):
+            why.append(
+                f"never loads {key!r}, the board it is evidence for (no {_LOADER} "
+                f"call whose first argument is that name, or a module-level name "
+                f"bound to it)"
+            )
         if why:
             problems.append(f"{key}: {evidence} " + "; ".join(why))
     return problems

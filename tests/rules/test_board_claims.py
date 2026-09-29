@@ -424,23 +424,81 @@ BOARD_CATALOGUE = CATALOGUE.replace(
     'BOARD_FIRMWARE_VERIFIED = {"Some Feather": "tests/cortexm0/test_blink.py"}',
 )
 
-#: `EVIDENCE`, naming the board it is evidence for.
-BOARD_EVIDENCE = 'BOARD = "Some Feather"\n' + EVIDENCE
+#: `EVIDENCE`, loading the board it is evidence for by name.
+BOARD_EVIDENCE = '''
+import pathlib
+
+from webui import api
+
+BOARD = "Some Feather"
+IMAGE = pathlib.Path(__file__).resolve().parent / "blink.bin"
 
 
-def test_a_board_entry_whose_test_names_it_and_runs_an_image_reports_nothing(tmp_path):
+def test_the_led_actually_blinks():
+    with api.load_firmware(BOARD, IMAGE.read_bytes(), base=0) as session:
+        for _ in range(20):
+            session.step()
+'''
+
+#: What check 5 says of a board entry whose test does not load that board.
+NEVER_LOADS = ("Some Feather: tests/cortexm0/test_blink.py never loads 'Some Feather', "
+               "the board it is evidence for (no load_firmware call whose first "
+               "argument is that name, or a module-level name bound to it)")
+
+
+def test_a_board_entry_whose_test_loads_it_and_runs_an_image_reports_nothing(tmp_path):
     root = build_root(tmp_path, catalogue=BOARD_CATALOGUE, evidence=BOARD_EVIDENCE)
     assert C.board_register(root) == {"Some Feather": "tests/cortexm0/test_blink.py"}
     assert problems(root) == []
 
 
-def test_a_board_entry_whose_test_never_names_the_board_fails(tmp_path):
+def test_a_board_entry_whose_test_never_loads_the_board_fails(tmp_path):
     """Check 5 alone would take the chip's test for the board's: it loads
-    and steps an image. What makes it this board's is that it names it."""
+    and steps an image. What makes it this board's is that it runs it."""
     root = build_root(tmp_path, catalogue=BOARD_CATALOGUE)
     found = C.evidence_that_never_loads_an_image(root)
-    assert found == ["Some Feather: tests/cortexm0/test_blink.py never names "
-                     "'Some Feather', the board it is evidence for"], found
+    assert found == [NEVER_LOADS], found
+
+
+def test_a_board_entry_whose_test_names_it_and_loads_another_fails(tmp_path):
+    """The name in a variable nothing reads, and a XIAO on the load call:
+    naming the board is not running it (OH-183)."""
+    evidence = BOARD_EVIDENCE.replace("api.load_firmware(BOARD,",
+                                      'api.load_firmware("XIAO-ESP32-C6-DIP",')
+    root = build_root(tmp_path, catalogue=BOARD_CATALOGUE, evidence=evidence)
+    found = C.evidence_that_never_loads_an_image(root)
+    assert found == [NEVER_LOADS], found
+
+
+def test_a_board_name_given_to_another_call_or_argument_is_not_the_load(tmp_path):
+    evidence = BOARD_EVIDENCE.replace(
+        "    with api.load_firmware(BOARD,",
+        '    print(BOARD)\n    with api.load_firmware("XIAO-ESP32-C6-DIP", BOARD,')
+    root = build_root(tmp_path, catalogue=BOARD_CATALOGUE, evidence=evidence)
+    found = C.evidence_that_never_loads_an_image(root)
+    assert found == [NEVER_LOADS], found
+
+
+def test_a_board_name_rebound_before_the_load_is_not_the_board(tmp_path):
+    evidence = BOARD_EVIDENCE.replace('BOARD = "Some Feather"\n',
+                                      'BOARD = "Some Feather"\nBOARD = "XIAO-ESP32-C6-DIP"\n')
+    root = build_root(tmp_path, catalogue=BOARD_CATALOGUE, evidence=evidence)
+    found = C.evidence_that_never_loads_an_image(root)
+    assert found == [NEVER_LOADS], found
+
+
+def test_a_board_entry_loading_its_board_spelled_out_reports_nothing(tmp_path):
+    evidence = BOARD_EVIDENCE.replace("api.load_firmware(BOARD,",
+                                      'api.load_firmware("Some Feather",')
+    root = build_root(tmp_path, catalogue=BOARD_CATALOGUE, evidence=evidence)
+    assert problems(root) == []
+
+
+def test_a_board_entry_loading_its_board_by_keyword_reports_nothing(tmp_path):
+    evidence = BOARD_EVIDENCE.replace("api.load_firmware(BOARD,",
+                                      "api.load_firmware(board_name=BOARD, data=")
+    root = build_root(tmp_path, catalogue=BOARD_CATALOGUE, evidence=evidence)
+    assert problems(root) == []
 
 
 def test_a_board_entry_naming_a_test_that_is_not_there_fails(tmp_path):
@@ -454,7 +512,7 @@ def test_a_board_entry_naming_a_test_that_is_not_there_fails(tmp_path):
 
 
 def test_a_board_entry_whose_test_never_steps_the_image_fails(tmp_path):
-    evidence = BOARD_EVIDENCE.replace("        cpu.step()\n", "        pass\n")
+    evidence = BOARD_EVIDENCE.replace("session.step()", "pass")
     root = build_root(tmp_path, catalogue=BOARD_CATALOGUE, evidence=evidence)
     found = C.evidence_that_never_loads_an_image(root)
     # The chip's entry names the same file, so both say it.
