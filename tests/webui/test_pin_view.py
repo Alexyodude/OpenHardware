@@ -1030,8 +1030,9 @@ def test_a_running_manifest_board_lists_its_own_pads_and_no_xiao_label():
 
     blinks = pathlib.Path(__file__).resolve().parents[1] / "riscv32"
     counts = {}
-    # The rows no blink here runs on, and what is true of those instead is
-    # `test_a_row_whose_chip_module_names_no_gpio_words_reports_no_levels`.
+    # The rows no blink here runs on: each runs its own image, whose pads its
+    # own test reads through the pin view (OH-196), and the KB2040's `D0`..
+    # `D10` are keys of the RP2040 module's table in fact.
     assert [row.board for row in board_manifest.ROWS if row.chip not in CHIP_BLINKS] == [
         "Adafruit KB2040", "PCBCUPID Glyph Mini RP2040"]
     for row in [row for row in board_manifest.ROWS if row.chip in CHIP_BLINKS]:
@@ -1053,17 +1054,17 @@ def test_a_running_manifest_board_lists_its_own_pads_and_no_xiao_label():
 def test_a_manifest_boards_levels_agree_with_its_chip_module_on_every_gpio_both_name():
     """`api.row_levels` reads the registers the chip module's `pin_states`
     reads, so on every GPIO a row's pad and the module's table both name,
-    for each register state, the two say the same thing."""
+    for each register state, the two say the same thing. Every row's chip
+    module names the words, the RP2040's since OH-196."""
     from tools import board_manifest
 
     shared = {}
-    worded = [row for row in board_manifest.ROWS
-              if hasattr(api.description_for(row.board), "GPIO")]
-    assert [row.board for row in board_manifest.ROWS if row not in worded] == [
-        "Adafruit KB2040", "PCBCUPID Glyph Mini RP2040"]
-    for row in worded:
+    assert [row.board for row in board_manifest.ROWS
+            if not hasattr(api.description_for(row.board), "GPIO")] == []
+    for row in board_manifest.ROWS:
         module = api.description_for(row.board)
-        runtime = api.Runtime(board=row.board, chip=row.chip, core="riscv32",
+        runtime = api.Runtime(board=row.board, chip=row.chip,
+                              core=api.catalogue.CHIPS[row.chip][1],
                               description=module, abi=None, machine=None)
         label_of = {gpio: label for label, gpio in module.HEADER.items()}
         own = [pad for pad in pinmap.load(row.board).pads if pad.chip_index in label_of]
@@ -1079,19 +1080,19 @@ def test_a_manifest_boards_levels_agree_with_its_chip_module_on_every_gpio_both_
 
 
 def test_a_row_whose_chip_module_names_no_gpio_words_reports_no_levels():
-    """The KB2040 (OH-181) and the Glyph Mini (OH-192): `webui/boards/rp2040.py`
-    names no `GPIO`, `GPIO_ENABLE` or `GPIO_OUT`, so `api.row_levels` reads
-    no level for either, and each view lists its own pads, in its file's
-    order, each with its own `chip_pin` and no state."""
+    """A chip module naming no `GPIO`, `GPIO_ENABLE` or `GPIO_OUT` gives a
+    row no level at all, and its view lists its own pads, in its file's
+    order, each with its own `chip_pin` and no state. `rp2040.py` was that
+    module until OH-196 named them, so a stand-in without them plays it
+    here, on the KB2040 (OH-181) and the Glyph Mini (OH-192)."""
+    bare = types.SimpleNamespace(__name__="webui.boards.rp2040")
     for board in ("Adafruit KB2040", "PCBCUPID Glyph Mini RP2040"):
-        module = api.description_for(board)
-        assert [hasattr(module, word) for word in ("GPIO", "GPIO_ENABLE", "GPIO_OUT")] == [
-            False, False, False]
         runtime = api.Runtime(board=board, chip="RP2040", core="cortexm0",
-                              description=module, abi=None, machine=None)
+                              description=bare, abi=None, machine=None)
         assert api.row_levels(runtime, _Words({})) is None
         own = json.loads((pinmap.BOARDS_DIR / f"{board}.json").read_text(encoding="utf-8"))
-        view = api.pad_view(board, module, api.row_levels(runtime, _Words({})))
+        view = api.pad_view(board, api.description_for(board),
+                            api.row_levels(runtime, _Words({})))
         assert [(pad["pin"], pad["chip_pin"], pad["state"]) for pad in view["pads"]] == [
             (pad["label"], pad["chip_pin"], "unknown") for pad in own["pads"]], board
 
