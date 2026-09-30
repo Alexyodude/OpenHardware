@@ -523,14 +523,17 @@ def _schematic_gpio(row: board_manifest.Row) -> dict[str, set[int]]:
     the chip's pins only: nowhere else is `IOA<n>` the chip's name for a pin.
     A KiCad row names no schematic, and its board file gives each of the
     chip's pads the pin name of the vendor's symbol, `pinfunction`:
-    `GPIO26_ADC0` on the Glyph Mini's `/GPIO-26`, and `IO4` on the Glyph
-    C3's `/SDA`. Read here off the file's own tree, not through a reader."""
+    `GPIO26_ADC0` on the Glyph Mini's `/GPIO-26`, `IO4` on the Glyph C3's
+    `/SDA`, and `MTMS/IOA2` on the SparkFun Thing Plus ESP32-C5's `IOA2`,
+    whose ESP32-C5-WROOM-1 symbol names its six ADC1 pins `IOA<n>` as the
+    Pro Micro's does. Read here off the file's own tree, not through a
+    reader."""
     if row.schematic is None:
         named: dict[str, set[int]] = {}
         for net, functions in _pin_functions(row).items():
             named[net] = {int(found.group(1)) for function in functions
                           for part in re.split(r"[/_]", function)
-                          if (found := re.fullmatch(r"(?:GPIO|IO)(\d+)", part))}
+                          if (found := re.fullmatch(r"(?:GPIO|IOA?)(\d+)", part))}
         return named
     board = eagle.read_board(board_manifest.cad_path(row))
     (chip,) = [element.name for element in board.elements if (element.package, element.value)
@@ -565,7 +568,8 @@ def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
     chip's pin on that net, as the KB2040's `SCLK` on `GPIO18`, which its
     variant calls `SCK`, the Pro Micro ESP32-C3's `IOA0/SCLK` on its module's
     `IOA0`, and the Glyph Mini's and the Glyph C3's symbol on each chip pin.
-    The pads with none are `TRACE_ONLY`, each held to its symbol's name."""
+    The pads with none are `TRACE_ONLY`, each held to its symbol's name. A
+    KiCad net's `/` is written `{slash}`: SparkFun's `IO23{slash}SDA`."""
     alone = set()
     for row in ROWS:
         _fetched(row)
@@ -574,7 +578,7 @@ def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
         for pad in _committed(row)["pads"]:
             if pad["chip_pin"] is None:
                 continue
-            parts = pad["label"].split("/")
+            parts = re.split(r"/|\{slash\}", pad["label"])
             stated = {int(found.group(1)) for part in parts
                       if (found := re.fullmatch(r"(?:GPIO|IO)[-_]?(\d+)", part, re.I))}
             stated |= {numbers[part] for part in parts if part in numbers}
@@ -828,18 +832,83 @@ def test_a_net_renamed_for_another_gpio_is_refused_on_the_glyph_c3():
         _trace(row, text.replace('"/GPIO_8"', '"/GPIO_18"'))
 
 
-def test_the_glyph_c3s_unconnected_pad_is_alone_on_its_net():
-    """The reason its J2 pad 8 carries, read off its board file: no other pad
-    of any footprint is on that net."""
-    row = row_named("PCBCUPID Glyph C3")
+def test_every_unconnected_pad_is_alone_on_its_net():
+    """The reason a KiCad row gives a pad on a net KiCad names
+    `unconnected-(...)`, read off its board file: no other pad of any
+    footprint is on that net. The Glyph C3's J2 pad 8, and the SparkFun
+    Thing Plus ESP32-C5's U3 pads 3 and 13."""
+    checked = []
+    for row in ROWS:
+        for label, why in row.reasons:
+            if not label.startswith("unconnected-("):
+                continue
+            _fetched(row)
+            on = [(placed.reference, pad.number)
+                  for placed in kicad.read_board(board_manifest.cad_path(row)).placements
+                  for pad in placed.pads if pad.net == label]
+            assert len(on) == 1 and on[0][0] in row.select, (row.board, on)
+            assert "this pad is the only pad on its net" in why, row.board
+            assert f"reaches no pin of the {row.chip} or of anything else" in why, row.board
+            checked.append((row.board, *on[0]))
+    assert checked == [("PCBCUPID Glyph C3", "J2", "8"),
+                       ("SparkFun Thing Plus ESP32-C5", "U3", "3"),
+                       ("SparkFun Thing Plus ESP32-C5", "U3", "13")], checked
+
+
+def test_a_net_renamed_for_another_gpio_is_refused_on_the_thing_plus_c5():
+    """SparkFun's `IO8/PICO`, which KiCad writes `IO8{slash}PICO`: the name
+    check reads the part before the escape. Renamed `IO18{slash}PICO`, its
+    copper still reaches U1 pad 10, GPIO8, and the file saying two things is
+    refused."""
+    row = row_named("SparkFun Thing Plus ESP32-C5")
     _fetched(row)
-    ((label, why),) = row.reasons
-    on = [(placed.reference, pad.number)
-          for placed in kicad.read_board(board_manifest.cad_path(row)).placements
-          for pad in placed.pads if pad.net == label]
-    assert on == [("J2", "8")], on
-    assert "this pad is the only pad on its net" in why
-    assert "reaches no pin of the ESP32-C3 or of anything else" in why
+    text = board_manifest.cad_path(row).read_text(encoding="utf-8")
+    assert '"IO8{slash}PICO"' in text and '"IO18{slash}PICO"' not in text
+    with pytest.raises(import_pindefs.PindefError, match=re.escape(
+            "'IO18{slash}PICO' is named for GPIO18 and its copper reaches "
+            "U1 pad 10 = GPIO8")):
+        _trace(row, text.replace('"IO8{slash}PICO"', '"IO18{slash}PICO"'))
+
+
+def test_the_thing_plus_c5s_jumpered_pad_is_its_leds_output_behind_an_open_jumper():
+    """`Net-(JP11-B)`'s reason, read off the board file: the net holds this
+    header pad and pad 2 of JP11, a Jumper_2_NO valued DO, whose pad 1 is on
+    LED_DO with pad 1 of D2, a WS2812B whose symbol names that pin DOUT; no
+    pad of the module is on either net."""
+    row = row_named("SparkFun Thing Plus ESP32-C5")
+    _fetched(row)
+    tree = kicad.parse_sexp(board_manifest.cad_path(row).read_text(encoding="utf-8"))
+    placed = {}
+    for node in kicad.children(tree, "footprint"):
+        (reference,) = [prop[2] for prop in kicad.children(node, "property")
+                        if prop[1] == "Reference"]
+        (value,) = [prop[2] for prop in kicad.children(node, "property")
+                    if prop[1] == "Value"]
+        placed[reference] = (node[1], value, {
+            pad[1]: (kicad.first(pad, "net")[-1] if kicad.first(pad, "net") else None,
+                     kicad.first(pad, "pinfunction")[1] if kicad.first(pad, "pinfunction")
+                     else None)
+            for pad in kicad.children(node, "pad")})
+
+    def on(net: str) -> set[tuple[str, str]]:
+        return {(reference, number) for reference, (_, _, pads) in placed.items()
+                for number, (where, _) in pads.items() if where == net}
+
+    assert on("Net-(JP11-B)") == {("U3", "26"), ("JP11", "2")}
+    assert placed["JP11"][:2] == ("SparkFun-Jumper:Jumper_2_NO", "DO")
+    assert placed["JP11"][2]["1"][0] == "LED_DO"
+    assert on("LED_DO") == {("JP11", "1"), ("D2", "1")}
+    assert placed["D2"][1] == "WS2812B" and placed["D2"][2]["1"][1] == "DOUT"
+    why = dict(row.reasons)["Net-(JP11-B)"]
+    for words in ("pad 2 of the jumper JP11 (Jumper_2_NO, value DO)",
+                  "pad 1 is on LED_DO with the DOUT of the WS2812B D2"):
+        assert words in why, words
+    # The module's nine central pads are all named EPAD, the page's 29.
+    epad = [pad for pad in _placed(row, "U1").pads if pad.number == "EPAD"]
+    assert len(epad) == 9 and {pad.net for pad in epad} == {"GND"}
+    assert dict(row.pin_table.footprint_pads) == {"EPAD": "29"}
+    assert dict(row.pin_table.not_gpio)["29"] == "EPAD"
+    assert "; pad EPAD = EPAD (" in _trace(row)["GND"].via
 
 
 def test_each_glyph_module_is_read_against_its_own_modules_page():
@@ -1131,7 +1200,7 @@ def test_no_row_pad_is_read_through_its_chips_module_table():
         assert "reads a pad's level at its own `chip_index`" in committed["assumption"]
         view = api.pad_view(row.board, description, None)
         assert [(pad["pin"], pad["chip_pin"]) for pad in view["pads"]] == [
-            (pad["label"].lstrip(api.PWM_MARK), pad["chip_pin"])
+            (api.header_key(pad["label"], {}), pad["chip_pin"])
             for pad in committed["pads"]], row.board
         checked.append(row.board)
     kb2040 = {pad["label"]: pad for pad in _committed(row_named("Adafruit KB2040"))["pads"]}

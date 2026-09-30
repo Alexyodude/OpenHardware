@@ -604,6 +604,8 @@ def test_a_pad_label_with_two_names_joins_on_the_one_the_module_defines():
     assert api.header_key("GND", names) == "GND"
     assert api.header_key("MTMS/MTDI", names) == "MTMS/MTDI"
     assert api.header_key("~11", atmega328p.PIN_NAMES) == "11"
+    # KiCad's overbar, not the PWM mark: the SparkFun Thing Plus ESP32-C5's reset.
+    assert api.header_key("~{RST}", atmega328p.PIN_NAMES) == "~{RST}"
 
     dip = api.pad_view("XIAO-ESP32-C3-DIP", api.description_for("XIAO-ESP32-C3-DIP"), None)
     boot = next(pad for pad in dip["pads"] if pad["label"] == "D9/BOOT")
@@ -742,8 +744,9 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     # PCBCUPID Glyph Mini RP2040, whose file names 20; 33 until OH-194 added
     # the PCBCUPID Glyph C3, whose file names 19; 34 until the PCBCUPID Glyph
     # C6, whose file names 20; 35 until the Olimex ESP32-C3-DevKit-Lipo,
-    # whose file names 13.
-    assert len(boards) == 36, boards
+    # whose file names 13; 36 until the SparkFun Thing Plus ESP32-C5, whose
+    # file names 19.
+    assert len(boards) == 37, boards
     # Every board, picked and not loaded: nothing was read.
     picked = {board: api.pad_view(board, api.description_for(board), None)
               for board in boards}
@@ -765,7 +768,7 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     )
     silent = sorted(set(boards) - set(would_have_lied))
     assert silent == [], silent
-    assert len(would_have_lied) == 36, would_have_lied
+    assert len(would_have_lied) == 37, would_have_lied
     assert "Arduino Uno" in would_have_lied
     assert "XIAO-MG24-SMD" in would_have_lied, (
         "the MG24 has no board module at all, so its 19 chip pins can only "
@@ -1020,8 +1023,8 @@ def test_the_named_led_component_is_one_the_shipped_board_model_actually_draws()
 
 #: A chip's own blink fixture per row chip: any image that runs will do, since
 #: what is asserted is which pads the view lists, not what the image drives.
-CHIP_BLINKS = {"ESP32-C3": "riscv32/c3blink", "ESP32-C6": "riscv32/c6blink",
-               "RP2040": "cortexm0/blink"}
+CHIP_BLINKS = {"ESP32-C3": "riscv32/c3blink", "ESP32-C5": "riscv32/c5blink",
+               "ESP32-C6": "riscv32/c6blink", "RP2040": "cortexm0/blink"}
 
 
 def test_a_running_manifest_board_lists_its_own_pads_and_no_xiao_label():

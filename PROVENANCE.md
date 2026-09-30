@@ -251,6 +251,23 @@ carries.
 **Position and risk:** as 2f, with one more: the licence rests on the
 vendor's README, which `source.licence_evidence` says.
 
+### 2h. Board pad map from SparkFun's KiCad file
+
+`webui/boards/SparkFun Thing Plus ESP32-C5.json` is written as 2f is, out of
+SparkFun's own KiCad board file,
+`Hardware/SparkFun_Thing_Plus_ESP32_C5.kicad_pcb`, fetched into
+`third_party/` and not tracked here. Its repository carries no licence file
+and a one-line README, so, as for the Qwiic Pocket in 2e, the licence is the
+sentence the board file itself places -- here the text of its
+`SparkFun-Aesthetic:Creative_Commons_License` footprint -- which
+`tools/board_sources.py` records, the tool refuses the row without, and
+`source.licence_evidence` quotes. Each `chip_pin` comes from arduino-esp32's
+`variants/sparkfun_esp32c5_thing_plus/` (LGPL-2.1-or-later), or from the pad
+of the ESP32-C5-WROOM-1 the pad's net reaches in SparkFun's board file, read
+against Espressif's datasheet pin table; `chip_pin_from` names which.
+
+**Position and risk:** as 2f.
+
 ---
 
 ## 3. What is unambiguously GPL, and stays GPL

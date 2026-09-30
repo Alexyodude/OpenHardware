@@ -866,9 +866,12 @@ class Traced:
 
 
 #: A GPIO named in a net: `IO8`, `GPIO5`, `io8`, and PCBCUPID's `GPIO-14`
-#: and `GPIO_1`. Read in every part between a `/` or, as Olimex writes
-#: `/GPIO2\FSPIQ`, a backslash.
+#: and `GPIO_1`. Read in every part of the name `_NET_PARTS` splits.
 _NAMED_GPIO = re.compile(r"(?:GPIO|IO)[-_]?(\d+)", re.I)
+#: What separates the parts of a net's name: a `/`; a backslash, as Olimex
+#: writes `/GPIO2\FSPIQ`; and `{slash}`, KiCad's escape for a `/` inside a
+#: name, as SparkFun's `IO23{slash}SDA` and Seeed's nets carry it.
+_NET_PARTS = re.compile(r"\{slash\}|[/\\]")
 #: A resistor, the one part a trace crosses: a reference `R<n>` and a value
 #: that reads as ohms -- `1k`, `4.7k`, `100K`, `0`, `4K7`, `22R`.
 _RESISTOR = re.compile(r"R\d+")
@@ -1059,7 +1062,7 @@ def _trace(chip: _Part, parts: list[_Part], header: list[str | None],
                                else named[number(pad)], []).append(pad)
         at = "; ".join(f"pad {pads[0]} = {name}" if len(pads) == 1
                        else f"{len(pads)} pads = {name}" for name, pads in by_name.items())
-        stated = sorted({int(found.group(1)) for part in re.split(r"[/\\]", net)
+        stated = sorted({int(found.group(1)) for part in _NET_PARTS.split(net)
                          if (found := _NAMED_GPIO.fullmatch(part.strip()))})
         if stated and stated != numbered:
             raise PindefError(
@@ -2554,8 +2557,10 @@ class Resolved:
 
 
 def alternatives(label: str) -> tuple[str, ...]:
-    """`D9/BOOT` is one pad wearing two names; try each of them."""
-    return tuple(part.strip() for part in label.split("/") if part.strip())
+    """`D9/BOOT` is one pad wearing two names; try each of them. A KiCad
+    net's `/` is written `{slash}`, so SparkFun's `IO23{slash}SDA` is `IO23`
+    and `SDA` (OH-194)."""
+    return tuple(part.strip() for part in re.split(r"/|\{slash\}", label) if part.strip())
 
 
 def agree(claims: tuple[Claim, ...]) -> ChipPin | None:

@@ -33,6 +33,7 @@ touches:
 - tests/webui/sparkfun_esp32c5/**
 - rules/board-claims.md
 - tests/rules/test_board_claims.py
+- webui/api.py
 ---
 
 Part of OH-174. OH-192 made a KiCad `.kicad_pcb` a manifest row, with pins traced through the copper. The survey (.omc/research/twin-candidates.md in the main checkout, 2026-09-29) lists ESP32 boards on chips that already run here that publish only KiCad, with a variant on disk:

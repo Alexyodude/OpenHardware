@@ -1839,6 +1839,9 @@ SUPPLY_LABELS = frozenset({
     # The PCBCUPID Glyph C3's and C6's 3.3 V rail and battery, as their KiCad
     # board files name them; the same test reads those files for them (OH-194).
     "+3.3V", "+BATT",
+    # The SparkFun Thing Plus ESP32-C5's USB and battery rails, as its KiCad
+    # board file names them; the same test reads that file for them (OH-194).
+    "VUSB", "VBATT",
 })
 
 
@@ -1868,7 +1871,7 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # and the Uno's pins come from its own variant -- and a count that skipped
     # it would be a count of most of the boards.
     files = sorted(pindefs.BOARDS_DIR.glob("*.json"))
-    assert len(files) == 36, [one.stem for one in files]
+    assert len(files) == 37, [one.stem for one in files]
     for path in files:
         board = path.stem
         for pad in json.loads(path.read_text(encoding="utf-8"))["pads"]:
@@ -1914,8 +1917,11 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # copper, 5 of them by its variant too, and the same 6 supplies. 515
     # and 196 until the Olimex ESP32-C3-DevKit-Lipo (OH-194) added 18: 13
     # named by its traced copper, and 4 supplies -- two GND, +5V and +3.3V.
-    assert naming == 528, naming
-    assert supplies == 200, supplies
+    # 528 and 200 until the SparkFun Thing Plus ESP32-C5 (OH-194) added 28: 19
+    # named by its traced copper, 5 of them by its variant too, and 5
+    # supplies -- GND, 3.3V, EN, VUSB and VBATT.
+    assert naming == 547, naming
+    assert supplies == 205, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
     # same debug cluster already carried; 42 until the six SWD pads on the
     # RP2040, SAMD21 and nRF52840 stopped saying nobody had published them.
@@ -1931,13 +1937,15 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # with the Pro Micro ESP32-C3's !RESET!, traced to the module's EN. 59
     # with the Glyph C3's two /RESET pads, traced to the module's EN, and its
     # J2 pad 8, alone on its net. 61 with the Glyph C6's two /RESET pads.
-    # 62 with the Olimex ESP32-C3-DevKit-Lipo's /ESP_EN, traced to EN.
-    assert specific == 62, specific
+    # 62 with the Olimex ESP32-C3-DevKit-Lipo's /ESP_EN, traced to EN. 66
+    # with the Thing Plus ESP32-C5's ~{RST}, traced to EN, its two pads alone
+    # on their nets, and the one behind its open jumper JP11.
+    assert specific == 66, specific
     assert generic == 15, (
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
-    assert naming + supplies + specific + generic == 805
+    assert naming + supplies + specific + generic == 833
 
 
 def test_the_tracer_refuses_a_part_string_that_matches_more_than_one_footprint():

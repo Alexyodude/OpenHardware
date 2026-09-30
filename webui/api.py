@@ -796,8 +796,11 @@ def header_key(label: str, names: typing.Mapping[str, object]) -> str:
     A label the module knows nothing about comes back as itself, so a pad
     nobody answers for keeps its own name in the table -- `GND` stays `GND`
     rather than becoming whichever half of it happened to match nothing.
+
+    A tilde before a brace is not the mark: KiCad writes a name drawn with
+    a bar over it that way, as SparkFun's `~{RST}` (OH-194), and it stays.
     """
-    name = label.lstrip(PWM_MARK)
+    name = label if label.startswith(PWM_MARK + "{") else label.lstrip(PWM_MARK)
     return next((part for part in name.split("/") if part in names), name)
 
 

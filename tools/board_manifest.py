@@ -200,6 +200,25 @@ ESP32_C6_WROOM_1 = PinTable(
     (("1", "GND"), ("2", "3V3"), ("3", "EN"), ("22", "NC"), ("28", "GND"),
      ("29", "EPAD")),
 )
+ESP32_C5_WROOM_1 = PinTable(
+    "ESP32-C5-WROOM-1-NARROW", "ESP32-C5-WROOM-1",
+    "ESP32-C5-WROOM-1 & WROOM-1U Datasheet v1.3, pp. 13-14, 3.2 Pin Description "
+    "and Table 3-1 ESP32-C5-WROOM-1 Pin Definitions: No. against the GPIO its "
+    "Function names",
+    _DOCS + "esp32-c5-wroom-1_wroom-1u_datasheet_en.pdf",
+    "fa50f329237226d09c5b53460e65d8a2561c58fb5fb08945c12990a2c61f8e9e",
+    29,
+    (("4", 2), ("5", 3), ("6", 0), ("7", 1), ("8", 6), ("9", 7), ("10", 8),
+     ("11", 9), ("12", 10), ("15", 28), ("16", 5), ("17", 4), ("18", 27),
+     ("21", 23), ("23", 24), ("24", 12), ("25", 11), ("26", 25), ("27", 26)),
+    # Pins 13, 14 and 19 are GPIO13, GPIO14 and, as NC/IO15, GPIO15, which
+    # no header reaches, so they are in neither list.
+    (("1", "GND"), ("2", "3V3"), ("3", "EN"), ("20", "NC"), ("22", "NC"),
+     ("28", "GND"), ("29", "EPAD")),
+    # SparkFun's footprint splits the page's 29, the central ground pad, into
+    # nine pads each named EPAD.
+    footprint_pads=(("EPAD", "29"),),
+)
 RP2040_QFN56 = PinTable(
     "QFN56_7MM_REDUCEDEPAD", "RP2040_QFN56",
     "RP2040 Datasheet build-date 2025-02-20 build-version 3184e62-clean, PDF pp. "
@@ -449,6 +468,33 @@ ROWS = (
         variant="esp32c3-devkit-lipo",
         labels=(),
         pin_table=ESP32_C3_MINI_1_OLIMEX,
+    ),
+    # KiCad, licensed by the sentence its board file places, as the Qwiic
+    # Pocket's is (OH-194). Its header is one footprint, the Thing Plus
+    # outline, and its nets are SparkFun's `IO23/SDA`, written `IO23{slash}SDA`.
+    Row(
+        board="SparkFun Thing Plus ESP32-C5",
+        source="sparkfun-thing-plus-esp32-c5",
+        cad="Hardware/SparkFun_Thing_Plus_ESP32_C5.kicad_pcb",
+        schematic=None,
+        select=("U3",),
+        chip="ESP32-C5",
+        package="arduino-esp32",
+        variant="sparkfun_esp32c5_thing_plus",
+        labels=("SDA", "SCL", "TX", "RX", "SCK"),
+        reasons=(
+            ("unconnected-(U3-GPIO6-Pad3)",
+             "no net: in the vendor's board file this pad is the only pad on its "
+             "net, so it reaches no pin of the ESP32-C5 or of anything else"),
+            ("unconnected-(U3-FREEBIE-Pad13)",
+             "no net: in the vendor's board file this pad is the only pad on its "
+             "net, so it reaches no pin of the ESP32-C5 or of anything else"),
+            ("Net-(JP11-B)",
+             "no ESP32-C5 pin is on this net: the vendor's board file puts it on "
+             "this pad and pad 2 of the jumper JP11 (Jumper_2_NO, value DO), whose "
+             "pad 1 is on LED_DO with the DOUT of the WS2812B D2"),
+        ),
+        pin_table=ESP32_C5_WROOM_1,
     ),
 )
 
