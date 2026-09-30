@@ -190,7 +190,7 @@ class Component:
 
 
 #: Espressif's own KiCad library, at the commit read on 2026-09-29, for the
-#: two ESP32-C6 modules KiCad's library does not hold (OH-180). Its LICENSE.md:
+#: modules KiCad's library does not hold (OH-180). Its LICENSE.md:
 #: CC-BY-SA 4.0 with the same exception as KiCad's own libraries. Pinned to a
 #: commit rather than a branch, because `pads_origin` reads an offset out of
 #: the footprint and a moved offset would move the module.
@@ -1390,21 +1390,25 @@ ABSENT: dict[str, str] = {
     # artwork pass already makes.
     "THING_PLUS": (
         "J1 on the Thing Plus, the pad map itself: 28 plated holes on the "
-        "2.54 mm pitch in two rows 20.32 mm apart, 38.10 mm long. SparkFun "
-        "give it no PROD_ID, where every part they fit carries one, so the "
-        "file places the holes and no header; the holes are drawn as copper. "
-        "No KiCad library was searched: there is no body to look for."
+        "2.54 mm pitch in two rows 20.32 mm apart, 38.10 mm long. Its device "
+        "says nothing of whether a header is fitted; SparkFun give it no "
+        "PROD_ID, where every part they fit carries one, so that no header "
+        "is fitted is A JUDGEMENT from that, and the holes are drawn as "
+        "copper. No KiCad library was searched: there is no body to look for."
     ),
     "1X16_ROUND": (
-        "JP1 on the Feather, sixteen plated holes on 2.54 mm, 38.10 mm long, "
-        "which Adafruit give no value -- as they give none to its solder "
-        "jumper, and a value to every part they fit. The holes are drawn as "
-        "copper. No KiCad library was searched: there is no body to look for."
+        "JP1 on the Feather, sixteen plated holes on 2.54 mm, 38.10 mm long. "
+        "Its device says nothing of whether a header is fitted; Adafruit give "
+        "it no value -- as they give none to its solder jumper, and a value "
+        "to every part they fit -- so that none is fitted is A JUDGEMENT from "
+        "that. The holes are drawn as copper. No KiCad library was searched: "
+        "there is no body to look for."
     ),
     "1X12_ROUND": (
         "JP3 on the Feather, twelve plated holes on 2.54 mm, 27.94 mm long, "
-        "with no value, as JP1. The holes are drawn as copper. No KiCad "
-        "library was searched: there is no body to look for."
+        "with no value, as the sixteen-hole row has none: that no header is "
+        "fitted is the same JUDGEMENT. The holes are drawn as copper. No "
+        "KiCad library was searched: there is no body to look for."
     ),
     "1X07_CASTEL": (
         "JP1 and JP3 on the QT Py: **the module's own castellated edge**, "
@@ -1474,12 +1478,6 @@ ABSENT: dict[str, str] = {
         "copper pass. No KiCad library was searched: there is no body to "
         "look for."
     ),
-    "1X06_NO_SILK": (
-        "six plated holes on 2.54 mm, 12.70 mm long, which SparkFun give no "
-        "PROD_ID, where every part they fit carries one -- so the file places "
-        "the holes and no header, and the holes are drawn as copper. No KiCad "
-        "library was searched: there is no body to look for."
-    ),
     "USB-SOLDER-PADS": (
         "four 3.0 x 0.9 mm pads, VBUS, D+, D- and GND, for a USB cable's "
         "wires soldered straight to the board. Copper, drawn as copper. No "
@@ -1546,8 +1544,9 @@ ABSENT: dict[str, str] = {
     ),
     "JSTPH2_BATT": (
         "X1 on the Feather, the battery socket: the same two 1.0 x 4.6 mm "
-        "contacts 2.0 mm apart and two mounting pads as SparkFun's J3, a "
-        "surface-mount JST PH, and KiCad's 30 PH models are all through-hole."
+        "contacts 2.0 mm apart and two mounting pads as SparkFun's JST-2-SMD "
+        "land, a surface-mount JST PH, and KiCad's 30 PH models are all "
+        "through-hole."
     ),
     "JST_SH4_RA": (
         "CONN1 on the Feather, the STEMMA QT port, **whose name and land "
@@ -2886,6 +2885,12 @@ KIND_WORDS = {"FUSE": "fuse"}
 #: normally closed, not missing.
 NOT_FITTED = frozenset({"DNP", "NC", "NF", "DNF", "DNI"})
 UNDECIDED = frozenset({"TBD"})
+#: What a DEVICE's name says when the vendor places a part that is not
+#: fitted: SparkFun's CONN_06 carries a NO_SILK_NO_POP beside the
+#: NO_SILK_FEMALE_PTH they fit, on one land. Closed, and read as a whole
+#: `_`-separated run of the device's name, of any part: unlike NC, it names
+#: nothing else.
+NOT_FITTED_DEVICE = ("NO", "POP")
 
 
 def value_kind(value: str) -> str | None:
@@ -2967,9 +2972,15 @@ def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
         kind = None if disagree else (by_prefix or by_value)
         word = value.strip().upper()
         passive = kind in PASSIVE_KINDS.values()
+        device = part.get("device", "")
+        runs = device.upper().split("_")
         if _unpopulated(part, variant):
             refused = (f'{schematic.name} places {name} with populate="no" in '
                        f"its current variant, {variant!r}: not fitted")
+        elif any(tuple(runs[at:at + len(NOT_FITTED_DEVICE)]) == NOT_FITTED_DEVICE
+                 for at in range(len(runs))):
+            refused = (f"{schematic.name} places {name} from {where}'s device "
+                       f"{device!r}, whose name says NO_POP: not fitted")
         elif disagree:
             prefix_says = ("a kind none of R, C, L and F" if by_prefix == OTHER
                            else by_prefix)
