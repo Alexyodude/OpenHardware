@@ -375,20 +375,20 @@ def test_nothing_is_declared_absent_that_no_board_actually_has():
 #: is what a person would look for and miss.
 EXPLAINS: dict[str, set[str]] = {
     "Arduino Uno": {"QS", "RESONATOR"},
-    # **Every XIAO is empty, and that is the claim rather than the
-    # absence of one.** These sets held the antennas and the coaxial socket
-    # until OH-104, the RP2350's own processor until OH-100, the buttons
-    # until OH-153 and the load switch until OH-154 -- so what is left is a
-    # statement that nothing a person would look for is missing from any of
-    # them. It fails the moment a new absence appears, which is the only
-    # thing an empty set here has to do.
+    # **The XIAOs hold one refusal between them.** These sets held the
+    # antennas and the coaxial socket until OH-104, the RP2350's own
+    # processor until OH-100, the buttons until OH-153 and the load switch
+    # until OH-154. What is left is the buck converter whose own name is
+    # wrong, on the two boards that place it under that name (OH-189 made
+    # this test ask the other direction, which is what found it listed
+    # nowhere). An empty set fails the moment a new absence appears.
     #
-    # The Arduino Uno above still has two, and they are the honest kind: a
+    # The Arduino Uno above has two, and they are the honest kind: a
     # crystal can and a resonator that KiCad publishes no model of.
     "XIAO-ESP32-C3-DIP": set(),
-    "XIAO-ESP32-C6-DIP": set(),
+    "XIAO-ESP32-C6-DIP": {"BGA6-0.35-0.745X10.95X0.4MM"},
     "XIAO-ESP32-C5-DIP": set(),
-    "XIAO-RP2350-DIP": set(),
+    "XIAO-RP2350-DIP": {"BGA6-0.35-0.745X10.95X0.4MM"},
     "XIAO-nRF54l15-DIP": set(),
     # **The manifest boards (OH-180) leave off what nobody publishes**, and
     # a person looking at one would look first for its USB socket and its
@@ -406,13 +406,12 @@ EXPLAINS: dict[str, set[str]] = {
     # The QT Py's two and its own flash (OH-186). Its castellated edge is
     # copper, as the QT Py's is, and so is not here.
     "Adafruit KB2040": {"USB_C_CUSB31-CFM2AX-01-X", "SK6805_1515", "USON8_4X4"},
-    # SparkFun's USB-C socket on both (OH-189); the Pocket's battery socket,
-    # and its header holes, fitted with no header as the Thing Plus's are.
-    # The Pro Micro's castellated edge is copper, as the QT Py's is.
+    # SparkFun's USB-C socket on both (OH-189), and the Pocket's battery
+    # socket. The Pro Micro's castellated edge is copper, as the QT Py's is;
+    # the Pocket's header holes are refused by its own schematic, whose
+    # device says NO_POP (`REFUSED_BY_SCHEMATIC`).
     "SparkFun Pro Micro ESP32-C3": {"USB-C-16P_4LAYER-PADS"},
-    "SparkFun Qwiic Pocket ESP32-C6": {
-        "USB-C-16P_4LAYER-PADS", "JST-2-SMD", "1X06_NO_SILK",
-    },
+    "SparkFun Qwiic Pocket ESP32-C6": {"USB-C-16P_4LAYER-PADS", "JST-2-SMD"},
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
 # same placements, same absences -- so the entries are derived the same way
@@ -437,9 +436,23 @@ def test_each_board_explains_the_parts_it_leaves_off():
         "stated -- add it rather than deleting this assertion"
     )
     for spec in compose.COMPOSITIONS:
-        if not spec.layout.is_file():
+        if not _fetched(spec):
             continue
-        packages = {e.package for e in compose.read_layout(spec.layout).elements}
+        board = compose.read_layout(spec.layout)
+        packages = {e.package for e in board.elements}
+        # **And the other direction** (OH-189): every part the board refuses
+        # for want of a model is in its entry. Copper, ink and holes are
+        # not -- a person does not look for them -- and a part the board's
+        # own schematic refuses is explained there.
+        statements = compose.statements_for(spec)
+        refused = {e.package for e in board.elements
+                   if e.package in compose.ABSENT
+                   and compose.NO_BODY not in compose.ABSENT[e.package]
+                   and not (statements and e.name in statements
+                            and statements[e.name].refused)}
+        assert refused <= EXPLAINS[spec.board], (
+            f"{spec.board} refuses {sorted(refused - EXPLAINS[spec.board])} "
+            f"and its entry here does not say so")
         for missing in EXPLAINS[spec.board]:
             assert missing in packages, (
                 f"{spec.board} has no {missing!r}, so this expectation is "
@@ -4372,7 +4385,10 @@ def test_a_part_its_files_say_is_not_fitted_is_not_drawn(tmp_path):
         '<part name="JP1" library="lib" deviceset="JUMPER" value="NC"/>'
         '<part name="SW1" library="lib" deviceset="SWITCH" value="NC"/>'
         '<part name="R9" library="lib" deviceset="RESISTOR" value="10K"/>'
-        '<part name="R10" library="lib" deviceset="RESISTOR" value="10K"/>'),
+        '<part name="R10" library="lib" deviceset="RESISTOR" value="10K"/>'
+        '<part name="J2" library="lib" deviceset="CONN" device="NO_SILK_NO_POP"/>'
+        '<part name="J4" library="lib" deviceset="CONN" device="NO_SILK_FEMALE_PTH"/>'
+        '<part name="J6" library="lib" deviceset="CONN" device="PIANO_POP"/>'),
         variantdefs=('<variantdefs><variantdef name="lite"/>'
                      '<variantdef name="full" current="yes"/></variantdefs>'))
     stated = compose.stated_kinds(schematic)
@@ -4384,6 +4400,13 @@ def test_a_part_its_files_say_is_not_fitted_is_not_drawn(tmp_path):
     assert "whether it is fitted is not stated" in stated["C7"].refused
     assert stated["JP1"] == compose.Statement(compose.OTHER, "JP", None)
     assert stated["SW1"] == compose.Statement(compose.OTHER, "SW", None)
+    # **The device's own name, where the vendor says it there** (OH-189):
+    # SparkFun's CONN_06 places NO_SILK_NO_POP and NO_SILK_FEMALE_PTH on one
+    # land, so the land cannot say which is fitted and the device does. Read
+    # as a whole run of the name, so PIANO_POP says nothing.
+    assert "'NO_SILK_NO_POP'" in stated["J2"].refused
+    assert stated["J4"].refused is None and stated["J6"].refused is None
+    assert compose.NOT_FITTED_DEVICE == ("NO", "POP")
 
     board = tmp_path / "board.brd"
     board.write_text(
@@ -4453,8 +4476,59 @@ REFUSED_BY_SCHEMATIC = {
     "Adafruit Feather ESP32-C6": set(),
     "Adafruit KB2040": {"R8"},
     "SparkFun Pro Micro ESP32-C3": set(),
-    "SparkFun Qwiic Pocket ESP32-C6": {"C6"},
+    "SparkFun Qwiic Pocket ESP32-C6": {"C6", "J2", "J3"},
 }
+
+
+#: What each manifest board draws as copper, ink or a hole -- an ABSENT reason
+#: carrying `NO_BODY` -- by package. Written down, because the words are the
+#: only thing that sorts a reason into the bodyless count rather than the
+#: refused one, and a reason that loses them would move silently.
+BODYLESS = {
+    "SparkFun Thing Plus ESP32-C6": {
+        "COMBO-JUMPER_2_NC_TRACE", "FIDUCIAL-MICRO", "SMT-JUMPER_2_NC_TRACE_SILK",
+        "SMT-JUMPER_2_NO_SILK", "SMT-JUMPER_3_1-NC_TRACE_SILK",
+        "SMT-JUMPER_3_2-NC_TRACE_SILK", "THING_PLUS"},
+    "Adafruit QT Py ESP32-C3": {
+        "1X07_CASTEL", "B1,27", "FIDUCIAL_1MM", "TESTPOINT_MINUS_1X3MM",
+        "TESTPOINT_PLUS_1X3MM"},
+    "Adafruit Feather ESP32-C6": {
+        "1X12_ROUND", "1X16_ROUND", "FIDUCIAL_1MM", "MOUNTINGHOLE_2.5_PLATED",
+        "SOLDERJUMPER_CLOSEDWIRE"},
+    "Adafruit KB2040": {
+        "1X13_CASTEL", "FIDUCIAL_1MM", "SOLDERJUMPER_ARROW_NOPASTE",
+        "TESTPOINT_ROUND_1.5MM_NO"},
+    "SparkFun Pro Micro ESP32-C3": {
+        "1X09_CASTELLATED", "FIDUCIAL-MICRO", "PAD.03X.05",
+        "SMT-JUMPER_2_NC_TRACE_SILK", "SMT-JUMPER_3_2-NC_TRACE_SILK",
+        "USB-SOLDER-PADS"},
+    "SparkFun Qwiic Pocket ESP32-C6": {
+        "FIDUCIAL-MICRO", "PAD.03X.03", "SMT-JUMPER_2_NC_TRACE_SILK",
+        "SMT-JUMPER_3_2-NC_TRACE_SILK"},
+}
+
+
+def test_each_manifest_board_counts_the_same_things_bodyless():
+    """Per fetched manifest board, the packages drawn as copper, ink or a
+    hole are the ones written above, and every other ABSENT package it
+    places is a refused part its `EXPLAINS` names -- so header holes whose
+    reason lost its no-body words would move from one count to the other
+    and fail here, on the board they moved on."""
+    unfetched = []
+    for _row, spec in _manifest_specs():
+        if spec is None or not _fetched(spec):
+            unfetched.append(_row.board)
+            continue
+        statements = compose.statements_for(spec)
+        absent = {e.package for e in compose.read_layout(spec.layout).elements
+                  if e.package in compose.ABSENT
+                  and not (e.name in statements and statements[e.name].refused)}
+        bodyless = {p for p in absent if compose.NO_BODY in compose.ABSENT[p]}
+        assert bodyless == BODYLESS[spec.board], (spec.board, bodyless)
+        assert absent - bodyless <= EXPLAINS[spec.board], (
+            spec.board, absent - bodyless)
+    if unfetched:
+        pytest.skip(f"checked the rest; not fetched: {unfetched}")
 
 
 def test_every_manifest_passive_is_drawn_as_the_kind_its_vendor_states():
