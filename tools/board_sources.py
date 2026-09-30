@@ -1096,6 +1096,94 @@ SOURCES: tuple[Source, ...] = (
         cite="OH-194: GitHub's tree listing of the default branch, read 2026-09-30; "
         "the board file and the README fetched here and opened",
     ),
+    Source(
+        name="olimex-esp32-c3-devkit-lipo",
+        vendor="Olimex",
+        model="one repository per board, this one among 154 under org:OLIMEX; "
+        "HARDWARE/ holds one directory per revision",
+        size="862,423 + 504 bytes, the two blobs fetched, as GitHub's tree lists them",
+        licence=Licence(
+            name="CERN-OHL-S-2.0",
+            covers="hardware, in the README's words; the same README puts software "
+            "under GPL3 and documentation under CC BY-SA 3.0",
+            sampled=True,
+            evidence=Evidence.STATED,
+            cite="README.md at the repository root, fetched here and read "
+            "2026-09-30. The repository's LICENSE is the GPL-3.0's text, the "
+            "README's licence for software, so the hardware's rests on the README",
+            file="README.md",
+            quote="Hardware is released under CERN Open Hardware Licence Version 2 - "
+            "Strongly Reciprocal https://spdx.org/licenses/CERN-OHL-S-2.0.html",
+        ),
+        fetch=Fetch(
+            transport=Transport.GIT_SPARSE,
+            url="https://github.com/OLIMEX/ESP32-C3-DevKit-Lipo.git",
+            # The newest of the four revisions, D: the variant names none.
+            # HARDWARE/Hardware-revision-changes.txt calls it "Preliminary,
+            # unreleased" and lists the two GPIOs it moves back from C, both
+            # sense lines, neither a header pad's GPIO.
+            wanted=(
+                "HARDWARE/ESP32-C3-DevKit-Lipo_Rev_D/ESP32-C3-DevKit-Lipo_Rev_D.kicad_pcb",
+                "README.md",
+            ),
+            skipped=(
+                ("HARDWARE/ESP32-C3-DevKit-Lipo_Rev_D", "the rest of revision D's "
+                 "directory: its KiCad schematic, project files, a schematic PDF, a "
+                 "BOM and fp-info-cache; the pads and nets are in the .kicad_pcb"),
+                ("HARDWARE/ESP32-C3-DevKit-Lipo_Rev_A", "revision A, KiCad 5 files "
+                 "and their netlist, BOM and PDFs; revision D is the one read"),
+                ("HARDWARE/ESP32-C3-DevKit-Lipo_Rev_B", "revision B, KiCad 5 files "
+                 "and their netlist, BOM and PDFs; revision D is the one read"),
+                ("HARDWARE/ESP32-C3-DevKit-Lipo_Rev_C", "revision C, KiCad files, a "
+                 "schematic PDF and a BOM; revision D is the one read"),
+                ("HARDWARE/ESP32-C3-DevKit-Lipo-dimensions-revision-B.pdf",
+                 "a dimensioned drawing of revision B"),
+                ("HARDWARE/Hardware-revision-changes.txt", "the changes between "
+                 "revisions B, C and D, 664 bytes; opened 2026-09-30 and quoted in "
+                 "this row's comment, not fetched"),
+                ("DOCS", "user manuals per revision and copies of Espressif's chip "
+                 "and module datasheets and reference manual; the pin table cites "
+                 "Espressif's own download"),
+                ("SOFTWARE", "Arduino, ESPHome, PlatformIO and Telegram examples; "
+                 "the pins are read from arduino-esp32's variants/"
+                 "esp32c3-devkit-lipo, which the manifest row names"),
+                ("LICENSE", "the GPL-3.0's text, which the README gives the software"),
+            ),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES, Evidence.LISTED,
+                "HARDWARE/ESP32-C3-DevKit-Lipo_Rev_D/ESP32-C3-DevKit-Lipo_Rev_D."
+                "kicad_sch and one per earlier revision; listed, not fetched",
+            ),
+            schematic_pdf=Artefact(
+                Published.YES, Evidence.LISTED,
+                "HARDWARE/ESP32-C3-DevKit-Lipo_Rev_D/ESP32-C3-DevKit-Lipo_Rev_D.pdf "
+                "and one per earlier revision; listed, not fetched",
+            ),
+            pcb_layout=Artefact(
+                Published.YES, Evidence.OPENED,
+                "HARDWARE/ESP32-C3-DevKit-Lipo_Rev_D/ESP32-C3-DevKit-Lipo_Rev_D."
+                "kicad_pcb, KiCad version 20221018, read by tools/kicad.py",
+            ),
+            footprints_symbols=Artefact(
+                Published.PARTIAL, Evidence.LISTED,
+                "revisions A and B carry a .lib and a -cache.lib, KiCad 5 symbol "
+                "libraries; no .kicad_mod or .kicad_sym",
+            ),
+            model_3d=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "no .step, .stp, .wrl or .stl in the tree listing",
+            ),
+            board_support=Artefact(
+                Published.YES, Evidence.LISTED,
+                "SOFTWARE/PLATFORMIO/esp32-c3-devkit-lipo.json, a PlatformIO board "
+                "definition, and example sketches; not fetched",
+            ),
+        ),
+        cite="OH-194: GitHub's tree listing of the default branch, read 2026-09-30; "
+        "the board file of revision D and the README fetched here and opened",
+    ),
 )
 
 
