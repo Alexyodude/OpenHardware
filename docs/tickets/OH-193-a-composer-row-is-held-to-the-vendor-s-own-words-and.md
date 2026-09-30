@@ -2,11 +2,13 @@
 id: OH-193
 title: A composer row is held to the vendor's own words, and the manifest boards are
   composed under test
-status: in-review
+status: in-progress
 priority: P2
 created: '2026-09-30'
 touches:
 - docs/tickets/OH-193-*
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
 ---
 
 Found by OH-189's review (2026-09-30). Three mutations of the composer's table each compose cleanly and pass the whole suite, putting a false part on a board:
