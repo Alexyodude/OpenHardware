@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 
+import collections
 import json
 import pathlib
 import re
@@ -217,8 +218,67 @@ def test_a_licence_read_from_a_fetched_file_is_in_that_file():
             unfetched.append(candidate.name)
             continue
         text = " ".join(path.read_text(encoding="utf-8", errors="replace").split())
-        assert " ".join(candidate.licence.quote.split()) in text, (
-            f"{path} does not read {candidate.licence.quote!r}")
+        for words in (candidate.licence.quote, candidate.licence.notice):
+            assert " ".join(words.split()) in text, f"{path} does not read {words!r}"
+        checked.append(candidate.name)
+    if unfetched:
+        pytest.skip(f"SKIPPED after checking {checked}: {unfetched} not fetched; "
+                    f"run python tools/get_board_sources.py <name>")
+
+
+#: The artefact classes a file's suffix decides, and those suffixes. A PDF
+#: or a board-support file is not known by its name, so those two are not here.
+_BY_SUFFIX = {
+    "schematic_source": (".sch", ".kicad_sch", ".schdoc", ".dsn"),
+    "pcb_layout": (".kicad_pcb", ".brd", ".pcbdoc"),
+    "footprints_symbols": (".kicad_mod", ".kicad_sym", ".lbr", ".lib", ".dcm"),
+    "model_3d": (".step", ".stp", ".wrl", ".stl"),
+}
+
+
+def test_a_cell_graded_absent_is_what_the_fetched_listing_holds():
+    """`ABSENT` says a complete listing was searched and the class is not
+    there, and a fetched clone holds that listing: the sparse, blobless
+    fetch still has every tree, so `git ls-tree -r HEAD` lists every file.
+    A file of an absent class is allowed only under a directory the cell's
+    note names whole -- its path from the top, ending `/`, standing alone as
+    a word -- as seeed-xiao's names the clock project's `3d_models/` its
+    thirteen .stl are in; `HARDWARE/<rev>/3d/` names no directory. And a
+    count a model cell states, `42 .step`, is the listing's (OH-194: the
+    Olimex C3's model cell said ABSENT over 74 component models)."""
+
+    def named(directory: str, note: str) -> bool:
+        return re.search(rf"(?<![\w/.<>-]){re.escape(directory)}(?=[\s,;:)]|$)",
+                         note) is not None
+
+    checked, unfetched = [], []
+    for candidate in SOURCES:
+        dest = candidate.dest(REPO)
+        if candidate.fetch.transport is not Transport.GIT_SPARSE:
+            continue
+        if not (dest / ".git").is_dir():
+            unfetched.append(candidate.name)
+            continue
+        listing = subprocess.run(["git", "ls-tree", "-r", "--name-only", "HEAD"], cwd=dest,
+                                 capture_output=True, text=True, check=True).stdout.splitlines()
+        suffixes = collections.Counter(pathlib.PurePosixPath(path).suffix.lower()
+                                       for path in listing)
+        for name, known in _BY_SUFFIX.items():
+            cell = getattr(candidate.artefacts, name)
+            if cell.evidence is Evidence.ABSENT:
+                unnamed = [path for path in listing
+                           if pathlib.PurePosixPath(path).suffix.lower() in known
+                           and not any(named(f"{parent.as_posix()}/", cell.note)
+                                       for parent in pathlib.PurePosixPath(path).parents
+                                       if parent.as_posix() != ".")]
+                assert not unnamed, (
+                    f"{candidate.name}.{name} is graded absent and the listing holds "
+                    f"{len(unnamed)}, first {unnamed[:3]}")
+        stated = {f".{suffix.lower()}": int(count.replace(",", ""))
+                  for count, suffix in re.findall(r"(\d[\d,]*) \.(step|stp|wrl|stl)\b",
+                                                  candidate.artefacts.model_3d.note, re.I)}
+        assert stated == {suffix: suffixes[suffix] for suffix in stated}, (
+            candidate.name, stated)
         checked.append(candidate.name)
     if unfetched:
         pytest.skip(f"SKIPPED after checking {checked}: {unfetched} not fetched; "

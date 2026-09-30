@@ -169,6 +169,10 @@ class Licence(typing.NamedTuple):
     #: `tests/rules/test_board_sources.py` reads the file for the words.
     file: str = ""
     quote: str = ""
+    #: Text that same file says any redistribution must include, in full, as
+    #: the file writes it; empty where it asks for none. A board file written
+    #: from the source carries it (OH-194), and the same test reads it.
+    notice: str = ""
 
 
 class Fetch(typing.NamedTuple):
@@ -252,6 +256,29 @@ _PCBCUPID_README_CC_BY_SA_4 = Licence(
     quote="[Creative Commons Attribution, Share-Alike license]"
     "(https://creativecommons.org/licenses/by-sa/4.0/deed.en)",
 )
+
+
+def _pcbcupid_notice(board: str, image: str, product: str) -> str:
+    """A Glyph README in full, which ends "All text above must be included
+    in any redistribution": the two differ only in the board's name, its
+    picture and its product page."""
+    return (
+        f"# PCBCUPID-GLYPH-{board}-PCB\n\n"
+        f"![PCBCUPID-GLYPH-{board}]({image})\n\n"
+        f"This repo contains open source PCB files for PCBCUPID Glyph {board}\n"
+        "This particular PCB is designed using Kicad v8.0\n\n"
+        "**This design has been built and tested successfully!**\n"
+        "For more details, check out the product pages at\n\n"
+        f"   * [Glyph-{board}]({product})\n\n"
+        "We are here to build India's largest open source hardware community, If you "
+        "like to support\n"
+        "please consider buying the product from the above link!\n\n"
+        "[Creative Commons Attribution, Share-Alike license]"
+        "(https://creativecommons.org/licenses/by-sa/4.0/deed.en)\n"
+        "All text above must be included in any redistribution"
+    )
+
+
 _PINOUT_PICTURE = "a pinout diagram, opened 2026-09-29: no pad coordinates and no nets"
 _ADAFRUIT_README = "not needed: the licence is read from license.txt, which is fetched"
 _NO_LBR = "no .lbr in the tree listing; the .brd carries the libraries it uses"
@@ -995,7 +1022,10 @@ SOURCES: tuple[Source, ...] = (
         vendor="PCBCUPID",
         model="one repository per board, this one among 46 under org:pcbcupid",
         size="1,293,159 + 732 bytes, the two blobs fetched, as GitHub's tree lists them",
-        licence=_PCBCUPID_README_CC_BY_SA_4,
+        licence=_PCBCUPID_README_CC_BY_SA_4._replace(notice=_pcbcupid_notice(
+            "C3", "https://files.pcbcupid.com/Documentation/Boards/glyph_c3/"
+            "PCBCUPID_ESP32C3-Overview_result.avif",
+            "https://shop.pcbcupid.com/product/gd001/")),
         fetch=Fetch(
             transport=Transport.GIT_SPARSE,
             url="https://github.com/pcbcupid/PCBCUPID-Glyph-C3.git",
@@ -1049,7 +1079,10 @@ SOURCES: tuple[Source, ...] = (
         vendor="PCBCUPID",
         model="one repository per board, this one among 46 under org:pcbcupid",
         size="1,319,294 + 732 bytes, the two blobs fetched, as GitHub's tree lists them",
-        licence=_PCBCUPID_README_CC_BY_SA_4,
+        licence=_PCBCUPID_README_CC_BY_SA_4._replace(notice=_pcbcupid_notice(
+            "C6", "https://files.pcbcupid.com/Documentation/Boards/glyph_c6/"
+            "PCBCUPID_esp32c6-overview_result.avif",
+            "https://shop.pcbcupid.com/product/gd002/")),
         fetch=Fetch(
             transport=Transport.GIT_SPARSE,
             url="https://github.com/pcbcupid/PCBCUPID-Glyph-C6.git",
@@ -1131,24 +1164,36 @@ SOURCES: tuple[Source, ...] = (
             skipped=(
                 ("HARDWARE/ESP32-C3-DevKit-Lipo_Rev_D", "the rest of revision D's "
                  "directory: its KiCad schematic, project files, a schematic PDF, a "
-                 "BOM and fp-info-cache; the pads and nets are in the .kicad_pcb"),
-                ("HARDWARE/ESP32-C3-DevKit-Lipo_Rev_A", "revision A, KiCad 5 files "
-                 "and their netlist, BOM and PDFs; revision D is the one read"),
-                ("HARDWARE/ESP32-C3-DevKit-Lipo_Rev_B", "revision B, KiCad 5 files "
-                 "and their netlist, BOM and PDFs; revision D is the one read"),
-                ("HARDWARE/ESP32-C3-DevKit-Lipo_Rev_C", "revision C, KiCad files, a "
-                 "schematic PDF and a BOM; revision D is the one read"),
+                 "BOM, fp-info-cache, Gerbers/ (9 .gbr, 2 .drl) and packages3D/ (13 "
+                 ".step, 2 .stp, 6 .wrl, one model per component); the pads and nets "
+                 "are in the .kicad_pcb"),
+                ("HARDWARE/ESP32-C3-DevKit-Lipo_Rev_A", "revision A, KiCad 5: board, "
+                 "schematic, netlist, two symbol libraries, sym-lib-table, BOM, "
+                 "PDFs, Gerbers/ (9 .gbr, 2 .drl) and 3d/ (8 .step, 2 .stp, 6 "
+                 ".wrl, one model per component); revision D is the one read"),
+                ("HARDWARE/ESP32-C3-DevKit-Lipo_Rev_B", "revision B, KiCad 5: board, "
+                 "schematic, netlist, two symbol libraries, sym-lib-table, BOM, "
+                 "PDFs, Gerbers/ (9 .gbr, 2 .drl) and 3d/ (8 .step, 2 .stp, 6 "
+                 ".wrl, one model per component); revision D is the one read"),
+                ("HARDWARE/ESP32-C3-DevKit-Lipo_Rev_C", "revision C: KiCad board, "
+                 "schematic and project files, a schematic PDF, a BOM, fp-info-cache, "
+                 "Gerbers/ (9 .gbr, 2 .drl) and packages3D/ (13 .step, 2 .stp, 6 "
+                 ".wrl, one model per component); revision D is the one read"),
                 ("HARDWARE/ESP32-C3-DevKit-Lipo-dimensions-revision-B.pdf",
                  "a dimensioned drawing of revision B"),
+                ("HARDWARE/ESP32-C3-DevKit-Lipo-dimensions.jpg", "a dimensioned "
+                 "drawing, opened 2026-09-30, of the board whose silkscreen reads "
+                 "Rev.C; the outline is read from revision D's .kicad_pcb"),
                 ("HARDWARE/Hardware-revision-changes.txt", "the changes between "
                  "revisions B, C and D, 664 bytes; opened 2026-09-30 and quoted in "
                  "this row's comment, not fetched"),
-                ("DOCS", "user manuals per revision and copies of Espressif's chip "
-                 "and module datasheets and reference manual; the pin table cites "
-                 "Espressif's own download"),
-                ("SOFTWARE", "Arduino, ESPHome, PlatformIO and Telegram examples; "
-                 "the pins are read from arduino-esp32's variants/"
-                 "esp32c3-devkit-lipo, which the manifest row names"),
+                ("DOCS", "user manuals per revision, copies of Espressif's chip "
+                 "and module datasheets and reference manual, and five .jpg under "
+                 "Images/; the pin table cites Espressif's own download"),
+                ("SOFTWARE", "Arduino, ESPHome, PlatformIO and Telegram examples and "
+                 "Arduino-board-settings.jpg; the pins are read from "
+                 "arduino-esp32's variants/esp32c3-devkit-lipo, which the manifest "
+                 "row names"),
                 ("LICENSE", "the GPL-3.0's text, which the README gives the software"),
             ),
         ),
@@ -1174,8 +1219,14 @@ SOURCES: tuple[Source, ...] = (
                 "libraries; no .kicad_mod or .kicad_sym",
             ),
             model_3d=Artefact(
-                Published.NO, Evidence.ABSENT,
-                "no .step, .stp, .wrl or .stl in the tree listing",
+                Published.YES, Evidence.LISTED,
+                "42 .step, 8 .stp and 24 .wrl, all component-level: 16 in each of "
+                "HARDWARE/<rev A and B>/3d/ and 21 in each of HARDWARE/<rev C and "
+                "D>/packages3D/, a model per footprint -- C_0402_1005Metric, "
+                "HN1x9-PinHeader_1x09_P2.54mm_Vertical, revision D's "
+                "ESP32-C3-MINI-1-N4.STEP and the like. KiCad's per-footprint 3D "
+                "library, as the olimex-esp32-poe row finds, not a model of the "
+                "assembled board; not fetched",
             ),
             board_support=Artefact(
                 Published.YES, Evidence.LISTED,
