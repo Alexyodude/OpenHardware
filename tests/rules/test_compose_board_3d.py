@@ -406,6 +406,13 @@ EXPLAINS: dict[str, set[str]] = {
     # The QT Py's two and its own flash (OH-186). Its castellated edge is
     # copper, as the QT Py's is, and so is not here.
     "Adafruit KB2040": {"USB_C_CUSB31-CFM2AX-01-X", "SK6805_1515", "USON8_4X4"},
+    # SparkFun's USB-C socket on both (OH-189); the Pocket's battery socket,
+    # and its header holes, fitted with no header as the Thing Plus's are.
+    # The Pro Micro's castellated edge is copper, as the QT Py's is.
+    "SparkFun Pro Micro ESP32-C3": {"USB-C-16P_4LAYER-PADS"},
+    "SparkFun Qwiic Pocket ESP32-C6": {
+        "USB-C-16P_4LAYER-PADS", "JST-2-SMD", "1X06_NO_SILK",
+    },
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
 # same placements, same absences -- so the entries are derived the same way
@@ -4445,6 +4452,8 @@ REFUSED_BY_SCHEMATIC = {
     "Adafruit QT Py ESP32-C3": {"C7", "C9", "L2"},
     "Adafruit Feather ESP32-C6": set(),
     "Adafruit KB2040": {"R8"},
+    "SparkFun Pro Micro ESP32-C3": set(),
+    "SparkFun Qwiic Pocket ESP32-C6": {"C6"},
 }
 
 
