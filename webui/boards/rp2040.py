@@ -153,8 +153,9 @@ GPIO_CTRL_AT_RESET = 0x1F
 FUNCSEL_NULL = 0x1F
 
 #: Table 279, PDF pp. 238-239 (printed 237-238): F5 is SIO on each of
-#: GPIO0 to GPIO29; and beside it: "The SIO function (F5) must be selected
-#: for the processors to drive a GPIO, but the input is always connected".
+#: GPIO0 to GPIO29; and Table 280, PDF p.239 (printed 238): "The SIO
+#: function (F5) must be selected for the processors to drive a GPIO, but
+#: the input is always connected".
 FUNCSEL_SIO = 5
 
 
@@ -396,12 +397,21 @@ def unrouted_level(cpu: Cpu, gpio: int) -> str | None:
 
     `"input"` where it is NULL, which selects no function, so nothing
     enables the pad's output; `"unknown"` where it selects a peripheral this
-    module does not model, whose output nobody here can answer for.
+    module does not model, whose output nobody here can answer for, and for
+    a GPIO past GPIO29, which has no `CTRL` in IO_BANK0 and so is not
+    modelled at all.
+
+    **Only `FUNCSEL` is read.** `CTRL`'s `OUTOVER` and `OEOVER`, which can
+    force a pad's output or its enable whatever SIO says (Table 285), are
+    stored as written and ignored: an image that sets them reads here as if
+    it had not.
 
     **`pin_states` does not ask this**, and the XIAO RP2040s' levels are read
     through it as before: that the chip's own blink never selects SIO, and
     reads as driving its pin all the same, is a gap this ticket leaves open.
     """
+    if not 0 <= gpio < IO_BANK0_GPIOS:
+        return "unknown"
     funcsel = cpu.read_word(gpio_ctrl(gpio)) & GPIO_CTRL_FUNCSEL
     if funcsel == FUNCSEL_SIO:
         return None

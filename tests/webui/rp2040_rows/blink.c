@@ -17,7 +17,7 @@
  * (rules/board-claims.md s11).
  *
  * And it selects SIO on that pin's pad first, as silicon requires: RP2040
- * Datasheet build-version 3184e62, Table 279 (PDF pp. 238-239), "The SIO
+ * Datasheet build-version 3184e62, Table 280 (PDF p.239), "The SIO
  * function (F5) must be selected for the processors to drive a GPIO"; the
  * select is FUNCSEL, bits 4:0 of GPIO<n>_CTRL, at IO_BANK0 0x40014000 plus
  * 0x004 + 8n (s2.19.6.1, PDF p.245; Table 285, PDF pp. 249-250).

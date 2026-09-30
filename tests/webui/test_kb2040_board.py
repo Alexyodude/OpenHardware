@@ -105,7 +105,12 @@ def sibling_variants() -> dict[str, str]:
                    for path in source.paths]
         found[name] = pathlib.PurePosixPath(path).parent.name
     _, files = reading(row.variant, ())
-    (default,) = {pathlib.PurePosixPath(path).parent.name for path in files} - {row.variant}
+    included = {pathlib.PurePosixPath(path).parent.name for path in files} - {row.variant}
+    assert len(included) == 1, (
+        f"{row.variant}'s pins_arduino.h reads its pins from {sorted(files)}, so "
+        f"{sorted(included) or 'no table'} besides its own is arduino-pico's default; "
+        f"a row whose variant is that default has no default of its own to differ from")
+    (default,) = included
     found[f"arduino-pico {default}"] = default
     assert any(board_manifest.find(name) for name in found), found
     assert any(name in import_pindefs.BOARDS and not board_manifest.find(name)

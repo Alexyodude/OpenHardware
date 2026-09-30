@@ -340,7 +340,7 @@ chip's blink made that board's, and nothing weaker:
   beside the test, and rebuilt byte for byte wherever that toolchain is.
 - **It selects SIO on the pad first, as silicon requires.** An RP2040's
   processors drive a GPIO only where its `FUNCSEL` selects SIO (RP2040
-  Datasheet 3184e62, Table 279), and `FUNCSEL` resets to NULL (Table 285).
+  Datasheet 3184e62, Table 280), and `FUNCSEL` resets to NULL (Table 285).
   `webui/boards/rp2040.py` maps each GPIO's `CTRL` register in IO_BANK0,
   and `api.row_levels` gives a row's pad SIO's level only where its
   `FUNCSEL` selects SIO: `input` where it is NULL, `unknown` where it is a

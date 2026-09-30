@@ -1120,6 +1120,28 @@ def test_an_rp2040_rows_pad_reads_sio_only_where_its_funcsel_selects_sio():
     assert set(rp2040.pin_states(_Words({**driven, **at_reset})).values()) == {"high"}
 
 
+def test_an_rp2040_rows_pad_past_gpio29_is_not_modelled_rather_than_an_error(monkeypatch):
+    """IO_BANK0 has no `CTRL` past GPIO29, and no board here puts a pad there;
+    a file that did gets that pad reported `unknown`, and every other pad
+    its level, rather than the whole view failing on the one address."""
+    import dataclasses
+
+    from webui.boards import rp2040
+
+    board = "PCBCUPID Glyph Mini RP2040"
+    real = pinmap.load(board)
+    (first, *_) = [pad for pad in real.pads if pad.chip_index is not None]
+    far = dataclasses.replace(first, label="/GPIO-30", chip_index=30)
+    monkeypatch.setattr(api.pinmap, "load",
+                        lambda name: dataclasses.replace(real, pads=(*real.pads, far)))
+    runtime = api.Runtime(board=board, chip="RP2040", core="cortexm0",
+                          description=rp2040, abi=None, machine=None)
+    sio = {rp2040.gpio_ctrl(gpio): rp2040.FUNCSEL_SIO for gpio in range(rp2040.IO_BANK0_GPIOS)}
+    levels = api.row_levels(runtime, _Words({**sio, rp2040.SIO + rp2040.SIO_GPIO_OE: 0}))
+    assert levels.pop("/GPIO-30") == "unknown", levels
+    assert set(levels.values()) == {"input"}, levels
+
+
 def test_a_row_whose_chip_module_names_no_gpio_words_reports_no_levels():
     """A chip module naming no `GPIO`, `GPIO_ENABLE` or `GPIO_OUT` gives a
     row no level at all, and its view lists its own pads, in its file's
