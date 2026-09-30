@@ -55,7 +55,7 @@ import subprocess
 
 import pytest
 
-from tools import board_manifest
+from tools import board_manifest, import_board
 from tools import import_pindefs as pindefs
 from tools.import_pindefs import (
     BOARDS,
@@ -2910,6 +2910,57 @@ def test_a_kicad_number_on_two_nets_is_refused():
             _kicad_traced(text.replace(pin, pin + pin.replace('(net "TX"))', twin)))
 
 
+def test_a_kicad_number_on_two_nets_stops_the_row_only_where_the_trace_can_reach():
+    """A capacitor's pad 1 on two nets, away from the header's copper, does
+    not stop the row: that pad is a contact on each of its nets -- on N1,
+    enough to keep R1 from being crossed. On a resistor of two pins, as on
+    the chip and a header, it is refused."""
+    signals = {"TX": ["J1.1", "R1.1"], "N1": ["R1.2", "U1.1"], "A": ["C9.1"], "B": ["C9.2"]}
+    text = _kicad_traced_board(signals, {"R1": (2, "1k"), "C9": (2, "0.1uF")})
+    cap = '(pad "1" smd rect (at 1 0) (size 1 1) (layers "*.Cu") (net "A"))'
+    far = '(pad "2" smd rect (at 2 0) (size 1 1) (layers "*.Cu") (net "N1"))'
+    assert text.count(cap) == 1 and text.count(far) == 1
+    assert _kicad_traced(text) == {"TX": "GPIO4"}
+    assert _kicad_traced(text.replace(cap, cap + cap.replace('"A"', '"B"'))) == {"TX": "GPIO4"}
+    assert _kicad_traced(text.replace(cap, cap + cap.replace('"A"', '"N1"'))) == {}
+    with pytest.raises(PindefError, match=re.escape(
+            "probe.kicad_pcb: R1 numbers pads alike and puts them on different "
+            "nets, {'2': ['B', 'N1']}")):
+        _kicad_traced(text.replace(far, far + far.replace('"N1"', '"B"')))
+
+
+def test_a_kicad_header_is_traced_by_the_pads_its_geometry_reads(tmp_path):
+    """`tools/import_board.py` reads a header's through-hole pads, so the
+    trace does too: an SMD pad on the header -- pad 5, on a net reaching U1's
+    GPIO5 -- is no header pin and is traced nowhere, and a number split
+    across a hole and an SMD pad is not refused, as the geometry does not
+    refuse it. Split across two holes, it is."""
+    text = _kicad_traced_board({"TX": ["J1.1", "U1.1"], "SMD": ["U1.2"]})
+    hole = ('(pad "1" thru_hole circle (drill 0.5) (at 1 0) (size 1 1) (layers "*.Cu") '
+            '(net "TX"))')
+    assert text.count(hole) == 1
+    smd = ('(pad "5" smd rect (at 5 1) (size 1 1) (layers "F.Cu") (net "SMD"))'
+           '(pad "1" smd rect (at 1 1) (size 1 1) (layers "F.Cu") (net "RX"))')
+    board = text.replace(hole, hole + smd)
+    assert _kicad_traced(board) == {"TX": "GPIO4"}
+    path = tmp_path / "probe.kicad_pcb"
+    path.write_text(board, encoding="utf-8")
+    assert {pad.label for pad in import_board.read_geometry(path, ("J1",)).pads} == {
+        "TX", "2", "3", "4"}
+    with pytest.raises(PindefError, match=re.escape(
+            "J1 numbers pads alike and puts them on different nets, {'1': ['RX', 'TX']}")):
+        _kicad_traced(text.replace(hole, hole + hole.replace('"TX"', '"RX"')))
+
+
+def test_a_kicad_auto_net_name_is_not_read_as_a_gpio_name():
+    """KiCad names a net nobody named after a pad on it: `Net-(IC1-GPIO5)`,
+    `unconnected-(IC1-GPIO16-Pad27)`. Neither is a name a person gave, and
+    neither `/`-part is `GPIO<n>` whole, so a net on U1's GPIO4 so named
+    resolves GPIO4 from its copper and is not refused."""
+    for net in ("Net-(IC1-GPIO5)", "unconnected-(IC1-GPIO16-Pad27)"):
+        assert _kicad_traced(_kicad_traced_board({net: ["J1.1", "U1.1"]})) == {net: "GPIO4"}
+
+
 def test_a_kicad_header_and_chip_are_each_exactly_one_footprint():
     """A reference no footprint has, or two share, and a chip placed as the
     table's footprint and value by none or by two: each refused, naming the
@@ -2929,6 +2980,10 @@ def test_a_kicad_header_and_chip_are_each_exactly_one_footprint():
             _kicad_traced(_kicad_traced_board({"TX": ["J1.1"]}, parts))
     with pytest.raises(PindefError, match="probe.kicad_pcb: expected '\\('"):
         _kicad_traced("not a board")
+    # Where the parser's own words already name the file, it is named once.
+    with pytest.raises(PindefError, match="probe.kicad_pcb: not a board") as caught:
+        _kicad_traced('(footprint "X")')
+    assert str(caught.value).count("probe.kicad_pcb") == 1, caught.value
 
 
 def test_a_row_whose_board_file_no_reader_traces_is_refused():

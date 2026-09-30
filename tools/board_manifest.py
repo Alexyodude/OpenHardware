@@ -487,14 +487,14 @@ def check(entry: Row) -> None:
         )
     # Which pads are one pin: a KiCad board says so by its pads' numbers,
     # and an EAGLE board only through its schematic's device connects.
-    kicad = pathlib.PurePosixPath(entry.cad).suffix.lower() == ".kicad_pcb"
-    if kicad and entry.schematic is not None:
+    is_kicad = pathlib.PurePosixPath(entry.cad).suffix.lower() == ".kicad_pcb"
+    if is_kicad and entry.schematic is not None:
         raise ManifestError(
             f"{entry.board}: {entry.cad} is a KiCad board, whose pads carry "
             f"their own numbers and nets; a schematic's connects are read for "
             f"an EAGLE board only, so the row names no {entry.schematic}"
         )
-    if not kicad and entry.schematic is None:
+    if not is_kicad and entry.schematic is None:
         raise ManifestError(
             f"{entry.board}: {entry.cad} is not a KiCad board, and which of "
             f"its pads are one pin is stated by its schematic's device "

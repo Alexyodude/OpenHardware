@@ -871,7 +871,7 @@ _NAMED_GPIO = re.compile(r"(?:GPIO|IO)-?(\d+)", re.I)
 #: A resistor, the one part a trace crosses: a reference `R<n>` and a value
 #: that reads as ohms -- `1k`, `4.7k`, `100K`, `0`, `4K7`, `22R`.
 _RESISTOR = re.compile(r"R\d+")
-_OHMS = re.compile(r"(?:\d+(?:\.\d+)?\s*(?:[kmr]|ohms?|Ω)?|\d+[rkm]\d+)", re.I)
+_OHMS = re.compile(r"(?:\d+(?:\.\d+)?\s*(?:[kmr]|ohms?|\u03a9)?|\d+[rkm]\d+)", re.I)
 
 
 class _Part(typing.NamedTuple):
@@ -921,21 +921,30 @@ def read_kicad_traced(
     placed as its footprint's name, without the library, and its value. The
     chip is the one footprint placed as the table's package and value.
 
-    KiCad joins a footprint's pads to its pins by number, so one number is
-    one pin however many pads carry it -- a castellated header's hole and
-    half-hole -- and counts as one contact on its net. An unnumbered pad is
-    no pin. One number on two nets is refused, because one pin is on one
-    net, as `tools/import_board.py` refuses it on a header."""
+    KiCad joins a footprint's pads to its pins by number, so one number on
+    one net is one pin however many pads carry it -- a castellated header's
+    hole and half-hole -- and counts as one contact on that net. An
+    unnumbered pad is no pin. A header's nets are those of its through-hole
+    pads, the pads `tools/import_board.py` reads for the geometry.
+
+    One number on two nets is refused on a footprint the trace can reach --
+    the chip, a header, a resistor `R<n>` with two numbered pins -- because
+    one pin is on one net, as `tools/import_board.py` refuses it on a
+    header. Elsewhere it does not stop the row: such a pad is a contact on
+    each of its nets."""
     (text,) = texts
     try:
         board = kicad.read_board(path, text=text)
     except kicad.KicadError as exc:
-        # The parser's own words name no file where the text is not KiCad's.
-        raise PindefError(f"{path.name}: {exc}") from exc
-    parts = []
-    for placed in board.placements:
+        # The parser's own words name the file, except where the text is not
+        # KiCad's at all.
+        raise PindefError(str(exc) if path.name in str(exc) else f"{path.name}: {exc}"
+                          ) from exc
+
+    def one_net(placed: kicad.Placement, pads: typing.Iterable[kicad.Pad]) -> None:
+        """Refuse a number these pads put on two nets."""
         nets: dict[str, set[str]] = {}
-        for pad in placed.pads:
+        for pad in pads:
             if pad.number:
                 nets.setdefault(pad.number, set()).add(pad.net)
         split = {number: sorted(on) for number, on in nets.items() if len(on) > 1}
@@ -945,26 +954,38 @@ def read_kicad_traced(
                 f"them on different nets, {split}; one number is one pin, and "
                 f"one pin is on one net"
             )
-        parts.append(_Part(placed.reference, placed.name, placed.value,
-                           tuple((number, on.pop()) for number, on in nets.items())))
+
+    parts = [_Part(placed.reference, placed.name, placed.value,
+                   tuple(dict.fromkeys((pad.number, pad.net)
+                                       for pad in placed.pads if pad.number)))
+             for placed in board.placements]
     header = []
     for name in select:
-        found = [part for part in parts if part.name == name]
+        found = [placed for placed in board.placements if placed.reference == name]
         if len(found) != 1:
             raise PindefError(
                 f"{len(found)} footprints in {path.name} have the reference "
                 f"{name!r}; a header is read off exactly one"
             )
-        header += [net for _, net in found[0].pads]
-    chips = [part for part in parts
-             if (part.package, part.value) == (table.package, table.value)]
-    if len(chips) != 1:
+        through = [pad for pad in found[0].pads if pad.kind == "thru_hole"]
+        one_net(found[0], through)
+        header += [pad.net for pad in through]
+    placed_as = [placed for placed in board.placements
+                 if (placed.name, placed.value) == (table.package, table.value)]
+    if len(placed_as) != 1:
         raise PindefError(
-            f"{len(chips)} footprints in {path.name} are placed as "
+            f"{len(placed_as)} footprints in {path.name} are placed as "
             f"{table.package!r}, value {table.value!r}; its pin table is read "
             f"against exactly one"
         )
-    return _trace(chips[0], parts, header, table)
+    one_net(placed_as[0], placed_as[0].pads)
+    for placed in board.placements:
+        if (_RESISTOR.fullmatch(placed.reference)
+                and len({pad.number for pad in placed.pads if pad.number}) == 2):
+            one_net(placed, placed.pads)
+    (chip,) = [part for part, placed in zip(parts, board.placements, strict=True)
+               if placed is placed_as[0]]
+    return _trace(chip, parts, header, table)
 
 
 def _trace(chip: _Part, parts: list[_Part], header: list[str | None],
