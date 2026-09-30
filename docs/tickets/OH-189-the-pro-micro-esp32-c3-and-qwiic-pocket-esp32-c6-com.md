@@ -7,6 +7,9 @@ priority: P1
 created: '2026-09-30'
 touches:
 - docs/tickets/OH-189-*
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
+- tools/import_3d_model.py
 ---
 
 Part of OH-174, from OH-188. OH-188 made the SparkFun Pro Micro ESP32-C3 and the SparkFun Qwiic Pocket ESP32-C6 manifest rows with geometry, pins and runs, and left the model layer to the composer's owner. With OH-186's derived COMPOSED list, both boards compose with no edit, and OH-188 reports four things still wrong with the result:
