@@ -1958,7 +1958,9 @@ def test_every_component_lands_where_the_vendor_drew_its_body():
         if miss > worst:
             worst, worst_name = miss, element.name
 
-    assert checked == 47, (  # 15 until OH-119 mapped the Uno's small parts
+    # 15 until OH-119 mapped the Uno's small parts; 47 until OH-191, whose
+    # reading of the Uno's own schematic refuses F1, Z1 and Z2.
+    assert checked == 44, (
         f"only {checked} components were checked against silk")
     assert worst < compose.SILK_TOLERANCE_MM, (
         f"{worst_name} lands {worst:.2f} mm from the body the vendor drew"
@@ -2130,7 +2132,8 @@ def test_each_component_box_actually_contains_its_component():
                     assert solid["min"][axis] - 1e-3 <= value, element.name
                     assert value <= solid["max"][axis] + 1e-3, element.name
         checked += 1
-    assert checked == 47, (  # 15 until OH-119 mapped the Uno's small parts
+    # 15 until OH-119 mapped the Uno's small parts; 47 until OH-191.
+    assert checked == 44, (
         f"only {checked} components were boxed")
 
 
@@ -3672,7 +3675,12 @@ def test_every_uno_package_is_drawn_or_its_absence_is_explained():
         pytest.skip(f"no layout; run {spec.fetch_with}")
     board = compose.read_layout(spec.layout)
     mapped = {c.package for c in compose.CORRESPONDENCE}
-    explained = set(compose.ABSENT)
+    # A package every placement of which its own schematic refuses is
+    # explained there, with the reason printed per part (OH-191).
+    statements = compose.statements_for(spec)
+    stated_off = {e.package for e in board.elements
+                  if compose.drawn_from(e, statements)[1] is not None}
+    explained = set(compose.ABSENT) | stated_off
     orphans = sorted({e.package for e in board.elements}
                      - mapped - explained)
     assert not orphans, (
@@ -3733,9 +3741,10 @@ def test_the_pin_13_led_is_one_of_the_drawn_parts():
     for name in ("L (LED_0805_2012Metric)", "ON (LED_0805_2012Metric)",
                  "RX (LED_0805_2012Metric)", "TX (LED_0805_2012Metric)"):
         assert name in drawn, f"{name} is not in the shipped mesh's own list"
-    assert len(drawn) >= 47, (
-        f"the Uno draws {len(drawn)} parts; it drew 47 when OH-119 closed, "
-        f"and fewer means something was silently lost"
+    assert len(drawn) >= 44, (
+        f"the Uno draws {len(drawn)} parts; it drew 47 when OH-119 closed and "
+        f"44 once OH-191 read its schematic, which refuses F1, Z1 and Z2 "
+        f"out loud -- fewer means something was silently lost"
     )
 
 
@@ -4300,6 +4309,7 @@ def _schematic(tmp_path, parts: str, variantdefs: str = "") -> pathlib.Path:
         '<deviceset name="JUMPER" prefix="JP"/>'
         '<deviceset name="SWITCH" prefix="SW"/>'
         '<deviceset name="LOGO" prefix=""/>'
+        '<deviceset name="NETWORK" prefix="RN"/>'
         '</devicesets></library>'
         '<library name="twin" urn="urn:one"><devicesets>'
         '<deviceset name="PART" prefix="R"/></devicesets></library>'
@@ -4324,8 +4334,8 @@ def test_the_schematic_decides_a_passives_kind_and_which_statement_did(tmp_path)
         '<part name="LED1" library="lib" deviceset="LED" value="RED"/>'
         '<part name="CONN1" library="lib" deviceset="CONN" value=""/>'
         '<part name="G1" library="lib" deviceset="LOGO" value="ADAFRUIT"/>'
-        '<part name="P1" library="twin" library_urn="urn:one" deviceset="PART"/>'
-        '<part name="P2" library="twin" library_urn="urn:two" deviceset="PART"/>')))
+        '<part name="R12" library="twin" library_urn="urn:one" deviceset="PART"/>'
+        '<part name="C12" library="twin" library_urn="urn:two" deviceset="PART"/>')))
     assert stated["R1"] == compose.Statement("resistor", "R", "10K")
     assert stated["R3"] == compose.Statement("resistor", "R", None)
     # Only an F prefix agrees with a value reading FUSE.
@@ -4338,9 +4348,31 @@ def test_the_schematic_decides_a_passives_kind_and_which_statement_did(tmp_path)
     assert stated["CONN1"] == compose.Statement(compose.OTHER, "CONN", None)
     assert stated["G1"] == compose.Statement(None, None, None)
     # One library name, two urns, two prefixes.
-    assert stated["P1"].kind == "resistor" and stated["P2"].kind == "capacitor"
+    assert stated["R12"].kind == "resistor" and stated["C12"].kind == "capacitor"
     assert compose.PREFIX_KINDS == {"R": "resistor", "C": "capacitor",
-                                    "L": "inductor", "F": "fuse"}
+                                    "L": "inductor", "F": "fuse",
+                                    "RN": "resistor"}
+
+
+def test_a_passive_renamed_away_from_its_prefix_is_refused(tmp_path):
+    """**The designer's name against the library's prefix** (OH-191): the
+    Uno's F1 is placed from an inductor's deviceset and its Z1 from one
+    whose prefix is R. A name that keeps the prefix's letters keeps the
+    kind -- the Uno's PC1 is a polarised C -- and a name on a part whose
+    prefix is not a passive's says nothing either way."""
+    stated = compose.stated_kinds(_schematic(tmp_path, (
+        '<part name="F1" library="lib" deviceset="INDUCTOR" value="MF-MSMF050-2"/>'
+        '<part name="Z1" library="lib" deviceset="RESISTOR" value="CG0603MLC-05E"/>'
+        '<part name="PC1" library="lib" deviceset="CAP" value="47u"/>'
+        '<part name="RN1" library="lib" deviceset="NETWORK" value="10K"/>'
+        '<part name="ZU4" library="lib" deviceset="CHIP" value="ATMEGA328P"/>')))
+    for name, prefix in (("F1", "L"), ("Z1", "R")):
+        assert stated[name].kind is None, stated[name]
+        assert f"named it {name}" in stated[name].refused
+        assert f"prefix {prefix} says" in stated[name].refused
+    assert stated["PC1"] == compose.Statement("capacitor", "C", None)
+    assert stated["RN1"] == compose.Statement("resistor", "RN", "10K")
+    assert stated["ZU4"] == compose.Statement(compose.OTHER, "U", None)
 
 
 def test_two_statements_of_a_kind_that_disagree_refuse_the_part(tmp_path):
@@ -4477,6 +4509,9 @@ REFUSED_BY_SCHEMATIC = {
     "Adafruit KB2040": {"R8"},
     "SparkFun Pro Micro ESP32-C3": set(),
     "SparkFun Qwiic Pocket ESP32-C6": {"C6", "J2", "J3"},
+    # Arduino named its fuse F1 and its varistors Z1 and Z2, and placed them
+    # from an inductor's deviceset and a varistor's whose prefix is R.
+    "Arduino Uno": {"F1", "Z1", "Z2"},
 }
 
 
@@ -4532,15 +4567,18 @@ def test_each_manifest_board_counts_the_same_things_bodyless():
 
 
 def test_every_manifest_passive_is_drawn_as_the_kind_its_vendor_states():
-    """**The rows, held to the schematics**, per fetched board: each part a
-    schematic calls a resistor, capacitor, inductor or fuse is drawn from a
-    row of that kind, and the parts refused are the ones written above -- so
-    a row whose kind is swapped, or a package that loses its row for one
-    kind, fails by name."""
+    """**The rows, held to the schematics**, per fetched board that reads
+    one -- the manifest boards and the Uno: each part a schematic calls a
+    resistor, capacitor, inductor or fuse is drawn from a row of that kind,
+    and the parts refused are the ones written above -- so a row whose kind
+    is swapped, a package that loses its row for one kind, or a part whose
+    kind is restated, fails by name."""
     unfetched = []
-    for _row, spec in _manifest_specs():
-        if spec is None or not _fetched(spec):
-            unfetched.append(_row.board)
+    for spec in compose.COMPOSITIONS:
+        if spec.schematic is None:
+            continue
+        if not _fetched(spec):
+            unfetched.append(spec.board)
             continue
         assert spec.board in REFUSED_BY_SCHEMATIC, (
             f"{spec.board} is composed and its schematic's refusals are not "

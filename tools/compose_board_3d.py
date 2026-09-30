@@ -272,14 +272,6 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "matching resistor body.",
     ),
     Component(
-        "CT/CN0603", "Capacitor_SMD", "C_0603_1608Metric",
-        "Z1 and Z2, the USB line varistors. Two pads 2.00 mm apart on an "
-        "0603-sized land, and a multilayer varistor IS a ceramic chip in an "
-        "0603 body -- the model is the body, borrowed from the capacitor "
-        "that shares it. The PART is a varistor; only the moulding is a "
-        "capacitor's, and both are ceramic blocks.",
-    ),
-    Component(
         "0805", "Inductor_SMD", "L_0805_2012Metric",
         "L1 and L2, the ferrites. Two pads 2.20 mm apart, an 0805 land, and "
         "the 2.0 x 1.25 mm chip body.",
@@ -296,17 +288,6 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "D1, the reverse-protection diode. Two pads 4.40 mm apart and the "
         "SMB (DO-214AA) body is 4.3 x 3.6 mm -- the package name is the "
         "JEDEC name the model uses.",
-    ),
-    Component(
-        "L1812", "Capacitor_SMD", "C_1812_4532Metric",
-        "F1, the resettable polyfuse. Two pads 3.90 mm apart along y on an "
-        "1812 land, and the model is the 4.5 x 3.2 mm 1812 BODY -- borrowed "
-        "from the capacitor library because KiCad's Fuse library stops at "
-        "1210 (checked against GitLab's own tree, 28 files, 2026-08-30). A "
-        "polyfuse is a rectangular chip; the PART is a fuse, only the "
-        "moulding is a capacitor's, the same argument as Z1/Z2 above. EAGLE "
-        "runs it along y.",
-        turn=90.0,
     ),
     Component(
         "CAY16", "Resistor_SMD", "R_Array_Convex_4x0603",
@@ -1768,6 +1749,9 @@ COMPOSITIONS: tuple[Composition, ...] = (
             "silhouette, which is what makes it the board's colour rather "
             "than one that happens to be in the drawing"
         ),
+        # Arduino's schematic, from the same CAD zip as the board file: what
+        # says which kind of passive each placement is (OH-191).
+        schematic=REPO / "third_party" / "arduino-uno" / "UNO-TH_Rev3e.sch",
     ),
     Composition(
         board="XIAO-ESP32-C3-DIP",
@@ -2863,9 +2847,10 @@ PASSIVE_KINDS = {"Resistor_SMD": "resistor", "Capacitor_SMD": "capacitor",
 #: it: the letters a reference designator is numbered after. Only an EMPTY
 #: prefix is silence. Any other names a kind, and one not in this table names
 #: a kind that is none of these -- `D`, `U`, `FB`, `LED`, `CONN`. `F` is here
-#: so that a fuse's prefix agrees with a value reading FUSE and no other does.
+#: so that a fuse's prefix agrees with a value reading FUSE and no other does;
+#: `RN` is a resistor network's, which the Uno's `4R-N` states (OH-191).
 PREFIX_KINDS = {"R": "resistor", "C": "capacitor", "L": "inductor",
-                "F": "fuse"}
+                "F": "fuse", "RN": "resistor"}
 
 #: The kind a prefix outside `PREFIX_KINDS` states.
 OTHER = "other"
@@ -2970,6 +2955,15 @@ def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
                  "value": value if by_value else None}
         disagree = bool(by_prefix and by_value and by_prefix != by_value)
         kind = None if disagree else (by_prefix or by_value)
+        # **A designer who renames a part away from its deviceset's prefix
+        # has said something the library did not** (OH-191). EAGLE numbers
+        # a part after its prefix; the Uno's F1 is placed from an inductor's
+        # deviceset (prefix L) and its Z1 and Z2 from one whose prefix is R.
+        # A name that keeps the prefix's letters -- a PC1 for a C -- keeps
+        # its kind; one that drops them contradicts a passive's prefix.
+        letters = re.match(r"[A-Za-z]*", name).group(0).upper()
+        renamed = (by_prefix in PASSIVE_KINDS.values()
+                   and prefix.upper() not in letters)
         word = value.strip().upper()
         passive = kind in PASSIVE_KINDS.values()
         device = part.get("device", "")
@@ -2981,6 +2975,13 @@ def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
                  for at in range(len(runs))):
             refused = (f"{schematic.name} places {name} from {where}'s device "
                        f"{device!r}, whose name says NO_POP: not fitted")
+        elif renamed:
+            refused = (f"{schematic.name} places {name} from {where}, whose prefix "
+                       f"{prefix} says {by_prefix} and would number it "
+                       f"{prefix}<n>, and its designer named it {name}: the "
+                       f"library and the designer disagree about what it is, "
+                       f"and drawing the library's kind would take its word "
+                       f"over theirs")
         elif disagree:
             prefix_says = ("a kind none of R, C, L and F" if by_prefix == OTHER
                            else by_prefix)
