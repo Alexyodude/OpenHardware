@@ -1120,8 +1120,10 @@ SOURCES: tuple[Source, ...] = (
             url="https://github.com/OLIMEX/ESP32-C3-DevKit-Lipo.git",
             # The newest of the four revisions, D: the variant names none.
             # HARDWARE/Hardware-revision-changes.txt calls it "Preliminary,
-            # unreleased" and lists the two GPIOs it moves back from C, both
-            # sense lines, neither a header pad's GPIO.
+            # unreleased", and says D swaps back from C which of GPIO1 and
+            # GPIO5 senses the battery and which the external power. Both
+            # are header pads; in D their nets are /GPIO1\BAT_MEASURE and
+            # /GPIO5\EXT_PWR_SENSE.
             wanted=(
                 "HARDWARE/ESP32-C3-DevKit-Lipo_Rev_D/ESP32-C3-DevKit-Lipo_Rev_D.kicad_pcb",
                 "README.md",
