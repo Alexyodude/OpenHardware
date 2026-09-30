@@ -1,7 +1,7 @@
 ---
 id: OH-196
 title: 'A manifest RP2040 board runs as itself: the KB2040 and the Glyph Mini'
-status: in-review
+status: in-progress
 priority: P1
 created: '2026-09-30'
 touches:
@@ -15,6 +15,9 @@ touches:
 - tests/webui/test_kb2040_board.py
 - tests/webui/test_glyph_mini_rp2040_board.py
 - tests/webui/rp2040_rows/**
+- tools/check_board_claims.py
+- webui/api.py
+- tests/cortexm0/test_board_rp2040.py
 ---
 
 Part of OH-174. The Adafruit KB2040 and the PCBCUPID Glyph Mini RP2040 hold geometry and pins and read `RP2040:no` for runs: rules/board-claims.md §7 gives a manifest board its own run evidence only through a named test that compiles for that board against its own variant, runs the image, and watches a GPIO the variant names through the board's own pad. The ESP32 manifest boards meet that through the page's compile service. RP2040 has no compile recipe (compile.py's RECIPES), and the chip-level evidence for the RP2040 (`tests/cortexm0/test_blink.py`) is a bare-metal blink, because an Arduino/pico-sdk build calls into the RP2040 boot ROM, whose licence the 2026-08-24 notes record as not redistributable.
