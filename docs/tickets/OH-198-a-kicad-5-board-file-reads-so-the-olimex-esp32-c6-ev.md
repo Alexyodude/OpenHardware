@@ -2,11 +2,14 @@
 id: OH-198
 title: A KiCad 5 board file reads, so the Olimex ESP32-C6-EVB and Olimex's older boards
   can be rows
-status: open
+status: in-progress
 priority: P2
 created: '2026-09-30'
 touches:
 - docs/tickets/OH-198-*
+- tools/kicad.py
+- tests/rules/test_kicad.py
+- tests/rules/kicad5/**
 ---
 
 Part of OH-174, found by OH-194. The Olimex ESP32-C6-EVB stopped before a registry row because its only board file, `HARDWARE/Hardware-revision-A/ESP32-C6-EVB_Rev_A.kicad_pcb`, is KiCad 5: `kicad.read_board` refuses a board that places its parts as `(module ...)` (OH-182 made that refusal name the format). The survey found Olimex is the strongest KiCad source with real variants, and earlier Olimex revisions are KiCad 5 too (OH-182's review).
