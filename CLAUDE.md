@@ -114,7 +114,8 @@ the Arduino Uno is the one that does. It stands KiCad's published component
 models on the outline and placements in Arduino's own EAGLE board file, so the
 board draws with its notch, its DIP-28, its four headers, its barrel jack and
 its USB socket without a height or a position being invented anywhere. It needs
-the vendor's `.brd`, which `python tools/get_board_sources.py arduino-uno`
+the vendor's `.brd` and `.sch` from the same CAD zip -- the schematic says what
+each passive is (OH-191) -- which `python tools/get_board_sources.py arduino-uno`
 prints the URL for -- an `https-archive`, so it is downloaded by hand, as the
 Pico's is.
 
