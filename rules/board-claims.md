@@ -411,9 +411,11 @@ and a path climbing out of the test's directory.
 
 §10's conditions do not name a label, and the PCBCUPID Glyph C3 (OH-194)
 meets them on `LED_BUILTIN`, on the header pads its board file puts on
-PCBCUPID's `/GPIO_1`. Every other table on the ESP32-C3 numbers
-`LED_BUILTIN` another GPIO, or no pin at all -- it defines none, or defines
-it as something other than an integer, as an RGB LED past the chip's GPIO
-count is -- and then a build against it is refused and moves nothing.
-`tests/webui/test_pcbcupid_glyph_c3_board.py` reads each table for it, and
-asserts why not `SDA`: its net, `/SDA`, carries no GPIO.
+PCBCUPID's `/GPIO_1`, as the Glyph C6 does on its `/GPIO_14`. Every other
+table on the same chip numbers `LED_BUILTIN` another GPIO, or no pin at
+all -- it defines none, or defines it as something other than an integer,
+as an RGB LED past the chip's GPIO count is -- and then a build against it
+is refused and moves nothing. `tests/webui/test_pcbcupid_glyph_c3_board.py`
+and `tests/webui/test_pcbcupid_glyph_c6_board.py` read each table for it,
+build the sketch for each sibling that numbers none, and assert why not
+`SDA`: its net, `/SDA`, carries no GPIO.

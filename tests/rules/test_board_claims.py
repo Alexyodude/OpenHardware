@@ -128,6 +128,8 @@ def test_the_repository_passes_today():
             "tests/webui/test_glyph_mini_rp2040_board.py" in result.stdout)
     assert ("PCBCUPID Glyph C3 -> "
             "tests/webui/test_pcbcupid_glyph_c3_board.py" in result.stdout)
+    assert ("PCBCUPID Glyph C6 -> "
+            "tests/webui/test_pcbcupid_glyph_c6_board.py" in result.stdout)
 
 
 def test_the_rule_arms_this_checker():

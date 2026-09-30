@@ -317,7 +317,8 @@ def test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence():
     Adafruit KB2040 and the PCBCUPID Glyph Mini RP2040 joined under OH-196,
     with no recipe to compile a sketch: each runs the chip's bare-metal blink
     built against its own variant, as board-claims §11 decides. The
-    PCBCUPID Glyph C3 joined under OH-194, watching `LED_BUILTIN` (§13).
+    PCBCUPID Glyph C3 and C6 joined under OH-194, each watching
+    `LED_BUILTIN` (§13).
     """
     from tools import board_manifest
 
@@ -326,7 +327,8 @@ def test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence():
     assert proven == {"Adafruit Feather ESP32-C6", "SparkFun Thing Plus ESP32-C6",
                       "Adafruit QT Py ESP32-C3", "SparkFun Pro Micro ESP32-C3",
                       "SparkFun Qwiic Pocket ESP32-C6", "Adafruit KB2040",
-                      "PCBCUPID Glyph Mini RP2040", "PCBCUPID Glyph C3"}
+                      "PCBCUPID Glyph Mini RP2040", "PCBCUPID Glyph C3",
+                      "PCBCUPID Glyph C6"}
     assert set(catalogue.BOARD_FIRMWARE_VERIFIED) == proven
 
 
