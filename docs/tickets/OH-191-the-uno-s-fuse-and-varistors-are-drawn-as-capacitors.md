@@ -2,13 +2,11 @@
 id: OH-191
 title: The Uno's fuse and varistors are drawn as capacitors; its own schematic says
   what they are
-status: in-progress
+status: in-review
 priority: P2
 created: '2026-09-30'
 touches:
 - docs/tickets/OH-191-*
-- tools/compose_board_3d.py
-- tests/rules/test_compose_board_3d.py
 ---
 
 Found by OH-187's review (2026-09-30). The composed Arduino Uno draws F1, its fuse, with a C_1812 capacitor model, and Z1 and Z2, its varistors, with C_0603 capacitor models. The pads land, so every placement check passes, and the drawn list names parts they are not: the false-part-name rule CLAUDE.md gives for the QFN-56 near miss.
@@ -22,3 +20,5 @@ Done when the Uno's drawn list names no part as a kind its schematic contradicts
 **Note 2026-09-30:** 2026-09-30, lane2 (local, not merged): 62c837e, 65a05d3. The Uno's Composition carries UNO-TH_Rev3e.sch (same CAD zip as its .brd), read through statements_for as the manifest boards' are. What Arduino's schematic states: F1 from rcl/L-EU (INDUCTOR, prefix L), valued 'MF-MSMF050-2 500mA'; Z1 and Z2 from varistor/VARISTOR, prefix R, valued 'CG0603MLC-05E'. The prefix alone would draw the fuse as an inductor and the varistors as resistors, so neither 'draw as stated' outcome was true: a name that drops a passive's prefix letters (F1 for L, Z1 for R) is the designer contradicting the library, and the part is refused with both statements; a name that keeps them (PC1 for C) keeps the kind. No model would have been found anyway: KiCad's Fuse library stops at 1210 (28 files) and its Varistor library holds 100 disc models, none SMD, listed 2026-09-30 -- the review's 'KiCad publishes a Fuse 1812 model' is not so. RN joins PREFIX_KINDS (the Uno's 4R-N networks, which would otherwise be refused as other-kind-valued-in-ohms). Uno: 47 -> 44 drawn (F1, Z1, Z2 gone), refused 5 (QS, RESONATOR; F1, Z1, Z2 by its schematic); every other Uno placement and every other board's --check drawn list unchanged. Rows L1812 (C_1812) and CT/CN0603 (C_0603) drew nothing and are gone; three tests pinning 47 pin 44 with the reason; REFUSED_BY_SCHEMATIC holds the Uno and its passive test runs on every board that reads a schematic. Red on purpose: the rename unread, a rename read as 'does not start with the prefix' (refuses PC1), RN unread, the Uno reading no schematic. Composer and importer rule files under miniconda: 218 passed.
 
 **Note 2026-09-30:** 2026-09-30: tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py passed on to OH-190, then OH-193; they return to OH-163 after OH-193.
+
+**Note 2026-09-30:** 2026-09-30, review round (lane2, rebased on master with OH-192): 56a34f3. (1) DESIGNATOR_STEMS, closed and pinned, pairs each passive prefix with the name stems that agree with it -- R: R, RN; C: C, PC; L: L, FB; F: F, PTC; RN: RN, R -- and any other stem refuses with both statements; the substring rule it replaces drew RV1, RT1 and CR1 on an R as resistors. DEVICESET_WORDS (VARISTOR, FUSE, PTC, THERMISTOR, FERRITE; closed and pinned) is a third statement of kind from the deviceset's own name, agreeing or disagreeing like the prefix and the value: the Uno's Z1 and Z2 are now refused because VARISTOR disagrees with prefix R, F1 because its stem F is not an L's. Only a passive prefix is asked, so an LED named TX or a chip named ZU4 says nothing. The rename test now holds F1, Z1, RV1, CR1 and JP1 (0R) refused, R5 on a VARISTOR refused by the word, FB1 on an L, PTC2 on an F, R7 on an RN drawn, TX and ZU4 unasked. The Uno still draws 44; every board's drawn list unchanged. (2) With the .brd and not the .sch, three Uno tests failed and main() returned 3 at the first skipped board: they skip through _uno_whole() naming the missing file (reproduced with the .sch moved aside: 9 skip, none fail), and main() reports each skipped board, composes the rest and ends 3 (a test drives it). (3) Stale prose and count comments fixed. Red on purpose: the stem unread, read as endswith, read as a substring; deviceset words unread; main stopping at the first skip. Composer and importer rule files under miniconda: 220 passed, 2 skipped (the Glyph Mini's refusal is OH-193's item 9).
