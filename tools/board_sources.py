@@ -1044,6 +1044,58 @@ SOURCES: tuple[Source, ...] = (
         cite="OH-194: GitHub's tree listing of the default branch, read 2026-09-30; "
         "the board file and the README fetched here and opened",
     ),
+    Source(
+        name="pcbcupid-glyph-c6",
+        vendor="PCBCUPID",
+        model="one repository per board, this one among 46 under org:pcbcupid",
+        size="1,319,294 + 732 bytes, the two blobs fetched, as GitHub's tree lists them",
+        licence=_PCBCUPID_README_CC_BY_SA_4,
+        fetch=Fetch(
+            transport=Transport.GIT_SPARSE,
+            url="https://github.com/pcbcupid/PCBCUPID-Glyph-C6.git",
+            wanted=("esp32c6.kicad_pcb", "README.md"),
+            skipped=(
+                ("esp32c6.kicad_sch", "the KiCad schematic. Nothing reads it; the "
+                 "pads and nets are in the .kicad_pcb"),
+                ("esp32c6.kicad_pro", "KiCad's project settings file; nothing here "
+                 "reads one"),
+                ("esp32c6.kicad_prl", "KiCad's per-user project state, layer "
+                 "visibility and the like; nothing here reads one"),
+                ("fp-lib-table", "opened 2026-09-30: two footprint libraries, by "
+                 "paths on the designer's machine that the tree does not hold"),
+                ("sym-lib-table", "opened 2026-09-30: one symbol library, by a path "
+                 "on the designer's machine that the tree does not hold"),
+            ),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES, Evidence.LISTED,
+                "esp32c6.kicad_sch, KiCad; listed, not fetched",
+            ),
+            schematic_pdf=Artefact(
+                Published.NO, Evidence.ABSENT, "the tree holds seven files and no PDF"
+            ),
+            pcb_layout=Artefact(
+                Published.YES, Evidence.OPENED,
+                "esp32c6.kicad_pcb, KiCad version 20240108, read by tools/kicad.py",
+            ),
+            footprints_symbols=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "no .kicad_mod or .kicad_sym among the seven files; the footprints "
+                "are inside the .kicad_pcb",
+            ),
+            model_3d=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "no .step, .stp, .wrl or .stl among the seven files",
+            ),
+            board_support=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "none of the seven files defines pins for firmware",
+            ),
+        ),
+        cite="OH-194: GitHub's tree listing of the default branch, read 2026-09-30; "
+        "the board file and the README fetched here and opened",
+    ),
 )
 
 
