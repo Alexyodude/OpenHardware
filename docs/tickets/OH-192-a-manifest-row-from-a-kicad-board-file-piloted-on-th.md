@@ -2,7 +2,7 @@
 id: OH-192
 title: A manifest row from a KiCad board file, piloted on the PCBCUPID Glyph Mini
   RP2040
-status: in-review
+status: in-progress
 priority: P1
 created: '2026-09-30'
 touches:
@@ -16,6 +16,7 @@ touches:
 - tests/webui/test_pin_view.py
 - webui/boards/PCBCUPID*
 - README.md
+- PROVENANCE.md
 ---
 
 Part of OH-174. Every manifest row so far is an EAGLE board. Several open boards whose chips already run here publish only KiCad: the PCBCUPID Glyph Mini RP2040 (`glyph-mini-rp2040.kicad_pcb`, MIT, LICENSE file read by the OH-177 survey), the PCBCUPID Glyph C3 and C6, the Olimex ESP32-C3-DevKit-Lipo and ESP32-C6-EVB, and the SparkFun Thing Plus ESP32-C5. OH-182 made tools/import_board.py read a whole-board `.kicad_pcb` (header footprints by reference, one pad per pad number, pads labelled by net). What stops a KiCad row, per OH-181's and OH-180's notes:
