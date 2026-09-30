@@ -158,14 +158,15 @@ the footprint -- EAGLE's curved silkscreen wire, KiCad's `fp_circle` on
 finds by seeing which of its vertices a half turn moves. Neither side is a
 table written here, and the feature is never named: on the Arduino's DIP-28 it
 is the notch in the top of the body, and the rule would hold as well for a
-bevel. Which packages qualify, and by how much the closest turn wins, is
-printed by `python tools/compose_board_3d.py --check` rather than written here:
-this paragraph carried those counts, and they went stale as boards were added.
+bevel. This paragraph used to count the packages that qualify and the margin
+the closest turn wins by; the counts went stale as boards were added, and
+nothing printed them, so they are gone rather than moved.
 
-**A half turn that moves nothing is not a claim that can be wrong** -- every
-pin header, every 0201 is in that position. The ones that do move and that
-nothing can check are counted and printed per board by the same command, the
-same way unread silkscreen is.
+**A half turn that moves nothing is not a claim that can be wrong.** The
+placements that a half turn does move and that nothing here can check are
+listed per board by `python tools/compose_board_3d.py --check` (which needs
+`cadquery-ocp`), on a `turn` line, the same way unread silkscreen is; a board
+with none prints no such line.
 
 **And the underside is lit** (OH-111), because that is where a XIAO's pin
 names, its battery pads and the words "Seeed Studio" are printed. One light
