@@ -328,6 +328,31 @@ def test_a_reference_is_read_from_either_place_kicad_puts_it(tmp_path):
     assert {p.reference for p in read_board(path).placements} == {"U4", "C13"}
 
 
+def test_a_value_is_read_from_either_place_kicad_puts_it(tmp_path):
+    """The part a footprint is, beside where it sits: `(property "Value" ...)`
+    on U4 and the older `(fp_text value ...)` on C13, and `""` where neither
+    is written. `tools/import_pindefs.py` finds a board's chip by it."""
+    assert {p.reference: p.value for p in read_board(tmp_path / "unwritten.kicad_pcb",
+                                                    text=BOARD).placements} == {
+        "U4": "", "C13": ""}
+    text = BOARD.replace(
+        '(property "Reference" "U4"',
+        '(property "Value" "RP2040" (at 0 0 0) (layer "F.Fab"))\n\t\t(property "Reference" "U4"',
+    ).replace('(fp_text reference "C13"',
+              '(fp_text value "100nF" (at 0 0 0) (layer "B.Fab"))\n\t\t(fp_text reference "C13"')
+    got = read_board(tmp_path / "unwritten.kicad_pcb", text=text).placements
+    assert {p.reference: p.value for p in got} == {"U4": "RP2040", "C13": "100nF"}
+
+
+def test_a_board_given_as_text_is_read_from_that_text(board):
+    """`text` is parsed in place of the file, which then only names it: the
+    bytes a caller read and digested are the bytes read here."""
+    renamed = BOARD.replace('"Reference" "U4"', '"Reference" "U9"')
+    assert {p.reference for p in read_board(board, text=renamed).placements} == {
+        "U9", "C13"}
+    assert {p.reference for p in read_board(board).placements} == {"U4", "C13"}
+
+
 def test_a_placement_without_a_rotation_is_not_rotated(board):
     """`(at x y)` is legal and means zero. Indexing coords[2] and hoping is
     an IndexError on roughly half the parts of any real board."""

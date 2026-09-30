@@ -523,6 +523,11 @@ class Placement:
     #: and a reader that never saw them could not say "four are hidden and the
     #: fifth is a whole different board". See `StatedModel`.
     models: tuple[StatedModel, ...] = ()
+    #: What the part is -- `"RP2040"`, `"1K"` -- as the schematic's value
+    #: field states it, or `""` where the file gives none. The reference
+    #: says where a part sits and this says which part it is, which is how
+    #: `tools/import_pindefs.py` finds a board's chip and its resistors.
+    value: str = ""
 
     @property
     def name(self) -> str:
@@ -604,6 +609,19 @@ def _reference_of(node: list) -> str:
             return prop[2]
     for text in children(node, "fp_text"):
         if len(text) > 2 and text[1] == "reference" and isinstance(text[2], str):
+            return text[2]
+    return ""
+
+
+def _value_of(node: list) -> str:
+    """A footprint's value, from either place it can live, as `_reference_of`
+    reads the reference: `(property "Value" ...)`, or the older
+    `(fp_text value ...)`."""
+    for prop in children(node, "property"):
+        if len(prop) > 2 and prop[1] == "Value" and isinstance(prop[2], str):
+            return prop[2]
+    for text in children(node, "fp_text"):
+        if len(text) > 2 and text[1] == "value" and isinstance(text[2], str):
             return text[2]
     return ""
 
@@ -1022,14 +1040,19 @@ def _models_of(node: list) -> tuple[StatedModel, ...]:
     return tuple(out)
 
 
-def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
+def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
+               text: str | None = None) -> Board:
     """Read one `.kicad_pcb`: the board outline and every placement on it.
 
     `layer` is which layer carries the outline, and it is a parameter because
     it is the one thing here a vendor can reasonably disagree about -- not
     because anything today passes something else.
+
+    `text`, where given, is read in place of the file at `path`, which then
+    only names it: `eagle.read_board` takes the same, so that a caller who
+    has already read the bytes -- and digested them -- parses those bytes.
     """
-    tree = parse_sexp(path.read_text(encoding="utf-8"))
+    tree = parse_sexp(path.read_text(encoding="utf-8") if text is None else text)
     if head(tree) != "kicad_pcb":
         raise KicadError(f"{path}: not a board (root is {head(tree)!r})")
 
@@ -1088,6 +1111,7 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts") -> Board:
             body=_body_of(node),
             mark=_mark_of(node),
             models=_models_of(node),
+            value=_value_of(node),
         )
         placements.append(placed)
         drawn, curved = _fp_graphics(node, layer, placed)
