@@ -313,7 +313,10 @@ def test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence():
     ESP32-C6 and the QT Py ESP32-C3 joined under OH-185, once their own
     tables compiled here, each with its own test of the same shape. The
     SparkFun Pro Micro ESP32-C3 and Qwiic Pocket ESP32-C6 joined under
-    OH-188, each watching `MOSI` for the reasons board-claims §10 gives.
+    OH-188, each watching `MOSI` for the reasons board-claims §10 gives. The
+    Adafruit KB2040 and the PCBCUPID Glyph Mini RP2040 joined under OH-196,
+    with no recipe to compile a sketch: each runs the chip's bare-metal blink
+    built against its own variant, as board-claims §11 decides.
     """
     from tools import board_manifest
 
@@ -321,7 +324,8 @@ def test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence():
     proven = {b.name for b in catalogue.catalogue() if b.firmware_verified and b.name in rows}
     assert proven == {"Adafruit Feather ESP32-C6", "SparkFun Thing Plus ESP32-C6",
                       "Adafruit QT Py ESP32-C3", "SparkFun Pro Micro ESP32-C3",
-                      "SparkFun Qwiic Pocket ESP32-C6"}
+                      "SparkFun Qwiic Pocket ESP32-C6", "Adafruit KB2040",
+                      "PCBCUPID Glyph Mini RP2040"}
     assert set(catalogue.BOARD_FIRMWARE_VERIFIED) == proven
 
 

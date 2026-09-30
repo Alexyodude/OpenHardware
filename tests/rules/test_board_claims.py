@@ -123,6 +123,9 @@ def test_the_repository_passes_today():
             "tests/webui/test_sparkfun_pro_micro_esp32c3_board.py" in result.stdout)
     assert ("SparkFun Qwiic Pocket ESP32-C6 -> "
             "tests/webui/test_sparkfun_qwiic_pocket_esp32c6_board.py" in result.stdout)
+    assert "Adafruit KB2040 -> tests/webui/test_kb2040_board.py" in result.stdout
+    assert ("PCBCUPID Glyph Mini RP2040 -> "
+            "tests/webui/test_glyph_mini_rp2040_board.py" in result.stdout)
 
 
 def test_the_rule_arms_this_checker():

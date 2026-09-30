@@ -198,7 +198,7 @@ FIRMWARE_VERIFIED: dict[str, str] = {
 
 #: A row of `tools/board_manifest.py` to the test that compiled a sketch for
 #: it against its own variant and watched the image run (rules/board-claims.md
-#: §7). A row does not inherit its chip's `FIRMWARE_VERIFIED` entry (§6), so
+#: §7), or on an RP2040 a bare-metal image (§11). A row does not inherit its chip's `FIRMWARE_VERIFIED` entry (§6), so
 #: this is its only licence; `tools/check_board_claims.py` holds each entry
 #: as it holds that table's, and to loading its board by name (§7).
 BOARD_FIRMWARE_VERIFIED: dict[str, str] = {
@@ -208,6 +208,8 @@ BOARD_FIRMWARE_VERIFIED: dict[str, str] = {
     "SparkFun Pro Micro ESP32-C3": "tests/webui/test_sparkfun_pro_micro_esp32c3_board.py",
     "SparkFun Qwiic Pocket ESP32-C6":
         "tests/webui/test_sparkfun_qwiic_pocket_esp32c6_board.py",
+    "Adafruit KB2040": "tests/webui/test_kb2040_board.py",
+    "PCBCUPID Glyph Mini RP2040": "tests/webui/test_glyph_mini_rp2040_board.py",
 }
 
 #: What each instruction set would need before a core for it could be trusted.
