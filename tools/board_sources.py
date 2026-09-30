@@ -236,6 +236,22 @@ _ADAFRUIT_CC_BY_SA_3 = Licence(
     file="license.txt",
     quote="Attribution-ShareAlike 3.0 Unported",
 )
+#: The licence of both PCBCUPID Glyph ESP32 repositories (OH-194): neither
+#: holds a licence file, and each README links CC BY-SA 4.0's deed under the
+#: same words. Recorded as the README states it, and graded so.
+_PCBCUPID_README_CC_BY_SA_4 = Licence(
+    name="CC BY-SA 4.0",
+    covers="not stated: the README says the repository 'contains open source "
+    "PCB files' and links the deed, and names no file the licence covers",
+    sampled=True,
+    evidence=Evidence.STATED,
+    cite="README.md at the repository root, fetched here and read 2026-09-30: "
+    "the tree GitHub lists holds no licence file, so the licence is the one the "
+    "README states, by a link to the CC BY-SA 4.0 deed",
+    file="README.md",
+    quote="[Creative Commons Attribution, Share-Alike license]"
+    "(https://creativecommons.org/licenses/by-sa/4.0/deed.en)",
+)
 _PINOUT_PICTURE = "a pinout diagram, opened 2026-09-29: no pad coordinates and no nets"
 _ADAFRUIT_README = "not needed: the licence is read from license.txt, which is fetched"
 _NO_LBR = "no .lbr in the tree listing; the .brd carries the libraries it uses"
@@ -973,6 +989,60 @@ SOURCES: tuple[Source, ...] = (
         cite="OH-188: GitHub's tree listing of the default branch, read 2026-09-30; "
         "the board file and the schematic fetched here and opened, the licence "
         "read from the board file",
+    ),
+    Source(
+        name="pcbcupid-glyph-c3",
+        vendor="PCBCUPID",
+        model="one repository per board, this one among 46 under org:pcbcupid",
+        size="1,293,159 + 732 bytes, the two blobs fetched, as GitHub's tree lists them",
+        licence=_PCBCUPID_README_CC_BY_SA_4,
+        fetch=Fetch(
+            transport=Transport.GIT_SPARSE,
+            url="https://github.com/pcbcupid/PCBCUPID-Glyph-C3.git",
+            wanted=("esp32c3.kicad_pcb", "README.md"),
+            skipped=(
+                ("esp32c3.kicad_sch", "the KiCad schematic. Nothing reads it; the "
+                 "pads and nets are in the .kicad_pcb"),
+                ("esp32c3.kicad_pro", "KiCad's project settings file; nothing here "
+                 "reads one"),
+                ("esp32c3.kicad_prl", "KiCad's per-user project state, layer "
+                 "visibility and the like; nothing here reads one"),
+                ("fp-info-cache", "KiCad's cache of the footprint libraries on the "
+                 "designer's machine, 3,474,341 bytes; no board is in it"),
+                ("fp-lib-table", "opened 2026-09-30: one footprint library, by a "
+                 "path on the designer's machine that the tree does not hold"),
+                ("sym-lib-table", "opened 2026-09-30: one symbol library, by a path "
+                 "on the designer's machine that the tree does not hold"),
+            ),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES, Evidence.LISTED,
+                "esp32c3.kicad_sch, KiCad; listed, not fetched",
+            ),
+            schematic_pdf=Artefact(
+                Published.NO, Evidence.ABSENT, "the tree holds eight files and no PDF"
+            ),
+            pcb_layout=Artefact(
+                Published.YES, Evidence.OPENED,
+                "esp32c3.kicad_pcb, KiCad version 20240108, read by tools/kicad.py",
+            ),
+            footprints_symbols=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "no .kicad_mod or .kicad_sym among the eight files; the footprints "
+                "are inside the .kicad_pcb",
+            ),
+            model_3d=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "no .step, .stp, .wrl or .stl among the eight files",
+            ),
+            board_support=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "none of the eight files defines pins for firmware",
+            ),
+        ),
+        cite="OH-194: GitHub's tree listing of the default branch, read 2026-09-30; "
+        "the board file and the README fetched here and opened",
     ),
 )
 

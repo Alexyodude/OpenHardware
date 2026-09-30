@@ -7,6 +7,32 @@ priority: P1
 created: '2026-09-30'
 touches:
 - docs/tickets/OH-194-*
+- tools/board_sources.py
+- tools/board_manifest.py
+- tools/import_pindefs.py
+- webui/boards/PCBCUPID Glyph C3.json
+- webui/boards/PCBCUPID Glyph C6.json
+- webui/boards/Olimex ESP32-C3-DevKit-Lipo.json
+- webui/boards/SparkFun Thing Plus ESP32-C5.json
+- webui/boards/Olimex ESP32-C6-EVB.json
+- README.md
+- PROVENANCE.md
+- tests/rules/test_board_manifest.py
+- tests/rules/test_board_sources.py
+- tests/rules/test_import_pindefs.py
+- tests/webui/test_pin_view.py
+- webui/boards/catalogue.py
+- tests/webui/test_board_catalogue.py
+- tests/webui/test_pcbcupid_glyph_c3_board.py
+- tests/webui/pcbcupid_glyph_c3/**
+- tests/webui/test_pcbcupid_glyph_c6_board.py
+- tests/webui/pcbcupid_glyph_c6/**
+- tests/webui/test_olimex_esp32c3_devkit_lipo_board.py
+- tests/webui/olimex_esp32c3_devkit_lipo/**
+- tests/webui/test_sparkfun_esp32c5_board.py
+- tests/webui/sparkfun_esp32c5/**
+- rules/board-claims.md
+- tests/rules/test_board_claims.py
 ---
 
 Part of OH-174. OH-192 made a KiCad `.kicad_pcb` a manifest row, with pins traced through the copper. The survey (.omc/research/twin-candidates.md in the main checkout, 2026-09-29) lists ESP32 boards on chips that already run here that publish only KiCad, with a variant on disk:

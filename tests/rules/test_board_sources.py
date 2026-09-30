@@ -189,13 +189,19 @@ def _from_the_survey(candidate: Source) -> bool:
 
 def test_every_row_cites_the_survey_or_the_ticket_that_opened_it():
     """A row the OH-23 survey did not carry names the ticket that listed the
-    repository, and reads its licence from a file it fetches."""
+    repository, and reads its licence from a file it fetches. That file is
+    a licence the row opened, or, where the repository holds none, the
+    README that states one (OH-194): graded `stated`, because a README
+    asserting a licence is not the licence."""
     for candidate in SOURCES:
         assert candidate.licence.cite.strip(), f"{candidate.name}: licence with no cite"
         if _from_the_survey(candidate):
             continue
         assert re.match(r"OH-\d+: ", candidate.cite), f"{candidate.name} cites no ticket"
-        assert candidate.licence.evidence is Evidence.OPENED, candidate.name
+        readme = pathlib.PurePosixPath(candidate.licence.file).name.upper().startswith(
+            "README")
+        assert candidate.licence.evidence is (
+            Evidence.STATED if readme else Evidence.OPENED), candidate.name
         assert candidate.licence.file in candidate.fetch.wanted, candidate.name
         assert candidate.licence.quote.strip(), candidate.name
 
