@@ -64,8 +64,8 @@ have to chase through three modules is evidence nobody checks.
 counts only where the file joins its name onto its own location --
 `pathlib.Path(__file__)`, then `.resolve()`, `.parent`, `.parents[n]` and `/`
 with a string, directly or through names one plain module-level assignment
-binds (`_image_paths`) -- and that path is a file under the test's own
-directory. Matching the name anywhere under that directory was satisfied by
+binds (`_image_paths`) -- and that path, resolved so a `..` is followed as
+opening it would follow it, is a file under the test's own directory. Matching the name anywhere under that directory was satisfied by
 another test's `blink.bin` with the named image deleted, and by a temporary
 file's name (OH-196). A board's own
 entry also has to load that board: its name is the first argument of a
@@ -766,13 +766,17 @@ def evidence_that_never_loads_an_image(root: pathlib.Path | None = None) -> list
         named = _image_names(tree)
         here = test.resolve().parent
         built = _image_paths(tree, test.resolve())
-        on_disk = [path for path in built if path.is_relative_to(here) and path.is_file()]
+        # Resolved before it is compared: `is_relative_to` reads a `..` as a
+        # name, and opening the file follows it out (OH-196).
+        on_disk = [path for path in built
+                   if path.resolve().is_relative_to(here) and path.is_file()]
         why: list[str] = []
         if not named:
             suffixes = ", ".join(sorted(IMAGE_SUFFIXES))
             why.append(f"names no image file (nothing ending in {suffixes})")
         elif not on_disk:
-            where = (f"it builds {sorted(path.as_posix() for path in built)}" if built else
+            where = (f"it builds {sorted(path.resolve().as_posix() for path in built)}"
+                     if built else
                      "it joins none of them onto a path built from its own __file__")
             why.append(
                 f"names {sorted(named)} but no such file exists beside it under "

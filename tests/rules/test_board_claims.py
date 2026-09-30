@@ -633,6 +633,29 @@ def test_the_led_actually_blinks(cpu):
     assert len(found) == 1 and "it builds" in found[0] and "tests/blink.bin" in found[0], found
 
 
+def test_an_image_reached_by_dot_dot_out_of_the_tests_directory_is_not_beside_it(tmp_path):
+    """OH-196's confirm review: `..` in a joined string, or as a part of its
+    own, reads as under the test's directory until the path is normalised,
+    and reaches another suite's image all the same."""
+    for joined in ('HERE / "../riscv32/blink.bin"',
+                   'HERE / "fixture" / ".." / ".." / "riscv32" / "blink.bin"'):
+        evidence = f'''
+import pathlib
+
+HERE = pathlib.Path(__file__).resolve().parent
+IMAGE = {joined}
+
+
+def test_the_led_actually_blinks(cpu):
+    cpu.write_block(0x10000100, IMAGE.read_bytes())
+    cpu.step()
+'''
+        root = build_root(tmp_path / str(len(joined)), evidence=evidence, image=False,
+                          files={"tests/riscv32/blink.bin": "another suite's"})
+        found = C.evidence_that_never_loads_an_image(root)
+        assert len(found) == 1 and "tests/riscv32/blink.bin" in found[0], (joined, found)
+
+
 # --- 4 and 5 for a board's own entry (rules/board-claims.md §7) ---------------
 
 #: One manifest board with its own entry, naming the chip miniature's test.
