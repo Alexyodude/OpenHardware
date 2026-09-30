@@ -866,7 +866,8 @@ class Traced:
 
 
 #: A GPIO named in a net: `IO8`, `GPIO5`, `io8`, and PCBCUPID's `GPIO-14`
-#: and `GPIO_1`. Read in every `/`-part.
+#: and `GPIO_1`. Read in every part between a `/` or, as Olimex writes
+#: `/GPIO2\FSPIQ`, a backslash.
 _NAMED_GPIO = re.compile(r"(?:GPIO|IO)[-_]?(\d+)", re.I)
 #: A resistor, the one part a trace crosses: a reference `R<n>` and a value
 #: that reads as ohms -- `1k`, `4.7k`, `100K`, `0`, `4K7`, `22R`.
@@ -1058,7 +1059,7 @@ def _trace(chip: _Part, parts: list[_Part], header: list[str | None],
                                else named[number(pad)], []).append(pad)
         at = "; ".join(f"pad {pads[0]} = {name}" if len(pads) == 1
                        else f"{len(pads)} pads = {name}" for name, pads in by_name.items())
-        stated = sorted({int(found.group(1)) for part in net.split("/")
+        stated = sorted({int(found.group(1)) for part in re.split(r"[/\\]", net)
                          if (found := _NAMED_GPIO.fullmatch(part.strip()))})
         if stated and stated != numbered:
             raise PindefError(
@@ -2428,12 +2429,32 @@ BOARDS = {
 }
 
 
+def read_row_pins(texts: tuple[str, ...], *, extras: tuple[str, ...] = ()) -> dict[str, ChipPin]:
+    """A row's flat variant, as `read_flat_pins` reads it, except that it
+    may number no `D<n>` where the row opts in no label: a row's pins can
+    all be its traced copper's, and the Olimex ESP32-C3-DevKit-Lipo's
+    variant numbers `TX`, `SDA`, `A0` and the like and no `D<n>` (OH-194).
+    Then it names no pad. A file that numbers no pin at all is refused."""
+    (text,) = texts
+    constants = read_c_pin_constants(text)
+    if not constants:
+        raise PindefError("the variant numbers no pin at all; it is not a pin table")
+    if extras or any(_D_LABEL.match(label) for label in constants):
+        return read_flat_pins(texts, extras=extras)
+    return {}
+
+
 def variant_source(entry: board_manifest.Row) -> Source:
     """A row's variant, by the labels the row opts in: through the
-    preprocessor for arduino-pico (OH-181), read flat for the others."""
+    preprocessor for arduino-pico (OH-181), read flat for the others, by
+    `read_row_pins`."""
     if entry.package == "arduino-pico":
         return arduino_pico(entry.variant, extras=entry.labels)
-    return arduino_flat(entry.package, entry.variant, extras=entry.labels)
+    return Source(
+        entry.package,
+        (f"variants/{entry.variant}/pins_arduino.h",),
+        functools.partial(read_row_pins, extras=entry.labels),
+    )
 
 
 #: The reader a row's own CAD is traced by, by the file's suffix.

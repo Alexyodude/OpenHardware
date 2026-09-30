@@ -238,6 +238,16 @@ ESP32-C3-MINI-1 or ESP32-C6-MINI-1 the pad's net reaches in PCBCUPID's
 board file, read against Espressif's datasheet pin table; `chip_pin_from`
 names which.
 
+`webui/boards/Olimex ESP32-C3-DevKit-Lipo.json` is written the same way,
+out of revision D of Olimex's own KiCad board file,
+`HARDWARE/ESP32-C3-DevKit-Lipo_Rev_D/ESP32-C3-DevKit-Lipo_Rev_D.kicad_pcb`.
+Its `README.md` puts the hardware under CERN-OHL-S-2.0, and the
+repository's `LICENSE` is the GPL-3.0 text that README gives the software,
+so the hardware's licence is recorded graded `stated`, as above. Each
+`chip_pin` comes from the pad of the ESP32-C3-MINI-1 the pad's net reaches;
+the row's variant, `variants/esp32c3-devkit-lipo/`, names no label a pad
+carries.
+
 **Position and risk:** as 2f, with one more: the licence rests on the
 vendor's README, which `source.licence_evidence` says.
 

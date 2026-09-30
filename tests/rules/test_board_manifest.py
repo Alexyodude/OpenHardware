@@ -497,12 +497,16 @@ def test_every_resolved_pad_says_which_sources_named_it():
 
 def _pin_functions(row: board_manifest.Row) -> dict[str, set[str]]:
     """Net -> the pin names a KiCad row's board file gives the chip's pads
-    on it (`pinfunction`, its symbol's pin name), off the file's own tree."""
+    on it (`pinfunction`, its symbol's pin name), off the file's own tree.
+    A footprint's value is a `(property "Value" ...)` from KiCad 8, and an
+    `(fp_text value ...)` before, as in the Olimex's KiCad 7 file."""
     tree = kicad.parse_sexp(board_manifest.cad_path(row).read_text(encoding="utf-8"))
     (chip,) = [node for node in kicad.children(tree, "footprint")
                if node[1].split(":")[-1] == row.pin_table.package
-               and [prop[2] for prop in kicad.children(node, "property")
-                    if prop[1] == "Value"] == [row.pin_table.value]]
+               and [*(prop[2] for prop in kicad.children(node, "property")
+                      if prop[1] == "Value"),
+                    *(text[2] for text in kicad.children(node, "fp_text")
+                      if text[1] == "value")] == [row.pin_table.value]]
     functions: dict[str, set[str]] = {}
     for pad in kicad.children(chip, "pad"):
         net, function = kicad.first(pad, "net"), kicad.first(pad, "pinfunction")
@@ -862,6 +866,59 @@ def test_each_glyph_module_is_read_against_its_own_modules_page():
         assert split == [f"49_{n}" for n in range(1, 10)], board
         assert {function[pad].rstrip("_0123456789") for pad in split} == {"GND"}, board
         assert dict(table.not_gpio)["49"] == "GND", board
+
+
+def test_a_net_renamed_for_another_gpio_is_refused_on_the_olimex_c3():
+    """Olimex names a net for its GPIO and then its use, `/GPIO7\\I2C_SDA`,
+    and the name check reads the part before the backslash: renamed
+    `/GPIO17\\I2C_SDA`, its copper still reaches U3 pad 21, GPIO7, and the
+    file saying two things is refused."""
+    row = row_named("Olimex ESP32-C3-DevKit-Lipo")
+    _fetched(row)
+    text = board_manifest.cad_path(row).read_text(encoding="utf-8")
+    # KiCad stores the backslash doubled.
+    assert '"/GPIO7\\\\I2C_SDA"' in text and '"/GPIO17\\\\I2C_SDA"' not in text
+    with pytest.raises(import_pindefs.PindefError, match=re.escape(
+            "'/GPIO17\\\\I2C_SDA' is named for GPIO17 and its copper reaches "
+            "U3 pad 21 = GPIO7")):
+        _trace(row, text.replace('"/GPIO7\\\\I2C_SDA"', '"/GPIO17\\\\I2C_SDA"'))
+
+
+def test_the_olimex_c3s_pins_are_its_traced_copper_and_its_variant_names_no_pad():
+    """Revision D, the newest of the four the repository publishes: its
+    variant numbers `TX`, `SDA`, `A0` and the like and no `D<n>`, and no
+    label any pad carries, so every pin is the copper's. Each of its thirteen
+    GPIO pads is on a net Olimex names for that GPIO, before a backslash and
+    what the pin is for."""
+    row = row_named("Olimex ESP32-C3-DevKit-Lipo")
+    _fetched(row)
+    assert '(rev "D")' in board_manifest.cad_path(row).read_text(encoding="utf-8")
+    checkout = import_pindefs.BSP_DIR / row.package
+    constants = import_pindefs.read_c_pin_constants(
+        (checkout / "variants" / row.variant / "pins_arduino.h").read_text(encoding="utf-8"))
+    assert constants and not [label for label in constants if re.fullmatch(r"D\d+", label)]
+    assert _variant_numbers(row) == {}
+    pads = {pad["label"]: pad for pad in _committed(row)["pads"]}
+    gpios = {label: pad["chip_index"] for label, pad in pads.items() if pad["chip_pin"]}
+    assert sorted(gpios.values()) == [*range(11), 20, 21]
+    for label, gpio in gpios.items():
+        assert re.split(r"[/\\]", label)[1] == f"GPIO{gpio}", label
+        assert pads[label]["chip_pin_from"] == [row.source], label
+
+
+def test_a_rows_variant_may_number_no_d_pin_only_where_the_row_opts_in_no_label():
+    """`read_row_pins`, which a row's flat variant is read by. A XIAO's is
+    still read by `read_flat_pins`, which refuses a file with no `D<n>`."""
+    text = "static const uint8_t TX = 21;\nstatic const uint8_t SDA = 8;\n"
+    assert import_pindefs.read_row_pins((text,)) == {}
+    assert import_pindefs.read_row_pins((text,), extras=("SDA",)) == {
+        "SDA": import_pindefs.ChipPin("GPIO8", 8)}
+    with pytest.raises(import_pindefs.PindefError, match="'LED' is registered"):
+        import_pindefs.read_row_pins((text,), extras=("LED",))
+    with pytest.raises(import_pindefs.PindefError, match="numbers no pin at all"):
+        import_pindefs.read_row_pins(("#include <stdint.h>\n",))
+    with pytest.raises(import_pindefs.PindefError, match="no D<n> constants"):
+        import_pindefs.read_flat_pins((text,))
 
 
 def test_a_header_pad_moved_onto_a_pad_the_table_leaves_out_is_refused():

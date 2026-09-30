@@ -136,6 +136,18 @@ ESP32_C3_MINI_1_PCBCUPID = dataclasses.replace(
           ("30", 20), ("31", 21)),
     footprint_pads=tuple((f"49_{part}", "49") for part in range(1, 10)),
 )
+#: The same page, for the module as Olimex's ESP32-C3-DevKit-Lipo places it:
+#: a footprint whose name carries three soft hyphens, valued
+#: ESP32-C3-MINI-1-N4; the GPIO rows its headers reach -- pin 23 is GPIO9 on
+#: Table 3-1 -- and a footprint that numbers each of its nine central pads 49,
+#: as the page does.
+ESP32_C3_MINI_1_OLIMEX = dataclasses.replace(
+    ESP32_C3_MINI_1,
+    package="ESP32-\u00adC3-\u00adMINI\u00ad-1", value="ESP32-C3-MINI-1-N4",
+    gpio=(("5", 2), ("6", 3), ("12", 0), ("13", 1), ("16", 10), ("18", 4), ("19", 5),
+          ("20", 6), ("21", 7), ("22", 8), ("23", 9), ("30", 20), ("31", 21)),
+    footprint_pads=(),
+)
 ESP32_C6_MINI_1 = PinTable(
     "ESP32-PICO-MINI", "ESP32-C6-MINI_MINI",
     "ESP32-C6-MINI-1 & MINI-1U Datasheet v1.5, pp. 10-11, 3.2 Pin Description "
@@ -422,6 +434,21 @@ ROWS = (
         variant="Pcbcupid_GLYPH_C6",
         labels=("SDA", "SCL", "SCK", "MOSI", "MISO"),
         pin_table=ESP32_C6_MINI_1_PCBCUPID,
+    ),
+    # KiCad, revision D, and licensed by its README alone (OH-194). Its nets
+    # name each GPIO, `/GPIO2\FSPIQ` and so on, and no label its variant
+    # numbers, so its pins are the traced copper's, as the Glyph Mini's are.
+    Row(
+        board="Olimex ESP32-C3-DevKit-Lipo",
+        source="olimex-esp32-c3-devkit-lipo",
+        cad="HARDWARE/ESP32-C3-DevKit-Lipo_Rev_D/ESP32-C3-DevKit-Lipo_Rev_D.kicad_pcb",
+        schematic=None,
+        select=("EXT1", "EXT2"),
+        chip="ESP32-C3",
+        package="arduino-esp32",
+        variant="esp32c3-devkit-lipo",
+        labels=(),
+        pin_table=ESP32_C3_MINI_1_OLIMEX,
     ),
 )
 
