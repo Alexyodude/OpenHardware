@@ -1,7 +1,7 @@
 ---
 id: OH-196
 title: 'A manifest RP2040 board runs as itself: the KB2040 and the Glyph Mini'
-status: in-review
+status: in-progress
 priority: P1
 created: '2026-09-30'
 touches:
