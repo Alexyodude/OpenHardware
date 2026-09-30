@@ -1836,6 +1836,9 @@ SUPPLY_LABELS = frozenset({
     # The PCBCUPID Glyph Mini RP2040's two rails, as its KiCad board file
     # names them, `/` and all; the same test reads that file for them.
     "+3V3", "/5V",
+    # The PCBCUPID Glyph C3's 3.3 V rail and battery, as its KiCad board file
+    # names them; the same test reads that file for them (OH-194).
+    "+3.3V", "+BATT",
 })
 
 
@@ -1865,7 +1868,7 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # and the Uno's pins come from its own variant -- and a count that skipped
     # it would be a count of most of the boards.
     files = sorted(pindefs.BOARDS_DIR.glob("*.json"))
-    assert len(files) == 33, [one.stem for one in files]
+    assert len(files) == 34, [one.stem for one in files]
     for path in files:
         board = path.stem
         for pad in json.loads(path.read_text(encoding="utf-8"))["pads"]:
@@ -1904,9 +1907,11 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # ESP32-C6 (OH-188) added 12: 8 traced, and 4 supplies -- GND, 3.3V,
     # V_USB and V_BATT. 456 and 181 until the PCBCUPID Glyph Mini RP2040
     # (OH-192) added 23: 20 named by its traced copper, and 3 supplies --
-    # GND, +3V3 and /5V.
-    assert naming == 476, naming
-    assert supplies == 184, supplies
+    # GND, +3V3 and /5V. 476 and 184 until the PCBCUPID Glyph C3 (OH-194)
+    # added 28: 19 named by its traced copper, 5 of them by its variant
+    # too, and 6 supplies -- two GND, two +3.3V, VBUS and +BATT.
+    assert naming == 495, naming
+    assert supplies == 190, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
     # same debug cluster already carried; 42 until the six SWD pads on the
     # RP2040, SAMD21 and nRF52840 stopped saying nobody had published them.
@@ -1919,13 +1924,15 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # two ways and no file here joins them. 52 with the Thing Plus's ESP_EN,
     # VREG_EN and LED_DO. 55 with the KB2040's D+ and D-, traced through R3
     # and R4 to the RP2040's USB_DP and USB_DM, and its !RESET, to RUN. 56
-    # with the Pro Micro ESP32-C3's !RESET!, traced to the module's EN.
-    assert specific == 56, specific
+    # with the Pro Micro ESP32-C3's !RESET!, traced to the module's EN. 59
+    # with the Glyph C3's two /RESET pads, traced to the module's EN, and its
+    # J2 pad 8, alone on its net.
+    assert specific == 59, specific
     assert generic == 15, (
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
-    assert naming + supplies + specific + generic == 731
+    assert naming + supplies + specific + generic == 759
 
 
 def test_the_tracer_refuses_a_part_string_that_matches_more_than_one_footprint():

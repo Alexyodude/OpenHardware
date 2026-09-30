@@ -221,6 +221,23 @@ KB2040 in 2d; the row's arduino-pico variant,
 file itself: KiCad joins a footprint's pads to its pins by number, so no
 schematic is needed.
 
+### 2g. Board pad maps from KiCad files licensed by a README
+
+`webui/boards/PCBCUPID Glyph C3.json` is written as 2f is, out of PCBCUPID's
+own KiCad board file, `esp32c3.kicad_pcb`, fetched into `third_party/` and
+not tracked here. Its repository carries no licence file; its `README.md`
+links the CC BY-SA 4.0 deed, and `tools/board_sources.py` records that link
+graded `stated`, not `opened`: a README asserting a licence is not the
+licence. The tool refuses the row unless the fetched README reads so, and
+`source.licence_evidence` quotes it and says it is stated. Each `chip_pin`
+comes from arduino-esp32's `variants/Pcbcupid_GLYPH_C3/`
+(LGPL-2.1-or-later), or from the pad of the ESP32-C3-MINI-1 the pad's net
+reaches in PCBCUPID's board file, read against Espressif's datasheet pin
+table; `chip_pin_from` names which.
+
+**Position and risk:** as 2f, with one more: the licence rests on the
+vendor's README, which `source.licence_evidence` says.
+
 ---
 
 ## 3. What is unambiguously GPL, and stays GPL

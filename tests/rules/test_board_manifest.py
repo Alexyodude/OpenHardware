@@ -399,13 +399,19 @@ def test_the_licence_is_what_the_vendors_own_files_state():
     """SparkFun's registry licence is inferred from a sibling repository, so
     that board quotes the sentence its own CAD file places; a row whose
     registry licence was read from a file it fetches quotes that file."""
+    stated = []
     for row in ROWS:
         _fetched(row)
         evidence = _committed(row)["source"]["licence_evidence"]
         assert evidence == board_manifest.licence_evidence(row)
-        quote = (row.licence_statement[1] if row.licence_statement
-                 else board_sources.source(row.source).licence.quote)
+        licence = board_sources.source(row.source).licence
+        quote = row.licence_statement[1] if row.licence_statement else licence.quote
         assert repr(quote) in evidence
+        # A README's word is recorded as that and no more (OH-194).
+        graded = row.licence_statement is None and licence.evidence is board_sources.Evidence.STATED
+        assert ("; graded stated: " in evidence) == graded, (row.board, evidence)
+        stated += [row.board] if graded else []
+    assert "PCBCUPID Glyph C3" in stated
 
 
 def test_a_row_whose_licence_is_stated_nowhere_is_refused():
@@ -489,6 +495,22 @@ def test_every_resolved_pad_says_which_sources_named_it():
         assert matched == set(row.labels), row.board
 
 
+def _pin_functions(row: board_manifest.Row) -> dict[str, set[str]]:
+    """Net -> the pin names a KiCad row's board file gives the chip's pads
+    on it (`pinfunction`, its symbol's pin name), off the file's own tree."""
+    tree = kicad.parse_sexp(board_manifest.cad_path(row).read_text(encoding="utf-8"))
+    (chip,) = [node for node in kicad.children(tree, "footprint")
+               if node[1].split(":")[-1] == row.pin_table.package
+               and [prop[2] for prop in kicad.children(node, "property")
+                    if prop[1] == "Value"] == [row.pin_table.value]]
+    functions: dict[str, set[str]] = {}
+    for pad in kicad.children(chip, "pad"):
+        net, function = kicad.first(pad, "net"), kicad.first(pad, "pinfunction")
+        if net is not None and function is not None:
+            functions.setdefault(net[-1], set()).add(function[1])
+    return functions
+
+
 def _schematic_gpio(row: board_manifest.Row) -> dict[str, set[int]]:
     """Net -> the GPIOs the row's schematic names on the traced chip's own
     pins there: `GPIO26/AD0` on the KB2040's `A0`, and `IOA0` on the Pro
@@ -497,21 +519,14 @@ def _schematic_gpio(row: board_manifest.Row) -> dict[str, set[int]]:
     the chip's pins only: nowhere else is `IOA<n>` the chip's name for a pin.
     A KiCad row names no schematic, and its board file gives each of the
     chip's pads the pin name of the vendor's symbol, `pinfunction`:
-    `GPIO26_ADC0` on the Glyph Mini's `/GPIO-26`. Read here off the file's
-    own tree, not through a reader."""
+    `GPIO26_ADC0` on the Glyph Mini's `/GPIO-26`, and `IO4` on the Glyph
+    C3's `/SDA`. Read here off the file's own tree, not through a reader."""
     if row.schematic is None:
-        tree = kicad.parse_sexp(board_manifest.cad_path(row).read_text(encoding="utf-8"))
-        (chip,) = [node for node in kicad.children(tree, "footprint")
-                   if node[1].split(":")[-1] == row.pin_table.package
-                   and [prop[2] for prop in kicad.children(node, "property")
-                        if prop[1] == "Value"] == [row.pin_table.value]]
         named: dict[str, set[int]] = {}
-        for pad in kicad.children(chip, "pad"):
-            net, function = kicad.first(pad, "net"), kicad.first(pad, "pinfunction")
-            if net is not None and function is not None:
-                named.setdefault(net[-1], set()).update(
-                    int(found.group(1)) for part in re.split(r"[/_]", function[1])
-                    if (found := re.fullmatch(r"GPIO(\d+)", part)))
+        for net, functions in _pin_functions(row).items():
+            named[net] = {int(found.group(1)) for function in functions
+                          for part in re.split(r"[/_]", function)
+                          if (found := re.fullmatch(r"(?:GPIO|IO)(\d+)", part))}
         return named
     board = eagle.read_board(board_manifest.cad_path(row))
     (chip,) = [element.name for element in board.elements if (element.package, element.value)
@@ -524,14 +539,28 @@ def _schematic_gpio(row: board_manifest.Row) -> dict[str, set[int]]:
             for net in schematic.nets}
 
 
+#: Resolved pads whose one statement is the trace, each with the pin name
+#: the vendor's symbol gives the chip pad its copper reaches. PCBCUPID's
+#: `/uRx` and `/uTx` carry no number and no label a variant numbers, and its
+#: symbol names the module's pins 30 and 31 `RXD0` and `TXD0`, the names
+#: Table 3-1 gives them, which carry none either. Held to that name, so a
+#: footprint numbered otherwise than the page still fails.
+TRACE_ONLY = {
+    ("PCBCUPID Glyph C3", "/uRx"): "RXD0",
+    ("PCBCUPID Glyph C3", "/uTx"): "TXD0",
+}
+
+
 def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
     """The trace is one statement, and every resolved pad has another that
     agrees: the GPIO the vendor's net name carries, as SparkFun's `IO8` and
-    PCBCUPID's `/GPIO-8`; the variant's number for a label it numbers, as
-    Adafruit's `TX`; or the GPIO the vendor's schematic names the chip's pin
-    on that net, as the KB2040's `SCLK` on `GPIO18`, which its variant calls
-    `SCK`, the Pro Micro ESP32-C3's `IOA0/SCLK` on its module's `IOA0`, and
-    the Glyph Mini's symbol on each RP2040 pin."""
+    PCBCUPID's `/GPIO-8` and `/GPIO_8`; the variant's number for a label it
+    numbers, as Adafruit's `TX`; or the GPIO the vendor's schematic names the
+    chip's pin on that net, as the KB2040's `SCLK` on `GPIO18`, which its
+    variant calls `SCK`, the Pro Micro ESP32-C3's `IOA0/SCLK` on its module's
+    `IOA0`, and the Glyph Mini's and the Glyph C3's symbol on each chip pin.
+    The pads with none are `TRACE_ONLY`, each held to its symbol's name."""
+    alone = set()
     for row in ROWS:
         _fetched(row)
         numbers = _variant_numbers(row)
@@ -541,10 +570,17 @@ def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
                 continue
             parts = pad["label"].split("/")
             stated = {int(found.group(1)) for part in parts
-                      if (found := re.fullmatch(r"(?:GPIO|IO)-?(\d+)", part, re.I))}
+                      if (found := re.fullmatch(r"(?:GPIO|IO)[-_]?(\d+)", part, re.I))}
             stated |= {numbers[part] for part in parts if part in numbers}
             stated |= named.get(pad["label"], set())
+            if (row.board, pad["label"]) in TRACE_ONLY:
+                assert stated == set(), (row.board, pad["label"], stated)
+                assert _pin_functions(row)[pad["label"]] == {
+                    TRACE_ONLY[(row.board, pad["label"])]}, (row.board, pad["label"])
+                alone.add((row.board, pad["label"]))
+                continue
             assert stated == {pad["chip_index"]}, (row.board, pad["label"], stated)
+    assert alone == set(TRACE_ONLY)
     kb2040 = row_named("Adafruit KB2040")
     assert "SCLK" not in _variant_numbers(kb2040)
     assert _schematic_gpio(kb2040)["SCLK"] == {18}
@@ -767,6 +803,60 @@ def test_the_glyph_minis_pad_57_is_the_central_pad_its_rp2040_page_numbers_57():
     assert {(pad.net, pad.layers) for pad in unnumbered} == {("", ("B.Paste",))}
     assert dict(row.pin_table.not_gpio)["57"] == "GND"
     assert "; pad 57 = GND (" in _trace(row)["GND"].via
+
+
+# --- the KiCad ESP32 rows (OH-194) --------------------------------------------
+
+
+def test_a_net_renamed_for_another_gpio_is_refused_on_the_glyph_c3():
+    """PCBCUPID spells a GPIO net `/GPIO_8` on this board, and the name check
+    reads that spelling: renamed `/GPIO_18`, its copper still reaches U4 pad
+    22, GPIO8, and the file saying two things is refused."""
+    row = row_named("PCBCUPID Glyph C3")
+    _fetched(row)
+    text = board_manifest.cad_path(row).read_text(encoding="utf-8")
+    assert '"/GPIO_8"' in text and '"/GPIO_18"' not in text
+    with pytest.raises(import_pindefs.PindefError,
+                       match=r"'/GPIO_18' is named for GPIO18 and its copper reaches "
+                             r"U4 pad 22 = GPIO8"):
+        _trace(row, text.replace('"/GPIO_8"', '"/GPIO_18"'))
+
+
+def test_the_glyph_c3s_unconnected_pad_is_alone_on_its_net():
+    """The reason its J2 pad 8 carries, read off its board file: no other pad
+    of any footprint is on that net."""
+    row = row_named("PCBCUPID Glyph C3")
+    _fetched(row)
+    ((label, why),) = row.reasons
+    on = [(placed.reference, pad.number)
+          for placed in kicad.read_board(board_manifest.cad_path(row)).placements
+          for pad in placed.pads if pad.net == label]
+    assert on == [("J2", "8")], on
+    assert "this pad is the only pad on its net" in why
+    assert "reaches no pin of the ESP32-C3 or of anything else" in why
+
+
+def test_the_glyph_c3s_module_is_its_esp32_c3_mini_1_under_another_footprints_name():
+    """PCBCUPID places the module under a footprint its library calls
+    `ESP32-H2-MINI-1_EXP`, valued `ESP32-C3-MINI-1-N4`. What makes the C3
+    page the one to read it against: the symbol's name on every pad the
+    table transcribes is the page's `IO<n>` for that pad's GPIO, or `RXD0`
+    and `TXD0` on 30 and 31, and the nine pads named `49_1` to `49_9` are
+    GND, as the page's 49 is."""
+    row = row_named("PCBCUPID Glyph C3")
+    _fetched(row)
+    table = row.pin_table
+    tree = kicad.parse_sexp(board_manifest.cad_path(row).read_text(encoding="utf-8"))
+    (chip,) = [node for node in kicad.children(tree, "footprint")
+               if node[1] == "ESP32C3:ESP32-H2-MINI-1_EXP"]
+    function = {pad[1]: kicad.first(pad, "pinfunction")[1]
+                for pad in kicad.children(chip, "pad")}
+    expected = {pad: f"IO{gpio}" for pad, gpio in table.gpio} | {"30": "RXD0", "31": "TXD0"}
+    assert {pad: function[pad] for pad in expected} == expected
+    split = [pad for pad, _ in table.footprint_pads]
+    assert split == [f"49_{n}" for n in range(1, 10)]
+    assert {function[pad].rstrip("_0123456789") for pad in split} == {"GND"}
+    assert dict(table.not_gpio)["49"] == "GND"
 
 
 def test_a_header_pad_moved_onto_a_pad_the_table_leaves_out_is_refused():

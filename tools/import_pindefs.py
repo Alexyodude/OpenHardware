@@ -865,9 +865,9 @@ class Traced:
     via: str
 
 
-#: A GPIO named in a net: `IO8`, `GPIO5`, `io8`, and PCBCUPID's `GPIO-14`.
-#: Read in every `/`-part.
-_NAMED_GPIO = re.compile(r"(?:GPIO|IO)-?(\d+)", re.I)
+#: A GPIO named in a net: `IO8`, `GPIO5`, `io8`, and PCBCUPID's `GPIO-14`
+#: and `GPIO_1`. Read in every `/`-part.
+_NAMED_GPIO = re.compile(r"(?:GPIO|IO)[-_]?(\d+)", re.I)
 #: A resistor, the one part a trace crosses: a reference `R<n>` and a value
 #: that reads as ohms -- `1k`, `4.7k`, `100K`, `0`, `4K7`, `22R`.
 _RESISTOR = re.compile(r"R\d+")

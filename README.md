@@ -115,6 +115,7 @@ Outline and pad labels only, not yet wired:
 - `Adafruit KB2040`, pad labels only, the same way
 - `SparkFun Pro Micro ESP32-C3` · `SparkFun Qwiic Pocket ESP32-C6`, pad labels only, the same way
 - `PCBCUPID Glyph Mini RP2040`, pad labels only, the same way, from a KiCad board file
+- `PCBCUPID Glyph C3`, pad labels only, the same way, from a KiCad board file
 
 All XIAO artwork is Seeed Studio's, MIT, from
 [OSHW-XIAO-Series](https://github.com/Seeed-Studio/OSHW-XIAO-Series).

@@ -123,6 +123,19 @@ ESP32_C3_MINI_1 = PinTable(
     # nine pads named 49.1 to 49.9.
     footprint_pads=tuple((f"49.{part}", "49") for part in range(1, 10)),
 )
+#: The same page, for the module as PCBCUPID's Glyph C3 places it: a KiCad
+#: footprint its library names for the ESP32-H2-MINI-1, valued as the
+#: ESP32-C3-MINI-1 it carries; the GPIO rows its headers reach -- pins 23, 26
+#: and 27 are GPIO9, GPIO18 and GPIO19 on Table 3-1 -- and a footprint that
+#: splits the page's 49 into nine pads named 49_1 to 49_9.
+ESP32_C3_MINI_1_PCBCUPID = dataclasses.replace(
+    ESP32_C3_MINI_1,
+    package="ESP32-H2-MINI-1_EXP", value="ESP32-C3-MINI-1-N4",
+    gpio=(("5", 2), ("6", 3), ("12", 0), ("13", 1), ("16", 10), ("18", 4), ("19", 5),
+          ("20", 6), ("21", 7), ("22", 8), ("23", 9), ("26", 18), ("27", 19),
+          ("30", 20), ("31", 21)),
+    footprint_pads=tuple((f"49_{part}", "49") for part in range(1, 10)),
+)
 ESP32_C6_MINI_1 = PinTable(
     "ESP32-PICO-MINI", "ESP32-C6-MINI_MINI",
     "ESP32-C6-MINI-1 & MINI-1U Datasheet v1.5, pp. 10-11, 3.2 Pin Description "
@@ -365,6 +378,26 @@ ROWS = (
         labels=(),
         pin_table=RP2040_QFN56_PCBCUPID,
     ),
+    # KiCad, and licensed by its README alone (OH-194). Its pads are labelled
+    # by net: `/SDA`, `/SCK` and so on, which its variant's labels name, and
+    # `/GPIO_1` and so on, which the traced copper does.
+    Row(
+        board="PCBCUPID Glyph C3",
+        source="pcbcupid-glyph-c3",
+        cad="esp32c3.kicad_pcb",
+        schematic=None,
+        select=("J2", "J4"),
+        chip="ESP32-C3",
+        package="arduino-esp32",
+        variant="Pcbcupid_GLYPH_C3",
+        labels=("SDA", "SCL", "SCK", "MOSI", "MISO"),
+        reasons=(
+            ("unconnected-(J2-Pin_8-Pad8)",
+             "no net: in the vendor's board file this pad is the only pad on its "
+             "net, so it reaches no pin of the ESP32-C3 or of anything else"),
+        ),
+        pin_table=ESP32_C3_MINI_1_PCBCUPID,
+    ),
 )
 
 
@@ -457,7 +490,11 @@ def licence_evidence(entry: Row) -> str:
                 f"{entry.board}: {path.relative_to(REPO).as_posix()} does not "
                 f"read {licence.quote!r}"
             )
-        return f"the repository's {licence.file} reads {licence.quote!r}"
+        # A README asserting a licence is not the licence (OH-194), and the
+        # board file says which it rests on.
+        graded = (f"; graded {licence.evidence.label}: {licence.cite}"
+                  if licence.evidence is board_sources.Evidence.STATED else "")
+        return f"the repository's {licence.file} reads {licence.quote!r}{graded}"
     element_name, text = entry.licence_statement
     board = ET.parse(cad_path(entry)).getroot().find("drawing/board")
     element = board.find(f"elements/element[@name='{element_name}']")
