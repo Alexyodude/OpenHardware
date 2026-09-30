@@ -3135,12 +3135,14 @@ CHIP_NAMES = ("ESP32-C3", "ESP32-C5", "ESP32-C6", "ESP32-H2", "ESP32-S2",
               "ESP32-S3", "RP2040", "RP2350")
 
 #: A lead count, as a vendor's package name states it and as a model's name
-#: does. Two-digit header counts only, so a `2X2MM` body is not a header.
-_VENDOR_LEADS = (re.compile(r"(?:QFN|MLF|DFN|SON)-?(\d+)"),
+#: does. Two-digit header counts only, so a `2X2MM` body is not a header;
+#: and a count is at most three digits and not followed by a digit, an X or
+#: a point, so a DFN1006's 1006 and a QFN-3X3's 3 are body sizes, not leads.
+_VENDOR_LEADS = (re.compile(r"(?:QFN|MLF|DFN|SON)-?(\d{1,3})(?![\dX.])"),
                  re.compile(r"SOT23-(\d)(?!\d)"), re.compile(r"MSOP0?(\d+)"),
                  re.compile(r"DIL(\d+)"),
                  re.compile(r"(?:^|[_-])([12])X(\d\d)(?:$|[_-])"))
-_MODEL_LEADS = (re.compile(r"(?:QFN|DFN|SON)[-_](\d+)"),
+_MODEL_LEADS = (re.compile(r"(?:QFN|DFN|SON)[-_](\d{1,3})(?![\dXx.])"),
                 re.compile(r"SOT-23-(\d)(?!\d)"), re.compile(r"MSOP-(\d+)"),
                 re.compile(r"DIP-(\d+)"), re.compile(r"PinHeader_(\d)x(\d+)"))
 
@@ -4213,20 +4215,26 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             )
         put = place(mesh, element, component.turn, spec.thickness_mm,
                     centre, component.flip)
-        # **The side of the board, as the vendor's file says it** (OH-193): a
-        # mirrored element is on the underside, and so is a row that flips a
-        # part below the board; everything else stands on top. Measured on
-        # the placed mesh's own height against the board's mid-plane.
+        # **A flip may not undo the vendor's mirror** (OH-193). `place` puts
+        # a part under the board for a mirrored element -- the vendor's
+        # statement of its side -- and for a row that flips it, which is for
+        # the XIAO DIP headers the vendor's board file does not place. Each
+        # is a half turn, so the two together are an XOR and a flipped row
+        # on a mirrored element lands on top. This guard is that case: the
+        # part is measured on the placed mesh's own height against the
+        # board's mid-plane, and refused where it is not under the board
+        # that a mirror or a flip put it under.
         heights = [value for positions, _n, _i in put.groups.values()
                    for value in positions[1::3]]
         below = (min(heights) + max(heights)) / 2 < spec.thickness_mm / 2
         if below != (element.mirrored or component.flip):
             raise SystemExit(
-                f"{spec.board}: {element.name} ({element.package}) is on the "
-                f"board's {'underside' if element.mirrored or component.flip else 'top'} "
-                f"by its file{' and its row' if component.flip else ''}, and "
-                f"is drawn on the {'underside' if below else 'top'}. Fix the "
-                f"row's flip rather than the side."
+                f"{spec.board}: {element.name} ({element.package}) is "
+                f"{'mirrored onto the underside by its board file' if element.mirrored else 'on top'}"
+                f"{' and its row flips it' if component.flip else ''}, and it "
+                f"is drawn on the {'underside' if below else 'top'}: a flip "
+                f"on a mirrored element turns it back over. Fix the row's "
+                f"flip rather than the side."
             )
         solids.append(box_around(element.name, put))
         # **The turn, checked the way the model and the place already are.**

@@ -4685,7 +4685,9 @@ def test_each_manifest_board_counts_the_same_things_bodyless():
     and fail here, on the board they moved on."""
     unfetched = []
     for _row, spec in _manifest_specs():
-        if spec is None or not _fetched(spec):
+        if spec is None:
+            continue   # refused by name; test_every_manifest_row_is_composed_from_that_row
+        if not _fetched(spec):
             unfetched.append(_row.board)
             continue
         statements = compose.statements_for(spec)
@@ -4916,6 +4918,58 @@ def test_a_row_its_vendors_words_contradict_is_refused():
                                   "ESP32-S2", "ESP32-S3", "RP2040", "RP2350")
 
 
+def test_compose_refuses_a_row_its_vendors_words_contradict(monkeypatch):
+    """The exit itself, not only `contradiction`: the Pro Micro's vertical
+    Qwiic land on KiCad's horizontal SM04B stops `compose` before any model
+    is read, so no OpenCASCADE is needed."""
+    spec = next(s for s in compose.COMPOSITIONS
+                if s.board == "SparkFun Pro Micro ESP32-C3")
+    if not _fetched(spec):
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    row = next(c for c in compose.CORRESPONDENCE if c.package == "JST04_1MM_VERT")
+    monkeypatch.setattr(compose, "CORRESPONDENCE", (dataclasses.replace(
+        row, model="JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal"),))
+    with pytest.raises(SystemExit, match="Fix the table rather than the words"):
+        compose.compose(spec, deflection=0.05, check=True)
+
+
+def test_compose_refuses_a_flip_on_a_mirrored_element(monkeypatch):
+    """The side guard, driven: the Pocket's module is mirrored under the
+    board by its file, and a row that also flips it would turn it back on
+    top. A box the module's size stands in for its mesh, centred on its pads
+    rather than where Espressif's footprint puts it, so the silkscreen check
+    -- which is not the one asked about here -- is set aside."""
+    spec = next(s for s in compose.COMPOSITIONS
+                if s.board == "SparkFun Qwiic Pocket ESP32-C6")
+    if not _fetched(spec):
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    row = next(c for c in compose.CORRESPONDENCE if c.package == "ESP32-C6-MINI-1")
+    monkeypatch.setattr(compose, "silk_miss", lambda *args: None)
+    for flip, refused in ((False, False), (True, True)):
+        monkeypatch.setattr(compose, "CORRESPONDENCE",
+                            (dataclasses.replace(row, flip=flip),))
+        monkeypatch.setattr(compose, "component_mesh", lambda component, d: (
+            _model_box(13.2, 16.6, 2.4, "#101010"),
+            compose.Extent(-6.6, 6.6, -8.3, 8.3, 0.0, 2.4)))
+        if refused:
+            with pytest.raises(SystemExit, match="flip on a mirrored element"):
+                compose.compose(spec, deflection=0.05, check=True)
+        else:
+            compose.compose(spec, deflection=0.05, check=True)
+
+
+def test_a_body_code_is_not_a_lead_count():
+    """A DFN1006 is a 1.0 x 0.6 mm body and a QFN-3X3 a 3 x 3 mm one: neither
+    number counts leads, and a count is what the words check compares."""
+    for text in ("DFN1006-2L", "QFN-3X3", "QFN-3.0X3.0"):
+        assert compose._leads(text, compose._VENDOR_LEADS) is None, text
+    for text in ("QFN-16-1EP_3x3mm", "DFN-8-1EP_2x2mm"):
+        assert compose._leads(text, compose._MODEL_LEADS) is not None, text
+    assert compose._leads("QFN_3x3", compose._MODEL_LEADS) is None
+    assert compose._leads("QFN56_7MM", compose._VENDOR_LEADS) == 56
+    assert compose._leads("QFN32G-0.5-5X5MM", compose._VENDOR_LEADS) == 32
+
+
 def _inputs_missing(spec, board) -> list[str]:
     """The fetched files `compose` would read for this board and cannot find:
     a model it would otherwise download, or one tools/model_from_datasheet.py
@@ -4941,11 +4995,17 @@ def test_the_manifest_boards_compose_under_test(capsys):
     turn, silkscreen, side and word checks exit the composer, and until this
     nothing ran it under pytest. Each manifest board composes, writing
     nothing, wherever its files and every model it draws are on disk and
-    OpenCASCADE is installed; what is missing is named."""
+    OpenCASCADE is installed; what is missing is named. A row the composer
+    refuses by name is not missing anything: its reason is reported beside
+    what composed, and `test_every_manifest_row_is_composed_from_that_row`
+    holds that it is refused rather than drawn."""
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
-    composed, missing = [], {}
+    composed, missing, refused = [], {}, {}
     for _row, spec in _manifest_specs():
-        if spec is None or not _fetched(spec):
+        if spec is None:
+            refused[_row.board] = compose.MANIFEST_REFUSED[_row.board]
+            continue
+        if not _fetched(spec):
             missing[_row.board] = ["its board or schematic file"]
             continue
         board = compose.read_layout(spec.layout)
@@ -4960,9 +5020,11 @@ def test_the_manifest_boards_compose_under_test(capsys):
         composed.append(spec.board)
     capsys.readouterr()
     if not composed:
-        pytest.skip(f"SKIPPED: nothing to compose; missing {missing}")
+        pytest.skip(f"SKIPPED: nothing to compose; missing {missing}; "
+                    f"refused by name {refused}")
     if missing:
-        pytest.skip(f"composed {composed}; missing {missing}")
+        pytest.skip(f"composed {composed}; missing {missing}; "
+                    f"refused by name {refused}")
 
 
 def test_a_board_not_fetched_is_skipped_and_the_rest_still_compose(monkeypatch,
