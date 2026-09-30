@@ -166,10 +166,11 @@ def test_the_image_blinks_the_gpio_this_boards_sda_names_on_its_own_pad():
     assert gpio not in not_gpio, (gpio, theirs)
     board_pads = pads()
     (pad,) = [pad for pad in board_pads if pad["chip_index"] == gpio]
-    assert pad["label"] == f"/GPIO-{gpio}", pad["label"]
     others = [pad for pad in board_pads if pad["chip_index"] in not_gpio]
     assert len(others) == len(not_gpio), (
         f"a sibling's {LABEL} of {sorted(not_gpio)} is no pad here to read")
+    for each in (pad, *others):
+        assert each["label"] == f"/GPIO-{each['chip_index']}", each
     # Why this name: it is the pin this board's `SDA` names, and the XIAO's
     # `SDA` is a macro naming its own `PIN_WIRE0_SDA`, which OH-181's reader
     # does not number, so `SDA` could not be held to that sibling. Why not

@@ -33,7 +33,7 @@ import tempfile
 
 import pytest
 
-from tools import board_manifest, import_pindefs
+from tools import board_manifest, board_sources, eagle, import_pindefs
 from webui import api, pinmap
 from webui.boards import rp2040
 
@@ -128,6 +128,25 @@ def pads() -> list[dict]:
     return json.loads((pinmap.BOARDS_DIR / f"{BOARD}.json").read_text(encoding="utf-8"))["pads"]
 
 
+@functools.cache
+def schematic_gpios() -> dict[str, set[int]]:
+    """Net -> the GPIOs Adafruit's own schematic names the RP2040's pins on
+    it. The pad's net is `MOSI`, the function and not the GPIO, so this is
+    where the vendor's own words carry the number (rules/board-claims.md
+    §10, §11). Skips, naming the fetch, where the schematic is not here."""
+    row = board_manifest.row(BOARD)
+    root = board_sources.source(row.source).dest(board_manifest.REPO)
+    if not (root / row.schematic).is_file():
+        pytest.skip(f"SKIPPED: no {root / row.schematic}; "
+                    f"python tools/get_board_sources.py {row.source}")
+    (chip,) = [element.name for element in eagle.read_board(board_manifest.cad_path(row)).elements
+               if (element.package, element.value) == (row.pin_table.package, row.pin_table.value)]
+    return {net.name: {int(found.group(1)) for ref in net.pins if ref.part == chip
+                       for part in ref.pin.split("/")
+                       if (found := re.fullmatch(r"GPIO(\d+)", part))}
+            for net in eagle.read_schematic(root / row.schematic).nets}
+
+
 def run(image: bytes) -> tuple[list[tuple[int, dict[str, str]]], int, int]:
     """Load `image` onto this board by name, step it, and read every pad's
     level through the pin view whenever SIO's output or output enable
@@ -156,7 +175,8 @@ def test_the_image_is_blink_c_built_against_this_boards_own_variant():
 
 def test_the_image_blinks_the_gpio_this_boards_mosi_names_on_its_own_pad():
     """The pad is the one whose `chip_index` is the GPIO this board's own
-    variant calls `MOSI`, and Adafruit's net there is `MOSI` too. No
+    variant calls `MOSI`; Adafruit's net there is `MOSI` too, and its
+    schematic names the RP2040's pin on that net for the same GPIO. No
     sibling's `MOSI` is enabled or driven, and the pads whose `chip_index`
     is one read `input` throughout."""
     pytest.importorskip("core.cortexm0.abi")
@@ -171,6 +191,8 @@ def test_the_image_blinks_the_gpio_this_boards_mosi_names_on_its_own_pad():
     assert LABEL in pad["label"].split("/"), pad["label"]
     others = [pad for pad in board_pads if pad["chip_index"] in not_gpio]
     assert others, f"no sibling's {LABEL} {sorted(not_gpio)} is a pad here to read"
+    for each in (pad, *others):
+        assert schematic_gpios()[each["label"]] == {each["chip_index"]}, each
     # Why not its LED: its variant numbers one no pad here reaches. Why not a
     # `D<n>`: another row's variant numbers every one of them the same, so a
     # `D<n>` blink would be that row's image too. If either stops being so,
