@@ -2,11 +2,13 @@
 id: OH-190
 title: The Uno's two MiniMELF diodes lie across their pads, and the diode test covers
   only manifest boards
-status: in-review
+status: in-progress
 priority: P2
 created: '2026-09-30'
 touches:
 - docs/tickets/OH-190-*
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
 ---
 
 Found by OH-186's review round (2026-09-30). The Arduino Uno's D2 and D3, drawn with a MiniMELF model at turn 90, lie across their pads: the model's band sits the same distance from pad A as from pad C. Neither the pad-span check nor the silkscreen check notices, so the composed Uno shows two diodes turned a quarter off their land with every check green.
