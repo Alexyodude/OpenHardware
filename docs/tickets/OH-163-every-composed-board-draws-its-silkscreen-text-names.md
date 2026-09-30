@@ -8,6 +8,9 @@ created: '2026-09-04'
 touches:
 - tools/model_from_datasheet.py
 - tests/rules/test_import_3d_model.py
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
+- tools/import_3d_model.py
 ---
 
 Twenty-five of twenty-six boards draw a vendor file or a board composed from the vendor's PCB, every placement is drawn or refused with a reason (OH-150), and what a person sees is still short of a photograph in four measurable ways. This ticket is those four, counted from `python tools/compose_board_3d.py --check` on 2026-09-04 (11 composed boards) and from the shipped .glb files.
@@ -55,3 +58,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-09-30:** 2026-09-30: the composer, its tests and the importer return here; OH-189 is done. Composer tickets waiting for them: OH-184 (back-side silkscreen), OH-190 (diode test and the Uno's MiniMELFs), OH-191 (the Uno's fuse and varistors), OH-193 (rows held to the vendor's words).
 
 **Note 2026-09-30:** 2026-09-30: the composer, its tests and the importer lent again, to OH-191, OH-190 and OH-193 in that order (one worker, lane2). Return them when OH-193 closes.
+
+**Note 2026-09-30:** 2026-09-30: the composer, its tests and the importer return here; OH-190, OH-191 and OH-193 are done. Composer tickets waiting: OH-184 (back-side silkscreen), OH-195 (KiCad manifest composition), OH-197 (the Uno's diodes), OH-199 (low edges).
