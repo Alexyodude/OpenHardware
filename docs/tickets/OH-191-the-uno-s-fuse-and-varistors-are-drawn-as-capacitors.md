@@ -2,7 +2,7 @@
 id: OH-191
 title: The Uno's fuse and varistors are drawn as capacitors; its own schematic says
   what they are
-status: in-review
+status: done
 priority: P2
 created: '2026-09-30'
 touches:
@@ -22,3 +22,5 @@ Done when the Uno's drawn list names no part as a kind its schematic contradicts
 **Note 2026-09-30:** 2026-09-30: tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py passed on to OH-190, then OH-193; they return to OH-163 after OH-193.
 
 **Note 2026-09-30:** 2026-09-30, review round (lane2, rebased on master with OH-192): 56a34f3. (1) DESIGNATOR_STEMS, closed and pinned, pairs each passive prefix with the name stems that agree with it -- R: R, RN; C: C, PC; L: L, FB; F: F, PTC; RN: RN, R -- and any other stem refuses with both statements; the substring rule it replaces drew RV1, RT1 and CR1 on an R as resistors. DEVICESET_WORDS (VARISTOR, FUSE, PTC, THERMISTOR, FERRITE; closed and pinned) is a third statement of kind from the deviceset's own name, agreeing or disagreeing like the prefix and the value: the Uno's Z1 and Z2 are now refused because VARISTOR disagrees with prefix R, F1 because its stem F is not an L's. Only a passive prefix is asked, so an LED named TX or a chip named ZU4 says nothing. The rename test now holds F1, Z1, RV1, CR1 and JP1 (0R) refused, R5 on a VARISTOR refused by the word, FB1 on an L, PTC2 on an F, R7 on an RN drawn, TX and ZU4 unasked. The Uno still draws 44; every board's drawn list unchanged. (2) With the .brd and not the .sch, three Uno tests failed and main() returned 3 at the first skipped board: they skip through _uno_whole() naming the missing file (reproduced with the .sch moved aside: 9 skip, none fail), and main() reports each skipped board, composes the rest and ends 3 (a test drives it). (3) Stale prose and count comments fixed. Red on purpose: the stem unread, read as endswith, read as a substring; deviceset words unread; main stopping at the first skip. Composer and importer rule files under miniconda: 220 passed, 2 skipped (the Glyph Mini's refusal is OH-193's item 9).
+
+**Note 2026-09-30:** 2026-09-30: approved by independent review over two rounds (before/after --check on all 17 boards; mutants; for OH-191 the stem table's cases, for OH-190 band offsets against the 20% floor on every drawn diode, for OH-193 both composer exits pinned). Merged to master by fast-forward (a83fa48); the Uno recomposed in the main checkout: 44 drawn, F1/Z1/Z2 refused by its schematic. Low-severity edges collected in OH-199.
