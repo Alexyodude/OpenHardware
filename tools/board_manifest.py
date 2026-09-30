@@ -161,6 +161,19 @@ ESP32_C6_MINI_1_SPARKFUN = dataclasses.replace(
           ("30", 17), ("31", 16)),
     footprint_pads=tuple((f"49.{part}", "49") for part in range(1, 10)),
 )
+#: The same page, for the module as PCBCUPID's Glyph C6 places it, valued
+#: ESP32-C6-MINI-1-N4: the GPIO rows its headers reach -- pin 26 is GPIO20
+#: on Table 3-1 -- and a footprint that splits the page's 49 into nine pads
+#: named 49_1 to 49_9.
+ESP32_C6_MINI_1_PCBCUPID = dataclasses.replace(
+    ESP32_C6_MINI_1,
+    package="ESP32-C6-MINI-1_EXP", value="ESP32-C6-MINI-1-N4",
+    gpio=(("5", 2), ("6", 3), ("9", 4), ("10", 5), ("12", 0), ("13", 1), ("15", 6),
+          ("16", 7), ("19", 14), ("20", 15), ("22", 8), ("23", 9), ("24", 18),
+          ("25", 19), ("26", 20), ("27", 21), ("28", 22), ("29", 23), ("30", 17),
+          ("31", 16)),
+    footprint_pads=tuple((f"49_{part}", "49") for part in range(1, 10)),
+)
 ESP32_C6_WROOM_1 = PinTable(
     "ESP32-C6-WROOM-1-NARROW", "ESP32-C6-WROOM-1-NARROW",
     "ESP32-C6-WROOM-1 & WROOM-1U Datasheet v1.4, pp. 10-11, 3.2 Pin Description "
@@ -397,6 +410,18 @@ ROWS = (
              "net, so it reaches no pin of the ESP32-C3 or of anything else"),
         ),
         pin_table=ESP32_C3_MINI_1_PCBCUPID,
+    ),
+    Row(
+        board="PCBCUPID Glyph C6",
+        source="pcbcupid-glyph-c6",
+        cad="esp32c6.kicad_pcb",
+        schematic=None,
+        select=("J2", "J4"),
+        chip="ESP32-C6",
+        package="arduino-esp32",
+        variant="Pcbcupid_GLYPH_C6",
+        labels=("SDA", "SCL", "SCK", "MOSI", "MISO"),
+        pin_table=ESP32_C6_MINI_1_PCBCUPID,
     ),
 )
 

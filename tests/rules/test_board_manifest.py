@@ -542,12 +542,14 @@ def _schematic_gpio(row: board_manifest.Row) -> dict[str, set[int]]:
 #: Resolved pads whose one statement is the trace, each with the pin name
 #: the vendor's symbol gives the chip pad its copper reaches. PCBCUPID's
 #: `/uRx` and `/uTx` carry no number and no label a variant numbers, and its
-#: symbol names the module's pins 30 and 31 `RXD0` and `TXD0`, the names
+#: symbol names each module's pins 30 and 31 `RXD0` and `TXD0`, the names
 #: Table 3-1 gives them, which carry none either. Held to that name, so a
 #: footprint numbered otherwise than the page still fails.
 TRACE_ONLY = {
     ("PCBCUPID Glyph C3", "/uRx"): "RXD0",
     ("PCBCUPID Glyph C3", "/uTx"): "TXD0",
+    ("PCBCUPID Glyph C6", "/uRx"): "RXD0",
+    ("PCBCUPID Glyph C6", "/uTx"): "TXD0",
 }
 
 
@@ -836,27 +838,30 @@ def test_the_glyph_c3s_unconnected_pad_is_alone_on_its_net():
     assert "reaches no pin of the ESP32-C3 or of anything else" in why
 
 
-def test_the_glyph_c3s_module_is_its_esp32_c3_mini_1_under_another_footprints_name():
-    """PCBCUPID places the module under a footprint its library calls
-    `ESP32-H2-MINI-1_EXP`, valued `ESP32-C3-MINI-1-N4`. What makes the C3
-    page the one to read it against: the symbol's name on every pad the
-    table transcribes is the page's `IO<n>` for that pad's GPIO, or `RXD0`
-    and `TXD0` on 30 and 31, and the nine pads named `49_1` to `49_9` are
-    GND, as the page's 49 is."""
-    row = row_named("PCBCUPID Glyph C3")
-    _fetched(row)
-    table = row.pin_table
-    tree = kicad.parse_sexp(board_manifest.cad_path(row).read_text(encoding="utf-8"))
-    (chip,) = [node for node in kicad.children(tree, "footprint")
-               if node[1] == "ESP32C3:ESP32-H2-MINI-1_EXP"]
-    function = {pad[1]: kicad.first(pad, "pinfunction")[1]
-                for pad in kicad.children(chip, "pad")}
-    expected = {pad: f"IO{gpio}" for pad, gpio in table.gpio} | {"30": "RXD0", "31": "TXD0"}
-    assert {pad: function[pad] for pad in expected} == expected
-    split = [pad for pad, _ in table.footprint_pads]
-    assert split == [f"49_{n}" for n in range(1, 10)]
-    assert {function[pad].rstrip("_0123456789") for pad in split} == {"GND"}
-    assert dict(table.not_gpio)["49"] == "GND"
+def test_each_glyph_module_is_read_against_its_own_modules_page():
+    """PCBCUPID places the Glyph C3's module under a footprint its library
+    calls `ESP32-H2-MINI-1_EXP`, valued `ESP32-C3-MINI-1-N4`, and the Glyph
+    C6's as `ESP32-C6-MINI-1_EXP`, `ESP32-C6-MINI-1-N4`. What makes each
+    MINI-1 page the one to read it against: the symbol's name on every pad
+    the table transcribes is the page's `IO<n>` for that pad's GPIO, or
+    `RXD0` and `TXD0` on 30 and 31, and the nine pads named `49_1` to `49_9`
+    are GND, as the page's 49 is."""
+    for board, footprint in (("PCBCUPID Glyph C3", "ESP32C3:ESP32-H2-MINI-1_EXP"),
+                             ("PCBCUPID Glyph C6", "ESP32C6:ESP32-C6-MINI-1_EXP")):
+        row = row_named(board)
+        _fetched(row)
+        table = row.pin_table
+        tree = kicad.parse_sexp(board_manifest.cad_path(row).read_text(encoding="utf-8"))
+        (chip,) = [node for node in kicad.children(tree, "footprint") if node[1] == footprint]
+        function = {pad[1]: kicad.first(pad, "pinfunction")[1]
+                    for pad in kicad.children(chip, "pad")}
+        expected = {pad: f"IO{gpio}" for pad, gpio in table.gpio} | {
+            "30": "RXD0", "31": "TXD0"}
+        assert {pad: function[pad] for pad in expected} == expected, board
+        split = [pad for pad, _ in table.footprint_pads]
+        assert split == [f"49_{n}" for n in range(1, 10)], board
+        assert {function[pad].rstrip("_0123456789") for pad in split} == {"GND"}, board
+        assert dict(table.not_gpio)["49"] == "GND", board
 
 
 def test_a_header_pad_moved_onto_a_pad_the_table_leaves_out_is_refused():
