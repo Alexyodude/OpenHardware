@@ -1652,7 +1652,7 @@ class Composition:
     dip_headers: bool = False
     #: The vendor's schematic of the same board, where there is one to read:
     #: what says which kind of passive each placement is (OH-187). None for
-    #: the Uno and the XIAOs, which compose from their board file alone.
+    #: the XIAOs, which compose from their board file alone.
     schematic: pathlib.Path | None = None
 
 
@@ -2868,6 +2868,27 @@ _FARADS = re.compile(r"\s*\d+(?:\.\d+)?\s*[pnuµμ]?[Ff]\s*")
 #: Values that name a kind in a word. Closed: a word is read only once it is
 #: in this table, because a value is free text.
 KIND_WORDS = {"FUSE": "fuse"}
+#: Words in a DEVICESET's name that state a kind, as a whole token of it: a
+#: third statement beside the prefix and the value, agreeing or disagreeing
+#: as they do (OH-191). Arduino places its varistors from `VARISTOR` with
+#: prefix R. FERRITE is an inductor's because that is how KiCad draws one --
+#: its own ferrite-bead symbol takes the `L_` footprints -- and PTC a fuse's,
+#: the resettable fuse these boards carry: both JUDGEMENTS. Closed.
+DEVICESET_WORDS = {"VARISTOR": "varistor", "FUSE": "fuse", "PTC": "fuse",
+                   "THERMISTOR": "thermistor", "FERRITE": "inductor"}
+#: The letter stems of a part's NAME that agree with a passive's deviceset
+#: prefix (OH-191). EAGLE names a part after its prefix; a designer who
+#: renames it to a stem not listed here -- the Uno's fuse F1 on an inductor's
+#: prefix L, a varistor RV1 or a thermistor RT1 on an R, a diode CR1 -- has
+#: said the library's kind is not the part's, and the part is refused with
+#: both statements. Only a passive's prefix is checked: an LED's or a
+#: header's names (ON, TX, POWER) state nothing. Closed: IEEE 315's class
+#: letters, and the stems these boards and common practice pair with them --
+#: PC for a polarised C (the Uno's PC1), FB for a ferrite on an L, PTC for a
+#: resettable fuse on an F, RN and R for a network.
+DESIGNATOR_STEMS = {"R": frozenset({"R", "RN"}), "C": frozenset({"C", "PC"}),
+                    "L": frozenset({"L", "FB"}), "F": frozenset({"F", "PTC"}),
+                    "RN": frozenset({"RN", "R"})}
 #: Values that say a part is NOT fitted, and the one that says nobody has
 #: decided. Either way drawing the part would assert it is there. Read only
 #: of a part stated to be a passive: a jumper or a switch valued NC is
@@ -2904,6 +2925,8 @@ class Statement:
     value: str | None
     #: Why the part is not drawn at all, or None.
     refused: str | None = None
+    #: The word of the deviceset's name that spoke (`DEVICESET_WORDS`).
+    word: str | None = None
 
 
 def _current_variant(root) -> str | None:
@@ -2955,19 +2978,22 @@ def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
                                part.get("deviceset")), "")
         by_prefix = (PREFIX_KINDS.get(prefix, OTHER) if prefix else None)
         by_value = value_kind(value)
+        said_word = next((token for token in re.split(
+            r"[^A-Z0-9]+", part.get("deviceset", "").upper())
+            if token in DEVICESET_WORDS), None)
+        by_word = DEVICESET_WORDS.get(said_word)
         spoke = {"prefix": prefix if by_prefix else None,
-                 "value": value if by_value else None}
-        disagree = bool(by_prefix and by_value and by_prefix != by_value)
-        kind = None if disagree else (by_prefix or by_value)
+                 "value": value if by_value else None,
+                 "word": said_word}
+        spoken = {kind for kind in (by_prefix, by_word, by_value) if kind}
+        disagree = len(spoken) > 1
+        kind = None if disagree else next(iter(spoken), None)
         # **A designer who renames a part away from its deviceset's prefix
-        # has said something the library did not** (OH-191). EAGLE numbers
-        # a part after its prefix; the Uno's F1 is placed from an inductor's
-        # deviceset (prefix L) and its Z1 and Z2 from one whose prefix is R.
-        # A name that keeps the prefix's letters -- a PC1 for a C -- keeps
-        # its kind; one that drops them contradicts a passive's prefix.
-        letters = re.match(r"[A-Za-z]*", name).group(0).upper()
+        # has said something the library did not** (OH-191): see
+        # `DESIGNATOR_STEMS`, which is the whole of what is read of a name.
+        stem = re.match(r"[A-Za-z]*", name).group(0).upper()
         renamed = (by_prefix in PASSIVE_KINDS.values()
-                   and prefix.upper() not in letters)
+                   and stem not in DESIGNATOR_STEMS.get(prefix.upper(), ()))
         word = value.strip().upper()
         passive = kind in PASSIVE_KINDS.values()
         device = part.get("device", "")
@@ -2979,21 +3005,25 @@ def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
                  for at in range(len(runs))):
             refused = (f"{schematic.name} places {name} from {where}'s device "
                        f"{device!r}, whose name says NO_POP: not fitted")
+        elif disagree:
+            said = ([f"whose prefix {prefix} says "
+                     + ("a kind none of R, C, L and F" if by_prefix == OTHER
+                        else by_prefix)] if by_prefix else []) \
+                + ([f"the deviceset's own name, {said_word}, saying {by_word}"]
+                   if by_word else []) \
+                + ([f"valued {value!r}, which says {by_value}"] if by_value else [])
+            refused = (f"{schematic.name} places {name} from {where}, "
+                       f"{', '.join(said)}: statements of its kind that "
+                       f"disagree, and drawing it as any one would be choosing "
+                       f"between them")
         elif renamed:
             refused = (f"{schematic.name} places {name} from {where}, whose prefix "
                        f"{prefix} says {by_prefix} and would number it "
-                       f"{prefix}<n>, and its designer named it {name}: the "
-                       f"library and the designer disagree about what it is, "
-                       f"and drawing the library's kind would take its word "
+                       f"{prefix}<n>, and its designer named it {name}, a stem "
+                       f"{stem} not one of {sorted(DESIGNATOR_STEMS[prefix.upper()])}: "
+                       f"the library and the designer disagree about what it "
+                       f"is, and drawing the library's kind would take its word "
                        f"over theirs")
-        elif disagree:
-            prefix_says = ("a kind none of R, C, L and F" if by_prefix == OTHER
-                           else by_prefix)
-            refused = (f"{schematic.name} places {name} from {where}, whose prefix "
-                       f"{prefix} says {prefix_says}, "
-                       f"and values it {value!r}, which says {by_value}: two "
-                       f"statements of its kind that disagree, and drawing either "
-                       f"would be choosing between them")
         elif passive and word in NOT_FITTED:
             refused = f"{schematic.name} values {name} {value!r}: not fitted"
         elif passive and word in UNDECIDED:
@@ -3007,7 +3037,7 @@ def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
 
 def statements_for(spec: "Composition") -> dict[str, Statement] | None:
     """What a board's own files say of each part it places, or None for a
-    board composed without a schematic -- the Uno and the XIAOs.
+    board composed without a schematic -- the XIAOs.
 
     The schematic's statements (`stated_kinds`), and the board file's own
     word on what is not fitted: an `<element>` with `populate="no"`, or not
@@ -3056,9 +3086,9 @@ def drawn_from(element: eagle.Element, statements: dict[str, Statement] | None,
                schematic: str = "the schematic") -> tuple[Component | None, str | None]:
     """The row a placement is drawn from, or why it is not drawn at all.
 
-    `statements` is None for a board with no schematic -- the Uno, the XIAOs
-    -- which compose from the table alone, as they always have, ESD diodes
-    in a resistor's moulding included. Otherwise a part its files refuse is
+    `statements` is None for a board with no schematic -- the XIAOs --
+    which compose from the table alone, as they always have, ESD diodes in
+    a resistor's moulding included. Otherwise a part its files refuse is
     refused; a resistor, capacitor, inductor or fuse is drawn only from a row
     of the kind stated; and on a land every row of which draws one of those,
     a part stated to be some other kind is refused, as is a part nothing
@@ -4136,8 +4166,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     padless: list[str] = []
     #: Each passive drawn, and which of its schematic's statements said what
     #: kind it is; and each part that schematic refuses (OH-187). Only for a
-    #: board with a schematic to read -- the Uno and the XIAOs compose as they
-    #: always have.
+    #: board with a schematic to read -- the XIAOs compose as they always
+    #: have.
     statements = statements_for(spec)
     kinds: dict[str, dict[str, str]] = {}
     kind_refused: list[tuple[eagle.Element, str]] = []
@@ -4154,7 +4184,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             kinds[element.name] = {
                 key: text for key, text in (("kind", said.kind),
                                             ("prefix", said.prefix),
-                                            ("value", said.value))
+                                            ("value", said.value),
+                                            ("word", said.word))
                 if text is not None}
         if component is None:
             if element.package not in ABSENT:
@@ -4299,13 +4330,15 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         print(f"  modelled {len(modelled)}: {', '.join(modelled)} "
               f"-- built here, not fetched; see tools/model_from_datasheet.py")
     if kinds:
-        prefix = sum("prefix" in said for said in kinds.values())
-        value = sum("value" in said for said in kinds.values())
-        both = prefix + value - len(kinds)
+        both = sum("prefix" in said and "value" in said for said in kinds.values())
+        prefix = sum("prefix" in said and "value" not in said for said in kinds.values())
+        value = sum("value" in said and "prefix" not in said for said in kinds.values())
+        word = sum("word" in said for said in kinds.values())
         print(f"  kinds   {len(kinds)} passive(s) drawn as the kind "
               f"{spec.schematic.name} states: {both} by the deviceset's prefix "
-              f"and the value, {prefix - both} by the prefix alone, "
-              f"{value - both} by the value alone")
+              f"and the value, {prefix} by the prefix alone, {value} by the "
+              f"value alone" + (f", {word} with the deviceset's name agreeing"
+                                if word else ""))
     if unmodelled:
         print(f"  no model {len(unmodelled)} placement(s) drawn as nothing, "
               f"with no ABSENT entry saying why: "
@@ -4478,6 +4511,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     total = 0
+    #: Boards whose files are not fetched. Each says so as it is reached and
+    #: the rest compose; the run then ends 3, as a checker that could not
+    #: find its source does, rather than passing quietly or stopping at the
+    #: first (OH-191: a checkout holding the Uno's board file and not its
+    #: schematic composed nothing at all).
+    skipped: list[str] = []
     for spec in wanted:
         try:
             written = compose(spec, args.deflection, args.check)
@@ -4486,7 +4525,8 @@ def main(argv: list[str] | None = None) -> int:
                   f"pip install cadquery-ocp")
             return 3
         if written == 3:
-            return 3
+            skipped.append(spec.board)
+            continue
         total += written
     if not args.check and total:
         from tools.import_3d_model import write_index
@@ -4499,6 +4539,10 @@ def main(argv: list[str] | None = None) -> int:
             for name in (spec.board, *spec.serves)
         ))
         print(f"{total:,} bytes of glTF; index at {index.relative_to(REPO)}")
+    if skipped:
+        print(f"SKIPPED {len(skipped)} board(s), their files not fetched: "
+              f"{', '.join(skipped)}")
+        return 3
     return 0
 
 

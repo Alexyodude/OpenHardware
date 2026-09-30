@@ -75,6 +75,17 @@ def _uno():
     raise AssertionError("the Arduino Uno is no longer a composed board")
 
 
+def _uno_whole():
+    """The Uno's composition, skipping by name what of it is not fetched: its
+    board file, or the schematic beside it that `compose` now reads too
+    (OH-191) -- a checkout can hold the one without the other."""
+    spec = _uno()
+    for path in (spec.layout, spec.schematic):
+        if not path.is_file():
+            pytest.skip(f"SKIPPED: {path.name} is not fetched. Run: {spec.fetch_with}")
+    return spec
+
+
 def _fetched(spec) -> bool:
     """Its board file is on disk, and its schematic too where it reads one."""
     return spec.layout.is_file() and (spec.schematic is None
@@ -1958,8 +1969,9 @@ def test_every_component_lands_where_the_vendor_drew_its_body():
         if miss > worst:
             worst, worst_name = miss, element.name
 
-    # 15 until OH-119 mapped the Uno's small parts; 47 until OH-191, whose
-    # reading of the Uno's own schematic refuses F1, Z1 and Z2.
+    # 15 until OH-119 mapped the Uno's small parts; 47 until OH-191 deleted
+    # the L1812 and CT/CN0603 rows, which drew F1, Z1 and Z2 in borrowed
+    # bodies that the Uno's own schematic now refuses. Counted by row.
     assert checked == 44, (
         f"only {checked} components were checked against silk")
     assert worst < compose.SILK_TOLERANCE_MM, (
@@ -2045,7 +2057,7 @@ def test_compose_refuses_a_board_whose_part_faces_the_wrong_way(monkeypatch):
     turn it had when it pointed into the board.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
-    _brd()
+    _uno_whole()
     wrong = tuple(
         dataclasses.replace(component, turn=90.0)
         if component.package == "POWERSUPPLY_DC-21MM" else component
@@ -2132,7 +2144,8 @@ def test_each_component_box_actually_contains_its_component():
                     assert solid["min"][axis] - 1e-3 <= value, element.name
                     assert value <= solid["max"][axis] + 1e-3, element.name
         checked += 1
-    # 15 until OH-119 mapped the Uno's small parts; 47 until OH-191.
+    # 15 until OH-119 mapped the Uno's small parts; 47 until OH-191 deleted
+    # the L1812 and CT/CN0603 rows. Counted by row.
     assert checked == 44, (
         f"only {checked} components were boxed")
 
@@ -3530,7 +3543,7 @@ def test_compose_refuses_a_part_turned_away_from_the_pin_one_marker(monkeypatch)
     mutation OH-106 was filed for.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
-    _brd()
+    _uno_whole()
     wrong = tuple(
         dataclasses.replace(component, turn=270.0)
         if component.package == "DIL28-3" else component
@@ -3718,9 +3731,7 @@ def test_every_uno_package_is_drawn_or_its_absence_is_explained():
     survives a swapped part, and a new element in a vendor revision fails
     loudly here instead of vanishing.
     """
-    spec = _uno()
-    if not spec.layout.is_file():
-        pytest.skip(f"no layout; run {spec.fetch_with}")
+    spec = _uno_whole()
     board = compose.read_layout(spec.layout)
     mapped = {c.package for c in compose.CORRESPONDENCE}
     # A package every placement of which its own schematic refuses is
@@ -4358,6 +4369,7 @@ def _schematic(tmp_path, parts: str, variantdefs: str = "") -> pathlib.Path:
         '<deviceset name="SWITCH" prefix="SW"/>'
         '<deviceset name="LOGO" prefix=""/>'
         '<deviceset name="NETWORK" prefix="RN"/>'
+        '<deviceset name="VARISTOR" prefix="R"/>'
         '</devicesets></library>'
         '<library name="twin" urn="urn:one"><devicesets>'
         '<deviceset name="PART" prefix="R"/></devicesets></library>'
@@ -4387,7 +4399,7 @@ def test_the_schematic_decides_a_passives_kind_and_which_statement_did(tmp_path)
     assert stated["R1"] == compose.Statement("resistor", "R", "10K")
     assert stated["R3"] == compose.Statement("resistor", "R", None)
     # Only an F prefix agrees with a value reading FUSE.
-    assert stated["F1"] == compose.Statement("fuse", "F", "FUSE")
+    assert stated["F1"] == compose.Statement("fuse", "F", "FUSE", word="FUSE")
     assert stated["X1"] == compose.Statement("capacitor", None, "0.1uF")
     # **A prefix that is none of R, C, L and F still speaks**: LED is not an
     # inductor and CONN is not a capacitor, whatever letter they start with.
@@ -4404,23 +4416,47 @@ def test_the_schematic_decides_a_passives_kind_and_which_statement_did(tmp_path)
 
 def test_a_passive_renamed_away_from_its_prefix_is_refused(tmp_path):
     """**The designer's name against the library's prefix** (OH-191): the
-    Uno's F1 is placed from an inductor's deviceset and its Z1 from one
-    whose prefix is R. A name that keeps the prefix's letters keeps the
-    kind -- the Uno's PC1 is a polarised C -- and a name on a part whose
-    prefix is not a passive's says nothing either way."""
+    Uno's F1 is placed from an inductor's deviceset. A name whose letter
+    stem `DESIGNATOR_STEMS` pairs with the prefix keeps the kind -- the
+    Uno's PC1 is a polarised C, FB1 a ferrite on an L -- and any other is
+    refused with both statements, a varistor's RV1, a diode's CR1 and a
+    0R jumper's JP1 alike. A deviceset's own name is a third statement: a
+    VARISTOR is not a resistor whatever its prefix and its part's name say.
+    And a part whose prefix is not a passive's is not asked: an LED named
+    TX, a chip named ZU4."""
     stated = compose.stated_kinds(_schematic(tmp_path, (
         '<part name="F1" library="lib" deviceset="INDUCTOR" value="MF-MSMF050-2"/>'
         '<part name="Z1" library="lib" deviceset="RESISTOR" value="CG0603MLC-05E"/>'
+        '<part name="RV1" library="lib" deviceset="RESISTOR" value="10K"/>'
+        '<part name="CR1" library="lib" deviceset="RESISTOR" value=""/>'
+        '<part name="JP1" library="lib" deviceset="RESISTOR" value="0R"/>'
+        '<part name="R5" library="lib" deviceset="VARISTOR" value=""/>'
+        '<part name="FB1" library="lib" deviceset="INDUCTOR" value="BLM21"/>'
+        '<part name="PTC2" library="lib" deviceset="FUSE" value=""/>'
+        '<part name="R7" library="lib" deviceset="NETWORK" value="10K"/>'
         '<part name="PC1" library="lib" deviceset="CAP" value="47u"/>'
         '<part name="RN1" library="lib" deviceset="NETWORK" value="10K"/>'
+        '<part name="TX" library="lib" deviceset="LED" value="YELLOW"/>'
         '<part name="ZU4" library="lib" deviceset="CHIP" value="ATMEGA328P"/>')))
-    for name, prefix in (("F1", "L"), ("Z1", "R")):
+    for name, prefix in (("F1", "L"), ("Z1", "R"), ("RV1", "R"), ("CR1", "R"),
+                         ("JP1", "R")):
         assert stated[name].kind is None, stated[name]
         assert f"named it {name}" in stated[name].refused
         assert f"prefix {prefix} says" in stated[name].refused
+    assert stated["R5"].kind is None and "VARISTOR" in stated["R5"].refused
+    assert stated["FB1"] == compose.Statement("inductor", "L", None)
+    assert stated["PTC2"] == compose.Statement("fuse", "F", None, word="FUSE")
+    assert stated["R7"] == compose.Statement("resistor", "RN", "10K")
     assert stated["PC1"] == compose.Statement("capacitor", "C", None)
     assert stated["RN1"] == compose.Statement("resistor", "RN", "10K")
+    assert stated["TX"] == compose.Statement(compose.OTHER, "LED", None)
     assert stated["ZU4"] == compose.Statement(compose.OTHER, "U", None)
+    assert compose.DESIGNATOR_STEMS == {
+        "R": {"R", "RN"}, "C": {"C", "PC"}, "L": {"L", "FB"},
+        "F": {"F", "PTC"}, "RN": {"RN", "R"}}
+    assert compose.DEVICESET_WORDS == {
+        "VARISTOR": "varistor", "FUSE": "fuse", "PTC": "fuse",
+        "THERMISTOR": "thermistor", "FERRITE": "inductor"}
 
 
 def test_two_statements_of_a_kind_that_disagree_refuse_the_part(tmp_path):
@@ -4877,6 +4913,28 @@ def test_the_manifest_boards_compose_under_test(capsys):
         pytest.skip(f"SKIPPED: nothing to compose; missing {missing}")
     if missing:
         pytest.skip(f"composed {composed}; missing {missing}")
+
+
+def test_a_board_not_fetched_is_skipped_and_the_rest_still_compose(monkeypatch,
+                                                                   capsys):
+    """`main` used to stop at the first board whose files were not fetched,
+    so a checkout holding the Uno's board file and not its schematic
+    composed nothing (OH-191). It reports each such board, composes the
+    rest, and ends 3."""
+    first, second = compose.COMPOSITIONS[0], compose.COMPOSITIONS[1]
+    reached = []
+
+    def fake(spec, deflection, check):
+        reached.append(spec.board)
+        return 3 if spec is first else 0
+
+    monkeypatch.setattr(compose, "COMPOSITIONS", (first, second))
+    monkeypatch.setattr(compose, "MANIFEST_REFUSED", {})
+    monkeypatch.setattr(compose, "compose", fake)
+    assert compose.main(["--check"]) == 3
+    assert reached == [first.board, second.board]
+    assert f"SKIPPED 1 board(s), their files not fetched: {first.board}" in (
+        capsys.readouterr().out)
 
 
 def test_a_kicad_manifest_row_is_refused_by_name(capsys):
