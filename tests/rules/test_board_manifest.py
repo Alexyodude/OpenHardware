@@ -20,6 +20,7 @@ from tools import (
     import_board,
     import_pindefs,
     import_schematic,
+    kicad,
 )
 from tools.board_manifest import ROWS, ManifestError
 from webui import pinmap
@@ -255,9 +256,25 @@ def row_named(name: str) -> board_manifest.Row:
     return next(row for row in ROWS if row.board == name)
 
 
+def _placed(row: board_manifest.Row, name: str) -> kicad.Placement:
+    """The one footprint of a KiCad row's board file with this reference."""
+    (placed,) = [one for one in kicad.read_board(board_manifest.cad_path(row)).placements
+                 if one.reference == name]
+    return placed
+
+
 def _pins_stated(row: board_manifest.Row) -> dict[str, list[list[str]]]:
     """Per selected element, the pads each pin connects to, read straight off
-    the vendor's schematic: part, then its library's device, then `<connect>`."""
+    the vendor's schematic: part, then its library's device, then `<connect>`.
+    A KiCad row names no schematic, and its board file states the same by
+    number: a footprint's through-hole pads of one number are one pin."""
+    if row.schematic is None:
+        stated = {}
+        for name in row.select:
+            numbers = [pad.number for pad in _placed(row, name).pads if pad.kind == "thru_hole"]
+            stated[name] = [[number] * numbers.count(number)
+                            for number in dict.fromkeys(numbers)]
+        return stated
     path = board_sources.source(row.source).dest(board_manifest.REPO) / row.schematic
     root = ET.parse(path).getroot().find("drawing/schematic")
     stated = {}
@@ -282,9 +299,16 @@ def test_every_pin_the_schematic_states_is_one_pad():
         assert len(committed["pads"]) == sum(len(pins) for pins in stated.values()), row.board
         rule = ("Where the schematic's device connects one pin to several pads, they "
                 "are one pad here, at the pad its <connect> names first; "
-                f"{merged} pads were merged so.")
+                f"{merged} pads were merged so." if row.schematic is not None else
+                "Where a footprint gives several pads on one net one number, they are "
+                "one pin and one pad here, at the first of them KiCad does not flag "
+                f"castellated")
         assert (rule in committed["derivation"]) == bool(merged), (row.board, merged)
+        assert (f"{merged} pads were merged so." in committed["derivation"]) == bool(
+            merged), (row.board, merged)
     assert len(_committed(row_named("Adafruit QT Py ESP32-C3"))["pads"]) == 14
+    # Each of the Glyph Mini's 23 pins is a hole and a castellated half-hole.
+    assert len(_committed(row_named("PCBCUPID Glyph Mini RP2040"))["pads"]) == 23
 
 
 def test_the_feathers_two_33v_pins_stay_two_pads():
@@ -321,32 +345,52 @@ def test_every_pad_is_where_the_vendors_board_file_puts_it():
     committed pad to one of them by number and millimetres: EAGLE's Y points
     up, the file's down, and the file adds `MARGIN_MM` on each side. Keyed by
     element and number, because two elements can both have a pad 1. The pad
-    kept for a pin is the first its schematic `<connect>` names."""
+    kept for a pin is the first its schematic `<connect>` names. A KiCad
+    board's Y already runs down, each pad is placed by its footprint's
+    position and turn, and the pad kept for a pin is its whole hole, the one
+    KiCad does not flag castellated."""
+    margin = import_board.MARGIN_MM
     for row in ROWS:
         _fetched(row)
-        board = eagle.read_board(board_manifest.cad_path(row))
-        min_x, _, _, max_y = board.extent_mm()
-        margin = import_board.MARGIN_MM
         firsts = {(name, pads[0]) for name, pins in _pins_stated(row).items() for pads in pins}
-        vendor = {
-            (name, pad.number): pad
-            for name in row.select
-            for pad in board.element(name).pads_of("thru_hole")
-            if (name, pad.number) in firsts
-        }
-        assert len(vendor) == len(firsts), row.board
+        # (element, number) -> (x, y) in the file's millimetres, and the net.
+        vendor: dict[tuple[str, str], tuple[float, float, str]] = {}
+        if row.schematic is None:
+            min_x, min_y, _, _ = kicad.read_board(board_manifest.cad_path(row)).extent_mm()
+            for name in row.select:
+                placed = _placed(row, name)
+                for pad in placed.pads:
+                    if (pad.kind == "thru_hole" and not pad.castellated
+                            and (name, pad.number) not in vendor):
+                        x, y = kicad.pad_on_board(placed, pad)
+                        vendor[(name, pad.number)] = (
+                            x - min_x + margin, y - min_y + margin, pad.net)
+        else:
+            board = eagle.read_board(board_manifest.cad_path(row))
+            min_x, _, _, max_y = board.extent_mm()
+            vendor = {
+                (name, pad.number): (pad.x_mm - min_x + margin, max_y - pad.y_mm + margin,
+                                     pad.net)
+                for name in row.select
+                for pad in board.element(name).pads_of("thru_hole")
+                if (name, pad.number) in firsts
+            }
+        assert set(vendor) == firsts, row.board
         committed = _committed(row)
         scale = committed["px_per_mm"]
         matched = []
         for pad in committed["pads"]:
             hits = [
-                key for key, source in vendor.items()
+                key for key, (x, y, _) in vendor.items()
                 if key[1] == pad["pad"]
-                and abs(pad["x"] / scale - (source.x_mm - min_x + margin)) <= 0.05 / scale
-                and abs(pad["y"] / scale - (max_y - source.y_mm + margin)) <= 0.05 / scale
+                and abs(pad["x"] / scale - x) <= 0.05 / scale
+                and abs(pad["y"] / scale - y) <= 0.05 / scale
             ]
             assert len(hits) == 1, (row.board, pad, hits)
-            assert pad["label"] == vendor[hits[0]].net, (row.board, pad["pad"])
+            assert pad["label"] == vendor[hits[0]][2], (row.board, pad["pad"])
+            if row.schematic is None:
+                # A KiCad board's pads are grouped by their footprint.
+                assert pad["group"] == hits[0][0], (row.board, pad)
             matched.append(hits[0])
         assert sorted(matched) == sorted(vendor), row.board
 
@@ -450,7 +494,25 @@ def _schematic_gpio(row: board_manifest.Row) -> dict[str, set[int]]:
     pins there: `GPIO26/AD0` on the KB2040's `A0`, and `IOA0` on the Pro
     Micro ESP32-C3's `IOA0/SCLK`, where SparkFun's ESP32-C3_MINI-1 symbol
     names its five ADC1 pins `IOA<n>` and every other GPIO `IO<n>`. Read on
-    the chip's pins only: nowhere else is `IOA<n>` the chip's name for a pin."""
+    the chip's pins only: nowhere else is `IOA<n>` the chip's name for a pin.
+    A KiCad row names no schematic, and its board file gives each of the
+    chip's pads the pin name of the vendor's symbol, `pinfunction`:
+    `GPIO26_ADC0` on the Glyph Mini's `/GPIO-26`. Read here off the file's
+    own tree, not through a reader."""
+    if row.schematic is None:
+        tree = kicad.parse_sexp(board_manifest.cad_path(row).read_text(encoding="utf-8"))
+        (chip,) = [node for node in kicad.children(tree, "footprint")
+                   if node[1].split(":")[-1] == row.pin_table.package
+                   and [prop[2] for prop in kicad.children(node, "property")
+                        if prop[1] == "Value"] == [row.pin_table.value]]
+        named: dict[str, set[int]] = {}
+        for pad in kicad.children(chip, "pad"):
+            net, function = kicad.first(pad, "net"), kicad.first(pad, "pinfunction")
+            if net is not None and function is not None:
+                named.setdefault(net[-1], set()).update(
+                    int(found.group(1)) for part in re.split(r"[/_]", function[1])
+                    if (found := re.fullmatch(r"GPIO(\d+)", part)))
+        return named
     board = eagle.read_board(board_manifest.cad_path(row))
     (chip,) = [element.name for element in board.elements if (element.package, element.value)
                == (row.pin_table.package, row.pin_table.value)]
@@ -464,11 +526,12 @@ def _schematic_gpio(row: board_manifest.Row) -> dict[str, set[int]]:
 
 def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
     """The trace is one statement, and every resolved pad has another that
-    agrees: the GPIO the vendor's net name carries, as SparkFun's `IO8`; the
-    variant's number for a label it numbers, as Adafruit's `TX`; or the GPIO
-    the vendor's schematic names the chip's pin on that net, as the KB2040's
-    `SCLK` on `GPIO18`, which its variant calls `SCK`, and the Pro Micro
-    ESP32-C3's `IOA0/SCLK` on its module's `IOA0`."""
+    agrees: the GPIO the vendor's net name carries, as SparkFun's `IO8` and
+    PCBCUPID's `/GPIO-8`; the variant's number for a label it numbers, as
+    Adafruit's `TX`; or the GPIO the vendor's schematic names the chip's pin
+    on that net, as the KB2040's `SCLK` on `GPIO18`, which its variant calls
+    `SCK`, the Pro Micro ESP32-C3's `IOA0/SCLK` on its module's `IOA0`, and
+    the Glyph Mini's symbol on each RP2040 pin."""
     for row in ROWS:
         _fetched(row)
         numbers = _variant_numbers(row)
@@ -478,7 +541,7 @@ def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
                 continue
             parts = pad["label"].split("/")
             stated = {int(found.group(1)) for part in parts
-                      if (found := re.fullmatch(r"(?:GPIO|IO)(\d+)", part, re.I))}
+                      if (found := re.fullmatch(r"(?:GPIO|IO)-?(\d+)", part, re.I))}
             stated |= {numbers[part] for part in parts if part in numbers}
             stated |= named.get(pad["label"], set())
             assert stated == {pad["chip_index"]}, (row.board, pad["label"], stated)
@@ -487,12 +550,16 @@ def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
     assert _schematic_gpio(kb2040)["SCLK"] == {18}
     pro_micro = row_named("SparkFun Pro Micro ESP32-C3")
     assert _schematic_gpio(pro_micro)["IOA0/SCLK"] == {0}
+    glyph = _schematic_gpio(row_named("PCBCUPID Glyph Mini RP2040"))
+    assert (glyph["/GPIO-26"], glyph["/GPIO-15"], glyph["+3V3"]) == ({26}, {15}, set())
 
 
 def _trace(row: board_manifest.Row, text: str | None = None,
            table: board_manifest.PinTable | None = None) -> dict:
+    """The row's own CAD traced by the reader `import_pindefs` registers it
+    through, for its format."""
     path = board_manifest.cad_path(row)
-    return import_pindefs.read_eagle_traced(
+    return import_pindefs.TRACED_READERS[path.suffix.lower()](
         (path.read_text(encoding="utf-8") if text is None else text,),
         path=path, select=row.select, table=table or row.pin_table)
 
@@ -583,9 +650,14 @@ def test_no_supply_pad_names_a_pin_or_is_on_a_gpio_pad_of_its_chip():
     checked = []
     for row in ROWS:
         _fetched(row)
-        board = eagle.read_board(board_manifest.cad_path(row))
-        (chip,) = [element for element in board.elements if (element.package, element.value)
-                   == (row.pin_table.package, row.pin_table.value)]
+        if row.schematic is None:
+            (chip,) = [placed for placed in kicad.read_board(board_manifest.cad_path(row)).placements
+                       if (placed.name, placed.value)
+                       == (row.pin_table.package, row.pin_table.value)]
+        else:
+            board = eagle.read_board(board_manifest.cad_path(row))
+            (chip,) = [element for element in board.elements if (element.package, element.value)
+                       == (row.pin_table.package, row.pin_table.value)]
         gpio = dict(row.pin_table.gpio)
         for pad in _committed(row)["pads"]:
             label = pad["label"]
@@ -616,6 +688,85 @@ def test_a_net_renamed_for_another_gpio_is_refused_on_the_pilot():
                        match=r"'IO12' is named for GPIO12 and its copper reaches "
                              r"U1 pad 10 = GPIO8"):
         _trace(row, text.replace('<signal name="IO8">', '<signal name="IO12">'))
+
+
+# --- a row from a KiCad board file (OH-192) -----------------------------------
+
+
+def test_a_kicad_row_names_no_schematic_and_an_eagle_row_needs_one():
+    """Which pads are one pin: a `.kicad_pcb` says so by its pads' numbers,
+    and an EAGLE `.brd` only through its schematic's device connects. A
+    KiCad row naming a schematic, or an EAGLE row naming none, is refused
+    before anything is read."""
+    glyph = row_named("PCBCUPID Glyph Mini RP2040")
+    with pytest.raises(ManifestError, match="is a KiCad board, whose pads carry their "
+                                            "own numbers and nets"):
+        board_manifest.check(dataclasses.replace(glyph, schematic="glyph.kicad_sch"))
+    with pytest.raises(ManifestError, match=r"Thing_Plus_ESP32_C6\.brd is not a KiCad "
+                                            r"board, .* the row names no schematic"):
+        board_manifest.check(dataclasses.replace(ROWS[0], schematic=None))
+
+
+def test_the_glyph_minis_pins_are_its_traced_copper_and_its_variant_names_no_pad():
+    """Its pads are labelled by net, `/GPIO-0` and so on, and its variant --
+    read through `common.h` -- numbers `D0` to `D29` and no label any pad
+    carries, so every pin is the copper's: twenty pads each reach one RP2040
+    GPIO directly. GND and +3V3 reach pads the page gives no GPIO, and /5V
+    reaches none of the chip's."""
+    row = row_named("PCBCUPID Glyph Mini RP2040")
+    _fetched(row)
+    numbers = _variant_numbers(row)
+    assert {f"D{n}" for n in range(30)} <= set(numbers)
+    pads = {pad["label"]: pad for pad in _committed(row)["pads"]}
+    assert not [label for label in pads
+                if set(import_pindefs.alternatives(label)) & set(numbers)]
+    gpios = {label: pad["chip_index"] for label, pad in pads.items() if pad["chip_pin"]}
+    assert gpios == {f"/GPIO-{n}": n for n in (*range(16), 26, 27, 28, 29)}
+    assert {tuple(pads[label]["chip_pin_from"]) for label in gpios} == {(row.source,)}
+    assert pads["/5V"]["why_null"] == import_pindefs.NOT_TRACED
+    for label in ("GND", "+3V3"):
+        assert pads[label]["why_null"].startswith(
+            f"no GPIO: the vendor's board file traces {label} -> IC1 "), pads[label]
+    traced = _trace(row)
+    for label, gpio in gpios.items():
+        assert traced[label].via.startswith(f"{label} -> IC1 pad "), traced[label].via
+        assert f" = GPIO{gpio} (" in traced[label].via, traced[label].via
+
+
+def test_a_net_renamed_for_another_gpio_is_refused_on_the_glyph_mini():
+    """The KiCad row's cross-check, as the pilot's: PCBCUPID's `/GPIO-3`
+    renamed `/GPIO-30` throughout the file. Its copper still reaches IC1's
+    pad 5, GPIO3, and the file saying two things is refused."""
+    row = row_named("PCBCUPID Glyph Mini RP2040")
+    _fetched(row)
+    text = board_manifest.cad_path(row).read_text(encoding="utf-8")
+    assert '"/GPIO-3"' in text and '"/GPIO-30"' not in text
+    with pytest.raises(import_pindefs.PindefError,
+                       match=r"'/GPIO-30' is named for GPIO30 and its copper reaches "
+                             r"IC1 pad 5 = GPIO3"):
+        _trace(row, text.replace('"/GPIO-3"', '"/GPIO-30"'))
+
+
+def test_the_glyph_minis_pad_57_is_the_central_pad_its_rp2040_page_numbers_57():
+    """The footprint numbers its central pad 57, as the page does, so the
+    Glyph Mini's table needs no `footprint_pads`: 57 sits at the centre of
+    the 56 around it, the footprint's 16 unnumbered pads are paste on no
+    net, and GND reaches the page's 57."""
+    row = row_named("PCBCUPID Glyph Mini RP2040")
+    _fetched(row)
+    assert row.pin_table.footprint_pads == ()
+    (chip,) = [placed for placed in kicad.read_board(board_manifest.cad_path(row)).placements
+               if (placed.name, placed.value) == (row.pin_table.package, row.pin_table.value)]
+    ring = [pad for pad in chip.pads if pad.number.isdigit() and int(pad.number) <= 56]
+    (central,) = [pad for pad in chip.pads if pad.number == "57"]
+    assert sorted(int(pad.number) for pad in ring) == list(range(1, 57))
+    assert (round(central.x_mm - sum(pad.x_mm for pad in ring) / 56, 3),
+            round(central.y_mm - sum(pad.y_mm for pad in ring) / 56, 3)) == (0, 0)
+    unnumbered = [pad for pad in chip.pads if not pad.number]
+    assert len(unnumbered) == 16
+    assert {(pad.net, pad.layers) for pad in unnumbered} == {("", ("B.Paste",))}
+    assert dict(row.pin_table.not_gpio)["57"] == "GND"
+    assert "; pad 57 = GND (" in _trace(row)["GND"].via
 
 
 def test_a_header_pad_moved_onto_a_pad_the_table_leaves_out_is_refused():

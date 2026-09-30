@@ -61,7 +61,9 @@ class ManifestError(Exception):
 class PinTable:
     """One part's pins, as its datasheet's pin table numbers them.
 
-    The part is the element a row's CAD places as `package` with `value`.
+    The part is the element a row's CAD places as `package` with `value`:
+    an EAGLE element's package, or a KiCad footprint's name without its
+    library, and the value either states.
     `gpio` holds only the pads some row's header reaches (OH-178);
     `not_gpio` every pad the page gives no GPIO, by the name it gives; and
     `pins` how many pins the page numbers. A pad within `pins` in neither
@@ -182,6 +184,19 @@ RP2040_QFN56 = PinTable(
     # footprint names its central pad `P$1`.
     footprint_pads=(("P$1", "57"),),
 )
+#: The same page, for the RP2040 as PCBCUPID's Glyph Mini places it: a
+#: KiCad footprint and the value `RP2040`, the GPIO rows its headers reach
+#: -- pins 14 to 18 are GPIO11 to GPIO15 on Table 615 -- and a footprint
+#: that numbers the central pad 57 as the page does.
+RP2040_QFN56_PCBCUPID = dataclasses.replace(
+    RP2040_QFN56,
+    package="QFN-56-1EP_7x7mm_P0.4mm_EP5.6x5.6mm", value="RP2040",
+    gpio=(("2", 0), ("3", 1), ("4", 2), ("5", 3), ("6", 4), ("7", 5), ("8", 6),
+          ("9", 7), ("11", 8), ("12", 9), ("13", 10), ("14", 11), ("15", 12),
+          ("16", 13), ("17", 14), ("18", 15), ("38", 26), ("39", 27), ("40", 28),
+          ("41", 29)),
+    footprint_pads=(),
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -195,8 +210,10 @@ class Row:
     #: The CAD file, relative to that source's checkout.
     cad: str
     #: The vendor's schematic of the same board, relative to the same checkout.
-    #: Its devices say which pads are one pin: `import_board.Connects`.
-    schematic: str
+    #: Its devices say which pads are one pin: `import_board.Connects`. An
+    #: EAGLE row needs it; a KiCad board's pads carry their own numbers and
+    #: nets, which say the same, so a `.kicad_pcb` row names none.
+    schematic: str | None
     #: The placed elements carrying the header: `tools/import_board.py --select`.
     select: tuple[str, ...]
     #: A key of `webui/boards/catalogue.py`'s `CHIPS`.
@@ -217,7 +234,7 @@ class Row:
     #: package defines this label"; `import_pindefs.Board.reasons`.
     reasons: tuple[tuple[str, str], ...] = ()
     #: The chip's pads in the CAD, read so that a pad names the GPIO its net
-    #: reaches: `import_pindefs.read_eagle_traced`.
+    #: reaches: `import_pindefs.read_eagle_traced` or `read_kicad_traced`.
     pin_table: PinTable | None = None
 
 
@@ -332,6 +349,21 @@ ROWS = (
              f"than R13 and the chip"),
         ),
         pin_table=ESP32_C6_MINI_1_SPARKFUN,
+    ),
+    # A KiCad board (OH-192). Its pads are labelled by net, `/GPIO-0` and so
+    # on, which no label of its variant spells, so its pins are the traced
+    # copper's; the variant is read all the same, for its chip.
+    Row(
+        board="PCBCUPID Glyph Mini RP2040",
+        source="pcbcupid-glyph-mini-2040",
+        cad="glyph-mini-rp2040.kicad_pcb",
+        schematic=None,
+        select=("J3", "J4", "J5"),
+        chip="RP2040",
+        package="arduino-pico",
+        variant="pcbcupid_glyph_mini_2040",
+        labels=(),
+        pin_table=RP2040_QFN56_PCBCUPID,
     ),
 )
 
@@ -453,6 +485,21 @@ def check(entry: Row) -> None:
             f"{sorted(FLAT_PACKAGES)}, whose Arduino pin number is the GPIO; "
             f"read flat, its numbers would be indices into the core's own table"
         )
+    # Which pads are one pin: a KiCad board says so by its pads' numbers,
+    # and an EAGLE board only through its schematic's device connects.
+    kicad = pathlib.PurePosixPath(entry.cad).suffix.lower() == ".kicad_pcb"
+    if kicad and entry.schematic is not None:
+        raise ManifestError(
+            f"{entry.board}: {entry.cad} is a KiCad board, whose pads carry "
+            f"their own numbers and nets; a schematic's connects are read for "
+            f"an EAGLE board only, so the row names no {entry.schematic}"
+        )
+    if not kicad and entry.schematic is None:
+        raise ManifestError(
+            f"{entry.board}: {entry.cad} is not a KiCad board, and which of "
+            f"its pads are one pin is stated by its schematic's device "
+            f"connects; the row names no schematic"
+        )
     package = import_pindefs.PACKAGES[entry.package]
     checkout = import_pindefs.BSP_DIR / entry.package
     variant = checkout / "variants" / entry.variant / "pins_arduino.h"
@@ -460,8 +507,9 @@ def check(entry: Row) -> None:
     wanted = [
         (cad_path(entry),
          f"python tools/get_board_sources.py {entry.source}"),
-        (board_sources.source(entry.source).dest(REPO) / entry.schematic,
-         f"python tools/get_board_sources.py {entry.source}"),
+        *([(board_sources.source(entry.source).dest(REPO) / entry.schematic,
+            f"python tools/get_board_sources.py {entry.source}")]
+          if entry.schematic is not None else []),
         (variant, package.how_to_fetch()),
         (table, package.how_to_fetch()),
     ]
@@ -509,7 +557,9 @@ def geometry(entry: Row) -> dict:
     """The board file as `tools/import_board.py` builds it: pads, no pins."""
     path = cad_path(entry)
     try:
-        read = import_board.read_geometry(path, entry.select, connects=connects(entry))
+        read = import_board.read_geometry(
+            path, entry.select,
+            connects=connects(entry) if entry.schematic is not None else None)
     except import_board.BoardImportError as exc:
         raise ManifestError(f"{entry.board}: {exc}") from exc
     source = board_sources.source(entry.source)

@@ -738,8 +738,9 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     # Adafruit Feather ESP32-C6, whose file names 15; 29 until OH-181 added
     # the Adafruit KB2040, whose file names 18; 30 until OH-188 added the
     # SparkFun Pro Micro ESP32-C3, whose file names 12; 31 until the SparkFun
-    # Qwiic Pocket ESP32-C6, whose file names 8.
-    assert len(boards) == 32, boards
+    # Qwiic Pocket ESP32-C6, whose file names 8; 32 until OH-192 added the
+    # PCBCUPID Glyph Mini RP2040, whose file names 20.
+    assert len(boards) == 33, boards
     # Every board, picked and not loaded: nothing was read.
     picked = {board: api.pad_view(board, api.description_for(board), None)
               for board in boards}
@@ -761,7 +762,7 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     )
     silent = sorted(set(boards) - set(would_have_lied))
     assert silent == [], silent
-    assert len(would_have_lied) == 32, would_have_lied
+    assert len(would_have_lied) == 33, would_have_lied
     assert "Arduino Uno" in would_have_lied
     assert "XIAO-MG24-SMD" in would_have_lied, (
         "the MG24 has no board module at all, so its 19 chip pins can only "
@@ -1032,7 +1033,7 @@ def test_a_running_manifest_board_lists_its_own_pads_and_no_xiao_label():
     # The rows no blink here runs on, and what is true of those instead is
     # `test_a_row_whose_chip_module_names_no_gpio_words_reports_no_levels`.
     assert [row.board for row in board_manifest.ROWS if row.chip not in CHIP_BLINKS] == [
-        "Adafruit KB2040"]
+        "Adafruit KB2040", "PCBCUPID Glyph Mini RP2040"]
     for row in [row for row in board_manifest.ROWS if row.chip in CHIP_BLINKS]:
         module = api.description_for(row.board)
         own = json.loads((pinmap.BOARDS_DIR / f"{row.board}.json").read_text(encoding="utf-8"))
@@ -1059,7 +1060,7 @@ def test_a_manifest_boards_levels_agree_with_its_chip_module_on_every_gpio_both_
     worded = [row for row in board_manifest.ROWS
               if hasattr(api.description_for(row.board), "GPIO")]
     assert [row.board for row in board_manifest.ROWS if row not in worded] == [
-        "Adafruit KB2040"]
+        "Adafruit KB2040", "PCBCUPID Glyph Mini RP2040"]
     for row in worded:
         module = api.description_for(row.board)
         runtime = api.Runtime(board=row.board, chip=row.chip, core="riscv32",
@@ -1078,20 +1079,21 @@ def test_a_manifest_boards_levels_agree_with_its_chip_module_on_every_gpio_both_
 
 
 def test_a_row_whose_chip_module_names_no_gpio_words_reports_no_levels():
-    """The KB2040 (OH-181): `webui/boards/rp2040.py` names no `GPIO`,
-    `GPIO_ENABLE` or `GPIO_OUT`, so `api.row_levels` reads no level for it,
-    and its view lists its own pads, in its file's order, each with its own
-    `chip_pin` and no state."""
-    module = api.description_for("Adafruit KB2040")
-    assert [hasattr(module, word) for word in ("GPIO", "GPIO_ENABLE", "GPIO_OUT")] == [
-        False, False, False]
-    runtime = api.Runtime(board="Adafruit KB2040", chip="RP2040", core="cortexm0",
-                          description=module, abi=None, machine=None)
-    assert api.row_levels(runtime, _Words({})) is None
-    own = json.loads((pinmap.BOARDS_DIR / "Adafruit KB2040.json").read_text(encoding="utf-8"))
-    view = api.pad_view("Adafruit KB2040", module, api.row_levels(runtime, _Words({})))
-    assert [(pad["pin"], pad["chip_pin"], pad["state"]) for pad in view["pads"]] == [
-        (pad["label"], pad["chip_pin"], "unknown") for pad in own["pads"]]
+    """The KB2040 (OH-181) and the Glyph Mini (OH-192): `webui/boards/rp2040.py`
+    names no `GPIO`, `GPIO_ENABLE` or `GPIO_OUT`, so `api.row_levels` reads
+    no level for either, and each view lists its own pads, in its file's
+    order, each with its own `chip_pin` and no state."""
+    for board in ("Adafruit KB2040", "PCBCUPID Glyph Mini RP2040"):
+        module = api.description_for(board)
+        assert [hasattr(module, word) for word in ("GPIO", "GPIO_ENABLE", "GPIO_OUT")] == [
+            False, False, False]
+        runtime = api.Runtime(board=board, chip="RP2040", core="cortexm0",
+                              description=module, abi=None, machine=None)
+        assert api.row_levels(runtime, _Words({})) is None
+        own = json.loads((pinmap.BOARDS_DIR / f"{board}.json").read_text(encoding="utf-8"))
+        view = api.pad_view(board, module, api.row_levels(runtime, _Words({})))
+        assert [(pad["pin"], pad["chip_pin"], pad["state"]) for pad in view["pads"]] == [
+            (pad["label"], pad["chip_pin"], "unknown") for pad in own["pads"]], board
 
 
 def test_a_manifest_pad_is_never_captioned_by_its_chip_modules_table():

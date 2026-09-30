@@ -114,14 +114,16 @@ Outline and pad labels only, not yet wired:
 - `Adafruit QT Py ESP32-C3` · `Adafruit Feather ESP32-C6`, pad labels only, the same way
 - `Adafruit KB2040`, pad labels only, the same way
 - `SparkFun Pro Micro ESP32-C3` · `SparkFun Qwiic Pocket ESP32-C6`, pad labels only, the same way
+- `PCBCUPID Glyph Mini RP2040`, pad labels only, the same way, from a KiCad board file
 
 All XIAO artwork is Seeed Studio's, MIT, from
 [OSHW-XIAO-Series](https://github.com/Seeed-Studio/OSHW-XIAO-Series).
 
 A board that is not a XIAO is a row in `tools/board_manifest.py`: its CAD
-file, the elements carrying its header, its chip, the board-support variant
-that names pins by label, and the chip's datasheet pin table, against which
-each pad's net is traced to the chip pad it reaches. Each pad's
+file (an EAGLE board and its schematic, or a KiCad board, whose pads carry
+their own numbers and nets), the elements carrying its header, its chip, the
+board-support variant that names pins by label, and the chip's datasheet pin
+table, against which each pad's net is traced to the chip pad it reaches. Each pad's
 `chip_pin_from` says which of the two, or both, named its pin.
 `python tools/board_manifest.py` writes its file from that row, and writes no
 SVG beside it.
