@@ -407,3 +407,13 @@ binds -- and that path is a file under the test's own directory. Every
 entry names its image that way already. `tests/rules/test_board_claims.py`
 holds the case the review found, a name joined onto a temporary directory,
 and a path climbing out of the test's directory.
+## 13. 2026-09-30 — a row may watch `LED_BUILTIN` where no sibling numbers it alike
+
+§10's conditions do not name a label, and the PCBCUPID Glyph C3 (OH-194)
+meets them on `LED_BUILTIN`, on the header pads its board file puts on
+PCBCUPID's `/GPIO_1`. Every other table on the ESP32-C3 numbers
+`LED_BUILTIN` another GPIO, or no pin at all -- it defines none, or defines
+it as something other than an integer, as an RGB LED past the chip's GPIO
+count is -- and then a build against it is refused and moves nothing.
+`tests/webui/test_pcbcupid_glyph_c3_board.py` reads each table for it, and
+asserts why not `SDA`: its net, `/SDA`, carries no GPIO.

@@ -126,6 +126,8 @@ def test_the_repository_passes_today():
     assert "Adafruit KB2040 -> tests/webui/test_kb2040_board.py" in result.stdout
     assert ("PCBCUPID Glyph Mini RP2040 -> "
             "tests/webui/test_glyph_mini_rp2040_board.py" in result.stdout)
+    assert ("PCBCUPID Glyph C3 -> "
+            "tests/webui/test_pcbcupid_glyph_c3_board.py" in result.stdout)
 
 
 def test_the_rule_arms_this_checker():

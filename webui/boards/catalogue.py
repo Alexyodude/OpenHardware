@@ -211,6 +211,7 @@ BOARD_FIRMWARE_VERIFIED: dict[str, str] = {
         "tests/webui/test_sparkfun_qwiic_pocket_esp32c6_board.py",
     "Adafruit KB2040": "tests/webui/test_kb2040_board.py",
     "PCBCUPID Glyph Mini RP2040": "tests/webui/test_glyph_mini_rp2040_board.py",
+    "PCBCUPID Glyph C3": "tests/webui/test_pcbcupid_glyph_c3_board.py",
 }
 
 #: What each instruction set would need before a core for it could be trusted.
