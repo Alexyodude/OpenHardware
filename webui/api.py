@@ -832,6 +832,12 @@ def row_levels(runtime: Runtime, cpu: Core) -> dict[str, str] | None:
     deciding before `OUT` as those modules do; a test holds the two equal
     on every GPIO both name. `None` where the module names no such words,
     and a pad with no `chip_index` gets no level.
+
+    **Those words decide only a pad they are routed to.** A module that
+    names `unrouted_level` is asked first, per pad, and where it answers,
+    its answer is the pad's level: the RP2040's does wherever the pad's
+    `FUNCSEL` does not select SIO (OH-196), so a pad there reads `high` or
+    `low` only where an image has selected SIO on it, as silicon requires.
     """
     description = runtime.description
     words = [getattr(description, name, None) for name in ("GPIO", "GPIO_ENABLE", "GPIO_OUT")]
@@ -839,6 +845,7 @@ def row_levels(runtime: Runtime, cpu: Core) -> dict[str, str] | None:
     if None in words or layout is None:
         return None
     base, enable_at, out_at = words
+    unrouted = getattr(description, "unrouted_level", None)
     enable = cpu.read_word(base + enable_at)
     out = cpu.read_word(base + out_at)
     levels: dict[str, str] = {}
@@ -846,7 +853,9 @@ def row_levels(runtime: Runtime, cpu: Core) -> dict[str, str] | None:
         if pad.chip_index is None:
             continue
         mask = 1 << pad.chip_index
-        levels[header_key(pad.label, {})] = ("input" if not enable & mask
+        instead = None if unrouted is None else unrouted(cpu, pad.chip_index)
+        levels[header_key(pad.label, {})] = (instead if instead is not None
+                                             else "input" if not enable & mask
                                              else "high" if out & mask else "low")
     return levels
 

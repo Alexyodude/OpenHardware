@@ -8,17 +8,20 @@ Mini RP2040 (rules/board-claims.md §11, OH-196), made as the KB2040's is
 
 `rp2040_rows/blink.c`, built by arm-none-eabi-gcc with the chip blink's
 flags and linker script and `-I` on arduino-pico's
-`variants/pcbcupid_glyph_mini_2040`, toggling what that variant calls
-`PIN_WIRE0_SDA`: the pin its `SDA` names, spelled as every sibling's table
-numbers it. `rp2040_rows/glyph_mini_blink.bin` is that build, rebuilt here
-byte for byte where the toolchain is installed.
+`variants/pcbcupid_glyph_mini_2040`, selecting SIO on what that variant
+calls `PIN_WIRE0_SDA` and toggling it: the pin its `SDA` names, spelled as
+every sibling's table numbers it. `rp2040_rows/glyph_mini_blink.bin` is
+that build, rebuilt here byte for byte where the toolchain is installed.
 
 Loaded onto this board by name and stepped on the Cortex-M0+ core, it moves
 the pad whose `chip_index` is the GPIO OH-181's reader gives for this
 board's `PIN_WIRE0_SDA`, read through the pin view, and never that of any
-other RP2040 row in `tools/board_manifest.py` or of the XIAO RP2040's
-variant (`sibling_variants`): the same source built against any of those
-moves another pad.
+other RP2040 row in `tools/board_manifest.py`, of the XIAO RP2040s' variant,
+or of arduino-pico's own default table (`sibling_variants`): the same source
+built against any of those moves another pad.
+
+Every test here reads a GPIO through the preprocessor, so where no
+arm-none-eabi-g++ is installed, as on CI, every one of them skips.
 """
 
 import functools
@@ -55,30 +58,38 @@ BUDGET = 3_000
 
 
 @functools.cache
-def numbered(variant: str, labels: tuple[str, ...]) -> dict[str, int]:
+def reading(variant: str, labels: tuple[str, ...]) -> tuple[dict[str, int], tuple[str, ...]]:
     """Every `D<n>` arduino-pico's `variant` numbers, and each of `labels`,
     read as OH-181's reader reads a row: through the preprocessor, with the
-    flags that variant's board is compiled with. Skips, naming the fetch or
-    the install, where the checkout or the preprocessor is missing."""
+    flags that variant's board is compiled with; and the checkout's files it
+    read them from. Skips, naming the fetch or the install, where the
+    checkout or the preprocessor is missing: by hand the reader refuses a
+    header that `#include`s, as this board's does."""
     table = PICO / "variants" / variant / "pins_arduino.h"
     if not table.is_file():
         pytest.skip(f"SKIPPED: no {table}; python tools/import_pindefs.py --fetch")
     try:
-        pins, _ = import_pindefs.read_pico_pins(
+        pins, files = import_pindefs.read_pico_pins(
             (table.read_text(encoding="utf-8", errors="replace"),),
             checkout=PICO, variant=variant, extras=labels)
     except import_pindefs.PindefError as exc:
         if "only the preprocessor can say" not in str(exc):
             raise
         pytest.skip(f"SKIPPED: {exc}")
-    return {label: pin.index for label, pin in pins.items()}
+    return {label: pin.index for label, pin in pins.items()}, files
+
+
+def numbered(variant: str, labels: tuple[str, ...]) -> dict[str, int]:
+    return reading(variant, labels)[0]
 
 
 def sibling_variants() -> dict[str, str]:
-    """Every other row on this board's chip, to its own variant, and the
-    chip's XIAO boards, to the arduino-pico variant `tools/import_pindefs.py`
-    registers for them: the tables this source could be built against
-    instead of this board's."""
+    """Every other row on this board's chip, to its own variant; the chip's
+    XIAO boards, to the arduino-pico variant `tools/import_pindefs.py`
+    registers for them; and arduino-pico's own default table, the variant
+    whose `common.h` this board's variant includes, as the reader says it
+    read it. The tables this source could be built against instead of this
+    board's, and the one a pin keeps where a variant sets nothing."""
     row = board_manifest.row(BOARD)
     found = {}
     for other in board_manifest.ROWS:
@@ -91,8 +102,12 @@ def sibling_variants() -> dict[str, str]:
         (path,) = [path for source in board.sources if source.package == "arduino-pico"
                    for path in source.paths]
         found[name] = pathlib.PurePosixPath(path).parent.name
+    _, files = reading(row.variant, ())
+    (default,) = {pathlib.PurePosixPath(path).parent.name for path in files} - {row.variant}
+    found[f"arduino-pico {default}"] = default
     assert any(board_manifest.find(name) for name in found), found
-    assert any(not board_manifest.find(name) for name in found), found
+    assert any(name in import_pindefs.BOARDS and not board_manifest.find(name)
+               for name in found), found
     return found
 
 
@@ -157,8 +172,9 @@ def test_the_image_is_blink_c_built_against_this_boards_own_variant():
 def test_the_image_blinks_the_gpio_this_boards_sda_names_on_its_own_pad():
     """The pad is the one whose `chip_index` is the GPIO this board's own
     variant calls `PIN_WIRE0_SDA`, and PCBCUPID's net there names that GPIO:
-    `/GPIO-<n>`. No sibling's `PIN_WIRE0_SDA` is enabled or driven, and the
-    pads whose `chip_index` is one read `input` throughout."""
+    `/GPIO-<n>`, as it does on each sibling's pad. No sibling's
+    `PIN_WIRE0_SDA` is enabled or driven, and their pads read `input`
+    throughout."""
     pytest.importorskip("core.cortexm0.abi")
     own = numbered(board_manifest.row(BOARD).variant, (LABEL, "SDA", "MOSI", "LED"))
     variants = sibling_variants()
@@ -180,9 +196,13 @@ def test_the_image_blinks_the_gpio_this_boards_sda_names_on_its_own_pad():
     # numbers one no pad here reaches. If any stops being so, reconsider.
     assert own["SDA"] == gpio, own
     for name, variant in variants.items():
-        if not board_manifest.find(name):
-            with pytest.raises(import_pindefs.PindefError, match="'SDA'"):
+        if name in import_pindefs.BOARDS and not board_manifest.find(name):
+            try:
                 numbered(variant, ("SDA",))
+            except import_pindefs.PindefError as exc:
+                assert "'SDA'" in str(exc), exc
+            else:
+                pytest.fail(f"the reader now numbers {name}'s SDA: switch LABEL to SDA")
     assert own["MOSI"] in {table["MOSI"] for table in theirs.values()}, (own, theirs)
     assert own["LED"] not in {pad["chip_index"] for pad in board_pads}, own["LED"]
 
@@ -205,7 +225,7 @@ def test_the_image_blinks_the_gpio_this_boards_sda_names_on_its_own_pad():
 
 
 def test_the_same_source_built_for_a_sibling_moves_that_boards_pin_and_not_this_one():
-    """What the test above refuses: `blink.c` built against every sibling's
+    """What the image test refuses: `blink.c` built against every sibling's
     variant, loaded onto this board, leaves this board's pad `input`
     throughout and moves the pad at that variant's `PIN_WIRE0_SDA` instead."""
     pytest.importorskip("core.cortexm0.abi")

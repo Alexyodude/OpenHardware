@@ -141,6 +141,33 @@ def test_a_peripheral_this_board_does_not_model_still_faults(board):
         board.read_word(0x40008000)
 
 
+# --- IO_BANK0 --------------------------------------------------------------
+
+
+def test_every_gpio_ctrl_comes_up_null_and_takes_a_function_select(board):
+    """GPIO0_CTRL to GPIO29_CTRL at 0x004 + 8n, each resetting to FUNCSEL's
+    NULL, 0x1f (datasheet Table 285), and a plain store of SIO's F5 selects
+    it -- what an image must do before SIO drives the pad (OH-196)."""
+    addresses = [rp2040.gpio_ctrl(gpio) for gpio in range(rp2040.IO_BANK0_GPIOS)]
+    assert addresses[0] == 0x40014004 and addresses[-1] == 0x400140EC
+    assert [board.read_word(address) for address in addresses] == [0x1F] * 30
+    board.write_word(rp2040.gpio_ctrl(20), rp2040.FUNCSEL_SIO)
+    assert board.read_word(rp2040.gpio_ctrl(20)) == 5
+    assert [board.read_word(address) for address in addresses].count(0x1F) == 29
+
+
+def test_the_rest_of_io_bank0_is_not_modelled_and_says_so(board):
+    """Only the CTRL registers are mapped: each GPIO's STATUS beside it, and
+    INTR0 after GPIO29_CTRL, fault naming their address, as does a CTRL
+    alias window no image has used."""
+    for address in (rp2040.IO_BANK0, rp2040.IO_BANK0 + 0x0F0,
+                    rp2040.gpio_ctrl(0) + rp2040.ALIAS_SET):
+        with pytest.raises(MemoryFault, match=f"0x{address:08x}"):
+            board.read_word(address)
+    with pytest.raises(ValueError, match="GPIO30"):
+        rp2040.gpio_ctrl(30)
+
+
 # --- SIO -------------------------------------------------------------------
 
 

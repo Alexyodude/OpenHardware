@@ -1017,45 +1017,55 @@ def test_the_named_led_component_is_one_the_shipped_board_model_actually_draws()
 
 #: A chip's own blink fixture per row chip: any image that runs will do, since
 #: what is asserted is which pads the view lists, not what the image drives.
-CHIP_BLINKS = {"ESP32-C3": "c3blink", "ESP32-C6": "c6blink"}
+CHIP_BLINKS = {"ESP32-C3": "riscv32/c3blink", "ESP32-C6": "riscv32/c6blink",
+               "RP2040": "cortexm0/blink"}
 
 
 def test_a_running_manifest_board_lists_its_own_pads_and_no_xiao_label():
     """The ticket's condition, on each row: the view lists the board file's
-    pads in its order and nothing else -- the pilot's 28 -- and no label of
-    the chip module's table; a pad with a `chip_index` has a level and one
-    without is unknown."""
+    pads in its order and nothing else -- the pilot's 28 -- each with its
+    own file's `chip_pin`, so a label of the chip module's table is never
+    captioned as that table's; a pad with a `chip_index` has a level and
+    one without is unknown. The KB2040's `D0`..`D10` are keys of the RP2040
+    module's table in fact, so the caption is what holds it; its pads, and
+    the Glyph Mini's, read levels since OH-196."""
     pytest.importorskip("core.riscv32.abi")
+    pytest.importorskip("core.cortexm0.abi")
     from tools import board_manifest
 
-    blinks = pathlib.Path(__file__).resolve().parents[1] / "riscv32"
+    tests = pathlib.Path(__file__).resolve().parents[1]
     counts = {}
-    # The rows no blink here runs on: each runs its own image, whose pads its
-    # own test reads through the pin view (OH-196), and the KB2040's `D0`..
-    # `D10` are keys of the RP2040 module's table in fact.
-    assert [row.board for row in board_manifest.ROWS if row.chip not in CHIP_BLINKS] == [
-        "Adafruit KB2040", "PCBCUPID Glyph Mini RP2040"]
-    for row in [row for row in board_manifest.ROWS if row.chip in CHIP_BLINKS]:
+    assert {row.chip for row in board_manifest.ROWS} <= set(CHIP_BLINKS), CHIP_BLINKS
+    for row in board_manifest.ROWS:
         module = api.description_for(row.board)
         own = json.loads((pinmap.BOARDS_DIR / f"{row.board}.json").read_text(encoding="utf-8"))
-        image = (blinks / CHIP_BLINKS[row.chip] / "blink.bin").read_bytes()
-        with api.load_firmware(row.board, image, base=module.IROM) as session:
+        image = (tests / CHIP_BLINKS[row.chip] / "blink.bin").read_bytes()
+        # A raw image carries no address: an ESP32's loads at its IROM, the
+        # RP2040's past boot2, where the chip blink's `blink.ld` links it.
+        base = module.IROM if row.chip != "RP2040" else module.FLASH + module.BOOT2_BYTES
+        with api.load_firmware(row.board, image, base=base) as session:
             session.step(2000)
             view = api.pin_view(session.runtime, session.cpu, row.board)
         pins = [pad["pin"] for pad in view["pads"]]
-        assert pins == [pad["label"] for pad in own["pads"]], row.board
-        assert not set(pins) & set(module.HEADER), (row.board, set(pins) & set(module.HEADER))
+        assert [(pad["pin"], pad["chip_pin"]) for pad in view["pads"]] == [
+            (pad["label"], pad["chip_pin"]) for pad in own["pads"]], row.board
+        if row.chip != "RP2040":
+            assert not set(pins) & set(module.HEADER), (row.board, set(pins) & set(module.HEADER))
         assert [pad["state"] != "unknown" for pad in view["pads"]] == [
             pad["chip_index"] is not None for pad in own["pads"]], row.board
         counts[row.board] = len(pins)
     assert counts["SparkFun Thing Plus ESP32-C6"] == 28, counts
+    assert {"Adafruit KB2040", "PCBCUPID Glyph Mini RP2040"} <= set(counts), counts
 
 
 def test_a_manifest_boards_levels_agree_with_its_chip_module_on_every_gpio_both_name():
     """`api.row_levels` reads the registers the chip module's `pin_states`
     reads, so on every GPIO a row's pad and the module's table both name,
     for each register state, the two say the same thing. Every row's chip
-    module names the words, the RP2040's since OH-196."""
+    module names the words, the RP2040's since OH-196, whose rows read them
+    only where `FUNCSEL` selects SIO, so it is selected on every GPIO here:
+    `test_an_rp2040_rows_pad_reads_sio_only_where_its_funcsel_selects_sio`
+    is the rest."""
     from tools import board_manifest
 
     shared = {}
@@ -1069,14 +1079,45 @@ def test_a_manifest_boards_levels_agree_with_its_chip_module_on_every_gpio_both_
         label_of = {gpio: label for label, gpio in module.HEADER.items()}
         own = [pad for pad in pinmap.load(row.board).pads if pad.chip_index in label_of]
         enable, out = module.GPIO + module.GPIO_ENABLE, module.GPIO + module.GPIO_OUT
+        sio = ({module.gpio_ctrl(gpio): module.FUNCSEL_SIO
+                for gpio in range(module.IO_BANK0_GPIOS)}
+               if hasattr(module, "unrouted_level") else {})
         for words in ({}, {enable: 0xFFFFFFFF}, {enable: 0xFFFFFFFF, out: 0xFFFFFFFF},
                       {enable: 0xAAAAAAAA, out: 0x66666666}):
-            ours = api.row_levels(runtime, _Words(words))
+            ours = api.row_levels(runtime, _Words({**sio, **words}))
             theirs = module.pin_states(_Words(words))
             assert [ours[pad.label] for pad in own] == [
                 theirs[label_of[pad.chip_index]] for pad in own], (row.board, words)
         shared[row.board] = len(own)
     assert all(shared.values()), f"a row shares no GPIO with its chip's table: {shared}"
+
+
+def test_an_rp2040_rows_pad_reads_sio_only_where_its_funcsel_selects_sio():
+    """OH-196: SIO drives a pad only where its `FUNCSEL` selects SIO, as
+    silicon requires. At reset every `FUNCSEL` is NULL, and every pad reads
+    `input` however SIO's words stand; SIO on one GPIO gives that pad alone
+    SIO's level; any other function is a peripheral nothing here models,
+    and its pad is `unknown`. The XIAO's `pin_states` does not ask, and
+    reads SIO's level throughout: the gap this ticket leaves open."""
+    from webui.boards import rp2040
+
+    driven = {rp2040.SIO + rp2040.SIO_GPIO_OE: 0xFFFFFFFF,
+              rp2040.SIO + rp2040.SIO_GPIO_OUT: 0xFFFFFFFF}
+    at_reset = {rp2040.gpio_ctrl(gpio): rp2040.GPIO_CTRL_AT_RESET
+                for gpio in range(rp2040.IO_BANK0_GPIOS)}
+    for board in ("Adafruit KB2040", "PCBCUPID Glyph Mini RP2040"):
+        runtime = api.Runtime(board=board, chip="RP2040", core="cortexm0",
+                              description=rp2040, abi=None, machine=None)
+        (first, *_) = [pad for pad in pinmap.load(board).pads if pad.chip_index is not None]
+        assert set(api.row_levels(runtime, _Words({**driven, **at_reset})).values()) == {
+            "input"}, board
+        for funcsel, level in ((rp2040.FUNCSEL_SIO, "high"),
+                               (rp2040.FUNCSEL_SIO + 1, "unknown")):
+            words = {**driven, **at_reset, rp2040.gpio_ctrl(first.chip_index): funcsel}
+            levels = api.row_levels(runtime, _Words(words))
+            assert {label: state for label, state in levels.items() if state != "input"} == {
+                first.label: level}, (board, funcsel)
+    assert set(rp2040.pin_states(_Words({**driven, **at_reset})).values()) == {"high"}
 
 
 def test_a_row_whose_chip_module_names_no_gpio_words_reports_no_levels():
