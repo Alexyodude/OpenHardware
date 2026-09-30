@@ -328,19 +328,33 @@ than its chip has shown. So a row on the RP2040 holds its own entry by the
 chip's blink made that board's, and nothing weaker:
 
 - **The image names its pin through the board's own variant.**
-  `tests/webui/rp2040_rows/blink.c` toggles a name given with `-D`, which
-  only the `pins_arduino.h` of the board's own arduino-pico variant, found
-  through `-I` on that variant, defines. Nothing in the source or its build
-  numbers a GPIO, so the same source built against another board's table
-  toggles that board's pin. It is built by the chip blink's
+  `tests/webui/rp2040_rows/blink.c` toggles a name given with `-D` and
+  includes one board header, the `pins_arduino.h` of the board's own
+  arduino-pico variant, found through `-I` on that variant. The name may be
+  declared there or in the `variants/generic/common.h` that file includes
+  -- `MISO` is common.h's, set to the variant's `PIN_SPI0_MISO` -- and
+  either way the number is the variant's. Nothing in the source or its
+  build numbers a GPIO, so the same source built against another board's
+  table toggles that board's pin. It is built by the chip blink's
   `arm-none-eabi-gcc`, with its flags and its linker script, committed
   beside the test, and rebuilt byte for byte wherever that toolchain is.
-- **The GPIO watched is read, not typed**, by OH-181's reader: through the
-  preprocessor, with the flags the board's own build is given. The image is
-  compiled without them, so two readings of one variant have to agree for
-  the test to pass: the compiler's, in the image, and the reader's, in the
-  test. A name whose value turned on one of those flags would disagree, and
-  fail.
+- **It selects SIO on the pad first, as silicon requires.** An RP2040's
+  processors drive a GPIO only where its `FUNCSEL` selects SIO (RP2040
+  Datasheet 3184e62, Table 279), and `FUNCSEL` resets to NULL (Table 285).
+  `webui/boards/rp2040.py` maps each GPIO's `CTRL` register in IO_BANK0,
+  and `api.row_levels` gives a row's pad SIO's level only where its
+  `FUNCSEL` selects SIO: `input` where it is NULL, `unknown` where it is a
+  peripheral nothing here models. So an image that never selects SIO, as
+  the chip's own blink does not, moves no row's pad.
+- **The GPIO watched is read, not typed**, by OH-181's reader, with the
+  flags the board's own build is given. For these variants that reading is
+  the preprocessor's: by hand the reader refuses a header that
+  `#include`s, as both boards' do, so where no `arm-none-eabi-g++` is
+  installed -- CI among them -- every test in both files skips, and check 5
+  is all that holds these entries there. The image is compiled without
+  those flags, so two readings of one variant have to agree for the tests
+  to pass: the compiler's, in the image, and the reader's, in the test. A
+  name whose value turned on one of those flags would disagree, and fail.
 - **The board is loaded by name** through `api.load_firmware`, stepped on
   the Cortex-M0+ core, and watched through the pin view at the pad whose
   `chip_index` is that GPIO. For that, `webui/boards/rp2040.py` names SIO's
@@ -348,30 +362,48 @@ chip's blink made that board's, and nothing weaker:
   `api.row_levels` reads; until then an RP2040 row's pads read no level at
   all.
 - **The vendor names the GPIO too** (§10). Where a net is named for the
-  function rather than the GPIO, as Adafruit's `MOSI` is, the vendor's own
+  function rather than the GPIO, as Adafruit's `MISO` is, the vendor's own
   statement is its schematic's name for the chip's pin on that net.
-- **The siblings are every other RP2040 row in `tools/board_manifest.py`
-  and the XIAO RP2040s' variant**, each read the same way. The watched name
+- **The siblings are every other RP2040 row in `tools/board_manifest.py`,
+  the XIAO RP2040s' variant, and arduino-pico's own default table** -- the
+  variant whose `common.h` the board's own includes, as the reader reports
+  having read it -- each read the same way. The default is there so that a
+  pin a variant leaves at arduino-pico's default is never the one watched:
+  a row pointing at the Pico's table would pass on it. The watched name
   must number another GPIO in each, those pads read `input` throughout,
   and the same source built against each sibling's variant, run on this
-  board, must move that sibling's pad and leave this board's `input`. That
-  last is §10's condition run rather than argued, wherever the toolchain is.
+  board, must drive that sibling's pin and leave this board's pad `input`.
+  That last is §10's condition run rather than argued, wherever the
+  toolchain is.
 
-`tests/webui/test_kb2040_board.py` watches the Adafruit KB2040's `MOSI`.
-`tests/webui/test_glyph_mini_rp2040_board.py` watches the PCBCUPID Glyph
-Mini RP2040's `PIN_WIRE0_SDA`: the pin its `SDA` names, under the spelling
-every sibling's table numbers, because the XIAO RP2040's `SDA` is a macro
-naming another macro, which the reader refuses to number. Each test
-asserts why it watches what it does, so it fails if a reason stops being
-true. `test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence`
+`tests/webui/test_kb2040_board.py` watches the Adafruit KB2040's `MISO`;
+its `MOSI` is the default table's. `tests/webui/test_glyph_mini_rp2040_board.py`
+watches the PCBCUPID Glyph Mini RP2040's `PIN_WIRE0_SDA`: the pin its `SDA`
+names, under the spelling every sibling's table numbers, because the XIAO
+RP2040's `SDA` is a macro naming another macro, which the reader refuses to
+number. Each test asserts why it watches what it does, so it fails if a
+reason stops being true.
+`test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence`
 pins both entries with the rest.
 
 **What this is not.** It is not a page build: an RP2040 row gets a compile
 recipe from OH-161's compile service or not at all, and nothing here adds
-one. It is not a sketch, whose path still stops at the boot ROM. And, as
-with the chip's own blink, nothing selects SIO on the pad: `IO_BANK0`'s
-`FUNCSEL`, which `docs/research/peripheral-layer/rp2040_v2/io_bank0.json`
-records as resetting to `0x1f` and as having to select SIO before SIO
-drives the pad, is not modelled here. An image that never sets it passes
-here and would drive nothing on silicon. That gap is the chip's evidence's
-as much as these boards', and is not closed here.
+one. It is not a sketch, whose path still stops at the boot ROM. And it
+does not close `FUNCSEL` for the XIAO RP2040s: `rp2040.pin_states`, which
+their levels are read through, does not ask it, and the chip's own blink
+never selects SIO, so a XIAO's pad reads SIO's level whatever `FUNCSEL`
+holds. That is left open, on the chip's evidence rather than these rows'.
+
+## 12. 2026-09-30 — check 5 finds the image at the path the test builds
+
+Check 5 found a named image by its name anywhere under the test's
+directory, so the KB2040's entry passed with its image deleted: the test
+spelled `blink.bin` for a temporary build output, and another test's
+`blink.bin` sat under `tests/webui/` (OH-196's review). An image now counts
+only where the named test joins its name onto its own location --
+`pathlib.Path(__file__)`, `.resolve()`, `.parent`, `.parents[n]` and `/`
+with a string, directly or through names one plain module-level assignment
+binds -- and that path is a file under the test's own directory. Every
+entry names its image that way already. `tests/rules/test_board_claims.py`
+holds the case the review found, a name joined onto a temporary directory,
+and a path climbing out of the test's directory.

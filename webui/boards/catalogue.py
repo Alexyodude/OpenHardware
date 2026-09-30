@@ -198,8 +198,9 @@ FIRMWARE_VERIFIED: dict[str, str] = {
 
 #: A row of `tools/board_manifest.py` to the test that compiled a sketch for
 #: it against its own variant and watched the image run (rules/board-claims.md
-#: §7), or on an RP2040 a bare-metal image (§11). A row does not inherit its chip's `FIRMWARE_VERIFIED` entry (§6), so
-#: this is its only licence; `tools/check_board_claims.py` holds each entry
+#: §7), or on an RP2040 a bare-metal image (§11). A row does not inherit
+#: its chip's `FIRMWARE_VERIFIED` entry (§6), so this is its only
+#: licence; `tools/check_board_claims.py` holds each entry
 #: as it holds that table's, and to loading its board by name (§7).
 BOARD_FIRMWARE_VERIFIED: dict[str, str] = {
     "Adafruit Feather ESP32-C6": "tests/webui/test_feather_esp32c6_board.py",
