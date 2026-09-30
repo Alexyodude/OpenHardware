@@ -85,8 +85,7 @@ def _drawn(spec, board):
     """`(element, row)` for every placement `compose` draws from a row, found
     the way `compose` finds it (OH-187): through the board's schematic, which
     refuses some parts and says which kind of passive the rest are."""
-    statements = (compose.stated_kinds(spec.schematic)
-                  if spec.schematic is not None else None)
+    statements = compose.statements_for(spec)
     for element in board.elements:
         row, _refused = compose.drawn_from(element, statements)
         if row is not None:
@@ -3680,8 +3679,7 @@ def test_every_composed_boards_placements_are_drawn_or_explained():
         if not _fetched(spec):
             continue
         checked += 1
-        statements = (compose.stated_kinds(spec.schematic)
-                      if spec.schematic is not None else None)
+        statements = compose.statements_for(spec)
         for element in compose.read_layout(spec.layout).elements:
             # A part its own schematic refuses is explained there (OH-187).
             row, refused = compose.drawn_from(element, statements)
@@ -4080,7 +4078,7 @@ def test_every_placement_is_drawn_refused_or_padless_and_counted(capsys):
     board = compose.read_layout(spec.layout)
     # A part its own schematic refuses is refused whatever the table holds
     # (OH-187), and counted there alone.
-    statements = compose.stated_kinds(spec.schematic)
+    statements = compose.statements_for(spec)
     off = [e for e in board.elements
            if e.name in statements and statements[e.name].refused]
     padless = [e for e in board.elements if not e.pads and e not in off]
@@ -4226,7 +4224,7 @@ def test_compose_draws_each_0603_from_its_own_library(monkeypatch, capsys):
     board = compose.read_layout(spec.layout)
     # C6 is valued DNP, and a part its schematic says is not fitted is not
     # drawn (OH-187).
-    refused = {name for name, said in compose.stated_kinds(spec.schematic).items()
+    refused = {name for name, said in compose.statements_for(spec).items()
                if said.refused}
     placed = [e for e in board.elements
               if e.package == "0603" and e.name not in refused]
@@ -4262,9 +4260,10 @@ def test_a_value_states_a_kind_only_in_ohms_farads_or_a_word_it_knows():
     assert compose.UNDECIDED == {"TBD"}
 
 
-def _schematic(tmp_path, parts: str) -> pathlib.Path:
+def _schematic(tmp_path, parts: str, variantdefs: str = "") -> pathlib.Path:
     """A written EAGLE schematic: two libraries under one name told apart by
-    urn, and one of each kind of deviceset prefix these rules meet."""
+    urn, one of each kind of deviceset prefix these rules meet, and the
+    variant definitions EAGLE writes after the libraries."""
     path = tmp_path / "board.sch"
     path.write_text(
         '<eagle version="9.6.2"><drawing><schematic><libraries>'
@@ -4272,29 +4271,34 @@ def _schematic(tmp_path, parts: str) -> pathlib.Path:
         '<deviceset name="RESISTOR" prefix="R"/>'
         '<deviceset name="CAP" prefix="C"/>'
         '<deviceset name="INDUCTOR" prefix="L"/>'
+        '<deviceset name="FUSE" prefix="F"/>'
+        '<deviceset name="DIODE" prefix="D"/>'
         '<deviceset name="CHIP" prefix="U"/>'
         '<deviceset name="LED" prefix="LED"/>'
         '<deviceset name="CONN" prefix="CONN"/>'
         '<deviceset name="FERRITE" prefix="FB"/>'
+        '<deviceset name="JUMPER" prefix="JP"/>'
+        '<deviceset name="SWITCH" prefix="SW"/>'
         '<deviceset name="LOGO" prefix=""/>'
         '</devicesets></library>'
         '<library name="twin" urn="urn:one"><devicesets>'
         '<deviceset name="PART" prefix="R"/></devicesets></library>'
         '<library name="twin" urn="urn:two"><devicesets>'
         '<deviceset name="PART" prefix="C"/></devicesets></library>'
-        f'</libraries><parts>{parts}</parts></schematic></drawing></eagle>',
+        f'</libraries>{variantdefs}<parts>{parts}</parts></schematic></drawing></eagle>',
         encoding="utf-8")
     return path
 
 
 def test_the_schematic_decides_a_passives_kind_and_which_statement_did(tmp_path):
-    """The prefix alone, the value alone, both agreeing, both disagreeing,
-    neither, and a prefix naming a kind that is none of R, C and L -- which
-    is only silent when it is EMPTY. What spoke is recorded as fields, not
-    words: `compose` counts them."""
+    """The prefix alone, the value alone, both agreeing, and neither, and a
+    prefix naming a kind that is none of R, C, L and F -- which is only
+    silent when it is EMPTY. What spoke is recorded as fields, not words:
+    `compose` counts them."""
     stated = compose.stated_kinds(_schematic(tmp_path, (
         '<part name="R1" library="lib" deviceset="RESISTOR" value="10K"/>'
         '<part name="R3" library="lib" deviceset="RESISTOR" value="27"/>'
+        '<part name="F1" library="lib" deviceset="FUSE" value="FUSE"/>'
         '<part name="X1" library="lib" deviceset="LOGO" value="0.1uF"/>'
         '<part name="U1" library="lib" deviceset="CHIP" value="RP2040"/>'
         '<part name="LED1" library="lib" deviceset="LED" value="RED"/>'
@@ -4304,8 +4308,10 @@ def test_the_schematic_decides_a_passives_kind_and_which_statement_did(tmp_path)
         '<part name="P2" library="twin" library_urn="urn:two" deviceset="PART"/>')))
     assert stated["R1"] == compose.Statement("resistor", "R", "10K")
     assert stated["R3"] == compose.Statement("resistor", "R", None)
+    # Only an F prefix agrees with a value reading FUSE.
+    assert stated["F1"] == compose.Statement("fuse", "F", "FUSE")
     assert stated["X1"] == compose.Statement("capacitor", None, "0.1uF")
-    # **A prefix that is none of R, C and L still speaks**: LED is not an
+    # **A prefix that is none of R, C, L and F still speaks**: LED is not an
     # inductor and CONN is not a capacitor, whatever letter they start with.
     assert stated["U1"] == compose.Statement(compose.OTHER, "U", None)
     assert stated["LED1"] == compose.Statement(compose.OTHER, "LED", None)
@@ -4313,63 +4319,122 @@ def test_the_schematic_decides_a_passives_kind_and_which_statement_did(tmp_path)
     assert stated["G1"] == compose.Statement(None, None, None)
     # One library name, two urns, two prefixes.
     assert stated["P1"].kind == "resistor" and stated["P2"].kind == "capacitor"
+    assert compose.PREFIX_KINDS == {"R": "resistor", "C": "capacitor",
+                                    "L": "inductor", "F": "fuse"}
 
 
 def test_two_statements_of_a_kind_that_disagree_refuse_the_part(tmp_path):
     """**A swapped kind is refused, not drawn as either**: the QT Py's own
     L2, an inductor valued in ohms; a capacitor valued in ohms; a chip, a
-    ferrite and an LED valued in farads or ohms; and the KB2040's own R8, a
-    resistor valued FUSE -- whose model KiCad does publish, which is why the
-    reason is the disagreement and never that nothing could draw it."""
+    ferrite and an LED valued in farads or ohms; a diode and an LED valued
+    FUSE; and the KB2040's own R8, a resistor valued FUSE -- whose model KiCad
+    does publish, which is why the reason is the disagreement and never that
+    nothing could draw it."""
     stated = compose.stated_kinds(_schematic(tmp_path, (
         '<part name="L2" library="lib" deviceset="INDUCTOR" value="0 ohm"/>'
         '<part name="C9" library="lib" deviceset="CAP" value="10K"/>'
         '<part name="U2" library="lib" deviceset="CHIP" value="0.1uF"/>'
         '<part name="FB1" library="lib" deviceset="FERRITE" value="600R"/>'
         '<part name="LED2" library="lib" deviceset="LED" value="10K"/>'
+        '<part name="D5" library="lib" deviceset="DIODE" value="FUSE"/>'
+        '<part name="LED3" library="lib" deviceset="LED" value="FUSE"/>'
         '<part name="R8" library="lib" deviceset="RESISTOR" value="FUSE"/>')))
-    for name in ("L2", "C9", "U2", "FB1", "LED2", "R8"):
+    for name in ("L2", "C9", "U2", "FB1", "LED2", "D5", "LED3", "R8"):
         said = stated[name]
         assert said.kind is None and "disagree" in said.refused, (name, said)
     assert "says resistor" in stated["R8"].refused
     assert "says fuse" in stated["R8"].refused
 
 
-def test_a_part_the_schematic_says_is_not_fitted_is_not_drawn(tmp_path):
-    """DNP and its spellings, `populate="no"`, and TBD -- which says nobody
-    has decided, so drawing the part would say somebody had."""
-    stated = compose.stated_kinds(_schematic(tmp_path, (
+def test_a_part_its_files_say_is_not_fitted_is_not_drawn(tmp_path):
+    """**`populate` where EAGLE writes it**: on the `<variant>` a part is
+    placed in, read for the schematic's CURRENT variant only, and on a board
+    file's `<element>` -- never on `<part>`, which EAGLE does not write. And
+    DNP and its spellings, and TBD -- which says nobody has decided, so
+    drawing the part would say somebody had -- of a passive only: a jumper
+    or a switch valued NC is normally closed, not missing."""
+    schematic = _schematic(tmp_path, (
+        '<part name="R4" library="lib" deviceset="RESISTOR" value="10K">'
+        '<variant name="full" populate="no"/></part>'
+        '<part name="R5" library="lib" deviceset="RESISTOR" value="10K">'
+        '<variant name="lite" populate="no"/></part>'
+        '<part name="R6" library="lib" deviceset="RESISTOR" value="10K" populate="no"/>'
         '<part name="C6" library="lib" deviceset="CAP" value="DNP"/>'
         '<part name="R2" library="lib" deviceset="RESISTOR" value="nc"/>'
-        '<part name="R4" library="lib" deviceset="RESISTOR" value="10K" populate="no"/>'
-        '<part name="C7" library="lib" deviceset="CAP" value="TBD"/>')))
+        '<part name="C7" library="lib" deviceset="CAP" value="TBD"/>'
+        '<part name="JP1" library="lib" deviceset="JUMPER" value="NC"/>'
+        '<part name="SW1" library="lib" deviceset="SWITCH" value="NC"/>'
+        '<part name="R9" library="lib" deviceset="RESISTOR" value="10K"/>'
+        '<part name="R10" library="lib" deviceset="RESISTOR" value="10K"/>'),
+        variantdefs=('<variantdefs><variantdef name="lite"/>'
+                     '<variantdef name="full" current="yes"/></variantdefs>'))
+    stated = compose.stated_kinds(schematic)
+    assert "populate" in stated["R4"].refused and "'full'" in stated["R4"].refused
+    assert stated["R5"].refused is None, "a variant that is not current"
+    assert stated["R6"].refused is None, "<part populate> is not EAGLE's shape"
     assert "not fitted" in stated["C6"].refused
     assert "not fitted" in stated["R2"].refused
-    assert 'populate="no"' in stated["R4"].refused
     assert "whether it is fitted is not stated" in stated["C7"].refused
+    assert stated["JP1"] == compose.Statement(compose.OTHER, "JP", None)
+    assert stated["SW1"] == compose.Statement(compose.OTHER, "SW", None)
+
+    board = tmp_path / "board.brd"
+    board.write_text(
+        '<eagle version="9.6.2"><drawing><board><variantdefs>'
+        '<variantdef name="full" current="yes"/></variantdefs><elements>'
+        '<element name="R9" library="lib" package="0603" value="10K" x="0" y="0"'
+        ' populate="no"/>'
+        '<element name="R10" library="lib" package="0603" value="10K" x="0" y="0">'
+        '<variant name="full" populate="no"/></element>'
+        '<element name="R1" library="lib" package="0603" value="10K" x="0" y="0"/>'
+        '</elements></board></drawing></eagle>', encoding="utf-8")
+    import types
+    statements = compose.statements_for(
+        types.SimpleNamespace(schematic=schematic, layout=board))
+    assert 'board.brd places R9 with populate="no"' in statements["R9"].refused
+    assert 'board.brd places R10 with populate="no"' in statements["R10"].refused
+    assert statements["R9"].kind is None
 
 
-def test_the_gate_is_what_the_part_is_and_not_its_row(tmp_path):
-    """An ESD diode is drawn in a resistor's moulding by a row, and its
-    schematic calls it a diode: it is drawn from that row, not held to a
-    resistor's. A part nothing states on a passive's package is refused. And
-    without a kind, a package two unlibraried rows answer is answered with
-    None rather than whichever row comes first."""
-    def placed(name, package):
+def test_another_kind_on_a_passives_land_is_refused(tmp_path):
+    """**A row does not get to decide what a part is** (OH-187 confirm
+    review). On a land every row of which draws a resistor, capacitor,
+    inductor or fuse, a part its schematic states to be something else is
+    refused, as a part nothing states is: the QT Py's L1 land restated a
+    ferrite, R7's restated an LED, an ESD diode on a resistor's land. Only a
+    board with no schematic -- the XIAOs -- draws its ESD diodes from a
+    resistor's row, as it always has. And without a kind, a package two
+    unlibraried rows answer is answered with None rather than whichever row
+    comes first."""
+    def placed(name, package, library="lib"):
         return eagle.Element(
-            name, "lib", package,
+            name, library, package,
             pads=(eagle.Pad("1", "smd", -0.46, 0.0, 0.5, 0.5, None),
                   eagle.Pad("2", "smd", 0.46, 0.0, 0.5, 0.5, None)))
 
-    statements = {"D2": compose.Statement(compose.OTHER, "D", None),
+    statements = {"L1": compose.Statement(compose.OTHER, "FB", None),
+                  "R7": compose.Statement(compose.OTHER, "LED", None),
+                  "D2": compose.Statement(compose.OTHER, "D", None),
                   "C1": compose.Statement(None, None, None)}
-    row, refused = compose.drawn_from(placed("D2", "ESD-0402"), statements)
-    assert refused is None and row is not None and row.model == "R_0402_1005Metric"
+    for name, land in (("L1", "_0402"), ("R7", "_0603MP_TWO6MIL"),
+                       ("D2", "ESD-0402")):
+        row, refused = compose.drawn_from(placed(name, land), statements)
+        assert row is None and f"prefix {statements[name].prefix}" in refused, (
+            name, row, refused)
     row, refused = compose.drawn_from(placed("C1", "_0402NO"), statements)
     assert row is None and "nothing in" in refused
+    row, refused = compose.drawn_from(placed("D2", "ESD-0402"), None)
+    assert refused is None and row.model == "R_0402_1005Metric"
     assert compose.correspondence_for(placed("C1", "_0402NO")) is None
     assert compose.correspondence_for(
         placed("C1", "_0402NO"), "capacitor").model == "C_0402_1005Metric"
+    # **The kind is asked before the vendor's library is**: a part from
+    # SparkFun's resistor library that its schematic calls a capacitor is
+    # not drawn as the resistor its library's row would draw.
+    stray = placed("R99", "0603", library="SparkFun-Resistors")
+    assert compose.correspondence_for(stray, "capacitor") is None
+    assert compose.drawn_from(
+        stray, {"R99": compose.Statement("capacitor", "C", None)}) == (None, None)
 
 
 #: What each manifest board's own schematic refuses, by name. Written down
@@ -4397,7 +4462,7 @@ def test_every_manifest_passive_is_drawn_as_the_kind_its_vendor_states():
         assert spec.board in REFUSED_BY_SCHEMATIC, (
             f"{spec.board} is composed and its schematic's refusals are not "
             f"written down")
-        statements = compose.stated_kinds(spec.schematic)
+        statements = compose.statements_for(spec)
         refused = set()
         for element in compose.read_layout(spec.layout).elements:
             row, why = compose.drawn_from(element, statements)
@@ -4507,8 +4572,7 @@ def test_every_row_draws_something_somewhere():
         extra = (compose.dip_header_elements(
             [pad for name in spec.headers for pad in board.element(name).pads])
             if spec.dip_headers else [])
-        statements = (compose.stated_kinds(spec.schematic)
-                      if spec.schematic is not None else None)
+        statements = compose.statements_for(spec)
         for element in [*board.elements, *extra]:
             row, _why = compose.drawn_from(element, statements)
             if row is not None:

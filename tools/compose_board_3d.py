@@ -2748,8 +2748,10 @@ PASSIVE_KINDS = {"Resistor_SMD": "resistor", "Capacitor_SMD": "capacitor",
 #: EAGLE's `prefix`, which a deviceset states once for every part placed from
 #: it: the letters a reference designator is numbered after. Only an EMPTY
 #: prefix is silence. Any other names a kind, and one not in this table names
-#: a kind that is none of these three -- `D`, `U`, `FB`, `LED`, `CONN`.
-PREFIX_KINDS = {"R": "resistor", "C": "capacitor", "L": "inductor"}
+#: a kind that is none of these -- `D`, `U`, `FB`, `LED`, `CONN`. `F` is here
+#: so that a fuse's prefix agrees with a value reading FUSE and no other does.
+PREFIX_KINDS = {"R": "resistor", "C": "capacitor", "L": "inductor",
+                "F": "fuse"}
 
 #: The kind a prefix outside `PREFIX_KINDS` states.
 OTHER = "other"
@@ -2764,7 +2766,9 @@ _FARADS = re.compile(r"\s*\d+(?:\.\d+)?\s*[pnuµμ]?[Ff]\s*")
 #: in this table, because a value is free text.
 KIND_WORDS = {"FUSE": "fuse"}
 #: Values that say a part is NOT fitted, and the one that says nobody has
-#: decided. Either way drawing the part would assert it is there.
+#: decided. Either way drawing the part would assert it is there. Read only
+#: of a part stated to be a passive: a jumper or a switch valued NC is
+#: normally closed, not missing.
 NOT_FITTED = frozenset({"DNP", "NC", "NF", "DNF", "DNI"})
 UNDECIDED = frozenset({"TBD"})
 
@@ -2793,6 +2797,27 @@ class Statement:
     refused: str | None = None
 
 
+def _current_variant(root) -> str | None:
+    """The name of the variant an EAGLE drawing is set to, or None: the
+    `<variantdef current="yes">` under its `<variantdefs>`."""
+    return next((variant.get("name") for variant in root.iter("variantdef")
+                 if variant.get("current") == "yes"), None)
+
+
+def _unpopulated(placed, variant: str | None) -> bool:
+    """Whether a `<part>` or an `<element>` is not fitted in `variant`.
+
+    **Where EAGLE writes it, and nowhere else**: `populate` is an attribute
+    of `<variant>`, one per variant a part or an element is placed in, and
+    of `<element>` itself on a board. A `<part populate="no">` is not a shape
+    EAGLE writes, so it is not read.
+    """
+    if placed.tag == "element" and placed.get("populate") == "no":
+        return True
+    return any(each.get("name") == variant and each.get("populate") == "no"
+               for each in placed.findall("variant"))
+
+
 def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
     """Each part as the vendor's schematic states it.
 
@@ -2801,8 +2826,8 @@ def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
     word in `KIND_WORDS`. Where both speak and disagree the part is refused,
     as a connector whose name and land disagree is (`JST_SH4_RA`): drawing
     either would be choosing between two statements of the vendor's. A part
-    the schematic says is not fitted -- by its value, or `populate="no"` --
-    or whose value is still `TBD` is refused whatever its kind.
+    not fitted in the schematic's current variant is refused whatever its
+    kind; a passive valued as not fitted, or still `TBD`, is refused too.
 
     Devicesets are keyed by library AND urn, because one schematic can carry
     two libraries under one name; the Feather's carries two `supply1`s.
@@ -2812,6 +2837,7 @@ def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
                 deviceset.get("prefix", "")
                 for library in root.iter("library")
                 for deviceset in library.iter("deviceset")}
+    variant = _current_variant(root)
     stated: dict[str, Statement] = {}
     for part in root.iter("part"):
         name, value = part.get("name"), part.get("value", "")
@@ -2822,29 +2848,53 @@ def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
         by_value = value_kind(value)
         spoke = {"prefix": prefix if by_prefix else None,
                  "value": value if by_value else None}
+        disagree = bool(by_prefix and by_value and by_prefix != by_value)
+        kind = None if disagree else (by_prefix or by_value)
         word = value.strip().upper()
-        if part.get("populate") == "no":
-            refused = f'{schematic.name} places {name} with populate="no": not fitted'
-        elif word in NOT_FITTED:
-            refused = f"{schematic.name} values {name} {value!r}: not fitted"
-        elif word in UNDECIDED:
-            refused = (f"{schematic.name} values {name} {value!r}: whether it is "
-                       f"fitted is not stated, and drawing it would say it is")
-        elif (by_prefix and by_value and by_prefix != by_value
-              and not (by_prefix == OTHER and by_value not in PREFIX_KINDS.values())):
-            prefix_says = ("a kind none of R, C and L" if by_prefix == OTHER
+        passive = kind in PASSIVE_KINDS.values()
+        if _unpopulated(part, variant):
+            refused = (f'{schematic.name} places {name} with populate="no" in '
+                       f"its current variant, {variant!r}: not fitted")
+        elif disagree:
+            prefix_says = ("a kind none of R, C, L and F" if by_prefix == OTHER
                            else by_prefix)
             refused = (f"{schematic.name} places {name} from {where}, whose prefix "
                        f"{prefix} says {prefix_says}, "
                        f"and values it {value!r}, which says {by_value}: two "
                        f"statements of its kind that disagree, and drawing either "
                        f"would be choosing between them")
+        elif passive and word in NOT_FITTED:
+            refused = f"{schematic.name} values {name} {value!r}: not fitted"
+        elif passive and word in UNDECIDED:
+            refused = (f"{schematic.name} values {name} {value!r}: whether it is "
+                       f"fitted is not stated, and drawing it would say it is")
         else:
             refused = None
-        kind = None if refused else (
-            by_value if by_prefix in (None, OTHER) and by_value else by_prefix)
-        stated[name] = Statement(kind, refused=refused, **spoke)
+        stated[name] = Statement(None if refused else kind, refused=refused, **spoke)
     return stated
+
+
+def statements_for(spec: "Composition") -> dict[str, Statement] | None:
+    """What a board's own files say of each part it places, or None for a
+    board composed without a schematic -- the Uno and the XIAOs.
+
+    The schematic's statements (`stated_kinds`), and the board file's own
+    word on what is not fitted: an `<element>` with `populate="no"`, or not
+    fitted in the board's current variant.
+    """
+    if spec.schematic is None:
+        return None
+    statements = stated_kinds(spec.schematic)
+    board = eagle._open(spec.layout, "board").find("drawing/board")
+    variant = _current_variant(board)
+    for element in board.iter("element"):
+        if _unpopulated(element, variant):
+            name = element.get("name")
+            statements[name] = dataclasses.replace(
+                statements.get(name, Statement(None, None, None)), kind=None,
+                refused=(f'{spec.layout.name} places {name} with '
+                         f'populate="no": not fitted'))
+    return statements
 
 
 def correspondence_for(element: eagle.Element,
@@ -2876,12 +2926,14 @@ def drawn_from(element: eagle.Element, statements: dict[str, Statement] | None,
     """The row a placement is drawn from, or why it is not drawn at all.
 
     `statements` is None for a board with no schematic -- the Uno, the XIAOs
-    -- which compose from the table alone, as they always have. Otherwise a
-    part the schematic refuses is refused; a resistor, capacitor, inductor or
-    fuse is drawn only from a row of the kind stated; and a part whose kind
-    nothing states is refused where its package is a passive's. A part stated
-    to be another kind -- an ESD diode in a resistor's moulding -- is drawn
-    from its row as before: the gate is what the part is, not the row.
+    -- which compose from the table alone, as they always have, ESD diodes
+    in a resistor's moulding included. Otherwise a part its files refuse is
+    refused; a resistor, capacitor, inductor or fuse is drawn only from a row
+    of the kind stated; and on a land every row of which draws one of those,
+    a part stated to be some other kind is refused, as is a part nothing
+    states -- a row does not get to decide what a part is. A borrowed body
+    for another kind on a board with a schematic would have to be marked so
+    on its row, and no row is.
     """
     if statements is None:
         return correspondence_for(element), None
@@ -2890,11 +2942,16 @@ def drawn_from(element: eagle.Element, statements: dict[str, Statement] | None,
         return None, said.refused
     if said is not None and said.kind in PASSIVE_KINDS.values():
         return correspondence_for(element, said.kind), None
-    if (said is None or said.kind is None) and any(
-            row.package == element.package and row.library in PASSIVE_KINDS
-            for row in CORRESPONDENCE):
-        return None, (f"nothing in {schematic} states what kind of part "
-                      f"{element.name} is, and its package is a passive's")
+    rows = [row for row in CORRESPONDENCE if row.package == element.package]
+    if rows and all(row.library in PASSIVE_KINDS for row in rows):
+        if said is None or said.kind is None:
+            return None, (f"nothing in {schematic} states what kind of part "
+                          f"{element.name} is, and every row for its land, "
+                          f"{element.package}, draws a passive")
+        return None, (f"{schematic} places {element.name} from a deviceset whose "
+                      f"prefix {said.prefix} names a kind none of R, C, L and "
+                      f"F, and every row for its land, {element.package}, "
+                      f"draws a resistor, capacitor, inductor or fuse")
     return correspondence_for(element), None
 
 
@@ -3880,8 +3937,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     #: kind it is; and each part that schematic refuses (OH-187). Only for a
     #: board with a schematic to read -- the Uno and the XIAOs compose as they
     #: always have.
-    statements = (stated_kinds(spec.schematic) if spec.schematic is not None
-                  else None)
+    statements = statements_for(spec)
     kinds: dict[str, dict[str, str]] = {}
     kind_refused: list[tuple[eagle.Element, str]] = []
     for element in [*board.elements, *extra]:
