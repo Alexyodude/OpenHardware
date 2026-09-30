@@ -3356,29 +3356,67 @@ def test_every_part_whose_vendor_marks_pin_one_agrees_with_its_model():
     )
 
 
-def test_a_diodes_band_lands_on_the_pad_its_vendor_names_the_cathode():
-    """**A diode's turn, checked by its own two names** (OH-186 review).
+#: How far the band's area-weighted centroid must sit off the model's centre
+#: against the next colour's before it is taken for the band: twice. Every
+#: diode model drawn here clears it by four times that or more -- a
+#: MiniMELF's thin blue stripe included, once weighted by area.
+BAND_MARGIN = 2.0
 
-    An EAGLE diode names its pads A and C, and a KiCad diode model marks its
-    cathode with a band -- the one colour of the model whose centroid sits
-    furthest off the model's own centre. So the band must land nearer pad C
-    than pad A. Adafruit's cathode marker for the KB2040's SOD-323F is a
-    straight tPlace bar, which `mark_of` does not read, so without this the
-    row's half turn was checked by nothing. Run on the manifest boards.
+#: The least share of a model's surface a colour must cover to be read as a
+#: band at all: a painted stripe is a face, and a stray triangle far out at
+#: the anode end is not one, however far out it sits.
+MIN_BAND_SHARE = 0.01
+
+
+def _area_centroids(groups, plan=(0, 1)) -> dict[str, tuple[float, float, float]]:
+    """Each colour group's centroid in plan, weighted by its triangles' area,
+    so a sliver with many vertices cannot outweigh a face with few -- and
+    the group's area, third."""
+    out = {}
+    for colour, (positions, _normals, indices) in groups.items():
+        sum_a = sum_u = sum_v = 0.0
+        for at in range(0, len(indices), 3):
+            corners = [positions[i * 3:i * 3 + 3] for i in indices[at:at + 3]]
+            edge1 = [corners[1][k] - corners[0][k] for k in range(3)]
+            edge2 = [corners[2][k] - corners[0][k] for k in range(3)]
+            area = math.dist((0, 0, 0), (
+                edge1[1] * edge2[2] - edge1[2] * edge2[1],
+                edge1[2] * edge2[0] - edge1[0] * edge2[2],
+                edge1[0] * edge2[1] - edge1[1] * edge2[0])) / 2
+            sum_a += area
+            sum_u += area * sum(c[plan[0]] for c in corners) / 3
+            sum_v += area * sum(c[plan[1]] for c in corners) / 3
+        if sum_a:
+            out[colour] = (sum_u / sum_a, sum_v / sum_a, sum_a)
+    return out
+
+
+def test_a_diodes_band_lies_along_its_land_at_the_pad_its_vendor_names_the_cathode():
+    """**A diode's turn, checked by its own band** (OH-186 review, OH-190).
+
+    A KiCad diode model marks its cathode with a band: the colour whose
+    area-weighted centroid sits furthest off the model's centre, by
+    `BAND_MARGIN` over the next -- or there is no band to read and the test
+    says so rather than guess. Placed, the band must lie ALONG the land:
+    nearer one pad than the other by at least its own offset, where a diode
+    drawn across its pads puts it the same distance from both (the Uno's
+    MiniMELFs did, at turn 90). And where the vendor names the pads A and C,
+    the nearer is C. On every composed board, each skipped by name when its
+    files are not fetched.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
     cache: dict = {}
-    checked = []
-    for _row, spec in _manifest_specs():
-        if spec is None or not _fetched(spec):
+    checked, unfetched = [], []
+    for spec in compose.COMPOSITIONS:
+        if not _fetched(spec):
+            unfetched.append(spec.board)
             continue
         board = compose.read_layout(spec.layout)
         pads = [pad for name in spec.headers for pad in board.element(name).pads]
         centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
                   (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
         for element, component in _drawn(spec, board):
-            named = {pad.number: pad for pad in element.pads}
-            if component.library != "Diode_SMD" or set(named) != {"A", "C"}:
+            if component.library != "Diode_SMD" or len(element.pads) != 2:
                 continue
             if component.slug not in cache:
                 cache[component.slug] = compose.component_mesh(component, 0.05)
@@ -3387,29 +3425,39 @@ def test_a_diodes_band_lands_on_the_pad_its_vendor_names_the_cathode():
                           for value in positions]
             middle = [(max(everything[axis::3]) + min(everything[axis::3])) / 2
                       for axis in (0, 1)]
-
-            def off_centre(colour):
-                positions = mesh.groups[colour][0]
-                return math.dist(middle, (sum(positions[0::3]) / (len(positions) // 3),
-                                          sum(positions[1::3]) / (len(positions) // 3)))
-            band = max(mesh.groups, key=off_centre)
+            read = _area_centroids(mesh.groups)
+            surface = sum(area for _u, _v, area in read.values())
+            offsets = sorted(((math.dist(middle, (u, v)), colour)
+                              for colour, (u, v, area) in read.items()
+                              if area >= MIN_BAND_SHARE * surface),
+                             reverse=True)
+            (off, band), (runner_up, _next) = offsets[0], offsets[1]
+            assert off >= BAND_MARGIN * runner_up, (
+                f"{spec.board}: {element.name} ({component.model}) has no band "
+                f"to read: its most off-centre colour sits {off:.3f} mm out "
+                f"and the next {runner_up:.3f}")
             put = compose.place(mesh, element, component.turn, spec.thickness_mm,
                                 centre, component.flip)
-            positions = put.groups[band][0]
-            got = (sum(positions[0::3]) / (len(positions) // 3),
-                   sum(positions[2::3]) / (len(positions) // 3))
-
-            def scene(pad):
-                return (pad.x_mm - centre[0], -(pad.y_mm - centre[1]))
-            to_c, to_a = math.dist(got, scene(named["C"])), math.dist(got, scene(named["A"]))
-            assert to_c < to_a, (
+            # The scene: x is the board's, z its y negated.
+            got = _area_centroids({band: put.groups[band]}, plan=(0, 2))[band][:2]
+            near = {pad.number: math.dist(got, (pad.x_mm - centre[0],
+                                                -(pad.y_mm - centre[1])))
+                    for pad in element.pads}
+            (d_near, nearer), (d_far, _farther) = sorted(
+                (d, number) for number, d in near.items())
+            assert d_far - d_near >= off, (
                 f"{spec.board}: {element.name} ({element.package}) turned "
-                f"{component.turn:.0f} puts its band {to_c:.3f} mm from pad C "
-                f"and {to_a:.3f} from pad A")
+                f"{component.turn:.0f} puts its band {d_near:.3f} and "
+                f"{d_far:.3f} mm from its two pads: it lies across its land")
+            if set(near) == {"A", "C"}:
+                assert nearer == "C", (
+                    f"{spec.board}: {element.name} ({element.package}) turned "
+                    f"{component.turn:.0f} puts its band at pad A")
             checked.append((spec.board, element.name))
     if not checked:
-        pytest.skip("SKIPPED: no board layouts are fetched")
-    assert ("Adafruit KB2040", "D1") in checked, checked
+        pytest.skip(f"SKIPPED: no diode on a fetched board; not fetched: {unfetched}")
+    if unfetched:
+        pytest.skip(f"checked {len(checked)} diodes; not fetched: {unfetched}")
 
 
 def test_the_turn_nothing_can_see_is_counted_rather_than_passed_over():

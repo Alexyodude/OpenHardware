@@ -278,10 +278,13 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "MINIMELF", "Diode_SMD", "D_MiniMELF",
-        "D2 and D3. Two pads 3.40 mm apart along y, and a MiniMELF is the "
-        "3.5 x 1.4 mm glass cylinder the package name states. The KiCad "
-        "model runs along x where EAGLE's runs along y, hence the turn.",
-        turn=90.0,
+        "D2 and D3. Two pads 3.40 mm apart along the package's own x, the "
+        "cathode C at -x, and a MiniMELF is the 3.5 x 1.4 mm glass cylinder "
+        "the package name states. KiCad's footprint puts pad 1, the cathode, "
+        "at -x too, so no turn. Until OH-190 this row said 90, from pads "
+        "measured on the board, where the element's own rotation had already "
+        "turned them: both diodes lay across their land, the band as far "
+        "from C as from A, and a test of the band now reads that.",
     ),
     Component(
         "SMB", "Diode_SMD", "D_SMB",
