@@ -3380,6 +3380,65 @@ BAND_MARGIN = 2.0
 #: the anode end is not one, however far out it sits.
 MIN_BAND_SHARE = 0.01
 
+#: The least a band's offset may be, as a share of the model's half-length:
+#: a floor under the margin, which cannot fire when the next colour sits
+#: exactly on the centre -- end caps at 0.000 make any ratio infinite, and a
+#: tessellation's 0.02 mm of noise would then be read as a band. Every
+#: diode model drawn here sits a third of its half-length out or more.
+BAND_FLOOR = 0.2
+
+
+def _read_band(mesh) -> tuple[str, float]:
+    """A diode model's band and how far off its centre it sits, in the
+    model's own plan -- or an AssertionError saying there is no band to
+    read, which is what a model with one colour, or with its stripe painted
+    over, has."""
+    everything = [value for positions, _n, _i in mesh.groups.values()
+                  for value in positions]
+    spans = [max(everything[axis::3]) - min(everything[axis::3]) for axis in (0, 1)]
+    middle = [(max(everything[axis::3]) + min(everything[axis::3])) / 2
+              for axis in (0, 1)]
+    read = _area_centroids(mesh.groups)
+    surface = sum(area for _u, _v, area in read.values())
+    offsets = sorted(((math.dist(middle, (u, v)), colour)
+                      for colour, (u, v, area) in read.items()
+                      if area >= MIN_BAND_SHARE * surface), reverse=True)
+    assert len(offsets) > 1, (
+        f"no band to read: {len(offsets)} colour(s) cover "
+        f"{MIN_BAND_SHARE:.0%} of the surface")
+    (off, band), (runner_up, _next) = offsets[0], offsets[1]
+    assert off >= BAND_MARGIN * runner_up, (
+        f"no band to read: the most off-centre colour sits {off:.3f} mm out "
+        f"and the next {runner_up:.3f}")
+    assert off >= BAND_FLOOR * max(spans) / 2, (
+        f"no band to read: the most off-centre colour sits {off:.3f} mm out, "
+        f"under {BAND_FLOOR:.0%} of the model's half-length, {max(spans) / 2:.3f}")
+    return band, off
+
+
+def test_a_model_with_no_band_says_so():
+    """The floor and the count, on models built to have no band: one colour
+    alone, and a cylinder whose end caps sit exactly on the centre with its
+    body 0.02 mm off it -- a ratio of infinity, and noise."""
+    with pytest.raises(AssertionError, match="no band to read"):
+        _read_band(_model_box(3.6, 1.4, 1.4, "#a5a392"))
+    caps = [_model_box(0.4, 1.4, 1.4, "#a5a392", at=(x, 0.0)) for x in (-1.6, 1.6)]
+    positions, normals, indices = [], [], []
+    for cap in caps:
+        (p, n, i), = cap.groups.values()
+        indices += [index + len(positions) // 3 for index in i]
+        positions += p
+        normals += n
+    body = _model_box(2.8, 1.4, 1.4, "#720301", at=(0.02, 0.0))
+    cylinder = compose.Mesh({"#a5a392": (positions, normals, indices),
+                             **body.groups})
+    with pytest.raises(AssertionError, match="half-length"):
+        _read_band(cylinder)
+    # And a real stripe, a fifth of the length in from one end, reads.
+    stripe = _model_box(0.3, 1.41, 1.41, "#0000ff", at=(-0.9, 0.0))
+    band, _off = _read_band(compose.Mesh({**cylinder.groups, **stripe.groups}))
+    assert band == "#0000ff"
+
 
 def _area_centroids(groups, plan=(0, 1)) -> dict[str, tuple[float, float, float]]:
     """Each colour group's centroid in plan, weighted by its triangles' area,
@@ -3434,21 +3493,12 @@ def test_a_diodes_band_lies_along_its_land_at_the_pad_its_vendor_names_the_catho
             if component.slug not in cache:
                 cache[component.slug] = compose.component_mesh(component, 0.05)
             mesh, _box = cache[component.slug]
-            everything = [value for positions, _n, _i in mesh.groups.values()
-                          for value in positions]
-            middle = [(max(everything[axis::3]) + min(everything[axis::3])) / 2
-                      for axis in (0, 1)]
-            read = _area_centroids(mesh.groups)
-            surface = sum(area for _u, _v, area in read.values())
-            offsets = sorted(((math.dist(middle, (u, v)), colour)
-                              for colour, (u, v, area) in read.items()
-                              if area >= MIN_BAND_SHARE * surface),
-                             reverse=True)
-            (off, band), (runner_up, _next) = offsets[0], offsets[1]
-            assert off >= BAND_MARGIN * runner_up, (
-                f"{spec.board}: {element.name} ({component.model}) has no band "
-                f"to read: its most off-centre colour sits {off:.3f} mm out "
-                f"and the next {runner_up:.3f}")
+            try:
+                band, off = _read_band(mesh)
+            except AssertionError as exc:
+                raise AssertionError(
+                    f"{spec.board}: {element.name} ({component.model}) has "
+                    f"{exc}") from None
             put = compose.place(mesh, element, component.turn, spec.thickness_mm,
                                 centre, component.flip)
             # The scene: x is the board's, z its y negated.
