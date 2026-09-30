@@ -98,6 +98,18 @@ def test_the_claude_md_precommit_block_names_every_armed_checker():
                for line in check_facts.precommit_checkers(extra))
 
 
+def test_the_composed_boards_include_every_manifest_board_the_composer_takes():
+    """COMPOSED appends the manifest rows at import time (OH-186), so a parse of
+    its literal saw none of them and the overlap and gone-board checks below
+    skipped every manifest board."""
+    from tools import board_manifest
+
+    _, composed = check_facts._model_and_composed_boards()
+    brd_rows = {row.board for row in board_manifest.ROWS if row.cad.endswith(".brd")}
+    assert brd_rows, "no EAGLE manifest row: this test would pass vacuously"
+    assert brd_rows <= composed, sorted(brd_rows - composed)
+
+
 def test_the_board_split_points_at_twins_and_reads_the_two_tables(monkeypatch):
     """The model paragraph counts nothing now; TWINS does.
 

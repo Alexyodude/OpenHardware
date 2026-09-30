@@ -128,28 +128,22 @@ def _module_tuple_len(path: pathlib.Path, name: str) -> int:
 
 
 def _model_and_composed_boards() -> tuple[set[str], set[str]]:
-    """Board names out of import_3d_model's MODELS and COMPOSED, by ast."""
-    path = ROOT / "tools" / "import_3d_model.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    models: set[str] = set()
-    composed: set[str] = set()
-    for node in tree.body:
-        targets = (
-            [node.target] if isinstance(node, ast.AnnAssign)
-            else node.targets if isinstance(node, ast.Assign) else []
-        )
-        for target in targets:
-            if not isinstance(target, ast.Name):
-                continue
-            if target.id == "MODELS":
-                for call in node.value.elts:
-                    for kw in call.keywords:
-                        if kw.arg == "boards":
-                            models |= {ast.literal_eval(e) for e in kw.value.elts}
-            elif target.id == "COMPOSED":
-                composed |= {ast.literal_eval(row.elts[0]) for row in node.value.elts}
+    """Board names in import_3d_model's MODELS and COMPOSED, as imported.
+
+    Imported rather than parsed: COMPOSED appends every manifest row at import
+    time (OH-186), so its literal names only the hand-kept boards, and a parse
+    of the source saw none of the manifest boards.
+    """
+    try:
+        from tools import import_3d_model
+    except ModuleNotFoundError:  # pragma: no cover - only when run as a script
+        sys.path.insert(0, str(ROOT))
+        from tools import import_3d_model
+
+    models = {board for model in import_3d_model.MODELS for board in model.boards}
+    composed = {row[0] for row in import_3d_model.COMPOSED}
     if not models or not composed:
-        raise ValueError(f"{path}: MODELS or COMPOSED not found or empty")
+        raise ValueError("tools/import_3d_model.py: MODELS or COMPOSED is empty")
     return models, composed
 
 
