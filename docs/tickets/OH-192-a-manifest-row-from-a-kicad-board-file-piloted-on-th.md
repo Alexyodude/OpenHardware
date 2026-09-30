@@ -2,7 +2,7 @@
 id: OH-192
 title: A manifest row from a KiCad board file, piloted on the PCBCUPID Glyph Mini
   RP2040
-status: in-review
+status: done
 priority: P1
 created: '2026-09-30'
 touches:
@@ -45,3 +45,5 @@ REBASE, resolved by recomputing: ROWS keeps master's two SparkFun rows and then 
 FIXES: (1) a number on two nets is refused only on footprints the trace can reach: the chip, a header (its through-hole pads) and an R<n> with two numbered pins. Elsewhere such a pad is a contact on each of its nets. Tested: a capacitor's split pad 1 does not block the row, and split onto the far net it keeps R1 from being crossed. (2) A header's nets are its through-hole pads, the pads import_board reads; tested against import_board on the same board, with an SMD pad on the header reaching a GPIO traced nowhere. (3) A parse error names the file once. (4) _OHMS's \u03a9 is back and the file is ASCII. (5) Net-(IC1-GPIO5) and unconnected-(IC1-GPIO16-Pad27) on U1's GPIO4 resolve GPIO4 from copper and are not refused. (7) is_kicad. (8) PROVENANCE 2d names the KB2040, and 2f is the Glyph Mini.
 RED ON PURPOSE, 8 more, each restored, all red, each on its own test: split refused on every footprint; a two-pin resistor's split taken; a split pad counted on its first net only; a header read off every pad; a header's split checked on every pad; the file prefixed always; prefixed never; a GPIO found anywhere in a net's name (search, not fullmatch).
 SUITE at 79f169b, whose tree is b7cdb27's but for OH-163's ticket file: 2 failed, 2378 passed, 38 skipped: the OCP pair (test_import_3d_model). All CLAUDE.md checkers, ticket_guard --self-test and check_facts OK. TWINS in lane3: 12 of 33; geometry 32, model 29 (2 not built here: the SparkFun meshes are not built in this worktree), pins 27, runs 17. The Glyph Mini: file, footprint:no source, 20/20, RP2040:no.
+
+**Note 2026-09-30:** 2026-09-30: approved by independent review (Glyph pins re-derived with an independent s-expression parser; datasheet rows and sha256 checked; EAGLE trace results identical by diff; KiCad cases incl. name-only nets and back side). Fix round and rebase over OH-188/189 verified by the orchestrator: 405 affected tests pass in lane3, check_ticket_claims OK; the conflict resolution moved the Glyph onto its own RP2040_QFN56_PCBCUPID table, master's one-page-two-footprints pattern. Author's full suite at the tip: 2 failed (OCP pair), 2378 passed, 38 skipped. Merged by fast-forward.
