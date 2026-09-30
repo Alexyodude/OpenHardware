@@ -3086,6 +3086,76 @@ def drawn_from(element: eagle.Element, statements: dict[str, Statement] | None,
     return correspondence_for(element), None
 
 
+# --- a row held to the vendor's own words (OH-193) ------------------------------
+#
+# **A row is a claim that one library's model IS another's package**, and the
+# pads, the body and the pin-1 marker are what check it. They cannot see a
+# word: KiCad's vertical and horizontal SH sockets share a land, and so do
+# the C3 and C6 MINI modules. Where the vendor's own package name or value
+# states something a model's name also states, the two must agree. Each
+# vocabulary is closed: a word is read only once it is here.
+
+#: Orientation, as a vendor spells it in a token of its package or value,
+#: against the word KiCad's model names carry.
+ORIENTATION_WORDS = {"VERT": "Vertical", "VERTICAL": "Vertical",
+                     "RA": "Horizontal", "HORIZONTAL": "Horizontal"}
+
+#: Chips a module or a package can be named for, on either side.
+CHIP_NAMES = ("ESP32-C3", "ESP32-C5", "ESP32-C6", "ESP32-H2", "ESP32-S2",
+              "ESP32-S3", "RP2040", "RP2350")
+
+#: A lead count, as a vendor's package name states it and as a model's name
+#: does. Two-digit header counts only, so a `2X2MM` body is not a header.
+_VENDOR_LEADS = (re.compile(r"(?:QFN|MLF|DFN|SON)-?(\d+)"),
+                 re.compile(r"SOT23-(\d)(?!\d)"), re.compile(r"MSOP0?(\d+)"),
+                 re.compile(r"DIL(\d+)"),
+                 re.compile(r"(?:^|[_-])([12])X(\d\d)(?:$|[_-])"))
+_MODEL_LEADS = (re.compile(r"(?:QFN|DFN|SON)[-_](\d+)"),
+                re.compile(r"SOT-23-(\d)(?!\d)"), re.compile(r"MSOP-(\d+)"),
+                re.compile(r"DIP-(\d+)"), re.compile(r"PinHeader_(\d)x(\d+)"))
+
+
+def _leads(text: str, patterns) -> int | None:
+    """The lead count the first pattern that matches states, or None."""
+    for pattern in patterns:
+        found = pattern.search(text)
+        if found:
+            numbers = [int(group) for group in found.groups()]
+            return numbers[0] * numbers[1] if len(numbers) == 2 else numbers[0]
+    return None
+
+
+def _chips(text: str) -> set[str]:
+    return {name for name in CHIP_NAMES
+            if re.search(rf"(?<![A-Z0-9]){re.escape(name)}(?![A-Z0-9])", text)}
+
+
+def contradiction(element: eagle.Element, component: Component) -> str | None:
+    """What the vendor's own words for this placement state that its row's
+    model contradicts, or None."""
+    vendor = f"{element.package} {element.value or ''}".upper()
+    names = [component.model] + [pathlib.PurePosixPath(url).name
+                                 for url in (component.step, component.footprint)
+                                 if url is not None]
+    model = " ".join(names)
+    for token in re.split(r"[^A-Z0-9]+", vendor):
+        said = ORIENTATION_WORDS.get(token)
+        other = {"Vertical": "Horizontal", "Horizontal": "Vertical"}.get(said)
+        if said and other.lower() in model.lower():
+            return (f"the vendor's {token!r} says {said.lower()}, and "
+                    f"{component.model} is {other.lower()}")
+    stated, drawn = _chips(vendor), _chips(model.upper())
+    if stated and drawn - stated:
+        return (f"the vendor's words name {sorted(stated)} and the row's model "
+                f"and files name {sorted(drawn)}")
+    leads, modelled = _leads(element.package.upper(), _VENDOR_LEADS), \
+        _leads(component.model, _MODEL_LEADS)
+    if leads is not None and modelled is not None and leads != modelled:
+        return (f"{element.package} states {leads} leads and {component.model} "
+                f"{modelled}")
+    return None
+
+
 def cached(component: Component, url: str, suffix: str) -> pathlib.Path:
     """Where a fetched model file is kept.
 
@@ -4093,6 +4163,13 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 else:
                     padless.append(element.name)
             continue
+        said = contradiction(element, component)
+        if said is not None:
+            raise SystemExit(
+                f"{spec.board}: {element.name} is a {element.package} and "
+                f"CORRESPONDENCE gives it {component.library}/{component.model}, "
+                f"but {said}. Fix the table rather than the words."
+            )
         if component.slug not in cache:
             cache[component.slug] = component_mesh(component, deflection)
         mesh, box = cache[component.slug]
@@ -4105,6 +4182,21 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             )
         put = place(mesh, element, component.turn, spec.thickness_mm,
                     centre, component.flip)
+        # **The side of the board, as the vendor's file says it** (OH-193): a
+        # mirrored element is on the underside, and so is a row that flips a
+        # part below the board; everything else stands on top. Measured on
+        # the placed mesh's own height against the board's mid-plane.
+        heights = [value for positions, _n, _i in put.groups.values()
+                   for value in positions[1::3]]
+        below = (min(heights) + max(heights)) / 2 < spec.thickness_mm / 2
+        if below != (element.mirrored or component.flip):
+            raise SystemExit(
+                f"{spec.board}: {element.name} ({element.package}) is on the "
+                f"board's {'underside' if element.mirrored or component.flip else 'top'} "
+                f"by its file{' and its row' if component.flip else ''}, and "
+                f"is drawn on the {'underside' if below else 'top'}. Fix the "
+                f"row's flip rather than the side."
+            )
         solids.append(box_around(element.name, put))
         # **The turn, checked the way the model and the place already are.**
         # Both other checks survive a half turn -- a span does and a centre

@@ -4753,6 +4753,132 @@ def test_every_row_draws_something_somewhere():
     assert not unused, unused
 
 
+# --- a row held to the vendor's own words (OH-193) ------------------------------
+
+
+def test_every_row_agrees_with_its_vendors_words():
+    """On every fetched composed board, no drawn placement's row names a
+    model its vendor's own package or value words contradict -- the check
+    `compose` makes, asked here without OpenCASCADE."""
+    checked, unfetched = 0, []
+    for spec in compose.COMPOSITIONS:
+        if not _fetched(spec):
+            unfetched.append(spec.board)
+            continue
+        board = compose.read_layout(spec.layout)
+        pads = [pad for name in spec.headers for pad in board.element(name).pads]
+        extra = compose.dip_header_elements(pads) if spec.dip_headers else []
+        statements = compose.statements_for(spec)
+        for element in [*board.elements, *extra]:
+            row, _why = compose.drawn_from(element, statements)
+            if row is None:
+                continue
+            checked += 1
+            said = compose.contradiction(element, row)
+            assert said is None, f"{spec.board}: {element.name}: {said}"
+    if not checked:
+        pytest.skip("SKIPPED: no board layouts are fetched")
+    if unfetched:
+        pytest.skip(f"checked {checked} placements; not fetched: {unfetched}")
+
+
+def test_a_row_its_vendors_words_contradict_is_refused():
+    """The three words the vocabularies read, each agreeing and each
+    contradicted: an orientation, a chip, a lead count. The vocabularies are
+    closed and pinned, so a word is read only once it is added here too."""
+    def placed(package, value=""):
+        return eagle.Element("U1", "lib", package, pads=(), value=value)
+
+    vertical = compose.Component(
+        "JST04_1MM_VERT", "Connector_JST",
+        "JST_SH_BM04B-SRSS-TB_1x04-1MP_P1.00mm_Vertical", "a test row")
+    horizontal = dataclasses.replace(
+        vertical, model="JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal")
+    assert compose.contradiction(placed("JST04_1MM_VERT"), vertical) is None
+    assert "vertical" in compose.contradiction(placed("JST04_1MM_VERT"), horizontal)
+    assert "horizontal" in compose.contradiction(placed("JST04_1MM_RA"), vertical)
+
+    c3 = compose.Component(
+        "ESP32-C3-MINI-1", "espressif", "ESP32-C3-MINI-1", "a test row",
+        step="https://example.invalid/ESP32-C3-MINI-1.STEP",
+        footprint="https://example.invalid/ESP32-C3-MINI-1.kicad_mod")
+    assert compose.contradiction(placed("ESP32-C3-MINI-1", "ESP32-C3_MINI-1"), c3) is None
+    # The model's name left alone and only its files pointed elsewhere.
+    c6_files = dataclasses.replace(
+        c3, step="https://example.invalid/ESP32-C6-MINI-1.STEP",
+        footprint="https://example.invalid/ESP32-C6-MINI-1.kicad_mod")
+    assert "ESP32-C6" in compose.contradiction(placed("ESP32-C3-MINI-1"), c6_files)
+    # A value that names the chip where the package does not: the Feather's.
+    assert "ESP32-C3" in compose.contradiction(
+        placed("ESP32-PICO-MINI", "ESP32-C3-MINI"),
+        dataclasses.replace(c3, model="ESP32-C6-MINI-1", step=None, footprint=None))
+
+    qfn = compose.Component("QFN56_7MM", "Package_DFN_QFN",
+                            "QFN-56-1EP_7x7mm_P0.4mm_EP3.2x3.2mm", "a test row")
+    assert compose.contradiction(placed("QFN56_7MM"), qfn) is None
+    assert "56 leads" in compose.contradiction(
+        placed("QFN56_7MM"), dataclasses.replace(qfn, model="QFN-60-1EP_7x7mm"))
+    assert "6 leads" in compose.contradiction(
+        placed("2X03"), dataclasses.replace(qfn, model="PinHeader_2x04_P2.54mm"))
+    # A body's size is not a header's count.
+    assert compose.contradiction(
+        placed("TDFN8_2X2MM"), dataclasses.replace(qfn, model="DFN-8-1EP_2x2mm")) is None
+
+    assert compose.ORIENTATION_WORDS == {"VERT": "Vertical", "VERTICAL": "Vertical",
+                                         "RA": "Horizontal", "HORIZONTAL": "Horizontal"}
+    assert compose.CHIP_NAMES == ("ESP32-C3", "ESP32-C5", "ESP32-C6", "ESP32-H2",
+                                  "ESP32-S2", "ESP32-S3", "RP2040", "RP2350")
+
+
+def _inputs_missing(spec, board) -> list[str]:
+    """The fetched files `compose` would read for this board and cannot find:
+    a model it would otherwise download, or one tools/model_from_datasheet.py
+    has not built."""
+    missing = []
+    statements = compose.statements_for(spec)
+    for element in board.elements:
+        row, _why = compose.drawn_from(element, statements)
+        if row is None:
+            continue
+        if row.modelled:
+            wanted = [compose.MODELLED / f"{row.model}.obj"]
+        else:
+            wanted = [compose.cached(row, row.url, ".step")]
+            if row.footprint is not None:
+                wanted.append(compose.cached(row, row.footprint, ".kicad_mod"))
+        missing += [path.name for path in wanted if not path.is_file()]
+    return sorted(set(missing))
+
+
+def test_the_manifest_boards_compose_under_test(capsys):
+    """**The composer's own refusals, in the suite's view** (OH-193): its
+    turn, silkscreen, side and word checks exit the composer, and until this
+    nothing ran it under pytest. Each manifest board composes, writing
+    nothing, wherever its files and every model it draws are on disk and
+    OpenCASCADE is installed; what is missing is named."""
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    composed, missing = [], {}
+    for _row, spec in _manifest_specs():
+        if spec is None or not _fetched(spec):
+            missing[_row.board] = ["its board or schematic file"]
+            continue
+        board = compose.read_layout(spec.layout)
+        absent = _inputs_missing(spec, board)
+        if absent:
+            missing[spec.board] = absent
+            continue
+        try:
+            compose.compose(spec, deflection=compose.DEFLECTION, check=True)
+        except SystemExit as exc:
+            pytest.fail(f"the composer refuses {spec.board}: {exc}")
+        composed.append(spec.board)
+    capsys.readouterr()
+    if not composed:
+        pytest.skip(f"SKIPPED: nothing to compose; missing {missing}")
+    if missing:
+        pytest.skip(f"composed {composed}; missing {missing}")
+
+
 def test_a_kicad_manifest_row_is_refused_by_name(capsys):
     """Every reading `manifest_composition` makes beyond the row is an EAGLE
     field -- the preview colour, the design-rule stack -- so a `.kicad_pcb`
