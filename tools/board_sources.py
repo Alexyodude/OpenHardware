@@ -1184,6 +1184,77 @@ SOURCES: tuple[Source, ...] = (
         cite="OH-194: GitHub's tree listing of the default branch, read 2026-09-30; "
         "the board file of revision D and the README fetched here and opened",
     ),
+    Source(
+        name="sparkfun-thing-plus-esp32-c5",
+        vendor="SparkFun",
+        model="one repository per board",
+        size="1,636,441 bytes, the one blob fetched, as GitHub's tree lists it",
+        licence=Licence(
+            name="CC BY-SA 4.0",
+            covers="the board design its sentence is placed in; the repository "
+            "holds no licence file, and its README is one line naming the board",
+            sampled=True,
+            evidence=Evidence.OPENED,
+            cite="Hardware/SparkFun_Thing_Plus_ESP32_C5.kicad_pcb, fetched here and "
+            "read 2026-09-30: its footprint SparkFun-Aesthetic:Creative_Commons_"
+            "License carries the sentence on the layer the file names "
+            "License.Info, as the Qwiic Pocket's FRAME1 carries it",
+            file="Hardware/SparkFun_Thing_Plus_ESP32_C5.kicad_pcb",
+            quote="Released under the Creative Commons Attribution Share-Alike 4.0 License",
+        ),
+        fetch=Fetch(
+            transport=Transport.GIT_SPARSE,
+            url="https://github.com/sparkfun/SparkFun_Thing_Plus_ESP32-C5.git",
+            wanted=("Hardware/SparkFun_Thing_Plus_ESP32_C5.kicad_pcb",),
+            skipped=(
+                ("Hardware/SparkFun_Thing_Plus_ESP32_C5.kicad_sch", "the KiCad "
+                 "schematic. Nothing reads it; the pads and nets are in the .kicad_pcb"),
+                ("Hardware/SparkFun_Thing_Plus_ESP32_C5.kicad_pro", "KiCad's project "
+                 "settings file; nothing here reads one"),
+                ("Hardware/Production", "a panelised .kicad_pcb of 19,386,731 bytes, "
+                 "its gerbers, a zip of them and the panelizer's logs: fabrication "
+                 "output derived from the design in Hardware/"),
+                ("docs", "the product documentation site: pages, its configuration, "
+                 "the schematic as a PDF, a zip of the design files and a copy of "
+                 "Espressif's module datasheet"),
+                ("README.md", "30 bytes, one heading naming the board; the licence "
+                 "is read from the board file, which is fetched"),
+                (".github", "the documentation site's deploy workflow; nothing about "
+                 "the board"),
+                (".gitignore", "the repository's ignore list; nothing about the board"),
+            ),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES, Evidence.LISTED,
+                "Hardware/SparkFun_Thing_Plus_ESP32_C5.kicad_sch, KiCad; listed, not "
+                "fetched",
+            ),
+            schematic_pdf=Artefact(
+                Published.YES, Evidence.OPENED,
+                "docs/static/ref/SparkFun_Thing_Plus_ESP32_C5.pdf, opened 2026-09-30 "
+                "and a rendering of the schematic; this row does not fetch it",
+            ),
+            pcb_layout=Artefact(
+                Published.YES, Evidence.OPENED,
+                "Hardware/SparkFun_Thing_Plus_ESP32_C5.kicad_pcb, KiCad version "
+                "20241229, read by tools/kicad.py",
+            ),
+            footprints_symbols=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "no .kicad_mod or .kicad_sym in the tree listing; the footprints are "
+                "inside the .kicad_pcb",
+            ),
+            model_3d=Artefact(Published.NO, Evidence.ABSENT, _NO_MESH),
+            board_support=Artefact(
+                Published.NO, Evidence.ABSENT,
+                "no pin definitions in the tree listing; docs/ describes the Arduino "
+                "setup in prose",
+            ),
+        ),
+        cite="OH-194: GitHub's tree listing of the default branch, read 2026-09-30; "
+        "the board file fetched here and opened, the licence read from it",
+    ),
 )
 
 
