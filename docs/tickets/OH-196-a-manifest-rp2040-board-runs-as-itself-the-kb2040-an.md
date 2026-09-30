@@ -1,7 +1,7 @@
 ---
 id: OH-196
 title: 'A manifest RP2040 board runs as itself: the KB2040 and the Glyph Mini'
-status: in-progress
+status: in-review
 priority: P1
 created: '2026-09-30'
 touches:
@@ -43,3 +43,12 @@ SUITE at f0275ee: 2 failed (the OCP pair, test_import_3d_model), 2384 passed, 38
 5 [LOW] The KB2040 schematic check is its own test. test_pin_view's running-view test runs the RP2040 rows on the chip blink and holds each pad's own caption. The Glyph's SDA reason fails with 'the reader now numbers ...'s SDA: switch LABEL to SDA'. catalogue.py:201 rewrapped.
 TRANSITIONS: KB2040 MISO input, low 19, high 20, low 473, high 926, low 1379, high 1832, low 2285, high 2738; D4 input throughout. Glyph /GPIO-8 input, low 18, high 19, low 472, high 925, low 1378, high 1831, low 2284, high 2737; /GPIO-12, /GPIO-6, /GPIO-4 input throughout. Also red: each image built against each sibling's variant, generic included; the watched pad's chip_index + 1.
 TWINS 15 of 33, runs 19. SUITE at c91b8ce: 2 failed (OCP pair), 2393 passed, 38 skipped. All CLAUDE.md checkers, check_facts, ticket_guard --self-test 6/6 OK.
+
+**Note 2026-09-30:** 2026-09-30: back in review with the confirm review's fixes, rebased onto master 0b9165b. Commits 43f0d64 (check 5 resolves), 69b00f5 (LOWs).
+1 [MEDIUM] CHECK 5 '..': the built path is resolved before is_relative_to, as opening it would resolve it; the refusal names resolved paths. New fixture holds HERE / "../riscv32/blink.bin" and HERE / "fixture" / ".." / ".." / "riscv32" / "blink.bin": red before the fix, red again with the comparison unresolved. All 13 entries pass.
+2 [LOW] The F5 quote is cited as Table 280, PDF p.239, in rp2040.py, blink.c's header (comment only; both images still rebuild byte for byte) and s11.
+3 [LOW] unrouted_level's docstring says only FUNCSEL is read and OUTOVER/OEOVER are stored and ignored.
+4 [LOW] A pad past GPIO29 reads unknown (not modelled) instead of raising from gpio_ctrl: a synthetic /GPIO-30 pad on the Glyph's layout holds it, red without the range check (ValueError). A row whose variant is arduino-pico's default table fails with an assertion saying it has no default to differ from (seen with the KB2040 pointed at generic), where it raised ValueError.
+5 [NOTE, not modelled] IO_BANK0's CTRL registers are writable while RESETS holds IO_BANK0 in reset, and do not return to 0x1f when reset is re-asserted; the model keeps whatever was written.
+STILL OPEN FOR A FOLLOW-UP: rp2040.pin_states (the XIAO RP2040s') ignores FUNCSEL, and tests/cortexm0/blink/blink.c never selects SIO.
+SUITE at 69b00f5: 2 failed (OCP pair), 2405 passed, 37 skipped. All CLAUDE.md checkers, check_facts, ticket_guard --self-test 6/6 OK.
