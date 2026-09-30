@@ -407,7 +407,8 @@ binds -- and that path is a file under the test's own directory. Every
 entry names its image that way already. `tests/rules/test_board_claims.py`
 holds the case the review found, a name joined onto a temporary directory,
 and a path climbing out of the test's directory.
-## 13. 2026-09-30 — a row may watch `LED_BUILTIN` where no sibling numbers it alike
+
+## 13. 2026-09-30 — the KiCad ESP32 rows hold their own, three of them on `LED_BUILTIN`
 
 §10's conditions do not name a label, and the PCBCUPID Glyph C3 (OH-194)
 meets them on `LED_BUILTIN`, on the header pads its board file puts on
@@ -424,3 +425,8 @@ for it, builds the sketch for each sibling that numbers none, and asserts
 why not `SDA`: on a Glyph its net, `/SDA`, carries no GPIO; on the Olimex
 its variant's `SDA` is `LED_BUILTIN`'s GPIO, and Olimex's own nets put
 `I2C_SDA` on another.
+
+The SparkFun Thing Plus ESP32-C5 is §10's shape, as the Qwiic Pocket is:
+its `SDA` and `TX` are the XIAO ESP32-C5's, and its `LED_BUILTIN` is an RGB
+LED, so `tests/webui/test_sparkfun_esp32c5_board.py` watches `MOSI`, on the
+pad whose net SparkFun names for its GPIO, and asserts both reasons.

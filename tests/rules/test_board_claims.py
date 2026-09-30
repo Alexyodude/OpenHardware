@@ -132,6 +132,8 @@ def test_the_repository_passes_today():
             "tests/webui/test_pcbcupid_glyph_c6_board.py" in result.stdout)
     assert ("Olimex ESP32-C3-DevKit-Lipo -> "
             "tests/webui/test_olimex_esp32c3_devkit_lipo_board.py" in result.stdout)
+    assert ("SparkFun Thing Plus ESP32-C5 -> "
+            "tests/webui/test_sparkfun_esp32c5_board.py" in result.stdout)
 
 
 def test_the_rule_arms_this_checker():

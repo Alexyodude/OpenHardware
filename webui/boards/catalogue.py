@@ -215,6 +215,7 @@ BOARD_FIRMWARE_VERIFIED: dict[str, str] = {
     "PCBCUPID Glyph C6": "tests/webui/test_pcbcupid_glyph_c6_board.py",
     "Olimex ESP32-C3-DevKit-Lipo":
         "tests/webui/test_olimex_esp32c3_devkit_lipo_board.py",
+    "SparkFun Thing Plus ESP32-C5": "tests/webui/test_sparkfun_esp32c5_board.py",
 }
 
 #: What each instruction set would need before a core for it could be trusted.
