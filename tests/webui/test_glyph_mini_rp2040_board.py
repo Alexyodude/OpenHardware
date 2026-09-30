@@ -110,7 +110,9 @@ def build(variant: str) -> bytes:
         pytest.skip(f"SKIPPED: no arm-none-eabi-gcc on PATH or at {gcc}")
     objcopy = gcc.with_name(gcc.name.replace("gcc", "objcopy"))
     with tempfile.TemporaryDirectory() as tmp:
-        elf, binary = pathlib.Path(tmp) / "blink.elf", pathlib.Path(tmp) / "blink.bin"
+        # Named with no image suffix: tools/check_board_claims.py reads one as
+        # this test naming its image.
+        elf, binary = pathlib.Path(tmp) / "linked", pathlib.Path(tmp) / "flat"
         for command in (
             [str(gcc), "-mcpu=cortex-m0plus", "-mthumb", "-Os", "-ffreestanding",
              "-nostdlib", "-I", str(PICO / "variants" / variant), f"-DWATCHED={LABEL}",

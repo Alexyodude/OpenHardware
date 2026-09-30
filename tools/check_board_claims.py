@@ -58,7 +58,16 @@ it cannot come back quietly.
 `evidence_that_never_loads_an_image`. Naming any file satisfies check 4. The
 named file has to name a firmware image that exists beside it, read that image
 off disk, and step a CPU over it -- all three, in that one file. Evidence you
-have to chase through three modules is evidence nobody checks. A board's own
+have to chase through three modules is evidence nobody checks.
+
+"Beside it" is the path the file builds, not the name it spells: an image
+counts only where the file joins its name onto its own location --
+`pathlib.Path(__file__)`, then `.resolve()`, `.parent`, `.parents[n]` and `/`
+with a string, directly or through names one plain module-level assignment
+binds (`_image_paths`) -- and that path is a file under the test's own
+directory. Matching the name anywhere under that directory was satisfied by
+another test's `blink.bin` with the named image deleted, and by a temporary
+file's name (OH-196). A board's own
 entry also has to load that board: its name is the first argument of a
 `load_firmware` call in the file, spelled out, or as a name `_resolved`
 resolves to it -- one plain module-level assignment that nothing enclosing
@@ -666,10 +675,75 @@ def _loads_board(tree: ast.Module, board: str) -> bool:
     return False
 
 
-def _found_beside(test: pathlib.Path, name: str) -> bool:
-    """Is a file of that name anywhere under the named test's own directory?"""
-    basename = pathlib.PurePosixPath(name).name
-    return any(candidate.is_file() for candidate in test.parent.rglob(basename))
+def _module_value(tree: ast.Module, name: str) -> ast.expr | None:
+    """The expression `name` is bound to, where its only binding anywhere in
+    the file is one plain `NAME = ...` directly in the module's body."""
+    sites = [node for node in ast.walk(tree) if _binds(node, name)]
+    if len(sites) != 1:
+        return None
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and node.targets[0] is sites[0]):
+            return node.value
+    return None
+
+
+def _path_of(node: ast.AST, tree: ast.Module, test: pathlib.Path,
+             seen: frozenset[str] = frozenset()) -> pathlib.Path | None:
+    """The path `node` builds from the test file's own location, or None.
+
+    Only `pathlib.Path(__file__)` or `Path(__file__)`, `.resolve()`,
+    `.parent`, `.parents[n]`, and `/` with a string literal or a name bound
+    to one, each directly or through a name `_module_value` resolves. Any
+    other expression -- a temporary directory, a working-directory-relative
+    string, a call -- builds no path this can check, and is None.
+    """
+    if isinstance(node, ast.Name):
+        value = _module_value(tree, node.id) if node.id not in seen else None
+        return None if value is None else _path_of(value, tree, test, seen | {node.id})
+    if isinstance(node, ast.Call):
+        func = node.func
+        called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if (called == "Path" and len(node.args) == 1 and not node.keywords
+                and isinstance(node.args[0], ast.Name) and node.args[0].id == "__file__"):
+            return test
+        if called == "resolve" and isinstance(func, ast.Attribute) and not node.args:
+            return _path_of(func.value, tree, test, seen)
+        return None
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        base = _path_of(node.value, tree, test, seen)
+        return None if base is None else base.parent
+    if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "parents" and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, int)):
+        base = _path_of(node.value.value, tree, test, seen)
+        if base is None or not 0 <= node.slice.value < len(base.parents):
+            return None
+        return base.parents[node.slice.value]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        base = _path_of(node.left, tree, test, seen)
+        right = node.right
+        if isinstance(right, ast.Name) and right.id not in seen:
+            right = _module_value(tree, right.id) or right
+        if (base is None or not isinstance(right, ast.Constant)
+                or not isinstance(right.value, str)):
+            return None
+        return base / right.value
+    return None
+
+
+def _image_paths(tree: ast.Module, test: pathlib.Path) -> set[pathlib.Path]:
+    """Every path the file builds, by `_path_of`, whose last part it joins
+    on as a string with an image suffix."""
+    found = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)
+                and isinstance(node.right, ast.Constant) and isinstance(node.right.value, str)
+                and pathlib.PurePosixPath(node.right.value).suffix.lower() in IMAGE_SUFFIXES):
+            path = _path_of(node, tree, test)
+            if path is not None:
+                found.add(path)
+    return found
 
 
 def evidence_that_never_loads_an_image(root: pathlib.Path | None = None) -> list[str]:
@@ -690,14 +764,19 @@ def evidence_that_never_loads_an_image(root: pathlib.Path | None = None) -> list
             ) from exc
 
         named = _image_names(tree)
-        on_disk = sorted(name for name in named if _found_beside(test, name))
+        here = test.resolve().parent
+        built = _image_paths(tree, test.resolve())
+        on_disk = [path for path in built if path.is_relative_to(here) and path.is_file()]
         why: list[str] = []
         if not named:
             suffixes = ", ".join(sorted(IMAGE_SUFFIXES))
             why.append(f"names no image file (nothing ending in {suffixes})")
         elif not on_disk:
+            where = (f"it builds {sorted(path.as_posix() for path in built)}" if built else
+                     "it joins none of them onto a path built from its own __file__")
             why.append(
-                f"names {sorted(named)} but no such file exists under {test.parent}"
+                f"names {sorted(named)} but no such file exists beside it under "
+                f"{here.as_posix()}: {where}"
             )
         if not _reads_bytes_off_disk(tree):
             why.append(

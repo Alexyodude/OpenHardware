@@ -541,15 +541,96 @@ def test_the_image_has_a_vector_table(cpu):
 
 def test_a_binary_open_counts_as_reading_the_image(tmp_path):
     """read_bytes is the idiom here; refusing every other way of opening a file
-    would fail an honest test for a reason that is about style."""
+    would fail an honest test for a reason that is about style. The path is
+    the one beside the test, which a bare `"blink.bin"` is not (OH-196)."""
     evidence = '''
+import pathlib
+
+
 def test_the_led_actually_blinks(cpu):
-    with open("blink.bin", "rb") as handle:
+    with open(pathlib.Path(__file__).resolve().parent / "blink.bin", "rb") as handle:
         cpu.write_block(0x10000100, handle.read())
     cpu.step()
 '''
     root = build_root(tmp_path, evidence=evidence)
     assert C.evidence_that_never_loads_an_image(root) == []
+
+
+def test_an_image_of_that_name_elsewhere_under_the_tests_directory_is_not_the_one_named(
+        tmp_path):
+    """OH-196's review: the named image deleted, check 5 still passed on
+    another test's `blink.bin` under the same directory, because it matched
+    the name anywhere there. It is the path the test builds that counts."""
+    root = build_root(tmp_path, image=False,
+                      files={"tests/cortexm0/elsewhere/blink.bin": "not this one"})
+    found = C.evidence_that_never_loads_an_image(root)
+    assert len(found) == 1, found
+    assert "no such file exists beside it" in found[0], found
+    assert "tests/cortexm0/blink.bin" in found[0], found
+
+
+def test_an_image_named_only_onto_a_temporary_directory_is_not_beside_the_test(tmp_path):
+    """A build's output, joined onto a directory the test makes as it runs,
+    is no path the file builds from where it is: naming it shows nothing,
+    even with a file of that name beside the test."""
+    evidence = '''
+import tempfile
+import pathlib
+
+
+def test_the_led_actually_blinks(cpu):
+    with tempfile.TemporaryDirectory() as tmp:
+        cpu.write_block(0x10000100, (pathlib.Path(tmp) / "blink.bin").read_bytes())
+    cpu.step()
+'''
+    root = build_root(tmp_path, evidence=evidence)
+    found = C.evidence_that_never_loads_an_image(root)
+    assert len(found) == 1, found
+    assert "joins none of them onto a path built from its own __file__" in found[0], found
+
+
+def test_an_image_in_the_fixture_directory_the_test_builds_its_path_to_counts(tmp_path):
+    """The shape every entry has: a directory beside the test named once at
+    module level, and the image joined onto it through a second name."""
+    evidence = '''
+import pathlib
+
+HERE = pathlib.Path(__file__).resolve().parent
+FIXTURE = "blink"
+IMAGE = HERE / FIXTURE / "blink.bin"
+
+
+def test_the_led_actually_blinks(cpu):
+    cpu.write_block(0x10000100, IMAGE.read_bytes())
+    cpu.step()
+'''
+    root = build_root(tmp_path, evidence=evidence, image=False,
+                      files={"tests/cortexm0/blink/blink.bin": "an image"})
+    assert C.evidence_that_never_loads_an_image(root) == []
+    (root / "tests/cortexm0/blink/blink.bin").unlink()
+    (root / "tests/cortexm0/blink.bin").write_text("beside, but not where it looks")
+    found = C.evidence_that_never_loads_an_image(root)
+    assert len(found) == 1 and "tests/cortexm0/blink/blink.bin" in found[0], found
+
+
+def test_an_image_the_test_builds_a_path_to_outside_its_own_directory_is_not_beside_it(
+        tmp_path):
+    """`.parents[1]` climbs out of the test's directory, to an image some
+    other suite owns: a path the file builds, and still not its own."""
+    evidence = '''
+import pathlib
+
+IMAGE = pathlib.Path(__file__).resolve().parents[1] / "blink.bin"
+
+
+def test_the_led_actually_blinks(cpu):
+    cpu.write_block(0x10000100, IMAGE.read_bytes())
+    cpu.step()
+'''
+    root = build_root(tmp_path, evidence=evidence, image=False,
+                      files={"tests/blink.bin": "another suite's"})
+    found = C.evidence_that_never_loads_an_image(root)
+    assert len(found) == 1 and "it builds" in found[0] and "tests/blink.bin" in found[0], found
 
 
 # --- 4 and 5 for a board's own entry (rules/board-claims.md §7) ---------------
