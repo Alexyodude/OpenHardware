@@ -2,7 +2,7 @@
 id: OH-193
 title: A composer row is held to the vendor's own words, and the manifest boards are
   composed under test
-status: in-review
+status: done
 priority: P2
 created: '2026-09-30'
 touches:
@@ -28,3 +28,5 @@ Done when each of the three mutations above fails a test.
 **Note 2026-09-30:** 2026-09-30: review round. lane2 rebased onto master (OH-192). The composer and its tests go to OH-191, then OH-190, for their fixes, and come back here for this ticket's.
 
 **Note 2026-09-30:** 2026-09-30, review round (lane2, rebased on master with OH-192): e6e501f. (6) test_compose_refuses_a_row_its_vendors_words_contradict drives compose() on the Pro Micro with its vertical land on KiCad's horizontal SM04B (the exit fires before any model is read, so no OCP), and test_compose_refuses_a_flip_on_a_mirrored_element drives it on the Pocket with a box for its module, unflipped (composes) and flipped (exits 'a flip on a mirrored element turns it back over'); each fails with its exit deleted. (7) The side guard is described as what it is: place() turns a part under the board for a mirrored element or a flipped row, each a half turn, so both together put it back on top, which is the case it refuses. (8) A lead count is at most three digits and not followed by a digit, an X or a point, vendor and model side alike: DFN1006-2L and QFN-3X3 state no count (test_a_body_code_is_not_a_lead_count, red with the old pattern). (9) The Glyph Mini, refused by name after the rebase, is reported with MANIFEST_REFUSED's reason and no longer makes the composing or the bodyless test skip as if unfetched. The ticket's three mutations re-run after the round: each still fails a test. Every board's drawn list unchanged; the Uno recomposed. Composer and importer rule files under miniconda: 226 passed. Full default suite in lane2: 2388 passed, 37 skipped, 2 failed -- the OCP pair. tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py return to OH-163 when this closes.
+
+**Note 2026-09-30:** 2026-09-30: approved by independent review over two rounds (before/after --check on all 17 boards; mutants; for OH-191 the stem table's cases, for OH-190 band offsets against the 20% floor on every drawn diode, for OH-193 both composer exits pinned). Merged to master by fast-forward (a83fa48); the Uno recomposed in the main checkout: 44 drawn, F1/Z1/Z2 refused by its schematic. Low-severity edges collected in OH-199.
