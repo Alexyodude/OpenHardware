@@ -647,11 +647,12 @@ CORRESPONDENCE: tuple[Component, ...] = (
     # holds 39 files, listed 2026-08-31, and its smallest chip diode is an
     # 0603 -- so
     # the choice is a resistor's moulding of exactly the right land pattern
-    # or nothing. This table already makes that trade twice, for Z1/Z2's
-    # varistor and F1's fuse: the PART is a diode and only the moulding is
-    # borrowed, which is a statement about a 0.6 mm brick with no marking on
-    # it. Seeed themselves reached the same conclusion first: all seven
-    # ESD-0201 placements name `Resistor_SMD/R_0201_0603Metric` in the
+    # or nothing. The PART is a diode and only the moulding is borrowed,
+    # which is a statement about a 0.6 mm brick with no marking on it -- and
+    # one only a board with no schematic can make: on one that reads its
+    # schematic, a part stated to be another kind is refused on a passive's
+    # land (OH-187, OH-191). Seeed themselves reached the same conclusion
+    # first: all seven ESD-0201 placements name `Resistor_SMD/R_0201_0603Metric` in the
     # vendor's own board file.
     Component(
         "ESD-0201", "Resistor_SMD", "R_0201_0603Metric",
