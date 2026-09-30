@@ -2,7 +2,7 @@
 id: OH-189
 title: 'The Pro Micro ESP32-C3 and Qwiic Pocket ESP32-C6 composed whole: their own
   colour and thickness, every part drawn or reasoned'
-status: open
+status: in-progress
 priority: P1
 created: '2026-09-30'
 touches:
