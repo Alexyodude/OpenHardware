@@ -2,7 +2,7 @@
 id: OH-190
 title: The Uno's two MiniMELF diodes lie across their pads, and the diode test covers
   only manifest boards
-status: in-review
+status: done
 priority: P2
 created: '2026-09-30'
 touches:
@@ -24,3 +24,5 @@ Done when the Uno's D2 and D3 lie along their pads with the band at the cathode,
 **Note 2026-09-30:** 2026-09-30: tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py passed on to OH-193.
 
 **Note 2026-09-30:** 2026-09-30, review round (lane2, rebased on master): the note above says every diode model 'clears the margin by 8x or more'; the ratio is 8.0, which clears the 2x margin by 4x -- corrected here. Fixes: BAND_FLOOR, the band must sit at least 20% of the model's half-length off its centre (the margin cannot fire when the next colour sits exactly on the centre, and a MiniMELF with its stripe painted as glass read 0.019 mm of tessellation as its band); one colour clearing MIN_BAND_SHARE is 'no band to read' instead of an IndexError. The reading moved to _read_band; test_a_model_with_no_band_says_so builds one colour alone, end caps on the centre with the body 0.02 mm off (a ratio of infinity), and the same cylinder with a real stripe, which reads. Red on purpose: the floor removed, the count guard removed (IndexError), the real MiniMELF with its stripe painted as glass ('no band to read' on the Uno's D2). Composer and importer rule files under miniconda: 221 passed, 2 skipped.
+
+**Note 2026-09-30:** 2026-09-30: approved by independent review over two rounds (before/after --check on all 17 boards; mutants; for OH-191 the stem table's cases, for OH-190 band offsets against the 20% floor on every drawn diode, for OH-193 both composer exits pinned). Merged to master by fast-forward (a83fa48); the Uno recomposed in the main checkout: 44 drawn, F1/Z1/Z2 refused by its schematic. Low-severity edges collected in OH-199.
