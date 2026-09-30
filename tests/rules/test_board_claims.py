@@ -130,6 +130,8 @@ def test_the_repository_passes_today():
             "tests/webui/test_pcbcupid_glyph_c3_board.py" in result.stdout)
     assert ("PCBCUPID Glyph C6 -> "
             "tests/webui/test_pcbcupid_glyph_c6_board.py" in result.stdout)
+    assert ("Olimex ESP32-C3-DevKit-Lipo -> "
+            "tests/webui/test_olimex_esp32c3_devkit_lipo_board.py" in result.stdout)
 
 
 def test_the_rule_arms_this_checker():
