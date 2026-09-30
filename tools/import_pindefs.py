@@ -135,10 +135,10 @@ import textwrap
 import typing
 
 try:
-    from tools import board_manifest, board_sources, eagle
+    from tools import board_manifest, board_sources, eagle, kicad
 except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-    from tools import board_manifest, board_sources, eagle
+    from tools import board_manifest, board_sources, eagle, kicad
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 BSP_DIR = REPO / "third_party" / "bsp"
@@ -865,12 +865,23 @@ class Traced:
     via: str
 
 
-#: A GPIO named in a net: `IO8`, `GPIO5`, `io8`. Read in every `/`-part.
-_NAMED_GPIO = re.compile(r"(?:GPIO|IO)(\d+)", re.I)
+#: A GPIO named in a net: `IO8`, `GPIO5`, `io8`, and PCBCUPID's `GPIO-14`.
+#: Read in every `/`-part.
+_NAMED_GPIO = re.compile(r"(?:GPIO|IO)-?(\d+)", re.I)
 #: A resistor, the one part a trace crosses: a reference `R<n>` and a value
 #: that reads as ohms -- `1k`, `4.7k`, `100K`, `0`, `4K7`, `22R`.
 _RESISTOR = re.compile(r"R\d+")
-_OHMS = re.compile(r"(?:\d+(?:\.\d+)?\s*(?:[kmr]|ohms?|\u03a9)?|\d+[rkm]\d+)", re.I)
+_OHMS = re.compile(r"(?:\d+(?:\.\d+)?\s*(?:[kmr]|ohms?|Ω)?|\d+[rkm]\d+)", re.I)
+
+
+class _Part(typing.NamedTuple):
+    """A placed part as a trace reads it, from either board format: its
+    reference, what it is placed as, and one `(number, net)` per pin."""
+
+    name: str
+    package: str
+    value: str | None
+    pads: tuple[tuple[str, str | None], ...]
 
 
 def read_eagle_traced(
@@ -878,15 +889,96 @@ def read_eagle_traced(
     table: board_manifest.PinTable,
 ) -> dict[str, Traced]:
     """Each header net, traced to its chip in the vendor's own EAGLE board
-    file (`path`) and read against the chip's datasheet table (OH-178).
+    file (`path`) and read against the chip's datasheet table (OH-178), by
+    the rule `_trace` states. The chip is the one element placed as the
+    table's package and value."""
+    (text,) = texts
+    try:
+        board = eagle.read_board(path, text)
+        header = [pad.net for name in select for pad in board.element(name).pads]
+    except eagle.EagleError as exc:
+        raise PindefError(str(exc)) from exc
+    parts = [_Part(element.name, element.package, element.value,
+                   tuple((pad.number, pad.net) for pad in element.pads))
+             for element in board.elements]
+    chips = [part for part in parts
+             if (part.package, part.value) == (table.package, table.value)]
+    if len(chips) != 1:
+        raise PindefError(
+            f"{len(chips)} elements in {path.name} are placed as package "
+            f"{table.package!r}, value {table.value!r}; its pin table is read "
+            f"against exactly one"
+        )
+    return _trace(chips[0], parts, header, table)
 
-    The chip is the one element placed as the table's package and value. A
-    net reaches it directly, or, where it touches no pad of the chip,
-    through one resistor whose other net holds that resistor and one chip
-    pad and nothing else: the QT Py's TX, through R4. Any other part stops
-    the trace: an LED, a jumper, a capacitor, a switch, a connector. A pad
-    numbered past the table's `pins` is on the chip and is no pin of it, and
-    a pad the footprint names otherwise than by the page's number -- the
+
+def read_kicad_traced(
+    texts: tuple[str, ...], *, path: pathlib.Path, select: tuple[str, ...],
+    table: board_manifest.PinTable,
+) -> dict[str, Traced]:
+    """The same trace in the vendor's own KiCad board file (OH-192). A
+    footprint is a part as an EAGLE element is: named by its reference, and
+    placed as its footprint's name, without the library, and its value. The
+    chip is the one footprint placed as the table's package and value.
+
+    KiCad joins a footprint's pads to its pins by number, so one number is
+    one pin however many pads carry it -- a castellated header's hole and
+    half-hole -- and counts as one contact on its net. An unnumbered pad is
+    no pin. One number on two nets is refused, because one pin is on one
+    net, as `tools/import_board.py` refuses it on a header."""
+    (text,) = texts
+    try:
+        board = kicad.read_board(path, text=text)
+    except kicad.KicadError as exc:
+        # The parser's own words name no file where the text is not KiCad's.
+        raise PindefError(f"{path.name}: {exc}") from exc
+    parts = []
+    for placed in board.placements:
+        nets: dict[str, set[str]] = {}
+        for pad in placed.pads:
+            if pad.number:
+                nets.setdefault(pad.number, set()).add(pad.net)
+        split = {number: sorted(on) for number, on in nets.items() if len(on) > 1}
+        if split:
+            raise PindefError(
+                f"{path.name}: {placed.reference} numbers pads alike and puts "
+                f"them on different nets, {split}; one number is one pin, and "
+                f"one pin is on one net"
+            )
+        parts.append(_Part(placed.reference, placed.name, placed.value,
+                           tuple((number, on.pop()) for number, on in nets.items())))
+    header = []
+    for name in select:
+        found = [part for part in parts if part.name == name]
+        if len(found) != 1:
+            raise PindefError(
+                f"{len(found)} footprints in {path.name} have the reference "
+                f"{name!r}; a header is read off exactly one"
+            )
+        header += [net for _, net in found[0].pads]
+    chips = [part for part in parts
+             if (part.package, part.value) == (table.package, table.value)]
+    if len(chips) != 1:
+        raise PindefError(
+            f"{len(chips)} footprints in {path.name} are placed as "
+            f"{table.package!r}, value {table.value!r}; its pin table is read "
+            f"against exactly one"
+        )
+    return _trace(chips[0], parts, header, table)
+
+
+def _trace(chip: _Part, parts: list[_Part], header: list[str | None],
+           table: board_manifest.PinTable) -> dict[str, Traced]:
+    """Each header net, traced to `chip` among the board's `parts` and read
+    against the chip's datasheet table: the one rule an EAGLE and a KiCad
+    board are both read by.
+
+    A net reaches the chip directly, or, where it touches no pad of the
+    chip, through one resistor whose other net holds that resistor and one
+    chip pad and nothing else: the QT Py's TX, through R4. Any other part
+    stops the trace: an LED, a jumper, a capacitor, a switch, a connector. A
+    pad numbered past the table's `pins` is on the chip and is no pin of it,
+    and a pad the footprint names otherwise than by the page's number -- the
     KB2040's central `P$1` -- is read as the number `footprint_pads` gives.
 
     A net on one GPIO names it. A net on pads the table gives no GPIO
@@ -894,21 +986,6 @@ def read_eagle_traced(
     does not transcribe, or on a GPIO and another pad, is refused, and so
     is a net whose name carries a GPIO its copper does not reach.
     """
-    (text,) = texts
-    try:
-        board = eagle.read_board(path, text)
-        header = [pad.net for name in select for pad in board.element(name).pads]
-    except eagle.EagleError as exc:
-        raise PindefError(str(exc)) from exc
-    chips = [element for element in board.elements
-             if (element.package, element.value) == (table.package, table.value)]
-    if len(chips) != 1:
-        raise PindefError(
-            f"{len(chips)} elements in {path.name} are placed as package "
-            f"{table.package!r}, value {table.value!r}; its pin table is read "
-            f"against exactly one"
-        )
-    (chip,) = chips
     gpio = dict(table.gpio)
     page = dict(table.footprint_pads)
 
@@ -920,20 +997,19 @@ def read_eagle_traced(
     # A pad the footprint numbers past the page's count is on the chip and
     # is no pin of it: reached, so no resistor is crossed from it, and named.
     named = {**dict(table.not_gpio), **{
-        number(pad.number): f"not a pin of the part (past the page's {table.pins})"
-        for pad in chip.pads
-        if number(pad.number).isdigit() and int(number(pad.number)) > table.pins}}
-    contacts = collections.Counter(
-        pad.net for element in board.elements for pad in element.pads if pad.net)
+        number(pad): f"not a pin of the part (past the page's {table.pins})"
+        for pad, _ in chip.pads
+        if number(pad).isdigit() and int(number(pad)) > table.pins}}
+    contacts = collections.Counter(net for part in parts for _, net in part.pads if net)
 
     def pads_on(net: str) -> list[str]:
-        return [pad.number for pad in chip.pads if pad.net == net]
+        return [pad for pad, on in chip.pads if on == net]
 
     traced: dict[str, Traced] = {}
     for net in dict.fromkeys(net for net in header if net):
         reached, crossed = pads_on(net), []
-        for part in board.elements if not reached else ():
-            nets = [pad.net for pad in part.pads]
+        for part in parts if not reached else ():
+            nets = [on for _, on in part.pads]
             if (len(nets) != 2 or net not in nets or not _RESISTOR.fullmatch(part.name)
                     or not _OHMS.fullmatch((part.value or "").strip())):
                 continue
@@ -2339,16 +2415,26 @@ def variant_source(entry: board_manifest.Row) -> Source:
     return arduino_flat(entry.package, entry.variant, extras=entry.labels)
 
 
+#: The reader a row's own CAD is traced by, by the file's suffix.
+TRACED_READERS = {".brd": read_eagle_traced, ".kicad_pcb": read_kicad_traced}
+
+
 def manifest_board(entry: board_manifest.Row) -> Board:
     """A row's board: its variant, by the labels the row opts in, and its own
     CAD traced to its chip (OH-178), registered as the package `entry.source`."""
     sources = [variant_source(entry)]
     if entry.pin_table is not None:
+        suffix = pathlib.PurePosixPath(entry.cad).suffix.lower()
+        if suffix not in TRACED_READERS:
+            raise PindefError(
+                f"{entry.board}: {entry.cad} is not traced by anything here; a "
+                f"row's own CAD is traced from {sorted(TRACED_READERS)}"
+            )
         root = board_sources.source(entry.source).dest(REPO)
         sources.append(Source(
             entry.source,
             (entry.cad,),
-            functools.partial(read_eagle_traced, path=root / entry.cad,
+            functools.partial(TRACED_READERS[suffix], path=root / entry.cad,
                               select=entry.select, table=entry.pin_table),
             root=root,
         ))

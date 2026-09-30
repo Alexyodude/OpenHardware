@@ -2724,10 +2724,13 @@ def test_a_pad_the_table_does_not_transcribe_is_refused_and_never_read_as_no_gpi
 
 def test_a_net_named_for_another_gpio_than_its_copper_reaches_is_refused():
     """The name is a cross-check and never the source, read in every
-    `/`-part, as `IO<n>` or `GPIO<n>`, in either case."""
+    `/`-part, as `IO<n>` or `GPIO<n>`, in either case, and as PCBCUPID's
+    `GPIO-<n>`."""
     assert _traced(_traced_board({"IO4/TX": ["J1.1", "U1.1"]})) == {"IO4/TX": "GPIO4"}
     assert _traced(_traced_board({"tx/gpio4": ["J1.1", "U1.1"]})) == {"tx/gpio4": "GPIO4"}
+    assert _traced(_traced_board({"/GPIO-4": ["J1.1", "U1.1"]})) == {"/GPIO-4": "GPIO4"}
     for net, reaches in (("TX/IO5", r"U1 pad 1 = GPIO4"), ("GPIO5", r"U1 pad 1 = GPIO4"),
+                         ("/GPIO-5", r"U1 pad 1 = GPIO4"),
                          ("tx/io5", r"U1 pad 1 = GPIO4"), ("IO4", r"no pad of U1"),
                          ("IO4/3V3", r"U1 pad 3 = 3V3")):
         contacts = {"IO4": ["J1.1"], "IO4/3V3": ["J1.1", "U1.3"]}.get(net, ["J1.1", "U1.1"])
@@ -2783,6 +2786,153 @@ def test_a_pad_the_footprint_names_otherwise_is_read_as_the_page_number_the_tabl
         table=dataclasses.replace(_TABLE, footprint_pads=(("5", "1"),))).values()
     assert found == pindefs.Traced(
         ChipPin("GPIO4", 4), "TX -> U1 pad 5 = GPIO4 (this test's own table)")
+
+
+# --- the same trace in a KiCad board file (OH-192) ----------------------------
+
+
+def _kicad_traced_board(signals: dict[str, list[str]],
+                        parts: dict[str, tuple[int, str]] | None = None) -> str:
+    """`_traced_board`'s board as a `.kicad_pcb`: J1 a through-hole header of
+    four pads, and each other part a footprint named as that board names its
+    package, with its value; each pad on the net `signals` puts it on."""
+    parts = {"U1": (5, "PART"), **(parts or {})}
+    on = {contact: net for net, contacts in signals.items() for contact in contacts}
+
+    def pads(name: str, count: int, kind: str) -> str:
+        return "".join(
+            f'(pad "{n}" {kind} (at {n} 0) (size 1 1) (layers "*.Cu")'
+            + (f' (net "{on[f"{name}.{n}"]}")' if f"{name}.{n}" in on else "") + ")"
+            for n in range(1, count + 1))
+
+    placed = ('(footprint "L:HDR" (layer "F.Cu") (at 0 0) (property "Reference" "J1") '
+              f'{pads("J1", 4, "thru_hole circle (drill 0.5)")})') + "".join(
+        f'(footprint "L:{"QFN" if count == 5 else f"P{count}"}" (layer "F.Cu") (at 10 0) '
+        f'(property "Reference" "{name}") (property "Value" "{value}") '
+        f'{pads(name, count, "smd rect")})'
+        for name, (count, value) in parts.items())
+    return ('(kicad_pcb (version 20241229) '
+            '(gr_rect (start 0 0) (end 40 20) (layer "Edge.Cuts")) '
+            f"{placed})")
+
+
+def _kicad_traced(text: str, select: tuple[str, ...] = ("J1",)) -> dict[str, str | None]:
+    return {net: found.pin.name if found.pin else None for net, found in
+            pindefs.read_kicad_traced((text,), path=pathlib.Path("probe.kicad_pcb"),
+                                      select=select, table=_TABLE).items()}
+
+
+def test_a_kicad_board_is_traced_by_the_rule_an_eagle_board_is():
+    """One rule, `_trace`, and two readers: each board the tests above
+    describe, written once as EAGLE and once as KiCad, traces to the same
+    pins by the same paths, or is refused in the same words."""
+    boards = [
+        ({"TX": ["J1.1", "U1.1"]}, {}),
+        ({"TX": ["J1.1", "R1.1"], "N1": ["R1.2", "U1.1"]}, {"R1": (2, "1k")}),
+        ({"TX": ["J1.1", "R1.1"], "N1": ["R1.2", "R2.1"], "N2": ["R2.2", "U1.1"]},
+         {"R1": (2, "1k"), "R2": (2, "1k")}),
+        ({"VBAT": ["J1.1", "R1.1"], "SENSE": ["R1.2", "R2.1", "U1.1"],
+          "GND": ["R2.2", "J1.2"]}, {"R1": (2, "1k"), "R2": (2, "1k")}),
+        ({"TX": ["J1.1", "R1.1"], "N1": ["R1.2", "U1.1"]}, {"R1": (3, "1k")}),
+        *(({"TX": ["J1.1", f"{name}.1"], "N1": [f"{name}.2", "U1.1"]}, {name: (2, value)})
+          for name, value in _NOT_RESISTORS.items()),
+        ({"3V3": ["J1.1", "U1.3", "U1.5", "R1.1"], "IO4": ["R1.2", "U1.1"]},
+         {"R1": (2, "10k")}),
+        ({"GNDPAD": ["J1.1", "U1.5", "R1.1"], "N1": ["R1.2", "U1.1"]}, {"R1": (2, "10k")}),
+        ({"BOOT": ["J1.1", "U1.4"]}, {}),
+        ({"IO9/BOOT": ["J1.1", "U1.4"]}, {}),
+        ({"TX": ["J1.1", "R1.1"], "N1": ["R1.2", "U1.4"]}, {"R1": (2, "1k")}),
+        ({"IO4/TX": ["J1.1", "U1.1"]}, {}),
+        ({"TX/IO5": ["J1.1", "U1.1"]}, {}),
+        ({"/GPIO-4": ["J1.1", "U1.1"]}, {}),
+        ({"/GPIO-5": ["J1.1", "U1.1"]}, {}),
+        ({"IO4": ["J1.1"]}, {}),
+        ({"IO4/3V3": ["J1.1", "U1.3"]}, {}),
+        ({"TX": ["J1.1", "U1.1", "U1.2"]}, {}),
+        ({"TX": ["J1.1", "U1.1"]}, {"U2": (5, "OTHER")}),
+    ]
+    said = []
+    for signals, parts in boards:
+        outcome = []
+        for reader, text, name in (
+                (pindefs.read_eagle_traced, _traced_board(signals, parts), "probe.brd"),
+                (pindefs.read_kicad_traced, _kicad_traced_board(signals, parts),
+                 "probe.kicad_pcb")):
+            try:
+                outcome.append(reader((text,), path=pathlib.Path(name), select=("J1",),
+                                      table=_TABLE))
+            except PindefError as exc:
+                outcome.append(str(exc))
+        assert outcome[1] == outcome[0], (signals, parts)
+        said.append(outcome[0])
+    # Not vacuous: a pin, a hop through a resistor, a net naming no pin, a
+    # trace that stops, and a refusal are all among them.
+    found = [one for answer in said if isinstance(answer, dict) for one in answer.values()]
+    assert any(one.pin for one in found) and any(one.pin is None for one in found)
+    assert any(" -> R1 (1k) -> " in one.via for one in found)
+    assert {} in said and any(isinstance(answer, str) for answer in said)
+
+
+def test_a_kicad_pin_is_one_contact_however_many_pads_carry_its_number():
+    """The chip's pin 1 as two pads numbered 1, as a split exposed pad is,
+    and the resistor with an unnumbered paste pad: still one resistor, and
+    its far net still holds it and one chip pin. Counted by pad, the far
+    net would hold three contacts and the resistor three pads, and the
+    trace would stop at both."""
+    signals = {"TX": ["J1.1", "R1.1"], "N1": ["R1.2", "U1.1"]}
+    text = _kicad_traced_board(signals, {"R1": (2, "1k")})
+    pin, paste = ('(pad "1" smd rect (at 1 0) (size 1 1) (layers "*.Cu") (net "N1"))',
+                  '(pad "" smd rect (at 0 0) (size 1 1) (layers "F.Paste"))')
+    value = '(property "Value" "1k") '
+    assert text.count(pin) == 1 and text.count(value) == 1
+    for board in (text.replace(pin, pin + pin), text.replace(value, value + paste)):
+        (found,) = pindefs.read_kicad_traced(
+            (board,), path=pathlib.Path("probe.kicad_pcb"), select=("J1",),
+            table=_TABLE).values()
+        assert found.via == "TX -> R1 (1k) -> U1 pad 1 = GPIO4 (this test's own table)"
+
+
+def test_a_kicad_number_on_two_nets_is_refused():
+    """One number is one pin, and one pin is on one net: a second pad 1 on
+    another net, or on none, is refused naming the nets."""
+    text = _kicad_traced_board({"TX": ["J1.1", "U1.1"]})
+    pin = '(pad "1" smd rect (at 1 0) (size 1 1) (layers "*.Cu") (net "TX"))'
+    assert text.count(pin) == 1
+    for twin, nets in (('(net "RX"))', "['RX', 'TX']"), (")", "['', 'TX']")):
+        with pytest.raises(PindefError, match=re.escape(
+                f"probe.kicad_pcb: U1 numbers pads alike and puts them on different "
+                f"nets, {{'1': {nets}}}")):
+            _kicad_traced(text.replace(pin, pin + pin.replace('(net "TX"))', twin)))
+
+
+def test_a_kicad_header_and_chip_are_each_exactly_one_footprint():
+    """A reference no footprint has, or two share, and a chip placed as the
+    table's footprint and value by none or by two: each refused, naming the
+    file. A footprint of the chip's name with another value is not the chip."""
+    text = _kicad_traced_board({"TX": ["J1.1", "U1.1"]})
+    assert _kicad_traced(_kicad_traced_board({"TX": ["J1.1", "U1.1"]},
+                                             {"U2": (5, "OTHER")})) == {"TX": "GPIO4"}
+    with pytest.raises(PindefError, match="0 footprints in probe.kicad_pcb have the "
+                                          "reference 'J9'"):
+        _kicad_traced(text, select=("J9",))
+    with pytest.raises(PindefError, match="2 footprints in probe.kicad_pcb have the "
+                                          "reference 'J1'"):
+        _kicad_traced(text.replace('"Reference" "U1"', '"Reference" "J1"'))
+    for parts, count in (({"U1": (5, "OTHER")}, 0), ({"U2": (5, "PART")}, 2)):
+        with pytest.raises(PindefError, match=f"{count} footprints in probe.kicad_pcb "
+                                              f"are placed as 'QFN', value 'PART'"):
+            _kicad_traced(_kicad_traced_board({"TX": ["J1.1"]}, parts))
+    with pytest.raises(PindefError, match="probe.kicad_pcb: expected '\\('"):
+        _kicad_traced("not a board")
+
+
+def test_a_row_whose_board_file_no_reader_traces_is_refused():
+    row = next(row for row in board_manifest.ROWS if row.pin_table is not None)
+    with pytest.raises(PindefError, match=r"Nowhere: board\.kicad_mod is not traced by "
+                                          r"anything here; a row's own CAD is traced from "
+                                          r"\['\.brd', '\.kicad_pcb'\]"):
+        pindefs.manifest_board(dataclasses.replace(row, board="Nowhere",
+                                                   cad="board.kicad_mod"))
 
 
 # --- arduino-pico, read through its preprocessor (OH-181) ---------------------
