@@ -163,6 +163,14 @@ the fetched file reads so, and `source.licence_evidence` quotes it. Each
 pad the pad's net reaches in Adafruit's board file, read against Espressif's
 datasheet pin table, as 2c; `chip_pin_from` names which.
 
+`webui/boards/Adafruit KB2040.json` is written the same way, out of
+`Adafruit KB2040.brd`, with the same `license.txt`. Its `chip_pin` values
+come from arduino-pico's `variants/adafruit_kb2040/` and the
+`variants/generic/common.h` it includes (LGPL-2.1-or-later), read through
+the preprocessor, or from the RP2040 pad the pad's net reaches in Adafruit's
+board file, read against Raspberry Pi's RP2040 datasheet pin table, whose
+PDF `pindefs.packages` names by address and sha256.
+
 **Position and risk:** as 2c. The pads and labels can be re-read from the
 drawing `source.file` names, which pads are one pin from the schematic the
 board's row names (Adafruit's own, fetched beside the board file), and each
@@ -192,6 +200,26 @@ the pad of the ESP32-C6-MINI-1 each net reaches.
 
 **Position and risk:** as 2c. Which pads are one pin is read from each
 board's `.sch`, fetched beside its board file.
+
+### 2f. Board pad map from PCBCUPID's KiCad file
+
+`webui/boards/PCBCUPID Glyph Mini RP2040.json` is written by
+`tools/board_manifest.py` out of PCBCUPID's own KiCad board file,
+`glyph-mini-rp2040.kicad_pcb`, fetched into `third_party/` and not tracked
+here. Its repository carries `LICENSE`, the MIT licence;
+`tools/board_sources.py` records it, the tool refuses the row unless the
+fetched file reads so, and `source.licence_evidence` quotes it. The pads are
+the through-hole pads of the footprints the row names, placed by the
+footprints' own positions and turns, and each is labelled with its net. Each
+`chip_pin` comes from the RP2040 pad the pad's net reaches in that board
+file, read against Raspberry Pi's RP2040 datasheet pin table, as for the
+KB2040 in 2d; the row's arduino-pico variant,
+`variants/pcbcupid_glyph_mini_2040/`, names no label a pad carries, and
+`chip_pin_from` names which source named each pin.
+
+**Position and risk:** as 2c. Which pads are one pin is read from the board
+file itself: KiCad joins a footprint's pads to its pins by number, so no
+schematic is needed.
 
 ---
 
