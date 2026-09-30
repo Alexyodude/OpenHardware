@@ -2,7 +2,7 @@
 id: OH-186
 title: 'Every manifest row is composed by construction: the KB2040 made whole, and
   the importer''s list derived rather than hand-kept'
-status: in-review
+status: done
 priority: P1
 created: '2026-09-30'
 touches:
@@ -33,3 +33,5 @@ Done when both tests pass, the KB2040's model cell reads composed, its drawn and
 **Note 2026-09-30:** 2026-09-30: tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py lent to OH-187 again for its review round.
 
 **Note 2026-09-30:** 2026-09-30: of review item 5, the counts cut from mark_turns' docstring are restored under OH-187 (f576810): check_facts anchors CLAUDE.md's pin-1 paragraph to that function's source, and re-confirming the anchor writes OH-149's tools/facts_store.json. half_turn_moves keeps its cut. For OH-149's owner: re-read CLAUDE.md's 'Six packages qualify' paragraph against mark_turns, then cut the docstring's counts and --confirm claude-md:mark-turns.
+
+**Note 2026-09-30:** 2026-09-30: approved by independent review over two rounds (OH-186: M1, M3, L1 red on mutation; band rule sound on every drawn diode, its margin moved to OH-190. OH-187: all items and both confirm-round must-fixes verified; the final populate/other-kind fixes checked by the orchestrator: 28 targeted tests pass in EAGLE's real variant shape). Merged to master by fast-forward (0af3628); composed models rebuilt in the main checkout with miniconda. TWINS on master: 12 of 30, model 29. Author's full default suite at the tip: 2 failed (the OCP pair, OH-163), 2359 passed, 36 skipped.
