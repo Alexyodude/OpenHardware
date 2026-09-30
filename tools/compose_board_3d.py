@@ -1153,6 +1153,55 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "a capacitor on the land Adafruit's own description calls 0603 "
         "MicroPitch: two pads 1.52 mm apart, and the 1.6 x 0.8 mm chip.",
     ),
+    # --- the SparkFun Pro Micro ESP32-C3 and Qwiic Pocket ESP32-C6, OH-189 ----
+    #
+    # Their rows in tools/board_manifest.py composed both by construction,
+    # and these are the packages no row above already drew. Each span was
+    # measured with `eagle.Element.pad_extent` on 2026-09-30.
+    Component(
+        "0402-TIGHT", "Resistor_SMD", "R_0402_1005Metric",
+        "a resistor on SparkFun's tight 0402 land: two pads 1.00 mm apart, "
+        "and the 1.0 x 0.5 mm resistor.",
+    ),
+    Component(
+        "0402-TIGHT", "Capacitor_SMD", "C_0402_1005Metric",
+        "a capacitor on the same 1.00 mm 0402 land, and the 1.0 x 0.5 mm "
+        "chip.",
+    ),
+    Component(
+        "ESP32-C3-MINI-1", "espressif", "ESP32-C3-MINI-1",
+        "SparkFun's ESP32-C3-MINI-1 land: 61 pads spanning 11.90 x 9.90 mm "
+        "in the package's own frame, the count and span of Espressif's own "
+        "footprint for the module. KiCad's RF_Module holds no ESP32-C3-MINI-1, "
+        "listed 2026-09-30 -- its C3 is the WROOM-02 -- so this is "
+        "Espressif's STEP and footprint, as for the C6 modules above. Placed "
+        "by `pads_origin`; turned half round, SparkFun's drawing of the body "
+        "misses Espressif's by more than 5 mm, which `silk_miss` refuses.",
+        step=f"{ESPRESSIF_KICAD}/3dmodels/espressif.3dshapes/ESP32-C3-MINI-1.STEP",
+        footprint=(f"{ESPRESSIF_KICAD}/footprints/Espressif.pretty/"
+                   f"ESP32-C3-MINI-1.kicad_mod"),
+    ),
+    Component(
+        "ESP32-C6-MINI-1", "espressif", "ESP32-C6-MINI-1",
+        "SparkFun's own land for the ESP32-C6-MINI-1, under the module's "
+        "name: 61 pads spanning 11.90 x 9.90 mm, the count and span of "
+        "Espressif's footprint, and the model the Feather's PICO-MINI land "
+        "draws -- one part, one drawing. Placed by `pads_origin`, on the "
+        "underside where the board file mirrors it.",
+        step=f"{ESPRESSIF_KICAD}/3dmodels/espressif.3dshapes/ESP32-C6-MINI-1.STEP",
+        footprint=(f"{ESPRESSIF_KICAD}/footprints/Espressif.pretty/"
+                   f"ESP32-C6-MINI-1.kicad_mod"),
+    ),
+    Component(
+        "JST04_1MM_VERT", "Connector_JST",
+        "JST_SH_BM04B-SRSS-TB_1x04-1MP_P1.00mm_Vertical",
+        "SparkFun's vertical Qwiic port, by its own package description: "
+        "four 1 mm-pitch contacts and two mounting pads 5.60 mm apart, the "
+        "contacts 2.43 mm from the mounting pads' line where KiCad's vertical "
+        "SH, BM04B-SRSS-TB, puts them 2.53 mm. Pin 1 is at -x, on the side "
+        "away from the mounting pads, in both, so no turn -- a turn nothing "
+        "here can check, and the composer counts it.",
+    ),
 )
 
 #: Packages that are on the board, are worth seeing, and are NOT drawn -- with
@@ -1364,8 +1413,9 @@ ABSENT: dict[str, str] = {
         "KiCad library was searched: there is no body to look for."
     ),
     "FIDUCIAL-MICRO": (
-        "four fiducials on the Thing Plus, each a bare 0.635 mm copper "
-        "pad. No KiCad library was searched: there is no body to look for."
+        "SparkFun's fiducial, a bare 0.635 mm copper pad the pick-and-place "
+        "camera sights on. No KiCad library was searched: there is no body "
+        "to look for."
     ),
     "FIDUCIAL_1MM": (
         "Adafruit's fiducial, a bare 1.0 mm copper pad the pick-and-place "
@@ -1373,10 +1423,9 @@ ABSENT: dict[str, str] = {
         "to look for."
     ),
     "SMT-JUMPER_2_NC_TRACE_SILK": (
-        "five solder jumpers on the Thing Plus -- SHLD, CHG, PWR, SD_DET, "
-        "ALRT -- two 0.66 x 1.27 mm pads each, closed by a trace a person "
-        "may cut. Copper, drawn as copper. No KiCad library was searched: "
-        "there is no body to look for."
+        "a solder jumper of SparkFun's: two 0.66 x 1.27 mm pads, closed by a "
+        "trace a person may cut. Copper, drawn as copper. No KiCad library "
+        "was searched: there is no body to look for."
     ),
     "SMT-JUMPER_2_NO_SILK": (
         "RGB on the Thing Plus: two 0.635 x 1.27 mm pads a person may bridge "
@@ -1389,8 +1438,9 @@ ABSENT: dict[str, str] = {
         "body to look for."
     ),
     "SMT-JUMPER_3_2-NC_TRACE_SILK": (
-        "I2C on the Thing Plus: three 0.66 x 1.27 mm pads, the pull-ups' "
-        "jumper. No KiCad library was searched: there is no body to look for."
+        "a three-pad solder jumper of SparkFun's: three 0.66 x 1.27 mm pads, "
+        "each outer pad joined to the middle one by a trace a person may "
+        "cut. No KiCad library was searched: there is no body to look for."
     ),
     "COMBO-JUMPER_2_NC_TRACE": (
         "MEAS on the Thing Plus: two 0.635 x 1.27 mm pads joined by a trace "
@@ -1415,6 +1465,35 @@ ABSENT: dict[str, str] = {
     "TESTPOINT_MINUS_1X3MM": (
         "GND on the QT Py, the other bare 0.5 mm battery pad. No KiCad "
         "library was searched: there is no body to look for."
+    ),
+    # --- OH-189: the Pro Micro's and the Pocket's copper ----------------------
+    "1X09_CASTELLATED": (
+        "**a board's own castellated edge**: nine plated half-holes on "
+        "2.54 mm, 20.32 mm long, cut by the edge, with a smaller plated hole "
+        "1.57 mm inboard of each. Copper and the board's edge, drawn by the "
+        "copper pass. No KiCad library was searched: there is no body to "
+        "look for."
+    ),
+    "1X06_NO_SILK": (
+        "six plated holes on 2.54 mm, 12.70 mm long, which SparkFun give no "
+        "PROD_ID, where every part they fit carries one -- so the file places "
+        "the holes and no header, and the holes are drawn as copper. No KiCad "
+        "library was searched: there is no body to look for."
+    ),
+    "USB-SOLDER-PADS": (
+        "four 3.0 x 0.9 mm pads, VBUS, D+, D- and GND, for a USB cable's "
+        "wires soldered straight to the board. Copper, drawn as copper. No "
+        "KiCad library was searched: there is no body to look for."
+    ),
+    "PAD.03X.05": (
+        "a test point, a bare 1.27 mm round pad by SparkFun's own "
+        "description of it. No KiCad library was searched: there is no body "
+        "to look for."
+    ),
+    "PAD.03X.03": (
+        "a test point, a bare 0.76 mm round pad by SparkFun's own "
+        "description of it. No KiCad library was searched: there is no body "
+        "to look for."
     ),
     "MOUNTINGHOLE_2.5_PLATED": (
         "two mounting holes on the Feather, 2.5 mm drilled in a 3.2 mm "
@@ -1441,9 +1520,9 @@ ABSENT: dict[str, str] = {
     # And the parts: each names what was listed and what the nearest thing
     # in it was, so the next reader re-runs the search rather than retakes it.
     "USB-C-16P_4LAYER-PADS": (
-        "J2 on the Thing Plus, the USB-C socket: twelve contact pads and "
-        "four shell tabs spanning 8.64 x 4.76 mm. SparkFun's file names no "
-        "maker for it -- only their own PROD_ID, CONN-14122 -- and KiCad's "
+        "SparkFun's USB-C socket: twelve contact pads and four shell tabs "
+        "spanning 8.64 x 4.76 mm. SparkFun's files name no maker for it -- "
+        "only their own PROD_ID, CONN-14122 -- and KiCad's "
         "Connector_USB, 12 models listed 2026-09-29, holds two 16-pin "
         "receptacles, GCT's USB4105 and Amphenol's 12401610E4-2A, each a "
         "named part of its own length. Drawing either would put a maker's "
@@ -1459,9 +1538,9 @@ ABSENT: dict[str, str] = {
         "would be a different maker's part under Adafruit's name for this one."
     ),
     "JST-2-SMD": (
-        "J3 on the Thing Plus, the battery socket, SparkFun PRT-08612: two "
-        "1.0 x 4.6 mm contact pads 2.0 mm apart and two mounting pads, a "
-        "surface-mount JST PH. KiCad's Connector_JST holds 30 PH models, "
+        "SparkFun's battery socket, a surface-mount JST PH: two "
+        "1.0 x 4.6 mm contact pads 2.0 mm apart and two mounting pads. "
+        "KiCad's Connector_JST holds 30 PH models, "
         "listed 2026-09-29, and every one is the through-hole -K; `confirm` "
         "refuses a legged model on these pads anyway."
     ),
@@ -1874,6 +1953,42 @@ MANIFEST_STATED: dict[str, dict[str, object]] = {
             "SparkFun's own board file, which states it twice: a note on its "
             "tDocu layer reading 'Soldermask: Red', and a manufacturing-"
             "preview solder mask of 0xC8FF0000 -- red at alpha 200/255. "
+            "Drawn, A JUDGEMENT, the way that preview draws mask over bare "
+            "laminate: 0xFF0000 at that alpha over the file's own substrate "
+            "colour, 0x786E46, which `preview_mask` computes from those "
+            "numbers. That 0xC8FF0000 is a choice rather than a default is "
+            "a judgement too: the Arduino Uno's file carries 0xC8008000 under "
+            "a board this table draws navy, and that is taken for the value "
+            "EAGLE leaves when nobody sets one"
+        ),
+    },
+    "SparkFun Pro Micro ESP32-C3": {
+        # Its layer-51 note reads "Board thickness: 0.8mm" and "Soldermask:
+        # Red": half the Thing Plus's board, the same red named.
+        "thickness_mm": 0.8,
+        "colour": FROM_PREVIEW,
+        "colour_source": (
+            "SparkFun's own board file, which states it twice: a note on its "
+            "tDocu layer reading 'Soldermask: Red', and a manufacturing-"
+            "preview solder mask of 0xC8AA0000 -- a darker red, 0xAA0000, at "
+            "alpha 200/255. Drawn, A JUDGEMENT, the way that preview draws "
+            "mask over bare laminate: 0xAA0000 at that alpha over the file's "
+            "own substrate colour, 0x786E46, which `preview_mask` computes "
+            "from those numbers. That 0xC8AA0000 is a choice rather than a "
+            "default is a judgement too: the Arduino Uno's file carries "
+            "0xC8008000 under a board this table draws navy, and that is "
+            "taken for the value EAGLE leaves when nobody sets one"
+        ),
+    },
+    "SparkFun Qwiic Pocket ESP32-C6": {
+        # Its layer-51 note reads "Board thickness: 1.6mm" and "Soldermask:
+        # Red".
+        "thickness_mm": 1.6,
+        "colour": FROM_PREVIEW,
+        "colour_source": (
+            "SparkFun's own board file, which states it twice: a note on its "
+            "tDocu layer reading 'Soldermask: Red', and a manufacturing-"
+            "preview solder mask of 0xC8FF0000 -- 0xFF0000 at alpha 200/255. "
             "Drawn, A JUDGEMENT, the way that preview draws mask over bare "
             "laminate: 0xFF0000 at that alpha over the file's own substrate "
             "colour, 0x786E46, which `preview_mask` computes from those "
