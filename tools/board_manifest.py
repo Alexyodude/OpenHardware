@@ -493,6 +493,11 @@ ROWS = (
              "no ESP32-C5 pin is on this net: the vendor's board file puts it on "
              "this pad and pad 2 of the jumper JP11 (Jumper_2_NO, value DO), whose "
              "pad 1 is on LED_DO with the DOUT of the WS2812B D2"),
+            ("EN",
+             "the enable of the board's regulator, not a pin of the ESP32-C5: the "
+             "vendor's board file puts the net EN on this pad, U2's `EN` (an "
+             "RT9080-3.3, whose `VOUT` is the 3.3V net) and R4 (100k), whose other "
+             "pad is on VIN, and on no pad of U1"),
         ),
         pin_table=ESP32_C5_WROOM_1,
     ),
@@ -583,16 +588,20 @@ def licence_evidence(entry: Row) -> str:
             )
         path = board_sources.source(entry.source).dest(REPO) / licence.file
         text = " ".join(path.read_text(encoding="utf-8", errors="replace").split())
-        if " ".join(licence.quote.split()) not in text:
-            raise ManifestError(
-                f"{entry.board}: {path.relative_to(REPO).as_posix()} does not "
-                f"read {licence.quote!r}"
-            )
+        for words in (licence.quote, licence.notice):
+            if " ".join(words.split()) not in text:
+                raise ManifestError(
+                    f"{entry.board}: {path.relative_to(REPO).as_posix()} does not "
+                    f"read {words!r}"
+                )
         # A README asserting a licence is not the licence (OH-194), and the
         # board file says which it rests on.
         graded = (f"; graded {licence.evidence.label}: {licence.cite}"
                   if licence.evidence is board_sources.Evidence.STATED else "")
-        return f"the repository's {licence.file} reads {licence.quote!r}{graded}"
+        # Text the file asks any redistribution to carry is carried whole.
+        notice = (f"; it asks that any redistribution include its text, which "
+                  f"reads in full {licence.notice!r}" if licence.notice else "")
+        return f"the repository's {licence.file} reads {licence.quote!r}{graded}{notice}"
     element_name, text = entry.licence_statement
     board = ET.parse(cad_path(entry)).getroot().find("drawing/board")
     element = board.find(f"elements/element[@name='{element_name}']")

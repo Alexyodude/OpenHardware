@@ -411,7 +411,15 @@ def test_the_licence_is_what_the_vendors_own_files_state():
         graded = row.licence_statement is None and licence.evidence is board_sources.Evidence.STATED
         assert ("; graded stated: " in evidence) == graded, (row.board, evidence)
         stated += [row.board] if graded else []
+        # A README that asks for its text in any redistribution has it, whole.
+        if row.licence_statement is None and licence.notice:
+            assert evidence.endswith(f"reads in full {licence.notice!r}"), row.board
+            assert licence.notice.endswith(
+                "All text above must be included in any redistribution"), row.board
     assert "PCBCUPID Glyph C3" in stated
+    assert [row.board for row in ROWS if row.licence_statement is None
+            and board_sources.source(row.source).licence.notice] == [
+        "PCBCUPID Glyph C3", "PCBCUPID Glyph C6"]
 
 
 def test_a_row_whose_licence_is_stated_nowhere_is_refused():
@@ -443,6 +451,17 @@ def test_a_licence_file_that_does_not_read_the_registrys_words_is_refused(monkey
     with pytest.raises(ManifestError) as caught:
         board_manifest.check(row)
     assert "does not read 'Attribution-ShareAlike 4.0 International'" in str(caught.value)
+
+
+def test_a_licence_file_that_does_not_read_its_notice_is_refused(monkeypatch):
+    """The text a README asks any redistribution to carry is checked against
+    the README as the licence line is (OH-194)."""
+    row = row_named("PCBCUPID Glyph C3")
+    _fetched(row)
+    _registry_with(monkeypatch, row.source, notice="All text below may be dropped")
+    with pytest.raises(ManifestError) as caught:
+        board_manifest.check(row)
+    assert "does not read 'All text below may be dropped'" in str(caught.value)
 
 
 def test_a_licence_file_that_is_not_on_disk_is_refused_naming_it(tmp_path, monkeypatch):
@@ -870,11 +889,13 @@ def test_a_net_renamed_for_another_gpio_is_refused_on_the_thing_plus_c5():
         _trace(row, text.replace('"IO8{slash}PICO"', '"IO18{slash}PICO"'))
 
 
-def test_the_thing_plus_c5s_jumpered_pad_is_its_leds_output_behind_an_open_jumper():
+def test_the_thing_plus_c5s_jumpered_and_enable_pads_are_what_its_file_draws():
     """`Net-(JP11-B)`'s reason, read off the board file: the net holds this
     header pad and pad 2 of JP11, a Jumper_2_NO valued DO, whose pad 1 is on
     LED_DO with pad 1 of D2, a WS2812B whose symbol names that pin DOUT; no
-    pad of the module is on either net."""
+    pad of the module is on either net. And `EN`'s: the net holds this pad,
+    U2's pin its symbol names EN -- an RT9080-3.3 whose VOUT is on 3.3V --
+    and R4 (100k), whose other pad is on VIN, and no pad of U1."""
     row = row_named("SparkFun Thing Plus ESP32-C5")
     _fetched(row)
     tree = kicad.parse_sexp(board_manifest.cad_path(row).read_text(encoding="utf-8"))
@@ -902,6 +923,14 @@ def test_the_thing_plus_c5s_jumpered_pad_is_its_leds_output_behind_an_open_jumpe
     why = dict(row.reasons)["Net-(JP11-B)"]
     for words in ("pad 2 of the jumper JP11 (Jumper_2_NO, value DO)",
                   "pad 1 is on LED_DO with the DOUT of the WS2812B D2"):
+        assert words in why, words
+    assert on("EN") == {("U3", "11"), ("U2", "3"), ("R4", "2")}
+    assert placed["U2"][1] == "RT9080-3.3" and placed["U2"][2]["3"] == ("EN", "EN")
+    assert placed["U2"][2]["5"] == ("3.3V", "VOUT")
+    assert placed["R4"][1] == "100k" and placed["R4"][2]["1"][0] == "VIN"
+    why = dict(row.reasons)["EN"]
+    for words in ("U2's `EN` (an RT9080-3.3, whose `VOUT` is the 3.3V net)",
+                  "R4 (100k), whose other pad is on VIN", "on no pad of U1"):
         assert words in why, words
     # The module's nine central pads are all named EPAD, the page's 29.
     epad = [pad for pad in _placed(row, "U1").pads if pad.number == "EPAD"]
@@ -988,6 +1017,10 @@ def test_a_rows_variant_may_number_no_d_pin_only_where_the_row_opts_in_no_label(
         import_pindefs.read_row_pins(("#include <stdint.h>\n",))
     with pytest.raises(import_pindefs.PindefError, match="no D<n> constants"):
         import_pindefs.read_flat_pins((text,))
+    # No label opted in and a D<n> numbered: read as read_flat_pins reads it.
+    numbered = text + "static const uint8_t D0 = 20;\n"
+    assert import_pindefs.read_row_pins((numbered,)) == import_pindefs.read_flat_pins(
+        (numbered,)) == {"D0": import_pindefs.ChipPin("GPIO20", 20)}
 
 
 def test_a_header_pad_moved_onto_a_pad_the_table_leaves_out_is_refused():
@@ -1027,6 +1060,32 @@ def test_a_variant_and_a_trace_that_disagree_leave_the_pad_disputed(monkeypatch)
         assert sda["disputed_by"] == [
             {"chip_pin": "GPIO19", "chip_pin_from": [row.package]},
             {"chip_pin": traced, "chip_pin_from": [row.source]}]
+
+
+def test_a_pad_the_variant_names_and_the_copper_does_not_reach_is_refused(tmp_path):
+    """A row's copper is traced for every pad, so the variant's word alone
+    is not a pin (OH-194's review). The Thing Plus ESP32-C5's U3 pad 3 is on
+    a net of its own; labelled `Z{slash}SDA`, its variant's `SDA` names
+    GPIO23 and the trace reaches no pad of the chip. The pad stays null and
+    `disputed_by` names both; every other pad of the board is as committed."""
+    row = row_named("SparkFun Thing Plus ESP32-C5")
+    _fetched(row)
+    committed = _committed(row)
+    moved = json.loads(json.dumps(committed))
+    (pad,) = [pad for pad in moved["pads"] if pad["label"] == "unconnected-(U3-GPIO6-Pad3)"]
+    pad["label"] = "Z{slash}SDA"
+    (tmp_path / f"{row.board}.json").write_text(json.dumps(moved), encoding="utf-8")
+    report = {entry["label"]: entry for entry in import_pindefs.board_report(
+        row.board, boards_dir=tmp_path)["pads"]}
+    refused = report["Z{slash}SDA"]
+    assert (refused["chip_pin"], refused["index"], refused["reason"]) == (
+        None, None, import_pindefs.DISPUTED)
+    assert refused["disputed_by"] == [
+        {"chip_pin": "GPIO23", "chip_pin_from": [row.package]},
+        {"chip_pin": None, "chip_pin_from": [row.source]}]
+    # The real SDA pad, on the copper, still names GPIO23 from both.
+    assert report["IO23{slash}SDA"]["chip_pin"] == "GPIO23"
+    assert report["IO23{slash}SDA"]["chip_pin_from"] == sorted([row.package, row.source])
 
 
 def test_a_regenerated_pad_keeps_nothing_from_an_earlier_run(tmp_path):

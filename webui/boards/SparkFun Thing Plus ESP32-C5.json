@@ -307,7 +307,7 @@
       "pin": null,
       "chip_pin": null,
       "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label, and in the vendor's board file this pad's net reaches no pad of the chip, directly or through one resistor in series, whose other net holds only that resistor and the chip's pad",
+      "why_null": "the enable of the board's regulator, not a pin of the ESP32-C5: the vendor's board file puts the net EN on this pad, U2's `EN` (an RT9080-3.3, whose `VOUT` is the 3.3V net) and R4 (100k), whose other pad is on VIN, and on no pad of U1",
       "x": 18.2,
       "y": 262.0,
       "group": "U3",

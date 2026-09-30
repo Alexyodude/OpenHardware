@@ -231,7 +231,9 @@ Neither repository carries a licence file; each `README.md` links the
 CC BY-SA 4.0 deed, and `tools/board_sources.py` records that link graded
 `stated`, not `opened`: a README asserting a licence is not the licence.
 The tool refuses a row unless the fetched README reads so, and
-`source.licence_evidence` quotes it and says it is stated. Each `chip_pin`
+`source.licence_evidence` quotes it, says it is stated, and carries the
+README's whole text, which ends "All text above must be included in any
+redistribution". Each `chip_pin`
 comes from arduino-esp32's `variants/Pcbcupid_GLYPH_C3/` or
 `variants/Pcbcupid_GLYPH_C6/` (LGPL-2.1-or-later), or from the pad of the
 ESP32-C3-MINI-1 or ESP32-C6-MINI-1 the pad's net reaches in PCBCUPID's
@@ -246,7 +248,11 @@ repository's `LICENSE` is the GPL-3.0 text that README gives the software,
 so the hardware's licence is recorded graded `stated`, as above. Each
 `chip_pin` comes from the pad of the ESP32-C3-MINI-1 the pad's net reaches;
 the row's variant, `variants/esp32c3-devkit-lipo/`, names no label a pad
-carries.
+carries. The pins hold for revisions B, C and D alike -- in each, every EXT1
+and EXT2 pad reaches the same pad of the module, traced 2026-09-30 in all
+three files, though only D's is fetched -- and the labels are revision D's
+nets, the revision Olimex's `Hardware-revision-changes.txt` calls
+"Preliminary, unreleased".
 
 **Position and risk:** as 2f, with one more: the licence rests on the
 vendor's README, which `source.licence_evidence` says.
