@@ -2,11 +2,13 @@
 id: OH-191
 title: The Uno's fuse and varistors are drawn as capacitors; its own schematic says
   what they are
-status: in-review
+status: in-progress
 priority: P2
 created: '2026-09-30'
 touches:
 - docs/tickets/OH-191-*
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
 ---
 
 Found by OH-187's review (2026-09-30). The composed Arduino Uno draws F1, its fuse, with a C_1812 capacitor model, and Z1 and Z2, its varistors, with C_0603 capacitor models. The pads land, so every placement check passes, and the drawn list names parts they are not: the false-part-name rule CLAUDE.md gives for the QFN-56 near miss.
