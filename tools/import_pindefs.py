@@ -2852,9 +2852,26 @@ def board_report(
     # what the trace reached where it named none. The XIAO files are left as
     # they are.
     if name in MANIFEST:
+        traced_by = sorted({source.package for source in board.sources
+                            if PACKAGES[source.package].pin_table})
         for pad, entry in zip(pads, entries, strict=True):
-            if pad["chip_pin"] is not None:
-                pad["chip_pin_from"] = sorted({claim.package for claim in entry.claims})
+            named_by = sorted({claim.package for claim in entry.claims})
+            if pad["chip_pin"] is not None and traced_by and not set(named_by) & set(traced_by):
+                # A row's own copper is traced for every pad, so a pin its
+                # variant names on a pad whose net reaches no pad of the chip
+                # is the two sources disagreeing, not an answer: SparkFun's
+                # `IO23{slash}SDA` renamed `Z{slash}SDA` on a pad wired to
+                # nothing would otherwise read GPIO23 from the variant alone
+                # (OH-194).
+                pad["disputed"] = [
+                    {"chip_pin": pad["chip_pin"],
+                     "sources": [claim.source for claim in entry.claims]},
+                    {"chip_pin": None, "sources": []}]
+                pad["disputed_by"] = [{"chip_pin": pad["chip_pin"], "chip_pin_from": named_by},
+                                      {"chip_pin": None, "chip_pin_from": traced_by}]
+                pad.update(chip_pin=None, index=None, reason=DISPUTED)
+            elif pad["chip_pin"] is not None:
+                pad["chip_pin_from"] = named_by
             elif "disputed" in pad:
                 pad["disputed_by"] = [
                     {"chip_pin": rival["chip_pin"], "chip_pin_from": sorted(
