@@ -9,6 +9,7 @@ touches:
 - docs/tickets/OH-195-*
 - tools/compose_board_3d.py
 - tests/rules/test_compose_board_3d.py
+- tools/import_3d_model.py
 ---
 
 Part of OH-174. The composer refuses a manifest row whose board file is a `.kicad_pcb`, by name (OH-180). The PCBCUPID Glyph Mini RP2040 (OH-192) is such a row, and OH-194 adds more; their model cells read `footprint:no source`, so none of them can hold all four layers.
