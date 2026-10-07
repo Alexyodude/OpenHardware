@@ -1465,6 +1465,7 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "D1, the DT1042-04SO ESD array by value: SparkFun's SOT-23-6 land, "
         "six pads spanning 2.60 x 1.90 mm laid out as KiCad's own, and the "
         "model named SOT-23-6 it places.",
+        vendor_library="SparkFun-Semiconductor-Standard",
     ),
     Component(
         "SOT-583-8", "Package_TO_SOT_SMD", "SOT-583-8",
@@ -1475,6 +1476,7 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "eight-lead SOT-583 standing for it is a JUDGEMENT the vendor's own "
         "copper makes.",
         stands_for=("SOT-583-3",),
+        vendor_library="SparkFun-Semiconductor-Standard",
     ),
     Component(
         "DFN-8_2x2mm_P0.5mm_EP1.2x0.8mm", "Package_DFN_QFN",
@@ -1484,6 +1486,7 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "them, and the model it places. Their EAGLE DFN-8 row draws the same "
         "chip with the EP0.6x1.2 model, chosen by the land's exposed pad "
         "where nothing stated one; here the footprint states this one.",
+        vendor_library="SparkFun-Semiconductor-Standard",
     ),
     Component(
         "LED_0603_1608Metric_Red", "LED_SMD", "LED_0603_1608Metric",

@@ -5873,6 +5873,27 @@ def test_a_sot_on_a_kicad_row_is_turned_so_its_pin_one_is_kicads():
     assert checked, "no SOT on any KiCad row"
 
 
+def test_sparkfuns_kicad_lands_take_their_rows_only_from_sparkfuns_kicad_library():
+    """**A row written for one library's land holds for that library only**
+    (OH-195). SparkFun's KiCad SOT-23-5, SOT-23-6, SOT-583-8 and 2 x 2 mm
+    DFN-8 are laid out as KiCad's own and drawn unturned; the same names in
+    another library -- SparkFun's EAGLE SOT23-5 is one -- are other copper,
+    and a land of that name from anywhere else must not silently take this
+    row and its turn."""
+    library = "SparkFun-Semiconductor-Standard"
+    for package in ("SOT23-5", "SOT23-6", "SOT-583-8",
+                    "DFN-8_2x2mm_P0.5mm_EP1.2x0.8mm"):
+        rows = [c for c in compose.CORRESPONDENCE
+                if c.package == package and c.vendor_library == library]
+        assert len(rows) == 1, (package, rows)
+        here = eagle.Element("U1", library, package, pads=())
+        assert compose.correspondence_for(here) == rows[0], package
+        elsewhere = dataclasses.replace(here, library="SparkFun-IC-Power")
+        assert compose.correspondence_for(elsewhere) != rows[0], (
+            f"a {package} land from another library takes the row written "
+            f"for {library}'s")
+
+
 def test_the_thing_plus_c5s_qwiic_and_microsd_quote_what_their_footprints_state():
     """**A row's words about what a footprint says are read back out of it**
     (OH-195). SparkFun's file never names SM04B-SRSS-TB: J1's footprint
