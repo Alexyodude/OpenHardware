@@ -19,14 +19,20 @@
         "licence": "LGPL-2.1-or-later"
       },
       {
+        "name": "seeed-pcb",
+        "repository": "https://wiki.seeedstudio.com/ -- each XIAO's own page, as a zip",
+        "revision": "401ef70a8c1f",
+        "licence": "OSHW, per Seeed's XIAO series repository"
+      },
+      {
         "name": "zephyr",
         "repository": "https://github.com/zephyrproject-rtos/zephyr.git",
         "revision": "0a2e408",
         "licence": "Apache-2.0"
       }
     ],
-    "resolved": 11,
-    "unresolved": 13,
+    "resolved": 16,
+    "unresolved": 8,
     "disputed": 0,
     "on_board": [
       {
@@ -51,9 +57,8 @@
     {
       "label": "MTDI",
       "pin": null,
-      "chip_pin": null,
-      "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label",
+      "chip_pin": "GPIO5",
+      "chip_index": 5,
       "x": 73.3,
       "y": 35.2,
       "group": "header-top",
@@ -62,9 +67,8 @@
     {
       "label": "MTDO",
       "pin": null,
-      "chip_pin": null,
-      "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label",
+      "chip_pin": "GPIO7",
+      "chip_index": 7,
       "x": 93.6,
       "y": 35.2,
       "group": "header-top",
@@ -137,9 +141,8 @@
     {
       "label": "MTMS",
       "pin": null,
-      "chip_pin": null,
-      "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label",
+      "chip_pin": "GPIO4",
+      "chip_index": 4,
       "x": 73.3,
       "y": 75.9,
       "group": "header-top",
@@ -148,9 +151,8 @@
     {
       "label": "MTCK",
       "pin": null,
-      "chip_pin": null,
-      "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label",
+      "chip_pin": "GPIO6",
+      "chip_index": 6,
       "x": 93.6,
       "y": 75.9,
       "group": "header-top",
@@ -191,9 +193,8 @@
     {
       "label": "BOOT",
       "pin": null,
-      "chip_pin": null,
-      "chip_index": null,
-      "why_null": "no board-support package covering this board defines this label",
+      "chip_pin": "GPIO9",
+      "chip_index": 9,
       "x": 73.3,
       "y": 96.2,
       "group": "header-top",

@@ -2047,42 +2047,45 @@ _ESP32C3 = (
     zephyr_connector("xiao_esp32c3", flat_gpio),
     arduino_flat("arduino-esp32", "XIAO_ESP32C3"),
 )
-#: The JTAG pads and the boot strap. **Per board and not per chip**: Seeed's
-#: own file puts the C5's MTMS on GPIO2 and the C6's on GPIO4, which is
-#: exactly OH-26's first trap, and reading each board's own file is how this
-#: never has to be generalised. `BOOT` is here for the C5, whose net is
-#: `Boot{slash}GPIO28`, and NOT for the C6, whose net is called simply `BOOT`
-#: and names no pin -- so the C6's stays null and says so.
-_ESP32_JTAG = ("MTMS", "MTDI", "MTDO", "MTCK", "BOOT")
+#: The SMD footprint's JTAG pads. With `BOOT` they are five pads read from
+#: Seeed's own board file for each board (OH-200). Neither board's
+#: arduino-esp32 variant nor its Zephyr connector mentions any of the five, so
+#: the board file is the only source -- and it is the board's own, which is
+#: the strongest kind there is here (OH-173). **Per board and not per chip**:
+#: Seeed's own file puts the C5's MTMS on GPIO2 and the C6's on GPIO4, and
+#: the two disagree on every one of the five, which is exactly OH-26's first
+#: trap. Each board's tuple below names its own file, so neither can be
+#: copied to the other.
+#:
+#: The DIP footprint carries none of these pads and shares the tuple anyway,
+#: as `_S3_FIXED` and the MG24's traced pair already do: a label its file has
+#: no pad for resolves nothing there, and the chip's `HEADER` is the union
+#: over both files (`header_table`).
+_ESP32_JTAG = ("MTMS", "MTDI", "MTDO", "MTCK")
+#: `ESP32-C5.kicad_pcb` names all five beside their pin -- `MTMS_GPIO2_ADC1_CH1`,
+#: `MTDI_GPIO3_...`, `MTDO_GPIO5_...`, `MTCK_GPIO4_...` and
+#: `Boot{slash}GPIO28` -- so one reader of its net names answers them.
 _ESP32C5 = (
     zephyr_connector("xiao_esp32c5", flat_gpio),
     arduino_flat("arduino-esp32", "XIAO_ESP32C5", extras=("LED",)),
-    # **Seeed's own board file resolves five more pads here and it is not
-    # wired in, which is a claim and not an oversight.** `ESP32-C5.kicad_pcb`
-    # names `MTMS_GPIO2_ADC1_CH1`, `MTDI_GPIO3_...`, `MTDO_GPIO5_...`,
-    # `MTCK_GPIO4_...` and `Boot{slash}GPIO28`, all read cleanly by
-    # `read_seeed_net_names`. Adding them changes what this board's module
-    # must claim -- `test_the_board_file_and_the_module_agree_on_every_labelled_pad`
-    # holds the file and `PIN_NAMES` equal in both directions -- and
-    # `webui/boards/esp32c5.py` is OH-161's file, not OH-170's. It goes in
-    # when that ticket releases it. The C6 is the same, with its own values:
-    # MTMS 4, MTDI 5, MTDO 7, MTCK 6, which is why neither may be copied to
-    # the other.
+    seeed_pcb("ESP32-C5.kicad_pcb", _ESP32_JTAG + ("BOOT",)),
 )
+#: `ESP32-C6.kicad_pcb` names the JTAG four beside their pin --
+#: `GPIO4{slash}MTMS` and so on -- and calls the strap's net simply `BOOT`.
+#:
+#: **So BOOT needs the tracer and not the net names**, which is worth writing
+#: down because a first pass here said it was unreadable. The C6 module's own
+#: pad on that net is named `GPIO9`, so `seeed_pcb_traced` answers it where
+#: `seeed_pcb` cannot -- two readers over one file, and which one a label
+#: needs is a property of how the vendor drew that sheet rather than of the
+#: label. Each is asked only for what it answers: the net names leave `BOOT`
+#: silently, and the tracer reaches the JTAG four on pads named `MTMS` and
+#: the like, which are not pin names and so resolve nothing.
 _ESP32C6 = (
     zephyr_connector("xiao_esp32c6", flat_gpio),
     arduino_flat("arduino-esp32", "XIAO_ESP32C6", extras=("LED",)),
-    # As the C5 above: FIVE more pads are readable from `ESP32-C6.kicad_pcb`
-    # and wait on OH-161 releasing `esp32c6.py` -- MTMS 4, MTDI 5, MTDO 7,
-    # MTCK 6, and BOOT 9.
-    #
-    # **BOOT needs the tracer and not the net names**, which is worth writing
-    # down because a first pass here said it was unreadable. The C5's net is
-    # `Boot{slash}GPIO28` and states the pin; the C6's is called simply
-    # `BOOT`. But the C6 module's own pad on that net is named `GPIO9`, so
-    # `seeed_pcb_traced` answers it where `seeed_pcb` cannot -- two readers
-    # over one file, and which one a label needs is a property of how the
-    # vendor drew that sheet rather than of the label.
+    seeed_pcb("ESP32-C6.kicad_pcb", _ESP32_JTAG),
+    seeed_pcb_traced("ESP32-C6.kicad_pcb", "ESP32-C6", ("BOOT",)),
 )
 #: The ESP32-S3's JTAG and USB pads, which are the part's and not the board's
 #: (OH-170 US-1). Seeed's own variant names none of them -- it defines

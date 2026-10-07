@@ -19,6 +19,12 @@
         "licence": "LGPL-2.1-or-later"
       },
       {
+        "name": "seeed-pcb",
+        "repository": "https://wiki.seeedstudio.com/ -- each XIAO's own page, as a zip",
+        "revision": "e06eeb887f0d",
+        "licence": "OSHW, per Seeed's XIAO series repository"
+      },
+      {
         "name": "zephyr",
         "repository": "https://github.com/zephyrproject-rtos/zephyr.git",
         "revision": "0a2e408",

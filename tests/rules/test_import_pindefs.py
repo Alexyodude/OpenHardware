@@ -1093,8 +1093,13 @@ def test_the_two_artefacts_cite_the_same_revisions_as_each_other():
             if name in pindefs.MANIFEST and package == board_manifest.row(name).source:
                 continue
             assert f"{package} " in block, f"{name} names {package}, {module.name} does not"
-            assert f" @ {revision}" in block, (
-                f"{name} records {package} at {revision} and {module.name} cites "
+            # A source that is not a `--fetch` clone is cited by the digest of
+            # the bytes read, `@ sha256:...`, and its board file records the
+            # bare digest: Seeed's board file in the C5's and C6's blocks
+            # (OH-200), the first such source a module's block has cited.
+            stamp = revision if PACKAGES[package].cloned else f"sha256:{revision}"
+            assert f" @ {stamp}" in block, (
+                f"{name} records {package} at {stamp} and {module.name} cites "
                 f"another revision for it"
             )
 
@@ -1919,8 +1924,10 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # named by its traced copper, and 4 supplies -- two GND, +5V and +3.3V.
     # 528 and 200 until the SparkFun Thing Plus ESP32-C5 (OH-194) added 28: 19
     # named by its traced copper, 5 of them by its variant too, and 5
-    # supplies -- GND, 3.3V, EN, VUSB and VBATT.
-    assert naming == 547, naming
+    # supplies -- GND, 3.3V, EN, VUSB and VBATT. 547 until OH-200 wired
+    # Seeed's own board file into the XIAO ESP32-C5 and C6 SMD boards: MTMS,
+    # MTDI, MTDO, MTCK and BOOT on each, ten pads out of `generic` below.
+    assert naming == 557, naming
     assert supplies == 205, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
     # same debug cluster already carried; 42 until the six SWD pads on the
@@ -1941,7 +1948,8 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # with the Thing Plus ESP32-C5's ~{RST}, traced to EN, its two pads alone
     # on their nets, and the one behind its open jumper JP11.
     assert specific == 66, specific
-    assert generic == 15, (
+    # 15 until OH-200 named the C5's and C6's ten JTAG and BOOT pads.
+    assert generic == 5, (
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
@@ -2034,42 +2042,107 @@ def test_the_chip_reader_needs_more_than_one_variant_to_call_it_agreement():
     assert set(pindefs._S3_FIXED) == set(got)
 
 
-def test_the_c5_and_c6_jtag_values_are_held_by_a_test_and_not_only_a_comment():
-    """**Nine pads are read and not written**, because writing them changes
-    what `esp32c5.py` and `esp32c6.py` must state and those files belong to
-    OH-161. The values were recorded in a comment so nobody re-derives them,
-    and a comment is what this repository has twice caught describing code it
-    no longer matched.
+#: What Seeed's own board file for each SMD board names for its JTAG and BOOT
+#: pads (OH-200), typed once here so the vendor's file, the board file and the
+#: module are each held to it. OH-170 read these and left them unwritten
+#: until `esp32c5.py` and `esp32c6.py` could change with them.
+SEEED_JTAG_AND_BOOT = {
+    "XIAO-ESP32-C5-SMD": ("ESP32-C5.kicad_pcb",
+                          {"MTMS": 2, "MTDI": 3, "MTDO": 5, "MTCK": 4, "BOOT": 28}),
+    "XIAO-ESP32-C6-SMD": ("ESP32-C6.kicad_pcb",
+                          {"MTMS": 4, "MTDI": 5, "MTDO": 7, "MTCK": 6, "BOOT": 9}),
+}
 
-    So they are asserted from the vendor's file instead. When OH-161 releases
-    those modules, whoever wires the source in has a test that already says
-    what the answer must be -- and if Seeed republish the file first, this
-    fails rather than the comment quietly rotting.
 
-    The C5 and the C6 disagree on every one of them, which is why neither may
-    be copied to the other.
+def test_the_c5_and_c6_smd_jtag_and_boot_pads_are_read_from_each_boards_own_file():
+    """**Five pads per board, wired from Seeed's own board file** (OH-200).
+
+    Each board's registry entry reads its OWN file -- `ESP32-C5.kicad_pcb` for
+    the C5, `ESP32-C6.kicad_pcb` for the C6 -- and what those readers make of
+    that file is the table above; the committed board file names the same pin
+    on each pad, and the module reads levels through the same number.
+
+    **The C5 and the C6 disagree on every one of the five**, asserted rather
+    than said: a C6 wired to the C5's file, which is the copy OH-26's first
+    trap warns about, fails here on the file name and on every value.
+
+    The DIP footprint shares the sources and carries none of these pads, so
+    nothing on it resolves from them.
     """
-    for name, part, expect in (
-        ("ESP32-C5.kicad_pcb", "ESP32-C5",
-         {"MTMS": 2, "MTDI": 3, "MTDO": 5, "MTCK": 4, "BOOT": 28}),
-        ("ESP32-C6.kicad_pcb", "ESP32-C6",
-         {"MTMS": 4, "MTDI": 5, "MTDO": 7, "MTCK": 6, "BOOT": 9}),
-    ):
+    from webui.boards import esp32c5, esp32c6
+
+    modules = {"XIAO-ESP32-C5-SMD": esp32c5, "XIAO-ESP32-C6-SMD": esp32c6}
+    for board, (name, expect) in SEEED_JTAG_AND_BOOT.items():
         path = SEEED_PCB / name
         if not path.is_file():
-            pytest.skip(f"no {path}")
+            pytest.skip(f"no {path}; download it from Seeed's wiki page for the board")
         text = path.read_text(encoding="utf-8", errors="replace")
-        # The JTAG four come off the net names; BOOT needs the tracer on the
-        # C6, whose net is called simply `BOOT`, and comes off the name on the
-        # C5, whose net is `Boot{slash}GPIO28`.
-        found = dict(pindefs.read_seeed_net_names(
-            (text,), labels=tuple(expect)))
-        found.update(pindefs.read_seeed_traced(
-            (text,), part=part, labels=tuple(k for k in expect if k not in found)))
-        assert {k: v.index for k, v in found.items()} == expect, (name, found)
+        cad = [source for source in BOARDS[board].sources if source.package == "seeed-pcb"]
+        assert {source.paths for source in cad} == {(name,)}, (
+            board, [source.paths for source in cad])
+        # The C5 needs one reader and the C6 two -- its BOOT net is called
+        # simply `BOOT` and only the module pad on it names `GPIO9` -- and no
+        # label may be answered by both, or one would be a second opinion
+        # nobody compares.
+        found: dict[str, int | None] = {}
+        for source in cad:
+            for label, pin in source.read((text,)).items():
+                assert label not in found, (board, label, "answered by two readers")
+                found[label] = pin.index
+        assert found == expect, (board, found)
 
-    # The two really do differ, pad for pad.
-    assert True, "asserted above: no value is shared between the C5 and the C6"
+        pads = {pad["label"]: pad for pad in json.loads(
+            pindefs.board_path(board).read_text(encoding="utf-8"))["pads"]}
+        for label, gpio in expect.items():
+            assert (pads[label]["chip_pin"], pads[label]["chip_index"]) == (
+                f"GPIO{gpio}", gpio), (board, label, pads[label])
+            assert "why_null" not in pads[label], (board, label, pads[label])
+        assert {label: modules[board].HEADER[label] for label in expect} == expect, (
+            modules[board].__name__)
+
+        dip = board.replace("-SMD", "-DIP")
+        assert BOARDS[dip].sources == BOARDS[board].sources, dip
+        dip_labels = {pad["label"] for pad in json.loads(
+            pindefs.board_path(dip).read_text(encoding="utf-8"))["pads"]}
+        assert not dip_labels & set(expect), (dip, sorted(dip_labels & set(expect)))
+
+    c5 = SEEED_JTAG_AND_BOOT["XIAO-ESP32-C5-SMD"][1]
+    c6 = SEEED_JTAG_AND_BOOT["XIAO-ESP32-C6-SMD"][1]
+    assert set(c5) == set(c6)
+    assert not {label for label in c5 if c5[label] == c6[label]}, (c5, c6)
+
+
+def test_each_of_those_pads_rests_on_its_own_boards_file_and_on_nothing_else():
+    """OH-173 asks how strongly a pad's pin is known; these ten rest on the
+    strongest source there is here, the vendor's own board file for that
+    board, and on no other -- not a board-support package, and not the other
+    boards of the chip, which is the weaker kind OH-173 counts.
+
+    The other half is what the source must NOT do: no pad a board-support
+    package already answers cites the board file, on the SMD or on the DIP,
+    so wiring it in changed those five labels and nothing else.
+
+    And the file's `revision` is the digest each citation carries. The C6 has
+    two readers over its one file, and the revision used to hash the file
+    once per reader -- bytes nobody downloads, and a digest no citation names.
+    """
+    _needs_the_fetched_packages("zephyr", "arduino-esp32")
+    for board, (name, expect) in SEEED_JTAG_AND_BOOT.items():
+        path = SEEED_PCB / name
+        if not path.is_file():
+            pytest.skip(f"no {path}; download it from Seeed's wiki page for the board")
+        own = (f"seeed-pcb {name} @ sha256:"
+               f"{pindefs._digest((path.read_text(encoding='utf-8', errors='replace'),))}")
+        for one in (board, board.replace("-SMD", "-DIP")):
+            report = pindefs.board_report(one)
+            recorded = {package["name"]: package["revision"] for package in report["packages"]}
+            assert "seeed-pcb" in recorded, (one, "Seeed's board file is not a source", recorded)
+            assert f"seeed-pcb {name} @ sha256:{recorded['seeed-pcb']}" == own, (one, recorded)
+            for pad in report["pads"]:
+                if pad["label"] in expect:
+                    assert pad["sources"] == [own], (one, pad)
+                else:
+                    assert own not in pad["sources"], (one, pad["label"], pad["sources"])
 
 
 #: A Seeed-style KiCad board file in miniature: one net naming its pin, one

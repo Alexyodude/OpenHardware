@@ -247,6 +247,11 @@ LED_PIN = 8
 #: for XIAO-ESP32-C5-DIP, XIAO-ESP32-C5-SMD. A row is here only where every
 #: package that defines it names the same pin; a row only one package
 #: defines is that package's.
+#: `MTDI`, `MTDO`, `MTMS`, `MTCK`, `BOOT` are read out of the vendor's own
+#: board CAD instead, which is not a board-support package:
+#:     seeed-pcb ESP32-C5.kicad_pcb @ sha256:e06eeb887f0d
+#: `MTDI`, `MTDO`, `MTMS`, `MTCK`, `BOOT` are pads of XIAO-ESP32-C5-SMD
+#: alone; no other file here has a pad for them.
 #: `LED` has no pad: it is the board's own LED, which the Arduino variant
 #: above defines and the header does not carry.
 #: `tests/rules/test_import_pindefs.py` holds this block equal to what the
@@ -264,6 +269,11 @@ HEADER: dict[str, int] = {
     "D9": 9,
     "D10": 10,
     "LED": 27,
+    "MTDI": 3,
+    "MTDO": 5,
+    "MTMS": 2,
+    "MTCK": 4,
+    "BOOT": 28,
 }
 # --- END HEADER ---
 
