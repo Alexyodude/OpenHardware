@@ -2,9 +2,16 @@
 id: OH-200
 title: The XIAO ESP32-C5 and C6 SMD boards' JTAG and BOOT pads name their pins from
   Seeed's own board file
-status: open
+status: in-progress
 priority: P1
 created: '2026-10-08'
+touches:
+- tools/import_pindefs.py
+- tests/rules/test_import_pindefs.py
+- webui/boards/esp32c5.py
+- webui/boards/esp32c6.py
+- webui/boards/XIAO-ESP32-C5-*.json
+- webui/boards/XIAO-ESP32-C6-*.json
 ---
 
 Part of OH-174. The XIAO-ESP32-C5-SMD and XIAO-ESP32-C6-SMD hold three of the four layers on the TWINS scorecard and miss the fourth, pins, on the same five pads each: MTMS, MTDI, MTDO, MTCK and BOOT. `python tools/inventory.py` prints them as 11/16.
@@ -16,3 +23,5 @@ Wire Seeed's board file into `_ESP32C5` and `_ESP32C6` as a source for those fiv
 Starts after OH-194 merges, which claims `tools/import_pindefs.py` and `tests/rules/test_import_pindefs.py` until then. `webui/boards/esp32c5.py` and `esp32c6.py` are lent from OH-161, which nobody holds.
 
 Done when the two SMD boards' five pads each name a `chip_pin` read from Seeed's own board file, the scorecard shows both boards holding all four layers, and the comment that said these were waiting is gone.
+
+**Note 2026-10-08:** 2026-10-08: started in lane3. webui/boards/esp32c5.py and esp32c6.py are lent from OH-161 and go back when this closes.
