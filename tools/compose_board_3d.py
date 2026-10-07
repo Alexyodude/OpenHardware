@@ -1292,17 +1292,17 @@ CORRESPONDENCE: tuple[Component, ...] = (
     Component(
         "R_0603_1608Metric", "Resistor_SMD", "R_0603_1608Metric",
         "KiCad's own 0603 resistor land, by name: two pads 1.65 mm apart, "
-        "and the model the footprint places -- thirteen on each Glyph, from "
-        "KiCad's Resistor_SMD, and SparkFun's fourteen on the Thing Plus C5, "
-        "from their own copy of the land under KiCad's name. Drawn only "
-        "where the board file states a resistor.",
+        "and the model the footprint places -- the Glyph C3's and C6's, from "
+        "KiCad's Resistor_SMD, and the Thing Plus C5's, from SparkFun's own "
+        "copy of the land under KiCad's name. Drawn only where the board "
+        "file states a resistor.",
     ),
     Component(
         "C_0603_1608Metric", "Capacitor_SMD", "C_0603_1608Metric",
         "KiCad's own 0603 capacitor land, by name: two pads 1.55 mm apart, "
-        "and the model the footprint places -- seven on each Glyph and "
-        "SparkFun's ten on the Thing Plus C5. Drawn only where the board "
-        "file states a capacitor.",
+        "and the model the footprint places -- the Glyph C3's and C6's, and "
+        "SparkFun's on the Thing Plus C5. Drawn only where the board file "
+        "states a capacitor.",
     ),
     Component(
         "D_SMA", "Diode_SMD", "D_SMA",
@@ -1503,12 +1503,16 @@ CORRESPONDENCE: tuple[Component, ...] = (
     Component(
         "JST_1x04_P1.0mm_Horizontal_SMD", "Connector_JST",
         "JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal",
-        "J1, the Qwiic port: SparkFun's land, four 1 mm-pitch contacts "
-        "3.68 mm from two mounting pads, numbered from -x with the mounting "
-        "pads down the page, as KiCad's SM04B-SRSS-TB footprint has them "
-        "3.88 mm apart -- the land their EAGLE Thing Plus places as "
-        "JST04_1MM_RA, drawn from this model. SparkFun place their own "
-        "Qwiic-Horizontal.step, which this stands for.",
+        "J1, the Qwiic port, valued Qwiic_RA: SparkFun's land, four 1 "
+        "mm-pitch contacts 3.68 mm from two mounting pads, numbered from -x "
+        "with the mounting pads down the page, as KiCad's SM04B-SRSS-TB "
+        "footprint has them 3.88 mm apart -- the land their EAGLE Thing Plus "
+        "places as JST04_1MM_RA, drawn from this model. The file never names "
+        "SM04B-SRSS-TB: the footprint's Description reads '4 pin JST 1mm "
+        "polarized connector for I2C', its Datasheet is JST's eSH.pdf, the "
+        "SH series, and it places SparkFun's own Qwiic-Horizontal.step. That "
+        "KiCad's SM04B-SRSS-TB, the four-pin right-angle SH, stands for it "
+        "is A JUDGEMENT from those.",
         stands_for=("Qwiic-Horizontal",),
     ),
     Component(
@@ -2103,10 +2107,11 @@ ABSENT: dict[str, str] = {
     ),
     "microSD_Friction_Fit_Common": (
         "J4 on the Thing Plus C5's underside, the microSD socket, PROD_ID "
-        "CONN-20948: thirteen pads spanning 10.20 x 6.20 mm, naming no "
-        "maker. KiCad's Connector_Card holds three models, listed "
-        "2026-10-08: two Hirose microSD sockets, each a named part, and a "
-        "nano-SIM."
+        "CONN-20948: thirteen pads spanning 10.20 x 6.20 mm, whose footprint's "
+        "Datasheet property is Molex's document 1050270001_sd.pdf -- Molex's "
+        "105027-0001. KiCad's Connector_Card holds three models, listed "
+        "2026-10-08: two Hirose microSD sockets and a nano-SIM, and no Molex "
+        "105027."
     ),
     "WS2812_2020": (
         "D2 on the Thing Plus C5, valued WS2812B on a land named for the "

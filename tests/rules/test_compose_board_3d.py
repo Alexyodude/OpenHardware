@@ -5841,3 +5841,29 @@ def test_a_sot_on_a_kicad_row_is_turned_so_its_pin_one_is_kicads():
     if unfetched:
         pytest.skip(f"checked {checked}; not fetched: {unfetched}")
     assert checked, "no SOT on any KiCad row"
+
+
+def test_the_thing_plus_c5s_qwiic_and_microsd_quote_what_their_footprints_state():
+    """**A row's words about what a footprint says are read back out of it**
+    (OH-195). SparkFun's file never names SM04B-SRSS-TB: J1's footprint
+    says '4 pin JST 1mm polarized connector for I2C' and links JST's SH
+    catalogue, so KiCad's SM04B standing for it is a judgement and its row
+    quotes both and says so. J4's footprint links Molex's own document for
+    the microSD socket, which its ABSENT reason was written as naming no
+    maker."""
+    spec = next(s for s in compose.COMPOSITIONS
+                if s.board == "SparkFun Thing Plus ESP32-C5")
+    if not _fetched(spec):
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    tree = kicad.parse_sexp(spec.layout.read_text(encoding="utf-8"))
+    stated = {kicad._reference_of(node): {p[1]: p[2] for p in kicad.children(node, "property")}
+              for node in kicad.children(tree, "footprint")}
+    board = compose.read_layout(spec.layout)
+    row = compose.correspondence_for(board.element("J1"))
+    for said in (f"'{stated['J1']['Description']}'",
+                 pathlib.PurePosixPath(stated["J1"]["Datasheet"]).name,
+                 "A JUDGEMENT"):
+        assert said in row.why, (said, row.why)
+    why = compose.ABSENT[board.element("J4").package]
+    document = pathlib.PurePosixPath(stated["J4"]["Datasheet"]).name
+    assert document in why and "naming no maker" not in why, why
