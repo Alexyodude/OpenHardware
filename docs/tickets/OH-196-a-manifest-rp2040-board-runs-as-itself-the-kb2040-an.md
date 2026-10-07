@@ -1,7 +1,7 @@
 ---
 id: OH-196
 title: 'A manifest RP2040 board runs as itself: the KB2040 and the Glyph Mini'
-status: in-review
+status: done
 priority: P1
 created: '2026-09-30'
 touches:
@@ -52,3 +52,5 @@ TWINS 15 of 33, runs 19. SUITE at c91b8ce: 2 failed (OCP pair), 2393 passed, 38 
 5 [NOTE, not modelled] IO_BANK0's CTRL registers are writable while RESETS holds IO_BANK0 in reset, and do not return to 0x1f when reset is re-asserted; the model keeps whatever was written.
 STILL OPEN FOR A FOLLOW-UP: rp2040.pin_states (the XIAO RP2040s') ignores FUNCSEL, and tests/cortexm0/blink/blink.c never selects SIO.
 SUITE at 69b00f5: 2 failed (OCP pair), 2405 passed, 37 skipped. All CLAUDE.md checkers, check_facts, ticket_guard --self-test 6/6 OK.
+
+**Note 2026-10-08:** DONE 2026-10-08. Merged to master by fast-forward at 3e44403 (lane4). Full suite on that exact commit, in lane4: 2 failed (the OCP pair in tests/rules/test_import_3d_model.py, cadquery-ocp absent under python 3.14), 2405 passed, 37 skipped. In main at 3e44403: 187 targeted tests passed (test_board_claims, test_kb2040_board, test_glyph_mini_rp2040_board, test_pin_view, cortexm0/test_board_rp2040, test_board_catalogue), check_board_claims OK, TWINS 15 of 33 with the Adafruit KB2040 holding all four. A full suite in main was started and stopped by the operator's park; the next merged-master suite (after OH-194) covers this work in main.
