@@ -13,6 +13,7 @@ touches:
 - webui/boards/XIAO-ESP32-C5-*.json
 - webui/boards/XIAO-ESP32-C6-*.json
 - webui/boards/XIAO-nRF54LM20A-*.json
+- tests/webui/test_pin_view.py
 ---
 
 Part of OH-174. The XIAO-ESP32-C5-SMD and XIAO-ESP32-C6-SMD hold three of the four layers on the TWINS scorecard and miss the fourth, pins, on the same five pads each: MTMS, MTDI, MTDO, MTCK and BOOT. `python tools/inventory.py` prints them as 11/16.
