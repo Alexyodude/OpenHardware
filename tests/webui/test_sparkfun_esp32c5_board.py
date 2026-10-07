@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """The evidence `BOARD_FIRMWARE_VERIFIED` names for the SparkFun Thing Plus
-ESP32-C5 (rules/board-claims.md §7 and §10, OH-194), made as the Qwiic
+ESP32-C5 (rules/board-claims.md §7, §10 and §13, OH-194), made as the Qwiic
 Pocket's is (`tests/webui/test_sparkfun_qwiic_pocket_esp32c6_board.py`).
 
 This board's `SDA` and `TX` are the XIAO ESP32-C5's, so the pin watched is
