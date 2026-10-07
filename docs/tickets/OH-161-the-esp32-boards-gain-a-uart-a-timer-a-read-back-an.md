@@ -9,8 +9,6 @@ touches:
 - core/riscv32/**
 - tests/riscv32/**
 - webui/boards/esp32c3.py
-- webui/boards/esp32c5.py
-- webui/boards/esp32c6.py
 - tests/webui/test_board_run.py
 - core/cortexm0/abi.py
 - webui/arduino/**
@@ -134,3 +132,5 @@ Gate: all 12 checks pass, run clean with nothing else building or editing (three
 **Note 2026-09-30:** 2026-09-30: webui/arduino/**, webui/compile.py and tests/webui/test_compile.py returned to this ticket; OH-185 is done. What it changed on these paths: SOC_GPIO_PIN_COUNT for the C3, C5 and C6 read from ESP-IDF v5.5 with citations; per-chip OH_GPIO_PIN_COUNT in each ESP32 oh_board.h; mask_of writes no bit at or past it; inline pinMode/digitalWrite refuse a compile-time out-of-range pin; a hint for LED_BUILTIN on RGB boards. Left, LOW, from its review: the editor's clickable-diagnostic regex (webui/static/emulator.js ~711, ^sketch\.cpp:) misses the 'inlined from ... at sketch.cpp:L:C' location that pin refusal prints.
 
 **Note 2026-10-08:** 2026-10-08, 68a7fbe, committed under this ticket because tests/riscv32/** is its: test_the_chip_is_described_and_the_watching_is_named in tests/riscv32/test_esp32c5_board.py asserted two boards on the ESP32-C5. OH-194 adds a third, the SparkFun Thing Plus ESP32-C5, a manifest row with its own run evidence. The test now names the two XIAOs (boards board_manifest.find does not know) and still holds every C5 board, the row included, to described, runnable and firmware_verified. Seen red with a third name added to the expected list.
+
+**Note 2026-10-08:** 2026-10-08: webui/boards/esp32c5.py and webui/boards/esp32c6.py lent to OH-200, whose XIAO C5 and C6 SMD back pads change the generated HEADER blocks in both (OH-170 left them for this ticket's release). Return both here when OH-200 closes.
