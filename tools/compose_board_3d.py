@@ -4173,6 +4173,46 @@ def leads_of(mesh: Mesh) -> list[tuple[float, float]]:
             if positions[at + 2] < -LEAD_DEPTH_MM]
 
 
+def via_in_pad(hole: eagle.Pad, element: eagle.Element) -> bool:
+    """Is this plated hole a via in a pad, rather than a hole for a leg?
+
+    **Yes where surface-mount copper under its own number lies on all four
+    sides of its centre** (OH-195): a half-line from the centre along +x,
+    -x, +y and -y each meets one of those pads, each taken as its own width
+    by height turned by its own rotation -- a round or oval pad as the
+    rectangle round it, and an EAGLE pad unturned, since `eagle.Pad` carries
+    no angle for one. A centre inside one such pad is the case where all
+    four start in it, as on a XIAO's castellations. A centre in the middle
+    of a pad laid as a field of squares is the other, as on Olimex's
+    ESP32-C3-MINI-1: its plated hole is the middle square of nine and lies
+    in none of the eight surface-mount squares round it. A slot beside a pad
+    of its number meets that copper on one or two sides, as each of the
+    Olimex USB-C's four shell slots does, and is a leg's hole.
+    """
+    same = [pad for pad in element.pads_of("smd") if pad.number == hole.number]
+
+    def meets(pad: eagle.Pad, dx: float, dy: float) -> bool:
+        # Into the pad's own frame, where its copper is an upright rectangle,
+        # and the half-line clipped against it one axis at a time.
+        turn = math.radians(pad.rotation_deg)
+        cos, sin = math.cos(turn), math.sin(turn)
+        ox, oy = hole.x_mm - pad.x_mm, hole.y_mm - pad.y_mm
+        near, far = 0.0, math.inf
+        for origin, step, half in (
+                (ox * cos + oy * sin, dx * cos + dy * sin, pad.width_mm / 2),
+                (-ox * sin + oy * cos, -dx * sin + dy * cos, pad.height_mm / 2)):
+            if abs(step) < 1e-12:
+                if abs(origin) > half:
+                    return False
+                continue
+            low, high = sorted(((-half - origin) / step, (half - origin) / step))
+            near, far = max(near, low), min(far, high)
+        return near <= far
+
+    return all(any(meets(pad, dx, dy) for pad in same)
+               for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+
+
 def confirm(element: eagle.Element, box, turn: float,
             mesh: Mesh | None = None) -> str | None:
     """Does this mesh fit the pads it is supposed to stand on, the way round
@@ -4204,12 +4244,10 @@ def confirm(element: eagle.Element, box, turn: float,
     span = footprint(box, turn, element)
 
     if mesh is not None:
-        # **A plated hole inside a pad the land also lays as surface-mount
-        # copper, under the same number, is a via in that pad** and not a
-        # hole for a leg (OH-195): Olimex drill one through the middle of the
-        # ESP32-C3-MINI-1's ground pad, whose other eight squares are SMD.
-        surface = {pad.number for pad in element.pads_of("smd")}
-        through = any(pad.number not in surface
+        # **A plated hole in a pad's own copper is a via in that pad** and
+        # not a hole for a leg (OH-195): Olimex drill one through the middle
+        # of the ESP32-C3-MINI-1's ground pad.
+        through = any(not via_in_pad(pad, element)
                       for pad in element.pads_of("thru_hole"))
         legged = bool(leads_of(mesh))
         if through and not legged:

@@ -5751,27 +5751,57 @@ def test_a_kicad_parts_value_is_held_to_its_row_as_an_eagle_parts_is():
 
 
 def test_a_plated_hole_in_a_surface_mount_pad_is_not_a_hole_for_a_leg():
-    """Olimex drill a 1.1 mm hole through the middle of the ESP32-C3-MINI-1's
-    ground pad, numbered 49 as its other eight surface-mount squares are
-    (OH-195). `confirm` reads a through-hole pad as where a legged part's
-    legs go, and a via in a pad is not one: the module is surface-mount and
-    is drawn. A plated hole whose number no surface-mount pad shares is a
-    leg's, as before."""
+    """Olimex drill a hole through the middle of the ESP32-C3-MINI-1's ground
+    pad, laid as nine 1.45 mm squares on 1.975 mm under one number, the
+    middle one plated (OH-195). `confirm` reads a through-hole pad as where a
+    legged part's legs go, and a via in a pad is not one: the module is
+    surface-mount and is drawn. **"In a pad" is geometry, not a shared
+    number**: same-numbered surface-mount copper on all four sides of the
+    hole's centre, the pad's own rotation honoured. A plated slot BESIDE
+    pads of its number -- the Olimex USB-C's shell, four slots each next to
+    a surface-mount tab numbered 0 as they are -- is a leg's hole, and so is
+    one whose number no surface-mount pad shares."""
     class Box:
-        width, height = 2.0, 2.0
+        width, height = 4.0, 4.0
 
-    flat = _model_box(2.0, 2.0, 0.5, "#101010")
+    flat = _model_box(4.0, 4.0, 0.5, "#101010")
 
-    def land(hole):
-        return eagle.Element(
-            "U3", "lib", "LAND", pads=(
-                eagle.Pad("49", "smd", -0.6, -0.6, 0.5, 0.5, None),
-                eagle.Pad("49", "smd", 0.6, 0.6, 0.5, 0.5, None),
-                eagle.Pad(hole, "thru_hole", 0.0, 0.0, 0.5, 0.5, None)))
+    def complaint(*pads):
+        return compose.confirm(eagle.Element("U3", "lib", "LAND", pads=pads),
+                               Box(), 0.0, flat)
 
-    assert compose.confirm(land("49"), Box(), 0.0, flat) is None
-    complaint = compose.confirm(land("50"), Box(), 0.0, flat)
-    assert complaint is not None and "through-hole pads" in complaint, complaint
+    def pad(number, kind, x, y, width, height, turn=0.0):
+        return eagle.Pad(number, kind, x, y, width, height, None,
+                         shape="rect", rotation_deg=turn)
+
+    # Olimex's field: eight squares round a plated ninth, which lies in none.
+    field = [pad("49", "smd", x * 1.975, y * 1.975, 1.45, 1.45, 90.0)
+             for x in (-1, 0, 1) for y in (-1, 0, 1) if (x, y) != (0, 0)]
+    middle = pad("49", "thru_hole", 0.0, 0.0, 1.45, 1.45, 90.0)
+    assert complaint(*field, middle) is None
+    # Take away the row above it and copper is on three sides: a leg's hole.
+    open_top = [square for square in field if square.y_mm <= 0]
+    said = complaint(*open_top, middle)
+    assert said is not None and "through-hole pads" in said, said
+    # Inside one pad, its rotation honoured: 3.0 x 0.6 turned 90 runs along
+    # y and holds (0, 1.2); unturned it runs along x and does not.
+    hole = pad("1", "thru_hole", 0.0, 1.2, 0.5, 0.5)
+    assert complaint(pad("1", "smd", 0.0, 0.0, 3.0, 0.6, 90.0), hole) is None
+    said = complaint(pad("1", "smd", 0.0, 0.0, 3.0, 0.6), hole)
+    assert said is not None and "through-hole pads" in said, said
+    # The USB-C's shell, read off the Olimex's file: each slot 0.61 mm
+    # inboard of a 1.1 mm tab under the same number, outside it.
+    shell = [pad("0", kind, sign * x, y, width, height)
+             for sign in (-1, 1)
+             for y, slot, tab in ((0.0, (1.2, 2.2), (1.1, 2.2)),
+                                  (-4.18, (1.3, 2.0), (1.1, 2.0)))
+             for kind, x, (width, height) in (("thru_hole", 4.320, slot),
+                                              ("smd", 4.928, tab))]
+    said = complaint(*shell)
+    assert said is not None and "through-hole pads" in said, said
+    # A number no surface-mount pad shares is a leg's, as before.
+    said = complaint(*field, pad("50", "thru_hole", 0.0, 0.0, 1.45, 1.45))
+    assert said is not None and "through-hole pads" in said, said
 
 
 def test_a_sot_on_a_kicad_row_is_turned_so_its_pin_one_is_kicads():
