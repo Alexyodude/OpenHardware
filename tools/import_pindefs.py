@@ -2907,14 +2907,21 @@ def board_report(
                 # long form of this is beside `stamp` in `published_pins`.
                 # A row's own CAD says `sha256:` so that nobody reads it as a
                 # git revision; the XIAO files keep the bare digest.
+                #
+                # **Each file once**, however many sources read it. Two readers
+                # over one board file -- the C6's net names and its traced BOOT
+                # (OH-200), the nRF54LM20A's NFC pair and its debug pads -- used
+                # to hash the file twice, a digest of bytes nobody downloads and
+                # different from the one each pad's citation carries.
                 "revision": (revision(bsp_dir / package)
                              if PACKAGES[package].cloned
                              else ("sha256:" if name in MANIFEST else "") + _digest(tuple(
-                                 (source.root / one).read_text(
-                                     encoding="utf-8", errors="replace")
-                                 for source in board.sources
-                                 if source.package == package and source.root
-                                 for one in source.paths))),
+                                 path.read_text(encoding="utf-8", errors="replace")
+                                 for path in dict.fromkeys(
+                                     source.root / one
+                                     for source in board.sources
+                                     if source.package == package and source.root
+                                     for one in source.paths)))),
                 "licence": PACKAGES[package].licence,
                 **({"pin_table": {"cite": table.cite, "url": table.url,
                                   "sha256": table.pdf_sha256}}
