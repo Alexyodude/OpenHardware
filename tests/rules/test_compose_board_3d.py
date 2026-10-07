@@ -4841,7 +4841,7 @@ def test_what_decided_each_passive_is_recorded_in_the_model(
     compose.compose(spec, deflection=0.05, check=False)
     out = capsys.readouterr().out
     assert ("  kinds   21 passive(s) drawn as the kind Adafruit QT Py "
-            "ESP32-C3.sch states: 19 by the prefix and the value, "
+            "ESP32-C3.sch states: 19 by the deviceset's prefix and the value, "
             "2 by the prefix alone, 0 by the value alone") in out, out
     assert "  refused 5 placement(s): 2 of 2 package(s) with no published " \
            "model, and 3 by what their own schematic states" in out, out
@@ -5527,3 +5527,87 @@ def test_the_glyph_usb_socket_lands_where_its_own_footprint_puts_it():
             element.y_mm + ox * math.sin(turn) + oy * math.cos(turn))
     assert math.dist((origin[0], -origin[2]), want) < 0.05, (origin, want)
     assert math.hypot(ox, oy) > 1.0, "the offset no longer moves the model"
+
+
+def test_a_kicad_row_draws_only_the_model_its_own_footprint_places(
+        monkeypatch, tmp_path):
+    """**A KiCad footprint states the model it places** (OH-195), and one
+    land can carry two parts on two boards: PCBCUPID put GCT's USB4105 on
+    the Glyph Mini's Palconn land and HRO's TYPE-C-31-M-12 on the Glyph C3's
+    and C6's. So on a KiCad board a row draws only the model the footprint
+    places, or one the row says stands for it, and anything else is refused
+    with both names. A hidden alternate is no statement, and a footprint
+    that names no model leaves the row to say. A footprint with no
+    reference is keyed as `from_kicad` names it, by its library id."""
+    def footprint(reference, models):
+        blocks = "".join(f'\t\t(model "{path}"{" (hide yes)" if hidden else ""})\n'
+                         for path, hidden in models)
+        named = f'\t\t(property "Reference" "{reference}")\n' if reference else ""
+        return ('\t(footprint "Lib:LAND"\n\t\t(layer "F.Cu")\n\t\t(at 10 10)\n'
+                + named + '\t\t(property "Value" "X")\n\t\t(attr smd)\n'
+                '\t\t(pad "1" smd rect (at -1 0) (size 0.5 0.5) (layers "F.Cu"))\n'
+                '\t\t(pad "2" smd rect (at 1 0) (size 0.5 0.5) (layers "F.Cu"))\n'
+                + blocks + "\t)\n")
+
+    path = tmp_path / "MODELS.kicad_pcb"
+    path.write_text(
+        "(kicad_pcb\n\t(version 20241229)\n"
+        '\t(gr_rect (start 0 0) (end 20 20) (layer "Edge.Cuts"))\n'
+        + footprint("U1", [("${KICAD9_3DMODEL_DIR}/Lib.3dshapes/MODEL_A.step", False)])
+        + footprint("U2", [("F:/their disk/MODEL_B.step", False)])
+        + footprint("U3", [("${KIPRJMOD}/packages3D/MODEL_C.stp", False)])
+        + footprint("U4", [("F:/their disk/MODEL_B.step", True)])
+        + footprint("U5", [])
+        + footprint("", [("F:/their disk/MODEL_B.step", False)])
+        + ")\n", encoding="utf-8")
+    row = compose.Component("LAND", "Lib", "MODEL_A",
+                            "a two-pad land, its pads 2.00 mm apart")
+    monkeypatch.setattr(compose, "CORRESPONDENCE", (row,))
+    statements = compose.kicad_statements(path)
+    elements = {e.name: e for e in compose.read_layout(path).elements}
+
+    def drawn(name):
+        return compose.drawn_from(elements[name], statements, path.name)
+
+    assert statements["U1"].models == ("MODEL_A",)
+    assert drawn("U1") == (row, None)
+    assert drawn("U2") == (None, (
+        "MODELS.kicad_pcb's footprint for U2 places MODEL_B, and the row for "
+        "its land, LAND, draws MODEL_A, which is not that and does not say it "
+        "stands for it: drawing it would put a part on the board that its own "
+        "file does not"))
+    assert drawn("U3")[0] is None
+    assert drawn("U4") == (row, None), "a hidden alternate is not a statement"
+    assert drawn("U5") == (row, None)
+    assert drawn("Lib:LAND")[0] is None, "the unreferenced footprint's model unread"
+    # A row that says what it stands for is drawn there, and still where
+    # the footprint names its own model.
+    stand_in = dataclasses.replace(row, stands_for=("MODEL_C",))
+    monkeypatch.setattr(compose, "CORRESPONDENCE", (stand_in,))
+    assert drawn("U3") == (stand_in, None)
+    assert drawn("U1") == (stand_in, None)
+    assert drawn("U2")[0] is None
+
+
+def test_a_plated_hole_in_a_surface_mount_pad_is_not_a_hole_for_a_leg():
+    """Olimex drill a 1.1 mm hole through the middle of the ESP32-C3-MINI-1's
+    ground pad, numbered 49 as its other eight surface-mount squares are
+    (OH-195). `confirm` reads a through-hole pad as where a legged part's
+    legs go, and a via in a pad is not one: the module is surface-mount and
+    is drawn. A plated hole whose number no surface-mount pad shares is a
+    leg's, as before."""
+    class Box:
+        width, height = 2.0, 2.0
+
+    flat = _model_box(2.0, 2.0, 0.5, "#101010")
+
+    def land(hole):
+        return eagle.Element(
+            "U3", "lib", "LAND", pads=(
+                eagle.Pad("49", "smd", -0.6, -0.6, 0.5, 0.5, None),
+                eagle.Pad("49", "smd", 0.6, 0.6, 0.5, 0.5, None),
+                eagle.Pad(hole, "thru_hole", 0.0, 0.0, 0.5, 0.5, None)))
+
+    assert compose.confirm(land("49"), Box(), 0.0, flat) is None
+    complaint = compose.confirm(land("50"), Box(), 0.0, flat)
+    assert complaint is not None and "through-hole pads" in complaint, complaint

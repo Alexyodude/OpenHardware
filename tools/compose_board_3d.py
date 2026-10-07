@@ -174,6 +174,12 @@ class Component:
     #: with `silk_miss` left free to check the body against the vendor's.
     step: str | None = None
     footprint: str | None = None
+    #: The models a vendor's KiCad footprint places, by file stem, that this
+    #: row's model stands for where it is not one of them by name (OH-195) --
+    #: each a JUDGEMENT its `why` argues. A KiCad manifest row's footprint
+    #: states the model it places, and `drawn_from` refuses a row that draws
+    #: another without saying so here.
+    stands_for: tuple[str, ...] = ()
 
     @property
     def url(self) -> str:
@@ -1222,6 +1228,7 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "their own machine's user directory, which nobody publishes, so this "
         "is the model KiCad publishes for the land of that name -- a "
         "JUDGEMENT that one SKRK body stands for another.",
+        stands_for=("SKRKAHE020",),
     ),
     Component(
         "SOIC-8_5.3x5.3mm_P1.27mm", "Package_SO", "SOIC-8_5.3x5.3mm_P1.27mm",
@@ -2465,6 +2472,11 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
             mirrored=placed.back,
             silk=silk,
             mark=mark,
+            # The vendor's words for the part, beside its land's name, which
+            # `contradiction` holds a row to as it does an EAGLE element's
+            # (OH-195): PCBCUPID place the Glyph C3's ESP32-C3-MINI-1 on a
+            # land named for the H2's, and only the value says C3.
+            value=placed.value or None,
         ))
 
     # The ink, y negated like every coordinate above it and for the same
@@ -3129,6 +3141,10 @@ class Statement:
     refused: str | None = None
     #: The word of the deviceset's name that spoke (`DEVICESET_WORDS`).
     word: str | None = None
+    #: The models a KiCad footprint itself places, by file stem, hidden
+    #: alternates left out (OH-195). Empty for an EAGLE part, which places
+    #: none, and for a footprint that names none.
+    models: tuple[str, ...] = ()
 
 
 def _current_variant(root) -> str | None:
@@ -3255,12 +3271,18 @@ def kicad_statements(layout: pathlib.Path) -> dict[str, Statement]:
     its value where that is ohms, farads or a word in `KIND_WORDS`. A
     footprint with pads that KiCad marks `dnp` or `exclude_from_bom` is not
     fitted; a passive valued as not fitted, or still TBD, is refused too.
+    And the models the footprint places, which `drawn_from` holds a row to.
+
+    Keyed as `from_kicad` names an element: by reference, or by the
+    footprint's library name where the file gives no reference.
     """
     tree = kicad.parse_sexp(layout.read_text(encoding="utf-8"))
     stated: dict[str, Statement] = {}
     for footprint in kicad.children(tree, "footprint"):
-        name = kicad._reference_of(footprint)
+        name = kicad._reference_of(footprint) or footprint[1]
         value = kicad._value_of(footprint)
+        models = tuple(pathlib.PurePosixPath(model.path).stem
+                       for model in kicad._models_of(footprint) if not model.hidden)
         library = footprint[1].split(":", 1)[0] if ":" in footprint[1] else ""
         attr = kicad.first(footprint, "attr")
         flags = [flag for flag in (attr[1:] if attr else []) if isinstance(flag, str)]
@@ -3298,7 +3320,7 @@ def kicad_statements(layout: pathlib.Path) -> dict[str, Statement]:
         stated[name] = Statement(
             None if refused else kind, stem if by_prefix else None,
             value if by_value else None, refused=refused,
-            word=library if by_library else None)
+            word=library if by_library else None, models=models)
     return stated
 
 
@@ -3364,6 +3386,13 @@ def drawn_from(element: eagle.Element, statements: dict[str, Statement] | None,
     states -- a row does not get to decide what a part is. A borrowed body
     for another kind on a board with a schematic would have to be marked so
     on its row, and no row is.
+
+    **A KiCad footprint states the model it places** (OH-195), so on a KiCad
+    manifest row a row draws only that model, or one it says stands for it
+    (`Component.stands_for`); any other is refused, with both names. One
+    land can carry two parts on two boards -- PCBCUPID put GCT's USB4105 on
+    the Glyph Mini's Palconn land and HRO's TYPE-C-31-M-12 on the Glyph
+    C3's -- and the package name cannot tell them apart.
     """
     if statements is None:
         return correspondence_for(element), None
@@ -3371,18 +3400,28 @@ def drawn_from(element: eagle.Element, statements: dict[str, Statement] | None,
     if said is not None and said.refused:
         return None, said.refused
     if said is not None and said.kind in PASSIVE_KINDS.values():
-        return correspondence_for(element, said.kind), None
-    rows = [row for row in CORRESPONDENCE if row.package == element.package]
-    if rows and all(row.library in PASSIVE_KINDS for row in rows):
-        if said is None or said.kind is None:
-            return None, (f"nothing in {schematic} states what kind of part "
-                          f"{element.name} is, and every row for its land, "
-                          f"{element.package}, draws a passive")
-        return None, (f"{schematic} places {element.name} under the prefix "
-                      f"{said.prefix}, which names a kind none of R, C, L and "
-                      f"F, and every row for its land, {element.package}, "
-                      f"draws a resistor, capacitor, inductor or fuse")
-    return correspondence_for(element), None
+        row = correspondence_for(element, said.kind)
+    else:
+        rows = [row for row in CORRESPONDENCE if row.package == element.package]
+        if rows and all(row.library in PASSIVE_KINDS for row in rows):
+            if said is None or said.kind is None:
+                return None, (f"nothing in {schematic} states what kind of part "
+                              f"{element.name} is, and every row for its land, "
+                              f"{element.package}, draws a passive")
+            return None, (f"{schematic} places {element.name} under the prefix "
+                          f"{said.prefix}, which names a kind none of R, C, L "
+                          f"and F, and every row for its land, "
+                          f"{element.package}, draws a resistor, capacitor, "
+                          f"inductor or fuse")
+        row = correspondence_for(element)
+    if (row is not None and said is not None and said.models
+            and not {row.model, *row.stands_for} & set(said.models)):
+        return None, (f"{schematic}'s footprint for {element.name} places "
+                      f"{' and '.join(said.models)}, and the row for its land, "
+                      f"{element.package}, draws {row.model}, which is not that "
+                      f"and does not say it stands for it: drawing it would "
+                      f"put a part on the board that its own file does not")
+    return row, None
 
 
 # --- a row held to the vendor's own words (OH-193) ------------------------------
@@ -3658,7 +3697,13 @@ def confirm(element: eagle.Element, box, turn: float,
     span = footprint(box, turn, element)
 
     if mesh is not None:
-        through = bool(element.pads_of("thru_hole"))
+        # **A plated hole inside a pad the land also lays as surface-mount
+        # copper, under the same number, is a via in that pad** and not a
+        # hole for a leg (OH-195): Olimex drill one through the middle of the
+        # ESP32-C3-MINI-1's ground pad, whose other eight squares are SMD.
+        surface = {pad.number for pad in element.pads_of("smd")}
+        through = any(pad.number not in surface
+                      for pad in element.pads_of("thru_hole"))
         legged = bool(leads_of(mesh))
         if through and not legged:
             return ("the element has through-hole pads and the model has "
@@ -4611,11 +4656,16 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         prefix = sum("prefix" in said and "value" not in said for said in kinds.values())
         value = sum("value" in said and "prefix" not in said for said in kinds.values())
         word = sum("word" in said for said in kinds.values())
+        # What spoke, in each format's own terms: an EAGLE deviceset's prefix
+        # and name, or a KiCad reference's letters and footprint library.
+        kicad_file = spec.schematic.suffix == ".kicad_pcb"
+        letters = "the reference's letters" if kicad_file else "the deviceset's prefix"
+        named = "the footprint's library" if kicad_file else "the deviceset's name"
         print(f"  kinds   {len(kinds)} passive(s) drawn as the kind "
-              f"{spec.schematic.name} states: {both} by the prefix and the "
-              f"value, {prefix} by the prefix alone, {value} by the value "
-              f"alone" + (f", {word} with the library or deviceset's name "
-                          f"agreeing" if word else ""))
+              f"{spec.schematic.name} states: {both} by {letters} and the "
+              f"value, {prefix} by the {letters.split()[-1]} alone, {value} by "
+              f"the value alone"
+              + (f", {word} with {named} agreeing" if word else ""))
     if unmodelled:
         print(f"  no model {len(unmodelled)} placement(s) drawn as nothing, "
               f"with no ABSENT entry saying why: "
