@@ -427,6 +427,20 @@ EXPLAINS: dict[str, set[str]] = {
     # a person would look for (OH-195; `compose.GLYPH_HEADER`).
     "PCBCUPID Glyph Mini RP2040": {"PinHeader_1x05_P2.54mm_Vertical",
                                    "PinHeader_1x09_P2.54mm_Vertical"},
+    # The buttons, whose land and model name two parts (OH-195). Their USB
+    # socket is refused too, by the model their own file places
+    # (`REFUSED_BY_SCHEMATIC`), and so is not here.
+    "PCBCUPID Glyph C3": {"SW_SPST_PTS810"},
+    "PCBCUPID Glyph C6": {"SW_SPST_PTS810"},
+    # Olimex's own parts that nobody but Olimex publishes a model of.
+    "Olimex ESP32-C3-DevKit-Lipo": {
+        "CD32", "YTS-A016-X", "GBH-254-SMT-10", "LIPO_BAT_VERTICAL_DW02S",
+        "USB2.0_TYPE-C(A40-00119-A52-12)"},
+    # What its EAGLE sibling, the Thing Plus C6, leaves off, and its buttons.
+    "SparkFun Thing Plus ESP32-C5": {
+        "JST_1x02_P2.0mm_Horizontal_SMD", "USB-C_16",
+        "microSD_Friction_Fit_Common", "WS2812_2020",
+        "Push_SMD_4.6x2.8mm_h2.5mm"},
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
 # same placements, same absences -- so the entries are derived the same way
@@ -4685,6 +4699,12 @@ REFUSED_BY_SCHEMATIC = {
     # A KiCad board file is its own schematic here (OH-195), and PCBCUPID's
     # states every passive's kind three ways that agree.
     "PCBCUPID Glyph Mini RP2040": set(),
+    # Both Glyphs mark their sockets, test pads and jumper `dnp`, and place
+    # HRO's USB socket from their own disk on a land a row draws as GCT's.
+    "PCBCUPID Glyph C3": {"J1", "J2", "J3", "J4", "JP1"},
+    "PCBCUPID Glyph C6": {"J1", "J2", "J3", "J4", "JP1", "F1"},
+    "Olimex ESP32-C3-DevKit-Lipo": set(),
+    "SparkFun Thing Plus ESP32-C5": set(),
 }
 
 
@@ -4715,6 +4735,16 @@ BODYLESS = {
         "SMT-JUMPER_3_2-NC_TRACE_SILK"},
     # Its three logos put down no pad and are counted as ink instead.
     "PCBCUPID Glyph Mini RP2040": set(),
+    # Their copper is refused by `dnp` instead, and their logos are ink.
+    "PCBCUPID Glyph C3": set(),
+    "PCBCUPID Glyph C6": set(),
+    "Olimex ESP32-C3-DevKit-Lipo": {
+        "Fiducial1x3", "Fiducial1x3_Paste",
+        "Mounting_Hole_Drill-3.3mm_Clerance-7mm", "SJ_1_SMALLER"},
+    "SparkFun Thing Plus ESP32-C5": {
+        "Fiducial_0.5mm_Mask1mm", "Jumper_2_NC_Trace", "Jumper_2_NO",
+        "Jumper_2_PTH_SMD_Combo-NC", "Jumper_3_NC-1_Trace",
+        "Jumper_3_NC-2_Trace", "Standoff", "ThingPlus_With_Connectors"},
 }
 
 
@@ -4770,9 +4800,14 @@ def test_every_manifest_passive_is_drawn_as_the_kind_its_vendor_states():
             said = statements.get(element.name)
             if said is None or said.kind not in compose.PASSIVE_KINDS.values():
                 continue
-            assert row is not None, (
+            # A passive nobody publishes a model of is refused by its
+            # package's ABSENT reason, which `EXPLAINS` pins per board: the
+            # Olimex's inductor L1 (OH-195).
+            assert row is not None or element.package in compose.ABSENT, (
                 f"{spec.board}: {element.name} ({element.package}) is stated "
                 f"{said.kind}, and no row draws that kind on that package")
+            if row is None:
+                continue
             assert compose.PASSIVE_KINDS[row.library] == said.kind, (
                 f"{spec.board}: {element.name} is stated {said.kind} and is "
                 f"drawn as {row.model}")
@@ -5589,6 +5624,26 @@ def test_a_kicad_row_draws_only_the_model_its_own_footprint_places(
     assert drawn("U2")[0] is None
 
 
+def test_a_kicad_parts_value_is_held_to_its_row_as_an_eagle_parts_is():
+    """PCBCUPID place the Glyph C3's module on a land named for the
+    ESP32-H2-MINI-1 and value it ESP32-C3-MINI-1-N4 (OH-195). Espressif's own
+    footprints for the H2-, C3- and C6-MINI-1 put down one land, so the value
+    is the word that names the chip, and `contradiction` reads a KiCad
+    part's value as it reads an EAGLE element's: the C3 module is drawn
+    there, and a C6 module on that land would be refused."""
+    path = _kicad_parts_file(
+        ("ESP32C3:ESP32-H2-MINI-1_EXP", "U4", "ESP32-C3-MINI-1-N4", "smd", True))
+    element = compose.read_layout(path).element("U4")
+    assert element.value == "ESP32-C3-MINI-1-N4"
+    c3 = next(row for row in compose.CORRESPONDENCE
+              if row.package == "ESP32-H2-MINI-1_EXP")
+    assert compose.contradiction(element, c3) is None
+    c6 = next(row for row in compose.CORRESPONDENCE
+              if row.package == "ESP32-C6-MINI-1_EXP")
+    said = compose.contradiction(element, c6)
+    assert said is not None and "ESP32-C6" in said, said
+
+
 def test_a_plated_hole_in_a_surface_mount_pad_is_not_a_hole_for_a_leg():
     """Olimex drill a 1.1 mm hole through the middle of the ESP32-C3-MINI-1's
     ground pad, numbered 49 as its other eight surface-mount squares are
@@ -5611,3 +5666,42 @@ def test_a_plated_hole_in_a_surface_mount_pad_is_not_a_hole_for_a_leg():
     assert compose.confirm(land("49"), Box(), 0.0, flat) is None
     complaint = compose.confirm(land("50"), Box(), 0.0, flat)
     assert complaint is not None and "through-hole pads" in complaint, complaint
+
+
+def test_a_sot_on_a_kicad_row_is_turned_so_its_pin_one_is_kicads():
+    """**A five-lead SOT-23 drawn a quarter or a half turn out passes every
+    check `compose` makes** -- its span is nearly square and nothing marks
+    its pin 1 -- and two did (OH-195): SparkFun's KiCad land took the EAGLE
+    row's quarter turn under the same package name, and Olimex's, laid out
+    half round from KiCad's, took none. KiCad's own SOT-23, SOT-23-5 and
+    SOT-23-6 footprints put pad 1 at -x and -y down the page, read
+    2026-10-08; turned back by its row, each land's pad 1 must sit there."""
+    checked, unfetched = 0, []
+    for row, spec in _manifest_specs():
+        if spec is None or not row.cad.endswith(".kicad_pcb"):
+            continue
+        if not _fetched(spec):
+            unfetched.append(row.board)
+            continue
+        statements = compose.statements_for(spec)
+        placed = kicad.read_board(spec.layout).placements
+        for footprint, element in zip(placed, compose.read_layout(spec.layout).elements):
+            drawn, _why = compose.drawn_from(element, statements)
+            if drawn is None or drawn.model not in ("SOT-23", "SOT-23-5", "SOT-23-6"):
+                continue
+            checked += 1
+            one = next(pad for pad in footprint.pads if pad.number == "1")
+            # The land's own frame, y up: an underside footprint's stored
+            # pads are its library's with y negated (OH-182).
+            x, y = one.x_mm, (one.y_mm if footprint.back else -one.y_mm)
+            back = math.radians(-drawn.turn)
+            mx = x * math.cos(back) - y * math.sin(back)
+            my = x * math.sin(back) + y * math.cos(back)
+            assert mx < 0 < my, (
+                f"{spec.board}: {element.name} ({element.package}, "
+                f"{element.library}) turned {drawn.turn:.0f} puts its pad 1 "
+                f"at ({mx:.2f}, {my:.2f}) in {drawn.model}'s frame, where "
+                f"KiCad's footprint puts it at -x, +y")
+    if unfetched:
+        pytest.skip(f"checked {checked}; not fetched: {unfetched}")
+    assert checked, "no SOT on any KiCad row"

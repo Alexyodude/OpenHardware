@@ -307,7 +307,9 @@ CORRESPONDENCE: tuple[Component, ...] = (
     Component(
         "SOT-23", "Package_TO_SOT_SMD", "SOT-23",
         "T1, the FDN340P power-switch FET. Three pads spanning 2.032 x "
-        "1.93 mm, and the package name is the model's own.",
+        "1.93 mm, and the package name is the model's own. The Glyph C3's "
+        "and C6's Q1, Si2301 by value, is on KiCad's own land of that name, "
+        "which places this model (OH-195).",
     ),
     Component(
         "SOT23-DBV", "Package_TO_SOT_SMD", "SOT-23-5",
@@ -1217,7 +1219,8 @@ CORRESPONDENCE: tuple[Component, ...] = (
     Component(
         "LED_0603_1608Metric", "LED_SMD", "LED_0603_1608Metric",
         "D1, RED_LED by value, on KiCad's own 0603 LED land: two pads "
-        "1.575 mm apart, and the model PCBCUPID's footprint places.",
+        "1.575 mm apart, and the model PCBCUPID's footprint places -- on "
+        "the Glyph Mini, and D2 and D3 on the Glyph C3 and C6.",
     ),
     Component(
         "SW_Push_SPST_NO_Alps_SKRK", "Button_Switch_SMD",
@@ -1238,9 +1241,12 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "SOT-23-5", "Package_TO_SOT_SMD", "SOT-23-5",
-        "U2, the AP2127K-3.3 regulator by value, on KiCad's own SOT-23-5 "
-        "land: five pads spanning 2.28 x 1.90 mm, and the model PCBCUPID's "
-        "footprint places. On the underside, where the board file flips it.",
+        "KiCad's own SOT-23-5 land, by name: five pads spanning 2.28 x "
+        "1.90 mm, and the model each footprint placing it states -- the "
+        "Glyph Mini's U2 regulator, on the underside where the board file "
+        "flips it, and the Glyph C3's and C6's charger and regulator. "
+        "Olimex keep KiCad's name for a land of their own laid out half "
+        "round, which has rows of its own below.",
     ),
     Component(
         "Crystal_SMD_Abracon_ABM8AIG-4Pin_3.2x2.5mm", "Crystal",
@@ -1273,7 +1279,252 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "model 1.25 mm off its origin, and anchored on its shell tabs this "
         "one lands where that offset puts it: "
         "`test_the_glyph_usb_socket_lands_where_its_own_footprint_puts_it` "
-        "measures the two.",
+        "measures the two. The Glyph C3 and C6 place the same land with "
+        "HRO's model on it, and `drawn_from` refuses this row there.",
+    ),
+    # --- the PCBCUPID Glyph C3 and C6, OH-195 -----------------------------------
+    #
+    # One board twice, with its module changed: KiCad 8 files whose
+    # footprints are KiCad's own, from KiCad's own libraries, each placing
+    # the model KiCad files with it -- except three, which place models from
+    # PCBCUPID's own disk and are refused or argued below. Spans are the
+    # footprints' own pad extents, read 2026-10-08.
+    Component(
+        "R_0603_1608Metric", "Resistor_SMD", "R_0603_1608Metric",
+        "KiCad's own 0603 resistor land, by name: two pads 1.65 mm apart, "
+        "and the model the footprint places -- thirteen on each Glyph, from "
+        "KiCad's Resistor_SMD, and SparkFun's fourteen on the Thing Plus C5, "
+        "from their own copy of the land under KiCad's name. Drawn only "
+        "where the board file states a resistor.",
+    ),
+    Component(
+        "C_0603_1608Metric", "Capacitor_SMD", "C_0603_1608Metric",
+        "KiCad's own 0603 capacitor land, by name: two pads 1.55 mm apart, "
+        "and the model the footprint places -- seven on each Glyph and "
+        "SparkFun's ten on the Thing Plus C5. Drawn only where the board "
+        "file states a capacitor.",
+    ),
+    Component(
+        "D_SMA", "Diode_SMD", "D_SMA",
+        "D1 on the Glyph C3 and C6, SS34 by value, a Schottky rectifier in "
+        "DO-214AC: KiCad's own SMA land, two pads 4.00 mm apart with pad 1, "
+        "the cathode, at -x, and the model the footprint places.",
+    ),
+    Component(
+        "SW_SPDT_PCM12", "Button_Switch_SMD", "SW_SPDT_PCM12",
+        "SW3 on the Glyph C3 and C6, the slide switch: KiCad's own land for "
+        "C&K's PCM12, three contacts and four shell tabs spanning 7.30 x "
+        "2.86 mm round two locating holes, and the model the footprint "
+        "places.",
+    ),
+    Component(
+        "JST_SH_BM04B-SRSS-TB_1x04-1MP_P1.00mm_Vertical", "Connector_JST",
+        "JST_SH_BM04B-SRSS-TB_1x04-1MP_P1.00mm_Vertical",
+        "J5 on the Glyph C3 and C6, the Qwiic port: KiCad's own land for "
+        "JST's vertical SH, BM04B-SRSS-TB -- four 1 mm-pitch contacts and "
+        "two mounting pads spanning 5.60 x 2.53 mm. PCBCUPID's footprint "
+        "places a BM4B-SRSS-TB.step from their own disk, which nobody "
+        "publishes; that this is the same part as the land's BM04B, the "
+        "contact count written without its zero, is a JUDGEMENT, and this "
+        "is KiCad's model of it.",
+        stands_for=("BM4B-SRSS-TB",),
+    ),
+    Component(
+        "ESP32-H2-MINI-1_EXP", "espressif", "ESP32-C3-MINI-1",
+        "U4 on the Glyph C3, valued ESP32-C3-MINI-1-N4, from PCBCUPID's own "
+        "library named ESP32C3, on a land they named for the ESP32-H2-MINI-1. "
+        "Espressif's own footprints for the H2-, C3- and C6-MINI-1 put down "
+        "the same 61 pads at the same places -- compared 2026-10-08 at the "
+        "pinned commit -- so the land's name says nothing of the chip, and "
+        "the value and the library say C3. 61 pads spanning 11.90 x "
+        "9.90 mm, within 0.01 mm of Espressif's. The footprint places no "
+        "model; this is Espressif's STEP and footprint, as for SparkFun's "
+        "C3-MINI-1 above.",
+        step=f"{ESPRESSIF_KICAD}/3dmodels/espressif.3dshapes/ESP32-C3-MINI-1.STEP",
+        footprint=(f"{ESPRESSIF_KICAD}/footprints/Espressif.pretty/"
+                   f"ESP32-C3-MINI-1.kicad_mod"),
+    ),
+    Component(
+        "ESP32-C6-MINI-1_EXP", "espressif", "ESP32-C6-MINI-1",
+        "U4 on the Glyph C6, valued ESP32-C6-MINI-1-N4, on PCBCUPID's land "
+        "named for it: 61 pads spanning 11.90 x 9.90 mm, Espressif's own. "
+        "The footprint places no model; this is Espressif's STEP and "
+        "footprint, the one the Feather's and the Pocket's C6-MINI-1 draw.",
+        step=f"{ESPRESSIF_KICAD}/3dmodels/espressif.3dshapes/ESP32-C6-MINI-1.STEP",
+        footprint=(f"{ESPRESSIF_KICAD}/footprints/Espressif.pretty/"
+                   f"ESP32-C6-MINI-1.kicad_mod"),
+    ),
+    # --- the Olimex ESP32-C3-DevKit-Lipo, revision D, OH-195 ---------------------
+    #
+    # Olimex's own footprint libraries, each footprint placing a model from
+    # the project's own packages3D/ directory. Where that file carries
+    # KiCad's model's name the row draws KiCad's; where it does not, the row
+    # says what it stands for. Turns are read off pad numbers against KiCad's
+    # own footprint for the model, in each land's library frame -- for a part
+    # on the underside, its stored pads with y negated -- 2026-10-08.
+    Component(
+        "R_0402_5MIL_DWS", "Resistor_SMD", "R_0402_1005Metric",
+        "Olimex's 0402 resistor land: two pads 1.02 mm apart, and the model "
+        "it places is named for KiCad's 0402 resistor.",
+    ),
+    Component(
+        "C_0402_5MIL_DWS", "Capacitor_SMD", "C_0402_1005Metric",
+        "Olimex's 0402 capacitor land: two pads 1.02 mm apart, and the model "
+        "it places is named for KiCad's 0402 capacitor.",
+    ),
+    Component(
+        "C_0603_5MIL_DWS", "Capacitor_SMD", "C_0603_1608Metric",
+        "Olimex's 0603 capacitor land: two pads 1.78 mm apart, and the model "
+        "it places is named for KiCad's 0603 capacitor.",
+    ),
+    Component(
+        "LED_0603_KA", "LED_SMD", "LED_0603_1608Metric",
+        "LED1 and CHARGING1, green and yellow by value: Olimex's 0603 LED "
+        "land, two pads 1.52 mm apart, named K then A and drawn with its body "
+        "reaching past pad 1 -- the cathode at -x, as KiCad's footprint puts "
+        "pad 1. Olimex place their own LED_0603_G and LED_0603_Y from the "
+        "project's packages3D/, which nothing here fetches; KiCad's 0603 LED "
+        "standing for both is a JUDGEMENT, and it is not coloured.",
+        stands_for=("LED_0603_G", "LED_0603_Y"),
+    ),
+    Component(
+        "SOD-123_1C-2A_KA", "Diode_SMD", "D_SOD-123",
+        "D1 and D2, 1N5819S4/SOD123 by value: Olimex's SOD-123 land, two "
+        "pads 3.80 mm apart, whose own name puts the cathode on pad 1 at -x, "
+        "as KiCad's footprint does. Olimex place their own SOD123.step; "
+        "KiCad's SOD-123, the package both names state, stands for it.",
+        stands_for=("SOD123",),
+    ),
+    Component(
+        "SOT23", "Package_TO_SOT_SMD", "SOT-23",
+        "FET1, IRLML6402 by value, on the underside: Olimex's SOT-23 land, "
+        "three pads spanning 2.21 x 1.90 mm, and the model named SOT-23 it "
+        "places. TURNED 180: Olimex put pins 1 and 2 at +x and pin 3 at -x, "
+        "where KiCad's footprint puts 1 and 2 at -x.",
+        turn=180.0,
+        vendor_library="OLIMEX_Transistors-FP",
+    ),
+    Component(
+        "SOT-23-5", "Package_TO_SOT_SMD", "SOT-23-5",
+        "U1, the TP4054 charger by value: Olimex's own SOT-23-5 land under "
+        "KiCad's name, five pads spanning 2.60 x 1.90 mm, and the model named "
+        "SOT-23-5 it places. TURNED 180: Olimex put pins 1 to 3 at +x, "
+        "where KiCad's footprint puts them at -x.",
+        turn=180.0,
+        vendor_library="OLIMEX_IC-FP",
+    ),
+    Component(
+        "SOT-23-5", "Package_TO_SOT_SMD", "SOT-23-5",
+        "U2, the SY8089 regulator by value, on the underside: the same land "
+        "from Olimex's regulator library, five pads spanning 2.60 x 1.90 mm "
+        "with pins 1 to 3 at +x, so TURNED 180 for the reason the charger's "
+        "is.",
+        turn=180.0,
+        vendor_library="OLIMEX_Regulators-FP",
+    ),
+    Component(
+        "HN1x9", "Connector_PinHeader_2.54mm", "PinHeader_1x09_P2.54mm_Vertical",
+        "EXT1 and EXT2, the two header rows, on the underside: Olimex's land "
+        "of nine plated holes on 2.54 mm, 20.32 mm long, pin 1 at -x. Olimex "
+        "place their own HN1x9-PinHeader_1x09_P2.54mm_Vertical.step, named "
+        "for this KiCad model, which stands for it. TURNED 90: KiCad's "
+        "footprint runs its pins down the page from pin 1.",
+        turn=90.0,
+        stands_for=("HN1x9-PinHeader_1x09_P2.54mm_Vertical",),
+    ),
+    Component(
+        "ESP32-­C3-­MINI­-1", "espressif", "ESP32-C3-MINI-1",
+        "U3, valued ESP32-C3-MINI-1-N4, on Olimex's land for it, whose name "
+        "carries three soft hyphens: 61 pads spanning 11.90 x 9.90 mm, "
+        "Espressif's own count and span, with a plated 1.1 mm hole in the "
+        "middle of its ground pad. Olimex place their own "
+        "ESP32-C3-MINI-1-N4.STEP; Espressif's STEP and footprint, as for the "
+        "other C3-MINI-1 lands above, stand for it.",
+        step=f"{ESPRESSIF_KICAD}/3dmodels/espressif.3dshapes/ESP32-C3-MINI-1.STEP",
+        footprint=(f"{ESPRESSIF_KICAD}/footprints/Espressif.pretty/"
+                   f"ESP32-C3-MINI-1.kicad_mod"),
+        stands_for=("ESP32-C3-MINI-1-N4",),
+    ),
+    # --- the SparkFun Thing Plus ESP32-C5, OH-195 --------------------------------
+    #
+    # SparkFun's own KiCad libraries, each footprint placing a model from
+    # their own 3dmodels tree. Their lands here are laid out as KiCad's own
+    # footprints for each model are -- pad for pad, compared 2026-10-08 --
+    # so no row turns, where the same names in SparkFun's EAGLE libraries
+    # are turned (`SOT23-5`, `DFN-8`).
+    Component(
+        "SOT23-5", "Package_TO_SOT_SMD", "SOT-23-5",
+        "U2, U4 and U5, two RT9080-3.3 regulators and an MCP73831 charger: "
+        "SparkFun's KiCad SOT-23-5 land, five pads spanning 2.60 x 1.90 mm "
+        "laid out as KiCad's own, pin 1 at -x, so not turned as their EAGLE "
+        "land of the same name is.",
+        vendor_library="SparkFun-Semiconductor-Standard",
+    ),
+    Component(
+        "SOT23-6", "Package_TO_SOT_SMD", "SOT-23-6",
+        "D1, the DT1042-04SO ESD array by value: SparkFun's SOT-23-6 land, "
+        "six pads spanning 2.60 x 1.90 mm laid out as KiCad's own, and the "
+        "model named SOT-23-6 it places.",
+    ),
+    Component(
+        "SOT-583-8", "Package_TO_SOT_SMD", "SOT-583-8",
+        "U7, the LM66200 by value: SparkFun's SOT-583-8 land, eight pads "
+        "spanning 1.48 x 1.50 mm and pad for pad KiCad's own. SparkFun's "
+        "footprint places a file named SOT-583-3; its name says three leads "
+        "where the land is named for eight and puts down eight, so KiCad's "
+        "eight-lead SOT-583 standing for it is a JUDGEMENT the vendor's own "
+        "copper makes.",
+        stands_for=("SOT-583-3",),
+    ),
+    Component(
+        "DFN-8_2x2mm_P0.5mm_EP1.2x0.8mm", "Package_DFN_QFN",
+        "DFN-8-1EP_2x2mm_P0.5mm_EP1.05x1.75mm",
+        "U6, the MAX17048 by value: SparkFun's 2 x 2 mm DFN-8 land, eight "
+        "leads on 0.5 mm laid out as KiCad's footprint for this model lays "
+        "them, and the model it places. Their EAGLE DFN-8 row draws the same "
+        "chip with the EP0.6x1.2 model, chosen by the land's exposed pad "
+        "where nothing stated one; here the footprint states this one.",
+    ),
+    Component(
+        "LED_0603_1608Metric_Red", "LED_SMD", "LED_0603_1608Metric",
+        "D4 and D5, red by value: SparkFun's 0603 LED land, two pads "
+        "1.57 mm apart, pad for pad KiCad's own, and their own "
+        "LED_0603_1608Metric_Red.step on it. KiCad's 0603 LED standing for "
+        "it is a JUDGEMENT, and is not red.",
+        stands_for=("LED_0603_1608Metric_Red",),
+    ),
+    Component(
+        "LED_0603_1608Metric_Yellow", "LED_SMD", "LED_0603_1608Metric",
+        "D6, yellow by value: the same land, two pads 1.57 mm apart, and the "
+        "same JUDGEMENT as the red pair, for SparkFun's "
+        "LED_0603_1608Metric_Yellow.step.",
+        stands_for=("LED_0603_1608Metric_Yellow",),
+    ),
+    Component(
+        "JST_1x04_P1.0mm_Horizontal_SMD", "Connector_JST",
+        "JST_SH_SM04B-SRSS-TB_1x04-1MP_P1.00mm_Horizontal",
+        "J1, the Qwiic port: SparkFun's land, four 1 mm-pitch contacts "
+        "3.68 mm from two mounting pads, numbered from -x with the mounting "
+        "pads down the page, as KiCad's SM04B-SRSS-TB footprint has them "
+        "3.88 mm apart -- the land their EAGLE Thing Plus places as "
+        "JST04_1MM_RA, drawn from this model. SparkFun place their own "
+        "Qwiic-Horizontal.step, which this stands for.",
+        stands_for=("Qwiic-Horizontal",),
+    ),
+    Component(
+        "ESP32-C5-WROOM-1-NARROW", "espressif", "esp32-c5-wroom-1",
+        "U1, valued ESP32-C5-WROOM-1: SparkFun's narrow land for the module, "
+        "the 28 pads Espressif's own footprint numbers with its two side "
+        "rows 16.50 mm apart where Espressif's are 17.50, and the exposed pad "
+        "split into nine. KiCad publishes no ESP32-C5 module; this is "
+        "Espressif's STEP and footprint, placed by `pads_origin` on the "
+        "middle of the pads and held by `silk_miss` to the body SparkFun "
+        "draw, standing for the ESP32-C5-WROOM-1.step their footprint "
+        "places.",
+        step=f"{ESPRESSIF_KICAD}/3dmodels/espressif.3dshapes/esp32-c5-wroom-1.step",
+        footprint=(f"{ESPRESSIF_KICAD}/footprints/Espressif.pretty/"
+                   f"ESP32-C5-WROOM-1.kicad_mod"),
+        stands_for=("ESP32-C5-WROOM-1",),
     ),
 )
 
@@ -1705,6 +1956,175 @@ ABSENT: dict[str, str] = {
     # --- OH-195: the Glyph Mini's header rows -----------------------------------
     "PinHeader_1x05_P2.54mm_Vertical": GLYPH_HEADER,
     "PinHeader_1x09_P2.54mm_Vertical": GLYPH_HEADER,
+    # --- OH-195: the Glyph C3 and C6 ---------------------------------------------
+    "SW_SPST_PTS810": (
+        "SW1 and SW2 on the Glyph C3 and C6, the BOOT and RESET buttons, "
+        "**whose land and model name two parts**. The land, four pads "
+        "spanning 4.15 x 2.15 mm, is KiCad's own "
+        "for C&K's PTS 810, by its own description, and KiCad publishes that "
+        "model; but PCBCUPID's footprint places a file named KMR621NG LFS, "
+        "another C&K part number, from their own disk, which nobody "
+        "publishes. Nothing else in the file -- the value is SW_Push -- says "
+        "which they fit, and drawing the PTS 810 would take the land's word "
+        "over the model's."
+    ),
+    # --- OH-195: the Olimex ESP32-C3-DevKit-Lipo's copper and holes ---------------
+    "Fiducial1x3": (
+        "four of Olimex's fiducials, two a side: a bare 1.0 mm copper disc "
+        "the pick-and-place camera sights on, with no paste. No KiCad "
+        "library was searched: there is no body to look for."
+    ),
+    "Fiducial1x3_Paste": (
+        "two of Olimex's fiducials, one a side: the same bare 1.0 mm disc, "
+        "pasted. No KiCad library was searched: there is no body to look for."
+    ),
+    "Mounting_Hole_Drill-3.3mm_Clerance-7mm": (
+        "MH1 to MH4 on the Olimex, four unplated 3.3 mm mounting holes, "
+        "nothing fitted. No KiCad library was searched: there is no body to "
+        "look for."
+    ),
+    "SJ_1_SMALLER": (
+        "three solder jumpers on the Olimex's underside, valued Opened: two "
+        "0.51 x 0.76 mm pads each that a person may bridge with solder. "
+        "Copper, drawn as copper. No KiCad library was searched: there is "
+        "no body to look for."
+    ),
+    # And the Olimex's parts, each named by what its own file says it is.
+    # Olimex publish a model of every one in the project's packages3D/,
+    # which `tools/board_sources.py` does not fetch, and each footprint
+    # places it with a turn its block states -- `pads_origin` reads an
+    # offset only. Drawing them is that fetch and that reader.
+    "CD32": (
+        "L1 on the Olimex's underside, valued 2.2uH/NRS3015T2R2MNGH/1.5A/"
+        "3.00x3.00x1.50mm -- Taiyo Yuden's NRS3015, its body stated in the "
+        "value -- on a land Olimex name for Sumida's CD32, two pads 2.40 mm "
+        "apart, placing their own L-CD32_shielded.step. KiCad's Inductor_SMD, "
+        "518 models listed 2026-10-08, holds no Taiyo Yuden NR and no Sumida "
+        "CD32. **Every dimension is stated, so this is the OH-153 kind of "
+        "absence and not an honest one**: tools/model_from_datasheet.py "
+        "builds a slab from a footprint's NAME, and this states its body in "
+        "a value."
+    ),
+    "YTS-A016-X": (
+        "BUT1 on the Olimex, the button: Olimex's own land, four pads "
+        "spanning 4.15 x 2.15 mm, placing their own "
+        "YTS-A016-X(SKRPABE010).stp -- Alps' SKRP, by the file's name. "
+        "KiCad's Button_Switch_SMD, 157 models listed 2026-10-08, holds Alps' "
+        "SKRK and no SKRP."
+    ),
+    "GBH-254-SMT-10": (
+        "UEXT1 on the Olimex, the UEXT socket, valued P-B-V-10-LF: a "
+        "surface-mount 2 x 5 box header on 2.54 mm, ten pads spanning 10.16 "
+        "x 6.25 mm, placing their own model of CviLux's CH8710xM100 by its "
+        "file's name. KiCad's Connector_IDC, 51 models listed 2026-10-08, "
+        "holds IDC box headers that name no maker; one of them would stand "
+        "a part on this land that nothing in the file names."
+    ),
+    "LIPO_BAT_VERTICAL_DW02S": (
+        "BAT1 on the Olimex, the battery socket, **whose land and model name "
+        "two parts**: valued DW02S on a land named for it, two plated holes "
+        "2.03 mm apart, placing Molex's PicoBlade 53047-0210 by the model's "
+        "file name. KiCad's Connector_Molex, 89 models listed 2026-10-08, "
+        "holds no 53047 either."
+    ),
+    "USB2.0_TYPE-C(A40-00119-A52-12)": (
+        "USB-C1 on the Olimex, the USB socket, **whose land and model name "
+        "two parts**: valued USB-C-16P-F(A40-00119-A52-12) on a land named "
+        "for that part number, sixteen contact pads and four plated shell "
+        "tabs spanning 5.08 x 9.86 mm, placing GCT's USB4105-GF-A by the "
+        "model's file name. KiCad publishes GCT's USB4105, and drawing it "
+        "would put "
+        "GCT's name on a part the value says is another -- the mistake "
+        "OH-102 undid on the XIAOs."
+    ),
+    # --- OH-195: the SparkFun Thing Plus ESP32-C5's copper and holes --------------
+    "ThingPlus_With_Connectors": (
+        "U3 on the Thing Plus C5, the pad map itself: 28 plated holes on the "
+        "2.54 mm pitch in two rows 20.32 mm apart. Its footprint places no "
+        "model and SparkFun give it no PROD_ID, where every part they fit "
+        "carries one, so that no header is fitted is A JUDGEMENT from that, "
+        "as for the C6's THING_PLUS. The holes are drawn as copper. No KiCad "
+        "library was searched: there is no body to look for."
+    ),
+    "Fiducial_0.5mm_Mask1mm": (
+        "SparkFun's fiducial, by its own description a bare 0.5 mm copper "
+        "disc in a 1 mm mask opening. No KiCad library was searched: there "
+        "is no body to look for."
+    ),
+    "Standoff": (
+        "ST1 to ST4 on the Thing Plus C5, unplated 3.1 mm holes for "
+        "standoffs. The footprint carries a screw and a nut of two sizes, "
+        "every one hidden: nothing is fitted. No KiCad library was "
+        "searched: there is no body to look for."
+    ),
+    "Jumper_2_NC_Trace": (
+        "a solder jumper of SparkFun's: two 0.66 x 1.27 mm pads, closed by a "
+        "trace a person may cut. Copper, drawn as copper. No KiCad library "
+        "was searched: there is no body to look for."
+    ),
+    "Jumper_2_NO": (
+        "a solder jumper of SparkFun's: two 0.64 x 1.27 mm pads a person "
+        "may bridge with solder, open from the factory. No KiCad library was "
+        "searched: there is no body to look for."
+    ),
+    "Jumper_3_NC-1_Trace": (
+        "a three-pad solder jumper of SparkFun's: three 0.66 x 1.27 mm pads, "
+        "two joined by a trace a person may cut. No KiCad library was "
+        "searched: there is no body to look for."
+    ),
+    "Jumper_3_NC-2_Trace": (
+        "a three-pad solder jumper of SparkFun's: three 0.66 x 1.27 mm pads, "
+        "all joined by traces a person may cut. No KiCad library was "
+        "searched: there is no body to look for."
+    ),
+    "Jumper_2_PTH_SMD_Combo-NC": (
+        "MEAS on the Thing Plus C5: two 0.64 x 1.27 mm pads joined by a "
+        "trace and two 1.88 mm plated holes beside them, for a meter's leads "
+        "once the trace is cut. No KiCad library was searched: there is no "
+        "body to look for."
+    ),
+    # And its parts. SparkFun publish a model of each in their KiCad
+    # library's 3dmodels/, which nothing here fetches; these are the ones
+    # whose own maker's model KiCad does not publish either.
+    "JST_1x02_P2.0mm_Horizontal_SMD": (
+        "J3 on the Thing Plus C5, the battery socket, a surface-mount 2 mm "
+        "JST by its description, 'to match SparkFun LiPo batteries': two "
+        "1.0 x 4.6 mm contact pads 2.0 mm apart and two mounting pads, the "
+        "C6's JST-2-SMD land. Every PH model in KiCad's Connector_JST, 158 "
+        "listed 2026-10-08, is the through-hole -K."
+    ),
+    "USB-C_16": (
+        "J2 on the Thing Plus C5, the USB-C socket: twelve contact pads and "
+        "four shell tabs spanning 8.64 x 4.76 mm, PROD_ID CONN-14122, the "
+        "part SparkFun's EAGLE boards place as USB-C-16P_4LAYER-PADS, and "
+        "naming no maker. KiCad's Connector_USB, 12 models listed "
+        "2026-10-08, holds two 16-pin receptacles, GCT's and Amphenol's, "
+        "each a named part of its own."
+    ),
+    "microSD_Friction_Fit_Common": (
+        "J4 on the Thing Plus C5's underside, the microSD socket, PROD_ID "
+        "CONN-20948: thirteen pads spanning 10.20 x 6.20 mm, naming no "
+        "maker. KiCad's Connector_Card holds three models, listed "
+        "2026-10-08: two Hirose microSD sockets, each a named part, and a "
+        "nano-SIM."
+    ),
+    "WS2812_2020": (
+        "D2 on the Thing Plus C5, valued WS2812B on a land named for the "
+        "2020 package: four 0.7 mm pads spanning 1.83 x 1.10 mm. The "
+        "smallest WS2812 in KiCad's LED_SMD is the 3.5 x 3.5 mm "
+        "WS2812B-Mini, as for the C6's WS2812-2020."
+    ),
+    "Push_SMD_4.6x2.8mm_h2.5mm": (
+        "SW1 and SW2 on the Thing Plus C5, four pads spanning 4.10 x 1.60 mm "
+        "-- the land the C6's EAGLE file names for C&K's KMR2 -- under a name "
+        "that states the body, 4.6 x 2.8 mm and 2.5 mm high. KiCad's KMR2 is "
+        "4.60 x 2.80 x 1.90 mm, measured 2026-10-08, and this land's own "
+        "file links no datasheet: drawing it would be 0.6 mm short of what "
+        "the name says. **Every dimension is stated, so this is the OH-153 "
+        "kind of absence and not an honest one**: "
+        "tools/model_from_datasheet.py reads a body written L x W x H, and "
+        "this writes its height as h2.5mm."
+    ),
 }
 
 
