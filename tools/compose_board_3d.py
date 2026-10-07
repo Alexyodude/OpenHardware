@@ -2537,41 +2537,95 @@ def preview_mask(layout: pathlib.Path) -> str:
         for at in (4, 6, 8))
 
 
-#: KiCad's own colours for the solder-mask names its stackup offers, as its
-#: 3D view and its Gerber job file render them: `gbrjobColors` in
-#: pcbnew/board_stackup_manager/stackup_predefined_prms.cpp, read at commit
-#: 3ff0b3cc57dd043ac6b159611d85a01374df7a88 (OH-195). A board file stating
-#: its mask as `#rrggbb` is drawn in that instead.
-KICAD_MASK_COLOURS = {"Green": "#3c9650", "Red": "#800000", "Blue": "#000080",
-                      "Purple": "#500050", "Black": "#141414",
-                      "White": "#c8c8c8", "Yellow": "#808000"}
+#: The solder-mask colours KiCad's own 3D view draws a stackup's mask name
+#: in, and the alpha it lays each at: `g_MaskColors` in
+#: 3d-viewer/3d_canvas/board_adapter.cpp, lines 169-184 at commit
+#: 3ff0b3cc57dd043ac6b159611d85a01374df7a88 (OH-195), red, green and blue
+#: out of 255 copied as written there. The view looks the name up in exactly
+#: this list (lines 655-694 of that file). **Not `gbrjobColors`** in
+#: pcbnew/board_stackup_manager/stackup_predefined_prms.cpp, which this table
+#: held until OH-195's review: a Gerber job file writes the colour's name,
+#: not those numbers, and that list's "Green" is 60, 150, 80 where the 3D
+#: view's is 20, 51, 36 at 0.83. A board file stating its mask as `#rrggbb`
+#: or `#rrggbbaa` is drawn from that instead.
+KICAD_MASK_COLOURS: dict[str, tuple[tuple[int, int, int], float]] = {
+    "Green": ((20, 51, 36), 0.83),
+    "Light Green": ((91, 168, 12), 0.83),
+    "Saturated Green": ((13, 104, 11), 0.83),
+    "Red": ((181, 19, 21), 0.83),
+    "Light Red": ((210, 40, 14), 0.83),
+    "Red/Orange": ((239, 53, 41), 0.83),
+    "Blue": ((2, 59, 162), 0.83),
+    "Light Blue 1": ((54, 79, 116), 0.83),
+    "Light Blue 2": ((61, 85, 130), 0.83),
+    "Green/Blue": ((21, 70, 80), 0.83),
+    "Black": ((11, 11, 11), 0.83),
+    "White": ((245, 245, 245), 0.83),
+    "Purple": ((32, 2, 53), 0.83),
+    "Light Purple": ((119, 31, 91), 0.83),
+    "Yellow": ((194, 195, 0), 0.83),
+}
+
+#: The board-body colours the same view draws a stackup's dielectric name
+#: in: `g_BoardColors`, lines 195-203 of the same file at the same commit,
+#: red, green and blue copied as written there. What a KiCad row's mask is
+#: laid over, as an EAGLE row's is laid over its file's `substratecolor`
+#: (`preview_mask`); the substrate is drawn opaque, as EAGLE's is, so the
+#: alpha the view gives each is not carried.
+KICAD_BOARD_COLOURS: dict[str, tuple[int, int, int]] = {
+    "FR4 natural, dark": (51, 43, 22),
+    "FR4 natural": (109, 116, 75),
+    "PTFE natural": (252, 252, 250),
+    "Polyimide": (205, 130, 0),
+    "Phenolic natural": (92, 17, 6),
+    "Brown 1": (146, 99, 47),
+    "Brown 2": (160, 123, 54),
+    "Brown 3": (146, 99, 47),
+    "Aluminum": (213, 213, 213),
+}
 
 
-def kicad_stackup(layout: pathlib.Path) -> tuple[str | None, float | None, float | None]:
+def kicad_stackup(layout: pathlib.Path) -> tuple[
+        str | None, float | None, float | None, tuple[str, ...]]:
     """What a `.kicad_pcb` states of its board: the top solder mask's colour,
     the sum of its stackup's layer thicknesses, and its `(general
-    (thickness))` -- each None where the file does not state it."""
+    (thickness))` -- each None where the file does not state it -- and the
+    colour each dielectric layer names, in order, where it names one."""
     tree = kicad.parse_sexp(layout.read_text(encoding="utf-8"))
+
+    def millimetres(node: list, where: str) -> float:
+        try:
+            return float(node[1])
+        except ValueError as exc:
+            raise ValueError(
+                f"{layout}: {where} states its thickness as {node[1]!r}, "
+                f"which is not a number of millimetres") from exc
+
     general = kicad.first(tree, "general")
     thickness = kicad.first(general, "thickness") if general else None
     setup = kicad.first(tree, "setup")
     stack = kicad.first(setup, "stackup") if setup else None
-    mask, total = None, None
+    mask, total, core = None, None, []
     for layer in (kicad.children(stack, "layer") if stack else ()):
         colour, height = kicad.first(layer, "color"), kicad.first(layer, "thickness")
         if layer[1] == "F.Mask" and colour:
             mask = colour[1]
+        if layer[1].startswith("dielectric") and colour:
+            core.append(colour[1])
         if height:
-            total = (total or 0.0) + float(height[1])
-    return mask, total, (float(thickness[1]) if thickness else None)
+            total = (total or 0.0) + millimetres(
+                height, f"its stackup's layer {layer[1]!r}")
+    return (mask, total,
+            millimetres(thickness, "(general)") if thickness else None,
+            tuple(core))
 
 
 def _kicad_manifest_composition(entry: board_manifest.Row, source,
                                 layout: pathlib.Path) -> Composition:
     """A KiCad manifest row (OH-195): the stackup's own mask and thickness,
     and the board file itself for what each footprint is."""
-    mask, stack, general = (kicad_stackup(layout) if layout.is_file()
-                            else (None, None, None))
+    mask, stack, general, core = (kicad_stackup(layout) if layout.is_file()
+                                  else (None, None, None, ()))
     if stack is not None and general is not None and abs(stack - general) < 5e-4:
         # Two statements that agree decide, and the one written as a number
         # is taken, since the stackup's is a sum of floats.
@@ -2581,23 +2635,56 @@ def _kicad_manifest_composition(entry: board_manifest.Row, source,
         # somebody changed it, so without a stackup that adds up to it the
         # number is a default as often as a statement: the Uno's reused.
         thickness = MANIFEST_THICKNESS_MM
+    # **What the mask is laid over**: the dielectric's own colour where the
+    # stackup names one KiCad's view knows, and KiCad's FR4 otherwise.
+    if len(set(core)) == 1 and core[0] in KICAD_BOARD_COLOURS:
+        substrate = KICAD_BOARD_COLOURS[core[0]]
+        beneath = (f"the {core[0]!r} its stackup names for its dielectric, "
+                   f"which that view draws as rgb {', '.join(map(str, substrate))}")
+    else:
+        substrate = KICAD_BOARD_COLOURS["FR4 natural"]
+        beneath = (f"KiCad's own 'FR4 natural', rgb "
+                   f"{', '.join(map(str, substrate))} -- A JUDGEMENT too: its "
+                   f"stackup names "
+                   + (f"{', '.join(map(repr, core))} for its dielectric "
+                      f"layers, which is not one colour that view names"
+                      if core else "no colour for its dielectric"))
     if mask in KICAD_MASK_COLOURS:
-        colour = KICAD_MASK_COLOURS[mask]
+        rgb, alpha = KICAD_MASK_COLOURS[mask]
+        said = (f"as {mask!r}, which KiCad's own 3D view draws as rgb "
+                f"{', '.join(map(str, rgb))} at alpha {alpha} "
+                f"(KICAD_MASK_COLOURS, its g_MaskColors)")
+    elif mask is not None and re.fullmatch(r"#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?", mask):
+        # KiCad reads `#rrggbbaa` as red, green, blue and alpha, and a
+        # `#rrggbb` as opaque (COLOR4D::SetFromHexString).
+        rgb = tuple(int(mask[at:at + 2], 16) for at in (1, 3, 5))
+        alpha = int(mask[7:9], 16) / 255 if len(mask) == 9 else 1.0
+        said = (f"as {mask}: rgb {', '.join(map(str, rgb))} at alpha "
+                + (f"{int(mask[7:9], 16)}/255" if len(mask) == 9 else "1, opaque"))
+    else:
+        rgb = None
+    if rgb is not None:
+        # The EAGLE rows' blend (`preview_mask`), on KiCad's numbers.
+        colour = "#" + "".join(
+            f"{round(over * alpha + under * (1 - alpha)):02x}"
+            for over, under in zip(rgb, substrate))
         colour_source = (
             f"{source.vendor}'s own board file, whose stackup states its top "
-            f"solder mask as {mask!r}. Drawn, A JUDGEMENT, in the colour "
-            f"KiCad itself renders that name in, {colour} "
-            f"(KICAD_MASK_COLOURS, from KiCad's own source)")
-    elif mask is not None and mask.startswith("#"):
-        colour = mask[:7].lower()
-        colour_source = (f"{source.vendor}'s own board file, whose stackup "
-                         f"states its top solder mask as {mask}, drawn as its "
-                         f"red, green and blue")
-    else:
+            f"solder mask {said}. Drawn, A JUDGEMENT, as KiCad's own 3D view "
+            f"lays a mask over the board: at that alpha over {beneath}. "
+            f"That is {colour}")
+    elif mask is None:
         colour = BOARD_MASK
         colour_source = (
             "BOARD_MASK, A JUDGEMENT rather than a reading: the board file's "
             "stackup names no colour for its top solder mask")
+    else:
+        colour = BOARD_MASK
+        colour_source = (
+            f"BOARD_MASK, A JUDGEMENT rather than a reading: the board file's "
+            f"stackup names its top solder mask {mask!r}, which is neither a "
+            f"name KiCad's own 3D view draws (KICAD_MASK_COLOURS) nor "
+            f"#rrggbb or #rrggbbaa")
     return Composition(
         board=entry.board,
         layout=layout,

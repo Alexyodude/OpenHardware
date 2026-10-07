@@ -4143,19 +4143,29 @@ def test_a_manifest_boards_colour_is_read_where_its_file_states_one():
             continue
         checked += 1
         if spec.layout.suffix == ".kicad_pcb":
-            # KiCad's stackup names the top mask (OH-195), read here by
-            # pattern rather than through the composer's own reader.
+            # KiCad's stackup names the top mask and the dielectric under it
+            # (OH-195), read here by pattern rather than through the
+            # composer's own reader, and drawn as KiCad's 3D view lays one
+            # over the other.
+            text = spec.layout.read_text(encoding="utf-8")
             named = re.search(r'\(layer "F\.Mask"\s*\(type "[^"]*"\)'
-                              r'(?:\s*\([^()]*\))*?\s*\(color "([^"]+)"\)',
-                              spec.layout.read_text(encoding="utf-8"))
+                              r'(?:\s*\([^()]*\))*?\s*\(color "([^"]+)"\)', text)
             if named is None:
                 assert spec.colour == compose.BOARD_MASK, row.board
-            elif named.group(1) in compose.KICAD_MASK_COLOURS:
-                assert spec.colour == compose.KICAD_MASK_COLOURS[named.group(1)]
-                assert f"{named.group(1)!r}" in spec.colour_source, row.board
-                assert "A JUDGEMENT" in spec.colour_source, row.board
+                continue
+            cores = re.findall(r'\(layer "dielectric \d+"\s*\(type "[^"]*"\)'
+                               r'(?:\s*\([^()]*\))*?\s*\(color "([^"]+)"\)', text)
+            under = compose.KICAD_BOARD_COLOURS[
+                cores[0] if len(set(cores)) == 1 else "FR4 natural"]
+            stated = named.group(1)
+            if stated in compose.KICAD_MASK_COLOURS:
+                rgb, alpha = compose.KICAD_MASK_COLOURS[stated]
             else:
-                assert spec.colour == named.group(1)[:7].lower(), row.board
+                rgb = tuple(int(stated[at:at + 2], 16) for at in (1, 3, 5))
+                alpha = int(stated[7:9], 16) / 255 if len(stated) == 9 else 1.0
+            assert spec.colour == _over(rgb, alpha, under), (row.board, spec.colour)
+            assert stated in spec.colour_source, row.board
+            assert "A JUDGEMENT" in spec.colour_source, row.board
             continue
         stated = _preview(spec.layout, "soldermaskcolor")
         if spec.colour == compose.BOARD_MASK:
@@ -4222,7 +4232,7 @@ def test_a_manifest_boards_thickness_is_its_own_note_or_the_unos_stack():
         if spec.layout.suffix == ".kicad_pcb":
             # Its stackup and `(general (thickness))`, two statements that
             # decide only where they agree (OH-195).
-            _mask, layers, general = compose.kicad_stackup(spec.layout)
+            _mask, layers, general, _core = compose.kicad_stackup(spec.layout)
             agree = (layers is not None and general is not None
                      and abs(layers - general) < 5e-4)
             assert spec.thickness_mm == (
@@ -5360,23 +5370,73 @@ def _kicad_stackup_file(stackup: str | None, general: str | None) -> pathlib.Pat
     return path
 
 
-def _two_layer_stack(mask: str | None, core: str) -> str:
+def _two_layer_stack(mask: str | None, core: str, under: str | None = None) -> str:
     colour = f' (color "{mask}")' if mask is not None else ""
+    named = f' (color "{under}")' if under is not None else ""
     return (f'\t\t\t(layer "F.Mask" (type "Top Solder Mask"){colour} (thickness 0.01))\n'
             f'\t\t\t(layer "F.Cu" (type "copper") (thickness 0.035))\n'
-            f'\t\t\t(layer "dielectric 1" (type "core") (thickness {core}) (material "FR4"))\n'
+            f'\t\t\t(layer "dielectric 1" (type "core"){named} (thickness {core}) (material "FR4"))\n'
             f'\t\t\t(layer "B.Cu" (type "copper") (thickness 0.035))\n'
             f'\t\t\t(layer "B.Mask" (type "Bottom Solder Mask"){colour} (thickness 0.01))\n')
+
+
+def _over(rgb, alpha: float, under) -> str:
+    """`rgb` laid at `alpha` over an opaque `under`, as `#rrggbb`: the blend
+    an EAGLE preview and KiCad's 3D view both draw, written out again here
+    so the composer's own arithmetic is not what checks it."""
+    return "#" + "".join(f"{round(a * alpha + b * (1 - alpha)):02x}"
+                         for a, b in zip(rgb, under))
+
+
+def test_kicads_mask_and_board_colours_are_its_own_3d_views():
+    """**The colours a KiCad row is drawn in are the ones KiCad's own 3D view
+    draws** (OH-195): `g_MaskColors` and `g_BoardColors` in
+    3d-viewer/3d_canvas/board_adapter.cpp, lines 169-184 and 195-203 at
+    commit 3ff0b3cc57dd043ac6b159611d85a01374df7a88, copied a second time
+    here so that changing either copy fails. The table was `gbrjobColors`
+    first, whose "Green" is 60, 150, 80 -- a Gerber job file writes the
+    NAME -- and a mutant changing an entry survived every test."""
+    assert compose.KICAD_MASK_COLOURS == {
+        "Green": ((20, 51, 36), 0.83),
+        "Light Green": ((91, 168, 12), 0.83),
+        "Saturated Green": ((13, 104, 11), 0.83),
+        "Red": ((181, 19, 21), 0.83),
+        "Light Red": ((210, 40, 14), 0.83),
+        "Red/Orange": ((239, 53, 41), 0.83),
+        "Blue": ((2, 59, 162), 0.83),
+        "Light Blue 1": ((54, 79, 116), 0.83),
+        "Light Blue 2": ((61, 85, 130), 0.83),
+        "Green/Blue": ((21, 70, 80), 0.83),
+        "Black": ((11, 11, 11), 0.83),
+        "White": ((245, 245, 245), 0.83),
+        "Purple": ((32, 2, 53), 0.83),
+        "Light Purple": ((119, 31, 91), 0.83),
+        "Yellow": ((194, 195, 0), 0.83),
+    }
+    assert compose.KICAD_BOARD_COLOURS == {
+        "FR4 natural, dark": (51, 43, 22),
+        "FR4 natural": (109, 116, 75),
+        "PTFE natural": (252, 252, 250),
+        "Polyimide": (205, 130, 0),
+        "Phenolic natural": (92, 17, 6),
+        "Brown 1": (146, 99, 47),
+        "Brown 2": (160, 123, 54),
+        "Brown 3": (146, 99, 47),
+        "Aluminum": (213, 213, 213),
+    }
 
 
 def test_a_kicad_rows_colour_and_thickness_are_what_its_stackup_states():
     """**A KiCad board file states its colour and thickness in its
     `(stackup ...)`** (OH-195), where an EAGLE one states them in a preview
-    and a note. A named mask is drawn in the colour KiCad itself renders
-    that name in, and says it is a judgement; a mask given as a colour is
-    drawn as that colour. The stackup's layers must add up to `(general
-    (thickness))` for either number to be believed: KiCad writes the general
-    thickness on every board whether anybody set it or not."""
+    and a note. A mask is drawn as KiCad's own 3D view draws it -- a named
+    one in that view's colour for the name and at its alpha, a `#rrggbbaa`
+    at the alpha it states -- laid over the dielectric's own colour where
+    the stackup names one, and KiCad's FR4 where it does not, as an EAGLE
+    row's mask is laid over its substrate; each a judgement, and said to
+    be. The stackup's layers must add up to `(general (thickness))` for
+    either number to be believed: KiCad writes the general thickness on
+    every board whether anybody set it or not."""
     from tools import board_manifest, board_sources
 
     row = next(r for r in board_manifest.ROWS
@@ -5387,13 +5447,25 @@ def test_a_kicad_rows_colour_and_thickness_are_what_its_stackup_states():
         return compose._kicad_manifest_composition(
             row, source, _kicad_stackup_file(stackup, general))
 
+    # Black, 11, 11, 11 at 0.83, over KiCad's FR4 natural, 109, 116, 75:
+    # the stackup names no colour for its core.
     black = composed(_two_layer_stack("Black", "1.51"), "1.6")
-    assert black.colour == compose.KICAD_MASK_COLOURS["Black"]
-    assert "'Black'" in black.colour_source and "A JUDGEMENT" in black.colour_source
+    assert black.colour == "#1c1d16" == _over((11, 11, 11), 0.83, (109, 116, 75))
+    for said in ("'Black'", "A JUDGEMENT", "no colour for its dielectric"):
+        assert said in black.colour_source, (said, black.colour_source)
     assert black.thickness_mm == 1.6
+    # A dielectric the stackup names is what the mask is laid over.
+    flex = composed(_two_layer_stack("Black", "1.51", "Polyimide"), "1.6")
+    assert flex.colour == "#2c1f09" == _over((11, 11, 11), 0.83, (205, 130, 0))
+    assert "'Polyimide'" in flex.colour_source, flex.colour_source
+    # **A colour's own alpha is drawn, not dropped**: 0xD4 is 212/255.
     custom = composed(_two_layer_stack("#1B1B1BD4", "0.71"), "0.8")
-    assert custom.colour == "#1b1b1b" and "#1B1B1BD4" in custom.colour_source
+    assert custom.colour == "#292a23" == _over((27, 27, 27), 212 / 255, (109, 116, 75))
+    for said in ("#1B1B1BD4", "212/255", "A JUDGEMENT"):
+        assert said in custom.colour_source, (said, custom.colour_source)
     assert custom.thickness_mm == 0.8
+    # And one stating none is opaque, as KiCad reads it.
+    assert composed(_two_layer_stack("#1B1B1B", "0.71"), "0.8").colour == "#1b1b1b"
     # Layers that do not add up to the general thickness decide nothing.
     assert composed(_two_layer_stack("Black", "1.51"), "1.2").thickness_mm == (
         compose.MANIFEST_THICKNESS_MM)
@@ -5402,22 +5474,56 @@ def test_a_kicad_rows_colour_and_thickness_are_what_its_stackup_states():
     bare = composed(None, "1.6")
     assert bare.colour == compose.BOARD_MASK and "A JUDGEMENT" in bare.colour_source
     assert bare.thickness_mm == compose.MANIFEST_THICKNESS_MM
-    assert composed(_two_layer_stack(None, "1.51"), "1.6").colour == compose.BOARD_MASK
+    unnamed = composed(_two_layer_stack(None, "1.51"), "1.6")
+    assert unnamed.colour == compose.BOARD_MASK
+    assert "names no colour" in unnamed.colour_source, unnamed.colour_source
+    # **A name KiCad's view does not draw is said to be one**, not passed
+    # off as no name at all.
+    matte = composed(_two_layer_stack("Matte Black", "1.51"), "1.6")
+    assert matte.colour == compose.BOARD_MASK
+    assert "'Matte Black'" in matte.colour_source, matte.colour_source
+    assert "names no colour" not in matte.colour_source, matte.colour_source
+
+
+def test_a_kicad_stackup_thickness_that_is_not_a_number_is_named():
+    """A stackup thickness that is not a number fails naming the file, the
+    layer and the words it found (OH-195), not as a bare ValueError."""
+    path = _kicad_stackup_file(_two_layer_stack("Green", "1.5x"), "1.6")
+    with pytest.raises(ValueError) as caught:
+        compose.kicad_stackup(path)
+    for said in (str(path), "'dielectric 1'", "'1.5x'"):
+        assert said in str(caught.value), (said, str(caught.value))
 
 
 def test_the_glyph_mini_is_drawn_in_what_its_own_stackup_states():
-    """PCBCUPID's file states a green top mask and a stackup adding up to its
-    general 1.6 mm, so both numbers are the file's, and the model's parts
-    are read out of that same file."""
+    """PCBCUPID's file states a green top mask over 'FR4 natural' and a
+    stackup adding up to its general 1.6 mm, so both numbers are the
+    file's, and the model's parts are read out of that same file. The
+    colour is KiCad's 3D view's Green, 20, 51, 36 at 0.83, over its FR4
+    natural, 109, 116, 75."""
     spec = next((s for s in compose.COMPOSITIONS
                  if s.board == "PCBCUPID Glyph Mini RP2040"), None)
     assert spec is not None, "the Glyph Mini is a KiCad row and is composed"
     if not _fetched(spec):
         pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
-    assert spec.colour == compose.KICAD_MASK_COLOURS["Green"]
-    assert "'Green'" in spec.colour_source
+    assert spec.colour == "#233e2b"
+    assert "'Green'" in spec.colour_source and "'FR4 natural'" in spec.colour_source
     assert spec.thickness_mm == 1.6
     assert spec.schematic == spec.layout
+
+
+def test_the_thing_plus_c5_is_drawn_at_the_alpha_its_stackup_states():
+    """SparkFun's stackup states its mask as #E0311DD4 -- red at alpha
+    212/255 -- and names no colour for its dielectric (OH-195). Its alpha
+    was dropped and the board drawn #e0311d; it is laid over KiCad's FR4,
+    as a named mask is."""
+    spec = next((s for s in compose.COMPOSITIONS
+                 if s.board == "SparkFun Thing Plus ESP32-C5"), None)
+    assert spec is not None, "the Thing Plus C5 is a KiCad row and is composed"
+    if not _fetched(spec):
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    assert spec.colour == "#cd3c25" == _over((224, 49, 29), 212 / 255, (109, 116, 75))
+    assert "#E0311DD4" in spec.colour_source and "212/255" in spec.colour_source
 
 
 #: A KiCad footprint on the underside, placed the way KiCad stores one: its
