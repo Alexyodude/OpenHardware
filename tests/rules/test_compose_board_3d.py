@@ -4783,6 +4783,12 @@ def test_each_manifest_board_counts_the_same_things_bodyless():
         pytest.skip(f"checked the rest; not fetched: {unfetched}")
 
 
+#: The passives a board's own file states the kind of and nobody publishes a
+#: model for, by board and reference: each refused by its package's `ABSENT`
+#: reason rather than drawn (OH-195).
+PASSIVES_NOBODY_MODELS = {("Olimex ESP32-C3-DevKit-Lipo", "L1")}
+
+
 def test_every_manifest_passive_is_drawn_as_the_kind_its_vendor_states():
     """**The rows, held to the schematics**, per fetched board that reads
     one -- the manifest boards and the Uno: each part a schematic calls a
@@ -4811,9 +4817,12 @@ def test_every_manifest_passive_is_drawn_as_the_kind_its_vendor_states():
             if said is None or said.kind not in compose.PASSIVE_KINDS.values():
                 continue
             # A passive nobody publishes a model of is refused by its
-            # package's ABSENT reason, which `EXPLAINS` pins per board: the
-            # Olimex's inductor L1 (OH-195).
-            assert row is not None or element.package in compose.ABSENT, (
+            # package's ABSENT reason, named here part by part: the
+            # Olimex's inductor L1 (OH-195). Nowhere else may a stated
+            # passive go undrawn.
+            assert row is not None or (
+                (spec.board, element.name) in PASSIVES_NOBODY_MODELS
+                and compose.absent_why(element) is not None), (
                 f"{spec.board}: {element.name} ({element.package}) is stated "
                 f"{said.kind}, and no row draws that kind on that package")
             if row is None:
