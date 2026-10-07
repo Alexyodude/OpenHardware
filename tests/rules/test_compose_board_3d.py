@@ -3921,7 +3921,7 @@ def test_an_unmodelled_placement_is_counted_not_skipped():
     assert "unmodelled.append" in code, (
         "an unmapped placement falls through a bare continue again"
     )
-    assert "element.package not in ABSENT" in code, (
+    assert "absent_why(element) is None" in code, (
         "ABSENT packages are counted as unmodelled, double-reporting what "
         "the absent list already explains"
     )
@@ -5620,7 +5620,7 @@ def test_the_glyph_headers_are_refused_for_the_pair_of_holes_under_each_pin():
                   for node in kicad.children(tree, "footprint")}
     for name in ("J3", "J4", "J5"):
         element = board.element(name)
-        assert compose.ABSENT[element.package] == compose.GLYPH_HEADER
+        assert compose.absent_why(element) == compose.GLYPH_HEADER
         assert compose.NO_BODY not in compose.GLYPH_HEADER
         pairs: dict[str, list] = {}
         for pad in element.pads_of("thru_hole"):
@@ -5632,6 +5632,36 @@ def test_the_glyph_headers_are_refused_for_the_pair_of_holes_under_each_pin():
         assert "Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x" in model.path
         assert tuple(abs(a) for a in model.rotate) == (0.0, 180.0, 0.0), name
         assert model.offset == (0.0, 0.0, -1.5), name
+
+
+def test_a_plain_kicad_header_is_not_refused_for_the_glyphs_castellated_rows(capsys):
+    """**The Glyph's reason is keyed to the Glyph's library** (OH-195).
+    PCBCUPID keep their castellated rows in `Conn_Castellated_Holes_2.54mm`
+    under the names of KiCad's own plain headers, so a board placing KiCad's
+    `PinHeader_1x05_P2.54mm_Vertical` from KiCad's library places another
+    part: it is not refused with the Glyph's pair-of-holes reason, and with
+    no row to draw it is counted unmodelled, as any land nothing explains."""
+    path = _kicad_parts_file(
+        ("Connector_PinHeader_2.54mm:PinHeader_1x05_P2.54mm_Vertical",
+         "J1", "Conn_01x05", "", True),
+        ("Conn_Castellated_Holes_2.54mm:PinHeader_1x05_P2.54mm_Vertical",
+         "J3", "Conn_01x05", "", True))
+    assert set(compose.ABSENT_ONLY_FROM) <= set(compose.ABSENT), (
+        "an ABSENT_ONLY_FROM key that is no ABSENT key restricts nothing")
+    elements = {e.name: e for e in compose.read_layout(path).elements}
+    assert compose.absent_why(elements["J1"]) is None
+    assert compose.absent_why(elements["J3"]) == compose.GLYPH_HEADER
+    spec = compose.Composition(
+        board="HEADERS", layout=path, fetch_with="", pcb_chip=None,
+        geometry="", headers=("J1",), thickness_mm=1.6,
+        colour=compose.BOARD_MASK, colour_source="", schematic=path)
+    with mock.patch.object(compose, "CORRESPONDENCE", ()):
+        compose.compose(spec, deflection=0.05, check=True)
+    out = capsys.readouterr().out
+    assert "no model 1 placement(s)" in out and (
+        "J1 (PinHeader_1x05_P2.54mm_Vertical)" in out), out
+    assert "absent  J3 (PinHeader_1x05_P2.54mm_Vertical): J3, J4 and J5" in out, out
+    assert "absent  J1" not in out and "J1/J3" not in out and "J3/J1" not in out, out
 
 
 def test_the_glyph_usb_socket_lands_where_its_own_footprint_puts_it():

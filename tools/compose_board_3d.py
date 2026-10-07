@@ -2132,6 +2132,24 @@ ABSENT: dict[str, str] = {
     ),
 }
 
+#: `ABSENT` entries that hold only for a land from the named vendor library
+#: (OH-195). Their package names are KiCad's own, so a board placing KiCad's
+#: footprint of that name places another part, and is not refused for this
+#: one's reason: PCBCUPID keep their castellated rows in their own library
+#: under the names of KiCad's plain headers.
+ABSENT_ONLY_FROM: dict[str, str] = {
+    "PinHeader_1x05_P2.54mm_Vertical": "Conn_Castellated_Holes_2.54mm",
+    "PinHeader_1x09_P2.54mm_Vertical": "Conn_Castellated_Holes_2.54mm",
+}
+
+
+def absent_why(element: eagle.Element) -> str | None:
+    """The `ABSENT` reason this placement is not drawn for, or None."""
+    only = ABSENT_ONLY_FROM.get(element.package)
+    if only is not None and element.library != only:
+        return None
+    return ABSENT.get(element.package)
+
 
 @dataclasses.dataclass(frozen=True)
 class Composition:
@@ -5054,7 +5072,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                                             ("word", said.word))
                 if text is not None}
         if component is None:
-            if element.package not in ABSENT:
+            if absent_why(element) is None:
                 if element.pads:
                     unmodelled.append(f"{element.name} ({element.package})")
                 else:
@@ -5236,7 +5254,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     #: its package: a not-fitted part is not absent for want of a model.
     stated_off = {element.name for element, _why in kind_refused}
     absent = [e for e in board.elements
-              if e.package in ABSENT and e.name not in stated_off]
+              if absent_why(e) is not None and e.name not in stated_off]
     parts = [e for e in absent if NO_BODY not in ABSENT[e.package]]
     if parts or kind_refused:
         stated = ("" if spec.schematic is None else
