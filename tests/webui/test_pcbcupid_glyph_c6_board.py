@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """The evidence `BOARD_FIRMWARE_VERIFIED` names for the PCBCUPID Glyph C6
-(rules/board-claims.md §7 and §11, OH-194), made as the Glyph C3's is
+(rules/board-claims.md §7 and §13, OH-194), made as the Glyph C3's is
 (`tests/webui/test_pcbcupid_glyph_c3_board.py`), on its own chip.
 
 The pin watched is `LED_BUILTIN`, the one its variant numbers on a pad whose

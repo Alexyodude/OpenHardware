@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
 """The evidence `BOARD_FIRMWARE_VERIFIED` names for the PCBCUPID Glyph C3
-(rules/board-claims.md §7 and §11, OH-194), made as the Pro Micro
+(rules/board-claims.md §7 and §13, OH-194), made as the Pro Micro
 ESP32-C3's is (`tests/webui/test_sparkfun_pro_micro_esp32c3_board.py`), on
 another pin.
 
