@@ -2169,13 +2169,14 @@ COMPOSED: tuple[tuple[str, str, str], ...] = (
     ("XIAO-ESP32-C5-DIP", "ESP32-C5", "XIAO-ESP32-C5-DIP"),
     ("XIAO-ESP32-C5-SMD", "ESP32-C5", "XIAO-ESP32-C5-SMD"),
 )
-#: Every manifest row whose board file is EAGLE's, which is every row the
-#: composer composes: it refuses any other by name (`manifest_composition`).
+#: Every manifest row whose board file is EAGLE's or KiCad's, which is every
+#: row the composer composes: it refuses any other by name
+#: (`manifest_composition`; KiCad's since OH-195).
 #: The chip is the row's own, which `webui/boards/catalogue.py` also reads.
 COMPOSED += tuple(
     (row.board, row.chip, row.board.replace(" ", "-"))
     for row in board_manifest.ROWS
-    if pathlib.PurePosixPath(row.cad).suffix.lower() == ".brd"
+    if pathlib.PurePosixPath(row.cad).suffix.lower() in (".brd", ".kicad_pcb")
 )
 
 

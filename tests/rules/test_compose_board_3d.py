@@ -423,6 +423,10 @@ EXPLAINS: dict[str, set[str]] = {
     # device says NO_POP (`REFUSED_BY_SCHEMATIC`).
     "SparkFun Pro Micro ESP32-C3": {"USB-C-16P_4LAYER-PADS"},
     "SparkFun Qwiic Pocket ESP32-C6": {"USB-C-16P_4LAYER-PADS", "JST-2-SMD"},
+    # The header PCBCUPID's footprints hang under the castellated rows, which
+    # a person would look for (OH-195; `compose.GLYPH_HEADER`).
+    "PCBCUPID Glyph Mini RP2040": {"PinHeader_1x05_P2.54mm_Vertical",
+                                   "PinHeader_1x09_P2.54mm_Vertical"},
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
 # same placements, same absences -- so the entries are derived the same way
@@ -1603,9 +1607,13 @@ def test_the_rp2350_is_drawn_and_the_near_miss_is_still_refused():
             if not leads:
                 continue
             checked += 1
-            assert len(element.pads) == int(leads.group(1)) + 1, (
+            # A pad on no copper layer is a paste aperture KiCad lays over
+            # an exposed pad, as the Glyph's RP2040 has, and not a lead
+            # (OH-195). An EAGLE pad is on copper by construction.
+            copper = [pad for pad in element.pads if pad.front or pad.back]
+            assert len(copper) == int(leads.group(1)) + 1, (
                 f"{spec.board}: {element.name} ({element.package}) puts down "
-                f"{len(element.pads)} pads and was given {component.model}. "
+                f"{len(copper)} pads and was given {component.model}. "
                 f"A {leads.group(1)}-lead part and its exposed pad is not "
                 f"that land, however well it measures."
             )
@@ -2422,10 +2430,10 @@ def test_the_importers_boards_are_real_and_each_named_once():
 
 def test_a_manifest_row_the_composer_refuses_is_not_in_the_importers_list(
         monkeypatch):
-    """The importer's `.brd`-only filter, pinned: a KiCad row is refused by
-    the composer (`manifest_composition`), so it must not reach `COMPOSED`
-    either, and an EAGLE row beside it must. The importer is loaded afresh
-    over the patched rows, because it reads them as it loads."""
+    """The importer's filter, pinned: a row in a format the composer refuses
+    (`manifest_composition`) must not reach `COMPOSED` either, and an EAGLE
+    and a KiCad row beside it must -- KiCad's since OH-195. The importer is
+    loaded afresh over the patched rows, because it reads them as it loads."""
     import importlib.util
 
     from tools import board_manifest
@@ -2434,7 +2442,9 @@ def test_a_manifest_row_the_composer_refuses_is_not_in_the_importers_list(
                                     cad="board.kicad_pcb")
     eagle_row = dataclasses.replace(board_manifest.ROWS[0], board="An EAGLE Board",
                                     cad="board.brd")
-    monkeypatch.setattr(board_manifest, "ROWS", (kicad_row, eagle_row))
+    altium_row = dataclasses.replace(board_manifest.ROWS[0],
+                                     board="An Altium Board", cad="board.PcbDoc")
+    monkeypatch.setattr(board_manifest, "ROWS", (kicad_row, eagle_row, altium_row))
     spec = importlib.util.spec_from_file_location(
         "import_3d_model_over_patched_rows", REPO / "tools" / "import_3d_model.py")
     fresh = importlib.util.module_from_spec(spec)
@@ -2442,10 +2452,12 @@ def test_a_manifest_row_the_composer_refuses_is_not_in_the_importers_list(
     spec.loader.exec_module(fresh)
     named = {board for board, _chip, _slug in fresh.COMPOSED}
     assert "An EAGLE Board" in named, "the importer no longer reads the rows"
-    assert "A KiCad Board" not in named, (
-        "a KiCad row reached COMPOSED, and the composer refuses it")
-    _made, refused = compose.manifest_compositions((kicad_row,))
-    assert "A KiCad Board" in refused
+    assert "A KiCad Board" in named, (
+        "a KiCad row is composed and the importer does not list it")
+    assert "An Altium Board" not in named, (
+        "an Altium row reached COMPOSED, and the composer refuses it")
+    _made, refused = compose.manifest_compositions((kicad_row, altium_row))
+    assert set(refused) == {"An Altium Board"}
 
 
 def test_every_composed_board_says_how_to_fetch_its_layout():
@@ -4116,6 +4128,21 @@ def test_a_manifest_boards_colour_is_read_where_its_file_states_one():
         if spec is None or not spec.layout.is_file():
             continue
         checked += 1
+        if spec.layout.suffix == ".kicad_pcb":
+            # KiCad's stackup names the top mask (OH-195), read here by
+            # pattern rather than through the composer's own reader.
+            named = re.search(r'\(layer "F\.Mask"\s*\(type "[^"]*"\)'
+                              r'(?:\s*\([^()]*\))*?\s*\(color "([^"]+)"\)',
+                              spec.layout.read_text(encoding="utf-8"))
+            if named is None:
+                assert spec.colour == compose.BOARD_MASK, row.board
+            elif named.group(1) in compose.KICAD_MASK_COLOURS:
+                assert spec.colour == compose.KICAD_MASK_COLOURS[named.group(1)]
+                assert f"{named.group(1)!r}" in spec.colour_source, row.board
+                assert "A JUDGEMENT" in spec.colour_source, row.board
+            else:
+                assert spec.colour == named.group(1)[:7].lower(), row.board
+            continue
         stated = _preview(spec.layout, "soldermaskcolor")
         if spec.colour == compose.BOARD_MASK:
             assert stated == unset, (
@@ -4178,6 +4205,15 @@ def test_a_manifest_boards_thickness_is_its_own_note_or_the_unos_stack():
         if spec is None or not spec.layout.is_file():
             continue
         checked += 1
+        if spec.layout.suffix == ".kicad_pcb":
+            # Its stackup and `(general (thickness))`, two statements that
+            # decide only where they agree (OH-195).
+            _mask, layers, general = compose.kicad_stackup(spec.layout)
+            agree = (layers is not None and general is not None
+                     and abs(layers - general) < 5e-4)
+            assert spec.thickness_mm == (
+                general if agree else compose.MANIFEST_THICKNESS_MM), row.board
+            continue
         stated = "thickness_mm" in compose.MANIFEST_STATED.get(row.board, {})
         if not stated:
             assert spec.thickness_mm == _uno().thickness_mm, (
@@ -4646,6 +4682,9 @@ REFUSED_BY_SCHEMATIC = {
     # Arduino named its fuse F1 and its varistors Z1 and Z2, and placed them
     # from an inductor's deviceset and a varistor's whose prefix is R.
     "Arduino Uno": {"F1", "Z1", "Z2"},
+    # A KiCad board file is its own schematic here (OH-195), and PCBCUPID's
+    # states every passive's kind three ways that agree.
+    "PCBCUPID Glyph Mini RP2040": set(),
 }
 
 
@@ -4674,6 +4713,8 @@ BODYLESS = {
     "SparkFun Qwiic Pocket ESP32-C6": {
         "FIDUCIAL-MICRO", "PAD.03X.03", "SMT-JUMPER_2_NC_TRACE_SILK",
         "SMT-JUMPER_3_2-NC_TRACE_SILK"},
+    # Its three logos put down no pad and are counted as ink instead.
+    "PCBCUPID Glyph Mini RP2040": set(),
 }
 
 
@@ -4800,7 +4841,7 @@ def test_what_decided_each_passive_is_recorded_in_the_model(
     compose.compose(spec, deflection=0.05, check=False)
     out = capsys.readouterr().out
     assert ("  kinds   21 passive(s) drawn as the kind Adafruit QT Py "
-            "ESP32-C3.sch states: 19 by the deviceset's prefix and the value, "
+            "ESP32-C3.sch states: 19 by the prefix and the value, "
             "2 by the prefix alone, 0 by the value alone") in out, out
     assert "  refused 5 placement(s): 2 of 2 package(s) with no published " \
            "model, and 3 by what their own schematic states" in out, out
@@ -5049,27 +5090,32 @@ def test_a_board_not_fetched_is_skipped_and_the_rest_still_compose(monkeypatch,
         capsys.readouterr().out)
 
 
-def test_a_kicad_manifest_row_is_refused_by_name(capsys):
-    """Every reading `manifest_composition` makes beyond the row is an EAGLE
-    field -- the preview colour, the design-rule stack -- so a `.kicad_pcb`
-    row would be composed with an EAGLE sentence about a KiCad file. Until
-    somebody reads KiCad's own `(general (thickness ...))` and `(stackup
-    ...)`, such a row is refused by name, and the refusal is printed.
+def test_a_manifest_row_in_neither_format_is_refused_by_name(capsys):
+    """Every reading `manifest_composition` makes beyond the row is EAGLE's or
+    KiCad's own field -- a preview colour and a design-rule stack, or a
+    `(stackup ...)` and `(general (thickness ...))` (OH-195) -- so a row in
+    any other format would be composed with a sentence about a file it is
+    not. Such a row is refused by name, and the refusal is printed; a KiCad
+    row beside it is composed.
     """
     from tools import board_manifest
 
+    altium_row = dataclasses.replace(board_manifest.ROWS[0],
+                                     board="An Altium row",
+                                     cad="Hardware/board.PcbDoc")
     kicad_row = dataclasses.replace(board_manifest.ROWS[0],
                                     board="A KiCad row",
                                     cad="Hardware/board.kicad_pcb")
     made, refused = compose.manifest_compositions(
-        (board_manifest.ROWS[0], kicad_row))
-    assert [spec.board for spec in made] == [board_manifest.ROWS[0].board]
-    assert "composition from a .kicad_pcb manifest row is not supported yet" in (
-        refused["A KiCad row"])
+        (board_manifest.ROWS[0], altium_row, kicad_row))
+    assert [spec.board for spec in made] == [board_manifest.ROWS[0].board,
+                                             "A KiCad row"]
+    assert "composition from a .pcbdoc manifest row is not supported" in (
+        refused["An Altium row"])
     with mock.patch.object(compose, "MANIFEST_REFUSED", refused):
-        assert compose.main(["--board", "A KiCad row", "--check"]) == 2
+        assert compose.main(["--board", "An Altium row", "--check"]) == 2
     out = capsys.readouterr().out
-    assert "A KiCad row:" in out and "REFUSED" in out and "not supported yet" in out
+    assert "An Altium row:" in out and "REFUSED" in out and "not supported" in out
 
 
 def test_a_manufacturers_model_sits_on_the_board_whatever_its_z():
@@ -5165,3 +5211,319 @@ def test_a_manufacturers_file_is_cached_by_the_commit_it_came_from():
                       if c.step is None and not c.modelled)
     assert compose.cached(kicad_part, kicad_part.url, ".step") == (
         compose.CACHE / f"component-{kicad_part.slug}.step")
+
+
+# --- a KiCad manifest row, read from what its own file states (OH-195) ---------
+
+
+def _kicad_parts_file(*parts) -> pathlib.Path:
+    """A KiCad board placing each `(library:name, reference, value, attr,
+    has_pads)` at the same spot, two 0402 pads apiece where it has pads -- on
+    disk, because the readers take a path."""
+    import tempfile
+
+    placed = []
+    for lib_id, reference, value, attr, has_pads in parts:
+        pads = "".join(
+            f'\t\t(pad "{number}" smd rect (at {x} 0) (size 0.5 0.5) '
+            f'(layers "F.Cu"))\n'
+            for number, x in (("1", -0.48), ("2", 0.48))) if has_pads else ""
+        placed.append(
+            f'\t(footprint "{lib_id}"\n\t\t(layer "F.Cu")\n\t\t(at 10 10)\n'
+            f'\t\t(property "Reference" "{reference}")\n'
+            f'\t\t(property "Value" "{value}")\n'
+            + (f"\t\t(attr {attr})\n" if attr else "") + pads + "\t)\n")
+    path = pathlib.Path(tempfile.mkdtemp()) / "PARTS.kicad_pcb"
+    path.write_text("(kicad_pcb\n\t(version 20241229)\n"
+                    '\t(gr_rect (start 0 0) (end 20 20) (layer "Edge.Cuts"))\n'
+                    + "".join(placed) + ")\n", encoding="utf-8")
+    return path
+
+
+def test_a_kicad_part_whose_file_states_nothing_of_its_kind_is_refused():
+    """**OH-187's rule, on a board file that is its own schematic.** A KiCad
+    footprint carries three statements of kind: KiCad's own passive library
+    it came from, its reference's letters, and its value. Those that speak
+    decide where they agree; where they disagree, or where none speaks, a
+    part on a land that only passives are drawn on is refused -- a row does
+    not get to decide what a part is."""
+    path = _kicad_parts_file(
+        ("Resistor_SMD:R_0402_1005Metric", "R1", "10k", "smd", True),
+        ("Capacitor_SMD:C_0402_1005Metric", "7", "", "smd", True),
+        ("MyParts:R_0402_1005Metric", "12", "", "smd", True),
+        ("MyParts:R_0402_1005Metric", "X3", "", "smd", True),
+        ("Resistor_SMD:R_0402_1005Metric", "C4", "100nF", "smd", True),
+    )
+    statements = compose.kicad_statements(path)
+    elements = {e.name: e for e in compose.read_layout(path).elements}
+
+    def drawn(name):
+        return compose.drawn_from(elements[name], statements, path.name)
+
+    # All three speak and agree.
+    assert statements["R1"] == compose.Statement(
+        "resistor", "R", "10k", word="Resistor_SMD")
+    assert drawn("R1")[0].model == "R_0402_1005Metric"
+    # KiCad's own library alone is a statement, and it decides.
+    assert statements["7"] == compose.Statement(
+        "capacitor", None, None, word="Capacitor_SMD")
+    assert drawn("7")[0].model == "C_0402_1005Metric"
+    # **Nothing speaks**: a library of the vendor's own, a reference with no
+    # letters and a value with no unit. This is the ticket's DONE-WHEN.
+    row, why = drawn("12")
+    assert row is None and why.startswith(
+        "nothing in PARTS.kicad_pcb states what kind of part 12 is"), why
+    # The letters name some other kind.
+    row, why = drawn("X3")
+    assert row is None and "under the prefix X" in why, why
+    # The library says resistor, the letters and the value capacitor.
+    row, why = drawn("C4")
+    assert row is None and "disagree" in why, why
+    for said in ("Resistor_SMD saying resistor", "letters C saying capacitor",
+                 "'100nF', which says capacitor"):
+        assert said in why, (said, why)
+
+
+def test_a_kicad_part_its_own_file_says_is_not_fitted_is_refused():
+    """**What KiCad records for a part nobody fits** (OH-195): the `dnp` and
+    `exclude_from_bom` attributes its footprint carries, and OH-187's closed
+    vocabulary in the value of a passive. A footprint with no pad is ink --
+    a logo -- and is counted as ink rather than refused, however it is
+    marked; a chip valued NC is not a passive left off."""
+    path = _kicad_parts_file(
+        ("Resistor_SMD:R_0402_1005Metric", "R2", "10k", "smd dnp", True),
+        ("Resistor_SMD:R_0402_1005Metric", "R3", "10k", "smd exclude_from_bom", True),
+        ("Resistor_SMD:R_0402_1005Metric", "R4", "DNP", "smd", True),
+        ("Capacitor_SMD:C_0402_1005Metric", "C5", "TBD", "smd", True),
+        ("Package_TO_SOT_SMD:SOT-23-5", "U5", "NC", "smd", True),
+        ("Graphics:LOGO", "G1", "LOGO",
+         "board_only exclude_from_pos_files exclude_from_bom", False),
+    )
+    statements = compose.kicad_statements(path)
+    assert statements["R2"].refused == "PARTS.kicad_pcb marks R2 dnp: not fitted"
+    assert statements["R3"].refused == (
+        "PARTS.kicad_pcb marks R3 exclude_from_bom: not fitted")
+    assert statements["R4"].refused == "PARTS.kicad_pcb values R4 'DNP': not fitted"
+    assert "whether it is fitted is not stated" in statements["C5"].refused
+    assert statements["U5"].refused is None
+    assert statements["G1"].refused is None
+    for name in ("R2", "R3", "R4", "C5"):
+        assert statements[name].kind is None, name
+
+
+def _kicad_stackup_file(stackup: str | None, general: str | None) -> pathlib.Path:
+    """A KiCad board stating only its stackup and its general thickness."""
+    import tempfile
+
+    text = "(kicad_pcb\n\t(version 20241229)\n"
+    if general is not None:
+        text += f"\t(general\n\t\t(thickness {general})\n\t)\n"
+    if stackup is not None:
+        text += f"\t(setup\n\t\t(stackup\n{stackup}\t\t)\n\t)\n"
+    path = pathlib.Path(tempfile.mkdtemp()) / "STACK.kicad_pcb"
+    path.write_text(text + ")\n", encoding="utf-8")
+    return path
+
+
+def _two_layer_stack(mask: str | None, core: str) -> str:
+    colour = f' (color "{mask}")' if mask is not None else ""
+    return (f'\t\t\t(layer "F.Mask" (type "Top Solder Mask"){colour} (thickness 0.01))\n'
+            f'\t\t\t(layer "F.Cu" (type "copper") (thickness 0.035))\n'
+            f'\t\t\t(layer "dielectric 1" (type "core") (thickness {core}) (material "FR4"))\n'
+            f'\t\t\t(layer "B.Cu" (type "copper") (thickness 0.035))\n'
+            f'\t\t\t(layer "B.Mask" (type "Bottom Solder Mask"){colour} (thickness 0.01))\n')
+
+
+def test_a_kicad_rows_colour_and_thickness_are_what_its_stackup_states():
+    """**A KiCad board file states its colour and thickness in its
+    `(stackup ...)`** (OH-195), where an EAGLE one states them in a preview
+    and a note. A named mask is drawn in the colour KiCad itself renders
+    that name in, and says it is a judgement; a mask given as a colour is
+    drawn as that colour. The stackup's layers must add up to `(general
+    (thickness))` for either number to be believed: KiCad writes the general
+    thickness on every board whether anybody set it or not."""
+    from tools import board_manifest, board_sources
+
+    row = next(r for r in board_manifest.ROWS
+               if r.cad.endswith(".kicad_pcb"))
+    source = board_sources.source(row.source)
+
+    def composed(stackup, general):
+        return compose._kicad_manifest_composition(
+            row, source, _kicad_stackup_file(stackup, general))
+
+    black = composed(_two_layer_stack("Black", "1.51"), "1.6")
+    assert black.colour == compose.KICAD_MASK_COLOURS["Black"]
+    assert "'Black'" in black.colour_source and "A JUDGEMENT" in black.colour_source
+    assert black.thickness_mm == 1.6
+    custom = composed(_two_layer_stack("#1B1B1BD4", "0.71"), "0.8")
+    assert custom.colour == "#1b1b1b" and "#1B1B1BD4" in custom.colour_source
+    assert custom.thickness_mm == 0.8
+    # Layers that do not add up to the general thickness decide nothing.
+    assert composed(_two_layer_stack("Black", "1.51"), "1.2").thickness_mm == (
+        compose.MANIFEST_THICKNESS_MM)
+    # No stackup: a general thickness alone is KiCad's default as often as
+    # anybody's statement, and there is no mask to read.
+    bare = composed(None, "1.6")
+    assert bare.colour == compose.BOARD_MASK and "A JUDGEMENT" in bare.colour_source
+    assert bare.thickness_mm == compose.MANIFEST_THICKNESS_MM
+    assert composed(_two_layer_stack(None, "1.51"), "1.6").colour == compose.BOARD_MASK
+
+
+def test_the_glyph_mini_is_drawn_in_what_its_own_stackup_states():
+    """PCBCUPID's file states a green top mask and a stackup adding up to its
+    general 1.6 mm, so both numbers are the file's, and the model's parts
+    are read out of that same file."""
+    spec = next((s for s in compose.COMPOSITIONS
+                 if s.board == "PCBCUPID Glyph Mini RP2040"), None)
+    assert spec is not None, "the Glyph Mini is a KiCad row and is composed"
+    if not _fetched(spec):
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    assert spec.colour == compose.KICAD_MASK_COLOURS["Green"]
+    assert "'Green'" in spec.colour_source
+    assert spec.thickness_mm == 1.6
+    assert spec.schematic == spec.layout
+
+
+#: A KiCad footprint on the underside, placed the way KiCad stores one: its
+#: pads, its F.Fab-become-B.Fab body and its pin-1 dot all flipped top to
+#: bottom already, from a library footprint whose pad 1 is at (-1.0, -0.5),
+#: pad 2 at (1.0, 0.5), body (-1.3, -0.8)-(1.3, 0.6) and dot at (-1.6, -0.9).
+#: The same footprint on the top face is stored as the library has it.
+_SIDED = """(kicad_pcb
+\t(version 20241229)
+\t(gr_rect (start 10 20) (end 30 40) (layer "Edge.Cuts"))
+\t(footprint "Lib:PART"
+\t\t(layer "{copper}")
+\t\t(at 20 30 {rotation})
+\t\t(property "Reference" "U1")
+\t\t(fp_rect (start -1.3 {top}) (end 1.3 {bottom}) (layer "{fab}"))
+\t\t(fp_circle (center -1.6 {dot}) (end -1.5 {dot}) (layer "{fab}"))
+\t\t(pad "1" smd rect (at -1.0 {one} {rotation}) (size 0.6 0.4) (layers "{copper}"))
+\t\t(pad "2" smd rect (at 1.0 {two} {rotation}) (size 0.6 0.4) (layers "{copper}"))
+\t)
+)
+"""
+
+
+def test_an_underside_kicad_part_lands_where_its_own_file_puts_it():
+    """**KiCad stores an underside footprint already flipped, so it is not
+    flipped again** (OH-195, after OH-182). Its pads, its body outline and
+    its pin-1 dot all land where the file puts them -- through the one
+    transform the pads have always used, which the copper checks -- and a
+    model built on the library footprint lands with its pad 1 on pad 1.
+    The top face is held to the same, so the two sides cannot drift apart.
+    """
+    import tempfile
+
+    rotation = 30.0
+    turn = math.radians(rotation)
+
+    def on_board(x, y):
+        # The pads' own transform (`kicad.pad_on_board`), read into this
+        # module's y-up frame.
+        return (20 + x * math.cos(turn) + y * math.sin(turn),
+                -30 + x * math.sin(turn) - y * math.cos(turn))
+
+    # The model: a vertex over each of the library's pads, in a model's
+    # y-up frame, where the library's y is negated.
+    model = compose.Mesh({
+        "#000001": ([-1.0, 0.5, 0.5], [0.0, 0.0, 1.0], [0]),
+        "#000002": ([1.0, -0.5, 0.5], [0.0, 0.0, 1.0], [0]),
+    })
+    for side, flip in (("F", 1.0), ("B", -1.0)):
+        stored = {"one": -0.5 * flip, "two": 0.5 * flip, "dot": -0.9 * flip,
+                  "top": min(-0.8 * flip, 0.6 * flip),
+                  "bottom": max(-0.8 * flip, 0.6 * flip)}
+        path = pathlib.Path(tempfile.mkdtemp()) / "SIDED.kicad_pcb"
+        path.write_text(_SIDED.format(copper=f"{side}.Cu", fab=f"{side}.Fab",
+                                      rotation=rotation, **stored),
+                        encoding="utf-8")
+        element = compose.read_layout(path).element("U1")
+        assert element.mirrored == (side == "B")
+        pads = {pad.number: (pad.x_mm, pad.y_mm) for pad in element.pads}
+        assert pads["1"] == pytest.approx(on_board(-1.0, stored["one"]))
+        assert pads["2"] == pytest.approx(on_board(1.0, stored["two"]))
+        assert compose.mark_of(element) == pytest.approx(
+            on_board(-1.6, stored["dot"])), side
+        spelling = ("MR" if element.mirrored else "R") + str(int(element.rotation))
+        x0, y0, x1, y1 = element.silk
+        drawn = sorted(eagle.place(x, y, (element.x_mm, element.y_mm), spelling)
+                       for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)))
+        filed = sorted(on_board(x, y) for x, y in (
+            (-1.3, stored["top"]), (1.3, stored["top"]),
+            (1.3, stored["bottom"]), (-1.3, stored["bottom"])))
+        for got, want in zip(drawn, filed):
+            assert got == pytest.approx(want), (side, drawn, filed)
+        put = compose.place(model, element, 0.0, 1.6, (0.0, 0.0))
+        for colour, number in (("#000001", "1"), ("#000002", "2")):
+            p = put.groups[colour][0]
+            assert (p[0], -p[2]) == pytest.approx(pads[number]), (side, number)
+        assert (put.groups["#000001"][0][1] < 0) == (side == "B"), (
+            "an underside part hangs under the board")
+
+
+def test_the_glyph_headers_are_refused_for_the_pair_of_holes_under_each_pin():
+    """`GLYPH_HEADER` says why J3, J4 and J5 are not drawn, and each thing it
+    says is read here out of PCBCUPID's own file: every pin is two plated
+    holes 1.5 mm apart, and their footprint hangs KiCad's PinHeader under
+    the row, turned half round and dropped 1.5 mm. It is a refusal and not
+    copper, because a body is placed there."""
+    spec = next(s for s in compose.COMPOSITIONS
+                if s.board == "PCBCUPID Glyph Mini RP2040")
+    if not _fetched(spec):
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    board = compose.read_layout(spec.layout)
+    tree = kicad.parse_sexp(spec.layout.read_text(encoding="utf-8"))
+    footprints = {kicad._reference_of(node): node
+                  for node in kicad.children(tree, "footprint")}
+    for name in ("J3", "J4", "J5"):
+        element = board.element(name)
+        assert compose.ABSENT[element.package] == compose.GLYPH_HEADER
+        assert compose.NO_BODY not in compose.GLYPH_HEADER
+        pairs: dict[str, list] = {}
+        for pad in element.pads_of("thru_hole"):
+            pairs.setdefault(pad.number, []).append((pad.x_mm, pad.y_mm))
+        assert pairs and all(len(pair) == 2 for pair in pairs.values()), name
+        for number, (one, two) in pairs.items():
+            assert math.dist(one, two) == pytest.approx(1.5, abs=1e-6), (name, number)
+        (model,) = kicad._models_of(footprints[name])
+        assert "Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x" in model.path
+        assert tuple(abs(a) for a in model.rotate) == (0.0, 180.0, 0.0), name
+        assert model.offset == (0.0, 0.0, -1.5), name
+
+
+def test_the_glyph_usb_socket_lands_where_its_own_footprint_puts_it():
+    """**J2 is drawn from the model PCBCUPID's footprint places, and where
+    that footprint places it.** Their land is Palconn's and the model GCT's,
+    moved by an `(offset ...)`; `place` anchors the model on its shell tabs
+    and knows nothing of the offset. The model's own origin must still land
+    where the vendor's offset puts it -- which it does to a few hundredths
+    of a millimetre, against the 1.25 mm the offset moves it."""
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    spec = next(s for s in compose.COMPOSITIONS
+                if s.board == "PCBCUPID Glyph Mini RP2040")
+    if not _fetched(spec):
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    board = compose.read_layout(spec.layout)
+    element = board.element("J2")
+    row, _why = compose.drawn_from(element, compose.statements_for(spec))
+    if not compose.cached(row, row.url, ".step").is_file():
+        pytest.skip(f"SKIPPED: {row.model}.step is not fetched")
+    tree = kicad.parse_sexp(spec.layout.read_text(encoding="utf-8"))
+    (footprint,) = [node for node in kicad.children(tree, "footprint")
+                    if kicad._reference_of(node) == "J2"]
+    (stated,) = kicad._models_of(footprint)
+    assert pathlib.PurePosixPath(stated.path).stem == row.model
+    mesh, _box = compose.component_mesh(row, 0.05)
+    marked = compose.Mesh({**mesh.groups,
+                           "#000001": ([0.0, 0.0, 5.0], [0.0, 0.0, 1.0], [0])})
+    put = compose.place(marked, element, row.turn, spec.thickness_mm, (0.0, 0.0))
+    origin = put.groups["#000001"][0]
+    # A model's offset is in its own y-up frame, turned with the footprint.
+    turn = math.radians(element.rotation)
+    ox, oy = stated.offset[0], stated.offset[1]
+    want = (element.x_mm + ox * math.cos(turn) - oy * math.sin(turn),
+            element.y_mm + ox * math.sin(turn) + oy * math.cos(turn))
+    assert math.dist((origin[0], -origin[2]), want) < 0.05, (origin, want)
+    assert math.hypot(ox, oy) > 1.0, "the offset no longer moves the model"

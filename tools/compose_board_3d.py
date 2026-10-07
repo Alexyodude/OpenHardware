@@ -1187,6 +1187,87 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "away from the mounting pads, in both, so no turn -- a turn nothing "
         "here can check, and the composer counts it.",
     ),
+    # --- the PCBCUPID Glyph Mini RP2040, OH-195 --------------------------------
+    #
+    # The first manifest row that is a `.kicad_pcb`. Its footprints are
+    # KiCad's own by name, each from the library KiCad files it in or from a
+    # PCBCUPID copy of one, and every one states the model it places -- so
+    # each row below draws the model the vendor's own footprint names, and
+    # says where it does not. Spans are the board-frame pad extents of
+    # `eagle.Element.pad_extent`, measured 2026-09-30.
+    Component(
+        "R_0402_1005Metric", "Resistor_SMD", "R_0402_1005Metric",
+        "KiCad's own 0402 resistor land, by name and from KiCad's own "
+        "library: two pads 1.02 mm apart, and the model PCBCUPID's footprint "
+        "places. Drawn only where the board file states a resistor -- see "
+        "`kicad_statements`.",
+    ),
+    Component(
+        "C_0402_1005Metric", "Capacitor_SMD", "C_0402_1005Metric",
+        "KiCad's own 0402 capacitor land, by name and from KiCad's own "
+        "library: two pads 0.96 mm apart, and the model PCBCUPID's footprint "
+        "places. Drawn only where the board file states a capacitor.",
+    ),
+    Component(
+        "LED_0603_1608Metric", "LED_SMD", "LED_0603_1608Metric",
+        "D1, RED_LED by value, on KiCad's own 0603 LED land: two pads "
+        "1.575 mm apart, and the model PCBCUPID's footprint places.",
+    ),
+    Component(
+        "SW_Push_SPST_NO_Alps_SKRK", "Button_Switch_SMD",
+        "SW_Push_SPST_NO_Alps_SKRK",
+        "SW1 and SW2, SKRKAGE020 by value, an Alps SKRK, on a land PCBCUPID "
+        "keep in their own `Button` library under KiCad's name for it: two "
+        "pads 4.20 mm apart. Their footprint names `SKRKAHE020.STEP` from "
+        "their own machine's user directory, which nobody publishes, so this "
+        "is the model KiCad publishes for the land of that name -- a "
+        "JUDGEMENT that one SKRK body stands for another.",
+    ),
+    Component(
+        "SOIC-8_5.3x5.3mm_P1.27mm", "Package_SO", "SOIC-8_5.3x5.3mm_P1.27mm",
+        "U1, the W25Q32JVSS flash by value, on KiCad's own 208 mil SOIC-8 "
+        "land: eight pads spanning 3.81 x 7.18 mm turned as placed, and the "
+        "model PCBCUPID's footprint places.",
+    ),
+    Component(
+        "SOT-23-5", "Package_TO_SOT_SMD", "SOT-23-5",
+        "U2, the AP2127K-3.3 regulator by value, on KiCad's own SOT-23-5 "
+        "land: five pads spanning 2.28 x 1.90 mm, and the model PCBCUPID's "
+        "footprint places. On the underside, where the board file flips it.",
+    ),
+    Component(
+        "Crystal_SMD_Abracon_ABM8AIG-4Pin_3.2x2.5mm", "Crystal",
+        "Crystal_SMD_SeikoEpson_FA238-4Pin_3.2x2.5mm",
+        "Y1, on KiCad's own land for Abracon's ABM8AIG: four pads spanning "
+        "2.20 x 1.60 mm under a 3.2 x 2.5 mm body. PCBCUPID's footprint "
+        "places KiCad's Seiko Epson FA-238 model on it, a four-pad crystal "
+        "of the same 3.2 x 2.5 mm, and that is the model drawn. On the "
+        "underside, where the board file flips it.",
+    ),
+    Component(
+        "QFN-56-1EP_7x7mm_P0.4mm_EP5.6x5.6mm", "Package_DFN_QFN",
+        "QFN-56-1EP_7x7mm_P0.4mm_EP5.6x5.6mm",
+        "IC1, the RP2040 by value, on PCBCUPID's own copy of KiCad's 7 x 7 mm "
+        "QFN-56 land with the 5.6 x 5.6 mm exposed pad its name states: 56 "
+        "leads and that pad spanning 6.88 x 6.88 mm, with paste apertures "
+        "over the pad on no copper layer, and the model their footprint "
+        "places. "
+        "On the underside, where the board file flips it; pin 1 is where "
+        "their own marker says, which `mark_turns` reads there too.",
+    ),
+    Component(
+        "USB_C_Receptacle_Palconn_UTC16-G", "Connector_USB",
+        "USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
+        "J2, on a land PCBCUPID name for Palconn's UTC16-G: sixteen contact "
+        "pads and four shell tabs spanning 8.64 x 4.84 mm. Its value says "
+        "USB4105 and its part number GCT's USB4105-15-A-120, and their "
+        "footprint places KiCad's GCT USB4105 model -- three statements of "
+        "one part, so that is the model drawn. Their footprint moves the "
+        "model 1.25 mm off its origin, and anchored on its shell tabs this "
+        "one lands where that offset puts it: "
+        "`test_the_glyph_usb_socket_lands_where_its_own_footprint_puts_it` "
+        "measures the two.",
+    ),
 )
 
 #: Packages that are on the board, are worth seeing, and are NOT drawn -- with
@@ -1200,6 +1281,24 @@ CORRESPONDENCE: tuple[Component, ...] = (
 #: package that has no body, as against a part nobody publishes a model of.
 #: `compose` counts the two apart by this phrase (OH-180).
 NO_BODY = "there is no body to look for"
+
+#: The Glyph Mini's three header rows (OH-195), which are two package names
+#: and one reason. Not a `NO_BODY` reason: the vendor's own footprint places a
+#: body there, and a reader looking at the board would look for it.
+GLYPH_HEADER = (
+    "J3, J4 and J5 on the Glyph Mini, PCBCUPID's own castellated rows from "
+    "their library `Conn_Castellated_Holes_2.54mm`: each pin is two plated "
+    "holes 1.5 mm apart, the outer one cut by the board's edge, and that "
+    "copper is drawn by the copper pass. Their footprint also hangs KiCad's "
+    "own PinHeader model under the row, turned half round and dropped "
+    "1.5 mm, which is the header a person may solder in. It is refused "
+    "rather than drawn: `place` anchors a legged model on the middle of the "
+    "through-hole pads, which here is the middle of each pair, and that "
+    "would stand every pin half a pair outboard of the hole the vendor's "
+    "model puts it in. Nothing in the file says whether a header is "
+    "fitted -- no DNP, nothing left off the BOM -- and the footprint names "
+    "no maker and no part."
+)
 
 ABSENT: dict[str, str] = {
     # --- pads with no body, stated rather than silent (OH-119) --------------
@@ -1596,6 +1695,9 @@ ABSENT: dict[str, str] = {
         "0.61 mm -- and a land pattern is not a body. No KiCad library was "
         "searched: there is no body to look for."
     ),
+    # --- OH-195: the Glyph Mini's header rows -----------------------------------
+    "PinHeader_1x05_P2.54mm_Vertical": GLYPH_HEADER,
+    "PinHeader_1x09_P2.54mm_Vertical": GLYPH_HEADER,
 }
 
 
@@ -1650,9 +1752,11 @@ class Composition:
     #: page sat 3.25 to 3.95 mm from the nearest metal, and the pad map is
     #: the vendor's own DIP footprint and is right.
     dip_headers: bool = False
-    #: The vendor's schematic of the same board, where there is one to read:
-    #: what says which kind of passive each placement is (OH-187). None for
-    #: the XIAOs, which compose from their board file alone.
+    #: The vendor's file that says which kind of passive each placement is
+    #: (OH-187): an EAGLE board's schematic, or a KiCad manifest row's own
+    #: board file, whose footprints carry their library, reference, value and
+    #: attributes (OH-195). None for the XIAOs, which compose from their
+    #: board file alone and read nothing of the kind.
     schematic: pathlib.Path | None = None
 
 
@@ -2006,24 +2110,106 @@ def preview_mask(layout: pathlib.Path) -> str:
         for at in (4, 6, 8))
 
 
+#: KiCad's own colours for the solder-mask names its stackup offers, as its
+#: 3D view and its Gerber job file render them: `gbrjobColors` in
+#: pcbnew/board_stackup_manager/stackup_predefined_prms.cpp, read at commit
+#: 3ff0b3cc57dd043ac6b159611d85a01374df7a88 (OH-195). A board file stating
+#: its mask as `#rrggbb` is drawn in that instead.
+KICAD_MASK_COLOURS = {"Green": "#3c9650", "Red": "#800000", "Blue": "#000080",
+                      "Purple": "#500050", "Black": "#141414",
+                      "White": "#c8c8c8", "Yellow": "#808000"}
+
+
+def kicad_stackup(layout: pathlib.Path) -> tuple[str | None, float | None, float | None]:
+    """What a `.kicad_pcb` states of its board: the top solder mask's colour,
+    the sum of its stackup's layer thicknesses, and its `(general
+    (thickness))` -- each None where the file does not state it."""
+    tree = kicad.parse_sexp(layout.read_text(encoding="utf-8"))
+    general = kicad.first(tree, "general")
+    thickness = kicad.first(general, "thickness") if general else None
+    setup = kicad.first(tree, "setup")
+    stack = kicad.first(setup, "stackup") if setup else None
+    mask, total = None, None
+    for layer in (kicad.children(stack, "layer") if stack else ()):
+        colour, height = kicad.first(layer, "color"), kicad.first(layer, "thickness")
+        if layer[1] == "F.Mask" and colour:
+            mask = colour[1]
+        if height:
+            total = (total or 0.0) + float(height[1])
+    return mask, total, (float(thickness[1]) if thickness else None)
+
+
+def _kicad_manifest_composition(entry: board_manifest.Row, source,
+                                layout: pathlib.Path) -> Composition:
+    """A KiCad manifest row (OH-195): the stackup's own mask and thickness,
+    and the board file itself for what each footprint is."""
+    mask, stack, general = (kicad_stackup(layout) if layout.is_file()
+                            else (None, None, None))
+    if stack is not None and general is not None and abs(stack - general) < 5e-4:
+        # Two statements that agree decide, and the one written as a number
+        # is taken, since the stackup's is a sum of floats.
+        thickness = general
+    else:
+        # KiCad writes `(general (thickness))` for every board, 1.6 unless
+        # somebody changed it, so without a stackup that adds up to it the
+        # number is a default as often as a statement: the Uno's reused.
+        thickness = MANIFEST_THICKNESS_MM
+    if mask in KICAD_MASK_COLOURS:
+        colour = KICAD_MASK_COLOURS[mask]
+        colour_source = (
+            f"{source.vendor}'s own board file, whose stackup states its top "
+            f"solder mask as {mask!r}. Drawn, A JUDGEMENT, in the colour "
+            f"KiCad itself renders that name in, {colour} "
+            f"(KICAD_MASK_COLOURS, from KiCad's own source)")
+    elif mask is not None and mask.startswith("#"):
+        colour = mask[:7].lower()
+        colour_source = (f"{source.vendor}'s own board file, whose stackup "
+                         f"states its top solder mask as {mask}, drawn as its "
+                         f"red, green and blue")
+    else:
+        colour = BOARD_MASK
+        colour_source = (
+            "BOARD_MASK, A JUDGEMENT rather than a reading: the board file's "
+            "stackup names no colour for its top solder mask")
+    return Composition(
+        board=entry.board,
+        layout=layout,
+        fetch_with=f"python tools/get_board_sources.py {entry.source}",
+        pcb_chip=None,
+        geometry=(
+            f"{source.vendor}'s own board file, "
+            f"{pathlib.PurePosixPath(entry.cad).name}, {source.licence.name}: "
+            f"the outline and every component's position, rotation and "
+            f"side as the file states them"
+        ),
+        headers=entry.select,
+        thickness_mm=thickness,
+        colour=colour,
+        colour_source=colour_source,
+        schematic=layout,
+    )
+
+
 def manifest_composition(entry: board_manifest.Row) -> Composition:
     """A `tools/board_manifest.py` row, as the composition it describes.
 
-    **An EAGLE row only**, and refused by name otherwise: every value read
-    here beyond the row -- the preview colour `BOARD_MASK` is judged against,
-    the design-rule stack the thickness is judged against -- is an EAGLE
-    field, and a KiCad board file states both its own way, in `(general
-    (thickness ...))` and a `(stackup ...)`. Composing one with these
-    readings would put an EAGLE sentence on a KiCad board.
+    **An EAGLE or a KiCad row**, and refused by name otherwise. Each states
+    its colour, its thickness and its parts its own way: an EAGLE file in
+    its manufacturing preview, its notes and its schematic, a KiCad file in
+    its `(stackup ...)` and its footprints (OH-195). Composing one with the
+    other's readings would put an EAGLE sentence on a KiCad board.
     """
     suffix = pathlib.PurePosixPath(entry.cad).suffix.lower()
-    if suffix != ".brd":
+    if suffix not in (".brd", ".kicad_pcb"):
         raise ValueError(
             f"{entry.board}: composition from a {suffix} manifest row is not "
-            f"supported yet -- its thickness and mask colour are read from "
-            f"EAGLE's own fields, which a {suffix} does not have"
+            f"supported -- its colour, thickness and parts are read from "
+            f"EAGLE's or KiCad's own fields, which a {suffix} does not have"
         )
     source = board_sources.source(entry.source)
+    if suffix == ".kicad_pcb":
+        return _kicad_manifest_composition(entry, source,
+                                           board_manifest.cad_path(entry))
     stated = MANIFEST_STATED.get(entry.board, {})
     layout = board_manifest.cad_path(entry)
     colour = stated.get("colour", BOARD_MASK)
@@ -2205,13 +2391,14 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
         cos, sin = math.cos(turn), math.sin(turn)
         pads: list[eagle.Pad] = []
         for pad in placed.pads:
-            # Into the Y-up frame first, then rotated in it, then placed.
+            # Into the Y-up frame first, then rotated in it, then placed --
+            # and **never mirrored, on either side of the board** (OH-195,
+            # after OH-182): KiCad stores a flipped footprint's pads already
+            # flipped, so `kicad.pad_on_board` places them turned and moved
+            # only. Mirroring an underside pad again put it on the far side
+            # of its footprint's centre line, which no XIAO showed only
+            # because every underside pad on one sits on that line.
             local_x, local_y = pad.x_mm, -pad.y_mm
-            if placed.back:
-                # A part on the underside is mirrored across the board's own
-                # x axis, which is what makes its pad 1 land where the copper
-                # is rather than diagonally opposite it.
-                local_x = -local_x
             pads.append(eagle.Pad(
                 number=pad.number,
                 # `eagle.Pad.kind` uses this module's vocabulary, which IS
@@ -2230,10 +2417,9 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
                 # placement's own rotation is NOT added here; it is already
                 # in. What the frames do to it: flipping y turns KiCad's
                 # down-the-page rotation into this one's up-the-page rotation
-                # of the same sign, and a part on the underside is mirrored
-                # in x, which reverses the sense.
-                rotation_deg=(-pad.rotation_deg if placed.back
-                              else pad.rotation_deg),
+                # of the same sign -- on the underside too, whose pads are
+                # stored flipped already.
+                rotation_deg=pad.rotation_deg,
                 front=pad.front,
                 back=pad.back,
             ))
@@ -2251,6 +2437,22 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
         # The pin-1 marker crosses the same way and for the same reason: it is
         # a coordinate in the footprint's own frame, so only its y is negated.
         mark = None if placed.mark is None else (placed.mark[0], -placed.mark[1])
+        rotation = placed.rotation_deg
+        if placed.back:
+            # **An underside footprint, in the frame `place` and `mark_of`
+            # expect** (OH-195). KiCad flips a footprint onto the back top to
+            # bottom -- its stored pads are the library's with y negated, as
+            # QFN-56 pad 1 at (-3.4375, 2.6) against the library's
+            # (-3.4375, -2.6) shows -- and stores them flipped. So what the
+            # file holds, read in this module's y-up frame, is the library's
+            # own geometry with no negation at all; and a flip top to bottom
+            # is `eagle.place`'s mirror in x turned half round. Hence the
+            # outline and the marker cross unnegated, and the element turns
+            # 180 degrees further, which is what puts a model the way the
+            # file's own pads and marker already lie.
+            silk = None if body is None else body
+            mark = placed.mark
+            rotation = (placed.rotation_deg + 180.0) % 360.0
 
         elements.append(eagle.Element(
             name=placed.reference or placed.library,
@@ -2259,7 +2461,7 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
             pads=tuple(pads),
             x_mm=placed.x_mm,
             y_mm=-placed.y_mm,
-            rotation=placed.rotation_deg,
+            rotation=rotation,
             mirrored=placed.back,
             silk=silk,
             mark=mark,
@@ -3035,6 +3237,71 @@ def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
     return stated
 
 
+#: What a reference's letter stem says a part is: a passive prefix's own
+#: letters and the stems `DESIGNATOR_STEMS` pairs with it. A KiCad
+#: footprint carries no deviceset, and its reference is the prefix its
+#: symbol numbered it by (OH-195).
+STEM_KINDS = {stem: PREFIX_KINDS[prefix]
+              for prefix, stems in DESIGNATOR_STEMS.items() for stem in stems}
+
+
+def kicad_statements(layout: pathlib.Path) -> dict[str, Statement]:
+    """Each footprint of a KiCad board as its own file states it (OH-195).
+
+    Three statements of kind, under OH-187's rule -- those that speak must
+    agree, or the part is refused: its footprint library where that is one
+    of KiCad's own passive libraries (`PASSIVE_KINDS`), the letter stem of
+    its reference (`STEM_KINDS`, any other stem naming another kind), and
+    its value where that is ohms, farads or a word in `KIND_WORDS`. A
+    footprint with pads that KiCad marks `dnp` or `exclude_from_bom` is not
+    fitted; a passive valued as not fitted, or still TBD, is refused too.
+    """
+    tree = kicad.parse_sexp(layout.read_text(encoding="utf-8"))
+    stated: dict[str, Statement] = {}
+    for footprint in kicad.children(tree, "footprint"):
+        name = kicad._reference_of(footprint)
+        value = kicad._value_of(footprint)
+        library = footprint[1].split(":", 1)[0] if ":" in footprint[1] else ""
+        attr = kicad.first(footprint, "attr")
+        flags = [flag for flag in (attr[1:] if attr else []) if isinstance(flag, str)]
+        stem = re.match(r"[A-Za-z]*", name).group(0).upper()
+        by_prefix = STEM_KINDS.get(stem, OTHER) if stem else None
+        by_value = value_kind(value)
+        by_library = PASSIVE_KINDS.get(library)
+        spoken = {kind for kind in (by_prefix, by_library, by_value) if kind}
+        disagree = len(spoken) > 1
+        kind = None if disagree else next(iter(spoken), None)
+        word = value.strip().upper()
+        passive = kind in PASSIVE_KINDS.values()
+        fitted_not = [flag for flag in flags if flag in ("dnp", "exclude_from_bom")]
+        if fitted_not and kicad.children(footprint, "pad"):
+            refused = (f"{layout.name} marks {name} "
+                       f"{' and '.join(fitted_not)}: not fitted")
+        elif disagree:
+            said = ([f"its reference's letters {stem} saying "
+                     + ("a kind none of R, C, L and F" if by_prefix == OTHER
+                        else by_prefix)] if by_prefix else []) \
+                + ([f"its library {library} saying {by_library}"]
+                   if by_library else []) \
+                + ([f"valued {value!r}, which says {by_value}"] if by_value else [])
+            refused = (f"{layout.name} places {name} from {footprint[1]}, "
+                       f"{', '.join(said)}: statements of its kind that "
+                       f"disagree, and drawing it as any one would be choosing "
+                       f"between them")
+        elif passive and word in NOT_FITTED:
+            refused = f"{layout.name} values {name} {value!r}: not fitted"
+        elif passive and word in UNDECIDED:
+            refused = (f"{layout.name} values {name} {value!r}: whether it is "
+                       f"fitted is not stated, and drawing it would say it is")
+        else:
+            refused = None
+        stated[name] = Statement(
+            None if refused else kind, stem if by_prefix else None,
+            value if by_value else None, refused=refused,
+            word=library if by_library else None)
+    return stated
+
+
 def statements_for(spec: "Composition") -> dict[str, Statement] | None:
     """What a board's own files say of each part it places, or None for a
     board composed without a schematic -- the XIAOs.
@@ -3045,6 +3312,8 @@ def statements_for(spec: "Composition") -> dict[str, Statement] | None:
     """
     if spec.schematic is None:
         return None
+    if spec.schematic.suffix == ".kicad_pcb":
+        return kicad_statements(spec.schematic)
     statements = stated_kinds(spec.schematic)
     board = eagle._open(spec.layout, "board").find("drawing/board")
     variant = _current_variant(board)
@@ -3109,8 +3378,8 @@ def drawn_from(element: eagle.Element, statements: dict[str, Statement] | None,
             return None, (f"nothing in {schematic} states what kind of part "
                           f"{element.name} is, and every row for its land, "
                           f"{element.package}, draws a passive")
-        return None, (f"{schematic} places {element.name} from a deviceset whose "
-                      f"prefix {said.prefix} names a kind none of R, C, L and "
+        return None, (f"{schematic} places {element.name} under the prefix "
+                      f"{said.prefix}, which names a kind none of R, C, L and "
                       f"F, and every row for its land, {element.package}, "
                       f"draws a resistor, capacitor, inductor or fuse")
     return correspondence_for(element), None
@@ -4343,10 +4612,10 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         value = sum("value" in said and "prefix" not in said for said in kinds.values())
         word = sum("word" in said for said in kinds.values())
         print(f"  kinds   {len(kinds)} passive(s) drawn as the kind "
-              f"{spec.schematic.name} states: {both} by the deviceset's prefix "
-              f"and the value, {prefix} by the prefix alone, {value} by the "
-              f"value alone" + (f", {word} with the deviceset's name agreeing"
-                                if word else ""))
+              f"{spec.schematic.name} states: {both} by the prefix and the "
+              f"value, {prefix} by the prefix alone, {value} by the value "
+              f"alone" + (f", {word} with the library or deviceset's name "
+                          f"agreeing" if word else ""))
     if unmodelled:
         print(f"  no model {len(unmodelled)} placement(s) drawn as nothing, "
               f"with no ABSENT entry saying why: "
