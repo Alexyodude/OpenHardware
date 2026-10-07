@@ -2072,6 +2072,89 @@ def test_the_c5_and_c6_jtag_values_are_held_by_a_test_and_not_only_a_comment():
     assert True, "asserted above: no value is shared between the C5 and the C6"
 
 
+#: A Seeed-style KiCad board file in miniature: one net naming its pin, one
+#: net naming none, and the MCU footprint whose pad on the second names it --
+#: the C6's shape, where `BOOT` needs the tracer.
+FAKE_SEEED_PCB = (
+    '(kicad_pcb\n'
+    '\t(net 1 "MTMS_GPIO2_X")\n'
+    '\t(net 2 "BOOT")\n'
+    '\t(footprint "fake:MCU"\n'
+    '\t\t(property "Value" "FAKE-MCU")\n'
+    '\t\t(pad "5" smd rect (net 2 "BOOT") (pinfunction "GPIO9"))\n'
+    '\t\t(pad "6" smd rect (net 1 "MTMS_GPIO2_X") (pinfunction "MTMS"))\n'
+    '\t)\n'
+    ')\n'
+)
+
+
+def test_a_board_file_two_readers_share_is_cited_once_and_apart_from_the_packages(
+        tmp_path, monkeypatch):
+    """Needs no download. A vendor's board file is CAD and not a board-support
+    package (`Package.firmware`), so the block lists it under its own sentence,
+    naming the rows it answered, rather than under "Read out of the
+    board-support packages". And read by two readers -- net names for `MTMS`,
+    the tracer for `BOOT` -- it is ONE file: the board file's `revision` is
+    the digest of its bytes once, the digest the block's citation carries."""
+    bsp, boards = _fake_tree(tmp_path, monkeypatch)
+    pcb = tmp_path / "pcb"
+    pcb.mkdir()
+    (pcb / "fake.kicad_pcb").write_text(FAKE_SEEED_PCB, encoding="utf-8")
+    cad = (
+        dataclasses.replace(pindefs.seeed_pcb("fake.kicad_pcb", ("MTMS",)), root=pcb),
+        dataclasses.replace(
+            pindefs.seeed_pcb_traced("fake.kicad_pcb", "FAKE-MCU", ("BOOT",)), root=pcb),
+    )
+    sources = pindefs.BOARDS["FAKE-SMD"].sources + cad
+    _board_file(boards, "FAKE-SMD", [("D0", "1"), ("D6", "7"), ("MTMS", "13"), ("BOOT", "14")])
+    monkeypatch.setattr(pindefs, "BOARDS", {
+        "FAKE-DIP": pindefs.Board("FAKE", sources, on_board=("LED",)),
+        "FAKE-SMD": pindefs.Board("FAKE", sources, on_board=("LED",)),
+    })
+
+    digest = pindefs._digest(((pcb / "fake.kicad_pcb").read_text(encoding="utf-8"),))
+    for name in ("FAKE-DIP", "FAKE-SMD"):
+        (recorded,) = [package["revision"] for package in
+                       board_report(name, bsp, boards)["packages"]
+                       if package["name"] == "seeed-pcb"]
+        assert recorded == digest, (name, recorded, digest)
+
+    table = pindefs.header_table("FAKE", bsp, boards)
+    assert (table.pins["MTMS"], table.pins["BOOT"]) == (ChipPin("GPIO2", 2), ChipPin("GPIO9", 9))
+    assert table.cad_rows == ("MTMS", "BOOT"), table.cad_rows
+    cited = f"seeed-pcb fake.kicad_pcb @ sha256:{digest}"
+    assert table.cad_citations == (cited,), table.cad_citations
+    lines = pindefs.render_header(table).split("\n")
+    lead = next(n for n, line in enumerate(lines) if "never typed here:" in line)
+    after = next(n for n, line in enumerate(lines) if "is not a board-support package:" in line)
+    assert lines.index(f"#:     {cited}") == after + 1, lines
+    packages = [line for line in lines[lead + 1:after] if line.startswith("#:     ")]
+    assert packages == [
+        "#:     zephyr boards/seeed/fake/seeed_xiao_connector.dtsi @ fa4e000",
+        "#:     arduino-pico variants/fake/pins_arduino.h @ fa4e000",
+    ], packages
+    prose = " ".join(lines).replace(" #: ", " ")
+    assert "`MTMS`, `BOOT` are read out of the vendor's own board CAD" in prose, prose
+
+
+def test_a_row_only_one_of_a_chips_files_carries_says_which_file_in_the_block(
+        tmp_path, monkeypatch):
+    """The table is the union over a chip's files, so a module serving a DIP
+    and an SMD carries rows only the SMD has a pad for -- the C5's and C6's
+    JTAG and BOOT. The block says which file carries them, so that "`LED` has
+    no pad" does not leave every other row reading as a pad of both.
+
+    The fake SMD carries `D10` and the DIP does not; `D0` and `D6` are on
+    both, and `LED` is on neither and keeps its own sentence."""
+    bsp, boards = _fake_tree(tmp_path, monkeypatch)
+    table = pindefs.header_table("FAKE", bsp, boards)
+    assert table.partial == {"D10": ("FAKE-SMD",)}, table.partial
+    text = " ".join(pindefs.render_header(table).split("\n"))
+    assert "`D10` is a pad of FAKE-SMD alone; no other file here has a pad for it." in (
+        text.replace(" #: ", " ")), text
+    assert "`LED` has no pad" in text
+
+
 def _symbol_library() -> str:
     if not SEEED_SYM.is_file():
         pytest.skip(f"no {SEEED_SYM}; run python tools/get_board_sources.py seeed-xiao")

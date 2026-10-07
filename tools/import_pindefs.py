@@ -3002,6 +3002,20 @@ class HeaderTable:
     citations: tuple[str, ...]
     #: Labels with no pad, so the block can say which rows are not header.
     on_board: tuple[str, ...]
+    #: Rows a CAD source named -- a vendor's own board file, which is not a
+    #: board-support package (`Package.firmware`) -- and that source's
+    #: citations, a subset of `citations`. The block lists them apart, so a
+    #: row read off the C5's own board file does not sit under a sentence
+    #: calling everything above it a board-support package (OH-200).
+    cad_rows: tuple[str, ...] = ()
+    cad_citations: tuple[str, ...] = ()
+    #: Rows whose pad only some of `boards` carry, and those boards: the C5's
+    #: and C6's JTAG and BOOT pads are on the SMD footprint and not the DIP
+    #: (OH-200). The table is still the union -- one chip, one table -- and
+    #: the block says which file a row's pad is on, so that "`LED` has no
+    #: pad" does not leave a reader of the DIP's module believing every other
+    #: row is a pad of that file.
+    partial: dict[str, tuple[str, ...]] = dataclasses.field(default_factory=dict)
 
 
 def _label_order(label: str) -> tuple[int, int]:
@@ -3041,8 +3055,14 @@ def header_table(
     first_seen: dict[str, str] = {}
     citations: list[str] = []
     on_board: list[str] = []
+    cad_rows: set[str] = set()
+    cad_citations: list[str] = []
+    carried: dict[str, list[str]] = {}
     for name in names:
         report = board_report(name, bsp_dir, boards_dir)
+        for entry in report["pads"]:
+            if entry["chip_pin"] is not None and name not in carried.get(entry["matched"], []):
+                carried.setdefault(entry["matched"], []).append(name)
         for entry in report["pads"] + report["on_board"]:
             if entry["chip_pin"] is None:
                 continue
@@ -3058,13 +3078,24 @@ def header_table(
             for source in entry["sources"]:
                 if source not in citations:
                     citations.append(source)
+                # The package is a citation's first word: `published_pins`
+                # writes `<package> <paths> @ <stamp>`, and no name in
+                # `PACKAGES` has a space in it.
+                if not PACKAGES[source.split(" ", 1)[0]].firmware:
+                    cad_rows.add(label)
+                    if source not in cad_citations:
+                        cad_citations.append(source)
         for entry in report["on_board"]:
             if entry["chip_pin"] is not None and entry["matched"] not in on_board:
                 on_board.append(entry["matched"])
     if not pins:
         raise PindefError(f"{chip}: no pad on {names} resolves to a pin; nothing to emit")
     ordered = dict(sorted(pins.items(), key=lambda item: _label_order(item[0])))
-    return HeaderTable(chip, names, ordered, tuple(citations), tuple(on_board))
+    return HeaderTable(chip, names, ordered, tuple(citations), tuple(on_board),
+                       tuple(label for label in ordered if label in cad_rows),
+                       tuple(cad_citations),
+                       {label: tuple(carried[label]) for label in ordered
+                        if label in carried and len(carried[label]) < len(names)})
 
 
 def render_header(table: HeaderTable) -> str:
@@ -3089,7 +3120,8 @@ def render_header(table: HeaderTable) -> str:
         "#: through and `PIN_NAMES` spells. Read out of the board-support",
         "#: packages, never typed here:",
     ]
-    lines.extend(f"#:     {citation}" for citation in table.citations)
+    lines.extend(f"#:     {citation}" for citation in table.citations
+                 if citation not in table.cad_citations)
     # **Not "every package agrees on every row"**, which is what this said
     # until it was reviewed and is false wherever one package alone defines a
     # row: only arduino-esp32 names the C5's and C6's `LED`, only arduino-pico
@@ -3103,6 +3135,28 @@ def render_header(table: HeaderTable) -> str:
             f"that package's."
         )
     ]
+    for sentence in sentences:
+        lines.extend(textwrap.wrap(sentence, width=76, initial_indent="#: ",
+                                   subsequent_indent="#: "))
+    if table.cad_rows:
+        rows = ", ".join(f"`{label}`" for label in table.cad_rows)
+        verb = "is" if len(table.cad_rows) == 1 else "are"
+        lines.extend(textwrap.wrap(
+            f"{rows} {verb} read out of the vendor's own board CAD instead, which "
+            f"is not a board-support package:",
+            width=76, initial_indent="#: ", subsequent_indent="#: "))
+        lines.extend(f"#:     {citation}" for citation in table.cad_citations)
+    sentences = []
+    by_boards: dict[tuple[str, ...], list[str]] = {}
+    for label, boards in table.partial.items():
+        by_boards.setdefault(boards, []).append(label)
+    for boards, labels in by_boards.items():
+        rows = ", ".join(f"`{label}`" for label in labels)
+        one = len(labels) == 1
+        sentences.append(
+            f"{rows} {'is a pad' if one else 'are pads'} of {', '.join(boards)} "
+            f"alone; no other file here has a pad for {'it' if one else 'them'}."
+        )
     if table.on_board:
         rows = ", ".join(f"`{label}`" for label in table.on_board)
         sentences.append(
