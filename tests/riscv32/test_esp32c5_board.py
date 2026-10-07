@@ -214,11 +214,16 @@ def test_the_chip_is_described_and_the_watching_is_named():
     Until OH-147 this test asserted the second half's ABSENCE -- described,
     runnable, and nothing watched. `c5blink` is the watching, this file is
     where it happens, and `FIRMWARE_VERIFIED` names this file.
+
+    The boards named are the XIAOs. A manifest row on the chip is not named
+    here, and is held to every line after the names all the same.
     """
+    from tools import board_manifest
     from webui.boards import catalogue
 
     boards = [b for b in catalogue.catalogue() if b.chip == "ESP32-C5"]
-    assert len(boards) == 2, [b.name for b in boards]
+    xiaos = [b.name for b in boards if board_manifest.find(b.name) is None]
+    assert sorted(xiaos) == ["XIAO-ESP32-C5-DIP", "XIAO-ESP32-C5-SMD"], xiaos
     for board in boards:
         assert board.described, "webui/boards/esp32c5.py exists"
         assert board.runnable, "a built core and a description"
