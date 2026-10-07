@@ -15,7 +15,7 @@
       {
         "name": "seeed-pcb",
         "repository": "https://wiki.seeedstudio.com/ -- each XIAO's own page, as a zip",
-        "revision": "905c6be61ddc",
+        "revision": "348d87a79f07",
         "licence": "OSHW, per Seeed's XIAO series repository"
       },
       {
