@@ -3807,12 +3807,31 @@ def kicad_statements(layout: pathlib.Path) -> dict[str, Statement]:
     And the models the footprint places, which `drawn_from` holds a row to.
 
     Keyed as `from_kicad` names an element: by reference, or by the
-    footprint's library name where the file gives no reference.
+    footprint's library name where the file gives no reference. **A
+    reference two footprints with pads share is refused**, naming both,
+    since which of them a part's statements are about cannot be told. A
+    footprint with no pad under a reference already read is ink and is
+    passed over -- PCBCUPID's `G***` logos and `kibuzzard-*` lettering,
+    Olimex's two `REF*` signs.
     """
     tree = kicad.parse_sexp(layout.read_text(encoding="utf-8"))
     stated: dict[str, Statement] = {}
+    #: Each reference with pads, and the footprint that placed it.
+    padded: dict[str, str] = {}
     for footprint in kicad.children(tree, "footprint"):
         name = kicad._reference_of(footprint) or footprint[1]
+        has_pads = bool(kicad.children(footprint, "pad"))
+        if name in stated and not has_pads:
+            continue
+        at = kicad.first(footprint, "at")
+        here = f"{footprint[1]} at ({' '.join(map(str, at[1:])) if at else 'nowhere stated'})"
+        if has_pads and name in padded:
+            raise ValueError(
+                f"{layout.name} places two footprints with pads under the "
+                f"reference {name!r}: {padded[name]} and {here}. Which one "
+                f"its statements are about cannot be told")
+        if has_pads:
+            padded[name] = here
         value = kicad._value_of(footprint)
         models = tuple(pathlib.PurePosixPath(model.path).stem
                        for model in kicad._models_of(footprint) if not model.hidden)
@@ -3829,7 +3848,7 @@ def kicad_statements(layout: pathlib.Path) -> dict[str, Statement]:
         word = value.strip().upper()
         passive = kind in PASSIVE_KINDS.values()
         fitted_not = [flag for flag in flags if flag in ("dnp", "exclude_from_bom")]
-        if fitted_not and kicad.children(footprint, "pad"):
+        if fitted_not and has_pads:
             refused = (f"{layout.name} marks {name} "
                        f"{' and '.join(fitted_not)}: not fitted")
         elif disagree:

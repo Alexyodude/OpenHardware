@@ -5356,6 +5356,34 @@ def test_a_kicad_part_its_own_file_says_is_not_fitted_is_refused():
         assert statements[name].kind is None, name
 
 
+def test_a_kicad_reference_two_footprints_with_pads_share_is_refused():
+    """**Two parts under one reference cannot both be read** (OH-195): the
+    statements are keyed by reference, and the second silently replaced the
+    first. Two footprints with pads under one name are refused, naming both;
+    a footprint with no pad is ink, and under a name already read -- a logo's
+    `G***`, a sign's `REF*` -- it is passed over, before a part or after it,
+    without touching that part's statement."""
+    path = _kicad_parts_file(
+        ("Resistor_SMD:R_0402_1005Metric", "R1", "10k", "smd", True),
+        ("Capacitor_SMD:C_0402_1005Metric", "R1", "100nF", "smd", True))
+    with pytest.raises(ValueError) as caught:
+        compose.kicad_statements(path)
+    for said in ("PARTS.kicad_pcb", "'R1'", "Resistor_SMD:R_0402_1005Metric at (10 10)",
+                 "Capacitor_SMD:C_0402_1005Metric at (10 10)"):
+        assert said in str(caught.value), (said, str(caught.value))
+    path = _kicad_parts_file(
+        ("Graphics:LOGO", "G***", "LOGO", "board_only", False),
+        ("Graphics:LOGO", "R3", "LOGO", "board_only", False),
+        ("Resistor_SMD:R_0402_1005Metric", "R2", "10k", "smd", True),
+        ("Resistor_SMD:R_0402_1005Metric", "R3", "4k7", "smd", True),
+        ("Graphics:LOGO", "G***", "LOGO", "board_only", False),
+        ("Graphics:LOGO", "R2", "LOGO", "board_only", False))
+    statements = compose.kicad_statements(path)
+    assert statements["R2"].value == "10k" and statements["R2"].kind == "resistor"
+    assert statements["R3"].value == "4k7" and statements["R3"].kind == "resistor"
+    assert "G***" in statements
+
+
 def _kicad_stackup_file(stackup: str | None, general: str | None) -> pathlib.Path:
     """A KiCad board stating only its stackup and its general thickness."""
     import tempfile
