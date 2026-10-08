@@ -7,6 +7,11 @@ priority: P1
 created: '2026-10-09'
 touches:
 - docs/tickets/OH-214-*
+- tools/import_3d_model.py
+- tools/compose_board_3d.py
+- tools/model_from_datasheet.py
+- tests/rules/test_import_3d_model.py
+- tests/rules/test_compose_board_3d.py
 ---
 
 Found by OH-163 step 2's worker and confirmed by its review (2026-10-09). Every base colour read from a STEP file is gamma-converted twice, so every vendor model and every KiCad, Espressif or Blender part ships darker and more saturated than its file says.
