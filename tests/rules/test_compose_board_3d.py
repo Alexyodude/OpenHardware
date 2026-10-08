@@ -5247,6 +5247,34 @@ def test_a_part_flipped_and_mirrored_is_the_right_way_up():
         assert both.groups[colour][0] == pytest.approx(positions), colour
 
 
+def test_a_mirrored_eagle_parts_model_lands_where_eagle_place_puts_its_pads():
+    """**`place` moves a mesh the way `eagle.place` moves a pad** (OH-211).
+    EAGLE's MRd turns a package by d and then mirrors it in x, and a model
+    drawn over that package's pads has to go the same way, or at MR90 and
+    MR270 -- where the two orders are half a turn apart -- the part stands
+    half a turn round on its own copper. A vertex over each of an asymmetric
+    package's two pads, in the package's own frame, lands on that pad as
+    `eagle.place` puts it, at every quarter turn, mirrored or not."""
+    local = {"1": (-1.0, 0.5), "2": (1.5, -0.3)}
+    model = compose.Mesh({
+        "#000001": ([-1.0, 0.5, 0.5], [0.0, 0.0, 1.0], [0]),
+        "#000002": ([1.5, -0.3, 0.5], [0.0, 0.0, 1.0], [0]),
+    })
+    for rot in ("R0", "R90", "R180", "R270", "MR0", "MR90", "MR180", "MR270"):
+        pads = {number: eagle.place(x, y, (8.0, 6.0), rot)
+                for number, (x, y) in local.items()}
+        element = eagle.Element(
+            "U1", "L", "P",
+            pads=tuple(eagle.Pad(number, "smd", x, y, 0.5, 0.5, None)
+                       for number, (x, y) in pads.items()),
+            x_mm=8.0, y_mm=6.0, rotation=float(rot.lstrip("MR")),
+            mirrored=rot.startswith("M"))
+        put = compose.place(model, element, 0.0, 1.6, (0.0, 0.0))
+        for colour, number in (("#000001", "1"), ("#000002", "2")):
+            p = put.groups[colour][0]
+            assert (p[0], -p[2]) == pytest.approx(pads[number]), (rot, number)
+
+
 def test_a_modules_pads_land_on_the_pads_at_every_turn():
     """`place` turns an `OverPads` origin with the model, so the point under
     the middle of the module's pads lands on the middle of the element's

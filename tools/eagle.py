@@ -40,33 +40,35 @@ compare what is parsed here against the literal text of the vendor's file.
 
 A package holds pads at coordinates relative to its own origin; an `<element>`
 places that package at a board coordinate with an optional rotation like
-`R90`, `MR180` (mirrored) or `SR90` (spun). `place` mirrors in x first, then
-rotates counter-clockwise, then translates.
+`R90`, `MR180` (mirrored) or `SR90` (spun). `place` turns counter-clockwise
+first, then mirrors in x, then translates (OH-211). KiCad 7's own EAGLE
+importer reads `MRd` the same way: `orientFootprintAndText` sets the
+footprint's orientation to d + 180 and then flips it top to bottom
+(pcbnew/plugins/eagle/eagle_plugin.cpp at tag 7.0.0, lines 1563-1566), and a
+half turn followed by a flip top to bottom is a mirror in x.
 
 That order is a convention, not something the file states, so it was checked
 against evidence the transform does not use: **a routed signal's copper must
-end on the pads it connects.** Over the SparkFun Thing Plus ESP32-C6 board,
-across all eight rotation and mirror combinations:
+end on the pads it connects.** Over the SparkFun Thing Plus ESP32-C6 board:
 
-* 120 of 131 contact references on routed nets land within 0.01 mm of the pad
-  centre computed here;
-* the other 11 miss by between 0.81 mm and 2.09 mm — less than one pad in
-  every case, and six of them by exactly an SMT jumper's own pad pitch,
-  because EAGLE routes to the jumper's other pad. None is a distance a
-  misplaced component could produce;
-* dropping the mirror takes 120 to 104 and the worst residual to 10.7 mm, and
-  dropping the rotation takes it to 88. So the check is sensitive to the thing
-  it is checking, which is the part that makes it worth running.
+* all 131 contact references on routed, unpoured nets land within 0.01 mm of
+  the pad centre computed here;
+* mirroring first and turning second -- the order this module used until
+  OH-211 -- lands 120, with a worst miss of 2.08 mm. The two orders agree at
+  MR0 and MR180 and are half a turn apart at MR90 and MR270, and the 11 it
+  missed are the contacts of the board's mirrored parts at MR90 and MR270;
+* turning clockwise lands 109, dropping the mirror lands 104 with a worst
+  residual of 10.7 mm, and dropping the rotation lands 88. So the check is
+  sensitive to the thing it is checking, which is the part that makes it
+  worth running. Mirroring first scores 120 whichever way it turns, which is
+  why the direction of the turn was not pinned here until the order was.
 
 The other 76 contact references sit on poured nets, where there is no wire to
-land on, and are excluded rather than counted as failures.
-
-**What this does not establish:** rotating the other way also scores 120.
-Every rotated package on that board has a point-symmetric pad set — a two-pad
-0603 at R90 and at R270 puts the same pads in the same places — so the
-*sign* of the rotation is taken from EAGLE's documented behaviour and not from
-this evidence. The magnitude and the mirroring are pinned; the direction is
-not, and a board with an asymmetric rotated package would settle it.
+land on, and are excluded rather than counted as failures. Those numbers are
+`test_routed_copper_lands_on_the_computed_pad_centres`'s; across all eight
+EAGLE boards on disk, every routed contact of a mirrored part on an unpoured
+net lands, which is
+`test_every_routed_contact_of_a_mirrored_eagle_part_lands_on_its_own_nets_copper`.
 """
 
 from __future__ import annotations
@@ -283,14 +285,21 @@ def place(
 ) -> tuple[float, float]:
     """Move a package-local point to board coordinates.
 
-    Mirror in x, then rotate counter-clockwise, then translate — the order
-    checked against routed copper in this module's docstring. `rot` is EAGLE's
-    own spelling: an optional `S` (spin, which does not move the pad), an
-    optional `M` (mirrored), then `R` and the angle in degrees.
+    Turn counter-clockwise, then mirror in x, then translate — the order
+    checked against routed copper in this module's docstring (OH-211). `rot`
+    is EAGLE's own spelling: an optional `S` (spin, which does not move the
+    pad), an optional `M` (mirrored), then `R` and the angle in degrees.
+
+    **A turn by d followed by a mirror in x is the same map as the mirror
+    followed by a turn by -d**, and it is computed the second way. At MR0 and
+    MR180, where turning first and mirroring first agree, that is then the
+    very arithmetic this did before OH-211, bit for bit, so a composed board
+    changes only where a placement moved.
     """
     degrees, mirrored = _rotation(rot)
     if mirrored:
         x_mm = -x_mm
+        degrees = (-degrees) % 360.0
     angle = math.radians(degrees)
     cos, sin = math.cos(angle), math.sin(angle)
     return (
@@ -432,13 +441,13 @@ def _element_pads(
             )
         )
     if mirrored:
-        # A mirrored element is reflected in x before it is turned -- the rule
-        # `place` applies to every pad centre above -- and a reflection
-        # reverses the sense of an angle -- the same care `from_kicad` takes
-        # over a back-side part. The Uno's GROUND jumper is mirrored (MR0),
-        # as are the QT Py's ESP32-C3 and the Thing Plus's underside
-        # resistors, which is what exercises it. (This said the Uno placed
-        # nothing mirrored until OH-180 read the file.)
+        # A mirrored element is turned and then reflected in x -- the rule
+        # `place` applies to every pad centre above (OH-211) -- and a
+        # reflection reverses the sense of an angle, so the pad's own angle
+        # plus the element's turn comes out negated. The Uno's GROUND jumper
+        # is mirrored (MR0), as are the QT Py's ESP32-C3 and the Thing Plus's
+        # underside resistors, which is what exercises it. (This said the Uno
+        # placed nothing mirrored until OH-180 read the file.)
         pads = [dataclasses.replace(pad, rotation_deg=-pad.rotation_deg)
                 for pad in pads]
     return tuple(pads)

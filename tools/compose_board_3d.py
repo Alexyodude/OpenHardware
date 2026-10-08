@@ -3146,14 +3146,18 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
             # QFN-56 pad 1 at (-3.4375, 2.6) against the library's
             # (-3.4375, -2.6) shows -- and stores them flipped. So what the
             # file holds, read in this module's y-up frame, is the library's
-            # own geometry with no negation at all; and a flip top to bottom
-            # is `eagle.place`'s mirror in x turned half round. Hence the
-            # outline and the marker cross unnegated, and the element turns
-            # 180 degrees further, which is what puts a model the way the
-            # file's own pads and marker already lie.
+            # own geometry with no negation at all; and KiCad's placement is
+            # that geometry flipped top to bottom and then turned by theta.
+            # `eagle.place` turns and THEN mirrors in x (OH-211), and a turn
+            # by 180 - theta followed by its mirror is that same map: the
+            # mirror after a turn by phi is the turn by -phi after the
+            # mirror, and a half turn after a mirror in x is a flip top to
+            # bottom. Hence the outline and the marker cross unnegated, and
+            # the element turns by 180 - theta, which is what puts a model
+            # the way the file's own pads and marker already lie.
             silk = None if body is None else body
             mark = placed.mark
-            rotation = (placed.rotation_deg + 180.0) % 360.0
+            rotation = (180.0 - placed.rotation_deg) % 360.0
 
         elements.append(eagle.Element(
             name=placed.reference or placed.library,
@@ -4958,10 +4962,12 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
           centre: tuple[float, float], flip: bool = False) -> Mesh:
     """Move a component's mesh onto the board, the way its pads were moved.
 
-    `tools/eagle.py`'s `place` mirrors in x, then rotates counter-clockwise,
-    then translates -- an order checked there against routed copper. This does
-    the same thing to a mesh, so a component lands exactly where the pads this
-    repository already trusts put it.
+    `tools/eagle.py`'s `place` rotates counter-clockwise, then mirrors in x,
+    then translates -- an order checked there against routed copper (OH-211).
+    This does the same thing to a mesh, so a component lands exactly where the
+    pads this repository already trusts put it -- and it computes it the way
+    `eagle.place` does, as the mirror followed by the turn backwards, so that
+    where the two orders agree the arithmetic is the one it always was.
 
     **`turn` happens first, before the mirror**, and the order is not
     arbitrary: it takes the KiCad model into the frame EAGLE's own package is
@@ -5005,7 +5011,11 @@ def place(mesh: Mesh, element: eagle.Element, turn: float, thickness: float,
     origin = mesh.origin if isinstance(mesh, OverPads) else None
     spin = math.radians(turn)
     turn_cos, turn_sin = math.cos(spin), math.sin(spin)
-    rot = math.radians(element.rotation)
+    # A mirrored element turns by its rotation and then mirrors, which
+    # `onto_board` does as the mirror and then the turn by minus that
+    # rotation -- the same map, and `eagle.place`'s own arithmetic.
+    rot = math.radians((-element.rotation) % 360.0 if element.mirrored
+                       else element.rotation)
     rot_cos, rot_sin = math.cos(rot), math.sin(rot)
 
     def turned(x: float, y: float) -> tuple[float, float]:

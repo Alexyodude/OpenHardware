@@ -198,7 +198,7 @@ def test_the_outline_is_a_round_number_of_inches():
 def test_routed_copper_lands_on_the_computed_pad_centres():
     """The placement transform, checked against data it does not use.
 
-    Mirror-then-rotate-then-translate is a convention the file never states.
+    Turn, then mirror, then translate is a convention the file never states.
     But a routed signal's copper has to end on the pads it connects, and the
     wire coordinates are independent of the element placement arithmetic. So
     the two are compared.
@@ -206,18 +206,29 @@ def test_routed_copper_lands_on_the_computed_pad_centres():
     Nets with a copper pour are excluded: there is no wire to land on, only a
     polygon.
 
-    The two negative controls are the point. A threshold on its own proves
-    nothing — so the same score is recomputed with the mirror dropped and
-    with the rotation dropped, and both have to be worse. A check that cannot
-    fail is not evidence.
-
-    It does *not* pin the direction of rotation: see the note at the end of
-    `tools/eagle.py`'s docstring.
+    The negative controls are the point. A threshold on its own proves
+    nothing — so the same score is recomputed with the mirror taken FIRST
+    (the order `place` used until OH-211), with the turn taken clockwise,
+    with the mirror dropped and with the rotation dropped, and every one has
+    to be worse. A check that cannot fail is not evidence. Mirroring first
+    scores the same whichever way it turns, which is why the direction was
+    not pinned here until the order was right.
     """
     path = _brd()
-    assert _coincident(path, eagle.place) == (120, 2.0828), (
+    assert _coincident(path, eagle.place) == (131, 0.0), (
         "the transform, or the vendor's file, is not what this was measured on"
     )
+
+    def mirrored_first(x, y, origin, rot):
+        degrees, mirrored = eagle._rotation(rot)
+        x = -x if mirrored else x
+        angle = math.radians(degrees)
+        return (origin[0] + x * math.cos(angle) - y * math.sin(angle),
+                origin[1] + x * math.sin(angle) + y * math.cos(angle))
+
+    def clockwise(x, y, origin, rot):
+        degrees, mirrored = eagle._rotation(rot)
+        return eagle.place(x, y, origin, ("MR" if mirrored else "R") + str(-degrees))
 
     def unmirrored(x, y, origin, rot):
         return eagle.place(x, y, origin, (rot or "").replace("M", ""))
@@ -225,16 +236,107 @@ def test_routed_copper_lands_on_the_computed_pad_centres():
     def unrotated(x, y, origin, rot):
         return (origin[0] + x, origin[1] + y)
 
+    assert _coincident(path, mirrored_first) == (120, 2.0828), (
+        "mirroring before turning should miss the mirrored parts at MR90 and "
+        "MR270, every one of them half a turn round"
+    )
+    assert _coincident(path, clockwise) == (109, 7.4848), (
+        "turning clockwise should miss every part whose pads a turn moves"
+    )
     worse_mirror, gap_mirror = _coincident(path, unmirrored)
     worse_rot, _ = _coincident(path, unrotated)
-    assert worse_mirror < 120 and gap_mirror > 10.0, (
-        f"dropping the mirror changed nothing ({worse_mirror} coincident), so this "
-        f"check is not sensitive to the mirror and proves nothing about it"
+    assert (worse_mirror, gap_mirror) == (104, 10.7), (
+        f"dropping the mirror gave {worse_mirror} coincident and a worst gap of "
+        f"{gap_mirror}, so this check is not sensitive to the mirror as measured"
     )
-    assert worse_rot < worse_mirror, (
-        f"dropping the rotation ({worse_rot}) should be worse than dropping only "
-        f"the mirror ({worse_mirror})"
+    assert worse_rot == 88, (
+        f"dropping the rotation gave {worse_rot} coincident, which should be "
+        f"worse than dropping only the mirror ({worse_mirror})"
     )
+
+
+#: Every EAGLE board file this project reads, by the source
+#: `tools/get_board_sources.py` fetches it as and its path inside that source.
+EAGLE_BOARDS = (
+    ("adafruit-feather-esp32-c6", "Adafruit Feather ESP32-C6.brd"),
+    ("adafruit-huzzah32", "Adafruit HUZZAH32 ESP32 Feather.brd"),
+    ("adafruit-kb2040", "Adafruit KB2040.brd"),
+    ("adafruit-qt-py-esp32-c3", "Adafruit QT Py ESP32-C3.brd"),
+    ("arduino-uno", "UNO-TH_Rev3e.brd"),
+    ("sparkfun-pro-micro-esp32-c3", "Hardware/SparkFun_Dev_ESP32_C3_MINI.brd"),
+    ("sparkfun-qwiic-pocket-esp32-c6", "Hardware/Qwiic_Pocket_Dev_ESP32_C6.brd"),
+    ("sparkfun-thing-plus-esp32-c6", "Hardware/Thing_Plus_ESP32_C6.brd"),
+)
+
+
+def test_every_routed_contact_of_a_mirrored_eagle_part_lands_on_its_own_nets_copper():
+    """**EAGLE's `MRd` turns a package by d and then mirrors it in x** (OH-211),
+    and the vendors' own copper says so. Every pad of every mirrored element
+    the reader places, on all eight EAGLE boards, whose net is routed and
+    not poured, lands within 0.01 mm of a wire end or a via of that net.
+    Mirroring first and turning second agrees at MR0 and MR180 and puts a
+    part at MR90 or MR270 half a turn round, which is what this caught: 26
+    of these 132 contacts missed, by up to 2.08 mm on the Thing Plus C6 and
+    1.78 mm on the Pro Micro C3.
+
+    The pads are the reader's, `eagle.read_board`'s `Element.pads`; only the
+    copper is read raw here, because `Board.traces` carries no net. Copper is
+    a `<wire>` on layers 1 to 16, EAGLE's top, inner and bottom copper, or a
+    `<via>`; layer 19 is `Unrouted`, an airwire, and is not copper. A pad is
+    one contact however many times its signal lists it -- the HUZZAH32 lists
+    some twice in one `<signal>` -- because the pads counted are the
+    reader's, one per pad.
+
+    **Pours are excluded, and this is exactly how:** a net is poured when any
+    `<signal>` of its name holds a `<polygon>`, and then every pad on it is
+    left out, whether or not a wire also reaches it. EAGLE stores a pour as
+    its outline and computes the fill when it ratsnests, so a pad can join
+    its net through copper the file does not carry and there is no wire end
+    for it to land on. A pad on no net, or on a net with no copper at all,
+    is not a routed contact and is not counted either.
+    """
+    import xml.etree.ElementTree as ET
+
+    copper = {str(layer) for layer in range(1, 17)}
+    landed, missed, unfetched = 0, [], []
+    for source, name in EAGLE_BOARDS:
+        path = REPO / "third_party" / source / name
+        if not path.is_file():
+            unfetched.append(source)
+            continue
+        signals = ET.parse(path).getroot().findall("drawing/board/signals/signal")
+        poured = {signal.get("name") for signal in signals
+                  if signal.find("polygon") is not None}
+        ends: dict[str, list[tuple[float, float]]] = {}
+        for signal in signals:
+            on = ends.setdefault(signal.get("name"), [])
+            on += [(float(wire.get(x)), float(wire.get(y)))
+                   for wire in signal.findall("wire") if wire.get("layer") in copper
+                   for x, y in (("x1", "y1"), ("x2", "y2"))]
+            on += [(float(via.get("x")), float(via.get("y")))
+                   for via in signal.findall("via")]
+        for element in eagle.read_board(path).elements:
+            if not element.mirrored:
+                continue
+            for pad in element.pads:
+                if pad.net is None or pad.net in poured or not ends.get(pad.net):
+                    continue
+                gap = min(math.hypot(pad.x_mm - x, pad.y_mm - y)
+                          for x, y in ends[pad.net])
+                if gap < 0.01:
+                    landed += 1
+                else:
+                    missed.append(f"{path.name} {element.name} "
+                                  f"(MR{element.rotation:g}) pad {pad.number} on "
+                                  f"{pad.net}: {gap:.3f} mm")
+    assert not missed, (
+        f"{len(missed)} contact(s) of mirrored parts miss their own net's "
+        f"copper and {landed} land: {missed}"
+    )
+    if unfetched:
+        pytest.skip(f"SKIPPED: {landed} contacts land; not fetched: {unfetched}. "
+                    f"Run: python tools/get_board_sources.py <source>")
+    assert landed == 132, f"{landed} contacts of mirrored parts were measured, not 132"
 
 
 # --- placement, on fixtures that need no vendor tree ------------------------
@@ -246,16 +348,24 @@ def test_placement_rotates_counter_clockwise():
     assert (round(x, 9), round(y, 9)) == (0.0, 1.0)
 
 
-def test_placement_mirrors_in_x_before_it_rotates():
-    """MR90 is not R90 mirrored afterwards, and the order is visible here."""
-    assert tuple(round(v, 9) for v in eagle.place(1.0, 0.0, (0.0, 0.0), "MR0")) == (
-        -1.0,
-        0.0,
-    )
-    assert tuple(round(v, 9) for v in eagle.place(1.0, 0.0, (0.0, 0.0), "MR90")) == (
-        0.0,
-        -1.0,
-    )
+def test_placement_turns_before_it_mirrors_in_x():
+    """MRd is the package turned by d and then mirrored in x (OH-211), the
+    order KiCad 7's own EAGLE importer reads it in: `orientFootprintAndText`
+    sets the orientation to d + 180 and then flips top to bottom
+    (pcbnew/plugins/eagle/eagle_plugin.cpp at 7.0.0, lines 1563-1566), and a
+    flip top to bottom after a half turn is a mirror in x. The two orders
+    agree at MR0 and MR180 and are half a turn apart at MR90 and MR270, so
+    those are where it is visible: mirroring first would put (1, 0) at
+    (0, -1) and (0, 1) at (-1, 0)."""
+    def at(x, y, rot):
+        return tuple(round(v, 9) + 0.0 for v in eagle.place(x, y, (0.0, 0.0), rot))
+
+    assert at(1.0, 0.0, "MR0") == (-1.0, 0.0)
+    assert at(1.0, 0.0, "MR180") == (1.0, 0.0)
+    assert at(1.0, 0.0, "MR90") == (0.0, 1.0)
+    assert at(0.0, 1.0, "MR90") == (1.0, 0.0)
+    assert at(1.0, 0.0, "MR270") == (0.0, -1.0)
+    assert at(0.0, 1.0, "MR270") == (-1.0, 0.0)
 
 
 def test_a_spin_does_not_move_a_pad():
