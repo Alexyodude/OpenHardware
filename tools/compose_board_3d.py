@@ -5758,11 +5758,16 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                                spec.colour, letters)
     pieces.extend(drawn_art)
     print("  artwork " + ", ".join(f"{k} {v}" for k, v in tally.items()))
-    if board.silk_unread:
-        print("  not ink " + ", ".join(f"{k} {v}" for k, v in board.silk_unread)
-              + " -- " + ("hidden text is text the file prints nowhere; "
-                          if "hidden text" in dict(board.silk_unread) else "")
-              + "the rest is a handful per board")
+    # **Text the file hides is not a gap**: KiCad plots none of it either,
+    # so it is counted on its own line and under its own key, and `not ink`
+    # is only what a vendor's plot has and this model lacks.
+    unread_ink = dict(board.silk_unread)
+    hidden = unread_ink.pop("hidden text", 0)
+    if unread_ink:
+        print("  not ink " + ", ".join(f"{k} {v}" for k, v in unread_ink.items()))
+    if hidden:
+        print(f"  hidden  text {hidden}: the file hides it, and KiCad plots "
+              f"none of it either")
     # **Every piece of text is drawn or refused by name** (OH-163): KiCad's
     # in newstroke, and an EAGLE board's not at all, for the font's sake.
     if board.kicad_text:
@@ -5771,7 +5776,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
               f"are counted in the artwork line")
     # Only `eagle._ink` leaves text in `silk_unread`: `kicad._texts_of`
     # reads all of a KiCad board's.
-    unread_text = dict(board.silk_unread).get("text", 0)
+    unread_text = unread_ink.get("text", 0)
     if unread_text:
         unlettered = {**unlettered, EAGLE_TEXT: unread_text}
     for why, count in sorted(unlettered.items()):
@@ -6121,7 +6126,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             # a gap somebody can close, and now a reader can see it too.
             "artwork": dict(tally),
             "not_drawn": {
-                "ink": dict(board.silk_unread),
+                "ink": unread_ink,
                 # Each piece of text not drawn, counted under why (OH-163).
                 "text": unlettered,
                 "copper": dict(board.traces_unread),
@@ -6130,6 +6135,9 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 "unmodelled": unmodelled,
                 "no_pads": padless,
             },
+            # Text the file hides, which KiCad does not plot either: not
+            # a gap, so not under `not_drawn` (OH-163).
+            "hidden": {"text": hidden},
             "absent": [
                 {"package": package, "why": why,
                  "elements": [e.name for e in absent if e.package == package]}

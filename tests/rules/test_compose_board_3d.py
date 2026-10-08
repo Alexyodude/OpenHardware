@@ -3954,6 +3954,21 @@ def test_what_is_not_drawn_rides_in_extras():
     # refused, every piece of it, under that reason (OH-163).
     assert gaps["ink"].get("text", 0) > 0
     assert gaps["text"] == {compose.EAGLE_TEXT: gaps["ink"]["text"]}, gaps["text"]
+    # **Text the file hides is not a gap** (OH-163 step 1's review): KiCad
+    # plots none of it either, so it rides under its own key and `not_drawn`
+    # lists only what a vendor's plot has and this model lacks. SparkFun's
+    # KiCad file for the Thing Plus C5 hides every text it carries.
+    assert extras.get("hidden") == {"text": 0}, extras.get("hidden")
+    spec = next(s for s in compose.COMPOSITIONS
+                if s.board == "SparkFun Thing Plus ESP32-C5")
+    glb = REPO / "webui" / "static" / "models" / f"{compose._slug(spec.board)}.glb"
+    if not (glb.is_file() and spec.layout.is_file()):
+        pytest.skip(f"SKIPPED: {glb.name} or {spec.layout.name} is absent; "
+                    f"{spec.fetch_with}, then python tools/compose_board_3d.py")
+    hidden = dict(compose.read_layout(spec.layout).silk_unread).get("hidden text", 0)
+    extras = read_extras(glb)
+    assert hidden > 0 and extras.get("hidden") == {"text": hidden}, (hidden, extras.get("hidden"))
+    assert "hidden text" not in extras["not_drawn"]["ink"], extras["not_drawn"]["ink"]
 
 
 def test_an_unmodelled_placement_is_counted_not_skipped():
