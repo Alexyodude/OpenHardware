@@ -492,7 +492,10 @@ class Placement:
     x_mm: float
     y_mm: float
     rotation_deg: float
-    back: bool            #: on the underside, so its footprint is mirrored
+    #: On the underside. KiCad stores an underside footprint already flipped,
+    #: its pads and graphics alike, so it is placed by turn and move only and
+    #: never mirrored again: see `_on_board`.
+    back: bool
     pads: tuple[Pad, ...]  #: in the FOOTPRINT's own space, before placement
     #: `(min_x, min_y, max_x, max_y)` of the part's BODY, in the footprint's
     #: own local millimetres and KiCad's own y-down frame, or `None` where it
