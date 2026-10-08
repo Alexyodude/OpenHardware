@@ -3063,9 +3063,14 @@ def header_table(
     carried: dict[str, list[str]] = {}
     for name in names:
         report = board_report(name, bsp_dir, boards_dir)
+        # **Whether or not the pad resolves**: `partial` feeds "no other file
+        # here has a pad for it", and a pad that is null or disputed on this
+        # file is still a pad of it. An unresolved pad may have no `matched`,
+        # so it is keyed by every name it wears, the names `resolve` tries.
         for entry in report["pads"]:
-            if entry["chip_pin"] is not None and name not in carried.get(entry["matched"], []):
-                carried.setdefault(entry["matched"], []).append(name)
+            for key in dict.fromkeys((entry["label"], *alternatives(entry["label"]))):
+                if name not in carried.get(key, []):
+                    carried.setdefault(key, []).append(name)
         for entry in report["pads"] + report["on_board"]:
             if entry["chip_pin"] is None:
                 continue

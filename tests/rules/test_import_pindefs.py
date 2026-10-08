@@ -2228,6 +2228,39 @@ def test_a_row_only_one_of_a_chips_files_carries_says_which_file_in_the_block(
     assert "`LED` has no pad" in text
 
 
+def test_a_pad_one_file_carries_null_is_still_a_pad_of_that_file(tmp_path, monkeypatch):
+    """"No other file here has a pad for it" is a sentence about PADS, so a
+    file whose pad for a row is there and null -- or disputed -- still has
+    one. Counting only the pads that resolve called such a row the other
+    file's alone (OH-200 review, F3).
+
+    Both fake files carry `MTMS`; only the SMD reads the board CAD that names
+    it, so the DIP's pad is null. `D10` is still the SMD's alone."""
+    bsp, boards = _fake_tree(tmp_path, monkeypatch)
+    pcb = tmp_path / "pcb"
+    pcb.mkdir()
+    (pcb / "fake.kicad_pcb").write_text(FAKE_SEEED_PCB, encoding="utf-8")
+    cad = dataclasses.replace(pindefs.seeed_pcb("fake.kicad_pcb", ("MTMS",)), root=pcb)
+    _board_file(boards, "FAKE-DIP", [("D0", "1"), ("D6", "7"), ("MTMS", "13"), ("GND", "12")])
+    _board_file(boards, "FAKE-SMD",
+                [("D0", "1"), ("D6/MTDI", "7"), ("D10", "11"), ("MTMS", "13"), ("GND", "12")])
+    sources = pindefs.BOARDS["FAKE-DIP"].sources
+    monkeypatch.setattr(pindefs, "BOARDS", {
+        "FAKE-DIP": pindefs.Board("FAKE", sources, on_board=("LED",)),
+        "FAKE-SMD": pindefs.Board("FAKE", sources + (cad,), on_board=("LED",)),
+    })
+    (dip_mtms,) = [pad for pad in board_report("FAKE-DIP", bsp, boards)["pads"]
+                   if pad["label"] == "MTMS"]
+    assert dip_mtms["chip_pin"] is None, dip_mtms
+
+    table = pindefs.header_table("FAKE", bsp, boards)
+    assert table.pins["MTMS"] == ChipPin("GPIO2", 2), table.pins
+    assert table.partial == {"D10": ("FAKE-SMD",)}, table.partial
+    text = " ".join(pindefs.render_header(table).split("\n")).replace(" #: ", " ")
+    assert "`D10` is a pad of FAKE-SMD alone; no other file here has a pad for it." in text, text
+    assert "`MTMS` is a pad of" not in text and "`MTMS` are pads" not in text, text
+
+
 def _symbol_library() -> str:
     if not SEEED_SYM.is_file():
         pytest.skip(f"no {SEEED_SYM}; run python tools/get_board_sources.py seeed-xiao")
