@@ -440,6 +440,35 @@ def test_the_audit_returns_exactly_the_colours_it_could_not_name(capsys):
     assert printed.count("DEFAULT, nothing says what this is") == 2, printed
 
 
+def test_the_index_carries_each_composed_boards_unnamed_colours(
+        tmp_path, monkeypatch):
+    """**`default_finish` reaches the file the page fetches** (OH-163).
+
+    The composer writes the colours `FINISHES` cannot name into a board's
+    extras, and `write_index` copied `drawn`, `modelled` and `absent` out of
+    those extras into `index.json` and left this one behind -- so the list
+    stopped at a `.glb` nothing reads extras out of. One composed board
+    written with a known list, the index written over it, and the board's
+    entry must carry the list unchanged.
+    """
+    from tools import import_3d_model
+    from tools.import_3d_model import Mesh, write_glb, write_index
+
+    monkeypatch.setattr(import_3d_model, "OUT", tmp_path)
+    triangle = ([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0] * 3, [0, 1, 2])
+    unnamed = {"#123456": 1, "#654321": 7}
+    write_glb(Mesh({"#123456": triangle}), tmp_path / "Probe-Board.glb",
+              "Probe Board", "test", (1.0, 1.0, 1.0),
+              extras={"composed": True, "default_finish": unnamed})
+
+    index = write_index((("Probe Board", "probe-chip", "Probe-Board"),))
+
+    entry = json.loads(index.read_text(encoding="utf-8"))["boards"]["Probe Board"]
+    assert entry.get("default_finish") == unnamed, (
+        f"the index entry is {entry}, without the board's unnamed colours")
+
+
 def test_a_part_with_no_forward_direction_writes_none():
     """**Absent, not `from: null`**, and the two are different claims.
 

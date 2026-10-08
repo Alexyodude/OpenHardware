@@ -1155,9 +1155,10 @@ def report_finishes(mesh: Mesh) -> dict[str, int]:
     the claim in front of whoever runs the importer.
 
     **Returned so a caller can put the unnamed ones in front of a reader too**
-    (OH-163): the composer carries them in its extras as `default_finish`, so
-    a surface nothing here can name is listed on the page as exactly that
-    rather than drawn silently grey.
+    (OH-163): the composer carries them in its extras as `default_finish`, and
+    `write_index` copies them into `index.json`, the index the page fetches --
+    so the colours drawn at the default are written down per board rather
+    than known only to whoever read this printout.
     """
     unnamed: dict[str, int] = {}
     for colour, (_positions, _normals, indices) in sorted(
@@ -2470,6 +2471,10 @@ def write_index(composed: tuple[tuple[str, str, str], ...] | None = None
             "drawn": extras.get("drawn", []),
             "modelled": extras.get("modelled", []),
             "absent": extras.get("absent", []),
+            # Each colour drawn at DEFAULT_FINISH, with its triangles: the
+            # composer's own audit, copied so it reaches the index the page
+            # fetches rather than stopping in the .glb (OH-163).
+            "default_finish": extras.get("default_finish", {}),
             "components": extras.get("components", ""),
             "pcb_colour_source": extras.get("pcb_colour_source", ""),
         }

@@ -6143,8 +6143,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             "hidden": {"text": hidden},
             # **Each colour drawn at DEFAULT_FINISH, and how many triangles
             # of it** (OH-163): drawn, so not under `not_drawn`, but in a
-            # material nothing in `FINISHES` can name -- listed so the page
-            # can say so rather than draw it silently grey.
+            # material nothing in `FINISHES` can name -- carried here and,
+            # by `write_index`, in the index the page fetches.
             "default_finish": default_finish,
             "absent": [
                 {"package": package, "why": why,
