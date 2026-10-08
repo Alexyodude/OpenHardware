@@ -146,10 +146,10 @@ def test_one_scale_and_offset_per_axis_leaves_every_pad_within_one_stored_step()
 
     A fit per axis, because board.svg is not uniformly scaled; see the next
     test. Rounding to the stored 0.1 px leaves at most 0.05 px on a
-    coordinate, and a line fitted through 18 and 14 of them at once moves by
-    less than that, so one whole stored step is more than rounding leaves: a
-    pad that far out is not where Arduino put it. That step is under 0.02 mm
-    at either scale, against a header pitch of 2.54 mm.
+    coordinate, and a line fitted through all 32 at once averages those
+    errors rather than adding to them, so a residual of a whole stored step
+    is a pad that is not where Arduino put it, not rounding. That step is
+    under 0.02 mm at either scale, against a header pitch of 2.54 mm.
 
     Down, the two rows fix the fitted line exactly, so a residual there means
     a pad has left its row, which the test above names first.
@@ -234,6 +234,8 @@ def test_every_label_that_names_one_of_arduinos_nets_is_on_that_net():
     file's signals and the words on its silkscreen -- so the '+' it writes
     before a rail is allowed for. IOREF and NC name no net, and the two tests
     below compare them.
+
+    One behaviour across every such pad, as above.
     """
     nets = _nets()
     wrong = [
