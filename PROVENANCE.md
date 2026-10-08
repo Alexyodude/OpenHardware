@@ -315,6 +315,53 @@ against Espressif's datasheet pin table; `chip_pin_from` names which.
 
 **Position and risk:** as 2f.
 
+### 2i. KiCad's text arithmetic, reimplemented — `letter` and `_texts_of` (OH-163)
+
+`letter` in `tools/compose_board_3d.py` lays a KiCad text out as KiCad plots
+it, and `_texts_of` in `tools/kicad.py` reads a text out of a board file as
+KiCad reads it. Both were written by reading KiCad's own source at tag 8.0.0,
+and its 5.1.10 reader for the older files, which is under GPL-2-or-later
+headers, one file of it GPL-3-or-later. What was taken from it:
+
+- **The layout's numbers**: a glyph unit of 1/21 of the text size and the
+  8-unit baseline offset; the italic lean of 1/8; the 1.68 interline and the
+  0.9583 factor on it; the 1.17, 1.52 and 0.052 that place a block; a
+  default pen of 1/8 of the width, 1/5 if bold, held to 1/4 of the smaller
+  side. `GLYPH_UNITS` and the constants beside it name the file each one
+  is in.
+- **The reader's conventions**: a footprint text's angle is stored absolute;
+  `unlocked` means "not kept upright"; a size the file omits is 1.524 mm; a
+  final line break draws no empty line; hidden text is said three ways
+  across the vintages; a dimension's text is written as board text, in board
+  coordinates, wherever the dimension sits.
+
+No code, comment or identifier of KiCad's is copied: the composer is Python
+written here, in its own order, and its docstrings describe the arithmetic
+in their own words.
+
+**Position:** these are facts about KiCad's output, not KiCad's expression.
+The ink KiCad plots from a board file is fixed by these numbers: there is
+exactly one answer that puts a stroke where KiCad puts it, and the source is
+only where that answer was found first. It is interoperability information
+about a file format and how it is drawn, on the same footing as 2a's field
+order.
+
+**And the answer is checked against KiCad's behaviour, not its source.**
+The vendors' own Gerbers are the plots KiCad made from the very board files
+read here, and every stroke `letter` makes is held to them at 1 µm: Seeed's
+KiCad 8.0.0 plot of the XIAO ESP32-C6 and Olimex's KiCad 7.0.9 plot of the
+ESP32-PoE (`test_the_xiao_esp32_c6s_text_lands_on_seeeds_own_gerber`,
+`test_the_esp32_poes_text_lands_on_olimexs_own_gerber`). The branches no
+Gerber exercises -- right justification, top alignment, italic, and the
+default, bold and clamped pens -- carry tests whose expectations are derived by
+hand from the same arithmetic, the derivation in each docstring.
+
+**Risk:** low. Each number could be recovered from Gerbers alone, by
+plotting known texts and measuring them, which is observing behaviour rather
+than reading source; the two vendor Gerbers already confirm every number
+their texts use. The glyphs are not KiCad's code at all: §4 records them,
+from their author's CC0 release.
+
 ---
 
 ## 3. What is unambiguously GPL, and stays GPL
