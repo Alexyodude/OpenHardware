@@ -1,7 +1,7 @@
 ---
 id: OH-215
 title: Six manifest boards may be drawn a quarter turn off their own pads by the page
-status: open
+status: in-progress
 priority: P1
 created: '2026-10-09'
 touches:
