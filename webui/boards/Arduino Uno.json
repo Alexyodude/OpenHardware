@@ -5,7 +5,7 @@
     "height": 304,
     "file": "share/boards/Arduino Uno/board.svg"
   },
-  "derivation": "Pad centres extracted from board.svg: circle elements mapped through viewBox 0 0 27957 21193 -> 402x304 with the root translate(-42763,-28610), and stored to 0.1 px. The 14.4px spacing is the 0.1in header pitch and is what identifies a header run. Group sizes 10+8 top and 8+6 bottom match an Uno R3. `source.file` is Arduino's own EAGLE board file, and tests/rules/test_uno_geometry.py holds these pads to it as tools/import_board.py reads it from elements IOH, IOL, POWER and AD. Across, every pad is within the most that rounding to the stored 0.1 px could leave after one scale and offset fitted to Arduino's pads, a bound that test derives from Arduino's pad positions. Down, it holds only that the artwork has Arduino's two rows, in the same order and with as many pads in each; two rows fix a fitted line exactly, so it bounds nothing there, and the spacing between the rows is bounded only by tests/rules/test_import_board.py::test_the_unos_traced_pads_agree_under_one_scale_too_which_is_what_the_page_uses. It also compares every label with the net its pad is on. The coordinates here are deliberately NOT replaced by the vendor's: they are in artwork space and must land on the drawing they are painted over.",
+  "derivation": "Pad centres extracted from board.svg: circle elements mapped through viewBox 0 0 27957 21193 -> 402x304 with the root translate(-42763,-28610), and stored to 0.1 px. The 14.4px spacing is the 0.1in header pitch and is what identifies a header run. Group sizes 10+8 top and 8+6 bottom match an Uno R3. `source.file` is Arduino's own EAGLE board file, and tests/rules/test_uno_geometry.py holds these pads to it as tools/import_board.py reads it from elements IOH, IOL, POWER and AD. Across, every pad is within the most that rounding to the stored 0.1 px could leave after one scale and offset fitted to Arduino's pads, a bound that test derives from Arduino's pad positions. Down, the artwork has Arduino's two rows, in the same order and with as many pads in each; two rows fix a fitted line exactly, so no residual down can show. The spacing between the rows is held by three other tests instead: tests/rules/test_import_board.py::test_the_unos_artwork_is_not_uniformly_scaled_and_the_file_says_so asserts the down scale `assumption` states, to its four decimals; tests/rules/test_uno_geometry.py's anisotropy test fails once the rows widen until the two scales differ by no more than rounding could make; and tests/rules/test_import_board.py::test_the_unos_traced_pads_agree_under_one_scale_too_which_is_what_the_page_uses, the loosest, is the one that does not rest on a sentence in this file. It also compares every label with the net its pad is on. The coordinates here are deliberately NOT replaced by the vendor's: they are in artwork space and must land on the drawing they are painted over.",
   "assumption": "Pad-to-label assignment WAS an assumption -- the documented Uno R3 silkscreen order with USB at the left -- and is no longer one: tests/rules/test_uno_geometry.py compares every label with the net its pad is on in Arduino's own files, and each of its tests says how one kind of label is compared, which is where 13 on SCK, SDA beside A4, and IOREF on +5V are explained. Labels on one net -- SDA and A4, SCL and A5, IOREF and 5V, and the GNDs -- cannot be told apart by any net, so which of them is which is still the silkscreen order. Pin numbers come from the simulator's own pinsl names and that test does not check them. board.svg is not uniformly scaled, a property of the artwork rather than of the pads: one scale per axis fits it at 5.6616 px/mm across and 5.6382 px/mm down, and the same test holds that the two differ by more than rounding could make. Nothing here depends on it, and a future importer that assumes one scale for both axes will be wrong by that difference.",
   "source": {
     "vendor": "Arduino",
@@ -41,7 +41,7 @@
       "group": "digital-high",
       "chip_pin": null,
       "chip_index": null,
-      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
+      "why_null": "not a port pin: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "GND",
@@ -51,7 +51,7 @@
       "group": "digital-high",
       "chip_pin": null,
       "chip_index": null,
-      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
+      "why_null": "not a port pin: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "13",
@@ -197,7 +197,7 @@
       "group": "power",
       "chip_pin": null,
       "chip_index": null,
-      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
+      "why_null": "not a port pin: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "RESET",
@@ -227,7 +227,7 @@
       "group": "power",
       "chip_pin": null,
       "chip_index": null,
-      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
+      "why_null": "not a port pin: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "GND",
@@ -237,7 +237,7 @@
       "group": "power",
       "chip_pin": null,
       "chip_index": null,
-      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
+      "why_null": "not a port pin: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "GND",
@@ -247,7 +247,7 @@
       "group": "power",
       "chip_pin": null,
       "chip_index": null,
-      "why_null": "no MCU pin is behind this pad: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
+      "why_null": "not a port pin: it is a supply, a ground or a reference, and Arduino's own board file routes it to no GPIO net"
     },
     {
       "label": "VIN",
@@ -316,7 +316,7 @@
   ],
   "pindefs": {
     "generated_by": "OH-170 step 1, by hand; this board is not in tools/import_pindefs.py, whose table is keyed on XIAO names",
-    "derivation": "`chip_pin` is the port and bit from Arduino's own AVR variant, `framework-arduino-avr/variants/standard/pins_arduino.h` -- line 54 defines LED_BUILTIN as 13 and the pinout comment from line 99 gives each digital and analog pin its port and bit. `webui/boards/atmega328p.py` transcribes the same table for PIN_NAMES, and the two are asserted equal rather than one generated from the other. Cross-checked against Arduino's own board file third_party/arduino-uno/UNO-TH_Rev3e.brd, whose nets for the ATmega's port pins are IO0..IO9, SS, MOSI, MISO, SCK, AD0..AD3, AD4/SDA and AD5/SCL, every one reaching the ATmega socket ZU4: every label given a chip pin here sits on one of those nets, and every label left null sits on none of them. That is what the board file can check and the variant file cannot. A null pad can still reach ZU4 on another net: AREF is on the net of the ATmega pin Arduino's schematic names AREF, RESET on RESET's, 5V and IOREF on VCC's, and each GND on GND's, while NC is on no net and 3V3 and VIN are on nets that do not reach ZU4. `chip_index` is null throughout: an AVR names its pins by port and bit and publishes no flat GPIO numbering, as Silicon Labs does not for the MG24.",
+    "derivation": "`chip_pin` is the port and bit from Arduino's own AVR variant, `framework-arduino-avr/variants/standard/pins_arduino.h` -- line 54 defines LED_BUILTIN as 13 and the pinout comment at lines 87-104 gives each digital and analog pin its port and bit. `webui/boards/atmega328p.py` transcribes the same table for PIN_NAMES, and the two are asserted equal rather than one generated from the other. Cross-checked against Arduino's own board file third_party/arduino-uno/UNO-TH_Rev3e.brd, whose nets for the port pins this board numbers are IO0..IO9, SS, MOSI, MISO, SCK, AD0..AD3, AD4/SDA and AD5/SCL, every one reaching the ATmega socket ZU4: every label given a chip pin here sits on one of those nets, and every label left null sits on none of them. That is what the board file can check and the variant file cannot. A null pad can still reach ZU4 on another net: AREF is on the net of the ATmega pin Arduino's schematic names AREF, RESET on RESET's, 5V and IOREF on VCC's, and each GND on GND's, while NC is on no net and 3V3 and VIN are on nets that do not reach ZU4. `chip_index` is null throughout: an AVR names its pins by port and bit and publishes no flat GPIO numbering, as Silicon Labs does not for the MG24.",
     "packages": [
       {
         "name": "framework-arduino-avr",

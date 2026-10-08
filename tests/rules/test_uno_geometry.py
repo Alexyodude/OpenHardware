@@ -201,8 +201,13 @@ def test_one_scale_and_offset_across_leaves_no_pad_further_off_than_rounding_cou
 
     Down, nothing is fitted here: two rows fix a line exactly, so the residual
     down is zero whenever the first test passes. What holds down is that test's
-    rows, and the spacing between them is bounded only by
+    rows. The spacing between them is held by three other tests:
     tests/rules/test_import_board.py's
+    test_the_unos_artwork_is_not_uniformly_scaled_and_the_file_says_so, which
+    asserts the down scale the board file states to four decimals; the
+    anisotropy test below, which fails once the rows widen until the two scales
+    differ by no more than rounding could make; and, loosest and resting on no
+    sentence in the board file, the same file's
     test_the_unos_traced_pads_agree_under_one_scale_too_which_is_what_the_page_uses.
 
     One behaviour across every pad: the residuals are left by one fit through
