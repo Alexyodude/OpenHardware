@@ -749,19 +749,31 @@ def test_a_registry_row_reading_its_licence_from_no_file_reads_absent_and_says_w
     ), cell
 
 
-def test_a_board_naming_neither_a_registry_nor_a_footprint_has_no_tree_to_back_it(tmp_path):
-    """A footprint is searched for in Seeed's tree, so a board naming one is
-    backed there; a board naming neither names no tree at all."""
+def test_a_board_naming_only_a_footprint_is_backed_by_the_licence_file_in_seeeds_tree(
+    tmp_path,
+):
+    """A footprint is searched for in Seeed's tree, so that is where its
+    board's licence file is looked for."""
     seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
     boards = tmp_path / "boards"
     boards.mkdir()
     _board_file(boards, "Footprint", footprint="Footprint", licence="MIT")
+
+    cell = collect_assets(boards, seeed)[0].licence
+    assert (cell.evidence, cell.detail) == (
+        Evidence.PRESENT, f"MIT; {seeed.as_posix()}/LICENSE"
+    ), cell
+
+
+def test_a_board_naming_neither_a_registry_nor_a_footprint_has_no_tree_to_back_it(tmp_path):
+    seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
+    boards = tmp_path / "boards"
+    boards.mkdir()
     _board_file(boards, "Nothing", licence="MIT")
 
-    cells = {report.name: report.licence for report in collect_assets(boards, seeed)}
-    assert cells["Footprint"].evidence is Evidence.PRESENT, cells["Footprint"]
-    assert cells["Nothing"].evidence is Evidence.UNSEARCHABLE, cells["Nothing"]
-    assert "source.registry" in cells["Nothing"].detail, cells["Nothing"].detail
+    cell = collect_assets(boards, seeed)[0].licence
+    assert cell.evidence is Evidence.UNSEARCHABLE, cell
+    assert "source.registry" in cell.detail, cell.detail
 
 
 def test_a_registry_name_no_source_has_is_refused_naming_it(tmp_path):
