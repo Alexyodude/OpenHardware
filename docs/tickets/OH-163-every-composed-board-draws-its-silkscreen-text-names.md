@@ -8,6 +8,9 @@ created: '2026-09-04'
 touches:
 - tools/model_from_datasheet.py
 - tests/rules/test_import_3d_model.py
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
+- tools/import_3d_model.py
 ---
 
 Twenty-five of twenty-six boards draw a vendor file or a board composed from the vendor's PCB, every placement is drawn or refused with a reason (OH-150), and what a person sees is still short of a photograph in four measurable ways. This ticket is those four, counted from `python tools/compose_board_3d.py --check` on 2026-09-04 (11 composed boards) and from the shipped .glb files.
@@ -69,3 +72,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-08:** 2026-10-08: the composer, its tests and the importer lent to OH-184 (back-side silkscreen mirrored twice). Return when OH-184 closes.
 
 **Note 2026-10-08:** 2026-10-08: OH-184 is done (243d22a); the composer, its tests and the importer pass from it to OH-211 (EAGLE MR90/MR270 placed in the wrong order, whose fix also moves from_kicad's back rotation). Return when OH-211 closes.
+
+**Note 2026-10-08:** 2026-10-08: the composer, its tests and the importer return here; OH-211 is done (706cf14). From its review, for the composer: angles are truncated to int before eagle.place (compose_board_3d.py ~4682 and ~4773 build the spelling with str(int(element.rotation)); tools/eagle.py:609-610 likewise), so a fractional angle would turn ink, outline and mark differently from pads; none on disk today.
