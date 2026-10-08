@@ -6619,3 +6619,21 @@ def test_a_board_whose_font_is_not_fetched_is_skipped_naming_it(tmp_path, monkey
     assert not nowhere.exists(), sorted(nowhere.iterdir())
     missing = _inputs_missing(spec, compose.read_layout(spec.layout))
     assert any("newstroke" in name and fetch in name for name in missing), missing
+
+
+def test_a_run_of_the_tool_fetches_the_font_before_it_composes(monkeypatch):
+    """**The command line fetches the font as a run fetches KiCad's models**,
+    so a fresh checkout's `python tools/compose_board_3d.py` letters its
+    boards rather than skipping every KiCad one; `compose`, which tests call,
+    still only reads it. Neither the font nor OpenCASCADE is needed here:
+    the fetch and the composition are both stood in for, and what is held is
+    that the fetch happens once, first."""
+    calls = []
+    monkeypatch.setattr(compose, "newstroke_font", lambda: None)
+    monkeypatch.setattr(compose, "fetch_newstroke",
+                        lambda: calls.append("fetch") or compose.FONT_CACHE)
+    monkeypatch.setattr(compose, "compose",
+                        lambda spec, deflection, check: calls.append(spec.board) or 0)
+    board = compose.COMPOSITIONS[0].board
+    assert compose.main(["--check", "--board", board]) == 0
+    assert calls == ["fetch", board], calls

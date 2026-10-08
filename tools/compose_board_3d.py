@@ -88,6 +88,7 @@ import math
 import pathlib
 import re
 import sys
+import urllib.error
 import urllib.request
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
@@ -5147,10 +5148,11 @@ NEWSTROKE_FILES = ("font.lib", "symbol.lib", "charlist.txt")
 #: The characters KiCad has changed since the author's release, measured as
 #: `NEWSTROKE` says. Refused, because drawn they would be the old glyph.
 NEWSTROKE_CHANGED = frozenset("~")
-#: **The one command that fetches the font.** Composing only reads it, as it
-#: reads a manifest board's own files: a KiCad board whose font is not here
-#: is SKIPPED with this, and nothing downloads in the middle of a run or a
-#: test (OH-163 step 1's review).
+#: **The command that fetches the font and nothing else.** A run of this
+#: tool fetches it too, before composing, as it fetches KiCad's models;
+#: `compose` only reads it, so a test that composes downloads nothing (OH-163
+#: step 1's review). A KiCad board whose font is still not here is SKIPPED
+#: naming this.
 FETCH_FONT = "python tools/compose_board_3d.py --fetch-font"
 #: Seconds to wait on the author's wiki before saying it did not answer.
 FETCH_TIMEOUT_S = 60
@@ -5170,8 +5172,9 @@ def _font_archive_differs(archive: pathlib.Path) -> str | None:
 
 def fetch_newstroke() -> pathlib.Path:
     """Fetch the font's archive if it is not here, check it, and unpack
-    `NEWSTROKE_FILES` from it; the directory they are in. `--fetch-font`
-    calls this, and composing never does.
+    `NEWSTROKE_FILES` from it; the directory they are in. `main` calls this
+    before composing when the font is not here, and `--fetch-font` calls it
+    alone; `compose` never does.
 
     The digest is checked as well as the size: the font is on its author's
     own wiki, and a changed archive is a changed font that every composed
@@ -6187,6 +6190,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no composed board called {args.board!r}. Known: "
               f"{', '.join(spec.board for spec in COMPOSITIONS)}")
         return 2
+    # **The command line fetches the font as a run fetches KiCad's models**;
+    # `compose` itself only reads it, so a test that composes downloads
+    # nothing. A fetch the author's wiki does not answer leaves each KiCad
+    # board with text to say SKIPPED, naming the fetch, as an unfetched board
+    # file does.
+    if newstroke_font() is None:
+        try:
+            fetch_newstroke()
+        except urllib.error.URLError as exc:
+            print(f"newstroke not fetched from {NEWSTROKE[0]}: {exc}")
 
     total = 0
     #: Boards whose files are not fetched. Each says so as it is reached and
