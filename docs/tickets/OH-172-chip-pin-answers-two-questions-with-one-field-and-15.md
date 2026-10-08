@@ -38,3 +38,5 @@ STEPS:
 3. `test_every_pad_either_names_its_pin_or_says_why_it_has_none` counts 153 pads as "supply, with no MCU pin by construction". If a supply pad gains a name, that sentence is wrong and the count moves; both should change together.
 
 Found while OH-170 was checking whether its own supply-label set was too broad. It is not -- no source resolves any label in it -- but the reason no source resolves them turned out to be a rule this repository imposed rather than a fact about the boards.
+
+**Note 2026-10-08:** 2026-10-08, from OH-209's work and review: EN is in SUPPLY_LABELS, so the EN pad of every XIAO SMD keeps the generic why_null and no layer counts it, while it is a real signal: on XIAO-RP2350-SMD pad 25 lands on underside test point TP4, net '/04 RP2350/RUN', which carries the RP2350's RUN pad (U4 pad 26), the reset button K2, R12 and C25 (Seeed's RP2350.kicad_pcb). Whether EN belongs among the supplies is this ticket's question; nine XIAO SMD boards carry the same sentence.
