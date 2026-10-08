@@ -2,7 +2,7 @@
 id: OH-203
 title: A board file says its pins came from board-support packages while some rest
   on the vendor's board CAD
-status: in-review
+status: done
 priority: P2
 created: '2026-10-08'
 touches:
@@ -63,3 +63,5 @@ DELIBERATE BREAKS on the finished code, each red and each restored:
 - (E) XIAO-ESP32-C3-DIP's file given the narrowed sentence turned the existing test red on that board.
 
 VERIFIED in lane3 at d813786: the four named files gave 306 passed, 1 skipped (the OH_SLOW variant survey). check_ticket_claims and check_facts were OK. NOT YET VERIFIED: the full suite. One run was started at d813786 and had reached 30% when this note was written. It had two failures by then, at about 19%, not yet identified; they are expected to be the OCP pair. Its final line still has to be read and recorded.
+
+**Note 2026-10-08:** DONE 2026-10-08. Merged to master by fast-forward at 97d7403 (lane3). The NOT YET VERIFIED paragraph above is superseded: lane3's full suite on the final code gave 2 failed (the OCP pair), 2521 passed, 39 skipped; master at 97d7403 gave 2 failed (the OCP pair), 2522 passed, 38 skipped. TWINS unchanged at 26 of 38, as expected of a change to sentences. REVIEW: an independent review, MERGE: every derivation and assumption checked true against the per-pad citations of all 38 boards; CITES_BOARD_CAD matches exactly the CAD-citing reasons of the non-manifest boards; 8 of 9 mutants killed. Its lows, not done: (1) the tests hold the printed report and the board file equal for XIAO-ESP32-C5-SMD only, so a mutant changing the printed sentence for the Nordic boards alone survived (loop the equality over every CAD board, or have filled_board reuse the report's derivation); (2) CITES_BOARD_CAD hard-codes 'Seeed's own' and would miss a reason citing a .brd, .sch or 'layout': a structured marker on reasons belongs with the second vendor's covered board; (3) its comment says it matches every such reason in BOARDS, but manifest rows' 'the vendor's board file' reasons are not matched (true of non-manifest boards only); (4) the four DIPs that list seeed-pcb under packages say 'Nothing was inferred from the CAD', true but readable as calling seeed-pcb a board-support package; (5) the str.replace that narrows the sentence is a silent no-op if the phrase is reworded: raise instead; (6) the CAD-board assumption says 'packages' in the plural on the zephyr-only Nordic boards.
