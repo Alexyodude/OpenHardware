@@ -5569,8 +5569,8 @@ C6_EVB_SHA = "7b66d23cabba3c573a1e63d83363675b5fb74f06"
 def _c6_evb_file(name: str) -> pathlib.Path:
     """One of the ESP32-C6-EVB's two board files, found by name below
     `OH_KICAD5_BOARDS` or the registry's checkout, or a skip saying how to
-    get it: the registry row fetches the KiCad 5 board, and the KiCad 7 copy
-    in HARDWARE/Dimensions/ only by hand."""
+    get it: the registry row fetches both the KiCad 5 board and its KiCad 7
+    copy in HARDWARE/Dimensions/."""
     import os
 
     for root in (os.environ.get("OH_KICAD5_BOARDS"),
@@ -5580,9 +5580,8 @@ def _c6_evb_file(name: str) -> pathlib.Path:
         if found:
             return found[0]
     pytest.skip(f"SKIPPED: no {name}; python tools/get_board_sources.py "
-                f"olimex-esp32-c6-evb fetches the KiCad 5 board, and its KiCad 7 "
-                f"copy is HARDWARE/Dimensions/{name} at {C6_EVB_SHA}, fetched by "
-                f"hand into a directory OH_KICAD5_BOARDS names")
+                f"olimex-esp32-c6-evb fetches it, as of {C6_EVB_SHA}, or set "
+                f"OH_KICAD5_BOARDS to a directory holding it")
 
 
 def test_a_kicad_5_boards_parts_state_what_its_kicad_7_twin_states():

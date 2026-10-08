@@ -1568,12 +1568,14 @@ def test_the_esp32_poes_kicad_5_back_side_headers_sit_on_their_own_copper():
 # a drawing made from it -- and is used here only to hold the KiCad 5 reading
 # against an independent one.
 #
-# Neither file is committed: `third_party/` is fetched and git-ignored, and
-# the board has no registry row yet (OH-198's phase 2). Pointed at another
-# directory by `OH_KICAD5_BOARDS`, and each file is found by its name anywhere
-# below it.
+# Neither file is committed: `third_party/` is fetched and git-ignored. The
+# registry row `olimex-esp32-c6-evb` fetches both, so the tests below run
+# wherever `python tools/get_board_sources.py olimex-esp32-c6-evb` has.
+# Pointed at another directory by `OH_KICAD5_BOARDS`, and each file is found
+# by its name anywhere below it.
 
 C6_EVB_SHA = "7b66d23cabba3c573a1e63d83363675b5fb74f06"
+C6_EVB_FILES = ("ESP32-C6-EVB_Rev_A.kicad_pcb", "ESP32-C6-EVB_DIMM_Rev_A.kicad_pcb")
 
 
 def _c6_evb(name: str) -> pathlib.Path:
@@ -1584,12 +1586,22 @@ def _c6_evb(name: str) -> pathlib.Path:
     found = sorted(root.rglob(name)) if root.is_dir() else []
     if not found:
         pytest.skip(
-            f"{name} absent under {root}; fetch HARDWARE/Hardware-revision-A/"
-            f"ESP32-C6-EVB_Rev_A.kicad_pcb and HARDWARE/Dimensions/"
-            f"ESP32-C6-EVB_DIMM_Rev_A.kicad_pcb from "
-            f"https://github.com/OLIMEX/ESP32-C6-EVB at {C6_EVB_SHA}, and set "
-            f"OH_KICAD5_BOARDS to the directory holding them")
+            f"{name} absent under {root}; python tools/get_board_sources.py "
+            f"olimex-esp32-c6-evb fetches it, as of {C6_EVB_SHA}, or set "
+            f"OH_KICAD5_BOARDS to a directory holding both")
     return found[0]
+
+
+def test_the_c6_evbs_cross_check_reads_only_files_its_registry_row_fetches():
+    """Both files the cross-check below compares are in the registry row's
+    `wanted` (OH-198's review), so wherever that row is fetched the
+    cross-check runs, and skips only where nothing was fetched."""
+    from tools import board_sources
+
+    wanted = board_sources.source("olimex-esp32-c6-evb").fetch.wanted
+    for name in C6_EVB_FILES:
+        assert [path for path in wanted if pathlib.PurePosixPath(path).name == name], (
+            f"{name} is not in olimex-esp32-c6-evb's wanted, {wanted}")
 
 
 @functools.cache

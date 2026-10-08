@@ -1319,7 +1319,8 @@ SOURCES: tuple[Source, ...] = (
         vendor="Olimex",
         model="one repository per board; HARDWARE/ holds one directory per "
         "revision, and revision A is the only one",
-        size="651,418 + 344 bytes, the two blobs fetched, as GitHub's tree lists them",
+        size="651,418 + 1,115,980 + 344 bytes, the three blobs fetched, as "
+        "GitHub's tree lists them",
         licence=Licence(
             name="CERN-OHL-1.2",
             covers="hardware, in the README's words; the same README puts software "
@@ -1339,8 +1340,13 @@ SOURCES: tuple[Source, ...] = (
         fetch=Fetch(
             transport=Transport.GIT_SPARSE,
             url="https://github.com/OLIMEX/ESP32-C6-EVB.git",
+            # The KiCad 7 copy in HARDWARE/Dimensions/ is fetched for the
+            # tests that hold the KiCad 5 reading against it, and is read by
+            # nothing else: it is a drawing derived from the board, not the
+            # board.
             wanted=(
                 "HARDWARE/Hardware-revision-A/ESP32-C6-EVB_Rev_A.kicad_pcb",
+                "HARDWARE/Dimensions/ESP32-C6-EVB_DIMM_Rev_A.kicad_pcb",
                 "README.md",
             ),
             skipped=(
@@ -1350,10 +1356,10 @@ SOURCES: tuple[Source, ...] = (
                  ".ods and .pdf, fp-info-cache, Gerbers/ (9 .gbr, 2 .drl) and 3d/ "
                  "(15 .step, 4 .stp, 7 .wrl, one model per footprint); the pads and "
                  "nets are in the .kicad_pcb"),
-                ("HARDWARE/Dimensions", "ESP32-C6-EVB_DIMM_Rev_A.kicad_pcb, a KiCad 7 "
-                 "copy of the board carrying dimensions, and a dimensioned PDF: a "
-                 "drawing derived from the board, read by OH-198 only to cross-check "
-                 "the KiCad 5 reading"),
+                ("HARDWARE/Dimensions", "the rest of the directory: "
+                 "ESP32-C6-EVB_rev_A_dimensions.pdf, a dimensioned drawing. The "
+                 "KiCad 7 copy of the board beside it is fetched, and read only "
+                 "to cross-check the KiCad 5 reading"),
                 ("HARDWARE/3D printed case", "two .stl meshes, a printed case's top "
                  "and bottom, made with Fusion 360 as HARDWARE/README.md says; not "
                  "the board"),
@@ -1410,8 +1416,8 @@ SOURCES: tuple[Source, ...] = (
         ),
         cite="OH-198: GitHub's tree listing of commit "
         "7b66d23cabba3c573a1e63d83363675b5fb74f06, the default branch's head, read "
-        "2026-10-08; the board file of revision A and the README fetched here and "
-        "opened",
+        "2026-10-08; the board file of revision A, its KiCad 7 copy in "
+        "HARDWARE/Dimensions/ and the README fetched here and opened",
     ),
 )
 
