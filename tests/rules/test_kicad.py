@@ -1786,7 +1786,16 @@ def _gerber_draws(text: str, where: str) -> list[tuple[float, float, float, floa
     here = None        # 2.7: the current point
     draws: list[tuple[float, float, float, float]] = []
     ended = False
+    read_to = 0        # where the previous command ended
     for match in re.finditer(r"%([^%]*)%|([^%*]*)\*", text):
+        # finditer steps over what neither alternative matches -- a `%` that
+        # never closes -- and stepping over a command is what this refuses.
+        skipped = text[read_to:match.start()]
+        if skipped.strip():
+            raise ValueError(f"{where}: {skipped.strip()!r} between characters {read_to} "
+                             f"and {match.start()} is neither a %...% extended command "
+                             f"nor a word ending in * (3.3)")
+        read_to = match.end()
         extended, word = match.group(1), match.group(2)
         if extended is not None:
             command = extended.strip().rstrip("*")
@@ -1840,6 +1849,9 @@ def _gerber_draws(text: str, where: str) -> list[tuple[float, float, float, floa
             if op is None or decimals is None or scale is None:
                 raise ValueError(f"{where}: {word!r} is not read here, or comes before "
                                  f"the FS and MO that say how to read it")
+            if here is None and None in op.group(1, 2):
+                raise ValueError(f"{where}: {word!r} omits X or Y before any operation "
+                                 f"has set a current point to keep it from (2.7)")
             x = here[0] if op.group(1) is None else int(op.group(1)) / 10 ** decimals * scale
             y = here[1] if op.group(2) is None else int(op.group(2)) / 10 ** decimals * scale
             if op.group(3) == "1":
@@ -1854,6 +1866,31 @@ def _gerber_draws(text: str, where: str) -> list[tuple[float, float, float, floa
     if not ended:
         raise ValueError(f"{where}: no M02, so the file may be cut short (4.13)")
     return draws
+
+
+#: The head every malformed snippet below shares: millimetres, six decimals,
+#: dark polarity, straight plotting -- everything `_gerber_draws` needs before
+#: a coordinate can mean anything.
+_GERBER_HEAD = "%FSLAX46Y46*%\n%MOMM*%\n%LPD*%\nG01*\n"
+
+
+def test_the_gerber_reader_refuses_text_it_would_have_stepped_over():
+    """**Nothing between two commands is passed over unread.** A stray `%`
+    opens an extended command that never closes, so neither alternative of
+    the reader's pattern matches it; skipping it would read the draw after it
+    as though the file were well formed. The reader names the text instead."""
+    text = _GERBER_HEAD + "X0Y0D02*\n%\nX1000000Y0D01*\nM02*\n"
+    with pytest.raises(ValueError, match=r"stray\.gbr: '%' between"):
+        _gerber_draws(text, "stray.gbr")
+
+
+def test_the_gerber_reader_refuses_a_coordinate_omitted_before_any_current_point():
+    """**An omitted X or Y keeps the current point's (2.7), and before the
+    first operation there is none to keep.** The reader says so by name
+    rather than falling over on `None`."""
+    text = _GERBER_HEAD + "Y1000000D02*\nM02*\n"
+    with pytest.raises(ValueError, match=r"early\.gbr: 'Y1000000D02' omits"):
+        _gerber_draws(text, "early.gbr")
 
 
 def _gerber_ends(draws) -> dict[tuple[int, int], list[tuple[float, float, float, float]]]:
