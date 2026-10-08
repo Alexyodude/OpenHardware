@@ -817,7 +817,16 @@ def test_only_the_solder_masks_are_coated():
     # COLOUR is a judgement and whose being a mask is not. It belongs here for
     # the same reason the other two do, and this list is what stops a coat
     # spreading to a part that is one layer.
-    assert coated == {"#313d63", "#116517", "#1b1b1b"}, coated
+    #
+    # OH-163 added the composed boards' other masks and every composed
+    # board's ROUTING, which is the same film with copper behind it -- each
+    # one a mask, as `test_every_composed_boards_mask_and_routing_is_a_solder_mask`
+    # holds against the compositions themselves.
+    assert coated == {
+        "#313d63", "#116517", "#1b1b1b",
+        "#e2180f", "#9f180f", "#cd3c25", "#233e2b",
+        "#2a2a2a", "#4c5f99", "#ff2517", "#f62517", "#ff5d39", "#366043",
+    }, coated
     for colour in coated:
         assert "solder mask" in FINISHES[colour].why, (
             f"{colour} is coated and its evidence does not say it is a mask"
@@ -877,7 +886,8 @@ def test_the_shipped_board_carries_its_coat_and_nothing_else_does():
     assert document.get("extensionsUsed") == ["KHR_materials_clearcoat"]
     coated = {material["name"] for material in document["materials"]
               if "KHR_materials_clearcoat" in material.get("extensions", {})}
-    assert coated == {"#313d63"}, coated
+    # The mask and its routing, which is the mask over copper (OH-163).
+    assert coated == {"#313d63", "#4c5f99"}, coated
 
 
 # --- an albedo is linear, and a CAD file's colours are not ------------------
@@ -1404,6 +1414,38 @@ def test_the_composed_copper_is_a_conductor_and_the_silkscreen_is_not():
         "the constants moved; move the FINISHES keys with them or the "
         "finishes silently detach again"
     )
+
+
+def test_every_composed_boards_mask_and_routing_is_a_solder_mask():
+    """**Every trace on every composed board drew at DEFAULT_FINISH** (OH-163).
+
+    The composer draws a board's slab in its composition's mask colour and
+    each trace in `mask_over_copper` of it, so both are solder mask by
+    construction -- and neither hex is written anywhere but `FINISHES`, each
+    computed from a board file. So this walks the compositions rather than a
+    list: a board added with a new mask, or a mask read differently, fails
+    here instead of drawing grey. A manifest board whose file is not fetched
+    has no colour yet, and is the only one passed over.
+    """
+    from tools import compose_board_3d as compose
+    from tools.import_3d_model import FINISHES
+
+    checked = []
+    for spec in compose.COMPOSITIONS:
+        if not (spec.colour.startswith("#") and len(spec.colour) == 7):
+            continue
+        for what, colour in (("mask", spec.colour),
+                             ("routing", compose.mask_over_copper(spec.colour))):
+            finish = FINISHES.get(colour)
+            assert finish is not None, (
+                f"{spec.board}'s {what}, {colour}, has no FINISHES entry and "
+                f"draws at DEFAULT_FINISH")
+            assert (finish.metalness, finish.coat > 0) == (0.0, True), (
+                f"{spec.board}'s {what}, {colour}, is metalness "
+                f"{finish.metalness} coat {finish.coat}: not a solder mask")
+            assert "solder mask" in finish.why, (spec.board, what, colour)
+        checked.append(spec.board)
+    assert checked, "no composition has a colour to check"
 
 
 def test_the_composer_audits_its_own_finishes():

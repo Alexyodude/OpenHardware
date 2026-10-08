@@ -709,6 +709,26 @@ DEFAULT_FINISH = Finish(
 #: triangles on the SAMD21 that nothing here can identify at all. They take the
 #: default now. A test that asks for the reason is how a plausible table stops
 #: being a confident one.
+
+#: Why a composed board's routing is its solder mask, and why its slab is
+#: (OH-163): one argument each, said once rather than retyped beside every
+#: board's hex -- the reason `_MOULDED_IC` in `tools/model_from_datasheet.py`
+#: gives for naming a shared reading.
+_ROUTING = (
+    "-- `compose_board_3d.mask_over_copper` of that board's mask, which is "
+    "how the composer draws every trace: the mask's own colour lifted by "
+    "TRACE_LIFT, because a trace is the solder mask with copper behind it "
+    "and not exposed metal. So it is the same surface as the mask beside it, "
+    "a cured semi-gloss coating over a pigment, and it takes that mask's "
+    "finish and coat"
+)
+_MASK = (
+    "-- the colour `compose_board_3d` draws that board's slab in, read out of "
+    "its own board file and A JUDGEMENT its composition's `colour_source` "
+    "states. That the slab is a solder mask is not a judgement, so it takes "
+    "the finish and coat every solder mask in this table has"
+)
+
 FINISHES: dict[str, Finish] = {
     # -- metals. `metalness` 1.0 throughout, because a plated contact is a
     #    conductor and there is no honest fraction between the two.
@@ -827,7 +847,7 @@ FINISHES: dict[str, Finish] = {
         "0.60 sits between the silkscreen ink's 0.55 and moulded epoxy's "
         "0.70, and a vendor mesh of either part would retire it"
     )),
-    # -- the two solder masks, and the only two surfaces here with a COAT.
+    # -- the solder masks, and the only surfaces here with a COAT.
     # **Because a PCB is two layers and everything else here is one.** The
     # pigment scatters and the cured surface over it reflects, which is why a
     # board brightens as you tilt it and a moulded body does not. `roughness`
@@ -873,6 +893,47 @@ FINISHES: dict[str, Finish] = {
     "#116517": Finish(0.0, 0.35, (
         "the SAMD21 board's solder mask, named in `board3d.js`'s "
         "`refreshTheme` in the same sentence as #ff9f37"
+    ), coat=0.85, coat_roughness=0.08),
+    # **The composed boards' own masks and routing, named by construction as
+    # COPPER and SILKSCREEN are** (OH-163). `compose_board_3d` draws a board
+    # as a slab in its composition's mask colour and every trace in
+    # `mask_over_copper` of that colour, so which surface each of these hexes
+    # is was never in doubt -- nobody had written it down, and every trace on
+    # every composed board drew at DEFAULT_FINISH. Each hex is computed, so
+    # `test_every_composed_boards_mask_and_routing_is_a_solder_mask` holds
+    # this table to every composition rather than to this list.
+    "#2a2a2a": Finish(0.0, 0.35, (
+        "the routing of every board drawn in BOARD_MASK -- the XIAOs, and "
+        "each manifest board whose file states no mask colour " + _ROUTING
+    ), coat=0.85, coat_roughness=0.08),
+    "#4c5f99": Finish(0.0, 0.35, (
+        "the Arduino Uno's routing " + _ROUTING
+    ), coat=0.85, coat_roughness=0.08),
+    "#e2180f": Finish(0.0, 0.35, (
+        "the SparkFun Thing Plus ESP32-C6's and Qwiic Pocket ESP32-C6's "
+        "solder mask " + _MASK
+    ), coat=0.85, coat_roughness=0.08),
+    "#ff2517": Finish(0.0, 0.35, (
+        "the SparkFun Thing Plus ESP32-C6's and Qwiic Pocket ESP32-C6's "
+        "routing " + _ROUTING
+    ), coat=0.85, coat_roughness=0.08),
+    "#9f180f": Finish(0.0, 0.35, (
+        "the SparkFun Pro Micro ESP32-C3's solder mask " + _MASK
+    ), coat=0.85, coat_roughness=0.08),
+    "#f62517": Finish(0.0, 0.35, (
+        "the SparkFun Pro Micro ESP32-C3's routing " + _ROUTING
+    ), coat=0.85, coat_roughness=0.08),
+    "#cd3c25": Finish(0.0, 0.35, (
+        "the SparkFun Thing Plus ESP32-C5's solder mask " + _MASK
+    ), coat=0.85, coat_roughness=0.08),
+    "#ff5d39": Finish(0.0, 0.35, (
+        "the SparkFun Thing Plus ESP32-C5's routing " + _ROUTING
+    ), coat=0.85, coat_roughness=0.08),
+    "#233e2b": Finish(0.0, 0.35, (
+        "the PCBCUPID Glyph Mini RP2040's solder mask " + _MASK
+    ), coat=0.85, coat_roughness=0.08),
+    "#366043": Finish(0.0, 0.35, (
+        "the PCBCUPID Glyph Mini RP2040's routing " + _ROUTING
     ), coat=0.85, coat_roughness=0.08),
     "#c07635": Finish(0.0, 0.55, (
         "the axial resistor's lacquered body. **Named by geometry, which is "
