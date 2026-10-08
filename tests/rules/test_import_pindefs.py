@@ -1105,14 +1105,14 @@ def test_the_two_artefacts_cite_the_same_revisions_as_each_other():
 
 
 def test_the_committed_modules_match_the_generator():
-    """The four described boards with a flat GPIO number carry a block, and
+    """Every described chip with a flat GPIO number carries a block, and
     each block is what the generator emits today, pin for pin. A hand edit
     inside the markers, or a fetch that MOVED a pin, fails here by name; a
     fetch that moved only the revision does not, for the reason `_pins_only`
     gives at length."""
     _needs_the_fetched_packages()
     chips = pindefs.chips_with_header_markers()
-    assert chips == ["ESP32-C3", "ESP32-C5", "ESP32-C6", "RP2040"]
+    assert chips == ["ESP32-C3", "ESP32-C5", "ESP32-C6", "RP2040", "RP2350"]
     for chip in chips:
         text = pindefs.module_path(chip).read_text(encoding="utf-8")
         start = text.find(pindefs.HEADER_BEGIN)
@@ -1191,9 +1191,10 @@ def test_the_board_file_and_the_module_agree_on_every_labelled_pad():
             if isinstance(header[key], int):
                 assert header[key] == pad["chip_index"], f"{name} {pad['label']}"
             checked.add(name)
-    # Three C3 files, two each of C5, C6, RP2040 and SAMD21. A module added
-    # for another chip joins this check and moves the number, on purpose.
-    assert len(checked) == 11, sorted(checked)
+    # Three C3 files, two each of C5, C6, RP2040, RP2350 and SAMD21. A module
+    # added for another chip joins this check and moves the number, on
+    # purpose: the RP2350's moved it from 11 (OH-157).
+    assert len(checked) == 13, sorted(checked)
 
 
 # --- the board nothing publishes, and the sentence it must not borrow --------
