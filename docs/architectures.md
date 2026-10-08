@@ -777,6 +777,32 @@ plus four custom extensions — `Xh3power`, `Xh3bextm`, `Xh3irq`, `Xh3pmpm` —
 of which only `Xh3irq` matters before you model interrupts. **137 mnemonics**
 including pseudo-ops, from the datasheet's own alphabetical index [V].
 
+**Measured 2026-10-08 under OH-157, walking through that door** [V], against
+pico-sdk 2.3.0's `src/rp2350/hardware_regs` (`98a542c`, the submodule
+arduino-pico `33201a6` pins) and the datasheet at build `80d627281ed5`
+(sha256 `a638d6780da919162660691bfa02c6dcf7c2a0b6e9f18e2d7519c80b664a2e39`).
+Four things this section did not have:
+
+* **A bare-metal blink needs no Zbb, and that is now a fact about the
+  program.** riscv32-esp-elf GCC 14.2.0 emits the same blink bytes under
+  `-march=rv32imac` and under the full string above, while the same compiler
+  emits `clz`, `minu` and `rev8` for a three-line probe under the full string
+  and none of them under `rv32imac`. GCC 8.4, the RISC-V compiler this
+  repository had before, rejects `_zbb` and `_zbkb` outright, so it could not
+  tell those two cases apart.
+* **Entry needs no vector table and no boot2.** The minimum RISC-V IMAGE_DEF
+  is twenty bytes inside the first 4 kB, and with no entry point named "the
+  bootrom will enter the binary at its lowest address" (datasheet 5.9.5.2,
+  Table 504) -- the rule `core/riscv32/machine.py` already enters by. The
+  ROM's source is BSD-3-Clause (datasheet chapter 5), unlike the RP2040's.
+* **A pad is isolated until software releases it**, which the RP2040 has no
+  equivalent of: each PADS_BANK0 pad's `ISO` resets to 1 and latches the pad
+  (datasheet 9.7). And every SIO offset past `GPIO_OUT` moved: the RP2040's
+  `GPIO_OE` offset is the RP2350's `GPIO_OUT_CLR`.
+* **The two sources disagree about the mailbox's depth**: pico-sdk's `sio.h`
+  says eight words, the datasheet's 3.1.5 four entries. Recorded, not
+  resolved; a stub that never fills it depends on neither.
+
 ### 5.5 The dual-core question
 
 For a first emulator, **core 1 can simply not exist** [V]. At reset core 1 runs
