@@ -430,3 +430,13 @@ The SparkFun Thing Plus ESP32-C5 is §10's shape, as the Qwiic Pocket is:
 its `SDA` and `TX` are the XIAO ESP32-C5's, and its `LED_BUILTIN` is an RGB
 LED, so `tests/webui/test_sparkfun_esp32c5_board.py` watches `MOSI`, on the
 pad whose net SparkFun names for its GPIO, and asserts both reasons.
+
+On 2026-10-08 the Olimex ESP32-C6-EVB (OH-198), whose board file is KiCad
+5, joined on `LED_BUILTIN`, on the EXT1 pad its board file puts on
+Olimex's `/GPIO8\USER_LED1`. No other ESP32-C6 table numbers it alike, and
+none of the GPIOs they do number it is a pad of EXT1, so a build against
+another table moves no pad of this board at all.
+`tests/webui/test_olimex_esp32c6_evb_board.py` asserts that, and why not
+`SDA` -- its variant's `SDA` is the Thing Plus ESP32-C6's, and Olimex's net
+for it reaches only the surface-mount UEXT connectors -- or `TX`, which is
+the XIAO's.

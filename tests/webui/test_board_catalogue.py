@@ -339,7 +339,8 @@ def test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence():
     built against its own variant, as board-claims §11 decides. The
     PCBCUPID Glyph C3 and C6 and the Olimex ESP32-C3-DevKit-Lipo joined
     under OH-194, each watching `LED_BUILTIN`, and the SparkFun Thing Plus
-    ESP32-C5, watching `MOSI` (§13).
+    ESP32-C5, watching `MOSI` (§13). The Olimex ESP32-C6-EVB joined under
+    OH-198, read from a KiCad 5 board file and watching `LED_BUILTIN` (§13).
     """
     from tools import board_manifest
 
@@ -350,7 +351,7 @@ def test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence():
                       "SparkFun Qwiic Pocket ESP32-C6", "Adafruit KB2040",
                       "PCBCUPID Glyph Mini RP2040", "PCBCUPID Glyph C3",
                       "PCBCUPID Glyph C6", "Olimex ESP32-C3-DevKit-Lipo",
-                      "SparkFun Thing Plus ESP32-C5"}
+                      "SparkFun Thing Plus ESP32-C5", "Olimex ESP32-C6-EVB"}
     assert set(catalogue.BOARD_FIRMWARE_VERIFIED) == proven
 
 
