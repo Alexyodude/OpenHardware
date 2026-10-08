@@ -202,8 +202,9 @@ ESP32_C6_WROOM_1 = PinTable(
 )
 #: The same page, for the module as Olimex's ESP32-C6-EVB places it: a
 #: footprint of Olimex's own library, valued ESP32-C6-WROOM-1-N4; the GPIO
-#: rows its one header reaches -- pins 8, 10, 15, 24 and 25 are GPIO0,
-#: GPIO8, GPIO9, GPIO17 and GPIO16 on Table 3-1 -- and a footprint that
+#: rows its header EXT1 reaches -- pins 8, 10, 15, 24 and 25 are GPIO0,
+#: GPIO8, GPIO9, GPIO17 and GPIO16 on Table 3-1, and they hold the three
+#: GPIOs its other through-hole header, ESP-PROG1, reaches -- and a footprint that
 #: numbers its ground pad and the vias in it 29, as the page does. Its eight
 #: paste apertures are numbered `Past`, on no net and on no copper layer:
 #: no pin of the module, and never reached by a header's net.
@@ -516,9 +517,18 @@ ROWS = (
     # KiCad 5 (OH-198), revision A, the only one, and licensed by its README
     # alone, as the ESP32-C3-DevKit-Lipo is. Its nets name each GPIO and what
     # it is for, `/GPIO8\USER_LED1` and so on, and no label its variant
-    # numbers, so its pins are the traced copper's. EXT1 is the one
-    # through-hole header on the module's GPIOs; UEXT1 and UEXT2 are
-    # surface-mount, which tools/import_board.py does not read as a header.
+    # numbers, so its pins are the traced copper's. EXT1 and ESP-PROG1, the
+    # one Olimex's manual calls the "ESP32-PROG header", are the through-hole
+    # headers on the module's GPIOs. ESP-PROG1's four signals, /GPIO16\U0TXD,
+    # /GPIO17\U0RXD, /GPIO9\BUT1 and /ESP_EN, are all on EXT1 as well, and its
+    # other two pads are GND and the 3.3V that the jumper 3.3V_E1, open by
+    # default, would put there, so EXT1 alone is read. UEXT1 and UEXT2 are
+    # surface-mount, which tools/import_board.py does not read as a header,
+    # so no pad here carries the module's GPIO4 to GPIO7 and GPIO18 to GPIO21,
+    # whose nets go to UEXT1 and UEXT2, nor GPIO10, GPIO11, GPIO22 and GPIO23,
+    # which drive the relays through T1 to T4, nor GPIO1, GPIO2, GPIO3 and
+    # GPIO15, the optocoupled inputs OPT1 to OPT4, nor GPIO12 and GPIO13, USB
+    # D- and D+ on USB-OTG1: no through-hole pad is on any of their nets.
     Row(
         board="Olimex ESP32-C6-EVB",
         source="olimex-esp32-c6-evb",
