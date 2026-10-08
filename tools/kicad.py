@@ -1097,7 +1097,9 @@ def _models_of(node: list) -> tuple[StatedModel, ...]:
 # exclude_from_bom` ("legacy token prior to version 20200826") -- and the
 # KiCad 5 revisions of Olimex's ESP32-PoE mark its RJ45 jack, LAN_CON1,
 # `virtual`. What that says about whether a part is fitted is the composer's
-# question, so the token reaches it as the vendor wrote it.
+# question, so the token reaches it as the vendor wrote it; and
+# `compose_board_3d.kicad_statements` answers it, saying why the answer is
+# no (OH-198).
 
 #: The board version KiCad 5.0 and 5.1 write: `SEXPR_BOARD_FILE_VERSION` in
 #: `pcbnew/kicad_plugin.h` at 5.1, "3D model offset written using "offset"
