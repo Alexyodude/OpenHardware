@@ -562,12 +562,14 @@ class Core(typing.Protocol):
 #: `rp2350_arm_s` 0xe48bff59, `rp2350_riscv` 0xe48bff5a and `rp2350_arm_ns`
 #: 0xe48bff5b (RP2350 Datasheet 80d627281ed5, section 5.5.3, Table 469, PDF
 #: p.368), and `webui/boards/rp2350.py` describes only the RISC-V half. Absent
-#: from here, any one-family file loaded at 0x10000000 -- an Arm build, the
-#: XIAO's default, and an RP2040 one alike -- and stopped at an illegal
-#: encoding, which reads as the part refusing the program. Asking for
-#: `RP2350_RISCV` refuses those as `nothing-for-this-chip`, and also refuses
-#: the `absolute` and `data` families the bootrom accepts, because neither
-#: says which half its image is for. An `absolute` block BESIDE a
+#: from here, a file of one family loaded at 0x10000000 -- an Arm image or an
+#: RP2040 one alike -- and stopped at an illegal encoding, which reads as the
+#: part refusing the program; the XIAO's default Arm build, `--family
+#: rp2350-arm-s --abs-block` (arduino-pico 33201a6, `boards.txt:36734`), holds
+#: two families and was refused as unreadable. Asking for `RP2350_RISCV`
+#: refuses all of those as `nothing-for-this-chip`, and also refuses the
+#: `absolute` and `data` families alone, which the bootrom accepts, because
+#: neither says which half its image is for. An `absolute` block BESIDE a
 #: RISC-V image is skipped, so the UF2 arduino-pico's RISC-V build writes
 #: for the XIAO -- `--family rp2350-riscv --abs-block`, its `boards.txt:36741`
 #: at 33201a6 -- is read rather than refused as two families in one file.
