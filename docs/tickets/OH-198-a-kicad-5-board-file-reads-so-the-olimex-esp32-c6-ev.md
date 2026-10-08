@@ -2,7 +2,7 @@
 id: OH-198
 title: A KiCad 5 board file reads, so the Olimex ESP32-C6-EVB and Olimex's older boards
   can be rows
-status: in-progress
+status: open
 priority: P2
 created: '2026-09-30'
 touches:
@@ -19,3 +19,5 @@ Read KiCad 5 boards. The differences that matter to this repository are known an
 The OH-194 worker also found a KiCad 7 copy of the same board in the repository's `HARDWARE/Dimensions/` folder (title block rev A, the same 121 footprints and net references plus dimension annotations). Do not use it in place of the board file: it is a drawing derived from the board, and whether it is kept in step is not stated. It can serve as a cross-check that the KiCad 5 reading is right.
 
 Done when the ESP32-C6-EVB's board file reads, its headers import and trace like the other KiCad rows, and a KiCad 5 construct this reader does not handle is refused by name rather than skipped.
+
+**Note 2026-10-08:** 2026-10-08: paused before any code. Its first worker (lane4) was stopped by the operator's park before editing anything. The claims stay so the reader is not edited elsewhere meanwhile: OH-195 (done) calls kicad.py's API and asked that Placement.back/body/mark and pad_on_board's transform keep their meaning. Also waiting here from OH-195: kicad._on_board mirrors an underside footprint's silkscreen while its pads are not mirrored (OH-184's note).
