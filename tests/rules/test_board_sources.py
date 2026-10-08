@@ -226,6 +226,36 @@ def test_a_licence_read_from_a_fetched_file_is_in_that_file():
                     f"run python tools/get_board_sources.py <name>")
 
 
+def test_a_layout_cell_that_states_a_kicad_version_states_the_files_own():
+    """`pcb_layout` names the board file it opened and the version it read
+    there, and which version a board file is decides how tools/kicad.py
+    reads it: 20171130 is KiCad 5, respelled (OH-198), and anything later is
+    read as it stands. So the version is the file's `(version ...)`, read
+    off the fetched file, and not a note's say-so."""
+    stating = re.compile(r"(\S+\.kicad_pcb), KiCad version (\d{8})")
+    checked, unfetched = [], []
+    for candidate in SOURCES:
+        found = stating.search(" ".join(candidate.artefacts.pcb_layout.note.split()))
+        if found is None:
+            continue
+        path = candidate.dest(REPO) / found.group(1)
+        if not path.is_file():
+            unfetched.append(candidate.name)
+            continue
+        with path.open(encoding="utf-8") as board:
+            opening = board.read(200)
+        stated = re.match(r"\(kicad_pcb\s+\(version\s+(\d+)\)", opening)
+        assert stated is not None, f"{path} opens {opening[:60]!r}"
+        assert stated.group(1) == found.group(2), (
+            f"{candidate.name}: pcb_layout says version {found.group(2)} and "
+            f"{path.name} is version {stated.group(1)}")
+        checked.append(candidate.name)
+    assert checked or unfetched, "no layout cell states a KiCad version, so this checks nothing"
+    if unfetched:
+        pytest.skip(f"SKIPPED after checking {checked}: {unfetched} not fetched; "
+                    f"run python tools/get_board_sources.py <name>")
+
+
 #: The artefact classes a file's suffix decides, and those suffixes. A PDF
 #: or a board-support file is not known by its name, so those two are not here.
 _BY_SUFFIX = {

@@ -1308,6 +1308,111 @@ SOURCES: tuple[Source, ...] = (
         cite="OH-194: GitHub's tree listing of the default branch, read 2026-09-30; "
         "the board file fetched here and opened, the licence read from it",
     ),
+    # KiCad 5 (OH-198): its board file is version 20171130, which
+    # tools/kicad.py reads by respelling it as KiCad 6 spells it. Revision A
+    # is the only one HARDWARE/ publishes; its changes log calls it "initial
+    # release". Read at commit 7b66d23cabba3c573a1e63d83363675b5fb74f06, the
+    # default branch's head on 2026-10-08; the fetch takes the head, so a
+    # later commit is re-read before it is trusted.
+    Source(
+        name="olimex-esp32-c6-evb",
+        vendor="Olimex",
+        model="one repository per board; HARDWARE/ holds one directory per "
+        "revision, and revision A is the only one",
+        size="651,418 + 344 bytes, the two blobs fetched, as GitHub's tree lists them",
+        licence=Licence(
+            name="CERN-OHL-1.2",
+            covers="hardware, in the README's words; the same README puts software "
+            "under GPL3 and documentation under CC BY-SA 3.0",
+            sampled=True,
+            evidence=Evidence.STATED,
+            cite="README.md at the repository root, fetched here and read "
+            "2026-10-08 at commit 7b66d23cabba3c573a1e63d83363675b5fb74f06. "
+            "HARDWARE/README.md says the same of the design files. The root's "
+            "Hardware-License-CERN_OHL_v_1_2.pdf, opened 2026-10-08, is the CERN "
+            "OHL v1.2's own text and names no work, and the repository's LICENSE "
+            "is the GPL-3.0's text, the README's licence for software, so the "
+            "hardware's rests on the README",
+            file="README.md",
+            quote="Hardware is released under CERN OHL v1.2 license",
+        ),
+        fetch=Fetch(
+            transport=Transport.GIT_SPARSE,
+            url="https://github.com/OLIMEX/ESP32-C6-EVB.git",
+            wanted=(
+                "HARDWARE/Hardware-revision-A/ESP32-C6-EVB_Rev_A.kicad_pcb",
+                "README.md",
+            ),
+            skipped=(
+                ("HARDWARE/Hardware-revision-A", "the rest of revision A's "
+                 "directory: its KiCad 5 schematic, netlist, project file, symbol "
+                 "library and its cache, sym-lib-table, a schematic PDF, a BOM as "
+                 ".ods and .pdf, fp-info-cache, Gerbers/ (9 .gbr, 2 .drl) and 3d/ "
+                 "(15 .step, 4 .stp, 7 .wrl, one model per footprint); the pads and "
+                 "nets are in the .kicad_pcb"),
+                ("HARDWARE/Dimensions", "ESP32-C6-EVB_DIMM_Rev_A.kicad_pcb, a KiCad 7 "
+                 "copy of the board carrying dimensions, and a dimensioned PDF: a "
+                 "drawing derived from the board, read by OH-198 only to cross-check "
+                 "the KiCad 5 reading"),
+                ("HARDWARE/3D printed case", "two .stl meshes, a printed case's top "
+                 "and bottom, made with Fusion 360 as HARDWARE/README.md says; not "
+                 "the board"),
+                ("HARDWARE/Hardware-revision-changes-log.txt", "133 bytes, opened "
+                 "2026-10-08: revision A, the initial release, is its only entry"),
+                ("HARDWARE/README.md", "281 bytes, opened 2026-10-08: the design "
+                 "files are made with KiCAD and released under CERN OHL v1.2, as the "
+                 "root README states"),
+                ("Hardware-License-CERN_OHL_v_1_2.pdf", "the CERN OHL v1.2's own "
+                 "text, 98,023 bytes, opened 2026-10-08; it names no work, and the "
+                 "README says what it covers"),
+                ("LICENSE", "the GPL-3.0's text, which the README gives the software"),
+                ("DOCUMENTS", "the user manual, as .odt and as .pdf"),
+                ("SOFTWARE", "Arduino, ESP-IDF, ESPHome and PlatformIO examples and "
+                 "settings; the pins are read from arduino-esp32's "
+                 "variants/esp32c6-evb, which the manifest row names"),
+            ),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES, Evidence.LISTED,
+                "HARDWARE/Hardware-revision-A/ESP32-C6-EVB_Rev_A.sch, KiCad 5; "
+                "listed, not fetched",
+            ),
+            schematic_pdf=Artefact(
+                Published.YES, Evidence.OPENED,
+                "HARDWARE/Hardware-revision-A/ESP32-C6-EVB_Rev_A.pdf, opened "
+                "2026-10-08 and a rendering of ESP32-C6-EVB_Rev_A.sch; this row does "
+                "not fetch it",
+            ),
+            pcb_layout=Artefact(
+                Published.YES, Evidence.OPENED,
+                "HARDWARE/Hardware-revision-A/ESP32-C6-EVB_Rev_A.kicad_pcb, KiCad "
+                "version 20171130, KiCad 5, read by tools/kicad.py",
+            ),
+            footprints_symbols=Artefact(
+                Published.PARTIAL, Evidence.LISTED,
+                "revision A carries a .lib and a -cache.lib, KiCad 5 symbol "
+                "libraries; no .kicad_mod or .kicad_sym",
+            ),
+            model_3d=Artefact(
+                Published.YES, Evidence.LISTED,
+                "15 .step, 4 .stp, 7 .wrl and 2 .stl. All but the two .stl are "
+                "component-level, in HARDWARE/Hardware-revision-A/3d/, a model per "
+                "footprint -- R_0402_1005Metric, ESP32-WROOM-32D-56544.STEP and the "
+                "like -- KiCad's per-footprint 3D library, not a model of the "
+                "assembled board; the two .stl are a printed case. Not fetched",
+            ),
+            board_support=Artefact(
+                Published.YES, Evidence.LISTED,
+                "SOFTWARE/PLATFORMIO/esp32-c6-evb.json, a PlatformIO board "
+                "definition, and example sketches; not fetched",
+            ),
+        ),
+        cite="OH-198: GitHub's tree listing of commit "
+        "7b66d23cabba3c573a1e63d83363675b5fb74f06, the default branch's head, read "
+        "2026-10-08; the board file of revision A and the README fetched here and "
+        "opened",
+    ),
 )
 
 
