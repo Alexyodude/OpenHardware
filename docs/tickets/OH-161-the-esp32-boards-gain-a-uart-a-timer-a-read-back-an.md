@@ -138,3 +138,5 @@ Gate: all 12 checks pass, run clean with nothing else building or editing (three
 **Note 2026-10-08:** 2026-10-08: webui/boards/esp32c5.py and webui/boards/esp32c6.py lent to OH-200, whose XIAO C5 and C6 SMD back pads change the generated HEADER blocks in both (OH-170 left them for this ticket's release). Return both here when OH-200 closes.
 
 **Note 2026-10-08:** 2026-10-08: webui/boards/esp32c5.py and esp32c6.py return here; OH-200 is done (merged at 90eed1f). Their HEADER blocks now carry the SMD boards' MTMS, MTDI, MTDO, MTCK and BOOT rows, read from Seeed's board files.
+
+**Note 2026-10-08:** 2026-10-08: test_each_refusal_arrives_as_itself (tests/webui/test_board_run.py) now uses XIAO-MG24-DIP, not XIAO-RP2350-DIP, as its board whose core is not built: OH-157 runs the RP2350 on its Hazard3 half through core/riscv32, which is built. The MG24 is on cortexm33, which is not (OH-36).

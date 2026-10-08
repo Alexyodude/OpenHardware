@@ -774,7 +774,7 @@ def test_each_refusal_arrives_as_itself(live_server):
     wrong_family = uf2_block(0x42000020, blink_bytes(), ESP32C3_FAMILY, 0, 1)
     cases = (
         (upload(board="Raspberry Pi Pico", base=BLINK_LOAD), 404, "unknown-board"),
-        (upload(board="XIAO-RP2350-DIP", base=BLINK_LOAD), 409, "core-not-built"),
+        (upload(board="XIAO-MG24-DIP", base=BLINK_LOAD), 409, "core-not-built"),
         # **`chip-not-described` is not in this list, and cannot be.** It used
         # to be the ESP32-C3, then the ESP32-C6, and each replacement lasted
         # until somebody described that chip. OH-57 described the last two, so
