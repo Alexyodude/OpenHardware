@@ -2,9 +2,12 @@
 id: OH-201
 title: The Arduino Uno's geometry is a test against Arduino's board file, not a dated
   sentence, and its source names that file
-status: open
+status: in-progress
 priority: P2
 created: '2026-10-08'
+touches:
+- webui/boards/Arduino Uno.json
+- tests/rules/test_uno_geometry.py
 ---
 
 Part of OH-174. The Arduino Uno holds three of the four TWINS layers -- a model composed from Arduino's own board file, 22 of 22 pins, and a run -- and misses geometry, because `webui/boards/Arduino Uno.json` records no `source` (`tools/inventory.py` prints `none`).
