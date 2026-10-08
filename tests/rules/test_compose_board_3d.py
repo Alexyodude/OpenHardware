@@ -841,9 +841,8 @@ def test_nothing_refused_is_a_part_this_file_could_have_drawn():
         if not spec.layout.is_file():
             continue
         placed = {e.package for e in compose.read_layout(spec.layout).elements}
-        with spec.layout.open(encoding="utf-8", errors="replace") as opened:
-            kicad5 = opened.read(40).startswith(
-                f"(kicad_pcb (version {kicad.KICAD5_VERSION})")
+        kicad5 = spec.layout.suffix == ".kicad_pcb" and kicad.board_version(
+            kicad.parse_sexp(spec.layout.read_text(encoding="utf-8"))) == kicad.KICAD5_VERSION
         if spec.layout.suffix != ".kicad_pcb" or kicad5:
             # **An EAGLE layout, which the slab reader cannot open** (OH-180),
             # **or a KiCad 5 one**, whose `(module ...)` it does not read
@@ -5725,6 +5724,15 @@ def test_a_kicad_5_rows_colour_says_its_format_states_none(tmp_path):
         assert said in spec.colour_source, (said, spec.colour_source)
     assert "names no colour for its top solder mask" not in spec.colour_source
     assert spec.thickness_mm == compose.MANIFEST_THICKNESS_MM
+    # Told by the version the file states, as `kicad.board_tree` tells it,
+    # and not by its first line's spelling: one that KiCad 5 would never
+    # write but reads alike is the same KiCad 5 board.
+    spaced = tmp_path / "SPACED.kicad_pcb"
+    spaced.write_text("(kicad_pcb\n  (version 20171130)\n  (host pcbnew 5.1.0)\n"
+                      "  (general (thickness 1.6)))\n", encoding="utf-8")
+    assert kicad.board_version(kicad.board_tree(spaced)) == kicad.KICAD5_VERSION
+    assert compose._kicad_manifest_composition(
+        row, board_sources.source(row.source), spaced).colour_source == spec.colour_source
 
 
 def test_the_glyph_mini_is_drawn_in_what_its_own_stackup_states():

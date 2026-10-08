@@ -2795,11 +2795,10 @@ def _kicad_manifest_composition(entry: board_manifest.Row, source,
     and the board file itself for what each footprint is."""
     mask, stack, general, core = (kicad_stackup(layout) if layout.is_file()
                                   else (None, None, None, ()))
-    kicad5 = False
-    if layout.is_file():
-        with layout.open(encoding="utf-8") as opened:
-            kicad5 = opened.read(100).startswith(
-                f"(kicad_pcb (version {kicad.KICAD5_VERSION})")
+    # KiCad 5 by the version the file states, read as `kicad.board_tree`
+    # reads it, and not by how its first line happens to be spelled.
+    kicad5 = layout.is_file() and kicad.board_version(kicad.parse_sexp(
+        layout.read_text(encoding="utf-8"))) == kicad.KICAD5_VERSION
     if stack is not None and general is not None and abs(stack - general) < 5e-4:
         # Two statements that agree decide, and the one written as a number
         # is taken, since the stackup's is a sum of floats.

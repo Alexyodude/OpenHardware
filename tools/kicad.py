@@ -1229,6 +1229,14 @@ def _stated_arc(node: list, path: pathlib.Path, version: str | None) -> list:
     return node
 
 
+def board_version(tree: list) -> str | None:
+    """The version a board's tree states in its `(version ...)`, or None
+    where it states none: what `board_tree` tells a KiCad 5 file by, for a
+    caller that must ask the same question the same way (OH-198)."""
+    version = first(tree, "version")
+    return version[1] if version is not None and len(version) > 1 else None
+
+
 def board_tree(path: pathlib.Path, text: str | None = None) -> list:
     """One `.kicad_pcb`'s tree, spelled as KiCad 6 and later spell it.
 
@@ -1246,8 +1254,7 @@ def board_tree(path: pathlib.Path, text: str | None = None) -> list:
     tree = parse_sexp(path.read_text(encoding="utf-8") if text is None else text)
     if head(tree) != "kicad_pcb":
         raise KicadError(f"{path}: not a board (root is {head(tree)!r})")
-    version = first(tree, "version")
-    stated = version[1] if version is not None and len(version) > 1 else None
+    stated = board_version(tree)
     if stated != KICAD5_VERSION:
         modules = children(tree, "module")
         if modules:
