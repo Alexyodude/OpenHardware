@@ -585,11 +585,16 @@ def _licence_file(paths: tuple[str, ...]) -> str | None:
 
 
 def _licence_cell(licence: str | None, tree: _Tree) -> Asset:
-    """How well the licence claim over a board's assets is backed.
+    """How well the licence claim over a board naming only a footprint is backed.
 
-    A licence string in a board file is a note an importer wrote. A licence
-    file in the tree it came from is the licence. The classes keep those apart
-    rather than letting the note stand in for the thing.
+    A licence string in a board file is a note an importer wrote, and the
+    classes keep it apart from a file on disk. Such a board names no registry
+    row, so no row's `licence.file` says which file its licence is read from;
+    the licence-named file nearest the root of the tree its footprint is
+    searched in stands in, unopened. A board whose `source.registry` names a
+    row is graded by `_registry_licence_cell` instead, because a file named
+    like a licence need not be the hardware's: both Olimex trees hold a
+    LICENSE that is the GPL-3.0's text, for their software.
     """
     if not licence:
         return Asset(Evidence.ABSENT, "the board file records no `source.licence`")
@@ -616,6 +621,48 @@ def _licence_cell(licence: str | None, tree: _Tree) -> Asset:
     )
 
 
+def _registry_licence_cell(
+    licence: str | None, registered: board_sources.Source, tree: _Tree
+) -> Asset:
+    """How well a registry board's licence claim is backed, graded on the one
+    file its registry row reads the licence from (`licence.file`) and on no
+    other, in that row's own tree.
+
+    A row naming no file reads `absent` whether or not its tree is fetched:
+    there is nothing on any disk to look for, and the row's `cite` says what
+    the licence was read from instead.
+    """
+    if not licence:
+        return Asset(Evidence.ABSENT, "the board file records no `source.licence`")
+    named = registered.licence.file
+    root = tree.root.as_posix()
+    if not named:
+        return Asset(
+            Evidence.ABSENT,
+            f"{licence} recorded in the board file, but the registry row "
+            f"{registered.name} reads its licence from no file in {root}; "
+            f"it cites: {registered.licence.cite}",
+        )
+    if tree.unsearchable:
+        return Asset(
+            Evidence.UNSEARCHABLE,
+            f"{licence} recorded in the board file, uncorroborated: the registry "
+            f"row {registered.name} reads it from {named}, and {tree.unsearchable}",
+        )
+    if named in tree.on_disk:
+        return Asset(Evidence.PRESENT, f"{licence}; {root}/{named}")
+    if named in tree.indexed:
+        return Asset(
+            Evidence.INDEXED,
+            f"{licence}; {named} — in the git tree of {root}, not fetched",
+        )
+    return Asset(
+        Evidence.ABSENT,
+        f"{licence} recorded in the board file, but {root} does not hold {named}, "
+        f"the file the registry row {registered.name} reads its licence from",
+    )
+
+
 def collect_assets(
     boards_dir: pathlib.Path = BOARDS_DIR,
     vendor_dir: pathlib.Path = VENDOR_DIR,
@@ -629,10 +676,11 @@ def collect_assets(
     the hand-maintained inventory `CLAUDE.md` forbids by name on the grounds
     that it is the document that rots fastest.
 
-    The licence is looked for in the tree the board's own files came from:
-    the one `source.registry` names, or, for a board that names only a
-    `source.footprint`, `vendor_dir`, where that footprint is searched for.
-    A board naming neither names no tree, and reads so.
+    A board whose `source.registry` names a row is backed by the file that
+    row reads its licence from, in that row's tree. A board naming only a
+    `source.footprint` is backed by a licence file in `vendor_dir`, where
+    that footprint is searched for. A board naming neither names no tree,
+    and reads so.
     """
     if not boards_dir.is_dir():
         raise InventoryError(f"{boards_dir}: boards directory does not exist")
@@ -641,7 +689,7 @@ def collect_assets(
         raise InventoryError(f"{boards_dir}: contains no board definitions")
 
     tree = _vendor_tree(vendor_dir)
-    registry_trees: dict[str, _Tree] = {}
+    registry_trees: dict[str, tuple[board_sources.Source, _Tree]] = {}
 
     reports = []
     for path in paths:
@@ -663,17 +711,23 @@ def collect_assets(
                     registered = board_sources.source(registry)
                 except board_sources.SourceError as exc:
                     raise InventoryError(f"{path}: source.registry: {exc}") from exc
-                registry_trees[registry] = _source_tree(registered)
-            licence_tree = registry_trees[registry]
+                registry_trees[registry] = (registered, _source_tree(registered))
+            registered, registry_tree = registry_trees[registry]
+            licence = _registry_licence_cell(
+                source.get("licence"), registered, registry_tree
+            )
         elif footprint:
-            licence_tree = tree
+            licence = _licence_cell(source.get("licence"), tree)
         else:
-            licence_tree = _Tree(
-                path,
-                (),
-                (),
-                "the board file records no `source.registry` and no "
-                "`source.footprint`, so it names no tree to read a licence file in",
+            licence = _licence_cell(
+                source.get("licence"),
+                _Tree(
+                    path,
+                    (),
+                    (),
+                    "the board file records no `source.registry` and no "
+                    "`source.footprint`, so it names no tree to read a licence file in",
+                ),
             )
         reports.append(
             BoardAssets(
@@ -682,7 +736,7 @@ def collect_assets(
                 pcb=_vendor_cell(PCB_FORMS, footprint, tree),
                 model3d=_vendor_cell(MODEL_FORMS, footprint, tree),
                 pins=_pin_cell(path, pads),
-                licence=_licence_cell(source.get("licence"), licence_tree),
+                licence=licence,
             )
         )
     return reports
@@ -1211,11 +1265,14 @@ def render_text() -> str:
     lines.append(
         "  that tree; CAD fetched anywhere else is not searched, and model3d is"
     )
-    lines.append("  not what the 3D view draws. licence is looked for in the tree the")
+    lines.append("  not what the 3D view draws. licence is the file the registry row")
     lines.append(
-        "  board file's source.registry names, or, for a board naming only a"
+        "  the board file's source.registry names reads its licence from, in"
     )
-    lines.append("  footprint, in the tree above.")
+    lines.append(
+        "  that row's tree, or, for a board naming only a footprint, a licence"
+    )
+    lines.append("  file in the tree above.")
     lines.append("  Evidence, strongest first:")
     for evidence in Evidence:
         lines.append(f"    {evidence.label:<13} {evidence.gloss}")
@@ -1344,9 +1401,10 @@ def render_markdown() -> str:
         "checkout, which is a fact about the checkout and not about the vendor. "
         "`schematic`, `pcb` and `model3d` count only files named for the "
         "footprint in that tree; CAD fetched anywhere else is not searched, and "
-        "`model3d` is not what the 3D view draws. `licence` is looked for in the "
-        "tree the board file's `source.registry` names, or, for a board naming "
-        "only a footprint, in the tree above.",
+        "`model3d` is not what the 3D view draws. `licence` is the file the "
+        "registry row the board file's `source.registry` names reads its licence "
+        "from, in that row's tree, or, for a board naming only a footprint, a "
+        "licence file in the tree above.",
         "",
     ]
     out += [f"* `{evidence.label}` — {evidence.gloss}" for evidence in Evidence]

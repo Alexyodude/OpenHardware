@@ -608,8 +608,9 @@ def test_a_registry_board_is_not_backed_by_seeeds_licence_when_its_own_tree_hold
     cell = collect_assets(boards, seeed)[0].licence
     assert (cell.evidence, cell.detail) == (
         Evidence.ABSENT,
-        "CC BY-SA 4.0 recorded in the board file, but third_party/arduino-uno holds "
-        "no licence file to back it",
+        "CC BY-SA 4.0 recorded in the board file, but third_party/arduino-uno does "
+        "not hold License.txt, the file the registry row arduino-uno reads its "
+        "licence from",
     ), cell
 
 
@@ -650,11 +651,12 @@ def test_a_registry_board_cloned_sparsely_reads_its_own_index(tmp_path, monkeypa
     cell = collect_assets(boards, seeed)[0].licence
     assert (cell.evidence, cell.detail) == (
         Evidence.INDEXED,
-        "CC BY-SA 3.0 Unported; license.txt — in the vendor's git tree, not fetched",
+        "CC BY-SA 3.0 Unported; license.txt — in the git tree of "
+        "third_party/adafruit-kb2040, not fetched",
     ), cell
 
 
-def test_a_registry_board_whose_tree_is_not_fetched_says_how_to_fetch_it(
+def test_a_registry_board_whose_tree_is_not_fetched_names_its_licence_file_and_the_fetch(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
@@ -664,8 +666,87 @@ def test_a_registry_board_whose_tree_is_not_fetched_says_how_to_fetch_it(
     _board_file(boards, "Uno", licence="CC BY-SA 4.0", registry="arduino-uno")
 
     cell = collect_assets(boards, seeed)[0].licence
-    assert cell.evidence is Evidence.UNSEARCHABLE, cell
-    assert "python tools/get_board_sources.py arduino-uno" in cell.detail, cell.detail
+    assert (cell.evidence, cell.detail) == (
+        Evidence.UNSEARCHABLE,
+        "CC BY-SA 4.0 recorded in the board file, uncorroborated: the registry row "
+        "arduino-uno reads it from License.txt, and third_party/arduino-uno is not "
+        "fetched here; run: python tools/get_board_sources.py arduino-uno",
+    ), cell
+
+
+# OH-212: a registry board's licence is graded on the one file its registry
+# row reads the licence from, `licence.file`, and never on a file whose name
+# looks like a licence. Both Olimex trees hold a LICENSE that is the GPL-3.0's
+# text, for their software; their hardware's CERN-OHL is read from README.md.
+
+
+def test_a_registry_boards_licence_rests_on_the_file_its_row_names_not_a_licence_named_one(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    evb = board_sources.source("olimex-esp32-c6-evb")
+    assert evb.licence.file == "README.md", evb.licence
+    _vendor_checkout(
+        evb.dest(pathlib.Path(".")),
+        {
+            "LICENSE": "GNU GENERAL PUBLIC LICENSE Version 3",
+            "README.md": "Hardware is released under CERN OHL v1.2 license",
+        },
+    )
+    seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "EVB", licence="CERN-OHL-1.2", registry="olimex-esp32-c6-evb")
+
+    cell = collect_assets(boards, seeed)[0].licence
+    assert (cell.evidence, cell.detail) == (
+        Evidence.PRESENT, "CERN-OHL-1.2; third_party/olimex-esp32-c6-evb/README.md"
+    ), cell
+
+
+def test_a_licence_named_file_the_registry_row_does_not_name_backs_nothing(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    evb = board_sources.source("olimex-esp32-c6-evb")
+    _vendor_checkout(
+        evb.dest(pathlib.Path(".")), {"LICENSE": "GNU GENERAL PUBLIC LICENSE Version 3"}
+    )
+    seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "EVB", licence="CERN-OHL-1.2", registry="olimex-esp32-c6-evb")
+
+    cell = collect_assets(boards, seeed)[0].licence
+    assert (cell.evidence, cell.detail) == (
+        Evidence.ABSENT,
+        "CERN-OHL-1.2 recorded in the board file, but third_party/olimex-esp32-c6-evb "
+        "does not hold README.md, the file the registry row olimex-esp32-c6-evb "
+        "reads its licence from",
+    ), cell
+
+
+def test_a_registry_row_reading_its_licence_from_no_file_reads_absent_and_says_what_it_cites(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    thing = board_sources.source("sparkfun-thing-plus-esp32-c6")
+    assert thing.licence.file == "", thing.licence
+    _vendor_checkout(thing.dest(pathlib.Path(".")), {"LICENSE.md": "CC BY-SA 4.0 ..."})
+    seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(
+        boards, "Thing", licence="CC BY-SA 4.0", registry="sparkfun-thing-plus-esp32-c6"
+    )
+
+    cell = collect_assets(boards, seeed)[0].licence
+    assert (cell.evidence, cell.detail) == (
+        Evidence.ABSENT,
+        "CC BY-SA 4.0 recorded in the board file, but the registry row "
+        "sparkfun-thing-plus-esp32-c6 reads its licence from no file in "
+        f"third_party/sparkfun-thing-plus-esp32-c6; it cites: {thing.licence.cite}",
+    ), cell
 
 
 def test_a_board_naming_neither_a_registry_nor_a_footprint_has_no_tree_to_back_it(tmp_path):
@@ -708,6 +789,38 @@ def test_the_unos_licence_cell_rests_on_arduinos_own_licence_file(monkeypatch):
     assert (cells["Arduino Uno"].evidence, cells["Arduino Uno"].detail) == (
         Evidence.PRESENT, "CC BY-SA 4.0; third_party/arduino-uno/License.txt"
     ), cells["Arduino Uno"]
+
+
+def test_every_fetched_registry_boards_licence_cell_names_the_file_its_row_reads(monkeypatch):
+    """Over the real boards: wherever the file a board's registry row reads
+    its licence from is on this disk, the cell is present on that file. Until
+    OH-212 the two Olimex cells were backed by their GPL-3.0 LICENSE."""
+    monkeypatch.chdir(REPO)
+    boards_dir = REPO / "webui" / "boards"
+    rows = {}
+    for path in sorted(boards_dir.glob("*.json")):
+        board = json.loads(path.read_text(encoding="utf-8"))
+        source = board.get("source") or {}
+        if source.get("registry"):
+            rows[board.get("board", path.stem)] = (
+                source["licence"], board_sources.source(source["registry"])
+            )
+    expected = {
+        name: (Evidence.PRESENT, f"{licence}; {row.dest(pathlib.Path('.')).as_posix()}/"
+                                 f"{row.licence.file}")
+        for name, (licence, row) in rows.items()
+        if row.licence.file and (row.dest(REPO) / row.licence.file).is_file()
+    }
+    if not expected:
+        pytest.skip(
+            f"SKIPPED: none of the {len(rows)} registry boards' licence files is "
+            f"fetched; run python tools/get_board_sources.py <name>"
+        )
+    cells = {
+        report.name: report.licence
+        for report in collect_assets(boards_dir, REPO / VENDOR_DIR)
+    }
+    assert {name: (cells[name].evidence, cells[name].detail) for name in expected} == expected
 
 
 def test_missing_names_every_cell_with_nothing_behind_it(tmp_path):
