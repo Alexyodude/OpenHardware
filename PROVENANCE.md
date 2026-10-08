@@ -112,13 +112,13 @@ So the coordinates were **measured from upstream's GPL artwork**.
 
 **Its `source` does not say where they came from.** On every other board
 file that has one, `source` names the vendor file, or the footprint in one,
-the pads were read from.
-On this one, `source.file` names Arduino's own EAGLE board file,
-`UNO-TH_Rev3e.brd` from the A000066 CAD zip (CC BY-SA 4.0), which the pads
-were not read from: it is the file they are checked against.
-`tests/rules/test_uno_geometry.py` reads it through `tools/import_board.py`
-and holds the traced pads to it, rows, fit and labels, and the coordinates
-stay in the artwork's pixels because they are painted over that drawing.
+the pads were read from. On this one, `source.file` names Arduino's own
+EAGLE board file, `UNO-TH_Rev3e.brd` from the A000066 CAD zip (CC BY-SA
+4.0), which the pads were not read from: it is the file they are checked
+against. `tests/rules/test_uno_geometry.py` reads it through
+`tools/import_board.py` and holds the traced pads to it, rows, fit and
+labels, and the coordinates stay in the artwork's pixels because they are
+painted over that drawing.
 
 **Position:** what was extracted is the geometry of a real Arduino Uno R3
 header — 0.1 inch pitch, groups of 10+8 and 8+6. Those are physical facts
