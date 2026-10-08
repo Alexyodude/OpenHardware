@@ -2857,13 +2857,16 @@ def board_derivation_with_cad(cad: tuple[str, ...], answered: tuple[str, ...],
         + ", ".join(f"`{one}`" for one in cad)
         + ", answered "
         + ", ".join(f"`{label}`" for label in answered)
-        + "; the board-support packages, "
+        # One package on the Nordic boards, Zephyr alone: the noun agrees, as
+        # `render_header`'s verb does for its CAD rows.
+        + "; the board-support package" + ("" if len(firmware) == 1 else "s") + ", "
         + ", ".join(f"`{one}`" for one in firmware)
         + ", answered every other pad that resolves. Nothing was inferred from "
         "the silkscreen or a pinout image: a label resolves only when every "
         "source in `packages` that defines it names the same pin, and `python "
         "tools/import_pindefs.py <board>` prints the file that named it."
     )
+
 
 #: And for a row in `tools/board_manifest.py`, whose own CAD is read too.
 MANIFEST_DERIVATION = (
