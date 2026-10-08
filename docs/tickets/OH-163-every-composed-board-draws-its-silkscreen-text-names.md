@@ -8,9 +8,6 @@ created: '2026-09-04'
 touches:
 - tools/model_from_datasheet.py
 - tests/rules/test_import_3d_model.py
-- tools/compose_board_3d.py
-- tests/rules/test_compose_board_3d.py
-- tools/import_3d_model.py
 ---
 
 Twenty-five of twenty-six boards draw a vendor file or a board composed from the vendor's PCB, every placement is drawn or refused with a reason (OH-150), and what a person sees is still short of a photograph in four measurable ways. This ticket is those four, counted from `python tools/compose_board_3d.py --check` on 2026-09-04 (11 composed boards) and from the shipped .glb files.
@@ -68,3 +65,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-08:** 2026-10-08: the composer, its tests and the importer lent to OH-198, whose phase 2 composes the Olimex ESP32-C6-EVB, a KiCad 5 board: kicad_statements must read through kicad.board_tree, or it finds no statements in a KiCad 5 file (OH-198's review). Return when OH-198 closes.
 
 **Note 2026-10-08:** 2026-10-08: the composer, its tests and the importer return here; OH-198 is done (merged at 9780c25). Left by its reviews for this ticket: (1) a quarter turn on a two-pad part is invisible to confirm() (SPAN_TOLERANCE_MM=3 against pad-centre spans; a D_SMA model turned 90 degrees on a 5 mm land passes), so such a part's turn rests on its row alone; (2) tools/model_from_datasheet.py walks (footprint ...) itself and cannot open a KiCad 5 board: it should read through kicad.board_tree; (3) the shared USB-C ABSENT reason omits the vendor's own tag that A40-00119-A52-12 is fully compatible with GCT's USB4105-GF-A; (4) KiCad 5 custom-pad (primitives (gr_arc ...)) are not respelled (nothing reads primitives yet).
+
+**Note 2026-10-08:** 2026-10-08: the composer, its tests and the importer lent to OH-184 (back-side silkscreen mirrored twice). Return when OH-184 closes.
