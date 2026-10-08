@@ -2244,7 +2244,10 @@ def test_a_pad_one_file_carries_null_is_still_a_pad_of_that_file(tmp_path, monke
     file's alone (OH-200 review, F3).
 
     Both fake files carry `MTMS`; only the SMD reads the board CAD that names
-    it, so the DIP's pad is null. `D10` is still the SMD's alone."""
+    it, so the DIP's pad is null. `D10` is still the SMD's alone. And the
+    SMD's `D6/MTDI` is what exercises keying a pad by every name in
+    `alternatives`: keyed by its whole label alone, the SMD would carry no
+    `D6` and the DIP's `D6` would read as the DIP's alone."""
     bsp, boards = _fake_tree(tmp_path, monkeypatch)
     pcb = tmp_path / "pcb"
     pcb.mkdir()

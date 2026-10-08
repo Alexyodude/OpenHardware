@@ -3171,8 +3171,10 @@ def header_table(
     first_seen: dict[str, str] = {}
     citations: list[str] = []
     on_board: list[str] = []
-    cad_rows: set[str] = set()
-    package_rows: set[str] = set()
+    # Rows ANY CAD source named, and rows any package named. Not `cad_rows`:
+    # that field is the rows only the CAD named, which these two give apart.
+    cad_named: set[str] = set()
+    package_named: set[str] = set()
     cad_citations: list[str] = []
     carried: dict[str, list[str]] = {}
     for name in names:
@@ -3204,9 +3206,9 @@ def header_table(
                 # writes `<package> <paths> @ <stamp>`, and no name in
                 # `PACKAGES` has a space in it.
                 if PACKAGES[source.split(" ", 1)[0]].firmware:
-                    package_rows.add(label)
+                    package_named.add(label)
                 else:
-                    cad_rows.add(label)
+                    cad_named.add(label)
                     if source not in cad_citations:
                         cad_citations.append(source)
         for entry in report["on_board"]:
@@ -3217,10 +3219,10 @@ def header_table(
     ordered = dict(sorted(pins.items(), key=lambda item: _label_order(item[0])))
     return HeaderTable(chip, names, ordered, tuple(citations), tuple(on_board),
                        cad_rows=tuple(label for label in ordered
-                                      if label in cad_rows and label not in package_rows),
+                                      if label in cad_named and label not in package_named),
                        cad_citations=tuple(cad_citations),
                        cad_also=tuple(label for label in ordered
-                                      if label in cad_rows and label in package_rows),
+                                      if label in cad_named and label in package_named),
                        partial={label: tuple(carried[label]) for label in ordered
                                 if label in carried and len(carried[label]) < len(names)})
 
