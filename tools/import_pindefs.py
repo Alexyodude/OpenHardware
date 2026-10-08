@@ -2048,14 +2048,27 @@ _ESP32C3 = (
     arduino_flat("arduino-esp32", "XIAO_ESP32C3"),
 )
 #: The SMD footprint's JTAG pads. With `BOOT` they are five pads read from
-#: Seeed's own board file for each board (OH-200). Neither board's
-#: arduino-esp32 variant nor its Zephyr connector mentions any of the five, so
-#: the board file is the only source -- and it is the board's own, which is
-#: the strongest kind there is here (OH-173). **Per board and not per chip**:
-#: Seeed's own file puts the C5's MTMS on GPIO2 and the C6's on GPIO4, and
-#: the two disagree on every one of the five, which is exactly OH-26's first
-#: trap. Each board's tuple below names its own file, so neither can be
-#: copied to the other.
+#: Seeed's own board file for each board (OH-200), the only source wired in
+#: for them: no file the two boards read from a board-support package defines
+#: any of the five -- not arduino-esp32's
+#: `variants/XIAO_ESP32C5/pins_arduino.h` or
+#: `variants/XIAO_ESP32C6/pins_arduino.h`, and not Zephyr's
+#: `seeed_xiao_connector.dtsi` under `boards/seeed/xiao_esp32c5/` or
+#: `boards/seeed/xiao_esp32c6/`. The board file is the board's own, which is
+#: the strongest kind there is here (OH-173).
+#:
+#: **Only source wired in, not only statement.** Zephyr's board DTS for the
+#: C5, `boards/seeed/xiao_esp32c5/xiao_esp32c5_hpcore.dts`, puts its
+#: `boot_button` on `&gpio0 28` (lines 44-46): GPIO28, which is what the board
+#: file's `Boot{slash}GPIO28` names, stated independently. It is recorded as a
+#: cross-check and not wired in as a source; no reader here takes a pin from a
+#: board DTS's `gpio-keys` node. The C6's board DTS has no boot button.
+#: Measured 2026-10-08 at Zephyr 0a2e408 and arduino-esp32 2787dab.
+#:
+#: **Per board and not per chip**: Seeed's own file puts the C5's MTMS on
+#: GPIO2 and the C6's on GPIO4, and the two disagree on every one of the
+#: five, which is exactly OH-26's first trap. Each board's tuple below names
+#: its own file, so neither can be copied to the other.
 #:
 #: The DIP footprint carries none of these pads and shares the tuple anyway,
 #: as `_S3_FIXED` and the MG24's traced pair already do: a label its file has
