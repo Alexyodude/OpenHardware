@@ -859,64 +859,6 @@ def _uno_pairs():
     return list(zip(landed_top, vendor_top)) + list(zip(landed_bottom, vendor_bottom))
 
 
-def test_the_unos_traced_pads_still_agree_with_the_vendors_board_file():
-    """The check that turned an assumption in that file into a fact.
-
-    `webui/boards/Arduino Uno.json` is the ONLY one of 26 whose pad centres
-    were not derived from vendor CAD: they were traced out of PICSimLab's
-    `board.svg`, and the file carried an `assumption` about which pad was
-    which. Arduino's own EAGLE board file settles it.
-
-    The residual is what is left after the one scale and offset per axis that
-    separates artwork pixels from millimetres is fitted out -- subtracting raw
-    coordinates would report that frame difference on every pad and say nothing
-    about the trace. Measured 2026-08-27: median 0.005 mm, worst 0.008 mm,
-    against a 2.540 mm header pitch. The bound here is loose against that; what
-    would be a defect is a fraction of a pitch, which is what a mis-ordered pad
-    produces.
-    """
-    pairs = _uno_pairs()
-    assert len(pairs) == 32, f"paired {len(pairs)} pads, not 32"
-
-    scale_x, offset_x = _fit([v.x_mm for _, v in pairs], [l["x"] for l, _ in pairs])
-    scale_y, offset_y = _fit([v.y_mm for _, v in pairs], [l["y"] for l, _ in pairs])
-    residuals = [
-        max(abs((scale_x * v.x_mm + offset_x) - l["x"]) / scale_x,
-            abs((scale_y * v.y_mm + offset_y) - l["y"]) / scale_y)
-        for l, v in pairs
-    ]
-    assert max(residuals) < 0.1, (
-        f"worst pad is {max(residuals):.3f} mm from where the vendor puts it, "
-        f"against a 2.540 mm pitch"
-    )
-
-
-def test_the_unos_pad_labels_are_the_nets_the_vendor_put_them_on():
-    """Every label confirmed against the vendor, with no disagreements.
-
-    The three that look wrong and are not: D13..D10 carry SCK, MISO, MOSI and
-    SS because that is what those pins are on an Uno; A4 and A5 appear twice
-    because the R3 repeats them beside AREF; and IOREF sits on the +5V net
-    because the R3 ties it there.
-    """
-    expected = {
-        "SCL": "AD5/SCL", "SDA": "AD4/SDA", "AREF": "AREF", "GND": "GND",
-        "13": "SCK", "12": "MISO", "~11": "MOSI", "~10": "SS",
-        "~9": "IO9", "8": "IO8", "7": "IO7", "~6": "IO6", "~5": "IO5",
-        "4": "IO4", "~3": "IO3", "2": "IO2", "1": "IO1", "0": "IO0",
-        "NC": "1", "IOREF": "+5V", "RESET": "RESET", "3V3": "+3V3",
-        "5V": "+5V", "VIN": "VIN",
-        "A0": "AD0", "A1": "AD1", "A2": "AD2", "A3": "AD3",
-        "A4": "AD4/SDA", "A5": "AD5/SCL",
-    }
-    disagreed = [
-        (landed["label"], vendor.label)
-        for landed, vendor in _uno_pairs()
-        if expected[landed["label"]] != vendor.label
-    ]
-    assert not disagreed, disagreed
-
-
 def test_the_unos_artwork_is_not_uniformly_scaled_and_the_file_says_so():
     """A real finding, and the only one the cross-check turned up.
 
@@ -924,6 +866,10 @@ def test_the_unos_artwork_is_not_uniformly_scaled_and_the_file_says_so():
     0.28 mm over the board's 68.58 mm width. Nothing depends on it today, and
     an importer that assumed one scale for both axes would be wrong by that
     much, so the board file records it and this keeps that sentence true.
+
+    It is also the tightest of the three tests the board file's `derivation`
+    names as holding the spacing between the two rows, which no residual can
+    show: the down scale it reads, to four decimals, moves with that spacing.
     """
     pairs = _uno_pairs()
     scale_x, _ = _fit([v.x_mm for _, v in pairs], [l["x"] for l, _ in pairs])
@@ -950,8 +896,8 @@ def test_the_unos_traced_pads_agree_under_one_scale_too_which_is_what_the_page_u
     1.21 to 3.84 mm from the nearest pin the vendor's model puts there and
     eleven more are out by 0.7 -- and asked which of the two sources is wrong.
 
-    Neither is. The test above fits ONE SCALE PER AXIS and gets a worst of
-    0.008 mm, which is the honest fit but not the one the page performs:
+    Neither is. tests/rules/test_uno_geometry.py fits one scale per axis,
+    which is the honest fit but not the one the page performs:
     `webui/static/board3d.js` calls `group.scale.setScalar(...)`, a single
     isotropic scale for both axes, taken from `scaleFromPads`. So the question
     that matters is whether the two sources still agree under THAT
