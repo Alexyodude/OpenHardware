@@ -1489,30 +1489,39 @@ def test_an_arc_with_no_mid_after_version_20210925_is_refused_by_name(tmp_path):
 
 
 def test_a_kicad_5_arc_of_no_sweep_is_refused_by_name(tmp_path):
-    """KiCad 5.1.6 and later drop an `fp_arc` whose sweep is zero or not a
-    number ("Drop 0 and NaN angles", `std::isnormal`, pcb_parser.cpp at
-    5.1.12). There is no arc to put three points on, and this reader drew a
-    point where KiCad draws nothing: refused, naming the sweep. A `gr_arc`
-    of no sweep KiCad 5.1 keeps -- it checks only an `fp_arc`'s -- and it is
-    refused too, with a reason that is true of it and does not say KiCad
-    drops it."""
-    for angle, said in (("0", "0.0"), ("nan", "nan")):
-        text = ARC5.replace(
-            "(pad 1 smd rect",
-            f"(fp_arc (start 0 0) (end 1 0) (angle {angle}) (layer F.SilkS) (width 0.1))\n"
-            f"    (pad 1 smd rect").format(
-            arc="(gr_line (start 0 0) (end 5 0) (layer Edge.Cuts) (width 0.05))")
-        with pytest.raises(KicadError, match=rf"a \(fp_arc \.\.\.\) in a KiCad 5 file "
-                                             rf"\(version 20171130\) sweeps {said} degrees"
-                                             rf".*KiCad 5\.1\.6 and later drop an fp_arc"):
-            read_board(tmp_path / "flat.kicad_pcb", text=text)
-        text = ARC5.format(arc=f"(gr_arc (start 0 0) (end 1 0) (angle {angle}) "
-                               f"(layer Edge.Cuts) (width 0.05))")
-        with pytest.raises(KicadError, match=rf"a \(gr_arc \.\.\.\) in a KiCad 5 file "
-                                             rf"\(version 20171130\) sweeps {said} degrees"
-                                             rf".*KiCad 5\.1 keeps a gr_arc of any sweep") as caught:
-            read_board(tmp_path / "flat.kicad_pcb", text=text)
-        assert "drop" not in str(caught.value), str(caught.value)
+    """There is no arc to put three points on, and this reader drew a point
+    where KiCad 5.1.12 draws nothing or reads nothing: each is refused,
+    naming the sweep and saying what KiCad makes of it. A zero sweep KiCad
+    reads: it drops such an `fp_arc` from 5.1.6 ("Drop 0 and NaN angles",
+    `std::isnormal`, pcb_parser.cpp:2148-2149) and keeps such a `gr_arc`,
+    checking only an `fp_arc`'s. A sweep of nan or inf it never reaches: its
+    lexer takes neither for a number, and the whole file is refused with
+    `need a NUMBER for "segment angle"` (`isNumber` and `NeedNUMBER`,
+    common/dsnlexer.cpp)."""
+    part = ARC5.format(
+        arc="(gr_line (start 0 0) (end 5 0) (layer Edge.Cuts) (width 0.05))").replace(
+        "(pad 1 smd rect",
+        "(fp_arc (start 0 0) (end 1 0) (angle {angle}) (layer F.SilkS) (width 0.1))\n"
+        "    (pad 1 smd rect")
+    board = ARC5.format(
+        arc="(gr_arc (start 0 0) (end 1 0) (angle {angle}) (layer Edge.Cuts) (width 0.05))")
+    refuses_the_file = (r"KiCad 5\.1\.12 refuses the whole file, reading a sweep only "
+                        r"as a finite number \(nan and inf are no number to its lexer: "
+                        r'need a NUMBER for "segment angle"\)')
+    cases = [
+        (part, "fp_arc", "0", "0.0", r"KiCad 5\.1\.6 and later drop an fp_arc of zero sweep, "),
+        (board, "gr_arc", "0", "0.0", r"KiCad 5\.1 keeps a gr_arc of zero sweep, since it "
+                                      r"checks only an fp_arc's \(from 5\.1\.6\), "),
+        (part, "fp_arc", "nan", "nan", refuses_the_file),
+        (board, "gr_arc", "nan", "nan", refuses_the_file),
+        (part, "fp_arc", "inf", "inf", refuses_the_file),
+        (board, "gr_arc", "-inf", "-inf", refuses_the_file),
+    ]
+    for template, kind, angle, said, kicad_does in cases:
+        with pytest.raises(KicadError, match=rf"a \({kind} \.\.\.\) in a KiCad 5 file "
+                                             rf"\(version 20171130\) sweeps {said} degrees, "
+                                             rf"which is no arc; {kicad_does}"):
+            read_board(tmp_path / "flat.kicad_pcb", text=template.format(angle=angle))
 
 
 def test_the_esp32_poes_kicad_5_back_side_headers_sit_on_their_own_copper():
