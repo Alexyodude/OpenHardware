@@ -13,6 +13,9 @@ they read Arduino's file through `tools/import_board.py`'s own reader and hold
 the artwork to it -- its rows, the fit between the two, the artwork's two
 scales, and every label against the net its pad is on.
 
+Labels on one net -- SDA and A4, SCL and A5, IOREF and 5V, and the GNDs --
+cannot be told apart by any test here: swapping two of them passes every one.
+
 Both files come from Arduino's A000066 CAD zip, an https-archive that is
 downloaded by hand, so every test here skips by name where it is absent.
 """
@@ -113,6 +116,23 @@ def _fit(mm: list[float], px: list[float]) -> tuple[float, float]:
     return across / along, mean_px - across / along * mean_mm
 
 
+def _most_rounding_leaves(mm: list[float]) -> float:
+    """The largest residual a least-squares line over `mm` can leave on any
+    one pad when each pixel it is fitted to is out by up to half a stored step
+    and by nothing else: half a step times max_i sum_j |delta_ij - h_ij|, h
+    being the fit's hat matrix, h_ij = 1/n + d_i d_j / sum d^2, d each
+    position's distance from their mean. Where the pixels are otherwise an
+    exact scale and offset of `mm`, the residuals are (I - h) times the pixel
+    errors, which is where that comes from."""
+    mean = statistics.fmean(mm)
+    d = [m - mean for m in mm]
+    along = sum(x * x for x in d)
+    return STORED_STEP_PX / 2 * max(
+        sum(abs((i == j) - (1 / len(d) + d[i] * d[j] / along)) for j in range(len(d)))
+        for i in range(len(d))
+    )
+
+
 def _most_rounding_tilts(mm: list[float]) -> float:
     """The most a least-squares scale over `mm` moves when each pixel it is
     fitted to is out by up to half a stored step: half a step times
@@ -140,35 +160,66 @@ def test_the_artwork_has_arduinos_header_rows_with_as_many_pads_in_each():
     )
 
 
-def test_one_scale_and_offset_per_axis_leaves_every_pad_within_one_stored_step():
-    """The artwork pads are Arduino's pads, to the precision the board file
-    stores them at.
+def test_every_artwork_coordinate_is_stored_as_a_whole_number_of_steps():
+    """Both rounding arguments below start here: a coordinate stored to one
+    decimal place is out by at most half a step, 0.05 px.
 
-    A fit per axis, because board.svg is not uniformly scaled; see the next
-    test. Rounding to the stored 0.1 px leaves at most 0.05 px on a
-    coordinate, and a line fitted through all 32 at once averages those
-    errors rather than adding to them, so a residual of a whole stored step
-    is a pad that is not where Arduino put it, not rounding. That step is
-    under 0.02 mm at either scale, against a header pitch of 2.54 mm.
+    `_most_rounding_leaves` and `_most_rounding_tilts` take that half step as
+    the whole of the error rounding can contribute. A coordinate stored to
+    more places, or moved by hand by less than a step, is outside what they
+    allow for, and the bounds they give would no longer be about rounding.
 
-    Down, the two rows fix the fitted line exactly, so a residual there means
-    a pad has left its row, which the test above names first.
+    One behaviour across every coordinate: the assertion names each one that
+    is not a whole number of steps.
+    """
+    off = [
+        (pad["label"], axis, pad[axis])
+        for pad in _artwork()
+        for axis in ("x", "y")
+        if abs(pad[axis] / STORED_STEP_PX - round(pad[axis] / STORED_STEP_PX)) > 1e-6
+    ]
+    assert off == [], (
+        f"(label, axis, px) of every coordinate that is not a whole multiple of "
+        f"{STORED_STEP_PX} px: {off}"
+    )
 
-    One behaviour across all 32 pads: the residuals are left by one fit
-    through all of them, so the assertion is on the worst of them.
+
+def test_one_scale_and_offset_across_leaves_no_pad_further_off_than_rounding_could():
+    """The artwork pads are Arduino's pads across the board, to the precision
+    the board file stores them at.
+
+    A fit across only, with its own scale, because board.svg is not uniformly
+    scaled; see the next test. Were the artwork exactly a scale and offset of
+    Arduino's pads, the only error left would be rounding to the stored
+    0.1 px, at most 0.05 px on each coordinate, and the most a least-squares
+    line can turn that into on any one pad is computed from Arduino's own pad
+    positions by `_most_rounding_leaves`. A residual beyond that is a pad that
+    is not where Arduino put it, not rounding. A pad moved on its own can go a
+    little further than the bound before this fails, because the fit moves
+    with it. The message gives the bound in millimetres too, against a header
+    pitch of 2.54 mm.
+
+    Down, nothing is fitted here: two rows fix a line exactly, so the residual
+    down is zero whenever the first test passes. What holds down is that test's
+    rows, and the spacing between them is bounded only by
+    tests/rules/test_import_board.py's
+    test_the_unos_traced_pads_agree_under_one_scale_too_which_is_what_the_page_uses.
+
+    One behaviour across every pad: the residuals are left by one fit through
+    all of them, so the assertion is on the worst of them.
     """
     pairs = _pairs()
-    scale_x, offset_x = _fit([v.x_mm for _, v in pairs], [a["x"] for a, _ in pairs])
-    scale_y, offset_y = _fit([v.y_mm for _, v in pairs], [a["y"] for a, _ in pairs])
-    across = [abs(scale_x * v.x_mm + offset_x - a["x"]) for a, v in pairs]
-    down = [abs(scale_y * v.y_mm + offset_y - a["y"]) for a, v in pairs]
-    assert max(across + down) <= STORED_STEP_PX, (
-        f"worst residual {max(across):.4f} px across ({max(across) / scale_x:.4f} "
-        f"mm) and {max(down):.4f} px down ({max(down) / scale_y:.4f} mm), medians "
-        f"{statistics.median(across):.4f} and {statistics.median(down):.4f} px, "
-        f"against a bound of one stored step, {STORED_STEP_PX} px. Measured when "
-        f"this test was written: worst 0.0475 px (0.0084 mm) across and 0.0000 "
-        f"down, median 0.0257 px (0.0045 mm) across"
+    mm = [v.x_mm for _, v in pairs]
+    scale, offset = _fit(mm, [a["x"] for a, _ in pairs])
+    across = [abs(scale * v.x_mm + offset - a["x"]) for a, v in pairs]
+    bound = _most_rounding_leaves(mm)
+    assert max(across) <= bound, (
+        f"worst residual {max(across):.4f} px ({max(across) / scale:.4f} mm), "
+        f"median {statistics.median(across):.4f} px, against {bound:.4f} px "
+        f"({bound / scale:.4f} mm), the most rounding to {STORED_STEP_PX} px "
+        f"could leave on these pad positions. Measured when this test was "
+        f"written: worst 0.0475 px (0.0084 mm), median 0.0257 px (0.0045 mm), "
+        f"against 0.1245 px (0.0220 mm)"
     )
 
 
@@ -204,17 +255,26 @@ def test_every_label_the_avr_module_names_is_on_the_net_arduino_gives_its_port_p
     tilde, so ~11 is 11. Arduino's schematic names that pin of the ATmega
     `(SCK)PB5` and puts it on net SCK, and the label's pad must be on the same
     net in Arduino's board file. SDA and A4 are both PC4, which is why the R3
-    header repeats them beside AREF and why both are on AD4/SDA.
+    header repeats them beside AREF and why both are on AD4/SDA -- and so why
+    swapping those two labels, or SCL and A5, passes here.
     `test_the_uno_states_in_its_file_the_chip_pins_its_module_states` holds the
     board file's own `chip_pin` to the same table.
 
     One behaviour across every such pad: the rule is the claim, and the
-    assertion names each pad that breaks it.
+    assertion names each pad that breaks it. A port pin the schematic puts on
+    no net is named first, as the label that leads to it.
     """
     names = atmega328p.PIN_NAMES
     ports = _port_nets()
     behind = {pad["label"]: names.get(api.header_key(pad["label"], names))
               for pad in _artwork()}
+    unknown = sorted(f"{label} is {port}" for label, port in behind.items()
+                     if port is not None and port not in ports)
+    assert unknown == [], (
+        f"atmega328p.PIN_NAMES puts these labels on port pins Arduino's schematic "
+        f"names on no net: {unknown}. The port pins it does put on a net are "
+        f"{sorted(ports)}"
+    )
     wrong = [
         f"{a['label']} is {behind[a['label']]}, which Arduino's schematic puts on "
         f"{ports[behind[a['label']]]}, and its pad is on {v.label}"
@@ -233,7 +293,7 @@ def test_every_label_that_names_one_of_arduinos_nets_is_on_that_net():
     and prints 5V and 3V3 beside their pads -- the nets are in the board
     file's signals and the words on its silkscreen -- so the '+' it writes
     before a rail is allowed for. IOREF and NC name no net, and the two tests
-    below compare them.
+    below compare them. The GNDs are all on GND, so swapping any two passes.
 
     One behaviour across every such pad, as above.
     """
@@ -263,11 +323,12 @@ def test_the_pad_labelled_nc_is_the_one_arduinos_board_file_puts_on_no_net():
 def test_ioref_is_on_the_rail_arduinos_schematic_powers_the_atmega_from():
     """IOREF is on +5V: it tells a shield the voltage the board's logic runs at.
 
-    Arduino's datasheet for this board, A000066-datasheet.pdf from
-    docs.arduino.cc, gives IOREF in the power header's pin table as
-    "Reference for digital logic V - connected to 5V". The logic is the
-    ATmega's, and Arduino's schematic powers its VCC pin from a net; IOREF's
-    pad must be on that net.
+    Arduino's datasheet for this board describes IOREF as "Reference for
+    digital logic V - connected to 5V": in `arduino/docs-content`,
+    `content/hardware/uno/boards/uno-rev3/datasheet/datasheet.md`, section
+    "Connector Pinouts", table JANALOG, pin 2, read 2026-10-08 at commit
+    dab66ec. The logic is the ATmega's, and Arduino's schematic powers its VCC
+    pin from a net; IOREF's pad must be on that net.
 
     IOREF and 5V share that net, so no comparison with nets can tell those two
     labels apart.
@@ -277,4 +338,33 @@ def test_ioref_is_on_the_rail_arduinos_schematic_powers_the_atmega_from():
     assert ioref == [vcc], (
         f"IOREF's pad is on {ioref}; Arduino's schematic powers the ATmega's VCC "
         f"from {vcc}"
+    )
+
+
+def test_every_label_is_one_the_tests_above_compare_with_a_net():
+    """No label goes unchecked by being a kind none of the tests above takes.
+
+    Each of them compares one kind of label and passes over the rest: a label
+    `atmega328p.PIN_NAMES` names, a label that is one of the board file's net
+    names with or without Arduino's '+', NC, and IOREF. A label of none of
+    those kinds -- `Vin` for VIN, `RST` for RESET -- would pass all of them
+    while being compared with nothing, and the board file's `assumption`
+    says every label is compared.
+
+    One behaviour across every pad: the assertion names each label of no
+    compared kind.
+    """
+    names = atmega328p.PIN_NAMES
+    nets = _nets()
+    uncompared = [
+        pad["label"]
+        for pad in _artwork()
+        if names.get(api.header_key(pad["label"], names)) is None
+        and not {pad["label"], "+" + pad["label"]} & nets
+        and pad["label"] not in {"NC", "IOREF"}
+    ]
+    assert uncompared == [], (
+        f"labels that are no port pin atmega328p.PIN_NAMES names, no net of "
+        f"Arduino's board file with or without '+', and neither NC nor IOREF, so "
+        f"no test here compares them with anything: {uncompared}"
     )
