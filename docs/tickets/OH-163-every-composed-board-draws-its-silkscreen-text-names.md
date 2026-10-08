@@ -2,7 +2,7 @@
 id: OH-163
 title: Every composed board draws its silkscreen text, names its default-finish colours,
   and stops double-reporting its test points
-status: open
+status: in-progress
 priority: P2
 created: '2026-09-04'
 touches:
