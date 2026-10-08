@@ -2,7 +2,7 @@
 id: OH-198
 title: A KiCad 5 board file reads, so the Olimex ESP32-C6-EVB and Olimex's older boards
   can be rows
-status: open
+status: in-progress
 priority: P2
 created: '2026-09-30'
 touches:
