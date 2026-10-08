@@ -6386,11 +6386,13 @@ def test_a_text_newstroke_would_draw_unlike_kicad_is_refused_by_name():
 def test_every_composed_boards_text_is_lettered_or_refused_by_name():
     """**Done for OH-163's first step**: on every composed KiCad board each
     text is lettered or refused under a named reason, and on Seeed's XIAOs
-    none is refused. What is refused is PCBCUPID's TrueType face and
-    Olimex's knockouts; an EAGLE board's text is counted, and refused for
-    EAGLE's font, in `test_what_is_not_drawn_rides_in_extras`."""
+    none is refused. What is refused is PCBCUPID's TrueType faces -- Lexend,
+    and the Noto Sans of the "Antenna Here!" each Glyph ESP32 leads an arrow
+    to, a dimension's text -- and Olimex's knockouts; an EAGLE board's text
+    is counted, and refused for EAGLE's font, in
+    `test_what_is_not_drawn_rides_in_extras`."""
     _newstroke()
-    named = ("a TrueType face, 'Lexend'", "knockout text")
+    named = ("a TrueType face, 'Lexend'", "knockout text", "a TrueType face, 'Noto Sans'")
     refusals: dict[str, dict[str, int]] = {}
     for spec in compose.COMPOSITIONS:
         if spec.layout.suffix != ".kicad_pcb" or not _fetched(spec):
@@ -6408,8 +6410,8 @@ def test_every_composed_boards_text_is_lettered_or_refused_by_name():
              if spec.pcb_chip is not None and spec.board in refusals]
     assert xiaos and all(refusals[board] == {} for board in xiaos), refusals
     expected = {"PCBCUPID Glyph Mini RP2040": {named[0]: 49},
-                "PCBCUPID Glyph C3": {named[0]: 48},
-                "PCBCUPID Glyph C6": {named[0]: 48},
+                "PCBCUPID Glyph C3": {named[0]: 48, named[2]: 1},
+                "PCBCUPID Glyph C6": {named[0]: 48, named[2]: 1},
                 "Olimex ESP32-C3-DevKit-Lipo": {named[1]: 33}}
     assert {board: said for board, said in refusals.items() if said} == {
         board: said for board, said in expected.items() if board in refusals}

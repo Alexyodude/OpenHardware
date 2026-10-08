@@ -2138,3 +2138,76 @@ def test_silkscreen_text_is_read_as_the_file_states_it(tmp_path):
             reference.valign) == (180.0, False, "right", "top")
     assert (literal.text, literal.upright) == ("hide", True)
     assert dict(got.silk_unread) == {"hidden text": 2}
+
+
+DIMENSIONED = """(kicad_pcb
+\t(version 20240108)
+\t(generator "pcbnew")
+\t(gr_rect (start 0 0) (end 40 40) (stroke (width 0.05) (type solid)) (layer "Edge.Cuts"))
+\t(dimension
+\t\t(type leader)
+\t\t(layer "F.SilkS")
+\t\t(pts (xy 26 3) (xy 30 6))
+\t\t(gr_text "Antenna Here!"
+\t\t\t(at 30 10 270)
+\t\t\t(layer "F.SilkS")
+\t\t\t(effects (font (face "Noto Sans") (size 1 1) (thickness 0.1)))
+\t\t)
+\t\t(format (prefix "") (suffix "") (units 0) (units_format 0) (precision 4)
+\t\t\t(override_value "Antenna Here!"))
+\t\t(style (thickness 0.2) (arrow_length 1) (text_position_mode 0) (text_frame 1)
+\t\t\t(extension_offset 0.5))
+\t)
+\t(dimension
+\t\t(type aligned)
+\t\t(layer "F.Fab")
+\t\t(pts (xy 1 1) (xy 5 1))
+\t\t(height 2)
+\t\t(gr_text "4.0000 mm"
+\t\t\t(at 3 -1 0)
+\t\t\t(layer "F.Fab")
+\t\t\t(effects (font (size 1 1) (thickness 0.15)))
+\t\t)
+\t)
+\t(footprint "TEST:R0402"
+\t\t(layer "F.Cu")
+\t\t(at 20 30 90)
+\t\t(dimension
+\t\t\t(type aligned)
+\t\t\t(layer "B.SilkS")
+\t\t\t(pts (xy 24 37) (xy 26.54 37))
+\t\t\t(height -2)
+\t\t\t(gr_text "2.54 mm"
+\t\t\t\t(at 25.27 35 0)
+\t\t\t\t(layer "B.SilkS")
+\t\t\t\t(effects (font (size 0.8 0.8) (thickness 0.12)) (justify mirror))
+\t\t\t)
+\t\t)
+\t\t(pad "1" smd rect (at -0.5 0) (size 0.5 0.5) (layers "F.Cu"))
+\t)
+)
+"""
+
+
+def test_a_dimensions_text_is_read_as_board_text_and_its_lines_counted(tmp_path):
+    """**A dimension on the silkscreen is ink KiCad plots**, its text and its
+    lines both, and until this neither was drawn nor counted: `_texts_of`
+    read only a board's or a footprint's own texts, and `_silk_of` did not
+    know the word. PCBCUPID's Glyph C3 and C6 each lead an arrow to "Antenna
+    Here!" on F.SilkS this way. Its text is a board text WHEREVER the
+    dimension sits -- KiCad 8.0.0 writes a dimension's text as `gr_text`, in
+    board coordinates, inside a footprint too (`PCB_IO_KICAD_SEXPR::format`
+    for PCB_TEXT), so a footprint's turn and offset are not applied to it --
+    and its lines, leader, arrow and frame, are counted as `dimension`. A
+    dimension on any other layer is neither."""
+    got = read_board(tmp_path / "dimensioned.kicad_pcb", text=DIMENSIONED)
+    leader, measured = got.text
+    assert leader == Text(
+        layer="F.SilkS", text="Antenna Here!", x_mm=30.0, y_mm=10.0, angle_deg=270.0,
+        height_mm=1.0, width_mm=1.0, thickness_mm=0.1, halign="center",
+        valign="center", mirrored=False, upright=False, bold=False, italic=False,
+        face="Noto Sans")
+    assert (measured.layer, measured.text, measured.x_mm, measured.y_mm,
+            measured.mirrored, measured.upright) == (
+        "B.SilkS", "2.54 mm", 25.27, 35.0, True, False)
+    assert dict(got.silk_unread) == {"dimension": 2}

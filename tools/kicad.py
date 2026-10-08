@@ -789,7 +789,11 @@ def _fp_graphics(node: list, layer: str, placed: Placement
 #: as a string and a size, and a font turns it into ink. The rest is a
 #: handful per board: 2 to 16 arcs, 2 to 7 circles and 3 to 12 polygons
 #: across the five composed XIAOs, against 47 to 232 lines.
-SILK_UNREAD = ("arc", "circle", "poly", "curve", "bbox")
+#:
+#: A `dimension` is spelt without the prefix at either level. Its lines --
+#: a leader, an arrow, a frame round its text -- are KiCad's to compute from
+#: its points and style, and are counted here; its text is `_texts_of`'s.
+SILK_UNREAD = ("arc", "circle", "poly", "curve", "bbox", "dimension")
 
 
 def _silk_of(node: list, prefix: str, put) -> tuple[list[Stroke], list[str]]:
@@ -807,9 +811,12 @@ def _silk_of(node: list, prefix: str, put) -> tuple[list[Stroke], list[str]]:
         if not isinstance(child, list):
             continue
         tag = head(child)
-        if not tag.startswith(f"{prefix}_"):
+        if tag == "dimension":
+            kind = tag
+        elif tag.startswith(f"{prefix}_"):
+            kind = tag[len(prefix) + 1:]
+        else:
             continue
-        kind = tag[len(prefix) + 1:]
         layer = first(child, "layer")
         named = layer[1] if layer and len(layer) > 1 else ""
         if not str(named).endswith("SilkS"):
@@ -859,11 +866,21 @@ def _texts_of(node: list, prefix: str, put) -> tuple[list[Text], int]:
     word (KiCad 5 and 6), `(hide yes)` on the text (KiCad 8 and 9), and
     either inside its `(effects ...)`. Only the words AFTER the string are
     read for it, because the string itself may spell anything.
+
+    **A dimension's text is board text wherever the dimension sits**: KiCad
+    8.0.0 writes it as `gr_text`, in board coordinates, inside a footprint
+    as well (`PCB_IO_KICAD_SEXPR::format` for a PCB_TEXT), so it is read as
+    the board's own, and neither `prefix` nor `put` applies to it.
     """
     tags = ("gr_text",) if prefix == "gr" else ("fp_text", "property")
     texts: list[Text] = []
     hidden = 0
     for child in node:
+        if isinstance(child, list) and head(child) == "dimension":
+            measured, unseen = _texts_of(child, "gr", lambda x, y: (x, y))
+            texts += measured
+            hidden += unseen
+            continue
         if not isinstance(child, list) or head(child) not in tags:
             continue
         layer = first(child, "layer")
