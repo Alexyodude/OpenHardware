@@ -173,14 +173,25 @@ def test_the_backlog_names_a_core_and_what_it_would_cost():
         assert row["oracle"], f"{row['core']} has no oracle recorded"
 
 
-def test_the_backlog_groups_by_core_rather_than_by_instruction_set_name():
+def test_the_backlog_groups_by_core_rather_than_by_instruction_set_name(tmp_path):
     """Grouping by the ISA string split `cortexm33` into two rows and
-    `riscv32` into three, so ten rows described five pieces of work."""
+    `riscv32` into three, so ten rows described five pieces of work.
+
+    **The two spellings are built, not found.** This read them off the real
+    backlog, where the RP2350 and the MG24 spelled one core's ISA two ways,
+    until OH-157 moved the RP2350 to `riscv32` and left `cortexm33` with one
+    spelling -- the same perishable-example trap
+    `test_a_built_core_without_a_board_description_is_not_runnable` records.
+    An ESP32-C3 and an ESP32-C6 with no description beside them are two
+    spellings of one core, and must be one row.
+    """
     cores = [row["core"] for row in catalogue.missing_cores()]
     assert len(cores) == len(set(cores)), f"a core appears twice: {cores}"
-    assert "cortexm33" in cores
-    row = next(r for r in catalogue.missing_cores() if r["core"] == "cortexm33")
-    assert len(row["isas"]) > 1, "the RP2350 and the MG24 spell their ISA differently"
+    (tmp_path / "XIAO-ESP32-C3-DIP.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "XIAO-ESP32-C6-DIP.json").write_text("{}", encoding="utf-8")
+    row, = catalogue.missing_cores(tmp_path)
+    assert row["core"] == "riscv32"
+    assert row["isas"] == ["RV32IMAC", "RV32IMC"], row
 
 
 def test_the_cortexm0_row_left_the_backlog_when_the_samd21_was_described():
@@ -295,10 +306,19 @@ def test_only_the_board_a_real_image_ran_on_claims_to_have_run_one():
     counts through c.not and calls through cm.jalt and JVT, and watches
     GPIO8 toggle with a steady period -- so what was watched is the part's
     own instruction set, not the subset every sibling already proves.
+
+    RP2350 joined under OH-157, and the argument it had to survive is that
+    its RISC-V core was built and three RISC-V chips already ran: none of
+    that is an RP2350 image. It is here because
+    `tests/webui/test_xiao_rp2350_board.py` loads its own `blink.bin` --
+    SIO at offsets the RP2040 does not use, and a pad isolation latch the
+    RP2040 does not have -- onto the XIAO by name and watches the pad the
+    board file gives `D3`'s GPIO alternate. It is evidence for the Hazard3
+    half only; the Cortex-M33 half is OH-36's.
     """
     proven = {b.chip for b in catalogue.catalogue() if b.firmware_verified}
     assert proven == {"RP2040", "SAMD21", "ATmega328P", "ESP32-C3",
-                      "ESP32-C6", "ESP32-C5"}
+                      "ESP32-C6", "ESP32-C5", "RP2350"}
 
 
 def test_only_the_manifest_board_its_own_image_ran_on_holds_its_own_evidence():
@@ -534,24 +554,44 @@ def test_the_stm32c5_is_a_cortex_m33_part_and_not_an_unknown_one():
     that does not exist.
 
     So the board is no longer blocked on identification. It is blocked on
-    OH-36's oracle, exactly like the other eight Cortex-M33 boards — and it
-    makes that nine.
+    OH-36's oracle, exactly like the other Cortex-M33 boards; the test below
+    counts them.
     """
     isa, core = catalogue.CHIPS["STM32C5"]
     assert core == "cortexm33", "the part is identified; do not put it back to unknown"
     assert "Cortex-M33" in isa
 
 
-def test_the_cortex_m33_boards_are_nine_and_wait_on_one_oracle():
+def test_the_cortex_m33_boards_are_seven_and_wait_on_one_oracle():
     """Counted rather than listed, so adding an Armv8-M board moves it.
 
     The number is worth asserting because it is the size of a single blocked
-    ticket: nine boards of twenty-six, none of which can run until OH-36 has
-    something to check a core against.
+    ticket: the boards none of which can run until OH-36 has something to
+    check a core against. It was nine until OH-157 moved the two XIAO
+    RP2350s to their Hazard3 half, which is the ticket's own prediction --
+    "seven boards rather than nine" -- held.
     """
     waiting = [b for b in catalogue.catalogue() if b.core == "cortexm33"]
-    assert len(waiting) == 9, sorted(b.name for b in waiting)
+    assert len(waiting) == 7, sorted(b.name for b in waiting)
     assert not any(b.runnable for b in waiting), "one claims to run without a core"
+    assert not any(b.chip == "RP2350" for b in waiting)
+
+
+def test_the_rp2350_runs_on_its_hazard3_half_and_says_its_m33_half_does_not():
+    """OH-157's done-when, held: both XIAO RP2350s runnable and verified on
+    `riscv32`, the chip's ISA still naming both halves because the silicon
+    has both, and the board module saying plainly which half is not modelled
+    and where that work lives."""
+    from webui.boards import rp2350
+
+    isa, core = catalogue.CHIPS["RP2350"]
+    assert core == "riscv32"
+    assert "Cortex-M33" in isa and "Hazard3" in isa, isa
+    boards = {b.name: b for b in catalogue.catalogue() if b.chip == "RP2350"}
+    assert set(boards) == {"XIAO-RP2350-DIP", "XIAO-RP2350-SMD"}
+    assert all(b.runnable and b.firmware_verified for b in boards.values()), boards
+    assert "**The Cortex-M33 half is not modelled.**" in rp2350.__doc__
+    assert "that is OH-36" in rp2350.__doc__
 
 
 def test_every_board_states_whether_a_sketch_can_be_built_for_it():

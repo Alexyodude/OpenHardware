@@ -89,7 +89,14 @@ NOT_A_BOARD = frozenset({"__init__", "catalogue", "contract"})
 CHIPS: dict[str, tuple[str, str]] = {
     "RP2040": ("Armv6-M (Cortex-M0+)", "cortexm0"),
     "SAMD21": ("Armv6-M (Cortex-M0+)", "cortexm0"),
-    "RP2350": ("Armv8-M (Cortex-M33) + RV32 (Hazard3)", "cortexm33"),
+    # **Two instruction sets and one core column**, and the column names the
+    # half this repository runs. An RP2350 carries two Cortex-M33s and two
+    # Hazard3s, whichever is unused held in reset (docs/architectures.md 5.4),
+    # so the ISA string keeps both: it is a fact about the silicon. The core
+    # is `riscv32` because `webui/boards/rp2350.py` describes the Hazard3 half
+    # to it (OH-157). The Cortex-M33 half is not modelled; it is OH-36's, and
+    # a real RP2350 boots that half by default.
+    "RP2350": ("Armv8-M (Cortex-M33) + RV32 (Hazard3)", "riscv32"),
     "MG24": ("Armv8-M (Cortex-M33)", "cortexm33"),
     "nRF54l15": ("Armv8-M (Cortex-M33)", "cortexm33"),
     "nRF54LM20A": ("Armv8-M (Cortex-M33)", "cortexm33"),
@@ -124,8 +131,10 @@ CHIPS: dict[str, tuple[str, str]] = {
     # assuming it was checked.
     #
     # So this board is no longer blocked on identification. It is blocked on
-    # exactly what the other eight Cortex-M33 boards are blocked on -- OH-36's
-    # oracle -- and it makes that nine.
+    # exactly what the other Cortex-M33 boards are blocked on -- OH-36's
+    # oracle. (This said "the other eight" until OH-157 moved the two RP2350
+    # boards to their RISC-V half; `missing_cores()` counts them, and a count
+    # written here is the one that goes stale.)
     "STM32C5": ("Armv8-M (Cortex-M33)", "cortexm33"),
 }
 
@@ -187,6 +196,15 @@ CHIPS: dict[str, tuple[str, str]] = {
 #: Found and corrected by OH-158 (2026-09-04), whose whole subject is claims
 #: that outlived what they described; the table below is the fact and this
 #: comment follows it, not the other way round.
+#:
+#: The RP2350 entry is the first for a chip with two instruction sets, and it
+#: is evidence for one of them. `tests/webui/test_xiao_rp2350_board.py`
+#: loads `xiao_rp2350/blink.bin` beside it -- compiled `-march=rv32imac`, carrying the
+#: boot ROM's minimum RISC-V IMAGE_DEF -- onto the XIAO by name, steps it on
+#: `core/riscv32`, and watches the pad the board file gives GPIO5 alternate
+#: through the pin view, after the image has selected SIO and opened the
+#: pad's isolation latch. That is the Hazard3 half. The Cortex-M33 half, which
+#: a real RP2350 boots by default, has no core here and is OH-36's.
 FIRMWARE_VERIFIED: dict[str, str] = {
     "RP2040": "tests/cortexm0/test_blink.py",
     "SAMD21": "tests/cortexm0/test_samd21_blink.py",
@@ -194,6 +212,7 @@ FIRMWARE_VERIFIED: dict[str, str] = {
     "ESP32-C3": "tests/riscv32/test_esp32c3_board.py",
     "ESP32-C6": "tests/riscv32/test_esp32c6_board.py",
     "ESP32-C5": "tests/riscv32/test_esp32c5_board.py",
+    "RP2350": "tests/webui/test_xiao_rp2350_board.py",
 }
 
 #: A row of `tools/board_manifest.py` to the test that compiled a sketch for
