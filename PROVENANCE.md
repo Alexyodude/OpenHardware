@@ -362,6 +362,27 @@ than reading source; the two vendor Gerbers already confirm every number
 their texts use. The glyphs are not KiCad's code at all: §4 records them,
 from their author's CC0 release.
 
+### 2j. KiCad's palette names, as evidence for a finish — `KICAD_PALETTE` (OH-163)
+
+`FINISHES` in `tools/import_3d_model.py` names some colours by what KiCad
+itself calls them, and `KICAD_PALETTE` in `tests/rules/test_import_3d_model.py`
+holds those names with their diffuse colours, so the citation can be checked
+as arithmetic. They were read from the `.wrl` files kicad-packages3D
+publishes at tag 9.0.0 (CC-BY-SA-4.0 with KiCad's library exception), each of
+which opens with KiCad StepUp's material palette. **No `.wrl` is in this
+tree, fetched or tracked**; what is copied is a material name such as
+`CAP-CERAMIC-06` and three numbers per name, in a test.
+
+**Position:** facts about the library's files -- which colour a published
+model's surface is, and what the library calls that colour -- not its
+expression. There is exactly one answer to "what sRGB value does this STEP
+carry for this surface", and the library's own palette is where its name was
+found. The same footing as `KICAD_MASK_COLOURS` in
+`tools/compose_board_3d.py`.
+
+**Risk:** low. Each number can be recovered from the STEP files the
+composer already fetches, which carry the same values.
+
 ---
 
 ## 3. What is unambiguously GPL, and stays GPL
