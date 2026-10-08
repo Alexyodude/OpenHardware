@@ -271,8 +271,9 @@ That licence attaches obligations to a copy of the Documentation and to
 modified Documentation: keep its notices and include a copy of the licence
 (§3.1); on modifying it, make the modified Documentation available from a
 Documentation Location -- a place the licensor expects to stay public for
-three years (§1) -- where an original Licensor can find it once it is
-distributed, a proviso the Licensor may not assert until a Product is
+at least three years (§1) -- where an original Licensor can find it once
+it is distributed, "and, where required by section 4.1, by a recipient of
+a Product", a proviso the Licensor may not assert until a Product is
 distributed (§3.3); and to distribute it, mark it as modified, with the
 date and what changed, carry a new Documentation Location notice if the
 original Documentation provided for one (§3.4(c)), make it available, and
