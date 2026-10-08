@@ -317,11 +317,16 @@ def test_the_pad_labelled_nc_is_the_one_arduinos_board_file_puts_on_no_net():
 
     `tools/import_board.py` names a pad on no net by its pad number, so a
     vendor pad whose name is none of the board's nets has nothing on it.
+    Both ways round: one pad is labelled NC and it is on no net, and no other
+    pad is on no net. Checking only that every pad on no net is labelled NC
+    passed a second NC on MISO's pad (OH-204).
     """
     nets = _nets()
-    unconnected = [a["label"] for a, v in _pairs() if v.label not in nets]
-    assert unconnected == ["NC"], (
-        f"the labels on the pads Arduino's file connects to nothing: {unconnected}"
+    either = [(a["label"], v.label in nets) for a, v in _pairs()
+              if a["label"] == "NC" or v.label not in nets]
+    assert either == [("NC", False)], (
+        f"(label, whether Arduino's file puts its pad on a net) for every pad "
+        f"labelled NC or on no net: {either}"
     )
 
 
