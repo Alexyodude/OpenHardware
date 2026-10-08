@@ -697,9 +697,53 @@ DEFAULT_FINISH = Finish(
 #: 3. **A record already in the tree.** `webui/static/board3d.js` names two of
 #:    them in prose.
 #:
-#: A colour with none of the three is not in this table. `#6f6651` is the
-#: worked example: a hundred triangles shared by a QFN-32 and a SOT-223, very
-#: probably an exposed thermal pad and not evidenced enough to say so.
+#: OH-163 added two more, for the colours the composed boards still drew at
+#: the default:
+#:
+#: 4. **Geometry**: where the group lies in its own model -- between a chip's
+#:    two end caps, on top of its moulding, a copper weight thick on a PCB.
+#:    The resistor's body below was named this way first.
+#: 5. **KiCad's own name for the colour.** Each `.wrl` KiCad 9.0.0 publishes
+#:    beside a STEP in kicad-packages3D opens with KiCad StepUp's material
+#:    palette -- `PIN-01`, `IC-LABEL-01`, `CAP-CERAMIC-06` and the rest, each
+#:    with a diffuse colour -- and the STEP carries those same sRGB numbers,
+#:    which OpenCASCADE's reader makes linear before this file sees them. So a
+#:    palette entry converts EXACTLY to one key here: `CAP-CERAMIC-06`'s
+#:    0.379 0.270 0.215 is `#1e0f0a`, and `PIN-01` is `#a5a392`.
+#:    `test_kicads_own_names_for_the_colours_it_cites` does that arithmetic
+#:    for every entry citing one. KiCad 10 stopped shipping the `.wrl`; tag
+#:    9.0.0 still has them, beside STEPs byte-identical to the ones fetched
+#:    here for every model an entry cites.
+#:
+#: A colour with none of these is not in this table, and neither is one whose
+#: readings disagree. `#1d1d1d` is the worked example now: KiCad's palette
+#: names it `MET-ALUMINUM`, and on the PCM12 switch it is the box of a metal
+#: tab -- but at 11% it reflects less than any metal does (the near-black
+#: argument below), so naming it a metal would draw a black mirror and naming
+#: it anything else would contradict KiCad. It takes the default. Until
+#: OH-163 the example was `#6f6651`, "very probably an exposed thermal pad";
+#: the geometry puts it on TOP of every body that carries it, and KiCad's
+#: palette calls it `IC-LABEL-01` -- see its entry.
+#:
+#: **Examined for OH-163 and left at the default**, so nobody repeats it:
+#:
+#:   * `#808080` -- `UNSTYLED`, which that constant's comment forbids naming.
+#:   * `#1d1d1d` -- above.
+#:   * `#4e4e4e` -- `tools/model_from_datasheet.py` calls it a MEMS
+#:     microphone's steel lid, a metal darker than any metal reflects, and
+#:     the nRF54LM20A's own STEP uses it for a dot a tenth of a millimetre
+#:     across that nothing here identifies.
+#:   * `#272b27` -- that file's bare silicon dies, and on the MG24's and the
+#:     nRF54LM20A's own STEPs the ends of a part nothing here identifies.
+#:   * `#ebebe5` -- that file's RGB LED diffusers, and the RP2040 STEP's faces
+#:     the paragraph below could not identify.
+#:   * `#c8c8c8`, `#868686` -- the gull-wing leads of an eight-lead package
+#:     inside each ESP32 WROOM's shield on Espressif's STEPs, and on the
+#:     nRF54LM20A's own STEP the base under one part and a mark printed on top
+#:     of another: three things, not one material.
+#:   * `#97a3da`, `#98a4dc`, `#ffffff`, `#000037`, `#676767` -- Espressif's
+#:     module STEPs paint a passive's metal ends and most of a QFN with the
+#:     first, and nothing here identifies what the others are.
 #:
 #: **Four entries were written and then deleted**, and the thing that deleted
 #: them was `test_every_finish_says_what_the_evidence_was` refusing a citation
@@ -792,6 +836,35 @@ FINISHES: dict[str, Finish] = {
     "#edbe51": Finish(1.0, 0.30, (
         "the same, on the RP2040 model. The same analogy and the same caveat"
     )),
+    "#b8bac2": Finish(1.0, 0.35, (
+        "the leads and exposed pad of the two QFNs `tools/model_from_datasheet.py` "
+        "builds: `tools/blender/qfn_flatpack.py` names the material `lead` and "
+        "draws every terminal and the exposed pad in it. Named in this "
+        "repository's own source (OH-163); plated leadframe, the same finish "
+        "as #a5a392's legs"
+    )),
+    "#a86f0a": Finish(1.0, 0.35, (
+        "the land pattern on Espressif's own ESP32-C6-WROOM-1 and "
+        "ESP32-C5-WROOM-1 STEPs. Named by geometry (OH-163): every solid of "
+        "this colour in either file is a slab a few hundredths of a "
+        "millimetre thick on the module PCB's top or bottom face, shaped and "
+        "spaced as pads -- a row of them at the QFN's 0.4 mm pitch under the "
+        "chip -- which is exposed copper, as COPPER is on the composed boards"
+    )),
+    "#a66d0a": Finish(1.0, 0.35, (
+        "the ESP32-C6-WROOM-1's PCB antenna on Espressif's own STEP: one "
+        "solid a copper weight (0.035 mm) thick, lying on the module PCB "
+        "across its antenna end. Named by geometry (OH-163), and two values "
+        "off #a86f0a's lands: two nearly equal colours are two styles in the "
+        "vendor's CAD rather than two materials, as #ff9d36 is"
+    )),
+    "#7f8e98": Finish(1.0, 0.35, (
+        "the terminals of two small parts inside the ESP32-C5-WROOM-1 on "
+        "Espressif's own STEP: slabs a tenth of a millimetre thick on the "
+        "module PCB, under each end or corner of a #131313 body, which is "
+        "where a part's terminations and its solder are. Named by geometry "
+        "(OH-163), and bright enough to be a metal"
+    )),
 
     # -- dielectrics. `metalness` 0.0, and the roughness is what separates a
     #    moulded body from a solder mask from a lens.
@@ -846,6 +919,118 @@ FINISHES: dict[str, Finish] = {
         "BOARD_MASK's colour: an unglazed LTCC or alumina block is matte, so "
         "0.60 sits between the silkscreen ink's 0.55 and moulded epoxy's "
         "0.70, and a vendor mesh of either part would retire it"
+    )),
+    # -- OH-163's dielectrics: the colours the composed boards still drew at
+    #    the default, each named by the readings its entry gives -- KiCad's
+    #    own palette name, the geometry, this repository's own source -- and
+    #    by the near-black argument above where the colour is dark enough for
+    #    it. Where an entry covers two different dielectrics it claims only
+    #    what they share.
+    "#1e0f0a": Finish(0.0, 0.60, (
+        "the ceramic body of KiCad's chip capacitors, C_0201 to C_0805, on "
+        "the composed boards and on the MG24's and nRF54LM20A's own STEPs, "
+        "which place the same models. Two readings agree: by geometry it is "
+        "the block between the two #a5a392 end caps, and KiCad's palette "
+        "names the colour `CAP-CERAMIC-06` -- the box "
+        "`Capacitor_SMD.3dshapes/C_0402_1005Metric.wrl` at tag 9.0.0 paints "
+        "with it is that block. A fired ceramic is a dielectric; the "
+        "roughness is a JUDGEMENT in CERAMIC's register, matte and unglazed"
+    )),
+    "#0f0f0f": Finish(0.0, 0.65, (
+        "**two dielectrics, one entry, claiming only what they share.** "
+        "KiCad's palette names the colour `CAP-CERAMIC-05`, and paints with "
+        "it both its chip inductors' bodies -- the block between the end "
+        "caps in `Inductor_SMD.3dshapes/L_0402_1005Metric.wrl` at tag 9.0.0 "
+        "-- and the GCT USB4105 receptacle's insulator; "
+        "`tools/model_from_datasheet.py` calls it the USB sockets' "
+        "`insulator` and the modelled switches' moulded black plastic body. "
+        "Fired chip body or moulded plastic, none is a metal: KiCad gives "
+        "them one name, and at six percent grey none could be (the "
+        "near-black argument above). The roughness is a JUDGEMENT between "
+        "CERAMIC's 0.60 and moulded epoxy's 0.70, because the group is both"
+    )),
+    "#6f6651": Finish(0.0, 0.55, (
+        "the orientation mark on top of a moulded package -- a pin-1 dot, a "
+        "diode's cathode bar. KiCad's palette names the colour "
+        "`IC-LABEL-01`, and `QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm.wrl` and "
+        "`D_SOD-882.wrl` at tag 9.0.0 paint with it a patch on the body's top "
+        "face at the marked end; by geometry, on every KiCad model fetched "
+        "here that carries it, it lies on that top face, just proud of it or "
+        "just sunk into it. "
+        "Ink or a laser mark on epoxy is not a metal; the roughness is a "
+        "JUDGEMENT at the silkscreen ink's 0.55. Until OH-163 this table's "
+        "worked example of a colour too weakly evidenced to name, read as "
+        "'very probably an exposed thermal pad' -- which would be underneath"
+    )),
+    "#4c4c52": Finish(0.0, 0.55, (
+        "the pin-1 dot on the two QFNs `tools/model_from_datasheet.py` "
+        "builds: `tools/blender/qfn_flatpack.py` names the material `mark` "
+        "and the object `pin1`, a disc on the moulding's top face. The same "
+        "mark #6f6651 is on KiCad's packages, so the same finish"
+    )),
+    "#0f0f12": Finish(0.0, 0.70, (
+        "the moulded body of those two QFNs, the material "
+        "`tools/blender/qfn_flatpack.py` names `moulding`. Moulded epoxy, as "
+        "#050505 is, and near-black besides"
+    )),
+    "#186b2a": Finish(0.0, 0.70, (
+        "a thin layer at the base of KiCad's chip LEDs, LED_0402 to "
+        "LED_0805. KiCad's palette names the colour `PLASTIC-GREEN-01`, and "
+        "`LED_0603_1608Metric.wrl` at tag 9.0.0 paints exactly that box with "
+        "it. A plastic by KiCad's word and too dark to be a metal by its own "
+        "value; the roughness is moulded plastic's"
+    )),
+    "#0000ff": Finish(0.0, 0.55, (
+        "the MiniMELF's cathode band: by geometry a ring 0.2 mm wide at the "
+        "end where KiCad's footprint puts pad 1, the cathode -- the band "
+        "OH-190's test reads. `D_MiniMELF.wrl` at tag 9.0.0 leaves this one "
+        "material out of KiCad's palette (an anonymous `diffuseColor 0 0 1`), "
+        "so the name is the geometry's. Paint on glass, and no metal is a "
+        "saturated blue; the roughness is a JUDGEMENT at ink's 0.55"
+    )),
+    "#060606": Finish(0.0, 0.70, (
+        "the base of KiCad's Seiko Epson FA238 crystal, under its seal ring "
+        "and lid. KiCad's palette names the colour `BOARD-BLACK-03`, and "
+        "`Crystal_SMD_SeikoEpson_FA238-4Pin_3.2x2.5mm.wrl` at tag 9.0.0 "
+        "paints that box with it. At two percent grey it is not a metal (the "
+        "near-black argument above); the specific material is not claimed"
+    )),
+    "#04227c": Finish(0.0, 0.20, (
+        "the top of the fill in the WS2812B-Mini's cavity on KiCad's model, "
+        "inside the reflector. KiCad's palette names the colour "
+        "`PLASTIC-BLUE-01`, and `LED_WS2812B-Mini_PLCC4_3.5x3.5mm.wrl` at tag "
+        "9.0.0 tops that box with it. A plastic by KiCad's word; the "
+        "roughness is the LED lens's #720301 by ANALOGY, which is weaker than "
+        "a reading and says so"
+    )),
+    "#292929": Finish(0.0, 0.70, (
+        "the bodies of the parts on Espressif's own module STEPs, both MINIs "
+        "and both WROOMs: by geometry the block between a passive's two "
+        "ends, the whole moulding of a QFN and the base under a crystal's "
+        "lid -- a body on every part it touches, never an end. Ceramic or "
+        "epoxy, so two dielectrics claimed only for what they share: not a "
+        "metal by that and by its sixteen-percent value; the specific "
+        "material is not claimed"
+    )),
+    "#0d0d0d": Finish(0.0, 0.70, (
+        "moulded bodies: the eight-lead gull-wing package inside each ESP32 "
+        "WROOM's shield on Espressif's own STEPs, and small parts' bodies on "
+        "the MG24's and the nRF54LM20A's own STEPs, each standing on its "
+        "terminals -- and one patch inside a part on the nRF54LM20A that "
+        "nothing here identifies. At five percent grey none of it is a metal "
+        "(the near-black argument above); the specific material is not "
+        "claimed"
+    )),
+    "#0a0a0a": Finish(0.0, 0.70, (
+        "the moulding of the QFN inside the ESP32-C5-WROOM-1 on Espressif's "
+        "own STEP: by geometry the whole 6 mm square body. Near-black, so not "
+        "a metal by the argument above"
+    )),
+    "#131313": Finish(0.0, 0.70, (
+        "the bodies of two small parts inside the ESP32-C5-WROOM-1 on "
+        "Espressif's own STEP, each standing on #7f8e98 terminals. "
+        "Near-black, so not a metal by the argument above; what the parts "
+        "are is not claimed"
     )),
     # -- the solder masks, and the only surfaces here with a COAT.
     # **Because a PCB is two layers and everything else here is one.** The

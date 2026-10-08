@@ -473,6 +473,121 @@ def test_the_resistors_body_is_not_a_metal_and_its_leads_still_are():
     assert "resistor" in FINISHES["#c07635"].why
 
 
+def test_no_metal_is_darker_than_a_metal_reflects():
+    """**The near-black argument, as a rule over the whole table** (OH-163).
+
+    A metal's base colour IS its reflectance, and no metal used in electronics
+    reflects under about half -- the argument `FINISHES` gives for calling its
+    near-blacks dielectrics. Read the other way it says what may be a metal:
+    nothing with every channel under half. That is why `#1d1d1d` stays at the
+    default although KiCad's own palette calls it `MET-ALUMINUM` -- metalness
+    1.0 on an 11% base would draw a black mirror -- and why `#4e4e4e`, which
+    `tools/model_from_datasheet.py` calls a steel lid, does too.
+    """
+    from tools.import_3d_model import FINISHES
+
+    for colour, finish in FINISHES.items():
+        if finish.metalness == 1.0:
+            brightest = max(int(colour[at:at + 2], 16) for at in (1, 3, 5))
+            assert brightest >= 128, (
+                f"{colour} is a metal in FINISHES, and its brightest channel "
+                f"is {brightest} of 255: darker than any metal reflects")
+
+
+#: KiCad StepUp's material palette as each `.wrl` at kicad-packages3D tag
+#: 9.0.0 opens with it: name -> diffuse colour, sRGB, copied as written there.
+KICAD_PALETTE = {
+    "PIN-01": (0.824, 0.82, 0.781),
+    "CAP-CERAMIC-06": (0.379, 0.27, 0.215),
+    "CAP-CERAMIC-05": (0.273, 0.273, 0.273),
+    "IC-LABEL-01": (0.691, 0.664, 0.598),
+    "PLASTIC-GREEN-01": (0.340, 0.680, 0.445),
+    "PLASTIC-BLUE-01": (0.137, 0.402, 0.727),
+    "BOARD-BLACK-03": (0.16, 0.16, 0.16),
+    "MET-ALUMINUM": (0.372322, 0.371574, 0.373173),
+}
+
+
+def test_kicads_own_names_for_the_colours_it_cites():
+    """**A citation of KiCad's palette is arithmetic, so it is checked as
+    arithmetic** (OH-163).
+
+    A KiCad STEP carries the same sRGB numbers its `.wrl` palette names, and
+    OpenCASCADE's reader makes them linear before `colour_of` writes a hex --
+    so a palette entry converts to exactly one key. Every `FINISHES` entry
+    that cites a palette name in backticks must be the key that name converts
+    to: an entry citing the wrong name, or a key mistyped, fails here. The
+    conversion is pinned on `PIN-01`, which has been `#a5a392` -- every
+    component's leg -- since that entry was written.
+    """
+    from tools.import_3d_model import FINISHES
+
+    def key(srgb):
+        def linear(c):
+            return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+        return "#" + "".join(f"{round(linear(c) * 255):02x}" for c in srgb)
+
+    assert key(KICAD_PALETTE["PIN-01"]) == "#a5a392"
+    cited = {}
+    for colour, finish in FINISHES.items():
+        for name, srgb in KICAD_PALETTE.items():
+            if f"`{name}`" in finish.why:
+                assert colour == key(srgb), (
+                    f"{colour}'s evidence cites KiCad's `{name}`, which is "
+                    f"{key(srgb)}, not {colour}")
+                cited[name] = colour
+    assert cited == {
+        "CAP-CERAMIC-06": "#1e0f0a", "CAP-CERAMIC-05": "#0f0f0f",
+        "IC-LABEL-01": "#6f6651", "PLASTIC-GREEN-01": "#186b2a",
+        "PLASTIC-BLUE-01": "#04227c", "BOARD-BLACK-03": "#060606",
+    }, cited
+    assert key(KICAD_PALETTE["MET-ALUMINUM"]) == "#1d1d1d"
+    assert "#1d1d1d" not in FINISHES, (
+        "#1d1d1d is KiCad's MET-ALUMINUM and darker than any metal reflects: "
+        "the two readings disagree, so it takes the default")
+
+
+def test_the_label_colour_lies_on_top_of_every_body_that_carries_it():
+    """**`#6f6651` was 'very probably an exposed thermal pad'; it is on top.**
+
+    OH-163 named it as KiCad's `IC-LABEL-01`, the orientation mark printed on
+    a package, and a mark is only a mark if it is on the top face: an exposed
+    pad would be at the bottom, under the body, where the solder is. Checked on
+    every KiCad model fetched into the cache, so a model added later that
+    styles a pad or a lead with this colour fails here rather than shading
+    a metal as ink. A mark may stand just proud of the top or sit just sunk
+    into it, as a moulded dimple does -- 0.10 mm deep on the QFN-56 -- so
+    `on_top_mm` allows a little more than that below the top.
+
+    Skips without OCP or without a fetched model, as the header says.
+    """
+    pytest.importorskip("OCP")
+    from tools.import_3d_model import (
+        DEFLECTION, Frame, handedness_of, read, tessellate)
+
+    mark, on_top_mm = "#6f6651", 0.15
+    steps = sorted((REPO / "third_party" / "seeed-3d").glob("component-*.step"))
+    if not steps:
+        pytest.skip("no KiCad model fetched; run tools/compose_board_3d.py")
+    frame = Frame(long_axis=0, up=1, short_axis=2,
+                  handedness=handedness_of((0, 1, 2)), origin=(0.0, 0.0, 0.0))
+    carrying = []
+    for step in steps:
+        shape, styles, _document = read(step)
+        groups = tessellate(shape, styles, DEFLECTION, frame).groups
+        if mark not in groups:
+            continue
+        heights = groups[mark][0][2::3]
+        top = max(z for colour, (positions, _n, _i) in groups.items()
+                  if colour != mark for z in positions[2::3])
+        assert min(heights) >= top - on_top_mm, (
+            f"{step.name}: {mark} reaches down to {min(heights):.3f} mm and "
+            f"the rest of the model's top is {top:.3f}: not a mark on top")
+        carrying.append(step.name)
+    if not carrying:
+        pytest.skip(f"no fetched model carries {mark}")
+
+
 def test_the_resistor_the_importer_writes_carries_its_value_and_no_lens():
     """**The whole pipeline, on the file the page actually fetches.**
 
