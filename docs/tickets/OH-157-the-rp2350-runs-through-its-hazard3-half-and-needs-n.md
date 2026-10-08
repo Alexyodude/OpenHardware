@@ -1,12 +1,17 @@
 ---
 id: OH-157
 title: The RP2350 runs through its Hazard3 half, and needs no new core or oracle
-status: blocked
+status: in-progress
 priority: P1
 created: '2026-09-03'
 touches:
 - webui/boards/rp2350.py
 - tests/riscv32/rp2350/**
+- webui/boards/catalogue.py
+- tests/webui/test_board_catalogue.py
+- tests/rules/test_board_claims.py
+- tests/webui/test_pin_view.py
+- docs/architectures.md
 ---
 
 Two of the fourteen dead boards can probably be made to run without a new
@@ -100,3 +105,5 @@ THREE THINGS THIS TICKET GOT WRONG, found while checking it, so the next attempt
 WHAT UNBLOCKS IT, concretely, and it is one fetch: pico-sdk's src/rp2350/hardware_regs/include/hardware/regs/ (addressmap.h, sio.h, io_bank0.h, pads_bank0.h, xip.h), blobless and sparse, the way tools/import_pindefs.py --fetch brings arduino-esp32's variants/ -- initialising the submodule that is already declared under third_party/bsp/arduino-pico would do it -- or the RP2350 datasheet with its section numbers, the way rp2040.py's research files cite the RP2040's. Either is a citation; neither is here. Fetch it, decide what CHIPS says about a two-core part, and then rp2350.py can be written the way esp32c6.py was, with the Cortex-M33 half stated as not modelled and OH-36's.
 
 Nothing under core/cortexm33/** or tests/cortexm33/** was touched, and nothing was fetched.
+
+**Note 2026-10-08:** 2026-10-08: unblocked by fetching what it was blocked on. Started in lane4. A RISC-V compiler is on this machine: the ESP32 Arduino core's esp-rv32 toolchain (riscv32-esp-elf-gcc) under Arduino15/packages/esp32/tools/esp-rv32. third_party/bsp/arduino-pico/pico-sdk is declared and empty.
