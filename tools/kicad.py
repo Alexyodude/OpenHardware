@@ -1141,10 +1141,14 @@ def _kicad5_arc(node: list, path: pathlib.Path, version: str = KICAD5_VERSION) -
     holds a board in and rounds that end to (`KiROUND`).
 
     **A sweep of nothing is refused by name** (OH-198), zero or not a number:
-    there is no arc to put three points on, and KiCad 5.1.6 and later drop
-    such an `fp_arc` as one that "can corrupt/crash" it (`std::isnormal(
-    em->GetAngle() )`, pcb_parser.cpp at 5.1.12), where this reader would
-    otherwise have drawn a point.
+    there is no arc to put three points on. KiCad 5.1.6 and later drop such
+    an `fp_arc` as one that "can corrupt/crash" it (`std::isnormal(
+    em->GetAngle() )`, pcb_parser.cpp:2148-2149 at 5.1.12), where this
+    reader would otherwise have drawn a point. Such a `gr_arc` KiCad 5.1
+    keeps: `parseDRAWSEGMENT` takes any `angle` and the board adds what it
+    returns (pcb_parser.cpp:1652-1653 and 544 at 5.1.12). It is refused here
+    all the same, rather than drawn as a point, and the refusal says which
+    of the two KiCad does.
     """
     centre, start, sweep = first(node, "start"), first(node, "end"), first(node, "angle")
     c, s, a = (_floats(part) if part is not None else [] for part in (centre, start, sweep))
@@ -1156,10 +1160,13 @@ def _kicad5_arc(node: list, path: pathlib.Path, version: str = KICAD5_VERSION) -
             f"version {LEGACY_ARC_VERSION}, and an arc stated otherwise there "
             f"is not read")
     if not (math.isfinite(a[0]) and a[0] != 0.0):
+        kicad_does = ("KiCad 5.1.6 and later drop an fp_arc of a sweep that is "
+                      "zero or not a number" if head(node) == "fp_arc" else
+                      f"KiCad 5.1 keeps a {head(node)} of any sweep, since it "
+                      f"checks only an fp_arc's (from 5.1.6)")
         raise KicadError(
             f"{path}: a ({head(node)} ...) in {where} sweeps {a[0]!r} degrees, "
-            f"which is no arc; KiCad 5.1.6 and later drop an fp_arc of a sweep "
-            f"that is zero or not a number, and one is refused here, not read: "
+            f"which is no arc; {kicad_does}, and one is refused here, not read: "
             f"{node!r}")
 
     def turned(degrees: float) -> list[str]:

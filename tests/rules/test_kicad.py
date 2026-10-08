@@ -1492,7 +1492,10 @@ def test_a_kicad_5_arc_of_no_sweep_is_refused_by_name(tmp_path):
     """KiCad 5.1.6 and later drop an `fp_arc` whose sweep is zero or not a
     number ("Drop 0 and NaN angles", `std::isnormal`, pcb_parser.cpp at
     5.1.12). There is no arc to put three points on, and this reader drew a
-    point where KiCad draws nothing: refused, naming the sweep."""
+    point where KiCad draws nothing: refused, naming the sweep. A `gr_arc`
+    of no sweep KiCad 5.1 keeps -- it checks only an `fp_arc`'s -- and it is
+    refused too, with a reason that is true of it and does not say KiCad
+    drops it."""
     for angle, said in (("0", "0.0"), ("nan", "nan")):
         text = ARC5.replace(
             "(pad 1 smd rect",
@@ -1500,8 +1503,16 @@ def test_a_kicad_5_arc_of_no_sweep_is_refused_by_name(tmp_path):
             f"    (pad 1 smd rect").format(
             arc="(gr_line (start 0 0) (end 5 0) (layer Edge.Cuts) (width 0.05))")
         with pytest.raises(KicadError, match=rf"a \(fp_arc \.\.\.\) in a KiCad 5 file "
-                                             rf"\(version 20171130\) sweeps {said} degrees"):
+                                             rf"\(version 20171130\) sweeps {said} degrees"
+                                             rf".*KiCad 5\.1\.6 and later drop an fp_arc"):
             read_board(tmp_path / "flat.kicad_pcb", text=text)
+        text = ARC5.format(arc=f"(gr_arc (start 0 0) (end 1 0) (angle {angle}) "
+                               f"(layer Edge.Cuts) (width 0.05))")
+        with pytest.raises(KicadError, match=rf"a \(gr_arc \.\.\.\) in a KiCad 5 file "
+                                             rf"\(version 20171130\) sweeps {said} degrees"
+                                             rf".*KiCad 5\.1 keeps a gr_arc of any sweep") as caught:
+            read_board(tmp_path / "flat.kicad_pcb", text=text)
+        assert "drop" not in str(caught.value), str(caught.value)
 
 
 def test_the_esp32_poes_kicad_5_back_side_headers_sit_on_their_own_copper():
