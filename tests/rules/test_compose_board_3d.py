@@ -6398,6 +6398,112 @@ def test_a_text_newstroke_would_draw_unlike_kicad_is_refused_by_name():
             compose.letter(dataclasses.replace(plain, **change), table)
 
 
+# The layout's branches no vendor's Gerber exercises, each held to a stroke
+# derived BY HAND from KiCad 8.0.0's arithmetic, the derivation in the
+# docstring. Read at that tag: `getLinePositions` in common/font/font.cpp for
+# where a line starts, `STROKE_FONT::GetTextAsGlyphs` and the glyph loader in
+# common/font/stroke_font.cpp for the advance and a glyph's units,
+# `STROKE_GLYPH::Transform` in common/font/glyph.cpp for the lean,
+# `EDA_TEXT::GetEffectiveTextPenWidth` in common/eda_text.cpp and the pen
+# sizes in common/gr_text.cpp for the pen.
+#
+# One glyph does for all of them: "PTRFR[" -- bearings P and T, two units
+# either side of R, so a 4-unit cell; then one stroke from (R, F) to (R, [),
+# x = 0 - (-2) = 2 units into the cell, y from F - R - 8 = -20 units to
+# [ - R - 8 = +1, y down. A unit is 1/21 of the size, so at 2.1 mm it is
+# 0.1 mm. KiCad truncates the lead (pen / 1.52) and the drop (pen x 0.052) to
+# whole nanometres where the composer keeps the fraction, under 1 nm each, so
+# every coordinate is held to 2 nm.
+_I_GLYPH = {ord("I"): "PTRFR["}
+_NM2 = 2e-6
+
+
+def _plain(**changes) -> kicad.Text:
+    """'I' at (10, 20), 2.1 mm square, pen 0.152 mm, left and bottom."""
+    text = kicad.Text(layer="F.SilkS", text="I", x_mm=10.0, y_mm=20.0, angle_deg=0.0,
+                      height_mm=2.1, width_mm=2.1, thickness_mm=0.152, halign="left",
+                      valign="bottom", mirrored=False, upright=False, bold=False,
+                      italic=False)
+    return dataclasses.replace(text, **changes)
+
+
+def _strokes_of(text: kicad.Text) -> list[tuple[float, ...]]:
+    return [(s.x1_mm, s.y1_mm, s.x2_mm, s.y2_mm, s.width_mm)
+            for s in compose.letter(text, _I_GLYPH)]
+
+
+def test_right_justified_text_ends_a_pen_lead_short_of_its_position():
+    """The text "II", right-justified, bottom-aligned, pen 0.152 mm.
+
+    The line spans two 4-unit cells, 0.8 mm. A right-justified line starts at
+    -(span + pen / 1.52) = -(0.8 + 0.1) = -0.9 from the text's x, so at 9.1;
+    each stroke is 2 units, 0.2 mm, into its cell: x = 9.3 and 9.7.
+
+    Bottom: the line's y is the text's y plus the size, less the drop
+    pen x 0.052 = 0.007904, less the block's height 1.17 x size = 2.457:
+    20 + 2.1 - 0.007904 - 2.457 = 19.635096. The stroke runs from 20 units
+    above it to 1 below: 17.635096 to 19.735096."""
+    assert _strokes_of(_plain(text="II", halign="right")) == [
+        pytest.approx((9.3, 17.635096, 9.3, 19.735096, 0.152), abs=_NM2),
+        pytest.approx((9.7, 17.635096, 9.7, 19.735096, 0.152), abs=_NM2)]
+
+
+def test_top_aligned_text_hangs_below_its_position():
+    """The text "I", left-justified, top-aligned, pen 0.152 mm.
+
+    Left: the line starts a lead of pen / 1.52 = 0.1 past the text's x, so
+    the stroke is at 10 + 0.1 + 0.2 = 10.3. Top: nothing is taken off for
+    the block, so the line's y is 20 + 2.1 - 0.007904 = 22.092096 and the
+    stroke runs from 20.092096 to 22.192096 -- the glyph's top a pen's drop
+    below the text's own y."""
+    assert _strokes_of(_plain(valign="top")) == [
+        pytest.approx((10.3, 20.092096, 10.3, 22.192096, 0.152), abs=_NM2)]
+
+
+def test_text_with_no_thickness_is_drawn_at_an_eighth_of_its_width():
+    """The text "I", 2.1 mm high and 1.6 mm wide, no thickness stated.
+
+    A pen of one nanometre or less takes the default, 1/8 of the WIDTH (not
+    of the smaller side): 1.6 / 8 = 0.2, under the clamp of 1.6 / 4 = 0.4.
+    x: 10 + 0.2 / 1.52 + 2/21 x 1.6 = 10 + 0.131579 + 0.152381 = 10.283960.
+    y: 20 + 2.1 - 0.2 x 0.052 - 2.457 = 19.6326, so the stroke runs from
+    17.6326 to 19.7326."""
+    assert _strokes_of(_plain(width_mm=1.6, thickness_mm=0.0)) == [
+        pytest.approx((10.283960, 17.6326, 10.283960, 19.7326, 0.2), abs=_NM2)]
+
+
+def test_bold_text_with_no_thickness_is_drawn_at_a_fifth_of_its_width():
+    """As the default pen, bold: 1/5 of the width, 1.6 / 5 = 0.32, under the
+    clamp of 0.4. x: 10 + 0.32 / 1.52 + 0.152381 = 10 + 0.210526 + 0.152381
+    = 10.362907. y: 20 + 2.1 - 0.32 x 0.052 - 2.457 = 19.62636, the stroke
+    from 17.62636 to 19.72636."""
+    assert _strokes_of(_plain(width_mm=1.6, thickness_mm=0.0, bold=True)) == [
+        pytest.approx((10.362907, 17.62636, 10.362907, 19.72636, 0.32), abs=_NM2)]
+
+
+def test_a_pen_is_held_to_a_quarter_of_the_texts_smaller_side():
+    """The text "I", 2.1 mm high and 1.6 mm wide, a stated pen of 0.6 mm.
+
+    Any pen is held to 1/4 of the smaller of the two sizes: 1.6 / 4 = 0.4,
+    not 2.1 / 4. x: 10 + 0.4 / 1.52 + 0.152381 = 10 + 0.263158 + 0.152381
+    = 10.415539. y: 20 + 2.1 - 0.4 x 0.052 - 2.457 = 19.6222, the stroke
+    from 17.6222 to 19.7222."""
+    assert _strokes_of(_plain(width_mm=1.6, thickness_mm=0.6)) == [
+        pytest.approx((10.415539, 17.6222, 10.415539, 19.7222, 0.4), abs=_NM2)]
+
+
+def test_italic_text_leans_an_eighth_of_its_height():
+    """The text "I", left-justified, bottom-aligned, pen 0.152 mm, italic.
+
+    Each point is scaled first and then moved left by 1/8 of its scaled y,
+    which is negative above the baseline: the top point, 2.0 mm above, moves
+    right by 0.25 to 10.55; the bottom point, 0.1 mm below, left by 0.0125
+    to 10.2875. Nothing else moves -- the advance is the unleaned glyph's --
+    so y is the right-justified case's: 17.635096 to 19.735096."""
+    assert _strokes_of(_plain(italic=True)) == [
+        pytest.approx((10.55, 17.635096, 10.2875, 19.735096, 0.152), abs=_NM2)]
+
+
 def test_every_composed_boards_text_is_lettered_or_refused_by_name():
     """**Done for OH-163's first step**: on every composed KiCad board each
     text is lettered or refused under a named reason, and on Seeed's XIAOs
