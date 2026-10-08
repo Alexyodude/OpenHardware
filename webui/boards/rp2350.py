@@ -467,15 +467,15 @@ def pin_states(cpu: Cpu) -> dict[str, str]:
     decide a pad, read from the pad inward, so the stage nearest it answers
     first:
 
-    1. **The isolation latch.** "All signals passing from the switched core
-       power domain to the pads pass through isolation latches" (section 9.7,
-       PDF p.545), so while ISO is set the pad holds what it was presented
-       when isolation began, whatever function is selected behind it. From
-       power-up that is the reset state, output disabled -- "The latches
-       reset to the reset value of the signal being isolated" (section 9.7,
-       PDF p.546) -- so this reports `input`. An image that clears ISO,
-       drives the pad and sets ISO again holds its level on silicon and reads
-       `input` here: this module keeps no history.
+    1. **The isolation latch.** On silicon "all signals passing from the
+       switched core power domain to the pads pass through isolation latches"
+       (section 9.7, PDF p.545), so while ISO is set the pad holds what it
+       was presented when isolation began, whatever function is selected
+       behind it. From power-up that is the reset state, output disabled --
+       "The latches reset to the reset value of the signal being isolated"
+       (section 9.7, PDF p.546) -- so this reports `input`. An image that
+       clears ISO, drives the pad and sets ISO again holds its level on
+       silicon and reads `input` here: this module keeps no history.
     2. **OD**, the pad's output disable, "overriding the Output Enable
        signal from the function controlling the pad" (section 9.6, PDF
        p.545): `input`, whatever that function is.
