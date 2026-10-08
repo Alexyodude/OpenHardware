@@ -627,6 +627,9 @@ SOURCES: tuple[Source, ...] = (
             evidence=Evidence.OPENED,
             cite="License.txt inside A000066-cad-files.zip, 211 bytes, says so "
             "explicitly and covers the hardware",
+            file="License.txt",
+            quote="This project's hardware is licensed under the Creative Commons "
+            "Attribution-ShareAlike 4.0 International License",
         ),
         fetch=Fetch(
             transport=Transport.HTTPS_ARCHIVE,
