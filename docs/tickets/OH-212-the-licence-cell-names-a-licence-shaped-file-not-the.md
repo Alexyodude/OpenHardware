@@ -2,9 +2,14 @@
 id: OH-212
 title: 'The licence cell names a licence-shaped file, not the file the registry reads
   the licence from: Olimex''s GPL text backs their CERN-OHL'
-status: open
+status: in-progress
 priority: P2
 created: '2026-10-09'
+touches:
+- tools/inventory.py
+- tests/rules/test_inventory.py
+- tests/rules/test_board_sources.py
+- webui/boards/atmega328p.py
 ---
 
 Found by OH-204's review (2026-10-09). Since OH-204 the ASSETS licence cell in `tools/inventory.py` (`_licence_cell`) reads each board's own registry tree, but it still grades a licence by finding a file whose name looks like a licence (`LICENCE_STEMS`), without opening it. Its docstring's premise, "a licence file in the tree it came from is the licence", is false for the two Olimex boards: their `LICENSE` is the GPL-3.0 text covering the repositories' software (GitHub's licence API agrees, and `tools/board_sources.py` already skips that file as "the GPL-3.0's text"), while their hardware licences are stated in README.md and, on the C6-EVB, in `Hardware-License-CERN_OHL_v_1_2.pdf`. So both cells read as backing a CERN-OHL hardware licence with a GPL file.
