@@ -642,25 +642,26 @@ def _graphic(node: list, tag: str) -> tuple[str, list[float]] | None:
 def _on_board(placed: Placement, x_mm: float, y_mm: float) -> tuple[float, float]:
     """A footprint-local point in the BOARD's millimetres, KiCad's own frame.
 
-    **This is the same transform `compose_board_3d.from_kicad` applies to
-    pads**, written in the other frame: that one converts to Y-up on the way
-    in, this one stays in KiCad's Y-down storage frame because that is the
-    frame `gr_line` coordinates are already in, and these two have to end up
-    in one tuple. Derived from that function rather than from first
-    principles, which is why the signs read backwards from the usual rotation:
-    a rotation that is counter-clockwise as DRAWN is clockwise in a frame
-    whose y runs down the page.
+    **Turned and moved, never mirrored, on either side of the board** (OH-184).
+    KiCad flips a footprint onto the back by flipping everything in it -- its
+    pads and its graphics alike -- and stores them flipped, so the file's own
+    local coordinates are already the underside's and mirroring them again
+    puts every stroke off the footprint's centre line on the wrong side of
+    it. Each vendor's own Gerber settles it, as the copper settles it for a
+    pad: every back-side footprint stroke on Seeed's XIAO ESP32-C6 and on
+    Olimex's ESP32-PoE lands on the back silkscreen they plotted when it is
+    placed this way, and none lands only when mirrored --
+    `test_the_xiao_esp32_c6s_silkscreen_lands_on_seeeds_own_gerber` and its
+    Olimex twin hold that. It is the transform `compose_board_3d.from_kicad`
+    gives a pad, in the other frame.
+
+    The signs read backwards from the usual rotation because this stays in
+    KiCad's Y-down storage frame, which is the frame `gr_line` coordinates
+    are already in: a rotation that is counter-clockwise as DRAWN is
+    clockwise in a frame whose y runs down the page.
     """
     turn = math.radians(placed.rotation_deg)
     cos, sin = math.cos(turn), math.sin(turn)
-    if placed.back:
-        # A part on the underside is mirrored across the footprint's own y
-        # axis before it is turned, as `compose_board_3d.from_kicad` mirrors
-        # its pads. **`pad_on_board` does not mirror a pad**, and the copper
-        # says it is right not to. Whether a footprint's graphics are stored
-        # already flipped as its pads are is not settled here; OH-182's note
-        # records what dropping this mirror would change.
-        x_mm = -x_mm
     return (placed.x_mm + x_mm * cos + y_mm * sin,
             placed.y_mm - x_mm * sin + y_mm * cos)
 
@@ -668,19 +669,14 @@ def _on_board(placed: Placement, x_mm: float, y_mm: float) -> tuple[float, float
 def pad_on_board(placed: Placement, pad: Pad) -> tuple[float, float]:
     """A placed footprint's pad centre in the BOARD's millimetres, KiCad's own frame.
 
-    **Turned and moved, never mirrored, on either side of the board.** When
-    KiCad flips a footprint onto the back it flips the pads' own offsets and
-    stores them flipped, so mirroring them again as `_on_board` mirrors a
-    graphic puts every pad off the footprint's centre line on the wrong side
-    of it. The copper is what settles it: a track ends on the pad it
-    connects, and `test_a_back_side_headers_pads_sit_on_their_own_nets_copper`
-    finds each of the Olimex ESP32-PoE's two back-side headers on its copper
-    only this way.
+    **Turned and moved, never mirrored, on either side of the board**: the
+    transform `_on_board` gives a graphic, for the same reason. The copper is
+    what settles it for a pad: a track ends on the pad it connects, and
+    `test_a_back_side_headers_pads_sit_on_their_own_nets_copper` finds each
+    of the Olimex ESP32-PoE's two back-side headers on its copper only this
+    way.
     """
-    turn = math.radians(placed.rotation_deg)
-    cos, sin = math.cos(turn), math.sin(turn)
-    return (placed.x_mm + pad.x_mm * cos + pad.y_mm * sin,
-            placed.y_mm - pad.x_mm * sin + pad.y_mm * cos)
+    return _on_board(placed, pad.x_mm, pad.y_mm)
 
 
 def _fp_graphics(node: list, layer: str, placed: Placement

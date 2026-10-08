@@ -16,8 +16,12 @@ loudly by name when the fetch has not been run.
 import collections
 import dataclasses
 import functools
+import hashlib
+import math
 import os
 import pathlib
+import re
+import zipfile
 
 import pytest
 
@@ -27,10 +31,12 @@ from tools.kicad import (
     Placement,
     _models_of,
     _reference_of,
+    _silk_of,
     _value_of,
     board_tree,
     board_version,
     children,
+    first,
     pad_on_board,
     parse_sexp,
     read_board,
@@ -613,11 +619,14 @@ def test_a_footprints_outline_is_turned_by_the_footprints_own_rotation(inside):
     assert (arc.x2_mm, arc.y2_mm) == (104.0, 46.0)
 
 
-def test_a_footprint_on_the_back_has_its_outline_mirrored(tmp_path):
-    """The same rule its pads follow: a part on the underside is seen through
-    the board, so its x is negated before it is turned.
+def test_a_footprint_on_the_back_has_its_outline_turned_and_moved_and_not_mirrored(tmp_path):
+    """The same rule its pads follow (OH-184): KiCad stores an underside
+    footprint's graphics already flipped, so they are turned and moved and
+    not mirrored a second time -- the vendors' own Gerbers below are what
+    settle it.
 
-    At rotation zero the local `(2,0)-(2,4)` lands at x = 98, not x = 102.
+    At rotation zero the local `(2,0)-(2,4)` lands at x = 102; mirrored again,
+    it would land at x = 98.
     """
     path = tmp_path / "back.kicad_pcb"
     path.write_text(INSIDE.replace('(layer "F.Cu")', '(layer "B.Cu")')
@@ -626,9 +635,10 @@ def test_a_footprint_on_the_back_has_its_outline_mirrored(tmp_path):
     got = read_board(path)
     assert got.placements[0].back is True
     line = next(s for s in got.outline
-                if {(s.x1_mm, s.y1_mm), (s.x2_mm, s.y2_mm)} == {(98.0, 50.0),
-                                                                (98.0, 54.0)})
+                if {(s.x1_mm, s.y1_mm), (s.x2_mm, s.y2_mm)} == {(102.0, 50.0),
+                                                                (102.0, 54.0)})
     assert line.layer == "Edge.Cuts"
+    assert not [s for s in got.outline if 98.0 in (s.x1_mm, s.x2_mm)]
 
 
 def test_a_footprint_carrying_the_whole_outline_is_enough_of_one(tmp_path):
@@ -1724,3 +1734,288 @@ def test_the_c6_evbs_kicad_5_outline_ink_and_copper_read_as_its_kicad_7_copys():
             _drawn(old.vias), old.silk_unread, old.traces_unread] == [
         _drawn(new.outline), _drawn(new.arcs), _drawn(new.silk), _drawn(new.traces),
         _drawn(new.vias), new.silk_unread, new.traces_unread]
+
+
+# --- the vendors' own Gerbers: where an underside footprint's ink lands (OH-184) --
+#
+# **KiCad stores an underside footprint's graphics already flipped, as it
+# stores its pads**, so `_on_board` turns and moves them and mirrors nothing.
+# What settles that is not a reading of KiCad's source but what each vendor
+# plotted from their own board: a silkscreen Gerber is the ink as it was sent
+# to be printed, written by KiCad from the very file this module reads. So
+# every stroke `read_board` places is looked for there -- and so is each
+# underside footprint stroke mirrored about its footprint's own axis, which
+# is where this reader put it until OH-184, and which must land only where a
+# stroke is its own mirror image.
+#
+# Neither vendor tree is committed: `third_party/` is fetched and git-ignored,
+# and each test skips naming its fetch where its files are absent.
+
+SEEED_PCB = REPO / "third_party" / "seeed-pcb"
+SEEED_C6_ROOT = "202003916_XIAO ESP32 C6_v1.0_SCH&PCB_260114/"
+#: Olimex's ESP32-PoE, revision M: its Gerbers state `.ProjectId` as
+#: `ESP32-PoE_Rev_M`, and the M1 and M2 directories ship the same Gerbers
+#: again beside boards that are not the one that made them.
+POE_REV_M = (REPO / "third_party" / "olimex-esp32-poe" / "HARDWARE"
+             / "ESP32-PoE-hardware-revision-M")
+
+#: How near a stroke's ends, and its midpoint, must come to one Gerber draw's
+#: to be that draw. KiCad writes the board and the Gerber from the same
+#: nanometres -- `%FSLAX46Y46*%` is six decimals of a millimetre, Gerber Layer
+#: Format Specification 2024.05 section 4.2.2 -- so a stroke placed as the
+#: file states it lands to rounding, while one mirrored about its footprint's
+#: axis misses by twice its distance from that axis. A micron is between the
+#: two on both boards: the tally each test asserts is what shows it.
+GERBER_TOLERANCE_MM = 0.001
+
+
+def _gerber_draws(text: str, where: str) -> list[tuple[float, float, float, float]]:
+    """Every straight draw on one Gerber layer, `(x1, y1, x2, y2)` in
+    millimetres in the Gerber's own frame, whose y runs up.
+
+    **A minimal RS-274X reader**, to the Gerber Layer Format Specification
+    revision 2024.05 (Ucamco), and the section each construct is read by is
+    named beside it. It reads what KiCad writes on a silkscreen layer and
+    refuses anything else by name: a command skipped here could move the
+    current point, or erase ink, and the comparison would quietly be made
+    against a different picture from the one the vendor sent.
+    """
+    decimals = scale = None
+    plot = None        # 4.7: G01 plots straight, G02 and G03 circular
+    region = False     # 4.10: between G36 and G37, a D01 is a contour edge
+    here = None        # 2.7: the current point
+    draws: list[tuple[float, float, float, float]] = []
+    ended = False
+    for match in re.finditer(r"%([^%]*)%|([^%*]*)\*", text):
+        extended, word = match.group(1), match.group(2)
+        if extended is not None:
+            command = extended.strip().rstrip("*")
+            if command.startswith("FS"):
+                # 4.2.2: leading zeros omitted, absolute coordinates, the
+                # same digits for X and Y. Trailing-zero omission and
+                # incremental notation are 8.2.1's deprecated options.
+                stated = re.fullmatch(r"FSLAX(\d)(\d)Y(\d)(\d)", command)
+                if stated is None or stated.group(1, 2) != stated.group(3, 4):
+                    raise ValueError(f"{where}: format {command!r} is not read here: "
+                                     f"expected FSLAX<i><d>Y<i><d>, X and Y alike")
+                decimals = int(stated.group(2))
+            elif command.startswith("MO"):
+                # 4.2.1: the unit.
+                units = {"MOMM": 1.0, "MOIN": 25.4}
+                if command not in units:
+                    raise ValueError(f"{where}: unit {command!r} is neither MOMM nor MOIN")
+                scale = units[command]
+            elif command.startswith("LP"):
+                # 4.9.2: a clear-polarity object erases ink rather than
+                # laying it down, so a draw under it is not ink.
+                if command != "LPD":
+                    raise ValueError(f"{where}: polarity {command!r} is not read here; "
+                                     f"only LPD, dark, is")
+            elif command[:2] in ("AD", "TF", "TA", "TO", "TD"):
+                # 4.3 defines an aperture, whose size is not compared here;
+                # 5.2 to 5.5 are attributes, which change no image (5.1).
+                continue
+            else:
+                raise ValueError(f"{where}: extended command {command!r} is not read here")
+            continue
+        word = word.strip()
+        if not word or word.startswith("G04"):    # 4.1: a comment
+            continue
+        if word in ("G01", "G02", "G03"):         # 4.7.1 and 4.7.2
+            plot = word
+        elif word == "G75":                       # 4.7.2: multi-quadrant arcs
+            continue
+        elif word in ("G36", "G37"):              # 4.10
+            region = word == "G36"
+        elif word == "M02":                       # 4.13: the end of the file
+            ended = True
+            break
+        elif re.fullmatch(r"D\d+", word) and int(word[1:]) >= 10:
+            continue                              # 4.6: the current aperture
+        else:
+            # 4.8: D01 plots from the current point, D02 moves it, D03
+            # flashes; an omitted X or Y keeps the current point's (2.7).
+            op = re.fullmatch(r"(?:X([+-]?\d+))?(?:Y([+-]?\d+))?"
+                              r"(?:I[+-]?\d+J[+-]?\d+)?D0([123])", word)
+            if op is None or decimals is None or scale is None:
+                raise ValueError(f"{where}: {word!r} is not read here, or comes before "
+                                 f"the FS and MO that say how to read it")
+            x = here[0] if op.group(1) is None else int(op.group(1)) / 10 ** decimals * scale
+            y = here[1] if op.group(2) is None else int(op.group(2)) / 10 ** decimals * scale
+            if op.group(3) == "1":
+                if here is None or plot is None:
+                    raise ValueError(f"{where}: {word!r} plots with no current point "
+                                     f"or no plot state")
+                # 4.8.2: in G01 a straight draw. An arc is no stroke the
+                # reader reads, and a region's edge is no draw at all.
+                if plot == "G01" and not region:
+                    draws.append((here[0], here[1], x, y))
+            here = (x, y)
+    if not ended:
+        raise ValueError(f"{where}: no M02, so the file may be cut short (4.13)")
+    return draws
+
+
+def _gerber_ends(draws) -> dict[tuple[int, int], list[tuple[float, float, float, float]]]:
+    """The draws filed under the millimetre each END rounds to, so a stroke's
+    end is compared against the few that could be it rather than all."""
+    cells: dict[tuple[int, int], list] = collections.defaultdict(list)
+    for draw in draws:
+        for x, y in ((draw[0], draw[1]), (draw[2], draw[3])):
+            cells[(round(x), round(y))].append(draw)
+    return cells
+
+
+def _lands(cells, a: tuple[float, float], b: tuple[float, float]) -> bool:
+    """Whether a stroke from `a` to `b`, in the Gerber's frame, is one of its
+    draws: both ends on that draw's ends, either way round, and the midpoint
+    on its midpoint, to `GERBER_TOLERANCE_MM`."""
+    middle = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for x1, y1, x2, y2 in cells.get((round(a[0]) + dx, round(a[1]) + dy), ()):
+                if math.dist(middle, ((x1 + x2) / 2, (y1 + y2) / 2)) > GERBER_TOLERANCE_MM:
+                    continue
+                for start, end in (((x1, y1), (x2, y2)), ((x2, y2), (x1, y1))):
+                    if (math.dist(a, start) <= GERBER_TOLERANCE_MM
+                            and math.dist(b, end) <= GERBER_TOLERANCE_MM):
+                        return True
+    return False
+
+
+def _put(placed: Placement, x: float, y: float, mirrored: bool) -> tuple[float, float]:
+    """A footprint-local point on the board, in KiCad's y-down frame: turned
+    and moved, and first mirrored about the footprint's own y axis where
+    `mirrored` says -- written out here rather than borrowed from the reader,
+    so the reader is held to it and not to itself."""
+    turn = math.radians(placed.rotation_deg)
+    if mirrored:
+        x = -x
+    return (placed.x_mm + x * math.cos(turn) + y * math.sin(turn),
+            placed.y_mm - x * math.sin(turn) + y * math.cos(turn))
+
+
+def _silk_on_gerbers(path: pathlib.Path, text: str, gerbers: dict[str, str]):
+    """`(read, missed, tally)`: how many strokes `read_board` places, which of
+    them land on no draw of their own layer's Gerber, and every stroke the
+    file states, by where it comes from and where it lands.
+
+    **The plot's own frame is the board's**, as KiCad writes it: y negated,
+    from the board's origin -- or from its auxiliary axis origin where the
+    plot says `useauxorigin`, which Olimex's does. A plot made mirrored would
+    put the mirrored stroke where the right one belongs, which is exactly the
+    confusion this test exists to settle, so one is refused.
+    """
+    tree = board_tree(path, text)
+    setup = first(tree, "setup") or []
+    params = first(setup, "pcbplotparams") or []
+    mirror = first(params, "mirror")
+    assert mirror is None or mirror[1] in ("no", "false"), (path, mirror)
+    origin = (0.0, 0.0)
+    use = first(params, "useauxorigin")
+    if use is not None and use[1] in ("yes", "true"):
+        origin = tuple(float(v) for v in first(setup, "aux_axis_origin")[1:3])
+
+    cells = {layer: _gerber_ends(_gerber_draws(plotted, f"{path.name} {layer}"))
+             for layer, plotted in gerbers.items()}
+
+    def lands(layer: str, a: tuple[float, float], b: tuple[float, float]) -> bool:
+        return _lands(cells[layer], (a[0] - origin[0], origin[1] - a[1]),
+                      (b[0] - origin[0], origin[1] - b[1]))
+
+    board = read_board(path, text=text)
+    missed = [s for s in board.silk
+              if not lands(s.layer, (s.x1_mm, s.y1_mm), (s.x2_mm, s.y2_mm))]
+
+    tally: collections.Counter = collections.Counter()
+    for stroke in _silk_of(tree, "gr", lambda x, y: (x, y))[0]:
+        tally[("board", stroke.layer, lands(stroke.layer, (stroke.x1_mm, stroke.y1_mm),
+                                            (stroke.x2_mm, stroke.y2_mm)))] += 1
+    for node, placed in zip(children(tree, "footprint"), board.placements, strict=True):
+        for stroke in _silk_of(node, "fp", lambda x, y: (x, y))[0]:
+            a, b = (stroke.x1_mm, stroke.y1_mm), (stroke.x2_mm, stroke.y2_mm)
+            stored = lands(stroke.layer, _put(placed, *a, False), _put(placed, *b, False))
+            if not placed.back:
+                tally[("front footprint", stroke.layer, stored)] += 1
+                continue
+            mirrored = lands(stroke.layer, _put(placed, *a, True), _put(placed, *b, True))
+            tally[("underside footprint", stroke.layer, {
+                (True, False): "as stored only", (False, True): "mirrored only",
+                (True, True): "both, being its own mirror image",
+                (False, False): "nowhere"}[(stored, mirrored)])] += 1
+    return len(board.silk), missed, tally
+
+
+def _project_and_function(gerber: str) -> tuple[str, str]:
+    """A Gerber's `.ProjectId` and `.FileFunction` (5.6.8 and 5.6.3): which
+    board made it, and which layer it is."""
+    project = re.search(r"%TF\.ProjectId,([^,*]*)", gerber)
+    function = re.search(r"%TF\.FileFunction,([^*]*)\*", gerber)
+    return (project.group(1) if project else "", function.group(1) if function else "")
+
+
+def test_the_xiao_esp32_c6s_silkscreen_lands_on_seeeds_own_gerber():
+    """**Every stroke this reader places lands on Seeed's own silkscreen
+    Gerbers**, from the zip that ships the very board file read here -- the
+    copy on disk is checked byte for byte against the zip's. Their one
+    underside footprint, the Seeed logo, lands only as stored, and none of
+    its strokes lands mirrored: the transform `_on_board` mirrored with
+    until OH-184 drew every one of them where Seeed printed nothing. The
+    board's own strokes on both faces and the footprints' on the front land
+    too, which is what makes the frame trustworthy."""
+    zipped, path = SEEED_PCB / "ESP32-C6.zip", SEEED_PCB / "ESP32-C6.kicad_pcb"
+    if not (zipped.is_file() and path.is_file()):
+        pytest.skip(f"SKIPPED: {zipped.name} or {path.name} absent under {SEEED_PCB}; "
+                    f"python tools/compose_board_3d.py --board XIAO-ESP32-C6-DIP")
+    with zipfile.ZipFile(zipped) as bundle:
+        shipped = bundle.read(SEEED_C6_ROOT + "XIAO ESP32 C6.kicad_pcb")
+        gerbers = {layer: bundle.read(f"{SEEED_C6_ROOT}XIAO ESP32 C6_gerber/"
+                                      f"XIAO ESP32 C6-{name}.gbr").decode("ascii")
+                   for layer, name in (("F.SilkS", "F_Silkscreen"),
+                                       ("B.SilkS", "B_Silkscreen"))}
+    on_disk = path.read_bytes()
+    assert hashlib.md5(on_disk).hexdigest() == hashlib.md5(shipped).hexdigest() == (
+        "4b3955a4bec473cbc1974d8f9a2e5cd2"), "not the board this was measured on"
+    assert [_project_and_function(gerbers[layer]) for layer in ("F.SilkS", "B.SilkS")] == [
+        ("XIAO ESP32 C6", "Legend,Top"), ("XIAO ESP32 C6", "Legend,Bot")]
+
+    read, missed, tally = _silk_on_gerbers(path, on_disk.decode("utf-8"), gerbers)
+    assert (read, missed) == (1761, [])
+    assert tally == collections.Counter({
+        ("board", "F.SilkS", True): 156,
+        ("front footprint", "F.SilkS", True): 97,
+        ("board", "B.SilkS", True): 3,
+        ("underside footprint", "B.SilkS", "as stored only"): 1505,
+    })
+
+
+def test_the_esp32_poes_silkscreen_lands_on_olimexs_own_gerber():
+    """**The same on a second vendor, and a board that tests it harder**:
+    Olimex's ESP32-PoE revision M places underside footprints at all four
+    quarter turns and one at 135 degrees, and plots from an auxiliary
+    origin. Every stroke this reader places lands on the Gerbers Olimex
+    plotted from that board; underside strokes land as stored, or both
+    ways where a stroke is its own mirror image, and none lands only
+    mirrored."""
+    path = POE_REV_M / "ESP32-PoE_Rev_M.kicad_pcb"
+    named = {"F.SilkS": "F_Silkscreen", "B.SilkS": "B_Silkscreen"}
+    files = {layer: POE_REV_M / "Gerbers" / f"ESP32-PoE_Rev_M-{name}.gbr"
+             for layer, name in named.items()}
+    if not (path.is_file() and all(file.is_file() for file in files.values())):
+        pytest.skip(f"SKIPPED: revision M's board or Gerbers absent under {POE_REV_M}; "
+                    f"python tools/get_board_sources.py olimex-esp32-poe")
+    gerbers = {layer: file.read_text(encoding="ascii") for layer, file in files.items()}
+    assert [_project_and_function(gerbers[layer]) for layer in ("F.SilkS", "B.SilkS")] == [
+        ("ESP32-PoE_Rev_M", "Legend,Top"), ("ESP32-PoE_Rev_M", "Legend,Bot")]
+
+    text = path.read_text(encoding="utf-8")
+    assert sorted({placed.rotation_deg % 360 for placed in read_board(path, text=text).placements
+                   if placed.back}) == [0.0, 90.0, 135.0, 180.0, 270.0]
+    read, missed, tally = _silk_on_gerbers(path, text, gerbers)
+    assert (read, missed) == (894, [])
+    assert tally == collections.Counter({
+        ("front footprint", "F.SilkS", True): 272,
+        ("board", "B.SilkS", True): 9,
+        ("underside footprint", "B.SilkS", "as stored only"): 327,
+        ("underside footprint", "B.SilkS", "both, being its own mirror image"): 286,
+    })
