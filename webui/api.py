@@ -557,7 +557,18 @@ class Core(typing.Protocol):
 #:
 #: A chip absent from here parses with `family=None`, which is correct for the
 #: formats that carry no family at all and for a single-family UF2.
-UF2_FAMILY_BY_CHIP: dict[str, str] = {"RP2040": "RP2040"}
+#:
+#: **The RP2350 is here because it is two chips to a UF2.** Its bootrom knows
+#: `rp2350_arm_s` 0xe48bff59, `rp2350_riscv` 0xe48bff5a and `rp2350_arm_ns`
+#: 0xe48bff5b (RP2350 Datasheet 80d627281ed5, section 5.5.3, Table 469, PDF
+#: p.368), and `webui/boards/rp2350.py` describes only the RISC-V half. Absent
+#: from here, any one-family file loaded at 0x10000000 -- an Arm build, the
+#: XIAO's default, and an RP2040 one alike -- and stopped at an illegal
+#: encoding, which reads as the part refusing the program. Asking
+#: for `RP2350_RISCV` refuses those as `nothing-for-this-chip`, and also
+#: refuses the `absolute` and `data` families the bootrom accepts, because
+#: neither says which half its image is for.
+UF2_FAMILY_BY_CHIP: dict[str, str] = {"RP2040": "RP2040", "RP2350": "RP2350_RISCV"}
 
 #: Where a vector table sits **used to be here**, as
 #: `VECTOR_TABLE_OFFSETS = {"RP2040": (0, 256)}`. It is not any more, and the

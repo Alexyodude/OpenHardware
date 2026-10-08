@@ -46,12 +46,13 @@ import os
 import pathlib
 import re
 import shutil
+import struct
 import subprocess
 import tempfile
 
 import pytest
 
-from webui import api, pinmap
+from webui import api, firmware, pinmap
 from webui.boards import rp2040, rp2350
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -294,6 +295,61 @@ def test_why_d3_and_not_another_pad():
         f"GPIO{rp2040.HEADER[LABEL]}, the RP2040's {LABEL}, is a pad here")
     stated = {pad.chip_pin for pad in pinmap.load(BOARD).pads if pad.label == LABEL}
     assert stated == {rp2350.PIN_NAMES[LABEL]}, stated
+
+
+# --- a UF2 says which half of the chip it was built for ---------------------
+
+#: "Table of standard UF2 family IDs understood by the RP2350 bootrom", RP2350
+#: Datasheet 80d627281ed5, section 5.5.3, Table 469 (PDF p.368).
+UF2_RP2040 = 0xE48BFF56
+UF2_RP2350_ARM_S = 0xE48BFF59
+UF2_RP2350_RISCV = 0xE48BFF5A
+UF2_RP2350_ARM_NS = 0xE48BFF5B
+
+
+def uf2(*images: tuple[int, bytes]) -> bytes:
+    """One UF2 block per `(family_id, payload)`, each at `rp2350.XIP` with the
+    familyID flag set, numbered within its family as the UF2 specification
+    numbers them. `blink.bin` is 96 bytes, so one block holds it."""
+    blocks = b""
+    for family_id, payload in images:
+        head = struct.pack("<8I", firmware.UF2_MAGIC_START0, firmware.UF2_MAGIC_START1,
+                           firmware.UF2_FLAG_FAMILY_ID, rp2350.XIP, len(payload), 0, 1,
+                           family_id)
+        blocks += head + payload.ljust(476, b"\x00") + struct.pack("<I", firmware.UF2_MAGIC_END)
+    return blocks
+
+
+def test_a_uf2_for_the_arm_half_or_for_an_rp2040_is_refused_as_not_for_this_chip():
+    """The same 96 bytes under each family this board cannot run. Without a
+    family to ask for, a one-family file loaded whatever it held, so an Arm
+    build -- the XIAO RP2350's default -- landed at 0x10000000 and stopped at
+    an illegal encoding, which reads as the part refusing the program rather
+    than the file being for the other half."""
+    image = IMAGE.read_bytes()
+    for family_id, name in ((UF2_RP2350_ARM_S, "RP2350_ARM_S"),
+                            (UF2_RP2350_ARM_NS, "RP2350_ARM_NS"), (UF2_RP2040, "RP2040")):
+        with pytest.raises(api.BoardRunError) as caught:
+            api.load_firmware(BOARD, uf2((family_id, image))).close()
+        assert caught.value.reason == "nothing-for-this-chip", (name, str(caught.value))
+        message = str(caught.value)
+        assert "holds nothing for a RP2350" in message and name in message, message
+
+
+def test_a_uf2_for_the_risc_v_half_loads_even_beside_an_arm_image_and_drives_d3():
+    """An RP2350_RISCV UF2 of `blink.bin` needs no `base`: its block names
+    the address. And a file carrying an Arm image at the same addresses --
+    0xFF filler here, which would stop on its first word -- loads the RISC-V
+    one rather than refusing to choose."""
+    image = IMAGE.read_bytes()
+    for data in (uf2((UF2_RP2350_RISCV, image)),
+                 uf2((UF2_RP2350_ARM_S, b"\xff" * len(image)), (UF2_RP2350_RISCV, image))):
+        with api.load_firmware(BOARD, data) as session:
+            assert session.image.family == "RP2350_RISCV", session.image
+            assert [(s.address, s.data) for s in session.image.segments] == [
+                (rp2350.XIP, image)], session.image.segments
+            states = [state for _, state in watch(session, BOARD)]
+        assert states[:3] == ["input", "low", "high"], states
 
 
 # --- the image: what the boot ROM would see, and what the core decodes ------
