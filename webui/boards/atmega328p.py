@@ -363,10 +363,11 @@ LED_PARTS = {"L": "13"}
 #: picture -- which is the truth about the board rather than a duplication bug.
 #:
 #: **Twenty-two of thirty-two pads, and the other ten are the point.** `AREF`,
-#: `NC`, `IOREF`, `RESET`, `3V3`, `5V`, `VIN` and three `GND`s are no port pin,
-#: so there is no level of theirs for this module to read; they are absent here
-#: and `webui.api.pin_view` reports them `unknown` -- a sentence about this
-#: board, where `low` would be a sentence about the program.
+#: `NC`, `IOREF`, `3V3`, `5V`, `VIN` and three `GND`s are no port pin, and
+#: `RESET` is one this module does not number, so there is no level of theirs
+#: for this module to read; they are absent here and `webui.api.pin_view`
+#: reports them `unknown` -- a sentence about this board, where `low` would be
+#: a sentence about the program.
 #:
 #: Not a port pin does not mean no pin. In Arduino's own board file and
 #: schematic, `UNO-TH_Rev3e.brd` and `.sch`, the ATmega is ZU4: `AREF` is on
@@ -374,6 +375,11 @@ LED_PARTS = {"L": "13"}
 #: VCC pin's, and the `GND`s on its GND and AGND pins'. Only `NC`, `3V3` and
 #: `VIN` reach no pin of it, as the board file's `pindefs.derivation` also
 #: records.
+#:
+#: That RESET pin is ZU4's pad 1 in the board file, the package's pin 1,
+#: which the pinout comment in the same `pins_arduino.h`, at line 90, draws as
+#: `PC6`. The two tables above give port C bits 0 to 5 only, as digital 14 to
+#: 19, so no row here numbers PC6.
 #:
 #: `13` is the one that matters most: it is `LED_BUILTIN`, it is PB5, and it is
 #: what a stock Blink drives.
