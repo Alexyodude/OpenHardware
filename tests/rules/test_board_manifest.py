@@ -1034,7 +1034,7 @@ def test_the_olimex_c6_evbs_pins_are_its_traced_copper_and_its_variant_names_no_
     row = row_named("Olimex ESP32-C6-EVB")
     _fetched(row)
     text = board_manifest.cad_path(row).read_text(encoding="utf-8")
-    assert text.startswith("(kicad_pcb (version 20171130)") and "(rev A)" in text
+    assert kicad.board_version(kicad.parse_sexp(text)) == "20171130" and "(rev A)" in text
     checkout = import_pindefs.BSP_DIR / row.package
     constants = import_pindefs.read_c_pin_constants(
         (checkout / "variants" / row.variant / "pins_arduino.h").read_text(encoding="utf-8"))

@@ -16,7 +16,6 @@ loudly by name when the fetch has not been run.
 import collections
 import dataclasses
 import functools
-import json
 import os
 import pathlib
 
@@ -30,6 +29,7 @@ from tools.kicad import (
     _reference_of,
     _value_of,
     board_tree,
+    board_version,
     children,
     pad_on_board,
     parse_sexp,
@@ -1535,8 +1535,8 @@ def test_the_esp32_poes_kicad_5_back_side_headers_sit_on_their_own_copper():
 
     root = REPO / "third_party" / "olimex-esp32-poe" / "HARDWARE"
     files = [path for path in sorted(root.rglob("*.kicad_pcb"))
-             if path.read_text(encoding="utf-8")[:40].startswith(
-                 "(kicad_pcb (version 20171130)")] if root.is_dir() else []
+             if board_version(parse_sexp(path.read_text(encoding="utf-8"))) == "20171130"
+             ] if root.is_dir() else []
     if not files:
         pytest.skip(f"SKIPPED: no KiCad 5 board under {root}; python "
                     f"tools/get_board_sources.py olimex-esp32-poe")
@@ -1615,11 +1615,11 @@ def test_the_c6_evbs_cross_check_reads_only_files_its_registry_row_fetches():
 
 @functools.cache
 def _c6_evb_boards():
-    """The KiCad 5 board and its KiCad 7 copy, each with the head of its
-    text, read once for every test below."""
+    """The KiCad 5 board and its KiCad 7 copy, each with the version its
+    tree states, read once for every test below."""
     old, new = _c6_evb("ESP32-C6-EVB_Rev_A.kicad_pcb"), _c6_evb("ESP32-C6-EVB_DIMM_Rev_A.kicad_pcb")
-    return (old.read_text(encoding="utf-8")[:40], read_board(old),
-            new.read_text(encoding="utf-8")[:40], read_board(new))
+    return (board_version(parse_sexp(old.read_text(encoding="utf-8"))), read_board(old),
+            board_version(parse_sexp(new.read_text(encoding="utf-8"))), read_board(new))
 
 
 def _turn(degrees: float) -> float:
@@ -1655,8 +1655,8 @@ def _drawn(items) -> collections.Counter:
 def test_the_c6_evbs_two_files_are_kicad_5_and_kicad_7():
     """The files the tests below compare are the ones they name: a board
     KiCad 5 wrote and a copy KiCad 7 wrote."""
-    old_head, _, new_head, _ = _c6_evb_boards()
-    assert "(version 20171130)" in old_head and "(version 20221018)" in new_head
+    old_version, _, new_version, _ = _c6_evb_boards()
+    assert (old_version, new_version) == ("20171130", "20221018")
 
 
 def test_the_c6_evbs_kicad_5_placements_read_as_its_kicad_7_copys():
