@@ -381,7 +381,9 @@ found. The same footing as `KICAD_MASK_COLOURS` in
 `tools/compose_board_3d.py`.
 
 **Risk:** low. Each number can be recovered from the STEP files the
-composer already fetches, which carry the same values.
+composer already fetches, which carry the same values --
+`test_the_palette_copied_here_is_the_one_the_cached_models_carry` holds every
+entry to one cached model's `COLOUR_RGB`, wherever that cache is present.
 
 ---
 

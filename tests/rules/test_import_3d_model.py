@@ -584,6 +584,59 @@ def test_kicads_own_names_for_the_colours_it_cites():
         "metal reflects: the two readings disagree, so it takes the default")
 
 
+#: The cached KiCad model each `KICAD_PALETTE` entry is held against: the one
+#: its `FINISHES` citation names where an entry cites it, and otherwise the
+#: model the palette test's own assertion is about.
+PALETTE_MODELS = {
+    "PIN-01": "Resistor_SMD-R_0402_1005Metric",
+    "CAP-CERAMIC-06": "Capacitor_SMD-C_0402_1005Metric",
+    "CAP-CERAMIC-05": "Inductor_SMD-L_0402_1005Metric",
+    "IC-LABEL-01": "Package_DFN_QFN-QFN-32-1EP_5x5mm_P0_5mm_EP3_45x3_45mm",
+    "PLASTIC-GREEN-01": "LED_SMD-LED_0603_1608Metric",
+    "PLASTIC-BLUE-01": "LED_SMD-LED_WS2812B-Mini_PLCC4_3_5x3_5mm",
+    "BOARD-BLACK-03": "Crystal-Crystal_SMD_SeikoEpson_FA238-4Pin_3_2x2_5mm",
+    "PLASTIC-WHITE-01": "Resistor_SMD-R_0402_1005Metric",
+    "MET-ALUMINUM": "Button_Switch_SMD-SW_SPDT_PCM12",
+    "MET-SILVER": "Button_Switch_SMD-SW_SPST_B3S-1000",
+}
+
+
+def test_the_palette_copied_here_is_the_one_the_cached_models_carry():
+    """**`KICAD_PALETTE` is typed by hand, so it is held to the files**
+    (OH-163's review).
+
+    The palette test checks each `FINISHES` key against these numbers, and
+    nothing checked the numbers: a digit mistyped here would move a key and
+    the test would follow it. A KiCad STEP writes the same sRGB triple its
+    `.wrl` palette names, as a `COLOUR_RGB` -- `0.372321993113` on the PCM12
+    for MET-ALUMINUM's `0.372322` -- so every entry must be one of the
+    triples in the cached model `PALETTE_MODELS` names, to within half the
+    last decimal the palette writes. Skips without the KiCad model cache,
+    which a run of `tools/compose_board_3d.py` fetches.
+    """
+    import re
+
+    from tools.import_3d_model import CACHE
+
+    assert set(PALETTE_MODELS) == set(KICAD_PALETTE), (
+        f"palette names with no model to hold them to: "
+        f"{sorted(set(KICAD_PALETTE) ^ set(PALETTE_MODELS))}")
+    steps = {name: CACHE / f"component-{stem}.step"
+             for name, stem in PALETTE_MODELS.items()}
+    missing = sorted(path.name for path in steps.values() if not path.is_file())
+    if missing:
+        pytest.skip(f"{missing} not fetched; run tools/compose_board_3d.py")
+    triple = re.compile(r"COLOUR_RGB\(\s*'[^']*'\s*,\s*([-+.\dEe]+)\s*,"
+                        r"\s*([-+.\dEe]+)\s*,\s*([-+.\dEe]+)\s*\)")
+    for name, srgb in KICAD_PALETTE.items():
+        carried = [tuple(float(v) for v in found) for found in
+                   triple.findall(steps[name].read_text(encoding="utf-8"))]
+        assert any(all(abs(a - b) <= 5e-7 for a, b in zip(srgb, step, strict=True))
+                   for step in carried), (
+            f"KICAD_PALETTE[{name!r}] is {srgb}; {steps[name].name} carries "
+            f"{carried}")
+
+
 def test_kicads_white_is_a_body_and_not_a_metal():
     """**`#c6c4a0` was the tactile switch's 'metal cover', and it is not a
     metal** (OH-163's review).
