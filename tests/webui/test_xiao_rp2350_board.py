@@ -416,7 +416,7 @@ def test_this_compiler_emits_zbb_when_the_march_names_it():
     tools = compiler()
     if tools is None:
         pytest.skip(f"no riscv32-esp-elf-gcc reporting {COMPILER_BANNER!r}")
-    gcc, objcopy = tools
+    gcc = tools[0]
     objdump = gcc.with_name(gcc.name.replace("gcc", "objdump"))
     probe = ("unsigned a(unsigned x) { return __builtin_clz(x); }\n"
              "unsigned b(unsigned x, unsigned y) { return x < y ? x : y; }\n"
