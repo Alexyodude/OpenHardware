@@ -1039,6 +1039,9 @@ def test_composing_refuses_a_part_turned_the_wrong_way():
     spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "ESP32-C3")
     if not spec.layout.is_file():
         pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    absent = _inputs_missing(spec, compose.read_layout(spec.layout))
+    if absent:
+        pytest.skip(f"SKIPPED: {spec.board} reads what is not fetched: {absent}")
     turned = tuple(
         dataclasses.replace(c, turn=(c.turn + 90.0) % 360.0)
         if c.package == "USB2.0-TYPE-C" else c
@@ -5123,9 +5126,11 @@ def test_a_body_code_is_not_a_lead_count():
 
 def _inputs_missing(spec, board) -> list[str]:
     """The fetched files `compose` would read for this board and cannot find:
-    a model it would otherwise download, or one tools/model_from_datasheet.py
-    has not built."""
+    a model it would otherwise download, one tools/model_from_datasheet.py
+    has not built, or the font a KiCad board's text is lettered in."""
     missing = []
+    if board.kicad_text and compose.newstroke_font() is None:
+        missing.append(f"the newstroke font ({compose.FETCH_FONT})")
     statements = compose.statements_for(spec)
     for element in board.elements:
         row, _why = compose.drawn_from(element, statements)
@@ -6256,12 +6261,11 @@ def test_the_thing_plus_c5s_qwiic_and_microsd_quote_what_their_footprints_state(
 
 def _newstroke() -> pathlib.Path:
     """The fetched font, or a skip naming what fetches it."""
-    archive = compose.FONT_CACHE / "newstroke-font.tgz"
-    if not (archive.is_file() and all((compose.FONT_CACHE / name).is_file()
-                                      for name in compose.NEWSTROKE_FILES)):
+    font = compose.newstroke_font()
+    if font is None:
         pytest.skip(f"SKIPPED: newstroke is not fetched under {compose.FONT_CACHE}; "
-                    f"python tools/compose_board_3d.py --check fetches it")
-    return compose.FONT_CACHE
+                    f"{compose.FETCH_FONT} fetches it")
+    return font
 
 
 def _letters_on_gerbers(path: pathlib.Path, text: str, gerbers: dict[str, str],
@@ -6419,3 +6423,76 @@ def test_a_font_archive_that_is_not_the_one_measured_is_refused(tmp_path, monkey
     (tmp_path / "newstroke-font.tgz").write_bytes(b"x" * compose.NEWSTROKE[1])
     with pytest.raises(SystemExit, match=r"records 210,057 bytes and dba1c334"):
         compose.fetch_newstroke()
+
+
+def test_a_download_that_is_not_the_font_is_deleted(tmp_path, monkeypatch):
+    """**A failed fetch leaves nothing behind and names where it was**
+    (OH-163 step 1's review): the download is bounded by `FETCH_TIMEOUT_S`
+    rather than waiting on the author's wiki for ever, and one that is not
+    the archive measured is deleted, its path in the message, so the next
+    run does not find it and trip over it."""
+    import io
+
+    monkeypatch.setattr(compose, "FONT_CACHE", tmp_path)
+    asked = {}
+
+    def answer(url, timeout=None):
+        asked[url] = timeout
+        return io.BytesIO(b"not the font")
+
+    monkeypatch.setattr(compose.urllib.request, "urlopen", answer)
+    archive = tmp_path / "newstroke-font.tgz"
+    with pytest.raises(SystemExit) as said:
+        compose.fetch_newstroke()
+    assert f"{archive} is 12 bytes" in str(said.value), said.value
+    assert "Deleted it" in str(said.value) and not archive.exists(), said.value
+    assert asked == {compose.NEWSTROKE[0]: compose.FETCH_TIMEOUT_S}
+
+
+def test_a_font_file_changed_since_it_was_unpacked_is_refused(tmp_path, monkeypatch):
+    """**The font is checked every time it is read, not only when fetched**,
+    as `import_3d_model.fetch` checks its archive every time: an unpacked
+    file that differs from the archive's own copy is another font, and the
+    composer says which file and how to put it right rather than drawing
+    every board's text in it."""
+    import shutil
+
+    real = _newstroke()
+    monkeypatch.setattr(compose, "FONT_CACHE", tmp_path)
+    shutil.copy(real / "newstroke-font.tgz", tmp_path / "newstroke-font.tgz")
+    assert compose.fetch_newstroke() == tmp_path
+    assert compose.newstroke_font() == tmp_path
+    glyphs = tmp_path / "font.lib"
+    glyphs.write_bytes(glyphs.read_bytes() + b"\n")
+    with pytest.raises(SystemExit, match=re.escape(f"{glyphs} is not the font.lib in")):
+        compose.newstroke_font()
+
+
+def test_a_board_whose_font_is_not_fetched_is_skipped_naming_it(tmp_path, monkeypatch,
+                                                               capsys):
+    """**Composing reads the font and never fetches it**, as it reads a
+    manifest board's own files (OH-163 step 1's review). `compose` used to
+    download the font in the middle of whatever called it, a test included,
+    and offline that ended in a URLError rather than a reason. A KiCad board
+    whose font is not fetched is SKIPPED, naming the font and the one command
+    that fetches it; and `_inputs_missing`, which every test that composes a
+    board consults first, names it too, so those tests skip and fetch
+    nothing."""
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "ESP32-C3")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched; run {spec.fetch_with}")
+    nowhere = tmp_path / "newstroke"
+    monkeypatch.setattr(compose, "FONT_CACHE", nowhere)
+
+    def offline(url, *args, **kwargs):
+        raise AssertionError(f"composing fetched {url}")
+
+    monkeypatch.setattr(compose.urllib.request, "urlopen", offline)
+    fetch = "python tools/compose_board_3d.py --fetch-font"
+    assert compose.compose(spec, deflection=compose.DEFLECTION, check=True) == 3
+    out = capsys.readouterr().out
+    assert f"SKIPPED: the newstroke font is not fetched under {nowhere}" in out, out
+    assert f"Run: {fetch}" in out, out
+    assert not nowhere.exists(), sorted(nowhere.iterdir())
+    missing = _inputs_missing(spec, compose.read_layout(spec.layout))
+    assert any("newstroke" in name and fetch in name for name in missing), missing

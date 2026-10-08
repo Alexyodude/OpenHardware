@@ -5147,40 +5147,99 @@ NEWSTROKE_FILES = ("font.lib", "symbol.lib", "charlist.txt")
 #: The characters KiCad has changed since the author's release, measured as
 #: `NEWSTROKE` says. Refused, because drawn they would be the old glyph.
 NEWSTROKE_CHANGED = frozenset("~")
+#: **The one command that fetches the font.** Composing only reads it, as it
+#: reads a manifest board's own files: a KiCad board whose font is not here
+#: is SKIPPED with this, and nothing downloads in the middle of a run or a
+#: test (OH-163 step 1's review).
+FETCH_FONT = "python tools/compose_board_3d.py --fetch-font"
+#: Seconds to wait on the author's wiki before saying it did not answer.
+FETCH_TIMEOUT_S = 60
+
+
+def _font_archive_differs(archive: pathlib.Path) -> str | None:
+    """What is wrong with the archive on disk, or None if it is the one
+    `NEWSTROKE` records."""
+    _url, size, digest = NEWSTROKE
+    data = archive.read_bytes()
+    actual = hashlib.sha256(data).hexdigest()
+    if (len(data), actual) == (size, digest):
+        return None
+    return (f"{archive} is {len(data):,} bytes with sha256 {actual}, and this "
+            f"file records {size:,} bytes and {digest}.")
 
 
 def fetch_newstroke() -> pathlib.Path:
-    """The directory holding `NEWSTROKE_FILES`, fetching and unpacking the
-    archive if need be.
+    """Fetch the font's archive if it is not here, check it, and unpack
+    `NEWSTROKE_FILES` from it; the directory they are in. `--fetch-font`
+    calls this, and composing never does.
 
-    Mirrors `fetch_pcb`, with the digest checked as well as the size: the
-    font is on its author's own wiki, and a changed archive is a changed
-    font that every composed board's text would silently be drawn in.
+    The digest is checked as well as the size: the font is on its author's
+    own wiki, and a changed archive is a changed font that every composed
+    board's text would silently be drawn in. A download that fails the check
+    is deleted rather than left for the next run to trip over.
     """
     import tarfile
 
-    if all((FONT_CACHE / name).is_file() for name in NEWSTROKE_FILES):
-        return FONT_CACHE
-    url, size, digest = NEWSTROKE
+    url, _size, _digest = NEWSTROKE
     FONT_CACHE.mkdir(parents=True, exist_ok=True)
     archive = FONT_CACHE / "newstroke-font.tgz"
     if not archive.is_file():
         print(f"  fetch  {url}")
-        with urllib.request.urlopen(url) as response:  # noqa: S310 - https, fixed
+        with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_S) as response:  # noqa: S310 - https, fixed
             archive.write_bytes(response.read())
-    data = archive.read_bytes()
-    actual = hashlib.sha256(data).hexdigest()
-    if (len(data), actual) != (size, digest):
+        wrong = _font_archive_differs(archive)
+        if wrong is not None:
+            archive.unlink()
+            raise SystemExit(
+                f"{wrong} Deleted it. The font's archive at {url} changed; "
+                f"re-measure it before drawing any board's text in it.")
+    wrong = _font_archive_differs(archive)
+    if wrong is not None:
         raise SystemExit(
-            f"{archive} is {len(data):,} bytes with sha256 {actual}, and this "
-            f"file records {size:,} bytes and {digest}. The font's archive "
-            f"changed; re-measure it before drawing any board's text in it.")
+            f"{wrong} The font's archive changed, or this copy is damaged: "
+            f"delete {archive} and run {FETCH_FONT} again, and if it still "
+            f"differs, re-measure it before drawing any board's text in it.")
     with tarfile.open(archive) as bundle:
         for name in NEWSTROKE_FILES:
             member = bundle.extractfile(name)
             if member is None:
                 raise SystemExit(f"{archive}: {name} is not a file in it")
             (FONT_CACHE / name).write_bytes(member.read())
+    return FONT_CACHE
+
+
+def newstroke_font() -> pathlib.Path | None:
+    """The directory holding `NEWSTROKE_FILES` if the font is fetched, None
+    if it is not; never fetches.
+
+    **Checked on every read, not only when fetched**, as
+    `import_3d_model.fetch` checks its archive's size every time: the
+    archive's size and sha256, and each file unpacked from it against the
+    archive's own copy, since an unpacked file edited or cut short is another
+    font as surely as another archive is. Both are small enough that this
+    costs nothing a composition notices.
+    """
+    import tarfile
+
+    archive = FONT_CACHE / "newstroke-font.tgz"
+    if not (archive.is_file()
+            and all((FONT_CACHE / name).is_file() for name in NEWSTROKE_FILES)):
+        return None
+    wrong = _font_archive_differs(archive)
+    if wrong is not None:
+        raise SystemExit(
+            f"{wrong} The font's archive changed, or this copy is damaged: "
+            f"delete {archive} and run {FETCH_FONT} again.")
+    with tarfile.open(archive) as bundle:
+        for name in NEWSTROKE_FILES:
+            member = bundle.extractfile(name)
+            if member is None:
+                raise SystemExit(f"{archive}: {name} is not a file in it")
+            if member.read() != (FONT_CACHE / name).read_bytes():
+                raise SystemExit(
+                    f"{FONT_CACHE / name} is not the {name} in {archive}, "
+                    f"which is the font measured: run {FETCH_FONT} to unpack "
+                    f"it again.")
     return FONT_CACHE
 
 
@@ -5441,12 +5500,17 @@ def lettering(texts) -> tuple[list[eagle.Stroke], dict[str, int], int]:
     """A board's text as ink in the composer's y-up frame, what was refused
     by reason, and how many texts were drawn.
 
-    The font is fetched only for a board that prints text, so an EAGLE
-    board, whose text is counted rather than read, never asks for it.
+    The font is read only for a board that prints text, so an EAGLE board,
+    whose text is counted rather than read, never asks for it; and it is
+    never fetched here, which is `FETCH_FONT`'s.
     """
     if not texts:
         return [], {}, 0
-    table = newstroke(fetch_newstroke())
+    font = newstroke_font()
+    if font is None:
+        raise SystemExit(f"the newstroke font is not fetched under {FONT_CACHE}, "
+                         f"and {len(texts)} texts are lettered in it. Run: {FETCH_FONT}")
+    table = newstroke(font)
     strokes: list[eagle.Stroke] = []
     refused: dict[str, int] = {}
     drawn = 0
@@ -5645,6 +5709,14 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         return 3
 
     board = read_layout(spec.layout)
+    # **The font is an input like the board's own files**: read here and
+    # fetched only by `FETCH_FONT`, so a board that prints KiCad text and
+    # finds no font is SKIPPED by name, as one whose files are not fetched is.
+    if board.kicad_text and newstroke_font() is None:
+        print(f"  SKIPPED: the newstroke font is not fetched under {FONT_CACHE}, "
+              f"and this board's {len(board.kicad_text)} texts are lettered in "
+              f"it. Run: {FETCH_FONT}")
+        return 3
     # **The silhouette, and the cutouts said out loud.** The Uno is one closed
     # ring; a XIAO ESP32-C3 is its edge plus two 1.270 x 0.508 mm routed slots,
     # which `loop` alone reported as "the outline does not chain".
@@ -6083,8 +6155,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true",
                         help="report and write nothing")
     parser.add_argument("--deflection", type=float, default=DEFLECTION)
+    parser.add_argument("--fetch-font", action="store_true",
+                        help="fetch the stroke font KiCad text is lettered in, "
+                             "and compose nothing")
     args = parser.parse_args(argv)
 
+    if args.fetch_font:
+        print(f"newstroke in {fetch_newstroke().relative_to(REPO)}")
+        return 0
     # A manifest row that is not composed says so, by name, every run.
     for board, why in MANIFEST_REFUSED.items():
         if args.board is None or args.board == board:
