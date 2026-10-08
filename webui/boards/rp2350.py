@@ -156,9 +156,12 @@ SRAM_SIZE = 0x20082000 - 0x20000000
 #:     #define PADS_BANK0_BASE _u(0x40038000)   :50
 #:     #define SIO_BASE _u(0xd0000000)          :105
 #:
-#: **Not one is the RP2040's.** `rp2040.py` has RESETS at 0x4000C000 and
-#: IO_BANK0 at 0x40014000; only SIO kept its base, and its register file did
-#: not keep its offsets -- see `SIO_GPIO_OE`.
+#: **Only SIO's is the RP2040's.** The RP2040 has RESETS at 0x4000c000,
+#: IO_BANK0 at 0x40014000 and PADS_BANK0 at 0x4001c000 -- pico-sdk 1.3.0's
+#: RP2040 `addressmap.h:40`, `:42` and `:44`, the copy PlatformIO's
+#: framework-arduino-mbed 4.6.0 vendors, which is not in this tree; `rp2040.py`
+#: carries the first two. SIO is 0xd0000000 on both (`:71` there), and its
+#: register file kept some offsets and not others -- see `SIO_GPIO_OE`.
 RESETS = 0x40020000
 IO_BANK0 = 0x40028000
 PADS_BANK0 = 0x40038000
@@ -239,9 +242,13 @@ PAD_ISO = 0x100
 #: "Output disable. Has priority over output enable from peripherals".
 PAD_OD = 0x80
 
-#: SIO registers, `sio.h`. **Every one past GPIO_OUT moved from the RP2040's
-#: offset**: the RP2040 put `GPIO_OE` at 0x020, which here is `GPIO_OUT_CLR`,
-#: so an RP2040 image clearing its output would enable outputs on this chip.
+#: SIO registers, `sio.h`. **GPIO_OUT's SET, CLR and XOR, GPIO_OE, and
+#: GPIO_OE's SET, CLR and XOR moved from the RP2040's offsets**, each now
+#: beside a `GPIO_HI_` register; CPUID, GPIO_IN and GPIO_OUT did not, and
+#: neither did the FIFO registers below. The RP2040 put `GPIO_OE` at 0x020,
+#: which here is `GPIO_OUT_CLR`, so an RP2040 image enabling its outputs
+#: would clear output levels on this chip instead. Compared against pico-sdk
+#: 1.3.0's RP2040 `sio.h`, the copy cited for the bases above.
 #:
 #:     SIO_CPUID_OFFSET        0x000  :23   RO
 #:     SIO_GPIO_IN_OFFSET      0x004  :35   RO

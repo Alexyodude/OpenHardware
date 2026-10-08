@@ -797,8 +797,11 @@ Four things this section did not have:
   ROM's source is BSD-3-Clause (datasheet chapter 5), unlike the RP2040's.
 * **A pad is isolated until software releases it**, which the RP2040 has no
   equivalent of: each PADS_BANK0 pad's `ISO` resets to 1 and latches the pad
-  (datasheet 9.7). And every SIO offset past `GPIO_OUT` moved: the RP2040's
-  `GPIO_OE` offset is the RP2350's `GPIO_OUT_CLR`.
+  (datasheet 9.7). And SIO's GPIO registers moved, but not all of them:
+  `GPIO_OUT`'s SET, CLR and XOR, `GPIO_OE` and `GPIO_OE`'s SET, CLR and XOR
+  are at new offsets, while `CPUID`, `GPIO_IN`, `GPIO_OUT` and the FIFO
+  registers kept the RP2040's (against pico-sdk 1.3.0's RP2040 `sio.h`). The
+  RP2040's `GPIO_OE` offset is the RP2350's `GPIO_OUT_CLR`.
 * **The two sources disagree about the mailbox's depth**: pico-sdk's `sio.h`
   says eight words, the datasheet's 3.1.5 four entries. Recorded, not
   resolved; a stub that never fills it depends on neither.

@@ -6,8 +6,10 @@
  * The sibling of `tests/cortexm0/blink/blink.c`, the RP2040's, and the
  * shape is the same on purpose: release the IO banks from reset, give the
  * pad to the processors, and toggle it. Reading the two side by side shows
- * what moved between the parts: every SIO offset past GPIO_OUT, and one
- * register the RP2040 does not have at all -- the pad's isolation latch.
+ * what moved between the parts: RESETS' base and the two banks' bits in
+ * it, the SIO offsets of GPIO_OUT_XOR and GPIO_OE_SET (SIO's base kept its
+ * address, and CPUID, GPIO_IN, GPIO_OUT and the FIFOs their offsets), and
+ * one register the RP2040 does not have at all -- the pad's isolation latch.
  *
  * ## No GPIO is typed here
  *
