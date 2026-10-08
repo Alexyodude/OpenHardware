@@ -338,13 +338,15 @@ def test_the_readme_does_not_write_down_board_counts():
 # by being trusted when it says no.
 
 
-def _board_file(directory, name, footprint=None, licence=None, pads=None):
+def _board_file(directory, name, footprint=None, licence=None, pads=None, registry=None):
     """Write one board definition, with only the fields under test."""
     source = {}
     if footprint is not None:
         source["footprint"] = footprint
     if licence is not None:
         source["licence"] = licence
+    if registry is not None:
+        source["registry"] = registry
     board = {"board": name, "pads": pads if pads is not None else [{"pin": None}]}
     if source:
         board["source"] = source
@@ -580,6 +582,132 @@ def test_a_board_recording_no_licence_reports_absent(tmp_path):
     report = collect_assets(boards, vendor)[0]
     assert report.licence.evidence is Evidence.ABSENT
     assert "source.licence" in report.licence.detail
+
+
+# A board whose `source.registry` names a source is backed by a licence file
+# in THAT source's tree, which `tools/board_sources.py` puts under the
+# repository root as `Source.dest` says. Until OH-204 every board's licence
+# was looked for in Seeed's tree, so the Uno's CC BY-SA 4.0 read `present` on
+# the strength of Seeed's MIT LICENSE, and so did every manifest board's.
+
+
+def test_a_registry_board_is_not_backed_by_seeeds_licence_when_its_own_tree_holds_none(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    uno = board_sources.source("arduino-uno")
+    assert uno.fetch.transport is board_sources.Transport.HTTPS_ARCHIVE
+    tree = uno.dest(pathlib.Path("."))
+    tree.mkdir(parents=True)
+    (tree / "UNO-TH_Rev3e.brd").write_text("<eagle/>", encoding="utf-8")
+    seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "Uno", licence="CC BY-SA 4.0", registry="arduino-uno")
+
+    cell = collect_assets(boards, seeed)[0].licence
+    assert (cell.evidence, cell.detail) == (
+        Evidence.ABSENT,
+        "CC BY-SA 4.0 recorded in the board file, but third_party/arduino-uno holds "
+        "no licence file to back it",
+    ), cell
+
+
+def test_a_registry_board_is_backed_by_the_licence_file_in_its_own_tree(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    tree = board_sources.source("arduino-uno").dest(pathlib.Path("."))
+    tree.mkdir(parents=True)
+    (tree / "License.txt").write_text("CC BY-SA 4.0 ...", encoding="utf-8")
+    seeed = _vendor_checkout(tmp_path / "seeed", {"README.md": "no licence here"})
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "Uno", licence="CC BY-SA 4.0", registry="arduino-uno")
+
+    cell = collect_assets(boards, seeed)[0].licence
+    assert (cell.evidence, cell.detail) == (
+        Evidence.PRESENT, "CC BY-SA 4.0; third_party/arduino-uno/License.txt"
+    ), cell
+
+
+def test_a_registry_board_cloned_sparsely_reads_its_own_index(tmp_path, monkeypatch):
+    """A git source's licence that is in its index and not on disk is
+    `indexed`, as a file in Seeed's index is; Seeed's LICENSE on disk is not
+    this board's."""
+    monkeypatch.chdir(tmp_path)
+    kb2040 = board_sources.source("adafruit-kb2040")
+    assert kb2040.fetch.transport is board_sources.Transport.GIT_SPARSE
+    clone = _vendor_checkout(
+        kb2040.dest(pathlib.Path(".")), {"license.txt": "...", "Adafruit KB2040.brd": "x"}
+    )
+    (clone / "license.txt").unlink()
+    seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "KB2040", licence="CC BY-SA 3.0 Unported", registry="adafruit-kb2040")
+
+    cell = collect_assets(boards, seeed)[0].licence
+    assert (cell.evidence, cell.detail) == (
+        Evidence.INDEXED,
+        "CC BY-SA 3.0 Unported; license.txt — in the vendor's git tree, not fetched",
+    ), cell
+
+
+def test_a_registry_board_whose_tree_is_not_fetched_says_how_to_fetch_it(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "Uno", licence="CC BY-SA 4.0", registry="arduino-uno")
+
+    cell = collect_assets(boards, seeed)[0].licence
+    assert cell.evidence is Evidence.UNSEARCHABLE, cell
+    assert "python tools/get_board_sources.py arduino-uno" in cell.detail, cell.detail
+
+
+def test_a_board_naming_neither_a_registry_nor_a_footprint_has_no_tree_to_back_it(tmp_path):
+    """A footprint is searched for in Seeed's tree, so a board naming one is
+    backed there; a board naming neither names no tree at all."""
+    seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "Footprint", footprint="Footprint", licence="MIT")
+    _board_file(boards, "Nothing", licence="MIT")
+
+    cells = {report.name: report.licence for report in collect_assets(boards, seeed)}
+    assert cells["Footprint"].evidence is Evidence.PRESENT, cells["Footprint"]
+    assert cells["Nothing"].evidence is Evidence.UNSEARCHABLE, cells["Nothing"]
+    assert "source.registry" in cells["Nothing"].detail, cells["Nothing"].detail
+
+
+def test_a_registry_name_no_source_has_is_refused_naming_it(tmp_path):
+    seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "Typo", licence="MIT", registry="arduino-unoo")
+
+    with pytest.raises(InventoryError, match=r"Typo\.json.*arduino-unoo"):
+        collect_assets(boards, seeed)
+
+
+def test_the_unos_licence_cell_rests_on_arduinos_own_licence_file(monkeypatch):
+    monkeypatch.chdir(REPO)
+    if not (REPO / "third_party" / "arduino-uno" / "License.txt").is_file():
+        pytest.skip(
+            "SKIPPED: third_party/arduino-uno/License.txt is not fetched. Run: "
+            "python tools/get_board_sources.py arduino-uno, which prints the URL "
+            "to download by hand"
+        )
+    cells = {
+        report.name: report.licence
+        for report in collect_assets(REPO / "webui" / "boards", REPO / VENDOR_DIR)
+    }
+    assert (cells["Arduino Uno"].evidence, cells["Arduino Uno"].detail) == (
+        Evidence.PRESENT, "CC BY-SA 4.0; third_party/arduino-uno/License.txt"
+    ), cells["Arduino Uno"]
 
 
 def test_missing_names_every_cell_with_nothing_behind_it(tmp_path):

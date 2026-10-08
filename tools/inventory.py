@@ -396,8 +396,11 @@ class _Tree(typing.NamedTuple):
     unsearchable: str | None
 
 
-def _vendor_tree(vendor_dir: pathlib.Path) -> _Tree:
+def _vendor_tree(vendor_dir: pathlib.Path, name: str = "seeed-xiao") -> _Tree:
     """Everything the vendor tree holds, split by whether it was fetched.
+
+    `name` is the registry source whose fetch makes the tree, for the command
+    a reader is told to run.
 
     The index half is the reason this consults git at all.
     `tools/get_board_sources.py` clones **sparsely by default** — the KiCad
@@ -412,7 +415,7 @@ def _vendor_tree(vendor_dir: pathlib.Path) -> _Tree:
             (),
             (),
             f"{vendor_dir.as_posix()} is not fetched here; "
-            f"run: python tools/get_board_sources.py seeed-xiao",
+            f"run: python tools/get_board_sources.py {name}",
         )
 
     on_disk: list[str] = []
@@ -440,7 +443,7 @@ def _vendor_tree(vendor_dir: pathlib.Path) -> _Tree:
     except subprocess.CalledProcessError as exc:
         raise InventoryError(
             f"{vendor_dir}: git ls-tree failed: {(exc.stderr or '').strip() or exc}. "
-            f"This should be the clone `python tools/get_board_sources.py seeed-xiao` "
+            f"This should be the clone `python tools/get_board_sources.py {name}` "
             f"makes; delete it and fetch again."
         ) from exc
     except (FileNotFoundError, NotADirectoryError) as exc:
@@ -453,6 +456,32 @@ def _vendor_tree(vendor_dir: pathlib.Path) -> _Tree:
         if line.strip() and line.strip() not in fetched
     )
     return _Tree(vendor_dir, tuple(on_disk), tuple(indexed), None)
+
+
+def _source_tree(registered: board_sources.Source) -> _Tree:
+    """The tree a registry source is fetched into, under the working directory
+    as `_file_geometry` resolves it.
+
+    A `GIT_SPARSE` source is a clone, read as `_vendor_tree` reads Seeed's.
+    An `HTTPS_ARCHIVE` is a zip unpacked by hand, so it has no index and holds
+    only what is on disk -- and `git ls-tree` run in it would ask this
+    repository, which tracks nothing under `third_party/`, and not the vendor.
+    """
+    dest = registered.dest(pathlib.Path("."))
+    if registered.fetch.transport is board_sources.Transport.GIT_SPARSE:
+        return _vendor_tree(dest, registered.name)
+    if not dest.is_dir():
+        return _Tree(
+            dest,
+            (),
+            (),
+            f"{dest.as_posix()} is not fetched here; "
+            f"run: python tools/get_board_sources.py {registered.name}",
+        )
+    on_disk = sorted(
+        path.relative_to(dest).as_posix() for path in dest.rglob("*") if path.is_file()
+    )
+    return _Tree(dest, tuple(on_disk), (), None)
 
 
 def _named_for(
@@ -596,6 +625,11 @@ def collect_assets(
     The alternative is a five-column table of yes and no, which is precisely
     the hand-maintained inventory `CLAUDE.md` forbids by name on the grounds
     that it is the document that rots fastest.
+
+    The licence is looked for in the tree the board's own files came from:
+    the one `source.registry` names, or, for a board that names only a
+    `source.footprint`, `vendor_dir`, where that footprint is searched for.
+    A board naming neither names no tree, and reads so.
     """
     if not boards_dir.is_dir():
         raise InventoryError(f"{boards_dir}: boards directory does not exist")
@@ -604,6 +638,7 @@ def collect_assets(
         raise InventoryError(f"{boards_dir}: contains no board definitions")
 
     tree = _vendor_tree(vendor_dir)
+    registry_trees: dict[str, _Tree] = {}
 
     reports = []
     for path in paths:
@@ -618,6 +653,25 @@ def collect_assets(
             )
         source = data.get("source") or {}
         footprint = source.get("footprint")
+        registry = source.get("registry")
+        if registry:
+            if registry not in registry_trees:
+                try:
+                    registered = board_sources.source(registry)
+                except board_sources.SourceError as exc:
+                    raise InventoryError(f"{path}: source.registry: {exc}") from exc
+                registry_trees[registry] = _source_tree(registered)
+            licence_tree = registry_trees[registry]
+        elif footprint:
+            licence_tree = tree
+        else:
+            licence_tree = _Tree(
+                path,
+                (),
+                (),
+                "the board file records no `source.registry` and no "
+                "`source.footprint`, so it names no tree to read a licence file in",
+            )
         reports.append(
             BoardAssets(
                 name=data.get("board", path.stem),
@@ -625,7 +679,7 @@ def collect_assets(
                 pcb=_vendor_cell(PCB_FORMS, footprint, tree),
                 model3d=_vendor_cell(MODEL_FORMS, footprint, tree),
                 pins=_pin_cell(path, pads),
-                licence=_licence_cell(source.get("licence"), tree),
+                licence=_licence_cell(source.get("licence"), licence_tree),
             )
         )
     return reports
@@ -1154,7 +1208,11 @@ def render_text() -> str:
     lines.append(
         "  that tree; CAD fetched anywhere else is not searched, and model3d is"
     )
-    lines.append("  not what the 3D view draws.")
+    lines.append("  not what the 3D view draws. licence is looked for in the tree the")
+    lines.append(
+        "  board file's source.registry names, or, for a board naming only a"
+    )
+    lines.append("  footprint, in the tree above.")
     lines.append("  Evidence, strongest first:")
     for evidence in Evidence:
         lines.append(f"    {evidence.label:<13} {evidence.gloss}")
@@ -1283,7 +1341,9 @@ def render_markdown() -> str:
         "checkout, which is a fact about the checkout and not about the vendor. "
         "`schematic`, `pcb` and `model3d` count only files named for the "
         "footprint in that tree; CAD fetched anywhere else is not searched, and "
-        "`model3d` is not what the 3D view draws.",
+        "`model3d` is not what the 3D view draws. `licence` is looked for in the "
+        "tree the board file's `source.registry` names, or, for a board naming "
+        "only a footprint, in the tree above.",
         "",
     ]
     out += [f"* `{evidence.label}` — {evidence.gloss}" for evidence in Evidence]
