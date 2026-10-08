@@ -8,9 +8,6 @@ created: '2026-09-04'
 touches:
 - tools/model_from_datasheet.py
 - tests/rules/test_import_3d_model.py
-- tools/compose_board_3d.py
-- tests/rules/test_compose_board_3d.py
-- tools/import_3d_model.py
 ---
 
 Twenty-five of twenty-six boards draw a vendor file or a board composed from the vendor's PCB, every placement is drawn or refused with a reason (OH-150), and what a person sees is still short of a photograph in four measurable ways. This ticket is those four, counted from `python tools/compose_board_3d.py --check` on 2026-09-04 (11 composed boards) and from the shipped .glb files.
