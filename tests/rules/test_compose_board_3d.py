@@ -4074,9 +4074,12 @@ def test_the_ceramic_parts_reach_the_shipped_boards_as_dielectrics():
             f"{board}: {triangles[CERAMIC]} triangles of {CERAMIC}, "
             "not the one box a slab is"
         )
-        # The cover it used to borrow is still steel wherever it remains.
+        # The colour it used to borrow is a dielectric wherever it remains:
+        # KiCad's PLASTIC-WHITE-01, a body on every model carrying it
+        # (OH-163's review), and no longer the 'steel cover' it was taken for.
         if "#c6c4a0" in finishes:
-            assert finishes["#c6c4a0"][0] == 1.0, board
+            assert finishes["#c6c4a0"][0] == 0.0, (
+                f"{board}: #c6c4a0 ships at metalness {finishes['#c6c4a0'][0]}")
 
 
 # --- the manifest boards, composed from their rows (OH-180) --------------------

@@ -548,7 +548,8 @@ BOARD_MASK = "#1b1b1b"
 #: **THE SECOND JUDGEMENT IN THIS FILE, AND THE SAME KIND AS THE FIRST.** Every
 #: entry in `FINISHES` is a reading off a vendor mesh, and a part with no mesh
 #: has nothing to read. Until OH-155 the two ceramic parts borrowed `#c6c4a0`,
-#: the tactile switch's steel cover, and drew at metalness 1.0 -- a dielectric
+#: then taken for the tactile switch's steel cover (OH-163's review found it
+#: is the plunger, and a dielectric), and drew at metalness 1.0 -- a dielectric
 #: shaded as a conductor, which under the PBR model is a different reflectance
 #: law and not a nearby value on a slider. And the borrowed key could not
 #: simply be re-declared for them: `FINISHES` is keyed by colour, and tallied
@@ -729,6 +730,14 @@ DEFAULT_FINISH = Finish(
 #:
 #:   * `#808080` -- `UNSTYLED`, which that constant's comment forbids naming.
 #:   * `#1d1d1d` -- above.
+#:   * `#383838` -- KiCad's `MET-SILVER`, and by geometry a shell over the
+#:     body of every switch fetched here that carries it: the B3S-1000's
+#:     6 x 6.6 mm cover (38 faces, z 1.75 to 3.50, under the plunger), the
+#:     SKRK's over its white housing and the KMR2's frame. A metal by name
+#:     and by place, at 22% linear reflectance -- darker than any metal
+#:     reflects -- so the readings disagree as `#1d1d1d`'s do. Until OH-163's
+#:     review this was the TS42's "moulded actuator" at metalness 0, one half
+#:     of a pair read off its values the wrong way round; see `#c6c4a0`.
 #:   * `#4e4e4e` -- `tools/model_from_datasheet.py` calls it a MEMS
 #:     microphone's steel lid, a metal darker than any metal reflects, and
 #:     the nRF54LM20A's own STEP uses it for a dot a tenth of a millimetre
@@ -797,18 +806,6 @@ FINISHES: dict[str, Finish] = {
         "tactile switch -- and it is also the colour `lead_tips` already "
         "treats as metal BY RULE on the LEDs and the buzzer: 'every group "
         "that is not the lens is metal'. Two independent readings agreeing"
-    )),
-    "#c6c4a0": Finish(1.0, 0.30, (
-        "the tactile switch's metal cover. **The weakest entry here**: 440 "
-        "triangles on TS42 and nothing else, and which of its two colours is "
-        "the steel cover and which the moulded actuator is read off their "
-        "values rather than off anything named. A B3S-1000 is a black body "
-        "under a bright cover, and this is the bright one. **And it is not "
-        "only on TS42**: tallied 2026-09-04, the shipped ESP32-C3 boards "
-        "carry 604 triangles of it with no switch on them, so vendor models "
-        "of small passives style faces with it too -- which is why the two "
-        "ceramic parts that borrowed this hex until OH-155 could not have it "
-        "re-declared for them, and draw in `CERAMIC` instead"
     )),
     "#ff9f37": Finish(1.0, 0.30, (
         "the XIAO's gold castellated pads. Already recorded in the tree: "
@@ -905,10 +902,6 @@ FINISHES: dict[str, Finish] = {
         "nearly zero, which is a vendor writing an ideal black rather than a "
         "different material"
     )),
-    "#383838": Finish(0.0, 0.65, (
-        "the tactile switch's moulded actuator, the other half of the TS42 "
-        "pair. Carries the same caveat as #c6c4a0"
-    )),
     CERAMIC: Finish(0.0, 0.60, (
         "the two ceramic blocks `tools/model_from_datasheet.py` builds -- the "
         "ESP32-C5's LTCC diplexer and the nRF54L15's chip antenna -- in the "
@@ -948,6 +941,28 @@ FINISHES: dict[str, Finish] = {
         "them one name, and at six percent grey none could be (the "
         "near-black argument above). The roughness is a JUDGEMENT between "
         "CERAMIC's 0.60 and moulded epoxy's 0.70, because the group is both"
+    )),
+    "#c6c4a0": Finish(0.0, 0.65, (
+        "**two dielectrics, one entry, claiming only what they share**, as "
+        "#0f0f0f's does. KiCad's palette names the colour `PLASTIC-WHITE-01`, "
+        "and `Resistor_SMD.3dshapes/R_0402_1005Metric.wrl` and "
+        "`LED_SMD.3dshapes/LED_WS2812B-Mini_PLCC4_3.5x3.5mm.wrl` at tag 9.0.0 "
+        "paint with it the resistor's substrate and the LED's housing. By "
+        "geometry it is a body, never a terminal, on every KiCad model "
+        "fetched here that carries it: the chip LEDs' body; the "
+        "WS2812B-Mini's, the JST SH connectors' and the SKRK switch's "
+        "housing; the U.FL's insulator; the Johanson antenna's ceramic block "
+        "between its terminals; the chip resistors' and the 0603 fuse's "
+        "substrate, which their end caps wrap; and the B3S-1000's round "
+        "plunger, 3.57 mm across on "
+        "top of its #383838 cover. The MG24's and nRF54LM20A's own STEPs use "
+        "it for their 0402 LEDs' bodies and their 0201 resistors' substrate. "
+        "Moulded plastic or fired ceramic, neither is a metal; the roughness "
+        "is a JUDGEMENT between CERAMIC's 0.60 and moulded epoxy's 0.70, as "
+        "#0f0f0f's is. Until OH-163's review this was the TS42's 'metal "
+        "cover' at metalness 1.0, the pair read off its values the wrong way "
+        "round, and every composed board carrying any of these parts drew "
+        "them as polished metal"
     )),
     "#6f6651": Finish(0.0, 0.55, (
         "the orientation mark on top of a moulded package -- a pin-1 dot, a "

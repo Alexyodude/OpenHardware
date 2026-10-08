@@ -534,7 +534,9 @@ KICAD_PALETTE = {
     "PLASTIC-GREEN-01": (0.340, 0.680, 0.445),
     "PLASTIC-BLUE-01": (0.137, 0.402, 0.727),
     "BOARD-BLACK-03": (0.16, 0.16, 0.16),
+    "PLASTIC-WHITE-01": (0.895, 0.891, 0.813),
     "MET-ALUMINUM": (0.372322, 0.371574, 0.373173),
+    "MET-SILVER": (0.50754, 0.50754, 0.50754),
 }
 
 
@@ -570,11 +572,53 @@ def test_kicads_own_names_for_the_colours_it_cites():
         "CAP-CERAMIC-06": "#1e0f0a", "CAP-CERAMIC-05": "#0f0f0f",
         "IC-LABEL-01": "#6f6651", "PLASTIC-GREEN-01": "#186b2a",
         "PLASTIC-BLUE-01": "#04227c", "BOARD-BLACK-03": "#060606",
+        "PLASTIC-WHITE-01": "#c6c4a0",
     }, cited
     assert key(KICAD_PALETTE["MET-ALUMINUM"]) == "#1d1d1d"
     assert "#1d1d1d" not in FINISHES, (
         "#1d1d1d is KiCad's MET-ALUMINUM and darker than any metal reflects: "
         "the two readings disagree, so it takes the default")
+    assert key(KICAD_PALETTE["MET-SILVER"]) == "#383838"
+    assert "#383838" not in FINISHES, (
+        "#383838 is KiCad's MET-SILVER and, at 22% linear, darker than any "
+        "metal reflects: the two readings disagree, so it takes the default")
+
+
+def test_kicads_white_is_a_body_and_not_a_metal():
+    """**`#c6c4a0` was the tactile switch's 'metal cover', and it is not a
+    metal** (OH-163's review).
+
+    `FINISHES` read the TS42's two colours off their values -- the bright one
+    the steel cover, the dark one the moulded actuator -- and had them the
+    wrong way round. On the cached B3S-1000 STEP this colour is the round
+    plunger on top, 3.57 mm across, and KiCad's palette calls it
+    `PLASTIC-WHITE-01`. It also paints KiCad's chip LED bodies, the
+    WS2812B-Mini's housing and the resistors' substrate, so at metalness 1.0
+    every composed board carrying any of them drew those as polished metal.
+    """
+    from tools.import_3d_model import FINISHES
+
+    assert FINISHES["#c6c4a0"].metalness == 0.0, (
+        f"#c6c4a0 is a metal in FINISHES ({FINISHES['#c6c4a0']}); it is a "
+        f"moulded or fired body on every model that carries it")
+
+
+def test_kicads_silver_is_listed_at_the_default_with_its_reason():
+    """**`#383838` is the switch's cover and still not named** (OH-163's
+    review): KiCad's palette calls it `MET-SILVER`, and on the B3S-1000 it is
+    the 6 x 6.6 mm cover, a metal by name and by place -- at 22% linear
+    reflectance, below anything a metal reflects. Two readings that disagree
+    leave a colour at the default, as `#1d1d1d`'s do, and the table's own
+    list of colours examined and left there has to say so, with the reason.
+    """
+    source = (REPO / "tools" / "import_3d_model.py").read_text(encoding="utf-8")
+    examined = source.split("**Examined for OH-163 and left at the default**",
+                            1)[1].split("**Four entries were written", 1)[0]
+    entry = examined.split("`#383838`", 1)
+    assert len(entry) == 2, (
+        f"#383838 is not in the list of colours left at the default:{examined}")
+    assert "MET-SILVER" in entry[1].split("#:   * ", 1)[0], (
+        f"#383838's line does not give KiCad's name for it: {entry[1]}")
 
 
 def test_the_label_colour_lies_on_top_of_every_body_that_carries_it():
@@ -1633,7 +1677,8 @@ def test_the_trimmer_is_the_first_three_terminal_part():
 
 
 def test_a_ceramic_block_is_a_dielectric_in_its_own_colour():
-    """OH-155: the two ceramic parts stop borrowing the switch cover's steel.
+    """OH-155: the two ceramic parts stop borrowing `#c6c4a0`, which `FINISHES`
+    then called the switch cover's steel (OH-163 found it is the plunger).
 
     `FINISHES` is keyed by colour, and `#c6c4a0` is on thirteen of the
     seventeen shipped boards -- both ESP32-C3s among them, which carry neither
@@ -1647,9 +1692,8 @@ def test_a_ceramic_block_is_a_dielectric_in_its_own_colour():
     from tools.model_from_datasheet import SLABS
 
     assert CERAMIC in FINISHES
-    assert CERAMIC != "#c6c4a0", "a ceramic in the cover's own hex is the defect"
+    assert CERAMIC != "#c6c4a0", "a ceramic in a vendor colour's own hex is the defect"
     assert FINISHES[CERAMIC].metalness == 0.0
-    assert FINISHES["#c6c4a0"].metalness == 1.0, "the switch cover keeps its steel"
     assert "judgement" in FINISHES[CERAMIC].why, (
         "the roughness is a stated choice and the entry must say which kind "
         "of number it is"
@@ -1657,4 +1701,4 @@ def test_a_ceramic_block_is_a_dielectric_in_its_own_colour():
     ceramic = {spec.package for spec in SLABS if spec.colour == CERAMIC}
     assert ceramic == {"CAF-50P160X80-6N", "ANT2P-5.2x2x1.1MM"}, ceramic
     borrowers = [spec.package for spec in SLABS if spec.colour == "#c6c4a0"]
-    assert not borrowers, f"still shaded as the switch cover: {borrowers}"
+    assert not borrowers, f"still shaded in the borrowed #c6c4a0: {borrowers}"
