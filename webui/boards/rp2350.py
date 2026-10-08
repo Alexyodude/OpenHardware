@@ -457,18 +457,24 @@ def pin_states(cpu: Cpu) -> dict[str, str]:
 
     `"high"`, `"low"`, `"input"` or `"unknown"` keyed by the label in
     `HEADER`, which `webui.api.pin_view` finds by `getattr`. Four things
-    decide a pad, read in the order silicon applies them:
+    decide a pad, read from the pad inward, so the stage nearest it answers
+    first:
 
-    1. **FUNCSEL.** NULL selects nothing, so nothing drives the pad:
+    1. **The isolation latch.** "All signals passing from the switched core
+       power domain to the pads pass through isolation latches" (section 9.7,
+       PDF p.545), so while ISO is set the pad holds what it was presented
+       when isolation began, whatever function is selected behind it. From
+       power-up that is the reset state, output disabled -- "The latches
+       reset to the reset value of the signal being isolated" (section 9.7,
+       PDF p.546) -- so this reports `input`. An image that clears ISO,
+       drives the pad and sets ISO again holds its level on silicon and reads
+       `input` here: this module keeps no history.
+    2. **OD**, the pad's output disable, "overriding the Output Enable
+       signal from the function controlling the pad" (section 9.6, PDF
+       p.545): `input`, whatever that function is.
+    3. **FUNCSEL.** NULL selects nothing, so nothing drives the pad:
        `input`. A peripheral this module does not model: `unknown`. Only SIO
        goes on (section 9.8, PDF p.546).
-    2. **The isolation latch.** While ISO is set the pad holds what it was
-       presented when isolation began. From power-up that is the reset state,
-       output disabled -- "The latches reset to the reset value of the signal
-       being isolated" (section 9.7, PDF p.546) -- so this reports `input`.
-       An image that clears ISO, drives the pad and sets ISO again holds its
-       level on silicon and reads `input` here: this module keeps no history.
-    3. **OD**, the pad's output disable, which has priority: `input`.
     4. **SIO's GPIO_OE, then GPIO_OUT**, as `rp2040.py` reads them.
 
     **RESETS is not consulted**, for the reason `install_resets` gives.
@@ -483,12 +489,12 @@ def pin_states(cpu: Cpu) -> dict[str, str]:
         funcsel = cpu.read_word(gpio_ctrl(gpio)) & GPIO_CTRL_FUNCSEL
         control = cpu.read_word(pad(gpio))
         mask = 1 << gpio
-        if funcsel == FUNCSEL_NULL:
+        if control & (PAD_ISO | PAD_OD):
+            states[label] = "input"
+        elif funcsel == FUNCSEL_NULL:
             states[label] = "input"
         elif funcsel != FUNCSEL_SIO:
             states[label] = "unknown"
-        elif control & (PAD_ISO | PAD_OD):
-            states[label] = "input"
         elif not enabled & mask:
             states[label] = "input"
         else:

@@ -485,8 +485,10 @@ def test_a_pad_reads_sio_only_once_funcsel_selects_it_and_its_latch_is_open():
     """The chain `pin_states` reads, link by link, on a real core: SIO
     driving GPIO5 high is `input` until FUNCSEL selects SIO, still `input`
     while the pad is isolated, `high` once it is not, `input` again under the
-    pad's output disable, and `unknown` under a function nothing here
-    models (2, UART1 RX on GPIO5, `io_bank0.h:833`)."""
+    pad's output disable, `unknown` under a function nothing here models (2,
+    UART1 RX on GPIO5, `io_bank0.h:833`), and `input` with FUNCSEL back at
+    NULL and the latch open -- the one reading where NULL alone decides,
+    because the first is decided by the latch."""
     from core.riscv32 import abi
 
     gpio = rp2350.HEADER[LABEL]
@@ -504,7 +506,33 @@ def test_a_pad_reads_sio_only_once_funcsel_selects_it_and_its_latch_is_open():
         cpu.write_word(rp2350.pad(gpio), 0)
         cpu.write_word(rp2350.gpio_ctrl(gpio), 2)
         readings.append(rp2350.pin_states(cpu)[LABEL])
-    assert readings == ["input", "input", "high", "input", "unknown"], readings
+        cpu.write_word(rp2350.gpio_ctrl(gpio), rp2350.FUNCSEL_NULL)
+        readings.append(rp2350.pin_states(cpu)[LABEL])
+    assert readings == ["input", "input", "high", "input", "unknown", "input"], readings
+
+
+def test_an_isolated_pad_reads_its_latch_whatever_function_is_selected():
+    """ISO is the stage nearest the pad -- "all signals passing from the
+    switched core power domain to the pads pass through isolation latches"
+    (section 9.7, PDF p.545) -- and OD the next, "overriding the Output
+    Enable signal from the function controlling the pad" (section 9.6, the
+    same page). So under a peripheral this module does not model, an
+    isolated pad still reads as the latch holds it from reset, `input`, and
+    so does one whose output is disabled; with both open, the function
+    decides, and that one is `unknown`."""
+    from core.riscv32 import abi
+
+    gpio = rp2350.HEADER[LABEL]
+    with abi.Cpu() as cpu:
+        rp2350.install(cpu)
+        cpu.write_word(rp2350.SIO + rp2350.SIO_GPIO_OE, 1 << gpio)
+        cpu.write_word(rp2350.SIO + rp2350.SIO_GPIO_OUT, 1 << gpio)
+        cpu.write_word(rp2350.gpio_ctrl(gpio), 2)
+        readings = []
+        for control in (rp2350.PAD_AT_RESET, rp2350.PAD_OD, 0):
+            cpu.write_word(rp2350.pad(gpio), control)
+            readings.append(rp2350.pin_states(cpu)[LABEL])
+    assert readings == ["input", "input", "unknown"], readings
 
 
 def test_the_mailbox_to_core_1_is_there_and_core_1_is_not():
