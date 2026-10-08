@@ -2,9 +2,13 @@
 id: OH-203
 title: A board file says its pins came from board-support packages while some rest
   on the vendor's board CAD
-status: open
+status: in-progress
 priority: P2
 created: '2026-10-08'
+touches:
+- tools/import_pindefs.py
+- tests/rules/test_import_pindefs.py
+- webui/boards/XIAO-*.json
 ---
 
 Found by OH-200's review (2026-10-08). A board file's `pindefs.derivation` and `assumption` say where its `chip_pin` values came from, and on eight XIAO board files they say something false.
