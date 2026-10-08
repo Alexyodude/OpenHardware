@@ -1,9 +1,14 @@
 ---
 id: OH-209
 title: The XIAO RP2350 SMD's BOOT pad says what Seeed's own file shows it reaches
-status: open
+status: in-progress
 priority: P2
 created: '2026-10-08'
+touches:
+- tools/import_pindefs.py
+- tests/rules/test_import_pindefs.py
+- webui/boards/XIAO-RP2350-*.json
+- webui/boards/rp2350.py
 ---
 
 Part of OH-174. Since OH-157, XIAO-RP2350-SMD holds geometry, model and runs, and misses pins on one pad: BOOT. Its why_null is the generic one the TWINS pins layer counts as unanswered, because OH-170 found no BOOT net in Seeed's `third_party/seeed-pcb/RP2350.kicad_pcb`, and Seeed's wiki calls BOOT a button, which says nothing about a pin.
