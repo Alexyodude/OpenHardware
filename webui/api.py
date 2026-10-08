@@ -1084,8 +1084,10 @@ def pin_view(runtime: Runtime, cpu: Core, board: str) -> dict[str, object]:
     # board would report `read_levels` false while its program ran, and every
     # modelled pad would read "no program running".
     #
-    # Nothing has that shape today: all six modules with `PIN_NAMES` also have
-    # `pin_states`. But OH-160 generates the first from a `HEADER` and leaves
+    # Nothing has that shape today: every module with `PIN_NAMES` also has
+    # `pin_states`, which `tests/webui/test_pin_view.py`'s
+    # `test_a_running_board_whose_module_reads_no_pins_still_says_one_is_running`
+    # asserts. But OH-160 generates the first from a `HEADER` and leaves
     # the second hand-written, so the shape it produces is precisely a module
     # that could have one without the other. Coalescing here is what makes
     # `pad_view`'s `read_levels` mean what it says rather than what happens to
