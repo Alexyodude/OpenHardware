@@ -352,6 +352,36 @@ The full corpus is ≈2 GB and is fetched, not vendored:
 `tools/get_8088_tests.sh` puts it in the git-ignored `third_party/`. The
 eleven committed cases exist so the reader has offline, deterministic tests.
 
+### Fetched, never tracked: the newstroke stroke font (OH-163)
+
+A composed board's silkscreen text is drawn in newstroke, the stroke font
+KiCad plots text in. **None of it is in this tree.** `NEWSTROKE` in
+`tools/compose_board_3d.py` fetches its author's own archive into the
+git-ignored `third_party/newstroke/` and checks its size and sha256 before
+reading a glyph. Checked 2026-10-09:
+
+- KiCad carries the glyphs in `common/newstroke_font.cpp`, whose header grants
+  GPL-2-or-later (at tags 8.0.0 and 10.0.7), with CJK ideographs added in
+  2019 by MIT-licensed code from Source Han Sans, which is under the SIL Open
+  Font License 1.1. Copied
+  here, that file would put GPL content in an MIT tree, so it is not used.
+- Vladimir Uryvaev, who drew the font, publishes it at
+  <http://vovanium.ru/sledy/newstroke/en>: "It is released under CC0
+  licence", and the archive's README.txt says "Now released under CC0
+  licence". The glyphs are read from its `font.lib`, `symbol.lib` and
+  `charlist.txt`, which carry no other notice; the C table beside them in
+  the archive carries KiCad's GPL boilerplate, written by the converter, and
+  is read by a test only, as the oracle the glyphs are held to.
+- EAGLE's vector font, which EAGLE's CAM processor draws all text in, is
+  inside EAGLE's executable under CadSoft's terms ("No part of the executable
+  files [...] may be altered in any way", as Debian's non-free `eagle`
+  package records them) and is published nowhere as a font. An EAGLE board's
+  text is therefore counted and refused, not drawn.
+
+Vendoring the CC0 glyphs would be allowed under MIT, and would need an exempt
+directory and its notice under `rules/licence-hygiene.md` §4; fetching needs
+neither, and is how the KiCad component meshes are handled too.
+
 ---
 
 ## 5. What the relicense actually changed
