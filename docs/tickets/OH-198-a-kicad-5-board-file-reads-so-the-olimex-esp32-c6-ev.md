@@ -2,7 +2,7 @@
 id: OH-198
 title: A KiCad 5 board file reads, so the Olimex ESP32-C6-EVB and Olimex's older boards
   can be rows
-status: in-review
+status: in-progress
 priority: P2
 created: '2026-09-30'
 touches:
@@ -10,6 +10,26 @@ touches:
 - tools/kicad.py
 - tests/rules/test_kicad.py
 - tests/rules/kicad5/**
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
+- tools/import_3d_model.py
+- tools/board_sources.py
+- tests/rules/test_board_sources.py
+- tools/board_manifest.py
+- tests/rules/test_board_manifest.py
+- tools/import_pindefs.py
+- tests/rules/test_import_pindefs.py
+- webui/boards/Olimex ESP32-C6-EVB.json
+- webui/boards/catalogue.py
+- tests/webui/test_board_catalogue.py
+- tests/rules/test_board_claims.py
+- tests/webui/test_pin_view.py
+- tests/webui/test_olimex_esp32c6_evb_board.py
+- tests/webui/olimex_esp32c6_evb/**
+- PROVENANCE.md
+- README.md
+- rules/board-claims.md
+- webui/api.py
 ---
 
 Part of OH-174, found by OH-194. The Olimex ESP32-C6-EVB stopped before a registry row because its only board file, `HARDWARE/Hardware-revision-A/ESP32-C6-EVB_Rev_A.kicad_pcb`, is KiCad 5: `kicad.read_board` refuses a board that places its parts as `(module ...)` (OH-182 made that refusal name the format). The survey found Olimex is the strongest KiCad source with real variants, and earlier Olimex revisions are KiCad 5 too (OH-182's review).
@@ -39,3 +59,5 @@ SEEN, NOT FIXED (KiCad 6+ behaviour, outside this ticket): KiCad 6 and 7 write a
 VERIFIED. `compose_board_3d.py --check` (miniconda, OCP) byte-identical against HEAD's kicad.py, md5 0d6635718db317b0b2a1bc4cb30158f0 both (a first, cold-cache baseline differed only in `fetch` lines for models it downloaded). The five-file run: 500 passed, 24 skipped; with the real files, 505 passed, 19 skipped. tests/rules/test_compose_board_3d.py under miniconda: 185 passed. Every new test was seen red once under a deliberate break of kicad.py (or, for the version check, of the files it is given). checkall: every row PASS but "the test suites pass", which is the OCP pair. Full suite: 2 failed (test_import_3d_model.py's OCP pair, "No module named 'OCP'" under python 3.14), 2493 passed, 43 skipped.
 
 Next: phase 2, the C6-EVB's registry row, manifest row, board file, header import and trace.
+
+**Note 2026-10-08:** 2026-10-08: phase 1 merged to master by fast-forward at 30e113b; master's full suite 2 failed (the OCP pair), 2493 passed, 43 skipped. Its review (MERGE) left for phase 2: compose_board_3d.kicad_statements finds no statements in a KiCad 5 file (it must read through kicad.board_tree); _models_of reads KiCad 8's (hide yes) but not KiCad 6/7's bare hide or (hide); a KiCad 5.99 nightly file (20201115 to 20210925) still writes arcs the old way and they are dropped silently; (attr virtual) is not respelled as KiCad 7 reads it (exclude from position files and BOM); a zero-angle fp_arc is kept where KiCad 5.1 drops it; and two transforms (inches, unmirrored back pads) rest only on hand-written tests. Phase 2 claims the composer (lent from OH-163), the registry, the manifest, the pin importer, the board file, the run-evidence files and the docs a new board row touches.
