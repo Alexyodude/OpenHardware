@@ -42,6 +42,7 @@ import math
 import pathlib
 import re
 import shutil
+import struct
 import subprocess
 
 import pytest
@@ -2573,3 +2574,341 @@ def test_a_board_drawn_as_a_footprint_keeps_no_lamp_from_the_last_one():
     assert "view.leds = []" in teardown, (
         "the torn-down board leaves its lamps in the list"
     )
+
+
+# --- OH-215: where the page puts a model, found by running the page ----------
+#
+# Every test above reads board3d.js. These RUN it, under node: the page's own
+# `showBoard`, `loadModel`, `placeModel` and `carvePins`, unextracted and
+# unported. `PLACEMENT_HOOKS` resolves the page's import map and appends one
+# line naming two of the module's private bindings; the file on disk is not
+# touched.
+
+#: Node module hooks: the page's import map, and the probe's handle on `view`
+#: and `loadModel`, appended to board3d.js as it loads.
+PLACEMENT_HOOKS = r"""
+import { pathToFileURL } from "node:url";
+import path from "node:path";
+
+let vendor = null;
+export async function initialize(data) { vendor = path.join(data.static, "vendor"); }
+
+const MAP = { "three": "three.module.js",
+              "three/addons/controls/OrbitControls.js": "OrbitControls.js" };
+
+export async function resolve(specifier, context, next) {
+  if (specifier in MAP) {
+    return { url: pathToFileURL(path.join(vendor, MAP[specifier])).href,
+             shortCircuit: true };
+  }
+  return next(specifier, context);
+}
+
+export async function load(url, context, next) {
+  const result = await next(url, context);
+  if (!url.endsWith("/board3d.js")) return result;
+  const text = typeof result.source === "string"
+    ? result.source : new TextDecoder().decode(result.source);
+  return { ...result, format: "module", shortCircuit: true,
+           source: text + "\nexport const __probe = { view, loadModel };\n" };
+}
+"""
+
+#: Draws each case's board with `showBoard`, loads its model with `loadModel`
+#: (through a `fetch` that reads the disk), and prints per board the model's
+#: turn and scale, and where every pad sits in the MODEL's frame -- the
+#: millimetres the composer writes -- with the centroid of every triangle
+#: `carvePins` gave it.
+PLACEMENT_PROBE = r"""
+import { register } from "node:module";
+import { pathToFileURL } from "node:url";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+const [STATIC, HOOKS, CASES] = process.argv.slice(2);
+register(pathToFileURL(HOOKS).href, { data: { static: STATIC } });
+const THREE = await import(
+  pathToFileURL(path.join(STATIC, "vendor", "three.module.js")).href);
+const page = await import(pathToFileURL(path.join(STATIC, "board3d.js")).href);
+const { view, loadModel } = page.__probe;
+
+globalThis.fetch = async (file) => {
+  const bytes = readFileSync(file);
+  return { ok: true, arrayBuffer: async () => bytes.buffer.slice(
+    bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
+};
+// What `mount` would have made: enough of a scene for `showBoard` to draw in.
+view.renderer = {};
+view.scene = new THREE.Scene();
+view.camera = new THREE.PerspectiveCamera();
+view.controls = { target: new THREE.Vector3(), update() {} };
+const grey = new THREE.Color(0.5, 0.5, 0.5);
+view.palette = { surface: grey, line: grey,
+                 states: { unknown: grey, high: grey, low: grey, input: grey } };
+
+const out = [];
+const at = new THREE.Vector3();
+for (const { layout, file } of JSON.parse(readFileSync(CASES, "utf-8"))) {
+  page.showBoard(layout, null);
+  await loadModel(layout, { file });
+  const model = view.model;
+  view.board.updateWorldMatrix(true, true);
+  const pads = [];
+  for (const meshes of view.pads.values()) {
+    for (const mesh of meshes) {
+      mesh.getWorldPosition(at);
+      model.worldToLocal(at);
+      const pad = { label: mesh.userData.label, x: at.x, z: at.z, tris: [] };
+      if (mesh.userData.carved) {
+        // A carved pin's triangles are relative to its own place (OH-128).
+        const position = mesh.geometry.getAttribute("position");
+        for (let i = 0; i < position.count; i += 3) {
+          let x = 0, z = 0;
+          for (let k = 0; k < 3; k++) {
+            x += position.getX(i + k);
+            z += position.getZ(i + k);
+          }
+          pad.tris.push([mesh.position.x + x / 3, mesh.position.z + z / 3]);
+        }
+      }
+      pads.push(pad);
+    }
+  }
+  out.push({ board: layout.board, turn: model.rotation.y, scale: model.scale.x,
+             pads });
+}
+console.log(JSON.stringify(out));
+"""
+
+
+def placed_by_the_page(directory: pathlib.Path, cases: list[dict]) -> list[dict]:
+    """The page's own placement of each `{"layout": pad_view, "file": glb}`,
+    run under node; skips without one, as the comparator test above does."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("no node on PATH; the placement is the page's own JS and "
+                    "needs one to run")
+    hooks = directory / "hooks.mjs"
+    probe = directory / "probe.mjs"
+    listing = directory / "cases.json"
+    hooks.write_text(PLACEMENT_HOOKS, encoding="utf-8")
+    probe.write_text(PLACEMENT_PROBE, encoding="utf-8")
+    listing.write_text(json.dumps(cases), encoding="utf-8")
+    done = subprocess.run([node, str(probe), str(STATIC), str(hooks), str(listing)],
+                          capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout.strip().splitlines()[-1])
+
+
+def one_triangle_glb(path: pathlib.Path, pcb: dict[str, float]) -> None:
+    """The narrowest file `readGlb` accepts -- one triangle, one material --
+    carrying the `pcb` extra a turn is read from."""
+    binary = (struct.pack("<9f", 0, 0, 0, 1, 0, 0, 0, 0, 1)
+              + struct.pack("<9f", 0, 1, 0, 0, 1, 0, 0, 1, 0)
+              + struct.pack("<3I", 0, 1, 2))
+    document = json.dumps({
+        "asset": {"version": "2.0", "extras": {"units": "mm", "pcb": pcb}},
+        "buffers": [{"byteLength": len(binary)}],
+        "bufferViews": [{"buffer": 0, "byteOffset": offset, "byteLength": length}
+                        for offset, length in ((0, 36), (36, 36), (72, 12))],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"},
+            {"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"},
+            {"bufferView": 2, "componentType": 5125, "count": 3, "type": "SCALAR"},
+        ],
+        "materials": [{"name": "probe", "pbrMetallicRoughness": {
+            "baseColorFactor": [0.5, 0.5, 0.5, 1.0],
+            "metallicFactor": 0.0, "roughnessFactor": 0.5}}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1},
+                                    "indices": 2, "material": 0}]}],
+    }).encode("utf-8")
+    document += b" " * (-len(document) % 4)
+    body = (struct.pack("<II", len(document), 0x4E4F534A) + document
+            + struct.pack("<II", len(binary), 0x004E4942) + binary)
+    path.write_bytes(struct.pack("<III", 0x46546C67, 2, 12 + len(body)) + body)
+
+
+def test_a_model_drawn_upright_is_not_turned_onto_a_pad_map_drawn_upright(tmp_path):
+    """**OH-215: the turn read one frame and assumed the other.** `placeModel`
+    turned a model a quarter whenever the PAD MAP was taller than wide, under
+    "the model is always landscape" -- true of every fetched mesh and every
+    composed XIAO, false of a board whose vendor drew it upright. The composer
+    keeps the vendor's frame, the board file is read out of the same file, so
+    both were upright and the page turned one of them a quarter off the other.
+
+    Three cases, each a real kind of board here: upright on upright (the
+    manifest boards OH-215 names), lying on upright (a XIAO SMD footprint
+    under a landscape model -- the turn that must survive), and lying on
+    lying. A model of one triangle carrying only the `pcb` extra, so this
+    runs on a fresh checkout with no model built.
+
+    Seen red (2026-10-09): with the turn read from `layout.height >
+    layout.width` alone, the first case came out turned 90 degrees.
+    """
+    upright = tmp_path / "upright.glb"
+    lying = tmp_path / "lying.glb"
+    one_triangle_glb(upright, {"long": 10.0, "short": 20.0, "thickness": 1.6})
+    one_triangle_glb(lying, {"long": 20.0, "short": 10.0, "thickness": 1.6})
+
+    def pad_map(board: str, width: int, height: int) -> dict:
+        return {"board": board, "width": width, "height": height,
+                "px_per_mm": 8.0, "supply": None, "led_parts": None,
+                "pads": [{"label": label, "pin": label, "chip_pin": None,
+                          "x": x, "y": y, "group": "header", "state": "unknown"}
+                         for label, x, y in (("A", 30.0, 30.0), ("B", 70.0, 70.0))]}
+
+    placed = placed_by_the_page(tmp_path, [
+        {"layout": pad_map("upright on upright", 100, 200), "file": str(upright)},
+        {"layout": pad_map("lying on upright", 100, 200), "file": str(lying)},
+        {"layout": pad_map("lying on lying", 200, 100), "file": str(lying)},
+    ])
+    turns = {case["board"]: round(math.degrees(case["turn"])) for case in placed}
+    assert turns == {"upright on upright": 0, "lying on upright": 90,
+                     "lying on lying": 0}, turns
+
+
+def own_header_pads(compose, spec) -> list[tuple[float, float, float, float]]:
+    """The composer's header pads for `spec` as `(x, z, width, height)` in the
+    frame it writes the model in: millimetres from the centre of those pads,
+    x along the vendor's x and z against its y (`slab`). A DIP variant's own
+    pads are the rows `dip_header_elements` hangs there, as composed."""
+    pcb = compose.read_layout(spec.layout)
+    header = [pad for name in spec.headers for pad in pcb.element(name).pads]
+    xs = [pad.x_mm for pad in header]
+    ys = [pad.y_mm for pad in header]
+    centre = ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+    if spec.dip_headers:
+        header = [pad for element in compose.dip_header_elements(header)
+                  for pad in element.pads]
+    return [(pad.x_mm - centre[0], centre[1] - pad.y_mm, pad.width_mm,
+             pad.height_mm) for pad in header]
+
+
+@pytest.fixture(scope="module")
+def composed_boards_as_placed(tmp_path_factory):
+    """Every board drawn from a composed model built here, as the page places
+    it, beside the composer's own header pads and whether its board file
+    names the very file the model was composed from.
+
+    Models and vendor files are gitignored, so this skips where nobody has run
+    `tools/compose_board_3d.py`, as the Uno's model test in test_pin_view does.
+    """
+    index = STATIC / "models" / "index.json"
+    if not index.is_file():
+        pytest.skip(f"no {index}; run tools/compose_board_3d.py")
+    compose = pytest.importorskip("tools.compose_board_3d")
+    from tools.import_3d_model import read_extras
+    from webui import api
+
+    cases = []
+    known = {}
+    for board, entry in json.loads(index.read_text(encoding="utf-8"))["boards"].items():
+        model = STATIC / (entry.get("file") or "/").lstrip("/")
+        if not model.is_file():
+            continue
+        extras = read_extras(model)
+        if not extras.get("composed"):
+            continue
+        spec = next(s for s in compose.COMPOSITIONS if s.board == extras["board"])
+        if not spec.layout.is_file():
+            continue
+        stated = json.loads((STATIC.parent / "boards" / f"{board}.json")
+                            .read_text(encoding="utf-8"))["source"].get("file", "")
+        known[board] = (own_header_pads(compose, spec),
+                        pathlib.PurePosixPath(stated).name == extras["source"])
+        cases.append({"layout": api.pad_view(board, None, None), "file": str(model)})
+    if not cases:
+        pytest.skip("no composed model is built here with its vendor file "
+                    "fetched; run tools/compose_board_3d.py")
+    placed = placed_by_the_page(tmp_path_factory.mktemp("placed"), cases)
+    return [(case, *known[case["board"]]) for case in placed]
+
+
+def on_copper(x: float, z: float, pads, reach) -> bool:
+    """Whether (x, z) is within `reach(width, height)` of one of `pads`."""
+    return any(math.hypot(x - px, z - pz) <= reach(width, height)
+               for px, pz, width, height in pads)
+
+
+def inscribed(width: float, height: float) -> float:
+    """The circle a pad's narrower side spans: inside it is on that pad's
+    copper at any rotation, and no pad here is within it of its neighbour."""
+    return min(width, height) / 2
+
+
+def test_every_composed_board_lands_its_pads_on_the_models_own_header_pads(
+        composed_boards_as_placed):
+    """**OH-215, held over every board a composed model is drawn for.**
+    Placed as the page places it, each board-file pad is on the copper of one
+    of the model's own header pads -- the ones the composer centred it on.
+
+    Two claims, because two kinds of board are here. Where the board file was
+    read out of the very file the model was composed from -- the Uno and
+    every manifest board -- EVERY pad must land. A XIAO's board file is
+    Seeed's footprint, which also carries underside pads no header pad
+    answers for; there the page's turn must land at least as many pads as any
+    other quarter turn would, which is the claim a wrong turn breaks.
+
+    Tolerance: inside the circle the pad's narrower side spans (`inscribed`).
+    The PCBCUPID Glyph Mini sits 0.73 mm off on every pad -- inside it --
+    because the composer centres on its castellations as well as its pins; a
+    centring offset, not a turn, recorded on OH-215.
+
+    Seen red (2026-10-09): with the turn read from the pad map alone, the six
+    boards OH-215 names were the six failures, each landing 0 or 4 of its
+    pads where one further quarter turn landed every one.
+    """
+    quarters = ((1, 0), (0, 1), (-1, 0), (0, -1))
+    wrong = []
+    for case, own, same_file in composed_boards_as_placed:
+        # A further turn of the model about its own origin moves each pad's
+        # place in the model's frame by the opposite turn; all four are tried.
+        landed = [sum(on_copper(pad["x"] * c + pad["z"] * s,
+                                pad["z"] * c - pad["x"] * s, own, inscribed)
+                      for pad in case["pads"]) for c, s in quarters]
+        whole = len(case["pads"])
+        if landed[0] < max(landed) or (same_file and landed[0] < whole):
+            wrong.append(f"{case['board']}: turned "
+                         f"{math.degrees(case['turn']):.0f} deg, {landed[0]} of "
+                         f"{whole} pads on the model's own header pads; turned "
+                         f"a further 0/90/180/270 deg: {landed}")
+    assert not wrong, "\n".join(wrong)
+
+
+def test_carvepins_takes_only_metal_standing_on_the_models_own_header_pads(
+        composed_boards_as_placed):
+    """**What a wrong turn does next** (OH-215): `carvePins` turns every metal
+    triangle within `PIN_REACH_MM` of a pad into that pad's pin, so a pad
+    turned off its header carves a component's legs instead -- or nothing,
+    and keeps an invisible collider where its pin should be.
+
+    On every board whose pads ALL land (`test_every_composed_board_lands...`
+    says which: those read from the model's own file, and the XIAO DIPs),
+    every pad must carve a pin, and every triangle carved must stand on the
+    copper of one of the model's own header pads -- within half its diagonal,
+    so on it at any rotation. A XIAO SMD's underside pads carve whatever
+    topside metal stands over them; that is a separate finding, recorded on
+    OH-215 and not asserted here.
+
+    Seen red (2026-10-09), twice. With the turn read from the pad map alone,
+    the six boards OH-215 names were the six failures: 3 to 19 pads each
+    carved no pin, and 50 to 2202 triangles each were taken off every header
+    pad. And with the turn restored but `PIN_REACH_MM` at 3.0 -- past half
+    the 2.54 mm pitch, so a pad reaches its neighbour's metal -- every board
+    this covers failed, the Uno with 8 such triangles and each XIAO DIP with
+    thousands; the turn tests stayed green, as they should.
+    """
+    wrong = []
+    for case, own, same_file in composed_boards_as_placed:
+        pads = case["pads"]
+        if not same_file and not all(
+                on_copper(pad["x"], pad["z"], own, inscribed) for pad in pads):
+            continue
+        bare = [pad["label"] for pad in pads if not pad["tris"]]
+        stray = [(pad["label"], x, z) for pad in pads for x, z in pad["tris"]
+                 if not on_copper(x, z, own, lambda w, h: math.hypot(w, h) / 2)]
+        if bare or stray:
+            wrong.append(f"{case['board']}: {len(bare)} of {len(pads)} pads "
+                         f"carved no pin {bare[:6]}; {len(stray)} triangles "
+                         f"carved off every header pad, e.g. {stray[:3]}")
+    assert not wrong, "\n".join(wrong)
