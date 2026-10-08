@@ -2,11 +2,18 @@
 id: OH-184
 title: Back-side silkscreen on composed boards is mirrored twice, and the vendor's
   own Gerber says so
-status: open
+status: in-progress
 priority: P2
 created: '2026-09-29'
 touches:
 - docs/tickets/OH-184-*
+- tools/kicad.py
+- tests/rules/test_kicad.py
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
+- tools/import_3d_model.py
+- tools/eagle.py
+- tests/rules/test_eagle.py
 ---
 
 Found by OH-182's approving re-review, 2026-09-29. KiCad stores a flipped footprint's graphics already flipped, the same as its pads, and `kicad._on_board` mirrors them a second time. OH-182 fixed this for pads (`kicad.pad_on_board`) and deliberately kept the graphics mirror because removing it changes composed output. The evidence now says the composed output is what is wrong.
