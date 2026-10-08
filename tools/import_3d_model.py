@@ -734,7 +734,7 @@ DEFAULT_FINISH = Finish(
 #:     the nRF54LM20A's own STEP uses it for a dot a tenth of a millimetre
 #:     across that nothing here identifies.
 #:   * `#272b27` -- that file's bare silicon dies, and on the MG24's and the
-#:     nRF54LM20A's own STEPs the ends of a part nothing here identifies.
+#:     nRF54LM20A's own STEPs the base of a part nothing here identifies.
 #:   * `#ebebe5` -- that file's RGB LED diffusers, and the RP2040 STEP's faces
 #:     the paragraph below could not identify.
 #:   * `#c8c8c8`, `#868686` -- the gull-wing leads of an eight-lead package
