@@ -1,7 +1,7 @@
 ---
 id: OH-209
 title: The XIAO RP2350 SMD's BOOT pad says what Seeed's own file shows it reaches
-status: in-review
+status: done
 priority: P2
 created: '2026-10-08'
 touches:
@@ -36,3 +36,5 @@ COMMIT: ca94d31.
 TWINS after: "18 of 37 boards hold all four; by layer: geometry 37, model 29 (7 not built here), pins 34, runs 25" (was 17 and pins 33). XIAO-RP2350-SMD reads `footprint  composed  19+3/22  RP2350` and holds all four; XIAO-RP2350-DIP unchanged at 19/19. VERIFIED in lane3 at ca94d31: the four named files 252 passed, 2 skipped; check_ticket_claims, check_facts and check_board_claims OK; full suite "2 failed, 2478 passed, 39 skipped, 1 warning in 459.40s (0:07:39)", the two failures the OCP pair in tests/rules/test_import_3d_model.py ("No module named 'OCP'"), pytest exit 1 for that reason alone.
 
 FOUND AND NOT TAKEN. The SMD's EN pad (25) lands the same way on TP4, net `/04 RP2350/RUN`, which carries the RP2350's RUN pad and the reset button K2. `SUPPLY_LABELS` lists EN, so the TWINS pins layer does not count it, and it keeps the generic sentence; writing it is outside this ticket. The module's own underside silkscreen also prints `BOOT` and `RST` beside those test points; not relied on.
+
+**Note 2026-10-08:** DONE 2026-10-08. Merged to master by fast-forward at 62631cf (lane3). TWINS on master 25 of 37: XIAO-RP2350-SMD reads 19+3/22 and holds all four. REVIEW: an independent review, MERGE: BOOT -> TP2 reproduced by position alone with the reviewer's own parser (next copper 2.536 mm away), the QSPI_SS net, R4 to K1 to GND, the schematic's BOOT beside TP2, and the datasheet's §5.2.8 and §5.2.2 wording against the pinned release; eleven mutants each turned the new test red. Its lows, not done: the landing tolerance (< 0.01 mm) is 1.1 micrometres above the worst measured distance and the separation from the next copper is not asserted; the frame check compares x and not the side of y (a mirrored numbering is still caught later by the signal-net loop). VERIFIED on master at 62631cf: full suite 2 failed (the OCP pair), 2479 passed, 38 skipped.
