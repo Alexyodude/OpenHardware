@@ -273,10 +273,11 @@ def collect_boards(boards_dir: pathlib.Path = BOARDS_DIR) -> list[Board]:
             raise InventoryError(
                 f"{path}: expected a `pads` list, got {type(pads).__name__}"
             )
-        # On an imported board `source` names the vendor file its pads were
-        # read from. On the Arduino Uno, whose pads were traced from
-        # PICSimLab's artwork, it names the vendor file they are checked
-        # against instead (tests/rules/test_uno_geometry.py). A board file
+        # On an imported board `source` names the vendor file, or the
+        # footprint in one, its pads were read from: a XIAO's names a
+        # footprint in Seeed's library. On the Arduino Uno, whose pads were
+        # traced from PICSimLab's artwork, it names the vendor file they are
+        # checked against instead (tests/rules/test_uno_geometry.py). A board file
         # with no `source` has its provenance reported as missing rather than
         # defaulted to a vendor name, because "we do not know where this came
         # from" is the finding.
