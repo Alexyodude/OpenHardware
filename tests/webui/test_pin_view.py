@@ -844,7 +844,7 @@ def test_a_running_board_whose_module_reads_no_pins_still_says_one_is_running():
     could arrive as `None` and report that nothing was running -- every
     modelled pad reading "no program running" while a program ran.
 
-    Nothing has that shape today. All six modules with `PIN_NAMES` also have
+    Nothing has that shape today. Every module with `PIN_NAMES` also has
     `pin_states`, so this was a comment claiming a property of the type where
     only a property of today's board modules held. **OH-160 is precisely the
     shape that produces one without the other**: it generates `PIN_NAMES` from
@@ -893,7 +893,7 @@ def test_a_running_board_whose_module_reads_no_pins_still_says_one_is_running():
         if module is not None and getattr(module, "PIN_NAMES", None)
     )
     assert with_names == ["atmega328p", "esp32c3", "esp32c5", "esp32c6",
-                          "rp2040", "samd21"], with_names
+                          "rp2040", "rp2350", "samd21"], with_names
     assert all(
         hasattr(api.description_for(board), "pin_states")
         for board in catalogue.board_names()
@@ -931,7 +931,10 @@ def test_a_pad_names_its_chip_pin_on_a_board_with_no_module_at_all():
     # re-imported from a different source shows up here as a change. The MG24
     # names by port and bit because Silicon Labs publishes no flat numbering,
     # which is why `chip_pin` is the string and `chip_index` the extra.
-    for board, expect in (("XIAO-MG24-SMD", "PC1"), ("XIAO-RP2350-DIP", "GPIO27")):
+    #
+    # The second witness was `XIAO-RP2350-DIP` until OH-157 gave the RP2350 a
+    # module; the ESP32-S3 has none and numbers its GPIOs flat, as it did.
+    for board, expect in (("XIAO-MG24-SMD", "PC1"), ("XIAO-ESP32-S3-DIP", "GPIO2")):
         layout = pinmap.load(board)
         assert layout is not None, board
         # The loader keeps it.
@@ -948,13 +951,13 @@ def test_a_pad_names_its_chip_pin_on_a_board_with_no_module_at_all():
             v for v in shown.values() if v))
     # And the flat index, which is the half that is NOT always there. Silicon
     # Labs numbers the MG24 by port and bit and publishes nothing flat, so
-    # every one of its pads carries a chip pin and no index; the RP2350 has
+    # every one of its pads carries a chip pin and no index; the ESP32-S3 has
     # both. A reader who treats `chip_index` as the answer gets nulls on four
     # families, which is why `chip_pin` is the string the page shows.
     mg24 = {pad.label: pad.chip_index for pad in pinmap.load("XIAO-MG24-SMD").pads}
     assert set(mg24.values()) == {None}, mg24
-    rp = {pad.label: pad.chip_index for pad in pinmap.load("XIAO-RP2350-DIP").pads}
-    assert rp["D1"] == 27, rp
+    s3 = {pad.label: pad.chip_index for pad in pinmap.load("XIAO-ESP32-S3-DIP").pads}
+    assert s3["D1"] == 2, s3
 
 
 def test_the_board_module_wins_where_it_names_a_pin_and_the_file_fills_the_rest():
