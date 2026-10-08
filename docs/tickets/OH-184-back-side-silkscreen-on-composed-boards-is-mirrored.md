@@ -14,6 +14,8 @@ touches:
 - tools/import_3d_model.py
 - tools/eagle.py
 - tests/rules/test_eagle.py
+- tools/import_board.py
+- tests/rules/test_import_board.py
 ---
 
 Found by OH-182's approving re-review, 2026-09-29. KiCad stores a flipped footprint's graphics already flipped, the same as its pads, and `kicad._on_board` mirrors them a second time. OH-182 fixed this for pads (`kicad.pad_on_board`) and deliberately kept the graphics mirror because removing it changes composed output. The evidence now says the composed output is what is wrong.
