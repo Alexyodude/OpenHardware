@@ -2,7 +2,7 @@
 id: OH-198
 title: A KiCad 5 board file reads, so the Olimex ESP32-C6-EVB and Olimex's older boards
   can be rows
-status: in-review
+status: done
 priority: P2
 created: '2026-09-30'
 touches:
@@ -132,3 +132,5 @@ VERIFIED. The six named rule and webui files under python 3.14, nothing pointed 
 RED ON PURPOSE, each restored and checked by sha256 or by git stash pop: (2) the new test against 6ea7b0a's kicad.py, red, and each of its cases run alone against that file, the old message matching none of them; (3) board_version answering None for every tree (the manifest test red at its version assertion, None == '20171130'; the C6-EVB version test red, its board refused), board_version answering 20171130 for every tree (the PoE test red, revision M read as KiCad 5; the C6-EVB version test red), and the C6-EVB's two files handed to _c6_evb_boards the wrong way round (the version test red at its assertion, ('20221018', '20171130') == ('20171130', '20221018')). (1) and (4) are prose that no test reads.
 
 VERIFIED. python -m pytest -q -p no:cacheprovider tests/rules/test_kicad.py tests/rules/test_board_manifest.py tests/rules/test_board_sources.py: "177 passed in 34.58s". tests/rules/test_compose_board_3d.py under miniconda: "192 passed in 93.90s (0:01:33)". check_ticket_claims OK; check_facts OK; check_licenses OK. The full suite was not run: the only behaviour changed is _kicad5_arc's refusal message, which no test outside test_kicad.py asserts, and no test reads PROVENANCE.md or the composer's docstring.
+
+**Note 2026-10-08:** DONE 2026-10-08. Merged to master by fast-forward at 9780c25 (lane4): phase 1 at 30e113b, phase 2 and its two review rounds after. The olimex-esp32-c6-evb source fetched into main by get_board_sources.py and the board composed there with miniconda's python. TWINS on master 26 of 38: the Olimex ESP32-C6-EVB reads file, composed, 5+1/6, ESP32-C6, holding all four. REVIEW: phase 1 independent review MERGE; phase 2 independent review MERGE AFTER FIXES (the false one-header sentence, a truncated KiCad quote, and lows), its confirm review MERGE AFTER FIXES on prose (the count of KiCad 5.1.12's readers of virtual), both fixed. Left open for the owner: whether a model of one module may stand for a footprint that places another's (U3, refused under OH-187's disagreement rule, the reviewer agreeing), and the CERN OHL v1.2 obligations recorded in PROVENANCE §2g. VERIFIED on master at 9780c25: full suite 2 failed (the OCP pair), 2518 passed, 38 skipped. The composer, its tests and the importer return to OH-163.
