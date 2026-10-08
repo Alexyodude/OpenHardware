@@ -1418,6 +1418,136 @@ def test_a_kicad_5_arc_stated_otherwise_is_refused_by_name(tmp_path):
         read_board(tmp_path / "center.kicad_pcb", text=text)
 
 
+# --- the reader's edges, from phase 1's review (OH-198) ---------------------------
+
+#: A board of a KiCad nightly between 5 and 6: `(footprint ...)` already, and
+#: its arcs still KiCad 5's. `{version}` and `{arc}` are filled per test.
+ARC_NIGHTLY = """(kicad_pcb (version {version}) (host pcbnew 5.99)
+  (footprint T:P (layer F.Cu) (at 0 0)
+    (fp_text reference P1 (at 0 0) (layer F.SilkS))
+    (pad 1 smd rect (at 0 0) (size 1 1) (layers F.Cu))
+    {fp_arc})
+  {arc})
+"""
+
+
+def test_a_model_hidden_as_kicad_6_7_and_8_write_it_is_hidden():
+    """**KiCad 6 and 7 write a hidden model as a bare `hide`** after its path
+    (pcb_plugin.cpp at 7.0.0), KiCad 8 as `(hide yes)`, and KiCad 8's reader
+    takes `(hide)` and `(hide true)` as hidden too and `(hide no)` as shown
+    (`parseMaybeAbsentBool`). Only `(hide yes)` read as hidden until OH-198,
+    so a KiCad 6 or 7 alternate read as the part itself."""
+    def hidden(model: str) -> bool:
+        (stated,) = _models_of(parse_sexp(f"(footprint T:P (at 0 0) {model})"))
+        return stated.hidden
+
+    for model in ('(model "a.wrl" hide (offset (xyz 0 0 0)))', "(model a.wrl hide)",
+                  "(model a.wrl (hide))", "(model a.wrl (hide yes))",
+                  "(model a.wrl (hide true))"):
+        assert hidden(model), model
+    for model in ("(model a.wrl)", "(model a.wrl (hide no))", "(model a.wrl (hide false))",
+                  "(model hide (offset (xyz 0 0 0)))"):
+        assert not hidden(model), model
+
+
+def test_a_nightlys_legacy_arc_is_read_as_kicad_5s_is(tmp_path):
+    """**Every file up to version 20210925 states an arc by its centre, its
+    start and its sweep** (`LEGACY_ARC_FORMATTING`, KiCad 7.0), a nightly's
+    between 5 and 6 as well as KiCad 5's, and KiCad 7 reads them all so. A
+    nightly's arcs, on the board and in a footprint, read as KiCad 5's same
+    arcs do; read as written they were dropped without a word."""
+    fp_arc = "(fp_arc (start 0 0) (end 1 0) (angle 90) (layer F.SilkS) (width 0.1))"
+    arc = "(gr_arc (start 0 0) (end 2 0) (angle -90) (layer Edge.Cuts) (width 0.05))"
+    for version in ("20210108", "20210925"):
+        nightly = read_board(tmp_path / "nightly.kicad_pcb", text=ARC_NIGHTLY.format(
+            version=version, fp_arc=fp_arc, arc=arc))
+        (outline,) = nightly.arcs
+        assert (outline.x1_mm, outline.y1_mm, outline.xm_mm, outline.ym_mm,
+                outline.x2_mm, outline.y2_mm) == (0.0, -2.0, 1.414214, -1.414214, 2.0, 0.0)
+        (footprint_arc,) = children(children(board_tree(
+            tmp_path / "nightly.kicad_pcb", text=ARC_NIGHTLY.format(
+                version=version, fp_arc=fp_arc, arc=arc)), "footprint")[0], "fp_arc")
+        assert footprint_arc[1:4] == [["start", "1", "0"],
+                                      ["mid", "0.707107", "0.707107"],
+                                      ["end", "0.0", "1.0"]], (version, footprint_arc)
+
+
+def test_an_arc_with_no_mid_after_version_20210925_is_refused_by_name(tmp_path):
+    """After 20210925 KiCad writes an arc as start, mid and end, and its
+    reader takes one with no mid as an error. Such an arc -- an `angle` and
+    no `mid`, as a nightly of the old format would have written it -- is
+    refused naming the file, the version and the arc, rather than dropped."""
+    for fp_arc, arc in (
+            ("(fp_arc (start 0 0) (end 1 0) (angle 90) (layer F.SilkS))",
+             "(gr_arc (start 0 0) (mid 1 1) (end 2 0) (layer Edge.Cuts))"),
+            ("(fp_line (start 0 0) (end 1 0) (layer F.SilkS))",
+             "(gr_arc (start 0 0) (end 2 0) (angle 90) (layer Edge.Cuts))")):
+        text = ARC_NIGHTLY.format(version="20210926", fp_arc=fp_arc, arc=arc)
+        with pytest.raises(KicadError, match=r"in a file of version 20210926 reads "
+                                             r".*'angle'.*after version 20210925"):
+            read_board(tmp_path / "late.kicad_pcb", text=text)
+
+
+def test_a_kicad_5_arc_of_no_sweep_is_refused_by_name(tmp_path):
+    """KiCad 5.1.6 and later drop an `fp_arc` whose sweep is zero or not a
+    number ("Drop 0 and NaN angles", `std::isnormal`, pcb_parser.cpp at
+    5.1.12). There is no arc to put three points on, and this reader drew a
+    point where KiCad draws nothing: refused, naming the sweep."""
+    for angle, said in (("0", "0.0"), ("nan", "nan")):
+        text = ARC5.replace(
+            "(pad 1 smd rect",
+            f"(fp_arc (start 0 0) (end 1 0) (angle {angle}) (layer F.SilkS) (width 0.1))\n"
+            f"    (pad 1 smd rect").format(
+            arc="(gr_line (start 0 0) (end 5 0) (layer Edge.Cuts) (width 0.05))")
+        with pytest.raises(KicadError, match=rf"a \(fp_arc \.\.\.\) in a KiCad 5 file "
+                                             rf"\(version 20171130\) sweeps {said} degrees"):
+            read_board(tmp_path / "flat.kicad_pcb", text=text)
+
+
+def test_the_esp32_poes_kicad_5_back_side_headers_sit_on_their_own_copper():
+    """**`pad_on_board` held by real copper on a KiCad 5 board** (OH-198),
+    where the hand-written twin held it before. Each KiCad 5 revision of
+    Olimex's ESP32-PoE places EXT1 and EXT2 on the underside turned 270, and
+    every one of their twenty pads has a track end or a via of its own net
+    on its centre only as `pad_on_board` puts it: turned and moved, not
+    mirrored. Mirrored first, they miss by up to 22.86 mm."""
+    import math
+
+    root = REPO / "third_party" / "olimex-esp32-poe" / "HARDWARE"
+    files = [path for path in sorted(root.rglob("*.kicad_pcb"))
+             if path.read_text(encoding="utf-8")[:40].startswith(
+                 "(kicad_pcb (version 20171130)")] if root.is_dir() else []
+    if not files:
+        pytest.skip(f"SKIPPED: no KiCad 5 board under {root}; python "
+                    f"tools/get_board_sources.py olimex-esp32-poe")
+    for path in files:
+        tree = board_tree(path)
+        names = {node[1]: node[2] for node in children(tree, "net") if len(node) > 2}
+        ends: dict[str, list[tuple[float, float]]] = {}
+        for tag, points in (("segment", ("start", "end")), ("via", ("at",))):
+            for node in children(tree, tag):
+                net = [child for child in node if isinstance(child, list)
+                       and child[0] == "net"][0][1]
+                for point in points:
+                    (at,) = [child for child in node if isinstance(child, list)
+                             and child[0] == point]
+                    ends.setdefault(names.get(net, net), []).append(
+                        (float(at[1]), float(at[2])))
+        headers = [placed for placed in read_board(path).placements
+                   if placed.reference in ("EXT1", "EXT2")]
+        assert [(placed.back, placed.rotation_deg) for placed in headers] == [
+            (True, 270.0)] * 2, path
+        off, mirrored = [], []
+        for placed in headers:
+            for pad in placed.pads:
+                for into, shown in ((off, pad), (mirrored, dataclasses.replace(
+                        pad, x_mm=-pad.x_mm))):
+                    x, y = pad_on_board(placed, shown)
+                    into.append(min(math.hypot(x - a, y - b) for a, b in ends[pad.net]))
+        assert len(off) == 20 and max(off) < 0.01, (path, off)
+        assert max(mirrored) > 20, (path, mirrored)
+
+
 # --- the ESP32-C6-EVB's KiCad 5 board against its KiCad 7 copy -------------------
 #
 # **Two files from one vendor, read by two paths through this reader.** Olimex

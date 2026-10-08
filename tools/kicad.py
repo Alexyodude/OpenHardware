@@ -455,7 +455,8 @@ class StatedModel:
     """
 
     path: str
-    #: `(hide yes)`. KiCad's own way of saying "an alternate, not this part".
+    #: `hide`, `(hide)` or `(hide yes)`: KiCad's own way of saying "an
+    #: alternate, not this part" (`_models_of` says where each comes from).
     hidden: bool = False
     #: `(offset ...)`, `(rotate ...)` and `(scale ...)`, in the block's own
     #: order and units -- millimetres and degrees. Carried rather than applied,
@@ -1027,6 +1028,16 @@ def _models_of(node: list) -> tuple[StatedModel, ...]:
         if len(node_model) < 2:
             continue
         hide = first(node_model, "hide")
+        # **Three spellings of hidden, and one of shown** (OH-198). KiCad 6
+        # and 7 write a hidden model as a bare `hide` after its path
+        # (`bs3D->m_Show ? "" : " hide"`, pcb_plugin.cpp at 7.0.0), and
+        # KiCad 8 as `(hide yes)`; KiCad 8's own reader takes `hide`,
+        # `(hide)`, `(hide yes)` and `(hide true)` as hidden and `(hide no)`
+        # or `(hide false)` as shown (`parseMaybeAbsentBool`,
+        # pcb_io_kicad_sexpr_parser.cpp at 8.0.0).
+        hidden = ("hide" in [child for child in node_model[2:] if isinstance(child, str)]
+                  or (hide is not None
+                      and (len(hide) == 1 or str(hide[1]) in ("yes", "true"))))
         offset = triple("offset", None)
         if offset is None:
             # **`(at (xyz ...))` is the same offset in INCHES** (OH-198), and
@@ -1041,12 +1052,12 @@ def _models_of(node: list) -> tuple[StatedModel, ...]:
                       else (0.0, 0.0, 0.0))
         out.append(StatedModel(
             path=str(node_model[1]),
-            # `(hide yes)`. Anything else -- including its absence -- is
-            # visible, which is the reading that keeps the SAMD21 alternate
-            # dangerous rather than quietly safe. A KiCad 5 model has no way
-            # to be hidden: 5.1's `parse3DModel` takes at, offset, scale and
-            # rotate and nothing else.
-            hidden=bool(hide and len(hide) > 1 and str(hide[1]) == "yes"),
+            # Any spelling above. Nothing at all is visible, which is the
+            # reading that keeps the SAMD21 alternate dangerous rather than
+            # quietly safe. A KiCad 5 model has no way to be hidden: 5.1's
+            # `parse3DModel` takes at, offset, scale and rotate and nothing
+            # else.
+            hidden=hidden,
             offset=offset,
             rotate=triple("rotate", (0.0, 0.0, 0.0)),
             scale=triple("scale", (1.0, 1.0, 1.0)),
@@ -1093,9 +1104,20 @@ def _models_of(node: list) -> tuple[StatedModel, ...]:
 #: parameter". The only version whose `(module ...)` is read.
 KICAD5_VERSION = "20171130"
 
+#: The last board version whose arcs are stated by their centre, their start
+#: and their sweep: `LEGACY_ARC_FORMATTING` in pcbnew/plugins/kicad/
+#: pcb_plugin.h at 7.0.0, "These were the last to use old arc formatting".
+#: KiCad 7's reader reads every `gr_arc` and `fp_arc` of a file up to it that
+#: way and no other (pcb_parser.cpp at 7.0.0, `m_requiredVersion <=
+#: LEGACY_ARC_FORMATTING`) -- KiCad 5's files, and the nightlies' between 5
+#: and 6 that already write `(footprint ...)` (OH-198) -- and after it reads
+#: an arc with no `mid` as an error (`Expecting( T_mid )`).
+LEGACY_ARC_VERSION = 20210925
 
-def _kicad5_arc(node: list, path: pathlib.Path) -> list:
-    """A KiCad 5 `gr_arc` or `fp_arc` as the three points KiCad 6 stores.
+
+def _kicad5_arc(node: list, path: pathlib.Path, version: str = KICAD5_VERSION) -> list:
+    """A legacy `gr_arc` or `fp_arc` as the three points KiCad 6 stores --
+    one of a KiCad 5 file, or of any file up to `LEGACY_ARC_VERSION`.
 
     **KiCad 5 stored an arc as its centre, its start and its sweep.**
     `(gr_arc (start CX CY) (end SX SY) (angle A) ...)`: in its own parser's
@@ -1115,15 +1137,28 @@ def _kicad5_arc(node: list, path: pathlib.Path) -> list:
     true )`), so the arc reads as KiCad's own upgrade of the file writes it.
     Each computed point is rounded to the nanometre, the integer unit KiCad
     holds a board in and rounds that end to (`KiROUND`).
+
+    **A sweep of nothing is refused by name** (OH-198), zero or not a number:
+    there is no arc to put three points on, and KiCad 5.1.6 and later drop
+    such an `fp_arc` as one that "can corrupt/crash" it (`std::isnormal(
+    em->GetAngle() )`, pcb_parser.cpp at 5.1.12), where this reader would
+    otherwise have drawn a point.
     """
     centre, start, sweep = first(node, "start"), first(node, "end"), first(node, "angle")
     c, s, a = (_floats(part) if part is not None else [] for part in (centre, start, sweep))
+    where = f"a {'KiCad 5 ' if version == KICAD5_VERSION else ''}file (version {version})"
     if len(c) < 2 or len(s) < 2 or not a:
         raise KicadError(
-            f"{path}: a ({head(node)} ...) in a KiCad 5 file (version "
-            f"{KICAD5_VERSION}) reads {node!r}; KiCad 5 writes an arc as "
-            f"(start CX CY) (end SX SY) (angle A), and an arc stated otherwise "
+            f"{path}: a ({head(node)} ...) in {where} reads {node!r}; KiCad "
+            f"writes an arc as (start CX CY) (end SX SY) (angle A) up to "
+            f"version {LEGACY_ARC_VERSION}, and an arc stated otherwise there "
             f"is not read")
+    if not (math.isfinite(a[0]) and a[0] != 0.0):
+        raise KicadError(
+            f"{path}: a ({head(node)} ...) in {where} sweeps {a[0]!r} degrees, "
+            f"which is no arc; KiCad 5.1.6 and later drop an fp_arc of a sweep "
+            f"that is zero or not a number, and one is refused here, not read: "
+            f"{node!r}")
 
     def turned(degrees: float) -> list[str]:
         turn = math.radians(degrees)
@@ -1172,14 +1207,29 @@ def _kicad5_copper(tree: list, path: pathlib.Path) -> None:
                 f"{named!r}; a renamed KiCad 5 copper layer is not read")
 
 
+def _stated_arc(node: list, path: pathlib.Path, version: str | None) -> list:
+    """An arc of a file after `LEGACY_ARC_VERSION`, as it stands, or refused
+    by name where it states no `mid`: KiCad's own reader takes no such arc
+    there (OH-198), and the readers above would drop it without a word."""
+    if first(node, "mid") is None:
+        raise KicadError(
+            f"{path}: a ({head(node)} ...) in a file of version {version} reads "
+            f"{node!r}; after version {LEGACY_ARC_VERSION} KiCad writes an arc as "
+            f"(start ...) (mid ...) (end ...) and reads one with no mid as an "
+            f"error, and one is refused here, not dropped")
+    return node
+
+
 def board_tree(path: pathlib.Path, text: str | None = None) -> list:
     """One `.kicad_pcb`'s tree, spelled as KiCad 6 and later spell it.
 
-    A KiCad 6 or later file is returned as `parse_sexp` reads it. A KiCad 5
-    file -- version 20171130 -- comes back with each `(module ...)` a
-    `(footprint ...)` and each arc its three points; see the notes above
-    `KICAD5_VERSION`. A `(module ...)` in any other version is refused by
-    name, since what that version means by it has not been checked.
+    A KiCad 5 file -- version 20171130 -- comes back with each `(module ...)`
+    a `(footprint ...)`; see the notes above `KICAD5_VERSION`. A `(module
+    ...)` in any other version is refused by name, since what that version
+    means by it has not been checked. Each arc of a file up to
+    `LEGACY_ARC_VERSION` comes back as its three points (`_kicad5_arc`), as
+    KiCad 7 reads it, and one of a later file with no `mid` is refused by
+    name. Everything else is as `parse_sexp` reads it.
 
     `text`, where given, is read in place of the file at `path`, as
     `read_board` takes it.
@@ -1197,17 +1247,21 @@ def board_tree(path: pathlib.Path, text: str | None = None) -> list:
                 f"of version {stated}; (module ...) is read as KiCad 5 writes "
                 f"it, at version {KICAD5_VERSION}, and what version {stated} "
                 f"means by it has not been checked")
-        return tree
-    _kicad5_copper(tree, path)
+    else:
+        _kicad5_copper(tree, path)
+    legacy = isinstance(stated, str) and stated.isdigit() and int(stated) <= LEGACY_ARC_VERSION
+
+    def arc(node: list) -> list:
+        return _kicad5_arc(node, path, stated) if legacy else _stated_arc(node, path, stated)
+
     out: list = []
     for node in tree:
-        if isinstance(node, list) and head(node) == "module":
+        if isinstance(node, list) and head(node) in ("module", "footprint"):
             node = ["footprint", *(
-                _kicad5_arc(child, path)
-                if isinstance(child, list) and head(child) == "fp_arc" else child
+                arc(child) if isinstance(child, list) and head(child) == "fp_arc" else child
                 for child in node[1:])]
         elif isinstance(node, list) and head(node) == "gr_arc":
-            node = _kicad5_arc(node, path)
+            node = arc(node)
         out.append(node)
     return out
 
