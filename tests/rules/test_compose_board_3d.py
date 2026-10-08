@@ -5668,10 +5668,11 @@ def test_a_part_olimex_values_na_is_not_fitted(tmp_path):
 
 def test_a_kicad_5_part_marked_virtual_is_not_read_as_not_fitted(tmp_path):
     """**KiCad 5's `(attr virtual)` says a part is not placed by machine**,
-    not that it is not there (OH-198): KiCad 5.1 reads it only to leave the
-    part out of the position file. So a footprint with pads that KiCad 5
-    marks virtual is stated as any other, where KiCad 7's `exclude_from_bom`
-    on the same part refuses it (`test_a_kicad_part_its_own_file_says_is_not_fitted_is_refused`).
+    not that it is not there (OH-198): KiCad 5.1 leaves the part out of the
+    position file, and its own 3D viewer draws the part's model by default.
+    So a footprint with pads that KiCad 5 marks virtual is stated as any
+    other, where KiCad 7's `exclude_from_bom` on the same part refuses it
+    (`test_a_kicad_part_its_own_file_says_is_not_fitted_is_refused`).
     Olimex's ESP32-PoE is why it matters: its KiCad 5 revisions mark
     LAN_CON1, the RJ45 jack, virtual."""
     path = tmp_path / "VIRTUAL.kicad_pcb"

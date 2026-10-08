@@ -3805,12 +3805,19 @@ UNDECIDED = frozenset({"TBD"})
 #: the whole value or before what the part would be -- `NA`, `NA/R0402`,
 #: `NA(2.2k/R0402)`, `NA(HN1x10)` on the ESP32-C6-EVB (OH-198). Olimex's own
 #: ESP32-PoE log, `HARDWARE/Revision-changes.txt` in the olimex-esp32-poe
-#: source, says what such a part is for: "R16(NA(10k/R0402)) added just in
-#: case" (revision D) and "Added L3 ferrite bead, NA(FB0805/600R/2A), ... in
-#: case there is a need to connect the shield to the GND" (revision C). That
-#: the C6-EVB's file means the same by it is A JUDGEMENT. Read of ANY part,
-#: since it names nothing a connector or a switch could otherwise be, as NC
-#: does; and in capitals only, since `nA` is a current.
+#: source, shows that a part so valued is not there, because valuing one NA
+#: changed what the board does: "R34 changed from 49.9R/1%/R0402 to
+#: NA(49.9R/1%/R0402) -> Default Class 0 (0.44 to 12.95 W) instead of Class
+#: 3 (6.49 to 12.95 W)!!!" (revision C, line 256; revision B2's entry, line
+#: 263, says the same). It also says what such a part is for:
+#: "R16(NA(10k/R0402)) added just in case" (revision D) and "Added L3
+#: ferrite bead, NA(FB0805/600R/2A), ... in case there is a need to connect
+#: the shield to the GND" (revision C). That the C6-EVB's file means the
+#: same by it is A JUDGEMENT. Read of ANY part, whoever the vendor, in an
+#: EAGLE schematic (`stated_kinds`) and a KiCad board file
+#: (`kicad_statements`) alike, since it names nothing a connector or a
+#: switch could otherwise be, as NC does; and in capitals only, since `nA`
+#: is a current.
 NOT_ASSEMBLED = re.compile(r"\s*NA\s*(?:[/(]|$)")
 #: What a DEVICE's name says when the vendor places a part that is not
 #: fitted: SparkFun's CONN_06 carries a NO_SILK_NO_POP beside the
@@ -3880,7 +3887,9 @@ def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
     as a connector whose name and land disagree is (`JST_SH4_RA`): drawing
     either would be choosing between two statements of the vendor's. A part
     not fitted in the schematic's current variant is refused whatever its
-    kind; a passive valued as not fitted, or still `TBD`, is refused too.
+    kind, and so is one whose value's first word is NA, Olimex's not
+    assembled (`NOT_ASSEMBLED`), whoever the vendor; a passive valued as not
+    fitted, or still `TBD`, is refused too.
 
     Devicesets are keyed by library AND urn, because one schematic can carry
     two libraries under one name; the Feather's carries two `supply1`s.
@@ -3977,7 +3986,9 @@ def kicad_statements(layout: pathlib.Path) -> dict[str, Statement]:
     its reference (`STEM_KINDS`, any other stem naming another kind), and
     its value where that is ohms, farads or a word in `KIND_WORDS`. A
     footprint with pads that KiCad marks `dnp` or `exclude_from_bom` is not
-    fitted; a passive valued as not fitted, or still TBD, is refused too.
+    fitted, and nor is one whose value's first word is NA, Olimex's not
+    assembled (`NOT_ASSEMBLED`), whoever the vendor; a passive valued as not
+    fitted, or still TBD, is refused too.
     And the models the footprint places, which `drawn_from` holds a row to.
 
     Keyed as `from_kicad` names an element: by reference, or by the
@@ -3994,18 +4005,37 @@ def kicad_statements(layout: pathlib.Path) -> dict[str, Statement]:
     was refused as a part whose kind nothing states.
 
     **KiCad 5's `(attr virtual)` is not read as not fitted** (OH-198).
-    KiCad 5.1 reads it in one place, the footprint position file, which
-    skips a virtual part ("skipping footprint %s because it's virtual",
-    pcbnew/exporters/gen_footprints_placefile.cpp at 5.1.0), and its own
-    words for it are "Virtual component: when created by copper shapes on
-    board" (`MOD_VIRTUAL`, pcbnew/class_module.h at 5.1.0); its board BOM
-    exporter does not read it. So what a KiCad 5 file states by it is "not
-    placed by machine", which says nothing of whether the part is there.
+    KiCad 5.1's own words for it, `MOD_VIRTUAL` in pcbnew/class_module.h
+    (lines 78-79 at 5.1.12), are in full "Virtual component: when created by
+    copper shapes on board (Like edge card connectors, mounting hole...)".
+    Two things KiCad 5.1.12 makes of a board read it, and they do not agree.
+    Its footprint position file leaves a virtual part out ("skipping
+    footprint %s because it's virtual",
+    pcbnew/exporters/gen_footprints_placefile.cpp:468-472). Its own 3D
+    viewer draws one: both its renderers ask
+    `CINFO3D_VISU::ShouldModuleBeDisplayed` before drawing a footprint's
+    models (3d_render_ogl_legacy/c3d_render_ogl_legacy.cpp:1002,
+    3d_render_raytracing/c3d_render_createscene.cpp:1219, under
+    3d-viewer/3d_rendering/), which shows a virtual part while
+    `FL_MODULE_ATTRIBUTES_VIRTUAL` is set (3d-viewer/3d_canvas/
+    cinfo3d_visu.cpp:221, the virtual case at 227-228), and that is set by
+    default: in the class's constructor (cinfo3d_visu.cpp:101) and from the
+    viewer's `ShowFootprints_Virtual` setting, read with a default of true
+    (3d-viewer/3d_viewer/eda_3d_viewer.cpp:797). Its footprint report only
+    repeats it ("attribut virtual", gen_footprints_placefile.cpp:717-718),
+    and its board BOM (pcbnew/build_BOM_from_board.cpp) does not read it.
     KiCad 7 reads it as `exclude_from_pos_files exclude_from_bom` (`case
     T_virtual: // legacy token prior to version 20200826`, pcb_parser.cpp at
-    7.0.0), a translation the vendor did not write; and the KiCad 5
+    7.0.0), a translation the vendor did not write.
+
+    So it is not read as not fitted, for two reasons. KiCad 5.1's own 3D
+    viewer, where a designer sees the board as built, draws a virtual
+    part's model by default, as a part that is there. And the KiCad 5
     revisions of Olimex's ESP32-PoE fetched here, B1 to I, mark LAN_CON1
-    virtual: the RJ45 jack a Power-over-Ethernet board is built round. Under
+    virtual: the RJ45 jack a Power-over-Ethernet board is built round, and
+    fitted -- revision D's own BOM, ESP32-PoE_Rev_D-BOM.pdf, lists it as
+    the part, RJP-003TC1(LPJ4112CNL), where it lists the parts not
+    assembled as NA(...). Under
     OH-187's rule only a statement that the part is not fitted refuses it,
     and this is not one.
     """
