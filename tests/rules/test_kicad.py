@@ -1957,10 +1957,10 @@ def _project_and_function(gerber: str) -> tuple[str, str]:
 def test_the_xiao_esp32_c6s_silkscreen_lands_on_seeeds_own_gerber():
     """**Every stroke this reader places lands on Seeed's own silkscreen
     Gerbers**, from the zip that ships the very board file read here -- the
-    copy on disk is checked byte for byte against the zip's. Their one
-    underside footprint, the Seeed logo, lands only as stored, and none of
-    its strokes lands mirrored: the transform `_on_board` mirrored with
-    until OH-184 drew every one of them where Seeed printed nothing. The
+    copy on disk is checked byte for byte against the zip's. Every
+    underside footprint stroke lands only as stored, and none lands
+    mirrored: the transform `_on_board` mirrored with until OH-184 drew
+    every one of them where Seeed printed nothing. The
     board's own strokes on both faces and the footprints' on the front land
     too, which is what makes the frame trustworthy."""
     zipped, path = SEEED_PCB / "ESP32-C6.zip", SEEED_PCB / "ESP32-C6.kicad_pcb"

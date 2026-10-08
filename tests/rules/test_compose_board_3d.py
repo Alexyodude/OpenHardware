@@ -5783,10 +5783,11 @@ def test_the_thing_plus_c5_is_drawn_at_the_alpha_its_stackup_states():
 
 
 #: A KiCad footprint on the underside, placed the way KiCad stores one: its
-#: pads, its F.Fab-become-B.Fab body and its pin-1 dot all flipped top to
-#: bottom already, from a library footprint whose pad 1 is at (-1.0, -0.5),
-#: pad 2 at (1.0, 0.5), body (-1.3, -0.8)-(1.3, 0.6) and dot at (-1.6, -0.9).
-#: The same footprint on the top face is stored as the library has it.
+#: pads, its F.Fab-become-B.Fab body, its pin-1 dot and its silkscreen line
+#: all flipped top to bottom already, from a library footprint whose pad 1 is
+#: at (-1.0, -0.5), pad 2 at (1.0, 0.5), body (-1.3, -0.8)-(1.3, 0.6), dot at
+#: (-1.6, -0.9) and silkscreen line (-1.3, -1.0)-(0.5, -1.0). The same
+#: footprint on the top face is stored as the library has it.
 _SIDED = """(kicad_pcb
 \t(version 20241229)
 \t(gr_rect (start 10 20) (end 30 40) (layer "Edge.Cuts"))
@@ -5796,6 +5797,7 @@ _SIDED = """(kicad_pcb
 \t\t(property "Reference" "U1")
 \t\t(fp_rect (start -1.3 {top}) (end 1.3 {bottom}) (layer "{fab}"))
 \t\t(fp_circle (center -1.6 {dot}) (end -1.5 {dot}) (layer "{fab}"))
+\t\t(fp_line (start -1.3 {line}) (end 0.5 {line}) (stroke (width 0.12) (type solid)) (layer "{silk}"))
 \t\t(pad "1" smd rect (at -1.0 {one} {rotation}) (size 0.6 0.4) (layers "{copper}"))
 \t\t(pad "2" smd rect (at 1.0 {two} {rotation}) (size 0.6 0.4) (layers "{copper}"))
 \t)
@@ -5805,11 +5807,12 @@ _SIDED = """(kicad_pcb
 
 def test_an_underside_kicad_part_lands_where_its_own_file_puts_it():
     """**KiCad stores an underside footprint already flipped, so it is not
-    flipped again** (OH-195, after OH-182). Its pads, its body outline and
-    its pin-1 dot all land where the file puts them -- through the one
-    transform the pads have always used, which the copper checks -- and a
-    model built on the library footprint lands with its pad 1 on pad 1.
-    The top face is held to the same, so the two sides cannot drift apart.
+    flipped again** (OH-195, after OH-182). Its pads, its body outline, its
+    pin-1 dot and its silkscreen (OH-184) all land where the file puts them
+    -- through the one transform the pads have always used, which the copper
+    checks and the vendors' Gerbers check for the ink -- and a model built on
+    the library footprint lands with its pad 1 on pad 1. The top face is held
+    to the same, so the two sides cannot drift apart.
     """
     import tempfile
 
@@ -5831,13 +5834,20 @@ def test_an_underside_kicad_part_lands_where_its_own_file_puts_it():
     for side, flip in (("F", 1.0), ("B", -1.0)):
         stored = {"one": -0.5 * flip, "two": 0.5 * flip, "dot": -0.9 * flip,
                   "top": min(-0.8 * flip, 0.6 * flip),
-                  "bottom": max(-0.8 * flip, 0.6 * flip)}
+                  "bottom": max(-0.8 * flip, 0.6 * flip), "line": -1.0 * flip}
         path = pathlib.Path(tempfile.mkdtemp()) / "SIDED.kicad_pcb"
         path.write_text(_SIDED.format(copper=f"{side}.Cu", fab=f"{side}.Fab",
-                                      rotation=rotation, **stored),
+                                      silk=f"{side}.SilkS", rotation=rotation,
+                                      **stored),
                         encoding="utf-8")
-        element = compose.read_layout(path).element("U1")
+        board = compose.read_layout(path)
+        element = board.element("U1")
         assert element.mirrored == (side == "B")
+        (ink,) = board.silk
+        assert ink.layer == f"{side}.SilkS"
+        assert ((ink.x1_mm, ink.y1_mm), (ink.x2_mm, ink.y2_mm)) == (
+            pytest.approx(on_board(-1.3, stored["line"])),
+            pytest.approx(on_board(0.5, stored["line"]))), side
         pads = {pad.number: (pad.x_mm, pad.y_mm) for pad in element.pads}
         assert pads["1"] == pytest.approx(on_board(-1.0, stored["one"]))
         assert pads["2"] == pytest.approx(on_board(1.0, stored["two"]))
