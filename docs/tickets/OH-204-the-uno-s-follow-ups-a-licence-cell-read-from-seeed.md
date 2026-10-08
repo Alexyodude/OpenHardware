@@ -2,9 +2,20 @@
 id: OH-204
 title: 'The Uno''s follow-ups: a licence cell read from Seeed''s tree, source''s two
   meanings, duplicate tests, an unquoted licence file, a moved citation'
-status: open
+status: in-progress
 priority: P3
 created: '2026-10-08'
+touches:
+- tools/inventory.py
+- tests/rules/test_inventory.py
+- PROVENANCE.md
+- tests/rules/test_import_board.py
+- tools/board_sources.py
+- tests/rules/test_board_sources.py
+- webui/boards/atmega328p.py
+- tests/avr/test_uno_board.py
+- webui/boards/Arduino Uno.json
+- tests/rules/test_uno_geometry.py
 ---
 
 Found by OH-201's two reviews (2026-10-08). OH-201 gave the Arduino Uno a `source` naming Arduino's own board file and a test file that holds the artwork pads to it; each item below sits in a file OH-201 did not claim.
