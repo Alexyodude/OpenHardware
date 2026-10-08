@@ -64,3 +64,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-09-30:** 2026-09-30: the composer, its tests and the importer lent to OH-195 (KiCad manifest composition). Return when OH-195 closes.
 
 **Note 2026-10-08:** 2026-10-08: the composer, its tests and the importer return here; OH-195 is done (merged at a2428d1).
+
+**Note 2026-10-08:** 2026-10-08: the composer, its tests and the importer lent to OH-198, whose phase 2 composes the Olimex ESP32-C6-EVB, a KiCad 5 board: kicad_statements must read through kicad.board_tree, or it finds no statements in a KiCad 5 file (OH-198's review). Return when OH-198 closes.
