@@ -363,10 +363,17 @@ LED_PARTS = {"L": "13"}
 #: picture -- which is the truth about the board rather than a duplication bug.
 #:
 #: **Twenty-two of thirty-two pads, and the other ten are the point.** `AREF`,
-#: `NC`, `IOREF`, `RESET`, `3V3`, `5V`, `VIN` and three `GND`s have no MCU pin
-#: behind them and never will, so they are absent here and `webui.api.pin_view`
-#: reports them `unknown` -- a sentence about this board, where `low` would be
-#: a sentence about the program.
+#: `NC`, `IOREF`, `RESET`, `3V3`, `5V`, `VIN` and three `GND`s are no port pin,
+#: so there is no level of theirs for this module to read; they are absent here
+#: and `webui.api.pin_view` reports them `unknown` -- a sentence about this
+#: board, where `low` would be a sentence about the program.
+#:
+#: Not a port pin does not mean no pin. In Arduino's own board file and
+#: schematic, `UNO-TH_Rev3e.brd` and `.sch`, the ATmega is ZU4: `AREF` is on
+#: the net of its AREF pin, `RESET` on its RESET pin's, `5V` and `IOREF` on its
+#: VCC pin's, and the `GND`s on its GND and AGND pins'. Only `NC`, `3V3` and
+#: `VIN` reach no pin of it, as the board file's `pindefs.derivation` also
+#: records.
 #:
 #: `13` is the one that matters most: it is `LED_BUILTIN`, it is PB5, and it is
 #: what a stock Blink drives.
@@ -433,10 +440,13 @@ SUPPLY: dict[str, object] = {
     "absolute_amps": 0.040,
     "cited": {
         "volts": (
-            "Arduino's own tech specs for the UNO R3, `I/O Voltage: 5V` -- "
-            "`content/hardware/02.uno/boards/uno-rev3/tech-specs.yml` in "
-            "`arduino/docs-content`, read 2026-08-27. A fact about the board "
-            "rather than the chip, which runs from 1.8 V to 5.5 V"
+            "Arduino's own tech specs for the UNO R3, `I/O Voltage: 5V` under "
+            "`Power` -- `content/hardware/uno/boards/uno-rev3/tech-specs.yml` in "
+            "`arduino/docs-content`, read 2026-10-09 at commit dab66ec, the "
+            "last to touch it; first read 2026-08-27 at "
+            "`content/hardware/02.uno/...`, a path the repository no longer has. "
+            "A fact about the board rather than the chip, which runs from "
+            "1.8 V to 5.5 V"
         ),
         "source_ohms": (
             "derived: (5.0 - 4.2) / 0.020. ATmega48A/PA/88A/PA/168A/PA/328/P "
