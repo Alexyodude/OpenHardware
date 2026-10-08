@@ -219,12 +219,15 @@ def test_routed_copper_lands_on_the_computed_pad_centres():
         "the transform, or the vendor's file, is not what this was measured on"
     )
 
-    def mirrored_first(x, y, origin, rot):
+    def mirrored_first(x, y, origin, rot, sense=1.0):
         degrees, mirrored = eagle._rotation(rot)
         x = -x if mirrored else x
-        angle = math.radians(degrees)
+        angle = math.radians(sense * degrees)
         return (origin[0] + x * math.cos(angle) - y * math.sin(angle),
                 origin[1] + x * math.sin(angle) + y * math.cos(angle))
+
+    def mirrored_first_clockwise(x, y, origin, rot):
+        return mirrored_first(x, y, origin, rot, sense=-1.0)
 
     def clockwise(x, y, origin, rot):
         degrees, mirrored = eagle._rotation(rot)
@@ -239,6 +242,10 @@ def test_routed_copper_lands_on_the_computed_pad_centres():
     assert _coincident(path, mirrored_first) == (120, 2.0828), (
         "mirroring before turning should miss the mirrored parts at MR90 and "
         "MR270, every one of them half a turn round"
+    )
+    assert _coincident(path, mirrored_first_clockwise)[0] == 120, (
+        "mirroring first should score the same whichever way it turns, which "
+        "is why it could not pin the direction"
     )
     assert _coincident(path, clockwise) == (109, 7.4848), (
         "turning clockwise should miss every part whose pads a turn moves"
