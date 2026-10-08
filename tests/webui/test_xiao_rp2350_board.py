@@ -245,10 +245,20 @@ def test_a_board_name_and_a_compiled_image_drive_the_xiaos_d3_pad():
     the pad's isolation latch, the pad reads `input`; then `low` when its
     output is enabled at zero; then it alternates. Every other pad with a GPIO
     behind it reads `input` throughout, which `watch` checks at each step.
+
+    And by the end the image has released IO_BANK0 and PADS_BANK0 from
+    reset, as silicon requires. The pad cannot say so: RESETS is stored and
+    not obeyed here (`rp2350.install_resets`), so an image that never
+    releases the banks drives its pad all the same. The register can.
     """
     assert chip_index(BOARD, LABEL) == rp2350.HEADER[LABEL]
+    banks = rp2350.RESET_IO_BANK0 | rp2350.RESET_PADS_BANK0
     with load() as session:
         seen = watch(session, BOARD)
+        reset = session.cpu.read_word(rp2350.RESETS + rp2350.RESETS_RESET)
+    assert not reset & banks, (
+        f"RESETS.RESET is {reset:#010x}: the image left {reset & banks:#x} of "
+        f"IO_BANK0|PADS_BANK0 ({banks:#x}) held in reset")
     states = [state for _, state in seen]
     assert states[:3] == ["input", "low", "high"], seen[:6]
     assert len(states) >= 5, f"the pad changed {len(states) - 1} times: {seen}"
