@@ -1,17 +1,21 @@
 ---
 id: OH-157
 title: The RP2350 runs through its Hazard3 half, and needs no new core or oracle
-status: blocked
+status: in-progress
 priority: P1
 created: '2026-09-03'
 touches:
 - webui/boards/rp2350.py
-- tests/riscv32/rp2350/**
 - webui/boards/catalogue.py
 - tests/webui/test_board_catalogue.py
 - tests/rules/test_board_claims.py
 - tests/webui/test_pin_view.py
 - docs/architectures.md
+- tests/webui/test_xiao_rp2350_board.py
+- tests/webui/xiao_rp2350/**
+- tests/rules/test_import_pindefs.py
+- webui/boards/XIAO-RP2350-*.json
+- webui/api.py
 ---
 
 Two of the fourteen dead boards can probably be made to run without a new
@@ -125,3 +129,5 @@ WHAT BLOCKS IT, file by file, and the edit that clears each:
 6. Not failing, stale: webui/api.py:1087 (unclaimed) says "all six modules with PIN_NAMES"; it would be seven.
 
 Full suite with everything in place, lane4: "10 failed, 2438 passed, 67 skipped in 542.37s". Five of the ten fail at HEAD without this work, measured: the OCP pair in test_import_3d_model, test_compose_board_3d::test_nothing_is_declared_absent_that_no_board_actually_has, and test_import_pindefs's test_the_real_tree_never_resolves_a_pad_from_nothing and test_the_committed_board_files_match_the_generator, the last two because lane4's third_party has no olimex-esp32-c3-devkit-lipo checkout. The other five are items 1-4. Nothing under core/**, tests/cortexm33/** or the rest of tests/riscv32/** was edited.
+
+**Note 2026-10-08:** 2026-10-08, the orchestrator's decision on the claims blocker: the evidence moves out of tests/riscv32/ (OH-161's glob, which collides on disk) to tests/webui/test_xiao_rp2350_board.py and tests/webui/xiao_rp2350/, beside the KB2040's, so neither OH-161's claim nor pyproject.toml's testpaths changes. tests/webui/test_board_run.py's core-not-built example moved to the MG24 under OH-161 on master (393d452). This ticket now also claims tests/rules/test_import_pindefs.py, the two XIAO-RP2350 board files and webui/api.py, all unclaimed, for the chip list, the count, the regenerated assumption sentence and the stale module count in a comment.
