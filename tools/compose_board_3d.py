@@ -1379,13 +1379,15 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "LED_0603_KA", "LED_SMD", "LED_0603_1608Metric",
-        "LED1 and CHARGING1, green and yellow by value: Olimex's 0603 LED "
-        "land, two pads 1.52 mm apart, named K then A and drawn with its body "
-        "reaching past pad 1 -- the cathode at -x, as KiCad's footprint puts "
-        "pad 1. Olimex place their own LED_0603_G and LED_0603_Y from the "
-        "project's packages3D/, which nothing here fetches; KiCad's 0603 LED "
-        "standing for both is a JUDGEMENT, and it is not coloured.",
-        stands_for=("LED_0603_G", "LED_0603_Y"),
+        "LED1 and CHARGING1 on the Lipo, green and yellow by value, and the "
+        "ESP32-C6-EVB's ten, red and green: Olimex's 0603 LED land, two pads "
+        "1.52 mm apart, named K then A and drawn with its body reaching past "
+        "pad 1 -- the cathode at -x, as KiCad's footprint puts pad 1. Olimex "
+        "place their own LED_0603_G, LED_0603_Y and LED_0603_R from each "
+        "project's own model directory, which nothing here fetches; KiCad's "
+        "0603 LED standing for all three is a JUDGEMENT, and it is not "
+        "coloured.",
+        stands_for=("LED_0603_G", "LED_0603_Y", "LED_0603_R"),
     ),
     Component(
         "SOD-123_1C-2A_KA", "Diode_SMD", "D_SOD-123",
@@ -1444,6 +1446,47 @@ CORRESPONDENCE: tuple[Component, ...] = (
         footprint=(f"{ESPRESSIF_KICAD}/footprints/Espressif.pretty/"
                    f"ESP32-C3-MINI-1.kicad_mod"),
         stands_for=("ESP32-C3-MINI-1-N4",),
+    ),
+    # --- the Olimex ESP32-C6-EVB, revision A, OH-198 ------------------------------
+    #
+    # A KiCad 5 board, read through `kicad.board_tree`. It places its parts
+    # from the Olimex libraries the Lipo's come from, and the rows above
+    # serve the lands the two share; these are the lands only it places.
+    # Each footprint places a model from the project's own 3d/ directory,
+    # which nothing here fetches. Turns are read off pad numbers against
+    # KiCad's own footprint for the model, 2026-10-08: none is turned.
+    Component(
+        "R_0603_5MIL_DWS", "Resistor_SMD", "R_0603_1608Metric",
+        "R1 and R2, 5.1k/R0603 by value: Olimex's 0603 resistor land, two "
+        "pads 1.78 mm apart, pad 1 at -x as KiCad's footprint puts it, and "
+        "the model it places is named for KiCad's 0603 resistor.",
+    ),
+    Component(
+        "R_1206_5MIL_DWS", "Resistor_SMD", "R_1206_3216Metric",
+        "R4 to R8, 0.03R and 3.9k by value: Olimex's 1206 resistor land, two "
+        "pads 2.79 mm apart, pad 1 at -x, and the model it places is named "
+        "for KiCad's 1206 resistor.",
+    ),
+    Component(
+        "SMA-KA", "Diode_SMD", "D_SMA",
+        "D1, D6 and D7, valued SMAJ58A/SMA, SS310/SMA and 1N5822/SS34/SMA: "
+        "Olimex's land for the SMA package, whose own name puts the cathode "
+        "on pad 1 at -x, as KiCad's D_SMA does, each terminal two "
+        "overlapping copper pads, 7.00 mm end to end. Olimex place their "
+        "own DO-214AC_SMA.step; KiCad's D_SMA, the DO-214AC package both "
+        "names state, stands for it.",
+        stands_for=("DO-214AC_SMA",),
+    ),
+    Component(
+        "SM10B-SRSS-TB", "Connector_JST",
+        "JST_SH_SM10B-SRSS-TB_1x10-1MP_P1.00mm_Horizontal",
+        "UEXT2, the pUEXT socket, valued SM10B-SRSS-TB: JST's ten-way SH "
+        "header, on Olimex's land for it -- pads 1 to 10 on 1.00 mm from -x, "
+        "and the two mounting pads behind them, numbered 0 -- laid out as "
+        "KiCad's own footprint for that part number. Olimex place their own "
+        "SM10B-SRSS-TB.STEP; KiCad's model of the same JST part stands for "
+        "it.",
+        stands_for=("SM10B-SRSS-TB",),
     ),
     # --- the SparkFun Thing Plus ESP32-C5, OH-195 --------------------------------
     #
@@ -1977,55 +2020,61 @@ ABSENT: dict[str, str] = {
     ),
     # --- OH-195: the Olimex ESP32-C3-DevKit-Lipo's copper and holes ---------------
     "Fiducial1x3": (
-        "four of Olimex's fiducials, two a side: a bare 1.0 mm copper disc "
-        "the pick-and-place camera sights on, with no paste. No KiCad "
-        "library was searched: there is no body to look for."
+        "Olimex's fiducial: a bare 1.0 mm copper disc the pick-and-place "
+        "camera sights on, with no paste -- four on the ESP32-C3-DevKit-Lipo, "
+        "two a side, and three on the ESP32-C6-EVB's top. No KiCad library "
+        "was searched: there is no body to look for."
     ),
     "Fiducial1x3_Paste": (
         "two of Olimex's fiducials, one a side: the same bare 1.0 mm disc, "
         "pasted. No KiCad library was searched: there is no body to look for."
     ),
     "Mounting_Hole_Drill-3.3mm_Clerance-7mm": (
-        "MH1 to MH4 on the Olimex, four unplated 3.3 mm mounting holes, "
-        "nothing fitted. No KiCad library was searched: there is no body to "
-        "look for."
+        "MH1 to MH4 on each Olimex board, four unplated 3.3 mm mounting "
+        "holes, nothing fitted. No KiCad library was searched: there is no "
+        "body to look for."
     ),
     "SJ_1_SMALLER": (
-        "three solder jumpers on the Olimex's underside, valued Opened: two "
-        "0.51 x 0.76 mm pads each that a person may bridge with solder. "
-        "Copper, drawn as copper. No KiCad library was searched: there is "
-        "no body to look for."
+        "Olimex's solder jumper, valued Opened: two 0.51 x 0.76 mm pads a "
+        "person may bridge with solder -- three on the ESP32-C3-DevKit-Lipo's "
+        "underside, and 3.3V_E1 on the ESP32-C6-EVB's top. Copper, drawn as "
+        "copper. No KiCad library was searched: there is no body to look for."
     ),
     # And the Olimex's parts, each named by what its own file says it is.
-    # Olimex publish a model of every one in the project's packages3D/,
-    # which `tools/board_sources.py` does not fetch, and each footprint
-    # places it with a turn its block states -- `pads_origin` reads an
-    # offset only. Drawing them is that fetch and that reader.
+    # Olimex publish a model of every one in each project's own model
+    # directory, which `tools/board_sources.py` does not fetch, and each
+    # footprint places it with a turn its block states -- `pads_origin`
+    # reads an offset only. Drawing them is that fetch and that reader.
+    # Where a land is on both Olimex boards, its reason speaks of both.
     "CD32": (
-        "L1 on the Olimex's underside, valued 2.2uH/NRS3015T2R2MNGH/1.5A/"
-        "3.00x3.00x1.50mm -- Taiyo Yuden's NRS3015, its body stated in the "
-        "value -- on a land Olimex name for Sumida's CD32, two pads 2.40 mm "
-        "apart, placing their own L-CD32_shielded.step. KiCad's Inductor_SMD, "
-        "518 models listed 2026-10-08, holds no Taiyo Yuden NR and no Sumida "
-        "CD32. **Every dimension is stated, so this is the OH-153 kind of "
-        "absence and not an honest one**: tools/model_from_datasheet.py "
-        "builds a slab from a footprint's NAME, and this states its body in "
-        "a value."
+        "Olimex's land named for Sumida's CD32, two pads 2.40 mm apart, each "
+        "placing their own L-CD32_shielded.step: L1 on the "
+        "ESP32-C3-DevKit-Lipo's underside, valued 2.2uH/NRS3015T2R2MNGH/1.5A/"
+        "3.00x3.00x1.50mm, and L2 on the ESP32-C6-EVB, valued 2.2uH/1.5A/"
+        "DCR=72mR/20%/3.00x3.00x1.50mm/CD32(NR3015T2R2M) -- Taiyo Yuden's "
+        "NRS3015 and NR3015, each body stated in the value. KiCad's "
+        "Inductor_SMD, 518 models listed 2026-10-08, holds no Taiyo Yuden NR "
+        "and no Sumida CD32. **Every dimension is stated, so this is the "
+        "OH-153 kind of absence and not an honest one**: "
+        "tools/model_from_datasheet.py builds a slab from a footprint's NAME, "
+        "and this states its body in a value."
     ),
     "YTS-A016-X": (
-        "BUT1 on the Olimex, the button: Olimex's own land, four pads "
-        "spanning 4.15 x 2.15 mm, placing their own "
-        "YTS-A016-X(SKRPABE010).stp -- Alps' SKRP, by the file's name. "
-        "KiCad's Button_Switch_SMD, 157 models listed 2026-10-08, holds Alps' "
-        "SKRK and no SKRP."
+        "Olimex's button land, four pads spanning 4.15 x 2.15 mm, placing "
+        "their own YTS-A016-X(SKRPABE010).stp -- Alps' SKRP, by the file's "
+        "name: BUT1 on the ESP32-C3-DevKit-Lipo, and BUT1 and RST1 on the "
+        "ESP32-C6-EVB. KiCad's Button_Switch_SMD, 157 models listed "
+        "2026-10-08, holds Alps' SKRK and no SKRP."
     ),
     "GBH-254-SMT-10": (
-        "UEXT1 on the Olimex, the UEXT socket, valued P-B-V-10-LF: a "
+        "UEXT1 on each Olimex board, the UEXT socket, valued P-B-V-10-LF: a "
         "surface-mount 2 x 5 box header on 2.54 mm, ten pads spanning 10.16 "
-        "x 6.25 mm, placing their own model of CviLux's CH8710xM100 by its "
-        "file's name. KiCad's Connector_IDC, 51 models listed 2026-10-08, "
-        "holds IDC box headers that name no maker; one of them would stand "
-        "a part on this land that nothing in the file names."
+        "x 6.25 mm. The ESP32-C3-DevKit-Lipo's footprint places a model of "
+        "CviLux's CH8710xM100 by its file's name, and the ESP32-C6-EVB's a "
+        "UEXT-SMD.STEP naming no maker. KiCad's Connector_IDC, 51 models "
+        "listed 2026-10-08, holds IDC box headers that name no maker; one of "
+        "them would stand a part on this land that nothing in either file "
+        "names."
     ),
     "LIPO_BAT_VERTICAL_DW02S": (
         "BAT1 on the Olimex, the battery socket, **whose land and model name "
@@ -2035,14 +2084,108 @@ ABSENT: dict[str, str] = {
         "holds no 53047 either."
     ),
     "USB2.0_TYPE-C(A40-00119-A52-12)": (
-        "USB-C1 on the Olimex, the USB socket, **whose land and model name "
-        "two parts**: valued USB-C-16P-F(A40-00119-A52-12) on a land named "
-        "for that part number, sixteen contact pads and four plated shell "
-        "tabs spanning 5.08 x 9.86 mm, placing GCT's USB4105-GF-A by the "
-        "model's file name. KiCad publishes GCT's USB4105, and drawing it "
-        "would put "
-        "GCT's name on a part the value says is another -- the mistake "
-        "OH-102 undid on the XIAOs."
+        "Olimex's USB socket -- USB-C1 on the ESP32-C3-DevKit-Lipo, USB-OTG1 "
+        "on the ESP32-C6-EVB -- **whose land and model name two parts**: "
+        "valued USB-C-16P-F(A40-00119-A52-12) on a land named for that part "
+        "number, sixteen contact pads and four plated shell tabs spanning "
+        "5.08 x 9.86 mm, placing GCT's USB4105-GF-A by the model's file name. "
+        "KiCad publishes GCT's USB4105, and drawing it would put GCT's name "
+        "on a part the value says is another -- the mistake OH-102 undid on "
+        "the XIAOs."
+    ),
+    # --- OH-198: the Olimex ESP32-C6-EVB's own lands ------------------------------
+    "TEST_PAD40x70_SQUARE": (
+        "GND1 on the ESP32-C6-EVB, valued TESTPAD: one plated 1.78 mm square "
+        "pad with a 1.0 mm hole, a point for a probe. No KiCad library was "
+        "searched: there is no body to look for."
+    ),
+    "ESP32-C6-WROOM-1-xx-UNIVERSAL_MODULE": (
+        "U3 on the ESP32-C6-EVB, the module, **whose land and model name two "
+        "parts**: valued ESP32-C6-WROOM-1-N4, on Olimex's land for that "
+        "module, whose 29 numbered pads, spanning 17.50 x 16.51 mm, are the "
+        "29 pins Table 3-1 of "
+        "Espressif's datasheet numbers, and placing "
+        "ESP32-WROOM-32D-56544.STEP, a model named for Espressif's "
+        "ESP32-WROOM-32D, another module. Espressif publish the "
+        "C6-WROOM-1's own STEP and footprint, which the SparkFun Thing Plus "
+        "ESP32-C6's row draws, and KiCad's RF_Module, 18 models listed "
+        "2026-10-08, holds no C6 module; drawing Espressif's here would take "
+        "the value's word over the footprint's, the choice OH-187 refuses "
+        "to make."
+    ),
+    "Relay_RAS-05-15": (
+        "REL1 to REL4 on the ESP32-C6-EVB, the relays, **whose land and "
+        "model name two parts**: valued RAS-0515 on Olimex's land named for "
+        "it, five plated holes spanning 14.00 x 12.00 mm, placing a model "
+        "whose file name is TE Connectivity's ORWH-SH-124D1F000. KiCad's "
+        "Relay_THT, 64 models listed 2026-10-08, holds no RAS and no ORWH."
+    ),
+    "TB2-DG306-5.0_2P": (
+        "IN1 to IN4 on the ESP32-C6-EVB, valued DG306-5.0-2P, and PWR2, "
+        "valued NA(DG306-5.0-2P) and not fitted: Olimex's land for a two-way "
+        "5.0 mm terminal block, two plated holes 5.00 mm apart, IN1 to IN4 "
+        "placing their own User Library-DG306-5_0-1.STEP. KiCad's four "
+        "TerminalBlock libraries, 156 models listed 2026-10-08 -- Altech 23, "
+        "Ningbo-Kagnex 22, Phoenix 98, Wuerth 13 -- hold 5.00 mm blocks of "
+        "Altech's and Phoenix's and none named DG306; one of them would "
+        "stand another maker's block on this land."
+    ),
+    "TB3-DG306-5.0_3P": (
+        "CON1 to CON4 on the ESP32-C6-EVB, valued DG306-5.0-3P: Olimex's "
+        "land for a three-way 5.0 mm terminal block, three plated holes "
+        "10.00 mm end to end, placing their own klema-5mm-3pin.step. KiCad's "
+        "four TerminalBlock libraries hold none named DG306, as for its "
+        "two-way sibling."
+    ),
+    "PWRJ-2mm(YDJ-1136)": (
+        "PWR1 on the ESP32-C6-EVB, the power jack, **whose land, value and "
+        "model name three parts**: valued PWRJ-2mm(YDJ-1134) on a land "
+        "named PWRJ-2mm(YDJ-1136), three plated holes spanning 6.50 x 4.45 "
+        "mm, placing pj-102ah.stp "
+        "-- CUI's PJ-102AH by its file's name. KiCad's Connector_BarrelJack, "
+        "5 models listed 2026-10-08, holds CUI's PJ-063AH, PJ-063BH and "
+        "PJ-079BH, and no PJ-102AH and no YDJ."
+    ),
+    "H11A817C_SMD(PC817X3NIP06)_FP": (
+        "OPT1 to OPT4 on the ESP32-C6-EVB, the optocouplers, valued "
+        "PC817CS_CYPC817(C-TP2) on a land named for H11A817C and "
+        "PC817X3NIP06: four pads on 2.54 mm in two rows 8.89 mm apart, "
+        "centre to centre, placing their own DIP4_opto_iso.step. KiCad's "
+        "Package_DIP holds four SMDIP-4 models, listed 2026-10-08, for rows "
+        "7.62, 9.53 and 11.48 mm wide, and its own SMDIP-4_W7.62mm footprint "
+        "puts its pad rows 7.62 mm apart; its OptoDevice, 42 models, holds "
+        "no PC817."
+    ),
+    "CPOL-RM5mm_10.0x16.0mm_PTH": (
+        "C1 on the ESP32-C6-EVB, a polarised capacitor, **whose land and "
+        "value state two bodies**: valued 100uF/63V/20%/10x13MM/Low_ESR/RM5, "
+        "a can 13 mm tall, on a land named CPOL-RM5mm_10.0x16.0mm_PTH and "
+        "placing Cap_PTH_10x16x5_0mm.step, each 16. KiCad publishes "
+        "CP_Radial_D10.0mm_P5.00mm; drawing it, or any can, would be "
+        "choosing between the two."
+    ),
+    "CPOL-RM2.5mm_6.3x11mm_PTH": (
+        "C6 on the ESP32-C6-EVB, a polarised capacitor, **whose land and "
+        "value state two bodies**: valued 470uF/10V/20%/Low_ESR/RM2.5/"
+        "6.0x11mm, a can 6.0 mm across, on a land named "
+        "CPOL-RM2.5mm_6.3x11mm_PTH and placing Cap_PTH_6_3x11x2_5mm.step, "
+        "each 6.3. KiCad publishes CP_Radial_D6.3mm_P2.50mm; drawing it "
+        "would take the land's word over the value's."
+    ),
+    "DBS135": (
+        "L1 on the ESP32-C6-EVB, valued 33uH/2.1A/DCR=0.1R/20%/"
+        "DBS135(PD3316MT330), on Olimex's land named DBS135, two pads 10.70 "
+        "mm apart, placing their own L_AX97-103R3.step, a model named for "
+        "another part than the value. KiCad's Inductor_SMD, 518 models "
+        "listed 2026-10-08, holds no DBS135, no PD3316 and no AX97."
+    ),
+    "ESOIC-8": (
+        "U1 on the ESP32-C6-EVB, valued TX4138(ESOIC-8), from Olimex's "
+        "regulator library: their land for an eight-lead SOIC with an "
+        "exposed pad of 2.60 x 3.50 mm, a plated hole through it, placing "
+        "their own SL08.step, a name stating no package. KiCad's Package_SO "
+        "holds two SOIC-8-1EP models, listed 2026-10-08, for exposed pads of "
+        "2.29 x 3.00 and 2.41 x 3.81 mm, and none of 2.60 x 3.50."
     ),
     # --- OH-195: the SparkFun Thing Plus ESP32-C5's copper and holes --------------
     "ThingPlus_With_Connectors": (
@@ -2652,6 +2795,11 @@ def _kicad_manifest_composition(entry: board_manifest.Row, source,
     and the board file itself for what each footprint is."""
     mask, stack, general, core = (kicad_stackup(layout) if layout.is_file()
                                   else (None, None, None, ()))
+    kicad5 = False
+    if layout.is_file():
+        with layout.open(encoding="utf-8") as opened:
+            kicad5 = opened.read(100).startswith(
+                f"(kicad_pcb (version {kicad.KICAD5_VERSION})")
     if stack is not None and general is not None and abs(stack - general) < 5e-4:
         # Two statements that agree decide, and the one written as a number
         # is taken, since the stackup's is a sum of floats.
@@ -2699,6 +2847,17 @@ def _kicad_manifest_composition(entry: board_manifest.Row, source,
             f"solder mask {said}. Drawn, A JUDGEMENT, as KiCad's own 3D view "
             f"lays a mask over the board: at that alpha over {beneath}. "
             f"That is {colour}")
+    elif mask is None and kicad5:
+        # **A KiCad 5 file has no stackup to name one in** (OH-198): KiCad
+        # 5.1's writer puts `(thickness ...)` in `(general ...)` and writes
+        # no colour for any layer (`PCB_IO::formatGeneral`, kicad_plugin.cpp
+        # at 5.1.0, whose writer and parser never mention a stackup).
+        colour = BOARD_MASK
+        colour_source = (
+            f"BOARD_MASK, A JUDGEMENT rather than a reading: the board file is "
+            f"KiCad 5's, version {kicad.KICAD5_VERSION}, whose format has no "
+            f"stackup and states no colour for any layer -- only "
+            f"(general (thickness ...))")
     elif mask is None:
         colour = BOARD_MASK
         colour_source = (
@@ -3642,6 +3801,17 @@ DESIGNATOR_STEMS = {"R": frozenset({"R", "RN"}), "C": frozenset({"C", "PC"}),
 #: normally closed, not missing.
 NOT_FITTED = frozenset({"DNP", "NC", "NF", "DNF", "DNI"})
 UNDECIDED = frozenset({"TBD"})
+#: Olimex's word for a part laid on the board and NOT ASSEMBLED, written as
+#: the whole value or before what the part would be -- `NA`, `NA/R0402`,
+#: `NA(2.2k/R0402)`, `NA(HN1x10)` on the ESP32-C6-EVB (OH-198). Olimex's own
+#: ESP32-PoE log, `HARDWARE/Revision-changes.txt` in the olimex-esp32-poe
+#: source, says what such a part is for: "R16(NA(10k/R0402)) added just in
+#: case" (revision D) and "Added L3 ferrite bead, NA(FB0805/600R/2A), ... in
+#: case there is a need to connect the shield to the GND" (revision C). That
+#: the C6-EVB's file means the same by it is A JUDGEMENT. Read of ANY part,
+#: since it names nothing a connector or a switch could otherwise be, as NC
+#: does; and in capitals only, since `nA` is a current.
+NOT_ASSEMBLED = re.compile(r"\s*NA\s*(?:[/(]|$)")
 #: What a DEVICE's name says when the vendor places a part that is not
 #: fitted: SparkFun's CONN_06 carries a NO_SILK_NO_POP beside the
 #: NO_SILK_FEMALE_PTH they fit, on one land. Closed, and read as a whole
@@ -3756,6 +3926,10 @@ def stated_kinds(schematic: pathlib.Path) -> dict[str, Statement]:
                  for at in range(len(runs))):
             refused = (f"{schematic.name} places {name} from {where}'s device "
                        f"{device!r}, whose name says NO_POP: not fitted")
+        elif NOT_ASSEMBLED.match(value):
+            refused = (f"{schematic.name} values {name} {value!r}, whose first "
+                       f"word, NA, is not assembled as Olimex write it "
+                       f"(NOT_ASSEMBLED): not fitted")
         elif disagree:
             said = ([f"whose prefix {prefix} says "
                      + ("a kind none of R, C, L and F" if by_prefix == OTHER
@@ -3813,8 +3987,29 @@ def kicad_statements(layout: pathlib.Path) -> dict[str, Statement]:
     footprint with no pad under a reference already read is ink and is
     passed over -- PCBCUPID's `G***` logos and `kibuzzard-*` lettering,
     Olimex's two `REF*` signs.
+
+    **Read through `kicad.board_tree`** (OH-198), which spells a KiCad 5
+    file's `(module ...)` as the `(footprint ...)` walked here: read as
+    written, a KiCad 5 board stated nothing at all, and every passive on it
+    was refused as a part whose kind nothing states.
+
+    **KiCad 5's `(attr virtual)` is not read as not fitted** (OH-198).
+    KiCad 5.1 reads it in one place, the footprint position file, which
+    skips a virtual part ("skipping footprint %s because it's virtual",
+    pcbnew/exporters/gen_footprints_placefile.cpp at 5.1.0), and its own
+    words for it are "Virtual component: when created by copper shapes on
+    board" (`MOD_VIRTUAL`, pcbnew/class_module.h at 5.1.0); its board BOM
+    exporter does not read it. So what a KiCad 5 file states by it is "not
+    placed by machine", which says nothing of whether the part is there.
+    KiCad 7 reads it as `exclude_from_pos_files exclude_from_bom` (`case
+    T_virtual: // legacy token prior to version 20200826`, pcb_parser.cpp at
+    7.0.0), a translation the vendor did not write; and the KiCad 5
+    revisions of Olimex's ESP32-PoE fetched here, B1 to I, mark LAN_CON1
+    virtual: the RJ45 jack a Power-over-Ethernet board is built round. Under
+    OH-187's rule only a statement that the part is not fitted refuses it,
+    and this is not one.
     """
-    tree = kicad.parse_sexp(layout.read_text(encoding="utf-8"))
+    tree = kicad.board_tree(layout)
     stated: dict[str, Statement] = {}
     #: Each reference with pads, and the footprint that placed it.
     padded: dict[str, str] = {}
@@ -3851,6 +4046,10 @@ def kicad_statements(layout: pathlib.Path) -> dict[str, Statement]:
         if fitted_not and has_pads:
             refused = (f"{layout.name} marks {name} "
                        f"{' and '.join(fitted_not)}: not fitted")
+        elif has_pads and NOT_ASSEMBLED.match(value):
+            refused = (f"{layout.name} values {name} {value!r}, whose first "
+                       f"word, NA, is not assembled as Olimex write it "
+                       f"(NOT_ASSEMBLED): not fitted")
         elif disagree:
             said = ([f"its reference's letters {stem} saying "
                      + ("a kind none of R, C, L and F" if by_prefix == OTHER

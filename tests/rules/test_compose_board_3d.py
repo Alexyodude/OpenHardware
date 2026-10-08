@@ -436,6 +436,16 @@ EXPLAINS: dict[str, set[str]] = {
     "Olimex ESP32-C3-DevKit-Lipo": {
         "CD32", "YTS-A016-X", "GBH-254-SMT-10", "LIPO_BAT_VERTICAL_DW02S",
         "USB2.0_TYPE-C(A40-00119-A52-12)"},
+    # The C6-EVB's share of those, and its own (OH-198): its module, whose
+    # value and model name two modules; its relays, terminals, jack and
+    # optocouplers; two cans whose land and value state two bodies; and its
+    # inductor and regulator, whose packages KiCad holds no model of.
+    "Olimex ESP32-C6-EVB": {
+        "CD32", "YTS-A016-X", "GBH-254-SMT-10", "USB2.0_TYPE-C(A40-00119-A52-12)",
+        "ESP32-C6-WROOM-1-xx-UNIVERSAL_MODULE", "Relay_RAS-05-15",
+        "TB2-DG306-5.0_2P", "TB3-DG306-5.0_3P", "PWRJ-2mm(YDJ-1136)",
+        "H11A817C_SMD(PC817X3NIP06)_FP", "CPOL-RM5mm_10.0x16.0mm_PTH",
+        "CPOL-RM2.5mm_6.3x11mm_PTH", "DBS135", "ESOIC-8"},
     # What its EAGLE sibling, the Thing Plus C6, leaves off, and its buttons.
     "SparkFun Thing Plus ESP32-C5": {
         "JST_1x02_P2.0mm_Horizontal_SMD", "USB-C_16",
@@ -831,8 +841,13 @@ def test_nothing_refused_is_a_part_this_file_could_have_drawn():
         if not spec.layout.is_file():
             continue
         placed = {e.package for e in compose.read_layout(spec.layout).elements}
-        if spec.layout.suffix != ".kicad_pcb":
-            # **An EAGLE layout, which the slab reader cannot open** (OH-180).
+        with spec.layout.open(encoding="utf-8", errors="replace") as opened:
+            kicad5 = opened.read(40).startswith(
+                f"(kicad_pcb (version {kicad.KICAD5_VERSION})")
+        if spec.layout.suffix != ".kicad_pcb" or kicad5:
+            # **An EAGLE layout, which the slab reader cannot open** (OH-180),
+            # **or a KiCad 5 one**, whose `(module ...)` it does not read
+            # (OH-198): it walks a board's `(footprint ...)` nodes itself.
             # The question is the same one asked of the name alone: a
             # refused package whose own name states length x width x height
             # is the OH-153 kind of absence, and its reason must say that the
@@ -842,7 +857,7 @@ def test_nothing_refused_is_a_part_this_file_could_have_drawn():
                     continue
                 why = compose.ABSENT[package]
                 assert ("tools/model_from_datasheet.py" in why
-                        and "EAGLE package" in why), (
+                        and ("EAGLE package" in why or "KiCad 5" in why)), (
                     f"{package} on {spec.board} states its own body in its "
                     f"name and is refused without saying the reader is the "
                     f"gap: {why}"
@@ -4715,6 +4730,11 @@ REFUSED_BY_SCHEMATIC = {
     "PCBCUPID Glyph C6": {"J1", "J2", "J3", "J4", "JP1", "F1"},
     "Olimex ESP32-C3-DevKit-Lipo": set(),
     "SparkFun Thing Plus ESP32-C5": set(),
+    # KiCad 5, read through kicad.board_tree (OH-198): the parts Olimex value
+    # NA, not assembled (`compose.NOT_ASSEMBLED`) -- five resistors, the EXT1
+    # and ESP-PROG1 headers and the PWR2 terminal.
+    "Olimex ESP32-C6-EVB": {"R9", "R10", "R18", "R33", "R34", "EXT1", "ESP-PROG1",
+                            "PWR2"},
 }
 
 
@@ -4751,6 +4771,9 @@ BODYLESS = {
     "Olimex ESP32-C3-DevKit-Lipo": {
         "Fiducial1x3", "Fiducial1x3_Paste",
         "Mounting_Hole_Drill-3.3mm_Clerance-7mm", "SJ_1_SMALLER"},
+    "Olimex ESP32-C6-EVB": {
+        "Fiducial1x3", "Mounting_Hole_Drill-3.3mm_Clerance-7mm", "SJ_1_SMALLER",
+        "TEST_PAD40x70_SQUARE"},
     "SparkFun Thing Plus ESP32-C5": {
         "Fiducial_0.5mm_Mask1mm", "Jumper_2_NC_Trace", "Jumper_2_NO",
         "Jumper_2_PTH_SMD_Combo-NC", "Jumper_3_NC-1_Trace",
@@ -4786,7 +4809,11 @@ def test_each_manifest_board_counts_the_same_things_bodyless():
 #: The passives a board's own file states the kind of and nobody publishes a
 #: model for, by board and reference: each refused by its package's `ABSENT`
 #: reason rather than drawn (OH-195).
-PASSIVES_NOBODY_MODELS = {("Olimex ESP32-C3-DevKit-Lipo", "L1")}
+PASSIVES_NOBODY_MODELS = {("Olimex ESP32-C3-DevKit-Lipo", "L1"),
+                          # Its CD32 sibling, its other inductor, and its two
+                          # cans, whose land and value state two bodies (OH-198).
+                          ("Olimex ESP32-C6-EVB", "L2"), ("Olimex ESP32-C6-EVB", "L1"),
+                          ("Olimex ESP32-C6-EVB", "C1"), ("Olimex ESP32-C6-EVB", "C6")}
 
 
 def test_every_manifest_passive_is_drawn_as_the_kind_its_vendor_states():
@@ -5530,6 +5557,173 @@ def test_a_kicad_stackup_thickness_that_is_not_a_number_is_named():
         compose.kicad_stackup(path)
     for said in (str(path), "'dielectric 1'", "'1.5x'"):
         assert said in str(caught.value), (said, str(caught.value))
+
+
+# --- a KiCad 5 row (OH-198) ------------------------------------------------------
+
+#: The hand-written twin boards of tests/rules/test_kicad.py: one board,
+#: written once as KiCad 5 writes it and once as KiCad 7 does.
+KICAD5_TWINS = pathlib.Path(__file__).resolve().parent / "kicad5"
+C6_EVB_SHA = "7b66d23cabba3c573a1e63d83363675b5fb74f06"
+
+
+def _c6_evb_file(name: str) -> pathlib.Path:
+    """One of the ESP32-C6-EVB's two board files, found by name below
+    `OH_KICAD5_BOARDS` or the registry's checkout, or a skip saying how to
+    get it: the registry row fetches the KiCad 5 board, and the KiCad 7 copy
+    in HARDWARE/Dimensions/ only by hand."""
+    import os
+
+    for root in (os.environ.get("OH_KICAD5_BOARDS"),
+                 REPO / "third_party" / "olimex-esp32-c6-evb"):
+        found = sorted(pathlib.Path(root).rglob(name)) if root and pathlib.Path(
+            root).is_dir() else []
+        if found:
+            return found[0]
+    pytest.skip(f"SKIPPED: no {name}; python tools/get_board_sources.py "
+                f"olimex-esp32-c6-evb fetches the KiCad 5 board, and its KiCad 7 "
+                f"copy is HARDWARE/Dimensions/{name} at {C6_EVB_SHA}, fetched by "
+                f"hand into a directory OH_KICAD5_BOARDS names")
+
+
+def test_a_kicad_5_boards_parts_state_what_its_kicad_7_twin_states():
+    """**A KiCad 5 board stated nothing** (OH-198): `kicad_statements`
+    walked the `(footprint ...)` a KiCad 5 file never writes -- it places
+    every part as `(module ...)` -- and refused every passive on it as a
+    part whose kind nothing states. Read through `kicad.board_tree`, the
+    KiCad 5 twin states what the KiCad 7 one does, part by part."""
+    old = compose.kicad_statements(KICAD5_TWINS / "twin-kicad5.kicad_pcb")
+    new = compose.kicad_statements(KICAD5_TWINS / "twin-kicad7.kicad_pcb")
+    assert old == new
+    assert (old["R1"].kind, old["R1"].value, old["R1"].models) == (
+        "resistor", "10k", ("R_0603_1608Metric",))
+
+
+def test_the_c6_evbs_kicad_5_board_states_a_part_for_every_reference():
+    """On Olimex's own KiCad 5 board: walked as written it holds no
+    `(footprint ...)` at all, and read through `kicad.board_tree` every
+    reference it places is stated -- the padless signs once each, as
+    `kicad_statements` keys them."""
+    path = _c6_evb_file("ESP32-C6-EVB_Rev_A.kicad_pcb")
+    assert not kicad.children(kicad.parse_sexp(path.read_text(encoding="utf-8")),
+                              "footprint")
+    stated = compose.kicad_statements(path)
+    assert set(stated) == {placed.reference for placed in kicad.read_board(path).placements}
+    assert stated["R11"].kind == "resistor" and stated["C10"].kind == "capacitor"
+
+
+def test_the_c6_evbs_kicad_5_board_states_each_part_as_its_kicad_7_copy_does():
+    """The KiCad 5 board against the KiCad 7 copy of it Olimex keep in
+    HARDWARE/Dimensions/: the same parts stated the same way, every one, but
+    for the file each refusal names. The copy names every model in KiCad's
+    own directory and the board in its own, and a model is held to by its
+    file's stem, which is alike."""
+    old_path = _c6_evb_file("ESP32-C6-EVB_Rev_A.kicad_pcb")
+    new_path = _c6_evb_file("ESP32-C6-EVB_DIMM_Rev_A.kicad_pcb")
+
+    def stated(path):
+        return {name: dataclasses.replace(said, refused=said.refused.replace(
+                    path.name, "BOARD") if said.refused else None)
+                for name, said in compose.kicad_statements(path).items()}
+
+    old, new = stated(old_path), stated(new_path)
+    assert old == new
+    assert len(old) == len({placed.reference
+                            for placed in kicad.read_board(new_path).placements})
+
+
+def test_a_part_olimex_values_na_is_not_fitted(tmp_path):
+    """**NA is Olimex's not assembled** (OH-198, `compose.NOT_ASSEMBLED`):
+    read as the whole value or before a slash or a parenthesis, of any
+    part -- a header as well as a resistor, since NA names nothing a
+    connector could otherwise be -- in a KiCad board file and an EAGLE
+    schematic alike; in capitals only, since `nA` is a current; and not as
+    the start of a longer word."""
+    path = _kicad_parts_file(
+        ("OLIMEX_RLC-FP:R_0402_5MIL_DWS", "R9", "NA/R0402", "smd", True),
+        ("OLIMEX_RLC-FP:R_0402_5MIL_DWS", "R33", "NA(2.2k/R0402)", "smd", True),
+        ("OLIMEX_RLC-FP:R_0402_5MIL_DWS", "R5", "NA", "smd", True),
+        ("OLIMEX_Connectors-FP:HN1x10", "EXT1", "NA(HN1x10)", "", True),
+        ("OLIMEX_RLC-FP:R_0402_5MIL_DWS", "R6", "2.2k/R0402", "smd", True),
+        ("Package_SO:SOIC-8", "U1", "nA(typ)", "smd", True),
+        ("Package_SO:SOIC-8", "U2", "NAND", "smd", True),
+        ("Package_SO:SOIC-8", "U3", "NA1", "smd", True),
+    )
+    statements = compose.kicad_statements(path)
+    for name, value in (("R9", "NA/R0402"), ("R33", "NA(2.2k/R0402)"), ("R5", "NA"),
+                        ("EXT1", "NA(HN1x10)")):
+        assert statements[name].refused == (
+            f"PARTS.kicad_pcb values {name} {value!r}, whose first word, NA, is not "
+            f"assembled as Olimex write it (NOT_ASSEMBLED): not fitted"), name
+    for name in ("R6", "U1", "U2", "U3"):
+        assert statements[name].refused is None, (name, statements[name])
+    stated = compose.stated_kinds(_schematic(tmp_path, (
+        '<part name="R9" library="lib" deviceset="RESISTOR" value="NA/R0402"/>'
+        '<part name="CONN1" library="lib" deviceset="CONN" value="NA(WU06S)"/>'
+        '<part name="U1" library="lib" deviceset="CHIP" value="nA(typ)"/>')))
+    assert "NOT_ASSEMBLED" in stated["R9"].refused and "NOT_ASSEMBLED" in stated[
+        "CONN1"].refused
+    assert stated["U1"].refused is None
+
+
+def test_a_kicad_5_part_marked_virtual_is_not_read_as_not_fitted(tmp_path):
+    """**KiCad 5's `(attr virtual)` says a part is not placed by machine**,
+    not that it is not there (OH-198): KiCad 5.1 reads it only to leave the
+    part out of the position file. So a footprint with pads that KiCad 5
+    marks virtual is stated as any other, where KiCad 7's `exclude_from_bom`
+    on the same part refuses it (`test_a_kicad_part_its_own_file_says_is_not_fitted_is_refused`).
+    Olimex's ESP32-PoE is why it matters: its KiCad 5 revisions mark
+    LAN_CON1, the RJ45 jack, virtual."""
+    path = tmp_path / "VIRTUAL.kicad_pcb"
+    path.write_text(
+        "(kicad_pcb (version 20171130) (host pcbnew 5.1.6)\n"
+        "  (layers (0 F.Cu signal) (31 B.Cu signal))\n"
+        "  (module Conn:RJ45 (layer F.Cu) (at 10 10)\n"
+        "    (attr virtual)\n"
+        "    (fp_text reference LAN_CON1 (at 0 0) (layer F.SilkS))\n"
+        "    (fp_text value RJ45 (at 0 0) (layer F.Fab))\n"
+        "    (pad 1 thru_hole circle (at 0 0) (size 1.5 1.5) (drill 0.9) (layers *.Cu *.Mask)))\n"
+        "  (module Resistor_SMD:R_0402_1005Metric (layer F.Cu) (at 20 10)\n"
+        "    (attr virtual)\n"
+        "    (fp_text reference R7 (at 0 0) (layer F.SilkS))\n"
+        "    (fp_text value 10k (at 0 0) (layer F.Fab))\n"
+        "    (pad 1 smd rect (at -0.48 0) (size 0.56 0.62) (layers F.Cu))\n"
+        "    (pad 2 smd rect (at 0.48 0) (size 0.56 0.62) (layers F.Cu))))\n",
+        encoding="utf-8")
+    statements = compose.kicad_statements(path)
+    assert statements["LAN_CON1"].refused is None
+    assert statements["R7"] == compose.Statement(
+        "resistor", "R", "10k", word="Resistor_SMD")
+    poe = REPO / "third_party" / "olimex-esp32-poe" / "HARDWARE" / (
+        "ESP32-PoE-hardware-revision-D") / "ESP32-PoE_Rev_D.kicad_pcb"
+    if not poe.is_file():
+        pytest.skip(f"SKIPPED after the written board: no {poe}; python "
+                    f"tools/get_board_sources.py olimex-esp32-poe")
+    (lan,) = [node for node in kicad.children(kicad.board_tree(poe), "footprint")
+              if kicad._reference_of(node) == "LAN_CON1"]
+    assert kicad.first(lan, "attr")[1:] == ["virtual"]
+    assert compose.kicad_statements(poe)["LAN_CON1"].refused is None
+
+
+def test_a_kicad_5_rows_colour_says_its_format_states_none(tmp_path):
+    """**A KiCad 5 file has no stackup** (OH-198): KiCad 5.1 writes a board's
+    thickness in `(general ...)` and no colour for any layer. Its mask is
+    BOARD_MASK, a judgement, and the colour source says why in those words
+    rather than that a stackup it never had names none."""
+    from tools import board_manifest, board_sources
+
+    row = next(r for r in board_manifest.ROWS if r.board == "Olimex ESP32-C6-EVB")
+    path = tmp_path / "OLD.kicad_pcb"
+    path.write_text("(kicad_pcb (version 20171130) (host pcbnew 5.1.0)\n"
+                    "  (general (thickness 1.6)))\n", encoding="utf-8")
+    spec = compose._kicad_manifest_composition(
+        row, board_sources.source(row.source), path)
+    assert spec.colour == compose.BOARD_MASK
+    for said in ("A JUDGEMENT", "KiCad 5's, version 20171130", "has no stackup",
+                 "(general (thickness ...))"):
+        assert said in spec.colour_source, (said, spec.colour_source)
+    assert "names no colour for its top solder mask" not in spec.colour_source
+    assert spec.thickness_mm == compose.MANIFEST_THICKNESS_MM
 
 
 def test_the_glyph_mini_is_drawn_in_what_its_own_stackup_states():
