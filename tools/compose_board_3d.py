@@ -5281,11 +5281,15 @@ def newstroke(directory: pathlib.Path) -> dict[int, str]:
                 strokes[name] = []
             elif field[0] == "P":
                 values = [int(v) for v in field[5:5 + 2 * int(field[1])]]
+                if len(values) != 2 * int(field[1]):
+                    raise ValueError(f"{path}:{number}: {name} states {field[1]} "
+                                     f"points and gives {len(values)} coordinates: "
+                                     f"{line!r}")
                 if any(v % NEWSTROKE_GRID for v in values):
                     raise ValueError(f"{path}:{number}: {name} draws off the "
                                      f"{NEWSTROKE_GRID}-mil grid: {line!r}")
                 points: list[tuple[int, int]] = []
-                for x, y in zip(values[::2], values[1::2]):
+                for x, y in zip(values[::2], values[1::2], strict=True):
                     point = (x // NEWSTROKE_GRID, -y // NEWSTROKE_GRID)
                     if not points or points[-1] != point:
                         points.append(point)
