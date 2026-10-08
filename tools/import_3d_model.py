@@ -899,20 +899,30 @@ def finish_for(colour: str) -> Finish:
     return FINISHES.get(colour, DEFAULT_FINISH)
 
 
-def report_finishes(mesh: Mesh) -> None:
-    """Print what each colour group was taken to be made of.
+def report_finishes(mesh: Mesh) -> dict[str, int]:
+    """Print what each colour group was taken to be made of, and return the
+    colours drawn at `DEFAULT_FINISH`, each with its triangle count.
 
     **So that the assignment can be audited against the picture**, which is the
     only way to check it. A table of thirty colours nobody ever sees applied is
     a table that rots; printing it per model, with the triangle counts, puts
     the claim in front of whoever runs the importer.
+
+    **Returned so a caller can put the unnamed ones in front of a reader too**
+    (OH-163): the composer carries them in its extras as `default_finish`, so
+    a surface nothing here can name is listed on the page as exactly that
+    rather than drawn silently grey.
     """
+    unnamed: dict[str, int] = {}
     for colour, (_positions, _normals, indices) in sorted(
             mesh.groups.items(), key=lambda kv: -len(kv[1][2])):
         finish = finish_for(colour)
         named = "" if colour in FINISHES else "  DEFAULT, nothing says what this is"
+        if colour not in FINISHES:
+            unnamed[colour] = len(indices) // 3
         print(f"  finish {colour} {len(indices) // 3:>7,} tri  "
               f"metal {finish.metalness:.1f} rough {finish.roughness:.2f}{named}")
+    return unnamed
 
 
 @dataclasses.dataclass(frozen=True)

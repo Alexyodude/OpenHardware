@@ -412,6 +412,33 @@ def test_the_writer_applies_the_finish_rather_than_a_constant(tmp_path):
     # And the two really are different, or this proves nothing.
     assert got[named] != got[unnamed]
 
+
+def test_the_audit_returns_exactly_the_colours_it_could_not_name(capsys):
+    """**What the composer lists on the page as drawn in no named material**
+    (OH-163), so it has to be every unnamed colour and nothing else.
+
+    `report_finishes` printed the default and returned nothing, so the only
+    place a reader could learn that a surface was grey for want of evidence
+    was a terminal. Two named colours and two unnamed ones, of different
+    sizes, so a return that dropped the counts, kept a named colour or
+    dropped an unnamed one would each show here.
+    """
+    from tools.import_3d_model import FINISHES, Mesh, report_finishes
+
+    one = ([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+           [0.0, 0.0, 1.0] * 3, [0, 1, 2])
+    two = (one[0] * 2, one[1] * 2, [0, 1, 2, 3, 4, 5])
+    mesh = Mesh({"#b58136": one, "#050505": two,
+                 "#123456": one, "#654321": two})
+    assert {"#b58136", "#050505"} <= set(FINISHES)
+    assert not {"#123456", "#654321"} & set(FINISHES)
+
+    unnamed = report_finishes(mesh)
+
+    assert unnamed == {"#654321": 2, "#123456": 1}, unnamed
+    printed = capsys.readouterr().out
+    assert printed.count("DEFAULT, nothing says what this is") == 2, printed
+
 def test_a_part_with_no_forward_direction_writes_none():
     """**Absent, not `from: null`**, and the two are different claims.
 

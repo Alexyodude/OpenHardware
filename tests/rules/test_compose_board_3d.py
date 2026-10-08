@@ -3990,6 +3990,53 @@ def test_an_unmodelled_placement_is_counted_not_skipped():
     assert '"not_drawn"' in code, "the gaps do not ride in extras"
 
 
+def test_a_composed_board_lists_every_colour_it_draws_in_no_named_material():
+    """OH-163: a colour `FINISHES` cannot name stays at the default, and the
+    page's own inventory says which colours those are rather than letting them
+    pass as grey with nothing to say why.
+
+    On the artefact where one exists: `default_finish` in each composed
+    board's extras must be exactly the file's materials that have no
+    `FINISHES` entry, with the triangles each covers -- not a superset, not a
+    stale copy from before an entry was added. And pinned at the source, with
+    comments stripped, so a checkout with nothing composed still fails if the
+    list stops being written.
+    """
+    from tools.import_3d_model import FINISHES, read_extras
+
+    source = (REPO / "tools" / "compose_board_3d.py").read_text(encoding="utf-8")
+    body = source.split("def compose(", 1)[1].split("\ndef ", 1)[0]
+    code = "\n".join(line for line in body.splitlines()
+                     if not line.lstrip().startswith("#"))
+    assert "default_finish = report_finishes(whole)" in code, (
+        "the composer no longer keeps what its own audit could not name")
+    assert '"default_finish": default_finish' in code, (
+        "the unnamed colours do not ride in extras")
+
+    seen = 0
+    for spec in compose.COMPOSITIONS:
+        glb = REPO / "webui" / "static" / "models" / f"{compose._slug(spec.board)}.glb"
+        if not glb.is_file():
+            continue
+        raw = glb.read_bytes()
+        length = struct.unpack("<I", raw[12:16])[0]
+        doc = json.loads(raw[20:20 + length])
+        unnamed: dict[str, int] = {}
+        for mesh in doc["meshes"]:
+            for primitive in mesh["primitives"]:
+                name = doc["materials"][primitive["material"]]["name"]
+                if name not in FINISHES:
+                    unnamed[name] = unnamed.get(name, 0) + (
+                        doc["accessors"][primitive["indices"]]["count"] // 3)
+        listed = read_extras(glb).get("default_finish")
+        assert listed == unnamed, (
+            f"{glb.name}: extras list {listed} as drawn in no named material, "
+            f"and the file's own materials with no FINISHES entry are {unnamed}")
+        seen += 1
+    if not seen:
+        pytest.skip("no composed board on disk; run tools/compose_board_3d.py")
+
+
 def test_the_ceramic_parts_reach_the_shipped_boards_as_dielectrics():
     """OH-155 on the artefact: the material in the file, not the row in the table.
 

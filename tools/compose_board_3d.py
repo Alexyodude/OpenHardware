@@ -6059,7 +6059,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     # copper, silkscreen and trace surface -- and its copper shipped at
     # DEFAULT_FINISH for a session because nothing printed the assignment
     # where somebody would see it.
-    report_finishes(whole)
+    default_finish = report_finishes(whole)
     if check:
         print("  write   skipped (--check)")
         return 0
@@ -6141,6 +6141,11 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             # Text the file hides, which KiCad does not plot either: not
             # a gap, so not under `not_drawn` (OH-163).
             "hidden": {"text": hidden},
+            # **Each colour drawn at DEFAULT_FINISH, and how many triangles
+            # of it** (OH-163): drawn, so not under `not_drawn`, but in a
+            # material nothing in `FINISHES` can name -- listed so the page
+            # can say so rather than draw it silently grey.
+            "default_finish": default_finish,
             "absent": [
                 {"package": package, "why": why,
                  "elements": [e.name for e in absent if e.package == package]}
