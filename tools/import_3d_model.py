@@ -1163,8 +1163,9 @@ def report_finishes(mesh: Mesh) -> dict[str, int]:
     for colour, (_positions, _normals, indices) in sorted(
             mesh.groups.items(), key=lambda kv: -len(kv[1][2])):
         finish = finish_for(colour)
-        named = "" if colour in FINISHES else "  DEFAULT, nothing says what this is"
+        named = ""
         if colour not in FINISHES:
+            named = "  DEFAULT, nothing says what this is"
             unnamed[colour] = len(indices) // 3
         print(f"  finish {colour} {len(indices) // 3:>7,} tri  "
               f"metal {finish.metalness:.1f} rough {finish.roughness:.2f}{named}")

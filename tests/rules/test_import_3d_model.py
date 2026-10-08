@@ -439,6 +439,7 @@ def test_the_audit_returns_exactly_the_colours_it_could_not_name(capsys):
     printed = capsys.readouterr().out
     assert printed.count("DEFAULT, nothing says what this is") == 2, printed
 
+
 def test_a_part_with_no_forward_direction_writes_none():
     """**Absent, not `from: null`**, and the two are different claims.
 
@@ -562,8 +563,7 @@ def test_the_label_colour_lies_on_top_of_every_body_that_carries_it():
     Skips without OCP or without a fetched model, as the header says.
     """
     pytest.importorskip("OCP")
-    from tools.import_3d_model import (
-        DEFLECTION, Frame, handedness_of, read, tessellate)
+    from tools.import_3d_model import DEFLECTION, Frame, handedness_of, read, tessellate
 
     mark, on_top_mm = "#6f6651", 0.15
     steps = sorted((REPO / "third_party" / "seeed-3d").glob("component-*.step"))
