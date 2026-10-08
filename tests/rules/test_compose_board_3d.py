@@ -5631,6 +5631,23 @@ def test_the_c6_evbs_kicad_5_board_states_each_part_as_its_kicad_7_copy_does():
                             for placed in kicad.read_board(new_path).placements})
 
 
+def test_the_c6_evbs_module_refusal_quotes_what_its_own_footprint_says():
+    """U3's refusal (`compose.ABSENT`) is that its footprint names one module
+    and places a model of another, and it quotes the footprint for both: its
+    own `descr`, the datasheet its `tags` give, and the model it places, each
+    as Olimex's KiCad 5 board writes it (OH-198)."""
+    path = _c6_evb_file("ESP32-C6-EVB_Rev_A.kicad_pcb")
+    (u3,) = [node for node in kicad.children(kicad.board_tree(path), "footprint")
+             if kicad._reference_of(node) == "U3"]
+    why = compose.ABSENT[u3[1].split(":", 1)[1]]
+    descr, tags = kicad.first(u3, "descr")[1].strip(), kicad.first(u3, "tags")[1]
+    assert tags.startswith("https://www.espressif.com/"), tags
+    models = [pathlib.PurePosixPath(model.path).name for model in kicad._models_of(u3)]
+    assert models == ["ESP32-WROOM-32D-56544.STEP"], models
+    for said in (descr, pathlib.PurePosixPath(tags).name, *models):
+        assert said in why, (said, why)
+
+
 def test_a_part_olimex_values_na_is_not_fitted(tmp_path):
     """**NA is Olimex's not assembled** (OH-198, `compose.NOT_ASSEMBLED`):
     read as the whole value or before a slash or a parenthesis, of any
