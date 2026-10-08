@@ -131,8 +131,16 @@ trace is under a translucent film with something brighter behind it, so what
 changes is lightness and not hue. Blending toward copper instead turned the
 Uno's navy into a neutral grey, which is the picture that found the bug.
 
-What is NOT drawn is counted and printed: silkscreen **text**, which needs a
-font shipped; the handful of arcs, circles and polygons on that layer;
+**A KiCad board's silkscreen text is drawn** (OH-163), in newstroke, the
+stroke font KiCad plots with, read from its author's own CC0 archive, which
+a run of the composer fetches as it fetches the meshes and pins by size and
+sha256 (KiCad's own copy of the font carries a GPL header, so it is never
+the source), and held to two vendors' own silkscreen Gerbers.
+
+What is NOT drawn is counted and printed: text the stroke font cannot draw
+as the vendor plotted it -- a TrueType face, knockout text, and every EAGLE
+board's text, which EAGLE plots in a vector font built into its executable;
+the arcs, circles and polygons on that layer;
 **inner copper layers**, which are inside the laminate where nothing can see
 them; and a zone's **filled polygon**, which is a keyhole outline walking into
 every thermal relief and back out. The colours are judgements and say so, as
