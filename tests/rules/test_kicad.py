@@ -13,7 +13,11 @@ repository exists to prevent, so the parser is pinned against text held here.
 loudly by name when the fetch has not been run.
 """
 
+import collections
+import dataclasses
+import functools
 import json
+import os
 import pathlib
 
 import pytest
@@ -22,6 +26,11 @@ from tools.kicad import (
     KicadError,
     Pad,
     Placement,
+    _models_of,
+    _reference_of,
+    _value_of,
+    board_tree,
+    children,
     pad_on_board,
     parse_sexp,
     read_board,
@@ -427,14 +436,20 @@ def test_a_string_that_unescapes_to_bytes_that_are_not_utf8_is_refused():
         parse_sexp(r'(net "\377")')
 
 
-def test_a_kicad_5_board_is_refused_by_name(tmp_path):
-    """KiCad 5 placed parts as `(module ...)`, and reading none of them
-    reported "no footprints", which says nothing about why."""
+def test_a_module_in_a_file_of_another_version_is_refused_by_name(tmp_path):
+    """OH-182's refusal, narrowed by OH-198 to what is still not read.
+
+    KiCad 5 writes version 20171130, and that file's `(module ...)` now reads
+    (see the KiCad 5 section below). A `(module ...)` in any other version --
+    KiCad 4's `4`, or a nightly's between 5 and 6 -- is refused naming that
+    version, rather than read as though it were KiCad 5's or reported as "no
+    footprints", which says nothing about why."""
     path = tmp_path / "old.kicad_pcb"
-    path.write_text('(kicad_pcb (version 20171130) (module "R_0402" (at 1 2) '
+    path.write_text('(kicad_pcb (version 4) (module "R_0402" (at 1 2) '
                     '(pad "1" smd rect (at 0 0) (size 0.5 0.5) (layers F.Cu))))',
                     encoding="utf-8")
-    with pytest.raises(KicadError, match=r"KiCad 5 format \(module\) is not read"):
+    with pytest.raises(KicadError, match=r"places 1 parts as \(module \.\.\.\) in a "
+                                         r"file of version 4;"):
         read_board(path)
 
 
@@ -1229,3 +1244,321 @@ def test_the_esp32_processors_pin_one_dot_is_read_from_the_silkscreen():
         assert u4.body == pytest.approx((-half, -half, half, half)), (
             f"{name} U4 body is not its silk outline"
         )
+
+
+# --- KiCad 5 (OH-198) -----------------------------------------------------------
+#
+# `tests/rules/kicad5/` holds one small board written twice by hand: once as
+# KiCad 5 writes a board and once as KiCad 7 does, the same parts, pads, nets,
+# models, arcs and ink in each. Each difference between the two spellings is
+# read off the KiCad 5 file below against numbers worked by hand, and the
+# first test holds the whole of one reading against the whole of the other.
+
+KICAD5 = pathlib.Path(__file__).resolve().parent / "kicad5"
+
+#: A KiCad 5 board around one arc on Edge.Cuts, which is all the outline it
+#: needs: `{arc}` is the arc, as KiCad 5 writes one.
+ARC5 = """(kicad_pcb (version 20171130) (host pcbnew 5.1.6)
+  (module T:P (layer F.Cu) (at 0 0)
+    (fp_text reference P1 (at 0 0) (layer F.SilkS))
+    (pad 1 smd rect (at 0 0) (size 1 1) (layers F.Cu)))
+  {arc})
+"""
+
+
+def test_a_kicad_5_board_reads_to_the_same_board_as_its_kicad_7_twin():
+    """**The whole of OH-198 in one assertion.** What a KiCad 5 file says is
+    read into the very structures the same board written by KiCad 7 reads
+    into -- every placement, pad, net, model, arc, stroke, via, and count of
+    what is not drawn. Only the name differs, and it is the file's."""
+    old = read_board(KICAD5 / "twin-kicad5.kicad_pcb")
+    new = read_board(KICAD5 / "twin-kicad7.kicad_pcb")
+    assert dataclasses.replace(old, name="twin") == dataclasses.replace(new, name="twin")
+
+
+def test_a_kicad_5_module_is_read_as_a_placement_where_it_stands():
+    """`(module ...)` is what KiCad 6 renamed `(footprint ...)`: the same
+    library id, `(layer ...)` for the side and `(at x y angle)` for where."""
+    got = {p.reference: p for p in read_board(KICAD5 / "twin-kicad5.kicad_pcb").placements}
+    assert [(p.library, p.x_mm, p.y_mm, p.rotation_deg, p.back) for p in got.values()] == [
+        ("Fixture:R_0603", 20.0, 10.0, 90.0, False),
+        ("Fixture:PinHeader_1x02", 30.0, 20.0, 90.0, True),
+    ]
+
+
+def test_a_kicad_5_tree_is_respelled_with_footprints_for_a_caller_that_walks_it():
+    """The composer reads a board's statements of kind off the tree itself, so
+    `board_tree` is where the respelling lives and not inside `read_board`."""
+    tree = board_tree(KICAD5 / "twin-kicad5.kicad_pcb")
+    assert [footprint[1] for footprint in children(tree, "footprint")] == [
+        "Fixture:R_0603", "Fixture:PinHeader_1x02"]
+    assert children(tree, "module") == []
+
+
+def test_a_kicad_5_reference_and_value_are_read_from_its_fp_text():
+    """KiCad 5 has no footprint properties: `(fp_text reference R1 ...)` and
+    `(fp_text value 10k ...)` are where it states both, and `_reference_of`
+    and `_value_of` answer for a raw `(module ...)` as for the twin's
+    `(footprint ...)`."""
+    old = parse_sexp((KICAD5 / "twin-kicad5.kicad_pcb").read_text(encoding="utf-8"))
+    new = parse_sexp((KICAD5 / "twin-kicad7.kicad_pcb").read_text(encoding="utf-8"))
+    said = [("R1", "10k"), ("J1", "CONN_01x02")]
+    assert [(_reference_of(node), _value_of(node)) for node in children(old, "module")] == said
+    assert [(_reference_of(node), _value_of(node)) for node in children(new, "footprint")] == said
+
+
+def test_a_kicad_5_arc_is_read_from_its_centre_start_and_sweep(tmp_path):
+    """`(gr_arc (start CX CY) (end SX SY) (angle A))`, where KiCad 5's own
+    parser says `start` "actually gives the arc center" and `end` the arc's
+    start. Centre (0, 0), start (1, 0), a quarter turn: KiCad's
+    `RotatePoint` by -90 takes (1, 0) to (0, 1), and halfway is (cos 45,
+    sin 45) to the nanometre -- worked by hand, in KiCad's y-down frame,
+    where that turn is clockwise as drawn."""
+    text = ARC5.format(arc="(gr_arc (start 0 0) (end 1 0) (angle 90) (layer Edge.Cuts) "
+                           "(width 0.05))")
+    (arc,) = read_board(tmp_path / "arc.kicad_pcb", text=text).arcs
+    assert (arc.x1_mm, arc.y1_mm, arc.xm_mm, arc.ym_mm, arc.x2_mm, arc.y2_mm) == (
+        1.0, 0.0, 0.707107, 0.707107, 0.0, 1.0)
+
+
+def test_a_kicad_5_arc_with_a_negative_sweep_is_read_from_its_far_end(tmp_path):
+    """The same arc swept the other way ends at (0, -1), and KiCad's own
+    reader swaps a negative arc's ends (`SetArcAngleAndEnd( angle, true )`
+    at 7.0), so it reads from (0, -1) to (1, 0): the arc KiCad 7 writes when
+    it saves the same board."""
+    text = ARC5.format(arc="(gr_arc (start 0 0) (end 1 0) (angle -90) (layer Edge.Cuts) "
+                           "(width 0.05))")
+    (arc,) = read_board(tmp_path / "arc.kicad_pcb", text=text).arcs
+    assert (arc.x1_mm, arc.y1_mm, arc.xm_mm, arc.ym_mm, arc.x2_mm, arc.y2_mm) == (
+        0.0, -1.0, 0.707107, -0.707107, 1.0, 0.0)
+
+
+def test_a_kicad_5_footprint_arc_is_read_as_a_board_arc_is():
+    """`fp_arc` is stored the same way, in the part's own frame. R1 draws its
+    pin-1 mark as one on F.Fab -- centre (-0.8, 0), start (-0.8, -0.2), a
+    quarter turn -- so its three points are (-0.8, -0.2), (-0.658579,
+    -0.141421) and (-0.6, 0), and their centroid is the mark."""
+    got = {p.reference: p for p in read_board(KICAD5 / "twin-kicad5.kicad_pcb").placements}
+    assert got["R1"].mark == pytest.approx(((-0.8 - 0.658579 - 0.6) / 3,
+                                            (-0.2 - 0.141421 + 0.0) / 3))
+
+
+def test_a_model_offset_written_as_at_is_read_in_inches():
+    """**`(at (xyz ...))` is a model offset in INCHES**: KiCad's own reader
+    multiplies it by 25.4 at 5.1 and at 7.0 alike ("Prior to KiCad v5, model
+    offset was designated by "at", and the units were in inches"). KiCad 5
+    writes it only for an offset that is all zero, so this one is made by
+    hand to be one that is not."""
+    node = parse_sexp("(module T:P (at 0 0) (model x.wrl (at (xyz 0.1 0 -0.05)) "
+                      "(scale (xyz 1 1 1)) (rotate (xyz 0 0 0))))")
+    (model,) = _models_of(node)
+    assert model.offset == pytest.approx((2.54, 0.0, -1.27))
+
+
+def test_a_kicad_5_model_offset_written_as_offset_is_read_in_millimetres():
+    """A non-zero offset KiCad 5 writes as `(offset ...)`, in millimetres as
+    every later version does: J1's model is moved 1.27 mm, not 32.258."""
+    got = {p.reference: p for p in read_board(KICAD5 / "twin-kicad5.kicad_pcb").placements}
+    assert [model.offset for model in got["J1"].models] == [(1.27, 0.0, 0.0)]
+
+
+def test_a_kicad_5_stroke_keeps_the_width_written_beside_it():
+    """KiCad 5 writes `(width 0.15)` where KiCad 7 writes `(stroke (width
+    0.15) ...)`. The board's own silkscreen line is 0.15 mm wide either way,
+    and a reader of only the newer spelling would draw it at zero."""
+    silk = read_board(KICAD5 / "twin-kicad5.kicad_pcb").silk
+    (line,) = [s for s in silk if (s.x1_mm, s.y1_mm, s.x2_mm, s.y2_mm) == (15.0, 5.0, 25.0, 5.0)]
+    assert line.width_mm == 0.15
+
+
+def test_a_kicad_5_net_has_one_backslash_whether_it_is_quoted_or_bare():
+    """**One KiCad 5 file spells a backslash two ways.** It quotes a name
+    only where it must (`OUTPUTFORMATTER::Quotes` at 5.1: whitespace, a
+    parenthesis, or a leading `#` or quote) and doubles a backslash only
+    inside quotes, so `/GPIO5\\SPI_CS` is written bare with one and
+    `"/GPIO4\\\\SDA(I2C)"` quoted with two. Olimex's KiCad 5 boards carry
+    both, and each is one backslash."""
+    got = {p.reference: p for p in read_board(KICAD5 / "twin-kicad5.kicad_pcb").placements}
+    assert [pad.net for pad in got["R1"].pads] == ["/GPIO5\\SPI_CS", "/GPIO4\\SDA(I2C)"]
+
+
+def test_a_kicad_5_back_side_pad_is_turned_and_moved_and_not_mirrored():
+    """KiCad 5 stores a flipped part's pads already flipped (`D_PAD::Flip`
+    mirrors `m_Pos0`) and places a pad by turning that stored offset by the
+    part's angle and moving it (`parseMODULE_unchecked`), which is what
+    `pad_on_board` does. J1 is on the underside at (30, 20) turned 90
+    degrees, its pad 2 stored at (2.54, 0): so (30, 17.46), where its track
+    ends. Mirroring first would put it at (30, 22.54)."""
+    got = {p.reference: p for p in read_board(KICAD5 / "twin-kicad5.kicad_pcb").placements}
+    assert tuple(round(v, 9) for v in pad_on_board(got["J1"], got["J1"].pads[1])) == (
+        30.0, 17.46)
+
+
+def test_a_renamed_kicad_5_copper_layer_is_refused_by_name(tmp_path):
+    """KiCad 5 writes a copper layer under the name its user gave it
+    (`BOARD::GetLayerName` at 5.1), so a board whose top is `Top` puts every
+    pad and track on `Top` and none on `F.Cu`, and reading it as given would
+    report every part's copper on neither side."""
+    text = (KICAD5 / "twin-kicad5.kicad_pcb").read_text(encoding="utf-8").replace(
+        "(0 F.Cu signal)", "(0 Top signal)")
+    assert "(0 Top signal)" in text, "the substitution did not take"
+    with pytest.raises(KicadError, match=r"names copper layer F\.Cu 'Top' in its "
+                                         r"\(layers \.\.\.\) table.*version 20171130"):
+        read_board(tmp_path / "renamed.kicad_pcb", text=text)
+
+
+def test_a_kicad_5_arc_stated_otherwise_is_refused_by_name(tmp_path):
+    """KiCad 5's parser takes `(center ...)` in place of `start` "for future
+    change", and nothing writes it. An arc this reader cannot place is
+    refused naming it, rather than dropped from the outline it belongs to."""
+    text = ARC5.format(arc="(gr_arc (center 0 0) (end 1 0) (angle 90) (layer Edge.Cuts) "
+                           "(width 0.05))")
+    with pytest.raises(KicadError, match=r"a \(gr_arc \.\.\.\) in a KiCad 5 file "
+                                         r"\(version 20171130\) reads .*'center'"):
+        read_board(tmp_path / "center.kicad_pcb", text=text)
+
+
+# --- the ESP32-C6-EVB's KiCad 5 board against its KiCad 7 copy -------------------
+#
+# **Two files from one vendor, read by two paths through this reader.** Olimex
+# publish the ESP32-C6-EVB's board as KiCad 5 (HARDWARE/Hardware-revision-A/)
+# and a KiCad 7 copy of the same board with its dimensions drawn on it
+# (HARDWARE/Dimensions/). The copy is not used in place of the board -- it is
+# a drawing made from it -- and is used here only to hold the KiCad 5 reading
+# against an independent one.
+#
+# Neither file is committed: `third_party/` is fetched and git-ignored, and
+# the board has no registry row yet (OH-198's phase 2). Pointed at another
+# directory by `OH_KICAD5_BOARDS`, and each file is found by its name anywhere
+# below it.
+
+C6_EVB_SHA = "7b66d23cabba3c573a1e63d83363675b5fb74f06"
+
+
+def _c6_evb(name: str) -> pathlib.Path:
+    """One of the two board files, or a skip saying where it was looked for
+    and how to fetch it."""
+    root = pathlib.Path(os.environ.get("OH_KICAD5_BOARDS",
+                                       REPO / "third_party" / "olimex-esp32-c6-evb"))
+    found = sorted(root.rglob(name)) if root.is_dir() else []
+    if not found:
+        pytest.skip(
+            f"{name} absent under {root}; fetch HARDWARE/Hardware-revision-A/"
+            f"ESP32-C6-EVB_Rev_A.kicad_pcb and HARDWARE/Dimensions/"
+            f"ESP32-C6-EVB_DIMM_Rev_A.kicad_pcb from "
+            f"https://github.com/OLIMEX/ESP32-C6-EVB at {C6_EVB_SHA}, and set "
+            f"OH_KICAD5_BOARDS to the directory holding them")
+    return found[0]
+
+
+@functools.cache
+def _c6_evb_boards():
+    """The KiCad 5 board and its KiCad 7 copy, each with the head of its
+    text, read once for every test below."""
+    old, new = _c6_evb("ESP32-C6-EVB_Rev_A.kicad_pcb"), _c6_evb("ESP32-C6-EVB_DIMM_Rev_A.kicad_pcb")
+    return (old.read_text(encoding="utf-8")[:40], read_board(old),
+            new.read_text(encoding="utf-8")[:40], read_board(new))
+
+
+def _turn(degrees: float) -> float:
+    """An angle as one turn, to the nanodegree: KiCad 7 writes 270 as -90."""
+    return round(degrees % 360.0, 9) % 360.0
+
+
+def _placed(placed: Placement) -> tuple:
+    return (placed.reference, placed.library, round(placed.x_mm, 6), round(placed.y_mm, 6),
+            _turn(placed.rotation_deg), placed.back, placed.value,
+            tuple(round(v, 6) for v in placed.body) if placed.body else None,
+            tuple(round(v, 6) for v in placed.mark) if placed.mark else None)
+
+
+def _pad(placed: Placement, pad: Pad, number: str) -> tuple:
+    return (placed.reference, number, pad.kind, pad.shape, round(pad.width_mm, 6),
+            round(pad.height_mm, 6), _turn(pad.rotation_deg), pad.layers, pad.net,
+            pad.castellated,
+            *(round(v, 6) for v in pad_on_board(placed, pad)))
+
+
+def _numbered(pad: Pad) -> bool:
+    """Whether KiCad 7 lets this pad keep a number (`PAD::CanHaveNumber` at
+    7.0): not an aperture, a pad with no copper layer, and not unplated."""
+    return any(layer.endswith(".Cu") for layer in pad.layers) and pad.kind != "np_thru_hole"
+
+
+def _drawn(items) -> collections.Counter:
+    return collections.Counter(tuple(round(v, 5) if isinstance(v, float) else v
+                                     for v in dataclasses.astuple(item)) for item in items)
+
+
+def test_the_c6_evbs_two_files_are_kicad_5_and_kicad_7():
+    """The files the tests below compare are the ones they name: a board
+    KiCad 5 wrote and a copy KiCad 7 wrote."""
+    old_head, _, new_head, _ = _c6_evb_boards()
+    assert "(version 20171130)" in old_head and "(version 20221018)" in new_head
+
+
+def test_the_c6_evbs_kicad_5_placements_read_as_its_kicad_7_copys():
+    """Every part, where it stands, which way round, on which side, what it
+    is, and its body and pin-1 mark: alike in both readings. KiCad 7 writes
+    an angle between -180 and 180 where KiCad 5 wrote 0 to 360, so turns are
+    compared as turns."""
+    _, old, _, new = _c6_evb_boards()
+    assert collections.Counter(map(_placed, old.placements)) == collections.Counter(
+        map(_placed, new.placements))
+
+
+def test_the_c6_evbs_kicad_5_pads_read_as_its_kicad_7_copys():
+    """Every pad -- number, kind, shape, size, turn, layers, net, and where
+    `pad_on_board` puts it on the board -- alike in both readings, but for
+    **one difference, which is KiCad 7's and not the reading's**: KiCad 7's
+    reader clears the number of a pad that may not have one ("At some point
+    it was possible to assign a number to aperture pads", pcb_parser.cpp at
+    7.0). The KiCad 5 file numbers its paste-only apertures `Past` and
+    `past`, and this reader reports what the file says; so the KiCad 7 rule
+    is applied to the KiCad 5 side here, in the test, and no number survives
+    it on the KiCad 7 side."""
+    _, old, _, new = _c6_evb_boards()
+    kicad7_rule = collections.Counter(
+        _pad(placed, pad, pad.number if _numbered(pad) else "")
+        for placed in old.placements for pad in placed.pads)
+    as_read = collections.Counter(_pad(placed, pad, pad.number)
+                                  for placed in new.placements for pad in placed.pads)
+    assert kicad7_rule == as_read
+    assert {pad.number for placed in new.placements for pad in placed.pads
+            if not _numbered(pad)} == {""}
+    assert {pad.number for placed in old.placements for pad in placed.pads
+            if not _numbered(pad)} - {""} == {"Past", "past"}
+
+
+def test_the_c6_evbs_kicad_5_models_read_as_its_kicad_7_copys():
+    """Every model's file, offset -- inches where KiCad 5 wrote `(at ...)`,
+    millimetres where it wrote `(offset ...)` -- turn and scale, alike in
+    both readings, but for **one difference, which is in the copy**: the
+    board names every model in `${KIPRJMOD}/3d/`, the vendor's own directory
+    beside it, and the copy names `${KISYS3DMOD}/`, KiCad's library. KiCad's
+    reader takes a model's path as written (`parse3DModel`), so the copy was
+    edited, and the board is the vendor's statement."""
+    _, old, _, new = _c6_evb_boards()
+
+    def models(board, directory):
+        return collections.Counter(
+            (placed.reference, model.path.removeprefix(directory), model.hidden,
+             *(round(v, 6) for v in model.offset + model.rotate + model.scale))
+            for placed in board.placements for model in placed.models)
+
+    assert models(old, "${KIPRJMOD}/3d/") == models(new, "${KISYS3DMOD}/")
+    assert {model.path.rsplit("/", 1)[0] for placed in old.placements
+            for model in placed.models} == {"${KIPRJMOD}/3d"}
+
+
+def test_the_c6_evbs_kicad_5_outline_ink_and_copper_read_as_its_kicad_7_copys():
+    """The outline -- its rounded corners are KiCad 5 arcs -- the silkscreen,
+    the tracks, the vias, and the counts of what is not drawn: alike in both
+    readings, to ten nanometres. The arcs are the check on `_kicad5_arc`:
+    every one of them is stated by its centre and a negative or positive
+    sweep in the one file and by three points in the other."""
+    _, old, _, new = _c6_evb_boards()
+    assert [_drawn(old.outline), _drawn(old.arcs), _drawn(old.silk), _drawn(old.traces),
+            _drawn(old.vias), old.silk_unread, old.traces_unread] == [
+        _drawn(new.outline), _drawn(new.arcs), _drawn(new.silk), _drawn(new.traces),
+        _drawn(new.vias), new.silk_unread, new.traces_unread]

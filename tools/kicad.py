@@ -1027,17 +1027,189 @@ def _models_of(node: list) -> tuple[StatedModel, ...]:
         if len(node_model) < 2:
             continue
         hide = first(node_model, "hide")
+        offset = triple("offset", None)
+        if offset is None:
+            # **`(at (xyz ...))` is the same offset in INCHES** (OH-198), and
+            # KiCad's own reader says so at 5.1 and at 7.0 alike --
+            # `PCB_PARSER::parse3DModel` multiplies it by 25.4 under "Prior to
+            # KiCad v5, model offset was designated by "at", and the units
+            # were in inches". KiCad 5 still writes it, for an offset that is
+            # all zero ("fewer file changes", `PCB_IO::format( MODULE* )` at
+            # 5.1), and `(offset ...)` in millimetres otherwise.
+            inches = triple("at", None)
+            offset = (tuple(value * 25.4 for value in inches) if inches is not None
+                      else (0.0, 0.0, 0.0))
         out.append(StatedModel(
             path=str(node_model[1]),
             # `(hide yes)`. Anything else -- including its absence -- is
             # visible, which is the reading that keeps the SAMD21 alternate
-            # dangerous rather than quietly safe.
+            # dangerous rather than quietly safe. A KiCad 5 model has no way
+            # to be hidden: 5.1's `parse3DModel` takes at, offset, scale and
+            # rotate and nothing else.
             hidden=bool(hide and len(hide) > 1 and str(hide[1]) == "yes"),
-            offset=triple("offset", (0.0, 0.0, 0.0)),
+            offset=offset,
             rotate=triple("rotate", (0.0, 0.0, 0.0)),
             scale=triple("scale", (1.0, 1.0, 1.0)),
         ))
     return tuple(out)
+
+
+# --- KiCad 5 ---------------------------------------------------------------------
+#
+# **A KiCad 5 board is read by respelling its tree, not by a second reader**
+# (OH-198). Everything above walks KiCad 6's spelling, and so do the callers
+# that walk a board's tree themselves; `board_tree` hands every one of them a
+# KiCad 5 file in that spelling, so none of them needs a second path.
+#
+# What differs, each checked against KiCad's own 5.1 source and against
+# Olimex's ESP32-C6-EVB, whose KiCad 5 board has a KiCad 7 copy beside it:
+#
+#   * a placed part is `(module ...)`, renamed `(footprint ...)` by KiCad 6
+#   * an arc is its centre, its start and its sweep -- see `_kicad5_arc`
+#   * a copper layer is written under the name its user gave it -- see
+#     `_kicad5_copper`
+#   * a model's offset may be `(at (xyz ...))`, in inches, which `_models_of`
+#     reads in any version because KiCad's own reader does
+#
+# And what reads alike and so is left as the vendor wrote it: references and
+# values as `fp_text`, which `_reference_of` and `_value_of` already read;
+# widths as `(width w)`, which `_stroke_width` already reads; pad `(at x y
+# angle)`, with the position in the part's own frame and the angle absolute
+# (`parseD_PAD` and `parseMODULE_unchecked` at 5.1), as `pad_on_board` takes
+# them; and nets, `(net 3 GND)` on a pad as later. A KiCad 5 pad is never
+# `castellated`: pad properties arrived at version 20200104.
+#
+# `(attr ...)` is left alone too, and nothing here reads it. KiCad 5 can
+# state `smd` and `virtual` and nothing else ("smd and/or virtual", its
+# parser at 5.1); it cannot state `dnp`, `board_only` or `exclude_from_bom`.
+# KiCad 7's reader takes `virtual` as `exclude_from_pos_files
+# exclude_from_bom` ("legacy token prior to version 20200826") -- and the
+# KiCad 5 revisions of Olimex's ESP32-PoE mark its RJ45 jack, LAN_CON1,
+# `virtual`. What that says about whether a part is fitted is the composer's
+# question, so the token reaches it as the vendor wrote it.
+
+#: The board version KiCad 5.0 and 5.1 write: `SEXPR_BOARD_FILE_VERSION` in
+#: `pcbnew/kicad_plugin.h` at 5.1, "3D model offset written using "offset"
+#: parameter". The only version whose `(module ...)` is read.
+KICAD5_VERSION = "20171130"
+
+
+def _kicad5_arc(node: list, path: pathlib.Path) -> list:
+    """A KiCad 5 `gr_arc` or `fp_arc` as the three points KiCad 6 stores.
+
+    **KiCad 5 stored an arc as its centre, its start and its sweep.**
+    `(gr_arc (start CX CY) (end SX SY) (angle A) ...)`: in its own parser's
+    words (`parseDRAWSEGMENT` and `parseEDGE_MODULE` at 5.1), "the start
+    keyword actually gives the arc center" and "the end keyword actually
+    gives the starting point of the arc". Read as KiCad 6's `start` and
+    `end`, every rounded corner of a board is a radius out, and with no
+    `mid` the readers above drop it without a word.
+
+    The end is the start turned through A about the centre --
+    `DRAWSEGMENT::GetArcEnd`, `RotatePoint( &endPoint, m_Start, -m_Angle )`,
+    whose `RotatePoint` (common/geometry/trigo.cpp at 5.1) takes `(x, y)` to
+    `(x cos + y sin, y cos - x sin)`, so that turning by -A takes an offset
+    to `(x cos A - y sin A, y cos A + x sin A)`. The mid is the start turned
+    through A / 2, as KiCad 7's `EDA_SHAPE::GetArcMid` makes one. A negative sweep
+    swaps start and end, as KiCad 7's reader does (`SetArcAngleAndEnd( angle,
+    true )`), so the arc reads as KiCad's own upgrade of the file writes it.
+    Each computed point is rounded to the nanometre, the integer unit KiCad
+    holds a board in and rounds that end to (`KiROUND`).
+    """
+    centre, start, sweep = first(node, "start"), first(node, "end"), first(node, "angle")
+    c, s, a = (_floats(part) if part is not None else [] for part in (centre, start, sweep))
+    if len(c) < 2 or len(s) < 2 or not a:
+        raise KicadError(
+            f"{path}: a ({head(node)} ...) in a KiCad 5 file (version "
+            f"{KICAD5_VERSION}) reads {node!r}; KiCad 5 writes an arc as "
+            f"(start CX CY) (end SX SY) (angle A), and an arc stated otherwise "
+            f"is not read")
+
+    def turned(degrees: float) -> list[str]:
+        turn = math.radians(degrees)
+        dx, dy = s[0] - c[0], s[1] - c[1]
+        return [repr(round(c[0] + dx * math.cos(turn) - dy * math.sin(turn), 6)),
+                repr(round(c[1] + dy * math.cos(turn) + dx * math.sin(turn), 6))]
+
+    begin, end = start[1:3], turned(a[0])
+    if a[0] < 0:
+        begin, end = end, begin
+    rest = [child for child in node[1:]
+            if not (isinstance(child, list) and head(child) in ("start", "end", "angle"))]
+    return [head(node), ["start", *begin], ["mid", *turned(a[0] / 2)], ["end", *end], *rest]
+
+
+def _kicad5_copper(tree: list, path: pathlib.Path) -> None:
+    """Refuse a KiCad 5 board that renames a copper layer, naming it.
+
+    **KiCad 5 writes copper under the name its user gave it.**
+    `BOARD::GetLayerName` at 5.1 returns "the actual copper layer name" for a
+    copper layer, and `PCB_IO` writes every track, pad and zone with it, so a
+    board whose top is called `Top` puts its pads on `Top` and never on
+    `F.Cu`. KiCad 6 writes KiCad's own name and keeps the user's beside it.
+
+    Which layer a name means is positional in KiCad 5 (`PCB_PARSER::
+    parseLayers`): the copper entries come first in the `(layers ...)` table,
+    the last is B.Cu and the others F.Cu, In1.Cu and on. A table that names
+    them so needs nothing; one that does not is refused rather than mapped,
+    since no vendor file read here renames one.
+    """
+    table = first(tree, "layers")
+    copper: list[str] = []
+    for entry in (table or [])[1:]:
+        if not (isinstance(entry, list) and len(entry) > 2
+                and entry[2] in ("signal", "power", "mixed", "jumper")):
+            break
+        copper.append(str(entry[1]))
+    expected = ["F.Cu" if index == 0 else f"In{index}.Cu"
+                for index in range(len(copper) - 1)] + ["B.Cu"]
+    for named, kicad_name in zip(copper, expected):
+        if named != kicad_name:
+            raise KicadError(
+                f"{path}: names copper layer {kicad_name} {named!r} in its "
+                f"(layers ...) table, and a KiCad 5 file (version "
+                f"{KICAD5_VERSION}) writes that layer's tracks and pads under "
+                f"{named!r}; a renamed KiCad 5 copper layer is not read")
+
+
+def board_tree(path: pathlib.Path, text: str | None = None) -> list:
+    """One `.kicad_pcb`'s tree, spelled as KiCad 6 and later spell it.
+
+    A KiCad 6 or later file is returned as `parse_sexp` reads it. A KiCad 5
+    file -- version 20171130 -- comes back with each `(module ...)` a
+    `(footprint ...)` and each arc its three points; see the notes above
+    `KICAD5_VERSION`. A `(module ...)` in any other version is refused by
+    name, since what that version means by it has not been checked.
+
+    `text`, where given, is read in place of the file at `path`, as
+    `read_board` takes it.
+    """
+    tree = parse_sexp(path.read_text(encoding="utf-8") if text is None else text)
+    if head(tree) != "kicad_pcb":
+        raise KicadError(f"{path}: not a board (root is {head(tree)!r})")
+    version = first(tree, "version")
+    stated = version[1] if version is not None and len(version) > 1 else None
+    if stated != KICAD5_VERSION:
+        modules = children(tree, "module")
+        if modules:
+            raise KicadError(
+                f"{path}: places {len(modules)} parts as (module ...) in a file "
+                f"of version {stated}; (module ...) is read as KiCad 5 writes "
+                f"it, at version {KICAD5_VERSION}, and what version {stated} "
+                f"means by it has not been checked")
+        return tree
+    _kicad5_copper(tree, path)
+    out: list = []
+    for node in tree:
+        if isinstance(node, list) and head(node) == "module":
+            node = ["footprint", *(
+                _kicad5_arc(child, path)
+                if isinstance(child, list) and head(child) == "fp_arc" else child
+                for child in node[1:])]
+        elif isinstance(node, list) and head(node) == "gr_arc":
+            node = _kicad5_arc(node, path)
+        out.append(node)
+    return out
 
 
 def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
@@ -1051,10 +1223,11 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
     `text`, where given, is read in place of the file at `path`, which then
     only names it: `eagle.read_board` takes the same, so that a caller who
     has already read the bytes -- and digested them -- parses those bytes.
+
+    A KiCad 5 board reads into the same structures as a later one, through
+    `board_tree` (OH-198).
     """
-    tree = parse_sexp(path.read_text(encoding="utf-8") if text is None else text)
-    if head(tree) != "kicad_pcb":
-        raise KicadError(f"{path}: not a board (root is {head(tree)!r})")
+    tree = board_tree(path, text)
 
     outline: list[Segment] = []
     for node in children(tree, "gr_line"):
@@ -1122,15 +1295,6 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
         silk += printed
         unread += missed
 
-    if not placements and children(tree, "module"):
-        # KiCad 5 called a placed part `(module ...)`, and nothing here has
-        # been checked against that format, so it is refused by name rather
-        # than read as though it were a footprint.
-        raise KicadError(
-            f"{path}: places {len(children(tree, 'module'))} parts as (module "
-            f"...), which is KiCad 5's format; KiCad 5 format (module) is not "
-            f"read. KiCad 6 or later writes (footprint ...)"
-        )
     if not placements:
         raise KicadError(f"{path}: no footprints; refusing to report an empty board")
     if not outline and not arcs:
