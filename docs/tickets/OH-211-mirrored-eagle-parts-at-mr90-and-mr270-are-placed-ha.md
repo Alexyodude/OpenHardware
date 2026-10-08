@@ -2,7 +2,7 @@
 id: OH-211
 title: 'Mirrored EAGLE parts at MR90 and MR270 are placed half a turn off: EAGLE turns
   and then mirrors'
-status: open
+status: in-progress
 priority: P1
 created: '2026-10-08'
 touches:
