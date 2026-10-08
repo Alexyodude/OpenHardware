@@ -477,6 +477,27 @@ def test_a_kicad_footprint_with_no_symbol_library_beside_it_says_so(tmp_path):
         read_geometry(lonely)
 
 
+def test_a_footprint_pad_with_no_number_is_refused_where_it_sits(tmp_path):
+    """A lone footprint's pads are on no net, so the number is all a pad has
+    to be joined to its symbol's pin by; one without it would be labelled ""."""
+    footprint = tmp_path / "thing.kicad_mod"
+    footprint.write_text(
+        '(footprint "thing" (pad "1" thru_hole circle (at 0 0) (size 1 1)) '
+        '(pad "" thru_hole circle (at 2.54 0) (size 1 1)))',
+        encoding="utf-8",
+    )
+    (tmp_path / "thing.kicad_sym").write_text(
+        '(kicad_symbol_lib (symbol "thing" (symbol "thing_1_1" (pin power_in line '
+        '(at 0 0 0) (length 2.54) (name "VCC") (number "1")))))',
+        encoding="utf-8",
+    )
+    with pytest.raises(BoardImportError) as caught:
+        read_geometry(footprint)
+    assert (f"{footprint}: footprint thing has a thru_hole pad at (2.54, 0) in its own "
+            f"millimetres that the file gives neither a number nor a net"
+            ) in str(caught.value), caught.value
+
+
 # --- grouping ---------------------------------------------------------------
 
 
@@ -1304,7 +1325,21 @@ def test_unnumbered_pads_are_never_one_pin(tmp_path):
     path = _kicad_board(tmp_path, [_pad("", 0, 0, "GND"), _pad("", 10, 0, "GND")])
     geometry = read_geometry(path, select=("J1",))
     assert sorted(pad.x_mm for pad in geometry.pads) == [6.0, 16.0]
+    assert {pad.label for pad in geometry.pads} == {"GND"}, "an unnumbered pad is named by its net"
     assert "merged" not in geometry.derivation
+
+
+def test_a_plated_pad_with_neither_a_number_nor_a_net_is_refused_where_it_sits(tmp_path):
+    """**A pad with neither has no name to carry**: it would be labelled ""
+    and nothing should invent one. J1 at (5, 5) turned 90 degrees puts its
+    pad 2.54 mm below the origin 2.54 mm right of it, at (7.54, 5) on the
+    board, which is the position the refusal names."""
+    path = _kicad_board(tmp_path, [_pad("1", 0, 0, "A"), _pad("", 0, 2.54)], rotation=90)
+    with pytest.raises(BoardImportError) as caught:
+        read_geometry(path, select=("J1",))
+    assert (f"{path}: J1 (Header) has a plated through-hole pad at (7.54, 5) on the "
+            f"board that the file gives neither a number nor a net"
+            ) in str(caught.value), caught.value
 
 
 def test_pads_one_number_on_no_net_are_never_one_pin(tmp_path):

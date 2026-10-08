@@ -361,6 +361,16 @@ def _from_kicad(
     pads = footprint.pads_of("thru_hole") or footprint.pads_of("smd")
     if not pads:
         raise BoardImportError(f"{path}: footprint has no through-hole or SMD pads")
+    # A lone footprint's pads are on no net, so the number is the only thing
+    # joining a pad to its pin; without one the pad would be labelled "".
+    for pad in pads:
+        if not pad.number:
+            raise BoardImportError(
+                f"{path}: footprint {footprint.name} has a {pad.kind} pad at "
+                f"({pad.x_mm:g}, {pad.y_mm:g}) in its own millimetres that the "
+                f"file gives neither a number nor a net, so it has no name to "
+                f"carry and none is invented for it."
+            )
 
     min_x, min_y, max_x, max_y = footprint.extent_mm()
     entries = [
@@ -428,7 +438,9 @@ def _from_kicad_board(
     pads on no net connect nothing, so neither is ever merged.
 
     A pad is named after its net, as an EAGLE board's is, and a pad on no net
-    keeps its number. Pads are grouped by the footprint they belong to.
+    keeps its number. A pad with neither is refused where it sits, because it
+    would be named "" and nothing should invent a name for it (OH-184). Pads
+    are grouped by the footprint they belong to.
     """
     if symbols is not None or connects is not None:
         raise BoardImportError(
@@ -480,6 +492,16 @@ def _from_kicad_board(
             pins.setdefault(pad.number, []).append(pad)
         for number, pads in pins.items():
             if not number:
+                for pad in pads:
+                    if not pad.net:
+                        x, y = kicad.pad_on_board(placed, pad)
+                        raise BoardImportError(
+                            f"{path}: {placed.reference} ({placed.name}) has a "
+                            f"plated through-hole pad at ({round(x, 4):g}, "
+                            f"{round(y, 4):g}) on the board that the file gives "
+                            f"neither a number nor a net, so it has no name to "
+                            f"carry and none is invented for it."
+                        )
                 kept += [(placed, pad) for pad in pads]
                 continue
             nets = {pad.net for pad in pads}
