@@ -3005,13 +3005,17 @@ class HeaderTable:
     citations: tuple[str, ...]
     #: Labels with no pad, so the block can say which rows are not header.
     on_board: tuple[str, ...]
-    #: Rows a CAD source named -- a vendor's own board file, which is not a
-    #: board-support package (`Package.firmware`) -- and that source's
+    #: Rows only a CAD source named -- a vendor's own board file, which is not
+    #: a board-support package (`Package.firmware`) -- and every CAD source's
     #: citations, a subset of `citations`. The block lists them apart, so a
     #: row read off the C5's own board file does not sit under a sentence
     #: calling everything above it a board-support package (OH-200).
     cad_rows: tuple[str, ...] = ()
     cad_citations: tuple[str, ...] = ()
+    #: Rows a CAD source AND a package both named. The block calls a
+    #: `cad_rows` row the CAD's "instead" of a package's, which is false of
+    #: these, so it names them apart again (OH-200 review, F4).
+    cad_also: tuple[str, ...] = ()
     #: Rows whose pad only some of `boards` carry, and those boards: the C5's
     #: and C6's JTAG and BOOT pads are on the SMD footprint and not the DIP
     #: (OH-200). The table is still the union -- one chip, one table -- and
@@ -3059,6 +3063,7 @@ def header_table(
     citations: list[str] = []
     on_board: list[str] = []
     cad_rows: set[str] = set()
+    package_rows: set[str] = set()
     cad_citations: list[str] = []
     carried: dict[str, list[str]] = {}
     for name in names:
@@ -3089,7 +3094,9 @@ def header_table(
                 # The package is a citation's first word: `published_pins`
                 # writes `<package> <paths> @ <stamp>`, and no name in
                 # `PACKAGES` has a space in it.
-                if not PACKAGES[source.split(" ", 1)[0]].firmware:
+                if PACKAGES[source.split(" ", 1)[0]].firmware:
+                    package_rows.add(label)
+                else:
                     cad_rows.add(label)
                     if source not in cad_citations:
                         cad_citations.append(source)
@@ -3100,10 +3107,13 @@ def header_table(
         raise PindefError(f"{chip}: no pad on {names} resolves to a pin; nothing to emit")
     ordered = dict(sorted(pins.items(), key=lambda item: _label_order(item[0])))
     return HeaderTable(chip, names, ordered, tuple(citations), tuple(on_board),
-                       tuple(label for label in ordered if label in cad_rows),
-                       tuple(cad_citations),
-                       {label: tuple(carried[label]) for label in ordered
-                        if label in carried and len(carried[label]) < len(names)})
+                       cad_rows=tuple(label for label in ordered
+                                      if label in cad_rows and label not in package_rows),
+                       cad_citations=tuple(cad_citations),
+                       cad_also=tuple(label for label in ordered
+                                      if label in cad_rows and label in package_rows),
+                       partial={label: tuple(carried[label]) for label in ordered
+                                if label in carried and len(carried[label]) < len(names)})
 
 
 def render_header(table: HeaderTable) -> str:
@@ -3146,12 +3156,22 @@ def render_header(table: HeaderTable) -> str:
     for sentence in sentences:
         lines.extend(textwrap.wrap(sentence, width=76, initial_indent="#: ",
                                    subsequent_indent="#: "))
+    # "Instead" only of a row no package answered: a row a package answered
+    # too is that package's, as the sentence above says, and the CAD names it
+    # "as well". Either way the CAD is cited here and not above.
+    clauses = []
     if table.cad_rows:
         rows = ", ".join(f"`{label}`" for label in table.cad_rows)
         verb = "is" if len(table.cad_rows) == 1 else "are"
+        clauses.append(f"{rows} {verb} read out of the vendor's own board CAD instead")
+    if table.cad_also:
+        rows = ", ".join(f"`{label}`" for label in table.cad_also)
+        verb = "is" if len(table.cad_also) == 1 else "are"
+        cad = "it" if clauses else "the vendor's own board CAD"
+        clauses.append(f"{rows} {verb} read out of {cad} as well")
+    if clauses:
         lines.extend(textwrap.wrap(
-            f"{rows} {verb} read out of the vendor's own board CAD instead, which "
-            f"is not a board-support package:",
+            f"{', and '.join(clauses)}, which is not a board-support package:",
             width=76, initial_indent="#: ", subsequent_indent="#: "))
         lines.extend(f"#:     {citation}" for citation in table.cad_citations)
     sentences = []

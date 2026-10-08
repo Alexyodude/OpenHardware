@@ -2261,6 +2261,56 @@ def test_a_pad_one_file_carries_null_is_still_a_pad_of_that_file(tmp_path, monke
     assert "`MTMS` is a pad of" not in text and "`MTMS` are pads" not in text, text
 
 
+def test_a_row_the_cad_and_a_package_both_answer_is_not_the_cads_instead(tmp_path, monkeypatch):
+    """The block says the packages answer every row above, and a CAD row is
+    read out of the vendor's own board CAD "instead". A row BOTH answer is a
+    package's row that the CAD names as well, so it is named without
+    "instead" -- and the CAD is still cited apart and never as a package
+    (OH-200 review, F4).
+
+    The fake CAD names `MTMS`, which no package does, and `D0`, which both
+    fake packages already answer with the same pin. Then `D0` alone, so the
+    sentence has no "instead" row to lean on."""
+    bsp, boards = _fake_tree(tmp_path, monkeypatch)
+    pcb = tmp_path / "pcb"
+    pcb.mkdir()
+    (pcb / "fake.kicad_pcb").write_text(
+        '(kicad_pcb\n\t(net 1 "MTMS_GPIO2_X")\n\t(net 2 "D0_GPIO26")\n)\n', encoding="utf-8")
+    cited = (f"seeed-pcb fake.kicad_pcb @ sha256:"
+             f"{pindefs._digest(((pcb / 'fake.kicad_pcb').read_text(encoding='utf-8'),))}")
+    _board_file(boards, "FAKE-SMD", [("D0", "1"), ("D6", "7"), ("MTMS", "13")])
+    for labels, instead, also, sentence in (
+        (("MTMS", "D0"), ("MTMS",), ("D0",),
+         "`MTMS` is read out of the vendor's own board CAD instead, and `D0` is read "
+         "out of it as well, which is not a board-support package:"),
+        (("D0",), (), ("D0",),
+         "`D0` is read out of the vendor's own board CAD as well, which is not a "
+         "board-support package:"),
+    ):
+        cad = dataclasses.replace(pindefs.seeed_pcb("fake.kicad_pcb", labels), root=pcb)
+        sources = (pindefs.zephyr_connector("fake", flat_gpio),
+                   pindefs.arduino_flat("arduino-pico", "fake", extras=("LED",)), cad)
+        monkeypatch.setattr(pindefs, "BOARDS", {
+            "FAKE-DIP": pindefs.Board("FAKE", sources, on_board=("LED",)),
+            "FAKE-SMD": pindefs.Board("FAKE", sources, on_board=("LED",)),
+        })
+        (d0,) = [pad for pad in board_report("FAKE-SMD", bsp, boards)["pads"]
+                 if pad["label"] == "D0"]
+        assert (d0["chip_pin"], cited in d0["sources"], len(d0["sources"])) == (
+            "GPIO26", True, 3), (labels, d0)
+
+        table = pindefs.header_table("FAKE", bsp, boards)
+        lines = pindefs.render_header(table).split("\n")
+        text = " ".join(lines).replace(" #: ", " ")
+        assert sentence in text, (labels, text)
+        assert (table.cad_rows, table.cad_also) == (instead, also), (
+            labels, table.cad_rows, table.cad_also)
+        # The sentence wraps wherever its rows put it, so find its last line.
+        after = next(n for n, line in enumerate(lines) if line.endswith("package:"))
+        assert [n for n, line in enumerate(lines) if line == f"#:     {cited}"] == [after + 1], (
+            labels, lines)
+
+
 def _symbol_library() -> str:
     if not SEEED_SYM.is_file():
         pytest.skip(f"no {SEEED_SYM}; run python tools/get_board_sources.py seeed-xiao")
