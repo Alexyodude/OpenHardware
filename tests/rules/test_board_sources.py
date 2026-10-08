@@ -208,15 +208,20 @@ def test_every_row_cites_the_survey_or_the_ticket_that_opened_it():
 
 
 def test_a_licence_read_from_a_fetched_file_is_in_that_file():
-    """Whitespace is normalised: the checkout is CRLF here and the text wraps."""
+    """Whitespace is normalised: the checkout is CRLF here and the text wraps.
+    A tree that is fetched and lacks the named file fails rather than
+    skipping as unfetched: that is what a wrong `file=` looks like."""
     checked, unfetched = [], []
     for candidate in SOURCES:
         if not candidate.licence.file:
             continue
-        path = candidate.dest(REPO) / candidate.licence.file
-        if not path.is_file():
+        if not candidate.dest(REPO).is_dir():
             unfetched.append(candidate.name)
             continue
+        path = candidate.dest(REPO) / candidate.licence.file
+        assert path.is_file(), (
+            f"{candidate.name}: {candidate.dest(REPO).as_posix()} is fetched and "
+            f"does not hold {candidate.licence.file}, the file its licence is read from")
         text = " ".join(path.read_text(encoding="utf-8", errors="replace").split())
         for words in (candidate.licence.quote, candidate.licence.notice):
             assert " ".join(words.split()) in text, f"{path} does not read {words!r}"
