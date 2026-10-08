@@ -4010,11 +4010,11 @@ def kicad_statements(layout: pathlib.Path) -> dict[str, Statement]:
     KiCad 5.1's own words for it, `MOD_VIRTUAL` in pcbnew/class_module.h
     (lines 78-79 at 5.1.12), are in full "Virtual component: when created by
     copper shapes on board (Like edge card connectors, mounting hole...)".
-    Two things KiCad 5.1.12 makes of a board read it, and they do not agree.
-    Its footprint position file leaves a virtual part out ("skipping
-    footprint %s because it's virtual",
-    pcbnew/exporters/gen_footprints_placefile.cpp:468-472). Its own 3D
-    viewer draws one: both its renderers ask
+    KiCad 5.1.12's own readers of the flag do not agree on what it means,
+    and of them only its footprint position file leaves the part out
+    ("skipping footprint %s because it's virtual",
+    pcbnew/exporters/gen_footprints_placefile.cpp:468-472). The rest keep
+    it. Its own 3D viewer draws one: both its renderers ask
     `CINFO3D_VISU::ShouldModuleBeDisplayed` before drawing a footprint's
     models (3d_render_ogl_legacy/c3d_render_ogl_legacy.cpp:1002,
     3d_render_raytracing/c3d_render_createscene.cpp:1219, under
@@ -4023,9 +4023,20 @@ def kicad_statements(layout: pathlib.Path) -> dict[str, Statement]:
     cinfo3d_visu.cpp:221, the virtual case at 227-228), and that is set by
     default: in the class's constructor (cinfo3d_visu.cpp:101) and from the
     viewer's `ShowFootprints_Virtual` setting, read with a default of true
-    (3d-viewer/3d_viewer/eda_3d_viewer.cpp:797). Its footprint report only
-    repeats it ("attribut virtual", gen_footprints_placefile.cpp:717-718),
-    and its board BOM (pcbnew/build_BOM_from_board.cpp) does not read it.
+    (3d-viewer/3d_viewer/eda_3d_viewer.cpp:797). Its footprint report
+    lists every footprint (gen_footprints_placefile.cpp:706) and notes
+    "attribut virtual" against one (717-718). Its GenCAD export writes one
+    as a device of `TYPE VIRTUAL` (pcbnew/exporters/export_gencad.cpp:
+    1170-1171) and its shape as `INSERT SMD` (1272-1275). Its STEP export,
+    kicad2step, reads the flag (utils/kicad2step/pcb/kicadmodule.cpp:
+    239-240) and leaves a virtual part's models out only when asked to
+    (368-369): it includes them by default (`m_includeVirtual = true`,
+    utils/kicad2step/kicad2step.cpp:105) and leaves them out under
+    `--no-virtual` (82-83, 141-142), which pcbnew passes when its export
+    dialog's "Ignore virtual components" is ticked
+    (pcbnew/dialogs/dialog_export_step.cpp:274-275, the label at
+    dialog_export_step_base.cpp:148). Its board BOM
+    (pcbnew/build_BOM_from_board.cpp) does not read the flag at all.
     KiCad 7 reads it as `exclude_from_pos_files exclude_from_bom` (`case
     T_virtual: // legacy token prior to version 20200826`, pcb_parser.cpp at
     7.0.0), a translation the vendor did not write.
