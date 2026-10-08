@@ -29,6 +29,7 @@ from tools.kicad import (
     KicadError,
     Pad,
     Placement,
+    Text,
     _models_of,
     _reference_of,
     _silk_of,
@@ -2056,3 +2057,84 @@ def test_the_esp32_poes_silkscreen_lands_on_olimexs_own_gerber():
         ("underside footprint", "B.SilkS", "as stored only"): 327,
         ("underside footprint", "B.SilkS", "both, being its own mirror image"): 286,
     })
+
+
+# --- silkscreen text (OH-163) ---------------------------------------------------
+#
+# The reader carries what KiCad draws a text BY -- its string, where, how big,
+# at what pen, which way it is justified, turned and mirrored -- and draws
+# nothing: the font is the composer's. Whether the strokes land where each
+# vendor plotted them is held in tests/rules/test_compose_board_3d.py, against
+# the vendors' own Gerbers.
+
+LETTERED = """(kicad_pcb
+\t(version 20241229)
+\t(generator "pcbnew")
+\t(gr_rect (start 0 0) (end 40 40) (stroke (width 0.05) (type solid)) (layer "Edge.Cuts"))
+\t(gr_text "D0\\nGND"
+\t\t(at 10 20 90)
+\t\t(layer "F.SilkS")
+\t\t(effects (font (size 1.2 1) (thickness 0.15) (italic yes)) (justify left bottom))
+\t)
+\t(gr_text "SEEED"
+\t\t(at 5 6)
+\t\t(layer "B.SilkS" knockout)
+\t\t(effects (font (face "Lexend") (size 1 1) (thickness 0.2) (bold yes)) (justify mirror))
+\t)
+\t(footprint "TEST:R0402"
+\t\t(layer "F.Cu")
+\t\t(at 20 30 90)
+\t\t(property "Reference" "R1"
+\t\t\t(at 1 0 180)
+\t\t\t(unlocked yes)
+\t\t\t(layer "F.SilkS")
+\t\t\t(effects (font (size 0.5 0.4) (thickness 0.08)) (justify right top))
+\t\t)
+\t\t(property "Value" "10k"
+\t\t\t(at 0 1 90)
+\t\t\t(layer "F.SilkS")
+\t\t\t(hide yes)
+\t\t\t(effects (font (size 1 1) (thickness 0.15)))
+\t\t)
+\t\t(fp_text user "hide"
+\t\t\t(at 0 -1 90)
+\t\t\t(layer "F.SilkS")
+\t\t\t(effects (font (size 1 1) (thickness 0.15)))
+\t\t)
+\t\t(fp_text user "${REFERENCE}"
+\t\t\t(at 0 2 90)
+\t\t\t(layer "F.SilkS")
+\t\t\thide
+\t\t\t(effects (font (size 1 1) (thickness 0.15)))
+\t\t)
+\t\t(pad "1" smd rect (at -0.5 0) (size 0.5 0.5) (layers "F.Cu"))
+\t)
+)
+"""
+
+
+def test_silkscreen_text_is_read_as_the_file_states_it(tmp_path):
+    """**Every text on a silkscreen layer, with what KiCad draws it by**:
+    board text where the file puts it; a footprint's text turned and moved
+    with the footprint and at the ABSOLUTE angle the file stores; a
+    footprint's `property` fields as well as its `fp_text`, which no reader
+    here counted before OH-163; `unlocked` read as "not kept upright"; a
+    TrueType face and a knockout carried for the composer to refuse by name;
+    and hidden text -- `(hide yes)` or the older bare word -- counted and not
+    read. A text whose STRING is "hide" is not hidden: only the words after
+    the string say that."""
+    got = read_board(tmp_path / "lettered.kicad_pcb", text=LETTERED)
+    board_text, knocked, reference, literal = got.text
+    assert board_text == Text(
+        layer="F.SilkS", text="D0\nGND", x_mm=10.0, y_mm=20.0, angle_deg=90.0,
+        height_mm=1.2, width_mm=1.0, thickness_mm=0.15, halign="left",
+        valign="bottom", mirrored=False, upright=False, bold=False, italic=True)
+    assert (knocked.face, knocked.knockout, knocked.bold, knocked.mirrored,
+            knocked.layer, knocked.angle_deg) == ("Lexend", True, True, True, "B.SilkS", 0.0)
+    # (1, 0) in a footprint at (20, 30) turned 90 degrees is (20, 29) in
+    # KiCad's y-down frame; the angle is the file's 180, not 180 + 90.
+    assert (reference.text, reference.x_mm, reference.y_mm) == ("R1", 20.0, 29.0)
+    assert (reference.angle_deg, reference.upright, reference.halign,
+            reference.valign) == (180.0, False, "right", "top")
+    assert (literal.text, literal.upright) == ("hide", True)
+    assert dict(got.silk_unread) == {"hidden text": 2}

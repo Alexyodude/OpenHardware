@@ -2673,16 +2673,44 @@ def test_a_stroke_with_no_length_or_no_width_is_not_ink():
 
 
 def test_the_silkscreen_says_what_it_could_not_draw():
-    """Text is 47 to 99 pieces per board, and a caption hiding it would be
-    worse than one that names it. Text needs a font; the arcs, circles and
-    polygons are a handful per board and are named for the same reason."""
+    """A caption hiding what it left out would be worse than one that names
+    it. Text was 47 to 99 pieces per board and unread until OH-163; now it is
+    read, for the composer to letter, and what stays unread is named: the
+    text the file hides, and the arcs, circles and polygons, a handful per
+    board."""
     spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
     if not spec.layout.is_file():
         pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
     board = compose.read_layout(spec.layout)
     unread = dict(board.silk_unread)
-    assert unread.get("text", 0) >= 40, unread
+    assert "text" not in unread and unread.get("hidden text", 0) > 0, unread
+    assert len(board.kicad_text) >= 40, len(board.kicad_text)
     assert board.silk, "the strokes it CAN draw are drawn"
+
+
+def test_text_beside_the_board_is_not_drawn_on_it():
+    """**Seeed draw a stackup table beside the RP2350, on its silkscreen
+    layer**, and a fab prints nothing off the board. So a text stroke is cut
+    to the outline as every other piece of ink is, and one wholly beside the
+    board is counted rather than drawn in the air."""
+    spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
+    _newstroke()
+    board = compose.read_layout(spec.layout)
+    ring, _cut = compose.outer(board.outline)
+    letters, _refused, _drawn = compose.lettering(board.kicad_text)
+    meshes, tally = compose.artwork(board, ring, spec.thickness_mm, (0.0, 0.0),
+                                    spec.colour, letters)
+    ink = [(p[at], -p[at + 2]) for mesh in meshes
+           for colour, (p, _n, _i) in mesh.groups.items() if colour == compose.SILKSCREEN
+           for at in range(0, len(p), 3)]
+    left, right = min(x for x, _y in ring), max(x for x, _y in ring)
+    near, far = min(y for _x, y in ring), max(y for _x, y in ring)
+    out = max(max(left - x, x - right, near - y, y - far) for x, y in ink)
+    assert out <= 0.001, f"ink {out:.3f} mm outside the board"
+    assert tally.get("text stroke off the board", 0) > 0, tally
+    assert tally["text front"] > 0 and tally["text back"] > 0, tally
 
 
 def test_the_uno_draws_copper_too():
@@ -2832,7 +2860,7 @@ def test_the_artwork_pass_is_the_thing_that_cuts_copper_to_the_board():
     board = compose.read_layout(spec.layout)
     ring, _cut = compose.outer(board.outline)
     meshes, tally = compose.artwork(board, ring, spec.thickness_mm, (0.0, 0.0),
-                                    spec.colour)
+                                    spec.colour, [])
     assert tally["pads front"] > 200, tally
     assert tally["track front"] > 200, tally
 
@@ -2974,7 +3002,7 @@ def test_a_via_joins_both_faces_and_is_drawn_on_each():
     board = compose.read_layout(spec.layout)
     ring, _cut = compose.outer(board.outline)
     meshes, tally = compose.artwork(board, ring, spec.thickness_mm, (0.0, 0.0),
-                                    spec.colour)
+                                    spec.colour, [])
     assert tally["vias"] > 100, tally
     routed = compose.mask_over_copper(spec.colour)
     faces: dict[float, set[tuple[float, float]]] = {}
@@ -3916,11 +3944,13 @@ def test_what_is_not_drawn_rides_in_extras():
     assert "artwork" in extras and extras["artwork"].get("ink front", 0) > 0
     gaps = extras.get("not_drawn")
     assert gaps is not None, "the composer's gaps still stop at stdout"
-    for key in ("ink", "copper", "cutouts", "turn_unseen", "unmodelled"):
+    for key in ("ink", "copper", "cutouts", "turn_unseen", "unmodelled", "text"):
         assert key in gaps, f"not_drawn is missing {key}"
-    # The Uno prints text it cannot draw (no font shipped) -- the exact gap
-    # OH-122's close note records -- so the ink tally cannot be empty here.
+    # The Uno prints text in EAGLE's own vector font, which no licence lets
+    # this repository carry -- so its text is counted in the ink tally and
+    # refused, every piece of it, under that reason (OH-163).
     assert gaps["ink"].get("text", 0) > 0
+    assert gaps["text"] == {compose.EAGLE_TEXT: gaps["ink"]["text"]}, gaps["text"]
 
 
 def test_an_unmodelled_placement_is_counted_not_skipped():
@@ -6212,3 +6242,180 @@ def test_the_thing_plus_c5s_qwiic_and_microsd_quote_what_their_footprints_state(
     why = compose.ABSENT[board.element("J4").package]
     document = pathlib.PurePosixPath(stated["J4"]["Datasheet"]).name
     assert document in why and "naming no maker" not in why, why
+
+
+# --- the silkscreen's text (OH-163) ---------------------------------------------
+#
+# The oracle for the font is its author's own table, and the oracle for the
+# layout is what each vendor plotted: a silkscreen Gerber is the ink as it was
+# sent to be printed, written by KiCad from the very board file read here, and
+# a text in it is a run of straight draws at the text's pen. So every stroke
+# `letter` makes is looked for there, with the reader tests/rules/test_kicad.py
+# holds the silkscreen's lines to, at the same micron.
+
+
+def _newstroke() -> pathlib.Path:
+    """The fetched font, or a skip naming what fetches it."""
+    archive = compose.FONT_CACHE / "newstroke-font.tgz"
+    if not (archive.is_file() and all((compose.FONT_CACHE / name).is_file()
+                                      for name in compose.NEWSTROKE_FILES)):
+        pytest.skip(f"SKIPPED: newstroke is not fetched under {compose.FONT_CACHE}; "
+                    f"python tools/compose_board_3d.py --check fetches it")
+    return compose.FONT_CACHE
+
+
+def _letters_on_gerbers(path: pathlib.Path, text: str, gerbers: dict[str, str],
+                        origin: tuple[float, float]):
+    """`(tally, missed)`: each text `letter` draws or refuses, by outcome, and
+    every stroke it draws that lands on no draw of its own layer's Gerber.
+    The Gerber's frame is the board's with y negated, from `origin`."""
+    from tests.rules.test_kicad import _gerber_draws, _gerber_ends, _lands
+
+    cells = {layer: _gerber_ends(_gerber_draws(plotted, f"{path.name} {layer}"))
+             for layer, plotted in gerbers.items()}
+    table = compose.newstroke(_newstroke())
+    tally: dict[str, int] = {}
+    missed = []
+    for item in kicad.read_board(path, text=text).text:
+        try:
+            strokes = compose.letter(item, table)
+        except compose.Unlettered as why:
+            tally[str(why)] = tally.get(str(why), 0) + 1
+            continue
+        tally["lettered"] = tally.get("lettered", 0) + 1
+        tally["strokes"] = tally.get("strokes", 0) + len(strokes)
+        missed += [(item.text, stroke) for stroke in strokes
+                   if not _lands(cells[stroke.layer],
+                                 (stroke.x1_mm - origin[0], origin[1] - stroke.y1_mm),
+                                 (stroke.x2_mm - origin[0], origin[1] - stroke.y2_mm))]
+    return tally, missed
+
+
+def test_newstroke_reads_as_its_authors_own_table():
+    """**The glyphs are read out of the author's libraries and are the very
+    table the author generated from them**: every character from U+0020 to
+    U+007E, built from `font.lib` and `symbol.lib` through `charlist.txt`,
+    is the string the archive's own `newstroke_font.cpp` holds for it, bearings,
+    accents and the converter's dropped repeat points included. That table is
+    the one KiCad plots from, which the Gerber tests below hold."""
+    import tarfile
+
+    font = _newstroke()
+    with tarfile.open(font / "newstroke-font.tgz") as bundle:
+        generated = bundle.extractfile("newstroke_font.cpp").read().decode("latin-1")
+    rows = [re.sub(r"\\(.)", r"\1", row) for row in re.findall(
+        r'^\s*"((?:[^"\\]|\\.)*)",', generated[generated.index("newstroke_font[]"):],
+        re.MULTILINE)]
+    table = compose.newstroke(font)
+    assert sorted(table) == list(range(0x20, 0x7F))
+    assert {code: rows[code - 0x20] for code in table} == table
+
+
+def test_the_xiao_esp32_c6s_text_lands_on_seeeds_own_gerber():
+    """**Every stroke of every text on the XIAO ESP32-C6 lands on a draw of
+    Seeed's own silkscreen Gerbers**, plotted by KiCad 8.0.0 from the board
+    file read here: its pin labels mirrored on the back, the stackup table
+    beside the board, both justifications and every angle it uses -- and its
+    "3V3" followed by a line break, which KiCad draws as one line."""
+    from tests.rules.test_kicad import SEEED_C6_ROOT, SEEED_PCB
+    import zipfile
+
+    zipped, path = SEEED_PCB / "ESP32-C6.zip", SEEED_PCB / "ESP32-C6.kicad_pcb"
+    if not (zipped.is_file() and path.is_file()):
+        pytest.skip(f"SKIPPED: {zipped.name} or {path.name} absent under {SEEED_PCB}; "
+                    f"python tools/compose_board_3d.py --board XIAO-ESP32-C6-DIP")
+    with zipfile.ZipFile(zipped) as bundle:
+        shipped = bundle.read(SEEED_C6_ROOT + "XIAO ESP32 C6.kicad_pcb")
+        gerbers = {layer: bundle.read(f"{SEEED_C6_ROOT}XIAO ESP32 C6_gerber/"
+                                      f"XIAO ESP32 C6-{name}.gbr").decode("ascii")
+                   for layer, name in (("F.SilkS", "F_Silkscreen"),
+                                       ("B.SilkS", "B_Silkscreen"))}
+    assert path.read_bytes() == shipped, "not the board Seeed plotted these from"
+    tally, missed = _letters_on_gerbers(path, shipped.decode("utf-8"), gerbers, (0.0, 0.0))
+    assert (tally, missed) == ({"lettered": 73, "strokes": 4178}, [])
+
+
+def test_the_esp32_poes_text_lands_on_olimexs_own_gerber():
+    """**The same on a second vendor and a second KiCad**: Olimex's
+    ESP32-PoE revision M, plotted by KiCad 7.0.9 from an auxiliary origin,
+    with footprint text kept upright at every quarter turn. Its four knockout
+    texts are refused by name, not drawn wrong."""
+    from tests.rules.test_kicad import POE_REV_M
+
+    path = POE_REV_M / "ESP32-PoE_Rev_M.kicad_pcb"
+    files = {layer: POE_REV_M / "Gerbers" / f"ESP32-PoE_Rev_M-{name}.gbr"
+             for layer, name in (("F.SilkS", "F_Silkscreen"), ("B.SilkS", "B_Silkscreen"))}
+    if not (path.is_file() and all(file.is_file() for file in files.values())):
+        pytest.skip(f"SKIPPED: revision M's board or Gerbers absent under {POE_REV_M}; "
+                    f"python tools/get_board_sources.py olimex-esp32-poe")
+    text = path.read_text(encoding="utf-8")
+    setup = kicad.first(kicad.parse_sexp(text), "setup")
+    origin = tuple(float(v) for v in kicad.first(setup, "aux_axis_origin")[1:3])
+    gerbers = {layer: file.read_text(encoding="ascii") for layer, file in files.items()}
+    tally, missed = _letters_on_gerbers(path, text, gerbers, origin)
+    knockout = next(why for why in tally if why.startswith("knockout"))
+    assert (tally, missed) == ({"lettered": 188, "strokes": 5956, knockout: 4}, [])
+
+
+def test_a_text_newstroke_would_draw_unlike_kicad_is_refused_by_name():
+    """**Refused, and said why, rather than drawn wrong**: a TrueType face
+    KiCad draws from its own outlines, a knockout, a stated line spacing,
+    KiCad's markup, a character KiCad has redrawn since the author's release,
+    and one the table does not hold. Each reason names the thing, so a board's
+    count of refusals says what is missing from it."""
+    table = {ord(c): "PTRFR[" for c in "D0~"}
+    plain = kicad.Text(layer="F.SilkS", text="D0", x_mm=0.0, y_mm=0.0, angle_deg=0.0,
+                       height_mm=1.0, width_mm=1.0, thickness_mm=0.15, halign="left",
+                       valign="bottom", mirrored=False, upright=False, bold=False,
+                       italic=False)
+    assert len(compose.letter(plain, table)) == 2
+    for change, reason in (({"face": "Lexend"}, "a TrueType face, 'Lexend'"),
+                           ({"knockout": True}, "knockout text"),
+                           ({"line_spacing": 1.2}, "a stated line spacing"),
+                           ({"text": "~{RST}"}, "KiCad markup"),
+                           ({"text": "D0~"}, "does: U+007E"),
+                           ({"text": "Dé"}, "does: U+00E9")):
+        with pytest.raises(compose.Unlettered, match=re.escape(reason)):
+            compose.letter(dataclasses.replace(plain, **change), table)
+
+
+def test_every_composed_boards_text_is_lettered_or_refused_by_name():
+    """**Done for OH-163's first step**: on every composed KiCad board each
+    text is lettered or refused under a named reason, and on Seeed's XIAOs
+    none is refused. What is refused is PCBCUPID's TrueType face and
+    Olimex's knockouts; an EAGLE board's text is counted, and refused for
+    EAGLE's font, in `test_what_is_not_drawn_rides_in_extras`."""
+    _newstroke()
+    named = ("a TrueType face, 'Lexend'", "knockout text")
+    refusals: dict[str, dict[str, int]] = {}
+    for spec in compose.COMPOSITIONS:
+        if spec.layout.suffix != ".kicad_pcb" or not _fetched(spec):
+            continue
+        texts = compose.read_layout(spec.layout).kicad_text
+        _letters, refused, drawn = compose.lettering(texts)
+        assert drawn + sum(refused.values()) == len(texts), spec.board
+        # Each reason by the name it starts with, or whole where it is new.
+        refusals[spec.board] = {
+            next((name for name in named if why.startswith(name)), why): count
+            for why, count in refused.items()}
+    if not refusals:
+        pytest.skip("SKIPPED: no composed KiCad board is fetched")
+    xiaos = [spec.board for spec in compose.COMPOSITIONS
+             if spec.pcb_chip is not None and spec.board in refusals]
+    assert xiaos and all(refusals[board] == {} for board in xiaos), refusals
+    expected = {"PCBCUPID Glyph Mini RP2040": {named[0]: 49},
+                "PCBCUPID Glyph C3": {named[0]: 48},
+                "PCBCUPID Glyph C6": {named[0]: 48},
+                "Olimex ESP32-C3-DevKit-Lipo": {named[1]: 33}}
+    assert {board: said for board, said in refusals.items() if said} == {
+        board: said for board, said in expected.items() if board in refusals}
+
+
+def test_a_font_archive_that_is_not_the_one_measured_is_refused(tmp_path, monkeypatch):
+    """**The font is checked by its digest as well as its size**, because it
+    lives on its author's wiki: an archive of the right length and other
+    bytes is another font, and every board's text would be drawn in it."""
+    monkeypatch.setattr(compose, "FONT_CACHE", tmp_path)
+    (tmp_path / "newstroke-font.tgz").write_bytes(b"x" * compose.NEWSTROKE[1])
+    with pytest.raises(SystemExit, match=r"records 210,057 bytes and dba1c334"):
+        compose.fetch_newstroke()

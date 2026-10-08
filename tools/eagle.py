@@ -245,6 +245,13 @@ class Board:
     #: What was on those layers and is not in `silk`, counted by kind, so a
     #: caption can say what it left out.
     silk_unread: tuple[tuple[str, int], ...] = ()
+    #: A KiCad board's silkscreen text, as `kicad.Text` items in KiCad's own
+    #: y-down frame -- **the one field here NOT in this module's y-up frame**,
+    #: because what turns it into ink is KiCad's own layout arithmetic, done
+    #: where KiCad does it; `compose_board_3d.letter` negates y on the strokes
+    #: it makes, as `from_kicad` does every other coordinate (OH-163). Empty
+    #: for an EAGLE board, whose `<text>` stays counted in `silk_unread`.
+    kicad_text: tuple[object, ...] = ()
     #: The routed copper on the two outer layers, and the plated holes joining
     #: them. Both readers fill these; what neither draws is counted below.
     traces: tuple[Stroke, ...] = ()

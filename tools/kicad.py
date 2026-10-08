@@ -257,6 +257,57 @@ class Via:
     diameter_mm: float
 
 
+@dataclasses.dataclass(frozen=True)
+class Text:
+    """One piece of silkscreen text, as the board file states it (OH-163).
+
+    In board millimetres and KiCad's own y-down frame, like every `Stroke`,
+    and **nothing here is a glyph**: turning a string into ink needs a font,
+    which this reader does not hold. `compose_board_3d.letter` draws one.
+
+    A footprint's text is already on the board: its position is turned and
+    moved by `_on_board`, as the footprint's silkscreen is, and its angle is
+    the file's own number, because KiCad stores a footprint text's angle
+    ABSOLUTE -- its reader subtracts the footprint's orientation on the way
+    in (`parsePCB_TEXT_effects` in KiCad 8.0.0's
+    pcbnew/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr_parser.cpp, and the
+    `T_fp_text` case of KiCad 5.1.10's pcbnew/pcb_parser.cpp) and its plotter
+    adds it back.
+    """
+
+    layer: str
+    text: str
+    x_mm: float
+    y_mm: float
+    #: Degrees, counter-clockwise as drawn, absolute on the board.
+    angle_deg: float
+    #: `(size h w)` -- KiCad writes the HEIGHT first.
+    height_mm: float
+    width_mm: float
+    #: The stroke width the file states, or 0.0 where it states none.
+    thickness_mm: float
+    #: `"left"`, `"center"` or `"right"`; centre where `justify` names none.
+    halign: str
+    #: `"top"`, `"center"` or `"bottom"`; centre where `justify` names none.
+    valign: str
+    #: `(justify mirror)`: KiCad writes it on underside text, and the text is
+    #: mirrored about its own position by the font, not by this reader.
+    mirrored: bool
+    #: A footprint's text that KiCad turns to read upright, which is every
+    #: footprint text unless the file says `unlocked`. Board text never is.
+    upright: bool
+    bold: bool
+    italic: bool
+    #: The TrueType face the text is set in, or `""` for KiCad's own stroke
+    #: font. A face is drawn by KiCad from the font's outlines, not strokes.
+    face: str = ""
+    #: `(layer "F.SilkS" knockout)`: ink everywhere around the text and none
+    #: in it.
+    knockout: bool = False
+    #: `(line_spacing s)`, which multiplies the pitch between lines.
+    line_spacing: float = 1.0
+
+
 #: The two copper layers anything can see. A four- or six-layer board's inner
 #: copper is inside the laminate, so it is counted and not drawn -- the RP2350
 #: routes 149 segments on In2 through In4 and the nRF54L15 381, none of which
@@ -552,10 +603,14 @@ class Board:
     #: Empty until OH-110; a composed board drew none of it and looked like a
     #: slab with boxes on it beside a vendor's own assembly export.
     silk: tuple[Stroke, ...] = ()
-    #: What was on those layers and is NOT in `silk`, counted by kind. A
-    #: caption that says "232 strokes" while dropping 99 texts is worse than
-    #: one that says both.
+    #: What was on those layers and is NOT in `silk` or `text`, counted by
+    #: kind. A caption that says "232 strokes" while dropping 99 texts is
+    #: worse than one that says both.
     silk_unread: tuple[tuple[str, int], ...] = ()
+    #: The text printed on those layers, board-level and every footprint's,
+    #: as the file states it (OH-163). Text the file marks hidden is not
+    #: here: it is counted in `silk_unread` as `hidden text`.
+    text: tuple[Text, ...] = ()
     #: The routed copper on the two OUTER layers, in board millimetres. Inner
     #: layers are inside the board and nothing can see them, so they are
     #: counted in `traces_unread` rather than carried.
@@ -730,11 +785,11 @@ def _fp_graphics(node: list, layer: str, placed: Placement
 #: named so that "232 strokes" is never quietly also saying "and 99 pieces of
 #: text you cannot see". Counted and reported rather than dropped.
 #:
-#: Text is the big one and it needs a font -- KiCad stores `gr_text` as a
-#: string and a size, and turning that into geometry means shipping glyph
-#: outlines. The rest is a handful per board: 2 to 16 arcs, 2 to 7 circles and
-#: 3 to 12 polygons across the five composed XIAOs, against 47 to 232 lines.
-SILK_UNREAD = ("text", "arc", "circle", "poly", "curve", "bbox")
+#: Text was the big one, and is not here since OH-163: `_texts_of` reads it,
+#: as a string and a size, and a font turns it into ink. The rest is a
+#: handful per board: 2 to 16 arcs, 2 to 7 circles and 3 to 12 polygons
+#: across the five composed XIAOs, against 47 to 232 lines.
+SILK_UNREAD = ("arc", "circle", "poly", "curve", "bbox")
 
 
 def _silk_of(node: list, prefix: str, put) -> tuple[list[Stroke], list[str]]:
@@ -759,6 +814,8 @@ def _silk_of(node: list, prefix: str, put) -> tuple[list[Stroke], list[str]]:
         named = layer[1] if layer and len(layer) > 1 else ""
         if not str(named).endswith("SilkS"):
             continue
+        if kind == "text":
+            continue                    # `_texts_of` reads it
         if kind in SILK_UNREAD:
             unread.append(kind)
             continue
@@ -781,6 +838,94 @@ def _silk_of(node: list, prefix: str, put) -> tuple[list[Stroke], list[str]]:
         else:
             unread.append(kind)
     return strokes, unread
+
+
+def _says_yes(node: list | None) -> bool:
+    """`(hide)`, `(hide yes)`: a flag KiCad writes as a list, set unless it
+    says `no`. Absent is unset."""
+    return node is not None and (len(node) < 2 or node[1] != "no")
+
+
+def _texts_of(node: list, prefix: str, put) -> tuple[list[Text], int]:
+    """The silkscreen text directly under `node`, placed, and how many pieces
+    of it the file hides.
+
+    `prefix` and `put` are `_silk_of`'s. A footprint's text is `fp_text`, or
+    since KiCad 8 a `property` -- its reference and value fields -- which no
+    reader here counted until OH-163: the XIAO ESP32-C3 prints 67 references
+    as properties beside 47 board texts, and `text 47` was all it reported.
+
+    Hidden is said three ways across the vintages read here: a bare `hide`
+    word (KiCad 5 and 6), `(hide yes)` on the text (KiCad 8 and 9), and
+    either inside its `(effects ...)`. Only the words AFTER the string are
+    read for it, because the string itself may spell anything.
+    """
+    tags = ("gr_text",) if prefix == "gr" else ("fp_text", "property")
+    texts: list[Text] = []
+    hidden = 0
+    for child in node:
+        if not isinstance(child, list) or head(child) not in tags:
+            continue
+        layer = first(child, "layer")
+        named = str(layer[1]) if layer and len(layer) > 1 else ""
+        if not named.endswith("SilkS"):
+            continue
+        # `(gr_text "x" ...)`, `(gr_text locked "x" ...)` before KiCad 7, and
+        # `(fp_text user "x" ...)`, `(property "Reference" "R1" ...)`.
+        at_text = 1 if prefix == "gr" else 2
+        if (prefix == "gr" and len(child) > 2 and child[1] == "locked"
+                and isinstance(child[2], str)):
+            at_text = 2
+        string = child[at_text] if len(child) > at_text else None
+        if not isinstance(string, str):
+            raise KicadError(f"{head(child)} on {named} states no string: {child[:4]!r}")
+        effects = first(child, "effects") or []
+        words = [w for w in child[at_text + 1:] if isinstance(w, str)]
+        if ("hide" in words or "hide" in effects
+                or _says_yes(first(child, "hide")) or _says_yes(first(effects, "hide"))):
+            hidden += 1
+            continue
+        at = first(child, "at")
+        where = _floats(at) if at is not None else []
+        if len(where) < 2:
+            raise KicadError(f"{head(child)} {string!r} on {named} has no position: {at!r}")
+        x_mm, y_mm = put(where[0], where[1])
+        font = first(effects, "font") or []
+        size = _floats(first(font, "size") or [])
+        if len(size) < 2:
+            # "Prior to v5.0 text size was omitted from file format if equal
+            # to 60mils" -- KiCad 8.0.0's `parseEDA_TEXT`, which sets 1.524.
+            size = [1.524, 1.524]
+        thickness = _floats(first(font, "thickness") or [])
+        spacing = _floats(first(font, "line_spacing") or [])
+        face = first(font, "face")
+        justify = (first(effects, "justify") or [])[1:]
+        texts.append(Text(
+            layer=named,
+            text=string,
+            x_mm=x_mm,
+            y_mm=y_mm,
+            angle_deg=where[2] if len(where) > 2 else 0.0,
+            height_mm=size[0],
+            width_mm=size[1],
+            thickness_mm=thickness[0] if thickness else 0.0,
+            halign=("left" if "left" in justify
+                    else "right" if "right" in justify else "center"),
+            valign=("top" if "top" in justify
+                    else "bottom" if "bottom" in justify else "center"),
+            mirrored="mirror" in justify,
+            # `unlocked` is the old bare word inside `(at ...)` and the newer
+            # `(unlocked yes)`, and it means "not kept upright" rather than
+            # anything about locking, as KiCad 8.0.0's own reader notes.
+            upright=(prefix == "fp" and "unlocked" not in (at or [])
+                     and not _says_yes(first(child, "unlocked"))),
+            bold="bold" in font or _says_yes(first(font, "bold")),
+            italic="italic" in font or _says_yes(first(font, "italic")),
+            face=str(face[1]) if face is not None and len(face) > 1 else "",
+            knockout="knockout" in layer[2:],
+            line_spacing=spacing[0] if spacing else 1.0,
+        ))
+    return texts, hidden
 
 
 def _routing_of(tree: list) -> tuple[list[Stroke], list[Arc], list[Via],
@@ -1343,6 +1488,7 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
         arcs.append(Arc(layer, a[0], a[1], m[0], m[1], b[0], b[1]))
 
     silk, unread = _silk_of(tree, "gr", lambda x, y: (x, y))
+    words, hidden = _texts_of(tree, "gr", lambda x, y: (x, y))
 
     placements: list[Placement] = []
     for node in children(tree, "footprint"):
@@ -1377,6 +1523,10 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
             node, "fp", lambda x, y, at=placed: _on_board(at, x, y))
         silk += printed
         unread += missed
+        lettered, unseen = _texts_of(
+            node, "fp", lambda x, y, at=placed: _on_board(at, x, y))
+        words += lettered
+        hidden += unseen
 
     if not placements:
         raise KicadError(f"{path}: no footprints; refusing to report an empty board")
@@ -1385,9 +1535,11 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
                          f"A board drawn without one would be a bounding box "
                          f"around its parts, which is not its shape")
     tracks, curves, vias, skipped = _routing_of(tree)
+    unread += ["hidden text"] * hidden
     return Board(path.stem, tuple(outline), tuple(arcs), tuple(placements),
                  silk=tuple(silk),
                  silk_unread=tuple(sorted(collections.Counter(unread).items())),
+                 text=tuple(words),
                  traces=tuple(tracks), trace_arcs=tuple(curves),
                  vias=tuple(vias),
                  traces_unread=tuple(sorted(skipped.items())))

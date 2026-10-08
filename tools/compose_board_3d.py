@@ -3199,6 +3199,9 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
     return eagle.Board(name=path.stem, version="kicad_pcb",
                        elements=tuple(elements), outline=tuple(outline),
                        silk=silk, silk_unread=board.silk_unread,
+                       # In KiCad's frame, as `eagle.Board.kicad_text` says:
+                       # `letter` lays text out where KiCad does (OH-163).
+                       kicad_text=board.text,
                        traces=tuple(traces), vias=vias,
                        traces_unread=board.traces_unread)
 
@@ -5103,8 +5106,378 @@ def merge(*meshes: Mesh) -> Mesh:
     return Mesh(groups)
 
 
+# --- the silkscreen's text (OH-163) --------------------------------------------
+#
+# **KiCad plots its text in a stroke font, newstroke, and so is it drawn
+# here**: each glyph is a few polylines, laid out at the size, thickness,
+# angle, justification and mirroring the board file states, and each segment
+# is a stroke of ink at the stated pen, exactly as a silkscreen line is.
+# Seeed's own Gerbers for the XIAO ESP32-C6 and Olimex's for the ESP32-PoE
+# are what the arithmetic is held to: the strokes land on the vendors' plotted
+# text draws (`test_the_xiao_esp32_c6s_text_lands_on_seeeds_own_gerber`).
+
+#: newstroke, from its author's own release and NOT from KiCad's tree, and the
+#: difference is the licence. KiCad carries the glyphs in
+#: `common/newstroke_font.cpp`, whose header grants GPL-2-or-later (read at
+#: tags 8.0.0 and 10.0.7). Vladimir Uryvaev, who drew them, publishes the font
+#: at http://vovanium.ru/sledy/newstroke/en -- "released under CC0 licence
+#: which is effectively equivalent to public domain" -- and the archive's own
+#: README.txt says "Now released under CC0 licence". So the archive is fetched
+#: into `third_party/`, never committed, and the glyphs are read out of its
+#: glyph libraries `font.lib` and `symbol.lib` through `charlist.txt` -- not
+#: out of the C table beside them, whose header is the GPL boilerplate the
+#: author's converter, `fontconv.awk`, writes into every table it generates
+#: for KiCad's tree.
+#:
+#: **They are KiCad's glyphs, measured rather than assumed**: every character
+#: from U+0020 to U+007E reads here exactly as the archive's own generated
+#: table has it (`test_newstroke_reads_as_its_authors_own_table`), and that
+#: table matched KiCad 8.0.0's and 10.0.7's in that range on 2026-10-09 in
+#: every character but `~`, which KiCad has since lowered. A text with a `~`
+#: is refused rather than drawn in the older glyph.
+NEWSTROKE = (
+    "https://vovanium.ru/_media/sledy/newstroke/newstroke-font.tgz",
+    210_057,
+    "dba1c334834e21bdbd15395dc610ecc2bf2eb6675ba0c4585597b375b7bd099e",
+)
+FONT_CACHE = REPO / "third_party" / "newstroke"
+#: What is read out of the archive: the glyphs, the symbols some of them are
+#: built from, and the list that says which glyph each character is.
+NEWSTROKE_FILES = ("font.lib", "symbol.lib", "charlist.txt")
+#: The characters KiCad has changed since the author's release, measured as
+#: `NEWSTROKE` says. Refused, because drawn they would be the old glyph.
+NEWSTROKE_CHANGED = frozenset("~")
+
+
+def fetch_newstroke() -> pathlib.Path:
+    """The directory holding `NEWSTROKE_FILES`, fetching and unpacking the
+    archive if need be.
+
+    Mirrors `fetch_pcb`, with the digest checked as well as the size: the
+    font is on its author's own wiki, and a changed archive is a changed
+    font that every composed board's text would silently be drawn in.
+    """
+    import tarfile
+
+    if all((FONT_CACHE / name).is_file() for name in NEWSTROKE_FILES):
+        return FONT_CACHE
+    url, size, digest = NEWSTROKE
+    FONT_CACHE.mkdir(parents=True, exist_ok=True)
+    archive = FONT_CACHE / "newstroke-font.tgz"
+    if not archive.is_file():
+        print(f"  fetch  {url}")
+        with urllib.request.urlopen(url) as response:  # noqa: S310 - https, fixed
+            archive.write_bytes(response.read())
+    data = archive.read_bytes()
+    actual = hashlib.sha256(data).hexdigest()
+    if (len(data), actual) != (size, digest):
+        raise SystemExit(
+            f"{archive} is {len(data):,} bytes with sha256 {actual}, and this "
+            f"file records {size:,} bytes and {digest}. The font's archive "
+            f"changed; re-measure it before drawing any board's text in it.")
+    with tarfile.open(archive) as bundle:
+        for name in NEWSTROKE_FILES:
+            member = bundle.extractfile(name)
+            if member is None:
+                raise SystemExit(f"{archive}: {name} is not a file in it")
+            (FONT_CACHE / name).write_bytes(member.read())
+    return FONT_CACHE
+
+
+#: The converter's own constants, from `fontconv.awk` in the same archive: a
+#: glyph library is drawn in mils on a 50-mil grid, a glyph's baseline sits 9
+#: grid steps down its cell, and a coordinate is written as a character
+#: counted from `R`. A glyph name led by `!` is that glyph mirrored left to
+#: right; the converter's other prefixes turn and shift a glyph, and no
+#: character from U+0020 to U+007E uses one.
+NEWSTROKE_GRID = 50
+NEWSTROKE_BASE = 9
+NEWSTROKE_ZERO = ord("R")
+NEWSTROKE_PREFIXES = "!-=~+%*^`.,"
+
+
+def newstroke(directory: pathlib.Path) -> dict[int, str]:
+    """Code point to glyph, for U+0020 to U+007E, in the encoding KiCad reads.
+
+    Each value is the string KiCad's own table holds for that character --
+    two characters of left and right bearing, then points, with `" R"`
+    lifting the pen -- built from the author's glyph libraries the way the
+    author's converter builds it. One quirk is kept because the table has
+    it: a point equal to the one written just before it is dropped, even
+    across a lifted pen.
+    """
+    strokes: dict[str, list[list[tuple[int, int]]]] = {}
+    anchors: dict[tuple[str, str], tuple[int, int]] = {}
+    bearings: dict[str, dict[str, int]] = {}
+    for library in ("symbol.lib", "font.lib"):     # the converter's order
+        name = ""
+        path = directory / library
+        for number, line in enumerate(
+                path.read_text(encoding="latin-1").splitlines(), start=1):
+            field = line.split()
+            if not field:
+                continue
+            if field[0] == "DEF":
+                name = field[1]
+                strokes[name] = []
+            elif field[0] == "P":
+                values = [int(v) for v in field[5:5 + 2 * int(field[1])]]
+                if any(v % NEWSTROKE_GRID for v in values):
+                    raise ValueError(f"{path}:{number}: {name} draws off the "
+                                     f"{NEWSTROKE_GRID}-mil grid: {line!r}")
+                points: list[tuple[int, int]] = []
+                for x, y in zip(values[::2], values[1::2]):
+                    point = (x // NEWSTROKE_GRID, -y // NEWSTROKE_GRID)
+                    if not points or points[-1] != point:
+                        points.append(point)
+                strokes[name].append(points)
+            elif field[0] == "X":
+                # A pin is an anchor for an accent, and the pins named `~`
+                # are the glyph's left and right bearings -- or one named `S`
+                # its right and `P` its left, as the converter reads them.
+                pin, x, y = field[1], int(field[3]), int(field[4])
+                if x % NEWSTROKE_GRID or y % NEWSTROKE_GRID:
+                    raise ValueError(f"{path}:{number}: {name}'s pin {pin} is "
+                                     f"off the {NEWSTROKE_GRID}-mil grid: {line!r}")
+                anchors[(name, pin)] = (x // NEWSTROKE_GRID, -y // NEWSTROKE_GRID)
+                if (pin == "~" and x > 0) or pin == "S":
+                    bearings.setdefault(name, {})["right"] = x // NEWSTROKE_GRID
+                elif pin in ("~", "P"):
+                    bearings.setdefault(name, {})["left"] = x // NEWSTROKE_GRID
+
+    def split(glyph: str, line: str) -> tuple[str, int]:
+        if glyph[:1] == "!":
+            return glyph[1:], -1
+        if glyph[:1] in NEWSTROKE_PREFIXES:
+            raise ValueError(f"charlist.txt {line!r}: {glyph!r} carries the "
+                             f"converter's {glyph[0]!r}, which this does not apply")
+        return glyph, 1
+
+    def char(value: int) -> str:
+        return chr(value + NEWSTROKE_ZERO)
+
+    def graph(glyph: str, dx: int, dy: int, line: str) -> str:
+        name, sx = split(glyph, line)
+        if name not in strokes:
+            raise ValueError(f"charlist.txt {line!r}: no glyph {name!r} in "
+                             f"symbol.lib or font.lib")
+        out, last = "", ""
+        for index, points in enumerate(strokes[name]):
+            if index:
+                out += " R"
+            for x, y in points:
+                pair = char(x * sx + dx) + char(y + dy + NEWSTROKE_BASE)
+                if pair != last:
+                    out += pair
+                    last = pair
+        return out
+
+    table: dict[int, str] = {}
+    code = None
+    for line in (directory / "charlist.txt").read_text(encoding="latin-1").splitlines():
+        field = line.split()
+        if not field:
+            continue
+        if field[0] == "startchar":
+            code = int(field[1])
+        elif field[0] == "+":
+            if code is None:
+                raise ValueError(f"charlist.txt {line!r} comes before any startchar")
+            base = field[1]
+            entry = graph(base, 0, 0, line)
+            accents = field[2:]
+            while accents and accents[0] != "#":
+                accent, anchor = accents[0], (accents[1:2] or [""])[0]
+                dx = dy = 0
+                if anchor not in ("", "#"):
+                    # `ABOVE=X`: the base's pin ABOVE meets the accent's X.
+                    mine, _, theirs = anchor.partition("=")
+                    (under, bsx), (over, asx) = split(base, line), split(accent, line)
+                    on, at = (under, mine), (over, theirs or mine)
+                    if on in anchors and at in anchors:
+                        dx = bsx * anchors[on][0] - asx * anchors[at][0]
+                        dy = anchors[on][1] - anchors[at][1]
+                entry += " R" + graph(accent, dx, dy, line)
+                if anchor == "#":
+                    break
+                accents = accents[2:]
+            name, sx = split(base, line)
+            sides = bearings.get(name, {})
+            if set(sides) != {"left", "right"}:
+                raise ValueError(f"charlist.txt {line!r}: {name} has bearings "
+                                 f"{sides}, and a glyph needs a left and a right")
+            left, right = ((sides["right"], sides["left"]) if sx < 0
+                           else (sides["left"], sides["right"]))
+            table[code] = char(sx * left) + char(sx * right) + entry
+            code += 1
+            if code > 0x7E:
+                return table
+        elif field[0] in ("+w", "+p", "+(", "+|", "+)", "skipcodes"):
+            raise ValueError(f"charlist.txt {line!r} before U+007F: a directive "
+                             f"no Basic Latin character needs and this does not read")
+    raise ValueError(f"charlist.txt ends at U+{code or 0:04X}, before U+007E")
+
+
+class Unlettered(Exception):
+    """A text `letter` does not draw; the message says why, and is what the
+    composer counts it under."""
+
+
+#: KiCad 8.0.0's stroke-font layout, each number from the file named. A glyph
+#: unit is 1/21 of the text size, and rows are offset by 8 units to put the
+#: baseline where KiCad does (common/font/stroke_font.cpp, STROKE_FONT_SCALE
+#: and FONT_OFFSET). Italic leans by 1/8 (include/font/font.h, ITALIC_TILT).
+#: Lines are 1.68 heights apart, times 0.9583 "to match legacy spacing"
+#: (METRICS::m_InterlinePitch, STROKE_FONT::GetInterline). A block is placed
+#: with the 1.17, 1/1.52 and 0.052 that common/font/font.cpp's
+#: `getLinePositions` names fudge factors to match KiCad 6.0. A pen defaults
+#: to 1/8 of the width, 1/5 if bold, and is held to 1/4 of the smaller size
+#: (common/gr_text.cpp, via EDA_TEXT::GetEffectiveTextPenWidth).
+GLYPH_UNITS = 21
+GLYPH_ROW_OFFSET = -8
+ITALIC_TILT = 1 / 8
+LINE_PITCH = 1.68 * 0.9583
+FIRST_LINE = 1.17
+LEAD_PER_PEN = 1 / 1.52
+DROP_PER_PEN = 0.052
+
+
+def letter(text: kicad.Text, table: dict[int, str]) -> list[kicad.Stroke]:
+    """One text as the strokes KiCad plots it, in board millimetres and
+    KiCad's own y-down frame; `Unlettered` where it is not drawn here.
+
+    Every step is the plotter's, in its order: lines split as KiCad splits
+    them, each laid out from the text's position by its justification, each
+    glyph scaled, leaned if italic, mirrored about the text's position if
+    the file says `mirror`, and turned about it by the angle -- held between
+    -90 and 90 degrees for a footprint's text that is kept upright.
+    """
+    if text.face:
+        raise Unlettered(f"a TrueType face, {text.face!r}, which KiCad draws "
+                         f"from that font's outlines and not in newstroke")
+    if text.knockout:
+        raise Unlettered("knockout text, which is ink everywhere around the "
+                         "strokes and none in them: a shape cut away, where "
+                         "the composer lays ink down")
+    if text.line_spacing != 1.0:
+        raise Unlettered("a stated line spacing, which KiCad 8.0.0 applies on "
+                         "one of its two ways of placing lines and not the other")
+    if any(mark in text.text for mark in ("~{", "^{", "_{", "${")):
+        raise Unlettered("KiCad markup or a variable, which KiCad expands "
+                         "before it draws")
+    missing = sorted({c for c in text.text.replace("\n", "")
+                      if ord(c) not in table or c in NEWSTROKE_CHANGED})
+    if missing:
+        raise Unlettered("a character this newstroke does not draw as KiCad "
+                         "does: " + " ".join(f"U+{ord(c):04X}" for c in missing))
+
+    width, height = text.width_mm, text.height_mm
+    pen = text.thickness_mm
+    if pen <= 1e-6:                     # one KiCad unit, a nanometre, or less
+        pen = round(width / (5 if text.bold else 8), 6)
+    pen = min(pen, round(min(abs(width), abs(height)) / 4, 6))
+    angle = text.angle_deg
+    if text.upright:
+        while angle > 90:
+            angle -= 180
+        while angle <= -90:
+            angle += 180
+    turn = math.radians(angle)
+    cos, sin = math.cos(turn), math.sin(turn)
+    tilt = ITALIC_TILT if text.italic else 0.0
+
+    # KiCad's `wxStringSplit` keeps an empty line between two breaks and
+    # drops the one after a final break: "3V3\n" is one line, as Seeed's
+    # Gerber for the XIAO ESP32-C6 plots it.
+    lines = text.text.split("\n")
+    if len(lines) > 1 and not lines[-1]:
+        lines.pop()
+    pitch = height * LINE_PITCH
+    block = height * FIRST_LINE + (len(lines) - 1) * pitch
+    top = height - pen * DROP_PER_PEN - {
+        "top": 0.0, "center": block / 2, "bottom": block}[text.valign]
+
+    strokes: list[kicad.Stroke] = []
+    for row, line in enumerate(lines):
+        glyphs = []
+        for c in line:
+            entry = table[ord(c)]
+            left = ord(entry[0]) - NEWSTROKE_ZERO
+            right = ord(entry[1]) - NEWSTROKE_ZERO
+            polylines: list[list[tuple[float, float]]] = []
+            for at in range(2, len(entry) - 1, 2):
+                pair = entry[at:at + 2]
+                if pair == " R":
+                    polylines.append([])
+                    continue
+                if not polylines:
+                    polylines.append([])
+                polylines[-1].append(
+                    ((ord(pair[0]) - NEWSTROKE_ZERO - left) / GLYPH_UNITS,
+                     (ord(pair[1]) - NEWSTROKE_ZERO + GLYPH_ROW_OFFSET) / GLYPH_UNITS))
+            # A cursor advance is rounded to KiCad's nanometre, as it is.
+            glyphs.append((round((right - left) / GLYPH_UNITS * width, 6), polylines))
+        span = sum(advance for advance, _ in glyphs)
+        x = {"left": pen * LEAD_PER_PEN, "center": -span / 2,
+             "right": -(span + pen * LEAD_PER_PEN)}[text.halign]
+        y = top + row * pitch
+        for advance, polylines in glyphs:
+            for polyline in polylines:
+                points = []
+                for gx, gy in polyline:
+                    px = x + gx * width - gy * height * tilt
+                    py = y + gy * height
+                    if text.mirrored:
+                        px = -px
+                    points.append((text.x_mm + px * cos + py * sin,
+                                   text.y_mm + py * cos - px * sin))
+                strokes += [kicad.Stroke(text.layer, *a, *b, pen)
+                            for a, b in itertools.pairwise(points)]
+            x += advance
+    return strokes
+
+
+def lettering(texts) -> tuple[list[eagle.Stroke], dict[str, int], int]:
+    """A board's text as ink in the composer's y-up frame, what was refused
+    by reason, and how many texts were drawn.
+
+    The font is fetched only for a board that prints text, so an EAGLE
+    board, whose text is counted rather than read, never asks for it.
+    """
+    if not texts:
+        return [], {}, 0
+    table = newstroke(fetch_newstroke())
+    strokes: list[eagle.Stroke] = []
+    refused: dict[str, int] = {}
+    drawn = 0
+    for text in texts:
+        try:
+            made = letter(text, table)
+        except Unlettered as why:
+            refused[str(why)] = refused.get(str(why), 0) + 1
+            continue
+        drawn += 1
+        strokes += [eagle.Stroke(s.layer, s.x1_mm, -s.y1_mm, s.x2_mm, -s.y2_mm,
+                                 s.width_mm) for s in made]
+    return strokes, refused, drawn
+
+
+#: Why an EAGLE board's text is not drawn, and it is the font and not the
+#: reading. EAGLE's own help for TEXT: "When creating output files with the
+#: CAM Processor, texts will always be drawn with Vector font. Other fonts
+#: are not supported" -- "the program's internal vector font", inside EAGLE's
+#: executable, of which "No part [...] may be altered in any way" (CadSoft's
+#: terms, as Debian's non-free `eagle` 4.16-5 records them in
+#: debian/copyright; the help is that package's help/93.htm). Nobody
+#: publishes it as a font file, and newstroke would be a different font.
+EAGLE_TEXT = ("EAGLE's CAM processor draws all text in EAGLE's built-in "
+              "vector font, which no licence lets this repository carry; "
+              "newstroke would be a different font")
+
+
 def artwork(board: eagle.Board, ring: list[tuple[float, float]],
-            thickness: float, centre: tuple[float, float], mask: str
+            thickness: float, centre: tuple[float, float], mask: str,
+            letters: list[eagle.Stroke]
             ) -> tuple[list[Mesh], dict[str, int]]:
     """The copper and the ink the vendor drew, and a tally of what was left.
 
@@ -5172,6 +5545,32 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
         if len(cut) < 3:
             continue
         (ink_back if stroke.layer.startswith("B.") else ink).append(cut)
+    #: The text's strokes are ink like any other and are drawn with it; only
+    #: the tally is their own, so a board's line count is still its lines.
+    text_front = text_back = 0
+    for stroke in letters:
+        shape = stroke_outline(stroke)
+        if shape is None:
+            left["zero-length text stroke"] = (
+                left.get("zero-length text stroke", 0) + 1)
+            continue
+        # On a concave board `inside` would count a stroke it drops under its
+        # own name as well; one beside the board is counted once, below.
+        cut = (inside(shape) if can_clip or all(point_in(ring, p) for p in shape)
+               else [])
+        if len(cut) < 3:
+            # Text on the silkscreen layer but beside the board -- Seeed draw
+            # their stackup table there -- is no board's ink. Counted, since
+            # "73 texts drawn" would otherwise say more than the board shows.
+            left["text stroke off the board"] = (
+                left.get("text stroke off the board", 0) + 1)
+            continue
+        if stroke.layer.startswith("B."):
+            ink_back.append(cut)
+            text_back += 1
+        else:
+            ink.append(cut)
+            text_front += 1
 
     #: The routing, and it is drawn in the board's OWN mask warmed toward the
     #: metal rather than in bare copper: a trace is under the soldermask and a
@@ -5213,7 +5612,9 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
              flat(ink_back, -COPPER_THICKNESS_MM - SILK_THICKNESS_MM,
                   SILKSCREEN, centre, False)],
             {"pads front": len(front), "pads back": len(back),
-             "ink front": len(ink), "ink back": len(ink_back),
+             "ink front": len(ink) - text_front,
+             "ink back": len(ink_back) - text_back,
+             "text front": text_front, "text back": text_back,
              "track front": len(track), "track back": len(track_back),
              "vias": len(holes),
              "clipped to the outline": int(can_clip), **left})
@@ -5276,13 +5677,29 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     pieces = [slab(ring, spec.thickness_mm, spec.colour, centre)]
     # **The copper and the ink, before any component stands on them**, so a
     # part's own body hides the pads under it exactly as solder does.
+    letters, unlettered, lettered = lettering(board.kicad_text)
     drawn_art, tally = artwork(board, ring, spec.thickness_mm, centre,
-                               spec.colour)
+                               spec.colour, letters)
     pieces.extend(drawn_art)
     print("  artwork " + ", ".join(f"{k} {v}" for k, v in tally.items()))
     if board.silk_unread:
         print("  not ink " + ", ".join(f"{k} {v}" for k, v in board.silk_unread)
-              + " -- text needs a font; the rest is a handful per board")
+              + " -- " + ("hidden text is text the file prints nowhere; "
+                          if "hidden text" in dict(board.silk_unread) else "")
+              + "the rest is a handful per board")
+    # **Every piece of text is drawn or refused by name** (OH-163): KiCad's
+    # in newstroke, and an EAGLE board's not at all, for the font's sake.
+    if board.kicad_text:
+        print(f"  text    {lettered} of {len(board.kicad_text)} lettered in "
+              f"newstroke, {len(letters):,} strokes; any beside the board "
+              f"are counted in the artwork line")
+    # Only `eagle._ink` leaves text in `silk_unread`: `kicad._texts_of`
+    # reads all of a KiCad board's.
+    unread_text = dict(board.silk_unread).get("text", 0)
+    if unread_text:
+        unlettered = {**unlettered, EAGLE_TEXT: unread_text}
+    for why, count in sorted(unlettered.items()):
+        print(f"  text    {count} refused: {why}")
     if board.traces_unread:
         print("  not cu  "
               + ", ".join(f"{k} {v}" for k, v in board.traces_unread)
@@ -5629,6 +6046,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             "artwork": dict(tally),
             "not_drawn": {
                 "ink": dict(board.silk_unread),
+                # Each piece of text not drawn, counted under why (OH-163).
+                "text": unlettered,
                 "copper": dict(board.traces_unread),
                 "cutouts": len(cutouts),
                 "turn_unseen": unpinned,
