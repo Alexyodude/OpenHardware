@@ -689,6 +689,39 @@ def test_the_esp32_and_rp2040_pin_states_read_the_enable_before_the_out():
         )
 
 
+def test_a_running_c5_or_c6_dip_lists_the_smd_jtag_and_boot_pads_as_on_board_rows():
+    """**A running DIP board shows five rows it has no pad for** (OH-200).
+
+    `pad_view` lists every `pin_states` key that no pad carries as an
+    on-board row, the way it lists `LED`. The C5's and C6's modules each
+    serve a DIP and an SMD board file, and their `HEADER` now carries `MTMS`,
+    `MTDI`, `MTDO`, `MTCK` and `BOOT`, which only the SMD file has pads for.
+    So on the DIP those five are padless rows beside `LED`, each with its
+    GPIO; on the SMD they are pads, and `LED` is the only padless row.
+
+    That is true of the board, and OH-200's review ruled it so: Seeed's one
+    board CAD per chip carries the five as underside test points, and the DIP
+    and SMD footprints are two ways of mounting that one module.
+
+    `pin_states` over a bus that reads zero stands in for a running board, as
+    in the test above, so no core is built. Each GPIO is read from the
+    module's own `HEADER`, which `tests/rules/test_import_pindefs.py` holds to
+    Seeed's board file.
+    """
+    from webui.boards import esp32c5, esp32c6
+
+    five = ("MTMS", "MTDI", "MTDO", "MTCK", "BOOT")
+    for chip, module in (("C5", esp32c5), ("C6", esp32c6)):
+        for footprint, padless in (("DIP", ("LED",) + five), ("SMD", ("LED",))):
+            board = f"XIAO-ESP32-{chip}-{footprint}"
+            assert api.description_for(board) is module, board
+            view = api.pad_view(board, module, module.pin_states(_Words({})))
+            rows = {pad["pin"]: (pad["group"], pad["chip_pin"])
+                    for pad in view["pads"] if pad["x"] is None}
+            assert rows == {label: ("on-board", f"GPIO{module.HEADER[label]}")
+                            for label in padless}, (board, rows)
+
+
 def test_a_view_says_whether_any_levels_were_read_at_all():
     """**OH-164: a board you picked told you its pins were in use elsewhere.**
 
