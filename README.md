@@ -117,6 +117,7 @@ Outline and pad labels only, not yet wired:
 - `PCBCUPID Glyph Mini RP2040`, pad labels only, the same way, from a KiCad board file
 - `PCBCUPID Glyph C3` · `PCBCUPID Glyph C6`, pad labels only, the same way, from a KiCad board file
 - `Olimex ESP32-C3-DevKit-Lipo`, pad labels only, the same way, from a KiCad board file
+- `Olimex ESP32-C6-EVB`, pad labels only, the same way, from a board file in KiCad 5's format
 - `SparkFun Thing Plus ESP32-C5`, pad labels only, the same way, from a KiCad board file
 
 All XIAO artwork is Seeed Studio's, MIT, from

@@ -518,8 +518,10 @@ def _pin_functions(row: board_manifest.Row) -> dict[str, set[str]]:
     """Net -> the pin names a KiCad row's board file gives the chip's pads
     on it (`pinfunction`, its symbol's pin name), off the file's own tree.
     A footprint's value is a `(property "Value" ...)` from KiCad 8, and an
-    `(fp_text value ...)` before, as in the Olimex's KiCad 7 file."""
-    tree = kicad.parse_sexp(board_manifest.cad_path(row).read_text(encoding="utf-8"))
+    `(fp_text value ...)` before, as in the Olimex's KiCad 7 file. A KiCad 5
+    file places it as a `(module ...)`, which `kicad.board_tree` spells as a
+    footprint, and gives a pad no `pinfunction`: that arrived with KiCad 6."""
+    tree = kicad.board_tree(board_manifest.cad_path(row))
     (chip,) = [node for node in kicad.children(tree, "footprint")
                if node[1].split(":")[-1] == row.pin_table.package
                and [*(prop[2] for prop in kicad.children(node, "property")
@@ -588,7 +590,10 @@ def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
     variant calls `SCK`, the Pro Micro ESP32-C3's `IOA0/SCLK` on its module's
     `IOA0`, and the Glyph Mini's and the Glyph C3's symbol on each chip pin.
     The pads with none are `TRACE_ONLY`, each held to its symbol's name. A
-    KiCad net's `/` is written `{slash}`: SparkFun's `IO23{slash}SDA`."""
+    KiCad net's `/` is written `{slash}`: SparkFun's `IO23{slash}SDA`. Olimex
+    names a GPIO and then what it is for after a backslash, `/GPIO8\\USER_LED1`,
+    and its KiCad 5 ESP32-C6-EVB carries no `pinfunction`, so there the net's
+    own name is the second statement."""
     alone = set()
     for row in ROWS:
         _fetched(row)
@@ -597,7 +602,7 @@ def test_every_resolved_pin_is_the_gpio_a_second_vendor_statement_names():
         for pad in _committed(row)["pads"]:
             if pad["chip_pin"] is None:
                 continue
-            parts = re.split(r"/|\{slash\}", pad["label"])
+            parts = re.split(r"/|\\|\{slash\}", pad["label"])
             stated = {int(found.group(1)) for part in parts
                       if (found := re.fullmatch(r"(?:GPIO|IO)[-_]?(\d+)", part, re.I))}
             stated |= {numbers[part] for part in parts if part in numbers}
@@ -1002,6 +1007,76 @@ def test_the_olimex_c3s_pins_are_its_traced_copper_and_its_variant_names_no_pad(
     for label, gpio in gpios.items():
         assert re.split(r"[/\\]", label)[1] == f"GPIO{gpio}", label
         assert pads[label]["chip_pin_from"] == [row.source], label
+
+
+def test_a_net_renamed_for_another_gpio_is_refused_on_the_olimex_c6_evb():
+    """KiCad 5 writes a net's name bare, `/GPIO8\\USER_LED1`, with one
+    backslash, where KiCad 7 quotes it and doubles it; the name check reads
+    it all the same. Renamed `/GPIO18\\USER_LED1`, its copper still reaches
+    U3 pad 10, GPIO8, and the file saying two things is refused."""
+    row = row_named("Olimex ESP32-C6-EVB")
+    _fetched(row)
+    text = board_manifest.cad_path(row).read_text(encoding="utf-8")
+    assert " /GPIO8\\USER_LED1)" in text and "/GPIO18\\USER_LED1" not in text
+    with pytest.raises(import_pindefs.PindefError, match=re.escape(
+            "'/GPIO18\\\\USER_LED1' is named for GPIO18 and its copper reaches "
+            "U3 pad 10 = GPIO8")):
+        _trace(row, text.replace("/GPIO8\\USER_LED1", "/GPIO18\\USER_LED1"))
+
+
+def test_the_olimex_c6_evbs_pins_are_its_traced_copper_and_its_variant_names_no_pad():
+    """Revision A, the only one, in KiCad 5: its variant numbers
+    `LED_BUILTIN`, `TX`, `SDA`, `A0` and the like and no `D<n>`, and no label
+    any pad carries, so every pin is the copper's. Each of EXT1's GPIO pads
+    is on a net Olimex names for that GPIO, alone or before a backslash and
+    what the pin is for; the rest are its rails, its grounds and /ESP_EN,
+    which reaches the module's EN."""
+    row = row_named("Olimex ESP32-C6-EVB")
+    _fetched(row)
+    text = board_manifest.cad_path(row).read_text(encoding="utf-8")
+    assert text.startswith("(kicad_pcb (version 20171130)") and "(rev A)" in text
+    checkout = import_pindefs.BSP_DIR / row.package
+    constants = import_pindefs.read_c_pin_constants(
+        (checkout / "variants" / row.variant / "pins_arduino.h").read_text(encoding="utf-8"))
+    assert constants and not [label for label in constants if re.fullmatch(r"D\d+", label)]
+    assert _variant_numbers(row) == {}
+    pads = _committed(row)["pads"]
+    resolved = [pad for pad in pads if pad["chip_pin"]]
+    assert sorted(pad["chip_index"] for pad in resolved) == [0, 8, 9, 16, 17]
+    for pad in resolved:
+        assert re.split(r"[/\\]", pad["label"])[1] == f"GPIO{pad['chip_index']}", pad
+        assert pad["chip_pin_from"] == [row.source], pad
+    rest = {pad["label"]: pad["why_null"] for pad in pads if not pad["chip_pin"]}
+    assert sorted(pad["label"] for pad in pads if not pad["chip_pin"]) == [
+        "+3.3V", "+5V", "/ESP_EN", "GND", "GND"]
+    assert "/ESP_EN -> U3 pad 3 = EN" in rest["/ESP_EN"], rest["/ESP_EN"]
+
+
+def test_the_olimex_c6_evbs_paste_apertures_are_on_no_net_and_are_no_pin():
+    """U3, the ESP32-C6-WROOM-1, carries eight pads numbered `Past`: paste
+    apertures over its ground pad, each on `F.Paste` alone and on no net.
+    The number is all they share with a pin, and KiCad numbers no pad on no
+    copper layer, nor an unplated hole (`PAD::CanHaveNumber` at 7.0.0), so
+    the trace reads none: not as eight pads of one pin, and not as a contact
+    of a net even where one is put on a header's."""
+    row = row_named("Olimex ESP32-C6-EVB")
+    _fetched(row)
+    u3 = _placed(row, "U3")
+    assert (u3.name, u3.value) == (row.pin_table.package, row.pin_table.value)
+    past = [pad for pad in u3.pads if not pad.number.isdigit()]
+    assert len(past) == 8, [pad.number for pad in past]
+    assert {(pad.number, pad.net, pad.layers) for pad in past} == {("Past", "", ("F.Paste",))}
+    assert {int(pad.number) for pad in u3.pads if pad.number.isdigit()} == set(
+        range(1, row.pin_table.pins + 1))
+    assert not [found.via for found in _trace(row).values() if "Past" in found.via]
+    text = board_manifest.cad_path(row).read_text(encoding="utf-8")
+    aperture = "(pad Past smd rect (at -0.25 1.71 270) (size 0.8 0.8) (layers F.Paste))"
+    assert text.count(aperture) == 1
+    moved = text.replace(aperture, aperture[:-1] + " (net 42 /GPIO8\\USER_LED1))")
+    assert _trace(row, moved) == _trace(row)
+    for kind, layers in (("smd", ("F.Paste",)), ("np_thru_hole", ("*.Cu", "*.Mask"))):
+        assert import_pindefs._numbered(kicad.Pad("1", kind, 0, 0, 1, 1, layers=layers)) == ""
+    assert import_pindefs._numbered(kicad.Pad("1", "smd", 0, 0, 1, 1, layers=("F.Cu",))) == "1"
 
 
 def test_a_rows_variant_may_number_no_d_pin_only_where_the_row_opts_in_no_label():

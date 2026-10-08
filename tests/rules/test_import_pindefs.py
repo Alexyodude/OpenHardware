@@ -1879,7 +1879,7 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # and the Uno's pins come from its own variant -- and a count that skipped
     # it would be a count of most of the boards.
     files = sorted(pindefs.BOARDS_DIR.glob("*.json"))
-    assert len(files) == 37, [one.stem for one in files]
+    assert len(files) == 38, [one.stem for one in files]
     for path in files:
         board = path.stem
         for pad in json.loads(path.read_text(encoding="utf-8"))["pads"]:
@@ -1930,8 +1930,10 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # supplies -- GND, 3.3V, EN, VUSB and VBATT. 547 until OH-200 wired
     # Seeed's own board file into the XIAO ESP32-C5 and C6 SMD boards: MTMS,
     # MTDI, MTDO, MTCK and BOOT on each, ten pads out of `generic` below.
-    assert naming == 557, naming
-    assert supplies == 205, supplies
+    # 557 and 205 until the Olimex ESP32-C6-EVB (OH-198) added 10: 5 named
+    # by its traced copper, and 4 supplies -- two GND, +5V and +3.3V.
+    assert naming == 562, naming
+    assert supplies == 209, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
     # same debug cluster already carried; 42 until the six SWD pads on the
     # RP2040, SAMD21 and nRF52840 stopped saying nobody had published them.
@@ -1951,15 +1953,16 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # with the Thing Plus ESP32-C5's ~{RST}, traced to EN, its two pads alone
     # on their nets, and the one behind its open jumper JP11. 67 with the
     # XIAO RP2350 SMD's BOOT, which lands on the underside test point on the
-    # RP2350's QSPI chip-select (OH-209).
-    assert specific == 67, specific
+    # RP2350's QSPI chip-select (OH-209). 68 with the Olimex ESP32-C6-EVB's
+    # /ESP_EN, traced to EN.
+    assert specific == 68, specific
     # 15 until OH-200 named the C5's and C6's ten JTAG and BOOT pads. 5 until
     # OH-209 gave the RP2350 SMD's BOOT the reason Seeed's board file states.
     assert generic == 4, (
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
-    assert naming + supplies + specific + generic == 833
+    assert naming + supplies + specific + generic == 843
 
 
 def test_the_tracer_refuses_a_part_string_that_matches_more_than_one_footprint():

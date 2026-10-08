@@ -254,6 +254,27 @@ three files, though only D's is fetched -- and the labels are revision D's
 nets, the revision Olimex's `Hardware-revision-changes.txt` calls
 "Preliminary, unreleased".
 
+`webui/boards/Olimex ESP32-C6-EVB.json` is written the same way, out of
+revision A, the only one, of Olimex's own KiCad 5 board file,
+`HARDWARE/Hardware-revision-A/ESP32-C6-EVB_Rev_A.kicad_pcb`, which
+`tools/kicad.py` reads by respelling it as KiCad 6 spells it (OH-198). Its
+`README.md`, and `HARDWARE/README.md` beside the design files, put the
+hardware under CERN OHL v1.2. The repository's root also holds
+`Hardware-License-CERN_OHL_v_1_2.pdf`, the licence's own text, which names
+no work, and its `LICENSE` is the GPL-3.0 text the README gives the
+software, so the hardware's licence is recorded graded `stated`, as above.
+Each `chip_pin` comes from the pad of the ESP32-C6-WROOM-1 the pad's net
+reaches; the row's variant, `variants/esp32c6-evb/`, names no label a pad
+carries.
+
+That licence attaches obligations to a copy of the Documentation and to
+modified Documentation: keep its notices and include a copy of the licence
+(§3.1), and mark modified Documentation as modified, with the date and what
+changed, make it available, and license it under the CERN OHL (§3.4).
+Whether a board file written from Olimex's design is modified Documentation
+in that sense is recorded here as found and not decided: it is the owner's
+decision, before anything built from it is published.
+
 **Position and risk:** as 2f, with one more: the licence rests on the
 vendor's README, which `source.licence_evidence` says.
 

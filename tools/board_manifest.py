@@ -200,6 +200,18 @@ ESP32_C6_WROOM_1 = PinTable(
     (("1", "GND"), ("2", "3V3"), ("3", "EN"), ("22", "NC"), ("28", "GND"),
      ("29", "EPAD")),
 )
+#: The same page, for the module as Olimex's ESP32-C6-EVB places it: a
+#: footprint of Olimex's own library, valued ESP32-C6-WROOM-1-N4; the GPIO
+#: rows its one header reaches -- pins 8, 10, 15, 24 and 25 are GPIO0,
+#: GPIO8, GPIO9, GPIO17 and GPIO16 on Table 3-1 -- and a footprint that
+#: numbers its ground pad and the vias in it 29, as the page does. Its eight
+#: paste apertures are numbered `Past`, on no net and on no copper layer:
+#: no pin of the module, and never reached by a header's net.
+ESP32_C6_WROOM_1_OLIMEX = dataclasses.replace(
+    ESP32_C6_WROOM_1,
+    package="ESP32-C6-WROOM-1-xx-UNIVERSAL_MODULE", value="ESP32-C6-WROOM-1-N4",
+    gpio=(("8", 0), ("10", 8), ("15", 9), ("24", 17), ("25", 16)),
+)
 ESP32_C5_WROOM_1 = PinTable(
     "ESP32-C5-WROOM-1-NARROW", "ESP32-C5-WROOM-1",
     "ESP32-C5-WROOM-1 & WROOM-1U Datasheet v1.3, pp. 13-14, 3.2 Pin Description "
@@ -500,6 +512,24 @@ ROWS = (
              "pad is on VIN, and on no pad of U1"),
         ),
         pin_table=ESP32_C5_WROOM_1,
+    ),
+    # KiCad 5 (OH-198), revision A, the only one, and licensed by its README
+    # alone, as the ESP32-C3-DevKit-Lipo is. Its nets name each GPIO and what
+    # it is for, `/GPIO8\USER_LED1` and so on, and no label its variant
+    # numbers, so its pins are the traced copper's. EXT1 is the one
+    # through-hole header on the module's GPIOs; UEXT1 and UEXT2 are
+    # surface-mount, which tools/import_board.py does not read as a header.
+    Row(
+        board="Olimex ESP32-C6-EVB",
+        source="olimex-esp32-c6-evb",
+        cad="HARDWARE/Hardware-revision-A/ESP32-C6-EVB_Rev_A.kicad_pcb",
+        schematic=None,
+        select=("EXT1",),
+        chip="ESP32-C6",
+        package="arduino-esp32",
+        variant="esp32c6-evb",
+        labels=(),
+        pin_table=ESP32_C6_WROOM_1_OLIMEX,
     ),
 )
 

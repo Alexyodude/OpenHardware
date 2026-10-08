@@ -916,6 +916,15 @@ def read_eagle_traced(
     return _trace(chips[0], parts, header, table)
 
 
+def _numbered(pad: kicad.Pad) -> str:
+    """A KiCad pad's number, or "" where KiCad gives it none: an aperture,
+    on no copper layer (`PAD::IsAperturePad`, pcbnew/pad.h at 7.0.0), or an
+    unplated hole."""
+    if pad.kind == "np_thru_hole" or not any(layer.endswith(".Cu") for layer in pad.layers):
+        return ""
+    return pad.number
+
+
 def read_kicad_traced(
     texts: tuple[str, ...], *, path: pathlib.Path, select: tuple[str, ...],
     table: board_manifest.PinTable,
@@ -928,8 +937,15 @@ def read_kicad_traced(
     KiCad joins a footprint's pads to its pins by number, so one number on
     one net is one pin however many pads carry it -- a castellated header's
     hole and half-hole -- and counts as one contact on that net. An
-    unnumbered pad is no pin. A header's nets are those of its through-hole
-    pads, the pads `tools/import_board.py` reads for the geometry.
+    unnumbered pad is no pin, and nor is a pad KiCad itself numbers nothing:
+    one on no copper layer, an aperture, or an unplated hole
+    (`PAD::CanHaveNumber`, pcbnew/pad.cpp at 7.0.0). A KiCad 5 file can give
+    one a number -- the Olimex ESP32-C6-EVB's module carries eight paste
+    apertures numbered `Past` -- and KiCad 7's reader clears it ("At some
+    point it was possible to assign a number to aperture pads", pcb_parser.cpp
+    at 7.0.0), so one is read here as KiCad reads it, unnumbered (OH-198). A
+    header's nets are those of its through-hole pads, the pads
+    `tools/import_board.py` reads for the geometry.
 
     One number on two nets is refused on a footprint the trace can reach --
     the chip, a header, a resistor `R<n>` with two numbered pins -- because
@@ -949,7 +965,7 @@ def read_kicad_traced(
         """Refuse a number these pads put on two nets."""
         nets: dict[str, set[str]] = {}
         for pad in pads:
-            if pad.number:
+            if _numbered(pad):
                 nets.setdefault(pad.number, set()).add(pad.net)
         split = {number: sorted(on) for number, on in nets.items() if len(on) > 1}
         if split:
@@ -961,7 +977,7 @@ def read_kicad_traced(
 
     parts = [_Part(placed.reference, placed.name, placed.value,
                    tuple(dict.fromkeys((pad.number, pad.net)
-                                       for pad in placed.pads if pad.number)))
+                                       for pad in placed.pads if _numbered(pad))))
              for placed in board.placements]
     header = []
     for name in select:
@@ -985,7 +1001,7 @@ def read_kicad_traced(
     one_net(placed_as[0], placed_as[0].pads)
     for placed in board.placements:
         if (_RESISTOR.fullmatch(placed.reference)
-                and len({pad.number for pad in placed.pads if pad.number}) == 2):
+                and len({pad.number for pad in placed.pads if _numbered(pad)}) == 2):
             one_net(placed, placed.pads)
     (chip,) = [part for part, placed in zip(parts, board.placements, strict=True)
                if placed is placed_as[0]]

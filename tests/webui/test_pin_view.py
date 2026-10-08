@@ -778,8 +778,9 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     # the PCBCUPID Glyph C3, whose file names 19; 34 until the PCBCUPID Glyph
     # C6, whose file names 20; 35 until the Olimex ESP32-C3-DevKit-Lipo,
     # whose file names 13; 36 until the SparkFun Thing Plus ESP32-C5, whose
-    # file names 19.
-    assert len(boards) == 37, boards
+    # file names 19; 37 until OH-198 added the Olimex ESP32-C6-EVB, whose
+    # file names 5.
+    assert len(boards) == 38, boards
     # Every board, picked and not loaded: nothing was read.
     picked = {board: api.pad_view(board, api.description_for(board), None)
               for board in boards}
@@ -801,7 +802,7 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     )
     silent = sorted(set(boards) - set(would_have_lied))
     assert silent == [], silent
-    assert len(would_have_lied) == 37, would_have_lied
+    assert len(would_have_lied) == 38, would_have_lied
     assert "Arduino Uno" in would_have_lied
     assert "XIAO-MG24-SMD" in would_have_lied, (
         "the MG24 has no board module at all, so its 19 chip pins can only "
