@@ -2320,6 +2320,75 @@ def test_a_row_the_cad_and_a_package_both_answer_is_not_the_cads_instead(tmp_pat
             labels, lines)
 
 
+#: What a covered board file says that is false of one some of whose pins a
+#: vendor's CAD named (OH-203): the first two are `BOARD_DERIVATION`'s, the
+#: third the covered `assumption`'s. The test below asserts each is still in
+#: the sentence it quotes, so a rewording fails there loudly instead of
+#: leaving it to look for words nothing writes any more.
+_PACKAGES_ALONE = (
+    "from the board-support packages in `packages`",
+    "Nothing was inferred from the CAD",
+    "read out of the board-support packages named in `pindefs`",
+)
+
+
+def test_no_board_file_says_its_pins_came_from_packages_alone_while_one_rests_on_cad():
+    """OH-203. `BOARD_DERIVATION` says a file was generated "from the
+    board-support packages in `packages`" and that "Nothing was inferred from
+    the CAD", and the covered `assumption` that `chip_pin` was "read out of the
+    board-support packages named in `pindefs`". All three were written onto
+    boards where a vendor's own CAD -- a source that is not firmware,
+    `Package.firmware` -- named a pin, and on those they are false.
+
+    **Which pads rest on CAD is computed here from the claims the report
+    cites**, not taken from the generator's answer or from a list: the ticket
+    named the MG24 and nRF54L15 DIPs, and neither carries such a pad. A file
+    with one must say none of the three, and a covered XIAO file must name
+    each such pad in both sentences. A covered XIAO file with none keeps
+    `BOARD_DERIVATION` and the packages sentence, which is the other half.
+    """
+    _needs_the_fetched_packages()
+    absent = sorted({str(source.root / path) for board in BOARDS.values()
+                     for source in board.sources if source.root is not None
+                     for path in source.paths if not (source.root / path).is_file()})
+    if absent:
+        pytest.skip(f"{absent} absent; `python tools/import_pindefs.py --fetch` "
+                    f"names how to get each")
+    derivation_says, assumption_says = _PACKAGES_ALONE[:2], _PACKAGES_ALONE[2]
+    assert all(phrase in pindefs.BOARD_DERIVATION for phrase in derivation_says), (
+        pindefs.BOARD_DERIVATION)
+    assert assumption_says in pindefs.assumption_for("FAKE", False, True)
+
+    unread = _unread_without_a_compiler()
+    rest_on_cad = {}
+    for name in sorted(set(BOARDS) - set(unread)):
+        report = board_report(name)
+        cad = [entry["label"] for entry in report["pads"] + report["on_board"]
+               if entry["chip_pin"] is not None
+               and any(not PACKAGES[source.split(" ", 1)[0]].firmware
+                       for source in entry["sources"])]
+        document = json.loads(pindefs.board_path(name).read_text(encoding="utf-8"))
+        derivation = document["pindefs"]["derivation"]
+        assumption = document["assumption"]
+        if cad:
+            rest_on_cad[name] = cad
+            said = [phrase for phrase in _PACKAGES_ALONE
+                    if phrase in derivation or phrase in assumption]
+            assert not said, (name, cad, said)
+        if name in pindefs.MANIFEST or not any(
+                PACKAGES[one["name"]].firmware for one in report["packages"]):
+            continue
+        if cad:
+            unnamed = [label for label in cad
+                       if f"`{label}`" not in derivation or f"`{label}`" not in assumption]
+            assert not unnamed, (name, unnamed, derivation, assumption)
+        else:
+            assert derivation == pindefs.BOARD_DERIVATION, (name, derivation)
+            assert assumption_says in assumption, (name, assumption)
+    assert rest_on_cad, "no board has a pad resting on CAD, so nothing above was checked"
+    _skip_the_unread(unread)
+
+
 def _symbol_library() -> str:
     if not SEEED_SYM.is_file():
         pytest.skip(f"no {SEEED_SYM}; run python tools/get_board_sources.py seeed-xiao")
