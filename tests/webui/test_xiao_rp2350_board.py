@@ -311,6 +311,7 @@ def test_why_d3_and_not_another_pad():
 
 #: "Table of standard UF2 family IDs understood by the RP2350 bootrom", RP2350
 #: Datasheet 80d627281ed5, section 5.5.3, Table 469 (PDF p.368).
+UF2_ABSOLUTE = 0xE48BFF57
 UF2_RP2040 = 0xE48BFF56
 UF2_RP2350_ARM_S = 0xE48BFF59
 UF2_RP2350_RISCV = 0xE48BFF5A
@@ -319,10 +320,10 @@ UF2_RP2350_ARM_NS = 0xE48BFF5B
 
 def uf2(*images: tuple[int, bytes]) -> bytes:
     """One UF2 block per `(family_id, payload)`, each at `rp2350.XIP` with the
-    familyID flag set, numbered within its family as the UF2 specification
-    numbers them. `blink.bin` is 96 bytes, so one block holds it."""
+    familyID flag set and each the only block of its family: block 0 of 1."""
     blocks = b""
     for family_id, payload in images:
+        assert len(payload) <= 476, f"{len(payload)} bytes is more than one UF2 block"
         head = struct.pack("<8I", firmware.UF2_MAGIC_START0, firmware.UF2_MAGIC_START1,
                            firmware.UF2_FLAG_FAMILY_ID, rp2350.XIP, len(payload), 0, 1,
                            family_id)
@@ -331,11 +332,12 @@ def uf2(*images: tuple[int, bytes]) -> bytes:
 
 
 def test_a_uf2_for_the_arm_half_or_for_an_rp2040_is_refused_as_not_for_this_chip():
-    """The same 96 bytes under each family this board cannot run. Without a
-    family to ask for, a one-family file loaded whatever it held, so an Arm
-    build -- the XIAO RP2350's default -- landed at 0x10000000 and stopped at
-    an illegal encoding, which reads as the part refusing the program rather
-    than the file being for the other half."""
+    """`blink.bin`'s bytes under each family this board cannot run. Without
+    a family to ask for, a one-family file loaded whatever it held, so an Arm
+    build -- the XIAO RP2350's default, the first `arch` in arduino-pico
+    33201a6's `boards.txt`, `--family rp2350-arm-s` (:36734) -- landed at
+    0x10000000 and stopped at an illegal encoding, which reads as the part
+    refusing the program rather than the file being for the other half."""
     image = IMAGE.read_bytes()
     for family_id, name in ((UF2_RP2350_ARM_S, "RP2350_ARM_S"),
                             (UF2_RP2350_ARM_NS, "RP2350_ARM_NS"), (UF2_RP2040, "RP2040")):
@@ -348,12 +350,16 @@ def test_a_uf2_for_the_arm_half_or_for_an_rp2040_is_refused_as_not_for_this_chip
 
 def test_a_uf2_for_the_risc_v_half_loads_even_beside_an_arm_image_and_drives_d3():
     """An RP2350_RISCV UF2 of `blink.bin` needs no `base`: its block names
-    the address. And a file carrying an Arm image at the same addresses --
-    0xFF filler here, which would stop on its first word -- loads the RISC-V
-    one rather than refusing to choose."""
+    the address. A file carrying an Arm image at the same addresses -- 0xFF
+    filler here, which would stop on its first word -- loads the RISC-V one
+    rather than refusing to choose. So does one with an `absolute` block
+    beside it, which is the shape arduino-pico's own RISC-V build writes:
+    `--family rp2350-riscv --abs-block` (`boards.txt:36741`)."""
     image = IMAGE.read_bytes()
+    filler = b"\xff" * len(image)
     for data in (uf2((UF2_RP2350_RISCV, image)),
-                 uf2((UF2_RP2350_ARM_S, b"\xff" * len(image)), (UF2_RP2350_RISCV, image))):
+                 uf2((UF2_RP2350_ARM_S, filler), (UF2_RP2350_RISCV, image)),
+                 uf2((UF2_RP2350_RISCV, image), (UF2_ABSOLUTE, filler))):
         with api.load_firmware(BOARD, data) as session:
             assert session.image.family == "RP2350_RISCV", session.image
             assert [(s.address, s.data) for s in session.image.segments] == [

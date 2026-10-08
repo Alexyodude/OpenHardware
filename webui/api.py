@@ -564,10 +564,14 @@ class Core(typing.Protocol):
 #: p.368), and `webui/boards/rp2350.py` describes only the RISC-V half. Absent
 #: from here, any one-family file loaded at 0x10000000 -- an Arm build, the
 #: XIAO's default, and an RP2040 one alike -- and stopped at an illegal
-#: encoding, which reads as the part refusing the program. Asking
-#: for `RP2350_RISCV` refuses those as `nothing-for-this-chip`, and also
-#: refuses the `absolute` and `data` families the bootrom accepts, because
-#: neither says which half its image is for.
+#: encoding, which reads as the part refusing the program. Asking for
+#: `RP2350_RISCV` refuses those as `nothing-for-this-chip`, and also refuses
+#: the `absolute` and `data` families the bootrom accepts, because neither
+#: says which half its image is for. An `absolute` block BESIDE a
+#: RISC-V image is skipped, so the UF2 arduino-pico's RISC-V build writes
+#: for the XIAO -- `--family rp2350-riscv --abs-block`, its `boards.txt:36741`
+#: at 33201a6 -- is read rather than refused as two families in one file.
+#: Whether its image then runs is `webui/boards/rp2350.py`'s question.
 UF2_FAMILY_BY_CHIP: dict[str, str] = {"RP2040": "RP2040", "RP2350": "RP2350_RISCV"}
 
 #: Where a vector table sits **used to be here**, as
