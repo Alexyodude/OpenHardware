@@ -2286,6 +2286,55 @@ _RP2350_DEBUG = tuple(
         gpio="GPIO0 through GPIO29", label=label))
     for label in ("SWDIO", "SWDCLK")
 )
+#: **BOOT is the flash's chip-select, and the copper says so where the net
+#: names did not** (OH-209). OH-170 listed every net in `RP2350.kicad_pcb`,
+#: found none called `BOOT`, and stopped. The pad's net is not named for the
+#: pad; it is named for what the pad is.
+#:
+#: The SMD footprint's underside pads are the module's own underside test
+#: points, matched by POSITION as OH-200's review matched the C5's and C6's:
+#: the module's castellated edge, `MOUDLE14P-XIAO-HALF-HOLE` (U2), stands
+#: unturned on the front with its pads 1-14 at the footprint's own x, so the
+#: footprint's frame is U2's. In that frame every underside pad of
+#: `XIAO-RP2350-SMD.kicad_mod` lands on one back-side `Test Point` within
+#: 0.01 mm, and each pad whose label names a signal (`D11`-`D18`, `SWDIO`,
+#: `SWDCLK`) lands on that signal's net. BOOT, pad 27, lands on TP2.
+#:
+#: TP2's net is `/04 RP2350/QSPI_SS`. On it: the RP2350's pad 60, whose
+#: function the footprint names `QSPI_SS` apart from its `GPIO0`-`GPIO29`
+#: pads; the `/CS` of U5, which the file describes as a 16Mbit SPI memory;
+#: and R4 (1K), whose other net holds only the button K1, whose other side
+#: is GND. Seeed's schematic, in the same
+#: `RP2350.zip` the board file was taken from, prints `BOOT` beside TP2 --
+#: the vendor's own label for the join the positions make, and it pairs its
+#: other five names there (`3V3`, `GND`, `RUN`, `SWDCLK`, `SWDIO`) with test
+#: points on nets carrying those names. Every clause of the reason but the
+#: datasheet's is read back out of those files by
+#: `test_the_rp2350_smd_boot_pad_is_the_flash_chip_select_in_seeeds_own_board_file`.
+#:
+#: **A reason and not a chip pin.** `chip_pin` here is a `GPIOn` of the
+#: thirty, and QSPI_SS is not one of them. Why a button on that line is the
+#: BOOT button is the RP2350 Datasheet's, release 8, fetched from
+#: https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf, sha256
+#: a638d6780da919162660691bfa02c6dcf7c2a0b6e9f18e2d7519c80b664a2e39: section
+#: 5.2.8, "BOOTSEL (USB/UART) boot", has the bootrom sample QSPI CSn shortly
+#: after reset and enter BOOTSEL if it is driven low, and the "Check BOOTSEL"
+#: step of 5.2.2 calls that "QSPI CSn is low (BOOTSEL button)". Cited, not
+#: copied: CC BY-ND. The datasheet explains the wiring; the wiring is read
+#: from Seeed's file.
+_RP2350_BOOT = (
+    ("BOOT",
+     "the RP2350's flash chip-select, QSPI_SS, which is outside its GPIO0 "
+     "through GPIO29 numbering: in Seeed's own RP2350.kicad_pcb this pad lands "
+     "on the underside test point TP2, whose net '/04 RP2350/QSPI_SS' carries "
+     "the RP2350's pad 60 'QSPI_SS' and the '/CS' of U5, a 16Mbit SPI "
+     "memory, and runs through R4 (1K) to the button K1, whose other side is "
+     "GND; Seeed's schematic in the same RP2350.zip, '04 RP2350.kicad_sch', "
+     "prints 'BOOT' beside TP2. The RP2350 Datasheet, release 8, section "
+     "5.2.8 'BOOTSEL (USB/UART) boot', has the bootrom sample QSPI CSn shortly "
+     "after reset and enter BOOTSEL if it is driven low, so this pad is that "
+     "strap and there is no GPIO number for it to have"),
+)
 #: The same shape on Nordic's part, which numbers its GPIOs by port and bit:
 #: `nRF54L15.kicad_pcb` gives U6 thirty-two pads named `Pn.nn` and names
 #: `SWDIO` and `SWDCLK` apart from them.
@@ -2417,7 +2466,9 @@ BOARDS = {
         "RP2040", _RP2040, on_board=("LED",), reasons=_RP2040_SWD
     ),
     "XIAO-RP2350-DIP": Board("RP2350", _RP2350),
-    "XIAO-RP2350-SMD": Board("RP2350", _RP2350, reasons=_RP2350_DEBUG),
+    "XIAO-RP2350-SMD": Board(
+        "RP2350", _RP2350, reasons=_RP2350_DEBUG + _RP2350_BOOT
+    ),
     "XIAO-SAMD21-DIP": Board("SAMD21", _SAMD21),
     "XIAO-SAMD21-SMD": Board("SAMD21", _SAMD21, reasons=_SAMD21_SWD),
     # Nobody has published this one. Zephyr has no xiao_stm32c5 board and

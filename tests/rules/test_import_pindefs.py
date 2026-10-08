@@ -48,14 +48,16 @@
 
 import dataclasses
 import json
+import math
 import os
 import pathlib
 import re
 import subprocess
+import zipfile
 
 import pytest
 
-from tools import board_manifest, import_board
+from tools import board_manifest, import_board, kicad
 from tools import import_pindefs as pindefs
 from tools.import_pindefs import (
     BOARDS,
@@ -1947,10 +1949,13 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # J2 pad 8, alone on its net. 61 with the Glyph C6's two /RESET pads.
     # 62 with the Olimex ESP32-C3-DevKit-Lipo's /ESP_EN, traced to EN. 66
     # with the Thing Plus ESP32-C5's ~{RST}, traced to EN, its two pads alone
-    # on their nets, and the one behind its open jumper JP11.
-    assert specific == 66, specific
-    # 15 until OH-200 named the C5's and C6's ten JTAG and BOOT pads.
-    assert generic == 5, (
+    # on their nets, and the one behind its open jumper JP11. 67 with the
+    # XIAO RP2350 SMD's BOOT, which lands on the underside test point on the
+    # RP2350's QSPI chip-select (OH-209).
+    assert specific == 67, specific
+    # 15 until OH-200 named the C5's and C6's ten JTAG and BOOT pads. 5 until
+    # OH-209 gave the RP2350 SMD's BOOT the reason Seeed's board file states.
+    assert generic == 4, (
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
@@ -2683,6 +2688,189 @@ def test_the_user_led_reports_the_pin_two_sources_name_and_writes_neither():
     assert "gpios = <&gpio2 0 GPIO_ACTIVE_LOW>" in body, (
         "Zephyr no longer puts led0 on P2.00, so the reason's second source "
         "is stale and the sentence must be re-read against it")
+
+
+def test_the_rp2350_smd_boot_pad_is_the_flash_chip_select_in_seeeds_own_board_file():
+    """**The net names had no `BOOT`; the copper does** (OH-209).
+
+    OH-170 found no net called `BOOT` in `RP2350.kicad_pcb` and left the SMD's
+    BOOT pad on the generic sentence. The pad is not on a net named for it. It
+    sits on one of the module's underside test points, and that point is on
+    the RP2350's QSPI chip-select, the line its bootrom samples for BOOTSEL.
+
+    **Both joins are read here, not restated.** Pad to test point is by
+    position, in the frame of the module's own castellated edge, and every
+    other underside pad whose label names a signal must land on that signal's
+    net -- so a wrong frame fails on those before it says anything about
+    BOOT. Test point to name is Seeed's own schematic, from the zip the board
+    file came out of, and the rule that pairs `BOOT` with a test point there
+    must pair its five neighbours with points on their own nets. Then the net
+    is walked -- the chip's pad and its function, the memory's, the resistor
+    and the button past it -- and each is found in the clause of the reason
+    that states it, so the sentence cannot keep a part the file has lost.
+
+    The one clause not read here is the datasheet's: the PDF is CC BY-ND and
+    is not in the tree. `_RP2350_BOOT`'s comment cites its release, section
+    and sha256.
+    """
+    reasons = dict(pindefs.BOARDS["XIAO-RP2350-SMD"].reasons)
+    assert "BOOT" in reasons, (
+        f"XIAO-RP2350-SMD wires reasons for {sorted(reasons)} and none for BOOT, "
+        f"so the pad falls back to the generic sentence while Seeed's own file "
+        f"says what it reaches")
+    why = reasons["BOOT"]
+    document = json.loads(
+        pindefs.board_path("XIAO-RP2350-SMD").read_text(encoding="utf-8"))
+    (boot,) = [pad for pad in document["pads"] if pad["label"] == "BOOT"]
+    assert (boot["chip_pin"], boot["chip_index"]) == (None, None), boot
+    assert boot["why_null"] == why, (
+        f"the board file is stale against the registry: {boot['why_null']!r}")
+    labels = {pad["pad"]: pad["label"] for pad in document["pads"]}
+
+    footprint_path = SEEED_SYM.parent / "XIAO-RP2350-SMD.kicad_mod"
+    board_path = SEEED_PCB / "RP2350.kicad_pcb"
+    archive = SEEED_PCB / "RP2350.zip"
+    for one in (footprint_path, board_path, archive):
+        if not one.is_file():
+            pytest.skip(f"no {one}")
+    footprint = kicad.read_footprint(footprint_path)
+    text = board_path.read_text(encoding="utf-8")
+    board = kicad.read_board(board_path, text=text)
+    assert f"Seeed's own {board_path.name}" in why, why
+    assert f"in the same {archive.name}" in why, why
+
+    def property_of(reference: str, name: str) -> str:
+        """One `(property ...)` of the footprint placed as `reference`. A
+        parsed placement carries its value and no other property, and the
+        reason leans on two more."""
+        opening = f'(property "Reference" "{reference}"'
+        assert text.count(opening) == 1, (reference, text.count(opening))
+        start = text.index(opening)
+        block = text[start:text.find("\n\t(footprint ", start)]
+        found = re.findall(rf'\(property "{re.escape(name)}" "([^"]*)"', block)
+        assert len(found) == 1, (reference, name, found)
+        return found[0]
+
+    # THE FRAME. The module's castellated edge stands unturned on the front,
+    # its pads at the footprint's own x, so the footprint's frame is its own.
+    (edge,) = [placed for placed in board.placements if "XIAO-HALF-HOLE" in placed.name]
+    assert (edge.rotation_deg, edge.back) == (0.0, False), (
+        edge.reference, edge.rotation_deg, edge.back)
+    numbers = {pad.number for pad in edge.pads}
+    for pad in footprint.pads:
+        if pad.number in numbers:
+            xs = {round(one.x_mm, 3) for one in edge.pads if one.number == pad.number}
+            assert xs == {round(pad.x_mm, 3)}, (pad.number, xs, pad.x_mm)
+
+    # THE PADS. Every underside pad lands on exactly one back-side test point
+    # within 0.01 mm, no point takes two...
+    points = [placed for placed in board.placements
+              if placed.back and placed.value == "Test Point"]
+    landed = {}
+    for pad in footprint.pads:
+        if pad.number in numbers:
+            continue
+        at = (edge.x_mm + pad.x_mm, edge.y_mm + pad.y_mm)
+        hits = [point.reference for point in points
+                if math.dist(at, kicad.pad_on_board(point, point.pads[0])) < 0.01]
+        assert len(hits) == 1, (pad.number, labels[pad.number], at, hits)
+        landed[pad.number] = next(point for point in points if point.reference == hits[0])
+    assert len({point.reference for point in landed.values()}) == len(landed), landed
+    nets = {point.reference: point.pads[0].net for point in points}
+    # ...and a pad whose label names a signal is on that signal's net, which
+    # is what makes the frame a fact rather than a coincidence of spacing.
+    signals = {labels[number] for number in landed
+               if re.fullmatch(r"D\d+|SWDIO|SWDCLK", labels[number])}
+    assert signals == {f"D{n}" for n in range(11, 19)} | {"SWDIO", "SWDCLK"}, signals
+    for number, point in landed.items():
+        if labels[number] in signals:
+            assert labels[number] in re.split(r"\{slash\}|/", nets[point.reference]), (
+                number, labels[number], point.reference, nets[point.reference])
+
+    # THE NET. BOOT's test point is on the chip-select, which no part of its
+    # name calls BOOT.
+    tp = landed[boot["pad"]]
+    net = nets[tp.reference]
+    assert net == "/04 RP2350/QSPI_SS", (tp.reference, net)
+    assert f"underside test point {tp.reference}, whose net {net!r}" in why, why
+    on_net = {placed.reference: placed for placed in board.placements
+              if any(pad.net == net for pad in placed.pads)}
+    functions = {value: sorted(names) for value, by_net in pindefs._footprints(text)
+                 for name, names in by_net.items() if name == net}
+
+    (chip,) = [placed for placed in on_net.values() if "RP2350" in placed.value]
+    (chip_pad,) = [pad.number for pad in chip.pads if pad.net == net]
+    assert functions[chip.value] == ["QSPI_SS"], functions
+    assert f"the RP2350's pad {chip_pad} 'QSPI_SS'" in why, why
+    # Named apart from the GPIOs, which is the whole of "not a GPIO".
+    (mcu,) = [by_net for value, by_net in pindefs._footprints(text) if value == chip.value]
+    gpio = {match.group(1) for names in mcu.values() for name in names
+            if (match := pindefs._CHIP_PIN_NAME.match(name))}
+    assert gpio == {f"GPIO{n}" for n in range(30)}, sorted(gpio)
+    assert pindefs._CHIP_PIN_NAME.match("QSPI_SS") is None
+    assert "outside its GPIO0 through GPIO29 numbering" in why, why
+
+    (memory,) = [placed for placed in on_net.values() if functions.get(placed.value) == ["/CS"]]
+    description = property_of(memory.reference, "Description")
+    assert "Memory" in description and "SPI" in description, description
+    assert f"the '/CS' of {memory.reference}, a {memory.value} SPI memory" in why, why
+
+    (resistor,) = [placed for placed in on_net.values()
+                   if pindefs._RESISTOR.fullmatch(placed.reference)]
+    (far,) = {pad.net for pad in resistor.pads} - {net}
+    beyond = {placed.reference: placed for placed in board.placements
+              if any(pad.net == far for pad in placed.pads)}
+    (button,) = [placed for reference, placed in beyond.items()
+                 if reference != resistor.reference]
+    assert property_of(button.reference, "Part Type") == "Button"
+    assert {pad.net for pad in button.pads} - {far} == {"GND"}, button.pads
+    assert (f"through {resistor.reference} ({resistor.value}) to the button "
+            f"{button.reference}, whose other side is GND") in why, why
+    # And the net carries nothing the sentence leaves out.
+    assert set(on_net) == {tp.reference, chip.reference, memory.reference,
+                           resistor.reference}, sorted(on_net)
+
+    # THE NAME. Seeed's schematic, in the zip this board file came out of,
+    # prints a name beside each of a column of test points.
+    with zipfile.ZipFile(archive) as bundle:
+        (inside,) = [name for name in bundle.namelist() if name.endswith(".kicad_pcb")]
+        assert bundle.read(inside) == board_path.read_bytes(), (
+            f"{board_path.name} is not {inside} from {archive.name}, so the "
+            f"schematic beside it is not this board's")
+        (sheet_name,) = [name for name in bundle.namelist()
+                         if name.endswith("/04 RP2350.kicad_sch")]
+        sheet = kicad.parse_sexp(bundle.read(sheet_name).decode("utf-8"))
+    assert f"'{sheet_name.rsplit('/', 1)[-1]}', prints 'BOOT' beside {tp.reference}" in why
+
+    def at_of(node: list) -> tuple[float, float]:
+        where = kicad.first(node, "at")
+        return float(where[1]), float(where[2])
+
+    texts = [(node[1], at_of(node)) for node in kicad.children(sheet, "text")]
+    symbols = {}
+    for node in kicad.children(sheet, "symbol"):
+        reference = {one[1]: one[2] for one in kicad.children(node, "property")
+                     if len(one) > 2}.get("Reference", "")
+        if reference.startswith("TP"):
+            symbols[reference] = at_of(node)
+    (boot_at,) = [where for name, where in texts if name == "BOOT"]
+    column = {name: where for name, where in texts if where[0] == boot_at[0]}
+
+    def beside(where: tuple[float, float]) -> str:
+        """The test point a name sits beside: to its left, nearest in height,
+        and nearer than the next one."""
+        near = sorted((abs(where[1] - y), reference) for reference, (x, y) in symbols.items()
+                      if 0 < where[0] - x < 10)
+        assert near and (len(near) == 1 or near[0][0] < near[1][0]), (where, near)
+        return near[0][1]
+
+    named = {name: beside(where) for name, where in column.items()}
+    assert named["BOOT"] == tp.reference, named
+    assert set(named) - {"BOOT"} == {"3V3", "GND", "RUN", "SWDCLK", "SWDIO"}, named
+    for name, reference in named.items():
+        if name != "BOOT":
+            assert name in nets[reference], (name, reference, nets[reference])
+    assert "BOOT" not in nets[tp.reference]
 
 
 def test_the_swd_pads_quote_a_vendor_page_that_says_what_they_quote():
