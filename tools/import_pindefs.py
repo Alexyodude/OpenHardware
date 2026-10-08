@@ -2842,9 +2842,55 @@ _UNCOVERED = (
 BOARD_DERIVATION_UNCOVERED = _UNCOVERED.format(why="why_null")
 DERIVATION_UNCOVERED = _UNCOVERED.format(why="reason")
 
+#: **How a typed reason is known to cite the vendor's board CAD** (OH-203).
+#: `Board.reasons` is prose, `(label, why)`, and nothing beside it says which
+#: file a reason read, so this matches the words every such reason in
+#: `BOARDS` cites one with -- "Seeed's own" and then a `.kicad_pcb` file's
+#: name or "board file" -- and nothing wider. The `_SWD_DOCUMENTED` reasons
+#: say "Seeed publish no board CAD for this part" and cite a wiki page; they
+#: do not match, and must not. What it finds on a manifest board
+#: is never written: `MANIFEST_DERIVATION` names that board's CAD already.
+CITES_BOARD_CAD = re.compile(r"Seeed's own (?:\S+\.kicad_pcb|board file)")
+
+
+def cad_reasons_clause(cited: tuple[str, ...]) -> str:
+    """What a covered board's derivation ends with where a null pad's reason
+    cites the vendor's own board CAD, and nothing where none does (OH-203).
+
+    `cited` is those pads' labels, from `read_off_cad`. A reason is typed in
+    `Board.reasons`, not read from a source in `packages`, so the CAD it cites
+    need not be one of them: on the RP2350 SMD it is Seeed's RP2350.kicad_pcb,
+    and no pin of that board is read from it.
+    """
+    if not cited:
+        return ""
+    return (
+        " The reason given for " + ("" if len(cited) == 1 else "each of ")
+        + ", ".join(f"`{label}`" for label in cited)
+        + " having no `chip_pin` cites the vendor's own board CAD."
+    )
+
+
+def packages_derivation(sentence: str, cited: tuple[str, ...]) -> str:
+    """`sentence` -- `DERIVATION` printed, `BOARD_DERIVATION` in the file --
+    for a covered board every pin of which a board-support package named.
+
+    Where a null pad's reason cites the vendor's CAD (OH-203), "Nothing was
+    inferred from the CAD" is said of `chip_pin` alone, which is the half
+    that was true, and `cad_reasons_clause` names those pads. Where none
+    does, `sentence` byte for byte.
+    """
+    if not cited:
+        return sentence
+    return (
+        sentence.replace("Nothing was inferred from the CAD",
+                         "No `chip_pin` was inferred from the CAD")
+        + cad_reasons_clause(cited)
+    )
+
 
 def board_derivation_with_cad(cad: tuple[str, ...], answered: tuple[str, ...],
-                              firmware: tuple[str, ...]) -> str:
+                              firmware: tuple[str, ...], cited: tuple[str, ...]) -> str:
     """`BOARD_DERIVATION` for a covered board some of whose pins a source that
     is not firmware named (OH-203).
 
@@ -2852,9 +2898,9 @@ def board_derivation_with_cad(cad: tuple[str, ...], answered: tuple[str, ...],
     inferred from the CAD", and it was written onto the XIAO files whose JTAG,
     BOOT, SWD or NFC pads Seeed's own board file answered -- beside a HEADER
     block that says, of the same pads, that the file "is not a board-support
-    package". `cad`, `answered` and `firmware` are the report's own claims,
-    from `read_off_cad`, and never typed; a covered board whose CAD answered
-    nothing keeps `BOARD_DERIVATION`, byte for byte. The report
+    package". `cad`, `answered`, `firmware` and `cited` are the report's own
+    claims and reasons, from `read_off_cad`, and never typed; a covered board
+    whose CAD answered nothing has `packages_derivation` instead. The report
     `board_report` prints carries this same sentence, of the same claims.
     """
     return (
@@ -2872,20 +2918,22 @@ def board_derivation_with_cad(cad: tuple[str, ...], answered: tuple[str, ...],
         "the silkscreen or a pinout image: a label resolves only when every "
         "source in `packages` that defines it names the same pin, and `python "
         "tools/import_pindefs.py <board>` prints the file that named it."
+        + cad_reasons_clause(cited)
     )
 
 
 def read_off_cad(pads: list[dict],
-                 on_board: list[dict]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+                 on_board: list[dict]) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     """What a board's report rests on that is not firmware (OH-203), as
-    `(cad, answered)`, read off the claims it cites.
+    `(cad, answered, cited)`, read off the claims and reasons it gives.
 
     `cad` is the sources that are not firmware which named a pin a pad
     resolved to, and `answered` those pads' labels in the file's order -- a
     citation's first word is its package, as `header_table` reads it.
-    `board_report` and `filled_board` both write their derivation from
-    these, so the sentence printed above the pads and the one in the board
-    file are of the same claims.
+    `cited` is the null pads whose reason cites the vendor's board CAD, by
+    `CITES_BOARD_CAD`. `board_report` and `filled_board` both write their
+    derivation from these, so the sentence printed above the pads and the
+    one in the board file are of the same claims.
     """
     cad: set[str] = set()
     answered: dict[str, None] = {}
@@ -2894,7 +2942,9 @@ def read_off_cad(pads: list[dict],
         if entry["chip_pin"] is not None and any(not PACKAGES[one].firmware for one in named):
             answered[entry["label"]] = None
             cad.update(one for one in named if not PACKAGES[one].firmware)
-    return tuple(sorted(cad)), tuple(answered)
+    cited = dict.fromkeys(pad["label"] for pad in pads
+                          if pad["chip_pin"] is None and CITES_BOARD_CAD.search(pad["reason"]))
+    return tuple(sorted(cad)), tuple(answered), tuple(cited)
 
 
 #: And for a row in `tools/board_manifest.py`, whose own CAD is read too.
@@ -3040,16 +3090,16 @@ def board_report(
     # but a manifest row, and said "Nothing was inferred from the CAD" over
     # pads Seeed's own board file named, and "from the board-support
     # packages" over the one board none covers.
-    cad, answered = read_off_cad(pads, on_board_pads)
+    cad, answered, cited = read_off_cad(pads, on_board_pads)
     firmware = tuple(package for package in packages if PACKAGES[package].firmware)
     if name in MANIFEST:
         derivation = MANIFEST_DERIVATION
     elif not firmware:
         derivation = DERIVATION_UNCOVERED
     elif answered:
-        derivation = board_derivation_with_cad(cad, answered, firmware)
+        derivation = board_derivation_with_cad(cad, answered, firmware, cited)
     else:
-        derivation = DERIVATION
+        derivation = packages_derivation(DERIVATION, cited)
     return {
         "board": name,
         "chip": board.chip,
@@ -3645,15 +3695,15 @@ def filled_board(
     # publishes this board's pins. It is CAD; see `Package.firmware`.
     covered = any(PACKAGES[entry["name"]].firmware
                   for entry in report["packages"])
-    # **Which pins a source that is not firmware named** (OH-203), off the
-    # report's claims by `read_off_cad`, as `board_report` reads them for the
-    # sentence it prints.
+    # **Which pins a source that is not firmware named, and which null pads'
+    # reasons cite the vendor's CAD** (OH-203), off the report's claims by
+    # `read_off_cad`, as `board_report` reads them for the sentence it prints.
     # On a covered board with any, the two sentences below say which pads
     # that CAD answered rather than calling every pin the board-support
     # packages'. A manifest board's sentences name their sources already, and
     # the board no package covers has its own, so both are chosen before
     # these are looked at.
-    cad, answered = read_off_cad(report["pads"], report["on_board"])
+    cad, answered, cited = read_off_cad(report["pads"], report["on_board"])
     firmware = tuple(entry["name"] for entry in report["packages"]
                      if PACKAGES[entry["name"]].firmware)
     if name in MANIFEST:
@@ -3661,9 +3711,9 @@ def filled_board(
     elif not covered:
         derivation = BOARD_DERIVATION_UNCOVERED
     elif answered:
-        derivation = board_derivation_with_cad(cad, answered, firmware)
+        derivation = board_derivation_with_cad(cad, answered, firmware, cited)
     else:
-        derivation = BOARD_DERIVATION
+        derivation = packages_derivation(BOARD_DERIVATION, cited)
     # The PINS the packages resolved to a name with no number, in the file's
     # own order, deduplicated so the sentence quotes real pins off this board
     # rather than a class.

@@ -2386,10 +2386,64 @@ def test_no_board_file_says_its_pins_came_from_packages_alone_while_one_rests_on
                        if f"`{label}`" not in derivation or f"`{label}`" not in assumption]
             assert not unnamed, (name, unnamed, derivation, assumption)
         else:
-            assert derivation == pindefs.BOARD_DERIVATION, (name, derivation)
             assert assumption_says in assumption, (name, assumption)
+            # A null pad whose reason cites the CAD is the next test's.
+            if not any(pad["chip_pin"] is None and _CITES_CAD.search(pad["reason"])
+                       for pad in report["pads"]):
+                assert derivation == pindefs.BOARD_DERIVATION, (name, derivation)
     assert rest_on_cad, "no board has a pad resting on CAD, so nothing above was checked"
     _skip_the_unread(unread)
+
+
+#: A `why_null` that cites a board file, by a wider net than the generator's
+#: own, which wants "Seeed's own" in front of either (`CITES_BOARD_CAD`): a
+#: reason that cites the CAD in other words is then a pad the sentence fails
+#: to name, not one this test fails to see. `_SWD_DOCUMENTED`'s "Seeed publish
+#: no board CAD for this part" says neither, and cites a wiki page.
+_CITES_CAD = re.compile(r"\.kicad_pcb\b|board file")
+
+
+def test_a_board_file_whose_null_reasons_cite_the_cad_does_not_say_nothing_came_from_it():
+    """OH-203. Every `chip_pin` on XIAO-RP2350-SMD came from board-support
+    packages, so `BOARD_DERIVATION` was true of them; but its SWDIO, SWDCLK
+    and BOOT say why they have none by citing Seeed's own RP2350.kicad_pcb,
+    beneath a sentence saying "Nothing was inferred from the CAD". The
+    MG24's and both nRF54s' reasons cite their board files too.
+
+    **Which reasons cite the CAD is computed here from the reasons the
+    report gives**, by `_CITES_CAD`. A covered non-manifest board with such a
+    pad must not say "Nothing was inferred from the CAD", in its file or in
+    the report printed for it, and must name each such pad in both. The
+    RP2350 SMD keeps the packages sentence for its `chip_pin` values, which
+    is the half that was true.
+    """
+    _needs_the_fetched_packages()
+    absent = sorted({str(source.root / path) for board in BOARDS.values()
+                     for source in board.sources if source.root is not None
+                     for path in source.paths if not (source.root / path).is_file()})
+    if absent:
+        pytest.skip(f"{absent} absent; `python tools/import_pindefs.py --fetch` "
+                    f"names how to get each")
+    nothing = "Nothing was inferred from the CAD"
+    assert nothing in pindefs.BOARD_DERIVATION and nothing in pindefs.DERIVATION
+
+    cited = {}
+    for name in sorted(set(BOARDS) - set(pindefs.MANIFEST)):
+        report = board_report(name)
+        labels = [pad["label"] for pad in report["pads"]
+                  if pad["chip_pin"] is None and _CITES_CAD.search(pad["reason"])]
+        if not labels or not any(PACKAGES[one["name"]].firmware for one in report["packages"]):
+            continue
+        cited[name] = labels
+        document = json.loads(pindefs.board_path(name).read_text(encoding="utf-8"))
+        for derivation in (document["pindefs"]["derivation"], report["derivation"]):
+            unnamed = [label for label in labels if f"`{label}`" not in derivation]
+            assert nothing not in derivation and not unnamed, (name, unnamed, derivation)
+    assert "XIAO-RP2350-SMD" in cited, cited
+    rp2350 = json.loads(pindefs.board_path("XIAO-RP2350-SMD").read_text(encoding="utf-8"))
+    assert ("from the board-support packages in `packages`" in rp2350["pindefs"]["derivation"]
+            and "No `chip_pin` was inferred from the CAD" in rp2350["pindefs"]["derivation"]), (
+        rp2350["pindefs"]["derivation"])
 
 
 def test_the_printed_report_names_the_cad_and_the_pads_it_answered_where_one_rests_on_it():
