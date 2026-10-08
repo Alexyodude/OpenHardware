@@ -2392,6 +2392,66 @@ def test_no_board_file_says_its_pins_came_from_packages_alone_while_one_rests_on
     _skip_the_unread(unread)
 
 
+def test_the_printed_report_names_the_cad_and_the_pads_it_answered_where_one_rests_on_it():
+    """OH-203. `DERIVATION`, printed above the pads by `python
+    tools/import_pindefs.py <board>`, says the pins came "from the
+    board-support packages named in each pad's `sources`" and that "Nothing
+    was inferred from the CAD". On the XIAO ESP32-C5 SMD Seeed's own board
+    file named some of them.
+
+    **Which pads rest on it is computed here from the claims the report
+    cites**, as the board-file test above computes it. The printed sentence
+    must name that source and each of those pads, say neither phrase, and be
+    the board file's own sentence, since both come from the same claims. A
+    board whose pins all came from packages, the C3 DIP, still prints
+    `DERIVATION` byte for byte.
+    """
+    _needs_the_fetched_packages("zephyr", "arduino-esp32")
+    board = BOARDS["XIAO-ESP32-C5-SMD"]
+    absent = sorted({str(source.root / path) for source in board.sources
+                     if source.root is not None
+                     for path in source.paths if not (source.root / path).is_file()})
+    if absent:
+        pytest.skip(f"{absent} absent; `python tools/import_pindefs.py --fetch` "
+                    f"names how to get each")
+    printed_says = ("from the board-support packages named in each pad's `sources`",
+                    "Nothing was inferred from the CAD")
+    assert all(phrase in pindefs.DERIVATION for phrase in printed_says), pindefs.DERIVATION
+
+    report = board_report("XIAO-ESP32-C5-SMD")
+    rests = [entry for entry in report["pads"] + report["on_board"]
+             if entry["chip_pin"] is not None
+             and any(not PACKAGES[source.split(" ", 1)[0]].firmware for source in entry["sources"])]
+    cad = sorted({source.split(" ", 1)[0] for entry in rests for source in entry["sources"]
+                  if not PACKAGES[source.split(" ", 1)[0]].firmware})
+    assert rests, "nothing on the C5 SMD rests on CAD, so nothing below was checked"
+    derivation = report["derivation"]
+    said = [phrase for phrase in printed_says if phrase in derivation]
+    unnamed = [one for one in cad + [entry["label"] for entry in rests]
+               if f"`{one}`" not in derivation]
+    assert (said, unnamed) == ([], []), derivation
+    document = json.loads(pindefs.board_path("XIAO-ESP32-C5-SMD").read_text(encoding="utf-8"))
+    assert derivation == document["pindefs"]["derivation"]
+    assert board_report("XIAO-ESP32-C3-DIP")["derivation"] == pindefs.DERIVATION
+
+
+def test_the_printed_report_of_the_board_no_package_covers_does_not_cite_packages():
+    """OH-203. The XIAO STM32C5's report printed `DERIVATION` too, "from the
+    board-support packages named in each pad's `sources`" and "Nothing was
+    inferred from the CAD", where no board-support package covers it and its
+    two resolved pads are Seeed's schematic symbols'. It prints the board
+    file's sentence for that board instead, naming the field its own pads say
+    why in: the report's `reason`, where the file's is `why_null`.
+    """
+    _symbol_library()
+    report = board_report("XIAO-XIAO STM32C5-SMD")
+    derivation = report["derivation"]
+    assert "found no board-support package covering this board" in derivation, derivation
+    assert "Nothing was inferred from the CAD" not in derivation, derivation
+    assert "`reason`" in derivation and "`why_null`" not in derivation, derivation
+    assert all("reason" in pad for pad in report["pads"] if pad["chip_pin"] is None)
+
+
 def _symbol_library() -> str:
     if not SEEED_SYM.is_file():
         pytest.skip(f"no {SEEED_SYM}; run python tools/get_board_sources.py seeed-xiao")
