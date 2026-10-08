@@ -269,8 +269,16 @@ carries.
 
 That licence attaches obligations to a copy of the Documentation and to
 modified Documentation: keep its notices and include a copy of the licence
-(§3.1), and mark modified Documentation as modified, with the date and what
-changed, make it available, and license it under the CERN OHL (§3.4).
+(§3.1); on modifying it, make the modified Documentation available from a
+Documentation Location -- a place the licensor expects to stay public for
+three years (§1) -- where an original Licensor can find it once it is
+distributed, a proviso the Licensor may not assert until a Product is
+distributed (§3.3); and to distribute it, mark it as modified, with the
+date and what changed, carry a new Documentation Location notice if the
+original Documentation provided for one (§3.4(c)), make it available, and
+license it under the CERN OHL (§3.4). Neither of Olimex's READMEs, the
+root's or `HARDWARE/`'s, uses the words "Documentation Location"; the
+root's links a product page.
 Whether a board file written from Olimex's design is modified Documentation
 in that sense is recorded here as found and not decided: it is the owner's
 decision, before anything built from it is published.
