@@ -1492,12 +1492,22 @@ function placeModel(loaded, layout) {
   view.mmScale = scale;
   view.solids = extras.solids ?? [];
 
-  // **The model is always landscape and half these pad maps are not.** Every
-  // model is emitted with the PCB's long side along x; `XIAO-SAMD21-SMD` and
-  // its three siblings are taller than they are wide. A quarter turn about the
-  // vertical is the whole correction, and it is decided from the data rather
-  // than tabulated per board.
-  if (layout.height > layout.width) group.rotation.y = Math.PI / 2;
+  // **Turned when the two frames disagree, and each frame is read from what
+  // states it** (OH-215). The model states which way its PCB lies: `pcb.long`
+  // along its x and `pcb.short` along its z -- the reading the collider slab
+  // below makes. The board file states which way its own image lies. A
+  // quarter turn about the vertical is the whole correction.
+  //
+  // This used to read the pad map alone, under "the model is always
+  // landscape". That is true of every mesh the importer fetches, which it
+  // emits long side along x, and of every composed XIAO -- and false of a
+  // board whose vendor drew it upright: the composer keeps the vendor's own
+  // frame, and such a board's pad map, read out of the same file, is upright
+  // too. Each was turned a quarter off its own pads, and `carvePins` then
+  // took whatever metal stood where the pads had been turned to.
+  const mapUpright = layout.height > layout.width;
+  const modelUpright = pcb.short > pcb.long;
+  if (mapUpright !== modelUpright) group.rotation.y = Math.PI / 2;
 
   // Centre it on the pads rather than on the image. The pad map's extent
   // includes a courtyard margin that is a footprint artefact and is not the
