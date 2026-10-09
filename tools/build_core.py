@@ -30,6 +30,17 @@ So on Windows this runs `vcvarsall.bat`, captures the environment it produces,
 and hands that to CMake. The alternative is telling every contributor to
 launch a Developer Command Prompt, which works right up until CI or an agent
 session does not.
+
+## Why the build type is read back, not assumed
+
+Until OH-220 every core built here on Windows was Debug -- measured through
+`session.run` at 39% to 73% of a Release core's rate -- while this file said
+`--config Release` and CMakeLists.txt said Release too. Neither was true: Ninja ignores `--config`, and MSVC's platform
+module had cached Debug before CMakeLists.txt's default ran. CMakeLists.txt
+now sets that default early enough, but a cache written before then still
+holds Debug, and a cached value outlives any default. So `configure` reads the
+type back out of the cache and reconfigures a tree that is not Release, rather
+than building whatever it finds.
 """
 
 from __future__ import annotations
@@ -209,6 +220,63 @@ def _run(command: list[str], env: dict[str, str]) -> None:
         )
 
 
+def cached_build_type(build_dir: pathlib.Path) -> str | None:
+    """The build type `build_dir`'s CMakeCache.txt holds.
+
+    None for a multi-configuration generator (Visual Studio, Ninja
+    Multi-Config), whose cache lists CMAKE_CONFIGURATION_TYPES instead and
+    which picks one per build -- `--config Release` in `build`. "" for a
+    single-configuration cache that names no type, which CMake builds with no
+    optimisation flags at all.
+    """
+    entries: dict[str, str] = {}
+    for line in (build_dir / "CMakeCache.txt").read_text(encoding="utf-8").splitlines():
+        # `KEY:TYPE=VALUE`. `//` and `#` lines are CMake's own comments, and
+        # the header's `# KEY:TYPE=VALUE` is one of them.
+        if line.startswith(("//", "#")):
+            continue
+        key, sep, value = line.partition("=")
+        if sep:
+            entries[key.partition(":")[0]] = value
+    if "CMAKE_CONFIGURATION_TYPES" in entries:
+        return None
+    return entries.get("CMAKE_BUILD_TYPE", "")
+
+
+def configure(build_dir: pathlib.Path, env: dict[str, str]) -> None:
+    """Configure `build_dir` for a Release build, whatever its cache held.
+
+    The first configure names no type: CMakeLists.txt's default is what makes
+    a fresh tree Release, and it is what a configure by hand gets too. Then the
+    cache is read back, and a single-configuration tree holding anything else
+    is reconfigured Release, saying so -- a Debug cached before OH-220, a type
+    somebody set by hand, or the CMAKE_BUILD_TYPE environment variable.
+
+    Reconfigured rather than refused, because `build_dir` is this script's
+    tree and this script builds Release. A Debug build belongs in a directory
+    of its own, where nothing here will touch it.
+    """
+    command = ["cmake", "-S", str(REPO), "-B", str(build_dir)]
+    if shutil.which("ninja"):
+        command += ["-G", "Ninja"]
+    _run(command, env)
+    found = cached_build_type(build_dir)
+    if found in (None, "Release"):
+        return
+    print(
+        f"build_core: {build_dir} is configured {found!r}, not Release; "
+        f"reconfiguring it Release",
+        file=sys.stderr,
+    )
+    _run([*command, "-DCMAKE_BUILD_TYPE=Release"], env)
+    found = cached_build_type(build_dir)
+    if found not in (None, "Release"):
+        raise BuildError(
+            f"configured {build_dir} with -DCMAKE_BUILD_TYPE=Release and its "
+            f"CMakeCache.txt still says {found!r}"
+        )
+
+
 def build(clean: bool = False, verbose: bool = False) -> pathlib.Path:
     if shutil.which("cmake") is None:
         raise BuildError("cmake is not on PATH (pip install cmake ninja)")
@@ -216,8 +284,9 @@ def build(clean: bool = False, verbose: bool = False) -> pathlib.Path:
         shutil.rmtree(BUILD_DIR)
 
     env = build_environment()
-    generator = ["-G", "Ninja"] if shutil.which("ninja") else []
-    _run(["cmake", "-S", str(REPO), "-B", str(BUILD_DIR), *generator], env)
+    configure(BUILD_DIR, env)
+    # `--config` is read by a multi-configuration generator only. Ninja builds
+    # whatever `configure` cached, which is why that is checked there.
     _run(["cmake", "--build", str(BUILD_DIR), "--config", "Release"], env)
 
     # Every core is checked, not just the default one. A build that reports
@@ -242,7 +311,15 @@ def build(clean: bool = False, verbose: bool = False) -> pathlib.Path:
 
 
 def ensure_built(core: str = DEFAULT_CORE) -> pathlib.Path:
-    """The library path for one core, building everything first if it is absent."""
+    """The library path for one core, building everything first if it is absent.
+
+    A library that exists is returned as it is: not rebuilt when its source
+    changes, and not when its tree's build type is wrong either (OH-220).
+    Rebuilding from inside a load would relink a DLL that the server or another
+    test session may hold open, and a failed build here reaches a suite as a
+    skip. `tests/rules/test_build_core.py` fails instead, on a build/ that is
+    not Release, and `python tools/build_core.py` is the fix for both.
+    """
     path = library_path(core)
     if path.is_file():
         return path
