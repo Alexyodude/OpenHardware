@@ -47,13 +47,15 @@ GPIO_ENABLE = esp32c3.GPIO + esp32c3.GPIO_ENABLE
 #: hold each delay(n).
 MILLISECOND = steps_per_millisecond(esp32c3)
 
-#: Measured 2026-10-09 over fifty moves of this image: the gaps between them
-#: take three lengths, 160,043, 160,049 and 160,055 steps, and the longest
-#: first ends at step 1,440,461, the tenth move. It is half of the one period
-#: in four that is a twelve-step poll longer, 320,104 against 320,092, as
-#: wiring.c says a period can be. 1,450,000 watches a gap of each length,
-#: with about 9,500 to spare.
-BUDGET = 1_450_000
+#: Five moves of this image, measured 2026-10-09: the fifth lands at step
+#: 640,222, so 650,000 watches four gaps, 160,043 and 160,049 steps by
+#: turns, with about 9,800 to spare. The third length, 160,055, first ends
+#: at the tenth move and is not watched here. It need not be: the gaps are
+#: delay()'s on this clock, measured the same on every C3 and C6 image, and
+#: `POLL` holds each one to the millisecond whatever its length, so whether
+#: the longest is within it is asked once per clock and not once per board
+#: -- tests/webui/test_qtpy_esp32c3_board.py watches every length.
+BUDGET = 650_000
 
 
 def needs_table() -> None:

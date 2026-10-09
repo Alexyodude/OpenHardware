@@ -53,6 +53,10 @@ MILLISECOND = steps_per_millisecond(esp32c5)
 #: move. The one period in six that is a twelve-step poll longer, 480,100
 #: against 480,088, as wiring.c says a period can be, ends at the seventh.
 #: 1,690,000 watches a gap of each length, with about 9,600 to spare.
+#:
+#: Every length is watched here for the C5's clock, and in
+#: tests/webui/test_qtpy_esp32c3_board.py for the C3's and the C6's; the
+#: other C3 and C6 board tests watch five moves and point there.
 BUDGET = 1_690_000
 
 
