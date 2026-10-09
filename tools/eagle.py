@@ -122,6 +122,12 @@ class Pad:
     #: says so; a surface-mount pad is on the side its footprint states.
     front: bool = True
     back: bool = False
+    #: An unplated hole, which KiCad writes as a pad, `np_thru_hole`, and
+    #: `compose_board_3d.from_kicad` gives the kind `smd`. Nothing is soldered
+    #: to it and nothing is plated in it, so a placement holding one is not
+    #: drawn by its copper (OH-163). Never set by this reader: EAGLE writes a
+    #: hole as a `<hole>` and not as a pad.
+    hole: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -209,6 +215,12 @@ class Element:
     #: Feather ESP32-C6 places its module as package `ESP32-PICO-MINI`, value
     #: `ESP32-C6-MINI_MINI`.
     value: str | None = None
+    #: The package draws the board's own outline, so it is the board and not
+    #: a part on it (OH-163): `kicad.Placement.edge`, carried across by
+    #: `compose_board_3d.from_kicad`. Never set here, because this reader
+    #: takes the outline from the board's plain wires on layer 20 and no
+    #: package's.
+    edge: bool = False
 
     def pads_of(self, kind: str) -> tuple[Pad, ...]:
         return tuple(pad for pad in self.pads if pad.kind == kind)

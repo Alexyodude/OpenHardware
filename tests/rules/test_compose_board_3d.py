@@ -2703,8 +2703,8 @@ def test_text_beside_the_board_is_not_drawn_on_it():
     board = compose.read_layout(spec.layout)
     ring, _cut = compose.outer(board.outline)
     letters, _refused, _drawn = compose.lettering(board.kicad_text)
-    meshes, tally = compose.artwork(board, ring, spec.thickness_mm, (0.0, 0.0),
-                                    spec.colour, letters)
+    meshes, tally, _undrawn = compose.artwork(board, ring, spec.thickness_mm,
+                                              (0.0, 0.0), spec.colour, letters)
     ink = [(p[at], -p[at + 2]) for mesh in meshes
            for colour, (p, _n, _i) in mesh.groups.items() if colour == compose.SILKSCREEN
            for at in range(0, len(p), 3)]
@@ -2862,8 +2862,8 @@ def test_the_artwork_pass_is_the_thing_that_cuts_copper_to_the_board():
         pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
     board = compose.read_layout(spec.layout)
     ring, _cut = compose.outer(board.outline)
-    meshes, tally = compose.artwork(board, ring, spec.thickness_mm, (0.0, 0.0),
-                                    spec.colour, [])
+    meshes, tally, _undrawn = compose.artwork(board, ring, spec.thickness_mm,
+                                              (0.0, 0.0), spec.colour, [])
     assert tally["pads front"] > 200, tally
     assert tally["track front"] > 200, tally
 
@@ -3004,8 +3004,8 @@ def test_a_via_joins_both_faces_and_is_drawn_on_each():
         pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
     board = compose.read_layout(spec.layout)
     ring, _cut = compose.outer(board.outline)
-    meshes, tally = compose.artwork(board, ring, spec.thickness_mm, (0.0, 0.0),
-                                    spec.colour, [])
+    meshes, tally, _undrawn = compose.artwork(board, ring, spec.thickness_mm,
+                                              (0.0, 0.0), spec.colour, [])
     assert tally["vias"] > 100, tally
     routed = compose.mask_over_copper(spec.colour)
     faces: dict[float, set[tuple[float, float]]] = {}
@@ -3862,7 +3862,9 @@ def test_every_uno_package_is_drawn_or_its_absence_is_explained():
     stated_off = {e.package for e in board.elements
                   if compose.drawn_from(e, statements)[1] is not None}
     explained = set(compose.ABSENT) | stated_off
-    orphans = sorted({e.package for e in board.elements}
+    # A placement that puts down no pad -- the Uno's schematic frame -- is no
+    # part, and `compose` counts it apart (OH-163).
+    orphans = sorted({e.package for e in board.elements if e.pads}
                      - mapped - explained)
     assert not orphans, (
         f"{orphans} are neither drawn nor explained. Add a CORRESPONDENCE "
@@ -3879,8 +3881,9 @@ def test_every_composed_boards_placements_are_drawn_or_explained():
     drawn as nothing and one line of output saying so. The lookup is the
     composer's own, `correspondence_for`, because SparkFun's `0603` is two
     rows told apart by library. A padless element is ink and is counted
-    apart by `compose`, so only a placement with a pad must be one or the
-    other.
+    apart by `compose`, and so is one that draws the board's own edge
+    (OH-163), so only a placement with a pad that is not the board must be
+    one or the other.
     """
     orphans: dict[str, list[str]] = {}
     checked = 0
@@ -3892,7 +3895,8 @@ def test_every_composed_boards_placements_are_drawn_or_explained():
         for element in compose.read_layout(spec.layout).elements:
             # A part its own schematic refuses is explained there (OH-187).
             row, refused = compose.drawn_from(element, statements)
-            if (element.pads and element.package not in compose.ABSENT
+            if (element.pads and not element.edge
+                    and element.package not in compose.ABSENT
                     and row is None and refused is None):
                 orphans.setdefault(spec.board, []).append(
                     f"{element.name} ({element.package})")
@@ -4416,10 +4420,203 @@ def test_every_placement_is_drawn_refused_or_padless_and_counted(capsys):
     assert (f"refused {len(refused) + len(off)} placement(s): {len(refused)} of "
             f"{len(parts)} package(s) with no published model, and {len(off)} "
             f"by what their own schematic states") in out, out
-    assert (f"bodyless {len(bodyless)} placement(s) of "
+    # Every pad of every one of them is drawn, so each is counted drawn, as
+    # its copper, and none of them as absent (OH-163).
+    assert (f"copper  {len(bodyless)} placement(s) of "
             f"{len({e.package for e in bodyless})} package(s)") in out, out
+    assert "bodyless" not in out, out
     assert (len(padless) + len(absent) + len(rest) + len(off)
             == len(board.elements))
+
+
+# --- what was reported absent and is not a part (OH-163 step 3) -------------
+
+
+def _xiao_layouts():
+    """The five KiCad XIAOs, one composition per board file -- an SMD
+    variant composes its DIP sibling's PCB (OH-118) -- skipping the run by
+    name where none is fetched, and needing the font a XIAO's text is
+    lettered in."""
+    _newstroke()
+    specs = [spec for spec in compose.COMPOSITIONS
+             if spec.board.startswith("XIAO-") and spec.dip_headers
+             and spec.layout.is_file()]
+    if not specs:
+        pytest.skip("SKIPPED: no XIAO board file is fetched; run "
+                    "python tools/compose_board_3d.py")
+    return specs
+
+
+def _accounting(spec, capsys) -> str:
+    """What `compose --check` prints of one board with no model matched: its
+    placements counted, with no mesh fetched or tessellated."""
+    with mock.patch.object(compose, "CORRESPONDENCE", ()):
+        compose.compose(spec, deflection=0.05, check=True)
+    return capsys.readouterr().out
+
+
+#: Seeed's test points on the KiCad XIAOs, by package: a bare pad each on the
+#: underside, and no body.
+XIAO_TEST_POINTS = frozenset({"TP-D45MIL", "TP-80X40MIL", "TP-1.6MM-ROUND"})
+
+
+def test_a_test_point_is_drawn_as_its_pad_and_not_also_reported_absent(capsys):
+    """**A test point is its pad, and the copper pass draws the pad** (OH-110),
+    so naming it among the absent as well was a double report (OH-163): its
+    copper on the board, and the test point listed as missing beside it.
+
+    Held on the copper first -- every corner of every test point's pad is a
+    vertex of the copper drawn on that pad's own face -- then on the count,
+    which names each package as drawn copper and none on an `absent` line;
+    and on the composed `.glb`, whose `absent` no longer lists them."""
+    from tools.import_3d_model import read_extras
+
+    for spec in _xiao_layouts():
+        board = compose.read_layout(spec.layout)
+        points = [e for e in board.elements if e.package in XIAO_TEST_POINTS]
+        assert points, f"{spec.board} places none of {sorted(XIAO_TEST_POINTS)}"
+        ring, _cut = compose.outer(board.outline)
+        meshes, *_ = compose.artwork(board, ring, spec.thickness_mm, (0.0, 0.0),
+                                     spec.colour, [])
+        copper: dict[float, set[tuple[float, float]]] = {}
+        for mesh in meshes:
+            for colour, (p, _n, _i) in mesh.groups.items():
+                if colour != compose.COPPER:
+                    continue
+                for at in range(0, len(p), 3):
+                    copper.setdefault(round(p[at + 1], 4), set()).add(
+                        (round(p[at], 4), round(-p[at + 2], 4)))
+        for element in points:
+            for pad in element.pads:
+                face = round(-compose.COPPER_THICKNESS_MM if pad.back else
+                             spec.thickness_mm + compose.COPPER_THICKNESS_MM, 4)
+                corners = {(round(x, 4), round(y, 4))
+                           for x, y in compose.pad_outline(pad)}
+                assert corners <= copper.get(face, set()), (
+                    f"{spec.board}: {element.name}'s pad is not drawn as copper")
+
+        packages = {e.package for e in points}
+        lines = _accounting(spec, capsys).splitlines()
+        named = [line for line in lines if line.startswith("  absent  ")
+                 and any(f"({package})" in line for package in packages)]
+        assert not named, (spec.board, named)
+        drawn = next((line for line in lines if line.startswith("  copper  ")), "")
+        assert packages <= set(drawn.partition(": ")[2].split(", ")), (
+            spec.board, drawn)
+
+        glb = REPO / "webui" / "static" / "models" / f"{compose._slug(spec.board)}.glb"
+        if glb.is_file():
+            extras = read_extras(glb)
+            assert not packages & {entry["package"] for entry in extras["absent"]}, (
+                f"{glb.name} still lists its test points absent; recompose")
+            assert packages <= {entry["package"] for entry in extras.get("copper", [])}
+
+
+def test_a_placement_with_an_unplated_hole_is_not_counted_drawn(capsys):
+    """**Its copper is not all of it** (OH-163): an unplated hole is a hole,
+    which the copper pass does not cut -- it reaches `artwork` as a surface
+    pad, see `eagle.Pad.hole` -- so a placement with no body that puts one
+    down stays among the absent with its reason, and is not counted drawn as
+    its copper. Olimex's mounting holes and SparkFun's standoffs are that."""
+    _newstroke()
+    checked = []
+    for spec in compose.COMPOSITIONS:
+        if spec.layout.suffix != ".kicad_pcb" or not _fetched(spec):
+            continue
+        holed = {e.package for e in compose.read_layout(spec.layout).elements
+                 if any(pad.hole for pad in e.pads)
+                 and compose.NO_BODY in (compose.absent_why(e) or "")}
+        if not holed:
+            continue
+        lines = _accounting(spec, capsys).splitlines()
+        drawn = next((line for line in lines if line.startswith("  copper  ")), "")
+        assert not holed & set(drawn.partition(": ")[2].split(", ")), (spec.board, drawn)
+        for package in holed:
+            assert any(line.startswith("  absent  ") and f"({package})" in line
+                       for line in lines), (spec.board, package)
+        checked.append(spec.board)
+    if not checked:
+        pytest.skip("SKIPPED: no fetched board places a bodyless unplated hole")
+
+
+def test_a_logo_is_ink_and_not_a_part_left_off(capsys):
+    """**A footprint that puts down no pad has nothing soldered to it**, so
+    it is no part, whatever `ABSENT` holds (OH-163): Seeed's logos are that,
+    and each was reported absent beside its own ink. The board file is what
+    says so -- no pad -- and each is counted on the no-pads line, its ink
+    stroke by stroke on the artwork and `not ink` lines.
+
+    And where the file carries a logo's ink as strokes, it is drawn: the CE
+    mark's outline is a run of arcs, which the silkscreen reader counted
+    and dropped and now reads, so no arc of any XIAO's silkscreen is left
+    unread and each is drawn as the strokes `arc_points` flattens it to.
+    Last, no `ABSENT` reason is for a package any fetched board places with
+    no pad: `compose` could never print one."""
+    for spec in _xiao_layouts():
+        board = compose.read_layout(spec.layout)
+        padless = [e for e in board.elements if not e.pads]
+        assert padless, f"{spec.board} places no logo"
+        out = _accounting(spec, capsys)
+        assert f"  no pads {len(padless)} placement(s)" in out, out
+        absent = [line for line in out.splitlines() if line.startswith("  absent  ")]
+        for element in padless:
+            assert not any(f"({element.package})" in line for line in absent), (
+                spec.board, element.package)
+
+        read = kicad.read_board(spec.layout)
+        assert "arc" not in dict(read.silk_unread), (spec.board, read.silk_unread)
+        flattened = sum(len(compose.arc_points(arc)) - 1 for arc in read.silk_arcs)
+        assert len(board.silk) == len(read.silk) + flattened, spec.board
+        if spec.pcb_chip == "nRF54L15":
+            assert any(arc.layer == "B.SilkS" for arc in read.silk_arcs), (
+                "the CE mark's arcs, on the underside, are not read")
+
+    for spec in compose.COMPOSITIONS:
+        if not _fetched(spec):
+            continue
+        dead = {e.package for e in compose.read_layout(spec.layout).elements
+                if not e.pads and compose.absent_why(e) is not None}
+        assert not dead, (spec.board, dead)
+
+
+def test_the_footprint_drawing_the_boards_edge_is_the_board_and_not_a_placement(capsys):
+    """**KiCad mills a footprint's `Edge.Cuts` as it mills the board's own**,
+    so a footprint carrying it is the board (OH-163): Seeed's module outline
+    is a XIAO's whole silhouette, its pads the castellations, and it was
+    reported absent as though a part were missing from it.
+
+    Which footprints draw the edge is read out of the file here, not named:
+    each is printed as the board's edge and counted nowhere else, and each
+    is still the header element the page lands a board file's pads on. The
+    ESP32-C3 draws its silhouette at the top level, so on it none is."""
+    seen = []
+    flagged = []
+    for spec in _xiao_layouts():
+        tree = kicad.board_tree(spec.layout)
+        carrying = {kicad._reference_of(node)
+                    for node in kicad.children(tree, "footprint")
+                    if any(isinstance(child, list)
+                           and kicad.first(child, "layer") == ["layer", "Edge.Cuts"]
+                           for child in node)}
+        out = _accounting(spec, capsys)
+        lines = out.splitlines()
+        board = compose.read_layout(spec.layout)
+        for element in board.elements:
+            if element.name not in carrying:
+                continue
+            assert (f"  edge    {element.name} ({element.package}) draws the "
+                    f"board's own outline") in out, out
+            assert not [line for line in lines
+                        if line.startswith(("  absent  ", "  copper  ", "  no model"))
+                        and element.package in line], (spec.board, element.name)
+            assert element.name in spec.headers, (spec.board, element.name)
+            seen.append(f"{spec.board}: {element.name}")
+        flagged.append((spec.board, board, carrying))
+    # And the flag the composer counts by is the file's own, board by board.
+    for name, board, carrying in flagged:
+        assert {e.name for e in board.elements if e.edge} == carrying, name
+    if not seen:
+        pytest.skip("SKIPPED: no fetched XIAO draws its edge inside a footprint")
 
 
 def test_a_mirrored_elements_copper_is_on_the_other_face(tmp_path):

@@ -1626,10 +1626,6 @@ ABSENT: dict[str, str] = {
         "Unbridged from the factory there is no component to draw, and the "
         "pads themselves are drawn as copper. No KiCad library was searched: there is no body to look for."
     ),
-    "FRAME": (
-        "the schematic frame: zero pads and 0.0 mm of copper, a drawing "
-        "artefact in the board file rather than a part. No KiCad library was searched: there is no body to look for."
-    ),
     "QS": (
         "the 16 MHz crystal. Arduino's own silkscreen makes its body "
         "6.86 x 4.57 mm, and every through-hole crystal in KiCad's Crystal "
@@ -1673,6 +1669,13 @@ ABSENT: dict[str, str] = {
     # logo is its ink, and a castellation is the board's own edge: none is
     # a part that a library could hold, so each says so rather than being
     # counted as a gap somebody might one day fill.
+    #
+    # **Since OH-163 the logos and the module outline are not here at all**,
+    # and the board file is what moved them: a footprint that puts down no
+    # pad is ink and is counted as ink, and one that draws the board's own
+    # Edge.Cuts is the board -- see `compose`. Of what is left, a placement
+    # whose every pad the copper pass draws is counted drawn, as its copper,
+    # and keeps its reason here for why no body stands on it.
     "H7-HALF-HOLE-2.54": (
         "J1 and J2 on the ESP32-C3: **the module's own castellated edge**, "
         "drawn as two seven-pin references where the C6, C5 and nRF54L15 "
@@ -1735,47 +1738,6 @@ ABSENT: dict[str, str] = {
         "name says. A test point is the copper itself, which OH-110 "
         "already draws. No KiCad library was searched: there is no body to "
         "look for."
-    ),
-    "LOGO-SEEED-NEW-1X9.6MM": (
-        "Seeed's own logo -- U$2 on the ESP32-C3, REF** on the ESP32-C6, "
-        "G*** on the RP2350 -- with zero pads and no `(model ...)` on any "
-        "of the three. Ink and nothing else: 9.571 x 1.070 mm of it on the "
-        "C3 and C6, drawn as 1,505 `fp_line`, and 8.916 x 1.005 mm on the "
-        "RP2350, drawn as 12 `fp_poly` under the same package name. Both "
-        "readings are already accounted for -- `kicad._silk_of` takes every "
-        "footprint's silk whether or not this entry exists, so the lines "
-        "are drawn as board silk and the polygons are in that board's own "
-        "`not ink` count. No KiCad library was searched: there is no body "
-        "to look for."
-    ),
-    "LOGO-SEEED-NEW-0.83X7.5MM": (
-        "The smaller Seeed logo, G*** on the ESP32-C5: zero pads, no "
-        "`(model ...)`, and 7.498 x 0.846 mm of silkscreen -- the name's "
-        "own 0.83 x 7.5 to two thousandths -- drawn as the 12 `fp_poly` "
-        "that are the whole of that board's `not ink` polygon count. No "
-        "KiCad library was searched: there is no body to look for."
-    ),
-    "LOGO-CE_4.0x3.0mm_SilkScreen": (
-        "The CE mark on the nRF54L15, which Seeed's own `(descr \"CE "
-        "marking\")` names and their `exclude_from_pos_files "
-        "exclude_from_bom` says is never fitted. Zero pads, no "
-        "`(model ...)`, and 4.046 x 2.947 mm of silkscreen -- the name's "
-        "own 4.0 x 3.0 -- drawn as 942 `fp_line` and the 7 `fp_arc` that "
-        "are the whole of that board's `not ink` arc count. No KiCad "
-        "library was searched: there is no body to look for."
-    ),
-    "MOUDLE14P-XIAO-HALF-HOLE": (
-        "U2 on the ESP32-C6 and the RP2350: **the module's own edge**, not "
-        "a part standing on it. `tools/kicad.py` says the same thing from "
-        "the other side -- this footprint IS the XIAO outline -- and the "
-        "geometry agrees: its 14 pins carry 56 pad records spanning "
-        "15.240 x 17.780 mm on a 2.54 mm pitch, its castellation holes sit "
-        "exactly on the y-extent of the Edge.Cuts it draws itself, and "
-        "that outline measures 20.955 x 17.780 mm, which is the board. "
-        "Nothing inside the footprint reaches F.Fab except hidden empty "
-        "properties, so there is no body outline to read. The copper is "
-        "drawn as copper and the half-holes are cut with the edge. No "
-        "KiCad library was searched: there is no body to look for."
     ),
     # --- OH-180: the manifest boards' copper, and the parts nobody publishes
     #
@@ -1993,16 +1955,6 @@ ABSENT: dict[str, str] = {
         "tall over none. U names the ultra-thin height class and neither "
         "is in it, so either would draw a thicker part than the land is "
         "named for; and the name states no height to build one from."
-    ),
-    "MOUDLE14P-XIAO-HALF-HOLE-PRO": (
-        "U9 on the ESP32-C5 and the nRF54L15, and the same edge as the "
-        "entry above: identical 15.240 x 17.780 mm pad span, identical "
-        "2.54 mm pitch, identical 20.955 x 17.780 mm Edge.Cuts. What the "
-        "`-PRO` names is a finer land pattern -- a uniform "
-        "1.626 x 1.725 mm flare pulled 0.862 mm off the edge on all 14 "
-        "pins, against the plain variant's mixed flares at 0.55 to "
-        "0.61 mm -- and a land pattern is not a body. No KiCad library was "
-        "searched: there is no body to look for."
     ),
     # --- OH-195: the Glyph Mini's header rows -----------------------------------
     "PinHeader_1x05_P2.54mm_Vertical": GLYPH_HEADER,
@@ -3126,6 +3078,7 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
                 rotation_deg=pad.rotation_deg,
                 front=pad.front,
                 back=pad.back,
+                hole=pad.kind == "np_thru_hole",
             ))
         # **The body outline, which is what makes `silk_miss` able to run.**
         # KiCad names its assembly layer, so this is `F.Fab` rather than the
@@ -3178,15 +3131,22 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
             # (OH-195): PCBCUPID place the Glyph C3's ESP32-C3-MINI-1 on a
             # land named for the H2's, and only the value says C3.
             value=placed.value or None,
+            edge=placed.edge,
         ))
 
     # The ink, y negated like every coordinate above it and for the same
     # reason. A stroke's WIDTH is a length rather than a coordinate, so it
     # crosses unchanged -- getting that wrong would be invisible, since the
     # boards' widths are all positive.
-    silk = tuple(eagle.Stroke(s.layer, s.x1_mm, -s.y1_mm, s.x2_mm, -s.y2_mm,
-                              s.width_mm)
-                 for s in board.silk)
+    silk = [eagle.Stroke(s.layer, s.x1_mm, -s.y1_mm, s.x2_mm, -s.y2_mm,
+                         s.width_mm)
+            for s in board.silk]
+    # An arc of ink is flattened as an arc of track is, below (OH-163).
+    for curve in board.silk_arcs:
+        points = arc_points(curve)
+        for (ax, ay), (bx, by) in itertools.pairwise(points):
+            silk.append(eagle.Stroke(curve.layer, ax, -ay, bx, -by,
+                                     curve.width_mm))
     # The routed copper crosses the same way, and its curves are flattened
     # here rather than in the reader: solving an arc's centre from three
     # points is `arc_points`, which the outline already needs.
@@ -3201,7 +3161,7 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
     vias = tuple(eagle.Via(v.x_mm, -v.y_mm, v.diameter_mm) for v in board.vias)
     return eagle.Board(name=path.stem, version="kicad_pcb",
                        elements=tuple(elements), outline=tuple(outline),
-                       silk=silk, silk_unread=board.silk_unread,
+                       silk=tuple(silk), silk_unread=board.silk_unread,
                        # In KiCad's frame, as `eagle.Board.kicad_text` says:
                        # `letter` lays text out where KiCad does (OH-163).
                        kicad_text=board.text,
@@ -5603,8 +5563,13 @@ EAGLE_TEXT = ("EAGLE's CAM processor draws all text in EAGLE's built-in "
 def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             thickness: float, centre: tuple[float, float], mask: str,
             letters: list[eagle.Stroke]
-            ) -> tuple[list[Mesh], dict[str, int]]:
-    """The copper and the ink the vendor drew, and a tally of what was left.
+            ) -> tuple[list[Mesh], dict[str, int], set[str]]:
+    """The copper and the ink the vendor drew, a tally of what was left, and
+    the placements with a pad that is not drawn.
+
+    The last is what lets a placement with no body be called drawn: its
+    copper is all of it, and only where every pad it puts down is drawn here
+    (OH-163).
 
     **Every composed board was a slab with boxes standing on it until this**,
     and the reason was not that the data was missing: Seeed's own board files
@@ -5639,21 +5604,30 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
 
     front: list[list[tuple[float, float]]] = []
     back: list[list[tuple[float, float]]] = []
+    undrawn: set[str] = set()
     for element in board.elements:
         for pad in element.pads:
             if pad.kind == "np_thru_hole":
                 # A hole with no copper in it. Nothing solders to it and
                 # nothing is drawn for it.
                 left["np_thru_hole"] = left.get("np_thru_hole", 0) + 1
+                undrawn.add(element.name)
                 continue
             shape = pad_outline(pad)
             if shape is None:
                 left[pad.shape or "no shape"] = (
                     left.get(pad.shape or "no shape", 0) + 1)
+                undrawn.add(element.name)
                 continue
             cut = inside(shape)
-            if len(cut) < 3:
+            if len(cut) < 3 or not (pad.front or pad.back):
+                undrawn.add(element.name)
                 continue
+            if pad.hole:
+                # An unplated hole, reaching here as a surface pad (see
+                # `eagle.Pad.hole`) and drawn as copper it does not have: the
+                # hole is not drawn, so neither is its placement.
+                undrawn.add(element.name)
             if pad.front:
                 front.append(cut)
             if pad.back:
@@ -5742,7 +5716,8 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
              "text front": text_front, "text back": text_back,
              "track front": len(track), "track back": len(track_back),
              "vias": len(holes),
-             "clipped to the outline": int(can_clip), **left})
+             "clipped to the outline": int(can_clip), **left},
+            undrawn)
 
 
 def point_in(ring: list[tuple[float, float]], point: tuple[float, float]) -> bool:
@@ -5811,8 +5786,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     # **The copper and the ink, before any component stands on them**, so a
     # part's own body hides the pads under it exactly as solder does.
     letters, unlettered, lettered = lettering(board.kicad_text)
-    drawn_art, tally = artwork(board, ring, spec.thickness_mm, centre,
-                               spec.colour, letters)
+    drawn_art, tally, undrawn_pads = artwork(board, ring, spec.thickness_mm,
+                                             centre, spec.colour, letters)
     pieces.extend(drawn_art)
     print("  artwork " + ", ".join(f"{k} {v}" for k, v in tally.items()))
     # **Text the file hides is not a gap**: KiCad plots none of it either,
@@ -5880,6 +5855,9 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     #: rather than given an ABSENT entry apiece, because SparkFun's file alone
     #: places 63 pin labels, each its own package.
     padless: list[str] = []
+    #: Placements that draw the board's own outline, and so are the board and
+    #: not a part on it (OH-163) -- see `kicad.Placement.edge`.
+    edges: list[str] = []
     #: Each passive drawn, and which of its schematic's statements said what
     #: kind it is; and each part that schematic refuses (OH-187). Only for a
     #: board with a schematic to read -- the XIAOs compose as they always
@@ -5904,11 +5882,21 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                                             ("word", said.word))
                 if text is not None}
         if component is None:
-            if absent_why(element) is None:
-                if element.pads:
-                    unmodelled.append(f"{element.name} ({element.package})")
-                else:
-                    padless.append(element.name)
+            # **Two kinds of placement are not parts, and the board file says
+            # which** (OH-163), whatever `ABSENT` holds for the package. One
+            # that draws the board's own outline is the board: Seeed's module
+            # outline is a XIAO's whole silhouette, its copper drawn by the
+            # copper pass and its half-holes cut with the edge. And one that
+            # puts down no pad has nothing soldered to it: it is ink, counted
+            # stroke by stroke on the artwork and `not ink` lines -- Seeed's
+            # logos -- or a bare hole, or a drawing on a layer no fab prints:
+            # the Uno's schematic frame is a picture on layer 49, Reference.
+            if element.edge:
+                edges.append(f"{element.name} ({element.package})")
+            elif not element.pads:
+                padless.append(element.name)
+            elif absent_why(element) is None:
+                unmodelled.append(f"{element.name} ({element.package})")
             continue
         said = contradiction(element, component)
         if said is not None:
@@ -6073,7 +6061,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
               + (" ..." if len(unmodelled) > 8 else ""))
     if padless:
         print(f"  no pads {len(padless)} placement(s) put down no pad, so no "
-              f"part stands on them -- ink or a bare hole")
+              f"part stands on them -- ink, a bare hole, or a drawing no fab "
+              f"prints")
     if unpinned:
         print(f"  turn    {len(unpinned)} placement(s) a half turn would move "
               f"and nothing here can see: {', '.join(unpinned)}")
@@ -6085,8 +6074,21 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     #: A part its schematic refuses is counted there and nowhere else, whatever
     #: its package: a not-fitted part is not absent for want of a model.
     stated_off = {element.name for element, _why in kind_refused}
-    absent = [e for e in board.elements
-              if absent_why(e) is not None and e.name not in stated_off]
+    #: **A placement with no body whose every pad is drawn IS drawn**
+    #: (OH-163): its copper is all there is of it. Reporting it absent as
+    #: well was a double report -- a test point's pad on the board, and the
+    #: test point named as missing beside it. A pad left undrawn -- a bare
+    #: hole, a shape the copper pass does not draw -- keeps its placement
+    #: among the absent. Neither list holds what the loop above found is not
+    #: a part.
+    absent: list[eagle.Element] = []
+    copper: list[eagle.Element] = []
+    for e in board.elements:
+        why = absent_why(e)
+        if why is None or not e.pads or e.edge or e.name in stated_off:
+            continue
+        (copper if NO_BODY in why and e.name not in undrawn_pads
+         else absent).append(e)
     parts = [e for e in absent if NO_BODY not in ABSENT[e.package]]
     if parts or kind_refused:
         stated = ("" if spec.schematic is None else
@@ -6107,6 +6109,13 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         if label == "absent ":
             for element, why in kind_refused:
                 print(f"  refused {element.name} ({element.package}): {why}")
+    if copper:
+        packages = sorted({e.package for e in copper})
+        print(f"  copper  {len(copper)} placement(s) of {len(packages)} "
+              f"package(s) with no body, every pad drawn: {', '.join(packages)}")
+    for name in edges:
+        print(f"  edge    {name} draws the board's own outline: the board, "
+              f"not a part on it")
 
     whole = merge(*pieces)
     print(f"  mesh    {whole.triangles():,} triangles, "
@@ -6219,6 +6228,14 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 {"package": element.package, "why": why,
                  "elements": [element.name]}
                 for element, why in kind_refused
+            ],
+            # Drawn, as their copper, so not under `absent` (OH-163); each
+            # with the reason no body stands there.
+            "copper": [
+                {"package": package, "why": why,
+                 "elements": [e.name for e in copper if e.package == package]}
+                for package, why in sorted(ABSENT.items())
+                if any(e.package == package for e in copper)
             ],
             # Which kind each passive is drawn as, and what said so (OH-187).
             "kinds": kinds,

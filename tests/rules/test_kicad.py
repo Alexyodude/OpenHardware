@@ -656,6 +656,79 @@ def test_a_footprint_carrying_the_whole_outline_is_enough_of_one(tmp_path):
     assert got.extent_mm() == (100.0, 46.0, 105.0, 50.0)
 
 
+#: `INSIDE`, with a board-level arc of ink and, beside the module outline, a
+#: second footprint on the underside that draws no outline: an arc of ink on
+#: its silkscreen, the same arc on its fabrication layer, and a circle
+#: (OH-163).
+BESIDE = INSIDE[:INSIDE.rindex(")")] + """\t(gr_arc
+\t\t(start 0 0)
+\t\t(mid 1 1)
+\t\t(end 2 0)
+\t\t(stroke (width 0.15) (type solid))
+\t\t(layer "F.SilkS")
+\t)
+\t(footprint "Logo:CE"
+\t\t(layer "B.Cu")
+\t\t(at 10 20 90)
+\t\t(fp_arc
+\t\t\t(start 1 0)
+\t\t\t(mid 0 1)
+\t\t\t(end -1 0)
+\t\t\t(stroke (width 0.0254) (type default))
+\t\t\t(layer "B.SilkS")
+\t\t)
+\t\t(fp_arc
+\t\t\t(start 1 0)
+\t\t\t(mid 0 1)
+\t\t\t(end -1 0)
+\t\t\t(stroke (width 0.1) (type default))
+\t\t\t(layer "B.Fab")
+\t\t)
+\t\t(fp_circle
+\t\t\t(center 0 0)
+\t\t\t(end 1 0)
+\t\t\t(stroke (width 0.1) (type default))
+\t\t\t(layer "B.SilkS")
+\t\t)
+\t)
+)
+"""
+
+
+def test_a_silkscreen_arc_is_read_as_ink_where_it_is_placed(tmp_path):
+    """**An arc on the silkscreen is a stroke along a curve** (OH-163), and
+    was counted and dropped: Seeed's CE mark draws its outline in them. So
+    it is read, with its width, from the board and from a footprint -- the
+    footprint's placed as its lines are, turned and moved and not mirrored
+    on the underside -- while one on the fabrication layer is not ink and a
+    circle is still counted unread.
+
+    By hand, at 90 degrees where `(lx, ly)` lands at `(10 + ly, 20 - lx)`:
+    the footprint's arc from (1, 0) through (0, 1) to (-1, 0) lands from
+    (10, 19) through (11, 20) to (10, 21)."""
+    path = tmp_path / "beside.kicad_pcb"
+    path.write_text(BESIDE, encoding="utf-8")
+    got = read_board(path)
+    unread = dict(got.silk_unread)
+    assert "arc" not in unread and unread.get("circle") == 1, unread
+    assert [(arc.layer, *(pytest.approx(v, abs=1e-9) for v in (
+        arc.x1_mm, arc.y1_mm, arc.xm_mm, arc.ym_mm, arc.x2_mm, arc.y2_mm)),
+             arc.width_mm) for arc in got.silk_arcs] == [
+        ("F.SilkS", 0.0, 0.0, 1.0, 1.0, 2.0, 0.0, 0.15),
+        ("B.SilkS", 10.0, 19.0, 11.0, 20.0, 10.0, 21.0, 0.0254)]
+
+
+def test_a_footprint_that_draws_the_outline_is_marked_as_the_boards_edge(tmp_path):
+    """**KiCad mills a footprint's `Edge.Cuts` as it mills the board's own**,
+    so the footprint that draws it is the board and not a part on it
+    (OH-163) -- Seeed's module outline -- and the reader says which it is.
+    The footprint beside it draws ink and no outline, and is not."""
+    path = tmp_path / "beside.kicad_pcb"
+    path.write_text(BESIDE, encoding="utf-8")
+    assert {placed.name: placed.edge for placed in read_board(path).placements} == {
+        "MOUDLE14P": True, "CE": False}
+
+
 # --- the body, which is not the silkscreen -------------------------------------------
 
 BODIES = """(kicad_pcb
@@ -1735,6 +1808,19 @@ def test_the_c6_evbs_kicad_5_outline_ink_and_copper_read_as_its_kicad_7_copys():
             _drawn(old.vias), old.silk_unread, old.traces_unread] == [
         _drawn(new.outline), _drawn(new.arcs), _drawn(new.silk), _drawn(new.traces),
         _drawn(new.vias), new.silk_unread, new.traces_unread]
+    # The silkscreen's arcs too (OH-163), each matched within the ten
+    # nanometres rather than rounded: one mid point KiCad 5's centre and
+    # sweep give lies a nanometre from KiCad 7's, across a rounding boundary.
+    unmatched = list(new.silk_arcs)
+    for arc in old.silk_arcs:
+        twin = next((other for other in unmatched
+                     if (other.layer, other.width_mm) == (arc.layer, arc.width_mm)
+                     and all(abs(a - b) <= 1e-5 for a, b in zip(
+                         dataclasses.astuple(arc)[1:7], dataclasses.astuple(other)[1:7]))),
+                    None)
+        assert twin is not None, f"KiCad 7's copy has no arc where KiCad 5's {arc} is"
+        unmatched.remove(twin)
+    assert old.silk_arcs and not unmatched, unmatched
 
 
 # --- the vendors' own Gerbers: where an underside footprint's ink lands (OH-184) --
@@ -1770,9 +1856,12 @@ POE_REV_M = (REPO / "third_party" / "olimex-esp32-poe" / "HARDWARE"
 GERBER_TOLERANCE_MM = 0.001
 
 
-def _gerber_draws(text: str, where: str) -> list[tuple[float, float, float, float]]:
+def _gerber_draws(text: str, where: str, arcs: list | None = None
+                  ) -> list[tuple[float, float, float, float]]:
     """Every straight draw on one Gerber layer, `(x1, y1, x2, y2)` in
-    millimetres in the Gerber's own frame, whose y runs up.
+    millimetres in the Gerber's own frame, whose y runs up -- and, into
+    `arcs` where one is given, every circular draw as `(x1, y1, x2, y2, cx,
+    cy, clockwise)` (OH-163).
 
     **A minimal RS-274X reader**, to the Gerber Layer Format Specification
     revision 2024.05 (Ucamco), and the section each construct is read by is
@@ -1846,7 +1935,7 @@ def _gerber_draws(text: str, where: str) -> list[tuple[float, float, float, floa
             # 4.8: D01 plots from the current point, D02 moves it, D03
             # flashes; an omitted X or Y keeps the current point's (2.7).
             op = re.fullmatch(r"(?:X([+-]?\d+))?(?:Y([+-]?\d+))?"
-                              r"(?:I[+-]?\d+J[+-]?\d+)?D0([123])", word)
+                              r"(?:I([+-]?\d+)J([+-]?\d+))?D0([123])", word)
             if op is None or decimals is None or scale is None:
                 raise ValueError(f"{where}: {word!r} is not read here, or comes before "
                                  f"the FS and MO that say how to read it")
@@ -1855,14 +1944,22 @@ def _gerber_draws(text: str, where: str) -> list[tuple[float, float, float, floa
                                  f"has set a current point to keep it from (2.7)")
             x = here[0] if op.group(1) is None else int(op.group(1)) / 10 ** decimals * scale
             y = here[1] if op.group(2) is None else int(op.group(2)) / 10 ** decimals * scale
-            if op.group(3) == "1":
+            if op.group(5) == "1":
                 if here is None or plot is None:
                     raise ValueError(f"{where}: {word!r} plots with no current point "
                                      f"or no plot state")
-                # 4.8.2: in G01 a straight draw. An arc is no stroke the
-                # reader reads, and a region's edge is no draw at all.
+                # 4.8.2: in G01 a straight draw; in G02 and G03 an arc, whose
+                # centre is the current point offset by I and J (4.7.2). A
+                # region's edge is no draw at all.
                 if plot == "G01" and not region:
                     draws.append((here[0], here[1], x, y))
+                elif arcs is not None and not region:
+                    if op.group(3) is None:
+                        raise ValueError(f"{where}: {word!r} plots an arc with no I and J")
+                    arcs.append((here[0], here[1], x, y,
+                                 here[0] + int(op.group(3)) / 10 ** decimals * scale,
+                                 here[1] + int(op.group(4)) / 10 ** decimals * scale,
+                                 plot == "G02"))
             here = (x, y)
     if not ended:
         raise ValueError(f"{where}: no M02, so the file may be cut short (4.13)")
@@ -2057,6 +2154,88 @@ def test_the_esp32_poes_silkscreen_lands_on_olimexs_own_gerber():
         ("underside footprint", "B.SilkS", "as stored only"): 327,
         ("underside footprint", "B.SilkS", "both, being its own mirror image"): 286,
     })
+
+
+def _arc_lands(arcs, a: tuple[float, float], m: tuple[float, float],
+               b: tuple[float, float]) -> bool:
+    """Whether the arc from `a` through `m` to `b`, in a Gerber's frame, is
+    one of its circular draws: both ends on that draw's ends, either way
+    round, the same centre, and `m` within the draw's own sweep, to
+    `GERBER_TOLERANCE_MM`. The centre is solved here from the three points
+    rather than borrowed from the composer, so the reader is held to the
+    plot and not to itself."""
+    twice = 2 * ((m[0] - a[0]) * (b[1] - a[1]) - (m[1] - a[1]) * (b[0] - a[0]))
+    if abs(twice) < 1e-12:
+        return False
+    first, middle, last = (p[0] ** 2 + p[1] ** 2 for p in (a, m, b))
+    centre = ((first * (m[1] - b[1]) + middle * (b[1] - a[1]) + last * (a[1] - m[1])) / twice,
+              (first * (b[0] - m[0]) + middle * (a[0] - b[0]) + last * (m[0] - a[0])) / twice)
+    for x1, y1, x2, y2, cx, cy, clockwise in arcs:
+        if math.dist(centre, (cx, cy)) > GERBER_TOLERANCE_MM:
+            continue
+        if not any(math.dist(a, start) <= GERBER_TOLERANCE_MM
+                   and math.dist(b, end) <= GERBER_TOLERANCE_MM
+                   for start, end in (((x1, y1), (x2, y2)), ((x2, y2), (x1, y1)))):
+            continue
+        start, end, at = (math.atan2(y - cy, x - cx) for x, y in ((x1, y1), (x2, y2), m))
+        turn = -1.0 if clockwise else 1.0
+        sweep = ((end - start) * turn) % math.tau or math.tau
+        if ((at - start) * turn) % math.tau <= sweep:
+            return True
+    return False
+
+
+def test_the_silkscreen_arcs_land_on_the_vendors_own_gerbers():
+    """**An arc of ink is read where each vendor plotted it** (OH-163): every
+    silkscreen arc this reader places, on Seeed's XIAO ESP32-C6 and on
+    Olimex's ESP32-PoE revision M -- whose underside footprints stand at
+    every quarter turn and at 135 degrees -- is a circular draw of its own
+    layer's Gerber, from the same files `test_the_xiao_esp32_c6s_silkscreen_
+    lands_on_seeeds_own_gerber` and its Olimex twin read."""
+    boards = []
+    zipped = SEEED_PCB / "ESP32-C6.zip"
+    if zipped.is_file():
+        with zipfile.ZipFile(zipped) as bundle:
+            boards.append((zipped.name, bundle.read(SEEED_C6_ROOT + "XIAO ESP32 C6.kicad_pcb")
+                           .decode("utf-8"),
+                           {layer: bundle.read(f"{SEEED_C6_ROOT}XIAO ESP32 C6_gerber/"
+                                               f"XIAO ESP32 C6-{name}.gbr").decode("ascii")
+                            for layer, name in (("F.SilkS", "F_Silkscreen"),
+                                                ("B.SilkS", "B_Silkscreen"))}))
+    poe = POE_REV_M / "ESP32-PoE_Rev_M.kicad_pcb"
+    files = {layer: POE_REV_M / "Gerbers" / f"ESP32-PoE_Rev_M-{name}.gbr"
+             for layer, name in (("F.SilkS", "F_Silkscreen"), ("B.SilkS", "B_Silkscreen"))}
+    if poe.is_file() and all(file.is_file() for file in files.values()):
+        boards.append((poe.name, poe.read_text(encoding="utf-8"),
+                       {layer: file.read_text(encoding="ascii") for layer, file in files.items()}))
+    if not boards:
+        pytest.skip(f"SKIPPED: neither {zipped.name} nor revision M's board and Gerbers is "
+                    f"fetched; python tools/compose_board_3d.py --board XIAO-ESP32-C6-DIP, "
+                    f"python tools/get_board_sources.py olimex-esp32-poe")
+    for name, text, gerbers in boards:
+        tree = board_tree(pathlib.Path(name), text)
+        params = first(first(tree, "setup") or [], "pcbplotparams") or []
+        use = first(params, "useauxorigin")
+        origin = (tuple(float(v) for v in first(first(tree, "setup"), "aux_axis_origin")[1:3])
+                  if use is not None and use[1] in ("yes", "true") else (0.0, 0.0))
+        plotted = {}
+        for layer, gerber in gerbers.items():
+            plotted[layer] = []
+            _gerber_draws(gerber, f"{name} {layer}", plotted[layer])
+
+        def frame(x: float, y: float, origin=origin) -> tuple[float, float]:
+            return (x - origin[0], origin[1] - y)
+
+        board = read_board(pathlib.Path(name), text=text)
+        assert board.silk_arcs, f"{name} reads no arc of ink"
+        missed = [arc for arc in board.silk_arcs
+                  if not _arc_lands(plotted[arc.layer], frame(arc.x1_mm, arc.y1_mm),
+                                    frame(arc.xm_mm, arc.ym_mm), frame(arc.x2_mm, arc.y2_mm))]
+        assert not missed, (name, missed)
+        # Seeed's arcs are all on the top; Olimex's underside ones are what
+        # hold an underside footprint's arc to its plot.
+        if name == poe.name:
+            assert any(arc.layer == "B.SilkS" for arc in board.silk_arcs), name
 
 
 # --- silkscreen text (OH-163) ---------------------------------------------------

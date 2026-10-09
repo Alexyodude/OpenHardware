@@ -583,6 +583,11 @@ class Placement:
     #: says where a part sits and this says which part it is, which is how
     #: `tools/import_pindefs.py` finds a board's chip and its resistors.
     value: str = ""
+    #: The footprint draws on the board's outline layer. KiCad mills a
+    #: footprint's `Edge.Cuts` as it mills the board's own, so such a
+    #: footprint is the board, or part of it, and not a part standing on it
+    #: (OH-163): Seeed's `MOUDLE14P-XIAO-HALF-HOLE` is a XIAO's whole outline.
+    edge: bool = False
 
     @property
     def name(self) -> str:
@@ -603,9 +608,12 @@ class Board:
     #: Empty until OH-110; a composed board drew none of it and looked like a
     #: slab with boxes on it beside a vendor's own assembly export.
     silk: tuple[Stroke, ...] = ()
-    #: What was on those layers and is NOT in `silk` or `text`, counted by
-    #: kind. A caption that says "232 strokes" while dropping 99 texts is
-    #: worse than one that says both.
+    #: The ink drawn as a curve, kept as arcs for the reason `trace_arcs` is:
+    #: `compose_board_3d.arc_points` solves the centre (OH-163).
+    silk_arcs: tuple[Arc, ...] = ()
+    #: What was on those layers and is NOT in `silk`, `silk_arcs` or `text`,
+    #: counted by kind. A caption that says "232 strokes" while dropping 99
+    #: texts is worse than one that says both.
     silk_unread: tuple[tuple[str, int], ...] = ()
     #: The text printed on those layers, board-level and every footprint's,
     #: as the file states it (OH-163). Text the file marks hidden is not
@@ -786,18 +794,31 @@ def _fp_graphics(node: list, layer: str, placed: Placement
 #: text you cannot see". Counted and reported rather than dropped.
 #:
 #: Text was the big one, and is not here since OH-163: `_texts_of` reads it,
-#: as a string and a size, and a font turns it into ink. The rest is a
-#: handful per board: 2 to 16 arcs, 2 to 7 circles and 3 to 12 polygons
-#: across the five composed XIAOs, against 47 to 232 lines.
+#: as a string and a size, and a font turns it into ink. Nor is an arc: it
+#: is a stroke along a curve and is read as one, which is what drew the
+#: outline of Seeed's CE mark (OH-163). The rest is a handful per board.
+#:
+#: **A `poly` is a fill, and the logos it draws hold the reason it is not
+#: drawn.** Seeed's own logo on the RP2350 and on the ESP32-C5 is nothing
+#: but filled `fp_poly`, one per glyph, and every glyph with a counter -- an
+#: e, a d, an o -- is a keyhole outline: the rim walks in along a bridge,
+#: round the hole and back out along the same edge. `ear_clip` triangulates
+#: a simple polygon and raises on that one, so drawing the logo needs
+#: a triangulator for weakly simple polygons -- the one a zone's fill also
+#: waits on, see `_routing_of` -- and drawing only the glyphs it can would
+#: print a logo with its counters missing. So none is drawn and all are
+#: counted.
 #:
 #: A `dimension` is spelt without the prefix at either level. Its lines --
 #: a leader, an arrow, a frame round its text -- are KiCad's to compute from
 #: its points and style, and are counted here; its text is `_texts_of`'s.
-SILK_UNREAD = ("arc", "circle", "poly", "curve", "bbox", "dimension")
+SILK_UNREAD = ("circle", "poly", "curve", "bbox", "dimension")
 
 
-def _silk_of(node: list, prefix: str, put) -> tuple[list[Stroke], list[str]]:
-    """Silkscreen lines under `node`, in board millimetres, and what was not.
+def _silk_of(node: list, prefix: str, put
+             ) -> tuple[list[Stroke], list[Arc], list[str]]:
+    """Silkscreen lines and arcs under `node`, in board millimetres, and what
+    was not.
 
     `prefix` is `"gr"` at the top level of a board and `"fp"` inside a
     footprint, and `put` is the transform into board space -- the identity for
@@ -806,6 +827,7 @@ def _silk_of(node: list, prefix: str, put) -> tuple[list[Stroke], list[str]]:
     silkscreen and a board's are the same ink on the same layer.
     """
     strokes: list[Stroke] = []
+    arcs: list[Arc] = []
     unread: list[str] = []
     for child in node:
         if not isinstance(child, list):
@@ -842,9 +864,22 @@ def _silk_of(node: list, prefix: str, put) -> tuple[list[Stroke], list[str]]:
             corners = [put(x1, y1), put(x2, y1), put(x2, y2), put(x1, y2)]
             for start, end in zip(corners, corners[1:] + corners[:1]):
                 strokes.append(Stroke(named, *start, *end, width))
+        elif kind == "arc":
+            # Three points on the curve, as `board_tree` spells every arc,
+            # each placed: a turn and a move keep a circle a circle.
+            start, mid, end = first(child, "start"), first(child, "mid"), first(child, "end")
+            if start is None or mid is None or end is None:
+                unread.append(kind)
+                continue
+            a, m, b = _floats(start), _floats(mid), _floats(end)
+            if min(len(a), len(m), len(b)) < 2:
+                unread.append(kind)
+                continue
+            arcs.append(Arc(named, *put(a[0], a[1]), *put(m[0], m[1]),
+                            *put(b[0], b[1]), _stroke_width(child)))
         else:
             unread.append(kind)
-    return strokes, unread
+    return strokes, arcs, unread
 
 
 def _says_yes(node: list | None) -> bool:
@@ -1504,7 +1539,7 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
             continue
         arcs.append(Arc(layer, a[0], a[1], m[0], m[1], b[0], b[1]))
 
-    silk, unread = _silk_of(tree, "gr", lambda x, y: (x, y))
+    silk, silk_arcs, unread = _silk_of(tree, "gr", lambda x, y: (x, y))
     words, hidden = _texts_of(tree, "gr", lambda x, y: (x, y))
 
     placements: list[Placement] = []
@@ -1532,13 +1567,14 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
             models=_models_of(node),
             value=_value_of(node),
         )
-        placements.append(placed)
         drawn, curved = _fp_graphics(node, layer, placed)
         outline += drawn
         arcs += curved
-        printed, missed = _silk_of(
+        placements.append(dataclasses.replace(placed, edge=bool(drawn or curved)))
+        printed, bowed, missed = _silk_of(
             node, "fp", lambda x, y, at=placed: _on_board(at, x, y))
         silk += printed
+        silk_arcs += bowed
         unread += missed
         lettered, unseen = _texts_of(
             node, "fp", lambda x, y, at=placed: _on_board(at, x, y))
@@ -1554,7 +1590,7 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
     tracks, curves, vias, skipped = _routing_of(tree)
     unread += ["hidden text"] * hidden
     return Board(path.stem, tuple(outline), tuple(arcs), tuple(placements),
-                 silk=tuple(silk),
+                 silk=tuple(silk), silk_arcs=tuple(silk_arcs),
                  silk_unread=tuple(sorted(collections.Counter(unread).items())),
                  text=tuple(words),
                  traces=tuple(tracks), trace_arcs=tuple(curves),
