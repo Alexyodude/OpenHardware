@@ -546,7 +546,7 @@ def _glb_groups(path: pathlib.Path) -> dict[str, list[tuple[float, float, float]
 #: The gold and brass a KiCad model gives a plated contact. Every one of these
 #: was read off a shipped mesh rather than chosen: they are what the vendors'
 #: own STEP files style their pins and shells with.
-CONTACT_COLOURS = frozenset({"#b58136", "#ebbc51", "#edbe51", "#c6c4a0"})
+CONTACT_COLOURS = frozenset({"#dbbc7e", "#f6df99", "#f7e099", "#e4e3cf"})
 
 #: How high above the board a plated contact still counts as touching it.
 #:
@@ -1083,7 +1083,7 @@ def test_a_part_with_too_few_pads_has_no_facing_to_check():
     small = next(e for e in board.elements if e.package == "C0201")
     assert len(small.pads) < compose.TURN_FROM_CONTACTS_PADS
     assert compose.contact_miss(small, compose.slab(
-        [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)], 1.0, "#b58136", (0.0, 0.0)),
+        [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)], 1.0, "#dbbc7e", (0.0, 0.0)),
         (0.0, 0.0)) is None
 
 
@@ -3121,7 +3121,8 @@ def test_the_usb_b_paddle_is_not_made_of_metal():
     #: reaches UNDER the board. Nothing of that colour may stand in the
     #: aperture -- which is where the paddle is, and where it rendered as a
     #: gold wedge for as long as it was given this material.
-    brass = "#" + "".join(f"{round(v * 255):02x}" for v in (0.72, 0.60, 0.30))
+    #: The sRGB of the linear (0.72, 0.60, 0.30) first typed for them (OH-214).
+    brass = "#" + "".join(f"{round(v * 255):02x}" for v in (0.865, 0.798, 0.584))
     assert brass in mesh.groups, "the pins are still drawn"
     positions = mesh.groups[brass][0]
     highest = max(positions[at + 2] for at in range(0, len(positions), 3))
@@ -3355,7 +3356,7 @@ def test_the_dip_is_turned_the_way_arduino_draw_their_own_notch():
 
     What sees it is the notch. Arduino draw one at the end their pad 1 is at,
     KiCad's model cuts one into the top of the body -- 1.5 x 0.8 mm of
-    `#050505` -- and at the stated turn the two land 1.542 mm apart against
+    `#262525` -- and at the stated turn the two land 1.542 mm apart against
     25.15 for the nearest rival.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
@@ -3492,16 +3493,16 @@ def test_a_model_with_no_band_says_so():
     alone, and a cylinder whose end caps sit exactly on the centre with its
     body 0.02 mm off it -- a ratio of infinity, and noise."""
     with pytest.raises(AssertionError, match="no band to read"):
-        _read_band(_model_box(3.6, 1.4, 1.4, "#a5a392"))
-    caps = [_model_box(0.4, 1.4, 1.4, "#a5a392", at=(x, 0.0)) for x in (-1.6, 1.6)]
+        _read_band(_model_box(3.6, 1.4, 1.4, "#d2d1c7"))
+    caps = [_model_box(0.4, 1.4, 1.4, "#d2d1c7", at=(x, 0.0)) for x in (-1.6, 1.6)]
     positions, normals, indices = [], [], []
     for cap in caps:
         (p, n, i), = cap.groups.values()
         indices += [index + len(positions) // 3 for index in i]
         positions += p
         normals += n
-    body = _model_box(2.8, 1.4, 1.4, "#720301", at=(0.02, 0.0))
-    cylinder = compose.Mesh({"#a5a392": (positions, normals, indices),
+    body = _model_box(2.8, 1.4, 1.4, "#b2190d", at=(0.02, 0.0))
+    cylinder = compose.Mesh({"#d2d1c7": (positions, normals, indices),
                              **body.groups})
     with pytest.raises(AssertionError, match="half-length"):
         _read_band(cylinder)
@@ -3692,7 +3693,7 @@ def test_a_flipped_part_hangs_below_the_board_with_its_tails_proud_of_the_top():
     together.
     """
     mesh = compose.Mesh(groups={
-        "#b58136": ([1.0, 0.0, 2.0,    # a body corner, above the raw zero
+        "#dbbc7e": ([1.0, 0.0, 2.0,    # a body corner, above the raw zero
                      0.0, 0.0, -3.0],  # a tail tip, below it
                     [0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
                     [0, 1, 1]),
@@ -3703,11 +3704,11 @@ def test_a_flipped_part_hangs_below_the_board_with_its_tails_proud_of_the_top():
         x_mm=10.0, y_mm=20.0)
     flat = compose.place(mesh, element, 0.0, 1.6, (0.0, 0.0))
     flipped = compose.place(mesh, element, 0.0, 1.6, (0.0, 0.0), flip=True)
-    fx, fy, fz = flat.groups["#b58136"][0][0:3]
-    px, py, pz = flipped.groups["#b58136"][0][0:3]
+    fx, fy, fz = flat.groups["#dbbc7e"][0][0:3]
+    px, py, pz = flipped.groups["#dbbc7e"][0][0:3]
     assert fy == pytest.approx(1.6 + 2.0), "unflipped, the body stands on top"
     assert py == pytest.approx(-2.0), "flipped, the body hangs below the board"
-    tail_y = flipped.groups["#b58136"][0][4]
+    tail_y = flipped.groups["#dbbc7e"][0][4]
     assert tail_y == pytest.approx(3.0), (
         "the tail should come out proud of the top face, where the pad is"
     )
@@ -3793,7 +3794,7 @@ def test_the_composed_dip_board_has_pin_metal_at_both_header_rows():
         "pixels of one field by millimetres of another and the model draws "
         "14% too small"
     )
-    brass = _glb_groups(glb).get("#b58136", [])
+    brass = _glb_groups(glb).get("#dbbc7e", [])
     for row in (-7.62, 7.62):
         near = [p for p in brass if abs(p[2] - row) < 0.6]
         assert any(p[1] > thickness for p in near), (
@@ -4077,9 +4078,9 @@ def test_the_ceramic_parts_reach_the_shipped_boards_as_dielectrics():
         # The colour it used to borrow is a dielectric wherever it remains:
         # KiCad's PLASTIC-WHITE-01, a body on every model carrying it
         # (OH-163's review), and no longer the 'steel cover' it was taken for.
-        if "#c6c4a0" in finishes:
-            assert finishes["#c6c4a0"][0] == 0.0, (
-                f"{board}: #c6c4a0 ships at metalness {finishes['#c6c4a0'][0]}")
+        if "#e4e3cf" in finishes:
+            assert finishes["#e4e3cf"][0] == 0.0, (
+                f"{board}: #e4e3cf ships at metalness {finishes['#e4e3cf'][0]}")
 
 
 # --- the manifest boards, composed from their rows (OH-180) --------------------
@@ -4464,7 +4465,7 @@ def test_a_mirrored_element_hangs_under_the_board():
     ESP32-C3 first came out. Negating z with it is the half turn that puts
     the part underneath, and the pair is a rotation.
     """
-    model = _model_box(2.0, 1.0, 1.0, "#050505")
+    model = _model_box(2.0, 1.0, 1.0, "#262525")
     pads = (eagle.Pad("1", "smd", -0.85, 0.0, 0.5, 0.5, None),
             eagle.Pad("2", "smd", 0.85, 0.0, 0.5, 0.5, None))
     thickness = 1.6
@@ -5335,7 +5336,7 @@ def test_a_part_flipped_and_mirrored_is_the_right_way_up():
     is both at once: a part hung under the board by its table row AND on the
     bottom face by its element is turned over twice -- the right way up, and
     in the same place as a part that is neither."""
-    model = _model_box(2.0, 1.0, 1.0, "#050505", at=(0.7, 0.0))
+    model = _model_box(2.0, 1.0, 1.0, "#262525", at=(0.7, 0.0))
     pads = (eagle.Pad("1", "smd", -0.85, 0.0, 0.5, 0.5, None),
             eagle.Pad("2", "smd", 0.85, 0.0, 0.5, 0.5, None))
     plain = compose.place(model, eagle.Element("C1", "L", "P", pads=pads),

@@ -371,7 +371,7 @@ NAMED_BODY_TOLERANCE_MM = 0.5
 #: twice is how the two copies come to disagree.
 _MOULDED_IC = (
     "moulded black plastic and epoxy, `tools/import_3d_model.py`'s own "
-    "`FINISHES['#050505']` -- the same reading the QFNs' encapsulant takes, "
+    "`FINISHES['#262525']` -- the same reading the QFNs' encapsulant takes, "
     "and these are the same kind of moulded IC body"
 )
 _BARE_DIE = "a bare silicon die, as the WLCSP-47 and WLCSP-20 below"
@@ -394,7 +394,7 @@ SLABS: tuple[ModelledSlab, ...] = (
             "a multilayer ceramic filter is a fired ceramic block: `CERAMIC` "
             "in `tools/import_3d_model.py`, the judged colour that file "
             "records beside BOARD_MASK, with a dielectric's finish. Until "
-            "OH-155 this row borrowed `#c6c4a0`, then taken for the tactile "
+            "OH-155 this row borrowed `#e4e3cf`, then taken for the tactile "
             "switch's steel cover, and the diplexer drew as polished metal; "
             "the ANT2P row made the same borrow while saying FINISHES "
             "already gave ceramic, which it did not"
@@ -477,7 +477,7 @@ SLABS: tuple[ModelledSlab, ...] = (
     ModelledSlab(
         package="DFN6-0.4-1.1X0.7X0.45MM",
         pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
-        colour="#050505",
+        colour="#262525",
         colour_source=_MOULDED_IC,
         why_not_fetched=(
             "six leads on a 0.4 mm pitch, on the ESP32-C6 and the "
@@ -497,7 +497,7 @@ SLABS: tuple[ModelledSlab, ...] = (
     ModelledSlab(
         package="DFN6-0.5-1.45X1X0.6",
         pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
-        colour="#050505",
+        colour="#262525",
         colour_source=_MOULDED_IC,
         why_not_fetched=(
             "six leads on a 0.5 mm pitch, on the RP2350 and the nRF54L15. "
@@ -514,7 +514,7 @@ SLABS: tuple[ModelledSlab, ...] = (
     ModelledSlab(
         package="SOT8_0d5_2_1x1_2x0_6mm",
         pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C5.kicad_pcb",
-        colour="#050505",
+        colour="#262525",
         colour_source=_MOULDED_IC,
         why_not_fetched=(
             "TI's TPS2116 power mux, U8 on the ESP32-C5, and **the name "
@@ -533,7 +533,7 @@ SLABS: tuple[ModelledSlab, ...] = (
     ModelledSlab(
         package="X2SON4-0.625-1x1x0.6mm",
         pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
-        colour="#050505",
+        colour="#262525",
         colour_source=_MOULDED_IC,
         why_not_fetched=(
             "SGMICRO's SGM2040 LDO, U3 on the nRF54L15, and the SECOND "
@@ -571,7 +571,7 @@ SLABS: tuple[ModelledSlab, ...] = (
     ModelledSlab(
         package="SW4-SMD-2.8-2.6X1.6X0.53MM",
         pcb=REPO / "third_party" / "seeed-pcb" / "RP2350.kicad_pcb",
-        colour="#0f0f0f",
+        colour="#464646",
         colour_source="moulded black plastic, the switch body",
         why_not_fetched=(
             "the smallest surface-mount switch in KiCad's 159-file "
@@ -582,7 +582,7 @@ SLABS: tuple[ModelledSlab, ...] = (
     ModelledSlab(
         package="PMOS_1.0X0.6X0.35MM",
         pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C6.kicad_pcb",
-        colour="#050505",
+        colour="#262525",
         colour_source=_MOULDED_IC,
         why_not_fetched=(
             "the load switch: Q1 to Q3 on the ESP32-C6, Q1 and Q2 on the "
@@ -608,16 +608,16 @@ SLABS: tuple[ModelledSlab, ...] = (
     ModelledSlab(
         package="BUTTON_TD1183SA",
         pcb=REPO / "third_party" / "seeed-pcb" / "ESP32-C5.kicad_pcb",
-        colour="#0f0f0f",
+        colour="#464646",
         colour_source=(
             "moulded black plastic, the same reading the SW4 switch above "
             "takes and carrying the same uncertainty: a tactile switch is "
             "TWO materials and a slab is one colour. KiCad's own switch "
-            "models draw a cover over a black body: `#383838`, which "
+            "models draw a cover over a black body: `#818181`, which "
             "KiCad's palette calls MET-SILVER and "
             "`tools/import_3d_model.py`'s FINISHES leaves at the default, "
             "because no metal is that dark. (FINISHES had a TS42's two "
-            "colours the wrong way round until OH-163's review: `#c6c4a0` "
+            "colours the wrong way round until OH-163's review: `#e4e3cf` "
             "is the B3S-1000's white plunger, not its cover.) Drawing the "
             "body rather than the cover is what keeps the two switches on "
             "these boards the same colour; a photograph of a TD1183SA is "
@@ -685,7 +685,7 @@ SLABS: tuple[ModelledSlab, ...] = (
     ModelledSlab(
         package="IPEX-GEN4-SMD-1.7X1.7X1.0MM",
         pcb=REPO / "third_party" / "seeed-pcb" / "nRF54L15.kicad_pcb",
-        colour="#a5a392",
+        colour="#d2d1c7",
         colour_source="the plated shell of a coaxial socket",
         why_not_fetched=(
             "KiCad's Connector_Coaxial holds fifteen models and its only "
@@ -751,29 +751,35 @@ class ModelledSocket:
 #: same standing `tools/import_3d_model.py` gives a colour it reads out of a
 #: file rather than one it decides.
 #:
+#: **In sRGB, as the STEP states it, since OH-214.** These were copied from
+#: the importer's keys while `colour_of` took OpenCASCADE's linear value, so
+#: they were linear bytes -- GCT's shell `#a5a392`, Amphenol's `#1d1d1d` -- and
+#: the writer converted them a second time. Each moved with the key it was
+#: copied from, so the socket and the KiCad parts beside it still agree.
+#:
 #: The contact gold is in `compose_board_3d.CONTACT_COLOURS` on purpose and
 #: not by luck: that set is what the composer reads to find a part's plated
 #: contacts, so a receptacle whose tails were some other gold would be a part
 #: with no measurable facing -- and the turn is the one thing about this part
 #: that has been wrong three times.
 SOCKET_COLOURS: dict[str, tuple[str, str]] = {
-    "shell": ("#a5a392", (
+    "shell": ("#d2d1c7", (
         "the shell colour GCT's own STEP carries, which is also what the four "
         "boards that draw a steel-looking socket already show. Amphenol's "
-        "model says #1d1d1d for the same steel, and drawing two of the five "
+        "model says #5f5f5f for the same steel, and drawing two of the five "
         "XIAOs with a black connector and three with a metal one made them "
         "look like different parts. They are not."
     )),
-    "cavity": ("#050505", (
+    "cavity": ("#262525", (
         "the insulator colour Amphenol's own STEP carries -- the darkest thing "
         "in either published model, which is what the inside of a socket is"
     )),
-    "insulator": ("#0f0f0f", (
+    "insulator": ("#464646", (
         "the insulator colour GCT's own STEP carries. A shade off the cavity "
         "above so that the tongue is visible against the hole it sits in, and "
         "both are readings rather than a pair chosen to contrast"
     )),
-    "contact": ("#b58136", (
+    "contact": ("#dbbc7e", (
         "the gold BOTH published receptacles give their contacts, and one of "
         "the four values in `compose_board_3d.CONTACT_COLOURS`"
     )),
@@ -1490,10 +1496,21 @@ def build(spec: Modelled, check: bool) -> int:
         # read out of the STEP `tools/compose_board_3d.py` fetches -- so the
         # two connectors on this project's boards state the same material with
         # the same number, and neither of them says the paddle is metal.
-        "colours": {"shell": [0.62, 0.63, 0.66],
-                    "cavity": [0.05, 0.05, 0.06],
-                    "insulator": [0.06, 0.06, 0.06],
-                    "pin": [0.72, 0.60, 0.30]},
+        #
+        # **sRGB, as every key is since OH-214.** These pass through Blender
+        # untouched and become the key `write_glb` converts to linear once.
+        # `insulator` was 0.06, GCT's 0.273 as OpenCASCADE's linear reading;
+        # it is GCT's own number now. The other three were typed in 7f6e3bf
+        # as LINEAR values -- the writer then put a key straight into the
+        # linear `baseColorFactor` -- until 7dc67fc read every key as sRGB and
+        # drew them darker: (0.62, 0.63, 0.66), (0.05, 0.05, 0.06) and
+        # (0.72, 0.60, 0.30), whose sRGB encodings these are. Read as sRGB,
+        # the shell's and the pins' brightest channels were 39% and 48%
+        # linear, under what any metal reflects.
+        "colours": {"shell": [0.809, 0.815, 0.832],
+                    "cavity": [0.248, 0.248, 0.272],
+                    "insulator": [0.273, 0.273, 0.273],
+                    "pin": [0.865, 0.798, 0.584]},
         "body": {
             "x": plan["x"],
             "y": plan["y"],

@@ -152,7 +152,7 @@ ANGULAR = 0.5
 #: duplicated: two vertices at one point, each holding the average of only the
 #: triangles on its own side. The surface is smooth there and the shading is
 #: not, so a polished lid gets a dead-straight line across it. Measured on the
-#: Arduino Uno: 509 such pairs in the `#a5a392` group alone, the worst 22.1
+#: Arduino Uno: 509 such pairs in the `#d2d1c7` group alone, the worst 22.1
 #: degrees apart, which is one facet's worth of normal concentrated onto a
 #: single edge.
 #:
@@ -470,17 +470,30 @@ def pcb_solid(shape, up: int):
 
 
 def colour_of(styles, shape) -> str:
-    """`"#rrggbb"` for a shape, or `""` where the vendor set none."""
+    """`"#rrggbb"` for a shape, or `""` where the vendor set none.
+
+    **In sRGB, the number the file states -- not `Red()`** (OH-214). A STEP's
+    `COLOUR_RGB` is sRGB, and OpenCASCADE converts it to linear as it reads:
+    `STEPConstruct_Styles::DecodeColor` calls `SetValues(..., Quantity_TOC_sRGB)`,
+    and `Quantity_Color` keeps linear RGB, which `Red()` returns (OCCT 7.9.3,
+    `Quantity_Color.hxx`: "other OCCT interfaces taking/returning
+    Quantity_Color would expect them in linear space"). This took `Red()`, so
+    every key read from a STEP was a linear byte, and `write_glb` -- whose
+    `linear()` is right for every other key here -- converted it a second
+    time: KiCad's PIN-01, 0.824 in the file, drew at 0.376 linear instead of
+    0.645. `Values(Quantity_TOC_sRGB)` hands back the file's own value, so a
+    STEP colour is now an sRGB key like `compose_board_3d.COPPER` and is
+    converted exactly once.
+    """
+    from OCP.Quantity import Quantity_TypeOfColor
+
     if not styles.Contains(shape):
         return ""
     style = styles.FindFromKey(shape)
     if not style.IsSetColorSurf():
         return ""
-    colour = style.GetColorSurf()
-    return "#{:02x}{:02x}{:02x}".format(
-        round(colour.Red() * 255), round(colour.Green() * 255),
-        round(colour.Blue() * 255),
-    )
+    srgb = style.GetColorSurf().Values(Quantity_TypeOfColor.Quantity_TOC_sRGB)
+    return "#{:02x}{:02x}{:02x}".format(*(round(value * 255) for value in srgb))
 
 
 #: What a face with no style of its own is painted.
@@ -496,6 +509,12 @@ def colour_of(styles, shape) -> str:
 #: material nobody here knows, so giving it one would be exactly the pretending
 #: this constant exists to avoid. `test_the_unstyled_colour_is_given_no_material`
 #: is what keeps that true.
+#:
+#: **Since OH-214 one vendor face shares it.** The nRF54LM20A's STEP styles
+#: three faces (0.502, 0.502, 0.502), and read as the file states it that is
+#: this same `#808080`, so they join this group. Nothing here could name them
+#: before either -- they drew at the default as `#373737`, their linear byte --
+#: so what changed is the count and not the material.
 UNSTYLED = "#808080"
 
 #: What an unstyled PRINTED CIRCUIT BOARD is painted, where the constant above
@@ -532,10 +551,17 @@ UNSTYLED = "#808080"
 #:
 #: So the value is chosen, and what is chosen is a DARK GREY rather than a
 #: black: a solder mask is a thin translucent film over copper and glass-epoxy,
-#: and it never reaches the 0.2% reflectance `FINISHES` gives moulded black
+#: and it never reaches the 0.2% reflectance `FINISHES` gave moulded black
 #: epoxy at `#050505`. Sitting it above that keeps the board readably a
 #: different material from the chips standing on it, which is a thing anybody
 #: can check against a real board.
+#:
+#: **OH-214 found that comparison was made against a colour converted twice,
+#: and it no longer holds.** `#050505` was the epoxy's LINEAR byte; read as
+#: KiCad's file states it, the epoxy is `#262525`, 1.9% linear, and this mask
+#: is 1.1% -- below the chips it was set above. The argument for a grey rather
+#: than a black stands; the value no longer does what this paragraph says, and
+#: OH-214 changed no judged constant, so choosing another is left open here.
 #:
 #: **What would retire this judgement**: Seeed stating a colour, or somebody
 #: measuring a board. Recorded so it can be replaced rather than inherited.
@@ -547,13 +573,13 @@ BOARD_MASK = "#1b1b1b"
 #:
 #: **THE SECOND JUDGEMENT IN THIS FILE, AND THE SAME KIND AS THE FIRST.** Every
 #: entry in `FINISHES` is a reading off a vendor mesh, and a part with no mesh
-#: has nothing to read. Until OH-155 the two ceramic parts borrowed `#c6c4a0`,
+#: has nothing to read. Until OH-155 the two ceramic parts borrowed `#e4e3cf`,
 #: then taken for the tactile switch's steel cover (OH-163's review found it
 #: is the plunger, and a dielectric), and drew at metalness 1.0 -- a dielectric
 #: shaded as a conductor, which under the PBR model is a different reflectance
 #: law and not a nearby value on a slider. And the borrowed key could not
 #: simply be re-declared for them: `FINISHES` is keyed by colour, and tallied
-#: 2026-09-04 across the shipped boards `#c6c4a0` is on 13 of the 17, including
+#: 2026-09-04 across the shipped boards `#e4e3cf` is on 13 of the 17, including
 #: both ESP32-C3s at 604 triangles each, which carry neither a TS42 nor a
 #: ceramic part -- so vendor models style faces with it too. One hex meaning
 #: two materials is the shape of the defect OH-99 fixed on the nRF54LM20A's
@@ -565,7 +591,10 @@ BOARD_MASK = "#1b1b1b"
 #: their text, and Seeed's `ANT_KH5220-A36` antenna has no datasheet in the
 #: tree at all. So the value is chosen: a pale warm ivory, which is what LTCC
 #: and alumina fire to, set LIGHTER than the switch cover it replaces so that
-#: the two are never read as one, in this table or on a board.
+#: the two are never read as one, in this table or on a board. (Lighter than
+#: `#c6c4a0`, that white's key until OH-214 read it as its file states it:
+#: `#e4e3cf` is lighter than this. The two still differ, which is what the
+#: choice was for.)
 #:
 #: **What would retire this judgement**: a vendor STEP that styles either
 #: block, or a photographed board measured. Recorded so it can be replaced
@@ -592,10 +621,12 @@ CERAMIC = "#d9d3c0"
 #
 # **Why this does not reverse "a face the vendor DID colour is untouched".**
 # The vendor did not colour it. Their stackup states this mask's THICKNESS and
-# no colour, as recorded above; `#143324` is the exporter's default, and it
-# reads as one -- it is (0.08, 0.20, 0.14) in floats to two decimals, a
-# constant somebody typed into a program rather than anything measured off a
-# board. The rule that replaces the old one is therefore narrower, not weaker:
+# no colour, as recorded above; `#507c69` is the exporter's default, and it
+# reads as one -- the file writes 0.3133 0.4845 0.4100, which is the sRGB
+# encoding of exactly (0.08, 0.20, 0.14) linear: a constant somebody typed into
+# a program rather than anything measured off a board. (Until OH-214 this file
+# keyed it `#143324`, its linear byte, which is how those round numbers
+# showed.) The rule that replaces the old one is therefore narrower, not weaker:
 # *a face the vendor coloured is untouched unless it is the solder-mask film on
 # the board this module has already identified by shape* -- because that face's
 # colour comes from exactly where the board's does, which is nowhere, and
@@ -680,6 +711,13 @@ DEFAULT_FINISH = Finish(
 #: keying on the component -- does not survive `tools/compose_board_3d.py`,
 #: which merges fifteen components into one mesh by colour.
 #:
+#: **Every key is the sRGB its source states, since OH-214.** Until then a
+#: colour read out of a STEP was keyed by its LINEAR byte -- `colour_of` took
+#: OpenCASCADE's `Red()` -- so PIN-01, 0.824 in KiCad's file, was `#a5a392`
+#: here and is `#d2d1c7` now, while the composer's own constants were sRGB all
+#: along. The history below is restated in the new keys: a hex it quotes from
+#: before OH-214 names the same surface under its new name.
+#:
 #: ## How each assignment was arrived at, 2026-08-27
 #:
 #: The precedent for stating this rather than deriving it from the colour is
@@ -692,11 +730,11 @@ DEFAULT_FINISH = Finish(
 #:    `tools/blender/usb_b_receptacle.py` builds the Arduino Uno's USB socket
 #:    out of materials it calls `shell`, `cavity` and `pin`.
 #: 2. **Which package contributes the colour**, from loading every model in
-#:    `compose_board_3d.CORRESPONDENCE` and tallying its groups. `#b58136` on
+#:    `compose_board_3d.CORRESPONDENCE` and tallying its groups. `#dbbc7e` on
 #:    the five pin-header packages and on nothing else is the strongest result
 #:    of the lot: that colour is contact geometry by construction.
 #: 3. **A record already in the tree.** `webui/static/board3d.js` names two of
-#:    them in prose.
+#:    them in prose -- by their keys before OH-214, `#ff9f37` and `#116517`.
 #:
 #: OH-163 added two more, for the colours the composed boards still drew at
 #: the default:
@@ -708,56 +746,66 @@ DEFAULT_FINISH = Finish(
 #:    beside a STEP in kicad-packages3D opens with KiCad StepUp's material
 #:    palette -- `PIN-01`, `IC-LABEL-01`, `CAP-CERAMIC-06` and the rest, each
 #:    with a diffuse colour -- and the STEP carries those same sRGB numbers,
-#:    which OpenCASCADE's reader makes linear before this file sees them. So a
-#:    palette entry converts EXACTLY to one key here: `CAP-CERAMIC-06`'s
-#:    0.379 0.270 0.215 is `#1e0f0a`, and `PIN-01` is `#a5a392`.
+#:    which `colour_of` reads back as the file states them. So a palette entry
+#:    IS one key here, each channel times 255: `CAP-CERAMIC-06`'s
+#:    0.379 0.270 0.215 is `#614537`, and `PIN-01` is `#d2d1c7`.
 #:    `test_kicads_own_names_for_the_colours_it_cites` does that arithmetic
 #:    for every entry citing one. KiCad 10 stopped shipping the `.wrl`; tag
 #:    9.0.0 still has them, beside STEPs byte-identical to the ones fetched
 #:    here for every model an entry cites.
 #:
 #: A colour with none of these is not in this table, and neither is one whose
-#: readings disagree. `#1d1d1d` is the worked example now: KiCad's palette
+#: readings disagree. `#5f5f5f` is the worked example now: KiCad's palette
 #: names it `MET-ALUMINUM`, and on the PCM12 switch it is the box of a metal
 #: tab -- but at 11% it reflects less than any metal does (the near-black
 #: argument below), so naming it a metal would draw a black mirror and naming
 #: it anything else would contradict KiCad. It takes the default. Until
-#: OH-163 the example was `#6f6651`, "very probably an exposed thermal pad";
+#: OH-163 the example was `#b0a998`, "very probably an exposed thermal pad";
 #: the geometry puts it on TOP of every body that carries it, and KiCad's
 #: palette calls it `IC-LABEL-01` -- see its entry.
 #:
 #: **Examined for OH-163 and left at the default**, so nobody repeats it:
 #:
-#:   * `#808080` -- `UNSTYLED`, which that constant's comment forbids naming.
-#:   * `#1d1d1d` -- above.
-#:   * `#383838` -- KiCad's `MET-SILVER`, and by geometry a shell over the
+#:   * `#808080` -- `UNSTYLED`, which that constant's comment forbids naming,
+#:     and since OH-214 three faces the nRF54LM20A styles that same grey.
+#:   * `#5f5f5f` -- above.
+#:   * `#818181` -- KiCad's `MET-SILVER`, and by geometry a shell over the
 #:     body of every switch fetched here that carries it: the B3S-1000's
 #:     6 x 6.6 mm cover (38 faces, z 1.75 to 3.50, under the plunger), the
 #:     SKRK's over its white housing and the KMR2's frame. A metal by name
 #:     and by place, at 22% linear reflectance -- darker than any metal
-#:     reflects -- so the readings disagree as `#1d1d1d`'s do. Until OH-163's
+#:     reflects -- so the readings disagree as `#5f5f5f`'s do. Until OH-163's
 #:     review this was the TS42's "moulded actuator" at metalness 0, one half
-#:     of a pair read off its values the wrong way round; see `#c6c4a0`.
+#:     of a pair read off its values the wrong way round; see `#e4e3cf`.
 #:   * `#4e4e4e` -- `tools/model_from_datasheet.py` calls it a MEMS
-#:     microphone's steel lid, a metal darker than any metal reflects, and
-#:     the nRF54LM20A's own STEP uses it for a dot a tenth of a millimetre
-#:     across that nothing here identifies.
-#:   * `#272b27` -- that file's bare silicon dies, and on the MG24's and the
-#:     nRF54LM20A's own STEPs the base of a part nothing here identifies.
-#:   * `#ebebe5` -- that file's RGB LED diffusers, and the RP2040 STEP's faces
-#:     the paragraph below could not identify.
-#:   * `#c8c8c8`, `#868686` -- the gull-wing leads of an eight-lead package
+#:     microphone's steel lid, a metal darker than any metal reflects.
+#:   * `#969696` -- a dot a tenth of a millimetre across on the nRF54LM20A's
+#:     own STEP that nothing here identifies.
+#:   * `#272b27` -- that file's bare silicon dies.
+#:   * `#6d726d` -- on the MG24's and the nRF54LM20A's own STEPs, the base of
+#:     a part nothing here identifies.
+#:   * `#ebebe5` -- that file's RGB LED diffusers.
+#:   * `#f6f6f3` -- the RP2040 STEP's faces the paragraph below could not
+#:     identify.
+#:
+#:     **Those three pairs were one key each until OH-214**: the vendor faces'
+#:     linear bytes were `#4e4e4e`, `#272b27` and `#ebebe5`, the values the
+#:     modelled parts are typed in. The modelled parts keep theirs -- a hex
+#:     this repository types is sRGB, as the composer's are, and those three
+#:     name a lid, a die and a diffuser, not the vendor surfaces nobody here
+#:     identifies -- so read as the files state them the vendor faces move.
+#:   * `#e5e5e5`, `#c0c0c0` -- the gull-wing leads of an eight-lead package
 #:     inside each ESP32 WROOM's shield on Espressif's STEPs, and on the
 #:     nRF54LM20A's own STEP the base under one part and a mark printed on top
 #:     of another: three things, not one material.
-#:   * `#97a3da`, `#98a4dc`, `#ffffff`, `#000037`, `#676767` -- Espressif's
+#:   * `#cad1ee`, `#cbd2ef`, `#ffffff`, `#000080`, `#aaaaaa` -- Espressif's
 #:     module STEPs paint a passive's metal ends and most of a QFN with the
 #:     first, and nothing here identifies what the others are.
 #:
 #: **Four entries were written and then deleted**, and the thing that deleted
 #: them was `test_every_finish_says_what_the_evidence_was` refusing a citation
 #: too short to be a sentence. Made to write the evidence out, there was none:
-#: `#10178b`, `#000ca4` and `#ebebe5` are 16, 4 and 2 triangles -- far too
+#: `#4655c3`, `#023dd2` and `#f6f6f3` are 16, 4 and 2 triangles -- far too
 #: small to be the board faces they had been called -- and `#ffffff` was 3,085
 #: triangles on the SAMD21 that nothing here can identify at all. They take the
 #: default now. A test that asks for the reason is how a plausible table stops
@@ -785,35 +833,46 @@ _MASK = (
 FINISHES: dict[str, Finish] = {
     # -- metals. `metalness` 1.0 throughout, because a plated contact is a
     #    conductor and there is no honest fraction between the two.
-    "#b58136": Finish(1.0, 0.30, (
+    "#dbbc7e": Finish(1.0, 0.30, (
         "gold-plated header contact. Tallied 2026-08-27 across every KiCad "
         "model the Uno is composed from: 1,224 triangles, all of them on "
         "1X10, 1X08, 1X06, 2X03 and 2X02, and NOT ONE anywhere else. A colour "
         "that appears only on pin-header packages is those packages' pins"
     )),
-    "#b8994c": Finish(1.0, 0.30, (
+    "#ddcb95": Finish(1.0, 0.30, (
         "the USB-B's contacts. Named in this repository's own source: "
-        "`tools/blender/usb_b_receptacle.py` calls the material `pin`"
+        "`tools/blender/usb_b_receptacle.py` calls the material `pin`. The "
+        "colour is the sRGB encoding of the linear (0.72, 0.60, 0.30) "
+        "`tools/model_from_datasheet.py` typed for it in 7f6e3bf, when this "
+        "writer put a key straight into the linear `baseColorFactor`; read "
+        "as sRGB after 7dc67fc it was #b8994c, 48% at its brightest, darker "
+        "than any metal reflects (OH-214)"
     )),
-    "#9ea1a8": Finish(1.0, 0.25, (
+    "#ced0d4": Finish(1.0, 0.25, (
         "the USB-B's shell, likewise named `shell` in "
         "`tools/blender/usb_b_receptacle.py`. A Series-B receptacle shell is "
-        "folded nickel-plated steel, which is smoother than a plated contact"
+        "folded nickel-plated steel, which is smoother than a plated contact. "
+        "Its colour is the sRGB encoding of the linear (0.62, 0.63, 0.66) "
+        "typed for it in the same commit as the contacts' -- #9ea1a8 when "
+        "read as sRGB, 39% at its brightest (OH-214)"
     )),
-    "#a5a392": Finish(1.0, 0.35, (
+    "#d2d1c7": Finish(1.0, 0.35, (
         "every component's LEG. 8,497 triangles across the DIP-28, the "
         "QFN-32, both electrolytics, the barrel jack, the SOT-223 and the "
         "tactile switch -- and it is also the colour `lead_tips` already "
         "treats as metal BY RULE on the LEDs and the buzzer: 'every group "
         "that is not the lens is metal'. Two independent readings agreeing"
     )),
-    "#ff9f37": Finish(1.0, 0.30, (
+    "#ffcf80": Finish(1.0, 0.30, (
         "the XIAO's gold castellated pads. Already recorded in the tree: "
-        "`webui/static/board3d.js`'s `refreshTheme` names it in prose, beside "
-        "#116517 below"
+        "`webui/static/board3d.js`'s `refreshTheme` names it in prose, as "
+        "#ff9f37 beside #116517 -- the linear bytes this file keyed the two "
+        "with until OH-214. The SAMD21's own STEP calls it "
+        "`Opaque(255,207,128)`, which is this key"
     )),
-    "#ff9d36": Finish(1.0, 0.30, (
-        "the same gold, one value off, on the same board. Two nearly equal "
+    "#ffce7f": Finish(1.0, 0.30, (
+        "the same gold, a value off in two channels, on the same board -- "
+        "`Opaque(255,206,127)` in the vendor's file. Two nearly equal "
         "colours are two styles in the vendor's CAD rather than two materials"
     )),
     "#c8a253": Finish(1.0, 0.35, (
@@ -824,13 +883,13 @@ FINISHES: dict[str, Finish] = {
         "tan while the header pins beside them shone, and `carvePins`'s "
         "metalness > 0.5 gate could not claim a castellation at all (OH-120)"
     )),
-    "#e7c863": Finish(1.0, 0.30, (
+    "#f4e5a7": Finish(1.0, 0.30, (
         "gold plating on the ESP32-S3 and nRF52840 models. **By ANALOGY with "
-        "#ff9f37 rather than from a record**: it is the same warm yellow, on "
+        "#ffcf80 rather than from a record**: it is the same warm yellow, on "
         "the same vendor's boards, on 9,084 triangles, and Seeed plates every "
         "XIAO's pads. Analogy is weaker than the entries above and this says so"
     )),
-    "#edbe51": Finish(1.0, 0.30, (
+    "#f7e099": Finish(1.0, 0.30, (
         "the same, on the RP2040 model. The same analogy and the same caveat"
     )),
     "#b8bac2": Finish(1.0, 0.35, (
@@ -838,9 +897,9 @@ FINISHES: dict[str, Finish] = {
         "builds: `tools/blender/qfn_flatpack.py` names the material `lead` and "
         "draws every terminal and the exposed pad in it. Named in this "
         "repository's own source (OH-163); plated leadframe, the same finish "
-        "as #a5a392's legs"
+        "as #d2d1c7's legs"
     )),
-    "#a86f0a": Finish(1.0, 0.35, (
+    "#d4b038": Finish(1.0, 0.35, (
         "the land pattern on Espressif's own ESP32-C6-WROOM-1 and "
         "ESP32-C5-WROOM-1 STEPs. Named by geometry (OH-163): every solid of "
         "this colour in either file is a slab a few hundredths of a "
@@ -848,17 +907,17 @@ FINISHES: dict[str, Finish] = {
         "spaced as pads -- a row of them at the QFN's 0.4 mm pitch under the "
         "chip -- which is exposed copper, as COPPER is on the composed boards"
     )),
-    "#a66d0a": Finish(1.0, 0.35, (
+    "#d3af38": Finish(1.0, 0.35, (
         "the ESP32-C6-WROOM-1's PCB antenna on Espressif's own STEP: one "
         "solid a copper weight (0.035 mm) thick, lying on the module PCB "
-        "across its antenna end. Named by geometry (OH-163), and two values "
-        "off #a86f0a's lands: two nearly equal colours are two styles in the "
-        "vendor's CAD rather than two materials, as #ff9d36 is"
+        "across its antenna end. Named by geometry (OH-163), and a value off "
+        "#d4b038's lands in two channels: two nearly equal colours are two "
+        "styles in the vendor's CAD rather than two materials, as #ffce7f is"
     )),
-    "#7f8e98": Finish(1.0, 0.35, (
+    "#bbc5cb": Finish(1.0, 0.35, (
         "the terminals of two small parts inside the ESP32-C5-WROOM-1 on "
         "Espressif's own STEP: slabs a tenth of a millimetre thick on the "
-        "module PCB, under each end or corner of a #131313 body, which is "
+        "module PCB, under each end or corner of a #4d4d4d body, which is "
         "where a part's terminations and its solder are. Named by geometry "
         "(OH-163), and bright enough to be a metal"
     )),
@@ -879,23 +938,45 @@ FINISHES: dict[str, Finish] = {
     # whatever else it is, and moulded plastic and epoxy are what near-black
     # things on a board are made of. That argument covers every entry below and
     # is why they are here while other guesses were dropped.
-    "#050505": Finish(0.0, 0.70, (
+    "#262525": Finish(0.0, 0.70, (
         "moulded black plastic and epoxy: 3,598 triangles across the bodies "
-        "of the same six packages whose legs are #a5a392 above -- the QFN's "
+        "of the same six packages whose legs are #d2d1c7 above -- the QFN's "
         "encapsulant, the barrel jack's housing, the electrolytics' sleeves, "
         "the header shrouds, the DIP's body"
     )),
-    "#0d0d0f": Finish(0.0, 0.70, (
+    "#3f3f45": Finish(0.0, 0.70, (
         "the USB-B's insulator, named `cavity` in "
-        "`tools/blender/usb_b_receptacle.py`"
+        "`tools/blender/usb_b_receptacle.py`; the sRGB encoding of the linear "
+        "(0.05, 0.05, 0.06) typed for it beside the shell's (OH-214)"
     )),
-    "#030303": Finish(0.0, 0.70, (
+    "#1a1a1a": Finish(0.0, 0.70, (
         "near-black moulding on the SAMD21 model, 13,822 triangles. Not a "
         "metal for the reflectance reason above; the specific plastic is not "
         "claimed and does not need to be"
     )),
-    "#020202": Finish(0.0, 0.70, (
+    # **#1c1c1c and #151618 were drawn as #030303 and #020202 until OH-214**,
+    # because a linear byte is too coarse near black to tell them apart: two
+    # colours each file states differently shared one key, and with it one
+    # entry that named only the first. Read as the files state them they are
+    # four, and the two the old entries never named take the near-black
+    # argument above, which is all those entries rested on.
+    "#1c1c1c": Finish(0.0, 0.70, (
+        "the near-black the MG24's and the nRF54LM20A's own STEPs style 38 "
+        "faces each with, 0.110 in both files. Not a metal for the "
+        "reflectance reason above, at one percent; the specific material is "
+        "not claimed. Keyed #030303 with the SAMD21's moulding until OH-214"
+    )),
+    "#191919": Finish(0.0, 0.70, (
         "the same near-black, on the ESP32-S3, RP2040 and nRF52840 models"
+    )),
+    "#151618": Finish(0.0, 0.70, (
+        "the near-black top of KiCad's chip resistors and the 0603 fuse, and "
+        "parts on the MG24's and the nRF54LM20A's own STEPs, which place the "
+        "same models. KiCad's palette names the colour `RES-SMD-01` -- "
+        "`Resistor_SMD.3dshapes/R_0402_1005Metric.wrl` at tag 9.0.0 -- and at "
+        "under one percent it is not a metal (the reflectance reason above); "
+        "the roughness is the one it drew at as #020202, keyed with #191919 "
+        "until OH-214, and is moulded epoxy's by analogy rather than a reading"
     )),
     "#000000": Finish(0.0, 0.70, (
         "the same near-black, on the ESP32-S3 model. Pure zero rather than "
@@ -919,17 +1000,17 @@ FINISHES: dict[str, Finish] = {
     #    by the near-black argument above where the colour is dark enough for
     #    it. Where an entry covers two different dielectrics it claims only
     #    what they share.
-    "#1e0f0a": Finish(0.0, 0.60, (
+    "#614537": Finish(0.0, 0.60, (
         "the ceramic body of KiCad's chip capacitors, C_0201 to C_0805, on "
         "the composed boards and on the MG24's and nRF54LM20A's own STEPs, "
         "which place the same models. Two readings agree: by geometry it is "
-        "the block between the two #a5a392 end caps, and KiCad's palette "
+        "the block between the two #d2d1c7 end caps, and KiCad's palette "
         "names the colour `CAP-CERAMIC-06` -- the box "
         "`Capacitor_SMD.3dshapes/C_0402_1005Metric.wrl` at tag 9.0.0 paints "
         "with it is that block. A fired ceramic is a dielectric; the "
         "roughness is a JUDGEMENT in CERAMIC's register, matte and unglazed"
     )),
-    "#0f0f0f": Finish(0.0, 0.65, (
+    "#464646": Finish(0.0, 0.65, (
         "**two dielectrics, one entry, claiming only what they share.** "
         "KiCad's palette names the colour `CAP-CERAMIC-05`, and paints with "
         "it both its chip inductors' bodies -- the block between the end "
@@ -942,9 +1023,9 @@ FINISHES: dict[str, Finish] = {
         "near-black argument above). The roughness is a JUDGEMENT between "
         "CERAMIC's 0.60 and moulded epoxy's 0.70, because the group is both"
     )),
-    "#c6c4a0": Finish(0.0, 0.65, (
+    "#e4e3cf": Finish(0.0, 0.65, (
         "**two dielectrics, one entry, claiming only what they share**, as "
-        "#0f0f0f's does. KiCad's palette names the colour `PLASTIC-WHITE-01`, "
+        "#464646's does. KiCad's palette names the colour `PLASTIC-WHITE-01`, "
         "and `Resistor_SMD.3dshapes/R_0402_1005Metric.wrl` and "
         "`LED_SMD.3dshapes/LED_WS2812B-Mini_PLCC4_3.5x3.5mm.wrl` at tag 9.0.0 "
         "paint with it the resistor's substrate and the LED's housing. By "
@@ -955,16 +1036,16 @@ FINISHES: dict[str, Finish] = {
         "between its terminals; the chip resistors' and the 0603 fuse's "
         "substrate, which their end caps wrap; and the B3S-1000's round "
         "plunger, 3.57 mm across on "
-        "top of its #383838 cover. The MG24's and nRF54LM20A's own STEPs use "
+        "top of its #818181 cover. The MG24's and nRF54LM20A's own STEPs use "
         "it for their 0402 LEDs' bodies and their 0201 resistors' substrate. "
         "Moulded plastic or fired ceramic, neither is a metal; the roughness "
         "is a JUDGEMENT between CERAMIC's 0.60 and moulded epoxy's 0.70, as "
-        "#0f0f0f's is. Until OH-163's review this was the TS42's 'metal "
+        "#464646's is. Until OH-163's review this was the TS42's 'metal "
         "cover' at metalness 1.0, the pair read off its values the wrong way "
         "round, and every composed board carrying any of these parts drew "
         "them as polished metal"
     )),
-    "#6f6651": Finish(0.0, 0.55, (
+    "#b0a998": Finish(0.0, 0.55, (
         "the orientation mark on top of a moulded package -- a pin-1 dot, a "
         "diode's cathode bar. KiCad's palette names the colour "
         "`IC-LABEL-01`, and `QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm.wrl` and "
@@ -981,14 +1062,14 @@ FINISHES: dict[str, Finish] = {
         "the pin-1 dot on the two QFNs `tools/model_from_datasheet.py` "
         "builds: `tools/blender/qfn_flatpack.py` names the material `mark` "
         "and the object `pin1`, a disc on the moulding's top face. The same "
-        "mark #6f6651 is on KiCad's packages, so the same finish"
+        "mark #b0a998 is on KiCad's packages, so the same finish"
     )),
     "#0f0f12": Finish(0.0, 0.70, (
         "the moulded body of those two QFNs, the material "
         "`tools/blender/qfn_flatpack.py` names `moulding`. Moulded epoxy, as "
-        "#050505 is, and near-black besides"
+        "#262525 is, and near-black besides"
     )),
-    "#186b2a": Finish(0.0, 0.70, (
+    "#57ad71": Finish(0.0, 0.70, (
         "a thin layer at the base of KiCad's chip LEDs, LED_0402 to "
         "LED_0805. KiCad's palette names the colour `PLASTIC-GREEN-01`, and "
         "`LED_0603_1608Metric.wrl` at tag 9.0.0 paints exactly that box with "
@@ -1003,22 +1084,22 @@ FINISHES: dict[str, Finish] = {
         "so the name is the geometry's. Paint on glass, and no metal is a "
         "saturated blue; the roughness is a JUDGEMENT at ink's 0.55"
     )),
-    "#060606": Finish(0.0, 0.70, (
+    "#292929": Finish(0.0, 0.70, (
         "the base of KiCad's Seiko Epson FA238 crystal, under its seal ring "
         "and lid. KiCad's palette names the colour `BOARD-BLACK-03`, and "
         "`Crystal_SMD_SeikoEpson_FA238-4Pin_3.2x2.5mm.wrl` at tag 9.0.0 "
         "paints that box with it. At two percent grey it is not a metal (the "
         "near-black argument above); the specific material is not claimed"
     )),
-    "#04227c": Finish(0.0, 0.20, (
+    "#2367b9": Finish(0.0, 0.20, (
         "the top of the fill in the WS2812B-Mini's cavity on KiCad's model, "
         "inside the reflector. KiCad's palette names the colour "
         "`PLASTIC-BLUE-01`, and `LED_WS2812B-Mini_PLCC4_3.5x3.5mm.wrl` at tag "
         "9.0.0 tops that box with it. A plastic by KiCad's word; the "
-        "roughness is the LED lens's #720301 by ANALOGY, which is weaker than "
+        "roughness is the LED lens's #b2190d by ANALOGY, which is weaker than "
         "a reading and says so"
     )),
-    "#292929": Finish(0.0, 0.70, (
+    "#707070": Finish(0.0, 0.70, (
         "the bodies of the parts on Espressif's own module STEPs, both MINIs "
         "and both WROOMs: by geometry the block between a passive's two "
         "ends, the whole moulding of a QFN and the base under a crystal's "
@@ -1027,7 +1108,7 @@ FINISHES: dict[str, Finish] = {
         "metal by that and by its sixteen-percent value; the specific "
         "material is not claimed"
     )),
-    "#0d0d0d": Finish(0.0, 0.70, (
+    "#404040": Finish(0.0, 0.70, (
         "moulded bodies: the eight-lead gull-wing package inside each ESP32 "
         "WROOM's shield on Espressif's own STEPs, and small parts' bodies on "
         "the MG24's and the nRF54LM20A's own STEPs, each standing on its "
@@ -1036,14 +1117,14 @@ FINISHES: dict[str, Finish] = {
         "(the near-black argument above); the specific material is not "
         "claimed"
     )),
-    "#0a0a0a": Finish(0.0, 0.70, (
+    "#393939": Finish(0.0, 0.70, (
         "the moulding of the QFN inside the ESP32-C5-WROOM-1 on Espressif's "
         "own STEP: by geometry the whole 6 mm square body. Near-black, so not "
         "a metal by the argument above"
     )),
-    "#131313": Finish(0.0, 0.70, (
+    "#4d4d4d": Finish(0.0, 0.70, (
         "the bodies of two small parts inside the ESP32-C5-WROOM-1 on "
-        "Espressif's own STEP, each standing on #7f8e98 terminals. "
+        "Espressif's own STEP, each standing on #bbc5cb terminals. "
         "Near-black, so not a metal by the argument above; what the parts "
         "are is not claimed"
     )),
@@ -1090,9 +1171,11 @@ FINISHES: dict[str, Finish] = {
         "moulded body and not a mirror. The COLOUR is a judgement; that a "
         "solder mask is semi-gloss is not"
     ), coat=0.85, coat_roughness=0.08),
-    "#116517": Finish(0.0, 0.35, (
+    "#49a954": Finish(0.0, 0.35, (
         "the SAMD21 board's solder mask, named in `board3d.js`'s "
-        "`refreshTheme` in the same sentence as #ff9f37"
+        "`refreshTheme` in the same sentence as #ffcf80 -- both by the linear "
+        "bytes this file keyed them with until OH-214, #116517 and #ff9f37. "
+        "The SAMD21's own STEP calls it `Opaque(73,169,84)`, which is this key"
     ), coat=0.85, coat_roughness=0.08),
     # **The composed boards' own masks and routing, named by construction as
     # COPPER and SILKSCREEN are** (OH-163). `compose_board_3d` draws a board
@@ -1135,18 +1218,18 @@ FINISHES: dict[str, Finish] = {
     "#366043": Finish(0.0, 0.35, (
         "the PCBCUPID Glyph Mini RP2040's routing " + _ROUTING
     ), coat=0.85, coat_roughness=0.08),
-    "#c07635": Finish(0.0, 0.55, (
+    "#e1b57d": Finish(0.0, 0.55, (
         "the axial resistor's lacquered body. **Named by geometry, which is "
         "the strongest reading available on a two-colour part**: measured "
         "2026-08-28, `R_Axial_DIN0207_L6.3mm_D2.5mm` tessellates to exactly "
         "two colour groups, and this one spans x +-3.150 and z +-1.250 -- the "
-        "6.3 by 2.5 mm body the filename itself states -- while #a5a392, "
+        "6.3 by 2.5 mm body the filename itself states -- while #d2d1c7, "
         "already the LEG colour above, runs the full 8.2 mm out to the lead "
         "tips. A resistor's coat is a cured lacquer over a ceramic core: not a "
         "metal, and its gloss sits between a moulded body's 0.70 and a solder "
         "mask's 0.35"
     )),
-    "#720301": Finish(0.0, 0.20, (
+    "#b2190d": Finish(0.0, 0.20, (
         "the LEDs' lens, which `Part.lens` already names on all three sizes. "
         "A moulded epoxy lens is the glossiest thing on this bench, which is "
         "why it is the lowest roughness in the table -- and `setPartState` "
@@ -1467,18 +1550,25 @@ def linear(channel: int) -> float:
 
     **This was `channel / 255` and that is a different colour.** The glTF
     specification says `baseColorFactor` is linear, three.js reads it as
-    linear, and a CAD file's colours are sRGB -- so every albedo in every model
-    this repository has ever written was too bright, and DIFFERENTLY too bright
-    per channel because the transfer function is a curve. That flattens a
-    colour toward grey, which is what was reported: "the board is still matte
-    and greyish".
+    linear, and a CAD file's colours are sRGB -- so every albedo keyed in sRGB
+    was too bright, and DIFFERENTLY too bright per channel because the
+    transfer function is a curve. That flattens a colour toward grey, which is
+    what was reported: "the board is still matte and greyish".
 
     Measured on the corpus, written against what it should have been:
 
         Uno solder mask #313d63   6.3x 5.1x 3.1x too bright, saturation .51 -> .75
-        SAMD21 mask     #116517  11.9x 3.0x 10.5x           saturation .83 -> .96
-        gold contact    #b58136   1.5x 2.3x  5.7x           saturation .70 -> .92
-        black epoxy     #050505  12.9x each                 (grey, not black)
+
+    **Three more rows stood here and were wrong, which OH-214 found.** The
+    SAMD21's mask, the header gold and the black epoxy were measured the same
+    way -- 11.9x 3.0x 10.5x, 1.5x 2.3x 5.7x and 12.9x too bright -- but they
+    were read out of STEP files, and `colour_of` then keyed a STEP colour by
+    OpenCASCADE's LINEAR value. For those keys `channel / 255` had been right,
+    and this function made them darker than their files say: KiCad's epoxy,
+    0.148 sRGB in the file, was `#050505` and reached the page at 0.0015
+    linear instead of 0.0194. Keyed as the files state them they are
+    `#49a954`, `#dbbc7e` and `#262525`, sRGB like the mask above, and this
+    converts each of them once.
 
     **And the repository already had the right answer twenty lines away.**
     `readPalette` in `webui/static/board3d.js` builds its colours from strings
@@ -2015,7 +2105,7 @@ LED_ELECTRICAL = Electrical(
 #: painted colour bands reading something else -- a picture contradicting a
 #: label, which is the defect this area keeps re-learning. Measured 2026-08-28
 #: by tessellating it: `R_Axial_DIN0207` has exactly TWO styled colours,
-#: `#a5a392` on the leads and `#c07635` on the body, and NO BANDS. There is no
+#: `#d2d1c7` on the leads and `#e1b57d` on the body, and NO BANDS. There is no
 #: claim in the picture for the label to contradict.
 #:
 #: **No current rating, and that is a measured absence rather than an
@@ -2169,13 +2259,13 @@ PARTS: tuple[Part, ...] = (
     #: `LED_ELECTRICAL` distinguish them. Saying so once beats three copies
     #: that could drift apart while all three parts stayed identical.
     Part(library="LED_THT", name="LED_D3.0mm", label="3 mm LED",
-         lens="#720301", terminals=("cathode", "anode"),
+         lens="#b2190d", terminals=("cathode", "anode"),
          electrical=LED_ELECTRICAL),
     Part(library="LED_THT", name="LED_D5.0mm", label="5 mm LED",
-         lens="#720301", terminals=("cathode", "anode"),
+         lens="#b2190d", terminals=("cathode", "anode"),
          electrical=LED_ELECTRICAL),
     Part(library="LED_THT", name="LED_D10.0mm", label="10 mm LED",
-         lens="#720301", terminals=("cathode", "anode"),
+         lens="#b2190d", terminals=("cathode", "anode"),
          electrical=LED_ELECTRICAL),
     #: **The red mark on its case, and it means driven rather than sounding.**
     #: A buzzer makes a noise and this page has no audio, so nothing here can
@@ -2195,7 +2285,7 @@ PARTS: tuple[Part, ...] = (
     #: `circuit.js` reports no current for any bench it stands on rather than
     #: letting a number invented here decide an LED's.
     Part(library="Buzzer_Beeper", name="Buzzer_12x9.5RM7.6", label="12 mm buzzer",
-         lens="#9e2705", terminals=("negative", "positive")),
+         lens="#ce6d26", terminals=("negative", "positive")),
     #: **The part that makes every other one usable**, and `RESISTOR_ELECTRICAL`
     #: above carries the argument. A 5 mm LED from D13 through this to GND
     #: carries at least 9.3 mA on an Uno -- inside the 20 mA a pin is rated for

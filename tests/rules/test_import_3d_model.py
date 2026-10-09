@@ -160,7 +160,7 @@ def test_the_origin_moves_the_pcb_centre_to_zero_and_its_underside_to_the_floor(
 def one_triangle_mesh():
     """A mesh of one triangle in one colour. Enough to exercise every field."""
     return import_3d_model.Mesh(groups={
-        "#116517": ([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+        "#49a954": ([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
                     [0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0],
                     [0, 1, 2]),
     })
@@ -236,8 +236,8 @@ def test_each_colour_becomes_its_own_material_and_not_a_vertex_attribute():
     colours would render the same and would lose the vendor's own names for
     them."""
     mesh = import_3d_model.Mesh(groups={
-        "#116517": ([0.0] * 9, [0.0] * 9, [0, 1, 2]),
-        "#ff9f37": ([0.0] * 9, [0.0] * 9, [0, 1, 2]),
+        "#49a954": ([0.0] * 9, [0.0] * 9, [0, 1, 2]),
+        "#ffcf80": ([0.0] * 9, [0.0] * 9, [0, 1, 2]),
     })
     assert mesh.triangles() == 2
     assert mesh.vertices() == 6
@@ -365,13 +365,13 @@ def test_the_uno_is_made_of_more_than_one_material():
                            material["pbrMetallicRoughness"]["roughnessFactor"])
         for material in document["materials"]
     }
-    # The four the evidence is strongest for. `#b58136` is the header contacts,
+    # The four the evidence is strongest for. `#dbbc7e` is the header contacts,
     # and it earned its entry by appearing on the five pin-header packages and
     # on nothing else.
-    assert finishes["#b58136"] == (1.0, 0.30)
-    assert finishes["#9ea1a8"] == (1.0, 0.25)
-    assert finishes["#a5a392"] == (1.0, 0.35)
-    assert finishes["#050505"] == (0.0, 0.70)
+    assert finishes["#dbbc7e"] == (1.0, 0.30)
+    assert finishes["#ced0d4"] == (1.0, 0.25)
+    assert finishes["#d2d1c7"] == (1.0, 0.35)
+    assert finishes["#262525"] == (0.0, 0.70)
     # And more than one distinct material actually reaches the file.
     assert len(set(finishes.values())) >= 5
 
@@ -389,7 +389,7 @@ def test_the_writer_applies_the_finish_rather_than_a_constant(tmp_path):
     """
     from tools.import_3d_model import DEFAULT_FINISH, FINISHES, Mesh, write_glb
 
-    named = "#b58136"
+    named = "#dbbc7e"
     unnamed = "#123456"
     assert named in FINISHES and unnamed not in FINISHES
     triangle = ([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
@@ -428,9 +428,9 @@ def test_the_audit_returns_exactly_the_colours_it_could_not_name(capsys):
     one = ([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
            [0.0, 0.0, 1.0] * 3, [0, 1, 2])
     two = (one[0] * 2, one[1] * 2, [0, 1, 2, 3, 4, 5])
-    mesh = Mesh({"#b58136": one, "#050505": two,
+    mesh = Mesh({"#dbbc7e": one, "#262525": two,
                  "#123456": one, "#654321": two})
-    assert {"#b58136", "#050505"} <= set(FINISHES)
+    assert {"#dbbc7e", "#262525"} <= set(FINISHES)
     assert not {"#123456", "#654321"} & set(FINISHES)
 
     unnamed = report_finishes(mesh)
@@ -491,16 +491,16 @@ def test_a_part_with_no_forward_direction_writes_none():
 def test_the_resistors_body_is_not_a_metal_and_its_leads_still_are():
     """The two colours the axial resistor has, and they are not the same thing.
 
-    `#c07635` is the lacquered body and `#a5a392` is the lead, which is the
+    `#e1b57d` is the lacquered body and `#d2d1c7` is the lead, which is the
     colour the table already calls "every component's LEG". A resistor drawn as
     a metal cylinder would be the finishes table saying something false about
     the one part whose material is easiest to check by looking at it.
     """
     from tools.import_3d_model import FINISHES
 
-    assert FINISHES["#c07635"].metalness == 0.0
-    assert FINISHES["#a5a392"].metalness == 1.0
-    assert "resistor" in FINISHES["#c07635"].why
+    assert FINISHES["#e1b57d"].metalness == 0.0
+    assert FINISHES["#d2d1c7"].metalness == 1.0
+    assert "resistor" in FINISHES["#e1b57d"].why
 
 
 def test_no_metal_is_darker_than_a_metal_reflects():
@@ -509,19 +509,31 @@ def test_no_metal_is_darker_than_a_metal_reflects():
     A metal's base colour IS its reflectance, and no metal used in electronics
     reflects under about half -- the argument `FINISHES` gives for calling its
     near-blacks dielectrics. Read the other way it says what may be a metal:
-    nothing with every channel under half. That is why `#1d1d1d` stays at the
+    nothing with every channel under half. That is why `#5f5f5f` stays at the
     default although KiCad's own palette calls it `MET-ALUMINUM` -- metalness
     1.0 on an 11% base would draw a black mirror -- and why `#4e4e4e`, which
     `tools/model_from_datasheet.py` calls a steel lid, does too.
-    """
-    from tools.import_3d_model import FINISHES
 
+    **Half is a LINEAR half, and every key is sRGB since OH-214.** This read
+    a byte of 128 as half while a STEP colour was keyed by its linear byte.
+    Keyed as the file states it, 0.5 linear is byte 187.5 -- `linear(187)` is
+    0.497 and `linear(188)` is 0.503 -- so the bound is 188, derived here
+    rather than typed: at 128, KiCad's MET-SILVER `#818181`, 22% linear,
+    would pass as bright enough to be a metal.
+    """
+    from tools.import_3d_model import FINISHES, linear
+
+    least = 188
+    assert linear(least - 1) < 0.5 <= linear(least), (
+        f"byte {least} is not where 0.5 linear lies: linear({least - 1}) is "
+        f"{linear(least - 1):.4f} and linear({least}) is {linear(least):.4f}")
     for colour, finish in FINISHES.items():
         if finish.metalness == 1.0:
             brightest = max(int(colour[at:at + 2], 16) for at in (1, 3, 5))
-            assert brightest >= 128, (
+            assert brightest >= least, (
                 f"{colour} is a metal in FINISHES, and its brightest channel "
-                f"is {brightest} of 255: darker than any metal reflects")
+                f"is {brightest} of 255, {linear(brightest):.3f} linear: darker "
+                f"than any metal reflects")
 
 
 #: KiCad StepUp's material palette as each `.wrl` at kicad-packages3D tag
@@ -537,6 +549,7 @@ KICAD_PALETTE = {
     "PLASTIC-WHITE-01": (0.895, 0.891, 0.813),
     "MET-ALUMINUM": (0.372322, 0.371574, 0.373173),
     "MET-SILVER": (0.50754, 0.50754, 0.50754),
+    "RES-SMD-01": (0.082, 0.086, 0.094),
 }
 
 
@@ -545,21 +558,20 @@ def test_kicads_own_names_for_the_colours_it_cites():
     arithmetic** (OH-163).
 
     A KiCad STEP carries the same sRGB numbers its `.wrl` palette names, and
-    OpenCASCADE's reader makes them linear before `colour_of` writes a hex --
-    so a palette entry converts to exactly one key. Every `FINISHES` entry
-    that cites a palette name in backticks must be the key that name converts
-    to: an entry citing the wrong name, or a key mistyped, fails here. The
-    conversion is pinned on `PIN-01`, which has been `#a5a392` -- every
-    component's leg -- since that entry was written.
+    `colour_of` writes them as the file states them, each channel times 255
+    -- so a palette entry is exactly one key. Every `FINISHES` entry that
+    cites a palette name in backticks must be that key: an entry citing the
+    wrong name, or a key mistyped, fails here. The conversion is pinned on
+    `PIN-01`, every component's leg: `#d2d1c7`, which until OH-214 was
+    `#a5a392` -- the same 0.824 made linear first, because `colour_of` then
+    took OpenCASCADE's linear `Red()`.
     """
     from tools.import_3d_model import FINISHES
 
     def key(srgb):
-        def linear(c):
-            return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-        return "#" + "".join(f"{round(linear(c) * 255):02x}" for c in srgb)
+        return "#" + "".join(f"{round(c * 255):02x}" for c in srgb)
 
-    assert key(KICAD_PALETTE["PIN-01"]) == "#a5a392"
+    assert key(KICAD_PALETTE["PIN-01"]) == "#d2d1c7"
     cited = {}
     for colour, finish in FINISHES.items():
         for name, srgb in KICAD_PALETTE.items():
@@ -569,18 +581,18 @@ def test_kicads_own_names_for_the_colours_it_cites():
                     f"{key(srgb)}, not {colour}")
                 cited[name] = colour
     assert cited == {
-        "CAP-CERAMIC-06": "#1e0f0a", "CAP-CERAMIC-05": "#0f0f0f",
-        "IC-LABEL-01": "#6f6651", "PLASTIC-GREEN-01": "#186b2a",
-        "PLASTIC-BLUE-01": "#04227c", "BOARD-BLACK-03": "#060606",
-        "PLASTIC-WHITE-01": "#c6c4a0",
+        "CAP-CERAMIC-06": "#614537", "CAP-CERAMIC-05": "#464646",
+        "IC-LABEL-01": "#b0a998", "PLASTIC-GREEN-01": "#57ad71",
+        "PLASTIC-BLUE-01": "#2367b9", "BOARD-BLACK-03": "#292929",
+        "PLASTIC-WHITE-01": "#e4e3cf", "RES-SMD-01": "#151618",
     }, cited
-    assert key(KICAD_PALETTE["MET-ALUMINUM"]) == "#1d1d1d"
-    assert "#1d1d1d" not in FINISHES, (
-        "#1d1d1d is KiCad's MET-ALUMINUM and darker than any metal reflects: "
+    assert key(KICAD_PALETTE["MET-ALUMINUM"]) == "#5f5f5f"
+    assert "#5f5f5f" not in FINISHES, (
+        "#5f5f5f is KiCad's MET-ALUMINUM and darker than any metal reflects: "
         "the two readings disagree, so it takes the default")
-    assert key(KICAD_PALETTE["MET-SILVER"]) == "#383838"
-    assert "#383838" not in FINISHES, (
-        "#383838 is KiCad's MET-SILVER and, at 22% linear, darker than any "
+    assert key(KICAD_PALETTE["MET-SILVER"]) == "#818181"
+    assert "#818181" not in FINISHES, (
+        "#818181 is KiCad's MET-SILVER and, at 22% linear, darker than any "
         "metal reflects: the two readings disagree, so it takes the default")
 
 
@@ -598,6 +610,7 @@ PALETTE_MODELS = {
     "PLASTIC-WHITE-01": "Resistor_SMD-R_0402_1005Metric",
     "MET-ALUMINUM": "Button_Switch_SMD-SW_SPDT_PCM12",
     "MET-SILVER": "Button_Switch_SMD-SW_SPST_B3S-1000",
+    "RES-SMD-01": "Resistor_SMD-R_0402_1005Metric",
 }
 
 
@@ -638,7 +651,7 @@ def test_the_palette_copied_here_is_the_one_the_cached_models_carry():
 
 
 def test_kicads_white_is_a_body_and_not_a_metal():
-    """**`#c6c4a0` was the tactile switch's 'metal cover', and it is not a
+    """**`#e4e3cf` was the tactile switch's 'metal cover', and it is not a
     metal** (OH-163's review).
 
     `FINISHES` read the TS42's two colours off their values -- the bright one
@@ -651,31 +664,31 @@ def test_kicads_white_is_a_body_and_not_a_metal():
     """
     from tools.import_3d_model import FINISHES
 
-    assert FINISHES["#c6c4a0"].metalness == 0.0, (
-        f"#c6c4a0 is a metal in FINISHES ({FINISHES['#c6c4a0']}); it is a "
+    assert FINISHES["#e4e3cf"].metalness == 0.0, (
+        f"#e4e3cf is a metal in FINISHES ({FINISHES['#e4e3cf']}); it is a "
         f"moulded or fired body on every model that carries it")
 
 
 def test_kicads_silver_is_listed_at_the_default_with_its_reason():
-    """**`#383838` is the switch's cover and still not named** (OH-163's
+    """**`#818181` is the switch's cover and still not named** (OH-163's
     review): KiCad's palette calls it `MET-SILVER`, and on the B3S-1000 it is
     the 6 x 6.6 mm cover, a metal by name and by place -- at 22% linear
     reflectance, below anything a metal reflects. Two readings that disagree
-    leave a colour at the default, as `#1d1d1d`'s do, and the table's own
+    leave a colour at the default, as `#5f5f5f`'s do, and the table's own
     list of colours examined and left there has to say so, with the reason.
     """
     source = (REPO / "tools" / "import_3d_model.py").read_text(encoding="utf-8")
     examined = source.split("**Examined for OH-163 and left at the default**",
                             1)[1].split("**Four entries were written", 1)[0]
-    entry = examined.split("`#383838`", 1)
+    entry = examined.split("`#818181`", 1)
     assert len(entry) == 2, (
-        f"#383838 is not in the list of colours left at the default:{examined}")
+        f"#818181 is not in the list of colours left at the default:{examined}")
     assert "MET-SILVER" in entry[1].split("#:   * ", 1)[0], (
-        f"#383838's line does not give KiCad's name for it: {entry[1]}")
+        f"#818181's line does not give KiCad's name for it: {entry[1]}")
 
 
 def test_the_label_colour_lies_on_top_of_every_body_that_carries_it():
-    """**`#6f6651` was 'very probably an exposed thermal pad'; it is on top.**
+    """**`#b0a998` was 'very probably an exposed thermal pad'; it is on top.**
 
     OH-163 named it as KiCad's `IC-LABEL-01`, the orientation mark printed on
     a package, and a mark is only a mark if it is on the top face: an exposed
@@ -691,7 +704,7 @@ def test_the_label_colour_lies_on_top_of_every_body_that_carries_it():
     pytest.importorskip("OCP")
     from tools.import_3d_model import DEFLECTION, Frame, handedness_of, read, tessellate
 
-    mark, on_top_mm = "#6f6651", 0.15
+    mark, on_top_mm = "#b0a998", 0.15
     steps = sorted((REPO / "third_party" / "seeed-3d").glob("component-*.step"))
     if not steps:
         pytest.skip("no KiCad model fetched; run tools/compose_board_3d.py")
@@ -768,12 +781,12 @@ def test_the_resistor_is_drawn_as_a_lacquered_body_on_metal_leads():
                            material["pbrMetallicRoughness"]["roughnessFactor"])
         for material in document["materials"]
     }
-    assert set(got) == {"#c07635", "#a5a392"}
-    assert got["#c07635"] == (FINISHES["#c07635"].metalness,
-                              FINISHES["#c07635"].roughness)
-    assert got["#a5a392"] == (FINISHES["#a5a392"].metalness,
-                              FINISHES["#a5a392"].roughness)
-    assert got["#c07635"] != got["#a5a392"]
+    assert set(got) == {"#e1b57d", "#d2d1c7"}
+    assert got["#e1b57d"] == (FINISHES["#e1b57d"].metalness,
+                              FINISHES["#e1b57d"].roughness)
+    assert got["#d2d1c7"] == (FINISHES["#d2d1c7"].metalness,
+                              FINISHES["#d2d1c7"].roughness)
+    assert got["#e1b57d"] != got["#d2d1c7"]
 
 def test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert():
     """**The guard OH-80 made conditional, and it has to still fire.**
@@ -942,8 +955,8 @@ def test_the_shipped_meshes_have_almost_no_seams_left():
     """The measurement, on the files the page actually fetches.
 
     Counted before the weld existed: 509 coincident pairs in the Arduino Uno's
-    `#a5a392` group whose normals disagreed by more than a degree, the worst
-    22.1 degrees apart, and 178 more in `#050505`. What is left is the handful
+    `#d2d1c7` group whose normals disagreed by more than a degree, the worst
+    22.1 degrees apart, and 178 more in `#262525`. What is left is the handful
     where three or more surfaces genuinely meet, which this must NOT merge.
     """
     model = REPO / "webui" / "static" / "models" / "Arduino-Uno.glb"
@@ -970,8 +983,8 @@ def test_the_shipped_meshes_have_almost_no_seams_left():
                 if 1.0 < spread < 25.0:
                     unwelded += 1
             worst[name] = unwelded
-    assert worst.get("#a5a392", 0) <= 20, worst
-    assert worst.get("#050505", 0) <= 20, worst
+    assert worst.get("#d2d1c7", 0) <= 20, worst
+    assert worst.get("#262525", 0) <= 20, worst
 
 
 def test_the_tessellator_welds_what_it_meshes():
@@ -1064,7 +1077,7 @@ def test_only_the_solder_masks_are_coated():
     # one a mask, as `test_every_composed_boards_mask_and_routing_is_a_solder_mask`
     # holds against the compositions themselves.
     assert coated == {
-        "#313d63", "#116517", "#1b1b1b",
+        "#313d63", "#49a954", "#1b1b1b",
         "#e2180f", "#9f180f", "#cd3c25", "#233e2b",
         "#2a2a2a", "#4c5f99", "#ff2517", "#f62517", "#ff5d39", "#366043",
     }, coated
@@ -1101,7 +1114,7 @@ def test_the_coat_is_written_as_the_registered_extension(tmp_path):
     triangle = ([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
                 [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
                 [0, 1, 2])
-    for colours, expect in ((["#313d63"], True), (["#a5a392"], False)):
+    for colours, expect in ((["#313d63"], True), (["#d2d1c7"], False)):
         target = tmp_path / f"{colours[0][1:]}.glb"
         write_glb(Mesh({c: triangle for c in colours}), target,
                   "probe", "test", (1.0, 1.0, 1.0))
@@ -1168,6 +1181,68 @@ def test_an_srgb_byte_becomes_the_linear_value_gltf_asks_for():
         assert 0.0 <= linear(byte) <= byte / 255 + 1e-12
 
 
+def test_a_step_colour_reaches_the_written_factor_converted_exactly_once(tmp_path):
+    """**Every STEP colour was converted twice, and this is the whole path**
+    (OH-214).
+
+    A STEP states its colours in sRGB, and OpenCASCADE's reader converts them
+    to linear on the way in: `Quantity_Color.Red()` returns linear, and
+    `Values(Quantity_TOC_sRGB)` gives back the file's own number. `colour_of`
+    took `Red()` for a key, and `write_glb` then applied `linear()` to that
+    key as if it were sRGB -- so KiCad's PIN-01, which the file writes as
+    0.824, reached the page as 0.376 linear rather than 0.645, and every
+    vendor and KiCad part drew darker and more saturated than its file says.
+
+    So this reads a real file: the cached R_0402 STEP's own `COLOUR_RGB` for
+    PIN-01, through `read`, `colour_of` and `write_glb`, to the written
+    `baseColorFactor` -- which must be that sRGB value made linear ONCE, to
+    within half of the key's last byte (0.005 linear at the top of the
+    curve). Converted twice it is 0.27 low. Skips without OCP or the cache.
+    """
+    pytest.importorskip("OCP")
+    import re
+
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    from tools.import_3d_model import CACHE, Mesh, colour_of, read, write_glb
+
+    step = CACHE / "component-Resistor_SMD-R_0402_1005Metric.step"
+    if not step.is_file():
+        pytest.skip(f"{step.name} not fetched; run tools/compose_board_3d.py")
+    # PIN-01 as the file writes it -- the same triple KICAD_PALETTE holds.
+    stated = (0.824000000954, 0.819999992847, 0.78100001812)
+    assert re.search(r"COLOUR_RGB\(''\s*,\s*0\.824000000954\s*,\s*0\.819999992847"
+                     r"\s*,\s*0\.78100001812\s*\)",
+                     step.read_text(encoding="utf-8")), (
+        f"{step.name} no longer carries PIN-01 as {stated}")
+    key = "#" + "".join(f"{round(v * 255):02x}" for v in stated)
+
+    shape, styles, _document = read(step)
+    keys = set()
+    walk = TopExp_Explorer(shape, TopAbs_FACE)
+    while walk.More():
+        keys.add(colour_of(styles, TopoDS.Face_s(walk.Current())))
+        walk.Next()
+    assert key in keys, (
+        f"the file states PIN-01 as {stated}, which is {key}; colour_of read "
+        f"its faces as {sorted(keys)}")
+
+    triangle = ([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0] * 3, [0, 1, 2])
+    out = tmp_path / "pin.glb"
+    write_glb(Mesh({key: triangle}), out, "probe", "test", (1.0, 1.0, 1.0))
+    raw = out.read_bytes()
+    length, _kind = struct.unpack_from("<II", raw, 12)
+    document = json.loads(raw[20:20 + length].decode("utf-8"))
+    written = document["materials"][0]["pbrMetallicRoughness"]["baseColorFactor"][:3]
+
+    once = [((v + 0.055) / 1.055) ** 2.4 for v in stated]
+    assert written == pytest.approx(once, abs=0.005), (
+        f"PIN-01 is {stated} in the file, {once} linear; the glb says {written}")
+
+
 def test_the_written_albedos_are_linear_and_not_the_bytes():
     """The measurement that started this, on the file the page fetches.
 
@@ -1175,6 +1250,13 @@ def test_the_written_albedos_are_linear_and_not_the_bytes():
     (0.192, 0.239, 0.388) -- six, five and three times too bright, and half as
     saturated as the colour actually is. The board came out matte and greyish
     and it was reported twice.
+
+    **This held for every material while it pinned a defect** (OH-214): a
+    key read out of a STEP was then a linear byte, so `linear()` of it was
+    the file's colour converted twice, and this passed. The assertion is
+    unchanged and now means what it says, because every key is sRGB --
+    `test_a_step_colour_reaches_the_written_factor_converted_exactly_once`
+    is what holds a STEP colour to its file.
     """
     model = REPO / "webui" / "static" / "models" / "Arduino-Uno.glb"
     if not model.is_file():
@@ -1202,20 +1284,34 @@ def test_the_written_albedos_are_linear_and_not_the_bytes():
             )
 
 
-def test_black_epoxy_renders_black_rather_than_grey():
-    """The clearest single symptom, and the easiest to check.
+def test_black_epoxy_renders_as_dark_as_its_file_says_and_no_darker():
+    """**This test said the opposite until OH-214, and was wrong.**
 
-    #050505 is as near black as a vendor writes. As a byte over 255 it reached
-    the renderer as 0.0196 -- THIRTEEN TIMES its linear value -- so the DIP-28,
-    the barrel jack and every header shroud were grey plastic.
+    It was `test_black_epoxy_renders_black_rather_than_grey`: the epoxy was
+    keyed `#050505`, and it asserted the written factor under 0.005, calling
+    the 0.0196 that `channel / 255` had written "THIRTEEN TIMES its linear
+    value". But `#050505` was already linear -- OpenCASCADE's reading of the
+    0.148 0.145 0.145 KiCad's STEPs state for the DIP-28, the barrel jack and
+    every header shroud -- so 0.0196 was right and the 0.0015 this pinned was
+    the colour converted twice. Keyed as the file states it the epoxy is
+    `#262525`, and on the shipped Uno it must be that triple made linear
+    once: within 0.001, where twice is 0.017 low.
     """
     model = REPO / "webui" / "static" / "models" / "Arduino-Uno.glb"
     if not model.is_file():
         pytest.skip("no composed Uno; run tools/compose_board_3d.py")
     document, _body = _gltf(model)
-    epoxy = next(material for material in document["materials"]
-                 if material["name"] == "#050505")
-    assert max(epoxy["pbrMetallicRoughness"]["baseColorFactor"][:3]) < 0.005
+    epoxy = next((material for material in document["materials"]
+                  if material["name"] == "#262525"), None)
+    assert epoxy is not None, (
+        f"the Uno has no #262525; its materials are "
+        f"{sorted(m['name'] for m in document['materials'])}")
+    stated = (0.148, 0.145, 0.145)
+    once = [((v + 0.055) / 1.055) ** 2.4 for v in stated]
+    written = epoxy["pbrMetallicRoughness"]["baseColorFactor"][:3]
+    assert written == pytest.approx(once, abs=0.001), (
+        f"the epoxy is {stated} in KiCad's file, {once} linear; the Uno's glb "
+        f"says {written}")
 
 
 def test_the_writer_converts_every_channel_and_not_just_the_file_on_disk(tmp_path):
@@ -1415,7 +1511,7 @@ def test_a_face_the_vendor_did_colour_keeps_its_colour_even_on_the_board():
     **Narrowed by OH-99, and narrowed with its argument rather than around
     it.** There is now exactly one face this does not hold for -- the
     solder-mask film lying on the board, which the nRF54LM20A's STEP styles
-    `#143324` while its own PCB solid, the same missing fact, draws
+    `#507c69` while its own PCB solid, the same missing fact, draws
     `BOARD_MASK`. That is not a statement being overridden: the vendor's
     stackup gives that mask a thickness and no colour, so the green is the
     exporter's default and the incoherence of answering one missing fact two
@@ -1426,8 +1522,8 @@ def test_a_face_the_vendor_did_colour_keeps_its_colour_even_on_the_board():
 
     assert colour_key("#00ff00", is_board=True, is_film=False) == "#00ff00"
     assert colour_key("#313d63", is_board=True, is_film=False) == "#313d63"
-    assert colour_key("#143324", is_board=False, is_film=False) == "#143324"
-    assert colour_key("#186b2a", is_board=False, is_film=False) == "#186b2a", (
+    assert colour_key("#507c69", is_board=False, is_film=False) == "#507c69"
+    assert colour_key("#57ad71", is_board=False, is_film=False) == "#57ad71", (
         "the nRF54LM20A's green LED is a real vendor colour on a real part "
         "and is not the mask film; only the film may be repainted"
     )
@@ -1514,12 +1610,12 @@ def test_the_mask_film_rule_leaves_a_board_sized_thing_standing_above_it():
 def test_the_solder_mask_film_takes_the_colour_of_the_board_it_lies_on():
     """**The film and the board are the same missing fact**, and answering it
     two ways inside one mesh is what OH-99 was filed for: the nRF54LM20A drew
-    `#143324` over a board already drawing `BOARD_MASK`. The film gets the
+    `#507c69` over a board already drawing `BOARD_MASK`. The film gets the
     board's colour whatever the file styles it, because the vendor's stackup
     gives that mask a thickness and no colour."""
     from tools.import_3d_model import BOARD_MASK, colour_key
 
-    assert colour_key("#143324", is_board=False, is_film=True) == BOARD_MASK
+    assert colour_key("#507c69", is_board=False, is_film=True) == BOARD_MASK
     assert colour_key("", is_board=False, is_film=True) == BOARD_MASK
     assert colour_key(None, is_board=False, is_film=True) == BOARD_MASK
 
@@ -1546,9 +1642,10 @@ def test_the_film_tolerances_say_what_they_were_measured_against():
 def test_the_shipped_nrf54lm20a_lost_its_green_board_and_kept_its_green_led():
     """**Both halves of OH-99, measured on the mesh that ships.**
 
-    `#143324` is the exporter's default solder-mask colour -- it is (0.08,
-    0.20, 0.14) in floats to two decimals, a constant typed into a program --
-    and no board mesh may carry it any more. `#186b2a` is a different green
+    `#507c69` is the exporter's default solder-mask colour -- the sRGB
+    encoding of exactly (0.08, 0.20, 0.14) linear, a constant typed into a
+    program, and keyed `#143324` by its linear byte until OH-214 --
+    and no board mesh may carry it any more. `#57ad71` is a different green
     on a real part, the RGB LED, and it MUST survive: a repaint that took it
     too would be the overreach this rule is written narrowly to avoid.
     """
@@ -1562,12 +1659,12 @@ def test_the_shipped_nrf54lm20a_lost_its_green_board_and_kept_its_green_led():
             continue
         seen += 1
         names = {material["name"] for material in doc["materials"]}
-        assert "#143324" not in names, (
+        assert "#507c69" not in names, (
             f"{mesh.name} still draws the exporter's default solder-mask "
             f"green over a board that draws BOARD_MASK"
         )
         if mesh.stem == "nRF54LM20A":
-            assert "#186b2a" in names, (
+            assert "#57ad71" in names, (
                 "the nRF54LM20A's green LED went with the film; the repaint "
                 "is supposed to reach two faces and no part"
             )
@@ -1730,10 +1827,10 @@ def test_the_trimmer_is_the_first_three_terminal_part():
 
 
 def test_a_ceramic_block_is_a_dielectric_in_its_own_colour():
-    """OH-155: the two ceramic parts stop borrowing `#c6c4a0`, which `FINISHES`
+    """OH-155: the two ceramic parts stop borrowing `#e4e3cf`, which `FINISHES`
     then called the switch cover's steel (OH-163 found it is the plunger).
 
-    `FINISHES` is keyed by colour, and `#c6c4a0` is on thirteen of the
+    `FINISHES` is keyed by colour, and `#e4e3cf` is on thirteen of the
     seventeen shipped boards -- both ESP32-C3s among them, which carry neither
     a tactile switch nor a ceramic part -- so it could not be re-declared for
     two of its users without changing the other eleven. A ceramic therefore
@@ -1745,7 +1842,7 @@ def test_a_ceramic_block_is_a_dielectric_in_its_own_colour():
     from tools.model_from_datasheet import SLABS
 
     assert CERAMIC in FINISHES
-    assert CERAMIC != "#c6c4a0", "a ceramic in a vendor colour's own hex is the defect"
+    assert CERAMIC != "#e4e3cf", "a ceramic in a vendor colour's own hex is the defect"
     assert FINISHES[CERAMIC].metalness == 0.0
     assert "judgement" in FINISHES[CERAMIC].why, (
         "the roughness is a stated choice and the entry must say which kind "
@@ -1753,5 +1850,5 @@ def test_a_ceramic_block_is_a_dielectric_in_its_own_colour():
     )
     ceramic = {spec.package for spec in SLABS if spec.colour == CERAMIC}
     assert ceramic == {"CAF-50P160X80-6N", "ANT2P-5.2x2x1.1MM"}, ceramic
-    borrowers = [spec.package for spec in SLABS if spec.colour == "#c6c4a0"]
-    assert not borrowers, f"still shaded in the borrowed #c6c4a0: {borrowers}"
+    borrowers = [spec.package for spec in SLABS if spec.colour == "#e4e3cf"]
+    assert not borrowers, f"still shaded in the borrowed #e4e3cf: {borrowers}"

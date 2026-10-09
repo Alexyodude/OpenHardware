@@ -4572,7 +4572,10 @@ def confirm(element: eagle.Element, box, turn: float,
 #: whole basis of `tools/import_3d_model.py`, so reading "these triangles are
 #: the plated contacts" off it is the same kind of reading as "this face is
 #: solder mask". Every value was taken from a shipped mesh rather than chosen.
-CONTACT_COLOURS = frozenset({"#b58136", "#ebbc51", "#edbe51", "#e7c863"})
+#: In sRGB, as each file states it, since OH-214 -- they were the linear bytes
+#: `#b58136`, `#ebbc51`, `#edbe51` and `#e7c863` while `colour_of` took
+#: OpenCASCADE's linear value, and moved with the keys they were copied from.
+CONTACT_COLOURS = frozenset({"#dbbc7e", "#f6df99", "#f7e099", "#f4e5a7"})
 
 #: A part needs this many surface-mount pads before its turn is decided by
 #: where its contacts land.
@@ -4795,7 +4798,7 @@ def mark_turns(element: eagle.Element, mesh: Mesh, thickness: float,
     the vendor's, read off their own footprint; the feature is the model's
     own, found by asking which of its vertices a half turn moves and where
     they are. The feature is not named and does not need to be: on the DIP it
-    is the notch in the top of the body, 1.5 x 0.8 mm of `#050505` at the end
+    is the notch in the top of the body, 1.5 x 0.8 mm of `#262525` at the end
     Arduino draw their notch at, and the rule would hold just as well if it
     were a bevel or a dimple.
 
