@@ -6,7 +6,6 @@ priority: P2
 owner: session/muldiv
 created: '2026-08-23'
 touches:
-- core/i8086/muldiv.*
 - tests/i8086/test_muldiv.py
 ---
 
@@ -60,3 +59,5 @@ sign are intermediates of the 8088's CORX/CORD microcode, and two documented
 attempts have failed to recover them. Nothing in the tree has changed that.
 
 **Note 2026-10-10:** 2026-10-10: OH-222 filed against this ticket's core/i8086/muldiv.cc -- IDIV r/m16 with DX:AX = 0x80000000 and a divisor of 0xFFFF computes INT32_MIN / -1 on the host before the range check, which crashes the process (x64 #DE) where the part raises a divide error. Found by OH-220's review, by reading. Lend core/i8086/muldiv.* to OH-222 or take it here.
+
+**Note 2026-10-10:** 2026-10-10: core/i8086/muldiv.* lent to OH-222 (the host-crashing IDIV), nobody holding this ticket and no session/muldiv branch or worktree existing. Return it when OH-222 closes.

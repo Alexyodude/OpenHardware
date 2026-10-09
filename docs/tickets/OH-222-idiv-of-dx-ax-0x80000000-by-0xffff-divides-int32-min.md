@@ -5,6 +5,9 @@ title: IDIV of DX:AX = 0x80000000 by 0xFFFF divides INT32_MIN by -1 on the host 
 status: open
 priority: P1
 created: '2026-10-10'
+touches:
+- core/i8086/muldiv.*
+- tests/i8086/test_idiv_overflow.py
 ---
 
 Found by OH-220's review (2026-10-10), read and not executed: executing it would kill the process that ran it.
@@ -21,3 +24,5 @@ STEPS:
 1. Return the divide-error trap for INT32_MIN / -1 before dividing, in the same shape as the divisor == 0 case.
 2. A test that executes IDIV r/m16 with DX:AX = 0x80000000 and a divisor of 0xFFFF and expects the divide-error trap with AX and DX unchanged, as the existing out-of-range cases do -- seen to fail first, which means seen to crash, so run the failing case in a subprocess and assert on its exit rather than letting it take the suite down.
 3. Check the oracle's corpus (the F7.7 cases the conformance suite fetches) for whether it contains this dividend; if it does, say why the suite never crashed.
+
+**Note 2026-10-10:** 2026-10-10: borrows core/i8086/muldiv.* from OH-11 and claims a new tests/i8086/test_idiv_overflow.py.
