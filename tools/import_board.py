@@ -170,6 +170,14 @@ def _grouped(pads: list[tuple[str, str, float, float]]) -> tuple[PadSpec, ...]:
 #: retired importer tagged these pads `header-top` by the sign of their y.
 UNDERSIDE = "underside"
 
+#: How many more of the pins under a module the quarter turn that places its
+#: own board must NAME than any other turn does (OH-216): stand on back-side
+#: copper whose net is the pin's own symbol name. Two is what a wrong turn
+#: could name by coincidence -- a XIAO has two GND pins under it, and ground
+#: is the net a wrong turn is likeliest to stand a GND pin on -- so the turn
+#: that places the module must name three more than any other.
+NAME_MARGIN = 3
+
 
 def _land(pad: kicad.Pad) -> tuple[float, float, float, float]:
     """A pad's copper as `(min_x, min_y, max_x, max_y)`, turned by its own
@@ -184,7 +192,7 @@ def _land(pad: kicad.Pad) -> tuple[float, float, float, float]:
 
 def _under_the_module(
     path: pathlib.Path, footprint: kicad.Footprint, module: kicad.Board | None,
-    module_path: pathlib.Path | None,
+    module_path: pathlib.Path | None, names: typing.Mapping[str, str],
 ) -> set[str]:
     """The numbers of a module footprint's pads that meet the module's
     UNDERSIDE, from what the vendor's files state (OH-216).
@@ -203,13 +211,22 @@ def _under_the_module(
     too -- the nRF54L15's two NFC pads do. The module's own board file
     (Seeed's `.kicad_pcb`) says which copper is the module's: a land over a
     plated-through pad is a castellation, and one over copper on `B.Cu`
-    alone, with no plated-through pad, meets the underside. It is placed
-    over the module by the turn that lands every pad the outline found on
-    back-side copper; a footprint with no such pad gives it nothing to be
-    placed by, and then the module is not read.
+    alone, with no plated-through pad, meets the underside.
 
-    Where the two disagree -- a pin the outline puts under the module that
-    no back-side copper answers under any turn -- this refuses, naming them.
+    **It is placed over the module by NAMES, not by how many lands find
+    copper.** Of the four quarter turns, the one taken is the one under
+    which the most of the pins the outline found stand on back-side copper
+    whose net their own symbol pin (`names`) names -- `D11` on Seeed's
+    `GPIO21/D11/RX1`. Copper alone cannot tell a half turn: a XIAO's
+    underside test points are two rows, and turned half way round the
+    RP2350 DIP's and the MG24 DIP's lands find back-side copper for MORE of
+    those pins than turned right, each on another pin's net. A footprint
+    with no pin inside its outline gives the module nothing to be placed
+    by, and then the module is not read.
+
+    Where the names cannot decide -- no turn names `NAME_MARGIN` more of the
+    pins than every other turn does -- this refuses, naming the pins and
+    what each turn answered and named.
     """
     fab = [seg for seg in footprint.segments if seg.layer == "F.Fab"]
     if not fab:
@@ -257,9 +274,11 @@ def _under_the_module(
                       if abs(px - at[0]) <= half_x and abs(py - at[1]) <= half_y]
         return found
 
-    def back_only(found: list[tuple[kicad.Pad, float]]) -> list[float]:
-        """How far each back-side-only pad in `found` is from its land."""
-        return [gap for pad, gap in found if pad.back and not pad.front]
+    def back_only(found: list[tuple[kicad.Pad, float]]) -> list[tuple[float, kicad.Pad]]:
+        """Each back-side-only pad in `found` with its distance from its
+        land, nearest first."""
+        return sorted(((gap, pad) for pad, gap in found if pad.back and not pad.front),
+                      key=lambda pair: pair[0])
 
     def edge_under(quarter: int) -> frozenset[str]:
         """The pins reaching the outline that meet back-side copper and no
@@ -269,33 +288,41 @@ def _under_the_module(
         return frozenset(number for number, pads in found.items()
                          if back_only(pads) and not any(p.front and p.back for p, _ in pads))
 
+    def aliases(name: str, separator: str) -> set[str]:
+        """The names one signal goes by, in any case: a symbol pin's
+        `D3/MTDI` is two, and a net is `/sheet/label` with each `/` inside
+        the label written `{slash}`, so Seeed's `/04 RP2350/GPIO21{slash}
+        D11{slash}RX1` is three."""
+        return {alias.casefold() for alias in name.split(separator) if alias}
+
     # **Not every pin under the module is answered, and need not be.** The
     # outline is the statement for those; the module is read for the edge.
     # Measured: the C5's battery lands sit 0.77 mm off its battery pads, and
-    # its pad 25 stands where the module has no pad at all. So the turn is
-    # the one answering the most of them, and of turns answering as many --
-    # the nRF54LM20A DIP's test points are a grid a half turn lays onto
-    # itself -- the one standing its lands nearest the copper answering them.
-    answered = {}
+    # its pad 25 stands where the module has no pad at all. **Nor is every
+    # answered pin named**: the RP2350's EN stands on its `RUN`. A pin is
+    # named where the back-side copper nearest it is on a net its symbol pin
+    # names, and the turn naming the most places the module.
+    answered, named = {}, {}
     for quarter in range(4):
-        gaps = [min(gap) for gap in (back_only(over(lands[number], quarter))
-                                     for number in inside) if gap]
-        answered[quarter] = (len(gaps), -round(sum(gaps), 3))
-    best = max(answered.values())
-    readings = {edge_under(quarter) for quarter, score in answered.items() if score == best}
-    if best[0] == 0 or len(readings) != 1:
+        nearest = {number: back_only(over(lands[number], quarter)) for number in inside}
+        answered[quarter] = sum(1 for found in nearest.values() if found)
+        named[quarter] = sum(
+            1 for number, found in nearest.items()
+            if found and aliases(names.get(number, ""), "/")
+            & aliases(found[0][1].net.rsplit("/", 1)[-1], "{slash}"))
+    best, runner_up = sorted(range(4), key=lambda quarter: -named[quarter])[:2]
+    if named[best] - named[runner_up] < NAME_MARGIN:
         raise BoardImportError(
             f"{path}: the pins {sorted(inside, key=_number_order)} lie wholly "
-            f"inside its F.Fab outline, so under the module, and {module_path} "
-            f"answers { {q * 90: n for q, (n, _) in answered.items()} } of them "
-            f"with back-side copper turned 0/90/180/270 degrees. The turn "
-            f"answering most, nearest, is what places the module; "
-            + ("none answers any." if best[0] == 0 else
-               f"the turns tied at {best} disagree about the pins at the "
-               f"edge: {[sorted(r, key=_number_order) for r in readings]}.")
+            f"inside its F.Fab outline, so under the module, and {module_path}, "
+            f"turned 0/90/180/270 degrees, answers "
+            f"{ {q * 90: n for q, n in answered.items()} } of them with "
+            f"back-side copper and names { {q * 90: n for q, n in named.items()} }"
+            f" -- the copper nearest the pin on a net its symbol pin names. The "
+            f"turn that places the module must name at least {NAME_MARGIN} "
+            f"(NAME_MARGIN) more than any other, and none does."
         )
-    (edge,) = readings
-    return inside | edge
+    return inside | edge_under(best)
 
 
 def _number_order(number: str) -> tuple[int, str]:
@@ -543,7 +570,7 @@ def _from_kicad(
         board = kicad.read_board(module) if module is not None else None
     except kicad.KicadError as exc:
         raise BoardImportError(f"{path}: --module {module}: {exc}") from exc
-    under = _under_the_module(path, footprint, board, module)
+    under = _under_the_module(path, footprint, board, module, names)
     # Header runs are read off the pads that are on one; an underside pad is
     # on none, and counted among them it would add runs that are not there.
     grouped = _grouped([entry for entry in entries if entry[1] not in under])

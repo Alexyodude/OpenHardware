@@ -648,10 +648,13 @@ def test_more_than_two_runs_are_numbered_rather_than_named(tmp_path):
 
 
 def _module_footprint(tmp_path) -> pathlib.Path:
-    """A 10 x 8 mm module's footprint, with its symbol beside it: castellation
-    lands 1 and 2 reaching past the F.Fab outline's long sides, 3 and 4 wholly
-    inside it, and 5 at the edge where the module carries a back-side pad."""
-    lands = (("1", 0.3, 2), ("2", 9.7, 2), ("3", 5, 4), ("4", 3, 4), ("5", 0.3, 6))
+    """A 10 x 8 mm module's footprint, with its symbol beside it naming pin
+    n `Pn`: castellation lands 1 and 2 reaching past the F.Fab outline's left
+    and right sides, 5 at its left edge where the module carries a back-side
+    pad, and 3, 4, 6, 7 and 8 wholly inside it. Turned half way round the
+    outline's centre, 3 and 4 swap places, so do 6 and 7, and so do 2 and 5."""
+    lands = (("1", 0.3, 2), ("2", 9.7, 2), ("3", 3, 3), ("4", 7, 5), ("5", 0.3, 6),
+             ("6", 3, 5), ("7", 7, 3), ("8", 5, 6.5))
     path = tmp_path / "mod.kicad_mod"
     path.write_text(
         '(footprint "mod" (layer "F.Cu")'
@@ -671,15 +674,21 @@ def _module_footprint(tmp_path) -> pathlib.Path:
     return path
 
 
-def _module_board(tmp_path, back: tuple[tuple[float, float], ...]) -> pathlib.Path:
+def _module_board(tmp_path, back: tuple[tuple[float, float, str], ...]) -> pathlib.Path:
     """The module's own board, 10 x 8 mm at (100, 100): plated castellations
-    under lands 1 and 2, and a pad on `B.Cu` alone at each of `back`."""
-    parts = [f'(footprint "L:CASTEL" (layer "F.Cu") (at {x} 102)'
-             f' (pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.6) (layers "*.Cu")))'
-             for x in (100.3, 109.7)]
+    under lands 1 and 2 -- 1 over a pad on `B.Cu` alone as well, as a
+    castellation's own land on a module's underside is -- and a pad on
+    `B.Cu` alone at each `(x, y, net)` of `back`."""
+    parts = [
+        '(footprint "L:CASTEL" (layer "F.Cu") (at 100.3 102)'
+        ' (pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.6) (layers "*.Cu") (net "P1"))'
+        ' (pad "1" smd rect (at 0 0) (size 1 1) (layers "B.Cu" "B.Mask") (net "P1")))',
+        '(footprint "L:CASTEL" (layer "F.Cu") (at 109.7 102)'
+        ' (pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.6) (layers "*.Cu") (net "P2")))',
+    ]
     parts += [f'(footprint "L:TP" (layer "B.Cu") (at {x} {y})'
-              f' (pad "1" smd circle (at 0 0) (size 1 1) (layers "B.Cu" "B.Mask")))'
-              for x, y in back]
+              f' (pad "1" smd circle (at 0 0) (size 1 1) (layers "B.Cu" "B.Mask") (net "{net}")))'
+              for x, y, net in back]
     path = tmp_path / "mod.kicad_pcb"
     path.write_text(
         "(kicad_pcb (version 20241229)"
@@ -704,12 +713,19 @@ def test_a_pin_under_the_module_is_grouped_underside_by_the_footprints_own_outli
     underside. Those are grouped `underside` and kept out of the header runs.
 
     Seen red (2026-10-09): with `_under_the_module` returning no pins, the
-    two under the module were grouped into header columns with the rest."""
+    pins under the module were grouped into header columns with the rest;
+    again on this fixture as it now is (review round, 2026-10-09)."""
     geometry = read_geometry(_module_footprint(tmp_path))
-    assert _underside(geometry) == ["3", "4"], geometry.pads
+    assert _underside(geometry) == ["3", "4", "6", "7", "8"], geometry.pads
     assert {pad.group for pad in geometry.pads if pad.number in "125"} == {
         "header-left", "header-right"}, geometry.pads
     assert "wholly inside the footprint's F.Fab outline" in geometry.derivation
+
+
+#: Back-side copper of the module board under `_module_footprint`'s pins
+#: unturned, each on its own pin's net, and under land 5 at the edge.
+NAMED_UNDERSIDE = ((103, 103, "P3"), (107, 105, "P4"), (103, 105, "P6"), (107, 103, "P7"),
+                   (100.3, 106, "P5"))
 
 
 def test_a_pin_at_the_edge_is_underside_where_the_modules_own_board_puts_back_side_copper(
@@ -717,15 +733,63 @@ def test_a_pin_at_the_edge_is_underside_where_the_modules_own_board_puts_back_si
     """**The outline cannot place a pad at the module's edge**: the
     nRF54L15's NFC pads reach past it as a castellation's land does. The
     module's own board file can: a land over a plated-through pad is a
-    castellation, one over copper on `B.Cu` alone is on the underside. Land
-    5 stands over such a pad and is underside with the module read, and not
-    without it; lands 1 and 2 stand over castellations and are never.
+    castellation, one over copper on `B.Cu` alone, and over no plated-through
+    pad, is on the underside. Land 5 stands over such a pad and is underside
+    with the module read, and not without it; land 2 stands over a
+    castellation and is not, and nor is land 1, though its castellation has
+    a pad of its own on `B.Cu` alone under it.
 
-    Seen red (2026-10-09): with the edge rule removed, land 5 stayed out."""
+    Seen red (2026-10-09): with the edge rule removed, land 5 stayed out. In
+    review (2026-10-09), with the plated-through check removed, land 1 was
+    underside too; before land 1 had back-side copper, removing that check
+    failed no test that runs without Seeed's files."""
     footprint = _module_footprint(tmp_path)
-    module = _module_board(tmp_path, ((105, 104), (103, 104), (100.3, 106)))
-    assert _underside(read_geometry(footprint, module=module)) == ["3", "4", "5"]
-    assert _underside(read_geometry(footprint)) == ["3", "4"]
+    module = _module_board(tmp_path, NAMED_UNDERSIDE)
+    assert _underside(read_geometry(footprint, module=module)) == ["3", "4", "5", "6", "7", "8"]
+    assert _underside(read_geometry(footprint)) == ["3", "4", "6", "7", "8"]
+
+
+def test_a_module_is_placed_by_the_turn_naming_its_pins_and_not_the_one_answering_most(
+        tmp_path):
+    """**A half turn can stand MORE of the pins under a module on back-side
+    copper than the right turn does, each on another pin's net** -- Seeed's
+    RP2350 and MG24 DIPs do (OH-216 review) -- so the module is placed by
+    the turn under which the pins stand on copper their own symbol names.
+    Here a half turn stands pins 3, 4, 6 and 7 on one another's copper, and
+    pin 8 on copper on a net called `X`; unturned, 3, 4, 6 and 7 stand on
+    their own nets and 8 on nothing. Which turn it is decides land 5 or land
+    2 at the edge: placed by the half turn, land 2 -- a castellation --
+    would be called underside.
+
+    Seen red (2026-10-09), on `_under_the_module` as it was before review:
+    it took the half turn, answering five pins to four, and put land 2
+    under the module in place of land 5."""
+    footprint = _module_footprint(tmp_path)
+    module = _module_board(tmp_path, NAMED_UNDERSIDE + ((105, 101.5, "X"),))
+    assert _underside(read_geometry(footprint, module=module)) == ["3", "4", "5", "6", "7", "8"]
+
+
+def test_a_module_whose_turns_its_pins_names_cannot_tell_apart_is_refused_with_its_counts(
+        tmp_path):
+    """**A turn is taken only where it names `NAME_MARGIN` more pins than
+    any other.** Here the module board's back-side copper is on nets naming
+    two pins each, `P3/P4` and `P6/P7`, so unturned and turned half way round
+    both name four of the pins under the module, and the half turn answers
+    one more by copper alone. Refused, naming each turn's counts, rather
+    than taking either.
+
+    Seen red (2026-10-09), on `_under_the_module` as it was before review:
+    nothing was refused; it took the half turn by copper."""
+    footprint = _module_footprint(tmp_path)
+    module = _module_board(tmp_path, (
+        (103, 103, "P3{slash}P4"), (107, 105, "P3{slash}P4"), (103, 105, "P6{slash}P7"),
+        (107, 103, "P6{slash}P7"), (100.3, 106, "P5"), (105, 101.5, "X")))
+    with pytest.raises(BoardImportError) as caught:
+        read_geometry(footprint, module=module)
+    message = str(caught.value)
+    assert ("answers {0: 4, 90: 0, 180: 5, 270: 0} of them with back-side copper "
+            "and names {0: 4, 90: 0, 180: 4, 270: 0}") in message, message
+    assert "must name at least 3 (NAME_MARGIN) more than any other" in message, message
 
 
 def test_a_module_whose_board_answers_no_pin_under_it_is_refused_with_its_counts(
@@ -733,17 +797,20 @@ def test_a_module_whose_board_answers_no_pin_under_it_is_refused_with_its_counts
     """A module board that puts back-side copper under none of the pins the
     outline places under the module, at any quarter turn, is not this
     module's board, or not placed as this reads it. Refused, naming the
-    pins and what each turn answered.
+    pins and what each turn answered and named.
 
     Seen red (2026-10-09): with `_under_the_module` returning no pins,
-    nothing was refused."""
+    nothing was refused; again on this fixture as it now is (review round,
+    2026-10-09)."""
     footprint = _module_footprint(tmp_path)
     module = _module_board(tmp_path, ())
     with pytest.raises(BoardImportError) as caught:
         read_geometry(footprint, module=module)
     message = str(caught.value)
-    assert "the pins ['3', '4'] lie wholly inside its F.Fab outline" in message, message
-    assert "{0: 0, 90: 0, 180: 0, 270: 0}" in message, message
+    assert ("the pins ['3', '4', '6', '7', '8'] lie wholly inside its F.Fab "
+            "outline") in message, message
+    assert ("answers {0: 0, 90: 0, 180: 0, 270: 0} of them with back-side copper "
+            "and names {0: 0, 90: 0, 180: 0, 270: 0}") in message, message
 
 
 #: Each XIAO chip's module board as Seeed publish it, under
