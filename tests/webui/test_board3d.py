@@ -2230,7 +2230,9 @@ def test_image_y_maps_to_scene_z_with_the_same_sign_as_the_models_pins():
         "the pad line negates image y again, which mirrors every pad onto "
         "the row opposite its pin"
     )
-    assert "centreY * SCALE - depth / 2" in source, (
+    # Since OH-216 the model is set by the pads' own scene positions, so the
+    # centring takes image y through the same expression as the pad line.
+    assert "z: pad.y * SCALE - depth / 2" in source, (
         "the model group's centring flipped back, so the model and the pads "
         "mirror against each other"
     )
@@ -2700,7 +2702,7 @@ for (const { layout, file } of JSON.parse(readFileSync(CASES, "utf-8"))) {
                     `placed layout pads`);
   }
   out.push({ board: layout.board, turn: model.rotation.y, scale: model.scale.x,
-             pcb: view.slab.max[1], pads });
+             pcb: view.slab.max[1], placement: view.placement, pads });
 }
 console.log(JSON.stringify(out));
 """
@@ -2725,14 +2727,18 @@ def placed_by_the_page(directory: pathlib.Path, cases: list[dict]) -> list[dict]
     return json.loads(done.stdout.strip().splitlines()[-1])
 
 
-def one_triangle_glb(path: pathlib.Path, pcb: dict[str, float]) -> None:
+def one_triangle_glb(path: pathlib.Path, pcb: dict[str, float],
+                     header_pads: list | None = None) -> None:
     """The narrowest file `readGlb` accepts -- one triangle, one material --
-    carrying the `pcb` extra a turn is read from."""
+    carrying the `pcb` extra a turn is read from, and `header_pads` where
+    given (OH-216)."""
     binary = (struct.pack("<9f", 0, 0, 0, 1, 0, 0, 0, 0, 1)
               + struct.pack("<9f", 0, 1, 0, 0, 1, 0, 0, 1, 0)
               + struct.pack("<3I", 0, 1, 2))
     document = json.dumps({
-        "asset": {"version": "2.0", "extras": {"units": "mm", "pcb": pcb}},
+        "asset": {"version": "2.0", "extras": {
+            "units": "mm", "pcb": pcb,
+            **({"header_pads": header_pads} if header_pads is not None else {})}},
         "buffers": [{"byteLength": len(binary)}],
         "bufferViews": [{"buffer": 0, "byteOffset": offset, "byteLength": length}
                         for offset, length in ((0, 36), (36, 36), (72, 12))],
@@ -2838,6 +2844,10 @@ def composed_boards_as_placed(tmp_path_factory):
     on every board whose file is not the model's own, and on the Uno, whose
     pad map was traced from Arduino's artwork and labelled from its
     silkscreen, so its labels are not nets and it carries no pad numbers.
+    And `group`, the board file's, which says which pads are on the
+    underside (OH-216). Each case carries `header_pads`, the pads the model
+    itself states it is set by (OH-216), or None on a model composed before
+    it stated any.
 
     Models and vendor files are gitignored, so this skips where nobody has run
     `tools/compose_board_3d.py`, as the Uno's model test in test_pin_view does;
@@ -2883,7 +2893,8 @@ def composed_boards_as_placed(tmp_path_factory):
                  (pad["group"] if kicad else pad["label"], pad["pad"])
                  for pad in stated["pads"] if same_file and "pad" in pad}
         layout = api.pad_view(board, None, None)
-        known[board] = (layout, names, own_header_pads(compose, spec), same_file)
+        known[board] = (layout, names, own_header_pads(compose, spec), same_file,
+                        extras.get("header_pads"))
         cases.append({"layout": layout, "file": str(model)})
     if not cases:
         pytest.skip(f"no composed model is built here with its vendor file "
@@ -2892,7 +2903,8 @@ def composed_boards_as_placed(tmp_path_factory):
     placed = placed_by_the_page(tmp_path_factory.mktemp("placed"), cases)
     boards = []
     for case in placed:
-        layout, names, own, same_file = known[case["board"]]
+        layout, names, own, same_file, stated = known[case["board"]]
+        case["header_pads"] = stated
         for pad in case["pads"]:
             entry = layout["pads"][pad["index"]]
             pad["name"] = names.get((entry["label"], entry["x"], entry["y"]))
@@ -2949,9 +2961,10 @@ def test_every_composed_board_lands_its_pads_on_the_models_own_header_pads(
     map, it is right only because both of `placeModel`'s comparisons tie.
 
     Tolerance: inside the circle the pad's narrower side spans (`inscribed`).
-    The PCBCUPID Glyph Mini sits 0.73 mm off on every pad -- inside it --
-    because the composer centres on its castellations as well as its pins; a
-    centring offset, not a turn, recorded on OH-215.
+    The PCBCUPID Glyph Mini sat 0.73 mm off on every pad -- inside it --
+    because the composer centres on its castellations as well as its pins;
+    since OH-216 the page centres on the pads that land, and the test after
+    the next holds that to `CENTRED_MM`.
 
     Seen red (2026-10-09): with the turn read from the pad map alone, the six
     boards OH-215 names were the six failures, each landing 0 or 4 of its
@@ -3147,6 +3160,170 @@ def test_every_pad_carves_only_metal_on_its_own_side_of_the_board(
         if stray:
             wrong.append(f"{case['board']}: {len(stray)} triangles carved off "
                          f"their pad's own side or header pad, e.g. {stray[:3]}")
+    assert not wrong, "\n".join(wrong)
+    if left_out:
+        pytest.skip(f"SKIPPED in part: the {len(composed)} boards placed here "
+                    f"held; left out: {left_out}")
+
+
+# --- OH-216: the page sets a model by the pads both sides name ---------------
+
+
+def named_pad_map(board: str, width: int, height: int,
+                  pads: list[tuple[str, float, float]]) -> dict:
+    """A pad map at 8 px/mm whose pads are `(label, x_mm, z_mm)` from the
+    middle of the image, z down the page as the image's y is."""
+    return {"board": board, "width": width, "height": height,
+            "px_per_mm": 8.0, "supply": None, "led_parts": None,
+            "pads": [{"label": label, "pin": label, "chip_pin": None,
+                      "x": width / 2 + x * 8, "y": height / 2 + z * 8,
+                      "group": "header", "state": "unknown"}
+                     for label, x, z in pads]}
+
+
+def test_a_model_is_turned_by_the_names_of_its_pads_where_its_outline_cannot_say(
+        tmp_path):
+    """**OH-216: the turn comes from the pads both sides name.** OH-215's
+    rule compared the two outlines' orientations, which cannot say which way
+    a square lies or see a half turn. Two models that state their header
+    pads, each needing what the outlines cannot give:
+
+    a 10 x 10 mm square whose pads land on their namesakes only turned a
+    quarter, on a square map -- the outlines tie, so OH-215's rule left it
+    unturned; and a 20 x 10 mm board lying on a lying map whose pads land on
+    their namesakes only turned half way round. And the square again with
+    no header pads, which is every fetched mesh: set by its outline, and
+    saying so. Synthetic, so it runs with no model built; needs node.
+
+    Seen red (2026-10-09), on board3d.js as OH-215 left it: the square and
+    the half-turned board both came out unturned.
+    """
+    pads = [[-2.0, 0.0, 1.0, 1.0, "A"], [2.0, 0.0, 1.0, 1.0, "B"],
+            [0.0, -1.0, 1.0, 1.0, "C"]]
+    square = tmp_path / "square.glb"
+    one_triangle_glb(square, {"long": 10.0, "short": 10.0, "thickness": 1.6}, pads)
+    bare = tmp_path / "bare.glb"
+    one_triangle_glb(bare, {"long": 10.0, "short": 10.0, "thickness": 1.6})
+    lying = tmp_path / "lying.glb"
+    one_triangle_glb(lying, {"long": 20.0, "short": 10.0, "thickness": 1.6},
+                     [[-4.0, 0.0, 1.0, 1.0, "A"], [4.0, 0.0, 1.0, 1.0, "B"],
+                      [0.0, 2.0, 1.0, 1.0, "C"]])
+    # Turned by `rotation.y`, a model point (x, z) lands at (z, -x) a quarter
+    # round and at (-x, -z) half way.
+    placed = placed_by_the_page(tmp_path, [
+        {"layout": named_pad_map("square", 100, 100,
+                                 [("A", 0, 2), ("B", 0, -2), ("C", -1, 0)]),
+         "file": str(square)},
+        {"layout": named_pad_map("half", 200, 100,
+                                 [("A", 4, 0), ("B", -4, 0), ("C", 0, -2)]),
+         "file": str(lying)},
+        {"layout": named_pad_map("bare", 100, 100,
+                                 [("A", 0, 2), ("B", 0, -2), ("C", -1, 0)]),
+         "file": str(bare)},
+    ])
+    got = {case["board"]: (round(math.degrees(case["turn"])),
+                           (case.get("placement") or {}).get("by"),
+                           (case.get("placement") or {}).get("named"))
+           for case in placed}
+    assert got == {"square": (90, "header pads", 3), "half": (180, "header pads", 3),
+                   "bare": (0, "PCB outline", None)}, got
+
+
+def test_a_model_no_turn_of_which_lands_the_pads_is_refused_by_name(tmp_path):
+    """Where no quarter turn lands every pad of the board file on one of the
+    model's header pads, the page refuses, naming the board and the pads,
+    rather than drawing the model somewhere a pad is not.
+
+    Seen red (2026-10-09), on board3d.js as OH-215 left it: nothing refused.
+    """
+    far = tmp_path / "far.glb"
+    one_triangle_glb(far, {"long": 20.0, "short": 10.0, "thickness": 1.6},
+                     [[-4.0, 0.0, 1.0, 1.0, "A"], [4.0, 0.0, 1.0, 1.0, "B"]])
+    with pytest.raises(AssertionError) as caught:
+        placed_by_the_page(tmp_path, [{
+            "layout": named_pad_map("nowhere", 200, 100,
+                                    [("A", -4, 0), ("B", 1, 0), ("C", 0, 3)]),
+            "file": str(far)}])
+    message = str(caught.value)
+    assert ("nowhere: no quarter turn lands every pad of its board file on one "
+            "of the model's header pads") in message, message
+
+
+#: How near a pad must land to its namesake where the board file and the
+#: model were read out of one vendor file: both are that file's numbers, so
+#: anything but rounding is a misplacement. OH-215 measured 0.01 mm worst
+#: and the Glyph Mini's 0.73.
+SAME_FILE_MM = 0.05
+
+#: How far the middle of where a board's pads land may sit from the middle
+#: of the pads themselves: a model centred on the pads that land puts it at
+#: nothing but rounding, 0.004 mm at worst as measured on every board
+#: (2026-10-09). A XIAO SMD footprint's castellation lands stand outward of
+#: the module's pads on BOTH rows, which is why each pad may be a quarter
+#: millimetre off its own and the middle none.
+CENTRED_MM = 0.05
+
+
+def test_every_composed_board_lands_each_pad_on_a_header_pad_its_model_states(
+        composed_boards_as_placed):
+    """**OH-216, over every board a composed model is drawn for**: placed as
+    the page places it, every pad of the board file on the board's top lands
+    on a header pad the MODEL states (`header_pads`), and on one of its own
+    name wherever the model has a pad of that name. Where the board file
+    names each pad out of the very file the model was composed from, it
+    lands within `SAME_FILE_MM` of it. The Uno's map is traced from
+    artwork and labelled from its silkscreen, so its pads land inside a
+    header pad, any one, as OH-215 held them.
+
+    This is what holds a XIAO against a half turn, which OH-215 could not:
+    its board file is Seeed's footprint and its model Seeed's module, two
+    files, and the names they share -- GND and VBUS, and nine on the C3 --
+    lie on no namesake turned half way round. And it holds the centre, to
+    `CENTRED_MM`: the PCBCUPID Glyph Mini sat 0.73 mm off every pad, centred
+    on 46 pads where its board file has 23; and a XIAO SMD 0.43 to 0.52 mm
+    off, centred on its underside pads too.
+
+    Seen red (2026-10-09): on board3d.js as OH-215 left it, every board
+    (none said what set it), the Glyph Mini with every pad 0.73 mm off its
+    own, and the C3, C5, C6, RP2350 and nRF54L15 SMDs off centre by 0.43 to
+    0.52 mm; and with the page turning every model a further half (in
+    memory), every board, the XIAO DIPs among them.
+    """
+    composed, left_out = composed_boards_as_placed
+    wrong = []
+    for case, _, same_file in composed:
+        stated = case["header_pads"]
+        if stated is None:
+            wrong.append(f"{case['board']}: its model states no header pads -- "
+                         f"composed before OH-216; recompose")
+            continue
+        names = {name for *_, name in stated}
+        astray = []
+        offsets = []
+        for pad in case["pads"]:
+            if pad["group"] == "underside":
+                continue
+            # A traced map's labels are its artwork's silkscreen, not nets:
+            # the Uno's "1" is digital pin 1 and its model's "1" a pad on no
+            # net. Anywhere else a shared name is one signal.
+            traced = same_file and pad["name"] is None
+            own = [row for row in stated
+                   if traced or pad["label"] not in names or row[4] == pad["label"]]
+            gap, row = min((math.hypot(pad["x"] - x, pad["z"] - z), (x, z, w, h, name))
+                           for x, z, w, h, name in own)
+            reach = SAME_FILE_MM if pad["name"] is not None else inscribed(row[2], row[3])
+            if gap > reach:
+                astray.append((pad["label"], row[4], round(gap, 3)))
+            offsets.append((pad["x"] - row[0], pad["z"] - row[1]))
+        middle = (sum(x for x, _ in offsets) / len(offsets),
+                  sum(z for _, z in offsets) / len(offsets))
+        if math.hypot(*middle) > CENTRED_MM:
+            astray.append(("the middle of all of them", "",
+                           tuple(round(v, 3) for v in middle)))
+        if astray or (case.get("placement") or {}).get("by") != "header pads":
+            wrong.append(f"{case['board']}: set by {case.get('placement')}, "
+                         f"{len(astray)} pads off their own header pad "
+                         f"(pad, nearest it may land on, mm): {astray[:4]}")
     assert not wrong, "\n".join(wrong)
     if left_out:
         pytest.skip(f"SKIPPED in part: the {len(composed)} boards placed here "

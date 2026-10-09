@@ -1183,6 +1183,8 @@ export function showBoard(layout, model = null) {
   // An underside pad lies on the board's underside, mirrored across it.
   const top = BOARD_THICKNESS / 2 + PAD_LIFT + PAD_HEIGHT / 2;
   view.underside = [];
+  // Until a model arrives nothing has set one (OH-216).
+  view.placement = null;
   for (const pad of layout.pads) {
     if (pad.x === null || pad.y === null) continue;
     const under = pad.group === UNDERSIDE;
@@ -1483,6 +1485,85 @@ function carvePins(group, pcbThickness) {
   return found;
 }
 
+/** The middle of a set of `{x, z}` points' extent. */
+function middleOf(points) {
+  const xs = points.map((point) => point.x);
+  const zs = points.map((point) => point.z);
+  return { x: (Math.min(...xs) + Math.max(...xs)) / 2,
+           z: (Math.min(...zs) + Math.max(...zs)) / 2 };
+}
+
+/**
+ * The quarter turn and the place that land a board file's pads on the
+ * model's own header pads (OH-216), or an error naming the pads none does.
+ *
+ * `pads` are the board file's, in scene units: `{label, x, z}`. `header` is
+ * the model's `header_pads` extra, `[x, z, width, height, name]` in its own
+ * millimetres, each named as the importer names a board file's pad from the
+ * same file -- its net, or its number on no net.
+ *
+ * **Each turn is tried and the one that lands most pads on a header pad of
+ * their own NAME wins**, then most on any header pad, then nearest. A name
+ * is what a half turn cannot fake: a XIAO's two castellated rows lie on one
+ * another turned half way round, and its GND and VBUS do not. A pad lands
+ * where it is inside the circle its header pad's narrower side spans.
+ * Each turn is first centred on the middle of both sets' extents, and the
+ * place is then the middle of the pads that landed against the middle of
+ * the header pads they landed on: **the pads both sides have**, which on
+ * the PCBCUPID Glyph Mini is not every pad its composer centred on.
+ *
+ * `preferred` is the quarter the outlines' orientations give (OH-215),
+ * taken only where turns tie on all three -- a board whose names say
+ * nothing and whose pads are symmetric, as a XIAO DIP's header rows are.
+ */
+function landOnHeaderPads(board, pads, header, scale, preferred) {
+  const tried = [];
+  for (let quarter = 0; quarter < 4; quarter++) {
+    // A model point (x, z) turned by `rotation.y` = quarter * 90 degrees.
+    const cos = [1, 0, -1, 0][quarter];
+    const sin = [0, 1, 0, -1][quarter];
+    const turned = header.map(([x, z, w, h, name]) => ({
+      x: (x * cos + z * sin) * scale, z: (-x * sin + z * cos) * scale,
+      reach: (Math.min(w, h) / 2) * scale, name }));
+    const from = middleOf(pads);
+    const to = middleOf(turned);
+    const matches = pads.map((pad) => {
+      let best = null;
+      let gap = Infinity;
+      for (const own of turned) {
+        const d = Math.hypot(pad.x - from.x - (own.x - to.x),
+                             pad.z - from.z - (own.z - to.z));
+        if (d < gap) { gap = d; best = own; }
+      }
+      return { pad, own: best, gap, landed: gap <= best.reach };
+    });
+    const landed = matches.filter((match) => match.landed);
+    tried.push({
+      quarter, turned, landed,
+      named: landed.filter((match) => match.own.name === match.pad.label).length,
+      gaps: landed.reduce((sum, match) => sum + match.gap, 0),
+    });
+  }
+  const rank = (a, b) => (b.named - a.named) || (b.landed.length - a.landed.length)
+    || (Math.round((a.gaps - b.gaps) * 1e3));
+  const best = [...tried].sort(rank)[0];
+  const tied = tried.filter((one) => rank(one, best) === 0);
+  const chosen = tied.find((one) => one.quarter === preferred) ?? best;
+  if (chosen.landed.length < pads.length) {
+    const astray = pads.filter((pad) => !chosen.landed.some((m) => m.pad === pad))
+      .map((pad) => pad.label);
+    throw new Error(
+      `${board}: no quarter turn lands every pad of its board file on one of ` +
+      `the model's header pads -- turned 0/90/180/270 degrees, ` +
+      `${tried.map((one) => one.landed.length).join("/")} of ${pads.length} ` +
+      `land, and at the best these do not: ${astray.join(", ")}`);
+  }
+  const from = middleOf(chosen.landed.map((match) => match.pad));
+  const to = middleOf(chosen.landed.map((match) => match.own));
+  return { turn: (chosen.quarter * Math.PI) / 2, x: from.x - to.x, z: from.z - to.z,
+           named: chosen.named, landed: chosen.landed.length, of: pads.length,
+           tied: tied.length };
+}
 
 function placeModel(loaded, layout) {
   const { group, extras } = loaded;
@@ -1519,52 +1600,62 @@ function placeModel(loaded, layout) {
     : extras.pad_span
       ? scaleFromPads(xs, ys, extras.pad_span)
       : PX_PER_MM * SCALE;
+
+  // **The pads a model is set by are the ones on its top** (OH-216): an
+  // underside pad is on no header, and a XIAO SMD footprint's sit to one side
+  // of its castellations, so counted they moved the model half a millimetre
+  // off them. A board file whose every pad is underneath keeps them all.
+  const topside = placed.filter((pad) => pad.group !== UNDERSIDE);
+  const setBy = (topside.length ? topside : placed).map((pad) => ({
+    label: pad.label, x: pad.x * SCALE - width / 2, z: pad.y * SCALE - depth / 2 }));
+  // The outlines' orientations, which are all a model with no header pads
+  // can be set by -- see below -- and the tie-break where pads cannot decide.
+  const mapUpright = layout.height > layout.width;
+  const modelUpright = pcb.short > pcb.long;
+  const outlineQuarter = mapUpright !== modelUpright ? 1 : 0;
+  // Worked out before anything is changed, because it can refuse.
+  const fit = extras.header_pads?.length
+    ? landOnHeaderPads(layout.board, setBy, extras.header_pads, scale, outlineQuarter)
+    : null;
+
   group.scale.setScalar(scale);
   // Everything else that puts millimetres into this scene reads this, so a
   // bench part is the size it would be beside the real board.
   view.mmScale = scale;
   view.solids = extras.solids ?? [];
 
-  // **Turned when the two frames disagree, and each frame is read from what
-  // states it** (OH-215). The model states which way its PCB lies: `pcb.long`
-  // along its x and `pcb.short` along its z -- the reading the collider slab
-  // below makes. The board file states which way its own image lies. A
-  // quarter turn about the vertical is the whole correction.
-  //
-  // This used to read the pad map alone, under "the model is always
-  // landscape". That is true of every mesh the importer fetches, which it
-  // emits long side along x, and of every composed XIAO -- and false of a
-  // board whose vendor drew it upright: the composer keeps the vendor's own
-  // frame, and such a board's pad map, read out of the same file, is upright
-  // too. Each was turned a quarter off its own pads, and `carvePins` then
-  // took whatever metal stood where the pads had been turned to.
-  //
-  // **A square board is placed right only because both comparisons tie.**
-  // The SparkFun Qwiic Pocket ESP32-C6 is 25.4 x 25.4 mm on a 219 x 219 px
-  // map, so both strict `>` are false and nothing turns -- which is right,
-  // because both frames are its vendor's. A NEAR-square board can flip: a
-  // map one pixel taller than wide over a model whose two sides are equal
-  // reads as two frames disagreeing, and is turned a quarter that nothing
-  // stated. Neither outline can say which way a square lies; only a pad
-  // match could (OH-215).
-  const mapUpright = layout.height > layout.width;
-  const modelUpright = pcb.short > pcb.long;
-  if (mapUpright !== modelUpright) group.rotation.y = Math.PI / 2;
-
-  // Centre it on the pads rather than on the image. The pad map's extent
-  // includes a courtyard margin that is a footprint artefact and is not the
-  // board; the pads are the thing both sources measured.
-  const centreX = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const centreY = (Math.min(...ys) + Math.max(...ys)) / 2;
-  group.position.set(
-    centreX * SCALE - width / 2,
-    -BOARD_THICKNESS / 2,
-    // The same sign as the pads' own line, and the two must move together:
-    // this is where the model's origin -- the centre of its pad field -- is
-    // put on the centre of the page's, so the convention that places one has
-    // to place the other. OH-115.
-    centreY * SCALE - depth / 2
-  );
+  if (fit) {
+    // **Set by the pads both sides name** (OH-216): see `landOnHeaderPads`.
+    group.rotation.y = fit.turn;
+    group.position.set(fit.x, -BOARD_THICKNESS / 2, fit.z);
+    view.placement = { by: "header pads", turn: Math.round((fit.turn * 180) / Math.PI),
+                       landed: fit.landed, named: fit.named, of: fit.of,
+                       tied: fit.tied };
+  } else {
+    // **A model that states no header pads -- every mesh the importer
+    // fetches -- is set by its outline, and says so.** Turned when the two
+    // frames disagree, each read from what states it (OH-215): the model's
+    // PCB lies `pcb.long` along its x and `pcb.short` along its z -- the
+    // reading the collider slab below makes -- and the board file's image
+    // lies as it is drawn. A quarter turn about the vertical is the whole
+    // correction. This cannot see a half turn, and a square board is right
+    // only because both strict comparisons tie; a near-square one can flip.
+    // Only a model's own pads can say either, which a fetched mesh does not
+    // state.
+    group.rotation.y = (outlineQuarter * Math.PI) / 2;
+    // Centred on the pads rather than on the image. The pad map's extent
+    // includes a courtyard margin that is a footprint artefact and is not the
+    // board; the pads are the thing both sources measured. The pads' own
+    // scene positions carry the sign OH-115 settled, so the model's origin
+    // -- the centre of its pad field -- moves with them. **Every placed pad,
+    // as before OH-216**: which of a fetched mesh's pads are its castellations
+    // nothing it states can say, and the nRF52840 SMD's NFC pads, at its
+    // edge and on no stated side, would pull a topside centre further off.
+    const middle = middleOf(placed.map((pad) => ({
+      x: pad.x * SCALE - width / 2, z: pad.y * SCALE - depth / 2 })));
+    group.position.set(middle.x, -BOARD_THICKNESS / 2, middle.z);
+    view.placement = { by: "PCB outline", turn: outlineQuarter * 90 };
+  }
 
   const [slab, edges] = view.board.children;
   slab.visible = false;
@@ -1971,6 +2062,9 @@ export function describe() {
     // claims -- the first is true even when the carve finds nothing. This is
     // the number that tells them apart, and it is what the test asserts.
     realPins: view.realPins ?? [],
+    // What set the model: its own header pads, or -- a fetched mesh, which
+    // states none -- its outline (OH-216).
+    placement: view.placement ?? null,
     // Each underside pad, and whether it found metal under the board or kept
     // only its invisible collider (OH-216). Never topside metal: `carvePins`.
     underside: view.underside ?? [],
