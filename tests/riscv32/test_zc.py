@@ -343,8 +343,11 @@ def test_the_jvt_csr_stays_unimplemented_without_zcmt():
 
 
 def test_set_isa_spells_the_c5_and_refuses_what_it_cannot_represent():
+    """Zbc, carry-less multiply, has no bit in this core and no part here
+    has it -- the RP2350's string leaves it out -- so its name is refused
+    rather than dropped. Zbb was the example until OH-208 gave it a bit."""
     cpu = abi.Cpu()
     cpu.set_isa("RV32IMAC_ZCB_ZCMP_ZCMT")
     assert cpu.extensions() == C5
     with pytest.raises(abi.AbiError, match="cannot represent"):
-        cpu.set_isa("RV32IMAC_ZBB")
+        cpu.set_isa("RV32IMAC_ZBC")

@@ -107,9 +107,11 @@ ISA = "rv32ima_zicsr_zifencei_zba_zbb_zbs_zbkb_zca_zcb_zcmp"
 #: What `install` gives the core: `abi.RP2350`, every group of `ISA` that
 #: `core/riscv32` has a bit for -- M, A (classified, not executed), C for
 #: Zca, Zba, Zbb, Zbs, Zbkb, Zcb and Zcmp. A bitmask rather than `set_isa`'s
-#: letters because `set_isa` names no group for Zba, Zbb, Zbs or Zbkb, and
-#: dropping them would make this core call `sh1add` or `clz` illegal on a
-#: part that has it.
+#: letters because `ISA` itself cannot be handed to `set_isa` -- Zicsr and
+#: Zifencei have no bit, and its grammar spells Zca `C` -- and `abi.RP2350`
+#: already spells the part once, beside the bits. In that grammar the same
+#: set is `RV32IMAC_ZBA_ZBB_ZBS_ZBKB_ZCB_ZCMP`, which
+#: `tests/riscv32/test_zbb_zbkb.py` holds equal to `abi.RP2350`.
 #:
 #: **Until OH-208 this was `abi.RP2350_MODELLED`, without Zbb and Zbkb**,
 #: and a XIAO RP2350 refused `clz`, `minu` and `rev8` as `Illegal` -- the

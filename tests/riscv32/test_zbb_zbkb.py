@@ -413,6 +413,30 @@ def test_the_compressed_zbb_unaries_need_zbb_as_well_as_zcb(cpu):
         assert cpu.pc == PC + 2, f"{name} is two bytes wide"
 
 
+def test_set_isa_gives_each_bitmanip_group_name_its_own_bit():
+    """`set_isa` names Zba, Zbb, Zbs and Zbkb, each as its own bit and
+    nothing else -- a swapped pair would give the RP2350's whole mask and
+    still be wrong for any part with one of the two."""
+    expected = {"ZBA": abi.EXT_ZBA, "ZBB": abi.EXT_ZBB, "ZBS": abi.EXT_ZBS,
+                "ZBKB": abi.EXT_ZBKB}
+    got = {}
+    with abi.Cpu() as fresh:
+        for name in expected:
+            fresh.set_isa(f"RV32I_{name}")
+            got[name] = fresh.extensions()
+    assert got == expected, {name: hex(mask) for name, mask in got.items()}
+
+
+def test_set_isa_spells_the_mask_the_rp2350_board_configures():
+    """The Hazard3's string in `set_isa`'s grammar: Zca spelled `C`, and
+    Zicsr and Zifencei left out because they have no bit. It must come to
+    `abi.RP2350`, which `webui/boards/rp2350.py` configures as a bitmask."""
+    with abi.Cpu() as fresh:
+        fresh.set_isa("RV32IMAC_ZBA_ZBB_ZBS_ZBKB_ZCB_ZCMP")
+        assert fresh.extensions() == abi.RP2350, (
+            f"{fresh.extensions():#x}, expected {abi.RP2350:#x}")
+
+
 def test_this_core_runs_exactly_what_the_disassembler_names_on_an_rp2350(cpu):
     """Every OP and OP-IMM funct3 x funct7 x rs2 field: 65,536 words.
 

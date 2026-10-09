@@ -332,7 +332,10 @@ class Cpu:
         which is the one distinction this whole core is shaped around.
 
         Underscore groups spell the named extensions, the way real ISA
-        strings do: `RV32IMAC_ZCB_ZCMP_ZCMT` is the ESP32-C5 (OH-146). An
+        strings do: `RV32IMAC_ZCB_ZCMP_ZCMT` is the ESP32-C5 (OH-146), and
+        `RV32IMAC_ZBA_ZBB_ZBS_ZBKB_ZCB_ZCMP` is `RP2350` (OH-208). Every
+        `EXT_*` bit has a letter or a group name here, so a group that
+        raises -- `ZBC`, or `ZICSR` -- is one this core has no bit for. An
         unknown group name raises exactly as an unknown letter does.
         """
         text = letters.upper()
@@ -350,7 +353,9 @@ class Cpu:
             )
 
         known = {"M": EXT_M, "A": EXT_A, "C": EXT_C}
-        named = {"ZCB": EXT_ZCB, "ZCMP": EXT_ZCMP, "ZCMT": EXT_ZCMT}
+        named = {"ZBA": EXT_ZBA, "ZBB": EXT_ZBB, "ZBS": EXT_ZBS,
+                 "ZBKB": EXT_ZBKB, "ZCB": EXT_ZCB, "ZCMP": EXT_ZCMP,
+                 "ZCMT": EXT_ZCMT}
         mask = 0
         for letter in rest[1:]:
             if letter not in known:
