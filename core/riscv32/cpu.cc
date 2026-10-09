@@ -339,8 +339,22 @@ void Cpu::note_executed() {
         // that never moves: the first snapshot asked for through it faults,
         // naming the unit. This runs between instructions, where there is
         // no access to fault.
+        //
+        // **And so it must not leave a fault behind either.** `mmio_read`
+        // records one when a readable alias's target is unmapped, which is
+        // right for an access and wrong here: it would rewrite the fault
+        // record after every retired instruction, naming an address no
+        // instruction touched. The record is put back as it was; the
+        // snapshot is where the broken gate is reported.
+        const uint32_t fault_address = fault_address_;
+        const bool fault_was_fetch = fault_was_fetch_;
         uint32_t gate = 0;
-        if (mmio_read(counter.enable, gate) && (gate & counter.enable_mask) != 0) {
+        if (!mmio_read(counter.enable, gate)) {
+            fault_address_ = fault_address;
+            fault_was_fetch_ = fault_was_fetch;
+            continue;
+        }
+        if ((gate & counter.enable_mask) != 0) {
             ++counter.instructions;
         }
     }
@@ -478,10 +492,19 @@ bool Cpu::mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask) {
         if ((value & counter.update_mask) == 0) {
             return true;
         }
-        if (!is_mapped(counter.enable)) {
+        uint32_t gate = 0;
+        if (!mmio_read(counter.enable, gate)) {
             // The board named an enable register it never mapped: a counter
             // that could never have counted. Faulting here names the unit
             // where the reader is looking, which a zero copy would not.
+            //
+            // **Through `mmio_read`, the read `note_executed` counts by**,
+            // and not `is_mapped`, which is what this was until the OH-161
+            // review: a gate mapped as a readable alias onto nothing IS
+            // mapped, so the old check let the copy through while counting
+            // read the gate, failed, and never counted -- a timer reading
+            // zero forever with no fault anywhere. The two must ask the same
+            // question or they answer it differently.
             note_fault(address, false);
             return false;
         }

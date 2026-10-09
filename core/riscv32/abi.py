@@ -505,13 +505,23 @@ class Cpu:
 
         `instructions_per_tick` is a stated approximation -- this core has no
         cycle model -- and below one is refused here with the value, rather
-        than passed to a core that would have to divide by it.
+        than passed to a core that would have to divide by it. So is anything
+        past 0xFFFFFFFF: the C side takes a `uint32_t`, and ctypes passes a
+        larger int truncated without a word -- 2**32 would arrive as zero,
+        which the core corrects to one.
         """
         if instructions_per_tick < 1:
             raise AbiError(
                 f"instructions_per_tick must be at least 1, got "
                 f"{instructions_per_tick!r}: a counter that never advances is "
                 f"the hang this behaviour exists to prevent"
+            )
+        if instructions_per_tick > 0xFFFFFFFF:
+            raise AbiError(
+                f"instructions_per_tick must fit in 32 bits, got "
+                f"{instructions_per_tick!r}: ctypes would pass it as "
+                f"{instructions_per_tick & 0xFFFFFFFF}, a different rate, "
+                f"without saying so"
             )
         self._lib.riscv32_map_snapshot_counter(
             self._handle, op, update_mask, valid_mask, low, high, high_mask,

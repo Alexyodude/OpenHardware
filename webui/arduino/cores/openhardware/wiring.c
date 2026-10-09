@@ -57,7 +57,16 @@ static uint64_t oh_systimer_ticks(void) {
 }
 
 /* A shift and not a division: the rate is sixteen, and an image linked
- * `-nostdlib` has no `__udivdi3` to divide 64 bits by anything else. */
+ * `-nostdlib` has no `__udivdi3` to divide 64 bits by anything else. A
+ * variant whose rate is not a power of two stops here, by name, rather than
+ * at the link with an undefined reference that names neither the rate nor
+ * the header that set it. */
+_Static_assert(OH_SYSTIMER_TICKS_PER_US != 0 &&
+                   (OH_SYSTIMER_TICKS_PER_US & (OH_SYSTIMER_TICKS_PER_US - 1u)) == 0,
+               "OH_SYSTIMER_TICKS_PER_US must be a power of two: micros() and millis() "
+               "divide a 64-bit count by it, any other divisor calls __udivdi3, and "
+               "a -nostdlib image does not link one");
+
 unsigned long micros(void) {
     return (unsigned long)(oh_systimer_ticks() / OH_SYSTIMER_TICKS_PER_US);
 }

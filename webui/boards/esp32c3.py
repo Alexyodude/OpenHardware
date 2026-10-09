@@ -288,6 +288,13 @@ CPU_HZ = 160_000_000
 #: and an integer (`rules/determinism.md` §3), at a rate whose every factor
 #: is cited.
 SYSTIMER_INSTRUCTIONS_PER_TICK = CPU_HZ // SYSTIMER_HZ
+# The division above floors without a word, so a clock that is not a whole
+# number of ticks would be timed at a rate nobody cited. Refused at import.
+if CPU_HZ % SYSTIMER_HZ:
+    raise ValueError(
+        f"CPU_HZ {CPU_HZ} is not a multiple of SYSTIMER_HZ {SYSTIMER_HZ}: "
+        f"SYSTIMER_INSTRUCTIONS_PER_TICK would be {SYSTIMER_INSTRUCTIONS_PER_TICK}, "
+        f"rounded down from {CPU_HZ / SYSTIMER_HZ}, and every tick would come early")
 
 #: The pin the fixture watches. **Not a user LED** -- see the module docstring.
 #: GPIO8 is what Espressif's own ESP32-C3-DevKitM-1 wires its RGB LED to, and

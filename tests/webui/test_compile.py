@@ -2015,9 +2015,11 @@ void loop() { }
 """
 
 #: SYSTIMER counts held still, chosen to reach the branches the toggle tests
-#: cannot. Stepping to them would take years of emulated time: a count past
-#: 2^16 microseconds is the first that leaves `millis()`'s low half alone,
-#: and the 52-bit top is about 8.9 years at sixteen ticks a microsecond.
+#: cannot. Not every one is beyond stepping: a count past 2^16 microseconds,
+#: the first that leaves `millis()`'s low half alone, is 65.5 ms of emulated
+#: time, 10,485,760 steps on a C3 -- slow, and reachable. 2^32 microseconds
+#: is about 71.6 minutes, 687,194,767,360 steps on a C3, and the 52-bit top,
+#: 2^48 microseconds at sixteen ticks a microsecond, is about 8.9 years.
 #:   - one tick under and one exactly at a millisecond: the floor, both ways
 #:   - 2^32 microseconds and some: `micros()` wraps where Arduino's does
 #:   - microseconds whose upper sixteen-bit-shifted half leaves a remainder
@@ -2069,6 +2071,36 @@ def test_millis_and_micros_are_right_where_stepping_cannot_reach():
             printed_text = esp32c3.uart0_output(cpu)
         expected = f"{(count // 16_000) % (1 << 32)}\r\n{(count // 16) % (1 << 32)}\r\n"
         assert printed_text == expected.encode(), f"count {count:#x}"
+
+
+def test_millis_waits_for_value_valid_before_it_reads_the_copy():
+    """`millis()` writes UPDATE and then spins until VALUE_VALID, as
+    `systimer_hal.c` does, because on silicon the copy takes a few clock
+    edges to land. The core's counter takes it at the write, so deleting the
+    spin passed every other test -- step 2's one surviving mutation, which
+    the OH-161 review asked to have killed. Here UNIT0_OP is a plain
+    register: the UPDATE write is stored, VALUE_VALID never reads back, and
+    a `millis()` that waits prints nothing. One that does not wait reads the
+    halves anyway and prints the seven milliseconds they hold. The budget is
+    `HELD_BUDGET`, in which the test above prints two lines and this sketch
+    would print one."""
+    needs_toolchain(C3_BOARD)
+    built = oh_build(C3_BOARD, "void setup(){ Serial.println(millis()); }\nvoid loop(){}")
+    assert built.ok, built.diagnostics
+    timer = esp32c3.SYSTIMER
+    with api.load_firmware(C3_BOARD, built.image,
+                           base=compiler.recipe_for(C3_BOARD).base) as session:
+        cpu = session.cpu
+        cpu.clear_mmio()
+        esp32c3.install_gpio(cpu)
+        esp32c3.install_uart0(cpu)
+        cpu.map_register(timer + esp32c3.SYSTIMER_UNIT0_OP, 0)
+        cpu.map_register(timer + esp32c3.SYSTIMER_UNIT0_VALUE_HI, 0)
+        cpu.map_register(timer + esp32c3.SYSTIMER_UNIT0_VALUE_LO, 16_000 * 7)
+        ran = session.run(HELD_BUDGET)
+        assert ran.status == "running", ran.detail
+        printed_text = esp32c3.uart0_output(cpu)
+    assert printed_text == b"", "millis() read a copy it never saw become valid"
 
 
 def test_the_timer_hints_are_gone_where_the_systimer_is_modelled():

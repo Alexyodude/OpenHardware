@@ -686,6 +686,74 @@ def test_a_snapshot_through_an_unmapped_enable_register_faults_naming_the_unit(c
     assert f"0x{UNIT0_OP:08x}" in str(caught.value), str(caught.value)
 
 
+#: An address inside SYSTIMER's block that nothing here maps, for a gate to
+#: be an alias onto. The header's last register is `SYSTIMER_DATE_REG` at
+#: + 0xfc (:556), so nothing is described at + 0xf00.
+NOTHING = 0x60023F00
+
+
+def test_a_snapshot_through_an_alias_gate_onto_nothing_faults_naming_the_unit(cpu):
+    """A readable alias whose target nothing maps IS mapped, and cannot be
+    read: `is_mapped` says yes and `mmio_read` fails. The snapshot used to
+    ask the first and the count the second, so this unit handed out copies
+    of a count that never moved and nothing faulted anywhere. Found by the
+    OH-161 review. Executed, for the reason the test above gives."""
+    cpu.map_alias(SYSTIMER_CONF, NOTHING, "store", readable=True)
+    cpu.map_snapshot_counter(
+        op=UNIT0_OP, update_mask=UNIT0_UPDATE, valid_mask=UNIT0_VALUE_VALID,
+        low=UNIT0_VALUE_LO, high=UNIT0_VALUE_HI, high_mask=VALUE_HI_BITS,
+        enable=SYSTIMER_CONF, enable_mask=UNIT0_WORK_EN,
+        instructions_per_tick=PER_TICK,
+    )
+    load(cpu, [e.lui("a4", 0x60023), e.lui("a5", 0x40000), e.sw("a5", "a4", 4)])
+    cpu.step()
+    cpu.step()
+    with pytest.raises(abi.MemoryFault) as caught:
+        cpu.step()
+    assert f"0x{UNIT0_OP:08x}" in str(caught.value), str(caught.value)
+
+
+def test_a_gate_that_cannot_be_read_leaves_no_fault_behind_between_instructions(cpu):
+    """Counting reads the gate after every retired instruction, where there
+    is no access to fault, and `mmio_read` records the alias's own address
+    when its target is missing. So until the OH-161 review every NOP here
+    rewrote the fault record to name CONF, an address no instruction
+    touched. The record is set first by a fault this test causes, at zero,
+    and read through the C side, because only a `MemoryFault` from `step`
+    reports it to Python and none happens here."""
+    cpu.map_alias(SYSTIMER_CONF, NOTHING, "store", readable=True)
+    cpu.map_snapshot_counter(
+        op=UNIT0_OP, update_mask=UNIT0_UPDATE, valid_mask=UNIT0_VALUE_VALID,
+        low=UNIT0_VALUE_LO, high=UNIT0_VALUE_HI, high_mask=VALUE_HI_BITS,
+        enable=SYSTIMER_CONF, enable_mask=UNIT0_WORK_EN,
+        instructions_per_tick=PER_TICK,
+    )
+    with pytest.raises(abi.MemoryFault):
+        cpu.read_word(0)
+    fault_address = cpu._lib.riscv32_fault_address
+    assert fault_address(cpu._handle) == 0
+    retire(cpu, 40)
+    assert fault_address(cpu._handle) == 0, (
+        f"the record names 0x{fault_address(cpu._handle):08x} after forty "
+        f"instructions that faulted nowhere")
+
+
+def test_mapping_the_same_unit_twice_replaces_it(systimer):
+    """The fixture maps the unit at four instructions a tick and this maps
+    it again at eight: forty instructions are then five ticks. Two counters
+    left on one address would answer in whichever order the scan met them,
+    and the first -- the one the board replaced -- would say ten."""
+    systimer.map_snapshot_counter(
+        op=UNIT0_OP, update_mask=UNIT0_UPDATE, valid_mask=UNIT0_VALUE_VALID,
+        low=UNIT0_VALUE_LO, high=UNIT0_VALUE_HI, high_mask=VALUE_HI_BITS,
+        enable=SYSTIMER_CONF, enable_mask=UNIT0_WORK_EN,
+        instructions_per_tick=8,
+    )
+    retire(systimer, 40)
+    systimer.write_word(UNIT0_OP, UNIT0_UPDATE)
+    assert systimer.read_word(UNIT0_VALUE_LO) == 5
+
+
 def test_a_rate_below_one_is_refused_with_the_value(cpu):
     """Zero would be a counter that never advances, which is the hang this
     behaviour exists to end. The C side corrects it to one rather than
@@ -698,6 +766,21 @@ def test_a_rate_below_one_is_refused_with_the_value(cpu):
             instructions_per_tick=0,
         )
     assert "got 0" in str(caught.value)
+
+
+def test_a_rate_past_32_bits_is_refused_with_the_value(cpu):
+    """The C side's rate is a `uint32_t`, and ctypes truncates a larger int
+    without a word: 2**32 would arrive as zero, which the core corrects to
+    one -- a counter 2**32 times faster than the board asked for, with
+    nothing said anywhere. The binding refuses it, naming the value."""
+    with pytest.raises(abi.AbiError) as caught:
+        cpu.map_snapshot_counter(
+            op=UNIT0_OP, update_mask=UNIT0_UPDATE, valid_mask=UNIT0_VALUE_VALID,
+            low=UNIT0_VALUE_LO, high=UNIT0_VALUE_HI, high_mask=VALUE_HI_BITS,
+            enable=SYSTIMER_CONF, enable_mask=UNIT0_WORK_EN,
+            instructions_per_tick=1 << 32,
+        )
+    assert f"got {1 << 32}" in str(caught.value), str(caught.value)
 
 
 def test_a_machine_with_no_board_keeps_no_counter_behind(systimer):

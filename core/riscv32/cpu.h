@@ -302,7 +302,8 @@ public:
     /// it; `abi.py` refuses it before it gets here.
     ///
     /// **The gate must itself be mapped**, as a stream's must, and a snapshot
-    /// asked for through an unmapped one faults naming `op_address`: a board
+    /// asked for through one that cannot be read -- unmapped, or a readable
+    /// alias onto nothing -- faults naming `op_address`: a board
     /// that named the wrong enable register would otherwise describe a timer
     /// that silently never counts, which is the spin-forever hang this whole
     /// file is shaped against.
