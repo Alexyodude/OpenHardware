@@ -6143,6 +6143,12 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     #: hole, a pad beyond the outline -- keeps its placement among the
     #: absent, and that pad's reason is what is printed for it. Neither
     #: list holds what the loop above found is not a part.
+    #:
+    #: "Every pad drawn" is said only of a placement that has a pad. One with
+    #: none is here only because its file states a mesh, and a reason saying
+    #: there is no body to look for then contradicts the file: refused, with
+    #: both, rather than drawn by a sentence that is true of no pad (OH-163
+    #: step 3's confirm review).
     absent: list[eagle.Element] = []
     copper: list[eagle.Element] = []
     for e in board.elements:
@@ -6150,6 +6156,11 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         if (why is None or not (e.pads or e.models) or e.edge
                 or e.name in stated_off):
             continue
+        if NO_BODY in why and not e.pads:
+            raise ValueError(
+                f"{spec.board}: {e.name} ({e.package}) has no pad and states "
+                f"a mesh, {list(e.models)}, but its package's reason says "
+                f"{NO_BODY!r}: {why}")
         (copper if NO_BODY in why and e.name not in undrawn_pads
          else absent).append(e)
     parts = [e for e in absent if NO_BODY not in ABSENT[e.package]]

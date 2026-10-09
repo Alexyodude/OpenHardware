@@ -4814,6 +4814,12 @@ def test_a_placement_with_no_pad_that_states_a_mesh_is_a_part(tmp_path, capsys):
         reasoned = _accounting(_c3_with(spec, tmp_path, logo, model % ""), capsys)
     assert f"  absent  U$2 ({logo}): a part nobody publishes a model of..." in reasoned, (
         reasoned)
+    # And a reason saying there is no body contradicts the mesh the file
+    # states: refused with both, never printed as copper whose every pad --
+    # of none -- is drawn.
+    with mock.patch.dict(compose.ABSENT, {logo: f"a mark: {compose.NO_BODY}"}):
+        with pytest.raises(ValueError, match=r"U\$2 .*has no pad and states a mesh"):
+            _accounting(_c3_with(spec, tmp_path, logo, model % ""), capsys)
 
 
 def _the_c3s_accounting(capsys):
