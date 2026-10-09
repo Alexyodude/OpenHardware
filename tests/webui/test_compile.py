@@ -1571,6 +1571,21 @@ def test_the_oh_board_header_restates_the_descriptions_own_numbers(variant):
         "token and a shift is three -- it read `(1u` and this test could not "
         "have compared anything."
     )
+    # SYSTIMER unit 0, on the same terms (OH-161 step 2): the C3's block is
+    # at 0x60023000 and the C5's and C6's at 0x6000A000, so a header copied
+    # from a neighbour would ask a register this part does not map for the
+    # time. The bits are hex literals for the reason the gate's is.
+    timer = description.SYSTIMER
+    assert int(defines["OH_SYSTIMER_UNIT0_OP"], 16) == timer + description.SYSTIMER_UNIT0_OP
+    assert int(defines["OH_SYSTIMER_UNIT0_VALUE_HI"], 16) == (
+        timer + description.SYSTIMER_UNIT0_VALUE_HI)
+    assert int(defines["OH_SYSTIMER_UNIT0_VALUE_LO"], 16) == (
+        timer + description.SYSTIMER_UNIT0_VALUE_LO)
+    assert int(defines["OH_SYSTIMER_UNIT0_UPDATE"], 16) == (
+        description.SYSTIMER_TIMER_UNIT0_UPDATE)
+    assert int(defines["OH_SYSTIMER_UNIT0_VALUE_VALID"], 16) == (
+        description.SYSTIMER_TIMER_UNIT0_VALUE_VALID)
+    assert int(defines["OH_SYSTIMER_TICKS_PER_US"]) * 1_000_000 == description.SYSTIMER_HZ
 
     ram_base = getattr(description, ram)
     ram_size = getattr(description, f"{ram}_SIZE")
@@ -1666,10 +1681,15 @@ def test_the_c5_and_c6_delay_is_steady_and_scales(board):
 
 @pytest.mark.parametrize("board", sorted(OPENHARDWARE_BOARDS))
 def test_each_absence_hints_its_own_variant_header(board):
-    """The hint for a missing timer names the header of the board being
-    built, not the C3's -- the reason `_openhardware` is a function."""
+    """A hint that names a header names the header of the board being built,
+    not the C3's -- the reason `_openhardware` is a function.
+
+    **The sketch reached for `millis()` until OH-161's step 2**, whose hint
+    was the one that named the header; the descriptions now map a timer and
+    that hint is gone. A pin past the chip's GPIO count is the absence whose
+    hint still names it."""
     recipe = compiler.recipe_for(board)
-    built = oh_build(board, "void setup(){} void loop(){ millis(); }")
+    built = oh_build(board, "void setup(){ pinMode(60, OUTPUT); } void loop(){}")
     assert not built.ok
     assert recipe.variant in built.diagnostics, built.diagnostics
     assert "xiao_esp32c3" not in built.diagnostics
@@ -1865,7 +1885,7 @@ def test_the_serial_hint_is_gone_where_the_uart_is_modelled():
         hints = dict(compiler.recipe_for(board).hints)
         assert "Serial" not in hints, board
         assert "digitalRead" in hints, f"{board}: the unfilled absences still speak"
-        assert "millis" in hints and "analogRead" in hints, board
+        assert "analogRead" in hints, board
 
 
 def test_a_sketch_reading_the_serial_port_still_fails_to_build():
@@ -1877,3 +1897,188 @@ def test_a_sketch_reading_the_serial_port_still_fails_to_build():
     built = oh_build(C3_BOARD, "void setup(){ Serial.read(); }\nvoid loop(){}")
     assert not built.ok
     assert "read" in built.diagnostics
+
+
+# --- a sketch can tell the time, and the hint that said it could not is gone
+# (OH-161 step 2)
+#
+# The rate each test predicts is the description's own:
+# `SYSTIMER_INSTRUCTIONS_PER_TICK` retired instructions a tick, sixteen ticks
+# a microsecond -- 160,000 steps a millisecond on a C3 or a C6 and 240,000 on
+# a C5, whose Arduino build runs at 240 MHz. Every factor is cited where it is
+# defined; the tests read the constants rather than restating the numbers, so
+# a description that changes its rate changes what they expect.
+
+#: board -> (its description, the GPIO its vendor's D10 names). The C3's row
+#: beside the two in `OPENHARDWARE_BOARDS`, for the reason that table gives:
+#: the sketch names `D10`, so a wrong table is the wrong bit toggling.
+TIMED_BOARDS = {C3_BOARD: (esp32c3, 10), **OPENHARDWARE_BOARDS}
+
+#: Toggles D10 once a millisecond by `millis()`. `last += 1` rather than
+#: `last = millis()`, so a toggle that lands late does not push the next one
+#: later: the period is the clock's, not the loop's.
+BY_MILLIS = """
+unsigned long last;
+void setup() { pinMode(D10, OUTPUT); last = millis(); }
+void loop() {
+  if (millis() - last >= 1) {
+    last += 1;
+    digitalWrite(D10, (last & 1) ? HIGH : LOW);
+  }
+}
+"""
+
+#: The same, every hundred microseconds by `micros()`.
+BY_MICROS = """
+unsigned long last;
+void setup() { pinMode(D10, OUTPUT); last = micros(); }
+void loop() {
+  if (micros() - last >= 100) {
+    last += 100;
+    digitalWrite(D10, ((last / 100) & 1) ? HIGH : LOW);
+  }
+}
+"""
+
+#: How far one toggle may land from the step the rate predicts. **Measured,
+#: not chosen** (2026-10-09): the sketches above poll in a loop of 26 to 35
+#: instructions, so a toggle lands up to one loop late and a period between
+#: two of them wanders by less than that -- 159,998 steps every period on a
+#: C3 and a C6, 240,008 and 239,973 on a C5, 16,005 and 15,979 by micros.
+#: Three loops of margin; a rate wrong by one instruction a tick is off by
+#: 16,000 a millisecond.
+POLL = 100
+
+
+def toggles(board: str, source: str, count: int, budget: int) -> list[int]:
+    """Build `source` for `board`, run it, and return the steps at which its
+    D10 moved, stopping at the `count`th."""
+    description, gpio = TIMED_BOARDS[board]
+    needs_toolchain(board)
+    built = oh_build(board, source)
+    assert built.ok, built.diagnostics
+    out = description.GPIO + description.GPIO_OUT
+    steps: list[int] = []
+    last = 0
+    with api.load_firmware(board, built.image,
+                           base=compiler.recipe_for(board).base) as session:
+        for step in range(budget):
+            session.step()
+            now = session.cpu.read_word(out) & (1 << gpio)
+            if now != last:
+                steps.append(step)
+                last = now
+                if len(steps) == count:
+                    break
+    return steps
+
+
+def test_a_sketch_timed_by_millis_toggles_at_the_rate_its_description_states():
+    """The watched test OH-161's step 2 is done when, on every ESP32 board.
+
+    Four toggles, a millisecond of `millis()` apart, each within `POLL` of
+    the step the description's rate predicts -- and the FIRST one a
+    millisecond after the board was installed, because the counter starts at
+    the board's power-on and `setup()` reads it as zero. A unit counting at
+    another rate, a header naming a neighbour's SYSTIMER, or a `millis()`
+    dividing wrongly all land somewhere else."""
+    for board, (description, _gpio) in sorted(TIMED_BOARDS.items()):
+        millisecond = description.SYSTIMER_INSTRUCTIONS_PER_TICK * (
+            description.SYSTIMER_HZ // 1000)
+        steps = toggles(board, BY_MILLIS, 4, 5 * millisecond)
+        assert len(steps) == 4, f"{board}: D10 moved at steps {steps}"
+        assert millisecond <= steps[0] < millisecond + POLL, (board, steps)
+        gaps = [b - a for a, b in itertools.pairwise(steps)]
+        assert all(abs(gap - millisecond) < POLL for gap in gaps), (
+            f"{board}: a millisecond is {millisecond} steps here, and D10 "
+            f"moved {gaps} apart")
+
+
+def test_a_sketch_timed_by_micros_toggles_at_the_rate_its_description_states():
+    """The same promise at a hundred microseconds, by `micros()`: a tenth of
+    the steps, so six toggles cost less than one millisecond's test."""
+    for board, (description, _gpio) in sorted(TIMED_BOARDS.items()):
+        period = description.SYSTIMER_INSTRUCTIONS_PER_TICK * (
+            description.SYSTIMER_HZ // 10_000)
+        steps = toggles(board, BY_MICROS, 6, 7 * period)
+        assert len(steps) == 6, f"{board}: D10 moved at steps {steps}"
+        assert period <= steps[0] < period + POLL, (board, steps)
+        gaps = [b - a for a, b in itertools.pairwise(steps)]
+        assert all(abs(gap - period) < POLL for gap in gaps), (
+            f"{board}: 100 us is {period} steps here, and D10 moved {gaps} apart")
+
+
+#: Prints both clocks once, so a test can set the count they read.
+PRINTS_THE_TIME = """
+void setup() { Serial.println(millis()); Serial.println(micros()); }
+void loop() { }
+"""
+
+#: SYSTIMER counts held still, chosen to reach the branches the toggle tests
+#: cannot. Stepping to them would take years of emulated time: a count past
+#: 2^16 microseconds is the first that leaves `millis()`'s low half alone,
+#: and the 52-bit top is about 8.9 years at sixteen ticks a microsecond.
+#:   - one tick under and one exactly at a millisecond: the floor, both ways
+#:   - 2^32 microseconds and some: `micros()` wraps where Arduino's does
+#:   - microseconds whose upper sixteen-bit-shifted half leaves a remainder
+#:     over a thousand, which the lower division has to carry
+#:   - the largest count the 52 bits hold
+HELD_COUNTS = (
+    16_000 - 1,
+    16_000,
+    16 * ((1 << 32) + 123_456_789),
+    16 * ((1_234_567 << 16) | 0xBEEF) + 7,
+    (1 << 52) - 1,
+)
+
+#: Steps to run each held count for. **Measured** (2026-10-09): the sketch's
+#: last byte arrives at step 378 at the largest count, the longest of the
+#: lines it prints, and then it sits in an empty `loop()`.
+HELD_BUDGET = 5_000
+
+
+def test_millis_and_micros_are_right_where_stepping_cannot_reach():
+    """`millis()` divides a 64-bit count by sixteen thousand without the
+    `__udivdi3` a `-nostdlib` image cannot link, in two 32-bit halves --
+    arithmetic the toggle tests above only ever run with its upper half
+    zero. So the board here is the described C3 with its SYSTIMER replaced
+    by one whose copy is a count the test chose: VALUE_HI and VALUE_LO hold
+    it, and UNIT0_OP answers VALUE_VALID to every UPDATE (a set-alias onto
+    itself keeps both bits). Every other register is the description's own.
+
+    What is expected is Python's floor division, wrapped at 2^32 as
+    `unsigned long` wraps, and nothing about the core's arithmetic."""
+    needs_toolchain(C3_BOARD)
+    built = oh_build(C3_BOARD, PRINTS_THE_TIME)
+    assert built.ok, built.diagnostics
+    timer = esp32c3.SYSTIMER
+    for count in HELD_COUNTS:
+        with api.load_firmware(C3_BOARD, built.image,
+                               base=compiler.recipe_for(C3_BOARD).base) as session:
+            cpu = session.cpu
+            cpu.clear_mmio()
+            esp32c3.install_gpio(cpu)
+            esp32c3.install_uart0(cpu)
+            op = timer + esp32c3.SYSTIMER_UNIT0_OP
+            cpu.map_alias(op, op, "set", readable=True)
+            cpu.write_word(op, esp32c3.SYSTIMER_TIMER_UNIT0_VALUE_VALID)
+            cpu.map_register(timer + esp32c3.SYSTIMER_UNIT0_VALUE_HI, count >> 32)
+            cpu.map_register(timer + esp32c3.SYSTIMER_UNIT0_VALUE_LO, count & 0xFFFFFFFF)
+            ran = session.run(HELD_BUDGET)
+            assert ran.status == "running", f"count {count:#x}: {ran.detail}"
+            printed_text = esp32c3.uart0_output(cpu)
+        expected = f"{(count // 16_000) % (1 << 32)}\r\n{(count // 16) % (1 << 32)}\r\n"
+        assert printed_text == expected.encode(), f"count {count:#x}"
+
+
+def test_the_timer_hints_are_gone_where_the_systimer_is_modelled():
+    """A hint names a modelling decision, and `millis` and `micros` named an
+    absence that SYSTIMER's unit 0 has filled on all three descriptions.
+    Asserted on the recipe and on a build, because a hint left in the table
+    would only show when a build failed -- and these no longer fail."""
+    for board in TIMED_BOARDS:
+        hints = dict(compiler.recipe_for(board).hints)
+        assert "millis" not in hints and "micros" not in hints, board
+        needs_toolchain(board)
+        built = oh_build(board, "void setup(){ millis(); micros(); }\nvoid loop(){}")
+        assert built.ok, f"{board}: {built.diagnostics}"

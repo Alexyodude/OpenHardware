@@ -44,11 +44,38 @@
 #define OH_UART_CLK_CONF     0x60000078u
 #define OH_UART_TX_SCLK_EN   0x01000000u   /* UART_TX_SCLK_EN, bit 24 */
 
+/* SYSTIMER unit 0, base 0x60023000: write UPDATE to UNIT0_OP, wait for
+ * VALUE_VALID, then read VALUE_HI and VALUE_LO, which hold the copy taken
+ * at the write. `systimer_reg.h:108`, `:344` and `:356`, via
+ * webui/boards/esp32c3.py, which cites each bit. The unit counts out of
+ * reset, so nothing here enables it. */
+#define OH_SYSTIMER_UNIT0_OP           0x60023004u
+#define OH_SYSTIMER_UNIT0_UPDATE       0x40000000u   /* bit 30 */
+#define OH_SYSTIMER_UNIT0_VALUE_VALID  0x20000000u   /* bit 29 */
+#define OH_SYSTIMER_UNIT0_VALUE_HI     0x60023040u
+#define OH_SYSTIMER_UNIT0_VALUE_LO     0x60023044u
+
+/* Sixteen ticks a microsecond: the description's SYSTIMER_HZ, which cites
+ * `soc_caps.h:250`'s SOC_SYSTIMER_FIXED_TICKS_US. What a tick costs in
+ * emulator steps is the description's SYSTIMER_INSTRUCTIONS_PER_TICK, ten,
+ * and its comment says what kind of number that is. A power of two, which
+ * is what lets micros() divide the 64-bit count with a shift in an image
+ * linked without libgcc. */
+#define OH_SYSTIMER_TICKS_PER_US       16u
+
 /* The top of DRAM (0x3FCE0000), minus a word so the first push stays
  * inside it -- the same arithmetic the blink fixtures state. */
 #define OH_STACK_TOP         0x3FCDFFF0u
 
-/* **A judgement, and it says so** -- the same kind of number BOARD_MASK is
+/* **delay() still spins on this, and no longer because nothing models a
+ * timer**: SYSTIMER above does, and millis() reads it. Moving delay() onto
+ * it changes the bytes of every committed sketch image a board test
+ * rebuilds, which OH-161 left for a change that may edit those tests -- its
+ * note says which. Until then a delay(1) is ~24,000 steps and a
+ * millisecond of millis() is 160,000, so a sketch timing one with the
+ * other reads about 0.15 of what it asked for.
+ *
+ * **A judgement, and it says so** -- the same kind of number BOARD_MASK is
  * in `tools/compose_board_3d.py`. This model configures no PLL and counts
  * no cycles, so a millisecond here cannot be a measurement of anything.
  * The choice, then the measurement: 4,000 iterations of the volatile spin

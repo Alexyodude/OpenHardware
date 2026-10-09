@@ -105,7 +105,8 @@ mistake easy: the number a copy would get wrong is not the one it would check.
 
 ## What is deliberately absent
 
-Every timer, the ADC, SPI, I2C, the LP core and its 16 KB of LP_SRAM
+Every timer but SYSTIMER's unit 0 (OH-161's step 2, see `install_systimer`),
+the ADC, SPI, I2C, the LP core and its 16 KB of LP_SRAM
 at 0x50000000, and the whole clock and reset subsystem. Same growth rule the
 other boards keep: a peripheral is added when a real image faults on it and not
 before, and `core/riscv32/cpu.h` faults on any address no region and no
@@ -229,6 +230,83 @@ UART_TX_SCLK_EN = 1 << 24
 #: `UART_CLK_CONF_REG` itself.
 UART_CLK_CONF_AT_RESET = (1 << 24) | (1 << 25)
 
+#: SYSTIMER's base, `register/soc/reg_base.h:23` --
+#: `#define DR_REG_SYSTIMER_BASE 0x6000A000`, a C6's base and not a C3's.
+SYSTIMER = 0x6000A000
+
+#: The four registers of it this board models, from
+#: `register/soc/systimer_reg.h`:
+#:
+#:     #define SYSTIMER_CONF_REG            (DR_REG_SYSTIMER_BASE + 0x0)   :17
+#:     #define SYSTIMER_UNIT0_OP_REG        (DR_REG_SYSTIMER_BASE + 0x4)   :121
+#:     #define SYSTIMER_UNIT0_VALUE_HI_REG  (DR_REG_SYSTIMER_BASE + 0x40)  :370
+#:     #define SYSTIMER_UNIT0_VALUE_LO_REG  (DR_REG_SYSTIMER_BASE + 0x44)  :382
+#:
+#: The same offsets as a C6's, read from this part's own header -- which is
+#: the lesson of this file's GPIO block, where the base matched and the
+#: offsets did not. Everything else is unmapped: `UNIT0_LOAD_LO` at + 0x10
+#: (:177), `UNIT1_OP` at + 0x8 (:143), the comparators.
+SYSTIMER_CONF = 0x00
+SYSTIMER_UNIT0_OP = 0x04
+SYSTIMER_UNIT0_VALUE_HI = 0x40
+SYSTIMER_UNIT0_VALUE_LO = 0x44
+
+#: The bits, each with the header's access type and default:
+#:
+#:     SYSTIMER_TIMER_UNIT0_WORK_EN      R/W       [30]    default 1   :99, :104
+#:     SYSTIMER_TIMER_UNIT0_UPDATE       WT        [30]    default 0   :129, :135
+#:     SYSTIMER_TIMER_UNIT0_VALUE_VALID  R/SS/WTC  [29]    default 0   :122, :125
+#:     SYSTIMER_TIMER_UNIT0_VALUE_HI     RO        [19:0]  default 0   :371, :374
+#:
+#: The unit counts out of reset. Twenty bits over 32 is a 52-bit counter,
+#: `soc_caps.h:491-492`'s `SOC_SYSTIMER_BIT_WIDTH_LO 32` and `_HI 20`.
+SYSTIMER_TIMER_UNIT0_WORK_EN = 1 << 30
+SYSTIMER_TIMER_UNIT0_UPDATE = 1 << 30
+SYSTIMER_TIMER_UNIT0_VALUE_VALID = 1 << 29
+SYSTIMER_TIMER_UNIT0_VALUE_HI = 0x000FFFFF
+
+#: `SYSTIMER_CONF_REG` out of reset, from every field default
+#: `systimer_reg.h:18-108` states: `CLK_FO` [0] 0, `ETM_EN` [1] 0,
+#: `TARGET2..0_WORK_EN` [22..24] 0, `TIMER_UNIT1_CORE1_STALL_EN` [25] 1,
+#: `TIMER_UNIT1_CORE0_STALL_EN` [26] 1, `TIMER_UNIT0_CORE1_STALL_EN` [27] 0,
+#: `TIMER_UNIT0_CORE0_STALL_EN` [28] 0, `TIMER_UNIT1_WORK_EN` [29] 0,
+#: `TIMER_UNIT0_WORK_EN` [30] 1, `CLK_EN` [31] 0.
+SYSTIMER_CONF_AT_RESET = (1 << 25) | (1 << 26) | (1 << 30)
+
+#: How fast unit 0 counts: 16 MHz -- **and the arithmetic the C3 and C6 do
+#: gives the wrong answer here**, which is why this one cites a sentence
+#: rather than a sum. `soc_caps.h:493` still reads
+#: `SOC_SYSTIMER_FIXED_DIVIDER 1 // Clock source divider is fixed: 2.5`, and
+#: the XIAO ESP32-C5 carries a 48 MHz crystal -- Seeed's own board file,
+#: `third_party/seeed-pcb/ESP32-C5.kicad_pcb:7943`, crystal `X1`, value
+#: `48Mhz`, and
+#: `include/soc/clk_tree_defs.h:22` names "External 48MHz Crystal Clock" for
+#: the part -- so 48 over 2.5 would say 19.2 MHz. ESP-IDF says otherwise in
+#: `components/esp_hw_support/port/esp32c5/systimer.c:12-13` at 8c750b0:
+#: "the fixed fractional divider is changed according to EFUSE_XTAL_48M_SEL.
+#: No matter 48MHz or 40MHz XTAL, the resolution of the systimer is always
+#: 16MHz", and `systimer_ticks_to_us` is `ticks / 16` (:18). That file is
+#: outside the sparse checkout `docs/esp-idf-reference.md` describes, so no
+#: test reads it; `test_the_c5_divider_comment_would_time_this_board_wrongly`
+#: holds the two facts that make the comment the wrong source.
+SYSTIMER_HZ = 16_000_000
+
+#: The clock a sketch on this part runs at: `build.f_cpu=240000000L` for
+#: `XIAO_ESP32C5`, arduino-esp32's `boards.txt:37911` @ 2787dab -- half again
+#: a C3's or a C6's. The board's own Arduino build, for the reason
+#: `esp32c3.py` gives at its own `CPU_HZ`; every ESP32-C5 row in
+#: `tools/board_manifest.py` declares the same, and
+#: `test_every_c5_boards_arduino_build_declares_the_clock_the_rate_assumes`
+#: holds that.
+CPU_HZ = 240_000_000
+
+#: Retired instructions per SYSTIMER tick, fifteen: one instruction standing
+#: for one cycle at `CPU_HZ`. **A judgement**, stated in full at
+#: `esp32c3.py`'s `SYSTIMER_INSTRUCTIONS_PER_TICK`; what differs here is only
+#: the clock, so a millisecond is 240,000 retired instructions where a C3's
+#: is 160,000.
+SYSTIMER_INSTRUCTIONS_PER_TICK = CPU_HZ // SYSTIMER_HZ
+
 
 #: The pin the fixture watches. **Not the board's LED**: GPIO8 is ESP-IDF's
 #: own blink default, `examples/get-started/blink/main/Kconfig.projbuild:34-37`,
@@ -318,6 +396,10 @@ class Cpu(typing.Protocol):
                   readable: bool = ...) -> None: ...
     def map_stream(self, address: int, *, enable: int,
                    enable_mask: int) -> None: ...
+    def map_snapshot_counter(self, *, op: int, update_mask: int,
+                             valid_mask: int, low: int, high: int,
+                             high_mask: int, enable: int, enable_mask: int,
+                             instructions_per_tick: int) -> None: ...
     def stream(self, address: int) -> bytes: ...
     def read_word(self, address: int) -> int: ...
 
@@ -389,6 +471,30 @@ def uart0_output(cpu: Cpu) -> bytes:
     return cpu.stream(UART0 + UART_FIFO)
 
 
+def install_systimer(cpu: Cpu) -> None:
+    """SYSTIMER unit 0, far enough for a program to read the time.
+
+    `CONF` at its composed reset value, and unit 0 as a snapshot counter
+    gated on `TIMER_UNIT0_WORK_EN`: UPDATE copies the count into the two value
+    registers and sets VALUE_VALID, ESP-IDF's own read. `esp32c3.py`'s
+    `install_systimer` carries the argument in full, including what is
+    absent: the LOAD registers, unit 1, and the comparators whose alarms need
+    an interrupt this core cannot take.
+    """
+    cpu.map_register(SYSTIMER + SYSTIMER_CONF, SYSTIMER_CONF_AT_RESET)
+    cpu.map_snapshot_counter(
+        op=SYSTIMER + SYSTIMER_UNIT0_OP,
+        update_mask=SYSTIMER_TIMER_UNIT0_UPDATE,
+        valid_mask=SYSTIMER_TIMER_UNIT0_VALUE_VALID,
+        low=SYSTIMER + SYSTIMER_UNIT0_VALUE_LO,
+        high=SYSTIMER + SYSTIMER_UNIT0_VALUE_HI,
+        high_mask=SYSTIMER_TIMER_UNIT0_VALUE_HI,
+        enable=SYSTIMER + SYSTIMER_CONF,
+        enable_mask=SYSTIMER_TIMER_UNIT0_WORK_EN,
+        instructions_per_tick=SYSTIMER_INSTRUCTIONS_PER_TICK,
+    )
+
+
 def pin_states(cpu: Cpu) -> dict[str, str]:
     """What every header pin this board knows about is doing, right now.
 
@@ -430,3 +536,4 @@ def install(cpu: Cpu) -> None:
     install_memory(cpu)
     install_gpio(cpu)
     install_uart0(cpu)
+    install_systimer(cpu)

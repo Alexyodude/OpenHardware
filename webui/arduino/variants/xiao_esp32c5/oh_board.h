@@ -54,6 +54,24 @@
 #define OH_UART_CLK_CONF     0x60000088u
 #define OH_UART_TX_SCLK_EN   0x01000000u   /* UART_TX_SCLK_EN, bit 24 */
 
+/* SYSTIMER unit 0, base 0x6000A000 (reg_base.h:23): write UPDATE to
+ * UNIT0_OP, wait for VALUE_VALID, then read VALUE_HI and VALUE_LO, which
+ * hold the copy taken at the write. `register/soc/systimer_reg.h:121`,
+ * `:370` and `:382`, via webui/boards/esp32c5.py, which cites each bit. The
+ * unit counts out of reset. */
+#define OH_SYSTIMER_UNIT0_OP           0x6000A004u
+#define OH_SYSTIMER_UNIT0_UPDATE       0x40000000u   /* bit 30 */
+#define OH_SYSTIMER_UNIT0_VALUE_VALID  0x20000000u   /* bit 29 */
+#define OH_SYSTIMER_UNIT0_VALUE_HI     0x6000A040u
+#define OH_SYSTIMER_UNIT0_VALUE_LO     0x6000A044u
+
+/* Sixteen ticks a microsecond, the description's SYSTIMER_HZ -- and NOT
+ * the 48 MHz crystal over `soc_caps.h`'s 2.5, which would say 19.2; the
+ * description says why. A tick is fifteen emulator steps here, the
+ * description's SYSTIMER_INSTRUCTIONS_PER_TICK, because this board's
+ * Arduino build runs at 240 MHz. */
+#define OH_SYSTIMER_TICKS_PER_US       16u
+
 /* The top of HP SRAM (0x40860000, soc.h's SOC_DRAM_HIGH), minus a word so
  * the first push stays inside it -- the C3 header's arithmetic applied to
  * this part's own bound. One window here where the C3 has two: the C5's
@@ -61,7 +79,12 @@
  * choose between. */
 #define OH_STACK_TOP         0x4085FFF0u
 
-/* **A judgement, and it says so** -- the same kind of number BOARD_MASK is
+/* **delay() still spins on this, and no longer because nothing models a
+ * timer**: SYSTIMER above does, and millis() reads it -- the C3 header says
+ * why delay() has not moved yet. Until it does, a delay(1) is ~24,000 steps
+ * and a millisecond of millis() is 240,000.
+ *
+ * **A judgement, and it says so** -- the same kind of number BOARD_MASK is
  * in `tools/import_3d_model.py`. This model configures no PLL and counts
  * no cycles, so a millisecond here cannot be a measurement of anything.
  * The choice is the C3's 4,000 iterations; the measurement is this

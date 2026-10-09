@@ -306,16 +306,16 @@ def _openhardware(*, variant: str, march: str, base: int,
     constant.
     """
     header = f"webui/arduino/{variant}/oh_board.h"
-    no_timer = (f"needs a timer and nothing on this board's model is one; "
-                f"delay() exists, as a counted loop whose cost {header} states.")
     return Recipe(
         toolchain="toolchain-riscv32-esp",
         prefix="riscv32-esp-elf-",
         framework="openhardware",
         core="cores/openhardware",
         variant=variant,
-        # No F_CPU define -- this model claims no clock, and the delay
-        # constant in oh_board.h says what kind of number it is.
+        # No F_CPU define. The description states the clock its SYSTIMER
+        # rate assumes (`CPU_HZ`, from the board's own boards.txt), but no
+        # sketch here has needed it at compile time, and the delay constant
+        # in oh_board.h says what kind of number it is.
         flags=(
             f"-march={march}", "-mabi=ilp32",
             "-Os", "-ffunction-sections", "-fdata-sections",
@@ -344,6 +344,11 @@ def _openhardware(*, variant: str, march: str, base: int,
         # decision nobody is making any more. What is still absent of that
         # peripheral -- the receive half, the divisors, `TXFIFO_CNT` -- is
         # unmapped rather than hinted, so it faults at a named address.
+        #
+        # **`millis` and `micros` went the same way at OH-161's step 2**:
+        # the descriptions map SYSTIMER's unit 0, and both read it. What is
+        # absent of that peripheral -- its LOAD registers, unit 1, the
+        # comparators -- is likewise unmapped rather than hinted.
         hints=(
             ("digitalRead",
              ("digitalRead does not exist on this board's model: its "
@@ -360,8 +365,6 @@ def _openhardware(*, variant: str, march: str, base: int,
               f"LED_BUILTIN is such a number it is that RGB LED, which this "
               f"board's model does not drive. Blink a GPIO the board's pins "
               f"name instead.")),
-            ("millis", "millis " + no_timer),
-            ("micros", "micros " + no_timer),
             ("analogWrite",
              ("analogWrite needs the LEDC peripheral and this board's model "
               "maps GPIO only.")),

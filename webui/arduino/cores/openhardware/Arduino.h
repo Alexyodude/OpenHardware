@@ -81,9 +81,17 @@ static inline __attribute__((always_inline)) void digitalWrite(uint8_t pin, uint
     oh_digital_write(pin, value);
 }
 
-/* A counted busy loop, because nothing on these boards models a timer.
- * What one millisecond COSTS is the variant's `OH_DELAY_LOOPS_PER_MS`,
- * and that constant's comment says what kind of number it is. */
+/* Time since the board was installed, read from SYSTIMER unit 0, which the
+ * board's description maps and `wiring.c` reads the way ESP-IDF does. Both
+ * wrap at 2^32, as Arduino's own do. What a millisecond is in emulator steps
+ * is the description's SYSTIMER_INSTRUCTIONS_PER_TICK times sixteen
+ * thousand, and that constant's comment says what kind of number it is. */
+unsigned long millis(void);
+unsigned long micros(void);
+
+/* Still a counted busy loop, although a timer is now modelled: the
+ * variant's `oh_board.h` says why it has not moved onto SYSTIMER, and what
+ * one millisecond of it COSTS is that header's `OH_DELAY_LOOPS_PER_MS`. */
 void delay(unsigned long ms);
 
 #ifdef __cplusplus

@@ -54,9 +54,9 @@ anything is wired to, and `GPIO8` below is the pin Espressif's own devkit uses
 
 ## What is deliberately absent
 
-Every timer, the ADC, SPI, I2C, and the whole clock and reset subsystem. Same
-growth rule the other three boards keep: a peripheral is added when a real
-image faults on it and not before. Here the rule has teeth --
+Every timer but one, the ADC, SPI, I2C, and the whole clock and reset
+subsystem. Same growth rule the other three boards keep: a peripheral is added
+when a real image faults on it and not before. Here the rule has teeth --
 `core/riscv32/cpu.h` faults on any address no region and no register covers, so
 a program that touches an undescribed peripheral stops and names the address
 rather than reading zero and hanging.
@@ -67,6 +67,17 @@ is what a `Serial.print` needs and no more. Its receive half, its baud
 divisors and `UART_TXFIFO_CNT` are unmapped, so firmware that waits for room
 in the FIFO or reads a byte back faults at a named address instead of spinning
 on a zero, and UART1 is not mapped at all.
+
+**The one timer is SYSTIMER's unit 0, since OH-161's step 2** -- the counter
+ESP-IDF's `esp_timer` reads (`SYSTIMER_COUNTER_ESPTIMER 0`, ESP-IDF v5.5's
+`components/esp_hw_support/include/esp_private/systimer.h:30`), which is
+what arduino-esp32's own `millis()` and `micros()` return
+(`cores/esp32/esp32-hal-misc.c:204-210` @ 2787dab) -- so it is what this
+repository's own two read. Its enable, its UPDATE / VALUE_VALID handshake and
+its two value registers; not unit 1, which is the one ESP-IDF's OS tick
+counts on (:31), not the LOAD registers that set a count, and not the three
+comparators, whose alarms need an interrupt this core cannot deliver. See
+`install_systimer`.
 """
 
 from __future__ import annotations
@@ -195,6 +206,89 @@ UART_TX_SCLK_EN = 1 << 24
 #: the others.
 UART_CLK_CONF_AT_RESET = 0x03701000
 
+#: SYSTIMER's base, `soc.h:61` -- `#define DR_REG_SYSTIMER_BASE 0x60023000`.
+SYSTIMER = 0x60023000
+
+#: The four registers of it this board models, from `systimer_reg.h`, as
+#: offsets because that is how the header writes them:
+#:
+#:     #define SYSTIMER_CONF_REG            (DR_REG_SYSTIMER_BASE + 0x0)   :26
+#:     #define SYSTIMER_UNIT0_OP_REG        (DR_REG_SYSTIMER_BASE + 0x4)   :108
+#:     #define SYSTIMER_UNIT0_VALUE_HI_REG  (DR_REG_SYSTIMER_BASE + 0x40)  :344
+#:     #define SYSTIMER_UNIT0_VALUE_LO_REG  (DR_REG_SYSTIMER_BASE + 0x44)  :356
+#:
+#: Every other register in the block is unmapped, so firmware that loads a
+#: count (`SYSTIMER_UNIT0_LOAD_LO_REG` at + 0x10, :158), arms an alarm or
+#: asks unit 1 for a snapshot (`SYSTIMER_UNIT1_OP_REG` at + 0x8, :127)
+#: faults at a named address.
+SYSTIMER_CONF = 0x00
+SYSTIMER_UNIT0_OP = 0x04
+SYSTIMER_UNIT0_VALUE_HI = 0x40
+SYSTIMER_UNIT0_VALUE_LO = 0x44
+
+#: The bits, each with the header's own access type and default:
+#:
+#:     SYSTIMER_TIMER_UNIT0_WORK_EN      R/W       [30]    default 1   :90, :93
+#:     SYSTIMER_TIMER_UNIT0_UPDATE       WT        [30]    default 0   :116, :119
+#:     SYSTIMER_TIMER_UNIT0_VALUE_VALID  R/SS/WTC  [29]    default 0   :109, :112
+#:     SYSTIMER_TIMER_UNIT0_VALUE_HI     RO        [19:0]  default 0   :345, :348
+#:
+#: **The unit counts out of reset**, `WORK_EN` being 1, so a bare-metal image
+#: reads time without configuring anything -- the same kind of fact as
+#: `UART_TX_SCLK_EN`'s default. `VALUE_HI`'s twenty bits over `VALUE_LO`'s 32
+#: make the counter 52 bits wide, which `soc_caps.h:248-249` states as
+#: `SOC_SYSTIMER_BIT_WIDTH_LO (32)` and `SOC_SYSTIMER_BIT_WIDTH_HI (20)`.
+SYSTIMER_TIMER_UNIT0_WORK_EN = 1 << 30
+SYSTIMER_TIMER_UNIT0_UPDATE = 1 << 30
+SYSTIMER_TIMER_UNIT0_VALUE_VALID = 1 << 29
+SYSTIMER_TIMER_UNIT0_VALUE_HI = 0x000FFFFF
+
+#: `SYSTIMER_CONF_REG` out of reset, composed from every field default
+#: `systimer_reg.h:27-97` states rather than from the one bit this model
+#: reads: `CLK_FO` [0] 0, `TARGET2..0_WORK_EN` [22..24] 0,
+#: `TIMER_UNIT1_CORE1_STALL_EN` [25] 1, `TIMER_UNIT1_CORE0_STALL_EN` [26] 1,
+#: `TIMER_UNIT0_CORE1_STALL_EN` [27] 0, `TIMER_UNIT0_CORE0_STALL_EN` [28] 0,
+#: `TIMER_UNIT1_WORK_EN` [29] 0, `TIMER_UNIT0_WORK_EN` [30] 1, `CLK_EN` [31] 0.
+SYSTIMER_CONF_AT_RESET = (1 << 25) | (1 << 26) | (1 << 30)
+
+#: How fast unit 0 counts: 16 MHz, sixteen ticks a microsecond. **Stated, in
+#: this file's own tree**: `soc_caps.h:250`,
+#: `SOC_SYSTIMER_FIXED_TICKS_US (16) // Number of ticks per microsecond is
+#: fixed`. ESP-IDF v5.5 dropped that define and says the same in prose --
+#: `components/esp_hw_support/port/esp32c3/systimer.c:10-11` at 8c750b0,
+#: "fixed to XTAL (40MHz), and has a fixed fractional divider (2.5). So the
+#: resolution of the systimer is 40MHz/2.5 = 16MHz" -- a file outside the
+#: sparse checkout `docs/esp-idf-reference.md` describes, so no test reads
+#: it; `tests/riscv32/test_esp32c3_board.py` reads the define.
+SYSTIMER_HZ = 16_000_000
+
+#: The clock a sketch on this part runs at: `build.f_cpu=160000000L` for
+#: `XIAO_ESP32C3` in arduino-esp32's `boards.txt:37756` @ 2787dab, the
+#: checkout the manifest's C3 rows build against -- and PlatformIO's
+#: `framework-arduinoespressif32/boards.txt:22087`, whose `XIAO_ESP32C3`
+#: variant this board's own recipe includes, says the same. **The board's
+#: own Arduino build, not this chip's maximum and not its reset clock**: an
+#: Arduino sketch for this board is compiled for and run at that frequency.
+#: Every ESP32-C3 row in `tools/board_manifest.py` declares the same, and
+#: `test_every_c3_boards_arduino_build_declares_the_clock_the_rate_assumes`
+#: holds that, because the rate below is per chip and a row at another clock
+#: would be timed wrongly by it.
+CPU_HZ = 160_000_000
+
+#: Retired instructions per SYSTIMER tick: `CPU_HZ // SYSTIMER_HZ`, ten.
+#:
+#: **A judgement, and the same one `webui/boards/rp2040.py`'s
+#: `TIMER_INSTRUCTIONS_PER_TICK` makes**: this core has no cycle model, so
+#: one retired instruction stands for one cycle at `CPU_HZ`. On silicon a
+#: load, a taken branch, a divide or a flash-cache miss takes more than one,
+#: so a real C3 retires fewer instructions in a millisecond than the 160,000
+#: this counts -- `millis()` here runs fast against a wall clock by however
+#: far the program's real CPI is above one. What it does guarantee is what a
+#: program reading time needs: virtual time that is monotonic, deterministic
+#: and an integer (`rules/determinism.md` §3), at a rate whose every factor
+#: is cited.
+SYSTIMER_INSTRUCTIONS_PER_TICK = CPU_HZ // SYSTIMER_HZ
+
 #: The pin the fixture watches. **Not a user LED** -- see the module docstring.
 #: GPIO8 is what Espressif's own ESP32-C3-DevKitM-1 wires its RGB LED to, and
 #: on a XIAO it is an ordinary exposed output -- the pad silkscreened `D8`,
@@ -270,6 +364,10 @@ class Cpu(typing.Protocol):
                   readable: bool = ...) -> None: ...
     def map_stream(self, address: int, *, enable: int,
                    enable_mask: int) -> None: ...
+    def map_snapshot_counter(self, *, op: int, update_mask: int,
+                             valid_mask: int, low: int, high: int,
+                             high_mask: int, enable: int, enable_mask: int,
+                             instructions_per_tick: int) -> None: ...
     def stream(self, address: int) -> bytes: ...
     def read_word(self, address: int) -> int: ...
 
@@ -366,6 +464,42 @@ def uart0_output(cpu: Cpu) -> bytes:
     return cpu.stream(UART0 + UART_FIFO)
 
 
+def install_systimer(cpu: Cpu) -> None:
+    """SYSTIMER unit 0, far enough for a program to read the time and no
+    further.
+
+    `CONF` as a register at its composed reset value, and unit 0 as a
+    snapshot counter gated on `CONF`'s `TIMER_UNIT0_WORK_EN`: a write of
+    `UPDATE` to `UNIT0_OP` copies the count into `VALUE_HI` and `VALUE_LO`
+    and sets `VALUE_VALID`, which is ESP-IDF's own read --
+    `systimer_hal_get_counter_value` writes the bit, spins on the flag, then
+    reads the two halves. The copy is taken the instant UPDATE is written, so
+    the spin ends on its first read; on silicon it takes the few clock
+    edges the halves need to synchronise.
+
+    **What is deliberately absent, and what it costs.** The LOAD registers,
+    so a program cannot set the count; unit 1; the three comparators and
+    their interrupts, which need an interrupt controller this core does not
+    have -- so ESP-IDF's FreeRTOS tick, an alarm on unit 1, cannot run here,
+    and a `millis()` that polls unit 0 can. And `VALUE_VALID`'s `WTC`: the header
+    says hardware clears it on a write, and here it is set by the first
+    UPDATE and stays set, because each UPDATE refreshes the copy before
+    anything can read the flag.
+    """
+    cpu.map_register(SYSTIMER + SYSTIMER_CONF, SYSTIMER_CONF_AT_RESET)
+    cpu.map_snapshot_counter(
+        op=SYSTIMER + SYSTIMER_UNIT0_OP,
+        update_mask=SYSTIMER_TIMER_UNIT0_UPDATE,
+        valid_mask=SYSTIMER_TIMER_UNIT0_VALUE_VALID,
+        low=SYSTIMER + SYSTIMER_UNIT0_VALUE_LO,
+        high=SYSTIMER + SYSTIMER_UNIT0_VALUE_HI,
+        high_mask=SYSTIMER_TIMER_UNIT0_VALUE_HI,
+        enable=SYSTIMER + SYSTIMER_CONF,
+        enable_mask=SYSTIMER_TIMER_UNIT0_WORK_EN,
+        instructions_per_tick=SYSTIMER_INSTRUCTIONS_PER_TICK,
+    )
+
+
 def pin_states(cpu: Cpu) -> dict[str, str]:
     """What every header pin this board knows about is doing, right now.
 
@@ -418,3 +552,4 @@ def install(cpu: Cpu) -> None:
     install_memory(cpu)
     install_gpio(cpu)
     install_uart0(cpu)
+    install_systimer(cpu)

@@ -643,9 +643,10 @@ def test_every_byte_of_the_operation_register_names_the_unit(systimer):
 
 
 def test_a_program_reads_the_count_the_way_esp_idf_does(systimer):
-    """`systimer_hal_get_counter_value`'s shape: write UPDATE, spin until
-    VALUE_VALID, read HI, read LO -- the sequence the openhardware core's
-    `millis` compiles to, executed here against the mechanism alone.
+    """Write UPDATE, spin until VALUE_VALID, read HI, read LO: ESP-IDF's
+    `systimer_hal_get_counter_value` less the second LO read only an
+    interrupt needs, and the sequence the openhardware core's `millis`
+    compiles to -- executed here against the mechanism alone.
 
     38 NOPs, then `lui`, `lui` and the store: the copy is taken with 40
     retired, which is ten ticks."""

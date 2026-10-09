@@ -1,4 +1,5 @@
-/* OpenHardware - pinMode, digitalWrite and delay against the modelled GPIO.
+/* OpenHardware - pinMode, digitalWrite, millis, micros and delay against
+ * the modelled GPIO and SYSTIMER.
  *
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 the OpenHardware authors. See LICENSE.
@@ -38,6 +39,41 @@ void oh_digital_write(uint8_t pin, uint8_t value) {
     } else {
         OH_REG(OH_GPIO_OUT_W1TC) = mask_of(pin);
     }
+}
+
+/* One read of SYSTIMER unit 0, the way ESP-IDF's own
+ * `systimer_hal_get_counter_value` reads it (`components/hal/systimer_hal.c:46-62`
+ * at v5.5): ask for a copy, wait until the copy is valid, then read its two
+ * halves. ESP-IDF reads the low half twice
+ * around the high one, because an interrupt may take a new copy between
+ * them; nothing here interrupts, so one read of each IS the copy. */
+static uint64_t oh_systimer_ticks(void) {
+    OH_REG(OH_SYSTIMER_UNIT0_OP) = OH_SYSTIMER_UNIT0_UPDATE;
+    while ((OH_REG(OH_SYSTIMER_UNIT0_OP) & OH_SYSTIMER_UNIT0_VALUE_VALID) == 0) {
+    }
+    const uint32_t high = OH_REG(OH_SYSTIMER_UNIT0_VALUE_HI);
+    const uint32_t low = OH_REG(OH_SYSTIMER_UNIT0_VALUE_LO);
+    return ((uint64_t)high << 32) | low;
+}
+
+/* A shift and not a division: the rate is sixteen, and an image linked
+ * `-nostdlib` has no `__udivdi3` to divide 64 bits by anything else. */
+unsigned long micros(void) {
+    return (unsigned long)(oh_systimer_ticks() / OH_SYSTIMER_TICKS_PER_US);
+}
+
+/* Microseconds over a thousand, without the `__udivdi3` this image does
+ * not link: split at bit 16 and divide each half with the M extension's
+ * 32-bit `divu`. The count is 52 bits, so the microseconds are under 2^48
+ * and `upper` fits in 32; `(rest << 16) | lower` is under 1000 * 2^16. The
+ * shift of the upper quotient may carry past bit 31, and dropping that is
+ * the wrap at 2^32 an `unsigned long millis()` makes anyway. */
+unsigned long millis(void) {
+    const uint64_t us = oh_systimer_ticks() / OH_SYSTIMER_TICKS_PER_US;
+    const uint32_t upper = (uint32_t)(us >> 16);
+    const uint32_t lower = (uint32_t)us & 0xFFFFu;
+    const uint32_t rest = upper % 1000u;
+    return ((upper / 1000u) << 16) + (((rest << 16) | lower) / 1000u);
 }
 
 void delay(unsigned long ms) {

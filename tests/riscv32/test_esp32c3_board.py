@@ -37,6 +37,7 @@
 
 import itertools
 import pathlib
+import re
 import shutil
 import subprocess
 
@@ -489,3 +490,182 @@ def test_the_status_register_this_uart_does_not_model_faults_by_name():
         with pytest.raises(abi.MemoryFault) as caught:
             cpu.read_word(esp32c3.UART0 + 0x1C)
     assert "0x6000001c" in str(caught.value)
+
+
+# --- SYSTIMER unit 0: what a program reads the time from (OH-161 step 2) ----
+
+
+#: `jal x0, 0`: a jump to itself, so a test can retire any number of
+#: instructions from one word of flash.
+SPIN = 0x0000006F
+
+
+def framework_soc() -> pathlib.Path | None:
+    """The `soc` headers `webui/boards/esp32c3.py` cites, inside PlatformIO's
+    `framework-arduinoespressif32` (ESP-IDF 4.4.7), or None where it is not
+    installed -- found where `webui/compile.py` finds the toolchain."""
+    from webui import compile as compiler
+
+    soc = (compiler.PACKAGES / "framework-arduinoespressif32" / "tools" / "sdk"
+           / "esp32c3" / "include" / "soc" / "esp32c3" / "include" / "soc")
+    return soc if (soc / "systimer_reg.h").is_file() else None
+
+
+def header_defines(header: pathlib.Path) -> dict[str, str]:
+    """Every `#define NAME VALUE` in `header`, as text, comments stripped."""
+    out: dict[str, str] = {}
+    for line in header.read_text(encoding="utf-8", errors="replace").splitlines():
+        parts = line.split(maxsplit=2)
+        if len(parts) == 3 and parts[0] == "#define":
+            out[parts[1]] = parts[2].split("/*")[0].split("//")[0].strip()
+    return out
+
+
+def test_the_systimer_numbers_this_board_carries_are_the_ones_in_the_header():
+    """Every SYSTIMER constant in `esp32c3.py` read back, by define name, out
+    of the tree it cites: the base (`soc.h`), the four offsets and the bit
+    patterns (`systimer_reg.h`), and the rate -- `SOC_SYSTIMER_FIXED_TICKS_US`
+    in `soc_caps.h`, sixteen ticks a microsecond, the one header of the three
+    parts' that states the rate as a value. Skips where PlatformIO's
+    framework is not installed."""
+    soc = framework_soc()
+    if soc is None:
+        pytest.skip("SKIPPED: no framework-arduinoespressif32; pio pkg install")
+    base = header_defines(soc / "soc.h")
+    timer = header_defines(soc / "systimer_reg.h")
+    caps = header_defines(soc / "soc_caps.h")
+
+    assert int(base["DR_REG_SYSTIMER_BASE"], 16) == esp32c3.SYSTIMER
+    for name, offset in (
+        ("SYSTIMER_CONF_REG", esp32c3.SYSTIMER_CONF),
+        ("SYSTIMER_UNIT0_OP_REG", esp32c3.SYSTIMER_UNIT0_OP),
+        ("SYSTIMER_UNIT0_VALUE_HI_REG", esp32c3.SYSTIMER_UNIT0_VALUE_HI),
+        ("SYSTIMER_UNIT0_VALUE_LO_REG", esp32c3.SYSTIMER_UNIT0_VALUE_LO),
+    ):
+        written = timer[name].strip("()").replace("DR_REG_SYSTIMER_BASE + ", "")
+        assert int(written, 16) == offset, f"{name} is {timer[name]}"
+    for name, bit in (
+        ("SYSTIMER_TIMER_UNIT0_WORK_EN", esp32c3.SYSTIMER_TIMER_UNIT0_WORK_EN),
+        ("SYSTIMER_TIMER_UNIT0_UPDATE", esp32c3.SYSTIMER_TIMER_UNIT0_UPDATE),
+        ("SYSTIMER_TIMER_UNIT0_VALUE_VALID", esp32c3.SYSTIMER_TIMER_UNIT0_VALUE_VALID),
+    ):
+        assert timer[name] == f"(BIT({bit.bit_length() - 1}))", f"{name} is {timer[name]}"
+    assert int(timer["SYSTIMER_TIMER_UNIT0_VALUE_HI"], 16) == esp32c3.SYSTIMER_TIMER_UNIT0_VALUE_HI
+    assert int(caps["SOC_SYSTIMER_FIXED_TICKS_US"].strip("()")) * 1_000_000 == (
+        esp32c3.SYSTIMER_HZ)
+
+
+def test_the_conf_reset_value_is_every_default_the_header_states():
+    """`SYSTIMER_CONF_AT_RESET` composed from the header's own field
+    defaults -- the comments the generator writes above each field, where
+    the defaults live -- and not from the one bit the model reads."""
+    soc = framework_soc()
+    if soc is None:
+        pytest.skip("SKIPPED: no framework-arduinoespressif32; pio pkg install")
+    text = (soc / "systimer_reg.h").read_text(encoding="utf-8", errors="replace")
+    start = text.index("#define SYSTIMER_CONF_REG ")
+    block = text[start:text.index("#define SYSTIMER_UNIT0_OP_REG ", start)]
+    fields = re.findall(
+        r"/\*\* (\w+) : [\w/]+; bitpos: \[(\d+)(?::\d+)?\]; default: (\d+);", block)
+    assert fields, "no field comments between CONF and UNIT0_OP"
+    composed = sum(int(default) << int(low) for _name, low, default in fields)
+    assert composed == esp32c3.SYSTIMER_CONF_AT_RESET, (
+        f"the header's defaults compose to {composed:#010x}, the board says "
+        f"{esp32c3.SYSTIMER_CONF_AT_RESET:#010x}: {fields}")
+
+
+def test_every_c3_boards_arduino_build_declares_the_clock_the_rate_assumes():
+    """The rate is per chip -- `SYSTIMER_INSTRUCTIONS_PER_TICK` is `CPU_HZ`
+    over the counter's -- and a board is built against its own variant, so
+    every ESP32-C3 board this repository builds must declare the same
+    `build.f_cpu` in arduino-esp32's `boards.txt`. A row at another clock
+    would have its `millis()` timed by a rate that is not its own. The
+    XIAO's variant is the one its recipe includes, which on this part comes
+    from PlatformIO's framework; its name is the same in both trees. Skips,
+    naming the fetch, where the checkout is absent."""
+    from tools import board_manifest
+    from webui import compile as compiler
+
+    boards_txt = compiler.BOARD_SUPPORT / "arduino-esp32" / "boards.txt"
+    if not boards_txt.is_file():
+        pytest.skip(f"SKIPPED: no {boards_txt}; python tools/import_pindefs.py --fetch")
+    text = boards_txt.read_text(encoding="utf-8", errors="replace")
+    recipe = compiler.RECIPES["ESP32-C3"]
+    (xiao,) = recipe.extra_includes + recipe.bsp_includes
+    variants = {xiao.rsplit("/", 1)[1]} | {
+        row.variant for row in board_manifest.ROWS if row.chip == "ESP32-C3"}
+    for variant in sorted(variants):
+        keys = re.findall(rf"^([\w.-]+)\.build\.variant={re.escape(variant)}\s*$", text, re.M)
+        assert keys, f"no boards.txt entry builds variant {variant}"
+        for key in keys:
+            (clock,) = re.findall(rf"^{re.escape(key)}\.build\.f_cpu=(\d+)L\s*$", text, re.M)
+            assert int(clock) == esp32c3.CPU_HZ, f"{key} ({variant}) runs at {clock}"
+
+
+def test_the_installed_unit_reads_the_vendors_reset_values():
+    """Out of reset `CONF` is its composed default, and unit 0 has given no
+    copy: `VALUE_VALID` is `default: 0` (:109) and both value fields too
+    (:345, :357)."""
+    needs_core()
+    from core.riscv32 import abi
+
+    timer = esp32c3.SYSTIMER
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        assert cpu.read_word(timer + esp32c3.SYSTIMER_CONF) == esp32c3.SYSTIMER_CONF_AT_RESET
+        assert cpu.read_word(timer + esp32c3.SYSTIMER_UNIT0_OP) == 0
+        assert cpu.read_word(timer + esp32c3.SYSTIMER_UNIT0_VALUE_HI) == 0
+        assert cpu.read_word(timer + esp32c3.SYSTIMER_UNIT0_VALUE_LO) == 0
+
+
+def test_the_unit_counts_at_the_stated_rate_and_holds_while_its_enable_is_clear():
+    """1,005 instructions at ten a tick is 100 ticks. Then `WORK_EN` alone is
+    cleared -- the other bits of `CONF` left at reset, so an enable read from
+    the wrong bit would keep counting -- and 1,000 more count nothing; set
+    again, 1,000 more are another 100."""
+    needs_core()
+    from core.riscv32 import abi
+
+    timer = esp32c3.SYSTIMER
+    conf = timer + esp32c3.SYSTIMER_CONF
+    op = timer + esp32c3.SYSTIMER_UNIT0_OP
+    low = timer + esp32c3.SYSTIMER_UNIT0_VALUE_LO
+    assert esp32c3.SYSTIMER_INSTRUCTIONS_PER_TICK == 10, "160 MHz over 16"
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        cpu.write_block(esp32c3.IROM, SPIN.to_bytes(4, "little"))
+        cpu.set_regs([0] * 32, pc=esp32c3.IROM)
+        for _ in range(1_005):
+            cpu.step()
+        cpu.write_word(op, esp32c3.SYSTIMER_TIMER_UNIT0_UPDATE)
+        assert cpu.read_word(op) == esp32c3.SYSTIMER_TIMER_UNIT0_VALUE_VALID
+        assert cpu.read_word(low) == 100
+
+        cpu.write_word(conf, esp32c3.SYSTIMER_CONF_AT_RESET & ~esp32c3.SYSTIMER_TIMER_UNIT0_WORK_EN)
+        for _ in range(1_000):
+            cpu.step()
+        cpu.write_word(op, esp32c3.SYSTIMER_TIMER_UNIT0_UPDATE)
+        assert cpu.read_word(low) == 100, "a disabled unit holds its count"
+
+        cpu.write_word(conf, esp32c3.SYSTIMER_CONF_AT_RESET)
+        for _ in range(1_000):
+            cpu.step()
+        cpu.write_word(op, esp32c3.SYSTIMER_TIMER_UNIT0_UPDATE)
+        assert cpu.read_word(low) == 200
+
+
+def test_the_systimer_registers_this_board_does_not_model_fault_by_name():
+    """`UNIT0_LOAD_LO` (+ 0x10, :158) would set the count and `UNIT1_OP`
+    (+ 0x8, :127) would ask the other unit for a copy. Neither is modelled,
+    so each faults at its own address rather than answering a zero a
+    program would take for the time."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        for offset in (0x10, 0x08):
+            address = esp32c3.SYSTIMER + offset
+            with pytest.raises(abi.MemoryFault) as caught:
+                cpu.read_word(address)
+            assert f"0x{address:08x}" in str(caught.value)
