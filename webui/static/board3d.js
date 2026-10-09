@@ -1528,19 +1528,30 @@ function middleOf(points) {
  * millimetres, each named as the importer names a board file's pad from the
  * same file -- its net, or its number on no net.
  *
- * **Each turn is tried and the one that lands most pads on a header pad of
- * their own NAME wins**, then most on any header pad, then nearest. A name
- * is what a half turn cannot fake: a XIAO's two castellated rows lie on one
- * another turned half way round, and its GND and VBUS do not. A pad lands
- * where it is inside the circle its header pad's narrower side spans.
- * Each turn is first centred on the middle of both sets' extents, and the
- * place is then the middle of the pads that landed against the middle of
- * the header pads they landed on: **the pads both sides have**, which on
- * the PCBCUPID Glyph Mini is not every pad its composer centred on.
+ * **Each turn is tried, and one landing every pad wins over one that does
+ * not**; of those, the one landing most pads on a header pad of their own
+ * NAME, then most on any header pad, then nearest. Landing comes first
+ * because a turn that does not land every pad is refused: ranked by names
+ * first, one stray namesake under a turn landing a single pad outranked a
+ * turn landing all of them, and the refusal then said no turn did. A name
+ * is what a half turn cannot fake: two rows of pads lie on one another
+ * turned half way round, and their names do not. A pad lands where it is
+ * inside the circle its header pad's narrower side spans. Each turn is
+ * first centred on the middle of both sets' extents, and the place is then
+ * the middle of the pads that landed against the middle of the header pads
+ * they landed on: **the pads both sides have**, which on the PCBCUPID Glyph
+ * Mini is not every pad its composer centred on.
  *
  * `preferred` is the quarter the outlines' orientations give (OH-215),
- * taken only where turns tie on all three -- a board whose names say
- * nothing and whose pads are symmetric, as a XIAO DIP's header rows are.
+ * taken only where turns tie on all four -- a board whose names say
+ * nothing and whose pads are symmetric.
+ *
+ * Refused by name in two ways, each its own message: when no turn lands
+ * every pad, and when the turn taken lands every pad but more of the pads
+ * whose name the model gives a header pad land on one of ANOTHER name than
+ * land on their own -- the names say the landing is wrong. One such pad is
+ * not that: a traced map's silkscreen label can be the number a model
+ * names a pad on no net by, as the Arduino Uno's "1" is.
  */
 function landOnHeaderPads(board, pads, header, scale, preferred) {
   const tried = [];
@@ -1570,7 +1581,9 @@ function landOnHeaderPads(board, pads, header, scale, preferred) {
       gaps: landed.reduce((sum, match) => sum + match.gap, 0),
     });
   }
-  const rank = (a, b) => (b.named - a.named) || (b.landed.length - a.landed.length)
+  const whole = (one) => (one.landed.length === pads.length ? 1 : 0);
+  const rank = (a, b) => (whole(b) - whole(a))
+    || (b.named - a.named) || (b.landed.length - a.landed.length)
     || (Math.round((a.gaps - b.gaps) * 1e3));
   const best = [...tried].sort(rank)[0];
   const tied = tried.filter((one) => rank(one, best) === 0);
@@ -1583,6 +1596,17 @@ function landOnHeaderPads(board, pads, header, scale, preferred) {
       `the model's header pads -- turned 0/90/180/270 degrees, ` +
       `${tried.map((one) => one.landed.length).join("/")} of ${pads.length} ` +
       `land, and at the best these do not: ${astray.join(", ")}`);
+  }
+  const names = new Set(header.map((row) => row[4]));
+  const crossed = chosen.landed.filter((match) => names.has(match.pad.label)
+                                       && match.own.name !== match.pad.label);
+  if (crossed.length > chosen.named) {
+    throw new Error(
+      `${board}: turned ${chosen.quarter * 90} degrees, every pad of its board ` +
+      `file lands on one of the model's header pads, but their names disagree: ` +
+      `${crossed.length} land on a header pad of another name where the model ` +
+      `has one of their own, and ${chosen.named} on their namesakes -- ` +
+      `${crossed.map((match) => `${match.pad.label} on ${match.own.name}`).join(", ")}`);
   }
   const from = middleOf(chosen.landed.map((match) => match.pad));
   const to = middleOf(chosen.landed.map((match) => match.own));

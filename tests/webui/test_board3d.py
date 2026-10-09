@@ -2626,8 +2626,9 @@ export async function load(url, context, next) {
 #: (through a `fetch` that reads the disk), and prints per board the model's
 #: turn and scale, the top of its PCB, and where every pad sits in the
 #: MODEL's frame -- the millimetres the composer writes -- by its index in the
-#: layout, with the centroid `[x, z, y]` of every triangle `carvePins` gave it
-#: and whether the page holds it to be on the underside.
+#: layout, its height `y` there, with the centroid `[x, z, y]` of every
+#: triangle `carvePins` gave it and whether the page holds it to be on the
+#: underside.
 PLACEMENT_PROBE = r"""
 import { register } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -2678,7 +2679,7 @@ for (const { layout, file } of JSON.parse(readFileSync(CASES, "utf-8"))) {
     }
     mesh.getWorldPosition(at);
     model.worldToLocal(at);
-    const pad = { index, label: entry.label, x: at.x, z: at.z, tris: [],
+    const pad = { index, label: entry.label, x: at.x, z: at.z, y: at.y, tris: [],
                   underside: Boolean(mesh.userData.underside) };
     if (mesh.userData.carved) {
       // A carved pin's triangles are relative to its own place (OH-128).
@@ -3107,7 +3108,11 @@ def test_an_underside_pad_takes_the_metal_under_the_board_and_never_over_it(
     so it runs with no model built; needs node.
 
     Seen red (2026-10-09), on board3d.js as it was before OH-216: the
-    underside pad carved nothing and was not marked as on the underside.
+    underside pad carved nothing and was not marked as on the underside. In
+    review (2026-10-09), with `placeModel` standing every marker on the top:
+    the underside pad's marker stood over the board, which nothing asserted
+    until then. Each is `(underside, carved heights, marker under the
+    board, marker over it)`.
     """
     model = tmp_path / "both.glb"
     metal_triangles_glb(model, {"long": 10.0, "short": 10.0, "thickness": 1.6},
@@ -3118,9 +3123,10 @@ def test_an_underside_pad_takes_the_metal_under_the_board_and_never_over_it(
                         "x": 50.0, "y": 50.0, "group": group, "state": "unknown"}
                        for label, group in (("T", "header-top"), ("U", "underside"))]}
     (case,) = placed_by_the_page(tmp_path, [{"layout": layout, "file": str(model)}])
-    sides = {pad["label"]: (pad["underside"], [round(y, 2) for _, _, y in pad["tris"]])
+    sides = {pad["label"]: (pad["underside"], [round(y, 2) for _, _, y in pad["tris"]],
+                            pad["y"] < 0, pad["y"] > 1.6)
              for pad in case["pads"]}
-    assert sides == {"T": (False, [2.0]), "U": (True, [-0.5])}, sides
+    assert sides == {"T": (False, [2.0], False, True), "U": (True, [-0.5], True, False)}, sides
 
 
 def test_every_pad_carves_only_metal_on_its_own_side_of_the_board(
@@ -3229,12 +3235,47 @@ def test_a_model_is_turned_by_the_names_of_its_pads_where_its_outline_cannot_say
                    "bare": (0, "PCB outline", None)}, got
 
 
+def test_two_rows_a_half_turn_lays_on_each_other_are_turned_by_their_names_not_the_outline(
+        tmp_path):
+    """**Where geometry cannot tell a half turn, the names do, against the
+    outline.** Two rows of three pads, which turned half way round lie
+    exactly on one another: unturned or turned 180 degrees, every pad lands,
+    and at the same distance. The model lies on a lying map, so the outlines
+    prefer it unturned (OH-215), and its pads land on their namesakes only
+    turned half way round. Turned 180 degrees, all six named.
+
+    The name rule had no test of its own until review: each synthetic case
+    above is decided by where its pads are, and a XIAO's two rows by the
+    outline's preference as well as by its names.
+
+    Seen red (2026-10-09), with the name term taken out of the ranking: the
+    turns tied, the outline's preferred quarter was taken, and every pad
+    landed on another pad's name, which the page refused.
+    """
+    rows = tmp_path / "rows.glb"
+    one_triangle_glb(rows, {"long": 20.0, "short": 10.0, "thickness": 1.6},
+                     [[-3.0, -2.0, 1.0, 1.0, "A"], [0.0, -2.0, 1.0, 1.0, "B"],
+                      [3.0, -2.0, 1.0, 1.0, "C"], [-3.0, 2.0, 1.0, 1.0, "D"],
+                      [0.0, 2.0, 1.0, 1.0, "E"], [3.0, 2.0, 1.0, 1.0, "F"]])
+    # Half way round, a model point (x, z) lands at (-x, -z).
+    (case,) = placed_by_the_page(tmp_path, [{
+        "layout": named_pad_map("rows", 200, 100,
+                                [("A", 3, 2), ("B", 0, 2), ("C", -3, 2),
+                                 ("D", 3, -2), ("E", 0, -2), ("F", -3, -2)]),
+        "file": str(rows)}])
+    got = (round(math.degrees(case["turn"])), case["placement"]["by"],
+           case["placement"]["named"])
+    assert got == (180, "header pads", 6), (got, case["placement"])
+
+
 def test_a_model_no_turn_of_which_lands_the_pads_is_refused_by_name(tmp_path):
     """Where no quarter turn lands every pad of the board file on one of the
-    model's header pads, the page refuses, naming the board and the pads,
-    rather than drawing the model somewhere a pad is not.
+    model's header pads, the page refuses, naming the board, what each turn
+    lands and the pads, rather than drawing the model somewhere a pad is
+    not -- and says that, not that the names disagree.
 
     Seen red (2026-10-09), on board3d.js as OH-215 left it: nothing refused.
+    In review (2026-10-09), with that refusal taken out: nothing refused.
     """
     far = tmp_path / "far.glb"
     one_triangle_glb(far, {"long": 20.0, "short": 10.0, "thickness": 1.6},
@@ -3246,7 +3287,43 @@ def test_a_model_no_turn_of_which_lands_the_pads_is_refused_by_name(tmp_path):
             "file": str(far)}])
     message = str(caught.value)
     assert ("nowhere: no quarter turn lands every pad of its board file on one "
-            "of the model's header pads") in message, message
+            "of the model's header pads -- turned 0/90/180/270 degrees, 0/0/0/0 "
+            "of 3 land, and at the best these do not: A, B, C") in message, message
+    assert "names disagree" not in message, message
+
+
+def test_pads_that_all_land_on_pads_of_other_names_are_refused_as_names_that_disagree(
+        tmp_path):
+    """**A turn landing every pad is taken over one that names more but
+    lands fewer, and is refused where the names say it is wrong.** A row of
+    four header pads A, B, C, D and one beside it, X; the board file's pads
+    stand on all five unturned, but named D, C, B, A and W: four of them on
+    a header pad of another name where the model has one of their own, and
+    none on its namesake. The page refuses, saying so -- not that no turn
+    lands every pad, which is false.
+
+    Seen red (2026-10-09), on board3d.js with names ranked before landing,
+    as it was before review: a quarter turn landing one pad, on its
+    namesake, outranked the turn landing all five, and the refusal said
+    "no quarter turn lands every pad ... 5/1/0/1 of 5 land".
+    """
+    row = tmp_path / "row.glb"
+    one_triangle_glb(row, {"long": 20.0, "short": 10.0, "thickness": 1.6},
+                     [[-3.0, 0.0, 1.0, 1.0, "A"], [-1.0, 0.0, 1.0, 1.0, "B"],
+                      [1.0, 0.0, 1.0, 1.0, "C"], [3.0, 0.0, 1.0, 1.0, "D"],
+                      [0.0, 1.5, 1.0, 1.0, "X"]])
+    with pytest.raises(AssertionError) as caught:
+        placed_by_the_page(tmp_path, [{
+            "layout": named_pad_map("reversed", 200, 100,
+                                    [("D", -3, 0), ("C", -1, 0), ("B", 1, 0), ("A", 3, 0),
+                                     ("W", 0, 1.5)]),
+            "file": str(row)}])
+    message = str(caught.value)
+    assert ("reversed: turned 0 degrees, every pad of its board file lands on one "
+            "of the model's header pads, but their names disagree: 4 land on a "
+            "header pad of another name where the model has one of their own, and "
+            "0 on their namesakes") in message, message
+    assert "no quarter turn lands every pad" not in message, message
 
 
 #: How near a pad must land to its namesake where the board file and the
@@ -3275,10 +3352,16 @@ def test_every_composed_board_lands_each_pad_on_a_header_pad_its_model_states(
     artwork and labelled from its silkscreen, so its pads land inside a
     header pad, any one, as OH-215 held them.
 
-    This is what holds a XIAO against a half turn, which OH-215 could not:
-    its board file is Seeed's footprint and its model Seeed's module, two
-    files, and the names they share -- GND and VBUS, and nine on the C3 --
-    lie on no namesake turned half way round. And it holds the centre, to
+    This catches a XIAO turned half way round, which OH-215's test could
+    not: its board file is Seeed's footprint and its model Seeed's module,
+    two files, and the names they share -- GND and VBUS, and more on the C3
+    -- would land on another name. **What turns a XIAO right on the page is
+    not its names alone**: its two rows land every pad turned either way, at
+    the same distances, and with the names taken out of the page's ranking
+    the outline's preferred quarter (OH-215) breaks that tie the same way
+    and this still passes (review, 2026-10-09). The name rule is held by
+    `test_two_rows_a_half_turn_lays_on_each_other_are_turned_by_their_names_not_the_outline`,
+    where the outline says otherwise. And it holds the centre, to
     `CENTRED_MM`: the PCBCUPID Glyph Mini sat 0.73 mm off every pad, centred
     on 46 pads where its board file has 23; and a XIAO SMD 0.43 to 0.52 mm
     off, centred on its underside pads too.
