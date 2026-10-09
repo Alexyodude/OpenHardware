@@ -16,6 +16,36 @@ touches:
 - webui/boards/esp32c6.py
 - core/riscv32/**
 - tests/riscv32/**
+- tests/webui/test_feather_esp32c6_board.py
+- tests/webui/feather_esp32c6/blink.bin
+- tests/webui/feather_esp32c6/blink.ino
+- tests/webui/test_olimex_esp32c3_devkit_lipo_board.py
+- tests/webui/olimex_esp32c3_devkit_lipo/lipo_blink.bin
+- tests/webui/olimex_esp32c3_devkit_lipo/lipo_blink.ino
+- tests/webui/test_olimex_esp32c6_evb_board.py
+- tests/webui/olimex_esp32c6_evb/evb_blink.bin
+- tests/webui/olimex_esp32c6_evb/evb_blink.ino
+- tests/webui/test_pcbcupid_glyph_c3_board.py
+- tests/webui/pcbcupid_glyph_c3/glyph_c3_blink.bin
+- tests/webui/pcbcupid_glyph_c3/glyph_c3_blink.ino
+- tests/webui/test_pcbcupid_glyph_c6_board.py
+- tests/webui/pcbcupid_glyph_c6/glyph_c6_blink.bin
+- tests/webui/pcbcupid_glyph_c6/glyph_c6_blink.ino
+- tests/webui/test_qtpy_esp32c3_board.py
+- tests/webui/qtpy_esp32c3/qtpy_blink.bin
+- tests/webui/qtpy_esp32c3/qtpy_blink.ino
+- tests/webui/test_sparkfun_esp32c5_board.py
+- tests/webui/sparkfun_esp32c5/sparkfun_c5_blink.bin
+- tests/webui/sparkfun_esp32c5/sparkfun_c5_blink.ino
+- tests/webui/test_sparkfun_esp32c6_board.py
+- tests/webui/sparkfun_esp32c6/sparkfun_blink.bin
+- tests/webui/sparkfun_esp32c6/sparkfun_blink.ino
+- tests/webui/test_sparkfun_pro_micro_esp32c3_board.py
+- tests/webui/sparkfun_pro_micro_esp32c3/promicro_blink.bin
+- tests/webui/sparkfun_pro_micro_esp32c3/promicro_blink.ino
+- tests/webui/test_sparkfun_qwiic_pocket_esp32c6_board.py
+- tests/webui/sparkfun_qwiic_pocket_esp32c6/pocket_blink.bin
+- tests/webui/sparkfun_qwiic_pocket_esp32c6/pocket_blink.ino
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
@@ -206,3 +236,5 @@ VERIFIED at da66359, after python tools/build_core.py: tests/riscv32 and tests/w
 **Note 2026-10-09:** CONFIRM REVIEW OF THE FIX ROUND: confirmed for merge. It re-ran five of the breaks above, each failing its own test and no other, and found three LOWs, fixed here. (1) test_a_gate_that_cannot_be_read_leaves_no_fault_behind_between_instructions primed the record with an access fault at zero, which is also the reset value and what a mutant clearing the record instead of restoring it writes, so that mutant passed all 47; it now primes a fetch fault at 0x60023F00 and holds the address and the fetch flag both. Seen: the record cleared to 0/false fails it, and the fetch flag alone not put back fails it, each 1 failed, 46 passed; restored, 47 passed. (2) The note above says the review had eight findings and seven fixed. It had nine, one informational (finding 9: the HI mask unexercised, VALUE_VALID's write-to-clear unmodelled, both already disclosed); six were fixed in da66359; finding 1's 0.15 was corrected in that note, and the mismatch itself -- delay() and millis() on two scales -- stays open as the delay() work; finding 4 is left. (3) The three board modules' import-time refusal ended 'and every tick would come early', which is false below 16 MHz, where the count is 0 and abi.py refuses the board; the clause is gone and the two numbers say what is wrong.
 
 **Note 2026-10-09:** STEP 2 MERGED to master by fast-forward at 1573738 (lane2): SYSTIMER unit 0 on the C3, C5 and C6, millis() and micros() reading it, the core's snapshot counter at ABI 3. REVIEW: an independent review (MERGE AFTER FIXES), its fix round (da66359, b3d6df8), and a confirm review (CONFIRMED FOR MERGE) whose three LOWs are 1573738. VERIFIED on master at 1573738, core rebuilt with tools/build_core.py: full suite 2 failed (the OCP pair, test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert and test_the_tessellator_welds_what_it_meshes, under a python without OCP), 2650 passed, 41 skipped. NEXT, still step 2: delay(). The ten ESP32 manifest board tests and their images under tests/webui/<board>/ are claimed by no ticket (tickets.py owner says unclaimed for each), so this ticket takes them rather than borrowing them. Steps 3-5 remain.
+
+**Note 2026-10-09:** Claimed for delay(): the ten ESP32 manifest board tests tests/webui/test_{feather_esp32c6,olimex_esp32c3_devkit_lipo,olimex_esp32c6_evb,pcbcupid_glyph_c3,pcbcupid_glyph_c6,qtpy_esp32c3,sparkfun_esp32c5,sparkfun_esp32c6,sparkfun_pro_micro_esp32c3,sparkfun_qwiic_pocket_esp32c6}_board.py and their sketch folders tests/webui/<board>/**, which no ticket claimed (tickets.py owner: unclaimed for each test file). Moving delay() onto the systimer changes every committed image's bytes and every BUDGET they run under.
