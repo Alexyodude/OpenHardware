@@ -36,7 +36,7 @@ import types
 import pytest
 
 from webui import api, pinmap
-from webui.boards import atmega328p, catalogue, samd21
+from webui.boards import atmega328p, catalogue, contract, samd21
 
 UNO = "Arduino Uno"
 XIAO = "XIAO-SAMD21-DIP"
@@ -830,8 +830,8 @@ def test_a_running_board_still_reports_the_pins_its_timers_took():
     board with no program at all gets the new words.
 
     So this asserts the opposite of the test above on the same board: levels
-    WERE read, and pads that are still unknown with a chip pin behind them
-    are the real thing rather than the absence of a program.
+    WERE read, and modelled pads that are still unknown are the real thing
+    rather than the absence of a program.
     """
     with built(UNO, UNO_DRIVE) as session:
         session.step(5000)
@@ -849,8 +849,13 @@ def test_a_running_board_whose_module_reads_no_pins_still_says_one_is_running():
     `pad_view` decides on `live is None`, and `pin_view` is what guarantees
     that means "picked and not loaded". It did not: `pin_levels` answers
     `None` for a description with no `pin_states`, so a board that was RUNNING
-    could arrive as `None` and report that nothing was running -- every
-    modelled pad reading "no program running" while a program ran.
+    could arrive as `None` and report that nothing was running.
+
+    **Since OH-172 that costs the field and not the words.** Where
+    `pin_levels` answers `None`, `level_keys` is empty, so no pad is modelled
+    and every pad reads "not modelled" whether `read_levels` is true or not.
+    The coalesce changes no word on the page; what it keeps is `read_levels`
+    true for a board that is running, which is what that field states.
 
     Nothing has that shape today. Every module with `PIN_NAMES` also has
     `pin_states`, so this was a comment claiming a property of the type where
@@ -860,17 +865,20 @@ def test_a_running_board_whose_module_reads_no_pins_still_says_one_is_running():
     a generated header and no reader would have hit it.
 
     So `pin_view` coalesces, and this is the fixture that says so: a
-    description with names and no reader, which is the combination no shipped
-    module has and the generator can make. A stub rather than a real session,
-    because the thing under test is one `or {}` and a real board would need a
-    toolchain to prove less.
+    description with a header and names and no reader, which is the
+    combination no shipped module has and the generator can make. A stub
+    rather than a real session, because the thing under test is one `or {}`
+    and a real board would need a toolchain to prove less.
 
     **Three mutations die here, 2026-09-05, one of them only here**: the
     coalesce removed. The other two are the field never reported and an empty
-    poll counted as no program.
+    poll counted as no program. A fourth since OH-172's review: `level_keys`
+    answering a `HEADER`'s keys without asking whether a reader exists,
+    which is why the stub carries one.
     """
     named_but_silent = types.SimpleNamespace(
         __name__="stub_with_names_and_no_reader",
+        HEADER={"D0": (0, 2), "D1": (0, 4)},
         PIN_NAMES={"D0": "PA02", "D1": "PA04"},
     )
     assert not hasattr(named_but_silent, "pin_states")
@@ -882,14 +890,17 @@ def test_a_running_board_whose_module_reads_no_pins_still_says_one_is_running():
     )
     view = api.pin_view(runtime, None, XIAO)
     assert view["read_levels"] is True, (
-        "a board with a session reported that no levels were read, so every "
-        "modelled pad would say no program is running while one does"
+        "a board with a session reported that no levels were read, so "
+        "read_levels says no program is running while one does. No pad here "
+        "is modelled, so the page's words would not change; the field would "
+        "be wrong (OH-172)"
     )
     # And the pads are all unknown, which is the honest half: there really
     # are no levels. The difference is what the page says about WHY.
     assert view["unknown"] == len(view["pads"])
-    # And none is modelled (OH-172): its names are captions, with no reader
-    # behind them, so the page says "not modelled" rather than "in use".
+    # And none is modelled (OH-172): its header and names are captions, with
+    # no reader behind them, so the page says "not modelled" rather than "in
+    # use". The `HEADER` is what makes `level_keys` ask for the reader here.
     assert not any(pad["modelled"] for pad in view["pads"]), view["pads"]
     # The coupling that makes this unreachable today, stated so that a module
     # gaining a generated header and no reader is a change here rather than a
@@ -919,6 +930,11 @@ def test_a_pad_names_its_chip_pin_on_a_board_with_no_module_at_all():
     twenty-six boards have no module -- `webui/boards/mg24.py` does not exist
     -- so every pad of those boards reported `chip_pin` null, which the panel
     renders as the sentence OH-164 defined to mean "nothing models this pin".
+
+    **The defect was the missing caption, not those words.** OH-167 restored
+    the caption and OH-172 restored the words: a pad on a board with no
+    module names its chip pin here and still reads "not modelled", on
+    purpose, because nothing here reads its level.
 
     The board files have carried the answer since OH-26, which read it out of
     six board-support packages and named the vendor file and revision for
@@ -1028,6 +1044,10 @@ def test_a_pad_is_modelled_exactly_where_its_board_reads_a_level():
         # `board` because `pin_levels` asks whether it is a manifest row.
         runtime = types.SimpleNamespace(board=board, description=description)
         levels = api.pin_levels(runtime, zero) or {}
+        # The whole key set, and not only the names placed pads carry:
+        # `level_keys` restates `row_levels`, and a key no pad has would
+        # pass every per-pad assertion below.
+        assert api.level_keys(board, description, pinmap.load(board)) == frozenset(levels), board
         # Picked and not loaded, so every pad is a placed one: the reader's
         # padless rows (a XIAO's `LED`) appear only beside levels.
         assert all(pad["x"] is not None for pad in view["pads"]), board
@@ -1048,6 +1068,26 @@ def test_a_pad_is_modelled_exactly_where_its_board_reads_a_level():
     view = api.pad_view("XIAO-MG24-SMD", api.description_for("XIAO-MG24-SMD"), None)
     d0 = next(pad for pad in view["pads"] if pad["label"] == "D0")
     assert (d0["chip_pin"], d0["modelled"]) == ("PC0", False), d0
+
+
+def test_a_module_with_a_reader_and_no_header_is_refused_by_name():
+    """**OH-172's review: `level_keys` needs a `HEADER` that nothing requires.**
+
+    `pin_states` answers under the module's `HEADER`, so that is where
+    `level_keys` reads which pads are modelled. `webui/boards/contract.py`
+    does not require a `HEADER`, so a module can have the reader without
+    one. Such a module is refused naming itself and the attribute it lacks,
+    rather than raising an `AttributeError` that names neither.
+    """
+    reader_without_header = types.SimpleNamespace(
+        __name__="stub_with_a_reader_and_no_header",
+        pin_states=lambda cpu: {"D0": "low"},
+    )
+    with pytest.raises(contract.RuntimeContractError) as refused:
+        api.pad_view(XIAO, reader_without_header, None)
+    message = str(refused.value)
+    assert "stub_with_a_reader_and_no_header" in message, message
+    assert "no HEADER" in message, message
 
 
 def test_the_uno_names_the_component_its_led_pin_lights_and_no_other_board_does():

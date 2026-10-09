@@ -887,11 +887,22 @@ def level_keys(board: str, description: types.ModuleType | None,
     """The names this board could ever report a level under -- the keys
     `pin_levels` answers with -- known without a CPU (OH-172).
 
-    A module's `pin_states` answers under its `HEADER`. A row's levels are
-    read by `row_levels`, and its test of the module's words is restated
-    here rather than shared, because that function needs the words' values
-    and this needs only that they exist. `tests/webui/test_pin_view.py`
-    holds the two to one answer on every board in the catalogue.
+    A module's `pin_states` answers under its `HEADER`. A module with the
+    reader and no `HEADER` is refused here, naming itself, rather than left
+    to raise `AttributeError`: `webui/boards/contract.py` does not require a
+    `HEADER`, and this is the caller that needs one.
+
+    **A row's half restates `row_levels` rather than sharing with it**, and
+    it restates three things: the word names `GPIO`, `GPIO_ENABLE` and
+    `GPIO_OUT`; that a pad with no `chip_index` gets no level; and the key
+    spelling `header_key(pad.label, {})`, which `pad_view`'s empty `names`
+    for a row makes a third time. Not one helper, because `row_levels` needs
+    the words' values and this needs only that they exist: a helper serving
+    both would hand back the words and a keyed index map, an interface no
+    simpler than the lines it hides, for two callers in one file (rules 6 to
+    8 of `.claude/CLAUDE.md`). What keeps the copies one answer is
+    `tests/webui/test_pin_view.py`, which holds this set equal to the keys
+    `pin_levels` answers, on every board in the catalogue.
     """
     if is_row(board):
         words = [getattr(description, name, None) for name in ("GPIO", "GPIO_ENABLE", "GPIO_OUT")]
@@ -899,8 +910,18 @@ def level_keys(board: str, description: types.ModuleType | None,
             return frozenset()
         return frozenset(header_key(pad.label, {}) for pad in layout.pads
                          if pad.chip_index is not None)
+    # The reader is asked for before the header, because OH-160 generates
+    # `HEADER` and `PIN_NAMES` and leaves `pin_states` hand-written: a module
+    # with a header and no reader models nothing.
     if getattr(description, "pin_states", None) is None:
         return frozenset()
+    if not hasattr(description, "HEADER"):
+        raise contract.RuntimeContractError(
+            f"{getattr(description, '__name__', description)} has pin_states "
+            f"and no HEADER, so nothing names the pins it reads a level for: "
+            f"level_keys takes HEADER's keys as the names pin_states answers "
+            f"under (OH-172)"
+        )
     return frozenset(description.HEADER)
 
 
@@ -1135,8 +1156,7 @@ def pin_view(runtime: Runtime, cpu: Core, board: str) -> dict[str, object]:
     # **`or {}` and not the bare call**, because `pin_levels` answers `None`
     # for a description with no `pin_states` -- and a board that is RUNNING
     # with no reader is still a board that was asked. Without this, such a
-    # board would report `read_levels` false while its program ran, and every
-    # modelled pad would read "no program running".
+    # board would report `read_levels` false while its program ran.
     #
     # Nothing has that shape today: every module with `PIN_NAMES` also has
     # `pin_states`, which `tests/webui/test_pin_view.py`'s
@@ -1148,9 +1168,12 @@ def pin_view(runtime: Runtime, cpu: Core, board: str) -> dict[str, object]:
     # be true of today's board modules.
     #
     # **What such a board would then say**, stated here rather than found
-    # later: "not modelled" on every pad, since OH-172. `modelled` asks the
-    # reader, and there is none, so the names that module publishes are
-    # captions and nothing more -- the answer a board with no module gets.
+    # later: "not modelled" on every pad since OH-172, with the coalesce or
+    # without it. Where `pin_levels` answers `None`, `level_keys` is empty,
+    # so no pad is modelled: the names that module publishes are captions and
+    # nothing more -- the answer a board with no module gets. So the coalesce
+    # changes no word on the page. What it keeps is `read_levels` true for a
+    # board that is running, which is the fact that field states.
     return pad_view(board, runtime.description, pin_levels(runtime, cpu) or {})
 
 
