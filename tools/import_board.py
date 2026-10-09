@@ -172,10 +172,11 @@ UNDERSIDE = "underside"
 
 #: How many more of the pins under a module the quarter turn that places its
 #: own board must NAME than any other turn does (OH-216): stand on back-side
-#: copper whose net is the pin's own symbol name. Two is what a wrong turn
-#: could name by coincidence -- a XIAO has two GND pins under it, and ground
-#: is the net a wrong turn is likeliest to stand a GND pin on -- so the turn
-#: that places the module must name three more than any other.
+#: copper whose net is the pin's own symbol name. A judgement, not a
+#: measurement: ground is the net a wrong turn is likeliest to stand a pin on
+#: by coincidence, every XIAO SMD has more than one GND pin under it, and two
+#: such coincidences are allowed for, so the turn that places the module must
+#: name three more than any other.
 NAME_MARGIN = 3
 
 

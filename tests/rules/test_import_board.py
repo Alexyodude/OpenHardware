@@ -680,11 +680,11 @@ def _module_board(tmp_path, back: tuple[tuple[float, float, str], ...]) -> pathl
     castellation's own land on a module's underside is -- and a pad on
     `B.Cu` alone at each `(x, y, net)` of `back`."""
     parts = [
-        '(footprint "L:CASTEL" (layer "F.Cu") (at 100.3 102)'
-        ' (pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.6) (layers "*.Cu") (net "P1"))'
-        ' (pad "1" smd rect (at 0 0) (size 1 1) (layers "B.Cu" "B.Mask") (net "P1")))',
-        '(footprint "L:CASTEL" (layer "F.Cu") (at 109.7 102)'
-        ' (pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.6) (layers "*.Cu") (net "P2")))',
+        ('(footprint "L:CASTEL" (layer "F.Cu") (at 100.3 102)'
+         ' (pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.6) (layers "*.Cu") (net "P1"))'
+         ' (pad "1" smd rect (at 0 0) (size 1 1) (layers "B.Cu" "B.Mask") (net "P1")))'),
+        ('(footprint "L:CASTEL" (layer "F.Cu") (at 109.7 102)'
+         ' (pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.6) (layers "*.Cu") (net "P2")))'),
     ]
     parts += [f'(footprint "L:TP" (layer "B.Cu") (at {x} {y})'
               f' (pad "1" smd circle (at 0 0) (size 1 1) (layers "B.Cu" "B.Mask") (net "{net}")))'
