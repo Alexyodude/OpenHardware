@@ -354,12 +354,17 @@ def test_a_few_values_worked_by_hand_from_the_spec_pages(cpu):
 
 
 def test_no_esp32_part_runs_any_zbb_or_zbkb_encoding(cpu):
-    """The C3 is RV32IMC, the C6 RV32IMAC and the C5 RV32IMAC with three Zc
-    groups (docs/architectures.md 4.2, from Espressif's datasheets); the
-    ESP32 Arduino core 3.3.11 compiles all three without either group
-    (`-march=rv32imc_zicsr_zifencei`, and `rv32imac_zicsr_zifencei` for the
-    C5 and C6, in esp32-arduino-libs' `flags/c_flags`). So every encoding
-    here is Illegal on each -- the part's answer, never Unimplemented."""
+    """The datasheets carry this. The C3's CPU is "RV32IMC ISA" (v2.4), the
+    C6's "RV32IMAC ISA" (v1.5), and the C5's HP CPU "RV32IMAC ISA" with "Zc
+    extensions (Zcb, Zcmp, and Zcmt)" and Xhwlp (v1.5, 4.1.1.1); none of
+    the three names a Zb* group anywhere (docs/architectures.md 4.2). So
+    every encoding here is Illegal on each -- the part's answer, never
+    Unimplemented.
+
+    `-march` is compiler policy (4.2's C2 lesson) and says only that no
+    stock image contains them: the ESP32 Arduino core 3.3.11 builds the C3
+    with `rv32imc_zicsr_zifencei` and the C5 and C6 with
+    `rv32imac_zicsr_zifencei` (esp32-arduino-libs' `flags/c_flags`)."""
     wrong = []
     for part, mask in ESP32_PARTS.items():
         for word in (*ZBB_ONLY, *SHARED, *ZBKB_ONLY, e.zext_h("a0", "t0")):
