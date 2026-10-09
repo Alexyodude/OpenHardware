@@ -7,6 +7,7 @@ owner: session/muldiv
 created: '2026-08-23'
 touches:
 - tests/i8086/test_muldiv.py
+- core/i8086/muldiv.*
 ---
 
 IMUL, DIV and IDIV produce correct results and correct CF/OF but do not reproduce two things that need the 8088's CORX/CORD microcode emulated step by step rather than a C++ divide.

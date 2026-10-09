@@ -6,7 +6,6 @@ status: in-progress
 priority: P2
 created: '2026-09-06'
 touches:
-- webui/api.py
 - webui/static/board3d-panel.js
 - tests/webui/test_pin_view.py
 - tests/webui/test_board3d.py
@@ -110,3 +109,5 @@ VERIFIED at d9d1c6b.
 The ticket stays in progress. Slice 2 onward is as the 2026-10-09 decision lists it.
 
 **Note 2026-10-10:** SLICE 1 MERGED to master by fast-forward at 1e551db (lane4): the page's 'not modelled' reads a per-pad modelled flag from api.level_keys, chip_pin is a caption only. REVIEW: an independent review (MERGE AFTER SMALL FIXES), its fix round, and a verification (PASS). VERIFIED on master at 1e551db with OH-161's delay() work: full suite 2 failed (the OCP pair), 2669 passed, 41 skipped. Not seen in a browser. The verification also found the pins route answers a RuntimeContractError with a dropped connection rather than an HTTP status (unchanged by this slice, unreachable by any shipped module; webui/emulator_server.py is not this ticket's). tests/webui/test_board3d.py stays borrowed from OH-215 until this ticket closes. Slice 2 onward remains.
+
+**Note 2026-10-10:** 2026-10-10: webui/api.py lent to OH-161, whose step 3 adds BoardSession.drive (a recorded input level per pad) on the path from the bench to an ESP32's GPIO_IN. Slice 2 here starts in tools/import_pindefs.py and does not need it yet. Return it when OH-161's step 3 lands.

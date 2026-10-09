@@ -47,6 +47,7 @@ touches:
 - tests/webui/sparkfun_qwiic_pocket_esp32c6/pocket_blink.bin
 - tests/webui/sparkfun_qwiic_pocket_esp32c6/pocket_blink.ino
 - tests/webui/esp32_timing.py
+- webui/api.py
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
@@ -295,3 +296,5 @@ LOW 5, THE UNNAMED FAILURE, NAMED. The focused suite, tests/riscv32, tests/webui
 VERIFIED on ce25071, after python tools/build_core.py: the focused suite as above; tests/webui/test_compile.py alone, 92 passed, 1 skipped; tests/rules/test_inventory.py, 74 passed. tools/checkall.py's eleven checker rows, each run alone: all OK. The suite row was not run, by instruction: other worktrees are running theirs, and the full suite runs on master after the merge.
 
 **Note 2026-10-10:** STEP 2 COMPLETE, MERGED to master by fast-forward at 7d54725 (lane2): delay() and delayMicroseconds() wait on SYSTIMER unit 0, so delay(n) and millis() agree; OH_DELAY_LOOPS_PER_MS retired; the ten ESP32 manifest board images rebuilt; the board tests hold each pin move to the board's own millisecond, every gap length watched once per clock (QT Py C3, SparkFun Thing Plus C6 for the C6's own description, SparkFun Thing Plus C5); POLL and the millisecond in tests/webui/esp32_timing.py. REVIEW: an independent review (MERGE AFTER FIXES), its fix round, a confirm review (CONFIRMED FOR MERGE), its LOWs, and a verification of those (PASS), whose one gap -- no C6 test watching the third gap length -- is 7d54725. VERIFIED on master with OH-172 slice 1 also merged (1e551db), core rebuilt: full suite 2 failed (the OCP pair: test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert, test_the_tessellator_welds_what_it_meshes), 2669 passed, 41 skipped. OPEN FOR THE OWNER: the page's default delay(500) Blink on an ESP32 board is 80,000,000 instructions a half period at 160 MHz (120,000,000 at the C5's 240 MHz) -- about a minute on the Debug core measured here, and OH-220 (Release cores) roughly halves to thirds that; OH-221 is the page's prose. Steps 3-5 remain.
+
+**Note 2026-10-10:** 2026-10-10: borrows webui/api.py from OH-172 for step 3's slice A (BoardSession.drive and its replay record), on the design in the note above. Its decisions stand as written, taken for the owner while away: floating reads 0, a bench drive beats the internal pull (the Thevenin form deferred), a voltage between VIL and VIH is sent as open. Slice B (the page: circuit.js, the drive route, board3d.js) waits for OH-223's webui/emulator_server.py and OH-215's webui/static/board3d.js.

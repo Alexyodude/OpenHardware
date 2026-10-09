@@ -2,11 +2,10 @@
 id: OH-222
 title: IDIV of DX:AX = 0x80000000 by 0xFFFF divides INT32_MIN by -1 on the host and
   kills the process instead of trapping
-status: in-review
+status: done
 priority: P1
 created: '2026-10-10'
 touches:
-- core/i8086/muldiv.*
 - tests/i8086/test_idiv_overflow.py
 ---
 
@@ -42,3 +41,5 @@ VERIFIED. python tools/build_core.py rebuilt build/lib/i8086.dll. python -m pyte
 core/i8086/muldiv.* goes back to OH-11 when this closes.
 
 **Note 2026-10-10:** REVIEW: an independent review, APPROVE. It reproduced the pre-fix failure (the guard deleted, rebuilt: the child exits 1 with 'Windows fatal exception: integer overflow'), restored and rebuilt (tests/i8086 234 passed), and re-derived the corpus claims from each case's prefixes, modrm, registers and RAM: no F7.7 case has DX = 8000 or a divisor of FFFF. THE TITLE OVERSTATES THE WINDOWS SYMPTOM, corrected here rather than renamed: on Windows the process survives. The review ran an in-process emulator_server against the unguarded DLL with BA0080 B80000 BBFFFF F7FB F4: the server lived, /api/run got no reply (RemoteDisconnected, a traceback on stderr, since Session.step catches only abi.Unimplemented and Handler._api no OSError), and the IDIV was silently skipped -- IP already advanced past it, no trap, status still running, the next step ran the HLT. So on Windows the defect was a dropped request and a silently corrupted machine; 'kills the process' stays true only where the host's fault is a signal (x86-64 Linux, SIGFPE), which neither the author nor the review could run. And the server's Origin check refuses cross-origin pages, so 'any page that can reach the server' was too broad. With the fix the same probe takes vector 0. LOWS FIXED in the test: it says it sees the regression only where the host's divide faults (AArch64's sdiv does not); a child that exits 0 without printing JSON fails with its stdout and stderr, not a bare JSONDecodeError; and why the pushed FLAGS word is not asserted (OH-11's microcode intermediates). LEFT, filed elsewhere: a host fault surfaced by ctypes half-executes an instruction and drops the request, for any future fault (its own ticket); IDIV accepting a quotient of -128 where the 8088 traps, the conformance floor test dropping every case the part trapped on, and the negated quotient being exactly the REP-prefixed cases (OH-11, whose files these are).
+
+**Note 2026-10-10:** DONE, merged to master by fast-forward at 3dc7438 (lane2). VERIFIED on master at 3dc7438 with OH-220's Release cores: full suite 2 failed (the OCP pair: test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert, test_the_tessellator_welds_what_it_meshes), 2678 passed, 41 skipped. core/i8086/muldiv.* returned to OH-11. Follow-ups filed: OH-223 (a host fault half-executes the machine), and OH-11's note of 2026-10-10 (the -128 quotient, the conformance floor's blind spot, the REP negation).
