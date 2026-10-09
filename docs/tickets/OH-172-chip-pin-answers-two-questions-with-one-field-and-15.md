@@ -5,6 +5,11 @@ title: chip_pin answers two questions with one field, and 153 pads are answered 
 status: open
 priority: P2
 created: '2026-09-06'
+touches:
+- webui/api.py
+- webui/static/board3d-panel.js
+- tests/webui/test_pin_view.py
+- tests/webui/test_board3d.py
 ---
 
 `chip_pin` answers two different questions with one field, and 153 pads are answered wrongly by the half nobody meant.
@@ -40,3 +45,5 @@ STEPS:
 Found while OH-170 was checking whether its own supply-label set was too broad. It is not -- no source resolves any label in it -- but the reason no source resolves them turned out to be a rule this repository imposed rather than a fact about the boards.
 
 **Note 2026-10-08:** 2026-10-08, from OH-209's work and review: EN is in SUPPLY_LABELS, so the EN pad of every XIAO SMD keeps the generic why_null and no layer counts it, while it is a real signal: on XIAO-RP2350-SMD pad 25 lands on underside test point TP4, net '/04 RP2350/RUN', which carries the RP2350's RUN pad (U4 pad 26), the reset button K2, R12 and C25 (Seeed's RP2350.kicad_pcb). Whether EN belongs among the supplies is this ticket's question; nine XIAO SMD boards carry the same sentence.
+
+**Note 2026-10-09:** 2026-10-09: claims webui/api.py, webui/static/board3d-panel.js and tests/webui/test_pin_view.py (unclaimed), and borrows tests/webui/test_board3d.py from OH-215 (in review, waiting only on a browser look). DECISION, made for the owner while they are away, from a read-only design pass: the ticket's second shape. chip_pin becomes only the caption it is documented as; the page's modelled test becomes a per-pad 'modelled' boolean that webui/api.py computes from the keys the board's own level reader answers under -- the module's HEADER where it has pin_states, a manifest row's chip_index pads where it reads GPIO words -- because the page cannot see HEADER and a board file cannot state what a simulator reads. pin_kind was not chosen: the pads it would get wrong are real GPIOs on boards with no module, which a file-level kind would still call gpio. The design pass found the ticket's 'nothing renders incorrectly' out of date: since OH-167 made chip_pin_of fall back to the board file, every pad that names a chip pin on a board with no module renders 'no program running' where OH-164's own ordering says 'not modelled'; on every board with a reader, chip_pin non-null and 'the reader has a key' agree on every pad, so slice 1 changes exactly those pads. SLICE 1 (this ticket now): the API's modelled flag, the panel reading it, the tests. NOT IN SLICE 1: a caption for EN/RUN/GND and other non-GPIO pins, moving the _CHIP_PIN_NAME gate to header_table, plural captions for supply nets, EN/RESET/RST leaving SUPPLY_LABELS (which moves the TWINS pins layer and needs OH-213's files), and the wording of 'not modelled' beside a named chip pin.
