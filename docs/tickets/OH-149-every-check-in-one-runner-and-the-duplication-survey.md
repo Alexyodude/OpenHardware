@@ -14,6 +14,7 @@ touches:
 - CLAUDE.md
 - docs/research/board-sources/render.py
 - docs/research/board-sources/survey.md
+- tools/facts_store.json
 ---
 
 uvx nodeengine scaffolded tools/stale.py, tools/checkall.py and tools/viewer.html. This ticket does what the scaffold asks: survey what this repository states in more than one place (tools/DUPLICATION.md), name one source per relationship, rewrite checkall.py's table to run this repo's real checkers plus a new facts check for prose counts nothing currently watches, and break every row on purpose before believing it.
@@ -41,3 +42,5 @@ uvx nodeengine scaffolded tools/stale.py, tools/checkall.py and tools/viewer.htm
 **Note 2026-10-09:** 2026-10-09: CLAUDE.md's composed-board paragraph said silkscreen text 'needs a font shipped' and that a 'handful' of arcs, circles and polygons go undrawn; OH-163 step 1 (merged at b65dc5e) draws KiCad text in newstroke, fetched from its author's CC0 archive, and the Thing Plus C5 alone has a couple of hundred unread polygons. The paragraph now says what is drawn and what is not, with no count.
 
 **Note 2026-10-09:** 2026-10-09: tools/facts_store.json lent to OH-214, whose re-keying changes the DIP notch colour in mark_turns' docstring, which the claude-md:mark-turns anchor holds; OH-214 re-reads both sides and confirms the anchor. Return it when OH-214 closes.
+
+**Note 2026-10-09:** 2026-10-09: tools/facts_store.json returns from OH-214 (done); the claude-md:mark-turns anchor was re-confirmed there after its docstring named #262525.
