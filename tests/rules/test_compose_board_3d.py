@@ -6688,3 +6688,114 @@ def test_a_run_of_the_tool_fetches_the_font_before_it_composes(monkeypatch):
     board = compose.COMPOSITIONS[0].board
     assert compose.main(["--check", "--board", board]) == 0
     assert calls == ["fetch", board], calls
+
+
+# --- OH-216: the header pads a model is set by --------------------------------
+
+
+#: A KiCad header whose first pin is a whole hole and a castellated half-hole
+#: beside it, as PCBCUPID draws the Glyph Mini's, and whose second is a whole
+#: hole on no net.
+CASTELLATED_HEADER = """(kicad_pcb
+\t(version 20241229)
+\t(gr_rect (start 0 0) (end 10 10) (layer "Edge.Cuts"))
+\t(footprint "L:HEADER"
+\t\t(layer "F.Cu")
+\t\t(at 5 5)
+\t\t(property "Reference" "J1")
+\t\t(pad "1" thru_hole circle (at -1.27 0) (size 1.7 1.7) (drill 1)
+\t\t\t(layers "*.Cu") (net 1 "/A"))
+\t\t(pad "1" thru_hole circle (at -1.27 1.5) (size 2 1.7) (drill 1)
+\t\t\t(layers "*.Cu") (net 1 "/A") (property pad_prop_castellated))
+\t\t(pad "2" thru_hole circle (at 1.27 0) (size 1.7 1.7) (drill 1)
+\t\t\t(layers "*.Cu"))
+\t)
+)
+"""
+
+
+def test_a_model_states_its_header_pads_as_the_board_file_names_them(tmp_path):
+    """**OH-216: the composer says where its header pads are, by name, so
+    the page can set the model by them.** Each is `[x, z, width, height,
+    name]` in the model's own millimetres -- x along the file's x, z down
+    the page from the centre the model is built about -- named by its net, or
+    its number on no net, as `tools/import_board.py` names a board file's.
+
+    A castellated half-hole beside its pin's whole hole is not one: the
+    importer keeps the whole hole as the pin's only pad, so a board file has
+    nothing there to land, and stated it moved the middle of the PCBCUPID
+    Glyph Mini's pads 0.73 mm off the middle of its board file's.
+
+    Seen red (2026-10-09): with the half-hole kept, three pads were stated;
+    with `from_kicad` dropping nets as it did, pin 1 was named "1".
+    """
+    path = tmp_path / "HEADER.kicad_pcb"
+    path.write_text(CASTELLATED_HEADER, encoding="utf-8")
+    spec = dataclasses.replace(compose.COMPOSITIONS[0], layout=path,
+                               headers=("J1",), dip_headers=False)
+    board = compose.read_layout(path)
+    stated = compose.stated_header_pads(spec, board, [], (5.0, -5.0))
+    assert stated == [[-1.27, 0.0, 1.7, 1.7, "/A"], [1.27, 0.0, 1.7, 1.7, "2"]], stated
+
+
+def test_a_dip_pin_is_named_by_the_castellation_it_stands_in(tmp_path):
+    """A XIAO DIP's header rows are not in the vendor's file -- the composer
+    hangs them from the castellation field (`dip_header_elements`) -- so
+    each pin is named by the castellation it stands in, which is the pin it
+    is soldered to. That is what lets the page tell a XIAO DIP from itself
+    turned half way round: its GND and VBUS lie on no namesake there.
+
+    Seen red (2026-10-09): with the DIP pins named by their own numbers, no
+    pin was named for its castellation.
+    """
+    # A half-hole on the edge and a whole hole inside it, one net, per pin --
+    # as Seeed's MOUDLE14P-XIAO-HALF-HOLE draws each of its fourteen.
+    castellations = tuple(
+        eagle.Pad(number=str(index + 1), kind="thru_hole",
+                  x_mm=(index - 3) * 2.54, y_mm=side * across, width_mm=1.5,
+                  height_mm=1.5, net=f"{'TOP' if side > 0 else 'BOT'}{index}")
+        for side in (1, -1) for index in range(7) for across in (8.89, 7.62))
+    board = eagle.Board(name="module", version="test",
+                        elements=(eagle.Element(name="U2", library="L",
+                                                package="CASTEL",
+                                                pads=castellations),),
+                        outline=())
+    spec = dataclasses.replace(compose.COMPOSITIONS[0], layout=tmp_path / "m.brd",
+                               headers=("U2",), dip_headers=True)
+    dip = compose.dip_header_elements(list(castellations))
+    stated = compose.stated_header_pads(spec, board, dip, (0.0, 0.0))
+    named = {(round(x, 2), round(z, 2)): name for x, z, _, _, name in stated}
+    assert named == {(round((index - 3) * 2.54, 2), round(-side * 7.62, 2)):
+                     f"{'TOP' if side > 0 else 'BOT'}{index}"
+                     for side in (1, -1) for index in range(7)}, named
+
+
+def test_every_composed_model_states_the_header_pads_it_is_set_by():
+    """Every composed model built here carries `header_pads`, each row
+    `[x, z, width, height, name]` with a name, so the page sets it by its
+    pads and not by its outline. Skips where nothing is composed.
+
+    Seen red (2026-10-09): on the models composed before OH-216, every one
+    stated none.
+    """
+    index = REPO / "webui" / "static" / "models" / "index.json"
+    if not index.is_file():
+        pytest.skip(f"no {index}; run tools/compose_board_3d.py")
+    from tools.import_3d_model import read_extras
+
+    wrong = []
+    seen = 0
+    for board, entry in json.loads(index.read_text(encoding="utf-8"))["boards"].items():
+        model = REPO / "webui" / "static" / (entry.get("file") or "/").lstrip("/")
+        if not model.is_file():
+            continue
+        extras = read_extras(model)
+        if not extras.get("composed"):
+            continue
+        seen += 1
+        rows = extras.get("header_pads") or []
+        if not rows or any(len(row) != 5 or not row[4] for row in rows):
+            wrong.append(f"{board}: header_pads {rows[:2]!r}")
+    if not seen:
+        pytest.skip("no composed model is built here; run tools/compose_board_3d.py")
+    assert not wrong, "\n".join(wrong)

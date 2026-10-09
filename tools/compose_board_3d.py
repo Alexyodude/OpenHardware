@@ -3111,7 +3111,9 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
                 y_mm=-placed.y_mm + local_x * sin + local_y * cos,
                 width_mm=pad.width_mm,
                 height_mm=pad.height_mm,
-                net=None,
+                # The pad's own net, which `stated_header_pads` names a
+                # header pad by, as the importer names a board file's (OH-216).
+                net=pad.net or None,
                 shape=pad.shape,
                 # **The stored angle is already the board's**, not the
                 # footprint's -- measured on the RP2350, where every pad of
@@ -4925,6 +4927,55 @@ def dip_header_elements(header_pads) -> list[eagle.Element]:
     return made
 
 
+def stated_header_pads(spec: Composition, board: eagle.Board,
+                       dip: list[eagle.Element], centre: tuple[float, float]
+                       ) -> list[list[object]]:
+    """Where this model's header pads are, for the page to set it by (OH-216):
+    `[x, z, width, height, name]` in the model's own millimetres, `name` the
+    pad's net, or its number on no net -- what `tools/import_board.py` names
+    a board file's pad from the same file.
+
+    **The page used to set a model by comparing two outlines' orientations**
+    (OH-215), which cannot see a half turn or which way a square lies, and by
+    centring the model's origin -- the middle of every header pad here -- on
+    the middle of the board file's pads, which is a different set on the
+    PCBCUPID Glyph Mini: 46 pads here against the board file's 23. With the
+    pads themselves it can take the turn that lands each board-file pad on a
+    header pad of its own name, and centre on the pads that land.
+
+    **A castellated half-hole beside its pin's whole hole is not stated**:
+    KiCad flags it `pad_prop_castellated`, and the importer keeps the whole
+    hole as the pin's one pad, so a board file has no pad there to land.
+    Those are the Glyph Mini's 23 extra. A DIP variant's pads are its two
+    header rows, each pin named by the castellation it stands in, which is
+    the pin it is soldered to.
+    """
+    flagged: dict[str, list[bool]] = {}
+    if spec.layout.suffix == ".kicad_pcb":
+        flagged = {placed.reference: [pad.castellated for pad in placed.pads]
+                   for placed in kicad.read_board(spec.layout).placements
+                   if placed.reference in spec.headers}
+    header = []
+    for name in spec.headers:
+        pads = board.element(name).pads
+        castellated = flagged.get(name, [False] * len(pads))
+        whole = {pad.number for pad, edge in zip(pads, castellated, strict=True)
+                 if not edge}
+        header += [pad for pad, edge in zip(pads, castellated, strict=True)
+                   if not (edge and pad.number in whole)]
+    named = []
+    if dip:
+        for element in dip:
+            for pad in element.pads:
+                under = min(header, key=lambda h: math.hypot(h.x_mm - pad.x_mm,
+                                                             h.y_mm - pad.y_mm))
+                named.append((pad, under.net or under.number))
+    else:
+        named = [(pad, pad.net or pad.number) for pad in header]
+    return [[round(pad.x_mm - centre[0], 4), round(centre[1] - pad.y_mm, 4),
+             pad.width_mm, pad.height_mm, name] for pad, name in named]
+
+
 def anchor_of(element: eagle.Element, legged: bool) -> tuple[float, float]:
     """Where a mesh's own anchor has to land: the centre of the pads it IS.
 
@@ -5816,6 +5867,9 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     # `confirm` measures them, `place` anchors them on their own pads -- so
     # everything downstream treats them as the placements they stand for.
     extra = dip_header_elements(header_pads) if spec.dip_headers else []
+    landing = stated_header_pads(spec, board, extra, centre)
+    print(f"  pads    {len(landing)} header pads stated for the page to land "
+          f"a board file's pads on, {len({row[4] for row in landing})} names")
     #: Placements with no model and no ABSENT entry -- until OH-125 these
     #: fell through a bare `continue`, which is the mechanism that let
     #: OH-119 and OH-122 sit unnoticed: the gap was not even a number.
@@ -6109,6 +6163,11 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 [round(max(hx) - min(hx), 4), round(max(hy) - min(hy), 4)]
             ),
             "pad_top": round(pad_top, 4),
+            # **Where the header pads are, each by name** (OH-216): what the
+            # page sets this model by -- the turn that lands the board file's
+            # pads on pads of their own names, and the centre of those that
+            # land. See `stated_header_pads`.
+            "header_pads": landing,
             "pcb_colour": spec.colour,
             "pcb_colour_source": spec.colour_source,
             "geometry": spec.geometry,

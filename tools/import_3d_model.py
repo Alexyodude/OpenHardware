@@ -1806,12 +1806,20 @@ def write_glb(mesh: Mesh, path: pathlib.Path, chip: str, source: str,
             # is the thing that travels.
             "extras": {
                 "units": "mm", "chip": chip, "source": source,
-                # The PCB alone, in the frame above: long side, short
-                # side, thickness. **The page needs the thickness and
-                # cannot measure it**, because the mesh it loads includes
-                # the components and its bounding box is the assembly.
-                # It is what puts a pad post on the board rather than
-                # sunk into it.
+                # The PCB alone: `long` is its extent along glTF x, `short`
+                # its extent along z, then its thickness. **The names are
+                # the frame above's and not a sort** (OH-215, OH-216): a
+                # fetched mesh is emitted long side along x, so there the
+                # two coincide, but `tools/compose_board_3d.py` keeps a
+                # vendor's own frame and passes a board drawn upright as
+                # (17.78, 33.02) -- `long` the SHORTER side. The page reads
+                # them as x and z to turn a model with no `header_pads` and
+                # to size the wire collider, so sorting them would turn
+                # those boards a quarter off their pads again. **The page
+                # needs the thickness and cannot measure it**, because the
+                # mesh it loads includes the components and its bounding
+                # box is the assembly. It is what puts a pad post on the
+                # board rather than sunk into it.
                 "pcb": {"long": round(pcb[0], 4), "short": round(pcb[1], 4),
                         "thickness": round(pcb[2], 4)},
                 **(extras or {}),
