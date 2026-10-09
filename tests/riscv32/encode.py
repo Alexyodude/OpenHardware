@@ -176,6 +176,66 @@ def bseti(rd, rs1, shamt): return r_type(0x14, shamt, rs1, 0x1, rd, 0x13)
 def bclri(rd, rs1, shamt): return r_type(0x24, shamt, rs1, 0x1, rd, 0x13)
 def bexti(rd, rs1, shamt): return r_type(0x24, shamt, rs1, 0x5, rd, 0x13)
 def binvi(rd, rs1, shamt): return r_type(0x34, shamt, rs1, 0x1, rd, 0x13)
+
+# Zbb and Zbkb (OH-208), the RP2350's last two groups. Bits from rvcpp's own
+# table, `third_party/hazard3/test/sim/rvcpp/include/encoding/
+# rv_opcodes.h:157-230` -- e.g. `RVOPC_CLZ_BITS =
+# 0b0110000_00000_00000_001_00000_0010011` -- and every helper here is held
+# to its own mnemonic through `core/riscv32/disasm.py`, which is swept
+# against GNU objdump 2.43 (test_zbb_zbkb.py, test_disasm.py).
+#
+# The register forms are ordinary R-type. The one-operand forms are not:
+# their rs2 field is the rest of the operation's name, so it is passed as a
+# number -- clz is 0, ctz 1, cpop 2, sext.b 4, sext.h 5 under funct7
+# 0b0110000; zip and unzip 0b01111 under 0b0000100.
+def andn(rd, rs1, rs2): return r_type(0x20, rs2, rs1, 0x7, rd, 0x33)
+def orn(rd, rs1, rs2): return r_type(0x20, rs2, rs1, 0x6, rd, 0x33)
+def xnor(rd, rs1, rs2): return r_type(0x20, rs2, rs1, 0x4, rd, 0x33)
+def min_(rd, rs1, rs2): return r_type(0x05, rs2, rs1, 0x4, rd, 0x33)
+def minu(rd, rs1, rs2): return r_type(0x05, rs2, rs1, 0x5, rd, 0x33)
+def max_(rd, rs1, rs2): return r_type(0x05, rs2, rs1, 0x6, rd, 0x33)
+def maxu(rd, rs1, rs2): return r_type(0x05, rs2, rs1, 0x7, rd, 0x33)
+def rol(rd, rs1, rs2): return r_type(0x30, rs2, rs1, 0x1, rd, 0x33)
+def ror(rd, rs1, rs2): return r_type(0x30, rs2, rs1, 0x5, rd, 0x33)
+def pack(rd, rs1, rs2): return r_type(0x04, rs2, rs1, 0x4, rd, 0x33)
+def packh(rd, rs1, rs2): return r_type(0x04, rs2, rs1, 0x7, rd, 0x33)
+def zext_h(rd, rs1): return r_type(0x04, "x0", rs1, 0x4, rd, 0x33)
+
+def clz(rd, rs1): return r_type(0x30, 0x00, rs1, 0x1, rd, 0x13)
+def ctz(rd, rs1): return r_type(0x30, 0x01, rs1, 0x1, rd, 0x13)
+def cpop(rd, rs1): return r_type(0x30, 0x02, rs1, 0x1, rd, 0x13)
+def sext_b(rd, rs1): return r_type(0x30, 0x04, rs1, 0x1, rd, 0x13)
+def sext_h(rd, rs1): return r_type(0x30, 0x05, rs1, 0x1, rd, 0x13)
+def zip_(rd, rs1): return r_type(0x04, 0x0F, rs1, 0x1, rd, 0x13)
+def unzip(rd, rs1): return r_type(0x04, 0x0F, rs1, 0x5, rd, 0x13)
+def orc_b(rd, rs1): return r_type(0x14, 0x07, rs1, 0x5, rd, 0x13)
+def rev8(rd, rs1): return r_type(0x34, 0x18, rs1, 0x5, rd, 0x13)
+def brev8(rd, rs1): return r_type(0x34, 0x07, rs1, 0x5, rd, 0x13)
+def rori(rd, rs1, shamt): return r_type(0x30, shamt, rs1, 0x5, rd, 0x13)
+
+
+def clmul(rd, rs1, rs2):
+    """Zbc, **which no part here has** -- not in the RP2350's string -- and
+    which shares funct7 0b0000101 with Zbb's min and max. rvcpp executes it
+    for every part (`rv_core.cpp:289`), which is what makes it the encoding
+    to reach for when a test wants the oracle to run what this core
+    refuses."""
+    return r_type(0x05, rs2, rs1, 0x1, rd, 0x33)
+
+
+def _zbb_unary_c(rd, select: int) -> int:
+    """Zcb's quadrant-1 unary slot, `100 111 rd' 11 select 01`."""
+    number = _reg(rd)
+    if not 8 <= number <= 15:
+        raise EncodeError(f"a compressed unary names x8-x15, not x{number}")
+    return 0x9C61 | ((number - 8) << 7) | (select << 2)
+
+
+def c_sext_b(rd): return _zbb_unary_c(rd, 0x1)
+def c_zext_h(rd): return _zbb_unary_c(rd, 0x2)
+def c_sext_h(rd): return _zbb_unary_c(rd, 0x3)
+
+
 def sll(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x1, rd, 0x33)
 def slt(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x2, rd, 0x33)
 def sltu(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x3, rd, 0x33)

@@ -38,17 +38,19 @@
 # directions:
 #
 #   * wider — the F and D extensions, which no part here has
-#   * narrower — Zbs, which its default `rv32` target does not know at all,
-#     and which this core implements and gates per part
+#   * narrower — Zbs, Zbb and Zbkb, which its default `rv32` target does not
+#     know at all, and which this core implements and gates per part
 #
 # `ACCOUNTED` names every such class with the reason. A divergence outside that
 # table is a bug in this module.
 
 import itertools
+import os
 import pathlib
 import re
 import shutil
 import subprocess
+import tempfile
 
 import pytest
 
@@ -133,6 +135,17 @@ ACCOUNTED_MINE = {
     "cm.popret": "Zcmp", "cm.popretz": "Zcmp",
     "cm.mvsa01": "Zcmp", "cm.mva01s": "Zcmp",
     "cm.jt": "Zcmt", "cm.jalt": "Zcmt",
+    # Zbb and Zbkb (OH-208), which binutils 2.35 predates. Not excused
+    # unchecked: `test_zbb_and_zbkb_render_the_way_binutils_2_43_does`
+    # sweeps the same space against an objdump that knows them.
+    "andn": "Zbb/Zbkb, absent from binutils 2.35", "orn": "Zbb/Zbkb",
+    "xnor": "Zbb/Zbkb", "rol": "Zbb/Zbkb", "ror": "Zbb/Zbkb",
+    "rori": "Zbb/Zbkb", "rev8": "Zbb/Zbkb",
+    "clz": "Zbb", "ctz": "Zbb", "cpop": "Zbb", "min": "Zbb", "minu": "Zbb",
+    "max": "Zbb", "maxu": "Zbb", "sext.b": "Zbb", "sext.h": "Zbb",
+    "zext.h": "Zbb", "orc.b": "Zbb",
+    "pack": "Zbkb", "packh": "Zbkb", "brev8": "Zbkb", "zip": "Zbkb",
+    "unzip": "Zbkb",
     "fence": "reserved rd/rs1 fields, which the ISA says to ignore",
     "fence.i": "same, for Zifencei",
 }
@@ -442,3 +455,131 @@ def test_the_fence_orderings_agree_with_objdump_and_not_only_with_this_table(
     for index, encoding in enumerate(words):
         mine = normalise(disasm.decode(encoding, index * 4)[0])
         assert mine == theirs_at[index * 4], hex(encoding)
+
+
+# --- Zbb and Zbkb, against a binutils that knows them (OH-208) ---------------
+#
+# binutils 2.35, the objdump above, predates both groups, so the sweeps above
+# can only excuse them. This one asks binutils 2.43 -- the ESP32 Arduino
+# core's, the compiler that builds the RP2350 images -- which does know them,
+# but only from an ELF's own arch attribute: from `-b binary` it decodes
+# neither group, every Zbb word printing as `.insn 4, 0x...` (measured).
+
+#: The arch the sweep's ELF is assembled for: every group this module
+#: renders in the OP and OP-IMM space, plus Zca and Zcb for the compressed
+#: Zbb unaries. Zbc and Zbkx are left out on purpose -- this core refuses
+#: them, so objdump must not render them either.
+SWEEP_MARCH = "-march=rv32im_zba_zbb_zbs_zbkb_zca_zcb"
+
+#: The mnemonics OH-208 added, each of which the sweep must reach and agree
+#: on -- otherwise "no divergence" could mean "never rendered".
+ZBB_ZBKB = frozenset({
+    "andn", "orn", "xnor", "clz", "ctz", "cpop", "max", "maxu", "min",
+    "minu", "sext.b", "sext.h", "zext.h", "rol", "ror", "rori", "orc.b",
+    "rev8", "pack", "packh", "brev8", "zip", "unzip",
+    "c.sext.b", "c.zext.h", "c.sext.h",
+})
+
+#: objdump renders a six-bit shift amount in an RV32 ELF for these, where
+#: `core/riscv32/exec.cc` refuses it -- the RV64 encoding `_RV64_SHIFT`
+#: excuses for the base shifts, here for the immediates that share their
+#: funct3 values.
+_RV64_IMMEDIATE = re.compile(
+    r"^(slli|srli|srai|rori|bseti|bclri|binvi|bexti)\s+\S+,\S+,0x([0-9a-f]+)$")
+
+
+def modern_binutils() -> tuple[pathlib.Path, pathlib.Path]:
+    """A riscv32-esp-elf gcc whose assembler accepts `SWEEP_MARCH`, and the
+    objdump beside it, or skip. **A skip and never a pass.**
+
+    Looked for where `tests/webui/test_xiao_rp2350_board.py` looks: on PATH
+    and in the Arduino IDE's package directory. PlatformIO's GCC 8.4 rejects
+    `_zbb`, so it is tried and passed over rather than trusted.
+    """
+    found = shutil.which("riscv32-esp-elf-gcc")
+    candidates = [pathlib.Path(found)] if found else []
+    for home in (os.environ.get("LOCALAPPDATA"),
+                 str(pathlib.Path.home() / ".arduino15"),
+                 str(pathlib.Path.home() / "Library")):
+        if home:
+            for root in (pathlib.Path(home) / "Arduino15", pathlib.Path(home)):
+                candidates += sorted(root.glob(
+                    "packages/esp32/tools/esp-rv32/*/bin/riscv32-esp-elf-gcc.exe"))
+                candidates += sorted(root.glob(
+                    "packages/esp32/tools/esp-rv32/*/bin/riscv32-esp-elf-gcc"))
+    with tempfile.TemporaryDirectory() as work:
+        empty = pathlib.Path(work) / "empty.s"
+        empty.write_text("\t.text\n", encoding="utf-8")
+        for gcc in candidates:
+            objdump = gcc.with_name(gcc.name.replace("gcc", "objdump"))
+            accepted = subprocess.run(
+                [str(gcc), SWEEP_MARCH, "-mabi=ilp32", "-c", "-o",
+                 str(pathlib.Path(work) / "empty.o"), str(empty)],
+                capture_output=True).returncode == 0
+            if accepted and objdump.is_file():
+                return gcc, objdump
+    pytest.skip(f"no riscv32-esp-elf-gcc accepting {SWEEP_MARCH}; tried "
+                f"{[str(c) for c in candidates]}")
+
+
+def test_zbb_and_zbkb_render_the_way_binutils_2_43_does(tmp_path):
+    """Every OP and OP-IMM funct3 x funct7 x rs2 field, and every compressed
+    Zbb unary: 65,560 encodings in one objdump pass.
+
+    The rs2 field is swept, where the sweeps above fix it, because this is
+    where Zbb and Zbkb put their names: `clz` and `cpop` differ only there,
+    and `zip` is one value of it out of thirty-two. A decoder that matched
+    the funct7 and not the field would render thirty-one encodings that are
+    not instructions, and only a sweep of the field can say so.
+    """
+    gcc, objdump = modern_binutils()
+    words = [
+        opcode | (1 << 7) | (funct3 << 12) | (2 << 15) | (rs2 << 20) | (funct7 << 25)
+        for opcode in (0x13, 0x33)
+        for funct3 in range(8)
+        for funct7 in range(128)
+        for rs2 in range(32)
+    ]
+    # c.sext.b, c.zext.h, c.sext.h on each of x8..x15: 100 111 rd' 11 sel 01.
+    halves = [0x9C61 | (reg << 7) | (sel << 2) for reg in range(8) for sel in (1, 2, 3)]
+    source = tmp_path / "sweep.s"
+    source.write_text(
+        "\t.text\n"
+        + "".join(f"\t.insn 4, 0x{w:08x}\n" for w in words)
+        + "".join(f"\t.insn 2, 0x{h:04x}\n" for h in halves),
+        encoding="utf-8")
+    elf = tmp_path / "sweep.o"
+    subprocess.run([str(gcc), SWEEP_MARCH, "-mabi=ilp32", "-c", "-o", str(elf),
+                    str(source)], check=True, capture_output=True)
+    listing = subprocess.run([str(objdump), "-d", "-M", "no-aliases", str(elf)],
+                             check=True, capture_output=True, text=True).stdout
+    theirs_at = {}
+    for line in listing.splitlines():
+        match = _LINE.match(line)
+        if match:
+            theirs_at[int(match.group(1), 16)] = normalise(match.group(3))
+
+    laid = [(index * 4, word, 4) for index, word in enumerate(words)]
+    laid += [(len(words) * 4 + index * 2, half, 2) for index, half in enumerate(halves)]
+    agreed: set[str] = set()
+    rv64_immediates = 0
+    unexplained = []
+    for at, encoding, width in laid:
+        mine = normalise(disasm.decode(encoding, at)[0])
+        theirs = theirs_at.get(at, "")
+        if mine == theirs:
+            agreed.add(mine.split()[0])
+            continue
+        if theirs.startswith(".insn") and mine.startswith("0x"):
+            continue                                     # both refuse
+        shift = _RV64_IMMEDIATE.match(theirs)
+        if shift and int(shift.group(2), 16) >= 32 and mine.startswith("0x"):
+            rv64_immediates += 1
+            continue
+        unexplained.append(f"0x{encoding:0{width * 2}x} at 0x{at:x}: "
+                           f"objdump {theirs!r}, this module {mine!r}")
+    assert unexplained == [], unexplained[:10]
+    assert ZBB_ZBKB <= agreed, sorted(ZBB_ZBKB - agreed)
+    # 8 immediates x 32 amounts >= 32 x 1 rd/rs1 pair: the six-bit shamt of
+    # slli, srli, srai, rori, bseti, bclri, binvi and bexti, each refused.
+    assert rv64_immediates == 8 * 32, rv64_immediates

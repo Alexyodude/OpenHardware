@@ -120,7 +120,7 @@ def test_zcb_stores_land_where_their_loads_read():
 C_ZEXT_B_S0 = 0x9C61   #: 100 111 000(s0) 11 000 01
 C_NOT_S1 = 0x9CF5      #: 100 111 001(s1) 11 101 01
 C_MUL_S0_S1 = 0x9C45   #: 100 111 000(s0) 10 001(s1) 01
-C_SEXT_B_S0 = 0x9C65   #: the unary slot 001: needs Zbb, which no part has
+C_SEXT_B_S0 = 0x9C65   #: the unary slot 001: needs Zbb, which the C5 lacks
 
 
 def test_the_zcb_unaries_and_mul_compute():
@@ -136,9 +136,10 @@ def test_the_zcb_unaries_and_mul_compute():
 
 
 def test_the_zbb_unaries_are_refused_even_on_the_c5():
-    """c.sext.b, c.zext.h and c.sext.h exist only on parts with Zbb, and no
-    part here has Zbb. Executing them anyway would decode instructions the
-    C5's own datasheet does not grant it."""
+    """c.sext.b, c.zext.h and c.sext.h exist only on parts with Zbb, and the
+    C5 has none. Executing them anyway would decode instructions the C5's
+    own datasheet does not grant it. The RP2350 has Zbb and runs them:
+    `test_zbb_zbkb.py`'s compressed tests."""
     with pytest.raises(abi.Illegal):
         run(fresh(), C_SEXT_B_S0, regs={8: 0x80})
 

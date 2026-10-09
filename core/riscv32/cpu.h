@@ -70,11 +70,17 @@ constexpr unsigned kRegisters = 32;
 /// before any part with an FPU arrives, and `tests/rv32/corpus/
 /// absent_extension.json` already holds the encodings that would separate them.
 ///
-/// Zbb and Zbkb are still absent: the RP2350 has them and this core does not
-/// implement them yet, which `tests/rv32/conftest.py` records as a gap in
-/// `MODELLED` rather than by pretending the part lacks them. Zcb, Zcmp and
-/// Zcmt arrived at OH-146: the ESP32-C5's three groups, the first two also
-/// the RP2350's.
+/// Zcb, Zcmp and Zcmt arrived at OH-146: the ESP32-C5's three groups, the
+/// first two also the RP2350's. Zbb and Zbkb arrived at OH-208, the last two
+/// groups of the RP2350's string; no ESP32-C part has either.
+///
+/// **Zbb and Zbkb are two bits and not one, although seven of their
+/// instructions are the same encodings.** `andn`, `orn`, `xnor`, `rol`,
+/// `ror`, `rori` and `rev8` are in both, so either bit opens them; the rest
+/// belong to one group only, and a part with one of the two must still
+/// refuse the other's -- `clz` on a Zbkb-only part, `zip` on a Zbb-only one.
+/// The RP2350 has both, so no board here can tell the difference; the
+/// gating tests can, and do.
 enum Extension : uint32_t {
     kExtM = 1u << 0,
     kExtA = 1u << 1,
@@ -84,6 +90,8 @@ enum Extension : uint32_t {
     kExtZcb = 1u << 5,
     kExtZcmp = 1u << 6,
     kExtZcmt = 1u << 7,
+    kExtZbb = 1u << 8,
+    kExtZbkb = 1u << 9,
 };
 
 /// What `step` did.

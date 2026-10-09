@@ -57,7 +57,7 @@ from core.riscv32.machine import REGISTER_NAMES
 #: disassembler and the executor agree about scope: an encoding one knows and
 #: the other does not is a divergence waiting to be found by a person rather
 #: than by a sweep.
-EXTENSIONS = ("I", "M", "C", "Zba", "Zbs", "Zcb", "Zcmp", "Zcmt")
+EXTENSIONS = ("I", "M", "C", "Zba", "Zbb", "Zbs", "Zbkb", "Zcb", "Zcmp", "Zcmt")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -205,6 +205,17 @@ def _decode32(word: int, address: int) -> str:
                (0x1, 0x34): "binvi", (0x5, 0x24): "bexti"}
         if (funct3, funct7) in zbs:
             return f"{zbs[(funct3, funct7)]}\t{_reg(rd)},{_reg(rs1)},0x{rs2:x}"
+        # Zbb and Zbkb (OH-208): one-operand forms named by the whole 12-bit
+        # immediate, the rs2 field being part of the name rather than a
+        # register -- matched the same way `exec.cc` matches them.
+        unary = ({0x600: "clz", 0x601: "ctz", 0x602: "cpop", 0x604: "sext.b",
+                  0x605: "sext.h", 0x08F: "zip"} if funct3 == 0x1 else
+                 {0x287: "orc.b", 0x698: "rev8", 0x687: "brev8", 0x08F: "unzip"}
+                 if funct3 == 0x5 else {})
+        if _bits(word, 31, 20) in unary:
+            return f"{unary[_bits(word, 31, 20)]}\t{_reg(rd)},{_reg(rs1)}"
+        if funct3 == 0x5 and funct7 == 0x30:
+            return f"rori\t{_reg(rd)},{_reg(rs1)},0x{rs2:x}"
         return ""
 
     if opcode == 0x33:
@@ -223,6 +234,16 @@ def _decode32(word: int, address: int) -> str:
                (0x1, 0x34): "binv", (0x5, 0x24): "bext"}
         if (funct3, funct7) in zbs:
             return f"{zbs[(funct3, funct7)]}\t{_reg(rd)},{_reg(rs1)},{_reg(rs2)}"
+        # Zbb and Zbkb (OH-208). `pack rd,rs1,zero` is Zbb's RV32 `zext.h`
+        # -- one encoding, and objdump names it zext.h, so this does too.
+        if funct7 == 0x04 and funct3 == 0x4 and rs2 == 0:
+            return f"zext.h\t{_reg(rd)},{_reg(rs1)}"
+        zbb = {(0x4, 0x20): "xnor", (0x6, 0x20): "orn", (0x7, 0x20): "andn",
+               (0x4, 0x05): "min", (0x5, 0x05): "minu", (0x6, 0x05): "max",
+               (0x7, 0x05): "maxu", (0x1, 0x30): "rol", (0x5, 0x30): "ror",
+               (0x4, 0x04): "pack", (0x7, 0x04): "packh"}
+        if (funct3, funct7) in zbb:
+            return f"{zbb[(funct3, funct7)]}\t{_reg(rd)},{_reg(rs1)},{_reg(rs2)}"
         return ""
 
     if opcode == 0x0F:
@@ -344,8 +365,8 @@ def _decode16(c: int, address: int) -> str:
             if _bits(c, 12, 12):
                 # C.SUBW / C.ADDW (funct2 00, 01) are RV64; Zcb (OH-146)
                 # takes 10 for C.MUL and 11 for its unary group. The Zbb
-                # unaries render too -- the union again -- though every part
-                # here refuses them.
+                # unaries render too -- the union again -- and since OH-208
+                # the RP2350 runs them while the C5 refuses them.
                 pair = _bits(c, 6, 5)
                 if pair == 0x2:
                     return f"c.mul\t{rsd},{_creg(_bits(c, 4, 2))}"

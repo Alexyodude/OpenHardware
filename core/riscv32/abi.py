@@ -58,6 +58,8 @@ EXT_ZBS = 16
 EXT_ZCB = 32
 EXT_ZCMP = 64
 EXT_ZCMT = 128
+EXT_ZBB = 256
+EXT_ZBKB = 512
 
 #: The ISA of the parts this core is for, spelled once. `docs/
 #: architectures.md` 4.2 is the citation, and the C3 row is the one that
@@ -67,30 +69,44 @@ ESP32_C6 = EXT_M | EXT_A | EXT_C
 
 #: The ESP32-C5, whole (OH-146): the datasheet spells it
 #: `RV32IMAC + Zcb/Zcmp/Zcmt` and every group now has a bit and an
-#: implementation, so unlike the RP2350 constant below this one describes
+#: implementation, so unlike `RP2350_MODELLED` below this one describes
 #: the part rather than a modelled subset of it.
 ESP32_C5 = EXT_M | EXT_A | EXT_C | EXT_ZCB | EXT_ZCMP | EXT_ZCMT
 
-#: The RP2350's Hazard3, **as far as this core models it, which is not all of
-#: it.** The datasheet's own string is
+#: The RP2350's Hazard3 **as far as `tests/rv32` can be told, which is now
+#: less than this core models.** The datasheet's own string is
 #:
 #:     rv32ima_zicsr_zifencei_zba_zbb_zbs_zbkb_zca_zcb_zcmp
 #:
-#: so Zbb and Zbkb are missing here -- Zcb and Zcmp arrived at OH-146, with
-#: the rv32 corpus asserting Zcb against rvcpp, Hazard3's own simulator --
-#: and `kExtC` is standing in
-#: for Zca -- see the note on `Extension` in cpu.h for why that is sound for a
-#: part with no FPU and would stop being sound for one with an FPU.
+#: Zcb and Zcmp arrived at OH-146, with the rv32 corpus asserting Zcb against
+#: rvcpp, Hazard3's own simulator, and `kExtC` is standing in for Zca -- see
+#: the note on `Extension` in cpu.h for why that is sound for a part with no
+#: FPU and would stop being sound for one with an FPU.
 #:
-#: **This constant therefore describes a part that does not exist**, and it is
-#: named for a real one. That is only safe because nothing derives "the RP2350
-#: must refuse X" from it: `tests/rv32/conftest.py` keeps the datasheet's full
-#: set separately as the citable truth and intersects it with what is modelled,
-#: so an unmodelled extension shows up as a gap rather than as the silicon
-#: lacking it. Adding Zbb here without adding it there is the mistake this
-#: paragraph exists to prevent.
+#: **Zbb and Zbkb are implemented (OH-208) and are not in this constant.**
+#: `tests/rv32/test_gating.py`'s
+#: `test_the_extension_letters_match_the_abi_bitmasks` asserts it equals the
+#: RP2350's datasheet set intersected with `MODELLED` in
+#: `tests/rv32/conftest.py`, and that list -- not OH-208's to edit -- names
+#: neither group yet. Adding them here alone would make that test fail;
+#: adding them there and here together is the follow-up that makes this
+#: constant equal `RP2350` below, and then one of the two can go.
+#:
+#: **This note used to call the constant safe because nothing derived "the
+#: RP2350 must refuse X" from it.** From OH-157 something did: the RP2350
+#: board configured exactly this mask, so a XIAO RP2350 refused `clz`,
+#: `minu` and `rev8` as `Illegal` -- the word for "the silicon lacks this" --
+#: where its silicon executes them. So no board should configure this
+#: constant: `RP2350` below is the part's mask.
 RP2350_MODELLED = (EXT_M | EXT_A | EXT_C | EXT_ZBA | EXT_ZBS
                    | EXT_ZCB | EXT_ZCMP)
+
+#: The RP2350's Hazard3: every group of the string above that has a bit --
+#: Zba, Zbb, Zbs, Zbkb, Zcb and Zcmp, with `EXT_C` for Zca, and A. The mask
+#: for `webui/boards/rp2350.py` (OH-208). Zicsr and Zifencei have no
+#: bit: this core has no CSRs and answers both `Unimplemented`, a hole in
+#: the model rather than a refusal, and it answers A the same way.
+RP2350 = RP2350_MODELLED | EXT_ZBB | EXT_ZBKB
 
 #: Must match `riscv32::StepResult` and abi.h's documented return values.
 OK = 0

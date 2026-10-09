@@ -187,6 +187,109 @@ uint32_t multiply_or_divide(unsigned funct3, uint32_t a, uint32_t b) {
     }
 }
 
+// --- Zbb and Zbkb ------------------------------------------------------------
+//
+// The RP2350's last two groups (OH-208). Each operation below is the Sail on
+// its instruction page in the ratified unprivileged ISA, 20240411, chapter 28
+// ("B" Extension for Bit Manipulation, Version 1.0.0), whose `Zbb` and `Zbkb`
+// sections list which instruction belongs to which group; Zbkb is also
+// chapter 32's (Scalar Cryptography, Version 1.0.1).
+//
+// **Loops and masks, never compiler builtins.** `__builtin_clz` is undefined
+// at zero under GCC and absent under MSVC, this file is built by three
+// compilers, and rvcpp -- the oracle these are held to in lockstep -- uses
+// exactly those builtins. A model and its oracle sharing one implementation
+// would agree about its bugs.
+
+/// `clz`: 32 for zero, which the spec defines and the builtin does not.
+uint32_t count_leading_zeros(uint32_t value) {
+    uint32_t count = 0;
+    for (uint32_t bit = 0x80000000u; bit != 0 && (value & bit) == 0; bit >>= 1) {
+        ++count;
+    }
+    return count;
+}
+
+/// `ctz`: 32 for zero, likewise.
+uint32_t count_trailing_zeros(uint32_t value) {
+    uint32_t count = 0;
+    for (uint32_t bit = 1u; bit != 0 && (value & bit) == 0; bit <<= 1) {
+        ++count;
+    }
+    return count;
+}
+
+/// `cpop`: each pass clears the lowest set bit.
+uint32_t count_ones(uint32_t value) {
+    uint32_t count = 0;
+    for (; value != 0; value &= value - 1u) {
+        ++count;
+    }
+    return count;
+}
+
+/// `ror` and `rori`, and `rol` as a rotate right by the complement. An amount
+/// of zero is answered first because `value << 32` is undefined in C++.
+uint32_t rotate_right(uint32_t value, unsigned amount) {
+    amount &= 0x1Fu;
+    return amount == 0 ? value : (value >> amount) | (value << (32u - amount));
+}
+
+/// `orc.b`: each byte becomes 0xFF if any bit of it is set, else stays 0.
+uint32_t or_combine_bytes(uint32_t value) {
+    uint32_t out = 0;
+    for (unsigned shift = 0; shift < 32; shift += 8) {
+        if ((value >> shift) & 0xFFu) {
+            out |= 0xFFu << shift;
+        }
+    }
+    return out;
+}
+
+/// `rev8` on RV32: byte 0 swaps with byte 3 and byte 1 with byte 2.
+uint32_t reverse_bytes(uint32_t value) {
+    return (value >> 24) | ((value >> 8) & 0x0000FF00u) |
+           ((value << 8) & 0x00FF0000u) | (value << 24);
+}
+
+/// `brev8` (chapter 28 spells it `rev.b`): bit 7 - i of each byte to bit i.
+uint32_t reverse_bits_in_bytes(uint32_t value) {
+    uint32_t out = 0;
+    for (unsigned bit = 0; bit < 32; ++bit) {
+        if (value & (1u << bit)) {
+            out |= 1u << ((bit & ~7u) | (7u - (bit & 7u)));
+        }
+    }
+    return out;
+}
+
+/// `zip`, RV32 only: the spec's `rd[2i] = rs1[i]`, `rd[2i+1] = rs1[i+16]`.
+uint32_t zip(uint32_t value) {
+    uint32_t out = 0;
+    for (unsigned i = 0; i < 16; ++i) {
+        out |= ((value >> i) & 1u) << (2u * i);
+        out |= ((value >> (i + 16u)) & 1u) << (2u * i + 1u);
+    }
+    return out;
+}
+
+/// `unzip`, RV32 only, zip's inverse: `rd[i] = rs1[2i]`,
+/// `rd[i+16] = rs1[2i+1]`.
+uint32_t unzip(uint32_t value) {
+    uint32_t out = 0;
+    for (unsigned i = 0; i < 16; ++i) {
+        out |= ((value >> (2u * i)) & 1u) << i;
+        out |= ((value >> (2u * i + 1u)) & 1u) << (i + 16u);
+    }
+    return out;
+}
+
+/// The seven instructions Zbb and Zbkb share -- `andn`, `orn`, `xnor`,
+/// `rol`, `ror`, `rori`, `rev8` -- are legal on a part with either.
+bool has_zbb_or_zbkb(const Cpu& cpu) {
+    return cpu.has(kExtZbb) || cpu.has(kExtZbkb);
+}
+
 // --- the compressed instructions -----------------------------------------
 //
 // ## Expanded, not re-implemented
@@ -459,11 +562,29 @@ Expansion expand_quadrant1(uint32_t extensions, uint16_t c, uint32_t& out) {
                     case 0x5u:  // C.NOT -> xori rd', rd', -1
                         out = i_type(kOpImm, rsd, 0x4u, rsd, 0xFFFu);
                         return Expansion::Ok;
+                    case 0x1u:  // C.SEXT.B -> sext.b rd', rd'
+                    case 0x2u:  // C.ZEXT.H -> zext.h rd', rd'
+                    case 0x3u:  // C.SEXT.H -> sext.h rd', rd'
+                        // "Zbb is also required" -- each one's page in the
+                        // Zc chapter (unprivileged ISA 20240411, ch. 27).
+                        // Checked here and not left to the expansion's own
+                        // gate, because C.ZEXT.H expands to `pack rd', rd',
+                        // x0`, which Zbkb alone would open: a Zcb part with
+                        // Zbkb and no Zbb must still refuse it. Of the parts
+                        // here the C5 refuses all three (Zcb, no Zbb) and
+                        // the RP2350 runs them (both).
+                        if (!(extensions & kExtZbb)) {
+                            return Expansion::Illegal;
+                        }
+                        out = bits(c, 4, 2) == 0x2u
+                                  ? r_type(kOp, rsd, 0x4u, rsd, 0, 0x04u)
+                                  : i_type(kOpImm, rsd, 0x1u, rsd,
+                                           bits(c, 4, 2) == 0x1u ? 0x604u
+                                                                 : 0x605u);
+                        return Expansion::Ok;
                     default:
-                        // 001 C.SEXT.B, 010 C.ZEXT.H and 011 C.SEXT.H exist
-                        // only on parts with Zbb, and no part here has Zbb;
                         // 100 C.ZEXT.W is RV64-only; 110 and 111 are
-                        // reserved. One answer covers all six.
+                        // reserved. One answer covers all three.
                         return Expansion::Illegal;
                     }
                 default:
@@ -857,6 +978,14 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
             // this is a switch over named funct7 values and not a test for
             // "nonzero", which would have opened the case this paragraph
             // exists to close.
+            //
+            // **Zbb's unaries and Zbkb's zip are here too, and they are
+            // where the rs2 field stops being a shift amount.** Under funct7
+            // 0b0110000 it names the operation -- the 12-bit immediates
+            // 0x600 clz, 0x601 ctz, 0x602 cpop, 0x604 sext.b, 0x605 sext.h
+            // -- and under 0b0000100 only 0b01111 means anything (0x08F,
+            // zip). So each is matched on its whole immediate, and every
+            // other value of the field stays illegal.
             const uint32_t seven = funct7_of(instr);
             const uint32_t bit = 1u << (rs2 & 0x1Fu);
             if (seven == 0x00u) {
@@ -868,12 +997,35 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
                 result = seven == 0x14u ? (a | bit)                     // BSETI
                        : seven == 0x24u ? (a & ~bit)                    // BCLRI
                        :                  (a ^ bit);                    // BINVI
+            } else if (seven == 0x30u) {
+                if (!cpu.has(kExtZbb)) {
+                    return StepResult::Illegal;
+                }
+                switch (rs2) {
+                case 0x0u: result = count_leading_zeros(a); break;      // CLZ
+                case 0x1u: result = count_trailing_zeros(a); break;     // CTZ
+                case 0x2u: result = count_ones(a); break;               // CPOP
+                case 0x4u: result = sign_extend(a, 8); break;           // SEXT.B
+                case 0x5u: result = sign_extend(a, 16); break;          // SEXT.H
+                default: return StepResult::Illegal;
+                }
+            } else if (seven == 0x04u && rs2 == 0x0Fu) {
+                // ZIP. Chapter 28's and chapter 32's encoding figures both
+                // draw this field as 0x1e (unzip's as 0x1f); the
+                // instruction is 0b01111 in riscv-opcodes' `rv32_zbkb`, in
+                // rvcpp's `RVOPC_ZIP_BITS` (Hazard3's author's own table)
+                // and in what GNU as 2.43 assembles, and that is what
+                // `tests/riscv32/test_zbb_zbkb.py` holds it to.
+                if (!cpu.has(kExtZbkb)) {
+                    return StepResult::Illegal;
+                }
+                result = zip(a);
             } else {
                 return StepResult::Illegal;
             }
             break;
         }
-        case 0x5u: {  // SRLI, SRAI, and Zbs's BEXTI
+        case 0x5u: {  // SRLI, SRAI, Zbs's BEXTI, and five Zbb/Zbkb forms
             const uint32_t seven = funct7_of(instr);
             if (seven == 0x00u) {
                 result = a >> (rs2 & 0x1Fu);                            // SRLI
@@ -888,6 +1040,41 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
                     return StepResult::Illegal;
                 }
                 result = (a >> (rs2 & 0x1Fu)) & 1u;                     // BEXTI
+            } else if (seven == 0x30u) {
+                // RORI, in both groups. funct7 exactly 0b0110000: a one in
+                // bit 25 is RV64's sixth shift-amount bit, and stays illegal
+                // here for the reason SLLI's does.
+                if (!has_zbb_or_zbkb(cpu)) {
+                    return StepResult::Illegal;
+                }
+                result = rotate_right(a, rs2 & 0x1Fu);                  // RORI
+            } else if (seven == 0x14u && rs2 == 0x07u) {
+                // ORC.B, 0x287 -- Zbb only. funct7 0b0010100 is BSETI's, but
+                // BSETI is funct3 001; here only this one immediate exists.
+                if (!cpu.has(kExtZbb)) {
+                    return StepResult::Illegal;
+                }
+                result = or_combine_bytes(a);                           // ORC.B
+            } else if (seven == 0x34u && rs2 == 0x18u) {
+                // REV8, 0x698 -- RV32's encoding (RV64's is 0x6b8), in both
+                // groups.
+                if (!has_zbb_or_zbkb(cpu)) {
+                    return StepResult::Illegal;
+                }
+                result = reverse_bytes(a);                              // REV8
+            } else if (seven == 0x34u && rs2 == 0x07u) {
+                // BREV8, 0x687 -- Zbkb only.
+                if (!cpu.has(kExtZbkb)) {
+                    return StepResult::Illegal;
+                }
+                result = reverse_bits_in_bytes(a);                      // BREV8
+            } else if (seven == 0x04u && rs2 == 0x0Fu) {
+                // UNZIP, 0x08F -- Zbkb, RV32 only; see ZIP above for the
+                // field the spec's figure draws differently.
+                if (!cpu.has(kExtZbkb)) {
+                    return StepResult::Illegal;
+                }
+                result = unzip(a);                                      // UNZIP
             } else {
                 return StepResult::Illegal;
             }
@@ -938,7 +1125,63 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
             switch (funct3) {
             case 0x0u: result = a - b; break;                             // SUB
             case 0x5u: result = shift_right_arithmetic(a, amount); break; // SRA
+            case 0x4u:                                                    // XNOR
+            case 0x6u:                                                    // ORN
+            case 0x7u:                                                    // ANDN
+                // The logical-with-negate three, in both Zbb and Zbkb.
+                if (!has_zbb_or_zbkb(cpu)) {
+                    return StepResult::Illegal;
+                }
+                result = funct3 == 0x4u ? ~(a ^ b)
+                       : funct3 == 0x6u ? (a | ~b)
+                       :                  (a & ~b);
+                break;
             default: return StepResult::Illegal;
+            }
+        } else if (funct7 == 0x05u) {
+            // MIN, MINU, MAX, MAXU -- Zbb only. funct3 001, 010 and 011
+            // under this funct7 are Zbc's clmul, clmulr and clmulh, which the
+            // RP2350's string does not name, so they are refused on every
+            // part here. rvcpp executes them (rv_core.cpp:289), so lockstep
+            // cannot see that refusal; test_zbb_zbkb.py asserts it instead.
+            if (!cpu.has(kExtZbb)) {
+                return StepResult::Illegal;
+            }
+            switch (funct3) {
+            case 0x4u: result = less_than_signed(a, b) ? a : b; break;   // MIN
+            case 0x5u: result = a < b ? a : b; break;                    // MINU
+            case 0x6u: result = less_than_signed(a, b) ? b : a; break;   // MAX
+            case 0x7u: result = a < b ? b : a; break;                    // MAXU
+            default: return StepResult::Illegal;
+            }
+        } else if (funct7 == 0x30u) {
+            // ROL and ROR, in both groups; the other six funct3 values of
+            // this funct7 name nothing on RV32.
+            if (!has_zbb_or_zbkb(cpu)) {
+                return StepResult::Illegal;
+            }
+            switch (funct3) {
+            case 0x1u: result = rotate_right(a, (32u - amount) & 0x1Fu); break;  // ROL
+            case 0x5u: result = rotate_right(a, amount); break;                  // ROR
+            default: return StepResult::Illegal;
+            }
+        } else if (funct7 == 0x04u) {
+            if (funct3 == 0x4u) {
+                // PACK, Zbkb -- and with rs2 = x0 the same word is Zbb's
+                // ZEXT.H, whose RV32 encoding is defined as exactly that
+                // (chapter 28, zext.h's page). So either group opens that
+                // one encoding and only Zbkb opens the rest.
+                if (!cpu.has(kExtZbkb) && !(rs2 == 0 && cpu.has(kExtZbb))) {
+                    return StepResult::Illegal;
+                }
+                result = (a & 0xFFFFu) | (b << 16);                       // PACK
+            } else if (funct3 == 0x7u) {
+                if (!cpu.has(kExtZbkb)) {
+                    return StepResult::Illegal;
+                }
+                result = (a & 0xFFu) | ((b & 0xFFu) << 8);                // PACKH
+            } else {
+                return StepResult::Illegal;
             }
         } else if (funct7 == 0x10u) {
             // Zba address generation. `refuse` is deliberately not used here:
@@ -956,10 +1199,9 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
             case 0x4u: result = (a << 2) + b; break;                   // SH2ADD
             case 0x6u: result = (a << 3) + b; break;                   // SH3ADD
             // funct3 000, 001, 011, 101 and 111 under this funct7 are not
-            // Zba. Some belong to Zbs and Zbkb, which this core does not
-            // model; unassigned and not-modelled both read as Illegal here,
-            // and `MODELLED` in tests/rv32/conftest.py is what keeps a
-            // not-modelled encoding from being asserted against a real part.
+            // Zba. This comment used to say some were Zbs's and Zbkb's;
+            // neither group has an encoding under funct7 0b0010000 (riscv-
+            // opcodes' `rv_zbs`, `rv_zbkb`), so all five name nothing.
             default: return StepResult::Illegal;
             }
         } else if (funct7 == 0x14u || funct7 == 0x24u || funct7 == 0x34u) {
