@@ -31,6 +31,7 @@
 #     6-pin analog header 2.54 mm off the end of the board.
 
 import dataclasses
+import itertools
 import json
 import math
 import pathlib
@@ -2677,10 +2678,10 @@ def test_a_stroke_with_no_length_or_no_width_is_not_ink():
 
 def test_the_silkscreen_says_what_it_could_not_draw():
     """A caption hiding what it left out would be worse than one that names
-    it. Text was 47 to 99 pieces per board and unread until OH-163; now it is
-    read, for the composer to letter, and what stays unread is named: the
-    text the file hides, and the arcs, circles and polygons, a handful per
-    board."""
+    it. Text was unread until OH-163, and an arc until its step 3; both are
+    read now, for the composer to letter and to flatten, and what stays
+    unread is named: the text the file hides, and the circles and polygons,
+    each counted by kind."""
     spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
     if not spec.layout.is_file():
         pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
@@ -3880,10 +3881,11 @@ def test_every_composed_boards_placements_are_drawn_or_explained():
     table edit at all -- and the KB2040 did, with eleven of its placements
     drawn as nothing and one line of output saying so. The lookup is the
     composer's own, `correspondence_for`, because SparkFun's `0603` is two
-    rows told apart by library. A padless element is ink and is counted
-    apart by `compose`, and so is one that draws the board's own edge
-    (OH-163), so only a placement with a pad that is not the board must be
-    one or the other.
+    rows told apart by library. A padless element that states no mesh is
+    ink and is counted apart by `compose`, and so is one whose own Edge.Cuts
+    is the board's outer ring (OH-163) -- not one that only cuts a slot or a
+    notch, which is a part like any other -- so only a placement with a pad
+    or a mesh that is not the board must be one or the other.
     """
     orphans: dict[str, list[str]] = {}
     checked = 0
@@ -3895,7 +3897,7 @@ def test_every_composed_boards_placements_are_drawn_or_explained():
         for element in compose.read_layout(spec.layout).elements:
             # A part its own schematic refuses is explained there (OH-187).
             row, refused = compose.drawn_from(element, statements)
-            if (element.pads and not element.edge
+            if ((element.pads or element.models) and not element.edge
                     and element.package not in compose.ABSENT
                     and row is None and refused is None):
                 orphans.setdefault(spec.board, []).append(
@@ -4516,8 +4518,9 @@ def test_a_placement_with_an_unplated_hole_is_not_counted_drawn(capsys):
     """**Its copper is not all of it** (OH-163): an unplated hole is a hole,
     which the copper pass does not cut -- it reaches `artwork` as a surface
     pad, see `eagle.Pad.hole` -- so a placement with no body that puts one
-    down stays among the absent with its reason, and is not counted drawn as
-    its copper. Olimex's mounting holes and SparkFun's standoffs are that."""
+    down stays among the absent, saying that its hole is not drawn, and is
+    not counted drawn as its copper. Olimex's mounting holes and SparkFun's
+    standoffs are that."""
     _newstroke()
     checked = []
     for spec in compose.COMPOSITIONS:
@@ -4532,8 +4535,9 @@ def test_a_placement_with_an_unplated_hole_is_not_counted_drawn(capsys):
         drawn = next((line for line in lines if line.startswith("  copper  ")), "")
         assert not holed & set(drawn.partition(": ")[2].split(", ")), (spec.board, drawn)
         for package in holed:
-            assert any(line.startswith("  absent  ") and f"({package})" in line
-                       for line in lines), (spec.board, package)
+            assert any(line.startswith("  absent  ") and f"({package}): " in line
+                       and " not drawn: an unplated hole, and no hole is cut" in line
+                       for line in lines), (spec.board, package, lines)
         checked.append(spec.board)
     if not checked:
         pytest.skip("SKIPPED: no fetched board places a bodyless unplated hole")
@@ -4575,29 +4579,305 @@ def test_a_logo_is_ink_and_not_a_part_left_off(capsys):
         if not _fetched(spec):
             continue
         dead = {e.package for e in compose.read_layout(spec.layout).elements
-                if not e.pads and compose.absent_why(e) is not None}
+                if not e.pads and not e.models and compose.absent_why(e) is not None}
         assert not dead, (spec.board, dead)
+
+
+def test_the_composed_silkscreen_arcs_land_on_seeeds_own_gerber():
+    """**The arcs of ink reach the composed board where Seeed plotted them**
+    (OH-163, from step 3's review). Each silkscreen arc `from_kicad`
+    flattens is a run of strokes in the composer's own frame, y up -- which,
+    Seeed plotting from a zero origin, IS the Gerber's frame -- and each run
+    goes from one end of a circular draw of its own layer's Gerber, through
+    its sweep, to the other, on the XIAO ESP32-C6. Only a count of those
+    strokes held them before, and a flattening that left y as KiCad stores
+    it, down the page, drew every arc of ink mirrored off the board and
+    passed."""
+    import zipfile
+
+    from tests.rules.test_kicad import (
+        SEEED_C6_ROOT,
+        SEEED_PCB,
+        _arc_lands,
+        _gerber_draws,
+    )
+
+    zipped, path = SEEED_PCB / "ESP32-C6.zip", SEEED_PCB / "ESP32-C6.kicad_pcb"
+    if not (zipped.is_file() and path.is_file()):
+        pytest.skip(f"SKIPPED: {zipped.name} or {path.name} absent under {SEEED_PCB}; "
+                    f"python tools/compose_board_3d.py --board XIAO-ESP32-C6-DIP")
+    plotted: dict[str, list] = {}
+    with zipfile.ZipFile(zipped) as bundle:
+        assert path.read_bytes() == bundle.read(SEEED_C6_ROOT + "XIAO ESP32 C6.kicad_pcb"), (
+            "not the board Seeed plotted these from")
+        for layer, name in (("F.SilkS", "F_Silkscreen"), ("B.SilkS", "B_Silkscreen")):
+            plotted[layer] = []
+            _gerber_draws(bundle.read(f"{SEEED_C6_ROOT}XIAO ESP32 C6_gerber/"
+                                      f"XIAO ESP32 C6-{name}.gbr").decode("ascii"),
+                          f"{path.name} {layer}", plotted[layer])
+    read = kicad.read_board(path)
+    rest = compose.from_kicad(path).silk[len(read.silk):]
+    missed = []
+    for arc in read.silk_arcs:
+        steps = len(compose.arc_points(arc)) - 1
+        run, rest = rest[:steps], rest[steps:]
+        middle = run[steps // 2]
+        if not (all(stroke.layer == arc.layer for stroke in run)
+                and _arc_lands(plotted[arc.layer], (run[0].x1_mm, run[0].y1_mm),
+                               (middle.x1_mm, middle.y1_mm), (run[-1].x2_mm, run[-1].y2_mm))):
+            missed.append((arc, run[0], run[-1]))
+    assert read.silk_arcs and not rest and not missed, (len(rest), missed[:3])
+
+
+def test_a_test_point_beyond_the_outline_stays_absent_and_says_why(capsys):
+    """**A placement is drawn as its copper only where every pad of it is
+    drawn** (OH-163, from step 3's review). The Uno's ORIGIN is a test point
+    whose pad reaches outside the board's concave outline, which the copper
+    pass cuts nothing to, so the pad is not drawn and ORIGIN stays among the
+    absent -- saying that, and not its package's reason, which is about the
+    test points whose pads are drawn. Those are counted drawn, as copper."""
+    spec = next(s for s in compose.COMPOSITIONS if s.board == "Arduino Uno")
+    if not _fetched(spec):
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    points = [e for e in compose.read_layout(spec.layout).elements if e.package == "TP-SP"]
+    origin = next(e for e in points if e.name == "ORIGIN")
+    assert len(points) > 1 and len(origin.pads) == 1, (len(points), origin.pads)
+    lines = _accounting(spec, capsys).splitlines()
+    assert (f"  absent  ORIGIN (TP-SP): pad {origin.pads[0].number} not drawn: "
+            f"reaching outside the board's concave outline, which nothing is cut "
+            f"to") in lines, lines
+    drawn = next((line for line in lines if line.startswith("  copper  ")), "")
+    assert "TP-SP" in drawn.partition(": ")[2].split(", "), drawn
+
+
+def test_an_unplated_hole_is_not_drawn_as_copper():
+    """**A hole with no copper in it is drawn as no copper** (OH-163, from
+    step 3's review). A KiCad `np_thru_hole` reaches `artwork` as a surface
+    pad -- see `eagle.Pad.hole` -- and was drawn on both faces as a disc of
+    copper its drill's size: the locating pegs of the USB-C sockets, buttons
+    and switches, Olimex's mounting holes, SparkFun's standoffs. Now no
+    corner of any such hole is a vertex of the copper, and each is counted
+    under `np_thru_hole`."""
+    checked = []
+    for spec in compose.COMPOSITIONS:
+        if (spec.layout.suffix != ".kicad_pcb" or not spec.layout.is_file()
+                or spec.layout in {seen for seen, _board in checked}):
+            continue
+        board = compose.read_layout(spec.layout)
+        holes = [pad for e in board.elements for pad in e.pads if pad.hole]
+        if not holes:
+            continue
+        ring, _cut = compose.outer(board.outline)
+        meshes, tally, _undrawn = compose.artwork(board, ring, spec.thickness_mm,
+                                                  (0.0, 0.0), spec.colour, [])
+        copper = {(round(p[at], 4), round(-p[at + 2], 4))
+                  for mesh in meshes for colour, (p, _n, _i) in mesh.groups.items()
+                  if colour == compose.COPPER for at in range(0, len(p), 3)}
+        drawn = [pad for pad in holes
+                 if {(round(x, 4), round(y, 4)) for x, y in compose.pad_outline(pad)} & copper]
+        assert not drawn, (spec.board, drawn[:3])
+        assert tally.get("np_thru_hole") == len(holes), (spec.board, tally)
+        checked.append((spec.layout, spec.board))
+    if not checked:
+        pytest.skip("SKIPPED: no fetched KiCad board places an unplated hole")
+
+
+def test_a_flattened_arc_stands_off_its_circle_by_no_more_than_its_chord_allows():
+    """**The price of `ARC_CHORD_MM`, as its comment states it** (OH-163,
+    from step 3's review, now that the silkscreen's arcs are flattened too):
+    no chord `arc_points` draws stands off its circle by more than
+    r(1 - cos(min(chord / 2r, pi / 2))). Swept over radii from below
+    chord / pi, where two steps round a circle are its diameter, to well
+    above a XIAO's corner, and over sweeps either way round.
+
+    Each step's angle t is measured from its chord, 2 asin(c / 2r), which
+    cannot exceed a half turn -- so the angles summing to the whole sweep is
+    what shows no step is more than one -- and the step stands off its arc
+    by r(1 - cos(t/2))."""
+    worst = 0.0
+    for radius in (0.03, 0.0637, 0.1, 0.254, 0.5, 1.5, 10.0):
+        for sweep in (5.0, 45.0, 90.0, 180.0, 270.0, 359.0, -90.0, -300.0):
+            half = math.radians(sweep) / 2
+            arc = kicad.Arc("F.SilkS", radius, 0.0,
+                            radius * math.cos(half), radius * math.sin(half),
+                            radius * math.cos(2 * half), radius * math.sin(2 * half))
+            points = compose.arc_points(arc)
+            steps = [2 * math.asin(min(1.0, math.dist(a, b) / (2 * radius)))
+                     for a, b in itertools.pairwise(points)]
+            assert sum(steps) == pytest.approx(abs(2 * half), abs=1e-9), (radius, sweep, steps)
+            bound = radius * (1 - math.cos(min(compose.ARC_CHORD_MM / (2 * radius),
+                                                math.pi / 2)))
+            for step in steps:
+                gap = radius * (1 - math.cos(step / 2))
+                assert gap <= bound + 1e-12, (radius, sweep, gap, bound)
+                worst = max(worst, gap / bound)
+    assert worst > 0.9, f"the bound is never approached ({worst:.3f}), so it holds nothing"
+
+
+def _edge_footprint(reference: str, at: str, cuts: str) -> str:
+    """One footprint with one pad, drawing `cuts` on Edge.Cuts."""
+    return (f'\t(footprint "Test:{reference}"\n\t\t(layer "F.Cu")\n\t\t(at {at})\n'
+            f'\t\t(property "Reference" "{reference}" (at 0 0 0) (layer "F.SilkS"))\n'
+            f'{cuts}\t\t(pad "1" smd rect (at 0 3) (size 1 1) (layers "F.Cu"))\n\t)\n')
+
+
+def _cut(kind: str, x1: float, y1: float, x2: float, y2: float) -> str:
+    """One straight piece of Edge.Cuts: a `*_line`, or a `*_rect`'s corners."""
+    return (f'\t\t({kind} (start {x1} {y1}) (end {x2} {y2}) '
+            f'(stroke (width 0.05) (type solid)) (layer "Edge.Cuts"))\n')
+
+
+#: Three 20 x 10 mm boards, which differ in which footprint draws what on
+#: Edge.Cuts (OH-163). `RING`: U2 draws the whole rectangle, and J1 beside it
+#: cuts a 2 x 0.6 mm slot. `NOTCHED`: the rectangle is drawn at the top level
+#: but for 4 mm of its top edge, which J2 closes with a 1 mm deep notch.
+#: `RING_AND_SLOT`: U3 draws the rectangle and a slot inside it, both.
+RING = ("(kicad_pcb\n\t(version 20241229)\n"
+        + _edge_footprint("U2", "0 0", _cut("fp_rect", 0, 0, 20, 10))
+        + _edge_footprint("J1", "10 5", _cut("fp_rect", -1, -0.3, 1, 0.3)) + ")\n")
+NOTCHED = ("(kicad_pcb\n\t(version 20241229)\n"
+           + "".join(_cut("gr_line", *ends) for ends in (
+               (0, 0, 8, 0), (12, 0, 20, 0), (20, 0, 20, 10), (20, 10, 0, 10),
+               (0, 10, 0, 0)))
+           + _edge_footprint("J2", "10 0", _cut("fp_line", -2, 0, -2, 1)
+                             + _cut("fp_line", -2, 1, 2, 1) + _cut("fp_line", 2, 1, 2, 0))
+           + ")\n")
+RING_AND_SLOT = ("(kicad_pcb\n\t(version 20241229)\n"
+                 + _edge_footprint("U3", "0 0", _cut("fp_rect", 0, 0, 20, 10)
+                                   + _cut("fp_rect", 9, 4.7, 11, 5.3)) + ")\n")
+
+
+def test_only_a_footprint_whose_edge_cuts_is_the_outer_ring_is_the_board(tmp_path):
+    """**A footprint's Edge.Cuts is the board only where it IS the board's
+    outer ring** (OH-163, from step 3's review). Every footprint that drew
+    anything there was taken for the board, so a connector cutting a slot
+    for itself, with no model, was printed as the board's edge and counted
+    nowhere else. By hand, on the three boards above:
+
+      * U2 draws the whole rectangle, and is the board. J1, a part with a
+        pad, cuts a slot inside it: still a part, its slot a cutout.
+      * J2 closes the top-level outline with a notch, so every one of its
+        segments is a side of the outer ring -- and it is still a part. A
+        part of the ring is not the ring.
+      * U3 draws the ring and a slot: not the ring alone, so not taken for
+        the board. It is then a placement with pads like any other, which
+        is counted and seen rather than passed over as the board.
+    """
+    got = {}
+    for name, text in (("ring", RING), ("notched", NOTCHED),
+                       ("ring-and-slot", RING_AND_SLOT)):
+        path = tmp_path / f"{name}.kicad_pcb"
+        path.write_text(text, encoding="utf-8")
+        got.update({e.name: e.edge for e in compose.from_kicad(path).elements})
+    assert got == {"U2": True, "J1": False, "J2": False, "U3": False}
+
+
+def test_a_part_that_cuts_a_slot_for_itself_is_still_a_part(tmp_path, capsys):
+    """**Step 3's review, kept as a test** (OH-163): a closed 0.6 mm square
+    slot on Edge.Cuts added inside the XIAO ESP32-C3's USB-C footprint, in
+    a copy of Seeed's file, put the socket on the `edge` line -- the board,
+    counted nowhere else -- when no model is matched for it. Now it stays a
+    placement with no model, counted as one, and its slot is one more cutout.
+    """
+    spec, shipped = _the_c3s_accounting(capsys)
+    slotted = _accounting(_c3_with(spec, tmp_path, "USB2.0-TYPE-C", "\n" + _cut(
+        "fp_rect", -0.3, -0.3, 0.3, 0.3)), capsys).splitlines()
+    assert not [line for line in slotted if line.startswith("  edge")], slotted
+    assert _counted(slotted, "  no model") == _counted(shipped, "  no model") != "", (
+        _counted(slotted, "  no model"), _counted(shipped, "  no model"))
+    assert _counted(shipped, "  cutouts").startswith("  cutouts 2 ")
+    assert _counted(slotted, "  cutouts").startswith("  cutouts 3 "), slotted
+
+
+def test_a_placement_with_no_pad_that_states_a_mesh_is_a_part(tmp_path, capsys):
+    """**No pad is not enough to make a placement ink** (OH-163, from step
+    3's review): one that states a mesh claims a body, so it is counted as a
+    part -- here, with no model matched, on the `no model` line -- and not
+    on the `no pads` line a logo is counted on. Shown on copies of the XIAO
+    ESP32-C3's file, whose one padless placement, Seeed's logo, is given a
+    `(model ...)`; and given a hidden one, KiCad's own "an alternate, not
+    this part", it is ink again. With an `ABSENT` reason for its package, it
+    is counted absent by that reason, as any part with no published model."""
+    spec, shipped = _the_c3s_accounting(capsys)
+    assert _counted(shipped, "  no pads") == "  no pads 1", shipped
+    model = '\n\t\t(model "${KICAD9_3DMODEL_DIR}/Test.3dshapes/Test.step"%s)\n'
+    logo = "LOGO-SEEED-NEW-1X9.6MM"
+    stated = _accounting(_c3_with(spec, tmp_path, logo, model % ""), capsys).splitlines()
+    hidden = _accounting(_c3_with(spec, tmp_path, logo, model % " (hide yes)"),
+                         capsys).splitlines()
+    unmodelled = int(_counted(shipped, "  no model").split()[-1])
+    assert _counted(stated, "  no pads") == "", stated
+    assert _counted(stated, "  no model") == f"  no model {unmodelled + 1}", stated
+    assert _counted(hidden, "  no pads") == "  no pads 1", hidden
+    assert _counted(hidden, "  no model") == f"  no model {unmodelled}", hidden
+    with mock.patch.dict(compose.ABSENT, {logo: "a part nobody publishes a model of"}):
+        reasoned = _accounting(_c3_with(spec, tmp_path, logo, model % ""), capsys)
+    assert f"  absent  U$2 ({logo}): a part nobody publishes a model of..." in reasoned, (
+        reasoned)
+
+
+def _the_c3s_accounting(capsys):
+    """The XIAO ESP32-C3's composition and what `_accounting` prints of it,
+    skipping where its file or the font its text is lettered in is absent."""
+    _newstroke()
+    spec = next(s for s in compose.COMPOSITIONS if s.board == "XIAO-ESP32-C3-DIP")
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched; {spec.fetch_with}")
+    return spec, _accounting(spec, capsys).splitlines()
+
+
+def _c3_with(spec, tmp_path, package: str, inserted: str):
+    """`spec` composing a copy of the C3's file with `inserted` written into
+    the one footprint of `package`, just after its name."""
+    text = spec.layout.read_text(encoding="utf-8")
+    marker = f'(footprint "XIAO ESP32C3_v1.3:{package}"'
+    assert text.count(marker) == 1, f"{spec.layout.name} places {text.count(marker)} {marker}"
+    at = text.index(marker) + len(marker)
+    copy = tmp_path / package / spec.layout.name
+    copy.parent.mkdir(exist_ok=True)
+    copy.write_text(text[:at] + inserted + text[at:], encoding="utf-8")
+    return dataclasses.replace(spec, layout=copy)
+
+
+def _counted(lines: list[str], start: str) -> str:
+    """The first line beginning `start`, up to its count, or `""`."""
+    return next((line for line in lines if line.startswith(start)), "").split(" placement")[0]
 
 
 def test_the_footprint_drawing_the_boards_edge_is_the_board_and_not_a_placement(capsys):
     """**KiCad mills a footprint's `Edge.Cuts` as it mills the board's own**,
-    so a footprint carrying it is the board (OH-163): Seeed's module outline
-    is a XIAO's whole silhouette, its pads the castellations, and it was
-    reported absent as though a part were missing from it.
+    so a footprint whose Edge.Cuts is the board's whole silhouette is the
+    board (OH-163): Seeed's module outline is a XIAO's, its pads the
+    castellations, and it was reported absent as though a part were missing
+    from it.
 
-    Which footprints draw the edge is read out of the file here, not named:
-    each is printed as the board's edge and counted nowhere else, and each
+    Which footprints draw the edge is read out of the file here, not named,
+    and by a different measure from `from_kicad`'s: the outline a footprint
+    carries reaches the board's own extent on all four sides. The kinds are
+    the reader's -- a line, a rectangle, an arc -- and no footprint on a
+    XIAO draws any other kind there, which is checked rather than assumed.
+    Each is printed as the board's edge and counted nowhere else, and each
     is still the header element the page lands a board file's pads on. The
     ESP32-C3 draws its silhouette at the top level, so on it none is."""
     seen = []
     flagged = []
     for spec in _xiao_layouts():
         tree = kicad.board_tree(spec.layout)
-        carrying = {kicad._reference_of(node)
-                    for node in kicad.children(tree, "footprint")
-                    if any(isinstance(child, list)
-                           and kicad.first(child, "layer") == ["layer", "Edge.Cuts"]
-                           for child in node)}
+        kinds = {kicad.head(child) for node in kicad.children(tree, "footprint")
+                 for child in node if isinstance(child, list)
+                 and kicad.first(child, "layer") == ["layer", "Edge.Cuts"]}
+        assert kinds <= {"fp_line", "fp_rect", "fp_arc"}, (spec.board, kinds)
+        read = kicad.read_board(spec.layout)
+        extent = read.extent_mm()
+        carrying = set()
+        for placed in read.placements:
+            xs = ([v for s in placed.outline for v in (s.x1_mm, s.x2_mm)]
+                  + [v for a in placed.arcs for v in (a.x1_mm, a.xm_mm, a.x2_mm)])
+            ys = ([v for s in placed.outline for v in (s.y1_mm, s.y2_mm)]
+                  + [v for a in placed.arcs for v in (a.y1_mm, a.ym_mm, a.y2_mm)])
+            if xs and all(abs(mine - whole) < compose.CHAIN_TOLERANCE_MM for mine, whole
+                          in zip((min(xs), min(ys), max(xs), max(ys)), extent)):
+                carrying.add(placed.reference)
         out = _accounting(spec, capsys)
         lines = out.splitlines()
         board = compose.read_layout(spec.layout)
@@ -4612,6 +4892,15 @@ def test_the_footprint_drawing_the_boards_edge_is_the_board_and_not_a_placement(
             assert element.name in spec.headers, (spec.board, element.name)
             seen.append(f"{spec.board}: {element.name}")
         flagged.append((spec.board, board, carrying))
+        # And the composed model records it, as it records every other
+        # placement it does not draw as a part.
+        glb = REPO / "webui" / "static" / "models" / f"{compose._slug(spec.board)}.glb"
+        if glb.is_file():
+            from tools.import_3d_model import read_extras
+
+            assert read_extras(glb).get("edge") == [
+                f"{e.name} ({e.package})" for e in board.elements if e.name in carrying], (
+                f"{glb.name} does not record its edge placement; recompose")
     # And the flag the composer counts by is the file's own, board by board.
     for name, board, carrying in flagged:
         assert {e.name for e in board.elements if e.edge} == carrying, name

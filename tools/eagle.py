@@ -215,12 +215,20 @@ class Element:
     #: Feather ESP32-C6 places its module as package `ESP32-PICO-MINI`, value
     #: `ESP32-C6-MINI_MINI`.
     value: str | None = None
-    #: The package draws the board's own outline, so it is the board and not
-    #: a part on it (OH-163): `kicad.Placement.edge`, carried across by
-    #: `compose_board_3d.from_kicad`. Never set here, because this reader
-    #: takes the outline from the board's plain wires on layer 20 and no
-    #: package's.
+    #: What the package draws on the outline layer IS the board's outer ring,
+    #: so it is the board and not a part on it (OH-163). Decided by
+    #: `compose_board_3d.from_kicad` from `kicad.Placement.outline`; a
+    #: package that draws only a slot or a notch is a part, and is not this.
+    #: Never set here, because this reader takes the outline from the
+    #: board's plain wires on layer 20 and no package's.
     edge: bool = False
+    #: The meshes a KiCad footprint states for the part, by path, its hidden
+    #: alternates left out -- `kicad.StatedModel.hidden` is KiCad's own "not
+    #: this part" -- carried by `compose_board_3d.from_kicad`. A placement
+    #: that puts down no pad and states a mesh claims a body, so it is not
+    #: taken for ink (OH-163). Never set here: this reader reads no 3D
+    #: package of EAGLE's.
+    models: tuple[str, ...] = ()
 
     def pads_of(self, kind: str) -> tuple[Pad, ...]:
         return tuple(pad for pad in self.pads if pad.kind == kind)

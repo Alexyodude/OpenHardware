@@ -583,11 +583,19 @@ class Placement:
     #: says where a part sits and this says which part it is, which is how
     #: `tools/import_pindefs.py` finds a board's chip and its resistors.
     value: str = ""
-    #: The footprint draws on the board's outline layer. KiCad mills a
-    #: footprint's `Edge.Cuts` as it mills the board's own, so such a
-    #: footprint is the board, or part of it, and not a part standing on it
-    #: (OH-163): Seeed's `MOUDLE14P-XIAO-HALF-HOLE` is a XIAO's whole outline.
-    edge: bool = False
+    #: What the footprint draws on the board's outline layer, in board
+    #: millimetres -- the same segments and arcs `Board.outline` and
+    #: `Board.arcs` hold, since KiCad mills a footprint's `Edge.Cuts` as it
+    #: mills the board's own.
+    #:
+    #: **Which ring of the board that is, this reader does not say** (OH-163).
+    #: Seeed's `MOUDLE14P-XIAO-HALF-HOLE` draws a XIAO's whole silhouette, and
+    #: is the board; a connector's footprint may draw a slot inside the board
+    #: or a notch in its edge for its own body, and is still a part. Telling
+    #: them apart takes the outline chained into rings, which is
+    #: `compose_board_3d.from_kicad`'s to do, against the outer one.
+    outline: tuple[Segment, ...] = ()
+    arcs: tuple[Arc, ...] = ()
 
     @property
     def name(self) -> str:
@@ -796,7 +804,10 @@ def _fp_graphics(node: list, layer: str, placed: Placement
 #: Text was the big one, and is not here since OH-163: `_texts_of` reads it,
 #: as a string and a size, and a font turns it into ink. Nor is an arc: it
 #: is a stroke along a curve and is read as one, which is what drew the
-#: outline of Seeed's CE mark (OH-163). The rest is a handful per board.
+#: outline of Seeed's CE mark (OH-163). How much of the rest each board
+#: carries is what `compose_board_3d.py --check` prints on its `not ink`
+#: line, and it is not a handful everywhere: SparkFun's and PCBCUPID's KiCad
+#: boards letter their labels as filled polygons.
 #:
 #: **A `poly` is a fill, and the logos it draws hold the reason it is not
 #: drawn.** Seeed's own logo on the RP2350 and on the ESP32-C5 is nothing
@@ -1570,7 +1581,8 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
         drawn, curved = _fp_graphics(node, layer, placed)
         outline += drawn
         arcs += curved
-        placements.append(dataclasses.replace(placed, edge=bool(drawn or curved)))
+        placements.append(dataclasses.replace(placed, outline=tuple(drawn),
+                                              arcs=tuple(curved)))
         printed, bowed, missed = _silk_of(
             node, "fp", lambda x, y, at=placed: _on_board(at, x, y))
         silk += printed

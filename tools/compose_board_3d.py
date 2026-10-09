@@ -1612,9 +1612,11 @@ GLYPH_HEADER = (
 ABSENT: dict[str, str] = {
     # --- pads with no body, stated rather than silent (OH-119) --------------
     "TP-SP": (
-        "61 test points, each a bare 0.8 x 0.8 mm pad. A test point is the "
-        "copper itself, which OH-110 already draws, and any body stood on "
-        "one would be an invention. No KiCad library was searched: there is no body to look for."
+        "the Uno's test points, each a bare 0.8 x 0.8 mm pad. A test point "
+        "is the copper itself, which the copper pass draws wherever the pad "
+        "lies inside the board's outline -- ORIGIN's, on a corner, reaches "
+        "outside it and is not drawn -- and any body stood on one would be "
+        "an invention. No KiCad library was searched: there is no body to look for."
     ),
     "FIDUCIA-MOUNT": (
         "three fiducials, each a bare 1.016 mm copper disc the pick-and-place "
@@ -1850,8 +1852,13 @@ ABSENT: dict[str, str] = {
     ),
     "MOUNTINGHOLE_2.5_PLATED": (
         "two mounting holes on the Feather, 2.5 mm drilled in a 3.2 mm "
-        "plated ring. Copper and a hole, and nothing fitted. No KiCad library "
-        "was searched: there is no body to look for."
+        "plated ring, and nothing fitted. The ring is copper, drawn by the "
+        "copper pass as every plated pad is, a solid disc of the pad's own "
+        "size; the drill is cut in no plated pad and no via on any board, so "
+        "this hole is drawn exactly as a header's is, and its placement is "
+        "counted drawn as its copper (OH-163). An unplated hole has no "
+        "copper, so nothing of it is drawn and its placement is absent. No "
+        "KiCad library was searched: there is no body to look for."
     ),
     # --- OH-186: the KB2040's copper ----------------------------------------
     "1X13_CASTEL": (
@@ -2949,6 +2956,19 @@ MODELLED = REPO / "third_party" / "modelled"
 #: faceting at the size a 21 mm board is drawn, and far below the 0.05 mm
 #: `DEFLECTION` every component mesh is tessellated to. The outline is
 #: extruded once into a slab, so this costs almost nothing.
+#:
+#: **What it costs in accuracy, stated, now that a track's arcs and the
+#: silkscreen's are flattened by it too** (OH-163). A step of angle t on a
+#: circle of radius r stands off its arc by the sagitta r(1 - cos(t/2)),
+#: which for a chord c is about c^2/8r. `arc_points` takes ceil(sweep * r /
+#: chord) steps, so no step's arc is longer than the chord, and its floor of
+#: two steps only makes a short arc's steps shorter still -- while still
+#: never more than a half turn each. So no point of a flattened arc is
+#: further from the circle than r(1 - cos(min(chord / 2r, pi / 2))): 0.0033
+#: mm on a 1.5 mm corner, 0.0194 mm on a 0.254 mm (10 mil) radius, and the
+#: whole radius below chord / pi = 0.064 mm, where two steps round a whole
+#: circle are its diameter. `test_a_flattened_arc_stands_off_its_circle_by_
+#: no_more_than_its_chord_allows` holds that bound.
 ARC_CHORD_MM = 0.2
 
 
@@ -3039,8 +3059,34 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
         for (ax, ay), (bx, by) in itertools.pairwise(points):
             outline.append(eagle.Segment("Dimension", ax, -ay, bx, -by))
 
+    # **Which placement IS the board** (OH-163). What a footprint draws on
+    # Edge.Cuts is milled with the board's own, and it is one of two things:
+    # the board's silhouette -- Seeed's module outline is a XIAO's whole edge
+    # -- or a slot or a notch cut for the part the footprint places. Only the
+    # first is the board and not a part on it; a connector that draws its own
+    # slot is still a connector, to be drawn or reported as one. So a
+    # placement is the edge only where its own Edge.Cuts, flattened as the
+    # outline is, IS the outer ring: each of its segments a side of that ring,
+    # and each side one of its segments. A part of the ring is not enough,
+    # because a notch is a part of the ring. Matched to `CHAIN_TOLERANCE_MM`,
+    # because that is as far as `contours` lets an end move when it welds it
+    # to the next: a side of the ring is the segment it was chained from, to
+    # within that.
+    sides: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    if any(placed.outline or placed.arcs for placed in board.placements):
+        ring, _cutouts = outer(tuple(outline))
+        sides = list(zip(ring, ring[1:] + ring[:1]))
+
     elements: list[eagle.Element] = []
     for placed in board.placements:
+        own = [((s.x1_mm, -s.y1_mm), (s.x2_mm, -s.y2_mm)) for s in placed.outline]
+        for arc in placed.arcs:
+            own += [((ax, -ay), (bx, -by)) for (ax, ay), (bx, by)
+                    in itertools.pairwise(arc_points(arc))]
+        matched = {next((at for at, (p, q) in enumerate(sides)
+                         if (_near(a, p) and _near(b, q))
+                         or (_near(a, q) and _near(b, p))), None)
+                   for a, b in own}
         turn = math.radians(placed.rotation_deg)
         cos, sin = math.cos(turn), math.sin(turn)
         pads: list[eagle.Pad] = []
@@ -3131,7 +3177,8 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
             # (OH-195): PCBCUPID place the Glyph C3's ESP32-C3-MINI-1 on a
             # land named for the H2's, and only the value says C3.
             value=placed.value or None,
-            edge=placed.edge,
+            edge=bool(own) and matched == set(range(len(sides))),
+            models=tuple(model.path for model in placed.models if not model.hidden),
         ))
 
     # The ink, y negated like every coordinate above it and for the same
@@ -5563,13 +5610,15 @@ EAGLE_TEXT = ("EAGLE's CAM processor draws all text in EAGLE's built-in "
 def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             thickness: float, centre: tuple[float, float], mask: str,
             letters: list[eagle.Stroke]
-            ) -> tuple[list[Mesh], dict[str, int], set[str]]:
+            ) -> tuple[list[Mesh], dict[str, int],
+                       dict[str, list[tuple[eagle.Pad, str]]]]:
     """The copper and the ink the vendor drew, a tally of what was left, and
-    the placements with a pad that is not drawn.
+    each placement with a pad that is not drawn, with the pad and why.
 
     The last is what lets a placement with no body be called drawn: its
     copper is all of it, and only where every pad it puts down is drawn here
-    (OH-163).
+    (OH-163). And where one is not, it is what the composer says instead of
+    the package's reason, which is about the pads that are.
 
     **Every composed board was a slab with boxes standing on it until this**,
     and the reason was not that the data was missing: Seeed's own board files
@@ -5604,30 +5653,35 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
 
     front: list[list[tuple[float, float]]] = []
     back: list[list[tuple[float, float]]] = []
-    undrawn: set[str] = set()
+    undrawn: dict[str, list[tuple[eagle.Pad, str]]] = {}
     for element in board.elements:
         for pad in element.pads:
-            if pad.kind == "np_thru_hole":
-                # A hole with no copper in it. Nothing solders to it and
-                # nothing is drawn for it.
+            if pad.kind == "np_thru_hole" or pad.hole:
+                # A hole with no copper in it -- a KiCad one reaches here as a
+                # surface pad, see `eagle.Pad.hole`. Nothing solders to it and
+                # nothing is plated in it, so nothing is drawn for it: not the
+                # disc of copper it does not have, and not the hole, which
+                # this pass cuts in nothing (OH-163).
                 left["np_thru_hole"] = left.get("np_thru_hole", 0) + 1
-                undrawn.add(element.name)
+                undrawn.setdefault(element.name, []).append(
+                    (pad, "an unplated hole, and no hole is cut"))
                 continue
             shape = pad_outline(pad)
             if shape is None:
                 left[pad.shape or "no shape"] = (
                     left.get(pad.shape or "no shape", 0) + 1)
-                undrawn.add(element.name)
+                undrawn.setdefault(element.name, []).append(
+                    (pad, (f"a pad of shape {pad.shape or 'none'!r}, which "
+                           f"this pass does not draw")))
                 continue
             cut = inside(shape)
             if len(cut) < 3 or not (pad.front or pad.back):
-                undrawn.add(element.name)
+                undrawn.setdefault(element.name, []).append((pad, (
+                    "on neither outer copper layer" if not (pad.front or pad.back)
+                    else "wholly outside the board's outline" if can_clip
+                    else "reaching outside the board's concave outline, which "
+                         "nothing is cut to")))
                 continue
-            if pad.hole:
-                # An unplated hole, reaching here as a surface pad (see
-                # `eagle.Pad.hole`) and drawn as copper it does not have: the
-                # hole is not drawn, so neither is its placement.
-                undrawn.add(element.name)
             if pad.front:
                 front.append(cut)
             if pad.back:
@@ -5849,14 +5903,16 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     #: fell through a bare `continue`, which is the mechanism that let
     #: OH-119 and OH-122 sit unnoticed: the gap was not even a number.
     unmodelled: list[str] = []
-    #: Placements that put down no pad at all (OH-180). Nothing is soldered to
-    #: them, so no part stands there: every one on the manifest boards is ink
+    #: Placements that put down no pad at all (OH-180), and state no mesh
+    #: (OH-163). Nothing is soldered to them and nothing claims a body there,
+    #: so no part stands there: every one on the manifest boards is ink
     #: -- a logo, a pin label, an ordering note -- or a bare hole. Counted
     #: rather than given an ABSENT entry apiece, because SparkFun's file alone
     #: places 63 pin labels, each its own package.
     padless: list[str] = []
-    #: Placements that draw the board's own outline, and so are the board and
-    #: not a part on it (OH-163) -- see `kicad.Placement.edge`.
+    #: Placements whose own Edge.Cuts is the board's outer ring, and so are
+    #: the board and not a part on it (OH-163) -- see `eagle.Element.edge`,
+    #: which `from_kicad` decides.
     edges: list[str] = []
     #: Each passive drawn, and which of its schematic's statements said what
     #: kind it is; and each part that schematic refuses (OH-187). Only for a
@@ -5884,16 +5940,21 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         if component is None:
             # **Two kinds of placement are not parts, and the board file says
             # which** (OH-163), whatever `ABSENT` holds for the package. One
-            # that draws the board's own outline is the board: Seeed's module
-            # outline is a XIAO's whole silhouette, its copper drawn by the
-            # copper pass and its half-holes cut with the edge. And one that
-            # puts down no pad has nothing soldered to it: it is ink, counted
-            # stroke by stroke on the artwork and `not ink` lines -- Seeed's
-            # logos -- or a bare hole, or a drawing on a layer no fab prints:
-            # the Uno's schematic frame is a picture on layer 49, Reference.
+            # whose own Edge.Cuts is the board's outer ring is the board:
+            # Seeed's module outline is a XIAO's whole silhouette, its copper
+            # drawn by the copper pass and its half-holes cut with the edge.
+            # One that cuts only a slot or a notch is a part like any other:
+            # the slot is on the `cutouts` line, the notch in the outline.
+            # And one that puts down no pad and states no mesh has nothing
+            # soldered to it and claims no body: it is ink, counted stroke by
+            # stroke on the artwork and `not ink` lines -- Seeed's logos --
+            # or a bare hole, or a drawing on a layer no fab prints: the
+            # Uno's schematic frame is a picture on layer 49, Reference. One
+            # with no pad that does state a mesh is a part, and is counted as
+            # one.
             if element.edge:
                 edges.append(f"{element.name} ({element.package})")
-            elif not element.pads:
+            elif not element.pads and not element.models:
                 padless.append(element.name)
             elif absent_why(element) is None:
                 unmodelled.append(f"{element.name} ({element.package})")
@@ -6070,7 +6131,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
           f"the PCB's own top face is at {spec.thickness_mm:.3f}")
     # **A part refused and a pad with no part are two different gaps**, and
     # they are counted apart: the first is something a reader will look for
-    # and not find, the second is drawn already as copper, ink or a hole.
+    # and not find, the second is drawn already as its copper, or is a pad
+    # the copper pass does not draw, said by name.
     #: A part its schematic refuses is counted there and nowhere else, whatever
     #: its package: a not-fitted part is not absent for want of a model.
     stated_off = {element.name for element, _why in kind_refused}
@@ -6078,14 +6140,15 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     #: (OH-163): its copper is all there is of it. Reporting it absent as
     #: well was a double report -- a test point's pad on the board, and the
     #: test point named as missing beside it. A pad left undrawn -- a bare
-    #: hole, a shape the copper pass does not draw -- keeps its placement
-    #: among the absent. Neither list holds what the loop above found is not
-    #: a part.
+    #: hole, a pad beyond the outline -- keeps its placement among the
+    #: absent, and that pad's reason is what is printed for it. Neither
+    #: list holds what the loop above found is not a part.
     absent: list[eagle.Element] = []
     copper: list[eagle.Element] = []
     for e in board.elements:
         why = absent_why(e)
-        if why is None or not e.pads or e.edge or e.name in stated_off:
+        if (why is None or not (e.pads or e.models) or e.edge
+                or e.name in stated_off):
             continue
         (copper if NO_BODY in why and e.name not in undrawn_pads
          else absent).append(e)
@@ -6101,11 +6164,19 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         packages = sorted({e.package for e in group})
         if packages and label == "bodyless":
             print(f"  bodyless {len(group)} placement(s) of {len(packages)} "
-                  f"package(s): copper, ink or a hole, with no body to draw")
+                  f"package(s) with no body, and a pad the copper pass does "
+                  f"not draw")
         for package in packages:
             here = [e.name for e in group if e.package == package]
+            # A bodyless placement is here for a pad that is not drawn, and
+            # the package's reason is about the pads that are: say which.
+            pads = sorted({(f"pad {pad.number}" if pad.number else "an unnumbered pad")
+                           + f" not drawn: {reason}"
+                           for name in here if label == "bodyless"
+                           for pad, reason in undrawn_pads[name]})
             print(f"  absent  {'/'.join(here)} ({package}): "
-                  f"{ABSENT[package][:60]}...")
+                  + ("; ".join(pads) if label == "bodyless"
+                     else f"{ABSENT[package][:60]}..."))
         if label == "absent ":
             for element, why in kind_refused:
                 print(f"  refused {element.name} ({element.package}): {why}")
@@ -6237,6 +6308,11 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 for package, why in sorted(ABSENT.items())
                 if any(e.package == package for e in copper)
             ],
+            # The placements whose own Edge.Cuts is the board's outer ring
+            # (OH-163): the board, so neither drawn as a part nor a gap, and
+            # recorded here because the `edge` line is the only other place
+            # they are named.
+            "edge": edges,
             # Which kind each passive is drawn as, and what said so (OH-187).
             "kinds": kinds,
         })

@@ -718,15 +718,26 @@ def test_a_silkscreen_arc_is_read_as_ink_where_it_is_placed(tmp_path):
         ("B.SilkS", 10.0, 19.0, 11.0, 20.0, 10.0, 21.0, 0.0254)]
 
 
-def test_a_footprint_that_draws_the_outline_is_marked_as_the_boards_edge(tmp_path):
+def test_a_footprint_carries_what_it_draws_on_the_outline(tmp_path):
     """**KiCad mills a footprint's `Edge.Cuts` as it mills the board's own**,
-    so the footprint that draws it is the board and not a part on it
-    (OH-163) -- Seeed's module outline -- and the reader says which it is.
-    The footprint beside it draws ink and no outline, and is not."""
+    so each footprint carries what it draws there, placed, as the board's
+    outline holds it too (OH-163). The reader says no more than that: a
+    footprint's outline may be the board's silhouette -- Seeed's module
+    outline -- or a slot or a notch for a part, and which ring is the
+    board's is `compose_board_3d.from_kicad`'s to decide. The footprint
+    beside it draws ink and no outline, and carries none.
+
+    `BESIDE` draws nothing on Edge.Cuts at the top level, so the module's
+    own line, arc and rectangle are the whole of the board's outline, which
+    `test_a_footprints_outline_is_turned_by_the_footprints_own_rotation`
+    holds point by point."""
     path = tmp_path / "beside.kicad_pcb"
     path.write_text(BESIDE, encoding="utf-8")
-    assert {placed.name: placed.edge for placed in read_board(path).placements} == {
-        "MOUDLE14P": True, "CE": False}
+    got = read_board(path)
+    placed = {placement.name: placement for placement in got.placements}
+    assert (placed["MOUDLE14P"].outline, placed["MOUDLE14P"].arcs) == (got.outline, got.arcs)
+    assert len(got.outline) == 5 and len(got.arcs) == 1, (got.outline, got.arcs)
+    assert (placed["CE"].outline, placed["CE"].arcs) == ((), ())
 
 
 # --- the body, which is not the silkscreen -------------------------------------------
