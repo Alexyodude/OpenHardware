@@ -1256,15 +1256,18 @@ def test_the_unos_silkscreen_is_gathered_into_strokes():
 
     The counts are pinned to the vendor's file as it is: 428 package wires
     plus 4 board-level on layer 21 minus the curved ones, and every unread
-    kind counted -- the same contract `kicad._silk_of` keeps.
+    kind counted -- the same contract `kicad._silk_of` keeps. Its 16
+    rectangles, marks on the LEDs and passives, are read as filled quads
+    since OH-163, and are no longer among the unread.
     """
     board = eagle.read_board(_brd_uno())
     front = [s for s in board.silk if s.layer == "F.SilkS"]
     back = [s for s in board.silk if s.layer == "B.SilkS"]
     assert len(front) == 407, f"front ink is {len(front)} strokes"
     assert len(back) == 4, f"back ink is {len(back)} strokes"
+    assert len(board.silk_fills) == 16, f"{len(board.silk_fills)} filled quads"
     unread = dict(board.silk_unread)
-    assert unread == {"arc": 21, "circle": 5, "rectangle": 16, "text": 24}, (
+    assert unread == {"arc": 21, "circle": 5, "text": 24}, (
         f"the unread tally moved: {unread}. If the vendor file changed, "
         f"re-measure; if the reader changed, something stopped being counted"
     )

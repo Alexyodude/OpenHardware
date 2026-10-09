@@ -2910,6 +2910,54 @@ def test_an_eagle_silkscreen_polygon_is_read_as_a_fill_where_its_element_puts_it
     assert dict(board.silk_unread) == {"polygon": 4}, board.silk_unread
 
 
+def test_an_eagle_silkscreen_rectangle_is_read_as_a_filled_quad(tmp_path):
+    """**Adafruit's Feather logo is 5,783 `<rectangle>`s on tPlace**, a
+    bitmap turned into runs a pixel tall, and the Uno marks its LEDs and
+    passives with 16 more (OH-163). Each is read as a filled quad: turned by
+    its own `rot` about its own centre -- (0, 0)-(2, 1) at R90 stands on
+    (1, 0.5) -- then placed with its element, and moved to the other face,
+    mirrored, by one at MR; a board-level one as drawn. One on tDocu is no
+    ink. On the Feather every one is read, and none is left counted."""
+    path = tmp_path / "boxed.brd"
+    path.write_text(
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<eagle version="9.6.2"><drawing><board>'
+        '<plain><wire x1="0" y1="0" x2="20" y2="0" width="0.2" layer="20"/>'
+        '<rectangle x1="1" y1="1" x2="3" y2="2" layer="21"/></plain>'
+        '<libraries><library name="L"><packages><package name="P">'
+        '<pad name="1" x="0" y="0" drill="1.016" diameter="1.8796"/>'
+        '<rectangle x1="0" y1="0" x2="2" y2="1" layer="21"/>'
+        '<rectangle x1="0" y1="0" x2="2" y2="1" layer="21" rot="R90"/>'
+        '<rectangle x1="0" y1="0" x2="2" y2="1" layer="51"/>'
+        "</package></packages></library></libraries>"
+        "<elements>"
+        '<element name="A" library="L" package="P" x="10" y="5"/>'
+        '<element name="B" library="L" package="P" x="10" y="5" rot="MR0"/>'
+        "</elements><signals/>"
+        "</board></drawing></eagle>",
+        encoding="utf-8",
+    )
+    board = eagle.read_board(path)
+    got = [(fill.layer, tuple((round(x, 9) + 0.0, round(y, 9) + 0.0) for x, y in fill.points),
+            fill.width_mm) for fill in board.silk_fills]
+    assert got == [
+        ("F.SilkS", ((1.0, 1.0), (3.0, 1.0), (3.0, 2.0), (1.0, 2.0)), 0.0),
+        ("F.SilkS", ((10.0, 5.0), (12.0, 5.0), (12.0, 6.0), (10.0, 6.0)), 0.0),
+        ("F.SilkS", ((11.5, 4.5), (11.5, 6.5), (10.5, 6.5), (10.5, 4.5)), 0.0),
+        ("B.SilkS", ((10.0, 5.0), (8.0, 5.0), (8.0, 6.0), (10.0, 6.0)), 0.0),
+        ("B.SilkS", ((8.5, 4.5), (8.5, 6.5), (9.5, 6.5), (9.5, 4.5)), 0.0),
+    ], got
+    assert "rectangle" not in dict(board.silk_unread), board.silk_unread
+
+    spec = next(s for s in compose.COMPOSITIONS if s.board == "Adafruit Feather ESP32-C6")
+    if not _fetched(spec):
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    feather = compose.read_layout(spec.layout)
+    quads = [fill for fill in feather.silk_fills if len(fill.points) == 4 and fill.width_mm == 0]
+    assert (len(quads), "rectangle" in dict(feather.silk_unread)) == (5783, False), (
+        len(quads), feather.silk_unread)
+
+
 def _faces(mesh, colour) -> list[tuple[tuple[float, float], ...]]:
     """Each triangle of `colour` in `mesh`, as board points: the scene's x,
     and its z negated back to the board's y."""

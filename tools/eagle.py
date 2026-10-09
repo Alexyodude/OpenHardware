@@ -625,13 +625,15 @@ def _ink(board: ET.Element, elements: list[Element], packages: dict
     walked, every vertex placed as a wire's ends are, and the polygon's
     `width` carried as the pen its outline is traced at, as EAGLE is
     understood to draw a polygon off the copper layers; no fetched plot holds
-    that.
+    that. **So is a rectangle**: Adafruit's Feather logo is thousands of
+    them, a bitmap turned into runs a pixel tall, each read as a filled quad,
+    turned by its own `rot` about its own centre and then placed.
 
     What is NOT read is counted by kind, the same contract `kicad._silk_of`
-    keeps: curved wires (the DIP notch), rectangles, circles, text, and a
-    polygon with a curved edge -- SparkFun's open-hardware gear -- or one
-    poured other than solid; so the composer prints what it left out instead
-    of leaving silence.
+    keeps: curved wires (the DIP notch), circles, text, and a polygon with a
+    curved edge -- SparkFun's open-hardware gear -- or one poured other than
+    solid; so the composer prints what it left out instead of leaving
+    silence.
     """
     strokes: list[Stroke] = []
     fills: list[Fill] = []
@@ -661,6 +663,21 @@ def _ink(board: ET.Element, elements: list[Element], packages: dict
             points = [transform(x, y) for x, y in points]
         fills.append(Fill(layer, tuple(points), float(polygon.get("width") or 0.0)))
 
+    def rectangle(node: ET.Element, layer: str, transform=None) -> None:
+        # Turned by its own `rot` about its own centre, where a mirror
+        # changes nothing; then placed as a vertex is. Filled, no pen.
+        degrees, _mirrored = _rotation(node.get("rot"))
+        x1, y1, x2, y2 = (float(node.get(key)) for key in ("x1", "y1", "x2", "y2"))
+        centre, half = ((x1 + x2) / 2, (y1 + y2) / 2), ((x2 - x1) / 2, (y2 - y1) / 2)
+        turn = math.radians(degrees)
+        cos, sin = math.cos(turn), math.sin(turn)
+        points = [(centre[0] + dx * cos - dy * sin, centre[1] + dx * sin + dy * cos)
+                  for dx, dy in ((-half[0], -half[1]), (half[0], -half[1]),
+                                 (half[0], half[1]), (-half[0], half[1]))]
+        if transform is not None:
+            points = [transform(x, y) for x, y in points]
+        fills.append(Fill(layer, tuple(points), 0.0))
+
     for wire in board.findall("plain/wire"):
         layer = INK_LAYERS.get(wire.get("layer"))
         if layer is not None:
@@ -669,7 +686,11 @@ def _ink(board: ET.Element, elements: list[Element], packages: dict
         layer = INK_LAYERS.get(polygon.get("layer"))
         if layer is not None:
             fill(polygon, layer)
-    for kind in ("rectangle", "circle", "text"):
+    for node in board.findall("plain/rectangle"):
+        layer = INK_LAYERS.get(node.get("layer"))
+        if layer is not None:
+            rectangle(node, layer)
+    for kind in ("circle", "text"):
         for node in board.findall(f"plain/{kind}"):
             if node.get("layer") in INK_LAYERS:
                 unread[kind] += 1
@@ -698,7 +719,14 @@ def _ink(board: ET.Element, elements: list[Element], packages: dict
             if element.mirrored:
                 layer = "B.SilkS" if layer == "F.SilkS" else "F.SilkS"
             fill(polygon, layer, placed)
-        for kind in ("rectangle", "circle", "text"):
+        for node in package.findall("rectangle"):
+            layer = INK_LAYERS.get(node.get("layer"))
+            if layer is None:
+                continue
+            if element.mirrored:
+                layer = "B.SilkS" if layer == "F.SilkS" else "F.SilkS"
+            rectangle(node, layer, placed)
+        for kind in ("circle", "text"):
             for node in package.findall(kind):
                 if node.get("layer") in INK_LAYERS:
                     unread[kind] += 1
