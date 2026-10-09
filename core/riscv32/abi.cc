@@ -162,6 +162,21 @@ void riscv32_map_snapshot_counter(Riscv32Cpu* cpu, uint32_t op_address,
                                       instructions_per_tick);
 }
 
+void riscv32_map_input(Riscv32Cpu* cpu, uint32_t address, uint32_t out_address,
+                       uint32_t enable_address, uint32_t pad_base,
+                       uint32_t pad_stride, uint32_t pads,
+                       uint32_t input_enable_mask, uint32_t pull_up_mask,
+                       uint32_t pull_down_mask) {
+    as_cpu(cpu)->map_input(address, out_address, enable_address, pad_base,
+                           pad_stride, pads, input_enable_mask, pull_up_mask,
+                           pull_down_mask);
+}
+
+int riscv32_drive_input(Riscv32Cpu* cpu, uint32_t address, uint32_t driven,
+                        uint32_t levels) {
+    return as_cpu(cpu)->drive_input(address, driven, levels) ? 1 : 0;
+}
+
 int riscv32_is_mapped(const Riscv32Cpu* cpu, uint32_t address) {
     return as_cpu(cpu)->is_mapped(address) ? 1 : 0;
 }

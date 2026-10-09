@@ -37,7 +37,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match RISCV32_ABI_VERSION in abi.h.
-ABI_VERSION = 3
+ABI_VERSION = 4
 
 #: `riscv32::WriteOp`, by the name a board description uses.
 #:
@@ -213,6 +213,14 @@ _SIGNATURES = {
     "riscv32_map_snapshot_counter": (
         [ctypes.c_void_p] + [ctypes.c_uint32] * 9,
         None,
+    ),
+    "riscv32_map_input": (
+        [ctypes.c_void_p] + [ctypes.c_uint32] * 9,
+        None,
+    ),
+    "riscv32_drive_input": (
+        [ctypes.c_void_p] + [ctypes.c_uint32] * 3,
+        ctypes.c_int,
     ),
     "riscv32_is_mapped": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
     "riscv32_clear_mmio": ([ctypes.c_void_p], None),
@@ -527,6 +535,48 @@ class Cpu:
             self._handle, op, update_mask, valid_mask, low, high, high_mask,
             enable, enable_mask, instructions_per_tick,
         )
+
+    def map_input(self, address: int, *, out: int, enable: int, pad_base: int,
+                  pad_stride: int, pads: int, input_enable: int, pull_up: int,
+                  pull_down: int) -> None:
+        """A read-only register whose read answers the level on each pin.
+
+        For each pin `n` named in `pads`: 0 where the pad register at
+        `pad_base + n * pad_stride` has `input_enable` clear; `out`'s bit
+        where `enable`'s is set; what `drive_input` last said, where it
+        drives the pin; 1 where only `pull_up` is set; 0 otherwise, which
+        for a pin with neither pull is a floating pin. An ESP32's `GPIO_IN`,
+        whose IO_MUX pad registers carry `FUN_IE`, `FUN_PU` and `FUN_PD`.
+        A pin outside `pads` reads 0. See `cpu.h` for every case.
+        """
+        self._lib.riscv32_map_input(
+            self._handle, address, out, enable, pad_base, pad_stride, pads,
+            input_enable, pull_up, pull_down,
+        )
+
+    def drive_input(self, address: int, *, driven: int, levels: int) -> None:
+        """What the outside drives onto the pins of the input register at
+        `address`: `driven` which pins, `levels` to what. Replaces the last
+        call's whole statement, so a pin left out is driven by nothing.
+
+        Refused, with the values, where `address` is no input register,
+        where a mask does not fit the 32 bits the C side takes -- ctypes
+        would pass `1 << 32` as 0, a drive of nothing said nowhere -- and
+        where `levels` gives a level to a pin `driven` does not name, which
+        the core would read past without a word.
+        """
+        for name, mask in (("driven", driven), ("levels", levels)):
+            if not 0 <= mask <= 0xFFFFFFFF:
+                raise AbiError(
+                    f"{name} must fit in 32 bits, got {mask!r}: ctypes would "
+                    f"pass it as {mask & 0xFFFFFFFF:#010x} without saying so")
+        if levels & ~driven:
+            raise AbiError(
+                f"levels {levels:#010x} name pins driven {driven:#010x} does "
+                f"not: {levels & ~driven:#010x} would be levels nothing drives")
+        if not self._lib.riscv32_drive_input(self._handle, address, driven, levels):
+            raise AbiError(
+                f"0x{address:08x} is no input register; map_input maps one")
 
     def is_mapped(self, address: int) -> bool:
         """Whether `address` is a mapped register rather than bulk memory."""

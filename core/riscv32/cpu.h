@@ -221,6 +221,14 @@ public:
     // moment, and a program that took a snapshot and read it later would see
     // time it never asked for. `map_snapshot_counter` is that shape.
     // `map_mirror` and `map_constant` are still absent, on the same terms.
+    //
+    // **The input register arrived at OH-161's step 3, and it is none of
+    // cortexm0's six.** An ESP32's `GPIO_IN` reads the level on every pad:
+    // `OUT` where the output driver is on, what the outside world drives
+    // where it is off, the pad's own pull where nothing does. A mirror of
+    // `OUT` would be right only for outputs; a stored zero would be wrong for
+    // every pin something drives. `map_input` is that shape, and
+    // `drive_input` is the only way a level from outside reaches it.
 
     /// An address that holds a word: reads answer it, writes replace it.
     ///
@@ -318,6 +326,46 @@ public:
                               uint32_t high_address, uint32_t high_mask,
                               uint32_t enable_address, uint32_t enable_mask,
                               uint32_t instructions_per_tick);
+
+    /// A read-only register whose read answers the level on each pin.
+    ///
+    /// Bit `n` is pin `n`, for each pin named in `pads`, and is decided in
+    /// this order:
+    ///
+    ///  1. 0 where the pad's input is disabled: `input_enable_mask` clear in
+    ///     its pad register, at `pad_base + n * pad_stride`.
+    ///  2. bit `n` of `out_address` where bit `n` of `enable_address` is set:
+    ///     a driven pin reads back what it drives.
+    ///  3. what `drive_input` last said, where it drives pin `n`.
+    ///  4. 1 where the pad's `pull_up_mask` is set and `pull_down_mask` is
+    ///     not; 0 otherwise -- a pull-down, both pulls, or neither.
+    ///
+    /// The last case of 4 is a FLOATING pin, and its 0 is stated rather than
+    /// measured: the board that maps this says where the number comes from.
+    /// A pin not in `pads` reads 0 and its pad register is never asked,
+    /// which is how a part with holes in its pad numbering is described.
+    ///
+    /// **Every pad register must be readable**, as a gate must, and a read
+    /// through one that is not -- unmapped, or a readable alias onto
+    /// nothing -- faults naming `address`: a board that named the wrong pad
+    /// block would otherwise describe pins that never read their own pulls.
+    /// Writes to `address` are ignored, as a read-only register ignores them.
+    /// Mapping the same address again replaces it and forgets its drive.
+    void map_input(uint32_t address, uint32_t out_address,
+                   uint32_t enable_address, uint32_t pad_base,
+                   uint32_t pad_stride, uint32_t pads,
+                   uint32_t input_enable_mask, uint32_t pull_up_mask,
+                   uint32_t pull_down_mask);
+
+    /// What the world outside the chip drives onto the pins of the input
+    /// register at `address`: `driven` says which pins, `levels` to what.
+    ///
+    /// Replaces the previous call's whole statement rather than adding to it,
+    /// so a pin left out is a pin nothing drives. **The only way a level from
+    /// outside enters this core**, so a run is reproduced by its image and
+    /// the sequence of these calls, and nothing else. False, having changed
+    /// nothing, where `address` is no input register.
+    bool drive_input(uint32_t address, uint32_t driven, uint32_t levels);
 
     /// Called by `step` once an instruction has actually retired -- never on
     /// an Unimplemented, Illegal or MemoryFault, so a program stopped by one
@@ -502,6 +550,31 @@ private:
         bool valid = false;
     };
 
+    /// A `map_input`: where its three inputs are, which pins have pads, the
+    /// three pad bits it reads, and what the outside last drove.
+    ///
+    /// Beside `mmio_` for the reason `Snapshot` is: its read is computed from
+    /// other registers, and a word per address cannot say that. Registered
+    /// in `mmio_` too, so `is_mapped` answers for it.
+    struct Input {
+        uint32_t address = 0;
+        uint32_t out = 0;
+        uint32_t enable = 0;
+        uint32_t pad_base = 0;
+        uint32_t pad_stride = 0;
+        uint32_t pads = 0;
+        uint32_t input_enable_mask = 0;
+        uint32_t pull_up_mask = 0;
+        uint32_t pull_down_mask = 0;
+        uint32_t driven = 0;
+        uint32_t levels = 0;
+    };
+
+    /// The level of every pin of `input`, or false having noted a fault at
+    /// `address` where one of the registers it is computed from cannot be
+    /// read. See `map_input` for the order each bit is decided in.
+    bool input_levels(const Input& input, uint32_t address, uint32_t& out) const;
+
     std::array<uint32_t, kRegisters> x_{};
     uint32_t pc_ = 0;
     uint32_t jvt_ = 0;
@@ -510,6 +583,7 @@ private:
     std::unordered_map<uint32_t, Mapped> mmio_;
     std::unordered_map<uint32_t, Stream> streams_;
     std::vector<Snapshot> snapshots_;
+    std::vector<Input> inputs_;
     mutable uint32_t fault_address_ = 0;
     mutable bool fault_was_fetch_ = false;
 };

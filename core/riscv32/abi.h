@@ -34,7 +34,9 @@ extern "C" {
 //: Bumped to 3 at OH-161's step 2, which added
 //: `riscv32_map_snapshot_counter`; step 1's `riscv32_map_stream` and
 //: `riscv32_stream` arrived without one, and are counted in this one.
-#define RISCV32_ABI_VERSION 3
+//: Bumped to 4 at OH-161's step 3, which added `riscv32_map_input` and
+//: `riscv32_drive_input`.
+#define RISCV32_ABI_VERSION 4
 
 /// x0 through x31, then PC.
 ///
@@ -139,6 +141,25 @@ RISCV32_API void riscv32_map_snapshot_counter(
     uint32_t valid_mask, uint32_t low_address, uint32_t high_address,
     uint32_t high_mask, uint32_t enable_address, uint32_t enable_mask,
     uint32_t instructions_per_tick);
+
+/// A read-only register whose read answers the level on each pin: per pin
+/// named in `pads`, 0 where the pad register at `pad_base + n * pad_stride`
+/// has `input_enable_mask` clear; `out_address`'s bit where
+/// `enable_address`'s is set; the level `riscv32_drive_input` gave it; 1
+/// where only `pull_up_mask` is set; else 0. An ESP32's `GPIO_IN`. See cpu.h.
+RISCV32_API void riscv32_map_input(Riscv32Cpu* cpu, uint32_t address,
+                                   uint32_t out_address,
+                                   uint32_t enable_address, uint32_t pad_base,
+                                   uint32_t pad_stride, uint32_t pads,
+                                   uint32_t input_enable_mask,
+                                   uint32_t pull_up_mask,
+                                   uint32_t pull_down_mask);
+
+/// What the world outside drives onto the pins of the input register at
+/// `address`, replacing what the last call said. 0, having changed nothing,
+/// where `address` is no input register.
+RISCV32_API int riscv32_drive_input(Riscv32Cpu* cpu, uint32_t address,
+                                    uint32_t driven, uint32_t levels);
 
 RISCV32_API int riscv32_is_mapped(const Riscv32Cpu* cpu, uint32_t address);
 RISCV32_API void riscv32_clear_mmio(Riscv32Cpu* cpu);

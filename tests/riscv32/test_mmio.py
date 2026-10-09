@@ -807,3 +807,189 @@ def test_a_reset_machine_keeps_no_counter_behind(systimer):
     systimer.reset()
     systimer.map_register(UNIT0_OP, 0x1234)
     assert systimer.read_word(UNIT0_OP) == 0x1234
+
+
+# --- a register that reads the pins (OH-161 step 3) --------------------------
+#
+# The ESP32-C3's again, from the same `framework-arduinoespressif32` tree:
+# `GPIO_IN_REG` at + 0x3C (`gpio_reg.h:122`); IO_MUX at 0x60009000
+# (`soc.h:49`), GPIO0's pad register at + 0x04 (`io_mux_reg.h:175`) and each
+# next GPIO's four bytes on (TRM v1.4 Register 5.21, `0x0004+4*n`); and in
+# each pad register `FUN_PD` bit 7, `FUN_PU` bit 8 and `FUN_IE` bit 9
+# (`io_mux_reg.h:51`, `:56`, `:61`). What the board's tests hold is the
+# board; what these hold is the mechanism.
+
+GPIO_IN = GPIO + 0x3C
+IO_MUX_GPIO0 = 0x60009004
+PAD_STRIDE = 4
+FUN_WPD = 1 << 7
+FUN_WPU = 1 << 8
+FUN_IE = 1 << 9
+
+#: The pins with a pad in these tests, 0 to 3. Pin 4 has none, and nothing
+#: maps its pad register, so asking it would fault.
+PADS = 0b1111
+
+
+def map_pins(cpu, pads: int = PADS) -> None:
+    """`map_input` over the `gpio` fixture's OUT and ENABLE."""
+    cpu.map_input(GPIO_IN, out=GPIO_OUT, enable=GPIO_ENABLE,
+                  pad_base=IO_MUX_GPIO0, pad_stride=PAD_STRIDE, pads=pads,
+                  input_enable=FUN_IE, pull_up=FUN_WPU, pull_down=FUN_WPD)
+
+
+def pad(n: int) -> int:
+    return IO_MUX_GPIO0 + n * PAD_STRIDE
+
+
+@pytest.fixture
+def pins(gpio):
+    """GPIO, four pad registers with their input enabled and no pull, and
+    the input register reading them. Takes `gpio` for the reason the `gpio`
+    fixture takes `cpu`."""
+    for n in range(4):
+        gpio.map_register(pad(n), FUN_IE)
+    map_pins(gpio)
+    return gpio
+
+
+def test_an_input_reads_what_the_outside_drives_it_to(pins):
+    pins.drive_input(GPIO_IN, driven=0b0011, levels=0b0001)
+    assert pins.read_word(GPIO_IN) == 0b0001
+    pins.drive_input(GPIO_IN, driven=0b0011, levels=0b0010)
+    assert pins.read_word(GPIO_IN) == 0b0010
+
+
+def test_a_driven_output_reads_back_its_own_level_whatever_the_outside_says(pins):
+    """The description's own sentence, `IN` follows `OUT` on a driven pin.
+    The outside is ignored there; what a pin and a part fighting over a node
+    do is the bench's to solve, and `circuit.js` treats the pin as a source."""
+    pins.write_word(GPIO_ENABLE, 0b0001)
+    pins.write_word(GPIO_OUT, 0b0001)
+    pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0000)
+    assert pins.read_word(GPIO_IN) == 0b0001
+    pins.write_word(GPIO_OUT, 0b0000)
+    pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+    assert pins.read_word(GPIO_IN) == 0b0000
+
+
+def test_an_undriven_input_reads_its_pull_and_a_floating_one_reads_zero(pins):
+    """Pin 0 pulled up, 1 pulled down, 2 both, 3 neither. Only the pull-up
+    alone reads high: both pulls are a divider at half the supply, which no
+    input threshold answers, and neither is a floating pin -- read as 0 by
+    the decision OH-161's step-3 note records."""
+    pins.write_word(pad(0), FUN_IE | FUN_WPU)
+    pins.write_word(pad(1), FUN_IE | FUN_WPD)
+    pins.write_word(pad(2), FUN_IE | FUN_WPU | FUN_WPD)
+    pins.write_word(pad(3), FUN_IE)
+    assert pins.read_word(GPIO_IN) == 0b0001
+
+
+def test_the_outside_beats_the_pull(pins):
+    """A pin pulled up and driven low reads low: the slice's decision that a
+    bench drive beats the internal 45 kohm pull, the Thevenin form deferred."""
+    pins.write_word(pad(0), FUN_IE | FUN_WPU)
+    pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0000)
+    assert pins.read_word(GPIO_IN) == 0
+
+
+def test_a_pin_whose_input_is_disabled_reads_zero_whatever_drives_it(pins):
+    """`FUN_IE` clear: the C3 TRM's 5.4.4 says reading needs it, and the
+    bit reads the gated buffer's 0 -- driven from outside, pulled up and
+    driven high as an output all at once."""
+    pins.write_word(pad(0), FUN_WPU)
+    pins.write_word(GPIO_ENABLE, 0b0001)
+    pins.write_word(GPIO_OUT, 0b0001)
+    pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+    assert pins.read_word(GPIO_IN) == 0
+
+
+def test_a_pin_with_no_pad_reads_zero_and_its_register_is_never_asked(pins):
+    """Pin 4 is driven high, and nothing maps its pad register: the read
+    answers rather than faulting, and pin 4's bit is 0."""
+    pins.drive_input(GPIO_IN, driven=0b10001, levels=0b10001)
+    assert pins.read_word(GPIO_IN) == 0b00001
+
+
+def test_a_pad_register_that_cannot_be_read_faults_naming_the_input_register(gpio):
+    """A board that named the wrong pad block has described pins that never
+    read their own input enable. Pin 3's pad register is not mapped here, and
+    the read faults at the input register, the address the instruction used,
+    as a stream names its FIFO; executed, because only `step` reports the
+    address the core recorded."""
+    for n in range(3):
+        gpio.map_register(pad(n), FUN_IE)
+    map_pins(gpio)
+    load(gpio, [e.lui("a4", 0x60004), e.lw("a0", "a4", 0x3C)])
+    gpio.step()
+    with pytest.raises(abi.MemoryFault) as caught:
+        gpio.step()
+    assert f"0x{GPIO_IN:08x}" in str(caught.value), str(caught.value)
+
+
+def test_a_program_reads_the_pins_with_a_word_and_with_a_byte(pins):
+    """`lw` and `lbu` both reach the computed word: a byte read that fell
+    through to the region lookup would fault at an address the board
+    describes."""
+    pins.drive_input(GPIO_IN, driven=0b0110, levels=0b0110)
+    _run(pins, [e.lui("a4", 0x60004), e.lw("a0", "a4", 0x3C),
+                e.lbu("a1", "a4", 0x3C)], {})
+    assert (pins.reg(10), pins.reg(11)) == (0b0110, 0b0110)
+
+
+def test_a_write_to_the_input_register_changes_nothing(pins):
+    pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+    pins.write_word(GPIO_IN, 0xFFFFFFFF)
+    assert pins.read_word(GPIO_IN) == 0b0001
+
+
+def test_a_drive_replaces_the_one_before_it(pins):
+    """A pin the second call leaves out is a pin nothing drives any more:
+    pin 0 goes back to floating."""
+    pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+    pins.drive_input(GPIO_IN, driven=0b0010, levels=0b0010)
+    assert pins.read_word(GPIO_IN) == 0b0010
+
+
+def test_driving_an_address_that_is_no_input_register_is_refused_by_address(pins):
+    with pytest.raises(abi.AbiError) as caught:
+        pins.drive_input(GPIO_OUT, driven=0b0001, levels=0b0001)
+    assert f"0x{GPIO_OUT:08x}" in str(caught.value), str(caught.value)
+
+
+def test_a_level_for_a_pin_nothing_drives_is_refused_with_both_masks(pins):
+    """A level with no drive behind it is a caller's mistake, and the core
+    would read past it without a word."""
+    with pytest.raises(abi.AbiError) as caught:
+        pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0010)
+    assert "0x00000001" in str(caught.value) and "0x00000002" in str(caught.value), (
+        str(caught.value))
+
+
+def test_a_mask_past_32_bits_is_refused_with_the_value(pins):
+    """ctypes would pass `1 << 32` as 0: a drive of nothing, said nowhere."""
+    with pytest.raises(abi.AbiError) as caught:
+        pins.drive_input(GPIO_IN, driven=1 << 32, levels=0)
+    assert f"{1 << 32}" in str(caught.value), str(caught.value)
+
+
+def test_mapping_the_input_again_replaces_it_and_forgets_its_drive(pins):
+    pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+    map_pins(pins)
+    assert pins.read_word(GPIO_IN) == 0
+
+
+def test_a_machine_with_no_board_keeps_no_input_behind(pins):
+    """A drive is state, so one left behind would answer for the next
+    board's register at the same address."""
+    pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+    pins.clear_regions()
+    pins.map_register(GPIO_IN, 0x1234)
+    assert pins.read_word(GPIO_IN) == 0x1234
+
+
+def test_a_reset_machine_keeps_no_input_behind(pins):
+    pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+    pins.reset()
+    pins.map_register(GPIO_IN, 0x1234)
+    assert pins.read_word(GPIO_IN) == 0x1234

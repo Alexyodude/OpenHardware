@@ -45,6 +45,7 @@ void Cpu::reset() {
     mmio_.clear();
     streams_.clear();
     snapshots_.clear();
+    inputs_.clear();
     fault_address_ = 0;
     fault_was_fetch_ = false;
 }
@@ -246,16 +247,20 @@ void Cpu::clear_regions() {
     // first. A stream carries BYTES as well as a mapping, so leaving one
     // behind would also let a second board answer with what the first one
     // printed. A snapshot counter carries a COUNT, so leaving one behind
-    // would start the next board's clock where the last board's stopped.
+    // would start the next board's clock where the last board's stopped. An
+    // input carries a DRIVE, so leaving one behind would hand the next board
+    // levels nobody put on its pins.
     mmio_.clear();
     streams_.clear();
     snapshots_.clear();
+    inputs_.clear();
 }
 
 void Cpu::clear_mmio() {
     mmio_.clear();
     streams_.clear();
     snapshots_.clear();
+    inputs_.clear();
 }
 
 void Cpu::map_register(uint32_t address, uint32_t value) {
@@ -333,6 +338,98 @@ void Cpu::map_snapshot_counter(uint32_t op_address, uint32_t update_mask,
     snapshots_.push_back(counter);
 }
 
+void Cpu::map_input(uint32_t address, uint32_t out_address,
+                    uint32_t enable_address, uint32_t pad_base,
+                    uint32_t pad_stride, uint32_t pads,
+                    uint32_t input_enable_mask, uint32_t pull_up_mask,
+                    uint32_t pull_down_mask) {
+    Input input;
+    input.address = address & ~3u;
+    input.out = out_address & ~3u;
+    input.enable = enable_address & ~3u;
+    input.pad_base = pad_base;
+    input.pad_stride = pad_stride;
+    input.pads = pads;
+    input.input_enable_mask = input_enable_mask;
+    input.pull_up_mask = pull_up_mask;
+    input.pull_down_mask = pull_down_mask;
+
+    // Registered in `mmio_` too, so `is_mapped` sees it and its accesses
+    // reach `mmio_read`/`mmio_write`, which consult `inputs_` first -- so a
+    // write lands in a word nobody reads, as a read-only register's does.
+    Mapped entry;
+    entry.target = input.address;
+    mmio_[input.address] = entry;
+
+    // Mapping the same register twice replaces it, drive and all, rather
+    // than leaving two answering one address in whichever order the scan
+    // meets them.
+    inputs_.erase(
+        std::remove_if(inputs_.begin(), inputs_.end(),
+                       [&](const Input& existing) {
+                           return existing.address == input.address;
+                       }),
+        inputs_.end());
+    inputs_.push_back(input);
+}
+
+bool Cpu::drive_input(uint32_t address, uint32_t driven, uint32_t levels) {
+    for (Input& input : inputs_) {
+        if (input.address == (address & ~3u)) {
+            input.driven = driven;
+            input.levels = levels;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Cpu::input_levels(const Input& input, uint32_t address,
+                       uint32_t& out) const {
+    uint32_t out_word = 0;
+    uint32_t enable_word = 0;
+    if (!mmio_read(input.out, out_word) || !mmio_read(input.enable, enable_word)) {
+        note_fault(address, false);
+        return false;
+    }
+    uint32_t value = 0;
+    for (uint32_t pin = 0; pin < 32; ++pin) {
+        const uint32_t bit = 1u << pin;
+        if ((input.pads & bit) == 0) {
+            continue;
+        }
+        uint32_t pad = 0;
+        if (!mmio_read(input.pad_base + pin * input.pad_stride, pad)) {
+            // The pad register the board named cannot be read. Named at the
+            // input register, the address the instruction used, as a stream
+            // names its FIFO and not its gate: `mmio_read` may have recorded
+            // the pad's own address on the way, and this replaces it.
+            note_fault(address, false);
+            return false;
+        }
+        if ((pad & input.input_enable_mask) == 0) {
+            continue;
+        }
+        if ((enable_word & bit) != 0) {
+            value |= out_word & bit;
+            continue;
+        }
+        if ((input.driven & bit) != 0) {
+            value |= input.levels & bit;
+            continue;
+        }
+        // A pull-up alone reads high. A pull-down, both pulls, or neither
+        // reads 0 -- the last a floating pin, whose 0 the board states.
+        const bool up = (pad & input.pull_up_mask) != 0;
+        const bool down = (pad & input.pull_down_mask) != 0;
+        if (up && !down) {
+            value |= bit;
+        }
+    }
+    out = value;
+    return true;
+}
+
 void Cpu::note_executed() {
     for (Snapshot& counter : snapshots_) {
         // An unmapped gate counts nothing here, and is NOT silently a timer
@@ -391,6 +488,12 @@ bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
         if (at == counter.high) {
             out = static_cast<uint32_t>(counter.latched >> 32) & counter.high_mask;
             return true;
+        }
+    }
+    // An input register answers the pins rather than a stored word.
+    for (const Input& input : inputs_) {
+        if (at == input.address) {
+            return input_levels(input, address, out);
         }
     }
 
