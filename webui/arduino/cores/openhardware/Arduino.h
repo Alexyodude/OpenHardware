@@ -89,9 +89,8 @@ static inline __attribute__((always_inline)) void digitalWrite(uint8_t pin, uint
 unsigned long millis(void);
 unsigned long micros(void);
 
-/* Still a counted busy loop, although a timer is now modelled: the
- * variant's `oh_board.h` says why it has not moved onto SYSTIMER, and what
- * one millisecond of it COSTS is that header's `OH_DELAY_LOOPS_PER_MS`. */
+/* Waits on the same SYSTIMER unit 0, so its millisecond is millis()'s: a
+ * sketch timing a delay() with millis() reads what it asked for. */
 void delay(unsigned long ms);
 
 #ifdef __cplusplus

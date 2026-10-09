@@ -340,9 +340,12 @@ void setup() { pinMode(D10, OUTPUT); }
 void loop() { digitalWrite(D10, HIGH); delay(1); digitalWrite(D10, LOW); delay(1); }
 """
 
-#: `delay(1)` is ~24,000 steps on this core (`oh_board.h` says what kind of
-#: number that is), so two highs need two of them and a little.
-SKETCH_BUDGET = 80_000
+#: Steps to the sketch's second high, where the test below stops. A
+#: `delay(1)` waits a millisecond of SYSTIMER since OH-161 moved it there,
+#: 160,000 steps at this description's ten steps a tick, so two highs are a
+#: whole period apart: the second lands at step 320,130 (measured
+#: 2026-10-09). 330,000 leaves about 9,900 to spare.
+SKETCH_BUDGET = 330_000
 
 
 def test_the_pad_the_blink_drives_follows_the_register_in_the_pin_view():

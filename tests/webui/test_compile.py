@@ -1283,6 +1283,14 @@ void setup() { pinMode(D10, OUTPUT); }
 void loop() { digitalWrite(D10, HIGH); digitalWrite(D10, LOW); delay(1); }
 """
 
+#: Steps for `C3_BLINK` to move its pin four times: high, low, one delay(1),
+#: high and low again. A delay(1) waits a millisecond of SYSTIMER since
+#: OH-161 moved it there, 160,000 steps on a C3 or a C6 and 240,000 on a C5,
+#: and the fourth change lands at step 160,111 on the C3 and the C6 and
+#: 240,115 on the C5 (measured 2026-10-09). 250,000 serves all three with
+#: about 9,900 to spare on the C5.
+FOUR_CHANGES = 250_000
+
 
 def oh_build(board: str, source: str) -> "compiler.Build":
     """Build for a board, or skip when the toolchain is not installed here."""
@@ -1318,7 +1326,7 @@ def gpio_transitions(board: str, description, gpio: int, image: bytes,
     return transitions
 
 
-def c3_transitions(image: bytes, budget: int = 60_000) -> list[tuple[int, bool]]:
+def c3_transitions(image: bytes, budget: int = FOUR_CHANGES) -> list[tuple[int, bool]]:
     """Every step at which the built image moves GPIO10, watched by name."""
     return gpio_transitions(C3_BOARD, esp32c3, 10, image, budget)
 
@@ -1350,23 +1358,52 @@ def test_a_built_c3_sketch_runs_on_the_described_board_and_toggles_its_pin():
     assert all(a != b for a, b in itertools.pairwise(states)), states[:8]
 
 
+#: Steps past two periods' worth of milliseconds for a third rise of
+#: `C3_BLINK` at any delay. The first rise lands at step 38 and each period
+#: is its milliseconds and the toggles around them, so the third lands 156
+#: to 160 steps past on the C3, C5 and C6 at delay(1) and delay(3)
+#: (measured 2026-10-09). A thousand leaves about 840 to spare.
+THIRD_RISE = 1_000
+
+
 def test_delay_scales_with_its_argument_and_the_period_is_steady():
-    """delay's millisecond is a stated judgement (oh_board.h says what
-    kind), but WHATEVER it costs must scale: delay(3) between toggles must
-    take about three times delay(1), or the loop is not counting."""
+    """delay(n) waits n milliseconds of SYSTIMER unit 0 since OH-161 moved it
+    there, so each period between toggles is n of the description's
+    milliseconds and the toggles around them, to within `POLL`: delay(3)
+    costs three delay(1)s and no period wanders off the rate. Measured
+    2026-10-09, 160,061 and 480,061 steps -- the 61 is the two writes, the
+    loop around them and the poll that sees the tick.
+
+    The first rise counts. The counted loop this test was written for
+    skipped it; on the timer the first period measures the same as the
+    rest, and three rises is then two periods of steps rather than three."""
+    millisecond = esp32c3.SYSTIMER_INSTRUCTIONS_PER_TICK * (
+        esp32c3.SYSTIMER_HZ // 1000)
     one = c3_build(C3_BLINK)
     three = c3_build(C3_BLINK.replace("delay(1)", "delay(3)"))
     assert one.ok and three.ok
 
-    def period(image: bytes) -> int:
-        highs = [step for step, state in c3_transitions(image, 200_000)
-                 if state]
-        gaps = {b - a for a, b in itertools.pairwise(highs[1:])}
-        assert len(gaps) == 1, f"period varies: {sorted(gaps)}"
-        return gaps.pop()
+    def period(image: bytes, ms: int) -> int:
+        highs = [step for step, state in c3_transitions(
+            image, 2 * ms * millisecond + THIRD_RISE) if state]
+        gaps = [b - a for a, b in itertools.pairwise(highs)]
+        assert len(gaps) >= 2 and all(
+            abs(gap - ms * millisecond) < POLL for gap in gaps), (
+            f"delay({ms}) is {ms * millisecond} steps here, and D10 rose "
+            f"{gaps} apart")
+        return gaps[0]
 
-    ratio = period(three.image) / period(one.image)
+    ratio = period(three.image, 3) / period(one.image, 1)
     assert 2.5 < ratio < 3.5, f"delay(3)/delay(1) = {ratio:.2f}"
+
+
+#: Steps for three rises of the HIGH, delay(1), LOW, delay(1) loops the two
+#: tests below run on the C3. A delay(1) is a millisecond of SYSTIMER since
+#: OH-161 moved it there, 160,000 steps here, so the third rise is two
+#: periods in: step 640,234 for the initialised global's sketch and 640,264
+#: for the constructor's (measured 2026-10-09). 650,000 leaves about 9,700
+#: to spare.
+THREE_RISES = 650_000
 
 
 def test_a_sketch_s_globals_survive_the_linker_script_having_no_crt0():
@@ -1415,7 +1452,7 @@ void loop() {
 }
 """)
     assert initialised.ok, initialised.diagnostics
-    rises = [state for _, state in c3_transitions(initialised.image, 200_000)
+    rises = [state for _, state in c3_transitions(initialised.image, THREE_RISES)
              if state]
     assert len(rises) >= 3, (
         f"an initialised global read wrongly: the pin rose {len(rises)} "
@@ -1434,7 +1471,7 @@ void loop() {
 }
 """)
     assert zeroed.ok, zeroed.diagnostics
-    rises = [state for _, state in c3_transitions(zeroed.image, 200_000)
+    rises = [state for _, state in c3_transitions(zeroed.image, THREE_RISES)
              if state]
     assert len(rises) == 1, (
         f"the pin rose {len(rises)} times: 0 means `.bss` was not zeroed, "
@@ -1484,7 +1521,7 @@ void loop() {
 }
 """)
     assert built.ok, built.diagnostics
-    rises = [state for _, state in c3_transitions(built.image, 200_000)
+    rises = [state for _, state in c3_transitions(built.image, THREE_RISES)
              if state]
     assert len(rises) >= 3, (
         f"the pin rose {len(rises)} times: the global's constructor did not "
@@ -1645,7 +1682,7 @@ def test_a_built_sketch_runs_on_the_described_c5_or_c6_and_toggles_its_pin(board
     built = oh_build(board, C3_BLINK)
     assert built.ok, built.diagnostics
     transitions = gpio_transitions(board, description, gpio, built.image,
-                                   60_000)
+                                   FOUR_CHANGES)
     assert len(transitions) >= 4, f"the bit changed {len(transitions)} times"
     states = [state for _, state in transitions]
     assert states[0] is True
@@ -1654,28 +1691,35 @@ def test_a_built_sketch_runs_on_the_described_c5_or_c6_and_toggles_its_pin(board
 
 @pytest.mark.parametrize("board", sorted(OPENHARDWARE_BOARDS))
 def test_the_c5_and_c6_delay_is_steady_and_scales(board):
-    """The C3's delay test, on each new part: whatever a millisecond costs
-    here (its `oh_board.h` says, and says what kind of number it is), the
-    period must be steady and delay(3) must cost about three delay(1)s.
+    """The C3's delay test, on each new part: each period is n of this
+    description's milliseconds and the toggles around them, to within
+    `POLL`, and delay(3) costs three delay(1)s.
 
-    **What this does not catch, run rather than assumed** (2026-09-04):
-    dividing a header's OH_DELAY_LOOPS_PER_MS by a hundred passes it, because
-    the VALUE is the judgement the header labels it as and only the scaling
-    is a claim. The measured period lives in that header's comment, beside
-    the date it was taken."""
+    Measured 2026-10-09: 160,061 and 480,061 steps on the C6; 720,061 for
+    the C5's delay(3), and 240,053 and 240,065 by turns for its delay(1),
+    whose fifteen-step tick and twelve-step poll fall in and out of step. A
+    period that alternates is why this asks for the rate to within `POLL`
+    and not for one period: the counted loop this test was written for
+    repeated exactly, and on the C5 the timer does not."""
     description, gpio = OPENHARDWARE_BOARDS[board]
+    millisecond = description.SYSTIMER_INSTRUCTIONS_PER_TICK * (
+        description.SYSTIMER_HZ // 1000)
     one = oh_build(board, C3_BLINK)
     three = oh_build(board, C3_BLINK.replace("delay(1)", "delay(3)"))
     assert one.ok and three.ok
 
-    def period(image: bytes) -> int:
+    def period(image: bytes, ms: int) -> int:
         highs = [step for step, state in gpio_transitions(
-            board, description, gpio, image, 200_000) if state]
-        gaps = {b - a for a, b in itertools.pairwise(highs[1:])}
-        assert len(gaps) == 1, f"period varies: {sorted(gaps)}"
-        return gaps.pop()
+            board, description, gpio, image,
+            2 * ms * millisecond + THIRD_RISE) if state]
+        gaps = [b - a for a, b in itertools.pairwise(highs)]
+        assert len(gaps) >= 2 and all(
+            abs(gap - ms * millisecond) < POLL for gap in gaps), (
+            f"{board}: delay({ms}) is {ms * millisecond} steps here, and D10 "
+            f"rose {gaps} apart")
+        return gaps[0]
 
-    ratio = period(three.image) / period(one.image)
+    ratio = period(three.image, 3) / period(one.image, 1)
     assert 2.5 < ratio < 3.5, f"delay(3)/delay(1) = {ratio:.2f}"
 
 
@@ -2006,6 +2050,54 @@ def test_a_sketch_timed_by_micros_toggles_at_the_rate_its_description_states():
         gaps = [b - a for a, b in itertools.pairwise(steps)]
         assert all(abs(gap - period) < POLL for gap in gaps), (
             f"{board}: 100 us is {period} steps here, and D10 moved {gaps} apart")
+
+
+#: Times a delay() with millis(): the sketch OH-161's step-2 note said would
+#: read a fraction of what it asked for while the two counted on two scales.
+DELAY_BY_MILLIS = """
+void setup() {
+  unsigned long t = millis();
+  delay(5);
+  Serial.println(millis() - t);
+}
+void loop() { }
+"""
+
+#: Steps past five milliseconds by which `DELAY_BY_MILLIS` has printed: its
+#: last byte lands 145 steps past them on the C3 and 141 on the C5
+#: (measured 2026-10-09), and then it sits in an empty `loop()`.
+DELAY_PRINTED = 1_000
+
+
+def test_a_delay_timed_by_millis_lasts_the_milliseconds_it_asked_for():
+    """delay() and millis() count one clock since OH-161 moved delay() onto
+    SYSTIMER, so five milliseconds of one are five of the other -- on the C3
+    and on the C5, whose milliseconds are 160,000 and 240,000 steps (the C6
+    keeps the C3's). On the counted loop delay() was before, about 24,000
+    steps a millisecond on all three, this sketch printed 0 on both.
+
+    Exactly 5, where 5 or 6 could both be right. `millis()` floors each
+    reading, so two readings five milliseconds and a little apart differ by
+    6 when the first falls in the last little of its millisecond. Here it
+    cannot: measured 2026-10-09, `t`'s copy is taken at tick 2 on the C3 and
+    tick 1 on the C5, delay() returns at the first poll past its 80,000
+    ticks, and the closing copy is tick 80,008 and 80,005 -- nearly a whole
+    millisecond short of 96,000, where 6 begins."""
+    for board in (C3_BOARD, "XIAO-ESP32-C5-DIP"):
+        description, _gpio = TIMED_BOARDS[board]
+        needs_toolchain(board)
+        built = oh_build(board, DELAY_BY_MILLIS)
+        assert built.ok, built.diagnostics
+        millisecond = description.SYSTIMER_INSTRUCTIONS_PER_TICK * (
+            description.SYSTIMER_HZ // 1000)
+        budget = 5 * millisecond + DELAY_PRINTED
+        with api.load_firmware(board, built.image,
+                               base=compiler.recipe_for(board).base) as session:
+            session.step(budget)
+            text = description.uart0_output(session.cpu)
+        assert text == b"5\r\n", (
+            f"{board}: a delay(5) timed by millis() printed {text!r} in "
+            f"{budget} steps")
 
 
 #: Prints both clocks once, so a test can set the count they read.

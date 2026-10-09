@@ -67,25 +67,4 @@
  * inside it -- the same arithmetic the blink fixtures state. */
 #define OH_STACK_TOP         0x3FCDFFF0u
 
-/* **delay() still spins on this, and no longer because nothing models a
- * timer**: SYSTIMER above does, and millis() reads it. Moving delay() onto
- * it changes the bytes of every committed sketch image a board test
- * rebuilds, which OH-161 left for a change that may edit those tests -- its
- * note says which. Until then a delay(1) is ~24,000 steps and a
- * millisecond of millis() is 160,000, so a sketch timing one with the
- * other reads about 0.15 of what it asked for.
- *
- * **A judgement, and it says so** -- the same kind of number BOARD_MASK is
- * in `tools/compose_board_3d.py`. This model configures no PLL and counts
- * no cycles, so a millisecond here cannot be a measurement of anything.
- * The choice, then the measurement: 4,000 iterations of the volatile spin
- * loop (six instructions each at this toolchain's -Os) makes delay(1)
- * cost ~24,000 emulator steps -- measured 2026-08-31, transitions 24,031
- * steps apart for a HIGH/LOW/delay(1) sketch (re-measured 2026-09-04 by
- * OH-156 at 24,043, the figure the C5 and C6 give the same day) -- the
- * same order as the 16,000 a real timer-driven millisecond costs on the
- * AVR board at its cited 16 MHz. One page, three families, comparable
- * blinks. */
-#define OH_DELAY_LOOPS_PER_MS 4000u
-
 #endif

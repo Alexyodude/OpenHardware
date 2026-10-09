@@ -36,9 +36,15 @@ IMAGE = HERE / "sparkfun_esp32c5" / "sparkfun_c5_blink.bin"
 GPIO_OUT = esp32c5.GPIO + esp32c5.GPIO_OUT
 GPIO_ENABLE = esp32c5.GPIO + esp32c5.GPIO_ENABLE
 
-#: Three rises of a delay(1) blink, at ~24,000 steps a millisecond
-#: (`webui/arduino/variants/xiao_esp32c5/oh_board.h`), and some to spare.
-BUDGET = 110_000
+#: Three rises of a delay(1) blink. delay() waits on SYSTIMER since OH-161
+#: (`webui/arduino/cores/openhardware/wiring.c`), and a millisecond of it is
+#: 16,000 ticks of fifteen steps at this board's 240 MHz, so each half of
+#: the blink is 240,000 steps and the toggle around it. Measured 2026-10-09
+#: on this image, the pin moves at steps 38, 240,085, 480,126, 720,173 and
+#: 960,214: 970,000 leaves about 9,800 to spare. Both periods in that window
+#: are 480,088 steps; the third is 480,100, one twelve-step poll longer, as
+#: wiring.c says a period can be.
+BUDGET = 970_000
 
 
 def needs_table() -> None:

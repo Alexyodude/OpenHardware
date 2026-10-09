@@ -33,9 +33,15 @@ IMAGE = HERE / "feather_esp32c6" / "blink.bin"
 GPIO_OUT = esp32c6.GPIO + esp32c6.GPIO_OUT
 GPIO_ENABLE = esp32c6.GPIO + esp32c6.GPIO_ENABLE
 
-#: Three rises of a delay(1) blink, at ~24,000 steps a millisecond
-#: (`webui/arduino/variants/xiao_esp32c6/oh_board.h`), and some to spare.
-BUDGET = 110_000
+#: Three rises of a delay(1) blink. delay() waits on SYSTIMER since OH-161
+#: (`webui/arduino/cores/openhardware/wiring.c`), and a millisecond of it is
+#: 16,000 ticks of ten steps, so each half of the blink is 160,000 steps and
+#: the toggle around it. Measured 2026-10-09 on this image and on the stock
+#: Blink below, the pin moves at steps 38, 160,081, 320,130, 480,173 and
+#: 640,222: 650,000 leaves about 9,800 to spare. Both periods in that window
+#: are 320,092 steps; the fifth is 320,104, one twelve-step poll longer, as
+#: wiring.c says a period can be.
+BUDGET = 650_000
 
 
 def needs_table() -> None:

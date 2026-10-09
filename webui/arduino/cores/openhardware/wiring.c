@@ -85,9 +85,27 @@ unsigned long millis(void) {
     return ((upper / 1000u) << 16) + (((rest << 16) | lower) / 1000u);
 }
 
+/* Returns once `ms` milliseconds of SYSTIMER unit 0 -- `ms` times sixteen
+ * thousand ticks -- have passed since the call, read through the same copy
+ * millis() reads, so a sketch timing one with the other gets what it asked
+ * for. One millisecond at a time and in the count's low 32 bits: the whole
+ * wait as one number would need `ms * 16000` in 64 bits, and a
+ * millisecond's 16,000 ticks fit a 32-bit difference with room to spare.
+ * Unsigned subtraction is then right across the low word's wrap at 2^32
+ * ticks and across the counter's own at 2^52, a multiple of it. `start`
+ * advances by whole milliseconds rather than being read again, so a poll
+ * that lands late does not push the next millisecond later.
+ *
+ * It returns at the first poll that sees the count there, so it overruns by
+ * up to one poll, and a blink built on it can be one poll longer in one
+ * period than in the next: the count moves every few instructions, and the
+ * poll and the tick fall in and out of step. */
 void delay(unsigned long ms) {
+    const uint32_t ticks_per_ms = OH_SYSTIMER_TICKS_PER_US * 1000u;
+    uint32_t start = (uint32_t)oh_systimer_ticks();
     for (; ms; --ms) {
-        for (volatile uint32_t spin = OH_DELAY_LOOPS_PER_MS; spin; --spin) {
+        while ((uint32_t)oh_systimer_ticks() - start < ticks_per_ms) {
         }
+        start += ticks_per_ms;
     }
 }

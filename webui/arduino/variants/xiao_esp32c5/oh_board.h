@@ -79,24 +79,4 @@
  * choose between. */
 #define OH_STACK_TOP         0x4085FFF0u
 
-/* **delay() still spins on this, and no longer because nothing models a
- * timer**: SYSTIMER above does, and millis() reads it -- the C3 header says
- * why delay() has not moved yet. Until it does, a delay(1) is ~24,000 steps
- * and a millisecond of millis() is 240,000.
- *
- * **A judgement, and it says so** -- the same kind of number BOARD_MASK is
- * in `tools/import_3d_model.py`. This model configures no PLL and counts
- * no cycles, so a millisecond here cannot be a measurement of anything.
- * The choice is the C3's 4,000 iterations; the measurement is this
- * part's own, because a copied constant is exactly what OH-156 said not
- * to do: built with this recipe's -march=rv32imac at -Os and watched on
- * the described C5, a HIGH/LOW/delay(1) sketch's rises came 24,043
- * steps apart (2026-09-04). The C3 re-measured the same day gives 24,043
- * too -- its header's 24,031 is dated 2026-08-31, so the twelve steps lie
- * between the dates and not between the parts -- and both are the same
- * order as the 16,000 a real timer-driven millisecond costs on the AVR
- * board at its cited 16 MHz. One page, three families, comparable
- * blinks. */
-#define OH_DELAY_LOOPS_PER_MS 4000u
-
 #endif
