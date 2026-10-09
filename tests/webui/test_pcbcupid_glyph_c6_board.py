@@ -23,6 +23,7 @@ import pathlib
 
 import pytest
 
+from tests.webui.test_compile import POLL
 from tools import board_manifest, import_pindefs
 from webui import api, pinmap
 from webui import compile as compiler
@@ -36,14 +37,22 @@ IMAGE = HERE / "pcbcupid_glyph_c6" / "glyph_c6_blink.bin"
 GPIO_OUT = esp32c6.GPIO + esp32c6.GPIO_OUT
 GPIO_ENABLE = esp32c6.GPIO + esp32c6.GPIO_ENABLE
 
-#: Three rises of a delay(1) blink. delay() waits on SYSTIMER since OH-161
-#: (`webui/arduino/cores/openhardware/wiring.c`), and a millisecond of it is
-#: 16,000 ticks of ten steps, so each half of the blink is 160,000 steps and
-#: the toggle around it. Measured 2026-10-09 on this image, the pin moves at
-#: steps 38, 160,081, 320,130, 480,173 and 640,222: 650,000 leaves about
-#: 9,800 to spare. Both periods in that window are 320,092 steps; the fifth
-#: is 320,104, one twelve-step poll longer, as wiring.c says a period can be.
-BUDGET = 650_000
+#: A millisecond in steps, read from the description and not written here:
+#: `SYSTIMER_HZ // 1000` ticks of `SYSTIMER_INSTRUCTIONS_PER_TICK` steps.
+#: delay() waits on SYSTIMER since OH-161
+#: (`webui/arduino/cores/openhardware/wiring.c`), so each move of a delay(1)
+#: blink comes a millisecond, and the write and the poll around it, after
+#: the one before -- held to within `POLL`, as test_compile's delay tests
+#: hold each delay(n).
+MILLISECOND = esp32c6.SYSTIMER_INSTRUCTIONS_PER_TICK * (esp32c6.SYSTIMER_HZ // 1000)
+
+#: Measured 2026-10-09 over fifty moves of this image: the gaps between them
+#: take three lengths, 160,043, 160,049 and 160,055 steps, and the longest
+#: first ends at step 1,440,461, the tenth move. It is half of the one period
+#: in four that is a twelve-step poll longer, 320,104 against 320,092, as
+#: wiring.c says a period can be. 1,450,000 watches a gap of each length,
+#: with about 9,500 to spare.
+BUDGET = 1_450_000
 
 
 def needs_table() -> None:
@@ -150,7 +159,7 @@ def test_the_image_blinks_the_gpio_this_boards_led_builtin_names_on_its_own_pads
     sda = {pad["label"] for pad in pads["pads"] if pad["chip_index"] == named(own, "SDA")}
     assert sda == {"/SDA"}, sda
 
-    rises, levels, still, driven = [], [], set(), 0
+    moves, levels, still, driven = [], [], set(), 0
     with api.load_firmware(BOARD, IMAGE.read_bytes(), base=recipe.base) as session:
         last = 0
         for step in range(BUDGET):
@@ -162,15 +171,16 @@ def test_the_image_blinks_the_gpio_this_boards_led_builtin_names_on_its_own_pads
                 read = api.pin_levels(session.runtime, session.cpu)
                 levels.append(read[label])
                 still |= {read[other["label"]] for other in others}
-                rises += [step] if now else []
+                moves.append(step)
                 last = now
         enabled = session.cpu.read_word(GPIO_ENABLE)
 
     assert len(levels) >= 5, f"{label} changed {len(levels)} times"
     assert all(a != b for a, b in itertools.pairwise(levels)), levels
     assert levels[0] == "high", levels
-    gaps = {b - a for a, b in itertools.pairwise(rises)}
-    assert len(gaps) == 1, f"the period varies: {sorted(gaps)}"
+    gaps = [b - a for a, b in itertools.pairwise(moves)]
+    assert all(abs(gap - MILLISECOND) < POLL for gap in gaps), (
+        f"a delay(1) is {MILLISECOND} steps here, and {label} moved {gaps} apart")
     assert enabled & (1 << gpio)
     for sibling in not_gpio:
         assert not enabled & (1 << sibling), f"GPIO{sibling} was enabled"
