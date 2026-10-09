@@ -18,6 +18,11 @@ overflow`, abandoning the C++ frames mid-instruction.
 **So the instruction runs in a child process.** A regression then fails this
 one test with the child's exit code and stderr, instead of taking the suite
 down with it where the fault is a signal.
+
+**It sees the regression only where the host's divide faults** -- x86-64,
+which is every machine this runs on today. AArch64's `sdiv` answers INT32_MIN
+for INT32_MIN / -1 without a fault, the range check then traps, and this
+passes with or without the guard; only a UB sanitizer would see it there.
 """
 
 import json
@@ -65,12 +70,20 @@ def test_idiv_of_int32_min_by_minus_one_traps_and_the_host_survives():
         f"host's own divide error, not the part's.\n"
         f"stdout: {child.stdout!r}\nstderr: {child.stderr[-2000:]}"
     )
-    state = json.loads(child.stdout)
+    try:
+        state = json.loads(child.stdout)
+    except json.JSONDecodeError as error:
+        raise AssertionError(
+            f"the child exited 0 but printed no state: {error}\n"
+            f"stdout: {child.stdout!r}\nstderr: {child.stderr[-2000:]}") from error
     shown = {name: f"{value:04X}" for name, value in state.items()}
     assert (state["cs"], state["ip"]) == (0xB000, 0x1234), f"no divide error was taken: {shown}"
     assert (state["ax"], state["dx"]) == (0x0000, 0x8000), (
         f"AX and DX must be untouched -- the part writes no partial answer: {shown}"
     )
+    # The pushed FLAGS word at 0000:01FE is not asserted: the core pushes the
+    # flags it came in with, and the part pushes its microcode's intermediates,
+    # which is OH-11's to model and the same for every IDIV trap.
     assert state["sp"] == 0x01FA, f"the trap pushes FLAGS, CS and IP: {shown}"
     assert (state["pushed_cs"], state["pushed_ip"]) == (0x0000, 0x0102), (
         f"the pushed address is the one after the instruction: {shown}"
