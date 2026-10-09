@@ -1,7 +1,7 @@
 ---
 id: OH-208
 title: 'Zbb and Zbkb on the RP2350''s Hazard3: the core refuses what the chip executes'
-status: open
+status: in-progress
 priority: P2
 created: '2026-10-08'
 touches:
