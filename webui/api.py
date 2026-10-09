@@ -783,9 +783,11 @@ def uart_view(runtime: Runtime, cpu: Core) -> dict[str, object]:
 #: **Three of these are claims about the program and one is a claim about this
 #: repository**, and keeping them in one vocabulary is the whole point of the
 #: distinction. `high`, `low` and `input` say what the firmware has done to a
-#: pin. `unknown` says nobody here can answer -- because the board module has
-#: no entry for that label, or because the label is a power pad with no MCU pin
-#: behind it at all.
+#: pin. `unknown` says nobody here can answer -- because nothing here reads
+#: that pin's level at all, which `pad_view` states per pad as `modelled`
+#: whether or not the pad names an MCU pin (OH-172); because no program is
+#: running, which it states as `read_levels`; or because the running program
+#: has taken the pin somewhere its registers do not show.
 #:
 #: Reporting `unknown` as `low` would be the failure this project ranks worst:
 #: a picture of a board with every pad dark, indistinguishable from a program
@@ -880,6 +882,28 @@ def row_levels(runtime: Runtime, cpu: Core) -> dict[str, str] | None:
     return levels
 
 
+def level_keys(board: str, description: types.ModuleType | None,
+               layout: pinmap.PinMap | None) -> frozenset[str]:
+    """The names this board could ever report a level under -- the keys
+    `pin_levels` answers with -- known without a CPU (OH-172).
+
+    A module's `pin_states` answers under its `HEADER`. A row's levels are
+    read by `row_levels`, and its test of the module's words is restated
+    here rather than shared, because that function needs the words' values
+    and this needs only that they exist. `tests/webui/test_pin_view.py`
+    holds the two to one answer on every board in the catalogue.
+    """
+    if is_row(board):
+        words = [getattr(description, name, None) for name in ("GPIO", "GPIO_ENABLE", "GPIO_OUT")]
+        if None in words or layout is None:
+            return frozenset()
+        return frozenset(header_key(pad.label, {}) for pad in layout.pads
+                         if pad.chip_index is not None)
+    if getattr(description, "pin_states", None) is None:
+        return frozenset()
+    return frozenset(description.HEADER)
+
+
 def description_for(board: str) -> types.ModuleType | None:
     """The board module for this board, or `None` where there is not one.
 
@@ -907,13 +931,18 @@ def description_for(board: str) -> types.ModuleType | None:
 def chip_pin_of(name: str, names: dict[str, str], pad: pinmap.Pad) -> str | None:
     """Which MCU pin a pad reaches, from the module first and the file second.
 
+    **A caption and nothing more** (OH-172). Whether anything reads the pin's
+    level is `modelled`, which `level_keys` answers from the board's reader;
+    a pad on a board with no module names its chip pin here and is still not
+    modelled.
+
     **Two sources and a fixed order, not a merge.** `PIN_NAMES` is the board
     module's, and it wins wherever it has an entry, because it is the same
     table `pin_states` reads levels through -- so a label cannot carry one pin
     in the caption and another in the state. The board file's `chip_pin` fills
     the holes: it comes from `tools/import_pindefs.py` reading the vendor's own
-    board-support package, and it is the only source there is for the fourteen
-    boards that have no module at all.
+    board-support package, and it is the only source there is for a board
+    that has no module at all.
 
     **The fallback can only ever fill a hole and never overrule one** (OH-167).
     Measured 2026-09-05 across all 26 boards: 125 pads where both state a pin
@@ -1005,6 +1034,11 @@ def pad_view(board: str, description: types.ModuleType | None,
     # board's labels, so a row keys each pad by its own and captions it from
     # its own file (`row_levels`).
     names: dict[str, str] = {} if is_row(board) else getattr(description, "PIN_NAMES", {})
+    # **Whether anything reads a pad's level, which a caption does not say**
+    # (OH-172). The panel's "not modelled" is asked of this and not of
+    # `chip_pin`, because a board with no module captions its pads from its
+    # own file and still has nothing that reads them.
+    readable = level_keys(board, description, layout)
 
     pads: list[dict[str, object]] = []
     placed: set[str] = set()
@@ -1021,6 +1055,7 @@ def pad_view(board: str, description: types.ModuleType | None,
                 "label": pad.label,
                 "pin": name,
                 "chip_pin": chip_pin_of(name, names, pad),
+                "modelled": name in readable,
                 "x": pad.x,
                 "y": pad.y,
                 "group": pad.group,
@@ -1028,10 +1063,12 @@ def pad_view(board: str, description: types.ModuleType | None,
             })
     # Pins the board can answer for that the pad map has nowhere to put. Listed
     # after the placed ones so a caller can render them in order and stop.
+    # Modelled by construction: the reader answered under the name.
     for name in live:
         if name not in placed:
             pads.append({
                 "label": name, "pin": name, "chip_pin": names.get(name),
+                "modelled": True,
                 "x": None, "y": None,
                 "group": "on-board", "state": live[name],
             })
@@ -1111,11 +1148,9 @@ def pin_view(runtime: Runtime, cpu: Core, board: str) -> dict[str, object]:
     # be true of today's board modules.
     #
     # **What such a board would then say**, stated here rather than found
-    # later: every modelled pad reads "in use elsewhere" instead of "no
-    # program running". Neither is literally true of a module that publishes
-    # names it cannot read, and "in use elsewhere" is the better of the two --
-    # it is already the bucket for a pin that is answerable in principle and
-    # unanswerable now, which is exactly that module's every pin.
+    # later: "not modelled" on every pad, since OH-172. `modelled` asks the
+    # reader, and there is none, so the names that module publishes are
+    # captions and nothing more -- the answer a board with no module gets.
     return pad_view(board, runtime.description, pin_levels(runtime, cpu) or {})
 
 

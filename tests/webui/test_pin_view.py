@@ -732,19 +732,23 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
 
     The page could not tell the third from the second, so it said the second.
     Measured over `catalogue.board_names()`, counting pads that are `unknown`
-    with a `chip_pin` -- which is exactly the input the panel's `unknownWords`
+    and `modelled` -- which is exactly the input the panel's `unknownWords`
     reads -- for a board picked and not loaded.
 
     **It was twelve boards, OH-167 made it twenty-five and OH-170 made it all
-    twenty-six.** A chip pin used to come only from the board module's
-    `PIN_NAMES`, and fourteen boards have no module; it now falls back to the
-    `chip_pin` the board file has carried since OH-26. The last exclusion was
-    `XIAO-XIAO STM32C5-SMD`, whose file stated no chip pin for any of its 35
-    pads because no board-support package covers it -- and that stayed true
-    while Seeed's own schematic symbol library named two of them `SWDIO/PA13`
-    and `SWCLK/PA14`. Reading those left no board in the catalogue whose file
-    names no pin at all, so the exclusion is asserted empty rather than
-    deleted: a board that loses its chip pins has to show up here.
+    twenty-six**, while the panel asked `chip_pin`. A chip pin used to come
+    only from the board module's `PIN_NAMES`, and fourteen boards have no
+    module; it now falls back to the `chip_pin` the board file has carried
+    since OH-26. The last exclusion was `XIAO-XIAO STM32C5-SMD`, whose file
+    stated no chip pin for any of its 35 pads because no board-support package
+    covers it -- and that stayed true while Seeed's own schematic symbol
+    library named two of them `SWDIO/PA13` and `SWCLK/PA14`.
+
+    **OH-172 moved the question to `modelled`, and the exclusion back to the
+    boards nothing reads a level on.** A chip pin from the file is a caption:
+    on a board with no module nothing could read that pin once a program ran,
+    so "in use elsewhere" was never the sentence it was owed. Those boards are
+    named, so a board gaining or losing a reader has to show up here.
 
     Before OH-167 the twelve were the number OH-160 made it: TWO modules
     answered before that -- `atmega328p` and `samd21`, over three board files,
@@ -790,23 +794,26 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
         if view.get("present") and view["read_levels"] is not False
     ]
     # And the boards that would otherwise have lied, named rather than counted
-    # so that a board losing its chip pins shows up as a change here. All of
-    # them, since OH-170 -- still written as the exclusion, because an empty
-    # list is what says the last board with no chip pin at all has gone, and
-    # a board losing its pins again would refill it.
+    # so that a board gaining or losing a reader shows up as a change here.
+    # Written as the exclusion: the boards with no modelled pad, which since
+    # OH-172 are the boards nothing reads a level on, captions or no captions.
     would_have_lied = sorted(
         board for board, view in picked.items()
         if view.get("present") and any(
-            pad["state"] == "unknown" and pad["chip_pin"] is not None
+            pad["state"] == "unknown" and pad["modelled"]
             for pad in view["pads"])
     )
     silent = sorted(set(boards) - set(would_have_lied))
-    assert silent == [], silent
-    assert len(would_have_lied) == 38, would_have_lied
+    assert silent == [
+        "XIAO-ESP32-S3-DIP", "XIAO-ESP32-S3-SMD", "XIAO-ESP32-S3-SMD_PAD",
+        "XIAO-MG24-DIP", "XIAO-MG24-SMD", "XIAO-XIAO STM32C5-SMD",
+        "XIAO-nRF52840-DIP", "XIAO-nRF52840-SMD", "XIAO-nRF54LM20A-DIP",
+        "XIAO-nRF54LM20A-SMD", "XIAO-nRF54l15-DIP", "XIAO-nRF54l15-SMD",
+    ], silent
     assert "Arduino Uno" in would_have_lied
-    assert "XIAO-MG24-SMD" in would_have_lied, (
-        "the MG24 has no board module at all, so its 19 chip pins can only "
-        "have come from its board file -- which is what OH-167 changed"
+    assert "XIAO-MG24-SMD" in silent, (
+        "the MG24 has no board module at all, so its chip pins come from its "
+        "board file and are captions: nothing reads them (OH-172)"
     )
     # A dict, even an empty one, is a program that was asked.
     asked = api.pad_view(UNO, api.description_for(UNO), {})
@@ -881,6 +888,9 @@ def test_a_running_board_whose_module_reads_no_pins_still_says_one_is_running():
     # And the pads are all unknown, which is the honest half: there really
     # are no levels. The difference is what the page says about WHY.
     assert view["unknown"] == len(view["pads"])
+    # And none is modelled (OH-172): its names are captions, with no reader
+    # behind them, so the page says "not modelled" rather than "in use".
+    assert not any(pad["modelled"] for pad in view["pads"]), view["pads"]
     # The coupling that makes this unreachable today, stated so that a module
     # gaining a generated header and no reader is a change here rather than a
     # silent one.
@@ -990,6 +1000,54 @@ def test_the_board_module_wins_where_it_names_a_pin_and_the_file_fills_the_rest(
     assert others, "the fixture needs a pad the module does not name"
     for label, pin in others.items():
         assert shown[label] == pin, (label, pin, shown[label])
+
+
+def test_a_pad_is_modelled_exactly_where_its_board_reads_a_level():
+    """**OH-172: one field was answering two questions.**
+
+    `chip_pin` is a caption -- which MCU pin a label reaches -- and the panel
+    also read it as "does anything here read this pin's level". OH-167 let a
+    board with no module caption its pads from its own file, so on every such
+    board a pad that names a chip pin said "no program running", which
+    OH-164 reserves for a pin something could answer for once a program ran.
+    Nothing reads a level on a board with no module, so those pads are "not
+    modelled", whatever their caption says.
+
+    So `modelled` is its own field, and it is held here against the reader
+    itself rather than against how `pad_view` computes it: a bus that reads
+    zero stands in for a running program, as in the C5 and C6 test above, and
+    a pad is modelled exactly where `pin_levels` answers under its name. A
+    board that reads nothing answers None, and none of its pads is modelled.
+    """
+    zero = types.SimpleNamespace(read_word=lambda address: 0,
+                                 read_data=lambda address: 0)
+    reading = []
+    for board in catalogue.board_names():
+        description = api.description_for(board)
+        view = api.pad_view(board, description, None)
+        # `board` because `pin_levels` asks whether it is a manifest row.
+        runtime = types.SimpleNamespace(board=board, description=description)
+        levels = api.pin_levels(runtime, zero) or {}
+        # Picked and not loaded, so every pad is a placed one: the reader's
+        # padless rows (a XIAO's `LED`) appear only beside levels.
+        assert all(pad["x"] is not None for pad in view["pads"]), board
+        # A bool and not merely truthy: the panel asks `modelled !== true`.
+        assert all(type(pad["modelled"]) is bool for pad in view["pads"]), board
+        assert [(pad["label"], pad["modelled"]) for pad in view["pads"]] == [
+            (pad["label"], pad["pin"] in levels) for pad in view["pads"]], board
+        if levels:
+            reading.append(board)
+            # Running, the reader's padless rows are listed too, and they
+            # are modelled because the reader answered under them.
+            running = api.pad_view(board, description, levels)
+            assert [(pad["label"], pad["modelled"]) for pad in running["pads"]] == [
+                (pad["label"], pad["pin"] in levels) for pad in running["pads"]], board
+    assert "Arduino Uno" in reading and "XIAO-MG24-SMD" not in reading, reading
+
+    # The case the ticket is for: a caption, and no level behind it.
+    view = api.pad_view("XIAO-MG24-SMD", api.description_for("XIAO-MG24-SMD"), None)
+    d0 = next(pad for pad in view["pads"] if pad["label"] == "D0")
+    assert (d0["chip_pin"], d0["modelled"]) == ("PC0", False), d0
 
 
 def test_the_uno_names_the_component_its_led_pin_lights_and_no_other_board_does():
@@ -1201,6 +1259,9 @@ def test_a_row_whose_chip_module_names_no_gpio_words_reports_no_levels():
                             api.row_levels(runtime, _Words({})))
         assert [(pad["pin"], pad["chip_pin"], pad["state"]) for pad in view["pads"]] == [
             (pad["label"], pad["chip_pin"], "unknown") for pad in own["pads"]], board
+        # And with no words, nothing is modelled (OH-172): a `chip_index`
+        # says where a level would be read, not that anything reads it.
+        assert not any(pad["modelled"] for pad in api.pad_view(board, bare, None)["pads"]), board
 
 
 def test_a_manifest_pad_is_never_captioned_by_its_chip_modules_table():

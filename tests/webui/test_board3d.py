@@ -418,22 +418,51 @@ def test_hovering_lights_what_a_press_would_grab():
     assert 'addEventListener("pointerleave", dehover)' in code
 
 
-def test_the_two_sentences_are_told_apart_by_the_pin_and_not_by_a_guess():
-    """`chip_pin` is exact rather than convenient, and this is where that is
-    asserted rather than assumed.
+def test_not_modelled_is_decided_by_the_modelled_flag_and_not_by_the_caption(tmp_path):
+    """**OH-172: a caption is not a level.** `chip_pin` says which MCU pin a
+    pad reaches, and since OH-167 a board with no module captions its pads
+    from its own file -- so a panel that read "has a chip pin" as "something
+    reads this pin" told an MG24's `D0`, which reaches `PC0` and has nothing
+    reading it, that no program was running. `webui/api.py` now states
+    `modelled` per pad, and `tests/webui/test_pin_view.py` holds it to the
+    board's own level reader.
 
-    `webui/api.py` fills `chip_pin` from the board's `PIN_NAMES`, which is
-    derived from the same `HEADER` its `pin_states` walks -- so a pad carries a
-    chip pin **if and only if** the board answered for it. A panel that guessed
-    from the label, or from the group, would be right on an Uno and wrong on
-    the next board.
+    Run rather than grepped: `unknownWords` and its three sentences,
+    extracted from the panel and called under node. A pad that does not
+    carry the field reads "not modelled", because a view without it is one
+    nobody has vouched for.
     """
-    panel = PANEL.read_text(encoding="utf-8")
-    chooser = panel.split("function unknownWords", 1)[1].split("\n}", 1)[0]
-    assert "chip_pin" in chooser
-    from webui.boards import atmega328p
-
-    assert set(atmega328p.PIN_NAMES) == set(atmega328p.HEADER)
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("no node on PATH; the chooser is plain JS and needs one "
+                    "to run")
+    panel = stripped(PANEL.read_text(encoding="utf-8"))
+    sentences = [re.search(rf"^const {name} = .*;$", panel, re.MULTILINE)
+                 for name in ("NOT_MODELLED", "IN_USE", "NOTHING_RUNNING")]
+    assert all(sentences), sentences
+    chooser = ("function unknownWords"
+               + panel.split("function unknownWords", 1)[1].split("\n}", 1)[0]
+               + "\n}")
+    cases = [
+        ({"modelled": False, "chip_pin": "PC0"}, False, "not modelled"),
+        ({"modelled": False, "chip_pin": "PC0"}, True, "not modelled"),
+        ({"modelled": True, "chip_pin": "GPIO2"}, False, "no program running"),
+        ({"modelled": True}, True, "in use elsewhere"),
+        ({"chip_pin": "PB5"}, False, "not modelled"),
+        ({"chip_pin": "PB5"}, True, "not modelled"),
+    ]
+    script = tmp_path / "probe.mjs"
+    script.write_text(
+        "\n".join(match.group(0) for match in sentences) + "\n" + chooser + "\n"
+        + f"const cases = {json.dumps([[pad, read] for pad, read, _ in cases])};\n"
+        + "console.log(JSON.stringify(cases.map(([pad, read]) => "
+        + "unknownWords(pad, read))));\n",
+        encoding="utf-8")
+    done = subprocess.run([node, str(script)], capture_output=True, text=True,
+                          check=False)
+    assert done.returncode == 0, done.stderr
+    got = json.loads(done.stdout.strip().splitlines()[-1])
+    assert got == [words for _, _, words in cases], list(zip(cases, got))
 
 
 def test_a_third_sentence_says_when_there_is_no_program_at_all():

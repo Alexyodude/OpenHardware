@@ -76,11 +76,11 @@ const WORDS = {
 //: in the same row that says nothing models it. Every assertion passed: the
 //: state really was `unknown`, and the words were what was wrong.
 //:
-//: `chip_pin` is the discriminator and it is exact rather than convenient.
-//: `webui/api.py` fills `chip_pin` from the board's `PIN_NAMES`, which is
-//: derived from the same `HEADER` its `pin_states` walks -- so a pad has a
-//: chip pin **if and only if** the board answered for it. A pad with none was
-//: never in the board's table at all.
+//: `modelled` is the discriminator, and `chip_pin` is not (OH-172).
+//: `webui/api.py` sets `modelled` where the board's own level reader answers
+//: under the pad's name. `chip_pin` is only the caption in the Chip pin
+//: column: a board with no module captions its pads from its own file, and
+//: nothing reads them, so a chip pin is no evidence that a level could be.
 const NOT_MODELLED = "not modelled";
 const IN_USE = "in use elsewhere";
 //: The third sentence (OH-164), and it is about there being no program rather
@@ -104,9 +104,12 @@ const NOTHING_RUNNING = "no program running";
  * fact about the fetch and not about any one pin. Working it out here from
  * `unknown === pads.length` would be a guess that is also true of a loaded
  * program driving nothing, which is OH-121's re-derivation all over again.
+ *
+ * A pad without `modelled` reads as not modelled: a view that does not say
+ * something reads the pin has not vouched for a level.
  */
 function unknownWords(pad, readLevels) {
-  if (pad.chip_pin === null || pad.chip_pin === undefined) return NOT_MODELLED;
+  if (pad.modelled !== true) return NOT_MODELLED;
   return readLevels ? IN_USE : NOTHING_RUNNING;
 }
 
