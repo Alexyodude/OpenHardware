@@ -1819,7 +1819,7 @@ def test_the_extruded_slab_is_the_same_substance_as_a_measured_one():
 
     from tools.import_3d_model import FINISHES
 
-    for colour in ("#313d63", "#116517"):
+    for colour in ("#313d63", "#49a954"):
         finish = FINISHES[colour]
         assert (finish.roughness, finish.coat, finish.coat_roughness) == (
             numbers["roughness"], numbers["coat"], numbers["coatRoughness"]
