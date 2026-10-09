@@ -22,11 +22,16 @@
 # RV64's and illegal here. Chapter 28 spells `brev8` as `rev.b`; chapter
 # 32, riscv-opcodes and GNU binutils spell it `brev8`.
 #
-# **One figure in both chapters disagrees with everything else.** `zip`
-# and `unzip` are drawn with 0x1e and 0x1f in the rs2 field; riscv-opcodes'
-# `extensions/rv32_zbkb` says `24..20=15`, rvcpp's `RVOPC_ZIP_BITS` (the
-# Hazard3 author's own table) says 0b01111, and GNU as 2.43 assembles
-# `zip a0,a1` to 0x08f59513. This core and these tests use 0b01111.
+# **One figure in both chapters of that release was wrong, and has been
+# corrected.** 20240411 draws `zip` and `unzip` with 0x1e and 0x1f in the
+# rs2 field; riscv-isa-manual 698e64ae7 (2024-09-09, "Fix
+# descriptions/encodings of zip/unzip instructions (#1635)") changed both
+# chapters' figures to 0xf, restoring the ratified encoding. sail-riscv's
+# `model/extensions/K/zbkb_insts.sail:66-67` and `:89-90` (at 549e723)
+# encode both with rs2 0b01111, as do riscv-opcodes'
+# `extensions/rv32_zbkb` (`24..20=15`), rvcpp's `RVOPC_ZIP_BITS` (the
+# Hazard3 author's own table) and GNU as 2.43 (`zip a0,a1` is 0x08f59513).
+# This core and these tests use 0b01111.
 #
 # The Zcb compressed forms `c.sext.b`, `c.zext.h` and `c.sext.h` are in the
 # same file because each one's page in chapter 27 (Zc*) says "Zbb is also

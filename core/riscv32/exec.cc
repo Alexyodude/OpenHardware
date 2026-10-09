@@ -1010,12 +1010,15 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
                 default: return StepResult::Illegal;
                 }
             } else if (seven == 0x04u && rs2 == 0x0Fu) {
-                // ZIP. Chapter 28's and chapter 32's encoding figures both
-                // draw this field as 0x1e (unzip's as 0x1f); the
-                // instruction is 0b01111 in riscv-opcodes' `rv32_zbkb`, in
-                // rvcpp's `RVOPC_ZIP_BITS` (Hazard3's author's own table)
-                // and in what GNU as 2.43 assembles, and that is what
-                // `tests/riscv32/test_zbb_zbkb.py` holds it to.
+                // ZIP, rs2 = 0b01111. The 20240411 release's figures in
+                // chapters 28 and 32 drew this field as 0x1e (unzip's as
+                // 0x1f), and riscv-isa-manual 698e64ae7 (2024-09-09, "Fix
+                // descriptions/encodings of zip/unzip instructions
+                // (#1635)") put both back to the ratified 0xf. sail-riscv's
+                // `model/extensions/K/zbkb_insts.sail:66-67` (at 549e723),
+                // riscv-opcodes' `rv32_zbkb`, rvcpp's `RVOPC_ZIP_BITS`
+                // (Hazard3's author's own table) and GNU as 2.43 all say
+                // 0b01111, and `tests/riscv32/test_zbb_zbkb.py` holds it.
                 if (!cpu.has(kExtZbkb)) {
                     return StepResult::Illegal;
                 }
@@ -1069,8 +1072,9 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
                 }
                 result = reverse_bits_in_bytes(a);                      // BREV8
             } else if (seven == 0x04u && rs2 == 0x0Fu) {
-                // UNZIP, 0x08F -- Zbkb, RV32 only; see ZIP above for the
-                // field the spec's figure draws differently.
+                // UNZIP, 0x08F -- Zbkb, RV32 only; sail-riscv's
+                // `zbkb_insts.sail:89-90`. See ZIP above for the 20240411
+                // figure that drew this field as 0x1f, since corrected.
                 if (!cpu.has(kExtZbkb)) {
                     return StepResult::Illegal;
                 }
