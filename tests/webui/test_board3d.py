@@ -1002,7 +1002,7 @@ def test_a_lit_lens_is_as_bright_as_a_surface_can_be_and_no_brighter():
     albedo** -- the fraction of the light reaching a surface that it sends
     back -- so no channel of it can pass 1.0 (OH-214).
 
-    3.0 did, on both lenses there are: KiCad's LED lens `#b2190d` is 0.445
+    3.0 did, when OH-214 retuned it: KiCad's LED lens `#b2190d` is 0.445
     linear red and lit at 1.34, the buzzer's mark `#ce6d26` is 0.617 and lit
     at 1.85. The gain is the largest tenth that keeps the brightest lens any
     part names inside the range, which is the derivation `parts.js` states

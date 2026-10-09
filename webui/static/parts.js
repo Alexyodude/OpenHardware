@@ -79,7 +79,7 @@ const LIT = 1.2;
 //: `#ce6d26`, at 0.617 linear red, which allows 1 / 0.617 = 1.62; KiCad's LED
 //: lens, 0.445, then lights at 0.71. What IS a judgement is reading "several
 //: times brighter" as "as much brighter as that bound allows", and sharing
-//: one gain between the two lenses rather than giving each its own.
+//: one gain between every lens rather than giving each its own.
 //:
 //: It was 3.0, chosen in fcce44c against this same lens at 0.447 -- the
 //: writer then put a byte divided by 255 straight into `baseColorFactor` --
