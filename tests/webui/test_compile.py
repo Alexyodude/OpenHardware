@@ -2066,7 +2066,8 @@ void loop() { }
 #: Steps past its wait by which each sketch here that times one has printed,
 #: measured 2026-10-09: the last byte lands 145 steps past five milliseconds
 #: for `DELAY_BY_MILLIS` on the C3 and 141 on the C5; 169 and 165 past 1,250
-#: microseconds for `DELAY_US_BY_MICROS`. Then each sits in an empty `loop()`.
+#: microseconds for `DELAY_US_BY_MICROS`; 179 past fifty milliseconds for
+#: `LONG_DELAY_BY_MICROS` on the C3. Then each sits in an empty `loop()`.
 DELAY_PRINTED = 1_000
 
 
@@ -2139,6 +2140,43 @@ def test_a_delay_in_microseconds_timed_by_micros_lasts_what_it_asked_for():
         assert text == b"1250\r\n", (
             f"{board}: a delayMicroseconds(1250) timed by micros() printed "
             f"{text!r} in {budget} steps")
+
+
+#: Times a long delay() with micros(): fifty milliseconds, each of which a
+#: delay() that lost its place at the end of the one before would stretch.
+LONG_DELAY_BY_MICROS = """
+void setup() {
+  unsigned long t = micros();
+  delay(50);
+  Serial.println(micros() - t);
+}
+void loop() { }
+"""
+
+
+def test_a_late_poll_does_not_push_the_next_millisecond_later():
+    """delay() advances `start` by whole milliseconds rather than reading the
+    count again (wiring.c), so the poll it overruns by is spent once, at the
+    end, and not once a millisecond. A delay() that read `start` again after
+    each millisecond loses a tick or so a millisecond: on the C5 the delay(3)
+    scaling test sees that, and on the C3 and the C6 no shorter delay above
+    does. Over fifty it prints 50003 here.
+
+    Exactly 50000, on the delayMicroseconds() test's argument: measured
+    2026-10-09, `t`'s copy is taken at tick 2 and the closing copy at tick
+    800,007, short of 800,016, where 50001 begins. The C3 alone, whose C6
+    counts at its rate: fifty milliseconds is 8,000,000 steps."""
+    needs_toolchain(C3_BOARD)
+    built = oh_build(C3_BOARD, LONG_DELAY_BY_MICROS)
+    assert built.ok, built.diagnostics
+    millisecond = esp32c3.SYSTIMER_INSTRUCTIONS_PER_TICK * (esp32c3.SYSTIMER_HZ // 1000)
+    budget = 50 * millisecond + DELAY_PRINTED
+    with api.load_firmware(C3_BOARD, built.image,
+                           base=compiler.recipe_for(C3_BOARD).base) as session:
+        session.step(budget)
+        text = esp32c3.uart0_output(session.cpu)
+    assert text == b"50000\r\n", (
+        f"a delay(50) timed by micros() printed {text!r} in {budget} steps")
 
 
 #: Prints both clocks once, so a test can set the count they read.
