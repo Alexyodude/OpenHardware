@@ -4,6 +4,9 @@ title: Six manifest boards may be drawn a quarter turn off their own pads by the
 status: in-review
 priority: P1
 created: '2026-10-09'
+touches:
+- webui/static/board3d.js
+- tests/webui/test_board3d.py
 ---
 
 Found by OH-163 step 2's review-fix worker (2026-10-09), from pad positions only; not yet seen in a browser. Six manifest boards may be drawn by the page a quarter turn off their own pads: SparkFun Pro Micro ESP32-C3, Adafruit QT Py ESP32-C3, SparkFun Thing Plus ESP32-C6, SparkFun Thing Plus ESP32-C5, PCBCUPID Glyph Mini RP2040 and Olimex ESP32-C3-DevKit-Lipo.
@@ -21,3 +24,5 @@ Done when every board's pads land on its drawn pads as the page places them, hel
 **Note 2026-10-09:** 2026-10-09: MERGED to master by fast-forward at 60dd716 (lane3). REVIEW: an independent review, MERGE (31 of 37 model-drawn boards placed byte-identically before and after; the six named boards now land each pad on its own pad, by net or pad number), then its test-strength round (a half turn now fails every board read from its own vendor file; partial builds named). VERIFIED on master at 60dd716: full suite 2 failed (the OCP pair), the rest passed. STILL OPEN, and why this stays in-review: the Done-when's 'the six boards are seen right in the page' -- no browser was available (gstack's /browse is not installed; the Playwright connector failed to connect). The node harness runs the page's own placeModel and carvePins on the real models, which covers the code and not the pixels. Its follow-ups (a turn and centre chosen from pads both sides name, XIAO underside pads carving topside metal, fetched XIAO meshes carving nothing) are filed as their own ticket.
 
 **Note 2026-10-09:** 2026-10-09: webui/static/board3d.js and tests/webui/test_board3d.py lent to OH-214, whose colour re-keying reaches a test here that reads an old FINISHES key and comments naming old keys. This ticket's remaining item is a look in a browser, which edits nothing. Return them when OH-214 closes.
+
+**Note 2026-10-09:** 2026-10-09: webui/static/board3d.js and tests/webui/test_board3d.py return from OH-214 (done).
