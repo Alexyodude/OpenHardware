@@ -139,6 +139,28 @@ const PIN_REACH_MM = 1.1;
 //: counted. A pad on no stated side is a topside pad, as every pad was.
 const UNDERSIDE = "underside";
 
+//: How far under a face of the board a pad's metal may lie and still be on
+//: that face, in model millimetres (OH-216).
+//:
+//: **A pad's copper is in the mask's opening, not on top of the mask.**
+//: Seeed's ESP32-S3 and nRF52840 STEPs say so in their own PCB solid: its top
+//: face is at 1.250 mm with recesses at 1.240 and 1.230 where the pads are,
+//: and their castellation copper tops out at 1.24 -- so a filter reading
+//: "above the board's top" took none of it, and those boards' castellations
+//: carved nothing. The deepest recess on any fetched board is 0.02 mm; the
+//: next metal down a castellation is its plated wall, whose triangles centre
+//: 0.4 mm and more below the face. 0.05 is between the two with room on
+//: both sides.
+//:
+//: **Three fetched boards carve no castellation at all, and this is why.**
+//: Seeed's RP2040 and nRF54LM20A STEPs leave the half-holes unstyled -- the
+//: grey `UNSTYLED` in `tools/import_3d_model.py`, which is given no material
+//: because nothing says what it is -- and the MG24's are faces of its PCB
+//: solid itself. None is metal, so there is nothing to carve and each pad
+//: keeps its invisible collider; making one metal would be inventing what
+//: the vendor did not state.
+const PAD_RECESS_MM = 0.05;
+
 //: How brightly a real pin glows in its state's colour.
 //:
 //: **The state is EMITTED, not painted on, and the first attempt got that
@@ -1175,9 +1197,10 @@ export function showBoard(layout, model = null) {
   view.board.add(edges);
 
   // **The pads stand on whichever board is showing.** With the vendor's model
-  // loaded that is its own PCB, which is 1.61 mm on a SAMD21 and 1.20 mm on an
-  // RP2040 -- so a height fixed to the assumed 1.6 would sink four pads into
-  // one board and float them above another. `placeModel` raises them when the
+  // loaded that is its own PCB, which is 1.60 mm on an MG24 and 1.20 mm on an
+  // RP2040 -- so a height fixed to the assumed 1.6 would sink pads into one
+  // board and float them above another. (The SAMD21's was stated 1.61 until
+  // OH-216 measured its top face, at 1.21.) `placeModel` raises them when the
   // mesh arrives; until then they sit on the slab, which is also where they
   // stay on a board with no model.
   // An underside pad lies on the board's underside, mirrored across it.
@@ -1376,10 +1399,13 @@ function carvePins(group, pcbThickness) {
       // and out of the underside, and carving that would take the solder
       // side of a part nobody is looking at. **And below its bottom face for
       // a pad on the underside, and only for one** (OH-216): each pad takes
-      // metal on its own side of the board and never the other's.
+      // metal on its own side of the board and never the other's. "On" a
+      // face is within `PAD_RECESS_MM` of it, because a pad's copper sits in
+      // the mask's opening, a hundredth of a millimetre under the board's
+      // face on two vendors' own meshes.
       let mine = null;
-      const below = centre.y < 0;
-      if (below || centre.y > pcbThickness) {
+      const below = centre.y < PAD_RECESS_MM;
+      if (below || centre.y > pcbThickness - PAD_RECESS_MM) {
         let nearest = PIN_REACH_MM;
         for (const pad of wanted) {
           if (pad.under !== below) continue;

@@ -3328,3 +3328,107 @@ def test_every_composed_board_lands_each_pad_on_a_header_pad_its_model_states(
     if left_out:
         pytest.skip(f"SKIPPED in part: the {len(composed)} boards placed here "
                     f"held; left out: {left_out}")
+
+
+# --- OH-216: a fetched mesh's castellations carve, or its vendor made none ----
+
+
+def metal_centres(path: pathlib.Path) -> list[tuple[float, float, float]]:
+    """The centre `(x, y, z)` of every triangle of a .glb drawn in a metal
+    -- `metallicFactor` over a half, the line `carvePins` draws -- in the
+    model's own millimetres."""
+    raw = path.read_bytes()
+    length, _ = struct.unpack_from("<II", raw, 12)
+    document = json.loads(raw[20:20 + length])
+    at = 20 + length
+    size, _ = struct.unpack_from("<II", raw, at)
+    binary = raw[at + 8:at + 8 + size]
+
+    def read(index: int) -> list[tuple]:
+        accessor = document["accessors"][index]
+        view = document["bufferViews"][accessor["bufferView"]]
+        width = {"SCALAR": 1, "VEC3": 3}[accessor["type"]]
+        kind = {5126: "f", 5125: "I", 5123: "H"}[accessor["componentType"]]
+        values = struct.unpack_from(
+            f"<{accessor['count'] * width}{kind}", binary,
+            view.get("byteOffset", 0) + accessor.get("byteOffset", 0))
+        return [values[i:i + width] for i in range(0, len(values), width)]
+
+    centres = []
+    for mesh in document["meshes"]:
+        for primitive in mesh["primitives"]:
+            material = document["materials"][primitive["material"]]
+            if material["pbrMetallicRoughness"].get("metallicFactor", 1.0) <= 0.5:
+                continue
+            corners = read(primitive["attributes"]["POSITION"])
+            indices = [index for (index,) in read(primitive["indices"])]
+            for k in range(0, len(indices), 3):
+                three = [corners[i] for i in indices[k:k + 3]]
+                centres.append(tuple(sum(c[axis] for c in three) / 3
+                                     for axis in range(3)))
+    return centres
+
+
+#: `PIN_REACH_MM` in board3d.js, and `PAD_RECESS_MM` beside it.
+PAGE_REACH_MM = 1.1
+PAGE_RECESS_MM = 0.05
+
+
+def test_every_fetched_meshs_castellations_carve_where_its_vendor_made_them_metal(
+        tmp_path):
+    """**OH-216: the fetched XIAO meshes carved nothing**, and for two
+    different reasons, one per kind of mistake. On the SAMD21 the stated PCB
+    thickness was its solid's box, 1.61 mm, which a small feature on that
+    solid reaches -- the board's own top face is at 1.21, and its castellation
+    copper stops at 1.22. On the ESP32-S3 and nRF52840 the thickness is right
+    and the filter was wrong: their pads' copper lies in the mask's openings,
+    0.01 mm under the board's face, and "above the board" took none of it.
+
+    Held over every board drawn from a fetched mesh built here, as the page
+    places it: each pad on the board's top carves metal standing on the top,
+    each underside pad metal on the underside (never the components standing
+    over it), and a pad on the top that carves nothing has no metal of its
+    vendor's within reach of it at ANY height -- which is why the RP2040's,
+    the MG24's and the nRF54LM20A's castellations keep their invisible
+    colliders: their STEPs make the half-holes unstyled or part of the
+    board, and nothing here says they are metal.
+
+    Seen red (2026-10-09): on board3d.js before PAD_RECESS_MM, every S3 and
+    nRF52840 board, castellations and all; and with SAMD21.glb as imported
+    before `board_top`, both SAMD21 boards.
+    """
+    index = STATIC / "models" / "index.json"
+    if not index.is_file():
+        pytest.skip(f"no {index}; run tools/import_3d_model.py --all")
+    from tools.import_3d_model import read_extras
+    from webui import api
+
+    cases, metal = [], {}
+    for board, entry in json.loads(index.read_text(encoding="utf-8"))["boards"].items():
+        model = STATIC / (entry.get("file") or "/").lstrip("/")
+        if entry.get("composed") or not model.is_file():
+            continue
+        if model not in metal:
+            metal[model] = metal_centres(model)
+        cases.append({"layout": api.pad_view(board, None, None), "file": str(model)})
+    if not cases:
+        pytest.skip("no fetched mesh is built here; run tools/import_3d_model.py --all")
+    wrong = []
+    for case, given in zip(placed_by_the_page(tmp_path, cases), cases, strict=True):
+        layout = given["layout"]
+        top = read_extras(pathlib.Path(given["file"]))["pcb"]["thickness"]
+        for pad in case["pads"]:
+            under = layout["pads"][pad["index"]]["group"] == "underside"
+            off_side = [round(y, 3) for _, _, y in pad["tris"]
+                        if (y >= PAGE_RECESS_MM if under else y <= top - PAGE_RECESS_MM)]
+            near = [y for x, y, z in metal[pathlib.Path(given["file"])]
+                    if math.hypot(x - pad["x"], z - pad["z"]) < PAGE_REACH_MM]
+            if off_side:
+                wrong.append(f"{case['board']} {pad['label']}: carved metal off its "
+                             f"own side of a {top} mm board, at {off_side[:3]}")
+            elif not pad["tris"] and near and not under:
+                wrong.append(f"{case['board']} {pad['label']}: carved nothing, "
+                             f"with its vendor's metal within reach at heights "
+                             f"{round(min(near), 3)}..{round(max(near), 3)} mm on "
+                             f"a {top} mm board")
+    assert not wrong, f"{len(wrong)} pads:\n" + "\n".join(wrong[:20])
