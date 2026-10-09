@@ -140,10 +140,12 @@ the source), and held to two vendors' own silkscreen Gerbers.
 What is NOT drawn is counted and printed: text the stroke font cannot draw
 as the vendor plotted it -- a TrueType face, knockout text, and every EAGLE
 board's text, which EAGLE plots in a vector font built into its executable;
-the arcs, circles and polygons on that layer;
+the shapes on that layer the composer cannot draw yet, which `--check` names
+per board by kind (a KiCad board's silkscreen arcs are drawn since OH-163);
 **inner copper layers**, which are inside the laminate where nothing can see
 them; and a zone's **filled polygon**, which is a keyhole outline walking into
-every thermal relief and back out. The colours are judgements and say so, as
+every thermal relief and back out. One gap is not counted yet: a board's own
+milled holes, which neither reader reads (OH-163). The colours are judgements and say so, as
 `BOARD_MASK` does: six of Seeed's seven board files carry a full `(stackup
 ...)` -- six copper layers with thicknesses, five FR4 dielectrics with their
 `epsilon_r`, both solder masks with a thickness -- and not one of them fills in
