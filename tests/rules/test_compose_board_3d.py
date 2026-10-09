@@ -6776,18 +6776,23 @@ def test_every_composed_model_states_the_header_pads_it_is_set_by():
     pads and not by its outline. Skips where nothing is composed.
 
     Seen red (2026-10-09): on the models composed before OH-216, every one
-    stated none.
+    stated none. A board the index says is composed whose model is not
+    built here is left out and named in a skip, after the rest are held: in
+    review (2026-10-09), with XIAO-ESP32-C3-DIP.glb moved away, this passed
+    quietly; now it skips in part, naming the two boards drawn from it.
     """
     index = REPO / "webui" / "static" / "models" / "index.json"
     if not index.is_file():
         pytest.skip(f"no {index}; run tools/compose_board_3d.py")
     from tools.import_3d_model import read_extras
 
-    wrong = []
+    wrong, left_out = [], []
     seen = 0
     for board, entry in json.loads(index.read_text(encoding="utf-8"))["boards"].items():
         model = REPO / "webui" / "static" / (entry.get("file") or "/").lstrip("/")
         if not model.is_file():
+            if entry.get("composed"):
+                left_out.append(f"{board}: no {model.name}")
             continue
         extras = read_extras(model)
         if not extras.get("composed"):
@@ -6797,8 +6802,14 @@ def test_every_composed_model_states_the_header_pads_it_is_set_by():
         if not rows or any(len(row) != 5 or not row[4] for row in rows):
             wrong.append(f"{board}: header_pads {rows[:2]!r}")
     if not seen:
-        pytest.skip("no composed model is built here; run tools/compose_board_3d.py")
+        pytest.skip(f"no composed model is built here; run tools/compose_board_3d.py. "
+                    f"Left out: {left_out}")
     assert not wrong, "\n".join(wrong)
+    if left_out:
+        pytest.skip(f"SKIPPED in part: the {seen} boards whose composed model is "
+                    f"built here held; "
+                    f"left out, with no model built here (recompose: python "
+                    f"tools/compose_board_3d.py): {left_out}")
 
 
 def test_a_boards_thickness_is_its_top_face_and_not_its_solids_box():

@@ -3478,7 +3478,10 @@ def test_every_fetched_meshs_castellations_carve_where_its_vendor_made_them_meta
 
     Seen red (2026-10-09): on board3d.js before PAD_RECESS_MM, every S3 and
     nRF52840 board, castellations and all; and with SAMD21.glb as imported
-    before `board_top`, both SAMD21 boards.
+    before `board_top`, both SAMD21 boards. A board the index names whose
+    mesh is not built here is left out and named in a skip, after the rest
+    are held: in review (2026-10-09), with ESP32-S3.glb moved away, this
+    passed quietly; now it skips in part, naming the three S3 boards.
     """
     index = STATIC / "models" / "index.json"
     if not index.is_file():
@@ -3486,16 +3489,20 @@ def test_every_fetched_meshs_castellations_carve_where_its_vendor_made_them_meta
     from tools.import_3d_model import read_extras
     from webui import api
 
-    cases, metal = [], {}
+    cases, metal, left_out = [], {}, []
     for board, entry in json.loads(index.read_text(encoding="utf-8"))["boards"].items():
         model = STATIC / (entry.get("file") or "/").lstrip("/")
-        if entry.get("composed") or not model.is_file():
+        if entry.get("composed"):
+            continue
+        if not model.is_file():
+            left_out.append(f"{board}: no {model.name}")
             continue
         if model not in metal:
             metal[model] = metal_centres(model)
         cases.append({"layout": api.pad_view(board, None, None), "file": str(model)})
     if not cases:
-        pytest.skip("no fetched mesh is built here; run tools/import_3d_model.py --all")
+        pytest.skip(f"no fetched mesh is built here; run tools/import_3d_model.py "
+                    f"--all. Left out: {left_out}")
     wrong = []
     for case, given in zip(placed_by_the_page(tmp_path, cases), cases, strict=True):
         layout = given["layout"]
@@ -3515,3 +3522,7 @@ def test_every_fetched_meshs_castellations_carve_where_its_vendor_made_them_meta
                              f"{round(min(near), 3)}..{round(max(near), 3)} mm on "
                              f"a {top} mm board")
     assert not wrong, f"{len(wrong)} pads:\n" + "\n".join(wrong[:20])
+    if left_out:
+        pytest.skip(f"SKIPPED in part: the {len(cases)} boards placed here held; "
+                    f"left out, with no mesh built here (run python "
+                    f"tools/import_3d_model.py --all): {left_out}")
