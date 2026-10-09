@@ -2624,8 +2624,8 @@ export async function load(url, context, next) {
 #: Draws each case's board with `showBoard`, loads its model with `loadModel`
 #: (through a `fetch` that reads the disk), and prints per board the model's
 #: turn and scale, and where every pad sits in the MODEL's frame -- the
-#: millimetres the composer writes -- with the centroid of every triangle
-#: `carvePins` gave it.
+#: millimetres the composer writes -- by its index in the layout, with the
+#: centroid of every triangle `carvePins` gave it.
 PLACEMENT_PROBE = r"""
 import { register } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -2661,25 +2661,40 @@ for (const { layout, file } of JSON.parse(readFileSync(CASES, "utf-8"))) {
   const model = view.model;
   view.board.updateWorldMatrix(true, true);
   const pads = [];
-  for (const meshes of view.pads.values()) {
-    for (const mesh of meshes) {
-      mesh.getWorldPosition(at);
-      model.worldToLocal(at);
-      const pad = { label: mesh.userData.label, x: at.x, z: at.z, tris: [] };
-      if (mesh.userData.carved) {
-        // A carved pin's triangles are relative to its own place (OH-128).
-        const position = mesh.geometry.getAttribute("position");
-        for (let i = 0; i < position.count; i += 3) {
-          let x = 0, z = 0;
-          for (let k = 0; k < 3; k++) {
-            x += position.getX(i + k);
-            z += position.getZ(i + k);
-          }
-          pad.tris.push([mesh.position.x + x / 3, mesh.position.z + z / 3]);
-        }
-      }
-      pads.push(pad);
+  // Each mesh by the layout pad it was made for: `showBoard` adds one per
+  // placed pad, in this order, to its pin's bucket, and `carvePins` swaps
+  // its pin into the same slot.
+  const taken = new Map();
+  layout.pads.forEach((entry, index) => {
+    if (entry.x === null || entry.y === null) return;
+    const nth = taken.get(entry.pin) ?? 0;
+    taken.set(entry.pin, nth + 1);
+    const mesh = view.pads.get(entry.pin)?.[nth];
+    if (mesh?.userData.label !== entry.label) {
+      throw new Error(`${layout.board}: layout pad ${index} is ${entry.label}, ` +
+                      `its mesh says ${mesh?.userData.label}`);
     }
+    mesh.getWorldPosition(at);
+    model.worldToLocal(at);
+    const pad = { index, label: entry.label, x: at.x, z: at.z, tris: [] };
+    if (mesh.userData.carved) {
+      // A carved pin's triangles are relative to its own place (OH-128).
+      const position = mesh.geometry.getAttribute("position");
+      for (let i = 0; i < position.count; i += 3) {
+        let x = 0, z = 0;
+        for (let k = 0; k < 3; k++) {
+          x += position.getX(i + k);
+          z += position.getZ(i + k);
+        }
+        pad.tris.push([mesh.position.x + x / 3, mesh.position.z + z / 3]);
+      }
+    }
+    pads.push(pad);
+  });
+  const meshes = [...view.pads.values()].flat().length;
+  if (meshes !== pads.length) {
+    throw new Error(`${layout.board}: ${meshes} pad meshes for ${pads.length} ` +
+                    `placed layout pads`);
   }
   out.push({ board: layout.board, turn: model.rotation.y, scale: model.scale.x,
              pads });
@@ -2778,31 +2793,53 @@ def test_a_model_drawn_upright_is_not_turned_onto_a_pad_map_drawn_upright(tmp_pa
                      "lying on lying": 0, "upright on lying": 90}, turns
 
 
-def own_header_pads(compose, spec) -> list[tuple[float, float, float, float]]:
-    """The composer's header pads for `spec` as `(x, z, width, height)` in the
-    frame it writes the model in: millimetres from the centre of those pads,
-    x along the vendor's x and z against its y (`slab`). A DIP variant's own
-    pads are the rows `dip_header_elements` hangs there, as composed."""
+def own_header_pads(compose, spec) -> list[tuple[float, float, float, float,
+                                                tuple[str, str]]]:
+    """The composer's header pads for `spec` as `(x, z, width, height, name)`
+    in the frame it writes the model in: millimetres from the centre of those
+    pads, x along the vendor's x and z against its y (`slab`). A DIP
+    variant's own pads are the rows `dip_header_elements` hangs there, as
+    composed.
+
+    `name` is what a board file generated from the same vendor file
+    (`tools/import_board.py`) calls that pad, as `(group or label, number)`:
+    a KiCad board groups its pads by footprint reference, so `(reference,
+    number)`; an EAGLE board labels each pad with its net, or its number on
+    no net, so `(net, number)`."""
     pcb = compose.read_layout(spec.layout)
-    header = [pad for name in spec.headers for pad in pcb.element(name).pads]
-    xs = [pad.x_mm for pad in header]
-    ys = [pad.y_mm for pad in header]
+    kicad = spec.layout.suffix == ".kicad_pcb"
+    header = [(element.name, pad) for element in map(pcb.element, spec.headers)
+              for pad in element.pads]
+    xs = [pad.x_mm for _, pad in header]
+    ys = [pad.y_mm for _, pad in header]
     centre = ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
     if spec.dip_headers:
-        header = [pad for element in compose.dip_header_elements(header)
+        header = [(element.name, pad) for element in
+                  compose.dip_header_elements([pad for _, pad in header])
                   for pad in element.pads]
     return [(pad.x_mm - centre[0], centre[1] - pad.y_mm, pad.width_mm,
-             pad.height_mm) for pad in header]
+             pad.height_mm,
+             (element if kicad else pad.net or pad.number, pad.number))
+            for element, pad in header]
 
 
 @pytest.fixture(scope="module")
 def composed_boards_as_placed(tmp_path_factory):
     """Every board drawn from a composed model built here, as the page places
     it, beside the composer's own header pads and whether its board file
-    names the very file the model was composed from.
+    names the very file the model was composed from -- and, apart, every
+    board the model index names that could not be placed here, with why.
+
+    Each placed pad carries `name`: the vendor pad its board file says it is,
+    in `own_header_pads`' terms. It is None where the board file names none:
+    on every board whose file is not the model's own, and on the Uno, whose
+    pad map was traced from Arduino's artwork and labelled from its
+    silkscreen, so its labels are not nets and it carries no pad numbers.
 
     Models and vendor files are gitignored, so this skips where nobody has run
-    `tools/compose_board_3d.py`, as the Uno's model test in test_pin_view does.
+    `tools/compose_board_3d.py`, as the Uno's model test in test_pin_view does;
+    where some boards are built and some not, each test using this ends in a
+    skip naming the ones it left out, after holding the rest.
     """
     index = STATIC / "models" / "index.json"
     if not index.is_file():
@@ -2811,34 +2848,64 @@ def composed_boards_as_placed(tmp_path_factory):
     from tools.import_3d_model import read_extras
     from webui import api
 
+    composed = {spec.board: spec for spec in compose.COMPOSITIONS}
     cases = []
     known = {}
+    left_out = []
     for board, entry in json.loads(index.read_text(encoding="utf-8"))["boards"].items():
         model = STATIC / (entry.get("file") or "/").lstrip("/")
         if not model.is_file():
+            left_out.append(f"{board}: no {model.name} (so whether it is "
+                            f"composed is not known)")
             continue
         extras = read_extras(model)
         if not extras.get("composed"):
             continue
-        spec = next(s for s in compose.COMPOSITIONS if s.board == extras["board"])
+        if extras["board"] not in composed:
+            raise LookupError(
+                f"{model} was composed for {extras['board']!r}, which "
+                f"tools/compose_board_3d.py no longer composes -- it composes "
+                f"{sorted(composed)}. A stale model: recompose, or delete it.")
+        spec = composed[extras["board"]]
         if not spec.layout.is_file():
+            left_out.append(f"{board}: its vendor file {spec.layout} is not "
+                            f"fetched")
             continue
         stated = json.loads((STATIC.parent / "boards" / f"{board}.json")
-                            .read_text(encoding="utf-8"))["source"].get("file", "")
-        known[board] = (own_header_pads(compose, spec),
-                        pathlib.PurePosixPath(stated).name == extras["source"])
-        cases.append({"layout": api.pad_view(board, None, None), "file": str(model)})
+                            .read_text(encoding="utf-8"))
+        same_file = (pathlib.PurePosixPath(stated["source"].get("file", "")).name
+                     == extras["source"])
+        kicad = spec.layout.suffix == ".kicad_pcb"
+        names = {(pad["label"], pad["x"], pad["y"]):
+                 (pad["group"] if kicad else pad["label"], pad["pad"])
+                 for pad in stated["pads"] if same_file and "pad" in pad}
+        layout = api.pad_view(board, None, None)
+        known[board] = (layout, names, own_header_pads(compose, spec), same_file)
+        cases.append({"layout": layout, "file": str(model)})
     if not cases:
-        pytest.skip("no composed model is built here with its vendor file "
-                    "fetched; run tools/compose_board_3d.py")
+        pytest.skip(f"no composed model is built here with its vendor file "
+                    f"fetched; run tools/compose_board_3d.py. Left out: "
+                    f"{left_out}")
     placed = placed_by_the_page(tmp_path_factory.mktemp("placed"), cases)
-    return [(case, *known[case["board"]]) for case in placed]
+    boards = []
+    for case in placed:
+        layout, names, own, same_file = known[case["board"]]
+        for pad in case["pads"]:
+            entry = layout["pads"][pad["index"]]
+            pad["name"] = names.get((entry["label"], entry["x"], entry["y"]))
+        unnamed = [pad["label"] for pad in case["pads"] if pad["name"] is None]
+        if names and unnamed:
+            raise LookupError(
+                f"{case['board']}: its board file names the vendor pad of "
+                f"{len(names)} pads, but none of the page's pads {unnamed}")
+        boards.append((case, own, same_file))
+    return boards, left_out
 
 
 def on_copper(x: float, z: float, pads, reach) -> bool:
     """Whether (x, z) is within `reach(width, height)` of one of `pads`."""
     return any(math.hypot(x - px, z - pz) <= reach(width, height)
-               for px, pz, width, height in pads)
+               for px, pz, width, height, _ in pads)
 
 
 def inscribed(width: float, height: float) -> float:
@@ -2850,15 +2917,32 @@ def inscribed(width: float, height: float) -> float:
 def test_every_composed_board_lands_its_pads_on_the_models_own_header_pads(
         composed_boards_as_placed):
     """**OH-215, held over every board a composed model is drawn for.**
-    Placed as the page places it, each board-file pad is on the copper of one
-    of the model's own header pads -- the ones the composer centred it on.
+    Placed as the page places it, each board-file pad is on the copper of the
+    model's own header pad that its board file names.
 
     Two claims, because two kinds of board are here. Where the board file was
     read out of the very file the model was composed from -- the Uno and
-    every manifest board -- EVERY pad must land. A XIAO's board file is
-    Seeed's footprint, which also carries underside pads no header pad
-    answers for; there the page's turn must land at least as many pads as any
-    other quarter turn would, which is the claim a wrong turn breaks.
+    every manifest board -- EVERY pad must land, and on ITS OWN pad: the one
+    its board file names (`own_header_pads`: footprint reference and pad
+    number on a KiCad board, net and pad number on an EAGLE one). The Uno's
+    file names none, so there each pad must land on one of its four headers'
+    pads. A XIAO's board file is Seeed's footprint, which also carries
+    underside pads no header pad answers for; there the page's turn must
+    land at least as many pads as any other quarter turn would, which is the
+    claim a wrong quarter turn breaks. A half turn does not break it, and
+    nothing here holds a XIAO against one.
+
+    "On one of the model's header pads", the claim until review, could not
+    tell a right turn from a half turn either. With the page turning every
+    model a further half (in memory, through `PLACEMENT_HOOKS`), it still
+    passed the Adafruit QT Py ESP32-C3 and KB2040, the SparkFun Pro Micro
+    ESP32-C3 and Qwiic Pocket ESP32-C6 and both Olimex boards, whose header
+    pads a half turn lays onto one another; matched pad by pad, each of them
+    lands none of its pads on its own (2026-10-09).
+
+    And the one exactly square board, the SparkFun Qwiic Pocket ESP32-C6, is
+    expected unturned where it is built: 25.4 x 25.4 mm on a 219 x 219 px
+    map, it is right only because both of `placeModel`'s comparisons tie.
 
     Tolerance: inside the circle the pad's narrower side spans (`inscribed`).
     The PCBCUPID Glyph Mini sits 0.73 mm off on every pad -- inside it --
@@ -2867,23 +2951,45 @@ def test_every_composed_board_lands_its_pads_on_the_models_own_header_pads(
 
     Seen red (2026-10-09): with the turn read from the pad map alone, the six
     boards OH-215 names were the six failures, each landing 0 or 4 of its
-    pads where one further quarter turn landed every one.
+    pads where one further quarter turn landed every one. In review, as
+    matched pad by pad: on that rule the same six, every pad of each off its
+    own; with a further half turn, every board read from its model's own
+    file, the XIAOs passing; and with `mapUpright` read `>=`, the Qwiic
+    Pocket alone, by both claims.
     """
+    composed, left_out = composed_boards_as_placed
     quarters = ((1, 0), (0, 1), (-1, 0), (0, -1))
     wrong = []
-    for case, own, same_file in composed_boards_as_placed:
+    for case, own, same_file in composed:
+        pads = case["pads"]
+        # On the pad its board file names; on any header pad where it names
+        # none.
+        astray = [(pad["label"], pad["name"]) for pad in pads
+                  if not on_copper(pad["x"], pad["z"],
+                                   [mine for mine in own
+                                    if pad["name"] in (None, mine[4])],
+                                   inscribed)]
         # A further turn of the model about its own origin moves each pad's
         # place in the model's frame by the opposite turn; all four are tried.
         landed = [sum(on_copper(pad["x"] * c + pad["z"] * s,
                                 pad["z"] * c - pad["x"] * s, own, inscribed)
-                      for pad in case["pads"]) for c, s in quarters]
-        whole = len(case["pads"])
-        if landed[0] < max(landed) or (same_file and landed[0] < whole):
+                      for pad in pads) for c, s in quarters]
+        if (same_file and astray) or (not same_file and landed[0] < max(landed)):
             wrong.append(f"{case['board']}: turned "
-                         f"{math.degrees(case['turn']):.0f} deg, {landed[0]} of "
-                         f"{whole} pads on the model's own header pads; turned "
-                         f"a further 0/90/180/270 deg: {landed}")
+                         f"{math.degrees(case['turn']):.0f} deg, {len(astray)} "
+                         f"of {len(pads)} pads off their own header pad "
+                         f"{astray[:4]}; on any header pad, turned a further "
+                         f"0/90/180/270 deg: {landed}")
+    # The one exactly square board, expected unturned wherever it is built.
+    square = "SparkFun Qwiic Pocket ESP32-C6"
+    wrong += [f"{square}, 25.4 x 25.4 mm on a 219 x 219 px map, is turned "
+              f"{math.degrees(case['turn']):.0f} deg and expected unturned"
+              for case, _, _ in composed
+              if case["board"] == square and round(math.degrees(case["turn"]))]
     assert not wrong, "\n".join(wrong)
+    if left_out:
+        pytest.skip(f"SKIPPED in part: the {len(composed)} boards placed here "
+                    f"held; left out: {left_out}")
 
 
 def test_carvepins_takes_only_metal_standing_on_the_models_own_header_pads(
@@ -2901,6 +3007,10 @@ def test_carvepins_takes_only_metal_standing_on_the_models_own_header_pads(
     topside metal stands over them; that is a separate finding, recorded on
     OH-215 and not asserted here.
 
+    This holds no turn of its own: with the page turning every model a
+    further half, it still passed the same six boards the old landing claim
+    did (2026-10-09). The landing test above is what holds the turn.
+
     Seen red (2026-10-09), twice. With the turn read from the pad map alone,
     the six boards OH-215 names were the six failures: 3 to 19 pads each
     carved no pin, and 50 to 2202 triangles each were taken off every header
@@ -2909,8 +3019,9 @@ def test_carvepins_takes_only_metal_standing_on_the_models_own_header_pads(
     this covers failed, the Uno with 8 such triangles and each XIAO DIP with
     thousands; the turn tests stayed green, as they should.
     """
+    composed, left_out = composed_boards_as_placed
     wrong = []
-    for case, own, same_file in composed_boards_as_placed:
+    for case, own, same_file in composed:
         pads = case["pads"]
         if not same_file and not all(
                 on_copper(pad["x"], pad["z"], own, inscribed) for pad in pads):
@@ -2923,3 +3034,6 @@ def test_carvepins_takes_only_metal_standing_on_the_models_own_header_pads(
                          f"carved no pin {bare[:6]}; {len(stray)} triangles "
                          f"carved off every header pad, e.g. {stray[:3]}")
     assert not wrong, "\n".join(wrong)
+    if left_out:
+        pytest.skip(f"SKIPPED in part: the {len(composed)} boards placed here "
+                    f"held; left out: {left_out}")
