@@ -14,6 +14,8 @@ touches:
 - tests/webui/test_compile.py
 - webui/boards/esp32c5.py
 - webui/boards/esp32c6.py
+- core/riscv32/**
+- tests/riscv32/**
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
@@ -140,3 +142,5 @@ Gate: all 12 checks pass, run clean with nothing else building or editing (three
 **Note 2026-10-08:** 2026-10-08: test_each_refusal_arrives_as_itself (tests/webui/test_board_run.py) now uses XIAO-MG24-DIP, not XIAO-RP2350-DIP, as its board whose core is not built: OH-157 runs the RP2350 on its Hazard3 half through core/riscv32, which is built. The MG24 is on cortexm33, which is not (OH-36).
 
 **Note 2026-10-09:** 2026-10-09: core/riscv32/** and tests/riscv32/** lent to OH-208 (Zbb and Zbkb on the RP2350's Hazard3, under lockstep with rvcpp). Return both when OH-208 closes.
+
+**Note 2026-10-09:** 2026-10-09: core/riscv32/** and tests/riscv32/** return from OH-208 (done, d6a8b9c): the core now executes RV32 Zbb and Zbkb, gated per part; only the RP2350 enables them.
