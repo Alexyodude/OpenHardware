@@ -610,7 +610,7 @@ def test_a_registry_board_is_not_backed_by_seeeds_licence_when_its_own_tree_hold
         Evidence.ABSENT,
         "CC BY-SA 4.0 recorded in the board file, but third_party/arduino-uno does "
         "not hold License.txt, the file the registry row arduino-uno reads its "
-        "licence from",
+        "licence from, graded opened",
     ), cell
 
 
@@ -628,7 +628,7 @@ def test_a_registry_board_is_backed_by_the_licence_file_in_its_own_tree(
 
     cell = collect_assets(boards, seeed)[0].licence
     assert (cell.evidence, cell.detail) == (
-        Evidence.PRESENT, "CC BY-SA 4.0; third_party/arduino-uno/License.txt"
+        Evidence.PRESENT, "CC BY-SA 4.0; third_party/arduino-uno/License.txt, graded opened"
     ), cell
 
 
@@ -651,7 +651,7 @@ def test_a_registry_board_cloned_sparsely_reads_its_own_index(tmp_path, monkeypa
     cell = collect_assets(boards, seeed)[0].licence
     assert (cell.evidence, cell.detail) == (
         Evidence.INDEXED,
-        "CC BY-SA 3.0 Unported; license.txt — in the git tree of "
+        "CC BY-SA 3.0 Unported; license.txt, graded opened — in the git tree of "
         "third_party/adafruit-kb2040, not fetched",
     ), cell
 
@@ -669,8 +669,9 @@ def test_a_registry_board_whose_tree_is_not_fetched_names_its_licence_file_and_t
     assert (cell.evidence, cell.detail) == (
         Evidence.UNSEARCHABLE,
         "CC BY-SA 4.0 recorded in the board file, uncorroborated: the registry row "
-        "arduino-uno reads it from License.txt, and third_party/arduino-uno is not "
-        "fetched here; run: python tools/get_board_sources.py arduino-uno",
+        "arduino-uno reads it from License.txt, graded opened, and "
+        "third_party/arduino-uno is not fetched here; run: python "
+        "tools/get_board_sources.py arduino-uno",
     ), cell
 
 
@@ -678,6 +679,9 @@ def test_a_registry_board_whose_tree_is_not_fetched_names_its_licence_file_and_t
 # row reads the licence from, `licence.file`, and never on a file whose name
 # looks like a licence. Both Olimex trees hold a LICENSE that is the GPL-3.0's
 # text, for their software; their hardware's CERN-OHL is read from README.md.
+# OH-213: and the cell carries the row's grade of that file, because a README
+# stating a licence is not the licence's text, and the registry grades it
+# `stated` where Arduino's License.txt is `opened`.
 
 
 def test_a_registry_boards_licence_rests_on_the_file_its_row_names_not_a_licence_named_one(
@@ -700,7 +704,8 @@ def test_a_registry_boards_licence_rests_on_the_file_its_row_names_not_a_licence
 
     cell = collect_assets(boards, seeed)[0].licence
     assert (cell.evidence, cell.detail) == (
-        Evidence.PRESENT, "CERN-OHL-1.2; third_party/olimex-esp32-c6-evb/README.md"
+        Evidence.PRESENT,
+        "CERN-OHL-1.2; third_party/olimex-esp32-c6-evb/README.md, graded stated",
     ), cell
 
 
@@ -722,30 +727,80 @@ def test_a_licence_named_file_the_registry_row_does_not_name_backs_nothing(
         Evidence.ABSENT,
         "CERN-OHL-1.2 recorded in the board file, but third_party/olimex-esp32-c6-evb "
         "does not hold README.md, the file the registry row olimex-esp32-c6-evb "
-        "reads its licence from",
+        "reads its licence from, graded stated",
     ), cell
+
+
+def _registry_row_reading_no_file(monkeypatch):
+    """The registry with one git source added whose licence is read from no
+    file, cited from a sibling repository instead. Synthetic, so a test of
+    that shape does not rest on a live row keeping it (OH-213)."""
+    nothing = board_sources.Artefact(
+        board_sources.Published.NO, board_sources.Evidence.ABSENT, "nothing here"
+    )
+    row = board_sources.Source(
+        name="probe-no-licence-file",
+        vendor="Probe Instruments",
+        model="one repository per board",
+        size="tiny",
+        licence=board_sources.Licence(
+            "CC BY-SA 4.0", "design files", True, board_sources.Evidence.OPENED,
+            "LICENSE.md in a sibling repository",
+        ),
+        fetch=board_sources.Fetch(
+            board_sources.Transport.GIT_SPARSE, "file:///nowhere", (), ()
+        ),
+        artefacts=board_sources.Artefacts(*[nothing] * 6),
+        cite="fixture",
+    )
+    monkeypatch.setattr(board_sources, "SOURCES", board_sources.SOURCES + (row,))
+    return row
 
 
 def test_a_registry_row_reading_its_licence_from_no_file_reads_absent_and_says_what_it_cites(
     tmp_path, monkeypatch
 ):
+    """A licence-named file in the fetched tree does not back it either."""
     monkeypatch.chdir(tmp_path)
-    thing = board_sources.source("sparkfun-thing-plus-esp32-c6")
-    assert thing.licence.file == "", thing.licence
-    _vendor_checkout(thing.dest(pathlib.Path(".")), {"LICENSE.md": "CC BY-SA 4.0 ..."})
+    probe = _registry_row_reading_no_file(monkeypatch)
+    _vendor_checkout(probe.dest(pathlib.Path(".")), {"LICENSE.md": "CC BY-SA 4.0 ..."})
     seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
     boards = tmp_path / "boards"
     boards.mkdir()
-    _board_file(
-        boards, "Thing", licence="CC BY-SA 4.0", registry="sparkfun-thing-plus-esp32-c6"
-    )
+    _board_file(boards, "Probe", licence="CC BY-SA 4.0", registry=probe.name)
 
     cell = collect_assets(boards, seeed)[0].licence
     assert (cell.evidence, cell.detail) == (
         Evidence.ABSENT,
         "CC BY-SA 4.0 recorded in the board file, but the registry row "
-        "sparkfun-thing-plus-esp32-c6 reads its licence from no file in "
-        f"third_party/sparkfun-thing-plus-esp32-c6; it cites: {thing.licence.cite}",
+        "probe-no-licence-file reads its licence from no file in "
+        "third_party/probe-no-licence-file; it cites, graded opened: LICENSE.md "
+        "in a sibling repository",
+    ), cell
+
+
+def test_a_registry_row_reading_its_licence_from_no_file_reads_absent_unfetched_too(
+    tmp_path, monkeypatch
+):
+    """The other half of `_registry_licence_cell`'s docstring: with no tree
+    fetched there is still no file to look for, so the cell is `absent` on
+    the row's own say-so, not `unsearchable` pending a fetch that could not
+    change it."""
+    monkeypatch.chdir(tmp_path)
+    probe = _registry_row_reading_no_file(monkeypatch)
+    assert not probe.dest(pathlib.Path(".")).exists()
+    seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "Probe", licence="CC BY-SA 4.0", registry=probe.name)
+
+    cell = collect_assets(boards, seeed)[0].licence
+    assert (cell.evidence, cell.detail) == (
+        Evidence.ABSENT,
+        "CC BY-SA 4.0 recorded in the board file, but the registry row "
+        "probe-no-licence-file reads its licence from no file in "
+        "third_party/probe-no-licence-file; it cites, graded opened: LICENSE.md "
+        "in a sibling repository",
     ), cell
 
 
@@ -799,14 +854,16 @@ def test_the_unos_licence_cell_rests_on_arduinos_own_licence_file(monkeypatch):
         for report in collect_assets(REPO / "webui" / "boards", REPO / VENDOR_DIR)
     }
     assert (cells["Arduino Uno"].evidence, cells["Arduino Uno"].detail) == (
-        Evidence.PRESENT, "CC BY-SA 4.0; third_party/arduino-uno/License.txt"
+        Evidence.PRESENT, "CC BY-SA 4.0; third_party/arduino-uno/License.txt, graded opened"
     ), cells["Arduino Uno"]
 
 
 def test_every_fetched_registry_boards_licence_cell_names_the_file_its_row_reads(monkeypatch):
     """Over the real boards: wherever the file a board's registry row reads
-    its licence from is on this disk, the cell is present on that file. Until
-    OH-212 the two Olimex cells were backed by their GPL-3.0 LICENSE."""
+    its licence from is on this disk, the cell is present on that file, with
+    the row's grade of it. Until OH-212 the two Olimex cells were backed by
+    their GPL-3.0 LICENSE; until OH-213 their README, which states a licence,
+    read as Adafruit's licence text does."""
     monkeypatch.chdir(REPO)
     boards_dir = REPO / "webui" / "boards"
     rows = {}
@@ -819,7 +876,7 @@ def test_every_fetched_registry_boards_licence_cell_names_the_file_its_row_reads
             )
     expected = {
         name: (Evidence.PRESENT, f"{licence}; {row.dest(pathlib.Path('.')).as_posix()}/"
-                                 f"{row.licence.file}")
+                                 f"{row.licence.file}, graded {row.licence.evidence.label}")
         for name, (licence, row) in rows.items()
         if row.licence.file and (row.dest(REPO) / row.licence.file).is_file()
     }
@@ -833,6 +890,32 @@ def test_every_fetched_registry_boards_licence_cell_names_the_file_its_row_reads
         for report in collect_assets(boards_dir, REPO / VENDOR_DIR)
     }
     assert {name: (cells[name].evidence, cells[name].detail) for name in expected} == expected
+
+
+def test_the_markdown_says_why_a_licence_cell_is_absent(tmp_path, monkeypatch):
+    """An absent schematic is the one search the prose above the table
+    describes. An absent licence is one of several -- the board file records
+    none, the row's fetched tree lacks its file, the row names no file -- so
+    the cell prints its reason, or a row naming no file reads as if its file
+    were missing."""
+    import tools.inventory as inventory
+
+    monkeypatch.chdir(REPO)
+    probe = _registry_row_reading_no_file(monkeypatch)
+    assert not probe.dest(REPO).exists()
+    seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "Probe", licence="CC BY-SA 4.0", registry=probe.name)
+    collect = inventory.collect_assets
+    cell = collect(boards, seeed)[0].licence
+    assert cell.evidence is Evidence.ABSENT, cell
+    monkeypatch.setattr(inventory, "collect_assets", lambda: collect(boards, seeed))
+
+    row = next(
+        line for line in render_markdown().splitlines() if line.startswith("| `Probe` |")
+    )
+    assert row.endswith(f"| `absent` {cell.detail} |"), row
 
 
 def test_missing_names_every_cell_with_nothing_behind_it(tmp_path):

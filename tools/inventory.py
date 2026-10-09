@@ -629,6 +629,11 @@ def _registry_licence_cell(
     file its registry row reads the licence from (`licence.file`) and on no
     other, in that row's own tree.
 
+    That file need not hold the licence's text: a README states one, and the
+    registry grades it `stated` where a licence text it opened is `opened`.
+    The classes here say only whether the file is on this disk, so the
+    detail carries the row's grade too, and a README never reads as a licence.
+
     A row naming no file reads `absent` whether or not its tree is fetched:
     there is nothing on any disk to look for, and the row's `cite` says what
     the licence was read from instead.
@@ -636,31 +641,33 @@ def _registry_licence_cell(
     if not licence:
         return Asset(Evidence.ABSENT, "the board file records no `source.licence`")
     named = registered.licence.file
+    graded = f"graded {registered.licence.evidence.label}"
     root = tree.root.as_posix()
     if not named:
         return Asset(
             Evidence.ABSENT,
             f"{licence} recorded in the board file, but the registry row "
             f"{registered.name} reads its licence from no file in {root}; "
-            f"it cites: {registered.licence.cite}",
+            f"it cites, {graded}: {registered.licence.cite}",
         )
     if tree.unsearchable:
         return Asset(
             Evidence.UNSEARCHABLE,
             f"{licence} recorded in the board file, uncorroborated: the registry "
-            f"row {registered.name} reads it from {named}, and {tree.unsearchable}",
+            f"row {registered.name} reads it from {named}, {graded}, and "
+            f"{tree.unsearchable}",
         )
     if named in tree.on_disk:
-        return Asset(Evidence.PRESENT, f"{licence}; {root}/{named}")
+        return Asset(Evidence.PRESENT, f"{licence}; {root}/{named}, {graded}")
     if named in tree.indexed:
         return Asset(
             Evidence.INDEXED,
-            f"{licence}; {named} — in the git tree of {root}, not fetched",
+            f"{licence}; {named}, {graded} — in the git tree of {root}, not fetched",
         )
     return Asset(
         Evidence.ABSENT,
         f"{licence} recorded in the board file, but {root} does not hold {named}, "
-        f"the file the registry row {registered.name} reads its licence from",
+        f"the file the registry row {registered.name} reads its licence from, {graded}",
     )
 
 
@@ -1194,6 +1201,19 @@ def _asset_md(asset: Asset) -> str:
     return f"`{asset.summary()}` {asset.detail}"
 
 
+def _licence_md(asset: Asset) -> str:
+    """The licence cell, which keeps an absent cell's reason.
+
+    An absent schematic is the one search the prose describes. An absent
+    licence is one of several -- the board file records none, the row's tree
+    lacks the file it names, the row names no file -- and without its detail
+    a row naming no file reads as if its file were missing.
+    """
+    if asset.evidence is Evidence.UNSEARCHABLE:
+        return f"`{asset.summary()}`"
+    return f"`{asset.summary()}` {asset.detail}"
+
+
 def _board_provenance(board: Board) -> str:
     if board.vendor and board.licence:
         return f"{board.vendor}, {board.licence}"
@@ -1266,14 +1286,21 @@ def render_text() -> str:
     lines.append(
         "  that tree; CAD fetched anywhere else is not searched, and model3d is"
     )
-    lines.append("  not what the 3D view draws. licence is the file the registry row")
-    lines.append(
-        "  the board file's source.registry names reads its licence from, in"
-    )
-    lines.append(
-        "  that row's tree, or, for a board naming only a footprint, a licence"
-    )
-    lines.append("  file in the tree above.")
+    lines.append("  not what the 3D view draws.")
+    lines += [
+        "  licence: the board file's source.registry names a row of",
+        "  tools/board_sources.py, the row names the file it read the licence",
+        "  from, and the cell looks for that file in the row's own tree. That",
+        "  file may state the licence rather than hold its text, so the cell's",
+        "  detail, which --markdown prints, carries the row's grade of how it",
+        "  was read: stated where the file is a README asserting the licence,",
+        "  opened where the row opened the file and read the licence in it, a",
+        "  licence's text or a sentence a board file carries. A board naming",
+        "  only a footprint is backed by a licence-named file in the tree above,",
+        "  which nothing opens. A licence cell is absent where the board file",
+        "  records no licence, the tree holds no file to back it, or the",
+        "  registry row names no file, citing where it read the licence instead.",
+    ]
     lines.append("  Evidence, strongest first:")
     for evidence in Evidence:
         lines.append(f"    {evidence.label:<13} {evidence.gloss}")
@@ -1402,10 +1429,20 @@ def render_markdown() -> str:
         "checkout, which is a fact about the checkout and not about the vendor. "
         "`schematic`, `pcb` and `model3d` count only files named for the "
         "footprint in that tree; CAD fetched anywhere else is not searched, and "
-        "`model3d` is not what the 3D view draws. `licence` is the file the "
-        "registry row the board file's `source.registry` names reads its licence "
-        "from, in that row's tree, or, for a board naming only a footprint, a "
-        "licence file in the tree above.",
+        "`model3d` is not what the 3D view draws.",
+        "",
+        "`licence`: the board file's `source.registry` names a row of "
+        "`tools/board_sources.py`, the row names the file it read the licence "
+        "from, and the cell looks for that file in the row's own tree. That file "
+        "may state the licence rather than hold its text, so the cell's detail "
+        "carries the row's grade of how it was read: `graded stated` where the "
+        "file is a README asserting the licence, `graded opened` where the row "
+        "opened the file and read the licence in it, a licence's text or a "
+        "sentence a board file carries. A board naming only a footprint is backed "
+        "by a licence-named file in the tree above, which nothing opens. A licence "
+        "cell is `absent` where the board file records no licence, the tree holds "
+        "no file to back it, or the registry row names no file, citing where it "
+        "read the licence instead; its detail says which.",
         "",
     ]
     out += [f"* `{evidence.label}` — {evidence.gloss}" for evidence in Evidence]
@@ -1416,7 +1453,10 @@ def render_markdown() -> str:
     ]
     out += [
         f"| `{report.name}` | "
-        + " | ".join(_asset_md(getattr(report, cell)) for cell in ASSET_CELLS)
+        + " | ".join(
+            (_licence_md if cell == "licence" else _asset_md)(getattr(report, cell))
+            for cell in ASSET_CELLS
+        )
         + " |"
         for report in _assets_by_completeness(inv.assets)
     ]
