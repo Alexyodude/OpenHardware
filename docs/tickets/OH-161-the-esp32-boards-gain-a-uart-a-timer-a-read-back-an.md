@@ -2,7 +2,7 @@
 id: OH-161
 title: The ESP32 boards gain a UART, a timer, a read-back, an ADC and one bus part,
   so a sketch can print, time, read and talk
-status: open
+status: in-progress
 priority: P1
 created: '2026-09-04'
 touches:
