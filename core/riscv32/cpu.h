@@ -54,8 +54,10 @@ constexpr unsigned kRegisters = 32;
 /// base and is always present, so it has no bit.
 ///
 /// One bit per extension this core can be *told about*, which is not the same
-/// as one bit per extension it implements. `kExtM` and `kExtA` are classified
-/// and then refused; `kExtZba` is implemented. Both need a bit, because the
+/// as one bit per extension it implements. `kExtA` is classified and then
+/// refused -- `Unimplemented` on a part that has it, `Illegal` on one that
+/// does not (exec.cc's AMO case); every other bit here, `kExtM` included,
+/// is implemented. Both kinds need a bit, because the
 /// question a bit answers is "does this part have it", and that has to be
 /// answerable before the encoding is written or every instruction added later
 /// inherits the wrong default.
