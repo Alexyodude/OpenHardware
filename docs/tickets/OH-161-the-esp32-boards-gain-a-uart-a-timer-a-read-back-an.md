@@ -297,4 +297,77 @@ VERIFIED on ce25071, after python tools/build_core.py: the focused suite as abov
 
 **Note 2026-10-10:** STEP 2 COMPLETE, MERGED to master by fast-forward at 7d54725 (lane2): delay() and delayMicroseconds() wait on SYSTIMER unit 0, so delay(n) and millis() agree; OH_DELAY_LOOPS_PER_MS retired; the ten ESP32 manifest board images rebuilt; the board tests hold each pin move to the board's own millisecond, every gap length watched once per clock (QT Py C3, SparkFun Thing Plus C6 for the C6's own description, SparkFun Thing Plus C5); POLL and the millisecond in tests/webui/esp32_timing.py. REVIEW: an independent review (MERGE AFTER FIXES), its fix round, a confirm review (CONFIRMED FOR MERGE), its LOWs, and a verification of those (PASS), whose one gap -- no C6 test watching the third gap length -- is 7d54725. VERIFIED on master with OH-172 slice 1 also merged (1e551db), core rebuilt: full suite 2 failed (the OCP pair: test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert, test_the_tessellator_welds_what_it_meshes), 2669 passed, 41 skipped. OPEN FOR THE OWNER: the page's default delay(500) Blink on an ESP32 board is 80,000,000 instructions a half period at 160 MHz (120,000,000 at the C5's 240 MHz) -- about a minute on the Debug core measured here, and OH-220 (Release cores) roughly halves to thirds that; OH-221 is the page's prose. Steps 3-5 remain.
 
+**Note 2026-10-10:** STEP 3 DESIGN, BEFORE ANY CODE, AND STOPPED THERE: the end-to-end path crosses webui/api.py (OH-172), webui/emulator_server.py (OH-223) and webui/static/board3d.js (OH-215). Nothing below is built. Steps 3-5 remain.
+
+THERE IS NO UNO MECHANISM TO REUSE. The step says circuit.js "already computes it for the Uno's pins". Half true: solve() computes every node's voltage (circuit.js:175-273), but analyse() (:322) returns only per-part verdicts, an `input` pad stamps nothing (:431), and nothing sends a level back. BoardSession has step, run, state and close and nothing else. emulator_server.py's /api/board/* routes are load, artefacts, compile, load-artefact, run, pins, state and step. The Uno's own PINB/C/D read a stored zero (atmega328p.py:70-84), and tests/avr/test_uno_board.py:324 test_reading_the_input_register_is_not_yet_modelled pins that. Also, no ESP32 description publishes SUPPLY; only atmega328p.py and samd21.py do. So analyse() answers "No electrical model for this board" on every ESP32 board (:366) and solves nothing there. The mechanism is new on every board. It is designed here once, for the ESP32s.
+
+THE REGISTERS. GPIO_IN: C3 +0x3C, GPIO_IN_DATA [25:0] (framework gpio_reg.h:122-125), bits 22-25 invalid (C3 TRM v1.4, Register 5.9, p.182). C5 +0x64 (v5.5 gpio_reg.h:235) and C6 +0x3c (:197), GPIO_IN_DATA_NEXT [31:0] default 0 (:236, :198). The reader is gpio_ll_get_level: hw->in.data on the C3 (framework hal/esp32c3/include/hal/gpio_ll.h:287-290) and hw->in.in_data_next on the C5 and C6 (v5.5 components/hal/<chip>/include/hal/gpio_ll.h:374-377 and :345-348, read through gh api; outside the sparse checkout). The GPIO matrix's FUNCn_IN_SEL is not needed. C3 TRM 5.4.4 (p.163): GPIO_IN "can be read at any time without configuring GPIO matrix ... However, it is necessary to enable the input via IO MUX by setting IO_MUX_GPIOx_FUN_IE". IO_MUX base: 0x60009000 on the C3 (framework soc.h:49) and 0x60090000 on the C5 and C6 (v5.5 reg_base.h:61, :47). GPIOn's register is at +0x04+4n on the C3 (framework io_mux_reg.h:175) and the C6 (v5.5 io_mux_reg.h:175), and at +0x0+4n on the C5 (:155). That is a third offset trap between neighbours. The bits are the same on all three: FUN_PD 7, FUN_PU 8, FUN_IE 9 (C3 framework io_mux_reg.h:51, :56, :61; C5 v5.5 :46, :51, :56; C6 :42, :47, :52). The TRM (Register 5.21, p.187) and the C5's io_mux_struct.h call the pulls FUN_WPD and FUN_WPU. On the Arduino side, arduino-esp32 @ 2787dab esp32-hal-gpio.h:46-53 defines INPUT 0x01, OUTPUT 0x03 ("where you can read the state of pin even when it is set as OUTPUT"), INPUT_PULLUP 0x05 and INPUT_PULLDOWN 0x09. In esp32-hal-gpio.c, pinMode goes to gpio_config (:145-153) and digitalRead is gpio_get_level (:189-199). ESP-IDF v5.5 gpio.c:369-401 enables or disables input, pull-up and pull-down explicitly on every gpio_config, so pinMode(INPUT) clears both pulls. digitalRead needs GPIO_IN, plus FUN_IE, FUN_PU and FUN_PD on every GPIO a HEADER or a manifest row names. In practice that is the whole bank: 22, 29 and 31 pads (soc_caps.h SOC_GPIO_PIN_COUNT).
+
+WHAT AN INPUT READS, per bit, in this order:
+  FUN_IE clear: 0. 5.4.4 says IE is necessary and does not say what the bit reads without it. 0 is a gated buffer's output and the register's stated default.
+  ENABLE set: OUT. IN follows OUT, the description's own comment. A bench level on an output pad is ignored here; circuit.js already treats that pin as a Thevenin source against the bench.
+  driven by the bench: that level. The page thresholds it at VIH min 0.75 VDD and VIL max 0.25 VDD (datasheet Table 5-4: C3 v2.4 p.55, C6 v1.5 p.65, C5 v1.5 p.71).
+  FUN_PU alone: 1. RPU is typ 45 kohm and IIH is max 50 nA (same table), a 2.25 mV drop.
+  FUN_PD alone: 0, by the same argument.
+  neither, or both: FLOATING, and it reads 0. Not a fault: the read is a whole word, the core cannot know which bit the program looks at, and seven of the XIAO C3's eleven header GPIOs come out of reset input-enabled with no pull: GPIO2, 3, 4, 5, 7, 8 and 10, Reset "1" in C3 TRM Table 5.12-1, p.174. Faulting whenever any pad floats would fault every digitalRead on that board from reset. Not 1, and not a held level: the datasheet gives no level for a floating input, and IIL/IIH max 50 nA on CIN typ 2 pF can move the node 25 mV/us, so a held level would model charge this model does not have. 0 is GPIO_IN_DATA_NEXT's stated default (C5 :236, C6 :198), and it is what circuit.js already solves an undriven node to (GMIN to ground, :198). It is stated, not measured, and the module will say so.
+IO_MUX is mapped at its after-reset value per pad, because this core enters the image with no ROM in front of it. On the C3 that is the TRM's Reset column, Table 5.12-1 on p.174, and its legend on p.175. MTCK's "1*" depends on EFUSE_DIS_PAD_JTAG, whose default 0 gives IE plus WPU (datasheet Table 2-1, note 6).
+
+FILES AND SIGNATURES. OH-161 holds core, boards, arduino, compile.py and the tests. The others are marked.
+
+  core/riscv32/cpu.h, cpu.cc (OH-161): the fifth behaviour.
+    /// A register whose read answers each pin's level, in the order above.
+    /// A pad register that cannot be read faults naming it, as a gate does.
+    void map_input(uint32_t address, uint32_t out_address, uint32_t enable_address,
+                   uint32_t pad_base, uint32_t pad_stride, uint32_t pad_count,
+                   uint32_t input_enable_mask, uint32_t pull_up_mask,
+                   uint32_t pull_down_mask);
+    /// What outside the chip drives: `driven` says which pins, `levels` to what.
+    /// Replaces the previous call's. False when `address` is no input register.
+    bool drive_input(uint32_t address, uint32_t driven, uint32_t levels);
+  core/riscv32/abi.h, abi.cc, abi.py (OH-161), ABI 4:
+    void riscv32_map_input(Riscv32Cpu*, uint32_t address, uint32_t out, uint32_t enable,
+                           uint32_t pad_base, uint32_t pad_stride, uint32_t pad_count,
+                           uint32_t ie_mask, uint32_t pu_mask, uint32_t pd_mask);
+    int riscv32_drive_input(Riscv32Cpu*, uint32_t address, uint32_t driven, uint32_t levels);
+    Cpu.map_input(address, *, out, enable, pad_base, pad_stride, pad_count,
+                  input_enable, pull_up, pull_down) -> None
+    Cpu.drive_input(address, *, driven: int, levels: int) -> None   # AbiError naming address
+  webui/boards/esp32c3.py, esp32c5.py, esp32c6.py (OH-161):
+    IO_MUX = 0x60009000                 # 0x60090000 on the C5 and C6
+    IO_MUX_GPIO0 = 0x04                 # 0x00 on the C5
+    IO_MUX_FUN_PD, IO_MUX_FUN_PU, IO_MUX_FUN_IE = 1 << 7, 1 << 8, 1 << 9
+    IO_MUX_AT_RESET: dict[int, int]     # gpio -> word, composed per pad from the TRM
+    def install_gpio_in(cpu: Cpu) -> None
+    def drive_pins(cpu: Cpu, levels: Mapping[int, str]) -> None   # gpio -> "high"|"low"|"open"
+    SUPPLY: dict[str, object]           # slice B: volts, source/sink ohms, amps,
+                                        # input_high_volts, input_low_volts, cited
+  webui/arduino/** (OH-161): Arduino.h gains INPUT_PULLUP and INPUT_PULLDOWN, and int digitalRead(uint8_t pin), an inline range check like digitalWrite's in front of wiring.c's oh_digital_read. wiring.c's pinMode writes FUN_IE, FUN_PU and FUN_PD as gpio_config does. Each oh_board.h gains OH_GPIO_IN, OH_IO_MUX_GPIO0 and the three bits, held to the description by the header test.
+  webui/compile.py (OH-161): the digitalRead hint retires from the ESP32 recipe.
+  webui/api.py (OH-172):
+    class BoardSession:
+        retired: int                                # instructions retired since load
+        inputs: list[tuple[int, dict[str, str]]]    # (retired, levels): the replay record
+        def drive(self, levels: Mapping[str, str]) -> None:
+            """Pad label, keyed as pin_levels keys it -> "high" | "low" | "open".
+            Resolved to a GPIO through the table pin_levels reads: HEADER on a
+            XIAO, the pad's chip_index on a manifest row. A label with no GPIO
+            is refused, naming it and the labels that can be driven."""
+  webui/emulator_server.py (OH-223): POST /api/board/drive {"levels": {...}} -> session.drive, POST-only.
+  webui/static/circuit.js (unclaimed): analyse(bench) also returns inputs: {pad: "high"|"low"|"open"} for each `input` pad. "open" where the pad's net reaches no source (only GMIN). Otherwise the solved volts against supply.inputHighVolts and inputLowVolts.
+  webui/static/board3d.js (OH-215, in review): supplyOf() carries the two thresholds, and after each analyse() the page POSTs the inputs that changed.
+
+CALL STACK. The page: board3d.js poll -> analyse(bench) [circuit.js] -> report.inputs -> POST /api/board/drive [emulator_server.py] -> BoardSession.drive [api.py: label -> GPIO, appends (retired, levels)] -> description.drive_pins(cpu, {gpio: level}) [esp32c3.py] -> Cpu.drive_input [abi.py] -> riscv32_drive_input [abi.cc] -> Cpu::drive_input [cpu.cc]. The sketch: digitalRead(D1) [Arduino.h] -> oh_digital_read [wiring.c] -> lw OH_GPIO_IN -> Cpu::mmio_read -> the input entry, resolved per bit as above. DETERMINISM: a level enters only through drive(), and each call is recorded with the retired count it took effect at. The same image plus the same record replays the same run. No clock and no randomness is consulted. The page's wall-clock timing decides only when a call arrives, and the record keeps that.
+
+SLICES. A, the server: the C3 first, then the C5 (its +0x0 IO_MUX and +0x64 GPIO_IN are the traps), then the C6. Core behaviour, IO_MUX, GPIO_IN, the Arduino side, the hint, and BoardSession.drive. Watched test: `pinMode(D1, INPUT); pinMode(D10, OUTPUT);` and `loop(){ digitalWrite(D10, digitalRead(D1)); }`, driven high, low and open through BoardSession.drive, with D10 read through session.state()["pins"]; and INPUT_PULLUP reading 1 when open. This needs webui/api.py. B, the page: SUPPLY on the three descriptions, circuit.js inputs, the route, and board3d.js. This needs emulator_server.py and board3d.js.
+
+LEAST CONFIDENT:
+(1) Floating reads 0, as argued above.
+(2) The page thresholds the bench WITHOUT the chip's 45 kohm pull in its solve, and in the core a bench drive beats a pull. That is right for a rail, a switch, or a resistor well under 45 kohm. It is wrong for a weak external resistor against the internal pull: 100 kohm to GND against FUN_PU is 2.28 V on silicon, which is undefined, and this would read low. The exact form sends each pad's Thevenin equivalent instead of a level and combines it with the pull at read time. It is left for later.
+(3) A solved voltage between VIL and VIH is sent as "open" and reads as undriven, and the panel names the voltage and both thresholds. Keeping the last level instead would be a hysteresis the pads do not have by default (C5 io_mux_struct.h hys_en default 0).
+(4) SUPPLY's output resistances. Table 5-4 gives IOH 40 mA and IOL 28 mA as TYPICAL, at PAD_DRIVER 3, while a pad resets at FUN_DRV 2 (20 mA). No guaranteed corner exists for the upper bound circuit.js's design rests on, so this would be the first SUPPLY that is not a bound.
+(5) Modelling FUN_IE in pinMode changes oh_pin_mode, so the ten board images rebuild, as at step 2. Giving input modes their own function would avoid that, but that is shaping the code around the fixtures.
+(6) IE clear reading 0 is inferred, not stated.
+
+TICKETS IN THE WAY. webui/api.py is OH-172's (in-progress, no session holds it). Slice A cannot be watched through the API without BoardSession.drive. OH-172's own subject, which pad answers for which GPIO, is the label-to-GPIO resolution drive() needs, so drive() should land after OH-172's answer or inside it. webui/emulator_server.py is OH-223's (open) and needs the route. webui/static/board3d.js is OH-215's (in review) and needs to post the levels. webui/static/circuit.js and tests/webui/test_circuit.py are unclaimed and can join this ticket. rules/board-claims.md is untouched: no chip or row gains a run claim. digitalRead is a capability on chips whose evidence already stands, and the TWINS pins and runs layers read board files and the register, which do not change.
+
 **Note 2026-10-10:** 2026-10-10: borrows webui/api.py from OH-172 for step 3's slice A (BoardSession.drive and its replay record), on the design in the note above. Its decisions stand as written, taken for the owner while away: floating reads 0, a bench drive beats the internal pull (the Thevenin form deferred), a voltage between VIL and VIH is sent as open. Slice B (the page: circuit.js, the drive route, board3d.js) waits for OH-223's webui/emulator_server.py and OH-215's webui/static/board3d.js.
