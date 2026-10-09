@@ -44,6 +44,7 @@ void Cpu::reset() {
     regions_.clear();
     mmio_.clear();
     streams_.clear();
+    snapshots_.clear();
     fault_address_ = 0;
     fault_was_fetch_ = false;
 }
@@ -244,14 +245,17 @@ void Cpu::clear_regions() {
     // is the kind of state that makes one test pass only when another ran
     // first. A stream carries BYTES as well as a mapping, so leaving one
     // behind would also let a second board answer with what the first one
-    // printed.
+    // printed. A snapshot counter carries a COUNT, so leaving one behind
+    // would start the next board's clock where the last board's stopped.
     mmio_.clear();
     streams_.clear();
+    snapshots_.clear();
 }
 
 void Cpu::clear_mmio() {
     mmio_.clear();
     streams_.clear();
+    snapshots_.clear();
 }
 
 void Cpu::map_register(uint32_t address, uint32_t value) {
@@ -289,6 +293,59 @@ void Cpu::map_stream(uint32_t address, uint32_t enable_address,
     streams_[at] = stream;
 }
 
+void Cpu::map_snapshot_counter(uint32_t op_address, uint32_t update_mask,
+                               uint32_t valid_mask, uint32_t low_address,
+                               uint32_t high_address, uint32_t high_mask,
+                               uint32_t enable_address, uint32_t enable_mask,
+                               uint32_t instructions_per_tick) {
+    Snapshot counter;
+    counter.op = op_address & ~3u;
+    counter.update_mask = update_mask;
+    counter.valid_mask = valid_mask;
+    counter.low = low_address & ~3u;
+    counter.high = high_address & ~3u;
+    counter.high_mask = high_mask;
+    counter.enable = enable_address & ~3u;
+    counter.enable_mask = enable_mask;
+    // Zero would divide by zero at the first snapshot. A board asking for a
+    // counter that never advances has asked for the hang this exists to
+    // prevent, so it is corrected to the fastest legal rate -- the answer
+    // `core/cortexm0`'s `map_counter` gives -- and `abi.py` refuses it first.
+    counter.instructions_per_tick =
+        instructions_per_tick == 0 ? 1u : instructions_per_tick;
+
+    // Registered in `mmio_` too, so `is_mapped` sees all three and their
+    // accesses reach `mmio_read`/`mmio_write`, which consult `snapshots_`
+    // before the stored word -- so the word these entries hold is never read.
+    for (const uint32_t at : {counter.op, counter.low, counter.high}) {
+        Mapped entry;
+        entry.target = at;
+        mmio_[at] = entry;
+    }
+    // Mapping the same unit twice replaces it, rather than leaving two
+    // counters answering one address in whichever order the scan meets them.
+    snapshots_.erase(
+        std::remove_if(snapshots_.begin(), snapshots_.end(),
+                       [&](const Snapshot& existing) {
+                           return existing.op == counter.op;
+                       }),
+        snapshots_.end());
+    snapshots_.push_back(counter);
+}
+
+void Cpu::note_executed() {
+    for (Snapshot& counter : snapshots_) {
+        // An unmapped gate counts nothing here, and is NOT silently a timer
+        // that never moves: the first snapshot asked for through it faults,
+        // naming the unit. This runs between instructions, where there is
+        // no access to fault.
+        uint32_t gate = 0;
+        if (mmio_read(counter.enable, gate) && (gate & counter.enable_mask) != 0) {
+            ++counter.instructions;
+        }
+    }
+}
+
 const std::vector<uint8_t>& Cpu::stream(uint32_t address) const {
     static const std::vector<uint8_t> none;
     const auto found = streams_.find(address & ~3u);
@@ -304,6 +361,25 @@ bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
     if (found == mmio_.end()) {
         return false;
     }
+    // A snapshot counter's three registers answer its state rather than a
+    // stored word, so they are checked before the stored-value path below.
+    const uint32_t at = address & ~3u;
+    for (const Snapshot& counter : snapshots_) {
+        if (at == counter.op) {
+            // UPDATE is a write trigger and reads zero; only VALID is held.
+            out = counter.valid ? counter.valid_mask : 0u;
+            return true;
+        }
+        if (at == counter.low) {
+            out = static_cast<uint32_t>(counter.latched);
+            return true;
+        }
+        if (at == counter.high) {
+            out = static_cast<uint32_t>(counter.latched >> 32) & counter.high_mask;
+            return true;
+        }
+    }
+
     const Mapped& entry = found->second;
     if (!entry.readable) {
         // The architecture's answer and not an absence: a W1TS register reads
@@ -384,6 +460,33 @@ bool Cpu::mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask) {
             // `map_stream`.
             stream->second.bytes.push_back(static_cast<uint8_t>(value));
         }
+        return true;
+    }
+
+    // **Before the word behaviours too**: a write to a snapshot counter's
+    // operation register takes a copy or does nothing, and falling through
+    // would store it in a word nobody reads. A write to one of its value
+    // registers does fall through, into a word `mmio_read` never answers
+    // from -- which is how a read-only register ignores it.
+    for (Snapshot& counter : snapshots_) {
+        if (at != counter.op) {
+            continue;
+        }
+        // `value` arrives positioned in its lane by the sub-word paths, so a
+        // byte store to the register's top byte carries the bit and one to
+        // its bottom byte cannot.
+        if ((value & counter.update_mask) == 0) {
+            return true;
+        }
+        if (!is_mapped(counter.enable)) {
+            // The board named an enable register it never mapped: a counter
+            // that could never have counted. Faulting here names the unit
+            // where the reader is looking, which a zero copy would not.
+            note_fault(address, false);
+            return false;
+        }
+        counter.latched = counter.instructions / counter.instructions_per_tick;
+        counter.valid = true;
         return true;
     }
 

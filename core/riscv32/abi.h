@@ -31,7 +31,10 @@ extern "C" {
 //: Bumped to 2 on 2026-08-25 (OH-47), which added the four mmio
 //: entry points below. The binding refuses a library reporting a
 //: different number rather than calling a symbol that is not there.
-#define RISCV32_ABI_VERSION 2
+//: Bumped to 3 at OH-161's step 2, which added
+//: `riscv32_map_snapshot_counter`; step 1's `riscv32_map_stream` and
+//: `riscv32_stream` arrived without one, and are counted in this one.
+#define RISCV32_ABI_VERSION 3
 
 /// x0 through x31, then PC.
 ///
@@ -96,7 +99,7 @@ RISCV32_API int riscv32_add_region(Riscv32Cpu* cpu, uint32_t base,
 RISCV32_API void riscv32_clear_regions(Riscv32Cpu* cpu);
 
 /// Memory-mapped registers. See `cpu.h` for why a peripheral is not a region
-/// and why three of the five behaviours are here.
+/// and why four of `core/cortexm0`'s six behaviours are here.
 ///
 /// `op` is `riscv32::WriteOp` as an int: 0 Store, 1 Set, 2 Clear, 3 Xor.
 RISCV32_API void riscv32_map_register(Riscv32Cpu* cpu, uint32_t address,
@@ -122,6 +125,20 @@ RISCV32_API void riscv32_map_stream(Riscv32Cpu* cpu, uint32_t address,
 /// truncated prefix as if it were the whole output.
 RISCV32_API uint32_t riscv32_stream(const Riscv32Cpu* cpu, uint32_t address,
                                     uint8_t* out, uint32_t capacity);
+
+/// A free-running counter read through a snapshot: a write carrying
+/// `update_mask` to `op_address` copies the count into `low_address` and
+/// `high_address` (kept to `high_mask`), after which `op_address` reads
+/// `valid_mask`. It counts once per `instructions_per_tick` retired
+/// instructions while `enable_address & enable_mask` is non-zero. An ESP32's
+/// SYSTIMER unit, whose UPDATE / VALUE_VALID handshake a live counter would
+/// answer at the wrong moment. `instructions_per_tick` is a stated
+/// approximation; this core has no cycle model. See cpu.h.
+RISCV32_API void riscv32_map_snapshot_counter(
+    Riscv32Cpu* cpu, uint32_t op_address, uint32_t update_mask,
+    uint32_t valid_mask, uint32_t low_address, uint32_t high_address,
+    uint32_t high_mask, uint32_t enable_address, uint32_t enable_mask,
+    uint32_t instructions_per_tick);
 
 RISCV32_API int riscv32_is_mapped(const Riscv32Cpu* cpu, uint32_t address);
 RISCV32_API void riscv32_clear_mmio(Riscv32Cpu* cpu);

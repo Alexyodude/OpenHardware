@@ -712,9 +712,29 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width);
 /// beside `execute` below.
 StepResult execute_zc(Cpu& cpu, uint32_t pc, uint16_t c);
 
+/// Fetch, decode and execute the instruction at PC: everything `step` does
+/// except age the machine, which `step` does only on what this returns.
+StepResult fetch_and_execute(Cpu& cpu);
+
 }  // namespace
 
 StepResult step(Cpu& cpu) {
+    const StepResult result = fetch_and_execute(cpu);
+    // Only a retired instruction ages the machine. On anything else the
+    // processor is untouched, PC included, so a program stopped by one must
+    // not go on accruing virtual time -- a caller stepping a halted core in
+    // a loop would otherwise watch its timer advance. `core/cortexm0` makes
+    // the same cut in its abi.cc; here it is in the core, so a C++ caller of
+    // `step` gets the machine the ABI does.
+    if (result == StepResult::Ok) {
+        cpu.note_executed();
+    }
+    return result;
+}
+
+namespace {
+
+StepResult fetch_and_execute(Cpu& cpu) {
     const uint32_t pc = cpu.pc();
 
     if (!aligned(cpu, pc)) {
@@ -784,6 +804,8 @@ StepResult step(Cpu& cpu) {
 
     return execute(cpu, pc, instr, 4);
 }
+
+}  // namespace
 
 /// One already-fetched 32-bit instruction, at `pc`, `width` bytes wide.
 ///

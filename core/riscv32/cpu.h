@@ -198,7 +198,7 @@ public:
     // the fault is what tells a person which peripheral the board description
     // is missing.
     //
-    // ## Three of the six, and the third arrived the way this comment said
+    // ## Four of the six, and the last two arrived the way this comment said
     //
     // `core/cortexm0` grew six behaviours -- register, alias, mirror,
     // constant, stream, counter -- each when a real image faulted without it.
@@ -211,11 +211,16 @@ public:
     // `UART_FIFO_REG` is a queue rather than a word, and a `map_register`
     // there keeps the last byte written -- so a program printing "hello"
     // leaves an `o` behind and a test reading it back sees a plausible single
-    // letter instead of a wrong answer. `map_mirror`, `map_constant` and
-    // `map_counter` are still absent, still on the same terms -- and the
-    // last of those is what OH-161's own step 2 will want, because a
-    // millisecond counted in a spin loop is a judgement and a free-running
-    // counter is a register read.
+    // letter instead of a wrong answer.
+    //
+    // **The counter arrived at OH-161's step 2, and not in cortexm0's
+    // shape.** That one is a register whose read answers the count; an
+    // ESP32's SYSTIMER is not read that way. Firmware writes UPDATE, waits
+    // for VALUE_VALID, and reads two registers holding a COPY taken at the
+    // write -- so a live read would answer the right number at the wrong
+    // moment, and a program that took a snapshot and read it later would see
+    // time it never asked for. `map_snapshot_counter` is that shape.
+    // `map_mirror` and `map_constant` are still absent, on the same terms.
 
     /// An address that holds a word: reads answer it, writes replace it.
     ///
@@ -274,6 +279,51 @@ public:
     /// Empty for an address that is not one, which is the same answer as a
     /// stream nothing has written to -- the caller registered it and knows.
     const std::vector<uint8_t>& stream(uint32_t address) const;
+
+    /// A free-running counter that firmware reads through a snapshot.
+    ///
+    /// A write carrying `update_mask` to `op_address` copies the count into
+    /// `low_address` (bits 31:0) and `high_address` (bits 63:32, kept to
+    /// `high_mask`), and from then on `op_address` reads `valid_mask`. Both
+    /// value registers answer that copy until the next write asks for
+    /// another; writes to them are ignored, as a read-only register ignores
+    /// them. Before the first snapshot all three read zero.
+    ///
+    /// The count advances once every `instructions_per_tick` retired
+    /// instructions, and only while `enable_address & enable_mask` is
+    /// non-zero -- a unit whose enable bit is clear holds its count, and
+    /// resumes from it when the bit is set again.
+    ///
+    /// **`instructions_per_tick` is a stated approximation, not a
+    /// measurement.** This core has no cycle model, so virtual time is
+    /// retired instructions, and the board that picks the number says what
+    /// it assumes -- `core/cortexm0`'s `map_counter` made the same trade for
+    /// the RP2040's TIMER. Zero is corrected to one rather than dividing by
+    /// it; `abi.py` refuses it before it gets here.
+    ///
+    /// **The gate must itself be mapped**, as a stream's must, and a snapshot
+    /// asked for through an unmapped one faults naming `op_address`: a board
+    /// that named the wrong enable register would otherwise describe a timer
+    /// that silently never counts, which is the spin-forever hang this whole
+    /// file is shaped against.
+    ///
+    /// **Nothing outside this repository's tests holds the behaviour.** rvcpp,
+    /// the lockstep oracle, models no peripheral at these addresses, so the
+    /// counter is held by the header lines each board cites and by the tests
+    /// that read them -- not by an oracle. Lockstep is unaffected either way:
+    /// a counter changes no architectural register.
+    void map_snapshot_counter(uint32_t op_address, uint32_t update_mask,
+                              uint32_t valid_mask, uint32_t low_address,
+                              uint32_t high_address, uint32_t high_mask,
+                              uint32_t enable_address, uint32_t enable_mask,
+                              uint32_t instructions_per_tick);
+
+    /// Called by `step` once an instruction has actually retired -- never on
+    /// an Unimplemented, Illegal or MemoryFault, so a program stopped by one
+    /// does not age while it is stopped. Advances every snapshot counter
+    /// whose gate is open, and is the one line where this core's virtual
+    /// time passes.
+    void note_executed();
 
     /// Whether `address` is a mapped register rather than bulk memory.
     ///
@@ -424,6 +474,33 @@ private:
         std::vector<uint8_t> bytes;
     };
 
+    /// A `map_snapshot_counter`: its three addresses, its gate, its rate,
+    /// the instructions it has counted and the copy firmware last asked for.
+    ///
+    /// Beside `mmio_` rather than inside `Mapped`, for the reason `Stream`
+    /// is: three addresses share one count, and a word per address cannot
+    /// say that. The three are registered in `mmio_` as well, so `is_mapped`
+    /// answers for them and their reads and writes reach the paths that
+    /// check this table first.
+    ///
+    /// **`instructions` and not a start point**, because the gate can close:
+    /// a count derived from "retired since mapping" would jump forward by
+    /// every instruction the unit was stopped for the moment it restarted.
+    struct Snapshot {
+        uint32_t op = 0;
+        uint32_t update_mask = 0;
+        uint32_t valid_mask = 0;
+        uint32_t low = 0;
+        uint32_t high = 0;
+        uint32_t high_mask = 0;
+        uint32_t enable = 0;
+        uint32_t enable_mask = 0;
+        uint32_t instructions_per_tick = 1;
+        uint64_t instructions = 0;
+        uint64_t latched = 0;
+        bool valid = false;
+    };
+
     std::array<uint32_t, kRegisters> x_{};
     uint32_t pc_ = 0;
     uint32_t jvt_ = 0;
@@ -431,6 +508,7 @@ private:
     std::vector<Region> regions_;
     std::unordered_map<uint32_t, Mapped> mmio_;
     std::unordered_map<uint32_t, Stream> streams_;
+    std::vector<Snapshot> snapshots_;
     mutable uint32_t fault_address_ = 0;
     mutable bool fault_was_fetch_ = false;
 };

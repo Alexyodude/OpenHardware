@@ -150,6 +150,18 @@ uint32_t riscv32_stream(const Riscv32Cpu* cpu, uint32_t address, uint8_t* out,
     return length;
 }
 
+void riscv32_map_snapshot_counter(Riscv32Cpu* cpu, uint32_t op_address,
+                                  uint32_t update_mask, uint32_t valid_mask,
+                                  uint32_t low_address, uint32_t high_address,
+                                  uint32_t high_mask, uint32_t enable_address,
+                                  uint32_t enable_mask,
+                                  uint32_t instructions_per_tick) {
+    as_cpu(cpu)->map_snapshot_counter(op_address, update_mask, valid_mask,
+                                      low_address, high_address, high_mask,
+                                      enable_address, enable_mask,
+                                      instructions_per_tick);
+}
+
 int riscv32_is_mapped(const Riscv32Cpu* cpu, uint32_t address) {
     return as_cpu(cpu)->is_mapped(address) ? 1 : 0;
 }

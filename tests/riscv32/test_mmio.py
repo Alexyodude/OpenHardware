@@ -29,6 +29,7 @@ import pytest
 from core.riscv32 import abi
 
 from . import encode as e
+from .conftest import load
 
 #: ESP32-C3 GPIO, from the Technical Reference Manual chapter 5. Used because
 #: it is the block `webui/boards/esp32c3.py` describes, so a change to these
@@ -498,3 +499,222 @@ def test_a_program_can_print_through_the_fifo(uart):
     for _ in program:
         uart.step()
     assert uart.stream(UART_FIFO) == b"H!"
+
+
+# --- a counter read through a snapshot (OH-161 step 2) -----------------------
+#
+# The addresses are the ESP32-C3's SYSTIMER, from the same
+# `framework-arduinoespressif32` tree as the UART above: `soc.h:61`
+# (`DR_REG_SYSTIMER_BASE 0x60023000`), and in `systimer_reg.h` CONF at + 0x0
+# (:26), whose `SYSTIMER_TIMER_UNIT0_WORK_EN` is `BIT(30)` (:90); UNIT0_OP at
+# + 0x4 (:108), `VALUE_VALID` `BIT(29)` (:109) and `UPDATE` `BIT(30)` (:116);
+# VALUE_HI at + 0x40 (:344), `[19:0]` (:345); VALUE_LO at + 0x44 (:356).
+# Used because they are the block `webui/boards/esp32c3.py` describes; what
+# the boards' tests hold is the board, and what these hold is the mechanism.
+
+SYSTIMER_CONF = 0x60023000
+UNIT0_OP = 0x60023004
+UNIT0_VALUE_HI = 0x60023040
+UNIT0_VALUE_LO = 0x60023044
+UNIT0_WORK_EN = 1 << 30
+UNIT0_UPDATE = 1 << 30
+UNIT0_VALUE_VALID = 1 << 29
+VALUE_HI_BITS = 0x000FFFFF
+
+#: Retired instructions per tick in these tests. **No chip's rate** -- each
+#: board states its own -- and not 1 either, so a counter that forgot to
+#: divide reads a different number from one that did.
+PER_TICK = 4
+
+NOP = e.addi("x0", "x0", 0)
+
+
+@pytest.fixture
+def systimer(cpu):
+    """The session core, its RAM, and one SYSTIMER unit counting.
+
+    Takes `cpu` for the reason the `gpio` fixture gives: `_fresh_board`
+    clears every mapping first, so this has to run after it.
+    """
+    cpu.map_register(SYSTIMER_CONF, UNIT0_WORK_EN)
+    cpu.map_snapshot_counter(
+        op=UNIT0_OP, update_mask=UNIT0_UPDATE, valid_mask=UNIT0_VALUE_VALID,
+        low=UNIT0_VALUE_LO, high=UNIT0_VALUE_HI, high_mask=VALUE_HI_BITS,
+        enable=SYSTIMER_CONF, enable_mask=UNIT0_WORK_EN,
+        instructions_per_tick=PER_TICK,
+    )
+    return cpu
+
+
+def retire(cpu, count: int) -> None:
+    """Execute `count` NOPs, from wherever `load` puts them."""
+    load(cpu, [NOP] * count)
+    for _ in range(count):
+        cpu.step()
+
+
+def test_before_any_snapshot_all_three_registers_read_zero(systimer):
+    """`VALUE_VALID` is `default: 0` (:109) and both value fields too (:345,
+    :357): a unit that has counted and never been asked has nothing to show,
+    and a live count here would be the right number read the wrong way."""
+    retire(systimer, 40)
+    assert systimer.read_word(UNIT0_OP) == 0
+    assert systimer.read_word(UNIT0_VALUE_LO) == 0
+    assert systimer.read_word(UNIT0_VALUE_HI) == 0
+
+
+def test_a_snapshot_is_the_retired_instructions_divided_by_the_rate(systimer):
+    """41 instructions at four a tick is ten ticks and one left over: the
+    remainder is not rounded up, and the copy says it is valid."""
+    retire(systimer, 41)
+    systimer.write_word(UNIT0_OP, UNIT0_UPDATE)
+    assert systimer.read_word(UNIT0_OP) == UNIT0_VALUE_VALID
+    assert systimer.read_word(UNIT0_VALUE_LO) == 10
+    assert systimer.read_word(UNIT0_VALUE_HI) == 0
+
+
+def test_the_copy_stands_still_until_the_next_snapshot(systimer):
+    """**The reason this is not `core/cortexm0`'s `map_counter`.** ESP-IDF's
+    HAL writes UPDATE and then reads the two halves; a live count read
+    between them would tear, and one read later would show time nobody
+    asked for."""
+    retire(systimer, 40)
+    systimer.write_word(UNIT0_OP, UNIT0_UPDATE)
+    retire(systimer, 40)
+    assert systimer.read_word(UNIT0_VALUE_LO) == 10, "the copy, not the count"
+    systimer.write_word(UNIT0_OP, UNIT0_UPDATE)
+    assert systimer.read_word(UNIT0_VALUE_LO) == 20, "and a new copy moves"
+
+
+def test_a_write_without_the_update_bit_takes_no_copy(systimer):
+    """UPDATE is one bit of the register (:116) and every other bit of a
+    write to it is not a request for anything."""
+    retire(systimer, 40)
+    systimer.write_word(UNIT0_OP, ~UNIT0_UPDATE & 0xFFFFFFFF)
+    assert systimer.read_word(UNIT0_OP) == 0
+    assert systimer.read_word(UNIT0_VALUE_LO) == 0
+
+
+def test_the_count_holds_while_the_unit_is_disabled_and_resumes_from_it(systimer):
+    """`TIMER_UNIT0_WORK_EN` is the unit's enable (:90). Cleared, the 400
+    instructions in the middle are not counted; set again, counting resumes
+    from where it stopped rather than jumping by what it missed."""
+    retire(systimer, 40)
+    systimer.write_word(SYSTIMER_CONF, 0)
+    retire(systimer, 400)
+    systimer.write_word(SYSTIMER_CONF, UNIT0_WORK_EN)
+    retire(systimer, 40)
+    systimer.write_word(UNIT0_OP, UNIT0_UPDATE)
+    assert systimer.read_word(UNIT0_VALUE_LO) == 20
+
+
+def test_an_instruction_that_faults_does_not_age_the_counter(systimer):
+    """A program stopped by a fault is stopped: a caller stepping it in a
+    loop must not watch its timer run on. The load is from address zero,
+    which nothing maps."""
+    load(systimer, [e.lw("a0", "x0", 0)])
+    for _ in range(40):
+        with pytest.raises(abi.MemoryFault):
+            systimer.step()
+    systimer.write_word(UNIT0_OP, UNIT0_UPDATE)
+    assert systimer.read_word(UNIT0_VALUE_LO) == 0
+
+
+def test_every_byte_of_the_operation_register_names_the_unit(systimer):
+    """`sb` to the register's top byte is a store a compiler may emit for
+    bit 30, and it reaches the unit at its word; one to the bottom byte
+    cannot carry the bit, so it takes no copy. Executed, because only the
+    store paths position a byte in its lane."""
+    program = [NOP] * 8 + [
+        e.lui("a4", 0x60023),        # a4 = SYSTIMER
+        e.addi("a5", "x0", 0x40),    # bit 6 of a byte: bit 30 of the word
+        e.sb("a5", "a4", 4),         # the bottom byte: no UPDATE in it
+        e.lw("a0", "a4", 4),
+        e.sb("a5", "a4", 7),         # the top byte: UPDATE
+        e.lw("a1", "a4", 4),
+        e.lw("a2", "a4", 0x44),
+    ]
+    load(systimer, program)
+    for _ in program:
+        systimer.step()
+    assert systimer.reg(10) == 0, "a0: the bottom byte took no copy"
+    assert systimer.reg(11) == UNIT0_VALUE_VALID, "a1: the top byte did"
+    assert systimer.reg(12) == 12 // PER_TICK, "a2: twelve retired before the store"
+
+
+def test_a_program_reads_the_count_the_way_esp_idf_does(systimer):
+    """`systimer_hal_get_counter_value`'s shape: write UPDATE, spin until
+    VALUE_VALID, read HI, read LO -- the sequence the openhardware core's
+    `millis` compiles to, executed here against the mechanism alone.
+
+    38 NOPs, then `lui`, `lui` and the store: the copy is taken with 40
+    retired, which is ten ticks."""
+    program = [NOP] * 38 + [
+        e.lui("a4", 0x60023),        # a4 = SYSTIMER
+        e.lui("a5", 0x40000),        # a5 = UPDATE
+        e.sw("a5", "a4", 4),
+        e.lw("a0", "a4", 4),         # spin on VALUE_VALID ...
+        e.beq("a0", "x0", -4),       # ... which UPDATE reads as zero
+        e.lw("a1", "a4", 0x40),
+        e.lw("a2", "a4", 0x44),
+    ]
+    load(systimer, program)
+    for _ in program:
+        systimer.step()
+    assert systimer.reg(10) == UNIT0_VALUE_VALID
+    assert (systimer.reg(11), systimer.reg(12)) == (0, 10)
+
+
+def test_a_snapshot_through_an_unmapped_enable_register_faults_naming_the_unit(cpu):
+    """A board naming an enable register it never mapped has described a
+    counter that could never count. The snapshot faults at the unit's own
+    address, through `step()` because only that reads the address the core
+    recorded -- the lesson `test_an_executed_store_through_an_unmapped_gate_
+    names_the_fifo` paid for."""
+    cpu.map_snapshot_counter(
+        op=UNIT0_OP, update_mask=UNIT0_UPDATE, valid_mask=UNIT0_VALUE_VALID,
+        low=UNIT0_VALUE_LO, high=UNIT0_VALUE_HI, high_mask=VALUE_HI_BITS,
+        enable=SYSTIMER_CONF, enable_mask=UNIT0_WORK_EN,
+        instructions_per_tick=PER_TICK,
+    )
+    load(cpu, [e.lui("a4", 0x60023), e.lui("a5", 0x40000), e.sw("a5", "a4", 4)])
+    cpu.step()
+    cpu.step()
+    with pytest.raises(abi.MemoryFault) as caught:
+        cpu.step()
+    assert f"0x{UNIT0_OP:08x}" in str(caught.value), str(caught.value)
+
+
+def test_a_rate_below_one_is_refused_with_the_value(cpu):
+    """Zero would be a counter that never advances, which is the hang this
+    behaviour exists to end. The C side corrects it to one rather than
+    divide by it; the binding refuses it first, saying what it was given."""
+    with pytest.raises(abi.AbiError) as caught:
+        cpu.map_snapshot_counter(
+            op=UNIT0_OP, update_mask=UNIT0_UPDATE, valid_mask=UNIT0_VALUE_VALID,
+            low=UNIT0_VALUE_LO, high=UNIT0_VALUE_HI, high_mask=VALUE_HI_BITS,
+            enable=SYSTIMER_CONF, enable_mask=UNIT0_WORK_EN,
+            instructions_per_tick=0,
+        )
+    assert "got 0" in str(caught.value)
+
+
+def test_a_machine_with_no_board_keeps_no_counter_behind(systimer):
+    """A counter carries a COUNT and a copy, so one left behind would answer
+    for the next board's register at the same address: a plain register
+    mapped there after `clear_regions` must read what it was given."""
+    retire(systimer, 40)
+    systimer.write_word(UNIT0_OP, UNIT0_UPDATE)
+    systimer.clear_regions()
+    systimer.map_register(UNIT0_OP, 0x1234)
+    assert systimer.read_word(UNIT0_OP) == 0x1234
+
+
+def test_a_reset_machine_keeps_no_counter_behind(systimer):
+    """`reset` is what `core/riscv32/machine.py`'s `blank` calls, so a board
+    installing onto a used core starts with no counter either."""
+    retire(systimer, 40)
+    systimer.write_word(UNIT0_OP, UNIT0_UPDATE)
+    systimer.reset()
+    systimer.map_register(UNIT0_OP, 0x1234)
+    assert systimer.read_word(UNIT0_OP) == 0x1234

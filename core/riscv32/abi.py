@@ -37,7 +37,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match RISCV32_ABI_VERSION in abi.h.
-ABI_VERSION = 2
+ABI_VERSION = 3
 
 #: `riscv32::WriteOp`, by the name a board description uses.
 #:
@@ -209,6 +209,10 @@ _SIGNATURES = {
         [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint8),
          ctypes.c_uint32],
         ctypes.c_uint32,
+    ),
+    "riscv32_map_snapshot_counter": (
+        [ctypes.c_void_p] + [ctypes.c_uint32] * 9,
+        None,
     ),
     "riscv32_is_mapped": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
     "riscv32_clear_mmio": ([ctypes.c_void_p], None),
@@ -487,6 +491,32 @@ class Cpu:
         buffer = (ctypes.c_uint8 * length)()
         self._lib.riscv32_stream(self._handle, address, buffer, length)
         return bytes(buffer)
+
+    def map_snapshot_counter(self, *, op: int, update_mask: int, valid_mask: int,
+                             low: int, high: int, high_mask: int, enable: int,
+                             enable_mask: int, instructions_per_tick: int) -> None:
+        """A free-running counter that firmware reads through a snapshot.
+
+        A write carrying `update_mask` to `op` copies the count into `low`
+        and `high` (kept to `high_mask`), and from then `op` reads
+        `valid_mask` -- an ESP32 SYSTIMER unit's UPDATE / VALUE_VALID
+        handshake. It counts once every `instructions_per_tick` retired
+        instructions while `enable & enable_mask` is set.
+
+        `instructions_per_tick` is a stated approximation -- this core has no
+        cycle model -- and below one is refused here with the value, rather
+        than passed to a core that would have to divide by it.
+        """
+        if instructions_per_tick < 1:
+            raise AbiError(
+                f"instructions_per_tick must be at least 1, got "
+                f"{instructions_per_tick!r}: a counter that never advances is "
+                f"the hang this behaviour exists to prevent"
+            )
+        self._lib.riscv32_map_snapshot_counter(
+            self._handle, op, update_mask, valid_mask, low, high, high_mask,
+            enable, enable_mask, instructions_per_tick,
+        )
 
     def is_mapped(self, address: int) -> bool:
         """Whether `address` is a mapped register rather than bulk memory."""
