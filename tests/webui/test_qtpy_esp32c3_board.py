@@ -49,10 +49,12 @@ MILLISECOND = steps_per_millisecond(esp32c3)
 #: wiring.c says a period can be. 1,450,000 watches a gap of each length,
 #: with about 9,500 to spare.
 #:
-#: Every length is watched here for the C3's and the C6's one clock, and in
-#: tests/webui/test_sparkfun_esp32c5_board.py for the C5's. The gaps are
-#: delay()'s on a clock, measured the same on every C3 and C6 image, so the
-#: other C3 and C6 board tests watch five moves and point here.
+#: Every length is watched here for the C3's and the C6's one clock, in
+#: tests/webui/test_sparkfun_esp32c6_board.py again for the C6's own
+#: description, and in tests/webui/test_sparkfun_esp32c5_board.py for the
+#: C5's. The gaps are delay()'s on a clock, measured the same on every C3
+#: and C6 image, so the other C3 and C6 board tests watch five moves and
+#: point here.
 BUDGET = 1_450_000
 
 
