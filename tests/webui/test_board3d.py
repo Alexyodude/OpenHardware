@@ -2251,8 +2251,13 @@ def test_a_carved_pin_carries_its_place_on_the_mesh_and_not_only_in_the_vertices
     Verified in the browser when it landed: the Uno's pads report 30 distinct
     world positions spread across 25 x 27 scene units, where before the fix
     every carved pad reported the one origin. Asserted here at the source
-    with comments stripped (the OH-117 lesson), because no headless harness
-    can run carvePins -- that gap is on OH-128's record.
+    with comments stripped (the OH-117 lesson), written when no headless
+    harness could run carvePins -- the gap on OH-128's record. One does now:
+    the OH-215 tests at the bottom of this file run it under node, and
+    removing either the position line or the x re-bake fails
+    `test_carvepins_takes_only_metal_standing_on_the_models_own_header_pads`
+    (the position line fails the landing test beside it too; both seen
+    2026-10-09). The per-entry buckets are held only here.
     """
     source = RENDERER.read_text(encoding="utf-8")
     body = source.split("function carvePins(", 1)[1].split("\nfunction ", 1)[0]
@@ -2310,9 +2315,10 @@ def test_a_wire_holding_a_released_pad_is_repointed_at_the_carved_pin():
     could repair it because `view.pads` no longer held the mesh. Distinct
     from OH-128, which fixed where a LIVE carved pin reports itself.
 
-    Asserted at the source with comments stripped (the OH-117 lesson),
-    because no headless harness can run `carvePins` -- the gap OH-128's
-    record owns.
+    Asserted at the source with comments stripped (the OH-117 lesson).
+    `carvePins` does run headless now, under node, in the OH-215 tests at
+    the bottom of this file -- but that probe makes no wire, so the repoint
+    is held only here.
     """
     source = RENDERER.read_text(encoding="utf-8")
     body = source.split("function carvePins(", 1)[1].split("\nfunction ", 1)[0]
@@ -2469,8 +2475,9 @@ def test_the_cold_page_does_not_ask_about_no_board():
 def test_the_drag_starts_on_a_part_terminal_too():
     """**The UI half of OH-116, without which the netlist half is dead
     code.** The drag is a THREE.js raycast with no headless harness -- the
-    same absence `carvePins` records -- so the wiring is pinned at the
-    source with comments stripped: the press falls through to
+    OH-215 tests below run `carvePins` under node, but nothing there drives
+    a pointer -- so the wiring is pinned at the source with comments
+    stripped: the press falls through to
     `terminalUnder`, the drop refuses the wire\'s own starting anchor, the
     bench wire carries its `from` end, and `removePart` takes the wires
     that BEGIN on the part with it."""
