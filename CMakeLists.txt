@@ -22,14 +22,32 @@ cmake_minimum_required(VERSION 3.20)
 # and CMakeInitializeConfigs.cmake:22 caches CMAKE_BUILD_TYPE from it, still
 # inside project(). This default used to sit after project(), where
 # `NOT CMAKE_BUILD_TYPE` found that Debug and did nothing, so every core built
-# on Windows was `/Od /RTC1`. GCC and Clang set no such INIT, which is why
-# only Windows was affected.
+# on Windows was `/Od /RTC1`. GCC, and Clang off Windows, set no such INIT,
+# which is why only Windows was affected. Clang on Windows sets it whenever it
+# targets the MSVC ABI: clang-cl by including this same Windows-MSVC.cmake
+# (Platform/Windows-Clang.cmake:230), and clang++ itself at
+# Platform/Windows-Clang.cmake:272, `set(CMAKE_BUILD_TYPE_INIT Debug)`.
 #
 # Before project(), a type already in the cache is one somebody asked for --
-# `-DCMAKE_BUILD_TYPE=`, or an earlier configure of the same tree -- and is
-# kept. So is the CMAKE_BUILD_TYPE environment variable, which CMake applies
-# inside project() and which a default here would otherwise beat. A
-# multi-configuration generator (Visual Studio, Ninja Multi-Config) has no
+# `-DCMAKE_BUILD_TYPE=<type>`, or an earlier configure of the same tree -- and
+# is kept. So is the CMAKE_BUILD_TYPE environment variable, which CMake applies
+# inside project() and which a default here would otherwise beat. An empty
+# value counts as unset, in the cache and in the environment alike, and gets
+# Release.
+#
+# The environment variable is yielded to only where CMake applies it: from
+# 3.22 (Help/envvar/CMAKE_BUILD_TYPE.rst: "versionadded:: 3.22"; the 3.22
+# release notes: "The CMAKE_BUILD_TYPE environment variable was added"), and
+# only when it is not empty. Yielding where CMake ignores it hands the type to
+# the platform's INIT, which on MSVC is Debug again: under the check this
+# replaced, `NOT DEFINED ENV{CMAKE_BUILD_TYPE}`, CMake 3.21.4 with
+# RelWithDebInfo in the environment and CMake 4.4.2 with an empty one each
+# cached Debug. Gated here rather than raising the minimum to 3.22,
+# because that would also turn CMP0121 to CMP0128 NEW for the whole project,
+# and CMP0128 changes how the C++ standard and extension flags are chosen --
+# every core's compile line, for a reason that is not the build type.
+#
+# A multi-configuration generator (Visual Studio, Ninja Multi-Config) has no
 # CMAKE_BUILD_TYPE and picks the type per build; `tools/build_core.py` asks it
 # for Release with `--config Release`.
 #
@@ -39,7 +57,11 @@ cmake_minimum_required(VERSION 3.20)
 # alone. What no default can reach is a tree configured before this fix, whose
 # cached Debug outlives it; that is the script's job, in `configure` there.
 get_property(multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
-if(NOT multi_config AND NOT CMAKE_BUILD_TYPE AND NOT DEFINED ENV{CMAKE_BUILD_TYPE})
+set(env_build_type "")
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.22)
+  set(env_build_type "$ENV{CMAKE_BUILD_TYPE}")
+endif()
+if(NOT multi_config AND NOT CMAKE_BUILD_TYPE AND env_build_type STREQUAL "")
   set(CMAKE_BUILD_TYPE Release CACHE STRING
     "Choose the type of build: Debug Release RelWithDebInfo MinSizeRel" FORCE)
 endif()

@@ -40,7 +40,9 @@ module had cached Debug before CMakeLists.txt's default ran. CMakeLists.txt
 now sets that default early enough, but a cache written before then still
 holds Debug, and a cached value outlives any default. So `configure` reads the
 type back out of the cache and reconfigures a tree that is not Release, rather
-than building whatever it finds.
+than building whatever it finds. And the cache says what the next build will
+be, not what build/lib holds, so on Windows the libraries are read back too:
+`debug_runtime`.
 """
 
 from __future__ import annotations
@@ -243,6 +245,38 @@ def cached_build_type(build_dir: pathlib.Path) -> str | None:
     return entries.get("CMAKE_BUILD_TYPE", "")
 
 
+#: What a Debug core imports on Windows and a Release one does not: MSVC's
+#: debug C runtime, which `/MDd` links. A Release core (`/MD`) imports
+#: VCRUNTIME140.dll and the ucrt's api-ms-win-crt-* forwarders instead. Read
+#: out of every core's DLL in four checkouts' build/lib on 2026-10-10: each
+#: Debug one named both of these, and no Release one named either.
+DEBUG_RUNTIMES = (b"VCRUNTIME140D.dll", b"ucrtbased.dll")
+
+
+def debug_runtime(library: pathlib.Path) -> str | None:
+    """The MSVC debug runtime `library` imports, or None if it names none.
+
+    The library's own word on what it is, where the cache has only the
+    tree's: a tree configured Release and not yet built still holds the Debug
+    DLLs it built before, and a multi-config build/ caches no type at all
+    while a Debug build of it -- from an IDE -- writes the same build/lib that
+    `--config Release` does.
+
+    A byte search rather than a parse of the import table, because no core's
+    source names either DLL, so the import table is the only place one can
+    come from.
+
+    Off Windows nothing links these and this is always None. What holds there
+    is the cache: GCC sets no Debug default, CI builds single-config with it,
+    and `test_this_checkouts_build_is_release` reads what that build cached.
+    """
+    data = library.read_bytes()
+    for runtime in DEBUG_RUNTIMES:
+        if runtime in data:
+            return runtime.decode()
+    return None
+
+
 def configure(build_dir: pathlib.Path, env: dict[str, str]) -> None:
     """Configure `build_dir` for a Release build, whatever its cache held.
 
@@ -253,8 +287,11 @@ def configure(build_dir: pathlib.Path, env: dict[str, str]) -> None:
     somebody set by hand, or the CMAKE_BUILD_TYPE environment variable.
 
     Reconfigured rather than refused, because `build_dir` is this script's
-    tree and this script builds Release. A Debug build belongs in a directory
-    of its own, where nothing here will touch it.
+    tree and this script builds Release. There is no Debug tree beside it:
+    every loader here takes `library_path`, which is always build/lib, so a
+    core built Debug into a directory of its own is never loaded, and one
+    built Debug into build/ is reported by `debug_runtime` -- at load, and in
+    tests/rules/test_build_core.py -- until this script is run again.
     """
     command = ["cmake", "-S", str(REPO), "-B", str(build_dir)]
     if shutil.which("ninja"):
@@ -304,6 +341,17 @@ def build(clean: bool = False, verbose: bool = False) -> pathlib.Path:
             f"build reported success but {[p.name for p in missing]} "
             f"{'is' if len(missing) == 1 else 'are'} not in {LIB_DIR}. Found: {found}"
         )
+    # A Debug DLL newer than every source is up to date to Ninja, which relinks
+    # nothing, so a Release build leaves it where it is: seen with one copied
+    # into build/lib. (MSBuild does relink -- a Visual Studio tree built
+    # Release, Debug, Release ends Release.)
+    debug = [f"{path.name} imports {runtime}" for path in built
+             if (runtime := debug_runtime(path)) is not None]
+    if debug:
+        raise BuildError(
+            f"built Release, but {LIB_DIR} still holds Debug builds: "
+            f"{'; '.join(debug)}. Run: python tools/build_core.py --clean"
+        )
     if verbose:
         for path in built:
             print(f"{path}  ({path.stat().st_size} bytes)")
@@ -318,10 +366,19 @@ def ensure_built(core: str = DEFAULT_CORE) -> pathlib.Path:
     Rebuilding from inside a load would relink a DLL that the server or another
     test session may hold open, and a failed build here reaches a suite as a
     skip. `tests/rules/test_build_core.py` fails instead, on a build/ that is
-    not Release, and `python tools/build_core.py` is the fix for both.
+    not Release, and `python tools/build_core.py` is the fix for both. A
+    library that imports MSVC's debug runtime is still returned, with one line
+    on stderr, for whoever runs the server and never the tests.
     """
     path = library_path(core)
     if path.is_file():
+        runtime = debug_runtime(path)
+        if runtime is not None:
+            print(
+                f"build_core: {path} imports {runtime}, so it is a Debug build, "
+                f"at a fraction of Release's speed. Run: python tools/build_core.py",
+                file=sys.stderr,
+            )
         return path
     build()
     return library_path(core)

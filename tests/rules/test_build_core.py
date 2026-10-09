@@ -15,13 +15,22 @@
 #   * `cached_build_type` reads a cache right -- synthesised caches, no CMake;
 #   * a configure that names no type is Release -- CMakeLists.txt, configured
 #     for real into tmp_path;
+#   * a type in the environment is kept where CMake applies it, and an empty
+#     one gets Release -- configured for real, the variable set;
 #   * a tree already cached Debug is reconfigured, not built Debug --
 #     `build_core.configure`, for real, on a tree made the way build/ was made
 #     before the fix;
 #   * this checkout's own build/ is Release. It is the one that matters, and
 #     an existing checkout FAILS it until `python tools/build_core.py` is run
-#     once, because `ensure_built` never rebuilds a library that exists.
+#     once, because `ensure_built` never rebuilds a library that exists;
+#   * `debug_runtime` tells a Debug library from a Release one -- synthesised
+#     import names, no compiler -- and `ensure_built` says so on loading one;
+#   * this checkout's own libraries are Release, whatever the cache says: a
+#     multi-config build/ caches no type, and a tree configured Release and
+#     not yet built still holds Debug DLLs. Windows only, where MSVC's runtime
+#     names the build type; elsewhere the cache test above is what holds.
 
+import platform
 import shutil
 import subprocess
 
@@ -136,6 +145,34 @@ def test_a_configure_that_names_no_build_type_is_release(tmp_path, toolchain):
     )
 
 
+def test_a_build_type_in_the_environment_is_kept_and_an_empty_one_is_not(tmp_path, toolchain):
+    """CMakeLists' default yields to $CMAKE_BUILD_TYPE only where CMake applies it.
+
+    That is from CMake 3.22, and only when it is not empty. Yielding anywhere
+    else hands the type to the platform's INIT, which on MSVC is Debug: an
+    empty variable did exactly that under CMake 4.4.2, and RelWithDebInfo did
+    under 3.21.4, which ignores the variable.
+    """
+    version = subprocess.run(["cmake", "--version"], capture_output=True, text=True,
+                             check=True).stdout.split()[2]  # "cmake version 4.4.2"
+    applied = tuple(int(part) for part in version.split(".")[:2]) >= (3, 22)
+    cases = {
+        "RelWithDebInfo": "RelWithDebInfo" if applied else "Release",
+        "": "Release",
+    }
+    for value, expected in cases.items():
+        build_dir = tmp_path / (value or "empty")
+        configure_by_hand(build_dir, {**toolchain, "CMAKE_BUILD_TYPE": value})
+        found = build_core.cached_build_type(build_dir)
+        if found is None:
+            pytest.skip("SKIPPED: no ninja, so the generator is multi-config; it caches no "
+                        "build type for the environment to set")
+        assert found == expected, (
+            f"CMake {version} with CMAKE_BUILD_TYPE={value!r} in the environment cached "
+            f"{found!r}, expected {expected!r}"
+        )
+
+
 def test_a_tree_cached_debug_is_reconfigured_release_and_says_so(tmp_path, toolchain, capsys):
     build_dir = tmp_path / "build"
     configure_by_hand(build_dir, toolchain, "-DCMAKE_BUILD_TYPE=Debug")
@@ -168,4 +205,67 @@ def test_this_checkouts_build_is_release():
         f"{cache} says CMAKE_BUILD_TYPE={found!r}, so the cores in "
         f"{build_core.LIB_DIR} are not Release builds and run at a fraction of the "
         f"speed. Run: python tools/build_core.py -- it reconfigures the tree (OH-220)"
+    )
+
+
+#: The DLL names in a core's import table, read out of i8086.dll and
+#: cortexm0.dll from a Debug build/lib and a Release one on 2026-10-10, and
+#: NUL-separated as an import table's are. The DLLs are build outputs and not
+#: committed; these are what `debug_runtime` reads in them.
+RELEASE_IMPORTS = b"\0".join([
+    b"KERNEL32.dll", b"MSVCP140.dll", b"VCRUNTIME140.dll", b"VCRUNTIME140_1.dll",
+    b"api-ms-win-crt-heap-l1-1-0.dll", b"api-ms-win-crt-runtime-l1-1-0.dll",
+])
+DEBUG_IMPORTS = b"\0".join([
+    b"KERNEL32.dll", b"MSVCP140D.dll", b"VCRUNTIME140D.dll", b"VCRUNTIME140_1D.dll",
+    b"ucrtbased.dll",
+])
+
+
+def test_a_library_says_whether_it_is_a_debug_build(tmp_path):
+    cases = {
+        "debug.dll": (DEBUG_IMPORTS, "VCRUNTIME140D.dll"),
+        "release.dll": (RELEASE_IMPORTS, None),
+    }
+    for name, (imports, expected) in cases.items():
+        library = tmp_path / name
+        library.write_bytes(b"MZ\0" + imports + b"\0")
+        found = build_core.debug_runtime(library)
+        assert found == expected, f"{name}: expected {expected!r}, read {found!r}"
+
+
+def test_a_debug_library_is_loaded_with_a_warning_and_not_rebuilt(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(build_core, "LIB_DIR", tmp_path)
+    monkeypatch.setattr(build_core, "build", lambda *a, **k: pytest.fail("ensure_built rebuilt"))
+    library = build_core.library_path("i8086")
+
+    library.write_bytes(b"MZ\0" + RELEASE_IMPORTS + b"\0")
+    assert build_core.ensure_built("i8086") == library
+    said = capsys.readouterr().err
+    assert said == "", f"warned of a Release library: {said!r}"
+
+    library.write_bytes(b"MZ\0" + DEBUG_IMPORTS + b"\0")
+    assert build_core.ensure_built("i8086") == library
+    said = capsys.readouterr().err
+    assert f"{library.name} imports VCRUNTIME140D.dll" in said, (
+        f"loaded a Debug library without saying so: {said!r}"
+    )
+
+
+def test_this_checkouts_libraries_are_release():
+    if platform.system() != "Windows":
+        pytest.skip("SKIPPED: only MSVC's runtime names the build type in a library; "
+                    "off Windows the cache says it, and "
+                    "test_this_checkouts_build_is_release reads that")
+    built = [path for path in map(build_core.library_path, build_core.cores())
+             if path.is_file()]
+    if not built:
+        pytest.skip(f"SKIPPED: no core built in {build_core.LIB_DIR}; "
+                    f"python tools/build_core.py builds them")
+    debug = [f"{path.name} imports {runtime}" for path in built
+             if (runtime := build_core.debug_runtime(path)) is not None]
+    assert not debug, (
+        f"{build_core.LIB_DIR} holds Debug builds whatever its CMakeCache.txt says -- "
+        f"{'; '.join(debug)} -- and they run at a fraction of Release's speed. "
+        f"Run: python tools/build_core.py (OH-220)"
     )
