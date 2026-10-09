@@ -2743,14 +2743,17 @@ def test_a_model_drawn_upright_is_not_turned_onto_a_pad_map_drawn_upright(tmp_pa
     keeps the vendor's frame, the board file is read out of the same file, so
     both were upright and the page turned one of them a quarter off the other.
 
-    Three cases, each a real kind of board here: upright on upright (the
-    manifest boards OH-215 names), lying on upright (a XIAO SMD footprint
-    under a landscape model -- the turn that must survive), and lying on
-    lying. A model of one triangle carrying only the `pcb` extra, so this
-    runs on a fresh checkout with no model built.
+    Four cases, all four ways the two frames can meet. Three are real kinds
+    of board here: upright on upright (the manifest boards OH-215 names),
+    lying on upright (a XIAO SMD footprint under a landscape model -- the
+    turn that must survive), and lying on lying. The fourth, an upright
+    model on a lying map, is no board yet and must turn too. A model of one
+    triangle carrying only the `pcb` extra, so this runs on a fresh checkout
+    with no model built.
 
     Seen red (2026-10-09): with the turn read from `layout.height >
-    layout.width` alone, the first case came out turned 90 degrees.
+    layout.width` alone, the first case came out turned 90 degrees, and the
+    fourth (added in review) 0.
     """
     upright = tmp_path / "upright.glb"
     lying = tmp_path / "lying.glb"
@@ -2768,10 +2771,11 @@ def test_a_model_drawn_upright_is_not_turned_onto_a_pad_map_drawn_upright(tmp_pa
         {"layout": pad_map("upright on upright", 100, 200), "file": str(upright)},
         {"layout": pad_map("lying on upright", 100, 200), "file": str(lying)},
         {"layout": pad_map("lying on lying", 200, 100), "file": str(lying)},
+        {"layout": pad_map("upright on lying", 200, 100), "file": str(upright)},
     ])
     turns = {case["board"]: round(math.degrees(case["turn"])) for case in placed}
     assert turns == {"upright on upright": 0, "lying on upright": 90,
-                     "lying on lying": 0}, turns
+                     "lying on lying": 0, "upright on lying": 90}, turns
 
 
 def own_header_pads(compose, spec) -> list[tuple[float, float, float, float]]:
