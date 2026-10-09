@@ -2,7 +2,7 @@
 id: OH-216
 title: The page sets each model by the pads both sides name, and carves only metal
   on a pad's own side
-status: open
+status: in-progress
 priority: P2
 created: '2026-10-09'
 touches:
