@@ -2,7 +2,7 @@
 id: OH-214
 title: 'Every STEP colour is gamma-converted twice: OCCT already returns linear values
   and write_glb converts them again'
-status: open
+status: in-progress
 priority: P1
 created: '2026-10-09'
 touches:
