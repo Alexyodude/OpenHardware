@@ -3784,11 +3784,17 @@ def flat_fills(fills: list[tuple[list[tuple[float, float]], list[tuple[int, int,
     them, as flat faces at height `up` whose triangles share those points.
 
     The triangles are exactly those `flat` draws from each one as a ring of
-    its own -- the same points at the same height, `ear_clip` winding every
-    one forward, and the same turn for an underside face -- and only the
+    its own -- the same points at the same height, wound as `flat` winds
+    them and turned the same way for an underside face -- and only the
     indexing differs: a point is stored once and not once per triangle that
     uses it, which takes a glyph's triangle from 84 bytes to about 36
     (OH-163). A point no triangle uses is not stored.
+
+    **Wound as `flat` winds them, which is not always as `ear_clip` does.**
+    `flat` turns a ring whose `signed_area` is negative, and on a sliver of
+    no area -- three of a SparkFun glyph's points in a line, 50 mm from the
+    origin -- that sum's rounding can disagree with `ear_clip`'s cross
+    product taken at a corner: 29 triangles on the Thing Plus ESP32-C6.
     """
     positions: list[float] = []
     normals: list[float] = []
@@ -3797,6 +3803,8 @@ def flat_fills(fills: list[tuple[list[tuple[float, float]], list[tuple[int, int,
     for points, triangles in fills:
         stored: dict[int, int] = {}
         for a, b, c in triangles:
+            if signed_area([points[a], points[b], points[c]]) < 0:
+                b, c = c, b
             for corner in ((a, b, c) if upward else (a, c, b)):
                 if corner not in stored:
                     stored[corner] = len(positions) // 3

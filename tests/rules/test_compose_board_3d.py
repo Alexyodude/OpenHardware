@@ -3032,24 +3032,56 @@ def test_a_fill_on_the_board_shares_its_vertices_and_draws_the_same_triangles():
                              -compose.COPPER_THICKNESS_MM - compose.SILK_THICKNESS_MM,
                              compose.SILKSCREEN, centre, False)
 
-    def faces(mesh) -> dict:
-        positions, normals, indices = mesh.groups[compose.SILKSCREEN]
-        vertex = [(*positions[at:at + 3], *normals[at:at + 3])
-                  for at in range(0, len(positions), 3)]
-        drawn: dict = {}
-        for at in range(0, len(indices), 3):
-            corner = [vertex[index] for index in indices[at:at + 3]]
-            start = corner.index(min(corner))
-            key = tuple(corner[start:] + corner[:start])
-            drawn[key] = drawn.get(key, 0) + 1
-        return drawn
-
-    assert faces(meshes[2]) == faces(one_by_one)
-    assert faces(meshes[5]) == faces(underside)
+    assert _drawn_faces(meshes[2]) == _drawn_faces(one_by_one)
+    assert _drawn_faces(meshes[5]) == _drawn_faces(underside)
     shared = len({index for triangle in whole for index in triangle})
     assert len(meshes[2].groups[compose.SILKSCREEN][0]) // 3 == shared + sum(map(len, cut)), (
         "the fill on the board does not share its vertices")
     assert len(meshes[5].groups[compose.SILKSCREEN][0]) // 3 == len(under)
+
+
+def _drawn_faces(mesh) -> dict:
+    """Each silkscreen triangle of `mesh` by its three vertices -- position
+    and normal -- in the order drawn, turned to start at the least, and how
+    many times it is drawn: the geometry, whatever the indexing."""
+    positions, normals, indices = mesh.groups[compose.SILKSCREEN]
+    vertex = [(*positions[at:at + 3], *normals[at:at + 3])
+              for at in range(0, len(positions), 3)]
+    drawn: dict = {}
+    for at in range(0, len(indices), 3):
+        corner = [vertex[index] for index in indices[at:at + 3]]
+        start = corner.index(min(corner))
+        key = tuple(corner[start:] + corner[:start])
+        drawn[key] = drawn.get(key, 0) + 1
+    return drawn
+
+
+def test_every_boards_fills_share_their_points_and_not_their_triangles():
+    """**On every fetched board, `flat_fills` draws each fill's triangles as
+    `flat` draws them one ring at a time, to the bit, on either face**
+    (OH-163). Not only the points and the height: `flat` turns a ring whose
+    shoelace sum is negative, and on a sliver of no area -- three points of
+    a SparkFun glyph in a line -- rounding at 50 mm from the origin can make
+    that sum negative while `ear_clip`'s own cross product, taken at a
+    corner, is positive. 29 such slivers on the Thing Plus ESP32-C6 were
+    drawn the other way round when the indexing alone changed."""
+    centre = (1.25, -0.5)
+    compared = 0
+    for spec in _fill_layouts():
+        for fill in compose.read_layout(spec.layout).silk_fills:
+            points = list(fill.points)
+            try:
+                triangles = compose.ear_clip(points)
+            except ValueError:
+                continue
+            rings = [[points[a], points[b], points[c]] for a, b, c in triangles]
+            for upward in (True, False):
+                assert _drawn_faces(compose.flat_fills([(points, triangles)], 1.0,
+                                                       compose.SILKSCREEN, centre, upward)) == (
+                    _drawn_faces(compose.flat(rings, 1.0, compose.SILKSCREEN, centre, upward))), (
+                    spec.board, len(points), upward)
+            compared += 1
+    assert compared, "no fetched board carries a fill"
 
 
 def test_a_fill_the_triangulator_refuses_is_counted_as_ink_not_drawn(capsys):
