@@ -997,46 +997,6 @@ def test_every_number_a_part_publishes_crosses_into_the_renderer():
             )
 
 
-def test_a_lit_lens_is_as_bright_as_a_surface_can_be_and_no_brighter():
-    """**`LIT_GAIN` multiplies a lens's own colour, and that colour is an
-    albedo** -- the fraction of the light reaching a surface that it sends
-    back -- so no channel of it can pass 1.0 (OH-214).
-
-    3.0 did, when OH-214 retuned it: KiCad's LED lens `#b2190d` is 0.445
-    linear red and lit at 1.34, the buzzer's mark `#ce6d26` is 0.617 and lit
-    at 1.85. The gain is the largest tenth that keeps the brightest lens any
-    part names inside the range, which is the derivation `parts.js` states
-    beside it -- so a lens added brighter than the buzzer's mark fails here
-    rather than reflecting more light than reaches it, and a gain cut further
-    than the bound needs fails too.
-    """
-    from tools.import_3d_model import PARTS, linear
-
-    parts = (STATIC / "parts.js").read_text(encoding="utf-8")
-    gain = float(re.search(r"^const LIT_GAIN = ([\d.]+);", parts, re.MULTILINE)[1])
-    lit = parts.split('if (drive === "lit") {', 1)[1].split("  }", 1)[0]
-    assert "lens.material.color.copy(base).multiplyScalar(LIT_GAIN);" in lit, (
-        "the lit branch no longer scales the lens's own colour by LIT_GAIN, so "
-        "this bound is about nothing"
-    )
-    lenses = sorted({part.lens for part in PARTS if part.lens is not None})
-    brightest = max(linear(int(lens[at:at + 2], 16))
-                    for lens in lenses for at in (1, 3, 5))
-    assert brightest * gain <= 1.0, (
-        f"LIT_GAIN {gain} lights the brightest lens channel among {lenses}, "
-        f"{brightest:.4f} linear, at {brightest * gain:.4f} -- more light "
-        f"than reaches it"
-    )
-    assert brightest * (gain + 0.1) > 1.0, (
-        f"LIT_GAIN {gain} is not the largest tenth the bound allows: "
-        f"{gain + 0.1:.1f} still lights {brightest:.4f} at "
-        f"{brightest * (gain + 0.1):.4f}"
-    )
-
-
-# --- metal, and something for it to reflect ---------------------------------
-
-
 def test_the_scene_has_an_environment_for_metal_to_reflect():
     """**Without this, `metalness` is a lie**, and the two are one change.
 

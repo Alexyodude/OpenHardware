@@ -561,7 +561,7 @@ UNSTYLED = "#808080"
 #: KiCad's file states it, the epoxy is `#262525`, 1.9% linear, and this mask
 #: is 1.1% -- below the chips it was set above. The argument for a grey rather
 #: than a black stands; the value no longer does what this paragraph says, and
-#: OH-214 changed no judged constant, so choosing another is left open here.
+#: OH-214 changed no judged constant; choosing another is OH-217's.
 #:
 #: **What would retire this judgement**: Seeed stating a colour, or somebody
 #: measuring a board. Recorded so it can be replaced rather than inherited.
@@ -968,7 +968,7 @@ FINISHES: dict[str, Finish] = {
         "not claimed. Keyed #030303 with the SAMD21's moulding until OH-214"
     )),
     "#191919": Finish(0.0, 0.70, (
-        "the same near-black, on the ESP32-S3, RP2040 and nRF52840 models"
+        "the same near-black, on the ESP32-S3, MG24, RP2040 and nRF52840 models"
     )),
     "#151618": Finish(0.0, 0.70, (
         "the near-black top of KiCad's chip resistors and the 0603 fuse, and "
