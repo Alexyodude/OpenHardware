@@ -223,8 +223,11 @@ DEBUG_IMPORTS = b"\0".join([
 
 
 def test_a_library_says_whether_it_is_a_debug_build(tmp_path):
+    # Either debug runtime alone is enough to say so: a real Debug core
+    # imports both, but each name is checked, not only the first one found.
     cases = {
         "debug.dll": (DEBUG_IMPORTS, "VCRUNTIME140D.dll"),
+        "ucrt-only.dll": (b"KERNEL32.dll\0ucrtbased.dll", "ucrtbased.dll"),
         "release.dll": (RELEASE_IMPORTS, None),
     }
     for name, (imports, expected) in cases.items():

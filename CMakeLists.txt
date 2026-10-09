@@ -42,10 +42,12 @@ cmake_minimum_required(VERSION 3.20)
 # the platform's INIT, which on MSVC is Debug again: under the check this
 # replaced, `NOT DEFINED ENV{CMAKE_BUILD_TYPE}`, CMake 3.21.4 with
 # RelWithDebInfo in the environment and CMake 4.4.2 with an empty one each
-# cached Debug. Gated here rather than raising the minimum to 3.22,
-# because that would also turn CMP0121 to CMP0128 NEW for the whole project,
-# and CMP0128 changes how the C++ standard and extension flags are chosen --
-# every core's compile line, for a reason that is not the build type.
+# cached Debug. Gated here rather than raising the minimum to 3.22, so that
+# 3.20 and 3.21 still configure and the project's policies stay as they
+# were: 3.22 would also turn CMP0121 to CMP0128 NEW for the whole project,
+# for a reason that is not the build type. Measured 2026-10-10, MSVC and
+# CMake 4.4.2: no compile line in compile_commands.json differs between the
+# two minimums, so the gate is about who can configure, not what is built.
 #
 # A multi-configuration generator (Visual Studio, Ninja Multi-Config) has no
 # CMAKE_BUILD_TYPE and picks the type per build; `tools/build_core.py` asks it
