@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import pathlib
 import sys
 import typing
@@ -161,11 +162,153 @@ def _grouped(pads: list[tuple[str, str, float, float]]) -> tuple[PadSpec, ...]:
     return tuple(sorted(specs, key=lambda pad: (pad.y_mm, pad.x_mm)))
 
 
+#: The group of a pad on the module's UNDERSIDE (OH-216), in place of a
+#: header run's name: such a pad is on no header, and the page carves its pin
+#: out of the metal under the board rather than over it. A group because the
+#: group is what reaches the page (`webui/pinmap.py` carries it to
+#: `webui/api.py`'s `pad_view`), and because it is what was false: the
+#: retired importer tagged these pads `header-top` by the sign of their y.
+UNDERSIDE = "underside"
+
+
+def _land(pad: kicad.Pad) -> tuple[float, float, float, float]:
+    """A pad's copper as `(min_x, min_y, max_x, max_y)`, turned by its own
+    angle, in the frame its centre is in. Exact for the quarter turns every
+    footprint here uses, a bounding box for any other."""
+    turn = math.radians(pad.rotation_deg)
+    cos, sin = abs(math.cos(turn)), abs(math.sin(turn))
+    half_w = (pad.width_mm * cos + pad.height_mm * sin) / 2
+    half_h = (pad.width_mm * sin + pad.height_mm * cos) / 2
+    return pad.x_mm - half_w, pad.y_mm - half_h, pad.x_mm + half_w, pad.y_mm + half_h
+
+
+def _under_the_module(
+    path: pathlib.Path, footprint: kicad.Footprint, module: kicad.Board | None,
+    module_path: pathlib.Path | None,
+) -> set[str]:
+    """The numbers of a module footprint's pads that meet the module's
+    UNDERSIDE, from what the vendor's files state (OH-216).
+
+    **A footprint's layers cannot say it.** It is the HOST's land pattern:
+    every land of a Seeed XIAO SMD footprint is `F.Cu`, the castellations'
+    and the underside test points' alike, because both are soldered to the
+    host's top. What the footprint does state is where the module sits --
+    its `F.Fab` outline, the module's own 17.8 x 21 mm -- and a pin whose
+    every land lies wholly inside that outline is covered by the module,
+    so it can only meet the module's underside. A castellation's land
+    reaches past the outline to the half-hole on its edge.
+
+    **The converse is not true**, and that is what `module` is for: an
+    underside test point near the edge has a land reaching past the outline
+    too -- the nRF54L15's two NFC pads do. The module's own board file
+    (Seeed's `.kicad_pcb`) says which copper is the module's: a land over a
+    plated-through pad is a castellation, and one over copper on `B.Cu`
+    alone, with no plated-through pad, meets the underside. It is placed
+    over the module by the turn that lands every pad the outline found on
+    back-side copper; a footprint with no such pad gives it nothing to be
+    placed by, and then the module is not read.
+
+    Where the two disagree -- a pin the outline puts under the module that
+    no back-side copper answers under any turn -- this refuses, naming them.
+    """
+    fab = [seg for seg in footprint.segments if seg.layer == "F.Fab"]
+    if not fab:
+        if module is not None:
+            raise BoardImportError(
+                f"{path}: draws no F.Fab outline, so where the module sits is "
+                f"not stated and {module_path} cannot be placed under it"
+            )
+        return set()
+    xs = [v for seg in fab for v in (seg.x1_mm, seg.x2_mm)]
+    ys = [v for seg in fab for v in (seg.y1_mm, seg.y2_mm)]
+    outline = (min(xs), min(ys), max(xs), max(ys))
+    lands: dict[str, list[tuple[float, float, float, float]]] = {}
+    for pad in footprint.pads:
+        lands.setdefault(pad.number, []).append(_land(pad))
+    inside = {
+        number for number, boxes in lands.items()
+        if all(outline[0] < x0 and outline[1] < y0 and x1 < outline[2] and y1 < outline[3]
+               for x0, y0, x1, y1 in boxes)
+    }
+    if module is None or not inside:
+        return inside
+
+    centre = ((outline[0] + outline[2]) / 2, (outline[1] + outline[3]) / 2)
+    bx0, by0, bx1, by1 = module.extent_mm()
+    middle = ((bx0 + bx1) / 2, (by0 + by1) / 2)
+    copper = [(pad, *kicad.pad_on_board(placed, pad))
+              for placed in module.placements for pad in placed.pads
+              if pad.front or pad.back]
+
+    def over(boxes, quarter: int) -> list[tuple[kicad.Pad, float]]:
+        """The module pads whose centres lie in these lands, each with its
+        distance from the land's centre, the footprint turned `quarter`
+        quarters about its outline's centre onto the board's."""
+        cos, sin = (1, 0, -1, 0)[quarter], (0, 1, 0, -1)[quarter]
+        found = []
+        for x0, y0, x1, y1 in boxes:
+            dx, dy = (x0 + x1) / 2 - centre[0], (y0 + y1) / 2 - centre[1]
+            at = (middle[0] + dx * cos - dy * sin, middle[1] + dx * sin + dy * cos)
+            # A quarter turn swaps which side of the land runs along x.
+            half_x, half_y = (x1 - x0) / 2, (y1 - y0) / 2
+            if quarter % 2:
+                half_x, half_y = half_y, half_x
+            found += [(pad, math.hypot(px - at[0], py - at[1])) for pad, px, py in copper
+                      if abs(px - at[0]) <= half_x and abs(py - at[1]) <= half_y]
+        return found
+
+    def back_only(found: list[tuple[kicad.Pad, float]]) -> list[float]:
+        """How far each back-side-only pad in `found` is from its land."""
+        return [gap for pad, gap in found if pad.back and not pad.front]
+
+    def edge_under(quarter: int) -> frozenset[str]:
+        """The pins reaching the outline that meet back-side copper and no
+        plated-through pad, the module turned `quarter` quarters."""
+        found = {number: over(boxes, quarter) for number, boxes in lands.items()
+                 if number not in inside}
+        return frozenset(number for number, pads in found.items()
+                         if back_only(pads) and not any(p.front and p.back for p, _ in pads))
+
+    # **Not every pin under the module is answered, and need not be.** The
+    # outline is the statement for those; the module is read for the edge.
+    # Measured: the C5's battery lands sit 0.77 mm off its battery pads, and
+    # its pad 25 stands where the module has no pad at all. So the turn is
+    # the one answering the most of them, and of turns answering as many --
+    # the nRF54LM20A DIP's test points are a grid a half turn lays onto
+    # itself -- the one standing its lands nearest the copper answering them.
+    answered = {}
+    for quarter in range(4):
+        gaps = [min(gap) for gap in (back_only(over(lands[number], quarter))
+                                     for number in inside) if gap]
+        answered[quarter] = (len(gaps), -round(sum(gaps), 3))
+    best = max(answered.values())
+    readings = {edge_under(quarter) for quarter, score in answered.items() if score == best}
+    if best[0] == 0 or len(readings) != 1:
+        raise BoardImportError(
+            f"{path}: the pins {sorted(inside, key=_number_order)} lie wholly "
+            f"inside its F.Fab outline, so under the module, and {module_path} "
+            f"answers { {q * 90: n for q, (n, _) in answered.items()} } of them "
+            f"with back-side copper turned 0/90/180/270 degrees. The turn "
+            f"answering most, nearest, is what places the module; "
+            + ("none answers any." if best[0] == 0 else
+               f"the turns tied at {best} disagree about the pins at the "
+               f"edge: {[sorted(r, key=_number_order) for r in readings]}.")
+        )
+    (edge,) = readings
+    return inside | edge
+
+
+def _number_order(number: str) -> tuple[int, str]:
+    """Pad numbers in the order a person counts them: 2 before 10."""
+    return (int(number), "") if number.isdigit() else (1 << 30, number)
+
+
 def _from_eagle(
     path: pathlib.Path,
     select: tuple[str, ...],
     symbols: pathlib.Path | None,
     connects: Connects | None,
+    module: pathlib.Path | None,
 ) -> Geometry:
     """Read an EAGLE board, taking the header pads off the placed elements named.
 
@@ -191,6 +334,11 @@ def _from_eagle(
         raise BoardImportError(
             f"{path}: --symbols is a KiCad option. An EAGLE board carries its "
             f"own net names in <signals>, so there is no second file to join."
+        )
+    if module is not None:
+        raise BoardImportError(
+            f"{path}: --module places a module's own board under a module "
+            f"FOOTPRINT; an EAGLE board is the board itself."
         )
     board = eagle.read_board(path)
     candidates = [
@@ -323,6 +471,7 @@ def _from_kicad(
     select: tuple[str, ...],
     symbols: pathlib.Path | None,
     connects: Connects | None,
+    module: pathlib.Path | None,
 ) -> Geometry:
     """Read a KiCad footprint, joined to a symbol library for the pin names.
 
@@ -336,6 +485,10 @@ def _from_kicad(
     is a list of placed elements. More than one is refused rather than having
     the first quietly win: a footprint is a single part, so a caller passing two
     roots has confused this file with a board.
+
+    `module` is the module's own board file, where the vendor publishes one:
+    it says which pads at the outline's edge meet the module's underside
+    (`_under_the_module`), which the footprint alone cannot.
     """
     if connects is not None:
         raise BoardImportError(
@@ -386,17 +539,35 @@ def _from_kicad(
         for pad in pads
     ]
     unnamed = sorted(number for _, number, _, _ in entries if number not in names)
+    try:
+        board = kicad.read_board(module) if module is not None else None
+    except kicad.KicadError as exc:
+        raise BoardImportError(f"{path}: --module {module}: {exc}") from exc
+    under = _under_the_module(path, footprint, board, module)
+    # Header runs are read off the pads that are on one; an underside pad is
+    # on none, and counted among them it would add runs that are not there.
+    grouped = _grouped([entry for entry in entries if entry[1] not in under])
+    underside = tuple(PadSpec(label, number, round(x, 4), round(y, 4), UNDERSIDE)
+                      for label, number, x, y in entries if number in under)
+    module_rule = (
+        f", or, reaching it, over copper that {module.name}, the module's own "
+        f"board file, puts on B.Cu alone and over no plated-through pad"
+        if module is not None else ""
+    )
     return Geometry(
         name=path.stem,
         width_mm=max_x - min_x + 2 * MARGIN_MM,
         height_mm=max_y - min_y + 2 * MARGIN_MM,
-        pads=_grouped(entries),
+        pads=tuple(sorted(grouped + underside, key=lambda pad: (pad.y_mm, pad.x_mm))),
         derivation=(
             f"Generated by tools/import_board.py from the vendor's own KiCad "
             f"footprint. Pad centres are exact millimetres from a "
             f"{max_x - min_x:.2f} x {max_y - min_y:.2f} mm extent including a "
             f"{MARGIN_MM} mm margin. Pin names joined from {library.name} on pad "
             f"number{'' if not unnamed else f'; {len(unnamed)} pad(s) had no entry and kept their number'}. "
+            f"A pin is in group '{UNDERSIDE}' where it meets the module's "
+            f"underside: every land of it wholly inside the footprint's F.Fab "
+            f"outline{module_rule}. "
             f"Nothing here was measured off an image."
         ),
         declared_name=footprint.name if footprint.name != path.stem else None,
@@ -421,6 +592,7 @@ def _from_kicad_board(
     select: tuple[str, ...],
     symbols: pathlib.Path | None,
     connects: Connects | None,
+    module: pathlib.Path | None,
 ) -> Geometry:
     """Read a whole KiCad board, taking the header pads off the footprints named.
 
@@ -442,11 +614,12 @@ def _from_kicad_board(
     would be named "" and nothing should invent a name for it (OH-184). Pads
     are grouped by the footprint they belong to.
     """
-    if symbols is not None or connects is not None:
+    if symbols is not None or connects is not None or module is not None:
         raise BoardImportError(
             f"{path}: --symbols and connects join a footprint's or an EAGLE "
-            f"board's pads to their pins. A .kicad_pcb's pads carry their own "
-            f"nets and numbers, so there is nothing to join."
+            f"board's pads to their pins, and --module places a module's own "
+            f"board under its footprint. A .kicad_pcb's pads carry their own "
+            f"nets, numbers and layers, so there is nothing to join."
         )
     board = kicad.read_board(path)
 
@@ -613,6 +786,7 @@ def read_geometry(
     select: tuple[str, ...] = (),
     symbols: pathlib.Path | None = None,
     connects: Connects | None = None,
+    module: pathlib.Path | None = None,
 ) -> Geometry:
     """Read any supported CAD file, or refuse it saying what is missing.
 
@@ -625,6 +799,10 @@ def read_geometry(
 
     `connects`, for an EAGLE board, makes each pin one pad; see `Connects`. A
     KiCad board needs none: its pads say which are one pin by their number.
+
+    `module`, for a module's KiCad footprint, is the module's own board file,
+    read for which of its pads are on the module's underside; see
+    `_under_the_module`.
     """
     # **A bare string is refused rather than iterated.** `select` took one name
     # until 2026-08-27; a caller that still passes `"J1"` would otherwise be
@@ -653,7 +831,7 @@ def read_geometry(
         raise BoardImportError(f"{path}: {suffix} is {reason}. {_NOT_MEASURED}")
 
     try:
-        return reader(path, select, symbols, connects)
+        return reader(path, select, symbols, connects, module)
     except (eagle.EagleError, kicad.KicadError) as exc:
         # Both parsers raise their own type. Re-raised as one so a caller
         # catches once, with the parser's message kept whole.
@@ -740,6 +918,12 @@ def main() -> int:
     parser.add_argument(
         "--symbols", type=pathlib.Path, help="KiCad symbol library (.kicad_sym)"
     )
+    parser.add_argument(
+        "--module",
+        type=pathlib.Path,
+        help="KiCad footprint of a module: the module's own .kicad_pcb, read for "
+        "which pads at its outline's edge are on its underside",
+    )
     parser.add_argument("--vendor", default="", help="recorded in source.vendor")
     parser.add_argument("--licence", default="", help="recorded in source.licence")
     parser.add_argument(
@@ -753,7 +937,8 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        geometry = read_geometry(args.file, tuple(args.select), args.symbols)
+        geometry = read_geometry(args.file, tuple(args.select), args.symbols,
+                                 module=args.module)
     except BoardImportError as exc:
         print(f"import_board: {exc}", file=sys.stderr)
         return 2

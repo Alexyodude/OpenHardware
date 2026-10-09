@@ -56,7 +56,7 @@
       "why_null": "the SWD debug interface, which Seeed's own page for this board names: XIAO-RP2040.md says '1 SWD Bonding pad interface'. No pin number for it is published anywhere in this tree -- no board-support package file this tool reads for this board mentions SWDIO or SWCLK, and Seeed publish no board CAD for this part as they do for the RP2350 and both nRF54s. NOT claimed: whether the chip has a GPIO behind this pad, which no file here states",
       "x": 74.3,
       "y": 36.6,
-      "group": "header-top",
+      "group": "underside",
       "pad": "15"
     },
     {
@@ -67,7 +67,7 @@
       "why_null": "the SWD debug interface, which Seeed's own page for this board names: XIAO-RP2040.md says '1 SWD Bonding pad interface'. No pin number for it is published anywhere in this tree -- no board-support package file this tool reads for this board mentions SWDIO or SWCLK, and Seeed publish no board CAD for this part as they do for the RP2350 and both nRF54s. NOT claimed: whether the chip has a GPIO behind this pad, which no file here states",
       "x": 94.6,
       "y": 36.6,
-      "group": "header-top",
+      "group": "underside",
       "pad": "16"
     },
     {
@@ -99,7 +99,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 74.3,
       "y": 56.9,
-      "group": "header-top",
+      "group": "underside",
       "pad": "17"
     },
     {
@@ -110,7 +110,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 94.6,
       "y": 56.9,
-      "group": "header-top",
+      "group": "underside",
       "pad": "18"
     },
     {
@@ -243,7 +243,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 74.3,
       "y": 172.7,
-      "group": "header-top",
+      "group": "underside",
       "pad": "19"
     },
     {
@@ -254,7 +254,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 94.6,
       "y": 172.7,
-      "group": "header-top",
+      "group": "underside",
       "pad": "20"
     }
   ]

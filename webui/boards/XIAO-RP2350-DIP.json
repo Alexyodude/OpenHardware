@@ -114,7 +114,7 @@
       "chip_index": 11,
       "x": 60.9,
       "y": 40.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "19"
     },
     {
@@ -124,7 +124,7 @@
       "chip_index": 12,
       "x": 81.2,
       "y": 40.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "20"
     },
     {
@@ -134,7 +134,7 @@
       "chip_index": 10,
       "x": 101.5,
       "y": 40.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "21"
     },
     {
@@ -144,7 +144,7 @@
       "chip_index": 9,
       "x": 121.8,
       "y": 40.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "22"
     },
     {
@@ -155,7 +155,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 46.8,
       "y": 73.3,
-      "group": "header-top",
+      "group": "underside",
       "pad": "23"
     },
     {
@@ -166,7 +166,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 46.8,
       "y": 89.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "24"
     },
     {
@@ -176,7 +176,7 @@
       "chip_index": 16,
       "x": 60.9,
       "y": 121.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "18"
     },
     {
@@ -186,7 +186,7 @@
       "chip_index": 17,
       "x": 81.2,
       "y": 121.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "17"
     },
     {
@@ -196,7 +196,7 @@
       "chip_index": 20,
       "x": 101.5,
       "y": 121.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "16"
     },
     {
@@ -206,7 +206,7 @@
       "chip_index": 21,
       "x": 121.8,
       "y": 121.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "15"
     },
     {

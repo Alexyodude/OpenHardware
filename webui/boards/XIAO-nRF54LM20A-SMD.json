@@ -174,7 +174,7 @@
       "chip_index": null,
       "x": 17.8,
       "y": 36.8,
-      "group": "header-top",
+      "group": "underside",
       "pad": "45"
     },
     {
@@ -184,7 +184,7 @@
       "chip_index": null,
       "x": 81.7,
       "y": 42.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "20"
     },
     {
@@ -194,7 +194,7 @@
       "chip_index": null,
       "x": 61.7,
       "y": 42.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "19"
     },
     {
@@ -204,7 +204,7 @@
       "chip_index": null,
       "x": 102.4,
       "y": 42.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "21"
     },
     {
@@ -214,7 +214,7 @@
       "chip_index": null,
       "x": 122.7,
       "y": 42.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "22"
     },
     {
@@ -224,7 +224,7 @@
       "chip_index": null,
       "x": 17.8,
       "y": 48.8,
-      "group": "header-top",
+      "group": "underside",
       "pad": "44"
     },
     {
@@ -235,7 +235,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 78.7,
       "y": 66.5,
-      "group": "header-top",
+      "group": "underside",
       "pad": "46"
     },
     {
@@ -246,7 +246,7 @@
       "why_null": "this pad is named for the on-board debugger, an ATSAMD11D14A, and not for this board's own MCU; `chip_pin` names a pin of the board's MCU, so a number here would be a pin of the wrong chip. NOT claimed: which pin it reaches. No net in Seeed's own board file carries this pad's name, so unlike the SWDIO and SWCLK pads on the same header nothing here was traced",
       "x": 100.5,
       "y": 73.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "38"
     },
     {
@@ -257,7 +257,7 @@
       "why_null": "this pad reaches the on-board debugger, an ATSAMD11D14A, and not this board's own MCU; `chip_pin` names a pin of the board's MCU, so a number here would be a pin of the wrong chip. Seeed's own board file names both parts, and the debugger's pins are reachable from it if they are ever wanted under a field that says which chip it means",
       "x": 120.8,
       "y": 73.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "36"
     },
     {
@@ -268,7 +268,7 @@
       "why_null": "a reset pad of the nRF54LM20A, not a GPIO: Seeed's own nRF54LM20A.kicad_pcb names that part's reset 'nRESET_F2' on the net '~{nRF54_RESET}', apart from all sixty-six of its pads numbered P0.00 through P3.12 by port and bit. A reset is a dedicated pin of the silicon, so there is no GPIO number for this label to have",
       "x": 141.1,
       "y": 73.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "34"
     },
     {
@@ -279,7 +279,7 @@
       "why_null": "a dedicated debug pad of the nRF54LM20A, not a GPIO: Seeed's own nRF54LM20A.kicad_pcb names its sixty-six pads P0.00 through P3.12 by port and bit and names this one 'SWDIO_G2' separately, alongside the supplies and the crystal, so there is no GPIO number for it to have",
       "x": 161.4,
       "y": 73.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "32"
     },
     {
@@ -290,7 +290,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 52.4,
       "y": 75.3,
-      "group": "header-top",
+      "group": "underside",
       "pad": "40"
     },
     {
@@ -301,7 +301,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 78.2,
       "y": 76.9,
-      "group": "header-top",
+      "group": "underside",
       "pad": "46"
     },
     {
@@ -312,7 +312,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 83.6,
       "y": 83.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "46"
     },
     {
@@ -323,7 +323,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 52.4,
       "y": 91.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "41"
     },
     {
@@ -334,7 +334,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 100.4,
       "y": 93.4,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "39"
     },
     {
@@ -345,7 +345,7 @@
       "why_null": "this pad reaches the on-board debugger, an ATSAMD11D14A, and not this board's own MCU; `chip_pin` names a pin of the board's MCU, so a number here would be a pin of the wrong chip. Seeed's own board file names both parts, and the debugger's pins are reachable from it if they are ever wanted under a field that says which chip it means",
       "x": 120.8,
       "y": 93.4,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "37"
     },
     {
@@ -356,7 +356,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 141.1,
       "y": 93.4,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "35"
     },
     {
@@ -367,7 +367,7 @@
       "why_null": "a dedicated debug pad of the nRF54LM20A, not a GPIO: Seeed's own nRF54LM20A.kicad_pcb names its sixty-six pads P0.00 through P3.12 by port and bit and names this one 'SWDCLK_G1' separately, alongside the supplies and the crystal, so there is no GPIO number for it to have",
       "x": 161.4,
       "y": 93.4,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "33"
     },
     {
@@ -378,7 +378,7 @@
       "why_null": "this pad reaches the board's power-management IC, an nPM1300, on its SHPHLD_D4 pin -- not the board's MCU and not its debugger. `chip_pin` names a pin of the board's MCU, and this label names none. Read from Seeed's own nRF54LM20A.kicad_pcb, which carries all three parts",
       "x": 17.8,
       "y": 117.2,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "43"
     },
     {
@@ -388,7 +388,7 @@
       "chip_index": null,
       "x": 82.1,
       "y": 123.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "17"
     },
     {
@@ -398,7 +398,7 @@
       "chip_index": null,
       "x": 102.4,
       "y": 123.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "16"
     },
     {
@@ -408,7 +408,7 @@
       "chip_index": null,
       "x": 122.7,
       "y": 123.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "15"
     },
     {
@@ -418,7 +418,7 @@
       "chip_index": null,
       "x": 61.8,
       "y": 123.4,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "18"
     },
     {
@@ -429,7 +429,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 17.8,
       "y": 129.2,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "42"
     },
     {

@@ -44,7 +44,7 @@
       "chip_index": null,
       "x": 20.6,
       "y": 36.8,
-      "group": "header-top",
+      "group": "underside",
       "pad": "45"
     },
     {
@@ -54,7 +54,7 @@
       "chip_index": null,
       "x": 61.7,
       "y": 42.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "19"
     },
     {
@@ -64,7 +64,7 @@
       "chip_index": null,
       "x": 82.0,
       "y": 42.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "20"
     },
     {
@@ -74,7 +74,7 @@
       "chip_index": null,
       "x": 102.4,
       "y": 42.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "21"
     },
     {
@@ -84,7 +84,7 @@
       "chip_index": null,
       "x": 122.7,
       "y": 42.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "22"
     },
     {
@@ -94,7 +94,7 @@
       "chip_index": null,
       "x": 20.6,
       "y": 48.8,
-      "group": "header-top",
+      "group": "underside",
       "pad": "44"
     },
     {
@@ -105,7 +105,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 52.4,
       "y": 75.3,
-      "group": "header-top",
+      "group": "underside",
       "pad": "40"
     },
     {
@@ -116,7 +116,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 52.4,
       "y": 91.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "41"
     },
     {
@@ -127,7 +127,7 @@
       "why_null": "this pad reaches the board's power-management IC, an nPM1300, on its SHPHLD_D4 pin -- not the board's MCU and not its debugger. `chip_pin` names a pin of the board's MCU, and this label names none. Read from Seeed's own nRF54LM20A.kicad_pcb, which carries all three parts",
       "x": 20.6,
       "y": 117.2,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "43"
     },
     {
@@ -137,7 +137,7 @@
       "chip_index": null,
       "x": 61.7,
       "y": 123.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "18"
     },
     {
@@ -147,7 +147,7 @@
       "chip_index": null,
       "x": 82.0,
       "y": 123.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "17"
     },
     {
@@ -157,7 +157,7 @@
       "chip_index": null,
       "x": 102.4,
       "y": 123.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "16"
     },
     {
@@ -167,7 +167,7 @@
       "chip_index": null,
       "x": 122.7,
       "y": 123.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "15"
     },
     {
@@ -178,7 +178,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 20.6,
       "y": 129.2,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "42"
     }
   ]

@@ -114,7 +114,7 @@
       "chip_index": null,
       "x": 17.2,
       "y": 35.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "34"
     },
     {
@@ -124,7 +124,7 @@
       "chip_index": null,
       "x": 62.7,
       "y": 39.4,
-      "group": "header-top",
+      "group": "underside",
       "pad": "19"
     },
     {
@@ -134,7 +134,7 @@
       "chip_index": null,
       "x": 83.0,
       "y": 39.4,
-      "group": "header-top",
+      "group": "underside",
       "pad": "20"
     },
     {
@@ -144,7 +144,7 @@
       "chip_index": null,
       "x": 103.4,
       "y": 39.4,
-      "group": "header-top",
+      "group": "underside",
       "pad": "21"
     },
     {
@@ -155,7 +155,7 @@
       "why_null": "the board's user LED. Two sources name its pin and neither names this pad: Seeed's own nRF54L15.kicad_pcb has a net 'P2.00{slash}USR_LED' carrying the nRF54L15's own P2.00 pad, a green LED and a test point, and Zephyr's xiao_nrf54l15 board states the same pin independently as `led0 = <&gpio2 0>`. NOT written into `chip_pin`: the vendor spells this pad USER_LED in the symbol library the labels come from and USR_LED in the board file, and no file here says those are one pad",
       "x": 123.7,
       "y": 39.4,
-      "group": "header-top",
+      "group": "underside",
       "pad": "22"
     },
     {
@@ -165,7 +165,7 @@
       "chip_index": null,
       "x": 17.2,
       "y": 47.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "33"
     },
     {
@@ -176,7 +176,7 @@
       "why_null": "this pad reaches the on-board debugger, an ATSAMD11D14A, and not this board's own MCU; `chip_pin` names a pin of the board's MCU, so a number here would be a pin of the wrong chip. Seeed's own board file names both parts, and the debugger's pins are reachable from it if they are ever wanted under a field that says which chip it means",
       "x": 101.4,
       "y": 70.5,
-      "group": "header-top",
+      "group": "underside",
       "pad": "29"
     },
     {
@@ -187,7 +187,7 @@
       "why_null": "this pad is named for the on-board debugger, an ATSAMD11D14A, and not for this board's own MCU; `chip_pin` names a pin of the board's MCU, so a number here would be a pin of the wrong chip. NOT claimed: which pin it reaches. No net in Seeed's own board file carries this pad's name, so unlike the SWDIO and SWCLK pads on the same header nothing here was traced",
       "x": 121.8,
       "y": 70.5,
-      "group": "header-top",
+      "group": "underside",
       "pad": "27"
     },
     {
@@ -198,7 +198,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 142.1,
       "y": 70.5,
-      "group": "header-top",
+      "group": "underside",
       "pad": "25"
     },
     {
@@ -209,7 +209,7 @@
       "why_null": "a dedicated debug pad of the nRF54L15, not a GPIO: Seeed's own nRF54L15.kicad_pcb names its thirty-two pads P0.00 through P2.10 by port and bit and names this one 'SWDIO' separately, alongside the supplies and the crystal, so there is no GPIO number for it to have",
       "x": 162.4,
       "y": 70.5,
-      "group": "header-top",
+      "group": "underside",
       "pad": "23"
     },
     {
@@ -220,7 +220,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 53.4,
       "y": 72.7,
-      "group": "header-top",
+      "group": "underside",
       "pad": "31"
     },
     {
@@ -231,7 +231,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 53.4,
       "y": 88.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "32"
     },
     {
@@ -242,7 +242,7 @@
       "why_null": "this pad reaches the on-board debugger, an ATSAMD11D14A, and not this board's own MCU; `chip_pin` names a pin of the board's MCU, so a number here would be a pin of the wrong chip. Seeed's own board file names both parts, and the debugger's pins are reachable from it if they are ever wanted under a field that says which chip it means",
       "x": 101.4,
       "y": 90.8,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "30"
     },
     {
@@ -253,7 +253,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 121.8,
       "y": 90.8,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "28"
     },
     {
@@ -264,7 +264,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 142.1,
       "y": 90.8,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "26"
     },
     {
@@ -275,7 +275,7 @@
       "why_null": "a dedicated debug pad of the nRF54L15, not a GPIO: Seeed's own nRF54L15.kicad_pcb names its thirty-two pads P0.00 through P2.10 by port and bit and names this one 'SWDCLK' separately, alongside the supplies and the crystal, so there is no GPIO number for it to have",
       "x": 162.4,
       "y": 90.8,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "24"
     },
     {
@@ -285,7 +285,7 @@
       "chip_index": null,
       "x": 62.7,
       "y": 120.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "18"
     },
     {
@@ -295,7 +295,7 @@
       "chip_index": null,
       "x": 83.0,
       "y": 120.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "17"
     },
     {
@@ -306,7 +306,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 103.4,
       "y": 120.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "16"
     },
     {
@@ -317,7 +317,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 123.7,
       "y": 120.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "15"
     },
     {

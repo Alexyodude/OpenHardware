@@ -120,7 +120,7 @@
       "chip_index": null,
       "x": 60.8,
       "y": 39.4,
-      "group": "header-top",
+      "group": "underside",
       "pad": "19"
     },
     {
@@ -130,7 +130,7 @@
       "chip_index": null,
       "x": 81.2,
       "y": 39.4,
-      "group": "header-top",
+      "group": "underside",
       "pad": "20"
     },
     {
@@ -140,7 +140,7 @@
       "chip_index": null,
       "x": 101.5,
       "y": 39.4,
-      "group": "header-top",
+      "group": "underside",
       "pad": "21"
     },
     {
@@ -150,7 +150,7 @@
       "chip_index": null,
       "x": 121.8,
       "y": 39.4,
-      "group": "header-top",
+      "group": "underside",
       "pad": "22"
     },
     {
@@ -161,7 +161,7 @@
       "why_null": "this pad reaches the on-board debugger, an ATSAMD11D14A, and not this board's own MCU; `chip_pin` names a pin of the board's MCU, so a number here would be a pin of the wrong chip. Seeed's own board file names both parts, and the debugger's pins are reachable from it if they are ever wanted under a field that says which chip it means",
       "x": 99.6,
       "y": 70.5,
-      "group": "header-top",
+      "group": "underside",
       "pad": "26"
     },
     {
@@ -172,7 +172,7 @@
       "why_null": "this pad is named for the on-board debugger, an ATSAMD11D14A, and not for this board's own MCU; `chip_pin` names a pin of the board's MCU, so a number here would be a pin of the wrong chip. NOT claimed: which pin it reaches. No net in Seeed's own board file carries this pad's name, so unlike the SWDIO and SWCLK pads on the same header nothing here was traced",
       "x": 119.9,
       "y": 70.5,
-      "group": "header-top",
+      "group": "underside",
       "pad": "25"
     },
     {
@@ -183,7 +183,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 140.2,
       "y": 70.5,
-      "group": "header-top",
+      "group": "underside",
       "pad": "24"
     },
     {
@@ -193,7 +193,7 @@
       "chip_index": null,
       "x": 160.5,
       "y": 70.5,
-      "group": "header-top",
+      "group": "underside",
       "pad": "23"
     },
     {
@@ -204,7 +204,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 51.5,
       "y": 72.7,
-      "group": "header-top",
+      "group": "underside",
       "pad": "31"
     },
     {
@@ -215,7 +215,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 51.5,
       "y": 88.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "32"
     },
     {
@@ -226,7 +226,7 @@
       "why_null": "this pad reaches the on-board debugger, an ATSAMD11D14A, and not this board's own MCU; `chip_pin` names a pin of the board's MCU, so a number here would be a pin of the wrong chip. Seeed's own board file names both parts, and the debugger's pins are reachable from it if they are ever wanted under a field that says which chip it means",
       "x": 99.6,
       "y": 90.8,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "27"
     },
     {
@@ -237,7 +237,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 119.9,
       "y": 90.8,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "28"
     },
     {
@@ -248,7 +248,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 140.2,
       "y": 90.8,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "29"
     },
     {
@@ -258,7 +258,7 @@
       "chip_index": null,
       "x": 160.5,
       "y": 90.8,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "30"
     },
     {
@@ -268,7 +268,7 @@
       "chip_index": null,
       "x": 60.8,
       "y": 120.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "18"
     },
     {
@@ -278,7 +278,7 @@
       "chip_index": null,
       "x": 81.2,
       "y": 120.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "17"
     },
     {
@@ -288,7 +288,7 @@
       "chip_index": null,
       "x": 101.5,
       "y": 120.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "16"
     },
     {
@@ -298,7 +298,7 @@
       "chip_index": null,
       "x": 121.8,
       "y": 120.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "15"
     },
     {

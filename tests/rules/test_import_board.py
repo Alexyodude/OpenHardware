@@ -14,6 +14,7 @@ from tools.import_board import (
     MARGIN_MM,
     READERS,
     REFUSED,
+    UNDERSIDE,
     BoardImportError,
     build_board,
     read_geometry,
@@ -641,6 +642,171 @@ def test_more_than_two_runs_are_numbered_rather_than_named(tmp_path):
     geometry = read_geometry(_synthetic(tmp_path, grid), select=("J1",))
     groups = {pad.group for pad in geometry.pads}
     assert groups == {"header-column-1", "header-column-2", "header-column-3"}, groups
+
+
+# --- which pads are on a module's underside (OH-216) --------------------------
+
+
+def _module_footprint(tmp_path) -> pathlib.Path:
+    """A 10 x 8 mm module's footprint, with its symbol beside it: castellation
+    lands 1 and 2 reaching past the F.Fab outline's long sides, 3 and 4 wholly
+    inside it, and 5 at the edge where the module carries a back-side pad."""
+    lands = (("1", 0.3, 2), ("2", 9.7, 2), ("3", 5, 4), ("4", 3, 4), ("5", 0.3, 6))
+    path = tmp_path / "mod.kicad_mod"
+    path.write_text(
+        '(footprint "mod" (layer "F.Cu")'
+        ' (fp_rect (start 0 0) (end 10 8) (layer "F.Fab"))'
+        + "".join(f' (pad "{n}" smd rect (at {x} {y}) (size {1.5 if x < 1 or x > 9 else 1} 1)'
+                  f' (layers "F.Cu" "F.Mask"))' for n, x, y in lands)
+        + ")",
+        encoding="utf-8",
+    )
+    (tmp_path / "mod.kicad_sym").write_text(
+        '(kicad_symbol_lib (symbol "mod" (symbol "mod_1_1"'
+        + "".join(f' (pin passive line (at 0 0 0) (length 2.54) (name "P{n}") (number "{n}"))'
+                  for n, _, _ in lands)
+        + ")))",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _module_board(tmp_path, back: tuple[tuple[float, float], ...]) -> pathlib.Path:
+    """The module's own board, 10 x 8 mm at (100, 100): plated castellations
+    under lands 1 and 2, and a pad on `B.Cu` alone at each of `back`."""
+    parts = [f'(footprint "L:CASTEL" (layer "F.Cu") (at {x} 102)'
+             f' (pad "1" thru_hole circle (at 0 0) (size 1 1) (drill 0.6) (layers "*.Cu")))'
+             for x in (100.3, 109.7)]
+    parts += [f'(footprint "L:TP" (layer "B.Cu") (at {x} {y})'
+              f' (pad "1" smd circle (at 0 0) (size 1 1) (layers "B.Cu" "B.Mask")))'
+              for x, y in back]
+    path = tmp_path / "mod.kicad_pcb"
+    path.write_text(
+        "(kicad_pcb (version 20241229)"
+        ' (gr_rect (start 100 100) (end 110 108) (layer "Edge.Cuts")) '
+        + " ".join(parts) + ")",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _underside(geometry) -> list[str]:
+    return sorted(pad.number for pad in geometry.pads if pad.group == UNDERSIDE)
+
+
+def test_a_pin_under_the_module_is_grouped_underside_by_the_footprints_own_outline(
+        tmp_path):
+    """**OH-216: a footprint's layers cannot say which pads are under the
+    module**, because it is the HOST's land pattern: every land of a XIAO SMD
+    footprint is on `F.Cu`, castellations and underside test points alike.
+    Its `F.Fab` outline is the module's, and a pin whose every land lies
+    wholly inside it is covered by the module, so it meets the module's
+    underside. Those are grouped `underside` and kept out of the header runs.
+
+    Seen red (2026-10-09): with `_under_the_module` returning no pins, the
+    two under the module were grouped into header columns with the rest."""
+    geometry = read_geometry(_module_footprint(tmp_path))
+    assert _underside(geometry) == ["3", "4"], geometry.pads
+    assert {pad.group for pad in geometry.pads if pad.number in "125"} == {
+        "header-left", "header-right"}, geometry.pads
+    assert "wholly inside the footprint's F.Fab outline" in geometry.derivation
+
+
+def test_a_pin_at_the_edge_is_underside_where_the_modules_own_board_puts_back_side_copper(
+        tmp_path):
+    """**The outline cannot place a pad at the module's edge**: the
+    nRF54L15's NFC pads reach past it as a castellation's land does. The
+    module's own board file can: a land over a plated-through pad is a
+    castellation, one over copper on `B.Cu` alone is on the underside. Land
+    5 stands over such a pad and is underside with the module read, and not
+    without it; lands 1 and 2 stand over castellations and are never.
+
+    Seen red (2026-10-09): with the edge rule removed, land 5 stayed out."""
+    footprint = _module_footprint(tmp_path)
+    module = _module_board(tmp_path, ((105, 104), (103, 104), (100.3, 106)))
+    assert _underside(read_geometry(footprint, module=module)) == ["3", "4", "5"]
+    assert _underside(read_geometry(footprint)) == ["3", "4"]
+
+
+def test_a_module_whose_board_answers_no_pin_under_it_is_refused_with_its_counts(
+        tmp_path):
+    """A module board that puts back-side copper under none of the pins the
+    outline places under the module, at any quarter turn, is not this
+    module's board, or not placed as this reads it. Refused, naming the
+    pins and what each turn answered.
+
+    Seen red (2026-10-09): with `_under_the_module` returning no pins,
+    nothing was refused."""
+    footprint = _module_footprint(tmp_path)
+    module = _module_board(tmp_path, ())
+    with pytest.raises(BoardImportError) as caught:
+        read_geometry(footprint, module=module)
+    message = str(caught.value)
+    assert "the pins ['3', '4'] lie wholly inside its F.Fab outline" in message, message
+    assert "{0: 0, 90: 0, 180: 0, 270: 0}" in message, message
+
+
+#: Each XIAO chip's module board as Seeed publish it, under
+#: `third_party/seeed-pcb/` -- fetched by `tools/compose_board_3d.py` or by
+#: hand, as `tools/import_pindefs.py` records.
+MODULE_BOARDS = {"ESP32-C3": "ESP32-C3", "ESP32-C5": "ESP32-C5", "ESP32-C6": "ESP32-C6",
+                 "RP2350": "RP2350", "nRF54l15": "nRF54L15", "MG24": "MG24",
+                 "nRF54LM20A": "nRF54LM20A"}
+
+
+def test_the_committed_xiao_board_files_state_the_importers_underside():
+    """**Every XIAO board file groups `underside` exactly the pads the
+    importer does** (OH-216), joined on pad number and place, with the
+    module's own board read wherever `MODULE_BOARDS` names one. Written into
+    the committed files once, group by group, because none of them is what
+    `tools/import_board.py` regenerates today: they carry the retired
+    importer's `header-top`/`header-bottom`, and nothing else was changed.
+
+    Seen red (2026-10-09): with the files' underside pads back to
+    `header-top`, every XIAO SMD board and three DIPs failed by name."""
+    lib = KICAD_LIB
+    if not lib.is_dir():
+        pytest.skip(f"SKIPPED: {lib} is not fetched. Run: "
+                    f"python tools/get_board_sources.py seeed-xiao")
+    wrong, left_out = [], []
+    for board in sorted((REPO / "webui" / "boards").glob("XIAO-*.json")):
+        stated = json.loads(board.read_text(encoding="utf-8"))
+        # OH-171: one footprint declares itself with its prefix doubled.
+        name = stated["source"]["footprint"].replace("XIAO-XIAO ", "XIAO-")
+        chip = next((chip for chip in MODULE_BOARDS if f"-{chip}-" in f"{board.stem}-"),
+                    None)
+        module = (REPO / "third_party" / "seeed-pcb" / f"{MODULE_BOARDS[chip]}.kicad_pcb"
+                  if chip else None)
+        if module is not None and not module.is_file():
+            left_out.append(f"{board.stem}: {module.name} is not fetched")
+            continue
+        # A DIP footprint's pins are its SMD sibling's: two ways of mounting
+        # one module (OH-200). The symbol only names the pads, which are
+        # joined here on number and place and not on name.
+        root = name if _has_symbol(name) else f"{name.split('-DIP')[0].split('-SMD')[0]}-SMD"
+        geometry = read_geometry(KICAD_LIB / f"{name}.kicad_mod", select=(root,),
+                                 module=module)
+        fresh = build_board(geometry, KICAD_LIB / f"{name}.kicad_mod", {})
+        want = sorted((pad["pad"], pad["x"], pad["y"]) for pad in fresh["pads"]
+                      if pad["group"] == UNDERSIDE)
+        have = sorted((pad["pad"], pad["x"], pad["y"]) for pad in stated["pads"]
+                      if pad["group"] == UNDERSIDE)
+        if want != have:
+            wrong.append(f"{board.stem}: the importer puts {[w[0] for w in want]} "
+                         f"under the module, the file {[h[0] for h in have]}")
+    assert not wrong, "\n".join(wrong)
+    if left_out:
+        pytest.skip(f"SKIPPED in part: every other XIAO board file held; "
+                    f"left out: {left_out}")
+
+
+def _has_symbol(root: str) -> bool:
+    library = KICAD_LIB / "Seeed_Studio_XIAO_Series.kicad_sym"
+    try:
+        kicad.read_symbol_pins(library, root)
+    except kicad.KicadError:
+        return False
+    return True
 
 
 # --- a board whose pads span several placed elements (OH-75) ----------------------

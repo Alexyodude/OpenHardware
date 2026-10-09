@@ -61,7 +61,7 @@
       "chip_index": 3,
       "x": 73.3,
       "y": 35.2,
-      "group": "header-top",
+      "group": "underside",
       "pad": "15"
     },
     {
@@ -71,7 +71,7 @@
       "chip_index": 5,
       "x": 93.6,
       "y": 35.2,
-      "group": "header-top",
+      "group": "underside",
       "pad": "16"
     },
     {
@@ -103,7 +103,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 73.3,
       "y": 55.6,
-      "group": "header-top",
+      "group": "underside",
       "pad": "17"
     },
     {
@@ -114,7 +114,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 93.6,
       "y": 55.6,
-      "group": "header-top",
+      "group": "underside",
       "pad": "18"
     },
     {
@@ -145,7 +145,7 @@
       "chip_index": 2,
       "x": 73.3,
       "y": 75.9,
-      "group": "header-top",
+      "group": "underside",
       "pad": "19"
     },
     {
@@ -155,7 +155,7 @@
       "chip_index": 4,
       "x": 93.6,
       "y": 75.9,
-      "group": "header-top",
+      "group": "underside",
       "pad": "20"
     },
     {
@@ -187,7 +187,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 92.8,
       "y": 95.7,
-      "group": "header-top",
+      "group": "underside",
       "pad": "22"
     },
     {
@@ -197,7 +197,7 @@
       "chip_index": 28,
       "x": 73.3,
       "y": 96.2,
-      "group": "header-top",
+      "group": "underside",
       "pad": "21"
     },
     {
@@ -228,7 +228,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 91.9,
       "y": 121.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "25"
     },
     {
@@ -279,7 +279,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 70.8,
       "y": 148.6,
-      "group": "header-top",
+      "group": "underside",
       "pad": "23"
     },
     {
@@ -290,7 +290,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 91.1,
       "y": 148.6,
-      "group": "header-top",
+      "group": "underside",
       "pad": "24"
     },
     {

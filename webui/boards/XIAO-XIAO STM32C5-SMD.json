@@ -116,7 +116,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 17.8,
       "y": 36.8,
-      "group": "header-top",
+      "group": "underside",
       "pad": "34"
     },
     {
@@ -127,7 +127,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 81.7,
       "y": 42.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "20"
     },
     {
@@ -138,7 +138,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 61.7,
       "y": 42.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "19"
     },
     {
@@ -149,7 +149,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 102.4,
       "y": 42.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "21"
     },
     {
@@ -160,7 +160,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 122.7,
       "y": 42.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "22"
     },
     {
@@ -171,7 +171,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 17.8,
       "y": 48.8,
-      "group": "header-top",
+      "group": "underside",
       "pad": "33"
     },
     {
@@ -182,7 +182,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 81.1,
       "y": 66.3,
-      "group": "header-top",
+      "group": "underside",
       "pad": "35"
     },
     {
@@ -193,7 +193,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 100.5,
       "y": 73.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "29"
     },
     {
@@ -204,7 +204,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 120.8,
       "y": 73.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "27"
     },
     {
@@ -215,7 +215,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 141.1,
       "y": 73.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "25"
     },
     {
@@ -225,7 +225,7 @@
       "chip_index": null,
       "x": 161.4,
       "y": 73.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "23"
     },
     {
@@ -236,7 +236,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 52.4,
       "y": 75.3,
-      "group": "header-top",
+      "group": "underside",
       "pad": "31"
     },
     {
@@ -247,7 +247,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 52.4,
       "y": 91.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "32"
     },
     {
@@ -258,7 +258,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 100.4,
       "y": 93.4,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "30"
     },
     {
@@ -269,7 +269,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 120.8,
       "y": 93.4,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "28"
     },
     {
@@ -280,7 +280,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 141.1,
       "y": 93.4,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "26"
     },
     {
@@ -290,7 +290,7 @@
       "chip_index": null,
       "x": 161.4,
       "y": 93.4,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "24"
     },
     {
@@ -301,7 +301,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 82.1,
       "y": 123.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "17"
     },
     {
@@ -312,7 +312,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 102.4,
       "y": 123.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "16"
     },
     {
@@ -323,7 +323,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 122.7,
       "y": 123.3,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "15"
     },
     {
@@ -334,7 +334,7 @@
       "why_null": "no board-support package covers this board at all, and the vendor's own CAD does not name a pin beside this pad; that is a gap in what the vendor has published, not in this tool",
       "x": 61.8,
       "y": 123.4,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "18"
     },
     {

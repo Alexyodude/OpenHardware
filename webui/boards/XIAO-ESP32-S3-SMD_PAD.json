@@ -45,7 +45,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 73.3,
       "y": 35.3,
-      "group": "header-top",
+      "group": "underside",
       "pad": "17"
     },
     {
@@ -56,7 +56,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 93.6,
       "y": 35.3,
-      "group": "header-top",
+      "group": "underside",
       "pad": "18"
     },
     {
@@ -87,7 +87,7 @@
       "chip_index": 42,
       "x": 73.3,
       "y": 55.6,
-      "group": "header-top",
+      "group": "underside",
       "pad": "19"
     },
     {
@@ -97,7 +97,7 @@
       "chip_index": 39,
       "x": 93.6,
       "y": 55.6,
-      "group": "header-top",
+      "group": "underside",
       "pad": "20"
     },
     {
@@ -128,7 +128,7 @@
       "chip_index": 19,
       "x": 73.3,
       "y": 76.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "21"
     },
     {
@@ -138,7 +138,7 @@
       "chip_index": 20,
       "x": 93.6,
       "y": 76.0,
-      "group": "header-top",
+      "group": "underside",
       "pad": "22"
     },
     {
@@ -169,7 +169,7 @@
       "chip_index": 40,
       "x": 47.9,
       "y": 86.1,
-      "group": "header-top",
+      "group": "underside",
       "pad": "16"
     },
     {
@@ -180,7 +180,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 73.3,
       "y": 96.3,
-      "group": "header-top",
+      "group": "underside",
       "pad": "23"
     },
     {
@@ -191,7 +191,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 93.6,
       "y": 96.3,
-      "group": "header-top",
+      "group": "underside",
       "pad": "24"
     },
     {
@@ -201,7 +201,7 @@
       "chip_index": 41,
       "x": 47.9,
       "y": 101.3,
-      "group": "header-top",
+      "group": "underside",
       "pad": "15"
     },
     {
@@ -232,7 +232,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 92.4,
       "y": 120.4,
-      "group": "header-top",
+      "group": "underside",
       "pad": "25"
     },
     {

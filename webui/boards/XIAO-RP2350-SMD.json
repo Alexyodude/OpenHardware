@@ -114,7 +114,7 @@
       "chip_index": 11,
       "x": 60.8,
       "y": 39.4,
-      "group": "header-top",
+      "group": "underside",
       "pad": "19"
     },
     {
@@ -124,7 +124,7 @@
       "chip_index": 12,
       "x": 81.2,
       "y": 39.4,
-      "group": "header-top",
+      "group": "underside",
       "pad": "20"
     },
     {
@@ -134,7 +134,7 @@
       "chip_index": 10,
       "x": 101.5,
       "y": 39.4,
-      "group": "header-top",
+      "group": "underside",
       "pad": "21"
     },
     {
@@ -144,7 +144,7 @@
       "chip_index": 9,
       "x": 121.8,
       "y": 39.4,
-      "group": "header-top",
+      "group": "underside",
       "pad": "22"
     },
     {
@@ -155,7 +155,7 @@
       "why_null": "the RP2350's flash chip-select, QSPI_SS, which is outside its GPIO0 through GPIO29 numbering: in Seeed's own RP2350.kicad_pcb this pad lands on the underside test point TP2, whose net '/04 RP2350/QSPI_SS' carries the RP2350's pad 60 'QSPI_SS' and the '/CS' of U5, a 16Mbit SPI memory, and runs through R4 (1K) to the button K1, whose other side is GND; Seeed's schematic in the same RP2350.zip, '04 RP2350.kicad_sch', prints 'BOOT' beside TP2. The RP2350 Datasheet, release 8, section 5.2.8 'BOOTSEL (USB/UART) boot', has the bootrom sample QSPI CSn shortly after reset and enter BOOTSEL if it is driven low, so this pad is that strap and there is no GPIO number for it to have",
       "x": 119.9,
       "y": 70.5,
-      "group": "header-top",
+      "group": "underside",
       "pad": "27"
     },
     {
@@ -166,7 +166,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 140.2,
       "y": 70.5,
-      "group": "header-top",
+      "group": "underside",
       "pad": "25"
     },
     {
@@ -177,7 +177,7 @@
       "why_null": "a dedicated debug pad of the RP2350, not a GPIO: Seeed's own RP2350.kicad_pcb names its thirty GPIO pads GPIO0 through GPIO29 and names this one 'SWDIO' separately, alongside the supplies and the crystal, so there is no GPIO number for it to have",
       "x": 160.5,
       "y": 70.5,
-      "group": "header-top",
+      "group": "underside",
       "pad": "23"
     },
     {
@@ -188,7 +188,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 51.5,
       "y": 72.7,
-      "group": "header-top",
+      "group": "underside",
       "pad": "29"
     },
     {
@@ -199,7 +199,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 51.5,
       "y": 88.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "30"
     },
     {
@@ -210,7 +210,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 119.9,
       "y": 90.8,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "28"
     },
     {
@@ -221,7 +221,7 @@
       "why_null": "no board-support package covering this board defines this label",
       "x": 140.2,
       "y": 90.8,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "26"
     },
     {
@@ -232,7 +232,7 @@
       "why_null": "a dedicated debug pad of the RP2350, not a GPIO: Seeed's own RP2350.kicad_pcb names its thirty GPIO pads GPIO0 through GPIO29 and names this one 'SWDCLK' separately, alongside the supplies and the crystal, so there is no GPIO number for it to have",
       "x": 160.5,
       "y": 90.8,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "24"
     },
     {
@@ -242,7 +242,7 @@
       "chip_index": 16,
       "x": 60.8,
       "y": 120.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "18"
     },
     {
@@ -252,7 +252,7 @@
       "chip_index": 17,
       "x": 81.2,
       "y": 120.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "17"
     },
     {
@@ -262,7 +262,7 @@
       "chip_index": 20,
       "x": 101.5,
       "y": 120.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "16"
     },
     {
@@ -272,7 +272,7 @@
       "chip_index": 21,
       "x": 121.8,
       "y": 120.7,
-      "group": "header-bottom",
+      "group": "underside",
       "pad": "15"
     },
     {
