@@ -285,7 +285,7 @@ if CPU_HZ % SYSTIMER_HZ:
     raise ValueError(
         f"CPU_HZ {CPU_HZ} is not a multiple of SYSTIMER_HZ {SYSTIMER_HZ}: "
         f"SYSTIMER_INSTRUCTIONS_PER_TICK would be {SYSTIMER_INSTRUCTIONS_PER_TICK}, "
-        f"rounded down from {CPU_HZ / SYSTIMER_HZ}, and every tick would come early")
+        f"rounded down from {CPU_HZ / SYSTIMER_HZ}")
 
 
 #: The pin the fixture watches. **Not the board's LED.** GPIO8 is ESP-IDF's

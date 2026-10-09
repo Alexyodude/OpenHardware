@@ -718,8 +718,10 @@ def test_a_gate_that_cannot_be_read_leaves_no_fault_behind_between_instructions(
     is no access to fault, and `mmio_read` records the alias's own address
     when its target is missing. So until the OH-161 review every NOP here
     rewrote the fault record to name CONF, an address no instruction
-    touched. The record is set first by a fault this test causes, at zero,
-    and read through the C side, because only a `MemoryFault` from `step`
+    touched. The record is set first by a fault this test causes -- a fetch,
+    at an address that is neither zero nor CONF, so that clearing the record
+    instead of putting it back fails here as well as rewriting it does -- and
+    read through the C side, because only a `MemoryFault` from `step`
     reports it to Python and none happens here."""
     cpu.map_alias(SYSTIMER_CONF, NOTHING, "store", readable=True)
     cpu.map_snapshot_counter(
@@ -728,14 +730,17 @@ def test_a_gate_that_cannot_be_read_leaves_no_fault_behind_between_instructions(
         enable=SYSTIMER_CONF, enable_mask=UNIT0_WORK_EN,
         instructions_per_tick=PER_TICK,
     )
+    cpu.set_regs([0] * 32, pc=NOTHING)
     with pytest.raises(abi.MemoryFault):
-        cpu.read_word(0)
+        cpu.step()
     fault_address = cpu._lib.riscv32_fault_address
-    assert fault_address(cpu._handle) == 0
+    was_fetch = cpu._lib.riscv32_fault_was_fetch
+    assert (fault_address(cpu._handle), was_fetch(cpu._handle)) == (NOTHING, 1)
     retire(cpu, 40)
-    assert fault_address(cpu._handle) == 0, (
-        f"the record names 0x{fault_address(cpu._handle):08x} after forty "
-        f"instructions that faulted nowhere")
+    assert (fault_address(cpu._handle), was_fetch(cpu._handle)) == (NOTHING, 1), (
+        f"the record names 0x{fault_address(cpu._handle):08x}, fetch "
+        f"{was_fetch(cpu._handle)}, after forty instructions that faulted "
+        f"nowhere")
 
 
 def test_mapping_the_same_unit_twice_replaces_it(systimer):
