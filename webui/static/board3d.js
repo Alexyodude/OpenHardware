@@ -130,10 +130,13 @@ const PIN_REACH_MM = 1.1;
 //:
 //: **The state is EMITTED, not painted on, and the first attempt got that
 //: wrong.** Blending the state colour into the metal was tried first and
-//: measured: brass `#b58136` with `high` mixed 72% of the way in comes out
-//: `#66744b`, a dull green, while `input` comes out `#7e726c`. Two muddy
+//: measured: brass `#dbbc7e` with `high` mixed 72% of the way in comes out
+//: `#7c8a61`, a dull green, while `input` comes out `#90897b`. Two muddy
 //: browns three pixels wide -- the pin had stopped looking like brass and the
-//: state still could not be read.
+//: state still could not be read. Measured under OH-95 on the brass's key
+//: then, `#b58136`, as `#66744b` and `#7e726c`; recomputed for its key since
+//: OH-214 by the same blend, which those two reproduce exactly: linear light,
+//: into the light theme's `--changed` `#0b6e52` and `--muted` `#5e6c7a`.
 //:
 //: Emission is the right mechanism because it is the right metaphor: the pin
 //: is still made of the metal the vendor published, and what changed is that
@@ -883,7 +886,7 @@ export function mount(canvas) {
   //
   // `NeutralToneMapping` rather than `ACESFilmicToneMapping` because THE
   // COLOURS IN THIS SCENE ARE MEASUREMENTS. #313d63 is the Uno's solder mask
-  // read out of PICSimLab's own artwork, #ff9f37 is the XIAO's gold named in
+  // read out of PICSimLab's own artwork, #ffcf80 is the XIAO's gold named in
   // `refreshTheme`, and `FINISHES` in `tools/import_3d_model.py` cites every
   // one of them. ACES is a film look: it shifts hue and desaturates on the way
   // through, which would quietly restate every sourced colour as something
@@ -1767,7 +1770,7 @@ export function refreshTheme() {
   slab.material.color.copy(view.palette.surface);
   edges.material.color.copy(view.palette.line);
   // **The vendor's model is deliberately not repainted.** Its colours are
-  // measurements -- #116517 for that board's solder mask, #ff9f37 for the gold
+  // measurements -- #49a954 for that board's solder mask, #ffcf80 for the gold
   // on its castellated pads -- and tinting them to match a UI theme would turn
   // the one part of this picture that is sourced into decoration. The pads
   // stay theme-coloured because they are this repository's own reading of a

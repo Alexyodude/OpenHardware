@@ -264,7 +264,7 @@ def test_the_vendors_own_colours_are_not_repainted_by_the_theme():
     """A board's solder mask is a measurement and the pad states are this
     repository's reading of a register. **Only the second follows the theme**,
     because tinting the first would turn the one sourced thing in the picture
-    into decoration -- and `#116517` is that board's green in either theme.
+    into decoration -- and `#49a954` is that board's green in either theme.
     """
     source = RENDERER.read_text(encoding="utf-8")
     # Bounded to the function's own body: everything after it is another
@@ -1338,7 +1338,7 @@ def test_the_renderer_tone_maps_and_not_with_a_film_look():
 
     ACES is the popular choice and is refused here on purpose. It is a film
     look: it shifts hue and desaturates on the way through, and #313d63 is the
-    Uno's solder mask read out of PICSimLab's own artwork while #ff9f37 is the
+    Uno's solder mask read out of PICSimLab's own artwork while #ffcf80 is the
     XIAO's gold -- every one of them cited in `FINISHES`. Khronos PBR Neutral
     leaves an in-gamut colour where it is and only compresses what is too
     bright to show.
@@ -1985,10 +1985,12 @@ def test_the_carved_triangles_are_moved_and_not_copied():
 def test_a_real_pin_keeps_its_metal_and_emits_its_state():
     """**The state is emitted, not painted, and that was measured.**
 
-    Blending the state into the metal was tried first: brass `#b58136` with
-    `high` mixed 72% of the way in comes out `#66744b`, and `input` comes out
-    `#7e726c`. Two muddy browns three pixels wide -- the pin had stopped
-    looking like brass and the state still could not be read.
+    Blending the state into the metal was tried first: brass `#dbbc7e` with
+    `high` mixed 72% of the way in comes out `#7c8a61`, and `input` comes out
+    `#90897b`. Two muddy browns three pixels wide -- the pin had stopped
+    looking like brass and the state still could not be read. (Measured on
+    the brass's key before OH-214, `#b58136`, as `#66744b` and `#7e726c`;
+    `PIN_GLOW`'s comment in `board3d.js` says how it was recomputed.)
 
     So `color` stays the colour the vendor published and the state goes into
     `emissive`, which is also the right metaphor: the pin is made of the same

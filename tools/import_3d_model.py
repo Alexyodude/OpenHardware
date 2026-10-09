@@ -734,7 +734,8 @@ DEFAULT_FINISH = Finish(
 #:    the five pin-header packages and on nothing else is the strongest result
 #:    of the lot: that colour is contact geometry by construction.
 #: 3. **A record already in the tree.** `webui/static/board3d.js` names two of
-#:    them in prose -- by their keys before OH-214, `#ff9f37` and `#116517`.
+#:    them in prose, `#ffcf80` and `#49a954` -- as their linear bytes,
+#:    `#ff9f37` and `#116517`, until OH-214.
 #:
 #: OH-163 added two more, for the colours the composed boards still drew at
 #: the default:
@@ -865,9 +866,9 @@ FINISHES: dict[str, Finish] = {
     )),
     "#ffcf80": Finish(1.0, 0.30, (
         "the XIAO's gold castellated pads. Already recorded in the tree: "
-        "`webui/static/board3d.js`'s `refreshTheme` names it in prose, as "
-        "#ff9f37 beside #116517 -- the linear bytes this file keyed the two "
-        "with until OH-214. The SAMD21's own STEP calls it "
+        "`webui/static/board3d.js`'s `refreshTheme` names it in prose, "
+        "beside #49a954 -- as #ff9f37 beside #116517, the linear bytes this "
+        "file keyed the two with, until OH-214. The SAMD21's own STEP calls it "
         "`Opaque(255,207,128)`, which is this key"
     )),
     "#ffce7f": Finish(1.0, 0.30, (
@@ -1174,7 +1175,7 @@ FINISHES: dict[str, Finish] = {
     "#49a954": Finish(0.0, 0.35, (
         "the SAMD21 board's solder mask, named in `board3d.js`'s "
         "`refreshTheme` in the same sentence as #ffcf80 -- both by the linear "
-        "bytes this file keyed them with until OH-214, #116517 and #ff9f37. "
+        "bytes this file keyed them with, #116517 and #ff9f37, until OH-214. "
         "The SAMD21's own STEP calls it `Opaque(73,169,84)`, which is this key"
     ), coat=0.85, coat_roughness=0.08),
     # **The composed boards' own masks and routing, named by construction as
