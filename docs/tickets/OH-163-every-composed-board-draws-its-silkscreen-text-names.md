@@ -12,6 +12,9 @@ touches:
 - PROVENANCE.md
 - tools/model_from_datasheet.py
 - tests/rules/test_import_3d_model.py
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
+- tools/import_3d_model.py
 ---
 
 Twenty-five of twenty-six boards draw a vendor file or a board composed from the vendor's PCB, every placement is drawn or refused with a reason (OH-150), and what a person sees is still short of a photograph in four measurable ways. This ticket is those four, counted from `python tools/compose_board_3d.py --check` on 2026-09-04 (11 composed boards) and from the shipped .glb files.
@@ -93,3 +96,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-09:** 2026-10-09: the composer, the importer, model_from_datasheet.py and their tests return from OH-214 (done). Steps 3-4 can resume.
 
 **Note 2026-10-09:** 2026-10-09: the composer, its tests and the importer lent to OH-216, which writes header pads into composed models' extras. Return when OH-216 closes.
+
+**Note 2026-10-09:** 2026-10-09: the composer, its tests and the importer return from OH-216 (done).
