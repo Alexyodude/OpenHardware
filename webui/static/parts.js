@@ -67,10 +67,28 @@ export const BENCH_PITCH = 6.0;
 const LIT = 1.2;
 
 //: How much brighter than the model's own dark red a lit lens is drawn.
-//: KiCad's LED lens is `#720301`, which is the colour of an LED that is off;
-//: one that is on is the same hue several times brighter, which is what a
-//: real one does.
-const LIT_GAIN = 3.0;
+//: KiCad's LED lens is `#b2190d`, which is the colour of an LED that is off;
+//: one that is on is the same hue brighter, which is what a real one does,
+//: and it emits as well (`LIT`).
+//:
+//: **1.6 is the largest gain, to a tenth, under which no lit lens reflects
+//: more light than reaches it** (OH-214). This multiplies the lens's own
+//: colour, which is an albedo, the fraction of the light reaching a surface
+//: that it sends back -- so no channel of it can pass 1.0, and that bound is
+//: not a judgement. The brightest lens any part names is the buzzer's mark,
+//: `#ce6d26`, at 0.617 linear red, which allows 1 / 0.617 = 1.62; KiCad's LED
+//: lens, 0.445, then lights at 0.71. What IS a judgement is reading "several
+//: times brighter" as "as much brighter as that bound allows", and sharing
+//: one gain between the two lenses rather than giving each its own.
+//:
+//: It was 3.0, chosen in fcce44c against this same lens at 0.447 -- the
+//: writer then put a byte divided by 255 straight into `baseColorFactor` --
+//: so a lit LED's albedo was 1.34 from the start. 7dc67fc's `linear()` drew
+//: the lens at 0.168, which hid it (3.0 lit that at 0.50), until OH-214 read
+//: the STEP's colour as the file states it and the lens came back at 0.445.
+//: `test_a_lit_lens_is_as_bright_as_a_surface_can_be_and_no_brighter` holds
+//: the bound, and that this is the largest tenth under it.
+const LIT_GAIN = 1.6;
 
 //: What a part can be shown doing, and **a circuit decides which** --
 //: `webui/static/circuit.js` solves the bench and hands one of these words per
@@ -268,8 +286,8 @@ export function setPartState(part, drive, palette) {
     return;
   }
   if (drive === "lit") {
-    // The same hue, several times brighter, plus its own light. A lit LED is
-    // not a differently coloured LED.
+    // The same hue, as much brighter as a surface can be, plus its own light.
+    // A lit LED is not a differently coloured LED.
     lens.material.color.copy(base).multiplyScalar(LIT_GAIN);
     lens.material.emissive.copy(base).multiplyScalar(LIT_GAIN);
     lens.material.emissiveIntensity = LIT;
