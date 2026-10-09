@@ -2622,9 +2622,10 @@ export async function load(url, context, next) {
 
 #: Draws each case's board with `showBoard`, loads its model with `loadModel`
 #: (through a `fetch` that reads the disk), and prints per board the model's
-#: turn and scale, and where every pad sits in the MODEL's frame -- the
-#: millimetres the composer writes -- by its index in the layout, with the
-#: centroid of every triangle `carvePins` gave it.
+#: turn and scale, the top of its PCB, and where every pad sits in the
+#: MODEL's frame -- the millimetres the composer writes -- by its index in the
+#: layout, with the centroid `[x, z, y]` of every triangle `carvePins` gave it
+#: and whether the page holds it to be on the underside.
 PLACEMENT_PROBE = r"""
 import { register } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -2675,17 +2676,20 @@ for (const { layout, file } of JSON.parse(readFileSync(CASES, "utf-8"))) {
     }
     mesh.getWorldPosition(at);
     model.worldToLocal(at);
-    const pad = { index, label: entry.label, x: at.x, z: at.z, tris: [] };
+    const pad = { index, label: entry.label, x: at.x, z: at.z, tris: [],
+                  underside: Boolean(mesh.userData.underside) };
     if (mesh.userData.carved) {
       // A carved pin's triangles are relative to its own place (OH-128).
       const position = mesh.geometry.getAttribute("position");
       for (let i = 0; i < position.count; i += 3) {
-        let x = 0, z = 0;
+        let x = 0, y = 0, z = 0;
         for (let k = 0; k < 3; k++) {
           x += position.getX(i + k);
+          y += position.getY(i + k);
           z += position.getZ(i + k);
         }
-        pad.tris.push([mesh.position.x + x / 3, mesh.position.z + z / 3]);
+        pad.tris.push([mesh.position.x + x / 3, mesh.position.z + z / 3,
+                       mesh.position.y + y / 3]);
       }
     }
     pads.push(pad);
@@ -2696,7 +2700,7 @@ for (const { layout, file } of JSON.parse(readFileSync(CASES, "utf-8"))) {
                     `placed layout pads`);
   }
   out.push({ board: layout.board, turn: model.rotation.y, scale: model.scale.x,
-             pads });
+             pcb: view.slab.max[1], pads });
 }
 console.log(JSON.stringify(out));
 """
@@ -2892,6 +2896,7 @@ def composed_boards_as_placed(tmp_path_factory):
         for pad in case["pads"]:
             entry = layout["pads"][pad["index"]]
             pad["name"] = names.get((entry["label"], entry["x"], entry["y"]))
+            pad["group"] = entry["group"]
         unnamed = [pad["label"] for pad in case["pads"] if pad["name"] is None]
         if names and unnamed:
             raise LookupError(
@@ -3026,12 +3031,122 @@ def test_carvepins_takes_only_metal_standing_on_the_models_own_header_pads(
                 on_copper(pad["x"], pad["z"], own, inscribed) for pad in pads):
             continue
         bare = [pad["label"] for pad in pads if not pad["tris"]]
-        stray = [(pad["label"], x, z) for pad in pads for x, z in pad["tris"]
+        stray = [(pad["label"], x, z) for pad in pads for x, z, _ in pad["tris"]
                  if not on_copper(x, z, own, lambda w, h: math.hypot(w, h) / 2)]
         if bare or stray:
             wrong.append(f"{case['board']}: {len(bare)} of {len(pads)} pads "
                          f"carved no pin {bare[:6]}; {len(stray)} triangles "
                          f"carved off every header pad, e.g. {stray[:3]}")
+    assert not wrong, "\n".join(wrong)
+    if left_out:
+        pytest.skip(f"SKIPPED in part: the {len(composed)} boards placed here "
+                    f"held; left out: {left_out}")
+
+
+# --- OH-216: a pad carves metal on its own side of the board, and only there --
+
+
+def metal_triangles_glb(path: pathlib.Path, pcb: dict[str, float],
+                        centres: list[tuple[float, float, float]]) -> None:
+    """A model of small flat METAL triangles, one centred on each `(x, y, z)`
+    in model millimetres, carrying the `pcb` extra: the narrowest model whose
+    metal `carvePins` can take."""
+    corners = [(x + dx, y, z + dz) for x, y, z in centres
+               for dx, dz in ((-0.1, -0.1), (0.2, -0.1), (-0.1, 0.2))]
+    count = len(corners)
+    binary = (b"".join(struct.pack("<3f", *corner) for corner in corners)
+              + struct.pack(f"<{3 * count}f", *(0, 1, 0) * count)
+              + struct.pack(f"<{count}I", *range(count)))
+    document = json.dumps({
+        "asset": {"version": "2.0", "extras": {"units": "mm", "pcb": pcb}},
+        "buffers": [{"byteLength": len(binary)}],
+        "bufferViews": [{"buffer": 0, "byteOffset": offset, "byteLength": length}
+                        for offset, length in ((0, 12 * count), (12 * count, 12 * count),
+                                               (24 * count, 4 * count))],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5126, "count": count, "type": "VEC3"},
+            {"bufferView": 1, "componentType": 5126, "count": count, "type": "VEC3"},
+            {"bufferView": 2, "componentType": 5125, "count": count, "type": "SCALAR"},
+        ],
+        "materials": [{"name": "brass", "pbrMetallicRoughness": {
+            "baseColorFactor": [0.8, 0.6, 0.3, 1.0],
+            "metallicFactor": 1.0, "roughnessFactor": 0.3}}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1},
+                                    "indices": 2, "material": 0}]}],
+    }).encode("utf-8")
+    document += b" " * (-len(document) % 4)
+    body = (struct.pack("<II", len(document), 0x4E4F534A) + document
+            + struct.pack("<II", len(binary), 0x004E4942) + binary)
+    path.write_bytes(struct.pack("<III", 0x46546C67, 2, 12 + len(body)) + body)
+
+
+def test_an_underside_pad_takes_the_metal_under_the_board_and_never_over_it(
+        tmp_path):
+    """**OH-216: a pad on the underside carved the metal on TOP of the board
+    over it.** `carvePins` took every metal triangle above the PCB within
+    `PIN_REACH_MM` of a pad, whichever side the pad was on, so a XIAO's
+    underside test point turned the chip lead or trace standing over it into
+    its pin, and that metal became the wire's anchor.
+
+    One pad on each side of a 1.6 mm board at the same place, over a metal
+    triangle on top and another underneath: each pad takes the one on its own
+    side, and the underside pad's marker stands under the board. Synthetic,
+    so it runs with no model built; needs node.
+
+    Seen red (2026-10-09), on board3d.js as it was before OH-216: the
+    underside pad carved nothing and was not marked as on the underside.
+    """
+    model = tmp_path / "both.glb"
+    metal_triangles_glb(model, {"long": 10.0, "short": 10.0, "thickness": 1.6},
+                        [(0.0, 2.0, 0.0), (0.0, -0.5, 0.0)])
+    layout = {"board": "one pad each side", "width": 100, "height": 100,
+              "px_per_mm": 8.0, "supply": None, "led_parts": None,
+              "pads": [{"label": label, "pin": label, "chip_pin": None,
+                        "x": 50.0, "y": 50.0, "group": group, "state": "unknown"}
+                       for label, group in (("T", "header-top"), ("U", "underside"))]}
+    (case,) = placed_by_the_page(tmp_path, [{"layout": layout, "file": str(model)}])
+    sides = {pad["label"]: (pad["underside"], [round(y, 2) for _, _, y in pad["tris"]])
+             for pad in case["pads"]}
+    assert sides == {"T": (False, [2.0]), "U": (True, [-0.5])}, sides
+
+
+def test_every_pad_carves_only_metal_on_its_own_side_of_the_board(
+        composed_boards_as_placed):
+    """**OH-216, over every board a composed model is drawn for.** A pad the
+    board file puts on the underside (`group` "underside", which
+    `tools/import_board.py` states from the vendor's footprint and, at its
+    edge, from the module's own board file) carves only metal below the PCB;
+    every other pad only metal above it, and only on the copper of one of the
+    model's own header pads -- within half its diagonal, as the carve test
+    above measures.
+
+    Before this, the XIAO SMD boards and the XIAO RP2350 DIP were left out of
+    that test because their underside pads land on no header pad, and each
+    underside pad took the topside metal standing over it: OH-215's review
+    counted 1557 to 5450 such triangles a board.
+
+    Seen red (2026-10-09), twice: with `carvePins` ignoring a pad's side, and
+    with the XIAO board files' underside pads tagged `header-top` again -- each
+    time the six boards OH-216 names failed, every underside pad's triangles
+    on top of the board.
+    """
+    composed, left_out = composed_boards_as_placed
+    wrong = []
+    for case, own, _ in composed:
+        stray = []
+        for pad in case["pads"]:
+            for x, z, y in pad["tris"]:
+                if pad["group"] == "underside":
+                    if y >= 0:
+                        stray.append((pad["label"], "over the board", round(y, 2)))
+                elif y <= case["pcb"]:
+                    stray.append((pad["label"], "not above the board", round(y, 2)))
+                elif not on_copper(x, z, own, lambda w, h: math.hypot(w, h) / 2):
+                    stray.append((pad["label"], "off every header pad",
+                                  round(x, 2), round(z, 2)))
+        if stray:
+            wrong.append(f"{case['board']}: {len(stray)} triangles carved off "
+                         f"their pad's own side or header pad, e.g. {stray[:3]}")
     assert not wrong, "\n".join(wrong)
     if left_out:
         pytest.skip(f"SKIPPED in part: the {len(composed)} boards placed here "

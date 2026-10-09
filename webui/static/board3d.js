@@ -126,6 +126,19 @@ const PAD_LIFT = 0.01;
 //: sign looks like from the outside.
 const PIN_REACH_MM = 1.1;
 
+//: The group a board file gives a pad on the board's UNDERSIDE (OH-216):
+//: `UNDERSIDE` in `tools/import_board.py`, which writes it, and the one place
+//: here that spells it.
+//:
+//: **Such a pad's pin is under the board, so it is carved out of the metal
+//: under the board or out of nothing.** A XIAO SMD footprint's test points
+//: and battery pads are on the module's underside, and until this every one
+//: of them took the topside metal standing over it -- a chip's leads, a
+//: trace, a capacitor's end -- recoloured it as a pin and anchored the wire
+//: there: 1557 to 5450 stray triangles a board on the six OH-215's review
+//: counted. A pad on no stated side is a topside pad, as every pad was.
+const UNDERSIDE = "underside";
+
 //: How brightly a real pin glows in its state's colour.
 //:
 //: **The state is EMITTED, not painted on, and the first attempt got that
@@ -1167,9 +1180,12 @@ export function showBoard(layout, model = null) {
   // one board and float them above another. `placeModel` raises them when the
   // mesh arrives; until then they sit on the slab, which is also where they
   // stay on a board with no model.
+  // An underside pad lies on the board's underside, mirrored across it.
   const top = BOARD_THICKNESS / 2 + PAD_LIFT + PAD_HEIGHT / 2;
+  view.underside = [];
   for (const pad of layout.pads) {
     if (pad.x === null || pad.y === null) continue;
+    const under = pad.group === UNDERSIDE;
     const post = new THREE.Mesh(
       new THREE.CylinderGeometry(PAD_RADIUS, PAD_RADIUS, PAD_HEIGHT, 20),
       new THREE.MeshStandardMaterial({
@@ -1191,6 +1207,7 @@ export function showBoard(layout, model = null) {
     // this sign every one of the 32 lands on its OWN pin within 0.1 mm,
     // against a 1.27 mm half-pitch.
     post.position.set(pad.x * SCALE - width / 2, top, pad.y * SCALE - depth / 2);
+    if (under) post.position.y = -top;
     // **Never drawn. OH-95.** This disc is a collider and an anchor, not a
     // picture: `placeModel` replaces it with the vendor's own pin wherever
     // there is one, and where there is not, a cylinder standing on a board
@@ -1201,6 +1218,7 @@ export function showBoard(layout, model = null) {
     post.visible = false;
     post.userData.pin = pad.pin;
     post.userData.label = pad.label;
+    post.userData.underside = under;
     // **The state is kept on the mesh, not only in the colour it produced.**
     // A colour cannot be turned back into a state, so a theme change had
     // nothing to recolour from -- see `refreshTheme`, which is where that bug
@@ -1310,7 +1328,8 @@ function carvePins(group, pcbThickness) {
   for (const [pin, posts] of view.pads) {
     for (const post of posts) {
       post.getWorldPosition(scratch);
-      wanted.push({ pin, post, at: group.worldToLocal(scratch.clone()) });
+      wanted.push({ pin, post, at: group.worldToLocal(scratch.clone()),
+                    under: post.userData.underside });
     }
   }
   if (!wanted.length) return [];
@@ -1353,11 +1372,15 @@ function carvePins(group, pcbThickness) {
 
       // Above the PCB's own top face: a pin's tail passes through the board
       // and out of the underside, and carving that would take the solder
-      // side of a part nobody is looking at.
+      // side of a part nobody is looking at. **And below its bottom face for
+      // a pad on the underside, and only for one** (OH-216): each pad takes
+      // metal on its own side of the board and never the other's.
       let mine = null;
-      if (centre.y > pcbThickness) {
+      const below = centre.y < 0;
+      if (below || centre.y > pcbThickness) {
         let nearest = PIN_REACH_MM;
         for (const pad of wanted) {
+          if (pad.under !== below) continue;
           const gap = Math.hypot(centre.x - pad.at.x, centre.z - pad.at.z);
           if (gap < nearest) {
             nearest = gap;
@@ -1389,6 +1412,12 @@ function carvePins(group, pcbThickness) {
     }
   });
 
+  // **Which underside pads found metal under the board and which kept only
+  // their invisible collider**, said rather than left to be inferred from
+  // `realPins` (OH-216). `describe` reports it.
+  view.underside = wanted.filter((pad) => pad.under).map((pad) => ({
+    pin: pad.pin, label: pad.post.userData.label, carved: pad.positions.length >= 9,
+  }));
   const found = [];
   for (const pad of wanted) {
     const { positions, normals, metal } = pad;
@@ -1448,6 +1477,7 @@ function carvePins(group, pcbThickness) {
       if (wire.post === pad.post) wire.post = pin;
     }
     pin.userData.carved = true;
+    pin.userData.underside = pad.under;
     found.push(pad.pin);
   }
   return found;
@@ -1554,7 +1584,13 @@ function placeModel(loaded, layout) {
   // placed there, and it is where a person clips a lead in any case.
   const top = -BOARD_THICKNESS / 2 + (extras.pad_top ?? pcb.thickness) * scale
               + PAD_LIFT + PAD_HEIGHT / 2;
-  for (const post of padMeshes()) post.position.y = top;
+  // An underside pad goes to the model's own bottom face, which is where the
+  // group stands it (OH-216): the pin it is carved from is there, and so is
+  // the place a wire to it is anchored.
+  const bottom = -BOARD_THICKNESS / 2 - PAD_LIFT - PAD_HEIGHT / 2;
+  for (const post of padMeshes()) {
+    post.position.y = post.userData.underside ? bottom : top;
+  }
 
   // **And then the drawn markers are replaced by the pins the vendor
   // published, wherever there is one.** OH-95. The raise above still matters:
@@ -1935,6 +1971,9 @@ export function describe() {
     // claims -- the first is true even when the carve finds nothing. This is
     // the number that tells them apart, and it is what the test asserts.
     realPins: view.realPins ?? [],
+    // Each underside pad, and whether it found metal under the board or kept
+    // only its invisible collider (OH-216). Never topside metal: `carvePins`.
+    underside: view.underside ?? [],
     // The number of PADS, against `pads` above which is keyed by NAME.
     // They differ wherever a name means several pads -- an Uno's three
     // GND, which OH-117 stopped losing. 32 against 30 there.
