@@ -3778,6 +3778,35 @@ def flat(rings: list[list[tuple[float, float]]], up: float, colour: str,
     return Mesh({colour: (positions, normals, indices)})
 
 
+def flat_fills(fills: list[tuple[list[tuple[float, float]], list[tuple[int, int, int]]]],
+               up: float, colour: str, centre: tuple[float, float], upward: bool) -> Mesh:
+    """Filled polygons, each as its points and `ear_clip`'s triangles of
+    them, as flat faces at height `up` whose triangles share those points.
+
+    The triangles are exactly those `flat` draws from each one as a ring of
+    its own -- the same points at the same height, `ear_clip` winding every
+    one forward, and the same turn for an underside face -- and only the
+    indexing differs: a point is stored once and not once per triangle that
+    uses it, which takes a glyph's triangle from 84 bytes to about 36
+    (OH-163). A point no triangle uses is not stored.
+    """
+    positions: list[float] = []
+    normals: list[float] = []
+    indices: list[int] = []
+    normal = (0.0, 1.0, 0.0) if upward else (0.0, -1.0, 0.0)
+    for points, triangles in fills:
+        stored: dict[int, int] = {}
+        for a, b, c in triangles:
+            for corner in ((a, b, c) if upward else (a, c, b)):
+                if corner not in stored:
+                    stored[corner] = len(positions) // 3
+                    x, y = points[corner]
+                    positions.extend((x - centre[0], up, -(y - centre[1])))
+                    normals.extend(normal)
+                indices.append(stored[corner])
+    return Mesh({colour: (positions, normals, indices)})
+
+
 def stroke_outline(stroke: eagle.Stroke) -> list[tuple[float, float]] | None:
     """One silkscreen stroke as the rectangle its width sweeps out.
 
@@ -5841,9 +5870,13 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
     #: fetched Gerber has one with a pen to hold that to. Every triangle and
     #: stroke is cut to the board as all ink is. A polygon `ear_clip` refuses
     #: is counted under `FILL_REFUSED`, which `compose` prints on the `not
-    #: ink` line.
+    #: ink` line. A fill whose every triangle the board leaves uncut is
+    #: drawn by `flat_fills`, its triangles sharing its points; one the edge
+    #: cuts is drawn as its cut triangles, ring by ring, as is every stroke.
     fill_front: list[list[tuple[float, float]]] = []
     fill_back: list[list[tuple[float, float]]] = []
+    whole_front: list[tuple[list[tuple[float, float]], list[tuple[int, int, int]]]] = []
+    whole_back: list[tuple[list[tuple[float, float]], list[tuple[int, int, int]]]] = []
     filled = {"fill front": 0, "fill back": 0}
     for fill in board.silk_fills:
         points = list(fill.points)
@@ -5853,17 +5886,22 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             left[FILL_REFUSED] = left.get(FILL_REFUSED, 0) + 1
             continue
         shapes = [[points[a], points[b], points[c]] for a, b, c in triangles]
+        pen = []
         if fill.width_mm > 0:
             # A repeated point traces nothing, so `stroke_outline` gives None.
-            shapes += [shape for start, end in zip(points, points[1:] + points[:1])
-                       if (shape := stroke_outline(eagle.Stroke(
-                           fill.layer, *start, *end, fill.width_mm))) is not None]
-        cuts = [cut for shape in shapes if len(cut := inside(shape)) >= 3]
-        if not cuts:
+            pen = [shape for start, end in zip(points, points[1:] + points[:1])
+                   if (shape := stroke_outline(eagle.Stroke(
+                       fill.layer, *start, *end, fill.width_mm))) is not None]
+        cuts = [inside(shape) for shape in shapes + pen]
+        whole = bool(shapes) and cuts[:len(shapes)] == shapes
+        kept = [cut for cut in cuts[len(shapes) if whole else 0:] if len(cut) >= 3]
+        if not (whole or kept):
             left["fill off the board"] = left.get("fill off the board", 0) + 1
             continue
         back_side = fill.layer.startswith("B.")
-        (fill_back if back_side else fill_front).extend(cuts)
+        if whole:
+            (whole_back if back_side else whole_front).append((points, triangles))
+        (fill_back if back_side else fill_front).extend(kept)
         filled["fill back" if back_side else "fill front"] += 1
 
     #: The routing, and it is drawn in the board's OWN mask warmed toward the
@@ -5897,14 +5935,16 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             holes.append(cut)
 
     routed = mask_over_copper(mask)
+    top = thickness + COPPER_THICKNESS_MM + SILK_THICKNESS_MM
+    under = -COPPER_THICKNESS_MM - SILK_THICKNESS_MM
     return ([flat(track + holes, thickness + TRACE_PROUD_MM, routed, centre, True),
              flat(front, thickness + COPPER_THICKNESS_MM, COPPER, centre, True),
-             flat(ink + fill_front, thickness + COPPER_THICKNESS_MM + SILK_THICKNESS_MM,
-                  SILKSCREEN, centre, True),
+             merge(flat(ink + fill_front, top, SILKSCREEN, centre, True),
+                   flat_fills(whole_front, top, SILKSCREEN, centre, True)),
              flat(track_back + holes, -TRACE_PROUD_MM, routed, centre, False),
              flat(back, -COPPER_THICKNESS_MM, COPPER, centre, False),
-             flat(ink_back + fill_back, -COPPER_THICKNESS_MM - SILK_THICKNESS_MM,
-                  SILKSCREEN, centre, False)],
+             merge(flat(ink_back + fill_back, under, SILKSCREEN, centre, False),
+                   flat_fills(whole_back, under, SILKSCREEN, centre, False))],
             {"pads front": len(front), "pads back": len(back),
              "ink front": len(ink) - text_front,
              "ink back": len(ink_back) - text_back,

@@ -3003,6 +3003,55 @@ def test_a_fill_is_drawn_as_ink_with_its_counter_open_and_its_pen_traced():
                                              (1.85, 1.85))] == [True, True, False, False]
 
 
+def test_a_fill_on_the_board_shares_its_vertices_and_draws_the_same_triangles():
+    """**A fill wholly on the board is one indexed mesh, its triangles
+    sharing its own points** (OH-163): drawn a triangle at a time, each of
+    SparkFun's glyph triangles carried three vertices of its own, 84 bytes
+    where sharing costs about 36. The indexing is all that changes: the
+    triangles drawn are those `flat` draws from each triangle as a ring of
+    its own -- the same points at the same height, wound the same way -- and
+    a fill the board's edge cuts is still drawn as its cut triangles."""
+    off = [(10.0, 2.0), (14.0, 2.0), (14.0, 6.0), (12.0, 4.0), (10.0, 6.0)]
+    under = [(2.0, 2.0), (4.0, 2.0), (4.0, 4.0), (3.0, 3.0), (2.0, 4.0)]
+    board = eagle.Board("inked", "test", (), (), silk_fills=(
+        eagle.Fill("F.SilkS", tuple(_O), 0.0), eagle.Fill("F.SilkS", tuple(off), 0.0),
+        eagle.Fill("B.SilkS", tuple(under), 0.0)))
+    ring = [(-1.0, -1.0), (12.0, -1.0), (12.0, 12.0), (-1.0, 12.0)]
+    centre = (1.5, 2.5)
+    meshes, tally, _undrawn = compose.artwork(board, ring, 1.6, centre, "#313d63", [])
+    assert (tally["fill front"], tally["fill back"]) == (2, 1), tally
+
+    whole = compose.ear_clip(_O)
+    cut = [piece for a, b, c in compose.ear_clip(off)
+           if len(piece := compose.clipped_to(ring, [off[a], off[b], off[c]])) >= 3]
+    one_by_one = compose.flat([[_O[a], _O[b], _O[c]] for a, b, c in whole] + cut,
+                              1.6 + compose.COPPER_THICKNESS_MM + compose.SILK_THICKNESS_MM,
+                              compose.SILKSCREEN, centre, True)
+    beneath = compose.ear_clip(under)
+    underside = compose.flat([[under[a], under[b], under[c]] for a, b, c in beneath],
+                             -compose.COPPER_THICKNESS_MM - compose.SILK_THICKNESS_MM,
+                             compose.SILKSCREEN, centre, False)
+
+    def faces(mesh) -> dict:
+        positions, normals, indices = mesh.groups[compose.SILKSCREEN]
+        vertex = [(*positions[at:at + 3], *normals[at:at + 3])
+                  for at in range(0, len(positions), 3)]
+        drawn: dict = {}
+        for at in range(0, len(indices), 3):
+            corner = [vertex[index] for index in indices[at:at + 3]]
+            start = corner.index(min(corner))
+            key = tuple(corner[start:] + corner[:start])
+            drawn[key] = drawn.get(key, 0) + 1
+        return drawn
+
+    assert faces(meshes[2]) == faces(one_by_one)
+    assert faces(meshes[5]) == faces(underside)
+    shared = len({index for triangle in whole for index in triangle})
+    assert len(meshes[2].groups[compose.SILKSCREEN][0]) // 3 == shared + sum(map(len, cut)), (
+        "the fill on the board does not share its vertices")
+    assert len(meshes[5].groups[compose.SILKSCREEN][0]) // 3 == len(under)
+
+
 def test_a_fill_the_triangulator_refuses_is_counted_as_ink_not_drawn(capsys):
     """**What `ear_clip` refuses is ink the file carries and the model
     lacks**, so `compose` prints it on the `not ink` line under
