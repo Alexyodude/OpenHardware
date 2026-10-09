@@ -399,9 +399,8 @@ def test_the_image_begins_with_its_stack_and_ends_with_the_minimum_image_def():
 def test_every_instruction_is_rv32i_or_compressed_and_this_core_decodes_it():
     """Read with this repository's own disassembler, because the question is
     what `core/riscv32` sees. An encoding it cannot render prints as a bare
-    `0x...`, so a Zbb or Zbkb instruction -- which it has no rendering for --
-    fails the first assertion, and an M, A, Zba, Zbs, Zcb or Zcmp one the
-    second."""
+    `0x...` and fails the first assertion; an M, A, Zba, Zbb, Zbs, Zbkb, Zcb
+    or Zcmp instruction -- all rendered since OH-208 -- fails the second."""
     from core.riscv32 import disasm
 
     lines = disasm.disassemble(code_of(IMAGE.read_bytes()), rp2350.XIP)
@@ -499,9 +498,141 @@ def test_the_images_instruction_stream_runs_in_lockstep_with_rvcpp():
             for a, b in changed), changed
         padding = bytes(lockstep.ENTRY_OFFSET)
         report = lockstep.run(padding + moved, pathlib.Path(work),
-                              extensions=abi.RP2350_MODELLED, cycles=BUDGET)
+                              extensions=rp2350.EXTENSIONS, cycles=BUDGET)
     assert report.matched_the_oracle, (report.divergence, report.stopped)
     assert report.traced == BUDGET
+
+
+# --- a Zbb image, built for the chip's whole ISA, runs (OH-208) --------------
+#
+# The blink above has no Zbb in it whatever it is compiled for, so it cannot
+# say whether the board runs Zbb. This probe is the smallest program that
+# must: the same three functions `test_this_compiler_emits_zbb_when_the_
+# march_names_it` measured -- `clz`, `minu`, `rev8` -- over inputs the
+# compiler cannot fold, built under the Hazard3's whole `-march` and linked
+# with `blink.ld`, IMAGE_DEF and all. It writes its three answers and a
+# marker to the bottom of SRAM and spins. Built at test time and never
+# committed, so `blink.bin` stays exactly as it was.
+
+PROBE = r"""
+#ifndef RESULTS
+#define RESULTS   0x20000000u
+#endif
+#ifndef STACK_TOP
+#define STACK_TOP 0x20082000u
+#endif
+
+__attribute__((section(".image_def"), used))
+static const unsigned int image_def[5] = {
+    0xffffded3u, 0x11010142u, 0x000001ffu, 0x00000000u, 0xab123579u,
+};
+
+static const volatile unsigned int inputs[3] = {
+    0x00F00000u, 0x12345678u, 0x9ABCDEF0u,
+};
+
+int main(void);
+
+__attribute__((naked, section(".text.start"))) void _start(void) {
+    __asm__ volatile("li sp, %0\n" "j  main\n" :: "i"(STACK_TOP));
+}
+
+int main(void) {
+    volatile unsigned int *out = (volatile unsigned int *)RESULTS;
+    unsigned int a = inputs[0], b = inputs[1], c = inputs[2];
+    out[0] = __builtin_clz(a);
+    out[1] = b < c ? b : c;
+    out[2] = __builtin_bswap32(b);
+    out[3] = 0x600DF00Du;
+    for (;;) {
+    }
+}
+"""
+
+#: What the probe must leave at RESULTS: clz(0x00F00000) is 8, the smaller
+#: unsigned of 0x12345678 and 0x9ABCDEF0 is the first, and 0x12345678
+#: byte-reversed is 0x78563412. Then the marker that says it got there.
+PROBE_RESULTS = (8, 0x12345678, 0x78563412, 0x600DF00D)
+
+
+def build_probe(work: pathlib.Path, *flags: str,
+                script: pathlib.Path = SCRIPT) -> bytes:
+    """`PROBE` compiled under `HAZARD3` and linked with `blink.ld`, or with
+    `script` where the caller needs it linked somewhere else."""
+    tools = compiler()
+    if tools is None:
+        pytest.skip(f"no riscv32-esp-elf-gcc reporting {COMPILER_BANNER!r}")
+    gcc, objcopy = tools
+    source, elf, image = work / "probe.c", work / "probe.elf", work / "probe.raw"
+    source.write_text(PROBE, encoding="utf-8")
+    subprocess.run(
+        [str(gcc), HAZARD3, "-mabi=ilp32", "-Os", "-ffreestanding", "-nostdlib",
+         "-nostartfiles", *flags, "-T", str(script), "-o", str(elf), str(source)],
+        check=True, capture_output=True)
+    subprocess.run([str(objcopy), "-O", "binary", str(elf), str(image)],
+                   check=True, capture_output=True)
+    return image.read_bytes()
+
+
+def test_a_probe_built_for_the_whole_hazard3_runs_clz_minu_and_rev8_on_the_board():
+    """The ticket's case, end to end: a XIAO RP2350 given an image with
+    `clz`, `minu` and `rev8` in it executes all three and leaves the right
+    answers in its SRAM -- where until OH-208 it stopped at the `clz` with
+    `Illegal`. The three are read out of the probe with this repository's
+    disassembler first, so the run cannot pass by the compiler having
+    avoided them."""
+    from core.riscv32 import disasm
+
+    with tempfile.TemporaryDirectory() as work:
+        probe = build_probe(pathlib.Path(work))
+    mnemonics = {line.text.split()[0]
+                 for line in disasm.disassemble(code_of(probe), rp2350.XIP)}
+    assert {"clz", "minu", "rev8"} <= mnemonics, sorted(mnemonics)
+
+    with api.load_firmware(BOARD, probe, base=rp2350.XIP) as session:
+        session.step(200)
+        results = tuple(session.cpu.read_word(rp2350.SRAM + 4 * index)
+                        for index in range(4))
+    assert results == PROBE_RESULTS, [hex(word) for word in results]
+
+
+def test_the_probe_runs_in_lockstep_with_rvcpp():
+    """The same probe, moved into rvcpp's testbench: linked where that
+    testbench enters (`blink.ld` with its origin moved from XIP_BASE to
+    0x80000040, because the probe reads its inputs by absolute address) and
+    with its results and stack in the testbench's RAM. It is asserted to
+    differ from the board's probe only in the immediates that build those
+    addresses -- `lui`, and the `addi` completing the inputs' address -- and
+    then both models agree on all 32 registers and the PC after every instruction,
+    through the `clz`, the `minu` and the `rev8` and on into the spin.
+    Skips where the compiler or the oracle is absent."""
+    from tests.riscv32 import lockstep
+    from core.riscv32 import disasm
+
+    if lockstep.executable() is None:
+        pytest.skip(f"no rvcpp under {lockstep.ORACLE}")
+    origin = lockstep.RAM_BASE + lockstep.ENTRY_OFFSET
+    with tempfile.TemporaryDirectory() as work:
+        script = pathlib.Path(work) / "testbench.ld"
+        linked = SCRIPT.read_text(encoding="utf-8")
+        assert "ORIGIN = 0x10000000" in linked, "blink.ld no longer says where flash is"
+        script.write_text(linked.replace("ORIGIN = 0x10000000", f"ORIGIN = {origin:#x}"),
+                          encoding="utf-8")
+        board = build_probe(pathlib.Path(work))
+        moved = build_probe(pathlib.Path(work), "-DRESULTS=0x80008000u",
+                            "-DSTACK_TOP=0x80010000u", script=script)
+        ours = disasm.disassemble(code_of(board), rp2350.XIP)
+        theirs = disasm.disassemble(code_of(moved), origin)
+        assert [line.width for line in ours] == [line.width for line in theirs]
+        changed = [(a.text, b.text) for a, b in zip(ours, theirs) if a.raw != b.raw]
+        assert changed and all(
+            a.split(",")[0] == b.split(",")[0] and a.split()[0] in ("lui", "addi")
+            for a, b in changed), changed
+        report = lockstep.run(bytes(lockstep.ENTRY_OFFSET) + moved,
+                              pathlib.Path(work), extensions=rp2350.EXTENSIONS,
+                              cycles=200)
+    assert report.matched_the_oracle, (report.divergence, report.stopped)
+    assert report.traced == 200
 
 
 # --- the board description --------------------------------------------------
@@ -593,15 +724,22 @@ def test_what_this_board_cannot_compute_faults_rather_than_answering():
             assert f"{address:08x}" in str(caught.value), caught.value
 
 
-def test_the_board_configures_the_modelled_part_of_the_hazard3():
-    """`abi.RP2350_MODELLED`: Zba and Zbs, which no ESP32 here has, and no
-    Zbb, because the core has no bit for it -- see `rp2350.EXTENSIONS`."""
+def test_the_board_configures_every_bitmanip_group_of_the_hazard3():
+    """`abi.RP2350`: Zba, Zbb, Zbs and Zbkb -- the four `_zb*` groups of
+    `rp2350.ISA`, none of which any ESP32 part here has -- and not the
+    narrower `abi.RP2350_MODELLED` it configured until OH-208, under which
+    `clz` was refused."""
     from core.riscv32 import abi
 
     with abi.Cpu() as cpu:
         rp2350.install(cpu)
-        assert cpu.extensions() == abi.RP2350_MODELLED
-        assert cpu.extensions() & abi.EXT_ZBA and cpu.extensions() & abi.EXT_ZBS
+        assert cpu.extensions() == abi.RP2350
+        groups = {"zba": abi.EXT_ZBA, "zbb": abi.EXT_ZBB, "zbs": abi.EXT_ZBS,
+                  "zbkb": abi.EXT_ZBKB}
+        named = {group for group in rp2350.ISA.split("_") if group.startswith("zb")}
+        assert named == set(groups), named
+        assert all(cpu.extensions() & bit for bit in groups.values()), (
+            f"{cpu.extensions():#x} lacks one of {groups}")
 
 
 def test_every_number_this_board_carries_is_the_one_in_pico_sdks_header():

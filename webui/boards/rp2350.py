@@ -101,24 +101,23 @@ from core.riscv32 import abi
 #: The Hazard3's ISA as the datasheet spells it -- RVCSR MISA's description,
 #: "On RP2350, Hazard3's full `-march` string is:" (section 3.8.9, PDF p.288),
 #: the same string `docs/architectures.md` 5.4 and `abi.RP2350_MODELLED`
-#: quote. The silicon's, and not what `install` configures; see `EXTENSIONS`.
+#: quote. The silicon's; what `install` configures is `EXTENSIONS`.
 ISA = "rv32ima_zicsr_zifencei_zba_zbb_zbs_zbkb_zca_zcb_zcmp"
 
-#: What `install` gives the core: `abi.RP2350_MODELLED`, the part of `ISA`
-#: `core/riscv32` models -- M, A (classified, not executed), C for Zca, Zba,
-#: Zbs, Zcb and Zcmp. A bitmask rather than `set_isa`'s letters because
-#: `set_isa` names no group for Zba or Zbs, and dropping them would make
-#: this core call `sh1add` illegal on a part that has it.
+#: What `install` gives the core: `abi.RP2350`, every group of `ISA` that
+#: `core/riscv32` has a bit for -- M, A (classified, not executed), C for
+#: Zca, Zba, Zbb, Zbs, Zbkb, Zcb and Zcmp. A bitmask rather than `set_isa`'s
+#: letters because `set_isa` names no group for Zba, Zbb, Zbs or Zbkb, and
+#: dropping them would make this core call `sh1add` or `clz` illegal on a
+#: part that has it.
 #:
-#: **Zbb and Zbkb are not in it, and that is a wrong answer about this
-#: part.** The core has no bit for either group and refuses their encodings
-#: on every part as `Illegal` -- the word for "the silicon lacks this",
-#: which the RP2350 does not. abi.py's note on `RP2350_MODELLED` says the
-#: constant "describes a part that does not exist"; this board inherits that
-#: rather than fixing it, because the fix is `core/riscv32`'s. An image with a
-#: Zbb or Zbkb instruction stops here, loudly, with the wrong word; the blink
-#: `test_xiao_rp2350_board.py` runs is built `-march=rv32imac` and has none.
-EXTENSIONS = abi.RP2350_MODELLED
+#: **Until OH-208 this was `abi.RP2350_MODELLED`, without Zbb and Zbkb**,
+#: and a XIAO RP2350 refused `clz`, `minu` and `rev8` as `Illegal` -- the
+#: word for "the silicon lacks this" -- where the chip executes them. The
+#: core implements both groups now, held in lockstep against rvcpp
+#: (`tests/riscv32/test_zbb_zbkb.py`), and this board is the only one that
+#: enables them: no ESP32 part here has either.
+EXTENSIONS = abi.RP2350
 
 #: The XIP window's base, `addressmap.h:24` -- `#define XIP_BASE
 #: _u(0x10000000)`. Where flash is executed from, and where an image loads.
