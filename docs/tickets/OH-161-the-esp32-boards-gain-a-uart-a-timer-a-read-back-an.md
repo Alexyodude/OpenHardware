@@ -6,8 +6,6 @@ status: open
 priority: P1
 created: '2026-09-04'
 touches:
-- core/riscv32/**
-- tests/riscv32/**
 - webui/boards/esp32c3.py
 - tests/webui/test_board_run.py
 - core/cortexm0/abi.py
@@ -140,3 +138,5 @@ Gate: all 12 checks pass, run clean with nothing else building or editing (three
 **Note 2026-10-08:** 2026-10-08: webui/boards/esp32c5.py and esp32c6.py return here; OH-200 is done (merged at 90eed1f). Their HEADER blocks now carry the SMD boards' MTMS, MTDI, MTDO, MTCK and BOOT rows, read from Seeed's board files.
 
 **Note 2026-10-08:** 2026-10-08: test_each_refusal_arrives_as_itself (tests/webui/test_board_run.py) now uses XIAO-MG24-DIP, not XIAO-RP2350-DIP, as its board whose core is not built: OH-157 runs the RP2350 on its Hazard3 half through core/riscv32, which is built. The MG24 is on cortexm33, which is not (OH-36).
+
+**Note 2026-10-09:** 2026-10-09: core/riscv32/** and tests/riscv32/** lent to OH-208 (Zbb and Zbkb on the RP2350's Hazard3, under lockstep with rvcpp). Return both when OH-208 closes.
