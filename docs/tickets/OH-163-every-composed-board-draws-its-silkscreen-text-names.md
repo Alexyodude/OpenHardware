@@ -10,9 +10,6 @@ touches:
 - tests/rules/test_kicad.py
 - tools/eagle.py
 - PROVENANCE.md
-- tools/compose_board_3d.py
-- tests/rules/test_compose_board_3d.py
-- tools/import_3d_model.py
 - tools/model_from_datasheet.py
 - tests/rules/test_import_3d_model.py
 ---
@@ -94,3 +91,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-09:** 2026-10-09: STEP 2 MERGED to master by fast-forward at 97fa596 (lane2): default-finish colours named from evidence or listed in each model's default_finish (carried in the index the page fetches); #c6c4a0 a white dielectric and #383838 left default; the palette checked against the cached STEPs. REVIEW: an independent review (MERGE AFTER FIXES) and a verification of its fix round (PASS). Master recomposed; VERIFIED on master at 97fa596: full suite 2 failed (the OCP pair), 2568 passed, 39 skipped. The double gamma conversion it found is OH-214 (P1), which needs this ticket's composer and importer: tools/compose_board_3d.py, tools/import_3d_model.py, tools/model_from_datasheet.py and their tests are lent to OH-214; return them when it closes. Steps 3-4 wait for them.
 
 **Note 2026-10-09:** 2026-10-09: the composer, the importer, model_from_datasheet.py and their tests return from OH-214 (done). Steps 3-4 can resume.
+
+**Note 2026-10-09:** 2026-10-09: the composer, its tests and the importer lent to OH-216, which writes header pads into composed models' extras. Return when OH-216 closes.
