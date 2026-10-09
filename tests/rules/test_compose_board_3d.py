@@ -6799,3 +6799,38 @@ def test_every_composed_model_states_the_header_pads_it_is_set_by():
     if not seen:
         pytest.skip("no composed model is built here; run tools/compose_board_3d.py")
     assert not wrong, "\n".join(wrong)
+
+
+def test_a_boards_thickness_is_its_top_face_and_not_its_solids_box():
+    """**OH-216: Seeed's SAMD21 STEP gives its PCB solid a small feature 0.39
+    mm proud of the board**, so the solid's box said the board was 1.61 mm
+    thick where its top face -- 309.66 of the solid's top area, and what
+    every component stands on -- is at 1.21. The page stood its pad markers
+    in the air and found none of its castellation copper "above the board".
+    `board_top` takes the plane across the board holding the most area
+    above the solid's middle.
+
+    A 20 x 17 x 1.2 mm board fused to a 1 x 1 x 0.4 mm boss on its top: one
+    solid, whose box is 1.6 mm and whose top face is at 1.2. Built here
+    because the vendor's file is fetched and this must run without it.
+
+    Here rather than beside the importer's other tests, whose file is not
+    this ticket's: the importer writes the fetched meshes the composed ones
+    are drawn beside, and both state `pcb.thickness` for the page.
+
+    Seen red (2026-10-09): with `board_top` answering the solid's box, 1.6.
+    """
+    try:
+        from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
+        from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+        from OCP.gp import gp_Pnt
+    except ImportError:
+        pytest.skip("OpenCASCADE is not installed")
+
+    from tools.import_3d_model import board_top, pcb_solid
+
+    board = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), 20.0, 17.0, 1.2).Shape()
+    boss = BRepPrimAPI_MakeBox(gp_Pnt(5.0, 5.0, 1.2), 1.0, 1.0, 0.4).Shape()
+    fused = BRepAlgoAPI_Fuse(board, boss).Shape()
+    solid = pcb_solid(fused, 2)
+    assert board_top(solid, 2) == 1.2, board_top(solid, 2)

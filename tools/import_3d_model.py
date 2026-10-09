@@ -1900,6 +1900,58 @@ def report_alignment(model: Model, long: float, short: float,
 PX_PER_MM = 8.0
 
 
+def board_top(solid, up: int) -> float:
+    """How far the PCB's top face stands above its underside, in millimetres.
+
+    **The face holding the most area, and not the solid's box** (OH-216).
+    Seeed's SAMD21 STEP gives its PCB solid a small feature standing 0.39 mm
+    proud of the board -- 1.87 mm2 at 1.605 and 0.65 at 1.610, against
+    309.66 mm2 of top face at 1.210 -- so the box said 1.61 and the page
+    stood every pad marker in the air above a 1.21 mm board, and found none
+    of its castellation copper, which stops at 1.22, "above the PCB's top".
+    Every one of its components stands at 1.21. On the other five fetched
+    boards the two agree: the largest planar area across the board above its
+    middle is at the box's top (measured 2026-10-09 off each vendor's STEP).
+
+    Planes across the board only -- those whose normal runs along `up` --
+    grouped to the micrometre, and only above the solid's middle, which is
+    where its top is.
+    """
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GeomAbs import GeomAbs_Plane
+    from OCP.GProp import GProp_GProps
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    box = box_of(solid)
+    low = (box.xmin, box.ymin, box.zmin)[up]
+    middle = spans(box)[up] / 2
+    areas: dict[float, float] = {}
+    walk = TopExp_Explorer(solid, TopAbs_FACE)
+    while walk.More():
+        face = TopoDS.Face_s(walk.Current())
+        walk.Next()
+        surface = BRepAdaptor_Surface(face)
+        if surface.GetType() != GeomAbs_Plane:
+            continue
+        normal = surface.Plane().Axis().Direction()
+        if abs(abs((normal.X(), normal.Y(), normal.Z())[up]) - 1.0) > 1e-6:
+            continue
+        place = box_of(face)
+        height = round((place.xmin, place.ymin, place.zmin)[up] - low, 3)
+        if height <= middle:
+            continue
+        props = GProp_GProps()
+        BRepGProp.SurfaceProperties_s(face, props)
+        areas[height] = areas.get(height, 0.0) + props.Mass()
+    if not areas:
+        raise SystemExit(f"the PCB solid has no plane across it above its middle; "
+                         f"its box is {spans(box)} mm along x, y, z")
+    return max(areas, key=areas.get)
+
+
 def convert(model: Model, deflection: float, check: bool) -> int:
     """Fetch, tessellate and write one model. Returns the glTF's byte count."""
     print(f"{model.chip}:")
@@ -1910,10 +1962,12 @@ def convert(model: Model, deflection: float, check: bool) -> int:
     shape, styles, _document = read(step)
     frame, pcb, long, short = frame_for(shape)
     whole = box_of(shape)
+    thickness = board_top(pcb_solid(shape, frame.up), frame.up)
     print(f"  axes   file is {'xyz'[frame.up]}-up; "
           f"long side is its {'xyz'[frame.long_axis]}; "
           f"{'mirrored' if frame.handedness < 0 else 'right-handed'} as read")
-    print(f"  pcb    {long:.3f} x {short:.3f} x {spans(pcb)[frame.up]:.3f} mm"
+    print(f"  pcb    {long:.3f} x {short:.3f} x {thickness:.3f} mm to its top "
+          f"face (its solid's box is {spans(pcb)[frame.up]:.3f})"
           f"   (assembly {whole.width:.3f} x {whole.height:.3f} x "
           f"{whole.thickness:.3f} mm in the file's own axes)")
 
@@ -1931,14 +1985,13 @@ def convert(model: Model, deflection: float, check: bool) -> int:
     mesh = tessellate(shape, styles, deflection, frame, board_faces, film_faces)
     print(f"  mesh   {mesh.triangles():,} triangles, {mesh.vertices():,} vertices, "
           f"{len(mesh.groups)} colours at {deflection} mm deflection")
-    report_alignment(model, long, short, spans(pcb)[frame.up])
+    report_alignment(model, long, short, thickness)
 
     if check:
         print("  write  skipped (--check)")
         return 0
     out = OUT / f"{model.chip}.glb"
-    size = write_glb(mesh, out, model.chip, model.url,
-                     (long, short, spans(pcb)[frame.up]))
+    size = write_glb(mesh, out, model.chip, model.url, (long, short, thickness))
     print(f"  write  {out.relative_to(REPO)}  {size:,} bytes")
     return size
 
