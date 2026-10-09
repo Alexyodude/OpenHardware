@@ -2,7 +2,7 @@
 id: OH-172
 title: chip_pin answers two questions with one field, and 153 pads are answered by
   the half nobody meant
-status: open
+status: in-progress
 priority: P2
 created: '2026-09-06'
 touches:
@@ -47,3 +47,41 @@ Found while OH-170 was checking whether its own supply-label set was too broad. 
 **Note 2026-10-08:** 2026-10-08, from OH-209's work and review: EN is in SUPPLY_LABELS, so the EN pad of every XIAO SMD keeps the generic why_null and no layer counts it, while it is a real signal: on XIAO-RP2350-SMD pad 25 lands on underside test point TP4, net '/04 RP2350/RUN', which carries the RP2350's RUN pad (U4 pad 26), the reset button K2, R12 and C25 (Seeed's RP2350.kicad_pcb). Whether EN belongs among the supplies is this ticket's question; nine XIAO SMD boards carry the same sentence.
 
 **Note 2026-10-09:** 2026-10-09: claims webui/api.py, webui/static/board3d-panel.js and tests/webui/test_pin_view.py (unclaimed), and borrows tests/webui/test_board3d.py from OH-215 (in review, waiting only on a browser look). DECISION, made for the owner while they are away, from a read-only design pass: the ticket's second shape. chip_pin becomes only the caption it is documented as; the page's modelled test becomes a per-pad 'modelled' boolean that webui/api.py computes from the keys the board's own level reader answers under -- the module's HEADER where it has pin_states, a manifest row's chip_index pads where it reads GPIO words -- because the page cannot see HEADER and a board file cannot state what a simulator reads. pin_kind was not chosen: the pads it would get wrong are real GPIOs on boards with no module, which a file-level kind would still call gpio. The design pass found the ticket's 'nothing renders incorrectly' out of date: since OH-167 made chip_pin_of fall back to the board file, every pad that names a chip pin on a board with no module renders 'no program running' where OH-164's own ordering says 'not modelled'; on every board with a reader, chip_pin non-null and 'the reader has a key' agree on every pad, so slice 1 changes exactly those pads. SLICE 1 (this ticket now): the API's modelled flag, the panel reading it, the tests. NOT IN SLICE 1: a caption for EN/RUN/GND and other non-GPIO pins, moving the _CHIP_PIN_NAME gate to header_table, plural captions for supply nets, EN/RESET/RST leaving SUPPLY_LABELS (which moves the TWINS pins layer and needs OH-213's files), and the wording of 'not modelled' beside a named chip pin.
+
+**Note 2026-10-09:** 2026-10-09, slice 1 landed at ee21ae0.
+
+WHAT CHANGED. `pad_view` gives every pad a `modelled` bool, true where the board's own level reader answers under the pad's name. webui/api.py's new `level_keys(board, description, layout)` answers that without a CPU: the module's `HEADER` where it has `pin_states`, and a manifest row's `chip_index` pads where its chip module names `GPIO`, `GPIO_ENABLE` and `GPIO_OUT`. A padless row the reader lists (a XIAO's `LED`) is modelled. `chip_pin` is unchanged and is the caption only. The comments that said otherwise now say so: `chip_pin_of`'s docstring, the `PIN_STATES` comment, `pin_view`'s comment on a module with names and no reader, and the panel's "if and only if" comment. In webui/static/board3d-panel.js, `unknownWords` returns "not modelled" unless `pad.modelled === true`, and the Chip pin column still shows `pad.chip_pin ?? "—"`. `level_keys` restates `row_levels`' word check instead of sharing it. `row_levels` needs the words' values and `level_keys` only needs to know they exist, so a shared predicate would be a second lookup with one caller each. The new test holds the two equal on every catalogue board.
+
+MEASURED 2026-10-09 over catalogue.board_names(), every board picked and not loaded, after the change:
+
+    python -c "from webui import api; from webui.boards import catalogue; v=[(b, p['chip_pin'] is not None, p['modelled']) for b in catalogue.board_names() for p in api.pad_view(b, api.description_for(b), None)['pads']]; c=[b for b, named, m in v if named and not m]; u=[b for b, named, m in v if m and not named]; print(len(c), len(set(c)), len(u))"
+    -> 180 12 0
+
+So 180 pads on 12 boards carry a caption and are not modelled, and no pad is modelled without one. Those 180 are exactly the pads whose words moved, all from "no program running" to "not modelled". A scratch script applied unknownWords' rule to every pad, using chip_pin at f1c8623 and modelled at ee21ae0, both picked and running on a zero bus. The diff was 180 picked pads on 12 boards and 0 running pads. By board: XIAO-ESP32-S3-DIP 11, XIAO-ESP32-S3-SMD 17, XIAO-ESP32-S3-SMD_PAD 17, XIAO-MG24-DIP 19, XIAO-MG24-SMD 21, XIAO-XIAO STM32C5-SMD 2, XIAO-nRF52840-DIP 11, XIAO-nRF52840-SMD 13, XIAO-nRF54LM20A-DIP 10, XIAO-nRF54LM20A-SMD 30, XIAO-nRF54l15-DIP 11, XIAO-nRF54l15-SMD 18. Picked pads reading "no program running" went from 562 to 382. No board with a reader changed, which the design pass predicted and this measures.
+
+TESTS. Each one was red against f1c8623's api.py and board3d-panel.js and is green now.
+- tests/webui/test_pin_view.py test_a_pad_is_modelled_exactly_where_its_board_reads_a_level (new). On every catalogue board, picked, and also running wherever the board reads, each pad's `modelled` is a bool and equals `pad["pin"] in` what pin_levels answers on a zero bus. The XIAO-MG24-SMD's D0 is (PC0, False). Red before the change: KeyError 'modelled'. Mutations it kills: modelled = chip_pin is not None; a padless reader row with modelled False; a row pad without chip_index counted as modelled.
+- test_a_view_says_whether_any_levels_were_read_at_all (rewritten, OH-164). would_have_lied now asks for a pad that is unknown and modelled. silent is named: it is the twelve boards above, so the MG24 is now in silent and the Uno in would_have_lied. Red: KeyError. Kills: modelled = chip_pin is not None.
+- test_a_running_board_whose_module_reads_no_pins_still_says_one_is_running (one assertion added). A stub with PIN_NAMES and no pin_states models no pad. Red: KeyError. Kills: level_keys answering PIN_NAMES' keys whether or not a reader exists.
+- test_a_row_whose_chip_module_names_no_gpio_words_reports_no_levels (one assertion added). A row whose stand-in module names no GPIO words models no pad. Red: KeyError. Kills: level_keys' row branch without the words check.
+- tests/webui/test_board3d.py test_not_modelled_is_decided_by_the_modelled_flag_and_not_by_the_caption. It replaces test_the_two_sentences_are_told_apart_by_the_pin_and_not_by_a_guess, which asserted "chip_pin" in the chooser. The test extracts unknownWords and its three sentences from the panel and runs them under node on six pads. {modelled:false, chip_pin:"PC0"} gives "not modelled" both picked and running. {modelled:true, chip_pin:"GPIO2"} picked gives "no program running". {modelled:true} running gives "in use elsewhere". A pad carrying only chip_pin gives "not modelled" both ways. Red: three of the six were wrong against master. Kills: the chip_pin test restored, and `modelled === false`, which lets a pad without the field through.
+Seven mutations were run and all seven were killed. Every file was restored and checked by sha256.
+
+END TO END. python webui/emulator_server.py --port 8099 on loopback, driven with urllib, then stopped:
+
+    GET /api/board/pins?board=XIAO-MG24-SMD -> 200, read_levels false
+      {"label": "D0", "pin": "D0", "chip_pin": "PC0", "modelled": false, "state": "unknown"}
+      {"label": "GND", "pin": "GND", "chip_pin": null, "modelled": false, "state": "unknown"}
+    GET /api/board/pins?board=Arduino Uno -> 200, read_levels false
+      {"label": "13", "pin": "13", "chip_pin": "PB5", "modelled": true, "state": "unknown"}
+      {"label": "GND", "pin": "GND", "chip_pin": null, "modelled": false, "state": "unknown"}
+
+Nobody has looked at it in a browser.
+
+VERIFIED.
+- python tools/build_core.py built avr, cortexm0, i8086 and riscv32.
+- python -m pytest -q -p no:cacheprovider tests/webui/test_pin_view.py tests/webui/test_board3d.py: 148 passed, none skipped.
+- python tools/checkall.py: eleven rows PASS and "the test suites pass" FAIL. checkall cuts off pytest's output, so the failures are named from the full run below.
+- python -m pytest -q -p no:cacheprovider -rfE: 3 failed, 2650 passed, 41 skipped in 522.69s. Two of the failures are the OCP pair, test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert and test_the_tessellator_welds_what_it_meshes. The third, tests/webui/test_compile.py::test_a_failed_build_leaves_nothing_behind, found an openhardware-build-* directory in the shared temp folder while lane2 was building at the same time. It passed when run alone.
+
+LEFT, as the 2026-10-09 decision says: everything after slice 1. That is captions for EN, RUN, GND and other non-GPIO pins; moving the _CHIP_PIN_NAME gate; plural captions for supply nets; EN, RESET and RST leaving SUPPLY_LABELS; and how "not modelled" reads beside a named chip pin. The ticket stays in progress.
