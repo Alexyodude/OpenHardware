@@ -31,6 +31,7 @@ import re
 
 import pytest
 
+from tests.webui.esp32_timing import POLL, steps_per_millisecond
 from tools import board_manifest
 from webui import api
 from webui import compile as compiler
@@ -1377,8 +1378,7 @@ def test_delay_scales_with_its_argument_and_the_period_is_steady():
     The first rise counts. The counted loop this test was written for
     skipped it; on the timer the first period measures the same as the
     rest, and three rises is then two periods of steps rather than three."""
-    millisecond = esp32c3.SYSTIMER_INSTRUCTIONS_PER_TICK * (
-        esp32c3.SYSTIMER_HZ // 1000)
+    millisecond = steps_per_millisecond(esp32c3)
     one = c3_build(C3_BLINK)
     three = c3_build(C3_BLINK.replace("delay(1)", "delay(3)"))
     assert one.ok and three.ok
@@ -1702,8 +1702,7 @@ def test_the_c5_and_c6_delay_is_steady_and_scales(board):
     and not for one period: the counted loop this test was written for
     repeated exactly, and on the C5 the timer does not."""
     description, gpio = OPENHARDWARE_BOARDS[board]
-    millisecond = description.SYSTIMER_INSTRUCTIONS_PER_TICK * (
-        description.SYSTIMER_HZ // 1000)
+    millisecond = steps_per_millisecond(description)
     one = oh_build(board, C3_BLINK)
     three = oh_build(board, C3_BLINK.replace("delay(1)", "delay(3)"))
     assert one.ok and three.ok
@@ -1984,15 +1983,6 @@ void loop() {
 }
 """
 
-#: How far one toggle may land from the step the rate predicts. **Measured,
-#: not chosen** (2026-10-09): the sketches above poll in a loop of 26 to 35
-#: instructions, so a toggle lands up to one loop late and a period between
-#: two of them wanders by less than that -- 159,998 steps every period on a
-#: C3 and a C6, 240,008 and 239,973 on a C5, 16,005 and 15,979 by micros.
-#: Three loops of margin; a rate wrong by one instruction a tick is off by
-#: 16,000 a millisecond.
-POLL = 100
-
 
 def toggles(board: str, source: str, count: int, budget: int) -> list[int]:
     """Build `source` for `board`, run it, and return the steps at which its
@@ -2027,8 +2017,7 @@ def test_a_sketch_timed_by_millis_toggles_at_the_rate_its_description_states():
     another rate, a header naming a neighbour's SYSTIMER, or a `millis()`
     dividing wrongly all land somewhere else."""
     for board, (description, _gpio) in sorted(TIMED_BOARDS.items()):
-        millisecond = description.SYSTIMER_INSTRUCTIONS_PER_TICK * (
-            description.SYSTIMER_HZ // 1000)
+        millisecond = steps_per_millisecond(description)
         steps = toggles(board, BY_MILLIS, 4, 5 * millisecond)
         assert len(steps) == 4, f"{board}: D10 moved at steps {steps}"
         assert millisecond <= steps[0] < millisecond + POLL, (board, steps)
@@ -2090,8 +2079,7 @@ def test_a_delay_timed_by_millis_lasts_the_milliseconds_it_asked_for():
         needs_toolchain(board)
         built = oh_build(board, DELAY_BY_MILLIS)
         assert built.ok, built.diagnostics
-        millisecond = description.SYSTIMER_INSTRUCTIONS_PER_TICK * (
-            description.SYSTIMER_HZ // 1000)
+        millisecond = steps_per_millisecond(description)
         budget = 5 * millisecond + DELAY_PRINTED
         with api.load_firmware(board, built.image,
                                base=compiler.recipe_for(board).base) as session:
@@ -2130,8 +2118,7 @@ def test_a_delay_in_microseconds_timed_by_micros_lasts_what_it_asked_for():
         needs_toolchain(board)
         built = oh_build(board, DELAY_US_BY_MICROS)
         assert built.ok, built.diagnostics
-        millisecond = description.SYSTIMER_INSTRUCTIONS_PER_TICK * (
-            description.SYSTIMER_HZ // 1000)
+        millisecond = steps_per_millisecond(description)
         budget = 1250 * millisecond // 1000 + DELAY_PRINTED
         with api.load_firmware(board, built.image,
                                base=compiler.recipe_for(board).base) as session:
@@ -2169,8 +2156,7 @@ def test_a_late_poll_does_not_push_the_next_millisecond_later():
     needs_toolchain(C3_BOARD)
     built = oh_build(C3_BOARD, LONG_DELAY_BY_MICROS)
     assert built.ok, built.diagnostics
-    millisecond = esp32c3.SYSTIMER_INSTRUCTIONS_PER_TICK * (esp32c3.SYSTIMER_HZ // 1000)
-    budget = 50 * millisecond + DELAY_PRINTED
+    budget = 50 * steps_per_millisecond(esp32c3) + DELAY_PRINTED
     with api.load_firmware(C3_BOARD, built.image,
                            base=compiler.recipe_for(C3_BOARD).base) as session:
         session.step(budget)

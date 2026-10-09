@@ -23,7 +23,7 @@ import re
 
 import pytest
 
-from tests.webui.test_compile import POLL
+from tests.webui.esp32_timing import POLL, steps_per_millisecond
 from tools import board_manifest, import_pindefs
 from webui import api, pinmap
 from webui import compile as compiler
@@ -37,15 +37,15 @@ IMAGE = HERE / "sparkfun_esp32c5" / "sparkfun_c5_blink.bin"
 GPIO_OUT = esp32c5.GPIO + esp32c5.GPIO_OUT
 GPIO_ENABLE = esp32c5.GPIO + esp32c5.GPIO_ENABLE
 
-#: A millisecond in steps, read from the description and not written here:
-#: `SYSTIMER_HZ // 1000` ticks of `SYSTIMER_INSTRUCTIONS_PER_TICK` steps,
-#: more of them a tick than on a C3 or a C6 at this board's 240 MHz.
+#: A millisecond in steps, read from the description by
+#: `esp32_timing.steps_per_millisecond` and not written here: more steps a
+#: tick than on a C3 or a C6, at this board's 240 MHz.
 #: delay() waits on SYSTIMER since OH-161
 #: (`webui/arduino/cores/openhardware/wiring.c`), so each move of a delay(1)
 #: blink comes a millisecond, and the write and the poll around it, after
 #: the one before -- held to within `POLL`, as test_compile's delay tests
 #: hold each delay(n).
-MILLISECOND = esp32c5.SYSTIMER_INSTRUCTIONS_PER_TICK * (esp32c5.SYSTIMER_HZ // 1000)
+MILLISECOND = steps_per_millisecond(esp32c5)
 
 #: Measured 2026-10-09 over fifty moves of this image: the gaps between them
 #: take four lengths, 240,035, 240,041, 240,047 and 240,053 steps, and the

@@ -24,7 +24,7 @@ import pathlib
 
 import pytest
 
-from tests.webui.test_compile import POLL
+from tests.webui.esp32_timing import POLL, steps_per_millisecond
 from tools import board_manifest, import_pindefs
 from webui import api, pinmap
 from webui import compile as compiler
@@ -38,14 +38,14 @@ IMAGE = HERE / "pcbcupid_glyph_c3" / "glyph_c3_blink.bin"
 GPIO_OUT = esp32c3.GPIO + esp32c3.GPIO_OUT
 GPIO_ENABLE = esp32c3.GPIO + esp32c3.GPIO_ENABLE
 
-#: A millisecond in steps, read from the description and not written here:
-#: `SYSTIMER_HZ // 1000` ticks of `SYSTIMER_INSTRUCTIONS_PER_TICK` steps.
+#: A millisecond in steps, read from the description by
+#: `esp32_timing.steps_per_millisecond` and not written here.
 #: delay() waits on SYSTIMER since OH-161
 #: (`webui/arduino/cores/openhardware/wiring.c`), so each move of a delay(1)
 #: blink comes a millisecond, and the write and the poll around it, after
 #: the one before -- held to within `POLL`, as test_compile's delay tests
 #: hold each delay(n).
-MILLISECOND = esp32c3.SYSTIMER_INSTRUCTIONS_PER_TICK * (esp32c3.SYSTIMER_HZ // 1000)
+MILLISECOND = steps_per_millisecond(esp32c3)
 
 #: Measured 2026-10-09 over fifty moves of this image: the gaps between them
 #: take three lengths, 160,043, 160,049 and 160,055 steps, and the longest
