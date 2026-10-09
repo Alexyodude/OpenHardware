@@ -99,6 +99,19 @@ MulDivResult MulDiv(MulDivKind kind, std::uint16_t ax, std::uint16_t dx,
             const std::int32_t dividend =
                 wide ? static_cast<std::int32_t>((static_cast<std::uint32_t>(dx) << 16) | ax)
                      : static_cast<std::int32_t>(static_cast<std::int16_t>(ax));
+            // INT32_MIN / -1 is the one quotient that does not fit the host's
+            // int32_t either, so it is answered before dividing, not after:
+            // the divide (and the % beside it) is undefined behaviour in C++,
+            // and on x64 the host's own idiv faults -- SIGFPE on Linux,
+            // STATUS_INTEGER_OVERFLOW on Windows -- in the process that loaded
+            // this core. The part raises a divide error, because +2^31 does
+            // not fit in 16 bits, exactly as the range check below does for
+            // every other quotient out of range. Only the word form reaches
+            // it: a byte dividend is a sign-extended 16-bit value, and
+            // -32768 / -1 fits. OH-222.
+            if (dividend == INT32_MIN && divisor == -1) {
+                return {ax, dx, true};
+            }
             // C++ truncates towards zero and so does the part, so the
             // remainder takes the dividend's sign in both.
             const std::int32_t quotient = dividend / divisor;
