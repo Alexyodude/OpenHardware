@@ -3194,6 +3194,10 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
         for (ax, ay), (bx, by) in itertools.pairwise(points):
             silk.append(eagle.Stroke(curve.layer, ax, -ay, bx, -by,
                                      curve.width_mm))
+    # A filled polygon of ink crosses point by point, y negated (OH-163).
+    fills = tuple(eagle.Fill(fill.layer, tuple((x, -y) for x, y in fill.points),
+                             fill.width_mm)
+                  for fill in board.silk_fills)
     # The routed copper crosses the same way, and its curves are flattened
     # here rather than in the reader: solving an arc's centre from three
     # points is `arc_points`, which the outline already needs.
@@ -3208,7 +3212,8 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
     vias = tuple(eagle.Via(v.x_mm, -v.y_mm, v.diameter_mm) for v in board.vias)
     return eagle.Board(name=path.stem, version="kicad_pcb",
                        elements=tuple(elements), outline=tuple(outline),
-                       silk=tuple(silk), silk_unread=board.silk_unread,
+                       silk=tuple(silk), silk_fills=fills,
+                       silk_unread=board.silk_unread,
                        # In KiCad's frame, as `eagle.Board.kicad_text` says:
                        # `letter` lays text out where KiCad does (OH-163).
                        kicad_text=board.text,
@@ -3349,40 +3354,95 @@ def _area(ring: list[tuple[float, float]]) -> float:
 
 
 def ear_clip(ring: list[tuple[float, float]]) -> list[tuple[int, int, int]]:
-    """Triangulate a simple polygon by clipping ears.
+    """Triangulate a weakly simple polygon by clipping ears.
 
     The Uno's outline is not convex -- the notch on its right edge is the
     point -- so a fan from one vertex would put triangles outside the board.
     Ear clipping handles any simple polygon and needs no library, which is the
     same reasoning `tools/import_3d_model.py` gives for hand-writing its glTF.
+
+    **And a weakly simple one: a ring that touches itself and never crosses**
+    (OH-163). It is how KiCad and EAGLE write a filled glyph with a hole --
+    an "o" is one outline that walks in along a bridge, round the counter the
+    other way and back out along the same bridge -- and how PCBCUPID's labels
+    pinch two strokes at a corner or run a spike out and back. Each is filled
+    as the vendor's own plot fills it, the region an even-odd ray finds
+    inside, which leaves a counter open because the bridge into it is crossed
+    twice. Three things make that so, and none changes a simple polygon's
+    triangles, so a board's slab is what it was:
+
+      * an ear that no other vertex touches is clipped first, as it always
+        was; only when none is left is a vertex that touches the triangle --
+        a keyhole's or a pinch's second visit to a corner -- weighed by where
+        its own edges go, see `_is_touched_ear`;
+      * a vertex at which the ring runs straight on, or turns straight back,
+        encloses nothing, and is dropped where no ear is left;
+      * a ring two of whose edges cross is refused before any of that,
+        naming them: what it fills depends on a rule the drawing does not
+        state. So is one with no ear and nothing to drop.
+
+    A triangle of no area is not returned.
     """
+    crossed = _crossed_edges(ring)
+    if crossed is not None:
+        (a, b), (c, d) = crossed
+        raise ValueError(
+            f"a {len(ring)}-vertex ring crosses itself, {a}-{b} against "
+            f"{c}-{d}, so it is not a weakly simple polygon")
     order = list(range(len(ring)))
     if _area(ring) < 0:
         order.reverse()
     triangles: list[tuple[int, int, int]] = []
-    guard = 0
     while len(order) > 3:
-        guard += 1
-        if guard > len(ring) * len(ring):
-            raise ValueError(
-                f"no ear found in a {len(order)}-vertex remainder; the outline "
-                f"is not a simple polygon"
-            )
-        for at in range(len(order)):
-            prev = order[at - 1]
-            here = order[at]
-            nxt = order[(at + 1) % len(order)]
-            if not _is_ear(ring, prev, here, nxt, order):
-                continue
-            triangles.append((prev, here, nxt))
+        corners = [(order[at - 1], order[at], order[(at + 1) % len(order)])
+                   for at in range(len(order))]
+        at = next((at for is_ear in (_is_ear, _is_touched_ear)
+                   for at, (prev, here, nxt) in enumerate(corners)
+                   if is_ear(ring, prev, here, nxt, order)), None)
+        if at is not None:
+            triangles.append(corners[at])
             order.pop(at)
-            break
-    triangles.append((order[0], order[1], order[2]))
+            continue
+        at = next((at for at, (prev, here, nxt) in enumerate(corners)
+                   if _cross(ring[prev], ring[here], ring[nxt]) == 0), None)
+        if at is None:
+            raise ValueError(
+                f"no ear found in a {len(order)}-vertex remainder of a "
+                f"{len(ring)}-vertex ring, from {ring[order[0]]}; it is not a "
+                f"weakly simple polygon")
+        order.pop(at)
+    if _cross(*(ring[index] for index in order)) != 0:
+        triangles.append((order[0], order[1], order[2]))
     return triangles
 
 
 def _cross(o, a, b) -> float:
     return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+
+def _crossed_edges(ring: list[tuple[float, float]]
+                   ) -> tuple[tuple[tuple[float, float], tuple[float, float]],
+                              tuple[tuple[float, float], tuple[float, float]]] | None:
+    """Two edges of `ring` that cross each other, each as its two ends, or None.
+
+    Crossing is each edge's ends strictly either side of the other's line.
+    Touching is not crossing: two edges sharing an end, a vertex on an edge,
+    and an edge walked twice -- a keyhole's bridge -- all put a zero among
+    the four sides. Edges are swept in order of their least x, so each is
+    held only against those its x-extent reaches.
+    """
+    edges = [(ring[at], ring[(at + 1) % len(ring)]) for at in range(len(ring))]
+    edges.sort(key=lambda edge: min(edge[0][0], edge[1][0]))
+    for at, (a, b) in enumerate(edges):
+        reach = max(a[0], b[0])
+        for c, d in edges[at + 1:]:
+            if min(c[0], d[0]) > reach:
+                break
+            sides = (_cross(c, d, a), _cross(c, d, b), _cross(a, b, c), _cross(a, b, d))
+            if (0 not in sides and (sides[0] > 0) != (sides[1] > 0)
+                    and (sides[2] > 0) != (sides[3] > 0)):
+                return (a, b), (c, d)
+    return None
 
 
 def _is_ear(ring, prev: int, here: int, nxt: int, order: list[int]) -> bool:
@@ -3398,6 +3458,49 @@ def _is_ear(ring, prev: int, here: int, nxt: int, order: list[int]) -> bool:
                 and _cross(ring[nxt], ring[prev], point) >= 0):
             return False
     return True
+
+
+def _is_touched_ear(ring, prev: int, here: int, nxt: int, order: list[int]) -> bool:
+    """Convex at `here`, and the triangle it cuts off is inside the ring and
+    crossed by none of it, though a vertex may touch it.
+
+    `_is_ear` refuses any vertex on the triangle, and in a weakly simple ring
+    one always is: a keyhole visits each end of its bridge twice, so every
+    ear at either end has the other visit sitting on its corner. Touching is
+    allowed here and entering is not: no vertex strictly inside, and none on
+    the triangle's edge or corner whose own edge leaves it INTO the triangle.
+    In a ring that does not cross itself nothing else can reach the inside,
+    so the inside is wholly in the ring or wholly out of it, and its centroid
+    says which -- by the even-odd ray `point_in` casts across what is left of
+    the ring. That last is not a formality: where edges are walked twice the
+    two sides of an edge can both be outside, and a pinch, whose two visits
+    each turn the long way round, offers a triangle across it that is convex
+    at the corner and outside both strokes.
+    """
+    a, b, c = ring[prev], ring[here], ring[nxt]
+    if _cross(a, b, c) <= 0:
+        return False
+    sides_of = ((b[0] - a[0], b[1] - a[1]), (c[0] - b[0], c[1] - b[1]),
+                (a[0] - c[0], a[1] - c[1]))
+    for at, other in enumerate(order):
+        if other in (prev, here, nxt):
+            continue
+        point = ring[other]
+        sides = (_cross(a, b, point), _cross(b, c, point), _cross(c, a, point))
+        if min(sides) < 0:
+            continue
+        if min(sides) > 0:
+            return False
+        # On the triangle: each side it lies on must not have this vertex's
+        # edge leave it inward -- on a corner, both sides, which is the
+        # corner's own angle.
+        for towards in (ring[order[at - 1]], ring[order[(at + 1) % len(order)]]):
+            step = (towards[0] - point[0], towards[1] - point[1])
+            if all(side[0] * step[1] - side[1] * step[0] > 0
+                   for side, on in zip(sides_of, sides) if on == 0):
+                return False
+    return point_in([ring[index] for index in order],
+                    ((a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3))
 
 
 def slab(ring: list[tuple[float, float]], thickness: float, colour: str,
@@ -5607,6 +5710,12 @@ EAGLE_TEXT = ("EAGLE's CAM processor draws all text in EAGLE's built-in "
               "newstroke would be a different font")
 
 
+#: Why a filled polygon of ink is not drawn: `ear_clip` refused it, finding
+#: it crosses itself -- so what it fills depends on a rule its drawing does
+#: not state -- or finding no ear in it. The `not ink` line's key (OH-163).
+FILL_REFUSED = "fill not weakly simple"
+
+
 def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             thickness: float, centre: tuple[float, float], mask: str,
             letters: list[eagle.Stroke]
@@ -5725,6 +5834,36 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             ink.append(cut)
             text_front += 1
 
+    #: Filled ink -- Seeed's logo glyph by glyph, PCBCUPID's and SparkFun's
+    #: labels -- as `ear_clip` fills each polygon, its counters left open,
+    #: and its outline traced at the pen the file states, as the vendor's
+    #: plot traces it (OH-163). Every triangle and stroke is cut to the board
+    #: as all ink is. A polygon `ear_clip` refuses is counted under
+    #: `FILL_REFUSED`, which `compose` prints on the `not ink` line.
+    fill_front: list[list[tuple[float, float]]] = []
+    fill_back: list[list[tuple[float, float]]] = []
+    filled = {"fill front": 0, "fill back": 0}
+    for fill in board.silk_fills:
+        points = list(fill.points)
+        try:
+            triangles = ear_clip(points)
+        except ValueError:
+            left[FILL_REFUSED] = left.get(FILL_REFUSED, 0) + 1
+            continue
+        shapes = [[points[a], points[b], points[c]] for a, b, c in triangles]
+        if fill.width_mm > 0:
+            # A repeated point traces nothing, so `stroke_outline` gives None.
+            shapes += [shape for start, end in zip(points, points[1:] + points[:1])
+                       if (shape := stroke_outline(eagle.Stroke(
+                           fill.layer, *start, *end, fill.width_mm))) is not None]
+        cuts = [cut for shape in shapes if len(cut := inside(shape)) >= 3]
+        if not cuts:
+            left["fill off the board"] = left.get("fill off the board", 0) + 1
+            continue
+        back_side = fill.layer.startswith("B.")
+        (fill_back if back_side else fill_front).extend(cuts)
+        filled["fill back" if back_side else "fill front"] += 1
+
     #: The routing, and it is drawn in the board's OWN mask warmed toward the
     #: metal rather than in bare copper: a trace is under the soldermask and a
     #: pad is not, and drawing both gold is a picture of a board with no mask
@@ -5758,16 +5897,16 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
     routed = mask_over_copper(mask)
     return ([flat(track + holes, thickness + TRACE_PROUD_MM, routed, centre, True),
              flat(front, thickness + COPPER_THICKNESS_MM, COPPER, centre, True),
-             flat(ink, thickness + COPPER_THICKNESS_MM + SILK_THICKNESS_MM,
+             flat(ink + fill_front, thickness + COPPER_THICKNESS_MM + SILK_THICKNESS_MM,
                   SILKSCREEN, centre, True),
              flat(track_back + holes, -TRACE_PROUD_MM, routed, centre, False),
              flat(back, -COPPER_THICKNESS_MM, COPPER, centre, False),
-             flat(ink_back, -COPPER_THICKNESS_MM - SILK_THICKNESS_MM,
+             flat(ink_back + fill_back, -COPPER_THICKNESS_MM - SILK_THICKNESS_MM,
                   SILKSCREEN, centre, False)],
             {"pads front": len(front), "pads back": len(back),
              "ink front": len(ink) - text_front,
              "ink back": len(ink_back) - text_back,
-             "text front": text_front, "text back": text_back,
+             "text front": text_front, "text back": text_back, **filled,
              "track front": len(track), "track back": len(track_back),
              "vias": len(holes),
              "clipped to the outline": int(can_clip), **left},
@@ -5843,11 +5982,16 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     drawn_art, tally, undrawn_pads = artwork(board, ring, spec.thickness_mm,
                                              centre, spec.colour, letters)
     pieces.extend(drawn_art)
+    # A fill the triangulator refused is ink the file carries and this does
+    # not draw, so it is counted with the rest of that (OH-163).
+    refused_fills = tally.pop(FILL_REFUSED, 0)
     print("  artwork " + ", ".join(f"{k} {v}" for k, v in tally.items()))
     # **Text the file hides is not a gap**: KiCad plots none of it either,
     # so it is counted on its own line and under its own key, and `not ink`
     # is only what a vendor's plot has and this model lacks.
     unread_ink = dict(board.silk_unread)
+    if refused_fills:
+        unread_ink[FILL_REFUSED] = refused_fills
     hidden = unread_ink.pop("hidden text", 0)
     if unread_ink:
         print("  not ink " + ", ".join(f"{k} {v}" for k, v in unread_ink.items()))

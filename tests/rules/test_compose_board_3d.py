@@ -239,6 +239,114 @@ def test_the_slab_is_the_outline_and_not_its_bounding_box():
     )
 
 
+def _fills_exactly(ring, triangles, probes) -> list:
+    """What is wrong with `triangles` as a fill of `ring`, or [] if nothing.
+
+    Held two ways, neither borrowed from the triangulator: every triangle
+    winds forward and their areas sum to the ring's own by the shoelace
+    formula; and each probe point is under a triangle exactly where an
+    even-odd ray from it crosses the ring an odd number of times -- which,
+    for a keyhole, leaves the counter open, because the bridge into it is
+    crossed twice. A probe on a triangle's own edge counts as under it.
+
+    The shoelace sum is taken about the ring's first point: a glyph of a few
+    hundred square microns placed 100 mm from the origin loses its area to
+    rounding in the plain formula's products."""
+    wrong = []
+    areas = [compose._cross(ring[a], ring[b], ring[c]) / 2 for a, b, c in triangles]
+    if not areas or min(areas) <= 0:
+        wrong.append(("a triangle of no area or wound backwards", min(areas, default=None)))
+    shoelace = abs(sum(compose._cross(ring[0], a, b)
+                       for a, b in itertools.pairwise(ring[1:]))) / 2
+    if sum(areas) != pytest.approx(shoelace, rel=1e-9, abs=1e-12):
+        wrong.append(("area", sum(areas), shoelace))
+
+    def under(point) -> bool:
+        return any(min(compose._cross(ring[a], ring[b], point), compose._cross(ring[b], ring[c], point),
+                       compose._cross(ring[c], ring[a], point)) >= 0 for a, b, c in triangles)
+
+    for point in probes:
+        if under(point) != compose.point_in(ring, point):
+            wrong.append(("probe", point, under(point)))
+    return wrong
+
+
+def _grid(width: float, height: float) -> list[tuple[float, float]]:
+    """Probe points over a shape drawn on whole millimetres, each off every
+    line through two of its corners, so none sits on an edge."""
+    return [(x + 0.37, y + 0.61) for x in range(-1, int(width) + 1)
+            for y in range(-1, int(height) + 1)]
+
+
+#: An "O": a 10 mm square with a 4 mm counter, walked as KiCad writes a glyph
+#: with a hole -- out along a bridge from (10, 5), round the counter the other
+#: way, and back along the same bridge.
+_O = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (7.0, 5.0), (7.0, 3.0), (3.0, 3.0),
+      (3.0, 7.0), (7.0, 7.0), (7.0, 5.0), (10.0, 5.0), (10.0, 10.0), (0.0, 10.0)]
+
+
+def test_a_keyhole_glyph_is_filled_with_its_counter_left_open():
+    """**A glyph with a hole is one outline that walks into its counter and
+    back** (OH-163): KiCad and EAGLE both write an "o" so, two points
+    repeated and the bridge between them walked once each way. `ear_clip`
+    raised on it -- no ear, it said, the polygon not simple -- so Seeed's
+    logo and every PCBCUPID and SparkFun label went undrawn. It fills the
+    84 mm^2 the "O" encloses and not the counter's 16, whichever way round
+    the ring runs and from whichever vertex, the bridge first or last."""
+    for ring in (_O, _O[::-1], _O[3:] + _O[:3], (_O[8:] + _O[:8])[::-1]):
+        triangles = compose.ear_clip(ring)
+        assert not _fills_exactly(ring, triangles, _grid(10, 10)), (
+            ring[0], _fills_exactly(ring, triangles, _grid(10, 10)))
+        assert sum(compose._cross(ring[a], ring[b], ring[c]) for a, b, c in triangles) / 2 == (
+            pytest.approx(84.0))
+
+
+def test_a_ring_with_two_holes_is_filled_around_both():
+    """Two counters, each bridged from the bottom edge -- a "B", or a pair
+    of SparkFun's letters joined as one polygon. 200 mm^2 less two of 16."""
+    ring = [(0.0, 0.0), (5.0, 0.0), (5.0, 3.0), (3.0, 3.0), (3.0, 7.0), (7.0, 7.0),
+            (7.0, 3.0), (5.0, 3.0), (5.0, 0.0), (15.0, 0.0), (15.0, 3.0), (13.0, 3.0),
+            (13.0, 7.0), (17.0, 7.0), (17.0, 3.0), (15.0, 3.0), (15.0, 0.0), (20.0, 0.0),
+            (20.0, 10.0), (0.0, 10.0)]
+    for walked in (ring, ring[::-1]):
+        triangles = compose.ear_clip(walked)
+        assert not _fills_exactly(walked, triangles, _grid(20, 10)), _fills_exactly(
+            walked, triangles, _grid(20, 10))
+        assert sum(compose._cross(walked[a], walked[b], walked[c])
+                   for a, b, c in triangles) / 2 == pytest.approx(168.0)
+
+
+def test_a_pinch_and_a_spike_cover_only_what_they_enclose():
+    """**The two other ways a vendor's outline touches itself**, both on
+    PCBCUPID's labels: two squares meeting at one corner, walked as one
+    ring through it twice; and a spike, out to a point and straight back.
+    A pinch's two visits each turn the long way round, so a triangle across
+    it can look like an ear at either and is outside both squares; a spike
+    encloses nothing and must add nothing."""
+    pinch = [(4.0, 4.0), (4.0, 2.0), (2.0, 2.0), (2.0, 0.0), (0.0, 0.0), (0.0, 2.0),
+             (2.0, 2.0), (2.0, 4.0)]
+    triangles = compose.ear_clip(pinch)
+    assert not _fills_exactly(pinch, triangles, _grid(4, 4)), _fills_exactly(
+        pinch, triangles, _grid(4, 4))
+    spike = [(0.0, 0.0), (6.0, 0.0), (6.0, 3.0), (9.0, 3.0), (6.0, 3.0), (6.0, 6.0), (0.0, 6.0)]
+    triangles = compose.ear_clip(spike)
+    assert not _fills_exactly(spike, triangles, _grid(9, 6)), _fills_exactly(
+        spike, triangles, _grid(9, 6))
+    assert sum(compose._cross(spike[a], spike[b], spike[c]) for a, b, c in triangles) / 2 == (
+        pytest.approx(36.0))
+
+
+def test_a_ring_that_crosses_itself_is_refused_naming_where():
+    """**A ring two of whose edges cross is no outline at all**: what it
+    fills depends on a rule -- even-odd or non-zero -- that the drawing does
+    not state, so it is refused and the two edges named, never filled by
+    one rule or the other. Six of SparkFun's letter polygons are this, each
+    an edge back from a counter that misses its own bridge by 0.01 mm."""
+    bow = [(0.0, 0.0), (4.0, 4.0), (4.0, 0.0), (0.0, 4.0)]
+    with pytest.raises(ValueError, match=r"cross.*\(0\.0, 0\.0\)-\(4\.0, 4\.0\)"):
+        compose.ear_clip(bow)
+
+
 # --- the correspondence -----------------------------------------------------------
 
 
@@ -2678,10 +2786,10 @@ def test_a_stroke_with_no_length_or_no_width_is_not_ink():
 
 def test_the_silkscreen_says_what_it_could_not_draw():
     """A caption hiding what it left out would be worse than one that names
-    it. Text was unread until OH-163, and an arc until its step 3; both are
-    read now, for the composer to letter and to flatten, and what stays
-    unread is named: the text the file hides, and the circles and polygons,
-    each counted by kind."""
+    it. Text was unread until OH-163, an arc until its step 3, and a filled
+    polygon until the slice after; all are read now, for the composer to
+    letter, to flatten and to fill, and what stays unread is named: the text
+    the file hides, and the circles, each counted by kind."""
     spec = next(s for s in compose.COMPOSITIONS if s.pcb_chip == "RP2350")
     if not spec.layout.is_file():
         pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
@@ -2690,6 +2798,222 @@ def test_the_silkscreen_says_what_it_could_not_draw():
     assert "text" not in unread and unread.get("hidden text", 0) > 0, unread
     assert len(board.kicad_text) >= 40, len(board.kicad_text)
     assert board.silk, "the strokes it CAN draw are drawn"
+
+
+def _fill_layouts():
+    """Each fetched composed board file once, by its first composition."""
+    specs = {}
+    for spec in compose.COMPOSITIONS:
+        if spec.layout.is_file():
+            specs.setdefault(spec.layout, spec)
+    if not specs:
+        pytest.skip("SKIPPED: no composed board file is fetched; run "
+                    "python tools/compose_board_3d.py")
+    return list(specs.values())
+
+
+def _crosses(ring) -> bool:
+    """Whether two edges of `ring` cross, held pair by pair -- slower than
+    the composer's sweep, and not borrowed from it."""
+    for i, j in itertools.combinations(range(len(ring)), 2):
+        a, b = ring[i], ring[(i + 1) % len(ring)]
+        c, d = ring[j], ring[(j + 1) % len(ring)]
+        sides = (compose._cross(c, d, a), compose._cross(c, d, b),
+                 compose._cross(a, b, c), compose._cross(a, b, d))
+        if 0 not in sides and (sides[0] > 0) != (sides[1] > 0) and (sides[2] > 0) != (sides[3] > 0):
+            return True
+    return False
+
+
+def test_every_filled_polygon_of_ink_is_filled_to_its_own_area():
+    """**Every filled polygon on a composed board's silkscreen is filled as
+    its vendor's plot fills it, or refused because it crosses itself**
+    (OH-163). None was drawn before: Seeed's logo on the RP2350 and the C5,
+    PCBCUPID's labels, Olimex's logo and open-hardware mark, the Thing Plus
+    C5's labels, SparkFun's EAGLE letters. Each `ear_clip` fills sums to its
+    own shoelace area, every triangle wound forward; on each that touches
+    itself -- a keyhole, a pinch, a spike -- seeded probes are under a
+    triangle exactly where the even-odd rule puts them inside; and each it
+    refuses has two edges that cross, found here pair by pair. The keyholes
+    step 3 measured are counted among those filled, board by board."""
+    import random
+
+    probe = random.Random(163)
+    tally: dict[str, dict[str, int]] = {}
+    for spec in _fill_layouts():
+        counts = tally.setdefault(spec.board, {})
+        for fill in compose.read_layout(spec.layout).silk_fills:
+            ring = list(fill.points)
+            try:
+                triangles = compose.ear_clip(ring)
+            except ValueError:
+                assert _crosses(ring), (spec.board, ring[:4])
+                counts["crossing"] = counts.get("crossing", 0) + 1
+                continue
+            touching = len(set(ring)) < len(ring)
+            xs, ys = [x for x, _y in ring], [y for _x, y in ring]
+            probes = [(probe.uniform(min(xs), max(xs)), probe.uniform(min(ys), max(ys)))
+                      for _ in range(25 if touching else 0)]
+            wrong = _fills_exactly(ring, triangles, probes)
+            assert not wrong, (spec.board, len(ring), wrong[:3])
+            kind = "touching" if touching else "simple"
+            counts[kind] = counts.get(kind, 0) + 1
+    measured = {"XIAO-RP2350-DIP": 6, "XIAO-ESP32-C5-DIP": 6, "PCBCUPID Glyph Mini RP2040": 3,
+                "PCBCUPID Glyph C3": 78, "PCBCUPID Glyph C6": 78,
+                "Olimex ESP32-C3-DevKit-Lipo": 6, "SparkFun Thing Plus ESP32-C5": 192}
+    seen = {board: tally[board].get("touching", 0) for board in measured if board in tally}
+    assert seen and seen == {board: measured[board] for board in seen}, tally
+
+
+def test_an_eagle_silkscreen_polygon_is_read_as_a_fill_where_its_element_puts_it(tmp_path):
+    """**SparkFun letter their EAGLE labels as `<polygon>`s on tPlace, a
+    keyhole for every letter with a counter** (OH-163), and the reader
+    counted them and dropped them. Read now as fills, every vertex placed as
+    a wire's ends are -- turned with its element, mirrored with one at MR
+    and moved to the other face -- with the polygon's width as its pen; a
+    board-level polygon as drawn. A polygon with a curved edge, or poured
+    other than solid, stays counted; one on tDocu is no ink at all."""
+    path = tmp_path / "inked.brd"
+    path.write_text(
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<eagle version="9.6.2"><drawing><board>'
+        '<plain><wire x1="0" y1="0" x2="20" y2="0" width="0.2" layer="20"/>'
+        '<polygon width="0" layer="22"><vertex x="1" y="1"/><vertex x="2" y="1"/>'
+        '<vertex x="2" y="2"/></polygon></plain>'
+        '<libraries><library name="L"><packages><package name="P">'
+        '<pad name="1" x="0" y="0" drill="1.016" diameter="1.8796"/>'
+        '<polygon width="0.01" layer="21"><vertex x="1" y="0"/><vertex x="3" y="0"/>'
+        '<vertex x="3" y="1"/></polygon>'
+        '<polygon width="0.15" layer="21"><vertex x="0" y="0" curve="90"/>'
+        '<vertex x="1" y="0"/><vertex x="1" y="1"/></polygon>'
+        '<polygon width="0" layer="21" pour="hatch"><vertex x="0" y="0"/>'
+        '<vertex x="1" y="0"/><vertex x="1" y="1"/></polygon>'
+        '<polygon width="0" layer="51"><vertex x="0" y="0"/><vertex x="1" y="0"/>'
+        '<vertex x="1" y="1"/></polygon>'
+        "</package></packages></library></libraries>"
+        "<elements>"
+        '<element name="A" library="L" package="P" x="10" y="5" rot="R90"/>'
+        '<element name="B" library="L" package="P" x="10" y="5" rot="MR0"/>'
+        "</elements><signals/>"
+        "</board></drawing></eagle>",
+        encoding="utf-8",
+    )
+    board = eagle.read_board(path)
+    got = [(fill.layer, tuple((round(x, 9), round(y, 9)) for x, y in fill.points),
+            fill.width_mm) for fill in board.silk_fills]
+    # (1, 0) turned a quarter about (10, 5) is (10, 6); mirrored, (9, 5).
+    assert got == [
+        ("B.SilkS", ((1.0, 1.0), (2.0, 1.0), (2.0, 2.0)), 0.0),
+        ("F.SilkS", ((10.0, 6.0), (10.0, 8.0), (9.0, 8.0)), 0.01),
+        ("B.SilkS", ((9.0, 5.0), (7.0, 5.0), (7.0, 6.0)), 0.01),
+    ], got
+    assert dict(board.silk_unread) == {"polygon": 4}, board.silk_unread
+
+
+def _faces(mesh, colour) -> list[tuple[tuple[float, float], ...]]:
+    """Each triangle of `colour` in `mesh`, as board points: the scene's x,
+    and its z negated back to the board's y."""
+    positions, _normals, indices = mesh.groups[colour]
+    point = [(positions[at], -positions[at + 2]) for at in range(0, len(positions), 3)]
+    return [tuple(point[index] for index in indices[at:at + 3])
+            for at in range(0, len(indices), 3)]
+
+
+def test_a_fill_is_drawn_as_ink_with_its_counter_open_and_its_pen_traced():
+    """**The artwork pass draws each fill as `ear_clip` fills it** (OH-163),
+    on its own face, cut to the board like all ink: the "O"'s ink covers its
+    84 mm^2 and leaves the counter bare; a back-side square drawn with a
+    0.5 mm pen is traced a quarter millimetre outside its edge, as the
+    vendor's plot traces a polygon's outline, and -- every stroke here being
+    the rectangle its width sweeps -- not round its corners. A fill that
+    crosses itself is counted under `FILL_REFUSED`, and one wholly beside
+    the board is counted too, neither drawn."""
+    board = eagle.Board("inked", "test", (), (), silk_fills=(
+        eagle.Fill("F.SilkS", tuple(_O), 0.0),
+        eagle.Fill("B.SilkS", ((2.0, 2.0), (4.0, 2.0), (4.0, 4.0), (2.0, 4.0)), 0.5),
+        eagle.Fill("F.SilkS", ((0.0, 0.0), (4.0, 4.0), (4.0, 0.0), (0.0, 4.0)), 0.0),
+        eagle.Fill("F.SilkS", ((30.0, 30.0), (31.0, 30.0), (31.0, 31.0)), 0.0),
+    ))
+    ring = [(-1.0, -1.0), (12.0, -1.0), (12.0, 12.0), (-1.0, 12.0)]
+    meshes, tally, _undrawn = compose.artwork(board, ring, 1.6, (0.0, 0.0), "#313d63", [])
+    assert (tally["fill front"], tally["fill back"], tally[compose.FILL_REFUSED],
+            tally["fill off the board"]) == (1, 1, 1, 1), tally
+    front, back = _faces(meshes[2], compose.SILKSCREEN), _faces(meshes[5], compose.SILKSCREEN)
+    assert sum(compose._cross(*face) for face in front) / 2 == pytest.approx(84.0)
+
+    def under(faces, point) -> bool:
+        """On or inside a face, whichever way it is wound: a back face is
+        wound to face down."""
+        return any(min(sides) >= 0 or max(sides) <= 0 for sides in (
+            (compose._cross(a, b, point), compose._cross(b, c, point),
+             compose._cross(c, a, point)) for a, b, c in faces))
+
+    for point in _grid(10, 10):
+        assert under(front, point) == compose.point_in(_O, point), point
+    # Inside; in the pen's band outside the edge; beyond it; off the corner.
+    assert [under(back, point) for point in ((3.0, 3.0), (1.9, 3.0), (1.7, 3.0),
+                                             (1.85, 1.85))] == [True, True, False, False]
+
+
+def test_a_fill_the_triangulator_refuses_is_counted_as_ink_not_drawn(capsys):
+    """**What `ear_clip` refuses is ink the file carries and the model
+    lacks**, so `compose` prints it on the `not ink` line under
+    `FILL_REFUSED` and not on the artwork line (OH-163): on SparkFun's Thing
+    Plus ESP32-C6, the letters whose bridge back from a counter misses itself
+    and crosses, each counted as many times as it is placed."""
+    spec = next(s for s in compose.COMPOSITIONS if s.board == "SparkFun Thing Plus ESP32-C6")
+    if not _fetched(spec):
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    refused = 0
+    for fill in compose.read_layout(spec.layout).silk_fills:
+        try:
+            compose.ear_clip(list(fill.points))
+        except ValueError:
+            refused += 1
+    lines = _accounting(spec, capsys).splitlines()
+    unread = next(line for line in lines if line.startswith("  not ink "))
+    drawn = next(line for line in lines if line.startswith("  artwork "))
+    assert refused and f"{compose.FILL_REFUSED} {refused}" in unread, (refused, unread)
+    assert compose.FILL_REFUSED not in drawn, drawn
+
+
+def test_the_composed_fills_land_on_seeeds_plotted_regions():
+    """**A filled mark reaches the composed board as Seeed plotted it**
+    (OH-163): on the XIAO ESP32-C6, each filled polygon `from_kicad` gives
+    the composer -- in its own frame, y up, which from Seeed's zero origin
+    IS the Gerber's -- is filled by triangles whose areas sum to its plotted
+    region's, every one of them inside that region. The C6's three U.FL
+    marks are the only filled silkscreen any fetched vendor Gerber plots."""
+    import zipfile
+
+    from tests.rules.test_kicad import (
+        SEEED_C6_ROOT,
+        SEEED_PCB,
+        _gerber_draws,
+        _same_ring,
+    )
+
+    zipped, path = SEEED_PCB / "ESP32-C6.zip", SEEED_PCB / "ESP32-C6.kicad_pcb"
+    if not (zipped.is_file() and path.is_file()):
+        pytest.skip(f"SKIPPED: {zipped.name} or {path.name} absent under {SEEED_PCB}; "
+                    f"python tools/compose_board_3d.py --board XIAO-ESP32-C6-DIP")
+    regions: list = []
+    with zipfile.ZipFile(zipped) as bundle:
+        assert path.read_bytes() == bundle.read(SEEED_C6_ROOT + "XIAO ESP32 C6.kicad_pcb")
+        _gerber_draws(bundle.read(f"{SEEED_C6_ROOT}XIAO ESP32 C6_gerber/"
+                                  f"XIAO ESP32 C6-F_Silkscreen.gbr").decode("ascii"),
+                      path.name, regions=regions)
+    fills = compose.from_kicad(path).silk_fills
+    assert len(fills) == len(regions) == 3, (len(fills), len(regions))
+    for fill in fills:
+        ring = list(fill.points)
+        region = next((contour[:-1] for contour in regions if _same_ring(ring, contour[:-1])), None)
+        assert region is not None, ring
+        faces = [[ring[index] for index in triangle] for triangle in compose.ear_clip(ring)]
+        assert sum(compose._cross(*face) for face in faces) / 2 == pytest.approx(
+            abs(compose._area(region)) / 2, rel=1e-6)
+        assert all(compose.point_in(region, (sum(x for x, _y in face) / 3,
+                                             sum(y for _x, y in face) / 3)) for face in faces)
 
 
 def test_text_beside_the_board_is_not_drawn_on_it():

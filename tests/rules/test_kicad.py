@@ -26,6 +26,7 @@ import zipfile
 import pytest
 
 from tools.kicad import (
+    Fill,
     KicadError,
     Pad,
     Placement,
@@ -1867,12 +1868,14 @@ POE_REV_M = (REPO / "third_party" / "olimex-esp32-poe" / "HARDWARE"
 GERBER_TOLERANCE_MM = 0.001
 
 
-def _gerber_draws(text: str, where: str, arcs: list | None = None
+def _gerber_draws(text: str, where: str, arcs: list | None = None,
+                  regions: list | None = None
                   ) -> list[tuple[float, float, float, float]]:
     """Every straight draw on one Gerber layer, `(x1, y1, x2, y2)` in
     millimetres in the Gerber's own frame, whose y runs up -- and, into
     `arcs` where one is given, every circular draw as `(x1, y1, x2, y2, cx,
-    cy, clockwise)` (OH-163).
+    cy, clockwise)` (OH-163); and into `regions`, every region's contour as
+    the list of points it visits, its first again at its end (4.10.2).
 
     **A minimal RS-274X reader**, to the Gerber Layer Format Specification
     revision 2024.05 (Ucamco), and the section each construct is read by is
@@ -1971,6 +1974,13 @@ def _gerber_draws(text: str, where: str, arcs: list | None = None
                                  here[0] + int(op.group(3)) / 10 ** decimals * scale,
                                  here[1] + int(op.group(4)) / 10 ** decimals * scale,
                                  plot == "G02"))
+                if region and regions is not None:
+                    if plot != "G01":
+                        raise ValueError(f"{where}: {word!r} curves a region's edge, "
+                                         f"which is not read here")
+                    regions[-1].append((x, y))
+            elif op.group(5) == "2" and region and regions is not None:
+                regions.append([(x, y)])          # 4.10.2: a contour starts
             here = (x, y)
     if not ended:
         raise ValueError(f"{where}: no M02, so the file may be cut short (4.13)")
@@ -2401,3 +2411,104 @@ def test_a_dimensions_text_is_read_as_board_text_and_its_lines_counted(tmp_path)
             measured.mirrored, measured.upright) == (
         "B.SilkS", "2.54 mm", 25.27, 35.0, True, False)
     assert dict(got.silk_unread) == {"dimension": 2}
+
+
+# --- filled silkscreen polygons (OH-163) ----------------------------------------
+
+FILLED = """(kicad_pcb
+\t(version 20241229)
+\t(generator "pcbnew")
+\t(gr_rect (start 0 0) (end 40 40) (stroke (width 0.05) (type solid)) (layer "Edge.Cuts"))
+\t(gr_poly (pts (xy 1 1) (xy 3 1) (xy 2 3))
+\t\t(stroke (width 0) (type solid)) (fill solid) (layer "F.SilkS"))
+\t(gr_poly (pts (xy 5 5) (xy 6 5) (xy 6 6)) (layer "F.SilkS") (width 0.15))
+\t(gr_poly (pts (xy 7 7) (xy 8 7) (xy 8 8))
+\t\t(stroke (width 0.1) (type solid)) (fill none) (layer "F.SilkS"))
+\t(gr_poly (pts (xy 1 1) (xy 3 1) (xy 2 3))
+\t\t(stroke (width 0) (type solid)) (fill solid) (layer "F.Fab"))
+\t(footprint "TEST:LOGO"
+\t\t(layer "B.Cu")
+\t\t(at 20 30 90)
+\t\t(fp_poly (pts (xy 1 0) (xy 2 0) (xy 2 1))
+\t\t\t(stroke (width 0.05) (type solid)) (fill yes) (layer "B.SilkS"))
+\t\t(fp_poly (pts (xy 0 0) (arc (start 1 0) (mid 1.5 0.5) (end 1 1)) (xy 0 1))
+\t\t\t(stroke (width 0) (type solid)) (fill yes) (layer "B.SilkS"))
+\t\t(pad "1" smd rect (at 0 0) (size 0.5 0.5) (layers "B.Cu"))
+\t)
+)
+"""
+
+
+def test_a_filled_silkscreen_polygon_is_read_as_the_outline_it_fills(tmp_path):
+    """**A filled polygon on the silkscreen is ink, and is read** (OH-163):
+    Seeed's logo on the RP2350 and the C5 is nothing else, nor are the
+    labels on PCBCUPID's and SparkFun's KiCad boards, and all of it was
+    counted and dropped. Read as the file walks it, each point placed as a
+    line's ends are -- a footprint's turned and moved, (1, 0) at (20, 30)
+    turned 90 degrees being (20, 29) -- with the pen KiCad also traces its
+    outline at. Filled is `solid` to KiCad 7, `yes` from KiCad 8, and
+    unstated in KiCad 5's spelling, whose polygons are all filled. What this
+    does not fill stays counted as a `poly`: one the file leaves unfilled,
+    and one with an arc among its points. Off the silkscreen, nothing."""
+    got = read_board(tmp_path / "filled.kicad_pcb", text=FILLED)
+    assert got.silk_fills == (
+        Fill("F.SilkS", ((1.0, 1.0), (3.0, 1.0), (2.0, 3.0)), 0.0),
+        Fill("F.SilkS", ((5.0, 5.0), (6.0, 5.0), (6.0, 6.0)), 0.15),
+        Fill("B.SilkS", ((20.0, 29.0), (20.0, 28.0), (21.0, 28.0)), 0.05),
+    ), got.silk_fills
+    assert dict(got.silk_unread) == {"poly": 2}
+
+
+def _same_ring(ours, theirs) -> bool:
+    """Whether two closed rings visit the same points in the same cyclic
+    order, either way round, each within `GERBER_TOLERANCE_MM`."""
+    if len(ours) != len(theirs):
+        return False
+    for walked in (theirs, theirs[::-1]):
+        for shift in range(len(walked)):
+            turned = walked[shift:] + walked[:shift]
+            if all(math.dist(a, b) <= GERBER_TOLERANCE_MM for a, b in zip(ours, turned)):
+                return True
+    return False
+
+
+def test_the_filled_silkscreen_polygons_are_seeeds_own_plotted_regions():
+    """**Each fill this reader places is a region on Seeed's own silkscreen
+    Gerber, and each region one of them** (OH-163): KiCad plots a filled
+    polygon as a region whose contour is the polygon's own points, so on
+    the XIAO ESP32-C6 -- from the zip that ships the board read here --
+    the three filled marks of its U.FL footprint are the three regions of
+    its front silkscreen, point for point. Neither vendor tree fetched here
+    plots a glyph with a counter: the C6 has none, and Olimex's ESP32-PoE's
+    regions are its knockout text, with no filled polygon on its silkscreen
+    at all. The keyholes are held to their area and their probes in
+    tests/rules/test_compose_board_3d.py."""
+    zipped, path = SEEED_PCB / "ESP32-C6.zip", SEEED_PCB / "ESP32-C6.kicad_pcb"
+    if not (zipped.is_file() and path.is_file()):
+        pytest.skip(f"SKIPPED: {zipped.name} or {path.name} absent under {SEEED_PCB}; "
+                    f"python tools/compose_board_3d.py --board XIAO-ESP32-C6-DIP")
+    regions: dict[str, list] = {}
+    with zipfile.ZipFile(zipped) as bundle:
+        assert path.read_bytes() == bundle.read(SEEED_C6_ROOT + "XIAO ESP32 C6.kicad_pcb"), (
+            "not the board Seeed plotted these from")
+        for layer, name in (("F.SilkS", "F_Silkscreen"), ("B.SilkS", "B_Silkscreen")):
+            regions[layer] = []
+            _gerber_draws(bundle.read(f"{SEEED_C6_ROOT}XIAO ESP32 C6_gerber/"
+                                      f"XIAO ESP32 C6-{name}.gbr").decode("ascii"),
+                          f"{path.name} {layer}", regions=regions[layer])
+    plotted = {layer: [contour[:-1] for contour in found] for layer, found in regions.items()}
+    assert all(contour[0] == contour[-1] for found in regions.values() for contour in found)
+    fills = read_board(path).silk_fills
+    unmatched = {layer: list(found) for layer, found in plotted.items()}
+    missed = []
+    for fill in fills:
+        # Seeed plot from a zero origin, so the Gerber's frame is the
+        # board's with y negated.
+        ours = [(x, -y) for x, y in fill.points]
+        twin = next((c for c in unmatched[fill.layer] if _same_ring(ours, c)), None)
+        if twin is None:
+            missed.append(fill)
+        else:
+            unmatched[fill.layer].remove(twin)
+    assert (len(fills), missed, unmatched) == (3, [], {"F.SilkS": [], "B.SilkS": []}), (
+        missed, unmatched)

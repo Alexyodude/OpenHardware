@@ -159,6 +159,17 @@ class Stroke:
 
 
 @dataclasses.dataclass(frozen=True)
+class Fill:
+    """A filled polygon of ink, as its outline walks it, with the pen that
+    outline is traced at. Named to match `tools/kicad.py`'s, which says why
+    nothing is closed or split (OH-163)."""
+
+    layer: str
+    points: tuple[tuple[float, float], ...]
+    width_mm: float
+
+
+@dataclasses.dataclass(frozen=True)
 class Via:
     """A plated hole joining layers, at its outside diameter. Named to match
     `tools/kicad.py`'s, and carrying no drill for the same reason: a via on
@@ -262,8 +273,13 @@ class Board:
     #: strokes today, and a composed Uno therefore has no silkscreen while a
     #: composed XIAO does. Stated rather than silently uneven.
     silk: tuple[Stroke, ...] = ()
-    #: What was on those layers and is not in `silk`, counted by kind, so a
-    #: caption can say what it left out.
+    #: The ink filled rather than stroked, in the same frame (OH-163): an
+    #: EAGLE board's straight-edged `<polygon>`s on those layers, and a
+    #: KiCad board's filled polygons as `compose_board_3d.from_kicad` gives
+    #: them.
+    silk_fills: tuple[Fill, ...] = ()
+    #: What was on those layers and is not in `silk` or `silk_fills`, counted
+    #: by kind, so a caption can say what it left out.
     silk_unread: tuple[tuple[str, int], ...] = ()
     #: A KiCad board's silkscreen text, as `kicad.Text` items in KiCad's own
     #: y-down frame -- **the one field here NOT in this module's y-up frame**,
@@ -584,9 +600,10 @@ def _open(path: pathlib.Path, wanted: str, text: str | None = None) -> ET.Elemen
 INK_LAYERS = {"21": "F.SilkS", "22": "B.SilkS"}
 
 
-def _ink(board: ET.Element, elements: list[Element],
-         packages: dict) -> tuple[tuple[Stroke, ...], tuple[tuple[str, int], ...]]:
-    """Every straight silkscreen wire on the board, as placed strokes.
+def _ink(board: ET.Element, elements: list[Element], packages: dict
+         ) -> tuple[tuple[Stroke, ...], tuple[Fill, ...], tuple[tuple[str, int], ...]]:
+    """Every straight silkscreen wire on the board, as placed strokes, and
+    every straight-edged silkscreen polygon, as placed fills.
 
     **The Arduino Uno printed nothing because this did not exist** (OH-122):
     `read_board` built `Board` with the `silk` default, so `compose` said
@@ -602,11 +619,20 @@ def _ink(board: ET.Element, elements: list[Element],
         spelling -- and **a mirrored element swaps its ink to the other
         face**, because EAGLE's `MR` puts the whole package on the underside.
 
+    **A polygon is a fill, and SparkFun letter their labels with them**
+    (OH-163): each glyph one `<polygon>`, and one with a counter a keyhole
+    outline, the rim walking in along a bridge and round the hole -- read as
+    walked, every vertex placed as a wire's ends are, and the polygon's
+    `width` carried as the pen EAGLE traces its outline at.
+
     What is NOT read is counted by kind, the same contract `kicad._silk_of`
-    keeps: curved wires (the DIP notch), rectangles, circles, polygons and
-    text, so the composer prints what it left out instead of leaving silence.
+    keeps: curved wires (the DIP notch), rectangles, circles, text, and a
+    polygon with a curved edge -- SparkFun's open-hardware gear -- or one
+    poured other than solid; so the composer prints what it left out instead
+    of leaving silence.
     """
     strokes: list[Stroke] = []
+    fills: list[Fill] = []
     unread: collections.Counter = collections.Counter()
 
     def take(wire: ET.Element, layer: str,
@@ -622,11 +648,26 @@ def _ink(board: ET.Element, elements: list[Element],
         strokes.append(Stroke(layer, x1, y1, x2, y2,
                               float(wire.get("width") or 0.0)))
 
+    def fill(polygon: ET.Element, layer: str, transform=None) -> None:
+        corners = polygon.findall("vertex")
+        if ((polygon.get("pour") or "solid") != "solid"
+                or any(corner.get("curve") is not None for corner in corners)):
+            unread["polygon"] += 1
+            return
+        points = [(float(corner.get("x")), float(corner.get("y"))) for corner in corners]
+        if transform is not None:
+            points = [transform(x, y) for x, y in points]
+        fills.append(Fill(layer, tuple(points), float(polygon.get("width") or 0.0)))
+
     for wire in board.findall("plain/wire"):
         layer = INK_LAYERS.get(wire.get("layer"))
         if layer is not None:
             take(wire, layer)
-    for kind in ("rectangle", "circle", "polygon", "text"):
+    for polygon in board.findall("plain/polygon"):
+        layer = INK_LAYERS.get(polygon.get("layer"))
+        if layer is not None:
+            fill(polygon, layer)
+    for kind in ("rectangle", "circle", "text"):
         for node in board.findall(f"plain/{kind}"):
             if node.get("layer") in INK_LAYERS:
                 unread[kind] += 1
@@ -648,11 +689,18 @@ def _ink(board: ET.Element, elements: list[Element],
             if element.mirrored:
                 layer = "B.SilkS" if layer == "F.SilkS" else "F.SilkS"
             take(wire, layer, placed)
-        for kind in ("rectangle", "circle", "polygon", "text"):
+        for polygon in package.findall("polygon"):
+            layer = INK_LAYERS.get(polygon.get("layer"))
+            if layer is None:
+                continue
+            if element.mirrored:
+                layer = "B.SilkS" if layer == "F.SilkS" else "F.SilkS"
+            fill(polygon, layer, placed)
+        for kind in ("rectangle", "circle", "text"):
             for node in package.findall(kind):
                 if node.get("layer") in INK_LAYERS:
                     unread[kind] += 1
-    return tuple(strokes), tuple(sorted(unread.items()))
+    return tuple(strokes), tuple(fills), tuple(sorted(unread.items()))
 
 
 def read_board(path: pathlib.Path, text: str | None = None) -> Board:
@@ -718,9 +766,10 @@ def read_board(path: pathlib.Path, text: str | None = None) -> Board:
         if wire.get("layer") == DIMENSION_LAYER
     ]
     tracks, vias, unrouted = _routing(board, str(path))
-    silk, silk_unread = _ink(board, elements, packages)
+    silk, silk_fills, silk_unread = _ink(board, elements, packages)
     return Board(path.stem, root.get("version") or "unknown", tuple(elements),
-                 tuple(outline), silk=silk, silk_unread=silk_unread,
+                 tuple(outline), silk=silk, silk_fills=silk_fills,
+                 silk_unread=silk_unread,
                  traces=tracks, vias=vias,
                  traces_unread=unrouted)
 
