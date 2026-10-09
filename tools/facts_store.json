@@ -5,7 +5,7 @@
     "function": "is_mask_film"
   },
   "claude-md:mark-turns": {
-    "hash": "4b69dcf68f11ce22",
+    "hash": "d4d4c150416ef5d7",
     "file": "tools/compose_board_3d.py",
     "function": "mark_turns"
   }

@@ -4798,7 +4798,7 @@ def mark_turns(element: eagle.Element, mesh: Mesh, thickness: float,
     the vendor's, read off their own footprint; the feature is the model's
     own, found by asking which of its vertices a half turn moves and where
     they are. The feature is not named and does not need to be: on the DIP it
-    is the notch in the top of the body, 1.5 x 0.8 mm of `#050505` at the end
+    is the notch in the top of the body, 1.5 x 0.8 mm of `#262525` at the end
     Arduino draw their notch at, and the rule would hold just as well if it
     were a bevel or a dimple.
 
