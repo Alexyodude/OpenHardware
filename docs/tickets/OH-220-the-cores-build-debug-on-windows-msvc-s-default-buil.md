@@ -50,3 +50,48 @@ CLOCK.JS, NOT EDITED (OH-221's, or whoever holds the page). Its header says an U
 NOTHING FAILED ONLY IN RELEASE. Full suite on Debug (2026-10-09 23:52, 570.87 s): 4 failed, 2665 passed, 42 skipped -- test_this_checkouts_build_is_release (build/ was Debug), the OCP pair test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert and test_the_tessellator_welds_what_it_meshes (no OCP in this python), and test_compile.py::test_a_failed_build_leaves_nothing_behind (shared temp directory, collides with other worktrees' builds; passes alone, 0.17 s, re-run on Release). Full suite on Release (2026-10-10 00:03, 542.24 s): 3 failed, 2666 passed, 42 skipped -- the same three. Compared per test id from both runs' junit XML: the one outcome that differs is test_this_checkouts_build_is_release, failure to pass. Called out on Release: tests/riscv32/test_lockstep.py 12 passed against rvcpp (third_party/rvcpp-build/rvcpp.exe), tests/i8086/test_conformance.py 26 passed (the fetched corpus 153.6 s in the Release suite, 139.3 s alone, against 166.9 s in the Debug suite), tests/avr/test_conformance.py 3 passed, tests/cortexm0/test_conformance.py 9 passed; per suite on both builds, riscv32 251, i8086 233, avr 92, cortexm0 208, rv32 12, all passed. The Release build's warnings are the Debug build's, the same four: C4389 at core/avr/exec.cc:596 and :997, C4457 at core/riscv32/exec.cc:908 and :951. No timed test broke on the faster core; the slowest tests moved by between nothing and a quarter (test_arduino_sketch's blink-period test, 6.70 s to 4.88 s).
 
 CHECKALL: python tools/checkall.py on the Release core, 2026-10-10 00:15 to 00:24: eleven rows PASS -- layering, board contract, part schemas, licences, deltas, banned symbols, board claims, ticket claims (218 tickets against OH-220), the ticket guard's self-test 6/6, facts (8 derived, 2 anchors held), the board-sources survey. The test-suites row FAILS. checkall cuts its output at 30 lines, so the names come from pytest's own .pytest_cache/v/cache/lastfailed, which that run left unrewritten -- pytest rewrites it only when the failed set changes -- and which holds exactly the OCP pair; test_compile's collision passed in that run. After checkall, one docstring sentence in tools/build_core.py was corrected from the ticket's "about a quarter of the speed" to the 39% to 73% measured here, and test_build_core.py (4 passed) and check_facts (OK) were re-run on it.
+
+**Note 2026-10-10:** REVIEW FIXES at 20190d3. The review said APPROVE with fixes. Each fix is below, with the break it was seen red on.
+
+MEDIUM-1, NOTHING READ THE DLLS. tools/build_core.py gains debug_runtime(library). It returns the MSVC debug runtime a library imports, VCRUNTIME140D.dll or ucrtbased.dll, or None. Every core's DLL in main's, lane2's, lane3's and lane4's build/lib was read on 2026-10-10. Each Debug DLL named both (and MSVCP140D.dll and VCRUNTIME140_1D.dll), and each Release DLL named VCRUNTIME140.dll and api-ms-win-crt-* instead. It is a byte search, because no core's source names either DLL (grep of core/). It has three callers:
+- test_this_checkouts_libraries_are_release (Windows only) fails on any core in build/lib that names one, whatever the cache says. That catches (a), an IDE's Debug build of a multi-config build/, where the cache test skips, and (b), a tree configured Release and not built, where the cache test passes.
+- ensure_built prints one stderr line naming the DLL and the import, and still returns it without rebuilding. That is for whoever runs webui/emulator_server.py and never pytest.
+- build() raises after building if a library it built still names one, and says to run --clean.
+Off Windows nothing links either DLL, so the library test skips and says so. What holds there is the cache test: GCC sets no Debug default, and CI builds single-config with it.
+(c) configure's docstring said a Debug build belongs in a directory of its own. Nothing loads one there, because every loader takes library_path, which is always build/lib. The docstring now says that, and says a Debug build into build/ is reported until build_core.py is run again.
+SEEN: main's Debug i8086.dll was copied over lane3's Release one, with a fresh mtime.
+- test_this_checkouts_libraries_are_release FAILED: "...build\lib holds Debug builds whatever its CMakeCache.txt says -- i8086.dll imports VCRUNTIME140D.dll -- ...". test_this_checkouts_build_is_release passed on the Release cache.
+- ensure_built('i8086') printed "build_core: ...\i8086.dll imports VCRUNTIME140D.dll, so it is a Debug build, at a fraction of Release's speed. Run: python tools/build_core.py".
+- python tools/build_core.py exited 1: "built Release, but ...\build\lib still holds Debug builds: i8086.dll imports VCRUNTIME140D.dll. Run: python tools/build_core.py --clean". Ninja does not relink a Debug DLL newer than its sources. With the check disabled, the same run exited 0 and listed the 130048-byte Debug i8086.dll as built. --clean restored Release in 4.3 s.
+- In a temp dir, a Visual Studio 17 2022 tree built i8086 Release, then Debug, then Release: 30720, then 130048 (VCRUNTIME140D.dll), then 30720 bytes. MSBuild relinks, so build()'s comment claims the Ninja case only.
+BREAKS, each red:
+- DEBUG_RUNTIMES's first name cut to b"VCRUNTIME140": "release.dll: expected None, read 'VCRUNTIME140'", and every Release DLL in build/lib was reported.
+- debug_runtime returning None: "debug.dll: expected 'VCRUNTIME140D.dll', read None" and "loaded a Debug library without saying so: ''".
+- ensure_built's check removed: only the second of those.
+
+LOW-1. CMakeLists' comment now says -DCMAKE_BUILD_TYPE=<type>. It also says an empty value counts as unset and gets Release, in the cache and in the environment alike. Probed: -DCMAKE_BUILD_TYPE= cached Release, and =Debug and =MinSizeRel were kept.
+
+LOW-2, AND AN EMPTY VARIABLE. test_a_build_type_in_the_environment_is_kept_and_an_empty_one_is_not configures twice, in 2.0 s. RelWithDebInfo in the environment must cache RelWithDebInfo, and an empty value must cache Release. Writing the test found the second case. The guard yielded to any DEFINED variable, but CMake ignores an empty one, so MSVC's INIT won: CMake 4.4.2 with CMAKE_BUILD_TYPE= in the environment cached Debug. The guard now yields only to a non-empty value. BREAKS:
+- The guard removed: "CMake 4.4.2 with CMAKE_BUILD_TYPE='RelWithDebInfo' in the environment cached 'Release', expected 'RelWithDebInfo'".
+- HEAD's NOT DEFINED ENV{CMAKE_BUILD_TYPE} restored: "CMake 4.4.2 with CMAKE_BUILD_TYPE='' in the environment cached 'Debug', expected 'Release'".
+
+LOW-3. Read in CMake 4.4.2's Platform/Windows-Clang.cmake. Line 272, set(CMAKE_BUILD_TYPE_INIT Debug), is in the branch for Clang simulating MSVC with the GNU-style front end, i.e. clang++ targeting the MSVC ABI. clang-cl, the MSVC-style front end, takes line 230, include(Platform/Windows-MSVC), and so reaches Windows-MSVC.cmake:150. MinGW Clang (line 281) includes Windows-GNU, which sets no INIT. The comment now says "GCC, and Clang off Windows" and cites lines 230 and 272.
+
+LOW-5, GATED, NOT RAISED. The variable is 3.22's: Help/envvar/CMAKE_BUILD_TYPE.rst says ".. versionadded:: 3.22", and Help/release/3.22.rst:27 says "The CMAKE_BUILD_TYPE environment variable was added". The default now reads $ENV{CMAKE_BUILD_TYPE} only when CMAKE_VERSION >= 3.22. Raising cmake_minimum_required to 3.22 would turn CMP0121 to CMP0128 NEW for the whole project. CMP0128 (3.22) changes how the standard and extension flags are chosen, which touches every core's compile line for a reason other than the build type. CI pins no cmake (rules.yml installs none and uses ubuntu-latest's), and the gate needs no fact about it. The test reads cmake --version and, below 3.22, expects Release for RelWithDebInfo.
+SEEN with CMake 3.21.4 (pip's wheel, unpacked in a temp dir and put first on PATH):
+- test_build_core.py: 8 passed.
+- The gate removed: "CMake 3.21.4 with CMAKE_BUILD_TYPE='RelWithDebInfo' in the environment cached 'Debug', expected 'Release'".
+- HEAD's guard: the same.
+
+NOTED, NOT EDITED.
+- L4: Release compiles out cortexm0's asserts (core/cortexm0/cpu.cc:615, 622), the only runtime checks on Windows. They were live in no CI run before either, since CI builds Release with GCC.
+- L6: the shadowed width at core/riscv32/exec.cc:908 and :951 (C4457) is in OH-161's files.
+- L7: Debug PDBs left in build/lib by a pre-fix build stay until --clean. lane3's went with the --clean above.
+- M2: the i8086 IDIV that kills the host is OH-222.
+- main's, lane2's and lane4's build/ still cached Debug, and every core DLL there imported VCRUNTIME140D.dll, when read at about 00:50 on 2026-10-10. Each fails both checkout tests until python tools/build_core.py is run there. Not touched.
+
+VERIFIED at 20190d3, 2026-10-10:
+- python tools/build_core.py: no-op, Release, exit 0.
+- python -m pytest -q -p no:cacheprovider tests/rules/test_build_core.py tests/i8086 tests/avr tests/cortexm0 tests/riscv32: 792 passed in 182.26s.
+- The checkall rows other than the full suite all exited 0: layering, board contract, part schemas, licences (299 files), deltas (1 patch), banned symbols (69 files), board claims (180 surfaces), ticket claims (218 against OH-220), ticket guard self-test 6/6, facts (8 derived, 2 anchors held), and the board-sources survey (current, 16 sources). checkall.missing_from_table() returned [].
+- The full suite was not run here; it is run on master after the merge.
