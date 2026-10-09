@@ -250,8 +250,10 @@ class Fill:
     Nothing is closed, cleaned or split: a glyph with a counter is ONE
     outline here, walking in along a bridge, round the hole and back out,
     which is how KiCad stores it and what `compose_board_3d.ear_clip` fills
-    (OH-163). `width_mm` is the pen KiCad also traces the outline with when
-    it plots the fill; at 0 or below it traces none.
+    (OH-163). `width_mm` is the pen the outline is also traced with when the
+    fill is plotted, at 0 or below none -- as KiCad's plotter is understood
+    to draw a filled polygon. No fetched Gerber plots a filled polygon with a
+    pen, so that is not held to a plot here: Seeed's C6 plots three at 0.
     """
 
     layer: str

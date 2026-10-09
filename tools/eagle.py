@@ -623,7 +623,9 @@ def _ink(board: ET.Element, elements: list[Element], packages: dict
     (OH-163): each glyph one `<polygon>`, and one with a counter a keyhole
     outline, the rim walking in along a bridge and round the hole -- read as
     walked, every vertex placed as a wire's ends are, and the polygon's
-    `width` carried as the pen EAGLE traces its outline at.
+    `width` carried as the pen its outline is traced at, as EAGLE is
+    understood to draw a polygon off the copper layers; no fetched plot holds
+    that.
 
     What is NOT read is counted by kind, the same contract `kicad._silk_of`
     keeps: curved wires (the DIP notch), rectangles, circles, text, and a

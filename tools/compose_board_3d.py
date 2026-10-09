@@ -5836,10 +5836,12 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
 
     #: Filled ink -- Seeed's logo glyph by glyph, PCBCUPID's and SparkFun's
     #: labels -- as `ear_clip` fills each polygon, its counters left open,
-    #: and its outline traced at the pen the file states, as the vendor's
-    #: plot traces it (OH-163). Every triangle and stroke is cut to the board
-    #: as all ink is. A polygon `ear_clip` refuses is counted under
-    #: `FILL_REFUSED`, which `compose` prints on the `not ink` line.
+    #: and its outline traced at the pen the file states (OH-163), as KiCad
+    #: and EAGLE are understood to plot a filled polygon's outline; no
+    #: fetched Gerber has one with a pen to hold that to. Every triangle and
+    #: stroke is cut to the board as all ink is. A polygon `ear_clip` refuses
+    #: is counted under `FILL_REFUSED`, which `compose` prints on the `not
+    #: ink` line.
     fill_front: list[list[tuple[float, float]]] = []
     fill_back: list[list[tuple[float, float]]] = []
     filled = {"fill front": 0, "fill back": 0}
