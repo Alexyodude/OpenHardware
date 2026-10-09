@@ -314,8 +314,9 @@ def _openhardware(*, variant: str, march: str, base: int,
         variant=variant,
         # No F_CPU define. The description states the clock its SYSTIMER
         # rate assumes (`CPU_HZ`, from the board's own boards.txt), but no
-        # sketch here has needed it at compile time: millis(), micros() and
-        # delay() all count SYSTIMER ticks, whose rate oh_board.h states.
+        # sketch here has needed it at compile time: millis(), micros(),
+        # delay() and delayMicroseconds() all count SYSTIMER ticks, whose
+        # rate oh_board.h states.
         flags=(
             f"-march={march}", "-mabi=ilp32",
             "-Os", "-ffunction-sections", "-fdata-sections",

@@ -2063,9 +2063,10 @@ void setup() {
 void loop() { }
 """
 
-#: Steps past five milliseconds by which `DELAY_BY_MILLIS` has printed: its
-#: last byte lands 145 steps past them on the C3 and 141 on the C5
-#: (measured 2026-10-09), and then it sits in an empty `loop()`.
+#: Steps past its wait by which each sketch here that times one has printed,
+#: measured 2026-10-09: the last byte lands 145 steps past five milliseconds
+#: for `DELAY_BY_MILLIS` on the C3 and 141 on the C5; 169 and 165 past 1,250
+#: microseconds for `DELAY_US_BY_MICROS`. Then each sits in an empty `loop()`.
 DELAY_PRINTED = 1_000
 
 
@@ -2098,6 +2099,46 @@ def test_a_delay_timed_by_millis_lasts_the_milliseconds_it_asked_for():
         assert text == b"5\r\n", (
             f"{board}: a delay(5) timed by millis() printed {text!r} in "
             f"{budget} steps")
+
+
+#: Times a delayMicroseconds() with micros(), long enough that both of its
+#: waits run: a whole millisecond of ticks, then the 250 microseconds left.
+DELAY_US_BY_MICROS = """
+void setup() {
+  unsigned long t = micros();
+  delayMicroseconds(1250);
+  Serial.println(micros() - t);
+}
+void loop() { }
+"""
+
+
+def test_a_delay_in_microseconds_timed_by_micros_lasts_what_it_asked_for():
+    """delayMicroseconds() waits on the SYSTIMER copy micros() reads, so 1,250
+    microseconds of one are 1,250 of the other -- on the C3 and on the C5,
+    whose milliseconds are 160,000 and 240,000 steps.
+
+    Exactly 1250, where 1250 or 1251 could both be right. Not less: the wait
+    is 20,000 ticks from a copy taken after `t`'s, so the closing copy is at
+    least 20,000 ticks past `t`'s, and `micros()`'s floor cannot lose a
+    microsecond of that. Not 1251: measured 2026-10-09, `t`'s copy is taken at
+    tick 2 on the C3 and tick 1 on the C5 and the closing copy at tick 20,007
+    and 20,004, short of 20,016, where 1251 begins."""
+    for board in (C3_BOARD, "XIAO-ESP32-C5-DIP"):
+        description, _gpio = TIMED_BOARDS[board]
+        needs_toolchain(board)
+        built = oh_build(board, DELAY_US_BY_MICROS)
+        assert built.ok, built.diagnostics
+        millisecond = description.SYSTIMER_INSTRUCTIONS_PER_TICK * (
+            description.SYSTIMER_HZ // 1000)
+        budget = 1250 * millisecond // 1000 + DELAY_PRINTED
+        with api.load_firmware(board, built.image,
+                               base=compiler.recipe_for(board).base) as session:
+            session.step(budget)
+            text = description.uart0_output(session.cpu)
+        assert text == b"1250\r\n", (
+            f"{board}: a delayMicroseconds(1250) timed by micros() printed "
+            f"{text!r} in {budget} steps")
 
 
 #: Prints both clocks once, so a test can set the count they read.

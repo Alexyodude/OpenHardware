@@ -93,6 +93,12 @@ unsigned long micros(void);
  * sketch timing a delay() with millis() reads what it asked for. */
 void delay(unsigned long ms);
 
+/* Waits on the same SYSTIMER unit 0, so its microsecond is micros()'s: a
+ * sketch timing a delayMicroseconds() with micros() reads what it asked
+ * for. Declared as arduino-esp32 declares it (`cores/esp32/esp32-hal.h:170`
+ * at 2787dab). */
+void delayMicroseconds(uint32_t us);
+
 #ifdef __cplusplus
 }
 #endif

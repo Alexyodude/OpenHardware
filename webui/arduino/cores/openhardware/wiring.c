@@ -1,5 +1,5 @@
-/* OpenHardware - pinMode, digitalWrite, millis, micros and delay against
- * the modelled GPIO and SYSTIMER.
+/* OpenHardware - pinMode, digitalWrite, millis, micros, delay and
+ * delayMicroseconds against the modelled GPIO and SYSTIMER.
  *
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 the OpenHardware authors. See LICENSE.
@@ -107,5 +107,26 @@ void delay(unsigned long ms) {
         while ((uint32_t)oh_systimer_ticks() - start < ticks_per_ms) {
         }
         start += ticks_per_ms;
+    }
+}
+
+/* Returns once `us` microseconds of SYSTIMER unit 0 -- `us` times
+ * `OH_SYSTIMER_TICKS_PER_US` ticks -- have passed since the call, on
+ * delay()'s terms: the same copy, the count's low 32 bits, and `start`
+ * advanced by what was waited rather than read again. The whole wait as one
+ * number passes 32 bits past 2^28 microseconds, so it goes as delay()'s
+ * does, a millisecond of ticks at a time, and then the microseconds left
+ * over, under a thousand: no piece comes near 32 bits, and the split is the
+ * M extension's 32-bit `divu` and `remu`, so nothing calls libgcc. */
+void delayMicroseconds(uint32_t us) {
+    const uint32_t ticks_per_ms = OH_SYSTIMER_TICKS_PER_US * 1000u;
+    const uint32_t rest = (us % 1000u) * OH_SYSTIMER_TICKS_PER_US;
+    uint32_t start = (uint32_t)oh_systimer_ticks();
+    for (uint32_t ms = us / 1000u; ms; --ms) {
+        while ((uint32_t)oh_systimer_ticks() - start < ticks_per_ms) {
+        }
+        start += ticks_per_ms;
+    }
+    while ((uint32_t)oh_systimer_ticks() - start < rest) {
     }
 }
