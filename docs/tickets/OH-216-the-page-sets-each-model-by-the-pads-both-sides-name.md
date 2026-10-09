@@ -5,6 +5,17 @@ title: The page sets each model by the pads both sides name, and carves only met
 status: open
 priority: P2
 created: '2026-10-09'
+touches:
+- webui/static/board3d.js
+- tests/webui/test_board3d.py
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
+- tools/import_3d_model.py
+- tools/import_board.py
+- tests/rules/test_import_board.py
+- tools/import_pindefs.py
+- tests/rules/test_import_pindefs.py
+- webui/boards/XIAO-*.json
 ---
 
 Follow-ups from OH-215 and its review (2026-10-09). OH-215 fixed the page's quarter turn by comparing two stated outline orientations (the board file's pad map and the model's `extras.pcb`). Three things remain, all in how the page sets a model on a board.
