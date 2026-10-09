@@ -1,7 +1,7 @@
 ---
 id: OH-208
 title: 'Zbb and Zbkb on the RP2350''s Hazard3: the core refuses what the chip executes'
-status: in-review
+status: done
 priority: P2
 created: '2026-10-08'
 touches:
@@ -83,3 +83,5 @@ Done when a Zbb or Zbkb instruction on the RP2350 executes as the Hazard3 does, 
 * **The zip/unzip rs2 field is settled, not disputed** (243da56). The 20240411 release's figures in chapters 28 and 32 drew 0x1e and 0x1f. riscv-isa-manual 698e64ae7 (2024-09-09, "Fix descriptions/encodings of zip/unzip instructions (#1635)") changed both chapters to 0xf, restoring the ratified encoding. sail-riscv's `model/extensions/K/zbkb_insts.sail:66-67` (zip) and `:89-90` (unzip), at master 549e723, encode both with rs2 0b01111. Both sources were fetched and read for this note. This supersedes the "Where the spec and everything else disagree" bullet above. exec.cc's comments and `test_zbb_zbkb.py`'s header now say so; comments only, no rebuild.
 * **The ESP32 parts lack Zb\* because their datasheets say so** (1961e8c). `test_no_esp32_part_runs_any_zbb_or_zbkb_encoding` now cites the datasheets: the C3's "RV32IMC ISA" (v2.4), the C6's "RV32IMAC ISA" (v1.5), and the C5 HP CPU's "RV32IMAC ISA" with "Zc extensions (Zcb, Zcmp, and Zcmt)" and Xhwlp (v1.5, §4.1.1.1). None of the three names a Zb\* group anywhere; the PDFs were downloaded and searched for this note. The Arduino core's `-march` stays, labelled as what it shows: no stock image contains them. That also corrects the "Gating" bullet above, which gave both sources equal weight. Break: `abi.ESP32_C5` given `EXT_ZBB` turns the test red.
 * **Verification.** `python -m pytest -q -p no:cacheprovider tests/riscv32 tests/rv32 tests/webui/test_xiao_rp2350_board.py`: `247 passed`. `python tools/check_ticket_claims.py`: OK. No C++ behaviour changed (the two .cc/.h edits are comments), so the full suite was not rerun.
+
+**Note 2026-10-09:** DONE 2026-10-09. Merged to master by fast-forward at d6a8b9c (lane4); the core rebuilt in main with tools/build_core.py. VERIFIED on master at d6a8b9c: full suite 2 failed (the OCP pair), 2609 passed, 41 skipped. REVIEW: an independent review, MERGE AFTER FIXES (no defect in semantics, encoding or gating: 655,360 decode verdicts and 1,497,360 value checks against its own reference models, 0 wrong; the zip/unzip encoding 0b01111 ruled correct, the 20240411 figure being a published erratum fixed upstream), and its small fix round (set_isa names the bitmanip groups; comments corrected and cited). Follow-ups (fold RP2350_MODELLED into RP2350 with tests/rv32, assert rv32zcb, correct three files outside this ticket, the Hazard3's custom extensions refused as Illegal) are filed as their own ticket. core/riscv32/** and tests/riscv32/** return to OH-161.
