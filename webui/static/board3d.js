@@ -1505,6 +1505,15 @@ function placeModel(loaded, layout) {
   // frame, and such a board's pad map, read out of the same file, is upright
   // too. Each was turned a quarter off its own pads, and `carvePins` then
   // took whatever metal stood where the pads had been turned to.
+  //
+  // **A square board is placed right only because both comparisons tie.**
+  // The SparkFun Qwiic Pocket ESP32-C6 is 25.4 x 25.4 mm on a 219 x 219 px
+  // map, so both strict `>` are false and nothing turns -- which is right,
+  // because both frames are its vendor's. A NEAR-square board can flip: a
+  // map one pixel taller than wide over a model whose two sides are equal
+  // reads as two frames disagreeing, and is turned a quarter that nothing
+  // stated. Neither outline can say which way a square lies; only a pad
+  // match could (OH-215).
   const mapUpright = layout.height > layout.width;
   const modelUpright = pcb.short > pcb.long;
   if (mapUpright !== modelUpright) group.rotation.y = Math.PI / 2;
