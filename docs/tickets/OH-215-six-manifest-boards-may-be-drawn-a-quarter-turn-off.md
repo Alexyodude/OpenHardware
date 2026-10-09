@@ -4,6 +4,9 @@ title: Six manifest boards may be drawn a quarter turn off their own pads by the
 status: in-review
 priority: P1
 created: '2026-10-09'
+touches:
+- webui/static/board3d.js
+- tests/webui/test_board3d.py
 ---
 
 Found by OH-163 step 2's review-fix worker (2026-10-09), from pad positions only; not yet seen in a browser. Six manifest boards may be drawn by the page a quarter turn off their own pads: SparkFun Pro Micro ESP32-C3, Adafruit QT Py ESP32-C3, SparkFun Thing Plus ESP32-C6, SparkFun Thing Plus ESP32-C5, PCBCUPID Glyph Mini RP2040 and Olimex ESP32-C3-DevKit-Lipo.
@@ -25,3 +28,5 @@ Done when every board's pads land on its drawn pads as the page places them, hel
 **Note 2026-10-09:** 2026-10-09: webui/static/board3d.js and tests/webui/test_board3d.py return from OH-214 (done).
 
 **Note 2026-10-09:** 2026-10-09: board3d.js and its test lent to OH-216 (the turn and centre chosen from pads; underside pads carving topside metal). Return when OH-216 closes; this ticket's open item, a browser look, edits nothing.
+
+**Note 2026-10-09:** 2026-10-09: board3d.js and its test return from OH-216 (done).
