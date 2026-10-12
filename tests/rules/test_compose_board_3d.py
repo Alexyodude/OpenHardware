@@ -4540,7 +4540,8 @@ def test_what_is_not_drawn_rides_in_extras():
     assert "artwork" in extras and extras["artwork"].get("ink front", 0) > 0
     gaps = extras.get("not_drawn")
     assert gaps is not None, "the composer's gaps still stop at stdout"
-    for key in ("ink", "copper", "cutouts", "holes", "turn_unseen", "unmodelled", "text"):
+    for key in ("ink", "copper", "cutouts", "holes", "milled", "turn_unseen", "unmodelled",
+                "text"):
         assert key in gaps, f"not_drawn is missing {key}"
     # Each hole the board drills that is no pad, none of them cut (OH-163).
     assert gaps["holes"] == len(eagle.read_board(_brd()).holes) > 0, gaps["holes"]
@@ -5379,33 +5380,40 @@ def test_a_part_that_cuts_a_slot_for_itself_is_still_a_part(tmp_path, capsys):
 
 def test_a_milled_hole_is_a_cutout_flattened_as_an_arc_is(tmp_path):
     """**A circle KiCad mills inside the board is one more cutout** (OH-163):
-    read as its two halves, flattened by `arc_points` at `ARC_CHORD_MM`, and
-    chained by `contours` into a ring inside the board's own, which `outer`
-    returns with the routed slots and `compose` prints on the `cutouts` line.
-    Every point of the ring is on the circle, its span either way is the
-    diameter, and no side stands off the circle by more than the bound
-    `ARC_CHORD_MM`'s comment states, r(1 - cos(min(chord / 2r, pi / 2))).
-    The board's own ring is untouched."""
-    radius = 1.27
-    path = tmp_path / "milled.kicad_pcb"
-    path.write_text("(kicad_pcb\n\t(version 20241229)\n" + _cut("gr_rect", 0, 0, 20, 10)
-                    + f'\t(gr_circle (center 5 5) (end 5 {5 + radius}) (fill none) '
-                      f'(layer "Edge.Cuts"))\n'
-                    + _edge_footprint("J1", "10 5", "") + ")\n", encoding="utf-8")
-    ring, cutouts = compose.outer(compose.from_kicad(path).outline)
-    assert sorted(ring) == [(0, -10), (0, 0), (20, -10), (20, 0)], ring
-    assert len(cutouts) == 1, cutouts
-    (hole,) = cutouts
-    centre = (5.0, -5.0)
-    assert all(math.dist(point, centre) == pytest.approx(radius, abs=1e-9)
-               for point in hole), hole
-    for axis in (0, 1):
-        span = max(p[axis] for p in hole) - min(p[axis] for p in hole)
-        assert span == pytest.approx(2 * radius, abs=1e-9), (axis, span)
-    bound = radius * (1 - math.cos(min(compose.ARC_CHORD_MM / (2 * radius), math.pi / 2)))
-    stand_off = max(radius - math.dist(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), centre)
-                    for a, b in zip(hole, hole[1:] + hole[:1]))
-    assert 0 < stand_off <= bound + 1e-12, (stand_off, bound)
+    read as its four quarters, flattened by `arc_points` at `ARC_CHORD_MM`,
+    and chained by `contours` into a ring inside the board's own, which
+    `outer` returns with the routed slots and `compose` prints on the
+    `cutouts` line. Every point of the ring is on the circle, its span either
+    way is the diameter, and no side stands off the circle by more than the
+    bound `ARC_CHORD_MM`'s comment states, r(1 - cos(min(chord / 2r, pi /
+    2))). The board's own ring is untouched. Two radii: the Glyphs' 1.27 mm,
+    and 1.7 mm, a half turn of which `arc_points` flattens in an odd number
+    of steps -- so the read in two halves missed the extreme in the middle of
+    each, and the 3.4 mm hole spanned 3.394 mm one way (OH-163's review)."""
+    for radius in (1.27, 1.7):
+        path = tmp_path / f"milled-{radius}.kicad_pcb"
+        path.write_text("(kicad_pcb\n\t(version 20241229)\n" + _cut("gr_rect", 0, 0, 20, 10)
+                        + f'\t(gr_circle (center 5 5) (end 5 {5 + radius}) (fill none) '
+                          f'(layer "Edge.Cuts"))\n'
+                        + _edge_footprint("J1", "10 5", "") + ")\n", encoding="utf-8")
+        ring, cutouts = compose.outer(compose.from_kicad(path).outline)
+        assert sorted(ring) == [(0, -10), (0, 0), (20, -10), (20, 0)], ring
+        assert len(cutouts) == 1, cutouts
+        (hole,) = cutouts
+        centre = (5.0, -5.0)
+        assert all(math.dist(point, centre) == pytest.approx(radius, abs=1e-9)
+                   for point in hole), hole
+        for axis in (0, 1):
+            span = max(p[axis] for p in hole) - min(p[axis] for p in hole)
+            assert span == pytest.approx(2 * radius, abs=1e-9), (radius, axis, span)
+        bound = radius * (1 - math.cos(min(compose.ARC_CHORD_MM / (2 * radius),
+                                            math.pi / 2)))
+        stand_off = max(radius - math.dist(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), centre)
+                        for a, b in zip(hole, hole[1:] + hole[:1]))
+        assert 0 < stand_off <= bound + 1e-12, (radius, stand_off, bound)
+    assert math.ceil(math.pi * 1.7 / compose.ARC_CHORD_MM) % 2 == 1, (
+        "1.7 mm no longer takes an odd number of steps a half turn, so this "
+        "test no longer holds the split")
 
 
 def test_a_boards_milled_holes_are_printed_with_its_cutouts(capsys):
@@ -5476,6 +5484,144 @@ def test_every_hole_an_eagle_board_drills_is_printed_with_its_size(capsys):
         checked.append(spec.board)
     if not checked:
         pytest.skip("SKIPPED: no EAGLE board is fetched")
+
+
+#: A 20 x 10 mm board with one footprint at (10, 5) turned 90 degrees, which
+#: drills three unplated holes -- one whose drill is smaller than its pad,
+#: an oval one, and one stating no drill -- and puts down one plated pad.
+UNPLATED = ("(kicad_pcb\n\t(version 20241229)\n" + _cut("gr_rect", 0, 0, 20, 10)
+            + '\t(footprint "Test:H1"\n\t\t(layer "F.Cu")\n\t\t(at 10 5 90)\n'
+              '\t\t(property "Reference" "H1" (at 0 0 0) (layer "F.SilkS"))\n'
+              '\t\t(pad "" np_thru_hole circle (at 2 0) (size 1.5 1.5) (drill 1.1) '
+              '(layers "*.Cu" "*.Mask"))\n'
+              '\t\t(pad "" np_thru_hole oval (at 0 1) (size 0.6 1.2) (drill oval 0.6 1.2) '
+              '(layers "*.Cu" "*.Mask"))\n'
+              '\t\t(pad "" np_thru_hole circle (at -2 0) (size 0.9 0.9) '
+              '(layers "*.Cu" "*.Mask"))\n'
+              '\t\t(pad "1" thru_hole circle (at 0 -1) (size 1.7 1.7) (drill 1) '
+              '(layers "*.Cu" "*.Mask"))\n\t)\n)\n')
+
+
+def test_an_unplated_kicad_pad_is_a_hole_where_it_is_placed_at_its_drill(tmp_path):
+    """**A KiCad `np_thru_hole` pad is the hole an EAGLE `<hole>` is**
+    (OH-163, from its review): `from_kicad` gives one `eagle.Hole` of each,
+    so the `holes` line and `not_drawn["holes"]` mean the same thing on both
+    formats -- the Olimex boards' mounting holes and the Thing Plus C5's
+    standoffs were counted only as pads drawn as nothing. Each lands where
+    its pad does, and by hand the first, (2, 0) in a footprint at (10, 5)
+    turned 90 degrees, at (10, -3) in the y-up frame. Its size is its own
+    `(drill ...)`, not the pad's copper; an oval drill is one hole, a slot,
+    its width the hole's and its length beside it; a pad stating no drill
+    is taken at its width. A plated pad is no hole."""
+    path = tmp_path / "unplated.kicad_pcb"
+    path.write_text(UNPLATED, encoding="utf-8")
+    board = compose.from_kicad(path)
+    (element,) = board.elements
+    unplated = [pad for pad in element.pads if pad.hole]
+    assert len(unplated) == 3 and len(element.pads) == 4, element.pads
+    assert [(hole.x_mm, hole.y_mm) for hole in board.holes] == [
+        pytest.approx((pad.x_mm, pad.y_mm), abs=1e-9) for pad in unplated]
+    assert (board.holes[0].x_mm, board.holes[0].y_mm) == pytest.approx((10, -3), abs=1e-9)
+    assert [(hole.drill_mm, hole.slot_mm, hole.element) for hole in board.holes] == [
+        (1.1, 0.0, "H1"), (0.6, 1.2, "H1"), (0.9, 0.0, "H1")], board.holes
+
+
+def test_every_unplated_hole_a_kicad_board_drills_is_printed_with_its_size(capsys):
+    """**Each composed KiCad board prints its `np_thru_hole` pads on its
+    `holes` line** (OH-163, from its review), by drill, and says that many
+    of them are the pads its artwork line counts as drawn as nothing -- a
+    hole counted under two names, said so. Counted here by walking each
+    footprint's pads in the file's tree, not by the reader. No KiCad pad
+    on a composed board is an oval unplated drill; one would print as a
+    slot."""
+    _newstroke()
+    checked: list[tuple[pathlib.Path, str]] = []
+    for spec in compose.COMPOSITIONS:
+        if (spec.layout.suffix != ".kicad_pcb" or not _fetched(spec)
+                or spec.layout in {seen for seen, _board in checked}):
+            continue
+        drills = []
+        for footprint in kicad.children(kicad.board_tree(spec.layout), "footprint"):
+            for pad in kicad.children(footprint, "pad"):
+                if pad[2] == "np_thru_hole":
+                    bore = kicad.first(pad, "drill")
+                    assert bore is not None and "oval" not in bore, (spec.board, pad)
+                    drills.append(f"{float(bore[1]):.3f}")
+        line = next((line for line in _accounting(spec, capsys).splitlines()
+                     if line.startswith("  holes ")), "")
+        if not drills:
+            assert not line, (spec.board, line)
+            continue
+        assert line.startswith(f"  holes   {len(drills)} not cut: "), (spec.board, line)
+        assert line.endswith(f"; {len(drills)} of them np_thru_hole pads, on the "
+                             f"artwork line too as pads drawn as nothing"), line
+        for drill in set(drills):
+            printed = sum(int(count) for count in re.findall(rf"\b{drill} mm x(\d+)", line))
+            assert printed == drills.count(drill), (spec.board, drill, line)
+        checked.append((spec.layout, spec.board))
+    if not checked:
+        pytest.skip("SKIPPED: no KiCad board is fetched")
+
+
+def test_what_an_eagle_board_mills_and_does_not_read_is_printed(tmp_path, capsys):
+    """**A milled shape the EAGLE reader does not read into the outline is
+    said, not passed over** (OH-163, from its review): a copy of the Uno's
+    file with a circle on Dimension (layer 20) in its `<plain>` prints it on
+    a `not cut` line, by kind, and the Uno's own file prints none. Said
+    before the outline is chained, so an outline a dropped shape leaves open
+    still says why."""
+    spec = _uno_whole()
+    text = spec.layout.read_text(encoding="utf-8")
+    assert text.count("<plain>") == 1
+    copy = tmp_path / spec.layout.name
+    copy.write_text(text.replace(
+        "<plain>", '<plain><circle x="30" y="30" radius="1.6" width="0" layer="20"/>'),
+        encoding="utf-8")
+    shipped = _accounting(spec, capsys).splitlines()
+    milled = _accounting(dataclasses.replace(spec, layout=copy), capsys).splitlines()
+    assert not [line for line in shipped if line.startswith("  not cut ")], shipped
+    assert ("  not cut circle on Dimension 1 -- milled, and not read into the "
+            "outline") in milled, milled
+
+
+def test_the_gaps_ride_as_compose_measured_them(capsys):
+    """**What rides under `not_drawn` is held in-process** (OH-163, from its
+    review), not only on a shipped `.glb`: `compose --check` builds it with
+    `not_drawn`, caught here as it returns. On the Uno, every hole is the
+    board's own, so a count of whose they are would not be the count of
+    holes; on the Glyph C3, the holes are its `np_thru_hole` pads and the
+    cutouts its milled circles, each counted off the file's tree."""
+    seen = []
+    real = compose.not_drawn
+
+    def spy(*args, **kwargs):
+        seen.append(real(*args, **kwargs))
+        return seen[-1]
+
+    keys = {"ink", "text", "copper", "cutouts", "holes", "milled", "turn_unseen",
+            "unmodelled", "no_pads"}
+    spec = _uno_whole()
+    with mock.patch.object(compose, "not_drawn", spy):
+        _accounting(spec, capsys)
+    (gaps,) = seen
+    holes = eagle.read_board(spec.layout).holes
+    assert set(gaps) == keys, gaps
+    assert gaps["holes"] == len(holes) > len({hole.element for hole in holes}), gaps
+    assert (gaps["cutouts"], gaps["milled"]) == (0, {}), gaps
+    _newstroke()
+    glyph = next(s for s in compose.COMPOSITIONS if s.board == "PCBCUPID Glyph C3")
+    if not _fetched(glyph):
+        pytest.skip(f"SKIPPED: {glyph.layout.name} is not fetched; {glyph.fetch_with}")
+    tree = kicad.board_tree(glyph.layout)
+    circles = [node for node in kicad.children(tree, "gr_circle")
+               if kicad.first(node, "layer")[1] == "Edge.Cuts"]
+    unplated = [pad for footprint in kicad.children(tree, "footprint")
+                for pad in kicad.children(footprint, "pad") if pad[2] == "np_thru_hole"]
+    seen.clear()
+    with mock.patch.object(compose, "not_drawn", spy):
+        _accounting(glyph, capsys)
+    (gaps,) = seen
+    assert (gaps["holes"], gaps["cutouts"]) == (len(unplated), len(circles)) != (0, 0), gaps
 
 
 def test_a_placement_with_no_pad_that_states_a_mesh_is_a_part(tmp_path, capsys):

@@ -3078,6 +3078,7 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
         sides = list(zip(ring, ring[1:] + ring[:1]))
 
     elements: list[eagle.Element] = []
+    holes: list[eagle.Hole] = []
     for placed in board.placements:
         own = [((s.x1_mm, -s.y1_mm), (s.x2_mm, -s.y2_mm)) for s in placed.outline]
         for arc in placed.arcs:
@@ -3126,6 +3127,18 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
                 back=pad.back,
                 hole=pad.kind == "np_thru_hole",
             ))
+        # **An unplated hole, as an EAGLE board's `<hole>` is** (OH-163, from
+        # its review): one for each `np_thru_hole` pad, where that pad is
+        # placed, at its own `(drill ...)` -- or at the pad's width, where it
+        # states none. An oval drill is a slot, counted as one hole: its
+        # width the hole's, its length beside it. The pad stays among the
+        # element's pads too, which `artwork` counts as drawn as nothing.
+        name = placed.reference or placed.library
+        for pad, made in zip(placed.pads, pads):
+            if pad.kind == "np_thru_hole":
+                width, length = sorted(pad.drill) if pad.drill else (pad.width_mm,) * 2
+                holes.append(eagle.Hole(made.x_mm, made.y_mm, width, name,
+                                        length if length > width else 0.0))
         # **The body outline, which is what makes `silk_miss` able to run.**
         # KiCad names its assembly layer, so this is `F.Fab` rather than the
         # silkscreen EAGLE mixes it in with -- and it arrives in the local
@@ -3162,7 +3175,7 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
             rotation = (180.0 - placed.rotation_deg) % 360.0
 
         elements.append(eagle.Element(
-            name=placed.reference or placed.library,
+            name=name,
             library=placed.library.split(":", 1)[0],
             package=placed.name,
             pads=tuple(pads),
@@ -3218,7 +3231,8 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
                        # `letter` lays text out where KiCad does (OH-163).
                        kicad_text=board.text,
                        traces=tuple(traces), vias=vias,
-                       traces_unread=board.traces_unread)
+                       traces_unread=board.traces_unread,
+                       holes=tuple(holes))
 
 
 def read_layout(path: pathlib.Path) -> eagle.Board:
@@ -6046,6 +6060,38 @@ def point_in(ring: list[tuple[float, float]], point: tuple[float, float]) -> boo
     return hit
 
 
+def not_drawn(board: eagle.Board, cutouts: list[list[tuple[float, float]]],
+              ink: dict[str, int], text: dict[str, int], turn_unseen: list[str],
+              unmodelled: list[str], no_pads: list[str]) -> dict[str, object]:
+    """What `compose` measured and did NOT draw, as it rides in a composed
+    model's extras under `not_drawn` (OH-125): the gaps `compose` found are
+    passed in, and those the board states are read off it here. Built where
+    `compose --check` runs too, so a test holds it in-process (OH-163, from
+    its review), not only on a shipped `.glb`.
+
+    `holes` counts every unplated hole drilled through the board -- an EAGLE
+    `<hole>`, the board's or a package's, and a KiCad `np_thru_hole` pad --
+    and `cutouts` every ring inside the outline, a hole KiCad mills among
+    them. A KiCad `np_thru_hole` is counted twice, on purpose and under two
+    names: here as a hole not cut, and under `extras["artwork"]
+    ["np_thru_hole"]` as a pad drawn as nothing. `milled` is what an EAGLE
+    board mills and its reader does not read into the outline, by kind
+    (`eagle._unmilled`). A plated drill is under no key.
+    """
+    return {
+        "ink": ink,
+        # Each piece of text not drawn, counted under why (OH-163).
+        "text": text,
+        "copper": dict(board.traces_unread),
+        "cutouts": len(cutouts),
+        "holes": len(board.holes),
+        "milled": dict(board.outline_unread),
+        "turn_unseen": turn_unseen,
+        "unmodelled": unmodelled,
+        "no_pads": no_pads,
+    }
+
+
 def compose(spec: Composition, deflection: float, check: bool) -> int:
     """Read, confirm, compose and write one board. Returns the byte count."""
     print(f"{spec.board}:")
@@ -6068,6 +6114,14 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
               f"and this board's {len(board.kicad_text)} texts are lettered in "
               f"it. Run: {FETCH_FONT}")
         return 3
+    # **What a fab mills that the reader did not read into the outline**
+    # (OH-163, from its review): an EAGLE board's, by kind -- see
+    # `eagle._unmilled` -- and said before the outline is chained, so it is
+    # said even where leaving it out leaves the outline open. A KiCad
+    # board's reader refuses such a thing, naming it, instead.
+    if board.outline_unread:
+        print("  not cut " + ", ".join(f"{k} {v}" for k, v in board.outline_unread)
+              + " -- milled, and not read into the outline")
     # **The silhouette, and the cutouts said out loud.** The Uno is one closed
     # ring; a XIAO ESP32-C3 is its edge plus two 1.270 x 0.508 mm routed slots,
     # which `loop` alone reported as "the outline does not chain". A hole
@@ -6079,19 +6133,30 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
               + ", ".join(f"{max(p[0] for p in c) - min(p[0] for p in c):.3f} x "
                           f"{max(p[1] for p in c) - min(p[1] for p in c):.3f} mm"
                           for c in cutouts))
-    # **And a hole EAGLE drills that is no pad**, which is not on the outline
-    # (OH-163): the board's own `<hole>`s and each placed package's, by drill
-    # and by whose. Neither is cut in the slab, which has no hole in it.
+    # **And each unplated hole drilled through the board**, which is not on
+    # the outline (OH-163): an EAGLE board's `<hole>`s, its own and each
+    # placed package's, and a KiCad board's `np_thru_hole` pads, by drill and
+    # by whose; a slot by its width and length. None is cut: the slab has no
+    # hole in it. A KiCad one is ALSO on the artwork line, under
+    # `np_thru_hole`, as a pad drawn as nothing, and this line says how many
+    # of its holes those are. A plated drill -- a pad's, a via's, a slot
+    # milled in a plated pad -- is counted nowhere.
     if board.holes:
-        drilled: dict[tuple[float, str], list[str]] = {}
+        drilled: dict[tuple[float, float, str], list[str]] = {}
         for hole in board.holes:
             package = board.element(hole.element).package if hole.element else ""
-            drilled.setdefault((hole.drill_mm, package), []).append(hole.element)
+            drilled.setdefault((hole.drill_mm, hole.slot_mm, package),
+                               []).append(hole.element)
+        unplated_pads = sum(pad.hole for element in board.elements
+                            for pad in element.pads)
         print(f"  holes   {len(board.holes)} not cut: " + "; ".join(
-            f"{drill:.3f} mm x{len(names)} "
+            (f"{drill:.3f} x {slot:.3f} mm slot" if slot else f"{drill:.3f} mm")
+            + f" x{len(names)} "
             + (f"in {'/'.join(dict.fromkeys(names))} ({package})" if package
                else "in the board itself")
-            for (drill, package), names in drilled.items()))
+            for (drill, slot, package), names in drilled.items())
+            + (f"; {unplated_pads} of them np_thru_hole pads, on the artwork "
+               f"line too as pads drawn as nothing" if unplated_pads else ""))
     xs = [point[0] for point in ring]
     ys = [point[1] for point in ring]
     print(f"  outline {len(ring)} points, "
@@ -6402,8 +6467,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
               + (" ..." if len(unmodelled) > 8 else ""))
     if padless:
         print(f"  no pads {len(padless)} placement(s) put down no pad, so no "
-              f"part stands on them -- ink, a bare hole, or a drawing no fab "
-              f"prints")
+              f"part stands on them -- ink, a drawing no fab prints, or a bare "
+              f"hole, whose drill is on the holes line")
     if unpinned:
         print(f"  turn    {len(unpinned)} placement(s) a half turn would move "
               f"and nothing here can see: {', '.join(unpinned)}")
@@ -6488,6 +6553,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     # DEFAULT_FINISH for a session because nothing printed the assignment
     # where somebody would see it.
     default_finish = report_finishes(whole)
+    gaps = not_drawn(board, cutouts, unread_ink, unlettered, unpinned, unmodelled,
+                     padless)
     if check:
         print("  write   skipped (--check)")
         return 0
@@ -6561,18 +6628,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             # the measurement stopped at stdout. A gap that is measured is
             # a gap somebody can close, and now a reader can see it too.
             "artwork": dict(tally),
-            "not_drawn": {
-                "ink": unread_ink,
-                # Each piece of text not drawn, counted under why (OH-163).
-                "text": unlettered,
-                "copper": dict(board.traces_unread),
-                "cutouts": len(cutouts),
-                # An EAGLE `<hole>`, the board's or a package's (OH-163).
-                "holes": len(board.holes),
-                "turn_unseen": unpinned,
-                "unmodelled": unmodelled,
-                "no_pads": padless,
-            },
+            # See `not_drawn`, which says what each key counts.
+            "not_drawn": gaps,
             # Text the file hides, which KiCad does not plot either: not
             # a gap, so not under `not_drawn` (OH-163).
             "hidden": {"text": hidden},
