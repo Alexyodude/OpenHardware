@@ -680,8 +680,10 @@ def test_a_registry_board_whose_tree_is_not_fetched_names_its_licence_file_and_t
 # looks like a licence. Both Olimex trees hold a LICENSE that is the GPL-3.0's
 # text, for their software; their hardware's CERN-OHL is read from README.md.
 # OH-213: and the cell carries the row's grade of that file, because a README
-# stating a licence is not the licence's text, and the registry grades it
-# `stated` where Arduino's License.txt is `opened`.
+# asserting a licence is not the licence: the registry grades it `stated`,
+# where Adafruit's license.txt, the licence's full text, is `opened`; so is
+# Arduino's License.txt, one sentence. Neither grade says whether the file
+# holds the licence's text.
 
 
 def test_a_registry_boards_licence_rests_on_the_file_its_row_names_not_a_licence_named_one(
@@ -916,6 +918,36 @@ def test_the_markdown_says_why_a_licence_cell_is_absent(tmp_path, monkeypatch):
         line for line in render_markdown().splitlines() if line.startswith("| `Probe` |")
     )
     assert row.endswith(f"| `absent` {cell.detail} |"), row
+
+
+def test_the_markdown_says_why_a_licence_cell_is_unsearchable(tmp_path, monkeypatch):
+    """On a checkout that has fetched nothing, CI's, every registry board's
+    licence cell is `unsearchable`, and its reason -- the file the row reads
+    and the fetch that would bring it -- is what a reader needs."""
+    import tools.inventory as inventory
+
+    monkeypatch.chdir(REPO)
+    probe = _registry_row_reading_no_file(monkeypatch)
+    probe = probe._replace(
+        name="probe-unfetched",
+        licence=probe.licence._replace(file="LICENSE.md", quote="CC BY-SA 4.0"),
+    )
+    monkeypatch.setattr(board_sources, "SOURCES", board_sources.SOURCES + (probe,))
+    assert not probe.dest(REPO).exists()
+    seeed = _vendor_checkout(tmp_path / "seeed", {"LICENSE": "MIT ..."})
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    _board_file(boards, "Probe", licence="CC BY-SA 4.0", registry=probe.name)
+    collect = inventory.collect_assets
+    cell = collect(boards, seeed)[0].licence
+    assert cell.evidence is Evidence.UNSEARCHABLE, cell
+    assert "get_board_sources.py probe-unfetched" in cell.detail, cell
+    monkeypatch.setattr(inventory, "collect_assets", lambda: collect(boards, seeed))
+
+    row = next(
+        line for line in render_markdown().splitlines() if line.startswith("| `Probe` |")
+    )
+    assert row.endswith(f"| `unsearchable` {cell.detail} |"), row
 
 
 def test_missing_names_every_cell_with_nothing_behind_it(tmp_path):

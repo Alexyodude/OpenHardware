@@ -629,10 +629,14 @@ def _registry_licence_cell(
     file its registry row reads the licence from (`licence.file`) and on no
     other, in that row's own tree.
 
-    That file need not hold the licence's text: a README states one, and the
-    registry grades it `stated` where a licence text it opened is `opened`.
-    The classes here say only whether the file is on this disk, so the
-    detail carries the row's grade too, and a README never reads as a licence.
+    The registry grades that file `stated` where it is a README, and
+    `opened` for any other file the row opened and found its quoted words
+    in: a licence's full text (Adafruit's license.txt), a licence file
+    stating it in a sentence (Arduino's License.txt) or summarising it (the
+    Pro Micro's License.md), or a sentence a board file carries. Neither
+    grade says whether the file holds the licence's text. The classes here
+    say only whether the file is on this disk, so the detail carries the
+    row's grade too, and a README never reads as any other file does.
 
     A row naming no file reads `absent` whether or not its tree is fetched:
     there is nothing on any disk to look for, and the row's `cite` says what
@@ -1202,15 +1206,16 @@ def _asset_md(asset: Asset) -> str:
 
 
 def _licence_md(asset: Asset) -> str:
-    """The licence cell, which keeps an absent cell's reason.
+    """The licence cell, which keeps its reason whatever its class.
 
-    An absent schematic is the one search the prose describes. An absent
-    licence is one of several -- the board file records none, the row's tree
-    lacks the file it names, the row names no file -- and without its detail
-    a row naming no file reads as if its file were missing.
+    An absent or unsearchable schematic is the one search the prose
+    describes. A licence cell's reason differs by row: the board file records
+    no licence, the row's tree lacks the file it names, the row names no
+    file, or the tree is not fetched and the cell names the file and the
+    fetch. Without its detail a row naming no file reads as if its file were
+    missing, and on a checkout that has fetched nothing every registry cell
+    reads `unsearchable` and says nothing more.
     """
-    if asset.evidence is Evidence.UNSEARCHABLE:
-        return f"`{asset.summary()}`"
     return f"`{asset.summary()}` {asset.detail}"
 
 
@@ -1290,16 +1295,18 @@ def render_text() -> str:
     lines += [
         "  licence: the board file's source.registry names a row of",
         "  tools/board_sources.py, the row names the file it read the licence",
-        "  from, and the cell looks for that file in the row's own tree. That",
-        "  file may state the licence rather than hold its text, so the cell's",
-        "  detail, which --markdown prints, carries the row's grade of how it",
-        "  was read: stated where the file is a README asserting the licence,",
-        "  opened where the row opened the file and read the licence in it, a",
-        "  licence's text or a sentence a board file carries. A board naming",
-        "  only a footprint is backed by a licence-named file in the tree above,",
-        "  which nothing opens. A licence cell is absent where the board file",
-        "  records no licence, the tree holds no file to back it, or the",
-        "  registry row names no file, citing where it read the licence instead.",
+        "  from, and the cell looks for that file in the row's own tree. The",
+        "  cell's detail, which --markdown prints, carries the row's grade of",
+        "  that file: stated where the file is a README; opened for any other",
+        "  file the row opened and found its quoted words in -- a licence's full",
+        "  text (Adafruit's license.txt), a licence file stating it in a",
+        "  sentence (Arduino's License.txt) or summarising it (the Pro Micro's",
+        "  License.md), or a sentence a board file carries. Neither grade says",
+        "  whether the file holds the licence's text. A board naming only a",
+        "  footprint is backed by a licence-named file in the tree above, which",
+        "  nothing opens. A licence cell is absent where the board file records",
+        "  no licence, the tree holds no file to back it, or the registry row",
+        "  names no file, citing where it read the licence instead.",
     ]
     lines.append("  Evidence, strongest first:")
     for evidence in Evidence:
@@ -1433,16 +1440,19 @@ def render_markdown() -> str:
         "",
         "`licence`: the board file's `source.registry` names a row of "
         "`tools/board_sources.py`, the row names the file it read the licence "
-        "from, and the cell looks for that file in the row's own tree. That file "
-        "may state the licence rather than hold its text, so the cell's detail "
-        "carries the row's grade of how it was read: `graded stated` where the "
-        "file is a README asserting the licence, `graded opened` where the row "
-        "opened the file and read the licence in it, a licence's text or a "
-        "sentence a board file carries. A board naming only a footprint is backed "
-        "by a licence-named file in the tree above, which nothing opens. A licence "
+        "from, and the cell looks for that file in the row's own tree. The cell's "
+        "detail carries the row's grade of that file: `graded stated` where the "
+        "file is a README; `graded opened` for any other file the row opened and "
+        "found its quoted words in -- a licence's full text (Adafruit's "
+        "license.txt), a licence file stating it in a sentence (Arduino's "
+        "License.txt) or summarising it (the Pro Micro's License.md), or a "
+        "sentence a board file carries. Neither grade says whether the file "
+        "holds the licence's text. A board naming only a footprint is backed by a "
+        "licence-named file in the tree above, which nothing opens. A licence "
         "cell is `absent` where the board file records no licence, the tree holds "
         "no file to back it, or the registry row names no file, citing where it "
-        "read the licence instead; its detail says which.",
+        "read the licence instead; its detail says which, as an `unsearchable` "
+        "one's says why the search could not run.",
         "",
     ]
     out += [f"* `{evidence.label}` — {evidence.gloss}" for evidence in Evidence]
