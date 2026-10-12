@@ -2,9 +2,12 @@
 id: OH-217
 title: 'A lit lens''s colour gain and its glow are one constant: split them so the
   colour stays an albedo'
-status: open
+status: in-progress
 priority: P3
 created: '2026-10-09'
+touches:
+- webui/static/parts.js
+- tests/webui/test_lit_lens.py
 ---
 
 Found by OH-214's review (2026-10-09). `webui/static/parts.js`'s `LIT_GAIN` scales both a lit lens's `color` (an albedo, which cannot pass 1.0) and its `emissive` (radiance, which can, up to the clip-to-white `LIT`'s comment describes). At 3.0, chosen in fcce44c, the lit colour passes 1.0: 1.34 for KiCad's LED lens (#b2190d, 0.445 linear red) and 1.85 for the buzzer's mark (#ce6d26, 0.617). OH-214 briefly cut the shared gain to 1.6 to bound the colour; its review showed that also halves the glow and the on/off contrast, and nobody could see the new look, so 3.0 was restored.
