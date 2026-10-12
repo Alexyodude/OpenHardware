@@ -223,30 +223,33 @@ def test_the_board_configures_the_part_and_not_some_other_one():
         assert cpu.extensions() != abi.ESP32_C6, "an ESP32-C6 has A and this does not"
 
 
-def test_reading_the_input_register_faults_rather_than_answering_wrongly():
-    """`GPIO_IN` reads the electrical level on the pins, so on GPIO8 driven
-    high it should read high. This model has no way to express that, so the
-    address is left unmapped and a read **faults**.
+GPIO_IN = esp32c3.GPIO + esp32c3.GPIO_IN
 
-    The same decision `webui/boards/samd21.py` makes about its `PORT_IN`, and
-    the opposite of what `webui/boards/atmega328p.py` could do -- an AVR's data
-    space has no holes, so its `PINB` returns a wrong zero and is pinned as a
-    limitation instead. Faulting is available here and is better.
+
+def test_the_input_register_reads_back_the_pin_the_blink_drives():
+    """`GPIO_IN` reads the electrical level on the pins, so on GPIO8 driven
+    high it reads high and driven low it reads low: `IN` follows `OUT`.
+
+    **This address faulted until OH-161's step 3**, on purpose, because the
+    model had no way to say that and a stored zero would have answered
+    wrongly. The bare-metal blink never touches IO_MUX, so this reads
+    GPIO8's pad as reset leaves it: input enabled (TRM Table 5.12-1, Reset
+    "1"). Stepped until each level rather than for a fixed budget, because
+    the pin toggles every 606 instructions and any constant is a coin flip
+    on which phase it lands in.
     """
     needs_core()
-    from core.riscv32 import abi
-
+    seen: list[tuple[bool, bool]] = []
     with load() as session:
-        # Stepped until the bit is *high* rather than for a fixed budget: it
-        # toggles every 606 instructions, so any constant is a coin flip on
-        # which phase it lands in.
+        last = None
         for _ in range(BUDGET):
             session.step()
-            if session.cpu.read_word(GPIO_OUT) & LED:
-                break
-        assert session.cpu.read_word(GPIO_OUT) & LED, "GPIO8 is driven high"
-        with pytest.raises(abi.MemoryFault):
-            session.cpu.read_word(esp32c3.GPIO + esp32c3.GPIO_IN)
+            out = bool(session.cpu.read_word(GPIO_OUT) & LED)
+            if out != last:
+                seen.append((out, bool(session.cpu.read_word(GPIO_IN) & LED)))
+                last = out
+    assert (True, True) in seen and (False, False) in seen, seen
+    assert all(out == read for out, read in seen), seen
 
 
 def test_the_instruction_bus_view_of_sram_faults_and_the_data_view_does_not():
@@ -672,3 +675,88 @@ def test_the_systimer_registers_this_board_does_not_model_fault_by_name():
             with pytest.raises(abi.MemoryFault) as caught:
                 cpu.read_word(address)
             assert f"0x{address:08x}" in str(caught.value)
+
+
+# --- the pins read: GPIO_IN and IO_MUX (OH-161 step 3) -----------------------
+
+
+def offset_of(text: str, base: str) -> int:
+    """`(BASE +0x24)` or `(BASE + 0x24)` as the integer after the plus."""
+    inner = text.strip("()").replace(" ", "")
+    assert inner.startswith(base + "+"), f"{text!r} is not an offset from {base}"
+    return int(inner[len(base) + 1:], 16)
+
+
+def test_the_io_mux_numbers_this_board_carries_are_the_ones_in_the_header():
+    """The base (`soc.h`), every GPIO's pad register (`IO_MUX_GPIOn_REG`,
+    each through the `PERIPHS_IO_MUX_*_U` it names), the three pad bits and
+    the drive field (`io_mux_reg.h`), and the GPIO count (`soc_caps.h`),
+    read out of the tree `esp32c3.py` cites. Every pad's address is held,
+    not only GPIO0's, so a stride or a gap the board got wrong fails here.
+    Skips where PlatformIO's framework is not installed."""
+    soc = framework_soc()
+    if soc is None:
+        pytest.skip("SKIPPED: no framework-arduinoespressif32; pio pkg install")
+    base = header_defines(soc / "soc.h")
+    mux = header_defines(soc / "io_mux_reg.h")
+    caps = header_defines(soc / "soc_caps.h")
+
+    assert int(base["DR_REG_IO_MUX_BASE"], 16) == esp32c3.IO_MUX
+    pads = {int(name[len("IO_MUX_GPIO"):-len("_REG")]): value
+            for name, value in mux.items()
+            if re.fullmatch(r"IO_MUX_GPIO\d+_REG", name)}
+    assert set(pads) == set(esp32c3.IO_MUX_PADS), sorted(pads)
+    assert len(pads) == int(caps["SOC_GPIO_PIN_COUNT"].strip("()")), (
+        "every GPIO this part counts has a pad")
+    for gpio, periphs in pads.items():
+        assert offset_of(mux[periphs], "REG_IO_MUX_BASE") == (
+            esp32c3.IO_MUX_GPIO0 + gpio * esp32c3.IO_MUX_STRIDE), (
+            f"IO_MUX_GPIO{gpio}_REG is {periphs}, {mux[periphs]}")
+    for name, bit in (("FUN_PD", esp32c3.IO_MUX_FUN_PD),
+                      ("FUN_PU", esp32c3.IO_MUX_FUN_PU),
+                      ("FUN_IE", esp32c3.IO_MUX_FUN_IE)):
+        assert mux[name] == f"(BIT({bit.bit_length() - 1}))", f"{name} is {mux[name]}"
+    assert int(mux["FUN_DRV_S"]) == esp32c3.IO_MUX_FUN_DRV_SHIFT
+
+
+def test_each_pad_comes_out_of_reset_as_its_row_of_the_table_says():
+    """Installed, every pad register reads its composed reset word, and
+    `GPIO_IN` with nothing driven and no output enabled reads exactly the
+    pads the TRM's Table 5.12-1 pulls up with their input on: "3", and
+    MTCK's "1*" at the eFuse's default. GPIO21's "4" pulls up with its input
+    off, so it reads 0; every "1" floats and reads 0.
+
+    The floating pins are the ones `install_gpio_in`'s docstring names, a
+    XIAO's D0 to D3, D5, D8 and D10, and this holds that sentence too."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        for gpio, word in esp32c3.IO_MUX_AT_RESET.items():
+            address = esp32c3.IO_MUX + esp32c3.IO_MUX_GPIO0 + gpio * esp32c3.IO_MUX_STRIDE
+            assert cpu.read_word(address) == word, f"GPIO{gpio} at 0x{address:08x}"
+        pulled_up = {6, 9, 12, 13, 14, 15, 16, 17, 20}
+        assert cpu.read_word(GPIO_IN) == sum(1 << gpio for gpio in pulled_up), (
+            f"{cpu.read_word(GPIO_IN):#010x}")
+
+    pulls = esp32c3.IO_MUX_FUN_PU | esp32c3.IO_MUX_FUN_PD
+    floating = {label for label, gpio in esp32c3.HEADER.items()
+                if esp32c3.IO_MUX_AT_RESET[gpio] & esp32c3.IO_MUX_FUN_IE
+                and not esp32c3.IO_MUX_AT_RESET[gpio] & pulls}
+    assert floating == {"D0", "D1", "D2", "D3", "D5", "D8", "D10"}
+    assert sorted(esp32c3.HEADER[label] for label in floating) == [2, 3, 4, 5, 7, 8, 10]
+
+
+def test_a_gpio_with_no_pad_is_refused_a_drive_by_name():
+    """The C3's pads are GPIO0 to GPIO21; a drive on GPIO22 names it."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        with pytest.raises(ValueError) as caught:
+            esp32c3.drive_pins(cpu, {22: True})
+        assert "GPIO22" in str(caught.value), str(caught.value)
+        esp32c3.drive_pins(cpu, {3: True})
+        assert cpu.read_word(GPIO_IN) & (1 << 3), "GPIO3 is a pad, input on, driven high"

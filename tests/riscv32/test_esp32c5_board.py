@@ -500,21 +500,30 @@ def test_the_c5_register_file_is_not_the_c6_one():
     )
 
 
-def test_reading_the_input_register_faults_rather_than_answering_wrongly():
-    """`GPIO_IN` is unmapped here as on every board that can leave it so. On
-    this part the address is + 0x64, and a board that used a C6's + 0x3c would
-    be reading its own `GPIO_ENABLE_W1TC` instead -- which is mapped, so it
-    would answer rather than fault."""
-    needs_core()
-    from core.riscv32 import abi
+GPIO_IN = esp32c5.GPIO + esp32c5.GPIO_IN
 
-    with abi.Cpu() as cpu:
-        esp32c5.install(cpu)
-        assert not cpu.is_mapped(esp32c5.GPIO + esp32c5.GPIO_IN)
-        assert cpu.is_mapped(esp32c5.GPIO + esp32c5.GPIO_ENABLE_W1TC), (
-            "and the address a copied board would have read instead is mapped, "
-            "so the mistake would have been silent"
-        )
+
+def test_a_pin_driven_high_reads_zero_until_its_input_is_enabled():
+    """**The input enable, watched on a real image.** The C5's GPIO8 comes
+    out of reset with `FUN_IE` clear (TRM Table 8.13-1, Reset "0"), and the
+    bare-metal blink drives it high without touching IO_MUX -- so `GPIO_IN`
+    reads 0 for it, as the silicon's does. Set `FUN_IE` in GPIO8's pad
+    register and the same high pin reads 1.
+
+    `GPIO_IN` is at + 0x64 on this part; a C6's + 0x3c is this part's
+    `GPIO_ENABLE_W1TC`, which reads 0 whatever the pins do, so a board that
+    used it would pass the first half of this and fail the second."""
+    needs_core()
+    pad = esp32c5.IO_MUX + esp32c5.IO_MUX_GPIO0 + 8 * esp32c5.IO_MUX_STRIDE
+    with load() as session:
+        for _ in range(BUDGET):
+            session.step()
+            if session.cpu.read_word(GPIO_OUT) & LED:
+                break
+        assert session.cpu.read_word(GPIO_OUT) & LED, "GPIO8 is driven high"
+        assert not session.cpu.read_word(GPIO_IN) & LED, "its input is off"
+        session.cpu.write_word(pad, session.cpu.read_word(pad) | esp32c5.IO_MUX_FUN_IE)
+        assert session.cpu.read_word(GPIO_IN) & LED, "and on, it reads the pin"
 
 
 def test_the_write_only_aliases_read_as_zero_and_still_reach_their_target():
@@ -945,3 +954,110 @@ def test_the_systimer_registers_this_board_does_not_model_fault_by_name():
             with pytest.raises(abi.MemoryFault) as caught:
                 cpu.read_word(address)
             assert f"0x{address:08x}" in str(caught.value)
+
+
+# --- the pins read: GPIO_IN and IO_MUX (OH-161 step 3) -----------------------
+
+
+def offset_of(text: str, base: str) -> int:
+    """`(BASE + 0x24)` as the integer after the plus."""
+    inner = text.strip("()").replace(" ", "")
+    assert inner.startswith(base + "+"), f"{text!r} is not an offset from {base}"
+    return int(inner[len(base) + 1:], 16)
+
+
+#: The pads `io_mux_reg.h` names that the TRM's table and register leave
+#: out, which `esp32c5.IO_MUX_PADS` says are the SPI flash pads.
+SPI_FLASH_PADS = set(range(15, 23))
+
+
+def test_the_io_mux_numbers_this_board_carries_are_the_ones_in_the_header():
+    """The base (`reg_base.h`), every pad register the board maps, through
+    the `PERIPHS_IO_MUX_U_PAD_*` each `IO_MUX_GPIOn_REG` names -- GPIO0's at
+    **+ 0x0**, where a C6's is at + 0x4 -- and the pad bits and fields
+    (`io_mux_reg.h`). The header names pads for GPIO15 to GPIO22 too; they
+    are the SPI flash pads the TRM's table leaves out, and this holds both
+    that the board leaves them out and why."""
+    root = idf_root()
+    if root is None:
+        pytest.skip("no ESP-IDF checkout; see docs/esp-idf-reference.md")
+    base = defines(root / "components/soc/esp32c5/register/soc/reg_base.h")
+    mux = defines(root / "components/soc/esp32c5/register/soc/io_mux_reg.h")
+
+    assert int(base["DR_REG_IO_MUX_BASE"], 16) == esp32c5.IO_MUX
+    pads = {int(name[len("IO_MUX_GPIO"):-len("_REG")]): value
+            for name, value in mux.items()
+            if re.fullmatch(r"IO_MUX_GPIO\d+_REG", name)}
+    assert set(pads) - set(esp32c5.IO_MUX_PADS) == SPI_FLASH_PADS, sorted(pads)
+    assert set(esp32c5.IO_MUX_PADS) <= set(pads)
+    assert all("SPI" in pads[gpio] for gpio in SPI_FLASH_PADS), {
+        gpio: pads[gpio] for gpio in SPI_FLASH_PADS}
+    for gpio in esp32c5.IO_MUX_PADS:
+        assert offset_of(mux[pads[gpio]], "REG_IO_MUX_BASE") == (
+            esp32c5.IO_MUX_GPIO0 + gpio * esp32c5.IO_MUX_STRIDE), (
+            f"IO_MUX_GPIO{gpio}_REG is {pads[gpio]}, {mux[pads[gpio]]}")
+    for name, bit in (("FUN_PD", esp32c5.IO_MUX_FUN_PD),
+                      ("FUN_PU", esp32c5.IO_MUX_FUN_PU),
+                      ("FUN_IE", esp32c5.IO_MUX_FUN_IE)):
+        assert mux[name] == f"(BIT({bit.bit_length() - 1}))", f"{name} is {mux[name]}"
+    assert int(mux["FUN_DRV_S"]) == esp32c5.IO_MUX_FUN_DRV_SHIFT
+    assert int(mux["MCU_SEL_S"]) == esp32c5.IO_MUX_MCU_SEL_SHIFT
+
+
+def test_the_pad_reset_row_is_every_default_the_struct_states():
+    """`IO_MUX_RESET_ROW` composed from `io_mux_struct.h`'s own field
+    comments -- `mcu_sel` 1 and `fun_drv` 2, and 0 for the rest, `fun_ie`
+    among them -- which restate the TRM's Register 8.25. Read from the LOW
+    bit of each `bitpos`, which for `[14:12]` is the second number."""
+    root = idf_root()
+    if root is None:
+        pytest.skip("no ESP-IDF checkout; see docs/esp-idf-reference.md")
+    text = (root / "components/soc/esp32c5/register/soc/io_mux_struct.h").read_text(
+        encoding="utf-8", errors="replace")
+    block = text[:text.index("} io_mux_gpio_reg_t;")]
+    fields = re.findall(
+        r"/\*\* (\w+) : [\w/]+; bitpos: \[(\d+)(?::(\d+))?\]; default: (\d+);", block)
+    assert fields, "no field comments in io_mux_gpio_reg_t"
+    composed = sum(int(default) << int(low or high) for _name, high, low, default in fields)
+    assert composed == esp32c5.IO_MUX_RESET_ROW, (
+        f"the struct's defaults compose to {composed:#010x}, the board says "
+        f"{esp32c5.IO_MUX_RESET_ROW:#010x}: {fields}")
+
+
+def test_each_pad_comes_out_of_reset_as_its_row_of_the_table_says():
+    """Installed, every pad register reads its composed reset word, and
+    `GPIO_IN` with nothing driven reads exactly the pads Table 8.13-1 pulls
+    up with their input on: "3", and MTCK's "1*" at the eFuse's default.
+    GPIO11's "4" and GPIO14's "3*" have their input on and no pull of the
+    pad's own, so they float and read 0. And the pins `install_gpio_in`
+    says come out with their input off -- a XIAO ESP32-C5's D1, D8, D9 and
+    D10 -- do."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c5.install(cpu)
+        for gpio, word in esp32c5.IO_MUX_AT_RESET.items():
+            address = esp32c5.IO_MUX + esp32c5.IO_MUX_GPIO0 + gpio * esp32c5.IO_MUX_STRIDE
+            assert cpu.read_word(address) == word, f"GPIO{gpio} at 0x{address:08x}"
+        pulled_up = {4, 27, 28}
+        assert cpu.read_word(GPIO_IN) == sum(1 << gpio for gpio in pulled_up), (
+            f"{cpu.read_word(GPIO_IN):#010x}")
+        for gpio in SPI_FLASH_PADS:
+            assert not cpu.is_mapped(
+                esp32c5.IO_MUX + esp32c5.IO_MUX_GPIO0 + gpio * esp32c5.IO_MUX_STRIDE)
+
+    for label in ("D1", "D8", "D9", "D10"):
+        gpio = esp32c5.HEADER[label]
+        assert not esp32c5.IO_MUX_AT_RESET[gpio] & esp32c5.IO_MUX_FUN_IE, (label, gpio)
+
+
+def test_a_flash_pad_is_refused_a_drive_by_name():
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c5.install(cpu)
+        with pytest.raises(ValueError) as caught:
+            esp32c5.drive_pins(cpu, {16: True})
+        assert "GPIO16" in str(caught.value), str(caught.value)

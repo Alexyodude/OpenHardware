@@ -73,6 +73,9 @@ baud divisors and `UART_TXFIFO_CNT` stay unmapped, so firmware that waits for
 room in the FIFO faults at a named address rather than spinning on a zero;
 `webui/boards/esp32c3.py` carries the argument in full.
 
+**The pins read since OH-161's step 3**: `GPIO_IN` and the IO_MUX pad
+register of every GPIO. See `install_gpio_in`.
+
 The mask ROM is not modelled and cannot be, for the reason `esp32c3.py` gives
 at length: it is Espressif's, it is not redistributable, and an ESP-IDF
 application expects it to have set up the cache, the clock and its own function
@@ -166,6 +169,70 @@ GPIO_ENABLE = 0x20
 GPIO_ENABLE_W1TS = 0x24
 GPIO_ENABLE_W1TC = 0x28
 GPIO_IN = 0x3C
+
+#: IO_MUX, `register/soc/reg_base.h:47` --
+#: `#define DR_REG_IO_MUX_BASE 0x60090000`.
+IO_MUX = 0x60090000
+
+#: GPIO0's pad register, `register/soc/io_mux_reg.h:175` --
+#: `#define PERIPHS_IO_MUX_XTAL_32K_P_U (REG_IO_MUX_BASE + 0x4)` -- and each
+#: next GPIO's four bytes on: C6 TRM v1.2, Register 7.20, `IO_MUX_GPIOn_REG
+#: (n: 0-30) (0x0004+4*n)`, p.282. A C3's offset at a C5's base, and a C5's
+#: GPIO0 is at + 0x0.
+IO_MUX_GPIO0 = 0x04
+IO_MUX_STRIDE = 4
+
+#: The pad register's bits this model reads, `register/soc/io_mux_reg.h`:
+#:
+#:     #define FUN_PD (BIT(7))     :42    pull-down enable
+#:     #define FUN_PU (BIT(8))     :47    pull-up enable
+#:     #define FUN_IE (BIT(9))     :52    input enable
+#:     #define FUN_DRV_S 10        :60    drive strength, [11:10]
+IO_MUX_FUN_PD = 1 << 7
+IO_MUX_FUN_PU = 1 << 8
+IO_MUX_FUN_IE = 1 << 9
+IO_MUX_FUN_DRV_SHIFT = 10
+
+#: Every pad this part has, GPIO -> its "DRV" and "Reset" columns in C6 TRM
+#: v1.2 Table 7.12-1, "IO MUX Functions List", p.262: GPIO0 to GPIO30, as
+#: Register 7.20's `n: 0-30` says.
+IO_MUX_PADS: dict[int, tuple[int, str]] = {
+    0: (2, "0"), 1: (2, "0"), 2: (2, "1"), 3: (2, "1"), 4: (2, "1"),
+    5: (2, "1"), 6: (2, "1*"), 7: (2, "1"), 8: (2, "1"), 9: (2, "3"),
+    10: (2, "1"), 11: (2, "1"), 12: (3, "1"), 13: (3, "3"), 14: (2, "1"),
+    15: (2, "1"), 16: (2, "4"), 17: (2, "3"), 18: (2, "3"), 19: (2, "3"),
+    20: (2, "3"), 21: (2, "3"), 22: (2, "3"), 23: (2, "3"), 24: (2, "3"),
+    25: (2, "3"), 26: (2, "3"), 27: (2, "0"), 28: (2, "3"), 29: (2, "3"),
+    30: (2, "3"),
+}
+
+#: The "Reset" column's codes as pad bits, from the legend under the table,
+#: "Reset Configurations", pp.262-263 -- the C3's codes:
+#:
+#:   0   IE = 0                    4   OE = 1, WPU = 1
+#:   1   IE = 1                    1*  MTCK: IE = 1, WPU = 1 while
+#:   3   IE = 1, WPU = 1               EFUSE_DIS_PAD_JTAG is 0, its default
+#:                                     (datasheet v1.5, note 5 under
+#:                                     Table 2-2, p.18)
+#:
+#: "4"'s OE is UART0's transmitter driving GPIO16 through function 0, and
+#: GPIO12's and GPIO13's USB pull-ups are USB_SERIAL_JTAG registers: neither
+#: is a bit of the pad register, and this model maps neither.
+IO_MUX_RESET_BITS: dict[str, int] = {
+    "0": 0,
+    "1": IO_MUX_FUN_IE,
+    "1*": IO_MUX_FUN_IE | IO_MUX_FUN_PU,
+    "3": IO_MUX_FUN_IE | IO_MUX_FUN_PU,
+    "4": IO_MUX_FUN_PU,
+}
+
+#: Each pad register's word out of reset: Register 7.20's reset row, p.282,
+#: with its drive strength and its three pad bits replaced by the pad's own
+#: two columns. Every other field of that row is 0, `MCU_SEL` among them.
+IO_MUX_AT_RESET: dict[int, int] = {
+    gpio: (drv << IO_MUX_FUN_DRV_SHIFT) | IO_MUX_RESET_BITS[code]
+    for gpio, (drv, code) in IO_MUX_PADS.items()
+}
 
 #: UART0's base, `register/soc/reg_base.h:13` -- `#define DR_REG_UART_BASE 0x60000000`. UART0 is the base itself and the only one modelled.
 #:
@@ -378,6 +445,10 @@ class Cpu(typing.Protocol):
                              valid_mask: int, low: int, high: int,
                              high_mask: int, enable: int, enable_mask: int,
                              instructions_per_tick: int) -> None: ...
+    def map_input(self, address: int, *, out: int, enable: int, pad_base: int,
+                  pad_stride: int, pads: int, input_enable: int, pull_up: int,
+                  pull_down: int) -> None: ...
+    def drive_input(self, address: int, *, driven: int, levels: int) -> None: ...
     def stream(self, address: int) -> bytes: ...
     def read_word(self, address: int) -> int: ...
 
@@ -412,13 +483,7 @@ def install_gpio(cpu: Cpu) -> None:
     PORT registers `__IO ... (R/W)` -- so which way round it goes is a per-chip
     fact read from the vendor's own header, never a default.
 
-    `GPIO_IN` is left **unmapped on purpose**, the same decision `esp32c3.py`
-    and `samd21.py` make and for the same reason: `IN` reads the electrical
-    level on the pin, so on a pin driven as an output it follows `OUT`. A
-    stored register reading zero would answer *wrongly* to firmware that drives
-    GPIO8 high and reads it back, and a wrong value a driver acts on costs more
-    than a fault. `GPIO_IN` stays exported so a test can name the address it
-    expects to fault at.
+    `GPIO_IN` is `install_gpio_in`'s.
     """
     cpu.map_register(GPIO + GPIO_OUT, 0)
     cpu.map_alias(GPIO + GPIO_OUT_W1TS, GPIO + GPIO_OUT, "set", readable=False)
@@ -429,6 +494,53 @@ def install_gpio(cpu: Cpu) -> None:
                   readable=False)
     cpu.map_alias(GPIO + GPIO_ENABLE_W1TC, GPIO + GPIO_ENABLE, "clear",
                   readable=False)
+
+
+def install_gpio_in(cpu: Cpu) -> None:
+    """`GPIO_IN`, reading the pins, and the IO_MUX pad register of every
+    GPIO.
+
+    The C3's `install_gpio_in` carries the argument in full: what each bit
+    reads and in what order, why a floating pin reads 0 and is not a fault,
+    and why the outside beats a pull. This part's datasheet, v1.5 Table 5-4,
+    p.65, states the same `IIH`, `IIL`, `CIN` and 45 kohm `RPU` as the
+    C3's. The block is the C3's shape -- GPIO0 at + 0x4 -- at a C5's base,
+    with every GPIO a pad.
+    """
+    pads = 0
+    for gpio, word in IO_MUX_AT_RESET.items():
+        cpu.map_register(IO_MUX + IO_MUX_GPIO0 + gpio * IO_MUX_STRIDE, word)
+        pads |= 1 << gpio
+    cpu.map_input(
+        GPIO + GPIO_IN,
+        out=GPIO + GPIO_OUT,
+        enable=GPIO + GPIO_ENABLE,
+        pad_base=IO_MUX + IO_MUX_GPIO0,
+        pad_stride=IO_MUX_STRIDE,
+        pads=pads,
+        input_enable=IO_MUX_FUN_IE,
+        pull_up=IO_MUX_FUN_PU,
+        pull_down=IO_MUX_FUN_PD,
+    )
+
+
+def drive_pins(cpu: Cpu, levels: typing.Mapping[int, bool]) -> None:
+    """What the outside drives onto the pins: GPIO -> high (True) or low.
+
+    A whole statement, as the C3's `drive_pins` says. A GPIO this part has
+    no pad for is refused, naming it.
+    """
+    driven = 0
+    high = 0
+    for gpio, level in levels.items():
+        if gpio not in IO_MUX_PADS:
+            raise ValueError(
+                f"GPIO{gpio} has no pad on an ESP32-C6; its pads are GPIO"
+                f"{min(IO_MUX_PADS)} to GPIO{max(IO_MUX_PADS)}")
+        driven |= 1 << gpio
+        if level:
+            high |= 1 << gpio
+    cpu.drive_input(GPIO + GPIO_IN, driven=driven, levels=high)
 
 
 def install_uart0(cpu: Cpu) -> None:
@@ -521,5 +633,7 @@ def install(cpu: Cpu) -> None:
     cpu.set_isa(ISA)
     install_memory(cpu)
     install_gpio(cpu)
+    # After `install_gpio`: the input register reads `OUT` and `ENABLE`.
+    install_gpio_in(cpu)
     install_uart0(cpu)
     install_systimer(cpu)

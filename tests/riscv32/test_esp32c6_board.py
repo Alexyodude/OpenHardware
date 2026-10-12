@@ -344,27 +344,27 @@ def test_the_flash_window_top_is_a_build_option_and_the_board_says_so():
     assert esp32c6.IROM_SIZE == 0x1000000, "at the header's default page size"
 
 
-def test_reading_the_input_register_faults_rather_than_answering_wrongly():
-    """`GPIO_IN` reads the electrical level on the pins, so on GPIO8 driven
-    high it should read high. This model has no way to express that, so the
-    address is left unmapped and a read **faults** -- the same decision
-    `esp32c3.py` and `samd21.py` make, and the opposite of what
-    `atmega328p.py` could do, an AVR data space having no holes.
-    """
-    needs_core()
-    from core.riscv32 import abi
+GPIO_IN = esp32c6.GPIO + esp32c6.GPIO_IN
 
+
+def test_the_input_register_reads_back_the_pin_the_blink_drives():
+    """`GPIO_IN` reads the electrical level on the pins, so GPIO8 driven
+    high reads high and driven low reads low: `IN` follows `OUT`. This
+    address faulted until OH-161's step 3. GPIO8's pad comes out of reset
+    with its input on here (TRM Table 7.12-1, Reset "1"), as on a C3 and
+    unlike a C5's."""
+    needs_core()
+    seen: list[tuple[bool, bool]] = []
     with load() as session:
-        # Stepped until the bit is *high* rather than for a fixed budget: it
-        # toggles every 606 instructions, so any constant is a coin flip on
-        # which phase it lands in.
+        last = None
         for _ in range(BUDGET):
             session.step()
-            if session.cpu.read_word(GPIO_OUT) & LED:
-                break
-        assert session.cpu.read_word(GPIO_OUT) & LED, "GPIO8 is driven high"
-        with pytest.raises(abi.MemoryFault):
-            session.cpu.read_word(esp32c6.GPIO + esp32c6.GPIO_IN)
+            out = bool(session.cpu.read_word(GPIO_OUT) & LED)
+            if out != last:
+                seen.append((out, bool(session.cpu.read_word(GPIO_IN) & LED)))
+                last = out
+    assert (True, True) in seen and (False, False) in seen, seen
+    assert all(out == read for out, read in seen), seen
 
 
 def test_an_undescribed_peripheral_faults_rather_than_reading_zero():
@@ -794,3 +794,61 @@ def test_the_systimer_registers_this_board_does_not_model_fault_by_name():
             with pytest.raises(abi.MemoryFault) as caught:
                 cpu.read_word(address)
             assert f"0x{address:08x}" in str(caught.value)
+
+
+# --- the pins read: GPIO_IN and IO_MUX (OH-161 step 3) -----------------------
+
+
+def offset_of(text: str, base: str) -> int:
+    """`(BASE + 0x24)` as the integer after the plus."""
+    inner = text.strip("()").replace(" ", "")
+    assert inner.startswith(base + "+"), f"{text!r} is not an offset from {base}"
+    return int(inner[len(base) + 1:], 16)
+
+
+def test_the_io_mux_numbers_this_board_carries_are_the_ones_in_the_header():
+    """The base (`reg_base.h`), every GPIO's pad register through the
+    `PERIPHS_IO_MUX_*_U` its `IO_MUX_GPIOn_REG` names -- GPIO0's at + 0x4,
+    a C3's offset at a C5's base -- the pad bits and the drive field
+    (`io_mux_reg.h`), and the GPIO count (`soc_caps.h`)."""
+    root = idf_root()
+    if root is None:
+        pytest.skip("no ESP-IDF checkout; see docs/esp-idf-reference.md")
+    base = defines(root / "components/soc/esp32c6/register/soc/reg_base.h")
+    mux = defines(root / "components/soc/esp32c6/register/soc/io_mux_reg.h")
+    caps = defines(root / "components/soc/esp32c6/include/soc/soc_caps.h")
+
+    assert int(base["DR_REG_IO_MUX_BASE"], 16) == esp32c6.IO_MUX
+    pads = {int(name[len("IO_MUX_GPIO"):-len("_REG")]): value
+            for name, value in mux.items()
+            if re.fullmatch(r"IO_MUX_GPIO\d+_REG", name)}
+    assert set(pads) == set(esp32c6.IO_MUX_PADS), sorted(pads)
+    assert len(pads) == int(caps["SOC_GPIO_PIN_COUNT"].strip("()")), (
+        "every GPIO this part counts has a pad")
+    for gpio, periphs in pads.items():
+        assert offset_of(mux[periphs], "REG_IO_MUX_BASE") == (
+            esp32c6.IO_MUX_GPIO0 + gpio * esp32c6.IO_MUX_STRIDE), (
+            f"IO_MUX_GPIO{gpio}_REG is {periphs}, {mux[periphs]}")
+    for name, bit in (("FUN_PD", esp32c6.IO_MUX_FUN_PD),
+                      ("FUN_PU", esp32c6.IO_MUX_FUN_PU),
+                      ("FUN_IE", esp32c6.IO_MUX_FUN_IE)):
+        assert mux[name] == f"(BIT({bit.bit_length() - 1}))", f"{name} is {mux[name]}"
+    assert int(mux["FUN_DRV_S"]) == esp32c6.IO_MUX_FUN_DRV_SHIFT
+
+
+def test_each_pad_comes_out_of_reset_as_its_row_of_the_table_says():
+    """Installed, every pad register reads its composed reset word, and
+    `GPIO_IN` with nothing driven reads exactly the pads Table 7.12-1 pulls
+    up with their input on: "3", and MTCK's "1*" at the eFuse's default.
+    GPIO16's "4" pulls up with its input off, and reads 0."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c6.install(cpu)
+        for gpio, word in esp32c6.IO_MUX_AT_RESET.items():
+            address = esp32c6.IO_MUX + esp32c6.IO_MUX_GPIO0 + gpio * esp32c6.IO_MUX_STRIDE
+            assert cpu.read_word(address) == word, f"GPIO{gpio} at 0x{address:08x}"
+        pulled_up = {6, 9, 13, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30}
+        assert cpu.read_word(GPIO_IN) == sum(1 << gpio for gpio in pulled_up), (
+            f"{cpu.read_word(GPIO_IN):#010x}")

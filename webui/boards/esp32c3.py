@@ -78,6 +78,11 @@ its two value registers; not unit 1, which is the one ESP-IDF's OS tick
 counts on (:31), not the LOAD registers that set a count, and not the three
 comparators, whose alarms need an interrupt this core cannot deliver. See
 `install_systimer`.
+
+**The pins read since OH-161's step 3**: `GPIO_IN` and the IO_MUX pad
+register of every GPIO, whose input enable and pulls decide what an input
+reads. What the outside drives onto a pin arrives only through
+`drive_pins`. See `install_gpio_in`.
 """
 
 from __future__ import annotations
@@ -144,6 +149,74 @@ GPIO_ENABLE = 0x20
 GPIO_ENABLE_W1TS = 0x24
 GPIO_ENABLE_W1TC = 0x28
 GPIO_IN = 0x3C
+
+#: IO_MUX, `soc.h:49` -- `#define DR_REG_IO_MUX_BASE 0x60009000`.
+IO_MUX = 0x60009000
+
+#: GPIO0's pad register, `io_mux_reg.h:175` --
+#: `#define PERIPHS_IO_MUX_XTAL_32K_P_U (REG_IO_MUX_BASE +0x04)` -- and each
+#: next GPIO's four bytes on: C3 TRM v1.4, Register 5.21, `IO_MUX_GPIOn_REG
+#: (n: 0-21) (0x0004+4*n)`, p.187. **+ 0x04 here and on a C6, + 0x0 on a
+#: C5**, the third offset this block moves between neighbours.
+IO_MUX_GPIO0 = 0x04
+IO_MUX_STRIDE = 4
+
+#: The pad register's bits this model reads, `io_mux_reg.h`:
+#:
+#:     #define FUN_PD (BIT(7))     :51    pull-down enable
+#:     #define FUN_PU (BIT(8))     :56    pull-up enable
+#:     #define FUN_IE (BIT(9))     :61    input enable
+#:     #define FUN_DRV_S 10        :69    drive strength, [11:10]
+#:
+#: The TRM calls the first two `FUN_WPD` and `FUN_WPU` (Register 5.21).
+IO_MUX_FUN_PD = 1 << 7
+IO_MUX_FUN_PU = 1 << 8
+IO_MUX_FUN_IE = 1 << 9
+IO_MUX_FUN_DRV_SHIFT = 10
+
+#: Every pad this part has, GPIO -> its "DRV" and "Reset" columns in C3 TRM
+#: v1.4 Table 5.12-1, "IO MUX Pin Functions", p.174. Twenty-two GPIOs, 0 to
+#: 21, as Register 5.21's `n: 0-21` says.
+IO_MUX_PADS: dict[int, tuple[int, str]] = {
+    0: (2, "0"), 1: (2, "0"), 2: (2, "1"), 3: (2, "1"), 4: (2, "1"),
+    5: (2, "1"), 6: (2, "1*"), 7: (2, "1"), 8: (2, "1"), 9: (2, "3"),
+    10: (2, "1"), 11: (2, "0"), 12: (2, "3"), 13: (2, "3"), 14: (2, "3"),
+    15: (2, "3"), 16: (2, "3"), 17: (2, "3"), 18: (3, "0"), 19: (3, "0*"),
+    20: (2, "3"), 21: (2, "4"),
+}
+
+#: The "Reset" column's codes as pad bits, from the legend under the table,
+#: "Reset Configurations", p.175:
+#:
+#:   0   IE = 0                    0*  IE = 0, WPU = 0, and GPIO19's USB
+#:   1   IE = 1                        pull-up is on, which is a USB_SERIAL_JTAG
+#:   3   IE = 1, WPU = 1               register this model does not map
+#:   4   OE = 1, WPU = 1           1*  MTCK: IE = 1, WPU = 1 while
+#:                                     EFUSE_DIS_PAD_JTAG is 0, its default
+#:                                     (datasheet v2.4 Table 2-1 note 6, p.17)
+#:
+#: "4"'s OE is UART0's transmitter driving GPIO21 through function 0, not a
+#: bit of the pad register, and this model routes no peripheral to a pad: an
+#: image that reads GPIO21 without configuring it reads its IE, which is 0.
+IO_MUX_RESET_BITS: dict[str, int] = {
+    "0": 0,
+    "0*": 0,
+    "1": IO_MUX_FUN_IE,
+    "1*": IO_MUX_FUN_IE | IO_MUX_FUN_PU,
+    "3": IO_MUX_FUN_IE | IO_MUX_FUN_PU,
+    "4": IO_MUX_FUN_PU,
+}
+
+#: Each pad register's word out of reset: Register 5.21's reset row with its
+#: drive strength and its three pad bits replaced by the pad's own two
+#: columns. Every other field of that row is 0 -- `MCU_SEL` 0x0 among them --
+#: so the word is the two columns and nothing else. Firmware reading a pad
+#: register back gets what the part gives it, the drive strength included,
+#: though this model reads only the three bits.
+IO_MUX_AT_RESET: dict[int, int] = {
+    gpio: (drv << IO_MUX_FUN_DRV_SHIFT) | IO_MUX_RESET_BITS[code]
+    for gpio, (drv, code) in IO_MUX_PADS.items()
+}
 
 #: UART0's base, from `soc.h`:
 #:
@@ -375,6 +448,10 @@ class Cpu(typing.Protocol):
                              valid_mask: int, low: int, high: int,
                              high_mask: int, enable: int, enable_mask: int,
                              instructions_per_tick: int) -> None: ...
+    def map_input(self, address: int, *, out: int, enable: int, pad_base: int,
+                  pad_stride: int, pads: int, input_enable: int, pull_up: int,
+                  pull_down: int) -> None: ...
+    def drive_input(self, address: int, *, driven: int, levels: int) -> None: ...
     def stream(self, address: int) -> bytes: ...
     def read_word(self, address: int) -> int: ...
 
@@ -412,13 +489,9 @@ def install_gpio(cpu: Cpu) -> None:
     PORT registers `__IO ... (R/W)` -- so which way round it goes is a per-chip
     fact read from the vendor's own header, never a default.
 
-    `GPIO_IN` is left **unmapped on purpose**, the same decision `samd21.py`
-    makes about its own `PORT_IN` and for the same reason: `IN` reads the
-    electrical level on the pin, so on a pin driven as an output it follows
-    `OUT`. A stored register reading zero would answer *wrongly* to firmware
-    that drives GPIO8 high and reads it back, and a wrong value a driver acts
-    on costs more than a fault. `GPIO_IN` stays exported so a test can name the
-    address it expects to fault at.
+    `GPIO_IN` is `install_gpio_in`'s. It was left unmapped here until
+    OH-161's step 3, because a stored register reading zero would answer
+    wrongly to firmware that drives GPIO8 high and reads it back.
     """
     cpu.map_register(GPIO + GPIO_OUT, 0)
     cpu.map_alias(GPIO + GPIO_OUT_W1TS, GPIO + GPIO_OUT, "set", readable=False)
@@ -429,6 +502,76 @@ def install_gpio(cpu: Cpu) -> None:
                   readable=False)
     cpu.map_alias(GPIO + GPIO_ENABLE_W1TC, GPIO + GPIO_ENABLE, "clear",
                   readable=False)
+
+
+def install_gpio_in(cpu: Cpu) -> None:
+    """`GPIO_IN`, reading the pins, and the IO_MUX pad register it reads them
+    through.
+
+    **`IN` reads the electrical level on the pin**, so it is neither a
+    stored word nor a mirror of `OUT`. Per pin, `core/riscv32`'s `map_input`
+    answers 0 where the pad's `FUN_IE` is clear -- the TRM's 5.4.4, p.163:
+    reading needs "the input via IO MUX" enabled -- `OUT` where `ENABLE`
+    drives it, what `drive_pins` says the outside drives it to, 1 where
+    only `FUN_PU` is set, and 0 otherwise.
+
+    **That last 0 is a floating pin, and it is a decision, not a
+    measurement.** Datasheet v2.4 Table 5-4, p.55, gives no level for an
+    input nothing drives: its leakage, `IIH`/`IIL` at most 50 nA, on `CIN`
+    of 2 pF can move the node 25 mV a microsecond, so any held level would
+    model charge this model does not have. 0 is what `circuit.js` solves an
+    undriven node to, and it is not a fault because the read is a word: the
+    core cannot tell which bit the program will look at, and GPIO2, 3, 4,
+    5, 7, 8 and 10 -- a XIAO ESP32-C3's D0 to D3, D5, D8 and D10 -- come out
+    of reset input-enabled and unpulled, so they float until something
+    drives them.
+    A pull-up reads 1 because `RPU` (typ 45 kohm, the same table) against
+    50 nA is a 2.25 mV drop. And a level from the outside beats a pull: the
+    bench's drive is taken as stronger than 45 kohm, which is right for a
+    rail, a switch or a resistor well under it and wrong for a weak
+    resistor fighting the pull -- the Thevenin form that would get that
+    right is deferred, as OH-161's step-3 note records.
+
+    Every pad is mapped at `IO_MUX_AT_RESET`, because this core enters an
+    image with no ROM in front of it, so the pads are as reset leaves them.
+    """
+    pads = 0
+    for gpio, word in IO_MUX_AT_RESET.items():
+        cpu.map_register(IO_MUX + IO_MUX_GPIO0 + gpio * IO_MUX_STRIDE, word)
+        pads |= 1 << gpio
+    cpu.map_input(
+        GPIO + GPIO_IN,
+        out=GPIO + GPIO_OUT,
+        enable=GPIO + GPIO_ENABLE,
+        pad_base=IO_MUX + IO_MUX_GPIO0,
+        pad_stride=IO_MUX_STRIDE,
+        pads=pads,
+        input_enable=IO_MUX_FUN_IE,
+        pull_up=IO_MUX_FUN_PU,
+        pull_down=IO_MUX_FUN_PD,
+    )
+
+
+def drive_pins(cpu: Cpu, levels: typing.Mapping[int, bool]) -> None:
+    """What the outside drives onto the pins: GPIO -> high (True) or low.
+
+    **A whole statement, not a change**: a pin left out is a pin nothing
+    drives, and the core forgets the previous call. `webui/api.py`'s
+    `BoardSession.drive` is the caller, and the only way a level from
+    outside reaches this board. A GPIO this part has no pad for is refused,
+    naming it and the pads there are.
+    """
+    driven = 0
+    high = 0
+    for gpio, level in levels.items():
+        if gpio not in IO_MUX_PADS:
+            raise ValueError(
+                f"GPIO{gpio} has no pad on an ESP32-C3; its pads are GPIO"
+                f"{min(IO_MUX_PADS)} to GPIO{max(IO_MUX_PADS)}")
+        driven |= 1 << gpio
+        if level:
+            high |= 1 << gpio
+    cpu.drive_input(GPIO + GPIO_IN, driven=driven, levels=high)
 
 
 def install_uart0(cpu: Cpu) -> None:
@@ -558,5 +701,7 @@ def install(cpu: Cpu) -> None:
     cpu.set_isa(ISA)
     install_memory(cpu)
     install_gpio(cpu)
+    # After `install_gpio`: the input register reads `OUT` and `ENABLE`.
+    install_gpio_in(cpu)
     install_uart0(cpu)
     install_systimer(cpu)
