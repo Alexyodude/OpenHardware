@@ -1411,10 +1411,11 @@ def render_markdown() -> str:
         "pin would otherwise wire the circuit wrongly and report success.",
         "",
         "**That is the PICSimLab pin index and not the MCU pin.** Since OH-160 "
-        "every board file also carries a `chip_pin` read out of the vendor's "
-        "board-support package, and the boards whose chip has a module report a "
-        "running program's pin levels through the same table — so an "
-        "*outline only* row here is not a board that answers nothing. "
+        "every board file also carries a `chip_pin`, the MCU pin a pad reaches "
+        "as a board-support package or the vendor's own CAD names it. It is a "
+        "caption (OH-172): where a running program's level is read, the pin "
+        "view says so per pad as `modelled` — so an *outline only* row here is "
+        "not a board that answers nothing. "
         "`python tools/import_pindefs.py --all --summary` counts that join.",
         "",
         "| board | pads | wired | artwork | provenance |",
