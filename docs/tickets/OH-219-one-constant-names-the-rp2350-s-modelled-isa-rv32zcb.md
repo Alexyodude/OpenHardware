@@ -54,3 +54,34 @@ Left:
 (c) The rv32zcb corpus's narrow unary inputs (above).
 (d) The C5's Xhwlp is a custom extension whose encodings nothing here has read. Wherever they live, the C5 answers them Illegal now, which may be the same wrong word.
 core/riscv32/** and tests/riscv32/** go back to OH-161 when this closes.
+
+**Note 2026-10-13:** Review round. The verdict was APPROVE, and its LOWs are fixed in 11ced57. The MEDIUM is rp2350.py:103-114's stale comments; that file belongs to OH-161 and is left to its fix round.
+
+1. h3.bextm's register shift is cut to rs2[4:0] by "& 0x1Fu", and no test here can see that mask go. A C++ shift by 32 or more is undefined, and x86 and ARM64 mask the count themselves. Removed again this round: all 18 tests in test_xh3.py and test_disasm.py stay green. exec.cc and test_xh3.py's AMOUNTS now say so; the mask stays.
+
+2. width is now nbits, the doc's word. It hid execute's own width parameter (C4457 under /W4). Recompiled: that warning is gone. The two C4457s that remain, in the LOAD and STORE cases, are older than this ticket.
+
+3. Item 2's corpus result needs a qualification: rv32zcb checks verdicts far better than values. Measured over its 96 cases:
+- All 32 load cases record x9 <- 0, because memory is cleared.
+- All 16 store cases record no write.
+- The Zbb unaries and c.zext.b see only x8 = 0 and 1.
+- A core that did nothing at all would match rvcpp's recorded writes in 61 cases.
+- Only 35 discriminate: 24 loads (only "wrote zero"), 8 c.not and 3 c.mul.
+So "all 96 match rvcpp's recorded writes" is value agreement for about a third of them, and for the loads only that a zero was written. The values are held elsewhere, without the oracle:
+- test_zc.py covers the loads by offset and sign, stores landing where loads read, and the unaries and c.mul.
+- test_zbb_zbkb.py's compressed lockstep covers the Zbb unaries against rvcpp.
+Seeding SANDBOX in the generator would let the corpus see load values. It is not done here, because it would regenerate the committed corpus.
+
+4. disasm.py now names h3.bextm and h3.bextmi, the two shapes the core runs and no others. No binutils can be the reference: objdump 2.43.1 prints 0x00c5850b as ".insn 4, 0x00c5850b", and GCC 14.2 rejects -march=rv32i_xh3bextm as an "unsupported non-standard extension". The form follows the doc's macros, "h3.bextm rd rs1 rs2 nbits" and "h3.bextmi rd rs1 shamt nbits" (custom_extensions.adoc:161, :213). test_xh3.py checks the rendering at every width and shift. Its custom-0 sweep requires the listing to name exactly the words that execute. test_disasm.py accounts for both names. Both checks were red first. Each break went red:
+- nbits without its +1
+- rs1 and rs2 swapped
+- the reserved bits unchecked
+- the names unaccounted
+
+5. h3.block and h3.unblock answer Ok while WFI answers Unimplemented. exec.cc now says why at slt:
+- A WFI may complete at any time: "a legal implementation is to simply implement the WFI instruction as a NOP" (riscv-isa-manual src/priv/machine.adoc:2705-2707 at 1b9ca13).
+- The Hazard3 doc lets h3.block fall through once an unblock arrives, "for some other platform-defined reason" included (custom_extensions.adoc:72-74).
+- rvcpp runs both as slt.
+- Refusing them would need an RP2350-only branch on a base-ISA hint.
+
+Verified: build_core; pytest tests/riscv32 tests/rv32 tests/webui/test_xiao_rp2350_board.py, 319 passed; each checker row from check_layering to check_facts, OK, run one by one. Neither checkall.py nor the full suite was run. Still in review.
