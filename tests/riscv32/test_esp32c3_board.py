@@ -346,8 +346,9 @@ void loop() { digitalWrite(D10, HIGH); delay(1); digitalWrite(D10, LOW); delay(1
 #: Steps to the sketch's second high, where the test below stops. A
 #: `delay(1)` waits a millisecond of SYSTIMER since OH-161 moved it there,
 #: 160,000 steps at this description's ten steps a tick, so two highs are a
-#: whole period apart: the second lands at step 320,130 (measured
-#: 2026-10-09). 330,000 leaves about 9,900 to spare.
+#: whole period apart: the second lands at step 320,155 (measured
+#: 2026-10-12, after OH-161's step 3 gave `pinMode` its pad writes).
+#: 330,000 leaves about 9,800 to spare.
 SKETCH_BUDGET = 330_000
 
 

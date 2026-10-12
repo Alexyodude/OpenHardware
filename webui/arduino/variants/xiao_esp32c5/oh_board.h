@@ -20,9 +20,9 @@
  * collision is recorded and `test_the_c5_register_file_is_not_the_c6_one`
  * is what pins it.
  *
- * No GPIO_IN, for the reason every variant here gives: the description
- * leaves it unmapped on purpose, and the core's API surface equals the
- * model.
+ * No ADC and no I2C, because the description maps neither, and the core's
+ * API surface equals the model. GPIO_IN was absent on the same terms until
+ * OH-161's step 3.
  */
 
 #ifndef OH_BOARD_XIAO_ESP32C5_H
@@ -44,6 +44,21 @@
 #define OH_GPIO_OUT_W1TC     0x6009100Cu
 #define OH_GPIO_ENABLE_W1TS  0x60091038u
 #define OH_GPIO_ENABLE_W1TC  0x6009103Cu
+
+/* GPIO_IN at +0x64 -- +0x3c, which is IN on a C3 and a C6, is
+ * ENABLE_W1TC here -- and the IO_MUX pad registers pinMode sets: GPIO0's at
+ * 0x60090000, at + 0x0 where a C3's and a C6's are at + 0x4, and each next
+ * GPIO's four bytes on; FUN_PD bit 7, FUN_PU bit 8, FUN_IE bit 9.
+ * `gpio_reg.h:235`, `reg_base.h:61`, `io_mux_reg.h:155`, `:46`, `:51` and
+ * `:56`, via webui/boards/esp32c5.py. GPIO15 to GPIO22, the SPI flash pads,
+ * have no register in the description, so a pinMode on one faults naming
+ * where it would be. */
+#define OH_GPIO_IN           0x60091064u
+#define OH_IO_MUX_GPIO0      0x60090000u
+#define OH_IO_MUX_STRIDE     0x4u
+#define OH_IO_MUX_FUN_PD     0x00000080u   /* bit 7 */
+#define OH_IO_MUX_FUN_PU     0x00000100u   /* bit 8 */
+#define OH_IO_MUX_FUN_IE     0x00000200u   /* bit 9 */
 
 /* UART0's transmit FIFO at 0x60000000, and the clock register whose bit 24
  * (+0x88 on this part) gates the transmitter. `register/soc/uart_reg.h:17` and `:1548`, via webui/boards/esp32c5.py.

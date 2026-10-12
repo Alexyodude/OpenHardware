@@ -11,9 +11,9 @@
  * drift; a change to the description that forgets this header fails a test
  * that names it.
  *
- * What is NOT here is as deliberate as what is: no GPIO_IN, because the
- * description leaves it unmapped on purpose (its comment says why), and the
- * core's API surface equals the model.
+ * What is NOT here is as deliberate as what is: no ADC and no I2C, because
+ * the description maps neither, and the core's API surface equals the
+ * model. GPIO_IN was absent on the same terms until OH-161's step 3.
  */
 
 #ifndef OH_BOARD_XIAO_ESP32C3_H
@@ -34,6 +34,18 @@
 #define OH_GPIO_OUT_W1TC     0x6000400Cu
 #define OH_GPIO_ENABLE_W1TS  0x60004024u
 #define OH_GPIO_ENABLE_W1TC  0x60004028u
+
+/* GPIO_IN at +0x3C, which reads the pins, and the IO_MUX pad registers
+ * pinMode sets: GPIO0's at 0x60009004 and each next GPIO's four bytes on,
+ * FUN_PD bit 7, FUN_PU bit 8, FUN_IE bit 9. `gpio_reg.h:122`, `soc.h:49`,
+ * `io_mux_reg.h:175`, `:51`, `:56` and `:61`, via webui/boards/esp32c3.py.
+ * The bits are hex literals for the reason the UART gate's is. */
+#define OH_GPIO_IN           0x6000403Cu
+#define OH_IO_MUX_GPIO0      0x60009004u
+#define OH_IO_MUX_STRIDE     0x4u
+#define OH_IO_MUX_FUN_PD     0x00000080u   /* bit 7 */
+#define OH_IO_MUX_FUN_PU     0x00000100u   /* bit 8 */
+#define OH_IO_MUX_FUN_IE     0x00000200u   /* bit 9 */
 
 /* UART0's transmit FIFO at 0x60000000, and the clock register whose bit 24
  * (+0x78 on this part) gates the transmitter. `uart_reg.h:22` and `:1160`, via webui/boards/esp32c3.py.

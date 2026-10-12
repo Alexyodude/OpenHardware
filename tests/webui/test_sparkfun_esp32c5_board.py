@@ -47,17 +47,19 @@ GPIO_ENABLE = esp32c5.GPIO + esp32c5.GPIO_ENABLE
 #: hold each delay(n).
 MILLISECOND = steps_per_millisecond(esp32c5)
 
-#: Measured 2026-10-09 over fifty moves of this image: the gaps between them
-#: take four lengths, 240,035, 240,041, 240,047 and 240,053 steps, and the
-#: last of them to appear, 240,035, first ends at step 1,680,349, the eighth
-#: move. The one period in six that is a twelve-step poll longer, 480,100
-#: against 480,088, as wiring.c says a period can be, ends at the seventh.
-#: 1,690,000 watches a gap of each length, with about 9,600 to spare.
+#: Measured 2026-10-12 over fifty moves of this image, after OH-161's step 3
+#: gave `pinMode` its pad writes: the gaps between them take four lengths,
+#: 240,035, 240,041, 240,047 and 240,053 steps, and the last of them to
+#: appear, 240,041, first ends at step 2,400,502, the eleventh move. The one
+#: period in six that is a twelve-step poll longer, 480,100 against 480,088,
+#: as wiring.c says a period can be, ends at the third. 2,410,000 watches a
+#: gap of each length, with about 9,500 to spare; it was 1,690,000, eight
+#: moves, when the last length to appear ended at the eighth.
 #:
 #: Every length is watched here for the C5's clock, and in
 #: tests/webui/test_qtpy_esp32c3_board.py for the C3's and the C6's; the
 #: other C3 and C6 board tests watch five moves and point there.
-BUDGET = 1_690_000
+BUDGET = 2_410_000
 
 
 def needs_table() -> None:

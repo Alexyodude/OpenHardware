@@ -350,12 +350,12 @@ def _openhardware(*, variant: str, march: str, base: int,
         # the descriptions map SYSTIMER's unit 0, and both read it. What is
         # absent of that peripheral -- its LOAD registers, unit 1, the
         # comparators -- is likewise unmapped rather than hinted.
+        #
+        # **And `digitalRead` at OH-161's step 3**: the descriptions map
+        # `GPIO_IN` with an electrical model -- the pad's input enable and
+        # pulls, `OUT` on a driven pin, and what `BoardSession.drive` says
+        # the outside does -- so a read has a level to answer with.
         hints=(
-            ("digitalRead",
-             ("digitalRead does not exist on this board's model: its "
-              "webui/boards/ description leaves GPIO_IN unmapped on purpose "
-              "-- on a driven pin IN follows OUT, and a stored zero would "
-              "answer firmware wrongly. The build fails rather than lie.")),
             # Arduino.h stops a build at a pin number it knows to be past
             # the chip's GPIO count, and this is the why (OH-185).
             ("oh_pin_is_past_this_chips_gpio_count",

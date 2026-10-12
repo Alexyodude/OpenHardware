@@ -1287,9 +1287,10 @@ void loop() { digitalWrite(D10, HIGH); digitalWrite(D10, LOW); delay(1); }
 #: Steps for `C3_BLINK` to move its pin four times: high, low, one delay(1),
 #: high and low again. A delay(1) waits a millisecond of SYSTIMER since
 #: OH-161 moved it there, 160,000 steps on a C3 or a C6 and 240,000 on a C5,
-#: and the fourth change lands at step 160,111 on the C3 and the C6 and
-#: 240,115 on the C5 (measured 2026-10-09). 250,000 serves all three with
-#: about 9,900 to spare on the C5.
+#: and the fourth change lands at step 160,124 on the C3 and the C6 and
+#: 240,127 on the C5 (measured 2026-10-12, after OH-161's step 3 gave
+#: `pinMode` its pad writes). 250,000 serves all three with about 9,850 to
+#: spare on the C5.
 FOUR_CHANGES = 250_000
 
 
@@ -1360,10 +1361,11 @@ def test_a_built_c3_sketch_runs_on_the_described_board_and_toggles_its_pin():
 
 
 #: Steps past two periods' worth of milliseconds for a third rise of
-#: `C3_BLINK` at any delay. The first rise lands at step 38 and each period
-#: is its milliseconds and the toggles around them, so the third lands 156
-#: to 160 steps past on the C3, C5 and C6 at delay(1) and delay(3)
-#: (measured 2026-10-09). A thousand leaves about 840 to spare.
+#: `C3_BLINK` at any delay. The first rise lands at step 50 or 51 and each
+#: period is its milliseconds and the toggles around them, so the third
+#: lands 172 to 185 steps past on the C3, C5 and C6 at delay(1) and
+#: delay(3) (measured 2026-10-12, after OH-161's step 3 gave `pinMode` its
+#: pad writes). A thousand leaves about 815 to spare.
 THIRD_RISE = 1_000
 
 
@@ -1372,8 +1374,9 @@ def test_delay_scales_with_its_argument_and_the_period_is_steady():
     there, so each period between toggles is n of the description's
     milliseconds and the toggles around them, to within `POLL`: delay(3)
     costs three delay(1)s and no period wanders off the rate. Measured
-    2026-10-09, 160,061 and 480,061 steps -- the 61 is the two writes, the
-    loop around them and the poll that sees the tick.
+    2026-10-12, 160,061 then 160,073 at delay(1) and 480,061 then 480,073
+    at delay(3) -- the 61 is the two writes, the loop around them and the
+    poll that sees the tick, and the 73 one poll more.
 
     The first rise counts. The counted loop this test was written for
     skipped it; on the timer the first period measures the same as the
@@ -1400,9 +1403,9 @@ def test_delay_scales_with_its_argument_and_the_period_is_steady():
 #: Steps for three rises of the HIGH, delay(1), LOW, delay(1) loops the two
 #: tests below run on the C3. A delay(1) is a millisecond of SYSTIMER since
 #: OH-161 moved it there, 160,000 steps here, so the third rise is two
-#: periods in: step 640,234 for the initialised global's sketch and 640,264
-#: for the constructor's (measured 2026-10-09). 650,000 leaves about 9,700
-#: to spare.
+#: periods in: step 640,259 for the initialised global's sketch and 640,265
+#: for the constructor's (measured 2026-10-12, after OH-161's step 3 gave
+#: `pinMode` its pad writes). 650,000 leaves about 9,700 to spare.
 THREE_RISES = 650_000
 
 
@@ -1531,23 +1534,27 @@ void loop() {
 
 
 def test_each_absence_hints_the_model_decision_it_stands_on():
-    """digitalRead and analogRead are not in the core because they are not in
-    the MODEL, and the person who reaches for one is told that in the pane
-    they are looking at -- the OH-138 pattern, one hint per decision.
+    """analogRead and attachInterrupt are not in the core because they are
+    not in the MODEL, and the person who reaches for one is told that in the
+    pane they are looking at -- the OH-138 pattern, one hint per decision.
 
-    **`Serial` was the second example here until OH-161** and is now the
-    opposite one: the three ESP32 descriptions map UART0's transmit FIFO, so
-    the symbol exists, the sketch builds, and the hint is gone. A test still
-    asserting that refusal would hold the model to a gap it no longer has --
-    so it asserts the fill instead, and `analogRead` takes the place of the
-    absence."""
-    read = c3_build("void setup(){int x = digitalRead(D10);} void loop(){}")
-    assert not read.ok
-    assert "leaves GPIO_IN unmapped on purpose" in read.diagnostics
-
+    **`Serial` was the second example here until OH-161, and `digitalRead`
+    the first until OH-161's step 3**, and both are now the opposite: the
+    three ESP32 descriptions map UART0's transmit FIFO and `GPIO_IN`, so the
+    symbols exist, the sketches build, and their hints are gone. A test
+    still asserting either refusal would hold the model to a gap it no
+    longer has -- so it asserts the fills instead."""
     analog = c3_build("void setup(){int x = analogRead(D10);} void loop(){}")
     assert not analog.ok
     assert "needs the ADC" in analog.diagnostics
+
+    interrupt = c3_build("void f(){} void setup(){attachInterrupt(0, f, 1);} void loop(){}")
+    assert not interrupt.ok
+    assert "no interrupt controller" in interrupt.diagnostics
+
+    read = c3_build("void setup(){int x = digitalRead(D10);} void loop(){}")
+    assert read.ok, read.diagnostics
+    assert "GPIO_IN" not in read.diagnostics
 
     serial = c3_build('void setup(){Serial.println("ok");} void loop(){}')
     assert serial.ok, serial.diagnostics
@@ -1623,6 +1630,17 @@ def test_the_oh_board_header_restates_the_descriptions_own_numbers(variant):
     assert int(defines["OH_SYSTIMER_UNIT0_VALUE_VALID"], 16) == (
         description.SYSTIMER_TIMER_UNIT0_VALUE_VALID)
     assert int(defines["OH_SYSTIMER_TICKS_PER_US"]) * 1_000_000 == description.SYSTIMER_HZ
+    # GPIO_IN and the IO_MUX pads, on the same terms (OH-161 step 3): the
+    # C5's GPIO_IN is at + 0x64 where the others' is at + 0x3c, and its
+    # GPIO0 pad at + 0x0 where theirs is at + 0x4, so a header copied from
+    # a neighbour would read another register or set another pin's pulls.
+    assert int(defines["OH_GPIO_IN"], 16) == gpio + description.GPIO_IN
+    assert int(defines["OH_IO_MUX_GPIO0"], 16) == (
+        description.IO_MUX + description.IO_MUX_GPIO0)
+    assert int(defines["OH_IO_MUX_STRIDE"], 16) == description.IO_MUX_STRIDE
+    assert int(defines["OH_IO_MUX_FUN_PD"], 16) == description.IO_MUX_FUN_PD
+    assert int(defines["OH_IO_MUX_FUN_PU"], 16) == description.IO_MUX_FUN_PU
+    assert int(defines["OH_IO_MUX_FUN_IE"], 16) == description.IO_MUX_FUN_IE
 
     ram_base = getattr(description, ram)
     ram_size = getattr(description, f"{ram}_SIZE")
@@ -1695,12 +1713,16 @@ def test_the_c5_and_c6_delay_is_steady_and_scales(board):
     description's milliseconds and the toggles around them, to within
     `POLL`, and delay(3) costs three delay(1)s.
 
-    Measured 2026-10-09: 160,061 and 480,061 steps on the C6; 720,061 for
-    the C5's delay(3), and 240,053 and 240,065 by turns for its delay(1),
-    whose fifteen-step tick and twelve-step poll fall in and out of step. A
-    period that alternates is why this asks for the rate to within `POLL`
-    and not for one period: the counted loop this test was written for
-    repeated exactly, and on the C5 the timer does not."""
+    Measured 2026-10-12, over the two periods this watches: 160,061 then
+    160,073 at delay(1) and 480,061 then 480,073 at delay(3) on the C6;
+    240,065 twice at the C5's delay(1) and 720,061 twice at its delay(3).
+    On 2026-10-09, before OH-161's step 3 gave `pinMode` its pad writes and
+    moved the first toggle, the C5's delay(1) went 240,053 and 240,065 by
+    turns and the C6's did not alternate at all: where the tick and the
+    twelve-step poll fall in and out of step depends on where the loop
+    starts. That is why this asks for the rate to within `POLL` and not for
+    one period: the counted loop this test was written for repeated
+    exactly, and on the timer the periods do not."""
     description, gpio = OPENHARDWARE_BOARDS[board]
     millisecond = steps_per_millisecond(description)
     one = oh_build(board, C3_BLINK)
@@ -1923,11 +1945,14 @@ def test_begin_reopens_a_port_that_end_closed():
 def test_the_serial_hint_is_gone_where_the_uart_is_modelled():
     """A hint names a modelling decision, and this one named an absence that
     has been filled. What is still absent of that peripheral is unmapped
-    rather than hinted, so it faults at a named address instead."""
+    rather than hinted, so it faults at a named address instead.
+
+    `digitalRead` stood here as an unfilled absence until OH-161's step 3
+    filled it; `attachInterrupt` takes its place."""
     for board in (C3_BOARD, *OPENHARDWARE_BOARDS):
         hints = dict(compiler.recipe_for(board).hints)
         assert "Serial" not in hints, board
-        assert "digitalRead" in hints, f"{board}: the unfilled absences still speak"
+        assert "attachInterrupt" in hints, f"{board}: the unfilled absences still speak"
         assert "analogRead" in hints, board
 
 
@@ -2272,3 +2297,153 @@ def test_the_timer_hints_are_gone_where_the_systimer_is_modelled():
         needs_toolchain(board)
         built = oh_build(board, "void setup(){ millis(); micros(); }\nvoid loop(){}")
         assert built.ok, f"{board}: {built.diagnostics}"
+
+
+# --- a sketch reads a pin, driven as the page will drive it (OH-161 step 3) --
+#
+# The level goes in through `BoardSession.drive`, the call the page's bench
+# will make once it has solved its circuit (slice B), and the sketch's answer
+# comes out through `session.state()["pins"]`, the same view the page draws
+# its pads from. Nothing here reads a register.
+
+#: The three XIAOs, each read through its own description. `D1` is GPIO3 on
+#: the C3, GPIO0 on the C5 and GPIO1 on the C6, and the C5's and C6's come
+#: out of reset with their input off (`IO_MUX_PADS`, Reset "0") -- so a
+#: `pinMode` that left `FUN_IE` alone would read 0 there whatever drove it.
+READING_BOARDS = (C3_BOARD, "XIAO-ESP32-C5-DIP", "XIAO-ESP32-C6-DIP")
+
+ECHO_SKETCH = """
+void setup() { pinMode(%(pin)s, %(mode)s); pinMode(D10, OUTPUT); }
+void loop() { digitalWrite(D10, digitalRead(%(pin)s)); }
+"""
+
+#: Steps run after each drive before D10 is looked at. One pass of `loop`
+#: is a digitalRead and a digitalWrite: measured 2026-10-12, `D10` follows a
+#: drive 29 to 48 steps after it on the three boards, and first leaves
+#: `input` 60 to 66 steps after the image is loaded. `ECHO_REACHED` is
+#: asserted per drive, so a slower read fails here rather than passing on a
+#: budget that happened to be long enough.
+ECHO_STEPS = 200
+ECHO_REACHED = 60
+
+
+def echoed(board: str, mode: str, drives: list[str | None],
+           pin: str = "D1") -> list[str]:
+    """`D10` after each of `drives` -- a level for `pin`, or None for no
+    drive at all -- on `board`, running `ECHO_SKETCH` in `mode`."""
+    built = oh_build(board, ECHO_SKETCH % {"pin": pin, "mode": mode})
+    assert built.ok, f"{board}: {built.diagnostics}"
+    seen: list[str] = []
+    with api.load_firmware(board, built.image,
+                           base=compiler.recipe_for(board).base) as session:
+        for level in drives:
+            if level is not None:
+                session.drive({pin: level})
+            before = session.state()["pins"]["D10"]
+            for step in range(ECHO_STEPS):
+                ran = session.run(1)
+                assert ran.status == "running", f"{board}: {ran.detail}"
+                now = api.pin_levels(session.runtime, session.cpu)["D10"]
+                if level is not None and now != before:
+                    assert step < ECHO_REACHED, (
+                        f"{board}: D10 followed D1 {step + 1} steps after the drive")
+                before = now
+            seen.append(session.state()["pins"]["D10"])
+        assert [levels for _, levels in session.inputs] == [
+            {pin: level} for level in drives if level is not None]
+    return seen
+
+
+def test_a_sketch_echoes_a_pin_driven_high_low_and_open():
+    """`pinMode(D1, INPUT)` and `digitalWrite(D10, digitalRead(D1))`: with
+    nothing driving D1 it floats and reads 0, driven high it reads 1, driven
+    low 0, and left open it floats again. On the C3, the C5 and the C6."""
+    for board in READING_BOARDS:
+        needs_toolchain(board)
+        assert echoed(board, "INPUT", [None, "high", "low", "open", "high"]) == [
+            "low", "high", "low", "low", "high"], board
+
+
+def test_a_pulled_up_input_reads_high_until_something_drives_it_low():
+    """`INPUT_PULLUP` sets the pad's `FUN_PU`: open, the pin reads 1 -- the
+    button's loop, a switch to ground closing it -- and `INPUT_PULLDOWN`'s
+    `FUN_PD` reads 0 open and 1 driven high."""
+    for board in READING_BOARDS:
+        needs_toolchain(board)
+        assert echoed(board, "INPUT_PULLUP", [None, "low", "open", "high"]) == [
+            "high", "low", "high", "high"], board
+        assert echoed(board, "INPUT_PULLDOWN", [None, "high", "open"]) == [
+            "low", "high", "low"], board
+
+
+def test_input_clears_a_pull_the_pad_came_out_of_reset_with():
+    """`D9` is GPIO9 on the C3 and GPIO20 on the C6, and both come out of
+    reset pulled up (`IO_MUX_PADS`, Reset "3"). `pinMode(D9, INPUT)` clears
+    the pull as `gpio_config` does, so with nothing driving it the pin
+    floats and reads 0, not the 1 its reset pull would give."""
+    for board in (C3_BOARD, "XIAO-ESP32-C6-DIP"):
+        needs_toolchain(board)
+        assert echoed(board, "INPUT", [None, "high"], pin="D9") == [
+            "low", "high"], board
+
+
+def test_pin_mode_sets_the_pad_register_as_gpio_config_does():
+    """The pad register itself after `setup`, through the description's
+    own address for it: input enabled in every mode, and exactly the pull
+    the mode names. The only test here that can see `INPUT_PULLDOWN`'s
+    `FUN_PD`, since a pulled-down pin and a floating one both read 0; and
+    on the C5, whose GPIO0 pad is at + 0x0, a header pointing `pinMode` at
+    + 0x4 would set GPIO1's pad and leave this one's input off."""
+    expected = {"INPUT": 0, "OUTPUT": 0, "INPUT_PULLUP": "pu", "INPUT_PULLDOWN": "pd"}
+    for board, description in ((C3_BOARD, esp32c3), ("XIAO-ESP32-C5-DIP", esp32c5),
+                               ("XIAO-ESP32-C6-DIP", esp32c6)):
+        needs_toolchain(board)
+        gpio = description.HEADER["D1"]
+        pad = description.IO_MUX + description.IO_MUX_GPIO0 + gpio * description.IO_MUX_STRIDE
+        pulls = {0: 0, "pu": description.IO_MUX_FUN_PU, "pd": description.IO_MUX_FUN_PD}
+        for mode, pull in expected.items():
+            built = oh_build(board, f"void setup(){{ pinMode(D1, {mode}); }}\nvoid loop(){{}}")
+            assert built.ok, f"{board}: {built.diagnostics}"
+            with api.load_firmware(board, built.image,
+                                   base=compiler.recipe_for(board).base) as session:
+                ran = session.run(ECHO_STEPS)
+                assert ran.status == "running", f"{board}: {ran.detail}"
+                word = session.cpu.read_word(pad)
+            bits = description.IO_MUX_FUN_IE | description.IO_MUX_FUN_PU | description.IO_MUX_FUN_PD
+            assert word & bits == description.IO_MUX_FUN_IE | pulls[pull], (
+                f"{board} {mode}: GPIO{gpio}'s pad reads {word:#010x}")
+
+
+def test_an_output_reads_back_its_own_level():
+    """arduino-esp32's `OUTPUT` is `INPUT | OUTPUT` (`esp32-hal-gpio.h:46-53`
+    @ 2787dab, "where you can read the state of pin even when it is set as
+    OUTPUT"), so `pinMode(OUTPUT)` enables the pad's input too, and a pin
+    driven high reads 1 -- on the C5, whose D10 comes out of reset with its
+    input off, as much as anywhere. The level goes out through Serial."""
+    sketch = """
+void setup() {
+  pinMode(D10, OUTPUT);
+  digitalWrite(D10, HIGH);
+  Serial.print(digitalRead(D10));
+  digitalWrite(D10, LOW);
+  Serial.print(digitalRead(D10));
+}
+void loop() { }
+"""
+    for board in READING_BOARDS:
+        needs_toolchain(board)
+        built = oh_build(board, sketch)
+        assert built.ok, f"{board}: {built.diagnostics}"
+        with api.load_firmware(board, built.image,
+                               base=compiler.recipe_for(board).base) as session:
+            ran = session.run(PRINT_BUDGET)
+            assert ran.status == "running", f"{board}: {ran.detail}"
+            assert session.state()["uart"]["text"] == "10", board
+
+
+def test_the_digitalread_hint_is_gone_where_gpio_in_is_modelled():
+    """The hint named an absence `GPIO_IN` now fills on all three
+    descriptions; left in the table it would only show when a build failed,
+    and these no longer fail."""
+    for board in READING_BOARDS:
+        assert "digitalRead" not in dict(compiler.recipe_for(board).hints), board

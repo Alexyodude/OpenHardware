@@ -42,15 +42,16 @@ GPIO_ENABLE = esp32c6.GPIO + esp32c6.GPIO_ENABLE
 #: hold each delay(n).
 MILLISECOND = steps_per_millisecond(esp32c6)
 
-#: Measured 2026-10-09: this image moves at the same steps as the QT Py
+#: Measured 2026-10-12 over fifty moves, after OH-161's step 3 gave
+#: `pinMode` its pad writes: this image moves at the same steps as the QT Py
 #: ESP32-C3's, and its gaps take the same three lengths, 160,043, 160,049
-#: and 160,055 steps, the longest first ending at step 1,440,461, the tenth
-#: move. 1,450,000 watches a gap of each length, with about 9,500 to spare.
+#: and 160,061 steps, all three ended by the fifth move. 1,450,000 watches
+#: ten moves, the tenth at step 1,440,474, with about 9,500 to spare.
 #:
-#: Every length is watched here as well as on the QT Py because the clock
-#: is one but the description is not: the C6 has its own module and its
-#: own SYSTIMER base (`webui/boards/esp32c6.py`), so a fault only the C6's
-#: description had, showing only from the tenth move, would otherwise be
+#: Ten moves are watched here as well as on the QT Py because the clock is
+#: one but the description is not: the C6 has its own module and its own
+#: SYSTIMER base (`webui/boards/esp32c6.py`), so a fault only the C6's
+#: description had, showing only after the fifth move, would otherwise be
 #: watched by no test. The other C6 board tests watch five moves.
 BUDGET = 1_450_000
 

@@ -1,5 +1,5 @@
-/* OpenHardware - pinMode, digitalWrite, millis, micros, delay and
- * delayMicroseconds against the modelled GPIO and SYSTIMER.
+/* OpenHardware - pinMode, digitalWrite, digitalRead, millis, micros, delay
+ * and delayMicroseconds against the modelled GPIO, IO_MUX and SYSTIMER.
  *
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 the OpenHardware authors. See LICENSE.
@@ -24,13 +24,36 @@ static uint32_t mask_of(uint8_t pin) {
     return pin < OH_GPIO_PIN_COUNT ? (1u << pin) : 0u;
 }
 
-/* `pinMode` and `digitalWrite` in `Arduino.h` call these two. */
+/* `pinMode`, `digitalWrite` and `digitalRead` in `Arduino.h` call these
+ * three.
+ *
+ * `pinMode` sets the pad first, as ESP-IDF's `gpio_config` does on every
+ * call (`components/esp_driver_gpio/src/gpio.c:369-401` at v5.5): its input
+ * enabled whatever the mode -- arduino-esp32's `OUTPUT` is `INPUT | OUTPUT`,
+ * so an output reads back its own level -- and exactly the pull the mode
+ * names, the other cleared, so `INPUT` leaves a pin with no pull at all. A
+ * pin past the count touches no pad register, as it writes no GPIO bit. */
 void oh_pin_mode(uint8_t pin, uint8_t mode) {
+    if (pin < OH_GPIO_PIN_COUNT) {
+        const uint32_t pad = OH_IO_MUX_GPIO0 + OH_IO_MUX_STRIDE * pin;
+        uint32_t word = OH_REG(pad) & ~(OH_IO_MUX_FUN_PU | OH_IO_MUX_FUN_PD);
+        word |= OH_IO_MUX_FUN_IE;
+        if (mode == INPUT_PULLUP) {
+            word |= OH_IO_MUX_FUN_PU;
+        } else if (mode == INPUT_PULLDOWN) {
+            word |= OH_IO_MUX_FUN_PD;
+        }
+        OH_REG(pad) = word;
+    }
     if (mode == OUTPUT) {
         OH_REG(OH_GPIO_ENABLE_W1TS) = mask_of(pin);
     } else {
         OH_REG(OH_GPIO_ENABLE_W1TC) = mask_of(pin);
     }
+}
+
+int oh_digital_read(uint8_t pin) {
+    return (OH_REG(OH_GPIO_IN) & mask_of(pin)) != 0u ? HIGH : LOW;
 }
 
 void oh_digital_write(uint8_t pin, uint8_t value) {

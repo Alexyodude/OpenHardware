@@ -42,12 +42,14 @@ GPIO_ENABLE = esp32c3.GPIO + esp32c3.GPIO_ENABLE
 #: hold each delay(n).
 MILLISECOND = steps_per_millisecond(esp32c3)
 
-#: Measured 2026-10-09 over fifty moves of this image: the gaps between them
-#: take three lengths, 160,043, 160,049 and 160,055 steps, and the longest
-#: first ends at step 1,440,461, the tenth move. It is half of the one period
-#: in four that is a twelve-step poll longer, 320,104 against 320,092, as
-#: wiring.c says a period can be. 1,450,000 watches a gap of each length,
-#: with about 9,500 to spare.
+#: Measured 2026-10-12 over fifty moves of this image, after OH-161's step 3
+#: gave `pinMode` its pad writes: the gaps between them take three lengths,
+#: 160,043, 160,049 and 160,061 steps, and all three have ended by step
+#: 640,247, the fifth move. The longest is half of the one period in four
+#: that is a twelve-step poll longer, 320,104 against 320,092, as wiring.c
+#: says a period can be. 1,450,000 watches ten moves, the tenth at step
+#: 1,440,474, with about 9,500 to spare: every length, and the longest
+#: twice.
 #:
 #: Every length is watched here for the C3's and the C6's one clock, in
 #: tests/webui/test_sparkfun_esp32c6_board.py again for the C6's own

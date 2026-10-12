@@ -18,10 +18,10 @@
  * it is. **The API here is exactly what the board descriptions model.** A
  * function is present when every register it needs is mapped, and absent --
  * with a `Recipe.hints` row naming the modelling decision -- when one is
- * not. `digitalRead` is the worked example: `webui/boards/esp32c3.py`
- * leaves `GPIO_IN` unmapped on purpose (its comment says why), so this
- * header deliberately does not declare it, and reaching for it earns the
- * explanation at the moment gcc says "undefined reference".
+ * not. `analogRead` is the worked example: no description maps an ADC, so
+ * this header deliberately does not declare it, and reaching for it earns
+ * the explanation at the moment gcc says it was not declared.
+ * `digitalRead` was the example until OH-161's step 3 mapped `GPIO_IN`.
  *
  * The pin NAMES are still the vendor's: each recipe puts the board's own
  * `pins_arduino.h` -- plain constants, and at most ESP-IDF's
@@ -41,8 +41,17 @@
 #define LOW 0
 #define HIGH 1
 
+/* The four modes and their numbers as Arduino's own API declares them,
+ * `ArduinoCore-API`'s `api/Common.h:39-42` at a1f668d. Not arduino-esp32's
+ * numbers (`INPUT` 0x01, `OUTPUT` 0x03, `INPUT_PULLUP` 0x05,
+ * `INPUT_PULLDOWN` 0x09, `cores/esp32/esp32-hal-gpio.h:46-53` at 2787dab),
+ * which are bit fields for its own `gpio_config`; what this core takes from
+ * them is the meaning -- an `OUTPUT` reads back its own level -- and not the
+ * encoding. A sketch names the mode, so the numbers are this core's own. */
 #define INPUT 0
 #define OUTPUT 1
+#define INPUT_PULLUP 2
+#define INPUT_PULLDOWN 3
 
 #ifdef __cplusplus
 extern "C" {
@@ -60,10 +69,15 @@ void loop(void);
  * one the compiler knows -- a constant such as an RGB board's
  * `LED_BUILTIN`, which arduino-esp32 numbers `SOC_GPIO_PIN_COUNT` plus the
  * LED's pin -- stops the build at the call, where the recipe's hint says
- * what it is, rather than building a sketch that moves nothing. The two
- * functions are these inline checks in front of `wiring.c`'s own. */
+ * what it is, rather than building a sketch that moves nothing. The three
+ * functions are these inline checks in front of `wiring.c`'s own.
+ *
+ * `digitalRead` reads `GPIO_IN`, which reads the pins (OH-161 step 3):
+ * what `pinMode` set the pad to, and what the outside drives it to.
+ * Declared `int`, as arduino-esp32 declares it. */
 void oh_pin_mode(uint8_t pin, uint8_t mode);
 void oh_digital_write(uint8_t pin, uint8_t value);
+int oh_digital_read(uint8_t pin);
 void oh_pin_is_past_this_chips_gpio_count(void)
     __attribute__((error("the pin is at or past this chip's GPIO count")));
 
@@ -79,6 +93,13 @@ static inline __attribute__((always_inline)) void digitalWrite(uint8_t pin, uint
         oh_pin_is_past_this_chips_gpio_count();
     }
     oh_digital_write(pin, value);
+}
+
+static inline __attribute__((always_inline)) int digitalRead(uint8_t pin) {
+    if (__builtin_constant_p(pin) && pin >= OH_GPIO_PIN_COUNT) {
+        oh_pin_is_past_this_chips_gpio_count();
+    }
+    return oh_digital_read(pin);
 }
 
 /* Time since the board was installed, read from SYSTIMER unit 0, which the

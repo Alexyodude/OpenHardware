@@ -47,14 +47,16 @@ GPIO_ENABLE = esp32c3.GPIO + esp32c3.GPIO_ENABLE
 #: hold each delay(n).
 MILLISECOND = steps_per_millisecond(esp32c3)
 
-#: Five moves of this image, measured 2026-10-09: the fifth lands at step
-#: 640,222, so 650,000 watches four gaps, 160,043 and 160,049 steps by
-#: turns, with about 9,800 to spare. The third length, 160,055, first ends
-#: at the tenth move and is not watched here. It need not be: the gaps are
-#: delay()'s on this clock, measured the same on every C3 and C6 image, and
-#: `POLL` holds each one to the millisecond whatever its length, so whether
+#: Five moves of this image, measured 2026-10-12, after OH-161's step 3
+#: gave `pinMode` its pad writes: the fifth lands at step 640,247, so
+#: 650,000 watches four gaps -- 160,043, 160,061, 160,043 and 160,049
+#: steps -- with about 9,750 to spare. Those are the three lengths the gaps
+#: take over fifty moves of the QT Py's and the SparkFun Thing Plus C6's
+#: images, whose first six moves are this image's. That this board sees
+#: each is a fact about today's wiring.c and not what the budget is for:
+#: `POLL` holds each gap to the millisecond whatever its length, so whether
 #: the longest is within it is asked once per clock and not once per board
-#: -- tests/webui/test_qtpy_esp32c3_board.py watches every length.
+#: -- tests/webui/test_qtpy_esp32c3_board.py watches ten moves.
 BUDGET = 650_000
 
 
