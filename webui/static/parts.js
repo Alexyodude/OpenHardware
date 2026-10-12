@@ -63,21 +63,27 @@ export const BENCH_PITCH = 6.0;
 
 //: How hard a lit lens glows: the radiance of its brightest channel, in the
 //: lens's own hue. Not a colour -- the colour is the part's own, from the file
-//: -- and not the colour's gain, which `setPartState` takes from each lens and
+//: -- and not the colour's gain, which `dressPart` takes from each lens and
 //: which cannot pass one over its brightest channel. This is the one number
 //: chosen for the look (OH-217).
 //:
-//: **1.2 is the middle, to a tenth, of the window two bounds leave**, each
-//: run on every lens a part names by `tests/webui/test_lit_lens.py`, through
-//: OH-227's proxy under the light the page was measured putting on each lens:
+//: **1.2 is the middle, to a tenth, of the window two bounds leave on every
+//: lens a part names.** `tests/webui/test_lit_lens.py` computes that window
+//: through OH-227's proxy, under the light the page was measured putting on
+//: each lens, prints it when it fails, and holds this to its middle:
 //:
-//: - **from 0.92**, lit and unlit 3:1 apart in luminance, the bar WCAG sets
-//:   for a state change on the same pixels (SC 2.4.13, Focus Appearance;
-//:   the test cites it). The buzzer's mark sets it;
-//:   KiCad's LED lens clears it from 0.59.
-//: - **to 1.49**, lit at least as colourful as unlit. Past that the tone
-//:   curve presses the buzzer's orange mark toward peach, and past 2.67 the
-//:   red LED toward pink: the clip to white this comment used to warn of.
+//: - **at least** lit and unlit 3:1 apart in luminance. The bar is borrowed
+//:   from WCAG's SC 2.4.13 (AAA, keyboard focus indicators), the only WCAG
+//:   criterion that compares the same pixels in two states; WCAG sets no
+//:   such bar for other state changes (Understanding 1.4.11).
+//: - **at most** as bright as leaves a lit lens as colourful as an unlit
+//:   one. Past that the tone curve presses the buzzer's orange mark toward
+//:   peach, and further on the red LED toward pink: the clip to white this
+//:   comment used to warn of.
+//:
+//: Which lens sets each end is in what the test prints, per lens. **If a lens
+//: added to `PARTS` closes the window**, no one glow serves every lens, and
+//: the fallback is a glow per lens, each from the same two bounds.
 //:
 //: **Seen in the page 2026-10-13**, the Arduino Uno blinking pin 13 into a
 //: 5 mm LED and the 12 mm buzzer, in both themes alike: the LED went from a
@@ -87,9 +93,9 @@ export const BENCH_PITCH = 6.0;
 //: **It was 1.2 before as well, over a colour and an emission each 3.0 times
 //: the lens's own** -- `LIT_GAIN`, fcce44c's, which put the LED lens's colour
 //: at 1.34 and the buzzer's at 1.85 -- so each emitted 3.6 times its own
-//: colour, 1.60 in the LED's red. That drew the LED salmon, (251, 105, 101), and the mark
-//: peach, (252, 171, 135), less colourful lit (chroma 40.0) than unlit (46.6):
-//: brighter, 4.59:1 and 3.97:1, by being whiter.
+//: colour, 1.60 in the LED's red. That drew the LED salmon, (251, 105, 101),
+//: and the mark peach, (252, 171, 135), less colourful lit (chroma 40.0) than
+//: unlit (46.6): brighter, 4.59:1 and 3.97:1, by being whiter.
 const LIT = 1.2;
 
 //: What a part can be shown doing, and **a circuit decides which** --
@@ -144,14 +150,24 @@ export function dressPart(group, extras, palette) {
       // either lights both.
       object.material = object.material.clone();
       object.userData.baseColour = object.material.color.clone();
-      // Lit, the lens is brightened by one over its brightest channel, and a
-      // black lens has no hue to brighten.
+      // **Lit, the lens is its own colour over its brightest channel**
+      // (OH-217). The colour is an albedo, so no channel of it passes 1.0;
+      // this makes that channel exactly 1.0 and keeps the lens's hue. The
+      // gain is the lens's own rather than one shared by every lens -- one
+      // over the brightest lens any part names, the buzzer's 0.617 red, so
+      // 1.62, which was OH-214's -- because a lens's unlit tint says how dark
+      // its plastic is, not how bright the part shines when it is on: a
+      // shared gain would tie the LED to the buzzer's painted mark, and a
+      // lighter lens added to `PARTS` would dim every other one. A black lens
+      // has no hue to light.
       const peak = Math.max(...object.userData.baseColour.toArray());
       if (!(peak > 0)) {
         throw new Error(`${extras.chip}'s lens ${extras.lens} is ` +
                         `[${object.userData.baseColour.toArray()}] linear, ` +
                         `which has no hue to light`);
       }
+      object.userData.litColour =
+        object.userData.baseColour.clone().multiplyScalar(1 / peak);
     }
   });
 
@@ -296,19 +312,12 @@ export function setPartState(part, drive, palette) {
     return;
   }
   if (drive === "lit") {
-    // The same hue, as bright as a surface can be, plus its own light. A lit
-    // LED is not a differently coloured LED.
-    //
-    // **The colour is an albedo, so no channel of it passes 1.0** (OH-217),
-    // and its gain is the lens's own: one over its brightest channel, so that
-    // channel is exactly 1.0. A gain shared by every lens -- one over the
-    // brightest lens any part names, the buzzer's 0.617 red, so 1.62 -- holds
-    // the bound too and was OH-214's; it is not used because a brighter lens
-    // added to `PARTS` would then dim every other lens's colour. The glow is
-    // `LIT`, chosen on its own, in the same hue.
-    const peak = Math.max(base.r, base.g, base.b);
-    lens.material.color.copy(base).multiplyScalar(1 / peak);
-    lens.material.emissive.copy(lens.material.color);
+    // The same hue, as bright as a surface can be (`dressPart` says why that
+    // is the lens's own colour over its brightest channel), plus its own
+    // light in that hue at `LIT`. A lit LED is not a differently coloured
+    // LED.
+    lens.material.color.copy(lens.userData.litColour);
+    lens.material.emissive.copy(lens.userData.litColour);
     lens.material.emissiveIntensity = LIT;
     return;
   }
