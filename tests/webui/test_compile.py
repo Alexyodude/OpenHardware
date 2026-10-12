@@ -1645,34 +1645,39 @@ def test_the_oh_board_header_restates_the_descriptions_own_numbers(variant):
     assert int(defines["OH_IO_MUX_FUN_PD"], 16) == description.IO_MUX_FUN_PD
     assert int(defines["OH_IO_MUX_FUN_PU"], 16) == description.IO_MUX_FUN_PU
     assert int(defines["OH_IO_MUX_FUN_IE"], 16) == description.IO_MUX_FUN_IE
-    # ADC1's one-time sample, on the same terms (OH-161 step 4), on each
-    # variant whose description maps it: the C3's block is at 0x60040000
-    # and gated in its own CTRL, so a header copied from a neighbour would
-    # start a conversion this part does not map. The channels are a run of
-    # GPIOs, so the header's first and count must make the description's
-    # table exactly.
-    if hasattr(description, "APB_SARADC"):
-        adc = description.APB_SARADC
-        for define, offset in (
-            ("OH_ADC_ONETIME_SAMPLE", description.APB_SARADC_ONETIME_SAMPLE),
-            ("OH_ADC_SAR1_DATA", description.APB_SARADC_SAR1_DATA),
-            ("OH_ADC_INT_RAW", description.APB_SARADC_INT_RAW),
-            ("OH_ADC_INT_CLR", description.APB_SARADC_INT_CLR),
-        ):
-            assert int(defines[define], 16) == adc + offset, define
-        assert int(defines["OH_ADC_ONETIME_SAR1"], 16) == description.ONETIME_SAR1
-        assert int(defines["OH_ADC_ONETIME_START"], 16) == description.ONETIME_START
-        assert int(defines["OH_ADC1_DONE"], 16) == description.ADC1_DONE
-        assert int(defines["OH_ADC_ONETIME_CHANNEL_SHIFT"]) == description.ONETIME_CHANNEL_SHIFT
-        assert int(defines["OH_ADC_ONETIME_ATTEN_12DB"], 16) == (
-            3 << description.ONETIME_ATTEN_SHIFT), "12 dB, arduino-esp32's ADC_11db"
-        assert description.ADC_ATTEN_K[3] == 0.25
-        first = int(defines["OH_ADC1_FIRST_GPIO"])
-        count = int(defines["OH_ADC1_CHANNELS"])
-        assert {first + n: n for n in range(count)} == description.ADC1_CHANNELS
-        gate, gate_bit = description.ADC_GATE
-        assert int(defines["OH_ADC_GATE"], 16) == gate
-        assert int(defines["OH_ADC_GATE_EN"], 16) == gate_bit
+    # ADC1's one-time sample, on the same terms (OH-161 step 4): the C3's
+    # block is at 0x60040000 and the C5's and C6's at 0x6000E000; the C3
+    # gates it in its own CTRL and the others in PCR, at + 0x8c on a C5 and
+    # + 0x84 on a C6, so a header copied from a neighbour would set a clock
+    # this part keeps elsewhere. The channels are a run of GPIOs -- from
+    # GPIO1 on a C5 -- so the header's first and count must make the
+    # description's table exactly. The PCR register clock is set only where
+    # the description maps it.
+    adc = description.APB_SARADC
+    for define, offset in (
+        ("OH_ADC_ONETIME_SAMPLE", description.APB_SARADC_ONETIME_SAMPLE),
+        ("OH_ADC_SAR1_DATA", description.APB_SARADC_SAR1_DATA),
+        ("OH_ADC_INT_RAW", description.APB_SARADC_INT_RAW),
+        ("OH_ADC_INT_CLR", description.APB_SARADC_INT_CLR),
+    ):
+        assert int(defines[define], 16) == adc + offset, define
+    assert int(defines["OH_ADC_ONETIME_SAR1"], 16) == description.ONETIME_SAR1
+    assert int(defines["OH_ADC_ONETIME_START"], 16) == description.ONETIME_START
+    assert int(defines["OH_ADC1_DONE"], 16) == description.ADC1_DONE
+    assert int(defines["OH_ADC_ONETIME_CHANNEL_SHIFT"]) == description.ONETIME_CHANNEL_SHIFT
+    assert int(defines["OH_ADC_ONETIME_ATTEN_12DB"], 16) == (
+        3 << description.ONETIME_ATTEN_SHIFT), "12 dB, arduino-esp32's ADC_11db"
+    assert description.ADC_ATTEN_K[3] == 0.25
+    first = int(defines["OH_ADC1_FIRST_GPIO"])
+    count = int(defines["OH_ADC1_CHANNELS"])
+    assert {first + n: n for n in range(count)} == description.ADC1_CHANNELS
+    gate, gate_bit = description.ADC_GATE
+    assert int(defines["OH_ADC_GATE"], 16) == gate
+    assert int(defines["OH_ADC_GATE_EN"], 16) == gate_bit
+    assert ("OH_ADC_BUS_CLOCK" in defines) == hasattr(description, "PCR_SARADC_CONF")
+    if hasattr(description, "PCR_SARADC_CONF"):
+        assert int(defines["OH_ADC_BUS_CLOCK"], 16) == description.PCR + description.PCR_SARADC_CONF
+        assert int(defines["OH_ADC_BUS_CLOCK_EN"], 16) == description.PCR_SARADC_REG_CLK_EN
 
     ram_base = getattr(description, ram)
     ram_size = getattr(description, f"{ram}_SIZE")
@@ -2489,7 +2494,8 @@ def test_the_digitalread_hint_is_gone_where_gpio_in_is_modelled():
 # Nothing here reads a register.
 
 #: The XIAOs whose descriptions map ADC1's one-time sample.
-ANALOG_BOARDS = {C3_BOARD: esp32c3}
+ANALOG_BOARDS = {C3_BOARD: esp32c3, "XIAO-ESP32-C5-DIP": esp32c5,
+                 "XIAO-ESP32-C6-DIP": esp32c6}
 
 #: Prints each code `analogRead(A0)` gives that differs from the last, so
 #: the text is the sequence of readings and not how many loops ran.
@@ -2516,8 +2522,8 @@ void loop() {
 """
 
 #: Steps run after loading and after each hold. Measured 2026-10-13 on the
-#: XIAO ESP32-C3: `ANALOG_SKETCH`'s first byte at step 89, and each new
-#: line complete 93 to 135 steps after the drive that changed the code.
+#: three XIAOs: `ANALOG_SKETCH`'s first byte at step 89 to 96, and each new
+#: line complete 93 to 142 steps after the drive that changed the code.
 ANALOG_STEPS = 2_000
 
 
@@ -2613,9 +2619,20 @@ def test_analog_read_leaves_the_pad_as_gpio_config_as_analog_does():
             assert ran.status == "running", f"{board}: {ran.detail}"
             word = session.cpu.read_word(pad)
             enable = session.cpu.read_word(description.GPIO + description.GPIO_ENABLE)
+            gate, gate_bit = description.ADC_GATE
+            clocks = [(gate, gate_bit)]
+            if hasattr(description, "PCR_SARADC_CONF"):
+                clocks.append((description.PCR + description.PCR_SARADC_CONF,
+                               description.PCR_SARADC_REG_CLK_EN))
+            unset = [f"{address:#010x} bit {bit:#x}" for address, bit in clocks
+                     if not session.cpu.read_word(address) & bit]
         bits = description.IO_MUX_FUN_IE | description.IO_MUX_FUN_PU | description.IO_MUX_FUN_PD
         assert word & bits == 0, f"{board}: GPIO{gpio}'s pad reads {word:#010x}"
         assert not enable & (1 << gpio), f"{board}: GPIO{gpio} still drives"
+        # And the clocks ESP-IDF turns on, the gate and, on a C5 and a C6,
+        # PCR's register clock -- which resets off on a C5 and which the
+        # model does not check, so only this sees analogRead set it.
+        assert unset == [], f"{board}: analogRead left {unset} clear"
 
 
 def test_a_pin_on_no_adc1_channel_is_refused_where_known_and_reads_0_where_not():
@@ -2628,18 +2645,23 @@ def test_a_pin_on_no_adc1_channel_is_refused_where_known_and_reads_0_where_not()
     assert not refused.ok
     assert "on none of its channels" in refused.diagnostics, refused.diagnostics
     assert "variants/xiao_esp32c3/oh_board.h" in refused.diagnostics
+    # A XIAO ESP32-C5's D1 is GPIO0, below the C5's first channel, GPIO1.
+    needs_toolchain("XIAO-ESP32-C5-DIP")
+    below = oh_build("XIAO-ESP32-C5-DIP", "void setup(){ analogRead(D1); }\nvoid loop(){}")
+    assert not below.ok and "on none of its channels" in below.diagnostics, below.diagnostics
+    assert "variants/xiao_esp32c5/oh_board.h" in below.diagnostics
     source = ("volatile uint8_t pin = 10;\n"
               "void setup(){ Serial.println(analogRead(pin)); }\nvoid loop(){}")
     assert printed(C3_BOARD, esp32c3, source) == b"0\r\n"
 
 
 def test_the_analogread_hint_is_gone_where_the_adc_is_modelled():
-    """The hint named an absence ADC1's one-time sample now fills -- on every
-    board built against a chip whose description maps it, the manifest's
-    C3 rows with the XIAO -- and still stands where it does not."""
+    """The hint named an absence ADC1's one-time sample now fills on all
+    three descriptions, so it is gone from every board built against one of
+    them: the three XIAOs and the manifest's ESP32 rows."""
     rows = [row.board for row in board_manifest.ROWS if row.chip.startswith("ESP32-C")]
     assert len(rows) >= 2, rows
-    for board in (C3_BOARD, *OPENHARDWARE_BOARDS, *rows):
+    for board in (*ANALOG_BOARDS, *rows):
+        assert api.description_for(board) in ANALOG_BOARDS.values(), board
         hints = dict(compiler.recipe_for(board).hints)
-        modelled = api.description_for(board) in ANALOG_BOARDS.values()
-        assert ("analogRead" in hints) != modelled, (board, sorted(hints))
+        assert "analogRead" not in hints, (board, sorted(hints))

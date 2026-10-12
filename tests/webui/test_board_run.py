@@ -1424,6 +1424,25 @@ def test_two_labels_of_one_gpio_held_at_two_voltages_are_refused(monkeypatch):
         str(caught.value))
 
 
+def test_every_description_that_reads_input_converts_a_voltage_too():
+    """**The page posts volts wherever it posts levels**: `circuit.js`
+    answers both on a board whose supply states input levels, which is
+    exactly where the description reads input
+    (`test_a_supply_states_input_levels_exactly_where_its_board_reads_input`).
+    So a description with `drive_pins` and no `hold_volts` would have every
+    post the page made refused, levels and all. Held over the catalogue;
+    the XIAO ESP32-C5 joined at OH-161's step 4, before which this failed
+    on it, and the bench test on the C5 with it."""
+    checked = []
+    for board in catalogue.catalogue():
+        description = api.description_for(board.name)
+        if getattr(description, "drive_pins", None) is None:
+            continue
+        assert getattr(description, "hold_volts", None) is not None, board.name
+        checked.append(board.name)
+    assert {"XIAO-ESP32-C3-DIP", "XIAO-ESP32-C5-DIP", "XIAO-ESP32-C6-DIP"} <= set(checked), checked
+
+
 def test_volts_for_a_description_that_converts_none_are_refused(monkeypatch):
     """A description that reads input and has no `hold_volts` would believe
     a voltage and convert nothing; levels alone are still driven there.

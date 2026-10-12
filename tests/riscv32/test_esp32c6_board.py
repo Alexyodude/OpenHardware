@@ -380,7 +380,9 @@ def test_an_undescribed_peripheral_faults_rather_than_reading_zero():
         # block, which is exactly the "clock or reset status bit" this test
         # is named for. It was UART0 until OH-161 described UART0's transmit
         # half, at which point the address stopped being undescribed and this
-        # test stopped testing anything.
+        # test stopped testing anything. OH-161's step 4 maps two of PCR's
+        # registers, the ADC's clocks at + 0x80 and + 0x84; its base is not
+        # one of them.
         session.cpu.read_word(0x60096000)
     assert "60096000" in str(caught.value).lower()
 
@@ -634,11 +636,14 @@ def field_defaults(header: pathlib.Path, register: str, after: str) -> dict[str,
     text = header.read_text(encoding="utf-8", errors="replace")
     start = text.index(f"#define {register} ")
     block = text[start:text.index(f"#define {after} ", start)]
+    # `[hi:lo]` or `[bit]`: the LOW bit is the field's position. Every
+    # field this read until OH-161's step 4 was one bit wide, where the two
+    # are the same number; `SAR_CLK_DIV`'s `[14:7]` is where they are not.
     found = re.findall(
-        r"/\*\* (\w+) : [\w/]+; bitpos: \[(\d+)(?::\d+)?\]; default: (\d+);", block)
+        r"/\*\* (\w+) : [\w/]+; bitpos: \[(\d+)(?::(\d+))?\]; default: (\d+);", block)
     if not found:
         raise AssertionError(f"no field comments between {register} and {after} in {header}")
-    return {name: (int(low), int(default)) for name, low, default in found}
+    return {name: (int(low or high), int(default)) for name, high, low, default in found}
 
 
 def test_the_systimer_numbers_this_board_carries_are_the_ones_in_the_header():
@@ -852,3 +857,143 @@ def test_each_pad_comes_out_of_reset_as_its_row_of_the_table_says():
         pulled_up = {6, 9, 13, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30}
         assert cpu.read_word(GPIO_IN) == sum(1 << gpio for gpio in pulled_up), (
             f"{cpu.read_word(GPIO_IN):#010x}")
+
+
+# --- ADC1's one-time sample (OH-161 step 4) -----------------------------------
+
+ADC_ONETIME = esp32c6.APB_SARADC + esp32c6.APB_SARADC_ONETIME_SAMPLE
+
+
+def onetime(channel: int, atten: int = 3) -> int:
+    """ADC1's control word for `channel` at `atten`, START clear."""
+    return (esp32c6.ONETIME_SAR1 | channel << esp32c6.ONETIME_CHANNEL_SHIFT
+            | atten << esp32c6.ONETIME_ATTEN_SHIFT)
+
+
+def convert(cpu, word: int) -> tuple[int, bool]:
+    """Clear done, start `word` as ESP-IDF does -- the word, then with START
+    -- and answer the result and whether done was set."""
+    adc = esp32c6.APB_SARADC
+    cpu.write_word(adc + esp32c6.APB_SARADC_INT_CLR, esp32c6.ADC1_DONE)
+    cpu.write_word(ADC_ONETIME, word)
+    cpu.write_word(ADC_ONETIME, word | esp32c6.ONETIME_START)
+    done = bool(cpu.read_word(adc + esp32c6.APB_SARADC_INT_RAW) & esp32c6.ADC1_DONE)
+    return cpu.read_word(adc + esp32c6.APB_SARADC_SAR1_DATA), done
+
+
+def test_the_adc_numbers_this_board_carries_are_the_ones_in_the_header():
+    """Every ADC constant in `esp32c6.py` read back, by define name, out of
+    this part's own headers: the block's base and PCR's (`reg_base.h`), the
+    five offsets and every bit (`apb_saradc_reg.h`), the two PCR registers
+    and their bits (`pcr_reg.h`) -- at + 0x80 and + 0x84, where a C5's are at
+    + 0x88 and + 0x8c -- and ADC1's channels (`adc_channel.h`), GPIO0 to
+    GPIO6."""
+    root = idf_root()
+    if root is None:
+        pytest.skip("no ESP-IDF checkout; see docs/esp-idf-reference.md")
+    soc = root / "components/soc/esp32c6"
+    base = defines(soc / "register/soc/reg_base.h")
+    adc = defines(soc / "register/soc/apb_saradc_reg.h")
+    pcr = defines(soc / "register/soc/pcr_reg.h")
+    channels = defines(soc / "include/soc/adc_channel.h")
+
+    assert int(base["DR_REG_APB_SARADC_BASE"], 16) == esp32c6.APB_SARADC
+    assert int(base["DR_REG_PCR_BASE"], 16) == esp32c6.PCR
+    for name, offset in (
+        ("APB_SARADC_CTRL_REG", esp32c6.APB_SARADC_CTRL),
+        ("APB_SARADC_ONETIME_SAMPLE_REG", esp32c6.APB_SARADC_ONETIME_SAMPLE),
+        ("APB_SARADC_SAR1DATA_STATUS_REG", esp32c6.APB_SARADC_SAR1_DATA),
+        ("APB_SARADC_INT_RAW_REG", esp32c6.APB_SARADC_INT_RAW),
+        ("APB_SARADC_INT_CLR_REG", esp32c6.APB_SARADC_INT_CLR),
+    ):
+        assert offset_of(adc[name], "DR_REG_APB_SARADC_BASE") == offset, f"{name} is {adc[name]}"
+    for name, offset in (("PCR_SARADC_CONF_REG", esp32c6.PCR_SARADC_CONF),
+                         ("PCR_SARADC_CLKM_CONF_REG", esp32c6.PCR_SARADC_CLKM_CONF)):
+        assert offset_of(pcr[name], "DR_REG_PCR_BASE") == offset, f"{name} is {pcr[name]}"
+    for table, name, bit in (
+        (adc, "APB_SARADC_SARADC_SAR_CLK_GATED", esp32c6.APB_SARADC_SAR_CLK_GATED),
+        (adc, "APB_SARADC_SARADC1_ONETIME_SAMPLE", esp32c6.ONETIME_SAR1),
+        (adc, "APB_SARADC_SARADC2_ONETIME_SAMPLE", esp32c6.ONETIME_SAR2),
+        (adc, "APB_SARADC_SARADC_ONETIME_START", esp32c6.ONETIME_START),
+        (adc, "APB_SARADC_APB_SARADC1_DONE_INT_RAW", esp32c6.ADC1_DONE),
+        (adc, "APB_SARADC_APB_SARADC1_DONE_INT_CLR", esp32c6.ADC1_DONE),
+        (pcr, "PCR_SARADC_REG_CLK_EN", esp32c6.PCR_SARADC_REG_CLK_EN),
+        (pcr, "PCR_SARADC_CLKM_EN", esp32c6.PCR_SARADC_CLKM_EN),
+    ):
+        assert table[name] == f"(BIT({bit.bit_length() - 1}))", f"{name} is {table[name]}"
+    assert int(adc["APB_SARADC_SARADC_ONETIME_CHANNEL_S"]) == esp32c6.ONETIME_CHANNEL_SHIFT
+    assert int(adc["APB_SARADC_SARADC_ONETIME_ATTEN_S"]) == esp32c6.ONETIME_ATTEN_SHIFT
+    assert esp32c6.ONETIME_CONVERSION == (
+        esp32c6.ONETIME_SAR1 | esp32c6.ONETIME_SAR2
+        | int(adc["APB_SARADC_SARADC_ONETIME_CHANNEL_V"].rstrip("U"), 16)
+        << esp32c6.ONETIME_CHANNEL_SHIFT
+        | int(adc["APB_SARADC_SARADC_ONETIME_ATTEN_V"].rstrip("U"), 16)
+        << esp32c6.ONETIME_ATTEN_SHIFT)
+    adc1 = {int(channels[f"ADC1_CHANNEL_{n}_GPIO_NUM"]): n
+            for n in range(8) if f"ADC1_CHANNEL_{n}_GPIO_NUM" in channels}
+    assert adc1 == esp32c6.ADC1_CHANNELS
+    assert esp32c6.ADC_GATE == (esp32c6.PCR + esp32c6.PCR_SARADC_CLKM_CONF,
+                                esp32c6.PCR_SARADC_CLKM_EN)
+
+
+def test_the_adc_reset_values_are_every_default_the_header_states():
+    """`CTRL`, `ONETIME_SAMPLE` and the two PCR registers out of reset,
+    composed from this part's own field comments -- `PCR_SARADC_CLKM_EN`
+    and `PCR_SARADC_REG_CLK_EN` both `default: 1` here."""
+    root = idf_root()
+    if root is None:
+        pytest.skip("no ESP-IDF checkout; see docs/esp-idf-reference.md")
+    regs = root / "components/soc/esp32c6/register/soc"
+    for header, register, after, board in (
+        ("apb_saradc_reg.h", "APB_SARADC_CTRL_REG", "APB_SARADC_CTRL2_REG",
+         esp32c6.APB_SARADC_CTRL_AT_RESET),
+        ("apb_saradc_reg.h", "APB_SARADC_ONETIME_SAMPLE_REG", "APB_SARADC_ARB_CTRL_REG",
+         esp32c6.ONETIME_SAMPLE_AT_RESET),
+        ("pcr_reg.h", "PCR_SARADC_CONF_REG", "PCR_SARADC_CLKM_CONF_REG",
+         esp32c6.PCR_SARADC_CONF_AT_RESET),
+        ("pcr_reg.h", "PCR_SARADC_CLKM_CONF_REG", "PCR_TSENS_CLK_CONF_REG",
+         esp32c6.PCR_SARADC_CLKM_CONF_AT_RESET),
+    ):
+        fields = field_defaults(regs / header, register, after)
+        composed = sum(default << low for low, default in fields.values())
+        assert composed == board, (
+            f"{register}: the header's defaults compose to {composed:#010x}, the "
+            f"board says {board:#010x}: {fields}")
+
+
+def test_each_channel_converts_its_own_pin_out_of_reset():
+    """The C6's ADC clock resets on, so a start converts without touching
+    it: GPIO0 and GPIO1, channels 0 and 1, held at 1.65 V and 1.1 V. Clear
+    the clock and a start is never done."""
+    needs_core()
+    from core.riscv32 import abi
+
+    gate, bit = esp32c6.ADC_GATE
+    with abi.Cpu() as cpu:
+        esp32c6.install(cpu)
+        esp32c6.hold_volts(cpu, {0: 1.65, 1: 1.1})
+        assert cpu.read_word(gate) & bit
+        assert convert(cpu, onetime(0)) == (1536, True)
+        assert convert(cpu, onetime(1)) == (1024, True)
+        assert convert(cpu, onetime(6)) == (0, True), "GPIO6 holds nothing"
+        cpu.write_word(gate, cpu.read_word(gate) & ~bit)
+        assert convert(cpu, onetime(1)) == (0, False), "no conversion, no done"
+
+
+def test_a_start_on_adc2_or_on_no_channel_faults_and_a_gpio_with_no_pad_is_refused():
+    """ADC2's bit, the reset channel 13 and channel 7 -- the part has seven,
+    0 to 6 -- are held at nothing and fault; a voltage on GPIO31, which this
+    part has no pad for, is refused by name."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c6.install(cpu)
+        for word in (esp32c6.ONETIME_SAR2, esp32c6.ONETIME_SAR1 | esp32c6.ONETIME_SAMPLE_AT_RESET,
+                     onetime(7)):
+            cpu.write_word(ADC_ONETIME, word)
+            with pytest.raises(abi.MemoryFault):
+                cpu.write_word(ADC_ONETIME, word | esp32c6.ONETIME_START)
+        with pytest.raises(ValueError) as caught:
+            esp32c6.hold_volts(cpu, {31: 1.0})
+        assert "GPIO31" in str(caught.value), str(caught.value)

@@ -17,9 +17,9 @@
  * neighbour the C5 shares the base and NOT the layout -- see that variant's
  * header -- which is why none of these three files is a copy of another.
  *
- * No ADC and no I2C, because the description maps neither, and the core's
- * API surface equals the model. GPIO_IN was absent on the same terms until
- * OH-161's step 3.
+ * No I2C, because the description maps none, and the core's API surface
+ * equals the model. GPIO_IN was absent on the same terms until OH-161's
+ * step 3, and the ADC until its step 4.
  */
 
 #ifndef OH_BOARD_XIAO_ESP32C6_H
@@ -79,6 +79,36 @@
  * description's SYSTIMER_INSTRUCTIONS_PER_TICK, which says what kind of
  * number that is. */
 #define OH_SYSTIMER_TICKS_PER_US       16u
+
+/* ADC1's one-time sample, base 0x6000E000 (OH-161 step 4): clear done
+ * through INT_CLR, write ONETIME_SAMPLE with ADC1's bit, the channel and
+ * the attenuation, write it again with START, wait for done in INT_RAW,
+ * read SAR1's data. `reg_base.h:27`, `apb_saradc_reg.h:225`, `:352`, `:508`
+ * and `:616`, via webui/boards/esp32c6.py, which cites each bit.
+ *
+ * The clock is in PCR (0x60096000), and on out of reset here: the function
+ * clock SARADC_CLKM_EN, bit 22 of PCR + 0x84, is the gate, and the register
+ * clock SARADC_REG_CLK_EN is bit 2 of PCR + 0x80. analogRead sets both, as
+ * ESP-IDF does. A C5 keeps them at + 0x88 and + 0x8C, and off. The bits are
+ * hex literals for the reason the UART gate's is, and the attenuation is
+ * 12 dB, arduino-esp32's default. */
+#define OH_ADC_BUS_CLOCK               0x60096080u
+#define OH_ADC_BUS_CLOCK_EN            0x00000004u   /* SARADC_REG_CLK_EN, bit 2 */
+#define OH_ADC_GATE                    0x60096084u
+#define OH_ADC_GATE_EN                 0x00400000u   /* SARADC_CLKM_EN, bit 22 */
+#define OH_ADC_ONETIME_SAMPLE          0x6000E020u
+#define OH_ADC_SAR1_DATA               0x6000E02Cu
+#define OH_ADC_INT_RAW                 0x6000E044u
+#define OH_ADC_INT_CLR                 0x6000E04Cu
+#define OH_ADC_ONETIME_SAR1            0x80000000u   /* bit 31 */
+#define OH_ADC_ONETIME_START           0x20000000u   /* bit 29 */
+#define OH_ADC_ONETIME_ATTEN_12DB      0x01800000u   /* 3 in [24:23] */
+#define OH_ADC_ONETIME_CHANNEL_SHIFT   25u
+#define OH_ADC1_DONE                   0x80000000u   /* bit 31 */
+
+/* ADC1's channels are GPIO0 to GPIO6, in order (TRM Table 39.2-1). */
+#define OH_ADC1_FIRST_GPIO             0u
+#define OH_ADC1_CHANNELS               7u
 
 /* The top of HP SRAM (0x40880000, soc.h's SOC_DRAM_HIGH), minus a word so
  * the first push stays inside it -- the C3 header's arithmetic applied to

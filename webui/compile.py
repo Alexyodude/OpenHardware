@@ -291,8 +291,7 @@ class Recipe:
 #: `recipe_for` names the chip rather than failing to find a compiler.
 def _openhardware(*, variant: str, march: str, base: int,
                   extra_includes: tuple[str, ...] = (),
-                  bsp_includes: tuple[str, ...] = (),
-                  adc_modelled: bool = False) -> Recipe:
+                  bsp_includes: tuple[str, ...] = ()) -> Recipe:
     """A row for a board the repository's own core serves (see ARDUINO_LITE).
 
     **The three ESP32 rows differ in exactly four things** -- the variant,
@@ -357,9 +356,9 @@ def _openhardware(*, variant: str, march: str, base: int,
         # pulls, `OUT` on a driven pin, and what `BoardSession.drive` says
         # the outside does -- so a read has a level to answer with.
         #
-        # **And `analogRead` at OH-161's step 4**, on each chip whose
-        # description maps ADC1's one-time sample: what the outside holds a
-        # pin at arrives through `BoardSession.drive`'s volts.
+        # **And `analogRead` at OH-161's step 4**: the descriptions map
+        # ADC1's one-time sample, and what the outside holds a pin at
+        # arrives through `BoardSession.drive`'s volts.
         hints=(
             # Arduino.h stops a build at a pin number it knows to be past
             # the chip's GPIO count, and this is the why (OH-185).
@@ -382,10 +381,6 @@ def _openhardware(*, variant: str, march: str, base: int,
             ("analogWrite",
              ("analogWrite needs the LEDC peripheral and this board's model "
               "maps GPIO only.")),
-            *(() if adc_modelled else (
-                ("analogRead",
-                 ("analogRead needs the ADC and this board's model maps GPIO "
-                  "only.")),)),
             ("attachInterrupt",
              ("this model has no interrupt controller; the emulated core "
               "executes straight-line code only.")),
@@ -461,7 +456,6 @@ RECIPES: dict[str, Recipe] = {
         extra_includes=(
             "framework-arduinoespressif32/variants/XIAO_ESP32C3",
         ),
-        adc_modelled=True,
     ),
     "ESP32-C5": _openhardware(
         variant="variants/xiao_esp32c5",
