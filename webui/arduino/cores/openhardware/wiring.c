@@ -27,12 +27,21 @@ static uint32_t mask_of(uint8_t pin) {
 /* `pinMode`, `digitalWrite` and `digitalRead` in `Arduino.h` call these
  * three.
  *
- * `pinMode` sets the pad first, as ESP-IDF's `gpio_config` does on every
- * call (`components/esp_driver_gpio/src/gpio.c:369-401` at v5.5): its input
- * enabled whatever the mode -- arduino-esp32's `OUTPUT` is `INPUT | OUTPUT`,
- * so an output reads back its own level -- and exactly the pull the mode
- * names, the other cleared, so `INPUT` leaves a pin with no pull at all. A
- * pin past the count touches no pad register, as it writes no GPIO bit. */
+ * `pinMode` sets the pad's input enable and pulls first, as ESP-IDF's
+ * `gpio_config` does on every call (`components/esp_driver_gpio/src/
+ * gpio.c:369-401` at v5.5): its input enabled whatever the mode --
+ * arduino-esp32's `OUTPUT` is `INPUT | OUTPUT`, so an output reads back its
+ * own level -- and exactly the pull the mode names, the other cleared, so
+ * `INPUT` leaves a pin with no pull at all. A pin past the count touches no
+ * pad register, as it writes no GPIO bit.
+ *
+ * **Those three bits and not the function select.** `gpio_config` also
+ * writes `MCU_SEL` to the GPIO function (`gpio.c:426-427`), and this does
+ * not: no description here reads `MCU_SEL` -- a pin's level is `OUT` and
+ * `ENABLE` whatever function the pad selects -- so writing it would change
+ * every committed image's bytes for no difference the model can show. A pad
+ * whose reset function is a peripheral's (UART0's TX, JTAG's) is the case
+ * where silicon would differ, and `webui/boards/esp32c5.py` names it. */
 void oh_pin_mode(uint8_t pin, uint8_t mode) {
     if (pin < OH_GPIO_PIN_COUNT) {
         const uint32_t pad = OH_IO_MUX_GPIO0 + OH_IO_MUX_STRIDE * pin;

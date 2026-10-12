@@ -247,6 +247,19 @@ IO_MUX_PADS: dict[int, tuple[int, str]] = {
 #:
 #: "4"'s OE is UART0's transmitter driving GPIO11 through function 0, not a
 #: bit of the pad register, and this model routes no peripheral to a pad.
+#:
+#: **Two pins where this model and the silicon read differently out of
+#: reset, both because of that**, and both held as they are by
+#: `test_each_pad_comes_out_of_reset_as_its_row_of_the_table_says`, which
+#: expects each to read 0. GPIO11 ("4", a XIAO ESP32-C5's D6) has its input
+#: on and UART0's idle-high transmitter on it, so silicon reads 1 and this
+#: model, with no pull of the pad's own, floats it to 0. GPIO14 ("3*") has
+#: its input on and USB_SERIAL_JTAG's pull-up on it, so silicon reads 1 and
+#: this model, which maps no USB register, floats it to 0. After a
+#: `pinMode`, this model reads either pin as the pad bits `pinMode` set and
+#: whatever `drive_pins` says; whether silicon still sees the peripheral
+#: there is not modelled, and this core's `pinMode` leaves `MCU_SEL` alone
+#: (wiring.c says why).
 IO_MUX_RESET_BITS: dict[str, int] = {
     "0": 0,
     "1": IO_MUX_FUN_IE,

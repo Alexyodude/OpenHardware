@@ -510,10 +510,13 @@ def install_gpio_in(cpu: Cpu) -> None:
 
     **`IN` reads the electrical level on the pin**, so it is neither a
     stored word nor a mirror of `OUT`. Per pin, `core/riscv32`'s `map_input`
-    answers 0 where the pad's `FUN_IE` is clear -- the TRM's 5.4.4, p.163:
-    reading needs "the input via IO MUX" enabled -- `OUT` where `ENABLE`
-    drives it, what `drive_pins` says the outside drives it to, 1 where
-    only `FUN_PU` is set, and 0 otherwise.
+    answers 0 where the pad's `FUN_IE` is clear -- the TRM's 5.4.4, p.163,
+    says reading needs "the input via IO MUX" enabled, and ESP-IDF's own
+    `gpio_get_level` says what is read without it: "If the pad is not
+    configured for input (or input and output) the returned value is always
+    0" (`components/esp_driver_gpio/include/driver/gpio.h:146` at v5.5) --
+    `OUT` where `ENABLE` drives it, what `drive_pins` says the outside
+    drives it to, 1 where only `FUN_PU` is set, and 0 otherwise.
 
     **That last 0 is a floating pin, and it is a decision, not a
     measurement.** Datasheet v2.4 Table 5-4, p.55, gives no level for an

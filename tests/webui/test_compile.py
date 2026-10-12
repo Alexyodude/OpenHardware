@@ -2319,8 +2319,7 @@ void loop() { digitalWrite(D10, digitalRead(%(pin)s)); }
 
 #: Steps run after each drive before D10 is looked at. One pass of `loop`
 #: is a digitalRead and a digitalWrite: measured 2026-10-12, `D10` follows a
-#: drive 29 to 48 steps after it on the three boards, and first leaves
-#: `input` 60 to 66 steps after the image is loaded. `ECHO_REACHED` is
+#: drive 29 to 48 steps after it on the three boards. `ECHO_REACHED` is
 #: asserted per drive, so a slower read fails here rather than passing on a
 #: budget that happened to be long enough.
 ECHO_STEPS = 200
