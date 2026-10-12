@@ -2,7 +2,7 @@
 id: OH-172
 title: chip_pin answers two questions with one field, and 153 pads are answered by
   the half nobody meant
-status: in-progress
+status: in-review
 priority: P2
 created: '2026-09-06'
 touches:
@@ -192,3 +192,66 @@ LEFT, for a later slice:
 - _trace's captions (3 above), with SUPPLY_LABELS and plural captions. A GND net on many pads all named GND, or on GND and TESTEN as on the KB2040, is a supply question and not this slice's.
 - The XIAO SMD EN pads nothing here traces yet: the RP2350's (4 above), whose landing OH-209 measured, and the C3's, C5's and C6's, whose board files are in third_party/seeed-pcb and whose EN pads nobody has joined to a net. Their chips have modules, so the module-agreement test needs restating first.
 - The panel's wording beside a caption: "not modelled" next to RESET.
+
+**Note 2026-10-13:** 2026-10-13, SLICE 2 LANDED in lane4 at 8e74efd (with 3fda7f3, the inventory docstring), as the design note above planned it.
+
+WHAT CHANGED. In tools/import_pindefs.py, read_seeed_traced no longer drops a pad outside the part's GPIO numbering. Where the label's net reaches exactly one pad of the part and its function fails _CHIP_PIN_NAME, it returns ChipPin(<that function>, None), a caption, and as Traced where the net was typed in `nets`. A net on two or more such pads still names none: the MG24's GND reaches RFVSS, VREFN, CREGVSS and PAD. _CHIP_PIN_NAME is unchanged and is now applied where the answer lands. header_table skips an entry whose chip_pin fails it before keying or citing it. filled_board counts only gate-passing pins in the unnumbered sentence and passes the rest to assumption_for's new `captions`, which says each is a caption, with chip_index null and no level read through it. The reasons the captions displaced are removed: _LANDED_RESET, _MG24_RESET, _NRF54L15_RESET and _NRF54LM20A_DEBUG. A reason never overrides an answer, so each would have been text nothing reads. tools/inventory.py's collect_boards docstring, slice 1's LOW-6, now calls chip_pin a caption rather than the pin a module reads a level through.
+
+REGENERATED with python tools/import_pindefs.py --write-headers --write-boards. Three files were written: XIAO-MG24-SMD.json, XIAO-nRF54l15-SMD.json and XIAO-nRF54LM20A-SMD.json. No module block changed, and a second run reported all 42 unchanged. The four pads, from the files:
+    XIAO-MG24-SMD        MG24_EN      chip_pin RESET
+    XIAO-nRF54l15-SMD    nRF54_EN     chip_pin ~{RESET}
+    XIAO-nRF54LM20A-SMD  nRF54_SWDIO  chip_pin SWDIO_G2
+    XIAO-nRF54LM20A-SMD  nRF54_SWCLK  chip_pin SWDCLK_G1
+Each has chip_index null and no why_null. Each file's assumption ends with the caption sentence, and its derivation lists the pad among those the vendor's CAD answered.
+
+NOTHING CLAIMS A LEVEL FOR A CAPTION. Over catalogue.board_names(), picked: every pad whose chip_pin fails _CHIP_PIN_NAME, with its modelled flag:
+    python -c "from webui import api; from webui.boards import catalogue; from tools.import_pindefs import _CHIP_PIN_NAME; rows=[(b, p['label'], p['chip_pin'], p['modelled']) for b in catalogue.board_names() for p in api.pad_view(b, api.description_for(b), None)['pads'] if p['chip_pin'] is not None and not _CHIP_PIN_NAME.match(p['chip_pin'])]; [print(*r) for r in rows]"
+    XIAO-MG24-SMD MG24_EN RESET False
+    XIAO-nRF54LM20A-SMD nRF54_SWDIO SWDIO_G2 False
+    XIAO-nRF54LM20A-SMD nRF54_SWCLK SWDCLK_G1 False
+    XIAO-nRF54l15-SMD nRF54_EN ~{RESET} False
+Slice 1's measure, rerun: 187 pads on 12 boards carry a caption and are not modelled, and 0 are modelled without one. It was 180 at slice 1. OH-224 added three GPIO captions and this slice added four.
+
+IN A BROWSER. python webui/emulator_server.py --bind 127.0.0.1 --port 8089, driven with Playwright and stopped by its listening PID. With XIAO-MG24-SMD picked, the Pins table reads "MG24_EN | RESET | not modelled", and D0 reads "PC0 | not modelled". With XIAO-nRF54l15-SMD picked, it reads "nRF54_EN | ~{RESET} | not modelled" and "54L15_TX20 | P1.08 | not modelled". The page's console shows one 400 from GET /api/board/pins with no board loaded. Earlier sessions' logs show the same 400, so this slice did not cause it. The screenshots were moved out of the checkout.
+
+TESTS. Each was red before the change and is green after.
+- test_a_pin_outside_the_numbering_is_a_caption_and_never_a_header_row (new, on _fake_tree): a CAD source answers EN -> ChipPin("RUN", None) on the fake SMD. Red: EN was in table.pins. A probe of the same tree showed render_header raising "FAKE: ['EN'] name a chip pin with no flat number (RUN)". The assumption also said "1 pins on this board are named with NO flat number -- RUN".
+- test_a_traced_pad_on_one_pad_of_the_part_outside_its_numbering_is_a_caption (new): MG24_EN gives Traced(ChipPin("RESET", None), ...), the MG24's GND gives nothing, and SWCLK is still PA01. Red: {} == {...}.
+- test_a_traced_label_that_reaches_nothing_is_refused_rather_than_silent (restated): the nRF54LM20A's SWD pads give SWDIO_G2 and SWDCLK_G1. Red: {} == {...}.
+- test_a_net_typed_for_a_traced_label_must_reach_the_part (restated): MG24_EN's pin is RESET. Red: KeyError 'MG24_EN'.
+- test_the_mg24_and_nrf54l15_underside_pads_answer_from_seeeds_own_board_file (restated): each landed pad's chip_pin is the footprint's pad function, the GPIO through the gate or the reset verbatim, with no why_null and no reason in the registry. Red: MG24_EN (None, None) != ('RESET', None).
+- tests/webui/test_pin_view.py test_a_caption_outside_the_gpio_numbering_is_shown_and_never_modelled (new): on every catalogue board, picked and running on a zero bus, a pad whose chip_pin fails the gate is modelled False, and the MG24's MG24_EN is among them. Red: the list was empty.
+- Restated by the counts moving, with a ladder line each: test_every_pad_either_names_its_pin_or_says_why_it_has_none (naming 565 -> 569, specific 69 -> 65), and test_a_generated_reason_reads_the_supplies_the_crystal_and_the_debugger (crystals 6 -> 4).
+- test_the_committed_files_with_unnumbered_pins_are_the_ones_oh_26_named counts only gate-passing pins and still holds 136.
+
+BREAKS. Each was applied alone and each turned its test red. Every file was restored and checked by sha256.
+- M1, header_table's gate removed: the fake-tree test.
+- M2, the unnumbered sentence's gate removed: the fake-tree test, and test_the_committed_board_files_match_the_generator.
+- M3, the caption branch removed from read_seeed_traced: the three tracer tests, and the generator-equality test.
+- M4, a caption taken from the first pad however many: the new tracer test, on GND.
+- M5, the caption sentence dropped: the fake-tree test, and the generator-equality test.
+- M6, MG24_EN hand-edited to RST in its board file: the underside answer test, and the generator-equality test.
+- M7, a reason left in the registry for MG24_EN: the underside answer test.
+- M8, the unnumbered test's filter without the gate: that test.
+- M9, api.level_keys monkeypatched in memory to answer every captioned pad (webui/api.py is OH-161's and was not edited): the pin view test, on MG24_EN.
+
+INVENTORY, python tools/inventory.py, before at 4bcd540 and after:
+    TWINS: 26 of 38 boards hold all four; by layer: geometry 38, model 37, pins 37, runs 26     (unchanged)
+    XIAO-MG24-SMD        pins 21+4/25 -> 22+3/25
+    XIAO-nRF54LM20A-SMD  pins 30+7/37 -> 32+5/37
+    XIAO-nRF54l15-SMD    pins 21+6/27 -> 22+5/27
+Nothing else moved except the test counts.
+
+VERIFIED.
+- python -m pytest -q -p no:cacheprovider tests/rules/test_import_pindefs.py tests/rules/test_inventory.py tests/rules/test_board_manifest.py tests/webui/test_pin_view.py tests/webui/test_board3d.py tests/webui/test_board_catalogue.py: 485 passed, 1 skipped (OH_SLOW's variant survey), at 3fda7f3. Before the change: 482 passed, 1 skipped.
+- Checker rows, each run on its own, each exit 0 and OK: check_layering, check_board_contract, check_part_schemas, check_licenses, check_deltas, check_banned_symbols, check_board_claims, check_ticket_claims, ticket_guard --self-test 6/6, check_facts, and board-sources render.py --check. checkall.missing_from_table() is empty.
+- Neither checkall.py nor the full suite was run.
+
+LEFT, for a later slice:
+(1) _trace's captions on the manifest rows: 3.3V on a module's one 3V3 pin, the QT Py's GND, the KB2040's D+, D- and !RESET, and each row's EN or RESET pad. This displaces the Thing Plus ESP32-C6's typed ESP_EN reason, because _trace reaches U1 pad 3 = EN there. It goes with SUPPLY_LABELS, and with plural captions such as GND on GND and TESTEN.
+(2) The XIAO SMD EN pads nothing traces yet. The RP2350's needs webui/boards/rp2350.py (OH-161) or a restated test_the_two_artefacts_cite_the_same_revisions_as_each_other. The C3's, C5's and C6's have not been joined to a net. All four boards have modules, so test_the_board_file_and_the_module_agree_on_every_labelled_pad needs restating to "a key in HEADER means chip_pin == PIN_NAMES[key]; otherwise chip_pin is null or fails the gate", and the Uno test's equality needs restricting to HEADER keys.
+(3) assumption_for's described-board sentence, "a pad with a `chip_pin` answers for itself in the pin view", would contradict the caption sentence on the first described board with a caption. No such board exists yet.
+(4) The panel's wording beside a caption: "not modelled" next to RESET.
+(5) README.md:86-90's count, which slice 1 recorded and which is unclaimed.
+
+STATUS. in-review, for slice 2's review. The ticket is not done: LEFT above is its next slice. Its claims grew by tools/import_pindefs.py, tests/rules/test_import_pindefs.py, tools/inventory.py and the three regenerated board files, and tests/webui/test_board3d.py is still borrowed from OH-215.
