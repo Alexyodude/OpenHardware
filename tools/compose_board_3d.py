@@ -6070,13 +6070,28 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         return 3
     # **The silhouette, and the cutouts said out loud.** The Uno is one closed
     # ring; a XIAO ESP32-C3 is its edge plus two 1.270 x 0.508 mm routed slots,
-    # which `loop` alone reported as "the outline does not chain".
+    # which `loop` alone reported as "the outline does not chain". A hole
+    # KiCad mills on Edge.Cuts is a ring like a slot -- PCBCUPID's Glyphs
+    # mill their mounting holes so -- and is counted here with them (OH-163).
     ring, cutouts = outer(board.outline)
     if cutouts:
         print(f"  cutouts {len(cutouts)} not drawn: "
               + ", ".join(f"{max(p[0] for p in c) - min(p[0] for p in c):.3f} x "
                           f"{max(p[1] for p in c) - min(p[1] for p in c):.3f} mm"
                           for c in cutouts))
+    # **And a hole EAGLE drills that is no pad**, which is not on the outline
+    # (OH-163): the board's own `<hole>`s and each placed package's, by drill
+    # and by whose. Neither is cut in the slab, which has no hole in it.
+    if board.holes:
+        drilled: dict[tuple[float, str], list[str]] = {}
+        for hole in board.holes:
+            package = board.element(hole.element).package if hole.element else ""
+            drilled.setdefault((hole.drill_mm, package), []).append(hole.element)
+        print(f"  holes   {len(board.holes)} not cut: " + "; ".join(
+            f"{drill:.3f} mm x{len(names)} "
+            + (f"in {'/'.join(dict.fromkeys(names))} ({package})" if package
+               else "in the board itself")
+            for (drill, package), names in drilled.items()))
     xs = [point[0] for point in ring]
     ys = [point[1] for point in ring]
     print(f"  outline {len(ring)} points, "
@@ -6552,6 +6567,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 "text": unlettered,
                 "copper": dict(board.traces_unread),
                 "cutouts": len(cutouts),
+                # An EAGLE `<hole>`, the board's or a package's (OH-163).
+                "holes": len(board.holes),
                 "turn_unseen": unpinned,
                 "unmodelled": unmodelled,
                 "no_pads": padless,

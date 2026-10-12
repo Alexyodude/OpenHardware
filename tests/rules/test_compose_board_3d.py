@@ -4540,8 +4540,10 @@ def test_what_is_not_drawn_rides_in_extras():
     assert "artwork" in extras and extras["artwork"].get("ink front", 0) > 0
     gaps = extras.get("not_drawn")
     assert gaps is not None, "the composer's gaps still stop at stdout"
-    for key in ("ink", "copper", "cutouts", "turn_unseen", "unmodelled", "text"):
+    for key in ("ink", "copper", "cutouts", "holes", "turn_unseen", "unmodelled", "text"):
         assert key in gaps, f"not_drawn is missing {key}"
+    # Each hole the board drills that is no pad, none of them cut (OH-163).
+    assert gaps["holes"] == len(eagle.read_board(_brd()).holes) > 0, gaps["holes"]
     # The Uno prints text in EAGLE's own vector font, which no licence lets
     # this repository carry -- so its text is counted in the ink tally and
     # refused, every piece of it, under that reason (OH-163).
@@ -5373,6 +5375,107 @@ def test_a_part_that_cuts_a_slot_for_itself_is_still_a_part(tmp_path, capsys):
         _counted(slotted, "  no model"), _counted(shipped, "  no model"))
     assert _counted(shipped, "  cutouts").startswith("  cutouts 2 ")
     assert _counted(slotted, "  cutouts").startswith("  cutouts 3 "), slotted
+
+
+def test_a_milled_hole_is_a_cutout_flattened_as_an_arc_is(tmp_path):
+    """**A circle KiCad mills inside the board is one more cutout** (OH-163):
+    read as its two halves, flattened by `arc_points` at `ARC_CHORD_MM`, and
+    chained by `contours` into a ring inside the board's own, which `outer`
+    returns with the routed slots and `compose` prints on the `cutouts` line.
+    Every point of the ring is on the circle, its span either way is the
+    diameter, and no side stands off the circle by more than the bound
+    `ARC_CHORD_MM`'s comment states, r(1 - cos(min(chord / 2r, pi / 2))).
+    The board's own ring is untouched."""
+    radius = 1.27
+    path = tmp_path / "milled.kicad_pcb"
+    path.write_text("(kicad_pcb\n\t(version 20241229)\n" + _cut("gr_rect", 0, 0, 20, 10)
+                    + f'\t(gr_circle (center 5 5) (end 5 {5 + radius}) (fill none) '
+                      f'(layer "Edge.Cuts"))\n'
+                    + _edge_footprint("J1", "10 5", "") + ")\n", encoding="utf-8")
+    ring, cutouts = compose.outer(compose.from_kicad(path).outline)
+    assert sorted(ring) == [(0, -10), (0, 0), (20, -10), (20, 0)], ring
+    assert len(cutouts) == 1, cutouts
+    (hole,) = cutouts
+    centre = (5.0, -5.0)
+    assert all(math.dist(point, centre) == pytest.approx(radius, abs=1e-9)
+               for point in hole), hole
+    for axis in (0, 1):
+        span = max(p[axis] for p in hole) - min(p[axis] for p in hole)
+        assert span == pytest.approx(2 * radius, abs=1e-9), (axis, span)
+    bound = radius * (1 - math.cos(min(compose.ARC_CHORD_MM / (2 * radius), math.pi / 2)))
+    stand_off = max(radius - math.dist(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), centre)
+                    for a, b in zip(hole, hole[1:] + hole[:1]))
+    assert 0 < stand_off <= bound + 1e-12, (stand_off, bound)
+
+
+def test_a_boards_milled_holes_are_printed_with_its_cutouts(capsys):
+    """**What KiCad mills is counted where the slots are** (OH-163): the
+    Glyph C3 and C6 each mill their mounting holes as `gr_circle` on
+    Edge.Cuts, and no line of `--check` named one. Every composed KiCad
+    board whose file draws one now prints each on its `cutouts` line at its
+    own diameter -- found here by walking the file's top level, not by the
+    reader."""
+    _newstroke()
+    checked: list[str] = []
+    for spec in compose.COMPOSITIONS:
+        if (spec.layout.suffix != ".kicad_pcb" or not _fetched(spec)
+                or spec.layout in {seen for seen, _board in checked}):
+            continue
+        across = []
+        for node in kicad.children(kicad.board_tree(spec.layout), "gr_circle"):
+            if kicad.first(node, "layer")[1] != "Edge.Cuts":
+                continue
+            (cx, cy), (ex, ey) = (kicad._floats(kicad.first(node, tag))[:2]
+                                  for tag in ("center", "end"))
+            across.append(f"{2 * math.hypot(ex - cx, ey - cy):.3f}")
+        if not across:
+            continue
+        line = _counted(_accounting(spec, capsys).splitlines(), "  cutouts")
+        assert line, f"{spec.board} mills {len(across)} circle(s) and prints no cutouts line"
+        sizes = line.partition(" not drawn: ")[2].split(", ")
+        assert line.startswith(f"  cutouts {len(sizes)} not drawn: "), (spec.board, line)
+        for diameter in set(across):
+            assert sizes.count(f"{diameter} x {diameter} mm") == across.count(diameter), (
+                spec.board, diameter, line)
+        checked.append((spec.layout, spec.board))
+    if not checked:
+        pytest.skip("SKIPPED: no fetched KiCad board mills a circle on Edge.Cuts")
+
+
+def test_every_hole_an_eagle_board_drills_is_printed_with_its_size(capsys):
+    """**EAGLE drills a hole that is no pad as a `<hole>`** (OH-163) -- in the
+    board itself, as the Uno's mounting holes and the Feather's, or in a
+    package, as SparkFun's standoffs and the locating pegs of the USB-C
+    sockets -- and no line of `--check` named one. Each composed EAGLE board
+    now prints every one on its `holes` line, by drill, and one that drills
+    none prints no such line: counted here off the file's XML, its `<plain>`
+    and each placed element's package, not by the reader."""
+    import xml.etree.ElementTree as ET
+    checked = []
+    for spec in compose.COMPOSITIONS:
+        if spec.layout.suffix != ".brd" or not _fetched(spec):
+            continue
+        root = ET.parse(spec.layout).getroot().find("drawing/board")
+        packages = {(library.get("name"), package.get("name")): package
+                    for library in root.findall("libraries/library")
+                    for package in library.findall("packages/package")}
+        drills = [hole.get("drill") for hole in root.findall("plain/hole")] + [
+            hole.get("drill") for element in root.findall("elements/element")
+            for hole in packages[(element.get("library"), element.get("package"))
+                                 ].findall("hole")]
+        lines = _accounting(spec, capsys).splitlines()
+        line = next((line for line in lines if line.startswith("  holes ")), "")
+        if not drills:
+            assert not line, (spec.board, line)
+            continue
+        assert line.startswith(f"  holes   {len(drills)} not cut: "), (spec.board, line)
+        for drill in set(drills):
+            printed = sum(int(count) for count in
+                          re.findall(rf"\b{float(drill):.3f} mm x(\d+)", line))
+            assert printed == drills.count(drill), (spec.board, drill, line)
+        checked.append(spec.board)
+    if not checked:
+        pytest.skip("SKIPPED: no EAGLE board is fetched")
 
 
 def test_a_placement_with_no_pad_that_states_a_mesh_is_a_part(tmp_path, capsys):
