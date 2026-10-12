@@ -542,7 +542,7 @@ def _footprints(text: str) -> list[tuple[str, dict[str, list[str]]]]:
 def read_seeed_traced(
     texts: tuple[str, ...], *, part: str, labels: tuple[str, ...],
     nets: dict[str, str] | None = None,
-) -> dict[str, ChipPin]:
+) -> dict[str, ChipPin | Traced]:
     """Follow a pad's net to the board's own MCU and read that pad's function.
 
     **For labels the net name does not spell out.** Seeed name a net `SWDIO`
@@ -578,10 +578,23 @@ def read_seeed_traced(
     `test_the_mg24_and_nrf54l15_underside_pads_land_on_the_nets_the_registry_traces`,
     which reads both files; what the pad reaches is still read here, never
     typed. A net named here that reaches no pad of the part raises, as an
-    absent named net does.
+    absent named net does, and so does a label given both ways.
+
+    **A pin found by a net from `nets` comes back `Traced`**, carrying that
+    net, so the report `board_report` prints cites the net beside the file
+    and its digest. A net named for its label says which pad it is by its
+    name; a typed one does not, and the board file has no per-pad field to
+    say it in.
     """
     nets = nets or {}
-    pins: dict[str, ChipPin] = {}
+    both = sorted(set(labels) & set(nets))
+    if both:
+        raise PindefError(
+            f"{both} given both in `labels` and in `nets`; a label is traced "
+            f"by the net named for it or by the net `nets` gives it, and "
+            f"following both keeps whichever was read last"
+        )
+    pins: dict[str, ChipPin | Traced] = {}
     for text in texts:
         matched = [(value, by_net) for value, by_net in _footprints(text)
                    if part in value]
@@ -636,8 +649,11 @@ def read_seeed_traced(
                         one = next(iter(named))
                         token = _PIN_TOKEN.match(one)
                         flat = token.group(1) if token else None
-                        pins[label] = ChipPin(
-                            one, int(flat) if flat is not None else None)
+                        pin = ChipPin(one, int(flat) if flat is not None else None)
+                        pins[label] = (
+                            Traced(pin, f"the net {net!r}, joined to this pad by "
+                                        f"position, reaches the {part}'s {one}")
+                            if label in nets else pin)
             # **Two different silences, and only one of them is a fact.**
             # A label that REACHES this part and whose pad is not a pin name
             # resolves to nothing above, and that is right: `SWDIO_G2` says
@@ -2207,7 +2223,7 @@ _NRF52840 = (
 #: SAMD11 and nRF54 debug pads on the same board are NOT here: they belong
 #: to a second chip and are OH-170 US-3's question, not this source's.
 #:
-#: **Three underside pads are traced from nets named for what they carry**
+#: **Underside pads are traced from nets named for what they carry**
 #: (OH-224), as the MG24's `MG24_EN` is: each lands on an underside test
 #: point by position, and the test that reads the footprint beside the board
 #: file holds the net named here. `54L15_TX20` reaches the nRF54L15's P1.08
@@ -2215,14 +2231,28 @@ _NRF52840 = (
 #: pad names rather than off the nets'. `nRF54_EN` reaches its `~{RESET}`,
 #: which resolves nothing, and `_NRF54L15_RESET` says why.
 #:
-#: **The pad Seeed call TX20 reaches the pin Zephyr receives on.** Zephyr's
-#: `xiao_nrf54l15-pinctrl.dtsi` gives `uart20_default` `UART_TX` on P1.09
-#: and `UART_RX` on P1.08 (measured 2026-10-12 at Zephyr 0a2e408). `chip_pin`
-#: states which pin the pad's copper reaches, which is what it means, and
-#: not which way a signal on it runs. Recorded, not resolved: no reader here
-#: takes a pin from a pinctrl node, so Zephyr is a cross-check and not a
-#: source, and whether the pad's name or the pinctrl reads the line from the
-#: other end is not something either file says.
+#: **`USER_LED` is one of them, and the join is the one its old reason said
+#: no file made** (OH-224's review). Seeed's board file calls the net
+#: `P2.00{slash}USR_LED` and puts the MCU's own P2.00 pad, a green LED and a
+#: test point on it; the pad is spelled `USER_LED` in the symbol library, and
+#: until the footprint was read beside the board file nothing joined the two
+#: spellings, so the pin was named in words and kept out of `chip_pin`. The
+#: pad lands on that test point. Zephyr states the same pin independently,
+#: as `led0 = <&gpio2 0>` in `xiao_nrf54l15_common.dtsi`; that is a
+#: cross-check, held by a test, and not a source.
+#:
+#: **The pad Seeed label TX20 is the nRF54L15's receive line, and the label
+#: is what disagrees.** Each of these says P1.08 receives:
+#:   - Seeed's own board file names P1.08's net `SAMD11_TX`: the on-board
+#:     debugger transmits on it.
+#:   - silabs-arduino's `variants/xiao_mg24/pins_arduino.h` at 6128e93, line
+#:     70, `#define PIN_SERIAL_RX (D11) // PA9`, on the sibling board where
+#:     the same debugger's `SAMD11_TX` net is `PA09{slash}A11{slash}D11{slash}SAMD11_TX`.
+#:   - Zephyr's `xiao_nrf54l15-pinctrl.dtsi` at 0a2e408 gives `uart20_default`
+#:     `UART_RX` on P1.08 and `UART_TX` on P1.09, and puts `bias-pull-up` on
+#:     the RX group alone.
+#: `chip_pin` is P1.08 regardless, because it states where the pad's copper
+#: goes and not which way a signal on it runs.
 _NRF54L15 = (
     zephyr_connector("xiao_nrf54l15", nordic_port_pin),
     seeed_pcb("nRF54L15.kicad_pcb", ("NFC1", "NFC2")),
@@ -2230,6 +2260,7 @@ _NRF54L15 = (
         "54L15_TX20": "P1.08{slash}SAMD11_TX",
         "54L15_RX20": "P1.09{slash}SAMD11_RX",
         "nRF54_EN": "~{nRF54_RESET}",
+        "USER_LED": "P2.00{slash}USR_LED",
     }),
 )
 #: **The NFC pair is P1.01 and P1.02 here and P1.02 and P1.03 on the
@@ -2270,33 +2301,6 @@ _DEDICATED_DEBUG = (
     "a dedicated debug pad of the {chip}, not a GPIO: {where} names its {which} "
     "pads {gpio} and names this one {label!r} separately, alongside the "
     "supplies and the crystal, so there is no GPIO number for it to have"
-)
-#: **Two sources name this pad's pin and it is still not written**, which is
-#: the honest end of a search rather than a shrug. Seeed's own
-#: `nRF54L15.kicad_pcb` calls a net `P2.00{slash}USR_LED` and puts exactly
-#: three things on it: the MCU's own `P2.00` pad, a green LED, and a test
-#: point. Zephyr states the same pin independently -- `led0` in
-#: `boards/seeed/xiao_nrf54l15/xiao_nrf54l15_common.dtsi` is `<&gpio2 0>`,
-#: which is P2.00. Two vendors, one answer, no disagreement to record.
-#:
-#: **The gap is one letter and it is not mine to close.** The pad is labelled
-#: `USER_LED`; the vendor's net says `USR_LED`. No file here joins the two
-#: spellings. `resolve` matches a pad through `alternatives(label)`, so
-#: nothing keyed `USR_LED` reaches this pad, and the net carries no
-#: castellated-pad footprint -- only the LED and a test point -- so which
-#: exposed pad sits on it was never read. Matching them would be a join made
-#: from resemblance, which is the trap OH-26 exists for. So the pin is
-#: reported in words and left out of `chip_pin`, where a reader would take it
-#: for something this tool had established.
-_NRF54L15_USER_LED = (
-    ("USER_LED",
-     "the board's user LED. Two sources name its pin and neither names this "
-     "pad: Seeed's own nRF54L15.kicad_pcb has a net 'P2.00{slash}USR_LED' "
-     "carrying the nRF54L15's own P2.00 pad, a green LED and a test point, "
-     "and Zephyr's xiao_nrf54l15 board states the same pin independently as "
-     "`led0 = <&gpio2 0>`. NOT written into `chip_pin`: the vendor spells "
-     "this pad USER_LED in the symbol library the labels come from and "
-     "USR_LED in the board file, and no file here says those are one pad"),
 )
 #: **The three boards Seeed publish no `.kicad_pcb` for.** The RP2350's and
 #: both Nordics' debug pads were answered by tracing the vendor's own board
@@ -2588,8 +2592,7 @@ BOARDS = {
     "XIAO-nRF54l15-DIP": Board("nRF54L15", _NRF54L15),
     "XIAO-nRF54l15-SMD": Board(
         "nRF54L15", _NRF54L15,
-        reasons=(_NRF54L15_DEBUG + _MG24_DEBUGGER + _NRF54L15_USER_LED
-                 + _NRF54L15_RESET),
+        reasons=_NRF54L15_DEBUG + _MG24_DEBUGGER + _NRF54L15_RESET,
     ),
 }
 
