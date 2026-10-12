@@ -23,6 +23,13 @@
 // all of those return the stored zero rather than the electrical level. OH-73
 // says so in as many words and leaves it to its own ticket.
 //
+// **On the three ESP32s that work is done (OH-161), and still not here.**
+// Their descriptions read `GPIO_IN`, so `circuit.js` solves what the bench
+// puts on each input and `board3d.js` posts it to the board: a resistor from
+// an input to ground on a XIAO ESP32-C3 changes what its `digitalRead` sees.
+// A part is still only a consumer; the solve and the post are the parts of
+// the page that drive a pin.
+//
 // ## The part is a real part
 //
 // **Nothing in this file models a shape.** The first version built an LED out

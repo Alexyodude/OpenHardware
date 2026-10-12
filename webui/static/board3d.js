@@ -655,6 +655,9 @@ const view = {
   //: The last thing `circuit.js` said about the bench, kept so that `parts()`
   //: can hand the page a sentence per part without solving again.
   circuit: null,
+  //: What the bench last told the board it drives, as `postInputs` spells
+  //: it, or null before this page has told it anything (OH-161).
+  posted: null,
   //: Pin name -> EVERY marker drawn for it, and the plural is OH-117.
   //:
   //: **A name can mean more than one pad and this held one.** An Arduino Uno
@@ -1833,6 +1836,13 @@ function supplyOf(layout) {
     sinkOhms: spec.sink_ohms,
     ratedAmps: spec.rated_amps,
     absoluteAmps: spec.absolute_amps,
+    //: Whether the two resistances are typical rather than bounds, and the
+    //: two levels an input is guaranteed to read (OH-161). Absent on a board
+    //: that states none, and then `analyse` reads no input and nothing is
+    //: posted to the board.
+    typical: spec.typical === true,
+    inputHighVolts: spec.input_high_volts ?? null,
+    inputLowVolts: spec.input_low_volts ?? null,
     cited: spec.cited ?? {},
   };
 }
@@ -2231,6 +2241,10 @@ export function describe() {
 // `webui/api.py` through `setLevels` exactly as it did before any of this
 // existed. A part lit here is a picture of a state this repository measured,
 // which is the same sentence the file's header makes about a pad.
+//
+// **And one thing goes the other way** (OH-161): what the solved bench puts
+// on the pins the program leaves as inputs. `postInputs` sends it to the
+// board, and that is the only way a level enters a running sketch.
 
 //: How thick a jumper lead is drawn, and how many sides its tube has.
 //: Six is enough at this radius: the wire is about a pixel and a half across
@@ -2927,6 +2941,47 @@ function applyCircuit() {
     if (report.parts[at].destroyed) part.userData.destroyed = true;
     setPartState(part, report.parts[at].drive, view.palette);
   }
+  postInputs(report.inputs);
+}
+
+//: The drives in flight, one after another. **Chained, not fired together**:
+//: each post is a whole statement that replaces the last, so two that crossed
+//: on the way -- a press and its release, a few milliseconds apart -- would
+//: leave the board holding the press.
+let posting = Promise.resolve();
+
+/**
+ * Tell the board what the bench drives onto its inputs, when that changes
+ * (OH-161).
+ *
+ * `levels` is `analyse`'s `inputs`, and it is posted whole: a drive replaces
+ * the one before it, so a pad left out would be a pad let go. **Changed means
+ * a pad driven differently**, so the map is compared without its "open"
+ * entries -- a pad turning into an input or out of one moves nothing on the
+ * board while it is open. Nothing is posted before the first input exists,
+ * so a page with no program running asks the server nothing.
+ *
+ * **The board is named** so the server can refuse a bench solved for a board
+ * it is not running -- the page can be drawing one while the session runs
+ * another. A refusal is reported, not retried: the next change posts again.
+ */
+function postInputs(levels) {
+  const stated = JSON.stringify(
+    Object.entries(levels).filter(([, level]) => level !== "open").sort());
+  if (stated === view.posted || (view.posted === null && !Object.keys(levels).length)) {
+    return;
+  }
+  view.posted = stated;
+  const body = JSON.stringify({ board: view.board?.userData.board, levels });
+  posting = posting
+    .then(() => fetch("/api/board/drive", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body }))
+    .then(async (response) => {
+      if (!response.ok) {
+        console.warn("the bench's levels were refused:", (await response.json()).error);
+      }
+    })
+    .catch((error) => console.warn("the bench's levels did not reach the board:", error));
 }
 
 /**
