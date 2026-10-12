@@ -544,9 +544,12 @@ class Cpu:
         except OSError as unreadable:
             failed.append(f"the registers ({unreadable})")
 
+        # Which a step was is not recorded, so both are named.
         said = [f"cortexm0: the core faulted on the host ({fault}) "
                 + (f"in the step that began at 0x{at:08x}" if at is not None
-                   else "in a step")]
+                   else "in a step")
+                + " -- the instruction there, or the exception entry a due "
+                  "SysTick made in its place"]
         if code:
             said.append(f"the first {len(code)} halfwords there are "
                         + " ".join(f"0x{halfword:04x}" for halfword in code))

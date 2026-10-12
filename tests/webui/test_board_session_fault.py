@@ -180,6 +180,11 @@ def test_a_cortexm0_host_fault_is_raised_as_an_abi_error_naming_the_step(
     assert READING in message, message
     assert f"0x{M0_BASE + 4:08x}" in message, message
     assert "load the image again" in message, message
+    # The binding cannot tell which a step was, so the message says both: a
+    # reader sent only to the instruction there would miss a fault while
+    # stacking an exception frame.
+    assert "or the exception entry a due SysTick made in its place" in message, (
+        message)
 
 
 def test_what_the_cortexm0_binding_read_back_survives_a_fault_reading_the_rest(
