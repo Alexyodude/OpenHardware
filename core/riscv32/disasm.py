@@ -57,7 +57,8 @@ from core.riscv32.machine import REGISTER_NAMES
 #: disassembler and the executor agree about scope: an encoding one knows and
 #: the other does not is a divergence waiting to be found by a person rather
 #: than by a sweep.
-EXTENSIONS = ("I", "M", "C", "Zba", "Zbb", "Zbs", "Zbkb", "Zcb", "Zcmp", "Zcmt")
+EXTENSIONS = ("I", "M", "C", "Zba", "Zbb", "Zbs", "Zbkb", "Zcb", "Zcmp", "Zcmt",
+              "Xh3bextm")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -281,6 +282,20 @@ def _decode32(word: int, address: int) -> str:
                     0x5: "csrrwi", 0x6: "csrrsi", 0x7: "csrrci"}[funct3]
             operand = _reg(rs1) if funct3 < 0x4 else str(rs1)
             return f"{name}\t{_reg(rd)},0x17,{operand}"
+        return ""
+
+    if opcode == 0x0B:
+        # custom-0: the Hazard3's Xh3bextm (OH-219), the two shapes
+        # `exec.cc` runs and no others -- bits 31:29 and 25 clear, funct3
+        # 000 or 100. No binutils knows them, so the operands follow the
+        # doc's own macros, `h3.bextm rd rs1 rs2 nbits` and `h3.bextmi rd
+        # rs1 shamt nbits` (custom_extensions.adoc:161, :213), with the shift
+        # amount in hex as `slli`'s is and `nbits` from bits 28:26, plus one.
+        if funct3 in (0x0, 0x4) and word & 0xE2000000 == 0:
+            nbits = _bits(word, 28, 26) + 1
+            if funct3 == 0x0:
+                return f"h3.bextm\t{_reg(rd)},{_reg(rs1)},{_reg(rs2)},{nbits}"
+            return f"h3.bextmi\t{_reg(rd)},{_reg(rs1)},0x{rs2:x},{nbits}"
         return ""
 
     return ""

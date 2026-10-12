@@ -1136,6 +1136,17 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
         const unsigned amount = b & 0x1Fu;
         uint32_t result = 0;
         if (funct7 == 0x00u) {
+            // SLT to x0 is also the Hazard3's h3.block (`slt x0, x0, x0`) and
+            // h3.unblock (`slt x0, x0, x1`), Xh3power's hints, and they answer
+            // Ok here where WFI answers Unimplemented. Ok is right for them. A
+            // WFI may complete at any time -- "a legal implementation is to
+            // simply implement the WFI instruction as a NOP" (privileged ISA,
+            // "Wait for Interrupt"); Hazard3's doc says h3.block falls
+            // through as a nop once an unblock has been received, which may
+            // come "for some other platform-defined reason"
+            // (custom_extensions.adoc:72-74); rvcpp runs both as slt; and
+            // refusing them would need an RP2350-only branch on a base-ISA
+            // hint every other part must run (OH-219).
             switch (funct3) {
             case 0x0u: result = a + b; break;                             // ADD
             case 0x1u: result = a << amount; break;                       // SLL
@@ -1338,10 +1349,16 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
             (funct3 != 0x0u && funct3 != 0x4u)) {
             return StepResult::Illegal;
         }
-        const unsigned width = ((instr >> 26) & 0x7u) + 1u;
+        // `nbits`, the doc's word, and not `width`, which is this function's
+        // instruction width. The `& 0x1Fu` is the doc's `rs2[4:0]`, and no
+        // test here can see it go: a C++ shift by 32 or more is undefined,
+        // and x86 and ARM64 hosts mask the count to five bits themselves, so
+        // test_xh3.py's amounts of 32 and up pass without it. It is kept
+        // because the language does not promise what those hosts do.
+        const unsigned nbits = ((instr >> 26) & 0x7u) + 1u;
         const unsigned amount = funct3 == 0x0u ? (cpu.reg(rs2) & 0x1Fu)  // H3.BEXTM
                                                : rs2;                     // H3.BEXTMI
-        cpu.set_reg(rd, (cpu.reg(rs1) >> amount) & ((1u << width) - 1u));
+        cpu.set_reg(rd, (cpu.reg(rs1) >> amount) & ((1u << nbits) - 1u));
         cpu.set_pc(next);
         return StepResult::Ok;
     }

@@ -146,6 +146,11 @@ ACCOUNTED_MINE = {
     "zext.h": "Zbb", "orc.b": "Zbb",
     "pack": "Zbkb", "packh": "Zbkb", "brev8": "Zbkb", "zip": "Zbkb",
     "unzip": "Zbkb",
+    # Xh3bextm (OH-219), the Hazard3's own, in custom-0. No binutils knows
+    # it -- 2.43.1 prints `.insn 4, ...` too -- so its rendering is held to
+    # the Hazard3 doc's macros instead, in test_xh3.py.
+    "h3.bextm": "Xh3bextm, a vendor's custom-0: no binutils renders it",
+    "h3.bextmi": "Xh3bextm",
     "fence": "reserved rd/rs1 fields, which the ISA says to ignore",
     "fence.i": "same, for Zifencei",
 }

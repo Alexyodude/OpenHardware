@@ -49,8 +49,18 @@
 # whole opcode 0b0001011; its bits 6:2 are 0b00010, which is what
 # custom_extensions.adoc:139 and :191 print, and the same pages' own macros
 # assemble `.insn r 0x0b` and `.insn i 0x0b`. The HDL and rvcpp agree: 0x0b.
+#
+# ## The listing
+#
+# `core/riscv32/disasm.py` names both, and nothing outside this repository
+# can check how: GNU objdump 2.43.1 prints `0x00c5850b` as `.insn 4,
+# 0x00c5850b`, and GCC 14.2 rejects `-march=rv32i_xh3bextm` as an
+# "unsupported non-standard extension". So the reference is the doc's own
+# macros, `h3.bextm rd rs1 rs2 nbits` and `h3.bextmi rd rs1 shamt nbits`
+# (:161, :213), in the module's objdump spelling: commas, a shift amount in
+# hex as objdump prints `slli`'s, the width in decimal as the macros take it.
 
-from core.riscv32 import abi
+from core.riscv32 import abi, disasm
 
 from . import encode as e
 from . import lockstep
@@ -60,6 +70,12 @@ from .test_zbb_zbkb import check, image, li, verdict
 #: Every amount h3.bextm's five-bit field takes, and four the register form
 #: must cut to `rs2[4:0]` (custom_extensions.adoc:160): 32 and 33 shift like
 #: 0 and 1, 63 and 0xFFFFFFE1 like 31 and 1.
+#:
+#: **On this machine those four cannot fail.** x86 and ARM64 mask a shift
+#: count to five bits in hardware, so exec.cc without its `& 0x1Fu` passes
+#: every test here (OH-219's review removed it and all of them stayed
+#: green). They hold the answer, not the mask; the mask is there because a
+#: C++ shift by 32 or more is undefined.
 AMOUNTS = (*range(32), 32, 33, 63, 0xFFFFFFE1)
 
 #: Values whose eight-bit windows differ at every shift: a width or a shift
@@ -162,6 +178,19 @@ def test_the_encoder_builds_what_the_hazard3_docs_assemble():
                 (imm << 20) | (11 << 15) | (4 << 12) | (10 << 7) | 0x0B)
 
 
+def test_the_disassembler_names_both_in_the_docs_operand_order():
+    """`h3.bextm rd rs1 rs2 nbits` and `h3.bextmi rd rs1 shamt nbits`
+    (custom_extensions.adoc:161, :213), at every width and every shift, on
+    registers that are not each other's neighbours -- so a transposed
+    operand or a width read from the wrong bits renders a different line."""
+    for width in WIDTHS:
+        assert disasm.decode(e.h3_bextm("a0", "t0", "s1", width))[0] == (
+            f"h3.bextm\ta0,t0,s1,{width}")
+        for shamt in range(32):
+            assert disasm.decode(e.h3_bextmi("a0", "t0", shamt, width))[0] == (
+                f"h3.bextmi\ta0,t0,0x{shamt:x},{width}")
+
+
 # --- what each part refuses, which rvcpp cannot say ---------------------------
 
 
@@ -171,7 +200,9 @@ def test_custom_0_runs_only_the_two_xh3bextm_shapes_on_an_rp2350(cpu):
     The two shapes, at each of the eight widths, execute; every other word
     -- RES0 bit 31, 30, 29 or 25 set, or any other funct3 -- is Illegal,
     as on the chip. None may answer Unimplemented: nothing in this opcode
-    is waiting to be written."""
+    is waiting to be written. And the disassembler names exactly the words
+    that execute, so a listing never names one the core refuses or leaves
+    one it runs as a raw word."""
     expected = {(funct3, size << 1) for funct3 in (0x0, 0x4) for size in range(8)}
     executed, wrong = set(), []
     for funct3 in range(8):
@@ -182,6 +213,10 @@ def test_custom_0_runs_only_the_two_xh3bextm_shapes_on_an_rp2350(cpu):
                 executed.add((funct3, funct7))
             elif answer != "illegal":
                 wrong.append(f"{word:#010x} answered {answer}")
+            named = not disasm.decode(word)[0].startswith("0x")
+            if named != (answer == "ok"):
+                wrong.append(f"{word:#010x} ({disasm.decode(word)[0]!r}) "
+                             f"answered {answer}")
     assert not wrong, wrong[:10]
     assert executed == expected, sorted(executed ^ expected)
 
