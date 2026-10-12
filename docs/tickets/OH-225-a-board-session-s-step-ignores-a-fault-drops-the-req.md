@@ -17,3 +17,5 @@ Found by OH-223 and its review (2026-10-12), by reading and through a live serve
 Claims: `core/riscv32/**` and the borrowed `webui/api.py` are OH-161's (api.py is OH-172's, lent to OH-161); `core/cortexm0/abi.py` and `webui/emulator_server.py` check with `tools/tickets.py owner` when this starts. Borrow rather than overlap.
 
 STEPS: each of the four, with a test seen to fail first using OH-223's technique (monkeypatch the cached CDLL's step to raise OSError on the Nth call) through the real path to the server's answer.
+
+**Note 2026-10-13:** 2026-10-13: OH-223 merged at 7d3c98e settles the pattern for item 1. Both the i8086 and AVR cores now record where each step began (i8086_step_entry as (cs << 16) | ip, avr_step_entry as the word PC, ABI 9 and 4), and the binding reads it only after a fault, at no measurable cost per step (verified: Cpu.step 0.233 us with the record against 0.233 without). Copy that for cortexm0 and riscv32 rather than naming where the core left the PC. Also from OH-223's confirm verification: avr_step_entry has no null check in C, unlike i8086_step_entry (unreachable now that Python refuses a closed Cpu first).
