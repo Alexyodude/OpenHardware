@@ -2,7 +2,7 @@
 id: OH-224
 title: The XIAO MG24 and nRF54L15 SMD boards are four pads short of the pins layer,
   and Seeed's own board files answer them
-status: in-review
+status: done
 priority: P2
 created: '2026-10-12'
 touches:
@@ -114,3 +114,5 @@ VERIFIED at 8f482f2:
 - python -m pytest -q -p no:cacheprovider tests/rules/test_import_pindefs.py tests/rules/test_inventory.py tests/rules/test_board_manifest.py tests/webui/test_pin_view.py tests/webui/test_board_catalogue.py: 378 passed, 1 skipped (the OH_SLOW variant survey).
 - Checker rows, each run on its own, each exit 0 and OK: check_layering, check_board_contract, check_part_schemas, check_licenses, check_deltas, check_banned_symbols, check_board_claims, check_ticket_claims, ticket_guard --self-test, check_facts, and board-sources render.py --check.
 - Neither checkall.py nor the full suite was run.
+
+**Note 2026-10-13:** DONE, merged to master by fast-forward at 9e6e2f8 (lane4). REVIEW: an independent review (MERGE AFTER SMALL FIXES: the nRF54L15 SMD's USER_LED answerable by the same join) and its fix round. VERIFIED on master at 85baf4a: full suite 2 failed (the OCP pair: test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert, test_the_tessellator_welds_what_it_meshes), 2749 passed, 41 skipped. python tools/inventory.py: pins 37 of 38; the one board still short is the STM32C5, which has no vendor source.
