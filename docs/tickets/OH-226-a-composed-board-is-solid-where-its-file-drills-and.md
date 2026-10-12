@@ -5,6 +5,11 @@ title: 'A composed board is solid where its file drills and mills holes: cut the
 status: open
 priority: P2
 created: '2026-10-12'
+touches:
+- tools/import_3d_model.py
+- tests/rules/test_import_3d_model.py
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
 ---
 
 Split out of OH-163 by its milled-holes review (2026-10-12). OH-163 now reads and counts every hole a board's file makes -- KiCad's Edge.Cuts circles and polygons on the cutouts line, EAGLE's board and package `<hole>`s and KiCad's np_thru_hole on a holes line -- and cuts none of them, because `slab()` in `tools/compose_board_3d.py` extrudes only the outer ring `outer()` returns. A real board has those holes; the composed one is solid there.
@@ -24,3 +29,5 @@ Risks the review named, each to be handled with a test:
 Then, and only where no header pin stands, plated drills: the same bridging (pad minus drill), with EAGLE's layer-46 slot overriding a pad's round drill.
 
 Claims: `tools/compose_board_3d.py` and its tests are OH-163's; borrow them when this starts.
+
+**Note 2026-10-13:** 2026-10-13: borrows tools/import_3d_model.py, tools/compose_board_3d.py and their tests from OH-163 (via OH-228, done). Return them to OH-163 when this closes.
