@@ -123,6 +123,30 @@ PADS = [
     {"name": "VIN", "state": "unknown"},
 ]
 
+#: The ESP32-C3's numbers, as `webui/boards/esp32c3.py`'s `SUPPLY` publishes
+#: them (OH-161), copied for `UNO`'s reason: if the two disagree,
+#: `test_the_bench_uses_the_boards_own_published_supply` says which moved.
+#: **The first supply that is typical and not a bound**, and the first that
+#: states the two levels an input reads.
+C3 = {
+    "chip": "ESP32-C3", "volts": 3.3, "sourceOhms": 33.0, "sinkOhms": 35.4,
+    "ratedAmps": None, "absoluteAmps": None, "typical": True,
+    "inputHighVolts": 2.475, "inputLowVolts": 0.825,
+}
+
+#: A XIAO ESP32-C3's pads as `webui/api.py` sends them while a sketch runs
+#: that leaves D1 and D2 as inputs, drives D10 high and D9 low. `VBUS` is a
+#: pad this board cannot answer for, and `3V3_OUT` and `GND` are rails.
+XIAO = [
+    {"name": "D1", "state": "input"},
+    {"name": "D2", "state": "input"},
+    {"name": "D10", "state": "high"},
+    {"name": "D9", "state": "low"},
+    {"name": "3V3_OUT", "state": "unknown"},
+    {"name": "GND", "state": "unknown"},
+    {"name": "VBUS", "state": "unknown"},
+]
+
 
 def run(tmp_path: pathlib.Path, body: str) -> dict:
     """Run a fragment against the real `circuit.js` under node, and parse it.
@@ -147,6 +171,8 @@ def run(tmp_path: pathlib.Path, body: str) -> dict:
         f"const RESISTOR = {json.dumps(RESISTOR)};\n"
         f"const POT = {json.dumps(POT)};\n"
         f"const PADS = {json.dumps(PADS)};\n"
+        f"const C3 = {json.dumps(C3)};\n"
+        f"const XIAO = {json.dumps(XIAO)};\n"
         + textwrap.dedent(body),
         encoding="utf-8")
     done = subprocess.run([node, str(script)], capture_output=True, text=True)
@@ -521,7 +547,8 @@ def test_a_rail_the_board_does_not_name_drives_nothing(tmp_path):
 
 
 def test_a_board_with_no_supply_model_computes_nothing(tmp_path):
-    """Nine of the ten boards with a 3D model publish no `SUPPLY`.
+    """A board whose module publishes no `SUPPLY` -- most of them; which ones
+    is the modules', and a count written here went stale (OH-161).
 
     They get no circuit and say so, which is the same honest degradation the
     panel's three model captions make. **Not `off`**: a part that would light
@@ -802,22 +829,34 @@ def test_the_bench_uses_the_boards_own_published_supply(tmp_path):
     the page — so if the two disagree, the tests above are checking a circuit
     the browser never builds.
     """
-    from webui.boards import atmega328p, samd21
-    for module, want in ((atmega328p, UNO), (samd21, None)):
+    from webui.boards import atmega328p, esp32c3, esp32c5, esp32c6, samd21
+    # The C5's and the C6's Table 5-4 and drive strengths are the C3's line
+    # for line, so their supplies are the C3's under their own names.
+    for module, want in ((atmega328p, UNO), (samd21, None), (esp32c3, C3),
+                         (esp32c5, {**C3, "chip": "ESP32-C5"}),
+                         (esp32c6, {**C3, "chip": "ESP32-C6"})):
         supply = module.SUPPLY
         # Every value carries its provenance, the rule `Electrical` and `SPECS`
         # both keep: a number without one is the defect this area re-learns.
+        # The three a board states only where it has them -- `typical` and the
+        # two input levels (OH-161) -- are held to the same rule when present.
         for name in ("volts", "source_ohms", "sink_ohms", "rated_amps",
-                     "absolute_amps"):
+                     "absolute_amps", *(name for name in (
+                         "typical", "input_high_volts", "input_low_volts")
+                         if name in supply)):
             assert name in supply, f"{module.__name__} publishes no {name}"
             assert supply["cited"].get(name), f"{module.__name__}: {name} uncited"
         if want is None:
             continue
+        assert supply["chip"] == want["chip"]
         assert supply["volts"] == want["volts"]
         assert supply["source_ohms"] == want["sourceOhms"]
         assert supply["sink_ohms"] == want["sinkOhms"]
         assert supply["rated_amps"] == want["ratedAmps"]
         assert supply["absolute_amps"] == want["absoluteAmps"]
+        assert supply.get("typical", False) == want.get("typical", False)
+        assert supply.get("input_high_volts") == want.get("inputHighVolts")
+        assert supply.get("input_low_volts") == want.get("inputLowVolts")
 
 
 def test_the_led_the_page_loads_carries_the_parameters_the_tests_use():
@@ -1601,3 +1640,281 @@ def test_the_junction_note_retires_on_a_bench_that_joined_parts(tmp_path):
     assert not (got["withOne"] and "terminal to another's" in got["withOne"]), (
         "the bench joined two parts directly and was still told it cannot"
     )
+
+
+# --- what the bench drives onto an input (OH-161 step 3) ---------------------
+#
+# `analyse` answers the other direction too: for every pad the program leaves
+# as an input, the level the bench puts on it. `board3d.js` posts that map to
+# the board, and it is the only way a level reaches a running sketch, so a
+# level answered wrongly here is a `digitalRead` answered wrongly there.
+
+
+def xiao(wires: str, parts: str = "[RESISTOR]", supply: str = "C3") -> str:
+    """The line every case below shares, on the XIAO ESP32-C3's pads."""
+    return (f"const report = analyse({{supply: {supply}, pads: XIAO, "
+            f"parts: {parts}, wires: {wires}}});\n")
+
+
+def test_an_input_pulled_to_a_rail_through_a_resistor_reads_that_rail(tmp_path):
+    """**The circuit a pull-down or a pressed button is, solved.** A 220 ohm
+    resistor from D1 to GND and one from D2 to `3V3_OUT`: an input takes no
+    current, so each sits at its rail, 0 V and 3.3 V, past the level the C3
+    is guaranteed to read low and high (datasheet v2.4 Table 5-4)."""
+    got = run(tmp_path, xiao("""[
+        {pad: "D1", part: 0, terminal: "lead A"},
+        {pad: "GND", part: 0, terminal: "lead B"},
+        {pad: "D2", part: 1, terminal: "lead A"},
+        {pad: "3V3_OUT", part: 1, terminal: "lead B"},
+    ]""", parts="[RESISTOR, RESISTOR]") + """
+        console.log(JSON.stringify(report.inputs));
+    """)
+    assert got == {"D1": "low", "D2": "high"}
+
+
+def test_an_input_nothing_reaches_is_open_and_every_input_is_named(tmp_path):
+    """**Open is a level the bench states, not one it guesses.** A pad no
+    source reaches sits at 0 V in the solve only through `GMIN`, which is an
+    artefact, so it is "open" -- and every pad in state `input` is in the
+    map, wired or not, so the post the page makes from it is a whole
+    statement. A resistor with one lead on D1 and the other in mid-air
+    reaches nothing either; nor does a bench with no wire, or no part."""
+    got = run(tmp_path, xiao("""[
+        {pad: "D1", part: 0, terminal: "lead A"},
+    ]""") + """
+        const bare = analyse({supply: C3, pads: XIAO, parts: [RESISTOR], wires: []});
+        const empty = analyse({supply: C3, pads: XIAO, parts: [], wires: []});
+        console.log(JSON.stringify({dangling: report.inputs, bare: bare.inputs,
+                                    empty: empty.inputs}));
+    """)
+    for case in ("dangling", "bare", "empty"):
+        assert got[case] == {"D1": "open", "D2": "open"}, (case, got[case])
+
+
+def test_an_input_between_the_two_guaranteed_levels_is_open_and_said_so(tmp_path):
+    """Two equal resistors from `3V3_OUT` and `GND` put D1 at half the rail,
+    1.65 V: past VIL max 0.825 V and short of VIH min 2.475 V, where the
+    datasheet promises neither level. So it is "open" -- and not the last
+    level, which would be a hysteresis these pads do not have by default --
+    and the bench note says where it sits and the two levels it is between."""
+    got = run(tmp_path, xiao("""[
+        {pad: "3V3_OUT", part: 0, terminal: "lead A"},
+        {pad: "D1", part: 0, terminal: "lead B"},
+        {pad: "D1", part: 1, terminal: "lead A"},
+        {pad: "GND", part: 1, terminal: "lead B"},
+    ]""", parts="[RESISTOR, RESISTOR]") + """
+        console.log(JSON.stringify({inputs: report.inputs, note: report.note}));
+    """)
+    assert got["inputs"]["D1"] == "open"
+    for words in ("D1 is at 1.65 V", "0.825 V", "2.475 V", "ESP32-C3"):
+        assert words in got["note"], (words, got["note"])
+
+
+def test_a_voltage_at_a_guaranteed_level_reads_as_that_level(tmp_path):
+    """VIH is a MINIMUM and VIL a MAXIMUM, so a pin standing exactly on one
+    reads that way. A pad wired to the same terminal as a rail's pad IS the
+    rail's node, and sits on its voltage exactly; a supply whose levels are
+    the two rails puts D1 on VIH and D2 on VIL."""
+    got = run(tmp_path, """
+        const edges = {...C3, inputHighVolts: 3.3, inputLowVolts: 0.0};
+        const report = analyse({supply: edges, pads: XIAO, parts: [RESISTOR, RESISTOR], wires: [
+          {pad: "D1", part: 0, terminal: "lead A"},
+          {pad: "3V3_OUT", part: 0, terminal: "lead A"},
+          {pad: "D2", part: 1, terminal: "lead A"},
+          {pad: "GND", part: 1, terminal: "lead A"},
+        ]});
+        console.log(JSON.stringify(report.inputs));
+    """)
+    assert got == {"D1": "high", "D2": "low"}
+
+
+def test_an_input_follows_a_pin_driving_it_through_a_resistor(tmp_path):
+    """D10 driven high through a resistor into D1, and D9 driven low into
+    D2: a driven pin is a source, its Thevenin resistor referred to ground,
+    so each input reads the pin that drives it."""
+    got = run(tmp_path, xiao("""[
+        {pad: "D10", part: 0, terminal: "lead A"},
+        {pad: "D1", part: 0, terminal: "lead B"},
+        {pad: "D9", part: 1, terminal: "lead A"},
+        {pad: "D2", part: 1, terminal: "lead B"},
+    ]""", parts="[RESISTOR, RESISTOR]") + """
+        console.log(JSON.stringify(report.inputs));
+    """)
+    assert got == {"D1": "high", "D2": "low"}
+
+
+def test_an_input_a_value_nobody_published_could_move_is_left_open(tmp_path):
+    """**A level decided by a stood-in value is not a level.** The buzzer
+    publishes no model, so `analyse` stands `ASSUMED_OHMS` in for it; from
+    `3V3_OUT` into D1 against a resistor to GND that would put D1 at
+    3.3 x 231 / 1231 = 0.62 V, low, and a real coil buzzer of thirty ohms
+    would put it high. So D1 is "open" and the note says why. The same with
+    D2 between a resistor to GND and one to `VBUS`, a pad this board cannot
+    answer for. Without the buzzer, D1 is low: the control."""
+    buzzer = '{label: "12 mm buzzer", terminals: ["negative", "positive"], model: null}'
+    got = run(tmp_path, xiao("""[
+        {pad: "3V3_OUT", part: 0, terminal: "positive"},
+        {pad: "D1", part: 0, terminal: "negative"},
+        {pad: "D1", part: 1, terminal: "lead A"},
+        {pad: "GND", part: 1, terminal: "lead B"},
+        {pad: "D2", part: 2, terminal: "lead A"},
+        {pad: "GND", part: 2, terminal: "lead B"},
+        {pad: "D2", part: 3, terminal: "lead A"},
+        {pad: "VBUS", part: 3, terminal: "lead B"},
+    ]""", parts=f"[{buzzer}, RESISTOR, RESISTOR, RESISTOR]") + """
+        const control = analyse({supply: C3, pads: XIAO, parts: [RESISTOR], wires: [
+          {pad: "D1", part: 0, terminal: "lead A"},
+          {pad: "GND", part: 0, terminal: "lead B"},
+        ]});
+        // `VBUS` tied to ground beside it: ground holds its voltage whatever
+        // hangs off it, so nothing on the far side of it moves what D1 reads.
+        const across = analyse({supply: C3, pads: XIAO,
+                                parts: [RESISTOR, RESISTOR], wires: [
+          {pad: "VBUS", part: 0, terminal: "lead A"},
+          {pad: "GND", part: 0, terminal: "lead B"},
+          {pad: "D1", part: 1, terminal: "lead A"},
+          {pad: "GND", part: 1, terminal: "lead B"},
+        ]});
+        console.log(JSON.stringify({inputs: report.inputs, note: report.note,
+                                    control: control.inputs,
+                                    across: across.inputs}));
+    """)
+    assert got["inputs"] == {"D1": "open", "D2": "open"}
+    assert "D1 and D2 would read whatever" in got["note"], got["note"]
+    assert got["control"]["D1"] == "low"
+    assert got["across"]["D1"] == "low", "a rail passed a stood-in value across"
+
+
+def test_an_input_reached_only_through_a_diode_that_is_off_is_open(tmp_path):
+    """An LED from `3V3_OUT` into D1 and nothing else: no current can return,
+    so the LED is off, and D1 is joined to the rail only through `OFF_OHMS`
+    against `GMIN` -- an artefact that solves it to 3.297 V, which would read
+    high. An off diode is not a path, so D1 is "open"."""
+    got = run(tmp_path, xiao("""[
+        {pad: "3V3_OUT", part: 0, terminal: "anode"},
+        {pad: "D1", part: 0, terminal: "cathode"},
+    ]""", parts="[LED]") + """
+        console.log(JSON.stringify(report.inputs));
+    """)
+    assert got["D1"] == "open"
+
+
+def test_a_board_whose_supply_states_no_input_levels_gets_no_inputs(tmp_path):
+    """The Uno's `SUPPLY` states no input levels, and its description reads
+    no input -- its `PINx` are a stored zero -- so there is nothing to hold a
+    voltage against and nowhere to send one. Pin 11 is an input and wired to
+    ground, and the map is still empty, so the page posts nothing."""
+    got = run(tmp_path, bench("""[
+        {pad: "11", part: 0, terminal: "lead A"},
+        {pad: "GND", part: 0, terminal: "lead B"},
+    ]""", parts="[RESISTOR]") + """
+        console.log(JSON.stringify(report.inputs));
+    """)
+    assert got == {}
+
+
+def test_a_current_through_a_typical_pin_is_said_as_typical_and_judged_by_nothing(tmp_path):
+    """**The first supply that is not a bound** (OH-161). A current through a
+    pin whose drive the datasheet states only as typical is neither a lower
+    bound nor an upper one, so it is said as "about" and held to no limit: a
+    C3 whose pin stood at one typical ohm would push (3.3 - 2.2) / 31 =
+    35 mA through an LED rated 30 mA absolute, and the page may not call
+    that destroyed. The same LED straight across `3V3_OUT` and `GND` on the
+    same board reaches no pin: its 1.1 / 30 = 37 mA is a lower bound, and it
+    IS destroyed."""
+    got = run(tmp_path, """
+        const strong = {...C3, sourceOhms: 1.0};
+        const pin = analyse({supply: strong, pads: XIAO, parts: [LED], wires: [
+          {pad: "D10", part: 0, terminal: "anode"},
+          {pad: "GND", part: 0, terminal: "cathode"},
+        ]});
+        const rails = analyse({supply: strong, pads: XIAO, parts: [LED], wires: [
+          {pad: "3V3_OUT", part: 0, terminal: "anode"},
+          {pad: "GND", part: 0, terminal: "cathode"},
+        ]});
+        // And the pin's own current is through its own typical drive, so a
+        // pin rating -- which no ESP32 supply states -- is not held to it
+        // either.
+        const rated = analyse({supply: {...strong, ratedAmps: 0.001}, pads: XIAO,
+                               parts: [LED], wires: [
+          {pad: "D10", part: 0, terminal: "anode"},
+          {pad: "GND", part: 0, terminal: "cathode"},
+        ]});
+        console.log(JSON.stringify({pin: pin.parts[0], rails: rails.parts[0],
+                                    rated: rated.note}));
+    """)
+    pin, rails = got["pin"], got["rails"]
+    assert pin["drive"] == "lit" and not pin["destroyed"], pin
+    assert pin["reason"].startswith("about ") and "typical" in pin["reason"], pin
+    assert pin["warning"] is None, pin
+    assert abs(pin["amps"] - 1.1 / 31) < 1e-9
+    assert rails["drive"] == "damaged" and rails["destroyed"], rails
+    assert got["rated"] is None, got["rated"]
+
+
+def test_a_supply_states_input_levels_exactly_where_its_board_reads_input():
+    """**The two halves of one join.** A board whose description reads input
+    (`drive_pins`) and whose supply states no input levels -- or which has
+    no supply at all -- would get a bench that can never drive it; one whose
+    supply states them and whose description reads nothing would be posted
+    levels it refuses. So the two go together, on every description a
+    catalogue board resolves to."""
+    from webui import api
+    from webui.boards import catalogue
+
+    seen = {}
+    for board in catalogue.catalogue():
+        description = api.description_for(board.name)
+        if description is None:
+            continue
+        supply = getattr(description, "SUPPLY", None) or {}
+        reads = getattr(description, "drive_pins", None) is not None
+        states = "input_high_volts" in supply and "input_low_volts" in supply
+        assert reads == states, (board.name, description.__name__, reads, states)
+        seen[description.__name__] = states
+    assert seen.get("webui.boards.esp32c3") is True, seen
+    assert seen.get("webui.boards.atmega328p") is False, seen
+
+
+def test_two_pads_of_one_rail_are_one_supply(tmp_path):
+    """An Adafruit Feather ESP32-C6 has two pads called `3.3V`, and they are
+    one net, as an Uno's three GND pads are. Stamped as two ideal sources
+    across that net they made the matrix singular, and the bench answered
+    "did not settle" for a resistor from the rail into an input -- found by
+    `test_bench_drive.py`'s end-to-end test on the Feather, the first board
+    with two pads of a non-zero rail (OH-161)."""
+    got = run(tmp_path, """
+        const pads = [{name: "3.3V", state: "unknown"}, {name: "3.3V", state: "unknown"},
+                      {name: "GND", state: "unknown"}, {name: "A1", state: "input"}];
+        const report = analyse({supply: C3, pads, parts: [RESISTOR], wires: [
+          {pad: "3.3V", part: 0, terminal: "lead A"},
+          {pad: "A1", part: 0, terminal: "lead B"},
+        ]});
+        console.log(JSON.stringify({ok: report.ok, inputs: report.inputs}));
+    """)
+    assert got == {"ok": True, "inputs": {"A1": "high"}}
+
+
+def test_every_esp32_boards_three_volt_rail_is_a_rail(tmp_path):
+    """**A rail is named by its silkscreen** (`RAILS`), and the manifest
+    boards spell the 3.3 V one `3.3V` or `+3.3V` where a XIAO says
+    `3V3_OUT`. Without those a resistor from a pin to the board's own 3.3 V
+    pad would reach nothing, and the input would read open. Every ESP32
+    board whose pads are drawn has a pad the bench takes for its 3.3 V rail,
+    and one for ground."""
+    from webui import api
+    from webui.boards import catalogue
+
+    rails = run(tmp_path, "console.log(JSON.stringify(RAILS));")
+    checked = []
+    for board in catalogue.catalogue():
+        if not board.chip.startswith("ESP32-C"):
+            continue
+        view = api.pad_view(board.name, api.description_for(board.name), None)
+        if not view.get("present"):
+            continue
+        names = {pad["pin"] for pad in view["pads"]}
+        assert any(rails.get(name) == 3.3 for name in names), (board.name, sorted(names))
+        assert any(rails.get(name) == 0.0 for name in names), (board.name, sorted(names))
+        checked.append(board.name)
+    assert "Adafruit QT Py ESP32-C3" in checked and "XIAO-ESP32-C3-DIP" in checked

@@ -50,6 +50,28 @@
 // still. A lower bound that sits under a rating is not a clean bill of health,
 // because the real current may be anywhere above it. So this file emits a
 // warning and never an all-clear.
+//
+// ## Except through a pin whose drive is only typical (OH-161)
+//
+// An ESP32's datasheet guarantees no output corner -- its VOH and VOL are
+// measured into no load at all -- and states a pin's current only as typical,
+// so `webui/boards/esp32c3.py`'s `SUPPLY` is typical and says so. A current
+// that runs through one of its driven pins is then typical too: it is said as
+// "about", and no rating is checked against it, because a typical figure over
+// a limit is not a fact and one under it is no reassurance. A current that
+// reaches no driven pin -- a part between two rails -- is still a lower bound
+// and is still judged.
+//
+// ## And the other direction: what the bench drives onto an input (OH-161)
+//
+// `analyse` also says, for every pin the program leaves as an input, what the
+// bench puts on it: "high" or "low" where its solved voltage is past the level
+// the chip is guaranteed to read that way, and "open" where nothing reaches
+// it, where it sits between the two, or where a value nobody published would
+// decide it. `board3d.js` posts that map to the board, which is the only way a
+// level enters a running sketch, and this file only ever answers it from the
+// solve: it invents no level, and "open" stays open. A board whose supply
+// states no input levels gets an empty map, and nothing is posted to it.
 
 //: A pad label that names its own voltage. **The silkscreen is the source**:
 //: `5V` is five volts because that is what the vendor printed on the board, and
@@ -62,11 +84,18 @@
 //: there is no cable either; `IOREF` is a reference output rather than a rail
 //: to draw from; the last three are pins. A part wired to one of those reaches
 //: a node nothing drives, which is the truth about it.
+//:
+//: **`3.3V` and `+3.3V` are the manifest boards' spellings of the same rail**
+//: (OH-161): Adafruit's and SparkFun's board files name the pad `3.3V`, and
+//: Olimex's and PCBCUPID's KiCad nets `+3.3V`. `+5V` is absent for VBUS's
+//: reason: on a QT Py and an Olimex devkit it is the USB cable's five volts.
 export const RAILS = {
   GND: 0.0,
   "5V": 5.0,
   "3V3": 3.3,
   "3V3_OUT": 3.3,
+  "3.3V": 3.3,
+  "+3.3V": 3.3,
 };
 
 //: Amps at which a red indicator LED is unambiguously alight.
@@ -169,14 +198,16 @@ function gauss(A, z) {
  *   `{kind: "source",   id, a, b, volts}`  -- ideal: V(a) - V(b) = volts
  *   `{kind: "diode",    id, a, b, volts, ohms}`  -- a is the anode
  *
- * Returns `{ok, volts, amps, passes}`; `volts` is indexed by node and `amps` is
- * a plain object keyed by element id.
+ * Returns `{ok, volts, amps, passes, on}`; `volts` is indexed by node, `amps`
+ * is a plain object keyed by element id, and `on` says which diodes conduct,
+ * keyed the same way.
  */
 export function solve(net) {
   const sources = net.elements.filter((e) => e.kind === "source");
   const size = net.nodes - 1 + sources.length;
   if (size <= 0) {
-    return { ok: true, volts: new Float64Array(net.nodes), amps: {}, passes: 0 };
+    return { ok: true, volts: new Float64Array(net.nodes), amps: {}, passes: 0,
+             on: {} };
   }
   // Which diodes are conducting. All off to begin with, because that is the
   // one starting point that does not depend on the order the parts were
@@ -270,7 +301,8 @@ export function solve(net) {
                             : across / OFF_OHMS;
     }
   }
-  return { ok: true, volts: nodeVoltage, amps, passes };
+  return { ok: true, volts: nodeVoltage, amps, passes,
+           on: Object.fromEntries(conducting) };
 }
 
 /** One node's voltage mid-solve, where ground is not in the unknown vector. */
@@ -297,6 +329,43 @@ function nets() {
   };
 }
 
+/**
+ * Which node voltages the solve decided, and which nodes move together.
+ *
+ * `solve` gives every node a voltage, and some of them are artefacts: a node
+ * nothing conducts to sits at zero through `GMIN`, and one reached only
+ * through a part with no model sits wherever `ASSUMED_OHMS` put it. This
+ * tells them apart, for `analyse`'s inputs and for whether a part's current
+ * ran through a driven pin (OH-161).
+ *
+ * Two joins over what conducts. `decided` joins through everything, so a node
+ * joined to ground's is decided by a source -- every source here is referred
+ * to ground, a rail by an ideal source and a driven pin by its Thevenin
+ * resistor. `group` stops at ground and at every rail, the `fixed` nodes,
+ * because a fixed voltage carries no change across it: a node's group is
+ * everything that can move it, and a fixed node has none. A diode that is off
+ * does not conduct here -- its `OFF_OHMS` is an artefact, as `analyse` says of
+ * its nanoamps. A part with no model conducts as `solve` stood it in, and
+ * `analyse` marks every group it touches, so no node it reaches is read.
+ */
+function groups(elements, on, fixed) {
+  const whole = nets();
+  const local = nets();
+  for (const element of elements) {
+    if (element.kind === "current") continue;
+    if (element.kind === "diode" && !on[element.id]) continue;
+    whole.join(String(element.a), String(element.b));
+    if (!fixed.has(element.a) && !fixed.has(element.b)) {
+      local.join(String(element.a), String(element.b));
+    }
+  }
+  const ground = whole.find("0");
+  return {
+    decided: (node) => whole.find(String(node)) === ground,
+    group: (node) => (fixed.has(node) ? null : local.find(String(node))),
+  };
+}
+
 /** How a number of amps reads in a sentence. */
 export function milliamps(amps) {
   const mA = amps * 1000;
@@ -311,13 +380,18 @@ export function milliamps(amps) {
  * `bench` is `{supply, pads, parts, wires}`:
  *
  *   supply  `{volts, sourceOhms, sinkOhms, ratedAmps, absoluteAmps, chip}`,
- *           or null for a board that publishes no electrical model
+ *           or null for a board that publishes no electrical model; and
+ *           `typical`, `inputHighVolts` and `inputLowVolts` where the board
+ *           states them (OH-161)
  *   pads    `[{name, state}]` — the four states `webui/api.py` defines
  *   parts   `[{label, model}]` — index is the identity, `model` may be null
  *   wires   `[{pad, part, terminal}]` — `part` is an index into `parts`
  *
- * Returns `{ok, note, parts}` with one entry per part, in the same order:
- * `{drive, amps, reason, warning}`. `drive` is one of `parts.js`'s three words.
+ * Returns `{ok, note, parts, inputs}` with one entry per part, in the same
+ * order: `{drive, amps, reason, warning}`. `drive` is one of `parts.js`'s
+ * three words. `inputs` is pad name -> "high", "low" or "open" for every pad
+ * in state `input`, on a board whose supply states both input levels, and
+ * empty on any other: the file header says what each word means.
  */
 export function analyse(bench) {
   const report = bench.parts.map((part) => (part.destroyed ? {
@@ -335,7 +409,17 @@ export function analyse(bench) {
     drive: "unanswerable", amps: null, destroyed: false,
     reason: "not wired to anything", warning: null,
   }));
-  const answer = (note) => ({ ok: true, note, parts: report });
+  // **Every input starts open, and only the solve below says otherwise**
+  // (OH-161). Only on a board whose supply states both levels an input
+  // reads: anywhere else there is nothing to hold a voltage against, and no
+  // board description that reads input to send it to.
+  const supply = bench.supply;
+  const reads = supply?.inputHighVolts != null && supply?.inputLowVolts != null;
+  const inputs = {};
+  for (const pad of bench.pads) {
+    if (reads && pad.state === "input") inputs[pad.name] = "open";
+  }
+  const answer = (note) => ({ ok: true, note, parts: report, inputs });
 
   // **A destroyed part is out of the reporting from here on.** Its verdict is
   // already decided and permanent; every branch below writes a verdict, so the
@@ -412,8 +496,13 @@ export function analyse(bench) {
       // thing a person can build with two wires and which no solve of it can
       // describe. Named rather than left to come out as a singular matrix.
       if (railAt.has(where) && railAt.get(where) !== rail) shorted.push(pad.name);
+      // **One source per rail net** (OH-161): a board with two pads of one
+      // rail -- an Adafruit Feather ESP32-C6's two `3.3V` -- has one net,
+      // and two ideal sources across it leave the matrix singular.
+      if (rail !== 0 && !railAt.has(where)) {
+        elements.push({ kind: "source", id: `rail:${pad.name}`, a: where, b: 0, volts: rail });
+      }
       railAt.set(where, rail);
-      if (rail !== 0) elements.push({ kind: "source", id: `rail:${pad.name}`, a: where, b: 0, volts: rail });
       continue;
     }
     if (pad.state === "high" || pad.state === "low") {
@@ -438,7 +527,7 @@ export function analyse(bench) {
     for (const index of wired) {
       report[index].reason = "in a circuit that shorts two supplies together";
     }
-    return { ok: false, parts: report,
+    return { ok: false, parts: report, inputs,
              note: `${shorted.join(" and ")} is wired to another supply. That ` +
                    `is a short circuit, not a circuit this can solve.` };
   }
@@ -464,7 +553,9 @@ export function analyse(bench) {
     }
     const a = nodeOf(terminalKey(index, names[0]));
     const b = nodeOf(terminalKey(index, names[1]));
-    if (!model) { assumed++; elements.push({ kind: "resistor", id: `part:${index}`, a, b, ohms: ASSUMED_OHMS }); continue; }
+    // `assumed` on the element too, so that no input is read off a node a
+    // stood-in value moves (OH-161).
+    if (!model) { assumed++; elements.push({ kind: "resistor", id: `part:${index}`, a, b, ohms: ASSUMED_OHMS, assumed: true }); continue; }
     if (model.kind === "diode") {
       elements.push({ kind: "diode", id: `part:${index}`,
                       a: nodeOf(terminalKey(index, model.from)),
@@ -485,17 +576,46 @@ export function analyse(bench) {
       // it, which is what `assumed` means.
       assumed++;
       elements.push({ kind: "resistor", id: `part:${index}`, a, b,
-                      ohms: ASSUMED_OHMS });
+                      ohms: ASSUMED_OHMS, assumed: true });
     }
   }
 
   const solved = solve({ nodes: count, elements });
   if (!solved.ok) {
     for (const index of wired) report[index].reason = "in a circuit that could not be solved";
-    return { ok: false, parts: report,
+    return { ok: false, parts: report, inputs,
              note: "This circuit did not settle in " + MAX_PASSES + " passes. " +
                    "Nothing is being shown for it rather than a guess." };
   }
+
+  // Ground and every rail: the nodes a source holds. See `groups`.
+  const fixed = new Set([0]);
+  for (const element of elements) if (element.kind === "source") fixed.add(element.a);
+  const grouped = groups(elements, solved.on, fixed);
+  // The groups a driven pin can move, and the groups a value nobody
+  // published can: a pad this board cannot answer for, or either end of a
+  // part with no model (OH-161).
+  const drivenGroups = new Set();
+  const blindGroups = new Set();
+  for (const pad of bench.pads) {
+    if (RAILS[pad.name] !== undefined) continue;
+    const group = grouped.group(nodeOf(`pad:${pad.name}`));
+    if (group === null) continue;
+    if (pad.state === "high" || pad.state === "low") drivenGroups.add(group);
+    if (pad.state === "unknown") blindGroups.add(group);
+  }
+  for (const element of elements) {
+    if (!element.assumed) continue;
+    for (const end of [element.a, element.b]) {
+      const group = grouped.group(end);
+      if (group !== null) blindGroups.add(group);
+    }
+  }
+  //: Whether a part's current ran through a pin whose drive is only
+  //: typical: the file header says what is then said, and what is not.
+  const typical = (index, names) => supply.typical === true
+    && names.some((name) => drivenGroups.has(
+      grouped.group(nodeOf(terminalKey(index, name)))));
 
   // **What each DRIVEN PIN carries, which is not what any one part carries.**
   // Two LEDs across one pad each draw 25 mA and the pad delivers 51 mA, so a
@@ -606,9 +726,16 @@ export function analyse(bench) {
     }
     entry.drive = "lit";
     entry.amps = assumed ? null : amps;
+    // **A typical current is said as one, and held to no limit** (OH-161):
+    // neither a lower bound nor an upper one, so neither a warning nor a
+    // verdict can rest on it.
+    const rough = typical(index, names);
     entry.reason = entry.amps === null
       ? "conducting, but a part with no electrical model is in the same circuit"
-      : `at least ${milliamps(amps)} through it`;
+      : rough
+        ? `about ${milliamps(amps)} through it, at the ${supply.chip}'s ` +
+          `typical drive -- not a bound, so no rating is checked against it`
+        : `at least ${milliamps(amps)} through it`;
     // The busiest driven pin this part reaches. One part can touch two of
     // them -- an LED from a high pad to a low one -- and the one that is
     // closest to its limit is the one worth naming.
@@ -618,12 +745,12 @@ export function analyse(bench) {
       const carrying = pinAmps.get(wire.pad);
       if (!pin || carrying > pin.amps) pin = { name: wire.pad, amps: carrying };
     }
-    entry.warning = warn(amps, bench.supply, model, pin);
+    entry.warning = rough ? null : warn(amps, bench.supply, model, pin);
     // **The verdict, and it outranks the picture.** A part carrying more than
     // its datasheet's absolute maximum is not a lit part with a caption -- it
     // is a destroyed one, and drawing it glowing beside a paragraph saying so
     // lets the picture win the disagreement.
-    const killed = assumed ? null : destroys(amps, model);
+    const killed = assumed || rough ? null : destroys(amps, model);
     if (killed) {
       entry.drive = "damaged";
       entry.destroyed = true;
@@ -675,10 +802,14 @@ export function analyse(bench) {
   // already names is skipped -- one sentence per fact, not one per place that
   // noticed it.
   for (const [name, amps] of pinAmps) {
-    if (named.has(name)) continue;
+    // A pin's own current is through its own drive, so on a typical supply
+    // it is typical, and the file header says what that rules out (OH-161).
+    if (named.has(name) || supply.typical === true) continue;
     const sentence = pinSentence(name, amps, bench.supply);
     if (sentence) notes.push(sentence);
   }
+  notes.push(...readInputs(supply, inputs, nodeOf, solved, grouped,
+                           blindGroups));
   if (assumed) {
     notes.push("One part on this bench publishes no electrical model, so no " +
                "current is reported for any of them: a value stood in for it " +
@@ -689,6 +820,47 @@ export function analyse(bench) {
     notes.push(JUNCTION_NOTE);
   }
   return answer(notes.length ? notes.join(" ") : null);
+}
+
+/**
+ * Fill `inputs` from the solve, and return what the bench note must say
+ * about it (OH-161). Called by `analyse` only once the circuit has solved.
+ *
+ * A pad is "open" until something decides it: a group a value nobody
+ * published can move keeps it open, and so does a node no source reaches --
+ * it is at zero only through `GMIN`. A decided voltage is held against the
+ * two levels the chip guarantees an input reads: at or past `inputHighVolts`
+ * it is "high", at or under `inputLowVolts` "low", and between the two the
+ * datasheet promises neither, so it stays "open" and the note says where it
+ * sits. Kept "open" rather than at the last level, because holding a level
+ * would be a hysteresis these pads do not have by default.
+ */
+function readInputs(supply, inputs, nodeOf, solved, grouped, blindGroups) {
+  const between = [];
+  const blind = [];
+  for (const name of Object.keys(inputs)) {
+    const at = nodeOf(`pad:${name}`);
+    const group = grouped.group(at);
+    if (group !== null && blindGroups.has(group)) { blind.push(name); continue; }
+    if (!grouped.decided(at)) continue;
+    const volts = solved.volts[at];
+    if (volts >= supply.inputHighVolts) inputs[name] = "high";
+    else if (volts <= supply.inputLowVolts) inputs[name] = "low";
+    else between.push(`${name} is at ${volts.toFixed(2)} V`);
+  }
+  const notes = [];
+  if (between.length) {
+    notes.push(`${between.join(" and ")}, between the ${supply.inputLowVolts} V ` +
+               `the ${supply.chip} is guaranteed to read as low and the ` +
+               `${supply.inputHighVolts} V it is guaranteed to read as high, so ` +
+               `the board is told nothing drives it.`);
+  }
+  if (blind.length) {
+    notes.push(`${blind.join(" and ")} would read whatever a part with no ` +
+               `published model, or a pad this board cannot answer for, made ` +
+               `of it, so the board is told nothing drives it.`);
+  }
+  return notes;
 }
 
 /** The two names a part's wires may land on. */

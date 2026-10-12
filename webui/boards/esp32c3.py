@@ -412,6 +412,98 @@ HEADER: dict[str, int] = {
 #: label onto the half this table knows.
 PIN_NAMES: dict[str, str] = {label: f"GPIO{gpio}" for label, gpio in HEADER.items()}
 
+#: What a pin of this part drives and the levels it reads, so the bench's
+#: circuit can be solved on a board carrying one (OH-161 step 3).
+#: `webui/api.py` sends it beside the pad map, as it sends
+#: `atmega328p.SUPPLY`, and `webui/static/circuit.js` reads it. Read out of
+#: ESP32-C3 Series Datasheet v2.4 and the C3 TRM v1.4 on 2026-10-13.
+#:
+#: **The two input levels are guarantees.** Table 5-4, p.55: VIH min 0.75 x
+#: VDD and VIL max 0.25 x VDD. A voltage at or past one of them reads that
+#: way on every part; between them the datasheet promises neither, and the
+#: page tells the board nothing drives the pin.
+#:
+#: **The two resistances are TYPICAL, and this is the first `SUPPLY` here
+#: that is not a bound.** The ATmega328P's and the SAM D21's come from a
+#: guaranteed corner -- a minimum VOH at a stated current -- so a current
+#: through them is a lower bound and the page may say "at least". This part
+#: guarantees no such corner: its VOH min 0.8 x VDD and VOL max 0.1 x VDD are
+#: "measured using high-impedance load" (Table 5-4 note 2), at no current, and
+#: its source and sink currents are given only as Typ. So `typical` is set,
+#: and the page says a current through one of these pins is "about" so much
+#: and holds it to no rating: a typical figure over a limit is not a fact and
+#: one under it is no reassurance. A current that reaches no driven pin -- a
+#: part between `3V3_OUT` and `GND` -- is untouched by these and is still a
+#: lower bound.
+#:
+#: **And they are at the drive a pad comes out of reset with**, `FUN_DRV` 2
+#: (`IO_MUX_PADS`), which nothing here writes: the datasheet's currents are at
+#: `PAD_DRIVER = 3`, and the TRM gives 3 as ~40 mA and 2 as ~20 mA, so each
+#: is taken at half. **Except on GPIO2, 3 and 5**, whose `FUN_DRV` 2 the same
+#: register calls ~10 mA: a XIAO ESP32-C3's D0, D1 and D3 drive about half
+#: what the page says. One figure per part is what `SUPPLY` holds, and this
+#: is the price of that.
+#:
+#: No current rating and no absolute maximum per pin, and both are real
+#: absences, as the SAM D21's absolute maximum is: see their citations.
+SUPPLY: dict[str, object] = {
+    "chip": "ESP32-C3",
+    "volts": 3.3,
+    "source_ohms": 33.0,
+    "sink_ohms": 35.4,
+    "typical": True,
+    "rated_amps": None,
+    "absolute_amps": None,
+    "input_high_volts": 2.475,
+    "input_low_volts": 0.825,
+    "cited": {
+        "volts": (
+            "every XIAO ESP32-C3 pad map's `3V3_OUT` pad, from Seeed's own "
+            "CAD, and the 3.3 V typical of datasheet v2.4 Table 5-2, "
+            "`Recommended Operating Conditions`, p.54, for VDD3P3 and "
+            "VDD3P3_CPU -- the I/O supply on every board carrying this part"
+        ),
+        "source_ohms": (
+            "derived: (3.3 - 0.8 * 3.3) / 0.020. Datasheet v2.4 Table 5-4, "
+            "`DC Characteristics (3.3 V, 25 C)`, p.55: IOH typ 40 mA at "
+            "VDD = 3.3 V, VOH >= 2.64 V, PAD_DRIVER = 3. TRM v1.4 Register "
+            "5.21, `IO_MUX_GPIOn_REG`, p.188: FUN_DRV 3 is ~40 mA and 2, "
+            "every header pad's reset drive, is ~20 mA -- except on GPIO2, 3, "
+            "5, 18 and 19, where 2 is ~10 mA. TYPICAL, not a bound"
+        ),
+        "sink_ohms": (
+            "derived: 0.495 / (0.028 / 2), rounded to 0.1 ohm. Same table: "
+            "IOL typ 28 mA at VDD = 3.3 V, VOL = 0.495 V, PAD_DRIVER = 3, "
+            "halved to FUN_DRV 2 by the same register's ~20 of ~40 mA -- an "
+            "assumption, since the TRM gives one strength per field value and "
+            "does not say sourcing or sinking. TYPICAL, not a bound"
+        ),
+        "typical": (
+            "Table 5-4 note 2, p.55: `VOH and VOL are measured using "
+            "high-impedance load`, so no output voltage is guaranteed at any "
+            "current, and IOH and IOL are stated only in the Typ column"
+        ),
+        "rated_amps": (
+            "there is not one. Table 5-4 gives IOH and IOL as typical currents "
+            "at a test point, which is not a rating, and no other table states "
+            "a per-pin current"
+        ),
+        "absolute_amps": (
+            "there is not one per pin. Table 5-1, `Absolute Maximum Ratings`, "
+            "p.54, gives `Cumulative IO output current` 1000 mA -- every pin "
+            "together, not one"
+        ),
+        "input_high_volts": (
+            "0.75 * 3.3: Table 5-4, p.55, VIH `High-level input voltage` min "
+            "0.75 x VDD"
+        ),
+        "input_low_volts": (
+            "0.25 * 3.3: Table 5-4, p.55, VIL `Low-level input voltage` max "
+            "0.25 x VDD"
+        ),
+    },
+}
+
 
 #: This part's ISA, exactly as its datasheet spells it and as
 #: `webui/boards/catalogue.py`'s `CHIPS` records it.

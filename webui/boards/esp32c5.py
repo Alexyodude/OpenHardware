@@ -465,6 +465,75 @@ HEADER: dict[str, int] = {
 #: the vendor's labels and not the silkscreen's compound ones.
 PIN_NAMES: dict[str, str] = {label: f"GPIO{gpio}" for label, gpio in HEADER.items()}
 
+#: What a pin of this part drives and the levels it reads, for the bench's
+#: circuit (OH-161 step 3), read out of ESP32-C5 Series Datasheet v1.5 and
+#: the C5 TRM v1.1 on 2026-10-13. **`esp32c3.py`'s `SUPPLY` carries the
+#: argument**, and it holds here word for word: the input levels are
+#: guarantees, and the two resistances are TYPICAL -- this part's VOH and VOL
+#: are measured into no load (Table 5-4 note 2) and its currents are Typ --
+#: so `typical` is set and the page says "about" and holds a current through
+#: a pin to no rating. The numbers are the C3's because the table's are,
+#: line for line, and the TRM's drive strengths are too; what this part does
+#: not have is the C3's exception, so every header pad's reset `FUN_DRV` 2 is
+#: ~20 mA.
+SUPPLY: dict[str, object] = {
+    "chip": "ESP32-C5",
+    "volts": 3.3,
+    "source_ohms": 33.0,
+    "sink_ohms": 35.4,
+    "typical": True,
+    "rated_amps": None,
+    "absolute_amps": None,
+    "input_high_volts": 2.475,
+    "input_low_volts": 0.825,
+    "cited": {
+        "volts": (
+            "every XIAO ESP32-C5 pad map's `3V3_OUT` pad, from Seeed's own "
+            "CAD, and the 3.3 V typical of datasheet v1.5 Table 5-2, "
+            "`Recommended Power Characteristics`, p.70, for VDDPST1 and "
+            "VDDPST3 -- the I/O supply on every board carrying this part"
+        ),
+        "source_ohms": (
+            "derived: (3.3 - 0.8 * 3.3) / 0.020. Datasheet v1.5 Table 5-4, "
+            "`DC Characteristics (3.3 V, 25 C)`, p.71: IOH typ 40 mA at "
+            "VDD = 3.3 V, VOH >= 2.64 V, PAD_DRIVER = 3. TRM v1.1 Register "
+            "8.25, `IO_MUX_GPIOn_REG`, p.353: FUN_DRV 3 is ~40 mA and 2, every "
+            "header pad's reset drive, is ~20 mA -- as v5.5's "
+            "`io_mux_struct.h:75-80` also states. TYPICAL, not a bound"
+        ),
+        "sink_ohms": (
+            "derived: 0.495 / (0.028 / 2), rounded to 0.1 ohm. Same table: "
+            "IOL typ 28 mA at VDD = 3.3 V, VOL = 0.495 V, PAD_DRIVER = 3, "
+            "halved to FUN_DRV 2 by the same register's ~20 of ~40 mA -- an "
+            "assumption, since the TRM gives one strength per field value and "
+            "does not say sourcing or sinking. TYPICAL, not a bound"
+        ),
+        "typical": (
+            "Table 5-4 note 2, p.71: `VOH and VOL are measured using "
+            "high-impedance load`, so no output voltage is guaranteed at any "
+            "current, and IOH and IOL are stated only in the Typ column"
+        ),
+        "rated_amps": (
+            "there is not one. Table 5-4 gives IOH and IOL as typical currents "
+            "at a test point, which is not a rating, and no other table states "
+            "a per-pin current"
+        ),
+        "absolute_amps": (
+            "there is not one. Table 5-1, `Absolute Maximum Ratings`, p.70, "
+            "states only the input power pins' voltage and the storage "
+            "temperature: no output current at all, per pin or together"
+        ),
+        "input_high_volts": (
+            "0.75 * 3.3: Table 5-4, p.71, VIH `High-level input voltage` min "
+            "0.75 x VDD"
+        ),
+        "input_low_volts": (
+            "0.25 * 3.3: Table 5-4, p.71, VIL `Low-level input voltage` max "
+            "0.25 x VDD"
+        ),
+    },
+}
+
 #: What the silicon has, exactly as `webui/boards/catalogue.py`'s `CHIPS`
 #: records it, with `test_the_board_agrees_with_the_catalogue_about_the_isa`
 #: pinning the two together.
