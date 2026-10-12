@@ -15,6 +15,7 @@ touches:
 - tests/webui/test_board_session_fault.py
 - webui/static/emulator.js
 - tests/avr/test_host_fault.py
+- tests/webui/test_board_runtime_contract.py
 ---
 
 Found by OH-223 and its review (2026-10-12), by reading and through a live server. OH-223 gave the i8086 and AVR bindings a `HostFault(AbiError)` for a fault ctypes catches on the host, and made the 8086 debugger's session stop as "faulted". The board side is not done, because its files belong elsewhere:
