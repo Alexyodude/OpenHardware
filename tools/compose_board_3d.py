@@ -224,6 +224,25 @@ ESPRESSIF_KICAD = ("https://raw.githubusercontent.com/espressif/kicad-libraries/
 ADAFRUIT_CAD = ("https://raw.githubusercontent.com/adafruit/Adafruit_CAD_Parts/"
                 "c128bceb1f96b6ea8b68f250bda986ba85da24ea")
 
+#: The licence each library a row's `step` is fetched from states, keyed by
+#: that library's pinned URL, for the components line of every .glb that
+#: draws one (OH-228). A STEP from any other library is refused there, by
+#: `step_licence`, rather than written down with no licence beside it.
+STEP_LICENCES: dict[str, str] = {
+    ESPRESSIF_KICAD: ("CC-BY-SA-4.0 with the KiCad library exception, by "
+                      "Espressif's LICENSE.md"),
+    ADAFRUIT_CAD: "MIT, (c) 2016 Adafruit Industries",
+}
+
+
+def step_licence(url: str) -> str:
+    """The licence `STEP_LICENCES` records for a fetched STEP's URL."""
+    for source, licence in STEP_LICENCES.items():
+        if url.startswith(source + "/"):
+            return licence
+    raise SystemExit(f"{url} is from no library STEP_LICENCES records a "
+                     f"licence for; it records {sorted(STEP_LICENCES)}")
+
 #: EAGLE package name -> the KiCad model of that part. Each span quoted below
 #: was measured on 2026-08-27 with `eagle.Element.pad_extent`, and `confirm`
 #: re-measures it on every run rather than trusting these comments.
@@ -1175,19 +1194,27 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "ESP32-C6: Adafruit's USB-C socket, twelve contact pads and four "
         "plated shell slots spanning 8.64 x 4.76 mm. ADAFRUIT's own model of "
         "it, out of their MIT-licensed whole-board STEP of the QT Py "
-        "ESP32-C3, where it is the product their exporter names for this "
-        "land -- PRODUCT('USB TYPE C','USB_C_CUSB31-CFM2AX-01-X',...), the "
-        "element's value and then its package -- placed at the element's own "
-        "origin and turn, so its frame is the package's and the turn is 0. "
+        "ESP32-C3. Their exporter writes one product per package, named by "
+        "the package, its id the value of one placement of it -- here "
+        "PRODUCT('USB TYPE C','USB_C_CUSB31-CFM2AX-01-X',...) -- and places "
+        "it at the element's own origin and turn, so its frame is the "
+        "package's and the turn is 0. "
         "Its body is 8.94 x 7.90 x 4.20 mm, its width the package's own "
         "outline exactly. Placed on its legs as every legged model is, each "
-        "shell leg stands 0.060 to 0.065 mm off its slot's middle, and each "
-        "of the twelve tails rests on its pad, the four wide ones 0.05 mm "
-        "outboard: a test holds both. The KB2040's own STEP carries the same "
+        "shell leg stands 0.060 to 0.065 mm off its slot's middle -- the "
+        "legs' middle is 0.029 mm from the tabs', so this is that much off "
+        "Adafruit's own placement -- and each of the twelve tails rests on "
+        "its pad, the four wide ones 0.05 mm outboard: a test holds both. "
+        "**ITS TURN IS HELD THINLY IN `compose`.** Its gold cannot decide it "
+        "(see CONTACT_COLOURS) and Adafruit draw no pin-1 marker, so "
+        "`silk_miss` alone refuses the half turn, by 0.315 mm over its "
+        "tolerance measured 2026-10-13, and a QUARTER turn passes `compose`, "
+        "listed only on the "
+        "turn line; the fit test refuses one, by the body's width along the "
+        "land. Measured 2026-10-13, the KB2040's own STEP carries the same "
         "body moved 0.09 mm in its own frame, vertex for vertex; the "
         "Feather's land is this land with its package origin 1.27 mm along, "
-        "which the pads absorb. Its gold is not a CONTACT_COLOURS key, for "
-        "the reason given there. Until OH-228 ABSENT left the land off "
+        "which the pads absorb. Until OH-228 ABSENT left the land off "
         "naming 'CUI's CUSB31-CFM2AX-01-X', and that was wrong: Same Sky, "
         "as CUI Devices is now named, make no such part -- their own site "
         "search finds none, read 2026-10-13 -- and Adafruit's files name no "
@@ -5276,11 +5303,12 @@ def confirm(element: eagle.Element, box, turn: float,
 #: **Adafruit's gold, `#ffce7f`, is not here, and on purpose** (OH-228). On
 #: their USB-C socket it plates the contacts on the tongue inside the shell as
 #: well as the solder tails, and the tongue is most of it -- so its middle is
-#: the tongue's, and `contact_miss` measured it 3.344 mm from the pads at the
-#: right turn and 1.986 at the half turn: it would refuse the right answer.
-#: That socket's tails are held to its pads by a test that reads only the gold
-#: at board level -- `test_adafruits_usb_c_body_stands_on_the_land_it_was_
-#: drawn_for` -- and its half turn is one `silk_miss` refuses.
+#: the tongue's, and `contact_miss` measured it, 2026-10-13, 3.344 mm from the
+#: pads at the right turn and 1.986 at the half turn: it would refuse the
+#: right answer. That socket's tails are held to its pads by a test that reads
+#: only the gold at board level -- `test_adafruits_usb_c_body_stands_on_the_
+#: land_it_was_drawn_for` -- and its half turn is one `silk_miss` refuses.
+#: A quarter turn nothing in `compose` refuses; that test does (see its row).
 CONTACT_COLOURS = frozenset({"#dbbc7e", "#f6df99", "#f7e099", "#f4e5a7"})
 
 #: A part needs this many surface-mount pads before its turn is decided by
@@ -7125,11 +7153,13 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 "exception; fetched, not vendored"
                 + "".join(sorted({
                     # A product out of an assembly is the BOARD vendor's
-                    # model of a part, not its maker's (OH-228).
-                    f"; and the manufacturer's own STEP, {component.url}"
-                    if component.product is None else
-                    f"; and {component.product!r} out of the board vendor's "
-                    f"own assembly, {component.url}"
+                    # model of a part, not its maker's; and each says its
+                    # licence, as KiCad's does (OH-228).
+                    (f"; and the manufacturer's own STEP, {component.url}"
+                     if component.product is None else
+                     f"; and {component.product!r} out of the board "
+                     f"vendor's own assembly, {component.url}")
+                    + f", {step_licence(component.url)}"
                     for component in CORRESPONDENCE
                     if component.step is not None
                     and component.slug in cache}))

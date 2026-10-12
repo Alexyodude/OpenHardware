@@ -7087,14 +7087,13 @@ ADAFRUIT_USB_C = {"Adafruit QT Py ESP32-C3": "X6", "Adafruit KB2040": "X6",
 #: wide -- `drill="0.6"` on M1 to M4 -- and the leg is 0.30 mm thick, which
 #: the test below measures off the body rather than taking from here:
 #: (0.60 - 0.30) / 2. Measured 2026-10-13 after `place`: 0.060 mm on the
-#: front legs and 0.065 on the rear.
+#: front legs and 0.065 on the rear. **Known, and not Adafruit's**: `place`
+#: puts the middle of the legs' bounding box on the tabs' middle, and the rear
+#: legs are longer than the front, so that box's middle is 0.0287 mm from the
+#: legs' own -- the whole of the difference from Adafruit's own placement,
+#: where the legs stand 0.031 and 0.036 mm off.
 LEG_PLAY_MM = 0.15
 LEG_THICKNESS_MM = 0.30
-
-#: How far above the board's top face a solder tail's foot may sit and still
-#: rest on its pad: the tessellation's own chord tolerance, `DEFLECTION`.
-#: Measured 0.012 mm on Adafruit's body.
-FOOT_LIFT_MM = 0.05
 
 
 def _adafruit_usb_c():
@@ -7166,8 +7165,10 @@ def test_adafruits_usb_c_body_stands_on_the_land_it_was_drawn_for():
     (OH-228), after `place` has put one on the other the way it puts every
     legged model: its legs' middle on the middle of the through-hole pads.
 
-      * its width along the board's edge is the package's own outline,
-        `element.silk`, to a hundredth of a millimetre;
+      * its width along the land's edge is the package's own outline,
+        `element.silk`, to a hundredth of a millimetre, and turned a quarter
+        either way it is narrower -- which is what refuses a quarter turn,
+        because nothing in `compose` does (the row's `why` says why);
       * each of its four shell legs stands in its tab, within `LEG_PLAY_MM`;
       * every one of the land's surface-mount pads has a solder tail resting
         on it, the middle of its foot inside the pad's copper.
@@ -7175,6 +7176,13 @@ def test_adafruits_usb_c_body_stands_on_the_land_it_was_drawn_for():
     In the package's own frame, where Adafruit draw the land, on each of the
     three boards. The two locating pegs are told apart from the legs by the
     holes they go into, which are the board's own `<hole>`s.
+
+    **Not asserted: that every gold vertex at board level lies on a pad.**
+    It does not, and the model is why: Adafruit draw the bottom of the whole
+    contact set as ONE gold face at board level, x +/-4.07 and y 2.21 to
+    4.06 mm in the package's frame, 10.30 mm^2 -- a comb, whose twelve teeth
+    are the tails' feet and whose spine runs across the land behind the
+    pads, which begin at y 2.97.
 
     Seen red (2026-10-13): no row drew the land.
     """
@@ -7201,18 +7209,34 @@ def test_adafruits_usb_c_body_stands_on_the_land_it_was_drawn_for():
         pads = [p for name in spec.headers for p in board.element(name).pads]
         centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
                   (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
-        put = compose.place(mesh, element, row.turn, spec.thickness_mm, centre)
-        local = [(*_into_package(element, p[at] + centre[0], centre[1] - p[at + 2]),
-                  p[at + 1], colour)
-                 for colour, (p, _n, _i) in put.groups.items()
-                 for at in range(0, len(p), 3)]
+        def placed_at(turn: float) -> list[tuple[float, float, float, str]]:
+            put = compose.place(mesh, element, turn, spec.thickness_mm, centre)
+            return [(*_into_package(element, p[at] + centre[0],
+                                    centre[1] - p[at + 2]), p[at + 1], colour)
+                    for colour, (p, _n, _i) in put.groups.items()
+                    for at in range(0, len(p), 3)]
+
+        def width_of(points) -> float:
+            return max(v[0] for v in points) - min(v[0] for v in points)
+
+        local = placed_at(row.turn)
         where = f"{spec.board} {element.name}"
 
         x0, _y0, x1, _y1 = element.silk
-        width = max(v[0] for v in local) - min(v[0] for v in local)
-        assert width == pytest.approx(x1 - x0, abs=0.01), (
-            f"{where}: the body is {width:.3f} mm wide and the package's "
-            f"outline {x1 - x0:.3f}")
+        outline = x1 - x0
+        width = width_of(local)
+        assert width == pytest.approx(outline, abs=0.01), (
+            f"{where}: turned {row.turn:.0f}, the body is {width:.3f} mm wide "
+            f"along the land's edge and the package's outline {outline:.3f}: "
+            f"a quarter turn lays the socket's depth along the edge, and "
+            f"nothing in `compose` refuses one")
+        for quarter in (90.0, 270.0):
+            turn = (row.turn + quarter) % 360.0
+            across = width_of(placed_at(turn))
+            assert across < outline - 0.01, (
+                f"{where}: turned {turn:.0f}, the body is {across:.3f} mm wide "
+                f"against the outline's {outline:.3f}, so its width cannot "
+                f"tell a quarter turn from the right one")
 
         tabs = {pad.number: _into_package(element, pad.x_mm, pad.y_mm)
                 for pad in element.pads_of("thru_hole")}
@@ -7231,20 +7255,27 @@ def test_adafruits_usb_c_body_stands_on_the_land_it_was_drawn_for():
             xs = [v[0] for v in legs[number]]
             ys = [v[1] for v in legs[number]]
             assert xs, f"{where}: no leg goes into tab {number}"
-            thick = min(max(xs) - min(xs), max(ys) - min(ys))
-            assert thick <= LEG_THICKNESS_MM + 0.001, (
-                f"{where}: the leg in {number} is {thick:.3f} mm thick, so "
-                f"LEG_PLAY_MM's arithmetic is not about this body")
+            # Where the leg stands first, and only then what it is: a body
+            # turned wrongly lands a peg nearer a tab than its own hole, and
+            # "too thick" would then be a true and useless thing to say.
             off = math.dist(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2),
                             (tx, ty))
             assert off <= LEG_PLAY_MM, (
-                f"{where}: the leg in tab {number} stands {off:.3f} mm off its "
-                f"middle, and a {LEG_THICKNESS_MM} mm leg in a 0.60 mm slot has "
-                f"{LEG_PLAY_MM}")
+                f"{where}: turned {row.turn:.0f}, what stands in tab {number} "
+                f"is {off:.3f} mm off its middle, and a {LEG_THICKNESS_MM} mm "
+                f"leg in a 0.60 mm slot has {LEG_PLAY_MM}: the row's turn is "
+                f"wrong, or the body is not the one measured")
+            thick = min(max(xs) - min(xs), max(ys) - min(ys))
+            assert thick <= LEG_THICKNESS_MM + 0.001, (
+                f"{where}: the leg in {number} is {thick:.3f} mm thick, so "
+                f"LEG_PLAY_MM's arithmetic is not about this body, or the "
+                f"row's turn is wrong")
 
+        # A foot rests on its pad within the tessellation's own chord
+        # tolerance; measured 0.012 mm above the copper.
         feet = [(x, y) for x, y, height, colour in local
                 if colour == "#ffce7f"
-                and abs(height - spec.thickness_mm) <= FOOT_LIFT_MM]
+                and abs(height - spec.thickness_mm) <= compose.DEFLECTION]
         smd = element.pads_of("smd")
         assert len(smd) == 12, (
             f"{where}: {len(smd)} contact pads, and the row's `why` says twelve")
@@ -7301,6 +7332,47 @@ def test_a_pinned_model_that_is_not_the_file_measured_is_refused(tmp_path,
         compose.component_mesh(row, compose.DEFLECTION)
     assert f"{step} is 13 bytes" in str(said.value), said.value
     assert "Deleted it" in str(said.value) and not step.exists(), said.value
+
+
+def test_every_fetched_step_says_its_licence_on_the_components_line(
+        monkeypatch, capsys, tmp_path):
+    """**Each source on a .glb's components line states its licence**, as
+    KiCad's always has (OH-228's review): Adafruit's MIT, and Espressif's
+    CC-BY-SA, which had the same gap. Every row's STEP is from a library
+    `STEP_LICENCES` names, one from any other is refused naming its URL, and
+    the Feather ESP32-C6 -- which draws from both -- writes both.
+
+    Seen red (2026-10-13): with Adafruit's library left out of
+    `STEP_LICENCES`, and with the licence left off the line.
+    """
+    from tools.import_3d_model import read_extras
+
+    stepped = [row for row in compose.CORRESPONDENCE if row.step is not None]
+    assert stepped, "no row draws a fetched STEP"
+    for row in stepped:
+        assert compose.step_licence(row.url), row.url
+    with pytest.raises(SystemExit, match=re.escape(
+            "https://example.invalid/PART.STEP is from no library")):
+        compose.step_licence("https://example.invalid/PART.STEP")
+
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    spec = next(s for s in compose.COMPOSITIONS
+                if s.board == "Adafruit Feather ESP32-C6")
+    if not _fetched(spec):
+        pytest.skip(f"SKIPPED in part: not fetched; run {spec.fetch_with}")
+    missing = _inputs_missing(spec, compose.read_layout(spec.layout))
+    if missing:
+        pytest.skip(f"SKIPPED in part: {spec.board} reads what is not fetched: "
+                    f"{missing}")
+    monkeypatch.setattr(compose, "OUT", tmp_path)
+    monkeypatch.setattr(compose, "REPO", tmp_path)
+    compose.compose(spec, deflection=compose.DEFLECTION, check=False)
+    capsys.readouterr()
+    line = read_extras(tmp_path / f"{compose._slug(spec.board)}.glb")["components"]
+    for source in (compose.ADAFRUIT_CAD, compose.ESPRESSIF_KICAD):
+        clause = next((part for part in line.split("; ") if source in part), None)
+        assert clause is not None, f"{source} is not on: {line}"
+        assert clause.endswith(f", {compose.STEP_LICENCES[source]}"), clause
 
 
 # --- a KiCad manifest row, read from what its own file states (OH-195) ---------

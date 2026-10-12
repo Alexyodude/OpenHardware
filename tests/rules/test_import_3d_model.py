@@ -1859,12 +1859,15 @@ def test_a_ceramic_block_is_a_dielectric_in_its_own_colour():
 
 def _assembly_step(tmp_path: pathlib.Path) -> pathlib.Path:
     """A STEP assembly as a board vendor's CAD exports one: `A BOARD`, holding
-    `A PART`, a 1 x 2 x 3 mm box at the origin, and `ANOTHER PART`, a 4 x 5 x
-    6 mm box placed 10 mm along x. Written by OpenCASCADE's own writer, so
-    this needs no vendor file, and then `ANOTHER PART`'s PRODUCT id rewritten
-    to `A VALUE`: STEP's PRODUCT is (id, name, description, ...), and
-    Adafruit's exporter writes a part's value as the id and its package as
-    the name -- `PRODUCT('USB TYPE C','USB_C_CUSB31-CFM2AX-01-X',...)`."""
+    `A PART`, a 1 x 2 x 3 mm box at the origin, `ANOTHER PART`, a 4 x 5 x 6
+    mm box placed 10 mm along x, and a 7 x 8 x 9 mm box 20 mm along. Written
+    by OpenCASCADE's own writer, so this needs no vendor file, and then
+    rewritten as text twice. `ANOTHER PART`'s PRODUCT id becomes `A VALUE`:
+    STEP's PRODUCT is (id, name, description, ...), and Adafruit's exporter
+    writes one product per package, named by the package, its id the value
+    of one placement of it -- `PRODUCT('1k','_0402NO',...)` behind the QT
+    Py's 0402 resistors and capacitors alike. And the third box's PRODUCT
+    takes the name `A PART`, so two products answer to it."""
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
     from OCP.gp import gp_Trsf, gp_Vec
     from OCP.STEPCAFControl import STEPCAFControl_Writer
@@ -1880,7 +1883,8 @@ def _assembly_step(tmp_path: pathlib.Path) -> pathlib.Path:
     board = tool.NewShape()
     TDataStd_Name.Set_s(board, TCollection_ExtendedString("A BOARD"))
     for name, size, along in (("A PART", (1.0, 2.0, 3.0), 0.0),
-                              ("ANOTHER PART", (4.0, 5.0, 6.0), 10.0)):
+                              ("ANOTHER PART", (4.0, 5.0, 6.0), 10.0),
+                              ("A THIRD PART", (7.0, 8.0, 9.0), 20.0)):
         part = tool.AddShape(BRepPrimAPI_MakeBox(*size).Shape(), False)
         TDataStd_Name.Set_s(part, TCollection_ExtendedString(name))
         move = gp_Trsf()
@@ -1893,10 +1897,15 @@ def _assembly_step(tmp_path: pathlib.Path) -> pathlib.Path:
     step = tmp_path / "assembly.step"
     writer.Write(str(step))
     text = step.read_text(encoding="utf-8")
-    written = "PRODUCT('ANOTHER PART','ANOTHER PART'"
-    assert text.count(written) == 1, "OpenCASCADE wrote the product otherwise"
-    step.write_text(text.replace(written, "PRODUCT('A VALUE','ANOTHER PART'"),
-                    encoding="utf-8")
+    for written, rewritten in (
+            ("PRODUCT('ANOTHER PART','ANOTHER PART'",
+             "PRODUCT('A VALUE','ANOTHER PART'"),
+            ("PRODUCT('A THIRD PART','A THIRD PART'",
+             "PRODUCT('A THIRD PART','A PART'")):
+        assert text.count(written) == 1, (
+            f"OpenCASCADE wrote {written!r} otherwise")
+        text = text.replace(written, rewritten)
+    step.write_text(text, encoding="utf-8")
     return step
 
 
@@ -1927,9 +1936,12 @@ def test_a_product_the_file_does_not_name_is_refused_naming_those_it_does(tmp_pa
     """**Refused, not guessed**, and the refusal is the list to choose from.
     A STEP product answers to its NAME, the field OpenCASCADE names its label
     by, and not to its id: `A VALUE` is in the file, as Adafruit's 'USB TYPE
-    C' is, and is refused like a name nobody wrote.
+    C' is, and is refused like a name nobody wrote. And a name two products
+    answer to is refused as well, with the count: which of them is meant is
+    not this reader's to guess.
 
-    Seen red (2026-10-13): `read_product` did not exist.
+    Seen red (2026-10-13): `read_product` did not exist. The duplicate, added
+    after the review: seen red with `len(found) != 1` mutated to `not found`.
     """
     pytest.importorskip("OCP")
     from tools.import_3d_model import read_product
@@ -1942,3 +1954,7 @@ def test_a_product_the_file_does_not_name_is_refused_naming_those_it_does(tmp_pa
         assert f"no product named {missing!r}" in said, said
         for present in ("'A BOARD'", "'A PART'", "'ANOTHER PART'"):
             assert present in said, f"{present} is not named in: {said}"
+    with pytest.raises(SystemExit) as refused:
+        read_product(step, "A PART")
+    said = str(refused.value)
+    assert "has 2 products named 'A PART', not one" in said, said

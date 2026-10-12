@@ -408,9 +408,11 @@ def read_product(step: pathlib.Path, name: str):
 
     **By the name the file states, and nothing looser.** STEP's PRODUCT is
     `(id, name, description, ...)`, and OpenCASCADE names a product's label
-    by its name -- Adafruit's exporter writes an element's VALUE as the id
-    and its PACKAGE as the name, `PRODUCT('USB TYPE C',
-    'USB_C_CUSB31-CFM2AX-01-X',...)`, so the socket answers to the second.
+    by its name. Adafruit's exporter writes one PRODUCT per PACKAGE, named
+    by the package, and takes its id from the value of one placement of it:
+    the QT Py's `PRODUCT('1k','_0402NO')` stands behind its 0402 resistors
+    and capacitors alike. So the socket is `PRODUCT('USB TYPE C',
+    'USB_C_CUSB31-CFM2AX-01-X',...)` and answers to its package name.
     Anything but exactly one product of that name is refused, naming every
     product there is.
     """
