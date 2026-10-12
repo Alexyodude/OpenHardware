@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 /// Bumped whenever this header's shape changes.
-#define AVR_ABI_VERSION 3
+#define AVR_ABI_VERSION 4
 
 typedef struct AvrCpu AvrCpu;
 
@@ -100,6 +100,15 @@ AVR_API uint64_t avr_executed(const AvrCpu* cpu);
 
 /// 0 ok, 1 an encoding this core does not implement, 2 a refused access.
 AVR_API int avr_step(AvrCpu* cpu);
+
+/// The word the most recent avr_step began at; zero before the first.
+///
+/// For when the core faults on the host part-way through an instruction
+/// (OH-223): avr_step advances the PC before executing, so afterwards the PC
+/// names the next instruction rather than the one that faulted. Every step
+/// records it, at the cost of one store, so a caller need not read the PC
+/// before each step to have it.
+AVR_API uint32_t avr_step_entry(const AvrCpu* cpu);
 
 AVR_API uint32_t avr_fault_address(const AvrCpu* cpu);
 AVR_API int avr_fault_was_program(const AvrCpu* cpu);

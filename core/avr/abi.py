@@ -34,7 +34,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match AVR_ABI_VERSION in abi.h.
-ABI_VERSION = 3
+ABI_VERSION = 4
 
 #: Must match avr::StepResult.
 OK = 0
@@ -48,6 +48,16 @@ FLAGS = {"C": 0, "Z": 1, "N": 2, "V": 3, "S": 4, "H": 5, "T": 6, "I": 7}
 #: register. The single most likely off-by-something in an AVR model, so it is
 #: named here as well as in the C.
 IO_BASE = 0x20
+
+#: How many program words a `HostFault` shows from where its step began: the
+#: longest AVR instruction (LDS, STS, JMP, CALL) is two.
+FAULT_WORDS = 2
+
+#: How ctypes words an access violation that WROTE (its SetException formats
+#: "exception: access violation writing 0x..."). A wild write in the core may
+#: have landed anywhere in this process, not only in the machine a reload
+#: replaces, so a `HostFault` from one says to restart the process instead.
+WILD_WRITE = "access violation writing"
 
 
 class AbiError(Exception):
@@ -77,6 +87,17 @@ class HostFault(AbiError):
     that ctypes does not catch, and the process ends before this can be
     raised. OH-223's note records why nothing is done about that here.
     """
+
+    def __init__(self, message: str, at: int | None,
+                 code: tuple[int, ...], left: int | None) -> None:
+        super().__init__(message)
+        #: The word the step began at, or None if reading that back faulted.
+        self.at = at
+        #: The first `FAULT_WORDS` program words there, or as many as were
+        #: read before reading them faulted or program memory ended.
+        self.code = code
+        #: The word the core left the PC at, or None if reading it faulted.
+        self.left = left
 
 
 _SIGNATURES = {
@@ -130,6 +151,7 @@ _SIGNATURES = {
     "avr_set_pc": ([ctypes.c_void_p, ctypes.c_uint32], None),
     "avr_executed": ([ctypes.c_void_p], ctypes.c_uint64),
     "avr_step": ([ctypes.c_void_p], ctypes.c_int),
+    "avr_step_entry": ([ctypes.c_void_p], ctypes.c_uint32),
     "avr_fault_address": ([ctypes.c_void_p], ctypes.c_uint32),
     "avr_fault_was_program": ([ctypes.c_void_p], ctypes.c_int),
 }
@@ -400,12 +422,15 @@ class Cpu:
         offset runs a program nobody wrote.
 
         A host fault in the core raises `HostFault`, chained from the
-        `OSError` ctypes raised.
+        `OSError` ctypes raised. A closed Cpu is refused first: the core would
+        fault on its null handle, and that is not a bug in the core.
         """
+        if not self._handle:
+            raise AbiError("this Cpu has been closed")
         try:
             result = self._lib.avr_step(self._handle)
         except OSError as fault:
-            raise HostFault(self._host_fault(fault)) from fault
+            raise self._host_fault(fault) from fault
         if result == OK:
             return
         if result == UNIMPLEMENTED:
@@ -418,47 +443,60 @@ class Cpu:
         program = bool(self._lib.avr_fault_was_program(self._handle))
         raise MemoryFault(self._fault_message(address, program))
 
-    def _host_fault(self, fault: OSError) -> str:
-        """What `HostFault` says: where the core left the PC, and the program
-        words up to it.
+    def _host_fault(self, fault: OSError) -> HostFault:
+        """The `HostFault` for `fault`: the word the step began at, the
+        program words there, and where the core left the PC.
 
-        **Where it was left, not where the instruction began.** The i8086
-        binding reads its registers before every step so it can name the
-        instruction. Here that read would cost: `avr_pc` takes about as long
-        as `avr_step` does, a board run is a loop of nothing but steps, and
-        reading it each time nearly halves the instructions a board runs per
-        second (OH-223's note has the measurement) -- for a message about a
-        fault that should never happen. The core advances the PC before
-        executing, so unless the instruction had already branched it begins at
-        the PC or up to two words before, and those words are shown.
+        The core advances the PC before executing, so after a fault the PC
+        names the next instruction; `avr_step_entry` is where the core
+        recorded the step began, read only after a fault. (It is not read
+        before every step from here: `avr_pc` costs about what `avr_step`
+        does, and a board run is a loop of nothing but steps.)
 
-        Reading them back calls into the core again, and a fault that wrecked
-        more than one instruction could fault that too; that is said, rather
-        than let a second `OSError` replace the one being described.
+        Each read back is its own call into the core, and a fault that wrecked
+        more than one instruction could fault any of them: each that does is
+        said, and what was read before it kept, rather than let a second
+        `OSError` replace the one being described.
         """
+        failed: list[str] = []
+        at: int | None = None
         try:
-            pc = self.pc
-            size = self.program_words
-            first = max(0, pc - 2)
-            words = [self.read_program(at) for at in range(first, min(pc + 1, size))]
+            at = int(self._lib.avr_step_entry(self._handle))
         except OSError as unreadable:
-            where = f"; reading the machine back faulted as well ({unreadable})"
+            failed.append(f"where the step began ({unreadable})")
+        code: list[int] = []
+        if at is not None:
+            try:
+                size = self.program_words
+                for word in range(at, min(at + FAULT_WORDS, size)):
+                    code.append(self.read_program(word))
+            except OSError as unreadable:
+                failed.append(f"the words there ({unreadable})")
+        left: int | None = None
+        try:
+            left = self.pc
+        except OSError as unreadable:
+            failed.append(f"the PC ({unreadable})")
+
+        said = [f"avr: the core faulted on the host ({fault}) "
+                + (f"in the step that began at word 0x{at:04x} (byte "
+                   f"0x{at * 2:04x})" if at is not None else "in a step")]
+        if code:
+            said.append(f"the first {len(code)} words there are "
+                        + " ".join(f"0x{word:04x}" for word in code))
+        if left is not None:
+            said.append(f"the PC is now word 0x{left:04x}")
+        if failed:
+            said.append(f"reading back {' and '.join(failed)} faulted as well")
+        if WILD_WRITE in str(fault):
+            after = ("a write in the core went astray, so this process may be "
+                     "damaged beyond the machine: restart it rather than reload")
         else:
-            held = (" ".join(f"0x{word:04x}" for word in words)
-                    or f"nothing, being past its {size} words")
-            where = (
-                f" with its PC at word 0x{pc:04x} (byte 0x{pc * 2:04x}). It "
-                f"moves the PC past an instruction before executing it, so "
-                f"unless that instruction had branched it begins there or up "
-                f"to two words before; program memory from word "
-                f"0x{first:04x} holds {held}"
-            )
-        return (
-            f"avr: the core faulted on the host ({fault}){where}. That is a "
-            f"bug in core/avr, not in the firmware, and the machine stopped "
-            f"part-way through an instruction: load the image again before "
-            f"running it."
-        )
+            after = ("the machine stopped part-way through the instruction: "
+                     "load the image again before running it")
+        message = (f"{'; '.join(said)}. That is a bug in core/avr, not in the "
+                   f"firmware; {after}.")
+        return HostFault(message, at, tuple(code), left)
 
     def _fault_message(self, address: int, program: bool) -> str:
         space = "program" if program else "data"

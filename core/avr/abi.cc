@@ -12,6 +12,10 @@ namespace {
 
 struct Handle {
     avr::Cpu cpu;
+    // The word the most recent avr_step began at, for avr_step_entry
+    // (OH-223). Kept here rather than in avr::Cpu: it is a fact about the
+    // ABI's calls, not about the part.
+    uint32_t step_pc = 0;
 };
 
 inline Handle* as_handle(AvrCpu* cpu) { return reinterpret_cast<Handle*>(cpu); }
@@ -132,13 +136,20 @@ uint8_t avr_timer_count(const AvrCpu* cpu) {
 }
 
 int avr_step(AvrCpu* cpu) {
-    avr::Cpu& core = as_handle(cpu)->cpu;
+    Handle* handle = as_handle(cpu);
+    avr::Cpu& core = handle->cpu;
+    // Recorded before stepping, which advances the PC before it executes: if
+    // the core then faults on the host, the PC no longer says which
+    // instruction it was, and this does.
+    handle->step_pc = core.pc();
     const avr::StepResult result = avr::step(core);
     if (result == avr::StepResult::Ok) {
         core.note_executed();
     }
     return static_cast<int>(result);
 }
+
+uint32_t avr_step_entry(const AvrCpu* cpu) { return as_handle(cpu)->step_pc; }
 
 uint32_t avr_fault_address(const AvrCpu* cpu) {
     return as_handle(cpu)->cpu.fault_address();
