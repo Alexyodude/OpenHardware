@@ -9,6 +9,12 @@ touches:
 - webui/static/board3d-panel.js
 - tests/webui/test_pin_view.py
 - tests/webui/test_board3d.py
+- tools/import_pindefs.py
+- tests/rules/test_import_pindefs.py
+- tools/inventory.py
+- webui/boards/XIAO-MG24-SMD.json
+- webui/boards/XIAO-nRF54l15-SMD.json
+- webui/boards/XIAO-nRF54LM20A-SMD.json
 ---
 
 `chip_pin` answers two different questions with one field, and 153 pads are answered wrongly by the half nobody meant.
@@ -111,3 +117,78 @@ The ticket stays in progress. Slice 2 onward is as the 2026-10-09 decision lists
 **Note 2026-10-10:** SLICE 1 MERGED to master by fast-forward at 1e551db (lane4): the page's 'not modelled' reads a per-pad modelled flag from api.level_keys, chip_pin is a caption only. REVIEW: an independent review (MERGE AFTER SMALL FIXES), its fix round, and a verification (PASS). VERIFIED on master at 1e551db with OH-161's delay() work: full suite 2 failed (the OCP pair), 2669 passed, 41 skipped. Not seen in a browser. The verification also found the pins route answers a RuntimeContractError with a dropped connection rather than an HTTP status (unchanged by this slice, unreachable by any shipped module; webui/emulator_server.py is not this ticket's). tests/webui/test_board3d.py stays borrowed from OH-215 until this ticket closes. Slice 2 onward remains.
 
 **Note 2026-10-10:** 2026-10-10: webui/api.py lent to OH-161, whose step 3 adds BoardSession.drive (a recorded input level per pad) on the path from the bench to an ESP32's GPIO_IN. Slice 2 here starts in tools/import_pindefs.py and does not need it yet. Return it when OH-161's step 3 lands.
+
+**Note 2026-10-13:** 2026-10-13, SLICE 2 DESIGN, written before any code.
+
+SCOPE. The gate move, and the first captions it lets through. tools/import_pindefs.py's read_seeed_traced stops dropping a pad outside the part's GPIO numbering and returns it as a caption; header_table applies _CHIP_PIN_NAME, so the decision of what may be a HEADER row sits where the answer lands; the board file's unnumbered sentence counts only pins that pass the same gate, and a new sentence says which pads carry a caption. The pads that change are the ones Seeed's own board files already trace to exactly one pad of the MCU, measured before any code as the pinfunction of every pad of the part on the label's net:
+
+    XIAO-MG24-SMD        MG24_EN      net '~{MG24_RESET}'   ['RESET']
+    XIAO-nRF54l15-SMD    nRF54_EN     net '~{nRF54_RESET}'  ['~{RESET}']
+    XIAO-nRF54LM20A-SMD  nRF54_SWDIO  net 'nRF54_SWDIO'     ['SWDIO_G2']
+    XIAO-nRF54LM20A-SMD  nRF54_SWCLK  net 'nRF54_SWCLK'     ['SWDCLK_G1']
+
+Every other label read_seeed_traced follows already reaches a GPIO. None of these boards has a chip module, so no HEADER block changes and no level is read for any of them.
+
+NOT IN SLICE 2: _trace's captions on the manifest rows; SUPPLY_LABELS; plural captions; the RP2350 SMD's EN and the C3, C5 and C6 SMD EN pads; how "not modelled" reads beside a caption. Why each is out is under LEAST CONFIDENT and LEFT below.
+
+SHAPE.
+
+    # tools/import_pindefs.py
+    _CHIP_PIN_NAME   # the regex is unchanged. Its comment now names it as the
+                     # decision of what may be a HEADER row, applied in header_table
+                     # and filled_board rather than in the tracer.
+
+    def read_seeed_traced(texts, *, part, labels, nets=None) -> dict[str, ChipPin | Traced]:
+        # the pads of `part` on the label's net, by pinfunction:
+        #   one name passes _CHIP_PIN_NAME     -> ChipPin(name, flat)             unchanged
+        #   two names pass                     -> PindefError                     unchanged
+        #   none passes, exactly one pad       -> ChipPin(<its function>, None)   NEW: a caption
+        #   none passes, two or more pads      -> nothing                         unchanged
+        # a typed net (`nets`) still comes back Traced, with the caption in it
+
+    def header_table(chip, bsp_dir=BSP_DIR, boards_dir=BOARDS_DIR) -> HeaderTable:
+        # NEW: an entry whose chip_pin fails _CHIP_PIN_NAME is skipped before it is
+        # keyed or cited. A caption is no row: no level is read through a pin
+        # outside the numbering, and its source is not a citation of the block.
+
+    def assumption_for(chip, described, covered, unnumbered=None, resolved=0,
+                       unresolved=0, keyed_by=(), manifest=False, cad=(), answered=(),
+                       captions: tuple[tuple[str, str], ...] = ()) -> str:
+        # NEW `captions`: (label, chip_pin) for each pad whose chip_pin fails the
+        # gate, and one sentence saying each is a caption, chip_index null, no level read
+
+    def filled_board(name, bsp_dir=BSP_DIR, boards_dir=BOARDS_DIR, modules_dir=None) -> dict:
+        # `unnumbered`: chip_pin passes the gate and chip_index is None (was: any chip_pin)
+        # `captions`:   chip_pin fails the gate
+
+    REMOVED: _LANDED_RESET, _MG24_RESET, _NRF54L15_RESET, _NRF54LM20A_DEBUG. A reason
+    never overrides an answer, so each would be text nothing reads.
+
+CALL STACK, unchanged:
+
+    --write-boards  -> filled_board -> board_report -> resolve -> published_pins
+                    -> Source.pins -> read_seeed_traced
+    --write-headers -> header_table -> board_report -> ...; render_header
+    the page        -> api.pad_view -> chip_pin_of (the file's chip_pin, on a board with
+                       no module) and level_keys (HEADER keys, or a row's chip_index pads)
+
+So the panel shows a caption in the Chip pin column and reads it "not modelled".
+
+TESTS, each to be seen red first:
+- New, on _fake_tree: a CAD source answering EN -> ChipPin("RUN", None) on the fake SMD. Before: render_header(header_table("FAKE")) raises "no flat number". After: EN is not in table.pins, the CAD source is not cited, and the SMD's assumption has the caption sentence and no "NO flat number" sentence.
+- New: read_seeed_traced on MG24.kicad_pcb gives MG24_EN Traced(ChipPin("RESET", None), ...), and the MG24's GND, on several pads of the part, gives nothing.
+- Restated: the underside-pads answer test's reset branch asserts the caption, read off the footprint; the LM20A tracer test asserts SWDIO_G2 and SWDCLK_G1; the typed-net test asserts RESET for MG24_EN.
+- Restated: test_the_committed_files_with_unnumbered_pins_are_the_ones_oh_26_named counts pins that pass the gate.
+- Restated: test_every_pad_either_names_its_pin_or_says_why_it_has_none, where the four pads move from specific to naming, with a ladder line.
+- New, in tests/webui/test_pin_view.py: on every catalogue board, a pad whose chip_pin fails the gate is modelled False, and at least one such pad exists.
+
+LEAST CONFIDENT.
+1. A caption is the vendor's pad function verbatim. '~{RESET}' is KiCad's overbar markup, and 'SWDIO_G2' keeps the ball suffix that the gate strips from 'P0.00_K3'. Normalising either would mean guessing what the vendor meant.
+2. "Exactly one pad" is counted by pinfunction, because _footprints keeps no pad number. A pin split into two pads would read as two and get no caption. That is conservative, and no traced label hits it.
+3. _trace is left for slice 3, although the design pass proposed it here. Measured from the committed files' why_null, the same rule there would caption the 3.3V pad of every row whose module puts the rail on one 3V3 pin, the QT Py's GND (its pad 33 alone), the KB2040's D+ and D- (USB_DP, USB_DM) and !RESET (RUN), and each row's EN or RESET pad that reaches the module's EN. It would also displace the Thing Plus ESP32-C6's typed ESP_EN reason: _trace reaches U1 pad 3 = EN there, and test_every_reason_is_on_a_pad_and_carried_by_it and both pilot-reason tests would need restating. Supplies with captions are the SUPPLY_LABELS question, which the decision note keeps apart.
+4. The RP2350 SMD's EN (pad 25 -> TP4, net '/04 RP2350/RUN', RP2350 pad 26 'RUN', OH-209) is left out. Tracing it adds seeed-pcb to both RP2350 files' packages. test_the_two_artefacts_cite_the_same_revisions_as_each_other would then want webui/boards/rp2350.py's block, which OH-161 holds, to cite a source the gate correctly keeps out of it. That test, and the module-agreement test, need restating with the first caption on a board that has a module.
+
+LEFT, for a later slice:
+- _trace's captions (3 above), with SUPPLY_LABELS and plural captions. A GND net on many pads all named GND, or on GND and TESTEN as on the KB2040, is a supply question and not this slice's.
+- The XIAO SMD EN pads nothing here traces yet: the RP2350's (4 above), whose landing OH-209 measured, and the C3's, C5's and C6's, whose board files are in third_party/seeed-pcb and whose EN pads nobody has joined to a net. Their chips have modules, so the module-agreement test needs restating first.
+- The panel's wording beside a caption: "not modelled" next to RESET.
