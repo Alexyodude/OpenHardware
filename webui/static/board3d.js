@@ -655,9 +655,15 @@ const view = {
   //: The last thing `circuit.js` said about the bench, kept so that `parts()`
   //: can hand the page a sentence per part without solving again.
   circuit: null,
-  //: What the bench last told the board it drives, as `postInputs` spells
-  //: it, or null before this page has told it anything (OH-161).
+  //: What the bench last ATTEMPTED to tell the board it drives, board and
+  //: map as `postInputs` spells them, or null where nothing has been stated
+  //: to this session -- the page's first, and after every `showBoard`
+  //: (OH-161). A refused post is still recorded here, so it is not retried
+  //: every poll; `refusal` is what says it was refused.
   posted: null,
+  //: The sentence for the last post the board refused or never received, or
+  //: null once one is accepted. `circuit()` puts it in the bench note.
+  refusal: null,
   //: Pin name -> EVERY marker drawn for it, and the plural is OH-117.
   //:
   //: **A name can mean more than one pad and this held one.** An Arduino Uno
@@ -1190,6 +1196,13 @@ function releasePart(part) {
 export function showBoard(layout, model = null) {
   if (!view.renderer) return;
   clearBoard();
+  // **Re-armed: whatever was posted before was posted to a session this
+  // drawing may not be looking at** (OH-161's review). `reload` draws after
+  // every load and every pick, so this is where the page learns the session
+  // may have changed; `applyCircuit` below then states the bench once where
+  // the drawn board is the running one.
+  view.posted = null;
+  view.refusal = null;
   view.supply = supplyOf(layout);
   if (!layout || !layout.width || !layout.height) return;
 
@@ -1296,6 +1309,10 @@ export function showBoard(layout, model = null) {
                 max: [width / 2, BOARD_THICKNESS / 2, depth / 2] };
   refreshColliders();
   frameScene();
+  // The bench against this board's pads and supply, which `clearBoard`
+  // solved against the last board's: and, where this board is the one
+  // running, its pads carry levels and the re-armed post states the bench.
+  applyCircuit();
 
   // Last, and not awaited: a board with a vendor model is drawn twice --
   // once as the footprint, then again when a megabyte and a half of mesh has
@@ -1843,6 +1860,10 @@ function supplyOf(layout) {
     typical: spec.typical === true,
     inputHighVolts: spec.input_high_volts ?? null,
     inputLowVolts: spec.input_low_volts ?? null,
+    //: The pads that drive unlike the rest, by the name the page drives them
+    //: by -- `webui/api.py`'s `supply_view` resolves them (OH-161).
+    pins: Object.fromEntries(Object.entries(spec.pins ?? {}).map(
+      ([name, own]) => [name, { sourceOhms: own.source_ohms, sinkOhms: own.sink_ohms }])),
     cited: spec.cited ?? {},
   };
 }
@@ -2567,11 +2588,15 @@ export function parts() {
   }));
 }
 
-/** What the last solve said about the bench as a whole, or null. */
+/** What the last solve said about the bench as a whole, or null.
+ *
+ *  **And what the board said back** (OH-161's review): a refused drive is
+ *  the bench's to explain, and the note is the one sentence of it the page
+ *  shows, so the refusal leads it until a post is accepted. */
 export function circuit() {
   if (!view.circuit) return null;
-  return { ok: view.circuit.ok, note: view.circuit.note,
-           supply: view.supply };
+  const note = [view.refusal, view.circuit.note].filter(Boolean).join(" ");
+  return { ok: view.circuit.ok, note: note || null, supply: view.supply };
 }
 
 /** Everything currently joined. For the page, and for a test. */
@@ -2816,9 +2841,11 @@ function capture(event, take) {
   }
 }
 
-/** Tell the page a wire appeared or went away, so it can redraw its list. */
+/** Tell the page a wire appeared or went away, so it can redraw its list --
+ *  and since OH-161, that the board refused or accepted a drive: the panel
+ *  redraws the bench note on this one event, and the note says which. */
 function announce() {
-  view.renderer?.domElement.dispatchEvent(
+  view.renderer?.domElement?.dispatchEvent(
     new CustomEvent("wires-changed", { bubbles: true }));
 }
 
@@ -2941,7 +2968,11 @@ function applyCircuit() {
     if (report.parts[at].destroyed) part.userData.destroyed = true;
     setPartState(part, report.parts[at].drive, view.palette);
   }
-  postInputs(report.inputs);
+  // **Not from a bench that did not solve** (OH-161's review). A short or a
+  // solve that did not settle answers every input "open", and there open
+  // means unknown, not let go: posting it would release a pad the bench may
+  // still be holding. The board keeps the last statement the bench made.
+  if (report.ok) postInputs(report.inputs);
 }
 
 //: The drives in flight, one after another. **Chained, not fired together**:
@@ -2959,29 +2990,42 @@ let posting = Promise.resolve();
  * a pad driven differently**, so the map is compared without its "open"
  * entries -- a pad turning into an input or out of one moves nothing on the
  * board while it is open. Nothing is posted before the first input exists,
- * so a page with no program running asks the server nothing.
+ * so a page with no program running asks the server nothing; `showBoard`
+ * re-arms that first post, because a load or a board change is a session
+ * that may hold a drive the page has not stated.
  *
  * **The board is named** so the server can refuse a bench solved for a board
  * it is not running -- the page can be drawing one while the session runs
- * another. A refusal is reported, not retried: the next change posts again.
+ * another. A refusal is not retried, since the same map would be refused
+ * again every poll; it is said in the bench note (`circuit`) and the console
+ * until a post is accepted.
  */
 function postInputs(levels) {
-  const stated = JSON.stringify(
-    Object.entries(levels).filter(([, level]) => level !== "open").sort());
+  const board = view.board?.userData.board;
+  const stated = JSON.stringify([board,
+    Object.entries(levels).filter(([, level]) => level !== "open").sort()]);
   if (stated === view.posted || (view.posted === null && !Object.keys(levels).length)) {
     return;
   }
   view.posted = stated;
-  const body = JSON.stringify({ board: view.board?.userData.board, levels });
+  const body = JSON.stringify({ board, levels });
+  const refused = (sentence) => {
+    view.refusal = sentence;
+    console.warn(sentence);
+    announce();
+  };
   posting = posting
     .then(() => fetch("/api/board/drive", {
       method: "POST", headers: { "Content-Type": "application/json" }, body }))
     .then(async (response) => {
       if (!response.ok) {
-        console.warn("the bench's levels were refused:", (await response.json()).error);
+        refused(`The board refused what the bench drives: ${(await response.json()).error}`);
+      } else if (view.refusal !== null) {
+        view.refusal = null;
+        announce();
       }
     })
-    .catch((error) => console.warn("the bench's levels did not reach the board:", error));
+    .catch((error) => refused(`What the bench drives did not reach the board: ${error}`));
 }
 
 /**

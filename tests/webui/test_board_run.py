@@ -1111,8 +1111,18 @@ C3_BLINK = REPO / "tests" / "riscv32" / "c3blink" / "blink.bin"
 D1 = 1 << esp32c3.HEADER["D1"]
 
 
+def needs_riscv32() -> None:
+    """Skip loudly where riscv32 is not built. `needs_core` asks after
+    cortexm0, and an ESP32 runs on the other core: with riscv32 missing and
+    cortexm0 built, a test guarded by `needs_core` failed loading instead of
+    skipping (OH-161's slice-B review, which found it on the bench test)."""
+    target = targets.find("riscv32")
+    if target is None or not target.selectable:
+        pytest.skip("riscv32 is not built; run python tools/build_core.py")
+
+
 def c3_session() -> api.BoardSession:
-    needs_core()
+    needs_riscv32()
     if not C3_BLINK.is_file():
         pytest.skip(f"{C3_BLINK} is missing")
     return api.load_firmware(C3_BOARD, C3_BLINK.read_bytes(), base=esp32c3.IROM)
@@ -1214,7 +1224,7 @@ def test_a_manifest_row_is_driven_by_its_own_pad_labels():
     On the Adafruit QT Py ESP32-C3 the pad `A1` reaches GPIO3, which the
     XIAO calls `D1` -- a label this board has no pad for. Its committed
     image drives SDA, GPIO5, and leaves GPIO3 as reset leaves it."""
-    needs_core()
+    needs_riscv32()
     board = "Adafruit QT Py ESP32-C3"
     image = REPO / "tests" / "webui" / "qtpy_esp32c3" / "qtpy_blink.bin"
     if not image.is_file():
@@ -1255,7 +1265,7 @@ def test_a_row_with_no_board_file_refuses_a_drive_by_name(monkeypatch):
     """A manifest row resolves its pads through its own board file; without
     one there is nothing to resolve a name against, and the refusal names
     the board rather than raising an `AttributeError` on `None`."""
-    needs_core()
+    needs_riscv32()
     from webui import pinmap
 
     board = "Adafruit QT Py ESP32-C3"
@@ -1309,7 +1319,7 @@ def test_the_image_and_the_record_of_drives_replay_the_run():
     the first time -- and the run must end with the same instruction count,
     program counter, pin levels and printed text. Found missing by OH-161's
     step-3 review."""
-    needs_core()
+    needs_riscv32()
     from webui import compile as compiler
 
     try:
@@ -1364,6 +1374,7 @@ def test_the_image_and_the_record_of_drives_replay_the_run():
 
 def load_c3_blink(base_url: str) -> None:
     """The XIAO ESP32-C3's committed blink, loaded over HTTP."""
+    needs_riscv32()
     if not C3_BLINK.is_file():
         pytest.skip(f"{C3_BLINK} is missing")
     post(base_url, "/api/board/load", upload(
@@ -1428,15 +1439,18 @@ def test_a_drive_on_a_board_that_reads_no_input_is_refused_by_name(live_server):
 
 def test_a_drive_that_is_not_a_map_of_levels_is_refused_naming_the_field(live_server):
     """Not a refusal of the drive -- there is no drive to refuse -- so a
-    plain 400 naming the field, and no slug."""
+    plain 400 naming the field and the value it got, and no slug."""
     load_c3_blink(live_server)
-    for body, field in (({"board": C3_BOARD, "levels": ["D1", "high"]}, "levels"),
-                        ({"levels": {"D1": "high"}}, "board")):
+    for body, field, got in (
+            ({"board": C3_BOARD, "levels": ["D1", "high"]}, "levels", "['D1', 'high']"),
+            ({"board": 7, "levels": {"D1": "high"}}, "board", "got 7"),
+            ({"levels": {"D1": "high"}}, "board", "got None")):
         with pytest.raises(urllib.error.HTTPError) as caught:
             post(live_server, "/api/board/drive", body)
         answer = json.loads(caught.value.read())
         assert caught.value.code == 400, answer
         assert field in answer["error"] and "reason" not in answer, answer
+        assert got in answer["error"], answer
 
 
 def test_a_drive_is_post_only(live_server):
@@ -1466,6 +1480,7 @@ def test_a_sketch_reads_what_the_bench_drove_through_the_server(live_server):
     the page reads it, from `/api/board/state`'s `pins`."""
     from webui import compile as compiler
 
+    needs_riscv32()
     try:
         built = compiler.build(C3_BOARD, ECHO_SKETCH)
     except compiler.ToolchainMissing as exc:

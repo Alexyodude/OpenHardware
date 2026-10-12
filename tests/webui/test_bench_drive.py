@@ -178,32 +178,43 @@ def layout(board: str = BOARD) -> dict:
     return api.pad_view(board, api.description_for(board), None)
 
 
-#: Steps a probe takes through the page's own exports, recording every post
-#: after each. `steps` is a list of `[verb, ...]`; `api` answers 200, or what
-#: `given.refuse` says to the drive, and keeps what was posted, in order.
+#: Steps a probe takes through the page's own exports, recording after each
+#: how many posts there have been and what the bench note says. `steps` is a
+#: list of `[verb, ...]`: `show` draws `given.layouts[n]` (the first is drawn
+#: before the steps), `connect` and `disconnect` take a part's index, the last
+#: added by default. `api` refuses the first `given.refusing` posts with
+#: `given.refusal`, answers 200 to the rest, and keeps them all, in order.
 STEPS = r"""
 const posted = [];
 api = async (url, options) => {
   if (url !== "/api/board/drive") throw new Error(`unexpected ${url}`);
   posted.push(JSON.parse(options.body));
-  if (given.refuse) {
-    return { ok: false, json: async () => ({ error: given.refuse, reason: "drive-refused" }) };
+  if (posted.length <= (given.refusing ?? 0)) {
+    return { ok: false, json: async () => ({ error: given.refusal, reason: "drive-refused" }) };
   }
   return { ok: true, json: async () => ({}) };
 };
-page.showBoard(given.layout, null);
-let part = null;
+const layouts = given.layouts ?? [given.layout];
+page.showBoard(layouts[0], null);
+await settled();
+const parts = [];
 const wires = {};
 const after = [];
+const notes = [];
+const last = (at) => at ?? parts.length - 1;
 for (const [verb, ...rest] of given.steps) {
+  if (verb === "show") page.showBoard(layouts[rest[0]], null);
   if (verb === "levels") page.setLevels(rest[0]);
-  if (verb === "add") part = await page.addPart("probe_resistor");
-  if (verb === "connect") wires[rest[0]] = page.connect(rest[0], part, rest[1]).id;
-  if (verb === "disconnect") page.disconnect(wires[rest[0]]);
+  if (verb === "add") parts.push(await page.addPart("probe_resistor"));
+  if (verb === "connect") {
+    wires[`${rest[0]}@${last(rest[2])}`] = page.connect(rest[0], parts[last(rest[2])], rest[1]).id;
+  }
+  if (verb === "disconnect") page.disconnect(wires[`${rest[0]}@${last(rest[1])}`]);
   await settled();
   after.push(posted.length);
+  notes.push(page.circuit()?.note ?? null);
 }
-console.log(JSON.stringify({ posted, after, warned }));
+console.log(JSON.stringify({ posted, after, notes, warned }));
 """
 
 
@@ -257,10 +268,105 @@ def test_a_refused_drive_is_reported_once_and_not_retried(tmp_path):
     map again -- a retry per poll would be a refusal many times a second."""
     running = {"D1": "input", "D2": "input"}
     got = run_page(tmp_path, STEPS, {
-        "layout": layout(), "refuse": "the bench was solved for another board",
+        "layout": layout(), "refusing": 99,
+        "refusal": "the bench was solved for another board",
         "steps": [["levels", running], ["levels", running], ["levels", running]]})
     assert len(got["posted"]) == 1, got["posted"]
     assert len(got["warned"]) == 1 and "another board" in got["warned"][0], got["warned"]
+
+
+def test_a_refused_drive_is_said_in_the_bench_note_until_one_is_accepted(tmp_path):
+    """**The console is not where a reader looks** (OH-161's review). A
+    refusal leads the bench note, which the panel shows under the canvas,
+    from the moment it arrives until a post is accepted -- here the next one,
+    when a resistor takes D1 low."""
+    running = {"D1": "input", "D2": "input"}
+    refusal = "the bench was solved for 'XIAO-ESP32-C6-DIP'"
+    got = run_page(tmp_path, STEPS, {
+        "layout": layout(), "refusing": 1, "refusal": refusal,
+        "steps": [["levels", running], ["levels", running], ["add"],
+                  ["connect", "D1", "lead A"], ["connect", "GND", "lead B"]]})
+    assert got["after"] == [1, 1, 1, 1, 2], got["after"]
+    for note in got["notes"][:4]:
+        assert note and note.startswith("The board refused what the bench drives: "
+                                        + refusal), note
+    assert not (got["notes"][4] or "").startswith("The board refused"), got["notes"][4]
+
+
+def test_a_bench_that_does_not_solve_lets_go_of_nothing(tmp_path):
+    """**"open" from a bench that did not solve is unknown, not let go**
+    (OH-161's review). D1 is held low through a resistor, and then a second
+    resistor's lead is wired to both `3V3_OUT` and `GND` -- a short, which
+    `analyse` refuses to solve and answers with every input open. Posting
+    that would release D1 on the board while the bench still holds it, so
+    nothing is posted; once the short is taken off, D1 is still low, which
+    is what the board was last told, and nothing is posted either."""
+    running = {"D1": "input", "D2": "input", "D10": "high"}
+    got = run_page(tmp_path, STEPS, {"layout": layout(), "steps": [
+        ["levels", running],                       # 1: first inputs, posted
+        ["add"],
+        ["connect", "D1", "lead A"],
+        ["connect", "GND", "lead B"],              # 4: D1 low, posted
+        ["add"],
+        ["connect", "3V3_OUT", "lead A"],
+        ["connect", "GND", "lead A"],              # 7: a short
+        ["disconnect", "GND"],                     # 8: the short off
+    ]})
+    assert got["after"] == [1, 1, 1, 2, 2, 2, 2, 2], (got["after"], got["posted"])
+    assert got["posted"][-1]["levels"]["D1"] == "low", got["posted"]
+    assert "short circuit" in got["notes"][6], got["notes"][6]
+
+
+def test_drawing_a_board_rearms_the_post_and_states_the_bench_once_where_it_runs(tmp_path):
+    """**A load or a pick is a session the page has told nothing** (OH-161's
+    review). `reload` draws after both, so `showBoard` forgets what it posted
+    and solves the bench against the pads it drew: where the drawn board is
+    the one running -- its pads carry levels, as `/api/board/pins` sends them
+    only then -- the bench is stated once, and polls after it post nothing
+    new. Drawn again, it is stated again. Where the drawn board is not
+    running, its pads carry no level and nothing is posted."""
+    idle = layout()
+    running = layout()
+    for pad in running["pads"]:
+        if pad["pin"] in ("D1", "D2"):
+            pad["state"] = "input"
+    got = run_page(tmp_path, STEPS, {"layouts": [idle, running], "steps": [
+        ["show", 1],                               # 1: drawn, running: stated
+        ["levels", {"D1": "input", "D2": "input"}],
+        ["show", 1],                               # 3: drawn again: stated again
+        ["show", 0],                               # 4: a board not running
+    ]})
+    every = {"D1": "open", "D2": "open"}
+    assert got["after"] == [1, 1, 2, 2], (got["after"], got["posted"])
+    assert got["posted"] == [{"board": BOARD, "levels": every}] * 2, got["posted"]
+
+
+def test_a_pad_that_drives_unlike_the_rest_is_solved_at_its_own_resistance(tmp_path):
+    """**Each pad at its own reset drive** (OH-161's review). A XIAO
+    ESP32-C3's D1 is GPIO3, which comes out of reset at ~10 mA where D10 is
+    at ~20 mA (C3 TRM v1.4, Table 5.12-1's legend, p.174). `webui/api.py`
+    names D1's resistances in the supply it sends, `supplyOf` carries them,
+    and `circuit.js` solves a 220 ohm resistor (231 at the top of its band)
+    from each to GND at its own: 3.3 / (66 + 231) through D1 and
+    3.3 / (33 + 231) through D10."""
+    probe = r"""
+    api = async () => ({ ok: true, json: async () => ({}) });
+    page.showBoard(given.layout, null);
+    page.setLevels({ D1: "high", D10: "high" });
+    const one = await page.addPart("probe_resistor");
+    page.connect("D1", one, "lead A");
+    page.connect("GND", one, "lead B");
+    const other = await page.addPart("probe_resistor");
+    page.connect("D10", other, "lead A");
+    page.connect("GND", other, "lead B");
+    console.log(JSON.stringify({ pins: view.supply.pins,
+                                 amps: page.parts().map((part) => part.amps) }));
+    """
+    got = run_page(tmp_path, probe, {"layout": layout()})
+    assert got["pins"]["D1"] == {"sourceOhms": 66.0, "sinkOhms": 70.7}, got["pins"]
+    assert "D10" not in got["pins"], got["pins"]
+    want = [3.3 / (66.0 + 231.0), 3.3 / (33.0 + 231.0)]
+    assert all(abs(seen - wanted) < 1e-9 for seen, wanted in zip(got["amps"], want)), got["amps"]
 
 
 def test_two_drives_reach_the_board_in_the_order_they_were_stated(tmp_path):
@@ -352,11 +458,13 @@ def test_the_page_drives_a_sketch_through_the_server(tmp_path):
     state poll reads the output low. Unwired, the input is open again, the
     pull-up wins, and the output goes high. The session's record holds
     exactly the drives the page made, in order."""
-    from tests.webui.test_board_run import needs_core
     from webui import compile as compiler
-    from webui import emulator_server
+    from webui import emulator_server, targets
 
-    needs_core()
+    # riscv32 and not cortexm0: every board watched here is an ESP32.
+    target = targets.find("riscv32")
+    if target is None or not target.selectable:
+        pytest.skip("riscv32 is not built; run python tools/build_core.py")
     server = emulator_server.build_server("127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

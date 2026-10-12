@@ -652,16 +652,16 @@ def handle_board_api(boards: BoardSlot, route: str,
         board = payload.get("board")
         levels = payload.get("levels")
         if not isinstance(board, str):
-            raise ApiError("board must be a string naming the board the "
-                           "bench was solved for")
+            raise ApiError(f"board must be a string naming the board the "
+                           f"bench was solved for, got {board!r}")
         if not isinstance(levels, dict):
             raise ApiError(f"levels must be an object of pad name -> level, "
                            f"got {levels!r}")
         if board != session.board:
             raise api.BoardRunError(
                 "drive-refused",
-                f"the bench was solved for {board} and the session runs "
-                f"{session.board}; nothing was driven")
+                f"the bench was solved for {board!r} and the session runs "
+                f"{session.board!r}; nothing was driven")
         try:
             session.drive(levels)
         except ValueError as error:
