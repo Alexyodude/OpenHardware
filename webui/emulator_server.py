@@ -86,11 +86,13 @@ that returns and posts a name back.
              the board answers here too, with status and detail saying why
 
     POST /api/board/drive   {"board": "XIAO-ESP32-C3-DIP",
-                             "levels": {"D1": "low", "D2": "open"}}
-      -> 200 {board, retired, levels}   // the drive as the session recorded it
+                             "levels": {"D1": "low", "D2": "open"},
+                             "volts": {"D1": 0.0, "D2": 1.65}}
+      -> 200 {board, retired, levels, volts}   // the drive as recorded
          // what the bench drives onto the pins, the whole map each time;
-         // a pad left out is open. 400 "drive-refused" for a level, a pad or
-         // a board that cannot be driven. POST-only: it changes the machine
+         // a pad left out is open, and one with no volts is held at
+         // nothing. 400 "drive-refused" for a level, a voltage, a pad or a
+         // board that cannot be driven. POST-only: it changes the machine
 
 **Registers are named and carry their width, and that is not decoration.**
 This used to be sixteen positional words plus an `apsr` integer, which is the
@@ -648,26 +650,37 @@ def handle_board_api(boards: BoardSlot, route: str,
         # first's pads by name (`levels` in `board3d-panel.js` says so). A
         # bench solved on those pads and posted unnamed would drive the
         # running board's pins of the same names.
+        #
+        # **And `volts`, optional** (OH-161 step 4): pad name -> the voltage
+        # the bench solved on it, which the board's ADC converts. Absent is
+        # no voltage at all, as `BoardSession.drive` takes None; a value
+        # that is not an object is a plain 400 naming the field, and what is
+        # inside one is the drive's to refuse.
         session = boards.require()
         board = payload.get("board")
         levels = payload.get("levels")
+        volts = payload.get("volts")
         if not isinstance(board, str):
             raise ApiError(f"board must be a string naming the board the "
                            f"bench was solved for, got {board!r}")
         if not isinstance(levels, dict):
             raise ApiError(f"levels must be an object of pad name -> level, "
                            f"got {levels!r}")
+        if volts is not None and not isinstance(volts, dict):
+            raise ApiError(f"volts must be an object of pad name -> volts, "
+                           f"got {volts!r}")
         if board != session.board:
             raise api.BoardRunError(
                 "drive-refused",
                 f"the bench was solved for {board!r} and the session runs "
                 f"{session.board!r}; nothing was driven")
         try:
-            session.drive(levels)
+            session.drive(levels, volts)
         except ValueError as error:
             raise api.BoardRunError("drive-refused", str(error)) from error
-        retired, stated, _held = session.inputs[-1]
-        return {"board": session.board, "retired": retired, "levels": stated}
+        retired, stated, held = session.inputs[-1]
+        return {"board": session.board, "retired": retired, "levels": stated,
+                "volts": held}
 
     raise ApiError(f"no such route: {route}")
 

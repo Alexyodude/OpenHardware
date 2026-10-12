@@ -73,6 +73,13 @@
 // solve: it invents no level, and "open" stays open. A board whose supply
 // states no input levels gets an empty map, and nothing is posted to it.
 //
+// **And the voltage itself, in `volts`** (OH-161 step 4): every input whose
+// node the solve decided -- past a level or between the two -- carries its
+// solved voltage, which is what an ADC on that pin converts. A pad "open"
+// because nothing reaches it, or because a value nobody published would
+// decide it, carries none: the board's description says what a pin held at
+// nothing converts to. `board3d.js` posts it beside the levels.
+//
 // **And a bench that does not solve -- a short across two supplies, a solve
 // that does not settle -- answers every input "open" with `ok` false.** There
 // "open" means this file cannot say, not that the pad was let go, so
@@ -136,6 +143,15 @@ export const POT_TRAVEL = 0.5;
 //: makes it solvable and changes no answer: against the 40 ohms of an AVR
 //: output it is one part in 2.5e10.
 export const GMIN = 1e-12;
+
+//: The resolution `volts` is posted at: a voltage is rounded to the nearest
+//: microvolt (OH-161 step 4). **GMIN moves a node, and a post must not
+//: follow it**: a resistor with one lead on an input and the other in
+//: mid-air adds GMIN through it, which moves a 231-ohm divider's midpoint by
+//: parts in 1e10 -- measured, 1.6499999996 V against 1.65 -- and every such
+//: wire would post a voltage no ADC could tell apart. A microvolt is about a
+//: thousandth of an ESP32's 12 dB LSB, 4.4 V / 4095 (C3 TRM v1.4 34.2.3.2).
+export const MICROVOLTS = 1e6;
 
 //: Ohms across a diode that is off. Reverse leakage is real — the ATmega's own
 //: input leakage is specified at a microamp — and a finite number here is what
@@ -394,11 +410,13 @@ export function milliamps(amps) {
  *   parts   `[{label, model}]` — index is the identity, `model` may be null
  *   wires   `[{pad, part, terminal}]` — `part` is an index into `parts`
  *
- * Returns `{ok, note, parts, inputs}` with one entry per part, in the same
- * order: `{drive, amps, reason, warning}`. `drive` is one of `parts.js`'s
- * three words. `inputs` is pad name -> "high", "low" or "open" for every pad
- * in state `input`, on a board whose supply states both input levels, and
- * empty on any other: the file header says what each word means.
+ * Returns `{ok, note, parts, inputs, volts}` with one entry per part, in the
+ * same order: `{drive, amps, reason, warning}`. `drive` is one of
+ * `parts.js`'s three words. `inputs` is pad name -> "high", "low" or "open"
+ * for every pad in state `input`, on a board whose supply states both input
+ * levels, and empty on any other: the file header says what each word
+ * means. `volts` is pad name -> solved volts for each of those pads whose
+ * node the solve decided, and empty wherever `ok` is false.
  */
 export function analyse(bench) {
   const report = bench.parts.map((part) => (part.destroyed ? {
@@ -426,7 +444,10 @@ export function analyse(bench) {
   for (const pad of bench.pads) {
     if (reads && pad.state === "input") inputs[pad.name] = "open";
   }
-  const answer = (note) => ({ ok: true, note, parts: report, inputs });
+  // Filled only from a solve (`readInputs`), so every answer before one and
+  // every failed one carries none.
+  const volts = {};
+  const answer = (note) => ({ ok: true, note, parts: report, inputs, volts });
 
   // **A destroyed part is out of the reporting from here on.** Its verdict is
   // already decided and permanent; every branch below writes a verdict, so the
@@ -536,7 +557,7 @@ export function analyse(bench) {
     for (const index of wired) {
       report[index].reason = "in a circuit that shorts two supplies together";
     }
-    return { ok: false, parts: report, inputs,
+    return { ok: false, parts: report, inputs, volts,
              note: `${shorted.join(" and ")} is wired to another supply. That ` +
                    `is a short circuit, not a circuit this can solve.` };
   }
@@ -592,7 +613,7 @@ export function analyse(bench) {
   const solved = solve({ nodes: count, elements });
   if (!solved.ok) {
     for (const index of wired) report[index].reason = "in a circuit that could not be solved";
-    return { ok: false, parts: report, inputs,
+    return { ok: false, parts: report, inputs, volts,
              note: "This circuit did not settle in " + MAX_PASSES + " passes. " +
                    "Nothing is being shown for it rather than a guess." };
   }
@@ -819,7 +840,7 @@ export function analyse(bench) {
     const sentence = pinSentence(name, amps, bench.supply);
     if (sentence) notes.push(sentence);
   }
-  notes.push(...readInputs(supply, inputs, nodeOf, solved, grouped,
+  notes.push(...readInputs(supply, inputs, volts, nodeOf, solved, grouped,
                            blindGroups));
   if (assumed) {
     notes.push("One part on this bench publishes no electrical model, so no " +
@@ -834,8 +855,9 @@ export function analyse(bench) {
 }
 
 /**
- * Fill `inputs` from the solve, and return what the bench note must say
- * about it (OH-161). Called by `analyse` only once the circuit has solved.
+ * Fill `inputs` and `volts` from the solve, and return what the bench note
+ * must say about it (OH-161). Called by `analyse` only once the circuit has
+ * solved.
  *
  * A pad is "open" until something decides it: a group a value nobody
  * published can move keeps it open, and so does a node no source reaches --
@@ -845,8 +867,12 @@ export function analyse(bench) {
  * datasheet promises neither, so it stays "open" and the note says where it
  * sits. Kept "open" rather than at the last level, because holding a level
  * would be a hysteresis these pads do not have by default.
+ *
+ * **Every decided voltage goes into `volts` as well**, between the levels or
+ * past one (step 4): it is what an ADC converts, and a divider's midpoint is
+ * exactly the voltage a digital input cannot read.
  */
-function readInputs(supply, inputs, nodeOf, solved, grouped, blindGroups) {
+function readInputs(supply, inputs, volts, nodeOf, solved, grouped, blindGroups) {
   const between = [];
   const blind = [];
   for (const name of Object.keys(inputs)) {
@@ -854,17 +880,20 @@ function readInputs(supply, inputs, nodeOf, solved, grouped, blindGroups) {
     const group = grouped.group(at);
     if (group !== null && blindGroups.has(group)) { blind.push(name); continue; }
     if (!grouped.decided(at)) continue;
-    const volts = solved.volts[at];
-    if (volts >= supply.inputHighVolts) inputs[name] = "high";
-    else if (volts <= supply.inputLowVolts) inputs[name] = "low";
-    else between.push(`${name} is at ${volts.toFixed(2)} V`);
+    const solvedVolts = solved.volts[at];
+    volts[name] = Math.round(solvedVolts * MICROVOLTS) / MICROVOLTS;
+    if (solvedVolts >= supply.inputHighVolts) inputs[name] = "high";
+    else if (solvedVolts <= supply.inputLowVolts) inputs[name] = "low";
+    else between.push(`${name} is at ${solvedVolts.toFixed(2)} V`);
   }
   const notes = [];
   if (between.length) {
     notes.push(`${between.join(" and ")}, between the ${supply.inputLowVolts} V ` +
                `the ${supply.chip} is guaranteed to read as low and the ` +
                `${supply.inputHighVolts} V it is guaranteed to read as high, so ` +
-               `the board is told nothing drives it.`);
+               `the board's digital input is told nothing drives it -- and an ` +
+               `analogRead of it, where the pin has an ADC channel, samples ` +
+               `that voltage.`);
   }
   if (blind.length) {
     notes.push(`${blind.join(" and ")} would read whatever a part with no ` +

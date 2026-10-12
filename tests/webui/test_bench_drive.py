@@ -240,11 +240,15 @@ def test_the_bench_posts_what_it_drives_onto_the_inputs_when_that_changes(tmp_pa
         ["levels", {**running, "D1": "high"}],     # 8: D1 an output now
     ]})
     every = {pad: "open" for pad, state in running.items() if state == "input"}
-    assert got["posted"] == [
-        {"board": BOARD, "levels": every},
-        {"board": BOARD, "levels": {**every, "D1": "low"}},
-        {"board": BOARD, "levels": every},
+    assert [(post["board"], post["levels"]) for post in got["posted"]] == [
+        (BOARD, every), (BOARD, {**every, "D1": "low"}), (BOARD, every),
     ], got["posted"]
+    # The voltage the solve put on each decided input, posted beside the
+    # levels (OH-161 step 4): none before the resistor, D1 at ground through
+    # it, and none once it is let go.
+    volts = [post["volts"] for post in got["posted"]]
+    assert volts[0] == {} and volts[2] == {}, volts
+    assert volts[1] == {"D1": 0}, volts
     assert got["after"] == [1, 1, 1, 1, 2, 2, 3, 3], got["after"]
     assert got["warned"] == []
 
@@ -338,7 +342,8 @@ def test_drawing_a_board_rearms_the_post_and_states_the_bench_once_where_it_runs
     ]})
     every = {"D1": "open", "D2": "open"}
     assert got["after"] == [1, 1, 2, 2], (got["after"], got["posted"])
-    assert got["posted"] == [{"board": BOARD, "levels": every}] * 2, got["posted"]
+    assert got["posted"] == [{"board": BOARD, "levels": every, "volts": {}}] * 2, (
+        got["posted"])
 
 
 def test_a_pad_that_drives_unlike_the_rest_is_solved_at_its_own_resistance(tmp_path):
@@ -399,6 +404,36 @@ def test_two_drives_reach_the_board_in_the_order_they_were_stated(tmp_path):
     got = run_page(tmp_path, probe, {"layout": layout()})
     assert got["events"] == [["sent", "low"], ["answered", "low"],
                              ["sent", "open"], ["answered", "open"]], got["events"]
+
+
+def test_a_voltage_that_moves_is_posted_though_its_level_does_not(tmp_path):
+    """**A divider's midpoint moves when a resistor does, and its level does
+    not** (OH-161 step 4). One resistor from `3V3_OUT` holds D1 high at the
+    rail; a second from D1 to GND makes a divider, 1.65 V, which no digital
+    level reads -- "open" -- and which is posted for the ADC; a third in
+    parallel with the second takes D1 to 1.1 V, still "open", and is posted
+    because the voltage changed. A lead in mid-air moves nothing and posts
+    nothing."""
+    running = {"D1": "input", "D2": "input", "D10": "high"}
+    got = run_page(tmp_path, STEPS, {"layout": layout(), "steps": [
+        ["levels", running],                       # 1: first inputs, posted
+        ["add"],
+        ["connect", "3V3_OUT", "lead A", 0],
+        ["connect", "D1", "lead B", 0],            # 4: D1 high, at the rail
+        ["add"],
+        ["connect", "D1", "lead A", 1],            # 6: a lead in mid-air
+        ["connect", "GND", "lead B", 1],           # 7: the divider, 1.65 V
+        ["levels", running],                       # 8: the same poll
+        ["add"],
+        ["connect", "D1", "lead A", 2],
+        ["connect", "GND", "lead B", 2],           # 11: 1.1 V, still open
+    ]})
+    assert got["after"] == [1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4], (got["after"], got["posted"])
+    levels = [post["levels"]["D1"] for post in got["posted"]]
+    volts = [post["volts"].get("D1") for post in got["posted"]]
+    assert levels == ["open", "high", "open", "open"], levels
+    assert volts == [None, 3.3, 1.65, 1.1], volts
+    assert "analogRead of it" in got["notes"][6], got["notes"][6]
 
 
 # --- the slice, end to end: the page's code against a real server -----------
@@ -501,3 +536,113 @@ def test_the_page_drives_a_sketch_through_the_server(tmp_path):
         assert seen == ["high", "low", "high"], (board, seen)
         assert warned == [], (board, warned)
         assert record == ["open", "low", "open"], (board, record)
+
+
+# --- a voltage, end to end (OH-161 step 4) -----------------------------------
+
+#: Prints each code `analogRead(A0)` gives that differs from the last.
+ANALOG_SKETCH = """
+int last = -1;
+void setup() { }
+void loop() {
+  int code = analogRead(A0);
+  if (code != last) { Serial.println(code); last = code; }
+}
+"""
+
+#: Each board the voltage is watched on, with the pad its `A0` is.
+ANALOG_WATCHED = (
+    ("XIAO-ESP32-C3-DIP", "D0"),
+    ("XIAO-ESP32-C5-DIP", "D0"),
+    ("XIAO-ESP32-C6-DIP", "D0"),
+)
+
+#: The page's own path again, reading the console instead of a pin: the
+#: board drawn from `/api/board/pins`, a run and a state poll handed to
+#: `setLevels`, then a divider built on the bench a lead at a time -- each
+#: `connect` solves and posts -- and the console read after the next run.
+#: **The posts are let land before the run**: a run sent while they are in
+#: flight would run between two of them, and print the rail the divider's
+#: upper resistor held A0 at for an instant (measured, 3071).
+ANALOG_END_TO_END = r"""
+api = (url, options) => network(given.server + url, options);
+const json = async (url, body) => (await api(url, body === undefined ? {} : {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body) })).json();
+page.showBoard(await json(`/api/board/pins?board=${encodeURIComponent(given.board)}`), null);
+const poll = async () => {
+  await json("/api/board/run", { steps: 2000 });
+  page.setLevels((await json("/api/board/state")).pins);
+  await settled();
+  await json("/api/board/run", { steps: 2000 });
+  return (await json("/api/board/state")).uart.text;
+};
+const seen = [await poll()];
+const top = await page.addPart("probe_resistor");
+page.connect("3V3_OUT", top, "lead A");
+page.connect(given.input, top, "lead B");
+const bottom = await page.addPart("probe_resistor");
+page.connect(given.input, bottom, "lead A");
+page.connect("GND", bottom, "lead B");
+await settled();
+seen.push(await poll());
+const parallel = await page.addPart("probe_resistor");
+page.connect(given.input, parallel, "lead A");
+page.connect("GND", parallel, "lead B");
+await settled();
+seen.push(await poll());
+console.log(JSON.stringify({ seen, warned }));
+"""
+
+
+def test_the_page_holds_a_voltage_a_sketch_converts_through_the_server(tmp_path):
+    """**The voltage, watched.** A sketch printing `analogRead(A0)` whenever
+    it changes, loaded on a real server; the page's own code draws the
+    board, and two 220 ohm resistors from `3V3_OUT` and GND meeting on A0's
+    pad make a divider. `circuit.js` solves 1.65 V there, `board3d.js` posts
+    it, and the sketch prints 1536. A third resistor in parallel with the
+    lower one takes A0 to 1.1 V, and it prints 1024. The session's record
+    holds the voltages the page posted, in order: nothing, the rail while
+    only the upper resistor was wired, the divider, the divider changed."""
+    from webui import compile as compiler
+    from webui import emulator_server, targets
+
+    target = targets.find("riscv32")
+    if target is None or not target.selectable:
+        pytest.skip("riscv32 is not built; run python tools/build_core.py")
+    server = emulator_server.build_server("127.0.0.1", 0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    watched = {}
+    try:
+        host, port = server.server_address[:2]
+        base = f"http://{host}:{port}"
+        for board, pad in ANALOG_WATCHED:
+            try:
+                built = compiler.build(board, ANALOG_SKETCH)
+            except compiler.ToolchainMissing as exc:
+                pytest.skip(str(exc))
+            assert built.ok, (board, built.diagnostics)
+            request = urllib.request.Request(
+                base + "/api/board/load", method="POST",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps({"board": board,
+                                 "image": base64.b64encode(built.image).decode(),
+                                 "base": hex(compiler.recipe_for(board).base)}).encode())
+            with urllib.request.urlopen(request, timeout=30):
+                pass
+            directory = tmp_path / str(len(watched))
+            directory.mkdir()
+            got = run_page(directory, ANALOG_END_TO_END,
+                           {"server": base, "board": board, "input": pad})
+            record = [volts.get(pad) for _, _levels, volts
+                      in server.RequestHandlerClass.boards.session.inputs]
+            watched[board] = (got["seen"], got["warned"], record)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    for board, (seen, warned, record) in watched.items():
+        assert seen == ["0\r\n", "0\r\n1536\r\n", "0\r\n1536\r\n1024\r\n"], (board, seen)
+        assert warned == [], (board, warned)
+        assert record == [None, 3.3, 1.65, 1.1], (board, record)

@@ -1916,6 +1916,100 @@ def test_a_board_whose_supply_states_no_input_levels_gets_no_inputs(tmp_path):
     assert got == {}
 
 
+# --- and the voltage itself, for an ADC (OH-161 step 4) ----------------------
+#
+# `analyse` puts every decided input's solved voltage in `volts`, which
+# `board3d.js` posts beside the levels and an `analogRead` converts.
+
+
+def test_a_dividers_midpoint_is_open_to_a_digital_input_and_its_voltage_is_posted(tmp_path):
+    """Two equal resistors from `3V3_OUT` and `GND` meeting on D1: half the
+    rail, 1.65 V, which no digital level reads -- so D1 is "open" in
+    `inputs` -- and which `volts` carries for the ADC. The bench note says
+    both."""
+    got = run(tmp_path, xiao("""[
+        {pad: "3V3_OUT", part: 0, terminal: "lead A"},
+        {pad: "D1", part: 0, terminal: "lead B"},
+        {pad: "D1", part: 1, terminal: "lead A"},
+        {pad: "GND", part: 1, terminal: "lead B"},
+    ]""", parts="[RESISTOR, RESISTOR]") + """
+        console.log(JSON.stringify({inputs: report.inputs, volts: report.volts,
+                                    note: report.note}));
+    """)
+    assert got["inputs"] == {"D1": "open", "D2": "open"}
+    assert got["volts"] == {"D1": 1.65}, got["volts"]
+    assert "digital input is told nothing drives it" in got["note"], got["note"]
+    assert "analogRead of it" in got["note"] and "samples that voltage" in got["note"], (
+        got["note"])
+
+
+def test_a_pad_past_a_level_carries_its_voltage_too(tmp_path):
+    """D1 through a resistor to GND and D2 to `3V3_OUT`: "low" and "high",
+    and 0 V and 3.3 V in `volts` -- an analogRead of a pin pulled to a rail
+    converts the rail."""
+    got = run(tmp_path, xiao("""[
+        {pad: "D1", part: 0, terminal: "lead A"},
+        {pad: "GND", part: 0, terminal: "lead B"},
+        {pad: "D2", part: 1, terminal: "lead A"},
+        {pad: "3V3_OUT", part: 1, terminal: "lead B"},
+    ]""", parts="[RESISTOR, RESISTOR]") + """
+        console.log(JSON.stringify({inputs: report.inputs, volts: report.volts}));
+    """)
+    assert got["inputs"] == {"D1": "low", "D2": "high"}
+    assert got["volts"] == {"D1": 0, "D2": 3.3}, got["volts"]
+
+
+def test_an_input_the_solve_did_not_decide_carries_no_voltage(tmp_path):
+    """Open because nothing reaches it -- a dangling resistor, a bare bench,
+    an empty one, an LED that is off -- or because a value nobody published
+    would decide it, as the buzzer would: no voltage, not the 0 V the solve
+    gives an undriven node through `GMIN`. The board's description says what
+    a pin held at nothing converts to."""
+    buzzer = '{label: "12 mm buzzer", terminals: ["negative", "positive"], model: null}'
+    got = run(tmp_path, xiao("""[
+        {pad: "D1", part: 0, terminal: "lead A"},
+    ]""") + f"""
+        const bare = analyse({{supply: C3, pads: XIAO, parts: [RESISTOR], wires: []}});
+        const empty = analyse({{supply: C3, pads: XIAO, parts: [], wires: []}});
+        const off = analyse({{supply: C3, pads: XIAO, parts: [LED], wires: [
+          {{pad: "3V3_OUT", part: 0, terminal: "anode"}},
+          {{pad: "D1", part: 0, terminal: "cathode"}},
+        ]}});
+        const blind = analyse({{supply: C3, pads: XIAO, parts: [{buzzer}, RESISTOR], wires: [
+          {{pad: "3V3_OUT", part: 0, terminal: "positive"}},
+          {{pad: "D1", part: 0, terminal: "negative"}},
+          {{pad: "D1", part: 1, terminal: "lead A"}},
+          {{pad: "GND", part: 1, terminal: "lead B"}},
+        ]}});
+        console.log(JSON.stringify({{dangling: report.volts, bare: bare.volts,
+                                    empty: empty.volts, off: off.volts,
+                                    blind: blind.volts}}));
+    """)
+    for case in ("dangling", "bare", "empty", "off", "blind"):
+        assert got[case] == {}, (case, got[case])
+
+
+def test_a_bench_that_does_not_solve_and_a_board_that_reads_nothing_carry_no_voltage(tmp_path):
+    """A short across two supplies answers `ok` false, and there the levels
+    are unknown and so is every voltage; the Uno's supply states no input
+    levels, so it has no inputs and no voltages to carry."""
+    got = run(tmp_path, xiao("""[
+        {pad: "3V3_OUT", part: 0, terminal: "lead A"},
+        {pad: "D1", part: 0, terminal: "lead B"},
+        {pad: "D1", part: 1, terminal: "lead A"},
+        {pad: "GND", part: 1, terminal: "lead B"},
+        {pad: "3V3_OUT", part: 2, terminal: "lead A"},
+        {pad: "GND", part: 2, terminal: "lead A"},
+    ]""", parts="[RESISTOR, RESISTOR, RESISTOR]") + bench("""[
+        {pad: "11", part: 0, terminal: "lead A"},
+        {pad: "GND", part: 0, terminal: "lead B"},
+    ]""", parts="[RESISTOR]").replace("const report", "const uno") + """
+        console.log(JSON.stringify({ok: report.ok, volts: report.volts,
+                                    uno: uno.volts}));
+    """)
+    assert got == {"ok": False, "volts": {}, "uno": {}}, got
+
+
 def test_a_current_through_a_typical_pin_is_said_as_typical_and_nothing_is_declared(tmp_path):
     """**The first supply that is not a bound** (OH-161). A current through a
     pin whose drive the datasheet states only as typical is neither a lower

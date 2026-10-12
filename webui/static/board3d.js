@@ -655,8 +655,8 @@ const view = {
   //: The last thing `circuit.js` said about the bench, kept so that `parts()`
   //: can hand the page a sentence per part without solving again.
   circuit: null,
-  //: What the bench last ATTEMPTED to tell the board it drives, board and
-  //: map as `postInputs` spells them, or null where nothing has been stated
+  //: What the bench last ATTEMPTED to tell the board it drives, board, levels
+  //: and volts as `postInputs` spells them, or null where nothing has been stated
   //: to this session -- the page's first, and after every `showBoard`
   //: (OH-161). A refused post is still recorded here, so it is not retried
   //: every poll; `refusal` is what says it was refused.
@@ -2264,8 +2264,9 @@ export function describe() {
 // which is the same sentence the file's header makes about a pad.
 //
 // **And one thing goes the other way** (OH-161): what the solved bench puts
-// on the pins the program leaves as inputs. `postInputs` sends it to the
-// board, and that is the only way a level enters a running sketch.
+// on the pins the program leaves as inputs, as levels and as volts.
+// `postInputs` sends it to the board, and that is the only way a level or a
+// voltage enters a running sketch.
 
 //: How thick a jumper lead is drawn, and how many sides its tube has.
 //: Six is enough at this radius: the wire is about a pixel and a half across
@@ -2972,7 +2973,7 @@ function applyCircuit() {
   // solve that did not settle answers every input "open", and there open
   // means unknown, not let go: posting it would release a pad the bench may
   // still be holding. The board keeps the last statement the bench made.
-  if (report.ok) postInputs(report.inputs);
+  if (report.ok) postInputs(report.inputs, report.volts);
 }
 
 //: The drives in flight, one after another. **Chained, not fired together**:
@@ -2999,16 +3000,24 @@ let posting = Promise.resolve();
  * another. A refusal is not retried, since the same map would be refused
  * again every poll; it is said in the bench note (`circuit`) and the console
  * until a post is accepted.
+ *
+ * **`volts` goes with it** (OH-161 step 4): `analyse`'s solved voltage on
+ * every input it decided, which the board's ADC converts. A change of
+ * voltage is a change of what the bench drives, so it posts as a change of
+ * level does -- a divider's midpoint moves when a resistor does, and its
+ * level stays "open" throughout. Posted whole, beside the levels, in the one
+ * call that is recorded as one drive.
  */
-function postInputs(levels) {
+function postInputs(levels, volts = {}) {
   const board = view.board?.userData.board;
   const stated = JSON.stringify([board,
-    Object.entries(levels).filter(([, level]) => level !== "open").sort()]);
+    Object.entries(levels).filter(([, level]) => level !== "open").sort(),
+    Object.entries(volts).sort()]);
   if (stated === view.posted || (view.posted === null && !Object.keys(levels).length)) {
     return;
   }
   view.posted = stated;
-  const body = JSON.stringify({ board, levels });
+  const body = JSON.stringify({ board, levels, volts });
   const refused = (sentence) => {
     view.refusal = sentence;
     console.warn(sentence);

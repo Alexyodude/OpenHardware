@@ -1559,7 +1559,7 @@ def test_a_drive_reaches_the_pin_through_the_server(live_server):
     said = post(live_server, "/api/board/drive",
                 {"board": C3_BOARD, "levels": {"D1": "high", "D9": "low"}})
     assert said == {"board": C3_BOARD, "retired": 0,
-                    "levels": {"D1": "high", "D9": "low"}}
+                    "levels": {"D1": "high", "D9": "low"}, "volts": {}}
     level = gpio_in_over_http(live_server)
     assert level & D1 and not level & d9, hex(level)
     post(live_server, "/api/board/run", {"steps": 100})
@@ -1576,11 +1576,15 @@ def test_each_refused_drive_arrives_as_drive_refused(live_server):
     and the values in the message -- and leave the pins as they were."""
     load_c3_blink(live_server)
     before = gpio_in_over_http(live_server)
-    for levels, board, named in (({"D1": "1"}, C3_BOARD, "'1'"),
-                                 ({"3V3_OUT": "high"}, C3_BOARD, "'3V3_OUT'"),
-                                 ({"D1": "high"}, "XIAO-ESP32-C6-DIP", "XIAO-ESP32-C6-DIP")):
+    for levels, volts, board, named in (
+            ({"D1": "1"}, None, C3_BOARD, "'1'"),
+            ({"3V3_OUT": "high"}, None, C3_BOARD, "'3V3_OUT'"),
+            ({"D1": "high"}, None, "XIAO-ESP32-C6-DIP", "XIAO-ESP32-C6-DIP"),
+            ({"D1": "high"}, {"D0": -1}, C3_BOARD, "-1"),
+            ({"D1": "high"}, {"D0": "1.65"}, C3_BOARD, "'1.65'")):
         with pytest.raises(urllib.error.HTTPError) as caught:
-            post(live_server, "/api/board/drive", {"board": board, "levels": levels})
+            post(live_server, "/api/board/drive",
+                 {"board": board, "levels": levels, "volts": volts})
         answer = json.loads(caught.value.read())
         assert caught.value.code == 400, answer
         assert answer["reason"] == "drive-refused", answer
@@ -1605,6 +1609,7 @@ def test_a_drive_that_is_not_a_map_of_levels_is_refused_naming_the_field(live_se
     load_c3_blink(live_server)
     for body, field, got in (
             ({"board": C3_BOARD, "levels": ["D1", "high"]}, "levels", "['D1', 'high']"),
+            ({"board": C3_BOARD, "levels": {}, "volts": [1.65]}, "volts", "[1.65]"),
             ({"board": 7, "levels": {"D1": "high"}}, "board", "got 7"),
             ({"levels": {"D1": "high"}}, "board", "got None")):
         with pytest.raises(urllib.error.HTTPError) as caught:
@@ -1662,3 +1667,32 @@ def test_a_sketch_reads_what_the_bench_drove_through_the_server(live_server):
     assert d10_after({"D1": "low"}) == "low"
     assert d10_after({"D1": "open"}) == "high"
     assert d10_after({"D1": "low", "D2": "open"}) == "low"
+
+
+def test_a_sketch_converts_the_voltage_the_bench_held_through_the_server(live_server):
+    """**Step 4 over HTTP**: `ANALOG_REPLAY_SKETCH` prints each code A0
+    converts to; the bench's map with `D0` -- A0 -- held at 1.65 V, posted
+    to `/api/board/drive`, is answered with the volts as the session
+    recorded them, and the console the page reads from `/api/board/state`
+    prints 1536, then 1024 at 1.1 V."""
+    from webui import compile as compiler
+
+    needs_riscv32()
+    try:
+        built = compiler.build(C3_BOARD, ANALOG_REPLAY_SKETCH)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    assert built.ok, built.diagnostics
+    post(live_server, "/api/board/load", upload(
+        image=built.image, board=C3_BOARD,
+        base=hex(compiler.recipe_for(C3_BOARD).base)))
+    post(live_server, "/api/board/run", {"steps": 2_000})
+    said = post(live_server, "/api/board/drive",
+                {"board": C3_BOARD, "levels": {"D0": "open"}, "volts": {"D0": 1.65}})
+    assert said == {"board": C3_BOARD, "retired": 2_000,
+                    "levels": {"D0": "open"}, "volts": {"D0": 1.65}}
+    post(live_server, "/api/board/run", {"steps": 2_000})
+    post(live_server, "/api/board/drive",
+         {"board": C3_BOARD, "levels": {"D0": "open"}, "volts": {"D0": 1.1}})
+    post(live_server, "/api/board/run", {"steps": 2_000})
+    assert get(live_server, "/api/board/state")["uart"]["text"] == "0\r\n1536\r\n1024\r\n"
