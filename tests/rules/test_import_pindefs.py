@@ -1367,8 +1367,9 @@ def test_the_committed_files_with_unnumbered_pins_are_the_ones_oh_26_named():
     under the same rule as a comment, and this one had already been noticed
     and shipped anyway.
 
-    **OH-26 measured 123 and it is 133 now**, which is the count doing its
-    job rather than drifting. This paragraph said 131 and "four pads" and was
+    **OH-26 measured 123, and what it is now is the assertion below**, which
+    is the count doing its job rather than drifting. This paragraph said 133
+    until OH-224 moved the count, and before that 131 and "four pads",
     left behind when the STM32C5's own pair landed in c6015aa -- caught by a
     review, three lines under a sentence about a number in a test name being
     a claim like any other. The ladder is spelled out in the assertion below,
@@ -1422,7 +1423,7 @@ def test_the_committed_files_with_unnumbered_pins_are_the_ones_oh_26_named():
         assert f"{len(pins)} pins on this board are named with NO flat number" in (
             document["assumption"]
         ), name
-    assert unnumbered == 133, (
+    assert unnumbered == 135, (
         "recomputed rather than restated. 123 when OH-26 measured it; 125 once "
         "OH-170 read NFC1 and NFC2 off Seeed's nRF54L15 board file; 127 once it "
         "traced the MG24's SWDIO to PA02 and SWCLK to PA01; 131 once the "
@@ -1430,9 +1431,10 @@ def test_the_committed_files_with_unnumbered_pins_are_the_ones_oh_26_named():
         "P1.02 -- which are NOT the nRF54L15's P1.02 and P1.03, two Nordic "
         "parts a generation apart; 133 once the XIAO STM32C5's SWDIO and SWCLK "
         "were read as PA13 and PA14 off Seeed's schematic symbol library, the "
-        "only thing published about that board. ST, Silicon Labs and Nordic "
-        "all number by port, so every pad this ticket resolved on any of them "
-        "lands in this bucket"
+        "only thing published about that board; 135 once OH-224 traced the "
+        "nRF54L15 SMD's 54L15_TX20 and 54L15_RX20 from their underside test "
+        "points to P1.08 and P1.09. ST, Silicon Labs and Nordic all number by "
+        "port, so every pad resolved on any of them lands in this bucket"
     )
     # Every other board's resolved pads carry a number, so the sentence would
     # be false on them.
@@ -1763,20 +1765,27 @@ def test_a_dedicated_debug_pad_says_so_rather_than_that_nobody_named_it():
     # The XIAO boards only: a row in tools/board_manifest.py is not what
     # OH-170 left behind, and `test_every_pad_either_names_its_pin_or_says_why_it_has_none`
     # counts its pads.
-    generic = [pad["label"] for board in BOARDS if board not in pindefs.MANIFEST
-               for pad in json.loads(pindefs.board_path(board).read_text(encoding="utf-8"))["pads"]
-               if pad["chip_pin"] is None
-               and "defines this label" in (pad.get("why_null") or "")
+    carrying = [pad["label"] for board in BOARDS if board not in pindefs.MANIFEST
+                for pad in json.loads(pindefs.board_path(board).read_text(encoding="utf-8"))["pads"]
+                if pad["chip_pin"] is None
+                and "defines this label" in (pad.get("why_null") or "")]
+    # **The control goes negative on the supplies now, not on a pad left
+    # unanswered.** This asserted that at least one non-supply pad still
+    # carried the sentence, "which would be too good"; OH-224 answered the
+    # last four -- MG24_EN, nRF54_EN, 54L15_TX20, 54L15_RX20 -- from Seeed's
+    # own board files, so that is now the truth. What keeps the filter below
+    # from being one that matches nothing is that the supplies still wear it.
+    assert carrying, "the phrase matches no null on any XIAO, so the filter below cannot fail"
+    generic = [label for label in carrying
                # A supply pad carries the same sentence and is not what this
                # control is about: nobody publishes a GPIO for GND because
                # there is none, which is a different silence from a label
                # nobody has looked up.
-               and pad["label"].split("/")[0].upper() not in SUPPLY_LABELS
-               and pad["label"].upper() not in SUPPLY_LABELS]
-    assert generic, "every null now claims a specific reason, which would be too good"
-    assert len(generic) <= 23, (
+               if label.split("/")[0].upper() not in SUPPLY_LABELS
+               and label.upper() not in SUPPLY_LABELS]
+    assert generic == [], (
         f"{len(generic)} non-supply pads carry the generic sentence, more than "
-        f"this ticket left behind: {sorted(set(generic))}"
+        f"OH-224 left behind: {sorted(set(generic))}"
     )
 
 
@@ -1931,8 +1940,10 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # Seeed's own board file into the XIAO ESP32-C5 and C6 SMD boards: MTMS,
     # MTDI, MTDO, MTCK and BOOT on each, ten pads out of `generic` below.
     # 557 and 205 until the Olimex ESP32-C6-EVB (OH-198) added 10: 5 named
-    # by its traced copper, and 4 supplies -- two GND, +5V and +3.3V.
-    assert naming == 562, naming
+    # by its traced copper, and 4 supplies -- two GND, +5V and +3.3V. 562
+    # until OH-224 traced the XIAO nRF54L15 SMD's 54L15_TX20 and 54L15_RX20
+    # from their underside test points to the nRF54L15's P1.08 and P1.09.
+    assert naming == 564, naming
     assert supplies == 209, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
     # same debug cluster already carried; 42 until the six SWD pads on the
@@ -1954,11 +1965,15 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # on their nets, and the one behind its open jumper JP11. 67 with the
     # XIAO RP2350 SMD's BOOT, which lands on the underside test point on the
     # RP2350's QSPI chip-select (OH-209). 68 with the Olimex ESP32-C6-EVB's
-    # /ESP_EN, traced to EN.
-    assert specific == 68, specific
+    # /ESP_EN, traced to EN. 70 with the XIAO MG24 SMD's MG24_EN and the
+    # nRF54L15 SMD's nRF54_EN, each traced from its underside test point to
+    # its part's reset pad (OH-224).
+    assert specific == 70, specific
     # 15 until OH-200 named the C5's and C6's ten JTAG and BOOT pads. 5 until
     # OH-209 gave the RP2350 SMD's BOOT the reason Seeed's board file states.
-    assert generic == 4, (
+    # 4 until OH-224 answered MG24_EN, nRF54_EN, 54L15_TX20 and 54L15_RX20
+    # from Seeed's own board files.
+    assert generic == 0, (
         f"{generic} pads still carry only the generic sentence: "
         f"{ {board: sorted(labels) for board, labels in outstanding.items()} }"
     )
@@ -3060,6 +3075,212 @@ def test_the_rp2350_smd_boot_pad_is_the_flash_chip_select_in_seeeds_own_board_fi
         if name != "BOOT":
             assert name in nets[reference], (name, reference, nets[reference])
     assert "BOOT" not in nets[tp.reference]
+
+
+#: The underside pads OH-224 answers, by board: Seeed's board file for it,
+#: the MCU's value there, and the labels. Seeed name none of their nets for
+#: the pad, so each is joined to its net by position, as OH-209 joined the
+#: RP2350's BOOT, and the registry names that net in `seeed_pcb_traced`.
+LANDED_BY_POSITION = {
+    "XIAO-MG24-SMD": ("MG24.kicad_pcb", "EFR32MG24", ("MG24_EN",)),
+    "XIAO-nRF54l15-SMD": ("nRF54L15.kicad_pcb", "nRF54L15",
+                          ("54L15_TX20", "54L15_RX20", "nRF54_EN")),
+}
+
+
+def _underside_landings(board: str, board_file: str) -> tuple[
+        dict[str, kicad.Placement], kicad.Board, str]:
+    """Each underside pad of `board`'s own footprint, by label, as the
+    back-side test point it lands on in Seeed's `board_file` (OH-224).
+
+    The frame is the module's castellated edge, which stands unturned on the
+    front with its pads 1-14 at the footprint's own x, as OH-209 found on the
+    RP2350. A pad lands on a test point whose centre is inside the pad's own
+    copper, nearer than half its narrower side, and on exactly one; no point
+    takes two pads. The RP2350 test's 0.01 mm is not used: the nRF54L15's
+    points sit further off the frame than that, and the pad's own copper is
+    the vendor's tolerance rather than one chosen here.
+
+    **The frame is a fact and not a coincidence of spacing** only if the
+    pads that can be checked are: every pad whose label is one `{slash}`
+    part of a net of this file lands on that net, or on the far side of a
+    0R link from it, which is how the nRF54L15 brings its D11 and D12 out.
+    """
+    footprint_path = SEEED_SYM.parent / f"{board}.kicad_mod"
+    board_path = SEEED_PCB / board_file
+    for one in (footprint_path, board_path):
+        if not one.is_file():
+            pytest.skip(f"no {one}")
+    document = json.loads(pindefs.board_path(board).read_text(encoding="utf-8"))
+    labels = {pad["pad"]: pad["label"] for pad in document["pads"]}
+    footprint = kicad.read_footprint(footprint_path)
+    text = board_path.read_text(encoding="utf-8")
+    vendor = kicad.read_board(board_path, text=text)
+
+    (edge,) = [placed for placed in vendor.placements if "XIAO-HALF-HOLE" in placed.name]
+    assert (edge.rotation_deg, edge.back) == (0.0, False), (
+        edge.reference, edge.rotation_deg, edge.back)
+    numbers = {pad.number for pad in edge.pads}
+    for pad in footprint.pads:
+        if pad.number in numbers:
+            xs = {round(one.x_mm, 3) for one in edge.pads if one.number == pad.number}
+            assert xs == {round(pad.x_mm, 3)}, (board, pad.number, xs, pad.x_mm)
+
+    points = [placed for placed in vendor.placements
+              if placed.back and placed.value == "Test Point"]
+    landed = {}
+    for pad in footprint.pads:
+        if pad.number in numbers:
+            continue
+        at = (edge.x_mm + pad.x_mm, edge.y_mm + pad.y_mm)
+        hits = [point for point in points
+                if math.dist(at, kicad.pad_on_board(point, point.pads[0]))
+                < min(pad.width_mm, pad.height_mm) / 2]
+        assert len(hits) == 1, (board, pad.number, labels[pad.number], at,
+                                [point.reference for point in hits])
+        landed[labels[pad.number]] = hits[0]
+    assert len({point.reference for point in landed.values()}) == len(landed), landed
+
+    every_net = {pad.net for placed in vendor.placements for pad in placed.pads if pad.net}
+    linked = {}
+    for placed in vendor.placements:
+        if pindefs._RESISTOR.fullmatch(placed.reference) and placed.value == "0R":
+            ends = {pad.net for pad in placed.pads}
+            for one in ends:
+                linked.setdefault(one, set()).update(ends - {one})
+    witnessed = set()
+    for label, point in landed.items():
+        named_for = {net for net in every_net if label in net.split("{slash}")}
+        if not named_for:
+            continue
+        on = point.pads[0].net
+        assert on in named_for or linked.get(on, set()) & named_for, (
+            board, label, point.reference, on, sorted(named_for))
+        witnessed.add(label)
+    underside_d = {label for label in landed if re.fullmatch(r"D\d+", label)}
+    assert underside_d and underside_d <= witnessed, (board, sorted(underside_d), witnessed)
+    return landed, vendor, text
+
+
+def test_the_mg24_and_nrf54l15_underside_pads_land_on_the_nets_the_registry_traces():
+    """**Four pads whose nets are named for what they carry, not for the pad**
+    (OH-224).
+
+    `MG24_EN`, `nRF54_EN`, `54L15_TX20` and `54L15_RX20` appear on no net of
+    Seeed's board files under any spelling, which is why OH-170 left them on
+    the generic sentence. They are not on nets named for them; each sits on
+    one of the module's underside test points, as the RP2350's BOOT does.
+
+    The registry names the net each lands on, in `seeed_pcb_traced`'s
+    `nets`, because the join is by position and the footprint it is read
+    from is in another vendor tree. This is what holds that typed name: the
+    position is read here from the vendor's footprint and board file, and
+    the net the point is on must be the one the registry names.
+    """
+    for board, (board_file, part, wanted) in LANDED_BY_POSITION.items():
+        landed, _, _ = _underside_landings(board, board_file)
+        typed = {}
+        for source in pindefs.BOARDS[board].sources:
+            if source.package == "seeed-pcb":
+                typed.update(source.read.keywords.get("nets") or {})
+        assert set(typed) == set(wanted), (
+            f"{board}'s registry names a net by position for {sorted(typed)}, "
+            f"not for {sorted(wanted)}")
+        for label in wanted:
+            net = landed[label].pads[0].net
+            assert typed[label] == net, (board, label, landed[label].reference,
+                                         net, typed[label])
+            # Which is why it is typed: the net does not name the pad.
+            assert label not in net.split("{slash}"), (label, net)
+
+
+def test_the_mg24_and_nrf54l15_underside_pads_answer_from_seeeds_own_board_file():
+    """**The four pads answered, each from the MCU pad its test point's net
+    reaches** (OH-224).
+
+    Where Seeed's footprint names that pad by port and bit, the board file
+    states it as `chip_pin`, read off the vendor's file here and compared,
+    never restated. Where it names the part's reset instead, the pad stays
+    null and says so in the shape the dedicated debug pads already use, and
+    every clause of that reason is read back out of the vendor's files: the
+    test point, the net, the chip's pad and its name, and the span of the
+    pads it is named apart from.
+
+    `_CHIP_PIN_NAME` is the line between the two, and it stays where it is:
+    a reset becoming a caption is OH-172's slice 2.
+    """
+    answered = {}
+    for board, (board_file, part, wanted) in LANDED_BY_POSITION.items():
+        landed, vendor, text = _underside_landings(board, board_file)
+        document = json.loads(pindefs.board_path(board).read_text(encoding="utf-8"))
+        pads = {pad["label"]: pad for pad in document["pads"]}
+        reasons = dict(pindefs.BOARDS[board].reasons)
+        (chip,) = [placed for placed in vendor.placements if part in (placed.value or "")]
+        (mcu,) = [by_net for value, by_net in pindefs._footprints(text) if value == chip.value]
+        numbered = sorted({match.group(1) for names in mcu.values() for name in names
+                           if (match := pindefs._CHIP_PIN_NAME.match(name))})
+        for label in wanted:
+            point = landed[label]
+            net = point.pads[0].net
+            (function,) = mcu[net]
+            pin = pindefs._CHIP_PIN_NAME.match(function)
+            pad = pads[label]
+            answered[label] = pad["chip_pin"]
+            if pin:
+                assert (pad["chip_pin"], pad["chip_index"]) == (pin.group(1), None), (
+                    board, label, net, function, pad)
+                assert "why_null" not in pad, pad
+                continue
+            assert (pad["chip_pin"], pad["chip_index"]) == (None, None), pad
+            why = pad["why_null"]
+            assert why == reasons.get(label), (
+                f"{board} {label}: the board file is stale against the registry, "
+                f"or the registry gives it no reason: {why!r}")
+            assert f"a reset pad of the {part}, not a GPIO" in why, why
+            assert f"Seeed's own {board_file}" in why, why
+            assert f"underside test point {point.reference}, whose net {net!r}" in why, why
+            (chip_pad,) = [one.number for one in chip.pads if one.net == net]
+            assert f"the {part}'s own pad {chip_pad} {function!r}" in why, why
+            assert "RESET" in function.upper(), function
+            assert f"{numbered[0]} through {numbered[-1]}" in why, (numbered, why)
+            assert pindefs.CITES_BOARD_CAD.search(why), why
+    # Both branches are taken: two pads name a pin and two are the part's reset.
+    assert {label for label, pin in answered.items() if pin} == {"54L15_TX20", "54L15_RX20"}, (
+        answered)
+
+
+def test_a_net_typed_for_a_traced_label_must_reach_the_part():
+    """A net named in `nets` is a citation, and it is refused where it names
+    nothing on the part rather than resolving to the silence a reset pad
+    resolves to (OH-224).
+
+    `/04 ATSAMD11D14A/MGM_RST_CTL` is a real net of `MG24.kicad_pcb` -- it
+    runs from the on-board debugger to the gate of the MOSFET that pulls the
+    MG24's reset -- and no pad of the EFR32MG24 is on it. A typed name that
+    drifted onto it must stop the generator, as a renamed `SWDIO` would.
+    """
+    for name in ("MG24.kicad_pcb", "nRF54L15.kicad_pcb"):
+        if not (SEEED_PCB / name).is_file():
+            pytest.skip(f"no {SEEED_PCB / name}")
+    mg24 = ((SEEED_PCB / "MG24.kicad_pcb").read_text(encoding="utf-8", errors="replace"),)
+    nrf = ((SEEED_PCB / "nRF54L15.kicad_pcb").read_text(encoding="utf-8", errors="replace"),)
+
+    # The reset pad: reached, no pin, and silent, for `Board.reasons` to answer.
+    assert pindefs.read_seeed_traced(
+        mg24, part="EFR32MG24", labels=(), nets={"MG24_EN": "~{MG24_RESET}"}) == {}
+    with pytest.raises(PindefError) as raised:
+        pindefs.read_seeed_traced(
+            mg24, part="EFR32MG24", labels=(),
+            nets={"MG24_EN": "/04 ATSAMD11D14A/MGM_RST_CTL"})
+    assert "MGM_RST_CTL" in str(raised.value) and "MG24_EN" in str(raised.value), raised.value
+
+    # And the part still decides: the debugger is on the TX20 net as well,
+    # with its own PA08, and only the nRF54L15's pad is this board's pin.
+    nets = {"54L15_TX20": "P1.08{slash}SAMD11_TX"}
+    assert pindefs.read_seeed_traced(
+        nrf, part="nRF54L15", labels=(), nets=nets)["54L15_TX20"].name == "P1.08"
+    assert pindefs.read_seeed_traced(
+        nrf, part="ATSAMD11", labels=(), nets=nets)["54L15_TX20"].name == "PA08"
 
 
 def test_the_swd_pads_quote_a_vendor_page_that_says_what_they_quote():

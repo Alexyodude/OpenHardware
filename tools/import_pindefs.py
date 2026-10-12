@@ -540,7 +540,8 @@ def _footprints(text: str) -> list[tuple[str, dict[str, list[str]]]]:
 
 
 def read_seeed_traced(
-    texts: tuple[str, ...], *, part: str, labels: tuple[str, ...]
+    texts: tuple[str, ...], *, part: str, labels: tuple[str, ...],
+    nets: dict[str, str] | None = None,
 ) -> dict[str, ChipPin]:
     """Follow a pad's net to the board's own MCU and read that pad's function.
 
@@ -567,7 +568,19 @@ def read_seeed_traced(
     the silicon saying it has no GPIO number for this pad, the second is a
     citation naming something that is not there, and only the first is a
     fact worth keeping quiet about.
+
+    **`nets` is for a pad whose net is not named for it** (OH-224): label to
+    the net its pad lands on, traced from there exactly as a named net is.
+    Seeed bring some pads out on underside test points whose nets are named
+    for what they carry -- the MG24's `MG24_EN` lands on `~{MG24_RESET}` --
+    so no reading of the net names joins the two. The join is by position,
+    against the footprint in the other vendor tree, and it is held by
+    `test_the_mg24_and_nrf54l15_underside_pads_land_on_the_nets_the_registry_traces`,
+    which reads both files; what the pad reaches is still read here, never
+    typed. A net named here that reaches no pad of the part raises, as an
+    absent named net does.
     """
+    nets = nets or {}
     pins: dict[str, ChipPin] = {}
     for text in texts:
         matched = [(value, by_net) for value, by_net in _footprints(text)
@@ -593,13 +606,13 @@ def read_seeed_traced(
                 f"them on nets with the same names"
             )
         mine = [by_net for _, by_net in matched]
-        for label in labels:
+        for label in (*labels, *nets):
             wanted = label.upper()
             reached = False
             for by_net in mine:
                 for net, functions in by_net.items():
                     plain = net.replace("{slash}", "/").rsplit("/", 1)[-1].upper()
-                    if plain != wanted:
+                    if (net != nets[label]) if label in nets else (plain != wanted):
                         continue
                     reached = True
                     named = {match.group(1) for match in
@@ -643,8 +656,9 @@ def read_seeed_traced(
             # `SWDIO` net, the MG24's `PA02` and `PA01` would vanish exactly
             # this quietly and the pads would fall back to a generic null.
             if not reached:
+                on = f", given the net {nets[label]!r} in `nets`," if label in nets else ""
                 raise PindefError(
-                    f"{label!r} is on no net of the {part} footprint in this "
+                    f"{label!r}{on} is on no net of the {part} footprint in this "
                     f"board file, so there is nothing to trace to. A label "
                     f"traced here must reach this part: a pad that reaches it "
                     f"and is not a GPIO resolves to nothing, which is a fact "
@@ -846,12 +860,14 @@ def seeed_symbol(symbol: str, labels: tuple[str, ...]) -> Source:
     )
 
 
-def seeed_pcb_traced(board_file: str, part: str, labels: tuple[str, ...]) -> Source:
-    """Seeed's own board file, followed one hop from the pad to the MCU."""
+def seeed_pcb_traced(board_file: str, part: str, labels: tuple[str, ...],
+                     nets: dict[str, str] | None = None) -> Source:
+    """Seeed's own board file, followed one hop from the pad to the MCU:
+    from the net named for the label, or from the one `nets` names for it."""
     return Source(
         "seeed-pcb",
         (board_file,),
-        functools.partial(read_seeed_traced, part=part, labels=labels),
+        functools.partial(read_seeed_traced, part=part, labels=labels, nets=nets),
         root=REPO / "third_party" / "seeed-pcb",
     )
 
@@ -2143,9 +2159,18 @@ _ESP32S3 = (
 #: pads are on nets with the same names, and its own `PA02` is a different
 #: pin of a different chip. Its pads are `SAMD11_*` on the header and are
 #: answered in words below, not with a number.
+#:
+#: **`MG24_EN` is traced from a net named for what it carries** (OH-224).
+#: The SMD footprint's pad lands on the underside test point TP4, whose net
+#: is `~{MG24_RESET}`; no net is named for the pad, so the net is named here
+#: and the join is held by a test that reads the footprint beside the board
+#: file. Traced, it reaches the EFR32MG24's `RESET` pad, which is not a pin
+#: name, so it resolves nothing and `_MG24_RESET` says why. Tracing it is
+#: still the point: a vendor revision that renamed the net stops the run.
 _MG24 = (
     zephyr_connector("xiao_mg24", silabs_port_pin),
-    seeed_pcb_traced("MG24.kicad_pcb", "EFR32MG24", ("SWDIO", "SWCLK")),
+    seeed_pcb_traced("MG24.kicad_pcb", "EFR32MG24", ("SWDIO", "SWCLK"),
+                     nets={"MG24_EN": "~{MG24_RESET}"}),
     arduino_indexed(
         "silabs-arduino",
         "variants/xiao_mg24/pins_arduino.h",
@@ -2181,9 +2206,31 @@ _NRF52840 = (
 #: clear, and Seeed name them beside their pin -- `P1.02{slash}NFC1`. The
 #: SAMD11 and nRF54 debug pads on the same board are NOT here: they belong
 #: to a second chip and are OH-170 US-3's question, not this source's.
+#:
+#: **Three underside pads are traced from nets named for what they carry**
+#: (OH-224), as the MG24's `MG24_EN` is: each lands on an underside test
+#: point by position, and the test that reads the footprint beside the board
+#: file holds the net named here. `54L15_TX20` reaches the nRF54L15's P1.08
+#: and `54L15_RX20` its P1.09, ordinary GPIOs, read off the footprint's own
+#: pad names rather than off the nets'. `nRF54_EN` reaches its `~{RESET}`,
+#: which resolves nothing, and `_NRF54L15_RESET` says why.
+#:
+#: **The pad Seeed call TX20 reaches the pin Zephyr receives on.** Zephyr's
+#: `xiao_nrf54l15-pinctrl.dtsi` gives `uart20_default` `UART_TX` on P1.09
+#: and `UART_RX` on P1.08 (measured 2026-10-12 at Zephyr 0a2e408). `chip_pin`
+#: states which pin the pad's copper reaches, which is what it means, and
+#: not which way a signal on it runs. Recorded, not resolved: no reader here
+#: takes a pin from a pinctrl node, so Zephyr is a cross-check and not a
+#: source, and whether the pad's name or the pinctrl reads the line from the
+#: other end is not something either file says.
 _NRF54L15 = (
     zephyr_connector("xiao_nrf54l15", nordic_port_pin),
     seeed_pcb("nRF54L15.kicad_pcb", ("NFC1", "NFC2")),
+    seeed_pcb_traced("nRF54L15.kicad_pcb", "nRF54L15", (), nets={
+        "54L15_TX20": "P1.08{slash}SAMD11_TX",
+        "54L15_RX20": "P1.09{slash}SAMD11_RX",
+        "nRF54_EN": "~{nRF54_RESET}",
+    }),
 )
 #: **The NFC pair is P1.01 and P1.02 here and P1.02 and P1.03 on the
 #: nRF54L15**, which is why every one of these reads its own board's file
@@ -2451,6 +2498,37 @@ _NRF54LM20A_RESET = (
         gpio="P0.00 through P3.12 by port and bit")),
 )
 
+#: **The same fact where the pad's own net WAS followed** (OH-224). The MG24
+#: and nRF54L15 SMD footprints' `EN` pads land on an underside test point
+#: each, by position, and `seeed_pcb_traced` follows that point's net to the
+#: part's reset pad -- so unlike `_DEDICATED_RESET`, this sentence says the
+#: pad is on that net. The test point is not something the generator reads;
+#: `test_the_mg24_and_nrf54l15_underside_pads_answer_from_seeeds_own_board_file`
+#: reads it, and every other clause, back out of the vendor's files.
+#:
+#: **No count of the other pads**, where `_DEDICATED_RESET` gives one: the
+#: span is read back by that test, and a count beside it is a second number
+#: to keep true.
+_LANDED_RESET = (
+    "a reset pad of the {chip}, not a GPIO: in {where} this pad lands on the "
+    "underside test point {tp}, whose net {net!r} carries the {chip}'s own pad "
+    "{pad} {pin!r}, which its footprint names apart from its pads numbered "
+    "{gpio}. A reset is a dedicated pin of the silicon, so there is no GPIO "
+    "number for this label to have"
+)
+_MG24_RESET = (
+    ("MG24_EN", _LANDED_RESET.format(
+        chip="EFR32MG24", where="Seeed's own MG24.kicad_pcb", tp="TP4",
+        net="~{MG24_RESET}", pad="13", pin="RESET",
+        gpio="PA00 through PD05 by port and pin")),
+)
+_NRF54L15_RESET = (
+    ("nRF54_EN", _LANDED_RESET.format(
+        chip="nRF54L15", where="Seeed's own nRF54L15.kicad_pcb", tp="TP4",
+        net="~{nRF54_RESET}", pad="D2", pin="~{RESET}",
+        gpio="P0.00 through P2.10 by port and bit")),
+)
+
 #: **A third chip, and not even a microcontroller.** `SHPHLD` reaches an
 #: `nPM1300-CAAA` -- Nordic's power-management IC -- on its `SHPHLD_D4` pad.
 #: Ship-hold is that part's own function, so the label names nothing on the
@@ -2476,7 +2554,7 @@ BOARDS = {
     "XIAO-ESP32-S3-SMD": Board("ESP32-S3", _ESP32S3),
     "XIAO-ESP32-S3-SMD_PAD": Board("ESP32-S3", _ESP32S3),
     "XIAO-MG24-DIP": Board("EFR32MG24", _MG24),
-    "XIAO-MG24-SMD": Board("EFR32MG24", _MG24, reasons=_MG24_DEBUGGER),
+    "XIAO-MG24-SMD": Board("EFR32MG24", _MG24, reasons=_MG24_DEBUGGER + _MG24_RESET),
     "XIAO-RP2040-DIP": Board("RP2040", _RP2040, on_board=("LED",)),
     "XIAO-RP2040-SMD": Board(
         "RP2040", _RP2040, on_board=("LED",), reasons=_RP2040_SWD
@@ -2510,7 +2588,8 @@ BOARDS = {
     "XIAO-nRF54l15-DIP": Board("nRF54L15", _NRF54L15),
     "XIAO-nRF54l15-SMD": Board(
         "nRF54L15", _NRF54L15,
-        reasons=_NRF54L15_DEBUG + _MG24_DEBUGGER + _NRF54L15_USER_LED,
+        reasons=(_NRF54L15_DEBUG + _MG24_DEBUGGER + _NRF54L15_USER_LED
+                 + _NRF54L15_RESET),
     ),
 }
 
