@@ -33,7 +33,7 @@
 # and encoded to sRGB. It leaves out the lights' angles, the room's
 # reflection and the shadows. How far off that is was measured where the page
 # and the proxy show the same surface -- the LED's body unlit -- and the
-# threshold below is lowered by exactly that.
+# threshold below is raised by exactly that.
 
 import json
 import math
@@ -48,12 +48,20 @@ STATIC = pathlib.Path(__file__).resolve().parents[2] / "webui" / "static"
 SHEET = STATIC / "emulator.css"
 UNO_MODEL = STATIC / "models" / "Arduino-Uno.glb"
 
-#: What the ticket measured in the page (OH-227, 2026-10-12), mean sRGB over
-#: the same pixels of device-scale screenshots: pin 13's post low and high,
-#: and the LED's body unlit.
+#: Pin 13's post low and high, as the ticket measured it in the page (OH-227,
+#: 2026-10-12), mean sRGB over the same pixels of device-scale screenshots,
+#: dark theme. The fix's own look measured the post at (223, 221, 218) and
+#: (114, 208, 145).
 POST_LOW = (221, 220, 217)
 POST_HIGH = (113, 207, 145)
-BODY_SEEN = (211, 210, 203)
+
+#: The LED's body unlit, as the page draws it with nothing over it: measured
+#: 2026-10-12 at b407852, mean sRGB of the 66 pixels inside the projected top
+#: face of the Uno's "L" solid inset by a pixel, at the page's own framing,
+#: DPR 1, the same in both themes. **Not the ticket's (211, 210, 203)**, which
+#: was the mean over the old lamp's mottle -- the vendor's body and the box's
+#: `--line` together -- and so not a measurement of the body at all.
+BODY_SEEN = (229, 226, 209)
 
 #: The Uno's "L" LED body: KiCad's `PLASTIC-WHITE-01`, the key
 #: `tools/import_3d_model.py`'s `FINISHES` gives the chip LEDs' body, as the
@@ -74,13 +82,25 @@ def encoded(value: float) -> int:
     return round(value * 255)
 
 
+#: Where Khronos PBR Neutral starts to compress, after its toe offset. A lit
+#: lamp held under it is drawn as the stylesheet's own colour and not pressed
+#: toward white (`LAMP_GLOW`).
+KNEE = 0.8 - 0.04
+
+
+def toe(rgb: list[float]) -> float:
+    """What Khronos PBR Neutral takes off every channel before anything else:
+    a curve under the darkest channel near black, 0.04 above it."""
+    least = min(rgb)
+    return least - 6.25 * least * least if least < 0.08 else 0.04
+
+
 def neutral(rgb: list[float]) -> list[float]:
     """Khronos PBR Neutral, as `three.js` r185's `NeutralToneMapping` computes
     it (`vendor/three.module.js`'s shader chunk): the page sets this curve, so
     a colour is compared after it and not before."""
-    start, desaturation = 0.8 - 0.04, 0.15
-    least = min(rgb)
-    offset = least - 6.25 * least * least if least < 0.08 else 0.04
+    start, desaturation = KNEE, 0.15
+    offset = toe(rgb)
     rgb = [value - offset for value in rgb]
     peak = max(rgb)
     if peak < start:
@@ -131,13 +151,20 @@ PROXY_ERROR = delta_e(
     BODY_SEEN)
 
 #: How far, in CIE76, what the page's camera sees at a board's LED has to move
-#: between low and high: **as far as pin 13's post moved in the page, less the
+#: between low and high: **as far as pin 13's post moved in the page, plus the
 #: proxy's own error.** The post's change is the one the ticket called plainly
-#: green, and the lamp's job is to be at least as plain as the pin beside it;
-#: the error is taken off because the lamp's change is computed through the
-#: proxy and the post's was measured off pixels. The LED as the ticket found it
-#: moved 3.5.
-UNMISTAKABLE = delta_e(POST_LOW, POST_HIGH) - PROXY_ERROR
+#: green, and the lamp's job is to be at least as plain as the pin beside it.
+#:
+#: **The error is a bound, not a tolerance.** The lamp's change is computed
+#: through the proxy and the post's was measured off pixels, so a proxy that
+#: misplaces the unlit end by `PROXY_ERROR` could overstate the lamp's change
+#: by as much; adding it means a lamp that clears this in the proxy clears the
+#: post in the page. It bounds the unlit end only. The lit end is the lamp's
+#: own emission, which the proxy draws without the room's reflection; the
+#: fix's look measured it 2.4 (light) and 2.9 (dark) off the proxy, and the
+#: page's own change, 57.2 and 51.7, cleared the post directly. The LED as the
+#: ticket found it moved 3.5.
+UNMISTAKABLE = delta_e(POST_LOW, POST_HIGH) + PROXY_ERROR
 
 
 def stylesheet_themes() -> dict[str, dict[str, str]]:
@@ -234,7 +261,8 @@ const shown = (object) => {
 const values = (material) => ({
   color: material.color.toArray(), emissive: material.emissive.toArray(),
   intensity: material.emissiveIntensity,
-  offsetUnits: material.polygonOffset ? material.polygonOffsetUnits : 0 });
+  offsetUnits: material.polygonOffset ? material.polygonOffsetUnits : 0,
+  offsetFactor: material.polygonOffset ? material.polygonOffsetFactor : 0 });
 
 const out = [];
 for (const { layout, file, component, pin } of cases) {
@@ -310,8 +338,10 @@ def seen(look: dict) -> dict:
     seeing.
 
     A lamp's polygon offset counts toward its lead as what `glPolygonOffset`
-    makes it: `-units` steps of the buffer toward the camera. Its slope term
-    is left out; it only adds to the lead, on faces not seen square-on."""
+    makes it: `-units` steps of the buffer toward the camera. A slope term
+    would only add to that lead, and `held` requires the lamp to have none,
+    because at grazing angles it is what drew the lamp through the IOH
+    header."""
     surfaces = look["surfaces"]
     if not surfaces:
         raise AssertionError(f"{look['board']}: the camera's ray through the "
@@ -388,9 +418,38 @@ def body_box_glb(path: pathlib.Path, low: list[float], high: list[float]) -> Non
 def held(rows: list[tuple]) -> None:
     """Every row's lit-minus-unlit at least `UNMISTAKABLE`; unlit, the
     vendor's own LED seen and nothing drawn over it; and lit, the lamp in the
-    theme now on rather than the one it was drawn in."""
+    theme now on rather than the one it was drawn in.
+
+    And what `LAMP_GLOW`'s comment claims for the lit lamp, which the change
+    alone does not hold -- any strength from 0.5 to 2.0 clears it: that it is
+    seen as exactly what the tone curve makes of the theme's own `high`, and
+    that it is under the curve's `KNEE`, so not pressed toward white. And that
+    its polygon offset has no slope term, which drew it through the IOH header
+    at grazing angles."""
     failures = []
     for board, drawn, now, low, high, change, by in rows:
+        lit = by["high"]["lamp"]
+        if lit is not None:
+            radiance = [base + glow * lit["intensity"]
+                        for base, glow in zip(lit["color"], lit["emissive"])]
+            if max(radiance) - toe(radiance) >= KNEE:
+                failures.append(
+                    f"{board}, drawn {drawn}, shown {now}: lit, the lamp's "
+                    f"brightest channel {max(radiance):.3f} less the toe "
+                    f"{toe(radiance):.3f} is at or over the knee {KNEE:.2f}, so "
+                    f"the tone curve presses it toward white")
+            own = proxy({"color": [0.0, 0.0, 0.0], "emissive": by["high"]["high"],
+                         "intensity": 1.0})
+            if high != own:
+                failures.append(
+                    f"{board}, drawn {drawn}, shown {now}: lit, the camera sees "
+                    f"{high}, not the theme's own `high` through the tone "
+                    f"curve, {own}")
+            if lit["offsetFactor"] != 0:
+                failures.append(
+                    f"{board}, drawn {drawn}, shown {now}: the lamp's polygon "
+                    f"offset has a slope term, {lit['offsetFactor']}, which "
+                    f"draws it through a part in front at grazing angles")
         if seen(by["low"])["lamp"]:
             failures.append(f"{board}, drawn {drawn}, shown {now}: unlit, the "
                             f"camera sees the lamp, {seen(by['low'])}, over "
@@ -421,7 +480,7 @@ def test_a_lit_board_led_moves_as_far_as_the_pin_beside_it_in_both_themes(tmp_pa
     each with the page's own `refreshTheme`, because the reader's toggle is
     how a board drawn in one theme comes to be seen in the other.
 
-    Held to `UNMISTAKABLE` in all four, and lit, the lamp in the theme on.
+    Held by `held` in all four.
     """
     model = tmp_path / "lamp.glb"
     body_box_glb(model, [-0.625, 1.6, -1.0], [0.625, 2.7, 1.0])

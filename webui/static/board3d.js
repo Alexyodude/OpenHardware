@@ -189,11 +189,14 @@ const PIN_GLOW = 0.85;
 //: **A lit lamp is drawn as its light alone**: no base colour, and the
 //: palette's `high` emitted at this strength. At 1.0 the emission IS the
 //: stylesheet's `--changed`, the colour the table writes `high` in, in
-//: whichever theme is on -- and the tone curve leaves it as it is, because
-//: its brightest channel, the dark theme's green at 0.67 linear, is under the
-//: 0.76 where Khronos PBR Neutral starts to compress. Past about 1.2 that
-//: green is pressed toward white, which is the blowout `PIN_GLOW` stops short
-//: of.
+//: whichever theme is on, and the tone curve leaves it uncompressed: its
+//: brightest channel, the dark theme's green at 0.67 linear, less the curve's
+//: toe offset, stays under the 0.76 where Khronos PBR Neutral starts to
+//: compress. Only that toe offset moves it, and it darkens the darkest
+//: channel: ΔE 1.2 from `--changed` in the light theme and 4.0 in the dark,
+//: CIE76 through the proxy `tests/webui/test_board_led.py` computes. Past
+//: about 1.2 the dark green is pressed toward white, which is the blowout
+//: `PIN_GLOW` stops short of, and that test holds both.
 //:
 //: **Emission ADDED to the LED was the defect.** The lamp was a box in
 //: `--line` emitting `high` at `PIN_GLOW` -- a pin's recipe, and a pin is
@@ -1886,16 +1889,24 @@ function placeLeds(parts) {
       // not. A polygon offset settles that tie the same way at every
       // distance, where a box drawn larger would settle it only until the
       // camera pulled back far enough for the buffer's step to outgrow the
-      // margin. `-1` is one depth slope across a pixel, which an
-      // oblique face needs; `-4` is four steps of the buffer, which a face
-      // seen square-on needs, because the box's depths and the LED's are
-      // rounded through different matrices. Neither moves anything a reader
-      // can see: it changes which of two coincident faces is drawn.
+      // margin. `-4` is four steps of the buffer, because the box's depths
+      // and the LED's are rounded through different matrices.
+      //
+      // **No slope term, and that is a measured trade.** A factor of `-1`
+      // pulls a face forward by its own depth slope across a pixel, which at
+      // a grazing angle is millimetres: seen from behind the IOH header at
+      // half a degree to a degree above the board, the lit lamp drew a row
+      // of 5 to 10 pixels through the header's housing (OH-227's review).
+      // At `0` it drew none in the same views, and none of the LED's own
+      // pixels went to the vendor's surface in a sweep from 1.2 to 89.5
+      // degrees. What is left is that the lamp wins any surface within four
+      // steps of it, 0.024 mm at the page's framing: it changes which of two
+      // coincident faces is drawn, and nothing further off.
       new THREE.MeshStandardMaterial({
         emissive: view.palette.states.high,
         emissiveIntensity: 0,
         polygonOffset: true,
-        polygonOffsetFactor: -1,
+        polygonOffsetFactor: 0,
         polygonOffsetUnits: -4,
       }));
     // `setScalar(0)` and not a black Color, for the reason `repaint` gives:
