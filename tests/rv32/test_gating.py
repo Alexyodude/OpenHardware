@@ -64,6 +64,8 @@ def extension_mask(abi, names) -> int:
         "A": abi.EXT_A,
         "C": abi.EXT_C,
         "Zba": abi.EXT_ZBA,
+        "Zbb": abi.EXT_ZBB,
+        "Zbkb": abi.EXT_ZBKB,
         "Zcb": abi.EXT_ZCB,
         "Zcmp": abi.EXT_ZCMP,
         "Zcmt": abi.EXT_ZCMT,
@@ -374,21 +376,26 @@ def test_the_extension_letters_match_the_abi_bitmasks(abi):
 
     assert set(esp32c5.ABSENT) == TARGETS["ESP32-C5"] - MODELLED
 
-    # The RP2350 is the case where the two spellings can drift *silently*,
-    # because its datasheet set is larger than what the core can be told.
-    # `abi.RP2350_MODELLED` is the intersection written out by hand, and this
-    # is what stops someone adding Zbb to it without adding Zbb to MODELLED --
-    # which would make the core claim an extension no test could then reach.
-    assert extension_mask(abi, TARGETS["RP2350"]) == abi.RP2350_MODELLED, (
+    # The RP2350 is one constant (OH-219): `abi.RP2350` is the mask its board
+    # configures, and it must be this row through this map. Until OH-219 the
+    # test held a second, narrower constant here, without the Zbb and Zbkb
+    # OH-208 had modelled, while the board ran the wider one unchecked.
+    assert extension_mask(abi, TARGETS["RP2350"]) == abi.RP2350, (
         f"TARGETS['RP2350'] & MODELLED is "
         f"{sorted(TARGETS['RP2350'] & MODELLED)}, whose mask is "
         f"{extension_mask(abi, TARGETS['RP2350']):#x}, but "
-        f"abi.RP2350_MODELLED is {abi.RP2350_MODELLED:#x}"
+        f"abi.RP2350 is {abi.RP2350:#x}"
     )
-    assert abi.EXT_ZBA & abi.RP2350_MODELLED != 0, "the RP2350 has Zba"
+    assert abi.EXT_ZBA & abi.RP2350 != 0, "the RP2350 has Zba"
     assert abi.EXT_ZBA & abi.ESP32_C6 == 0, "an ESP32-C6 does not"
-    assert TARGETS["RP2350"] - MODELLED, (
-        "every extension the RP2350 has is now modelled, so `MODELLED` and "
-        "`faithfully_configurable` have become no-ops and the comments "
-        "explaining them describe a state that no longer exists"
+    # What the row has and MODELLED lacks is one name, and it is a spelling
+    # rather than an extension: `kExtC` stands for Zca on a part with no FPU
+    # (`test_the_c_and_zca_equivalence_is_only_claimed_for_parts_without_an_fpu`).
+    assert TARGETS["RP2350"] - MODELLED == {"Zca"}, (
+        f"the RP2350's unmodelled names are "
+        f"{sorted(TARGETS['RP2350'] - MODELLED)}. Any but Zca is a datasheet "
+        f"group with no bit, and `faithfully_configurable` excludes every "
+        f"case needing it from every sweep here instead of asserting it. No "
+        f"Zca means it has a bit of its own, and conftest.py's reasoning "
+        f"for spelling it C has to change with it."
     )

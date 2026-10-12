@@ -61,7 +61,7 @@ def test_zba_agrees_with_rvcpp(oracle, tmp_path):
 
     `sh1add`, `sh2add` and `sh3add` are the whole of Zba on RV32, and they are
     the first extension this core implements rather than classifies-and-
-    refuses. Run with `RP2350_MODELLED`, because with Zba off the core must
+    refuses. Run with `RP2350`, because with Zba off the core must
     raise illegal-instruction -- which is `test_extension_gating.py`'s half of
     the answer and is invisible here, since rvcpp executes them for every part.
 
@@ -82,7 +82,7 @@ def test_zba_agrees_with_rvcpp(oracle, tmp_path):
         e.sh2add("x0", "t0", "t1"),
     ]
     check(
-        lockstep.run(image(body), tmp_path, extensions=abi.RP2350_MODELLED),
+        lockstep.run(image(body), tmp_path, extensions=abi.RP2350),
         least=len(body),
     )
 
@@ -116,7 +116,7 @@ def test_zbs_agrees_with_rvcpp(oracle, tmp_path):
         e.bext("s0", "t0", "t0"),
     ]
     check(
-        lockstep.run(image(body), tmp_path, extensions=abi.RP2350_MODELLED),
+        lockstep.run(image(body), tmp_path, extensions=abi.RP2350),
         least=len(body),
     )
 
@@ -142,7 +142,7 @@ def test_zbs_immediates_share_a_funct3_with_the_shifts_and_agree_anyway(oracle, 
         e.bclri("s0", "t0", 0),
     ]
     check(
-        lockstep.run(image(body), tmp_path, extensions=abi.RP2350_MODELLED),
+        lockstep.run(image(body), tmp_path, extensions=abi.RP2350),
         least=len(body),
     )
 
@@ -156,7 +156,7 @@ def test_zba_writing_x0_changes_nothing_in_either_model(oracle, tmp_path):
     registers, which is why lockstep compares the whole file rather than rd.
     """
     body = [e.addi("t0", "x0", 7), e.sh3add("x0", "t0", "t0")]
-    report = lockstep.run(image(body), tmp_path, extensions=abi.RP2350_MODELLED)
+    report = lockstep.run(image(body), tmp_path, extensions=abi.RP2350)
     check(report, least=len(body))
 
 

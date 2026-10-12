@@ -26,9 +26,11 @@ CORPUS = pathlib.Path(__file__).parent / "corpus"
 
 #: Every family the generator emits. Named rather than globbed, so a corpus
 #: missing a family fails loudly instead of quietly testing less -- the same
-#: contract `tests/cortexm0/test_conformance.py` keeps with its FAMILIES.
+#: contract `tests/cortexm0/test_conformance.py` keeps with its FAMILIES. The
+#: other direction -- a family generated and left out of this list -- is
+#: `test_every_family_the_generator_emits_is_named_in_families`.
 FAMILIES = ("rv32i_op", "rv32m_op", "rv32a", "rv32c", "rv32zba", "rv32zbs",
-            "absent_extension")
+            "rv32zcb", "absent_extension")
 
 #: rvcpp's map, so a captured final state means the same thing on both sides.
 #: From `third_party/hazard3/test/sim/rvcpp/main.cpp`: `RAM_BASE 0x80000000`
@@ -57,15 +59,15 @@ SANDBOX = RAM_BASE + 0x1000
 #: exactly `Zca` + `Zcf` + `Zcd`; `Zcf` needs F and `Zcd` needs D. The RP2350
 #: has neither, so over the encodings that exist on it, `C` and `Zca` denote
 #: the same legal set and a corpus case marked `requires: ["C"]` is legal on it.
-#: `test_the_c_and_zca_equivalence_is_only_claimed_for_partitions_without_an_fpu`
+#: `test_the_c_and_zca_equivalence_is_only_claimed_for_parts_without_an_fpu`
 #: pins that reasoning so it cannot be reused for a part with an FPU, where it
 #: is false.
 #: The ESP32-C5 row added under OH-57, when `webui/boards/esp32c5.py` gave that
-#: part a board description. It is the second row whose datasheet set exceeds
-#: `MODELLED`, and unlike the RP2350's it is a part this repository now has a
-#: *runnable board* for -- which is exactly why it belongs here rather than in
-#: that board file's prose. `docs/architectures.md` 4.3 records the Zc groups,
-#: and its 4.2 answers the obvious objection: ESP-IDF's own
+#: part a board description. Its datasheet set exceeded `MODELLED` until OH-146
+#: gave the core all three of its Zc groups, and it is a part this repository
+#: has a *runnable board* for -- which is exactly why it belongs here rather
+#: than in that board file's prose. `docs/architectures.md` 4.3 records the Zc
+#: groups, and its 4.2 answers the obvious objection: ESP-IDF's own
 #: `tools/cmake/toolchain-esp32c5.cmake:10` compiles this part
 #: `-march=rv32imac_zicsr_zifencei`, with **no Zc at all**, because
 #: `ZCMP_WORKAROUND` gates them out of the default build. That is the answer to
@@ -73,10 +75,9 @@ SANDBOX = RAM_BASE + 0x1000
 #: accept", and a decoder that took the first answer would trap a legal
 #: instruction.
 #:
-#: `Zcmt` appears in no other row and has no bit in `MODELLED`, so
-#: `faithfully_configurable` excludes any case requiring it -- of which the
-#: corpus has none today, `FAMILIES` having no Zc family. That is the honest
-#: state: the target is recorded, and nothing tests it yet.
+#: `Zcmt` appears in no other row. `rv32zcb` is the corpus's Zc family and
+#: holds Zcb alone: `tools/gen_rv32_tests.py` says why Zcmp and Zcmt are held
+#: by `tests/riscv32/test_zc.py` instead.
 TARGETS = {
     "ESP32-C3": frozenset({"M", "C"}),
     "ESP32-C5": frozenset({"M", "A", "C", "Zcb", "Zcmp", "Zcmt"}),
@@ -86,14 +87,18 @@ TARGETS = {
     ),
 }
 
-#: What `core/riscv32` can be *told about* today: one entry per bit in
-#: `core.riscv32.abi`. Deliberately smaller than the RP2350's row above.
+#: What `core/riscv32` can be *told about*: one entry per bit in
+#: `core.riscv32.abi`. The RP2350's row exceeds it by one name, `Zca`, which
+#: is a spelling and not a gap -- `C` stands for it, for the reason above.
 #:
 #: A target whose datasheet set exceeds this cannot be configured faithfully,
 #: and the honest response is to say which cases that affects rather than to
-#: shrink the target and assert that an RP2350 refuses `clz`. It does not; this
-#: core simply cannot be told that it has Zbb yet.
-MODELLED = frozenset({"M", "A", "C", "Zba", "Zbs", "Zcb", "Zcmp", "Zcmt"})
+#: shrink the target and assert that the part refuses what its silicon runs.
+#: Zbb and Zbkb joined at OH-219: OH-208 modelled both, and until they were
+#: named here `faithfully_configurable` excluded any case needing them on the
+#: RP2350 rather than asserting it.
+MODELLED = frozenset({"M", "A", "C", "Zba", "Zbb", "Zbs", "Zbkb", "Zcb",
+                      "Zcmp", "Zcmt"})
 
 
 def faithfully_configurable(case: dict, target: str) -> bool:

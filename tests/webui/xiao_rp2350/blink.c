@@ -55,8 +55,9 @@
  * section 7.5.2, PDF p.459); this image's next store to either bank is
  * several instructions after the release.
  *
- * Compiled -march=rv32imac: no Zbb and no Zbkb, the two groups of the
- * Hazard3's string `core/riscv32` does not model.
+ * Compiled -march=rv32imac: no Zbb and no Zbkb. `core/riscv32` models both
+ * (OH-208); the program needs neither, and the same compiler gives the same
+ * bytes under the Hazard3's whole string (the test beside this file).
  */
 
 #ifndef BLINK_GPIO

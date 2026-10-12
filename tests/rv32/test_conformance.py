@@ -30,8 +30,10 @@ x12 and corrupted x11 would pass every case in the corpus.
 
 from __future__ import annotations
 
-from tests.rv32.conftest import PC, TARGETS, every_case, legal_on
-from tests.rv32.test_gating import extension_mask
+from tests.rv32.conftest import (
+    CORPUS, FAMILIES, PC, TARGETS, every_case, legal_on, load_family,
+)
+from tests.rv32.test_gating import attempt, extension_mask
 
 
 def run_case(cpu, abi, case: dict, target: str):
@@ -130,3 +132,68 @@ def test_the_corpus_records_the_oracle_for_every_case(cpu, abi):
         if "rvcpp" not in case and not case.get("requires_source")
     ]
     assert not unsourced, "\n".join(unsourced)
+
+
+def test_every_family_the_generator_emits_is_named_in_families():
+    """FAMILIES, the generator and the committed corpus name the same families.
+
+    FAMILIES is named rather than globbed so that a missing file fails
+    loudly. Nothing checked the other direction, and `rv32zcb` fell into it:
+    generated and committed at OH-146, and read by no test until OH-219. The
+    generator's names come from `build` without the oracle, so this runs on a
+    machine with no rvcpp.
+    """
+    from tools import gen_rv32_tests
+
+    emitted = set(gen_rv32_tests.build(1, want_oracle=False))
+    committed = {path.stem for path in CORPUS.glob("*.json")}
+    assert emitted == set(FAMILIES) == committed, (
+        f"the generator emits {sorted(emitted)}, FAMILIES names "
+        f"{sorted(FAMILIES)} and the corpus holds {sorted(committed)}. A "
+        f"family left out of FAMILIES is one no test here reads."
+    )
+
+
+def test_rv32zcb_runs_whole_on_an_rp2350_and_the_c5_refuses_its_zbb_cases(cpu, abi):
+    """The Zc family, every case on every target, from the corpus.
+
+    The RP2350 has Zcb and Zbb, so every case executes there and leaves the
+    registers rvcpp recorded. The ESP32-C5 has Zcb and no Zbb: it executes
+    every case except those whose `requires` names Zbb -- the unaries whose
+    chapter 27 pages say "Zbb is also required" -- and refuses exactly those
+    as Illegal. The C3 and C6 have no Zcb and refuse every case. rvcpp
+    executed all of them, so each refusal is the manual's verdict and not the
+    oracle's.
+    """
+    cases = load_family("rv32zcb")
+    split = {"Zbb" in case["requires"] for case in cases}
+    assert split == {True, False}, (
+        "rv32zcb no longer has cases both with and without Zbb, so the C5's "
+        "half of this test would check nothing")
+    wrong = []
+    for case in cases:
+        name = f"{case['mnemonic']} ({case['encoding']}) initial={case['initial']}"
+        if case["rvcpp"]["status"] != "executed":
+            wrong.append(f"rvcpp did not execute {name}")
+            continue
+        outcome = run_case(cpu, abi, case, "RP2350")
+        if outcome is None:
+            wrong.append(f"RP2350 did not execute {name}")
+        else:
+            final = outcome[1]
+            for number, value in case["rvcpp"]["writes"].items():
+                if final.x[int(number)] != value:
+                    wrong.append(f"RP2350 {name}: x{number} is "
+                                 f"{final.x[int(number)]:#010x}, rvcpp made it "
+                                 f"{value:#010x}")
+        expected = "illegal" if "Zbb" in case["requires"] else "executed"
+        verdict = attempt(cpu, abi, case, "ESP32-C5")
+        if verdict != expected:
+            wrong.append(f"ESP32-C5 answered {verdict!r} for {name}, "
+                         f"requires={case['requires']}; expected {expected!r}")
+        for absent in ("ESP32-C3", "ESP32-C6"):
+            verdict = attempt(cpu, abi, case, absent)
+            if verdict != "illegal":
+                wrong.append(f"{absent} answered {verdict!r} for {name}, which "
+                             f"has no Zcb")
+    assert not wrong, "\n".join(wrong[:20])

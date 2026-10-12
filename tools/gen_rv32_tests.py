@@ -363,11 +363,11 @@ RV32ZBS_OP = (
 #: `tests/riscv32/test_zc.py` instead; every Zcb operation is a single
 #: writeback and fits here.
 #:
-#: Entries are (mnemonic, encoding, requires, why). The Zbb-only unaries
-#: ride along because their verdict is checkable even though no target has
-#: Zbb: every part must refuse them, and rvcpp -- which implements Zbb and
-#: gates nothing -- executes them, which is exactly the divergence the
-#: two-verdict design exists to record.
+#: Entries are (mnemonic, encoding, requires, why). The three unaries that
+#: also need Zbb split the targets: the RP2350 has Zbb and runs them (OH-208
+#: modelled it), the ESP32-C5 has Zcb without Zbb and must refuse them, and
+#: rvcpp -- which gates nothing -- executes them for both, which is exactly
+#: the divergence the two-verdict design exists to record.
 RV32ZCB = (
     ("c.lbu x9, 0(x8)", 0x8004, ["Zcb"],
      "quadrant 0 funct3=100 [12:10]=000; uimm[0] at bit 6, uimm[1] at bit 5"),

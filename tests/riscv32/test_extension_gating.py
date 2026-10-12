@@ -73,7 +73,7 @@ def test_zba_is_illegal_on_a_c3_and_executes_on_an_rp2350(cpu):
             cpu.step()
 
         load(cpu, [encoding])
-        cpu.set_extensions(abi.RP2350_MODELLED)
+        cpu.set_extensions(abi.RP2350)
         regs = cpu.get_regs().as_list()
         regs[5], regs[6] = 7, 5          # t0, t1
         cpu.set_regs(regs, pc=PC)
@@ -96,7 +96,7 @@ def test_zba_is_not_reached_by_enabling_some_other_extension(cpu):
     with pytest.raises(abi.Illegal):
         cpu.step()
 
-    assert abi.RP2350_MODELLED & abi.EXT_ZBA
+    assert abi.RP2350 & abi.EXT_ZBA
     assert not abi.ESP32_C6 & abi.EXT_ZBA
     assert not abi.ESP32_C3 & abi.EXT_ZBA
 
@@ -117,7 +117,7 @@ def test_an_unassigned_encoding_under_zbas_funct7_is_still_illegal(cpu):
     """
     unassigned = e.r_type(0x10, "t1", "t0", 0x1, "a0", 0x33)
     load(cpu, [unassigned])
-    cpu.set_extensions(abi.RP2350_MODELLED)
+    cpu.set_extensions(abi.RP2350)
     with pytest.raises(abi.Illegal):
         cpu.step()
 
@@ -132,7 +132,7 @@ def test_zbs_opens_its_funct7_values_only_at_the_funct3_it_defines(cpu):
     """
     for funct7, funct3 in ((0x14, 0x5), (0x34, 0x5), (0x14, 0x2), (0x24, 0x3)):
         load(cpu, [e.r_type(funct7, "t1", "t0", funct3, "a0", 0x33)])
-        cpu.set_extensions(abi.RP2350_MODELLED)
+        cpu.set_extensions(abi.RP2350)
         with pytest.raises(abi.Illegal):
             cpu.step()
 
@@ -151,7 +151,7 @@ def test_zbs_does_not_reopen_the_rv64_six_bit_shift(cpu):
     `funct7 != 0` as the new gate.
     """
     rv64_slli = e.r_type(0x01, 3, "t0", 0x1, "a0", 0x13)
-    for part in (abi.ESP32_C6, abi.RP2350_MODELLED):
+    for part in (abi.ESP32_C6, abi.RP2350):
         load(cpu, [rv64_slli])
         cpu.set_extensions(part)
         with pytest.raises(abi.Illegal):
@@ -186,7 +186,7 @@ def test_zbs_is_illegal_on_both_esp32_parts_and_executes_on_an_rp2350(cpu):
                 cpu.step()
 
         load(cpu, [encoded])
-        cpu.set_extensions(abi.RP2350_MODELLED)
+        cpu.set_extensions(abi.RP2350)
         regs = cpu.get_regs().as_list()
         regs[5], regs[6] = start, index      # t0, t1
         cpu.set_regs(regs, pc=PC)
