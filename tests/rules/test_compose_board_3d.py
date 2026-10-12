@@ -38,6 +38,7 @@ import pathlib
 import re
 import struct
 import sys
+from fractions import Fraction
 from unittest import mock
 
 import pytest
@@ -260,11 +261,12 @@ def _fills_exactly(ring, triangles, probes) -> list:
 
     The shoelace sum is taken about the ring's first point: a glyph of a few
     hundred square microns placed 100 mm from the origin loses its area to
-    rounding in the plain formula's products."""
+    rounding in the plain formula's products. No triangles at all is a fill
+    only of a ring enclosing nothing, which the area and the probes hold."""
     wrong = []
     faces = [(ring[a], ring[b], ring[c]) for a, b, c in triangles]
     areas = [compose._cross(*face) / 2 for face in faces]
-    if not areas or min(areas) <= 0:
+    if areas and min(areas) <= 0:
         wrong.append(("a triangle of no area or wound backwards", min(areas, default=None)))
     shoelace = abs(sum(compose._cross(ring[0], a, b)
                        for a, b in itertools.pairwise(ring[1:]))) / 2
@@ -368,31 +370,161 @@ def test_a_pinch_and_a_spike_cover_only_what_they_enclose():
 
 
 def test_a_ring_that_crosses_itself_is_refused_naming_where():
-    """**A ring two of whose edges cross is refused, the two edges named**:
-    filling it needs the ring split at each crossing and its faces chosen,
-    and what to choose is a rule -- even-odd or non-zero -- that the drawing
-    does not state. Some of SparkFun's EAGLE letters are this; see
-    `test_every_filled_polygon_of_ink_is_filled_to_its_own_area`."""
+    """**A ring two of whose edges cross is refused by `ear_clip`, the two
+    edges named**, as a `SelfCrossing`: it fills only a ring that touches
+    itself and crosses nowhere. `even_odd` is what fills one that crosses,
+    see `test_a_ring_that_crosses_itself_is_filled_by_the_even_odd_rule`."""
     bow = [(0.0, 0.0), (4.0, 4.0), (4.0, 0.0), (0.0, 4.0)]
-    with pytest.raises(ValueError, match=r"cross.*\(0\.0, 0\.0\)-\(4\.0, 4\.0\)"):
+    with pytest.raises(compose.SelfCrossing, match=r"cross.*\(0\.0, 0\.0\)-\(4\.0, 4\.0\)"):
         compose.ear_clip(bow)
 
 
-def test_a_ring_crossing_itself_through_a_vertex_is_refused_by_its_backwards_triangle():
+def test_a_ring_crossing_itself_through_a_vertex_is_refused_naming_where():
     """**A crossing through a vertex puts a zero among the four sides, as a
-    touch does**, so the edge test passes it (OH-163's review, M2). A square
-    and a triangle wound against it, meeting at (2, 2), clipped down to a
-    last triangle wound backwards, which `ear_clip` returned and the artwork
-    drew. A last triangle wound backwards is refused now, and named. So are
-    a figure-8 crossing at a shared vertex and a bow-tie crossing at a vertex
-    of one edge, the review's other two."""
+    touch does**, so the edge test passes it (OH-163's review, M2): a square
+    and a triangle wound against it, meeting at (2, 2); a figure-8 crossing
+    at a shared vertex; a bow-tie crossing at a vertex of one edge. Each is
+    refused now, as a `SelfCrossing` naming the point, because at (2, 2) the
+    two passes through it interleave round it.
+
+    **The last triangle wound backwards stays a guard behind that**, which
+    is how the review's square and triangle were first refused: with the
+    vertex test taken away, it still refuses them, naming that triangle."""
     lobes = [(2.0, 2.0), (4.0, 2.0), (4.0, 4.0), (2.0, 4.0), (2.0, 2.0), (1.0, 0.0), (0.0, 1.0)]
-    with pytest.raises(ValueError, match=r"\(1\.0, 0\.0\).*wound backwards"):
-        compose.ear_clip(lobes)
-    for ring in ([(0.0, 0.0), (2.0, 2.0), (4.0, 4.0), (4.0, 0.0), (2.0, 2.0), (0.0, 4.0)],
+    for ring in (lobes, [(0.0, 0.0), (2.0, 2.0), (4.0, 4.0), (4.0, 0.0), (2.0, 2.0), (0.0, 4.0)],
                  [(0.0, 0.0), (2.0, 2.0), (4.0, 4.0), (4.0, 0.0), (0.0, 4.0)]):
-        with pytest.raises(ValueError, match="not a weakly simple polygon"):
+        with pytest.raises(compose.SelfCrossing,
+                           match=r"crosses itself at \(2\.0, 2\.0\).*not a weakly simple"):
             compose.ear_clip(ring)
+    with (mock.patch.object(compose, "_crossing_point", return_value=None),
+          pytest.raises(ValueError, match=r"\(1\.0, 0\.0\).*wound backwards")):
+        compose.ear_clip(lobes)
+
+
+#: The ring OH-163's confirm review found by fuzzing `ear_clip`: it crosses
+#: itself through (2, 2), a vertex lying on its last edge, and ear clipping
+#: it gave triangles all wound forward and summing to the ring's own area,
+#: 4.5 mm^2, which covered a face of 0.5 mm^2 twice.
+_TWICE = [(1.0, 2.0), (3.0, 0.0), (4.0, 4.0), (2.0, 2.0), (2.0, 1.0), (3.0, 2.0)]
+
+
+def test_a_face_that_ear_clip_covered_twice_is_refused_and_filled_once():
+    """**A ring crossing itself through a vertex could be covered twice with
+    every runtime check passing** (OH-163's confirm review): `_TWICE`'s
+    triangles were all forward and summed to its area, and an area sum
+    cannot see one face counted twice where the ring winds round it twice.
+    `ear_clip` now refuses it, naming (2, 2), where its two passes cross;
+    `even_odd` fills it, the twice-wound face left open as the rule leaves
+    it, held by probes against the ring's own even-odd rule."""
+    with pytest.raises(compose.SelfCrossing, match=r"crosses itself at \(2\.0, 2\.0\)"):
+        compose.ear_clip(_TWICE)
+    points, triangles = compose.even_odd(_TWICE)
+    assert not _even_odd_exactly(_TWICE, points, triangles, _grid(4, 4)), (
+        _even_odd_exactly(_TWICE, points, triangles, _grid(4, 4)))
+    # The ring's 4.5, less the twice-wound half a square millimetre twice.
+    assert (abs(compose._area(_TWICE)) / 2,
+            sum(compose._cross(points[a], points[b], points[c]) for a, b, c in triangles) / 2
+            ) == pytest.approx((4.5, 4.5 - 2 * 0.5))
+
+
+def _even_odd_exactly(ring, points, triangles, probes) -> list:
+    """What is wrong with `even_odd`'s fill of `ring` -- `points` and the
+    triangles of them -- or [] if nothing: `_fills_exactly` of the walk it
+    filled, and every probe and every triangle's centroid inside that walk
+    by the even-odd rule exactly where it is inside `ring` by it, so the walk
+    is the ring's own region and not merely a region its triangles fill."""
+    wrong = _fills_exactly(points, triangles, probes)
+    faces = [(points[a], points[b], points[c]) for a, b, c in triangles]
+    centroids = [(sum(x for x, _y in face) / 3, sum(y for _x, y in face) / 3)
+                 for face in faces if compose._cross(*face) / 2 >= 1e-12]
+    return wrong + [("walk", point) for point in [*probes, *centroids]
+                    if compose.point_in(points, point) != compose.point_in(ring, point)]
+
+
+def test_a_ring_that_crosses_itself_is_filled_by_the_even_odd_rule():
+    """**A ring that crosses itself is filled as an even-odd ray finds it**
+    (OH-163), held by probes against the ring's own rule and never the
+    triangulator's: a bow-tie, crossing mid-edge; a five-pointed star, whose
+    middle the rule leaves open though the ring winds round it twice; a
+    square walked twice, which encloses nothing by it; and a keyhole whose
+    bridge, walked once each way, runs across a bar hung from the bridge's
+    own end -- SparkFun's 146-point glyph is that -- a hole of 3 mm^2 and a
+    counter of 12 in a 100 mm^2 square.
+
+    And the artwork draws one: the bow-tie as a fill on its face, its pen
+    traced along the four edges the file walks, not the six the fill is cut
+    into, and nothing counted refused. A walk whose turns never end its
+    crossings -- an edit that lost the strands' names did that, and hung --
+    is refused after the square of its length in turns, not looped on; the
+    stand-in that never ends them stops itself well past that, so a guard
+    removed is this test failing and not this test hanging."""
+    asked = itertools.count()
+
+    def always_crossing(*_args):
+        assert next(asked) < 1000, "turned on past the guard"
+        return 0, 2
+
+    with (mock.patch.object(compose, "_interleaved", always_crossing),
+          pytest.raises(ValueError, match=r"still crosses itself after 36 turns")):
+        compose.even_odd([(0.0, 0.0), (4.0, 4.0), (4.0, 0.0), (0.0, 4.0)])
+    bar = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (5.0, 10.0), (5.0, 8.0), (8.0, 8.0),
+           (8.0, 7.0), (5.0, 7.0), (5.0, 8.0), (5.0, 10.0), (7.0, 5.0), (7.0, 2.0),
+           (3.0, 2.0), (3.0, 5.0), (7.0, 5.0), (5.0, 10.0), (0.0, 10.0)]
+    bow = [(0.0, 0.0), (4.0, 4.0), (4.0, 0.0), (0.0, 4.0)]
+    for ring, area, size in (
+            (bow, 8.0, 4),
+            ([(0.0, 0.0), (2.0, 6.0), (4.0, 0.0), (-1.0, 4.0), (5.0, 4.0)], None, 6),
+            ([(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)] * 2, 0.0, 4),
+            (bar, 85.0, 10)):
+        assert _crosses(ring) or len(set(ring)) < len(ring), ring
+        points, triangles = compose.even_odd(ring)
+        wrong = _even_odd_exactly(ring, points, triangles, _grid(size, size))
+        assert not wrong, (ring[:3], wrong[:3])
+        if area is not None:
+            assert sum(compose._cross(points[a], points[b], points[c])
+                       for a, b, c in triangles) / 2 == pytest.approx(area), ring[:3]
+
+    board = eagle.Board("inked", "test", (), (), silk_fills=(
+        eagle.Fill("F.SilkS", tuple(bow), 0.5),))
+    outline = [(-1.0, -1.0), (12.0, -1.0), (12.0, 12.0), (-1.0, 12.0)]
+    meshes, tally, _undrawn = compose.artwork(board, outline, 1.6, (0.0, 0.0), "#313d63", [])
+    assert (tally["fill front"], compose.FILL_REFUSED in tally) == (1, False), tally
+    _points, triangles = compose.even_odd(bow)
+    assert len(meshes[2].groups[compose.SILKSCREEN][2]) // 3 == len(triangles) + 4 * 2
+
+
+def test_which_side_of_a_line_a_point_is_on_is_exact_where_floats_are_not():
+    """**`_sign` is the exact side, not the float one** (OH-163): whether a
+    vertex lies on an edge, or two edges cross, decides where `_noded` puts
+    a vertex. Kettner et al.'s classroom example ("Classroom examples of
+    robustness problems in geometric computations", 2008): a point a few
+    units of 2^-53 from (0.5, 0.5), against the line through (12, 12) and
+    (24, 24), whose float cross product on some of that grid has the
+    opposite sign, not merely none -- counted here -- and `_sign` has the
+    right sign on all of it, held against fractions computed here."""
+    unit = 2.0 ** -53
+    opposite = 0
+    for x, y in itertools.product(range(64), repeat=2):
+        point, start, end = (0.5 + x * unit, 0.5 + y * unit), (12.0, 12.0), (24.0, 24.0)
+        px, py = Fraction(point[0]), Fraction(point[1])
+        exact = (12 - px) * (24 - py) - (12 - py) * (24 - px)
+        side = (exact > 0) - (exact < 0)
+        assert compose._sign(point, start, end) == side, (x, y)
+        opposite += compose._cross(point, start, end) * side < 0
+    assert opposite, "no point of the grid is one whose float sign is the opposite"
+
+
+def test_directions_round_a_point_are_ordered_by_angle_exactly():
+    """**`_by_angle` orders directions counter-clockwise from +x**, which is
+    how `_interleaved` finds two passes crossing round a point: each pair of
+    the directions below, every one a whole step on a grid and listed in
+    angle order, compared as their angles compare -- among them (1, 0)
+    before (-1, 0), the two halves of a horizontal edge with a vertex lying
+    on it."""
+    steps = [(1, 0), (2, 1), (1, 1), (1, 2), (0, 1), (-1, 2), (-1, 1), (-2, 1), (-1, 0),
+             (-2, -1), (-1, -1), (-1, -2), (0, -1), (1, -2), (1, -1), (2, -1)]
+    for (i, d), (j, e) in itertools.product(enumerate(steps), repeat=2):
+        assert compose._by_angle(d, e) == (i > j) - (i < j), (d, e)
 
 
 def test_a_ring_of_fewer_than_three_points_is_refused_by_its_count():
@@ -409,6 +541,64 @@ def test_a_ring_of_fewer_than_three_points_is_refused_by_its_count():
     ring = [(-1.0, -1.0), (12.0, -1.0), (12.0, 12.0), (-1.0, 12.0)]
     _meshes, tally, _undrawn = compose.artwork(board, ring, 1.6, (0.0, 0.0), "#313d63", [])
     assert tally[compose.FILL_REFUSED] == 1, tally
+
+
+def _grid_rings(seed: int) -> list[list[tuple[float, float]]]:
+    """Rings of 3 to 10 points drawn, seeded, from the whole millimetres of a
+    4 mm square: so few places that they repeat points, double back, run
+    along their own edges and cross, mid-edge and through vertices -- every
+    way a ring meets itself, which no vendor's file is relied on to show."""
+    import random
+
+    draw = random.Random(seed)
+    return [[(float(draw.randint(0, 4)), float(draw.randint(0, 4)))
+             for _ in range(draw.randint(3, 10))] for _ in range(GRID_RINGS)]
+
+
+#: How many rings each fuzz below draws: enough that some are filled and
+#: some cross through a vertex as `_TWICE` does, which the first asserts,
+#: and few enough to stay a test.
+GRID_RINGS = 600
+
+
+def test_ear_clip_fills_a_small_grid_ring_by_the_even_odd_rule_or_refuses_it():
+    """**`ear_clip` fills a ring exactly as the even-odd rule does, or it
+    refuses it** (OH-163's confirm review, which found `_TWICE` this way):
+    on seeded rings from a small grid, each probe -- a grid across the
+    square, and points in every triangle -- is under exactly one triangle
+    where an even-odd ray from it crosses the ring an odd number of times,
+    and under none where it does not. An area sum would pass a face covered
+    twice; a probe in it is under two triangles. Among the rings drawn, some
+    are filled and some refused for crossing at a point, as `_TWICE` is, or
+    the fuzz has not tested what it is for."""
+    outcomes = {"filled": 0, "crossing at a point": 0, "refused otherwise": 0}
+    for ring in _grid_rings(163):
+        try:
+            triangles = compose.ear_clip(ring)
+        except ValueError as why:
+            outcomes["crossing at a point" if re.search(r"crosses itself at \(", str(why))
+                     else "refused otherwise"] += 1
+            continue
+        outcomes["filled"] += 1
+        assert not _fills_exactly(ring, triangles, _grid(4, 4)), (
+            ring, _fills_exactly(ring, triangles, _grid(4, 4))[:3])
+    assert outcomes["filled"] and outcomes["crossing at a point"], outcomes
+
+
+def test_even_odd_fills_every_small_grid_ring_by_the_rule():
+    """**`even_odd` fills every ring, crossing or not, as the even-odd rule
+    does** (OH-163): the same seeded rings as the fuzz above, each held by
+    `_even_odd_exactly` against its own rule. None is refused: where the
+    walk `even_odd` makes, rounded to floats, defeats `ear_clip` -- a
+    crossing point rounded off the edge it lies on -- it is clipped again
+    in exact arithmetic."""
+    for ring in _grid_rings(163):
+        try:
+            points, triangles = compose.even_odd(ring)
+        except ValueError as why:
+            pytest.fail(f"{ring}: {why}")
+        wrong = _even_odd_exactly(ring, points, triangles, _grid(4, 4))
+        assert not wrong, (ring, wrong[:3])
 
 
 # --- the correspondence -----------------------------------------------------------
@@ -2891,16 +3081,18 @@ def _crosses(ring) -> bool:
 
 def test_every_filled_polygon_of_ink_is_filled_to_its_own_area():
     """**Every filled polygon on a composed board's silkscreen is filled as
-    its vendor's plot fills it, or refused because it crosses itself**
-    (OH-163). None was drawn before: Seeed's logo on the RP2350 and the C5,
+    the even-odd rule fills it, those that cross themselves too** (OH-163).
+    None was drawn before: Seeed's logo on the RP2350 and the C5,
     PCBCUPID's labels, Olimex's logo and open-hardware mark, the Thing Plus
-    C5's labels, SparkFun's EAGLE letters. Each `ear_clip` fills sums to its
-    own shoelace area, every triangle wound forward; on every one, probes in
-    each of its triangles and seeded ones across its box are each under
-    exactly one triangle where the even-odd rule puts them inside and none
-    where it does not; and each it refuses has two edges that cross, found
-    here pair by pair. The keyholes step 3 measured are counted among those
-    filled, and the placements refused, board by board."""
+    C5's labels, SparkFun's EAGLE letters -- whose crossing glyphs were then
+    refused, until `even_odd`. Each fill's triangles sum to the shoelace
+    area of the walk they fill, every triangle wound forward; on every one,
+    probes in each of its triangles and seeded ones across its box are each
+    under exactly one triangle where the even-odd rule puts them inside the
+    vendor's ring and none where it does not. A ring crossing itself is
+    found here pair by pair, not by the composer. The keyholes step 3
+    measured are counted among those filled, and the crossing placements,
+    board by board."""
     import random
 
     probe = random.Random(163)
@@ -2909,18 +3101,14 @@ def test_every_filled_polygon_of_ink_is_filled_to_its_own_area():
         counts = tally.setdefault(spec.board, {})
         for fill in compose.read_layout(spec.layout).silk_fills:
             ring = list(fill.points)
-            try:
-                triangles = compose.ear_clip(ring)
-            except ValueError:
-                assert _crosses(ring), (spec.board, ring[:4])
-                counts["crossing"] = counts.get("crossing", 0) + 1
-                continue
+            points, triangles = compose.even_odd(ring)
             xs, ys = [x for x, _y in ring], [y for _x, y in ring]
             probes = [(probe.uniform(min(xs), max(xs)), probe.uniform(min(ys), max(ys)))
                       for _ in range(10)]
-            wrong = _fills_exactly(ring, triangles, probes)
+            wrong = _even_odd_exactly(ring, points, triangles, probes)
             assert not wrong, (spec.board, len(ring), wrong[:3])
-            kind = "touching" if len(set(ring)) < len(ring) else "simple"
+            kind = ("crossing" if _crosses(ring) else
+                    "touching" if len(set(ring)) < len(ring) else "simple")
             counts[kind] = counts.get(kind, 0) + 1
     measured = {"XIAO-RP2350-DIP": 6, "XIAO-ESP32-C5-DIP": 6, "PCBCUPID Glyph Mini RP2040": 3,
                 "PCBCUPID Glyph C3": 78, "PCBCUPID Glyph C6": 78,
@@ -3052,18 +3240,20 @@ def _faces(mesh, colour) -> list[tuple[tuple[float, float], ...]]:
 
 
 def test_a_fill_is_drawn_as_ink_with_its_counter_open_and_its_pen_traced():
-    """**The artwork pass draws each fill as `ear_clip` fills it** (OH-163),
+    """**The artwork pass draws each fill as `even_odd` fills it** (OH-163),
     on its own face, cut to the board like all ink: the "O"'s ink covers its
     84 mm^2 and leaves the counter bare; a back-side square drawn with a
     0.5 mm pen is traced a quarter millimetre outside its edge, as the
     vendor's plot traces a polygon's outline, and -- every stroke here being
     the rectangle its width sweeps -- not round its corners. A fill that
-    crosses itself is counted under `FILL_REFUSED`, and one wholly beside
-    the board is counted too, neither drawn."""
+    encloses nothing, two points, is counted under `FILL_REFUSED`, and one
+    wholly beside the board is counted too, neither drawn. (One that crosses
+    itself is drawn, see `test_a_ring_that_crosses_itself_is_filled_by_the_
+    even_odd_rule`.)"""
     board = eagle.Board("inked", "test", (), (), silk_fills=(
         eagle.Fill("F.SilkS", tuple(_O), 0.0),
         eagle.Fill("B.SilkS", ((2.0, 2.0), (4.0, 2.0), (4.0, 4.0), (2.0, 4.0)), 0.5),
-        eagle.Fill("F.SilkS", ((0.0, 0.0), (4.0, 4.0), (4.0, 0.0), (0.0, 4.0)), 0.0),
+        eagle.Fill("F.SilkS", ((1.0, 1.0), (2.0, 2.0)), 0.0),
         eagle.Fill("F.SilkS", ((30.0, 30.0), (31.0, 30.0), (31.0, 31.0)), 0.0),
     ))
     ring = [(-1.0, -1.0), (12.0, -1.0), (12.0, 12.0), (-1.0, 12.0)]
@@ -3193,16 +3383,13 @@ def test_every_boards_fills_share_their_points_and_not_their_triangles():
     a SparkFun glyph in a line -- rounding at 50 mm from the origin can make
     that sum negative while `ear_clip`'s own cross product, taken at a
     corner, is positive. Such slivers on the Thing Plus ESP32-C6 were drawn
-    the other way round when the indexing alone changed."""
+    the other way round when the indexing alone changed. Every fill is held,
+    those `even_odd` uncrosses with the rest."""
     centre = (1.25, -0.5)
     compared = 0
     for spec in _fill_layouts():
         for fill in compose.read_layout(spec.layout).silk_fills:
-            points = list(fill.points)
-            try:
-                triangles = compose.ear_clip(points)
-            except ValueError:
-                continue
+            points, triangles = compose.even_odd(list(fill.points))
             rings = [[points[a], points[b], points[c]] for a, b, c in triangles]
             for upward in (True, False):
                 assert _drawn_faces(compose.flat_fills([(points, triangles)], 1.0,
@@ -3214,29 +3401,47 @@ def test_every_boards_fills_share_their_points_and_not_their_triangles():
 
 
 def test_a_fill_the_triangulator_refuses_is_counted_as_ink_not_drawn(capsys):
-    """**What `ear_clip` refuses is ink the file carries and the model
+    """**What `even_odd` refuses is ink the file carries and the model
     lacks**, so `compose` prints it on the `not ink` line under
-    `FILL_REFUSED` and not on the artwork line (OH-163): on SparkFun's Thing
-    Plus ESP32-C6, the letters whose outline crosses itself, each counted as
-    many times as it is placed. So is each pen left untraced, under
-    `PEN_DROPPED`: SparkFun draw their letters' outlines at 0.01 mm."""
+    `FILL_REFUSED` and not on the artwork line (OH-163). On SparkFun's Thing
+    Plus ESP32-C6 it refuses nothing: the letters whose outline crosses
+    itself, which `ear_clip` alone refused, are filled and drawn. So the
+    refusal is made here, `even_odd` made to refuse exactly those again:
+    each is then counted on the `not ink` line as many times as it is
+    placed, and the artwork line's fills fall by as many. So is each pen
+    left untraced, under `PEN_DROPPED`: SparkFun draw their letters'
+    outlines at 0.01 mm, the crossing letters' too."""
     spec = next(s for s in compose.COMPOSITIONS if s.board == "SparkFun Thing Plus ESP32-C6")
     if not _fetched(spec):
         pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
-    refused = hairline = 0
-    for fill in compose.read_layout(spec.layout).silk_fills:
-        try:
-            compose.ear_clip(list(fill.points))
-        except ValueError:
-            refused += 1
-            continue
-        hairline += 0 < fill.width_mm / 2 < compose.CHAIN_TOLERANCE_MM
-    lines = _accounting(spec, capsys).splitlines()
-    unread = next(line for line in lines if line.startswith("  not ink "))
-    drawn = next(line for line in lines if line.startswith("  artwork "))
-    assert refused and f"{compose.FILL_REFUSED} {refused}" in unread, (refused, unread)
+    fills = compose.read_layout(spec.layout).silk_fills
+    crossing = sum(compose._crossed_edges(list(fill.points)) is not None for fill in fills)
+    hairline = sum(0 < fill.width_mm / 2 < compose.CHAIN_TOLERANCE_MM for fill in fills)
+
+    def lines_of(printed: str) -> tuple[str, str, int]:
+        """The `not ink` line, the `artwork` line, and the fills it drew."""
+        lines = printed.splitlines()
+        drawn = next(line for line in lines if line.startswith("  artwork "))
+        return (next(line for line in lines if line.startswith("  not ink ")), drawn,
+                sum(int(count) for count in re.findall(r"fill (?:front|back) (\d+)", drawn)))
+
+    unread, drawn, filled = lines_of(_accounting(spec, capsys))
+    assert crossing and compose.FILL_REFUSED not in unread, (crossing, unread)
     assert hairline and f"{compose.PEN_DROPPED} {hairline}" in unread, (hairline, unread)
     assert compose.FILL_REFUSED not in drawn and compose.PEN_DROPPED not in drawn, drawn
+
+    even_odd = compose.even_odd
+
+    def refusing(ring):
+        if compose._crossed_edges(ring) is not None:
+            raise ValueError("refused here, as `ear_clip` alone refused it")
+        return even_odd(ring)
+
+    with mock.patch.object(compose, "even_odd", refusing):
+        unread, drawn, fewer = lines_of(_accounting(spec, capsys))
+    assert f"{compose.FILL_REFUSED} {crossing}" in unread and filled - fewer == crossing, (
+        crossing, unread, filled, fewer)
+    assert compose.FILL_REFUSED not in drawn, drawn
 
 
 def test_the_composed_fills_land_on_seeeds_plotted_regions():
