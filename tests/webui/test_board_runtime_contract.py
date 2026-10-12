@@ -192,6 +192,25 @@ def test_the_three_board_capable_cores_all_have_a_machine_module():
         contract.core_requirements(core)      # raises if the module is missing
 
 
+def test_every_board_core_names_a_fault_on_the_host_as_its_own_error():
+    """`webui/api.py`'s `BoardSession._stop` says "faulted" rather than
+    "stopped" by asking whether the core raised its `HostFault`, and the
+    session's run and step catch the core's `AbiError` (OH-225). So every core
+    a board runs on owes both. A core without a `HostFault` would turn the
+    first stop of any board on it into an AttributeError raised from inside
+    that catch, losing the core's own sentence and the request with it."""
+    import importlib
+
+    cores = sorted({contract.core_for(module) for module in contract.board_modules()})
+    assert cores, "no board modules, so no core was checked"
+    for core in cores:
+        abi = importlib.import_module(f"core.{core}.abi")
+        fault = getattr(abi, "HostFault", None)
+        assert fault is not None, f"core.{core}.abi has no HostFault; cores: {cores}"
+        assert issubclass(fault, abi.AbiError), (
+            f"core.{core}.abi.HostFault is not its AbiError: {fault.__mro__}")
+
+
 def test_a_board_that_satisfies_the_contract_raises_nothing():
     from webui.boards import rp2040
 

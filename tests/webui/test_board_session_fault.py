@@ -559,6 +559,25 @@ def test_after_a_run_faults_on_the_host_the_step_route_moves_nothing(
         assert stepped["registers"] == before["registers"], board
 
 
+def test_a_step_count_outside_the_run_budget_is_refused_by_name(live_server):
+    """The step route's `count` is a budget like the run route's `steps`: 0
+    steps nothing, and past `MAX_RUN_STEPS` one request would pin the server.
+    Each is refused 400 `budget-refused`, naming the count, and the machine
+    does not move -- not clamped to something it can run."""
+    board, path, base, core, _ = BOARDS[0]
+    library(core)
+    load_over_http(live_server, board, image_of(path), base)
+    status, before = call(live_server, "/api/board/state")
+    assert status == 200, before
+    for count in (0, api.MAX_RUN_STEPS + 1):
+        status, refused = call(live_server, "/api/board/step", {"count": count})
+        assert (status, refused.get("reason")) == (400, "budget-refused"), (
+            count, status, refused)
+        assert str(count) in refused["error"], refused
+    status, after = call(live_server, "/api/board/state")
+    assert after["pc"] == before["pc"], (before["pc"], after["pc"])
+
+
 # --- "faulted", not "stopped" ---------------------------------------------------
 #
 # Every board core, the Uno's AVR included: the word is the session's, and a
