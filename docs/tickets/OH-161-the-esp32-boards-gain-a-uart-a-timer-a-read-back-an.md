@@ -8,13 +8,11 @@ created: '2026-09-04'
 touches:
 - webui/boards/esp32c3.py
 - tests/webui/test_board_run.py
-- core/cortexm0/abi.py
 - webui/arduino/**
 - webui/compile.py
 - tests/webui/test_compile.py
 - webui/boards/esp32c5.py
 - webui/boards/esp32c6.py
-- core/riscv32/**
 - tests/riscv32/**
 - tests/webui/test_feather_esp32c6_board.py
 - tests/webui/feather_esp32c6/blink.bin
@@ -47,7 +45,6 @@ touches:
 - tests/webui/sparkfun_qwiic_pocket_esp32c6/pocket_blink.bin
 - tests/webui/sparkfun_qwiic_pocket_esp32c6/pocket_blink.ino
 - tests/webui/esp32_timing.py
-- webui/api.py
 - webui/boards/rp2350.py
 ---
 
@@ -428,3 +425,5 @@ FOUND WHILE BREAKING THESE. Nothing held that the record keeps a copy of the cal
 VERIFIED on 5ef09c6, after python tools/build_core.py: tests/riscv32, tests/rv32, tests/webui/test_compile.py, tests/webui/test_board_run.py, the ten board files, test_api, test_pin_view, test_soc_caps, tests/rules/test_inventory.py, tests/rules/test_board_claims.py and tests/webui/test_board_catalogue.py: 719 passed, 1 skipped, in 253 s. Each checker row of tools/checkall.py was run alone, and all eleven exited 0. All ten committed images rebuild byte for byte. The full suite was not run, by instruction.
 
 **Note 2026-10-12:** STEP 3 SLICE A MERGED to master by fast-forward at ae9de27 (lane2): GPIO_IN read through each part's IO_MUX pads, BoardSession.drive with its replay record, digitalRead/INPUT_PULLUP/INPUT_PULLDOWN. REVIEW: an independent review (APPROVE with comments, two MEDIUM tests asked for) and its fix round. VERIFIED on master at 47b5e36, cores rebuilt (ABI 4) and boards recomposed: full suite 2 failed (the OCP pair: test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert, test_the_tessellator_welds_what_it_meshes), 2744 passed, 41 skipped. Slice B (the page: the drive route, circuit.js's input levels, board3d.js, SUPPLY on the three descriptions, a switch part) remains, with steps 4-5. webui/api.py stays borrowed from OH-172 until step 3 lands.
+
+**Note 2026-10-13:** 2026-10-13: core/cortexm0/abi.py, core/riscv32/** and webui/api.py (the last itself on loan from OH-172) lent to OH-225 while this ticket is not being worked: OH-225 gives the Cortex-M0 and RISC-V bindings OH-223's step-entry record and HostFault, and makes BoardSession.step respect a fault and the server answer it. Return all three here when OH-225 closes; webui/api.py goes back to OH-172 when this ticket's step 3 lands.
