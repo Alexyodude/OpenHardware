@@ -1384,10 +1384,31 @@ class BoardSession:
         Raises, unlike `run`. A caller stepping one instruction at a time is
         watching for the stop and wants the traceback; a caller asking for
         twenty thousand wants the answer.
+
+        **The stop is recorded before it is raised**, as `run` records it, and
+        a session that has stopped steps no further (OH-225): after a host
+        fault the core has left the machine part-way through an instruction,
+        and a step that carried on would run the program from a state no
+        instruction produced. That refusal is the core's own `AbiError`,
+        naming what stopped it. `/api/board/step` calls `run` instead, which
+        reports a stop rather than raising it.
         """
+        if self.status != "running":
+            raise self.runtime.abi.AbiError(
+                f"{self.board} is {self.status} and steps no further until "
+                f"an image is loaded again: {self.detail}")
         for _ in range(count):
-            self.cpu.step()
+            try:
+                self.cpu.step()
+            except self.runtime.abi.AbiError as error:
+                self._stop(error)
+                raise
             self.retired += 1
+
+    def _stop(self, error: Exception) -> None:
+        """Record what stopped the core, for `step` and `run` alike."""
+        self.status = "stopped"
+        self.detail = str(error)
 
     def drive(self, levels: typing.Mapping[str, str]) -> None:
         """What the outside drives onto the pins: name -> "high", "low" or
@@ -1488,8 +1509,7 @@ class BoardSession:
             try:
                 self.cpu.step()
             except self.runtime.abi.AbiError as error:
-                self.status = "stopped"
-                self.detail = str(error)
+                self._stop(error)
                 break
             taken += 1
         self.retired += taken

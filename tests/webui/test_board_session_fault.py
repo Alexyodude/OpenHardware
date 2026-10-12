@@ -21,12 +21,23 @@ process ends; OH-223's note records why nothing is done about that here.
 
 from __future__ import annotations
 
+import base64
 import ctypes
+import json
+import pathlib
+import struct
+import threading
+import urllib.error
+import urllib.request
 
 import pytest
 
 from core.cortexm0 import abi as cortexm0
 from core.riscv32 import abi as riscv32
+from webui import api, emulator_server
+from webui.boards import esp32c3
+
+REPO = pathlib.Path(__file__).resolve().parents[2]
 
 #: The text ctypes gives an access violation, reading and writing.
 READING = "exception: access violation reading 0x0000000000000010"
@@ -326,3 +337,214 @@ def test_a_riscv32_step_after_close_is_refused_and_not_called_a_core_bug(rv):
         rv.step()
     assert type(caught.value) is riscv32.AbiError, repr(caught.value)
     assert "closed" in str(caught.value)
+
+
+# --- the board session -----------------------------------------------------------
+#
+# One board on each core, each running its own committed blink: the XIAO
+# RP2040's on the Cortex-M0+ and the XIAO ESP32-C3's on the RISC-V.
+
+#: (board, its blink, where that raw .bin loads, the core's binding, its step).
+BOARDS = (
+    ("XIAO-RP2040-DIP", REPO / "tests" / "cortexm0" / "blink" / "blink.bin",
+     0x10000100, cortexm0, "cortexm0_step"),
+    ("XIAO-ESP32-C3-DIP", REPO / "tests" / "riscv32" / "c3blink" / "blink.bin",
+     esp32c3.IROM, riscv32, "riscv32_step"),
+)
+
+#: The RP2040 board, and an image whose reset vector points into its boot ROM
+#: stub, which is mapped and not executable: the first step is a MemoryFault.
+#: `tests/webui/test_board_run.py` runs the same two words.
+M0_BOARD, M0_LOAD = BOARDS[0][0], BOARDS[0][2]
+INTO_THE_ROM = struct.pack("<II", 0x20042000, 0x00000001)
+#: And one whose reset vector lands in erased flash, where 0xFFFF is no
+#: encoding: the first step is Unimplemented.
+INTO_ERASED_FLASH = struct.pack("<II", 0x20042000, M0_LOAD + 0x700 + 1)
+
+
+def image_of(path: pathlib.Path) -> bytes:
+    if not path.is_file():
+        pytest.skip(f"{path} is missing")
+    return path.read_bytes()
+
+
+def library(core):
+    try:
+        return core.load()
+    except core.AbiError as exc:
+        pytest.skip(f"{core.__name__} unavailable: {exc}")
+
+
+def fault_on_call(core, step: str, monkeypatch, nth: int,
+                  text: str = READING) -> None:
+    """Make the core's `nth` step from now fault on the host, wherever it is."""
+    calls = []
+    fault_on(library(core), step, lambda handle: None, monkeypatch,
+             lambda at: calls.append(at) or len(calls) == nth, text)
+
+
+def name_of(step: str) -> str:
+    """`cortexm0_step` -> `cortexm0`, the word a `HostFault` begins with."""
+    return step.split("_")[0]
+
+
+def test_a_board_run_whose_core_faults_on_the_host_stops_and_answers(
+        monkeypatch):
+    """`BoardSession.run` stops on the core's `AbiError`, so a `HostFault`
+    stops a run on either core with the core's sentence as the detail, and
+    a second run does not carry on from where the core left the machine."""
+    for board, path, base, core, step in BOARDS:
+        library(core)
+        with api.load_firmware(board, image_of(path), base=base) as session:
+            fault_on_call(core, step, monkeypatch, 1000)
+            first = session.run(5000)
+            assert first.steps == 999, (board, first)
+            assert first.status != "running", (board, first)
+            assert first.detail.startswith(
+                f"{name_of(step)}: the core faulted"), first.detail
+            assert session.run(5000) == api.RunResult(
+                0, first.status, first.detail), board
+            assert session.retired == 999, (board, session.retired)
+
+
+def test_a_board_that_stopped_on_a_host_fault_steps_no_further(monkeypatch):
+    """What OH-223's review saw on the AVR: after a run stopped on a host
+    fault, a step stepped the half-executed machine on. A stop is terminal for
+    a step as it is for a run. A caller stepping one at a time is told so,
+    with what stopped it, and the machine does not move."""
+    for board, path, base, core, step in BOARDS:
+        library(core)
+        with api.load_firmware(board, image_of(path), base=base) as session:
+            fault_on_call(core, step, monkeypatch, 10)
+            first = session.run(100)
+            assert first.steps == 9, (board, first)
+            pc = session.state()["pc"]
+            with pytest.raises(core.AbiError) as caught:
+                session.step()
+            assert first.detail in str(caught.value), str(caught.value)
+            assert session.state()["pc"] == pc, board
+            assert session.retired == 9, (board, session.retired)
+            assert (session.status, session.detail) == (
+                first.status, first.detail), board
+
+
+def test_a_step_that_faults_is_recorded_before_it_is_raised(monkeypatch):
+    """`step` still raises the core's own exception, and the session says so
+    afterwards, as it does after a run: a run that follows takes nothing."""
+    for board, path, base, core, step in BOARDS:
+        library(core)
+        with api.load_firmware(board, image_of(path), base=base) as session:
+            fault_on_call(core, step, monkeypatch, 3)
+            session.step(2)
+            with pytest.raises(core.HostFault) as caught:
+                session.step()
+            assert session.status != "running", board
+            assert session.detail == str(caught.value), board
+            assert session.retired == 2, (board, session.retired)
+            assert session.run(100) == api.RunResult(
+                0, session.status, session.detail), board
+
+
+def test_a_step_the_firmware_stops_is_recorded_as_a_run_records_it():
+    """Not only a host fault: a firmware's own fault through `step` left the
+    session saying "running" as well."""
+    library(cortexm0)
+    with api.load_firmware(M0_BOARD, INTO_THE_ROM, base=M0_LOAD) as session:
+        with pytest.raises(cortexm0.MemoryFault) as caught:
+            session.step()
+        assert (session.status, session.detail) == ("stopped", str(caught.value))
+        assert session.run(10) == api.RunResult(0, "stopped", str(caught.value))
+
+
+# --- the server -------------------------------------------------------------------
+
+
+@pytest.fixture
+def live_server():
+    server = emulator_server.build_server("127.0.0.1", 0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address[:2]
+        yield f"http://{host}:{port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def call(base: str, path: str, body: dict[str, object] | None = None
+         ) -> tuple[int, dict[str, object]]:
+    """The HTTP status and the JSON body, whatever the status. A dropped
+    connection raises, which is the failure these tests exist to catch."""
+    request = urllib.request.Request(
+        base + path,
+        data=None if body is None else json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
+        method="GET" if body is None else "POST")
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read())
+
+
+def load_over_http(server: str, board: str, data: bytes, base: int) -> None:
+    status, report = call(server, "/api/board/load", {
+        "board": board, "image": base64.b64encode(data).decode(),
+        "base": hex(base)})
+    assert status == 200, (board, status, report)
+
+
+def test_a_step_route_whose_core_faults_on_the_host_answers(
+        live_server, monkeypatch):
+    """POST /api/board/step whose step faulted got no reply at all
+    (RemoteDisconnected). It answers 200 with the state, as a run that
+    faulted answers 200, and the state says the board stopped and why."""
+    for board, path, base, core, step in BOARDS:
+        library(core)
+        load_over_http(live_server, board, image_of(path), base)
+        fault_on_call(core, step, monkeypatch, 3)
+        status, stepped = call(live_server, "/api/board/step", {"count": 2})
+        assert (status, stepped["status"]) == (200, "running"), (board, stepped)
+        status, faulted = call(live_server, "/api/board/step", {})
+        assert status == 200, (board, status, faulted)
+        assert faulted["status"] != "running", (board, faulted["status"])
+        assert faulted["detail"].startswith(
+            f"{name_of(step)}: the core faulted"), faulted["detail"]
+
+
+def test_a_step_route_the_firmware_stops_answers(live_server):
+    """`Unimplemented` and `MemoryFault` reached that route the same way and
+    were dropped the same way. Each answers as a run does: stopped, with the
+    core's sentence naming the address."""
+    library(cortexm0)
+    for image, expected in ((INTO_THE_ROM, "not executable"),
+                            (INTO_ERASED_FLASH, "no implementation")):
+        load_over_http(live_server, M0_BOARD, image, M0_LOAD)
+        status, stepped = call(live_server, "/api/board/step", {})
+        assert status == 200, (expected, status, stepped)
+        assert stepped["status"] == "stopped", (expected, stepped["status"])
+        assert expected in stepped["detail"], stepped["detail"]
+        assert "0x" in stepped["detail"], stepped["detail"]
+
+
+def test_after_a_run_faults_on_the_host_the_step_route_moves_nothing(
+        live_server, monkeypatch):
+    """Probed by OH-223 on the AVR: after a run stopped on a host fault, POST
+    /api/board/step answered 200 and stepped the half-executed machine on
+    (its pc moved to 22). It answers with the same stop, and nothing moves."""
+    for board, path, base, core, step in BOARDS:
+        library(core)
+        load_over_http(live_server, board, image_of(path), base)
+        fault_on_call(core, step, monkeypatch, 1000)
+        status, run = call(live_server, "/api/board/run", {"steps": 5000})
+        assert (status, run["steps"]) == (200, 999), (board, status, run)
+        status, before = call(live_server, "/api/board/state")
+        assert status == 200, (board, before)
+        status, stepped = call(live_server, "/api/board/step", {})
+        assert status == 200, (board, status, stepped)
+        assert (stepped["status"], stepped["detail"]) == (
+            run["status"], run["detail"]), board
+        assert stepped["pc"] == before["pc"], board
+        assert stepped["registers"] == before["registers"], board

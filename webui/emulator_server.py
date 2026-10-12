@@ -79,6 +79,10 @@ that returns and posts a name back.
               uart: {present, bytes, dropped_bytes, text, undecodable_bytes},
               listing: {present, at, lines[]}}
 
+    POST /api/board/step?words=...   {"count": 1}
+      -> 200 the state, as /api/board/state answers it; a step that stops
+             the board answers here too, with status and detail saying why
+
 **Registers are named and carry their width, and that is not decoration.**
 This used to be sixteen positional words plus an `apsr` integer, which is the
 Armv6-M register file and nothing else: an ATmega328P has thirty-two eight-bit
@@ -605,7 +609,16 @@ def handle_board_api(boards: BoardSlot, route: str,
         # 8086 could be single-stepped from the page and a board could not.
         # The stepped state comes back in the same reply so the page redraws
         # in one round-trip, and `words=` rides it exactly as on /state.
-        boards.require().step(_int(payload, "count", 1))
+        #
+        # **Through `run`, not `step`** (OH-225). `step` raises the core's
+        # error, which nothing here maps, so a step that stopped got no reply
+        # at all; and `step` did not check status, so after a host fault it
+        # stepped the half-executed machine on. `run` reports a stop rather
+        # than raising it and refuses a stopped board, so a step that stops
+        # answers 200 as a run that stops does, the state saying why in
+        # `status` and `detail`. `count` is a budget like `steps`, refused
+        # outside 1..MAX_RUN_STEPS as `budget-refused`.
+        boards.require().run(_int(payload, "count", 1))
         return _board_state(boards, query)
 
     raise ApiError(f"no such route: {route}")
