@@ -167,6 +167,6 @@ def test_a_board_run_whose_core_faults_on_the_host_stops_and_answers(
         fault_on(abi.load(), monkeypatch,
                  lambda at: calls.append(at) or len(calls) == 1000, READING)
         first = session.run(5000)
-        assert (first.steps, first.status) == (999, "stopped")
+        assert (first.steps, first.status) == (999, "faulted")
         assert first.detail.startswith("avr: the core faulted"), first.detail
-        assert session.run(5000) == api.RunResult(0, "stopped", first.detail)
+        assert session.run(5000) == api.RunResult(0, "faulted", first.detail)
