@@ -247,8 +247,9 @@ def collect_boards(boards_dir: pathlib.Path = BOARDS_DIR) -> list[Board]:
     A pad whose `pin` is null has no PICSimLab pin behind it — every XIAO file
     says so in its own `assumption` field, and gives the reason: a guessed pin
     number would wire the circuit wrongly and report success. Since OH-160 the
-    same files also carry a `chip_pin`, the MCU pin the board's own module
-    reads a level through; that is the 3D view's join and a different count,
+    same files also carry a `chip_pin`, the MCU pin a pad reaches as the
+    vendor names it. It is a caption and not a claim that a level is read
+    (OH-172): the pin view's `modelled` answers that. It is a different count,
     printed by `python tools/import_pindefs.py --all --summary`, not this one.
 
     So the count that matters is not how many boards exist. Reporting "26
