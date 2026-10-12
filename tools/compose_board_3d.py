@@ -3361,8 +3361,13 @@ def _near(a: tuple[float, float], b: tuple[float, float]) -> bool:
 
 
 def _area(ring: list[tuple[float, float]]) -> float:
-    """Twice the signed area. Positive when the ring runs counter-clockwise."""
-    total = 0.0
+    """Twice the signed area. Positive when the ring runs counter-clockwise.
+
+    Exact for a ring of fractions, as `even_odd` clips one: the sum starts
+    at the integer 0, which a fraction adds to exactly, where 0.0 made it a
+    float and its sign a rounding's (OH-163's review fix round). A float
+    ring's sum is the same either way."""
+    total = 0
     for index, (x, y) in enumerate(ring):
         nx, ny = ring[(index + 1) % len(ring)]
         total += x * ny - nx * y
@@ -3410,10 +3415,12 @@ def ear_clip(ring: list[tuple[float, float]]) -> list[tuple[int, int, int]]:
     that crosses itself can wind round a face twice, which no area sum can
     see. A ring that crosses nowhere winds round each point once or not at
     all. A last triangle wound backwards is refused and named, as is a ring
-    of fewer than three points (OH-163's review). Last, the triangles are
-    held to the ring: every one wound forward, their areas summing to the
-    ring's own. By then that holds by construction, so it is a guard
-    against an edit here, and it says what it found.
+    of fewer than three points (OH-163's review); in a ring that crosses
+    nowhere, what makes one -- or leaves no ear -- is a corner too thin for
+    floats, and `even_odd` clips such a ring again exactly. Last, the
+    triangles are held to the ring: every one wound forward, their areas
+    summing to the ring's own. By then that holds by construction, so it is
+    a guard against an edit here, and it says what it found.
     """
     if len(ring) < 3:
         raise ValueError(f"a ring of {len(ring)} point(s) encloses nothing: {ring}")
@@ -3448,16 +3455,18 @@ def ear_clip(ring: list[tuple[float, float]]) -> list[tuple[int, int, int]]:
         if at is None:
             raise ValueError(
                 f"no ear found in a {len(order)}-vertex remainder of a "
-                f"{len(ring)}-vertex ring, from {ring[order[0]]}; it is not a "
-                f"weakly simple polygon")
+                f"{len(ring)}-vertex ring, from {ring[order[0]]}, which crosses "
+                f"nowhere: a corner too thin for the arithmetic, or one the "
+                f"touched-ear test cannot clip")
         order.pop(at)
     last = _cross(*(ring[index] for index in order))
     if last < 0:
         raise ValueError(
             f"the last triangle of a {len(ring)}-vertex ring, "
             f"{'-'.join(str(ring[index]) for index in order)}, is wound backwards "
-            f"({last / 2:.3g} mm^2): the ring crosses itself through a vertex, so it "
-            f"is not a weakly simple polygon")
+            f"({last / 2:.3g} mm^2), though the ring crosses nowhere: an ear "
+            f"taken before it was not the ring's, a corner too thin for the "
+            f"arithmetic misjudged")
     if last != 0:
         triangles.append((order[0], order[1], order[2]))
     areas = [_cross(ring[a], ring[b], ring[c]) / 2 for a, b, c in triangles]
@@ -3591,22 +3600,37 @@ def even_odd(ring: list[tuple[float, float]]
     refused, and SparkFun's Thing Plus ESP32-C6 read "Thin Plus ESP32-C" in
     the page, its g and its 6 among them.
 
-    **The walk's crossing points are rationals no float holds.** Rounded,
-    one can fall off the edge it lies on, which defeats `_is_touched_ear`'s
-    test for a vertex on a triangle's side, and `ear_clip`'s own checks
-    then refuse the rounded walk. So it is clipped again in exact
-    arithmetic, slower, which those checks hold the same way; the points
-    returned are rounded either way. What that refuses still raises.
+    **Where floats are too coarse, it is clipped again exactly.** The
+    walk's crossing points are rationals no float holds: rounded, one can
+    fall off the edge it lies on, which defeats `_is_touched_ear`'s test for
+    a vertex on a triangle's side. And a ring that crosses nowhere can have
+    a corner so thin that floats take its winding the wrong way round --
+    three points 0.0025 mm apart near (100, 37) have a float shoelace sum of
+    the other sign from their own (OH-163's review). Either way `ear_clip`'s
+    own checks refuse it, and it is clipped again in exact arithmetic,
+    slower, which those checks hold the same way. What that refuses still
+    raises, and the caller counts it.
+
+    The points returned are floats either way, and a triangle rounding
+    leaves flat or wound backwards is dropped: it is a sliver under the
+    rounding, which drawn would be wound forward by `flat_fills` and cover
+    the sliver it should not.
     """
     try:
         return ring, ear_clip(ring)
     except SelfCrossing:
         walk = _uncrossed(ring)
-    rounded = [(float(x), float(y)) for x, y in walk]
-    try:
-        return rounded, ear_clip(rounded)
     except ValueError:
-        return rounded, ear_clip([(Fraction(x), Fraction(y)) for x, y in walk])
+        walk = ring
+    rounded = [(float(x), float(y)) for x, y in walk]
+    if walk is not ring:
+        try:
+            return rounded, ear_clip(rounded)
+        except ValueError:
+            pass  # Too coarse, as above: clipped exactly below.
+    exact = ear_clip([(Fraction(x), Fraction(y)) for x, y in walk])
+    return rounded, [(a, b, c) for a, b, c in exact
+                     if _cross(rounded[a], rounded[b], rounded[c]) > 0]
 
 
 def _uncrossed(ring: list[tuple[float, float]]) -> list[tuple[float | Fraction, float | Fraction]]:
@@ -3656,6 +3680,17 @@ def _crossing_point(ring: list[tuple[float, float]]) -> tuple[float, float] | No
     there can lie, laid edge by edge through the points that share them, and
     the ring crosses where no way will do. It is named, in floats, by a
     point at which the last way tried crossed.
+
+    **The search is kept small, and bounded** (OH-163's review). Edges are
+    laid in the order the walk first takes them, only in `_alternating`
+    orders, and each pair of passes is asked as soon as the edges under its
+    four ends are laid, not when all of its point's are: a wrong lay is
+    then found where it is made, and a star of spikes or a long stretch
+    walked out and back is decided in a lay or two an edge, where asking
+    each point only once every edge at it was laid tried exponentially many.
+    The search keeps its own stack, so a stretch of any length is no
+    recursion; and past `STRAND_LAYS` lays an edge it raises a ValueError
+    naming the ring, which `artwork` counts refused.
     """
     if len(ring) < 3:
         return None
@@ -3675,26 +3710,6 @@ def _crossing_point(ring: list[tuple[float, float]]) -> tuple[float, float] | No
         edge = _edge_of(walk, step)
         return lay[edge].index(step) if edge in lay else 0
 
-    def crossing(points: list, edges: list, laid: int):
-        """A point of `points` that crosses with `edges[:laid]` laid as
-        `lay` lays them -- checked once its last edge is laid -- or, if
-        none does, a crossing point of every way `edges[laid:]` can lie;
-        None where one way crosses nowhere."""
-        for point in points:
-            if (loose[point] <= set(edges[:laid])
-                    and (edges[laid - 1] in loose[point] if laid else not loose[point])
-                    and _interleaved(walk, point, visits[point], rank) is not None):
-                return point
-        if laid == len(edges):
-            return None
-        found = None
-        for order in itertools.permutations(strands[edges[laid]]):
-            lay[edges[laid]] = order
-            found = crossing(points, edges, laid + 1)
-            if found is None:
-                return None
-        return found
-
     unseen = set(visits)
     while unseen:
         seed = min(unseen)
@@ -3710,39 +3725,130 @@ def _crossing_point(ring: list[tuple[float, float]]) -> tuple[float, float] | No
                         unseen.discard(end)
                         points.append(end)
                         todo.append(end)
-        found = crossing(points, edges, 0)
+        edges.sort(key=lambda edge: strands[edge][0])
+        laid_at = {edge: depth for depth, edge in enumerate(edges)}
+        # Each pair of passes, filed under how many edges must be laid
+        # before its four ends are all placed round its point.
+        asked: list[list] = [[] for _ in range(len(edges) + 1)]
+        for point in points:
+            ends, slot = _round(walk, point, visits[point])
+            for one, other in itertools.combinations(ends, 2):
+                needs = [laid_at[edge] + 1 for edge in
+                         {_edge_of(walk, step) for step, _end in (*one, *other)} if edge in laid_at]
+                asked[max(needs, default=0)].append((point, one, other, slot))
+        found = next((point for point, one, other, slot in asked[0]
+                      if _crossed(point, one, other, slot, rank)), None)
+        # An edge whose strands cannot lie any way -- walked twice the same
+        # way round -- crosses along itself; named by its lesser end.
+        found = found or next((edge[0] for edge in edges
+                               if next(_alternating(walk, strands[edge]), None) is None), None)
         if found is not None:
             return (float(found[0]), float(found[1]))
+        ways = [_alternating(walk, strands[edges[0]])] if edges else []
+        tried = 0
+        while ways:
+            order = next(ways[-1], None)
+            if order is None:
+                ways.pop()
+                continue
+            tried += 1
+            if tried > STRAND_LAYS * len(edges):
+                raise ValueError(
+                    f"a {len(ring)}-vertex ring walks {len(edges)} edges more than "
+                    f"once through one group of points, and {STRAND_LAYS} ways an "
+                    f"edge of laying their strands decide nothing: {ring[:4]}...")
+            depth = len(ways) - 1
+            lay[edges[depth]] = order
+            crossed = next((point for point, one, other, slot in asked[depth + 1]
+                            if _crossed(point, one, other, slot, rank)), None)
+            if crossed is not None:
+                found = crossed
+            elif depth + 1 == len(edges):
+                break
+            else:
+                ways.append(_alternating(walk, strands[edges[depth + 1]]))
+        else:
+            # No way of laying them crosses nowhere, `found` the last crossing.
+            if found is not None:
+                return (float(found[0]), float(found[1]))
     return None
+
+
+#: How many ways of laying the strands of a ring's twice-walked edges
+#: `_crossing_point` tries in one group, for each edge in it, before it
+#: refuses the ring. Laid in the walk's order, asked pair by pair and only
+#: in `_alternating` orders, every fetched fill is decided within three an
+#: edge, the walks `_uncrossed` makes of them too, which
+#: `test_every_filled_polygon_of_ink_is_filled_to_its_own_area` holds; the
+#: rest is room for rings no vendor draws, edges walked four and five times
+#: over. Past it the search may be exponential, and an outline or a fill is
+#: not worth seconds (OH-163's review).
+STRAND_LAYS = 128
+
+
+def _alternating(walk: list, steps: list[int]):
+    """Each way the strands of one edge -- the `steps` that walk it -- can
+    lie side by side and cross nowhere, as their steps, rightmost first
+    looking from the edge's lesser end.
+
+    Side by side they run alternately one way and the other, or none does:
+    two neighbours walked the same way round would have the ring wind round
+    the strip between them once more than round either side, which a ring
+    crossing nowhere never does. So an edge walked twice the same way, or
+    three times one way and once the other, has no way at all.
+    """
+    n = len(walk)
+    forth = [step for step in steps if walk[step] < walk[(step + 1) % n]]
+    back = [step for step in steps if not walk[step] < walk[(step + 1) % n]]
+    if abs(len(forth) - len(back)) > 1:
+        return
+    for first, second in ((forth, back), (back, forth)):
+        if len(first) < len(second):
+            continue
+        for odd in itertools.permutations(first):
+            for even in itertools.permutations(second):
+                yield tuple(step for pair in itertools.zip_longest(odd, even)
+                            for step in pair if step is not None)
 
 
 def _interleaved(walk: list, point: tuple, visits: list[int], rank) -> tuple[int, int] | None:
     """Two of `visits`, positions in `walk` at `point`, whose passes cross
-    there -- the earlier first -- or None.
+    there -- the earlier first -- or None; see `_crossed`."""
+    ends, slot = _round(walk, point, visits)
+    for (i, one), (j, other) in itertools.combinations(enumerate(ends), 2):
+        if _crossed(point, one, other, slot, rank):
+            return visits[i], visits[j]
+    return None
 
-    Each visit passes through `point` along two edges, in and out, and two
-    passes cross where their ends interleave round it. Ends along different
-    edges are ordered by angle, exactly. Ends along one edge walked more
-    than once are its strands, and `rank` of the step that walked each lays
-    them side by side, the higher to the left looking from the edge's lesser
-    end: so from that end they run in order, and from the other reversed.
-    """
+
+def _round(walk: list, point: tuple, visits: list[int]) -> tuple[list, dict]:
+    """Each of `visits` -- positions in `walk` at `point` -- as its two ends
+    there, in and out, each `(step, far end)`; and each far end's place
+    counter-clockwise round `point`, found exactly."""
     n = len(walk)
     ends = [(((at - 1) % n, walk[at - 1]), (at, walk[(at + 1) % n])) for at in visits]
     far = {end for one in ends for _step, end in one}
     toward = {end: (Fraction(end[0]) - Fraction(point[0]), Fraction(end[1]) - Fraction(point[1]))
               for end in far}
     turn = sorted(far, key=functools.cmp_to_key(lambda p, q: _by_angle(toward[p], toward[q])))
+    return ends, {end: place for place, end in enumerate(turn)}
 
-    def place(step: int, end: tuple) -> tuple[int, int]:
-        return turn.index(end), (rank(step) if point < end else -rank(step))
 
-    order = sorted(place(*end) for one in ends for end in one)
-    spans = [sorted(order.index(place(*end)) for end in one) for one in ends]
-    for (i, (a1, a2)), (j, (b1, b2)) in itertools.combinations(enumerate(spans), 2):
-        if a1 < b1 < a2 < b2 or b1 < a1 < b2 < a2:
-            return visits[i], visits[j]
-    return None
+def _crossed(point: tuple, one: tuple, other: tuple, slot: dict, rank) -> bool:
+    """Whether two passes through `point` cross there: their ends, as
+    `_round` gives them, interleave round it.
+
+    Ends along different edges are ordered by `slot`, their angle. Ends
+    along one edge walked more than once are its strands, and `rank` of the
+    step that walked each lays them side by side, the higher to the left
+    looking from the edge's lesser end: so from that end they run in order,
+    and from the other reversed.
+    """
+    a1, a2, b1, b2 = ((slot[end], rank(step) if point < end else -rank(step))
+                      for step, end in (*one, *other))
+    a1, a2 = sorted((a1, a2))
+    b1, b2 = sorted((b1, b2))
+    return a1 < b1 < a2 < b2 or b1 < a1 < b2 < a2
 
 
 def _by_angle(d: tuple, e: tuple) -> int:
@@ -3830,23 +3936,37 @@ def _meeting(a, b, c, d) -> tuple[Fraction, Fraction]:
 #: How far a float `_cross` can be from the exact one, as a share of the sum
 #: of its two products' sizes: (3 + 16e)e for e = 2^-53, Shewchuk's
 #: `ccwerrboundA` ("Adaptive Precision Floating-Point Arithmetic and Fast
-#: Robust Geometric Predicates", 1997). Past it, the float's sign is right.
+#: Robust Geometric Predicates", 1997). Past it, the float's sign is right
+#: -- so long as nothing underflowed, which that bound does not count.
 CROSS_ROUNDING = (3.0 + 16.0 * 2.0 ** -53) * 2.0 ** -53
+
+#: The least size of a float product `_sign` trusts to `CROSS_ROUNDING`:
+#: twice the smallest normal double, so a product this size or more did
+#: not underflow, and its rounding is relative as the bound counts it.
+CROSS_UNDERFLOW = 2.0 ** -1021
 
 
 def _sign(o, a, b) -> int:
     """The sign of `_cross(o, a, b)`, exactly: from the floats where they
     are clear of `CROSS_ROUNDING`, which is nearly always, and otherwise in
-    fractions, which every float is exactly."""
+    fractions, which every float is exactly.
+
+    A product with a factor of zero -- two points level or plumb -- is zero
+    exactly, with no rounding to weigh; one that is merely small may have
+    underflowed, and is weighed in fractions (OH-163's review: a bound of
+    zero was taken for a zero, and products of 1e-330 both underflow to it)."""
     if o == a or a == b or b == o:
+        return 0
+    level_left = a[0] == o[0] or b[1] == o[1]
+    level_right = a[1] == o[1] or b[0] == o[0]
+    if level_left and level_right:
         return 0
     if type(o[0]) is type(o[1]) is type(a[0]) is type(a[1]) is type(b[0]) is type(b[1]) is float:
         left = (a[0] - o[0]) * (b[1] - o[1])
         right = (a[1] - o[1]) * (b[0] - o[0])
-        bound = CROSS_ROUNDING * (abs(left) + abs(right))
-        if bound == 0:
-            return 0
-        if abs(left - right) > bound:
+        if ((level_left or abs(left) >= CROSS_UNDERFLOW)
+                and (level_right or abs(right) >= CROSS_UNDERFLOW)
+                and abs(left - right) > CROSS_ROUNDING * (abs(left) + abs(right))):
             return 1 if left > right else -1
     ox, oy, ax, ay, bx, by = map(Fraction, (*o, *a, *b))
     exact = (ax - ox) * (by - oy) - (ay - oy) * (bx - ox)
@@ -3861,6 +3981,16 @@ def slab(ring: list[tuple[float, float]], thickness: float, colour: str,
     (x, height, -y) -- the same negation `board3d.js` applies to a pad, and for
     the same reason: EAGLE's y grows upward and the scene's z grows toward the
     camera, so getting it wrong mirrors the board end for end.
+
+    **The outline is `ear_clip`'s, not `even_odd`'s, on purpose** (OH-163's
+    review). An outline that crosses itself is no board a fab could mill,
+    so it is refused by name -- a `SelfCrossing`, or the ValueError
+    `_crossing_point` raises past `STRAND_LAYS` -- and the board's
+    composition ends there, rather than a board being drawn by a rule its
+    file does not state. One crossing mid-edge was refused so before; since
+    `_crossing_point`, one crossing at a point is too, even a spike of no
+    area, which was drawn. No fetched board's outline does either, and
+    every one is composed by the tests.
     """
     positions: list[float] = []
     normals: list[float] = []
