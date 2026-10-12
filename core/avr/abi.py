@@ -62,6 +62,23 @@ class MemoryFault(AbiError):
     """An access outside the sized space."""
 
 
+class HostFault(AbiError):
+    """The core's own code faulted on the host while executing an instruction.
+
+    A divide error or an access violation in the C++, which is a bug in the
+    core and never in the firmware. On Windows ctypes catches the structured
+    exception around the foreign call and raises `OSError`; `Cpu.step` raises
+    this from it, so a run loop that stops on `AbiError` -- `webui/api.py`'s
+    does -- stops here too instead of losing the request. The machine is left
+    part-way through an instruction, PC included, and should be loaded again
+    rather than stepped (OH-223).
+
+    **Windows only.** On Linux the same fault is a signal, SIGFPE or SIGSEGV,
+    that ctypes does not catch, and the process ends before this can be
+    raised. OH-223's note records why nothing is done about that here.
+    """
+
+
 _SIGNATURES = {
     "avr_abi_version": ([], ctypes.c_int),
     "avr_new": ([], ctypes.c_void_p),
@@ -381,8 +398,14 @@ class Cpu:
         message can name the word that stopped it -- and on a variable-length
         encoding that matters more than on Arm, because resuming from the wrong
         offset runs a program nobody wrote.
+
+        A host fault in the core raises `HostFault`, chained from the
+        `OSError` ctypes raised.
         """
-        result = self._lib.avr_step(self._handle)
+        try:
+            result = self._lib.avr_step(self._handle)
+        except OSError as fault:
+            raise HostFault(self._host_fault(fault)) from fault
         if result == OK:
             return
         if result == UNIMPLEMENTED:
@@ -394,6 +417,48 @@ class Cpu:
         address = int(self._lib.avr_fault_address(self._handle))
         program = bool(self._lib.avr_fault_was_program(self._handle))
         raise MemoryFault(self._fault_message(address, program))
+
+    def _host_fault(self, fault: OSError) -> str:
+        """What `HostFault` says: where the core left the PC, and the program
+        words up to it.
+
+        **Where it was left, not where the instruction began.** The i8086
+        binding reads its registers before every step so it can name the
+        instruction. Here that read would cost: `avr_pc` takes about as long
+        as `avr_step` does, a board run is a loop of nothing but steps, and
+        reading it each time nearly halves the instructions a board runs per
+        second (OH-223's note has the measurement) -- for a message about a
+        fault that should never happen. The core advances the PC before
+        executing, so unless the instruction had already branched it begins at
+        the PC or up to two words before, and those words are shown.
+
+        Reading them back calls into the core again, and a fault that wrecked
+        more than one instruction could fault that too; that is said, rather
+        than let a second `OSError` replace the one being described.
+        """
+        try:
+            pc = self.pc
+            size = self.program_words
+            first = max(0, pc - 2)
+            words = [self.read_program(at) for at in range(first, min(pc + 1, size))]
+        except OSError as unreadable:
+            where = f"; reading the machine back faulted as well ({unreadable})"
+        else:
+            held = (" ".join(f"0x{word:04x}" for word in words)
+                    or f"nothing, being past its {size} words")
+            where = (
+                f" with its PC at word 0x{pc:04x} (byte 0x{pc * 2:04x}). It "
+                f"moves the PC past an instruction before executing it, so "
+                f"unless that instruction had branched it begins there or up "
+                f"to two words before; program memory from word "
+                f"0x{first:04x} holds {held}"
+            )
+        return (
+            f"avr: the core faulted on the host ({fault}){where}. That is a "
+            f"bug in core/avr, not in the firmware, and the machine stopped "
+            f"part-way through an instruction: load the image again before "
+            f"running it."
+        )
 
     def _fault_message(self, address: int, program: bool) -> str:
         space = "program" if program else "data"
