@@ -507,4 +507,106 @@ VERIFIED after python tools/build_core.py: test_circuit, test_bench_drive, test_
 
 **Note 2026-10-13:** REBASED ONTO MASTER after OH-219 merged (no conflicts), and the one item left from slice B's review fixed: webui/boards/rp2350.py's EXTENSIONS and ISA comments, now true against master. abi.RP2350_MODELLED no longer exists, so ISA's string is said to be quoted by docs/architectures.md 5.4 and abi.RP2350's comment; install gives Xh3bextm besides every group of ISA with a bit, which ISA does not name; test_zbb_zbkb.py holds RV32IMAC_ZBA_ZBB_ZBS_ZBKB_ZCB_ZCMP_XH3BEXTM equal to abi.RP2350; and the history says OH-219 removed the narrower constant and that h3.bextm was refused until it. Comments only. VERIFIED after python tools/build_core.py on the rebased tree: test_xiao_rp2350_board, test_circuit, test_bench_drive, test_board_run, test_board3d, test_pin_view, test_compile and the ten ESP32 board files, 435 passed, 2 skipped (no pico-sdk rp2350 headers in lane2; every_upstream_variants, OH_SLOW). Each checker row of tools/checkall.py run alone: all eleven exit 0. Still in-progress: the switch part (blocked on OH-163's tools/import_3d_model.py) and steps 4-5.
 
+**Note 2026-10-13:** STEP 4 DESIGN, BEFORE ANY CODE, AND STOPPED THERE: the ADC needs a sixth behaviour in core/riscv32, and core/riscv32/** and tests/riscv32/** are on loan to OH-219 (in-review). Nothing below is built. Step 4 waits for the core; step 5 and the switch part remain.
+
+WHY NOT A REGISTER AND A SETTER. Slice A's map_input is itself a core behaviour (9df5232, ABI 4): GPIO_IN's word is computed at the read, from OUT, ENABLE, the pad and the drive. The ADC has the same need in a sharper form. On all three parts ONE result register, SAR1's data at APB_SARADC + 0x2c, answers whichever channel and attenuation the last start named in ONETIME_SAMPLE (+0x20), and firmware writes the channel, starts, polls and reads within a few instructions of one run chunk. A map_register at the result, set by the description between chunks, would answer the channel the sketch asked for with the voltage of the channel the description guessed: a sketch reading A0 and A1 by turns would read every value wrong, and plausibly. The word has to be chosen at the write that starts the conversion, which only the core sees. None of the five behaviours does that (register, alias, stream, snapshot counter, input; cpu.h:240-376), and the core has no host callback. Converting in BoardSession.run's per-instruction loop was considered and refused: the board tests step the Cpu directly (tests/riscv32/test_esp32c3_board.py, test_mmio.py) and would never see a conversion, and the model would live in api.py instead of the description.
+
+WHAT ARDUINO'S analogRead TOUCHES, arduino-esp32 @ 2787dab read through gh api. __analogRead (cores/esp32/esp32-hal-adc.c:295-318) attaches the pin once through __analogInit (:244-276: adc_oneshot_new_unit, then adc_oneshot_config_channel at __analogAttenuation = ADC_11db and __analogWidth = SOC_ADC_RTC_MAX_BITWIDTH, :62-63; 12 on all three, v5.5 soc_caps.h :111, :134, :122) and returns adc_oneshot_read's raw value through mapResolution (:214), which leaves it alone at the default width. ESP-IDF v5.5 (8c750b0): config_channel puts the pad in analog mode through gpio_config_as_analog (components/esp_adc/adc_oneshot.c:310-314; components/esp_driver_gpio/src/gpio.c:436-454: input off, output off, both pulls off). adc_oneshot_read (adc_oneshot.c:202-230) runs adc_oneshot_hal_setup (components/hal/adc_oneshot_hal.c:48-94: clock select and dividers, then attenuation and channel into ONETIME_SAMPLE) and adc_oneshot_hal_convert (:136-168): clear the done event, clear both unit-select bits, set unit 1's, write ONETIME_START 0 and then 1 (:116-118), spin on the done bit in INT_RAW, read the result & 0xfff, and clear the unit bits again with START still 1 (:166). Per chip, components/hal/<chip>/include/hal/adc_ll.h: set_channel writes (unit << 3) | channel into ONETIME_CHANNEL (C3 :839-842, C5 :650-654, C6 :782-786); set_atten writes ONETIME_ATTEN (:983-989, :779-785, :910-916); clear_event ORs the mask into INT_CLR (:877-880, :686-689, :818-821); get_event reads INT_RAW (:891-894, :700-703, :832-835); the result is SAR1's data & 0xfff (:903-912, :712-718, :844-850). The rest of the path is calibration and power this model does not have: the hardware offset code from eFuse (adc_oneshot.c:218-220), the SAR's power (sar_periph_ctrl), and the arbiter.
+
+THE REGISTERS THE openhardware analogRead WILL TOUCH: the TRM's own one-time procedure (C3 v1.4 34.2.3.3, p.871; C5 v1.1 46.8.1, p.1716; C6 v1.2 39.2.3.3, pp.1355-1356) and nothing more. All three parts have ONETIME_SAMPLE, so the simplest real path exists on each.
+  Base: 0x60040000 on the C3 (framework soc.h:67), 0x6000E000 on the C5 and C6 (v5.5 reg_base.h:27 in each).
+  ONETIME_SAMPLE + 0x20: SAR1_ONETIME_SAMPLE bit 31, SAR2 bit 30, ONETIME_START bit 29, ONETIME_CHANNEL [28:25] default 13, ONETIME_ATTEN [24:23] default 0 (C3 framework apb_saradc_reg.h:176-206; C5 and C6 v5.5 :225-260). Reset word 13 << 25.
+  SAR1 data + 0x2c, [16:0], read-only (C3 :278-284; C5 and C6 :352-353).
+  INT_RAW + 0x44, ADC1 done bit 31 (C3 :391-397; C5 and C6 :508, :551). INT_CLR + 0x4c, bit 31, write-only (C3 :467-473; C5 and C6 :616, :659): mapped as a clear alias onto INT_RAW, a behaviour that already exists.
+  THE GATE, ANOTHER TRAP BETWEEN NEIGHBOURS. The C3 gates ADC_CTRL_CLK with APB_SARADC_CTRL's SAR_CLK_GATED, bit 6, default 1 (framework apb_saradc_reg.h:53), which ESP-IDF sets in adc_ll_digi_clk_sel (C3 adc_ll.h:313-318). Its APB_SARADC_CLK_EN (+ 0x54 bit 20, "Enable the SAR ADC register clock", reset 0, TRM Register 34.19, p.888) is written nowhere on ESP-IDF's oneshot path, so silicon converts with it clear, and the model must not gate on it. The C5 and C6 gate the function clock in PCR: PCR_SARADC_CLKM_CONF's CLKM_EN, bit 22, at PCR + 0x8c and default 0 on the C5 (v5.5 pcr_reg.h:1020, :1052), at PCR + 0x84 and default 1 on the C6 (:822, :852), PCR at 0x60096000 (reg_base.h:67 and :53). The C5's TRM sets it in step 4 of its procedure. So out of reset the ADC is clocked on the C3 and the C6 and not on the C5, and a C5 description copied from the C6 would convert with its clock off. The C5's register clock, PCR_SARADC_CONF's REG_CLK_EN (+ 0x88 bit 2, default 0, :987 and :1002; + 0x80, default 1 on the C6, :789 and :804), is mapped at its reset value and set by analogRead, and is not a gate the model checks: least-confident (5).
+  Channels, ADC1 only: GPIO0-4 are channels 0-4 on the C3 (TRM Table 34.2-1, p.870; v5.5 adc_channel.h:10-22), GPIO1-6 are 0-5 on the C5 (Table 46.5-1, p.1709; :10-25), GPIO0-6 are 0-6 on the C6 (Table 39.2-1, p.1355; :10-28). The C3's GPIO5 is ADC2's channel 0, which ESP-IDF v5.5 refuses on the C3 unless CONFIG_ADC_ONESHOT_FORCE_USE_ADC2_ON_C3 is set (adc_oneshot.c:86-92; soc_caps.h:90), so arduino-esp32's analogRead(A3) on a XIAO ESP32-C3 logs the failure and returns 0, and the model holds no ADC2 key. A XIAO's A0 is its D0 pad on all three: GPIO2 (channel 2) on the C3, GPIO1 (channel 0) on the C5, GPIO0 (channel 0) on the C6 (variants/XIAO_ESP32C{3,5,6}/pins_arduino.h @ 2787dab; each description's HEADER).
+
+THE VALUES. Each TRM states the conversion in the same words: "the resolution (12-bit) of the conversion spans voltage range from 0 mV to Vref. Vref is the SAR ADC's internal reference voltage (1100 mV by design)", with Vdata = Vref / k * data / 4095 and k 100%, 75%, 50% and 25% at 0, 2.5, 6 and 12 dB (C3 34.2.3.2, p.870; C5 46.5.6, pp.1710-1711; C6 39.2.3.2, p.1355). So the model's code, at the attenuation the start names, is
+    code = min(4095, floor(volts * k / 1.1 * 4095 + 0.5))
+arduino-esp32's default ADC_11db is ONETIME_ATTEN 3, k = 25%, so a full code is 4.4 V and 3.3 V reads 3071. The thin slice's divider, two of the bench's 220-ohm resistors (modelled at 231, import_3d_model.py's RESISTOR_ELECTRICAL; the ratio is what counts) from 3V3_OUT to GND, puts 1.65 V on A0: 1535.625, so the sketch prints 1536. Two in series above one, 1.1 V: 1024.
+TYPICAL, AND UNCALIBRATED. Vref is "by design". The datasheets state accuracy only after hardware and software calibration (Table 5-6, ADC Calibration Results: C3 v2.4 p.56, C5 v1.5 p.72, C6 v1.5 p.66), give DNL and INL only as LSB bounds (Table 5-5, the same pages), and state no uncalibrated spread. The model applies no eFuse calibration, no nonlinearity and no noise, and the descriptions say "typical" as SUPPLY does. The effective range at ATTEN3 is 0 to 2500 mV on the C3 and 0 to 3300 mV on the C5 and C6 (Table 5-6), so a C3's code past 2.5 V is the formula's and outside anything the part states. WHAT THE PAGE SHOWS: the code only as the sketch prints it, in the console. The bench note still says where an input sits between the two digital levels, and its words change: it now says the digital input is told nothing drives it and that an analogRead samples that voltage, because both are true once volts are posted.
+
+HOW A VOLTAGE REACHES THE CORE. drive grows a second map, not a second call: BoardSession.drive(levels, volts=None), volts being pad name -> a finite number of volts for every input pad the bench solved, past a digital level or not. levels is unchanged and stays the bench's to threshold. One call and one record: each entry of `inputs` becomes (retired, levels, volts), so a replay is still the image plus one list, in order, and a voltage enters only there. Why this is the smaller design: a number as a level would move circuit.js's thresholds into api.py and leave two copies of one rule; a parallel call would need a second record, an interleaved replay, and two posts that could cross in flight. A pad with no voltage is floating and samples 0, step 3's decision for a floating input and what circuit.js solves an undriven node to. Refused with the values, like the rest of drive: a voltage that is not a finite number, a name that reaches no GPIO, and volts for a description with no hold_volts.
+
+THE CALL STACK.
+  The page: board3d.js poll -> analyse(bench) [circuit.js: readInputs fills `volts` beside `inputs`] -> applyCircuit -> postInputs(report.inputs, report.volts) [posts when either changes; the body gains "volts"] -> POST /api/board/drive {board, levels, volts} [emulator_server.py; a volts that is not an object is a plain 400 naming the field] -> BoardSession.drive(levels, volts) [api.py: names to GPIOs through drive_table, as now; records (retired, levels, volts)] -> description.drive_pins(cpu, driven) [unchanged] and description.hold_volts(cpu, {gpio: volts}) [esp32c3.py: for each ADC1 channel and each attenuation, adc_code(volts, atten), 0 where nothing drives it] -> Cpu.hold_samples(control, {key: code}) [abi.py] -> riscv32_hold_samples [abi.cc] -> Cpu::hold_samples [cpu.cc].
+  The sketch: analogRead(A0) [Arduino.h: inline; a constant pin with no ADC1 channel refused at compile time, as a pin past the GPIO count is] -> oh_analog_read [wiring.c: the pad left as gpio_config_as_analog leaves it; on the C5, both PCR clocks; INT_CLR; ONETIME_SAMPLE = SAR1 | channel << 25 | 3 << 23, then again with START] -> Cpu::write_word at ONETIME_SAMPLE -> the sampler: START rising, the gate read, the key looked up, the result stored and done set -> the spin on INT_RAW ends at its first read -> lw SAR1 data, & 0xfff.
+
+THE SIGNATURES.
+  core/riscv32/cpu.h and cpu.cc (blocked: OH-219's until it closes), the sixth behaviour:
+    /// A converter firmware starts with a write and reads through a result
+    /// register. `control_address` stores as a register, `value` from reset.
+    /// A write that sets `start_mask` where the stored word had it clear
+    /// starts a conversion that completes at once: the word held for the
+    /// key `written & key_mask` replaces `result_address`'s, and `done_mask`
+    /// is set in `status_address`'s. A rising edge and not a level, because
+    /// ESP-IDF writes START 0 and then 1, and later writes the word again
+    /// with START still 1 (adc_oneshot_hal.c:116-118, :166). While
+    /// `enable_address & enable_mask` is clear nothing converts and nothing
+    /// is flagged, as on silicon with its clock off. A start through a gate
+    /// that cannot be read, whose key holds nothing, or whose result or
+    /// status register is unmapped faults naming `control_address`.
+    void map_sampler(uint32_t control_address, uint32_t value,
+                     uint32_t start_mask, uint32_t key_mask,
+                     uint32_t result_address, uint32_t status_address,
+                     uint32_t done_mask, uint32_t enable_address,
+                     uint32_t enable_mask);
+    /// The word each key converts to, as the outside holds it. Replaces the
+    /// previous call's whole statement. The only way a value from outside
+    /// reaches a sampler. False, having changed nothing, where
+    /// `control_address` is no sampler.
+    bool hold_samples(uint32_t control_address, const uint32_t* keys,
+                      const uint32_t* words, uint32_t count);
+  core/riscv32/abi.h, abi.cc and abi.py, ABI 6:
+    void riscv32_map_sampler(Riscv32Cpu*, uint32_t control, uint32_t value,
+                             uint32_t start_mask, uint32_t key_mask, uint32_t result,
+                             uint32_t status, uint32_t done_mask, uint32_t enable,
+                             uint32_t enable_mask);
+    int riscv32_hold_samples(Riscv32Cpu*, uint32_t control, const uint32_t* keys,
+                             const uint32_t* words, uint32_t count);
+    Cpu.map_sampler(control, *, value, start_mask, key_mask, result, status,
+                    done_mask, enable, enable_mask) -> None
+    Cpu.hold_samples(control, samples: Mapping[int, int]) -> None   # AbiError naming control
+  webui/boards/esp32c3.py, esp32c5.py, esp32c6.py, each citing its own header:
+    APB_SARADC = 0x60040000                    # 0x6000E000 on the C5 and C6
+    APB_SARADC_CTRL, APB_SARADC_ONETIME_SAMPLE = 0x00, 0x20
+    APB_SARADC_SAR1_DATA, APB_SARADC_INT_RAW, APB_SARADC_INT_CLR = 0x2C, 0x44, 0x4C
+    ONETIME_SAR1, ONETIME_START = 1 << 31, 1 << 29
+    ONETIME_CHANNEL_SHIFT, ONETIME_ATTEN_SHIFT = 25, 23
+    ONETIME_SAMPLE_AT_RESET = 13 << ONETIME_CHANNEL_SHIFT
+    ADC1_DONE = 1 << 31
+    ADC1_CHANNELS: dict[int, int]              # GPIO -> channel
+    ADC_VREF_VOLTS = 1.1
+    ADC_ATTEN_K: dict[int, float] = {0: 1.0, 1: 0.75, 2: 0.5, 3: 0.25}
+    # The gate. C3: SAR_CLK_GATED = 1 << 6 in CTRL. C5 and C6: PCR = 0x60096000,
+    # PCR_SARADC_CONF and PCR_SARADC_CLKM_CONF at + 0x88 and + 0x8c on the C5,
+    # + 0x80 and + 0x84 on the C6; SARADC_REG_CLK_EN = 1 << 2,
+    # SARADC_CLKM_EN = 1 << 22, the gate.
+    def adc_code(volts: float, atten: int) -> int
+    def install_adc(cpu: Cpu) -> None
+    def hold_volts(cpu: Cpu, volts: typing.Mapping[int, float]) -> None
+  webui/api.py: BoardSession.drive(levels, volts=None); inputs: list[tuple[int, dict[str, str], dict[str, float]]].
+  webui/emulator_server.py: /api/board/drive takes an optional "volts" and answers {board, retired, levels, volts}.
+  webui/static/circuit.js: analyse returns `volts`, pad name -> solved volts, for every input pad readInputs decides or finds between the two levels; none for a blind or undecided pad.
+  webui/static/board3d.js: postInputs(levels, volts) compares and posts both.
+  webui/arduino/**: Arduino.h declares uint16_t analogRead(uint8_t pin), as arduino-esp32 does (esp32-hal-adc.h:42); wiring.c gains oh_analog_read; each oh_board.h gains its OH_APB_SARADC_* addresses and its channel table, held to the description by the header test. No analogReadResolution, analogSetAttenuation or analogReadMilliVolts: missing symbols, each a width, a mode or a calibration this model does not have.
+  webui/compile.py: the analogRead hint retires per chip as each lands. Until a variant defines the ADC, Arduino.h declares no analogRead there and the hint still answers.
+
+THE SLICES, each verified end to end.
+  1. The XIAO ESP32-C3, server side: the core's sampler and hold_samples with their tests in test_mmio.py; esp32c3.py's ADC; drive's volts and its record; analogRead for the C3. Watched: `Serial.println(analogRead(A0))` in loop, driven {"D0": "open"} with volts {"D0": 1.65}, prints 1536; at 1.1 V, 1024; with no voltage, 0; replayed from session.inputs, the same text. Board tests: the reset words, the gate, a refused key (ADC2's bit, the reset channel 13), and the rising edge.
+  2. The page, on the C3: circuit.js's volts, the post and the route. Watched through test_bench_drive with the page's own addPart and connect: two resistors from 3V3_OUT and from GND meeting on D0, and the session's record carrying 1.65. Then in the browser.
+  3. The C5, whose gate resets off and whose channels start at GPIO1; then the C6. Each with its own watched sketch, and the hint retired on each.
+
+LEAST CONFIDENT.
+(1) A sixth core behaviour, which blocks this step on OH-219. Nothing smaller is right, as argued above.
+(2) The core holds a code per key and knows no volts and no formula. The board computes one code per channel and attenuation at each drive, so a sketch that changes attenuation between drives needs no new drive. The alternative, volts in the core and the formula as parameters, puts one chip's arithmetic in the core.
+(3) A start whose key holds nothing faults: ADC2 on the C3, the reset channel 13, both unit bits at once. What silicon answers there is not documented, and a fault names the address where a 0 would read as a voltage.
+(4) A start with the gate clear converts nothing and never sets done, so firmware polling it spins until its budget ends, as it would on silicon. Faulting there would refuse a write the part accepts.
+(5) Only the function clock is a gate. The C5's register clock also resets off, and on silicon a write with it clear does not land; here it is mapped at reset and set by analogRead, but not checked.
+(6) Round half up, and clamp at 4095. The bench solves nothing below ground, so there is no low clamp.
+(7) A pin the program drives as an output gets no voltage from the bench (circuit.js stamps it as a source and reads only inputs), so it samples 0 where silicon samples its own level. analogRead turns the pad into an input first, as gpio_config_as_analog does, so this lasts until the page's next solve posts its voltage.
+(8) analogRead puts the pad in analog mode on every call, where arduino-esp32 does it once per attach. The two differ only for a sketch that drives an analog pin without pinMode between two reads.
+
+TICKETS IN THE WAY. core/riscv32/** and tests/riscv32/** are OH-219's until it closes (tickets.py owner core/riscv32/cpu.h: OH-219, in-review); this design waits for them. Everything else it touches is this ticket's. tools/import_3d_model.py (lent to OH-228) is not needed: the bench already has the 220-ohm resistor, and the 5 kOhm trimmer, whose wiper stands at circuit.js's POT_TRAVEL 0.5 until turning it is built. A trimmer from 3V3_OUT to GND with its wiper on A0 is 1.65 V there too.
+
 **Note 2026-10-13:** STEP 3 SLICE B MERGED to master by fast-forward at 4bcd540 (lane2): POST /api/board/drive, circuit.js input levels, SUPPLY on the three ESP32 descriptions (typical, per pad), the page posting the input map; watched in the page. REVIEW: an independent review (APPROVE WITH COMMENTS) and its fix round. VERIFIED on master at 4bcd540, cores rebuilt: full suite 4 failed, 2862 passed, 41 skipped, under load from three other worktrees -- the OCP pair (test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert, test_the_tessellator_welds_what_it_meshes) and two socket tests (test_an_upload_from_another_origin_is_refused, ConnectionAbortedError; test_a_state_poll_answers_while_a_build_runs), both of which pass alone (2 passed). core/riscv32/** and tests/riscv32/** are back from OH-219, which unblocks step 4's core change (the ADC's map_sampler, designed in the note above). Still blocked: the switch part, on tools/import_3d_model.py (lent to OH-228).
