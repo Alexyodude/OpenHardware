@@ -3205,7 +3205,7 @@ def from_kicad(path: pathlib.Path) -> eagle.Board:
         # placed, at its own `(drill ...)` -- or at the pad's width, where it
         # states none. An oval drill is a slot, counted as one hole: its
         # width the hole's, its length beside it. The pad stays among the
-        # element's pads too, which `artwork` counts as drawn as nothing.
+        # element's pads too, which `artwork` counts as a pad with no copper.
         name = placed.reference or placed.library
         for pad, made in zip(placed.pads, pads):
             if pad.kind == "np_thru_hole":
@@ -3398,6 +3398,66 @@ def outer(segments: tuple[eagle.Segment, ...]
     rings = sorted(contours(segments), key=lambda ring: abs(_area(ring)),
                    reverse=True)
     return rings[0], rings[1:]
+
+
+def drilled(hole: eagle.Hole) -> list[tuple[float, float]]:
+    """A round unplated hole as the ring the slab is cut along (OH-226).
+
+    **Flattened as a circle KiCad mills on Edge.Cuts is**: four quarter
+    turns split at its extremes, each through `arc_points` at
+    `ARC_CHORD_MM`, as `kicad._circle_quarters` makes them -- so a hole
+    drilled and a hole milled of one size are one ring, its four extremes
+    are points of it, and its span either way is the drill. Every point is
+    on the circle and every side a chord inside it, so what is cut is the
+    drill less a sliver at each side: the chord error, at most
+    r(1 - cos(min(ARC_CHORD_MM / 2r, pi / 2))), the bound `ARC_CHORD_MM`
+    states, which `test_a_drilled_hole_is_cut_along_the_ring_a_milled_
+    circle_of_its_size_is` holds. Wound counter-clockwise, as built; `slab`
+    turns a hole's ring.
+
+    **A slot is refused, naming it**: `eagle.Hole` states a slot's length
+    and not which way it runs, and drawing one would invent that. No
+    composed board drills one; `holes_of` leaves one uncut, and
+    `not_drawn` counts it.
+    """
+    if hole.slot_mm:
+        raise ValueError(
+            f"a {hole.drill_mm:g} x {hole.slot_mm:g} mm slot in "
+            f"{hole.element or 'the board itself'} at ({hole.x_mm:g}, {hole.y_mm:g}): "
+            f"eagle.Hole states its length and not its direction, so it is not cut")
+    x, y, radius = hole.x_mm, hole.y_mm, hole.drill_mm / 2
+    lean = radius * math.sqrt(0.5)
+    ends = [(x + radius, y), (x, y + radius), (x - radius, y), (x, y - radius)]
+    mids = [(x + lean, y + lean), (x - lean, y + lean),
+            (x - lean, y - lean), (x + lean, y - lean)]
+    return [point for at in range(4)
+            for point in arc_points(kicad.Arc("drill", *ends[at], *mids[at],
+                                              *ends[(at + 1) % 4]))[:-1]]
+
+
+def holes_of(board: eagle.Board, cutouts: list[list[tuple[float, float]]]
+             ) -> dict[str, list[tuple[float, float]]]:
+    """Every hole the slab is cut along, by the words that name it on
+    `--check` (OH-226): each ring `outer` found inside the outline -- a
+    routed slot, a circle KiCad mills -- by its size and middle, and each
+    round unplated hole the board drills, an EAGLE `<hole>` or a KiCad
+    `np_thru_hole`, as `drilled` makes it, by its drill, whose it is and
+    where. A slot is not here; see `drilled`. Two holes named alike would
+    be one hole drawn over another, and are refused.
+    """
+    holes: dict[str, list[tuple[float, float]]] = {}
+    named = [((f"{max(xs) - min(xs):.3f} x {max(ys) - min(ys):.3f} mm cutout at "
+               f"({(min(xs) + max(xs)) / 2:.3f}, {(min(ys) + max(ys)) / 2:.3f})"), ring)
+             for ring in cutouts
+             for xs, ys in [([x for x, _y in ring], [y for _x, y in ring])]]
+    named += [((f"{hole.drill_mm:.3f} mm hole in {hole.element or 'the board itself'} "
+                f"at ({hole.x_mm:.3f}, {hole.y_mm:.3f})"), drilled(hole))
+              for hole in board.holes if not hole.slot_mm]
+    for label, ring in named:
+        if label in holes:
+            raise ValueError(f"two holes are each the {label}: one drawn over the other")
+        holes[label] = ring
+    return holes
 
 
 #: How far apart two outline endpoints may be and still be the same corner.
@@ -4044,14 +4104,103 @@ def _sign(o, a, b) -> int:
     return (exact > 0) - (exact < 0)
 
 
+def bridged(ring: list[tuple[float, float]], holes: list[list[tuple[float, float]]]
+            ) -> list[tuple[float, float]]:
+    """`ring` with every one of `holes` joined into it, as one walk that
+    touches itself and crosses nowhere, whose even-odd inside is the ring's
+    less the holes' -- which `ear_clip` fills (OH-226). `ring` is wound
+    counter-clockwise and each hole clockwise, as `slab` turns them; each
+    hole lies inside `ring` and clear of the others.
+
+    **Each hole is joined by a bridge**: an edge walked out and back, from
+    the hole's rightmost point M to a point P of the walk so far, which then
+    runs P, M, round the hole, M, P -- a keyhole, as a filled glyph with a
+    counter is written, and `ear_clip` fills those.
+
+    **Holes are joined rightmost first** (Eberly, "Triangulation by Ear
+    Clipping", 2002, section 3), which is what makes P exist: every hole
+    not yet joined lies at x <= M's, and the +x ray from M meets the walk
+    where an end of the edge it meets, or a reflex corner in front of it,
+    can be seen from M -- a point with x > M's. Two holes level at their
+    rightmost points are joined in the order given.
+
+    **Which P is found by looking, not by that construction**, because the
+    construction is where OH-163's review put the risk: a circle is split
+    exactly on its centre's row, so holes share rows, and a ray from one
+    can run exactly through another hole's corner; and a point bridged to
+    twice is in the walk three times. So every point of the walk right of M
+    is tried, nearest first, exactly, and the first that `_sees` M is taken.
+    A bridge to it crosses nothing, and since a nearer point was tried
+    first, it touches nothing either: were the segment M-P to meet the walk
+    first at a vertex Q, Q is nearer and would have been taken, M being in
+    the corner the walk turns at Q on the side the segment arrives from.
+    Nothing not yet joined lies on it, all of that being at x <= M's.
+    Eberly's argument says some point is taken; none being taken is a hole
+    not inside the board, refused naming M.
+    """
+    walk = list(ring)
+    for hole in sorted(holes, key=lambda hole: max(x for x, _y in hole), reverse=True):
+        start = max(range(len(hole)), key=lambda at: hole[at][0])
+        m = hole[start]
+        mx, my = Fraction(m[0]), Fraction(m[1])
+        nearest = sorted((at for at, point in enumerate(walk) if point[0] > m[0]),
+                         key=lambda at: ((Fraction(walk[at][0]) - mx) ** 2
+                                         + (Fraction(walk[at][1]) - my) ** 2, at))
+        here = next((at for at in nearest if _sees(walk, at, m)), None)
+        if here is None:
+            raise ValueError(
+                f"no point of the walk sees ({m[0]}, {m[1]}), the rightmost point "
+                f"of a {len(hole)}-point hole: a hole not inside the board, or "
+                f"inside another hole, is not one this can cut")
+        walk[here + 1:here + 1] = [*hole[start:], *hole[:start], m, walk[here]]
+    return walk
+
+
+def _sees(walk: list[tuple[float, float]], at: int, m: tuple[float, float]) -> bool:
+    """Whether a bridge from `m` to `walk[at]` may be walked, both exactly:
+    `m` lies strictly inside the corner the walk turns at that visit, from
+    its way out round counter-clockwise to its way in -- at a point the walk
+    visits more than once, true of one visit at most -- and no edge of the
+    walk crosses the bridge."""
+    p, before, after = walk[at], walk[at - 1], walk[(at + 1) % len(walk)]
+    out = (Fraction(after[0]) - Fraction(p[0]), Fraction(after[1]) - Fraction(p[1]))
+
+    def turned(q: tuple[float, float]) -> tuple[Fraction, Fraction]:
+        """`q`'s way from `p`, measured from the way out."""
+        dx, dy = Fraction(q[0]) - Fraction(p[0]), Fraction(q[1]) - Fraction(p[1])
+        return (out[0] * dx + out[1] * dy, out[0] * dy - out[1] * dx)
+
+    toward = turned(m)
+    if (toward[1] == 0 and toward[0] > 0) or _by_angle(toward, turned(before)) >= 0:
+        return False
+    return not any(_sign(a, b, m) * _sign(a, b, p) < 0 and _sign(m, p, a) * _sign(m, p, b) < 0
+                   for a, b in zip(walk, walk[1:] + walk[:1]))
+
+
 def slab(ring: list[tuple[float, float]], thickness: float, colour: str,
-         centre: tuple[float, float]) -> Mesh:
-    """The PCB: the outline extruded, in glTF axes and millimetres.
+         centre: tuple[float, float], holes: list[list[tuple[float, float]]] = ()
+         ) -> Mesh:
+    """The PCB: the outline extruded, cut through along each of `holes`,
+    in glTF axes and millimetres.
 
     glTF y is up and z runs the short way, so an EAGLE (x, y) becomes
     (x, height, -y) -- the same negation `board3d.js` applies to a pad, and for
     the same reason: EAGLE's y grows upward and the scene's z grows toward the
     camera, so getting it wrong mirrors the board end for end.
+
+    **The holes are cut** (OH-226): the top and bottom faces are `ear_clip`'s
+    triangles of the walk `bridged` joins the holes into, and each hole has
+    a wall, as the outline does. A face of V points in all, h of them in
+    holes, is V + 2h - 2 triangles, so a hole of n sides adds 4n + 4 to the
+    slab with its wall.
+
+    **Every ring is turned here, not taken as wound** (OH-226): a wall's
+    normal is its edge turned a quarter to the right, out of the board along
+    an outline wound counter-clockwise and into a hole along one wound
+    clockwise, and `contours` chains a vendor's outline whichever way the
+    file walks it -- before this, every board whose outline came clockwise
+    had its walls facing in. A ring of no area has no winding to turn and is
+    refused, naming it.
 
     **The outline is `ear_clip`'s, not `even_odd`'s, on purpose** (OH-163's
     review). An outline that crosses itself is no board a fab could mill,
@@ -4061,8 +4210,20 @@ def slab(ring: list[tuple[float, float]], thickness: float, colour: str,
     file does not state. One crossing mid-edge was refused so before; since
     `_crossing_point`, one crossing at a point is too, even a spike of no
     area, which was drawn. No fetched board's outline does either, and
-    every one is composed by the tests.
+    every one is composed by the tests. **That guard is the bridged walk's
+    too** (OH-226): a bridge spliced in at the wrong visit to a point
+    crosses the walk at that point and nowhere else, which the edge test
+    cannot see; `_crossing_point` refuses it.
     """
+    for loop in (ring, *holes):
+        if _area(loop) == 0:
+            raise ValueError(
+                f"a {len(loop)}-point ring of no area, from {loop[0]}, has no "
+                f"winding to turn: {loop[:6]}")
+    outline = ring if _area(ring) > 0 else ring[::-1]
+    cut = [hole if _area(hole) < 0 else hole[::-1] for hole in holes]
+    face = bridged(outline, cut)
+
     positions: list[float] = []
     normals: list[float] = []
     indices: list[int] = []
@@ -4072,24 +4233,24 @@ def slab(ring: list[tuple[float, float]], thickness: float, colour: str,
         normals.extend(normal)
         return len(positions) // 3 - 1
 
-    faces = ear_clip(ring)
-    for a, b, c in faces:
-        top = [put(*ring[i], thickness, (0.0, 1.0, 0.0)) for i in (a, b, c)]
+    for a, b, c in ear_clip(face):
+        top = [put(*face[i], thickness, (0.0, 1.0, 0.0)) for i in (a, b, c)]
         indices.extend(top)
-        bottom = [put(*ring[i], 0.0, (0.0, -1.0, 0.0)) for i in (a, c, b)]
+        bottom = [put(*face[i], 0.0, (0.0, -1.0, 0.0)) for i in (a, c, b)]
         indices.extend(bottom)
 
-    for index, point in enumerate(ring):
-        nxt = ring[(index + 1) % len(ring)]
-        along = (nxt[0] - point[0], nxt[1] - point[1])
-        length = math.hypot(*along) or 1.0
-        # The outward normal of a counter-clockwise ring is the edge turned a
-        # quarter to the right, and z is negated with y.
-        normal = (along[1] / length, 0.0, along[0] / length)
-        corners = [put(*point, 0.0, normal), put(*nxt, 0.0, normal),
-                   put(*nxt, thickness, normal), put(*point, thickness, normal)]
-        indices.extend((corners[0], corners[1], corners[2]))
-        indices.extend((corners[0], corners[2], corners[3]))
+    for loop in (outline, *cut):
+        for index, point in enumerate(loop):
+            nxt = loop[(index + 1) % len(loop)]
+            along = (nxt[0] - point[0], nxt[1] - point[1])
+            length = math.hypot(*along) or 1.0
+            # The edge turned a quarter to the right, and z is negated with
+            # y: out of the board along the outline, into the hole along one.
+            normal = (along[1] / length, 0.0, along[0] / length)
+            corners = [put(*point, 0.0, normal), put(*nxt, 0.0, normal),
+                       put(*nxt, thickness, normal), put(*point, thickness, normal)]
+            indices.extend((corners[0], corners[1], corners[2]))
+            indices.extend((corners[0], corners[2], corners[3]))
 
     return Mesh({colour: (positions, normals, indices)})
 
@@ -6351,16 +6512,27 @@ PEN_DROPPED = f"pen under {2 * CHAIN_TOLERANCE_MM:g} mm"
 
 def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             thickness: float, centre: tuple[float, float], mask: str,
-            letters: list[eagle.Stroke]
+            letters: list[eagle.Stroke],
+            holes: dict[str, list[tuple[float, float]]] | None = None
             ) -> tuple[list[Mesh], dict[str, int],
-                       dict[str, list[tuple[eagle.Pad, str]]]]:
-    """The copper and the ink the vendor drew, a tally of what was left, and
-    each placement with a pad that is not drawn, with the pad and why.
+                       dict[str, list[tuple[eagle.Pad, str]]],
+                       dict[str, dict[str, int]]]:
+    """The copper and the ink the vendor drew, a tally of what was left,
+    each placement with a pad that is not drawn, with the pad and why, and
+    what reached into a hole, by hole and by kind.
 
-    The last is what lets a placement with no body be called drawn: its
+    The third is what lets a placement with no body be called drawn: its
     copper is all of it, and only where every pad it puts down is drawn here
     (OH-163). And where one is not, it is what the composer says instead of
     the package's reason, which is about the pads that are.
+
+    **Nothing is drawn in a hole** (OH-226): `holes` are those the slab is
+    cut along, by name, and a pad, a stroke of ink or of text, a fill, a
+    trace or a via that reaches into one is dropped, whole, and counted
+    against the first it reaches, by kind -- not cut round it, which would
+    take a polygon difference this composer has none of. What that drops
+    on each composed board is held in `INTO_HOLES`, in the tests: strokes
+    of ink and of text, and no copper.
 
     **Every composed board was a slab with boxes standing on it until this**,
     and the reason was not that the data was missing: Seeed's own board files
@@ -6377,6 +6549,20 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
     """
     left: dict[str, int] = {}
     can_clip = convex(ring)
+    holes = holes or {}
+    boxes = {label: (min(x for x, _y in hole), min(y for _x, y in hole),
+                     max(x for x, _y in hole), max(y for _x, y in hole))
+             for label, hole in holes.items()}
+    into: dict[str, dict[str, int]] = {}
+
+    def into_hole(shapes: list[list[tuple[float, float]]], kind: str) -> bool:
+        """Whether any of `shapes`, the pieces of one thing drawn, reaches
+        into a hole; if so it is counted once, against the first."""
+        label = next((label for label, hole in holes.items() for shape in shapes
+                      if _reaches(shape, hole, boxes[label])), None)
+        if label is not None:
+            into.setdefault(label, {})[kind] = into.get(label, {}).get(kind, 0) + 1
+        return label is not None
 
     def inside(shape: list[tuple[float, float]], counted: bool = True
                ) -> list[tuple[float, float]]:
@@ -6404,12 +6590,15 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             if pad.kind == "np_thru_hole" or pad.hole:
                 # A hole with no copper in it -- a KiCad one reaches here as a
                 # surface pad, see `eagle.Pad.hole`. Nothing solders to it and
-                # nothing is plated in it, so nothing is drawn for it: not the
-                # disc of copper it does not have, and not the hole, which
-                # this pass cuts in nothing (OH-163).
+                # nothing is plated in it, so no copper is drawn for it: not
+                # the disc of copper it does not have (OH-163). The hole is
+                # the slab's to cut (OH-226), and is said cut where one of
+                # `holes` is -- not where a slot is, which nothing cuts.
                 left["np_thru_hole"] = left.get("np_thru_hole", 0) + 1
-                undrawn.setdefault(element.name, []).append(
-                    (pad, "an unplated hole, and no hole is cut"))
+                undrawn.setdefault(element.name, []).append((pad, (
+                    "an unplated hole, cut through the board with no copper in it"
+                    if any(point_in(hole, (pad.x_mm, pad.y_mm)) for hole in holes.values())
+                    else "an unplated hole, and no hole is cut")))
                 continue
             shape = pad_outline(pad)
             if shape is None:
@@ -6427,6 +6616,10 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
                     else "reaching outside the board's concave outline, which "
                          "nothing is cut to")))
                 continue
+            if into_hole([cut], "pad"):
+                undrawn.setdefault(element.name, []).append(
+                    (pad, "reaching into a hole cut through the board"))
+                continue
             if pad.front:
                 front.append(cut)
             if pad.back:
@@ -6440,7 +6633,7 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             left["zero-length stroke"] = left.get("zero-length stroke", 0) + 1
             continue
         cut = inside(shape)
-        if len(cut) < 3:
+        if len(cut) < 3 or into_hole([cut], "ink"):
             continue
         (ink_back if stroke.layer.startswith("B.") else ink).append(cut)
     #: The text's strokes are ink like any other and are drawn with it; only
@@ -6462,6 +6655,8 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             # "73 texts drawn" would otherwise say more than the board shows.
             left["text stroke off the board"] = (
                 left.get("text stroke off the board", 0) + 1)
+            continue
+        if into_hole([cut], "text"):
             continue
         if stroke.layer.startswith("B."):
             ink_back.append(cut)
@@ -6527,6 +6722,8 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             if not beyond:
                 left["fill off the board"] = left.get("fill off the board", 0) + 1
             continue
+        if into_hole((shapes if whole else []) + kept, "fill"):
+            continue
         back_side = fill.layer.startswith("B.")
         if whole:
             (whole_back if back_side else whole_front).append((points, triangles))
@@ -6546,31 +6743,31 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             left["zero-length trace"] = left.get("zero-length trace", 0) + 1
             continue
         cut = inside(shape)
-        if len(cut) < 3:
+        if len(cut) < 3 or into_hole([cut], "trace"):
             continue
         (track_back if stroke.layer.startswith("B.") else track).append(cut)
 
     #: A via joins the two faces, so it is drawn on both. Tented -- covered by
     #: mask -- which is why it takes the same colour as a trace and not the
     #: copper of an exposed pad.
-    holes = []
+    tented = []
     for via in board.vias:
         ellipse = [(via.x_mm + via.diameter_mm / 2 * math.cos(step),
                     via.y_mm + via.diameter_mm / 2 * math.sin(step))
                    for step in (2 * math.pi * i / VIA_SIDES
                                 for i in range(VIA_SIDES))]
         cut = inside(ellipse)
-        if len(cut) >= 3:
-            holes.append(cut)
+        if len(cut) >= 3 and not into_hole([cut], "via"):
+            tented.append(cut)
 
     routed = mask_over_copper(mask)
     top = thickness + COPPER_THICKNESS_MM + SILK_THICKNESS_MM
     under = -COPPER_THICKNESS_MM - SILK_THICKNESS_MM
-    return ([flat(track + holes, thickness + TRACE_PROUD_MM, routed, centre, True),
+    return ([flat(track + tented, thickness + TRACE_PROUD_MM, routed, centre, True),
              flat(front, thickness + COPPER_THICKNESS_MM, COPPER, centre, True),
              merge(flat(ink + fill_front, top, SILKSCREEN, centre, True),
                    flat_fills(whole_front, top, SILKSCREEN, centre, True)),
-             flat(track_back + holes, -TRACE_PROUD_MM, routed, centre, False),
+             flat(track_back + tented, -TRACE_PROUD_MM, routed, centre, False),
              flat(back, -COPPER_THICKNESS_MM, COPPER, centre, False),
              merge(flat(ink_back + fill_back, under, SILKSCREEN, centre, False),
                    flat_fills(whole_back, under, SILKSCREEN, centre, False))],
@@ -6579,9 +6776,9 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
              "ink back": len(ink_back) - text_back,
              "text front": text_front, "text back": text_back, **filled,
              "track front": len(track), "track back": len(track_back),
-             "vias": len(holes),
+             "vias": len(tented),
              "clipped to the outline": int(can_clip), **left},
-            undrawn)
+            undrawn, into)
 
 
 def point_in(ring: list[tuple[float, float]], point: tuple[float, float]) -> bool:
@@ -6595,36 +6792,54 @@ def point_in(ring: list[tuple[float, float]], point: tuple[float, float]) -> boo
     return hit
 
 
-def not_drawn(board: eagle.Board, cutouts: list[list[tuple[float, float]]],
-              ink: dict[str, int], text: dict[str, int], turn_unseen: list[str],
-              unmodelled: list[str], no_pads: list[str]) -> dict[str, object]:
+def _reaches(shape: list[tuple[float, float]], hole: list[tuple[float, float]],
+             box: tuple[float, float, float, float]) -> bool:
+    """Whether a piece of artwork reaches into a hole's inside (OH-226):
+    their boxes overlap, and an edge of one crosses an edge of the other,
+    or a point of one is inside the other -- a piece wholly in the hole, or
+    a hole wholly under the piece. `box` is the hole's, `(xmin, ymin, xmax,
+    ymax)`. Two polygons whose insides meet do one of those, unless an edge
+    of one lies along an edge of the other, where `point_in`'s half-open
+    rule decides."""
+    xs, ys = [x for x, _y in shape], [y for _x, y in shape]
+    if min(xs) >= box[2] or max(xs) <= box[0] or min(ys) >= box[3] or max(ys) <= box[1]:
+        return False
+    edges = list(zip(hole, hole[1:] + hole[:1]))
+    if any(_cross(c, d, a) * _cross(c, d, b) < 0 and _cross(a, b, c) * _cross(a, b, d) < 0
+           for a, b in zip(shape, shape[1:] + shape[:1]) for c, d in edges):
+        return True
+    return (any(point_in(hole, point) for point in shape)
+            or any(point_in(shape, point) for point in hole))
+
+
+def not_drawn(board: eagle.Board, ink: dict[str, int], text: dict[str, int],
+              turn_unseen: list[str], unmodelled: list[str], no_pads: list[str],
+              into: dict[str, dict[str, int]]) -> dict[str, object]:
     """What `compose` measured and did NOT draw, as it rides in a composed
     model's extras under `not_drawn` (OH-125): the gaps `compose` found are
     passed in, and those the board states are read off it here. Built where
     `compose --check` runs too, so a test holds it in-process (OH-163, from
     its review), not only on a shipped `.glb`.
 
-    `holes` counts every unplated hole drilled through the board -- an EAGLE
-    `<hole>`, the board's or a package's, and a KiCad `np_thru_hole` pad --
-    and `cutouts` every ring inside the outline, a hole KiCad mills among
-    them. A KiCad `np_thru_hole` is counted twice, on purpose and under two
-    names: here as a hole not cut, and under `extras["artwork"]
-    ["np_thru_hole"]` as a pad drawn as nothing -- and `holes_np_thru_hole`
-    says how many of `holes` those pads are, so the overlap is in the JSON
-    and not only in this docstring (OH-163's confirm verification). `milled`
-    is what an EAGLE board mills and its reader does not read into the
-    outline, by kind (`eagle._unmilled`). A plated drill is under no key.
+    **A hole is cut, and no gap, since OH-226**: every ring inside the
+    outline and every round unplated hole the board drills -- see
+    `holes_of`, and `extras["cut"]` for how many. So `holes` counts only
+    what is drilled and not cut, a slot, `drilled` says why; and the keys
+    that counted the holes not cut, `cutouts` and the overlap OH-163's
+    confirm verification put beside them, `holes_np_thru_hole`, went with
+    that gap. `into_holes` is the artwork that reached into a hole and was
+    not drawn, by hole and by kind. `milled` is what an EAGLE board mills
+    and its reader does not read into the outline, by kind
+    (`eagle._unmilled`). A plated drill is under no key.
     """
     return {
         "ink": ink,
         # Each piece of text not drawn, counted under why (OH-163).
         "text": text,
         "copper": dict(board.traces_unread),
-        "cutouts": len(cutouts),
-        "holes": len(board.holes),
-        "holes_np_thru_hole": sum(pad.hole for element in board.elements
-                                  for pad in element.pads),
+        "holes": sum(1 for hole in board.holes if hole.slot_mm),
         "milled": dict(board.outline_unread),
+        "into_holes": into,
         "turn_unseen": turn_unseen,
         "unmodelled": unmodelled,
         "no_pads": no_pads,
@@ -6665,37 +6880,47 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     # ring; a XIAO ESP32-C3 is its edge plus two 1.270 x 0.508 mm routed slots,
     # which `loop` alone reported as "the outline does not chain". A hole
     # KiCad mills on Edge.Cuts is a ring like a slot -- PCBCUPID's Glyphs
-    # mill their mounting holes so -- and is counted here with them (OH-163).
+    # mill their mounting holes so -- and is counted here with them (OH-163),
+    # and cut through the slab with them (OH-226).
     ring, cutouts = outer(board.outline)
     if cutouts:
-        print(f"  cutouts {len(cutouts)} not drawn: "
+        print(f"  cutouts {len(cutouts)} cut: "
               + ", ".join(f"{max(p[0] for p in c) - min(p[0] for p in c):.3f} x "
                           f"{max(p[1] for p in c) - min(p[1] for p in c):.3f} mm"
                           for c in cutouts))
     # **And each unplated hole drilled through the board**, which is not on
     # the outline (OH-163): an EAGLE board's `<hole>`s, its own and each
     # placed package's, and a KiCad board's `np_thru_hole` pads, by drill and
-    # by whose; a slot by its width and length. None is cut: the slab has no
-    # hole in it. A KiCad one is ALSO on the artwork line, under
-    # `np_thru_hole`, as a pad drawn as nothing, and this line says how many
-    # of its holes those are. A plated drill -- a pad's, a via's, a slot
-    # milled in a plated pad -- is counted nowhere.
+    # by whose; a slot by its width and length. Each round one is cut
+    # (OH-226); a slot is not, `drilled` says why. A KiCad one is ALSO on the
+    # artwork line, under `np_thru_hole`, as a pad with no copper, and this
+    # line says how many of its holes those are. A plated drill -- a pad's,
+    # a via's, a slot milled in a plated pad -- is counted nowhere.
     if board.holes:
-        drilled: dict[tuple[float, float, str], list[str]] = {}
+        groups: dict[tuple[float, float, str], list[str]] = {}
         for hole in board.holes:
             package = board.element(hole.element).package if hole.element else ""
-            drilled.setdefault((hole.drill_mm, hole.slot_mm, package),
-                               []).append(hole.element)
+            groups.setdefault((hole.drill_mm, hole.slot_mm, package),
+                              []).append(hole.element)
+
+        def said(slots: bool) -> str:
+            return "; ".join(
+                (f"{drill:.3f} x {slot:.3f} mm slot" if slot else f"{drill:.3f} mm")
+                + f" x{len(names)} "
+                + (f"in {'/'.join(dict.fromkeys(names))} ({package})" if package
+                   else "in the board itself")
+                for (drill, slot, package), names in groups.items() if bool(slot) == slots)
+
+        slots = sum(1 for hole in board.holes if hole.slot_mm)
         unplated_pads = sum(pad.hole for element in board.elements
                             for pad in element.pads)
-        print(f"  holes   {len(board.holes)} not cut: " + "; ".join(
-            (f"{drill:.3f} x {slot:.3f} mm slot" if slot else f"{drill:.3f} mm")
-            + f" x{len(names)} "
-            + (f"in {'/'.join(dict.fromkeys(names))} ({package})" if package
-               else "in the board itself")
-            for (drill, slot, package), names in drilled.items())
-            + (f"; {unplated_pads} of them np_thru_hole pads, on the artwork "
-               f"line too as pads drawn as nothing" if unplated_pads else ""))
+        print(f"  holes   {len(board.holes) - slots} cut"
+              + (f": {said(False)}" if len(board.holes) > slots else "")
+              + (f"; {slots} not cut, a slot's direction being on no eagle.Hole: "
+                 f"{said(True)}" if slots else "")
+              + (f"; {unplated_pads} of them np_thru_hole pads, on the artwork "
+                 f"line too as pads with no copper" if unplated_pads else ""))
+    holes = holes_of(board, cutouts)
     xs = [point[0] for point in ring]
     ys = [point[1] for point in ring]
     print(f"  outline {len(ring)} points, "
@@ -6716,13 +6941,20 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
           f"({centre[0]:.3f}, {centre[1]:.3f}) mm; the PCB's own centre is "
           f"({(min(xs) + max(xs)) / 2:.3f}, {(min(ys) + max(ys)) / 2:.3f})")
 
-    pieces = [slab(ring, spec.thickness_mm, spec.colour, centre)]
+    pieces = [slab(ring, spec.thickness_mm, spec.colour, centre, list(holes.values()))]
     # **The copper and the ink, before any component stands on them**, so a
     # part's own body hides the pads under it exactly as solder does.
     letters, unlettered, lettered = lettering(board.kicad_text)
-    drawn_art, tally, undrawn_pads = artwork(board, ring, spec.thickness_mm,
-                                             centre, spec.colour, letters)
+    drawn_art, tally, undrawn_pads, into = artwork(board, ring, spec.thickness_mm,
+                                                   centre, spec.colour, letters, holes)
     pieces.extend(drawn_art)
+    # **What reached into a hole is said with the hole it reached** (OH-226):
+    # dropped whole by `artwork`, and counted against that hole by kind.
+    if into:
+        print(f"  into    {sum(n for kinds in into.values() for n in kinds.values())} "
+              f"piece(s) of artwork reach into a hole and are not drawn: "
+              + "; ".join(", ".join(f"{kind} {n}" for kind, n in kinds.items())
+                          + f" into the {label}" for label, kinds in into.items()))
     # A fill the triangulator refused, and a pen left untraced, are ink the
     # file carries and this does not draw, so they are counted with the rest
     # of that (OH-163).
@@ -7092,8 +7324,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     # DEFAULT_FINISH for a session because nothing printed the assignment
     # where somebody would see it.
     default_finish = report_finishes(whole)
-    gaps = not_drawn(board, cutouts, unread_ink, unlettered, unpinned, unmodelled,
-                     padless)
+    gaps = not_drawn(board, unread_ink, unlettered, unpinned, unmodelled, padless, into)
     if check:
         print("  write   skipped (--check)")
         return 0
@@ -7174,6 +7405,9 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             # the measurement stopped at stdout. A gap that is measured is
             # a gap somebody can close, and now a reader can see it too.
             "artwork": dict(tally),
+            # **What is cut through the slab** (OH-226): the rings inside the
+            # outline, and the round unplated holes drilled -- see `holes_of`.
+            "cut": {"cutouts": len(cutouts), "holes": len(holes) - len(cutouts)},
             # See `not_drawn`, which says what each key counts.
             "not_drawn": gaps,
             # Text the file hides, which KiCad does not plot either: not

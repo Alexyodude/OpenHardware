@@ -487,7 +487,7 @@ def test_a_ring_that_crosses_itself_is_filled_by_the_even_odd_rule():
     board = eagle.Board("inked", "test", (), (), silk_fills=(
         eagle.Fill("F.SilkS", tuple(bow), 0.5),))
     outline = [(-1.0, -1.0), (12.0, -1.0), (12.0, 12.0), (-1.0, 12.0)]
-    meshes, tally, _undrawn = compose.artwork(board, outline, 1.6, (0.0, 0.0), "#313d63", [])
+    meshes, tally, _undrawn, _into = compose.artwork(board, outline, 1.6, (0.0, 0.0), "#313d63", [])
     assert (tally["fill front"], compose.FILL_REFUSED in tally) == (1, False), tally
     _points, triangles = compose.even_odd(bow)
     assert len(meshes[2].groups[compose.SILKSCREEN][2]) // 3 == len(triangles) + 4 * 2
@@ -556,7 +556,7 @@ def test_a_ring_of_fewer_than_three_points_is_refused_by_its_count():
     board = eagle.Board("inked", "test", (), (), silk_fills=(
         eagle.Fill("F.SilkS", ((1.0, 1.0), (2.0, 2.0)), 0.0),))
     ring = [(-1.0, -1.0), (12.0, -1.0), (12.0, 12.0), (-1.0, 12.0)]
-    _meshes, tally, _undrawn = compose.artwork(board, ring, 1.6, (0.0, 0.0), "#313d63", [])
+    _meshes, tally, _undrawn, _into = compose.artwork(board, ring, 1.6, (0.0, 0.0), "#313d63", [])
     assert tally[compose.FILL_REFUSED] == 1, tally
 
 
@@ -698,7 +698,7 @@ def test_spikes_and_a_long_stretch_walked_twice_are_decided_in_a_lay_or_two_an_e
         board = eagle.Board("inked", "test", (), (), silk_fills=(
             eagle.Fill("F.SilkS", tuple(swapped), 0.0),))
         outline = [(-11.0, -11.0), (11.0, -11.0), (11.0, 11.0), (-11.0, 11.0)]
-        _meshes, tally, _undrawn = compose.artwork(board, outline, 1.6, (0.0, 0.0), "#313d63", [])
+        _meshes, tally, _undrawn, _into = compose.artwork(board, outline, 1.6, (0.0, 0.0), "#313d63", [])
     assert tally.get(compose.FILL_REFUSED) == 1, tally
 
 
@@ -3367,7 +3367,7 @@ def test_a_fill_is_drawn_as_ink_with_its_counter_open_and_its_pen_traced():
         eagle.Fill("F.SilkS", ((30.0, 30.0), (31.0, 30.0), (31.0, 31.0)), 0.0),
     ))
     ring = [(-1.0, -1.0), (12.0, -1.0), (12.0, 12.0), (-1.0, 12.0)]
-    meshes, tally, _undrawn = compose.artwork(board, ring, 1.6, (0.0, 0.0), "#313d63", [])
+    meshes, tally, _undrawn, _into = compose.artwork(board, ring, 1.6, (0.0, 0.0), "#313d63", [])
     assert (tally["fill front"], tally["fill back"], tally[compose.FILL_REFUSED],
             tally["fill off the board"]) == (1, 1, 1, 1), tally
     front, back = _faces(meshes[2], compose.SILKSCREEN), _faces(meshes[5], compose.SILKSCREEN)
@@ -3401,7 +3401,7 @@ def test_a_pen_narrower_than_the_same_point_distance_is_counted_and_not_traced()
         eagle.Fill("F.SilkS", square, narrow),
         eagle.Fill("B.SilkS", square, 2 * compose.CHAIN_TOLERANCE_MM)))
     ring = [(-1.0, -1.0), (12.0, -1.0), (12.0, 12.0), (-1.0, 12.0)]
-    meshes, tally, _undrawn = compose.artwork(board, ring, 1.6, (0.0, 0.0), "#313d63", [])
+    meshes, tally, _undrawn, _into = compose.artwork(board, ring, 1.6, (0.0, 0.0), "#313d63", [])
     assert (tally["fill front"], tally["fill back"], tally.get(compose.PEN_DROPPED)) == (1, 1, 1), tally
     # The front square is its two triangles; the back one gains its four strokes.
     assert (len(meshes[2].groups[compose.SILKSCREEN][2]) // 3,
@@ -3423,7 +3423,7 @@ def test_a_fill_of_no_area_and_one_beyond_a_concave_edge_are_counted_as_what_the
         eagle.Fill("F.SilkS", ((1.0, 1.0), (2.0, 1.0), (3.0, 1.0)), 0.0),
         eagle.Fill("F.SilkS", ((1.0, 1.0), (8.0, 1.0), (8.0, 8.0), (1.0, 8.0)), 0.0),
         eagle.Fill("F.SilkS", ((1.0, 1.0), (2.0, 1.0), (2.0, 2.0)), 0.0)))
-    _meshes, tally, _undrawn = compose.artwork(board, ell, 1.6, (0.0, 0.0), "#313d63", [])
+    _meshes, tally, _undrawn, _into = compose.artwork(board, ell, 1.6, (0.0, 0.0), "#313d63", [])
     assert ({key: tally.get(key) for key in ("fill of no area", "fill off the board",
                                              "fill reaching outside a concave outline",
                                              "outside a concave outline", "fill front")}
@@ -3447,7 +3447,7 @@ def test_a_fill_on_the_board_shares_its_vertices_and_draws_the_same_triangles():
         eagle.Fill("B.SilkS", tuple(under), 0.0)))
     ring = [(-1.0, -1.0), (12.0, -1.0), (12.0, 12.0), (-1.0, 12.0)]
     centre = (1.5, 2.5)
-    meshes, tally, _undrawn = compose.artwork(board, ring, 1.6, centre, "#313d63", [])
+    meshes, tally, _undrawn, _into = compose.artwork(board, ring, 1.6, centre, "#313d63", [])
     assert (tally["fill front"], tally["fill back"]) == (2, 1), tally
 
     whole = compose.ear_clip(_O)
@@ -3605,7 +3605,7 @@ def test_text_beside_the_board_is_not_drawn_on_it():
     board = compose.read_layout(spec.layout)
     ring, _cut = compose.outer(board.outline)
     letters, _refused, _drawn = compose.lettering(board.kicad_text)
-    meshes, tally, _undrawn = compose.artwork(board, ring, spec.thickness_mm,
+    meshes, tally, _undrawn, _into = compose.artwork(board, ring, spec.thickness_mm,
                                               (0.0, 0.0), spec.colour, letters)
     ink = [(p[at], -p[at + 2]) for mesh in meshes
            for colour, (p, _n, _i) in mesh.groups.items() if colour == compose.SILKSCREEN
@@ -3764,7 +3764,7 @@ def test_the_artwork_pass_is_the_thing_that_cuts_copper_to_the_board():
         pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
     board = compose.read_layout(spec.layout)
     ring, _cut = compose.outer(board.outline)
-    meshes, tally, _undrawn = compose.artwork(board, ring, spec.thickness_mm,
+    meshes, tally, _undrawn, _into = compose.artwork(board, ring, spec.thickness_mm,
                                               (0.0, 0.0), spec.colour, [])
     assert tally["pads front"] > 200, tally
     assert tally["track front"] > 200, tally
@@ -3906,7 +3906,7 @@ def test_a_via_joins_both_faces_and_is_drawn_on_each():
         pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched")
     board = compose.read_layout(spec.layout)
     ring, _cut = compose.outer(board.outline)
-    meshes, tally, _undrawn = compose.artwork(board, ring, spec.thickness_mm,
+    meshes, tally, _undrawn, _into = compose.artwork(board, ring, spec.thickness_mm,
                                               (0.0, 0.0), spec.colour, [])
     assert tally["vias"] > 100, tally
     routed = compose.mask_over_copper(spec.colour)
@@ -4855,11 +4855,13 @@ def test_what_is_not_drawn_rides_in_extras():
     assert "artwork" in extras and extras["artwork"].get("ink front", 0) > 0
     gaps = extras.get("not_drawn")
     assert gaps is not None, "the composer's gaps still stop at stdout"
-    for key in ("ink", "copper", "cutouts", "holes", "holes_np_thru_hole", "milled",
-                "turn_unseen", "unmodelled", "text"):
+    for key in ("ink", "copper", "holes", "milled", "into_holes", "turn_unseen",
+                "unmodelled", "text"):
         assert key in gaps, f"not_drawn is missing {key}"
-    # Each hole the board drills that is no pad, none of them cut (OH-163).
-    assert gaps["holes"] == len(eagle.read_board(_brd()).holes) > 0, gaps["holes"]
+    # Each hole the board drills that is no pad (OH-163), every one cut and
+    # none a gap (OH-226).
+    assert extras.get("cut") == {"cutouts": 0, "holes": len(eagle.read_board(_brd()).holes)}
+    assert (extras["cut"]["holes"], gaps["holes"]) != (0, 0) and gaps["holes"] == 0, gaps
     # The Uno prints text in EAGLE's own vector font, which no licence lets
     # this repository carry -- so its text is counted in the ink tally and
     # refused, every piece of it, under that reason (OH-163).
@@ -5421,11 +5423,12 @@ def test_a_test_point_is_drawn_as_its_pad_and_not_also_reported_absent(capsys):
 
 def test_a_placement_with_an_unplated_hole_is_not_counted_drawn(capsys):
     """**Its copper is not all of it** (OH-163): an unplated hole is a hole,
-    which the copper pass does not cut -- it reaches `artwork` as a surface
+    which the copper pass does not draw -- it reaches `artwork` as a surface
     pad, see `eagle.Pad.hole` -- so a placement with no body that puts one
-    down stays among the absent, saying that its hole is not drawn, and is
-    not counted drawn as its copper. Olimex's mounting holes and SparkFun's
-    standoffs are that."""
+    down stays among the absent, saying that pad is not drawn, and is not
+    counted drawn as its copper. Olimex's mounting holes and SparkFun's
+    standoffs are that. Since OH-226 the slab is cut there, and the pad's
+    reason says so."""
     _newstroke()
     checked = []
     for spec in compose.COMPOSITIONS:
@@ -5441,7 +5444,8 @@ def test_a_placement_with_an_unplated_hole_is_not_counted_drawn(capsys):
         assert not holed & set(drawn.partition(": ")[2].split(", ")), (spec.board, drawn)
         for package in holed:
             assert any(line.startswith("  absent  ") and f"({package}): " in line
-                       and " not drawn: an unplated hole, and no hole is cut" in line
+                       and " not drawn: an unplated hole, cut through the board with no "
+                           "copper in it" in line
                        for line in lines), (spec.board, package, lines)
         checked.append(spec.board)
     if not checked:
@@ -5573,7 +5577,7 @@ def test_an_unplated_hole_is_not_drawn_as_copper():
         if not holes:
             continue
         ring, _cut = compose.outer(board.outline)
-        meshes, tally, _undrawn = compose.artwork(board, ring, spec.thickness_mm,
+        meshes, tally, _undrawn, _into = compose.artwork(board, ring, spec.thickness_mm,
                                                   (0.0, 0.0), spec.colour, [])
         copper = {(round(p[at], 4), round(-p[at + 2], 4))
                   for mesh in meshes for colour, (p, _n, _i) in mesh.groups.items()
@@ -5738,7 +5742,7 @@ def test_a_boards_milled_holes_are_printed_with_its_cutouts(capsys):
     Edge.Cuts, and no line of `--check` named one. Every composed KiCad
     board whose file draws one now prints each on its `cutouts` line at its
     own diameter -- found here by walking the file's top level, not by the
-    reader."""
+    reader -- and, since OH-226, says it is cut."""
     _newstroke()
     checked: list[str] = []
     for spec in compose.COMPOSITIONS:
@@ -5756,8 +5760,8 @@ def test_a_boards_milled_holes_are_printed_with_its_cutouts(capsys):
             continue
         line = _counted(_accounting(spec, capsys).splitlines(), "  cutouts")
         assert line, f"{spec.board} mills {len(across)} circle(s) and prints no cutouts line"
-        sizes = line.partition(" not drawn: ")[2].split(", ")
-        assert line.startswith(f"  cutouts {len(sizes)} not drawn: "), (spec.board, line)
+        sizes = line.partition(" cut: ")[2].split(", ")
+        assert line.startswith(f"  cutouts {len(sizes)} cut: "), (spec.board, line)
         for diameter in set(across):
             assert sizes.count(f"{diameter} x {diameter} mm") == across.count(diameter), (
                 spec.board, diameter, line)
@@ -5773,7 +5777,8 @@ def test_every_hole_an_eagle_board_drills_is_printed_with_its_size(capsys):
     sockets -- and no line of `--check` named one. Each composed EAGLE board
     now prints every one on its `holes` line, by drill, and one that drills
     none prints no such line: counted here off the file's XML, its `<plain>`
-    and each placed element's package, not by the reader."""
+    and each placed element's package, not by the reader. Each is cut since
+    OH-226, and the line says so."""
     import xml.etree.ElementTree as ET
     checked = []
     for spec in compose.COMPOSITIONS:
@@ -5792,7 +5797,7 @@ def test_every_hole_an_eagle_board_drills_is_printed_with_its_size(capsys):
         if not drills:
             assert not line, (spec.board, line)
             continue
-        assert line.startswith(f"  holes   {len(drills)} not cut: "), (spec.board, line)
+        assert line.startswith(f"  holes   {len(drills)} cut: "), (spec.board, line)
         for drill in set(drills):
             printed = sum(int(count) for count in
                           re.findall(rf"\b{float(drill):.3f} mm x(\d+)", line))
@@ -5845,11 +5850,11 @@ def test_an_unplated_kicad_pad_is_a_hole_where_it_is_placed_at_its_drill(tmp_pat
 def test_every_unplated_hole_a_kicad_board_drills_is_printed_with_its_size(capsys):
     """**Each composed KiCad board prints its `np_thru_hole` pads on its
     `holes` line** (OH-163, from its review), by drill, and says that many
-    of them are the pads its artwork line counts as drawn as nothing -- a
-    hole counted under two names, said so. Counted here by walking each
-    footprint's pads in the file's tree, not by the reader. No KiCad pad
-    on a composed board is an oval unplated drill; one would print as a
-    slot."""
+    of them are the pads its artwork line counts as pads with no copper --
+    a hole counted under two names, said so. Counted here by walking each
+    footprint's pads in the file's tree, not by the reader. Each is cut
+    since OH-226. No KiCad pad on a composed board is an oval unplated
+    drill; one would print as a slot, and not cut."""
     _newstroke()
     checked: list[tuple[pathlib.Path, str]] = []
     for spec in compose.COMPOSITIONS:
@@ -5868,9 +5873,9 @@ def test_every_unplated_hole_a_kicad_board_drills_is_printed_with_its_size(capsy
         if not drills:
             assert not line, (spec.board, line)
             continue
-        assert line.startswith(f"  holes   {len(drills)} not cut: "), (spec.board, line)
+        assert line.startswith(f"  holes   {len(drills)} cut: "), (spec.board, line)
         assert line.endswith(f"; {len(drills)} of them np_thru_hole pads, on the "
-                             f"artwork line too as pads drawn as nothing"), line
+                             f"artwork line too as pads with no copper"), line
         for drill in set(drills):
             printed = sum(int(count) for count in re.findall(rf"\b{drill} mm x(\d+)", line))
             assert printed == drills.count(drill), (spec.board, drill, line)
@@ -5903,14 +5908,15 @@ def test_what_an_eagle_board_mills_and_does_not_read_is_printed(tmp_path, capsys
 def test_the_gaps_ride_as_compose_measured_them(capsys):
     """**What rides under `not_drawn` is held in-process** (OH-163, from its
     review), not only on a shipped `.glb`: `compose --check` builds it with
-    `not_drawn`, caught here as it returns. On the Uno, every hole is the
-    board's own, so a count of whose they are would not be the count of
-    holes; on the Glyph C3, the holes are its `np_thru_hole` pads and the
-    cutouts its milled circles, each counted off the file's tree. And the
-    overlap is in the JSON (OH-163's confirm verification):
-    `holes_np_thru_hole` is how many of `holes` are pads the artwork line
-    counts too -- none of the Uno's `<hole>`s, every one of the Glyph's, and
-    the very count its artwork line prints under `np_thru_hole`."""
+    `not_drawn`, caught here as it returns. Since OH-226 a hole is cut and
+    no gap: `holes` counts a slot alone, which no composed board drills,
+    and `cutouts` and the overlap OH-163's confirm verification put in the
+    JSON, `holes_np_thru_hole`, went with the gap they measured. What is
+    printed instead is what is cut, each counted off the file: on the Uno
+    its `<hole>`s, its own and none a package's; on the Glyph C3 its
+    `np_thru_hole` pads, which its artwork line counts as pads with no
+    copper, and its milled circles. What reaches into a hole rides as
+    `into_holes`, which on both is nothing."""
     seen = []
     real = compose.not_drawn
 
@@ -5918,16 +5924,19 @@ def test_the_gaps_ride_as_compose_measured_them(capsys):
         seen.append(real(*args, **kwargs))
         return seen[-1]
 
-    keys = {"ink", "text", "copper", "cutouts", "holes", "holes_np_thru_hole", "milled",
-            "turn_unseen", "unmodelled", "no_pads"}
+    keys = {"ink", "text", "copper", "holes", "milled", "into_holes", "turn_unseen",
+            "unmodelled", "no_pads"}
     spec = _uno_whole()
     with mock.patch.object(compose, "not_drawn", spy):
-        _accounting(spec, capsys)
+        printed = _accounting(spec, capsys).splitlines()
     (gaps,) = seen
     holes = eagle.read_board(spec.layout).holes
     assert set(gaps) == keys, gaps
-    assert gaps["holes"] == len(holes) > len({hole.element for hole in holes}), gaps
-    assert (gaps["cutouts"], gaps["milled"], gaps["holes_np_thru_hole"]) == (0, {}, 0), gaps
+    assert (gaps["holes"], gaps["milled"], gaps["into_holes"]) == (0, {}, {}), gaps
+    assert len(holes) > len({hole.element for hole in holes}) == 1, holes
+    assert _counted(printed, "  holes ") == (
+        f"  holes   {len(holes)} cut: 3.200 mm x{len(holes)} in the board itself"), printed
+    assert not _counted(printed, "  cutouts"), printed
     _newstroke()
     glyph = next(s for s in compose.COMPOSITIONS if s.board == "PCBCUPID Glyph C3")
     if not _fetched(glyph):
@@ -5941,10 +5950,804 @@ def test_the_gaps_ride_as_compose_measured_them(capsys):
     with mock.patch.object(compose, "not_drawn", spy):
         printed = _accounting(glyph, capsys).splitlines()
     (gaps,) = seen
-    assert (gaps["holes"], gaps["cutouts"]) == (len(unplated), len(circles)) != (0, 0), gaps
-    assert gaps["holes_np_thru_hole"] == gaps["holes"], gaps
+    assert (gaps["holes"], gaps["into_holes"]) == (0, {}), gaps
+    assert (len(unplated), len(circles)) != (0, 0)
+    assert _counted(printed, "  holes ").startswith(f"  holes   {len(unplated)} cut: "), printed
+    assert _counted(printed, "  holes ").endswith(f"; {len(unplated)} of them np_thru_hole pads, "
+                                                  f"on the artwork line too as pads with no copper")
+    assert _counted(printed, "  cutouts").startswith(f"  cutouts {len(circles)} cut: "), printed
     artwork = next(line for line in printed if line.startswith("  artwork "))
-    assert f", np_thru_hole {gaps['holes_np_thru_hole']}," in artwork, (artwork, gaps)
+    assert f", np_thru_hole {len(unplated)}," in artwork, artwork
+
+
+def test_compose_cuts_the_holes_it_prints_and_says_what_reached_into_one(capsys):
+    """**`compose` hands the slab and the artwork the holes it prints**
+    (OH-226), caught in-process as `compose --check` runs: on the Uno, the
+    slab is cut along every hole `holes_of` gives and the artwork kept out
+    of the same; on the QT Py, the one silkscreen stroke that reaches an X6
+    peg is printed on an `into` line with the hole it reaches, and rides in
+    `not_drawn` as `into_holes`, and nothing on the Uno reaches one."""
+    calls: dict[str, list] = {"slab": [], "artwork": [], "not_drawn": []}
+    real = {name: getattr(compose, name) for name in calls}
+
+    def spying(name):
+        def spy(*args, **kwargs):
+            calls[name].append((args, kwargs))
+            return real[name](*args, **kwargs)
+        return spy
+
+    spec = _uno_whole()
+    with (mock.patch.object(compose, "slab", spying("slab")),
+          mock.patch.object(compose, "artwork", spying("artwork")),
+          mock.patch.object(compose, "not_drawn", spying("not_drawn"))):
+        printed = _accounting(spec, capsys).splitlines()
+    board = compose.read_layout(spec.layout)
+    holes = compose.holes_of(board, compose.outer(board.outline)[1])
+    ((args, _kwargs),) = calls["slab"]
+    assert len(holes) == 4 and args[4] == list(holes.values()), args[4:]
+    ((args, _kwargs),) = calls["artwork"]
+    assert args[6] == holes, args[6:]
+    assert not _counted(printed, "  into"), printed
+    qt_py = next(s for s in compose.COMPOSITIONS if s.board == "Adafruit QT Py ESP32-C3")
+    if not _fetched(qt_py):
+        pytest.skip(f"SKIPPED: {qt_py.layout.name} is not fetched; {qt_py.fetch_with}")
+    calls["not_drawn"].clear()
+    with mock.patch.object(compose, "not_drawn", spying("not_drawn")):
+        printed = _accounting(qt_py, capsys).splitlines()
+    ((args, _kwargs),) = calls["not_drawn"]
+    peg = "0.650 mm hole in X6 at (11.780, 15.437)"
+    assert args[-1] == {peg: {"ink": 1}}, args[-1]
+    assert (f"  into    1 piece(s) of artwork reach into a hole and are not drawn: "
+            f"ink 1 into the {peg}") in printed, printed
+
+
+# --- the holes, cut through the slab (OH-226) -------------------------------------
+
+
+def _diamond(x: float, y: float, r: float) -> list[tuple[float, float]]:
+    """A square hole stood on a corner, clockwise as `slab` cuts one: its
+    rightmost and leftmost corners on its centre's row, exactly."""
+    return [(x + r, y), (x, y - r), (x - r, y), (x, y + r)]
+
+
+def _cut_exactly(outline, holes, faces, probes) -> list:
+    """What is wrong with `faces` as the top of a slab of `outline` less
+    `holes`, or [] if nothing (OH-226). Held off the rings, never off the
+    walk `bridged` makes of them: every face is wound forward and their
+    areas sum to the outline's shoelace area less each hole's; and each
+    probe is under exactly one face where it is inside the outline and in
+    no hole, and under none where it is not -- so a hole covered, a face
+    lying twice, and board left bare are each found where they are. Each
+    face is probed besides at its centroid and toward each corner. A probe
+    on a face's own edge is skipped, being under both faces or neither."""
+    wrong = []
+    areas = [compose._cross(*face) / 2 for face in faces]
+    if areas and min(areas) <= 0:
+        wrong.append(("a face of no area or wound backwards", min(areas)))
+    want = (abs(compose._area(outline)) - sum(abs(compose._area(hole)) for hole in holes)) / 2
+    if sum(areas) != pytest.approx(want, rel=1e-9, abs=1e-9):
+        wrong.append(("area", sum(areas), want))
+    inside = []
+    for face, area in zip(faces, areas):
+        if area < 1e-12:
+            continue
+        middle = (sum(x for x, _y in face) / 3, sum(y for _x, y in face) / 3)
+        inside += [middle] + [(0.8 * x + 0.2 * middle[0], 0.8 * y + 0.2 * middle[1])
+                              for x, y in face]
+    xs, ys = [x for x, _y in outline], [y for _x, y in outline]
+    cell = max(max(xs) - min(xs), max(ys) - min(ys)) / 32
+    grid: dict[tuple[int, int], list] = {}
+    for face in faces:
+        for gx in range(int((min(x for x, _y in face) - min(xs)) / cell),
+                        int((max(x for x, _y in face) - min(xs)) / cell) + 1):
+            for gy in range(int((min(y for _x, y in face) - min(ys)) / cell),
+                            int((max(y for _x, y in face) - min(ys)) / cell) + 1):
+                grid.setdefault((gx, gy), []).append(face)
+    for point in [*probes, *inside]:
+        cell_at = (math.floor((point[0] - min(xs)) / cell), math.floor((point[1] - min(ys)) / cell))
+        sides = [(compose._cross(a, b, point), compose._cross(b, c, point),
+                  compose._cross(c, a, point)) for a, b, c in grid.get(cell_at, [])]
+        if any(min(side) == 0 <= max(side) for side in sides):
+            continue
+        under = sum(min(side) > 0 for side in sides)
+        board = (compose.point_in(outline, point)
+                 and not any(compose.point_in(hole, point) for hole in holes))
+        if under != int(board):
+            wrong.append(("probe", point, under, board))
+    return wrong
+
+
+def _slab_parts(mesh, colour: str, thickness: float):
+    """The top face, the bottom face and the walls of a slab `compose.slab`
+    drew about (0, 0): a face's triangles as board points, the bottom's
+    turned to wind as the top's do; a wall's as scene points, with the
+    normal stored on them."""
+    positions, normals, indices = mesh.groups[colour]
+    top, bottom, walls = [], [], []
+    for at in range(0, len(indices), 3):
+        corners = indices[at:at + 3]
+        scene = [tuple(positions[3 * i:3 * i + 3]) for i in corners]
+        normal = tuple(normals[3 * corners[0]:3 * corners[0] + 3])
+        board = tuple((x, -z) for x, _up, z in scene)
+        if normal == (0.0, 1.0, 0.0):
+            assert all(up == thickness for _x, up, _z in scene), scene
+            top.append(board)
+        elif normal == (0.0, -1.0, 0.0):
+            assert all(up == 0.0 for _x, up, _z in scene), scene
+            bottom.append(board[::-1])
+        else:
+            walls.append((scene, normal))
+    return top, bottom, walls
+
+
+def _probes_round(holes) -> list[tuple[float, float]]:
+    """Points in each hole -- its middle, and nine tenths of the way to each
+    corner -- and just outside it, a twentieth of the way past each."""
+    probes = []
+    for hole in holes:
+        mx = sum(x for x, _y in hole) / len(hole)
+        my = sum(y for _x, y in hole) / len(hole)
+        probes.append((mx, my))
+        for x, y in hole:
+            probes += [(mx + 0.9 * (x - mx), my + 0.9 * (y - my)),
+                       (mx + 1.05 * (x - mx), my + 1.05 * (y - my))]
+    return probes
+
+
+def test_a_drilled_hole_is_cut_along_the_ring_a_milled_circle_of_its_size_is(tmp_path):
+    """**An unplated hole is cut as a circle KiCad mills is drawn** (OH-226):
+    `drilled` flattens it by `arc_points` at `ARC_CHORD_MM` in four quarter
+    turns split at its extremes, so for a size it is the very ring
+    `from_kicad` reads out of a `gr_circle` on Edge.Cuts, compared here
+    point for point. Every point is on the circle, every side is a chord no
+    longer than `ARC_CHORD_MM`, the span either way is the drill -- at
+    1.7 mm too, whose half turn takes an odd number of steps -- and no side
+    stands inside the circle by more than r(1 - cos(min(chord / 2r, pi /
+    2))), which is the chord error, so the hole cut is never larger than its
+    drill. A slot is refused by name: `eagle.Hole` states its length and
+    not its direction."""
+    for drill in (0.65, 3.2, 3.4):
+        r = drill / 2
+        ring = compose.drilled(eagle.Hole(5.0, -5.0, drill, "H1"))
+        path = tmp_path / f"milled-{drill}.kicad_pcb"
+        path.write_text("(kicad_pcb\n\t(version 20241229)\n" + _cut("gr_rect", 0, 0, 20, 10)
+                        + f'\t(gr_circle (center 5 5) (end 5 {5 + r}) (fill none) '
+                          f'(layer "Edge.Cuts"))\n'
+                        + _edge_footprint("J1", "10 5", "") + ")\n", encoding="utf-8")
+        (milled,) = compose.outer(compose.from_kicad(path).outline)[1]
+        assert ({(round(x, 9), round(y, 9)) for x, y in ring}
+                == {(round(x, 9), round(y, 9)) for x, y in milled}), (drill, len(ring), len(milled))
+        assert len(set(ring)) == len(ring), "a point repeated"
+        assert all(math.dist(point, (5.0, -5.0)) == pytest.approx(r, abs=1e-9) for point in ring)
+        sides = [math.dist(a, b) for a, b in zip(ring, ring[1:] + ring[:1])]
+        assert max(sides) <= compose.ARC_CHORD_MM, (drill, max(sides))
+        for axis in (0, 1):
+            span = max(p[axis] for p in ring) - min(p[axis] for p in ring)
+            assert span == pytest.approx(drill, abs=1e-9), (drill, axis, span)
+        bound = r * (1 - math.cos(min(compose.ARC_CHORD_MM / (2 * r), math.pi / 2)))
+        stand_off = max(r - math.dist(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), (5.0, -5.0))
+                        for a, b in zip(ring, ring[1:] + ring[:1]))
+        assert 0 < stand_off <= bound + 1e-12, (drill, stand_off, bound)
+    with pytest.raises(ValueError, match=r"0\.6 x 1\.2 mm slot in H1 .*no.* direction"):
+        compose.drilled(eagle.Hole(1.0, 2.0, 0.6, "H1", slot_mm=1.2))
+
+
+def test_holes_sharing_a_row_are_bridged_where_a_ray_runs_through_a_vertex():
+    """**Holes share rows, and a ray along one runs through a vertex**
+    (OH-226, the first risk OH-163's review named): a circle is split
+    exactly on its centre's row, so a +x ray from one hole's rightmost
+    point can meet the next hole's leftmost point exactly, where Eberly's
+    ray-and-edge construction has its special cases. `bridged` casts no
+    ray: it takes the nearest point right of M that M sees, held exactly.
+    Three diamonds on one row, the ray from each meeting the next's corner
+    -- each is bridged to that very corner, and the slab's top is the
+    board less the three, probed. And SparkFun's standoff, three of them on
+    a row, cut as `drilled` cuts them."""
+    outline = [(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (0.0, 10.0)]
+    row = [_diamond(5.0, 5.0, 1.0), _diamond(8.0, 5.0, 1.0), _diamond(11.0, 5.0, 1.0)]
+    for left, right in itertools.pairwise(row):
+        assert left[0][1] == right[2][1] == 5.0 and left[0][0] < right[2][0], (left, right)
+    walk = compose.bridged(outline, row)
+    for left, right in itertools.pairwise(row):
+        at = walk.index(left[0])
+        assert walk[at - 1] == right[2], (left[0], walk[at - 1])
+    triangles = compose.ear_clip(walk)
+    faces = [(walk[a], walk[b], walk[c]) for a, b, c in triangles]
+    assert not _cut_exactly(outline, row, faces, _grid(20, 10) + _probes_round(row))
+    standoffs = [compose.drilled(eagle.Hole(x, 5.0, 3.302))[::-1] for x in (4.0, 9.0, 14.0)]
+    walk = compose.bridged(outline, standoffs)
+    faces = [(walk[a], walk[b], walk[c]) for a, b, c in compose.ear_clip(walk)]
+    wrong = _cut_exactly(outline, standoffs, faces, _grid(20, 10) + _probes_round(standoffs))
+    assert not wrong, wrong[:3]
+
+
+#: A board 4 mm wide and three holes down its right side, each of whose
+#: rightmost corners sees only the board's two right-hand corners right of
+#: it, the lower nearer to all three (OH-226).
+_TALL = [(0.0, 0.0), (4.0, 0.0), (4.0, 30.0), (0.0, 30.0)]
+_TALL_HOLES = [_diamond(3.0, 2.0, 0.5), _diamond(3.0, 4.5, 0.5), _diamond(3.0, 7.0, 0.5)]
+
+
+def test_a_point_bridged_to_again_and_again_is_entered_at_the_visit_facing_the_hole():
+    """**A point bridged to twice is in the walk three times** (OH-226, the
+    review's first risk again): each bridge is walked out and back, so the
+    point it starts from is visited once more each time. Here three holes
+    are bridged to one corner, which the walk visits four times, and each
+    later bridge must leave from the visit whose corner M lies inside --
+    from the way out round to the way in -- or the walk crosses itself
+    there. Whichever corner the outline starts from, the slab's top is the
+    board less the three."""
+    for start in range(4):
+        outline = _TALL[start:] + _TALL[:start]
+        walk = compose.bridged(outline, _TALL_HOLES)
+        assert walk.count((4.0, 0.0)) == 4, (start, walk.count((4.0, 0.0)))
+        faces = [(walk[a], walk[b], walk[c]) for a, b, c in compose.ear_clip(walk)]
+        wrong = _cut_exactly(outline, _TALL_HOLES, faces,
+                             _grid(4, 30) + _probes_round(_TALL_HOLES))
+        assert not wrong, (start, wrong[:3])
+
+
+def test_a_bridge_leaves_a_point_only_from_strictly_inside_its_corner():
+    """**`_sees` takes M strictly inside the corner a visit turns, never on
+    either side of it** (OH-226): from the corner (10, 0) of a square, M
+    inside is seen; M along the way out, along the way in, beyond the
+    square and below it is not. A bridge along a side would lie on that
+    edge. No fetched board reaches either side -- tried nearest first, the
+    side's own far end is nearer and decides first -- so they are held here,
+    on the predicate itself (two mutations taking a side as inside survived
+    every other test)."""
+    square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+    assert [compose._sees(square, 1, m) for m in (
+        (5.0, 5.0), (10.0, 5.0), (5.0, 0.0), (15.0, 5.0), (5.0, -5.0))] == [
+        True, False, False, False, False]
+
+
+#: A board 40 x 5 mm with a corner on its top edge at (5.5, 5), a small hole
+#: below it, and a long thin hole between the two that reaches further right
+#: than the small one (OH-226).
+_SHADOW = [(0.0, 0.0), (40.0, 0.0), (40.0, 5.0), (5.5, 5.0), (0.0, 5.0)]
+_SHADOW_HOLES = [_diamond(5.0, 1.0, 0.2), [(30.0, 2.2), (30.0, 2.0), (1.0, 2.0), (1.0, 2.2)]]
+
+
+def test_holes_are_bridged_rightmost_first_and_never_across_one_another():
+    """**Rightmost first, and never across anything** (OH-226): the point
+    nearest the small hole's rightmost corner M is the board's corner at
+    (5.5, 5), and the long hole lies across the way to it. Bridged in the
+    order given, the long one not yet in the walk, that corner would be
+    taken and the bridge cut through the long hole; rightmost first, the
+    long hole is in the walk when the small one is bridged, and the bridge
+    to the corner crosses an edge of the walk, so it is not taken. Either
+    order the bridges that cross are what the slab's own probes find."""
+    small, long = _SHADOW_HOLES
+    m = small[0]
+    assert min((p for p in _SHADOW if p[0] > m[0]), key=lambda p: math.dist(p, m)) == (5.5, 5.0)
+    assert (compose._sign(long[1], long[2], m) * compose._sign(long[1], long[2], (5.5, 5.0)) < 0
+            and compose._sign(m, (5.5, 5.0), long[1]) * compose._sign(m, (5.5, 5.0), long[2]) < 0)
+    for holes in (_SHADOW_HOLES, _SHADOW_HOLES[::-1]):
+        walk = compose.bridged(_SHADOW, holes)
+        faces = [(walk[a], walk[b], walk[c]) for a, b, c in compose.ear_clip(walk)]
+        wrong = _cut_exactly(_SHADOW, holes, faces, _grid(40, 5) + _probes_round(holes))
+        assert not wrong, wrong[:3]
+
+
+def test_a_hole_not_inside_the_board_is_refused_by_name():
+    """**A hole the board does not hold is refused, not cut** (OH-226): one
+    beyond the outline, whose rightmost corner no point of the board sees,
+    by name and place; one across the outline's edge, as the ring crossing
+    itself that its walk then is, naming where."""
+    square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+    with pytest.raises(ValueError, match=r"no point of the walk sees \(12\.0, 5\.0\)"):
+        compose.slab(square, 1.6, "#313d63", (0.0, 0.0), [_diamond(11.0, 5.0, 1.0)])
+    with pytest.raises(compose.SelfCrossing, match="crosses itself"):
+        compose.slab(square, 1.6, "#313d63", (0.0, 0.0), [_diamond(0.2, 5.0, 1.0)])
+
+
+def test_a_hole_entered_at_the_wrong_visit_is_refused_by_ear_clips_crossing_guard():
+    """**The gap OH-163 closed, on a bridged walk** (OH-226, the review's
+    second risk). On `_TALL`, two holes bridged to the corner (4, 0) leave
+    it in the walk three times, and the third hole's rightmost corner sees
+    it, crossing nothing -- from inside the corner one visit turns, and
+    from outside the other two's. Spliced in at either of those, the walk
+    crosses itself at the corner and nowhere else: no two of its edges
+    cross, so the edge test passes it. `ear_clip` refuses it as a
+    `SelfCrossing` naming the corner, and so does `slab`, which fills its
+    walk with `ear_clip` -- here handed that walk in `bridged`'s place: the
+    slab path inherits the guard. Without `_crossing_point`, the walk is
+    refused only as having "no ear" while it "crosses nowhere", which
+    misnames it -- as every such splice a seeded search made did, none
+    coming back covering a face twice as OH-163's `_TWICE` did (OH-226's
+    note has the search). Spliced in at the visit `_sees` takes, it is the
+    board less the three holes."""
+    walk = compose.bridged(_TALL, _TALL_HOLES[:2])
+    third = _TALL_HOLES[2]
+    m, corner = third[0], (4.0, 0.0)
+    assert m == max(third)
+    visits = [at for at, p in enumerate(walk) if p == corner]
+    assert len(visits) == 3, visits
+    probes = _grid(4, 30) + _probes_round(_TALL_HOLES)
+    filled = refused = 0
+    for at in visits:
+        spliced = walk[:at + 1] + third + [m, corner] + walk[at + 1:]
+        if compose._sees(walk, at, m):
+            faces = [(spliced[a], spliced[b], spliced[c]) for a, b, c in compose.ear_clip(spliced)]
+            assert not _cut_exactly(_TALL, _TALL_HOLES, faces, probes)
+            filled += 1
+            continue
+        assert compose._crossed_edges(spliced) is None
+        with pytest.raises(compose.SelfCrossing, match=r"crosses itself at \(4\.0, 0\.0\)"):
+            compose.ear_clip(spliced)
+        with (mock.patch.object(compose, "_crossing_point", lambda _ring: None),
+              pytest.raises(ValueError, match=r"no ear found .* crosses nowhere")):
+            compose.ear_clip(spliced)
+        with (mock.patch.object(compose, "bridged", lambda _ring, _holes, walk=spliced: walk),
+              pytest.raises(compose.SelfCrossing, match=r"crosses itself at \(4\.0, 0\.0\)")):
+            compose.slab(_TALL, 1.6, "#313d63", (0.0, 0.0), _TALL_HOLES)
+        refused += 1
+    assert (filled, refused) == (1, 2)
+
+
+def test_the_slab_is_turned_so_its_walls_face_out_of_the_board_and_into_its_holes():
+    """**`slab` turns its rings, and does not take their winding on trust**
+    (OH-226, the review's third risk): a wall's normal is its edge turned a
+    quarter to the right, which faces out of the board along an outline
+    wound counter-clockwise and into a hole along one wound clockwise, and
+    `contours` chains a vendor's outline whichever way the file walks it --
+    the Uno's, a XIAO ESP32-C3's and both Glyphs' among those that come
+    clockwise. Fed either winding of each, every wall faces out of the
+    board, into the hole on a hole's, each triangle wound to face where its
+    normal does; the top and bottom are wound up and down. A ring of no
+    area has no winding to turn, and is refused naming it."""
+    square = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+    hole = compose.drilled(eagle.Hole(5.0, 5.0, 3.2))
+    for outline in (square, square[::-1]):
+        for holes in ([], [hole], [hole[::-1]]):
+            mesh = compose.slab(outline, 1.6, "#313d63", (0.0, 0.0), holes)
+            top, bottom, walls = _slab_parts(mesh, "#313d63", 1.6)
+            assert all(compose._cross(*face) > 0 for face in top + bottom)
+            assert len(walls) == 2 * (len(square) + sum(map(len, holes)))
+            for scene, normal in walls:
+                (x0, y0, z0), (x1, y1, z1), (x2, y2, z2) = scene
+                e, f = (x1 - x0, y1 - y0, z1 - z0), (x2 - x0, y2 - y0, z2 - z0)
+                facing = (e[1] * f[2] - e[2] * f[1], e[2] * f[0] - e[0] * f[2],
+                          e[0] * f[1] - e[1] * f[0])
+                assert sum(a * b for a, b in zip(facing, normal)) > 0, (scene, normal)
+                mx, my = (x0 + x1 + x2) / 3, -(z0 + z1 + z2) / 3
+                out = (normal[0], -normal[2])
+                on_hole = math.dist((mx, my), (5.0, 5.0)) < 2.0
+                away = (5.0 - mx, 5.0 - my) if on_hole else (mx - 5.0, my - 5.0)
+                assert out[0] * away[0] + out[1] * away[1] > 0, (outline[1], on_hole, scene)
+    with pytest.raises(ValueError, match=r"3-point ring of no area, from \(1\.0, 1\.0\)"):
+        compose.slab(square, 1.6, "#313d63", (0.0, 0.0), [[(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)]])
+
+
+def test_every_composed_boards_slab_is_its_outline_less_its_holes():
+    """**The evidence that the holes are cut** (OH-226), now that every
+    composed board's binary changes with them: on every fetched board, its
+    slab built from the outline and the holes `holes_of` says are cut,
+
+      * the top face's area, and the bottom's, is the outline's shoelace
+        area less each hole's, and every hole has its own;
+      * a point in each hole -- its middle, and most of the way to each
+        corner -- is under no face, and a point just outside one, or
+        anywhere on a millimetre grid in the board and in no hole, under
+        exactly one;
+      * the walls' area is each ring's perimeter times the thickness, the
+        outline's and each hole's apart, each wall on one ring;
+      * a face of V points in all, h of them holes, is V + 2h - 2
+        triangles, and the walls two a side -- so a hole of n sides adds
+        4n + 4."""
+    checked = []
+    for spec in _fill_layouts():
+        board = compose.read_layout(spec.layout)
+        ring, cutouts = compose.outer(board.outline)
+        holes = list(compose.holes_of(board, cutouts).values())
+        assert holes, f"{spec.board} cuts no hole, so this holds nothing of it"
+        assert all(cutout in holes for cutout in cutouts) and len(holes) == (
+            len(cutouts) + sum(1 for hole in board.holes if not hole.slot_mm)), spec.board
+        mesh = compose.slab(ring, spec.thickness_mm, spec.colour, (0.0, 0.0), holes)
+        top, bottom, walls = _slab_parts(mesh, spec.colour, spec.thickness_mm)
+        xs, ys = [x for x, _y in ring], [y for _x, y in ring]
+        probes = _probes_round(holes) + [
+            (min(xs) + 0.37 + gx, min(ys) + 0.61 + gy)
+            for gx in range(int(max(xs) - min(xs)) + 1) for gy in range(int(max(ys) - min(ys)) + 1)]
+        for face in (top, bottom):
+            wrong = _cut_exactly(ring, holes, face, probes)
+            assert not wrong, (spec.board, wrong[:3])
+        points = sum(map(len, holes)) + len(ring)
+        assert (len(top), len(bottom), len(walls)) == (
+            points + 2 * len(holes) - 2, points + 2 * len(holes) - 2, 2 * points), spec.board
+        which = {point: at for at, loop in enumerate([ring, *holes]) for point in loop}
+        lateral = [0.0] * (len(holes) + 1)
+        for scene, _normal in walls:
+            (on,) = {which[(x, -z)] for x, _up, z in scene}
+            e = [scene[1][k] - scene[0][k] for k in range(3)]
+            f = [scene[2][k] - scene[0][k] for k in range(3)]
+            lateral[on] += math.hypot(e[1] * f[2] - e[2] * f[1], e[2] * f[0] - e[0] * f[2],
+                                      e[0] * f[1] - e[1] * f[0]) / 2
+        for at, loop in enumerate([ring, *holes]):
+            perimeter = sum(math.dist(a, b) for a, b in zip(loop, loop[1:] + loop[:1]))
+            assert lateral[at] == pytest.approx(perimeter * spec.thickness_mm, rel=1e-9), (
+                spec.board, at, lateral[at], perimeter)
+        checked.append(spec.board)
+    assert checked
+
+
+def test_artwork_reaching_into_a_hole_is_dropped_and_counted_by_the_hole():
+    """**Artwork is kept out of the holes** (OH-226, the review's fourth
+    risk), not by a polygon difference this composer has none of, but by
+    dropping what reaches into one, counted against that hole by what it
+    is: a pad, a stroke of ink, a stroke of text, a fill, a trace and a
+    via, each reaching into a 2 mm hole, and one of each clear of it. A pad
+    dropped is a pad not drawn, said so, and its placement is not drawn by
+    its copper. Two more strokes hold the test itself, on a diamond hole:
+    one whose only way in is an edge crossing the hole's -- no corner of
+    either inside the other -- and one wholly round the hole, its middle
+    outside it; the fill, wholly inside the round hole, has only its
+    corners in it. A hole with no copper in it is said to be cut where a
+    hole is, and not where none is. No drawn triangle has a point inside a
+    hole."""
+    hole = compose.drilled(eagle.Hole(5.0, 5.0, 2.0))
+    diamond = _diamond(15.0, 5.0, 1.0)
+    pad_in = eagle.Pad("1", "smd", 5.8, 5.0, 0.8, 0.8, None, shape="circle")
+    pad_out = eagle.Pad("2", "smd", 8.0, 8.0, 0.8, 0.8, None, shape="circle")
+    cut = eagle.Pad("", "smd", 5.0, 5.0, 2.0, 2.0, None, shape="circle", hole=True)
+    uncut = eagle.Pad("", "smd", 2.0, 8.0, 1.0, 1.0, None, shape="circle", hole=True)
+    board = eagle.Board(
+        "holed", "test", (eagle.Element("U1", "test", "TEST", (pad_in, pad_out, cut, uncut)),), (),
+        silk=(eagle.Stroke("F.SilkS", 3.0, 5.0, 7.0, 5.0, 0.2),
+              eagle.Stroke("F.SilkS", 1.0, 1.0, 3.0, 1.0, 0.2),
+              eagle.Stroke("F.SilkS", 14.3, 5.8, 19.0, 5.8, 0.1),
+              eagle.Stroke("F.SilkS", 13.5, 5.0, 19.0, 5.0, 3.0)),
+        silk_fills=(eagle.Fill("F.SilkS", ((4.5, 4.5), (5.5, 4.5), (5.5, 5.5)), 0.0),
+                    eagle.Fill("F.SilkS", ((1.0, 8.0), (2.0, 8.0), (2.0, 9.0)), 0.0)),
+        traces=(eagle.Stroke("F.Cu", 5.0, 2.0, 5.0, 8.0, 0.25),
+                eagle.Stroke("F.Cu", 8.0, 1.0, 8.0, 3.0, 0.25)),
+        vias=(eagle.Via(5.0, 5.9, 0.4), eagle.Via(1.0, 5.0, 0.4)))
+    letters = [eagle.Stroke("F.SilkS", 4.0, 4.0, 6.0, 6.0, 0.15),
+               eagle.Stroke("F.SilkS", 7.5, 1.0, 9.0, 1.0, 0.15)]
+    outline = [(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (0.0, 10.0)]
+    meshes, tally, undrawn, into = compose.artwork(
+        board, outline, 1.6, (0.0, 0.0), "#313d63", letters,
+        {"the hole": hole, "the diamond": diamond})
+    assert into == {"the hole": {"pad": 1, "ink": 1, "text": 1, "fill": 1, "trace": 1, "via": 1},
+                    "the diamond": {"ink": 2}}, into
+    assert (tally["pads front"], tally["ink front"], tally["text front"], tally["fill front"],
+            tally["fill back"], tally["track front"], tally["vias"]) == (1, 1, 1, 1, 0, 1, 1), tally
+    assert undrawn == {"U1": [
+        (pad_in, "reaching into a hole cut through the board"),
+        (cut, "an unplated hole, cut through the board with no copper in it"),
+        (uncut, "an unplated hole, and no hole is cut")]}, undrawn
+    for mesh in meshes:
+        for colour in mesh.groups:
+            for face in _faces(mesh, colour):
+                middle = (sum(x for x, _y in face) / 3, sum(y for _x, y in face) / 3)
+                for point in [middle] + [(0.9 * x + 0.1 * middle[0], 0.9 * y + 0.1 * middle[1])
+                                         for x, y in face]:
+                    assert not compose.point_in(hole, point), (colour, face)
+                    assert not compose.point_in(diamond, point), (colour, face)
+
+
+#: What reaches into a hole on each composed board, by kind (OH-226),
+#: measured with each shape as drawn -- a stroke the rectangle its pen
+#: sweeps, a pad its outline -- against each hole as cut. Ink round Seeed's
+#: USB-C on the XIAO ESP32-C3 and nRF54L15 crosses its routed slots, text
+#: on the RP2350's underside lies over a USB-C peg, and one of Adafruit's
+#: silkscreen strokes on the QT Py reaches an X6 peg. Every other composed
+#: board draws nothing over a hole.
+INTO_HOLES = {
+    "XIAO-ESP32-C3-DIP": {"ink": 5},
+    "XIAO-RP2350-DIP": {"text": 6},
+    "XIAO-nRF54l15-DIP": {"ink": 2},
+    "Adafruit QT Py ESP32-C3": {"ink": 1},
+}
+
+
+def test_no_composed_boards_artwork_lies_in_a_hole_and_what_would_is_counted():
+    """**On every composed board, nothing drawn lies in a hole cut** (OH-226):
+    no point of any copper, ink, trace or via triangle -- each probed at its
+    middle and toward each corner -- is inside a hole `holes_of` says is
+    cut, and what was dropped for reaching into one is counted, per board
+    by kind as `INTO_HOLES` says, against holes that are cut."""
+    _newstroke()
+    checked = []
+    for spec in _fill_layouts():
+        board = compose.read_layout(spec.layout)
+        ring, cutouts = compose.outer(board.outline)
+        holes = compose.holes_of(board, cutouts)
+        letters, _unlettered, _lettered = compose.lettering(board.kicad_text)
+        meshes, _tally, _undrawn, into = compose.artwork(
+            board, ring, spec.thickness_mm, (0.0, 0.0), spec.colour, letters, holes)
+        assert set(into) <= set(holes), (spec.board, set(into) - set(holes))
+        kinds: dict[str, int] = {}
+        for counted in into.values():
+            for kind, count in counted.items():
+                kinds[kind] = kinds.get(kind, 0) + count
+        assert kinds == INTO_HOLES.get(spec.board, {}), (spec.board, into)
+        boxes = [(min(x for x, _y in h), min(y for _x, y in h), max(x for x, _y in h),
+                  max(y for _x, y in h)) for h in holes.values()]
+        lying = []
+        for mesh in meshes:
+            for colour in mesh.groups:
+                for face in _faces(mesh, colour):
+                    middle = (sum(x for x, _y in face) / 3, sum(y for _x, y in face) / 3)
+                    for point in [middle] + [(0.9 * x + 0.1 * middle[0], 0.9 * y + 0.1 * middle[1])
+                                             for x, y in face]:
+                        lying += [(colour, point) for hole, box in zip(holes.values(), boxes)
+                                  if box[0] < point[0] < box[2] and box[1] < point[1] < box[3]
+                                  and compose.point_in(hole, point)]
+        assert not lying, (spec.board, lying[:3])
+        checked.append(spec.board)
+    assert set(INTO_HOLES) <= set(checked) or len(checked) < len(_fill_layouts()), checked
+
+
+def _glb_faces(path: pathlib.Path, colour: str) -> list[tuple[tuple[float, float, float], ...]]:
+    """Each triangle of `colour` in a shipped `.glb`, as scene points, read
+    through its indices."""
+    raw = path.read_bytes()
+    json_length = struct.unpack("<I", raw[12:16])[0]
+    doc = json.loads(raw[20:20 + json_length])
+    binary = raw[20 + json_length + 8:]
+    faces = []
+    for primitive in doc["meshes"][0]["primitives"]:
+        if doc["materials"][primitive["material"]]["name"] != colour:
+            continue
+        reads = []
+        for accessor, width in ((primitive["attributes"]["POSITION"], 3), (primitive["indices"], 1)):
+            access = doc["accessors"][accessor]
+            view = doc["bufferViews"][access["bufferView"]]
+            at = view.get("byteOffset", 0) + access.get("byteOffset", 0)
+            kind = "f" if width == 3 else "I"
+            reads.append(struct.unpack_from(f"<{access['count'] * width}{kind}", binary, at))
+        flat, indices = reads
+        faces += [tuple(tuple(flat[3 * i:3 * i + 3]) for i in indices[at:at + 3])
+                  for at in range(0, len(indices), 3)]
+    return faces
+
+
+def test_the_shipped_models_are_cut_where_their_boards_are_drilled_and_milled():
+    """**The page's own files have the holes** (OH-226): in each composed
+    board's shipped `.glb`, no triangle of its board colour lying on the
+    top face covers the middle of a hole `holes_of` says is cut, nor one on
+    the bottom; and the board is there a twentieth of a radius beyond the
+    hole's rightmost point. The model's frame is its pad centre, which its
+    own `pcb_offset` gives against the outline's middle."""
+    from tools.import_3d_model import read_extras
+    checked = []
+    for spec in compose.COMPOSITIONS:
+        glb = REPO / "webui" / "static" / "models" / f"{compose._slug(spec.board)}.glb"
+        if not (glb.is_file() and spec.layout.is_file()):
+            continue
+        board = compose.read_layout(spec.layout)
+        ring, cutouts = compose.outer(board.outline)
+        extras = read_extras(glb)
+        xs, ys = [x for x, _y in ring], [y for _x, y in ring]
+        cx = (min(xs) + max(xs)) / 2 - extras["pcb_offset"][0]
+        cy = (min(ys) + max(ys)) / 2 + extras["pcb_offset"][1]
+        levels: dict[float, list] = {}
+        for face in _glb_faces(glb, spec.colour):
+            heights = {round(up, 4) for _x, up, _z in face}
+            if len(heights) == 1:
+                levels.setdefault(heights.pop(), []).append(tuple((x, -z) for x, _up, z in face))
+        for label, hole in compose.holes_of(board, cutouts).items():
+            mx = (min(x for x, _y in hole) + max(x for x, _y in hole)) / 2 - cx
+            my = (min(y for _x, y in hole) + max(y for _x, y in hole)) / 2 - cy
+            right = max(x for x, _y in hole) - cx
+            for level in (round(spec.thickness_mm, 4), 0.0):
+                under = [sum(min(sides) > -1e-9 or max(sides) < 1e-9 for sides in (
+                    (compose._cross(a, b, point), compose._cross(b, c, point),
+                     compose._cross(c, a, point)) for a, b, c in levels.get(level, [])))
+                         for point in ((mx, my), (right + 0.05 * (right - mx), my))]
+                assert under[0] == 0 and under[1] >= 1, (spec.board, label, level, under)
+        checked.append(spec.board)
+    if not checked:
+        pytest.skip("SKIPPED: no composed board is fetched and composed; run "
+                    "python tools/compose_board_3d.py")
+
+
+#: Each composed board whose vendor publishes its drill file in the tree its
+#: board file is fetched from (OH-226): the checkout, the file's path at the
+#: checkout's own commit, the git blob it was measured as -- content-
+#: addressed, so a different file is a different pin -- and whether it holds
+#: only unplated holes. SparkFun's EAGLE boards are drilled from one panel
+#: file each, Excellon, plated and unplated alike and untagged; KiCad's
+#: files say which tool is which. Seeed's XIAO ESP32-C6 is in its own zip.
+DRILL_FILES = {
+    "SparkFun Thing Plus ESP32-C6": (
+        "sparkfun-thing-plus-esp32-c6", "Production/Thing_Plus_ESP32_C6-Panel.TXT",
+        "8f8ce97bc8b4047f3cedde1092161e4363d273b5"),
+    "SparkFun Qwiic Pocket ESP32-C6": (
+        "sparkfun-qwiic-pocket-esp32-c6", "Production/Qwiic_Pocket_Dev_ESP32_C6-Panel.TXT",
+        "395fe0c8a7d80dd708c3d1121fc65949a9f9a3f4"),
+    "SparkFun Pro Micro ESP32-C3": (
+        "sparkfun-pro-micro-esp32-c3",
+        "Production/SparkFun_Dev_ESP32_C3_MINI-Panel_v11/SparkFun_Dev_ESP32_C3_MINI-Panel_v11b.TXT",
+        "527336b47182fe330ffd5efe12ed14b8575d213a"),
+    "SparkFun Thing Plus ESP32-C5": (
+        "sparkfun-thing-plus-esp32-c5",
+        "Hardware/Production/SparkFun_Thing_Plus_ESP32_C5_panelized.drl",
+        "d3fbe71361d57c54748d7c5b81318a56efc6509c"),
+    "Olimex ESP32-C3-DevKit-Lipo": (
+        "olimex-esp32-c3-devkit-lipo",
+        "HARDWARE/ESP32-C3-DevKit-Lipo_Rev_D/Gerbers/ESP32-C3-DevKit-Lipo_Rev_D-NPTH.drl",
+        "93a7d755a8e5f1cdfcdeb315bee6525a26fcf25d"),
+    "Olimex ESP32-C6-EVB": (
+        "olimex-esp32-c6-evb",
+        "HARDWARE/Hardware-revision-A/Gerbers/ESP32-C6-EVB_Rev_A-NPTH.drl",
+        "ff20f0e4fad04077fd8e40f6f381dffdf3b90547"),
+}
+
+#: How near a vendor's drill must be to a hole cut, in place and in size: the
+#: coarsest of these files writes a ten-thousandth of an inch, 0.00254 mm.
+DRILL_TOLERANCE_MM = 0.003
+
+
+def _excellon(text: str) -> list[tuple[float, float, float, bool | None]]:
+    """Each hit of an Excellon drill file as `(x, y, diameter, unplated)`, in
+    millimetres, `unplated` None where the file does not say. EAGLE writes
+    coordinates with their decimals implied by the header's format, KiCad
+    with a point; KiCad tags each tool, or the whole file, plated or not."""
+    tools, hits = {}, []
+    scale, decimals, unplated, tagged, tool = 1.0, None, None, None, None
+    for line in (line.strip() for line in text.splitlines()):
+        if match := re.search(r"TF\.FileFunction,(NonPlated|Plated)", line):
+            unplated = match.group(1) == "NonPlated"
+        elif match := re.search(r"TA\.AperFunction,(NonPlated|Plated)", line):
+            tagged = match.group(1) == "NonPlated"
+        elif line.startswith(("INCH", "METRIC")):
+            scale = 25.4 if line.startswith("INCH") else 1.0
+            if match := re.search(r",0*\.(0+)$", line):
+                decimals = len(match.group(1))
+        elif match := re.fullmatch(r"T(\d+)C([\d.]+)", line):
+            tools[match.group(1)] = (float(match.group(2)) * scale,
+                                     tagged if tagged is not None else unplated)
+            tagged = None
+        elif match := re.fullmatch(r"T(\d+)", line):
+            tool = match.group(1)
+        elif match := re.fullmatch(r"X([-\d.]+)Y([-\d.]+)", line):
+            x, y = (float(v) if "." in v or decimals is None else int(v) / 10 ** decimals
+                    for v in match.groups())
+            hits.append((x * scale, y * scale, *tools[tool]))
+    return hits
+
+
+def _gerber_drill(text: str) -> list[tuple[float, float, float, bool | None]]:
+    """Each flash of a Gerber X2 drill file as `_excellon` gives a hit; the
+    file's own function says whether its holes are plated."""
+    unplated = "FileFunction,NonPlated" in text
+    tools, hits, tool = {}, [], None
+    for line in text.splitlines():
+        if match := re.fullmatch(r"%ADD(\d+)C,([\d.]+)\*%", line):
+            tools[match.group(1)] = float(match.group(2))
+        elif match := re.fullmatch(r"D(\d+)\*", line):
+            tool = match.group(1)
+        elif match := re.fullmatch(r"X(-?\d+)Y(-?\d+)D03\*", line):
+            hits.append((int(match.group(1)) / 1e6, int(match.group(2)) / 1e6,
+                         tools[tool], unplated))
+    assert "%FSLAX46Y46*%" in text, "not the 4.6 format this reads"
+    return hits
+
+
+def _drill_file(board: str) -> list[tuple[float, float, float, bool | None]] | str:
+    """The hits of `board`'s vendor drill file, or why there are none here."""
+    import subprocess
+    import zipfile
+
+    if board == "XIAO-ESP32-C6-DIP":
+        from tests.rules.test_kicad import SEEED_C6_ROOT, SEEED_PCB
+        zipped = SEEED_PCB / "ESP32-C6.zip"
+        if not zipped.is_file():
+            return f"{zipped.name} is not fetched; python tools/compose_board_3d.py"
+        with zipfile.ZipFile(zipped) as bundle:
+            return _gerber_drill(bundle.read(
+                f"{SEEED_C6_ROOT}XIAO ESP32 C6_gerber/XIAO ESP32 C6-NPTH-drl.gbr").decode("ascii"))
+    checkout, path, pinned = DRILL_FILES[board]
+    where = REPO / "third_party" / checkout
+    # Never a lazy fetch from inside a test: a partial clone that lacks the
+    # blob says so, and the command that fetches it is named.
+    env = {**__import__("os").environ, "GIT_NO_LAZY_FETCH": "1"}
+    blob = subprocess.run(["git", "-C", str(where), "rev-parse", f"HEAD:{path}"],
+                          capture_output=True, text=True, env=env, check=False)
+    if blob.returncode:
+        return f"{where.name} has no {path}: {blob.stderr.strip()}"
+    assert blob.stdout.strip() == pinned, (
+        f"{board}'s drill file is now blob {blob.stdout.strip()}, not the {pinned} "
+        f"measured here: re-measure before holding the holes to it")
+    text = subprocess.run(["git", "-C", str(where), "cat-file", "-p", blob.stdout.strip()],
+                          capture_output=True, env=env, check=False)
+    if text.returncode:
+        return (f"{path} is not in {where.name}'s partial clone; fetch it with "
+                f"git -C third_party/{checkout} cat-file -p HEAD:{path}")
+    return _excellon(text.stdout.decode("utf-8"))
+
+
+def test_the_holes_cut_are_where_the_vendors_own_drill_files_drill_them():
+    """**Held to the vendors' own drill files** (OH-226), the oracle the
+    "binary unchanged" evidence of earlier slices gave way to. Seven
+    composed boards' vendors publish one beside the board file: SparkFun's
+    EAGLE panels for the Thing Plus C6, Qwiic Pocket C6 and Pro Micro C3
+    and its KiCad panel for the Thing Plus C5, Olimex's NPTH files for the
+    C3-DevKit-Lipo (revision D) and C6-EVB (revision A), and Seeed's NPTH
+    Gerber for the XIAO ESP32-C6. For each, every drilled hole cut -- its
+    ring's middle and span -- lands on a hit of its own size, all under one
+    translation (a panel repeats the board, and a KiCad file may drill from
+    an auxiliary origin); and within that copy of the board the file's
+    unplated hits -- those its tools are tagged unplated, or, in SparkFun's
+    untagged EAGLE panels, every hit of a size cut -- are exactly the holes
+    cut, one each."""
+    _newstroke()
+    held, why_not = [], {}
+    for spec in compose.COMPOSITIONS:
+        if spec.board not in DRILL_FILES and spec.board != "XIAO-ESP32-C6-DIP":
+            continue
+        if not spec.layout.is_file():
+            why_not[spec.board] = f"{spec.layout.name} is not fetched; {spec.fetch_with}"
+            continue
+        hits = _drill_file(spec.board)
+        if isinstance(hits, str):
+            why_not[spec.board] = hits
+            continue
+        board = compose.read_layout(spec.layout)
+        ring, cutouts = compose.outer(board.outline)
+        cut = []
+        for label, hole in compose.holes_of(board, cutouts).items():
+            if hole in cutouts:
+                continue
+            xs, ys = [x for x, _y in hole], [y for _x, y in hole]
+            assert max(xs) - min(xs) == pytest.approx(max(ys) - min(ys), abs=1e-9), label
+            cut.append(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, max(xs) - min(xs)))
+        assert cut, spec.board
+
+        def near(a, b) -> bool:
+            return all(abs(p - q) <= DRILL_TOLERANCE_MM for p, q in zip(a, b))
+
+        shifts = [(hx - cut[0][0], hy - cut[0][1]) for hx, hy, size, _u in hits
+                  if abs(size - cut[0][2]) <= DRILL_TOLERANCE_MM]
+        copies = [(dx, dy) for dx, dy in shifts
+                  if all(any(near((x + dx, y + dy, size), hit[:3]) for hit in hits)
+                         for x, y, size in cut)]
+        assert copies, (spec.board, cut[:3], sorted({round(h[2], 4) for h in hits}))
+        dx, dy = copies[0]
+        sizes = {round(size, 3) for _x, _y, size in cut}
+        mine = [(x - dx, y - dy, size) for x, y, size, unplated in hits
+                if compose.point_in(ring, (x - dx, y - dy))
+                and (unplated if unplated is not None else round(size, 3) in sizes)]
+        assert len(mine) == len(cut), (spec.board, len(mine), len(cut), mine[:4])
+        assert all(any(near(hit, hole) for hole in cut) for hit in mine), (spec.board, mine)
+        held.append(spec.board)
+    if why_not:
+        pytest.skip(f"SKIPPED: held {held or 'none'}; not held, each saying why: {why_not}")
+
+
+def test_a_slot_is_not_cut_and_is_counted_as_not_drawn(tmp_path, capsys):
+    """**A slot is left uncut and said so** (OH-226): `eagle.Hole` carries a
+    slot's length and not its direction, so `holes_of` cuts a board's
+    round holes and not its slot, `not_drawn["holes"]` counts the slot, and
+    the `holes` line says which are cut and which is not, and why. On
+    `UNPLATED`, composed here as a board of its own, two round holes and
+    one oval drill, each round one named by its drill, its element and
+    where it is. No composed board drills a slot (`test_every_unplated_
+    hole_a_kicad_board_drills_is_printed_with_its_size`)."""
+    path = tmp_path / "unplated.kicad_pcb"
+    path.write_text(UNPLATED, encoding="utf-8")
+    board = compose.from_kicad(path)
+    _ring, cutouts = compose.outer(board.outline)
+    holes = compose.holes_of(board, cutouts)
+    assert sorted(holes) == sorted(
+        f"{hole.drill_mm:.3f} mm hole in H1 at ({hole.x_mm:.3f}, {hole.y_mm:.3f})"
+        for hole in board.holes if not hole.slot_mm), sorted(holes)
+    assert len(holes) == 2 and sorted(holes)[1].startswith("1.100 mm hole in H1 at (10.000, -3.000)")
+    # Two holes named alike are one drawn over the other, and are refused.
+    with pytest.raises(ValueError, match=r"two holes are each the 1\.100 mm hole in H1"):
+        compose.holes_of(dataclasses.replace(board, holes=board.holes + board.holes[:1]), cutouts)
+    gaps = compose.not_drawn(board, {}, {}, [], [], [], {})
+    assert (gaps["holes"], gaps["into_holes"]) == (1, {}), gaps
+    _newstroke()
+    spec = compose.Composition("Unplated", path, "written by this test", None, "test",
+                               ("H1",), 1.6, "#313d63", "test")
+    assert _counted(_accounting(spec, capsys).splitlines(), "  holes ") == (
+        "  holes   2 cut: 1.100 mm x1 in H1 (H1); 0.900 mm x1 in H1 (H1); 1 not cut, a "
+        "slot's direction being on no eagle.Hole: 0.600 x 1.200 mm slot x1 in H1 (H1); "
+        "3 of them np_thru_hole pads, on the artwork line too as pads with no copper")
 
 
 def test_a_placement_with_no_pad_that_states_a_mesh_is_a_part(tmp_path, capsys):
