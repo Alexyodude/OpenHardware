@@ -28,7 +28,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define CORTEXM0_ABI_VERSION 13
+#define CORTEXM0_ABI_VERSION 14
 
 /// r0-r15, then the flags.
 ///
@@ -162,6 +162,16 @@ CORTEXM0_API uint64_t cortexm0_executed(const CortexM0Cpu* cpu);
 /// watching: 1 is a hole in this emulator's instruction set, 2 is a program
 /// that ran off into space this core does not model.
 CORTEXM0_API int cortexm0_step(CortexM0Cpu* cpu);
+
+/// The PC the most recent cortexm0_step began at; zero before the first.
+///
+/// For when the core faults on the host part-way through a step (OH-225): a
+/// step advances PC before executing, so afterwards PC names the next
+/// instruction rather than the one that faulted. Recorded before a due
+/// SysTick's entry too, so on a step that entered the handler it is the
+/// instruction that was interrupted. Every step records it, at the cost of
+/// one store, so a caller need not read PC before each step to have it.
+CORTEXM0_API uint32_t cortexm0_step_entry(const CortexM0Cpu* cpu);
 
 /// The address of the most recent failed access, and whether it was a fetch.
 /// Only meaningful straight after a step returned 2. See cpu.h for why the

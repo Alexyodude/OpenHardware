@@ -13,6 +13,10 @@ namespace {
 /// The opaque handle is this, so the C surface never exposes a C++ type.
 struct Handle {
     cortexm0::Cpu cpu;
+    // The PC the most recent cortexm0_step began at, for cortexm0_step_entry
+    // (OH-225). Kept here rather than in cortexm0::Cpu: it is a fact about the
+    // ABI's calls, not about the processor.
+    uint32_t step_pc = 0;
 };
 
 inline Handle* as_handle(CortexM0Cpu* cpu) { return reinterpret_cast<Handle*>(cpu); }
@@ -176,7 +180,13 @@ int cortexm0_fault_was_fetch(const CortexM0Cpu* cpu) {
 }
 
 int cortexm0_step(CortexM0Cpu* cpu) {
-    cortexm0::Cpu& processor = as_handle(cpu)->cpu;
+    Handle* handle = as_handle(cpu);
+    cortexm0::Cpu& processor = handle->cpu;
+    // Recorded before stepping, so before the exception entry a due SysTick
+    // makes of a step and before the fetch: the step advances PC before it
+    // executes, so if the core then faults on the host the PC no longer says
+    // which step it was, and this does.
+    handle->step_pc = processor.reg(cortexm0::kPc);
     const cortexm0::StepResult result = cortexm0::step(processor);
     // Only a retired instruction ages the machine. On Unimplemented or
     // MemoryFault the processor is untouched, PC included, so a program
@@ -186,6 +196,10 @@ int cortexm0_step(CortexM0Cpu* cpu) {
         processor.note_executed();
     }
     return static_cast<int>(result);
+}
+
+uint32_t cortexm0_step_entry(const CortexM0Cpu* cpu) {
+    return cpu == nullptr ? 0u : as_handle(cpu)->step_pc;
 }
 
 }  // extern "C"

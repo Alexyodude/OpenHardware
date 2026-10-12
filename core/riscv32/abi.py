@@ -37,7 +37,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match RISCV32_ABI_VERSION in abi.h.
-ABI_VERSION = 4
+ABI_VERSION = 5
 
 #: `riscv32::WriteOp`, by the name a board description uses.
 #:
@@ -114,6 +114,16 @@ UNIMPLEMENTED = 1
 MEMORY_FAULT = 2
 ILLEGAL = 3
 
+#: How many halfwords a `HostFault` shows from where its step began: an RV32
+#: instruction is one 16-bit parcel or two, and the core fetches it as such.
+FAULT_HALFWORDS = 2
+
+#: How ctypes words an access violation that WROTE (its SetException formats
+#: "exception: access violation writing 0x..."). A wild write in the core may
+#: have landed anywhere in this process, not only in the machine a reload
+#: replaces, so a `HostFault` from one says to restart the process instead.
+WILD_WRITE = "access violation writing"
+
 
 class AbiError(Exception):
     """The library is missing, or does not match this binding."""
@@ -141,6 +151,35 @@ class Illegal(AbiError):
 class MemoryFault(AbiError):
     """An access outside the modelled memory, a fetch from a region that
     exists and is not executable, or a misaligned access."""
+
+
+class HostFault(AbiError):
+    """The core's own code faulted on the host while executing an instruction.
+
+    A divide error or an access violation in the C++, which is a bug in the
+    core and never in the firmware. On Windows ctypes catches the structured
+    exception around the foreign call and raises `OSError`; `Cpu.step` raises
+    this from it, so a run loop that stops on `AbiError` -- `webui/api.py`'s
+    does -- stops here too instead of losing the request. The machine is left
+    part-way through an instruction, PC included, and should be loaded again
+    rather than stepped (OH-225, after OH-223).
+
+    **Windows only.** On Linux the same fault is a signal, SIGFPE or SIGSEGV,
+    that ctypes does not catch, and the process ends before this can be
+    raised. OH-223's note records why nothing is done about that here.
+    """
+
+    def __init__(self, message: str, at: int | None,
+                 code: tuple[int, ...], left: int | None) -> None:
+        super().__init__(message)
+        #: The PC the step began at, or None if reading that back faulted.
+        self.at = at
+        #: The first `FAULT_HALFWORDS` halfwords there, low parcel first, or
+        #: as many as were read before reading them faulted or the region
+        #: ended.
+        self.code = code
+        #: The PC the core left, or None if reading it faulted.
+        self.left = left
 
 
 class Registers(ctypes.Structure):
@@ -225,6 +264,7 @@ _SIGNATURES = {
     "riscv32_is_mapped": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
     "riscv32_clear_mmio": ([ctypes.c_void_p], None),
     "riscv32_step": ([ctypes.c_void_p], ctypes.c_int),
+    "riscv32_step_entry": ([ctypes.c_void_p], ctypes.c_uint32),
     "riscv32_fault_address": ([ctypes.c_void_p], ctypes.c_uint32),
     "riscv32_fault_was_fetch": ([ctypes.c_void_p], ctypes.c_int),
     "riscv32_in_range": (
@@ -597,8 +637,18 @@ class Cpu:
         that has to compare integers will eventually compare the wrong one:
         `Unimplemented` means finish the emulator, `Illegal` means the part is
         behaving correctly, and `MemoryFault` means the board is incomplete.
+
+        A fourth, `HostFault`, means the core itself is broken: it faulted on
+        the host, and is raised chained from the `OSError` ctypes raised. A
+        closed Cpu is refused first: the core would fault on its null handle,
+        and that is not a bug in the core.
         """
-        result = self._lib.riscv32_step(self._handle)
+        if not self._handle:
+            raise AbiError("this Cpu has been closed")
+        try:
+            result = self._lib.riscv32_step(self._handle)
+        except OSError as fault:
+            raise self._host_fault(fault) from fault
         if result == OK:
             return
         pc = self.pc
@@ -618,6 +668,60 @@ class Cpu:
         raise MemoryFault(
             f"pc=0x{pc:08x}: {kind} at 0x{address:08x} refused ({present})"
         )
+
+    def _host_fault(self, fault: OSError) -> HostFault:
+        """The `HostFault` for `fault`: the PC the step began at, the
+        halfwords there, and where the core left the PC.
+
+        Once an instruction has moved PC, PC names the next one;
+        `riscv32_step_entry` is where the core recorded the step began, read
+        only after a fault, so nothing is read per step.
+
+        Each read back is its own call into the core, and a fault that wrecked
+        more than one instruction could fault any of them: each that does is
+        said, and what was read before it kept, rather than let a second
+        `OSError` replace the one being described.
+        """
+        failed: list[str] = []
+        at: int | None = None
+        try:
+            at = int(self._lib.riscv32_step_entry(self._handle))
+        except OSError as unreadable:
+            failed.append(f"where the step began ({unreadable})")
+        code: list[int] = []
+        if at is not None:
+            try:
+                for address in range(at, at + 2 * FAULT_HALFWORDS, 2):
+                    if not self.in_range(address, 2):
+                        break
+                    code.append(int.from_bytes(self.read_block(address, 2), "little"))
+            except OSError as unreadable:
+                failed.append(f"the halfwords there ({unreadable})")
+        left: int | None = None
+        try:
+            left = int(self.get_regs().pc)
+        except OSError as unreadable:
+            failed.append(f"the registers ({unreadable})")
+
+        said = [f"riscv32: the core faulted on the host ({fault}) "
+                + (f"in the step that began at 0x{at:08x}" if at is not None
+                   else "in a step")]
+        if code:
+            said.append(f"the first {len(code)} halfwords there, low first, are "
+                        + " ".join(f"0x{halfword:04x}" for halfword in code))
+        if left is not None:
+            said.append(f"the PC is now 0x{left:08x}")
+        if failed:
+            said.append(f"reading back {' and '.join(failed)} faulted as well")
+        if WILD_WRITE in str(fault):
+            after = ("a write in the core went astray, so this process may be "
+                     "damaged beyond the machine: restart it rather than reload")
+        else:
+            after = ("the machine stopped part-way through the instruction: "
+                     "load the image again before running it")
+        message = (f"{'; '.join(said)}. That is a bug in core/riscv32, not in "
+                   f"the firmware; {after}.")
+        return HostFault(message, at, tuple(code), left)
 
     def _word_at(self, address: int) -> int:
         """The encoding at `address`, or zero if it cannot be read.

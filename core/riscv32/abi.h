@@ -36,7 +36,8 @@ extern "C" {
 //: `riscv32_stream` arrived without one, and are counted in this one.
 //: Bumped to 4 at OH-161's step 3, which added `riscv32_map_input` and
 //: `riscv32_drive_input`.
-#define RISCV32_ABI_VERSION 4
+//: Bumped to 5 at OH-225, which added `riscv32_step_entry`.
+#define RISCV32_ABI_VERSION 5
 
 /// x0 through x31, then PC.
 ///
@@ -179,6 +180,14 @@ RISCV32_API void riscv32_clear_mmio(Riscv32Cpu* cpu);
 /// report exactly which instruction stopped it, and a conformance case can
 /// never pass by accident because an unwritten encoding behaved like a NOP.
 RISCV32_API int riscv32_step(Riscv32Cpu* cpu);
+
+/// The PC the most recent riscv32_step began at; zero before the first.
+///
+/// For when the core faults on the host part-way through an instruction
+/// (OH-225): once an instruction has moved PC, PC names the next one rather
+/// than the one that faulted. Every step records it, at the cost of one
+/// store, so a caller need not read PC before each step to have it.
+RISCV32_API uint32_t riscv32_step_entry(const Riscv32Cpu* cpu);
 
 /// The address of the most recent failed access, and whether it was a fetch.
 /// Only meaningful straight after a step returned 2.

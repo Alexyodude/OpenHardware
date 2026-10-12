@@ -5,7 +5,9 @@
 //
 // Translation only. Every function here is a cast and a call: any behaviour
 // that appeared in this file would be behaviour the C++ tests cannot reach and
-// only the Python side exercises.
+// only the Python side exercises. The one thing kept here is the record of
+// where each step began (OH-225), which is a fact about this ABI's calls and
+// not behaviour of the hart: nothing the hart does reads it.
 
 #include <algorithm>
 
@@ -16,12 +18,25 @@
 
 namespace {
 
-riscv32::Cpu* as_cpu(Riscv32Cpu* handle) {
-    return reinterpret_cast<riscv32::Cpu*>(handle);
+// The opaque handle is this, so the record below has somewhere to live
+// without putting it in riscv32::Cpu.
+struct Handle {
+    riscv32::Cpu cpu;
+    // The PC the most recent riscv32_step began at, for riscv32_step_entry
+    // (OH-225).
+    uint32_t step_pc = 0;
+};
+
+Handle* as_handle(Riscv32Cpu* handle) { return reinterpret_cast<Handle*>(handle); }
+
+const Handle* as_handle(const Riscv32Cpu* handle) {
+    return reinterpret_cast<const Handle*>(handle);
 }
 
+riscv32::Cpu* as_cpu(Riscv32Cpu* handle) { return &as_handle(handle)->cpu; }
+
 const riscv32::Cpu* as_cpu(const Riscv32Cpu* handle) {
-    return reinterpret_cast<const riscv32::Cpu*>(handle);
+    return &as_handle(handle)->cpu;
 }
 
 }  // namespace
@@ -35,10 +50,10 @@ uint32_t riscv32_regs_size(void) {
 }
 
 Riscv32Cpu* riscv32_new(void) {
-    return reinterpret_cast<Riscv32Cpu*>(new riscv32::Cpu());
+    return reinterpret_cast<Riscv32Cpu*>(new Handle());
 }
 
-void riscv32_free(Riscv32Cpu* cpu) { delete as_cpu(cpu); }
+void riscv32_free(Riscv32Cpu* cpu) { delete as_handle(cpu); }
 
 void riscv32_reset(Riscv32Cpu* cpu) { as_cpu(cpu)->reset(); }
 
@@ -184,7 +199,16 @@ int riscv32_is_mapped(const Riscv32Cpu* cpu, uint32_t address) {
 void riscv32_clear_mmio(Riscv32Cpu* cpu) { as_cpu(cpu)->clear_mmio(); }
 
 int riscv32_step(Riscv32Cpu* cpu) {
-    return static_cast<int>(riscv32::step(*as_cpu(cpu)));
+    Handle* handle = as_handle(cpu);
+    // Recorded before stepping: if the core faults on the host after an
+    // instruction has moved PC, PC no longer says which instruction it was,
+    // and this does.
+    handle->step_pc = handle->cpu.pc();
+    return static_cast<int>(riscv32::step(handle->cpu));
+}
+
+uint32_t riscv32_step_entry(const Riscv32Cpu* cpu) {
+    return cpu == nullptr ? 0u : as_handle(cpu)->step_pc;
 }
 
 uint32_t riscv32_fault_address(const Riscv32Cpu* cpu) {
