@@ -244,16 +244,26 @@ def _fills_exactly(ring, triangles, probes) -> list:
 
     Held two ways, neither borrowed from the triangulator: every triangle
     winds forward and their areas sum to the ring's own by the shoelace
-    formula; and each probe point is under a triangle exactly where an
-    even-odd ray from it crosses the ring an odd number of times -- which,
-    for a keyhole, leaves the counter open, because the bridge into it is
-    crossed twice. A probe on a triangle's own edge counts as under it.
+    formula; and each probe point is under exactly one triangle where an
+    even-odd ray from it crosses the ring an odd number of times, and under
+    none where it does not -- which, for a keyhole, leaves the counter open,
+    because the bridge into it is crossed twice. **Exactly one**: a point
+    under two triangles is an overlap, which an area sum cannot see when
+    something else is missing (OH-163's review, L3).
+
+    Besides `probes`, every triangle is probed at its centroid and at three
+    points between it and each corner, so each fill is probed wherever it
+    is drawn, and a triangle lying across another is found where it lies.
+    A triangle of under 1e-12 mm^2 -- a sliver of points in a line -- is
+    not probed inside, where rounding says nothing; nor is a probe on some
+    triangle's own edge counted, being under both or neither.
 
     The shoelace sum is taken about the ring's first point: a glyph of a few
     hundred square microns placed 100 mm from the origin loses its area to
     rounding in the plain formula's products."""
     wrong = []
-    areas = [compose._cross(ring[a], ring[b], ring[c]) / 2 for a, b, c in triangles]
+    faces = [(ring[a], ring[b], ring[c]) for a, b, c in triangles]
+    areas = [compose._cross(*face) / 2 for face in faces]
     if not areas or min(areas) <= 0:
         wrong.append(("a triangle of no area or wound backwards", min(areas, default=None)))
     shoelace = abs(sum(compose._cross(ring[0], a, b)
@@ -261,13 +271,34 @@ def _fills_exactly(ring, triangles, probes) -> list:
     if sum(areas) != pytest.approx(shoelace, rel=1e-9, abs=1e-12):
         wrong.append(("area", sum(areas), shoelace))
 
-    def under(point) -> bool:
-        return any(min(compose._cross(ring[a], ring[b], point), compose._cross(ring[b], ring[c], point),
-                       compose._cross(ring[c], ring[a], point)) >= 0 for a, b, c in triangles)
+    inside = []
+    for face, area in zip(faces, areas):
+        if area < 1e-12:
+            continue
+        centroid = (sum(x for x, _y in face) / 3, sum(y for _x, y in face) / 3)
+        inside += [centroid] + [(0.8 * x + 0.2 * centroid[0], 0.8 * y + 0.2 * centroid[1])
+                                for x, y in face]
+    # Each face filed under the cells of a 32 x 32 grid its box reaches, so a
+    # probe is held against the few faces that could be over it.
+    xs, ys = [x for x, _y in ring], [y for _x, y in ring]
+    cell = max(max(xs) - min(xs), max(ys) - min(ys), 1e-9) / 32
+    grid: dict[tuple[int, int], list] = {}
+    for face in faces:
+        for gx in range(int((min(x for x, _y in face) - min(xs)) / cell),
+                        int((max(x for x, _y in face) - min(xs)) / cell) + 1):
+            for gy in range(int((min(y for _x, y in face) - min(ys)) / cell),
+                            int((max(y for _x, y in face) - min(ys)) / cell) + 1):
+                grid.setdefault((gx, gy), []).append(face)
 
-    for point in probes:
-        if under(point) != compose.point_in(ring, point):
-            wrong.append(("probe", point, under(point)))
+    for point in [*probes, *inside]:
+        near = grid.get((int((point[0] - min(xs)) / cell), int((point[1] - min(ys)) / cell)), [])
+        sides = [(compose._cross(a, b, point), compose._cross(b, c, point),
+                  compose._cross(c, a, point)) for a, b, c in near]
+        if any(min(side) == 0 <= max(side) for side in sides):
+            continue
+        under = sum(min(side) > 0 for side in sides)
+        if under != int(compose.point_in(ring, point)):
+            wrong.append(("probe", point, under))
     return wrong
 
 
@@ -337,14 +368,47 @@ def test_a_pinch_and_a_spike_cover_only_what_they_enclose():
 
 
 def test_a_ring_that_crosses_itself_is_refused_naming_where():
-    """**A ring two of whose edges cross is no outline at all**: what it
-    fills depends on a rule -- even-odd or non-zero -- that the drawing does
-    not state, so it is refused and the two edges named, never filled by
-    one rule or the other. Six of SparkFun's letter polygons are this, each
-    an edge back from a counter that misses its own bridge by 0.01 mm."""
+    """**A ring two of whose edges cross is refused, the two edges named**:
+    filling it needs the ring split at each crossing and its faces chosen,
+    and what to choose is a rule -- even-odd or non-zero -- that the drawing
+    does not state. Some of SparkFun's EAGLE letters are this; see
+    `test_every_filled_polygon_of_ink_is_filled_to_its_own_area`."""
     bow = [(0.0, 0.0), (4.0, 4.0), (4.0, 0.0), (0.0, 4.0)]
     with pytest.raises(ValueError, match=r"cross.*\(0\.0, 0\.0\)-\(4\.0, 4\.0\)"):
         compose.ear_clip(bow)
+
+
+def test_a_ring_crossing_itself_through_a_vertex_is_refused_by_its_backwards_triangle():
+    """**A crossing through a vertex puts a zero among the four sides, as a
+    touch does**, so the edge test passes it (OH-163's review, M2). A square
+    and a triangle wound against it, meeting at (2, 2), clipped down to a
+    last triangle wound backwards, which `ear_clip` returned and the artwork
+    drew. A last triangle wound backwards is refused now, and named. So are
+    a figure-8 crossing at a shared vertex and a bow-tie crossing at a vertex
+    of one edge, the review's other two."""
+    lobes = [(2.0, 2.0), (4.0, 2.0), (4.0, 4.0), (2.0, 4.0), (2.0, 2.0), (1.0, 0.0), (0.0, 1.0)]
+    with pytest.raises(ValueError, match=r"\(1\.0, 0\.0\).*wound backwards"):
+        compose.ear_clip(lobes)
+    for ring in ([(0.0, 0.0), (2.0, 2.0), (4.0, 4.0), (4.0, 0.0), (2.0, 2.0), (0.0, 4.0)],
+                 [(0.0, 0.0), (2.0, 2.0), (4.0, 4.0), (4.0, 0.0), (0.0, 4.0)]):
+        with pytest.raises(ValueError, match="not a weakly simple polygon"):
+            compose.ear_clip(ring)
+
+
+def test_a_ring_of_fewer_than_three_points_is_refused_by_its_count():
+    """**A ring of none, one or two points encloses nothing** (OH-163's
+    review, M3): `ear_clip` fell over on it with a TypeError, which the
+    artwork does not catch, so one such polygon in a board file would end
+    the board's composition. It is a ValueError naming the count, and the
+    artwork counts the fill refused."""
+    for ring in ([], [(0.0, 0.0)], [(0.0, 0.0), (1.0, 0.0)]):
+        with pytest.raises(ValueError, match=rf"a ring of {len(ring)} point"):
+            compose.ear_clip(ring)
+    board = eagle.Board("inked", "test", (), (), silk_fills=(
+        eagle.Fill("F.SilkS", ((1.0, 1.0), (2.0, 2.0)), 0.0),))
+    ring = [(-1.0, -1.0), (12.0, -1.0), (12.0, 12.0), (-1.0, 12.0)]
+    _meshes, tally, _undrawn = compose.artwork(board, ring, 1.6, (0.0, 0.0), "#313d63", [])
+    assert tally[compose.FILL_REFUSED] == 1, tally
 
 
 # --- the correspondence -----------------------------------------------------------
@@ -2831,11 +2895,12 @@ def test_every_filled_polygon_of_ink_is_filled_to_its_own_area():
     (OH-163). None was drawn before: Seeed's logo on the RP2350 and the C5,
     PCBCUPID's labels, Olimex's logo and open-hardware mark, the Thing Plus
     C5's labels, SparkFun's EAGLE letters. Each `ear_clip` fills sums to its
-    own shoelace area, every triangle wound forward; on each that touches
-    itself -- a keyhole, a pinch, a spike -- seeded probes are under a
-    triangle exactly where the even-odd rule puts them inside; and each it
-    refuses has two edges that cross, found here pair by pair. The keyholes
-    step 3 measured are counted among those filled, board by board."""
+    own shoelace area, every triangle wound forward; on every one, probes in
+    each of its triangles and seeded ones across its box are each under
+    exactly one triangle where the even-odd rule puts them inside and none
+    where it does not; and each it refuses has two edges that cross, found
+    here pair by pair. The keyholes step 3 measured are counted among those
+    filled, and the placements refused, board by board."""
     import random
 
     probe = random.Random(163)
@@ -2850,19 +2915,22 @@ def test_every_filled_polygon_of_ink_is_filled_to_its_own_area():
                 assert _crosses(ring), (spec.board, ring[:4])
                 counts["crossing"] = counts.get("crossing", 0) + 1
                 continue
-            touching = len(set(ring)) < len(ring)
             xs, ys = [x for x, _y in ring], [y for _x, y in ring]
             probes = [(probe.uniform(min(xs), max(xs)), probe.uniform(min(ys), max(ys)))
-                      for _ in range(25 if touching else 0)]
+                      for _ in range(10)]
             wrong = _fills_exactly(ring, triangles, probes)
             assert not wrong, (spec.board, len(ring), wrong[:3])
-            kind = "touching" if touching else "simple"
+            kind = "touching" if len(set(ring)) < len(ring) else "simple"
             counts[kind] = counts.get(kind, 0) + 1
     measured = {"XIAO-RP2350-DIP": 6, "XIAO-ESP32-C5-DIP": 6, "PCBCUPID Glyph Mini RP2040": 3,
                 "PCBCUPID Glyph C3": 78, "PCBCUPID Glyph C6": 78,
                 "Olimex ESP32-C3-DevKit-Lipo": 6, "SparkFun Thing Plus ESP32-C5": 192}
     seen = {board: tally[board].get("touching", 0) for board in measured if board in tally}
     assert seen and seen == {board: measured[board] for board in seen}, tally
+    crossing = {board: counts["crossing"] for board, counts in tally.items() if "crossing" in counts}
+    assert crossing == {board: count for board, count in (
+        ("SparkFun Thing Plus ESP32-C6", 9), ("SparkFun Qwiic Pocket ESP32-C6", 1)) if board in tally}, (
+        crossing)
 
 
 def test_an_eagle_silkscreen_polygon_is_read_as_a_fill_where_its_element_puts_it(tmp_path):

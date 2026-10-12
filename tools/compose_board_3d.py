@@ -3381,8 +3381,18 @@ def ear_clip(ring: list[tuple[float, float]]) -> list[tuple[int, int, int]]:
         naming them: what it fills depends on a rule the drawing does not
         state. So is one with no ear and nothing to drop.
 
-    A triangle of no area is not returned.
+    A triangle of no area is not returned. **A crossing through a vertex is
+    not found by the edge test** -- one of its four sides is zero, as a
+    touch's is -- and such a ring can clip down to a last triangle wound
+    backwards; that is refused, named, as is a ring of fewer than three
+    points (OH-163's review). Last, the triangles are held to the ring: every
+    one wound forward, their areas summing to the ring's own. By then that
+    holds by construction -- each clip takes from the ring's shoelace sum
+    exactly the triangle it returns -- so it is a guard against an edit
+    here, and it says what it found.
     """
+    if len(ring) < 3:
+        raise ValueError(f"a ring of {len(ring)} point(s) encloses nothing: {ring}")
     crossed = _crossed_edges(ring)
     if crossed is not None:
         (a, b), (c, d) = crossed
@@ -3411,8 +3421,23 @@ def ear_clip(ring: list[tuple[float, float]]) -> list[tuple[int, int, int]]:
                 f"{len(ring)}-vertex ring, from {ring[order[0]]}; it is not a "
                 f"weakly simple polygon")
         order.pop(at)
-    if _cross(*(ring[index] for index in order)) != 0:
+    last = _cross(*(ring[index] for index in order))
+    if last < 0:
+        raise ValueError(
+            f"the last triangle of a {len(ring)}-vertex ring, "
+            f"{'-'.join(str(ring[index]) for index in order)}, is wound backwards "
+            f"({last / 2:.3g} mm^2): the ring crosses itself through a vertex, so it "
+            f"is not a weakly simple polygon")
+    if last != 0:
         triangles.append((order[0], order[1], order[2]))
+    areas = [_cross(ring[a], ring[b], ring[c]) / 2 for a, b, c in triangles]
+    enclosed = abs(sum(_cross(ring[0], a, b) for a, b in itertools.pairwise(ring[1:]))) / 2
+    if (any(area <= 0 for area in areas)
+            or not math.isclose(sum(areas), enclosed, rel_tol=1e-9, abs_tol=1e-12)):
+        raise ValueError(
+            f"{len(triangles)} triangles of a {len(ring)}-vertex ring sum to "
+            f"{sum(areas):.12g} mm^2 against its {enclosed:.12g}, the least "
+            f"{min(areas, default=0.0):.3g}: they are not the ring's")
     return triangles
 
 
