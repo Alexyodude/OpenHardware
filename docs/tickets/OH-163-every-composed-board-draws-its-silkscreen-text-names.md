@@ -11,10 +11,6 @@ touches:
 - tools/eagle.py
 - PROVENANCE.md
 - tools/model_from_datasheet.py
-- tests/rules/test_import_3d_model.py
-- tools/compose_board_3d.py
-- tests/rules/test_compose_board_3d.py
-- tools/import_3d_model.py
 - tests/rules/test_import_board.py
 ---
 
@@ -133,3 +129,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-13:** THE MILLED-HOLES SLICE MERGED to master by fast-forward at e3a091a (lane3): both readers read every unplated hole and what an EAGLE board mills outside its outline reading, counted on cutouts, holes and not cut lines and in not_drawn; cutting them is OH-226. REVIEW: an independent review, its fix round, a confirm verification and its last fixes. CLAUDE.md's sentence updated under OH-149 at a9d1188. VERIFIED on master at a9d1188, models recomposed: full suite 2 failed (the OCP pair: test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert, test_the_tessellator_welds_what_it_meshes), 2783 passed, 41 skipped.
 
 **Note 2026-10-13:** 2026-10-13, carried here from OH-217 (whose subject is parts.js's lit lens, not these files) so they are not orphaned when it closes; each is in this ticket's files and none is changed yet: (1) BOARD_MASK's reason in tools/import_3d_model.py says the mask sits above the epoxy; since OH-214 the epoxy is #262525 (1.9% linear) and the mask #1b1b1b (1.1%), so that sentence is false -- the board still differs from the chips by coat and roughness. (2) The QFN moulding #0f0f12 ('moulded epoxy, as #262525 is') is about four times darker in linear than KiCad's epoxy; the modelled TD1183SA and SW4 switches moved #0f0f0f -> #464646 with CAP-CERAMIC-05's grouping, while TD1183SA's colour source says it draws KiCad's switch black body, #262525 on every cached KiCad switch. (3) The die, lid and diffuser slabs (#272b27, #4e4e4e, #ebebe5) each equal a vendor STEP's old linear key, so 'this repository's own' is weaker than stated. Also retarget tools/import_3d_model.py ~564's 'choosing another is OH-217's' to this ticket when one of these is taken up.
+
+**Note 2026-10-13:** 2026-10-13: the importer, the composer and their tests lent to OH-228 (Adafruit's own USB-C body on the QT Py ESP32-C3, KB2040 and Feather ESP32-C6), nobody working this ticket in a lane now. Return them when OH-228 closes.
