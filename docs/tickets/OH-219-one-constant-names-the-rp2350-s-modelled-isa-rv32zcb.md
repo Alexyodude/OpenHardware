@@ -2,15 +2,13 @@
 id: OH-219
 title: One constant names the RP2350's modelled ISA, rv32zcb is asserted, and the
   Hazard3's own extensions are refused in the right words
-status: in-review
+status: done
 priority: P3
 created: '2026-10-09'
 touches:
 - tests/rv32/**
 - tools/gen_rv32_tests.py
 - tests/webui/xiao_rp2350/blink.c
-- core/riscv32/**
-- tests/riscv32/**
 ---
 
 Follow-ups from OH-208 and its review (2026-10-09). OH-208 made core/riscv32 execute every RV32 Zbb and Zbkb instruction and turned them on for the RP2350 only, as `abi.RP2350 = RP2350_MODELLED | EXT_ZBB | EXT_ZBKB`. Two names for one part remain, and some files outside OH-208's claims now say something false.
@@ -85,3 +83,5 @@ Seeding SANDBOX in the generator would let the corpus see load values. It is not
 - Refusing them would need an RP2350-only branch on a base-ISA hint.
 
 Verified: build_core; pytest tests/riscv32 tests/rv32 tests/webui/test_xiao_rp2350_board.py, 319 passed; each checker row from check_layering to check_facts, OK, run one by one. Neither checkall.py nor the full suite was run. Still in review.
+
+**Note 2026-10-13:** DONE, merged to master by fast-forward at 71d79a9 (lane4). REVIEW: an independent review (APPROVE) and its LOW round; rp2350.py's stale comments fixed under OH-161 at 7dd166e. VERIFIED on master at 4bcd540, cores rebuilt: full suite 4 failed, 2862 passed, 41 skipped, under load from three other worktrees -- the OCP pair (test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert, test_the_tessellator_welds_what_it_meshes) and two socket tests (test_an_upload_from_another_origin_is_refused, ConnectionAbortedError; test_a_state_poll_answers_while_a_build_runs), both of which pass alone (2 passed). core/riscv32/** and tests/riscv32/** returned to OH-161.
