@@ -183,6 +183,29 @@ const PAD_RECESS_MM = 0.05;
 //: painted version was.
 const PIN_GLOW = 0.85;
 
+//: How brightly a board's own LED glows when its pin is high, and it is not
+//: `PIN_GLOW` (OH-227).
+//:
+//: **A lit lamp is drawn as its light alone**: no base colour, and the
+//: palette's `high` emitted at this strength. At 1.0 the emission IS the
+//: stylesheet's `--changed`, the colour the table writes `high` in, in
+//: whichever theme is on -- and the tone curve leaves it as it is, because
+//: its brightest channel, the dark theme's green at 0.67 linear, is under the
+//: 0.76 where Khronos PBR Neutral starts to compress. Past about 1.2 that
+//: green is pressed toward white, which is the blowout `PIN_GLOW` stops short
+//: of.
+//:
+//: **Emission ADDED to the LED was the defect.** The lamp was a box in
+//: `--line` emitting `high` at `PIN_GLOW` -- a pin's recipe, and a pin is
+//: brass, which reflects and does not scatter, so the light in it is most of
+//: what is seen. A chip LED is white plastic. In the light theme `high` is the
+//: DARKER colour, by the contrast ramp `STATE_VARIABLE` describes, and its
+//: light added to a near-white body moved it a few levels: the page measured
+//: the "L" on an Uno at (211, 210, 203) unlit and (209, 215, 204) lit, while
+//: pin 13's post beside it went plainly green. So a lit lamp replaces what is
+//: seen there, and a dark one is not drawn at all.
+const LAMP_GLOW = 1.0;
+
 //: How far back the camera sits, as a multiple of the board's longest side.
 //: Framing from the geometry rather than from a fixed distance is what lets
 //: one number serve a 196px XIAO and a 402px Uno.
@@ -1849,15 +1872,39 @@ function placeLeds(parts) {
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(...size),
       // **No colour of its own**, which the renderer's own tripwire insists
-      // on: the body is the palette's `unknown` and the light it emits is the
-      // palette's `high`, the same two the pads and the table use. An LED
-      // that glowed a colour written down here would be the one thing in this
-      // scene that did.
+      // on: the light it emits is the palette's `high`, the same one the pads
+      // and the table use, and it has no base colour at all -- see
+      // `LAMP_GLOW`. An LED that glowed a colour written down here would be
+      // the one thing in this scene that did.
+      //
+      // **Pulled toward the camera in the depth test** (OH-227), because the
+      // box is the composer's measurement of the LED, so its faces ARE the
+      // LED's faces: on the Uno's "L" the camera's ray meets the two less
+      // than a hundred-thousandth of a millimetre apart, far inside what a
+      // depth buffer resolves, and the page drew whichever won each pixel --
+      // a mottle of the vendor's cream and this box's pale `--line`, lit or
+      // not. A polygon offset settles that tie the same way at every
+      // distance, where a box drawn larger would settle it only until the
+      // camera pulled back far enough for the buffer's step to outgrow the
+      // margin. `-1` is one depth slope across a pixel, which an
+      // oblique face needs; `-4` is four steps of the buffer, which a face
+      // seen square-on needs, because the box's depths and the LED's are
+      // rounded through different matrices. Neither moves anything a reader
+      // can see: it changes which of two coincident faces is drawn.
       new THREE.MeshStandardMaterial({
-        color: view.palette.states.unknown,
         emissive: view.palette.states.high,
         emissiveIntensity: 0,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -4,
       }));
+    // `setScalar(0)` and not a black Color, for the reason `repaint` gives:
+    // it is the absence of a colour rather than one chosen here.
+    mesh.material.color.setScalar(0);
+    // **Not drawn until its pin is high.** An LED that is off is the vendor's
+    // own part, and anything drawn over it -- the theme's `--line`, which is
+    // what this box was -- would hide the one sourced thing there.
+    mesh.visible = false;
     mesh.position.set(...[0, 1, 2].map(
       (axis) => (solid.min[axis] + solid.max[axis]) / 2));
     view.model.add(mesh);
@@ -1876,7 +1923,10 @@ function placeLeds(parts) {
 function lightLeds(levels) {
   for (const led of view.leds) {
     const on = levels[led.label] === "high";
-    led.mesh.material.emissiveIntensity = on ? PIN_GLOW : 0;
+    // Shown and lit together, and dark together: a hidden lamp still emitting
+    // would be a material saying the opposite of the picture.
+    led.mesh.visible = on;
+    led.mesh.material.emissiveIntensity = on ? LAMP_GLOW : 0;
   }
 }
 
@@ -1953,6 +2003,11 @@ export function refreshTheme() {
   // stay theme-coloured because they are this repository's own reading of a
   // register, which is exactly the distinction the palette is for.
   for (const post of padMeshes()) repaint(post);
+  // **And so do the board's own lamps** (OH-227), for the same reason: what
+  // one emits is this repository's `high`. Until this a lamp kept the theme it
+  // was drawn in, so a board drawn light and switched dark lit its LED in the
+  // light theme's dark teal.
+  for (const led of view.leds) led.mesh.material.emissive.copy(view.palette.states.high);
 }
 
 function clearBoard() {

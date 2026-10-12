@@ -2,11 +2,12 @@
 id: OH-227
 title: 'A board''s own LED barely changes when it is lit: five levels of green on
   a near-white box, while the pin beside it turns plainly green'
-status: open
+status: in-progress
 priority: P2
 created: '2026-10-12'
 touches:
 - webui/static/board3d.js
+- tests/webui/test_board_led.py
 ---
 
 Seen in the page 2026-10-12, Playwright against `python webui/emulator_server.py` on loopback, Release cores, master 9e6e2f8: the Arduino Uno running the page's default sketch (pin 13 blink), its own "L" LED (`led_parts: {"L": "13"}`) lit and unlit, in both themes, stopped by the page's own Run/Stop the moment `/api/board/pins` said pin 13 was high and again when low.
