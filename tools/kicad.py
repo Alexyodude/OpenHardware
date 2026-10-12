@@ -199,6 +199,13 @@ class Pad:
     #: `(property pad_prop_castellated)`: KiCad's flag for a plated half-hole
     #: cut by the board's edge, as against the whole hole beside it.
     castellated: bool = False
+    #: The hole through the pad, `(width, height)` in the pad's own axes, as
+    #: its `(drill ...)` states it, or `()` for a pad with none, a surface one
+    #: (OH-163). `(drill d)` is `(d, d)`; `(drill oval w h)` is a slot, and
+    #: `(drill oval d)` is round. An `(offset ...)` beside it, which moves the
+    #: hole off the pad's centre, is not read: the hole is taken at the pad's
+    #: centre.
+    drill: tuple[float, ...] = ()
 
     @property
     def front(self) -> bool:
@@ -380,6 +387,11 @@ def _pads_of(tree: list) -> list[Pad]:
         # `(net 29 "/GPIO-14")` or `(net "GND")`: with the net's number or
         # without it, and the name last in both.
         net = first(node, "net")
+        # `(drill d)`, `(drill oval w h)` or `(drill oval d)`, each perhaps
+        # with an `(offset ...)` after it, which `_floats` stops at.
+        bore = first(node, "drill")
+        oval = bore is not None and len(bore) > 1 and bore[1] == "oval"
+        across = [] if bore is None else _floats(bore[1:] if oval else bore)
         pads.append(Pad(
             number, kind, coords[0], coords[1], dims[0], dims[1],
             shape=node[3] if isinstance(node[3], str) else "",
@@ -391,6 +403,8 @@ def _pads_of(tree: list) -> list[Pad]:
             net=net[-1] if net is not None and len(net) > 1 and isinstance(net[-1], str) else "",
             castellated=any(prop[1:] == ["pad_prop_castellated"]
                             for prop in children(node, "property")),
+            drill=(across[0], across[1] if oval and len(across) > 1 else across[0])
+            if across else (),
         ))
     return pads
 
@@ -493,8 +507,8 @@ class Arc:
     puts every rounded corner of a board in the wrong place by roughly the
     corner radius, and the result still looks like a board.
 
-    A circle on the outline layer, which KiCad stores by its centre, is two of
-    these, its halves, made by `_circle_halves` (OH-163).
+    A circle on the outline layer, which KiCad stores by its centre, is four
+    of these, its quarters, made by `_circle_quarters` (OH-163).
     """
 
     layer: str
@@ -671,9 +685,11 @@ class Board:
         Arcs contribute all three of their points. For an arc of a quarter turn
         or less -- which is what a board's rounded corner is -- the extremes in
         x and y are among those three, so this is exact for the shape it is
-        used on and an under-estimate for a half-turn arc no board outline has.
-        A tighter bound would need the arc's centre, which KiCad does not store
-        and which would have to be solved for from the three points.
+        used on, and an under-estimate for a longer arc a vendor may draw on
+        its outline: a semicircular end, say. A milled circle is read as four
+        quarters split at its extremes (OH-163), so it is exact too. A tighter
+        bound would need the arc's centre, which KiCad does not store and which
+        would have to be solved for from the three points.
         """
         xs: list[float] = []
         ys: list[float] = []
@@ -777,33 +793,50 @@ def pad_on_board(placed: Placement, pad: Pad) -> tuple[float, float]:
     return _on_board(placed, pad.x_mm, pad.y_mm)
 
 
-def _circle_halves(node: list, layer: str, put) -> list[Arc]:
-    """A `gr_circle` or `fp_circle` on `layer`, as two half turns in board
-    millimetres, or `[]` where it is on another layer.
+def _circle_quarters(node: list, layer: str, put, path: pathlib.Path) -> list[Arc]:
+    """A `gr_circle` or `fp_circle` on `layer`, as four quarter turns in
+    board millimetres, or `[]` where it is on another layer.
 
     **A circle on the outline layer is a hole KiCad mills through the board**
     (OH-163): PCBCUPID's Glyph C3 and C6 mill their mounting holes so.
     KiCad stores it as its centre and one point on its rim, and it is kept
     as arcs, which every consumer of the outline already flattens
     (`compose_board_3d.arc_points`), rather than as a new kind of shape.
-    It is split at its rightmost and leftmost points in board space, over
-    its top and back under it, so each half's extremes are among its own
-    three points -- which keeps `Board.extent_mm` exact. The stated rim
-    point gives the radius and nothing else.
+    It is split at its four extremes in board space, where x and y are
+    least and greatest, so each is the end of an arc and therefore a point
+    of the flattened ring: the ring's extent and span are the circle's
+    exactly. In two halves, a half flattened in an odd number of steps
+    missed its middle extreme, and a 3.4 mm hole spanned 3.394 mm one way
+    (OH-163's review). The stated rim point gives the radius and nothing
+    else.
+
+    A circle with no centre or rim to read, or of radius 0, is refused,
+    naming it: a dropped circle is a hole not counted, and one of no size is
+    no hole.
     """
     where = first(node, "layer")
     if not (where and len(where) > 1 and where[1] == layer):
         return []
     centre, rim = first(node, "center"), first(node, "end")
-    if centre is None or rim is None:
-        return []
-    c, e = _floats(centre), _floats(rim)
+    c = _floats(centre) if centre is not None else []
+    e = _floats(rim) if rim is not None else []
     if len(c) < 2 or len(e) < 2:
-        return []
+        raise KicadError(
+            f"{path}: a ({head(node)} ...) on {layer} states no centre and rim "
+            f"point of two numbers each, {node!r}; a circle on the outline is a "
+            f"hole, and it is refused here, not dropped")
     radius = math.hypot(e[0] - c[0], e[1] - c[1])
+    if radius == 0:
+        raise KicadError(
+            f"{path}: a ({head(node)} ...) on {layer} has its rim at its "
+            f"centre, {node!r}: a hole of radius 0 is no hole, and it is "
+            f"refused here, not counted")
     x, y = put(c[0], c[1])
-    return [Arc(layer, x + radius, y, x, y + radius, x - radius, y),
-            Arc(layer, x - radius, y, x, y - radius, x + radius, y)]
+    lean = radius * math.sqrt(0.5)
+    ends = [(x + radius, y), (x, y + radius), (x - radius, y), (x, y - radius)]
+    mids = [(x + lean, y + lean), (x - lean, y + lean),
+            (x - lean, y - lean), (x + lean, y - lean)]
+    return [Arc(layer, *ends[at], *mids[at], *ends[(at + 1) % 4]) for at in range(4)]
 
 
 def _polygon_sides(node: list, layer: str, put, path: pathlib.Path) -> list[Segment]:
@@ -817,23 +850,40 @@ def _polygon_sides(node: list, layer: str, put, path: pathlib.Path) -> list[Segm
     and later may write, is refused by name: what such a ring walks has not
     been checked against a vendor's file, and a side dropped would leave a
     ring that does not close, which `compose_board_3d.contours` reports far
-    from here.
+    from here. So are a polygon with no points, a point of fewer than two
+    numbers, and fewer than three distinct points, which enclose nothing.
     """
     where = first(node, "layer")
     if not (where and len(where) > 1 and where[1] == layer):
         return []
     pts = first(node, "pts")
-    if pts is None:
-        return []
-    if children(pts, "arc"):
+    if pts is not None and children(pts, "arc"):
         raise KicadError(
             f"{path}: a ({head(node)} ...) on {layer} has an arc among its "
             f"points, {node!r}; what such a ring walks has not been checked, "
             f"and it is refused here, not read")
-    points = [put(xy[0], xy[1]) for xy in (_floats(p) for p in children(pts, "xy"))
-              if len(xy) >= 2]
+    stated = [_floats(p) for p in children(pts, "xy")] if pts is not None else []
+    points = [put(xy[0], xy[1]) for xy in stated if len(xy) >= 2]
+    if len(points) < len(stated) or len(set(points)) < 3:
+        raise KicadError(
+            f"{path}: a ({head(node)} ...) on {layer} walks no ring of three "
+            f"points or more, each of two numbers, {node!r}; it is refused "
+            f"here, not read")
     return [Segment(layer, *a, *b) for a, b in zip(points, points[1:] + points[:1])
             if a != b]
+
+
+def _curve_refused(node: list, layer: str, path: pathlib.Path) -> None:
+    """Refuse a `gr_curve` or `fp_curve` on `layer`, naming it (OH-163, from
+    the review). A Bezier curve on the outline layer is milled with the rest,
+    and this reader does not flatten one: passed over, it left the ring it
+    closes open, which `compose_board_3d.contours` reports far from here."""
+    where = first(node, "layer")
+    if where and len(where) > 1 and where[1] == layer:
+        raise KicadError(
+            f"{path}: a ({head(node)} ...) on {layer}, {node!r}: a curve on the "
+            f"outline is milled, and this does not read one; it is refused "
+            f"here, not dropped")
 
 
 def _fp_graphics(node: list, layer: str, placed: Placement, path: pathlib.Path
@@ -870,6 +920,8 @@ def _fp_graphics(node: list, layer: str, placed: Placement, path: pathlib.Path
             segments.append(Segment(layer, *start, *end))
     for poly in children(node, "fp_poly"):
         segments += _polygon_sides(poly, layer, put, path)
+    for curve in children(node, "fp_curve"):
+        _curve_refused(curve, layer, path)
     for arc in children(node, "fp_arc"):
         where = first(arc, "layer")
         if not (where and len(where) > 1 and where[1] == layer):
@@ -882,7 +934,7 @@ def _fp_graphics(node: list, layer: str, placed: Placement, path: pathlib.Path
             continue
         arcs.append(Arc(layer, *put(a[0], a[1]), *put(m[0], m[1]), *put(b[0], b[1])))
     for circle in children(node, "fp_circle"):
-        arcs += _circle_halves(circle, layer, put)
+        arcs += _circle_quarters(circle, layer, put, path)
     return segments, arcs
 
 
@@ -1637,11 +1689,14 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
             Segment(layer, x1, y1, x2, y1), Segment(layer, x2, y1, x2, y2),
             Segment(layer, x2, y2, x1, y2), Segment(layer, x1, y2, x1, y1),
         ]
-    # A polygon is its sides, and a circle the two halves below (OH-163):
+    # A polygon is its sides, and a circle the four quarters below (OH-163):
     # closed shapes on the outline layer, so one inside the board is a hole
-    # milled through it -- PCBCUPID's Glyph C3 and C6 mill circles so.
+    # milled through it -- PCBCUPID's Glyph C3 and C6 mill circles so. A
+    # curve there is refused, naming it.
     for node in children(tree, "gr_poly"):
         outline += _polygon_sides(node, layer, lambda x, y: (x, y), path)
+    for node in children(tree, "gr_curve"):
+        _curve_refused(node, layer, path)
 
     arcs: list[Arc] = []
     for node in children(tree, "gr_arc"):
@@ -1656,7 +1711,7 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
             continue
         arcs.append(Arc(layer, a[0], a[1], m[0], m[1], b[0], b[1]))
     for node in children(tree, "gr_circle"):
-        arcs += _circle_halves(node, layer, lambda x, y: (x, y))
+        arcs += _circle_quarters(node, layer, lambda x, y: (x, y), path)
 
     silk, silk_arcs, fills, unread = _silk_of(tree, "gr", lambda x, y: (x, y))
     words, hidden = _texts_of(tree, "gr", lambda x, y: (x, y))

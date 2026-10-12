@@ -1368,6 +1368,55 @@ def test_a_hole_is_read_where_the_board_or_its_package_drills_it(tmp_path):
             (pad.x_mm, pad.y_mm, 0.65), abs=1e-9), (element.name, hole, pad)
 
 
+def test_what_is_milled_and_not_read_into_the_outline_is_counted(tmp_path):
+    """**EAGLE mills more than the board's own Dimension wires, and this
+    reader reads only those** (OH-163, from the review). What it passed over
+    without a word is counted by kind in `Board.outline_unread`: anything but
+    a wire on Dimension (layer 20) on the board, anything on Dimension in a
+    placed package -- a package's Dimension wire is milled with the board's,
+    and is not placed into the outline here -- and anything on Milling
+    (layer 46) on the board with a point inside the outline's extent. Not
+    counted: a Milling wire wholly outside that extent, which is no part of
+    the board -- SparkFun's Pro Micro marks a v-score above its board so --
+    and text on Milling, which mills nothing. Each package is placed twice
+    here, so its count is twice its own."""
+    path = tmp_path / "milled.brd"
+    path.write_text(
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<eagle version="9.6.2"><drawing><board>'
+        '<plain><wire x1="0" y1="0" x2="40" y2="0" width="0.2" layer="20"/>'
+        '<wire x1="0" y1="20" x2="40" y2="20" width="0.2" layer="20"/>'
+        '<circle x="5" y="5" radius="1" width="0" layer="20"/>'
+        '<wire x1="10" y1="5" x2="12" y2="5" width="0" layer="46"/>'
+        '<wire x1="-1" y1="21" x2="41" y2="21" width="0.2" layer="46"/>'
+        '<text x="10" y="10" size="1" layer="46">v-score</text></plain>'
+        '<libraries><library name="L"><packages><package name="P">'
+        '<pad name="1" x="1.5" y="0.5" drill="0.65" diameter="1"/>'
+        '<wire x1="-1" y1="-1" x2="1" y2="-1" width="0" layer="20"/>'
+        '<circle x="0" y="0" radius="0.5" width="0" layer="20"/>'
+        "</package></packages></library></libraries>"
+        "<elements>"
+        '<element name="A" library="L" package="P" x="10" y="10"/>'
+        '<element name="B" library="L" package="P" x="20" y="10" rot="R90"/>'
+        "</elements><signals/>"
+        "</board></drawing></eagle>",
+        encoding="utf-8",
+    )
+    assert dict(eagle.read_board(path).outline_unread) == {
+        "circle on Dimension": 1,
+        "package wire on Dimension": 2,
+        "package circle on Dimension": 2,
+        "wire on Milling inside the outline": 1,
+    }
+    pro_micro = (REPO / "third_party" / "sparkfun-pro-micro-esp32-c3" / "Hardware"
+                 / "SparkFun_Dev_ESP32_C3_MINI.brd")
+    if not pro_micro.is_file():
+        pytest.skip("SKIPPED: SparkFun_Dev_ESP32_C3_MINI.brd is not fetched. Run: "
+                    "python tools/get_board_sources.py sparkfun-pro-micro-esp32-c3")
+    assert eagle.read_board(pro_micro).outline_unread == (), (
+        "the Pro Micro's v-score, above its board, was counted as milled inside it")
+
+
 def _brd_uno():
     path = (REPO / "third_party" / "arduino-uno" / "UNO-TH_Rev3e.brd")
     if not path.is_file():

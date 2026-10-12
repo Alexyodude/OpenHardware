@@ -83,6 +83,9 @@ import xml.etree.ElementTree as ET
 #: EAGLE installation; it is a fixed layer number, not a per-file choice.
 DIMENSION_LAYER = "20"
 
+#: EAGLE's `Milling` layer: contours a fab routes, as against drills (OH-163).
+MILLING_LAYER = "46"
+
 
 class EagleError(Exception):
     """A file is not EAGLE XML, or does not hold what was asked of it."""
@@ -182,14 +185,15 @@ class Via:
 
 @dataclasses.dataclass(frozen=True)
 class Hole:
-    """An unplated hole drilled through the board: EAGLE's `<hole>` (OH-163).
+    """An unplated hole drilled through the board (OH-163).
 
-    In board millimetres with y upward. EAGLE writes one in the board's own
-    `<plain>` -- the Arduino Uno's mounting holes -- or in a package, placed
-    by its element as a pad at the same point is: SparkFun's standoffs, and
-    the locating pegs of a USB-C socket, which a KiCad footprint writes as
-    `np_thru_hole` pads instead. Neither is on the
-    outline layer, so neither is a cutout of the outline.
+    In board millimetres with y upward. EAGLE writes one as a `<hole>` in the
+    board's own `<plain>` -- the Arduino Uno's mounting holes -- or in a
+    package, placed by its element as a pad at the same point is: SparkFun's
+    standoffs, and the locating pegs of a USB-C socket. A KiCad footprint
+    writes the same thing as an `np_thru_hole` pad, and
+    `compose_board_3d.from_kicad` makes one of these of each. Neither is on
+    the outline layer, so neither is a cutout of the outline.
     """
 
     x_mm: float
@@ -198,6 +202,9 @@ class Hole:
     #: The element whose package drills it, or `""` for one the board drills
     #: in its own `<plain>`.
     element: str = ""
+    #: A slot's length, where the hole is KiCad's oval drill, `drill_mm`
+    #: being its width; `0.0` for a round hole. EAGLE's `<hole>` is round.
+    slot_mm: float = 0.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -314,11 +321,17 @@ class Board:
     trace_arcs: tuple[object, ...] = ()
     vias: tuple[Via, ...] = ()
     traces_unread: tuple[tuple[str, int], ...] = ()
-    #: Every `<hole>`, the board's own and each placed package's (OH-163).
-    #: Empty for a KiCad board: KiCad mills a hole drawn on Edge.Cuts, which
-    #: is then in `outline`, and drills one that is no copper as an
-    #: `np_thru_hole` pad.
+    #: Every unplated hole drilled through the board (OH-163): an EAGLE
+    #: board's `<hole>`s, its own and each placed package's, and a KiCad
+    #: board's `np_thru_hole` pads, which `from_kicad` gives here as well as
+    #: among its elements' pads. A hole KiCad mills on Edge.Cuts is not here:
+    #: it is in `outline`.
     holes: tuple[Hole, ...] = ()
+    #: What is on the outline layers and is NOT in `outline`, counted by kind
+    #: (OH-163, from its review), so the composer says what it did not read
+    #: rather than passing over it. See `read_board`. Empty for a KiCad
+    #: board, whose reader refuses what it cannot read there instead.
+    outline_unread: tuple[tuple[str, int], ...] = ()
 
     def element(self, name: str) -> Element:
         for candidate in self.elements:
@@ -839,7 +852,61 @@ def read_board(path: pathlib.Path, text: str | None = None) -> Board:
                  tuple(outline), silk=silk, silk_fills=silk_fills,
                  silk_unread=silk_unread,
                  traces=tracks, vias=vias,
-                 traces_unread=unrouted, holes=tuple(holes))
+                 traces_unread=unrouted, holes=tuple(holes),
+                 outline_unread=_unmilled(board, elements, packages, outline))
+
+
+#: The shapes a fab mills when they are on Dimension or Milling: what
+#: `_unmilled` counts. Text on either layer mills nothing.
+MILLED_SHAPES = ("wire", "circle", "rectangle", "polygon")
+
+
+def _unmilled(board: ET.Element, elements: list[Element], packages: dict,
+              outline: list[Segment]) -> tuple[tuple[str, int], ...]:
+    """What a fab mills and `read_board` does not read into the outline,
+    counted by kind (OH-163, from its review), where it was passed over:
+
+      * a shape on Dimension in the board's `<plain>` other than a wire --
+        a `<circle>` there is a round cut, or a round board;
+      * any shape on Dimension in a placed package, which EAGLE mills with
+        the board's own as KiCad mills a footprint's Edge.Cuts: it is not
+        placed into the outline here, so it is counted, once a placement;
+      * a shape on Milling in the board's `<plain>` with a point strictly
+        inside the outline's extent. One wholly outside it is no part of the
+        board -- SparkFun's Pro Micro marks a v-score above its board so --
+        and a concave outline's extent takes in its notches, so a contour in
+        one is counted too, which errs toward saying more.
+
+    A package's Milling is not counted: on the boards this composes each
+    such shape was found by hand to sit on a plated pad -- closed outlines
+    of no width in Adafruit's USB-C socket, open centre lines 0.6 mm wide in
+    SparkFun's -- so it is a plated slot, and a plated drill is counted
+    nowhere (see `compose_board_3d.compose`).
+    """
+    unread: collections.Counter = collections.Counter()
+    xs = [value for seg in outline for value in (seg.x1_mm, seg.x2_mm)]
+    ys = [value for seg in outline for value in (seg.y1_mm, seg.y2_mm)]
+
+    def inside(node: ET.Element) -> bool:
+        if not xs:
+            return True
+        points = [(node.get(f"x{n}"), node.get(f"y{n}")) for n in ("", "1", "2")]
+        points += [(vertex.get("x"), vertex.get("y")) for vertex in node.findall("vertex")]
+        return any(min(xs) < float(x) < max(xs) and min(ys) < float(y) < max(ys)
+                   for x, y in points if x is not None and y is not None)
+
+    for node in board.findall("plain/*"):
+        if node.tag not in MILLED_SHAPES:
+            continue
+        if node.get("layer") == DIMENSION_LAYER and node.tag != "wire":
+            unread[f"{node.tag} on Dimension"] += 1
+        elif node.get("layer") == MILLING_LAYER and inside(node):
+            unread[f"{node.tag} on Milling inside the outline"] += 1
+    for element in elements:
+        for node in packages[(element.library, element.package)]:
+            if node.tag in MILLED_SHAPES and node.get("layer") == DIMENSION_LAYER:
+                unread[f"package {node.tag} on Dimension"] += 1
+    return tuple(sorted(unread.items()))
 
 
 #: EAGLE's copper layers by number: 1 is the top and 16 the bottom, named here
