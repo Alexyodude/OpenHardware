@@ -1143,6 +1143,16 @@ def test_a_drive_reaches_the_pin_and_is_recorded_when_it_took_effect():
         assert session.retired == 125
 
 
+def test_the_record_is_not_the_callers_dict():
+    """A caller that reuses its dict for the next drive must not rewrite the
+    record of the last one; the record keeps a copy of what was said."""
+    with c3_session() as session:
+        levels = {"D1": "high"}
+        session.drive(levels)
+        levels["D1"] = "low"
+        assert session.inputs == [(0, {"D1": "high"})]
+
+
 def test_open_is_a_pad_nothing_drives_and_not_a_low_one():
     """`D9` is GPIO9, which comes out of reset pulled up (TRM Table 5.12-1,
     Reset "3"): driven low it reads 0, and left open its pull reads 1."""
@@ -1216,3 +1226,129 @@ def test_a_manifest_row_is_driven_by_its_own_pad_labels():
             session.drive({"D1": "high"})
     assert "'D1'" in str(caught.value) and "'A1'" in str(caught.value), (
         str(caught.value))
+
+
+def test_the_names_drive_accepts_are_the_names_pin_levels_answers_under():
+    """`drive` resolves a name to a GPIO with its own copy of the table
+    `pin_levels` reads through -- the fourth restatement of a row's half that
+    `level_keys`' docstring counts -- so the two are held to one answer here,
+    on every board in the catalogue whose description reads input: a name
+    one accepts and the other does not report is a pad the page could drive
+    and never see, or see and never drive. Found by OH-161's step-3 review."""
+    from webui import pinmap
+
+    checked = []
+    for board in catalogue.catalogue():
+        description = api.description_for(board.name)
+        if getattr(description, "drive_pins", None) is None:
+            continue
+        layout = pinmap.load(board.name)
+        accepted = frozenset(api.drive_table(board.name, description, layout))
+        keys = api.level_keys(board.name, description, layout)
+        assert accepted == keys, (board.name, sorted(accepted ^ keys))
+        checked.append(board.name)
+    assert {"XIAO-ESP32-C3-DIP", "XIAO-ESP32-C5-DIP", "Adafruit QT Py ESP32-C3",
+            "SparkFun Thing Plus ESP32-C5"} <= set(checked), checked
+
+
+def test_a_row_with_no_board_file_refuses_a_drive_by_name(monkeypatch):
+    """A manifest row resolves its pads through its own board file; without
+    one there is nothing to resolve a name against, and the refusal names
+    the board rather than raising an `AttributeError` on `None`."""
+    needs_core()
+    from webui import pinmap
+
+    board = "Adafruit QT Py ESP32-C3"
+    image = REPO / "tests" / "webui" / "qtpy_esp32c3" / "qtpy_blink.bin"
+    if not image.is_file():
+        pytest.skip(f"{image} is missing")
+    with api.load_firmware(board, image.read_bytes(), base=esp32c3.IROM) as session:
+        monkeypatch.setattr(pinmap, "load", lambda name: None)
+        with pytest.raises(ValueError) as caught:
+            session.drive({"A1": "high"})
+        assert session.inputs == []
+    assert board in str(caught.value) and "board file" in str(caught.value), (
+        str(caught.value))
+
+
+def test_a_drive_on_an_output_pad_is_recorded_and_the_pin_reads_what_it_drives():
+    """The blink drives GPIO8, `D8`, as an output. Driving `D8` low from
+    outside while the blink holds it high is accepted and recorded, and the
+    core ignores it: `IN` follows `OUT`, and what a pin and a part fighting
+    over one node do is the bench's to solve."""
+    d8 = 1 << esp32c3.HEADER["D8"]
+    with c3_session() as session:
+        for _ in range(20_000):
+            session.step()
+            if session.cpu.read_word(esp32c3.GPIO + esp32c3.GPIO_OUT) & d8:
+                break
+        session.drive({"D8": "low"})
+        assert gpio_in(session) & d8, "the output's own level, not the drive"
+        assert session.inputs[-1] == (session.retired, {"D8": "low"})
+
+
+#: A sketch whose output depends on WHEN each drive lands: it echoes `D1` to
+#: `D10` and prints each level it sees change, so a drive that landed an
+#: instruction early or late moves the run.
+REPLAY_SKETCH = """
+int last = -1;
+void setup() { pinMode(D1, INPUT_PULLUP); pinMode(D10, OUTPUT); }
+void loop() {
+  int level = digitalRead(D1);
+  digitalWrite(D10, level);
+  if (level != last) { Serial.print(level); last = level; }
+}
+"""
+
+
+def test_the_image_and_the_record_of_drives_replay_the_run():
+    """**The replay claim `BoardSession.inputs` makes, run.** A sketch is
+    driven between run chunks and single steps, then a fresh session is
+    given the same image and the record, one instruction at a time: each
+    drive must land at the same instruction -- the program counter it found
+    the first time -- and the run must end with the same instruction count,
+    program counter, pin levels and printed text. Found missing by OH-161's
+    step-3 review."""
+    needs_core()
+    from webui import compile as compiler
+
+    try:
+        built = compiler.build(C3_BOARD, REPLAY_SKETCH)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    assert built.ok, built.diagnostics
+    base = compiler.recipe_for(C3_BOARD).base
+
+    def ending(session: api.BoardSession) -> tuple:
+        return (session.retired, session.cpu.pc,
+                api.pin_levels(session.runtime, session.cpu),
+                session.state()["uart"]["text"])
+
+    landed = []
+    with api.load_firmware(C3_BOARD, built.image, base=base) as session:
+        session.run(300)
+        for chunk, levels, steps in ((None, {"D1": "low"}, 7), (213, {"D1": "open"}, 1),
+                                     (None, {"D1": "low"}, 0), (150, {}, 0)):
+            if chunk:
+                session.run(chunk)
+            landed.append(session.cpu.pc)
+            session.drive(levels)
+            if steps:
+                session.step(steps)
+        session.run(400)
+        record = list(session.inputs)
+        first = ending(session)
+    assert "0" in first[3] and "1" in first[3], f"the drives moved nothing: {first[3]!r}"
+
+    with api.load_firmware(C3_BOARD, built.image, base=base) as replay:
+        for (at, levels), pc in zip(record, landed):
+            while replay.retired < at:
+                replay.step()
+            assert replay.cpu.pc == pc, (
+                f"the drive stamped {at} lands at pc {replay.cpu.pc:#x}, "
+                f"where the run had it at {pc:#x}")
+            replay.drive(levels)
+        while replay.retired < first[0]:
+            replay.step()
+        assert ending(replay) == first
+        assert replay.inputs == record

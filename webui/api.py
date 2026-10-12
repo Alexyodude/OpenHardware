@@ -901,13 +901,16 @@ def level_keys(board: str, description: types.ModuleType | None,
     it restates three things: the word names `GPIO`, `GPIO_ENABLE` and
     `GPIO_OUT`; that a pad with no `chip_index` gets no level; and the key
     spelling `header_key(pad.label, {})`, which `pad_view`'s empty `names`
-    for a row makes a third time. Not one helper, because `row_levels` needs
-    the words' values and this needs only that they exist: a helper serving
-    both would hand back the words and a keyed index map, an interface no
-    simpler than the lines it hides, for two callers in one file (rules 6 to
-    8 of `.claude/CLAUDE.md`). What keeps the copies one answer is
-    `tests/webui/test_pin_view.py`, which holds this set equal to the keys
-    `pin_levels` answers, on every board in the catalogue.
+    for a row makes a third time and `drive_table` a fourth (OH-161 step 3).
+    Not one helper, because `row_levels` needs the words' values, this needs
+    only that they exist, and `drive_table` needs each key's index: a helper
+    serving all three would hand back the words and a keyed index map, an
+    interface no simpler than the lines it hides, for callers in one file
+    (rules 6 to 8 of `.claude/CLAUDE.md`). What keeps the copies one answer
+    is two tests: `tests/webui/test_pin_view.py` holds this set equal to the
+    keys `pin_levels` answers, on every board in the catalogue, and
+    `tests/webui/test_board_run.py` holds `drive_table`'s keys equal to it
+    on every board whose description reads input.
     """
     if is_row(board):
         words = [getattr(description, name, None) for name in ("GPIO", "GPIO_ENABLE", "GPIO_OUT")]
@@ -928,6 +931,29 @@ def level_keys(board: str, description: types.ModuleType | None,
             f"under (OH-172)"
         )
     return frozenset(description.HEADER)
+
+
+def drive_table(board: str, description: types.ModuleType,
+                layout: pinmap.PinMap | None) -> dict[str, int]:
+    """Each name `BoardSession.drive` accepts, and the GPIO it drives: on a
+    manifest row, its own board file's pads with a `chip_index`, keyed by
+    `header_key(pad.label, {})`; elsewhere the description's `HEADER`.
+
+    **The fourth restatement of a row's half** that `level_keys`' docstring
+    counts, kept a copy for the reason that docstring gives: this needs the
+    index each name resolves to, which `level_keys` does not, and a helper
+    serving both would be no simpler than the lines it hides.
+    `tests/webui/test_board_run.py`'s
+    `test_the_names_drive_accepts_are_the_names_pin_levels_answers_under`
+    holds its keys equal to `level_keys` on every board whose description
+    reads input. A row with no board file has no names, as it has no levels.
+    """
+    if is_row(board):
+        if layout is None:
+            return {}
+        return {header_key(pad.label, {}): pad.chip_index
+                for pad in layout.pads if pad.chip_index is not None}
+    return dict(description.HEADER)
 
 
 def description_for(board: str) -> types.ModuleType | None:
@@ -1364,38 +1390,53 @@ class BoardSession:
             self.retired += 1
 
     def drive(self, levels: typing.Mapping[str, str]) -> None:
-        """What the outside drives onto the pads: label -> "high", "low" or
-        "open", each label as `pin_levels` keys it.
+        """What the outside drives onto the pins: name -> "high", "low" or
+        "open", each name as `pin_levels` keys it.
 
-        **A whole statement, not a change.** A pad left out is a pad nothing
+        **The names are `pin_levels`' and not only the pads'**: on a XIAO they
+        are its description's `HEADER`, which names pins a package may have
+        no pad for -- `LED` on every XIAO ESP32-C5 and C6, `BOOT` and `MTCK`
+        on their DIPs -- and a level the page reports under a name is a level
+        the bench may drive under it. On a manifest row they are its own
+        board file's pads with a `chip_index`. `drive_table` resolves them,
+        and `test_the_names_drive_accepts_are_the_names_pin_levels_answers_under`
+        holds its keys equal to `level_keys`.
+
+        **A whole statement, not a change.** A pin left out is a pin nothing
         drives, so each call says everything the outside is doing, and
         `inputs` records it with the instructions retired when it took
-        effect. "open" says so explicitly. The label resolves to a GPIO
-        through the table `pin_levels` reads the pad through: the board
-        description's `HEADER` on a XIAO, the pad's `chip_index` from its own
-        board file on a manifest row.
+        effect. "open" says so explicitly. **The record keeps the names, not
+        the GPIOs they resolve to**, because a replay goes back through this
+        method, which resolves them again from the same board's tables; what
+        the core saw follows from that, and
+        `test_the_image_and_the_record_of_drives_replay_the_run` holds that a
+        replay lands every drive on the same instruction and ends the same.
 
-        This is what the page's bench will call, once it has solved what its
-        parts put on each input pad (OH-161 step 3, slice B). A floating pin
-        reads 0 and a bench drive beats the chip's own pull: the board
-        description's `install_gpio_in` says why.
+        **A drive on a pin the program drives as an output is accepted,
+        recorded, and ignored by the core**: `IN` follows `OUT` there, and
+        what a pin and a part fighting over one node do is the bench's to
+        solve. A floating pin reads 0 and a bench drive beats the chip's own
+        pull: the board description's `install_gpio_in` says why. This is
+        what the page's bench will call, once it has solved what its parts
+        put on each input pin (OH-161 step 3, slice B).
 
         `ValueError`, naming the values, for a level that is none of the
-        three, a label that reaches no GPIO, two labels of one GPIO driven two
-        ways, and a board whose description reads no input at all. A refusal
-        slug in `REASONS` waits for the transport that maps them to statuses.
+        three, a name that reaches no GPIO, two names of one GPIO driven two
+        ways, a manifest row with no board file to resolve names against, and
+        a board whose description reads no input at all. A refusal slug in
+        `REASONS` waits for the transport that maps them to statuses.
         """
         driver = getattr(self.runtime.description, "drive_pins", None)
         if driver is None:
             raise ValueError(
                 f"{self.board}: its description reads no input, so nothing "
                 f"can be driven onto its pads")
-        if is_row(self.board):
-            layout = pinmap.load(self.board)
-            gpios = {header_key(pad.label, {}): pad.chip_index
-                     for pad in layout.pads if pad.chip_index is not None}
-        else:
-            gpios = dict(self.runtime.description.HEADER)
+        layout = pinmap.load(self.board) if is_row(self.board) else None
+        if is_row(self.board) and layout is None:
+            raise ValueError(
+                f"{self.board}: no board file under webui/boards/ gives its "
+                f"pads a GPIO, so no name can be resolved to drive")
+        gpios = drive_table(self.board, self.runtime.description, layout)
         driven: dict[int, bool] = {}
         by_gpio: dict[int, str] = {}
         for label, level in levels.items():
