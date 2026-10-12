@@ -886,9 +886,11 @@ function runLine(report) {
   const fast = report.rate === null
     ? ""
     : `, ${Math.round(report.rate).toLocaleString()}/s`;
-  const stopped = report.status === "stopped"
-    ? ` and stopped: ${report.detail}`
-    : "";
+  // Any status but running says why (OH-225): "stopped" is the core refusing
+  // the firmware, "faulted" the core itself failing, and the detail says which.
+  const stopped = report.status === "running"
+    ? ""
+    : ` and ${report.status}: ${report.detail}`;
   return `${boardImage.board}: ${report.steps.toLocaleString()} instructions` +
          `${fast}${stopped}. pc 0x${$("where").textContent}`;
 }
@@ -981,7 +983,7 @@ async function runLoadedBoard() {
       renderBoardConsole(state.uart);
       renderBoardState(state);
       boardSays(runLine(report),
-                report.status === "stopped" ? report.detail : "");
+                report.status === "running" ? "" : report.detail);
     },
   });
 
@@ -1270,7 +1272,14 @@ function wire() {
     // first so the step is the only thing that moves the machine.
     await stopBoardClock();
     showBoardRunning(false);
-    renderBoardState(await api(watchedUrl("/api/board/step"), {}));
+    const state = await api(watchedUrl("/api/board/step"), {});
+    renderBoardState(state);
+    // A step that leaves the board stopped or faulted says why, as a run's
+    // tick does: the reply carries both (OH-225).
+    if (state.status !== "running") {
+      boardSays(`${boardImage.board} ${state.status}: ${state.detail}. ` +
+                `pc 0x${$("where").textContent}`, state.detail);
+    }
   });
   $("board-load").addEventListener("click", () =>
     loadBoardImage().catch((error) => boardSays("Nothing loaded yet.", String(error.message || error))));
