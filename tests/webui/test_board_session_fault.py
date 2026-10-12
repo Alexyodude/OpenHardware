@@ -32,6 +32,7 @@ import urllib.request
 
 import pytest
 
+from core.avr import abi as avr
 from core.cortexm0 import abi as cortexm0
 from core.riscv32 import abi as riscv32
 from webui import api, emulator_server
@@ -548,3 +549,55 @@ def test_after_a_run_faults_on_the_host_the_step_route_moves_nothing(
             run["status"], run["detail"]), board
         assert stepped["pc"] == before["pc"], board
         assert stepped["registers"] == before["registers"], board
+
+
+# --- "faulted", not "stopped" ---------------------------------------------------
+#
+# Every board core, the Uno's AVR included: the word is the session's, and a
+# core that answered "stopped" for its own bug would be the one place the page
+# blamed the firmware for the simulator.
+
+#: The three board cores, each on a board running its own committed blink.
+EVERY_CORE = BOARDS + (
+    ("Arduino Uno", REPO / "tests" / "avr" / "blink" / "blink.bin", 0, avr,
+     "avr_step"),
+)
+
+
+def test_a_host_fault_is_faulted_and_a_firmware_fault_is_stopped(monkeypatch):
+    """Two different things to say. "stopped" is the core refusing the
+    firmware -- an encoding it lacks, an access off the board's map -- and
+    is a fact about the firmware; "faulted" is the core itself broken, a bug
+    in the simulator, the word the 8086 debugger has used since OH-223."""
+    for board, path, base, core, step in EVERY_CORE:
+        library(core)
+        with api.load_firmware(board, image_of(path), base=base) as session:
+            fault_on_call(core, step, monkeypatch, 1000)
+            run = session.run(5000)
+            assert (run.steps, run.status) == (999, "faulted"), (board, run)
+            assert session.state()["status"] == "faulted", board
+        with api.load_firmware(board, image_of(path), base=base) as session:
+            fault_on_call(core, step, monkeypatch, 3)
+            session.step(2)
+            with pytest.raises(core.HostFault):
+                session.step()
+            assert session.status == "faulted", board
+
+    library(cortexm0)
+    with api.load_firmware(M0_BOARD, INTO_THE_ROM, base=M0_LOAD) as session:
+        assert session.run(10).status == "stopped"
+
+
+def test_the_server_says_faulted_for_a_host_fault(live_server, monkeypatch):
+    """/api/board/run, /api/board/state and /api/board/step all carry the
+    word, so a page can say the simulator is at fault."""
+    for board, path, base, core, step in EVERY_CORE:
+        library(core)
+        load_over_http(live_server, board, image_of(path), base)
+        fault_on_call(core, step, monkeypatch, 1000)
+        status, run = call(live_server, "/api/board/run", {"steps": 5000})
+        assert (status, run["status"]) == (200, "faulted"), (board, run)
+        status, state = call(live_server, "/api/board/state")
+        assert (status, state["status"]) == (200, "faulted"), board
+        status, stepped = call(live_server, "/api/board/step", {})
+        assert (status, stepped["status"]) == (200, "faulted"), board

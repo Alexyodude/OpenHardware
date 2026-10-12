@@ -70,7 +70,9 @@ that returns and posts a name back.
               vector_table, stack_pointer}   // Arm boards only; see below
 
     POST /api/board/run     {"steps": 5000}
-      -> 200 {steps, status: "running"|"stopped", detail}
+      -> 200 {steps, status: "running"|"stopped"|"faulted", detail}
+         // "stopped": the core refused the firmware; "faulted": the core
+         // itself faulted on the host, a bug in the simulator
 
     GET  /api/board/state?at=0x10000100&len=64&words=0xd0000010,0xd0000020
       -> 200 {board, chip, status, detail,

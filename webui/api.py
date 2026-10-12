@@ -1267,7 +1267,8 @@ class RunResult:
 
     steps: int
     #: "running" -- the budget ran out with the program still going --
-    #: or "stopped", with `detail` carrying what the core said.
+    #: "stopped", the core having refused the firmware, or "faulted", the
+    #: core having faulted on the host; `detail` carries what the core said.
     status: str
     detail: str
 
@@ -1355,7 +1356,8 @@ class BoardSession:
         self.cpu = cpu
         self.image = image
         self.placement = placement
-        #: "running" until the core refuses an instruction, then "stopped".
+        #: "running" until the core refuses an instruction, then "stopped" --
+        #: or "faulted", if the core itself faulted on the host (`_stop`).
         #: A program that faults is a fact about the program, not a failure of
         #: this layer, so it is recorded here and reported rather than raised.
         self.status = "running"
@@ -1406,8 +1408,17 @@ class BoardSession:
             self.retired += 1
 
     def _stop(self, error: Exception) -> None:
-        """Record what stopped the core, for `step` and `run` alike."""
-        self.status = "stopped"
+        """Record what stopped the core, for `step` and `run` alike.
+
+        "faulted" when the core itself broke -- its `HostFault`, a fault on
+        the host that is a bug in the core -- and "stopped" when it refused
+        the firmware: an encoding it lacks, an access off the board's map.
+        The 8086 debugger has said "faulted" for the first since OH-223, and
+        a page that said "stopped" for both would send a reader to the
+        firmware for a bug in the simulator (OH-225).
+        """
+        broke = isinstance(error, self.runtime.abi.HostFault)
+        self.status = "faulted" if broke else "stopped"
         self.detail = str(error)
 
     def drive(self, levels: typing.Mapping[str, str]) -> None:
