@@ -761,3 +761,200 @@ def test_a_gpio_with_no_pad_is_refused_a_drive_by_name():
         assert "GPIO22" in str(caught.value), str(caught.value)
         esp32c3.drive_pins(cpu, {3: True})
         assert cpu.read_word(GPIO_IN) & (1 << 3), "GPIO3 is a pad, input on, driven high"
+
+
+# --- ADC1's one-time sample (OH-161 step 4) -----------------------------------
+
+ADC = esp32c3.APB_SARADC
+ONETIME = ADC + esp32c3.APB_SARADC_ONETIME_SAMPLE
+SAR1_DATA = ADC + esp32c3.APB_SARADC_SAR1_DATA
+INT_RAW = ADC + esp32c3.APB_SARADC_INT_RAW
+INT_CLR = ADC + esp32c3.APB_SARADC_INT_CLR
+CTRL = ADC + esp32c3.APB_SARADC_CTRL
+
+
+def onetime(channel: int, atten: int = 3) -> int:
+    """ADC1's control word for `channel` at `atten`, START clear."""
+    return (esp32c3.ONETIME_SAR1 | channel << esp32c3.ONETIME_CHANNEL_SHIFT
+            | atten << esp32c3.ONETIME_ATTEN_SHIFT)
+
+
+def convert(cpu, word: int) -> int:
+    """Clear done, start a conversion of `word` the way ESP-IDF does -- the
+    word, then the word with START -- and answer the result."""
+    cpu.write_word(INT_CLR, esp32c3.ADC1_DONE)
+    cpu.write_word(ONETIME, word)
+    cpu.write_word(ONETIME, word | esp32c3.ONETIME_START)
+    assert cpu.read_word(INT_RAW) & esp32c3.ADC1_DONE, f"no done for {word:#010x}"
+    return cpu.read_word(SAR1_DATA)
+
+
+def test_the_adc_numbers_this_board_carries_are_the_ones_in_the_header():
+    """Every ADC constant in `esp32c3.py` read back, by define name, out of
+    the tree it cites: the base (`soc.h`), the five offsets and every bit
+    (`apb_saradc_reg.h`), and ADC1's channels (`adc_channel.h`), with
+    GPIO5 on ADC2 and so out of them. Skips where PlatformIO's framework is
+    not installed."""
+    soc = framework_soc()
+    if soc is None:
+        pytest.skip("SKIPPED: no framework-arduinoespressif32; pio pkg install")
+    base = header_defines(soc / "soc.h")
+    adc = header_defines(soc / "apb_saradc_reg.h")
+    channels = header_defines(soc / "adc_channel.h")
+
+    assert int(base["DR_REG_APB_SARADC_BASE"], 16) == esp32c3.APB_SARADC
+    for name, offset in (
+        ("APB_SARADC_CTRL_REG", esp32c3.APB_SARADC_CTRL),
+        ("APB_SARADC_ONETIME_SAMPLE_REG", esp32c3.APB_SARADC_ONETIME_SAMPLE),
+        ("APB_SARADC_1_DATA_STATUS_REG", esp32c3.APB_SARADC_SAR1_DATA),
+        ("APB_SARADC_INT_RAW_REG", esp32c3.APB_SARADC_INT_RAW),
+        ("APB_SARADC_INT_CLR_REG", esp32c3.APB_SARADC_INT_CLR),
+    ):
+        assert offset_of(adc[name], "DR_REG_APB_SARADC_BASE") == offset, (
+            f"{name} is {adc[name]}")
+    for name, bit in (
+        ("APB_SARADC_SAR_CLK_GATED", esp32c3.APB_SARADC_SAR_CLK_GATED),
+        ("APB_SARADC1_ONETIME_SAMPLE", esp32c3.ONETIME_SAR1),
+        ("APB_SARADC2_ONETIME_SAMPLE", esp32c3.ONETIME_SAR2),
+        ("APB_SARADC_ONETIME_START", esp32c3.ONETIME_START),
+        ("APB_SARADC_ADC1_DONE_INT_RAW", esp32c3.ADC1_DONE),
+        ("APB_SARADC_ADC1_DONE_INT_CLR", esp32c3.ADC1_DONE),
+    ):
+        assert adc[name] == f"(BIT({bit.bit_length() - 1}))", f"{name} is {adc[name]}"
+    assert int(adc["APB_SARADC_ONETIME_CHANNEL_S"]) == esp32c3.ONETIME_CHANNEL_SHIFT
+    assert int(adc["APB_SARADC_ONETIME_ATTEN_S"]) == esp32c3.ONETIME_ATTEN_SHIFT
+    assert esp32c3.ONETIME_CONVERSION == (
+        esp32c3.ONETIME_SAR1 | esp32c3.ONETIME_SAR2
+        | int(adc["APB_SARADC_ONETIME_CHANNEL_V"], 16) << esp32c3.ONETIME_CHANNEL_SHIFT
+        | int(adc["APB_SARADC_ONETIME_ATTEN_V"], 16) << esp32c3.ONETIME_ATTEN_SHIFT)
+    adc1 = {int(channels[f"ADC1_CHANNEL_{n}_GPIO_NUM"]): n
+            for n in range(8) if f"ADC1_CHANNEL_{n}_GPIO_NUM" in channels}
+    assert adc1 == esp32c3.ADC1_CHANNELS
+    assert int(channels["ADC2_CHANNEL_0_GPIO_NUM"]) not in esp32c3.ADC1_CHANNELS
+
+
+def test_the_adc_reset_values_are_every_default_the_header_states():
+    """`APB_SARADC_CTRL_AT_RESET` and `ONETIME_SAMPLE_AT_RESET` composed from
+    the header's own field comments, `/* NAME : R/W ;bitpos:[hi:lo]
+    ;default: 2'd1 ; */`, and not from the bits the model reads."""
+    soc = framework_soc()
+    if soc is None:
+        pytest.skip("SKIPPED: no framework-arduinoespressif32; pio pkg install")
+    text = (soc / "apb_saradc_reg.h").read_text(encoding="utf-8", errors="replace")
+
+    def composed(register: str, following: str) -> int:
+        start = text.index(f"#define {register} ")
+        block = text[start:text.index(f"#define {following} ", start)]
+        fields = re.findall(
+            r"/\* (\w+) : [\w/]+ ;bitpos:\[(\d+)(?::(\d+))?\] ;default: \d+'([bdh])(\w+) ; \*/",
+            block)
+        assert fields, f"no field comments between {register} and {following}"
+        radix = {"b": 2, "d": 10, "h": 16}
+        return sum(int(value, radix[kind]) << int(low or high)
+                   for _name, high, low, kind, value in fields)
+
+    assert composed("APB_SARADC_CTRL_REG", "APB_SARADC_CTRL2_REG") == (
+        esp32c3.APB_SARADC_CTRL_AT_RESET)
+    assert composed("APB_SARADC_ONETIME_SAMPLE_REG", "APB_SARADC_APB_ADC_ARB_CTRL_REG") == (
+        esp32c3.ONETIME_SAMPLE_AT_RESET)
+
+
+def test_the_installed_adc_reads_the_vendors_reset_values():
+    """Out of reset `CTRL` and `ONETIME_SAMPLE` are their composed defaults,
+    and nothing has converted: the result and done are 0."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        assert cpu.read_word(CTRL) == esp32c3.APB_SARADC_CTRL_AT_RESET
+        assert cpu.read_word(ONETIME) == esp32c3.ONETIME_SAMPLE_AT_RESET
+        assert (cpu.read_word(SAR1_DATA), cpu.read_word(INT_RAW)) == (0, 0)
+
+
+def test_each_channel_converts_its_own_pin_at_the_attenuation_its_start_names():
+    """GPIO2 held at 1.65 V and GPIO3 at 1.1 V: each start answers its own
+    channel's pin, at its own attenuation -- 12 dB, k 25%, gives 1536 and
+    1024; 6 dB, k 50%, gives 3071 for 1.65 V; 0 dB holds it to 4095."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        esp32c3.hold_volts(cpu, {2: 1.65, 3: 1.1})
+        assert convert(cpu, onetime(2)) == 1536
+        assert convert(cpu, onetime(3)) == 1024
+        assert convert(cpu, onetime(2, atten=2)) == 3071
+        assert convert(cpu, onetime(2, atten=0)) == 4095
+        assert convert(cpu, onetime(4)) == 0, "GPIO4 is held at nothing: it floats"
+
+
+def test_a_hold_is_a_whole_statement():
+    """A pin the next hold leaves out floats, and converts to 0."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        esp32c3.hold_volts(cpu, {2: 1.65})
+        esp32c3.hold_volts(cpu, {3: 1.1})
+        assert convert(cpu, onetime(2)) == 0
+        assert convert(cpu, onetime(3)) == 1024
+
+
+def test_nothing_converts_with_the_adc_clock_gated():
+    """`SAR_CLK_GATED` clear: the start stores, and no done comes."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        esp32c3.hold_volts(cpu, {2: 1.65})
+        cpu.write_word(CTRL, esp32c3.APB_SARADC_CTRL_AT_RESET & ~esp32c3.APB_SARADC_SAR_CLK_GATED)
+        cpu.write_word(ONETIME, onetime(2))
+        cpu.write_word(ONETIME, onetime(2) | esp32c3.ONETIME_START)
+        assert (cpu.read_word(SAR1_DATA), cpu.read_word(INT_RAW)) == (0, 0)
+
+
+def test_a_start_on_adc2_or_on_no_channel_faults_naming_the_control_register():
+    """ADC2's bit, the reset channel 13, and channel 5 -- GPIO5 is ADC2's --
+    are held at nothing, so each start faults rather than answering a 0
+    that would read as a voltage."""
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        for word in (esp32c3.ONETIME_SAR2 | 0 << esp32c3.ONETIME_CHANNEL_SHIFT,
+                     esp32c3.ONETIME_SAR1 | esp32c3.ONETIME_SAMPLE_AT_RESET,
+                     onetime(5)):
+            cpu.write_word(ONETIME, word)
+            with pytest.raises(abi.MemoryFault):
+                cpu.write_word(ONETIME, word | esp32c3.ONETIME_START)
+            assert cpu.read_word(INT_RAW) == 0, f"{word:#010x} flagged done"
+
+
+def test_the_code_is_the_trms_formula_rounded_half_up_and_held_to_4095():
+    """`Vref / k * data / 4095` solved for `data`: 1.65 V at 12 dB is
+    1535.625, so 1536; 1.1 V is 1023.75, so 1024; 2.2 V is 2047.5 exactly,
+    so half up gives 2048 where rounding half to even would too and floor
+    would give 2047; 3.3 V is 3071.25, 3071; 5 V would be 4652.8 and is
+    held to 4095."""
+    assert [esp32c3.adc_code(v, 3) for v in (0, 1.65, 1.1, 2.2, 3.3, 5.0)] == [
+        0, 1536, 1024, 2048, 3071, 4095]
+    assert esp32c3.adc_code(0.55, 0) == 2048, "0 dB, k 100%: 2047.5 half up"
+    for volts, atten in ((-0.1, 3), (float("nan"), 3), (float("inf"), 3), (1.0, 4)):
+        with pytest.raises(ValueError) as caught:
+            esp32c3.adc_code(volts, atten)
+        assert repr(volts if atten == 3 else atten) in str(caught.value), str(caught.value)
+
+
+def test_a_voltage_on_a_gpio_with_no_pad_is_refused_by_name():
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        with pytest.raises(ValueError) as caught:
+            esp32c3.hold_volts(cpu, {22: 1.0})
+        assert "GPIO22" in str(caught.value), str(caught.value)

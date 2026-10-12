@@ -490,7 +490,7 @@ def test_the_page_drives_a_sketch_through_the_server(tmp_path):
             directory.mkdir()
             got = run_page(directory, END_TO_END, {
                 "server": base, "board": board, "input": pin_in, "output": pin_out})
-            record = [levels.get(pin_in) for _, levels
+            record = [levels.get(pin_in) for _, levels, _volts
                       in server.RequestHandlerClass.boards.session.inputs]
             watched[board] = (got["seen"], got["warned"], record)
     finally:

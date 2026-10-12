@@ -666,7 +666,7 @@ def handle_board_api(boards: BoardSlot, route: str,
             session.drive(levels)
         except ValueError as error:
             raise api.BoardRunError("drive-refused", str(error)) from error
-        retired, stated = session.inputs[-1]
+        retired, stated, _held = session.inputs[-1]
         return {"board": session.board, "retired": retired, "levels": stated}
 
     raise ApiError(f"no such route: {route}")

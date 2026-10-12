@@ -18,10 +18,12 @@
  * it is. **The API here is exactly what the board descriptions model.** A
  * function is present when every register it needs is mapped, and absent --
  * with a `Recipe.hints` row naming the modelling decision -- when one is
- * not. `analogRead` is the worked example: no description maps an ADC, so
- * this header deliberately does not declare it, and reaching for it earns
- * the explanation at the moment gcc says it was not declared.
- * `digitalRead` was the example until OH-161's step 3 mapped `GPIO_IN`.
+ * not. `analogWrite` is the worked example: no description maps the LEDC
+ * peripheral, so this header deliberately does not declare it, and reaching
+ * for it earns the explanation at the moment gcc says it was not declared.
+ * `digitalRead` was the example until OH-161's step 3 mapped `GPIO_IN`, and
+ * `analogRead` until its step 4 mapped ADC1's one-time sample; `analogRead`
+ * is declared where the variant's `oh_board.h` defines that ADC.
  *
  * The pin NAMES are still the vendor's: each recipe puts the board's own
  * `pins_arduino.h` -- plain constants, and at most ESP-IDF's
@@ -101,6 +103,28 @@ static inline __attribute__((always_inline)) int digitalRead(uint8_t pin) {
     }
     return oh_digital_read(pin);
 }
+
+#ifdef OH_ADC_ONETIME_SAMPLE
+/* `analogRead` converts the pin's voltage on ADC1, through the one-time
+ * sample the board's description maps (OH-161 step 4), at 12 dB as
+ * arduino-esp32 does by default, and returns the 12-bit code. Declared
+ * `uint16_t`, as arduino-esp32 declares it (`cores/esp32/esp32-hal-adc.h:42`
+ * at 2787dab). A pin on no ADC1 channel -- `OH_ADC1_FIRST_GPIO` and the
+ * `OH_ADC1_CHANNELS` after it -- reads 0, as arduino-esp32's does after
+ * logging that it is no ADC pin, and one the compiler knows stops the
+ * build at the call, where the recipe's hint says why. */
+uint16_t oh_analog_read(uint8_t pin);
+void oh_pin_is_on_no_adc1_channel(void)
+    __attribute__((error("the pin is on no ADC1 channel of this chip")));
+
+static inline __attribute__((always_inline)) uint16_t analogRead(uint8_t pin) {
+    if (__builtin_constant_p(pin) &&
+        (pin < OH_ADC1_FIRST_GPIO || pin >= OH_ADC1_FIRST_GPIO + OH_ADC1_CHANNELS)) {
+        oh_pin_is_on_no_adc1_channel();
+    }
+    return oh_analog_read(pin);
+}
+#endif
 
 /* Time since the board was installed, read from SYSTIMER unit 0, which the
  * board's description maps and `wiring.c` reads the way ESP-IDF does. Both

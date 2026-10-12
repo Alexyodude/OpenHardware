@@ -1148,8 +1148,8 @@ def test_a_drive_reaches_the_pin_and_is_recorded_when_it_took_effect():
         session.drive({})
         assert not gpio_in(session) & D1
         assert session.inputs == [
-            (100, {"D1": "high"}), (105, {"D1": "low"}), (125, {"D1": "high"}),
-            (125, {})]
+            (100, {"D1": "high"}, {}), (105, {"D1": "low"}, {}),
+            (125, {"D1": "high"}, {}), (125, {}, {})]
         assert session.retired == 125
 
 
@@ -1158,9 +1158,11 @@ def test_the_record_is_not_the_callers_dict():
     record of the last one; the record keeps a copy of what was said."""
     with c3_session() as session:
         levels = {"D1": "high"}
-        session.drive(levels)
+        volts = {"D0": 1.65}
+        session.drive(levels, volts)
         levels["D1"] = "low"
-        assert session.inputs == [(0, {"D1": "high"})]
+        volts["D0"] = 1.1
+        assert session.inputs == [(0, {"D1": "high"}, {"D0": 1.65})]
 
 
 def test_open_is_a_pad_nothing_drives_and_not_a_low_one():
@@ -1294,7 +1296,7 @@ def test_a_drive_on_an_output_pad_is_recorded_and_the_pin_reads_what_it_drives()
                 break
         session.drive({"D8": "low"})
         assert gpio_in(session) & d8, "the output's own level, not the drive"
-        assert session.inputs[-1] == (session.retired, {"D8": "low"})
+        assert session.inputs[-1] == (session.retired, {"D8": "low"}, {})
 
 
 #: A sketch whose output depends on WHEN each drive lands: it echoes `D1` to
@@ -1351,13 +1353,154 @@ def test_the_image_and_the_record_of_drives_replay_the_run():
     assert "0" in first[3] and "1" in first[3], f"the drives moved nothing: {first[3]!r}"
 
     with api.load_firmware(C3_BOARD, built.image, base=base) as replay:
-        for (at, levels), pc in zip(record, landed):
+        for (at, levels, volts), pc in zip(record, landed):
             while replay.retired < at:
                 replay.step()
             assert replay.cpu.pc == pc, (
                 f"the drive stamped {at} lands at pc {replay.cpu.pc:#x}, "
                 f"where the run had it at {pc:#x}")
-            replay.drive(levels)
+            replay.drive(levels, volts)
+        while replay.retired < first[0]:
+            replay.step()
+        assert ending(replay) == first
+        assert replay.inputs == record
+
+
+# --- what the outside holds a pin at, as the ADC converts it (OH-161 step 4) --
+
+ADC_ONETIME = esp32c3.APB_SARADC + esp32c3.APB_SARADC_ONETIME_SAMPLE
+
+
+def adc1_code(session: api.BoardSession, gpio: int) -> int:
+    """Convert ADC1's channel for `gpio` at 12 dB as firmware would, through
+    the description's own addresses, and answer the code."""
+    word = (esp32c3.ONETIME_SAR1 | esp32c3.ADC1_CHANNELS[gpio] << esp32c3.ONETIME_CHANNEL_SHIFT
+            | 3 << esp32c3.ONETIME_ATTEN_SHIFT)
+    session.cpu.write_word(ADC_ONETIME, word)
+    session.cpu.write_word(ADC_ONETIME, word | esp32c3.ONETIME_START)
+    return session.cpu.read_word(esp32c3.APB_SARADC + esp32c3.APB_SARADC_SAR1_DATA)
+
+
+def test_a_voltage_reaches_the_adc_and_is_recorded_beside_the_levels():
+    """`D0` is GPIO2, ADC1's channel 2. Held at 1.65 V it converts to 1536,
+    and the record keeps the levels and the volts of each drive together; a
+    drive with no volts holds nothing, and the pin converts to 0."""
+    d0 = esp32c3.HEADER["D0"]
+    with c3_session() as session:
+        session.run(50)
+        session.drive({"D0": "open"}, {"D0": 1.65})
+        assert adc1_code(session, d0) == 1536
+        session.run(10)
+        session.drive({"D1": "low"})
+        assert adc1_code(session, d0) == 0, "a drive without volts holds nothing"
+        assert session.inputs == [
+            (50, {"D0": "open"}, {"D0": 1.65}), (60, {"D1": "low"}, {})]
+
+
+def test_a_voltage_that_is_not_a_finite_number_of_volts_or_more_is_refused():
+    """Each refused with its value, before anything is driven or recorded:
+    a voltage below ground, not a number, not finite, or a bool, which
+    Python would otherwise take for 1 V; a pad that reaches no GPIO; and a
+    `volts` that is not a map."""
+    with c3_session() as session:
+        for volts, said in (({"D0": -0.5}, "-0.5"), ({"D0": "1.65"}, "'1.65'"),
+                            ({"D0": float("nan")}, "nan"), ({"D0": float("inf")}, "inf"),
+                            ({"D0": True}, "True"), ({"3V3_OUT": 3.3}, "'3V3_OUT'"),
+                            ([("D0", 1.65)], "[('D0', 1.65)]")):
+            with pytest.raises(ValueError) as caught:
+                session.drive({"D1": "high"}, volts)
+            assert said in str(caught.value), (volts, str(caught.value))
+        assert session.inputs == [], "a refused drive is not recorded"
+        assert not gpio_in(session) & D1, "nor driven"
+
+
+def test_two_labels_of_one_gpio_held_at_two_voltages_are_refused(monkeypatch):
+    monkeypatch.setitem(esp32c3.HEADER, "ALSO_D0", esp32c3.HEADER["D0"])
+    with c3_session() as session:
+        session.drive({}, {"D0": 1.0, "ALSO_D0": 1.0})
+        with pytest.raises(ValueError) as caught:
+            session.drive({}, {"D0": 1.0, "ALSO_D0": 2.0})
+    assert "'D0'" in str(caught.value) and "'ALSO_D0'" in str(caught.value), (
+        str(caught.value))
+
+
+def test_volts_for_a_description_that_converts_none_are_refused(monkeypatch):
+    """A description that reads input and has no `hold_volts` would believe
+    a voltage and convert nothing; levels alone are still driven there.
+    Taken away once the board is installed, since `install_adc` holds
+    nothing through it."""
+    with c3_session() as session:
+        monkeypatch.delattr(esp32c3, "hold_volts")
+        session.drive({"D1": "high"})
+        with pytest.raises(ValueError) as caught:
+            session.drive({"D1": "low"}, {"D0": 1.65})
+        assert session.inputs == [(0, {"D1": "high"}, {})]
+    assert C3_BOARD in str(caught.value) and "1.65" in str(caught.value), (
+        str(caught.value))
+
+
+#: A sketch whose output depends on WHEN each voltage lands: it prints every
+#: code A0 converts to that differs from the last.
+ANALOG_REPLAY_SKETCH = """
+int last = -1;
+void setup() { }
+void loop() {
+  int code = analogRead(A0);
+  if (code != last) { Serial.println(code); last = code; }
+}
+"""
+
+
+def test_the_image_and_a_record_of_drives_with_volts_replay_the_run():
+    """The replay claim, with voltages in it: drives that hold `D0` -- A0 --
+    at three voltages and at none, between run chunks and single steps,
+    replayed into a fresh session one instruction at a time. Each drive must
+    land at the program counter it found the first time, and the run must
+    end with the same instruction count, program counter, pin levels and
+    printed codes, with the same record."""
+    needs_riscv32()
+    from webui import compile as compiler
+
+    try:
+        built = compiler.build(C3_BOARD, ANALOG_REPLAY_SKETCH)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    assert built.ok, built.diagnostics
+    base = compiler.recipe_for(C3_BOARD).base
+
+    def ending(session: api.BoardSession) -> tuple:
+        return (session.retired, session.cpu.pc,
+                api.pin_levels(session.runtime, session.cpu),
+                session.state()["uart"]["text"])
+
+    landed = []
+    with api.load_firmware(C3_BOARD, built.image, base=base) as session:
+        session.run(300)
+        for chunk, levels, volts, steps in (
+                (None, {"D0": "open"}, {"D0": 1.65}, 7),
+                (213, {"D0": "open"}, {"D0": 1.1}, 1),
+                (300, {"D0": "low"}, {"D0": 0.3}, 0),
+                (150, {}, None, 0)):
+            if chunk:
+                session.run(chunk)
+            landed.append(session.cpu.pc)
+            session.drive(levels, volts)
+            if steps:
+                session.step(steps)
+        session.run(400)
+        record = list(session.inputs)
+        first = ending(session)
+    assert first[3].split() == ["0", "1536", "1024", "279", "0"], (
+        f"the volts did not each print: {first[3]!r}")
+
+    with api.load_firmware(C3_BOARD, built.image, base=base) as replay:
+        for (at, levels, volts), pc in zip(record, landed):
+            while replay.retired < at:
+                replay.step()
+            assert replay.cpu.pc == pc, (
+                f"the drive stamped {at} lands at pc {replay.cpu.pc:#x}, "
+                f"where the run had it at {pc:#x}")
+            replay.drive(levels, volts)
         while replay.retired < first[0]:
             replay.step()
         assert ending(replay) == first

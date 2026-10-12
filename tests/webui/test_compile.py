@@ -1534,19 +1534,23 @@ void loop() {
 
 
 def test_each_absence_hints_the_model_decision_it_stands_on():
-    """analogRead and attachInterrupt are not in the core because they are
+    """analogWrite and attachInterrupt are not in the core because they are
     not in the MODEL, and the person who reaches for one is told that in the
     pane they are looking at -- the OH-138 pattern, one hint per decision.
 
-    **`Serial` was the second example here until OH-161, and `digitalRead`
-    the first until OH-161's step 3**, and both are now the opposite: the
-    three ESP32 descriptions map UART0's transmit FIFO and `GPIO_IN`, so the
+    **`Serial` was the second example here until OH-161, `digitalRead` the
+    first until OH-161's step 3, and `analogRead` the first after it until
+    step 4**, and all three are now the opposite: the ESP32-C3's description
+    maps UART0's transmit FIFO, `GPIO_IN` and ADC1's one-time sample, so the
     symbols exist, the sketches build, and their hints are gone. A test
-    still asserting either refusal would hold the model to a gap it no
-    longer has -- so it asserts the fills instead."""
-    analog = c3_build("void setup(){int x = analogRead(D10);} void loop(){}")
+    still asserting a refusal would hold the model to a gap it no longer
+    has -- so it asserts the fills instead."""
+    analog = c3_build("void setup(){analogWrite(D10, 128);} void loop(){}")
     assert not analog.ok
-    assert "needs the ADC" in analog.diagnostics
+    assert "needs the LEDC peripheral" in analog.diagnostics
+
+    converted = c3_build("void setup(){int x = analogRead(A0);} void loop(){}")
+    assert converted.ok, converted.diagnostics
 
     interrupt = c3_build("void f(){} void setup(){attachInterrupt(0, f, 1);} void loop(){}")
     assert not interrupt.ok
@@ -1641,6 +1645,34 @@ def test_the_oh_board_header_restates_the_descriptions_own_numbers(variant):
     assert int(defines["OH_IO_MUX_FUN_PD"], 16) == description.IO_MUX_FUN_PD
     assert int(defines["OH_IO_MUX_FUN_PU"], 16) == description.IO_MUX_FUN_PU
     assert int(defines["OH_IO_MUX_FUN_IE"], 16) == description.IO_MUX_FUN_IE
+    # ADC1's one-time sample, on the same terms (OH-161 step 4), on each
+    # variant whose description maps it: the C3's block is at 0x60040000
+    # and gated in its own CTRL, so a header copied from a neighbour would
+    # start a conversion this part does not map. The channels are a run of
+    # GPIOs, so the header's first and count must make the description's
+    # table exactly.
+    if hasattr(description, "APB_SARADC"):
+        adc = description.APB_SARADC
+        for define, offset in (
+            ("OH_ADC_ONETIME_SAMPLE", description.APB_SARADC_ONETIME_SAMPLE),
+            ("OH_ADC_SAR1_DATA", description.APB_SARADC_SAR1_DATA),
+            ("OH_ADC_INT_RAW", description.APB_SARADC_INT_RAW),
+            ("OH_ADC_INT_CLR", description.APB_SARADC_INT_CLR),
+        ):
+            assert int(defines[define], 16) == adc + offset, define
+        assert int(defines["OH_ADC_ONETIME_SAR1"], 16) == description.ONETIME_SAR1
+        assert int(defines["OH_ADC_ONETIME_START"], 16) == description.ONETIME_START
+        assert int(defines["OH_ADC1_DONE"], 16) == description.ADC1_DONE
+        assert int(defines["OH_ADC_ONETIME_CHANNEL_SHIFT"]) == description.ONETIME_CHANNEL_SHIFT
+        assert int(defines["OH_ADC_ONETIME_ATTEN_12DB"], 16) == (
+            3 << description.ONETIME_ATTEN_SHIFT), "12 dB, arduino-esp32's ADC_11db"
+        assert description.ADC_ATTEN_K[3] == 0.25
+        first = int(defines["OH_ADC1_FIRST_GPIO"])
+        count = int(defines["OH_ADC1_CHANNELS"])
+        assert {first + n: n for n in range(count)} == description.ADC1_CHANNELS
+        gate, gate_bit = description.ADC_GATE
+        assert int(defines["OH_ADC_GATE"], 16) == gate
+        assert int(defines["OH_ADC_GATE_EN"], 16) == gate_bit
 
     ram_base = getattr(description, ram)
     ram_size = getattr(description, f"{ram}_SIZE")
@@ -1948,12 +1980,13 @@ def test_the_serial_hint_is_gone_where_the_uart_is_modelled():
     rather than hinted, so it faults at a named address instead.
 
     `digitalRead` stood here as an unfilled absence until OH-161's step 3
-    filled it; `attachInterrupt` takes its place."""
+    filled it, and `analogRead` until its step 4; `attachInterrupt` and
+    `analogWrite` take their places."""
     for board in (C3_BOARD, *OPENHARDWARE_BOARDS):
         hints = dict(compiler.recipe_for(board).hints)
         assert "Serial" not in hints, board
         assert "attachInterrupt" in hints, f"{board}: the unfilled absences still speak"
-        assert "analogRead" in hints, board
+        assert "analogWrite" in hints, board
 
 
 def test_a_sketch_reading_the_serial_port_still_fails_to_build():
@@ -2348,7 +2381,7 @@ def echoed(board: str, mode: str, drives: list[str | None],
                         f"{board}: D10 followed D1 {step + 1} steps after the drive")
                 before = now
             seen.append(session.state()["pins"]["D10"])
-        assert [levels for _, levels in session.inputs] == [
+        assert [levels for _, levels, _volts in session.inputs] == [
             {pin: level} for level in drives if level is not None]
     return seen
 
@@ -2446,3 +2479,167 @@ def test_the_digitalread_hint_is_gone_where_gpio_in_is_modelled():
     and these no longer fail."""
     for board in READING_BOARDS:
         assert "digitalRead" not in dict(compiler.recipe_for(board).hints), board
+
+
+# --- a sketch reads a voltage, held as the page will hold it (OH-161 step 4) -
+#
+# The voltage goes in through `BoardSession.drive`'s `volts`, the call the
+# page's bench makes once it has solved its circuit, and the sketch's answer
+# comes out through `session.state()["uart"]`, the console pane's view.
+# Nothing here reads a register.
+
+#: The XIAOs whose descriptions map ADC1's one-time sample.
+ANALOG_BOARDS = {C3_BOARD: esp32c3}
+
+#: Prints each code `analogRead(A0)` gives that differs from the last, so
+#: the text is the sequence of readings and not how many loops ran.
+ANALOG_SKETCH = """
+int last = -1;
+void setup() { }
+void loop() {
+  int code = analogRead(A0);
+  if (code != last) { Serial.println(code); last = code; }
+}
+"""
+
+#: Two channels read by turns, the reason the ADC is a behaviour of the core:
+#: one result register answers whichever channel the last start named.
+TWO_CHANNEL_SKETCH = """
+long last = -1;
+void setup() { }
+void loop() {
+  int a = analogRead(A0);
+  int b = analogRead(A1);
+  long both = a * 4096L + b;
+  if (both != last) { Serial.print(a); Serial.print(' '); Serial.println(b); last = both; }
+}
+"""
+
+#: Steps run after loading and after each hold. Measured 2026-10-13 on the
+#: XIAO ESP32-C3: `ANALOG_SKETCH`'s first byte at step 89, and each new
+#: line complete 93 to 135 steps after the drive that changed the code.
+ANALOG_STEPS = 2_000
+
+
+def analog_pins(board: str) -> dict[str, int]:
+    """`A0`, `A1`, ... -> GPIO, read out of the board's own `pins_arduino.h`,
+    the header the recipe compiles `A0` from."""
+    recipe = compiler.recipe_for(board)
+    roots = ([compiler.PACKAGES / path for path in recipe.extra_includes]
+             + [compiler.BOARD_SUPPORT / path for path in recipe.bsp_includes])
+    (table,) = [root / "pins_arduino.h" for root in roots
+                if (root / "pins_arduino.h").is_file()]
+    return {name: int(gpio) for name, gpio in re.findall(
+        r"static const uint8_t (A\d+) = (\d+);", table.read_text(encoding="utf-8"))}
+
+
+def analog_pad(board: str, description, name: str) -> str:
+    """The pad label the bench drives `name` (`A0`) by: its GPIO's `HEADER`
+    label."""
+    gpio = analog_pins(board)[name]
+    (label,) = [label for label, at in description.HEADER.items() if at == gpio]
+    return label
+
+
+def analog_text(board: str, sketch: str, holds: list[dict[str, float]]) -> list[str]:
+    """What `sketch` has printed on `board` after loading and after each of
+    `holds` in turn -- pad label -> volts -- given through
+    `BoardSession.drive` with every pad it names "open", as the bench states
+    a voltage between the two input levels; and the session's record checked
+    to be exactly those holds."""
+    built = oh_build(board, sketch)
+    assert built.ok, f"{board}: {built.diagnostics}"
+    texts = []
+    with api.load_firmware(board, built.image,
+                           base=compiler.recipe_for(board).base) as session:
+        ran = session.run(ANALOG_STEPS)
+        assert ran.status == "running", f"{board}: {ran.detail}"
+        texts.append(session.state()["uart"]["text"])
+        for volts in holds:
+            session.drive({label: "open" for label in volts}, volts)
+            ran = session.run(ANALOG_STEPS)
+            assert ran.status == "running", f"{board}: {ran.detail}"
+            texts.append(session.state()["uart"]["text"])
+        assert [held for _, _, held in session.inputs] == holds, board
+    return texts
+
+
+def test_analog_read_prints_the_code_of_the_voltage_held_on_a0():
+    """`Serial.println(analogRead(A0))`: nothing held, the pin floats and
+    reads 0; 1.65 V, a divider of two equal resistors from 3.3 V, reads
+    1536 (1535.625 by the TRM's formula at 12 dB); 1.1 V reads 1024
+    (1023.75); held at nothing again, 0."""
+    for board, description in ANALOG_BOARDS.items():
+        needs_toolchain(board)
+        a0 = analog_pad(board, description, "A0")
+        texts = analog_text(board, ANALOG_SKETCH, [{a0: 1.65}, {a0: 1.1}, {}])
+        assert texts[-1] == "0\r\n1536\r\n1024\r\n0\r\n", (board, texts)
+
+
+def test_two_channels_read_by_turns_each_read_their_own_pin():
+    """A0 and A1 read in one loop, each held at its own voltage, then
+    swapped: each read answers its own pin, which a result register set
+    from outside between runs could not do. Asked of the last line after
+    each hold, because a hold that lands between the two reads prints one
+    line with A0 from before it and A1 from after -- measured on the C3,
+    `0 1024` and `1536 1536` -- which is each read answering its pin as it
+    is when it reads."""
+    for board, description in ANALOG_BOARDS.items():
+        needs_toolchain(board)
+        a0 = analog_pad(board, description, "A0")
+        a1 = analog_pad(board, description, "A1")
+        texts = analog_text(board, TWO_CHANNEL_SKETCH, [
+            {a0: 1.65, a1: 1.1}, {a0: 1.1, a1: 1.65}])
+        assert [text.splitlines()[-1] for text in texts] == [
+            "0 0", "1536 1024", "1024 1536"], (board, texts)
+
+
+def test_analog_read_leaves_the_pad_as_gpio_config_as_analog_does():
+    """ESP-IDF puts an ADC pin in analog mode -- input off, output off, both
+    pulls off (`gpio.c:436-454` at v5.5) -- so a pin set up as a pulled-up
+    output reads with neither afterwards. Through the description's own
+    addresses for the pad and `ENABLE`."""
+    sketch = ("void setup(){ pinMode(A0, INPUT_PULLUP); pinMode(A0, OUTPUT); "
+              "analogRead(A0); }\nvoid loop(){}")
+    for board, description in ANALOG_BOARDS.items():
+        needs_toolchain(board)
+        gpio = analog_pins(board)["A0"]
+        pad = description.IO_MUX + description.IO_MUX_GPIO0 + gpio * description.IO_MUX_STRIDE
+        built = oh_build(board, sketch)
+        assert built.ok, f"{board}: {built.diagnostics}"
+        with api.load_firmware(board, built.image,
+                               base=compiler.recipe_for(board).base) as session:
+            ran = session.run(ANALOG_STEPS)
+            assert ran.status == "running", f"{board}: {ran.detail}"
+            word = session.cpu.read_word(pad)
+            enable = session.cpu.read_word(description.GPIO + description.GPIO_ENABLE)
+        bits = description.IO_MUX_FUN_IE | description.IO_MUX_FUN_PU | description.IO_MUX_FUN_PD
+        assert word & bits == 0, f"{board}: GPIO{gpio}'s pad reads {word:#010x}"
+        assert not enable & (1 << gpio), f"{board}: GPIO{gpio} still drives"
+
+
+def test_a_pin_on_no_adc1_channel_is_refused_where_known_and_reads_0_where_not():
+    """The XIAO ESP32-C3's `A3` is GPIO5, ADC2's: a constant stops the build
+    with the hint naming the header; a pin known only when it runs reads 0,
+    as arduino-esp32's `analogRead` does after logging that it is no ADC
+    pin."""
+    needs_toolchain(C3_BOARD)
+    refused = c3_build("void setup(){ analogRead(A3); }\nvoid loop(){}")
+    assert not refused.ok
+    assert "on none of its channels" in refused.diagnostics, refused.diagnostics
+    assert "variants/xiao_esp32c3/oh_board.h" in refused.diagnostics
+    source = ("volatile uint8_t pin = 10;\n"
+              "void setup(){ Serial.println(analogRead(pin)); }\nvoid loop(){}")
+    assert printed(C3_BOARD, esp32c3, source) == b"0\r\n"
+
+
+def test_the_analogread_hint_is_gone_where_the_adc_is_modelled():
+    """The hint named an absence ADC1's one-time sample now fills -- on every
+    board built against a chip whose description maps it, the manifest's
+    C3 rows with the XIAO -- and still stands where it does not."""
+    rows = [row.board for row in board_manifest.ROWS if row.chip.startswith("ESP32-C")]
+    assert len(rows) >= 2, rows
+    for board in (C3_BOARD, *OPENHARDWARE_BOARDS, *rows):
+        hints = dict(compiler.recipe_for(board).hints)
+        modelled = api.description_for(board) in ANALOG_BOARDS.values()
+        assert ("analogRead" in hints) != modelled, (board, sorted(hints))

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+import math
 import re
 import types
 import typing
@@ -1392,11 +1393,12 @@ class BoardSession:
         #: `run` together: the clock `inputs` is stamped with.
         self.retired = 0
         #: Every `drive`, in order: the instructions retired when it took
-        #: effect, and what it said (OH-161 step 3). **The replay record**:
-        #: a level enters a session only through `drive`, so this image and
-        #: this list reproduce the run -- no clock and no randomness is
-        #: consulted, and when a call arrived in wall time is not part of it.
-        self.inputs: list[tuple[int, dict[str, str]]] = []
+        #: effect, the levels it said and the volts it held (OH-161 steps 3
+        #: and 4). **The replay record**: a level or a voltage enters a
+        #: session only through `drive`, so this image and this list
+        #: reproduce the run -- no clock and no randomness is consulted, and
+        #: when a call arrived in wall time is not part of it.
+        self.inputs: list[tuple[int, dict[str, str], dict[str, float]]] = []
 
     @property
     def board(self) -> str:
@@ -1447,9 +1449,11 @@ class BoardSession:
         self.status = "faulted" if broke else "stopped"
         self.detail = str(error)
 
-    def drive(self, levels: typing.Mapping[str, str]) -> None:
+    def drive(self, levels: typing.Mapping[str, str],
+              volts: typing.Mapping[str, float] | None = None) -> None:
         """What the outside drives onto the pins: name -> "high", "low" or
-        "open", each name as `pin_levels` keys it.
+        "open", each name as `pin_levels` keys it; and, in `volts`, name ->
+        the voltage the outside holds a pin at, as an ADC converts it.
 
         **The names are `pin_levels`' and not only the pads'**: on a XIAO they
         are its description's `HEADER`, which names pins a package may have
@@ -1478,12 +1482,23 @@ class BoardSession:
         what the page's bench will call, once it has solved what its parts
         put on each input pin (OH-161 step 3, slice B).
 
+        **`volts` is a second map and not a second call** (OH-161 step 4):
+        the bench solves one circuit and states both, so one call carries
+        both and one record entry keeps both, `(retired, levels, volts)`.
+        `levels` stays the bench's thresholding of the same voltages, so a
+        pad between the two input levels is "open" in `levels` and still
+        has its voltage here. A whole statement like `levels`: a pin left
+        out is held at nothing, and the description's `hold_volts` says what
+        a floating pin converts to. Called with every drive on a description
+        that has one, with an empty map where `volts` is None.
+
         `ValueError`, naming the values, for a level that is none of the
-        three, a name that reaches no GPIO, two names of one GPIO driven two
-        ways, a manifest row with no board file to resolve names against, and
-        a board whose description reads no input at all.
-        `webui/emulator_server.py`'s `/api/board/drive` gives each the
-        `drive-refused` slug.
+        three, a voltage that is not a finite number of 0 V or more, a name
+        that reaches no GPIO, two names of one GPIO driven or held two ways,
+        a manifest row with no board file to resolve names against, a board
+        whose description reads no input at all, and volts for one whose
+        description converts none. `webui/emulator_server.py`'s
+        `/api/board/drive` gives each the `drive-refused` slug.
         """
         driver = getattr(self.runtime.description, "drive_pins", None)
         if driver is None:
@@ -1516,8 +1531,38 @@ class BoardSession:
                     f"GPIO{gpio}, driven {levels[by_gpio[gpio]]!r} and {level!r}")
             driven[gpio] = level == "high"
             by_gpio[gpio] = label
+        holder = getattr(self.runtime.description, "hold_volts", None)
+        volts = {} if volts is None else volts
+        if not isinstance(volts, typing.Mapping):
+            raise ValueError(
+                f"{self.board}: volts must map a pad name to volts, got {volts!r}")
+        if volts and holder is None:
+            raise ValueError(
+                f"{self.board}: its description converts no voltage, so none "
+                f"can be held on its pads: {dict(volts)!r}")
+        held: dict[int, float] = {}
+        held_by: dict[int, str] = {}
+        for label, value in volts.items():
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value < 0):
+                raise ValueError(
+                    f"{self.board}: {label!r} held at {value!r}; a pad is held "
+                    f"at a finite number of volts, 0 or more")
+            if label not in gpios:
+                raise ValueError(
+                    f"{self.board}: no pad {label!r} reaches a GPIO; the pads "
+                    f"that do are {sorted(gpios)}")
+            gpio = gpios[label]
+            if gpio in held and held[gpio] != value:
+                raise ValueError(
+                    f"{self.board}: {held_by[gpio]!r} and {label!r} are both "
+                    f"GPIO{gpio}, held at {held[gpio]!r} and {value!r} V")
+            held[gpio] = float(value)
+            held_by[gpio] = label
         driver(self.cpu, driven)
-        self.inputs.append((self.retired, dict(levels)))
+        if holder is not None:
+            holder(self.cpu, held)
+        self.inputs.append((self.retired, dict(levels), dict(volts)))
 
     def run(self, budget: int) -> RunResult:
         """Up to `budget` instructions, stopping where the core does.

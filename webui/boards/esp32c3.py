@@ -54,8 +54,8 @@ anything is wired to, and `GPIO8` below is the pin Espressif's own devkit uses
 
 ## What is deliberately absent
 
-Every timer but one, the ADC, SPI, I2C, and the whole clock and reset
-subsystem. Same growth rule the other three boards keep: a peripheral is added
+Every timer but one, all of the ADC but ADC1's one-time sample, SPI, I2C,
+and the whole clock and reset subsystem. Same growth rule the other three boards keep: a peripheral is added
 when a real image faults on it and not before. Here the rule has teeth --
 `core/riscv32/cpu.h` faults on any address no region and no register covers, so
 a program that touches an undescribed peripheral stops and names the address
@@ -83,10 +83,16 @@ comparators, whose alarms need an interrupt this core cannot deliver. See
 register of every GPIO, whose input enable and pulls decide what an input
 reads. What the outside drives onto a pin arrives only through
 `drive_pins`. See `install_gpio_in`.
+
+**ADC1 converts since OH-161's step 4**: its one-time sample, the path
+the TRM's own procedure names, as `core/riscv32`'s sampler. What voltage the
+outside holds a pin at arrives only through `hold_volts`, and the code is
+the TRM's formula's, typical and uncalibrated. See `install_adc`.
 """
 
 from __future__ import annotations
 
+import math
 import typing
 
 #: The flash execute window, from `soc.h:219-220`:
@@ -390,6 +396,104 @@ if CPU_HZ % SYSTIMER_HZ:
         f"SYSTIMER_INSTRUCTIONS_PER_TICK would be {SYSTIMER_INSTRUCTIONS_PER_TICK}, "
         f"rounded down from {CPU_HZ / SYSTIMER_HZ}")
 
+#: The SAR ADC's digital controller, `soc.h:67` --
+#: `#define DR_REG_APB_SARADC_BASE 0x60040000`.
+APB_SARADC = 0x60040000
+
+#: The five registers of it this board models (OH-161 step 4), from
+#: `apb_saradc_reg.h`, as offsets because that is how the header writes them:
+#:
+#:     #define APB_SARADC_CTRL_REG            (DR_REG_APB_SARADC_BASE + 0x000)  :22
+#:     #define APB_SARADC_ONETIME_SAMPLE_REG  (DR_REG_APB_SARADC_BASE + 0x020)  :176
+#:     #define APB_SARADC_1_DATA_STATUS_REG   (DR_REG_APB_SARADC_BASE + 0x02C)  :278
+#:     #define APB_SARADC_INT_RAW_REG         (DR_REG_APB_SARADC_BASE + 0x044)  :391
+#:     #define APB_SARADC_INT_CLR_REG         (DR_REG_APB_SARADC_BASE + 0x04C)  :467
+#:
+#: The one-time path the TRM's own procedure names (v1.4 34.2.3.3, p.871)
+#: and nothing more: every other register in the block is unmapped, so
+#: firmware that sets up a pattern table, a filter, a threshold monitor or
+#: DMA faults at a named address.
+APB_SARADC_CTRL = 0x00
+APB_SARADC_ONETIME_SAMPLE = 0x20
+APB_SARADC_SAR1_DATA = 0x2C
+APB_SARADC_INT_RAW = 0x44
+APB_SARADC_INT_CLR = 0x4C
+
+#: The bits, each with the header's own access type and default:
+#:
+#:     APB_SARADC_SAR_CLK_GATED     R/W  [6]      default 1    :53
+#:     APB_SARADC1_ONETIME_SAMPLE   R/W  [31]     default 0    :177
+#:     APB_SARADC2_ONETIME_SAMPLE   R/W  [30]     default 0    :183
+#:     APB_SARADC_ONETIME_START     R/W  [29]     default 0    :189
+#:     APB_SARADC_ONETIME_CHANNEL   R/W  [28:25]  default 13   :195
+#:     APB_SARADC_ONETIME_ATTEN     R/W  [24:23]  default 0    :201
+#:     APB_SARADC_ADC1_DATA         RO   [16:0]   default 0    :279
+#:     APB_SARADC_ADC1_DONE_INT_RAW RO   [31]     default 0    :392
+#:     APB_SARADC_ADC1_DONE_INT_CLR WO   [31]     default 0    :468
+#:
+#: **The gate is `SAR_CLK_GATED`**, which gates ADC_CTRL_CLK and which
+#: ESP-IDF sets in `adc_ll_digi_clk_sel` (v5.5 `hal/esp32c3/include/hal/
+#: adc_ll.h:313-318`). It is 1 out of reset, so a bare-metal image converts
+#: without touching it, as it transmits without touching `UART_TX_SCLK_EN`.
+#: **Not `APB_SARADC_CLK_EN`** (+ 0x54 bit 20, "Enable the SAR ADC register
+#: clock", reset 0, TRM Register 34.19, p.888), which nothing on ESP-IDF's
+#: one-shot path writes, so silicon converts with it clear. A C5 gates on its
+#: PCR's `SARADC_CLKM_EN` instead, which resets to 0 there: the same block
+#: and another place for its clock on each neighbour.
+APB_SARADC_SAR_CLK_GATED = 1 << 6
+ONETIME_SAR1 = 1 << 31
+ONETIME_SAR2 = 1 << 30
+ONETIME_START = 1 << 29
+ONETIME_CHANNEL_SHIFT = 25
+ONETIME_ATTEN_SHIFT = 23
+ADC1_DONE = 1 << 31
+
+#: The bits of `ONETIME_SAMPLE` that choose what a start converts: both
+#: unit-select bits, the channel and the attenuation. `core/riscv32`'s
+#: sampler keys its answer on these bits of the word that raised START.
+ONETIME_CONVERSION = (ONETIME_SAR1 | ONETIME_SAR2 | (0xF << ONETIME_CHANNEL_SHIFT)
+                      | (0x3 << ONETIME_ATTEN_SHIFT))
+
+#: The register and the bit that gate a conversion on this part: `CTRL`'s
+#: `SAR_CLK_GATED`. A pair, because the neighbours put it elsewhere.
+ADC_GATE = (APB_SARADC + APB_SARADC_CTRL, APB_SARADC_SAR_CLK_GATED)
+
+#: `APB_SARADC_CTRL_REG` out of reset, composed from every field default
+#: `apb_saradc_reg.h:23-70` states rather than from the one bit this model
+#: reads: `WAIT_ARB_CYCLE` [31:30] 1, `XPD_SAR_FORCE` [28:27] 0,
+#: `SAR_PATT_P_CLEAR` [23] 0, `SAR_PATT_LEN` [17:15] 7, `SAR_CLK_DIV` [14:7]
+#: 4, `SAR_CLK_GATED` [6] 1, `START` [1] 0, `START_FORCE` [0] 0.
+APB_SARADC_CTRL_AT_RESET = (1 << 30) | (7 << 15) | (4 << 7) | (1 << 6)
+
+#: `ONETIME_SAMPLE_REG` out of reset: `ONETIME_CHANNEL` 13 and every other
+#: field 0 (:177-206). Channel 13 is no channel of this part's.
+ONETIME_SAMPLE_AT_RESET = 13 << ONETIME_CHANNEL_SHIFT
+
+#: ADC1's channels, GPIO -> channel: GPIO0 to GPIO4 are channels 0 to 4,
+#: TRM v1.4 Table 34.2-1, p.870, and `adc_channel.h:18-31`.
+#:
+#: **ADC1 only.** GPIO5 is ADC2's channel 0 (`adc_channel.h:33-34`), and
+#: ESP-IDF v5.5 refuses ADC2 on this part unless
+#: `CONFIG_ADC_ONESHOT_FORCE_USE_ADC2_ON_C3` is set (`components/esp_adc/
+#: adc_oneshot.c:86-92`; `soc_caps.h:90`, `SOC_ADC_DIG_SUPPORTED_UNIT`), so
+#: arduino-esp32's `analogRead(A3)` on a XIAO ESP32-C3 logs the failure and
+#: returns 0. No ADC2 key is held, so a start naming ADC2 faults.
+ADC1_CHANNELS: dict[int, int] = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
+
+#: The conversion, in the TRM's own words (v1.4 34.2.3.2, p.870): "the
+#: resolution (12-bit) of the conversion spans voltage range from 0 mV to
+#: Vref. Vref is the SAR ADC's internal reference voltage (1100 mV by
+#: design)", and `Vdata = Vref / k * data / 4095`, with k 100%, 75%, 50% and
+#: 25% at 0, 2.5, 6 and 12 dB. `ONETIME_ATTEN` spells those 0 to 3: the
+#: TRM's pattern table entry, "atten Attenuation. 0: 0 dB; 1: 2.5 dB; 2: 6
+#: dB; 3: 12 dB." (Figure 34.2-5, p.873), and ESP-IDF's `adc_atten_t`, which
+#: `adc_oneshot_ll_set_atten` writes into the field as it is
+#: (`components/hal/include/hal/adc_types.h:47-50` at v5.5). arduino-esp32's
+#: default `ADC_11db` is 3 (`cores/esp32/esp32-hal-adc.h:32-35` @ 2787dab).
+ADC_VREF_VOLTS = 1.1
+ADC_ATTEN_K: dict[int, float] = {0: 1.0, 1: 0.75, 2: 0.5, 3: 0.25}
+ADC_FULL_CODE = 4095
+
 #: The pin the fixture watches. **Not a user LED** -- see the module docstring.
 #: GPIO8 is what Espressif's own ESP32-C3-DevKitM-1 wires its RGB LED to, and
 #: on a XIAO it is an ordinary exposed output -- the pad silkscreened `D8`,
@@ -575,6 +679,11 @@ class Cpu(typing.Protocol):
                   pad_stride: int, pads: int, input_enable: int, pull_up: int,
                   pull_down: int) -> None: ...
     def drive_input(self, address: int, *, driven: int, levels: int) -> None: ...
+    def map_sampler(self, control: int, *, value: int, start_mask: int,
+                    key_mask: int, result: int, status: int, done_mask: int,
+                    enable: int, enable_mask: int) -> None: ...
+    def hold_samples(self, control: int,
+                     samples: typing.Mapping[int, int]) -> None: ...
     def stream(self, address: int) -> bytes: ...
     def read_word(self, address: int) -> int: ...
 
@@ -776,6 +885,96 @@ def install_systimer(cpu: Cpu) -> None:
     )
 
 
+def adc_code(volts: float, atten: int) -> int:
+    """The 12-bit code this part's ADC gives `volts` at `atten`: the TRM's
+    `Vdata = Vref / k * data / 4095` solved for `data`, rounded half up and
+    held to 4095.
+
+    **Typical, and uncalibrated.** Vref is "1100 mV by design"; the
+    datasheet states accuracy only after hardware and software calibration
+    (v2.4 Table 5-6, ADC Calibration Results, p.56) and DNL and INL only as
+    LSB bounds (Table 5-5, p.56), and states no uncalibrated spread, so a
+    real part's code differs from this by an amount nothing here can bound.
+    No eFuse calibration, no nonlinearity and no noise are modelled. And at
+    12 dB the effective range is 0 to 2500 mV (Table 5-6): a code past
+    2.5 V is this formula's, outside anything the part states.
+
+    `ValueError` with the value for a voltage that is not a finite number at
+    or above 0 V, and for an attenuation `ONETIME_ATTEN` cannot spell.
+    """
+    if atten not in ADC_ATTEN_K:
+        raise ValueError(
+            f"attenuation {atten!r} is none of ONETIME_ATTEN's {sorted(ADC_ATTEN_K)}")
+    if not (isinstance(volts, (int, float)) and math.isfinite(volts) and volts >= 0):
+        raise ValueError(f"an ADC converts a voltage of 0 V or more, got {volts!r}")
+    return min(ADC_FULL_CODE,
+               math.floor(volts * ADC_ATTEN_K[atten] / ADC_VREF_VOLTS * ADC_FULL_CODE + 0.5))
+
+
+def install_adc(cpu: Cpu) -> None:
+    """ADC1's one-time sample, far enough for an `analogRead` and no further.
+
+    `CTRL` as a register at its composed reset value, whose `SAR_CLK_GATED`
+    is the gate; the result and `INT_RAW` as registers, and `INT_CLR` as the
+    write-only clear alias onto `INT_RAW` it is; and `ONETIME_SAMPLE` as
+    `core/riscv32`'s sampler. A write raising `ONETIME_START` converts at
+    once: the code `hold_volts` holds for the channel and attenuation the
+    word names goes into the result, and ADC1's done bit is set. ESP-IDF's
+    own read is that start, a spin on done, and the result & 0xfff
+    (`components/hal/adc_oneshot_hal.c:136-168` at v5.5), so the spin ends
+    on its first read; on silicon a conversion takes the SAR's clock edges.
+
+    **What is deliberately absent, and what it costs.** ADC2, the pattern
+    table, DMA, the filters and threshold monitors, and calibration: the
+    result is `adc_code`'s, typical. The result and `INT_RAW` are read-only
+    on the part and stored here, as `map_register` stores: firmware writing
+    them changes what it reads back, where silicon would not. Every channel
+    holds 0 until `hold_volts` says otherwise -- a floating input, the same
+    stated decision `install_gpio_in` makes for a digital one.
+    """
+    cpu.map_register(APB_SARADC + APB_SARADC_CTRL, APB_SARADC_CTRL_AT_RESET)
+    cpu.map_register(APB_SARADC + APB_SARADC_SAR1_DATA, 0)
+    cpu.map_register(APB_SARADC + APB_SARADC_INT_RAW, 0)
+    cpu.map_alias(APB_SARADC + APB_SARADC_INT_CLR, APB_SARADC + APB_SARADC_INT_RAW,
+                  "clear", readable=False)
+    cpu.map_sampler(
+        APB_SARADC + APB_SARADC_ONETIME_SAMPLE,
+        value=ONETIME_SAMPLE_AT_RESET,
+        start_mask=ONETIME_START,
+        key_mask=ONETIME_CONVERSION,
+        result=APB_SARADC + APB_SARADC_SAR1_DATA,
+        status=APB_SARADC + APB_SARADC_INT_RAW,
+        done_mask=ADC1_DONE,
+        enable=ADC_GATE[0],
+        enable_mask=ADC_GATE[1],
+    )
+    hold_volts(cpu, {})
+
+
+def hold_volts(cpu: Cpu, volts: typing.Mapping[int, float]) -> None:
+    """What the outside holds each pin at, GPIO -> volts, as ADC1 converts it.
+
+    **A whole statement, not a change**: a pin left out is floating and
+    converts to 0, and the core forgets the previous call. Each ADC1 channel
+    is held at every attenuation, so the code a start gets is the one its
+    own word asks for. `webui/api.py`'s `BoardSession.drive` is the caller,
+    and the only way a voltage from outside reaches this board. A voltage on
+    a pad with no ADC1 channel is accepted and converts nowhere, as on the
+    part; a GPIO this part has no pad for is refused, naming it.
+    """
+    for gpio in volts:
+        if gpio not in IO_MUX_PADS:
+            raise ValueError(
+                f"GPIO{gpio} has no pad on an ESP32-C3; its pads are GPIO"
+                f"{min(IO_MUX_PADS)} to GPIO{max(IO_MUX_PADS)}")
+    cpu.hold_samples(APB_SARADC + APB_SARADC_ONETIME_SAMPLE, {
+        ONETIME_SAR1 | channel << ONETIME_CHANNEL_SHIFT | atten << ONETIME_ATTEN_SHIFT:
+            adc_code(volts.get(gpio, 0.0), atten)
+        for gpio, channel in ADC1_CHANNELS.items()
+        for atten in ADC_ATTEN_K
+    })
+
+
 def pin_states(cpu: Cpu) -> dict[str, str]:
     """What every header pin this board knows about is doing, right now.
 
@@ -833,3 +1032,5 @@ def install(cpu: Cpu) -> None:
     install_gpio_in(cpu)
     install_uart0(cpu)
     install_systimer(cpu)
+    # After `install_gpio_in`, whose pad registers `analogRead` writes.
+    install_adc(cpu)

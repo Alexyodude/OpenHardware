@@ -11,9 +11,10 @@
  * drift; a change to the description that forgets this header fails a test
  * that names it.
  *
- * What is NOT here is as deliberate as what is: no ADC and no I2C, because
- * the description maps neither, and the core's API surface equals the
- * model. GPIO_IN was absent on the same terms until OH-161's step 3.
+ * What is NOT here is as deliberate as what is: no I2C, because the
+ * description maps none, and the core's API surface equals the model.
+ * GPIO_IN was absent on the same terms until OH-161's step 3, and the ADC
+ * until its step 4.
  */
 
 #ifndef OH_BOARD_XIAO_ESP32C3_H
@@ -74,6 +75,32 @@
  * is what lets micros() divide the 64-bit count with a shift in an image
  * linked without libgcc. */
 #define OH_SYSTIMER_TICKS_PER_US       16u
+
+/* ADC1's one-time sample, base 0x60040000 (OH-161 step 4): clear done
+ * through INT_CLR, write ONETIME_SAMPLE with ADC1's bit, the channel and
+ * the attenuation, write it again with START, wait for done in INT_RAW,
+ * read SAR1's data. `soc.h:67`, `apb_saradc_reg.h:176`, `:278`, `:391` and
+ * `:467`, via webui/boards/esp32c3.py, which cites each bit. The clock gate
+ * is CTRL's SAR_CLK_GATED, 1 out of reset; analogRead sets it as ESP-IDF's
+ * adc_ll_digi_clk_sel does. The bits are hex literals for the reason the
+ * UART gate's is, and the attenuation is 12 dB, arduino-esp32's default. */
+#define OH_ADC_GATE                    0x60040000u
+#define OH_ADC_GATE_EN                 0x00000040u   /* SAR_CLK_GATED, bit 6 */
+#define OH_ADC_ONETIME_SAMPLE          0x60040020u
+#define OH_ADC_SAR1_DATA               0x6004002Cu
+#define OH_ADC_INT_RAW                 0x60040044u
+#define OH_ADC_INT_CLR                 0x6004004Cu
+#define OH_ADC_ONETIME_SAR1            0x80000000u   /* bit 31 */
+#define OH_ADC_ONETIME_START           0x20000000u   /* bit 29 */
+#define OH_ADC_ONETIME_ATTEN_12DB      0x01800000u   /* 3 in [24:23] */
+#define OH_ADC_ONETIME_CHANNEL_SHIFT   25u
+#define OH_ADC1_DONE                   0x80000000u   /* bit 31 */
+
+/* ADC1's channels are GPIO0 to GPIO4, in order (TRM Table 34.2-1). A pin
+ * outside them is on no ADC1 channel: the XIAO's A3, GPIO5, is ADC2's,
+ * which ESP-IDF refuses on this part. */
+#define OH_ADC1_FIRST_GPIO             0u
+#define OH_ADC1_CHANNELS               5u
 
 /* The top of DRAM (0x3FCE0000), minus a word so the first push stays
  * inside it -- the same arithmetic the blink fixtures state. */

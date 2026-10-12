@@ -291,7 +291,8 @@ class Recipe:
 #: `recipe_for` names the chip rather than failing to find a compiler.
 def _openhardware(*, variant: str, march: str, base: int,
                   extra_includes: tuple[str, ...] = (),
-                  bsp_includes: tuple[str, ...] = ()) -> Recipe:
+                  bsp_includes: tuple[str, ...] = (),
+                  adc_modelled: bool = False) -> Recipe:
     """A row for a board the repository's own core serves (see ARDUINO_LITE).
 
     **The three ESP32 rows differ in exactly four things** -- the variant,
@@ -355,6 +356,10 @@ def _openhardware(*, variant: str, march: str, base: int,
         # `GPIO_IN` with an electrical model -- the pad's input enable and
         # pulls, `OUT` on a driven pin, and what `BoardSession.drive` says
         # the outside does -- so a read has a level to answer with.
+        #
+        # **And `analogRead` at OH-161's step 4**, on each chip whose
+        # description maps ADC1's one-time sample: what the outside holds a
+        # pin at arrives through `BoardSession.drive`'s volts.
         hints=(
             # Arduino.h stops a build at a pin number it knows to be past
             # the chip's GPIO count, and this is the why (OH-185).
@@ -366,12 +371,21 @@ def _openhardware(*, variant: str, march: str, base: int,
               f"LED_BUILTIN is such a number it is that RGB LED, which this "
               f"board's model does not drive. Blink a GPIO the board's pins "
               f"name instead.")),
+            # Arduino.h stops a build at a pin it knows ADC1 has no channel
+            # for (OH-161 step 4).
+            ("oh_pin_is_on_no_adc1_channel",
+             (f"analogRead converts on ADC1, and that pin is on none of its "
+              f"channels -- {header} names them, OH_ADC1_FIRST_GPIO and the "
+              f"OH_ADC1_CHANNELS after it. A pin on ADC2 is refused too: "
+              f"ESP-IDF refuses ADC2 on an ESP32-C3, and the C5 and C6 have "
+              f"none. Read a pin the board's A-names give.")),
             ("analogWrite",
              ("analogWrite needs the LEDC peripheral and this board's model "
               "maps GPIO only.")),
-            ("analogRead",
-             ("analogRead needs the ADC and this board's model maps GPIO "
-              "only.")),
+            *(() if adc_modelled else (
+                ("analogRead",
+                 ("analogRead needs the ADC and this board's model maps GPIO "
+                  "only.")),)),
             ("attachInterrupt",
              ("this model has no interrupt controller; the emulated core "
               "executes straight-line code only.")),
@@ -447,6 +461,7 @@ RECIPES: dict[str, Recipe] = {
         extra_includes=(
             "framework-arduinoespressif32/variants/XIAO_ESP32C3",
         ),
+        adc_modelled=True,
     ),
     "ESP32-C5": _openhardware(
         variant="variants/xiao_esp32c5",

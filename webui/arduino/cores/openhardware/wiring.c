@@ -1,5 +1,6 @@
-/* OpenHardware - pinMode, digitalWrite, digitalRead, millis, micros, delay
- * and delayMicroseconds against the modelled GPIO, IO_MUX and SYSTIMER.
+/* OpenHardware - pinMode, digitalWrite, digitalRead, analogRead, millis,
+ * micros, delay and delayMicroseconds against the modelled GPIO, IO_MUX,
+ * ADC and SYSTIMER.
  *
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 the OpenHardware authors. See LICENSE.
@@ -72,6 +73,45 @@ void oh_digital_write(uint8_t pin, uint8_t value) {
         OH_REG(OH_GPIO_OUT_W1TC) = mask_of(pin);
     }
 }
+
+#ifdef OH_ADC_ONETIME_SAMPLE
+/* One conversion on ADC1, the way ESP-IDF's `adc_oneshot_read` makes one
+ * (`components/esp_adc/adc_oneshot.c:202-230` and
+ * `components/hal/adc_oneshot_hal.c:136-168` at v5.5), less its
+ * calibration, its locks and its arbiter, which this model has no use for.
+ *
+ * First the pad as `gpio_config_as_analog` leaves it (`components/
+ * esp_driver_gpio/src/gpio.c:436-454`): input off, both pulls off, output
+ * off -- which arduino-esp32 does once, when it attaches the pin, and this
+ * does on every read, so the two differ only for a sketch that drives an
+ * analog pin between two reads without a `pinMode`. Then the clock gate,
+ * as `adc_ll_digi_clk_sel` sets it; then clear done, write the word, and
+ * write it again with START, the rising edge ESP-IDF makes
+ * (`adc_oneshot_hal.c:116-118`); wait for done; read the result, & 0xfff as
+ * `adc_oneshot_ll_get_raw_result` reads it. A pin on no ADC1 channel reads
+ * 0 and touches nothing. */
+uint16_t oh_analog_read(uint8_t pin) {
+    if (pin < OH_ADC1_FIRST_GPIO || pin >= OH_ADC1_FIRST_GPIO + OH_ADC1_CHANNELS) {
+        return 0;
+    }
+    const uint32_t pad = OH_IO_MUX_GPIO0 + OH_IO_MUX_STRIDE * pin;
+    OH_REG(pad) &= ~(OH_IO_MUX_FUN_IE | OH_IO_MUX_FUN_PU | OH_IO_MUX_FUN_PD);
+    OH_REG(OH_GPIO_ENABLE_W1TC) = mask_of(pin);
+#ifdef OH_ADC_BUS_CLOCK
+    OH_REG(OH_ADC_BUS_CLOCK) |= OH_ADC_BUS_CLOCK_EN;
+#endif
+    OH_REG(OH_ADC_GATE) |= OH_ADC_GATE_EN;
+
+    const uint32_t word = OH_ADC_ONETIME_SAR1 | OH_ADC_ONETIME_ATTEN_12DB |
+        ((uint32_t)(pin - OH_ADC1_FIRST_GPIO) << OH_ADC_ONETIME_CHANNEL_SHIFT);
+    OH_REG(OH_ADC_INT_CLR) = OH_ADC1_DONE;
+    OH_REG(OH_ADC_ONETIME_SAMPLE) = word;
+    OH_REG(OH_ADC_ONETIME_SAMPLE) = word | OH_ADC_ONETIME_START;
+    while ((OH_REG(OH_ADC_INT_RAW) & OH_ADC1_DONE) == 0) {
+    }
+    return (uint16_t)(OH_REG(OH_ADC_SAR1_DATA) & 0xFFFu);
+}
+#endif
 
 /* One read of SYSTIMER unit 0, the way ESP-IDF's own
  * `systimer_hal_get_counter_value` reads it (`components/hal/systimer_hal.c:46-62`
