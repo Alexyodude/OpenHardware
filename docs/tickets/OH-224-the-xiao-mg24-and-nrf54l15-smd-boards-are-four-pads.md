@@ -70,3 +70,47 @@ LEFT, not this ticket's:
 (3) The nRF54LM20A's nRF54_RST might be joinable the same way; its edge footprint is XIAO-Add-On-PRO, not a HALF-HOLE, and that has not been checked.
 (4) The RP2350 SMD's EN is still a supply by SUPPLY_LABELS, per OH-172's note.
 (5) test_the_rp2350_smd_boot_pad_is_the_flash_chip_select_in_seeeds_own_board_file has its own copy of the frame-and-landing code. It could share _underside_landings; not done here.
+
+**Note 2026-10-12:** Review fix round, MERGE AFTER SMALL FIXES. All fixes are in 8f482f2. Still in review.
+
+MEDIUM, USER_LED. The pad's old reason said no file joins it to its net. But _underside_landings put pad 22 on TP18, net 'P2.00{slash}USR_LED', and then discarded the result. Now:
+- that net is in _NRF54L15's `nets`;
+- _NRF54L15_USER_LED and its comment are removed;
+- USER_LED is in LANDED_BY_POSITION;
+- the board file is regenerated, and USER_LED's chip_pin is P2.00, read off the nRF54L15's own pad.
+The test is now test_the_user_led_names_the_pin_its_test_point_reaches_and_zephyr_agrees. It checks that the net carries only the MCU's pad, the green LED D3 and the test point. It checks that chip_pin equals the pin read off the vendor's file. Zephyr's led0 is a cross-check, derived from its node: P2.00. The counts moved by what the failures printed: naming 565, specific 69, unnumbered 136. No webui code reads the reason's text, so the pin view simply shows the pin now. In api.pad_view, both SMD boards (and both DIPs) show modelled False on every pad and read_levels False.
+Breaks:
+- USER_LED dropped from `nets`: the landing test and the committed-files test went red.
+- The old reason left in the registry: the answer test and the USER_LED test went red.
+- USER_LED's chip_pin edited to P2.01 in the board file: the USER_LED test went red.
+
+LOW 1. _underside_landings now keys by pad number and asserts that no point takes two pads on that key; the label view keeps only labels that one pad wears alone. Break: footprint pad 32 (GND) moved onto pad 29 (GND). The old helper stayed green; the new one goes red.
+
+LOW 2. The landing test now asserts that the boards the registry types a net for equal LANDED_BY_POSITION, counting each board by the labels its own file carries. Break: an in-memory seeed_pcb_traced on XIAO-RP2350-SMD with nets {"BOOT": "/04 RP2350/QSPI_SS"}. The old test stayed green; the new one goes red, naming XIAO-RP2350-SMD.
+
+LOW 3. The TX20 comment now lists each source that says P1.08 is the nRF54L15's receive line, and says the pad's label is what disagrees:
+- the board file names that net SAMD11_TX;
+- silabs-arduino variants/xiao_mg24/pins_arduino.h at 6128e93, line 70, "#define PIN_SERIAL_RX (D11) // PA9", where the MG24's D11 net is that debugger's SAMD11_TX;
+- Zephyr's uart20_default at 0a2e408 has UART_RX on P1.08, with bias-pull-up on that group alone.
+chip_pin stays P1.08, where the copper goes.
+
+LOW 4. A pin traced by a typed net now comes back from read_seeed_traced as Traced. So the report printed by python tools/import_pindefs.py <board> cites the net, for example: "seeed-pcb nRF54L15.kicad_pcb @ sha256:2e524f78f222: the net 'P1.08{slash}SAMD11_TX', joined to this pad by position, reaches the nRF54L15's P1.08". The EN pads cite their nets in why_null. The XIAO board files themselves still carry no per-pad sources, so a chip_pin answer cites its net in the printed report and not in the JSON. test_a_pin_traced_by_a_typed_net_is_cited_with_that_net was red first, with the citation lacking the net. Break: the tracer returning a bare pin turns it red.
+
+LOW 5. Removed unchecked counts in prose: "Three underside pads", "Four pads", "The four pads answered", "Three sources", and "two underside GND pads".
+
+LOW 6. A label given in both `labels` and `nets` now raises. test_a_label_given_both_by_name_and_by_typed_net_is_refused was red first (DID NOT RAISE). Break: the refusal removed turns it red again.
+
+LOW 7, for OH-172 slice 2. board3d-panel.js's pin table shows a pad's label, then its chip_pin in the Chip pin column (or "—"), then its state. On these boards that now includes 54L15_TX20 beside P1.08, the pin Zephyr receives on, and USER_LED beside P2.00. The EN pads still show "—" and not modelled, because RESET and ~{RESET} are not pin names under _CHIP_PIN_NAME. board3d-panel.js is unchanged.
+
+REGENERATED with python tools/import_pindefs.py --write-headers --write-boards. Only XIAO-nRF54l15-SMD.json was written; a second run reported all 42 files unchanged.
+
+INVENTORY, python tools/inventory.py at fa3a473 plus this change:
+  TWINS — 26 of 38 boards hold all four; by layer: geometry 38, model 37, pins 37, runs 26
+  footprint                vendor               21+4/25  MG24:no        XIAO-MG24-SMD
+  footprint                composed             21+6/27  nRF54l15:no    XIAO-nRF54l15-SMD
+Against the first round, only the nRF54L15 SMD's cell and the test counts changed.
+
+VERIFIED at 8f482f2:
+- python -m pytest -q -p no:cacheprovider tests/rules/test_import_pindefs.py tests/rules/test_inventory.py tests/rules/test_board_manifest.py tests/webui/test_pin_view.py tests/webui/test_board_catalogue.py: 378 passed, 1 skipped (the OH_SLOW variant survey).
+- Checker rows, each run on its own, each exit 0 and OK: check_layering, check_board_contract, check_part_schemas, check_licenses, check_deltas, check_banned_symbols, check_board_claims, check_ticket_claims, ticket_guard --self-test, check_facts, and board-sources render.py --check.
+- Neither checkall.py nor the full suite was run.
