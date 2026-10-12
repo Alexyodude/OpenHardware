@@ -460,6 +460,14 @@ _NET_NAME = re.compile(r'\(net (?:\d+ )?"([^"]*)"\)')
 #: it is refused as it should be. A pad outside the part's numbering --
 #: `SWDIO`, `XIN`, `IOVDD` -- has no pin number to report, and that is the
 #: distinction this makes.
+#:
+#: **It is the decision of what may be a `HEADER` row, and it is made where
+#: the answer lands** (OH-172 slice 2). `read_seeed_traced` used to apply it
+#: and drop the rest, so a pad on the MG24's `RESET` named nothing although
+#: its copper says which pin it reaches. The tracer now reports that pin as a
+#: caption, and `header_table` and the board file's unnumbered sentence ask
+#: this pattern, because no level is read through a pin outside the
+#: numbering and no vendor numbers one by port.
 _CHIP_PIN_NAME = re.compile(r"^(GPIO\d+|P[A-D]\d{1,2}|P\d\.\d{1,2})(?:[/_]|$)")
 
 _PIN_TOKEN = re.compile(r"^(?:GPIO(\d+)|P(\d)\.(\d+))$")
@@ -559,15 +567,19 @@ def read_seeed_traced(
     value string is what keeps the debugger out of a field that means "a pin
     of this board's MCU".
 
-    A pad whose function is not a pin name -- `SWDIO`, `XIN`, `IOVDD` -- is
-    outside the part's GPIO numbering and resolves to nothing. That is the
-    RP2350's case, and `Board.reasons` answers it in words instead.
+    **A net on exactly one pad of the part, outside its GPIO numbering, is
+    named by that pad** (OH-172 slice 2): the MG24's `~{MG24_RESET}` reaches
+    its `RESET`, so `MG24_EN` gets `ChipPin("RESET", None)`, the pad's own
+    function verbatim. It is a caption and never a `HEADER` row --
+    `_CHIP_PIN_NAME` decides that in `header_table`. A net on two or more such
+    pads -- the MG24's `GND`, on `RFVSS`, `VREFN`, `CREGVSS` and `PAD` --
+    names none of them, because choosing one would be a guess.
 
     **A label that is on no net of the part at all raises instead of
     resolving to nothing.** Those two silences used to be one: the first is
     the silicon saying it has no GPIO number for this pad, the second is a
     citation naming something that is not there, and only the first is a
-    fact worth keeping quiet about.
+    fact.
 
     **`nets` is for a pad whose net is not named for it** (OH-224): label to
     the net its pad lands on, traced from there exactly as a named net is.
@@ -650,18 +662,26 @@ def read_seeed_traced(
                         token = _PIN_TOKEN.match(one)
                         flat = token.group(1) if token else None
                         pin = ChipPin(one, int(flat) if flat is not None else None)
-                        pins[label] = (
-                            Traced(pin, f"the net {net!r}, joined to this pad by "
-                                        f"position, reaches the {part}'s {one}")
-                            if label in nets else pin)
+                    elif len(functions) == 1:
+                        # One pad, counted by its function because
+                        # `_footprints` keeps no pad number: a pin split into
+                        # two pads reads as two and is named by neither.
+                        one = functions[0]
+                        pin = ChipPin(one, None)
+                    else:
+                        continue
+                    pins[label] = (
+                        Traced(pin, f"the net {net!r}, joined to this pad by "
+                                    f"position, reaches the {part}'s {one}")
+                        if label in nets else pin)
             # **Two different silences, and only one of them is a fact.**
-            # A label that REACHES this part and whose pad is not a pin name
-            # resolves to nothing above, and that is right: `SWDIO_G2` says
-            # the silicon has no GPIO number for it, which `Board.reasons`
-            # then answers in words. A label that is on no net of this part
-            # at all says nothing about silicon -- it is a citation naming
-            # something that is not there, and it used to return the same
-            # empty answer as the real fact.
+            # A label that REACHES this part on pads that are not pin names
+            # is a fact about the silicon: one such pad is named above as a
+            # caption, `SWDIO_G2`, and several resolve to nothing. A label
+            # that is on no net of this part at all says nothing about
+            # silicon -- it is a citation naming something that is not
+            # there, and it used to return the same empty answer as the real
+            # fact.
             #
             # Measured on the nRF54LM20A, which asked for four: `SHPHLD` is a
             # pin of the board's nPM1300 and never was on the MCU, and
@@ -677,9 +697,8 @@ def read_seeed_traced(
                     f"{label!r}{on} is on no net of the {part} footprint in this "
                     f"board file, so there is nothing to trace to. A label "
                     f"traced here must reach this part: a pad that reaches it "
-                    f"and is not a GPIO resolves to nothing, which is a fact "
-                    f"about the silicon, but a net that is absent is a "
-                    f"citation that names nothing"
+                    f"and is not a GPIO is a fact about the silicon, but a net "
+                    f"that is absent is a citation that names nothing"
                 )
     return pins
 
@@ -2180,9 +2199,9 @@ _ESP32S3 = (
 #: The SMD footprint's pad lands on the underside test point TP4, whose net
 #: is `~{MG24_RESET}`; no net is named for the pad, so the net is named here
 #: and the join is held by a test that reads the footprint beside the board
-#: file. Traced, it reaches the EFR32MG24's `RESET` pad, which is not a pin
-#: name, so it resolves nothing and `_MG24_RESET` says why. Tracing it is
-#: still the point: a vendor revision that renamed the net stops the run.
+#: file. Traced, it reaches the EFR32MG24's `RESET` pad, which is outside the
+#: part's numbering, so the board file names it as a caption (OH-172 slice
+#: 2), and a vendor revision that renamed the net stops the run.
 _MG24 = (
     zephyr_connector("xiao_mg24", silabs_port_pin),
     seeed_pcb_traced("MG24.kicad_pcb", "EFR32MG24", ("SWDIO", "SWCLK"),
@@ -2229,7 +2248,8 @@ _NRF52840 = (
 #: file holds the net named here. `54L15_TX20` reaches the nRF54L15's P1.08
 #: and `54L15_RX20` its P1.09, ordinary GPIOs, read off the footprint's own
 #: pad names rather than off the nets'. `nRF54_EN` reaches its `~{RESET}`,
-#: which resolves nothing, and `_NRF54L15_RESET` says why.
+#: outside the numbering, which the board file names as a caption (OH-172
+#: slice 2).
 #:
 #: **`USER_LED` is one of them, and the join is the one its old reason said
 #: no file made** (OH-224's review). Seeed's board file calls the net
@@ -2270,10 +2290,10 @@ _NRF54L15 = (
 #: OH-26's first trap, met again on parts closer than any it named.
 #:
 #: The nRF54's own debug pads are traced instead: Seeed name those nets for
-#: the function and leave the pin to the footprint. Tracing them resolves
-#: nothing and is still worth doing -- it establishes that they reach THIS
-#: part and that its pads for them (`SWDIO_G2`, `SWDCLK_G1`) are outside the
-#: `Pn.nn` numbering, which is what `_NRF54LM20A_DEBUG` then says in words.
+#: the function and leave the pin to the footprint. Tracing them establishes
+#: that they reach THIS part, on its pads `SWDIO_G2` and `SWDCLK_G1`, outside
+#: the `Pn.nn` numbering, and the board file names each as a caption (OH-172
+#: slice 2).
 #:
 #: **`SHPHLD` and `nRF54_RST` were asked for here and could never answer.**
 #: `SHPHLD` is a pin of the board's nPM1300, not of the MCU; `nRF54_RST`'s
@@ -2457,28 +2477,18 @@ _MG24_DEBUGGER = (
     + tuple((label, _SECOND_CHIP_UNTRACED) for label in _SAMD11_UNTRACED)
 )
 
-#: The nRF54LM20A's own debug pads, which its footprint names `SWDIO_G2` and
-#: `SWDCLK_G1` -- outside the `Pn.nn` numbering its GPIOs use, so there is no
-#: pin number for them to have. The same shape as the RP2350's and the
-#: nRF54L15's, with this part's own spelling.
-#: **Sixty-six, not thirty-two.** The count was copied from the nRF54L15's
-#: reason, where it is right. This part's footprint carries P0.00-P0.09,
-#: P1.00-P1.31, P2.00-P2.10 and P3.00-P3.12.
-_NRF54LM20A_DEBUG = tuple(
-    (label, _DEDICATED_DEBUG.format(
-        chip="nRF54LM20A", where="Seeed's own nRF54LM20A.kicad_pcb",
-        which="sixty-six", gpio="P0.00 through P3.12 by port and bit",
-        label=named))
-    for label, named in (("nRF54_SWDIO", "SWDIO_G2"), ("nRF54_SWCLK", "SWDCLK_G1"))
-)
+# **The nRF54LM20A's own debug pads carry no reason.** Its footprint names
+# them `SWDIO_G2` and `SWDCLK_G1`, outside the `Pn.nn` numbering, and the
+# tracer names each as a caption (OH-172 slice 2), which a reason never
+# overrides. The RP2350's and the nRF54L15's are not traced, so theirs stay.
 
 #: **Reset, which is neither a GPIO nor a debug pad.** Seeed's own
 #: `nRF54LM20A.kicad_pcb` gives the MCU footprint a pad `nRESET_F2` on the net
 #: `~{nRF54_RESET}`, apart from all sixty-six of its `Pn.nn` pads. A part's
 #: reset is a dedicated pin, so there is no port and bit for this label to
 #: name -- the same fact `_DEDICATED_DEBUG` states about SWDIO and SWCLK, and
-#: the reason those two say it while this one said "no package defines this
-#: label" was that nobody had written it down.
+#: the reason this one said "no package defines this label" instead was that
+#: nobody had written it down.
 #:
 #: **What is NOT claimed here: that this pad is on that net.** No net in that
 #: file is called `nRF54_RST`; the nearest, `nRF54_RST_CTL`, runs from the
@@ -2502,36 +2512,11 @@ _NRF54LM20A_RESET = (
         gpio="P0.00 through P3.12 by port and bit")),
 )
 
-#: **The same fact where the pad's own net WAS followed** (OH-224). The MG24
-#: and nRF54L15 SMD footprints' `EN` pads land on an underside test point
-#: each, by position, and `seeed_pcb_traced` follows that point's net to the
-#: part's reset pad -- so unlike `_DEDICATED_RESET`, this sentence says the
-#: pad is on that net. The test point is not something the generator reads;
-#: `test_the_mg24_and_nrf54l15_underside_pads_answer_from_seeeds_own_board_file`
-#: reads it, and every other clause, back out of the vendor's files.
-#:
-#: **No count of the other pads**, where `_DEDICATED_RESET` gives one: the
-#: span is read back by that test, and a count beside it is a second number
-#: to keep true.
-_LANDED_RESET = (
-    "a reset pad of the {chip}, not a GPIO: in {where} this pad lands on the "
-    "underside test point {tp}, whose net {net!r} carries the {chip}'s own pad "
-    "{pad} {pin!r}, which its footprint names apart from its pads numbered "
-    "{gpio}. A reset is a dedicated pin of the silicon, so there is no GPIO "
-    "number for this label to have"
-)
-_MG24_RESET = (
-    ("MG24_EN", _LANDED_RESET.format(
-        chip="EFR32MG24", where="Seeed's own MG24.kicad_pcb", tp="TP4",
-        net="~{MG24_RESET}", pad="13", pin="RESET",
-        gpio="PA00 through PD05 by port and pin")),
-)
-_NRF54L15_RESET = (
-    ("nRF54_EN", _LANDED_RESET.format(
-        chip="nRF54L15", where="Seeed's own nRF54L15.kicad_pcb", tp="TP4",
-        net="~{nRF54_RESET}", pad="D2", pin="~{RESET}",
-        gpio="P0.00 through P2.10 by port and bit")),
-)
+# **Where the pad's own net WAS followed, the reset is a caption** (OH-224,
+# OH-172 slice 2). The MG24 and nRF54L15 SMD footprints' `EN` pads land on
+# an underside test point each, by position; `seeed_pcb_traced` follows that
+# point's net to the part's reset pad, and the board file names that pad as
+# `chip_pin`. So neither carries a reason here.
 
 #: **A third chip, and not even a microcontroller.** `SHPHLD` reaches an
 #: `nPM1300-CAAA` -- Nordic's power-management IC -- on its `SHPHLD_D4` pad.
@@ -2558,7 +2543,7 @@ BOARDS = {
     "XIAO-ESP32-S3-SMD": Board("ESP32-S3", _ESP32S3),
     "XIAO-ESP32-S3-SMD_PAD": Board("ESP32-S3", _ESP32S3),
     "XIAO-MG24-DIP": Board("EFR32MG24", _MG24),
-    "XIAO-MG24-SMD": Board("EFR32MG24", _MG24, reasons=_MG24_DEBUGGER + _MG24_RESET),
+    "XIAO-MG24-SMD": Board("EFR32MG24", _MG24, reasons=_MG24_DEBUGGER),
     "XIAO-RP2040-DIP": Board("RP2040", _RP2040, on_board=("LED",)),
     "XIAO-RP2040-SMD": Board(
         "RP2040", _RP2040, on_board=("LED",), reasons=_RP2040_SWD
@@ -2586,13 +2571,12 @@ BOARDS = {
     ),
     "XIAO-nRF54LM20A-SMD": Board(
         "nRF54LM20A", _NRF54LM20A,
-        reasons=(_MG24_DEBUGGER + _NRF54LM20A_DEBUG + _NRF54LM20A_RESET
-                 + _NRF54LM20A_OTHER),
+        reasons=_MG24_DEBUGGER + _NRF54LM20A_RESET + _NRF54LM20A_OTHER,
     ),
     "XIAO-nRF54l15-DIP": Board("nRF54L15", _NRF54L15),
     "XIAO-nRF54l15-SMD": Board(
         "nRF54L15", _NRF54L15,
-        reasons=_NRF54L15_DEBUG + _MG24_DEBUGGER + _NRF54L15_RESET,
+        reasons=_NRF54L15_DEBUG + _MG24_DEBUGGER,
     ),
 }
 
@@ -3372,7 +3356,11 @@ def header_table(
                 if name not in carried.get(key, []):
                     carried.setdefault(key, []).append(name)
         for entry in report["pads"] + report["on_board"]:
-            if entry["chip_pin"] is None:
+            # **A caption is no row** (OH-172 slice 2): no level is read
+            # through a pin outside the numbering -- a reset, a debug pad --
+            # so it is neither keyed nor cited here. `_CHIP_PIN_NAME` is the
+            # line, and this is where it is drawn.
+            if entry["chip_pin"] is None or not _CHIP_PIN_NAME.match(entry["chip_pin"]):
                 continue
             label = entry["matched"]
             pin = ChipPin(entry["chip_pin"], entry["index"])
@@ -3613,7 +3601,8 @@ def assumption_for(chip: str, described: bool, covered: bool,
                    unnumbered: list[str] | None = None,
                    resolved: int = 0, unresolved: int = 0,
                    keyed_by: tuple[str, ...] = (), manifest: bool = False,
-                   cad: tuple[str, ...] = (), answered: tuple[str, ...] = ()) -> str:
+                   cad: tuple[str, ...] = (), answered: tuple[str, ...] = (),
+                   captions: tuple[tuple[str, str], ...] = ()) -> str:
     """What a board file says about its own `pin`, `chip_pin` and `chip_index`.
 
     Three shapes, because three things can be true of a board. `pin` is null
@@ -3639,7 +3628,23 @@ def assumption_for(chip: str, described: bool, covered: bool,
     Seeed's own schematic symbols, and a number written into prose that the
     code does not derive is one that goes stale without a test noticing --
     which has already happened twice in this file.
+
+    `captions` is each `(label, chip_pin)` whose pin fails `_CHIP_PIN_NAME`
+    (OH-172 slice 2): a pin the pad's copper reaches outside the chip's GPIO
+    numbering. `chip_index` is null on it for that reason and not the
+    unnumbered sentence's, so it is said apart, after that one.
     """
+    if captions:
+        named = [f"`{label}` ({pin})" for label, pin in captions]
+        one = len(named) == 1
+        listing = named[0] if one else ", ".join(named[:-1]) + " and " + named[-1]
+        captioned = (
+            f" {listing} {'names a pin' if one else 'name pins'} outside the "
+            f"{chip}'s GPIO numbering, so {'its' if one else 'their'} `chip_pin` "
+            f"is a caption only: `chip_index` is null and no level is read through it."
+        )
+    else:
+        captioned = ""
     head = (
         "Every `pin` is null: that field is the rcontrol pin index of a PICSimLab "
         "board implementation (webui/pinmap.py), and none exists for this board. "
@@ -3677,7 +3682,7 @@ def assumption_for(chip: str, described: bool, covered: bool,
         # one would have been the single file that did not.
         if unnumbered:
             body += unnumbered_sentence(chip, unnumbered, described)
-        return head + body
+        return head + body + captioned
     if manifest:
         reads = "the sources named in `pindefs`, and each pad's `chip_pin_from` says which; "
     elif answered:
@@ -3720,7 +3725,7 @@ def assumption_for(chip: str, described: bool, covered: bool,
         )
     if unnumbered:
         body += unnumbered_sentence(chip, unnumbered, described)
-    return head + body
+    return head + body + captioned
 
 
 def filled_board(
@@ -3806,10 +3811,17 @@ def filled_board(
     # eight boards that have unnumbered pins, no pin is on two pads (measured
     # 2026-09-04). Counting pads would therefore be an unfalsifiable choice:
     # nothing in the tree could tell the two counts apart.
+    #
+    # **Pins in the part's numbering, by `_CHIP_PIN_NAME`** (OH-172 slice 2).
+    # A caption -- the MG24's `RESET` -- has no flat index because it is no
+    # GPIO at all, which is not what that sentence says, so it is said apart.
     spellings = list(dict.fromkeys(
         pad["chip_pin"] for pad in pads
         if pad["chip_pin"] is not None and pad["chip_index"] is None
+        and _CHIP_PIN_NAME.match(pad["chip_pin"])
     ))
+    captions = tuple((pad["label"], pad["chip_pin"]) for pad in pads
+                     if pad["chip_pin"] is not None and not _CHIP_PIN_NAME.match(pad["chip_pin"]))
     pindefs = {
         "generated_by": "tools/import_pindefs.py",
         "derivation": derivation,
@@ -3836,6 +3848,7 @@ def filled_board(
                 report["chip"], described, covered, spellings,
                 report["resolved"], report["unresolved"], keyed_by,
                 manifest=name in MANIFEST, cad=cad, answered=answered,
+                captions=captions,
             )
             filled_document["pindefs"] = pindefs
     if "pindefs" not in filled_document:

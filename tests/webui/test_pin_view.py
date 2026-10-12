@@ -1070,6 +1070,36 @@ def test_a_pad_is_modelled_exactly_where_its_board_reads_a_level():
     assert (d0["chip_pin"], d0["modelled"]) == ("PC0", False), d0
 
 
+def test_a_caption_outside_the_gpio_numbering_is_shown_and_never_modelled():
+    """**OH-172 slice 2: a caption may name a pin no level is read through.**
+
+    `tools/import_pindefs.py` now writes the pin a traced pad's copper
+    reaches even where it is outside the chip's GPIO numbering -- the MG24
+    SMD's `MG24_EN` reaches its `RESET` -- and keeps such a pin out of every
+    `HEADER` by `_CHIP_PIN_NAME`, which is what `level_keys` reads. So on
+    every board in the catalogue, picked and running on a zero bus, a pad
+    whose `chip_pin` fails that gate is shown with its caption and is not
+    modelled. At least one such pad must exist, or this checks nothing.
+    """
+    from tools import import_pindefs
+
+    zero = types.SimpleNamespace(read_word=lambda address: 0,
+                                 read_data=lambda address: 0)
+    captioned = []
+    for board in catalogue.board_names():
+        description = api.description_for(board)
+        runtime = types.SimpleNamespace(board=board, description=description)
+        levels = api.pin_levels(runtime, zero)
+        for view in (api.pad_view(board, description, None),
+                     api.pad_view(board, description, levels)):
+            for pad in view["pads"]:
+                if (pad["chip_pin"] is not None
+                        and not import_pindefs._CHIP_PIN_NAME.match(pad["chip_pin"])):
+                    assert pad["modelled"] is False, (board, pad)
+                    captioned.append((board, pad["label"], pad["chip_pin"]))
+    assert ("XIAO-MG24-SMD", "MG24_EN", "RESET") in captioned, captioned
+
+
 def test_a_module_with_a_reader_and_no_header_is_refused_by_name():
     """**OH-172's review: `level_keys` needs a `HEADER` that nothing requires.**
 
