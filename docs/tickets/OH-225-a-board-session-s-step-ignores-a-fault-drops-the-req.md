@@ -13,6 +13,8 @@ touches:
 - webui/api.py
 - webui/emulator_server.py
 - tests/webui/test_board_session_fault.py
+- webui/static/emulator.js
+- tests/avr/test_host_fault.py
 ---
 
 Found by OH-223 and its review (2026-10-12), by reading and through a live server. OH-223 gave the i8086 and AVR bindings a `HostFault(AbiError)` for a fault ctypes catches on the host, and made the 8086 debugger's session stop as "faulted". The board side is not done, because its files belong elsewhere:
@@ -29,3 +31,5 @@ STEPS: each of the four, with a test seen to fail first using OH-223's technique
 **Note 2026-10-13:** 2026-10-13: OH-223 merged at 7d3c98e settles the pattern for item 1. Both the i8086 and AVR cores now record where each step began (i8086_step_entry as (cs << 16) | ip, avr_step_entry as the word PC, ABI 9 and 4), and the binding reads it only after a fault, at no measurable cost per step (verified: Cpu.step 0.233 us with the record against 0.233 without). Copy that for cortexm0 and riscv32 rather than naming where the core left the PC. Also from OH-223's confirm verification: avr_step_entry has no null check in C, unlike i8086_step_entry (unreachable now that Python refuses a closed Cpu first).
 
 **Note 2026-10-13:** 2026-10-13: borrows core/cortexm0/abi.py, core/riscv32/** and webui/api.py from OH-161 (api.py being OH-172's, lent to OH-161), and claims the unclaimed core/cortexm0/abi.cc, core/cortexm0/abi.h, webui/emulator_server.py and a new tests/webui/test_board_session_fault.py.
+
+**Note 2026-10-13:** 2026-10-13: borrows webui/static/emulator.js from OH-221 for item 4's page side, and claims tests/avr/test_host_fault.py (unclaimed since OH-223 closed), whose board-run test asserts the word 'stopped' item 4 changes to 'faulted'.
