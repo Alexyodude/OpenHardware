@@ -2,18 +2,14 @@
 id: OH-225
 title: A board session's step ignores a fault, drops the request on any core error,
   and the Cortex-M0 and RISC-V bindings let a host fault escape
-status: in-review
+status: done
 priority: P2
 created: '2026-10-12'
 touches:
-- core/cortexm0/abi.py
 - core/cortexm0/abi.cc
 - core/cortexm0/abi.h
-- core/riscv32/**
-- webui/api.py
 - webui/emulator_server.py
 - tests/webui/test_board_session_fault.py
-- webui/static/emulator.js
 - tests/avr/test_host_fault.py
 - tests/webui/test_board_runtime_contract.py
 ---
@@ -92,3 +88,5 @@ LOW 6 (2862dd0). The Step listener had no .catch, so a refused step was an unhan
 VERIFIED at b1e8ade. python tools/build_core.py. python -m pytest -q -p no:cacheprovider tests/riscv32 tests/cortexm0 tests/avr tests/webui/test_board_run.py tests/webui/test_board_session_fault.py tests/webui/test_host_fault.py tests/webui/test_api.py tests/webui/test_clock.py tests/webui/test_editor.py tests/webui/test_emulator.py tests/webui/test_emulator_session.py tests/webui/test_board3d.py tests/webui/test_board_catalogue.py tests/webui/test_board_runtime_contract.py tests/webui/test_artefacts.py: 983 passed, none skipped. node --check webui/static/emulator.js parses. Each checker row exits 0: check_layering, check_board_contract, check_part_schemas, check_licenses (305 files), check_deltas, check_banned_symbols (69 files), check_board_claims, check_ticket_claims, ticket_guard --self-test (6/6), check_facts, render.py --check. Neither checkall.py nor the full suite was run, and the page was not opened in a browser.
 
 FOLLOW-UP, the reviewer's open question, not changed here. After a host fault that corrupted memory, /api/board/state still makes foreign calls with nothing around them: BoardSession.state reads through the machine module (readable, is_register, word, view, read), uart_view, pin_levels and listing_view, and none of them turns an OSError into the core's error. If the corruption faults one of those reads, the state request is dropped as /api/board/step's was. That is the same shape as the i8086 decoder case OH-223 recorded, and it wants its own ticket: which reads to wrap, and what a state that cannot be read should answer.
+
+**Note 2026-10-13:** DONE, merged to master by fast-forward at ed548c9 (lane2). REVIEW: an independent review (COMMENT: the page tests read words, not behaviour) and its fix round. VERIFIED on master at 18b1b33, cores rebuilt: full suite 2 failed (the OCP pair: test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert, test_the_tessellator_welds_what_it_meshes), 2815 passed, 41 skipped. Returned: core/cortexm0/abi.py and webui/api.py to OH-161, core/riscv32/** to OH-161 and straight on to OH-219, webui/static/emulator.js to OH-221. Follow-up filed: OH-230 (state's unguarded reads after a fault).

@@ -9,6 +9,7 @@ touches:
 - tests/rv32/**
 - tools/gen_rv32_tests.py
 - tests/webui/xiao_rp2350/blink.c
+- core/riscv32/**
 ---
 
 Follow-ups from OH-208 and its review (2026-10-09). OH-208 made core/riscv32 execute every RV32 Zbb and Zbkb instruction and turned them on for the RP2350 only, as `abi.RP2350 = RP2350_MODELLED | EXT_ZBB | EXT_ZBKB`. Two names for one part remain, and some files outside OH-208's claims now say something false.
@@ -20,3 +21,5 @@ Follow-ups from OH-208 and its review (2026-10-09). OH-208 made core/riscv32 exe
 5. LOW: the MSVC shim's `__popcnt` assumes a POPCNT-capable CPU (it faults loudly on an old one, never answers wrong).
 
 Done when one constant names the RP2350's modelled ISA and the gating test holds it, rv32zcb is asserted, no file says Zbb is unmodelled, and the Hazard3's custom extensions are refused in the right words.
+
+**Note 2026-10-13:** 2026-10-13: borrows core/riscv32/** from OH-161 (via OH-225, done). Return it to OH-161 when this closes.

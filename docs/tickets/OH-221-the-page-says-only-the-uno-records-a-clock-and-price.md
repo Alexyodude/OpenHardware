@@ -7,6 +7,7 @@ priority: P3
 created: '2026-10-09'
 touches:
 - webui/static/clock.js
+- webui/static/emulator.js
 ---
 
 Found by OH-161's delay() review (2026-10-09). Two comments in the page say only the ATmega328P records a nominal clock, which stopped being true when OH-161 step 2 gave `webui/boards/esp32c3.py`, `esp32c5.py` and `esp32c6.py` a cited `CPU_HZ`: `webui/static/clock.js` ~54 ("only the ATmega328P records a nominal clock (`F_CPU_HZ`, ...)") and `webui/static/emulator.js` ~876-878. Their worked `delay(500)` costs name the Uno and the SAMD21 only; since OH-161 moved delay() onto the SYSTIMER, an ESP32's delay(500) is 80,000,000 instructions at 160 MHz (120,000,000 on the C5's 240 MHz).
