@@ -396,9 +396,11 @@ def test_every_pad_is_where_the_vendors_board_file_puts_it():
 
 
 def test_the_licence_is_what_the_vendors_own_files_state():
-    """SparkFun's registry licence is inferred from a sibling repository, so
-    that board quotes the sentence its own CAD file places; a row whose
-    registry licence was read from a file it fetches quotes that file."""
+    """A row naming a `licence_statement` quotes the sentence its own CAD
+    file places, as FRAME1 does on SparkFun's Thing Plus C6 and Qwiic
+    Pocket, whose registry rows read the same words from the same file
+    (OH-213); any other row quotes the file its registry row read the
+    licence from."""
     stated = []
     for row in ROWS:
         _fetched(row)

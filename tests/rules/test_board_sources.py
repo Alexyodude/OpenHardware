@@ -190,20 +190,29 @@ def _from_the_survey(candidate: Source) -> bool:
 
 def test_every_row_cites_the_survey_or_the_ticket_that_opened_it():
     """A row the OH-23 survey did not carry names the ticket that listed the
-    repository, and reads its licence from a file it fetches. That file is
-    a licence the row opened, or, where the repository holds none, the
-    README that states one (OH-194): graded `stated`, because a README
-    asserting a licence is not the licence."""
+    repository, and reads its licence from a file it fetches. Any row naming
+    such a file, the survey's included (OH-213: the Thing Plus C6's is the
+    first), fetches it -- itself, a directory above it, or the whole tree --
+    and quotes it. That file is one the row opened, or, where the repository
+    holds none, the README that states one (OH-194): graded `stated`,
+    because a README asserting a licence is not the licence."""
     for candidate in SOURCES:
         assert candidate.licence.cite.strip(), f"{candidate.name}: licence with no cite"
-        if _from_the_survey(candidate):
+        named = candidate.licence.file
+        if not _from_the_survey(candidate):
+            assert re.match(r"OH-\d+: ", candidate.cite), f"{candidate.name} cites no ticket"
+            assert named, f"{candidate.name} reads its licence from no file it fetches"
+        if not named:
             continue
-        assert re.match(r"OH-\d+: ", candidate.cite), f"{candidate.name} cites no ticket"
-        readme = pathlib.PurePosixPath(candidate.licence.file).name.upper().startswith(
-            "README")
+        readme = pathlib.PurePosixPath(named).name.upper().startswith("README")
         assert candidate.licence.evidence is (
-            Evidence.STATED if readme else Evidence.OPENED), candidate.name
-        assert candidate.licence.file in candidate.fetch.wanted, candidate.name
+            Evidence.STATED if readme else Evidence.OPENED), (
+            f"{candidate.name}: {named} is graded {candidate.licence.evidence.label}; "
+            f"a README is stated and any other file opened")
+        wanted = candidate.fetch.wanted
+        assert not wanted or any(
+            named == path or named.startswith(f"{path}/") for path in wanted
+        ), f"{candidate.name} fetches {wanted}, which do not hold {named}"
         assert candidate.licence.quote.strip(), candidate.name
 
 
