@@ -57,10 +57,33 @@ class Unimplemented(AbiError):
     """The core reached an opcode nobody has written yet."""
 
 
+class HostFault(AbiError):
+    """The core's own code faulted on the host while executing an instruction.
+
+    A divide error or an access violation in the C++, which is a bug in the
+    core and never in the program it was running. On Windows ctypes catches
+    the structured exception around the foreign call and raises `OSError`;
+    `Cpu.step` raises this from it. The machine is left wherever the C++ was
+    when it stopped -- IP already past the instruction if it faulted while
+    executing, since `ExecuteOne` advances IP first -- which is a state no
+    instruction produced, so nothing should step it again before a reset
+    (OH-223).
+
+    **Windows only.** On Linux the same fault is a signal, SIGFPE or SIGSEGV,
+    that ctypes does not catch, and the process ends before this can be
+    raised. OH-223's note records why nothing is done about that here.
+    """
+
+
 #: What i8086_step returns. Mirrors i8086::StepStatus.
 STEP_OK = 0
 STEP_UNIMPLEMENTED = 1
 STEP_HALTED = 2
+
+#: How many bytes a `HostFault` shows from where its instruction began: the
+#: longest 8086 instruction without a prefix -- opcode, ModRM, a 16-bit
+#: displacement and a 16-bit immediate.
+FAULT_BYTES = 6
 
 
 class Registers(ctypes.Structure):
@@ -240,6 +263,9 @@ class Cpu:
         if not handle:
             raise AbiError("i8086_new returned null; allocation failed")
         self._handle = handle
+        #: The registers as the instruction `step` is executing found them.
+        #: See `step` for why they are read before it runs.
+        self._entry = Registers()
 
     # -- lifetime ----------------------------------------------------------
 
@@ -349,8 +375,24 @@ class Cpu:
         successful run look like a crash. Existing callers ignore the return
         value and are unaffected -- the corpus contains no HLT, since the
         instruction cannot be single-stepped on the capture rig.
+
+        A **host fault** in the core raises `HostFault`, chained from the
+        `OSError` ctypes raised, naming the instruction it was executing.
+        That is why the registers are read before every step: the core moves
+        IP past an instruction before executing it, so once it has faulted
+        executing one, IP points at the next, and naming that would send the
+        reader to the wrong line. The read costs about what the step does, which is
+        accepted here and not on the board cores (`core/avr/abi.py` says
+        why): this machine's callers are a person stepping a debugger, a run
+        bounded at `webui.emulator.MAX_RUN_STEPS`, and a conformance suite
+        whose setup per case dwarfs it.
         """
-        status = self._lib.i8086_step(self._check())
+        handle = self._check()
+        self._lib.i8086_get_regs(handle, self._entry)
+        try:
+            status = self._lib.i8086_step(handle)
+        except OSError as fault:
+            raise HostFault(self._host_fault(fault)) from fault
         if status == STEP_HALTED:
             return False
         if status != STEP_OK:
@@ -360,6 +402,33 @@ class Cpu:
                 f"{self.regs.cs:04X}:{self.regs.ip:04X} is not implemented"
             )
         return True
+
+    def _host_fault(self, fault: OSError) -> str:
+        """What `HostFault` says: the instruction, the bytes there, and where
+        the core left CS:IP.
+
+        The bytes are read the way the processor fetches them, wrapping inside
+        CS rather than across the megabyte. Reading them back calls into the
+        core again, and a fault that wrecked more than one instruction could
+        fault that too; that is said, rather than let a second `OSError`
+        replace the one being described.
+        """
+        cs, ip = self._entry.cs, self._entry.ip
+        try:
+            code = bytes(self.read_byte(physical(cs, ip + offset))
+                         for offset in range(FAULT_BYTES))
+            left = self.regs
+        except OSError as unreadable:
+            found = f"reading the machine back faulted as well ({unreadable})"
+        else:
+            found = (f"the bytes there are {code.hex(' ').upper()}, and it "
+                     f"left CS:IP at {left.cs:04X}:{left.ip:04X}")
+        return (
+            f"i8086: the core faulted on the host ({fault}) executing the "
+            f"instruction at {cs:04X}:{ip:04X}; {found}. That is a bug in "
+            f"core/i8086, not in the program, and the machine stopped part-way "
+            f"through the instruction: reset or load it before running again."
+        )
 
 
 def opcode_info(opcode: int) -> tuple[bool, bool]:

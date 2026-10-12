@@ -74,9 +74,9 @@ class RunResult:
     """What a bounded run did."""
 
     steps: int
-    #: "running", "halted", or "unimplemented".
+    #: "running", "halted", "unimplemented", or "faulted".
     status: str
-    #: Set only when status is "unimplemented".
+    #: Set only when status is "unimplemented" or "faulted".
     detail: str = ""
 
 
@@ -156,13 +156,22 @@ class Session:
             self.status = "unimplemented"
             self.detail = str(exc)
             return RunResult(0, self.status, self.detail)
+        except abi.HostFault as exc:
+            # The core's bug, not the program's, and the machine is half way
+            # through an instruction: stepping on would run the next one from
+            # a state no instruction produced (OH-223). Terminal until a reset
+            # or a load, as halted is, and not counted as a step.
+            self.status = "faulted"
+            self.detail = str(exc)
+            return RunResult(0, self.status, self.detail)
         self.steps += 1
         if not still_running:
             self.status = "halted"
         return RunResult(1, self.status, self.detail)
 
     def run(self, budget: int) -> RunResult:
-        """Up to `budget` instructions, stopping early on halt or a gap."""
+        """Up to `budget` instructions, stopping early on halt, a gap or a
+        host fault."""
         if budget < 1:
             raise EmulatorError(f"a run budget of {budget} would do nothing")
         if budget > MAX_RUN_STEPS:

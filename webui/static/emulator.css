@@ -157,6 +157,9 @@ button.primary:hover:not(:disabled) { opacity: 0.88; }
 .status[data-state="halted"]::before { background: var(--muted); }
 .status[data-state="unimplemented"]::before { background: var(--halt); }
 .status[data-state="unimplemented"] { color: var(--halt); border-color: var(--halt); }
+/* The core's own bug (OH-223): a stop that says so, as a missing opcode does. */
+.status[data-state="faulted"]::before { background: var(--halt); }
+.status[data-state="faulted"] { color: var(--halt); border-color: var(--halt); }
 
 /* --- layout ------------------------------------------------------------- */
 
