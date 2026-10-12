@@ -358,7 +358,8 @@ public:
     /// block would otherwise describe pins that never read their own pulls.
     /// Writes to `address` are ignored, as a read-only register ignores them.
     /// Mapping the same address again replaces it and forgets its drive, and
-    /// so does mapping anything else there (`forget_input`).
+    /// so does mapping anything else there (`forget_input`). An input mapped
+    /// over a sampler replaces that too (`forget_sampler`).
     void map_input(uint32_t address, uint32_t out_address,
                    uint32_t enable_address, uint32_t pad_base,
                    uint32_t pad_stride, uint32_t pads,
@@ -374,6 +375,50 @@ public:
     /// the sequence of these calls, and nothing else. False, having changed
     /// nothing, where `address` is no input register.
     bool drive_input(uint32_t address, uint32_t driven, uint32_t levels);
+
+    /// A converter that firmware starts with a write and reads through a
+    /// result register: an ESP32's SAR ADC one-time sample (OH-161 step 4).
+    ///
+    /// `control_address` stores as a register, at `value` from reset. A
+    /// write that sets `start_mask` where the stored word had it clear starts
+    /// a conversion that completes at once: the word `hold_samples` holds for
+    /// the key `written & key_mask` replaces `result_address`'s, and
+    /// `done_mask` is set in `status_address`'s. Both are registers the
+    /// board maps itself, so a clear alias onto the status register is how
+    /// firmware acknowledges done.
+    ///
+    /// **A rising edge, not a level**, because ESP-IDF writes START 0 and
+    /// then 1, and later writes the word again with START still set when it
+    /// clears the unit bits -- which is no new conversion. **The key is the
+    /// written word's**, so what is converted is whatever channel and
+    /// attenuation that write names, and one result register answers
+    /// whichever the last start chose. That is why this is a behaviour of
+    /// the core rather than a register a board sets between runs: firmware
+    /// picks the channel in the same few instructions that read the answer.
+    ///
+    /// While `enable_address & enable_mask` is clear the word stores and
+    /// nothing converts or is flagged, as on silicon with its clock off. A
+    /// start through a gate that cannot be read, whose key holds nothing,
+    /// or whose result or status register is not mapped faults naming
+    /// `control_address`, having stored nothing: a 0 in the result would
+    /// read as a voltage. Mapping the same address again replaces it and
+    /// forgets what it held, and so does mapping anything else there
+    /// (`forget_sampler`).
+    void map_sampler(uint32_t control_address, uint32_t value,
+                     uint32_t start_mask, uint32_t key_mask,
+                     uint32_t result_address, uint32_t status_address,
+                     uint32_t done_mask, uint32_t enable_address,
+                     uint32_t enable_mask);
+
+    /// The word each key converts to, as the world outside holds it:
+    /// `words[i]` for `keys[i]`.
+    ///
+    /// Replaces the previous call's whole statement, so a key left out
+    /// converts to nothing and faults. **The only way a sample from outside
+    /// enters this core**, as `drive_input` is for a level. False, having
+    /// changed nothing, where `control_address` is no sampler.
+    bool hold_samples(uint32_t control_address, const uint32_t* keys,
+                      const uint32_t* words, uint32_t count);
 
     /// Called by `step` once an instruction has actually retired -- never on
     /// an Unimplemented, Illegal or MemoryFault, so a program stopped by one
@@ -590,6 +635,37 @@ private:
     /// behind would go on answering for an address it no longer owns.
     void forget_input(uint32_t at);
 
+    /// A `map_sampler`: its control word's start bit and key, where its
+    /// answer and its done flag go, its gate, and what the outside holds
+    /// each key at.
+    ///
+    /// Beside `mmio_` for the reason `Input` is: a write to its control
+    /// register changes two other registers, and a word per address cannot
+    /// say that. The control register is in `mmio_` as a plain register, so
+    /// `is_mapped` answers for it and a read gives back the stored word.
+    struct Sampler {
+        uint32_t control = 0;
+        uint32_t start_mask = 0;
+        uint32_t key_mask = 0;
+        uint32_t result = 0;
+        uint32_t status = 0;
+        uint32_t done_mask = 0;
+        uint32_t enable = 0;
+        uint32_t enable_mask = 0;
+        std::unordered_map<uint32_t, uint32_t> held;
+    };
+
+    /// A write to a sampler's control register: store `value` under
+    /// `byte_mask`, and convert on START's rising edge. False, having stored
+    /// nothing, where the conversion cannot happen; see `map_sampler`.
+    bool sampler_write(Sampler& sampler, Mapped& control, uint32_t address,
+                       uint32_t value, uint32_t byte_mask);
+
+    /// Forget the sampler at `at`, and what it held, for the reason
+    /// `forget_input` forgets an input: `mmio_write` asks `samplers_` before
+    /// the stored word. Every `map_*` calls both.
+    void forget_sampler(uint32_t at);
+
     std::array<uint32_t, kRegisters> x_{};
     uint32_t pc_ = 0;
     uint32_t jvt_ = 0;
@@ -599,6 +675,7 @@ private:
     std::unordered_map<uint32_t, Stream> streams_;
     std::vector<Snapshot> snapshots_;
     std::vector<Input> inputs_;
+    std::vector<Sampler> samplers_;
     mutable uint32_t fault_address_ = 0;
     mutable bool fault_was_fetch_ = false;
 };

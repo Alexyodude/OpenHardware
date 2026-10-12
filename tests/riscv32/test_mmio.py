@@ -1029,3 +1029,289 @@ def test_anything_mapped_over_an_input_replaces_it(pins):
         enable_mask=1, instructions_per_tick=1)
     with pytest.raises(abi.AbiError):
         pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+
+    # A sampler's control register replaces an input there too.
+    map_pins(pins)
+    pins.map_sampler(GPIO_IN, value=0, start_mask=1, key_mask=2,
+                     result=GPIO_OUT, status=GPIO_ENABLE, done_mask=1,
+                     enable=GPIO_OUT, enable_mask=1)
+    with pytest.raises(abi.AbiError):
+        pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+
+
+# --- a converter started by a write (OH-161 step 4) ---------------------------
+#
+# The ESP32-C3's SAR ADC one-time path, from the same `framework-
+# arduinoespressif32` tree: APB_SARADC at 0x60040000 (`soc.h:67`);
+# `APB_SARADC_CTRL_REG` + 0x00 with `SAR_CLK_GATED` bit 6
+# (`apb_saradc_reg.h:22`, `:53`); `ONETIME_SAMPLE_REG` + 0x20 with
+# `SARADC1_ONETIME_SAMPLE` bit 31, `SARADC2_ONETIME_SAMPLE` bit 30,
+# `ONETIME_START` bit 29, `ONETIME_CHANNEL` [28:25] (default 13) and
+# `ONETIME_ATTEN` [24:23] (`:176-206`); `1_DATA_STATUS_REG` + 0x2C (`:278`);
+# `INT_RAW_REG` + 0x44 and `INT_CLR_REG` + 0x4C, ADC1's done bit 31 in each
+# (`:391-397`, `:467-473`). What the board's tests hold is the board; what
+# these hold is the mechanism.
+
+SARADC = 0x60040000
+SARADC_CTRL = SARADC + 0x00
+SAR_CLK_GATED = 1 << 6
+ONETIME = SARADC + 0x20
+SAR1_DATA = SARADC + 0x2C
+INT_RAW = SARADC + 0x44
+INT_CLR = SARADC + 0x4C
+SAR1 = 1 << 31
+SAR2 = 1 << 30
+START = 1 << 29
+#: The bits that choose what is converted: both unit-select bits, the
+#: channel and the attenuation. START is not among them.
+CONVERSION = SAR1 | SAR2 | (0xF << 25) | (0x3 << 23)
+DONE = 1 << 31
+ONETIME_AT_RESET = 13 << 25
+
+
+def onetime(channel: int, atten: int = 3) -> int:
+    """ADC1's control word for `channel` at `atten`, START clear."""
+    return SAR1 | channel << 25 | atten << 23
+
+
+def map_adc(cpu, *, enable: int = SARADC_CTRL, result: int = SAR1_DATA,
+            status: int = INT_RAW) -> None:
+    cpu.map_sampler(ONETIME, value=ONETIME_AT_RESET, start_mask=START,
+                    key_mask=CONVERSION, result=result, status=status,
+                    done_mask=DONE, enable=enable, enable_mask=SAR_CLK_GATED)
+
+
+@pytest.fixture
+def adc(cpu):
+    """The clock gate open, the result and status registers, INT_CLR as the
+    clear alias it is, the converter, and two channels held at 12 dB. Takes
+    `cpu` for the reason the `gpio` fixture does."""
+    cpu.map_register(SARADC_CTRL, SAR_CLK_GATED)
+    cpu.map_register(SAR1_DATA, 0)
+    cpu.map_register(INT_RAW, 0)
+    cpu.map_alias(INT_CLR, INT_RAW, "clear", readable=False)
+    map_adc(cpu)
+    cpu.hold_samples(ONETIME, {onetime(2): 1536, onetime(3): 1024})
+    return cpu
+
+
+def convert(cpu, word: int) -> None:
+    """ESP-IDF's start: the word with START clear, then with it set
+    (`adc_oneshot_hal.c:116-118` at v5.5)."""
+    cpu.write_word(ONETIME, word)
+    cpu.write_word(ONETIME, word | START)
+
+
+def test_a_start_converts_the_word_held_for_the_channel_and_attenuation(adc):
+    convert(adc, onetime(2))
+    assert adc.read_word(SAR1_DATA) == 1536
+    assert adc.read_word(INT_RAW) == DONE
+
+
+def test_one_result_register_answers_whichever_channel_the_last_start_named(adc):
+    """The reason this is a behaviour of the core and not a register a board
+    sets between runs: firmware picks the channel in the same few
+    instructions that read the answer."""
+    convert(adc, onetime(2))
+    assert adc.read_word(SAR1_DATA) == 1536
+    convert(adc, onetime(3))
+    assert adc.read_word(SAR1_DATA) == 1024
+    convert(adc, onetime(2))
+    assert adc.read_word(SAR1_DATA) == 1536
+
+
+def test_a_start_is_a_rising_edge_and_not_a_level(adc):
+    """ESP-IDF writes the word again with START still set when it clears the
+    unit bits (`adc_oneshot_hal.c:166`), and that is no new conversion."""
+    convert(adc, onetime(2))
+    adc.write_word(INT_CLR, DONE)
+    adc.write_word(ONETIME, onetime(3) | START)
+    assert (adc.read_word(SAR1_DATA), adc.read_word(INT_RAW)) == (1536, 0)
+    convert(adc, onetime(3))
+    assert (adc.read_word(SAR1_DATA), adc.read_word(INT_RAW)) == (1024, DONE)
+
+
+def test_a_write_without_start_converts_nothing(adc):
+    adc.write_word(ONETIME, onetime(2))
+    assert (adc.read_word(SAR1_DATA), adc.read_word(INT_RAW)) == (0, 0)
+
+
+def test_the_control_register_reads_its_reset_value_and_then_what_was_written(adc):
+    assert adc.read_word(ONETIME) == ONETIME_AT_RESET
+    convert(adc, onetime(2))
+    assert adc.read_word(ONETIME) == onetime(2) | START
+
+
+def test_nothing_converts_while_the_gate_is_clear(adc):
+    """As on silicon with the clock off: the word stores, and no conversion
+    happens and nothing is flagged."""
+    adc.write_word(SARADC_CTRL, 0)
+    convert(adc, onetime(2))
+    assert (adc.read_word(SAR1_DATA), adc.read_word(INT_RAW)) == (0, 0)
+    assert adc.read_word(ONETIME) == onetime(2) | START
+
+
+def _start(cpu, word: int) -> abi.MemoryFault:
+    """Execute the store of `word | START` after `word`, and return the fault
+    the store raised. Executed, because the core's own fault record names
+    the address and `write_word` formats the one it was passed."""
+    cpu.write_word(ONETIME, word)
+    high = (word | START) >> 12
+    load(cpu, [e.lui("a4", SARADC >> 12), e.lui("a5", high), e.sw("a5", "a4", 0x20)])
+    cpu.step()
+    cpu.step()
+    with pytest.raises(abi.MemoryFault) as caught:
+        cpu.step()
+    return caught.value
+
+
+def test_a_start_whose_key_holds_nothing_faults_naming_the_control_register(adc):
+    """Channel 5, ADC2's bit, the reset channel 13: nothing is held for any
+    of them, and a 0 would read as a voltage."""
+    for word in (onetime(5), onetime(2) | SAR2, ONETIME_AT_RESET | SAR1):
+        fault = _start(adc, word)
+        assert f"0x{ONETIME:08x}" in str(fault), (hex(word), str(fault))
+        assert adc.read_word(ONETIME) == word, "a faulted store changed the word"
+        assert (adc.read_word(SAR1_DATA), adc.read_word(INT_RAW)) == (0, 0)
+
+
+def test_a_start_through_a_gate_that_cannot_be_read_faults_naming_the_control(cpu):
+    """A board naming a clock register it never mapped has described a
+    converter that could never convert."""
+    cpu.map_register(SAR1_DATA, 0)
+    cpu.map_register(INT_RAW, 0)
+    map_adc(cpu)
+    cpu.hold_samples(ONETIME, {onetime(2): 1536})
+    fault = _start(cpu, onetime(2))
+    assert f"0x{ONETIME:08x}" in str(fault), str(fault)
+
+
+def test_a_start_whose_result_or_status_is_unmapped_faults_naming_the_control(cpu):
+    cpu.map_register(SARADC_CTRL, SAR_CLK_GATED)
+    cpu.map_register(INT_RAW, 0)
+    map_adc(cpu)
+    cpu.hold_samples(ONETIME, {onetime(2): 1536})
+    fault = _start(cpu, onetime(2))
+    assert f"0x{ONETIME:08x}" in str(fault), str(fault)
+    assert cpu.read_word(INT_RAW) == 0, "done was set for a result nowhere"
+
+    cpu.map_register(SAR1_DATA, 0)
+    map_adc(cpu, status=INT_RAW + 0x100)
+    cpu.hold_samples(ONETIME, {onetime(2): 1536})
+    fault = _start(cpu, onetime(2))
+    assert f"0x{ONETIME:08x}" in str(fault), str(fault)
+    assert cpu.read_word(SAR1_DATA) == 0, "a result was stored with no done"
+
+
+def test_a_hold_replaces_the_one_before_it(adc):
+    adc.hold_samples(ONETIME, {onetime(3): 2048})
+    convert(adc, onetime(3))
+    assert adc.read_word(SAR1_DATA) == 2048
+    fault = _start(adc, onetime(2))
+    assert f"0x{ONETIME:08x}" in str(fault), str(fault)
+
+
+def test_holding_samples_for_an_address_that_is_no_sampler_is_refused_by_address(adc):
+    with pytest.raises(abi.AbiError) as caught:
+        adc.hold_samples(SAR1_DATA, {onetime(2): 1536})
+    assert f"0x{SAR1_DATA:08x}" in str(caught.value), str(caught.value)
+
+
+def test_a_key_or_word_past_32_bits_is_refused_with_the_value(adc):
+    """ctypes would pass `1 << 32` as 0 without saying so."""
+    for samples in ({1 << 32: 1}, {onetime(2): 1 << 32}, {onetime(2): -1}):
+        with pytest.raises(abi.AbiError) as caught:
+            adc.hold_samples(ONETIME, samples)
+        bad = next(value for pair in samples.items() for value in pair
+                   if not 0 <= value <= 0xFFFFFFFF)
+        assert f"{bad}" in str(caught.value), str(caught.value)
+
+
+def test_a_program_converts_the_way_esp_idf_does(adc):
+    """Clear done, write the word, write it with START, spin until done,
+    read the result: `adc_oneshot_hal_convert` (`adc_oneshot_hal.c:136-168`
+    at v5.5) less what this model has no use for, executed against the
+    mechanism alone. Then a byte store of the top byte alone, which carries
+    START: the key is taken from the whole stored word, not from the bytes
+    the store carried."""
+    program = [
+        e.lui("a4", SARADC >> 12),
+        e.lui("a2", DONE >> 12),
+        e.sw("a2", "a4", 0x4C),           # INT_CLR
+        e.lui("a5", onetime(2) >> 12),
+        e.sw("a5", "a4", 0x20),           # the word, START clear
+        e.lui("a6", (onetime(2) | START) >> 12),
+        e.sw("a6", "a4", 0x20),           # START rising
+        e.lw("a0", "a4", 0x44),           # spin on done, bit 31 ...
+        e.bge("a0", "x0", -4),            # ... which reads negative when set
+        e.lw("a1", "a4", 0x2C),
+        e.lui("a7", onetime(3) >> 12),
+        e.sw("a7", "a4", 0x20),           # channel 3, START clear
+        e.srli("a3", "a7", 24),           # channel 3's top byte ...
+        e.ori("a3", "a3", START >> 24),   # ... with START
+        e.sb("a3", "a4", 0x23),
+        e.lw("a3", "a4", 0x2C),
+    ]
+    load(adc, program)
+    for _ in program:
+        adc.step()
+    assert adc.reg(11) == 1536, "a1: channel 2's word"
+    assert adc.reg(13) == 1024, "a3: channel 3's, by a byte store of START"
+
+
+def test_mapping_the_sampler_again_replaces_it_and_forgets_what_it_held(adc):
+    map_adc(adc)
+    fault = _start(adc, onetime(2))
+    assert f"0x{ONETIME:08x}" in str(fault), str(fault)
+
+
+def test_anything_mapped_over_a_sampler_replaces_it(adc):
+    """A register mapped over the control address must stop it converting,
+    or the sampler goes on answering for an address it no longer owns."""
+    adc.map_register(ONETIME, 0)
+    convert(adc, onetime(2))
+    assert (adc.read_word(SAR1_DATA), adc.read_word(INT_RAW)) == (0, 0)
+    with pytest.raises(abi.AbiError):
+        adc.hold_samples(ONETIME, {onetime(2): 1536})
+
+    map_adc(adc)
+    adc.map_alias(ONETIME, SAR1_DATA, "store", readable=True)
+    with pytest.raises(abi.AbiError):
+        adc.hold_samples(ONETIME, {onetime(2): 1536})
+
+    map_adc(adc)
+    adc.map_stream(ONETIME, enable=SARADC_CTRL, enable_mask=SAR_CLK_GATED)
+    with pytest.raises(abi.AbiError):
+        adc.hold_samples(ONETIME, {onetime(2): 1536})
+
+    map_adc(adc)
+    adc.map_snapshot_counter(
+        op=ONETIME, update_mask=1, valid_mask=2, low=ONETIME + 0x100,
+        high=ONETIME + 0x104, high_mask=0xFFFFFFFF, enable=SARADC_CTRL,
+        enable_mask=SAR_CLK_GATED, instructions_per_tick=1)
+    with pytest.raises(abi.AbiError):
+        adc.hold_samples(ONETIME, {onetime(2): 1536})
+
+    map_adc(adc)
+    adc.map_input(ONETIME, out=SAR1_DATA, enable=INT_RAW, pad_base=SARADC_CTRL,
+                  pad_stride=0, pads=0, input_enable=1, pull_up=0, pull_down=0)
+    with pytest.raises(abi.AbiError):
+        adc.hold_samples(ONETIME, {onetime(2): 1536})
+
+
+def test_a_machine_with_no_board_keeps_no_sampler_behind(adc):
+    """What a sampler holds is state, so one left behind would take the next
+    board's samples for an address that board never made a sampler. Asked
+    through `hold_samples`, because mapping anything at the address would
+    replace a sampler left there and hide it."""
+    adc.clear_regions()
+    with pytest.raises(abi.AbiError) as caught:
+        adc.hold_samples(ONETIME, {onetime(2): 1536})
+    assert f"0x{ONETIME:08x}" in str(caught.value), str(caught.value)
+
+
+def test_a_reset_machine_keeps_no_sampler_behind(adc):
+    adc.reset()
+    with pytest.raises(abi.AbiError) as caught:
+        adc.hold_samples(ONETIME, {onetime(2): 1536})
+    assert f"0x{ONETIME:08x}" in str(caught.value), str(caught.value)

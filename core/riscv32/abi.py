@@ -29,6 +29,7 @@ from __future__ import annotations
 import ctypes
 import pathlib
 import sys
+from collections.abc import Mapping
 
 try:
     from tools.build_core import BuildError, ensure_built, library_path
@@ -37,7 +38,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match RISCV32_ABI_VERSION in abi.h.
-ABI_VERSION = 5
+ABI_VERSION = 6
 
 #: `riscv32::WriteOp`, by the name a board description uses.
 #:
@@ -258,6 +259,15 @@ _SIGNATURES = {
     ),
     "riscv32_drive_input": (
         [ctypes.c_void_p] + [ctypes.c_uint32] * 3,
+        ctypes.c_int,
+    ),
+    "riscv32_map_sampler": (
+        [ctypes.c_void_p] + [ctypes.c_uint32] * 9,
+        None,
+    ),
+    "riscv32_hold_samples": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32),
+         ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32],
         ctypes.c_int,
     ),
     "riscv32_is_mapped": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
@@ -618,6 +628,49 @@ class Cpu:
         if not self._lib.riscv32_drive_input(self._handle, address, driven, levels):
             raise AbiError(
                 f"0x{address:08x} is no input register; map_input maps one")
+
+    def map_sampler(self, control: int, *, value: int, start_mask: int,
+                    key_mask: int, result: int, status: int, done_mask: int,
+                    enable: int, enable_mask: int) -> None:
+        """A converter firmware starts with a write to `control`.
+
+        `control` stores as a register from `value`. A write that raises
+        `start_mask` -- set now, clear in the word before -- copies the word
+        `hold_samples` holds for `written & key_mask` into `result` and sets
+        `done_mask` in `status`, both registers the board maps itself, while
+        `enable & enable_mask` is set. An ESP32's SAR ADC one-time sample,
+        whose control word names the unit, the channel and the attenuation.
+        A start through an unreadable gate, for a key nothing holds, or with
+        `result` or `status` unmapped faults naming `control`. See `cpu.h`.
+        """
+        self._lib.riscv32_map_sampler(
+            self._handle, control, value, start_mask, key_mask, result, status,
+            done_mask, enable, enable_mask,
+        )
+
+    def hold_samples(self, control: int, samples: Mapping[int, int]) -> None:
+        """The word each key converts to at the sampler at `control`, key ->
+        word. Replaces the last call's whole statement, so a key left out
+        converts to nothing, and a start that names it faults.
+
+        Refused, with the values, where `control` is no sampler and where a
+        key or a word does not fit the 32 bits the C side takes: ctypes would
+        pass `1 << 32` as 0 without saying so.
+        """
+        for key, word in samples.items():
+            for name, number in (("key", key), ("word", word)):
+                if not 0 <= number <= 0xFFFFFFFF:
+                    raise AbiError(
+                        f"a {name} must fit in 32 bits, got {number!r} (key "
+                        f"{key!r} -> word {word!r}): ctypes would pass it as "
+                        f"{number & 0xFFFFFFFF:#010x} without saying so")
+        count = len(samples)
+        keys = (ctypes.c_uint32 * count)(*samples.keys())
+        words = (ctypes.c_uint32 * count)(*samples.values())
+        if not self._lib.riscv32_hold_samples(self._handle, control, keys, words,
+                                              count):
+            raise AbiError(
+                f"0x{control:08x} is no sampler; map_sampler maps one")
 
     def is_mapped(self, address: int) -> bool:
         """Whether `address` is a mapped register rather than bulk memory."""

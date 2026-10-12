@@ -37,7 +37,9 @@ extern "C" {
 //: Bumped to 4 at OH-161's step 3, which added `riscv32_map_input` and
 //: `riscv32_drive_input`.
 //: Bumped to 5 at OH-225, which added `riscv32_step_entry`.
-#define RISCV32_ABI_VERSION 5
+//: Bumped to 6 at OH-161's step 4, which added `riscv32_map_sampler` and
+//: `riscv32_hold_samples`.
+#define RISCV32_ABI_VERSION 6
 
 /// x0 through x31, then PC.
 ///
@@ -161,6 +163,25 @@ RISCV32_API void riscv32_map_input(Riscv32Cpu* cpu, uint32_t address,
 /// where `address` is no input register.
 RISCV32_API int riscv32_drive_input(Riscv32Cpu* cpu, uint32_t address,
                                     uint32_t driven, uint32_t levels);
+
+/// A converter started by a write: `control_address` stores as a register
+/// from `value`, and a write that raises `start_mask` copies the word held
+/// for `written & key_mask` into `result_address` and sets `done_mask` in
+/// `status_address`, while `enable_address & enable_mask` is set. An ESP32's
+/// SAR ADC one-time sample. See cpu.h for what faults.
+RISCV32_API void riscv32_map_sampler(Riscv32Cpu* cpu, uint32_t control_address,
+                                     uint32_t value, uint32_t start_mask,
+                                     uint32_t key_mask, uint32_t result_address,
+                                     uint32_t status_address,
+                                     uint32_t done_mask,
+                                     uint32_t enable_address,
+                                     uint32_t enable_mask);
+
+/// The word each of `count` keys converts to, replacing what the last call
+/// held. 0, having changed nothing, where `control_address` is no sampler.
+RISCV32_API int riscv32_hold_samples(Riscv32Cpu* cpu, uint32_t control_address,
+                                     const uint32_t* keys,
+                                     const uint32_t* words, uint32_t count);
 
 RISCV32_API int riscv32_is_mapped(const Riscv32Cpu* cpu, uint32_t address);
 RISCV32_API void riscv32_clear_mmio(Riscv32Cpu* cpu);

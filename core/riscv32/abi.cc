@@ -192,6 +192,22 @@ int riscv32_drive_input(Riscv32Cpu* cpu, uint32_t address, uint32_t driven,
     return as_cpu(cpu)->drive_input(address, driven, levels) ? 1 : 0;
 }
 
+void riscv32_map_sampler(Riscv32Cpu* cpu, uint32_t control_address,
+                         uint32_t value, uint32_t start_mask, uint32_t key_mask,
+                         uint32_t result_address, uint32_t status_address,
+                         uint32_t done_mask, uint32_t enable_address,
+                         uint32_t enable_mask) {
+    as_cpu(cpu)->map_sampler(control_address, value, start_mask, key_mask,
+                             result_address, status_address, done_mask,
+                             enable_address, enable_mask);
+}
+
+int riscv32_hold_samples(Riscv32Cpu* cpu, uint32_t control_address,
+                         const uint32_t* keys, const uint32_t* words,
+                         uint32_t count) {
+    return as_cpu(cpu)->hold_samples(control_address, keys, words, count) ? 1 : 0;
+}
+
 int riscv32_is_mapped(const Riscv32Cpu* cpu, uint32_t address) {
     return as_cpu(cpu)->is_mapped(address) ? 1 : 0;
 }

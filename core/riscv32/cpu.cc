@@ -46,6 +46,7 @@ void Cpu::reset() {
     streams_.clear();
     snapshots_.clear();
     inputs_.clear();
+    samplers_.clear();
     fault_address_ = 0;
     fault_was_fetch_ = false;
 }
@@ -249,11 +250,14 @@ void Cpu::clear_regions() {
     // printed. A snapshot counter carries a COUNT, so leaving one behind
     // would start the next board's clock where the last board's stopped. An
     // input carries a DRIVE, so leaving one behind would hand the next board
-    // levels nobody put on its pins.
+    // levels nobody put on its pins. A sampler carries SAMPLES, so leaving
+    // one behind would convert the next board's register to voltages nobody
+    // put on its pins either.
     mmio_.clear();
     streams_.clear();
     snapshots_.clear();
     inputs_.clear();
+    samplers_.clear();
 }
 
 void Cpu::clear_mmio() {
@@ -261,6 +265,7 @@ void Cpu::clear_mmio() {
     streams_.clear();
     snapshots_.clear();
     inputs_.clear();
+    samplers_.clear();
 }
 
 void Cpu::forget_input(uint32_t at) {
@@ -270,9 +275,17 @@ void Cpu::forget_input(uint32_t at) {
         inputs_.end());
 }
 
+void Cpu::forget_sampler(uint32_t at) {
+    samplers_.erase(
+        std::remove_if(samplers_.begin(), samplers_.end(),
+                       [&](const Sampler& sampler) { return sampler.control == at; }),
+        samplers_.end());
+}
+
 void Cpu::map_register(uint32_t address, uint32_t value) {
     const uint32_t at = address & ~3u;
     forget_input(at);
+    forget_sampler(at);
     Mapped entry;
     entry.value = value;
     entry.target = at;
@@ -283,6 +296,7 @@ void Cpu::map_alias(uint32_t address, uint32_t target, WriteOp op,
                     bool readable) {
     const uint32_t at = address & ~3u;
     forget_input(at);
+    forget_sampler(at);
     Mapped entry;
     entry.target = target & ~3u;
     entry.op = op;
@@ -294,6 +308,7 @@ void Cpu::map_stream(uint32_t address, uint32_t enable_address,
                      uint32_t enable_mask) {
     const uint32_t at = address & ~3u;
     forget_input(at);
+    forget_sampler(at);
     // Registered in `mmio_` as well, so `is_mapped` sees it and a READ answers
     // this entry's value, which stays zero. The stream table alone would make
     // the address respond to writes and fault on reads -- and a UART data
@@ -334,6 +349,7 @@ void Cpu::map_snapshot_counter(uint32_t op_address, uint32_t update_mask,
     // before the stored word -- so the word these entries hold is never read.
     for (const uint32_t at : {counter.op, counter.low, counter.high}) {
         forget_input(at);
+        forget_sampler(at);
         Mapped entry;
         entry.target = at;
         mmio_[at] = entry;
@@ -368,6 +384,7 @@ void Cpu::map_input(uint32_t address, uint32_t out_address,
     // Registered in `mmio_` too, so `is_mapped` sees it and its accesses
     // reach `mmio_read`/`mmio_write`, which consult `inputs_` first -- so a
     // write lands in a word nobody reads, as a read-only register's does.
+    forget_sampler(input.address);
     Mapped entry;
     entry.target = input.address;
     mmio_[input.address] = entry;
@@ -393,6 +410,98 @@ bool Cpu::drive_input(uint32_t address, uint32_t driven, uint32_t levels) {
         }
     }
     return false;
+}
+
+void Cpu::map_sampler(uint32_t control_address, uint32_t value,
+                      uint32_t start_mask, uint32_t key_mask,
+                      uint32_t result_address, uint32_t status_address,
+                      uint32_t done_mask, uint32_t enable_address,
+                      uint32_t enable_mask) {
+    Sampler sampler;
+    sampler.control = control_address & ~3u;
+    sampler.start_mask = start_mask;
+    sampler.key_mask = key_mask;
+    sampler.result = result_address & ~3u;
+    sampler.status = status_address & ~3u;
+    sampler.done_mask = done_mask;
+    sampler.enable = enable_address & ~3u;
+    sampler.enable_mask = enable_mask;
+
+    // The control register is a plain register in `mmio_`, so a read answers
+    // the stored word; `mmio_write` asks `samplers_` before storing.
+    forget_input(sampler.control);
+    Mapped entry;
+    entry.value = value;
+    entry.target = sampler.control;
+    mmio_[sampler.control] = entry;
+
+    // Mapping the same register twice replaces it, and what it held, rather
+    // than leaving two converting on one address.
+    forget_sampler(sampler.control);
+    samplers_.push_back(sampler);
+}
+
+bool Cpu::hold_samples(uint32_t control_address, const uint32_t* keys,
+                       const uint32_t* words, uint32_t count) {
+    for (Sampler& sampler : samplers_) {
+        if (sampler.control != (control_address & ~3u)) {
+            continue;
+        }
+        sampler.held.clear();
+        for (uint32_t i = 0; i < count; ++i) {
+            sampler.held[keys[i]] = words[i];
+        }
+        return true;
+    }
+    return false;
+}
+
+bool Cpu::sampler_write(Sampler& sampler, Mapped& control, uint32_t address,
+                        uint32_t value, uint32_t byte_mask) {
+    // `value` arrives positioned in its lane by the sub-word paths, so the
+    // stored word after this access is the whole word the key is read from,
+    // whichever bytes the store carried.
+    const uint32_t before = control.value;
+    const uint32_t after = (before & ~byte_mask) | (value & byte_mask);
+    const bool rises = (after & sampler.start_mask) != 0 &&
+                       (before & sampler.start_mask) == 0;
+    if (!rises) {
+        control.value = after;
+        return true;
+    }
+    uint32_t gate = 0;
+    if (!mmio_read(sampler.enable, gate)) {
+        // A clock register the board never mapped: a converter that could
+        // never have converted. Named at the control register, the address
+        // the instruction used, as a stream names its FIFO and not its gate.
+        note_fault(address, false);
+        return false;
+    }
+    if ((gate & sampler.enable_mask) == 0) {
+        // Clock off: the word stores and nothing converts, as on silicon.
+        control.value = after;
+        return true;
+    }
+    // Each through its own target, as `mmio_write` stores, so a result or
+    // status the board mapped as a readable alias lands where it is read.
+    const auto storage = [&](uint32_t at) {
+        const auto found = mmio_.find(at);
+        return found == mmio_.end() ? mmio_.end() : mmio_.find(found->second.target);
+    };
+    const auto held = sampler.held.find(after & sampler.key_mask);
+    const auto result = storage(sampler.result);
+    const auto status = storage(sampler.status);
+    if (held == sampler.held.end() || result == mmio_.end() ||
+        status == mmio_.end()) {
+        // Nothing held for the channel this write names, or nowhere to put
+        // the answer. A 0 in the result would read as a voltage.
+        note_fault(address, false);
+        return false;
+    }
+    control.value = after;
+    result->second.value = held->second;
+    status->second.value |= sampler.done_mask;
+    return true;
 }
 
 bool Cpu::input_levels(const Input& input, uint32_t address,
@@ -625,6 +734,15 @@ bool Cpu::mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask) {
         counter.latched = counter.instructions / counter.instructions_per_tick;
         counter.valid = true;
         return true;
+    }
+
+    // **Before the word behaviours too**: a write to a sampler's control
+    // register may convert, which a plain store would not.
+    for (Sampler& sampler : samplers_) {
+        if (at == sampler.control) {
+            return sampler_write(sampler, found->second, address, value,
+                                 byte_mask);
+        }
     }
 
     const Mapped& entry = found->second;
