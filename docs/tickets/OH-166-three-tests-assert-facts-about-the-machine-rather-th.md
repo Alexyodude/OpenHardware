@@ -95,3 +95,5 @@ it is four lines in a file they are already editing -- or releases the file,
 after which this ticket can be finished. Item 4, running the whole suite twice
 concurrently, is deliberately left until items 1 and 3 land, because running
 it now would only re-measure item 2.
+
+**Note 2026-10-13:** 2026-10-13, two more of this ticket's class seen on master full-suite runs while three other worktrees were building and testing: tests/webui/test_emulator.py::test_a_state_poll_answers_while_a_build_runs failed twice ('the build itself failed: None', at 4bcd540 and 037a80b) and tests/webui/test_board_run.py::test_an_upload_from_another_origin_is_refused once (ConnectionAbortedError); each passes alone. Alongside test_a_failed_build_leaves_nothing_behind (the shared temp directory), these are the tests that fail on machine load rather than on code.
