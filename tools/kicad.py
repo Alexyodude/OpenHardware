@@ -492,6 +492,9 @@ class Arc:
     `mid` is a point ON the curve, not the centre of it. Reading it as a centre
     puts every rounded corner of a board in the wrong place by roughly the
     corner radius, and the result still looks like a board.
+
+    A circle on the outline layer, which KiCad stores by its centre, is two of
+    these, its halves, made by `_circle_halves` (OH-163).
     """
 
     layer: str
@@ -774,7 +777,66 @@ def pad_on_board(placed: Placement, pad: Pad) -> tuple[float, float]:
     return _on_board(placed, pad.x_mm, pad.y_mm)
 
 
-def _fp_graphics(node: list, layer: str, placed: Placement
+def _circle_halves(node: list, layer: str, put) -> list[Arc]:
+    """A `gr_circle` or `fp_circle` on `layer`, as two half turns in board
+    millimetres, or `[]` where it is on another layer.
+
+    **A circle on the outline layer is a hole KiCad mills through the board**
+    (OH-163): PCBCUPID's Glyph C3 and C6 mill their mounting holes so.
+    KiCad stores it as its centre and one point on its rim, and it is kept
+    as arcs, which every consumer of the outline already flattens
+    (`compose_board_3d.arc_points`), rather than as a new kind of shape.
+    It is split at its rightmost and leftmost points in board space, over
+    its top and back under it, so each half's extremes are among its own
+    three points -- which keeps `Board.extent_mm` exact. The stated rim
+    point gives the radius and nothing else.
+    """
+    where = first(node, "layer")
+    if not (where and len(where) > 1 and where[1] == layer):
+        return []
+    centre, rim = first(node, "center"), first(node, "end")
+    if centre is None or rim is None:
+        return []
+    c, e = _floats(centre), _floats(rim)
+    if len(c) < 2 or len(e) < 2:
+        return []
+    radius = math.hypot(e[0] - c[0], e[1] - c[1])
+    x, y = put(c[0], c[1])
+    return [Arc(layer, x + radius, y, x, y + radius, x - radius, y),
+            Arc(layer, x - radius, y, x, y - radius, x + radius, y)]
+
+
+def _polygon_sides(node: list, layer: str, put, path: pathlib.Path) -> list[Segment]:
+    """A `gr_poly` or `fp_poly` on `layer`, as the closed ring of segments
+    its points walk, in board millimetres, or `[]` where it is on another
+    layer.
+
+    Milled as the board's own edge is, so one inside the board is a hole
+    through it (OH-163), and read as a `gr_rect` is, one segment a side; a
+    point repeated is no side. An `(arc ...)` among the points, which KiCad 7
+    and later may write, is refused by name: what such a ring walks has not
+    been checked against a vendor's file, and a side dropped would leave a
+    ring that does not close, which `compose_board_3d.contours` reports far
+    from here.
+    """
+    where = first(node, "layer")
+    if not (where and len(where) > 1 and where[1] == layer):
+        return []
+    pts = first(node, "pts")
+    if pts is None:
+        return []
+    if children(pts, "arc"):
+        raise KicadError(
+            f"{path}: a ({head(node)} ...) on {layer} has an arc among its "
+            f"points, {node!r}; what such a ring walks has not been checked, "
+            f"and it is refused here, not read")
+    points = [put(xy[0], xy[1]) for xy in (_floats(p) for p in children(pts, "xy"))
+              if len(xy) >= 2]
+    return [Segment(layer, *a, *b) for a, b in zip(points, points[1:] + points[:1])
+            if a != b]
+
+
+def _fp_graphics(node: list, layer: str, placed: Placement, path: pathlib.Path
                  ) -> tuple[list[Segment], list[Arc]]:
     """One footprint's `layer` graphics, in board coordinates.
 
@@ -782,7 +844,9 @@ def _fp_graphics(node: list, layer: str, placed: Placement
     `read_footprint` and `read_board` expand their own rects: every consumer
     then works in one primitive. No vendor board here draws an edge that way
     today -- what would be surprising is a rect on the outline layer silently
-    contributing nothing while the identical `gr_rect` beside it does.
+    contributing nothing while the identical `gr_rect` beside it does. The
+    same holds for `fp_poly` and `fp_circle`, read as `gr_poly` and
+    `gr_circle` are (OH-163).
     """
     segments: list[Segment] = []
     arcs: list[Arc] = []
@@ -804,6 +868,8 @@ def _fp_graphics(node: list, layer: str, placed: Placement
         corners = [put(x1, y1), put(x2, y1), put(x2, y2), put(x1, y2)]
         for start, end in zip(corners, corners[1:] + corners[:1]):
             segments.append(Segment(layer, *start, *end))
+    for poly in children(node, "fp_poly"):
+        segments += _polygon_sides(poly, layer, put, path)
     for arc in children(node, "fp_arc"):
         where = first(arc, "layer")
         if not (where and len(where) > 1 and where[1] == layer):
@@ -815,6 +881,8 @@ def _fp_graphics(node: list, layer: str, placed: Placement
         if min(len(a), len(m), len(b)) < 2:
             continue
         arcs.append(Arc(layer, *put(a[0], a[1]), *put(m[0], m[1]), *put(b[0], b[1])))
+    for circle in children(node, "fp_circle"):
+        arcs += _circle_halves(circle, layer, put)
     return segments, arcs
 
 
@@ -1569,6 +1637,11 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
             Segment(layer, x1, y1, x2, y1), Segment(layer, x2, y1, x2, y2),
             Segment(layer, x2, y2, x1, y2), Segment(layer, x1, y2, x1, y1),
         ]
+    # A polygon is its sides, and a circle the two halves below (OH-163):
+    # closed shapes on the outline layer, so one inside the board is a hole
+    # milled through it -- PCBCUPID's Glyph C3 and C6 mill circles so.
+    for node in children(tree, "gr_poly"):
+        outline += _polygon_sides(node, layer, lambda x, y: (x, y), path)
 
     arcs: list[Arc] = []
     for node in children(tree, "gr_arc"):
@@ -1582,6 +1655,8 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
         if min(len(a), len(m), len(b)) < 2:
             continue
         arcs.append(Arc(layer, a[0], a[1], m[0], m[1], b[0], b[1]))
+    for node in children(tree, "gr_circle"):
+        arcs += _circle_halves(node, layer, lambda x, y: (x, y))
 
     silk, silk_arcs, fills, unread = _silk_of(tree, "gr", lambda x, y: (x, y))
     words, hidden = _texts_of(tree, "gr", lambda x, y: (x, y))
@@ -1611,7 +1686,7 @@ def read_board(path: pathlib.Path, layer: str = "Edge.Cuts",
             models=_models_of(node),
             value=_value_of(node),
         )
-        drawn, curved = _fp_graphics(node, layer, placed)
+        drawn, curved = _fp_graphics(node, layer, placed, path)
         outline += drawn
         arcs += curved
         placements.append(dataclasses.replace(placed, outline=tuple(drawn),

@@ -657,6 +657,128 @@ def test_a_footprint_carrying_the_whole_outline_is_enough_of_one(tmp_path):
     assert got.extent_mm() == (100.0, 46.0, 105.0, 50.0)
 
 
+# --- a hole milled through the board (OH-163) ---------------------------------
+#
+# **A closed shape on Edge.Cuts inside the board is a hole KiCad mills**, and
+# PCBCUPID's Glyph C3 and C6 mill their mounting holes that way, as
+# `gr_circle`, which this reader did not read, so nothing counted them.
+
+#: Written into `BOARD`, inside its 22 x 17 mm rectangle: a milled hole whose
+#: stated rim point is off both axes, a triangle cut out of the board, and a
+#: circle of ink. KiCad stores a circle as its centre and one point on its rim.
+MILLED = """\t(gr_circle
+\t\t(center 15 25)
+\t\t(end 15.6 25.8)
+\t\t(stroke (width 0.1) (type default))
+\t\t(fill none)
+\t\t(layer "Edge.Cuts")
+\t)
+\t(gr_circle
+\t\t(center 20 30)
+\t\t(end 21 30)
+\t\t(stroke (width 0.1) (type default))
+\t\t(fill none)
+\t\t(layer "F.SilkS")
+\t)
+\t(gr_poly
+\t\t(pts (xy 25 30) (xy 28 30) (xy 28 33))
+\t\t(stroke (width 0.1) (type default))
+\t\t(fill none)
+\t\t(layer "Edge.Cuts")
+\t)
+"""
+
+
+def _milled(tmp_path, milled: str = MILLED) -> pathlib.Path:
+    path = tmp_path / "milled.kicad_pcb"
+    at = BOARD.index('\t(footprint "XIAO TEST:QFN32G')
+    path.write_text(BOARD[:at] + milled + BOARD[at:], encoding="utf-8")
+    return path
+
+
+def test_a_circle_on_the_outline_is_read_as_two_half_turns_split_left_and_right(tmp_path):
+    """**A milled circle is outline, kept as the two arcs it is split into**
+    (OH-163): from its rightmost point over its top to its leftmost and back
+    under it, so every consumer of the outline flattens it as it flattens a
+    corner, and each half's extremes are among its own three points, which
+    is what keeps `Board.extent_mm` exact. Radius 1 by hand: the stated rim
+    point is (0.6, 0.8) from the centre. The circle on F.SilkS is ink, and
+    not outline."""
+    plain = read_board(_milled(tmp_path, ""))
+    got = read_board(_milled(tmp_path))
+    halves = [(a.x1_mm, a.y1_mm, a.xm_mm, a.ym_mm, a.x2_mm, a.y2_mm)
+              for a in got.arcs[len(plain.arcs):]]
+    assert halves == [pytest.approx((16, 25, 15, 26, 14, 25), abs=1e-9),
+                      pytest.approx((14, 25, 15, 24, 16, 25), abs=1e-9)], halves
+    assert all(a.layer == "Edge.Cuts" and a.width_mm == 0 for a in got.arcs)
+    assert got.extent_mm() == plain.extent_mm(), "a hole inside moved the board's extent"
+
+
+def test_a_polygon_on_the_outline_is_read_as_its_sides(tmp_path):
+    """A `gr_poly` on Edge.Cuts is milled as the closed ring its points walk
+    (OH-163), so it is read as one segment a side, the last closing it."""
+    plain = read_board(_milled(tmp_path, ""))
+    got = read_board(_milled(tmp_path))
+    sides = {frozenset({(s.x1_mm, s.y1_mm), (s.x2_mm, s.y2_mm)})
+             for s in got.outline[len(plain.outline):]}
+    assert sides == {frozenset({(25.0, 30.0), (28.0, 30.0)}),
+                     frozenset({(28.0, 30.0), (28.0, 33.0)}),
+                     frozenset({(28.0, 33.0), (25.0, 30.0)})}, sides
+    assert len(got.outline) == len(plain.outline) + 3
+
+
+def test_an_outline_polygon_with_an_arc_among_its_points_is_refused_by_name(tmp_path):
+    """KiCad 7 and later may write an `(arc ...)` among a polygon's points,
+    and what such a ring walks on the outline has not been checked against a
+    vendor's file: refused, naming the node, rather than read as a guess or
+    dropped -- a dropped side would leave a ring that does not close,
+    reported far from its cause (OH-163)."""
+    arced = MILLED.replace("(xy 28 30) (xy 28 33)",
+                           "(arc (start 28 30) (mid 29 31.5) (end 28 33))")
+    assert arced != MILLED
+    with pytest.raises(KicadError, match=r"\(gr_poly \.\.\.\) on Edge\.Cuts .*an arc "
+                                         r"among its points"):
+        read_board(_milled(tmp_path, arced))
+
+
+def test_a_footprints_circle_and_polygon_on_the_outline_are_placed_with_it(tmp_path):
+    """**An `fp_circle` and an `fp_poly` on Edge.Cuts are milled as the board's
+    own are** (OH-163), placed by the footprint as its other edges are: in
+    `INSIDE`, at (100, 50) turned 90 degrees, where `(lx, ly)` lands at
+    `(100 + ly, 50 - lx)`. By hand: the circle about (0, 2) of radius 1 is
+    about (102, 50), and the triangle (5, 0), (6, 0), (5, 1) lands on
+    (100, 45), (100, 44), (101, 45). Both are the placement's outline and
+    the board's."""
+    cuts = """\t\t(fp_circle
+\t\t\t(center 0 2)
+\t\t\t(end 0 3)
+\t\t\t(stroke (width 0.05) (type solid))
+\t\t\t(layer "Edge.Cuts")
+\t\t)
+\t\t(fp_poly
+\t\t\t(pts (xy 5 0) (xy 6 0) (xy 5 1))
+\t\t\t(stroke (width 0.05) (type solid))
+\t\t\t(layer "Edge.Cuts")
+\t\t)
+"""
+    path = tmp_path / "fp-milled.kicad_pcb"
+    at = INSIDE.index('\t\t(pad "1"')
+    path.write_text(INSIDE[:at] + cuts + INSIDE[at:], encoding="utf-8")
+    got = read_board(path)
+    (placed,) = got.placements
+    halves = [(a.x1_mm, a.y1_mm, a.xm_mm, a.ym_mm, a.x2_mm, a.y2_mm)
+              for a in placed.arcs[1:]]
+    assert halves == [pytest.approx((103, 50, 102, 51, 101, 50), abs=1e-9),
+                      pytest.approx((101, 50, 102, 49, 103, 50), abs=1e-9)], halves
+    assert (placed.outline, placed.arcs) == (got.outline, got.arcs)
+    sides = {frozenset({(round(s.x1_mm, 9), round(s.y1_mm, 9)),
+                        (round(s.x2_mm, 9), round(s.y2_mm, 9))})
+             for s in placed.outline}
+    assert {frozenset({(100.0, 45.0), (100.0, 44.0)}),
+            frozenset({(100.0, 44.0), (101.0, 45.0)}),
+            frozenset({(101.0, 45.0), (100.0, 45.0)})} <= sides, sides
+
+
 #: `INSIDE`, with a board-level arc of ink and, beside the module outline, a
 #: second footprint on the underside that draws no outline: an arc of ink on
 #: its silkscreen, the same arc on its fabrication layer, and a circle

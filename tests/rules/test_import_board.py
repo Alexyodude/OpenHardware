@@ -1328,6 +1328,46 @@ def test_a_mirrored_elements_ink_moves_to_the_other_face(tmp_path):
     assert {round(mirrored.x1_mm, 3), round(mirrored.x2_mm, 3)} == {7.0, 9.0}
 
 
+def test_a_hole_is_read_where_the_board_or_its_package_drills_it(tmp_path):
+    """**EAGLE drills a hole that is no pad as a `<hole>`** (OH-163), in the
+    board's `<plain>` -- the Uno's mounting holes -- or in a package -- the
+    locating pegs of a USB-C socket -- and neither was read. A package's is
+    placed by its element exactly as a pad at the same point is, which is
+    held here by putting a pad there too: A turns 90 degrees, B turns 270
+    and is mirrored, and C is mirrored, so a hole turned the other way or
+    mirrored before its turn lands off its pad. By hand for A, at (10, 10)
+    R90, the local (1.5, 0.5) lands at (10 - 0.5, 10 + 1.5)."""
+    path = tmp_path / "holes.brd"
+    path.write_text(
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<eagle version="9.6.2"><drawing><board>'
+        '<plain><wire x1="0" y1="0" x2="40" y2="0" width="0.2" layer="20"/>'
+        '<wire x1="0" y1="20" x2="40" y2="20" width="0.2" layer="20"/>'
+        '<hole x="5" y="6" drill="3.2"/></plain>'
+        '<libraries><library name="L"><packages><package name="P">'
+        '<pad name="1" x="1.5" y="0.5" drill="0.65" diameter="1"/>'
+        '<hole x="1.5" y="0.5" drill="0.65"/>'
+        "</package></packages></library></libraries>"
+        "<elements>"
+        '<element name="A" library="L" package="P" x="10" y="10" rot="R90"/>'
+        '<element name="B" library="L" package="P" x="20" y="10" rot="MR270"/>'
+        '<element name="C" library="L" package="P" x="30" y="10" rot="MR0"/>'
+        "</elements><signals/>"
+        "</board></drawing></eagle>",
+        encoding="utf-8",
+    )
+    board = eagle.read_board(path)
+    holes = {hole.element: hole for hole in board.holes}
+    assert len(board.holes) == 4 and set(holes) == {"", "A", "B", "C"}, board.holes
+    assert holes[""] == eagle.Hole(5.0, 6.0, 3.2, ""), holes[""]
+    assert (holes["A"].x_mm, holes["A"].y_mm) == pytest.approx((9.5, 11.5), abs=1e-9)
+    for element in board.elements:
+        (pad,) = element.pads
+        hole = holes[element.name]
+        assert (hole.x_mm, hole.y_mm, hole.drill_mm) == pytest.approx(
+            (pad.x_mm, pad.y_mm, 0.65), abs=1e-9), (element.name, hole, pad)
+
+
 def _brd_uno():
     path = (REPO / "third_party" / "arduino-uno" / "UNO-TH_Rev3e.brd")
     if not path.is_file():

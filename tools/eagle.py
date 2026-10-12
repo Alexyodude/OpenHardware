@@ -126,7 +126,7 @@ class Pad:
     #: `compose_board_3d.from_kicad` gives the kind `smd`. Nothing is soldered
     #: to it and nothing is plated in it, so a placement holding one is not
     #: drawn by its copper (OH-163). Never set by this reader: EAGLE writes a
-    #: hole as a `<hole>` and not as a pad.
+    #: hole as a `<hole>` and not as a pad, and `Board.holes` carries it.
     hole: bool = False
 
 
@@ -178,6 +178,26 @@ class Via:
     x_mm: float
     y_mm: float
     diameter_mm: float
+
+
+@dataclasses.dataclass(frozen=True)
+class Hole:
+    """An unplated hole drilled through the board: EAGLE's `<hole>` (OH-163).
+
+    In board millimetres with y upward. EAGLE writes one in the board's own
+    `<plain>` -- the Arduino Uno's mounting holes -- or in a package, placed
+    by its element as a pad at the same point is: SparkFun's standoffs, and
+    the locating pegs of a USB-C socket, which a KiCad footprint writes as
+    `np_thru_hole` pads instead. Neither is on the
+    outline layer, so neither is a cutout of the outline.
+    """
+
+    x_mm: float
+    y_mm: float
+    drill_mm: float
+    #: The element whose package drills it, or `""` for one the board drills
+    #: in its own `<plain>`.
+    element: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -294,6 +314,11 @@ class Board:
     trace_arcs: tuple[object, ...] = ()
     vias: tuple[Via, ...] = ()
     traces_unread: tuple[tuple[str, int], ...] = ()
+    #: Every `<hole>`, the board's own and each placed package's (OH-163).
+    #: Empty for a KiCad board: KiCad mills a hole drawn on Edge.Cuts, which
+    #: is then in `outline`, and drills one that is no copper as an
+    #: `np_thru_hole` pad.
+    holes: tuple[Hole, ...] = ()
 
     def element(self, name: str) -> Element:
         for candidate in self.elements:
@@ -756,6 +781,9 @@ def read_board(path: pathlib.Path, text: str | None = None) -> Board:
 
     nets = _nets(board)
     packages = _packages(board)
+    holes = [Hole(_float(hole, "x", str(path)), _float(hole, "y", str(path)),
+                  _float(hole, "drill", str(path)))
+             for hole in board.findall("plain/hole")]
 
     elements: list[Element] = []
     for node in board.findall("elements/element"):
@@ -768,6 +796,13 @@ def read_board(path: pathlib.Path, text: str | None = None) -> Board:
                 f"{key[0]!r}, which the file does not contain"
             )
         where = f"{path}: element {name!r}"
+        # A package's hole is placed by the element's own spelling, as its
+        # pads are in `_element_pads` (OH-163).
+        origin = (_float(node, "x", where), _float(node, "y", where))
+        holes += [Hole(*place(_float(hole, "x", where), _float(hole, "y", where),
+                              origin, node.get("rot")),
+                       _float(hole, "drill", where), name)
+                  for hole in package.findall("hole")]
         degrees, mirrored = _rotation(node.get("rot"))
         elements.append(
             Element(
@@ -804,7 +839,7 @@ def read_board(path: pathlib.Path, text: str | None = None) -> Board:
                  tuple(outline), silk=silk, silk_fills=silk_fills,
                  silk_unread=silk_unread,
                  traces=tracks, vias=vias,
-                 traces_unread=unrouted)
+                 traces_unread=unrouted, holes=tuple(holes))
 
 
 #: EAGLE's copper layers by number: 1 is the top and 16 the bottom, named here
