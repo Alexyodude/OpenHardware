@@ -7,12 +7,15 @@ priority: P2
 created: '2026-10-10'
 touches:
 - webui/emulator.py
-- webui/emulator_server.py
 - core/i8086/abi.py
 - core/avr/abi.py
 - tests/webui/test_host_fault.py
 - tests/avr/test_host_fault.py
 - webui/static/emulator.css
+- core/i8086/abi.cc
+- core/i8086/abi.h
+- core/avr/abi.cc
+- core/avr/abi.h
 ---
 
 Found by OH-222's review (2026-10-10), by running it. When a core's DLL faults on the host -- a divide error, an access violation -- ctypes on Windows catches the structured exception around the foreign call and raises `OSError` out of `Cpu.step()`. Nothing above it expects that:
@@ -50,3 +53,5 @@ LEFT FOR OTHERS.
 - OH-161, core/cortexm0/abi.py and core/riscv32/abi.py: the same shape. cortexm0_step and riscv32_step are bare foreign calls; an OSError escapes Cpu.step and BoardSession.run's except AbiError, and the run request is dropped. Each wants a HostFault(AbiError) raised from the OSError as core/avr/abi.py's does at 4671fe1, naming where the PC was left, without a per-step read.
 - OH-161 / OH-172, webui/api.py's BoardSession: (1) step() does not check status. Probed: after an AVR host fault stopped a run, POST /api/board/step answered 200 and stepped the half-executed machine on (pc to 22). It should refuse unless status is running, as run does. (2) step() re-raises the core's AbiError and nothing maps it: POST /api/board/step whose step faults got RemoteDisconnected -- for HostFault, and equally for Unimplemented and MemoryFault on that route today. BoardSession.step recording the stop as run does (status, detail) and the route returning the state would answer it; a status code or a REASONS slug for it is api.py's to add. (3) run() reports a host fault as stopped, the word a firmware's memory fault gets; a distinct faulted would let the page say the core is at fault.
 - core/i8086's decoder: Cpu.decode is a foreign call too and is not wrapped, since it executes nothing. A fault in Decode would leave IP unmoved (ExecuteOne decodes first), so after the step reports faulted, /api/state's disassembly would decode the same bytes and fault again, dropping that request. Not met; recorded.
+
+**Note 2026-10-12:** RELEASED webui/emulator_server.py for OH-161 (slice B's POST /api/board/drive): OH-223 never changed it, since Session.step answers a host fault itself. Claimed for the review's fix round: core/i8086/abi.cc, core/i8086/abi.h, core/avr/abi.cc and core/avr/abi.h, so each core records where its step began and the bindings stop reading it before every step.
