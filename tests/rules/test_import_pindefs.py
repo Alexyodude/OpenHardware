@@ -847,18 +847,31 @@ def test_a_chip_with_no_flat_number_gets_no_block():
     assert "PA02" in message and "samd21.py" in message and "D0" in message
 
 
-def test_a_pin_outside_the_numbering_is_a_caption_and_never_a_header_row(tmp_path, monkeypatch):
+def _cad_answering(tmp_path: pathlib.Path, answers: dict[str, ChipPin]) -> pindefs.Source:
+    """A source of the vendor's CAD -- not firmware -- that answers `answers`
+    whatever it reads: a stand-in for a tracer, so the fake tree can carry a
+    caption without a board file to trace."""
+    cad = tmp_path / "pcb"
+    cad.mkdir(exist_ok=True)
+    (cad / "FAKE.kicad_pcb").write_text("(kicad_pcb)\n", encoding="utf-8")
+    return pindefs.Source("seeed-pcb", ("FAKE.kicad_pcb",), lambda texts: dict(answers),
+                          root=cad)
+
+
+def test_a_pin_the_gate_does_not_take_is_a_caption_and_never_a_header_row(tmp_path, monkeypatch):
     """**OH-172 slice 2: the gate sits where the answer lands.** A traced
-    pad on a pin outside the chip's GPIO numbering -- an RP2350's `RUN` -- is
-    what its copper reaches, so its board file names it. It is not a row of
-    the chip's `HEADER`: no level is read through a reset pin, and
-    `_CHIP_PIN_NAME` is the decision of what may be one. Before the gate moved
-    out of the tracer, a caption reaching `header_table` made `render_header`
-    refuse the whole chip for "no flat number".
+    pad on a pad its footprint names with no GPIO number -- an RP2350's
+    `RUN` -- is what its copper reaches, so its board file names it. It is
+    not a row of the chip's `HEADER`: `_CHIP_PIN_NAME` is the decision of
+    what may be one, and no level is read through a pin it does not take.
+    Before the gate moved out of the tracer, a caption reaching
+    `header_table` made `render_header` refuse the whole chip for "no flat
+    number".
 
     Nor is it one of the pins the board file says have no flat number: that
-    sentence is about a vendor that numbers its GPIOs by port, and `RUN` is
-    no GPIO at all. The file says it is a caption instead.
+    sentence is about a vendor that numbers its GPIOs by port, and the file
+    says what is known of `RUN` instead -- the footprint's name, and no GPIO
+    number.
     """
     bsp, boards = _fake_tree(tmp_path, monkeypatch)
     _board_file(
@@ -866,11 +879,7 @@ def test_a_pin_outside_the_numbering_is_a_caption_and_never_a_header_row(tmp_pat
         [("D0", "1"), ("D6/MTDI", "7"), ("D10", "11"), ("GND", "12"), ("GND", "12"),
          ("EN", "13")],
     )
-    cad = tmp_path / "pcb"
-    cad.mkdir()
-    (cad / "FAKE.kicad_pcb").write_text("(kicad_pcb)\n", encoding="utf-8")
-    caption = pindefs.Source("seeed-pcb", ("FAKE.kicad_pcb",),
-                             lambda texts: {"EN": ChipPin("RUN", None)}, root=cad)
+    caption = _cad_answering(tmp_path, {"EN": ChipPin("RUN", None)})
     smd = pindefs.BOARDS["FAKE-SMD"]
     monkeypatch.setattr(pindefs, "BOARDS", dict(pindefs.BOARDS) | {
         "FAKE-SMD": dataclasses.replace(smd, sources=smd.sources + (caption,))})
@@ -888,9 +897,65 @@ def test_a_pin_outside_the_numbering_is_a_caption_and_never_a_header_row(tmp_pat
     assert "why_null" not in en, en
     assumption = document["assumption"]
     assert "NO flat number" not in assumption, assumption
-    assert ("`EN` (RUN) names a pin outside the FAKE's GPIO numbering, so its "
-            "`chip_pin` is a caption only: `chip_index` is null and no level is read "
-            "through it.") in assumption, assumption
+    assert ("`EN` reaches a pad the vendor's footprint names `RUN`, with no GPIO "
+            "number, so its `chip_pin` is a caption only: `chip_index` is null and no "
+            "level is read through it.") in assumption, assumption
+
+
+def test_a_caption_never_sits_in_the_on_board_rows_or_carries_an_index(tmp_path, monkeypatch):
+    """**OH-172 slice 2's review, LOW-5 (b) and (c).** Two guards the first
+    unexpected caption would otherwise walk through.
+
+    `header_table` lists a chip's `on_board` labels apart from its rows, and
+    the block then says each "has no pad: it is the board's own LED, which the
+    Arduino variant above defines". A caption is no row, so it is no
+    `on_board` row either; listing one there would describe a row the block
+    does not have.
+
+    And the board file's caption sentence says `chip_index` is null. Nothing
+    checked that it was: a source that gave a caption a flat number would have
+    written both, one contradicting the other. `filled_board` refuses it,
+    naming the pad, the pin and the number.
+    """
+    bsp, boards = _fake_tree(tmp_path, monkeypatch)
+    led = _cad_answering(tmp_path, {"LED": ChipPin("STATUS", None)})
+    connector = pindefs.zephyr_connector("fake", flat_gpio)
+    monkeypatch.setattr(pindefs, "BOARDS", {
+        name: pindefs.Board("FAKE", (connector, led), on_board=("LED",))
+        for name in ("FAKE-DIP", "FAKE-SMD")})
+    table = pindefs.header_table("FAKE", bsp, boards)
+    assert "LED" not in table.pins, table.pins
+    assert table.on_board == (), table.on_board
+
+    _board_file(boards, "FAKE-SMD", [("D0", "1"), ("EN", "13")])
+    monkeypatch.setattr(pindefs, "BOARDS", dict(pindefs.BOARDS) | {
+        "FAKE-SMD": pindefs.Board("FAKE", (connector, _cad_answering(
+            tmp_path, {"EN": ChipPin("RUN", 7)})))})
+    with pytest.raises(PindefError) as raised:
+        pindefs.filled_board("FAKE-SMD", bsp, boards)
+    message = str(raised.value)
+    assert "EN" in message and "RUN" in message and "7" in message, message
+
+
+def test_a_board_no_package_covers_counts_only_the_pins_the_gate_takes(tmp_path, monkeypatch):
+    """**OH-172 slice 2's review, LOW-5 (a).** The sentence for a board no
+    package covers -- the XIAO STM32C5's -- said "Those N pads are the only
+    ones ... whose name carries a pin in a spelling this tool recognises",
+    with N every pad that resolved. A caption resolves and carries no such
+    pin, so that count is of the pins the gate takes, and the caption is said
+    apart."""
+    bsp, boards = _fake_tree(tmp_path, monkeypatch)
+    _board_file(boards, "FAKE-NOTHING", [("D0", "1"), ("EN", "13"), ("GND", "12")])
+    monkeypatch.setattr(pindefs, "BOARDS", dict(pindefs.BOARDS) | {
+        "FAKE-NOTHING": pindefs.Board("NOTHING", (_cad_answering(
+            tmp_path, {"D0": ChipPin("PA13"), "EN": ChipPin("RUN")}),)),
+    })
+    assumption = pindefs.filled_board("FAKE-NOTHING", bsp, boards)["assumption"]
+    assert "no board-support package covers this board at all" in assumption, assumption
+    assert "Those 2 pads" not in assumption, assumption
+    assert ("Of those, 1 is the only pad in the symbol read for this board whose "
+            "name carries a pin in a spelling this tool recognises") in assumption, assumption
+    assert "`EN` reaches a pad the vendor's footprint names `RUN`" in assumption, assumption
 
 
 def test_the_rendered_block_is_python_that_defines_the_table_and_names_its_sources(tmp_path, monkeypatch):
@@ -1791,18 +1856,36 @@ def test_a_dedicated_debug_pad_says_so_rather_than_that_nobody_named_it():
 
     A reason never overrides an answer -- it is applied only where nothing
     resolved the label -- so this cannot hide a pin that a package does name.
+
+    **The nRF54L15's pair is traced now, and named by its pads** (OH-172
+    slice 2's review, LOW-6). Its board file puts `nRF54_SWDIO` and
+    `nRF54_SWCLK` on nets of their own names, each on one pad of the part,
+    so the tracer names those pads as captions, as it does the nRF54LM20A's.
+    The RP2350's pair is not traced -- its board's entry reads no seeed-pcb
+    source -- so it keeps the reason.
     """
-    for board, labels in (("XIAO-RP2350-SMD", ("SWDIO", "SWDCLK")),
-                          ("XIAO-nRF54l15-SMD", ("nRF54_SWDIO", "nRF54_SWCLK"))):
-        pads = {pad["label"]: pad for pad in json.loads(
-            pindefs.board_path(board).read_text(encoding="utf-8"))["pads"]}
-        for label in labels:
-            assert pads[label]["chip_pin"] is None, (board, label)
-            why = pads[label]["why_null"]
-            assert "dedicated debug pad" in why, (board, label, why)
-            assert "not a GPIO" in why
-            # It names where it was read, like every other claim on this ticket.
-            assert "kicad_pcb" in why, why
+    pads = {pad["label"]: pad for pad in json.loads(
+        pindefs.board_path("XIAO-RP2350-SMD").read_text(encoding="utf-8"))["pads"]}
+    for label in ("SWDIO", "SWDCLK"):
+        assert pads[label]["chip_pin"] is None, label
+        why = pads[label]["why_null"]
+        assert "dedicated debug pad" in why, (label, why)
+        assert "not a GPIO" in why
+        # It names where it was read, like every other claim on this ticket.
+        assert "kicad_pcb" in why, why
+
+    nrf = {pad["label"]: pad for pad in json.loads(
+        pindefs.board_path("XIAO-nRF54l15-SMD").read_text(encoding="utf-8"))["pads"]}
+    assert not {"nRF54_SWDIO", "nRF54_SWCLK"} & set(dict(BOARDS["XIAO-nRF54l15-SMD"].reasons))
+    path = SEEED_PCB / "nRF54L15.kicad_pcb"
+    if path.is_file():
+        (mcu,) = [by_net for value, by_net in pindefs._footprints(
+            path.read_text(encoding="utf-8", errors="replace")) if "nRF54L15" in value]
+        for label in ("nRF54_SWDIO", "nRF54_SWCLK"):
+            (function,) = mcu[label]
+            assert pindefs._CHIP_PIN_NAME.match(function) is None, function
+            assert (nrf[label]["chip_pin"], nrf[label]["chip_index"]) == (function, None), (
+                label, nrf[label])
 
     # And the generic sentence is still there for pads that really are only
     # unpublished, so this did not simply relabel everything.
@@ -1880,6 +1963,26 @@ def test_a_pad_of_the_on_board_debugger_is_not_given_the_boards_own_mcu_pin():
     # draft leaned on the row that cannot fail.
     assert mg24["SWCLK"]["chip_pin"] == "PA01", mg24["SWCLK"]
     assert mg24["SWCLK"]["chip_pin"] != "PA03", "the debugger's pin, not the board's"
+
+
+def test_every_registry_reason_is_carried_by_a_pad_nothing_answered():
+    """**OH-172 slice 2's review, LOW-1.** A reason in `BOARDS` is applied
+    only where nothing resolved the label, so one left beside an answer is
+    text nothing reads -- and nothing said so: a reason put back on the
+    nRF54LM20A's answered `nRF54_SWDIO` failed no test. On every registered
+    board that is not a manifest row, a pad whose label has a reason has no
+    `chip_pin` and carries that reason, as
+    `test_every_reason_is_on_a_pad_and_carried_by_it` holds the rows."""
+    checked = 0
+    for name in sorted(set(BOARDS) - set(pindefs.MANIFEST)):
+        reasons = dict(BOARDS[name].reasons)
+        for pad in json.loads(pindefs.board_path(name).read_text(encoding="utf-8"))["pads"]:
+            if pad["label"] not in reasons:
+                continue
+            assert pad["chip_pin"] is None, (name, pad["label"], pad["chip_pin"])
+            assert pad["why_null"] == reasons[pad["label"]], (name, pad["label"])
+            checked += 1
+    assert checked, "no registered board carries a reason, so nothing was checked"
 
 
 #: Labels with no MCU pin behind them by construction. Not a guess: the board
@@ -1998,8 +2101,9 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # outside the GPIO numbering name it as a caption: the MG24 SMD's MG24_EN
     # (RESET), the nRF54L15 SMD's nRF54_EN (~{RESET}), and the nRF54LM20A
     # SMD's nRF54_SWDIO and nRF54_SWCLK (SWDIO_G2, SWDCLK_G1), four pads out
-    # of `specific` below.
-    assert naming == 569, naming
+    # of `specific` below. 569 until that slice's review traced the nRF54L15
+    # SMD's nRF54_SWDIO and nRF54_SWCLK the same way, to SWDIO and SWDCLK.
+    assert naming == 571, naming
     assert supplies == 209, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
     # same debug cluster already carried; 42 until the six SWD pads on the
@@ -2027,8 +2131,9 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # nRF54L15's USER_LED as P2.00 and dropped the reason that named it in
     # words: its pad lands on the test point of that net, which is the join
     # the reason said no file made. 65 once OH-172's slice 2 named those four
-    # traced pads by their MCU pad, as captions, in place of their reasons.
-    assert specific == 65, specific
+    # traced pads by their MCU pad, as captions, in place of their reasons. 63
+    # once its review traced the nRF54L15 SMD's two debug pads too.
+    assert specific == 63, specific
     # 15 until OH-200 named the C5's and C6's ten JTAG and BOOT pads. 5 until
     # OH-209 gave the RP2350 SMD's BOOT the reason Seeed's board file states.
     # 4 until OH-224 answered MG24_EN, nRF54_EN, 54L15_TX20 and 54L15_RX20
@@ -3366,6 +3471,96 @@ def test_a_traced_pad_on_one_pad_of_the_part_outside_its_numbering_is_a_caption(
         "SWCLK": ChipPin("PA01", None)}
 
 
+def test_a_pad_with_no_gpio_number_on_a_net_named_for_a_gpio_is_refused():
+    """**OH-172 slice 2's review, MEDIUM-1: a pad its footprint gives no
+    GPIO number is not a pin outside the numbering.** Espressif's footprints
+    name a strapping or JTAG pad by its function: the XIAO ESP32-C6's net
+    `GPIO4{slash}MTMS` reaches the pad the ESP32-C6FH4's footprint calls
+    `MTMS`, and MTMS is GPIO4. A caption there would put `MTMS` in a field
+    where `GPIO4` belongs.
+
+    **Refused, not answered from the name.** The tracer reads copper, and a
+    pin taken from a net's name is a second net-name reader whose answer the
+    copper does not confirm -- `_trace` holds the same rule, a name is a
+    cross-check and never the source. The refusal names the net, the pad and
+    the token, and the registry reads such a label off the net names with
+    `seeed_pcb`, as the C6's own entry already does for MTMS.
+    """
+    path = SEEED_PCB / "ESP32-C6.kicad_pcb"
+    if not path.is_file():
+        pytest.skip(f"no {path}")
+    c6 = (path.read_text(encoding="utf-8", errors="replace"),)
+    with pytest.raises(PindefError) as raised:
+        pindefs.read_seeed_traced(c6, part="ESP32-C6", labels=("MTMS",))
+    message = str(raised.value)
+    for said in ("'GPIO4{slash}MTMS'", "'MTMS'", "GPIO4", "seeed_pcb"):
+        assert said in message, (said, message)
+    assert pindefs.read_seeed_net_names(c6, labels=("MTMS",)) == {"MTMS": ChipPin("GPIO4", 4)}
+    # BOOT, the C6's one traced label, is on a net named for no pin and
+    # reaches a pad named GPIO9: unchanged.
+    assert pindefs.read_seeed_traced(c6, part="ESP32-C6", labels=("BOOT",)) == {
+        "BOOT": ChipPin("GPIO9", 9)}
+
+
+def _seeed_board(*pads: tuple[str, str, str]) -> str:
+    """A minimal KiCad board file as `_footprints` reads one: one footprint
+    valued `PART`, and a pad per `(number, net, pin function)`."""
+    lines = "".join(
+        f'\t\t(pad "{number}" smd rect (at 0 0) (size 1 1) (net {index} "{net}") '
+        f'(pinfunction "{function}"))\n'
+        for index, (number, net, function) in enumerate(pads, start=1))
+    return ('(kicad_pcb\n\t(footprint "L:QFN"\n\t\t(property "Value" "PART")\n'
+            + lines + "\t)\n)\n")
+
+
+def test_a_label_answered_two_ways_by_its_copper_is_refused():
+    """**OH-172 slice 2's review, LOW-2.** A label is matched to every net
+    whose last part is its name, and each match used to overwrite the last:
+    two nets ending `EN`, one on a GPIO pad and one on a `RUN` pad, gave
+    whichever came second. Now every answer for a label is gathered and two
+    different ones refuse the label, as `read_seeed_net_names` does for two
+    nets naming different pins. Two nets giving one answer are one answer.
+
+    One net on a GPIO pad AND a pad with no GPIO number is refused too, as
+    `_trace` refuses a net on a GPIO and another pad: the GPIO used to win
+    silently, and the board file would never say the other pad was there.
+    """
+    two = _seeed_board(("1", "A{slash}EN", "GPIO4"), ("2", "B{slash}EN", "RUN"))
+    with pytest.raises(PindefError) as raised:
+        pindefs.read_seeed_traced((two,), part="PART", labels=("EN",))
+    message = str(raised.value)
+    assert "A{slash}EN" in message and "B{slash}EN" in message, message
+    assert "GPIO4" in message and "RUN" in message, message
+
+    same = _seeed_board(("1", "A{slash}EN", "GPIO4"), ("2", "B{slash}EN", "GPIO4"))
+    assert pindefs.read_seeed_traced((same,), part="PART", labels=("EN",)) == {
+        "EN": ChipPin("GPIO4", 4)}
+
+    mixed = _seeed_board(("1", "EN", "GPIO4"), ("2", "EN", "RUN"))
+    with pytest.raises(PindefError) as raised:
+        pindefs.read_seeed_traced((mixed,), part="PART", labels=("EN",))
+    message = str(raised.value)
+    assert "GPIO4" in message and "RUN" in message, message
+
+
+def test_a_net_on_several_pads_of_one_function_names_none_of_them():
+    """**OH-172 slice 2's review, LOW-3.** "Exactly one pad" is counted by
+    pad, and two pads that share a function are two pads: the nRF54L15's
+    `VSYS_3V3` reaches two of its pads, both `VDD`, and the XIAO ESP32-C5's
+    `GND` four, all `GND`. A caption for either would name one pin of a
+    rail, so neither gets one. Counting distinct functions instead gave each
+    a caption, and nothing failed."""
+    for name, part, label in (("nRF54L15.kicad_pcb", "nRF54L15", "VSYS_3V3"),
+                              ("ESP32-C5.kicad_pcb", "ESP32-C5", "GND")):
+        path = SEEED_PCB / name
+        if not path.is_file():
+            pytest.skip(f"no {path}")
+        text = path.read_text(encoding="utf-8", errors="replace")
+        (mcu,) = [by_net for value, by_net in pindefs._footprints(text) if part in value]
+        assert len(mcu[label]) > 1 and len(set(mcu[label])) == 1, (name, mcu[label])
+        assert pindefs.read_seeed_traced((text,), part=part, labels=(label,)) == {}, name
+
+
 def test_a_net_typed_for_a_traced_label_must_reach_the_part():
     """A net named in `nets` is a citation, and it is refused where it names
     nothing on the part rather than resolving as a reset pad does, to the
@@ -3624,8 +3819,9 @@ def test_a_generated_reason_reads_the_supplies_the_crystal_and_the_debugger():
     # Not vacuous. These are the pads the two reasons actually cover. Six
     # crystals until OH-172's slice 2: the nRF54LM20A SMD's two debug pads
     # are traced, so they name `SWDIO_G2` and `SWDCLK_G1` as captions and
-    # carry no reason; the RP2350's and the nRF54L15's four still do.
-    assert (crystals, debuggers, reaches, untraced) == (4, 9, 6, 3), (
+    # carry no reason. Four until its review traced the nRF54L15 SMD's pair
+    # the same way; the RP2350's two, which nothing traces, still carry it.
+    assert (crystals, debuggers, reaches, untraced) == (2, 9, 6, 3), (
         crystals, debuggers, reaches, untraced)
 
 

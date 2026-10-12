@@ -466,8 +466,11 @@ _NET_NAME = re.compile(r'\(net (?:\d+ )?"([^"]*)"\)')
 #: and drop the rest, so a pad on the MG24's `RESET` named nothing although
 #: its copper says which pin it reaches. The tracer now reports that pin as a
 #: caption, and `header_table` and the board file's unnumbered sentence ask
-#: this pattern, because no level is read through a pin outside the
-#: numbering and no vendor numbers one by port.
+#: this pattern, because no level is read through a pin it does not take.
+#: **Failing it says only that the name is no pin spelling read here**, not
+#: that the pad is no GPIO: an ESP32's `MTMS` pad is GPIO4. So the board file
+#: says what is known -- the footprint's name, with no GPIO number -- and the
+#: tracer refuses a caption on a net whose own name carries a pin.
 _CHIP_PIN_NAME = re.compile(r"^(GPIO\d+|P[A-D]\d{1,2}|P\d\.\d{1,2})(?:[/_]|$)")
 
 _PIN_TOKEN = re.compile(r"^(?:GPIO(\d+)|P(\d)\.(\d+))$")
@@ -567,13 +570,17 @@ def read_seeed_traced(
     value string is what keeps the debugger out of a field that means "a pin
     of this board's MCU".
 
-    **A net on exactly one pad of the part, outside its GPIO numbering, is
-    named by that pad** (OH-172 slice 2): the MG24's `~{MG24_RESET}` reaches
-    its `RESET`, so `MG24_EN` gets `ChipPin("RESET", None)`, the pad's own
-    function verbatim. It is a caption and never a `HEADER` row --
-    `_CHIP_PIN_NAME` decides that in `header_table`. A net on two or more such
-    pads -- the MG24's `GND`, on `RFVSS`, `VREFN`, `CREGVSS` and `PAD` --
-    names none of them, because choosing one would be a guess.
+    **A net on exactly one pad of the part, a pad its footprint gives no GPIO
+    number, is named by that pad** (OH-172 slice 2): the MG24's
+    `~{MG24_RESET}` reaches its `RESET`, so `MG24_EN` gets
+    `ChipPin("RESET", None)`, the pad's own function verbatim. It is a
+    caption and never a `HEADER` row -- `_CHIP_PIN_NAME` decides that in
+    `header_table`. A net on two or more such pads -- the MG24's `GND`, on
+    `RFVSS`, `VREFN`, `CREGVSS` and `PAD` -- names none of them, because
+    choosing one would be a guess. **No GPIO number is all it says**: an
+    ESP32's `MTMS` pad is GPIO4, so a net whose own name carries a pin is
+    refused rather than captioned, and so is a label two nets answer
+    differently, or a net on a GPIO and another pad.
 
     **A label that is on no net of the part at all raises instead of
     resolving to nothing.** Those two silences used to be one: the first is
@@ -634,6 +641,11 @@ def read_seeed_traced(
         for label in (*labels, *nets):
             wanted = label.upper()
             reached = False
+            # **Every net's answer, gathered before one is kept** (OH-172
+            # slice 2's review). Two nets whose last part is the label's name
+            # used to overwrite each other, the last read winning, so a
+            # caption could replace a GPIO without a word.
+            answers: dict[str, ChipPin] = {}
             for by_net in mine:
                 for net, functions in by_net.items():
                     plain = net.replace("{slash}", "/").rsplit("/", 1)[-1].upper()
@@ -650,6 +662,17 @@ def read_seeed_traced(
                             f"pad and a reader must not choose between them"
                         )
                     if named:
+                        one = next(iter(named))
+                        # **A GPIO and another pad on one net is refused**, as
+                        # `_trace` refuses it. The GPIO used to win, and the
+                        # board file never said the other pad was there.
+                        others = sorted({fn for fn in functions if not _CHIP_PIN_NAME.match(fn)})
+                        if others:
+                            raise PindefError(
+                                f"{label}'s net {net!r} reaches the {part}'s {one} "
+                                f"and also its {others}, so one pad would name a "
+                                f"GPIO and drop what sits beside it on the same net"
+                            )
                         # **The flat index, where the part has one.** This used
                         # to pass `None` always: right for `PA02` and `P1.01`,
                         # which no vendor numbers flatly, and wrong for
@@ -658,22 +681,52 @@ def read_seeed_traced(
                         # have made `--write-headers` raise for every ESP32-C6
                         # board rather than skip one pad. `_PIN_TOKEN` already
                         # knew how to tell the two apart.
-                        one = next(iter(named))
                         token = _PIN_TOKEN.match(one)
                         flat = token.group(1) if token else None
-                        pin = ChipPin(one, int(flat) if flat is not None else None)
+                        answers[net] = ChipPin(one, int(flat) if flat is not None else None)
                     elif len(functions) == 1:
-                        # One pad, counted by its function because
-                        # `_footprints` keeps no pad number: a pin split into
-                        # two pads reads as two and is named by neither.
-                        one = functions[0]
-                        pin = ChipPin(one, None)
-                    else:
-                        continue
-                    pins[label] = (
-                        Traced(pin, f"the net {net!r}, joined to this pad by "
-                                    f"position, reaches the {part}'s {one}")
-                        if label in nets else pin)
+                        # One pad, counted as a pad because `_footprints`
+                        # keeps no pad number: a pin split into two pads, or a
+                        # rail on two `VDD` pads, reads as two and is named by
+                        # neither.
+                        #
+                        # **A pad with no GPIO number is not proved to be no
+                        # GPIO** (OH-172 slice 2's review). Espressif name a
+                        # strapping or JTAG pad by its function: the C6's net
+                        # `GPIO4{slash}MTMS` reaches the pad its footprint
+                        # calls `MTMS`, which is GPIO4. Where the net's own
+                        # name carries a pin, the label is refused rather than
+                        # answered from the name: this reader takes pins from
+                        # copper, and `read_seeed_net_names` is the one that
+                        # reads names.
+                        stated = sorted({word for word in re.split(r"\{slash\}|/|_", net)
+                                         if _CHIP_PIN_NAME.match(word)
+                                         or _NAMED_GPIO.fullmatch(word)})
+                        if stated:
+                            raise PindefError(
+                                f"{label}'s net {net!r} is named for {stated} and "
+                                f"reaches the {part}'s pad {functions[0]!r}, which "
+                                f"its footprint gives no GPIO number. This tracer "
+                                f"takes a pin from copper and never from a name, and "
+                                f"a pad named for its function can be a GPIO -- an "
+                                f"ESP32-C6's MTMS is GPIO4 -- so the label is "
+                                f"refused: read it off the net names with "
+                                f"`seeed_pcb` instead"
+                            )
+                        answers[net] = ChipPin(functions[0], None)
+            if len(set(answers.values())) > 1:
+                raise PindefError(
+                    f"{label} is answered by more than one net of the {part}, "
+                    f"differently: { {net: pin.name for net, pin in sorted(answers.items())} }; "
+                    f"the board file is saying two things and a reader must not "
+                    f"choose between them"
+                )
+            if answers:
+                net, pin = next(iter(answers.items()))
+                pins[label] = (
+                    Traced(pin, f"the net {net!r}, joined to this pad by "
+                                f"position, reaches the {part}'s {pin.name}")
+                    if label in nets else pin)
             # **Two different silences, and only one of them is a fact.**
             # A label that REACHES this part on pads that are not pin names
             # is a fact about the silicon: one such pad is named above as a
@@ -2239,8 +2292,8 @@ _NRF52840 = (
 # an Arduino core, and Zephyr upstream already carries the same connector node.
 #: `NFC1` and `NFC2` are GPIOs on this part when the NFC protection bit is
 #: clear, and Seeed name them beside their pin -- `P1.02{slash}NFC1`. The
-#: SAMD11 and nRF54 debug pads on the same board are NOT here: they belong
-#: to a second chip and are OH-170 US-3's question, not this source's.
+#: SAMD11 debug pads on the same board are NOT here: they belong to a second
+#: chip and are OH-170 US-3's question, not this source's.
 #:
 #: **Underside pads are traced from nets named for what they carry**
 #: (OH-224), as the MG24's `MG24_EN` is: each lands on an underside test
@@ -2273,10 +2326,16 @@ _NRF52840 = (
 #:     the RX group alone.
 #: `chip_pin` is P1.08 regardless, because it states where the pad's copper
 #: goes and not which way a signal on it runs.
+#:
+#: **The nRF54's own debug pads are traced too** (OH-172 slice 2's review),
+#: as the nRF54LM20A's are: Seeed name their nets `nRF54_SWDIO` and
+#: `nRF54_SWCLK`, each on one pad of the part, `SWDIO` and `SWDCLK`, which
+#: its footprint gives no port and bit. They were answered in words by a
+#: reason while the same tracer captioned the nRF54LM20A's.
 _NRF54L15 = (
     zephyr_connector("xiao_nrf54l15", nordic_port_pin),
     seeed_pcb("nRF54L15.kicad_pcb", ("NFC1", "NFC2")),
-    seeed_pcb_traced("nRF54L15.kicad_pcb", "nRF54L15", (), nets={
+    seeed_pcb_traced("nRF54L15.kicad_pcb", "nRF54L15", ("nRF54_SWDIO", "nRF54_SWCLK"), nets={
         "54L15_TX20": "P1.08{slash}SAMD11_TX",
         "54L15_RX20": "P1.09{slash}SAMD11_RX",
         "nRF54_EN": "~{nRF54_RESET}",
@@ -2422,20 +2481,8 @@ _RP2350_BOOT = (
      "after reset and enter BOOTSEL if it is driven low, so this pad is that "
      "strap and there is no GPIO number for it to have"),
 )
-#: The same shape on Nordic's part, which numbers its GPIOs by port and bit:
-#: `nRF54L15.kicad_pcb` gives U6 thirty-two pads named `Pn.nn` and names
-#: `SWDIO` and `SWDCLK` apart from them.
-#: The pad's own name is passed rather than derived. A first version built
-#: it with `label.replace("nRF54_", "SWD")`, which turned `nRF54_SWDIO` into
-#: `SWDSWDIO` -- a name the board file does not contain, quoted inside a
-#: sentence claiming the board file names it.
-_NRF54L15_DEBUG = tuple(
-    (label, _DEDICATED_DEBUG.format(
-        chip="nRF54L15", where="Seeed's own nRF54L15.kicad_pcb",
-        which="thirty-two", gpio="P0.00 through P2.10 by port and bit",
-        label=named))
-    for label, named in (("nRF54_SWDIO", "SWDIO"), ("nRF54_SWCLK", "SWDCLK"))
-)
+# The nRF54L15's own debug pads carry no reason since OH-172 slice 2's
+# review: `_NRF54L15` traces them, and the board file names each pad.
 
 #: **A pin of the wrong chip is worse than no pin**, so these are answered in
 #: words. `chip_pin` means "the pin of THIS board's MCU that this pad
@@ -2576,7 +2623,7 @@ BOARDS = {
     "XIAO-nRF54l15-DIP": Board("nRF54L15", _NRF54L15),
     "XIAO-nRF54l15-SMD": Board(
         "nRF54L15", _NRF54L15,
-        reasons=_NRF54L15_DEBUG + _MG24_DEBUGGER,
+        reasons=_MG24_DEBUGGER,
     ),
 }
 
@@ -3357,9 +3404,9 @@ def header_table(
                     carried.setdefault(key, []).append(name)
         for entry in report["pads"] + report["on_board"]:
             # **A caption is no row** (OH-172 slice 2): no level is read
-            # through a pin outside the numbering -- a reset, a debug pad --
-            # so it is neither keyed nor cited here. `_CHIP_PIN_NAME` is the
-            # line, and this is where it is drawn.
+            # through a pin `_CHIP_PIN_NAME` does not take -- a reset, a
+            # debug pad -- so it is neither keyed nor cited here. That
+            # pattern is the line, and this is where it is drawn.
             if entry["chip_pin"] is None or not _CHIP_PIN_NAME.match(entry["chip_pin"]):
                 continue
             label = entry["matched"]
@@ -3384,7 +3431,10 @@ def header_table(
                     if source not in cad_citations:
                         cad_citations.append(source)
         for entry in report["on_board"]:
-            if entry["chip_pin"] is not None and entry["matched"] not in on_board:
+            # Gated as a row is: an `on_board` label is a row with no pad,
+            # and the block says the variant defines it (OH-172's review).
+            if (entry["chip_pin"] is not None and _CHIP_PIN_NAME.match(entry["chip_pin"])
+                    and entry["matched"] not in on_board):
                 on_board.append(entry["matched"])
     if not pins:
         raise PindefError(f"{chip}: no pad on {names} resolves to a pin; nothing to emit")
@@ -3630,18 +3680,25 @@ def assumption_for(chip: str, described: bool, covered: bool,
     which has already happened twice in this file.
 
     `captions` is each `(label, chip_pin)` whose pin fails `_CHIP_PIN_NAME`
-    (OH-172 slice 2): a pin the pad's copper reaches outside the chip's GPIO
-    numbering. `chip_index` is null on it for that reason and not the
-    unnumbered sentence's, so it is said apart, after that one.
+    (OH-172 slice 2): the name the vendor's footprint gives the one pad the
+    pad's copper reaches, with no GPIO number. That is all it says -- not
+    that the pin is outside the chip's numbering, which an ESP32's `MTMS`
+    pad is not -- so the sentence says no more. `chip_index` is null on it
+    for that reason and not the unnumbered sentence's, so it is said apart,
+    after that one, and the uncovered sentence counts only the pins the gate
+    takes as the ones "in a spelling this tool recognises".
     """
+    def listed(items: list[str]) -> str:
+        return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
     if captions:
-        named = [f"`{label}` ({pin})" for label, pin in captions]
-        one = len(named) == 1
-        listing = named[0] if one else ", ".join(named[:-1]) + " and " + named[-1]
+        one = len(captions) == 1
         captioned = (
-            f" {listing} {'names a pin' if one else 'name pins'} outside the "
-            f"{chip}'s GPIO numbering, so {'its' if one else 'their'} `chip_pin` "
-            f"is a caption only: `chip_index` is null and no level is read through it."
+            f" {listed([f'`{label}`' for label, _ in captions])} "
+            f"{'reaches a pad' if one else 'reach pads'} the vendor's footprint "
+            f"names {listed([f'`{pin}`' for _, pin in captions])}, with no GPIO "
+            f"number, so {'its' if one else 'their'} `chip_pin` is a caption only: "
+            f"`chip_index` is null and no level is read through it."
         )
     else:
         captioned = ""
@@ -3661,12 +3718,17 @@ def assumption_for(chip: str, described: bool, covered: bool,
                 f"its own `why_null`. The pin view reports every pad as not "
                 f"modelled, and will until the vendor publishes something to read."
             )
+        gated = resolved - len(captions)
+        those = (f"Those {resolved} pads are the only ones" if gated == resolved
+                 else "None of those is a pad" if gated == 0
+                 else f"Of those, {gated} is the only pad" if gated == 1
+                 else f"Of those, {gated} are the only pads")
         body = (
             f"`chip_pin` and `chip_index` are null on {unresolved} of these "
             f"{resolved + unresolved} pads, {why}. The other {resolved} were "
             f"read from the vendor's own CAD, named in `pindefs`, which is a "
-            f"schematic and not firmware. Those {resolved} pads are the only "
-            f"ones in the symbol read for this board whose name carries a pin "
+            f"schematic and not firmware. {those} "
+            f"in the symbol read for this board whose name carries a pin "
             f"in a spelling this tool recognises: `GPIOn`, `PAn` through "
             f"`PDn`, `Pn.nn`. Ports E through H are not among those "
             f"spellings, so what was checked is those three and not every "
@@ -3822,6 +3884,18 @@ def filled_board(
     ))
     captions = tuple((pad["label"], pad["chip_pin"]) for pad in pads
                      if pad["chip_pin"] is not None and not _CHIP_PIN_NAME.match(pad["chip_pin"]))
+    # The caption sentence says `chip_index` is null, so a caption with a
+    # number is refused here rather than written beside a sentence it
+    # contradicts (OH-172 slice 2's review).
+    numbered_captions = [(pad["label"], pad["chip_pin"], pad["chip_index"]) for pad in pads
+                         if (pad["label"], pad["chip_pin"]) in captions
+                         and pad["chip_index"] is not None]
+    if numbered_captions:
+        raise PindefError(
+            f"{name}: {numbered_captions} name a pin `_CHIP_PIN_NAME` does not take "
+            f"and give it a flat number; a caption has none, and a source that "
+            f"numbers one is reading a GPIO under another name"
+        )
     pindefs = {
         "generated_by": "tools/import_pindefs.py",
         "derivation": derivation,
