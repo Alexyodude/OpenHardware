@@ -1,7 +1,7 @@
 ---
 id: OH-215
 title: Six manifest boards may be drawn a quarter turn off their own pads by the page
-status: in-review
+status: done
 priority: P1
 created: '2026-10-09'
 touches:
@@ -31,3 +31,5 @@ Done when every board's pads land on its drawn pads as the page places them, hel
 **Note 2026-10-09:** 2026-10-09: board3d.js and its test return from OH-216 (done).
 
 **Note 2026-10-09:** 2026-10-09: tests/webui/test_board3d.py lent to OH-172, whose first slice moves the page's 'not modelled' test off chip_pin onto a per-pad 'modelled' flag and changes test_board3d.py's chooser assertion with it. This ticket's code is merged; what is left is the browser look at the six boards, which writes no file. Return it when OH-172 closes.
+
+**Note 2026-10-12:** DONE: SEEN IN THE PAGE 2026-10-12, the browser look that was all this ticket had left. Playwright (headless Chromium) against python webui/emulator_server.py on 127.0.0.1, master 9e6e2f8, the composed models recomposed at 47b5e36. Each of the six boards picked in the page's own board selector and its 3D canvas screenshotted: SparkFun Pro Micro ESP32-C3, Adafruit QT Py ESP32-C3, SparkFun Thing Plus ESP32-C6 and ESP32-C5, PCBCUPID Glyph Mini RP2040, Olimex ESP32-C3-DevKit-Lipo. Every one is drawn upright as its board file's pad map is, its header pads along the edges the vendor put them on -- the QT Py's seven castellations a side, the Pro Micro's and both Thing Pluses' rows down both long edges, the Glyph Mini's castellations on three sides with its USB-C at the top, the Olimex's round header pads down both long edges -- none a quarter turn off. Seen along the way and filed or recorded elsewhere: the Thing Plus C6's lettering reads 'Thin Plus ESP32-C', its g and 6 being the self-crossing SparkFun glyphs OH-163 refuses; the QT Py, Feather C6 and KB2040 draw no USB-C socket (OH-228); a board's own LED barely changes when lit (OH-227). webui/static/board3d.js is released; tests/webui/test_board3d.py stays with OH-172 until it closes.

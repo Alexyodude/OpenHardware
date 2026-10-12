@@ -17,3 +17,5 @@ From the same review, LOW, for whoever next touches these colours (no change req
 - The die, lid and diffuser slabs (#272b27, #4e4e4e, #ebebe5) each equal a vendor STEP's old linear key; "this repository's own" is weaker than stated.
 
 Done when a lit lens's colour stays within 1.0 by a test, its glow is chosen on its own, and both are seen in the page.
+
+**Note 2026-10-12:** 2026-10-12, a browser look at the board's own LED, which is not this ticket's lens: OH-227. The bench LED part this ticket is about (parts.js, LIT_GAIN) was not looked at: placing one on the bench and wiring it needs drags on the canvas that were not driven. Still to see.
