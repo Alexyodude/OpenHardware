@@ -61,29 +61,36 @@ import * as THREE from "three";
 export const BENCH_GAP = 5.0;
 export const BENCH_PITCH = 6.0;
 
-//: The emissive strength of a lit LED. Not a colour -- the colour is the
-//: part's own, from the file -- but how hard it glows. Above about 1.4 the
-//: bloom-free renderer clips to white and the LED stops looking coloured.
+//: How hard a lit lens glows: the radiance of its brightest channel, in the
+//: lens's own hue. Not a colour -- the colour is the part's own, from the file
+//: -- and not the colour's gain, which `setPartState` takes from each lens and
+//: which cannot pass one over its brightest channel. This is the one number
+//: chosen for the look (OH-217).
+//:
+//: **1.2 is the middle, to a tenth, of the window two bounds leave**, each
+//: run on every lens a part names by `tests/webui/test_lit_lens.py`, through
+//: OH-227's proxy under the light the page was measured putting on each lens:
+//:
+//: - **from 0.92**, lit and unlit 3:1 apart in luminance, the bar WCAG sets
+//:   for a state change on the same pixels (SC 2.4.13, Focus Appearance;
+//:   the test cites it). The buzzer's mark sets it;
+//:   KiCad's LED lens clears it from 0.59.
+//: - **to 1.49**, lit at least as colourful as unlit. Past that the tone
+//:   curve presses the buzzer's orange mark toward peach, and past 2.67 the
+//:   red LED toward pink: the clip to white this comment used to warn of.
+//:
+//: **Seen in the page 2026-10-13**, the Arduino Uno blinking pin 13 into a
+//: 5 mm LED and the 12 mm buzzer, in both themes alike: the LED went from a
+//: dark red (100, 11, 7) to a bright one (248, 82, 77), 3.96:1, and the mark
+//: from brown (134, 68, 20) to orange (249, 146, 90), 3.26:1.
+//:
+//: **It was 1.2 before as well, over a colour and an emission each 3.0 times
+//: the lens's own** -- `LIT_GAIN`, fcce44c's, which put the LED lens's colour
+//: at 1.34 and the buzzer's at 1.85 -- so each emitted 3.6 times its own
+//: colour, 1.60 in the LED's red. That drew the LED salmon, (251, 105, 101), and the mark
+//: peach, (252, 171, 135), less colourful lit (chroma 40.0) than unlit (46.6):
+//: brighter, 4.59:1 and 3.97:1, by being whiter.
 const LIT = 1.2;
-
-//: How much brighter than the model's own dark red a lit lens is drawn.
-//: KiCad's LED lens is `#b2190d`, which is the colour of an LED that is off;
-//: one that is on is the same hue brighter, which is what a real one does,
-//: and it emits as well (`LIT`).
-//:
-//: **3.0 is the gain fcce44c chose against this same lens**, at 0.447
-//: linear red -- the writer then put a byte divided by 255 straight into
-//: `baseColorFactor` -- so 3.0 restores the look that commit drew. 7dc67fc's
-//: `linear()` then drew the lens at 0.168 (lit 0.50), until OH-214 read the
-//: STEP's colour as the file states it and the lens came back at 0.445.
-//:
-//: **A lit lens's colour passes 1.0 here and has since fcce44c**: 3.0 x
-//: 0.445 for the LED lens, 3.0 x 0.617 for the buzzer's mark `#ce6d26`. The
-//: colour is an albedo and cannot pass 1.0, but this one constant also
-//: scales `emissive`, which is radiance and can; bounding it for the colour
-//: halves the glow. Splitting the two gains is OH-217, and a new look wants
-//: seeing in a browser before it ships.
-const LIT_GAIN = 3.0;
 
 //: What a part can be shown doing, and **a circuit decides which** --
 //: `webui/static/circuit.js` solves the bench and hands one of these words per
@@ -137,6 +144,14 @@ export function dressPart(group, extras, palette) {
       // either lights both.
       object.material = object.material.clone();
       object.userData.baseColour = object.material.color.clone();
+      // Lit, the lens is brightened by one over its brightest channel, and a
+      // black lens has no hue to brighten.
+      const peak = Math.max(...object.userData.baseColour.toArray());
+      if (!(peak > 0)) {
+        throw new Error(`${extras.chip}'s lens ${extras.lens} is ` +
+                        `[${object.userData.baseColour.toArray()}] linear, ` +
+                        `which has no hue to light`);
+      }
     }
   });
 
@@ -281,10 +296,19 @@ export function setPartState(part, drive, palette) {
     return;
   }
   if (drive === "lit") {
-    // The same hue, several times brighter, plus its own light. A lit LED is
-    // not a differently coloured LED.
-    lens.material.color.copy(base).multiplyScalar(LIT_GAIN);
-    lens.material.emissive.copy(base).multiplyScalar(LIT_GAIN);
+    // The same hue, as bright as a surface can be, plus its own light. A lit
+    // LED is not a differently coloured LED.
+    //
+    // **The colour is an albedo, so no channel of it passes 1.0** (OH-217),
+    // and its gain is the lens's own: one over its brightest channel, so that
+    // channel is exactly 1.0. A gain shared by every lens -- one over the
+    // brightest lens any part names, the buzzer's 0.617 red, so 1.62 -- holds
+    // the bound too and was OH-214's; it is not used because a brighter lens
+    // added to `PARTS` would then dim every other lens's colour. The glow is
+    // `LIT`, chosen on its own, in the same hue.
+    const peak = Math.max(base.r, base.g, base.b);
+    lens.material.color.copy(base).multiplyScalar(1 / peak);
+    lens.material.emissive.copy(lens.material.color);
     lens.material.emissiveIntensity = LIT;
     return;
   }
