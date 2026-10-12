@@ -13,7 +13,6 @@ touches:
 - tests/webui/test_compile.py
 - webui/boards/esp32c5.py
 - webui/boards/esp32c6.py
-- tests/riscv32/**
 - tests/webui/test_feather_esp32c6_board.py
 - tests/webui/feather_esp32c6/blink.bin
 - tests/webui/feather_esp32c6/blink.ino
@@ -431,3 +430,5 @@ VERIFIED on 5ef09c6, after python tools/build_core.py: tests/riscv32, tests/rv32
 **Note 2026-10-13:** 2026-10-13: core/cortexm0/abi.py, core/riscv32/** and webui/api.py (the last itself on loan from OH-172) lent to OH-225 while this ticket is not being worked: OH-225 gives the Cortex-M0 and RISC-V bindings OH-223's step-entry record and HostFault, and makes BoardSession.step respect a fault and the server answer it. Return all three here when OH-225 closes; webui/api.py goes back to OH-172 when this ticket's step 3 lands.
 
 **Note 2026-10-13:** 2026-10-13: core/cortexm0/abi.py and webui/api.py back from OH-225 (done); core/riscv32/** passed straight on to OH-219 (the RP2350's ISA follow-ups), to come back here when OH-219 closes. Step 3 slice B (the page) can start: webui/emulator_server.py and webui/static/board3d.js are unclaimed now that OH-225 and OH-227 are done.
+
+**Note 2026-10-13:** 2026-10-13: tests/riscv32/** lent to OH-219 with core/riscv32/**. Return both when OH-219 closes.

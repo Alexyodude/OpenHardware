@@ -10,6 +10,7 @@ touches:
 - tools/gen_rv32_tests.py
 - tests/webui/xiao_rp2350/blink.c
 - core/riscv32/**
+- tests/riscv32/**
 ---
 
 Follow-ups from OH-208 and its review (2026-10-09). OH-208 made core/riscv32 execute every RV32 Zbb and Zbkb instruction and turned them on for the RP2350 only, as `abi.RP2350 = RP2350_MODELLED | EXT_ZBB | EXT_ZBKB`. Two names for one part remain, and some files outside OH-208's claims now say something false.
