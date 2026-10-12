@@ -2,7 +2,7 @@
 id: OH-224
 title: The XIAO MG24 and nRF54L15 SMD boards are four pads short of the pins layer,
   and Seeed's own board files answer them
-status: open
+status: in-review
 priority: P2
 created: '2026-10-12'
 touches:
@@ -27,3 +27,46 @@ STEPS:
 4. Check what else reads those pads (pin view, inventory, the 3D panel) and that nothing claims a level for them: neither chip has a module, so OH-172's `modelled` is false for every pad on both boards regardless.
 
 Done when `python tools/inventory.py` shows the pins layer holding on both boards, every new answer cites the board file's net, and the regeneration test holds the files.
+
+**Note 2026-10-12:** Done in lane4 at 185bf3c, in review.
+
+PADS. None of the four is on a net named for it. Each lands, by position, on one of the module's underside test points, and that point's net is traced to the MCU's own pad in Seeed's board file:
+  XIAO-MG24-SMD      MG24_EN     pad 24 -> TP4,  net '~{MG24_RESET}'          -> EFR32MG24 pad 13 'RESET'                  why_null (a reset pad, not a GPIO)
+  XIAO-nRF54l15-SMD  nRF54_EN    pad 25 -> TP4,  net '~{nRF54_RESET}'         -> nRF54L15 pad D2 '~{RESET}'                why_null (a reset pad, not a GPIO)
+  XIAO-nRF54l15-SMD  54L15_TX20  pad 15 -> TP11, net 'P1.08{slash}SAMD11_TX'  -> nRF54L15 pad F7 'P1.08/EXTREF/CLK16M/CK'  chip_pin P1.08
+  XIAO-nRF54l15-SMD  54L15_RX20  pad 16 -> TP12, net 'P1.09{slash}SAMD11_RX'  -> nRF54L15 pad B3 'P1.09'                   chip_pin P1.09
+Both reset nets also carry the reset button, an RC and the MOSFET the on-board SAMD11 pulls reset through. The TX20 and RX20 nets also carry a pad of the SAMD11 debugger, which the tracer leaves out because it matches the part by value.
+
+HOW. seeed_pcb_traced takes `nets`: a label and the net its pad lands on, traced exactly as a net named for the label is. The pin is read off the MCU's footprint, never typed; a typed net that reaches no pad of the part raises, naming the net. The label-to-net join is by position and is not in the generator. It needs the footprint from the seeed-xiao tree beside the board file from seeed-pcb, which a Source cannot cite together, and the nRF54L15's test points sit further off the footprint's frame than the RP2350's 0.01 mm. So the generator gets the net names typed, and a test reads both files to hold them. The four answers come from the existing tracer with that one parameter; there is no table of answers. The two reasons use a new template, _LANDED_RESET, in the shape of _DEDICATED_RESET. Unlike _DEDICATED_RESET, it says the pad is on the net, because the net was followed. It cites the board file, the test point, the net, the chip's pad and its name, and the span of numbered pads, with no count. _CHIP_PIN_NAME is unchanged. RESET and ~{RESET} becoming captions is OH-172 slice 2's to decide.
+
+TESTS, each red before the change. test_the_mg24_and_nrf54l15_underside_pads_land_on_the_nets_the_registry_traces was red with "registry names a net by position for [], not for ['MG24_EN']". test_the_mg24_and_nrf54l15_underside_pads_answer_from_seeeds_own_board_file was red because MG24_EN still had the generic sentence. test_a_net_typed_for_a_traced_label_must_reach_the_part was red with a TypeError (unexpected keyword 'nets'). The helper _underside_landings sets the frame from the castellated edge. A pad lands on a test point whose centre is inside the pad's own copper (nearer than half its narrower side), exactly one point per pad and one pad per point. Every pad whose label is a {slash} part of a net must land on that net or one 0R link from it; that is how the nRF54L15 brings out D11 and D12 through R16 and R17.
+
+BREAKS, each turned a test red:
+- TX20 and RX20 nets swapped in the registry: the landing test and test_the_committed_board_files_match_the_generator.
+- MG24_EN typed onto '/04 ATSAMD11D14A/MGM_RST_CTL': the landing test; the generator raised.
+- The tracer made to ignore `nets`: the typed-net test.
+- 54L15_TX20 hand-edited to P1.09 in the board file: the answer test.
+- These reason clauses changed in the registry and the file alike: TP4->TP5, PD05->PD04, pad 13->pad 12, '~{nRF54_RESET}'->'~{SAMD11_RESET}', nRF54L15.kicad_pcb->MG24.kicad_pcb. Each turned the answer test red.
+- D13<->D14 and D11<->D12 swapped on the nRF54L15, and D16<->D17 on the MG24: the frame witness.
+The counted states moved by exactly the four: test_every_pad_either_names_its_pin_or_says_why_it_has_none now holds 564 naming, 70 specific, 0 generic. test_the_committed_files_with_unnumbered_pins_are_the_ones_oh_26_named holds 135. Each count carries its ladder line. The negative control in test_a_dedicated_debug_pad_says_so_rather_than_that_nobody_named_it used to assert that some non-supply pad still had the generic sentence. Now it asserts that the phrase still matches the supply pads, which keeps the filter from matching nothing, and that no non-supply XIAO pad carries it.
+
+REGENERATED with python tools/import_pindefs.py --write-headers --write-boards. Only XIAO-MG24-SMD.json and XIAO-nRF54l15-SMD.json were written; a second run reported all 42 files unchanged. Before the change, the generator reproduced every committed board file and HEADER block exactly. Both files' seeed-pcb revision is unchanged, because the file is hashed once. OH-172: description_for is None for both boards, and api.pad_view reports read_levels False and modelled False on every pad of both, the four included.
+
+INVENTORY, python tools/inventory.py. Before, at 47b5e36:
+  TWINS — 26 of 38 boards hold all four; by layer: geometry 38, model 37, pins 35, runs 26
+  footprint                vendor               21+3/25  MG24:no        XIAO-MG24-SMD
+  footprint                composed             18+6/27  nRF54l15:no    XIAO-nRF54l15-SMD
+After:
+  TWINS — 26 of 38 boards hold all four; by layer: geometry 38, model 37, pins 37, runs 26
+  footprint                vendor               21+4/25  MG24:no        XIAO-MG24-SMD
+  footprint                composed             20+7/27  nRF54l15:no    XIAO-nRF54l15-SMD
+The pins layer now holds on both boards. Neither board holds all four layers, because both lack firmware evidence (runs). The inventory changed nowhere else except its test counts.
+
+VERIFIED. python -m pytest -q -p no:cacheprovider tests/rules/test_import_pindefs.py tests/rules/test_inventory.py tests/rules/test_board_manifest.py tests/webui/test_pin_view.py tests/webui/test_board_catalogue.py: 376 passed, 1 skipped (the OH_SLOW variant survey). On the first run, test_a_running_manifest_board_lists_its_own_pads_and_no_xiao_label failed because this worktree's build/lib/riscv32.dll was a stale Debug build missing riscv32_map_input. python tools/build_core.py rebuilt it (build/ is ignored), and that test passed after. Checker rows, each run on its own and each OK: check_layering, check_board_contract, check_part_schemas, check_licenses, check_deltas, check_banned_symbols, check_board_claims, check_ticket_claims, ticket_guard --self-test, check_facts, and board-sources render.py --check. Neither checkall.py nor the full suite was run.
+
+LEFT, not this ticket's:
+(1) The pad Seeed labels 54L15_TX20 reaches P1.08. Zephyr's xiao_nrf54l15-pinctrl.dtsi at 0a2e408 sets uart20_default UART_TX on P1.09 and UART_RX on P1.08. chip_pin states the copper; the direction question is recorded in the _NRF54L15 comment and not resolved.
+(2) The same position join puts the nRF54L15 SMD's USER_LED (pad 22) on TP18, whose net is 'P2.00{slash}USR_LED'. That answers the join _NRF54L15_USER_LED's reason says no file makes, and test_the_user_led_reports_the_pin_two_sources_name_and_writes_neither asserts the same thing. Untouched here.
+(3) The nRF54LM20A's nRF54_RST might be joinable the same way; its edge footprint is XIAO-Add-On-PRO, not a HALF-HOLE, and that has not been checked.
+(4) The RP2350 SMD's EN is still a supply by SUPPLY_LABELS, per OH-172's note.
+(5) test_the_rp2350_smd_boot_pad_is_the_flash_chip_select_in_seeeds_own_board_file has its own copy of the frame-and-landing code. It could share _underside_landings; not done here.
