@@ -873,14 +873,16 @@ EXPLAINS: dict[str, set[str]] = {
         "THING_PLUS", "USB-C-16P_4LAYER-PADS", "JST-2-SMD", "MICROSD_TINY",
         "WS2812-2020",
     },
-    "Adafruit QT Py ESP32-C3": {"USB_C_CUSB31-CFM2AX-01-X", "SK6805_1515"},
+    # Adafruit's USB-C socket left all three of these sets in OH-228, drawn
+    # from Adafruit's own model of it.
+    "Adafruit QT Py ESP32-C3": {"SK6805_1515"},
     "Adafruit Feather ESP32-C6": {
-        "1X16_ROUND", "1X12_ROUND", "USB_C_CUSB31-CFM2AX-01-X",
+        "1X16_ROUND", "1X12_ROUND",
         "JSTPH2_BATT", "JST_SH4_RA", "LONGAN-IC_SNR6-1.0-3X3X1MM",
     },
-    # The QT Py's two and its own flash (OH-186). Its castellated edge is
+    # The QT Py's LED and its own flash (OH-186). Its castellated edge is
     # copper, as the QT Py's is, and so is not here.
-    "Adafruit KB2040": {"USB_C_CUSB31-CFM2AX-01-X", "SK6805_1515", "USON8_4X4"},
+    "Adafruit KB2040": {"SK6805_1515", "USON8_4X4"},
     # SparkFun's USB-C socket on both (OH-189), and the Pocket's battery
     # socket. The Pro Micro's castellated edge is copper, as the QT Py's is;
     # the Pocket's header holes are refused by its own schematic, whose
@@ -1009,8 +1011,12 @@ def _glb_groups(path: pathlib.Path) -> dict[str, list[tuple[float, float, float]
 
 #: The gold and brass a KiCad model gives a plated contact. Every one of these
 #: was read off a shipped mesh rather than chosen: they are what the vendors'
-#: own STEP files style their pins and shells with.
-CONTACT_COLOURS = frozenset({"#dbbc7e", "#f6df99", "#f7e099", "#e4e3cf"})
+#: own STEP files style their pins and shells with. `#ffce7f` is Adafruit's,
+#: on their USB-C socket's tails and tongue (OH-228) -- kept out of the
+#: composer's own `CONTACT_COLOURS`, which takes a middle, and in here, which
+#: asks only of the gold at board level.
+CONTACT_COLOURS = frozenset({"#dbbc7e", "#f6df99", "#f7e099", "#e4e3cf",
+                             "#ffce7f"})
 
 #: How high above the board a plated contact still counts as touching it.
 #:
@@ -5304,8 +5310,9 @@ def test_every_placement_is_drawn_refused_or_padless_and_counted(capsys):
     assert padless and absent and rest, "the board no longer shows all three"
     # **A refused part and a bodyless pad are counted apart**, and which is
     # which on this board is written here rather than derived, so a reason
-    # that loses its "no body" words -- or gains them -- is caught.
-    parts = {"USB_C_CUSB31-CFM2AX-01-X", "SK6805_1515"}
+    # that loses its "no body" words -- or gains them -- is caught. The USB-C
+    # socket left this set in OH-228, drawn from Adafruit's own model.
+    parts = {"SK6805_1515"}
     refused = [e for e in absent if e.package in parts]
     bodyless = [e for e in absent if e.package not in parts]
     assert {e.package for e in bodyless} == {
@@ -6665,7 +6672,9 @@ def test_what_decided_each_passive_is_recorded_in_the_model(
     assert ("  kinds   21 passive(s) drawn as the kind Adafruit QT Py "
             "ESP32-C3.sch states: 19 by the deviceset's prefix and the value, "
             "2 by the prefix alone, 0 by the value alone") in out, out
-    assert "  refused 5 placement(s): 2 of 2 package(s) with no published " \
+    # 5 of 2 packages until OH-228 drew the USB-C socket, which `ABSENT`
+    # then held; the LED is the one left.
+    assert "  refused 4 placement(s): 1 of 1 package(s) with no published " \
            "model, and 3 by what their own schematic states" in out, out
     extras = read_extras(tmp_path / f"{compose._slug(spec.board)}.glb")
     assert extras["kinds"]["R1"] == {"kind": "resistor", "prefix": "R",
@@ -7063,6 +7072,235 @@ def test_a_manufacturers_file_is_cached_by_the_commit_it_came_from():
                       if c.step is None and not c.modelled)
     assert compose.cached(kicad_part, kicad_part.url, ".step") == (
         compose.CACHE / f"component-{kicad_part.slug}.step")
+
+
+# --- Adafruit's USB-C socket, out of Adafruit's own assembly (OH-228) -----------
+
+#: The land Adafruit place their USB-C socket on, and where each board places
+#: it. Both are the boards' own names, read out of their EAGLE files.
+USB_C_LAND = "USB_C_CUSB31-CFM2AX-01-X"
+ADAFRUIT_USB_C = {"Adafruit QT Py ESP32-C3": "X6", "Adafruit KB2040": "X6",
+                  "Adafruit Feather ESP32-C6": "X3"}
+
+#: How far off its tab's centre a shell leg may stand and still be in it.
+#: Adafruit's package drills each of its four tabs as a plated slot 0.60 mm
+#: wide -- `drill="0.6"` on M1 to M4 -- and the leg is 0.30 mm thick, which
+#: the test below measures off the body rather than taking from here:
+#: (0.60 - 0.30) / 2. Measured 2026-10-13 after `place`: 0.060 mm on the
+#: front legs and 0.065 on the rear.
+LEG_PLAY_MM = 0.15
+LEG_THICKNESS_MM = 0.30
+
+#: How far above the board's top face a solder tail's foot may sit and still
+#: rest on its pad: the tessellation's own chord tolerance, `DEFLECTION`.
+#: Measured 0.012 mm on Adafruit's body.
+FOOT_LIFT_MM = 0.05
+
+
+def _adafruit_usb_c():
+    """`(spec, board, element)` for each of the three boards whose files are
+    fetched."""
+    specs = {spec.board: spec for spec in compose.COMPOSITIONS}
+    for name, reference in ADAFRUIT_USB_C.items():
+        spec = specs[name]
+        if _fetched(spec):
+            board = compose.read_layout(spec.layout)
+            yield spec, board, board.element(reference)
+
+
+def _into_package(element, x: float, y: float) -> tuple[float, float]:
+    """A board point in the element's own package frame: the inverse of
+    `eagle.place` for an element that is not mirrored."""
+    turn = math.radians(-element.rotation)
+    dx, dy = x - element.x_mm, y - element.y_mm
+    return (dx * math.cos(turn) - dy * math.sin(turn),
+            dx * math.sin(turn) + dy * math.cos(turn))
+
+
+def test_adafruits_usb_c_socket_is_drawn_on_its_three_boards_and_absent_from_none(
+        capsys):
+    """**The socket is drawn, and nothing calls it absent** (OH-228). Until
+    this ticket `ABSENT` held the land with a reason naming "CUI's
+    CUSB31-CFM2AX-01-X", a part Same Sky -- CUI Devices, renamed -- do not
+    make; Adafruit's own CAD models the socket on this land, and that is what
+    is drawn now. Asked of the row, without OpenCASCADE, and then of
+    `compose` itself, which is what the page's file is written from.
+
+    Seen red (2026-10-13): `ABSENT` held the land and no row drew it.
+    """
+    assert USB_C_LAND not in compose.ABSENT, (
+        f"{USB_C_LAND} is drawn; ABSENT should no longer say it is not")
+    placed = list(_adafruit_usb_c())
+    if not placed:
+        pytest.skip("SKIPPED: none of the three Adafruit boards is fetched")
+    for spec, _board, element in placed:
+        assert element.package == USB_C_LAND, (spec.board, element.package)
+        row, refused = compose.drawn_from(
+            element, compose.statements_for(spec), spec.schematic.name)
+        assert refused is None, f"{spec.board} {element.name}: {refused}"
+        assert row is not None and row.product is not None, (
+            f"{spec.board} {element.name} is not drawn from a named product: {row}")
+        assert compose.absent_why(element) is None
+    # And through `compose`, where every model it would draw is on disk.
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    composed = []
+    for spec, board, element in placed:
+        if _inputs_missing(spec, board):
+            continue
+        compose.compose(spec, deflection=compose.DEFLECTION, check=True)
+        lines = capsys.readouterr().out.splitlines()
+        drawn = next(line for line in lines if line.startswith("  drawn "))
+        row, _refused = compose.drawn_from(element, compose.statements_for(spec))
+        assert f"{element.name} ({row.model})" in drawn, (spec.board, drawn)
+        said = [line for line in lines
+                if line.startswith(f"  absent  {element.name} (")]
+        assert not said, f"{spec.board} still says: {said}"
+        composed.append(spec.board)
+    if len(composed) < len(placed):
+        pytest.skip(f"SKIPPED in part: composed {composed}; the rest read "
+                    f"models that are not fetched (run tools/compose_board_3d.py)")
+
+
+def test_adafruits_usb_c_body_stands_on_the_land_it_was_drawn_for():
+    """**The body is Adafruit's and the land is Adafruit's, and they agree**
+    (OH-228), after `place` has put one on the other the way it puts every
+    legged model: its legs' middle on the middle of the through-hole pads.
+
+      * its width along the board's edge is the package's own outline,
+        `element.silk`, to a hundredth of a millimetre;
+      * each of its four shell legs stands in its tab, within `LEG_PLAY_MM`;
+      * every one of the land's surface-mount pads has a solder tail resting
+        on it, the middle of its foot inside the pad's copper.
+
+    In the package's own frame, where Adafruit draw the land, on each of the
+    three boards. The two locating pegs are told apart from the legs by the
+    holes they go into, which are the board's own `<hole>`s.
+
+    Seen red (2026-10-13): no row drew the land.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    placed = list(_adafruit_usb_c())
+    if not placed:
+        pytest.skip("SKIPPED: none of the three Adafruit boards is fetched")
+    rows = [c for c in compose.CORRESPONDENCE if c.package == USB_C_LAND]
+    assert len(rows) == 1, f"{len(rows)} rows draw {USB_C_LAND}"
+    row = rows[0]
+    if not compose.cached(row, row.url, ".step").is_file():
+        pytest.skip("SKIPPED: Adafruit's STEP is not fetched; run "
+                    "tools/compose_board_3d.py")
+    mesh, _box = compose.component_mesh(row, compose.DEFLECTION)
+    # The envelope the row's `why` states, off the mesh's own vertices.
+    every = [p[at:at + 3] for _c, (p, _n, _i) in mesh.groups.items()
+             for at in range(0, len(p), 3)]
+    envelope = tuple(max(v[axis] for v in every) - min(v[axis] for v in every)
+                     for axis in range(3))
+    assert envelope == pytest.approx((8.94, 7.90, 4.20), abs=0.01), envelope
+
+    for spec, board, element in placed:
+        assert not element.mirrored, f"{spec.board} {element.name} is mirrored"
+        pads = [p for name in spec.headers for p in board.element(name).pads]
+        centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
+                  (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
+        put = compose.place(mesh, element, row.turn, spec.thickness_mm, centre)
+        local = [(*_into_package(element, p[at] + centre[0], centre[1] - p[at + 2]),
+                  p[at + 1], colour)
+                 for colour, (p, _n, _i) in put.groups.items()
+                 for at in range(0, len(p), 3)]
+        where = f"{spec.board} {element.name}"
+
+        x0, _y0, x1, _y1 = element.silk
+        width = max(v[0] for v in local) - min(v[0] for v in local)
+        assert width == pytest.approx(x1 - x0, abs=0.01), (
+            f"{where}: the body is {width:.3f} mm wide and the package's "
+            f"outline {x1 - x0:.3f}")
+
+        tabs = {pad.number: _into_package(element, pad.x_mm, pad.y_mm)
+                for pad in element.pads_of("thru_hole")}
+        holes = [_into_package(element, hole.x_mm, hole.y_mm)
+                 for hole in board.holes if hole.element == element.name]
+        assert len(tabs) == 4 and len(holes) == 2, (where, tabs, holes)
+        legs: dict[str, list[tuple[float, float]]] = {number: [] for number in tabs}
+        for x, y, height, _colour in local:
+            if height >= spec.thickness_mm - compose.LEAD_DEPTH_MM:
+                continue
+            nearest = min([*tabs.items(), *((None, h) for h in holes)],
+                          key=lambda item: math.dist(item[1], (x, y)))
+            if nearest[0] is not None:
+                legs[nearest[0]].append((x, y))
+        for number, (tx, ty) in tabs.items():
+            xs = [v[0] for v in legs[number]]
+            ys = [v[1] for v in legs[number]]
+            assert xs, f"{where}: no leg goes into tab {number}"
+            thick = min(max(xs) - min(xs), max(ys) - min(ys))
+            assert thick <= LEG_THICKNESS_MM + 0.001, (
+                f"{where}: the leg in {number} is {thick:.3f} mm thick, so "
+                f"LEG_PLAY_MM's arithmetic is not about this body")
+            off = math.dist(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2),
+                            (tx, ty))
+            assert off <= LEG_PLAY_MM, (
+                f"{where}: the leg in tab {number} stands {off:.3f} mm off its "
+                f"middle, and a {LEG_THICKNESS_MM} mm leg in a 0.60 mm slot has "
+                f"{LEG_PLAY_MM}")
+
+        feet = [(x, y) for x, y, height, colour in local
+                if colour == "#ffce7f"
+                and abs(height - spec.thickness_mm) <= FOOT_LIFT_MM]
+        smd = element.pads_of("smd")
+        assert len(smd) == 12, (
+            f"{where}: {len(smd)} contact pads, and the row's `why` says twelve")
+        along = sorted((_into_package(element, pad.x_mm, pad.y_mm)[0], pad.width_mm)
+                       for pad in smd)
+        # Each pad is grown by half the narrowest gap between two of them,
+        # so a foot that overhangs its own pad is still its own and never
+        # its neighbour's.
+        grow = min(b[0] - b[1] / 2 - (a[0] + a[1] / 2)
+                   for a, b in zip(along, along[1:])) / 2
+        for pad in smd:
+            assert pad.rotation_deg % 180.0 == element.rotation % 180.0, (
+                f"{where}: pad {pad.number} is turned within its package")
+            px, py = _into_package(element, pad.x_mm, pad.y_mm)
+            half = (pad.width_mm / 2, pad.height_mm / 2)
+            on = [(x, y) for x, y in feet
+                  if abs(x - px) <= half[0] + grow and abs(y - py) <= half[1] + grow]
+            assert on, f"{where}: no tail rests on pad {pad.number}"
+            mx = (min(v[0] for v in on) + max(v[0] for v in on)) / 2
+            my = (min(v[1] for v in on) + max(v[1] for v in on)) / 2
+            assert abs(mx - px) <= half[0] and abs(my - py) <= half[1], (
+                f"{where}: the tail on pad {pad.number} has its foot's middle "
+                f"{mx - px:+.3f}, {my - py:+.3f} mm from the pad's, outside "
+                f"its {pad.width_mm} x {pad.height_mm} mm copper")
+
+
+def test_a_pinned_model_that_is_not_the_file_measured_is_refused(tmp_path,
+                                                                 monkeypatch):
+    """**Adafruit's STEP is pinned by its size and its sha256** (OH-228), as
+    the newstroke font is: a file of other bytes is another model, and every
+    socket would be drawn from it. One already on disk is refused, naming
+    both digests; a download that is not the file is deleted as well, so the
+    next run does not trip over it. Both before OpenCASCADE reads a byte.
+
+    Seen red (2026-10-13): no row was pinned.
+    """
+    import io
+
+    monkeypatch.setattr(compose, "CACHE", tmp_path)
+    rows = [c for c in compose.CORRESPONDENCE if c.pinned is not None]
+    assert rows, "no model is pinned by its size and sha256"
+    row = rows[0]
+    size, digest = row.pinned
+    step = compose.cached(row, row.url, ".step")
+    step.write_bytes(b"x" * size)
+    with pytest.raises(SystemExit, match=rf"pins {size:,} bytes and {digest}"):
+        compose.component_mesh(row, compose.DEFLECTION)
+    assert step.is_file(), "a file on disk is named, not deleted"
+
+    step.unlink()
+    monkeypatch.setattr(compose.urllib.request, "urlopen",
+                        lambda url: io.BytesIO(b"not the model"))
+    with pytest.raises(SystemExit) as said:
+        compose.component_mesh(row, compose.DEFLECTION)
+    assert f"{step} is 13 bytes" in str(said.value), said.value
+    assert "Deleted it" in str(said.value) and not step.exists(), said.value
 
 
 # --- a KiCad manifest row, read from what its own file states (OH-195) ---------

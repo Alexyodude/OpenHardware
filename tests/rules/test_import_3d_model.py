@@ -1852,3 +1852,93 @@ def test_a_ceramic_block_is_a_dielectric_in_its_own_colour():
     assert ceramic == {"CAF-50P160X80-6N", "ANT2P-5.2x2x1.1MM"}, ceramic
     borrowers = [spec.package for spec in SLABS if spec.colour == "#e4e3cf"]
     assert not borrowers, f"still shaded in the borrowed #e4e3cf: {borrowers}"
+
+
+# --- one named product out of an assembly STEP (OH-228) ------------------------
+
+
+def _assembly_step(tmp_path: pathlib.Path) -> pathlib.Path:
+    """A STEP assembly as a board vendor's CAD exports one: `A BOARD`, holding
+    `A PART`, a 1 x 2 x 3 mm box at the origin, and `ANOTHER PART`, a 4 x 5 x
+    6 mm box placed 10 mm along x. Written by OpenCASCADE's own writer, so
+    this needs no vendor file, and then `ANOTHER PART`'s PRODUCT id rewritten
+    to `A VALUE`: STEP's PRODUCT is (id, name, description, ...), and
+    Adafruit's exporter writes a part's value as the id and its package as
+    the name -- `PRODUCT('USB TYPE C','USB_C_CUSB31-CFM2AX-01-X',...)`."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Trsf, gp_Vec
+    from OCP.STEPCAFControl import STEPCAFControl_Writer
+    from OCP.STEPControl import STEPControl_AsIs
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    document = TDocStd_Document(TCollection_ExtendedString("step"))
+    tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+    board = tool.NewShape()
+    TDataStd_Name.Set_s(board, TCollection_ExtendedString("A BOARD"))
+    for name, size, along in (("A PART", (1.0, 2.0, 3.0), 0.0),
+                              ("ANOTHER PART", (4.0, 5.0, 6.0), 10.0)):
+        part = tool.AddShape(BRepPrimAPI_MakeBox(*size).Shape(), False)
+        TDataStd_Name.Set_s(part, TCollection_ExtendedString(name))
+        move = gp_Trsf()
+        move.SetTranslation(gp_Vec(along, 0.0, 0.0))
+        tool.AddComponent(board, part, TopLoc_Location(move))
+    tool.UpdateAssemblies()
+    writer = STEPCAFControl_Writer()
+    writer.SetNameMode(True)
+    writer.Transfer(document, STEPControl_AsIs)
+    step = tmp_path / "assembly.step"
+    writer.Write(str(step))
+    text = step.read_text(encoding="utf-8")
+    written = "PRODUCT('ANOTHER PART','ANOTHER PART'"
+    assert text.count(written) == 1, "OpenCASCADE wrote the product otherwise"
+    step.write_text(text.replace(written, "PRODUCT('A VALUE','ANOTHER PART'"),
+                    encoding="utf-8")
+    return step
+
+
+def test_one_named_product_comes_out_of_an_assembly_in_its_own_frame(tmp_path):
+    """**The new mechanism, on a file whose answer is known by hand** (OH-228).
+    Adafruit model their USB-C socket inside a whole-board assembly, so the
+    socket is one product of many; `read_product` hands back that product's
+    own shape -- in its own frame, NOT moved to where the assembly places it,
+    because the composer places a part on its own pads -- with its colours,
+    as `read` does for a whole file.
+
+    Seen red (2026-10-13): `read_product` did not exist.
+    """
+    pytest.importorskip("OCP")
+    from tools.import_3d_model import box_of, read_product
+
+    shape, _styles, _document = read_product(_assembly_step(tmp_path),
+                                             "ANOTHER PART")
+    box = box_of(shape)
+    assert (box.width, box.height, box.thickness) == pytest.approx(
+        (4.0, 5.0, 6.0), abs=1e-3), box
+    assert box.xmin == pytest.approx(0.0, abs=1e-3), (
+        f"the part came out at x {box.xmin:.3f}: moved to where the assembly "
+        f"places it, and not in its own frame")
+
+
+def test_a_product_the_file_does_not_name_is_refused_naming_those_it_does(tmp_path):
+    """**Refused, not guessed**, and the refusal is the list to choose from.
+    A STEP product answers to its NAME, the field OpenCASCADE names its label
+    by, and not to its id: `A VALUE` is in the file, as Adafruit's 'USB TYPE
+    C' is, and is refused like a name nobody wrote.
+
+    Seen red (2026-10-13): `read_product` did not exist.
+    """
+    pytest.importorskip("OCP")
+    from tools.import_3d_model import read_product
+
+    step = _assembly_step(tmp_path)
+    for missing in ("A VALUE", "NO SUCH PART"):
+        with pytest.raises(SystemExit) as refused:
+            read_product(step, missing)
+        said = str(refused.value)
+        assert f"no product named {missing!r}" in said, said
+        for present in ("'A BOARD'", "'A PART'", "'ANOTHER PART'"):
+            assert present in said, f"{present} is not named in: {said}"

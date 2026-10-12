@@ -398,6 +398,63 @@ def read(step: pathlib.Path):
     return tool.GetShape_s(top), styles, document
 
 
+def read_product(step: pathlib.Path, name: str):
+    """One named product out of an assembly STEP, as `read` returns a whole
+    file: `(shape, styles, document)`, in that product's OWN frame (OH-228).
+
+    For a part a vendor models only inside their whole-board assembly, as
+    Adafruit model their USB-C socket: the composer places the part on its
+    own pads, so where the assembly put it is not wanted, only what it is.
+
+    **By the name the file states, and nothing looser.** STEP's PRODUCT is
+    `(id, name, description, ...)`, and OpenCASCADE names a product's label
+    by its name -- Adafruit's exporter writes an element's VALUE as the id
+    and its PACKAGE as the name, `PRODUCT('USB TYPE C',
+    'USB_C_CUSB31-CFM2AX-01-X',...)`, so the socket answers to the second.
+    Anything but exactly one product of that name is refused, naming every
+    product there is.
+    """
+    try:
+        from OCP.STEPCAFControl import STEPCAFControl_Reader
+        from OCP.TCollection import TCollection_ExtendedString
+        from OCP.TDataStd import TDataStd_Name
+        from OCP.TDF import TDF_LabelSequence
+        from OCP.TDocStd import TDocStd_Document
+        from OCP.TopLoc import TopLoc_Location
+        from OCP.XCAFDoc import XCAFDoc_DocumentTool
+        from OCP.XCAFPrs import XCAFPrs, XCAFPrs_IndexedDataMapOfShapeStyle
+    except ImportError as exc:
+        raise Unavailable(str(exc)) from exc
+
+    document = TDocStd_Document(TCollection_ExtendedString("step"))
+    reader = STEPCAFControl_Reader()
+    reader.SetColorMode(True)
+    reader.SetNameMode(True)
+    reader.ReadFile(str(step))
+    reader.Transfer(document)
+
+    tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+    products = TDF_LabelSequence()
+    tool.GetShapes(products)
+    named: list[tuple[str, object]] = []
+    for at in range(1, products.Length() + 1):
+        label = products.Value(at)
+        attribute = TDataStd_Name()
+        if label.FindAttribute(TDataStd_Name.GetID_s(), attribute):
+            named.append((attribute.Get().ToExtString(), label))
+    found = [label for said, label in named if said == name]
+    if len(found) != 1:
+        raise SystemExit(
+            (f"{step} has {len(found)} products named {name!r}, not one"
+             if found else f"{step} has no product named {name!r}")
+            + f". The products it names: {sorted({said for said, _ in named})}"
+        )
+    styles = XCAFPrs_IndexedDataMapOfShapeStyle()
+    XCAFPrs.CollectStyleSettings_s(found[0], TopLoc_Location(), styles)
+    # The document outlives this call for the reason `read` gives.
+    return tool.GetShape_s(found[0]), styles, document
+
+
 def box_of(shape) -> Extent:
     """A shape's bounding box, in the STEP's own millimetres and axes."""
     from OCP.Bnd import Bnd_Box
@@ -874,7 +931,11 @@ FINISHES: dict[str, Finish] = {
     "#ffce7f": Finish(1.0, 0.30, (
         "the same gold, a value off in two channels, on the same board -- "
         "`Opaque(255,206,127)` in the vendor's file. Two nearly equal "
-        "colours are two styles in the vendor's CAD rather than two materials"
+        "colours are two styles in the vendor's CAD rather than two materials. "
+        "Also Adafruit's own USB-C socket on the composed boards that place "
+        "it (OH-228), where by geometry it is the solder tails resting on "
+        "their pads and the contacts on the tongue inside the shell: plated "
+        "contact, as here"
     )),
     "#c8a253": Finish(1.0, 0.35, (
         "the composed boards' own exposed copper -- `compose_board_3d.COPPER`, "

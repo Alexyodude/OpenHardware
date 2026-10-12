@@ -112,6 +112,7 @@ from tools.import_3d_model import (  # noqa: E402
     box_of,
     handedness_of,
     read,
+    read_product,
     report_finishes,
     tessellate,
     write_glb,
@@ -183,6 +184,15 @@ class Component:
     #: states the model it places, and `drawn_from` refuses a row that draws
     #: another without saying so here.
     stands_for: tuple[str, ...] = ()
+    #: The one product to draw out of `step` when `step` is a vendor's
+    #: whole-board ASSEMBLY rather than a model of one part (OH-228), by the
+    #: name the file gives it -- see `import_3d_model.read_product`, which
+    #: refuses any other name and lists the ones there are.
+    product: str | None = None
+    #: `(bytes, sha256)` the fetched `step` must be, checked on every read,
+    #: as `NEWSTROKE` is (OH-228). A commit-pinned URL names a revision of a
+    #: file; this is the file that revision was measured as.
+    pinned: tuple[int, str] | None = None
 
     @property
     def url(self) -> str:
@@ -205,6 +215,14 @@ class Component:
 #: the footprint and a moved offset would move the module.
 ESPRESSIF_KICAD = ("https://raw.githubusercontent.com/espressif/kicad-libraries/"
                    "dd76561812ab300351234ba6e0ec1295641796f0")
+
+#: Adafruit's own mechanical models of their boards, Adafruit_CAD_Parts, at
+#: the commit read on 2026-10-13 (OH-228). Its LICENSE: MIT, "Copyright (c)
+#: 2016 Adafruit Industries". Fetched into the gitignored cache and never
+#: committed, as every other model here is; pinned to a commit, and each file
+#: drawn from it by its size and sha256 as well (`Component.pinned`).
+ADAFRUIT_CAD = ("https://raw.githubusercontent.com/adafruit/Adafruit_CAD_Parts/"
+                "c128bceb1f96b6ea8b68f250bda986ba85da24ea")
 
 #: EAGLE package name -> the KiCad model of that part. Each span quoted below
 #: was measured on 2026-08-27 with `eagle.Element.pad_extent`, and `confirm`
@@ -1149,6 +1167,37 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "a capacitor on the land Adafruit's own description calls 0603 "
         "MicroPitch: two pads 1.52 mm apart, and the 1.6 x 0.8 mm chip.",
     ),
+    # --- Adafruit's USB-C socket, OH-228 --------------------------------------
+    Component(
+        "USB_C_CUSB31-CFM2AX-01-X", "Adafruit_CAD_Parts",
+        "USB_C_CUSB31-CFM2AX-01-X",
+        "X6 on the QT Py ESP32-C3 and the KB2040, X3 on the Feather "
+        "ESP32-C6: Adafruit's USB-C socket, twelve contact pads and four "
+        "plated shell slots spanning 8.64 x 4.76 mm. ADAFRUIT's own model of "
+        "it, out of their MIT-licensed whole-board STEP of the QT Py "
+        "ESP32-C3, where it is the product their exporter names for this "
+        "land -- PRODUCT('USB TYPE C','USB_C_CUSB31-CFM2AX-01-X',...), the "
+        "element's value and then its package -- placed at the element's own "
+        "origin and turn, so its frame is the package's and the turn is 0. "
+        "Its body is 8.94 x 7.90 x 4.20 mm, its width the package's own "
+        "outline exactly. Placed on its legs as every legged model is, each "
+        "shell leg stands 0.060 to 0.065 mm off its slot's middle, and each "
+        "of the twelve tails rests on its pad, the four wide ones 0.05 mm "
+        "outboard: a test holds both. The KB2040's own STEP carries the same "
+        "body moved 0.09 mm in its own frame, vertex for vertex; the "
+        "Feather's land is this land with its package origin 1.27 mm along, "
+        "which the pads absorb. Its gold is not a CONTACT_COLOURS key, for "
+        "the reason given there. Until OH-228 ABSENT left the land off "
+        "naming 'CUI's CUSB31-CFM2AX-01-X', and that was wrong: Same Sky, "
+        "as CUI Devices is now named, make no such part -- their own site "
+        "search finds none, read 2026-10-13 -- and Adafruit's files name no "
+        "maker.",
+        step=(f"{ADAFRUIT_CAD}/5405%20QTPy%20ESP32%20C3/"
+              f"5405%20QTPy%20ESP32%20C3.step"),
+        product="USB_C_CUSB31-CFM2AX-01-X",
+        pinned=(1_877_611,
+                "a220e20db7132d044a640680df0789c24ee89d7aa55e74a156cecac4bc25ebe8"),
+    ),
     # --- the SparkFun Pro Micro ESP32-C3 and Qwiic Pocket ESP32-C6, OH-189 ----
     #
     # Their rows in tools/board_manifest.py composed both by construction,
@@ -1891,14 +1940,9 @@ ABSENT: dict[str, str] = {
         "name on a part nobody here can say was fitted, the mistake OH-102 "
         "undid on the XIAOs."
     ),
-    "USB_C_CUSB31-CFM2AX-01-X": (
-        "Adafruit's USB-C socket, whose package name is the "
-        "part: CUI's CUSB31-CFM2AX-01-X, twelve contact pads and four shell "
-        "tabs spanning 8.64 x 4.76 mm. KiCad's Connector_USB, 12 models "
-        "listed 2026-09-29, holds nothing of CUI's; its two 16-pin "
-        "receptacles are GCT's and Amphenol's, and one of them on this land "
-        "would be a different maker's part under Adafruit's name for this one."
-    ),
+    # Adafruit's USB-C socket, USB_C_CUSB31-CFM2AX-01-X, was here until
+    # OH-228 drew it from Adafruit's own model; its row says why the reason
+    # it was here under was wrong.
     "JST-2-SMD": (
         "SparkFun's battery socket, a surface-mount JST PH: two "
         "1.0 x 4.6 mm contact pads 2.0 mm apart and two mounting pads. "
@@ -4353,11 +4397,32 @@ def component_mesh(component: Component, deflection: float) -> tuple[Mesh, objec
 
     CACHE.mkdir(parents=True, exist_ok=True)
     step = cached(component, component.url, ".step")
-    if not step.is_file():
+    fetched = not step.is_file()
+    if fetched:
         print(f"  fetch  {component.url}")
         with urllib.request.urlopen(component.url) as response:  # noqa: S310
             step.write_bytes(response.read())
-    shape, styles, _document = read(step)
+    # **Checked before OpenCASCADE reads a byte, and on every read**, as the
+    # font is: a file of other bytes is another model. A download that is
+    # not the file is deleted, so the next run does not trip over it.
+    if component.pinned is not None:
+        size, digest = component.pinned
+        data = step.read_bytes()
+        actual = hashlib.sha256(data).hexdigest()
+        if (len(data), actual) != (size, digest):
+            if fetched:
+                step.unlink()
+            raise SystemExit(
+                f"{step} is {len(data):,} bytes with sha256 {actual}, and its "
+                f"row pins {size:,} bytes and {digest}. "
+                + ("Deleted it: the download from "
+                   f"{component.url} is not the file this row was measured on."
+                   if fetched else
+                   "The file changed, or this copy is damaged: delete it and "
+                   "run again.")
+                + " If it still differs, re-measure the model before drawing it.")
+    shape, styles, _document = (read(step) if component.product is None
+                                else read_product(step, component.product))
     box = box_of(shape)
     #: Identity: x stays x, z stays up, y stays y. `place` does the moving.
     frame = Frame(long_axis=0, up=1, short_axis=2,
@@ -5207,6 +5272,15 @@ def confirm(element: eagle.Element, box, turn: float,
 #: In sRGB, as each file states it, since OH-214 -- they were the linear bytes
 #: `#b58136`, `#ebbc51`, `#edbe51` and `#e7c863` while `colour_of` took
 #: OpenCASCADE's linear value, and moved with the keys they were copied from.
+#:
+#: **Adafruit's gold, `#ffce7f`, is not here, and on purpose** (OH-228). On
+#: their USB-C socket it plates the contacts on the tongue inside the shell as
+#: well as the solder tails, and the tongue is most of it -- so its middle is
+#: the tongue's, and `contact_miss` measured it 3.344 mm from the pads at the
+#: right turn and 1.986 at the half turn: it would refuse the right answer.
+#: That socket's tails are held to its pads by a test that reads only the gold
+#: at board level -- `test_adafruits_usb_c_body_stands_on_the_land_it_was_
+#: drawn_for` -- and its half turn is one `silk_miss` refuses.
 CONTACT_COLOURS = frozenset({"#dbbc7e", "#f6df99", "#f7e099", "#f4e5a7"})
 
 #: A part needs this many surface-mount pads before its turn is decided by
@@ -7050,7 +7124,12 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
                 "KiCad kicad-packages3D, CC-BY-SA-4.0 with the library "
                 "exception; fetched, not vendored"
                 + "".join(sorted({
+                    # A product out of an assembly is the BOARD vendor's
+                    # model of a part, not its maker's (OH-228).
                     f"; and the manufacturer's own STEP, {component.url}"
+                    if component.product is None else
+                    f"; and {component.product!r} out of the board vendor's "
+                    f"own assembly, {component.url}"
                     for component in CORRESPONDENCE
                     if component.step is not None
                     and component.slug in cache}))
