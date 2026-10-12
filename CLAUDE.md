@@ -144,8 +144,21 @@ the shapes on that layer the composer cannot draw yet, which `--check` names
 per board by kind (a KiCad board's silkscreen arcs are drawn since OH-163);
 **inner copper layers**, which are inside the laminate where nothing can see
 them; and a zone's **filled polygon**, which is a keyhole outline walking into
-every thermal relief and back out. One gap is not counted yet: a board's own
-milled holes, which neither reader reads (OH-163). The colours are judgements and say so, as
+every thermal relief and back out.
+
+A board's own holes are counted and not cut (cutting them is OH-226): a hole
+KiCad mills on Edge.Cuts on the cutouts line, with the routed slots; each
+unplated hole drilled through the board -- an EAGLE `<hole>`, the board's own
+or a package's, and a KiCad np_thru_hole pad -- on a holes line; and what an
+EAGLE board mills that its reader does not read into the outline -- a shape on
+Dimension in its own `<plain>` other than a wire, any shape on Dimension in a
+package, and a shape on Milling in its own `<plain>` with a stated point
+strictly inside the outline's extent -- on a not cut line (OH-163). A
+package's own Milling is not counted: on every composed board that has one it
+is a slot in a plated pad. Plated drills -- pads', vias', and KiCad's oval
+drills in plated pads -- are neither drawn nor counted.
+
+The colours are judgements and say so, as
 `BOARD_MASK` does: six of Seeed's seven board files carry a full `(stackup
 ...)` -- six copper layers with thicknesses, five FR4 dielectrics with their
 `epsilon_r`, both solder masks with a thickness -- and not one of them fills in
