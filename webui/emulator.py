@@ -94,6 +94,9 @@ class Session:
         self.steps = 0
         self.status = "running"
         self.detail = ""
+        #: CS:IP of the instruction the core faulted on the host executing,
+        #: once status is "faulted" -- not the IP the core left (OH-223).
+        self.fault_at: tuple[int, int] | None = None
         self.reset()
 
     # --- lifetime -----------------------------------------------------------
@@ -143,6 +146,7 @@ class Session:
         self.steps = 0
         self.status = "running"
         self.detail = ""
+        self.fault_at = None
 
     # --- execution ----------------------------------------------------------
 
@@ -163,6 +167,7 @@ class Session:
             # or a load, as halted is, and not counted as a step.
             self.status = "faulted"
             self.detail = str(exc)
+            self.fault_at = exc.at
             return RunResult(0, self.status, self.detail)
         self.steps += 1
         if not still_running:
@@ -205,15 +210,41 @@ class Session:
         return {name: bool(value >> bit & 1) for name, bit in FLAG_BITS.items()}
 
     def disassembly(self, count: int = DISASSEMBLY_LINES) -> list[dict[str, object]]:
+        """`count` lines from CS:IP, the first marked current.
+
+        **After a host fault, from the instruction that faulted** (OH-223).
+        The core had moved IP past it, so a listing from IP would mark the
+        next instruction as where the machine stopped. The registers still
+        say where IP was left, because that is true.
+
+        A fault in the core's decoder ends the listing with a line that says
+        so, keeping the lines before it: reading the state runs nothing, and
+        a request for it should not go unanswered because the decoder is
+        broken. Hence the walk here rather than `disasm.disassemble_range`,
+        which returns all its lines or none.
+        """
         regs = self.cpu.regs
-        return [
-            {
+        cs, ip = self.fault_at if self.fault_at is not None else (regs.cs, regs.ip)
+        lines: list[dict[str, object]] = []
+        offset = ip
+        for _ in range(count):
+            try:
+                line = disasm.disassemble(self.cpu, cs, offset)
+            except abi.HostFault as exc:
+                lines.append({
+                    "cs": cs, "ip": offset, "address": abi.physical(cs, offset),
+                    "length": 0, "text": str(exc),
+                    "bytes": " ".join(f"{b:02X}" for b in exc.code),
+                    "current": offset == ip,
+                })
+                break
+            lines.append({
                 "cs": line.cs, "ip": line.ip, "address": line.address,
                 "length": line.length, "text": line.text, "bytes": line.hex,
-                "current": line.ip == regs.ip and line.cs == regs.cs,
-            }
-            for line in disasm.disassemble_range(self.cpu, regs.cs, regs.ip, count)
-        ]
+                "current": line.ip == ip and line.cs == cs,
+            })
+            offset = (offset + max(line.length, 1)) & 0xFFFF
+        return lines
 
     def memory(self, address: int, length: int) -> dict[str, object]:
         """A window of memory, as bytes plus the address it starts at."""

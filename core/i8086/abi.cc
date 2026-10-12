@@ -18,6 +18,11 @@ namespace {
 // header can forward-declare it without exposing any C++.
 struct Handle {
     i8086::Cpu cpu;
+    // Where the most recent i8086_step began, for i8086_step_entry (OH-223).
+    // Kept here rather than in i8086::Cpu: it is a fact about the ABI's
+    // calls, not about the processor.
+    uint16_t step_cs = 0;
+    uint16_t step_ip = 0;
 };
 
 inline i8086::Cpu* Of(I8086Cpu* p) { return &reinterpret_cast<Handle*>(p)->cpu; }
@@ -153,7 +158,21 @@ int i8086_step(I8086Cpu* cpu) {
     if (cpu == nullptr) {
         return 1;
     }
-    return static_cast<int>(i8086::Step(*Of(cpu)));
+    // Recorded before Step, which advances IP before it executes: if the
+    // core then faults on the host, IP no longer says which instruction it
+    // was, and this does.
+    Handle* handle = reinterpret_cast<Handle*>(cpu);
+    handle->step_cs = handle->cpu.regs().cs;
+    handle->step_ip = handle->cpu.regs().ip;
+    return static_cast<int>(i8086::Step(handle->cpu));
+}
+
+uint32_t i8086_step_entry(const I8086Cpu* cpu) {
+    if (cpu == nullptr) {
+        return 0;
+    }
+    const Handle* handle = reinterpret_cast<const Handle*>(cpu);
+    return static_cast<uint32_t>(handle->step_cs) << 16 | handle->step_ip;
 }
 
 int i8086_opcode_info(uint8_t opcode) {

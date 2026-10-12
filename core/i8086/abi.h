@@ -40,7 +40,7 @@ extern "C" {
 /// Bumped whenever this header's shape changes. Python refuses to run against
 /// a library that disagrees, which turns a silent struct mismatch into a clear
 /// failure at import.
-#define I8086_ABI_VERSION 8
+#define I8086_ABI_VERSION 9
 
 /// Mirrors i8086::Registers.
 ///
@@ -158,6 +158,16 @@ I8086_API uint32_t i8086_minimum_cycles(uint8_t length, uint8_t queued);
 /// a failure tells the user the wrong story every time a program ends
 /// normally.
 I8086_API int i8086_step(I8086Cpu* cpu);
+
+/// CS:IP where the most recent i8086_step began, as (cs << 16) | ip; zero
+/// before the first.
+///
+/// For when the core faults on the host part-way through an instruction
+/// (OH-223): i8086_step advances IP before executing, so afterwards IP names
+/// the next instruction rather than the one that faulted. Every step records
+/// it, at the cost of two stores, so a caller need not read the registers
+/// before each step to have it.
+I8086_API uint32_t i8086_step_entry(const I8086Cpu* cpu);
 
 #ifdef __cplusplus
 }  // extern "C"

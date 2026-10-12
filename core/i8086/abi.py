@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match I8086_ABI_VERSION in abi.h.
-ABI_VERSION = 8
+ABI_VERSION = 9
 
 #: Must match abi.h's field order exactly -- this is a struct mirror, and a
 #: reordering here reads the wrong bytes. It does NOT need to match the
@@ -58,21 +58,33 @@ class Unimplemented(AbiError):
 
 
 class HostFault(AbiError):
-    """The core's own code faulted on the host while executing an instruction.
+    """The core's own code faulted on the host, executing or decoding.
 
     A divide error or an access violation in the C++, which is a bug in the
     core and never in the program it was running. On Windows ctypes catches
     the structured exception around the foreign call and raises `OSError`;
-    `Cpu.step` raises this from it. The machine is left wherever the C++ was
-    when it stopped -- IP already past the instruction if it faulted while
-    executing, since `ExecuteOne` advances IP first -- which is a state no
-    instruction produced, so nothing should step it again before a reset
-    (OH-223).
+    `Cpu.step` and `Cpu.decode` raise this from it. After a step the machine
+    is left wherever the C++ was when it stopped -- IP already past the
+    instruction if it faulted while executing, since `ExecuteOne` advances IP
+    first -- which is a state no instruction produced, so nothing should step
+    it again before a reset (OH-223).
 
     **Windows only.** On Linux the same fault is a signal, SIGFPE or SIGSEGV,
     that ctypes does not catch, and the process ends before this can be
     raised. OH-223's note records why nothing is done about that here.
     """
+
+    def __init__(self, message: str, at: tuple[int, int] | None,
+                 code: bytes, left: tuple[int, int] | None) -> None:
+        super().__init__(message)
+        #: CS:IP of the instruction the core was executing or decoding, or
+        #: None if reading that back faulted as well.
+        self.at = at
+        #: The first `FAULT_BYTES` bytes there, or as many as were read
+        #: before reading them faulted.
+        self.code = code
+        #: CS:IP as the core left it, or None if reading it faulted.
+        self.left = left
 
 
 #: What i8086_step returns. Mirrors i8086::StepStatus.
@@ -82,8 +94,15 @@ STEP_HALTED = 2
 
 #: How many bytes a `HostFault` shows from where its instruction began: the
 #: longest 8086 instruction without a prefix -- opcode, ModRM, a 16-bit
-#: displacement and a 16-bit immediate.
+#: displacement and a 16-bit immediate. A prefixed one can be longer, so the
+#: message says "the first" of them rather than calling them the instruction.
 FAULT_BYTES = 6
+
+#: How ctypes words an access violation that WROTE (its SetException formats
+#: "exception: access violation writing 0x..."). A wild write in the core may
+#: have landed anywhere in this process, not only in the machine a reset puts
+#: back, so a `HostFault` from one says to restart the process instead.
+WILD_WRITE = "access violation writing"
 
 
 class Registers(ctypes.Structure):
@@ -164,6 +183,7 @@ class Decoded(ctypes.Structure):
 
 _SIGNATURES = {
     "i8086_step": ([ctypes.c_void_p], ctypes.c_int),
+    "i8086_step_entry": ([ctypes.c_void_p], ctypes.c_uint32),
     "i8086_opcode_info": ([ctypes.c_uint8], ctypes.c_int),
     "i8086_minimum_cycles": ([ctypes.c_uint8, ctypes.c_uint8], ctypes.c_uint32),
     "i8086_decoded_size": ([], ctypes.c_uint32),
@@ -263,9 +283,6 @@ class Cpu:
         if not handle:
             raise AbiError("i8086_new returned null; allocation failed")
         self._handle = handle
-        #: The registers as the instruction `step` is executing found them.
-        #: See `step` for why they are read before it runs.
-        self._entry = Registers()
 
     # -- lifetime ----------------------------------------------------------
 
@@ -351,15 +368,18 @@ class Cpu:
         """Decode the instruction at cs:ip without executing it.
 
         Defaults to the current CS:IP, which is what a disassembly view wants.
+
+        A host fault in the core's decoder raises `HostFault`, chained from
+        the `OSError` ctypes raised, naming where it was decoding.
         """
         current = self.regs
+        where = (current.cs if cs is None else cs & 0xFFFF,
+                 current.ip if ip is None else ip & 0xFFFF)
         out = Decoded()
-        self._lib.i8086_decode(
-            self._check(),
-            current.cs if cs is None else cs & 0xFFFF,
-            current.ip if ip is None else ip & 0xFFFF,
-            ctypes.byref(out),
-        )
+        try:
+            self._lib.i8086_decode(self._check(), *where, ctypes.byref(out))
+        except OSError as fault:
+            raise self._host_fault(fault, "decoding", where) from fault
         return out
 
     def step(self) -> bool:
@@ -377,22 +397,16 @@ class Cpu:
         instruction cannot be single-stepped on the capture rig.
 
         A **host fault** in the core raises `HostFault`, chained from the
-        `OSError` ctypes raised, naming the instruction it was executing.
-        That is why the registers are read before every step: the core moves
-        IP past an instruction before executing it, so once it has faulted
-        executing one, IP points at the next, and naming that would send the
-        reader to the wrong line. The read costs about what the step does, which is
-        accepted here and not on the board cores (`core/avr/abi.py` says
-        why): this machine's callers are a person stepping a debugger, a run
-        bounded at `webui.emulator.MAX_RUN_STEPS`, and a conformance suite
-        whose setup per case dwarfs it.
+        `OSError` ctypes raised, naming the instruction it was executing. The
+        core moves IP past an instruction before executing it, so once it has
+        faulted executing one, IP points at the next; `i8086_step_entry` is
+        where the core recorded the step began, read only after a fault.
         """
         handle = self._check()
-        self._lib.i8086_get_regs(handle, self._entry)
         try:
             status = self._lib.i8086_step(handle)
         except OSError as fault:
-            raise HostFault(self._host_fault(fault)) from fault
+            raise self._host_fault(fault, "executing", None) from fault
         if status == STEP_HALTED:
             return False
         if status != STEP_OK:
@@ -403,32 +417,60 @@ class Cpu:
             )
         return True
 
-    def _host_fault(self, fault: OSError) -> str:
-        """What `HostFault` says: the instruction, the bytes there, and where
-        the core left CS:IP.
+    def _host_fault(self, fault: OSError, doing: str,
+                    at: tuple[int, int] | None) -> HostFault:
+        """The `HostFault` for `fault`, raised while `doing` -- "executing" or
+        "decoding" -- the instruction at `at`, or for a step (`at` None) the
+        one the core recorded the step began at.
 
-        The bytes are read the way the processor fetches them, wrapping inside
-        CS rather than across the megabyte. Reading them back calls into the
-        core again, and a fault that wrecked more than one instruction could
-        fault that too; that is said, rather than let a second `OSError`
-        replace the one being described.
+        Each read back is its own call into the core, and a fault that wrecked
+        more than one instruction could fault any of them: each that does is
+        said, and what was read before it kept, rather than let a second
+        `OSError` replace the one being described. The bytes are read the way
+        the processor fetches them, wrapping inside CS.
         """
-        cs, ip = self._entry.cs, self._entry.ip
+        failed: list[str] = []
+        if at is None:
+            try:
+                entry = int(self._lib.i8086_step_entry(self._handle))
+                at = (entry >> 16, entry & 0xFFFF)
+            except OSError as unreadable:
+                failed.append(f"where the step began ({unreadable})")
+        code = bytearray()
+        if at is not None:
+            try:
+                for offset in range(FAULT_BYTES):
+                    code.append(self.read_byte(physical(at[0], at[1] + offset)))
+            except OSError as unreadable:
+                failed.append(f"the bytes there ({unreadable})")
+        left: tuple[int, int] | None = None
         try:
-            code = bytes(self.read_byte(physical(cs, ip + offset))
-                         for offset in range(FAULT_BYTES))
-            left = self.regs
+            regs = self.regs
+            left = (regs.cs, regs.ip)
         except OSError as unreadable:
-            found = f"reading the machine back faulted as well ({unreadable})"
+            failed.append(f"the registers ({unreadable})")
+
+        said = [f"i8086: the core faulted on the host ({fault}) {doing} "
+                + (f"the instruction at {at[0]:04X}:{at[1]:04X}"
+                   if at is not None else "an instruction")]
+        if code:
+            said.append(f"the first {len(code)} bytes there are "
+                        f"{code.hex(' ').upper()}")
+        if left is not None:
+            said.append(f"CS:IP is now {left[0]:04X}:{left[1]:04X}")
+        if failed:
+            said.append(f"reading back {' and '.join(failed)} faulted as well")
+        if WILD_WRITE in str(fault):
+            after = ("a write in the core went astray, so this process may be "
+                     "damaged beyond the machine: restart it rather than reset")
+        elif doing == "executing":
+            after = ("the machine stopped part-way through the instruction: "
+                     "reset or load it before running again")
         else:
-            found = (f"the bytes there are {code.hex(' ').upper()}, and it "
-                     f"left CS:IP at {left.cs:04X}:{left.ip:04X}")
-        return (
-            f"i8086: the core faulted on the host ({fault}) executing the "
-            f"instruction at {cs:04X}:{ip:04X}; {found}. That is a bug in "
-            f"core/i8086, not in the program, and the machine stopped part-way "
-            f"through the instruction: reset or load it before running again."
-        )
+            after = "decoding changes nothing, so the machine is as it was"
+        message = (f"{'; '.join(said)}. That is a bug in core/i8086, not in "
+                   f"the program; {after}.")
+        return HostFault(message, at, bytes(code), left)
 
 
 def opcode_info(opcode: int) -> tuple[bool, bool]:
