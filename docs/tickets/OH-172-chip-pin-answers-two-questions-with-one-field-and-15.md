@@ -255,3 +255,66 @@ LEFT, for a later slice:
 (5) README.md:86-90's count, which slice 1 recorded and which is unclaimed.
 
 STATUS. in-review, for slice 2's review. The ticket is not done: LEFT above is its next slice. Its claims grew by tools/import_pindefs.py, tests/rules/test_import_pindefs.py, tools/inventory.py and the three regenerated board files, and tests/webui/test_board3d.py is still borrowed from OH-215.
+
+**Note 2026-10-13:** 2026-10-13, SLICE 2 REVIEW FIX ROUND. The verdict was COMMENT (mergeable). Fixes are in 28f8050 (pindefs and its tests), d1404d4 (the panel) and 546614a (inventory's prose), on top of 97f1b86. The ticket stays in-review.
+
+MEDIUM-1. Failing _CHIP_PIN_NAME is not the same as "outside the GPIO numbering". On Espressif footprints the caption branch would caption real GPIOs: the C6's GPIO4{slash}MTMS reaches a pad named MTMS, the C5's D1{slash}GPIO0 reaches XTAL_32K_P, and the C5's D7{slash}RX{slash}GPIO12 reaches U0RXD.
+- FIX. In read_seeed_traced's one-pad branch, the net's own name is split on {slash}, / and _. If any part is a pin by _CHIP_PIN_NAME or _NAMED_GPIO, the label is refused, with an error naming the net, the pad function and the token.
+- WHY REFUSE AND NOT ANSWER. Answering from the name would make the tracer a second net-name reader, whose answer the copper does not confirm. _trace has the same rule: a name is a cross-check and never the source. read_seeed_net_names (seeed_pcb) is the reader that takes pins from names, and the C6's entry already reads MTMS that way.
+- THE GENERATED SENTENCE now says only what is known: "`MG24_EN` reaches a pad the vendor's footprint names `RESET`, with no GPIO number, so its `chip_pin` is a caption only: `chip_index` is null and no level is read through it." The comments that said "outside the numbering" in general now say the same, and say why: an ESP32's MTMS pad is GPIO4.
+- TEST, new: test_a_pad_with_no_gpio_number_on_a_net_named_for_a_gpio_is_refused. It uses the C6's MTMS, then checks that read_seeed_net_names gives GPIO4 and that BOOT is still GPIO9. Red first: DID NOT RAISE.
+- BREAK B1: the refusal disabled. The test went red.
+- MEASURED after the fix: the review's three cases are refused. The C6's D7{slash}RX would still caption U0RXD, because no part of that net's name is a pin. The sentence claims only "no GPIO number", which is true. And on that board a package's GPIO beside the caption disputes the pad rather than letting the caption stand.
+
+LOW-1. New test_every_registry_reason_is_carried_by_a_pad_nothing_answered. On every non-manifest board, a pad whose label has a reason in BOARDS has no chip_pin, and its why_null is that reason. This mirrors test_board_manifest.py's test for the rows.
+- BREAK B2, the review's probe G1: a reason put back on the nRF54LM20A's nRF54_SWDIO. The test went red; before this round, nothing did.
+
+LOW-2. read_seeed_traced now gathers every net's answer for a label, and refuses a label when two nets answer it differently. Two nets with one answer are one answer. It also refuses a net that reaches a GPIO pad and another pad of the part, as _trace does; the GPIO used to win silently. No real board hits either case: no traced part has two nets ending in one label.
+- TEST, new: test_a_label_answered_two_ways_by_its_copper_is_refused, on a three-line KiCad fixture, _seeed_board. Red first: DID NOT RAISE, on both refusals.
+- BREAK B3: the two-nets refusal disabled. BREAK B4: the GPIO-plus-another-pad refusal disabled. Each went red.
+
+LOW-3. New test_a_net_on_several_pads_of_one_function_names_none_of_them, on the nRF54L15's VSYS_3V3 (VDD, VDD) and the C5's GND (four GND pads). Both give {}. This is a control and held before the fix.
+- BREAK B5: the reviewer's surviving mutant, len(set(functions)) == 1. It is now killed.
+
+LOW-4. The Chip pin column draws KiCad's ~{X} as X with a CSS overline, and keeps the verbatim caption in the cell's title. The data is unchanged. captionParts, in webui/static/board3d-panel.js, splits a caption into plain runs and overlined runs.
+- TEST, new: test_a_caption_in_kicad_overbar_markup_is_drawn_overlined_and_kept_verbatim, in tests/webui/test_board3d.py. It runs captionParts under node on seven captions, ~11 among them, and checks that renderTable uses it. Red first: the caption was printed raw.
+- BREAK B9: the overbar read as plain text. The test went red.
+- BALL SUFFIX, NOT STRIPPED, and why. The gate drops whatever follows a GPIO name, because the GPIO name is what it reads. A pad with no GPIO number has no name to anchor on. A generic rule for a trailing _<letter><digit> would also cut a function such as ADC1_CH1, and which suffix is a ball is a fact about the package. So SWDIO_G2 stays as the vendor wrote it. pinOrder's tilde handling is unchanged: it sorts labels, and no caption reaches it.
+
+LOW-5.
+(a) The sentence for a board no package covers counts only gate-passing pins: "Of those, N is/are the only pad(s) ...". With no captions the output is byte for byte what it was; the STM32C5's file did not change.
+(b) header_table's on_board list is gated as rows are.
+(c) filled_board refuses a caption that carries a chip_index, naming the pad, the pin and the number.
+- TESTS, new: test_a_board_no_package_covers_counts_only_the_pins_the_gate_takes, red first because "Those 2 pads" was there; and test_a_caption_never_sits_in_the_on_board_rows_or_carries_an_index, red first because on_board was ('LED',).
+- BREAKS: B6, the old count restored, turned the first red. B7, on_board ungated, and B8, the index refusal disabled, each turned the second red.
+
+LOW-6. The nRF54L15 SMD's nRF54_SWDIO and nRF54_SWCLK are traced now, as the nRF54LM20A's are, and _NRF54L15_DEBUG is removed. Each net reaches one pad of the part, SWDIO and SWDCLK, and they become captions. The RP2350's pair is untraced and keeps its reason.
+- TEST, restated: test_a_dedicated_debug_pad_says_so_rather_than_that_nobody_named_it now holds the RP2350's reason, and holds the nRF54L15's captions against the footprint.
+- COUNTS, restated with a ladder line each: naming 569 -> 571, specific 65 -> 63, crystals 4 -> 2.
+- BREAK B10: nRF54_SWDIO hand-edited to SWD in the board file. This test and the generator-match test went red.
+
+NOTE-ONLY. tools/inventory.py's markdown sentence about chip_pin no longer says every pin came from a board-support package and levels come "through the same table". It now says chip_pin is a caption, and that `modelled` says where a level is read. The per-pad position join is still printed by `python tools/import_pindefs.py <board>` and not stored in the file.
+
+Every break was applied alone, and every file was restored and checked by sha256.
+
+REGENERATED with python tools/import_pindefs.py --write-headers --write-boards. It wrote XIAO-MG24-SMD.json, XIAO-nRF54l15-SMD.json and XIAO-nRF54LM20A-SMD.json, whose assumption sentences changed. The nRF54L15 file also gained two captions. A second run reported all 42 unchanged.
+
+CAPTIONS NOW, via api.pad_view over the catalogue, picked. Each has modelled False:
+    XIAO-MG24-SMD        MG24_EN      RESET
+    XIAO-nRF54LM20A-SMD  nRF54_SWDIO  SWDIO_G2
+    XIAO-nRF54LM20A-SMD  nRF54_SWCLK  SWDCLK_G1
+    XIAO-nRF54l15-SMD    nRF54_EN     ~{RESET}
+    XIAO-nRF54l15-SMD    nRF54_SWDIO  SWDIO
+    XIAO-nRF54l15-SMD    nRF54_SWCLK  SWDCLK
+
+INVENTORY, python tools/inventory.py:
+    TWINS: 26 of 38 boards hold all four; by layer: geometry 38, model 37, pins 37, runs 26     (unchanged)
+    XIAO-nRF54l15-SMD    pins 22+5/27 -> 24+3/27
+Nothing else moved except the test counts.
+
+VERIFIED.
+- python -m pytest -q -p no:cacheprovider tests/rules/test_import_pindefs.py tests/rules/test_inventory.py tests/rules/test_board_manifest.py tests/webui/test_pin_view.py tests/webui/test_board3d.py tests/webui/test_board_catalogue.py: 492 passed, 1 skipped (OH_SLOW's variant survey), on the tree committed as 546614a. Slice 2 was 485 passed.
+- Checker rows, each run on its own, each exit 0 and OK: check_layering, check_board_contract, check_part_schemas, check_licenses, check_deltas, check_banned_symbols, check_board_claims, check_ticket_claims, ticket_guard --self-test 6/6, check_facts, and board-sources render.py --check. checkall.missing_from_table() is empty.
+- Neither checkall.py nor the full suite was run.
+
+LEFT is as the slice 2 note says, with one item added. A pad its footprint names by function, on a net whose name carries no pin -- the C6's D7{slash}RX to U0RXD, which is GPIO17 -- would still be captioned if traced. On a covered board a package's GPIO beside that caption disputes the pad. A board no package covers would show the caption alone.
