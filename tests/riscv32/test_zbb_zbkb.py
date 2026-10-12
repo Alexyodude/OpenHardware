@@ -52,9 +52,10 @@
 # so rvcpp is built with MSVC through `tests/riscv32/oracle/
 # rvcpp_msvc_shim.h`, which supplies the four GCC builtins rvcpp computes
 # `clz`, `ctz`, `cpop` and `rev8` with -- `_BitScanReverse`,
-# `_BitScanForward`, `__popcnt`, `_byteswap_ulong`. For those four the
-# oracle's arithmetic is that shim over MSVC's intrinsics (rvcpp itself
-# answers the zero cases before calling them), so they are also checked
+# `_BitScanForward`, `std::bitset::count` (OH-219; `__popcnt` before it),
+# `_byteswap_ulong`. For those four the oracle's arithmetic is that shim
+# over MSVC's intrinsics and library (rvcpp itself answers the zero cases
+# before calling them), so they are also checked
 # against the spec's Sail in Python, a third implementation, below.
 #
 # What lockstep cannot see at all is gating: rvcpp runs every extension on

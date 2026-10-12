@@ -13,6 +13,8 @@
 
 #include <intrin.h>
 
+#include <bitset>
+
 // main.cpp declares `void exit_help(std::string errtext = "")` and never
 // includes <string>. libstdc++ drags it in transitively; MSVC does not.
 #include <string>
@@ -40,8 +42,14 @@ static inline int __builtin_ctz(unsigned int x) {
     return (int)index;
 }
 
+// Not `__popcnt`, which is the POPCNT instruction itself: MSVC emits it
+// unconditionally, and a CPU without it faults on the first `cpop` (OH-219).
+// `std::bitset::count` asks the CPU first and counts in plain arithmetic
+// where POPCNT is absent -- MSVC 14.44's `__msvc_bit_utils.hpp`,
+// `_Select_popcount_impl` checking `__isa_available`. The other three need
+// nothing past the 486: BSR, BSF and BSWAP.
 static inline int __builtin_popcount(unsigned int x) {
-    return (int)__popcnt(x);
+    return (int)std::bitset<32>(x).count();
 }
 
 static inline unsigned int __builtin_bswap32(unsigned int x) {
