@@ -993,3 +993,39 @@ def test_a_reset_machine_keeps_no_input_behind(pins):
     pins.reset()
     pins.map_register(GPIO_IN, 0x1234)
     assert pins.read_word(GPIO_IN) == 0x1234
+
+
+def test_anything_mapped_over_an_input_replaces_it(pins):
+    """Mapping an address again replaces what was there, which is what
+    `map_input` over an input already does. A register or an alias mapped
+    over a live input must too: the input would otherwise go on answering
+    from a table the new mapping knows nothing about, and refuse no drive.
+    Found by OH-161's step-3 review."""
+    pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+    pins.map_register(GPIO_IN, 0x1234)
+    assert pins.read_word(GPIO_IN) == 0x1234
+    with pytest.raises(abi.AbiError):
+        pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+
+    map_pins(pins)
+    pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+    pins.map_alias(GPIO_IN, GPIO_OUT, "store", readable=True)
+    pins.write_word(GPIO_OUT, 0x5678)
+    assert pins.read_word(GPIO_IN) == 0x5678
+
+    # A stream reads zero, where the input would read pin 0 driven high.
+    map_pins(pins)
+    pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+    pins.map_stream(GPIO_IN, enable=GPIO_OUT, enable_mask=1)
+    assert pins.read_word(GPIO_IN) == 0
+    with pytest.raises(abi.AbiError):
+        pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)
+
+    # A counter's three registers each replace an input at their address.
+    map_pins(pins)
+    pins.map_snapshot_counter(
+        op=GPIO_IN, update_mask=1, valid_mask=2, low=GPIO_IN + 0x100,
+        high=GPIO_IN + 0x104, high_mask=0xFFFFFFFF, enable=GPIO_OUT,
+        enable_mask=1, instructions_per_tick=1)
+    with pytest.raises(abi.AbiError):
+        pins.drive_input(GPIO_IN, driven=0b0001, levels=0b0001)

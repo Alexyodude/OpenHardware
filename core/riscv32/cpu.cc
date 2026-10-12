@@ -263,8 +263,16 @@ void Cpu::clear_mmio() {
     inputs_.clear();
 }
 
+void Cpu::forget_input(uint32_t at) {
+    inputs_.erase(
+        std::remove_if(inputs_.begin(), inputs_.end(),
+                       [&](const Input& input) { return input.address == at; }),
+        inputs_.end());
+}
+
 void Cpu::map_register(uint32_t address, uint32_t value) {
     const uint32_t at = address & ~3u;
+    forget_input(at);
     Mapped entry;
     entry.value = value;
     entry.target = at;
@@ -274,6 +282,7 @@ void Cpu::map_register(uint32_t address, uint32_t value) {
 void Cpu::map_alias(uint32_t address, uint32_t target, WriteOp op,
                     bool readable) {
     const uint32_t at = address & ~3u;
+    forget_input(at);
     Mapped entry;
     entry.target = target & ~3u;
     entry.op = op;
@@ -284,6 +293,7 @@ void Cpu::map_alias(uint32_t address, uint32_t target, WriteOp op,
 void Cpu::map_stream(uint32_t address, uint32_t enable_address,
                      uint32_t enable_mask) {
     const uint32_t at = address & ~3u;
+    forget_input(at);
     // Registered in `mmio_` as well, so `is_mapped` sees it and a READ answers
     // this entry's value, which stays zero. The stream table alone would make
     // the address respond to writes and fault on reads -- and a UART data
@@ -323,6 +333,7 @@ void Cpu::map_snapshot_counter(uint32_t op_address, uint32_t update_mask,
     // accesses reach `mmio_read`/`mmio_write`, which consult `snapshots_`
     // before the stored word -- so the word these entries hold is never read.
     for (const uint32_t at : {counter.op, counter.low, counter.high}) {
+        forget_input(at);
         Mapped entry;
         entry.target = at;
         mmio_[at] = entry;

@@ -350,7 +350,8 @@ public:
     /// nothing -- faults naming `address`: a board that named the wrong pad
     /// block would otherwise describe pins that never read their own pulls.
     /// Writes to `address` are ignored, as a read-only register ignores them.
-    /// Mapping the same address again replaces it and forgets its drive.
+    /// Mapping the same address again replaces it and forgets its drive, and
+    /// so does mapping anything else there (`forget_input`).
     void map_input(uint32_t address, uint32_t out_address,
                    uint32_t enable_address, uint32_t pad_base,
                    uint32_t pad_stride, uint32_t pads,
@@ -574,6 +575,13 @@ private:
     /// `address` where one of the registers it is computed from cannot be
     /// read. See `map_input` for the order each bit is decided in.
     bool input_levels(const Input& input, uint32_t address, uint32_t& out) const;
+
+    /// Forget the input at `at`, drive and all. Every `map_*` calls it for
+    /// each address it maps, so a register, an alias, a stream or a counter
+    /// mapped over an input replaces it, as `map_input` over one does --
+    /// `mmio_read` asks `inputs_` before the stored word, and an input left
+    /// behind would go on answering for an address it no longer owns.
+    void forget_input(uint32_t at);
 
     std::array<uint32_t, kRegisters> x_{};
     uint32_t pc_ = 0;
