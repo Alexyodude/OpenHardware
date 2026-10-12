@@ -886,13 +886,30 @@ function runLine(report) {
   const fast = report.rate === null
     ? ""
     : `, ${Math.round(report.rate).toLocaleString()}/s`;
-  // Any status but running says why (OH-225): "stopped" is the core refusing
-  // the firmware, "faulted" the core itself failing, and the detail says which.
-  const stopped = report.status === "running"
-    ? ""
-    : ` and ${report.status}: ${report.detail}`;
+  // The core's sentence ends with its own full stop, dropped so the line does
+  // not end it twice before the pc.
+  const why = stopDetail(report.status, report.detail);
+  const stopped = why ? ` and ${report.status}: ${why.replace(/\.$/, "")}` : "";
   return `${boardImage.board}: ${report.steps.toLocaleString()} instructions` +
          `${fast}${stopped}. pc 0x${$("where").textContent}`;
+}
+
+/** Why a board is not running, in the core's own sentence, or "" while it is.
+ *
+ *  Any status but running (OH-225): "stopped" is the core refusing the
+ *  firmware, "faulted" the core itself failing, and the sentence says which.
+ *  The one decision a run's tick and a step share. */
+function stopDetail(status, detail) {
+  return status === "running" ? "" : detail;
+}
+
+/** One line about a step: where the board got to, and why it stopped if it
+ *  did, as `runLine` says it about a run. */
+function stepLine(board, state, where) {
+  const why = stopDetail(state.status, state.detail);
+  return why
+    ? `${board} ${state.status}: ${why.replace(/\.$/, "")}. pc 0x${where}`
+    : `${board}: stepped. pc 0x${where}`;
 }
 
 /** A board route with whatever the watch box asks for riding it.
@@ -982,8 +999,7 @@ async function runLoadedBoard() {
       const state = await api(boardStateUrl());
       renderBoardConsole(state.uart);
       renderBoardState(state);
-      boardSays(runLine(report),
-                report.status === "running" ? "" : report.detail);
+      boardSays(runLine(report), stopDetail(report.status, report.detail));
     },
   });
 
@@ -997,6 +1013,22 @@ async function runLoadedBoard() {
     boardRunning = null;
     showBoardRunning(false);
   }
+}
+
+/** One instruction, through the same door Run uses; the clock is stopped
+ *  first so the step is the only thing that moves the machine.
+ *
+ *  The reply is the board's state, so the step says where it got to and, if
+ *  it left the board stopped or faulted, why, as a run's tick does (OH-225).
+ *  A refusal -- no board loaded, a server gone -- is thrown for the button's
+ *  `.catch` to report, as Load's and Run's are. */
+async function stepLoadedBoard() {
+  await stopBoardClock();
+  showBoardRunning(false);
+  const state = await api(watchedUrl("/api/board/step"), {});
+  renderBoardState(state);
+  boardSays(stepLine(boardImage.board, state, $("where").textContent),
+            stopDetail(state.status, state.detail));
 }
 
 /** The previous board register snapshot, keyed by name, for the "changed"
@@ -1267,20 +1299,8 @@ function wire() {
     reflectBuildability();
     window.boardPins?.reload().catch(() => {});
   });
-  $("board-step").addEventListener("click", async () => {
-    // One instruction, through the same door Run uses; the clock is stopped
-    // first so the step is the only thing that moves the machine.
-    await stopBoardClock();
-    showBoardRunning(false);
-    const state = await api(watchedUrl("/api/board/step"), {});
-    renderBoardState(state);
-    // A step that leaves the board stopped or faulted says why, as a run's
-    // tick does: the reply carries both (OH-225).
-    if (state.status !== "running") {
-      boardSays(`${boardImage.board} ${state.status}: ${state.detail}. ` +
-                `pc 0x${$("where").textContent}`, state.detail);
-    }
-  });
+  $("board-step").addEventListener("click", () =>
+    stepLoadedBoard().catch((error) => boardSays($("board-report").textContent, String(error.message || error))));
   $("board-load").addEventListener("click", () =>
     loadBoardImage().catch((error) => boardSays("Nothing loaded yet.", String(error.message || error))));
   $("board-go").addEventListener("click", () =>

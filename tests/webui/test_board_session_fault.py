@@ -614,17 +614,56 @@ def test_the_server_says_faulted_for_a_host_fault(live_server, monkeypatch):
 # --- the page -----------------------------------------------------------------------
 #
 # `webui/static/emulator.js` showed why a board stopped only when its status
-# was "stopped", so a "faulted" board stopped with no reason on the page; and
-# its Step button showed neither. The run line is a function node can call;
-# the clock's tick and the Step button are wiring inside closures, which node
-# cannot reach without a DOM, so those are read out of the source the way
-# `tests/webui/test_clock.py` reads the clock's wiring.
+# was "stopped", so a "faulted" board stopped with no reason on the page, and
+# its Step button showed neither. The page's own function declarations run
+# here under node: `stopDetail` directly, and the run clock's tick and the
+# Step button through `runLoadedBoard` and `stepLoadedBoard`, with what they
+# reach outside themselves -- the server, the DOM, the clock -- stubbed. The
+# click listeners are wired by `wire()` at load, which node cannot reach
+# without a DOM, so only the Step listener's `.catch` is read out of the
+# source, the way `tests/webui/test_clock.py` reads the clock's wiring.
 
 EMULATOR_JS = REPO / "webui" / "static" / "emulator.js"
 
+#: What every page script starts with: a DOM of plain objects keyed by id, a
+#: board already loaded, and a clock that runs the reports in `ticks` through
+#: its `onTick` and stops, as `clock.js` does when a status is not running.
+PAGE_STUBS = """\
+const elements = {};
+const $ = (id) => (elements[id] ??= { textContent: "", value: "" });
+let boardImage = { board: "XIAO-RP2040-DIP" };
+let boardClock = null;
+let boardRunning = null;
+let replies = [];
+let ticks = [];
+const window = { BoardClock: { Clock: class {
+  constructor(options) { this.options = options; this.running = false; }
+  async start() {
+    this.running = true;
+    for (const report of ticks) await this.options.onTick(report);
+    this.running = false;
+  }
+  stop() { this.running = false; }
+} } };
+"""
+
+#: Replaced after the page's functions are declared: `api` would fetch, so it
+#: answers from `replies` in order instead; the two renderers would draw, so
+#: the one thing `runLine` and `stepLine` read back -- `#where` -- is all they
+#: set.
+PAGE_OVERRIDES = """\
+api = async () => {
+  const next = replies.shift();
+  if (next instanceof Error) throw next;
+  return next;
+};
+renderBoardState = (state) => { $("where").textContent = state.pc.toString(16); };
+renderBoardConsole = () => {};
+"""
+
 
 def page_source() -> str:
-    """emulator.js without its comment lines, which mention statuses too."""
+    """emulator.js without its comment lines."""
     return "\n".join(
         line for line in EMULATOR_JS.read_text(encoding="utf-8").splitlines()
         if not line.lstrip().startswith(("//", "/*", "*")))
@@ -646,21 +685,18 @@ def page_functions() -> str:
     return "\n".join(kept)
 
 
-def run_line(tmp_path: pathlib.Path, report: dict[str, object], board: str,
-             where: str) -> str:
-    """`runLine(report)` from the page, under node, with the two things it
-    reads from the page -- the loaded board and `#where` -- stubbed. From a
-    file, because the page's functions are longer than a Windows command
-    line."""
+def run_page(tmp_path: pathlib.Path, body: str):
+    """Run `body`, the body of an async function, after the page's functions
+    under node, and return what it returns. From a file, because the page's
+    functions are longer than a Windows command line."""
     node = shutil.which("node")
     if node is None:
-        pytest.skip("no node on PATH; runLine is the page's and runs under node")
-    script = tmp_path / "run_line.js"
+        pytest.skip("no node on PATH; the page's functions run under node")
+    script = tmp_path / "page.js"
     script.write_text(
-        f"const $ = (id) => ({{ textContent: {json.dumps(where)} }});\n"
-        f"let boardImage = {{ board: {json.dumps(board)} }};\n"
-        f"{page_functions()}\n"
-        f"process.stdout.write(JSON.stringify(runLine({json.dumps(report)})));\n",
+        PAGE_STUBS + page_functions() + "\n" + PAGE_OVERRIDES
+        + "(async () => {\n" + body + "\n})().then(\n"
+        + "  (out) => process.stdout.write(JSON.stringify(out)));\n",
         encoding="utf-8")
     done = subprocess.run([node, str(script)], capture_output=True, text=True,
                           timeout=60)
@@ -668,38 +704,74 @@ def run_line(tmp_path: pathlib.Path, report: dict[str, object], board: str,
     return json.loads(done.stdout)
 
 
-def test_the_run_line_says_why_for_any_status_that_is_not_running(tmp_path):
-    """"faulted" is said with its reason, as "stopped" always was; a board
+#: A core's sentence, which ends with its own full stop, as every HostFault's
+#: and MemoryFault's does.
+DETAIL = ("cortexm0: the core faulted on the host (exception: access "
+          "violation reading 0x10); load the image again before running it.")
+
+
+def test_stop_detail_is_the_reason_for_any_status_but_running(tmp_path):
+    """The one decision the tick and the Step button share."""
+    said = run_page(tmp_path, """
+        return [stopDetail("stopped", "a."), stopDetail("faulted", "b."),
+                stopDetail("running", "")];""")
+    assert said == ["a.", "b.", ""], said
+
+
+def test_a_run_tick_says_why_the_board_stopped_with_one_full_stop(tmp_path):
+    """Through `runLoadedBoard`'s own tick: the run line names the status and
+    the core's sentence, without that sentence's full stop doubling the one
+    before the pc, and the sentence itself goes on the error line. A board
     still running gets no reason."""
-    detail = "cortexm0: the core faulted on the host (exception: ...)"
+    said = run_page(tmp_path, f"""
+        const out = {{}};
+        for (const status of ["stopped", "faulted", "running"]) {{
+          ticks = [{{ steps: 999, rate: null, status,
+                      detail: status === "running" ? "" : {json.dumps(DETAIL)} }}];
+          replies = [{{ pc: 0x10000138, uart: {{}} }}];
+          await runLoadedBoard();
+          out[status] = [$("board-report").textContent, $("board-error").textContent];
+        }}
+        return out;""")
+    reason = DETAIL[:-1]
     for status in ("stopped", "faulted"):
-        line = run_line(tmp_path, {"steps": 999, "rate": None, "status": status,
-                                   "detail": detail}, "XIAO-RP2040-DIP", "10000138")
-        assert f"{status}: {detail}" in line, (status, line)
-        assert line.startswith("XIAO-RP2040-DIP: 999 instructions"), line
-        assert line.endswith("pc 0x10000138"), line
-    line = run_line(tmp_path, {"steps": 5000, "rate": None, "status": "running",
-                               "detail": ""}, "XIAO-RP2040-DIP", "10000140")
-    assert line == "XIAO-RP2040-DIP: 5,000 instructions. pc 0x10000140", line
+        assert said[status] == [
+            f"XIAO-RP2040-DIP: 999 instructions and {status}: {reason}. "
+            f"pc 0x10000138", DETAIL], (status, said[status])
+    assert said["running"] == [
+        "XIAO-RP2040-DIP: 999 instructions. pc 0x10000138", ""], said["running"]
 
 
-def test_the_clock_and_the_step_button_show_why_for_any_status():
-    """The clock's tick put the detail under the run line only for
-    "stopped"; the Step button redrew the panes and said nothing, though
-    its reply carries status and detail (OH-225)."""
+def test_a_step_says_where_it_got_to_and_why_it_stopped(tmp_path):
+    """Through `stepLoadedBoard`: the step reply is the board's state, and it
+    carries status and detail, so a step that leaves the board stopped or
+    faulted says so as a run's tick does, and one that leaves it running
+    says where it got to."""
+    said = run_page(tmp_path, f"""
+        const out = {{}};
+        for (const status of ["stopped", "faulted", "running"]) {{
+          replies = [{{ pc: 0x10000140, status,
+                        detail: status === "running" ? "" : {json.dumps(DETAIL)} }}];
+          await stepLoadedBoard();
+          out[status] = [$("board-report").textContent, $("board-error").textContent];
+        }}
+        return out;""")
+    reason = DETAIL[:-1]
+    for status in ("stopped", "faulted"):
+        assert said[status] == [
+            f"XIAO-RP2040-DIP {status}: {reason}. pc 0x10000140", DETAIL], (
+            status, said[status])
+    assert said["running"] == [
+        "XIAO-RP2040-DIP: stepped. pc 0x10000140", ""], said["running"]
+
+
+def test_a_step_the_server_refuses_is_said_on_the_page():
+    """The Step button's handler had no `.catch`, so a refused step -- no
+    board loaded, a server gone -- was an unhandled rejection and the page
+    said nothing. It reports into the board panel as Load and Run do."""
     code = page_source()
-    assert 'status === "stopped"' not in code, (
-        "a reason is still shown for one status only, so a faulted board "
-        "stops without one")
-    tick = code.split("onTick: async (report) => {", 1)
-    assert len(tick) == 2, "the run clock has no onTick to read"
-    assert "report.detail" in tick[1].split("},", 1)[0], (
-        "the clock's tick no longer shows the core's reason")
-    wiring = code.split('$("board-step").addEventListener("click"', 1)
-    assert len(wiring) == 2, "the Step button has no click listener"
-    # To the listener's own close, at its indent: `api(..., {});` inside it
-    # ends in the same three characters.
-    listener = wiring[1].split("\n  });", 1)[0]
-    assert "boardSays(" in listener and ".detail" in listener, (
-        "the Step button shows neither the status nor the reason a step "
-        "stopped the board")
+    wiring = code.split('$("board-step").addEventListener("click", () =>', 1)
+    assert len(wiring) == 2, "the Step button's listener is not a call to catch"
+    listener = wiring[1].split(");\n", 1)[0]
+    assert "stepLoadedBoard().catch((error) => boardSays(" in listener, listener
+    assert "String(error.message || error)" in listener, listener
