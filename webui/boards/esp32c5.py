@@ -283,6 +283,19 @@ IO_MUX_AT_RESET: dict[int, int] = {
     for gpio, (drv, code) in IO_MUX_PADS.items()
 }
 
+#: The current each `FUN_DRV` value drives, in amps: the "Drive Strength"
+#: legend under Table 8.13-1, p.324, 5 mA to 40 mA for 0 to 3, with no pad
+#: excepted -- the C3's legend swaps 1 and 2 on six pads and this one does
+#: not -- and Register 8.25, p.353, the same.
+FUN_DRV_AMPS: dict[int, float] = {0: 0.005, 1: 0.010, 2: 0.020, 3: 0.040}
+
+#: Each pad's current at the drive it comes out of reset with, its
+#: `IO_MUX_PADS` "DRV" column read through the legend: ~20 mA but for GPIO13
+#: and 14, the USB pads, at ~40 mA. `SUPPLY` takes its resistances from these.
+RESET_DRIVE_AMPS: dict[int, float] = {
+    gpio: FUN_DRV_AMPS[drv] for gpio, (drv, _code) in IO_MUX_PADS.items()
+}
+
 #: UART0's base, `register/soc/reg_base.h:13` -- `#define DR_REG_UART0_BASE 0x60000000`. UART0 is the base itself and the only one modelled.
 #:
 #: **Not because it is where a XIAO's `Serial` goes by default.** On these
@@ -471,16 +484,22 @@ PIN_NAMES: dict[str, str] = {label: f"GPIO{gpio}" for label, gpio in HEADER.item
 #: argument**, and it holds here word for word: the input levels are
 #: guarantees, and the two resistances are TYPICAL -- this part's VOH and VOL
 #: are measured into no load (Table 5-4 note 2) and its currents are Typ --
-#: so `typical` is set and the page says "about" and holds a current through
-#: a pin to no rating. The numbers are the C3's because the table's are,
-#: line for line, and the TRM's drive strengths are too; what this part does
-#: not have is the C3's exception, so every header pad's reset `FUN_DRV` 2 is
-#: ~20 mA.
+#: so `typical` is set and the page says "about", rests no verdict on a
+#: current through a pin, and says a limit it passes is typically passed.
+#: The numbers are the C3's because the table's are,
+#: line for line, and so is the arithmetic from each pad's reset current,
+#: `RESET_DRIVE_AMPS`: `source_ohms` and `sink_ohms` are the ~20 mA pads',
+#: and `pad_ohms` the two that reset at ~40 mA. What this part does not have
+#: is the C3's ~10 mA pads.
 SUPPLY: dict[str, object] = {
     "chip": "ESP32-C5",
     "volts": 3.3,
     "source_ohms": 33.0,
     "sink_ohms": 35.4,
+    "pad_ohms": {
+        gpio: (round(0.66 / amps, 1), round(0.495 / (0.028 * amps / 0.040), 1))
+        for gpio, amps in RESET_DRIVE_AMPS.items() if amps != 0.020
+    },
     "typical": True,
     "rated_amps": None,
     "absolute_amps": None,
@@ -494,17 +513,22 @@ SUPPLY: dict[str, object] = {
             "VDDPST3 -- the I/O supply on every board carrying this part"
         ),
         "source_ohms": (
-            "derived: (3.3 - 0.8 * 3.3) / 0.020. Datasheet v1.5 Table 5-4, "
-            "`DC Characteristics (3.3 V, 25 C)`, p.71: IOH typ 40 mA at "
-            "VDD = 3.3 V, VOH >= 2.64 V, PAD_DRIVER = 3. TRM v1.1 Register "
-            "8.25, `IO_MUX_GPIOn_REG`, p.353: FUN_DRV 3 is ~40 mA and 2, every "
-            "header pad's reset drive, is ~20 mA -- as v5.5's "
+            "derived: (3.3 - 0.8 * 3.3) / 0.020, for a pad that resets at "
+            "~20 mA. Datasheet v1.5 Table 5-4, `DC Characteristics (3.3 V, "
+            "25 C)`, p.71: IOH typ 40 mA at VDD = 3.3 V, VOH >= 2.64 V, "
+            "PAD_DRIVER = 3. TRM v1.1 Register 8.25, `IO_MUX_GPIOn_REG`, "
+            "p.353: FUN_DRV 3 is ~40 mA and 2 is ~20 mA -- as v5.5's "
             "`io_mux_struct.h:75-80` also states. TYPICAL, not a bound"
+        ),
+        "pad_ohms": (
+            "source_ohms' and sink_ohms' arithmetic at each other pad's own "
+            "reset current, `RESET_DRIVE_AMPS`: ~40 mA on GPIO13 and 14 "
+            "(16.5 and 17.7 ohm). TYPICAL, not a bound"
         ),
         "sink_ohms": (
             "derived: 0.495 / (0.028 / 2), rounded to 0.1 ohm. Same table: "
             "IOL typ 28 mA at VDD = 3.3 V, VOL = 0.495 V, PAD_DRIVER = 3, "
-            "halved to FUN_DRV 2 by the same register's ~20 of ~40 mA -- an "
+            "halved for a ~20 mA pad as the source current is -- an "
             "assumption, since the TRM gives one strength per field value and "
             "does not say sourcing or sinking. TYPICAL, not a bound"
         ),

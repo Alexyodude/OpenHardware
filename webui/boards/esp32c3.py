@@ -218,6 +218,27 @@ IO_MUX_AT_RESET: dict[int, int] = {
     for gpio, (drv, code) in IO_MUX_PADS.items()
 }
 
+#: The current each `FUN_DRV` value drives, in amps: the "Drive Strength"
+#: legend under Table 5.12-1, p.174, "~5 mA" to "~40 mA" for 0 to 3, and
+#: Register 5.21's `IO_MUX_GPIOn_FUN_DRV`, p.188, the same.
+FUN_DRV_AMPS: dict[int, float] = {0: 0.005, 1: 0.010, 2: 0.020, 3: 0.040}
+
+#: The pads on which `FUN_DRV` 1 and 2 trade places, 1 being ~20 mA and 2
+#: ~10 mA. The p.174 legend lists GPIO2, GPIO3, GPIO4, GPIO5, GPIO18 and
+#: GPIO19; Register 5.21, p.188, lists "GPIO2, GPIO3, GPIO5, GPIO18, GPIO18,
+#: GPIO19" -- GPIO18 twice and GPIO4 not at all, which reads as GPIO4 typed
+#: as GPIO18 -- so the legend's six are taken. GPIO4 is a XIAO's D2.
+FUN_DRV_SWAPPED: frozenset[int] = frozenset({2, 3, 4, 5, 18, 19})
+
+#: Each pad's current at the drive it comes out of reset with: its
+#: `IO_MUX_PADS` "DRV" column read through the legend. Most are 2 and
+#: ~20 mA; GPIO2 to 5 are 2 and ~10 mA; GPIO18 and 19, the USB pads, are 3
+#: and ~40 mA. `SUPPLY` takes its resistances from these.
+RESET_DRIVE_AMPS: dict[int, float] = {
+    gpio: FUN_DRV_AMPS[{1: 2, 2: 1}.get(drv, drv) if gpio in FUN_DRV_SWAPPED else drv]
+    for gpio, (drv, _code) in IO_MUX_PADS.items()
+}
+
 #: UART0's base, from `soc.h`:
 #:
 #:     #define DR_REG_UART_BASE  0x60000000                          :42
@@ -430,19 +451,20 @@ PIN_NAMES: dict[str, str] = {label: f"GPIO{gpio}" for label, gpio in HEADER.item
 #: guarantees no such corner: its VOH min 0.8 x VDD and VOL max 0.1 x VDD are
 #: "measured using high-impedance load" (Table 5-4 note 2), at no current, and
 #: its source and sink currents are given only as Typ. So `typical` is set,
-#: and the page says a current through one of these pins is "about" so much
-#: and holds it to no rating: a typical figure over a limit is not a fact and
-#: one under it is no reassurance. A current that reaches no driven pin -- a
+#: and the page says a current through one of these pins is "about" so much,
+#: rests no warning or verdict on it -- a typical figure over a limit is not a
+#: fact and one under it is no reassurance -- and says a limit it passes is
+#: typically passed. A current that reaches no driven pin -- a
 #: part between `3V3_OUT` and `GND` -- is untouched by these and is still a
 #: lower bound.
 #:
-#: **And they are at the drive a pad comes out of reset with**, `FUN_DRV` 2
-#: (`IO_MUX_PADS`), which nothing here writes: the datasheet's currents are at
-#: `PAD_DRIVER = 3`, and the TRM gives 3 as ~40 mA and 2 as ~20 mA, so each
-#: is taken at half. **Except on GPIO2, 3 and 5**, whose `FUN_DRV` 2 the same
-#: register calls ~10 mA: a XIAO ESP32-C3's D0, D1 and D3 drive about half
-#: what the page says. One figure per part is what `SUPPLY` holds, and this
-#: is the price of that.
+#: **And they are at the drive each pad comes out of reset with**, which
+#: nothing here writes: `pinMode` sets the input enable and the pulls and
+#: leaves `FUN_DRV` alone. The datasheet's currents are at `PAD_DRIVER = 3`,
+#: ~40 mA, so a pad at ~20 mA is taken at half of them and one at ~10 mA at a
+#: quarter. `source_ohms` and `sink_ohms` are the ~20 mA pads', which is most;
+#: `pad_ohms` gives every other pad its own, by GPIO, from `RESET_DRIVE_AMPS`,
+#: and `webui/api.py` hands the page each by the name it drives the pad by.
 #:
 #: No current rating and no absolute maximum per pin, and both are real
 #: absences, as the SAM D21's absolute maximum is: see their citations.
@@ -451,6 +473,10 @@ SUPPLY: dict[str, object] = {
     "volts": 3.3,
     "source_ohms": 33.0,
     "sink_ohms": 35.4,
+    "pad_ohms": {
+        gpio: (round(0.66 / amps, 1), round(0.495 / (0.028 * amps / 0.040), 1))
+        for gpio, amps in RESET_DRIVE_AMPS.items() if amps != 0.020
+    },
     "typical": True,
     "rated_amps": None,
     "absolute_amps": None,
@@ -464,17 +490,22 @@ SUPPLY: dict[str, object] = {
             "VDD3P3_CPU -- the I/O supply on every board carrying this part"
         ),
         "source_ohms": (
-            "derived: (3.3 - 0.8 * 3.3) / 0.020. Datasheet v2.4 Table 5-4, "
-            "`DC Characteristics (3.3 V, 25 C)`, p.55: IOH typ 40 mA at "
-            "VDD = 3.3 V, VOH >= 2.64 V, PAD_DRIVER = 3. TRM v1.4 Register "
-            "5.21, `IO_MUX_GPIOn_REG`, p.188: FUN_DRV 3 is ~40 mA and 2, "
-            "every header pad's reset drive, is ~20 mA -- except on GPIO2, 3, "
-            "5, 18 and 19, where 2 is ~10 mA. TYPICAL, not a bound"
+            "derived: (3.3 - 0.8 * 3.3) / 0.020, for a pad that resets at "
+            "~20 mA. Datasheet v2.4 Table 5-4, `DC Characteristics (3.3 V, "
+            "25 C)`, p.55: IOH typ 40 mA at VDD = 3.3 V, VOH >= 2.64 V, "
+            "PAD_DRIVER = 3. The ~20 mA is `RESET_DRIVE_AMPS`'s, whose "
+            "comment cites the TRM. TYPICAL, not a bound"
+        ),
+        "pad_ohms": (
+            "source_ohms' and sink_ohms' arithmetic at each other pad's own "
+            "reset current, `RESET_DRIVE_AMPS`: ~10 mA on GPIO2, 3, 4 and 5 "
+            "(66.0 and 70.7 ohm), ~40 mA on GPIO18 and 19 (16.5 and 17.7). "
+            "TYPICAL, not a bound"
         ),
         "sink_ohms": (
             "derived: 0.495 / (0.028 / 2), rounded to 0.1 ohm. Same table: "
             "IOL typ 28 mA at VDD = 3.3 V, VOL = 0.495 V, PAD_DRIVER = 3, "
-            "halved to FUN_DRV 2 by the same register's ~20 of ~40 mA -- an "
+            "halved for a ~20 mA pad as the source current is -- an "
             "assumption, since the TRM gives one strength per field value and "
             "does not say sourcing or sinking. TYPICAL, not a bound"
         ),
@@ -758,8 +789,10 @@ def pin_states(cpu: Cpu) -> dict[str, str]:
     **`ENABLE` decides before `OUT` does.** A pin whose output driver is off
     has no driven level, and `OUT` for it holds the value the driver *would*
     use -- the plausible-but-wrong answer `install_gpio` refuses for `IN`.
-    A pull-up makes a real input read high and this model has no pulls, so
-    `input` is as far as it can honestly go.
+    The pulls are modelled since OH-161's step 3 -- `install_gpio_in` reads
+    each pad's `FUN_PU` and `FUN_PD` -- and they still do not make a pin
+    anything but `input` here: a pull is not a driver, this word is about what
+    drives the pin, and what the input reads is `GPIO_IN`'s to say.
 
     Each register is read once, because each is ONE register on this part:
     `gpio_reg.h:59` gives `GPIO_OUT_DATA` as `bitpos:[25:0]` and `:91`

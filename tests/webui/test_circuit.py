@@ -842,7 +842,8 @@ def test_the_bench_uses_the_boards_own_published_supply(tmp_path):
         # two input levels (OH-161) -- are held to the same rule when present.
         for name in ("volts", "source_ohms", "sink_ohms", "rated_amps",
                      "absolute_amps", *(name for name in (
-                         "typical", "input_high_volts", "input_low_volts")
+                         "typical", "input_high_volts", "input_low_volts",
+                         "pad_ohms")
                          if name in supply)):
             assert name in supply, f"{module.__name__} publishes no {name}"
             assert supply["cited"].get(name), f"{module.__name__}: {name} uncited"
@@ -857,6 +858,80 @@ def test_the_bench_uses_the_boards_own_published_supply(tmp_path):
         assert supply.get("typical", False) == want.get("typical", False)
         assert supply.get("input_high_volts") == want.get("inputHighVolts")
         assert supply.get("input_low_volts") == want.get("inputLowVolts")
+
+
+def test_each_pad_drives_at_the_current_its_reset_drive_strength_gives():
+    """**Not one figure per part** (OH-161's review). Each ESP32 pad comes
+    out of reset at its own "DRV", which `pinMode` leaves alone, and the
+    TRM's legend under the pin table says what each value drives:
+
+      * C3 v1.4 Table 5.12-1, p.174: on GPIO2, 3, 4, 5, 18 and 19 the value
+        2 is ~10 mA and 1 is ~20 mA, the other way round from every other
+        pad; GPIO18 and 19 reset at 3, ~40 mA. Register 5.21, p.188, lists
+        "GPIO2, GPIO3, GPIO5, GPIO18, GPIO18, GPIO19" -- GPIO4 dropped and
+        GPIO18 twice -- and the legend is the one taken.
+      * C5 v1.1 and C6 v1.2: no pad excepted; the USB pads reset at 3.
+
+    So the C3's GPIO2 to 5 drive at half the common current and the USB pads
+    at twice it, and `pad_ohms` gives each its own resistances."""
+    from webui.boards import esp32c3, esp32c5, esp32c6
+    for module, ten, forty in ((esp32c3, {2, 3, 4, 5}, {18, 19}),
+                               (esp32c5, set(), {13, 14}),
+                               (esp32c6, set(), {12, 13})):
+        amps = module.RESET_DRIVE_AMPS
+        assert {gpio for gpio, each in amps.items() if each == 0.010} == ten, module.__name__
+        assert {gpio for gpio, each in amps.items() if each == 0.040} == forty, module.__name__
+        assert set(amps.values()) <= {0.010, 0.020, 0.040}, module.__name__
+        assert module.SUPPLY["pad_ohms"] == {
+            **{gpio: (66.0, 70.7) for gpio in ten},
+            **{gpio: (16.5, 17.7) for gpio in forty}}, module.__name__
+
+
+def test_the_page_is_sent_each_pads_own_drive_by_the_name_it_drives_it_by():
+    """`pad_ohms` is by GPIO and the page knows a pad by name, so
+    `webui/api.py`'s `supply_view` resolves one to the other through
+    `drive_table`. A XIAO ESP32-C3's D0 to D3 are GPIO2 to 5; a PCBCUPID
+    Glyph C3 also brings out GPIO18 and 19, its USB pads; a XIAO ESP32-C6
+    exposes no pad that drives unlike the rest."""
+    from webui import api
+
+    def pins(board):
+        supply = api.pad_view(board, api.description_for(board), None)["supply"]
+        assert "pad_ohms" not in supply, board
+        return supply["pins"]
+
+    slow = {"source_ohms": 66.0, "sink_ohms": 70.7}
+    fast = {"source_ohms": 16.5, "sink_ohms": 17.7}
+    assert pins("XIAO-ESP32-C3-DIP") == {name: slow for name in ("D0", "D1", "D2", "D3")}
+    glyph = pins("PCBCUPID Glyph C3")
+    assert glyph["/USB_D-"] == fast and glyph["/USB_D+"] == fast, glyph
+    assert pins("XIAO-ESP32-C6-DIP") == {}
+
+
+def test_a_pad_the_supply_names_is_driven_at_its_own_resistance(tmp_path):
+    """`supply.pins` puts a pad at its own resistances, in the element the
+    solve stamps and in the pin's own current. On the C3 a pad at 66 ohm
+    sources (3.3 - 2.2) / (66 + 30) into an LED; and on a bound supply --
+    the Uno's, given a 400 ohm pin -- the pin's own current is through its
+    own 400, 6.5 mA, so it raises nothing, where the board's 40 ohm read
+    across the same node would have called it 65 mA."""
+    got = run(tmp_path, """
+        const slow = {...C3, pins: {D10: {sourceOhms: 66.0, sinkOhms: 70.7}}};
+        const xiao = analyse({supply: slow, pads: XIAO, parts: [LED], wires: [
+          {pad: "D10", part: 0, terminal: "anode"},
+          {pad: "GND", part: 0, terminal: "cathode"},
+        ]});
+        const weak = {...UNO, pins: {"13": {sourceOhms: 400.0, sinkOhms: 450.0}}};
+        const uno = analyse({supply: weak, pads: PADS, parts: [LED], wires: [
+          {pad: "13", part: 0, terminal: "anode"},
+          {pad: "GND", part: 0, terminal: "cathode"},
+        ]});
+        console.log(JSON.stringify({xiao: xiao.parts[0].amps, uno: uno.parts[0],
+                                    note: uno.note}));
+    """)
+    assert abs(got["xiao"] - 1.1 / 96) < 1e-9, got["xiao"]
+    assert abs(got["uno"]["amps"] - 2.8 / 430) < 1e-9, got["uno"]
+    assert got["uno"]["warning"] is None and got["note"] is None, got
 
 
 def test_the_led_the_page_loads_carries_the_parameters_the_tests_use():
@@ -1785,6 +1860,34 @@ def test_an_input_a_value_nobody_published_could_move_is_left_open(tmp_path):
     assert got["across"]["D1"] == "low", "a rail passed a stood-in value across"
 
 
+def test_a_rail_cuts_what_hangs_off_it_from_an_input_it_holds(tmp_path):
+    """**A rail holds its voltage whatever hangs off it** -- `3V3_OUT` as
+    much as ground -- so nothing on its far side moves an input it drives.
+    D1 is pulled to `3V3_OUT` through a resistor and reads high, beside the
+    buzzer across `3V3_OUT` and `GND`, whose value nobody published, and
+    beside `VBUS`, a pad this board cannot answer for, hung off `3V3_OUT`
+    through a second resistor. Found missing by OH-161's slice-B review:
+    `groups` stopping at ground was held, and stopping at a rail was not."""
+    buzzer = '{label: "12 mm buzzer", terminals: ["negative", "positive"], model: null}'
+    got = run(tmp_path, f"""
+        const buzzer = {buzzer};
+        const across = analyse({{supply: C3, pads: XIAO, parts: [buzzer, RESISTOR], wires: [
+          {{pad: "3V3_OUT", part: 0, terminal: "positive"}},
+          {{pad: "GND", part: 0, terminal: "negative"}},
+          {{pad: "D1", part: 1, terminal: "lead A"}},
+          {{pad: "3V3_OUT", part: 1, terminal: "lead B"}},
+        ]}});
+        const hung = analyse({{supply: C3, pads: XIAO, parts: [RESISTOR, RESISTOR], wires: [
+          {{pad: "VBUS", part: 0, terminal: "lead A"}},
+          {{pad: "3V3_OUT", part: 0, terminal: "lead B"}},
+          {{pad: "D1", part: 1, terminal: "lead A"}},
+          {{pad: "3V3_OUT", part: 1, terminal: "lead B"}},
+        ]}});
+        console.log(JSON.stringify({{across: across.inputs.D1, hung: hung.inputs.D1}}));
+    """)
+    assert got == {"across": "high", "hung": "high"}, got
+
+
 def test_an_input_reached_only_through_a_diode_that_is_off_is_open(tmp_path):
     """An LED from `3V3_OUT` into D1 and nothing else: no current can return,
     so the LED is off, and D1 is joined to the rail only through `OFF_OHMS`
@@ -1813,18 +1916,25 @@ def test_a_board_whose_supply_states_no_input_levels_gets_no_inputs(tmp_path):
     assert got == {}
 
 
-def test_a_current_through_a_typical_pin_is_said_as_typical_and_judged_by_nothing(tmp_path):
+def test_a_current_through_a_typical_pin_is_said_as_typical_and_nothing_is_declared(tmp_path):
     """**The first supply that is not a bound** (OH-161). A current through a
     pin whose drive the datasheet states only as typical is neither a lower
-    bound nor an upper one, so it is said as "about" and held to no limit: a
-    C3 whose pin stood at one typical ohm would push (3.3 - 2.2) / 31 =
-    35 mA through an LED rated 30 mA absolute, and the page may not call
-    that destroyed. The same LED straight across `3V3_OUT` and `GND` on the
+    bound nor an upper one, so it is said as "about", and no warning and no
+    verdict rest on it: a C3 whose pin stood at one typical ohm would push
+    (3.3 - 2.2) / 31 = 35 mA through an LED rated 30 mA absolute, and the
+    page may not call that destroyed. **Nor is it silent** (OH-161's review):
+    the limits it passes are said as typically passed, and that nothing is
+    declared on it is said too; at the C3's own 33 ohm, 17 mA, under both,
+    nothing is said. The same LED straight across `3V3_OUT` and `GND` on the
     same board reaches no pin: its 1.1 / 30 = 37 mA is a lower bound, and it
     IS destroyed."""
     got = run(tmp_path, """
         const strong = {...C3, sourceOhms: 1.0};
         const pin = analyse({supply: strong, pads: XIAO, parts: [LED], wires: [
+          {pad: "D10", part: 0, terminal: "anode"},
+          {pad: "GND", part: 0, terminal: "cathode"},
+        ]});
+        const own = analyse({supply: C3, pads: XIAO, parts: [LED], wires: [
           {pad: "D10", part: 0, terminal: "anode"},
           {pad: "GND", part: 0, terminal: "cathode"},
         ]});
@@ -1840,14 +1950,18 @@ def test_a_current_through_a_typical_pin_is_said_as_typical_and_judged_by_nothin
           {pad: "D10", part: 0, terminal: "anode"},
           {pad: "GND", part: 0, terminal: "cathode"},
         ]});
-        console.log(JSON.stringify({pin: pin.parts[0], rails: rails.parts[0],
-                                    rated: rated.note}));
+        console.log(JSON.stringify({pin: pin.parts[0], own: own.parts[0],
+                                    rails: rails.parts[0], rated: rated.note}));
     """)
-    pin, rails = got["pin"], got["rails"]
+    pin, own, rails = got["pin"], got["own"], got["rails"]
     assert pin["drive"] == "lit" and not pin["destroyed"], pin
     assert pin["reason"].startswith("about ") and "typical" in pin["reason"], pin
-    assert pin["warning"] is None, pin
+    assert pin["warning"].startswith(
+        "Typically past the 20 mA this part is rated for and its 30 mA "
+        "absolute maximum: about 35 mA"), pin["warning"]
+    assert "nothing is declared destroyed" in pin["warning"], pin["warning"]
     assert abs(pin["amps"] - 1.1 / 31) < 1e-9
+    assert own["drive"] == "lit" and own["warning"] is None, own
     assert rails["drive"] == "damaged" and rails["destroyed"], rails
     assert got["rated"] is None, got["rated"]
 

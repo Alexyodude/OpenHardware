@@ -57,10 +57,10 @@
 // measured into no load at all -- and states a pin's current only as typical,
 // so `webui/boards/esp32c3.py`'s `SUPPLY` is typical and says so. A current
 // that runs through one of its driven pins is then typical too: it is said as
-// "about", and no rating is checked against it, because a typical figure over
-// a limit is not a fact and one under it is no reassurance. A current that
-// reaches no driven pin -- a part between two rails -- is still a lower bound
-// and is still judged.
+// "about", no warning or verdict rests on it -- a typical figure over a limit
+// is not a fact and one under it is no reassurance -- and a limit it passes
+// is said as typically passed. A current that reaches no driven pin -- a part
+// between two rails -- is still a lower bound and is still judged.
 //
 // ## And the other direction: what the bench drives onto an input (OH-161)
 //
@@ -72,6 +72,12 @@
 // level enters a running sketch, and this file only ever answers it from the
 // solve: it invents no level, and "open" stays open. A board whose supply
 // states no input levels gets an empty map, and nothing is posted to it.
+//
+// **And a bench that does not solve -- a short across two supplies, a solve
+// that does not settle -- answers every input "open" with `ok` false.** There
+// "open" means this file cannot say, not that the pad was let go, so
+// `board3d.js` posts nothing from such an answer and the board keeps the last
+// statement the bench could make.
 
 //: A pad label that names its own voltage. **The silkscreen is the source**:
 //: `5V` is five volts because that is what the vendor printed on the board, and
@@ -381,8 +387,9 @@ export function milliamps(amps) {
  *
  *   supply  `{volts, sourceOhms, sinkOhms, ratedAmps, absoluteAmps, chip}`,
  *           or null for a board that publishes no electrical model; and
- *           `typical`, `inputHighVolts` and `inputLowVolts` where the board
- *           states them (OH-161)
+ *           `typical`, `inputHighVolts`, `inputLowVolts` and `pins` -- pad
+ *           name -> `{sourceOhms, sinkOhms}` -- where the board states them
+ *           (OH-161)
  *   pads    `[{name, state}]` — the four states `webui/api.py` defines
  *   parts   `[{label, model}]` — index is the identity, `model` may be null
  *   wires   `[{pad, part, terminal}]` — `part` is an index into `parts`
@@ -507,9 +514,11 @@ export function analyse(bench) {
     }
     if (pad.state === "high" || pad.state === "low") {
       // A driven pin, as its Thevenin equivalent: the rail behind the output
-      // resistance the datasheet's worst corner implies. `low` is the same
-      // thing at zero volts, which is a resistor to ground.
-      const ohms = pad.state === "high" ? bench.supply.sourceOhms : bench.supply.sinkOhms;
+      // resistance the datasheet's worst corner implies -- or its typical
+      // drive, where `supply.typical` -- at this pad's own drive where it has
+      // one (`driveOhms`). `low` is the same thing at zero volts, which is a
+      // resistor to ground.
+      const ohms = driveOhms(bench.supply, pad.name, pad.state);
       const g = 1 / ohms;
       elements.push({ kind: "resistor", id: `pin:${pad.name}`, a: where, b: 0, ohms });
       if (pad.state === "high") {
@@ -628,9 +637,10 @@ export function analyse(bench) {
   for (const pad of bench.pads) {
     if (pad.state !== "high" && pad.state !== "low") continue;
     const volts = solved.volts[nodeOf(`pad:${pad.name}`)];
+    const ohms = driveOhms(bench.supply, pad.name, pad.state);
     pinAmps.set(pad.name, pad.state === "high"
-      ? Math.abs(bench.supply.volts - volts) / bench.supply.sourceOhms
-      : Math.abs(volts) / bench.supply.sinkOhms);
+      ? Math.abs(bench.supply.volts - volts) / ohms
+      : Math.abs(volts) / ohms);
   }
 
   //: How many wired parts have one leg in mid-air. See `JUNCTION_NOTE`.
@@ -726,15 +736,15 @@ export function analyse(bench) {
     }
     entry.drive = "lit";
     entry.amps = assumed ? null : amps;
-    // **A typical current is said as one, and held to no limit** (OH-161):
-    // neither a lower bound nor an upper one, so neither a warning nor a
-    // verdict can rest on it.
+    // **A typical current is said as one** (OH-161): neither a lower bound
+    // nor an upper one, so no warning and no verdict rests on it, and a limit
+    // it passes is said as typically passed (`typicallyPast`).
     const rough = typical(index, names);
     entry.reason = entry.amps === null
       ? "conducting, but a part with no electrical model is in the same circuit"
       : rough
         ? `about ${milliamps(amps)} through it, at the ${supply.chip}'s ` +
-          `typical drive -- not a bound, so no rating is checked against it`
+          `typical drive -- not a bound`
         : `at least ${milliamps(amps)} through it`;
     // The busiest driven pin this part reaches. One part can touch two of
     // them -- an LED from a high pad to a low one -- and the one that is
@@ -745,7 +755,8 @@ export function analyse(bench) {
       const carrying = pinAmps.get(wire.pad);
       if (!pin || carrying > pin.amps) pin = { name: wire.pad, amps: carrying };
     }
-    entry.warning = rough ? null : warn(amps, bench.supply, model, pin);
+    entry.warning = rough ? typicallyPast(amps, model, supply)
+                          : warn(amps, bench.supply, model, pin);
     // **The verdict, and it outranks the picture.** A part carrying more than
     // its datasheet's absolute maximum is not a lit part with a caption -- it
     // is a destroyed one, and drawing it glowing beside a paragraph saying so
@@ -863,6 +874,18 @@ function readInputs(supply, inputs, nodeOf, solved, grouped, blindGroups) {
   return notes;
 }
 
+/**
+ * The output resistance behind a pad driven `state`: the pad's own, where
+ * the supply gives it one in `pins`, and the supply's otherwise. An ESP32-C3's
+ * GPIO2 to 5 come out of reset at half the common drive and its USB pads at
+ * twice it, so each is named there (OH-161).
+ */
+function driveOhms(supply, name, state) {
+  const own = supply.pins?.[name];
+  return state === "high" ? (own?.sourceOhms ?? supply.sourceOhms)
+                          : (own?.sinkOhms ?? supply.sinkOhms);
+}
+
 /** The two names a part's wires may land on. */
 function terminalsOf(part) {
   return part.terminals ?? (part.model ? [part.model.from, part.model.to] : []);
@@ -874,6 +897,30 @@ function groundOf(wiring, pads) {
     if (RAILS[pad.name] === 0) return wiring.find(`pad:${pad.name}`);
   }
   return null;
+}
+
+/**
+ * What to say about a TYPICAL current past a part's own limits, or null
+ * (OH-161's review).
+ *
+ * A current through a pin whose drive is only typical is neither a lower
+ * bound nor an upper one, so `warn`'s sentences and `destroys`' verdict
+ * cannot rest on it. Silence would be the opposite mistake: a typical figure
+ * past a rating is worth knowing, so it is said as typical, and that nothing
+ * is declared destroyed on it is said too.
+ */
+function typicallyPast(amps, model, supply) {
+  const past = [];
+  if (model?.ratedAmps && amps > model.ratedAmps) {
+    past.push(`the ${milliamps(model.ratedAmps)} this part is rated for`);
+  }
+  if (model?.absoluteAmps && amps > model.absoluteAmps) {
+    past.push(`its ${milliamps(model.absoluteAmps)} absolute maximum`);
+  }
+  if (!past.length) return null;
+  return `Typically past ${past.join(" and ")}: about ${milliamps(amps)} at ` +
+         `the ${supply.chip}'s typical drive. Not a bound -- the real current ` +
+         `may be under it -- so nothing is declared destroyed on it.`;
 }
 
 /**

@@ -1015,6 +1015,28 @@ def chip_pin_of(name: str, names: dict[str, str], pad: pinmap.Pad) -> str | None
     return stated if stated is not None else pad.chip_pin
 
 
+def supply_view(board: str, description: types.ModuleType | None,
+                layout: pinmap.PinMap | None) -> dict[str, object] | None:
+    """The description's `SUPPLY` as the page reads it, or `None`.
+
+    A supply whose pads do not all drive alike says so by GPIO, in
+    `pad_ohms` -- an ESP32-C3's GPIO2 to 5 reset at ~10 mA and its USB pads
+    at ~40 mA (OH-161) -- and the page knows a pad only by the name it drives
+    it by. So `pad_ohms` goes out as `pins`, name -> `source_ohms` and
+    `sink_ohms`, resolved through `drive_table`, the table `drive` resolves
+    the same names with. A pad not in it drives at the supply's own two.
+    """
+    supply = getattr(description, "SUPPLY", None)
+    if supply is None or "pad_ohms" not in supply:
+        return supply
+    by_gpio = supply["pad_ohms"]
+    pins = {name: {"source_ohms": by_gpio[gpio][0], "sink_ohms": by_gpio[gpio][1]}
+            for name, gpio in drive_table(board, description, layout).items()
+            if gpio in by_gpio}
+    return {**{key: value for key, value in supply.items() if key != "pad_ohms"},
+            "pins": pins}
+
+
 def pad_view(board: str, description: types.ModuleType | None,
              live: dict[str, str] | None) -> dict[str, object]:
     """Where a board's pads are, and what each one is doing if anything is.
@@ -1147,7 +1169,7 @@ def pad_view(board: str, description: types.ModuleType | None,
         # changes: an output resistance is a property of silicon, and sending
         # it twenty times a second beside the pin levels would be the same
         # mistake `pin_levels` exists to avoid.
-        "supply": getattr(description, "SUPPLY", None),
+        "supply": supply_view(board, description, layout),
         # **Which component on the board a pin lights** (OH-169), as the
         # vendor's board file names it, mapped to the header label that drives
         # it. Found by `getattr` exactly as `SUPPLY` and `PIN_NAMES` are, so
