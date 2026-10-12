@@ -10,6 +10,7 @@ touches:
 - tests/rules/test_inventory.py
 - tools/board_sources.py
 - tests/rules/test_board_sources.py
+- tests/rules/test_board_manifest.py
 ---
 
 Found by OH-212's review (2026-10-09). Since OH-212 a registry board's ASSETS licence cell names the file its registry row reads the licence from. Four edges remain.
@@ -20,3 +21,5 @@ Found by OH-212's review (2026-10-09). Since OH-212 a registry board's ASSETS li
 4. The docstring says a row naming no file reads `absent` whether or not its tree is fetched; only the fetched half is tested. Test the unfetched half.
 
 Done when each cell says how its file states the licence, the Thing Plus C6 reads its own file, an absent cell's reason reaches the page, and both halves of the no-file case are tested.
+
+**Note 2026-10-12:** 2026-10-12: claims tests/rules/test_board_manifest.py (unclaimed), whose test_a_row_whose_licence_is_stated_nowhere_is_refused pins the live Thing Plus C6 row as reading its licence from no file; item 2 gives that row its own board file, so the test moves to a synthetic registry row.
