@@ -465,6 +465,54 @@ def test_not_modelled_is_decided_by_the_modelled_flag_and_not_by_the_caption(tmp
     assert got == [words for _, _, words in cases], list(zip(cases, got))
 
 
+def test_a_caption_in_kicad_overbar_markup_is_drawn_overlined_and_kept_verbatim(tmp_path):
+    """**OH-172 slice 2's review, LOW-4.** The nRF54L15 SMD's `nRF54_EN`
+    reaches the pad its footprint calls `~{RESET}`: KiCad's markup for RESET
+    with a bar over it, the active-low mark. The Chip pin column printed the
+    markup raw, and a tilde in this table already means something else --
+    `pinOrder` reads `~11`'s as Arduino's PWM mark.
+
+    The data stays verbatim, because it is the vendor's own name and the
+    tests hold it to the footprint; the panel draws it. `captionParts`
+    splits a caption into plain runs and overlined runs, run here under
+    node, and `renderTable` draws an overlined run with a CSS overline and
+    keeps the verbatim caption in the cell's title. Nothing else in a
+    caption is touched: `SWDIO_G2` keeps its ball, as the vendor wrote it.
+    """
+    panel = stripped(PANEL.read_text(encoding="utf-8"))
+    table = panel.split("function renderTable(pads) {")[1].split("\n}")[0]
+    assert "captionParts(pad.chip_pin)" in table, "the caption is printed raw again"
+    assert 'textDecoration = "overline"' in table
+    assert "pin.title = pad.chip_pin" in table, "the verbatim caption is lost"
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("no node on PATH; the splitter is plain JS and needs one to run")
+    splitter = ("function captionParts"
+                + panel.split("function captionParts", 1)[1].split("\n}", 1)[0]
+                + "\n}")
+    cases = {
+        "~{RESET}": [["RESET", True]],
+        "RESET": [["RESET", False]],
+        "SWDIO_G2": [["SWDIO_G2", False]],
+        "P1.08": [["P1.08", False]],
+        "A~{B}C": [["A", False], ["B", True], ["C", False]],
+        "~{RST}/~{EN}": [["RST", True], ["/", False], ["EN", True]],
+        "~11": [["~11", False]],
+    }
+    script = tmp_path / "probe.mjs"
+    script.write_text(
+        splitter + "\n"
+        + f"const cases = {json.dumps(list(cases))};\n"
+        + "console.log(JSON.stringify(cases.map((one) => "
+        + "captionParts(one).map((part) => [part.text, part.over]))));\n",
+        encoding="utf-8")
+    done = subprocess.run([node, str(script)], capture_output=True, text=True,
+                          check=False)
+    assert done.returncode == 0, done.stderr
+    got = json.loads(done.stdout.strip().splitlines()[-1])
+    assert got == list(cases.values()), list(zip(cases, got))
+
+
 def test_a_third_sentence_says_when_there_is_no_program_at_all():
     """**OH-164: a board you picked said 22 of its 32 pads were in use.**
 

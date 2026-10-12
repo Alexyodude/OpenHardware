@@ -196,6 +196,30 @@ function pinOrder(a, b) {
   return 0;
 }
 
+/**
+ * A chip pin's caption as the runs the Chip pin column draws: plain text,
+ * and KiCad's `~{X}` -- X with a bar over it, the active-low mark -- as an
+ * overlined run (OH-172's review). The nRF54L15's reset pad is `~{RESET}`
+ * in its vendor's footprint, and the table printed the markup raw, beside
+ * an Uno's `~11` whose tilde means PWM.
+ *
+ * Only the markup is read; the caption stays verbatim in the data and in
+ * the cell's title. Nothing else is rewritten: `SWDIO_G2` keeps its ball,
+ * because what is a ball suffix is a fact about a package, not a spelling.
+ * Self-contained, as `pinOrder` is, so a test runs it under node.
+ */
+function captionParts(text) {
+  const parts = [];
+  let at = 0;
+  for (const found of text.matchAll(/~\{([^}]*)\}/g)) {
+    if (found.index > at) parts.push({ text: text.slice(at, found.index), over: false });
+    parts.push({ text: found[1], over: true });
+    at = found.index + found[0].length;
+  }
+  if (at < text.length) parts.push({ text: text.slice(at), over: false });
+  return parts;
+}
+
 function renderTable(pads) {
   const body = $(ROWS);
   body.textContent = "";
@@ -227,7 +251,21 @@ function renderTable(pads) {
 
     const pin = document.createElement("td");
     pin.className = "mono";
-    pin.textContent = pad.chip_pin ?? "—";
+    if (pad.chip_pin == null) {
+      pin.textContent = "—";
+    } else {
+      pin.title = pad.chip_pin;
+      for (const part of captionParts(pad.chip_pin)) {
+        if (!part.over) {
+          pin.append(part.text);
+          continue;
+        }
+        const bar = document.createElement("span");
+        bar.style.textDecoration = "overline";
+        bar.textContent = part.text;
+        pin.append(bar);
+      }
+    }
 
     const state = document.createElement("td");
     // Only `unknown` takes the three-sentence path. Anything else falls back
