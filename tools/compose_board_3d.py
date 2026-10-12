@@ -5784,8 +5784,9 @@ EAGLE_TEXT = ("EAGLE's CAM processor draws all text in EAGLE's built-in "
 #: one is a SparkFun EAGLE glyph, and measured face by face (in a scratch
 #: arrangement, not here), filling it by even-odd and by non-zero differs
 #: only on faces that lie inside the glyph's own pen band -- on one glyph,
-#: whose crossings are a doubled bridge across another doubled edge, not at
-#: all -- so either rule plots the same ink. EAGLE states no rule for a
+#: whose crossings are a doubled bridge across two single edges, which a
+#: doubled edge adds no winding to, not at all -- so either rule plots the
+#: same ink. EAGLE states no rule for a
 #: self-crossing outline. Drawing one needs two things this does not have:
 #: the even-odd fill, which reversing the run of the ring between the two
 #: visits to each crossing point would give -- that keeps every edge, so
