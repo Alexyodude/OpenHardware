@@ -2,7 +2,7 @@
 id: OH-223
 title: A host fault in a core's DLL reaches the page as a dropped request and a half-executed
   machine that keeps running
-status: in-review
+status: done
 priority: P2
 created: '2026-10-10'
 touches:
@@ -80,3 +80,5 @@ SEEN TO FAIL FIRST, at 705ea5e with the new tests: the two step-entry tests with
 BREAKS, each alone, restored: naming where IP was left instead of the recorded entry fails 4; neither core recording its entry (abi.cc in both, rebuilt) fails 8; the listing starting at IP fails 2; reset keeping fault_at fails 1; avr stepping a closed Cpu fails 1; Cpu.decode letting the OSError out fails 2; the listing letting a decoder HostFault out fails 1; one try for the i8086 bytes and registers fails 1; avr dropping the words read before a fault fails 1; "the bytes there" without "first" fails 2; no wild-write branch fails 1 on each core; BoardSession.run narrowed in memory fails the board test.
 
 VERIFIED. python tools/build_core.py rebuilt all four DLLs. python -m pytest -q -p no:cacheprovider tests/i8086 tests/avr tests/webui/test_host_fault.py tests/webui/test_emulator.py tests/webui/test_emulator_session.py tests/webui/test_board_run.py: 466 passed in 194.47s. Each checker row exits 0: check_layering, check_board_contract, check_part_schemas, check_licenses (303 files), check_deltas, check_banned_symbols (69 files), check_board_claims, check_ticket_claims, ticket_guard --self-test (6/6), check_facts, render.py --check. Neither checkall.py nor the full suite was run.
+
+**Note 2026-10-13:** DONE, merged to master by fast-forward at 7d3c98e (lane2). REVIEW: an independent review (COMMENT), its fix round (the core records each step's entry, ABI 9 and 4), and a confirm verification (PASS; the record costs nothing measurable). VERIFIED on master at 04e3585, cores rebuilt: full suite 2 failed (the OCP pair: test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert, test_the_tessellator_welds_what_it_meshes), 2765 passed, 41 skipped. Follow-ups: OH-225 (the board cores and BoardSession).
