@@ -2,13 +2,17 @@
 id: OH-223
 title: A host fault in a core's DLL reaches the page as a dropped request and a half-executed
   machine that keeps running
-status: open
+status: in-progress
 priority: P2
 created: '2026-10-10'
 touches:
 - webui/emulator.py
 - webui/emulator_server.py
 - core/i8086/abi.py
+- core/avr/abi.py
+- tests/webui/test_host_fault.py
+- tests/avr/test_host_fault.py
+- webui/static/emulator.css
 ---
 
 Found by OH-222's review (2026-10-10), by running it. When a core's DLL faults on the host -- a divide error, an access violation -- ctypes on Windows catches the structured exception around the foreign call and raises `OSError` out of `Cpu.step()`. Nothing above it expects that:
