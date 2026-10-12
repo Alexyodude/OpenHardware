@@ -48,6 +48,7 @@ touches:
 - tests/webui/sparkfun_qwiic_pocket_esp32c6/pocket_blink.ino
 - tests/webui/esp32_timing.py
 - webui/api.py
+- webui/boards/rp2350.py
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.

@@ -416,9 +416,10 @@ def install_sio(cpu: Cpu) -> None:
     The SET, CLR and XOR registers are SIO's own write-only registers, "WO"
     in `sio.h`, not bus alias windows, so they read as zero
     (`readable=False`) -- `rp2040.py` makes the same call and gives the
-    reason. `GPIO_IN` is left **unmapped**, as `esp32c6.py` leaves its own:
-    it reads the pins, so a stored zero would answer wrongly on a pin driven
-    high. `CPUID` is 0, core 0's.
+    reason. `GPIO_IN` is left **unmapped**, as `esp32c6.py` left its own
+    until OH-161's step 3 gave it an input model (`core/riscv32`'s
+    `map_input`): it reads the pins, so a stored zero would answer wrongly
+    on a pin driven high. `CPUID` is 0, core 0's.
     """
     cpu.map_register(SIO + SIO_CPUID, 0)
 
