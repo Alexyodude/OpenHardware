@@ -83,6 +83,12 @@ constexpr unsigned kRegisters = 32;
 /// refuse the other's -- `clz` on a Zbkb-only part, `zip` on a Zbb-only one.
 /// The RP2350 has both, so no board here can tell the difference; the
 /// gating tests can, and do.
+///
+/// **`kExtXh3bextm` is a vendor's, not RISC-V's** (OH-219): the Hazard3's
+/// bit-extract-multiple, two instructions in custom-0. It is the one of the
+/// four custom extensions the RP2350 enables that has encodings of its own
+/// -- the other three are CSRs, which this core does not have, and two
+/// hints in `slt`'s `rd = x0` space, which run as the base ISA's no-op.
 enum Extension : uint32_t {
     kExtM = 1u << 0,
     kExtA = 1u << 1,
@@ -94,6 +100,7 @@ enum Extension : uint32_t {
     kExtZcmt = 1u << 7,
     kExtZbb = 1u << 8,
     kExtZbkb = 1u << 9,
+    kExtXh3bextm = 1u << 10,
 };
 
 /// What `step` did.

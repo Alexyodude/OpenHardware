@@ -70,6 +70,7 @@ def extension_mask(abi, names) -> int:
         "Zcmp": abi.EXT_ZCMP,
         "Zcmt": abi.EXT_ZCMT,
         "Zbs": abi.EXT_ZBS,
+        "Xh3bextm": abi.EXT_XH3BEXTM,
     }
     assert set(bits) == set(MODELLED), (
         f"MODELLED says {sorted(MODELLED)} and this map has {sorted(bits)}. "

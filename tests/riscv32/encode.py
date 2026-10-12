@@ -236,6 +236,27 @@ def c_zext_h(rd): return _zbb_unary_c(rd, 0x2)
 def c_sext_h(rd): return _zbb_unary_c(rd, 0x3)
 
 
+# Xh3bextm, the Hazard3's own (OH-219), from the field tables in
+# `third_party/hazard3/doc/sections/custom_extensions.adoc`: custom-0, opcode
+# 0x0b; funct3 000 for h3.bextm and 100 for h3.bextmi; `size` in bits 28:26,
+# the mask's width less one; bits 31:29 and 25 RES0. The shift amount is rs2
+# in one and the five-bit field where rs2 sits in the other.
+def _h3_size(nbits: int) -> int:
+    if not 1 <= nbits <= 8:
+        raise EncodeError(f"h3.bextm extracts 1 to 8 bits, not {nbits}")
+    return (nbits - 1) << 26
+
+
+def h3_bextm(rd, rs1, rs2, nbits):
+    return _h3_size(nbits) | r_type(0x00, rs2, rs1, 0x0, rd, 0x0B)
+
+
+def h3_bextmi(rd, rs1, shamt, nbits):
+    if not 0 <= shamt < 32:
+        raise EncodeError(f"h3.bextmi shifts by 0 to 31, not {shamt}")
+    return _h3_size(nbits) | r_type(0x00, shamt, rs1, 0x4, rd, 0x0B)
+
+
 def sll(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x1, rd, 0x33)
 def slt(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x2, rd, 0x33)
 def sltu(rd, rs1, rs2): return r_type(0x00, rs2, rs1, 0x3, rd, 0x33)

@@ -62,6 +62,14 @@ SANDBOX = RAM_BASE + 0x1000
 #: `test_the_c_and_zca_equivalence_is_only_claimed_for_parts_without_an_fpu`
 #: pins that reasoning so it cannot be reused for a part with an FPU, where it
 #: is false.
+#:
+#: **`Xh3bextm` is in the RP2350 set and not in that string either**, because
+#: the string names no custom extension. The same section does, on PDF
+#: p.227: "Additionally, RP2350 enables the following Hazard3 custom
+#: extensions", Xh3power, Xh3bextm, Xh3irq and Xh3pmpm. Only Xh3bextm has
+#: encodings of its own; the other three are CSRs and two `slt` hints, which
+#: no more belong in this row than Zicsr does
+#: (`tests/riscv32/test_xh3.py`).
 #: The ESP32-C5 row added under OH-57, when `webui/boards/esp32c5.py` gave that
 #: part a board description. Its datasheet set exceeded `MODELLED` until OH-146
 #: gave the core all three of its Zc groups, and it is a part this repository
@@ -83,7 +91,8 @@ TARGETS = {
     "ESP32-C5": frozenset({"M", "A", "C", "Zcb", "Zcmp", "Zcmt"}),
     "ESP32-C6": frozenset({"M", "A", "C"}),
     "RP2350": frozenset(
-        {"M", "A", "C", "Zca", "Zba", "Zbb", "Zbs", "Zbkb", "Zcb", "Zcmp"}
+        {"M", "A", "C", "Zca", "Zba", "Zbb", "Zbs", "Zbkb", "Zcb", "Zcmp",
+         "Xh3bextm"}
     ),
 }
 
@@ -96,9 +105,9 @@ TARGETS = {
 #: shrink the target and assert that the part refuses what its silicon runs.
 #: Zbb and Zbkb joined at OH-219: OH-208 modelled both, and until they were
 #: named here `faithfully_configurable` excluded any case needing them on the
-#: RP2350 rather than asserting it.
+#: RP2350 rather than asserting it. Xh3bextm joined at OH-219 too.
 MODELLED = frozenset({"M", "A", "C", "Zba", "Zbb", "Zbs", "Zbkb", "Zcb",
-                      "Zcmp", "Zcmt"})
+                      "Zcmp", "Zcmt", "Xh3bextm"})
 
 
 def faithfully_configurable(case: dict, target: str) -> bool:

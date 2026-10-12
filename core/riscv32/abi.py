@@ -60,6 +60,7 @@ EXT_ZCMP = 64
 EXT_ZCMT = 128
 EXT_ZBB = 256
 EXT_ZBKB = 512
+EXT_XH3BEXTM = 1024
 
 #: The ISA of the parts this core is for, spelled once. `docs/
 #: architectures.md` 4.2 is the citation, and the C3 row is the one that
@@ -87,14 +88,24 @@ ESP32_C5 = EXT_M | EXT_A | EXT_C | EXT_ZCB | EXT_ZCMP | EXT_ZCMT
 #: bit: this core has no CSRs and answers both `Unimplemented`, a hole in
 #: the model rather than a refusal, and it answers A the same way.
 #:
+#: **And Xh3bextm (OH-219)**, which that string does not name because it
+#: names no custom extension. The datasheet's 3.8 does, PDF p.227:
+#: "Additionally, RP2350 enables the following Hazard3 custom extensions",
+#: Xh3power, Xh3bextm, Xh3irq and Xh3pmpm. Xh3bextm is the one with
+#: encodings of its own, and it runs here, in lockstep with rvcpp. The
+#: other three are CSRs, `Unimplemented` like every CSR, and two `slt`
+#: hints that run as the base ISA's no-op; `tests/riscv32/test_xh3.py`
+#: holds each answer.
+#:
 #: **One constant since OH-219.** OH-208 left two: this one, and a
 #: narrower `RP2350_MODELLED` without Zbb and Zbkb, which the gating test
 #: held because its `MODELLED` named neither group. Until OH-208 the board
 #: configured the narrower mask, and a XIAO RP2350 refused `clz`, `minu`
 #: and `rev8` as `Illegal` -- the word for "the silicon lacks this" --
-#: where its silicon executes them.
+#: where its silicon executes them. Until OH-219 it refused `h3.bextm` the
+#: same way.
 RP2350 = (EXT_M | EXT_A | EXT_C | EXT_ZBA | EXT_ZBB | EXT_ZBS | EXT_ZBKB
-          | EXT_ZCB | EXT_ZCMP)
+          | EXT_ZCB | EXT_ZCMP | EXT_XH3BEXTM)
 
 #: Must match `riscv32::StepResult` and abi.h's documented return values.
 OK = 0
@@ -373,10 +384,12 @@ class Cpu:
 
         Underscore groups spell the named extensions, the way real ISA
         strings do: `RV32IMAC_ZCB_ZCMP_ZCMT` is the ESP32-C5 (OH-146), and
-        `RV32IMAC_ZBA_ZBB_ZBS_ZBKB_ZCB_ZCMP` is `RP2350` (OH-208). Every
-        `EXT_*` bit has a letter or a group name here, so a group that
-        raises -- `ZBC`, or `ZICSR` -- is one this core has no bit for. An
-        unknown group name raises exactly as an unknown letter does.
+        `RV32IMAC_ZBA_ZBB_ZBS_ZBKB_ZCB_ZCMP_XH3BEXTM` is `RP2350` (OH-208,
+        OH-219) -- a vendor's extension spelled the way its `X` prefix is in
+        a real string. Every `EXT_*` bit has a letter or a group name here,
+        so a group that raises -- `ZBC`, or `ZICSR` -- is one this core has
+        no bit for. An unknown group name raises exactly as an unknown
+        letter does.
         """
         text = letters.upper()
         if not text.startswith("RV32"):
@@ -395,7 +408,7 @@ class Cpu:
         known = {"M": EXT_M, "A": EXT_A, "C": EXT_C}
         named = {"ZBA": EXT_ZBA, "ZBB": EXT_ZBB, "ZBS": EXT_ZBS,
                  "ZBKB": EXT_ZBKB, "ZCB": EXT_ZCB, "ZCMP": EXT_ZCMP,
-                 "ZCMT": EXT_ZCMT}
+                 "ZCMT": EXT_ZCMT, "XH3BEXTM": EXT_XH3BEXTM}
         mask = 0
         for letter in rest[1:]:
             if letter not in known:

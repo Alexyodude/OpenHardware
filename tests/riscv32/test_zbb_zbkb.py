@@ -439,10 +439,12 @@ def test_set_isa_gives_each_bitmanip_group_name_its_own_bit():
 
 def test_set_isa_spells_the_mask_the_rp2350_board_configures():
     """The Hazard3's string in `set_isa`'s grammar: Zca spelled `C`, and
-    Zicsr and Zifencei left out because they have no bit. It must come to
-    `abi.RP2350`, which `webui/boards/rp2350.py` configures as a bitmask."""
+    Zicsr and Zifencei left out because they have no bit, with the one
+    custom extension that has one, Xh3bextm (OH-219, test_xh3.py). It must
+    come to `abi.RP2350`, which `webui/boards/rp2350.py` configures as a
+    bitmask."""
     with abi.Cpu() as fresh:
-        fresh.set_isa("RV32IMAC_ZBA_ZBB_ZBS_ZBKB_ZCB_ZCMP")
+        fresh.set_isa("RV32IMAC_ZBA_ZBB_ZBS_ZBKB_ZCB_ZCMP_XH3BEXTM")
         assert fresh.extensions() == abi.RP2350, (
             f"{fresh.extensions():#x}, expected {abi.RP2350:#x}")
 

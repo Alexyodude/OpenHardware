@@ -1323,6 +1323,29 @@ StepResult execute(Cpu& cpu, uint32_t pc, uint32_t instr, uint32_t width) {
         // lockstep can never check this branch -- see OH-35.
         return refuse(cpu, kExtA);
 
+    case 0x0Bu: {
+        // custom-0: the Hazard3's Xh3bextm (OH-219). h3.bextm at funct3 000
+        // and h3.bextmi at 100 shift rs1 right -- by rs2[4:0], or by the
+        // five-bit field where rs2 sits -- and keep 1 to 8 low bits, the
+        // width less one in bits 28:26 (Hazard3's
+        // doc/sections/custom_extensions.adoc; RP2350 datasheet 3.8.6.4).
+        // Bits 31:29 and 25 are RES0, and a word with any of them set, or
+        // with another funct3, is illegal on the RP2350 as well: Hazard3's
+        // decoder matches only these two shapes (hdl/rv_opcodes.vh:156-157)
+        // and rvcpp traps the rest (rv_core.cpp:646-656). A part without
+        // the bit refuses all of custom-0.
+        if (!cpu.has(kExtXh3bextm) || (instr & 0xE2000000u) != 0 ||
+            (funct3 != 0x0u && funct3 != 0x4u)) {
+            return StepResult::Illegal;
+        }
+        const unsigned width = ((instr >> 26) & 0x7u) + 1u;
+        const unsigned amount = funct3 == 0x0u ? (cpu.reg(rs2) & 0x1Fu)  // H3.BEXTM
+                                               : rs2;                     // H3.BEXTMI
+        cpu.set_reg(rd, (cpu.reg(rs1) >> amount) & ((1u << width) - 1u));
+        cpu.set_pc(next);
+        return StepResult::Ok;
+    }
+
     default:
         // Every undefined opcode, including the all-zeros and all-ones words a
         // program that has run off the end of memory reads.
