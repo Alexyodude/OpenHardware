@@ -1096,3 +1096,123 @@ def test_the_step_route_moves_the_board_one_instruction():
         assert again["pc"] != after["pc"]
     finally:
         slot.session.close()
+
+
+# --- what the outside drives onto the pads (OH-161 step 3) -------------------
+#
+# The XIAO ESP32-C3's committed bare-metal blink, which drives GPIO8 and
+# never touches GPIO3 -- `D1` -- so GPIO3 is as reset leaves it: input on, no
+# pull (`esp32c3.IO_MUX_PADS`). What it reads is the drive and nothing else.
+
+from webui.boards import esp32c3  # noqa: E402
+
+C3_BOARD = "XIAO-ESP32-C3-DIP"
+C3_BLINK = REPO / "tests" / "riscv32" / "c3blink" / "blink.bin"
+D1 = 1 << esp32c3.HEADER["D1"]
+
+
+def c3_session() -> api.BoardSession:
+    needs_core()
+    if not C3_BLINK.is_file():
+        pytest.skip(f"{C3_BLINK} is missing")
+    return api.load_firmware(C3_BOARD, C3_BLINK.read_bytes(), base=esp32c3.IROM)
+
+
+def gpio_in(session: api.BoardSession) -> int:
+    return session.cpu.read_word(esp32c3.GPIO + esp32c3.GPIO_IN)
+
+
+def test_a_drive_reaches_the_pin_and_is_recorded_when_it_took_effect():
+    """Each drive is stamped with the instructions retired before it --
+    `run` and `step` both count -- and says everything the outside does:
+    the third call names no pad, so nothing drives `D1` and it floats."""
+    with c3_session() as session:
+        session.run(100)
+        session.drive({"D1": "high"})
+        assert gpio_in(session) & D1
+        session.step(5)
+        session.drive({"D1": "low"})
+        assert not gpio_in(session) & D1
+        session.run(20)
+        session.drive({"D1": "high"})
+        session.drive({})
+        assert not gpio_in(session) & D1
+        assert session.inputs == [
+            (100, {"D1": "high"}), (105, {"D1": "low"}), (125, {"D1": "high"}),
+            (125, {})]
+        assert session.retired == 125
+
+
+def test_open_is_a_pad_nothing_drives_and_not_a_low_one():
+    """`D9` is GPIO9, which comes out of reset pulled up (TRM Table 5.12-1,
+    Reset "3"): driven low it reads 0, and left open its pull reads 1."""
+    d9 = 1 << esp32c3.HEADER["D9"]
+    with c3_session() as session:
+        session.drive({"D9": "low"})
+        assert not gpio_in(session) & d9
+        session.drive({"D9": "open"})
+        assert gpio_in(session) & d9, "open: nothing beats the pull-up"
+
+
+def test_a_level_that_is_not_one_of_the_three_is_refused_by_name():
+    with c3_session() as session:
+        with pytest.raises(ValueError) as caught:
+            session.drive({"D1": "1"})
+    assert "'1'" in str(caught.value) and "'open'" in str(caught.value), (
+        str(caught.value))
+
+
+def test_a_pad_that_reaches_no_gpio_is_refused_with_the_pads_that_do():
+    """`3V3_OUT` is a pad of every XIAO ESP32-C3 and no GPIO: driving it
+    would say something about a rail, which is the bench's to solve."""
+    with c3_session() as session:
+        with pytest.raises(ValueError) as caught:
+            session.drive({"3V3_OUT": "high"})
+        assert session.inputs == [], "a refused drive is not recorded"
+    assert "'3V3_OUT'" in str(caught.value) and "'D1'" in str(caught.value), (
+        str(caught.value))
+
+
+def test_two_labels_of_one_gpio_driven_two_ways_are_refused(monkeypatch):
+    """No XIAO here names one GPIO twice, and an Uno's `A4` and `SDA` do:
+    the day such a board reads its inputs, the two must agree. A second
+    label for GPIO3 stands in for it."""
+    monkeypatch.setitem(esp32c3.HEADER, "ALSO_D1", esp32c3.HEADER["D1"])
+    with c3_session() as session:
+        session.drive({"D1": "high", "ALSO_D1": "high"})
+        assert gpio_in(session) & D1
+        with pytest.raises(ValueError) as caught:
+            session.drive({"D1": "high", "ALSO_D1": "low"})
+    assert "'D1'" in str(caught.value) and "'ALSO_D1'" in str(caught.value), (
+        str(caught.value))
+
+
+def test_a_board_whose_description_reads_no_input_refuses_a_drive():
+    """The XIAO RP2040's description maps SIO's `GPIO_IN` as a stored
+    zero and gives no `drive_pins`; a drive there would be believed and
+    ignored."""
+    needs_core()
+    with api.load_firmware(BOARD, blink_bytes(), base=BLINK_LOAD) as session:
+        with pytest.raises(ValueError) as caught:
+            session.drive({"D0": "high"})
+    assert BOARD in str(caught.value), str(caught.value)
+
+
+def test_a_manifest_row_is_driven_by_its_own_pad_labels():
+    """A row's labels are its own board file's, resolved to the pad's
+    `chip_index` as `row_levels` reads them, and not the XIAO's `HEADER`.
+    On the Adafruit QT Py ESP32-C3 the pad `A1` reaches GPIO3, which the
+    XIAO calls `D1` -- a label this board has no pad for. Its committed
+    image drives SDA, GPIO5, and leaves GPIO3 as reset leaves it."""
+    needs_core()
+    board = "Adafruit QT Py ESP32-C3"
+    image = REPO / "tests" / "webui" / "qtpy_esp32c3" / "qtpy_blink.bin"
+    if not image.is_file():
+        pytest.skip(f"{image} is missing")
+    with api.load_firmware(board, image.read_bytes(), base=esp32c3.IROM) as session:
+        session.drive({"A1": "high"})
+        assert gpio_in(session) & D1, "A1 is GPIO3 on this board"
+        with pytest.raises(ValueError) as caught:
+            session.drive({"D1": "high"})
+    assert "'D1'" in str(caught.value) and "'A1'" in str(caught.value), (
+        str(caught.value))

@@ -795,6 +795,11 @@ def uart_view(runtime: Runtime, cpu: Core) -> dict[str, object]:
 #: looking at.
 PIN_STATES = ("high", "low", "input", "unknown")
 
+#: What the outside can drive a pad to, through `BoardSession.drive`: the
+#: two levels, and "open" for a pad nothing drives (OH-161 step 3). Not
+#: `PIN_STATES`' words, which say what the PROGRAM is doing to a pad.
+DRIVE_LEVELS = ("high", "low", "open")
+
 #: Arduino's silkscreen marks a PWM-capable pin with a leading tilde -- `~11`
 #: is pin 11. The pad map carries the silkscreen's spelling because that is
 #: what somebody reads off the board; a board module carries the pin's name.
@@ -1329,6 +1334,15 @@ class BoardSession:
         #: this layer, so it is recorded here and reported rather than raised.
         self.status = "running"
         self.detail = ""
+        #: Instructions retired since the image was loaded, by `step` and
+        #: `run` together: the clock `inputs` is stamped with.
+        self.retired = 0
+        #: Every `drive`, in order: the instructions retired when it took
+        #: effect, and what it said (OH-161 step 3). **The replay record**:
+        #: a level enters a session only through `drive`, so this image and
+        #: this list reproduce the run -- no clock and no randomness is
+        #: consulted, and when a call arrived in wall time is not part of it.
+        self.inputs: list[tuple[int, dict[str, str]]] = []
 
     @property
     def board(self) -> str:
@@ -1347,6 +1361,63 @@ class BoardSession:
         """
         for _ in range(count):
             self.cpu.step()
+            self.retired += 1
+
+    def drive(self, levels: typing.Mapping[str, str]) -> None:
+        """What the outside drives onto the pads: label -> "high", "low" or
+        "open", each label as `pin_levels` keys it.
+
+        **A whole statement, not a change.** A pad left out is a pad nothing
+        drives, so each call says everything the outside is doing, and
+        `inputs` records it with the instructions retired when it took
+        effect. "open" says so explicitly. The label resolves to a GPIO
+        through the table `pin_levels` reads the pad through: the board
+        description's `HEADER` on a XIAO, the pad's `chip_index` from its own
+        board file on a manifest row.
+
+        This is what the page's bench will call, once it has solved what its
+        parts put on each input pad (OH-161 step 3, slice B). A floating pin
+        reads 0 and a bench drive beats the chip's own pull: the board
+        description's `install_gpio_in` says why.
+
+        `ValueError`, naming the values, for a level that is none of the
+        three, a label that reaches no GPIO, two labels of one GPIO driven two
+        ways, and a board whose description reads no input at all. A refusal
+        slug in `REASONS` waits for the transport that maps them to statuses.
+        """
+        driver = getattr(self.runtime.description, "drive_pins", None)
+        if driver is None:
+            raise ValueError(
+                f"{self.board}: its description reads no input, so nothing "
+                f"can be driven onto its pads")
+        if is_row(self.board):
+            layout = pinmap.load(self.board)
+            gpios = {header_key(pad.label, {}): pad.chip_index
+                     for pad in layout.pads if pad.chip_index is not None}
+        else:
+            gpios = dict(self.runtime.description.HEADER)
+        driven: dict[int, bool] = {}
+        by_gpio: dict[int, str] = {}
+        for label, level in levels.items():
+            if level not in DRIVE_LEVELS:
+                raise ValueError(
+                    f"{self.board}: {label!r} driven {level!r}; a pad is driven "
+                    f"{', '.join(repr(word) for word in DRIVE_LEVELS)}")
+            if label not in gpios:
+                raise ValueError(
+                    f"{self.board}: no pad {label!r} reaches a GPIO; the pads "
+                    f"that do are {sorted(gpios)}")
+            if level == "open":
+                continue
+            gpio = gpios[label]
+            if gpio in driven and driven[gpio] != (level == "high"):
+                raise ValueError(
+                    f"{self.board}: {by_gpio[gpio]!r} and {label!r} are both "
+                    f"GPIO{gpio}, driven {levels[by_gpio[gpio]]!r} and {level!r}")
+            driven[gpio] = level == "high"
+            by_gpio[gpio] = label
+        driver(self.cpu, driven)
+        self.inputs.append((self.retired, dict(levels)))
 
     def run(self, budget: int) -> RunResult:
         """Up to `budget` instructions, stopping where the core does.
@@ -1380,6 +1451,7 @@ class BoardSession:
                 self.detail = str(error)
                 break
             taken += 1
+        self.retired += taken
         return RunResult(taken, self.status, self.detail)
 
     def state(self, memory_at: int | None = None, memory_length: int = 64,
