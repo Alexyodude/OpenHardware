@@ -2985,7 +2985,13 @@ def test_an_eagle_silkscreen_rectangle_is_read_as_a_filled_quad(tmp_path):
     its own `rot` about its own centre -- (0, 0)-(2, 1) at R90 stands on
     (1, 0.5) -- then placed with its element, and moved to the other face,
     mirrored, by one at MR; a board-level one as drawn. One on tDocu is no
-    ink. On the Feather every one is read, and none is left counted."""
+    ink. On the Feather every one is read, and none is left counted.
+
+    **A rectangle's own `M` turns it the other way** (OH-163's review, L1):
+    `place`'s order is turn then mirror, and a mirror in x after a turn by
+    d is a turn by -d after the mirror, which leaves a rectangle the same.
+    So MR30 stands at -30 degrees about its centre, its long side running
+    down to the right; reading the angle alone stood it at +30."""
     path = tmp_path / "boxed.brd"
     path.write_text(
         '<?xml version="1.0" encoding="utf-8"?>'
@@ -2997,10 +3003,14 @@ def test_an_eagle_silkscreen_rectangle_is_read_as_a_filled_quad(tmp_path):
         '<rectangle x1="0" y1="0" x2="2" y2="1" layer="21"/>'
         '<rectangle x1="0" y1="0" x2="2" y2="1" layer="21" rot="R90"/>'
         '<rectangle x1="0" y1="0" x2="2" y2="1" layer="51"/>'
+        '</package><package name="Q">'
+        '<pad name="1" x="0" y="0" drill="1.016" diameter="1.8796"/>'
+        '<rectangle x1="0" y1="0" x2="2" y2="1" layer="21" rot="MR30"/>'
         "</package></packages></library></libraries>"
         "<elements>"
         '<element name="A" library="L" package="P" x="10" y="5"/>'
         '<element name="B" library="L" package="P" x="10" y="5" rot="MR0"/>'
+        '<element name="C" library="L" package="Q" x="0" y="0"/>'
         "</elements><signals/>"
         "</board></drawing></eagle>",
         encoding="utf-8",
@@ -3008,13 +3018,19 @@ def test_an_eagle_silkscreen_rectangle_is_read_as_a_filled_quad(tmp_path):
     board = eagle.read_board(path)
     got = [(fill.layer, tuple((round(x, 9) + 0.0, round(y, 9) + 0.0) for x, y in fill.points),
             fill.width_mm) for fill in board.silk_fills]
-    assert got == [
+    assert got[:5] == [
         ("F.SilkS", ((1.0, 1.0), (3.0, 1.0), (3.0, 2.0), (1.0, 2.0)), 0.0),
         ("F.SilkS", ((10.0, 5.0), (12.0, 5.0), (12.0, 6.0), (10.0, 6.0)), 0.0),
         ("F.SilkS", ((11.5, 4.5), (11.5, 6.5), (10.5, 6.5), (10.5, 4.5)), 0.0),
         ("B.SilkS", ((10.0, 5.0), (8.0, 5.0), (8.0, 6.0), (10.0, 6.0)), 0.0),
         ("B.SilkS", ((8.5, 4.5), (8.5, 6.5), (9.5, 6.5), (9.5, 4.5)), 0.0),
     ], got
+    slanted = board.silk_fills[5].points
+    centre = (sum(x for x, _y in slanted) / 4, sum(y for _x, y in slanted) / 4)
+    long_side = math.degrees(math.atan2(slanted[1][1] - slanted[0][1],
+                                        slanted[1][0] - slanted[0][0]))
+    assert (len(board.silk_fills), round(centre[0], 9), round(centre[1], 9),
+            round(long_side, 9)) == (6, 1.0, 0.5, -30.0), slanted
     assert "rectangle" not in dict(board.silk_unread), board.silk_unread
 
     spec = next(s for s in compose.COMPOSITIONS if s.board == "Adafruit Feather ESP32-C6")

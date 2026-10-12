@@ -664,9 +664,12 @@ def _ink(board: ET.Element, elements: list[Element], packages: dict
         fills.append(Fill(layer, tuple(points), float(polygon.get("width") or 0.0)))
 
     def rectangle(node: ET.Element, layer: str, transform=None) -> None:
-        # Turned by its own `rot` about its own centre, where a mirror
-        # changes nothing; then placed as a vertex is. Filled, no pen.
-        degrees, _mirrored = _rotation(node.get("rot"))
+        # Turned by its own `rot` about its own centre, then placed as a
+        # vertex is. Filled, no pen. In `place`'s order a turn by d and then
+        # a mirror in x is a turn by -d after the mirror, and a mirror leaves
+        # a rectangle the same: so MR30 stands at -30 degrees (OH-163).
+        degrees, mirrored = _rotation(node.get("rot"))
+        degrees = -degrees if mirrored else degrees
         x1, y1, x2, y2 = (float(node.get(key)) for key in ("x1", "y1", "x2", "y2"))
         centre, half = ((x1 + x2) / 2, (y1 + y2) / 2), ((x2 - x1) / 2, (y2 - y1) / 2)
         turn = math.radians(degrees)
