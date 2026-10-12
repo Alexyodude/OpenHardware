@@ -3192,8 +3192,8 @@ def test_every_boards_fills_share_their_points_and_not_their_triangles():
     shoelace sum is negative, and on a sliver of no area -- three points of
     a SparkFun glyph in a line -- rounding at 50 mm from the origin can make
     that sum negative while `ear_clip`'s own cross product, taken at a
-    corner, is positive. 29 such slivers on the Thing Plus ESP32-C6 were
-    drawn the other way round when the indexing alone changed."""
+    corner, is positive. Such slivers on the Thing Plus ESP32-C6 were drawn
+    the other way round when the indexing alone changed."""
     centre = (1.25, -0.5)
     compared = 0
     for spec in _fill_layouts():

@@ -3378,8 +3378,9 @@ def ear_clip(ring: list[tuple[float, float]]) -> list[tuple[int, int, int]]:
       * a vertex at which the ring runs straight on, or turns straight back,
         encloses nothing, and is dropped where no ear is left;
       * a ring two of whose edges cross is refused before any of that,
-        naming them: what it fills depends on a rule the drawing does not
-        state. So is one with no ear and nothing to drop.
+        naming them: filling it needs the ring split into faces at its
+        crossings, which this does not do -- see `FILL_REFUSED`. So is one
+        with no ear and nothing to drop.
 
     A triangle of no area is not returned. **A crossing through a vertex is
     not found by the edge test** -- one of its four sides is zero, as a
@@ -3819,7 +3820,9 @@ def flat_fills(fills: list[tuple[list[tuple[float, float]], list[tuple[int, int,
     `flat` turns a ring whose `signed_area` is negative, and on a sliver of
     no area -- three of a SparkFun glyph's points in a line, 50 mm from the
     origin -- that sum's rounding can disagree with `ear_clip`'s cross
-    product taken at a corner: 29 triangles on the Thing Plus ESP32-C6.
+    product taken at a corner, as it does on SparkFun's Thing Plus
+    ESP32-C6; `test_every_boards_fills_share_their_points_and_not_their_
+    triangles` holds every fetched board's fills to `flat`'s triangles.
     """
     positions: list[float] = []
     normals: list[float] = []
@@ -5773,8 +5776,23 @@ EAGLE_TEXT = ("EAGLE's CAM processor draws all text in EAGLE's built-in "
 
 
 #: Why a filled polygon of ink is not drawn: `ear_clip` refused it, finding
-#: it crosses itself -- so what it fills depends on a rule its drawing does
-#: not state -- or finding no ear in it. The `not ink` line's key (OH-163).
+#: two of its edges crossing, no ear in it, a last triangle wound backwards
+#: or fewer than three points. The `not ink` line's key (OH-163).
+#:
+#: **The crossing rings are refused for what this cannot do, not for what
+#: their vendor would draw** (OH-163's review). On the fetched boards every
+#: one is a SparkFun EAGLE glyph, and measured face by face (in a scratch
+#: arrangement, not here), filling it by even-odd and by non-zero differs
+#: only on faces that lie inside the glyph's own pen band -- on one glyph,
+#: whose crossings are a doubled bridge across another doubled edge, not at
+#: all -- so either rule plots the same ink. EAGLE states no rule for a
+#: self-crossing outline. Drawing one needs two things this does not have:
+#: the even-odd fill, which reversing the run of the ring between the two
+#: visits to each crossing point would give -- that keeps every edge, so
+#: the even-odd fill, and leaves a touch `ear_clip` fills -- and, to refuse
+#: only where the rules would plot differently, the ring's faces with their
+#: winding, to find any face of even, non-zero winding wider than the pen.
+#: That is a planar arrangement, and none is built here.
 FILL_REFUSED = "fill not weakly simple"
 
 #: Why a fill's pen is not traced: half its width is under
