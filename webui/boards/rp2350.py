@@ -100,25 +100,34 @@ from core.riscv32 import abi
 
 #: The Hazard3's ISA as the datasheet spells it -- RVCSR MISA's description,
 #: "On RP2350, Hazard3's full `-march` string is:" (section 3.8.9, PDF p.288),
-#: the same string `docs/architectures.md` 5.4 and `abi.RP2350_MODELLED`
-#: quote. The silicon's; what `install` configures is `EXTENSIONS`.
+#: the same string `docs/architectures.md` 5.4 and the comment over
+#: `abi.RP2350` quote. The silicon's; what `install` configures is
+#: `EXTENSIONS`.
 ISA = "rv32ima_zicsr_zifencei_zba_zbb_zbs_zbkb_zca_zcb_zcmp"
 
 #: What `install` gives the core: `abi.RP2350`, every group of `ISA` that
 #: `core/riscv32` has a bit for -- M, A (classified, not executed), C for
-#: Zca, Zba, Zbb, Zbs, Zbkb, Zcb and Zcmp. A bitmask rather than `set_isa`'s
-#: letters because `ISA` itself cannot be handed to `set_isa` -- Zicsr and
-#: Zifencei have no bit, and its grammar spells Zca `C` -- and `abi.RP2350`
-#: already spells the part once, beside the bits. In that grammar the same
-#: set is `RV32IMAC_ZBA_ZBB_ZBS_ZBKB_ZCB_ZCMP`, which
+#: Zca, Zba, Zbb, Zbs, Zbkb, Zcb and Zcmp -- **and Xh3bextm, which `ISA`
+#: does not name** (OH-219): that string names no custom extension, and the
+#: datasheet's section 3.8 (PDF p.227) says RP2350 enables four Hazard3 ones
+#: besides. Xh3bextm is the one with encodings of its own, and it runs here,
+#: held by `tests/riscv32/test_xh3.py`; `abi.RP2350`'s comment says what the
+#: other three answer.
+#:
+#: A bitmask rather than `set_isa`'s letters because `ISA` itself cannot be
+#: handed to `set_isa` -- Zicsr and Zifencei have no bit, and its grammar
+#: spells Zca `C` -- and `abi.RP2350` already spells the part once, beside
+#: the bits. In that grammar the same set is
+#: `RV32IMAC_ZBA_ZBB_ZBS_ZBKB_ZCB_ZCMP_XH3BEXTM`, which
 #: `tests/riscv32/test_zbb_zbkb.py` holds equal to `abi.RP2350`.
 #:
-#: **Until OH-208 this was `abi.RP2350_MODELLED`, without Zbb and Zbkb**,
-#: and a XIAO RP2350 refused `clz`, `minu` and `rev8` as `Illegal` -- the
-#: word for "the silicon lacks this" -- where the chip executes them. The
-#: core implements both groups now, held in lockstep against rvcpp
-#: (`tests/riscv32/test_zbb_zbkb.py`), and this board is the only one that
-#: enables them: no ESP32 part here has either.
+#: **Until OH-208 this was the narrower `abi.RP2350_MODELLED`, without Zbb
+#: and Zbkb**, a constant OH-219 removed, and a XIAO RP2350 refused `clz`,
+#: `minu` and `rev8` as `Illegal` -- the word for "the silicon lacks this"
+#: -- where the chip executes them; until OH-219 it refused `h3.bextm` the
+#: same way. The core implements Zbb and Zbkb now, held in lockstep against
+#: rvcpp (`tests/riscv32/test_zbb_zbkb.py`), and this board is the only one
+#: that enables them: no ESP32 part here has either.
 EXTENSIONS = abi.RP2350
 
 #: The XIP window's base, `addressmap.h:24` -- `#define XIP_BASE
