@@ -231,6 +231,28 @@ def test_a_licence_read_from_a_fetched_file_is_in_that_file():
                     f"run python tools/get_board_sources.py <name>")
 
 
+def test_a_licence_a_boards_cad_states_is_read_by_its_row_from_that_file():
+    """`tools/board_manifest.py` quotes the licence a board's CAD file states
+    on a placed element, for the board file it writes; the registry row of
+    that source reads its licence from the same file in the same words,
+    graded `opened` as any file the row opened, or one question has two
+    answers. Until OH-213 the Thing Plus C6's row named no file and cited a
+    sibling repository's LICENSE.md, while its own .brd held the sentence its
+    manifest row quotes. The words are checked against the file, fetched, by
+    `test_a_licence_read_from_a_fetched_file_is_in_that_file`."""
+    from tools.board_manifest import ROWS
+
+    stating = [row for row in ROWS if row.licence_statement is not None]
+    assert stating, "no manifest row reads its licence off its CAD, so this checks nothing"
+    for row in stating:
+        licence = source(row.source).licence
+        assert (licence.file, licence.quote, licence.evidence) == (
+            row.cad, row.licence_statement[1], Evidence.OPENED), (
+            f"{row.source}: the registry reads its licence from {licence.file!r} as "
+            f"{licence.quote!r}, graded {licence.evidence.label}; {row.board}'s "
+            f"manifest row reads it from {row.cad} as {row.licence_statement[1]!r}")
+
+
 def test_a_layout_cell_that_states_a_kicad_version_states_the_files_own():
     """`pcb_layout` names the board file it opened and the version it read
     there, and which version a board file is decides how tools/kicad.py

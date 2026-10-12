@@ -426,14 +426,20 @@ SOURCES: tuple[Source, ...] = (
         size="34,208 KiB",
         licence=Licence(
             name="CC BY-SA 4.0",
-            covers="design files; the code in the same repository is under "
-            "separate terms",
+            covers="the board design its sentence is placed in; the repository "
+            "holds no licence file, and its README points at a LICENSE.md it "
+            "does not contain",
             sampled=True,
             evidence=Evidence.OPENED,
-            cite="LICENSE.md in sparkfun/RP2040_Thing_Plus. **This repository's "
-            "own README points at a LICENSE.md it does not contain**, while "
-            "three sibling board repositories have one — so the licence here "
-            "is inferred from a sibling and must be re-read per board",
+            cite="Hardware/Thing_Plus_ESP32_C6.brd, fetched here and read "
+            "2026-10-10: the package of its FRAME1, SparkFun-Aesthetics/"
+            "CREATIVE_COMMONS, carries the sentence, as the Qwiic Pocket's does "
+            "(OH-213). **This repository's own README points at a LICENSE.md it "
+            "does not contain**, while three sibling board repositories have "
+            "one, so the survey read the licence from LICENSE.md in "
+            "sparkfun/RP2040_Thing_Plus, a sibling's",
+            file="Hardware/Thing_Plus_ESP32_C6.brd",
+            quote="Released under the Creative Commons Attribution Share-Alike 4.0 License",
         ),
         fetch=Fetch(
             transport=Transport.GIT_SPARSE,

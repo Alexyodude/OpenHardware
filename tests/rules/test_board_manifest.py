@@ -422,9 +422,12 @@ def test_the_licence_is_what_the_vendors_own_files_state():
         "PCBCUPID Glyph C3", "PCBCUPID Glyph C6"]
 
 
-def test_a_row_whose_licence_is_stated_nowhere_is_refused():
-    """SparkFun's registry licence came from a sibling repository, not a file."""
+def test_a_row_whose_licence_is_stated_nowhere_is_refused(monkeypatch):
+    """A row naming no licence statement, on a registry row that read its
+    licence from no file it fetches: synthetic, since the Thing Plus C6's
+    row reads its .brd (OH-213)."""
     _fetched(ROWS[0])
+    _registry_with(monkeypatch, ROWS[0].source, file="", quote="")
     with pytest.raises(ManifestError) as caught:
         board_manifest.check(dataclasses.replace(ROWS[0], licence_statement=None))
     assert "licence from no file it fetches" in str(caught.value), caught.value
