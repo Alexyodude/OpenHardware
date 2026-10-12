@@ -3087,6 +3087,51 @@ def test_a_fill_is_drawn_as_ink_with_its_counter_open_and_its_pen_traced():
                                              (1.85, 1.85))] == [True, True, False, False]
 
 
+def test_a_pen_narrower_than_the_same_point_distance_is_counted_and_not_traced():
+    """**A fill's pen is traced only where half its width reaches
+    `CHAIN_TOLERANCE_MM`** (OH-163's review, L2): narrower, the outline it
+    traces moves the fill's edge by less than the distance this composer
+    already treats as the same point, and SparkFun's 0.01 mm pens were most
+    of what their boards' fills weighed. Each dropped is counted under
+    `PEN_DROPPED`, whose width is the constant's, doubled, and not typed."""
+    assert compose.PEN_DROPPED == f"pen under {2 * compose.CHAIN_TOLERANCE_MM:g} mm"
+    square = ((2.0, 2.0), (4.0, 2.0), (4.0, 4.0), (2.0, 4.0))
+    narrow = 2 * compose.CHAIN_TOLERANCE_MM * 0.99
+    board = eagle.Board("inked", "test", (), (), silk_fills=(
+        eagle.Fill("F.SilkS", square, narrow),
+        eagle.Fill("B.SilkS", square, 2 * compose.CHAIN_TOLERANCE_MM)))
+    ring = [(-1.0, -1.0), (12.0, -1.0), (12.0, 12.0), (-1.0, 12.0)]
+    meshes, tally, _undrawn = compose.artwork(board, ring, 1.6, (0.0, 0.0), "#313d63", [])
+    assert (tally["fill front"], tally["fill back"], tally.get(compose.PEN_DROPPED)) == (1, 1, 1), tally
+    # The front square is its two triangles; the back one gains its four strokes.
+    assert (len(meshes[2].groups[compose.SILKSCREEN][2]) // 3,
+            len(meshes[5].groups[compose.SILKSCREEN][2]) // 3) == (2, 2 + 4 * 2)
+
+
+def test_a_fill_of_no_area_and_one_beyond_a_concave_edge_are_counted_as_what_they_are():
+    """**Each fill is counted for what happened to it** (OH-163's review,
+    L4): one of no area with no pen sat on the board and was counted "off
+    the board"; and on a concave outline -- the Uno's -- a fill's triangle
+    reaching past the edge was counted among the strokes and pads under
+    "outside a concave outline", one per triangle. A fill of no area is
+    counted as one, and a fill a concave edge cuts once, under its own key,
+    leaving the strokes' count to the strokes -- here a square one of whose
+    two triangles has a corner in the notch."""
+    ell = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (4.0, 4.0), (4.0, 10.0), (0.0, 10.0)]
+    board = eagle.Board("inked", "test", (), (), silk=(
+        eagle.Stroke("F.SilkS", 7.0, 7.0, 8.0, 7.0, 0.2),), silk_fills=(
+        eagle.Fill("F.SilkS", ((1.0, 1.0), (2.0, 1.0), (3.0, 1.0)), 0.0),
+        eagle.Fill("F.SilkS", ((1.0, 1.0), (8.0, 1.0), (8.0, 8.0), (1.0, 8.0)), 0.0),
+        eagle.Fill("F.SilkS", ((1.0, 1.0), (2.0, 1.0), (2.0, 2.0)), 0.0)))
+    _meshes, tally, _undrawn = compose.artwork(board, ell, 1.6, (0.0, 0.0), "#313d63", [])
+    assert ({key: tally.get(key) for key in ("fill of no area", "fill off the board",
+                                             "fill reaching outside a concave outline",
+                                             "outside a concave outline", "fill front")}
+            == {"fill of no area": 1, "fill off the board": None,
+                "fill reaching outside a concave outline": 1,
+                "outside a concave outline": 1, "fill front": 2}), tally
+
+
 def test_a_fill_on_the_board_shares_its_vertices_and_draws_the_same_triangles():
     """**A fill wholly on the board is one indexed mesh, its triangles
     sharing its own points** (OH-163): drawn a triangle at a time, each of
@@ -3172,22 +3217,26 @@ def test_a_fill_the_triangulator_refuses_is_counted_as_ink_not_drawn(capsys):
     """**What `ear_clip` refuses is ink the file carries and the model
     lacks**, so `compose` prints it on the `not ink` line under
     `FILL_REFUSED` and not on the artwork line (OH-163): on SparkFun's Thing
-    Plus ESP32-C6, the letters whose bridge back from a counter misses itself
-    and crosses, each counted as many times as it is placed."""
+    Plus ESP32-C6, the letters whose outline crosses itself, each counted as
+    many times as it is placed. So is each pen left untraced, under
+    `PEN_DROPPED`: SparkFun draw their letters' outlines at 0.01 mm."""
     spec = next(s for s in compose.COMPOSITIONS if s.board == "SparkFun Thing Plus ESP32-C6")
     if not _fetched(spec):
         pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
-    refused = 0
+    refused = hairline = 0
     for fill in compose.read_layout(spec.layout).silk_fills:
         try:
             compose.ear_clip(list(fill.points))
         except ValueError:
             refused += 1
+            continue
+        hairline += 0 < fill.width_mm / 2 < compose.CHAIN_TOLERANCE_MM
     lines = _accounting(spec, capsys).splitlines()
     unread = next(line for line in lines if line.startswith("  not ink "))
     drawn = next(line for line in lines if line.startswith("  artwork "))
     assert refused and f"{compose.FILL_REFUSED} {refused}" in unread, (refused, unread)
-    assert compose.FILL_REFUSED not in drawn, drawn
+    assert hairline and f"{compose.PEN_DROPPED} {hairline}" in unread, (hairline, unread)
+    assert compose.FILL_REFUSED not in drawn and compose.PEN_DROPPED not in drawn, drawn
 
 
 def test_the_composed_fills_land_on_seeeds_plotted_regions():

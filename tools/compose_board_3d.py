@@ -5777,6 +5777,11 @@ EAGLE_TEXT = ("EAGLE's CAM processor draws all text in EAGLE's built-in "
 #: not state -- or finding no ear in it. The `not ink` line's key (OH-163).
 FILL_REFUSED = "fill not weakly simple"
 
+#: Why a fill's pen is not traced: half its width is under
+#: `CHAIN_TOLERANCE_MM`, see `artwork`. The `not ink` line's key, its width
+#: the constant's and never typed (OH-163's review).
+PEN_DROPPED = f"pen under {2 * CHAIN_TOLERANCE_MM:g} mm"
+
 
 def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             thickness: float, centre: tuple[float, float], mask: str,
@@ -5807,8 +5812,10 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
     left: dict[str, int] = {}
     can_clip = convex(ring)
 
-    def inside(shape: list[tuple[float, float]]) -> list[tuple[float, float]]:
-        """`shape` cut to the board, or emptied if it cannot be cut exactly."""
+    def inside(shape: list[tuple[float, float]], counted: bool = True
+               ) -> list[tuple[float, float]]:
+        """`shape` cut to the board, or emptied if it cannot be cut exactly.
+        A fill's pieces are not `counted` here: the fill is, once."""
         if can_clip:
             return clipped_to(ring, shape)
         # A concave silhouette -- the Arduino Uno -- cannot be clipped by
@@ -5818,8 +5825,9 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
         # copper is all well within its outline.
         if all(point_in(ring, point) for point in shape):
             return shape
-        left["outside a concave outline"] = (
-            left.get("outside a concave outline", 0) + 1)
+        if counted:
+            left["outside a concave outline"] = (
+                left.get("outside a concave outline", 0) + 1)
         return []
 
     front: list[list[tuple[float, float]]] = []
@@ -5906,6 +5914,14 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
     #: ink` line. A fill whose every triangle the board leaves uncut is
     #: drawn by `flat_fills`, its triangles sharing its points; one the edge
     #: cuts is drawn as its cut triangles, ring by ring, as is every stroke.
+    #:
+    #: **A pen is traced only where half its width reaches
+    #: `CHAIN_TOLERANCE_MM`** (OH-163's review): narrower, the outline moves
+    #: the fill's edge by less than the distance this composer already takes
+    #: for the same point when it chains an outline, so the fill alone is
+    #: that edge to the composer's own precision. Each pen left untraced is
+    #: counted under `PEN_DROPPED`. Not argued from what can be seen: the
+    #: page's camera has no zoom floor.
     fill_front: list[list[tuple[float, float]]] = []
     fill_back: list[list[tuple[float, float]]] = []
     whole_front: list[tuple[list[tuple[float, float]], list[tuple[int, int, int]]]] = []
@@ -5920,16 +5936,28 @@ def artwork(board: eagle.Board, ring: list[tuple[float, float]],
             continue
         shapes = [[points[a], points[b], points[c]] for a, b, c in triangles]
         pen = []
-        if fill.width_mm > 0:
+        if fill.width_mm / 2 >= CHAIN_TOLERANCE_MM:
             # A repeated point traces nothing, so `stroke_outline` gives None.
             pen = [shape for start, end in zip(points, points[1:] + points[:1])
                    if (shape := stroke_outline(eagle.Stroke(
                        fill.layer, *start, *end, fill.width_mm))) is not None]
-        cuts = [inside(shape) for shape in shapes + pen]
+        elif fill.width_mm > 0:
+            left[PEN_DROPPED] = left.get(PEN_DROPPED, 0) + 1
+        if not (shapes or pen):
+            left["fill of no area"] = left.get("fill of no area", 0) + 1
+            continue
+        cuts = [inside(shape, counted=False) for shape in shapes + pen]
+        # On a concave outline a piece is kept whole or dropped: a fill with
+        # a piece dropped is counted once, apart from the strokes and pads.
+        beyond = not can_clip and not all(cuts)
+        if beyond:
+            left["fill reaching outside a concave outline"] = (
+                left.get("fill reaching outside a concave outline", 0) + 1)
         whole = bool(shapes) and cuts[:len(shapes)] == shapes
         kept = [cut for cut in cuts[len(shapes) if whole else 0:] if len(cut) >= 3]
         if not (whole or kept):
-            left["fill off the board"] = left.get("fill off the board", 0) + 1
+            if not beyond:
+                left["fill off the board"] = left.get("fill off the board", 0) + 1
             continue
         back_side = fill.layer.startswith("B.")
         if whole:
@@ -6057,16 +6085,15 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     drawn_art, tally, undrawn_pads = artwork(board, ring, spec.thickness_mm,
                                              centre, spec.colour, letters)
     pieces.extend(drawn_art)
-    # A fill the triangulator refused is ink the file carries and this does
-    # not draw, so it is counted with the rest of that (OH-163).
-    refused_fills = tally.pop(FILL_REFUSED, 0)
+    # A fill the triangulator refused, and a pen left untraced, are ink the
+    # file carries and this does not draw, so they are counted with the rest
+    # of that (OH-163).
+    moved = {key: tally.pop(key) for key in (FILL_REFUSED, PEN_DROPPED) if key in tally}
     print("  artwork " + ", ".join(f"{k} {v}" for k, v in tally.items()))
     # **Text the file hides is not a gap**: KiCad plots none of it either,
     # so it is counted on its own line and under its own key, and `not ink`
     # is only what a vendor's plot has and this model lacks.
-    unread_ink = dict(board.silk_unread)
-    if refused_fills:
-        unread_ink[FILL_REFUSED] = refused_fills
+    unread_ink = {**dict(board.silk_unread), **moved}
     hidden = unread_ink.pop("hidden text", 0)
     if unread_ink:
         print("  not ink " + ", ".join(f"{k} {v}" for k, v in unread_ink.items()))
