@@ -6074,9 +6074,11 @@ def not_drawn(board: eagle.Board, cutouts: list[list[tuple[float, float]]],
     and `cutouts` every ring inside the outline, a hole KiCad mills among
     them. A KiCad `np_thru_hole` is counted twice, on purpose and under two
     names: here as a hole not cut, and under `extras["artwork"]
-    ["np_thru_hole"]` as a pad drawn as nothing. `milled` is what an EAGLE
-    board mills and its reader does not read into the outline, by kind
-    (`eagle._unmilled`). A plated drill is under no key.
+    ["np_thru_hole"]` as a pad drawn as nothing -- and `holes_np_thru_hole`
+    says how many of `holes` those pads are, so the overlap is in the JSON
+    and not only in this docstring (OH-163's confirm verification). `milled`
+    is what an EAGLE board mills and its reader does not read into the
+    outline, by kind (`eagle._unmilled`). A plated drill is under no key.
     """
     return {
         "ink": ink,
@@ -6085,6 +6087,8 @@ def not_drawn(board: eagle.Board, cutouts: list[list[tuple[float, float]]],
         "copper": dict(board.traces_unread),
         "cutouts": len(cutouts),
         "holes": len(board.holes),
+        "holes_np_thru_hole": sum(pad.hole for element in board.elements
+                                  for pad in element.pads),
         "milled": dict(board.outline_unread),
         "turn_unseen": turn_unseen,
         "unmodelled": unmodelled,

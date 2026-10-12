@@ -872,10 +872,16 @@ def _unmilled(board: ET.Element, elements: list[Element], packages: dict,
         the board's own as KiCad mills a footprint's Edge.Cuts: it is not
         placed into the outline here, so it is counted, once a placement;
       * a shape on Milling in the board's `<plain>` with a point strictly
-        inside the outline's extent. One wholly outside it is no part of the
-        board -- SparkFun's Pro Micro marks a v-score above its board so --
-        and a concave outline's extent takes in its notches, so a contour in
-        one is counted too, which errs toward saying more.
+        inside the outline's extent; one on the extent's edge is not. One
+        wholly outside it is no part of the board -- SparkFun's Pro Micro
+        marks a v-score above its board so.
+
+    **What the extent test cannot see, both ways.** It looks at a shape's
+    stated points only -- a wire's two ends, a circle's centre, a polygon's
+    vertices -- so a Milling wire or circle that crosses the board with none
+    of those inside is NOT counted, which under-counts. And a concave
+    outline's extent takes in its notches, so a Milling mark lying in one,
+    off the board, IS counted, which over-counts.
 
     A package's Milling is not counted: on the boards this composes each
     such shape was found by hand to sit on a plated pad -- closed outlines

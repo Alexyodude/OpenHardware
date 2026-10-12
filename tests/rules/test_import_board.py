@@ -1378,8 +1378,10 @@ def test_what_is_milled_and_not_read_into_the_outline_is_counted(tmp_path):
     (layer 46) on the board with a point inside the outline's extent. Not
     counted: a Milling wire wholly outside that extent, which is no part of
     the board -- SparkFun's Pro Micro marks a v-score above its board so --
-    and text on Milling, which mills nothing. Each package is placed twice
-    here, so its count is twice its own."""
+    four Milling wires lying on the extent's four edges, since inside is
+    strictly inside (OH-163's confirm verification: one `<` made `<=`
+    survived), and text on Milling, which mills nothing. Each package is
+    placed twice here, so its count is twice its own."""
     path = tmp_path / "milled.brd"
     path.write_text(
         '<?xml version="1.0" encoding="utf-8"?>'
@@ -1389,6 +1391,12 @@ def test_what_is_milled_and_not_read_into_the_outline_is_counted(tmp_path):
         '<circle x="5" y="5" radius="1" width="0" layer="20"/>'
         '<wire x1="10" y1="5" x2="12" y2="5" width="0" layer="46"/>'
         '<wire x1="-1" y1="21" x2="41" y2="21" width="0.2" layer="46"/>'
+        # On the left, right, bottom and top edges of the extent, 0..40 by
+        # 0..20, each with its other coordinate strictly inside.
+        '<wire x1="0" y1="8" x2="0" y2="9" width="0" layer="46"/>'
+        '<wire x1="40" y1="8" x2="40" y2="9" width="0" layer="46"/>'
+        '<wire x1="15" y1="0" x2="16" y2="0" width="0" layer="46"/>'
+        '<wire x1="15" y1="20" x2="16" y2="20" width="0" layer="46"/>'
         '<text x="10" y="10" size="1" layer="46">v-score</text></plain>'
         '<libraries><library name="L"><packages><package name="P">'
         '<pad name="1" x="1.5" y="0.5" drill="0.65" diameter="1"/>'

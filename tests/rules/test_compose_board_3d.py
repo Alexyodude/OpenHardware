@@ -4540,8 +4540,8 @@ def test_what_is_not_drawn_rides_in_extras():
     assert "artwork" in extras and extras["artwork"].get("ink front", 0) > 0
     gaps = extras.get("not_drawn")
     assert gaps is not None, "the composer's gaps still stop at stdout"
-    for key in ("ink", "copper", "cutouts", "holes", "milled", "turn_unseen", "unmodelled",
-                "text"):
+    for key in ("ink", "copper", "cutouts", "holes", "holes_np_thru_hole", "milled",
+                "turn_unseen", "unmodelled", "text"):
         assert key in gaps, f"not_drawn is missing {key}"
     # Each hole the board drills that is no pad, none of them cut (OH-163).
     assert gaps["holes"] == len(eagle.read_board(_brd()).holes) > 0, gaps["holes"]
@@ -5590,7 +5590,11 @@ def test_the_gaps_ride_as_compose_measured_them(capsys):
     `not_drawn`, caught here as it returns. On the Uno, every hole is the
     board's own, so a count of whose they are would not be the count of
     holes; on the Glyph C3, the holes are its `np_thru_hole` pads and the
-    cutouts its milled circles, each counted off the file's tree."""
+    cutouts its milled circles, each counted off the file's tree. And the
+    overlap is in the JSON (OH-163's confirm verification):
+    `holes_np_thru_hole` is how many of `holes` are pads the artwork line
+    counts too -- none of the Uno's `<hole>`s, every one of the Glyph's, and
+    the very count its artwork line prints under `np_thru_hole`."""
     seen = []
     real = compose.not_drawn
 
@@ -5598,8 +5602,8 @@ def test_the_gaps_ride_as_compose_measured_them(capsys):
         seen.append(real(*args, **kwargs))
         return seen[-1]
 
-    keys = {"ink", "text", "copper", "cutouts", "holes", "milled", "turn_unseen",
-            "unmodelled", "no_pads"}
+    keys = {"ink", "text", "copper", "cutouts", "holes", "holes_np_thru_hole", "milled",
+            "turn_unseen", "unmodelled", "no_pads"}
     spec = _uno_whole()
     with mock.patch.object(compose, "not_drawn", spy):
         _accounting(spec, capsys)
@@ -5607,7 +5611,7 @@ def test_the_gaps_ride_as_compose_measured_them(capsys):
     holes = eagle.read_board(spec.layout).holes
     assert set(gaps) == keys, gaps
     assert gaps["holes"] == len(holes) > len({hole.element for hole in holes}), gaps
-    assert (gaps["cutouts"], gaps["milled"]) == (0, {}), gaps
+    assert (gaps["cutouts"], gaps["milled"], gaps["holes_np_thru_hole"]) == (0, {}, 0), gaps
     _newstroke()
     glyph = next(s for s in compose.COMPOSITIONS if s.board == "PCBCUPID Glyph C3")
     if not _fetched(glyph):
@@ -5619,9 +5623,12 @@ def test_the_gaps_ride_as_compose_measured_them(capsys):
                 for pad in kicad.children(footprint, "pad") if pad[2] == "np_thru_hole"]
     seen.clear()
     with mock.patch.object(compose, "not_drawn", spy):
-        _accounting(glyph, capsys)
+        printed = _accounting(glyph, capsys).splitlines()
     (gaps,) = seen
     assert (gaps["holes"], gaps["cutouts"]) == (len(unplated), len(circles)) != (0, 0), gaps
+    assert gaps["holes_np_thru_hole"] == gaps["holes"], gaps
+    artwork = next(line for line in printed if line.startswith("  artwork "))
+    assert f", np_thru_hole {gaps['holes_np_thru_hole']}," in artwork, (artwork, gaps)
 
 
 def test_a_placement_with_no_pad_that_states_a_mesh_is_a_part(tmp_path, capsys):
