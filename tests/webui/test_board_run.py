@@ -1352,3 +1352,136 @@ def test_the_image_and_the_record_of_drives_replay_the_run():
             replay.step()
         assert ending(replay) == first
         assert replay.inputs == record
+
+
+# --- the bench's drive, over HTTP (OH-161 step 3, slice B) -------------------
+#
+# `POST /api/board/drive` is how the page's bench reaches `BoardSession.drive`
+# -- `webui/static/board3d.js` posts what `circuit.js` solved onto the
+# inputs. Driven here through the server's real path: a loopback socket, the
+# Origin check, the method table, the lock and the handler.
+
+
+def load_c3_blink(base_url: str) -> None:
+    """The XIAO ESP32-C3's committed blink, loaded over HTTP."""
+    if not C3_BLINK.is_file():
+        pytest.skip(f"{C3_BLINK} is missing")
+    post(base_url, "/api/board/load", upload(
+        image=C3_BLINK.read_bytes(), board=C3_BOARD, base=hex(esp32c3.IROM)))
+
+
+def gpio_in_over_http(base_url: str) -> int:
+    """`GPIO_IN` as the page would watch it, through `words=`."""
+    state = get(base_url, f"/api/board/state?words={esp32c3.GPIO + esp32c3.GPIO_IN:#x}")
+    return state["words"][0]["value"]
+
+
+def test_a_drive_reaches_the_pin_through_the_server(live_server):
+    """The bench's whole map, posted, lands on the pins and is answered with
+    the drive as the session recorded it: when, and what. `D9` comes out of
+    reset pulled up, so driving it low and then leaving it open shows the
+    drive and its end; `D1` floats, so driven high it reads 1 and open 0."""
+    load_c3_blink(live_server)
+    d9 = 1 << esp32c3.HEADER["D9"]
+    said = post(live_server, "/api/board/drive",
+                {"board": C3_BOARD, "levels": {"D1": "high", "D9": "low"}})
+    assert said == {"board": C3_BOARD, "retired": 0,
+                    "levels": {"D1": "high", "D9": "low"}}
+    level = gpio_in_over_http(live_server)
+    assert level & D1 and not level & d9, hex(level)
+    post(live_server, "/api/board/run", {"steps": 100})
+    said = post(live_server, "/api/board/drive",
+                {"board": C3_BOARD, "levels": {"D1": "open", "D9": "open"}})
+    assert said["retired"] == 100
+    level = gpio_in_over_http(live_server)
+    assert not level & D1 and level & d9, hex(level)
+
+
+def test_each_refused_drive_arrives_as_drive_refused(live_server):
+    """`drive`'s `ValueError`s, and the route's own refusal of a bench solved
+    for another board, each arrive as a 400 with the `drive-refused` slug
+    and the values in the message -- and leave the pins as they were."""
+    load_c3_blink(live_server)
+    before = gpio_in_over_http(live_server)
+    for levels, board, named in (({"D1": "1"}, C3_BOARD, "'1'"),
+                                 ({"3V3_OUT": "high"}, C3_BOARD, "'3V3_OUT'"),
+                                 ({"D1": "high"}, "XIAO-ESP32-C6-DIP", "XIAO-ESP32-C6-DIP")):
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            post(live_server, "/api/board/drive", {"board": board, "levels": levels})
+        answer = json.loads(caught.value.read())
+        assert caught.value.code == 400, answer
+        assert answer["reason"] == "drive-refused", answer
+        assert named in answer["error"], answer
+    assert gpio_in_over_http(live_server) == before, "a refused drive moved a pin"
+
+
+def test_a_drive_on_a_board_that_reads_no_input_is_refused_by_name(live_server):
+    """The XIAO RP2040's description reads no input, so its session refuses
+    every drive, and the route says so as `drive-refused`."""
+    post(live_server, "/api/board/load", upload(board=BOARD, base=hex(BLINK_LOAD)))
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        post(live_server, "/api/board/drive", {"board": BOARD, "levels": {"D0": "high"}})
+    answer = json.loads(caught.value.read())
+    assert caught.value.code == 400 and answer["reason"] == "drive-refused", answer
+    assert BOARD in answer["error"], answer
+
+
+def test_a_drive_that_is_not_a_map_of_levels_is_refused_naming_the_field(live_server):
+    """Not a refusal of the drive -- there is no drive to refuse -- so a
+    plain 400 naming the field, and no slug."""
+    load_c3_blink(live_server)
+    for body, field in (({"board": C3_BOARD, "levels": ["D1", "high"]}, "levels"),
+                        ({"levels": {"D1": "high"}}, "board")):
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            post(live_server, "/api/board/drive", body)
+        answer = json.loads(caught.value.read())
+        assert caught.value.code == 400, answer
+        assert field in answer["error"] and "reason" not in answer, answer
+
+
+def test_a_drive_is_post_only(live_server):
+    """It changes the machine, so a GET -- an `<img>` in another tab -- is a
+    405 and drives nothing (OH-141's table)."""
+    load_c3_blink(live_server)
+    before = gpio_in_over_http(live_server)
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        get(live_server, "/api/board/drive")
+    assert caught.value.code == 405
+    assert "POST" in json.loads(caught.value.read())["error"]
+    assert gpio_in_over_http(live_server) == before
+
+
+#: `pinMode(D1, INPUT_PULLUP)` and D10 copying it: the slice's watched sketch.
+ECHO_SKETCH = """
+void setup() { pinMode(D1, INPUT_PULLUP); pinMode(D10, OUTPUT); }
+void loop() { digitalWrite(D10, digitalRead(D1)); }
+"""
+
+
+def test_a_sketch_reads_what_the_bench_drove_through_the_server(live_server):
+    """**The slice, end to end over HTTP**: a sketch compiled for the XIAO
+    ESP32-C3, loaded and run through the routes the page uses, copies D1 to
+    D10. Open, the pull-up holds D1 high and D10 follows; driven low through
+    `/api/board/drive`, D10 goes low; open again, high. D10 is read the way
+    the page reads it, from `/api/board/state`'s `pins`."""
+    from webui import compile as compiler
+
+    try:
+        built = compiler.build(C3_BOARD, ECHO_SKETCH)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    assert built.ok, built.diagnostics
+    post(live_server, "/api/board/load", upload(
+        image=built.image, board=C3_BOARD,
+        base=hex(compiler.recipe_for(C3_BOARD).base)))
+
+    def d10_after(levels: dict) -> str:
+        if levels is not None:
+            post(live_server, "/api/board/drive", {"board": C3_BOARD, "levels": levels})
+        post(live_server, "/api/board/run", {"steps": 2_000})
+        return get(live_server, "/api/board/state")["pins"]["D10"]
+
+    assert d10_after(None) == "high", "the pull-up did not hold an open D1 high"
+    assert d10_after({"D1": "low"}) == "low"
+    assert d10_after({"D1": "open"}) == "high"
+    assert d10_after({"D1": "low", "D2": "open"}) == "low"

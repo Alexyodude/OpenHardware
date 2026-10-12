@@ -523,6 +523,10 @@ REASONS = {
     "budget-refused": "the number of instructions asked for is not usable",
     "window-refused": "the memory window asked for is not a usable size",
     "window-outside-the-map": "the memory window asked for is not on this board",
+    # `BoardSession.drive` refuses with a `ValueError` carrying the values;
+    # `/api/board/drive` gives it this slug (OH-161 step 3), and so does the
+    # route's own refusal of a bench solved for another board.
+    "drive-refused": "what the bench drives cannot be put on this board's pins",
 }
 
 
@@ -1455,8 +1459,9 @@ class BoardSession:
         `ValueError`, naming the values, for a level that is none of the
         three, a name that reaches no GPIO, two names of one GPIO driven two
         ways, a manifest row with no board file to resolve names against, and
-        a board whose description reads no input at all. A refusal slug in
-        `REASONS` waits for the transport that maps them to statuses.
+        a board whose description reads no input at all.
+        `webui/emulator_server.py`'s `/api/board/drive` gives each the
+        `drive-refused` slug.
         """
         driver = getattr(self.runtime.description, "drive_pins", None)
         if driver is None:

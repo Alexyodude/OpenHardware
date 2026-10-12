@@ -85,6 +85,13 @@ that returns and posts a name back.
       -> 200 the state, as /api/board/state answers it; a step that stops
              the board answers here too, with status and detail saying why
 
+    POST /api/board/drive   {"board": "XIAO-ESP32-C3-DIP",
+                             "levels": {"D1": "low", "D2": "open"}}
+      -> 200 {board, retired, levels}   // the drive as the session recorded it
+         // what the bench drives onto the pins, the whole map each time;
+         // a pad left out is open. 400 "drive-refused" for a level, a pad or
+         // a board that cannot be driven. POST-only: it changes the machine
+
 **Registers are named and carry their width, and that is not decoration.**
 This used to be sixteen positional words plus an `apsr` integer, which is the
 Armv6-M register file and nothing else: an ATmega328P has thirty-two eight-bit
@@ -217,6 +224,10 @@ BOARD_ERROR_STATUS = {
     "budget-refused": 400,
     "window-refused": 400,
     "window-outside-the-map": 400,
+    # A level, a pad name or a board the request got wrong: the bench is the
+    # caller's to fix. Even "this description reads no input" is, from here:
+    # the page posts only where the board's supply states input levels.
+    "drive-refused": 400,
 }
 
 
@@ -623,6 +634,41 @@ def handle_board_api(boards: BoardSlot, route: str,
         boards.require().run(_int(payload, "count", 1))
         return _board_state(boards, query)
 
+    if route == "/api/board/drive":
+        # What the bench drives onto the pins (OH-161 step 3), posted by
+        # `webui/static/board3d.js` whenever an input's level changes: the
+        # whole map each time, because a drive replaces the last one. Under
+        # the one lock like every board route, so it lands between two
+        # instructions and `session.inputs` records which.
+        #
+        # **The board is named, and it must be the one running.**
+        # `/api/board/state` carries no board identity and the picker does
+        # not stop the clock, so the page can draw one board while the
+        # session runs another and paint the second's levels onto the
+        # first's pads by name (`levels` in `board3d-panel.js` says so). A
+        # bench solved on those pads and posted unnamed would drive the
+        # running board's pins of the same names.
+        session = boards.require()
+        board = payload.get("board")
+        levels = payload.get("levels")
+        if not isinstance(board, str):
+            raise ApiError("board must be a string naming the board the "
+                           "bench was solved for")
+        if not isinstance(levels, dict):
+            raise ApiError(f"levels must be an object of pad name -> level, "
+                           f"got {levels!r}")
+        if board != session.board:
+            raise api.BoardRunError(
+                "drive-refused",
+                f"the bench was solved for {board} and the session runs "
+                f"{session.board}; nothing was driven")
+        try:
+            session.drive(levels)
+        except ValueError as error:
+            raise api.BoardRunError("drive-refused", str(error)) from error
+        retired, stated = session.inputs[-1]
+        return {"board": session.board, "retired": retired, "levels": stated}
+
     raise ApiError(f"no such route: {route}")
 
 
@@ -766,6 +812,7 @@ ROUTE_METHODS: dict[str, frozenset[str]] = {
     "/api/board/load-artefact": frozenset({"POST"}),
     "/api/board/run": frozenset({"POST"}),
     "/api/board/step": frozenset({"POST"}),
+    "/api/board/drive": frozenset({"POST"}),
     "/api/step": frozenset({"POST"}),
     "/api/run": frozenset({"POST"}),
     "/api/reset": frozenset({"POST"}),
