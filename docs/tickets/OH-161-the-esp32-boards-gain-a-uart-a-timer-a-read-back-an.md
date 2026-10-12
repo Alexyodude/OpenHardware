@@ -47,6 +47,12 @@ touches:
 - webui/boards/rp2350.py
 - core/cortexm0/abi.py
 - webui/api.py
+- webui/emulator_server.py
+- webui/static/board3d.js
+- webui/static/circuit.js
+- tests/webui/test_circuit.py
+- tests/webui/test_bench_drive.py
+- webui/static/parts.js
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
