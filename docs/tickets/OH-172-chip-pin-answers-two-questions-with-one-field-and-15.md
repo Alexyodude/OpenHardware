@@ -9,7 +9,6 @@ touches:
 - webui/static/board3d-panel.js
 - tests/webui/test_pin_view.py
 - tests/webui/test_board3d.py
-- tools/inventory.py
 - webui/boards/XIAO-MG24-SMD.json
 - webui/boards/XIAO-nRF54l15-SMD.json
 - webui/boards/XIAO-nRF54LM20A-SMD.json
@@ -320,3 +319,5 @@ LEFT is as the slice 2 note says, with one item added. A pad its footprint names
 **Note 2026-10-13:** SLICE 2 MERGED to master by fast-forward at bf9ab71 (lane4): a traced pad on one non-GPIO pad of its MCU is a caption, with the review's fix round (5e73b95, 59b8798, b69ec33). REVIEW: an independent review, its fix round, and a confirmation pass (PASS): every finding's fix in the diff, every named test present and passing, the author's breaks B1, B3, B4, B8, B9 and B10 each re-applied alone and each turned its test red, the generator-match tests passing; tests/rules/test_import_pindefs.py, test_inventory.py, tests/webui/test_pin_view.py and test_board3d.py 375 passed, 1 skipped. VERIFIED on master at bf9ab71: the full suite (python -m pytest -q -p no:cacheprovider) 2 failed, 2875 passed, 46 skipped in 874.86s; the two failures are the OCP pair under Python 3.14 (test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert, test_the_tessellator_welds_what_it_meshes, No module named 'OCP'). python tools/inventory.py: TWINS 26 of 38, pins 37. STATUS: open, not done -- slice 2's LEFT (1)-(5) and the D7{slash}RX item are the next slice; nothing is building it now. tests/webui/test_board3d.py stays borrowed from OH-215 until this ticket closes; webui/api.py stays lent to OH-161.
 
 **Note 2026-10-13:** 2026-10-13: tools/import_pindefs.py and tests/rules/test_import_pindefs.py lent to OH-231 (the XIAO STM32C5's pins from Seeed's newly published PCB). Return them when OH-231 closes.
+
+**Note 2026-10-13:** 2026-10-13: tools/inventory.py lent to OH-231 (its supply list lacks Seeed's VOUT_3V3). Return it when OH-231 closes.
