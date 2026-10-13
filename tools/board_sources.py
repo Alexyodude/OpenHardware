@@ -378,13 +378,21 @@ SOURCES: tuple[Source, ...] = (
         "676070c1e35935869c39a52a624dec7cb937850e6d6e12401b061786aab35b1b",
         licence=Licence(
             name=NONE_STATED,
-            covers="not stated: the zip holds no LICENSE file and the wiki names "
-            "none beyond the site-wide /License/ link",
+            covers="not stated: the zip holds no LICENSE file, and the site-wide "
+            "/License/ page the wiki links is a disclaimer that says nothing of "
+            "downloadable files",
             sampled=False,
             evidence=Evidence.OPENED,
             cite="a LOGO_CC_BY-SA_4.0 symbol reading 'CC BY-SA 4.0' on each of "
             "the zip's six .kicad_sch files: recorded as seen, not taken as a "
-            "grant; whether it is one is for the owner, OH-234",
+            "grant; whether it is one is for the owner, OH-234. "
+            "https://wiki.seeedstudio.com/License/, read 2026-10-13: 'No "
+            "license, express, implied or otherwise, is granted hereby under "
+            "any patents, copyrights or other intellectual property rights of "
+            "Seeed Studio or others', and 'You should not alter, modify, copy, "
+            "or otherwise misappropriate any Seeed Studio product'; it names "
+            "'board design files' only in a military-use clause, and says "
+            "nothing of the archives on files.seeedstudio.com",
         ),
         fetch=Fetch(
             transport=Transport.HTTPS_ARCHIVE,

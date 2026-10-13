@@ -713,6 +713,11 @@ def test_the_xiao_stm32c5_row_states_no_licence_and_pins_its_archive():
     assert row.licence.evidence is Evidence.OPENED
     assert "recorded as seen, not taken as a grant" in row.licence.cite
     assert "OH-234" in row.licence.cite
+    # The site-wide page the wiki links, read and dated (OH-231's review): it
+    # grants nothing and says nothing of the archives, and the row says so.
+    assert "https://wiki.seeedstudio.com/License/, read 2026-10-13" in row.licence.cite
+    assert "No license, express, implied or otherwise, is granted" in row.licence.cite
+    assert "nothing of the archives" in row.licence.cite
     assert row.fetch.transport is Transport.HTTPS_ARCHIVE
     assert "1,559,346 bytes" in row.size
     assert "676070c1e35935869c39a52a624dec7cb937850e6d6e12401b061786aab35b1b" in row.size

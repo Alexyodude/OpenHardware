@@ -1318,7 +1318,8 @@ def test_a_board_no_package_covers_says_so_rather_than_that_its_labels_are_missi
     """"No package covering this board defines this label" is vacuously true
     of all 35 pads of the XIAO STM32C5 and reads as though a package had been
     consulted. The fact OH-26 recorded is that the count of packages covering
-    it is zero -- no Zephyr board, no Seeed core -- so the pads, the
+    it is zero -- none this tool fetches; Seeed's own Zephyr board is unread
+    (OH-231) -- so the pads, the
     `assumption` and the `derivation` all say that instead of citing a
     `packages` list that is empty."""
     bsp, boards = _fake_tree(tmp_path, monkeypatch)
@@ -1343,7 +1344,7 @@ def test_a_board_no_package_covers_says_so_rather_than_that_its_labels_are_missi
     assert {pad["why_null"] for pad in document["pads"]} == {pindefs.NO_PACKAGE_AT_ALL}
     assumption = document["assumption"]
     assert "no board-support package covers this board at all" in assumption
-    assert "NOTHING XIAO" in assumption
+    assert "Zephyr board for the NOTHING" in assumption
     assert "the join is ready, not made" not in assumption, (
         "there is nothing here to join, so the undescribed board's sentence is wrong"
     )
@@ -1383,19 +1384,27 @@ def test_the_block_states_the_agreement_rule_rather_than_claiming_every_package_
 
 def test_the_committed_stm32c5_file_is_the_one_no_package_covers():
     """Needs no fetch. One board no board-support package covers, and its file
-    must say which of the two nulls each pad is; every other file must not.
+    says so in its `assumption`; no board file carries the generic
+    `NO_PACKAGE_AT_ALL` sentence on any pad now (OH-231).
 
-    **Thirteen of its 35 pads resolve, and OH-26's finding is untouched by
-    that.** Seeed's own KiCad board file (OH-231) joins `D0`-`D10` and the
-    `SWDIO/PA13` and `SWCLK/PA14` pads to the STM32C5A3CG's pads; it is CAD
-    and not firmware, so "no board-support package covers this board" is as
-    true as it was. The 2026-10 version of this test held two resolved pads,
-    read from the schematic symbol library, and a board file with the old
-    reading fails the assertions below.
+    **Eighteen of its 35 pads resolve, and OH-26's finding is untouched by
+    that.** Seeed's own KiCad board file joins the header's `D0`-`D10`, the
+    underside `D11`, `D12` and `D15`, the two SWD pads and the boot and reset
+    pads to the STM32C5A3CG's pads; it is CAD and not firmware, so "no
+    board-support package covers this board" is as true as it was. The rest
+    carry reasons read from that file, not the generic sentence, which
+    claimed the vendor's CAD named nothing beside a ground pad. The first
+    version of this test held two resolved pads, read from the schematic
+    symbol library, and a board file with the old reading fails below.
     """
-    borrowed = sorted(
+    assert not [
         name for name in BOARDS
         if pindefs.NO_PACKAGE_AT_ALL in pindefs.board_path(name).read_text(encoding="utf-8")
+    ]
+    borrowed = sorted(
+        name for name in BOARDS
+        if "no board-support package covers this board at all" in json.loads(
+            pindefs.board_path(name).read_text(encoding="utf-8"))["assumption"]
     )
     assert borrowed == ["XIAO-XIAO STM32C5-SMD"]
     document = json.loads(pindefs.board_path(borrowed[0]).read_text(encoding="utf-8"))
@@ -1405,7 +1414,7 @@ def test_the_committed_stm32c5_file_is_the_one_no_package_covers():
         "revision": document["pindefs"]["packages"][0]["revision"],
         "licence": "none stated",
     }]
-    assert len(document["pads"]) == 35, "OH-26: 13 of 35 (OH-231)"
+    assert len(document["pads"]) == 35, "OH-26: 18 of 35 (OH-231)"
 
     named = {pad["label"]: pad for pad in document["pads"] if pad["chip_pin"]}
     assert {label: pad["chip_pin"] for label, pad in named.items()} == (
@@ -1414,9 +1423,10 @@ def test_the_committed_stm32c5_file_is_the_one_no_package_covers():
     # number appearing in no ST document.
     assert all(pad["chip_index"] is None for pad in named.values())
     reasons = {pad["why_null"] for pad in document["pads"] if not pad["chip_pin"]}
-    assert pindefs.NO_PACKAGE_AT_ALL in reasons
-    assert "no board-support package covers this board at all" in document["assumption"]
-    assert "20 of these 35 pads" in document["assumption"]
+    assert pindefs.NO_PACKAGE_AT_ALL not in reasons
+    assert "17 of these 35 pads" in document["assumption"]
+    assert "Zephyr board for the STM32C5 (platform-seeedboards" in document["assumption"]
+    assert "no Zephyr board and no vendor core" not in document["assumption"]
 
 
 # --- the pins their vendors publish no number for (OH-26's blocker) ----------
@@ -1545,7 +1555,7 @@ def test_the_committed_files_with_unnumbered_pins_are_the_ones_oh_26_named():
         assert f"{len(pins)} pins on this board are named with NO flat number" in (
             document["assumption"]
         ), name
-    assert unnumbered == 147, (
+    assert unnumbered == 150, (
         "recomputed rather than restated. 123 when OH-26 measured it; 125 once "
         "OH-170 read NFC1 and NFC2 off Seeed's nRF54L15 board file; 127 once it "
         "traced the MG24's SWDIO to PA02 and SWCLK to PA01; 131 once the "
@@ -1558,7 +1568,7 @@ def test_the_committed_files_with_unnumbered_pins_are_the_ones_oh_26_named():
         "points to P1.08 and P1.09; 136 once OH-224's review traced its "
         "USER_LED the same way, to P2.00; 147 once OH-231 read the XIAO STM32C5's "
         "D0-D10 off Seeed's own board file, eleven more than the SWDIO and SWCLK "
-        "already counted. ST, Silicon Labs and Nordic all "
+        "already counted; 150 once its underside D11, D12 and D15 were read too. ST, Silicon Labs and Nordic all "
         "number by port, so every pad resolved on any of them lands in this "
         "bucket"
     )
@@ -2117,8 +2127,8 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # SMD's nRF54_SWDIO and nRF54_SWCLK the same way, to SWDIO and SWDCLK.
     # 582 once OH-231 traced the XIAO STM32C5's D0-D10 through Seeed's own
     # board file: eleven more than the 571 before. 584 once its BOOT and
-    # reset pads were traced too, as captions.
-    assert naming == 584, naming
+    # reset pads were traced too, as captions. 587 with D11, D12 and D15.
+    assert naming == 587, naming
     # 211 once OH-231 counted the XIAO STM32C5's two VOUT_3V3 pads.
     assert supplies == 211, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
@@ -2152,7 +2162,9 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # OH-231 moved the XIAO STM32C5's D0-D10 out of this bucket and into
     # `naming`, where they are the same eleven the 582 above gained. 48 once its
     # BOOT and reset pads became captions and its two VOUT_3V3 pads supplies.
-    assert specific == 48, specific
+    # 45 once its underside D11, D12 and D15 were traced, the three more
+    # `naming` gained.
+    assert specific == 45, specific
     # 15 until OH-200 named the C5's and C6's ten JTAG and BOOT pads. 5 until
     # OH-209 gave the RP2350 SMD's BOOT the reason Seeed's board file states.
     # 4 until OH-224 answered MG24_EN, nRF54_EN, 54L15_TX20 and 54L15_RX20
@@ -3028,10 +3040,19 @@ def test_the_spellings_the_board_file_advertises_are_the_ones_the_pattern_takes(
     for good in ("GPIO0", "GPIO29", "PA13", "PB3", "PC10", "PD15", "PE2",
                  "PH2", "P1.02"):
         assert pindefs._CHIP_PIN_NAME.match(good), good
-    # ...and not a port ST does not have, nor a function that merely starts
-    # like one: the STM32C5's boot pad is `PH2-BOOT0`, not a GPIO name here.
-    for bad in ("PI1", "PJ0", "P1", "PH2-BOOT0_44", "SWDIO_G2"):
+    # ...and not a port this pattern does not take (larger STM32s have I, J
+    # and K; no board here uses one), nor a function that is not a pin name.
+    for bad in ("PI1", "PJ0", "P1", "SWDIO_G2"):
         assert pindefs._CHIP_PIN_NAME.match(bad) is None, bad
+    # The STM32C5's boot pad, `PH2-BOOT0`, is a GPIO joined to a boot function
+    # in one word. In ST's naming that is PH2 shared with BOOT0, but nothing
+    # here has read ST's pin table for the part, so the pattern does not take
+    # it as `PH2` and the board file says so (`_GPIO_JOINED`).
+    assert pindefs._CHIP_PIN_NAME.match("PH2-BOOT0_44") is None
+    assert pindefs._GPIO_JOINED.match("PH2-BOOT0_44")
+    assert not pindefs._GPIO_JOINED.match("PH2_44") and not pindefs._GPIO_JOINED.match("NRST_7")
+    assert "a GPIO joined to another function" in assumption, assumption
+    assert "`PH2-BOOT0_44`, with no GPIO number" not in assumption, assumption
 
 
 def test_the_user_led_names_the_pin_its_test_point_reaches_and_zephyr_agrees():
@@ -4723,7 +4744,8 @@ def test_a_value_an_if_reads_from_a_flag_the_build_cannot_know_is_refused(tmp_pa
 STM32C5_READ = {
     "D0": "PA0", "D1": "PA1", "D2": "PA2", "D3": "PA3", "D4": "PB7",
     "D5": "PB6", "D6": "PA9", "D7": "PA10", "D8": "PE2", "D9": "PB0",
-    "D10": "PB15", "SWDIO/PA13": "PA13", "SWCLK/PA14": "PA14",
+    "D10": "PB15", "D11": "PB8", "D12": "PB9", "D15": "PB14",
+    "SWDIO/PA13": "PA13", "SWCLK/PA14": "PA14",
 }
 #: The two pads that reach one pad of the MCU outside the GPIO numbering: a
 #: caption each, the footprint's own words (OH-231).
@@ -4766,6 +4788,12 @@ def test_the_xiao_stm32c5_labels_are_held_to_the_vendors_nets():
     committed = {pad["label"]: pad["chip_pin"] for pad in document["pads"]
                  if pad["chip_pin"] is not None}
     assert committed == STM32C5_READ | STM32C5_CAPTIONS
+    # ...and the registry asks for exactly those pads (the board file is only
+    # regenerated by a run that has the vendor's file, so a label dropped from
+    # the registry would otherwise leave the committed file untouched).
+    asked = pindefs.BOARDS["XIAO-XIAO STM32C5-SMD"].sources[0].read.keywords
+    assert set(asked["labels"]) | set(asked["nets"]) == (
+        {label.split("/")[0] for label in STM32C5_READ} | set(STM32C5_CAPTIONS)), asked
     assert all(pad["chip_index"] is None for pad in document["pads"]), (
         "ST publishes no flat numbering; a chip_index here would be invented")
 
@@ -4775,7 +4803,7 @@ def test_the_xiao_stm32c5_labels_are_held_to_the_vendors_nets():
     header, mcu = _stm32c5_pads(STM32C5_PCB.read_text(encoding="utf-8"))
     for label, pin in STM32C5_READ.items():
         short = label.split("/")[0]
-        if short.startswith("D"):
+        if short in {f"D{n}" for n in range(11)}:
             nets = [net for net, functions in header.items()
                     if all(re.fullmatch(rf"{short}_\d+", one) for one in functions)]
         else:
@@ -4798,12 +4826,14 @@ def test_the_xiao_stm32c5_package_states_no_licence_and_says_so_in_the_board_fil
     assert "OSHW" not in json.dumps(document["pindefs"])
 
 
-def test_a_net_named_for_its_label_first_is_traced_only_with_lead():
+def test_a_net_named_for_its_label_first_is_traced_by_the_leading_reader():
     """Seeed's STM32C5 names `D0{slash}A0{slash}PA0` and `D8{slash}SPI_SCK{slash}PE2`:
-    the label, then functions, then the pin. Without `lead` the label is
-    matched against the LAST part, which is the pin, and `D0` is on no net;
-    with it the pin is read from the MCU's pad and not from the name. Port E
-    is one of ST's, which the old `P[A-D]` pattern read as a caption
+    the label, then functions, then the pin. `read_seeed_traced` matches the
+    label against the LAST part, which is the pin, and `D0` is on no net;
+    `read_seeed_traced_leading` matches the FIRST, and the pin is read from
+    the MCU's pad and not from the name. The two are thin wrappers of one
+    body (L1 of OH-231's review), so each is held to differ in nothing else.
+    Port E is one of ST's, which the old `P[A-D]` pattern read as a caption
     `PE2_1`."""
     def pad(number: int, function: str, net: str) -> str:
         return (f'\n\t\t(pad "{number}" smd rect\n\t\t\t(net "{net}")\n'
@@ -4811,7 +4841,7 @@ def test_a_net_named_for_its_label_first_is_traced_only_with_lead():
     board = ('\n\t(footprint "F"\n\t\t(property "Value" "CHIP-1"\n\t\t)'
              + pad(10, "PA0_10", "D0{slash}A0{slash}PA0")
              + pad(1, "PE2_1", "D8{slash}SPI_SCK{slash}PE2") + "\n\t)\n")
-    got = pindefs.read_seeed_traced((board,), part="CHIP-1", labels=("D0", "D8"), lead=True)
+    got = pindefs.read_seeed_traced_leading((board,), part="CHIP-1", labels=("D0", "D8"))
     assert got == {"D0": pindefs.ChipPin("PA0", None), "D8": pindefs.ChipPin("PE2", None)}
     with pytest.raises(PindefError, match="is on no net of the CHIP-1 footprint"):
         pindefs.read_seeed_traced((board,), part="CHIP-1", labels=("D0",))
@@ -4856,6 +4886,7 @@ def test_the_xiao_stm32c5_underside_pads_land_on_the_nets_the_registry_reads():
     points = [placed for placed in vendor.placements
               if placed.back and placed.value == "Test Point"]
     landed = {}
+    by_pad = {}
     for pad in footprint.pads:
         if pad.number in numbers:
             continue
@@ -4868,6 +4899,28 @@ def test_the_xiao_stm32c5_underside_pads_land_on_the_nets_the_registry_reads():
             pad.number, [point.reference for point in hits])
         if hits:
             landed[labels[pad.number]] = hits[0].pads[0].net
+            by_pad[pad.number] = hits[0].pads[0].net
+
+    # Every underside pad, by number, on the net its test point is on: the
+    # claim the registry's typed net and every name-traced underside label rest
+    # on (L2 of OH-231's review). A pad that landed elsewhere changes a line.
+    assert by_pad == {
+        "15": "D11{slash}FDCAN1_RX{slash}PB8", "16": "D12{slash}FDCAN1_TX{slash}PB9",
+        "17": "Net-(TP7-T)", "18": "Net-(TP8-T)",
+        "19": "unconnected-(TP18-T-Pad1)", "20": "unconnected-(TP17-T-Pad1)",
+        "21": "unconnected-(TP16-T-Pad1)", "22": "D15{slash}CAN_STB{slash}PB14",
+        "23": "SWDIO{slash}PA13", "24": "SWCLK{slash}PA14", "25": "~{STM32C5_RESET}",
+        "26": "GND", "27": "USB_D-", "28": "USB_D+", "29": "STM32C5_BOOT",
+        "30": "VOUT_3V3", "31": "VBAT", "32": "GND", "33": "Net-(TP19-T)",
+        "34": "Net-(TP20-T)"}, by_pad
+    # And each underside label that is READ from a net named for it is on a net
+    # whose first part is that label: a pad on another net would be read as
+    # the wrong pin, and the tracer would not notice.
+    for label in STM32C5_READ:
+        pad = next(one["pad"] for one in document["pads"] if one["label"] == label)
+        if str(pad) in by_pad:
+            assert by_pad[str(pad)].split("{slash}")[0] == label.split("/")[0], (
+                label, pad, by_pad[str(pad)])
 
     assert {label: landed[label] for label in (
         "STM32C5_RST", "STM32C5_BOOT", "USB_D-", "USB_D+", "CANH", "CANL")} == {
@@ -4949,3 +5002,49 @@ def test_the_xiao_stm32c5_reset_and_boot_are_captions_and_the_rest_say_what_they
     assert not [one for one in mcu["VOUT_3V3"] if pindefs._CHIP_PIN_NAME.match(one)], mcu["VOUT_3V3"]
     assert "VOUT_3V3" in SUPPLY_LABELS
     assert [pad["chip_pin"] for pad in pads["VOUT_3V3"]] == [None, None]
+
+    # D13 and D14: the pad's test point is on a net holding one 0R resistor and
+    # nothing else; that resistor's far net is the one on the MCU's pad.
+    for label, test_point, resistor, far, number, pin, transceiver in (
+            ("D13", "TP7", "R45", "D13{slash}FDCAN2_RX{slash}PB5", "41", "PB5", "RXD_4"),
+            ("D14", "TP8", "R46", "D14{slash}FDCAN2_TX{slash}PB13", "26", "PB13", "TXD_1")):
+        near = f"Net-({test_point}-T)"
+        assert on[near] == {test_point: {"1"}, resistor: on[near][resistor]}, on[near]
+        assert values[resistor] == "0R"
+        assert set(on[far]) == {resistor, "U4", "U3"} and on[far]["U4"] == {number}, on[far]
+        assert mcu[far] == [f"{pin}_{number}"], mcu[far]
+        assert can[far] == [transceiver], can[far]
+        (pad,) = pads[label]
+        assert pad["chip_pin"] is None and pad["why_null"] == reasons[label]
+        for word in (near, resistor, "0R", far, f"pad {number}", f"`{pin}`"):
+            assert word in reasons[label], (label, word)
+
+    # NC: three test points, each on a net of its own pad alone.
+    assert len(pads["NC"]) == 3, pads["NC"]
+    for point in ("TP16", "TP17", "TP18"):
+        net = f"unconnected-({point}-T-Pad1)"
+        assert on[net] == {point: {"1"}}, on[net]
+        assert net not in mcu
+        assert point in reasons["NC"]
+    assert all(pad["why_null"] == reasons["NC"] for pad in pads["NC"])
+
+    # The ground and the two rails the MCU is not on: no GPIO of its on them.
+    assert all(re.match(r"(VREF-|VSS)_\d+$", one) for one in mcu["GND"]), mcu["GND"]
+    assert "VBAT" not in mcu and "VBUS" not in mcu
+    for label in ("GND", "VBAT", "VBUS"):
+        assert label in SUPPLY_LABELS
+        assert all(pad["chip_pin"] is None and pad["why_null"] == reasons[label]
+                   for pad in pads[label]), label
+    assert "VBAT" in on and "VBUS" in on
+    assert all(re.match(r"(VREF\+|VDD)_\d+$", one) for one in mcu["VOUT_3V3"]), mcu["VOUT_3V3"]
+
+    # The boot pad is a GPIO joined to a function, which the assumption says in
+    # those words (M3 of OH-231's review) and not as "no GPIO number"; the reset
+    # pad is not a GPIO at all and keeps the older sentence. Both captions name
+    # the net the position join typed or read, which the assumption also says.
+    assumption = document["assumption"]
+    assert "`STM32C5_BOOT` reaches a pad the vendor's footprint names `PH2-BOOT0_44`, a GPIO joined" in assumption
+    assert "`STM32C5_RST` reaches a pad the vendor's footprint names `NRST_7`, with no GPIO number" in assumption
+    assert "`PH2-BOOT0_44`, with no GPIO number" not in assumption
+    assert ("on the net the vendor names for that header label or, for a pad the vendor "
+            "names no net for, on the net its test point lands on by position") in assumption
