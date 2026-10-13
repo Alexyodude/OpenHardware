@@ -1488,3 +1488,21 @@ def test_inventory_calls_supply_exactly_the_pads_test_import_pindefs_does():
         assert is_supply(label, ours) == expected, (board, label)
         supplies += expected
     assert supplies, "no pad on any board is a supply, so nothing was compared"
+
+
+def test_the_xiao_stm32c5_pins_layer_holds_because_its_supply_pads_are_supplies():
+    """OH-231. Seeed names the board's 3.3 V output `VOUT_3V3`, a spelling no
+    other board uses, so with the label missing from `SUPPLY_LABELS` the pins
+    layer asked two supply pads for a `chip_pin` and failed on them. Fails
+    without the label, and no other board's pins layer moves: it is the only
+    board file that carries the spelling."""
+    assert "VOUT_3V3" in supply_labels()
+    twins = {twin.name: twin for twin in collect_twins()}
+    stm32c5 = twins["XIAO-XIAO STM32C5-SMD"]
+    assert stm32c5.pins.holds, stm32c5.pins.detail
+    assert "unanswered" not in stm32c5.pins.detail, stm32c5.pins.detail
+    carrying = sorted(
+        path.stem for path in (REPO / "webui" / "boards").glob("*.json")
+        if any(pad["label"] == "VOUT_3V3" for pad in json.loads(
+            path.read_text(encoding="utf-8"))["pads"]))
+    assert carrying == ["XIAO-XIAO STM32C5-SMD"], carrying

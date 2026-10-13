@@ -600,7 +600,12 @@ def read_seeed_traced(
     typed. A net named here that reaches no pad of the part raises, as an
     absent named net does, and so does a label given both ways.
 
-    **`lead` is for a board whose nets are named for the label FIRST** (OH-231):
+    **`lead` is for a board whose nets are named for the label FIRST** (OH-231),
+    and it is a keyword here and not a second reader because it changes one
+    expression -- which part of a net's name is compared with the label --
+    while everything else this function does (the part's single match, the
+    refusals, the captions, `nets`) is what that board needs too; a copy would
+    be 130 lines to keep in step for the sake of one `split`:
     Seeed's XIAO STM32C5 names its header nets `D0{slash}A0{slash}PA0` and
     `SWDIO{slash}PA13`, the label then the functions then the pin, where every
     other board here ends the name with the label. With `lead` the label is
@@ -968,7 +973,8 @@ def seeed_pcb_traced(board_file: str, part: str, labels: tuple[str, ...],
     )
 
 
-def seeed_xiao_stm32c5(labels: tuple[str, ...]) -> Source:
+def seeed_xiao_stm32c5(labels: tuple[str, ...],
+                       nets: dict[str, str] | None = None) -> Source:
     """The XIAO STM32C5's own KiCad board file, followed from each header
     label's net to the STM32C5A3CG's pad (OH-231).
 
@@ -981,7 +987,7 @@ def seeed_xiao_stm32c5(labels: tuple[str, ...]) -> Source:
         "seeed-xiao-stm32c5",
         ("XIAO STM32C5.kicad_pcb",),
         functools.partial(read_seeed_traced, part="STM32C5A3CG", labels=labels,
-                          lead=True),
+                          nets=nets, lead=True),
         root=board_sources.source("seeed-xiao-stm32c5").dest(REPO),
     )
 
@@ -2575,6 +2581,49 @@ _STM32C5_UNDERSIDE = tuple(
     for label in ("D11", "D12", "D13", "D14", "D15")
 )
 
+#: **The STM32C5's USB pair is reached through a series resistor, and the
+#: reason says so** (OH-231). Seeed's `XIAO STM32C5.kicad_pcb` puts the
+#: underside pad's test point on the net `USB_D-`, which holds the USB-C
+#: connector USB1, the ESD diode D5, the 27R resistor R19 and no pad of the
+#: STM32C5A3CG; R19's other end is the net `USB_DN`, on the MCU's pad 32,
+#: `PA11`. The `D+` side is the same through R18, D6 and `USB_DP` on pad 33,
+#: `PA12`. This tracer follows one net and never crosses a part, so the pin is
+#: named here and `chip_pin` stays null. `test_the_xiao_stm32c5_pads_the_vendor_
+#: ...` reads every clause back out of the board file.
+_STM32C5_USB = (
+    ("USB_D-", "Seeed's `XIAO STM32C5.kicad_pcb` puts this pad's test point on "
+               "the net `USB_D-`, which holds the USB-C connector USB1, the ESD "
+               "diode D5 and the 27R resistor R19 and no pad of the STM32C5A3CG; "
+               "R19's other end is the net `USB_DN`, on the MCU's pad 32, `PA11`. "
+               "So the pin is reached through a series resistor and not by this "
+               "pad's own net, which is what `chip_pin` records, and it is left null"),
+    ("USB_D+", "Seeed's `XIAO STM32C5.kicad_pcb` puts this pad's test point on "
+               "the net `USB_D+`, which holds the USB-C connector USB1, the ESD "
+               "diode D6 and the 27R resistor R18 and no pad of the STM32C5A3CG; "
+               "R18's other end is the net `USB_DP`, on the MCU's pad 33, `PA12`. "
+               "So the pin is reached through a series resistor and not by this "
+               "pad's own net, which is what `chip_pin` records, and it is left null"),
+)
+
+#: **CANH and CANL are the bus side of the CAN FD transceiver, not an MCU pin**
+#: (OH-231). Seeed's board file puts each pad's test point on a net whose
+#: only active pad is U3's (value `CAN FD`): `CANH` on U3's `CANH_7`, `CANL` on
+#: its `CANL_6`. The MCU reaches U3 on the other side, through `D14`'s and
+#: `D13`'s nets (`TXD_1`, `RXD_4`).
+_STM32C5_CAN = (
+    ("CANH", "a pin of the CAN FD transceiver U3, not of the STM32C5A3CG: "
+             "Seeed's `XIAO STM32C5.kicad_pcb` puts this pad's test point on a "
+             "net whose only IC pad is U3's `CANH_7` (with the jumper JP1), the "
+             "bus side of the transceiver. The MCU is on U3's other side, "
+             "through the nets of `D14` (`TXD_1`) and `D13` (`RXD_4`)"),
+    ("CANL", "a pin of the CAN FD transceiver U3, not of the STM32C5A3CG: "
+             "Seeed's `XIAO STM32C5.kicad_pcb` puts this pad's test point on a "
+             "net whose only IC pad is U3's `CANL_6` (with the termination "
+             "resistors R34, R35 and R37), the bus side of the transceiver. The "
+             "MCU is on U3's other side, through the nets of `D14` (`TXD_1`) and "
+             "`D13` (`RXD_4`)"),
+)
+
 # **The nRF54LM20A's own debug pads carry no reason.** Its footprint names
 # them `SWDIO_G2` and `SWDCLK_G1`, outside the `Pn.nn` numbering, and the
 # tracer names each as a caption (OH-172 slice 2), which a reason never
@@ -2661,8 +2710,9 @@ BOARDS = {
     "XIAO-XIAO STM32C5-SMD": Board(
         "STM32C5",
         (seeed_xiao_stm32c5(
-            tuple(f"D{n}" for n in range(11)) + ("SWDIO", "SWCLK")),),
-        reasons=_STM32C5_UNDERSIDE,
+            tuple(f"D{n}" for n in range(11)) + ("SWDIO", "SWCLK", "STM32C5_BOOT"),
+            nets={"STM32C5_RST": "~{STM32C5_RESET}"}),),
+        reasons=_STM32C5_UNDERSIDE + _STM32C5_USB + _STM32C5_CAN,
     ),
     "XIAO-nRF52840-DIP": Board("nRF52840", _NRF52840),
     "XIAO-nRF52840-SMD": Board("nRF52840", _NRF52840, reasons=_NRF52840_SWD),
