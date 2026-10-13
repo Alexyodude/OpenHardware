@@ -18,6 +18,14 @@ fetched with PlatformIO:
 
     tools/sdk/esp32c3/include/soc/esp32c3/include/soc/{soc,gpio_reg}.h
 
+**At package version 3.20017.241212, which ships ESP-IDF v4.4.7** (its
+`tools/sdk/versions.txt`: `esp-idf: v4.4.7 38eeba213a`). A bare `file.h:N`
+below is a line of that copy. ESP-IDF v5.5 carries the same defines at
+other lines and some in other files -- its `register/soc/apb_saradc_reg.h`
+has each eight lines earlier, under a shorter licence header -- and a
+citation that says "at v5.5" is that tree's; `docs/esp-idf-reference.md`
+says why there are two.
+
 Every address below cites the file and line it was read from, the same shape
 `samd21.py` cites its CMSIS headers and `atmega328p.py` its `iom328p.h`. There
 is no research directory for this part; the headers *are* the source.
@@ -401,7 +409,9 @@ if CPU_HZ % SYSTIMER_HZ:
 APB_SARADC = 0x60040000
 
 #: The five registers of it this board models (OH-161 step 4), from
-#: `apb_saradc_reg.h`, as offsets because that is how the header writes them:
+#: `apb_saradc_reg.h` -- the v4.4.7 copy the module docstring names, so
+#: every line below is eight past v5.5's -- as offsets because that is how
+#: the header writes them:
 #:
 #:     #define APB_SARADC_CTRL_REG            (DR_REG_APB_SARADC_BASE + 0x000)  :22
 #:     #define APB_SARADC_ONETIME_SAMPLE_REG  (DR_REG_APB_SARADC_BASE + 0x020)  :176
@@ -475,7 +485,8 @@ ONETIME_SAMPLE_AT_RESET = 13 << ONETIME_CHANNEL_SHIFT
 #: **ADC1 only.** GPIO5 is ADC2's channel 0 (`adc_channel.h:33-34`), and
 #: ESP-IDF v5.5 refuses ADC2 on this part unless
 #: `CONFIG_ADC_ONESHOT_FORCE_USE_ADC2_ON_C3` is set (`components/esp_adc/
-#: adc_oneshot.c:86-92`; `soc_caps.h:90`, `SOC_ADC_DIG_SUPPORTED_UNIT`), so
+#: adc_oneshot.c:86-92` and `components/soc/esp32c3/include/soc/
+#: soc_caps.h:90`, `SOC_ADC_DIG_SUPPORTED_UNIT`, both at v5.5), so
 #: arduino-esp32's `analogRead(A3)` on a XIAO ESP32-C3 logs the failure and
 #: returns 0. No ADC2 key is held, so a start naming ADC2 faults.
 ADC1_CHANNELS: dict[int, int] = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
@@ -900,15 +911,23 @@ def adc_code(volts: float, atten: int) -> int:
     2.5 V is this formula's, outside anything the part states.
 
     `ValueError` with the value for a voltage that is not a finite number at
-    or above 0 V, and for an attenuation `ONETIME_ATTEN` cannot spell.
+    or above 0 V -- a bool among them, and an integer no float can hold --
+    and for an attenuation `ONETIME_ATTEN` cannot spell.
     """
     if atten not in ADC_ATTEN_K:
         raise ValueError(
             f"attenuation {atten!r} is none of ONETIME_ATTEN's {sorted(ADC_ATTEN_K)}")
-    if not (isinstance(volts, (int, float)) and math.isfinite(volts) and volts >= 0):
-        raise ValueError(f"an ADC converts a voltage of 0 V or more, got {volts!r}")
+    refusal = f"an ADC converts a finite voltage of 0 V or more, got {volts!r}"
+    if isinstance(volts, bool) or not isinstance(volts, (int, float)):
+        raise ValueError(refusal)
+    try:
+        as_float = float(volts)
+    except OverflowError as error:
+        raise ValueError(f"{refusal}, which no float can hold") from error
+    if not (math.isfinite(as_float) and as_float >= 0):
+        raise ValueError(refusal)
     return min(ADC_FULL_CODE,
-               math.floor(volts * ADC_ATTEN_K[atten] / ADC_VREF_VOLTS * ADC_FULL_CODE + 0.5))
+               math.floor(as_float * ADC_ATTEN_K[atten] / ADC_VREF_VOLTS * ADC_FULL_CODE + 0.5))
 
 
 def install_adc(cpu: Cpu) -> None:
@@ -931,6 +950,16 @@ def install_adc(cpu: Cpu) -> None:
     them changes what it reads back, where silicon would not. Every channel
     holds 0 until `hold_volts` says otherwise -- a floating input, the same
     stated decision `install_gpio_in` makes for a digital one.
+
+    **The result's bits 16 to 12 read 0, because nothing states what they
+    hold.** The TRM gives `ADC1_DATA` [16:0] as "SAR ADC1 conversion data"
+    and no more (Register 34.9, p.883). Its DMA word carries `sar_sel` and
+    `ch_sel` in [16:13] (Figure 34.2-8, pp.874-875), and ESP-IDF reads
+    those bits of ADC2's register as the arbiter's flag while masking
+    ADC1's to twelve (v5.5 `hal/esp32c3/include/hal/adc_ll.h:907`, `:931`):
+    the same layout in ADC1's register is likely and not stated, so it is
+    not stored, and ESP-IDF's `& 0xfff` is a mask nothing here can be seen
+    to need.
     """
     cpu.map_register(APB_SARADC + APB_SARADC_CTRL, APB_SARADC_CTRL_AT_RESET)
     cpu.map_register(APB_SARADC + APB_SARADC_SAR1_DATA, 0)

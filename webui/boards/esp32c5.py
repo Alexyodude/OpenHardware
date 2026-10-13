@@ -882,15 +882,23 @@ def adc_code(volts: float, atten: int) -> int:
     the effective range is 0 to 3300 mV (Table 5-6).
 
     `ValueError` with the value for a voltage that is not a finite number at
-    or above 0 V, and for an attenuation `ONETIME_ATTEN` cannot spell.
+    or above 0 V -- a bool among them, and an integer no float can hold --
+    and for an attenuation `ONETIME_ATTEN` cannot spell.
     """
     if atten not in ADC_ATTEN_K:
         raise ValueError(
             f"attenuation {atten!r} is none of ONETIME_ATTEN's {sorted(ADC_ATTEN_K)}")
-    if not (isinstance(volts, (int, float)) and math.isfinite(volts) and volts >= 0):
-        raise ValueError(f"an ADC converts a voltage of 0 V or more, got {volts!r}")
+    refusal = f"an ADC converts a finite voltage of 0 V or more, got {volts!r}"
+    if isinstance(volts, bool) or not isinstance(volts, (int, float)):
+        raise ValueError(refusal)
+    try:
+        as_float = float(volts)
+    except OverflowError as error:
+        raise ValueError(f"{refusal}, which no float can hold") from error
+    if not (math.isfinite(as_float) and as_float >= 0):
+        raise ValueError(refusal)
     return min(ADC_FULL_CODE,
-               math.floor(volts * ADC_ATTEN_K[atten] / ADC_VREF_VOLTS * ADC_FULL_CODE + 0.5))
+               math.floor(as_float * ADC_ATTEN_K[atten] / ADC_VREF_VOLTS * ADC_FULL_CODE + 0.5))
 
 
 def install_adc(cpu: Cpu) -> None:

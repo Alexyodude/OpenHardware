@@ -1400,16 +1400,36 @@ def test_a_voltage_reaches_the_adc_and_is_recorded_beside_the_levels():
 def test_a_voltage_that_is_not_a_finite_number_of_volts_or_more_is_refused():
     """Each refused with its value, before anything is driven or recorded:
     a voltage below ground, not a number, not finite, or a bool, which
-    Python would otherwise take for 1 V; a pad that reaches no GPIO; and a
-    `volts` that is not a map."""
+    Python would otherwise take for 1 V; an integer too large for a float,
+    which `json.loads` accepts up to 4300 digits and which raised
+    `OverflowError` past every handler until the step 4 review; a pad that
+    reaches no GPIO; and a `volts` that is not a map."""
     with c3_session() as session:
         for volts, said in (({"D0": -0.5}, "-0.5"), ({"D0": "1.65"}, "'1.65'"),
                             ({"D0": float("nan")}, "nan"), ({"D0": float("inf")}, "inf"),
-                            ({"D0": True}, "True"), ({"3V3_OUT": 3.3}, "'3V3_OUT'"),
+                            ({"D0": True}, "True"), ({"D0": 10 ** 400}, "1" + "0" * 400),
+                            ({"3V3_OUT": 3.3}, "'3V3_OUT'"),
                             ([("D0", 1.65)], "[('D0', 1.65)]")):
             with pytest.raises(ValueError) as caught:
                 session.drive({"D1": "high"}, volts)
             assert said in str(caught.value), (volts, str(caught.value))
+        assert session.inputs == [], "a refused drive is not recorded"
+        assert not gpio_in(session) & D1, "nor driven"
+
+
+def test_a_voltage_the_description_refuses_leaves_the_levels_undriven(monkeypatch):
+    """`hold_volts` runs before `drive_pins`, so a voltage the description
+    refuses leaves the levels of the same call undriven as well as
+    unrecorded: a level applied and not recorded is a run no replay
+    reproduces. No name `drive_table` resolves on the three described parts
+    is refused there today, so the refusal is put in."""
+    def refuses(cpu, volts):
+        raise ValueError(f"refused {dict(volts)!r}")
+
+    with c3_session() as session:
+        monkeypatch.setattr(esp32c3, "hold_volts", refuses)
+        with pytest.raises(ValueError):
+            session.drive({"D1": "high"}, {"D0": 1.65})
         assert session.inputs == [], "a refused drive is not recorded"
         assert not gpio_in(session) & D1, "nor driven"
 
@@ -1581,7 +1601,8 @@ def test_each_refused_drive_arrives_as_drive_refused(live_server):
             ({"3V3_OUT": "high"}, None, C3_BOARD, "'3V3_OUT'"),
             ({"D1": "high"}, None, "XIAO-ESP32-C6-DIP", "XIAO-ESP32-C6-DIP"),
             ({"D1": "high"}, {"D0": -1}, C3_BOARD, "-1"),
-            ({"D1": "high"}, {"D0": "1.65"}, C3_BOARD, "'1.65'")):
+            ({"D1": "high"}, {"D0": "1.65"}, C3_BOARD, "'1.65'"),
+            ({"D1": "high"}, {"D0": 10 ** 400}, C3_BOARD, "1" + "0" * 400)):
         with pytest.raises(urllib.error.HTTPError) as caught:
             post(live_server, "/api/board/drive",
                  {"board": board, "levels": levels, "volts": volts})

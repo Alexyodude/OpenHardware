@@ -943,7 +943,8 @@ def test_the_code_is_the_trms_formula_rounded_half_up_and_held_to_4095():
     assert [esp32c3.adc_code(v, 3) for v in (0, 1.65, 1.1, 2.2, 3.3, 5.0)] == [
         0, 1536, 1024, 2048, 3071, 4095]
     assert esp32c3.adc_code(0.55, 0) == 2048, "0 dB, k 100%: 2047.5 half up"
-    for volts, atten in ((-0.1, 3), (float("nan"), 3), (float("inf"), 3), (1.0, 4)):
+    for volts, atten in ((-0.1, 3), (float("nan"), 3), (float("inf"), 3), (True, 3),
+                         (10 ** 400, 3), (1.0, 4)):
         with pytest.raises(ValueError) as caught:
             esp32c3.adc_code(volts, atten)
         assert repr(volts if atten == 3 else atten) in str(caught.value), str(caught.value)

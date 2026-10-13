@@ -980,6 +980,16 @@ def test_each_channel_converts_its_own_pin_out_of_reset():
         assert convert(cpu, onetime(1)) == (0, False), "no conversion, no done"
 
 
+def test_the_code_refuses_a_bool_and_an_integer_no_float_can_hold():
+    """`True` would convert as 1 V, and 10 ** 400 -- an integer `json.loads`
+    accepts -- raised `OverflowError` out of `math.isfinite` rather than say
+    what it was given, until the step 4 review."""
+    for volts in (True, 10 ** 400):
+        with pytest.raises(ValueError) as caught:
+            esp32c6.adc_code(volts, 3)
+        assert repr(volts) in str(caught.value), str(caught.value)
+
+
 def test_a_start_on_adc2_or_on_no_channel_faults_and_a_gpio_with_no_pad_is_refused():
     """ADC2's bit, the reset channel 13 and channel 7 -- the part has seven,
     0 to 6 -- are held at nothing and fault; a voltage on GPIO31, which this

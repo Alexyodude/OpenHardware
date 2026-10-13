@@ -1168,6 +1168,16 @@ def test_the_adc_reset_values_are_every_default_the_header_states():
             f"board says {board:#010x}: {fields}")
 
 
+def test_the_code_refuses_a_bool_and_an_integer_no_float_can_hold():
+    """`True` would convert as 1 V, and 10 ** 400 -- an integer `json.loads`
+    accepts -- raised `OverflowError` out of `math.isfinite` rather than say
+    what it was given, until the step 4 review."""
+    for volts in (True, 10 ** 400):
+        with pytest.raises(ValueError) as caught:
+            esp32c5.adc_code(volts, 3)
+        assert repr(volts) in str(caught.value), str(caught.value)
+
+
 def test_the_adc_converts_nothing_until_its_clock_is_on():
     """**The C5's ADC clock resets off**, `PCR_SARADC_CLKM_EN` `default: 0`,
     where a C6's resets on. A start with it clear stores and is never done,

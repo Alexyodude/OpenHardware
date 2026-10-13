@@ -1493,11 +1493,12 @@ class BoardSession:
         that has one, with an empty map where `volts` is None.
 
         `ValueError`, naming the values, for a level that is none of the
-        three, a voltage that is not a finite number of 0 V or more, a name
-        that reaches no GPIO, two names of one GPIO driven or held two ways,
-        a manifest row with no board file to resolve names against, a board
-        whose description reads no input at all, and volts for one whose
-        description converts none. `webui/emulator_server.py`'s
+        three, a voltage that is not a finite number of 0 V or more or is an
+        integer too large for a float, a name that reaches no GPIO, two
+        names of one GPIO driven or held two ways, a manifest row with no
+        board file to resolve names against, a board whose description reads
+        no input at all, and volts for one whose description converts none.
+        `webui/emulator_server.py`'s
         `/api/board/drive` gives each the `drive-refused` slug.
         """
         driver = getattr(self.runtime.description, "drive_pins", None)
@@ -1543,25 +1544,40 @@ class BoardSession:
         held: dict[int, float] = {}
         held_by: dict[int, str] = {}
         for label, value in volts.items():
-            if (isinstance(value, bool) or not isinstance(value, (int, float))
-                    or not math.isfinite(value) or value < 0):
-                raise ValueError(
-                    f"{self.board}: {label!r} held at {value!r}; a pad is held "
-                    f"at a finite number of volts, 0 or more")
+            refusal = (f"{self.board}: {label!r} held at {value!r}; a pad is "
+                       f"held at a finite number of volts, 0 or more")
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(refusal)
+            try:
+                as_float = float(value)
+            except OverflowError as error:
+                # An integer `json.loads` accepts, up to 4300 digits, that no
+                # float holds. `math.isfinite` raises this too, and nothing
+                # between here and the route catches an OverflowError.
+                raise ValueError(f"{refusal} that a float can hold") from error
+            if not math.isfinite(as_float) or as_float < 0:
+                raise ValueError(refusal)
             if label not in gpios:
                 raise ValueError(
                     f"{self.board}: no pad {label!r} reaches a GPIO; the pads "
                     f"that do are {sorted(gpios)}")
             gpio = gpios[label]
-            if gpio in held and held[gpio] != value:
+            if gpio in held and held[gpio] != as_float:
                 raise ValueError(
                     f"{self.board}: {held_by[gpio]!r} and {label!r} are both "
                     f"GPIO{gpio}, held at {held[gpio]!r} and {value!r} V")
-            held[gpio] = float(value)
+            held[gpio] = as_float
             held_by[gpio] = label
-        driver(self.cpu, driven)
+        # **The voltages before the levels.** Each of the two checks every
+        # GPIO before it changes anything, so whichever goes first refuses
+        # with nothing applied; the second refusing after the first applied
+        # would leave the core holding a statement `inputs` never recorded,
+        # which no replay reproduces. `hold_volts` is the newer and the one
+        # likelier to grow a refusal, so it goes first. Neither refuses any
+        # GPIO `drive_table` resolves on the three described parts today.
         if holder is not None:
             holder(self.cpu, held)
+        driver(self.cpu, driven)
         self.inputs.append((self.retired, dict(levels), dict(volts)))
 
     def run(self, budget: int) -> RunResult:

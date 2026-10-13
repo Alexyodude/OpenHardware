@@ -1108,6 +1108,17 @@ def test_a_start_converts_the_word_held_for_the_channel_and_attenuation(adc):
     assert adc.read_word(INT_RAW) == DONE
 
 
+def test_a_start_sets_done_beside_the_status_bits_already_raised(adc):
+    """`done_mask` is SET in the status register, as `cpu.h` says, and not
+    written over it: `INT_RAW` carries ADC2's done in bit 30 beside ADC1's
+    in bit 31 (`apb_saradc_reg.h:392`, `:398`), and a conversion that
+    cleared it would lose an interrupt nobody had serviced."""
+    adc2_done = 1 << 30
+    adc.write_word(INT_RAW, adc2_done)
+    convert(adc, onetime(2))
+    assert adc.read_word(INT_RAW) == adc2_done | DONE
+
+
 def test_one_result_register_answers_whichever_channel_the_last_start_named(adc):
     """The reason this is a behaviour of the core and not a register a board
     sets between runs: firmware picks the channel in the same few
