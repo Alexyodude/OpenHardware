@@ -881,7 +881,7 @@ let boardRunning = null;
  *  build's `-DF_CPU` in `webui/compile.py`) but no route carries it:
  *  `boardImage` is `/api/board/load`'s reply (board, chip, core, format,
  *  bytes, entry, notes) and `/api/board/run` answers steps, status and
- *  detail. Showing "about 1/42 of real time" would need `/api/board/load` to
+ *  detail. Showing "about 1/N of real time" would need `/api/board/load` to
  *  carry the board's clock as `cpu_hz` -- the module's constant, or the build's
  *  `F_CPU` for the SAMD21, null where neither exists -- and this line to
  *  divide the rate by it. That is an edit to `webui/api.py` and
