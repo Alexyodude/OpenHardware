@@ -13,6 +13,8 @@ touches:
 - tools/import_pindefs.py
 - tests/rules/test_import_pindefs.py
 - tests/rules/test_board_sources.py
+- tools/inventory.py
+- tests/rules/test_inventory.py
 ---
 
 Found by OH-163 step 4's dated re-check of the vendor (2026-10-13). docs/research/board-models/README.md section 5 and sources.json record that on 2026-08-29 (OH-109) Seeed's wiki sitemap had no STM32C5 page, files.seeedstudio.com answered 403, and OSHW-XIAO-Series held only XIAO-STM32C5-SMD.kicad_mod -- "a footprint for a board that appears never to have shipped". tools/import_pindefs.py says the same in its STM32C5 row ("Nobody has published this one. Zephyr has no xiao_stm32c5 board"). None of that is true any more:
@@ -35,3 +37,5 @@ Runs stay out of reach: the STM32C5A3CG is a Cortex-M33 (OH-36, blocked on an or
 Claims: tools/import_pindefs.py and its tests are OH-172's (open, nobody building), the composer and import_3d_model OH-163's (lent to OH-226): borrow each when its step starts.
 
 **Note 2026-10-13:** 2026-10-13: borrows tools/import_pindefs.py and tests/rules/test_import_pindefs.py from OH-172, and claims tests/rules/test_board_sources.py (unclaimed). Return the first two to OH-172 when this closes.
+
+**Note 2026-10-13:** 2026-10-13: borrows tools/inventory.py from OH-172 and claims tests/rules/test_inventory.py (unclaimed). Return inventory.py to OH-172 when this closes.
