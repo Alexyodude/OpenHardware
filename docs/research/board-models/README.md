@@ -187,6 +187,43 @@ median length 0.117 mm and `User.2` another 1,216 at 0.086 mm. Thousands of
 tenth-of-a-millimetre strokes is a traced PICTURE of the board, with no
 height, no part identity and no solid in it. See OH-109.
 
+**CORRECTED 2026-10-13 (OH-163 step 4's dated re-check; OH-231): everything
+above about the STM32C5 was true on 2026-08-29 and is not true now.** It is kept
+as the record of that day, as the C5 paragraph above is. Seeed has since
+published the board:
+
+- the wiki has a getting-started page,
+  `wiki.seeedstudio.com/xiao_stm32c5_getting_started/` (200), and five siblings
+  in its sitemap (`_pin_multiplexing`, `_application`, `_canfd_usage`,
+  `_with_micropython`, `_with_stm32cubeide`); the product page is
+  `seeedstudio.com/XIAO-STM32C5-p-7011.html`;
+- the KiCad project is
+  `files.seeedstudio.com/wiki/XIAO_STM32C5/res/XIAO_STM32C5_v1.0_SCH%26PCB.zip`,
+  1,559,346 bytes, sha256
+  `676070c1e35935869c39a52a624dec7cb937850e6d6e12401b061786aab35b1b`, holding
+  `XIAO STM32C5.kicad_pcb` and six `.kicad_sch` files (the files are dated
+  2026-07-27 to 07-31). It holds no STEP;
+- the schematic PDF is `.../res/Seeed-Studio-XIAO-STM32C5-v1.0.pdf`, 1,397,144
+  bytes, sha256 `6e32a6515372feb5b5c6e16864d37423c9d938b442907b26ea556fc93f35ce21`,
+  with no text layer;
+- Seeed's Zephyr board is `zephyr/stm32/boards/seeed/xiao_stm32c5/` in
+  `Seeed-Studio/platform-seeedboards` at
+  `57250b6f9157a5600eb2b232cc90618b3ed1b3be` (2026-10-08), "extracted from
+  schematic 04 XIAO Header&STM32C5.kicad_sch"; the MCU is STM32C5A3CG in a
+  UFQFPN48.
+
+`XIAO-STM32C5-pinout_sheet.xlsx` is not a source: its XIAO column is misaligned
+against the ST table (it puts `BAT_EN` on PE2, where the PCB puts `D8`/`SPI_SCK`
+and puts `BAT_EN` on PA15).
+
+So "a footprint for a board that appears never to have shipped" is retracted,
+and so is "these three keep the extruded footprint": the board has a vendor PCB
+to be composed from (OH-231 step 3, which waits on OH-226). What this
+paragraph does not settle is the archive's licence: its schematic sheets carry
+a `LOGO_CC_BY-SA_4.0` symbol, as the sheets of the C3, C5, C6, MG24 and
+nRF54LM20A archives do, and it holds no licence file. That is recorded in
+`sources.json` as seen, not as a grant.
+
 **Every XIAO shares a 21 × 17.5 mm outline and a 14-pad castellated edge, and
 that is exactly why a sibling's mesh must not be substituted.** It would be
 plausible, correctly sized, correctly placed, and a drawing of a different

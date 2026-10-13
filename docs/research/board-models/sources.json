@@ -126,9 +126,25 @@
         "XIAO-XIAO STM32C5-SMD"
       ],
       "mesh": null,
-      "modelable": false,
+      "pcb": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO_STM32C5/res/XIAO_STM32C5_v1.0_SCH%26PCB.zip",
+        "status": 200,
+        "bytes": 1559346,
+        "sha256": "676070c1e35935869c39a52a624dec7cb937850e6d6e12401b061786aab35b1b",
+        "found": "2026-10-13 (OH-163 step 4's re-check; OH-231)",
+        "holds": "XIAO STM32C5.kicad_pcb and six .kicad_sch files (five numbered sheets and the root sheet), files dated 2026-07-27..31; no STEP"
+      },
+      "schematic": {
+        "url": "https://files.seeedstudio.com/wiki/XIAO_STM32C5/res/Seeed-Studio-XIAO-STM32C5-v1.0.pdf",
+        "status": 200,
+        "bytes": 1397144,
+        "sha256": "6e32a6515372feb5b5c6e16864d37423c9d938b442907b26ea556fc93f35ce21",
+        "note": "no text layer"
+      },
+      "modelable": "yes since 2026-10-13: the vendor publishes a KiCad PCB; not yet composed (OH-231 step 3)",
       "searched": {
         "when": "2026-08-29 (OH-109)",
+        "status": "TRUE THEN, FALSE NOW: see `correction_3` at the end of this file and `rechecked` below",
         "control": "every query run twice, once for the ESP32-C5 whose PCB is now composed; the control finds it each time",
         "sitemap": {
           "esp32c5": 14,
@@ -146,7 +162,14 @@
           "stm32c5": 1,
           "the_one": "Seeed Studio XIAO Series Library/XIAO-STM32C5-SMD.kicad_mod, a footprint"
         },
-        "conclusion": "not a board whose CAD is unpublished -- a footprint for a board that appears never to have shipped. It is in this repository's catalogue because tools/import_board.py derives boards from that library."
+        "conclusion": "not a board whose CAD is unpublished -- a footprint for a board that appears never to have shipped. It is in this repository's catalogue because tools/import_board.py derives boards from that library. That was what 2026-08-29 found and is kept as such; it is no longer true."
+      },
+      "rechecked": {
+        "when": "2026-10-13 (OH-163 step 4; OH-231)",
+        "wiki": "https://wiki.seeedstudio.com/xiao_stm32c5_getting_started/ answers 200, with five sibling pages in the sitemap (_pin_multiplexing, _application, _canfd_usage, _with_micropython, _with_stm32cubeide); product page https://www.seeedstudio.com/XIAO-STM32C5-p-7011.html",
+        "zephyr": "Seeed-Studio/platform-seeedboards zephyr/stm32/boards/seeed/xiao_stm32c5/ at 57250b6f9157a5600eb2b232cc90618b3ed1b3be (2026-10-08), extracted from schematic '04 XIAO Header&STM32C5.kicad_sch'; MCU STM32C5A3CG, UFQFPN48",
+        "not_a_source": "XIAO-STM32C5-pinout_sheet.xlsx (80,761 bytes): an ST pin table with a XIAO column whose rows are misaligned -- it puts BAT_EN on PE2 where the PCB puts D8/SPI_SCK and BAT_EN on PA15",
+        "licence_seen": "all six .kicad_sch files of the zip carry a LOGO_CC_BY-SA_4.0 symbol; the zip holds no LICENSE file and the PCB names none. Recorded as seen, not as a grant: see OH-231 step 1"
       }
     },
     "nRF54LM20A": {
@@ -194,5 +217,6 @@
   },
   "corrected": "2026-08-29 (twice: see `correction` and `correction_2`)",
   "correction": "The MG24 and nRF54LM20A meshes DO exist: each is a KiCad assembly export inside the archive this file lists under `pcb`. `measured`/`method` describe the 2026-08-28 survey, which classified the LINKS on each wiki page and never opened an archive -- so a mesh behind a link whose text says PCB was invisible to it, and the control could not catch that because all four known meshes are behind links whose text says model. Only the two `mesh` fields below were changed; every byte count is still the Content-Length the survey measured, and both were re-checked 2026-08-29 and are unchanged. See the README beside this file.",
-  "correction_2": "The ESP32-C5 DOES publish a full KiCad project: https://files.seeedstudio.com/wiki/XIAO_ESP32C5/res/Seeed_Studio_XIAO_ESP32C5.zip, 865,127 bytes, holding `Seeed Studio ESP32C5.kicad_pcb` with 98 placements. It is linked from the getting-started page among the twenty files.seeedstudio.com links this survey says it classified -- so the classifier SAW it and did not recognise it, because the archive is named after the BOARD where the C6's says `SCH&PCB` and the MG24's says `KiCad`. The shared `New_XIAO_Series_Footprints.zip` was a decoy: it does hold XIAO-ESP32-C5-DIP.kicad_mod, whose five (model ...) blocks name the RP2040, SAMD21, C3, S3 and nRF52840 STEPs -- the boilerplate list in section 2, and not one of them a C5. Re-checked 2026-08-29."
+  "correction_2": "The ESP32-C5 DOES publish a full KiCad project: https://files.seeedstudio.com/wiki/XIAO_ESP32C5/res/Seeed_Studio_XIAO_ESP32C5.zip, 865,127 bytes, holding `Seeed Studio ESP32C5.kicad_pcb` with 98 placements. It is linked from the getting-started page among the twenty files.seeedstudio.com links this survey says it classified -- so the classifier SAW it and did not recognise it, because the archive is named after the BOARD where the C6's says `SCH&PCB` and the MG24's says `KiCad`. The shared `New_XIAO_Series_Footprints.zip` was a decoy: it does hold XIAO-ESP32-C5-DIP.kicad_mod, whose five (model ...) blocks name the RP2040, SAMD21, C3, S3 and nRF52840 STEPs -- the boilerplate list in section 2, and not one of them a C5. Re-checked 2026-08-29.",
+  "correction_3": "The XIAO STM32C5 IS published. On 2026-08-29 (OH-109) the wiki's sitemap had no STM32C5 page, files.seeedstudio.com answered 403 and OSHW-XIAO-Series held only XIAO-STM32C5-SMD.kicad_mod; that record is kept under the STM32C5 entry's `searched` as what was true then. Re-checked 2026-10-13 (OH-163 step 4, OH-231): the wiki has a getting-started page and five siblings, and https://files.seeedstudio.com/wiki/XIAO_STM32C5/res/XIAO_STM32C5_v1.0_SCH%26PCB.zip (1,559,346 bytes, sha256 676070c1e35935869c39a52a624dec7cb937850e6d6e12401b061786aab35b1b) holds a KiCad PCB and six .kicad_sch files. See `rechecked` and `pcb` under STM32C5."
 }
