@@ -24,12 +24,14 @@
 # register by name and tells the caller to use `words=` instead, and the two
 # predicates agreeing would make that refusal unreachable.
 
+import ctypes
+
 import pytest
 
 from core.riscv32 import abi
 
 from . import encode as e
-from .conftest import load
+from .conftest import PC, load
 
 #: ESP32-C3 GPIO, from the Technical Reference Manual chapter 5. Used because
 #: it is the block `webui/boards/esp32c3.py` describes, so a change to these
@@ -1326,3 +1328,412 @@ def test_a_reset_machine_keeps_no_sampler_behind(adc):
     with pytest.raises(abi.AbiError) as caught:
         adc.hold_samples(ONETIME, {onetime(2): 1536})
     assert f"0x{ONETIME:08x}" in str(caught.value), str(caught.value)
+
+
+# --- the doorbell and the byte FIFO (OH-161 step 5, ABI 7) --------------------
+#
+# Two behaviours that know nothing about any bus, so these tests are about the
+# mechanism and not an I2C controller: a doorbell rings when a write carries a
+# ring bit, and a FIFO holds the bytes firmware wrote and the bytes it will
+# read. The addresses are the ESP32-C3's I2C0, from the framework copy
+# `soc/i2c_reg.h` (3.20017.241212): CTR at + 0x04, whose TRANS_START is bit 5
+# and CLK_EN bit 8; DATA at + 0x1C; CLK_CONF at + 0x54, whose SCLK_ACTIVE is
+# bit 21. Used because they are the block step 5 describes; what a board's
+# tests hold is the board.
+
+I2C0 = 0x60013000
+BELL = I2C0 + 0x04
+BELL2 = I2C0 + 0x08
+RING = 1 << 5
+CLK_EN = 1 << 8
+I2C_DATA = I2C0 + 0x1C
+I2C_CLK_CONF = I2C0 + 0x54
+SCLK_ACTIVE = 1 << 21
+
+
+def ring_program(word: int, offset: int = 4) -> list[int]:
+    """Three instructions: write `word` (under 0x800, an `addi`'s reach) to
+    I2C0 + `offset`. The third retires the store."""
+    return [e.lui("a4", I2C0 >> 12), e.addi("a5", "x0", word),
+            e.sw("a5", "a4", offset)]
+
+
+def raw_step(cpu) -> int:
+    """One `riscv32_step`, its number and not an exception: `Cpu.step` runs
+    the service for a ring, which would hide what the core returned."""
+    return cpu._lib.riscv32_step(cpu._handle)
+
+
+@pytest.fixture
+def bell(cpu):
+    """CTR as a doorbell whose TRANS_START both rings and stores as 0. Takes
+    `cpu` for the reason the `gpio` fixture does."""
+    cpu.map_doorbell(BELL, value=0, ring_mask=RING, write_trigger=RING)
+    return cpu
+
+
+def test_a_write_carrying_a_ring_bit_rings_and_one_without_does_not(bell):
+    for word, rings in ((RING, True), (RING | CLK_EN, True), (CLK_EN, False),
+                        (0, False)):
+        load(bell, ring_program(word))
+        results = [raw_step(bell) for _ in range(3)]
+        want = abi.RANG if rings else abi.OK
+        assert results == [abi.OK, abi.OK, want], (hex(word), results)
+
+
+def test_the_ringing_store_has_retired_when_the_step_returns_rang(bell):
+    load(bell, ring_program(RING | CLK_EN))
+    assert [raw_step(bell) for _ in range(2)] == [abi.OK, abi.OK]
+    assert raw_step(bell) == abi.RANG
+    assert bell.pc == PC + 12, "past the store, as for any retired instruction"
+    assert bell.read_word(BELL) == CLK_EN, "the store landed, trigger bit aside"
+    assert abi.RANG == 4
+
+
+def test_rang_at_names_the_doorbell_that_rang(bell):
+    bell.map_doorbell(BELL2, value=0, ring_mask=1, write_trigger=0)
+    for offset, doorbell, word in ((8, BELL2, 1), (4, BELL, RING)):
+        load(bell, ring_program(word, offset))
+        assert [raw_step(bell) for _ in range(3)][-1] == abi.RANG
+        assert bell._lib.riscv32_rang_at(bell._handle) == doorbell
+
+
+def test_a_ring_is_forgotten_by_the_next_step(bell):
+    load(bell, ring_program(RING) + [NOP, NOP])
+    assert [raw_step(bell) for _ in range(5)] == [
+        abi.OK, abi.OK, abi.RANG, abi.OK, abi.OK]
+
+
+def test_a_write_that_is_no_instruction_leaves_no_ring_behind(bell):
+    """A harness poking CTR through `write_word` rang nothing. Its ring must
+    not end the next, unrelated step."""
+    bell.write_word(BELL, RING)
+    load(bell, [NOP])
+    assert raw_step(bell) == abi.OK
+
+
+def test_a_ring_bit_in_a_lane_the_access_does_not_carry_does_not_ring(bell):
+    """`sb` to CTR's second byte carries 0x20 into bits 15:8; TRANS_START is
+    bit 5, in byte 0, so only a store to byte 0 rings."""
+    for offset, want in ((5, abi.OK), (4, abi.RANG)):
+        load(bell, [e.lui("a4", I2C0 >> 12), e.addi("a5", "x0", RING),
+                    e.sb("a5", "a4", offset)])
+        results = [raw_step(bell) for _ in range(3)]
+        assert results[-1] == want, (offset, results)
+        bell.write_word(BELL, 0)
+
+
+def test_write_trigger_bits_read_back_zero_and_the_others_stay(bell):
+    bell.write_word(BELL, RING | CLK_EN)
+    assert bell.read_word(BELL) == CLK_EN
+    bell.map_doorbell(BELL, value=RING | CLK_EN, ring_mask=RING,
+                      write_trigger=RING)
+    assert bell.read_word(BELL) == CLK_EN, "a trigger bit does not reset to 1"
+
+
+def test_a_ringing_store_ages_the_machine_exactly_once(bell):
+    """One tick per instruction, so the count after the three-instruction
+    program is the number of times the machine aged. A ringing store that
+    aged it twice, or not at all, reads 4 or 2."""
+    bell.map_register(SYSTIMER_CONF, UNIT0_WORK_EN)
+    bell.on_ring(BELL, lambda cpu, address: None)
+    for word in (RING, CLK_EN):
+        bell.map_snapshot_counter(
+            op=UNIT0_OP, update_mask=UNIT0_UPDATE, valid_mask=UNIT0_VALUE_VALID,
+            low=UNIT0_VALUE_LO, high=UNIT0_VALUE_HI, high_mask=VALUE_HI_BITS,
+            enable=SYSTIMER_CONF, enable_mask=UNIT0_WORK_EN,
+            instructions_per_tick=1)
+        load(bell, ring_program(word))
+        for _ in range(3):
+            bell.step()
+        bell.write_word(UNIT0_OP, UNIT0_UPDATE)
+        assert bell.read_word(UNIT0_VALUE_LO) == 3, hex(word)
+
+
+def test_anything_mapped_over_a_doorbell_replaces_it(bell):
+    bell.map_register(SYSTIMER_CONF, UNIT0_WORK_EN)
+    mappers = (
+        lambda cpu: cpu.map_register(BELL, 0),
+        lambda cpu: cpu.map_alias(BELL, SYSTIMER_CONF, "store"),
+        lambda cpu: cpu.map_stream(BELL, enable=SYSTIMER_CONF,
+                                   enable_mask=UNIT0_WORK_EN),
+        lambda cpu: cpu.map_fifo(BELL, enable=SYSTIMER_CONF,
+                                 enable_mask=UNIT0_WORK_EN),
+        lambda cpu: cpu.map_input(BELL, out=SYSTIMER_CONF, enable=SYSTIMER_CONF,
+                                  pad_base=SYSTIMER_CONF, pad_stride=0, pads=0,
+                                  input_enable=1, pull_up=0, pull_down=0),
+        lambda cpu: cpu.map_sampler(BELL, value=0, start_mask=1 << 31,
+                                    key_mask=0, result=SYSTIMER_CONF,
+                                    status=SYSTIMER_CONF, done_mask=1,
+                                    enable=SYSTIMER_CONF,
+                                    enable_mask=UNIT0_WORK_EN),
+    )
+    for index, mapper in enumerate(mappers):
+        bell.map_doorbell(BELL, value=0, ring_mask=RING, write_trigger=RING)
+        mapper(bell)
+        load(bell, ring_program(RING))
+        results = [raw_step(bell) for _ in range(3)]
+        assert results == [abi.OK] * 3, (index, results)
+
+
+def test_on_ring_runs_its_service_after_the_store_retired(bell):
+    seen = []
+
+    def service(cpu, address):
+        seen.append((address, cpu.read_word(BELL), cpu.pc))
+
+    bell.on_ring(BELL, service)
+    load(bell, ring_program(RING | CLK_EN))
+    for _ in range(3):
+        bell.step()
+    assert seen == [(BELL, CLK_EN, PC + 12)]
+
+
+def test_on_ring_replaces_the_service_it_had(bell):
+    called = []
+    bell.on_ring(BELL, lambda cpu, address: called.append("first"))
+    bell.on_ring(BELL, lambda cpu, address: called.append("second"))
+    load(bell, ring_program(RING))
+    for _ in range(3):
+        bell.step()
+    assert called == ["second"]
+
+
+def test_a_value_error_from_the_service_is_refused_with_the_pc_and_address(bell):
+    reason = ValueError("a third byte was read (DS25095A 4.1.1)")
+
+    def service(cpu, address):
+        raise reason
+
+    bell.on_ring(BELL, service)
+    load(bell, ring_program(RING))
+    bell.step()
+    bell.step()
+    with pytest.raises(abi.Refused) as caught:
+        bell.step()
+    refused = caught.value
+    assert isinstance(refused, abi.AbiError)
+    assert refused.pc == PC + 8, "where the ringing store began"
+    assert refused.address == BELL
+    assert refused.__cause__ is reason
+    assert "a third byte was read (DS25095A 4.1.1)" in str(refused)
+    assert f"pc=0x{PC + 8:08x}" in str(refused) and f"0x{BELL:08x}" in str(refused)
+    assert bell.pc == PC + 12, "the store retired"
+    assert refused.retired is True
+
+
+def test_a_ring_with_no_service_is_refused_by_name(bell):
+    load(bell, ring_program(RING))
+    bell.step()
+    bell.step()
+    with pytest.raises(abi.Refused) as caught:
+        bell.step()
+    assert "no service" in str(caught.value) and "on_ring" in str(caught.value)
+    assert caught.value.address == BELL and caught.value.pc == PC + 8
+
+
+def test_a_service_that_is_not_a_device_refusal_propagates_as_itself(bell):
+    def service(cpu, address):
+        raise RuntimeError("a bug in the service")
+
+    bell.on_ring(BELL, service)
+    load(bell, ring_program(RING))
+    bell.step()
+    bell.step()
+    with pytest.raises(RuntimeError, match="a bug in the service"):
+        bell.step()
+
+
+def test_mapping_the_doorbell_again_drops_the_service_it_had(bell):
+    bell.on_ring(BELL, lambda cpu, address: None)
+    bell.map_doorbell(BELL, value=0, ring_mask=RING, write_trigger=RING)
+    load(bell, ring_program(RING))
+    bell.step()
+    bell.step()
+    with pytest.raises(abi.Refused, match="no service"):
+        bell.step()
+
+
+def test_a_doorbell_that_can_never_ring_is_refused_with_the_values(bell):
+    with pytest.raises(abi.AbiError) as caught:
+        bell.map_doorbell(BELL2, value=0, ring_mask=0)
+    assert f"0x{BELL2:08x}" in str(caught.value), str(caught.value)
+    for name, kwargs in (("ring_mask", {"ring_mask": 1 << 32}),
+                         ("write_trigger", {"ring_mask": 1,
+                                            "write_trigger": 1 << 32})):
+        with pytest.raises(abi.AbiError) as caught:
+            bell.map_doorbell(BELL2, value=0, **kwargs)
+        assert name in str(caught.value) and str(1 << 32) in str(caught.value)
+
+
+@pytest.fixture
+def fifo(cpu):
+    """DATA as a FIFO behind CLK_CONF's SCLK_ACTIVE, gate open."""
+    cpu.map_register(I2C_CLK_CONF, SCLK_ACTIVE)
+    cpu.map_fifo(I2C_DATA, enable=I2C_CLK_CONF, enable_mask=SCLK_ACTIVE)
+    return cpu
+
+
+def test_a_write_to_the_fifo_appends_its_low_byte_while_the_gate_is_open(fifo):
+    for word in (0x41, 0x00, 0x1234):
+        fifo.write_word(I2C_DATA, word)
+    assert fifo.take_written(I2C_DATA) == b"\x41\x00\x34"
+
+
+def test_nothing_is_appended_while_the_gate_is_clear(fifo):
+    fifo.write_word(I2C_CLK_CONF, 0)
+    fifo.write_word(I2C_DATA, 0x41)
+    assert fifo.take_written(I2C_DATA) == b""
+    fifo.write_word(I2C_CLK_CONF, SCLK_ACTIVE)
+    fifo.write_word(I2C_DATA, 0x42)
+    assert fifo.take_written(I2C_DATA) == b"B"
+
+
+def test_a_byte_store_to_a_lane_above_the_data_appends_nothing(fifo):
+    _run(fifo, [e.sb("a5", "a4", 1), e.sb("a5", "a4", 0)],
+         {14: I2C_DATA, 15: 0x41})
+    assert fifo.take_written(I2C_DATA) == b"A", "only the store to byte 0"
+
+
+def test_taking_the_written_bytes_forgets_them(fifo):
+    fifo.write_word(I2C_DATA, 0x41)
+    assert fifo.take_written(I2C_DATA) == b"A"
+    assert fifo.take_written(I2C_DATA) == b""
+    fifo.write_word(I2C_DATA, 0x42)
+    assert fifo.take_written(I2C_DATA) == b"B"
+
+
+def test_an_address_that_is_no_fifo_has_nothing_written(fifo):
+    assert fifo.take_written(I2C_CLK_CONF) == b""
+
+
+def test_a_buffer_too_small_for_the_written_bytes_takes_nothing(fifo):
+    for byte in b"abc":
+        fifo.write_word(I2C_DATA, byte)
+    small = (ctypes.c_uint8 * 2)()
+    assert fifo._lib.riscv32_take_written(fifo._handle, I2C_DATA, small, 2) == 3
+    assert fifo.take_written(I2C_DATA) == b"abc", "still there to be taken"
+
+
+def test_a_write_through_an_unmapped_gate_faults_naming_the_fifo(cpu):
+    cpu.map_fifo(I2C_DATA, enable=I2C_CLK_CONF, enable_mask=SCLK_ACTIVE)
+    load(cpu, ring_program(0x41, 0x1C))
+    cpu.step()
+    cpu.step()
+    with pytest.raises(abi.MemoryFault) as caught:
+        cpu.step()
+    assert f"0x{I2C_DATA:08x}" in str(caught.value), str(caught.value)
+    assert cpu.take_written(I2C_DATA) == b""
+
+
+def test_held_bytes_are_read_oldest_first_and_then_the_read_faults(fifo):
+    fifo.hold_readable(I2C_DATA, b"\x01\x02\x03")
+    assert [fifo.read_word(I2C_DATA) for _ in range(3)] == [1, 2, 3]
+    with pytest.raises(abi.MemoryFault):
+        fifo.read_word(I2C_DATA)
+
+
+def test_holding_again_replaces_what_was_held(fifo):
+    fifo.hold_readable(I2C_DATA, b"\x01\x02")
+    fifo.hold_readable(I2C_DATA, b"\x09")
+    assert fifo.read_word(I2C_DATA) == 9
+    with pytest.raises(abi.MemoryFault):
+        fifo.read_word(I2C_DATA)
+
+
+def test_a_read_with_nothing_held_faults_at_the_read_and_changes_nothing(fifo):
+    """The empty read is the program's, at its pc, not a plausible byte one
+    instruction late; and it leaves everything as it was, so holding a byte
+    and retrying the same instruction reads it."""
+    fifo.write_word(I2C_DATA, 0x5A)
+    fifo.hold_readable(I2C_DATA, b"\x07")
+    load(fifo, [e.lui("a4", I2C0 >> 12), e.lw("a5", "a4", 0x1C),
+                e.lw("a6", "a4", 0x1C)])
+    for _ in range(2):
+        fifo.step()
+    assert fifo.reg(15) == 7
+    with pytest.raises(abi.MemoryFault) as caught:
+        fifo.step()
+    assert f"pc=0x{PC + 8:08x}" in str(caught.value), str(caught.value)
+    assert f"0x{I2C_DATA:08x}" in str(caught.value), str(caught.value)
+    assert fifo.pc == PC + 8 and fifo.reg(16) == 0
+    assert fifo.take_written(I2C_DATA) == b"\x5a", "the written side is untouched"
+    fifo.hold_readable(I2C_DATA, b"\x08")
+    fifo.step()
+    assert fifo.reg(16) == 8 and fifo.pc == PC + 12
+
+
+def test_holding_bytes_for_an_address_that_is_no_fifo_is_refused_by_address(fifo):
+    with pytest.raises(abi.AbiError) as caught:
+        fifo.hold_readable(I2C_CLK_CONF, b"\x01")
+    assert f"0x{I2C_CLK_CONF:08x}" in str(caught.value), str(caught.value)
+
+
+def test_a_machine_with_no_board_keeps_no_fifo_behind(fifo):
+    """Held bytes and written ones are state. Asked through the FIFO's own
+    calls, because mapping anything at the address would replace one left
+    there and hide it."""
+    for forget in (lambda cpu: cpu.reset(), lambda cpu: cpu.clear_regions(),
+                   lambda cpu: cpu.clear_mmio()):
+        fifo.map_fifo(I2C_DATA, enable=I2C_CLK_CONF, enable_mask=SCLK_ACTIVE)
+        fifo.write_word(I2C_CLK_CONF, SCLK_ACTIVE)
+        fifo.write_word(I2C_DATA, 0x41)
+        fifo.hold_readable(I2C_DATA, b"\x01")
+        forget(fifo)
+        assert fifo.take_written(I2C_DATA) == b""
+        with pytest.raises(abi.AbiError):
+            fifo.hold_readable(I2C_DATA, b"\x01")
+        fifo.map_register(I2C_CLK_CONF, SCLK_ACTIVE)
+
+
+def test_anything_mapped_over_a_fifo_replaces_it(fifo):
+    fifo.map_register(SYSTIMER_CONF, UNIT0_WORK_EN)
+    mappers = (
+        lambda cpu: cpu.map_register(I2C_DATA, 0),
+        lambda cpu: cpu.map_alias(I2C_DATA, SYSTIMER_CONF, "store"),
+        lambda cpu: cpu.map_stream(I2C_DATA, enable=SYSTIMER_CONF,
+                                   enable_mask=UNIT0_WORK_EN),
+        lambda cpu: cpu.map_doorbell(I2C_DATA, value=0, ring_mask=1),
+        lambda cpu: cpu.map_input(I2C_DATA, out=SYSTIMER_CONF,
+                                  enable=SYSTIMER_CONF, pad_base=SYSTIMER_CONF,
+                                  pad_stride=0, pads=0, input_enable=1,
+                                  pull_up=0, pull_down=0),
+        lambda cpu: cpu.map_sampler(I2C_DATA, value=0, start_mask=1 << 31,
+                                    key_mask=0, result=SYSTIMER_CONF,
+                                    status=SYSTIMER_CONF, done_mask=1,
+                                    enable=SYSTIMER_CONF,
+                                    enable_mask=UNIT0_WORK_EN),
+        lambda cpu: cpu.map_snapshot_counter(
+            op=I2C_DATA, update_mask=1, valid_mask=2, low=I2C_DATA + 0x100,
+            high=I2C_DATA + 0x104, high_mask=0xFFFFFFFF, enable=SYSTIMER_CONF,
+            enable_mask=UNIT0_WORK_EN, instructions_per_tick=1),
+    )
+    for index, mapper in enumerate(mappers):
+        fifo.map_fifo(I2C_DATA, enable=I2C_CLK_CONF, enable_mask=SCLK_ACTIVE)
+        mapper(fifo)
+        with pytest.raises(abi.AbiError):
+            fifo.hold_readable(I2C_DATA, b"\x01")
+        assert fifo.take_written(I2C_DATA) == b"", index
+
+
+def test_a_fifo_mapped_over_a_stream_takes_its_writes(fifo):
+    """A stream left at the address would capture the write first and the
+    FIFO would see none of it."""
+    fifo.map_stream(I2C_DATA, enable=I2C_CLK_CONF, enable_mask=SCLK_ACTIVE)
+    fifo.map_fifo(I2C_DATA, enable=I2C_CLK_CONF, enable_mask=SCLK_ACTIVE)
+    fifo.write_word(I2C_DATA, 0x41)
+    assert fifo.take_written(I2C_DATA) == b"A"
+    assert fifo.stream(I2C_DATA) == b""
+
+
+def test_the_binding_refuses_a_library_of_another_abi_version(monkeypatch):
+    """7 is the ring and the FIFO. A binding that expected 6 against this
+    library, or 7 against an older one, would call a symbol that is not there
+    or miss one that is."""
+    assert abi.ABI_VERSION == 7
+    assert abi.load().riscv32_abi_version() == 7
+    monkeypatch.setattr(abi, "_library", None)
+    monkeypatch.setattr(abi, "ABI_VERSION", 6)
+    with pytest.raises(abi.AbiError) as caught:
+        abi.load(build_if_missing=False)
+    assert "7" in str(caught.value) and "6" in str(caught.value), str(caught.value)

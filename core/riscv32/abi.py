@@ -29,7 +29,7 @@ from __future__ import annotations
 import ctypes
 import pathlib
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 try:
     from tools.build_core import BuildError, ensure_built, library_path
@@ -38,7 +38,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     from tools.build_core import BuildError, ensure_built, library_path
 
 #: Must match RISCV32_ABI_VERSION in abi.h.
-ABI_VERSION = 6
+ABI_VERSION = 7
 
 #: `riscv32::WriteOp`, by the name a board description uses.
 #:
@@ -113,6 +113,10 @@ OK = 0
 UNIMPLEMENTED = 1
 MEMORY_FAULT = 2
 ILLEGAL = 3
+#: abi.h's `RISCV32_RANG`: the instruction retired, and rang a doorbell. ABI
+#: only: `riscv32::StepResult` has no such value, and `Cpu.step` never returns
+#: it, because it runs the service the doorbell names.
+RANG = 4
 
 #: How many halfwords a `HostFault` shows from where its step began: an RV32
 #: instruction is one 16-bit parcel or two, and the core fetches it as such.
@@ -180,6 +184,35 @@ class HostFault(AbiError):
         self.code = code
         #: The PC the core left, or None if reading it faulted.
         self.left = left
+
+
+class Refused(AbiError):
+    """A doorbell was rung and nothing could answer it.
+
+    Either the service registered for the doorbell raised `ValueError`, saying
+    what the device refuses -- the cause is chained -- or none was registered.
+    **The instruction that rang it retired**, so a caller counting
+    instructions counts this one: `pc` is where that instruction began, and
+    the PC register is past it. Not a fault of the core and not of the
+    firmware's memory map: the firmware asked a device for something the
+    device's model refuses.
+    """
+
+    #: What a caller that counts instructions asks of any `AbiError`: this
+    #: one came after the instruction retired. The others come instead of it.
+    retired = True
+
+    def __init__(self, pc: int, address: int, reason: str) -> None:
+        super().__init__(
+            f"pc=0x{pc:08x}: the doorbell at 0x{address:08x} was rung and "
+            f"{reason}"
+        )
+        #: Where the ringing instruction began.
+        self.pc = pc
+        #: The doorbell's word address.
+        self.address = address
+        #: The service's reason, or that there was no service.
+        self.reason = reason
 
 
 class Registers(ctypes.Structure):
@@ -270,6 +303,28 @@ _SIGNATURES = {
          ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32],
         ctypes.c_int,
     ),
+    "riscv32_map_doorbell": (
+        [ctypes.c_void_p] + [ctypes.c_uint32] * 4,
+        None,
+    ),
+    "riscv32_rang_at": ([ctypes.c_void_p], ctypes.c_uint32),
+    "riscv32_map_fifo": (
+        [ctypes.c_void_p] + [ctypes.c_uint32] * 3,
+        None,
+    ),
+    "riscv32_written_count": (
+        [ctypes.c_void_p, ctypes.c_uint32], ctypes.c_uint32
+    ),
+    "riscv32_take_written": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint8),
+         ctypes.c_uint32],
+        ctypes.c_uint32,
+    ),
+    "riscv32_hold_readable": (
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint8),
+         ctypes.c_uint32],
+        ctypes.c_int,
+    ),
     "riscv32_is_mapped": ([ctypes.c_void_p, ctypes.c_uint32], ctypes.c_int),
     "riscv32_clear_mmio": ([ctypes.c_void_p], None),
     "riscv32_step": ([ctypes.c_void_p], ctypes.c_int),
@@ -336,6 +391,8 @@ class Cpu:
         self._handle = self._lib.riscv32_new()
         if not self._handle:
             raise AbiError("riscv32_new returned null")
+        #: Doorbell word address -> what answers it (`on_ring`).
+        self._services: dict[int, Callable[[Cpu, int], None]] = {}
 
     def __enter__(self) -> Cpu:
         return self
@@ -672,6 +729,89 @@ class Cpu:
             raise AbiError(
                 f"0x{control:08x} is no sampler; map_sampler maps one")
 
+    def map_doorbell(self, address: int, *, value: int, ring_mask: int,
+                     write_trigger: int = 0) -> None:
+        """A register that rings when written, for a device Python owns.
+
+        `address` stores as a register from `value`, except that every bit of
+        `write_trigger` stores as 0. A write carrying a bit of `ring_mask`
+        retires as a store and then `step` runs the service `on_ring` gave
+        for `address`. A write with no ring bit does not ring. An ESP32 I2C
+        controller's CTR, whose TRANS_START is both. The core knows nothing of
+        the device; see `cpu.h`.
+
+        A `ring_mask` of zero is refused, with the values: a doorbell that can
+        never ring is a device that silently never answers. So is a mask that
+        does not fit 32 bits, which ctypes would pass truncated.
+        """
+        for name, mask in (("ring_mask", ring_mask),
+                           ("write_trigger", write_trigger)):
+            if not 0 <= mask <= 0xFFFFFFFF:
+                raise AbiError(
+                    f"{name} must fit in 32 bits, got {mask!r}: ctypes would "
+                    f"pass it as {mask & 0xFFFFFFFF:#010x} without saying so")
+        if ring_mask == 0:
+            raise AbiError(
+                f"ring_mask 0 for the doorbell at 0x{address:08x} never "
+                f"rings: a device behind it would never be asked anything")
+        self._services.pop(address & ~3, None)
+        self._lib.riscv32_map_doorbell(
+            self._handle, address, value, ring_mask, write_trigger)
+
+    def on_ring(self, address: int,
+                service: Callable[[Cpu, int], None]) -> None:
+        """What answers the doorbell at `address`: `service(cpu, address)`,
+        called by `step` once the ringing instruction has retired. Replaces
+        any earlier service for it.
+
+        A `ValueError` from the service is the device refusing, and `step`
+        raises `Refused` from it; anything else is a bug in the service and
+        propagates as it is, rather than be worded as the firmware's.
+        """
+        self._services[address & ~3] = service
+
+    def map_fifo(self, address: int, *, enable: int, enable_mask: int) -> None:
+        """A byte FIFO on each side of `address`.
+
+        A write appends its low byte for `take_written` while `enable &
+        enable_mask` is set, and faults through a gate that is not mapped. A
+        read pops the oldest byte `hold_readable` gave, and **faults when
+        nothing is held**: a plausible byte one instruction late would be
+        read as the device's answer. See `cpu.h`.
+        """
+        self._lib.riscv32_map_fifo(self._handle, address, enable, enable_mask)
+
+    def take_written(self, address: int) -> bytes:
+        """Everything written to the FIFO at `address` since it was last
+        taken, oldest first, and forget it. Empty where `address` is no FIFO
+        or nothing was written.
+
+        The core takes nothing when the buffer is too small, and says how many
+        there were; a mismatch here is raised with both numbers, not
+        returned as a prefix.
+        """
+        count = self._lib.riscv32_written_count(self._handle, address)
+        if count == 0:
+            return b""
+        buffer = (ctypes.c_uint8 * count)()
+        taken = self._lib.riscv32_take_written(
+            self._handle, address, buffer, count)
+        if taken != count:
+            raise AbiError(
+                f"the FIFO at 0x{address:08x} held {count} bytes and then "
+                f"{taken}: nothing steps this core between the two calls")
+        return bytes(buffer)
+
+    def hold_readable(self, address: int, data: bytes) -> None:
+        """The bytes reads of the FIFO at `address` pop, oldest first.
+        Replaces what was held and not yet read. Refused, naming the address,
+        where it is no FIFO."""
+        buffer = (ctypes.c_uint8 * len(data)).from_buffer_copy(data)
+        if not self._lib.riscv32_hold_readable(
+                self._handle, address, buffer, len(data)):
+            raise AbiError(
+                f"0x{address:08x} is no FIFO; map_fifo maps one")
+
     def is_mapped(self, address: int) -> bool:
         """Whether `address` is a mapped register rather than bulk memory."""
         return bool(self._lib.riscv32_is_mapped(self._handle, address))
@@ -705,6 +845,9 @@ class Cpu:
             raise self._host_fault(fault) from fault
         if result == OK:
             return
+        if result == RANG:
+            self._answer_ring()
+            return
         pc = self.pc
         if result == UNIMPLEMENTED:
             raise Unimplemented(
@@ -722,6 +865,25 @@ class Cpu:
         raise MemoryFault(
             f"pc=0x{pc:08x}: {kind} at 0x{address:08x} refused ({present})"
         )
+
+    def _answer_ring(self) -> None:
+        """Run the service for the doorbell the step just rang.
+
+        Called with the ringing instruction retired. `Refused` carries the PC
+        that instruction began at, from `riscv32_step_entry`: the PC register
+        is already past it.
+        """
+        address = self._lib.riscv32_rang_at(self._handle)
+        entry = self._lib.riscv32_step_entry(self._handle)
+        service = self._services.get(address)
+        if service is None:
+            raise Refused(
+                entry, address,
+                "no service is registered for it; on_ring registers one")
+        try:
+            service(self, address)
+        except ValueError as reason:
+            raise Refused(entry, address, str(reason)) from reason
 
     def _host_fault(self, fault: OSError) -> HostFault:
         """The `HostFault` for `fault`: the PC the step began at, the

@@ -39,7 +39,11 @@ extern "C" {
 //: Bumped to 5 at OH-225, which added `riscv32_step_entry`.
 //: Bumped to 6 at OH-161's step 4, which added `riscv32_map_sampler` and
 //: `riscv32_hold_samples`.
-#define RISCV32_ABI_VERSION 6
+//: Bumped to 7 at OH-161's step 5, which added `riscv32_map_doorbell`,
+//: `riscv32_rang_at`, `riscv32_map_fifo`, `riscv32_written_count`,
+//: `riscv32_take_written` and `riscv32_hold_readable`, and the step result
+//: `RISCV32_RANG`.
+#define RISCV32_ABI_VERSION 7
 
 /// x0 through x31, then PC.
 ///
@@ -183,6 +187,42 @@ RISCV32_API int riscv32_hold_samples(Riscv32Cpu* cpu, uint32_t control_address,
                                      const uint32_t* keys,
                                      const uint32_t* words, uint32_t count);
 
+/// A register that rings when written: `address` stores as a register from
+/// `value`, with every bit of `write_trigger` stored as 0, and a write whose
+/// value carries any bit of `ring_mask` ends its step with `RISCV32_RANG`
+/// after the store has retired. See cpu.h.
+RISCV32_API void riscv32_map_doorbell(Riscv32Cpu* cpu, uint32_t address,
+                                      uint32_t value, uint32_t ring_mask,
+                                      uint32_t write_trigger);
+
+/// The doorbell the most recent step rang; meaningful only straight after a
+/// step returned `RISCV32_RANG`.
+RISCV32_API uint32_t riscv32_rang_at(const Riscv32Cpu* cpu);
+
+/// A byte FIFO at `address`: writes append while `enable_address &
+/// enable_mask` is set, reads pop what `riscv32_hold_readable` gave and fault
+/// when nothing is held. See cpu.h.
+RISCV32_API void riscv32_map_fifo(Riscv32Cpu* cpu, uint32_t address,
+                                  uint32_t enable_address,
+                                  uint32_t enable_mask);
+
+/// How many bytes firmware has written to the FIFO at `address` since they
+/// were last taken; 0 where it is no FIFO.
+RISCV32_API uint32_t riscv32_written_count(const Riscv32Cpu* cpu,
+                                           uint32_t address);
+
+/// Copy the written bytes into `out` and forget them, returning how many
+/// there were. **When that is more than `capacity` nothing is copied or
+/// forgotten**, so a caller sees the true count and no bytes are lost to a
+/// buffer that was too small.
+RISCV32_API uint32_t riscv32_take_written(Riscv32Cpu* cpu, uint32_t address,
+                                          uint8_t* out, uint32_t capacity);
+
+/// The bytes reads of the FIFO at `address` pop, replacing what was held.
+/// 0, having changed nothing, where `address` is no FIFO.
+RISCV32_API int riscv32_hold_readable(Riscv32Cpu* cpu, uint32_t address,
+                                      const uint8_t* bytes, uint32_t count);
+
 RISCV32_API int riscv32_is_mapped(const Riscv32Cpu* cpu, uint32_t address);
 RISCV32_API void riscv32_clear_mmio(Riscv32Cpu* cpu);
 
@@ -190,7 +230,13 @@ RISCV32_API void riscv32_clear_mmio(Riscv32Cpu* cpu);
 ///
 /// 0 success, 1 an encoding this core has not implemented, 2 memory refused
 /// the access, 3 an encoding this *part* must refuse because the extension it
-/// belongs to is not enabled.
+/// belongs to is not enabled, 4 (`RISCV32_RANG`) success, with a doorbell rung.
+///
+/// **4 is a success and the first result that follows a retired
+/// instruction.** The store has landed, PC is past it and the machine has
+/// aged, exactly as for 0; `riscv32_rang_at` names the doorbell, and the
+/// caller runs whatever answers it before the next step. It exists only at
+/// this boundary: `riscv32::StepResult` has no such value.
 ///
 /// **3 is not a worse 1.** 1 says this emulator is unfinished; 3 says the
 /// silicon would trap here, and a model that returned 0 instead would be
@@ -201,6 +247,9 @@ RISCV32_API void riscv32_clear_mmio(Riscv32Cpu* cpu);
 /// report exactly which instruction stopped it, and a conformance case can
 /// never pass by accident because an unwritten encoding behaved like a NOP.
 RISCV32_API int riscv32_step(Riscv32Cpu* cpu);
+
+/// The `riscv32_step` result for a retired instruction that rang a doorbell.
+#define RISCV32_RANG 4
 
 /// The PC the most recent riscv32_step began at; zero before the first.
 ///

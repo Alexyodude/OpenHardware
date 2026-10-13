@@ -25,6 +25,9 @@ struct Handle {
     // The PC the most recent riscv32_step began at, for riscv32_step_entry
     // (OH-225).
     uint32_t step_pc = 0;
+    // The doorbell the most recent riscv32_step rang, for riscv32_rang_at
+    // (OH-161 step 5). A fact about this ABI's calls, as step_pc is.
+    uint32_t rang_at = 0;
 };
 
 Handle* as_handle(Riscv32Cpu* handle) { return reinterpret_cast<Handle*>(handle); }
@@ -208,6 +211,43 @@ int riscv32_hold_samples(Riscv32Cpu* cpu, uint32_t control_address,
     return as_cpu(cpu)->hold_samples(control_address, keys, words, count) ? 1 : 0;
 }
 
+void riscv32_map_doorbell(Riscv32Cpu* cpu, uint32_t address, uint32_t value,
+                          uint32_t ring_mask, uint32_t write_trigger) {
+    as_cpu(cpu)->map_doorbell(address, value, ring_mask, write_trigger);
+}
+
+uint32_t riscv32_rang_at(const Riscv32Cpu* cpu) {
+    return as_handle(cpu)->rang_at;
+}
+
+void riscv32_map_fifo(Riscv32Cpu* cpu, uint32_t address,
+                      uint32_t enable_address, uint32_t enable_mask) {
+    as_cpu(cpu)->map_fifo(address, enable_address, enable_mask);
+}
+
+uint32_t riscv32_written_count(const Riscv32Cpu* cpu, uint32_t address) {
+    return static_cast<uint32_t>(as_cpu(cpu)->written(address).size());
+}
+
+uint32_t riscv32_take_written(Riscv32Cpu* cpu, uint32_t address, uint8_t* out,
+                              uint32_t capacity) {
+    riscv32::Cpu* core = as_cpu(cpu);
+    const uint32_t count = static_cast<uint32_t>(core->written(address).size());
+    // Too small a buffer takes nothing, so the bytes are still there for the
+    // caller that asks again with the count this returned.
+    if (count == 0 || out == nullptr || capacity < count) {
+        return count;
+    }
+    const std::vector<uint8_t> bytes = core->take_written(address);
+    std::copy(bytes.begin(), bytes.end(), out);
+    return count;
+}
+
+int riscv32_hold_readable(Riscv32Cpu* cpu, uint32_t address,
+                          const uint8_t* bytes, uint32_t count) {
+    return as_cpu(cpu)->hold_readable(address, bytes, count) ? 1 : 0;
+}
+
 int riscv32_is_mapped(const Riscv32Cpu* cpu, uint32_t address) {
     return as_cpu(cpu)->is_mapped(address) ? 1 : 0;
 }
@@ -220,7 +260,18 @@ int riscv32_step(Riscv32Cpu* cpu) {
     // instruction has moved PC, PC no longer says which instruction it was,
     // and this does.
     handle->step_pc = handle->cpu.pc();
-    return static_cast<int>(riscv32::step(handle->cpu));
+    // A ring left by `riscv32_write_word` belongs to no instruction, and
+    // would otherwise end the next step as if that step had rung it.
+    handle->cpu.take_rung();
+    const riscv32::StepResult result = riscv32::step(handle->cpu);
+    // Taken after every step, so a ring on an instruction that then faulted
+    // (a Zcmp push storing several words) is not carried into the next.
+    const uint32_t rung = handle->cpu.take_rung();
+    if (result == riscv32::StepResult::Ok && rung != 0) {
+        handle->rang_at = rung;
+        return RISCV32_RANG;
+    }
+    return static_cast<int>(result);
 }
 
 uint32_t riscv32_step_entry(const Riscv32Cpu* cpu) {

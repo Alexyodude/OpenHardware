@@ -42,6 +42,7 @@
 #include <stdint.h>
 
 #include <array>
+#include <deque>
 #include <unordered_map>
 #include <vector>
 
@@ -420,6 +421,62 @@ public:
     bool hold_samples(uint32_t control_address, const uint32_t* keys,
                       const uint32_t* words, uint32_t count);
 
+    /// A register that rings when firmware writes to it (OH-161 step 5): the
+    /// seventh behaviour, and one that knows nothing about any bus.
+    ///
+    /// `address` stores as a register, at `value` from reset, except that
+    /// every bit in `write_trigger` stores as 0 -- a start bit is a command
+    /// and not state, so it reads back clear. A write whose value carries any
+    /// bit of `ring_mask` (under the bytes the access carries) retires as an
+    /// ordinary store, and `take_rung` then names the address: the caller,
+    /// which is the ABI's `riscv32_step`, ends that step with a result of its
+    /// own so the code that owns the device can run between two
+    /// instructions. A write that carries no ring bit does not ring. Only a
+    /// write to `address` itself rings, not one through an alias onto it.
+    ///
+    /// **Nothing here runs the device.** The chip's facts stay out of the
+    /// core, and so does a callback: an exception cannot cross one, and a
+    /// handler run from inside a store could change the very table the store
+    /// is walking. Mapping the same address again replaces it, and so does
+    /// mapping anything else there (`forget_doorbell`).
+    void map_doorbell(uint32_t address, uint32_t value, uint32_t ring_mask,
+                      uint32_t write_trigger);
+
+    /// The doorbell the last instruction rang, and forget it; 0 if none.
+    /// A ring left by a write that was not an instruction's -- a harness
+    /// calling `write_word` -- is the caller's to discard before a step.
+    uint32_t take_rung();
+
+    /// An address with a byte FIFO on each side (OH-161 step 5): the eighth
+    /// behaviour.
+    ///
+    /// A write appends its low byte to what `written` holds while
+    /// `enable_address & enable_mask` is non-zero, as `map_stream` does, and
+    /// a write through a gate that cannot be read faults naming `address`.
+    /// A read pops the oldest byte `hold_readable` gave, zero-extended, **and
+    /// a read with nothing held faults at the read**, having changed
+    /// nothing: a plausible byte one instruction late is the failure this
+    /// whole file is shaped against (see the note on faults above). A read
+    /// pops whoever asks, so a harness's `read_word` of this address takes a
+    /// byte as the instruction would. Mapping the same address again
+    /// replaces it and forgets both sides, and so does mapping anything else
+    /// there (`forget_fifo`).
+    void map_fifo(uint32_t address, uint32_t enable_address,
+                  uint32_t enable_mask);
+
+    /// What was written to the `map_fifo` at `address` since it was last
+    /// taken, oldest first. Empty for an address that is not one.
+    const std::vector<uint8_t>& written(uint32_t address) const;
+
+    /// `written`, and forget it.
+    std::vector<uint8_t> take_written(uint32_t address);
+
+    /// The bytes reads of the `map_fifo` at `address` will pop, oldest first,
+    /// replacing what was held and not yet popped. **The only way a byte
+    /// from outside enters this FIFO.** False, having changed nothing,
+    /// where `address` is no FIFO.
+    bool hold_readable(uint32_t address, const uint8_t* bytes, uint32_t count);
+
     /// Called by `step` once an instruction has actually retired -- never on
     /// an Unimplemented, Illegal or MemoryFault, so a program stopped by one
     /// does not age while it is stopped. Advances every snapshot counter
@@ -666,6 +723,28 @@ private:
     /// the stored word. Every `map_*` calls both.
     void forget_sampler(uint32_t at);
 
+    /// A `map_doorbell`: where it is, which bits ring it and which store as
+    /// 0. Its register is in `mmio_` as a plain register, so `is_mapped`
+    /// answers and a read gives back the stored word.
+    struct Doorbell {
+        uint32_t address = 0;
+        uint32_t ring_mask = 0;
+        uint32_t write_trigger = 0;
+    };
+
+    /// A `map_fifo`: its gate, what firmware wrote and what it will read.
+    struct Fifo {
+        uint32_t enable = 0;
+        uint32_t enable_mask = 0;
+        std::vector<uint8_t> written;
+        std::deque<uint8_t> held;
+    };
+
+    /// Forget the doorbell, or the FIFO and what it held, at `at`: every
+    /// `map_*` calls both, for the reason `forget_sampler` is.
+    void forget_doorbell(uint32_t at);
+    void forget_fifo(uint32_t at);
+
     std::array<uint32_t, kRegisters> x_{};
     uint32_t pc_ = 0;
     uint32_t jvt_ = 0;
@@ -676,6 +755,10 @@ private:
     std::vector<Snapshot> snapshots_;
     std::vector<Input> inputs_;
     std::vector<Sampler> samplers_;
+    std::vector<Doorbell> doorbells_;
+    // Mutable because a read pops, and `mmio_read` is const.
+    mutable std::unordered_map<uint32_t, Fifo> fifos_;
+    uint32_t rung_ = 0;
     mutable uint32_t fault_address_ = 0;
     mutable bool fault_was_fetch_ = false;
 };

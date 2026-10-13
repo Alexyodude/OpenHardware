@@ -47,6 +47,9 @@ void Cpu::reset() {
     snapshots_.clear();
     inputs_.clear();
     samplers_.clear();
+    doorbells_.clear();
+    fifos_.clear();
+    rung_ = 0;
     fault_address_ = 0;
     fault_was_fetch_ = false;
 }
@@ -252,12 +255,17 @@ void Cpu::clear_regions() {
     // input carries a DRIVE, so leaving one behind would hand the next board
     // levels nobody put on its pins. A sampler carries SAMPLES, so leaving
     // one behind would convert the next board's register to voltages nobody
-    // put on its pins either.
+    // put on its pins either. A doorbell carries a RING and a FIFO carries
+    // BYTES, so leaving either behind would ring the next board's device, or
+    // hand it a byte nobody sent.
     mmio_.clear();
     streams_.clear();
     snapshots_.clear();
     inputs_.clear();
     samplers_.clear();
+    doorbells_.clear();
+    fifos_.clear();
+    rung_ = 0;
 }
 
 void Cpu::clear_mmio() {
@@ -266,6 +274,9 @@ void Cpu::clear_mmio() {
     snapshots_.clear();
     inputs_.clear();
     samplers_.clear();
+    doorbells_.clear();
+    fifos_.clear();
+    rung_ = 0;
 }
 
 void Cpu::forget_input(uint32_t at) {
@@ -282,10 +293,21 @@ void Cpu::forget_sampler(uint32_t at) {
         samplers_.end());
 }
 
+void Cpu::forget_doorbell(uint32_t at) {
+    doorbells_.erase(
+        std::remove_if(doorbells_.begin(), doorbells_.end(),
+                       [&](const Doorbell& bell) { return bell.address == at; }),
+        doorbells_.end());
+}
+
+void Cpu::forget_fifo(uint32_t at) { fifos_.erase(at); }
+
 void Cpu::map_register(uint32_t address, uint32_t value) {
     const uint32_t at = address & ~3u;
     forget_input(at);
     forget_sampler(at);
+    forget_doorbell(at);
+    forget_fifo(at);
     Mapped entry;
     entry.value = value;
     entry.target = at;
@@ -297,6 +319,8 @@ void Cpu::map_alias(uint32_t address, uint32_t target, WriteOp op,
     const uint32_t at = address & ~3u;
     forget_input(at);
     forget_sampler(at);
+    forget_doorbell(at);
+    forget_fifo(at);
     Mapped entry;
     entry.target = target & ~3u;
     entry.op = op;
@@ -309,6 +333,8 @@ void Cpu::map_stream(uint32_t address, uint32_t enable_address,
     const uint32_t at = address & ~3u;
     forget_input(at);
     forget_sampler(at);
+    forget_doorbell(at);
+    forget_fifo(at);
     // Registered in `mmio_` as well, so `is_mapped` sees it and a READ answers
     // this entry's value, which stays zero. The stream table alone would make
     // the address respond to writes and fault on reads -- and a UART data
@@ -350,6 +376,8 @@ void Cpu::map_snapshot_counter(uint32_t op_address, uint32_t update_mask,
     for (const uint32_t at : {counter.op, counter.low, counter.high}) {
         forget_input(at);
         forget_sampler(at);
+        forget_doorbell(at);
+        forget_fifo(at);
         Mapped entry;
         entry.target = at;
         mmio_[at] = entry;
@@ -385,6 +413,8 @@ void Cpu::map_input(uint32_t address, uint32_t out_address,
     // reach `mmio_read`/`mmio_write`, which consult `inputs_` first -- so a
     // write lands in a word nobody reads, as a read-only register's does.
     forget_sampler(input.address);
+    forget_doorbell(input.address);
+    forget_fifo(input.address);
     Mapped entry;
     entry.target = input.address;
     mmio_[input.address] = entry;
@@ -430,6 +460,8 @@ void Cpu::map_sampler(uint32_t control_address, uint32_t value,
     // The control register is a plain register in `mmio_`, so a read answers
     // the stored word; `mmio_write` asks `samplers_` before storing.
     forget_input(sampler.control);
+    forget_doorbell(sampler.control);
+    forget_fifo(sampler.control);
     Mapped entry;
     entry.value = value;
     entry.target = sampler.control;
@@ -454,6 +486,79 @@ bool Cpu::hold_samples(uint32_t control_address, const uint32_t* keys,
         return true;
     }
     return false;
+}
+
+void Cpu::map_doorbell(uint32_t address, uint32_t value, uint32_t ring_mask,
+                       uint32_t write_trigger) {
+    const uint32_t at = address & ~3u;
+    forget_input(at);
+    forget_sampler(at);
+    forget_doorbell(at);
+    forget_fifo(at);
+    // A plain register in `mmio_`, so a read answers the stored word;
+    // `mmio_write` asks `doorbells_` before storing. The reset value is held
+    // to the same rule as a write: a trigger bit does not store.
+    Mapped entry;
+    entry.value = value & ~write_trigger;
+    entry.target = at;
+    mmio_[at] = entry;
+
+    Doorbell bell;
+    bell.address = at;
+    bell.ring_mask = ring_mask;
+    bell.write_trigger = write_trigger;
+    doorbells_.push_back(bell);
+}
+
+uint32_t Cpu::take_rung() {
+    const uint32_t rung = rung_;
+    rung_ = 0;
+    return rung;
+}
+
+void Cpu::map_fifo(uint32_t address, uint32_t enable_address,
+                   uint32_t enable_mask) {
+    const uint32_t at = address & ~3u;
+    forget_input(at);
+    forget_sampler(at);
+    forget_doorbell(at);
+    // A FIFO answers writes as a stream does, so it must not leave one
+    // behind to capture them first.
+    streams_.erase(at);
+    // Registered in `mmio_` too, so `is_mapped` sees it. Its reads and
+    // writes reach `mmio_read` and `mmio_write`, which ask `fifos_` first.
+    Mapped entry;
+    entry.target = at;
+    mmio_[at] = entry;
+
+    Fifo fifo;
+    fifo.enable = enable_address & ~3u;
+    fifo.enable_mask = enable_mask;
+    fifos_[at] = fifo;
+}
+
+const std::vector<uint8_t>& Cpu::written(uint32_t address) const {
+    static const std::vector<uint8_t> none;
+    const auto found = fifos_.find(address & ~3u);
+    return found == fifos_.end() ? none : found->second.written;
+}
+
+std::vector<uint8_t> Cpu::take_written(uint32_t address) {
+    std::vector<uint8_t> taken;
+    const auto found = fifos_.find(address & ~3u);
+    if (found != fifos_.end()) {
+        taken.swap(found->second.written);
+    }
+    return taken;
+}
+
+bool Cpu::hold_readable(uint32_t address, const uint8_t* bytes, uint32_t count) {
+    const auto found = fifos_.find(address & ~3u);
+    if (found == fifos_.end()) {
+        return false;
+    }
+    found->second.held.assign(bytes, bytes + count);
+    return true;
 }
 
 bool Cpu::sampler_write(Sampler& sampler, Mapped& control, uint32_t address,
@@ -592,9 +697,22 @@ bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
     if (found == mmio_.end()) {
         return false;
     }
+    const uint32_t at = address & ~3u;
+    // A FIFO's read pops what was held, and faults when nothing was: nothing
+    // has changed by then, so the fault names the read that found it empty.
+    const auto fifo = fifos_.find(at);
+    if (fifo != fifos_.end()) {
+        std::deque<uint8_t>& held = fifo->second.held;
+        if (held.empty()) {
+            note_fault(address, false);
+            return false;
+        }
+        out = held.front();
+        held.pop_front();
+        return true;
+    }
     // A snapshot counter's three registers answer its state rather than a
     // stored word, so they are checked before the stored-value path below.
-    const uint32_t at = address & ~3u;
     for (const Snapshot& counter : snapshots_) {
         if (at == counter.op) {
             // UPDATE is a write trigger and reads zero; only VALID is held.
@@ -649,6 +767,26 @@ bool Cpu::mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask) {
     if (found == mmio_.end()) {
         return false;
     }
+    // **A FIFO is a stream with a read side**, and is asked first so a stream
+    // left at the same address could never capture its write.
+    const auto fifo = fifos_.find(at);
+    if (fifo != fifos_.end()) {
+        uint32_t gate_bits = 0;
+        if (!mmio_read(fifo->second.enable, gate_bits)) {
+            // An unmapped gate, named at the FIFO the instruction used, as a
+            // stream's is: `mmio_read` does not note a miss of its own.
+            note_fault(address, false);
+            return false;
+        }
+        // The low byte only, and only when the access carries byte 0; see
+        // `map_stream` for why.
+        if ((byte_mask & 0xFFu) != 0 &&
+            (gate_bits & fifo->second.enable_mask) != 0) {
+            fifo->second.written.push_back(static_cast<uint8_t>(value));
+        }
+        return true;
+    }
+
     // **Before the word behaviours, because a stream is not one**: its write
     // appends rather than stores, and falling through would latch the byte
     // into a register nobody reads.
@@ -734,6 +872,22 @@ bool Cpu::mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask) {
         counter.latched = counter.instructions / counter.instructions_per_tick;
         counter.valid = true;
         return true;
+    }
+
+    // **Before the word behaviours too**: a write to a doorbell stores with
+    // its trigger bits cleared, and rings when it carries a ring bit. The
+    // ring is noted after the store, so the store has retired by the time
+    // anything hears of it.
+    for (const Doorbell& bell : doorbells_) {
+        if (at == bell.address) {
+            uint32_t& stored = found->second.value;
+            stored = ((stored & ~byte_mask) | (value & byte_mask)) &
+                     ~bell.write_trigger;
+            if ((value & byte_mask & bell.ring_mask) != 0) {
+                rung_ = at;
+            }
+            return true;
+        }
     }
 
     // **Before the word behaviours too**: a write to a sampler's control

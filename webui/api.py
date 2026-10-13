@@ -1432,6 +1432,11 @@ class BoardSession:
                 self.cpu.step()
             except self.runtime.abi.AbiError as error:
                 self._stop(error)
+                # A riscv32 `Refused` comes after the instruction that rang
+                # its doorbell retired, and the clock `inputs` is stamped
+                # with counts it. Other cores' errors carry no `retired`.
+                if getattr(error, "retired", False):
+                    self.retired += 1
                 raise
             self.retired += 1
 
@@ -1612,6 +1617,10 @@ class BoardSession:
                 self.cpu.step()
             except self.runtime.abi.AbiError as error:
                 self._stop(error)
+                # As in `step`: the instruction that rang the refused
+                # doorbell retired, so the run took it.
+                if getattr(error, "retired", False):
+                    taken += 1
                 break
             taken += 1
         self.retired += taken

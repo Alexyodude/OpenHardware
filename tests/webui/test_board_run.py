@@ -1759,3 +1759,70 @@ def test_a_sketch_converts_the_voltage_the_bench_held_through_the_server(live_se
          {"board": C3_BOARD, "levels": {"D0": "open"}, "volts": {"D0": 1.1}})
     post(live_server, "/api/board/run", {"steps": 2_000})
     assert get(live_server, "/api/board/state")["uart"]["text"] == "0\r\n1536\r\n1024\r\n"
+
+
+# --- a doorbell's refusal comes after the instruction that rang it retired ----
+#
+# ABI 7's ring (OH-161 step 5) is the first stop that follows a retired
+# instruction. These sessions are a bare RV32 core with one doorbell and no
+# board description, because the counting is the session's and not a chip's;
+# the I2C controller that uses it arrives in the next slice.
+
+RING_BELL = 0x60013004
+RING_RAM = 0x80000000
+#: lui a4, 0x60013 / addi a5, x0, 0x20 / sw a5, 4(a4) -- the store rings -- and
+#: then five nops (addi x0, x0, 0).
+RING_PROGRAM = [0x60013737, 0x02000793, 0x00F72223] + [0x00000013] * 5
+
+
+def ring_session(service) -> api.BoardSession:
+    import types
+
+    from core.riscv32 import abi as riscv32_abi
+
+    cpu = riscv32_abi.Cpu()
+    cpu.add_region(RING_RAM, 0x1000)
+    cpu.map_doorbell(RING_BELL, value=0, ring_mask=0x20, write_trigger=0x20)
+    cpu.on_ring(RING_BELL, service)
+    cpu.write_block(RING_RAM, b"".join(
+        word.to_bytes(4, "little") for word in RING_PROGRAM))
+    cpu.set_regs([0] * 32, pc=RING_RAM)
+    runtime = types.SimpleNamespace(abi=riscv32_abi, board="ring-test",
+                                    chip="rv32")
+    return api.BoardSession(runtime, cpu, None, None)
+
+
+def test_a_run_through_a_serviced_ring_counts_the_ringing_store_once():
+    needs_riscv32()
+    with ring_session(lambda cpu, address: None) as session:
+        result = session.run(8)
+        assert (result.steps, result.status) == (8, "running"), result
+        assert session.retired == 8
+
+
+def test_a_run_stopped_by_a_refused_ring_counts_the_store_that_rang():
+    needs_riscv32()
+
+    def refuse(cpu, address):
+        raise ValueError("the device refuses this")
+
+    with ring_session(refuse) as session:
+        result = session.run(8)
+        assert (result.steps, result.status) == (3, "stopped"), result
+        assert "the device refuses this" in result.detail
+        assert session.retired == 3, "lui, addi and the store that rang"
+        assert session.cpu.pc == RING_RAM + 12, "the store retired"
+
+
+def test_a_step_stopped_by_a_refused_ring_counts_the_store_that_rang():
+    needs_riscv32()
+    from core.riscv32 import abi as riscv32_abi
+
+    def refuse(cpu, address):
+        raise ValueError("the device refuses this")
+
+    with ring_session(refuse) as session:
+        with pytest.raises(riscv32_abi.Refused):
+            session.step(8)
+        assert session.status == "stopped"
+        assert session.retired == 3
