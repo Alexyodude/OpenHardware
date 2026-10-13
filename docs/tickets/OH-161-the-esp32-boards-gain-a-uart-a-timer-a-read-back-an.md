@@ -55,6 +55,8 @@ touches:
 - webui/static/parts.js
 - core/riscv32/**
 - tests/riscv32/**
+- webui/devices/**
+- tests/webui/test_mcp9808.py
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
@@ -652,3 +654,119 @@ VERIFIED after python tools/build_core.py, with every code change in: tests/risc
 LEFT, added to step 4's. (1) A START raised through a Set alias would not convert: mmio_write asks the samplers only about a write to a sampler's own control address, and an alias's write lands in its target's word through the WriteOp switch, so START is set and nothing converts. No board maps an alias onto ONETIME_SAMPLE. (2) analogRead on a pin with no ADC1 channel, at run time, returns 0, as arduino-esp32 does: __analogRead logs "Pin %u is not ADC pin!" and returns its value, 0 (cores/esp32/esp32-hal-adc.c:295-305 @ 2787dab). A constant pin is refused at compile time. (3) drive_pins refusing after hold_volts has applied would leave the voltages held and unrecorded: the same shape as LOW 3, the other way round, and as unreachable, since neither refuses any GPIO drive_table resolves on any board in the catalogue, the XIAOs through HEADER and the manifest rows through their own board files; test_every_gpio_a_drive_resolves_is_a_pad_its_description_accepts holds that (see the next note). Closing it means drive checks both before applying either, which needs a check the descriptions do not offer. (4) The 12-bit mask, LOW 5.
 
 **Note 2026-10-13:** STEP 4 CONFIRMATION ADDITIONS, b946ef0. (1) do_POST in webui/emulator_server.py caught only json.JSONDecodeError around json.loads; an integer past Python's 4300-digit conversion limit raises a plain ValueError there, which left every POST route with no reply. It now catches ValueError and answers the same 400 "body is not JSON". SEEN TO FAIL: a 5000-digit voltage posted as bytes to /api/board/drive, added to test_a_drive_that_is_not_a_map_of_levels_is_refused_naming_the_field, gave http.client.RemoteDisconnected before the fix. (2) test_every_gpio_a_drive_resolves_is_a_pad_its_description_accepts in test_board_run.py: over the catalogue, every GPIO drive_table resolves on a board whose description has drive_pins, the XIAOs through HEADER and the manifest rows through pinmap.load, is in that description's IO_MUX_PADS. SEEN TO FAIL by two breaks, one per path: HEADER["NOWHERE"] = 99 on the C3 (('XIAO-ESP32-C3-DIP', {'NOWHERE': 99})), and the Adafruit QT Py ESP32-C3's first GPIO pad moved to chip_index 99 in its loaded layout (('Adafruit QT Py ESP32-C3', {'A0': 99})). The fix round's LEFT (3) now says this holds for every board in the catalogue, and api.py's comment names the test. VERIFIED: test_board_run, test_bench_drive and test_api, 100 passed; each checkall.py checker row run alone, all eleven exit 0.
+
+**Note 2026-10-13:** STEP 4 MERGED to master by fast-forward at e9f8ffe (lane2): analogRead on the XIAO ESP32-C3, C5 and C6 from the bench's solved voltage, with the review's fix round (669904a) and the confirmation's two additions (b946ef0: a body json.loads refuses for its size is a 400 on every POST route; every GPIO a drive resolves held to its description's IO_MUX_PADS). REVIEW: an independent review (COMMENT, one MEDIUM: a 400-digit integer escaped as OverflowError), its fix round, a confirmation pass (all CONFIRMED, its C1 mutation now killed). VERIFIED on master at e9f8ffe after python tools/build_core.py: the full suite 3 failed, 2933 passed, 46 skipped in 1092.22s -- the OCP pair under Python 3.14, and test_a_failed_build_leaves_nothing_behind, which failed again alone while another lane's builds had live openhardware-build-* directories in the shared %TEMP% (OH-166's third test; not a regression). The ticket stays in progress: step 5 and the switch part remain.
+
+**Note 2026-10-13:** STEP 5 DESIGN, BEFORE ANY CODE (2026-10-13, an Opus design pass, confirmed by the stand-in for the owner). The device is the MCP9808; the I2C controller is each chip description's own Python, run between two instructions; the core gains a doorbell and a FIFO, its seventh and eighth behaviours, at ABI 7. Nothing below is built yet.
+
+THE DEVICE, MCP9808. Microchip DS25095A, fetched 2026-10-13 from https://ww1.microchip.com/downloads/en/DeviceDoc/25095A.pdf (HTTP 200, 1,111,378 bytes, 54 pages, sha256 9578bb72de18d76830ce34f256ef36b400542a3e7bbb9c6d0b74f0a72577ee11). Every number the model needs is in it: address 0011 A2 A1 A0 (Table 3-2, p.11); no sequential register read/write, the pointer kept across a repeated read (4.1.1, p.13); pointer (Register 5-1, p.16); bit summary (Table 5-1, p.17); CONFIG (Register 5-2, p.18); TUPPER/TLOWER/TCRIT (Register 5-3, p.22); TA with flags 15:13 (Register 5-4, p.24); manufacturer ID 0x0054 (5.1.4, p.27); device ID 0x04, revision 0x00 (5.1.5, p.28); resolution (Register 5-7, p.29); shutdown keeps the interface (5.2.1, p.30); power-on defaults (Table 5-3, p.33); VDD 2.7-5.5 V, VPOR 2.2 V typical, tCONV (p.3). Revision DS20005095B answered 403 and is not read. DS25095A disagrees with itself twice, carried as citations: (a) Register 5-4's note says the power-up resolution is 0.25 C/bit, Register 5-7 and Table 5-3 give 0x03 (0.0625 C) -- the model follows 5-7 and the table, and a test names the conflict (25.0625 C reads 401); (b) 5.1.6 names a "Capability register (see Register 5-2)" this part does not have. NOT THE SSD1306: Solomon Systech serves no PDF a script can fetch (the product page is a client-rendered shell; two upload paths 404), and what circulates is third-party mirrors of Rev 1.1 and Rev 1.5 with different layouts; its 1 KB RAM, addressing modes and 128-byte page writes (four times the 32-byte FIFO, SOC_I2C_FIFO_LEN) make it several times the model. MODELLED: address 0x18|A2A1A0 while VDD is 2.7-5.5 V; the pointer (bits 3:0); CONFIG stored with Crit Lock and Win Lock refusing limit writes until power-on; TUPPER/TLOWER/TCRIT to Register 5-3's mask; TA as the held C, 13-bit two's complement, cleared below the resolution step, flags against the limits (25.0 C reads 0xC190 = 49552 with power-on limits; -10.5 C reads 0x3F58 = 16216); shutdown freezes TA; both IDs; resolution. REFUSED, each by name and section: a pointer with bits 7:4 set or 1xxx (Register 5-1); pointer 0000; a third byte read (4.1.1); a write stopping after the MSB or carrying extra bytes; a write to TA or an ID; CONFIG Alert Cnt set (the Alert pin is not modelled); a TA read with THYST non-zero; a held temperature outside -40..+125 C; VDD between VPOR and 2.7 V. STATED, NOT MODELLED: tCONV (TA follows the held temperature at the read), the SMBus timeout (4.1.7), the 1001xxx address code.
+
+THE CONTROLLER, I2C0. C3 from the framework copy 3.20017.241212 (IDF 4.4.7) tools/sdk/esp32c3/include/soc/esp32c3/include/soc/; C5 and C6 from esp-idf-reference v5.5 (8c750b0) components/soc/<chip>/register/soc/. Offsets alike on all three: CTR +0x04 (TRANS_START 5, MS_MODE 4, CONF_UPGATE 11, CLK_EN 8), SR +0x08 unmapped, FIFO_CONF +0x18 (TX_FIFO_RST 13, RX_FIFO_RST 12), DATA +0x1C, INT_RAW +0x20 (NACK 10, TIME_OUT 8, TRANS_COMPLETE 7, ARBITRATION_LOST 5, END_DETECT 3), INT_CLR +0x24 (a clear alias), CLK_CONF +0x54 (SCLK_ACTIVE 21), COMD0..7 +0x58..+0x74 (command [13:0], DONE 31). Command word, v5.5 C3 i2c_ll.h:33-39: byte_num[7:0] | ack_en[8] | ack_exp[9] | ack_val[10] | op_code[13:11] | done[31]. Bases: C3 0x60013000 (soc.h:52, :79); C5 0x60004000 (reg_base.h:17, DR_REG_I2C_BASE); C6 0x60004000 (reg_base.h:17, DR_REG_I2C_EXT_BASE). Line citations per chip are in the design report (C3 i2c_reg.h CTR :31 ... COMD7 :955; C5 CTR :31, TRANS_START :81, CONF_UPGATE :135, DATA :430, INT_RAW :442, INT_CLR :580, COMD0 :1181, DONE :1205; C6 CTR :31, TRANS_START :75, CONF_UPGATE :121, DATA :371, INT_RAW :383, INT_CLR :521, COMD0 :1114, DONE :1131). OPCODES RSTART 6, WRITE 1, READ 3, STOP 2, END 4 from hal/<chip>/include/hal/i2c_ll.h v5.5 (C3 :45-49, C5 :46-50, C6 :45-49) and the framework's C3 copy :72-76. TRAP 1: the C6's v5.5 i2c_reg.h comment (:1192) says "0: RSTART, 1: WRITE, 2: READ, 3: STOP, 4: END", the original ESP32's encoding, wrong here; a test holds each description's opcodes to i2c_ll.h. TRAP 2, the clock gate: C3 SYSTEM_PERIP_CLK_EN0 (0x600C0000 +0x10) I2C_EXT0_CLK_EN bit 7 default 0, PERIP_RST_EN0 +0x18 bit 7 default 0; C5 PCR_I2C_CONF +0x20 CLK_EN bit 0 default 0 and PCR_I2C_SCLK_CONF +0x24 SCLK_EN bit 22 default 0; C6 the same two, default 1. Wire.begin sets the gate on all three; only the function clock is checked, as step 4 decided. TRAP 3, the GPIO matrix has three shapes: FUNCn_IN_SEL_CFG C3 +0x154 (5-bit IN_SEL, SIG_IN_SEL bit 6), C5 +0x2D4 (7-bit, bit 8), C6 +0x154 (6-bit, bit 7); FUNCn_OUT_SEL_CFG C3 +0x554 (OEN_SEL 9), C5 +0xAD4 (OE_SEL 10), C6 +0x554 (OEN_SEL 9); PINn C3/C6 +0x74, C5 +0xD4, PAD_DRIVER bit 2. I2C signals: C3 SCL 53 SDA 54; C5 46, 47; C6 45, 46. MCU_SEL [14:12] = 1. AT TRANS_START the model checks SDA and SCL each leave on one pad (OUT_SEL the signal, MCU_SEL 1) and return from the same pad (SIG_IN_SEL set, IN_SEL that pad, FUN_IE); other routing is refused naming what was found; coherent routing to pads with nothing attached is a NACK. Timing registers are mapped at reset and have no effect.
+
+WHERE THE ENGINE LIVES: at the step boundary, in the description (option C). (A) engine and device in the core: refused -- the command list and opcodes are ESP silicon facts, core/riscv32 also runs the RP2350, cpu.h:252-254 keeps chip facts out, and a part in the architecture layer is what rules/core-interface.md 1 forbids; hold_samples' held table does not stretch, since the MCP9808's answers depend on state the firmware wrote. (B) a ctypes callback: refused -- an exception in a CFUNCTYPE callback is printed and swallowed (catch-and-default, rule 9), and re-entry from inside mmio_write could invalidate the write's iterator and be pinned on the firmware by OH-225's step_entry. (C) chosen: map_doorbell stores like map_register (write-trigger bits store 0); a write carrying ring_mask retires as an ordinary store, then riscv32_step returns RISCV32_RANG = 4 naming the address through riscv32_rang_at; the C++ StepResult enum is unchanged (RANG is ABI-only, so cpu.h:121's rule holds); note_executed runs as for Ok. map_fifo: a write appends its low byte while the gate is set (an unmapped gate faults); a read pops the oldest held byte and a read with nothing held faults at the read (not a plausible byte one instruction late, cpu.h:196-206). Determinism: the handler runs synchronously at a retired-instruction count; the device is a pure function of the image and inputs. A ValueError from the handler is re-raised as abi.Refused(AbiError) with the step-entry PC and the doorbell's address; BoardSession.run stops on it as "stopped", not "faulted".
+
+THE ARDUINO SIDE: webui/arduino/libraries/Wire/{Wire.h,Wire.cpp}, a Library row in _openhardware (compile.py:337), compiled only for a sketch that names <Wire.h>; no inheritance, no constructor (-nostdlib, as OhSerial). begin() uses the vendor's SDA/SCL: C3 GPIO6/GPIO7 (D4/D5, third_party/bsp/arduino-esp32/variants/XIAO_ESP32C3/pins_arduino.h:9-10, :25-26), C5 GPIO23/24 (:16-17, :34-35), C6 GPIO22/23 (:20-21, :36-37); it writes MCU_SEL 1, FUN_IE, FUN_WPU, PAD_DRIVER open-drain, OUT_SEL with output-enable from GPIO_ENABLE, the ENABLE bit, the signal's IN_SEL. Each oh_board.h gains OH_I2C_*, held by the header-parity test; Wire declared only where they exist, a compile.py hint row otherwise. API: begin, setClock (accepted and ignored, saying why), beginTransmission, write(uint8_t), write(int), write(const uint8_t*, size_t), endTransmission(bool=true), requestFrom(uint8_t, uint8_t, bool=true), available, read (-1 when empty); 31-byte buffers plus the address.
+
+    endTransmission(stop):   RSTART | WRITE 1 (addr<<1|0) ack_en | WRITE n ack_en | STOP
+                             -- with stop=false the write is deferred into the next requestFrom
+    requestFrom(addr, n):    [RSTART | WRITE 1 addr|W | WRITE n]   (a deferred write, if any)
+                             RSTART | WRITE 1 (addr<<1|1) ack_en | READ n-1 ack_val=0 | READ 1 ack_val=1 | STOP
+                             -- at most 8 commands, COMD0..7
+    endTransmission returns: 0; 2 NACK with COMD1 not DONE (address); 3 NACK with COMD1 DONE (data);
+                             5 when 50 ms of SYSTIMER pass with nothing in INT_RAW (a gate left closed)
+
+THE BENCH SIDE (slice 4): the MCP9808 is MSOP-8, pins 1 SDA, 2 SCL, 3 Alert, 4 GND, 5 A2, 6 A1, 7 A0, 8 VDD (DS25095A p.1; Table 3-1, p.11); its mesh is KiCad's Package_SO MSOP-8 3x3 mm P0.65 mm as a PARTS row in tools/import_3d_model.py, so the page slice waits for OH-226 to return that file (a placeholder would break parts.js:34-46). circuit.js analyse() returns devices keyed by bench id: the pad each of SDA and SCL reaches (topologically), VDD solved with VDD-GND a 200 uA sink (IDD typical, p.1), A0..A2 levels (an open address pin makes the part unanswerable, not posted). The panel shows a C control (default 25.0), address, CONFIG, resolution and the TA it would report; Alert labelled not modelled. pin_states: a pad routed to a peripheral (OUT_SEL != 128) reports "unknown" -- decided in slice 1.
+
+FILE LAYOUT:
+
+    core/riscv32/cpu.h, cpu.cc            map_doorbell, take_rung, map_fifo, take_written, hold_readable
+    core/riscv32/abi.h, abi.cc, abi.py    ABI 7, RISCV32_RANG, Refused, on_ring
+    webui/devices/__init__.py             NEW
+    webui/devices/mcp9808.py              NEW: what an MCP9808 answers on its I2C pins, from DS25095A
+    webui/boards/esp32c3.py (c5, c6)      install_i2c, serve_i2c, hold_bus; pin_states reads OUT_SEL
+    webui/api.py                          drive(levels, volts, devices); BoardSession.devices; state()["devices"]
+    webui/arduino/libraries/Wire/Wire.h, Wire.cpp     NEW
+    webui/arduino/variants/xiao_esp32c{3,5,6}/oh_board.h   OH_I2C_*
+    webui/compile.py                      the Library row; a Wire hint until slice 3
+    webui/emulator_server.py, static/circuit.js, static/board3d.js        slice 4
+    tests/riscv32/test_mmio.py, test_esp32c{3,5,6}_board.py; tests/webui/test_mcp9808.py (NEW),
+    test_board_run.py, test_compile.py; slice 4: test_circuit.py, test_bench_drive.py
+
+SIGNATURES:
+
+    // cpu.h
+    void map_doorbell(uint32_t address, uint32_t value, uint32_t ring_mask, uint32_t write_trigger);
+    uint32_t take_rung();   // the doorbell the last instruction rang, and forget it; 0 if none
+    void map_fifo(uint32_t address, uint32_t enable_address, uint32_t enable_mask);
+    std::vector<uint8_t> take_written(uint32_t address);                                 // and clear
+    bool hold_readable(uint32_t address, const uint8_t* bytes, uint32_t count);           // replaces
+    // abi.h, ABI 7
+    #define RISCV32_RANG 4
+    void     riscv32_map_doorbell(Riscv32Cpu*, uint32_t address, uint32_t value, uint32_t ring_mask, uint32_t write_trigger);
+    uint32_t riscv32_rang_at(const Riscv32Cpu*);
+    void     riscv32_map_fifo(Riscv32Cpu*, uint32_t address, uint32_t enable, uint32_t enable_mask);
+    uint32_t riscv32_written_count(const Riscv32Cpu*, uint32_t address);
+    uint32_t riscv32_take_written(Riscv32Cpu*, uint32_t address, uint8_t* out, uint32_t capacity);
+    int      riscv32_hold_readable(Riscv32Cpu*, uint32_t address, const uint8_t* bytes, uint32_t count);
+
+    # core/riscv32/abi.py
+    RANG = 4
+    class Refused(AbiError): ...          # pc (step entry), address, the service's reason
+    def map_doorbell(self, address: int, *, value: int, ring_mask: int, write_trigger: int = 0) -> None
+    def on_ring(self, address: int, service: Callable[["Cpu", int], None]) -> None   # replaces
+    def map_fifo(self, address: int, *, enable: int, enable_mask: int) -> None
+    def take_written(self, address: int) -> bytes
+    def hold_readable(self, address: int, data: bytes) -> None
+    def step(self) -> None                # RANG -> service(self, address); ValueError -> Refused from it
+
+    # webui/devices/mcp9808.py
+    ADDRESS_CODE = 0b0011 << 3            # Table 3-2, p.11
+    POWER_ON: dict[int, int]              # Table 5-3, p.33
+    VPOR_VOLTS, VDD_MIN, VDD_MAX = 2.2, 2.7, 5.5   # p.3
+    class Mcp9808:
+        def __init__(self, *, straps: int, celsius: float) -> None
+        address: int                       # property: ADDRESS_CODE | straps
+        def hold(self, *, straps: int, celsius: float) -> None
+        def start(self, read: bool) -> bool
+        def write(self, byte: int) -> bool
+        def read(self) -> int
+        def stop(self) -> None
+        def view(self) -> dict[str, int | float]
+    def ta_word(celsius: float, resolution: int, tupper: int, tlower: int, tcrit: int) -> int
+
+    # webui/boards/esp32c3.py (and c5, c6, each from its own headers)
+    I2C = 0x60013000; I2C_CTR, I2C_FIFO_CONF, I2C_DATA = 0x04, 0x18, 0x1C
+    I2C_INT_RAW, I2C_INT_CLR, I2C_COMD0 = 0x20, 0x24, 0x58
+    I2C_TRANS_START = 1 << 5
+    I2C_OP: dict[str, int] = {"RSTART": 6, "WRITE": 1, "READ": 3, "STOP": 2, "END": 4}  # i2c_ll.h
+    I2C_GATE: tuple[int, int]             # C3: SYSTEM_PERIP_CLK_EN0, bit 7
+    I2CEXT0_SCL_IDX, I2CEXT0_SDA_IDX = 53, 54
+    def install_i2c(cpu: Cpu) -> None
+    def serve_i2c(cpu: Cpu, address: int, *, bus: tuple[tuple[int, int, Mcp9808], ...]) -> None
+    def hold_bus(cpu: Cpu, bus: typing.Sequence[tuple[int, int, Mcp9808]]) -> None
+
+    # webui/api.py
+    def drive(self, levels, volts=None, devices: Mapping[str, Mapping[str, object]] | None = None) -> None
+    #   devices: id -> {"part": "MCP9808", "sda": pad, "scl": pad, "vdd": volts,
+    #                    "address_pins": {"A0"|"A1"|"A2": "high"|"low"}, "celsius": float}
+    self.devices: dict[str, Mcp9808]
+    self.inputs: list[tuple[int, dict, dict, dict]]     # deep-copied
+
+CALL STACK:
+
+    sketch: Wire.endTransmission -> Wire.cpp: INT_CLR, FIFO resets, DATA x n (map_fifo appends),
+      COMD0..k, CTR |= TRANS_START -> Cpu::write_word -> doorbell rang -> riscv32_step returns RANG
+      -> abi.Cpu.step -> serve_i2c(cpu, CTR, bus=...) [the gate; MS_MODE; routing to (sda, scl);
+      for each COMDi: RSTART / WRITE (take_written; address byte -> the bus entry on those pads ->
+      Mcp9808.start; data -> .write) / READ (.read -> hold_readable) / STOP (.stop, TRANS_COMPLETE);
+      DONE per command; NACK + stop on an ack mismatch] -> the next instruction polls INT_RAW
+      -> lw DATA pops the held byte
+    page (slice 4): board3d.js poll -> analyse(bench).devices -> postInputs(levels, volts, devices)
+      -> POST /api/board/drive -> BoardSession.drive -> Mcp9808 kept or reset per id ->
+      description.hold_bus(cpu, [(sda_gpio, scl_gpio, device)]) -> cpu.on_ring(CTR, partial(serve_i2c, bus))
+
+SLICES, each checked end to end. (1) The C3, the transport: core ABI 7 first, then esp32c3.py's I2C, mcp9808.py answering pointers 6 and 7, drive's devices and their record, and Wire. Watched through BoardSession.drive: a sketch printing Wire's two ID reads prints 84 and 1024; with no device attached, endTransmission's 2. Fail first: test_mmio's doorbell and FIFO tests (AttributeError); the C3 board tests on unmapped registers (reset words from the header, the gate resetting closed, opcodes held to i2c_ll.h, routing refused, pin_states "unknown"); test_compile on "Wire.h: No such file". (2) The C3, the device: the register file, the temperature as an input, replay. Watched: 25.0 C prints 400 and 49552; -10.5 C prints 16216; 25.0625 C prints 401 (conflict (a)); a third byte read stops with Refused citing 4.1.1; the record replays the printed text and the PC at every drive. test_mcp9808.py fails first with ModuleNotFoundError; loops, not parametrize. (3) The C5, then the C6: each its own watched sketch on D4/D5; the Wire hint retires on each. (4) The page, after OH-226: the MSOP-8 PARTS row, analyse().devices, the post, the route, the panel's C control; watched in test_bench_drive with the page's own addPart and connect, then in Playwright.
+
+LEAST CONFIDENT. (1) Two core behaviours at one ABI bump, and RANG, the first step result that follows a retired instruction. (2) A transaction is instant: INT_RAW answers on the next instruction where 100 kHz would take about 80,000 C3 instructions, so Wire's 50 ms timeout fires only on a closed gate. (3) A refused service stops the session one instruction after the store, which has retired; run and step must count it, and a test should hold it. (4) Routing is refused unless coherent; PAD_DRIVER and pull-ups not checked. (5) pin_states says "unknown" for a routed pad, and pinMode does not reclaim it (OUT_SEL back to 128) -- later. (6) TA ignores tCONV; values round toward -inf to the resolution step; power-on resolution follows Register 5-7 and Table 5-3; DS25095A, not revision B. (7) The refusals are things silicon accepts and DS25095A does not describe: partial writes, sequential reads, Alert Cnt, THYST. (8) A device is identified by its bench id, reset below VPOR or when removed; VDD 2.2-2.7 V refused; straps re-read at every drive. (9) Return codes 2 and 3 told apart by COMD1's DONE; the deferred endTransmission(false), the 50 ms timeout and whether hardware ends with STOP after a NACK all to be checked against arduino-esp32 @ 2787dab and each TRM. (10) The RX FIFO is replaced per transaction; TX bytes the WRITE commands do not consume are refused. (11) The bench part is the bare chip, no breakout pull-ups; the 25 C default is a judgement. (12) Whether TRANS_START is write-trigger on the C3's 4.4.7 header is still to read; the doorbell stores it as 0 if so.
+
+CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: option C puts the first per-session Python peripheral state into a design where every earlier step kept state in the core, and replay depends on Python objects rebuilt through drive; keeping chip facts out of the core costs exactly that, and it is accepted. Claims: webui/devices/** and tests/webui/test_mcp9808.py added to OH-161; slice 4 waits for tools/import_3d_model.py (OH-226) and, if the C control goes there, webui/static/board3d-panel.js (OH-172's). Scratch: C:/Users/Alexyodude/scratch/oh161-step5/ (the datasheet PDF and text, v5.5 i2c_ll.h copies).
