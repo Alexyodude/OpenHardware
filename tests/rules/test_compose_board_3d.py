@@ -4855,13 +4855,13 @@ def test_what_is_not_drawn_rides_in_extras():
     assert "artwork" in extras and extras["artwork"].get("ink front", 0) > 0
     gaps = extras.get("not_drawn")
     assert gaps is not None, "the composer's gaps still stop at stdout"
-    for key in ("ink", "copper", "holes", "milled", "into_holes", "turn_unseen",
+    for key in ("ink", "copper", "slots", "milled", "into_holes", "turn_unseen",
                 "unmodelled", "text"):
         assert key in gaps, f"not_drawn is missing {key}"
     # Each hole the board drills that is no pad (OH-163), every one cut and
     # none a gap (OH-226).
     assert extras.get("cut") == {"cutouts": 0, "holes": len(eagle.read_board(_brd()).holes)}
-    assert (extras["cut"]["holes"], gaps["holes"]) != (0, 0) and gaps["holes"] == 0, gaps
+    assert (extras["cut"]["holes"], gaps["slots"]) != (0, 0) and gaps["slots"] == 0, gaps
     # The Uno prints text in EAGLE's own vector font, which no licence lets
     # this repository carry -- so its text is counted in the ink tally and
     # refused, every piece of it, under that reason (OH-163).
@@ -5826,7 +5826,7 @@ UNPLATED = ("(kicad_pcb\n\t(version 20241229)\n" + _cut("gr_rect", 0, 0, 20, 10)
 def test_an_unplated_kicad_pad_is_a_hole_where_it_is_placed_at_its_drill(tmp_path):
     """**A KiCad `np_thru_hole` pad is the hole an EAGLE `<hole>` is**
     (OH-163, from its review): `from_kicad` gives one `eagle.Hole` of each,
-    so the `holes` line and `not_drawn["holes"]` mean the same thing on both
+    so the `holes` line and `not_drawn["slots"]` mean the same thing on both
     formats -- the Olimex boards' mounting holes and the Thing Plus C5's
     standoffs were counted only as pads drawn as nothing. Each lands where
     its pad does, and by hand the first, (2, 0) in a footprint at (10, 5)
@@ -5909,7 +5909,7 @@ def test_the_gaps_ride_as_compose_measured_them(capsys):
     """**What rides under `not_drawn` is held in-process** (OH-163, from its
     review), not only on a shipped `.glb`: `compose --check` builds it with
     `not_drawn`, caught here as it returns. Since OH-226 a hole is cut and
-    no gap: `holes` counts a slot alone, which no composed board drills,
+    no gap: `slots` counts a slot alone, which no composed board drills,
     and `cutouts` and the overlap OH-163's confirm verification put in the
     JSON, `holes_np_thru_hole`, went with the gap they measured. What is
     printed instead is what is cut, each counted off the file: on the Uno
@@ -5924,7 +5924,7 @@ def test_the_gaps_ride_as_compose_measured_them(capsys):
         seen.append(real(*args, **kwargs))
         return seen[-1]
 
-    keys = {"ink", "text", "copper", "holes", "milled", "into_holes", "turn_unseen",
+    keys = {"ink", "text", "copper", "slots", "milled", "into_holes", "turn_unseen",
             "unmodelled", "no_pads"}
     spec = _uno_whole()
     with mock.patch.object(compose, "not_drawn", spy):
@@ -5932,7 +5932,7 @@ def test_the_gaps_ride_as_compose_measured_them(capsys):
     (gaps,) = seen
     holes = eagle.read_board(spec.layout).holes
     assert set(gaps) == keys, gaps
-    assert (gaps["holes"], gaps["milled"], gaps["into_holes"]) == (0, {}, {}), gaps
+    assert (gaps["slots"], gaps["milled"], gaps["into_holes"]) == (0, {}, {}), gaps
     assert len(holes) > len({hole.element for hole in holes}) == 1, holes
     assert _counted(printed, "  holes ") == (
         f"  holes   {len(holes)} cut: 3.200 mm x{len(holes)} in the board itself"), printed
@@ -5950,7 +5950,7 @@ def test_the_gaps_ride_as_compose_measured_them(capsys):
     with mock.patch.object(compose, "not_drawn", spy):
         printed = _accounting(glyph, capsys).splitlines()
     (gaps,) = seen
-    assert (gaps["holes"], gaps["into_holes"]) == (0, {}), gaps
+    assert (gaps["slots"], gaps["into_holes"]) == (0, {}), gaps
     assert (len(unplated), len(circles)) != (0, 0)
     assert _counted(printed, "  holes ").startswith(f"  holes   {len(unplated)} cut: "), printed
     assert _counted(printed, "  holes ").endswith(f"; {len(unplated)} of them np_thru_hole pads, "
@@ -5982,7 +5982,7 @@ def test_compose_cuts_the_holes_it_prints_and_says_what_reached_into_one(capsys)
           mock.patch.object(compose, "not_drawn", spying("not_drawn"))):
         printed = _accounting(spec, capsys).splitlines()
     board = compose.read_layout(spec.layout)
-    holes = compose.holes_of(board, compose.outer(board.outline)[1])
+    holes, _within = compose.holes_of(board, compose.outer(board.outline)[1])
     ((args, _kwargs),) = calls["slab"]
     assert len(holes) == 4 and args[4] == list(holes.values()), args[4:]
     ((args, _kwargs),) = calls["artwork"]
@@ -6202,6 +6202,42 @@ def test_a_bridge_leaves_a_point_only_from_strictly_inside_its_corner():
         True, False, False, False, False]
 
 
+#: A board 20 x 10 mm with a notch in from its right side to a tip at (9, 5)
+#: and one down from its top to a tip at (4.8, 2), whose left side is the
+#: edge back to where the ring starts (OH-226).
+_NOTCHED = [(6.0, 10.0), (0.0, 10.0), (0.0, 0.0), (20.0, 0.0), (20.0, 4.5), (9.0, 5.0),
+            (20.0, 5.5), (20.0, 10.0), (9.0, 10.0), (8.0, 5.0), (4.8, 2.0)]
+
+
+def test_a_bridge_is_never_taken_across_the_walks_closing_edge():
+    """**Every edge of the walk stands in a bridge's way, the one back to
+    its start too** (OH-226's review: a `_sees` that skipped the edge from
+    the walk's last point to its first survived every other test). A
+    hole's rightmost point M is (5, 5). The nearest point right of it
+    whose corner M lies inside is the tip (9, 5), and the way there touches
+    the corner (8, 5) -- no crossing -- and crosses the top notch's left
+    side, which `_NOTCHED` makes the edge back to its start, and nothing
+    else. Wherever the outline starts, the hole is bridged to (6, 10), the
+    next nearest, and the slab's top is the board less the hole."""
+    hole = _diamond(4.5, 5.0, 0.5)
+    m, side = hole[0], (_NOTCHED[-1], _NOTCHED[0])
+    tip, touched = _NOTCHED.index((9.0, 5.0)), _NOTCHED.index((8.0, 5.0))
+    assert (compose._sign(*side, m) * compose._sign(*side, _NOTCHED[tip]) < 0
+            and compose._sign(m, _NOTCHED[tip], side[0]) * compose._sign(m, _NOTCHED[tip], side[1]) < 0)
+    # Nearer than the tip, (8, 5) turns away from M; the tip is seen with the
+    # top notch filled in, and only that notch's side stands in the way.
+    assert math.dist(m, _NOTCHED[touched]) < math.dist(m, _NOTCHED[tip])
+    assert not compose._sees(_NOTCHED, touched, m)
+    assert compose._sees(_NOTCHED[:touched], tip, m) and not compose._sees(_NOTCHED, tip, m)
+    for start in range(len(_NOTCHED)):
+        outline = _NOTCHED[start:] + _NOTCHED[:start]
+        walk = compose.bridged(outline, [hole])
+        assert walk[walk.index(m) - 1] == (6.0, 10.0), (start, walk[walk.index(m) - 1])
+        faces = [(walk[a], walk[b], walk[c]) for a, b, c in compose.ear_clip(walk)]
+        wrong = _cut_exactly(outline, [hole], faces, _grid(20, 10) + _probes_round([hole]))
+        assert not wrong, (start, wrong[:3])
+
+
 #: A board 40 x 5 mm with a corner on its top edge at (5.5, 5), a small hole
 #: below it, and a long thin hole between the two that reaches further right
 #: than the small one (OH-226).
@@ -6252,12 +6288,14 @@ def test_a_hole_entered_at_the_wrong_visit_is_refused_by_ear_clips_crossing_guar
     cross, so the edge test passes it. `ear_clip` refuses it as a
     `SelfCrossing` naming the corner, and so does `slab`, which fills its
     walk with `ear_clip` -- here handed that walk in `bridged`'s place: the
-    slab path inherits the guard. Without `_crossing_point`, the walk is
-    refused only as having "no ear" while it "crosses nowhere", which
-    misnames it -- as every such splice a seeded search made did, none
-    coming back covering a face twice as OH-163's `_TWICE` did (OH-226's
-    note has the search). Spliced in at the visit `_sees` takes, it is the
-    board less the three holes."""
+    slab path inherits the guard. Without `_crossing_point` the walk is
+    still refused, as a ValueError -- today one saying "no ear found" and
+    that it "crosses nowhere", which misnames it, so that wording is not
+    held here and a better diagnosis need not break this (OH-226's review)
+    -- as every such splice a seeded search made was, none coming back
+    covering a face twice as OH-163's `_TWICE` did (OH-226's note has the
+    search). Spliced in at the visit `_sees` takes, it is the board less
+    the three holes."""
     walk = compose.bridged(_TALL, _TALL_HOLES[:2])
     third = _TALL_HOLES[2]
     m, corner = third[0], (4.0, 0.0)
@@ -6277,7 +6315,7 @@ def test_a_hole_entered_at_the_wrong_visit_is_refused_by_ear_clips_crossing_guar
         with pytest.raises(compose.SelfCrossing, match=r"crosses itself at \(4\.0, 0\.0\)"):
             compose.ear_clip(spliced)
         with (mock.patch.object(compose, "_crossing_point", lambda _ring: None),
-              pytest.raises(ValueError, match=r"no ear found .* crosses nowhere")):
+              pytest.raises(ValueError)):
             compose.ear_clip(spliced)
         with (mock.patch.object(compose, "bridged", lambda _ring, _holes, walk=spliced: walk),
               pytest.raises(compose.SelfCrossing, match=r"crosses itself at \(4\.0, 0\.0\)")):
@@ -6333,15 +6371,19 @@ def test_every_composed_boards_slab_is_its_outline_less_its_holes():
         exactly one;
       * the walls' area is each ring's perimeter times the thickness, the
         outline's and each hole's apart, each wall on one ring;
-      * a face of V points in all, h of them holes, is V + 2h - 2
-        triangles, and the walls two a side -- so a hole of n sides adds
-        4n + 4."""
+      * a face of V points in all, h of them holes, is at most V + 2h - 2
+        triangles -- fewer where `ear_clip` drops a point the walk runs
+        straight on through (OH-226's review) -- and the walls two a side,
+        so a hole of n sides adds at most 4n + 4;
+      * and no drilled hole is wholly within another (`holes_of`)."""
     checked = []
     for spec in _fill_layouts():
         board = compose.read_layout(spec.layout)
         ring, cutouts = compose.outer(board.outline)
-        holes = list(compose.holes_of(board, cutouts).values())
+        holes, within = compose.holes_of(board, cutouts)
+        holes = list(holes.values())
         assert holes, f"{spec.board} cuts no hole, so this holds nothing of it"
+        assert within == {}, (spec.board, within)
         assert all(cutout in holes for cutout in cutouts) and len(holes) == (
             len(cutouts) + sum(1 for hole in board.holes if not hole.slot_mm)), spec.board
         mesh = compose.slab(ring, spec.thickness_mm, spec.colour, (0.0, 0.0), holes)
@@ -6354,8 +6396,9 @@ def test_every_composed_boards_slab_is_its_outline_less_its_holes():
             wrong = _cut_exactly(ring, holes, face, probes)
             assert not wrong, (spec.board, wrong[:3])
         points = sum(map(len, holes)) + len(ring)
-        assert (len(top), len(bottom), len(walls)) == (
-            points + 2 * len(holes) - 2, points + 2 * len(holes) - 2, 2 * points), spec.board
+        assert len(top) == len(bottom) <= points + 2 * len(holes) - 2, (
+            spec.board, len(top), points + 2 * len(holes) - 2)
+        assert len(walls) == 2 * points, spec.board
         which = {point: at for at, loop in enumerate([ring, *holes]) for point in loop}
         lateral = [0.0] * (len(holes) + 1)
         for scene, _normal in walls:
@@ -6453,7 +6496,7 @@ def test_no_composed_boards_artwork_lies_in_a_hole_and_what_would_is_counted():
     for spec in _fill_layouts():
         board = compose.read_layout(spec.layout)
         ring, cutouts = compose.outer(board.outline)
-        holes = compose.holes_of(board, cutouts)
+        holes, _within = compose.holes_of(board, cutouts)
         letters, _unlettered, _lettered = compose.lettering(board.kicad_text)
         meshes, _tally, _undrawn, into = compose.artwork(
             board, ring, spec.thickness_mm, (0.0, 0.0), spec.colour, letters, holes)
@@ -6528,7 +6571,7 @@ def test_the_shipped_models_are_cut_where_their_boards_are_drilled_and_milled():
             heights = {round(up, 4) for _x, up, _z in face}
             if len(heights) == 1:
                 levels.setdefault(heights.pop(), []).append(tuple((x, -z) for x, _up, z in face))
-        for label, hole in compose.holes_of(board, cutouts).items():
+        for label, hole in compose.holes_of(board, cutouts)[0].items():
             mx = (min(x for x, _y in hole) + max(x for x, _y in hole)) / 2 - cx
             my = (min(y for _x, y in hole) + max(y for _x, y in hole)) / 2 - cy
             right = max(x for x, _y in hole) - cx
@@ -6544,36 +6587,49 @@ def test_the_shipped_models_are_cut_where_their_boards_are_drilled_and_milled():
                     "python tools/compose_board_3d.py")
 
 
-#: Each composed board whose vendor publishes its drill file in the tree its
-#: board file is fetched from (OH-226): the checkout, the file's path at the
-#: checkout's own commit, the git blob it was measured as -- content-
-#: addressed, so a different file is a different pin -- and whether it holds
-#: only unplated holes. SparkFun's EAGLE boards are drilled from one panel
-#: file each, Excellon, plated and unplated alike and untagged; KiCad's
-#: files say which tool is which. Seeed's XIAO ESP32-C6 is in its own zip.
+#: Each composed board whose vendor publishes its drill file beside its board
+#: file (OH-226): where the file is under `third_party` -- a checkout and the
+#: file's path at the checkout's own commit, or a zip and its member -- the
+#: git blob it was measured as, content-addressed, so a different file is a
+#: different pin; and WHERE THE BOARD IS in the file's frame, which is what
+#: holds the holes in place and not only to one another (OH-226's review:
+#: a free translation passed every hole moved 1 mm on all seven). A file of
+#: one board states the offset from the board file's own coordinates to its
+#: hits: Olimex's C3-DevKit-Lipo is drilled from its auxiliary origin, the
+#: `(aux_axis_origin 129.54 115.57)` its .kicad_pcb states (y negated, as
+#: `from_kicad` negates it); its C6-EVB from KiCad's own origin, though its
+#: file states an auxiliary one at (90, 125); Seeed's from its own origin. A
+#: panel is None: it repeats the board, and `_copies_by_pads` finds each copy
+#: from the board's own pads, which the holes cut have no part in. SparkFun's
+#: EAGLE panels hold plated and unplated hits alike, untagged; KiCad's files
+#: say which tool is which.
 DRILL_FILES = {
+    "XIAO-ESP32-C6-DIP": (
+        "seeed-pcb/ESP32-C6.zip",
+        "202003916_XIAO ESP32 C6_v1.0_SCH&PCB_260114/XIAO ESP32 C6_gerber/XIAO ESP32 C6-NPTH-drl.gbr",
+        "db37d4336fbb3ffeac8057e38c8ba99401025dc9", (0.0, 0.0)),
     "SparkFun Thing Plus ESP32-C6": (
         "sparkfun-thing-plus-esp32-c6", "Production/Thing_Plus_ESP32_C6-Panel.TXT",
-        "8f8ce97bc8b4047f3cedde1092161e4363d273b5"),
+        "8f8ce97bc8b4047f3cedde1092161e4363d273b5", None),
     "SparkFun Qwiic Pocket ESP32-C6": (
         "sparkfun-qwiic-pocket-esp32-c6", "Production/Qwiic_Pocket_Dev_ESP32_C6-Panel.TXT",
-        "395fe0c8a7d80dd708c3d1121fc65949a9f9a3f4"),
+        "395fe0c8a7d80dd708c3d1121fc65949a9f9a3f4", None),
     "SparkFun Pro Micro ESP32-C3": (
         "sparkfun-pro-micro-esp32-c3",
         "Production/SparkFun_Dev_ESP32_C3_MINI-Panel_v11/SparkFun_Dev_ESP32_C3_MINI-Panel_v11b.TXT",
-        "527336b47182fe330ffd5efe12ed14b8575d213a"),
+        "527336b47182fe330ffd5efe12ed14b8575d213a", None),
     "SparkFun Thing Plus ESP32-C5": (
         "sparkfun-thing-plus-esp32-c5",
         "Hardware/Production/SparkFun_Thing_Plus_ESP32_C5_panelized.drl",
-        "d3fbe71361d57c54748d7c5b81318a56efc6509c"),
+        "d3fbe71361d57c54748d7c5b81318a56efc6509c", None),
     "Olimex ESP32-C3-DevKit-Lipo": (
         "olimex-esp32-c3-devkit-lipo",
         "HARDWARE/ESP32-C3-DevKit-Lipo_Rev_D/Gerbers/ESP32-C3-DevKit-Lipo_Rev_D-NPTH.drl",
-        "93a7d755a8e5f1cdfcdeb315bee6525a26fcf25d"),
+        "93a7d755a8e5f1cdfcdeb315bee6525a26fcf25d", (-129.54, 115.57)),
     "Olimex ESP32-C6-EVB": (
         "olimex-esp32-c6-evb",
         "HARDWARE/Hardware-revision-A/Gerbers/ESP32-C6-EVB_Rev_A-NPTH.drl",
-        "ff20f0e4fad04077fd8e40f6f381dffdf3b90547"),
+        "ff20f0e4fad04077fd8e40f6f381dffdf3b90547", (0.0, 0.0)),
 }
 
 #: How near a vendor's drill must be to a hole cut, in place and in size: the
@@ -6585,9 +6641,11 @@ def _excellon(text: str) -> list[tuple[float, float, float, bool | None]]:
     """Each hit of an Excellon drill file as `(x, y, diameter, unplated)`, in
     millimetres, `unplated` None where the file does not say. EAGLE writes
     coordinates with their decimals implied by the header's format, KiCad
-    with a point; KiCad tags each tool, or the whole file, plated or not."""
+    with a point; KiCad tags each tool, or the whole file, plated or not. A
+    slot KiCad routes -- `G00` to one end, `G01` to the other -- is a hit at
+    its middle, which is where its pad is; the tool is its width."""
     tools, hits = {}, []
-    scale, decimals, unplated, tagged, tool = 1.0, None, None, None, None
+    scale, decimals, unplated, tagged, tool, start = 1.0, None, None, None, None, None
     for line in (line.strip() for line in text.splitlines()):
         if match := re.search(r"TF\.FileFunction,(NonPlated|Plated)", line):
             unplated = match.group(1) == "NonPlated"
@@ -6603,10 +6661,15 @@ def _excellon(text: str) -> list[tuple[float, float, float, bool | None]]:
             tagged = None
         elif match := re.fullmatch(r"T(\d+)", line):
             tool = match.group(1)
-        elif match := re.fullmatch(r"X([-\d.]+)Y([-\d.]+)", line):
-            x, y = (float(v) if "." in v or decimals is None else int(v) / 10 ** decimals
-                    for v in match.groups())
-            hits.append((x * scale, y * scale, *tools[tool]))
+        elif match := re.fullmatch(r"(G0[01])?X([-\d.]+)Y([-\d.]+)", line):
+            x, y = (float(v) * scale if "." in v or decimals is None
+                    else int(v) / 10 ** decimals * scale for v in match.groups()[1:])
+            if match.group(1) == "G00":
+                start = (x, y)
+            elif match.group(1) == "G01":
+                hits.append(((start[0] + x) / 2, (start[1] + y) / 2, *tools[tool]))
+            else:
+                hits.append((x, y, *tools[tool]))
     return hits
 
 
@@ -6629,19 +6692,22 @@ def _gerber_drill(text: str) -> list[tuple[float, float, float, bool | None]]:
 
 def _drill_file(board: str) -> list[tuple[float, float, float, bool | None]] | str:
     """The hits of `board`'s vendor drill file, or why there are none here."""
+    import hashlib
     import subprocess
     import zipfile
 
-    if board == "XIAO-ESP32-C6-DIP":
-        from tests.rules.test_kicad import SEEED_C6_ROOT, SEEED_PCB
-        zipped = SEEED_PCB / "ESP32-C6.zip"
-        if not zipped.is_file():
-            return f"{zipped.name} is not fetched; python tools/compose_board_3d.py"
-        with zipfile.ZipFile(zipped) as bundle:
-            return _gerber_drill(bundle.read(
-                f"{SEEED_C6_ROOT}XIAO ESP32 C6_gerber/XIAO ESP32 C6-NPTH-drl.gbr").decode("ascii"))
-    checkout, path, pinned = DRILL_FILES[board]
+    checkout, path, pinned, _origin = DRILL_FILES[board]
     where = REPO / "third_party" / checkout
+    if where.suffix == ".zip":
+        if not where.is_file():
+            return f"{where.name} is not fetched; python tools/compose_board_3d.py"
+        with zipfile.ZipFile(where) as bundle:
+            data = bundle.read(path)
+        blob = hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+        assert blob == pinned, (
+            f"{board}'s drill file is now blob {blob}, not the {pinned} measured "
+            f"here: re-measure before holding the holes to it")
+        return _gerber_drill(data.decode("ascii"))
     # Never a lazy fetch from inside a test: a partial clone that lacks the
     # blob says so, and the command that fetches it is named.
     env = {**__import__("os").environ, "GIT_NO_LAZY_FETCH": "1"}
@@ -6660,24 +6726,80 @@ def _drill_file(board: str) -> list[tuple[float, float, float, bool | None]] | s
     return _excellon(text.stdout.decode("utf-8"))
 
 
+def _near_drill(a, b) -> bool:
+    """Whether two `(x, y, size)` are one drill, to `DRILL_TOLERANCE_MM`."""
+    return all(abs(p - q) <= DRILL_TOLERANCE_MM for p, q in zip(a, b))
+
+
+def _copies_by_pads(board: eagle.Board, hits) -> list[tuple[float, float]]:
+    """Where a panel puts the board: each offset that lands every through-
+    hole pad the board places on a hit of the file, found from the pads
+    alone -- a different reader's output from the holes cut -- so the holes
+    are held to a copy they had no part in choosing."""
+    cells: dict[tuple[int, int], list[tuple[float, float]]] = {}
+    for x, y, *_rest in hits:
+        cells.setdefault((round(x * 100), round(y * 100)), []).append((x, y))
+
+    def drilled_at(x: float, y: float) -> bool:
+        return any(abs(hx - x) <= DRILL_TOLERANCE_MM and abs(hy - y) <= DRILL_TOLERANCE_MM
+                   for i in (-1, 0, 1) for j in (-1, 0, 1)
+                   for hx, hy in cells.get((round(x * 100) + i, round(y * 100) + j), ()))
+
+    pads = [(pad.x_mm, pad.y_mm) for element in board.elements
+            for pad in element.pads_of("thru_hole")]
+    assert pads, f"{board.name} places no through-hole pad to find a copy by"
+    (x0, y0), rest = pads[0], pads[1:]
+    return [(hx - x0, hy - y0) for hx, hy, *_rest in hits
+            if all(drilled_at(x + hx - x0, y + hy - y0) for x, y in rest)]
+
+
+def _drilled_as_filed(ring, cut, hits, copy: tuple[float, float]) -> str | None:
+    """Why `cut` -- each drilled hole cut, `(x, y, drill)` -- is not where
+    `hits` drill it with the board at offset `copy` in the file's frame, or
+    None where it is: every hole cut on a hit of its own size, and the
+    file's unplated hits on the board -- those its tools are tagged
+    unplated, or, in SparkFun's untagged EAGLE panels, every hit of a size
+    cut -- exactly the holes cut, one each."""
+    dx, dy = copy
+    off = [hole for hole in cut
+           if not any(_near_drill((hole[0] + dx, hole[1] + dy, hole[2]), hit[:3]) for hit in hits)]
+    if off:
+        return f"{len(off)} hole(s) cut on no hit of their size: {off[:3]}"
+    sizes = {round(size, 3) for _x, _y, size in cut}
+    xs, ys = [x for x, _y in ring], [y for _x, y in ring]
+    mine = [(x - dx, y - dy, size) for x, y, size, unplated in hits
+            if min(xs) <= x - dx <= max(xs) and min(ys) <= y - dy <= max(ys)
+            and compose.point_in(ring, (x - dx, y - dy))
+            and (unplated if unplated is not None else round(size, 3) in sizes)]
+    if len(mine) != len(cut) or not all(any(_near_drill(hit, hole) for hole in cut)
+                                        for hit in mine):
+        return f"the file drills {len(mine)} unplated on the board, not the {len(cut)} cut: {mine[:4]}"
+    return None
+
+
 def test_the_holes_cut_are_where_the_vendors_own_drill_files_drill_them():
-    """**Held to the vendors' own drill files** (OH-226), the oracle the
-    "binary unchanged" evidence of earlier slices gave way to. Seven
-    composed boards' vendors publish one beside the board file: SparkFun's
-    EAGLE panels for the Thing Plus C6, Qwiic Pocket C6 and Pro Micro C3
-    and its KiCad panel for the Thing Plus C5, Olimex's NPTH files for the
-    C3-DevKit-Lipo (revision D) and C6-EVB (revision A), and Seeed's NPTH
-    Gerber for the XIAO ESP32-C6. For each, every drilled hole cut -- its
-    ring's middle and span -- lands on a hit of its own size, all under one
-    translation (a panel repeats the board, and a KiCad file may drill from
-    an auxiliary origin); and within that copy of the board the file's
-    unplated hits -- those its tools are tagged unplated, or, in SparkFun's
-    untagged EAGLE panels, every hit of a size cut -- are exactly the holes
-    cut, one each."""
+    """**Held to the vendors' own drill files, in place** (OH-226), the
+    oracle the "binary unchanged" evidence of earlier slices gave way to.
+    Seven composed boards' vendors publish one beside the board file:
+    SparkFun's EAGLE panels for the Thing Plus C6, Qwiic Pocket C6 and Pro
+    Micro C3 and its KiCad panel for the Thing Plus C5, Olimex's NPTH files
+    for the C3-DevKit-Lipo (revision D) and C6-EVB (revision A), and Seeed's
+    NPTH Gerber for the XIAO ESP32-C6. The board is put where the file has
+    it -- at the offset `DRILL_FILES` states for a file of one board, and at
+    each copy of a panel its own through-hole pads find -- and there every
+    drilled hole cut, its ring's middle and span, lands on a hit of its own
+    size, and the file's unplated hits on the board are exactly the holes
+    cut (`_drilled_as_filed`). Free to slide the holes, this held every
+    hole moved 1 mm, and some mirrored (OH-226's review); so it is shown to
+    refuse each board's holes moved half a millimetre either way, mirrored
+    either way and turned a half turn about the outline's middle, wherever
+    that moves them off themselves."""
     _newstroke()
+    assert set(DRILL_FILES) <= {spec.board for spec in compose.COMPOSITIONS}, (
+        f"held to nothing: {sorted(set(DRILL_FILES) - {s.board for s in compose.COMPOSITIONS})}")
     held, why_not = [], {}
     for spec in compose.COMPOSITIONS:
-        if spec.board not in DRILL_FILES and spec.board != "XIAO-ESP32-C6-DIP":
+        if spec.board not in DRILL_FILES:
             continue
         if not spec.layout.is_file():
             why_not[spec.board] = f"{spec.layout.name} is not fetched; {spec.fetch_with}"
@@ -6689,30 +6811,30 @@ def test_the_holes_cut_are_where_the_vendors_own_drill_files_drill_them():
         board = compose.read_layout(spec.layout)
         ring, cutouts = compose.outer(board.outline)
         cut = []
-        for label, hole in compose.holes_of(board, cutouts).items():
+        for label, hole in compose.holes_of(board, cutouts)[0].items():
             if hole in cutouts:
                 continue
             xs, ys = [x for x, _y in hole], [y for _x, y in hole]
             assert max(xs) - min(xs) == pytest.approx(max(ys) - min(ys), abs=1e-9), label
             cut.append(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, max(xs) - min(xs)))
         assert cut, spec.board
-
-        def near(a, b) -> bool:
-            return all(abs(p - q) <= DRILL_TOLERANCE_MM for p, q in zip(a, b))
-
-        shifts = [(hx - cut[0][0], hy - cut[0][1]) for hx, hy, size, _u in hits
-                  if abs(size - cut[0][2]) <= DRILL_TOLERANCE_MM]
-        copies = [(dx, dy) for dx, dy in shifts
-                  if all(any(near((x + dx, y + dy, size), hit[:3]) for hit in hits)
-                         for x, y, size in cut)]
-        assert copies, (spec.board, cut[:3], sorted({round(h[2], 4) for h in hits}))
-        dx, dy = copies[0]
-        sizes = {round(size, 3) for _x, _y, size in cut}
-        mine = [(x - dx, y - dy, size) for x, y, size, unplated in hits
-                if compose.point_in(ring, (x - dx, y - dy))
-                and (unplated if unplated is not None else round(size, 3) in sizes)]
-        assert len(mine) == len(cut), (spec.board, len(mine), len(cut), mine[:4])
-        assert all(any(near(hit, hole) for hole in cut) for hit in mine), (spec.board, mine)
+        origin = DRILL_FILES[spec.board][3]
+        copies = [origin] if origin is not None else _copies_by_pads(board, hits)
+        assert copies, f"{spec.board}: no copy of the board's own pads in its drill file"
+        for copy in copies:
+            assert _drilled_as_filed(ring, cut, hits, copy) is None, (
+                spec.board, copy, _drilled_as_filed(ring, cut, hits, copy))
+        xs, ys = [x for x, _y in ring], [y for _x, y in ring]
+        mx, my = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+        for how, moved in (("moved 0.5 mm in x", [(x + 0.5, y, s) for x, y, s in cut]),
+                           ("moved 0.5 mm in y", [(x, y + 0.5, s) for x, y, s in cut]),
+                           ("mirrored in x", [(2 * mx - x, y, s) for x, y, s in cut]),
+                           ("mirrored in y", [(x, 2 * my - y, s) for x, y, s in cut]),
+                           ("turned a half turn", [(2 * mx - x, 2 * my - y, s) for x, y, s in cut])):
+            if all(any(_near_drill(hole, other) for other in cut) for hole in moved):
+                continue
+            assert _drilled_as_filed(ring, moved, hits, copies[0]) is not None, (
+                f"{spec.board}: its holes {how} are held to its drill file too")
         held.append(spec.board)
     if why_not:
         pytest.skip(f"SKIPPED: held {held or 'none'}; not held, each saying why: {why_not}")
@@ -6721,7 +6843,7 @@ def test_the_holes_cut_are_where_the_vendors_own_drill_files_drill_them():
 def test_a_slot_is_not_cut_and_is_counted_as_not_drawn(tmp_path, capsys):
     """**A slot is left uncut and said so** (OH-226): `eagle.Hole` carries a
     slot's length and not its direction, so `holes_of` cuts a board's
-    round holes and not its slot, `not_drawn["holes"]` counts the slot, and
+    round holes and not its slot, `not_drawn["slots"]` counts the slot, and
     the `holes` line says which are cut and which is not, and why. On
     `UNPLATED`, composed here as a board of its own, two round holes and
     one oval drill, each round one named by its drill, its element and
@@ -6731,16 +6853,17 @@ def test_a_slot_is_not_cut_and_is_counted_as_not_drawn(tmp_path, capsys):
     path.write_text(UNPLATED, encoding="utf-8")
     board = compose.from_kicad(path)
     _ring, cutouts = compose.outer(board.outline)
-    holes = compose.holes_of(board, cutouts)
+    holes, within = compose.holes_of(board, cutouts)
     assert sorted(holes) == sorted(
         f"{hole.drill_mm:.3f} mm hole in H1 at ({hole.x_mm:.3f}, {hole.y_mm:.3f})"
         for hole in board.holes if not hole.slot_mm), sorted(holes)
     assert len(holes) == 2 and sorted(holes)[1].startswith("1.100 mm hole in H1 at (10.000, -3.000)")
+    assert within == {}, within
     # Two holes named alike are one drawn over the other, and are refused.
     with pytest.raises(ValueError, match=r"two holes are each the 1\.100 mm hole in H1"):
         compose.holes_of(dataclasses.replace(board, holes=board.holes + board.holes[:1]), cutouts)
     gaps = compose.not_drawn(board, {}, {}, [], [], [], {})
-    assert (gaps["holes"], gaps["into_holes"]) == (1, {}), gaps
+    assert (gaps["slots"], gaps["into_holes"]) == (1, {}), gaps
     _newstroke()
     spec = compose.Composition("Unplated", path, "written by this test", None, "test",
                                ("H1",), 1.6, "#313d63", "test")
@@ -6748,6 +6871,116 @@ def test_a_slot_is_not_cut_and_is_counted_as_not_drawn(tmp_path, capsys):
         "  holes   2 cut: 1.100 mm x1 in H1 (H1); 0.900 mm x1 in H1 (H1); 1 not cut, a "
         "slot's direction being on no eagle.Hole: 0.600 x 1.200 mm slot x1 in H1 (H1); "
         "3 of them np_thru_hole pads, on the artwork line too as pads with no copper")
+
+
+def _milled_and_drilled(tmp_path, pads: list[tuple[float, float]]) -> pathlib.Path:
+    """A board 20 x 10 mm milling a 3.2 mm circle on Edge.Cuts at (5, 5) in
+    KiCad's frame, and a footprint H1 there with a plated pad and an
+    unplated one of each `(x, drill)` in `pads`, x in its own frame."""
+    path = tmp_path / "mounting.kicad_pcb"
+    path.write_text(
+        "(kicad_pcb\n\t(version 20241229)\n" + _cut("gr_rect", 0, 0, 20, 10)
+        + '\t(gr_circle (center 5 5) (end 5 6.6) (fill none) (layer "Edge.Cuts"))\n'
+        + '\t(footprint "Test:H1"\n\t\t(layer "F.Cu")\n\t\t(at 5 5)\n'
+          '\t\t(property "Reference" "H1" (at 0 0 0) (layer "F.SilkS"))\n'
+        + "".join(f'\t\t(pad "" np_thru_hole circle (at {x} 0) (size {drill} {drill}) '
+                  f'(drill {drill}) (layers "*.Cu" "*.Mask"))\n' for x, drill in pads)
+        + '\t\t(pad "1" thru_hole circle (at 0 3) (size 1.7 1.7) (drill 1) '
+          '(layers "*.Cu" "*.Mask"))\n\t)\n)\n', encoding="utf-8")
+    return path
+
+
+def _extras(spec, capsys) -> tuple[dict, str]:
+    """What `compose` hands `write_glb` as the model's extras, caught as it
+    does with nothing written and no model matched, and what it printed."""
+    caught: dict = {}
+
+    def write(*_args, extras):
+        caught.update(extras)
+        return 0
+
+    with (mock.patch.object(compose, "CORRESPONDENCE", ()),
+          mock.patch.object(compose, "write_glb", write)):
+        compose.compose(spec, deflection=0.05, check=False)
+    return caught, capsys.readouterr().out
+
+
+def test_a_hole_drilled_where_one_is_milled_is_cut_once_and_said_so(tmp_path, capsys):
+    """**A drilled hole wholly within another is already cut** (OH-226's
+    review): a KiCad mounting hole is often an `np_thru_hole` pad and a
+    circle on Edge.Cuts at one place, and cutting both made a walk crossing
+    itself, which `slab` refused as a `SelfCrossing` naming neither -- a
+    board that composed before OH-226 and did not after. `holes_of` cuts
+    the milled circle and names the drill as within it, a drill of its
+    size, which flattens to its very ring, and a smaller one; and a 1 mm
+    drill within a 3 mm one, listed first. The slab is the board less the
+    circle; the `holes` line says which is within which; the model's
+    `cut` counts it among the holes. One reaching into another and not
+    wholly within it -- beside it, or around it -- is refused, naming both
+    and both middles."""
+    _newstroke()
+    mill = "3.200 x 3.200 mm cutout at (5.000, -5.000)"
+    for drill in (3.2, 3.0):
+        board = compose.from_kicad(_milled_and_drilled(tmp_path, [(0, drill)]))
+        ring, cutouts = compose.outer(board.outline)
+        holes, within = compose.holes_of(board, cutouts)
+        assert (list(holes), within) == (
+            [mill], {f"{drill:.3f} mm hole in H1 at (5.000, -5.000)": mill}), (holes, within)
+        top, _bottom, _walls = _slab_parts(
+            compose.slab(ring, 1.6, "#313d63", (0.0, 0.0), list(holes.values())), "#313d63", 1.6)
+        probes = [(x, y - 10.0) for x, y in _grid(20, 10)] + _probes_round(cutouts)
+        assert not _cut_exactly(ring, cutouts, top, probes), drill
+    board = compose.from_kicad(_milled_and_drilled(tmp_path, [(8, 1.0), (8, 3.0)]))
+    holes, within = compose.holes_of(board, compose.outer(board.outline)[1])
+    assert (list(holes), within) == (
+        [mill, "3.000 mm hole in H1 at (13.000, -5.000)"],
+        {"1.000 mm hole in H1 at (13.000, -5.000)": "3.000 mm hole in H1 at (13.000, -5.000)"})
+    spec = compose.Composition("Mounting", tmp_path / "mounting.kicad_pcb", "written by this test",
+                               None, "test", ("H1",), 1.6, "#313d63", "test")
+    extras, printed = _extras(spec, capsys)
+    assert extras["cut"] == {"cutouts": 1, "holes": 2}, extras["cut"]
+    assert _counted(printed.splitlines(), "  holes ").endswith(
+        "; 1 of them wholly within another hole, and cut by it: the 1.000 mm hole in H1 at "
+        "(13.000, -5.000) within the 3.000 mm hole in H1 at (13.000, -5.000)"), printed
+    for x, drill, middle in ((1, 3.2, "6.000"), (0, 3.4, "5.000")):
+        board = compose.from_kicad(_milled_and_drilled(tmp_path, [(x, drill)]))
+        with pytest.raises(ValueError, match=(
+                rf"the {drill:.3f} mm hole in H1 at \({middle}, -5\.000\) reaches into the "
+                rf"3\.200 x 3\.200 mm cutout at \(5\.000, -5\.000\) and is not wholly within "
+                rf"it: one cut over the other, centred at \({middle}, -5\.000\) and "
+                rf"\(5\.000, -5\.000\)")):
+            compose.holes_of(board, compose.outer(board.outline)[1])
+    # Every point of a drill inside a cutout is not enough: here a notch of
+    # the board reaches into the drill between two of its points.
+    notched = [(3.0, -7.0), (7.0, -7.0), (7.0, -5.15), (5.0, -5.15), (5.0, -5.05),
+               (7.0, -5.05), (7.0, -3.0), (3.0, -3.0)]
+    drill = eagle.Hole(5.0, -5.0, 2.0, "H1")
+    assert all(compose.point_in(notched, point) for point in compose.drilled(drill))
+    with pytest.raises(ValueError, match=(
+            r"the 2\.000 mm hole in H1 at \(5\.000, -5\.000\) reaches into the "
+            r"4\.000 x 4\.000 mm cutout at \(5\.000, -5\.000\) and is not wholly within")):
+        compose.holes_of(dataclasses.replace(board, holes=(drill,)), [notched])
+
+
+def test_what_is_cut_rides_in_extras_as_compose_counted_it(capsys):
+    """**`cut` is held in-process** (OH-226's review: counting the cutouts
+    among the holes as well survived every test, `cut` being read only off
+    the shipped Uno, which mills none). Caught as `compose` hands it to
+    `write_glb`, on the Glyph C3, which mills its mounting holes on
+    Edge.Cuts and drills unplated holes as pads: as many cutouts as its
+    Edge.Cuts circles, and as many holes as its `np_thru_hole` pads."""
+    _newstroke()
+    glyph = next(s for s in compose.COMPOSITIONS if s.board == "PCBCUPID Glyph C3")
+    if not _fetched(glyph):
+        pytest.skip(f"SKIPPED: {glyph.layout.name} is not fetched; {glyph.fetch_with}")
+    tree = kicad.board_tree(glyph.layout)
+    circles = [node for node in kicad.children(tree, "gr_circle")
+               if kicad.first(node, "layer")[1] == "Edge.Cuts"]
+    unplated = [pad for footprint in kicad.children(tree, "footprint")
+                for pad in kicad.children(footprint, "pad") if pad[2] == "np_thru_hole"]
+    assert circles and unplated, (len(circles), len(unplated))
+    extras, _printed = _extras(glyph, capsys)
+    assert extras["cut"] == {"cutouts": len(circles), "holes": len(unplated)}, extras["cut"]
 
 
 def test_a_placement_with_no_pad_that_states_a_mesh_is_a_part(tmp_path, capsys):

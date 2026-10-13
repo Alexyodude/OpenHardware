@@ -91,9 +91,10 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from fractions import Fraction
 
-REPO = pathlib.Path(__file__).resolve().parents[1]
+REPO =pathlib.Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
@@ -3436,28 +3437,79 @@ def drilled(hole: eagle.Hole) -> list[tuple[float, float]]:
 
 
 def holes_of(board: eagle.Board, cutouts: list[list[tuple[float, float]]]
-             ) -> dict[str, list[tuple[float, float]]]:
-    """Every hole the slab is cut along, by the words that name it on
-    `--check` (OH-226): each ring `outer` found inside the outline -- a
-    routed slot, a circle KiCad mills -- by its size and middle, and each
-    round unplated hole the board drills, an EAGLE `<hole>` or a KiCad
+             ) -> tuple[dict[str, list[tuple[float, float]]], dict[str, str]]:
+    """`(every hole the slab is cut along, each drilled hole another one
+    already cuts)`, by the words that name each on `--check` (OH-226).
+
+    The first is each ring `outer` found inside the outline -- a routed
+    slot, a circle KiCad mills -- by its size and middle, then each round
+    unplated hole the board drills, an EAGLE `<hole>` or a KiCad
     `np_thru_hole`, as `drilled` makes it, by its drill, whose it is and
     where. A slot is not here; see `drilled`. Two holes named alike would
     be one hole drawn over another, and are refused.
+
+    **A drilled hole wholly within another is already cut**, and is the
+    second, to the hole it lies within (OH-226's review): a KiCad mounting
+    hole is often both an `np_thru_hole` pad and a circle on Edge.Cuts at
+    one place, and cutting both is a walk crossing itself, which `slab`
+    refused as a `SelfCrossing` naming neither. Wholly within is every
+    point of its ring inside the other's or within `CHAIN_TOLERANCE_MM`,
+    this file's distance for one point, of its edge, and no point of the
+    other's inside its own by more -- so a drill and a mill of one size,
+    which flatten to one ring but for a float's last digits, are one hole,
+    and a notch reaching in between a drill's points is not within. Drills
+    are taken largest first, so a hole within a larger drill finds it.
+    **One that reaches into another and is not wholly within it is
+    refused**, naming both and both middles: its own circle is not clear of
+    the other's ring. Nothing on a composed board is either.
     """
-    holes: dict[str, list[tuple[float, float]]] = {}
-    named = [((f"{max(xs) - min(xs):.3f} x {max(ys) - min(ys):.3f} mm cutout at "
-               f"({(min(xs) + max(xs)) / 2:.3f}, {(min(ys) + max(ys)) / 2:.3f})"), ring)
-             for ring in cutouts
-             for xs, ys in [([x for x, _y in ring], [y for _x, y in ring])]]
-    named += [((f"{hole.drill_mm:.3f} mm hole in {hole.element or 'the board itself'} "
-                f"at ({hole.x_mm:.3f}, {hole.y_mm:.3f})"), drilled(hole))
+    def label_of(ring: list[tuple[float, float]]) -> tuple[str, tuple[float, float]]:
+        xs, ys = [x for x, _y in ring], [y for _x, y in ring]
+        middle = ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+        return (f"{max(xs) - min(xs):.3f} x {max(ys) - min(ys):.3f} mm cutout at "
+                f"({middle[0]:.3f}, {middle[1]:.3f})"), middle
+
+    def gap(point: tuple[float, float], ring: list[tuple[float, float]]) -> float:
+        """How far `point` is from the nearest side of `ring`."""
+        nearest = math.inf
+        for (ax, ay), (bx, by) in zip(ring, ring[1:] + ring[:1]):
+            dx, dy = bx - ax, by - ay
+            along = ((point[0] - ax) * dx + (point[1] - ay) * dy) / (dx * dx + dy * dy or 1.0)
+            along = min(1.0, max(0.0, along))
+            nearest = min(nearest, math.hypot(ax + along * dx - point[0],
+                                              ay + along * dy - point[1]))
+        return nearest
+
+    milled = [(*label_of(ring), ring) for ring in cutouts]
+    drills = [((f"{hole.drill_mm:.3f} mm hole in {hole.element or 'the board itself'} "
+                f"at ({hole.x_mm:.3f}, {hole.y_mm:.3f})"), hole)
               for hole in board.holes if not hole.slot_mm]
-    for label, ring in named:
-        if label in holes:
+    order = [label for label, _middle, _ring in milled] + [label for label, _hole in drills]
+    for at, label in enumerate(order):
+        if label in order[:at]:
             raise ValueError(f"two holes are each the {label}: one drawn over the other")
-        holes[label] = ring
-    return holes
+
+    kept = {label: (middle, ring) for label, middle, ring in milled}
+    within: dict[str, str] = {}
+    for label, hole in sorted(drills, key=lambda drill: -drill[1].drill_mm):
+        ring, centre = drilled(hole), (hole.x_mm, hole.y_mm)
+        for other, (middle, theirs) in kept.items():
+            if (all(point_in(theirs, point) or gap(point, theirs) <= CHAIN_TOLERANCE_MM
+                    for point in ring)
+                    and all(not point_in(ring, point) or gap(point, ring) <= CHAIN_TOLERANCE_MM
+                            for point in theirs)):
+                within[label] = other
+                break
+            if gap(centre, theirs) < hole.drill_mm / 2:
+                raise ValueError(
+                    f"the {label} reaches into the {other} and is not wholly within "
+                    f"it: one cut over the other, centred at ({centre[0]:.3f}, "
+                    f"{centre[1]:.3f}) and ({middle[0]:.3f}, {middle[1]:.3f}), is "
+                    f"not a hole this can cut")
+        else:
+            kept[label] = (centre, ring)
+    return ({label: kept[label][1] for label in order if label in kept},
+            {label: within[label] for label, _hole in drills if label in within})
 
 
 #: How far apart two outline endpoints may be and still be the same corner.
@@ -4178,7 +4230,7 @@ def _sees(walk: list[tuple[float, float]], at: int, m: tuple[float, float]) -> b
 
 
 def slab(ring: list[tuple[float, float]], thickness: float, colour: str,
-         centre: tuple[float, float], holes: list[list[tuple[float, float]]] = ()
+         centre: tuple[float, float], holes: Sequence[list[tuple[float, float]]] = ()
          ) -> Mesh:
     """The PCB: the outline extruded, cut through along each of `holes`,
     in glTF axes and millimetres.
@@ -4191,8 +4243,11 @@ def slab(ring: list[tuple[float, float]], thickness: float, colour: str,
     **The holes are cut** (OH-226): the top and bottom faces are `ear_clip`'s
     triangles of the walk `bridged` joins the holes into, and each hole has
     a wall, as the outline does. A face of V points in all, h of them in
-    holes, is V + 2h - 2 triangles, so a hole of n sides adds 4n + 4 to the
-    slab with its wall.
+    holes, is at most V + 2h - 2 triangles -- fewer where `ear_clip` drops
+    a point the walk runs straight on through, an ear of no area, which
+    leaves the point on a side of the triangle beside it (OH-226's review:
+    19 and not 20 on three diamonds in a row) -- so a hole of n sides adds
+    at most 4n + 4 to the slab with its wall.
 
     **Every ring is turned here, not taken as wound** (OH-226): a wall's
     normal is its edge turned a quarter to the right, out of the board along
@@ -6823,11 +6878,13 @@ def not_drawn(board: eagle.Board, ink: dict[str, int], text: dict[str, int],
 
     **A hole is cut, and no gap, since OH-226**: every ring inside the
     outline and every round unplated hole the board drills -- see
-    `holes_of`, and `extras["cut"]` for how many. So `holes` counts only
-    what is drilled and not cut, a slot, `drilled` says why; and the keys
-    that counted the holes not cut, `cutouts` and the overlap OH-163's
-    confirm verification put beside them, `holes_np_thru_hole`, went with
-    that gap. `into_holes` is the artwork that reached into a hole and was
+    `holes_of`, and `extras["cut"]` for how many. So what is drilled and
+    not cut is a slot, `drilled` says why, counted as `slots` -- renamed
+    from `holes`, which counted every hole until then, so that no reader
+    takes the one count for the other (OH-226's review); and the keys that
+    counted the holes not cut, `cutouts` and the overlap OH-163's confirm
+    verification put beside them, `holes_np_thru_hole`, went with that
+    gap. `into_holes` is the artwork that reached into a hole and was
     not drawn, by hole and by kind. `milled` is what an EAGLE board mills
     and its reader does not read into the outline, by kind
     (`eagle._unmilled`). A plated drill is under no key.
@@ -6837,7 +6894,7 @@ def not_drawn(board: eagle.Board, ink: dict[str, int], text: dict[str, int],
         # Each piece of text not drawn, counted under why (OH-163).
         "text": text,
         "copper": dict(board.traces_unread),
-        "holes": sum(1 for hole in board.holes if hole.slot_mm),
+        "slots": sum(1 for hole in board.holes if hole.slot_mm),
         "milled": dict(board.outline_unread),
         "into_holes": into,
         "turn_unseen": turn_unseen,
@@ -6895,7 +6952,9 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
     # (OH-226); a slot is not, `drilled` says why. A KiCad one is ALSO on the
     # artwork line, under `np_thru_hole`, as a pad with no copper, and this
     # line says how many of its holes those are. A plated drill -- a pad's,
-    # a via's, a slot milled in a plated pad -- is counted nowhere.
+    # a via's, a slot milled in a plated pad -- is counted nowhere. One
+    # wholly within another hole is cut by that one, and said so by name.
+    holes, within = holes_of(board, cutouts)
     if board.holes:
         groups: dict[tuple[float, float, str], list[str]] = {}
         for hole in board.holes:
@@ -6919,8 +6978,10 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
               + (f"; {slots} not cut, a slot's direction being on no eagle.Hole: "
                  f"{said(True)}" if slots else "")
               + (f"; {unplated_pads} of them np_thru_hole pads, on the artwork "
-                 f"line too as pads with no copper" if unplated_pads else ""))
-    holes = holes_of(board, cutouts)
+                 f"line too as pads with no copper" if unplated_pads else "")
+              + (f"; {len(within)} of them wholly within another hole, and cut by it: "
+                 + "; ".join(f"the {label} within the {other}"
+                             for label, other in within.items()) if within else ""))
     xs = [point[0] for point in ring]
     ys = [point[1] for point in ring]
     print(f"  outline {len(ring)} points, "
@@ -7406,8 +7467,10 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
             # a gap somebody can close, and now a reader can see it too.
             "artwork": dict(tally),
             # **What is cut through the slab** (OH-226): the rings inside the
-            # outline, and the round unplated holes drilled -- see `holes_of`.
-            "cut": {"cutouts": len(cutouts), "holes": len(holes) - len(cutouts)},
+            # outline, and the round unplated holes drilled, each one wholly
+            # within another hole cut by that one -- see `holes_of`.
+            "cut": {"cutouts": len(cutouts),
+                    "holes": len(holes) - len(cutouts) + len(within)},
             # See `not_drawn`, which says what each key counts.
             "not_drawn": gaps,
             # Text the file hides, which KiCad does not plot either: not
