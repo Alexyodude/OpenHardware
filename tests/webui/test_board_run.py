@@ -1421,8 +1421,8 @@ def test_a_voltage_the_description_refuses_leaves_the_levels_undriven(monkeypatc
     """`hold_volts` runs before `drive_pins`, so a voltage the description
     refuses leaves the levels of the same call undriven as well as
     unrecorded: a level applied and not recorded is a run no replay
-    reproduces. No name `drive_table` resolves on the three described parts
-    is refused there today, so the refusal is put in."""
+    reproduces. No name `drive_table` resolves on any board in the
+    catalogue is refused there today, so the refusal is put in."""
     def refuses(cpu, volts):
         raise ValueError(f"refused {dict(volts)!r}")
 
@@ -1461,6 +1461,31 @@ def test_every_description_that_reads_input_converts_a_voltage_too():
         assert getattr(description, "hold_volts", None) is not None, board.name
         checked.append(board.name)
     assert {"XIAO-ESP32-C3-DIP", "XIAO-ESP32-C5-DIP", "XIAO-ESP32-C6-DIP"} <= set(checked), checked
+
+
+def test_every_gpio_a_drive_resolves_is_a_pad_its_description_accepts():
+    """`drive` holds the voltages before it drives the levels, so
+    `drive_pins` refusing a GPIO after `hold_volts` had applied would leave
+    the voltages held and unrecorded. Each refuses exactly a GPIO outside its
+    description's `IO_MUX_PADS`, so that cannot happen while every GPIO
+    `drive_table` resolves is inside it: through `HEADER` on a XIAO, through
+    its own board file on a manifest row. Held over the catalogue, as OH-161
+    step 4's confirmation pass enumerated it by hand."""
+    from webui import pinmap
+
+    checked = []
+    for board in catalogue.catalogue():
+        description = api.description_for(board.name)
+        if getattr(description, "drive_pins", None) is None:
+            continue
+        pads = getattr(description, "IO_MUX_PADS", None)
+        assert pads is not None, (board.name, description.__name__, "no IO_MUX_PADS")
+        table = api.drive_table(board.name, description, pinmap.load(board.name))
+        outside = {name: gpio for name, gpio in table.items() if gpio not in pads}
+        assert not outside, (board.name, outside)
+        checked.append(board.name)
+    assert {"XIAO-ESP32-C3-DIP", "XIAO-ESP32-C5-DIP", "XIAO-ESP32-C6-DIP",
+            "Adafruit QT Py ESP32-C3", "SparkFun Thing Plus ESP32-C5"} <= set(checked), checked
 
 
 def test_volts_for_a_description_that_converts_none_are_refused(monkeypatch):
@@ -1626,7 +1651,13 @@ def test_a_drive_on_a_board_that_reads_no_input_is_refused_by_name(live_server):
 
 def test_a_drive_that_is_not_a_map_of_levels_is_refused_naming_the_field(live_server):
     """Not a refusal of the drive -- there is no drive to refuse -- so a
-    plain 400 naming the field and the value it got, and no slug."""
+    plain 400 naming the field and the value it got, and no slug.
+
+    **And a body `json.loads` refuses for its size rather than its syntax**:
+    an integer past Python's 4300-digit limit for converting one is a plain
+    `ValueError`, not the `JSONDecodeError` the parse used to catch alone,
+    and it closed the connection with no reply. Sent as bytes, because
+    `json.dumps` refuses that integer too; 5 KB is under `MAX_BODY_BYTES`."""
     load_c3_blink(live_server)
     for body, field, got in (
             ({"board": C3_BOARD, "levels": ["D1", "high"]}, "levels", "['D1', 'high']"),
@@ -1639,6 +1670,17 @@ def test_a_drive_that_is_not_a_map_of_levels_is_refused_naming_the_field(live_se
         assert caught.value.code == 400, answer
         assert field in answer["error"] and "reason" not in answer, answer
         assert got in answer["error"], answer
+    digits = (b'{"board": "' + C3_BOARD.encode() + b'", "levels": {}, '
+              b'"volts": {"D0": 1' + b"0" * 4999 + b"}}")
+    request = urllib.request.Request(
+        live_server + "/api/board/drive", data=digits,
+        headers={"Content-Type": "application/json"}, method="POST")
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(request, timeout=10)
+    answer = json.loads(caught.value.read())
+    assert caught.value.code == 400, answer
+    assert "body is not JSON" in answer["error"] and "4300" in answer["error"], answer
+    assert "reason" not in answer, answer
 
 
 def test_a_drive_is_post_only(live_server):

@@ -914,7 +914,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         raw = self.rfile.read(length) if length else b"{}"
         try:
             payload = json.loads(raw or b"{}")
-        except json.JSONDecodeError as exc:
+        except ValueError as exc:
+            # `JSONDecodeError` is one, and not the only one: an integer past
+            # Python's 4300-digit limit for converting one raises a plain
+            # `ValueError` from inside the parse, and caught as the narrower
+            # class it left `do_POST` with no reply sent (OH-161 step 4).
             self._json(400, {"error": f"body is not JSON: {exc}"})
             return
         if not isinstance(payload, dict):

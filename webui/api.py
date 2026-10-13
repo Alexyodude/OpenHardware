@@ -1574,7 +1574,10 @@ class BoardSession:
         # would leave the core holding a statement `inputs` never recorded,
         # which no replay reproduces. `hold_volts` is the newer and the one
         # likelier to grow a refusal, so it goes first. Neither refuses any
-        # GPIO `drive_table` resolves on the three described parts today.
+        # GPIO `drive_table` resolves on any board in the catalogue, XIAO or
+        # manifest row, and `test_board_run.py`'s
+        # `test_every_gpio_a_drive_resolves_is_a_pad_its_description_accepts`
+        # holds that.
         if holder is not None:
             holder(self.cpu, held)
         driver(self.cpu, driven)
