@@ -12,6 +12,10 @@ touches:
 - PROVENANCE.md
 - tools/model_from_datasheet.py
 - tests/rules/test_import_board.py
+- tools/import_3d_model.py
+- tests/rules/test_import_3d_model.py
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
 ---
 
 Twenty-five of twenty-six boards draw a vendor file or a board composed from the vendor's PCB, every placement is drawn or refused with a reason (OH-150), and what a person sees is still short of a photograph in four measurable ways. This ticket is those four, counted from `python tools/compose_board_3d.py --check` on 2026-09-04 (11 composed boards) and from the shipped .glb files.
@@ -135,3 +139,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-13:** 2026-10-13: the importer, the composer and their tests pass from OH-228 (done) straight on to OH-226, which cuts the counted holes. They return here when OH-226 closes.
 
 **Note 2026-10-13:** STEP 4, the STM32C5 vendor re-check, done 2026-10-13: the premise is overturned. Seeed now publishes the XIAO STM32C5 -- six wiki pages (xiao_stm32c5_getting_started and siblings), a product page, a v1.0 schematic PDF, a KiCad project with the PCB (XIAO_STM32C5_v1.0_SCH%26PCB.zip, 1,559,346 bytes, sha256 676070c1...35b1b) and a Zephyr board (platform-seeedboards 57250b6f, 2026-10-08); still no STEP. So the footprint extrusion is no longer the honest picture: the board can be composed from its own PCB. Filed as OH-231, which takes the fetch, the pins, the composition and the research record's correction; this step is closed here.
+
+**Note 2026-10-13:** 2026-10-13: tools/import_3d_model.py, tools/compose_board_3d.py and their tests returned from OH-226 (done, fd8bf18).
