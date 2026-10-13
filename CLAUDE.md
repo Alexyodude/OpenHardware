@@ -146,14 +146,21 @@ per board by kind (a KiCad board's silkscreen arcs are drawn since OH-163);
 them; and a zone's **filled polygon**, which is a keyhole outline walking into
 every thermal relief and back out.
 
-A board's own holes are counted and not cut (cutting them is OH-226): a hole
-KiCad mills on Edge.Cuts on the cutouts line, with the routed slots; each
-unplated hole drilled through the board -- an EAGLE `<hole>`, the board's own
-or a package's, and a KiCad np_thru_hole pad -- on a holes line; and what an
-EAGLE board mills that its reader does not read into the outline -- a shape on
-Dimension in its own `<plain>` other than a wire, any shape on Dimension in a
-package, and a shape on Milling in its own `<plain>` with a stated point
-strictly inside the outline's extent -- on a not cut line (OH-163). A
+A board's own holes are cut through its slab (OH-226): a hole KiCad mills on
+Edge.Cuts, with the routed slots, on the cutouts line; each round unplated
+hole drilled through the board -- an EAGLE `<hole>`, the board's own or a
+package's, and a KiCad np_thru_hole pad -- on a holes line, held in place to
+the vendor's own drill file on each board whose vendor publishes one; a
+drilled hole wholly within another, as a KiCad mounting hole drawn both as a
+pad and on Edge.Cuts is, is cut once and named on that line, and one reaching
+partly into another is refused by name; and artwork reaching into a hole is
+not drawn, counted on an into line. A slot would be counted, as not_drawn's
+slots, and not cut, its direction being on no eagle.Hole; no composed board
+drills one. What an EAGLE board mills that its reader does not read into the
+outline -- a shape on Dimension in its own `<plain>` other than a wire, any
+shape on Dimension in a package, and a shape on Milling in its own `<plain>`
+with a stated point strictly inside the outline's extent -- is counted and not
+cut, on a not cut line (OH-163). A
 package's own Milling is not counted: on every composed board that has one it
 is a slot in a plated pad. Plated drills -- pads', vias', and KiCad's oval
 drills in plated pads -- are neither drawn nor counted.
