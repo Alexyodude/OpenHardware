@@ -867,15 +867,24 @@ let boardRunning = null;
 /** One line about a run: how far it has gone, how fast, and where it is now.
  *
  *  **The rate is not a garnish.** A `delay(500)` is emulated to the cycle --
- *  8,000,000 instructions on a 16 MHz Uno and 24,000,000 on a 48 MHz SAMD21,
- *  both measured 2026-08-27 -- but the wall clock runs 5.4x and 29x slower
- *  than the real chip, so those are a 3-second and a 15-second half period. A
- *  blink that slow, with nothing on the page about it, reads as a broken
- *  sketch. Saying the rate is what turns "it is stuck" into "it is slow".
+ *  8,000,000 instructions on a 16 MHz Uno, 24,000,000 on a 48 MHz SAMD21 and
+ *  80,000,000 on a 160 MHz ESP32-C3 -- but the wall clock runs several times
+ *  slower than the real chip: measured 2026-10-13 on the Release core, about
+ *  2.3 s, 7.6 s and 21 s for those half periods (`clock.js` has the rates and
+ *  the caveats). A blink that slow, with nothing on the page about it, reads as
+ *  a broken sketch. Saying the rate is what turns "it is stuck" into "it is
+ *  slow".
  *
- *  Instructions per second and **not** a fraction of real time, because only
- *  the ATmega328P records a nominal clock (`F_CPU_HZ`, and only to compute a
- *  baud divisor). "1/29 of a real SAMD21" would mean inventing the 48 MHz.
+ *  Instructions per second and **not** a fraction of real time, because the
+ *  page is never told a board's clock. The repository records one in some
+ *  board modules (`CPU_HZ` in `webui/boards/esp32c*.py`, `F_CPU_HZ` in
+ *  `atmega328p.py`) but no route carries it: `boardImage` is `/api/board/load`'s
+ *  reply (board, chip, core, format, bytes, entry, notes) and `/api/board/run`
+ *  answers steps, status and detail. Showing "about 1/42 of real time" would
+ *  need `/api/board/load` to carry the board module's clock as `cpu_hz`, null
+ *  where none is recorded, and this line to divide the rate by it. That is an
+ *  edit to `webui/api.py` and `webui/emulator_server.py`, which OH-161 held
+ *  when this was decided, so it is not made here (OH-221).
  *
  *  `$("where")` was set by `renderBoardState`, from the machine's own pc
  *  register and at that register's width. Read back rather than recomputed:

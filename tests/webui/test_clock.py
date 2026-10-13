@@ -33,8 +33,11 @@ import textwrap
 
 import pytest
 
+from webui.boards import atmega328p, esp32c3, esp32c5
+
 CLOCK = (pathlib.Path(__file__).resolve().parents[2]
          / "webui" / "static" / "clock.js")
+EMULATOR = CLOCK.with_name("emulator.js")
 
 #: Handed to every probe. A board that answers instantly and a clock that does
 #: not tick would both hide an ordering bug, so the board always yields and the
@@ -398,3 +401,49 @@ def test_every_path_that_replaces_the_image_stops_the_clock_first():
         if loads and "stopBoardClock" not in body:
             guilty.append(f"{name} posts {loads} without stopping the clock")
     assert not guilty, "; ".join(guilty)
+
+
+
+# --- what the page says about a board's clock (OH-221) -------------------------
+
+
+def comment_words(path: pathlib.Path) -> str:
+    """A source file's words, with the comment markers and the line breaks
+    between them gone, so a phrase wrapped over two lines is still a phrase."""
+    return " ".join(w for w in path.read_text(encoding="utf-8").split()
+                    if w not in ("//", "*"))
+
+
+def delay_500_steps(description) -> int:
+    """Instructions in a `delay(500)` on an ESP32, from the description's own
+    SYSTIMER rate: a millisecond is `SYSTIMER_HZ // 1000` ticks, each
+    `SYSTIMER_INSTRUCTIONS_PER_TICK` retired instructions (`wiring.c`'s
+    `delay()` waits that many ticks)."""
+    per_ms = description.SYSTIMER_INSTRUCTIONS_PER_TICK * (description.SYSTIMER_HZ // 1000)
+    return 500 * per_ms
+
+
+def test_the_pages_worked_delay_costs_are_the_boards_own_and_the_stale_claim_is_gone():
+    """The page prices `delay(500)` in the Uno's and the C3's instructions, and
+    says where a clock is recorded rather than that only the Uno has one.
+
+    The counts are computed from the board modules and looked for in both
+    comments, so a description that changes its clock leaves a comment that
+    fails here rather than one that lies. The measured rates beside them are
+    one machine's and are not held. Written after OH-161 gave the ESP32-C3,
+    -C5 and -C6 a cited `CPU_HZ` and two comments went on saying "only the
+    ATmega328P records a nominal clock"."""
+    uno = atmega328p.F_CPU_HZ // 2
+    c3 = delay_500_steps(esp32c3)
+    c5 = delay_500_steps(esp32c5)
+    assert (uno, c3, c5) == (8_000_000, 80_000_000, 120_000_000), (
+        "the figures below are the page's; re-derive them if a clock moved")
+    for path in (CLOCK, EMULATOR):
+        words = comment_words(path)
+        if "only the ATmega328P" in words:
+            pytest.fail(f"{path.name} still says only the ATmega328P has a clock")
+        for needed in (f"{uno:,}", f"{c3:,}", "`CPU_HZ`", "`F_CPU_HZ`"):
+            if needed not in words:
+                pytest.fail(f"{path.name} does not mention {needed}")
+    if f"{c5:,}" not in comment_words(CLOCK):
+        pytest.fail(f"clock.js does not price the C5's delay(500) at {c5:,}")
