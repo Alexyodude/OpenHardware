@@ -47,25 +47,28 @@
 // A `delay(500)` is emulated to the cycle -- 8,000,000 instructions on a
 // 16 MHz Uno, 24,000,000 on a 48 MHz SAMD21, 80,000,000 on a 160 MHz ESP32-C3
 // (120,000,000 on the C5's 240 MHz) -- but the wall clock is several times
-// slower than the real chip. Measured 2026-10-13 on the Release core, through
-// `BoardSession.run` in 200,000-instruction ticks like this loop's: about
-// 3.8 M instructions/s on the C3, so its delay(500) is about 21 s (42x); about
-// 3.5 M on the Uno, 2.3 s (4.5x); about 3.2 M on the SAMD21, 7.6 s (15x). A
-// 21-second blink with nothing said about it reads as a broken sketch. So a run
-// reports the rate it actually reached, and `emulator.js` puts it beside the
-// button. The rates are one machine's (an 8-thread AMD, Windows) and move with
-// the machine; the counts are not, and `tests/webui/test_clock.py` holds them.
-// The figures this paragraph carried from 2026-08-27 (5.4x and 29x) were taken
-// on the Debug core every Windows build made until OH-220.
+// slower than the real chip. Those counts are derived from the boards' own
+// clocks and `tests/webui/test_clock.py` holds them. The rates below are
+// **not held by any test**: one machine's (an 8-thread AMD, Windows), the
+// Release core, 2026-10-13, measured through `BoardSession.run` in
+// 200,000-instruction ticks like this loop's, and they move with the machine.
+// About 3.8 M instructions/s on the C3, so its delay(500) is about 21 s (42x);
+// about 3.5 M on the Uno, 2.3 s (4.5x); about 3.2 M on the SAMD21, 7.6 s
+// (15x). A 21-second blink with nothing said about it reads as a broken
+// sketch. So a run reports the rate it actually reached, and `emulator.js`
+// puts it beside the button. The figures this paragraph carried from
+// 2026-08-27 (5.4x and 29x) were taken on the Debug core every Windows build
+// made until OH-220.
 //
 // It is deliberately **instructions per second and not a fraction of real
 // time**, because the page is not told a board's clock. Where the repository
-// records one, it is in the board's module: `CPU_HZ` in each
+// records one in a board's module it is `CPU_HZ` in each
 // `webui/boards/esp32c*.py` (cited there, with the rate it sets for the
 // SYSTIMER) and `F_CPU_HZ` in `atmega328p.py` (which only computes a baud
-// divisor). The SAMD21 records none, so "1/15 of a real SAMD21" would mean
-// inventing its 48 MHz. None of those reaches the page: no route carries a
-// clock, which `emulator.js`'s `runLine` says and what to add (OH-221).
+// divisor). The SAMD21's module, `samd21.py`, records none; its 48 MHz is the
+// build's `-DF_CPU` in `webui/compile.py`. None of these reaches the page: no
+// route carries a clock, which `emulator.js`'s `runLine` says and what to add
+// (OH-221).
 
 /** Instructions per request.
  *

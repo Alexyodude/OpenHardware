@@ -25,14 +25,17 @@
 # every assertion here a tolerance, and a tolerance wide enough to survive a
 # loaded machine is wide enough to miss the bug.
 
+import fnmatch
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import textwrap
 
 import pytest
 
+from webui import compile as compiler
 from webui.boards import atmega328p, esp32c3, esp32c5
 
 CLOCK = (pathlib.Path(__file__).resolve().parents[2]
@@ -414,36 +417,83 @@ def comment_words(path: pathlib.Path) -> str:
                     if w not in ("//", "*"))
 
 
-def delay_500_steps(description) -> int:
+def delay_500_esp32(description) -> int:
     """Instructions in a `delay(500)` on an ESP32, from the description's own
     SYSTIMER rate: a millisecond is `SYSTIMER_HZ // 1000` ticks, each
     `SYSTIMER_INSTRUCTIONS_PER_TICK` retired instructions (`wiring.c`'s
     `delay()` waits that many ticks)."""
-    per_ms = description.SYSTIMER_INSTRUCTIONS_PER_TICK * (description.SYSTIMER_HZ // 1000)
-    return 500 * per_ms
+    return 500 * description.SYSTIMER_INSTRUCTIONS_PER_TICK * (description.SYSTIMER_HZ // 1000)
 
 
-def test_the_pages_worked_delay_costs_are_the_boards_own_and_the_stale_claim_is_gone():
-    """The page prices `delay(500)` in the Uno's and the C3's instructions, and
-    says where a clock is recorded rather than that only the Uno has one.
+def delay_500_uno() -> int:
+    """Instructions in the Uno's `delay(500)`. The Arduino core's `micros()`
+    counts Timer0 overflows of a prescaler of 64 at `F_CPU_HZ`, so a tick is
+    `64 * 1e6 / F_CPU_HZ` microseconds (4), and the model retires
+    `INSTRUCTIONS_PER_TICK` instructions a tick (`atmega328p.py` and
+    `tests/avr/test_arduino_sketch.py`: sixteen a microsecond)."""
+    microseconds_per_tick = 64 * 1_000_000 // atmega328p.F_CPU_HZ
+    return 500_000 * atmega328p.INSTRUCTIONS_PER_TICK // microseconds_per_tick
 
-    The counts are computed from the board modules and looked for in both
-    comments, so a description that changes its clock leaves a comment that
-    fails here rather than one that lies. The measured rates beside them are
+
+def samd21_build_hz() -> int:
+    """The SAMD21's clock, which its board module does not record: the
+    `-DF_CPU` its build passes (`webui/compile.py`). The Cortex-M0+ core has no
+    cycle model, so a SysTick tick is a retired instruction and a millisecond
+    is `F_CPU // 1000` of them (`tests/cortexm0/test_samd21_arduino.py`)."""
+    flags = compiler.recipe_for("XIAO-SAMD21-DIP").flags
+    found = [int(m.group(1)) for flag in flags if (m := re.fullmatch(r"-DF_CPU=(\d+)L", flag))]
+    assert len(found) == 1, f"expected one -DF_CPU in the SAMD21 flags, got {found}"
+    return found[0]
+
+
+def clock_modules() -> list[str]:
+    """The board modules that define a top-level `CPU_HZ` or `F_CPU_HZ`, read
+    from `webui/boards/` rather than listed."""
+    boards = pathlib.Path(__file__).resolve().parents[2] / "webui" / "boards"
+    return sorted(p.name for p in boards.glob("*.py")
+                  if re.search(r"^(?:F_)?CPU_HZ\s*=", p.read_text(encoding="utf-8"), re.MULTILINE))
+
+
+def test_the_pages_worked_delay_costs_and_clock_pointers_are_the_boards_own():
+    """The page prices `delay(500)` from each board's own clock, and its two
+    comments point at every board module that records one.
+
+    Every needle is built from the board modules or the build flag, so a
+    clock that moves leaves a comment that fails here rather than one that
+    lies: the instruction counts, the MHz beside each board, and a pointer
+    (a file name or a glob such as `esp32c*.py`) that matches each module
+    that defines `CPU_HZ` or `F_CPU_HZ`. The measured rates in `clock.js` are
     one machine's and are not held. Written after OH-161 gave the ESP32-C3,
     -C5 and -C6 a cited `CPU_HZ` and two comments went on saying "only the
     ATmega328P records a nominal clock"."""
-    uno = atmega328p.F_CPU_HZ // 2
-    c3 = delay_500_steps(esp32c3)
-    c5 = delay_500_steps(esp32c5)
-    assert (uno, c3, c5) == (8_000_000, 80_000_000, 120_000_000), (
-        "the figures below are the page's; re-derive them if a clock moved")
+    samd_hz = samd21_build_hz()
+    carriers = clock_modules()
+    assert "samd21.py" not in carriers, (
+        "the comments say the SAMD21's module records no clock; it now does: "
+        f"{carriers}")
+    assert {"atmega328p.py", "esp32c3.py", "esp32c5.py", "esp32c6.py"} <= set(carriers)
+
+    def mhz(hz: int) -> str:
+        return f"{hz // 1_000_000} MHz"
+
+    needles = {
+        "both": [
+            f"{delay_500_uno():,}", mhz(atmega328p.F_CPU_HZ),
+            f"{500 * samd_hz // 1000:,}", mhz(samd_hz),
+            f"{delay_500_esp32(esp32c3):,}", mhz(esp32c3.CPU_HZ),
+            "`CPU_HZ`", "`F_CPU_HZ`", "-DF_CPU", "compile.py",
+        ],
+        "clock.js": [f"{delay_500_esp32(esp32c5):,}", mhz(esp32c5.CPU_HZ)],
+    }
     for path in (CLOCK, EMULATOR):
         words = comment_words(path)
-        if "only the ATmega328P" in words:
-            pytest.fail(f"{path.name} still says only the ATmega328P has a clock")
-        for needed in (f"{uno:,}", f"{c3:,}", "`CPU_HZ`", "`F_CPU_HZ`"):
-            if needed not in words:
+        for needed in needles["both"] + (needles["clock.js"] if path is CLOCK else []):
+            # Not preceded by a digit or comma, so 4,000,000 is not found in
+            # 24,000,000 nor 8 MHz in 48 MHz.
+            if not re.search(r"(?<![\w,])" + re.escape(needed), words):
                 pytest.fail(f"{path.name} does not mention {needed}")
-    if f"{c5:,}" not in comment_words(CLOCK):
-        pytest.fail(f"clock.js does not price the C5's delay(500) at {c5:,}")
+        pointers = re.findall(r"[\w*]+\.py", words)
+        for module in carriers:
+            if not any(fnmatch.fnmatch(module, pointer) for pointer in pointers):
+                pytest.fail(f"{path.name} points at no pointer matching {module}: "
+                            f"{sorted(set(pointers))}")
