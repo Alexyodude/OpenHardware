@@ -139,6 +139,22 @@ enum class StepResult : int {
 /// anything Arm or RISC-V.
 enum class WriteOp : uint8_t { Store, Set, Clear, Xor };
 
+/// Why the most recent access was refused, for a caller worded around more
+/// than "unmapped": a FIFO read with nothing held names an address the board
+/// maps perfectly well, and calling it unmapped sends the reader to the wrong
+/// file (OH-161 step 5). `Unmapped` is every fault that predates this: the
+/// default, set by any `note_fault` that names no other.
+enum class FaultReason : uint8_t {
+    Unmapped = 0,
+    /// A read of a `map_fifo` with nothing held.
+    EmptyFifo = 1,
+    /// An access to a `map_fifo` whose enable register is not mapped.
+    FifoGateUnmapped = 2,
+    /// A byte or halfword read of a `map_fifo` above byte 0, which would
+    /// pop a byte and answer zero.
+    FifoSubword = 3,
+};
+
 class Cpu {
 public:
     Cpu();
@@ -477,6 +493,18 @@ public:
     /// where `address` is no FIFO.
     bool hold_readable(uint32_t address, const uint8_t* bytes, uint32_t count);
 
+    /// Whether `address` is a `map_doorbell` / a `map_fifo`: the answer a
+    /// caller needs to refuse an alias onto one, or a service for a bell that
+    /// is not, by name.
+    bool is_doorbell(uint32_t address) const;
+    bool is_fifo(uint32_t address) const;
+
+    /// `read_word` that changes nothing: a FIFO answers the byte its next
+    /// read will pop, and the same failure `read_word` gives where it holds
+    /// none. **The only read a viewer may make of a FIFO**, because
+    /// `read_word` takes the firmware's byte.
+    bool peek_word(uint32_t address, uint32_t& out) const;
+
     /// Called by `step` once an instruction has actually retired -- never on
     /// an Unimplemented, Illegal or MemoryFault, so a program stopped by one
     /// does not age while it is stopped. Advances every snapshot counter
@@ -549,6 +577,7 @@ public:
     /// says *which peripheral is missing*, and on a C3 the difference between
     /// 0x3FF00000 and 0x60000000 is the difference between two subsystems.
     uint32_t fault_address() const { return fault_address_; }
+    FaultReason fault_reason() const { return fault_reason_; }
     bool fault_was_fetch() const { return fault_was_fetch_; }
 
     /// Record that a *fetch* failed at `address`.
@@ -568,9 +597,11 @@ public:
     void note_data_fault(uint32_t address) { note_fault(address, false); }
 
 private:
-    void note_fault(uint32_t address, bool fetch) const {
+    void note_fault(uint32_t address, bool fetch,
+                    FaultReason reason = FaultReason::Unmapped) const {
         fault_address_ = address;
         fault_was_fetch_ = fetch;
+        fault_reason_ = reason;
     }
 
     /// One region and its contents. A vector rather than a map because there
@@ -610,7 +641,9 @@ private:
     /// `lbu` against one, and a byte read that skipped this would fall through
     /// to the region lookup, find nothing, and fault at an address the board
     /// describes perfectly well.
-    bool mmio_read(uint32_t address, uint32_t& out) const;
+    ///
+    /// `pop` false is `peek_word`'s: a FIFO then answers its head and keeps it.
+    bool mmio_read(uint32_t address, uint32_t& out, bool pop = true) const;
 
     /// A mapped write, or false if `address` is not mapped.
     ///
@@ -745,6 +778,11 @@ private:
     void forget_doorbell(uint32_t at);
     void forget_fifo(uint32_t at);
 
+    /// Forget the snapshot counter one of whose registers is `at`, for the
+    /// reason `forget_input` forgets an input; only the behaviours that ask
+    /// `mmio_write` before the snapshot scan need it.
+    void forget_snapshot(uint32_t at);
+
     std::array<uint32_t, kRegisters> x_{};
     uint32_t pc_ = 0;
     uint32_t jvt_ = 0;
@@ -761,6 +799,7 @@ private:
     uint32_t rung_ = 0;
     mutable uint32_t fault_address_ = 0;
     mutable bool fault_was_fetch_ = false;
+    mutable FaultReason fault_reason_ = FaultReason::Unmapped;
 };
 
 }  // namespace riscv32

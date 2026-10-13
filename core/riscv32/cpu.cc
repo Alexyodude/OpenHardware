@@ -52,6 +52,7 @@ void Cpu::reset() {
     rung_ = 0;
     fault_address_ = 0;
     fault_was_fetch_ = false;
+    fault_reason_ = FaultReason::Unmapped;
 }
 
 const Cpu::Region* Cpu::region_for(uint32_t address, uint32_t bytes) const {
@@ -90,6 +91,13 @@ bool Cpu::read_byte_checked(uint32_t address, uint8_t& out) const {
     // describes perfectly well. `core/cortexm0` shipped without this and had
     // to have it added.
     if (is_mapped(address)) {
+        // A FIFO's data is byte 0. A read above it would pop a byte and
+        // answer zero, so it faults before popping, as the write side
+        // refuses the mirror case.
+        if ((address & 3u) != 0 && fifos_.count(address & ~3u) != 0) {
+            note_fault(address, false, FaultReason::FifoSubword);
+            return false;
+        }
         uint32_t word = 0;
         if (!mmio_read(address, word)) {
             return false;
@@ -123,6 +131,10 @@ bool Cpu::write_byte_checked(uint32_t address, uint8_t value) {
 
 bool Cpu::read_halfword(uint32_t address, uint16_t& out) const {
     if (is_mapped(address)) {
+        if ((address & 2u) != 0 && fifos_.count(address & ~3u) != 0) {
+            note_fault(address, false, FaultReason::FifoSubword);
+            return false;
+        }
         uint32_t word = 0;
         if (!mmio_read(address, word)) {
             return false;
@@ -301,6 +313,16 @@ void Cpu::forget_doorbell(uint32_t at) {
 }
 
 void Cpu::forget_fifo(uint32_t at) { fifos_.erase(at); }
+
+void Cpu::forget_snapshot(uint32_t at) {
+    snapshots_.erase(
+        std::remove_if(snapshots_.begin(), snapshots_.end(),
+                       [&](const Snapshot& counter) {
+                           return counter.op == at || counter.low == at ||
+                                  counter.high == at;
+                       }),
+        snapshots_.end());
+}
 
 void Cpu::map_register(uint32_t address, uint32_t value) {
     const uint32_t at = address & ~3u;
@@ -495,6 +517,10 @@ void Cpu::map_doorbell(uint32_t address, uint32_t value, uint32_t ring_mask,
     forget_sampler(at);
     forget_doorbell(at);
     forget_fifo(at);
+    // A stream or a snapshot counter at the address would answer a write
+    // before the doorbell is asked, and it would never ring.
+    streams_.erase(at);
+    forget_snapshot(at);
     // A plain register in `mmio_`, so a read answers the stored word;
     // `mmio_write` asks `doorbells_` before storing. The reset value is held
     // to the same rule as a write: a trigger bit does not store.
@@ -523,8 +549,10 @@ void Cpu::map_fifo(uint32_t address, uint32_t enable_address,
     forget_sampler(at);
     forget_doorbell(at);
     // A FIFO answers writes as a stream does, so it must not leave one
-    // behind to capture them first.
+    // behind to capture them first, and a snapshot counter is asked before
+    // the word behaviours too.
     streams_.erase(at);
+    forget_snapshot(at);
     // Registered in `mmio_` too, so `is_mapped` sees it. Its reads and
     // writes reach `mmio_read` and `mmio_write`, which ask `fifos_` first.
     Mapped entry;
@@ -550,6 +578,26 @@ std::vector<uint8_t> Cpu::take_written(uint32_t address) {
         taken.swap(found->second.written);
     }
     return taken;
+}
+
+bool Cpu::is_doorbell(uint32_t address) const {
+    for (const Doorbell& bell : doorbells_) {
+        if (bell.address == (address & ~3u)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Cpu::is_fifo(uint32_t address) const {
+    return fifos_.count(address & ~3u) != 0;
+}
+
+bool Cpu::peek_word(uint32_t address, uint32_t& out) const {
+    if (is_mapped(address)) {
+        return mmio_read(address, out, false);
+    }
+    return read_word(address, out);
 }
 
 bool Cpu::hold_readable(uint32_t address, const uint8_t* bytes, uint32_t count) {
@@ -692,7 +740,7 @@ bool Cpu::is_mapped(uint32_t address) const {
     return mmio_.find(address & ~3u) != mmio_.end();
 }
 
-bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
+bool Cpu::mmio_read(uint32_t address, uint32_t& out, bool pop) const {
     const auto found = mmio_.find(address & ~3u);
     if (found == mmio_.end()) {
         return false;
@@ -704,11 +752,13 @@ bool Cpu::mmio_read(uint32_t address, uint32_t& out) const {
     if (fifo != fifos_.end()) {
         std::deque<uint8_t>& held = fifo->second.held;
         if (held.empty()) {
-            note_fault(address, false);
+            note_fault(address, false, FaultReason::EmptyFifo);
             return false;
         }
         out = held.front();
-        held.pop_front();
+        if (pop) {
+            held.pop_front();
+        }
         return true;
     }
     // A snapshot counter's three registers answer its state rather than a
@@ -775,7 +825,7 @@ bool Cpu::mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask) {
         if (!mmio_read(fifo->second.enable, gate_bits)) {
             // An unmapped gate, named at the FIFO the instruction used, as a
             // stream's is: `mmio_read` does not note a miss of its own.
-            note_fault(address, false);
+            note_fault(address, false, FaultReason::FifoGateUnmapped);
             return false;
         }
         // The low byte only, and only when the access carries byte 0; see

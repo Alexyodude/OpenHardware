@@ -1448,9 +1448,13 @@ class BoardSession:
         the firmware: an encoding it lacks, an access off the board's map.
         The 8086 debugger has said "faulted" for the first since OH-223, and
         a page that said "stopped" for both would send a reader to the
-        firmware for a bug in the simulator (OH-225).
+        firmware for a bug in the simulator (OH-225). A riscv32 doorbell's
+        `ServiceFault` -- the host-side model for a device raised something
+        that was not its refusal -- is a bug in this host and says
+        `host_side`, so it is "faulted" too.
         """
-        broke = isinstance(error, self.runtime.abi.HostFault)
+        broke = (isinstance(error, self.runtime.abi.HostFault)
+                 or getattr(error, "host_side", False))
         self.status = "faulted" if broke else "stopped"
         self.detail = str(error)
 
@@ -1682,9 +1686,15 @@ class BoardSession:
                     "window-outside-the-map",
                     f"{self.board} has nothing at 0x{watch:08x} to watch",
                 )
-            watched.append(
-                {"address": watch, "value": machine.word(self.cpu, watch)}
-            )
+            try:
+                value = machine.word(self.cpu, watch)
+            except self.runtime.abi.MemoryFault as fault:
+                raise BoardRunError(
+                    "window-outside-the-map",
+                    f"{self.board} cannot show 0x{watch:08x} without "
+                    f"changing it: {fault}",
+                ) from fault
+            watched.append({"address": watch, "value": value})
 
         view = machine.view(self.cpu)
         return {

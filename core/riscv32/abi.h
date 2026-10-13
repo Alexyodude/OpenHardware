@@ -42,7 +42,8 @@ extern "C" {
 //: Bumped to 7 at OH-161's step 5, which added `riscv32_map_doorbell`,
 //: `riscv32_rang_at`, `riscv32_map_fifo`, `riscv32_written_count`,
 //: `riscv32_take_written` and `riscv32_hold_readable`, and the step result
-//: `RISCV32_RANG`.
+//: `RISCV32_RANG`; and, before it shipped, `riscv32_fault_reason`,
+//: `riscv32_peek_word`, `riscv32_is_doorbell` and `riscv32_is_fifo`.
 #define RISCV32_ABI_VERSION 7
 
 /// x0 through x31, then PC.
@@ -258,6 +259,22 @@ RISCV32_API int riscv32_step(Riscv32Cpu* cpu);
 /// than the one that faulted. Every step records it, at the cost of one
 /// store, so a caller need not read PC before each step to have it.
 RISCV32_API uint32_t riscv32_step_entry(const Riscv32Cpu* cpu);
+
+/// Why the most recent access was refused, as `riscv32::FaultReason`: 0
+/// nothing mapped there (or any fault that names no other reason), 1 a FIFO
+/// read with nothing held, 2 a FIFO whose enable register is not mapped, 3 a
+/// byte or halfword read of a FIFO above byte 0. Meaningful straight after a
+/// step returned 2 or a read or write returned 0. ABI 7.
+RISCV32_API int riscv32_fault_reason(const Riscv32Cpu* cpu);
+
+/// `riscv32_read_word` that changes nothing: a FIFO answers the byte its next
+/// read will pop. The only read a viewer may make of one. ABI 7.
+RISCV32_API int riscv32_peek_word(const Riscv32Cpu* cpu, uint32_t address,
+                                  uint32_t* out);
+
+/// Whether `address` is a doorbell / a FIFO. ABI 7.
+RISCV32_API int riscv32_is_doorbell(const Riscv32Cpu* cpu, uint32_t address);
+RISCV32_API int riscv32_is_fifo(const Riscv32Cpu* cpu, uint32_t address);
 
 /// The address of the most recent failed access, and whether it was a fetch.
 /// Only meaningful straight after a step returned 2.

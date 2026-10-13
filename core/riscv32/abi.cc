@@ -58,7 +58,10 @@ Riscv32Cpu* riscv32_new(void) {
 
 void riscv32_free(Riscv32Cpu* cpu) { delete as_handle(cpu); }
 
-void riscv32_reset(Riscv32Cpu* cpu) { as_cpu(cpu)->reset(); }
+void riscv32_reset(Riscv32Cpu* cpu) {
+    as_cpu(cpu)->reset();
+    as_handle(cpu)->rang_at = 0;
+}
 
 void riscv32_get_regs(const Riscv32Cpu* cpu, Riscv32Registers* out) {
     const riscv32::Cpu* core = as_cpu(cpu);
@@ -280,6 +283,22 @@ uint32_t riscv32_step_entry(const Riscv32Cpu* cpu) {
 
 uint32_t riscv32_fault_address(const Riscv32Cpu* cpu) {
     return as_cpu(cpu)->fault_address();
+}
+
+int riscv32_fault_reason(const Riscv32Cpu* cpu) {
+    return static_cast<int>(as_cpu(cpu)->fault_reason());
+}
+
+int riscv32_peek_word(const Riscv32Cpu* cpu, uint32_t address, uint32_t* out) {
+    return as_cpu(cpu)->peek_word(address, *out) ? 1 : 0;
+}
+
+int riscv32_is_doorbell(const Riscv32Cpu* cpu, uint32_t address) {
+    return as_cpu(cpu)->is_doorbell(address) ? 1 : 0;
+}
+
+int riscv32_is_fifo(const Riscv32Cpu* cpu, uint32_t address) {
+    return as_cpu(cpu)->is_fifo(address) ? 1 : 0;
 }
 
 int riscv32_fault_was_fetch(const Riscv32Cpu* cpu) {

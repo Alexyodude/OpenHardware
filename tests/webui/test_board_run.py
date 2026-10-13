@@ -1802,9 +1802,10 @@ def test_a_run_through_a_serviced_ring_counts_the_ringing_store_once():
 
 def test_a_run_stopped_by_a_refused_ring_counts_the_store_that_rang():
     needs_riscv32()
+    from core.riscv32 import abi as riscv32_abi
 
     def refuse(cpu, address):
-        raise ValueError("the device refuses this")
+        raise riscv32_abi.DeviceRefusal("the device refuses this")
 
     with ring_session(refuse) as session:
         result = session.run(8)
@@ -1819,10 +1820,73 @@ def test_a_step_stopped_by_a_refused_ring_counts_the_store_that_rang():
     from core.riscv32 import abi as riscv32_abi
 
     def refuse(cpu, address):
-        raise ValueError("the device refuses this")
+        raise riscv32_abi.DeviceRefusal("the device refuses this")
 
     with ring_session(refuse) as session:
         with pytest.raises(riscv32_abi.Refused):
             session.step(8)
         assert session.status == "stopped"
         assert session.retired == 3
+
+
+def test_a_service_that_breaks_faults_the_session_and_counts_the_store():
+    """A host-side bug in a service is the session's "faulted", as a core's
+    HostFault is, and the ringing instruction retired and is counted: the
+    KeyError once escaped `run`, leaving the status "running" with the PC
+    moved."""
+    needs_riscv32()
+    from core.riscv32 import abi as riscv32_abi
+
+    def key_error(cpu, address):
+        {}["missing"]
+
+    def core_error(cpu, address):
+        cpu.hold_readable(address, b"\x01")  # the doorbell is no FIFO
+
+    for service in (key_error, core_error):
+        with ring_session(service) as session:
+            result = session.run(8)
+            assert (result.steps, result.status) == (3, "faulted"), result
+            assert session.status == "faulted" and session.retired == 3
+            assert "pc=0x80000008" in result.detail, result.detail
+            assert session.run(8).steps == 0, "a faulted session runs no further"
+
+        with ring_session(service) as session:
+            with pytest.raises(riscv32_abi.ServiceFault):
+                session.step(8)
+            assert session.status == "faulted" and session.retired == 3
+
+
+def test_watching_a_fifo_never_changes_what_the_firmware_reads():
+    """`state(words=[DATA])` was a `read_word`, which pops: the page's poll
+    ate the byte the firmware was to read, unrecorded in `inputs`, so a
+    replay diverged. It peeks now."""
+    needs_riscv32()
+    import types
+
+    from core.riscv32 import abi as riscv32_abi
+    from core.riscv32 import machine
+
+    data, gate = 0x60013000 + 0x1C, 0x60013000 + 0x54
+    cpu = riscv32_abi.Cpu()
+    cpu.add_region(RING_RAM, 0x1000)
+    cpu.map_register(gate, 1 << 21)
+    cpu.map_fifo(data, enable=gate, enable_mask=1 << 21)
+    cpu.set_regs([0] * 32, pc=RING_RAM)
+    runtime = types.SimpleNamespace(
+        abi=riscv32_abi, machine=machine, board="fifo-test", chip="rv32",
+        description=types.ModuleType("bare_description"), core="riscv32")
+    placement = types.SimpleNamespace(window=RING_RAM)
+    with api.BoardSession(runtime, cpu, None, placement) as session:
+        # Held first: a poll of an empty FIFO is refused by name.
+        with pytest.raises(api.BoardRunError) as caught:
+            session.state(words=[data])
+        assert caught.value.reason == "window-outside-the-map"
+        assert "nothing held to read" in str(caught.value), str(caught.value)
+
+        cpu.hold_readable(data, b"\x31\x32")
+        for _ in range(3):
+            watched = session.state(words=[data])["words"]
+            assert watched == [{"address": data, "value": 0x31}]
+        assert [cpu.read_word(data) for _ in range(2)] == [0x31, 0x32], (
+            "the firmware still reads every byte, in order")
