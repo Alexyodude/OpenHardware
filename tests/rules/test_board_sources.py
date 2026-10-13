@@ -20,6 +20,7 @@ from tools.board_sources import (
     Evidence,
     Fetch,
     Licence,
+    NONE_STATED,
     Published,
     Source,
     SourceError,
@@ -201,7 +202,9 @@ def test_every_row_cites_the_survey_or_the_ticket_that_opened_it():
         named = candidate.licence.file
         if not _from_the_survey(candidate):
             assert re.match(r"OH-\d+: ", candidate.cite), f"{candidate.name} cites no ticket"
-            assert named, f"{candidate.name} reads its licence from no file it fetches"
+            assert named or candidate.licence.name == NONE_STATED, (
+                f"{candidate.name} reads its licence from no file it fetches and "
+                f"does not say that none is stated")
         if not named:
             continue
         readme = pathlib.PurePosixPath(named).name.upper().startswith("README")
@@ -695,3 +698,29 @@ def test_the_list_says_what_a_source_does_not_publish():
     assert "publishes no schematic_source" in result.stdout, (
         "the absence is the finding; it has to be visible without opening the table"
     )
+
+
+def test_the_xiao_stm32c5_row_states_no_licence_and_pins_its_archive():
+    """OH-231. The archive holds no LICENSE file and its wiki names none, so
+    the row says "none stated" -- not "CC BY-SA 4.0", not "OSHW" -- and records
+    the logo it saw as seen. The same row pins the archive by size and sha256,
+    checked against the zip where it has been downloaded by hand."""
+    import hashlib
+
+    row = source("seeed-xiao-stm32c5")
+    assert row.licence.name == NONE_STATED == "none stated"
+    assert (row.licence.file, row.licence.quote, row.licence.notice) == ("", "", "")
+    assert row.licence.evidence is Evidence.OPENED
+    assert "recorded as seen, not taken as a grant" in row.licence.cite
+    assert "OH-234" in row.licence.cite
+    assert row.fetch.transport is Transport.HTTPS_ARCHIVE
+    assert "1,559,346 bytes" in row.size
+    assert "676070c1e35935869c39a52a624dec7cb937850e6d6e12401b061786aab35b1b" in row.size
+
+    archive = row.dest(REPO) / "XIAO_STM32C5_v1.0_SCH&PCB.zip"
+    if not archive.is_file():
+        pytest.skip(f"SKIPPED: {archive} absent; download {row.fetch.url} by hand")
+    data = archive.read_bytes()
+    assert len(data) == 1_559_346
+    assert hashlib.sha256(data).hexdigest() == (
+        "676070c1e35935869c39a52a624dec7cb937850e6d6e12401b061786aab35b1b")

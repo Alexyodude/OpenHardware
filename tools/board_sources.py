@@ -285,6 +285,10 @@ _NO_LBR = "no .lbr in the tree listing; the .brd carries the libraries it uses"
 _NO_MESH = "no .step, .stp, .wrl or .stl in the tree listing"
 _NO_PIN_HEADER = "no pin definitions in the tree listing; factory-reset/ holds a firmware image"
 
+#: The licence name of a row whose archive states none. Not "OSHW", not an SPDX
+#: id: a name the vendor did not write is not recorded as theirs.
+NONE_STATED = "none stated"
+
 #: The registry. **The only hand-written thing in this module**, and the only
 #: place a vendor's name appears anywhere in the fetch path — see
 #: `test_the_fetcher_names_no_vendor`, which reads the fetcher's source and
@@ -365,6 +369,76 @@ SOURCES: tuple[Source, ...] = (
         ),
         cite="OH-23 survey, docs/research/board-sources/sources.json: "
         "Seeed Studio / Seeed-Studio-OSHW-XIAO-Series",
+    ),
+    Source(
+        name="seeed-xiao-stm32c5",
+        vendor="Seeed Studio",
+        model="per-board KiCad project, a zip linked from the board's wiki page",
+        size="1,559,346 bytes, sha256 "
+        "676070c1e35935869c39a52a624dec7cb937850e6d6e12401b061786aab35b1b",
+        licence=Licence(
+            name=NONE_STATED,
+            covers="not stated: the zip holds no LICENSE file and the wiki names "
+            "none beyond the site-wide /License/ link",
+            sampled=False,
+            evidence=Evidence.OPENED,
+            cite="a LOGO_CC_BY-SA_4.0 symbol reading 'CC BY-SA 4.0' on each of "
+            "the zip's six .kicad_sch files: recorded as seen, not taken as a "
+            "grant; whether it is one is for the owner, OH-234",
+        ),
+        fetch=Fetch(
+            transport=Transport.HTTPS_ARCHIVE,
+            # Fetched by hand: the fetcher refuses an https archive and prints
+            # this URL. Put the zip in third_party/seeed-xiao-stm32c5/ and
+            # extract `XIAO STM32C5.kicad_pcb` beside it.
+            url="https://files.seeedstudio.com/wiki/XIAO_STM32C5/res/"
+            "XIAO_STM32C5_v1.0_SCH%26PCB.zip",
+            wanted=(),
+            skipped=(),
+        ),
+        artefacts=Artefacts(
+            schematic_source=Artefact(
+                Published.YES,
+                Evidence.OPENED,
+                "six .kicad_sch files: 01 Descriptions, 02 Block Diagram, 03 "
+                "Power, 04 XIAO Header&STM32C5, 05 Peripherals, and the root "
+                "XIAO STM32C5.kicad_sch",
+            ),
+            schematic_pdf=Artefact(
+                Published.YES,
+                Evidence.STATED,
+                "linked separately as Seeed-Studio-XIAO-STM32C5-v1.0.pdf, "
+                "1,397,144 bytes, no text layer; not in this zip",
+            ),
+            pcb_layout=Artefact(
+                Published.YES,
+                Evidence.OPENED,
+                "XIAO STM32C5.kicad_pcb, KiCad version 20260206, 1,883,494 "
+                "bytes; U10 is the castellated XIAO-Add-On-PRO footprint and U4 "
+                "the STM32C5A3CG",
+            ),
+            footprints_symbols=Artefact(
+                Published.NO,
+                Evidence.ABSENT,
+                "the zip holds no .kicad_mod, .kicad_sym or library; footprints "
+                "exist only embedded in the board and schematic files",
+            ),
+            model_3d=Artefact(
+                Published.NO,
+                Evidence.ABSENT,
+                "no .step, .stp, .wrl or .stl in the zip's listing",
+            ),
+            board_support=Artefact(
+                Published.YES,
+                Evidence.STATED,
+                "Seeed-Studio/platform-seeedboards zephyr/stm32/boards/seeed/"
+                "xiao_stm32c5/ at 57250b6f9157a5600eb2b232cc90618b3ed1b3be, as "
+                "OH-231's re-check of 2026-10-13 records it; not fetched here",
+            ),
+        ),
+        cite="OH-231: the wiki's getting-started page, "
+        "https://wiki.seeedstudio.com/xiao_stm32c5_getting_started/, read "
+        "2026-10-13; the zip fetched and opened the same day",
     ),
     Source(
         name="adafruit-huzzah32",

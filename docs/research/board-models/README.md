@@ -222,7 +222,10 @@ to be composed from (OH-231 step 3, which waits on OH-226). What this
 paragraph does not settle is the archive's licence: its schematic sheets carry
 a `LOGO_CC_BY-SA_4.0` symbol, as the sheets of the C3, C5, C6, MG24 and
 nRF54LM20A archives do, and it holds no licence file. That is recorded in
-`sources.json` as seen, not as a grant.
+`sources.json` as seen, not as a grant, and the registry row for the archive
+(`seeed-xiao-stm32c5` in `tools/board_sources.py`) names its licence "none
+stated" until the owner decides (OH-234). The board's pins are read from that
+file's nets by `tools/import_pindefs.py` (OH-231 steps 1-2).
 
 **Every XIAO shares a 21 × 17.5 mm outline and a 14-pad castellated edge, and
 that is exactly why a sibling's mesh must not be substituted.** It would be

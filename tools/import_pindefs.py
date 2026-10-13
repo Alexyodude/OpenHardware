@@ -446,8 +446,9 @@ def read_chip_pins(
 _NET_NAME = re.compile(r'\(net (?:\d+ )?"([^"]*)"\)')
 
 #: What a pad function looks like when it names a pin of the part: Espressif
-#: and Raspberry Pi number flatly, Silicon Labs by port and pin, Nordic by
-#: port and bit.
+#: and Raspberry Pi number flatly, Silicon Labs and STMicroelectronics by port
+#: and pin (ST's run to port H, since Seeed's STM32C5 puts `D8` on `PE2`),
+#: Nordic by port and bit.
 #:
 #: **Anchored at the start and not at both ends**, because Nordic's newer
 #: footprints append the ball: the nRF54LM20A writes `P1.01/NFC1_J6` and
@@ -471,7 +472,7 @@ _NET_NAME = re.compile(r'\(net (?:\d+ )?"([^"]*)"\)')
 #: that the pad is no GPIO: an ESP32's `MTMS` pad is GPIO4. So the board file
 #: says what is known -- the footprint's name, with no GPIO number -- and the
 #: tracer refuses a caption on a net whose own name carries a pin.
-_CHIP_PIN_NAME = re.compile(r"^(GPIO\d+|P[A-D]\d{1,2}|P\d\.\d{1,2})(?:[/_]|$)")
+_CHIP_PIN_NAME = re.compile(r"^(GPIO\d+|P[A-H]\d{1,2}|P\d\.\d{1,2})(?:[/_]|$)")
 
 _PIN_TOKEN = re.compile(r"^(?:GPIO(\d+)|P(\d)\.(\d+))$")
 
@@ -552,7 +553,7 @@ def _footprints(text: str) -> list[tuple[str, dict[str, list[str]]]]:
 
 def read_seeed_traced(
     texts: tuple[str, ...], *, part: str, labels: tuple[str, ...],
-    nets: dict[str, str] | None = None,
+    nets: dict[str, str] | None = None, lead: bool = False,
 ) -> dict[str, ChipPin | Traced]:
     """Follow a pad's net to the board's own MCU and read that pad's function.
 
@@ -598,6 +599,13 @@ def read_seeed_traced(
     which reads both files; what the pad reaches is still read here, never
     typed. A net named here that reaches no pad of the part raises, as an
     absent named net does, and so does a label given both ways.
+
+    **`lead` is for a board whose nets are named for the label FIRST** (OH-231):
+    Seeed's XIAO STM32C5 names its header nets `D0{slash}A0{slash}PA0` and
+    `SWDIO{slash}PA13`, the label then the functions then the pin, where every
+    other board here ends the name with the label. With `lead` the label is
+    matched against the first part of the net's name and not the last. The pin
+    is still read from the MCU's pad on that net, never from the name.
 
     **A pin found by a net from `nets` comes back `Traced`**, carrying that
     net, so the report `board_report` prints cites the net beside the file
@@ -648,7 +656,8 @@ def read_seeed_traced(
             answers: dict[str, ChipPin] = {}
             for by_net in mine:
                 for net, functions in by_net.items():
-                    plain = net.replace("{slash}", "/").rsplit("/", 1)[-1].upper()
+                    plain = net.replace("{slash}", "/").split("/")[
+                        0 if lead else -1].upper()
                     if (net != nets[label]) if label in nets else (plain != wanted):
                         continue
                     reached = True
@@ -808,13 +817,12 @@ def read_symbol_pin_names(
     THIS symbol rather than the whole library, for the reasons below.
 
     **The sweep recognises a pin by `_CHIP_PIN_NAME`, and that is the exact
-    strength of the alarm.** Its branches are `GPIO\\d+`, `P[A-D]\\d{1,2}` and
+    strength of the alarm.** Its branches are `GPIO\\d+`, `P[A-H]\\d{1,2}` and
     `P\\d\\.\\d{1,2}`. Republish this library naming a pin in one of those and
-    the generator stops; name one in any other spelling and it goes past,
-    `PE2` being the nearest miss to what is already read here. So the
-    sentence the board file generates speaks for the symbol read for that
-    board and names the spellings this tool recognises, which is what is
-    enforced, rather than claiming a universal nothing checked.
+    the generator stops; name one in any other spelling and it goes past.
+    (It stopped at port D until OH-231, when Seeed's own STM32C5 board file
+    put `D8` on `PE2`; this sweep is no longer what that board file rests
+    on, but it is kept, and tested, as the reader it was.)
 
     **Retracted from this paragraph, twice over.** It claimed "this same
     STM32 part has ports E through H", then a correction claimed "`P100`
@@ -957,6 +965,24 @@ def seeed_pcb_traced(board_file: str, part: str, labels: tuple[str, ...],
         (board_file,),
         functools.partial(read_seeed_traced, part=part, labels=labels, nets=nets),
         root=REPO / "third_party" / "seeed-pcb",
+    )
+
+
+def seeed_xiao_stm32c5(labels: tuple[str, ...]) -> Source:
+    """The XIAO STM32C5's own KiCad board file, followed from each header
+    label's net to the STM32C5A3CG's pad (OH-231).
+
+    Its own package, `seeed-xiao-stm32c5`, because its archive is a row of
+    `tools/board_sources.py` that states no licence, which the shared
+    `seeed-pcb` package's "OSHW" would misreport for it. Downloaded by hand
+    like the others: the row's `fetch.url` is the zip.
+    """
+    return Source(
+        "seeed-xiao-stm32c5",
+        ("XIAO STM32C5.kicad_pcb",),
+        functools.partial(read_seeed_traced, part="STM32C5A3CG", labels=labels,
+                          lead=True),
+        root=board_sources.source("seeed-xiao-stm32c5").dest(REPO),
     )
 
 
@@ -2004,6 +2030,14 @@ PACKAGES = {
             firmware=False,
         ),
         Package(
+            "seeed-xiao-stm32c5",
+            board_sources.source("seeed-xiao-stm32c5").fetch.url,
+            (),
+            board_sources.source("seeed-xiao-stm32c5").licence.name,
+            cloned=False,
+            firmware=False,
+        ),
+        Package(
             "zephyr",
             "https://github.com/zephyrproject-rtos/zephyr.git",
             ("boards/seeed",),
@@ -2524,6 +2558,23 @@ _MG24_DEBUGGER = (
     + tuple((label, _SECOND_CHIP_UNTRACED) for label in _SAMD11_UNTRACED)
 )
 
+#: **The XIAO STM32C5's D11-D15 are not asked for** (OH-231). Seeed's own
+#: `XIAO STM32C5.kicad_pcb` has nets `D11{slash}FDCAN1_RX{slash}PB8` through
+#: `D15{slash}CAN_STB{slash}PB14`, each on one pad of the STM32C5A3CG, but the
+#: header footprint U10 (`XIAO-Add-On-PRO`) has pads on D0-D10, the supplies
+#: and ground only. These pads are on the underside footprint, and which pad
+#: of this board's footprint lands on which of those nets is a join by
+#: position that has not been read, as the MG24's `MG24_EN` join is held by a
+#: test. So the sentence says what the file shows and not that this pad is
+#: that net.
+_STM32C5_UNDERSIDE = tuple(
+    (label, f"Seeed's `XIAO STM32C5.kicad_pcb` has a net named for {label} on "
+            f"one pad of the STM32C5A3CG, but none of the header footprint "
+            f"U10's pads is on it, and which pad of this footprint lands on it "
+            f"has not been read, so the pin is not claimed for this pad")
+    for label in ("D11", "D12", "D13", "D14", "D15")
+)
+
 # **The nRF54LM20A's own debug pads carry no reason.** Its footprint names
 # them `SWDIO_G2` and `SWDCLK_G1`, outside the `Pn.nn` numbering, and the
 # tracer names each as a caption (OH-172 slice 2), which a reason never
@@ -2601,15 +2652,17 @@ BOARDS = {
     ),
     "XIAO-SAMD21-DIP": Board("SAMD21", _SAMD21),
     "XIAO-SAMD21-SMD": Board("SAMD21", _SAMD21, reasons=_SAMD21_SWD),
-    # Nobody has published this one. Zephyr has no xiao_stm32c5 board and
-    # Seeed has released no core for it, so every pad stays null and the
-    # report says why rather than the board going missing from the run.
-    # The one board no board-support package covers. Seeed's schematic
-    # symbol library names a pin for two of its 35 pads and for none of the
-    # others, which is the whole of what has been published about this part.
+    # The one board no board-support package covers: this tree fetches no
+    # firmware for it. Seeed publishes its KiCad project (OH-231), and the
+    # header's D0-D10 and the two SWD pads are followed through that board
+    # file's copper to the STM32C5A3CG's pads. D11-D15 sit on underside test
+    # pads whose join to the MCU nets is by position and has not been read,
+    # so they are not asked for.
     "XIAO-XIAO STM32C5-SMD": Board(
         "STM32C5",
-        (seeed_symbol("XIAO-STM32C5-SMD", ("SWDIO", "SWCLK")),),
+        (seeed_xiao_stm32c5(
+            tuple(f"D{n}" for n in range(11)) + ("SWDIO", "SWCLK")),),
+        reasons=_STM32C5_UNDERSIDE,
     ),
     "XIAO-nRF52840-DIP": Board("nRF52840", _NRF52840),
     "XIAO-nRF52840-SMD": Board("nRF52840", _NRF52840, reasons=_NRF52840_SWD),
@@ -3718,22 +3771,14 @@ def assumption_for(chip: str, described: bool, covered: bool,
                 f"its own `why_null`. The pin view reports every pad as not "
                 f"modelled, and will until the vendor publishes something to read."
             )
-        gated = resolved - len(captions)
-        those = (f"Those {resolved} pads are the only ones" if gated == resolved
-                 else "None of those is a pad" if gated == 0
-                 else f"Of those, {gated} is the only pad" if gated == 1
-                 else f"Of those, {gated} are the only pads")
         body = (
             f"`chip_pin` and `chip_index` are null on {unresolved} of these "
             f"{resolved + unresolved} pads, {why}. The other {resolved} were "
             f"read from the vendor's own CAD, named in `pindefs`, which is a "
-            f"schematic and not firmware. {those} "
-            f"in the symbol read for this board whose name carries a pin "
-            f"in a spelling this tool recognises: `GPIOn`, `PAn` through "
-            f"`PDn`, `Pn.nn`. Ports E through H are not among those "
-            f"spellings, so what was checked is those three and not every "
-            f"spelling there could be. Each null pad says which of the two it is in "
-            f"its own `why_null`. The pin view reports every null pad as not "
+            f"board file and not firmware: each is the pin of the MCU's pad "
+            f"on the net the vendor names for that header label, and no pin "
+            f"is read from a net's name. Each null pad says why in its own "
+            f"`why_null`. The pin view reports every null pad as not "
             f"modelled, and will until the vendor publishes something to read."
         )
         # **The uncovered branch owes this sentence too**, and returning
@@ -3839,7 +3884,7 @@ def filled_board(
         pads.append(filled)
 
     # **Not `bool(packages)`.** The XIAO STM32C5 now names a package -- Seeed's
-    # schematic symbol library -- and no board-support package covers it, so a
+    # own KiCad board file (OH-231) -- and no board-support package covers it, so a
     # truthiness test would have `assumption_for` tell a reader that a core
     # publishes this board's pins. It is CAD; see `Package.firmware`.
     covered = any(PACKAGES[entry["name"]].firmware
@@ -4002,8 +4047,8 @@ def describe_registry() -> str:
     **The second half of that sentence stopped working and this is the fix.**
     The column keyed on `board.sources` being empty, which was the same test
     as "no package publishes this board" only while the uncovered board named
-    nothing at all. The XIAO STM32C5 now names `seeed-xiao` -- a schematic
-    symbol library, which is CAD -- so `--list` showed it exactly like the
+    nothing at all. The XIAO STM32C5 now names `seeed-xiao-stm32c5` -- a
+    KiCad board file, which is CAD -- so `--list` showed it exactly like the
     twenty-four boards a vendor core covers, and `not board.sources` became a
     branch nothing in the registry can enter.
     """

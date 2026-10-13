@@ -169,7 +169,7 @@
         "wiki": "https://wiki.seeedstudio.com/xiao_stm32c5_getting_started/ answers 200, with five sibling pages in the sitemap (_pin_multiplexing, _application, _canfd_usage, _with_micropython, _with_stm32cubeide); product page https://www.seeedstudio.com/XIAO-STM32C5-p-7011.html",
         "zephyr": "Seeed-Studio/platform-seeedboards zephyr/stm32/boards/seeed/xiao_stm32c5/ at 57250b6f9157a5600eb2b232cc90618b3ed1b3be (2026-10-08), extracted from schematic '04 XIAO Header&STM32C5.kicad_sch'; MCU STM32C5A3CG, UFQFPN48",
         "not_a_source": "XIAO-STM32C5-pinout_sheet.xlsx (80,761 bytes): an ST pin table with a XIAO column whose rows are misaligned -- it puts BAT_EN on PE2 where the PCB puts D8/SPI_SCK and BAT_EN on PA15",
-        "licence_seen": "all six .kicad_sch files of the zip carry a LOGO_CC_BY-SA_4.0 symbol; the zip holds no LICENSE file and the PCB names none. Recorded as seen, not as a grant: see OH-231 step 1"
+        "licence_seen": "all six .kicad_sch files of the zip carry a LOGO_CC_BY-SA_4.0 symbol; the zip holds no LICENSE file and the PCB names none. Recorded as seen, not as a grant: tools/board_sources.py's row seeed-xiao-stm32c5 names the licence 'none stated', and whether the logo is a grant is for the owner (OH-234)"
       }
     },
     "nRF54LM20A": {

@@ -57,7 +57,7 @@ import zipfile
 
 import pytest
 
-from tools import board_manifest, import_board, kicad
+from tools import board_manifest, board_sources, import_board, kicad
 from tools import import_pindefs as pindefs
 from tools.import_pindefs import (
     BOARDS,
@@ -588,8 +588,8 @@ def test_the_board_no_firmware_package_covers_is_deliberate():
     # And it is not sourceless: the distinction above has to be visible here
     # or this test passes for the wrong reason.
     stm32c5 = BOARDS["XIAO-XIAO STM32C5-SMD"]
-    assert [source.package for source in stm32c5.sources] == ["seeed-xiao"]
-    assert not PACKAGES["seeed-xiao"].firmware
+    assert [source.package for source in stm32c5.sources] == ["seeed-xiao-stm32c5"]
+    assert not PACKAGES["seeed-xiao-stm32c5"].firmware
 
     # **`--list` has to show it too, and it stopped.** `describe_registry`
     # printed the note when `board.sources` was empty, which is now true of no
@@ -942,8 +942,9 @@ def test_a_board_no_package_covers_counts_only_the_pins_the_gate_takes(tmp_path,
     package covers -- the XIAO STM32C5's -- said "Those N pads are the only
     ones ... whose name carries a pin in a spelling this tool recognises",
     with N every pad that resolved. A caption resolves and carries no such
-    pin, so that count is of the pins the gate takes, and the caption is said
-    apart."""
+    pin, so the caption is said apart. (OH-231: that sentence rested on a
+    sweep of the schematic symbol library the board no longer reads, so it is
+    gone, and this holds that no count of pins "in a spelling" comes back.)"""
     bsp, boards = _fake_tree(tmp_path, monkeypatch)
     _board_file(boards, "FAKE-NOTHING", [("D0", "1"), ("EN", "13"), ("GND", "12")])
     monkeypatch.setattr(pindefs, "BOARDS", dict(pindefs.BOARDS) | {
@@ -953,8 +954,8 @@ def test_a_board_no_package_covers_counts_only_the_pins_the_gate_takes(tmp_path,
     assumption = pindefs.filled_board("FAKE-NOTHING", bsp, boards)["assumption"]
     assert "no board-support package covers this board at all" in assumption, assumption
     assert "Those 2 pads" not in assumption, assumption
-    assert ("Of those, 1 is the only pad in the symbol read for this board whose "
-            "name carries a pin in a spelling this tool recognises") in assumption, assumption
+    assert "spelling this tool recognises" not in assumption, assumption
+    assert "The other 2 were read from the vendor's own CAD" in assumption, assumption
     assert "`EN` reaches a pad the vendor's footprint names `RUN`" in assumption, assumption
 
 
@@ -1384,12 +1385,13 @@ def test_the_committed_stm32c5_file_is_the_one_no_package_covers():
     """Needs no fetch. One board no board-support package covers, and its file
     must say which of the two nulls each pad is; every other file must not.
 
-    **Two of its 35 pads resolve, and OH-26's finding is untouched by that.**
-    Seeed's schematic symbol library calls pads 23 and 24 `SWDIO/PA13` and
-    `SWCLK/PA14`; it is CAD and not firmware, so "no board-support package
-    covers this board" is as true as it was. What changed is that two pads
-    stopped saying "a gap in what the vendor has published" about a pin the
-    vendor had published.
+    **Thirteen of its 35 pads resolve, and OH-26's finding is untouched by
+    that.** Seeed's own KiCad board file (OH-231) joins `D0`-`D10` and the
+    `SWDIO/PA13` and `SWCLK/PA14` pads to the STM32C5A3CG's pads; it is CAD
+    and not firmware, so "no board-support package covers this board" is as
+    true as it was. The 2026-10 version of this test held two resolved pads,
+    read from the schematic symbol library, and a board file with the old
+    reading fails the assertions below.
     """
     borrowed = sorted(
         name for name in BOARDS
@@ -1397,20 +1399,23 @@ def test_the_committed_stm32c5_file_is_the_one_no_package_covers():
     )
     assert borrowed == ["XIAO-XIAO STM32C5-SMD"]
     document = json.loads(pindefs.board_path(borrowed[0]).read_text(encoding="utf-8"))
-    assert [one["name"] for one in document["pindefs"]["packages"]] == ["seeed-xiao"]
-    assert len(document["pads"]) == 35, "OH-26: 2 of 35"
+    assert document["pindefs"]["packages"] == [{
+        "name": "seeed-xiao-stm32c5",
+        "repository": board_sources.source("seeed-xiao-stm32c5").fetch.url,
+        "revision": document["pindefs"]["packages"][0]["revision"],
+        "licence": "none stated",
+    }]
+    assert len(document["pads"]) == 35, "OH-26: 13 of 35 (OH-231)"
 
     named = {pad["label"]: pad for pad in document["pads"] if pad["chip_pin"]}
-    assert {label: pad["chip_pin"] for label, pad in named.items()} == {
-        "SWDIO/PA13": "PA13", "SWCLK/PA14": "PA14",
-    }
+    assert {label: pad["chip_pin"] for label, pad in named.items()} == STM32C5_READ
     # Named by port and bit, like every STM32: a flat index here would be a
     # number appearing in no ST document.
     assert all(pad["chip_index"] is None for pad in named.values())
-    assert {pad["why_null"] for pad in document["pads"] if not pad["chip_pin"]} == {
-        pindefs.NO_PACKAGE_AT_ALL}
+    reasons = {pad["why_null"] for pad in document["pads"] if not pad["chip_pin"]}
+    assert pindefs.NO_PACKAGE_AT_ALL in reasons
     assert "no board-support package covers this board at all" in document["assumption"]
-    assert "33 of these 35 pads" in document["assumption"]
+    assert "22 of these 35 pads" in document["assumption"]
 
 
 # --- the pins their vendors publish no number for (OH-26's blocker) ----------
@@ -1539,7 +1544,7 @@ def test_the_committed_files_with_unnumbered_pins_are_the_ones_oh_26_named():
         assert f"{len(pins)} pins on this board are named with NO flat number" in (
             document["assumption"]
         ), name
-    assert unnumbered == 136, (
+    assert unnumbered == 147, (
         "recomputed rather than restated. 123 when OH-26 measured it; 125 once "
         "OH-170 read NFC1 and NFC2 off Seeed's nRF54L15 board file; 127 once it "
         "traced the MG24's SWDIO to PA02 and SWCLK to PA01; 131 once the "
@@ -1550,7 +1555,9 @@ def test_the_committed_files_with_unnumbered_pins_are_the_ones_oh_26_named():
         "only thing published about that board; 135 once OH-224 traced the "
         "nRF54L15 SMD's 54L15_TX20 and 54L15_RX20 from their underside test "
         "points to P1.08 and P1.09; 136 once OH-224's review traced its "
-        "USER_LED the same way, to P2.00. ST, Silicon Labs and Nordic all "
+        "USER_LED the same way, to P2.00; 147 once OH-231 read the XIAO STM32C5's "
+        "D0-D10 off Seeed's own board file, eleven more than the SWDIO and SWCLK "
+        "already counted. ST, Silicon Labs and Nordic all "
         "number by port, so every pad resolved on any of them lands in this "
         "bucket"
     )
@@ -2103,7 +2110,9 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # SMD's nRF54_SWDIO and nRF54_SWCLK (SWDIO_G2, SWDCLK_G1), four pads out
     # of `specific` below. 569 until that slice's review traced the nRF54L15
     # SMD's nRF54_SWDIO and nRF54_SWCLK the same way, to SWDIO and SWDCLK.
-    assert naming == 571, naming
+    # 582 once OH-231 traced the XIAO STM32C5's D0-D10 through Seeed's own
+    # board file: eleven more than the 571 before.
+    assert naming == 582, naming
     assert supplies == 209, supplies
     # 41 before `nRF54_RST` was given the reason its two neighbours in the
     # same debug cluster already carried; 42 until the six SWD pads on the
@@ -2132,8 +2141,10 @@ def test_every_pad_either_names_its_pin_or_says_why_it_has_none():
     # words: its pad lands on the test point of that net, which is the join
     # the reason said no file made. 65 once OH-172's slice 2 named those four
     # traced pads by their MCU pad, as captions, in place of their reasons. 63
-    # once its review traced the nRF54L15 SMD's two debug pads too.
-    assert specific == 63, specific
+    # once its review traced the nRF54L15 SMD's two debug pads too. 52 once
+    # OH-231 moved the XIAO STM32C5's D0-D10 out of this bucket and into
+    # `naming`, where they are the same eleven the 582 above gained.
+    assert specific == 52, specific
     # 15 until OH-200 named the C5's and C6's ten JTAG and BOOT pads. 5 until
     # OH-209 gave the RP2350 SMD's BOOT the reason Seeed's board file states.
     # 4 until OH-224 answered MG24_EN, nRF54_EN, 54L15_TX20 and 54L15_RX20
@@ -2840,9 +2851,7 @@ def test_every_refusal_in_the_symbol_reader_can_be_reached():
     #
     #    Injected INSIDE the STM32C5's own body: the first `(name "D0"` in the
     #    file belongs to another symbol, and putting it there proved only that
-    #    the slicing works. `PA09` and not the `PE2` a review reached for --
-    #    `_CHIP_PIN_NAME` has no `P[E-H]` branch, so `PE2` is exactly the
-    #    spelling this sweep does NOT catch and the docstring now says so.
+    #    the slicing works.
     assert "(alternate " not in library, "no longer synthetic; read them properly"
     at = library.index('(symbol "XIAO-STM32C5-SMD"')
     body = library[at:]
@@ -3001,14 +3010,19 @@ def test_the_spellings_the_board_file_advertises_are_the_ones_the_pattern_takes(
     """
     assumption = json.loads(pindefs.board_path("XIAO-XIAO STM32C5-SMD")
                             .read_text(encoding="utf-8"))["assumption"]
-    assert "`GPIOn`, `PAn` through `PDn`, `Pn.nn`" in assumption, assumption
+    # The STM32C5's own sentence no longer advertises spellings: its pins are
+    # read from copper (OH-231), not by a sweep of a symbol library, and the
+    # claim "the only ones whose name carries a pin" went with the sweep.
+    assert "spelling this tool recognises" not in assumption, assumption
+    assert "Ports E through H are not among" not in assumption, assumption
 
-    # Every spelling it advertises is one the pattern takes...
-    for good in ("GPIO0", "GPIO29", "PA13", "PB3", "PC10", "PD15", "P1.02"):
+    # The pattern takes ST's ports through H: Seeed puts `D8` on `PE2`.
+    for good in ("GPIO0", "GPIO29", "PA13", "PB3", "PC10", "PD15", "PE2",
+                 "PH2", "P1.02"):
         assert pindefs._CHIP_PIN_NAME.match(good), good
-    # ...and the letters the sentence says are outside really are.
-    assert "Ports E through H are not among those spellings" in assumption
-    for bad in ("PE2", "PF1", "PG0", "PH2"):
+    # ...and not a port ST does not have, nor a function that merely starts
+    # like one: the STM32C5's boot pad is `PH2-BOOT0`, not a GPIO name here.
+    for bad in ("PI1", "PJ0", "P1", "PH2-BOOT0_44", "SWDIO_G2"):
         assert pindefs._CHIP_PIN_NAME.match(bad) is None, bad
 
 
@@ -4691,3 +4705,102 @@ def test_a_value_an_if_reads_from_a_flag_the_build_cannot_know_is_refused(tmp_pa
     with pytest.raises(PindefError, match=r"consults \['ARDUINO'\], which the build defines "
                                           r"with '-DARDUINO=\{runtime.ide.version\}'"):
         pindefs.read_pico_pins(("",), checkout=checkout, variant="fake")
+
+
+# --- the XIAO STM32C5, read from Seeed's own board file (OH-231) -------------
+
+#: What the committed board file says each opted-in pad reaches. Typed here
+#: as the ticket's reading of the vendor's PCB, and held to the vendor's file
+#: by the test below wherever that file is on disk.
+STM32C5_READ = {
+    "D0": "PA0", "D1": "PA1", "D2": "PA2", "D3": "PA3", "D4": "PB7",
+    "D5": "PB6", "D6": "PA9", "D7": "PA10", "D8": "PE2", "D9": "PB0",
+    "D10": "PB15", "SWDIO/PA13": "PA13", "SWCLK/PA14": "PA14",
+}
+STM32C5_PCB = (ROOT / "third_party" / "seeed-xiao-stm32c5" / "XIAO STM32C5.kicad_pcb")
+
+
+def _stm32c5_pads(text: str) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """`(header, mcu)`: net -> pad functions, for the castellated footprint and
+    for the STM32C5A3CG. Parsed here on its own, not by the reader under test."""
+    out = {}
+    for block in re.split(r"\n\t\(footprint ", text)[1:]:
+        value = re.search(r'\(property "Value" "([^"]*)"', block).group(1)
+        if value not in ("XIAO-Add-On-PRO", "STM32C5A3CG"):
+            continue
+        nets: dict[str, list[str]] = {}
+        for pad in re.split(r"\n\t\t\(pad ", block)[1:]:
+            net = re.search(r'\(net (?:\d+ )?"([^"]*)"\)', pad)
+            function = re.search(r'\(pinfunction "([^"]*)"\)', pad)
+            if net and function:
+                nets.setdefault(net.group(1), []).append(function.group(1))
+        assert value not in out, f"two footprints valued {value!r}"
+        out[value] = nets
+    return out["XIAO-Add-On-PRO"], out["STM32C5A3CG"]
+
+
+def test_the_xiao_stm32c5_labels_are_held_to_the_vendors_nets():
+    """**Fails on the old row**, which was `seeed_symbol` over the schematic
+    symbol library and named `PA13` and `PA14` only: eleven of these thirteen
+    pads were null, with a reason saying the vendor had published nothing.
+
+    The first half needs nothing fetched: the committed board file says what
+    the table above says. The second half needs Seeed's board file and reads
+    it again independently: a header label's net is the one U10's pad
+    `<label>_<n>` is on, and the pin is the STM32C5A3CG's pad on that net;
+    `SWDIO` and `SWCLK` are not U10 pads, so their nets are the ones whose
+    name begins with the label.
+    """
+    document = json.loads(pindefs.board_path("XIAO-XIAO STM32C5-SMD").read_text(encoding="utf-8"))
+    committed = {pad["label"]: pad["chip_pin"] for pad in document["pads"]
+                 if pad["chip_pin"] is not None}
+    assert committed == STM32C5_READ
+    assert all(pad["chip_index"] is None for pad in document["pads"]), (
+        "ST publishes no flat numbering; a chip_index here would be invented")
+
+    if not STM32C5_PCB.is_file():
+        pytest.skip(f"SKIPPED: {STM32C5_PCB} absent; download it by hand, see "
+                    f"python tools/get_board_sources.py seeed-xiao-stm32c5")
+    header, mcu = _stm32c5_pads(STM32C5_PCB.read_text(encoding="utf-8"))
+    for label, pin in STM32C5_READ.items():
+        short = label.split("/")[0]
+        if short.startswith("D"):
+            nets = [net for net, functions in header.items()
+                    if all(re.fullmatch(rf"{short}_\d+", one) for one in functions)]
+        else:
+            nets = [net for net in mcu if net.split("{slash}")[0] == short]
+        assert len(nets) == 1, (label, nets)
+        reached = sorted(one for one in mcu[nets[0]] if re.match(r"P[A-H]\d+_", one))
+        assert [one.split("_")[0] for one in reached] == [pin], (label, nets, mcu[nets[0]])
+
+
+def test_the_xiao_stm32c5_package_states_no_licence_and_says_so_in_the_board_file():
+    """The board file's `licence` is the registry row's, which is "none
+    stated", and not the shared `seeed-pcb` package's "OSHW": whether the
+    CC BY-SA logo on the archive's schematics is a grant is the owner's
+    question (OH-234), and a name the vendor did not write is not recorded as
+    theirs."""
+    assert board_sources.source("seeed-xiao-stm32c5").licence.name == board_sources.NONE_STATED
+    assert PACKAGES["seeed-xiao-stm32c5"].licence == board_sources.NONE_STATED
+    document = json.loads(pindefs.board_path("XIAO-XIAO STM32C5-SMD").read_text(encoding="utf-8"))
+    assert [one["licence"] for one in document["pindefs"]["packages"]] == ["none stated"]
+    assert "OSHW" not in json.dumps(document["pindefs"])
+
+
+def test_a_net_named_for_its_label_first_is_traced_only_with_lead():
+    """Seeed's STM32C5 names `D0{slash}A0{slash}PA0` and `D8{slash}SPI_SCK{slash}PE2`:
+    the label, then functions, then the pin. Without `lead` the label is
+    matched against the LAST part, which is the pin, and `D0` is on no net;
+    with it the pin is read from the MCU's pad and not from the name. Port E
+    is one of ST's, which the old `P[A-D]` pattern read as a caption
+    `PE2_1`."""
+    def pad(number: int, function: str, net: str) -> str:
+        return (f'\n\t\t(pad "{number}" smd rect\n\t\t\t(net "{net}")\n'
+                f'\t\t\t(pinfunction "{function}")\n\t\t)')
+    board = ('\n\t(footprint "F"\n\t\t(property "Value" "CHIP-1"\n\t\t)'
+             + pad(10, "PA0_10", "D0{slash}A0{slash}PA0")
+             + pad(1, "PE2_1", "D8{slash}SPI_SCK{slash}PE2") + "\n\t)\n")
+    got = pindefs.read_seeed_traced((board,), part="CHIP-1", labels=("D0", "D8"), lead=True)
+    assert got == {"D0": pindefs.ChipPin("PA0", None), "D8": pindefs.ChipPin("PE2", None)}
+    with pytest.raises(PindefError, match="is on no net of the CHIP-1 footprint"):
+        pindefs.read_seeed_traced((board,), part="CHIP-1", labels=("D0",))
