@@ -2,7 +2,7 @@
 id: OH-232
 title: The top bar's step counter reads the 8086 session's count, so it says 0 steps
   beside a board that is running
-status: open
+status: in-review
 priority: P3
 created: '2026-10-13'
 touches:
