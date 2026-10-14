@@ -195,6 +195,17 @@ def test_a_bad_curve_is_refused_naming_the_file_and_the_value(tmp_path):
         assert str(brd) in message and f"curve {curve}" in message, message
 
 
+def test_a_bad_coordinate_names_the_file_once(tmp_path):
+    brd = tmp_path / "bad.brd"
+    brd.write_text(
+        '<eagle version="9"><drawing><board><plain>'
+        '<wire x1="oops" y1="0" x2="1" y2="1" width="0" layer="20"/>'
+        '</plain></board></drawing></eagle>', encoding="utf-8")
+    with pytest.raises(eagle.EagleError) as raised:
+        eagle.read_board(brd)
+    assert str(raised.value).count(str(brd)) == 1, str(raised.value)
+
+
 def test_the_two_chord_constants_agree():
     # eagle.py cannot import the composer, so it holds its own copy.
     assert eagle.ARC_CHORD_MM == compose.ARC_CHORD_MM

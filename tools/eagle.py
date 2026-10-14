@@ -102,7 +102,10 @@ ARC_CHORD_MM = 0.2
 #: composer's `CHAIN_TOLERANCE_MM` = 0.02, which reads as a false one-point
 #: ring. Dropping it costs the bounding box at most eps^2 / 2r: 0.0005 mm on
 #: the QT Py's r = 2.54 mm corners, and nothing on a wire that starts and ends
-#: on an axis, as every fetched board's does.
+#: on an axis, as every fetched board's does. Two cases still leave a segment
+#: under that tolerance, and neither is something a board outline draws: an
+#: arc shorter than 0.04 mm with no crossing, whose floor of two halves it,
+#: and two crossings closer than 0.02 mm, which needs r < 0.0127 mm.
 AXIS_EPS_MM = 0.05
 
 
@@ -937,11 +940,11 @@ def read_board(path: pathlib.Path, text: str | None = None) -> Board:
     for wire in board.findall("plain/wire"):
         if wire.get("layer") != DIMENSION_LAYER:
             continue
+        ends = (_float(wire, "x1", str(path)), _float(wire, "y1", str(path)),
+                _float(wire, "x2", str(path)), _float(wire, "y2", str(path)))
+        curve = _float(wire, "curve", str(path)) if wire.get("curve") else 0.0
         try:
-            points = arc_points(
-                _float(wire, "x1", str(path)), _float(wire, "y1", str(path)),
-                _float(wire, "x2", str(path)), _float(wire, "y2", str(path)),
-                _float(wire, "curve", str(path)) if wire.get("curve") else 0.0)
+            points = arc_points(*ends, curve)
         except EagleError as exc:
             raise EagleError(f"{path}: Dimension {exc}") from exc
         outline += [Segment(DIMENSION_LAYER, ax, ay, bx, by)
