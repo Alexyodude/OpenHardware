@@ -461,9 +461,10 @@ What follows from that, and only that:
   column is where the repository says which half it is, and the test
   named above is where the evidence is.
 - **A surface that shows the ISA string beside that badge shows both halves
-  and the evidence for one.** `webui/static/emulator.js` prints
-  `board.isa` and `board.core` in separate cells and the badge from
-  `firmware_verified`. Saying on the page which half runs is OH-210 item 1,
+  and the evidence for one.** `webui/static/emulator.js`'s boards table
+  prints `board.isa` and `board.core` in separate cells and the badge from
+  `firmware_verified`; its table of waiting cores prints the core and not
+  the ISA. Saying on the page which half runs is OH-210 item 1,
   and is not done by this section.
 - **A core's backlog row names only the half its core runs.**
   `catalogue.CORE_ISA` maps the RP2350 to "RV32 (Hazard3)", and

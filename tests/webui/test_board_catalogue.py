@@ -227,6 +227,17 @@ def test_a_core_row_names_the_isa_its_core_runs_and_not_the_chips_other_half(tmp
     assert all(isa in board.isa for isa in row["isas"]), (row, board.isa)
 
 
+def test_every_core_isa_names_one_half_of_its_chips_own_string():
+    """OH-210. `CORE_ISA` overrides `CHIPS` silently, so an entry for a chip
+    that left `CHIPS`, or whose string no longer holds the half named, would
+    put words in a backlog row that nothing else in the repository says.
+    """
+    for chip, half in catalogue.CORE_ISA.items():
+        assert chip in catalogue.CHIPS, (chip, sorted(catalogue.CHIPS))
+        isa, _core = catalogue.CHIPS[chip]
+        assert half in isa.split(" + "), (chip, half, isa)
+
+
 def test_a_core_row_names_only_the_isas_of_the_boards_waiting_on_it(tmp_path, monkeypatch):
     """OH-210. `isas` was taken from every board on the core, runnable ones
     included, so a running RP2350 put its string in the row of an ESP32-C3
