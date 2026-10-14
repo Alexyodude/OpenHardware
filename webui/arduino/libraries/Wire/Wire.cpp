@@ -61,6 +61,11 @@
  * 5 is a transaction that raised neither TRANS_COMPLETE nor NACK within
  * 50 ms of SYSTIMER, which on this model happens only when `begin` was not
  * called: the controller's function clock is closed and answers nothing.
+ * **That 5 is this model's, not the vendor's.** 2787dab allocates its buffers
+ * only in `begin` (`Wire.cpp:44`) and returns 4 from `endTransmission`'s
+ * NULL-buffer guard (`:452-455`) without reaching the bus; its 5 is a probe
+ * or bus lock that timed out. This one goes to the bus anyway, because it is
+ * the only way a sketch shows what a closed gate does.
  *
  * ## What `begin` does, and what it cannot
  *
