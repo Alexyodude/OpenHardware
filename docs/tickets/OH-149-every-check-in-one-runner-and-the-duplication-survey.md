@@ -11,7 +11,6 @@ touches:
 - tools/DUPLICATION.md
 - tools/check_facts.py
 - tests/rules/test_check_facts.py
-- CLAUDE.md
 - docs/research/board-sources/render.py
 - docs/research/board-sources/survey.md
 - tools/facts_store.json
@@ -44,3 +43,5 @@ uvx nodeengine scaffolded tools/stale.py, tools/checkall.py and tools/viewer.htm
 **Note 2026-10-09:** 2026-10-09: tools/facts_store.json lent to OH-214, whose re-keying changes the DIP notch colour in mark_turns' docstring, which the claude-md:mark-turns anchor holds; OH-214 re-reads both sides and confirms the anchor. Return it when OH-214 closes.
 
 **Note 2026-10-09:** 2026-10-09: tools/facts_store.json returns from OH-214 (done); the claude-md:mark-turns anchor was re-confirmed there after its docstring named #262525.
+
+**Note 2026-10-14:** 2026-10-14 lends CLAUDE.md to OH-171 for the STM32C5 board key rename (and the now-stale 'no page on the vendor's wiki' sentence OH-231 made untrue); it comes back when OH-171 closes.
