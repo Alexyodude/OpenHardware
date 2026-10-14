@@ -8,6 +8,7 @@ created: '2026-10-13'
 touches:
 - tools/compose_board_3d.py
 - tests/rules/test_compose_board_3d.py
+- PROVENANCE.md
 ---
 
 Found while researching OH-228 (2026-10-13): Adafruit publishes its own mechanical models, MIT-licensed, at https://github.com/adafruit/Adafruit_CAD_Parts (LICENSE "MIT License, Copyright (c) 2016 Adafruit Industries"; main at c128bceb1f96b6ea8b68f250bda986ba85da24ea on 2026-10-01). Nothing in this repository references it.
@@ -56,3 +57,5 @@ IN THE PAGE (Playwright, :8091, stopped by PID): scratch/oh229/shots/after-qtpy-
 VERIFIED: tests/rules/test_compose_board_3d.py and tests/rules/test_import_3d_model.py 354 passed; tests/webui/test_board3d.py 105 passed; each checkall.py row alone: check_layering, check_board_contract, check_part_schemas, check_licenses, check_deltas, check_banned_symbols, check_board_claims, check_ticket_claims, ticket_guard --self-test, check_facts, render.py --check all OK. checkall.py and the full suite were not run, as asked.
 
 LEFT. (a) CONN1's 0.56 mm: recorded and held in a test, not settled. (b) The corner-arc defect is OH-235. (c) Each of the two Adafruit STEPs is now cached more than once under the composer's per-row names (the QT Py's twice, for the socket and the LED): `cached` keys by library and model, so two rows from one file download it twice. Harmless; not changed. (d) The thickness is a constant held by a test, not read; if a third Adafruit board is drawn from a STEP, its entry is the shape to copy. (e) Parts the two STEPs carry that were not asked for (JST_SH4_SKINNY for CONN1) are not substituted.
+
+**Note 2026-10-14:** Borrowed PROVENANCE.md from OH-163 for the review fix round's Adafruit_CAD_Parts entry; returned on close.
