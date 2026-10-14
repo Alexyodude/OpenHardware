@@ -8,6 +8,8 @@ created: '2026-10-13'
 touches:
 - tools/eagle.py
 - tests/rules/test_eagle.py
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
 ---
 
 Found by OH-229's comparison (2026-10-13): Adafruit's own whole-board STEP of the QT Py ESP32-C3 (Adafruit_CAD_Parts @ c128bceb, MIT) has four true r = 2.54 mm rounded corners, and the composed model draws 45-degree chamfers there -- visible in C:/Users/Alexyodude/scratch/oh229/shots/composed-qtpy-default.png against vendor-qtpy-default.png. The cause is that tools/eagle.py takes an EAGLE wire's endpoints and ignores its `curve` attribute (the bulge in degrees): `extent_mm` says so for the bounding box (eagle.py ~345-352), and the routed copper counts curved wires as unread (~937-953) -- but the board OUTLINE built from Dimension wires is drawn through the chord with nothing printed.
@@ -20,3 +22,5 @@ STEPS:
 Claims: tools/eagle.py and tools/compose_board_3d.py are OH-163's; borrow them when this starts.
 
 **Note 2026-10-14:** 2026-10-14: starts in lane4; borrows tools/eagle.py from OH-163 (returned on close) and claims tests/rules/test_eagle.py (unclaimed). tools/compose_board_3d.py and its tests are lent to OH-231 at the same time, so this ticket changes the reader and holds the outline in test_eagle.py; a change the composer or its tests need waits for OH-231 to close and is listed here.
+
+**Note 2026-10-14:** 2026-10-14 borrows tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py (OH-163's, passed on from OH-231 at its close) for the follow-up: the Uno outline test's rounds/sharp-corners assertion, and compose_board_3d.ARC_CHORD_MM = eagle.ARC_CHORD_MM with the equality test dropped. They go back to OH-163 at close.
