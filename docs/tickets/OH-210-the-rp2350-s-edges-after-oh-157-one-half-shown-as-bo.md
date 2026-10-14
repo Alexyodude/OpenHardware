@@ -2,15 +2,13 @@
 id: OH-210
 title: 'The RP2350''s edges after OH-157: one half shown as both, an unchecked IMAGE_DEF,
   RESETS stored not obeyed'
-status: in-progress
+status: open
 priority: P3
 created: '2026-10-08'
 touches:
 - rules/board-claims.md
 - webui/boards/catalogue.py
 - tests/webui/test_board_catalogue.py
-- webui/static/emulator.js
-- webui/boards/rp2350.py
 ---
 
 The edges OH-157's reviews left (2026-10-08), none of which changes what the XIAO RP2350 blink shows today.
@@ -36,3 +34,5 @@ Done when each is fixed with a test that fails when reverted where it is behavio
 **Note 2026-10-15:** items 1 and 6 done in lane3. Item 1: /api/boards carries core_isa (catalogue.CORE_ISA, else the whole ISA string) and emulator.js's boards table adds 'Only RV32 (Hazard3) runs here, on core riscv32. The rest has no core.' to the ISA cell where they differ; test_the_boards_table_says_which_half_of_the_isa_runs runs the real emulator.js under node and failed with emulator.js reverted; board-claims.md section 14 updated. The evidence sentence still names just RP2350. Item 6: pin_states' docstring in rp2350.py says only FUNCSEL is read from GPIO_CTRL, citing io_bank0.h lines read in the pinned pico-sdk checkout. Items 4, 5, 7 still open.
 
 **Note 2026-10-15:** review follow-ups to items 1 and 6: test_the_page_sentence_the_rest_has_no_core_stays_true fails when a core exists for a split chip's other half (shown by patching build_core.cores to add cortexm33); the boards-table probe polls up to 5 s and fails by name instead of sleeping 100 ms.
+
+**Note 2026-10-15:** 2026-10-15: items 1 and 6 reviewed (merge) with the guard and the probe poll as follow-ups; returns webui/static/emulator.js and webui/boards/rp2350.py to OH-161, back to open for items 4, 5 and 7.
