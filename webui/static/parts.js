@@ -190,6 +190,19 @@ export function dressPart(group, extras, palette) {
     group.userData.terminals.set(terminal.name, anchor);
   }
 
+  // **A target never reaches its neighbour's** (OH-161 step 5): the default
+  // radius is for leads 2.54 mm apart, and an MSOP-8's are 0.65, where two
+  // of them overlap by most of their width and a drop lands on the wrong
+  // pin. Under half the nearest pair's distance, with a margin.
+  let nearest = Infinity;
+  const anchors = [...group.userData.terminals.values()];
+  for (const [at, one] of anchors.entries()) {
+    for (const other of anchors.slice(at + 1)) {
+      nearest = Math.min(nearest, one.position.distanceTo(other.position));
+    }
+  }
+  group.userData.targetRadius = Math.min(TARGET_RADIUS, 0.45 * nearest);
+
   setPartState(group, "unanswerable", palette);
   return group;
 }
@@ -233,6 +246,15 @@ function electricalOf(extras) {
     //: datasheet publishes no absolute maximum, and then nothing here will
     //: ever declare it dead however much current it carries.
     absoluteAmps: spec.absolute_amps,
+    //: An I2C device (OH-161 step 5): the part it is, which the board's
+    //: bus names it by; the supply current, typical; and the two levels its
+    //: inputs read, as fractions of its own supply (a VIH and a VIL
+    //: stated as `0.7 VDD` and `0.3 VDD`). Named here or dropped in transit,
+    //: like `absoluteAmps` above.
+    device: spec.device,
+    supplyAmps: spec.supply_amps,
+    inputHighRatio: spec.input_high_ratio,
+    inputLowRatio: spec.input_low_ratio,
     note: spec.note,
     cited: spec.cited ?? {},
   };
@@ -254,7 +276,7 @@ export function terminalPoint(anchor, into = new THREE.Vector3()) {
  */
 export function makeTarget(anchor, palette) {
   const target = new THREE.Mesh(
-    new THREE.SphereGeometry(TARGET_RADIUS, 10, 8),
+    new THREE.SphereGeometry(anchor.userData.part.userData.targetRadius ?? TARGET_RADIUS, 10, 8),
     new THREE.MeshStandardMaterial({
       color: palette.muted ?? palette.line,
       roughness: 0.4,

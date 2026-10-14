@@ -90,8 +90,13 @@ that returns and posts a name back.
 
     POST /api/board/drive   {"board": "XIAO-ESP32-C3-DIP",
                              "levels": {"D1": "low", "D2": "open"},
-                             "volts": {"D1": 0.0, "D2": 1.65}}
-      -> 200 {board, retired, levels, volts}   // the drive as recorded
+                             "volts": {"D1": 0.0, "D2": 1.65},
+                             "devices": {"part-2": {"part": "MCP9808",
+                                 "sda": "D4", "scl": "D5", "vdd": 3.3,
+                                 "address_pins": {"A0": "low", "A1": "low",
+                                                  "A2": "low"},
+                                 "celsius": 25.0}}}
+      -> 200 {board, retired, levels, volts, devices}   // the drive as recorded
          // what the bench drives onto the pins, the whole map each time;
          // a pad left out is open, and one with no volts is held at
          // nothing. 400 "drive-refused" for a level, a voltage, a pad or a
@@ -689,9 +694,9 @@ def handle_board_api(boards: BoardSlot, route: str,
             session.drive(levels, volts, devices)
         except ValueError as error:
             raise api.BoardRunError("drive-refused", str(error)) from error
-        retired, stated, held, _devices = session.inputs[-1]
+        retired, stated, held, wired = session.inputs[-1]
         return {"board": session.board, "retired": retired, "levels": stated,
-                "volts": held}
+                "volts": held, "devices": wired}
 
     raise ApiError(f"no such route: {route}")
 

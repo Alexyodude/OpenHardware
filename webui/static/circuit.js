@@ -411,8 +411,11 @@ export function milliamps(amps) {
  *   wires   `[{pad, part, terminal}]` — `part` is an index into `parts`
  *
  * Returns `{ok, note, parts, inputs, volts}` with one entry per part, in the
- * same order: `{drive, amps, reason, warning}`. `drive` is one of
- * `parts.js`'s three words. `inputs` is pad name -> "high", "low" or "open"
+ * same order: `{drive, amps, reason, warning, device}`. `device` is null for
+ * every part but an I2C one (`model.kind` "i2c_device") that the solve has
+ * placed: `{part, sda, scl, vdd, address_pins}`, what `readDevices` says. An
+ * I2C device stamps nothing and keeps `drive` "unanswerable": it has no lens
+ * and no current. `drive` is one of `parts.js`'s three words. `inputs` is pad name -> "high", "low" or "open"
  * for every pad in state `input`, on a board whose supply states both input
  * levels, and empty on any other: the file header says what each word
  * means. `volts` is pad name -> solved volts for each of those pads whose
@@ -426,13 +429,13 @@ export function analyse(bench) {
     // It is also what an absolute maximum means -- past it is permanent -- so
     // the only thing that clears this is taking the part off the bench, which
     // is what a person does with a burnt LED.
-    drive: "damaged", amps: null, destroyed: true, warning: null,
+    drive: "damaged", amps: null, destroyed: true, warning: null, device: null,
     reason: "destroyed earlier by more current than its absolute maximum. " +
             "What a destroyed part does electrically is not modelled, so the " +
             "circuit shown here is still the intact one",
   } : {
     drive: "unanswerable", amps: null, destroyed: false,
-    reason: "not wired to anything", warning: null,
+    reason: "not wired to anything", warning: null, device: null,
   }));
   // **Every input starts open, and only the solve below says otherwise**
   // (OH-161). Only on a board whose supply states both levels an input
@@ -489,7 +492,6 @@ export function analyse(bench) {
     padState.set(pad.name, pad.state);
     wiring.find(`pad:${pad.name}`);
   }
-  const terminalKey = (index, name) => `part:${index}:${name}`;
   for (const wire of bench.wires) {
     // A wire's far end is a pad OR another part's terminal (OH-116); the
     // union-find never cared which, and now the wire shape says so too.
@@ -581,6 +583,13 @@ export function analyse(bench) {
                       ohms: model.ohms * (1 - POT_TRAVEL) });
       continue;
     }
+    // **An I2C device stamps nothing** (OH-161 step 5): its pins are high
+    // impedance and what it does is on the wire, which the board's
+    // controller answers. This is before the `ASSUMED_OHMS` branch below,
+    // which would stand it in as a resistor across its first two terminals
+    // and blind every group they reach. What the bench states of it is read
+    // after the solve, by `readDevices`.
+    if (model?.kind === "i2c_device") continue;
     const a = nodeOf(terminalKey(index, names[0]));
     const b = nodeOf(terminalKey(index, names[1]));
     // `assumed` on the element too, so that no input is read off a node a
@@ -674,6 +683,11 @@ export function analyse(bench) {
     if (!wired.has(index)) continue;
     const entry = report[index];
     const names = terminalsOf(part);
+    // A device is reported by `readDevices` after this loop. It must not
+    // reach the check below: once `Wire.begin()` routes the pads its SDA and
+    // SCL are on they read `unknown`, and a device wired to an unknown pad
+    // would be called blind -- it has no current to be blind about.
+    if (part.model?.kind === "i2c_device") continue;
     const reaching = names.filter((name) =>
       bench.wires.some((wire) =>
         (wire.part === index && wire.terminal === name)
@@ -842,6 +856,12 @@ export function analyse(bench) {
   }
   notes.push(...readInputs(supply, inputs, volts, nodeOf, solved, grouped,
                            blindGroups));
+  // Only where the board has a bus to state a device to: its supply states
+  // the input levels, as its description reads input and holds a bus.
+  if (reads) {
+    notes.push(...readDevices(bench, report, wiring, nodeOf, solved, grouped,
+                              blindGroups));
+  }
   if (assumed) {
     notes.push("One part on this bench publishes no electrical model, so no " +
                "current is reported for any of them: a value stood in for it " +
@@ -904,6 +924,102 @@ function readInputs(supply, inputs, volts, nodeOf, solved, grouped, blindGroups)
 }
 
 /**
+ * What the bench states of each I2C device on it, into `report[i].device`, and
+ * the bench-note sentences for a device that cannot be stated (OH-161 step 5).
+ * Called by `analyse` only once the circuit has solved, and only on a board
+ * whose supply states input levels -- the boards whose descriptions hold a bus.
+ *
+ * A device is stated when everything the board needs to place it is decided:
+ * `sda` and `scl` are the one board pad each line's net reaches (by wires
+ * alone, a pad's state ignored -- `Wire.begin()` makes both `unknown`, and a
+ * rail is no pad to post); `vdd` is the solved voltage of its VDD over its
+ * GND; and each of A0 to A2 is "high" or "low" against the model's own VIH
+ * and VIL ratios of that supply. An address pin nothing holds, or one
+ * between the two levels, leaves the part with no address and no device; so
+ * does a node a stood-in value decides, as for any input (`readInputs`).
+ * `celsius` is not here: the bench's part carries it, `board3d.js` adds it.
+ */
+function readDevices(bench, report, wiring, nodeOf, solved, grouped, blindGroups) {
+  const notes = [];
+  for (const [index, part] of bench.parts.entries()) {
+    const model = part.model;
+    if (model?.kind !== "i2c_device") continue;
+    const entry = report[index];
+    const touched = bench.wires.some((wire) =>
+      wire.part === index || wire.from?.part === index);
+    if (entry.destroyed || !touched) continue;
+
+    const held = (name) => {
+      const at = nodeOf(terminalKey(index, name));
+      const group = grouped.group(at);
+      return grouped.decided(at) && !(group !== null && blindGroups.has(group));
+    };
+    const volts = (name) => solved.volts[nodeOf(terminalKey(index, name))];
+    const padsOn = (name) => {
+      const root = wiring.find(terminalKey(index, name));
+      return [...new Set(bench.pads.map((pad) => pad.name))].filter((pad) =>
+        RAILS[pad] === undefined && wiring.find(`pad:${pad}`) === root);
+    };
+    // Either `{why}`, the sentence that leaves the part with no device, or
+    // `{device}`.
+    const state = () => {
+      if (!(model.inputHighRatio > 0 && model.inputLowRatio > 0)) {
+        return { why: `its model states inputHighRatio ${model.inputHighRatio} ` +
+                      `and inputLowRatio ${model.inputLowRatio}, which are not ` +
+                      `both above 0` };
+      }
+      const lines = {};
+      for (const line of ["SDA", "SCL"]) {
+        const on = padsOn(line);
+        if (on.length === 0) return { why: `its ${line} reaches no board pad` };
+        if (on.length > 1) {
+          return { why: `its ${line} reaches ${on.join(" and ")}, and a bus ` +
+                        `line is one pad` };
+        }
+        lines[line] = on[0];
+      }
+      if (lines.SDA === lines.SCL) {
+        return { why: `its SCL is on ${lines.SCL}, as its SDA is` };
+      }
+      const open = ["VDD", "GND"].filter((name) => !held(name));
+      if (open.length) {
+        return { why: `its ${open.join(" and ")} is not held at a voltage by ` +
+                      `anything` };
+      }
+      const ground = volts("GND");
+      const vdd = Math.round((volts("VDD") - ground) * MICROVOLTS) / MICROVOLTS;
+      const low = model.inputLowRatio * vdd;
+      const high = model.inputHighRatio * vdd;
+      const address = {};
+      for (const pin of ["A0", "A1", "A2"]) {
+        if (!held(pin)) return { why: `its ${pin} is open, so it has no address` };
+        const level = volts(pin) - ground;
+        if (level <= low) address[pin] = "low";
+        else if (level >= high) address[pin] = "high";
+        else {
+          return { why: `its ${pin} is at ${level.toFixed(2)} V, which it is ` +
+                        `guaranteed to read as neither low (at most ` +
+                        `${low.toFixed(2)} V) nor high (at least ` +
+                        `${high.toFixed(2)} V), so it has no address` };
+        }
+      }
+      return { device: { part: model.device, sda: lines.SDA, scl: lines.SCL, vdd,
+                         address_pins: address } };
+    };
+    const { why, device } = state();
+    if (device) {
+      entry.device = device;
+      entry.reason = `${device.part} on the board's bus: SDA on ${device.sda}, ` +
+                     `SCL on ${device.scl}, ${device.vdd} V supply`;
+    } else {
+      entry.reason = why;
+      notes.push(`${part.label}: ${why}; the board is told of no device.`);
+    }
+  }
+  return notes;
+}
+
+/**
  * The output resistance behind a pad driven `state`: the pad's own, where
  * the supply gives it one in `pins`, and the supply's otherwise. An ESP32-C3's
  * GPIO2 to 5 come out of reset at half the common drive and its USB pads at
@@ -918,6 +1034,11 @@ function driveOhms(supply, name, state) {
 /** The two names a part's wires may land on. */
 function terminalsOf(part) {
   return part.terminals ?? (part.model ? [part.model.from, part.model.to] : []);
+}
+
+/** The key one part's terminal has in `analyse`'s nets. */
+function terminalKey(index, name) {
+  return `part:${index}:${name}`;
 }
 
 /** Which net is ground: the one holding a pad the vendor labelled `GND`. */

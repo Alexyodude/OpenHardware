@@ -95,7 +95,8 @@ const network = globalThis.fetch;
 let api = null;
 globalThis.fetch = async (url, options = {}) => {
   if (url.startsWith("/models/parts/")) {
-    const bytes = readFileSync(given.part);
+    const kind = url.slice("/models/parts/".length, -".glb".length);
+    const bytes = readFileSync(given.parts[kind]);
     return { ok: true, arrayBuffer: async () => bytes.buffer.slice(
       bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
   }
@@ -120,16 +121,51 @@ def resistor_glb(path: pathlib.Path) -> None:
     """The narrowest part `readGlb` and `dressPart` accept: one triangle,
     two leads, and the 220 ohm resistor's electrical model as the importer
     writes it into `asset.extras`."""
+    write_glb(path, {
+        "chip": "probe_resistor", "label": "220 ohm resistor", "lens": None,
+        "terminals": [{"name": "lead A", "at": [-3.8, -0.5, 0]},
+                      {"name": "lead B", "at": [3.8, -0.5, 0]}],
+        "electrical": {"kind": "resistor", "ohms": 231.0, "note": "",
+                       "cited": {"ohms": "RESISTOR_ELECTRICAL's"}}})
+
+
+#: An MCP9808's pins in DS25095A Table 3-1's order (p.11).
+MCP9808_PINS = ("SDA", "SCL", "Alert", "GND", "A2", "A1", "A0", "VDD")
+
+
+def mcp9808_glb(path: pathlib.Path) -> None:
+    """The same narrow part with an MCP9808's eight terminals and the model
+    the importer will write for it (OH-161 step 5, slice 4d), in the
+    spellings `parts.js`'s `electricalOf` reads.
+
+    The terminals stand 0.65 mm apart along two rows, the pitch the 4d
+    design gives an MSOP-8's leads. The geometry is a stand-in: all the
+    tests need is that neighbours be closer than two default targets
+    (2 x 0.55), so the targets a wire is dropped on have to shrink to stay
+    apart. The numbers are the datasheet's: IDD typical 200 uA (p.3,
+    "Operating Current"), and for
+    "Serial Input/Output (SCL, SDA, A0, A1, A2)" VIH at least 0.7 VDD and
+    VIL at most 0.3 VDD (p.4)."""
+    pitch = 0.65
+    at = [[(number - 1.5) * pitch if number < 4 else (5.5 - number) * pitch,
+           -0.5, 1.5 if number < 4 else -1.5] for number in range(8)]
+    write_glb(path, {
+        "chip": "probe_mcp9808", "label": "MCP9808", "lens": None,
+        "terminals": [{"name": name, "at": at[number]}
+                      for number, name in enumerate(MCP9808_PINS)],
+        "electrical": {"kind": "i2c_device", "device": "MCP9808",
+                       "supply_amps": 200e-6,
+                       "input_high_ratio": 0.7, "input_low_ratio": 0.3,
+                       "note": "", "cited": {}}})
+
+
+def write_glb(path: pathlib.Path, extras: dict) -> None:
+    """A one-triangle glTF with `extras` as its `asset.extras`."""
     binary = (struct.pack("<9f", 0, 0, 0, 1, 0, 0, 0, 0, 1)
               + struct.pack("<9f", 0, 1, 0, 0, 1, 0, 0, 1, 0)
               + struct.pack("<3I", 0, 1, 2))
     document = json.dumps({
-        "asset": {"version": "2.0", "extras": {
-            "chip": "probe_resistor", "label": "220 ohm resistor", "lens": None,
-            "terminals": [{"name": "lead A", "at": [-3.8, -0.5, 0]},
-                          {"name": "lead B", "at": [3.8, -0.5, 0]}],
-            "electrical": {"kind": "resistor", "ohms": 231.0, "note": "",
-                           "cited": {"ohms": "RESISTOR_ELECTRICAL's"}}}},
+        "asset": {"version": "2.0", "extras": extras},
         "buffers": [{"byteLength": len(binary)}],
         "bufferViews": [{"buffer": 0, "byteOffset": offset, "byteLength": length}
                         for offset, length in ((0, 36), (36, 36), (72, 12))],
@@ -160,11 +196,15 @@ def run_page(directory: pathlib.Path, probe: str, case: dict) -> dict:
     hooks = directory / "hooks.mjs"
     script = directory / "probe.mjs"
     listing = directory / "case.json"
-    part = directory / "resistor.glb"
-    resistor_glb(part)
+    resistor = directory / "resistor.glb"
+    mcp9808 = directory / "mcp9808.glb"
+    resistor_glb(resistor)
+    mcp9808_glb(mcp9808)
     hooks.write_text(HOOKS, encoding="utf-8")
     script.write_text(PRELUDE + probe, encoding="utf-8")
-    listing.write_text(json.dumps({**case, "part": str(part)}), encoding="utf-8")
+    listing.write_text(json.dumps({**case, "parts": {
+        "probe_resistor": str(resistor), "probe_mcp9808": str(mcp9808)}}),
+        encoding="utf-8")
     done = subprocess.run([node, str(script), str(STATIC), str(hooks), str(listing)],
                           capture_output=True, text=True, check=False, timeout=120)
     assert done.returncode == 0, done.stderr
@@ -182,7 +222,10 @@ def layout(board: str = BOARD) -> dict:
 #: how many posts there have been and what the bench note says. `steps` is a
 #: list of `[verb, ...]`: `show` draws `given.layouts[n]` (the first is drawn
 #: before the steps), `connect` and `disconnect` take a part's index, the last
-#: added by default. `api` refuses the first `given.refusing` posts with
+#: added by default. `add` takes the kind (the resistor by default), `unwire`
+#: a terminal and an index, `celsius` an index and a temperature, and
+#: `remove` an index; `returned` collects what `celsius` and `remove` answer
+#: and `listing` is `parts()` at the end. `api` refuses the first `given.refusing` posts with
 #: `given.refusal`, answers 200 to the rest, and keeps them all, in order.
 STEPS = r"""
 const posted = [];
@@ -199,22 +242,30 @@ page.showBoard(layouts[0], null);
 await settled();
 const parts = [];
 const wires = {};
+const named = {};
+const returned = [];
 const after = [];
 const notes = [];
 const last = (at) => at ?? parts.length - 1;
 for (const [verb, ...rest] of given.steps) {
   if (verb === "show") page.showBoard(layouts[rest[0]], null);
   if (verb === "levels") page.setLevels(rest[0]);
-  if (verb === "add") parts.push(await page.addPart("probe_resistor"));
+  if (verb === "add") parts.push(await page.addPart(rest[0] ?? "probe_resistor"));
   if (verb === "connect") {
-    wires[`${rest[0]}@${last(rest[2])}`] = page.connect(rest[0], parts[last(rest[2])], rest[1]).id;
+    const wire = page.connect(rest[0], parts[last(rest[2])], rest[1]);
+    wires[`${rest[0]}@${last(rest[2])}`] = wire.id;
+    named[`${rest[1]}@${last(rest[2])}`] = wire.id;
   }
   if (verb === "disconnect") page.disconnect(wires[`${rest[0]}@${last(rest[1])}`]);
+  if (verb === "unwire") page.disconnect(named[`${rest[0]}@${last(rest[1])}`]);
+  if (verb === "celsius") returned.push(page.setCelsius(rest[0], rest[1]));
+  if (verb === "remove") returned.push(page.removePart(rest[0]));
   await settled();
   after.push(posted.length);
   notes.push(page.circuit()?.note ?? null);
 }
-console.log(JSON.stringify({ posted, after, notes, warned }));
+console.log(JSON.stringify({ posted, after, notes, warned, returned,
+                             listing: page.parts() }));
 """
 
 
@@ -342,8 +393,8 @@ def test_drawing_a_board_rearms_the_post_and_states_the_bench_once_where_it_runs
     ]})
     every = {"D1": "open", "D2": "open"}
     assert got["after"] == [1, 1, 2, 2], (got["after"], got["posted"])
-    assert got["posted"] == [{"board": BOARD, "levels": every, "volts": {}}] * 2, (
-        got["posted"])
+    assert got["posted"] == [{"board": BOARD, "levels": every, "volts": {},
+                              "devices": {}}] * 2, got["posted"]
 
 
 def test_a_pad_that_drives_unlike_the_rest_is_solved_at_its_own_resistance(tmp_path):
@@ -434,6 +485,144 @@ def test_a_voltage_that_moves_is_posted_though_its_level_does_not(tmp_path):
     assert levels == ["open", "high", "open", "open"], levels
     assert volts == [None, 3.3, 1.65, 1.1], volts
     assert "analogRead of it" in got["notes"][6], got["notes"][6]
+
+
+# --- an I2C device on the bench (OH-161 step 5, slice 4a) ---------------------
+
+#: What the bench states of the MCP9808 once all seven of its wires are
+#: made, and the temperature the page gives a part that arrives.
+MCP_POSTED = {"part": "MCP9808", "sda": "D4", "scl": "D5", "vdd": 3.3,
+              "address_pins": {"A0": "low", "A1": "low", "A2": "low"},
+              "celsius": 25.0}
+
+#: Add an MCP9808, wire SDA, SCL, VDD, GND and A0 to A2 to ground.
+SEVEN_WIRES = [
+    ["add", "probe_mcp9808"],
+    ["connect", "D4", "SDA"], ["connect", "D5", "SCL"],
+    ["connect", "3V3_OUT", "VDD"], ["connect", "GND", "GND"],
+    ["connect", "GND", "A0"], ["connect", "GND", "A1"],
+    ["connect", "GND", "A2"],
+]
+
+
+def test_six_wires_post_no_device_and_the_seventh_posts_it(tmp_path):
+    """**The bench states a device when it has every fact the board needs.**
+    A first state with an input in it is posted, with `devices` in the body
+    and empty. The part arriving and each of its first six wires post
+    nothing -- the address pin still open says so in the bench note -- and
+    the seventh posts the part under the id the bench gave it, with the
+    pads it is on, its supply, its address pins and the 25 C a part is given
+    when it arrives. A part with no wires has no id in the post to lose."""
+    got = run_page(tmp_path, STEPS, {"layout": layout(), "steps": [
+        ["levels", {"D1": "input"}],               # 1: first inputs, posted
+        *SEVEN_WIRES,                              # 2 to 9
+    ]})
+    assert got["after"] == [1, 1, 1, 1, 1, 1, 1, 1, 2], (got["after"], got["posted"])
+    assert got["posted"][0]["devices"] == {}, got["posted"][0]
+    assert got["posted"][1]["devices"] == {"part-1": MCP_POSTED}, got["posted"][1]
+    assert "A2" in got["notes"][7], got["notes"][7]
+    assert got["warned"] == []
+
+
+def test_a_change_of_celsius_alone_is_posted_and_the_same_celsius_is_not(tmp_path):
+    """The temperature is a fact about the part and nothing else about the
+    bench moves when it changes, so the post's `stated` has to include the
+    devices or a celsius-only change posts nothing. `setCelsius` answers true
+    for a part that has one, and false for one that has none."""
+    got = run_page(tmp_path, STEPS, {"layout": layout(), "steps": [
+        ["levels", {"D1": "input"}],
+        *SEVEN_WIRES,
+        ["celsius", 0, 30.0],                      # 10: posted
+        ["celsius", 0, 30.0],                      # 11: the same, nothing
+        ["celsius", 0, -10.5],                     # 12: posted
+        ["add"],                                   # 13: a resistor, index 1
+        ["celsius", 1, 30.0],                      # 14: no temperature to set
+    ]})
+    assert got["after"][8:] == [2, 3, 3, 4, 4, 4], (got["after"], got["posted"])
+    assert [post["devices"]["part-1"]["celsius"] for post in got["posted"][1:]] == [
+        25.0, 30.0, -10.5], got["posted"]
+    assert got["returned"] == [True, True, True, False], got["returned"]
+    assert [part["celsius"] for part in got["listing"]] == [-10.5, None], got["listing"]
+
+
+def test_unwiring_an_address_pin_posts_the_part_away(tmp_path):
+    """A0 let go leaves the part with no address, so the bench states no
+    device: the post that says so is `devices: {}`, which is what takes the
+    part off the board's bus."""
+    got = run_page(tmp_path, STEPS, {"layout": layout(), "steps": [
+        ["levels", {"D1": "input"}],
+        *SEVEN_WIRES,
+        ["unwire", "A0", 0],                       # 10
+    ]})
+    assert got["after"][8:] == [2, 3], (got["after"], got["posted"])
+    assert got["posted"][2]["devices"] == {}, got["posted"][2]
+    assert "A0" in got["notes"][9], got["notes"][9]
+
+
+def test_a_part_keeps_its_id_when_an_earlier_part_is_taken_off_the_bench(tmp_path):
+    """**The id is minted, not the part's index.** A resistor, then the
+    MCP9808 wired in full under `part-2`; taking the resistor off moves the
+    MCP9808 to index 0, and a post keyed by index would move its registers
+    onto another part. Nothing is posted -- the statement is the same -- and
+    the part that arrives next is `part-3`, not a second `part-2`."""
+    got = run_page(tmp_path, STEPS, {"layout": layout(), "steps": [
+        ["levels", {"D1": "input"}],
+        ["add"],                                   # 2: a resistor, part-1
+        *SEVEN_WIRES,                              # 3 to 10, part-2
+        ["remove", 0],                             # 11
+        ["add"],                                   # 12: part-3
+    ]})
+    assert got["after"][9:] == [2, 2, 2], (got["after"], got["posted"])
+    assert list(got["posted"][1]["devices"]) == ["part-2"], got["posted"][1]
+    assert got["returned"] == [True], got["returned"]
+    assert [(part["kind"], part["id"]) for part in got["listing"]] == [
+        ("probe_mcp9808", "part-2"), ("probe_resistor", "part-3")], got["listing"]
+    assert got["listing"][0]["device"] == {k: v for k, v in MCP_POSTED.items()
+                                           if k != "celsius"}, got["listing"][0]
+
+
+def test_an_i2c_devices_model_reaches_the_bench_in_the_spelling_analyse_reads(tmp_path):
+    """`electricalOf` renames the importer's keys across the glTF: a key it
+    forgets is dropped silently (`absolute_amps` was, once), and a device
+    whose ratios went missing would have no address to read."""
+    probe = r"""
+    api = async () => ({ ok: true, json: async () => ({}) });
+    page.showBoard(given.layout, null);
+    const part = await page.addPart("probe_mcp9808");
+    console.log(JSON.stringify(part.userData.electrical));
+    """
+    got = run_page(tmp_path, probe, {"layout": layout()})
+    assert got == {"kind": "i2c_device", "device": "MCP9808", "supplyAmps": 200e-6,
+                   "inputHighRatio": 0.7, "inputLowRatio": 0.3, "note": "", "cited": {}}, got
+
+
+def test_two_terminals_a_pitch_apart_have_targets_that_do_not_overlap(tmp_path):
+    """**A wire is dropped on a sphere at a terminal**, 0.55 radius by default.
+    An MSOP-8's leads are 0.65 apart, so the default spheres overlap by most
+    of their width and a drop on one lands on its neighbour. The radius is
+    capped to under half the nearest pair, and a resistor's, 7.6 apart, keeps
+    the default."""
+    probe = r"""
+    api = async () => ({ ok: true, json: async () => ({}) });
+    page.showBoard(given.layout, null);
+    const radii = async (kind) => {
+      const part = await page.addPart(kind);
+      const targets = [...part.userData.terminals.values()].map((anchor) =>
+        ({ at: anchor.position, radius: anchor.children.find((c) => c.isMesh).geometry.parameters.radius }));
+      let gap = Infinity;
+      for (const [i, one] of targets.entries()) {
+        for (const other of targets.slice(i + 1)) {
+          gap = Math.min(gap, one.at.distanceTo(other.at) - one.radius - other.radius);
+        }
+      }
+      return { gap, radius: Math.max(...targets.map((target) => target.radius)) };
+    };
+    console.log(JSON.stringify({ chip: await radii("probe_mcp9808"),
+                                 resistor: await radii("probe_resistor") }));
+    """
+    got = run_page(tmp_path, probe, {"layout": layout()})
+    assert got["chip"]["gap"] > 0, got["chip"]
+    assert got["resistor"]["radius"] == 0.55, got["resistor"]
 
 
 # --- the slice, end to end: the page's code against a real server -----------
@@ -646,3 +835,138 @@ def test_the_page_holds_a_voltage_a_sketch_converts_through_the_server(tmp_path)
         assert seen == ["0\r\n", "0\r\n1536\r\n", "0\r\n1536\r\n1024\r\n"], (board, seen)
         assert warned == [], (board, warned)
         assert record == [None, 3.3, 1.65, 1.1], (board, record)
+
+
+# --- a temperature, end to end (OH-161 step 5, slice 4a) ----------------------
+
+#: DS25095A Example 5-1's TA read (p.25), with one difference: the pointer
+#: write ends in a STOP (4.1.1, p.13: the part keeps the pointer across it)
+#: and the read follows, as `test_board_run.py`'s `WIRE_READ16` does. It
+#: returns -1 where the part did not answer. The loop prints the whole
+#: register, 16 bits, each time it differs from the last: -1 first, with
+#: nothing on the bus.
+TA_SKETCH = """
+#include <Wire.h>
+static int read16(uint8_t pointer) {
+  Wire.beginTransmission(0x18);
+  Wire.write(pointer);
+  Wire.endTransmission();
+  if (Wire.requestFrom(0x18, 2) != 2) return -1;
+  int high = Wire.read();
+  int low = Wire.read();
+  return (high << 8) | low;
+}
+int last = -2;
+void setup() { Wire.begin(); }
+void loop() {
+  int ta = read16(5);
+  if (ta != last) { Serial.println(ta); last = ta; }
+  delay(2);
+}
+"""
+
+#: Each board the temperature is watched on: the pads Wire's default SDA and
+#: SCL are, D4 and D5, on all three XIAOs.
+TEMPERATURE_WATCHED = ("XIAO-ESP32-C3-DIP", "XIAO-ESP32-C5-DIP", "XIAO-ESP32-C6-DIP")
+
+#: The page's own path, as the two end-to-end probes above walk it, with a
+#: part that is a device: the sketch runs with nothing on the bus, an
+#: MCP9808 is added and wired in full, and its temperature is changed twice.
+#: **The posts are let land before each run**, as `ANALOG_END_TO_END` says,
+#: and each run is two of run's ceiling, which passes a `delay(2)`.
+TEMPERATURE_END_TO_END = r"""
+api = (url, options) => network(given.server + url, options);
+const json = async (url, body) => (await api(url, body === undefined ? {} : {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body) })).json();
+page.showBoard(await json(`/api/board/pins?board=${encodeURIComponent(given.board)}`), null);
+const run = async () => {
+  await json("/api/board/run", { steps: 200000 });
+  await json("/api/board/run", { steps: 200000 });
+};
+const poll = async () => {
+  await run();
+  page.setLevels((await json("/api/board/state")).pins);
+  await settled();
+  await run();
+  return (await json("/api/board/state")).uart.text;
+};
+const seen = [await poll()];
+const part = await page.addPart("probe_mcp9808");
+for (const [pad, terminal] of [["D4", "SDA"], ["D5", "SCL"], ["3V3_OUT", "VDD"],
+                               ["GND", "GND"], ["GND", "A0"], ["GND", "A1"],
+                               ["GND", "A2"]]) {
+  page.connect(pad, part, terminal);
+}
+await settled();
+seen.push(await poll());
+const set = [];
+for (const celsius of [30.0, -10.5]) {
+  set.push(page.setCelsius(0, celsius));
+  await settled();
+  seen.push(await poll());
+}
+console.log(JSON.stringify({ seen, set, warned }));
+"""
+
+
+def test_the_page_holds_a_temperature_a_sketch_reads_through_the_server(tmp_path):
+    """**The temperature, watched.** A sketch reading the MCP9808's TA register
+    over `Wire` and printing it when it changes, loaded on a real server;
+    the page's own code draws the board and runs it with nothing on the bus,
+    so the sketch prints -1. An MCP9808 added to the bench and wired by its
+    seven pins is stated to the board at 25.0 C and the sketch prints 49552
+    (0xC190: 400 sixteenths, with TA >= TCRIT and TA > TUPPER in bits 15:13,
+    Register 5-4 p.24, at the power-on limits of Table 5-3 p.33). 30.0 C
+    prints 49632 (0xC1E0) and -10.5 C prints 16216 (0x3F58, TA < TLOWER). The
+    session's record holds the temperatures the page posted, in order."""
+    from webui import compile as compiler
+    from webui import emulator_server, targets
+
+    target = targets.find("riscv32")
+    if target is None or not target.selectable:
+        pytest.skip("riscv32 is not built; run python tools/build_core.py")
+    server = emulator_server.build_server("127.0.0.1", 0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    watched = {}
+    try:
+        host, port = server.server_address[:2]
+        base = f"http://{host}:{port}"
+        for board in TEMPERATURE_WATCHED:
+            try:
+                built = compiler.build(board, TA_SKETCH)
+            except compiler.ToolchainMissing as exc:
+                pytest.skip(str(exc))
+            assert built.ok, (board, built.diagnostics)
+            request = urllib.request.Request(
+                base + "/api/board/load", method="POST",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps({"board": board,
+                                 "image": base64.b64encode(built.image).decode(),
+                                 "base": hex(compiler.recipe_for(board).base)}).encode())
+            with urllib.request.urlopen(request, timeout=30):
+                pass
+            directory = tmp_path / str(len(watched))
+            directory.mkdir()
+            got = run_page(directory, TEMPERATURE_END_TO_END,
+                           {"server": base, "board": board})
+            record = [devices.get("part-1", {}).get("celsius")
+                      for _, _levels, _volts, devices
+                      in server.RequestHandlerClass.boards.session.inputs]
+            watched[board] = (got["seen"], got["set"], got["warned"], record)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    for board, (seen, set_, warned, record) in watched.items():
+        assert [text.split() for text in seen] == [
+            ["-1"], ["-1", "49552"], ["-1", "49552", "49632"],
+            ["-1", "49552", "49632", "16216"]], (board, seen)
+        assert set_ == [True, True], (board, set_)
+        assert warned == [], (board, warned)
+        # Before the part there is the one post that states the inputs the
+        # sketch left (no device in it), and nothing is posted for the six
+        # wires that do not yet make a device.
+        assert record[-3:] == [25.0, 30.0, -10.5], (board, record)
+        assert set(record[:-3]) == {None}, (board, record)

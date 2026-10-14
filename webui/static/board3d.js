@@ -2405,6 +2405,14 @@ export async function addPart(kind) {
   const loaded = await loadPart(kind);
   if (!loaded) return null;
   const part = dressPart(loaded.group, loaded.extras, view.palette);
+  // **An id minted when the part arrives, and kept** (OH-161 step 5):
+  // `view.parts` is spliced when a part is taken off, so an index names a
+  // different part afterwards, and the board keys a device's registers by
+  // this. Never reused, for the same reason `nextWireId` is not.
+  part.userData.benchId = `part-${nextPartId++}`;
+  if (part.userData.electrical?.kind === "i2c_device") {
+    part.userData.celsius = DEFAULT_CELSIUS;
+  }
   for (const anchor of part.userData.terminals.values()) {
     makeTarget(anchor, view.palette);
   }
@@ -2435,6 +2443,15 @@ export async function addPart(kind) {
 //: A counter rather than an index into `view.wires`: an index changes when
 //: an earlier wire is removed, and the page holds these across renders.
 let nextWireId = 1;
+
+//: The same, for the id a part is known to the board by: `part-1`, `part-2`.
+let nextPartId = 1;
+
+//: The temperature a temperature sensor arrives at. **A judgement**, not a
+//: measurement: nothing says what room a bench is in, and 25 C is a room
+//: (the MCP9808 datasheet's self-heating example says "At room temperature
+//: (TA = +25 C)"). The panel changes it (`setCelsius`).
+const DEFAULT_CELSIUS = 25.0;
 
 //: Part meshes, fetched once each. A bench with six LEDs on it should ask
 //: for one file, and `dressPart` clones what it needs per part anyway.
@@ -2578,6 +2595,12 @@ function connectionOf(part) {
 export function parts() {
   const report = view.circuit?.parts ?? [];
   return view.parts.map((part, at) => ({
+    // The id the board knows the part by, and its temperature where it has
+    // one; `device` is what the bench states of it (OH-161 step 5), without
+    // the temperature, which is the part's own.
+    id: part.userData.benchId,
+    celsius: part.userData.celsius ?? null,
+    device: report[at]?.device ?? null,
     kind: part.userData.kind,
     label: part.userData.label,
     drive: part.userData.drive,
@@ -2638,6 +2661,22 @@ export function disconnect(id) {
   const wire = view.wires.find((candidate) => candidate.id === id);
   if (!wire) return false;
   discardWire(wire);
+  applyCircuit();
+  return true;
+}
+
+/**
+ * Set a temperature sensor's temperature, and say whether it has one.
+ *
+ * **Not clamped** (OH-161 step 5): the server is the only range, and refuses
+ * what the part cannot be held at. A value that is not a finite number is
+ * refused here, since `JSON.stringify` would post it as null.
+ */
+export function setCelsius(index, celsius) {
+  const part = view.parts[index];
+  if (!part || part.userData.celsius === undefined) return false;
+  if (typeof celsius !== "number" || !Number.isFinite(celsius)) return false;
+  part.userData.celsius = celsius;
   applyCircuit();
   return true;
 }
@@ -2973,7 +3012,17 @@ function applyCircuit() {
   // solve that did not settle answers every input "open", and there open
   // means unknown, not let go: posting it would release a pad the bench may
   // still be holding. The board keeps the last statement the bench made.
-  if (report.ok) postInputs(report.inputs, report.volts);
+  if (report.ok) {
+    // **The devices the bench states, by the id each part keeps** (OH-161
+    // step 5), with the temperature the part holds -- a fact about the part
+    // and not the circuit, so it is added here and not by `analyse`.
+    const devices = {};
+    for (const [at, part] of view.parts.entries()) {
+      const device = report.parts[at].device;
+      if (device) devices[part.userData.benchId] = { ...device, celsius: part.userData.celsius };
+    }
+    postInputs(report.inputs, report.volts, devices);
+  }
 }
 
 //: The drives in flight, one after another. **Chained, not fired together**:
@@ -3007,17 +3056,26 @@ let posting = Promise.resolve();
  * level does -- a divider's midpoint moves when a resistor does, and its
  * level stays "open" throughout. Posted whole, beside the levels, in the one
  * call that is recorded as one drive.
+ *
+ * **And `devices`** (OH-161 step 5): `analyse`'s device for each I2C part, by
+ * the id the bench gave it, with its temperature. They are part of what is
+ * stated, so a change of temperature alone posts, and so does a part taken
+ * off the bench -- an empty map is how a device leaves the board's bus.
+ * A first state with a device in it is posted though no input exists.
  */
-function postInputs(levels, volts = {}) {
+function postInputs(levels, volts = {}, devices = {}) {
   const board = view.board?.userData.board;
   const stated = JSON.stringify([board,
     Object.entries(levels).filter(([, level]) => level !== "open").sort(),
-    Object.entries(volts).sort()]);
-  if (stated === view.posted || (view.posted === null && !Object.keys(levels).length)) {
+    Object.entries(volts).sort(),
+    Object.entries(devices).sort()]);
+  if (stated === view.posted
+      || (view.posted === null && !Object.keys(levels).length
+          && !Object.keys(devices).length)) {
     return;
   }
   view.posted = stated;
-  const body = JSON.stringify({ board, levels, volts });
+  const body = JSON.stringify({ board, levels, volts, devices });
   const refused = (sentence) => {
     view.refusal = sentence;
     console.warn(sentence);

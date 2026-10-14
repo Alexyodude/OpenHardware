@@ -1605,7 +1605,7 @@ def test_a_drive_reaches_the_pin_through_the_server(live_server):
     said = post(live_server, "/api/board/drive",
                 {"board": C3_BOARD, "levels": {"D1": "high", "D9": "low"}})
     assert said == {"board": C3_BOARD, "retired": 0,
-                    "levels": {"D1": "high", "D9": "low"}, "volts": {}}
+                    "levels": {"D1": "high", "D9": "low"}, "volts": {}, "devices": {}}
     level = gpio_in_over_http(live_server)
     assert level & D1 and not level & d9, hex(level)
     post(live_server, "/api/board/run", {"steps": 100})
@@ -1754,7 +1754,7 @@ def test_a_sketch_converts_the_voltage_the_bench_held_through_the_server(live_se
     said = post(live_server, "/api/board/drive",
                 {"board": C3_BOARD, "levels": {"D0": "open"}, "volts": {"D0": 1.65}})
     assert said == {"board": C3_BOARD, "retired": 2_000,
-                    "levels": {"D0": "open"}, "volts": {"D0": 1.65}}
+                    "levels": {"D0": "open"}, "volts": {"D0": 1.65}, "devices": {}}
     post(live_server, "/api/board/run", {"steps": 2_000})
     post(live_server, "/api/board/drive",
          {"board": C3_BOARD, "levels": {"D0": "open"}, "volts": {"D0": 1.1}})
@@ -2073,6 +2073,40 @@ def test_a_description_with_no_i2c_refuses_devices_by_name(monkeypatch):
         with pytest.raises(ValueError) as caught:
             session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
         assert "no I2C bus" in str(caught.value) and "u1" in str(caught.value)
+
+
+def test_the_route_answers_the_devices_it_recorded(live_server):
+    """The drive's answer is the drive as the session recorded it, and the
+    record has held the devices since slice 1: the page reads its own post
+    back from the answer. A drive that states none answers an empty map, and
+    a part taken off the bench is then absent from the answer too."""
+    load_c3_blink(live_server)
+    said = post(live_server, "/api/board/drive",
+                {"board": C3_BOARD, "levels": {}, "devices": {"part-2": MCP9808_ON_D4_D5}})
+    assert said["devices"] == {"part-2": MCP9808_ON_D4_D5}, said
+    said = post(live_server, "/api/board/drive", {"board": C3_BOARD, "levels": {}})
+    assert said["devices"] == {}, said
+
+
+def test_every_description_whose_supply_states_input_levels_has_a_bus():
+    """`circuit.js` reports a device only on a board whose supply states both
+    input levels -- the same boards whose descriptions read input -- and the
+    page posts it to whichever of them is running. A description that stated
+    the levels and had no `hold_bus` would be refused every post by name."""
+    import importlib
+    import pkgutil
+
+    from webui import boards
+
+    reading = []
+    for module in pkgutil.iter_modules(boards.__path__):
+        description = importlib.import_module(f"webui.boards.{module.name}")
+        supply = getattr(description, "SUPPLY", None)
+        if isinstance(supply, dict) and {"input_high_volts", "input_low_volts"} <= set(supply):
+            reading.append(module.name)
+            assert callable(getattr(description, "hold_bus", None)), (
+                f"{module.name} states input levels and has no hold_bus")
+    assert {"esp32c3", "esp32c5", "esp32c6"} <= set(reading), reading
 
 
 def test_a_refused_drive_leaves_a_kept_part_as_it_was():

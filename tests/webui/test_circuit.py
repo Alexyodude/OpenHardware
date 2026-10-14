@@ -147,6 +147,44 @@ XIAO = [
     {"name": "VBUS", "state": "unknown"},
 ]
 
+#: An MCP9808 as `webui/static/parts.js`'s `electricalOf` hands it to the
+#: bench (OH-161 step 5). **Its terminals are Table 3-1's names, in its pin
+#: order** (DS25095A p.11), because `analyse` reads them by name.
+#:
+#: - `supplyAmps` is IDD, typical: 200 uA (p.3, "Operating Current", 200 typ
+#:   and 400 max). Nothing in slice 4a reads it; the model carries it.
+#: - `inputHighRatio` and `inputLowRatio` are VIH and VIL for "Serial
+#:   Input/Output (SCL, SDA, A0, A1, A2)" (p.4): at least 0.7 VDD reads
+#:   high, at most 0.3 VDD reads low.
+MCP9808 = {
+    "label": "MCP9808", "terminals": ["SDA", "SCL", "Alert", "GND", "A2", "A1", "A0", "VDD"],
+    "model": {"kind": "i2c_device", "device": "MCP9808", "supplyAmps": 200e-6,
+              "inputHighRatio": 0.7, "inputLowRatio": 0.3},
+}
+
+#: A XIAO ESP32-C3's pads with the I2C pair, as `webui/api.py` sends them
+#: while a sketch has called `Wire.begin()`: D4 and D5 are routed to the
+#: controller, so they read `unknown`. D1 is an input.
+BUS = [
+    {"name": "D4", "state": "unknown"},
+    {"name": "D5", "state": "unknown"},
+    {"name": "D1", "state": "input"},
+    {"name": "3V3_OUT", "state": "unknown"},
+    {"name": "GND", "state": "unknown"},
+]
+
+#: The seven wires that make part 0 an MCP9808 on D4 and D5: SDA, SCL, VDD,
+#: GND, and the three address pins to ground.
+MCP_WIRES = [
+    {"pad": "D4", "part": 0, "terminal": "SDA"},
+    {"pad": "D5", "part": 0, "terminal": "SCL"},
+    {"pad": "3V3_OUT", "part": 0, "terminal": "VDD"},
+    {"pad": "GND", "part": 0, "terminal": "GND"},
+    {"pad": "GND", "part": 0, "terminal": "A0"},
+    {"pad": "GND", "part": 0, "terminal": "A1"},
+    {"pad": "GND", "part": 0, "terminal": "A2"},
+]
+
 
 def run(tmp_path: pathlib.Path, body: str) -> dict:
     """Run a fragment against the real `circuit.js` under node, and parse it.
@@ -173,6 +211,9 @@ def run(tmp_path: pathlib.Path, body: str) -> dict:
         f"const PADS = {json.dumps(PADS)};\n"
         f"const C3 = {json.dumps(C3)};\n"
         f"const XIAO = {json.dumps(XIAO)};\n"
+        f"const MCP9808 = {json.dumps(MCP9808)};\n"
+        f"const BUS = {json.dumps(BUS)};\n"
+        f"const MCP_WIRES = {json.dumps(MCP_WIRES)};\n"
         + textwrap.dedent(body),
         encoding="utf-8")
     done = subprocess.run([node, str(script)], capture_output=True, text=True)
@@ -2126,3 +2167,241 @@ def test_every_esp32_boards_three_volt_rail_is_a_rail(tmp_path):
         assert any(rails.get(name) == 0.0 for name in names), (board.name, sorted(names))
         checked.append(board.name)
     assert "Adafruit QT Py ESP32-C3" in checked and "XIAO-ESP32-C3-DIP" in checked
+
+
+# --- an I2C device on the bench (OH-161 step 5, slice 4a) ----------------------
+#
+# A part whose model is `i2c_device` stamps nothing into the circuit: its pins
+# are high impedance, and what it does is on the wire, which the board's I2C
+# controller answers. `analyse` only reads what the bench states about it --
+# which pads its SDA and SCL are on, what its supply is, which way its address
+# pins are tied -- into `report.parts[i].device`, and the page posts that.
+
+MCP_STATED = {"part": "MCP9808", "sda": "D4", "scl": "D5", "vdd": 3.3,
+              "address_pins": {"A0": "low", "A1": "low", "A2": "low"}}
+
+
+def test_an_mcp9808_wired_by_its_seven_pins_states_its_pads_supply_and_address(tmp_path):
+    """SDA on D4, SCL on D5, VDD on the 3.3 V rail, GND and the three address
+    pins on ground: the part states exactly that, whatever state the pads are
+    in. **The pad's state is ignored on purpose**: once `Wire.begin()` routes
+    D4 and D5 to the controller they read `unknown`, and a part wired to an
+    unknown pad is blind everywhere else in `analyse`."""
+    got = run(tmp_path, """
+        const found = {};
+        for (const state of ["unknown", "input", "high", "low"]) {
+          const pads = BUS.map((pad) => (pad.name === "D4" || pad.name === "D5"
+                                         ? {...pad, state} : pad));
+          const report = analyse({supply: C3, pads, parts: [MCP9808], wires: MCP_WIRES});
+          found[state] = {ok: report.ok, device: report.parts[0].device,
+                          note: report.note};
+        }
+        console.log(JSON.stringify(found));
+    """)
+    for state, answer in got.items():
+        assert answer["ok"] is True, (state, answer)
+        assert answer["device"] == MCP_STATED, (state, answer)
+        assert answer["note"] is None, (state, answer)
+
+
+def test_the_address_pins_are_read_as_levels_of_the_supply(tmp_path):
+    """Each of A0, A1 and A2 is "high" or "low" from the part's own VIH and
+    VIL against its own VDD (p.4): wired to the 3.3 V rail it is high, to
+    ground it is low."""
+    got = run(tmp_path, """
+        const ties = [["low", "low", "low"], ["high", "low", "low"],
+                      ["low", "high", "low"], ["low", "low", "high"],
+                      ["high", "high", "high"]];
+        const found = [];
+        for (const tie of ties) {
+          const wires = MCP_WIRES.map((wire) => {
+            const at = ["A0", "A1", "A2"].indexOf(wire.terminal);
+            return at < 0 ? wire : {...wire, pad: tie[at] === "high" ? "3V3_OUT" : "GND"};
+          });
+          const report = analyse({supply: C3, pads: BUS, parts: [MCP9808], wires});
+          found.push([tie, report.parts[0].device.address_pins]);
+        }
+        console.log(JSON.stringify(found));
+    """)
+    for tie, pins in got:
+        assert pins == {"A0": tie[0], "A1": tie[1], "A2": tie[2]}, (tie, pins)
+
+
+def test_an_address_pin_nothing_holds_leaves_the_part_with_no_device_and_names_it(tmp_path):
+    """An open A2 is no level, so the part has no address and nothing is
+    stated for it. The reason names the pin that is open and not the ones
+    that are fine, and the bench note says it too."""
+    got = run(tmp_path, """
+        const wires = MCP_WIRES.filter((wire) => wire.terminal !== "A2");
+        const report = analyse({supply: C3, pads: BUS, parts: [MCP9808], wires});
+        console.log(JSON.stringify({device: report.parts[0].device,
+                                    reason: report.parts[0].reason, note: report.note}));
+    """)
+    assert got["device"] is None, got
+    assert "A2" in got["reason"] and "A0" not in got["reason"] \
+        and "A1" not in got["reason"], got["reason"]
+    assert "A2" in got["note"], got["note"]
+
+
+def test_an_address_pin_between_the_two_levels_is_not_given_an_address(tmp_path):
+    """A1 on a divider's midpoint, 1.65 V of 3.3 V, is neither at most 0.3 VDD
+    (0.99 V) nor at least 0.7 VDD (2.31 V): the datasheet promises neither
+    reading, so the part has no address and the reason names A1 and its
+    voltage. The same pad still reads "open" with its voltage as an input,
+    as it did without the part."""
+    got = run(tmp_path, """
+        const wires = [
+          ...MCP_WIRES.map((wire) => (wire.terminal === "A1" ? {...wire, pad: "D1"} : wire)),
+          {pad: "3V3_OUT", part: 1, terminal: "lead A"},
+          {pad: "D1", part: 1, terminal: "lead B"},
+          {pad: "D1", part: 2, terminal: "lead A"},
+          {pad: "GND", part: 2, terminal: "lead B"},
+        ];
+        const report = analyse({supply: C3, pads: BUS,
+                                parts: [MCP9808, RESISTOR, RESISTOR], wires});
+        console.log(JSON.stringify({device: report.parts[0].device,
+                                    reason: report.parts[0].reason,
+                                    inputs: report.inputs, volts: report.volts}));
+    """)
+    assert got["device"] is None, got
+    assert "A1" in got["reason"] and "1.65" in got["reason"], got["reason"]
+    assert "A0" not in got["reason"] and "A2" not in got["reason"], got["reason"]
+    assert got["inputs"]["D1"] == "open" and got["volts"]["D1"] == 1.65, got
+
+
+def test_an_address_pin_on_a_node_a_stood_in_value_decides_is_not_read(tmp_path):
+    """A part with no model stands in as 1 kohm between its two legs, and
+    no input is read off a node that moves (OH-161). A1 tied to D1, which
+    is held at the rail through such a part, is on one: the reason names A1."""
+    got = run(tmp_path, """
+        const mystery = {label: "mystery", terminals: ["x", "y"], model: null};
+        const wires = [
+          ...MCP_WIRES.map((wire) => (wire.terminal === "A1" ? {...wire, pad: "D1"} : wire)),
+          {pad: "3V3_OUT", part: 1, terminal: "x"},
+          {pad: "D1", part: 1, terminal: "y"},
+        ];
+        const report = analyse({supply: C3, pads: BUS, parts: [MCP9808, mystery], wires});
+        console.log(JSON.stringify({device: report.parts[0].device,
+                                    reason: report.parts[0].reason}));
+    """)
+    assert got["device"] is None, got
+    assert "A1" in got["reason"], got["reason"]
+
+
+def test_a_bus_line_on_no_pad_or_on_two_pads_is_not_stated(tmp_path):
+    """SDA and SCL are each exactly one board pad's net, found by wires
+    alone. SDA wired to nothing, to only the 3.3 V rail (a rail is no pad to
+    post), to D4 and D1 at once, or SCL on the pad SDA is on, each leave the
+    part with no device and a reason that names the line and the pads."""
+    got = run(tmp_path, """
+        const without = (name) => MCP_WIRES.filter((wire) => wire.terminal !== name);
+        const cases = {
+          "SDA on nothing": [without("SDA"), "SDA"],
+          "SDA on the rail": [[...without("SDA"), {pad: "3V3_OUT", part: 0, terminal: "SDA"}], "SDA"],
+          "SDA on two pads": [[...MCP_WIRES, {pad: "D1", part: 0, terminal: "SDA"}], "D1"],
+          "SCL on nothing": [without("SCL"), "SCL"],
+          "SCL on SDA's pad": [MCP_WIRES.map((wire) => (wire.terminal === "SCL"
+                                 ? {...wire, pad: "D4"} : wire)), "SCL"],
+        };
+        const found = {};
+        for (const [name, [wires, word]] of Object.entries(cases)) {
+          const report = analyse({supply: C3, pads: BUS, parts: [MCP9808], wires});
+          found[name] = {device: report.parts[0].device, reason: report.parts[0].reason, word};
+        }
+        console.log(JSON.stringify(found));
+    """)
+    for name, answer in got.items():
+        assert answer["device"] is None, (name, answer)
+        assert answer["word"] in answer["reason"], (name, answer)
+
+
+def test_a_supply_nothing_holds_leaves_the_part_with_no_device_and_names_the_pin(tmp_path):
+    """VDD with no wire, or GND with none, is a supply the solve did not
+    decide: the part states no VDD and the reason names the pin."""
+    got = run(tmp_path, """
+        const found = {};
+        for (const name of ["VDD", "GND"]) {
+          const wires = MCP_WIRES.filter((wire) => wire.terminal !== name);
+          const report = analyse({supply: C3, pads: BUS, parts: [MCP9808], wires});
+          found[name] = {device: report.parts[0].device, reason: report.parts[0].reason};
+        }
+        console.log(JSON.stringify(found));
+    """)
+    for name, answer in got.items():
+        assert answer["device"] is None, (name, answer)
+        assert name in answer["reason"], (name, answer)
+
+
+def test_an_i2c_device_stamps_nothing_so_an_input_on_its_pad_reads_the_same(tmp_path):
+    """**The part's pins are high impedance.** A 220 ohm resistor from D4 to
+    ground holds D4 low, 0 V. Put the MCP9808's SDA on D4 beside it and the
+    input reads the same, with the same volts and the same current through
+    the resistor, and the resistor's own report is the one it had. A part
+    with no model would have stood in as 1 kohm between SDA and SCL and
+    blinded D4 and D5 both."""
+    got = run(tmp_path, """
+        const resistor = [{pad: "D4", part: 0, terminal: "lead A"},
+                          {pad: "GND", part: 0, terminal: "lead B"}];
+        const pads = BUS.map((pad) => (pad.name === "D4" || pad.name === "D5"
+                                       ? {...pad, state: "input"} : pad));
+        const alone = analyse({supply: C3, pads, parts: [RESISTOR], wires: resistor});
+        const beside = analyse({supply: C3, pads, parts: [RESISTOR, MCP9808], wires: [
+          ...resistor, ...MCP_WIRES.map((wire) => ({...wire, part: 1}))]});
+        console.log(JSON.stringify({alone, beside}));
+    """)
+    alone, beside = got["alone"], got["beside"]
+    assert alone["inputs"] == {"D4": "low", "D5": "open", "D1": "open"}, alone
+    assert beside["inputs"] == alone["inputs"], beside["inputs"]
+    assert beside["volts"] == alone["volts"], beside["volts"]
+    assert beside["parts"][0] == alone["parts"][0], beside["parts"][0]
+    assert beside["parts"][0]["device"] is None
+    assert beside["parts"][1]["device"] == MCP_STATED, beside["parts"][1]
+    assert beside["note"] is None, beside["note"]
+
+
+def test_a_bench_that_does_not_solve_states_no_device(tmp_path):
+    """A resistor with one lead on the 3.3 V rail and on ground is a short
+    across a supply, which no solve describes. The MCP9808 is wired in full
+    and is stated no device, as every input is answered open there."""
+    got = run(tmp_path, """
+        const report = analyse({supply: C3, pads: BUS, parts: [MCP9808, RESISTOR], wires: [
+          ...MCP_WIRES,
+          {pad: "3V3_OUT", part: 1, terminal: "lead A"},
+          {pad: "GND", part: 1, terminal: "lead A"},
+        ]});
+        console.log(JSON.stringify({ok: report.ok, device: report.parts[0].device}));
+    """)
+    assert got == {"ok": False, "device": None}, got
+
+
+def test_a_board_whose_supply_states_no_input_levels_states_no_device(tmp_path):
+    """The Uno's supply states no input levels and its description reads no
+    input, so there is no bus to state a device to: the part is wired in
+    full and has none, as nothing is posted for an Uno's inputs."""
+    got = run(tmp_path, """
+        const report = analyse({supply: UNO, pads: BUS, parts: [MCP9808], wires: MCP_WIRES});
+        console.log(JSON.stringify(report.parts[0].device));
+    """)
+    assert got is None, got
+
+
+def test_an_i2c_device_model_without_its_input_ratios_is_refused_with_what_it_states(tmp_path):
+    """A model that says `i2c_device` and carries no VIH or VIL cannot read an
+    address pin. It is not guessed at: the reason has the values it found."""
+    got = run(tmp_path, """
+        const bare = {...MCP9808, model: {...MCP9808.model, inputHighRatio: undefined}};
+        const report = analyse({supply: C3, pads: BUS, parts: [bare], wires: MCP_WIRES});
+        console.log(JSON.stringify({device: report.parts[0].device,
+                                    reason: report.parts[0].reason}));
+    """)
+    assert got["device"] is None, got
+    assert "0.3" in got["reason"] and "inputHighRatio" in got["reason"], got["reason"]
+
+
+def test_a_part_that_is_not_an_i2c_device_reports_no_device(tmp_path):
+    got = run(tmp_path, """
+        const report = analyse({supply: C3, pads: XIAO, parts: [LED], wires: [
+          {pad: "D10", part: 0, terminal: "anode"}, {pad: "GND", part: 0, terminal: "cathode"}]});
+        console.log(JSON.stringify(report.parts[0]));
+    """)
+    assert got["device"] is None and got["drive"] == "lit", got
