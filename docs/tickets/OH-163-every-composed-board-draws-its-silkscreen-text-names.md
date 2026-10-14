@@ -13,8 +13,6 @@ touches:
 - tools/eagle.py
 - tests/rules/test_eagle.py
 - tests/rules/test_import_board.py
-- tools/import_3d_model.py
-- tests/rules/test_import_3d_model.py
 - tools/compose_board_3d.py
 - tests/rules/test_compose_board_3d.py
 ---
@@ -172,3 +170,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-15:** Lends tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py to OH-199 (the composer's latent edges: a skipped board's stale index entry, the skipped signal, a test that downloads, absent-by-name); they come back when OH-199's slice lands.
 
 **Note 2026-10-15:** Takes back tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py from OH-199 (slice 1 merged). For this ticket's importer, from OH-199: write_index lists every entry with file None where no .glb is on disk, while the composer now leaves a skipped board out, and an import_3d_model.py --all run re-indexes a stale .glb by file presence.
+
+**Note 2026-10-15:** Lends tools/import_3d_model.py and tests/rules/test_import_3d_model.py to OH-161 (step 5 slice 4d: the MCP9808's MSOP-8 PARTS row, its leads named from KiCad's footprint); they come back when slice 4d lands.
