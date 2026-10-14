@@ -917,22 +917,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(404, b"not found", "text/plain; charset=utf-8")
             self._discard_body()
             return
-        length = int(self.headers.get("Content-Length") or 0)
+        length = self._declared_length()
+        if length is None:
+            # `rfile.read(-1)` reads until the peer closes, uncapped, and a
+            # non-numeric value used to raise out of `do_POST` with no reply
+            # sent. There is no length to drain, so the connection is closed
+            # and that is all: the body's extent is unknown.
+            self.close_connection = True
+            self._json(400, {"error": "Content-Length must be a non-negative "
+                                      "integer, got "
+                                      f"{self.headers.get('Content-Length', '')[:80]!r}"})
+            return
         if length > MAX_BODY_BYTES:
             # Checked from the header, before a byte is allocated. Reading a
             # declared length and then judging it is the thing this avoids.
             #
-            # **Not drained, unlike the two refusals above (OH-166).** Those
-            # are answers about a body of a size this server was willing to
-            # accept, so it can afford to read it out. This one is an answer
-            # about a size it is not, and a drain bounded at MAX_BODY_BYTES
-            # would still leave the tail unread for the reset. The connection
-            # is closed so that the unread body is not parsed as the next
-            # request; a client that goes on sending past a 413 is told so by
-            # the reset, which is what it has earned.
-            self.close_connection = True
+            # **Drained all the same, up to MAX_BODY_BYTES (OH-166).** The
+            # judgement is from the header and nothing is held: the drain
+            # reads and discards in 64 KiB pieces, so it allocates no more
+            # than any other drain. Closing without it sent RST whenever the
+            # client had already sent any of the body (`test_board_run.py`'s
+            # oversized-body test sends two bytes, and failed 1 in 300 alone
+            # on that); a client that sends more than MAX_BODY_BYTES is still
+            # reset past the cap, which is deliberate: this server will not
+            # read a body it has already said it will not accept.
             self._json(413, {"error": f"body of {length} bytes exceeds "
                                       f"{MAX_BODY_BYTES}"})
+            self._discard_body()
             return
         raw = self.rfile.read(length) if length else b"{}"
         try:
@@ -952,11 +963,57 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # --- helpers ------------------------------------------------------------
 
+    def _declared_length(self) -> int | None:
+        """The Content-Length as a count of bytes, 0 if absent or blank, or
+        None if it is not a plain non-negative decimal (a sign, a fraction, an
+        underscore, text, or more digits than Python will convert)."""
+        raw = (self.headers.get("Content-Length") or "").strip()
+        if not raw:
+            return 0
+        if not (raw.isascii() and raw.isdigit()):
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+
+    def handle_expect_100(self) -> bool:
+        """Refuse a body this server would refuse before inviting it.
+
+        `http.server` answers `Expect: 100-continue` with a 100 during request
+        parsing, before `do_POST` runs, so a foreign Origin or an oversized
+        length was told to go ahead and send the body and only then refused
+        it. A client that gets a final status instead sends nothing, so
+        nothing is drained here. The 404 for a path outside `/api/` is not
+        checked here: it is not a security refusal and is not worth a second
+        copy of the routing."""
+        if not self._origin_is_allowed():
+            self.close_connection = True
+            return False
+        length = self._declared_length()
+        if length is not None and length > MAX_BODY_BYTES:
+            self.close_connection = True
+            self._json(413, {"error": f"body of {length} bytes exceeds "
+                                      f"{MAX_BODY_BYTES}"})
+            return False
+        return super().handle_expect_100()
+
     def _discard_body(self) -> None:
         """Read out and drop the declared body, after a refusal has been sent.
 
-        **Why a refusal does this (OH-166 item 3).** A refusal is decided from
-        the headers, so the body is still on its way when the reply goes out.
+        **The property this holds: a refused request's bytes are never parsed
+        as a request.** `protocol_version` is HTTP/1.1, so the connection
+        stays open after a reply, and the bytes of an unread body are what
+        `handle_one_request` parses next. A refusal that left them there let a
+        foreign page smuggle a request past the Origin check: its body was a
+        complete, Origin-less `POST /api/load`, which is allowed, and it ran
+        (a `text/plain` `fetch` with `no-cors` can send those bytes with no
+        preflight). `close_connection = True` below is what stops that, and
+        the drain is only what makes the close polite. Do not move one without
+        the other, and do not return before the first line.
+
+        **Why the drain (OH-166 item 3).** A refusal is decided from the
+        headers, so the body is still on its way when the reply goes out.
         Closing a socket that holds unread data sends RST on Windows, and an
         RST discards whatever the client had not yet read, so a client still
         writing saw `ConnectionAbortedError` in place of the 403. Reading the
@@ -968,19 +1025,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         the same drain either way. Doing it after the reply rather than before
         puts the 403 in front of a client that reads while it writes.
 
-        Bounded twice: by `MAX_BODY_BYTES` (a declared length above that is
-        the 413 path's, not this one's) and by `DRAIN_SECONDS` in total, so a
-        client that declares a body and then sends nothing holds a thread for
-        five seconds and not forever. The connection is closed afterwards in
-        every case: whatever was not read would otherwise be parsed as the
-        next request on a keep-alive connection.
+        Bounded twice: by `MAX_BODY_BYTES` and by `DRAIN_SECONDS` in total, so
+        a client that declares a body and then sends nothing holds a thread
+        for that long and not forever. The cap applies to every caller, the
+        Origin refusal included: the Origin check comes first, so a foreign
+        request that declares more than the cap is drained up to the cap and
+        then closed, not 413'd. Past the cap the close still resets.
         """
         self.close_connection = True
-        try:
-            remaining = min(int(self.headers.get("Content-Length") or 0),
-                            MAX_BODY_BYTES)
-        except ValueError:
-            return  # not a number: nothing to say how much is coming
+        remaining = self._declared_length()
+        if remaining is None:
+            return  # no length to say how much is coming
+        remaining = min(remaining, MAX_BODY_BYTES)
         deadline = time.monotonic() + DRAIN_SECONDS
         try:
             while remaining > 0:

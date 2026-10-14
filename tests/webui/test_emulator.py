@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import json
 import pathlib
+import socket
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -444,8 +446,6 @@ def _post_in_pieces(base: str, path: str, origin: str | None) -> str:
     failure needs the server to have decided before the client has finished
     sending: a client that writes everything in one `sendall` into an idle
     loopback buffer finishes before the server has looked at anything."""
-    import socket
-
     host, port = base.removeprefix("http://").rsplit(":", 1)
     body = b'{"x":"' + b"a" * REFUSED_BODY_BYTES + b'"}'
     head = [f"POST {path} HTTP/1.1", f"Host: {host}:{port}",
@@ -454,7 +454,9 @@ def _post_in_pieces(base: str, path: str, origin: str | None) -> str:
     if origin:
         head.append(f"Origin: {origin}")
     wire = ("\r\n".join(head) + "\r\n\r\n").encode()
-    with socket.create_connection((host, int(port)), timeout=10) as client:
+    # Three seconds a call, not ten: a hang is a failure that should name
+    # itself quickly (`TimeoutError`), not hold the suite.
+    with socket.create_connection((host, int(port)), timeout=3) as client:
         try:
             client.sendall(wire)
             for start in range(0, len(body), 65536):
@@ -496,26 +498,188 @@ def test_a_refusal_reaches_a_client_still_sending_its_body(live_server):
                         "HTTP/1.1 404 Not Found")
 
 
+FOREIGN = "http://evil.example"
+
+
+def _converse(base: str, lines: list[str], body: bytes = b"", *,
+              shut_wr: bool = False, pause: float = 0.0, lag: float = 0.0,
+              trailing: bytes = b"") -> tuple[bytes, str]:
+    """Send a request over a raw socket and return everything read, and how
+    the read ended: `eof` (the server closed cleanly), the name of the
+    connection error that ended it (a reset), or `timeout` (the server held the
+    connection open and said nothing more).
+
+    `shut_wr` half-closes after the body, so a server draining for more sees
+    the end of it at once. `lag` waits between the headers and the body, which
+    lets a server that refuses from the headers answer and close first, so
+    the body arrives at a socket that has gone. `pause` waits before the first
+    read.
+    `trailing` is sent once the first reply's headers have arrived, which is
+    after the declared body and so cannot be mistaken for part of it."""
+    host, port = base.removeprefix("http://").rsplit(":", 1)
+    wire = ("\r\n".join([lines[0], f"Host: {host}:{port}", *lines[1:]])
+            + "\r\n\r\n").encode()
+    data, ended = b"", "timeout"
+    with socket.create_connection((host, int(port)), timeout=3) as client:
+        try:
+            client.sendall(wire)
+            if lag:
+                time.sleep(lag)
+            for start in range(0, len(body), 65536):
+                client.sendall(body[start:start + 65536])
+            if shut_wr:
+                client.shutdown(socket.SHUT_WR)
+            if pause:
+                time.sleep(pause)
+            pending = trailing
+            while True:
+                piece = client.recv(65536)
+                if not piece:
+                    ended = "eof"
+                    break
+                data += piece
+                if pending and b"\r\n\r\n" in data:
+                    try:
+                        client.sendall(pending)
+                    except OSError:
+                        pass  # the server may already have closed: fine
+                    pending = b""
+        except TimeoutError:
+            ended = "timeout"
+        except ConnectionError as exc:
+            ended = type(exc).__name__
+    return data, ended
+
+
+def _statuses(data: bytes) -> list[str]:
+    return [line.decode("latin-1") for line in data.split(b"\r\n")
+            if line.startswith(b"HTTP/1.")]
+
+
+CLOSED = ("eof", "ConnectionResetError", "ConnectionAbortedError")
+
+
+def _post_head(path: str, length: object, *extra: str) -> list[str]:
+    return [f"POST {path} HTTP/1.1", "Content-Type: application/json",
+            f"Content-Length: {length}", *extra]
+
+
 def test_an_oversized_body_is_refused_from_its_header_and_the_connection_closes(
         live_server):
-    """The 413 deliberately never reads the declared length, so it cannot be
-    made safe for a client still sending. What it can do is not leave the
-    connection open to parse the unsent body as the next request: after the
-    413 the server closes, and a client that sent nothing reads end of stream."""
-    import socket
+    """The 413 is judged from the header, and then the connection closes: the
+    unsent body is never parsed as the next request. A client that sent
+    nothing and half-closed reads end of stream (not a reset, not a hang)."""
+    data, ended = _converse(
+        live_server, _post_head("/api/board/load",
+                                emulator_server.MAX_BODY_BYTES + 1),
+        shut_wr=True)
+    assert _statuses(data)[:1] == ["HTTP/1.1 413 Content Too Large"], (data[:80], ended)
+    assert ended == "eof", f"the server did not close after the 413: {ended}"
 
-    host, port = live_server.removeprefix("http://").rsplit(":", 1)
-    wire = (f"POST /api/board/load HTTP/1.1\r\nHost: {host}:{port}\r\n"
-            f"Content-Length: {emulator_server.MAX_BODY_BYTES + 1}\r\n\r\n").encode()
-    with socket.create_connection((host, int(port)), timeout=10) as client:
-        client.sendall(wire)
-        reply = b""
-        while True:
-            piece = client.recv(65536)
-            if not piece:
-                break  # the server closed: end of stream, not a timeout
-            reply += piece
-    assert reply.startswith(b"HTTP/1.1 413"), reply[:80]
+
+def test_a_413_reaches_a_client_that_has_already_sent_some_of_the_body(live_server):
+    """`test_board_run.py::test_an_oversized_body_is_refused_from_its_header`
+    sends two bytes after declaring MAX_BODY_BYTES + 1, and failed 1 in 300 on
+    its own: the server answered 413 and closed, and the bytes then arrived at
+    a socket that had gone, which resets. The lag makes that the rule: the
+    server has certainly answered and closed before the bytes are sent."""
+    attempts = 20
+    bad = []
+    for _ in range(attempts):
+        data, ended = _converse(
+            live_server, _post_head("/api/board/load",
+                                    emulator_server.MAX_BODY_BYTES + 1),
+            b"{}", shut_wr=True, lag=0.05)
+        if _statuses(data)[:1] != ["HTTP/1.1 413 Content Too Large"]:
+            bad.append((ended, data[:40]))
+    assert not bad, f"{len(bad)}/{attempts} did not read the 413: {bad[:3]}"
+
+
+def _state(base: str) -> dict:
+    return get(base, "/api/state?at=256&len=16")
+
+
+def _inner_load() -> bytes:
+    """A complete request with no Origin, which the server allows: what a
+    refused body must never be able to turn into."""
+    body = json.dumps({"hex": "B83412F4", "origin": 256}).encode()
+    return (b"POST /api/load HTTP/1.1\r\nHost: x\r\n"
+            b"Content-Type: application/json\r\n"
+            + f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+
+
+def test_a_refused_bodys_bytes_are_never_parsed_as_a_request(live_server):
+    """The connection is HTTP/1.1 keep-alive, so whatever a refusal leaves
+    unread is parsed as the next request, and that one carries no Origin. A
+    foreign page can send those bytes with a `text/plain` `fetch` in
+    `no-cors` mode, with no preflight. Two shapes, each exactly one reply (the
+    403) with the connection closed and the machine untouched:
+
+    - the inner request wholly inside the declared body, which is what
+      the server did before OH-166 (it parsed it after the 403 and ran it);
+    - the inner request after a declared body of MAX_BODY_BYTES, which the
+      drain reads out and which is only safe because the connection then
+      closes. Draining without closing is the mutant this one kills."""
+    before = _state(live_server)
+    inner = _inner_load()
+
+    inside, ended = _converse(
+        live_server, _post_head("/api/state", len(inner), f"Origin: {FOREIGN}"),
+        inner)
+    assert _statuses(inside) == ["HTTP/1.1 403 Forbidden"], (inside[:200], ended)
+    assert ended in CLOSED, f"left open after the refusal: {ended}"
+    assert _state(live_server) == before
+
+    after, ended = _converse(
+        live_server,
+        _post_head("/api/state", emulator_server.MAX_BODY_BYTES,
+                   f"Origin: {FOREIGN}"),
+        b"x" * emulator_server.MAX_BODY_BYTES, trailing=inner)
+    assert _statuses(after) == ["HTTP/1.1 403 Forbidden"], (after[:200], ended)
+    assert ended in CLOSED, f"left open after the refusal: {ended}"
+    assert _state(live_server) == before
+
+
+def test_a_drain_gives_up_on_a_client_that_declares_a_body_and_sends_none(
+        live_server, monkeypatch):
+    monkeypatch.setattr(emulator_server, "DRAIN_SECONDS", 0.5)
+    started = time.monotonic()
+    data, ended = _converse(
+        live_server, _post_head("/api/board/load", 1_000_000,
+                                f"Origin: {FOREIGN}"))
+    waited = time.monotonic() - started
+    assert _statuses(data) == ["HTTP/1.1 403 Forbidden"], (data[:80], ended)
+    assert ended == "eof", f"the drain never ended: {ended} after {waited:.1f}s"
+    assert waited < 2.0, f"DRAIN_SECONDS is 0.5 and the close took {waited:.1f}s"
+
+
+def test_a_content_length_that_is_not_a_count_is_a_400_that_says_so(live_server):
+    for value in ("-5", "abc", "1_0", "1.5", "+7"):
+        data, ended = _converse(live_server,
+                                _post_head("/api/board/load", value))
+        assert _statuses(data) == ["HTTP/1.1 400 Bad Request"], (
+            value, data[:120], ended)
+        assert repr(value).encode() in data, (value, data[-120:])
+        assert ended in CLOSED, f"{value!r}: left open: {ended}"
+
+
+def test_a_100_continue_is_not_offered_for_a_body_that_will_be_refused(live_server):
+    """`http.server` answers `Expect: 100-continue` while parsing, before any
+    handler runs, so a refused request used to be told to send its body."""
+    cases = (
+        (_post_head("/api/board/load", 1000, f"Origin: {FOREIGN}",
+                    "Expect: 100-continue"), "HTTP/1.1 403 Forbidden"),
+        (_post_head("/api/board/load", emulator_server.MAX_BODY_BYTES + 1,
+                    "Expect: 100-continue"), "HTTP/1.1 413 Content Too Large"),
+    )
+    for lines, status in cases:
+        data, ended = _converse(live_server, lines, shut_wr=True)
+        assert _statuses(data)[:1] == [status], (lines[2:], data[:80], ended)
+    # And an acceptable request is still invited to continue.
+    data, _ = _converse(live_server,
+                        _post_head("/api/load", 2, "Expect: 100-continue"),
+                        shut_wr=True)
+    assert _statuses(data)[:1] == ["HTTP/1.1 100 Continue"], data[:80]
 
 
 # --- a client that goes away is not an error --------------------------------
