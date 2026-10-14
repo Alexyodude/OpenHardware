@@ -4553,7 +4553,7 @@ def test_the_unos_d2_and_d3_are_drawn_as_the_chip_their_value_names():
     names any other part, on any composed board, fails here rather than
     drawing that part as this one.
     """
-    seen = {}
+    seen = set()
     for spec in compose.COMPOSITIONS:
         if spec.layout.suffix != ".brd" or not spec.layout.is_file():
             continue
@@ -4562,7 +4562,7 @@ def test_the_unos_d2_and_d3_are_drawn_as_the_chip_their_value_names():
                 f"{spec.board}: {element.name} is on the MINIMELF land with the "
                 f"value {value!r}, and the row for that land draws "
                 f"{BOURNS_CD1206}'s body: give it a row of its own")
-            seen[(spec.board, element.name)] = element
+            seen.add((spec.board, element.name))
     uno = next(s for s in compose.COMPOSITIONS if s.board == "Arduino Uno")
     if not _fetched(uno):
         pytest.skip(f"SKIPPED: not fetched; run {uno.fetch_with}")
@@ -4572,9 +4572,8 @@ def test_the_unos_d2_and_d3_are_drawn_as_the_chip_their_value_names():
     for name in ("D2", "D3"):
         assert drawn[name].model == "D_1206_3216Metric", (
             f"{name} is drawn from {drawn[name].library}/{drawn[name].model}, "
-            f"and its value names a 1206 (3216) molded-plastic chip, not a "
-            f"MiniMELF")
-        assert "minimelf" not in drawn[name].model.lower()
+            f"and its value names a 1206 (3216) molded-plastic chip, which "
+            f"KiCad draws as Diode_SMD/D_1206_3216Metric")
 
 
 def test_the_unos_d2_and_d3_model_has_the_size_bourns_states_for_the_part():
@@ -4585,10 +4584,10 @@ def test_the_unos_d2_and_d3_model_has_the_size_bourns_states_for_the_part():
 
     Held to those three and not to every extent, on purpose: KiCad's model
     flares its moulding to 1.87 mm at the two end faces and stands its
-    terminals 0.96 mm tall, 0.17 and 0.01 mm over the datasheet's maxima,
-    because it draws a 3216 nominal with IPC's allowances and not this
-    maker's tolerances. Said here so that it is a known difference and not a
-    surprise a later measurement finds.
+    terminals 0.96 mm tall, 0.17 and 0.01 mm over the datasheet's maxima.
+    Why KiCad's model is drawn larger there is not established. Said here so
+    that it is a known difference and not a surprise a later measurement
+    finds.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
     uno = next(s for s in compose.COMPOSITIONS if s.board == "Arduino Uno")
