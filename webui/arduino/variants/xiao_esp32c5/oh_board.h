@@ -175,7 +175,7 @@
 #define OH_GPIO_FUNC_IN_SEL_CFG0       0x600912D4u
 #define OH_GPIO_FUNC_OUT_SEL_CFG0      0x60091AD4u
 #define OH_GPIO_SIG_IN_SEL             0x00000100u   /* IN_SEL_CFG bit 8 */
-#define OH_GPIO_OUT_SEL_OEN_SEL        0x00000400u   /* OUT_SEL_CFG bit 10, OE_SEL */
+#define OH_GPIO_OUT_SEL_OEN_SEL        0x00000400u   /* OUT_SEL_CFG bit 10: OE_SEL, gpio_reg.h:6175 */
 #define OH_GPIO_PIN0                   0x600910D4u
 #define OH_GPIO_PIN_STRIDE             0x4u
 #define OH_GPIO_PIN_PAD_DRIVER         0x00000004u   /* GPIO_PINn bit 2 */

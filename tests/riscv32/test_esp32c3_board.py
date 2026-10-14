@@ -1312,6 +1312,8 @@ def test_incoherent_routing_is_refused_by_naming_what_was_found():
         "two pads": ([(out_sel(8), esp32c3.I2CEXT0_SCL_IDX)], ("SCL", "GPIO7", "GPIO8")),
         "wrong pad back in": ([(in_sel(sda), esp32c3.GPIO_SIG_IN_SEL | 5)],
                               ("SDA", "IN_SEL", "GPIO5")),
+        "an IN_SEL that names no pad": ([(in_sel(sda), esp32c3.GPIO_SIG_IN_SEL | 25)],
+                                        ("SDA", "returns from no pad")),
         "matrix not selected": ([(in_sel(sda), SDA_GPIO)], ("SDA", "SIG_IN_SEL")),
         "not the GPIO function": ([(pad(SDA_GPIO), esp32c3.IO_MUX_FUN_IE)],
                                   ("SDA", "MCU_SEL", "GPIO6")),

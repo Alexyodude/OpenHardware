@@ -1341,8 +1341,25 @@ def test_the_i2c_numbers_this_board_carries_are_the_ones_in_the_header():
         esp32c5.GPIO_FUNC_OUT_SEL_MASK)
     assert re.search(r"GPIO_FUNC0_OUT_SEL : R/W/SC; bitpos: \[8:0\]; default: "
                      rf"{esp32c5.GPIO_OUT_SEL_GPIO};", gpio)
-    assert i2c_bit(gpio, "GPIO_FUNC0_OE_SEL") == 1 << 10
-    assert esp32c5.IO_MUX_MCU_SEL_MASK == 0x7 and esp32c5.IO_MUX_FUNC_GPIO == 1
+    # OE_SEL (bit 10) is not a description constant; `oh_board.h`'s copy is
+    # held to the header in tests/webui/test_compile.py.
+    mux = defines(soc / "register/soc/io_mux_reg.h")
+    assert esp32c5.IO_MUX_MCU_SEL_MASK == int(mux["MCU_SEL_V"], 16)
+    assert esp32c5.IO_MUX_FUNC_GPIO == int(mux["PIN_FUNC_GPIO"])
+    for pad_number in (23, 24):
+        assert esp32c5.IO_MUX_FUNC_GPIO == int(
+            re.search(rf"#define FUNC_GPIO{pad_number}_GPIO{pad_number}\s+(\d+)",
+                      (soc / "register/soc/io_mux_reg.h").read_text(
+                          encoding="utf-8", errors="replace")).group(1)), pad_number
+    # Open drain is FORCE_OUT clear on this part, so both bits are carried.
+    assert i2c_bit(i2c, "I2C_SDA_FORCE_OUT") == esp32c5.I2C_SDA_FORCE_OUT
+    assert i2c_bit(i2c, "I2C_SCL_FORCE_OUT") == esp32c5.I2C_SCL_FORCE_OUT
+    assert re.search(r"I2C_SDA_FORCE_OUT : R/W; bitpos: \[0\]; default: 0;\s*"
+                     r"\*\s+Configures the SDA output mode\.\\+\s*\*\s+0: Open drain output", i2c)
+    assert esp32c5.GPIO_IN_SEL_CONST_HIGH == 0x40 and esp32c5.GPIO_IN_SEL_CONST_LOW == 0x60
+    assert re.search(r"0x40: A constantly high input\s*\*\s+0x60: A constantly low input", gpio)
+    assert esp32c5.GPIO_IN_SEL_I2C_AT_RESET == esp32c5.GPIO_IN_SEL_CONST_HIGH
+    assert "GPIO28" in gpio and esp32c5.GPIO_PIN_COUNT == 29
 
 
 def test_the_opcodes_are_i2c_regs_own_comment_here():
@@ -1605,6 +1622,12 @@ def test_incoherent_routing_is_refused_by_naming_what_was_found():
         "matrix not selected": ([(in_sel_at(sda), SDA_GPIO)], ("SDA", "SIG_IN_SEL")),
         "the C3's SIG_IN_SEL bit": ([(in_sel_at(sda), 1 << 6 | SDA_GPIO)],
                                     ("SDA", "SIG_IN_SEL")),
+        "a constantly high input": ([(in_sel_at(sda), esp32c5.GPIO_SIG_IN_SEL | 0x40)],
+                                    ("SDA", "a constantly high input")),
+        "a constantly low input": ([(in_sel_at(sda), esp32c5.GPIO_SIG_IN_SEL | 0x60)],
+                                   ("SDA", "a constantly low input")),
+        "an IN_SEL that names no pad": ([(in_sel_at(sda), esp32c5.GPIO_SIG_IN_SEL | 0x30)],
+                                        ("SDA", "returns from no pad")),
         "not the GPIO function": ([(pad(SDA_GPIO), esp32c5.IO_MUX_FUN_IE)],
                                   ("SDA", "MCU_SEL", "GPIO23")),
         "input off": ([(pad(SCL_GPIO), 1 << 12)], ("SCL", "FUN_IE", "GPIO24")),

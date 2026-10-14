@@ -603,6 +603,13 @@ I2C_COMMANDS = 8
 #: trigger, so a read finds them 0 and CTR stores them as 0. TRANS_START is
 #: the doorbell.
 I2C_MS_MODE = 1 << 4
+#: **`I2C_SDA_FORCE_OUT` and `I2C_SCL_FORCE_OUT`** (:37, :46; fields :32, :41):
+#: "0: Open drain output, 1: Direct output" -- the C3's are the opposite way
+#: round, so open drain is these bits CLEAR here and `Wire.begin` writes
+#: neither. Carried so that a test without an ESP-IDF checkout can hold
+#: `oh_board.h`'s `OH_I2C_CTR_INIT` to it.
+I2C_SDA_FORCE_OUT = 1 << 0
+I2C_SCL_FORCE_OUT = 1 << 1
 I2C_TRANS_START = 1 << 5
 I2C_CONF_UPGATE = 1 << 11
 I2C_FSM_RST = 1 << 10
@@ -667,11 +674,19 @@ GPIO_FUNC_IN_SEL_CFG0 = 0x2D4
 GPIO_FUNC_OUT_SEL_CFG0 = 0xAD4
 GPIO_SIG_IN_SEL = 1 << 8
 GPIO_FUNC_IN_SEL_MASK = 0x7F
+#: IN_SEL values that are no pad: "0x40: A constantly high input, 0x60: A
+#: constantly low input" (:2796-:2797), the first being what each I2C signal
+#: resets to. GPIO0 to GPIO28 (:2790-:2794) are the pads.
+GPIO_IN_SEL_CONST_HIGH = 0x40
+GPIO_IN_SEL_CONST_LOW = 0x60
+GPIO_PIN_COUNT = 29
 GPIO_FUNC_OUT_SEL_MASK = 0x1FF
 GPIO_OUT_SEL_GPIO = 256
 
-#: `MCU_SEL` [14:12] of a pad register (`io_mux_reg.h:66-69`), and the value
-#: that selects the GPIO matrix, function 1 -- the C3's.
+#: `MCU_SEL` [14:12] of a pad register (`io_mux_reg.h:66-69`, `MCU_SEL_V 0x7`
+#: at :68), and the value that selects the GPIO matrix, function 1
+#: (`PIN_FUNC_GPIO 1`, :128; `FUNC_GPIO23_GPIO23` and `FUNC_GPIO24_GPIO24` are
+#: 1 too) -- the C3's.
 IO_MUX_MCU_SEL_MASK = 0x7
 IO_MUX_FUNC_GPIO = 1
 
@@ -1190,10 +1205,14 @@ def i2c_pad(cpu: Cpu, name: str, signal: int) -> int:
         raise DeviceRefusal(
             f"I2C {name} leaves on GPIO{gpio} but SIG_IN_SEL is clear in "
             f"IN_SEL_CFG {back:#x}: it does not return from the matrix")
-    if back & GPIO_FUNC_IN_SEL_MASK != gpio:
+    chosen = back & GPIO_FUNC_IN_SEL_MASK
+    if chosen != gpio:
+        source = ("a constantly high input" if chosen == GPIO_IN_SEL_CONST_HIGH
+                  else "a constantly low input" if chosen == GPIO_IN_SEL_CONST_LOW
+                  else f"GPIO{chosen}" if chosen < GPIO_PIN_COUNT else "no pad")
         raise DeviceRefusal(
-            f"I2C {name} leaves on GPIO{gpio} but returns from GPIO"
-            f"{back & GPIO_FUNC_IN_SEL_MASK} (IN_SEL_CFG {back:#x})")
+            f"I2C {name} leaves on GPIO{gpio} but returns from {source} "
+            f"(IN_SEL_CFG {back:#x})")
     if not pad_word & IO_MUX_FUN_IE:
         raise DeviceRefusal(
             f"I2C {name} leaves on GPIO{gpio} but its input is off (FUN_IE "
@@ -1220,6 +1239,14 @@ def serve_i2c(cpu: Cpu, address: int, *,
     (v1.4); this part's TRM was not re-read for it**, and the model's choice
     that the NACKed command stays without DONE is unverified against silicon
     on this part as on that one.
+
+    **A NACK is followed by a STOP and TRANS_COMPLETE here as an inference,
+    and `Wire` does not depend on it** (it reads NACK first). IDF 5.5's own
+    driver writes and starts a STOP itself after a NACK
+    (`components/esp_driver_i2c/i2c_master.c:509-517`), which suggests the controller may not end with a STOP and
+    TRANS_COMPLETE by itself: a hand-written image that waits on
+    TRANS_COMPLETE after a NACK could hang on silicon where this model
+    completes.
 
     **`DeviceRefusal` is the only refusal**, raised for what silicon does and
     this model does not: slave mode, END, a TX byte no WRITE consumed or a

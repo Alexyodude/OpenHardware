@@ -1227,10 +1227,12 @@ def i2c_pad(cpu: Cpu, name: str, signal: int) -> int:
         raise DeviceRefusal(
             f"I2C {name} leaves on GPIO{gpio} but SIG_IN_SEL is clear in "
             f"IN_SEL_CFG {back:#x}: it does not return from the matrix")
-    if back & GPIO_FUNC_IN_SEL_MASK != gpio:
+    chosen = back & GPIO_FUNC_IN_SEL_MASK
+    if chosen != gpio:
         raise DeviceRefusal(
-            f"I2C {name} leaves on GPIO{gpio} but returns from GPIO"
-            f"{back & GPIO_FUNC_IN_SEL_MASK} (IN_SEL_CFG {back:#x})")
+            f"I2C {name} leaves on GPIO{gpio} but returns from "
+            f"{f'GPIO{chosen}' if chosen in IO_MUX_PADS else 'no pad'} "
+            f"(IN_SEL_CFG {back:#x})")
     if not cpu.read_word(IO_MUX + IO_MUX_GPIO0 + gpio * IO_MUX_STRIDE) & IO_MUX_FUN_IE:
         raise DeviceRefusal(
             f"I2C {name} leaves on GPIO{gpio} but its input is off (FUN_IE "
@@ -1269,6 +1271,14 @@ def serve_i2c(cpu: Cpu, address: int, *,
     WRITE with too few, a list that never stops, a READ from nothing addressed
     for reading. Anything else raised here is a bug in this host and is not
     caught.
+
+    **A NACK is followed by a STOP and TRANS_COMPLETE here as an inference,
+    and `Wire` does not depend on it** (it reads NACK first). IDF 5.5's own
+    driver writes and starts a STOP itself after a NACK
+    (`components/esp_driver_i2c/i2c_master.c:509-517`), which suggests the controller may not end with a STOP and
+    TRANS_COMPLETE by itself: a hand-written image that waits on
+    TRANS_COMPLETE after a NACK could hang on silicon where this model
+    completes.
     """
     if not cpu.read_word(I2C_GATE[0]) & I2C_GATE[1]:
         return

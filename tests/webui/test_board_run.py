@@ -2158,10 +2158,12 @@ def test_a_wire_sketch_with_nothing_on_the_bus_is_nacked_and_reads_nothing():
     with _wire_session() as session:
         words = _printed_tokens(session, 6)
         assert session.status == "running", (session.status, session.detail)
-        assert words == ["2", "0", "-1", "0", "0", "-1"], (
-            f"a NACKed address is endTransmission's 2 and requestFrom's 0 "
-            f"bytes; the deferred write of the second read reports 0 because "
-            f"it has not gone out yet: {words}")
+        assert words == ["4", "0", "-1", "0", "0", "-1"], (
+            f"a NACKed write that carries data is endTransmission's 4 on the "
+            f"pinned vendor core (i2c_master_transmit's ESP_ERR_INVALID_STATE "
+            f"falls to Wire.cpp's default) and requestFrom's 0 bytes; the "
+            f"deferred write of the second read reports 0 because it has not "
+            f"gone out yet: {words}")
 
 
 #: A sketch that never calls `begin`: the controller's function clock is still
@@ -2244,6 +2246,36 @@ void loop() { }
 def test_a_nacked_probe_does_not_make_the_next_probe_read_as_nacked():
     words, _ = _run_wire(WIRE_SCAN_SKETCH, 2)
     assert words == ["2", "0"], f"0x19 NACKs, 0x18 acknowledges: {words}"
+
+
+#: With nothing at 0x19: a zero-length write, then one byte, then two. The
+#: pinned vendor core (arduino-esp32 @ 2787dab, `Wire.cpp:445-476`) maps
+#: ESP_OK to 0, ESP_FAIL and ESP_ERR_NOT_FOUND to 2, ESP_ERR_TIMEOUT to 5 and
+#: everything else to 4. `esp32-hal-i2c-ng.c:259-275`: a zero-length `i2cWrite`
+#: is `i2c_master_probe`, whose NACK is ESP_ERR_NOT_FOUND (2); any other is
+#: `i2c_master_transmit`, whose NACK is ESP_ERR_INVALID_STATE (IDF 5.5
+#: `i2c_master.c`), which falls to 4 -- address or data byte alike.
+WIRE_PROBE_SKETCH = """
+#include <Wire.h>
+void setup() {
+  Wire.begin();
+  Wire.beginTransmission(0x19);
+  Serial.println(Wire.endTransmission());
+  Wire.beginTransmission(0x19);
+  Wire.write(6);
+  Serial.println(Wire.endTransmission());
+  Wire.beginTransmission(0x19);
+  Wire.write(6);
+  Wire.write(7);
+  Serial.println(Wire.endTransmission());
+}
+void loop() { }
+"""
+
+
+def test_a_c3_zero_length_probe_is_nacked_with_2_and_a_write_with_data_with_4():
+    words, _ = _run_wire(WIRE_PROBE_SKETCH, 3, device=False)
+    assert words == ["2", "4", "4"], words
 
 
 #: 32 writes into a 31-byte buffer: the 32nd is refused, endTransmission says
@@ -2689,7 +2721,12 @@ def test_a_c5_wire_sketch_reads_ta_at_the_held_temperature():
 
 def test_a_c5_wire_sketch_with_nothing_on_the_bus_is_nacked_and_reads_nothing():
     words, _ = _c5_run(WIRE_SKETCH, 6, device=False)
-    assert words == ["2", "0", "-1", "0", "0", "-1"], words
+    assert words == ["4", "0", "-1", "0", "0", "-1"], words
+
+
+def test_a_c5_zero_length_probe_is_nacked_with_2_and_a_write_with_data_with_4():
+    words, _ = _c5_run(WIRE_PROBE_SKETCH, 3, device=False)
+    assert words == ["2", "4", "4"], words
 
 
 def test_a_c5_wire_sketch_that_never_began_times_out_with_a_closed_gate():

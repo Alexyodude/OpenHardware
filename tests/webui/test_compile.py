@@ -1752,6 +1752,13 @@ def test_the_oh_board_header_restates_the_descriptions_own_numbers(variant):
                 description.PCR + description.PCR_I2C_CONF)
             assert int(defines["OH_I2C_BUS_CLOCK_EN"], 16) == description.PCR_I2C_CLK_EN
         assert int(defines["OH_I2C_CTR_INIT"], 16) & description.I2C_MS_MODE, variant
+        # Open drain is FORCE_OUT SET on the C3 and CLEAR on the C5 (i2c_reg.h:32-41
+        # on the C5: "0: Open drain output"); copying the C3 word to the C5 sets
+        # them, which makes the pads push-pull and fights the pull-ups. The bit
+        # numbers are the same on both (esp32c3.py: SDA [0], SCL [1]).
+        force_out = esp32c5.I2C_SDA_FORCE_OUT | esp32c5.I2C_SCL_FORCE_OUT
+        assert int(defines["OH_I2C_CTR_INIT"], 16) & force_out == (
+            force_out if variant == "xiao_esp32c3" else 0), variant
         for define, offset in (
             ("OH_I2C_CTR", description.I2C_CTR), ("OH_I2C_FIFO_CONF", description.I2C_FIFO_CONF),
             ("OH_I2C_DATA", description.I2C_DATA), ("OH_I2C_INT_RAW", description.I2C_INT_RAW),

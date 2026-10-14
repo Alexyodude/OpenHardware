@@ -7,9 +7,10 @@
  *
  * I2C0 in master mode, as the board's description models it
  * (`webui/boards/esp32c3.py` or `esp32c5.py`; the registers are the board's
- * `oh_board.h` macros, and a chip's differences are macros and not `#ifdef`s
- * here): bytes go into the DATA FIFO, up to eight commands go into COMD0 to COMD7,
- * and setting TRANS_START in CTR runs the list. The board's description runs
+ * `oh_board.h` macros, and a chip's differences are macros: no `#ifdef` on the
+ * chip, one on whether the board has a register clock): bytes go into the DATA
+ * FIFO, up to eight commands go into COMD0 to COMD7, and setting TRANS_START in
+ * CTR runs the list. The board's description runs
  * it between two instructions, so by the time the next instruction polls
  * INT_RAW the transaction is over. `begin` and each method below do what
  * ESP-IDF's I2C HAL does for the same step (`i2c_ll.h`, `i2c_hal.c`), less
@@ -37,16 +38,25 @@
  * ## What `endTransmission` returns, and what it does not tell apart
  *
  * 0 for a transaction that completed, 1 for a write that overflowed the
- * buffer (`Wire.h` says how big), 2 for every NACK, 5 for a timeout.
+ * buffer (`Wire.h` says how big), 2 for a NACK of a zero-length write, 4 for
+ * a NACK of a write that carries data, 5 for a timeout.
  *
- * **2 for EVERY NACK, as arduino-esp32's own Wire does.** Arduino documents 2
- * as "received NACK on transmit of address" and 3 as "received NACK on
- * transmit of data", but `Wire.cpp:466-468` at arduino-esp32 3.20017.241212
- * maps its driver's one failure, `ESP_FAIL`, to 2 and has no 3 anywhere, so
- * a sketch that tests for 3 never sees it on the vendor's own core and does
- * not here. The model could tell the two apart -- it leaves a NACKed command
- * without DONE, so COMD1 reads DONE only when the address was acknowledged
- * -- and nothing in the vendor's software reads DONE, so nothing here does.
+ * **The reference is arduino-esp32 @ 2787dab, on every chip.** Its
+ * `libraries/Wire/src/Wire.cpp:445-476` maps ESP_OK to 0, ESP_FAIL and
+ * ESP_ERR_NOT_FOUND to 2, ESP_ERR_TIMEOUT to 5 and **everything else to 4**,
+ * and `cores/esp32/esp32-hal-i2c-ng.c:259-275` sends a zero-length `i2cWrite`
+ * to `i2c_master_probe` (a NACK is ESP_ERR_NOT_FOUND, so 2) and any other to
+ * `i2c_master_transmit` (a NACK is ESP_ERR_INVALID_STATE, IDF 5.5
+ * `i2c_master.c`, so 4). So `beginTransmission(a); endTransmission()` of an
+ * absent part is 2, and a write with data is 4 whether its address or one of
+ * its bytes was NACKed. Arduino documents 3 for a NACKed data byte, and
+ * the vendor's core has no 3, so a sketch that tests for 3 never sees it
+ * there and does not here. **This changed from the older core 3.20017.241212
+ * (arduino-esp32 2.0.17, IDF 4.4.7), which mapped every NACK to 2** and which
+ * cannot build for a C5 or C6; slice 1 cited it. The model could tell address
+ * from data apart -- it leaves a NACKed command without DONE, so COMD1 reads
+ * DONE only when the address was acknowledged -- and nothing in the vendor's
+ * software reads DONE, so nothing here does.
  *
  * 5 is a transaction that raised neither TRANS_COMPLETE nor NACK within
  * 50 ms of SYSTIMER, which on this model happens only when `begin` was not
@@ -77,10 +87,12 @@
  * The model stores CONF_UPGATE as a write-trigger 0 and does nothing with it,
  * so no run can tell the write is there; it is here because the HAL does it.
  *
- * **One thing silicon wants that this does not write, because the model maps
- * no such register.** PERIP_RST_EN0 bit 7, the controller's reset, is 0 out of
- * reset -- released -- so writing it would only fault. The model checks the
- * routing and the clock gate and not that.
+ * **One thing silicon wants that this does not write.** The controller's
+ * reset is released out of reset on both parts, so nothing writes it: on a C3
+ * it is PERIP_RST_EN0 bit 7, which the model maps no register for (writing it
+ * would only fault), and on a C5 PCR_I2C_RST_EN, bit 1 of PCR_I2C_CONF
+ * (`pcr_reg.h:272`, default 0), which `install_i2c` maps and nothing here
+ * sets. The model checks the routing and the function clock and not that.
  *
  * ## Why `setClock` does nothing
  *
@@ -113,7 +125,8 @@ void reg_clear(uint32_t address, uint32_t bits) {
 }
 
 /* One pad of the bus, as `i2c_pad` reads it back. OUT_SEL carries the signal
- * in its low bits (8 on a C3, 9 on a C5); OEN_SEL makes GPIO_ENABLE the pad's output enable; PAD_DRIVER
+ * in its low bits (8 on a C3, 9 on a C5); OEN_SEL (OE_SEL on a C5,
+ * `gpio_reg.h:6175`) makes GPIO_ENABLE the pad's output enable; PAD_DRIVER
  * makes the pad open-drain. */
 void route(uint8_t gpio, uint32_t signal) {
     const uint32_t pad = OH_IO_MUX_GPIO0 + OH_IO_MUX_STRIDE * gpio;
@@ -244,8 +257,9 @@ uint8_t OhWire::endTransmission(bool stop) {
     case kDone:
         return 0;
     case kNack:
-        /* 2 for every NACK, and why: see this file's header. */
-        return 2;
+        /* 2 for a zero-length write (a probe), 4 for one with data; see this
+         * file's header for the vendor core this follows. */
+        return tx_length_ == 0 ? 2 : 4;
     default:
         return 5;
     }
