@@ -137,6 +137,14 @@ CHIPS: dict[str, tuple[str, str]] = {
     "STM32C5": ("Armv8-M (Cortex-M33)", "cortexm33"),
 }
 
+#: A chip whose `CHIPS` ISA string names two instruction sets, to the one its
+#: core column runs (OH-210). `missing_cores` names this in a core's row, not
+#: the whole string: the RP2350 waiting on `riscv32` is waiting on Hazard3, and
+#: the Cortex-M33 half is OH-36's, on `cortexm33`.
+CORE_ISA: dict[str, str] = {
+    "RP2350": "RV32 (Hazard3)",
+}
+
 #: Chips on which a real compiled image has been watched executing, and the
 #: test that watched it.
 #:
@@ -467,7 +475,8 @@ def missing_cores(directory: pathlib.Path | None = None) -> list[dict[str, objec
     rows = [
         {
             "core": core,
-            "isas": sorted({b.isa for b in boards if b.core == core}),
+            "isas": sorted({CORE_ISA.get(b.chip, b.isa)
+                            for b in boards if b.name in names}),
             "boards": names,
             "exists": core in cores,
             "oracle": ORACLES.get(core, "not surveyed"),

@@ -209,6 +209,46 @@ def test_the_backlog_groups_by_core_rather_than_by_instruction_set_name(tmp_path
     assert row["isas"] == ["RV32IMAC", "RV32IMC"], row
 
 
+def test_a_core_row_names_the_isa_its_core_runs_and_not_the_chips_other_half(tmp_path):
+    """OH-210. The RP2350's ISA string keeps both halves of the silicon, and
+    only the `riscv32` column says which one runs here. `missing_cores` took
+    every board on a core and printed its whole string, so an RP2350 waiting on
+    `riscv32` put "Armv8-M (Cortex-M33)" in that row -- work that is OH-36's.
+
+    Built, not found: nothing is described in an empty directory, so the board
+    waits whatever is built on this machine.
+    """
+    (tmp_path / "XIAO-RP2350-DIP.json").write_text("{}", encoding="utf-8")
+    board, = catalogue.catalogue(tmp_path)
+    assert board.core == "riscv32" and not board.runnable
+    row, = catalogue.missing_cores(tmp_path)
+    assert row["core"] == "riscv32"
+    assert row["isas"] == ["RV32 (Hazard3)"], row
+    assert all(isa in board.isa for isa in row["isas"]), (row, board.isa)
+
+
+def test_a_core_row_names_only_the_isas_of_the_boards_waiting_on_it(tmp_path, monkeypatch):
+    """OH-210. `isas` was taken from every board on the core, runnable ones
+    included, so a running RP2350 put its string in the row of an ESP32-C3
+    that waits. Here the RP2350 is described and the core built, so it runs;
+    only the ESP32-C3 is waiting, and only its set may be named.
+    """
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    monkeypatch.setattr(build_core, "LIB_DIR", lib)
+    build_core.library_path("riscv32").write_bytes(b"")
+    boards = tmp_path / "boards"
+    boards.mkdir()
+    (boards / "XIAO-RP2350-DIP.json").write_text("{}", encoding="utf-8")
+    (boards / "XIAO-ESP32-C3-DIP.json").write_text("{}", encoding="utf-8")
+    (boards / "rp2350.py").write_text("", encoding="utf-8")
+    running, = [b for b in catalogue.catalogue(boards) if b.chip == "RP2350"]
+    assert running.runnable
+    row, = catalogue.missing_cores(boards)
+    assert row["boards"] == ["XIAO-ESP32-C3-DIP"], row
+    assert row["isas"] == ["RV32IMC"], row
+
+
 def test_the_cortexm0_row_left_the_backlog_when_the_samd21_was_described():
     """`cortexm0` used to sit in this backlog, because SAMD21 had no board
     description -- a different job from writing an instruction set, and the
