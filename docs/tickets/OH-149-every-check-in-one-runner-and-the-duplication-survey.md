@@ -14,6 +14,7 @@ touches:
 - docs/research/board-sources/render.py
 - docs/research/board-sources/survey.md
 - tools/facts_store.json
+- CLAUDE.md
 ---
 
 uvx nodeengine scaffolded tools/stale.py, tools/checkall.py and tools/viewer.html. This ticket does what the scaffold asks: survey what this repository states in more than one place (tools/DUPLICATION.md), name one source per relationship, rewrite checkall.py's table to run this repo's real checkers plus a new facts check for prose counts nothing currently watches, and break every row on purpose before believing it.
@@ -45,3 +46,5 @@ uvx nodeengine scaffolded tools/stale.py, tools/checkall.py and tools/viewer.htm
 **Note 2026-10-09:** 2026-10-09: tools/facts_store.json returns from OH-214 (done); the claude-md:mark-turns anchor was re-confirmed there after its docstring named #262525.
 
 **Note 2026-10-14:** 2026-10-14 lends CLAUDE.md to OH-171 for the STM32C5 board key rename (and the now-stale 'no page on the vendor's wiki' sentence OH-231 made untrue); it comes back when OH-171 closes.
+
+**Note 2026-10-14:** 2026-10-14 CLAUDE.md back from OH-171 (done).
