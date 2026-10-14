@@ -86,6 +86,73 @@ DIMENSION_LAYER = "20"
 #: EAGLE's `Milling` layer: contours a fab routes, as against drills (OH-163).
 MILLING_LAYER = "46"
 
+#: The longest chord a flattened arc is drawn with, in mm (OH-235). This is
+#: the number `tools/compose_board_3d.ARC_CHORD_MM` holds for KiCad arcs and
+#: drilled holes, defined again here because a reader must not import the
+#: composer. Two constants now exist; they must agree, and
+#: `tests/rules/test_eagle.py` compares them. A step of angle t stands off its
+#: arc by the sagitta r(1 - cos(t/2)), so no point of a flattened arc is
+#: further from the circle than r(1 - cos(min(chord / 2r, pi / 2))).
+ARC_CHORD_MM = 0.2
+
+
+def arc_points(x1: float, y1: float, x2: float, y2: float, curve: float,
+               chord: float = ARC_CHORD_MM) -> list[tuple[float, float]]:
+    """The points of one EAGLE wire, first end to second.
+
+    **`curve` is the angle the arc sweeps, in degrees, and its sign is the
+    way round**: positive is counter-clockwise going from (x1, y1) to
+    (x2, y2), in EAGLE's y-up frame. The centre therefore lies to the LEFT of
+    the first-to-second direction for a positive minor arc, and to the right
+    for a negative one; past 180 degrees the side flips. That sign is held by
+    `tests/rules/test_eagle.py` against Adafruit's own STEP of the QT Py
+    ESP32-C3, whose r = 2.54 mm corners are convex: the wrong sign puts the
+    centre outside the board.
+
+    A zero `curve` is a line. Otherwise the arc is cut into steps of at most
+    `chord` along the arc, never fewer than two, so a flattened point is never
+    further from the true arc than `ARC_CHORD_MM` allows -- and **the points
+    where the arc crosses an axis are included**, so the bounding box of the
+    result is the arc's own, which is what `Board.extent_mm` promises.
+    The ends are returned exactly as written, so a chain of wires still meets
+    end to end.
+    """
+    if curve == 0:
+        return [(x1, y1), (x2, y2)]
+    span = math.hypot(x2 - x1, y2 - y1)
+    if span == 0:
+        raise EagleError(
+            f"wire ({x1}, {y1}) -> ({x2}, {y2}) curve {curve}: both ends are "
+            f"the same point, so the arc has no radius"
+        )
+    sweep = math.radians(curve)
+    half = sweep / 2
+    if abs(math.sin(half)) < 1e-12:
+        raise EagleError(
+            f"wire ({x1}, {y1}) -> ({x2}, {y2}) curve {curve}: a whole turn "
+            f"or more has no radius from its two ends"
+        )
+    radius = span / (2 * abs(math.sin(half)))
+    # Left of the first-to-second direction, then along it by the apothem.
+    offset = (span / 2) / math.tan(half)
+    cx = (x1 + x2) / 2 - (y2 - y1) / span * offset
+    cy = (y1 + y2) / 2 + (x2 - x1) / span * offset
+    start = math.atan2(y1 - cy, x1 - cx)
+
+    steps = max(2, math.ceil(abs(sweep) * radius / chord))
+    angles = {step / steps for step in range(steps + 1)}
+    # The fractions of the sweep at which the arc is due east, north, west
+    # and south of its centre.
+    for quarter in range(-8, 9):
+        fraction = ((quarter * math.pi / 2) - start) / sweep
+        if 1e-9 < fraction < 1 - 1e-9:
+            angles.add(fraction)
+    points = [(cx + radius * math.cos(start + sweep * fraction),
+               cy + radius * math.sin(start + sweep * fraction))
+              for fraction in sorted(angles)]
+    points[0], points[-1] = (x1, y1), (x2, y2)
+    return points
+
 
 class EagleError(Exception):
     """A file is not EAGLE XML, or does not hold what was asked of it."""
@@ -345,11 +412,10 @@ class Board:
     def extent_mm(self) -> tuple[float, float, float, float]:
         """(min_x, min_y, max_x, max_y) of the drawn outline.
 
-        Arcs are taken as their chords: an EAGLE outline wire may carry a
-        `curve` attribute, and the bulge is ignored here. On a rounded
-        rectangle the straight edges already define the bounding box, so this
-        is exact; on an outline that is *only* arcs it would under-report by
-        the sagitta. Stated rather than silently assumed away.
+        Exact for arcs (OH-235): an outline wire's `curve` is read by
+        `read_board` into the points of its arc, and `arc_points` includes the
+        points where an arc crosses an axis, so the extreme of a bulge is a
+        vertex and not the sagitta short of it.
         """
         if not self.outline:
             raise EagleError(
@@ -679,6 +745,10 @@ def _ink(board: ET.Element, elements: list[Element], packages: dict
 
     def take(wire: ET.Element, layer: str,
              transform=None) -> None:
+        # Counted and not drawn after OH-235, on purpose: `arc_points` could
+        # flatten it, but that would change boards whose outline is straight
+        # (the Uno's DIP notch), and `_silk_mark` reads these same wires as
+        # pin-1 marks. A follow-up can draw them.
         if wire.get("curve") is not None:
             unread["arc"] += 1
             return
@@ -835,17 +905,18 @@ def read_board(path: pathlib.Path, text: str | None = None) -> Board:
     if not elements:
         raise EagleError(f"{path}: places no elements; refusing to report an empty board")
 
-    outline = [
-        Segment(
-            DIMENSION_LAYER,
-            _float(wire, "x1", str(path)),
-            _float(wire, "y1", str(path)),
-            _float(wire, "x2", str(path)),
-            _float(wire, "y2", str(path)),
-        )
-        for wire in board.findall("plain/wire")
-        if wire.get("layer") == DIMENSION_LAYER
-    ]
+    # A wire's `curve` is read (OH-235): a curved one becomes the segments of
+    # its flattened arc, so the outline is the vendor's shape and not the chord.
+    outline: list[Segment] = []
+    for wire in board.findall("plain/wire"):
+        if wire.get("layer") != DIMENSION_LAYER:
+            continue
+        points = arc_points(
+            _float(wire, "x1", str(path)), _float(wire, "y1", str(path)),
+            _float(wire, "x2", str(path)), _float(wire, "y2", str(path)),
+            _float(wire, "curve", str(path)) if wire.get("curve") else 0.0)
+        outline += [Segment(DIMENSION_LAYER, ax, ay, bx, by)
+                    for (ax, ay), (bx, by) in zip(points, points[1:])]
     tracks, vias, unrouted = _routing(board, str(path))
     silk, silk_fills, silk_unread = _ink(board, elements, packages)
     return Board(path.stem, root.get("version") or "unknown", tuple(elements),
@@ -938,6 +1009,12 @@ def _routing(board: ET.Element, where: str
     curved wire as its two endpoints plus a bulge in degrees, and taking the
     endpoints alone would draw the chord. Counted rather than silently
     straightened.
+
+    **Still counted after OH-235 read the outline's curves, on purpose**:
+    `arc_points` could flatten a track too, but a curved track drawn here
+    would move a board whose OUTLINE is straight, and OH-235 holds that only
+    boards with a curved outline change. A follow-up can draw them; the
+    count names the boards that carry one.
     """
     strokes: list[Stroke] = []
     vias: list[Via] = []
