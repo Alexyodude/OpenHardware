@@ -653,6 +653,7 @@ const $ = (id) => (elements[id] ??= { textContent: "", value: "" });
 let boardImage = { board: "XIAO-RP2040-DIP" };
 let boardClock = null;
 let boardRunning = null;
+let boardSteps = 0;
 let replies = [];
 let ticks = [];
 const window = { BoardClock: { Clock: class {
@@ -762,14 +763,18 @@ def test_a_run_tick_says_why_the_board_stopped_with_one_full_stop(tmp_path):
 
 
 def test_a_step_says_where_it_got_to_and_why_it_stopped(tmp_path):
-    """Through `stepLoadedBoard`: the step reply is the board's state, and it
+    """Through `stepLoadedBoard`: the state read after the one-instruction run
     carries status and detail, so a step that leaves the board stopped or
     faulted says so as a run's tick does, and one that leaves it running
     says where it got to."""
     said = run_page(tmp_path, f"""
         const out = {{}};
         for (const status of ["stopped", "faulted", "running"]) {{
-          replies = [{{ pc: 0x10000140, status,
+          // Step is `run(steps: 1)` and then the state read, as the page
+          // asks and the server answers (OH-232): the run reply says how many
+          // instructions retired, the state says where and why it stopped.
+          replies = [{{ steps: 1, status, detail: "" }},
+                     {{ pc: 0x10000140, status,
                         detail: status === "running" ? "" : {json.dumps(DETAIL)} }}];
           await stepLoadedBoard();
           out[status] = [$("board-report").textContent, $("board-error").textContent];

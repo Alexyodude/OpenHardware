@@ -2,12 +2,13 @@
 id: OH-232
 title: The top bar's step counter reads the 8086 session's count, so it says 0 steps
   beside a board that is running
-status: done
+status: in-progress
 priority: P3
 created: '2026-10-13'
 touches:
 - tests/webui/test_clock.py
 - tests/webui/test_editor.py
+- tests/webui/test_board_session_fault.py
 ---
 
 Seen by OH-161 step 4 on the page (2026-10-13, lane2's server, XIAO ESP32-C3 running a sketch): the top bar's step counter read "0 steps" throughout while the board ran and its console printed. Traced on master (bf9ab71): `#counter` (webui/static/emulator.html:107, title "instructions executed") is written only by `renderStatus` (webui/static/emulator.js:169, `state.steps`), which draws the 8086 session's state; the board's run path (the run clock's tick and `/api/board/run`, which answers `steps`) never writes it. So for every board the counter shows the 8086 session's count -- 0 when no 8086 program ran -- beside a board that has retired millions of instructions.
@@ -29,3 +30,5 @@ NOTE 2026-10-14 (lane4, fix round after review): (1) A step is now `/api/board/r
 NOTE 2026-10-14 (lane4): two scenarios added, one for loadSelected stopping a board clock whose tick is in flight and one for two Run presses behind a held tick, each seen red with its guard removed; the redundant post-success zero in loadArtefact is deleted.
 
 **Note 2026-10-14:** 2026-10-14: merged to master (..cedcc21) after an independent review (COMMENT), a fix round (Step reads the run reply's steps, the Run-Stop-Run race, stale counter on a refused load and on an 8086 load) and a confirmation pass (APPROVE), its two untested LOWs closed in 447a99f; test_clock + test_editor 38 passed on master. Not seen in a real browser against a live board: the node test runs the real emulator.js against a fake page and fetch. Done; the follow-up that gives the page the board's own retired count is on OH-233.
+
+NOTE 2026-10-14 (master): the merge broke two tests in tests/webui/test_board_session_fault.py, whose node harness slices the page's functions out of emulator.js: it had no page-level `boardSteps` (a `let`, not a function, so not sliced), and its fake answered the old single-reply Step. The harness now declares `boardSteps` and answers Step as the page asks it, a run reply then a state read; both tests keep their assertions (why the board stopped, one full stop, pc). The earlier rounds ran test_clock, test_emulator and test_editor only, so this file was never run. Full tests/webui: 923 passed, 18 skipped, 2 failed (test_compile OH-166 and test_a_state_poll_answers_while_a_build_runs, both known).
