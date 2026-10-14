@@ -238,6 +238,30 @@ def test_every_core_isa_names_one_half_of_its_chips_own_string():
         assert half in isa.split(" + "), (chip, half, isa)
 
 
+def test_the_page_sentence_the_rest_has_no_core_stays_true():
+    """OH-210. The boards table says of a split chip "The rest has no core."
+    That sentence is written in `emulator.js`, so a core added for the other
+    half would leave it false with every other test green. The other half is
+    named by the chips that carry it alone in `CHIPS`: the RP2350's
+    "Armv8-M (Cortex-M33)" is the MG24's and the nRF54s', on `cortexm33`.
+    """
+    for chip, half in catalogue.CORE_ISA.items():
+        isa, _core = catalogue.CHIPS[chip]
+        others = [each for each in isa.split(" + ") if each != half]
+        assert others, (chip, isa, half)
+        for other in others:
+            cores = {core for name, (string, core) in catalogue.CHIPS.items()
+                     if name != chip and string == other}
+            assert cores, (f"no other chip in CHIPS carries {other!r}, so "
+                           f"nothing says which core would run {chip}'s other half")
+            built = sorted(cores & set(build_core.cores()))
+            assert not built, (
+                f"core {built} now exists for {chip}'s other half {other!r}, "
+                f"but the boards table still says 'The rest has no core.': "
+                f"update that sentence in webui/static/emulator.js and "
+                f"rules/board-claims.md section 14")
+
+
 def test_a_core_row_names_only_the_isas_of_the_boards_waiting_on_it(tmp_path, monkeypatch):
     """OH-210. `isas` was taken from every board on the core, runnable ones
     included, so a running RP2350 put its string in the row of an ESP32-C3
@@ -604,11 +628,21 @@ const fetch = async (path) => path === "/api/boards" ? reply(JSON.parse(answer))
 const window = { matchMedia: () => ({ matches: false }) };
 vm.runInNewContext(source, { document, window, fetch, console, setTimeout,
   clearTimeout, performance, localStorage: { getItem: () => null, setItem() {} } });
-setTimeout(() => {
-  const rows = document.getElementById("boards-rows").children;
-  console.log(JSON.stringify(rows.map((row) => [row.children[0].textContent,
-                                                text(row.children[2])])));
-}, 100);
+// Polled, not slept: fillBoards awaits a fetch, and a fixed wait is a flake on
+// a loaded machine. The deadline fails by name rather than printing nothing.
+const table = document.getElementById("boards-rows");
+const deadline = Date.now() + 5000;
+const wait = setInterval(() => {
+  if (table.children.length) {
+    clearInterval(wait);
+    console.log(JSON.stringify(table.children.map((row) => [
+      row.children[0].textContent, text(row.children[2])])));
+  } else if (Date.now() > deadline) {
+    clearInterval(wait);
+    console.error("emulator.js never filled #boards-rows within 5 s");
+    process.exit(1);
+  }
+}, 10);
 """
 
 
