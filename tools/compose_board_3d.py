@@ -340,14 +340,34 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "the 2.0 x 1.25 mm chip body.",
     ),
     Component(
-        "MINIMELF", "Diode_SMD", "D_MiniMELF",
+        "MINIMELF", "Diode_SMD", "D_1206_3216Metric",
         "D2 and D3. Two pads 3.40 mm apart along the package's own x, the "
-        "cathode C at -x, and a MiniMELF is the 3.5 x 1.4 mm glass cylinder "
-        "the package name states. KiCad's footprint puts pad 1, the cathode, "
-        "at -x too, so no turn. Until OH-190 this row said 90, from pads "
-        "measured on the board, where the element's own rotation had already "
-        "turned them: both diodes lay across their land, the band as far "
-        "from C as from A, and a test of the band now reads that.",
+        "cathode C at -x. **Drawn as the part their VALUE names and not as "
+        "the land's name** (OH-197): the package is the board file's `diode` "
+        "library's MINIMELF, whose own body outline is 2.64 x 1.57 mm, and "
+        "the value is Bourns CD1206-S01575, which Bourns' datasheet "
+        "(farnell.com/datasheets/1647933.pdf) calls a 'Switching Chip "
+        "Diode' in 'compact chip package 1206 size format', 'Case 1206 "
+        "(3216) Molded plastic', 'Leadless', 'Polarity indicated by cathode "
+        "band', and LCSC C75465 lists as package '1206'. Its dimension "
+        "table, read off the drawing because the text layer drops the "
+        "labels, is 3.00-3.40 long, 1.30-1.70 wide and 0.75-0.95 thick "
+        "(0.35-0.75 a terminal), which KiCad's 1206 chip diode meets in "
+        "length, in the width of its terminals and in the thickness of its "
+        "moulding -- 3.40, 1.60 and 0.90 mm -- and a MiniMELF, 3.6 x 1.4 x "
+        "1.4 mm, does not; "
+        "`test_the_unos_d2_and_d3_model_has_the_size_bourns_states_for_the_"
+        "part` holds that. No source calls the part a glass MiniMELF, and no "
+        "photograph of a genuine Uno's D2 or D3 was found: what is drawn is "
+        "the named part's body, not a watched one. Bourns discontinued the "
+        "part on 2020-01-10 (farnell.com/datasheets/2921950.pdf); nothing "
+        "here says what a later Uno fits. KiCad's footprint puts pad 1 at "
+        "-x, where this model's band lies, and KiCad numbers a diode's "
+        "cathode 1, so no turn; the band test places the band and checks it "
+        "is nearer C. Until OH-190 this row said 90, from pads measured on "
+        "the board, where the element's own rotation had already turned "
+        "them: both diodes lay across their land, the band as far from C as "
+        "from A.",
     ),
     Component(
         "SMB", "Diode_SMD", "D_SMB",

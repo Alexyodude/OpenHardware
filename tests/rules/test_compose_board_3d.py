@@ -4367,8 +4367,8 @@ def test_every_part_whose_vendor_marks_pin_one_agrees_with_its_model():
 
 #: How far the band's area-weighted centroid must sit off the model's centre
 #: against the next colour's before it is taken for the band: twice. Every
-#: diode model drawn here clears it by four times that or more -- a
-#: MiniMELF's thin blue stripe included, once weighted by area.
+#: diode model drawn here clears it by four times that or more -- the 1206
+#: chip diode's label patch included, once weighted by area.
 BAND_MARGIN = 2.0
 
 #: The least share of a model's surface a colour must cover to be read as a
@@ -4431,9 +4431,9 @@ def test_a_model_with_no_band_says_so():
     with pytest.raises(AssertionError, match="half-length"):
         _read_band(cylinder)
     # And a real stripe, a fifth of the length in from one end, reads.
-    stripe = _model_box(0.3, 1.41, 1.41, "#0000ff", at=(-0.9, 0.0))
+    stripe = _model_box(0.3, 1.41, 1.41, "#b0a998", at=(-0.9, 0.0))
     band, _off = _read_band(compose.Mesh({**cylinder.groups, **stripe.groups}))
-    assert band == "#0000ff"
+    assert band == "#b0a998"
 
 
 def _area_centroids(groups, plan=(0, 1)) -> dict[str, tuple[float, float, float]]:
@@ -4517,6 +4517,102 @@ def test_a_diodes_band_lies_along_its_land_at_the_pad_its_vendor_names_the_catho
         pytest.skip(f"SKIPPED: no diode on a fetched board; not fetched: {unfetched}")
     if unfetched:
         pytest.skip(f"checked {len(checked)} diodes; not fetched: {unfetched}")
+
+
+#: The part the value of every MINIMELF placed on a composed board names, and
+#: the dimensions Bourns' datasheet for it states, in millimetres (OH-197).
+#: https://www.farnell.com/datasheets/1647933.pdf, "Product Dimensions": the
+#: text layer loses the labels, so they are read off the drawing -- 3.00-3.40
+#: over the top view, 1.30-1.70 beside it, 0.75-0.95 beside the side view and
+#: 0.35-0.75 under its terminal -- which "Case 1206 (3216) Molded plastic"
+#: agrees with: 3216 is 3.2 x 1.6 mm, inside the first two ranges.
+BOURNS_CD1206 = "CD1206-S01575"
+BOURNS_CD1206_MM = {"length": (3.00, 3.40), "width": (1.30, 1.70),
+                    "thickness": (0.75, 0.95)}
+
+
+def _minimelf_diodes(spec):
+    """`(element, value)` for each placement on the MINIMELF land, with the
+    value its board file states: `eagle.Element` carries none."""
+    board = eagle._open(spec.layout, "board").find("drawing/board")
+    values = {e.get("name"): e.get("value") for e in board.iter("element")}
+    return [(element, values[element.name])
+            for element in compose.read_layout(spec.layout).elements
+            if element.package == "MINIMELF"]
+
+
+def test_the_unos_d2_and_d3_are_drawn_as_the_chip_their_value_names():
+    """**A value that names a part outranks the package it sits on** (OH-197).
+
+    Arduino's board file puts D2 and D3 on the stock EAGLE diode library's
+    MINIMELF land, and their value says CD1206-S01575, which Bourns' datasheet
+    calls a "Switching Chip Diode" in a "1206 (3216) Molded plastic" case,
+    "Leadless". Drawn as `D_MiniMELF` -- a 3.6 x 1.4 mm glass cylinder -- on
+    the strength of the land's name alone, they contradicted the value. They
+    are drawn from KiCad's 1206 chip diode now, and a MINIMELF whose value
+    names any other part, on any composed board, fails here rather than
+    drawing that part as this one.
+    """
+    seen = {}
+    for spec in compose.COMPOSITIONS:
+        if spec.layout.suffix != ".brd" or not spec.layout.is_file():
+            continue
+        for element, value in _minimelf_diodes(spec):
+            assert value == BOURNS_CD1206, (
+                f"{spec.board}: {element.name} is on the MINIMELF land with the "
+                f"value {value!r}, and the row for that land draws "
+                f"{BOURNS_CD1206}'s body: give it a row of its own")
+            seen[(spec.board, element.name)] = element
+    uno = next(s for s in compose.COMPOSITIONS if s.board == "Arduino Uno")
+    if not _fetched(uno):
+        pytest.skip(f"SKIPPED: not fetched; run {uno.fetch_with}")
+    assert {name for board, name in seen if board == "Arduino Uno"} == {"D2", "D3"}, seen
+    drawn = {element.name: row for element, row in
+             _drawn(uno, compose.read_layout(uno.layout))}
+    for name in ("D2", "D3"):
+        assert drawn[name].model == "D_1206_3216Metric", (
+            f"{name} is drawn from {drawn[name].library}/{drawn[name].model}, "
+            f"and its value names a 1206 (3216) molded-plastic chip, not a "
+            f"MiniMELF")
+        assert "minimelf" not in drawn[name].model.lower()
+
+
+def test_the_unos_d2_and_d3_model_has_the_size_bourns_states_for_the_part():
+    """**The body the drawn model has, against the datasheet's, in numbers**
+    (OH-197): its length overall, the width of its two terminals, and the
+    thickness of its moulding must each lie within the range Bourns states
+    for CD1206-S01575, where `D_MiniMELF` is 3.6 mm long and 1.4 tall.
+
+    Held to those three and not to every extent, on purpose: KiCad's model
+    flares its moulding to 1.87 mm at the two end faces and stands its
+    terminals 0.96 mm tall, 0.17 and 0.01 mm over the datasheet's maxima,
+    because it draws a 3216 nominal with IPC's allowances and not this
+    maker's tolerances. Said here so that it is a known difference and not a
+    surprise a later measurement finds.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    uno = next(s for s in compose.COMPOSITIONS if s.board == "Arduino Uno")
+    if not _fetched(uno):
+        pytest.skip(f"SKIPPED: not fetched; run {uno.fetch_with}")
+    rows = {row for element, row in _drawn(uno, compose.read_layout(uno.layout))
+            if element.name in ("D2", "D3")}
+    assert len(rows) == 1, f"D2 and D3 are drawn from {len(rows)} rows: {rows}"
+    mesh, _box = compose.component_mesh(rows.pop(), 0.05)
+
+    def extent(values):
+        return max(values) - min(values)
+
+    every = [v for positions, _n, _i in mesh.groups.values() for v in positions]
+    measured = {"length": extent(every[0::3])}
+    for what, colour, axis in (("width", "#d2d1c7", 1), ("thickness", "#262525", 2)):
+        assert colour in mesh.groups, (
+            f"the model has no {colour} for its {what}; its colours are "
+            f"{sorted(mesh.groups)}")
+        measured[what] = extent(mesh.groups[colour][0][axis::3])
+    for what, (least, most) in BOURNS_CD1206_MM.items():
+        assert least - 0.005 <= measured[what] <= most + 0.005, (
+            f"{what} is {measured[what]:.3f} mm; Bourns' datasheet states "
+            f"{least:.2f}-{most:.2f} for {BOURNS_CD1206}")
 
 
 def test_the_turn_nothing_can_see_is_counted_rather_than_passed_over():

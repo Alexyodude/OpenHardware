@@ -1112,9 +1112,11 @@ FINISHES: dict[str, Finish] = {
     "#b0a998": Finish(0.0, 0.55, (
         "the orientation mark on top of a moulded package -- a pin-1 dot, a "
         "diode's cathode bar. KiCad's palette names the colour "
-        "`IC-LABEL-01`, and `QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm.wrl` and "
-        "`D_SOD-882.wrl` at tag 9.0.0 paint with it a patch on the body's top "
-        "face at the marked end; by geometry, on every KiCad model fetched "
+        "`IC-LABEL-01`, and `QFN-32-1EP_5x5mm_P0.5mm_EP3.45x3.45mm.wrl`, "
+        "`D_SOD-882.wrl` and `D_1206_3216Metric.wrl` at tag 9.0.0 paint with "
+        "it a patch on the body's top face at the marked end -- on the 1206 "
+        "chip diode the cathode band the Uno's D2 and D3 are placed by "
+        "(OH-197); by geometry, on every KiCad model fetched "
         "here that carries it, it lies on that top face, just proud of it or "
         "just sunk into it. "
         "Ink or a laser mark on epoxy is not a metal; the roughness is a "
@@ -1139,14 +1141,6 @@ FINISHES: dict[str, Finish] = {
         "`LED_0603_1608Metric.wrl` at tag 9.0.0 paints exactly that box with "
         "it. A plastic by KiCad's word and too dark to be a metal by its own "
         "value; the roughness is moulded plastic's"
-    )),
-    "#0000ff": Finish(0.0, 0.55, (
-        "the MiniMELF's cathode band: by geometry a ring 0.2 mm wide at the "
-        "end where KiCad's footprint puts pad 1, the cathode -- the band "
-        "OH-190's test reads. `D_MiniMELF.wrl` at tag 9.0.0 leaves this one "
-        "material out of KiCad's palette (an anonymous `diffuseColor 0 0 1`), "
-        "so the name is the geometry's. Paint on glass, and no metal is a "
-        "saturated blue; the roughness is a JUDGEMENT at ink's 0.55"
     )),
     "#292929": Finish(0.0, 0.70, (
         "the base of KiCad's Seiko Epson FA238 crystal, under its seal ring "
