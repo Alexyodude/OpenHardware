@@ -1210,11 +1210,18 @@ def test_not_built_here_and_cannot_be_built_read_differently(tmp_path, monkeypat
     boards = tmp_path / "boards"
     boards.mkdir()
     _real_board(boards, "XIAO-RP2040-DIP")
-    _real_board(boards, "XIAO-XIAO STM32C5-SMD")
+    # **No committed board is without a source any more** (the XIAO STM32C5
+    # was the last, composed in OH-231), so a board no builder names is a real
+    # board file under a name that nothing in `import_3d_model` knows.
+    unknown = _real_board(boards, "XIAO-XIAO STM32C5-SMD")
+    (boards / "XIAO-XIAO STM32C5-SMD.json").unlink()
+    unknown["board"] = "XIAO-NO-SUCH-BOARD"
+    (boards / "XIAO-NO-SUCH-BOARD.json").write_text(
+        json.dumps(unknown), encoding="utf-8")
     monkeypatch.setattr(server, "STATIC_DIR", tmp_path / "no-static")
 
     twins = {twin.name: twin.model for twin in collect_twins(boards)}
-    unbuilt, sourceless = twins["XIAO-RP2040-DIP"], twins["XIAO-XIAO STM32C5-SMD"]
+    unbuilt, sourceless = twins["XIAO-RP2040-DIP"], twins["XIAO-NO-SUCH-BOARD"]
     assert not unbuilt.holds and not sourceless.holds
     assert (unbuilt.summary, sourceless.summary) == (NOT_BUILT, NO_SOURCE)
     assert "builds it" in unbuilt.detail and "builds it" not in sourceless.detail

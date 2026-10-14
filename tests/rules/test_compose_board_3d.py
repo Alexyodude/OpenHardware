@@ -919,6 +919,11 @@ EXPLAINS: dict[str, set[str]] = {
         "JST_1x02_P2.0mm_Horizontal_SMD", "USB-C_16",
         "microSD_Friction_Fit_Common", "WS2812_2020",
         "Push_SMD_4.6x2.8mm_h2.5mm"},
+    # The STM32C5 itself, its flash and its USB socket (OH-231): the chip's
+    # exposed pad is not any published 7 x 7 mm part's, and the other two are
+    # parts nobody publishes a body of. The jumper is NO_BODY, so not here.
+    "XIAO-XIAO STM32C5-SMD": {
+        "QFN48-0.5-7X7MM", "USON8-0.8-3X3X0.55MM", "USB2.0-TYPE-C_short"},
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
 # same placements, same absences -- so the entries are derived the same way
@@ -4668,7 +4673,10 @@ def test_an_smd_variant_is_its_dip_siblings_pcb_without_the_headers():
     -SMD board any more, because a model with headers is wrong for a board
     without them and vice versa."""
     by_board = {spec.board: spec for spec in compose.COMPOSITIONS}
-    smd = [spec for spec in compose.COMPOSITIONS if spec.board.endswith("-SMD")]
+    # A board with no DIP sibling at all (the XIAO STM32C5, OH-231) is SMD
+    # only and has no pair to compare; it is held on its own below.
+    smd = [spec for spec in compose.COMPOSITIONS if spec.board.endswith("-SMD")
+           and spec.board.replace("-SMD", "-DIP") in by_board]
     assert len(smd) >= 5, "the derived SMD variants are gone"
     for spec in smd:
         sibling = by_board[spec.board.replace("-SMD", "-DIP")]
@@ -10221,3 +10229,89 @@ def test_a_boards_thickness_is_its_top_face_and_not_its_solids_box():
     fused = BRepAlgoAPI_Fuse(board, boss).Shape()
     solid = pcb_solid(fused, 2)
     assert board_top(solid, 2) == 1.2, board_top(solid, 2)
+
+
+# --- the XIAO STM32C5, composed from the registry's pinned archive (OH-231) ----
+
+
+STM32C5 = "XIAO-XIAO STM32C5-SMD"
+
+
+def _stm32c5_spec():
+    return next((s for s in compose.COMPOSITIONS if s.board == STM32C5), None)
+
+
+def test_the_xiao_stm32c5_is_composed_from_the_archive_the_registry_pins():
+    """The board draws its copper, silkscreen and parts rather than an
+    extruded footprint, which is `inventory`'s TWINS `model` column going
+    from 37 to 38 (OH-231). Its PCB is read from the `seeed-xiao-stm32c5`
+    row's own destination, so the composer's pin and the registry's are the
+    same numbers -- and not a second fetch path beside `PCB_SOURCES`."""
+    from tools import board_sources
+
+    spec = _stm32c5_spec()
+    assert spec is not None, f"{STM32C5} is not composed: {[s.board for s in compose.COMPOSITIONS][-5:]}"
+    source = board_sources.source("seeed-xiao-stm32c5")
+    archive, size, sha256 = spec.pinned
+    assert archive.parent == source.dest(compose.REPO), (archive, source.dest(compose.REPO))
+    assert spec.layout.parent == archive.parent, spec.layout
+    assert spec.pcb_chip is None and not spec.dip_headers and spec.headers == ("U10",)
+    assert f"{size:,} bytes" in source.size and sha256 in source.size, (
+        f"the composer pins {size:,} bytes, sha256 {sha256}; the row says "
+        f"{source.size!r}")
+
+
+def test_the_xiao_stm32c5_thickness_is_what_its_own_file_states():
+    """`(general (thickness 1.6))`, and a stackup whose layers add up to the
+    same; the other KiCad XIAOs state neither and take 1.2. The file names no
+    mask colour, so the colour is `BOARD_MASK` and the source says it is a
+    judgement."""
+    spec = _stm32c5_spec()
+    assert spec is not None, f"{STM32C5} is not composed"
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched. Run: {spec.fetch_with}")
+    mask, stack, general, core = compose.kicad_stackup(spec.layout)
+    assert mask is None and core == (), (mask, core)
+    assert abs(stack - general) < 5e-4, (stack, general)
+    assert spec.thickness_mm == general, (spec.thickness_mm, general)
+    assert spec.colour == compose.BOARD_MASK and "JUDGEMENT" in spec.colour_source
+
+
+def test_the_xiao_stm32c5_draws_what_is_published_and_refuses_the_rest_by_name():
+    """R0402, the 32 kHz crystal and the CAN transceiver are drawn from KiCad
+    models; the MCU is refused (no published 7 x 7 mm part has its exposed
+    pad), as are the flash and the USB socket, each with a reason."""
+    spec = _stm32c5_spec()
+    assert spec is not None, f"{STM32C5} is not composed"
+    if not spec.layout.is_file():
+        pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched. Run: {spec.fetch_with}")
+    rows = {c.package for c in compose.CORRESPONDENCE}
+    packages = {e.package for e in compose.read_layout(spec.layout).elements}
+    for drawn in ("R0402", "X2-SMD-2.0X1.2MM", "VSON-0.65-3X3X1MM"):
+        assert drawn in packages and drawn in rows, drawn
+    for refused in ("QFN48-0.5-7X7MM", "USON8-0.8-3X3X0.55MM", "USB2.0-TYPE-C_short"):
+        assert refused in packages and refused not in rows, refused
+        assert refused in compose.ABSENT, refused
+
+
+def test_a_pinned_layout_is_refused_when_the_archive_or_the_layout_differs(tmp_path):
+    """The archive is checked against its size and sha256 and the extracted
+    layout against the archive, each refusal carrying the values."""
+    import hashlib
+    import zipfile
+
+    archive = tmp_path / "a.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("b.kicad_pcb", "(kicad_pcb)")
+    data = archive.read_bytes()
+    sha = hashlib.sha256(data).hexdigest()
+    layout = tmp_path / "b.kicad_pcb"
+    layout.write_text("(kicad_pcb)")
+    compose.verify_pinned_layout(archive, len(data), sha, layout)
+    with pytest.raises(SystemExit, match=f"{len(data):,} bytes"):
+        compose.verify_pinned_layout(archive, len(data) + 1, sha, layout)
+    with pytest.raises(SystemExit, match="sha256 " + sha):
+        compose.verify_pinned_layout(archive, len(data), "0" * 64, layout)
+    layout.write_text("(kicad_pcb (edited))")
+    with pytest.raises(SystemExit, match="is not the 'b.kicad_pcb'"):
+        compose.verify_pinned_layout(archive, len(data), sha, layout)

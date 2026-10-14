@@ -644,6 +644,31 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "naming a library anybody can fetch is the one that can be used.",
     ),
     Component(
+        "R0402", "Resistor_SMD", "R_0402_1005Metric",
+        "SEEED STATES it on the XIAO STM32C5: twelve placements, each naming "
+        "`Resistor_SMD.3dshapes/R_0402_1005Metric.step`. Two pads 0.825 mm "
+        "apart, an 0402 land, which agrees with what they wrote. OH-231.",
+    ),
+    Component(
+        "X2-SMD-2.0X1.2MM", "Crystal",
+        "Crystal_SMD_MicroCrystal_CC8V-T1A-2Pin_2.0x1.2mm",
+        "SEEED STATES it on the XIAO STM32C5's 32.768 kHz crystal: the file "
+        "it names under `Y:/01_Cadence_Library`, "
+        "`Crystal_SMD_MicroCrystal_CC8V-T1A-2Pin_2.0x1.2mm`, is the name of a "
+        "file KiCad's `Crystal` library publishes, and their `Description` "
+        "says L2.05 x W1.2. Two pads 1.626 mm apart. OH-231.",
+    ),
+    Component(
+        "VSON-0.65-3X3X1MM", "Package_DFN_QFN",
+        "DFN-8-1EP_3x3mm_P0.65mm_EP1.55x2.4mm",
+        "MEASURED, on the XIAO STM32C5's CAN FD transceiver U3: nine pads, "
+        "eight leads at 0.65 mm pitch and a 1.6 x 2.4 mm exposed pad, in a "
+        "3 x 3 mm package. Seeed's own model, `HVSON-8_L3.0-W3.0-P0.65-TL-EP`, "
+        "is on a drive nobody else has; this is the published 8-lead 3 x 3 mm "
+        "0.65 mm DFN with a 2.4 mm exposed pad. The body height is KiCad's "
+        "and was not compared with the 1 mm in Seeed's name. OH-231.",
+    ),
+    Component(
         "X2-SMD-1.6X1.0MM", "Crystal",
         "Crystal_SMD_MicroCrystal_CM9V-T1A-2Pin_1.6x1.0mm",
         "SEEED STATES it on the nRF54L15, whose X2 is two pads 1.100 mm apart "
@@ -2347,6 +2372,48 @@ ABSENT: dict[str, str] = {
         "tools/model_from_datasheet.py reads a body written L x W x H, and "
         "this writes its height as h2.5mm."
     ),
+    # --- the XIAO STM32C5 (OH-231). KiCad's kicad-packages3D listed on GitLab
+    # 2026-10-14 for each search below.
+    "QFN48-0.5-7X7MM": (
+        "U4 on the XIAO STM32C5, the STM32C5A3CG itself (ST's UFQFPN48): "
+        "forty-nine pads spanning 6.900 x 6.900 mm with a 5.6 mm exposed pad. "
+        "Seeed's own model is `QFN-48-1EP_7x7mm_P0.5mm_EP5.45x5.45mm`, which "
+        "KiCad's Package_DFN_QFN does not hold (HTTP 404). The 7 x 7 mm, "
+        "0.5 mm pitch parts it does hold are `QFN-48-1EP_..._EP5.15x5.15mm`, "
+        "its Texas twin of the same pad, `TQFN-48-1EP_..._EP5.1x5.1mm` and "
+        "`VQFN-48-1EP_..._EP4.1x4.1mm`: none is the part Seeed name, and "
+        "drawing one would put a model name in the .glb that is not the "
+        "chip's, the QFN-56 against QFN-60 argument. Left off rather than "
+        "drawn near."
+    ),
+    "USON8-0.8-3X3X0.55MM": (
+        "U7 on the XIAO STM32C5, the PY25Q128HA flash, whose footprint places "
+        "no model: ten pads spanning 2.600 x 2.400 mm. KiCad's Package_SON "
+        "holds `Microchip_USON-10-1EP_3x3mm_P0.5mm_EP1.8x2.5mm` (another "
+        "part's pad), `WSON-8-1EP_3x3mm_P0.5mm_EP1.6x2.0mm`, and 3 x 2 mm "
+        "and smaller USON-8s, and no 3 x 3 mm USON-8 that the footprint "
+        "states. **Its name states the whole body, 3 x 3 x 0.55 mm, so this "
+        "is the OH-153 kind of absence and not an honest one**: it wants a "
+        "`SLABS` entry in tools/model_from_datasheet.py, which OH-231 did "
+        "not hold when this was written. Refused until that entry is made."
+    ),
+    "USB2.0-TYPE-C_short": (
+        "USB1 on the XIAO STM32C5, Seeed's `ST-USB-Y1016`, a 12+4 pin "
+        "receptacle whose model is on a drive nobody else has. KiCad's "
+        "Connector_USB holds two 16-pin Type-C receptacles, the Amphenol "
+        "12401610E4-2A and the GCT USB4105, each a named part of another "
+        "land. **Its Description states the whole envelope, 7.35 x 8.94 x "
+        "3.25 mm, so this is the OH-153 kind of absence and not an honest "
+        "one**: it wants a `SOCKETS` entry in tools/model_from_datasheet.py, "
+        "which OH-231 did not hold when this was written. Refused until "
+        "that entry is made."
+    ),
+    "2P-SMD-SHORT_Larger": (
+        "JP1 on the XIAO STM32C5, a solder jumper: two 1.6 x 1.2 mm pads "
+        "0.775 mm either side of the middle, which a person bridges with "
+        "solder. Nothing is fitted, so no KiCad body is looked for: "
+        + NO_BODY
+    ),
 }
 
 #: `ABSENT` entries that hold only for a land from the named vendor library
@@ -2425,6 +2492,12 @@ class Composition:
     #: attributes (OH-195). None for the XIAOs, which compose from their
     #: board file alone and read nothing of the kind.
     schematic: pathlib.Path | None = None
+    #: `(archive, bytes, sha256)` when `layout` was unzipped from an archive
+    #: that `tools/board_sources.py` pins: `compose` refuses an archive whose
+    #: size or hash differs, and a layout that is not that archive's member
+    #: (`verify_pinned_layout`). None for every board fetched through
+    #: `PCB_SOURCES`, whose pin is the size alone.
+    pinned: tuple[pathlib.Path, int, str] | None = None
 
 
 #: Where a vendor KiCad project lands. Gitignored with the rest of
@@ -2502,6 +2575,43 @@ def fetch_pcb(chip: str) -> pathlib.Path:
             )
         out.write_bytes(zipped.read(inside[0]))
     return out
+
+
+def verify_pinned_layout(archive: pathlib.Path, size: int, sha256: str,
+                         layout: pathlib.Path) -> None:
+    """Refuse an archive whose size or hash differs from its pin, and a
+    layout that is not the archive's own `.kicad_pcb`.
+
+    The `seeed-xiao-stm32c5` row of `tools/board_sources.py` is fetched by
+    hand into `third_party/seeed-xiao-stm32c5/` with the `.kicad_pcb`
+    extracted beside the zip, so what is on disk is checked here rather than
+    trusted: the zip against its pin, and the extracted file against the zip.
+    """
+    import zipfile
+
+    if not archive.is_file():
+        raise SystemExit(f"{archive} is not fetched; cannot verify {layout}")
+    data = archive.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    if len(data) != size or digest != sha256:
+        raise SystemExit(
+            f"{archive} is {len(data):,} bytes, sha256 {digest}; the registry "
+            f"pins {size:,} bytes, sha256 {sha256}. The vendor's archive "
+            f"changed; re-measure before trusting a board composed from it."
+        )
+    with zipfile.ZipFile(archive) as zipped:
+        inside = [n for n in zipped.namelist() if n.endswith(".kicad_pcb")]
+        if len(inside) != 1:
+            raise SystemExit(
+                f"{archive} holds {len(inside)} .kicad_pcb files and this "
+                f"expects exactly one: {inside}"
+            )
+        member = zipped.read(inside[0])
+    if layout.read_bytes() != member:
+        raise SystemExit(
+            f"{layout} is not the {inside[0]!r} inside {archive}: "
+            f"{layout.stat().st_size:,} bytes against {len(member):,}"
+        )
 
 
 COMPOSITIONS: tuple[Composition, ...] = (
@@ -2671,6 +2781,48 @@ COMPOSITIONS = COMPOSITIONS + tuple(
         dip_headers=False,
     )
     for spec in COMPOSITIONS if spec.dip_headers
+)
+
+#: **The XIAO STM32C5 (OH-231), SMD only**: it has no DIP sibling, so it is
+#: written out rather than derived. Its PCB is read from the `seeed-xiao-stm32c5`
+#: registry row's destination, pinned there by size and sha256, and not through
+#: `PCB_SOURCES`: two ways of fetching a vendor archive would be two things to
+#: keep true. `STM32C5_ARCHIVE` repeats the row's pin and a test holds the two
+#: together.
+STM32C5_SOURCE = board_sources.source("seeed-xiao-stm32c5").dest(REPO)
+STM32C5_ARCHIVE = (
+    STM32C5_SOURCE / "XIAO_STM32C5_v1.0_SCH&PCB.zip",
+    1_559_346,
+    "676070c1e35935869c39a52a624dec7cb937850e6d6e12401b061786aab35b1b",
+)
+COMPOSITIONS = COMPOSITIONS + (
+    Composition(
+        board="XIAO-XIAO STM32C5-SMD",
+        layout=STM32C5_SOURCE / "XIAO STM32C5.kicad_pcb",
+        fetch_with="python tools/get_board_sources.py seeed-xiao-stm32c5",
+        pcb_chip=None,
+        geometry=(
+            "Seeed's own KiCad project for the XIAO STM32C5 v1.0: the outline "
+            "from Edge.Cuts and every component's position, rotation and side "
+            "as the board file states them. Seeed publishes no mesh for this "
+            "board -- see docs/research/board-models/"
+        ),
+        # The castellated XIAO-Add-On-PRO footprint; U4 is the MCU.
+        headers=("U10",),
+        # **Stated, twice, and they agree**: `(general (thickness 1.6))` and a
+        # `(stackup ...)` whose layers sum to 1.6 (0.01 mask, 0.035 copper, 0.1
+        # prepreg, 0.035, 1.24 core, 0.035, 0.1, 0.035, 0.01). The other KiCad
+        # XIAOs state neither and take 1.2 as a cited judgement.
+        thickness_mm=1.6,
+        colour=BOARD_MASK,
+        colour_source=(
+            "BOARD_MASK, A JUDGEMENT rather than a reading -- see that "
+            "constant. This board's own .kicad_pcb has a (stackup ...), but it "
+            "names no colour for either solder mask or any dielectric, and "
+            "asks for copper_finish \"None\", so it states none"
+        ),
+        pinned=STM32C5_ARCHIVE,
+    ),
 )
 
 
@@ -6970,6 +7122,8 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         print(f"  SKIPPED: {spec.schematic} is not fetched, and it is what says "
               f"which kind each passive is. Run: {spec.fetch_with}")
         return 3
+    if spec.pinned is not None:
+        verify_pinned_layout(*spec.pinned, spec.layout)
 
     board = read_layout(spec.layout)
     # **The font is an input like the board's own files**: read here and
