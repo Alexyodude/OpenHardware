@@ -1666,6 +1666,21 @@ def test_a_layout_nobody_can_fetch_is_only_talked_about(monkeypatch, tmp_path):
     assert asked == []
 
 
+def test_a_board_whose_schematic_is_not_fetched_is_skipped_naming_it(tmp_path,
+                                                                    capsys):
+    """The layout is there and the schematic, which says which kind each
+    passive is, is not (OH-191): SKIPPED by name, with `compose.SKIPPED` as
+    the result (OH-199) -- the second of the three places it is returned."""
+    layout = tmp_path / "present.brd"
+    layout.write_text("", encoding="utf-8")
+    schematic = tmp_path / "missing.sch"
+    spec = dataclasses.replace(_uno(), layout=layout, schematic=schematic,
+                               pcb_chip=None)
+    assert compose.compose(spec, deflection=0.05, check=True) == compose.SKIPPED
+    out = capsys.readouterr().out
+    assert f"SKIPPED: {schematic} is not fetched" in out, out
+
+
 def test_the_uno_names_a_colour_it_actually_read_somewhere():
     """The one thing here that is neither Arduino's nor KiCad's.
 
@@ -8188,10 +8203,12 @@ def test_a_skipped_board_is_not_served_from_the_file_an_earlier_run_left(
     from tools import import_3d_model
     from tools.import_3d_model import Mesh, write_glb, write_index
 
-    skipped, other = compose.COMPOSITIONS[0], compose.COMPOSITIONS[1]
-    absent = dataclasses.replace(skipped, layout=tmp_path / "NOT-FETCHED.brd",
-                                 pcb_chip=None, schematic=None)
-    names = (absent.board, *absent.serves)
+    # One board that serves another (the XIAO C3's DIP serves its SMD) and one
+    # that does not, each skipped in turn with the other composed: dropping the
+    # boards a skipped board serves, and indexing the ones a composed board
+    # serves, are both held.
+    serving = next(s for s in compose.COMPOSITIONS if s.serves)
+    plain = next(s for s in compose.COMPOSITIONS if not s.serves)
     monkeypatch.setattr(import_3d_model, "OUT", tmp_path)
     monkeypatch.setattr(compose, "REPO", tmp_path)   # main prints the index relative to it
     monkeypatch.setattr(compose, "MANIFEST_REFUSED", {})
@@ -8200,31 +8217,46 @@ def test_a_skipped_board_is_not_served_from_the_file_an_earlier_run_left(
                 [0.0, 0.0, 1.0] * 3, [0, 1, 2])
     real = compose.compose
 
-    def compose_other(spec, deflection, check):
-        return 1234 if spec is other else real(spec, deflection, check)
+    for skipped, other in ((serving, plain), (plain, serving)):
+        absent = dataclasses.replace(skipped, layout=tmp_path / "NOT-FETCHED.brd",
+                                     pcb_chip=None, schematic=None)
+        names = (absent.board, *absent.serves)
+        composed = (other.board, *other.serves)
 
-    monkeypatch.setattr(compose, "compose", compose_other)
-    for specs in ((absent, other), (absent,)):
-        for spec in specs:
-            write_glb(Mesh({"#123456": triangle}),
-                      tmp_path / f"{compose._slug(spec.board)}.glb",
-                      spec.board, "an earlier run", (1.0, 1.0, 1.0),
-                      extras={"composed": True})
-        write_index(tuple((name, "chip", compose._slug(spec.board))
-                          for spec in specs for name in (spec.board, *spec.serves)))
-        monkeypatch.setattr(compose, "COMPOSITIONS", specs)
-        assert compose.main([]) == 3
-        capsys.readouterr()
-        boards = json.loads((tmp_path / "index.json").read_text(
-            encoding="utf-8"))["boards"]
-        served = {name: boards[name]["file"] for name in names if name in boards}
-        assert not served, (
-            f"{absent.board} was skipped, and the index still serves "
-            f"{served} from the file an earlier run left (run composing "
-            f"{[s.board for s in specs]})")
-        if other in specs:
-            assert boards[other.board]["file"] is not None, (
-                f"{other.board} composed and is not served: {boards[other.board]}")
+        def compose_other(spec, deflection, check, other=other):
+            return 1234 if spec is other else real(spec, deflection, check)
+
+        monkeypatch.setattr(compose, "compose", compose_other)
+        for specs in ((absent, other), (absent,)):
+            for spec in specs:
+                write_glb(Mesh({"#123456": triangle}),
+                          tmp_path / f"{compose._slug(spec.board)}.glb",
+                          spec.board, "an earlier run", (1.0, 1.0, 1.0),
+                          extras={"composed": True})
+            write_index(tuple((name, "chip", compose._slug(spec.board))
+                              for spec in specs
+                              for name in (spec.board, *spec.serves)))
+            before = json.loads((tmp_path / "index.json").read_text(
+                encoding="utf-8"))["boards"]
+            assert all(before[name]["file"] for name in names), (
+                f"the earlier index does not serve {names}: "
+                f"{ {n: before.get(n) for n in names} }")
+            monkeypatch.setattr(compose, "COMPOSITIONS", specs)
+            assert compose.main([]) == 3
+            capsys.readouterr()
+            boards = json.loads((tmp_path / "index.json").read_text(
+                encoding="utf-8"))["boards"]
+            served = {name: boards[name]["file"]
+                      for name in names if name in boards}
+            assert not served, (
+                f"{absent.board} was skipped, and the index still serves "
+                f"{served} from the file an earlier run left (run composing "
+                f"{[s.board for s in specs]})")
+            if other in specs:
+                unserved = {name: boards.get(name) for name in composed
+                            if not (boards.get(name) or {}).get("file")}
+                assert not unserved, (
+                    f"{other.board} composed and {unserved} are not served")
 
 
 def test_a_manifest_row_in_neither_format_is_refused_by_name(capsys):

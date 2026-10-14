@@ -7859,7 +7859,11 @@ def main(argv: list[str] | None = None) -> int:
         # left, drawn as that model. Refusing to write the index instead would
         # leave the index of that earlier run, which names the same file. It is
         # written when every board was skipped too: the index is what the page
-        # reads, and nothing else says the old file is not to be served.
+        # reads, and nothing else says the old file is not to be served. This
+        # is a second convention beside `write_index`'s own, which lists every
+        # entry it is given with `file: None` where no `.glb` is on disk, and
+        # beside `import_3d_model.py --all`, which indexes `COMPOSED` by file
+        # presence and so indexes a stale `.glb` again.
         index = write_index(tuple(
             (name, chip_for(spec.board), _slug(spec.board))
             for spec in COMPOSITIONS
