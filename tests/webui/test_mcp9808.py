@@ -1,10 +1,10 @@
-# OpenHardware - what an MCP9808 answers on its I2C pins, slice 1 (OH-161 step 5).
+# OpenHardware - what an MCP9808 answers on its I2C pins (OH-161 step 5).
 #
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 the OpenHardware authors. See LICENSE.
-"""`webui/devices/mcp9808.py` against DS25095A, slice 1: the address, the
-pointer and the two ID registers. Everything else the part has is slice 2's, and
-each refusal here names the section that makes it a refusal.
+"""`webui/devices/mcp9808.py` against DS25095A: the address, the pointer, the
+two ID registers (slice 1) and the register file with the temperature as an
+input (slice 2). Each refusal here names the section that makes it a refusal.
 
 Loops and not `parametrize`: `tools/inventory.py` counts `def test_*` by `ast`.
 """
@@ -81,8 +81,6 @@ def test_each_thing_slice_one_does_not_model_is_refused_by_name_and_section():
             device.write(pointer)
         return run
 
-    for pointer in (1, 2, 3, 4, 5, 8):
-        cases.append((another_pointer(pointer), "slice 2"))
     for pointer in (0, 9, 0xF, 0x10, 0x86, 0x80, 0xF6):
         cases.append((another_pointer(pointer), "Register 5-1"))
 
@@ -184,3 +182,317 @@ def test_hold_rereads_the_straps_and_keeps_the_pointer_while_powered():
     assert device.address == 0x18 | 6
     assert device.start(True)
     assert (device.read(), device.read()) == (0x04, 0x00)
+
+
+# --- slice 2: the register file and the temperature -------------------------
+
+CONFIG, TUPPER, TLOWER, TCRIT, TA, RESOLUTION = 1, 2, 3, 4, 5, 8
+
+
+def read_bytes(device: Mcp9808, pointer: int, count: int = 2) -> list[int]:
+    """Write the pointer, stop, then read `count` bytes in one transfer."""
+    assert device.start(False) and device.write(pointer)
+    device.stop()
+    assert device.start(True)
+    got = [device.read() for _ in range(count)]
+    device.stop()
+    return got
+
+
+def write_register(device: Mcp9808, pointer: int, *data: int) -> None:
+    """Pointer then the data bytes, one transfer, as Figure 5-4 (p.23) draws."""
+    assert device.start(False)
+    for byte in (pointer, *data):
+        assert device.write(byte)
+    device.stop()
+
+
+def write_word(device: Mcp9808, pointer: int, word: int) -> None:
+    write_register(device, pointer, word >> 8, word & 0xFF)
+
+
+def refused(run, *citations: str) -> str:
+    with pytest.raises(DeviceRefusal) as caught:
+        run()
+    for citation in citations:
+        assert citation in str(caught.value), (citation, str(caught.value))
+    return str(caught.value)
+
+
+def test_the_power_on_registers_are_table_5_3s():
+    """Table 5-3, p.33: CONFIG, TUPPER, TLOWER, TCRIT 0x0000, resolution 0x03
+    (+0.0625 C). The conflict (a): Register 5-4's note says the power-up
+    resolution is 0.25 C/bit; Register 5-7 and Table 5-3 say 0x03, and the
+    model follows them."""
+    assert mcp9808.POWER_ON == {CONFIG: 0x0000, TUPPER: 0x0000, TLOWER: 0x0000,
+                                TCRIT: 0x0000, RESOLUTION: 0x03}
+    device = part()
+    for pointer in (CONFIG, TUPPER, TLOWER, TCRIT):
+        assert read_register(device, pointer) == 0, pointer
+    assert read_bytes(device, RESOLUTION, 1) == [0x03]
+
+
+def test_ta_is_the_held_temperature_in_sixteenths_with_the_flags_above():
+    """Register 5-4 (p.24), Equation 5-1 (p.25): 13-bit two's complement, bit
+    0 = 2^-4 C, flags 15:13 = TA>=TCRIT, TA>TUPPER, TA<TLOWER. With power-on
+    limits of 0 C: 25.0 C is 0xC190 = 49552 (Figure 5-5, p.26 draws 25.25 C
+    as 0x0191) and -10.5 C is 0x3F58 = 16216."""
+    assert mcp9808.ta_word(25.0, 3, 0, 0, 0) == 0xC190 == 49552
+    assert mcp9808.ta_word(-10.5, 3, 0, 0, 0) == 0x3F58 == 16216
+    assert mcp9808.ta_word(0.0, 3, 0, 0, 0) == 0x8000, "0 C: >= TCRIT 0, not > TUPPER"
+    assert mcp9808.ta_word(25.25, 3, 0x0FFC, 0, 0x0FFC) & 0x1FFF == 0x0194
+    assert read_register(part(celsius=25.0), TA) == 49552
+    assert read_register(part(celsius=-10.5), TA) == 16216
+
+
+def test_conflict_a_25_0625_c_reads_401_at_the_power_on_resolution():
+    """Conflict (a), named: 0.0625 C is one step at Register 5-7's 0x03
+    default, so 25.0625 C is 401 sixteenths; at the 0.25 C Register 5-4's
+    note claims it would be 400."""
+    assert mcp9808.ta_word(25.0625, 3, 0, 0, 0) & 0x1FFF == 401
+    assert read_register(part(celsius=25.0625), TA) & 0x1FFF == 401
+    assert mcp9808.ta_word(25.0625, 1, 0, 0, 0) & 0x1FFF == 400
+
+
+def test_each_resolution_rounds_toward_minus_infinity_to_its_step():
+    """Register 5-7 (p.29) and Register 5-4 note 2: bits 2:0 may remain clear
+    at coarser resolution. Clearing low bits of a two's complement word rounds
+    toward minus infinity, which is the model's reading (design item 6)."""
+    steps = {0: 8, 1: 4, 2: 2, 3: 1}
+    for resolution, step in steps.items():
+        for sixteenths in range(-400, 401, 7):
+            celsius = sixteenths / 16
+            got = mcp9808.ta_word(celsius, resolution, 0x1000, 0x1000, 0x1000) & 0x1FFF
+            want = (sixteenths // step * step) & 0x1FFF
+            assert got == want, (resolution, celsius, got, want)
+    assert mcp9808.ta_word(-10.5625, 0, 0x1000, 0x1000, 0x1000) & 0x1FFF == 0x1F50
+    assert mcp9808.ta_word(-0.0625, 3, 0x1000, 0x1000, 0x1000) & 0x1FFF == 0x1FFF
+
+
+def test_the_flags_compare_ta_with_each_limit_as_register_5_4_says():
+    """Register 5-4 (p.24): bit 15 TA >= TCRIT, bit 14 TA > TUPPER, bit 13
+    TA < TLOWER."""
+    limit = 0x0190   # +25 C
+    def flags(celsius):
+        return mcp9808.ta_word(celsius, 3, limit, limit, limit) >> 13
+    assert flags(25.0) == 0b100, "equal: >= TCRIT only"
+    assert flags(25.0625) == 0b110
+    assert flags(24.9375) == 0b001
+    assert flags(0.0) == 0b001
+    assert flags(-1.0) == 0b001
+    assert mcp9808.ta_word(-5.0, 3, 0, 0, 0x1FFC) >> 13 == 0b001, (
+        "TCRIT 0x1FFC is -0.25 C: limits compare as signed, so -5 C is below it")
+
+
+def test_the_limit_registers_store_register_5_3s_eleven_bits():
+    """Register 5-3 (p.22): bits 15:13 and 1:0 read 0, bit 12 is the sign,
+    11:2 the data. Figure 5-4 (p.23) writes +90 C as 0x05A0."""
+    for pointer in (TUPPER, TLOWER, TCRIT):
+        device = part()
+        write_word(device, pointer, 0x05A0)
+        assert read_register(device, pointer) == 0x05A0, pointer
+        write_word(device, pointer, 0xFFFF)
+        assert read_register(device, pointer) == 0x1FFC, pointer
+        write_word(device, pointer, 0x0003)
+        assert read_register(device, pointer) == 0, pointer
+
+
+def test_limits_move_the_flags_a_sketch_reads():
+    device = part(celsius=25.0)
+    write_word(device, TUPPER, 25 * 16)
+    write_word(device, TCRIT, 30 * 16)
+    assert read_register(device, TA) == 0x0190, "not > 25, below 30, not < 0"
+    write_word(device, TUPPER, 20 * 16)
+    assert read_register(device, TA) == 0x4190
+    write_word(device, TLOWER, 26 * 16)
+    assert read_register(device, TA) == 0x6190
+
+
+def test_the_resolution_register_is_two_bits_and_sets_ta_s_step():
+    """Register 5-7 (p.29): bits 7:2 unimplemented, read 0."""
+    device = part(celsius=25.0625)
+    assert read_register(device, TA) & 0x1FFF == 401
+    write_register(device, RESOLUTION, 0x00)
+    assert read_bytes(device, RESOLUTION, 1) == [0x00]
+    assert read_register(device, TA) & 0x1FFF == 400
+    write_register(device, RESOLUTION, 0xFE)
+    assert read_bytes(device, RESOLUTION, 1) == [0x02]
+    write_register(device, RESOLUTION, 0x03)
+    assert read_register(device, TA) & 0x1FFF == 401
+
+
+def test_config_keeps_what_register_5_2_lets_it_and_reads_the_rest_as_zero():
+    """Register 5-2 (p.18-19): bits 15:11 read 0; Int Clear returns to 0;
+    Alert Stat is read-only; THYST, SHDN, the locks, Alert Sel, Pol and Mod
+    are stored."""
+    device = part()
+    for word in (0x0100, 0x0600, 0x0007, 0x07C7):
+        write_word(device, CONFIG, 0)
+        write_word(device, CONFIG, word)
+        assert read_register(device, CONFIG) == word, hex(word)
+    device = part()
+    write_word(device, CONFIG, 0xF830)
+    assert read_register(device, CONFIG) == 0, "unimplemented, Int Clear, Alert Stat"
+
+
+def test_the_lock_bits_stay_until_power_on_and_hold_back_what_5_1_1_says():
+    """Register 5-2: Crit Lock stops TCRIT, Win Lock stops TUPPER and TLOWER,
+    either stops THYST, SHDN being set, Alert Pol and Mod, neither bit is
+    cleared by a write, and a VDD glitch below VPOR (5.3, p.33) clears it."""
+    for lock, writable, stopped in ((0x80, TUPPER, TCRIT), (0x40, TCRIT, TUPPER)):
+        device = part()
+        write_word(device, CONFIG, lock)
+        write_word(device, writable, 0x0190)
+        assert read_register(device, writable) == 0x0190
+        write_word(device, stopped, 0x0190)
+        assert read_register(device, stopped) == 0, "can not be written"
+        write_word(device, CONFIG, 0x0000)
+        assert read_register(device, CONFIG) == lock, "cleared only by a reset"
+        write_word(device, CONFIG, lock | 0x0600 | 0x0100 | 0x0003)
+        assert read_register(device, CONFIG) == lock, (
+            "THYST, SHDN, Alert Pol and Alert Mod can not be altered")
+        device.hold(straps=0, celsius=25.0, vdd=0.0)
+        device.hold(straps=0, celsius=25.0, vdd=3.3)
+        assert read_register(device, CONFIG) == 0
+        assert read_register(device, writable) == 0, "the limits went with it"
+    device = part()
+    write_word(device, CONFIG, 0x0100)
+    write_word(device, CONFIG, 0x0100 | 0x40)
+    write_word(device, CONFIG, 0x0040)
+    assert read_register(device, CONFIG) == 0x40, "SHDN can be cleared while locked"
+
+
+def test_shutdown_holds_ta_and_leaving_it_follows_the_temperature_again():
+    """5.2.1 (p.30): in shutdown TA holds the previous temperature data."""
+    device = part(celsius=25.0)
+    write_word(device, CONFIG, 0x0100)
+    device.hold(straps=0, celsius=30.0, vdd=3.3)
+    assert read_register(device, TA) == 0xC190
+    write_word(device, CONFIG, 0x0000)
+    assert read_register(device, TA) == 0xC000 | 30 * 16
+
+
+def test_the_power_on_reset_restores_every_register():
+    device = part()
+    write_word(device, CONFIG, 0x0100)
+    write_word(device, TUPPER, 0x0190)
+    write_register(device, RESOLUTION, 0x00)
+    device.hold(straps=0, celsius=25.0, vdd=0.0)
+    device.hold(straps=0, celsius=25.0, vdd=3.3)
+    assert [read_register(device, pointer) for pointer in (CONFIG, TUPPER)] == [0, 0]
+    assert read_bytes(device, RESOLUTION, 1) == [0x03]
+    assert read_register(device, TA) == 0xC190, "and TA follows the temperature again"
+
+
+def test_a_new_temperature_keeps_the_part_and_its_registers():
+    """The bench's drive calls `hold` with a new temperature: the pointer, the
+    limits and the resolution are the part's own and survive it."""
+    device = part()
+    write_word(device, TLOWER, 0x0190)
+    write_register(device, RESOLUTION, 0x01)
+    write_register(device, TA)
+    device.hold(straps=0, celsius=-10.5, vdd=3.3)
+    assert device.pointer == TA
+    assert read_register(device, TA) == mcp9808.ta_word(-10.5, 1, 0, 0x0190, 0)
+    assert read_register(device, TLOWER) == 0x0190
+
+
+def test_a_temperature_outside_the_specified_range_is_refused_with_the_value():
+    """p.4: Specified Temperature Range -40 to +125 C."""
+    for celsius in (-40.0, 0.0, 125.0):
+        part(celsius=celsius)
+    for celsius in (-40.0625, 125.0625, float("nan"), float("inf"), -300.0):
+        refused(lambda: part(celsius=celsius), repr(celsius), "p.4")
+    device = part()
+    refused(lambda: device.hold(straps=0, celsius=130.0, vdd=3.3), "130.0")
+    assert device.celsius == 25.0, "a refused hold changes nothing"
+
+
+def test_a_pointer_only_write_selects_ta_and_a_repeated_read_keeps_it():
+    device = part(celsius=25.0)
+    write_register(device, TA)
+    for _ in range(2):
+        assert device.start(True)
+        assert (device.read(), device.read()) == (0xC1, 0x90)
+        device.stop()
+
+
+def test_a_third_byte_of_any_register_is_refused_citing_sequential_read():
+    """4.1.1 (p.13): 'does not support sequential register read/write'."""
+    for pointer in (CONFIG, TUPPER, TLOWER, TCRIT, TA, 6, 7):
+        device = part()
+        write_register(device, pointer)
+        device.start(True)
+        device.read()
+        device.read()
+        refused(device.read, "4.1.1", f"pointer {pointer}")
+    device = part()
+    write_register(device, RESOLUTION)
+    device.start(True)
+    device.read()
+    refused(device.read, "4.1.1", "Register 5-7")
+
+
+def test_a_write_that_stops_early_or_carries_extra_bytes_is_refused():
+    """Figure 5-4 (p.23) writes the pointer, the MSB and the LSB, and 4.1.1
+    (p.13) has no sequential write. Neither an MSB alone nor a third data byte
+    is in DS25095A, and a refused write stores nothing."""
+    for pointer in (CONFIG, TUPPER, TLOWER, TCRIT):
+        device = part()
+        device.start(False)
+        device.write(pointer)
+        device.write(0x01)
+        refused(device.stop, "4.1.1", "Figure 5-4", f"pointer {pointer}")
+        assert read_register(device, pointer) == 0, pointer
+
+        device = part()
+        device.start(False)
+        device.write(pointer)
+        device.write(0x01)
+        device.write(0x90)
+        refused(lambda: device.write(0x00), "4.1.1", "0x00")
+        assert read_register(device, pointer) == {CONFIG: 0x0180}.get(pointer, 0x0190), (
+            "the two bytes it was given, and not the third")
+    device = part()
+    device.start(False)
+    device.write(RESOLUTION)
+    device.write(0x01)
+    refused(lambda: device.write(0x02), "4.1.1", "Register 5-7")
+    device = part()
+    device.start(False)
+    device.write(TUPPER)
+    device.write(0x01)
+    refused(lambda: device.start(True), "4.1.1", "Figure 5-4")
+
+
+def test_a_write_to_ta_or_an_id_is_refused_citing_its_register():
+    """Register 5-4 (p.24), 5.1.4 (p.27), 5.1.5 (p.28): read-only."""
+    for pointer, citation in ((TA, "Register 5-4"), (6, "5.1.4"), (7, "5.1.5")):
+        device = part()
+        device.start(False)
+        device.write(pointer)
+        refused(lambda: device.write(0x12), citation, "0x12")
+
+
+def test_alert_cnt_is_refused_because_the_alert_pin_is_not_modelled():
+    """Register 5-2 bit 3 (p.19): the Alert output control. A write that would
+    enable it is refused and stores nothing; one the lock bits stop is not."""
+    device = part()
+    refused(lambda: write_word(device, CONFIG, 0x0008), "Alert Cnt", "Register 5-2", "0x0008")
+    assert read_register(device, CONFIG) == 0
+    write_word(device, CONFIG, 0x00C0)
+    write_word(device, CONFIG, 0x00C8)
+    assert read_register(device, CONFIG) == 0x00C0, "not altered: nothing to refuse"
+
+
+def test_a_ta_read_with_thyst_set_is_refused_citing_the_hysteresis():
+    """5.2.2 (p.30): THYST applies to the Alert limits on falling temperature,
+    which DS25095A does not carry into TA's flag bits."""
+    device = part()
+    write_word(device, CONFIG, 0x0200)
+    assert read_register(device, CONFIG) == 0x0200
+    write_register(device, TA)
+    device.start(True)
+    refused(device.read, "5.2.2", "THYST")
+    write_word(device, CONFIG, 0x0000)
+    assert read_register(device, TA) == 0xC190

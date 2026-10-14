@@ -2404,3 +2404,233 @@ def test_a_deferred_write_that_cannot_fit_the_fifo_reads_nothing_and_stops_nothi
     words, status = _run_wire(WIRE_FIFO_SKETCH, 2)
     assert words == ["0", "0"], words
     assert status == "running"
+
+
+# --- the MCP9808's register file, read and written through Wire (slice 2) -----
+#
+# DS25095A: TA is the held temperature as 13-bit two's complement sixteenths
+# with TA >= TCRIT, TA > TUPPER and TA < TLOWER in bits 15:13 (Register 5-4,
+# p.24). With the power-on limits of 0 C (Table 5-3, p.33) 25.0 C is 0xC190 and
+# -10.5 C is 0x3F58, the sketch printing the 13 temperature bits and then the
+# whole word.
+
+#: `read16` is the TA read of Example 5-1 (p.25): write the pointer, STOP, read
+#: two bytes. It returns -1 where the part did not answer.
+WIRE_READ16 = """
+#include <Wire.h>
+static int read16(uint8_t pointer) {
+  Wire.beginTransmission(0x18);
+  Wire.write(pointer);
+  Wire.endTransmission();
+  if (Wire.requestFrom(0x18, 2) != 2) return -1;
+  int high = Wire.read();
+  int low = Wire.read();
+  return (high << 8) | low;
+}
+"""
+
+WIRE_TA_SKETCH = WIRE_READ16 + """
+void setup() {
+  Wire.begin();
+  int ta = read16(5);
+  Serial.println(ta & 0x1FFF);
+  Serial.println(ta);
+}
+void loop() { }
+"""
+
+
+def _build_for(sketch: str):
+    """The built sketch and its load base, built once for several sessions."""
+    needs_riscv32()
+    from webui import compile as compiler
+
+    try:
+        built = compiler.build(C3_BOARD, sketch)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    assert built.ok, built.diagnostics
+    return built, compiler.recipe_for(C3_BOARD).base
+
+
+def _celsius(celsius: float) -> dict:
+    return {"u1": dict(MCP9808_ON_D4_D5, celsius=celsius)}
+
+
+def test_a_wire_sketch_reads_ta_at_the_held_temperature():
+    """25.0 C prints 400 and 49552 and -10.5 C prints 16216 (Register 5-4;
+    Figure 5-5, p.26 draws +25.25 C as 0x0191 at the same 1/16 C weights).
+    Conflict (a) in DS25095A is named by 25.0625 C: Register 5-4's note says
+    the part powers up at 0.25 C a bit, which would print 400; Register 5-7
+    and Table 5-3 say 0.0625 C, which prints 401, and the model follows them."""
+    built, base = _build_for(WIRE_TA_SKETCH)
+    got = {}
+    for celsius in (25.0, -10.5, 25.0625):
+        with api.load_firmware(C3_BOARD, built.image, base=base) as session:
+            session.drive({}, None, _celsius(celsius))
+            got[celsius] = _printed_tokens(session, 2)
+            assert session.status == "running", (celsius, session.status, session.detail)
+    assert got == {25.0: ["400", "49552"], -10.5: ["8024", "16216"],
+                   25.0625: ["401", "49553"]}, got
+
+
+#: The register file written and read back through Wire: TUPPER to +20 C
+#: (Register 5-3's word is the sixteenths), the resolution register to 0x01
+#: (+0.25 C, Register 5-7) and TA read once more. Each status, then TUPPER,
+#: the resolution byte, the 13 temperature bits and bits 15:13.
+WIRE_REGISTERS_SKETCH = WIRE_READ16 + """
+static void write_byte(uint8_t pointer, uint8_t data) {
+  Wire.beginTransmission(0x18);
+  Wire.write(pointer);
+  Wire.write(data);
+  Serial.println(Wire.endTransmission());
+}
+void setup() {
+  Wire.begin();
+  Wire.beginTransmission(0x18);
+  Wire.write(2);
+  Wire.write(0x01);
+  Wire.write(0x40);
+  Serial.println(Wire.endTransmission());
+  Serial.println(read16(2));
+  write_byte(8, 0x01);
+  Wire.beginTransmission(0x18);
+  Wire.write(8);
+  Wire.endTransmission();
+  Wire.requestFrom(0x18, 1);
+  Serial.println(Wire.read());
+  int ta = read16(5);
+  Serial.println(ta & 0x1FFF);
+  Serial.println(ta >> 13);
+}
+void loop() { }
+"""
+
+
+def test_a_wire_sketch_writes_registers_and_the_resolution_changes_what_ta_shows():
+    """25.0625 C at the 0.25 C step rounds to 400, below the 401 it reads at
+    the power-on 0.0625 C; TUPPER at 20 C and TCRIT at 0 C set bits 14 and 15."""
+    built, base = _build_for(WIRE_REGISTERS_SKETCH)
+    with api.load_firmware(C3_BOARD, built.image, base=base) as session:
+        session.drive({}, None, _celsius(25.0625))
+        words = _printed_tokens(session, 6)
+        assert session.status == "running", (session.status, session.detail)
+        assert words == ["0", "320", "0", "1", "400", "6"], words
+
+
+def _refused_by(sketch: str, *citations: str) -> list[str]:
+    """Run `sketch` with a part on the bus until the core stops it, and hold
+    the stop to the citations. Returns the words printed first."""
+    built, base = _build_for(sketch)
+    with api.load_firmware(C3_BOARD, built.image, base=base) as session:
+        session.drive({}, None, _celsius(25.0))
+        words = _printed_tokens(session, 99)
+        assert session.status == "stopped", (session.status, session.detail, words)
+        for citation in citations:
+            assert citation in session.detail, (citation, session.detail)
+        return words
+
+
+def test_a_third_byte_read_stops_the_session_citing_4_1_1():
+    sketch = WIRE_READ16 + """
+void setup() {
+  Wire.begin();
+  Serial.println(read16(5));
+  Wire.requestFrom(0x18, 3);
+  Serial.println(99);
+}
+void loop() { }
+"""
+    assert _refused_by(sketch, "4.1.1", "pointer 5") == ["49552"]
+
+
+def test_a_write_that_stops_after_the_msb_stops_the_session_citing_4_1_1():
+    sketch = WIRE_READ16 + """
+void setup() {
+  Wire.begin();
+  Serial.println(read16(5));
+  Wire.beginTransmission(0x18);
+  Wire.write(2);
+  Wire.write(0x01);
+  Wire.endTransmission();
+  Serial.println(99);
+}
+void loop() { }
+"""
+    assert _refused_by(sketch, "4.1.1", "Figure 5-4") == ["49552"]
+
+
+def test_a_sketch_that_turns_on_alert_cnt_stops_the_session_citing_register_5_2():
+    sketch = WIRE_READ16 + """
+void setup() {
+  Wire.begin();
+  Wire.beginTransmission(0x18);
+  Wire.write(1);
+  Wire.write(0x00);
+  Wire.write(0x08);
+  Wire.endTransmission();
+  Serial.println(99);
+}
+void loop() { }
+"""
+    assert _refused_by(sketch, "Alert Cnt", "Register 5-2") == []
+
+
+#: TA read forever, a pause between, so a bench can change the temperature
+#: under a running sketch.
+WIRE_TA_LOOP_SKETCH = WIRE_READ16 + """
+void setup() { Wire.begin(); }
+void loop() {
+  Serial.println(read16(5) & 0x1FFF);
+  delay(2);
+}
+"""
+
+
+def test_the_record_replays_the_printed_text_and_the_pc_at_every_drive():
+    """The bench moves the temperature under a running sketch: 25.0 C, then
+    -10.5 C, then 25.0625 C, the same part under the same id each time (its
+    pointer survives). A fresh session given the image and the record lands
+    every drive on the same instruction, with the same program counter and the
+    same text printed so far, and ends the same."""
+    built, base = _build_for(WIRE_TA_LOOP_SKETCH)
+
+    def settled(session: api.BoardSession) -> str:
+        """Run on to the end of a printed line, so that no number is cut."""
+        while not session.state()["uart"]["text"].endswith("\n"):
+            assert session.run(50).status == "running", (session.status, session.detail)
+        return session.state()["uart"]["text"]
+
+    def where(session: api.BoardSession) -> tuple:
+        return (session.retired, session.cpu.pc, session.state()["uart"]["text"])
+
+    def run_to(session: api.BoardSession, retired: int) -> None:
+        while session.retired < retired:
+            session.run(min(200_000, retired - session.retired))
+
+    landed = []
+    with api.load_firmware(C3_BOARD, built.image, base=base) as session:
+        for celsius in (25.0, -10.5, 25.0625):
+            landed.append(where(session))
+            session.drive({}, None, _celsius(celsius))
+            session.run(200_000)    # run's ceiling; two chunks pass a delay(2)
+            session.run(200_000)
+            settled(session)
+        final = where(session)
+        record = list(session.inputs)
+    words = final[2].split()
+    assert set(words) == {"400", "8024", "401"}, (
+        f"each temperature was read by the running sketch: {words}")
+    assert words == sorted(words, key=["400", "8024", "401"].index), words
+    assert [entry[3]["u1"]["celsius"] for entry in record] == [25.0, -10.5, 25.0625]
+
+    with api.load_firmware(C3_BOARD, built.image, base=base) as replay:
+        for (at, levels, volts, devices), seen in zip(record, landed):
+            run_to(replay, at)
+            assert seen[0] == at and where(replay) == seen, (
+                f"the drive stamped {at} found the replay at {where(replay)[:2]} "
+                f"with {where(replay)[2]!r}, where the run had {seen}")
+            replay.drive(levels, volts, devices)
+        run_to(replay, final[0])
+        assert where(replay) == final
+        assert replay.inputs == record
