@@ -803,6 +803,7 @@ def test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert():
     """
     import dataclasses
 
+    pytest.importorskip("OCP")
     from tools.import_3d_model import CACHE, DEFLECTION, PARTS, convert_part
 
     part = next(p for p in PARTS if p.library == "Resistor_THT")
@@ -1000,6 +1001,7 @@ def test_the_tessellator_welds_what_it_meshes():
     the cheapest shape in the corpus that has a periodic face: a cylinder body
     on two cylindrical leads, 1,950 triangles, and 378 vertices on a seam.
     """
+    pytest.importorskip("OCP")
     from tools.import_3d_model import CACHE, DEFLECTION, part_frame, read, tessellate
 
     step = CACHE / "part-R_Axial_DIN0207_L6_3mm_D2_5mm_P7_62mm_Horizontal.step"
