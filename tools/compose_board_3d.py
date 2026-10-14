@@ -2666,10 +2666,10 @@ COMPOSITIONS: tuple[Composition, ...] = (
             "for this board -- see docs/research/board-models/"
         ),
         headers=("J1", "J2"),
-        # Seeed's own board file says 1.0 mm nowhere this reads, and the XIAO
-        # is a 1.2 mm board by the RP2040 model's own PCB solid (0.00..1.20 in
-        # its extras). Reused rather than invented: the sibling the vendor DID
-        # publish a mesh of is the best evidence for a board of this family.
+        # Seeed's own board file says `(general (thickness 1.6))`, KiCad's
+        # default, and has no stackup; the XIAO is a 1.2 mm board by the
+        # vendor's own meshes of its siblings. Why 1.2 and not the file's 1.6
+        # is set out once, on the XIAO STM32C5 below (OH-236).
         thickness_mm=1.2,
         colour=BOARD_MASK,
         colour_source=(
@@ -2836,7 +2836,20 @@ COMPOSITIONS = COMPOSITIONS + (
         # never have set it. The composed XIAOs are drawn at 1.2 from the
         # RP2040 model's own PCB solid (0.00..1.20 in its extras), the
         # sibling the vendor DID publish a mesh of, and this board follows
-        # them. Whether the family should be 1.6 is a separate question.
+        # them.
+        #
+        # **Why the family stays 1.2 (OH-236, measured 2026-10-15).** The
+        # PCB solids of Seeed's own XIAO meshes, as each .glb's
+        # `extras.pcb.thickness` records them: RP2040 1.20, SAMD21 1.21,
+        # ESP32-S3 1.25, nRF52840 1.25, nRF54LM20A 1.51, MG24 1.60. The
+        # MG24's mesh is the STEP of its own KiCad project, so its 1.6 is
+        # that file's number again and not a second witness. The C5's
+        # 1.209108 comes from a stackup somebody filled in -- 0.5 oz inner
+        # copper, an 0.88492 core -- where the 1.6 files carry round
+        # dielectrics that sum to KiCad's default. Seeed states no PCB
+        # thickness on any wiki or product page found. So no one number is
+        # the family's, and 1.6 on a file's say-so alone is the weaker
+        # claim; a caliper on a newer XIAO, or a Seeed drawing, settles it.
         thickness_mm=1.2,
         colour=BOARD_MASK,
         colour_source=(
