@@ -1257,7 +1257,7 @@ def test_with_no_device_on_the_pads_the_address_is_nacked_and_its_command_not_do
         assert result.status == "running", result
         raw = session.cpu.read_word(I2C_RAW_AT)
         assert raw & esp32c3.I2C_INT_NACK, hex(raw)
-        assert not raw & esp32c3.I2C_INT_TRANS_COMPLETE
+        assert raw & esp32c3.I2C_INT_TRANS_COMPLETE, "the STOP after a NACK (TRM p.685, p.707)"
         assert session.cpu.read_word(comd(0)) >> 31 == 1, "RSTART ran"
         assert session.cpu.read_word(comd(1)) >> 31 == 0, "COMD1, the address, did not"
 
@@ -1424,3 +1424,29 @@ def test_a_bus_pad_this_part_does_not_have_is_refused_before_anything_is_held():
     with pytest.raises(ValueError) as caught:
         esp32c3.check_bus(((SDA_GPIO, 99, None),))
     assert "GPIO99" in str(caught.value)
+
+
+def test_a_repeated_start_inside_one_list_addresses_the_part_again():
+    """DS25095A 4.1.1's own read: pointer write, repeated START, read. Also the
+    path a deferred `endTransmission(false)` takes. The second address byte
+    must be an address, not data after the first."""
+    needs_riscv32()
+    lists = [command("RSTART"), command("WRITE", 2, ack_en=True), command("RSTART"),
+             command("WRITE", 1, ack_en=True), command("READ", 1),
+             command("READ", 1, ack_val=1), command("STOP")]
+    program = (stores(*wiring()) + stores(*transaction(lists, [0x18 << 1, 6, 0x18 << 1 | 1]))
+               + loads(I2C_DATA_AT, I2C_DATA_AT))
+    session, result = run_program(program, attached())
+    with session:
+        assert result.status == "running", result
+        regs = session.cpu.get_regs().as_list()
+        assert (regs[16], regs[17]) == (0x00, 0x54)
+
+
+def test_an_unpowered_part_on_the_bus_does_not_acknowledge_its_address():
+    needs_riscv32()
+    dark = ((SDA_GPIO, SCL_GPIO, Mcp9808(straps=0, celsius=25.0, vdd=1.0)),)
+    session, result = run_program(stores(*wiring()) + stores(*write_pointer(6)), dark)
+    with session:
+        assert result.status == "running", result
+        assert session.cpu.read_word(I2C_RAW_AT) & esp32c3.I2C_INT_NACK

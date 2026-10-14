@@ -140,6 +140,7 @@ def test_vdd_bounds_the_part_answers_within():
             part(vdd=vdd)
         assert repr(vdd) in str(caught.value), vdd
         assert "p.3" in str(caught.value) and "p.2" in str(caught.value), vdd
+        assert "below the 6.0 V" not in str(caught.value), "false at 6.0 V and above"
 
 
 def test_dropping_below_vpor_resets_the_pointer():
@@ -154,6 +155,17 @@ def test_dropping_below_vpor_resets_the_pointer():
         device.read()
     assert "RFU" in str(caught.value) and "Register 5-1" in str(caught.value), (
         "back at the power-on pointer, 0000")
+
+
+def test_pointers_9_to_f_are_reserved_test_and_calibration_registers():
+    """Register 5-1 '1xxx = Reserved' and its Note 1."""
+    for pointer in range(9, 16):
+        device = part()
+        device.start(False)
+        with pytest.raises(DeviceRefusal) as caught:
+            device.write(pointer)
+        assert "test and calibration" in str(caught.value), pointer
+        assert "no register" not in str(caught.value), pointer
 
 
 def test_a_read_inside_a_write_transfer_is_refused():

@@ -1229,14 +1229,16 @@ def serve_i2c(cpu: Cpu, address: int, *,
     the RX FIFO, from a part addressed for reading) and STOP, each marked DONE
     as it runs.
 
-    **A NACK is partly the model's choice.** TRM v1.4 28.4.9 item 5 (p.685):
+    **A NACK, read from two passages of TRM v1.4.** 28.4.9 item 5 (p.685):
     with `ack_check_en` set and the level received not matching `ack_exp` in a
     WRITE, the master "will generate an I2C_NACK_INT interrupt and a STOP
-    condition". That is modelled: NACK is set and the addressed part sees its
-    STOP. The manual is silent on whether TRANS_COMPLETE also rises and on
-    whether the NACKed command reads DONE; this model sets neither
-    (OH-161 design item 9, unverified against silicon), and nothing in the
-    vendor's own software reads either -- arduino-esp32's Wire maps every
+    condition". The interrupt list (p.707): "I2C_TRANS_COMPLETE_INT: Triggered
+    when the I2C controller detects a STOP bit". So NACK and TRANS_COMPLETE
+    are both set and the addressed part sees its STOP: an inference from the
+    two passages together, not one sentence of the manual. Whether the
+    NACKed command reads DONE is not stated; it does not here (OH-161 design
+    item 9, the model's choice, unverified against silicon). Nothing in the
+    vendor's own software reads DONE -- arduino-esp32's Wire maps every
     NACK to return code 2 (Wire.cpp:466-468 at 3.20017.241212). A WRITE
     without `ack_check_en` whose address byte nobody acknowledged goes on, and
     its data bytes reach nobody.
@@ -1294,7 +1296,7 @@ def serve_i2c(cpu: Cpu, address: int, *,
                     break
             expect_nack = bool(word & I2C_ACK_EXPECTED)
             if word & I2C_ACK_EN and acked == expect_nack:
-                raw |= I2C_INT_NACK
+                raw |= I2C_INT_NACK | I2C_INT_TRANS_COMPLETE
                 break
         elif op == I2C_OP["READ"]:
             if addressed is None or not reading:

@@ -67,9 +67,10 @@ class Mcp9808:
 
         Refused, with the values: a strap that is not A2 A1 A0 (0 to 7), and
         a VDD from VPOR up to 2.7 V, where DS25095A describes nothing, and
-        one above 5.5 V, past the operating range (p.3) and short of the
-        6.0 V absolute maximum (p.2), which "functional operation outside the
-        operational listings" is not implied by. Below VPOR the part is
+        one above 5.5 V, past the operating range (p.3); the absolute maximum
+        is 6.0 V (p.2) and "functional operation of the device at those or any
+        other conditions above those indicated in the operational listings
+        ... is not implied". Below VPOR the part is
         unpowered and its registers return to power-on (5.3, p.33).
         """
         if isinstance(straps, bool) or not isinstance(straps, int) or not 0 <= straps <= 7:
@@ -83,10 +84,11 @@ class Mcp9808:
                 f"neither state, so it is refused rather than guessed")
         if vdd > VDD_MAX:
             raise DeviceRefusal(
-                f"MCP9808 VDD {vdd!r} V is above the 5.5 V maximum operating "
-                f"voltage (p.3) and below the 6.0 V absolute maximum (p.2): "
-                f"the datasheet does not imply operation there, so it is "
-                f"refused rather than guessed")
+                f"MCP9808 VDD {vdd!r} V is past the 2.7-5.5 V operating range "
+                f"(p.3); the absolute maximum is 6.0 V (p.2), and 'functional "
+                f"operation of the device at those or any other conditions "
+                f"above those indicated in the operational listings ... is not "
+                f"implied': refused rather than guessed")
         self.straps = straps
         self.celsius = celsius
         if vdd < VPOR_VOLTS:
@@ -130,8 +132,9 @@ class Mcp9808:
                 f"slice 2; slice 1 answers pointers 6 and 7 (5.1.4, 5.1.5)")
         if byte not in IDS:
             raise DeviceRefusal(
-                f"MCP9808 pointer {byte:#04x} is {'0000 = RFU' if byte == 0 else 'not a register'} "
-                f"(Register 5-1, p.16): the part has no register there")
+                f"MCP9808 pointer {byte:#04x} is "
+                f"{'0000 = RFU, reserved for future use' if byte == 0 else 'a reserved test and calibration register'} "
+                f"(Register 5-1, p.16, Note 1): it is not to be accessed")
         self.pointer = byte
 
     def read(self) -> int:
