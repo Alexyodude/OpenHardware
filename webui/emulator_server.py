@@ -79,7 +79,12 @@ that returns and posts a name back.
               registers: [{name, value, width}], flags: [{name, on}], pc,
               memory: {at, bytes[]}, words: [{address, value, why?}],
               uart: {present, bytes, dropped_bytes, text, undecodable_bytes},
-              listing: {present, at, lines[]}}
+              listing: {present, at, lines[]},
+              devices: {"part-2": {address, powered, celsius, pointer, config,
+                        resolution, ta, why?}}}
+              `devices` is each part on the I2C bus by the id the bench gave
+              it; `ta` is null, with a `why`, where the part would not answer
+              a TA read (THYST set, or unpowered).
               A word the core refuses to show -- an empty FIFO, an alias onto
               a FIFO or a doorbell, an alias onto nothing -- is {address,
               value: null, why}; the rest of the state still arrives.
@@ -150,6 +155,7 @@ import binascii
 import http.server
 import json
 import pathlib
+import reprlib
 import sys
 import threading
 import time
@@ -672,23 +678,26 @@ def handle_board_api(boards: BoardSlot, route: str,
         board = payload.get("board")
         levels = payload.get("levels")
         volts = payload.get("volts")
+        # **A posted value is shown by `reprlib` in every message here**: a
+        # body may be as large as MAX_BODY_BYTES, and `{value!r}` sent a
+        # 16 MB string back as a 16 MB 400.
         if not isinstance(board, str):
             raise ApiError(f"board must be a string naming the board the "
-                           f"bench was solved for, got {board!r}")
+                           f"bench was solved for, got {reprlib.repr(board)}")
         if not isinstance(levels, dict):
             raise ApiError(f"levels must be an object of pad name -> level, "
-                           f"got {levels!r}")
+                           f"got {reprlib.repr(levels)}")
         if volts is not None and not isinstance(volts, dict):
             raise ApiError(f"volts must be an object of pad name -> volts, "
-                           f"got {volts!r}")
+                           f"got {reprlib.repr(volts)}")
         devices = payload.get("devices")
         if devices is not None and not isinstance(devices, dict):
             raise ApiError(f"devices must be an object of bench id -> device, "
-                           f"got {devices!r}")
+                           f"got {reprlib.repr(devices)}")
         if board != session.board:
             raise api.BoardRunError(
                 "drive-refused",
-                f"the bench was solved for {board!r} and the session runs "
+                f"the bench was solved for {reprlib.repr(board)} and the session runs "
                 f"{session.board!r}; nothing was driven")
         try:
             session.drive(levels, volts, devices)
@@ -946,11 +955,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         raw = self.rfile.read(length) if length else b"{}"
         try:
             payload = json.loads(raw or b"{}")
-        except ValueError as exc:
+        except (ValueError, RecursionError) as exc:
             # `JSONDecodeError` is one, and not the only one: an integer past
             # Python's 4300-digit limit for converting one raises a plain
             # `ValueError` from inside the parse, and caught as the narrower
             # class it left `do_POST` with no reply sent (OH-161 step 4).
+            # Nesting past the parser's depth raises `RecursionError`, which
+            # is not a `ValueError` and did the same (OH-161 step 5).
             self._json(400, {"error": f"body is not JSON: {exc}"})
             return
         if not isinstance(payload, dict):

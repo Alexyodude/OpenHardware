@@ -660,6 +660,25 @@ def test_a_device_is_not_posted_while_no_pad_has_a_state_of_its_own(tmp_path):
     assert got["warned"] == [] and got["notes"][7] is None, got["notes"]
 
 
+def test_a_device_is_posted_though_no_pad_is_an_input_where_a_pad_has_a_state(tmp_path):
+    """**The device clause of the first-post gate is the only thing that
+    posts here.** A sketch whose pads are all outputs leaves `analyse` no
+    input to state, so the first post would wait for one forever; a pad that
+    is high or low is a program running, and the seventh wire states the
+    part with `levels` empty. Without the clause nothing is ever posted."""
+    for level in ("high", "low"):
+        directory = tmp_path / level
+        directory.mkdir()
+        got = run_page(directory, STEPS, {"layout": layout(), "steps": [
+            ["levels", {"D1": level}],             # 1: a pad drives, none is an input
+            *SEVEN_WIRES,                          # 2 to 9
+        ]})
+        assert got["after"] == [0] * 8 + [1], (level, got["after"], got["posted"])
+        assert got["posted"] == [{"board": BOARD, "levels": {}, "volts": {},
+                                  "devices": {"part-1": MCP_POSTED}}], (level, got["posted"])
+        assert got["warned"] == [], (level, got["warned"])
+
+
 # --- the slice, end to end: the page's code against a real server -----------
 
 #: An input pulled up, and an output copying it, in each board's own names.
@@ -941,7 +960,8 @@ for (const celsius of [30.0, -10.5]) {
   await settled();
   seen.push(await poll());
 }
-console.log(JSON.stringify({ seen, set, warned }));
+const devices = (await json("/api/board/state")).devices;
+console.log(JSON.stringify({ seen, set, warned, devices }));
 """
 
 
@@ -989,12 +1009,13 @@ def test_the_page_holds_a_temperature_a_sketch_reads_through_the_server(tmp_path
             record = [devices.get("part-1", {}).get("celsius")
                       for _, _levels, _volts, devices
                       in server.RequestHandlerClass.boards.session.inputs]
-            watched[board] = (got["seen"], got["set"], got["warned"], record)
+            watched[board] = (got["seen"], got["set"], got["warned"], record,
+                              got["devices"])
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
-    for board, (seen, set_, warned, record) in watched.items():
+    for board, (seen, set_, warned, record, devices) in watched.items():
         assert [text.split() for text in seen] == [
             ["-1"], ["-1", "49552"], ["-1", "49552", "49632"],
             ["-1", "49552", "49632", "16216"]], (board, seen)
@@ -1005,3 +1026,9 @@ def test_the_page_holds_a_temperature_a_sketch_reads_through_the_server(tmp_path
         # wires that do not yet make a device.
         assert record[-3:] == [25.0, 30.0, -10.5], (board, record)
         assert set(record[:-3]) == {None}, (board, record)
+        # And what the page's poll reads back (slice 4c): the part as the
+        # sketch last found it, at the pointer the sketch left on TA, with
+        # the very word the sketch printed last.
+        assert devices == {"part-1": {
+            "address": 0x18, "powered": True, "celsius": -10.5, "pointer": 5,
+            "config": 0, "resolution": 3, "ta": 16216}}, (board, devices)

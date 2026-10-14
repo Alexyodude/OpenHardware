@@ -1207,7 +1207,9 @@ function renderBoardState(state) {
   // Optional by design. `board3d-panel.js` is a module loaded separately, so a
   // page where it failed -- no WebGL, a vendored three.js that would not parse
   // -- behaves exactly as this file did before the pin view existed.
-  window.boardPins?.levels(state.pins);
+  // `devices` rides the same poll: the parts the bench has put on the board's
+  // I2C bus, and what each would report (OH-161 step 5).
+  window.boardPins?.levels(state.pins, state.devices);
   previousBoard = Object.fromEntries(
     state.registers.map((register) => [register.name, register.value]),
   );

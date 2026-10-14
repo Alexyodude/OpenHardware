@@ -564,3 +564,65 @@ def test_a_ta_read_with_thyst_set_is_refused_citing_the_hysteresis():
     assert "does not say" not in message, "Figure 5-10 does say something"
     write_word(device, CONFIG, 0x0000)
     assert read_register(device, TA) == 0xC190
+
+
+# --- what the page shows of the part (OH-161 step 5, slice 4c) -----------------
+
+
+def test_view_is_what_the_bench_shows_of_the_part_and_follows_it():
+    """`view()` is the page's read-only look at the part: its address, whether
+    it is powered, the temperature the bench holds it at, the pointer, CONFIG,
+    the resolution register and the TA word a read would return right now.
+    It moves with the part: a pointer write, a resolution write (25.3 C is
+    404 sixteenths at 0.0625 C and 400 at 0.5 C) and a new temperature."""
+    device = part(straps=5, celsius=25.3)
+    assert device.view() == {
+        "address": 0x1D, "powered": True, "celsius": 25.3, "pointer": 0,
+        "config": 0x0000, "resolution": 3, "ta": 0xC194}, device.view()
+    write_register(device, TA)
+    write_register(device, RESOLUTION, 0x00)
+    write_register(device, TA)
+    assert device.view()["pointer"] == TA
+    assert (device.view()["resolution"], device.view()["ta"]) == (0, 0xC190), device.view()
+    device.hold(straps=5, celsius=-10.5, vdd=3.3)
+    assert device.view()["celsius"] == -10.5
+    assert device.view()["ta"] == mcp9808.ta_word(-10.5, 0, 0, 0, 0), device.view()
+
+
+def test_view_changes_nothing_a_transfer_in_progress_needs():
+    """A look in the middle of a read must not move the read: the page polls
+    many times a second and the sketch's transfer is in flight between two
+    of them."""
+    device = part()
+    write_register(device, TA)
+    assert device.start(True)
+    msb = device.read()
+    assert device.view()["ta"] == 0xC190
+    assert (msb, device.read()) == (0xC1, 0x90)
+    device.stop()
+
+
+def test_view_has_no_ta_where_the_part_would_refuse_one_and_says_why():
+    """A TA read with THYST set is refused (`_word`), and so there is no TA to
+    show: `ta` is None and `why` is the refusal's own sentence, citing the
+    section. The rest of the view is still true."""
+    device = part()
+    write_word(device, CONFIG, 0x0200)
+    seen = device.view()
+    assert seen["ta"] is None, seen
+    assert all(word in seen["why"] for word in ("5.2.2", "THYST", "Figure 5-10")), seen
+    assert (seen["config"], seen["pointer"], seen["powered"]) == (0x0200, CONFIG, True), seen
+    write_word(device, CONFIG, 0x0000)
+    assert device.view()["ta"] == 0xC190 and "why" not in device.view(), device.view()
+
+
+def test_view_of_an_unpowered_part_says_so_and_reports_no_ta():
+    """Below VPOR the part is unpowered and answers nothing (5.3, p.33): it is
+    not shown at the temperature the bench would hold it at as if it were
+    reading it."""
+    device = part(vdd=0.0)
+    seen = device.view()
+    assert seen["powered"] is False and seen["ta"] is None, seen
+    assert "VPOR" in seen["why"] and "2.2" in seen["why"], seen
+    device.hold(straps=0, celsius=25.0, vdd=3.3)
+    assert device.view()["powered"] is True and device.view()["ta"] == 0xC190

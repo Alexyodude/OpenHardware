@@ -3603,3 +3603,267 @@ def test_every_fetched_meshs_castellations_carve_where_its_vendor_made_them_meta
         pytest.skip(f"SKIPPED in part: the {len(cases)} boards placed here held; "
                     f"left out, with no mesh built here (run python "
                     f"tools/import_3d_model.py --all): {left_out}")
+
+
+# --- a device on the bench: its temperature, and what the board would say -----
+#
+# OH-161 step 5, slice 4c. These run `board3d-panel.js` itself under node: the
+# real file, loaded as a module, against a DOM that is only as much as it
+# touches and a `board3d.js` that is a stub the probe controls (the hook below
+# resolves the panel's own `import("/board3d.js")` to it). Nothing is extracted
+# by splitting source text, so a rename in the panel fails here by name.
+
+PANEL_HOOKS = r"""
+let stub = null;
+export async function initialize(data) { stub = data.stub; }
+export async function resolve(specifier, context, next) {
+  if (specifier === "/board3d.js") return { url: stub, shortCircuit: true };
+  return next(specifier, context);
+}
+"""
+
+PANEL_STUB = r"""
+const s = () => globalThis.__scene;
+export const mount = (...a) => s().mount(...a);
+export const showBoard = (...a) => s().showBoard(...a);
+export const setLevels = (...a) => s().setLevels(...a);
+export const refreshTheme = (...a) => s().refreshTheme(...a);
+export const connections = (...a) => s().connections(...a);
+export const parts = (...a) => s().parts(...a);
+export const circuit = (...a) => s().circuit(...a);
+export const setCelsius = (...a) => s().setCelsius(...a);
+export const removePart = (...a) => s().removePart(...a);
+export const disconnect = (...a) => s().disconnect(...a);
+export const clearBench = (...a) => s().clearBench(...a);
+export const addPart = (...a) => s().addPart(...a);
+"""
+
+#: Each scenario is `{bench, devices, ...}`: `parts()` as the scene would
+#: answer it, and the `devices` a state poll carried. `type` types a value
+#: into the first temperature field and fires "change"; `accept` is what the
+#: scene's `setCelsius` answers; `edit` leaves that field focused while a
+#: second poll (`next_bench`, `next_devices`) arrives.
+PANEL_PROBE = r"""
+import { register } from "node:module";
+import { pathToFileURL } from "node:url";
+import { readFileSync } from "node:fs";
+
+const [PANEL, HOOKS, STUB, CASE] = process.argv.slice(2);
+register(pathToFileURL(HOOKS).href, { data: { stub: pathToFileURL(STUB).href } });
+const given = JSON.parse(readFileSync(CASE, "utf-8"));
+
+const text = (words) => ({ tag: "#text", textContent: words, children: [], dataset: {} });
+class El {
+  constructor(tag) {
+    this.tag = tag; this.children = []; this.dataset = {}; this.style = {};
+    this.listeners = {}; this.attrs = {}; this.className = ""; this.hidden = false;
+    this.disabled = false; this.value = ""; this.open = false; this.own = "";
+  }
+  append(...nodes) {
+    for (const node of nodes) {
+      this.children.push(typeof node === "string" ? text(node) : node);
+    }
+  }
+  set textContent(text) { this.children = []; this.own = text; }
+  get textContent() { return this.own + this.children.map((child) => child.textContent).join(""); }
+  get valueAsNumber() { return this.value === "" ? NaN : Number(this.value); }
+  addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
+  setAttribute(name, value) { this.attrs[name] = value; }
+  scrollIntoView() {}
+  fire(type) { for (const fn of this.listeners[type] ?? []) fn({ target: this }); }
+}
+const elements = {};
+globalThis.window = globalThis;
+globalThis.document = {
+  activeElement: null,
+  getElementById: (id) => (elements[id] ??= new El(id)),
+  createElement: (tag) => new El(tag),
+  createTextNode: (words) => text(words),
+};
+elements["board-pick"] = Object.assign(new El("select"), { value: given.layout.board });
+globalThis.fetch = async (url) => {
+  if (url.startsWith("/api/board/pins")) return { ok: true, json: async () => given.layout };
+  if (url === "/models/index.json") return { ok: true, json: async () => ({ boards: {} }) };
+  throw new Error(`unexpected ${url}`);
+};
+
+let bench = [];
+let accept = true;
+const calls = [];
+globalThis.__scene = {
+  mount() {}, showBoard() {}, setLevels() {}, refreshTheme() {},
+  connections: () => [], circuit: () => null, parts: () => bench,
+  setCelsius(index, celsius) { calls.push([index, celsius]); return accept; },
+  removePart: () => true, disconnect: () => true, clearBench() {}, addPart: async () => null,
+};
+await import(pathToFileURL(PANEL).href);
+await window.boardPins.reload();
+
+const all = (node, keep) => [node, ...node.children.flatMap((child) => all(child, keep))].filter(keep);
+const list = () => elements["bench-list"];
+const fields = () => all(list(), (el) => el.tag === "input");
+const lines = () => all(list(), (el) => el.dataset.served !== undefined)
+  .map((el) => [el.dataset.served, el.textContent]);
+const rows = () => list().children.map((li) => ({
+  fields: all(li, (el) => el.tag === "input")
+    .map((el) => ({ type: el.type, step: el.step, value: el.value, owner: el.dataset.celsius })),
+  lines: all(li, (el) => el.dataset.served !== undefined).map((el) => el.textContent),
+}));
+
+const results = [];
+for (const one of given.scenarios) {
+  bench = one.bench; accept = one.accept ?? true; calls.length = 0;
+  window.boardPins.levels({ D1: "input" }, one.devices);
+  const out = { rows: rows() };
+  const field = fields()[0];
+  if (one.type !== undefined && field) {
+    field.value = one.type;
+    field.fire("change");
+    out.calls = [...calls];
+    out.after = fields()[0].value;
+  }
+  if (one.edit && field) {
+    document.activeElement = field;
+    bench = one.next_bench;
+    window.boardPins.levels({ D1: "input" }, one.next_devices);
+    out.same = fields()[0] === field;
+    out.lines = lines();
+    document.activeElement = null;
+    window.boardPins.levels({ D1: "input" }, one.next_devices);
+    out.rebuilt = fields()[0] !== field;
+  }
+  results.push(out);
+}
+console.log(JSON.stringify(results));
+"""
+
+#: The MCP9808 as `parts()` would list it with its seven wires made, and a
+#: resistor beside it that has no temperature.
+PANEL_MCP = {"id": "part-1", "celsius": 25.0, "kind": "mcp9808", "label": "MCP9808",
+             "drive": "unanswerable", "amps": None, "warning": None, "destroyed": False,
+             "reason": "MCP9808 on the board's bus: SDA on D4, SCL on D5, 3.3 V supply",
+             "device": {"part": "MCP9808", "sda": "D4", "scl": "D5", "vdd": 3.3,
+                        "address_pins": {"A0": "low", "A1": "low", "A2": "low"}}}
+PANEL_RESISTOR = {"id": "part-2", "celsius": None, "kind": "resistor", "label": "220 ohm",
+                  "drive": "unknown", "amps": None, "warning": None, "destroyed": False,
+                  "reason": "", "device": None}
+
+#: What `Mcp9808.view()` sends for it, at 25 C and power-on registers.
+PANEL_VIEW = {"address": 0x18, "powered": True, "celsius": 25.0, "pointer": 5,
+              "config": 0, "resolution": 3, "ta": 0xC190}
+
+
+def run_panel(directory: pathlib.Path, scenarios: list[dict]) -> list[dict]:
+    """`board3d-panel.js` under node, once per scenario in `scenarios`; skips
+    without node."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("no node on PATH; the panel is the page's own JS and needs "
+                    "one to run")
+    files = {"hooks.mjs": PANEL_HOOKS, "stub.mjs": PANEL_STUB, "probe.mjs": PANEL_PROBE}
+    for name, text in files.items():
+        (directory / name).write_text(text, encoding="utf-8")
+    layout = {"present": True, "board": "XIAO-ESP32-C3-DIP", "read_levels": True,
+              "pads": [{"pin": "D1", "label": "D1", "state": "input", "x": 0, "y": 0,
+                        "chip_pin": "GPIO3", "modelled": True}]}
+    (directory / "case.json").write_text(
+        json.dumps({"layout": layout, "scenarios": scenarios}), encoding="utf-8")
+    done = subprocess.run(
+        [node, str(directory / "probe.mjs"), str(PANEL), str(directory / "hooks.mjs"),
+         str(directory / "stub.mjs"), str(directory / "case.json")],
+        capture_output=True, text=True, encoding="utf-8", check=False, timeout=60)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout.strip().splitlines()[-1])
+
+
+def test_a_device_row_has_a_celsius_field_and_says_what_the_part_would_report(tmp_path):
+    """**The row of a part with a temperature carries a number field in
+    degrees C, stepped by the part's finest resolution (0.0625), and a line
+    from what the board served for it**: the TA word and its temperature at
+    the resolution the register is at, which is not the field's number when
+    the resolution is coarser (25.3 C reads 25 C at 0.5 C a step). A part with
+    no temperature gets neither."""
+    view = PANEL_VIEW
+    coarse = dict(view, celsius=25.3, resolution=0, ta=0xC190)
+    cold = dict(view, celsius=-10.5, ta=0x3F58)
+    refused = dict(view, ta=None, config=0x0200,
+                   why="MCP9808 TA read with CONFIG 0x0200 THYST 1 (Register 5-2)")
+    unpowered = dict(view, powered=False, ta=None,
+                     why="MCP9808 is unpowered: VDD is below VPOR, 2.2 V")
+    benches = [PANEL_MCP, PANEL_RESISTOR]
+    got = run_panel(tmp_path, [
+        {"bench": benches, "devices": {"part-1": view}},
+        {"bench": benches, "devices": {"part-1": coarse}},
+        {"bench": benches, "devices": {"part-1": cold}},
+        {"bench": benches, "devices": {"part-1": refused}},
+        {"bench": benches, "devices": {"part-1": unpowered}},
+        {"bench": benches, "devices": {}},
+        {"bench": [dict(PANEL_MCP, device=None), PANEL_RESISTOR], "devices": {}},
+    ])
+    ok, rounded, negative, no_ta, off, unserved, unstated = got
+    assert ok["rows"][0]["fields"] == [
+        {"type": "number", "step": "0.0625", "value": "25", "owner": "part-1"}], ok
+    assert ok["rows"][1] == {"fields": [], "lines": []}, ("a resistor has neither", ok)
+    line = ok["rows"][0]["lines"][0]
+    for word in ("0x18", "0xC190", "25 °C", "0.0625", "pointer 5"):
+        assert word in line, (word, line)
+    line = rounded["rows"][0]["lines"][0]
+    assert "25 °C" in line and "25.3" not in line and "0.5" in line, line
+    assert "-10.5 °C" in negative["rows"][0]["lines"][0], negative
+    assert "0x3F58" in negative["rows"][0]["lines"][0], negative
+    line = no_ta["rows"][0]["lines"][0]
+    assert "THYST 1" in line and "0x18" in line and "°C" not in line, line
+    line = off["rows"][0]["lines"][0]
+    assert "unpowered" in line.lower() and "°C" not in line, line
+    line = unserved["rows"][0]["lines"][0]
+    assert "not been told" in line, line
+    assert unstated["rows"][0]["lines"] == [], ("the circuit's reason speaks", unstated)
+    assert len(unstated["rows"][0]["fields"]) == 1, ("the field is the part's", unstated)
+
+
+def test_a_change_in_the_celsius_field_calls_setcelsius_and_a_refusal_restores_it(tmp_path):
+    """**"change", not "input"**: the value is committed once it is a number
+    the person meant, as design item 7 decided. The call is
+    `setCelsius(index, value)` with the part's index on the bench (the
+    resistor is index 0 here, the MCP9808 index 1) and a number, not text.
+    Where the scene refuses (it answers false for a value that is not a
+    finite number) the field goes back to the temperature the part has."""
+    benches = [PANEL_RESISTOR, PANEL_MCP]
+    given = [
+        {"bench": benches, "devices": {"part-1": PANEL_VIEW}, "type": "30.5"},
+        {"bench": benches, "devices": {"part-1": PANEL_VIEW}, "type": "-10.5"},
+        {"bench": benches, "devices": {"part-1": PANEL_VIEW}, "type": "", "accept": False},
+        {"bench": benches, "devices": {"part-1": PANEL_VIEW}, "type": "999", "accept": False},
+    ]
+    typed, negative, empty, refused = run_panel(tmp_path, given)
+    assert typed["calls"] == [[1, 30.5]], typed
+    assert negative["calls"] == [[1, -10.5]], negative
+    assert empty["calls"] == [[1, None]], ("NaN, which JSON writes as null", empty)
+    assert empty["after"] == "25", ("the field is put back to the part's", empty)
+    assert refused["calls"] == [[1, 999]] and refused["after"] == "25", refused
+
+
+def test_a_poll_does_not_rebuild_the_field_being_edited_but_updates_its_line(tmp_path):
+    """**The state poll repaints the bench many times a second**, and a number
+    field rebuilt under the hand loses its caret, its half-typed value and a
+    held spinner arrow. While the field has focus the poll leaves it (the
+    same element) and refreshes the served line in place; once focus leaves,
+    the next poll rebuilds the list as it always did."""
+    later = dict(PANEL_VIEW, celsius=30.0, ta=0xC1E0)
+    got = run_panel(tmp_path, [
+        {"bench": [PANEL_MCP], "devices": {"part-1": PANEL_VIEW}, "edit": True,
+         "next_bench": [dict(PANEL_MCP, celsius=30.0)], "next_devices": {"part-1": later}},
+    ])[0]
+    assert got["same"] is True, got
+    assert [(owner, "0xC1E0" in text) for owner, text in got["lines"]] == [("part-1", True)], got
+    assert got["rebuilt"] is True, got
+
+
+def test_the_page_hands_the_devices_of_the_state_to_the_panel():
+    """`emulator.js` passes `state.devices` beside `state.pins` and nothing
+    else: the pass-through is the whole of its part, and it stays optional
+    (`?.`) as every call into the panel is."""
+    emulator = stripped((STATIC / "emulator.js").read_text(encoding="utf-8"))
+    assert "window.boardPins?.levels(state.pins, state.devices);" in emulator
+    panel = stripped(PANEL.read_text(encoding="utf-8"))
+    assert "function levels(pins, devices)" in panel

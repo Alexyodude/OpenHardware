@@ -121,6 +121,24 @@ let layout = null;     // the last /api/board/pins answer
 let shown = null;
 let models = null;     // the model index, fetched once and remembered
 
+//: The parts on the board's I2C bus as the last state poll described them,
+//: by the id the bench gave each (`Mcp9808.view()` in `webui/devices/`,
+//: carried by `/api/board/state`). A part the bench has not got onto the bus
+//: is absent, and the row says so rather than showing a reading it has not got.
+let served = {};
+
+//: The temperature field and the served line of each device row as the bench
+//: was last drawn, by part id. A state poll repaints the bench many times a
+//: second, so a field being edited must be recognised and left standing (see
+//: `renderBench`), and its line refreshed in place.
+const celsiusFields = new Map();
+const servedLines = new Map();
+
+//: What Register 5-7's two bits make one step of TA, in degrees C
+//: (DS25095A p.29). The panel states the step so a temperature typed at a
+//: finer grain than the register's visibly reads back coarser.
+const RESOLUTION_STEPS = [0.5, 0.25, 0.125, 0.0625];
+
 /** Which board has a vendor model, from `models/index.json`.
  *
  * Fetched once and remembered **including the failure**: a checkout that has
@@ -405,8 +423,11 @@ function renderCount() {
     `${answerable} of ${layout.pads.length} pads answerable · ${layout.board}`;
 }
 
-/** Repaint from a state poll. `pins` is `{pinName: state}`, or null. */
-function levels(pins) {
+/** Repaint from a state poll. `pins` is `{pinName: state}`, or null, and
+ *  `devices` is `{partId: view}` for the parts on the board's I2C bus (OH-161
+ *  step 5), or absent from a server that has none. */
+function levels(pins, devices) {
+  served = devices ?? {};
   if (!layout) return;
   if (!pins) return;
   // **A poll does NOT mark the layout as having levels**, and an earlier
@@ -524,6 +545,85 @@ async function addPart(slug) {
 }
 
 /**
+ * What the board would report for a part with a temperature, in a sentence.
+ *
+ * **From what the board served and not from the field next to it.** The field
+ * is what the person typed; this is what the register would read, at the
+ * resolution it is set to, so 25.3 C reads "25 C" at 0.5 C a step. Where the
+ * part would report nothing -- unpowered, or a read the model refuses -- it
+ * says so, with the model's own reason, and no temperature is made up.
+ */
+function servedWords(part) {
+  const seen = served[part.id];
+  if (!seen) {
+    return "The board has not been told of this part yet: it joins the bus " +
+           "once a program is running and the part is fully wired.";
+  }
+  const where = `0x${seen.address.toString(16)}`;
+  if (!seen.powered) {
+    return `${where} · unpowered: it acknowledges nothing and reports no temperature`;
+  }
+  if (seen.ta === null) return `${where} · TA cannot be reported: ${seen.why}`;
+  const hex4 = (word) => `0x${word.toString(16).toUpperCase().padStart(4, "0")}`;
+  // TA<12:0> is a 13-bit two's complement count of sixteenths of a degree
+  // (Register 5-4, p.24); bits 15:13 are the alert flags, shown in the hex.
+  const sixteenths = ((seen.ta & 0x1FFF) ^ 0x1000) - 0x1000;
+  const celsius = Number((sixteenths / 16).toFixed(4));
+  return `${where} · TA ${hex4(seen.ta)} = ${celsius} °C ` +
+         `(${RESOLUTION_STEPS[seen.resolution]} °C a step) · ` +
+         `pointer ${seen.pointer} · CONFIG ${hex4(seen.config)}`;
+}
+
+/** Re-say each served line in place, leaving the rest of the bench standing. */
+function refreshServed() {
+  for (const part of scene.parts()) {
+    const line = servedLines.get(part.id);
+    if (line) line.textContent = servedWords(part);
+  }
+}
+
+/**
+ * The temperature field of a part that has one, and the line saying what the
+ * board would report for it once the bench has stated the part.
+ *
+ * **"change", not "input"**: the value is committed when the person has meant
+ * it, and there is no min or max -- the server is the only range and says so
+ * where it refuses (OH-161 step 5, design item 7). The scene refuses what is
+ * not a finite number, and the field then goes back to the temperature the
+ * part really has.
+ */
+function deviceControls(index, part) {
+  const field = document.createElement("input");
+  field.type = "number";
+  field.step = "0.0625";
+  field.value = String(part.celsius);
+  field.dataset.celsius = part.id;
+  field.setAttribute("aria-label", `${part.label} temperature in degrees Celsius`);
+  field.addEventListener("change", () => {
+    if (!scene.setCelsius(index, field.valueAsNumber)) {
+      field.value = String(scene.parts()[index].celsius);
+    }
+    renderBench();
+  });
+  celsiusFields.set(part.id, field);
+  const heading = document.createElement("p");
+  heading.className = "bench-why";
+  heading.append("Temperature ", field, " °C");
+  const controls = [heading];
+  // Only a part the bench has stated is described: one that is not has a
+  // reason on its row already, and a reading would be about nothing.
+  if (part.device !== null) {
+    const line = document.createElement("p");
+    line.className = "bench-why";
+    line.dataset.served = part.id;
+    line.textContent = servedWords(part);
+    servedLines.set(part.id, line);
+    controls.push(line);
+  }
+  return controls;
+}
+
+/**
  * What is on the bench, what is wired to what, and what the circuit makes of it.
  *
  * **One row per PART rather than per wire, and that is this ticket's change.**
@@ -534,6 +634,14 @@ async function addPart(slug) {
  */
 function renderBench() {
   if (!scene) return;
+  // **A temperature field that has focus is not rebuilt.** This runs on every
+  // state poll, and a number field replaced under the hand loses its caret,
+  // its half-typed value and a held spinner arrow. The served lines are
+  // refreshed in place and the rest of the bench catches up when focus leaves.
+  if ([...celsiusFields.values()].includes(document.activeElement)) {
+    refreshServed();
+    return;
+  }
   const joined = scene.connections();
   const onBench = scene.parts();
   const solved = scene.circuit();
@@ -541,6 +649,8 @@ function renderBench() {
 
   const list = $(BENCH_LIST);
   list.textContent = "";
+  celsiusFields.clear();
+  servedLines.clear();
   for (const [index, part] of onBench.entries()) {
     const row = document.createElement("li");
     row.dataset.drive = part.drive;
@@ -608,6 +718,8 @@ function renderBench() {
     });
     head.append(drop);
     row.append(head);
+
+    if (part.celsius !== null) row.append(...deviceControls(index, part));
 
     if (part.reason) {
       const why = document.createElement("p");

@@ -235,6 +235,35 @@ class Mcp9808:
             self._pending = []
         self._powered = vdd >= VDD_MIN
 
+    def view(self) -> dict[str, object]:
+        """What the page shows of the part (OH-161 step 5, slice 4c): a
+        read-only look that changes nothing a transfer in progress needs.
+
+        `address`, `powered`, `celsius` (the temperature the bench holds it
+        at), `pointer`, `config`, `resolution` (Register 5-7's two bits) and
+        `ta`, the 16-bit word a TA read would return right now -- the held
+        temperature rounded to the resolution, with the three flags in bits
+        15:13. **`ta` is None, with a `why`, wherever the part would not
+        answer one**: below VPOR the part is unpowered and acknowledges
+        nothing, and `_word` refuses a TA read with THYST set. A value the
+        part cannot give is not made up for the page to show."""
+        registers = self.registers
+        seen: dict[str, object] = {
+            "address": self.address, "powered": self._powered, "celsius": self.celsius,
+            "pointer": self.pointer, "config": registers[CONFIG],
+            "resolution": registers[RESOLUTION], "ta": None}
+        if not self._powered:
+            seen["why"] = (
+                f"MCP9808 at {self.address:#04x} is unpowered: VDD is below VPOR "
+                f"({VPOR_VOLTS} V, p.3), so it acknowledges nothing and its "
+                f"registers have returned to power-on (5.3, p.33)")
+            return seen
+        try:
+            seen["ta"] = self._word(TA)
+        except DeviceRefusal as refusal:
+            seen["why"] = str(refusal)
+        return seen
+
     def _close(self) -> None:
         """End the transfer in progress, and refuse it if it was a write that
         gave the register fewer bytes than its width. A START or a STOP both

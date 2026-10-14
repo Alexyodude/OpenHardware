@@ -1547,11 +1547,12 @@ class BoardSession:
         for label, level in levels.items():
             if level not in DRIVE_LEVELS:
                 raise ValueError(
-                    f"{self.board}: {label!r} driven {level!r}; a pad is driven "
+                    f"{self.board}: {reprlib.repr(label)} driven {reprlib.repr(level)}; "
+                    f"a pad is driven "
                     f"{', '.join(repr(word) for word in DRIVE_LEVELS)}")
             if label not in gpios:
                 raise ValueError(
-                    f"{self.board}: no pad {label!r} reaches a GPIO; the pads "
+                    f"{self.board}: no pad {reprlib.repr(label)} reaches a GPIO; the pads "
                     f"that do are {sorted(gpios)}")
             if level == "open":
                 continue
@@ -1566,16 +1567,16 @@ class BoardSession:
         volts = {} if volts is None else volts
         if not isinstance(volts, typing.Mapping):
             raise ValueError(
-                f"{self.board}: volts must map a pad name to volts, got {volts!r}")
+                f"{self.board}: volts must map a pad name to volts, got {reprlib.repr(volts)}")
         if volts and holder is None:
             raise ValueError(
                 f"{self.board}: its description converts no voltage, so none "
-                f"can be held on its pads: {dict(volts)!r}")
+                f"can be held on its pads: {reprlib.repr(dict(volts))}")
         held: dict[int, float] = {}
         held_by: dict[int, str] = {}
         for label, value in volts.items():
-            refusal = (f"{self.board}: {label!r} held at {value!r}; a pad is "
-                       f"held at a finite number of volts, 0 or more")
+            refusal = (f"{self.board}: {reprlib.repr(label)} held at {reprlib.repr(value)}; "
+                       f"a pad is held at a finite number of volts, 0 or more")
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ValueError(refusal)
             try:
@@ -1589,13 +1590,13 @@ class BoardSession:
                 raise ValueError(refusal)
             if label not in gpios:
                 raise ValueError(
-                    f"{self.board}: no pad {label!r} reaches a GPIO; the pads "
+                    f"{self.board}: no pad {reprlib.repr(label)} reaches a GPIO; the pads "
                     f"that do are {sorted(gpios)}")
             gpio = gpios[label]
             if gpio in held and held[gpio] != as_float:
                 raise ValueError(
                     f"{self.board}: {held_by[gpio]!r} and {label!r} are both "
-                    f"GPIO{gpio}, held at {held[gpio]!r} and {value!r} V")
+                    f"GPIO{gpio}, held at {held[gpio]!r} and {reprlib.repr(value)} V")
             held[gpio] = as_float
             held_by[gpio] = label
         wired, recorded = self._wired_devices(devices, gpios)
@@ -1694,10 +1695,15 @@ class BoardSession:
             straps = self._straps(where, device.get("address_pins"))
             kept = self.devices.get(name)
             part = copy.deepcopy(kept)
-            if part is None:
-                part = mcp9808.Mcp9808(straps=straps, celsius=celsius, vdd=vdd)
-            else:
-                part.hold(straps=straps, celsius=celsius, vdd=vdd)
+            try:
+                if part is None:
+                    part = mcp9808.Mcp9808(straps=straps, celsius=celsius, vdd=vdd)
+                else:
+                    part.hold(straps=straps, celsius=celsius, vdd=vdd)
+            except ValueError as refusal:
+                # The part's own sentence names its value and its section and
+                # not which part it is, and a bench may have several.
+                raise ValueError(f"{where}: {refusal}") from refusal
             wired[name] = (pads[0], pads[1], part)
             recorded[name] = {
                 "part": device["part"], "sda": device["sda"], "scl": device["scl"],
@@ -1886,6 +1892,11 @@ class BoardSession:
             # debugger shows is where execution *is*, and after a run that is
             # nowhere near where the image started.
             "listing": listing_view(self.runtime, self.cpu, view.pc),
+            # The parts on the I2C bus, by the id the bench gave each: what
+            # the page shows of them (OH-161 step 5, slice 4c), including the
+            # TA word a read would return and, where it would return none,
+            # why. Empty for a board with nothing wired to its bus.
+            "devices": {name: part.view() for name, part in self.devices.items()},
         }
 
     def close(self) -> None:

@@ -44,6 +44,7 @@
 import copy
 import pathlib
 import re
+import reprlib
 import struct
 
 import pytest
@@ -1409,7 +1410,10 @@ def test_a_voltage_that_is_not_a_finite_number_of_volts_or_more_is_refused():
     with c3_session() as session:
         for volts, said in (({"D0": -0.5}, "-0.5"), ({"D0": "1.65"}, "'1.65'"),
                             ({"D0": float("nan")}, "nan"), ({"D0": float("inf")}, "inf"),
-                            ({"D0": True}, "True"), ({"D0": 10 ** 400}, "1" + "0" * 400),
+                            ({"D0": True}, "True"),
+                            # Shown by `reprlib`, so a 400-digit integer is not
+                            # echoed whole (slice 4c).
+                            ({"D0": 10 ** 400}, reprlib.repr(10 ** 400)),
                             ({"3V3_OUT": 3.3}, "'3V3_OUT'"),
                             ([("D0", 1.65)], "[('D0', 1.65)]")):
             with pytest.raises(ValueError) as caught:
@@ -1629,7 +1633,7 @@ def test_each_refused_drive_arrives_as_drive_refused(live_server):
             ({"D1": "high"}, None, "XIAO-ESP32-C6-DIP", "XIAO-ESP32-C6-DIP"),
             ({"D1": "high"}, {"D0": -1}, C3_BOARD, "-1"),
             ({"D1": "high"}, {"D0": "1.65"}, C3_BOARD, "'1.65'"),
-            ({"D1": "high"}, {"D0": 10 ** 400}, C3_BOARD, "1" + "0" * 400)):
+            ({"D1": "high"}, {"D0": 10 ** 400}, C3_BOARD, reprlib.repr(10 ** 400))):
         with pytest.raises(urllib.error.HTTPError) as caught:
             post(live_server, "/api/board/drive",
                  {"board": board, "levels": levels, "volts": volts})
@@ -2128,12 +2132,16 @@ def test_a_device_with_a_key_the_drive_does_not_read_is_refused_by_name_and_chan
 
 
 def test_a_device_nested_past_the_recursion_limit_is_refused_and_not_crashed():
-    """`json.loads` accepts nesting about 5000 deep and `copy.deepcopy` and
-    `repr` give up at about 600, so a device carrying a deep value used to
-    raise `RecursionError` past the route's `except ValueError` after the
-    levels and the bus had been applied: the client saw the connection drop,
-    the session held the part, and the record had no entry for it. It is a
-    refusal now, whichever field the depth is in, and nothing is applied."""
+    """`json.loads` accepts nesting about 5000 deep and `copy.deepcopy` gives
+    up at about 600 (`repr` does not, on this Python), so a device carrying a
+    deep value used to raise `RecursionError` past the route's `except
+    ValueError` after the levels and the bus had been applied: the client saw
+    the connection drop, the session held the part, and the record had no
+    entry for it. It is a refusal now, whichever field the depth is in, and
+    nothing is applied. **The fix for the crash was building the record from
+    validated fields, not `reprlib`**; `reprlib` is why the refusal is short,
+    and a 2000-deep list that `repr` would print whole (about 4000
+    characters) is held to under 500."""
     deep: list = []
     for _ in range(2000):
         deep = [deep]
@@ -2146,12 +2154,15 @@ def test_a_device_nested_past_the_recursion_limit_is_refused_and_not_crashed():
             "vdd": dict(MCP9808_ON_D4_D5, vdd=deep),
             "an address pin": dict(MCP9808_ON_D4_D5, address_pins=dict(pins, A0=deep)),
             "the address pins": dict(MCP9808_ON_D4_D5, address_pins=deep),
+            "a device that is a list": deep,
         }.items():
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError) as caught:
                 session.drive({"D1": "high"}, None, {"u1": device})
+            assert len(str(caught.value)) < 500, (name, len(str(caught.value)))
             assert session.inputs == [] and session.devices == {}, name
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as caught:
             session.drive({"D1": "high"}, None, deep)
+        assert len(str(caught.value)) < 500, len(str(caught.value))
         assert session.inputs == [] and session.devices == {}
 
 
@@ -2183,6 +2194,108 @@ def test_the_route_refuses_a_deep_unknown_key_by_name_over_http(live_server):
         post(live_server, "/api/board/drive", {
             "board": C3_BOARD, "levels": {}, "devices": deep})
     assert caught.value.code == 400, caught.value.code
+
+
+def test_state_carries_the_view_of_every_part_on_the_bus():
+    """`state()["devices"]` is `Mcp9808.view()` for each part the last drive
+    put on the bus, by the id the bench gave it (OH-161 step 5, slice 4c):
+    empty with none, following a new temperature, empty again once the bench
+    takes the part off, and JSON all the way down."""
+    want = {"address": 0x18, "powered": True, "celsius": 25.0, "pointer": 0,
+            "config": 0, "resolution": 3, "ta": 0xC190}
+    with _i2c_session(_stores(*_i2c_wiring())) as session:
+        assert session.state()["devices"] == {}
+        session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
+        assert session.state()["devices"] == {"u1": want}, session.state()["devices"]
+        session.drive({}, None, {"u1": dict(MCP9808_ON_D4_D5, celsius=30.0)})
+        assert session.state()["devices"] == {"u1": dict(want, celsius=30.0, ta=0xC1E0)}
+        json.dumps(session.state())
+        session.drive({}, None, {})
+        assert session.state()["devices"] == {}
+
+
+def test_the_state_route_answers_the_devices_on_the_bus(live_server):
+    """What the page's poll reads: the same map, over HTTP, in the answer that
+    already carries the pins."""
+    load_c3_blink(live_server)
+    assert get(live_server, "/api/board/state")["devices"] == {}
+    post(live_server, "/api/board/drive",
+         {"board": C3_BOARD, "levels": {}, "devices": {"part-2": MCP9808_ON_D4_D5}})
+    seen = get(live_server, "/api/board/state")["devices"]
+    assert set(seen) == {"part-2"} and seen["part-2"]["ta"] == 0xC190, seen
+    assert seen["part-2"]["address"] == 0x18 and seen["part-2"]["celsius"] == 25.0, seen
+
+
+def test_a_device_refusal_names_the_device_it_is_about():
+    """Two parts, one at 999.0 C: the part's own sentence says "MCP9808 held
+    at 999.0 C" and not which one, so the drive says it. Both ways in are
+    held to it: a part that arrives and one already on the bus."""
+    second = dict(MCP9808_ON_D4_D5, address_pins={"A0": "high", "A1": "low", "A2": "low"})
+    with _i2c_session(_stores(*_i2c_wiring())) as session:
+        with pytest.raises(ValueError) as caught:
+            session.drive({}, None, {"u1": MCP9808_ON_D4_D5,
+                                     "u2": dict(second, celsius=999.0)})
+        assert "'u2'" in str(caught.value) and "999.0" in str(caught.value), str(caught.value)
+        assert "'u1'" not in str(caught.value), str(caught.value)
+        session.drive({}, None, {"u1": MCP9808_ON_D4_D5, "u2": second})
+        for device, name, value in ((dict(MCP9808_ON_D4_D5, celsius=-99.0), "u1", "-99.0"),
+                                    (dict(second, vdd=9.0), "u2", "9.0")):
+            posted = {"u1": MCP9808_ON_D4_D5, "u2": second, name: device}
+            with pytest.raises(ValueError) as caught:
+                session.drive({}, None, posted)
+            assert f"'{name}'" in str(caught.value) and value in str(caught.value), (
+                name, str(caught.value))
+
+
+def test_a_refusal_of_a_level_or_a_voltage_never_echoes_a_posted_value_whole():
+    """A value in a message is shown by `reprlib`: a pad driven or held at a
+    megabyte of text came back as a megabyte of refusal."""
+    big = "x" * 1_000_000
+    with _i2c_session(_stores(*_i2c_wiring())) as session:
+        for name, levels, volts in (
+                ("a level", {"D1": big}, None),
+                ("a pad name in the levels", {big: "high"}, None),
+                ("a voltage", {}, {"D1": big}),
+                ("a pad name in the volts", {}, {big: 3.3}),
+                ("volts that are no map", {}, big),
+                ("a voltage that is a huge integer", {}, {"D1": 10 ** 400}),
+        ):
+            with pytest.raises(ValueError) as caught:
+                session.drive(levels, volts)
+            assert len(str(caught.value)) < 500, (name, len(str(caught.value)))
+        assert session.inputs == []
+
+
+def test_the_route_does_not_echo_a_posted_value_whole(live_server):
+    """The route's own type refusals (`levels`, `volts`, `devices`, `board`)
+    and the board-name mismatch: a crafted 1 MB string used to come back as a
+    1 MB 400 (a 16 MB one, as large a body as the server reads)."""
+    load_c3_blink(live_server)
+    big = "x" * 1_000_000
+    for name, body in {
+        "levels": {"board": C3_BOARD, "levels": big},
+        "volts": {"board": C3_BOARD, "levels": {}, "volts": big},
+        "devices": {"board": C3_BOARD, "levels": {}, "devices": big},
+        "board": {"board": [big], "levels": {}},
+        "another board": {"board": big, "levels": {}},
+    }.items():
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            post(live_server, "/api/board/drive", body)
+        error = json.loads(caught.value.read())["error"]
+        assert caught.value.code == 400 and len(error) < 500, (name, caught.value.code, len(error))
+
+
+def test_a_body_nested_past_the_json_depth_is_a_400_and_not_a_dropped_connection(live_server):
+    """`json.loads` raises `RecursionError` for nesting past its limit, which
+    is not a `ValueError`: the handler caught only that, so `do_POST` raised
+    and the client got no reply at all."""
+    request = urllib.request.Request(
+        live_server + "/api/board/drive", data=b"[" * 200_000 + b"]" * 200_000,
+        headers={"Content-Type": "application/json"}, method="POST")
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        urllib.request.urlopen(request, timeout=10)
+    assert caught.value.code == 400, caught.value.code
+    assert "body is not JSON" in json.loads(caught.value.read())["error"]
 
 
 def test_a_refused_drive_leaves_a_kept_part_as_it_was():

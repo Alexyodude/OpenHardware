@@ -2429,6 +2429,42 @@ def test_an_address_pin_at_exactly_a_threshold_of_the_supply_is_read(tmp_path):
     assert got["third"]["device"]["address_pins"]["A1"] == "low", got["third"]
 
 
+def test_the_high_threshold_is_rounded_where_it_rounds_up(tmp_path):
+    """**At 3.3 V rounding the high threshold changes nothing**: 0.7 * 3.3 is
+    2.3099999999999996, below the 2.31 a 3k/7k divider solves to, so a high
+    threshold left raw still passes. At 4.11 V it is 2.8770000000000002, above
+    the 2.877 the same divider solves to, and a raw threshold refuses an
+    address pin that is exactly 0.7 VDD. VDD is a pad held high at 4.11 V
+    behind a milliohm, the divider hangs on it, and the loading is below the
+    microvolt both sides are rounded to."""
+    got = run(tmp_path, """
+        const supply = {...C3, volts: 4.11, sourceOhms: 0.001, sinkOhms: 0.001,
+                        inputHighVolts: 2.9, inputLowVolts: 1.0};
+        const resistor = (label, ohms) =>
+          ({label, terminals: ["a", "b"], model: {kind: "resistor", ohms}});
+        const pads = [{name: "D4", state: "unknown"}, {name: "D5", state: "unknown"},
+                      {name: "D10", state: "high"}, {name: "D1", state: "input"},
+                      {name: "GND", state: "unknown"}];
+        const wires = [
+          {pad: "D4", part: 0, terminal: "SDA"}, {pad: "D5", part: 0, terminal: "SCL"},
+          {pad: "D10", part: 0, terminal: "VDD"}, {pad: "GND", part: 0, terminal: "GND"},
+          {pad: "GND", part: 0, terminal: "A0"}, {pad: "GND", part: 0, terminal: "A2"},
+          {pad: "D1", part: 0, terminal: "A1"},
+          {pad: "D10", part: 1, terminal: "a"}, {pad: "D1", part: 1, terminal: "b"},
+          {pad: "D1", part: 2, terminal: "a"}, {pad: "GND", part: 2, terminal: "b"},
+        ];
+        const report = analyse({supply, pads, wires,
+          parts: [MCP9808, resistor("top", 3000), resistor("bottom", 7000)]});
+        console.log(JSON.stringify({device: report.parts[0].device,
+                                    reason: report.parts[0].reason,
+                                    raw: 0.7 * 4.11, volts: report.volts.D1}));
+    """)
+    assert got["raw"] > 2.877 and got["volts"] == 2.877, got
+    assert got["device"] is not None, got["reason"]
+    assert got["device"]["vdd"] == 4.11, got
+    assert got["device"]["address_pins"]["A1"] == "high", got
+
+
 def test_a_device_on_a_board_that_states_no_input_levels_says_so(tmp_path):
     """The Uno's supply states no input levels, so no bus is modelled; a
     fully wired MCP9808 there said nothing at all (an empty reason)."""
