@@ -58,6 +58,7 @@ touches:
 - webui/devices/**
 - webui/static/emulator.js
 - tests/webui/test_mcp9808.py
+- tests/webui/test_pin_view.py
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
@@ -797,3 +798,5 @@ CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: opt
 **Note 2026-10-14:** step 5 slice 1c last round, 65da61f: a zero-byte requestFrom at the deferred write's own address clears the deferral (vendor Wire.cpp:494), a mismatched one keeps it (:490-493); seen to fail first, ['0','2','1024'] against the old keep. write(const char*, size_t) added; the overload compile test failed first on the invalid conversion. A note at GPIO_PIN_AT_RESET: pin_states ignores PAD_DRIVER. Counts: board_run + esp32c3_board + pin_view + mcp9808 211 passed; test_compile -k wire/overload/restates/vendors_own 6 passed. The vendor's driver also sends the deferred write ahead of a zero-byte read; this model does not.
 
 **Note 2026-10-14:** 2026-10-14 lends tests/webui/test_pin_view.py (itself on loan from OH-172) to OH-171 for the STM32C5 board key rename; it comes back here when OH-171 closes.
+
+**Note 2026-10-14:** 2026-10-14 tests/webui/test_pin_view.py back from OH-171 (done); it is still on loan here from OH-172.
