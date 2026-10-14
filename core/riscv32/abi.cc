@@ -214,18 +214,20 @@ int riscv32_hold_samples(Riscv32Cpu* cpu, uint32_t control_address,
     return as_cpu(cpu)->hold_samples(control_address, keys, words, count) ? 1 : 0;
 }
 
-void riscv32_map_doorbell(Riscv32Cpu* cpu, uint32_t address, uint32_t value,
-                          uint32_t ring_mask, uint32_t write_trigger) {
-    as_cpu(cpu)->map_doorbell(address, value, ring_mask, write_trigger);
+int riscv32_map_doorbell(Riscv32Cpu* cpu, uint32_t address, uint32_t value,
+                         uint32_t ring_mask, uint32_t write_trigger) {
+    return as_cpu(cpu)->map_doorbell(address, value, ring_mask, write_trigger)
+               ? 1
+               : 0;
 }
 
 uint32_t riscv32_rang_at(const Riscv32Cpu* cpu) {
     return as_handle(cpu)->rang_at;
 }
 
-void riscv32_map_fifo(Riscv32Cpu* cpu, uint32_t address,
-                      uint32_t enable_address, uint32_t enable_mask) {
-    as_cpu(cpu)->map_fifo(address, enable_address, enable_mask);
+int riscv32_map_fifo(Riscv32Cpu* cpu, uint32_t address,
+                     uint32_t enable_address, uint32_t enable_mask) {
+    return as_cpu(cpu)->map_fifo(address, enable_address, enable_mask) ? 1 : 0;
 }
 
 uint32_t riscv32_written_count(const Riscv32Cpu* cpu, uint32_t address) {
@@ -289,8 +291,12 @@ int riscv32_fault_reason(const Riscv32Cpu* cpu) {
     return static_cast<int>(as_cpu(cpu)->fault_reason());
 }
 
-int riscv32_peek_word(const Riscv32Cpu* cpu, uint32_t address, uint32_t* out) {
-    return as_cpu(cpu)->peek_word(address, *out) ? 1 : 0;
+int riscv32_peek_word(const Riscv32Cpu* cpu, uint32_t address, uint32_t* out,
+                      int* reason) {
+    riscv32::FaultReason why = riscv32::FaultReason::Unmapped;
+    const bool read = as_cpu(cpu)->peek_word(address, *out, why);
+    *reason = static_cast<int>(why);
+    return read ? 1 : 0;
 }
 
 int riscv32_is_doorbell(const Riscv32Cpu* cpu, uint32_t address) {

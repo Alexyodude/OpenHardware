@@ -153,6 +153,9 @@ enum class FaultReason : uint8_t {
     /// A byte or halfword read of a `map_fifo` above byte 0, which would
     /// pop a byte and answer zero.
     FifoSubword = 3,
+    /// An access through an alias whose target is a `map_fifo` or a
+    /// `map_doorbell`, which an alias would bypass.
+    AliasOntoBehaviour = 4,
 };
 
 class Cpu {
@@ -455,7 +458,12 @@ public:
     /// handler run from inside a store could change the very table the store
     /// is walking. Mapping the same address again replaces it, and so does
     /// mapping anything else there (`forget_doorbell`).
-    void map_doorbell(uint32_t address, uint32_t value, uint32_t ring_mask,
+    ///
+    /// False, having changed nothing, where `address` is a register of a
+    /// snapshot counter: replacing one of its three would leave the other
+    /// two as plain words that read back what was written, a timer with no
+    /// fault. The board that meant it unmaps the counter first.
+    bool map_doorbell(uint32_t address, uint32_t value, uint32_t ring_mask,
                       uint32_t write_trigger);
 
     /// The doorbell the last instruction rang, and forget it; 0 if none.
@@ -477,7 +485,9 @@ public:
     /// byte as the instruction would. Mapping the same address again
     /// replaces it and forgets both sides, and so does mapping anything else
     /// there (`forget_fifo`).
-    void map_fifo(uint32_t address, uint32_t enable_address,
+    /// False, having changed nothing, where `address` is a register of a
+    /// snapshot counter, as `map_doorbell`.
+    bool map_fifo(uint32_t address, uint32_t enable_address,
                   uint32_t enable_mask);
 
     /// What was written to the `map_fifo` at `address` since it was last
@@ -502,8 +512,10 @@ public:
     /// `read_word` that changes nothing: a FIFO answers the byte its next
     /// read will pop, and the same failure `read_word` gives where it holds
     /// none. **The only read a viewer may make of a FIFO**, because
-    /// `read_word` takes the firmware's byte.
-    bool peek_word(uint32_t address, uint32_t& out) const;
+    /// `read_word` takes the firmware's byte. **Nor does it touch the fault
+    /// record**: a failed peek says why in `why` and leaves what the last
+    /// instruction faulted on as it was.
+    bool peek_word(uint32_t address, uint32_t& out, FaultReason& why) const;
 
     /// Called by `step` once an instruction has actually retired -- never on
     /// an Unimplemented, Illegal or MemoryFault, so a program stopped by one
@@ -778,10 +790,8 @@ private:
     void forget_doorbell(uint32_t at);
     void forget_fifo(uint32_t at);
 
-    /// Forget the snapshot counter one of whose registers is `at`, for the
-    /// reason `forget_input` forgets an input; only the behaviours that ask
-    /// `mmio_write` before the snapshot scan need it.
-    void forget_snapshot(uint32_t at);
+    /// Whether `at` is the op, low or high register of a snapshot counter.
+    bool is_snapshot_register(uint32_t at) const;
 
     std::array<uint32_t, kRegisters> x_{};
     uint32_t pc_ = 0;

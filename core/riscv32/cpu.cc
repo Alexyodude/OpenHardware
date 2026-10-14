@@ -314,14 +314,13 @@ void Cpu::forget_doorbell(uint32_t at) {
 
 void Cpu::forget_fifo(uint32_t at) { fifos_.erase(at); }
 
-void Cpu::forget_snapshot(uint32_t at) {
-    snapshots_.erase(
-        std::remove_if(snapshots_.begin(), snapshots_.end(),
-                       [&](const Snapshot& counter) {
-                           return counter.op == at || counter.low == at ||
-                                  counter.high == at;
-                       }),
-        snapshots_.end());
+bool Cpu::is_snapshot_register(uint32_t at) const {
+    for (const Snapshot& counter : snapshots_) {
+        if (counter.op == at || counter.low == at || counter.high == at) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void Cpu::map_register(uint32_t address, uint32_t value) {
@@ -510,17 +509,19 @@ bool Cpu::hold_samples(uint32_t control_address, const uint32_t* keys,
     return false;
 }
 
-void Cpu::map_doorbell(uint32_t address, uint32_t value, uint32_t ring_mask,
+bool Cpu::map_doorbell(uint32_t address, uint32_t value, uint32_t ring_mask,
                        uint32_t write_trigger) {
     const uint32_t at = address & ~3u;
+    if (is_snapshot_register(at)) {
+        return false;
+    }
     forget_input(at);
     forget_sampler(at);
     forget_doorbell(at);
     forget_fifo(at);
-    // A stream or a snapshot counter at the address would answer a write
-    // before the doorbell is asked, and it would never ring.
+    // A stream at the address would answer a write before the doorbell is
+    // asked, and it would never ring.
     streams_.erase(at);
-    forget_snapshot(at);
     // A plain register in `mmio_`, so a read answers the stored word;
     // `mmio_write` asks `doorbells_` before storing. The reset value is held
     // to the same rule as a write: a trigger bit does not store.
@@ -534,6 +535,7 @@ void Cpu::map_doorbell(uint32_t address, uint32_t value, uint32_t ring_mask,
     bell.ring_mask = ring_mask;
     bell.write_trigger = write_trigger;
     doorbells_.push_back(bell);
+    return true;
 }
 
 uint32_t Cpu::take_rung() {
@@ -542,17 +544,18 @@ uint32_t Cpu::take_rung() {
     return rung;
 }
 
-void Cpu::map_fifo(uint32_t address, uint32_t enable_address,
+bool Cpu::map_fifo(uint32_t address, uint32_t enable_address,
                    uint32_t enable_mask) {
     const uint32_t at = address & ~3u;
+    if (is_snapshot_register(at)) {
+        return false;
+    }
     forget_input(at);
     forget_sampler(at);
     forget_doorbell(at);
     // A FIFO answers writes as a stream does, so it must not leave one
-    // behind to capture them first, and a snapshot counter is asked before
-    // the word behaviours too.
+    // behind to capture them first.
     streams_.erase(at);
-    forget_snapshot(at);
     // Registered in `mmio_` too, so `is_mapped` sees it. Its reads and
     // writes reach `mmio_read` and `mmio_write`, which ask `fifos_` first.
     Mapped entry;
@@ -563,6 +566,7 @@ void Cpu::map_fifo(uint32_t address, uint32_t enable_address,
     fifo.enable = enable_address & ~3u;
     fifo.enable_mask = enable_mask;
     fifos_[at] = fifo;
+    return true;
 }
 
 const std::vector<uint8_t>& Cpu::written(uint32_t address) const {
@@ -593,11 +597,20 @@ bool Cpu::is_fifo(uint32_t address) const {
     return fifos_.count(address & ~3u) != 0;
 }
 
-bool Cpu::peek_word(uint32_t address, uint32_t& out) const {
-    if (is_mapped(address)) {
-        return mmio_read(address, out, false);
-    }
-    return read_word(address, out);
+bool Cpu::peek_word(uint32_t address, uint32_t& out, FaultReason& why) const {
+    // A viewer's read must leave the fault record as the last instruction
+    // left it, so the reason a failure had is handed back and the record put
+    // back.
+    const uint32_t fault_address = fault_address_;
+    const bool fault_was_fetch = fault_was_fetch_;
+    const FaultReason fault_reason = fault_reason_;
+    const bool read = is_mapped(address) ? mmio_read(address, out, false)
+                                         : read_word(address, out);
+    why = read ? FaultReason::Unmapped : fault_reason_;
+    fault_address_ = fault_address;
+    fault_was_fetch_ = fault_was_fetch;
+    fault_reason_ = fault_reason;
+    return read;
 }
 
 bool Cpu::hold_readable(uint32_t address, const uint8_t* bytes, uint32_t count) {
@@ -718,10 +731,12 @@ void Cpu::note_executed() {
         // snapshot is where the broken gate is reported.
         const uint32_t fault_address = fault_address_;
         const bool fault_was_fetch = fault_was_fetch_;
+        const FaultReason fault_reason = fault_reason_;
         uint32_t gate = 0;
         if (!mmio_read(counter.enable, gate)) {
             fault_address_ = fault_address;
             fault_was_fetch_ = fault_was_fetch;
+            fault_reason_ = fault_reason;
             continue;
         }
         if ((gate & counter.enable_mask) != 0) {
@@ -795,6 +810,13 @@ bool Cpu::mmio_read(uint32_t address, uint32_t& out, bool pop) const {
     if (entry.target == (address & ~3u)) {
         out = entry.value;
         return true;
+    }
+    // An alias reaches the stored word and nothing the target does, so an
+    // alias onto a FIFO or a doorbell -- mapped before either was -- would
+    // answer a zero that is neither's. It faults instead.
+    if (fifos_.count(entry.target) != 0 || is_doorbell(entry.target)) {
+        note_fault(address, false, FaultReason::AliasOntoBehaviour);
+        return false;
     }
     // A readable alias is a second view of its target, so it answers what the
     // target holds. One hop only -- an alias of an alias would need a loop,
@@ -950,6 +972,13 @@ bool Cpu::mmio_write(uint32_t address, uint32_t value, uint32_t byte_mask) {
     }
 
     const Mapped& entry = found->second;
+    if (entry.target != at &&
+        (fifos_.count(entry.target) != 0 || is_doorbell(entry.target))) {
+        // As for the read: an alias would store a trigger bit, or a byte no
+        // FIFO took.
+        note_fault(address, false, FaultReason::AliasOntoBehaviour);
+        return false;
+    }
     const auto target = mmio_.find(entry.target);
     if (target == mmio_.end()) {
         note_fault(address, false);

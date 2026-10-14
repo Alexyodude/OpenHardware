@@ -121,10 +121,12 @@ RANG = 4
 #: `riscv32_fault_reason`, as the words a `MemoryFault` is worded with. 0, an
 #: address nothing maps, has none: the older words say it.
 FAULT_REASONS = {
-    1: "the FIFO has nothing held to read; hold_readable gives it bytes",
+    1: "the FIFO holds nothing to read",
     2: "the FIFO's enable register is not mapped",
     3: "a byte or halfword read of a FIFO above byte 0 would pop a byte and "
        "answer zero; read byte 0",
+    4: "the register is an alias onto a FIFO or a doorbell, which an alias "
+       "bypasses",
 }
 
 #: How many halfwords a `HostFault` shows from where its step began: an RV32
@@ -346,12 +348,12 @@ _SIGNATURES = {
     ),
     "riscv32_map_doorbell": (
         [ctypes.c_void_p] + [ctypes.c_uint32] * 4,
-        None,
+        ctypes.c_int,
     ),
     "riscv32_rang_at": ([ctypes.c_void_p], ctypes.c_uint32),
     "riscv32_map_fifo": (
         [ctypes.c_void_p] + [ctypes.c_uint32] * 3,
-        None,
+        ctypes.c_int,
     ),
     "riscv32_written_count": (
         [ctypes.c_void_p, ctypes.c_uint32], ctypes.c_uint32
@@ -368,7 +370,8 @@ _SIGNATURES = {
     ),
     "riscv32_fault_reason": ([ctypes.c_void_p], ctypes.c_int),
     "riscv32_peek_word": (
-        [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)],
+        [ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32),
+         ctypes.POINTER(ctypes.c_int)],
         ctypes.c_int,
     ),
     "riscv32_is_doorbell": (
@@ -554,10 +557,13 @@ class Cpu:
 
     # --- memory -----------------------------------------------------------
 
-    def _fault_why(self) -> str | None:
+    def _fault_why(self, reason: int | None = None) -> str | None:
         """The core's reason for the access it just refused, where it names
-        one besides an address nothing maps."""
-        return FAULT_REASONS.get(self._lib.riscv32_fault_reason(self._handle))
+        one besides an address nothing maps. `reason` is a peek's own: a peek
+        leaves the core's record alone."""
+        if reason is None:
+            reason = self._lib.riscv32_fault_reason(self._handle)
+        return FAULT_REASONS.get(reason)
 
     def read_word(self, address: int) -> int:
         out = ctypes.c_uint32()
@@ -570,12 +576,14 @@ class Cpu:
         read will pop, so a viewer watching one takes nothing the firmware was
         to read; use this and not `read_word` to look at a register."""
         out = ctypes.c_uint32()
-        if not self._lib.riscv32_peek_word(self._handle, address, ctypes.byref(out)):
-            raise self._refused_access(address)
+        reason = ctypes.c_int()
+        if not self._lib.riscv32_peek_word(
+                self._handle, address, ctypes.byref(out), ctypes.byref(reason)):
+            raise self._refused_access(address, reason.value)
         return out.value
 
-    def _refused_access(self, address: int) -> MemoryFault:
-        why = self._fault_why()
+    def _refused_access(self, address: int, reason: int | None = None) -> MemoryFault:
+        why = self._fault_why(reason)
         if why is None:
             return MemoryFault(f"0x{address:08x} is outside the modelled memory")
         return MemoryFault(f"0x{address:08x} is mapped, and refuses the access: {why}")
@@ -832,13 +840,22 @@ class Cpu:
             raise AbiError(
                 f"ring_mask 0 for the doorbell at 0x{address:08x} never "
                 f"rings: a device behind it would never be asked anything")
+        if not 0 <= address <= 0xFFFFFFFF:
+            raise AbiError(
+                f"the doorbell address must fit in 32 bits, got {address:#x}: "
+                f"ctypes would pass it as {address & 0xFFFFFFFF:#010x} without "
+                f"saying so")
         if address & ~3 == 0:
             raise AbiError(
                 f"a doorbell at address {address:#x} could never ring: the "
                 f"core says no doorbell rang with 0, so 0 cannot be one")
+        if not self._lib.riscv32_map_doorbell(
+                self._handle, address, value, ring_mask, write_trigger):
+            raise AbiError(
+                f"0x{address:08x} is a register of a snapshot counter: "
+                f"replacing one of its three would leave the other two as "
+                f"plain words that read back what was written")
         self._services.pop(address & ~3, None)
-        self._lib.riscv32_map_doorbell(
-            self._handle, address, value, ring_mask, write_trigger)
 
     def on_ring(self, address: int,
                 service: Callable[[Cpu, int], None]) -> None:
@@ -878,7 +895,18 @@ class Cpu:
                 f"0xffffffff, got {enable_mask!r}: a gate that is never open "
                 f"captures nothing, and ctypes would pass a wider mask as "
                 f"{enable_mask & 0xFFFFFFFF:#010x} without saying so")
-        self._lib.riscv32_map_fifo(self._handle, address, enable, enable_mask)
+        for name, at in (("address", address), ("enable", enable)):
+            if not 0 <= at <= 0xFFFFFFFF:
+                raise AbiError(
+                    f"the FIFO's {name} must fit in 32 bits, got {at!r}: "
+                    f"ctypes would pass it as {at & 0xFFFFFFFF:#010x} without "
+                    f"saying so")
+        if not self._lib.riscv32_map_fifo(
+                self._handle, address, enable, enable_mask):
+            raise AbiError(
+                f"0x{address:08x} is a register of a snapshot counter: "
+                f"replacing one of its three would leave the other two as "
+                f"plain words that read back what was written")
 
     def take_written(self, address: int) -> bytes:
         """Everything written to the FIFO at `address` since it was last

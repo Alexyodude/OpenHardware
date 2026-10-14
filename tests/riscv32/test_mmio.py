@@ -31,7 +31,7 @@ import pytest
 from core.riscv32 import abi
 
 from . import encode as e
-from .conftest import PC, load
+from .conftest import PC, RAM, load
 
 #: ESP32-C3 GPIO, from the Technical Reference Manual chapter 5. Used because
 #: it is the block `webui/boards/esp32c3.py` describes, so a change to these
@@ -1684,7 +1684,7 @@ def test_a_read_with_nothing_held_faults_at_the_read_and_changes_nothing(fifo):
         fifo.step()
     assert f"pc=0x{PC + 8:08x}" in str(caught.value), str(caught.value)
     assert f"0x{I2C_DATA:08x}" in str(caught.value), str(caught.value)
-    assert "nothing held to read" in str(caught.value), "not 'unmapped'"
+    assert "holds nothing to read" in str(caught.value), "not 'unmapped'"
     assert "unmapped" not in str(caught.value), str(caught.value)
     assert fifo.pc == PC + 8 and fifo.reg(16) == 0
     assert fifo.take_written(I2C_DATA) == b"\x5a", "the written side is untouched"
@@ -1780,7 +1780,7 @@ def test_a_fifo_fault_says_why_and_a_plain_unmapped_address_still_says_unmapped(
     with pytest.raises(abi.MemoryFault) as caught:
         fifo.read_word(I2C_DATA)
     assert "mapped, and refuses" in str(caught.value), str(caught.value)
-    assert "nothing held to read" in str(caught.value), str(caught.value)
+    assert "holds nothing to read" in str(caught.value), str(caught.value)
     assert "outside the modelled memory" not in str(caught.value)
 
     with pytest.raises(abi.MemoryFault) as caught:
@@ -1825,13 +1825,13 @@ def test_peeking_a_fifo_shows_the_next_byte_and_takes_nothing(fifo):
     assert [fifo.read_word(I2C_DATA) for _ in range(2)] == [0x31, 0x32]
     with pytest.raises(abi.MemoryFault) as caught:
         fifo.peek_word(I2C_DATA)
-    assert "nothing held to read" in str(caught.value), str(caught.value)
+    assert "holds nothing to read" in str(caught.value), str(caught.value)
     fifo.write_word(I2C_CLK_CONF, SCLK_ACTIVE | 1)
     assert fifo.peek_word(I2C_CLK_CONF) == fifo.read_word(I2C_CLK_CONF)
     assert fifo.peek_word(PC) == fifo.read_word(PC), "memory too"
 
 
-def test_a_doorbell_mapped_over_a_stream_or_a_snapshot_counter_still_rings(bell):
+def test_a_doorbell_mapped_over_a_stream_still_rings(bell):
     bell.map_register(SYSTIMER_CONF, UNIT0_WORK_EN)
     bell.map_stream(BELL, enable=SYSTIMER_CONF, enable_mask=UNIT0_WORK_EN)
     bell.map_doorbell(BELL, value=0, ring_mask=RING, write_trigger=RING)
@@ -1840,30 +1840,33 @@ def test_a_doorbell_mapped_over_a_stream_or_a_snapshot_counter_still_rings(bell)
     assert bell.stream(BELL) == b"", "the stream captured nothing"
     assert bell.read_word(BELL) == CLK_EN, "and the doorbell stored"
 
-    bell.map_snapshot_counter(
-        op=BELL, update_mask=RING, valid_mask=2, low=BELL + 0x100,
-        high=BELL + 0x104, high_mask=0xFFFFFFFF, enable=SYSTIMER_CONF,
-        enable_mask=UNIT0_WORK_EN, instructions_per_tick=1)
-    bell.map_doorbell(BELL, value=0, ring_mask=RING, write_trigger=RING)
-    load(bell, ring_program(RING))
-    assert [raw_step(bell) for _ in range(3)][-1] == abi.RANG
 
 
-def test_a_snapshot_counter_left_under_a_replaced_fifo_would_own_the_register(fifo):
-    """As for a stream: the FIFO is asked before the snapshot scan, so a
-    counter it did not forget is invisible until the FIFO is replaced by a
-    plain register, which then reads the counter's zero."""
-    fifo.map_register(SYSTIMER_CONF, UNIT0_WORK_EN)
-    fifo.map_snapshot_counter(
-        op=I2C_DATA, update_mask=1, valid_mask=2, low=I2C_DATA + 0x100,
-        high=I2C_DATA + 0x104, high_mask=0xFFFFFFFF, enable=SYSTIMER_CONF,
-        enable_mask=UNIT0_WORK_EN, instructions_per_tick=1)
-    fifo.map_fifo(I2C_DATA, enable=I2C_CLK_CONF, enable_mask=SCLK_ACTIVE)
-    fifo.write_word(I2C_DATA, 0x41)
-    assert fifo.take_written(I2C_DATA) == b"A"
-    fifo.map_register(I2C_DATA, 0)
-    fifo.write_word(I2C_DATA, 0x42)
-    assert fifo.read_word(I2C_DATA) == 0x42
+def test_a_doorbell_or_a_fifo_over_any_register_of_a_snapshot_counter_is_refused(cpu):
+    """Replacing one of a counter's three registers dropped the counter and
+    left the other two as plain words: a write of 0x55 to the old HIGH read
+    back 0x55, a timer with no fault. Refused by name, the counter intact."""
+    cpu.map_register(SYSTIMER_CONF, UNIT0_WORK_EN)
+    mapped = (lambda: cpu.map_snapshot_counter(
+        op=UNIT0_OP, update_mask=UNIT0_UPDATE, valid_mask=UNIT0_VALUE_VALID,
+        low=UNIT0_VALUE_LO, high=UNIT0_VALUE_HI, high_mask=VALUE_HI_BITS,
+        enable=SYSTIMER_CONF, enable_mask=UNIT0_WORK_EN,
+        instructions_per_tick=1))
+    for register in (UNIT0_OP, UNIT0_VALUE_LO, UNIT0_VALUE_HI):
+        for name, attempt in (
+                ("doorbell", lambda: cpu.map_doorbell(register, value=0,
+                                                      ring_mask=1)),
+                ("FIFO", lambda: cpu.map_fifo(register, enable=SYSTIMER_CONF,
+                                              enable_mask=UNIT0_WORK_EN))):
+            mapped()
+            with pytest.raises(abi.AbiError) as caught:
+                attempt()
+            assert f"0x{register:08x}" in str(caught.value), str(caught.value)
+            assert "snapshot counter" in str(caught.value), (name, str(caught.value))
+            cpu.write_word(UNIT0_OP, UNIT0_UPDATE)
+            assert cpu.read_word(UNIT0_OP) == UNIT0_VALUE_VALID, "still a counter"
+            cpu.write_word(UNIT0_VALUE_HI, 0x55)
+            assert cpu.read_word(UNIT0_VALUE_HI) != 0x55, "and not a stored word"
 
 
 def test_a_stream_left_under_a_replaced_fifo_would_capture_the_register(fifo):
@@ -1911,12 +1914,12 @@ def test_a_fifo_gate_that_is_never_open_or_does_not_fit_is_refused_with_the_valu
 
 def test_a_zcmp_push_into_a_doorbell_is_a_fault_that_stores_and_rings_nothing(bell):
     """`cm.push {ra,s0}` stores s0 at sp-4 and ra at sp-8: with sp at
-    BELL + 4 the first store would ring the doorbell. `exec.cc` preflights
-    every address against the regions, and a register is none, so the push
-    faults before storing anything -- which is why `riscv32_step`'s `result
-    == Ok` guard on a ring cannot be reached through an instruction today
-    (an equivalent mutant, recorded in OH-161), and why this holds the
-    observable half: no store, no ring, and none carried to the next step."""
+    BELL + 4 the first store would ring the doorbell. Here BELL is outside
+    every region, and `exec.cc`'s preflight asks only the regions, so the
+    push faults before storing anything. A register mapped INSIDE a region
+    passes that preflight and is the case that reaches the `result == Ok`
+    guard on a ring: `test_a_push_that_rings_and_then_faults_is_a_fault_and_
+    not_a_ring`."""
     bell.set_extensions(abi.ESP32_C5)
     load(bell, [0xB852])
     regs = [0] * 32
@@ -1951,3 +1954,108 @@ def test_a_reset_forgets_which_doorbell_rang(bell):
     assert bell._lib.riscv32_rang_at(bell._handle) == BELL
     bell.reset()
     assert bell._lib.riscv32_rang_at(bell._handle) == 0
+
+
+# --- the second fix round ----------------------------------------------------
+
+
+def test_a_push_that_rings_and_then_faults_is_a_fault_and_not_a_ring(cpu):
+    """The case the preflight does not catch: registers mapped INSIDE a
+    region. `cm.push {ra,s0},-16` with sp at RAM + 0x208 stores s0 to a
+    doorbell at +0x204, which rings, and then ra to a FIFO at +0x200 whose
+    enable register is not mapped, which faults. The instruction never
+    retired, so reporting a ring would run a service for it."""
+    ram = RAM
+    cpu.set_extensions(abi.ESP32_C5)
+    cpu.map_doorbell(ram + 0x204, value=0, ring_mask=RING)
+    cpu.map_fifo(ram + 0x200, enable=I2C_CLK_CONF, enable_mask=1)
+    load(cpu, [0xB852])
+    regs = [0] * 32
+    regs[2] = ram + 0x208
+    regs[8] = RING
+    cpu.set_regs(regs, pc=PC)
+    assert raw_step(cpu) == abi.MEMORY_FAULT
+    assert cpu.pc == PC, "unretired: the PC did not move"
+    assert cpu._lib.riscv32_rang_at(cpu._handle) == 0
+    load(cpu, [NOP])
+    assert raw_step(cpu) == abi.OK, "and no ring is carried to the next step"
+
+
+def test_an_alias_made_before_the_fifo_or_the_doorbell_faults_at_the_access(cpu):
+    """The reverse order of the refusal in `map_alias`: register, alias, then
+    FIFO. The alias reaches the stored word and none of what the target does,
+    so a read answered 0 with nothing held and a write stored a trigger bit."""
+    alias = I2C0 + 0x200
+    cpu.map_register(I2C_CLK_CONF, SCLK_ACTIVE)
+    for target, make in (
+            (I2C_DATA, lambda: cpu.map_fifo(I2C_DATA, enable=I2C_CLK_CONF,
+                                            enable_mask=SCLK_ACTIVE)),
+            (BELL, lambda: cpu.map_doorbell(BELL, value=0, ring_mask=RING,
+                                            write_trigger=RING))):
+        for op in ("store", "set"):
+            cpu.map_register(target, 0)
+            cpu.map_alias(alias, target, op, readable=(op == "store"))
+            make()
+            accesses = [lambda: cpu.write_word(alias, RING)]
+            if op == "store":
+                accesses.append(lambda: cpu.read_word(alias))
+            for access in accesses:
+                with pytest.raises(abi.MemoryFault) as caught:
+                    access()
+                assert "alias onto a FIFO or a doorbell" in str(caught.value), (
+                    op, str(caught.value))
+
+
+def test_an_address_past_32_bits_is_refused_and_not_truncated_to_zero(cpu):
+    with pytest.raises(abi.AbiError) as caught:
+        cpu.map_doorbell(1 << 32, value=0, ring_mask=1)
+    assert "0x100000000" in str(caught.value), str(caught.value)
+    assert not cpu._lib.riscv32_is_doorbell(cpu._handle, 0)
+    for field in ("address", "enable"):
+        kwargs = {"address": I2C_DATA, "enable": I2C_CLK_CONF}
+        kwargs[field] = 1 << 32
+        with pytest.raises(abi.AbiError) as caught:
+            cpu.map_fifo(kwargs["address"], enable=kwargs["enable"],
+                         enable_mask=1)
+        assert field in str(caught.value) and "4294967296" in str(caught.value)
+    assert not cpu._lib.riscv32_is_fifo(cpu._handle, 0)
+
+
+def test_retiring_an_instruction_keeps_the_reason_of_the_last_fault(fifo):
+    """`note_executed` reads a snapshot counter's gate, which may note a fault
+    of its own (a readable alias onto nothing); it put the address back and
+    left the reason it had noted, so a `MemoryFault` worded after the next
+    instruction said 'unmapped' for an empty FIFO read."""
+    fifo.map_alias(SYSTIMER_CONF, SYSTIMER_CONF + 0x10, "store", readable=True)
+    fifo.map_snapshot_counter(
+        op=UNIT0_OP, update_mask=UNIT0_UPDATE, valid_mask=UNIT0_VALUE_VALID,
+        low=UNIT0_VALUE_LO, high=UNIT0_VALUE_HI, high_mask=VALUE_HI_BITS,
+        enable=SYSTIMER_CONF, enable_mask=UNIT0_WORK_EN, instructions_per_tick=1)
+    with pytest.raises(abi.MemoryFault):
+        fifo.read_word(I2C_DATA)
+    assert fifo._lib.riscv32_fault_reason(fifo._handle) == 1
+    load(fifo, [NOP])
+    fifo.step()
+    assert fifo._lib.riscv32_fault_address(fifo._handle) == I2C_DATA
+    assert fifo._lib.riscv32_fault_reason(fifo._handle) == 1
+
+
+def test_a_peek_leaves_the_fault_record_as_the_last_instruction_left_it(fifo):
+    """Succeeding or failing: a viewer's read is no access of the firmware's,
+    so the address, the kind and the reason of its last fault stay."""
+    with pytest.raises(abi.MemoryFault):
+        fifo.read_word(0x10)
+    record = (fifo._lib.riscv32_fault_address(fifo._handle),
+              fifo._lib.riscv32_fault_was_fetch(fifo._handle),
+              fifo._lib.riscv32_fault_reason(fifo._handle))
+    assert record == (0x10, 0, 0)
+    with pytest.raises(abi.MemoryFault) as caught:
+        fifo.peek_word(I2C_DATA)
+    assert "holds nothing to read" in str(caught.value), (
+        "the failed peek still says why")
+    fifo.hold_readable(I2C_DATA, b"\x05")
+    assert fifo.peek_word(I2C_DATA) == 5
+    after = (fifo._lib.riscv32_fault_address(fifo._handle),
+             fifo._lib.riscv32_fault_was_fetch(fifo._handle),
+             fifo._lib.riscv32_fault_reason(fifo._handle))
+    assert after == record

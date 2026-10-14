@@ -77,9 +77,12 @@ that returns and posts a name back.
     GET  /api/board/state?at=0x10000100&len=64&words=0xd0000010,0xd0000020
       -> 200 {board, chip, status, detail,
               registers: [{name, value, width}], flags: [{name, on}], pc,
-              memory: {at, bytes[]}, words: [{address, value}],
+              memory: {at, bytes[]}, words: [{address, value, why?}],
               uart: {present, bytes, dropped_bytes, text, undecodable_bytes},
               listing: {present, at, lines[]}}
+              A word that cannot be shown without changing it -- a FIFO with
+              nothing held -- is {address, value: null, why}; the rest of the
+              state still arrives.
 
     POST /api/board/step?words=...   {"count": 1}
       -> 200 the state, as /api/board/state answers it; a step that stops

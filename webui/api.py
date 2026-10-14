@@ -1686,15 +1686,16 @@ class BoardSession:
                     "window-outside-the-map",
                     f"{self.board} has nothing at 0x{watch:08x} to watch",
                 )
+            # **One word that cannot be shown does not take the poll down**:
+            # a FIFO with nothing held is on the board and says so, and the
+            # registers, memory and console beside it still arrive. `value`
+            # is null and `why` is the core's reason, in words.
             try:
-                value = machine.word(self.cpu, watch)
+                watched.append(
+                    {"address": watch, "value": machine.word(self.cpu, watch)})
             except self.runtime.abi.MemoryFault as fault:
-                raise BoardRunError(
-                    "window-outside-the-map",
-                    f"{self.board} cannot show 0x{watch:08x} without "
-                    f"changing it: {fault}",
-                ) from fault
-            watched.append({"address": watch, "value": value})
+                watched.append(
+                    {"address": watch, "value": None, "why": str(fault)})
 
         view = machine.view(self.cpu)
         return {

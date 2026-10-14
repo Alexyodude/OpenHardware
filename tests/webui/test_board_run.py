@@ -1878,11 +1878,15 @@ def test_watching_a_fifo_never_changes_what_the_firmware_reads():
         description=types.ModuleType("bare_description"), core="riscv32")
     placement = types.SimpleNamespace(window=RING_RAM)
     with api.BoardSession(runtime, cpu, None, placement) as session:
-        # Held first: a poll of an empty FIFO is refused by name.
-        with pytest.raises(api.BoardRunError) as caught:
-            session.state(words=[data])
-        assert caught.value.reason == "window-outside-the-map"
-        assert "nothing held to read" in str(caught.value), str(caught.value)
+        # Empty first: that word alone says why, and the poll still brings
+        # the registers, the memory and the console (which, with a FIFO
+        # empty most of the time, is every poll but a few).
+        state = session.state(words=[data])
+        word, = state["words"]
+        assert word["address"] == data and word["value"] is None, word
+        assert "holds nothing to read" in word["why"], word
+        assert state["registers"] and state["pc"] == RING_RAM
+        assert len(state["memory"]["bytes"]) == 64 and state["uart"]
 
         cpu.hold_readable(data, b"\x31\x32")
         for _ in range(3):

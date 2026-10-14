@@ -191,10 +191,11 @@ RISCV32_API int riscv32_hold_samples(Riscv32Cpu* cpu, uint32_t control_address,
 /// A register that rings when written: `address` stores as a register from
 /// `value`, with every bit of `write_trigger` stored as 0, and a write whose
 /// value carries any bit of `ring_mask` ends its step with `RISCV32_RANG`
-/// after the store has retired. See cpu.h.
-RISCV32_API void riscv32_map_doorbell(Riscv32Cpu* cpu, uint32_t address,
-                                      uint32_t value, uint32_t ring_mask,
-                                      uint32_t write_trigger);
+/// after the store has retired. See cpu.h. 0, having changed nothing, where
+/// `address` is a register of a snapshot counter; so for the FIFO.
+RISCV32_API int riscv32_map_doorbell(Riscv32Cpu* cpu, uint32_t address,
+                                     uint32_t value, uint32_t ring_mask,
+                                     uint32_t write_trigger);
 
 /// The doorbell the most recent step rang; meaningful only straight after a
 /// step returned `RISCV32_RANG`.
@@ -203,9 +204,9 @@ RISCV32_API uint32_t riscv32_rang_at(const Riscv32Cpu* cpu);
 /// A byte FIFO at `address`: writes append while `enable_address &
 /// enable_mask` is set, reads pop what `riscv32_hold_readable` gave and fault
 /// when nothing is held. See cpu.h.
-RISCV32_API void riscv32_map_fifo(Riscv32Cpu* cpu, uint32_t address,
-                                  uint32_t enable_address,
-                                  uint32_t enable_mask);
+RISCV32_API int riscv32_map_fifo(Riscv32Cpu* cpu, uint32_t address,
+                                 uint32_t enable_address,
+                                 uint32_t enable_mask);
 
 /// How many bytes firmware has written to the FIFO at `address` since they
 /// were last taken; 0 where it is no FIFO.
@@ -263,14 +264,17 @@ RISCV32_API uint32_t riscv32_step_entry(const Riscv32Cpu* cpu);
 /// Why the most recent access was refused, as `riscv32::FaultReason`: 0
 /// nothing mapped there (or any fault that names no other reason), 1 a FIFO
 /// read with nothing held, 2 a FIFO whose enable register is not mapped, 3 a
-/// byte or halfword read of a FIFO above byte 0. Meaningful straight after a
+/// byte or halfword read of a FIFO above byte 0, 4 an access through an alias
+/// onto a FIFO or a doorbell. Meaningful straight after a
 /// step returned 2 or a read or write returned 0. ABI 7.
 RISCV32_API int riscv32_fault_reason(const Riscv32Cpu* cpu);
 
 /// `riscv32_read_word` that changes nothing: a FIFO answers the byte its next
-/// read will pop. The only read a viewer may make of one. ABI 7.
+/// read will pop. The only read a viewer may make of one. A failed peek
+/// leaves the fault record alone and gives its reason (as
+/// `riscv32_fault_reason`) in `*reason`. ABI 7.
 RISCV32_API int riscv32_peek_word(const Riscv32Cpu* cpu, uint32_t address,
-                                  uint32_t* out);
+                                  uint32_t* out, int* reason);
 
 /// Whether `address` is a doorbell / a FIFO. ABI 7.
 RISCV32_API int riscv32_is_doorbell(const Riscv32Cpu* cpu, uint32_t address);

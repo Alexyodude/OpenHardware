@@ -56,6 +56,7 @@ touches:
 - core/riscv32/**
 - tests/riscv32/**
 - webui/devices/**
+- webui/static/emulator.js
 - tests/webui/test_mcp9808.py
 ---
 

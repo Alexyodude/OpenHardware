@@ -1198,8 +1198,10 @@ function renderBoardState(state) {
   $("where").textContent = hex(pc.value, pc.width / 4);
   // The watched words, beside the box that asked for them (OH-140).
   $("board-watch-note").textContent = (state.words ?? [])
-    .map((word) => `0x${word.address.toString(16)} = 0x${word.value
-      .toString(16).padStart(8, "0")}`)
+    .map((word) => (word.value === null
+      ? `0x${word.address.toString(16)}: ${word.why}`
+      : `0x${word.address.toString(16)} = 0x${word.value
+        .toString(16).padStart(8, "0")}`))
     .join("  ");
   // Optional by design. `board3d-panel.js` is a module loaded separately, so a
   // page where it failed -- no WebGL, a vendored three.js that would not parse
