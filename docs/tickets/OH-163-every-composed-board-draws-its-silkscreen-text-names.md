@@ -13,6 +13,9 @@ touches:
 - tests/rules/test_import_board.py
 - tools/import_3d_model.py
 - tests/rules/test_import_3d_model.py
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
+- PROVENANCE.md
 ---
 
 Twenty-five of twenty-six boards draw a vendor file or a board composed from the vendor's PCB, every placement is drawn or refused with a reason (OH-150), and what a person sees is still short of a photograph in four measurable ways. This ticket is those four, counted from `python tools/compose_board_3d.py --check` on 2026-09-04 (11 composed boards) and from the shipped .glb files.
@@ -142,3 +145,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-13:** 2026-10-13: tools/compose_board_3d.py and its tests lent to OH-229 (Adafruit's own bodies substituted into the QT Py ESP32-C3 and KB2040). Return them when OH-229 closes.
 
 **Note 2026-10-14:** PROVENANCE.md lent to OH-229 for its review fix round (a 'Fetched, never tracked: Adafruit_CAD_Parts' section beside the newstroke one); it comes back when OH-229 closes.
+
+**Note 2026-10-14:** 2026-10-14: OH-229 is done; tools/compose_board_3d.py, tests/rules/test_compose_board_3d.py and PROVENANCE.md come back from it.
