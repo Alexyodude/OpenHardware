@@ -7,7 +7,6 @@ priority: P2
 created: '2026-09-06'
 touches:
 - webui/static/board3d-panel.js
-- tests/webui/test_pin_view.py
 - tests/webui/test_board3d.py
 - webui/boards/XIAO-MG24-SMD.json
 - webui/boards/XIAO-nRF54l15-SMD.json
@@ -321,3 +320,5 @@ LEFT is as the slice 2 note says, with one item added. A pad its footprint names
 **Note 2026-10-13:** 2026-10-13: tools/import_pindefs.py and tests/rules/test_import_pindefs.py lent to OH-231 (the XIAO STM32C5's pins from Seeed's newly published PCB). Return them when OH-231 closes.
 
 **Note 2026-10-13:** 2026-10-13: tools/inventory.py lent to OH-231 (its supply list lacks Seeed's VOUT_3V3). Return it when OH-231 closes.
+
+**Note 2026-10-14:** 2026-10-14: lends tests/webui/test_pin_view.py to OH-161 (step 5 slice 1b: a C3 pad routed to a peripheral now reads 'unknown', so the module-parity fake must give C3 pads their reset OUT_SEL); comes back when OH-161 closes.
