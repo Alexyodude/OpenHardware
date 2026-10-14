@@ -57,6 +57,8 @@ touches:
 - webui/compile.py
 - tests/webui/test_compile.py
 - webui/emulator_server.py
+- webui/static/emulator.js
+- webui/boards/rp2350.py
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
@@ -850,3 +852,5 @@ CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: opt
 **Note 2026-10-15:** 2026-10-15: the browser watch (checklist in the 4c note) was NOT done: the gstack browse skill is not installed in this session (the Skill tool answers 'Unknown skill: browse' in the main session and in a subagent), and CLAUDE.md allows no other browser, so it is left for the owner. The emulator server itself was started on port 8099 and answered 200, then stopped by PID. What stands in for it: test_bench_drive's TEMPERATURE_END_TO_END drives the page's own scene functions on the C3, C5 and C6 XIAOs and watches TA move 25.0 -> 30.0 -> -10.5 C.
 
 **Note 2026-10-15:** 2026-10-15: lends webui/static/emulator.js and webui/boards/rp2350.py to OH-210 for its items 1 and 6; they come back when those land.
+
+**Note 2026-10-15:** 2026-10-15: takes back webui/static/emulator.js and webui/boards/rp2350.py from OH-210 (its items 1 and 6 landed).
