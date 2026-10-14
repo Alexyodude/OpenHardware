@@ -2,9 +2,13 @@
 id: OH-210
 title: 'The RP2350''s edges after OH-157: one half shown as both, an unchecked IMAGE_DEF,
   RESETS stored not obeyed'
-status: open
+status: in-progress
 priority: P3
 created: '2026-10-08'
+touches:
+- rules/board-claims.md
+- webui/boards/catalogue.py
+- tests/webui/test_board_catalogue.py
 ---
 
 The edges OH-157's reviews left (2026-10-08), none of which changes what the XIAO RP2350 blink shows today.
@@ -18,3 +22,5 @@ The edges OH-157's reviews left (2026-10-08), none of which changes what the XIA
 7. OH-36, held by another session, still lists the XIAO RP2350 among boards where nothing runs and hands the RP2350 to OH-42; rp2350.py and catalogue.py say the M33 half is OH-36's. Its holder should note which is true.
 
 Done when each is fixed with a test that fails when reverted where it is behaviour, or the sentence says only what the files show.
+
+**Note 2026-10-15:** 2026-10-15: items 2 and 3 taken in this session's lane3; claims rules/board-claims.md, webui/boards/catalogue.py and its test. Items 1, 4, 5, 6 and 7 are not in this pass.
