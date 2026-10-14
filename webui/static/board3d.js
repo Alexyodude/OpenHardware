@@ -3061,7 +3061,11 @@ let posting = Promise.resolve();
  * the id the bench gave it, with its temperature. They are part of what is
  * stated, so a change of temperature alone posts, and so does a part taken
  * off the bench -- an empty map is how a device leaves the board's bus.
- * A first state with a device in it is posted though no input exists.
+ * A first state with a device in it is posted though no input exists --
+ * but only when some pad has a state of its own. Every pad is `unknown`
+ * while no program runs, and a device posted then reaches a server with
+ * nothing loaded, whose refusal would lead the bench note; `showBoard` re-arms
+ * the post, so the device is stated the moment a program gives a pad a state.
  */
 function postInputs(levels, volts = {}, devices = {}) {
   const board = view.board?.userData.board;
@@ -3069,9 +3073,10 @@ function postInputs(levels, volts = {}, devices = {}) {
     Object.entries(levels).filter(([, level]) => level !== "open").sort(),
     Object.entries(volts).sort(),
     Object.entries(devices).sort()]);
+  const running = padMeshes().some((post) => post.userData.state !== "unknown");
   if (stated === view.posted
       || (view.posted === null && !Object.keys(levels).length
-          && !Object.keys(devices).length)) {
+          && !(Object.keys(devices).length && running))) {
     return;
   }
   view.posted = stated;

@@ -21,6 +21,7 @@ import dataclasses
 import importlib
 import math
 import re
+import reprlib
 import types
 import typing
 
@@ -1597,7 +1598,7 @@ class BoardSession:
                     f"GPIO{gpio}, held at {held[gpio]!r} and {value!r} V")
             held[gpio] = as_float
             held_by[gpio] = label
-        wired = self._wired_devices(devices, gpios)
+        wired, recorded = self._wired_devices(devices, gpios)
         # **The voltages before the levels.** Each of the two checks every
         # GPIO before it changes anything, so whichever goes first refuses
         # with nothing applied; the second refusing after the first applied
@@ -1615,45 +1616,72 @@ class BoardSession:
         if bus_holder is not None:
             bus_holder(self.cpu, [(sda, scl, part) for sda, scl, part in wired.values()])
         self.devices = {name: part for name, (_sda, _scl, part) in wired.items()}
-        self.inputs.append((self.retired, dict(levels), dict(volts),
-                            copy.deepcopy(dict(devices or {}))))
+        self.inputs.append((self.retired, dict(levels), dict(volts), recorded))
 
     #: What a posted device may be, by its `part`.
     DEVICE_PARTS = ("MCP9808",)
 
+    #: The keys a posted device has, and the only ones the record keeps.
+    DEVICE_KEYS = ("part", "sda", "scl", "vdd", "address_pins", "celsius")
+
+    #: The longest bench id a drive accepts, in characters. The page mints
+    #: `part-1`; the bound is far above that and far below a body's size.
+    DEVICE_ID_LENGTH = 64
+
     def _wired_devices(self, devices: typing.Mapping[str, typing.Mapping[str, object]] | None,
                        gpios: typing.Mapping[str, int],
-                       ) -> dict[str, tuple[int, int, mcp9808.Mcp9808]]:
+                       ) -> tuple[dict[str, tuple[int, int, mcp9808.Mcp9808]],
+                                  dict[str, dict[str, object]]]:
         """Validate every device and build the parts to wire, touching
-        nothing: id -> (sda_gpio, scl_gpio, part). A part already kept under
-        the id is copied and held anew, so a refusal here leaves the
-        session's parts as they were."""
+        nothing: (id -> (sda_gpio, scl_gpio, part), id -> the record's entry).
+        A part already kept under the id is copied and held anew, so a refusal
+        here leaves the session's parts as they were.
+
+        **The record's entry is built from the validated fields alone**,
+        normalised, and before anything is applied: it used to be a deep copy
+        of what was posted, made after the bus was wired, so a key nobody
+        reads rode into the record and a value nested too deep for `deepcopy`
+        raised past the route with the part already on the bus. **Every value
+        in a message is shown by `reprlib`**, which stops at a depth `repr`
+        survives."""
         devices = {} if devices is None else devices
         if not isinstance(devices, typing.Mapping):
             raise ValueError(
-                f"{self.board}: devices must map a bench id to a device, got {devices!r}")
+                f"{self.board}: devices must map a bench id to a device, got "
+                f"{reprlib.repr(devices)}")
         if devices and getattr(self.runtime.description, "hold_bus", None) is None:
             raise ValueError(
                 f"{self.board}: its description has no I2C bus, so no device can be "
-                f"wired to its pads: {sorted(map(str, devices))!r}")
+                f"wired to its pads: {reprlib.repr(sorted(map(str, devices)))}")
         wired: dict[str, tuple[int, int, mcp9808.Mcp9808]] = {}
+        recorded: dict[str, dict[str, object]] = {}
         for name, device in devices.items():
-            where = f"{self.board}: device {name!r}"
+            where = f"{self.board}: device {reprlib.repr(name)}"
             if not isinstance(name, str) or not name:
-                raise ValueError(f"{self.board}: a device id is a non-empty string, got {name!r}")
+                raise ValueError(
+                    f"{self.board}: a device id is a non-empty string, got {reprlib.repr(name)}")
+            if len(name) > self.DEVICE_ID_LENGTH:
+                raise ValueError(
+                    f"{self.board}: a device id is at most {self.DEVICE_ID_LENGTH} "
+                    f"characters, got {len(name)}: {reprlib.repr(name)}")
             if not isinstance(device, typing.Mapping):
-                raise ValueError(f"{where} must be an object, got {device!r}")
+                raise ValueError(f"{where} must be an object, got {reprlib.repr(device)}")
+            unknown = [key for key in device if key not in self.DEVICE_KEYS]
+            if unknown:
+                raise ValueError(
+                    f"{where} has {', '.join(reprlib.repr(key) for key in unknown)}; a "
+                    f"device has only {list(self.DEVICE_KEYS)}")
             if device.get("part") not in self.DEVICE_PARTS:
                 raise ValueError(
-                    f"{where} is part {device.get('part')!r}; the parts are "
+                    f"{where} is part {reprlib.repr(device.get('part'))}; the parts are "
                     f"{list(self.DEVICE_PARTS)}")
             pads = []
             for field in ("sda", "scl"):
                 label = device.get(field)
                 if not isinstance(label, str) or label not in gpios:
                     raise ValueError(
-                        f"{where} has {field} {label!r}; the pads that reach a GPIO are "
-                        f"{sorted(gpios)}")
+                        f"{where} has {field} {reprlib.repr(label)}; the pads that reach a "
+                        f"GPIO are {sorted(gpios)}")
                 pads.append(gpios[label])
             if pads[0] == pads[1]:
                 raise ValueError(
@@ -1671,6 +1699,12 @@ class BoardSession:
             else:
                 part.hold(straps=straps, celsius=celsius, vdd=vdd)
             wired[name] = (pads[0], pads[1], part)
+            recorded[name] = {
+                "part": device["part"], "sda": device["sda"], "scl": device["scl"],
+                "vdd": vdd,
+                "address_pins": {pin: device["address_pins"][pin]
+                                 for pin in ("A0", "A1", "A2")},
+                "celsius": celsius}
         for first, (sda, scl, part) in wired.items():
             for second, (other_sda, other_scl, other) in wired.items():
                 if first < second and (sda, scl) == (other_sda, other_scl) \
@@ -1681,18 +1715,19 @@ class BoardSession:
         checker = getattr(self.runtime.description, "check_bus", None)
         if checker is not None:
             checker([(sda, scl, part) for sda, scl, part in wired.values()])
-        return wired
+        return wired, recorded
 
     @staticmethod
     def _finite(where: str, field: str, value: object) -> float:
+        shown = reprlib.repr(value)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"{where} has {field} {value!r}; it is a finite number")
+            raise ValueError(f"{where} has {field} {shown}; it is a finite number")
         try:
             as_float = float(value)
         except OverflowError as error:
-            raise ValueError(f"{where} has {field} {value!r}, which no float can hold") from error
+            raise ValueError(f"{where} has {field} {shown}, which no float can hold") from error
         if not math.isfinite(as_float):
-            raise ValueError(f"{where} has {field} {value!r}; it is a finite number")
+            raise ValueError(f"{where} has {field} {shown}; it is a finite number")
         return as_float
 
     @staticmethod
@@ -1702,13 +1737,13 @@ class BoardSession:
         address pin makes the part unanswerable, not posted)."""
         if not isinstance(pins, typing.Mapping) or set(pins) != {"A0", "A1", "A2"}:
             raise ValueError(
-                f"{where} has address_pins {pins!r}; they are A0, A1 and A2, each "
+                f"{where} has address_pins {reprlib.repr(pins)}; they are A0, A1 and A2, each "
                 f"'high' or 'low'")
         straps = 0
         for number, pin in enumerate(("A0", "A1", "A2")):
             if pins[pin] not in ("high", "low"):
                 raise ValueError(
-                    f"{where} has address pin {pin} {pins[pin]!r}; it is 'high' or "
+                    f"{where} has address pin {pin} {reprlib.repr(pins[pin])}; it is 'high' or "
                     f"'low', and an open pin leaves the part with no address")
             straps |= (pins[pin] == "high") << number
         return straps

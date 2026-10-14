@@ -200,11 +200,16 @@ def run_page(directory: pathlib.Path, probe: str, case: dict) -> dict:
     mcp9808 = directory / "mcp9808.glb"
     resistor_glb(resistor)
     mcp9808_glb(mcp9808)
+    # A file whose two terminals are at one point, which is no part.
+    twin = directory / "twin.glb"
+    write_glb(twin, {"chip": "probe_twin", "label": "twin", "lens": None,
+                     "terminals": [{"name": "one", "at": [1, -0.5, 0]},
+                                   {"name": "two", "at": [1, -0.5, 0]}]})
     hooks.write_text(HOOKS, encoding="utf-8")
     script.write_text(PRELUDE + probe, encoding="utf-8")
     listing.write_text(json.dumps({**case, "parts": {
-        "probe_resistor": str(resistor), "probe_mcp9808": str(mcp9808)}}),
-        encoding="utf-8")
+        "probe_resistor": str(resistor), "probe_mcp9808": str(mcp9808),
+        "probe_twin": str(twin)}}), encoding="utf-8")
     done = subprocess.run([node, str(script), str(STATIC), str(hooks), str(listing)],
                           capture_output=True, text=True, check=False, timeout=120)
     assert done.returncode == 0, done.stderr
@@ -623,6 +628,36 @@ def test_two_terminals_a_pitch_apart_have_targets_that_do_not_overlap(tmp_path):
     got = run_page(tmp_path, probe, {"layout": layout()})
     assert got["chip"]["gap"] > 0, got["chip"]
     assert got["resistor"]["radius"] == 0.55, got["resistor"]
+
+
+def test_a_part_whose_terminals_are_at_one_point_is_refused_naming_them(tmp_path):
+    """Two terminals at one point would get a target of radius zero and no
+    target at all, silently. The part is refused, by the names of the two and
+    where they are, and is not put on the bench."""
+    probe = r"""
+    api = async () => ({ ok: true, json: async () => ({}) });
+    page.showBoard(given.layout, null);
+    let message = null;
+    try { await page.addPart("probe_twin"); } catch (error) { message = error.message; }
+    console.log(JSON.stringify({ message, parts: page.parts().length }));
+    """
+    got = run_page(tmp_path, probe, {"layout": layout()})
+    assert got["parts"] == 0, got
+    assert all(word in got["message"] for word in ("probe_twin", "one", "two", "1,-0.5,0")), got
+
+
+def test_a_device_is_not_posted_while_no_pad_has_a_state_of_its_own(tmp_path):
+    """**Every pad is `unknown` while no program runs**, and a device posted
+    then reaches a server with nothing loaded, whose 400 would lead the bench
+    note. Seven wires post nothing; the first state a pad takes -- D1 an
+    input, as a program leaves it -- posts the device with the first inputs."""
+    got = run_page(tmp_path, STEPS, {"layout": layout(), "steps": [
+        *SEVEN_WIRES,                              # 1 to 8
+        ["levels", {"D1": "input"}],               # 9: a pad has a state
+    ]})
+    assert got["after"] == [0] * 8 + [1], (got["after"], got["posted"])
+    assert got["posted"][0]["devices"] == {"part-1": MCP_POSTED}, got["posted"]
+    assert got["warned"] == [] and got["notes"][7] is None, got["notes"]
 
 
 # --- the slice, end to end: the page's code against a real server -----------

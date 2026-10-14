@@ -41,6 +41,7 @@
 # twenty thousand instructions of plausible nonsense ending in a fault
 # somewhere unrelated.
 
+import copy
 import pathlib
 import re
 import struct
@@ -2107,6 +2108,81 @@ def test_every_description_whose_supply_states_input_levels_has_a_bus():
             assert callable(getattr(description, "hold_bus", None)), (
                 f"{module.name} states input levels and has no hold_bus")
     assert {"esp32c3", "esp32c5", "esp32c6"} <= set(reading), reading
+
+
+def test_a_device_with_a_key_the_drive_does_not_read_is_refused_by_name_and_changes_nothing():
+    """**A key the drive ignores is a key the record keeps.** The record is
+    built from the validated fields only, so an unknown one is refused with
+    its name, before the levels or the bus are touched, and the session -- the
+    instructions retired, the record, the parts on the bus -- is as it was."""
+    with _i2c_session(_stores(*_i2c_wiring())) as session:
+        session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
+        kept = session.devices["u1"]
+        before = (session.retired, copy.deepcopy(session.inputs))
+        for key in ("junk", "Celsius", "alert"):
+            with pytest.raises(ValueError) as caught:
+                session.drive({"D1": "high"}, None, {"u1": dict(MCP9808_ON_D4_D5, **{key: 1})})
+            assert repr(key) in str(caught.value), (key, str(caught.value))
+            assert (session.retired, session.inputs) == before, key
+            assert set(session.devices) == {"u1"} and session.devices["u1"] is kept, key
+
+
+def test_a_device_nested_past_the_recursion_limit_is_refused_and_not_crashed():
+    """`json.loads` accepts nesting about 5000 deep and `copy.deepcopy` and
+    `repr` give up at about 600, so a device carrying a deep value used to
+    raise `RecursionError` past the route's `except ValueError` after the
+    levels and the bus had been applied: the client saw the connection drop,
+    the session held the part, and the record had no entry for it. It is a
+    refusal now, whichever field the depth is in, and nothing is applied."""
+    deep: list = []
+    for _ in range(2000):
+        deep = [deep]
+    pins = dict(MCP9808_ON_D4_D5["address_pins"])
+    with _i2c_session(_stores(*_i2c_wiring())) as session:
+        for name, device in {
+            "an unknown key": dict(MCP9808_ON_D4_D5, junk=deep),
+            "sda": dict(MCP9808_ON_D4_D5, sda=deep),
+            "part": dict(MCP9808_ON_D4_D5, part=deep),
+            "vdd": dict(MCP9808_ON_D4_D5, vdd=deep),
+            "an address pin": dict(MCP9808_ON_D4_D5, address_pins=dict(pins, A0=deep)),
+            "the address pins": dict(MCP9808_ON_D4_D5, address_pins=deep),
+        }.items():
+            with pytest.raises(ValueError):
+                session.drive({"D1": "high"}, None, {"u1": device})
+            assert session.inputs == [] and session.devices == {}, name
+        with pytest.raises(ValueError):
+            session.drive({"D1": "high"}, None, deep)
+        assert session.inputs == [] and session.devices == {}
+
+
+def test_a_device_id_is_bounded_and_the_refusal_names_the_length():
+    with _i2c_session(_stores(*_i2c_wiring())) as session:
+        with pytest.raises(ValueError) as caught:
+            session.drive({}, None, {"x" * 65: MCP9808_ON_D4_D5})
+        assert "65" in str(caught.value) and "64" in str(caught.value), str(caught.value)
+        assert session.inputs == [] and session.devices == {}
+        session.drive({}, None, {"x" * 64: MCP9808_ON_D4_D5})
+        assert set(session.devices) == {"x" * 64}
+
+
+def test_the_route_refuses_a_deep_unknown_key_by_name_over_http(live_server):
+    """The same device through the server: a 400 `drive-refused` that names
+    the key, and the connection is not dropped."""
+    load_c3_blink(live_server)
+    deep: list = []
+    for _ in range(2000):
+        deep = [deep]
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        post(live_server, "/api/board/drive", {
+            "board": C3_BOARD, "levels": {},
+            "devices": {"part-1": dict(MCP9808_ON_D4_D5, junk=deep)}})
+    answer = json.loads(caught.value.read())
+    assert caught.value.code == 400 and answer["reason"] == "drive-refused", answer
+    assert "junk" in answer["error"], answer
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        post(live_server, "/api/board/drive", {
+            "board": C3_BOARD, "levels": {}, "devices": deep})
+    assert caught.value.code == 400, caught.value.code
 
 
 def test_a_refused_drive_leaves_a_kept_part_as_it_was():

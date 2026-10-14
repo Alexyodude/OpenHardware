@@ -198,7 +198,16 @@ export function dressPart(group, extras, palette) {
   const anchors = [...group.userData.terminals.values()];
   for (const [at, one] of anchors.entries()) {
     for (const other of anchors.slice(at + 1)) {
-      nearest = Math.min(nearest, one.position.distanceTo(other.position));
+      const apart = one.position.distanceTo(other.position);
+      // Two terminals at one point would get a zero radius and no target at
+      // all, silently: a file that says so is wrong, and is refused.
+      if (apart === 0) {
+        throw new Error(`${extras.chip}'s terminals ${one.userData.terminal} and ` +
+                        `${other.userData.terminal} are both at ` +
+                        `[${one.position.toArray()}]; a wire cannot be dropped on ` +
+                        `one of them`);
+      }
+      nearest = Math.min(nearest, apart);
     }
   }
   group.userData.targetRadius = Math.min(TARGET_RADIUS, 0.45 * nearest);

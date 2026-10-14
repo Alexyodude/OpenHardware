@@ -687,7 +687,14 @@ export function analyse(bench) {
     // reach the check below: once `Wire.begin()` routes the pads its SDA and
     // SCL are on they read `unknown`, and a device wired to an unknown pad
     // would be called blind -- it has no current to be blind about.
-    if (part.model?.kind === "i2c_device") continue;
+    if (part.model?.kind === "i2c_device") {
+      // `readDevices` replaces this where the board has a bus to state it to.
+      if (!reads) {
+        entry.reason = "this board states no input levels, so no I2C bus is " +
+                       "modelled and nothing is stated of this device";
+      }
+      continue;
+    }
     const reaching = names.filter((name) =>
       bench.wires.some((wire) =>
         (wire.part === index && wire.terminal === name)
@@ -949,11 +956,17 @@ function readDevices(bench, report, wiring, nodeOf, solved, grouped, blindGroups
       wire.part === index || wire.from?.part === index);
     if (entry.destroyed || !touched) continue;
 
-    const held = (name) => {
+    // "held", "open" (nothing decides the node) or "blind" (a value nobody
+    // published does): the reader's next step differs, so the words do.
+    const holding = (name) => {
       const at = nodeOf(terminalKey(index, name));
       const group = grouped.group(at);
-      return grouped.decided(at) && !(group !== null && blindGroups.has(group));
+      if (group !== null && blindGroups.has(group)) return "blind";
+      return grouped.decided(at) ? "held" : "open";
     };
+    const blindWords = "on a node that a part with no published model, or " +
+                       "a pad this board cannot answer for, decides";
+    const micro = (value) => Math.round(value * MICROVOLTS) / MICROVOLTS;
     const volts = (name) => solved.volts[nodeOf(terminalKey(index, name))];
     const padsOn = (name) => {
       const root = wiring.find(terminalKey(index, name));
@@ -963,10 +976,13 @@ function readDevices(bench, report, wiring, nodeOf, solved, grouped, blindGroups
     // Either `{why}`, the sentence that leaves the part with no device, or
     // `{device}`.
     const state = () => {
-      if (!(model.inputHighRatio > 0 && model.inputLowRatio > 0)) {
-        return { why: `its model states inputHighRatio ${model.inputHighRatio} ` +
-                      `and inputLowRatio ${model.inputLowRatio}, which are not ` +
-                      `both above 0` };
+      const { device: named, inputHighRatio: top, inputLowRatio: bottom } = model;
+      if (!(typeof named === "string" && named !== ""
+            && 0 < bottom && bottom < top && top <= 1)) {
+        return { why: `its model states device ${JSON.stringify(named)}, ` +
+                      `inputHighRatio ${top} and inputLowRatio ${bottom}; a ` +
+                      `device is named and 0 < inputLowRatio < inputHighRatio ` +
+                      `<= 1` };
       }
       const lines = {};
       for (const line of ["SDA", "SCL"]) {
@@ -981,19 +997,26 @@ function readDevices(bench, report, wiring, nodeOf, solved, grouped, blindGroups
       if (lines.SDA === lines.SCL) {
         return { why: `its SCL is on ${lines.SCL}, as its SDA is` };
       }
-      const open = ["VDD", "GND"].filter((name) => !held(name));
-      if (open.length) {
-        return { why: `its ${open.join(" and ")} is not held at a voltage by ` +
-                      `anything` };
+      for (const word of ["blind", "open"]) {
+        const names = ["VDD", "GND"].filter((name) => holding(name) === word);
+        if (!names.length) continue;
+        const are = names.length > 1 ? "are" : "is";
+        return { why: `its ${names.join(" and ")} ${are} ` +
+                      `${word === "blind" ? blindWords : "not held at a voltage by anything"}` };
       }
       const ground = volts("GND");
-      const vdd = Math.round((volts("VDD") - ground) * MICROVOLTS) / MICROVOLTS;
-      const low = model.inputLowRatio * vdd;
-      const high = model.inputHighRatio * vdd;
+      const vdd = micro(volts("VDD") - ground);
+      // **Rounded on both sides** of every comparison: the bounds are
+      // inclusive (VIH is at least 0.7 VDD, VIL at most 0.3 VDD, p.4) and
+      // 0.7 * 3.3 is 2.3099999999999996, where a 3k/7k divider solves to 2.31.
+      const low = micro(model.inputLowRatio * vdd);
+      const high = micro(model.inputHighRatio * vdd);
       const address = {};
       for (const pin of ["A0", "A1", "A2"]) {
-        if (!held(pin)) return { why: `its ${pin} is open, so it has no address` };
-        const level = volts(pin) - ground;
+        const holds = holding(pin);
+        if (holds === "blind") return { why: `its ${pin} is ${blindWords}, so it has no address` };
+        if (holds === "open") return { why: `its ${pin} is open, so it has no address` };
+        const level = micro(volts(pin) - ground);
         if (level <= low) address[pin] = "low";
         else if (level >= high) address[pin] = "high";
         else {

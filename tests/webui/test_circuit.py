@@ -2398,6 +2398,112 @@ def test_an_i2c_device_model_without_its_input_ratios_is_refused_with_what_it_st
     assert "0.3" in got["reason"] and "inputHighRatio" in got["reason"], got["reason"]
 
 
+def test_an_address_pin_at_exactly_a_threshold_of_the_supply_is_read(tmp_path):
+    """**The datasheet's bounds are inclusive** (p.4): VIH is at least 0.7 VDD
+    and VIL at most 0.3 VDD. 3.3 V * 0.7 is 2.3099999999999996 in floating
+    point and a 3k/7k divider solves to 2.31, so a comparison of the raw
+    numbers refused exactly-0.7 as "neither"; both sides are rounded to the
+    microvolt, as `vdd` is. A1 on each of the two dividers gets an address."""
+    got = run(tmp_path, """
+        const resistor = (label, ohms) =>
+          ({label, terminals: ["a", "b"], model: {kind: "resistor", ohms}});
+        const found = {};
+        for (const [name, top, bottom] of [["seventh", 3000, 7000], ["third", 7000, 3000]]) {
+          const wires = [
+            ...MCP_WIRES.map((wire) => (wire.terminal === "A1" ? {...wire, pad: "D1"} : wire)),
+            {pad: "3V3_OUT", part: 1, terminal: "a"}, {pad: "D1", part: 1, terminal: "b"},
+            {pad: "D1", part: 2, terminal: "a"}, {pad: "GND", part: 2, terminal: "b"},
+          ];
+          const report = analyse({supply: C3, pads: BUS, wires,
+            parts: [MCP9808, resistor("top", top), resistor("bottom", bottom)]});
+          found[name] = {device: report.parts[0].device, reason: report.parts[0].reason,
+                         volts: report.volts.D1};
+        }
+        console.log(JSON.stringify(found));
+    """)
+    assert got["seventh"]["volts"] == 2.31 and got["third"]["volts"] == 0.99, got
+    assert got["seventh"]["device"]["address_pins"]["A1"] == "high", got["seventh"]
+    assert got["third"]["device"]["address_pins"]["A1"] == "low", got["third"]
+
+
+def test_a_device_on_a_board_that_states_no_input_levels_says_so(tmp_path):
+    """The Uno's supply states no input levels, so no bus is modelled; a
+    fully wired MCP9808 there said nothing at all (an empty reason)."""
+    got = run(tmp_path, """
+        const report = analyse({supply: UNO, pads: BUS, parts: [MCP9808], wires: MCP_WIRES});
+        console.log(JSON.stringify(report.parts[0].reason));
+    """)
+    assert "no input levels" in got and "bus" in got, got
+
+
+def test_a_stated_device_is_unanswerable_whatever_state_its_pads_are_in(tmp_path):
+    """**It has no lens and no current**, so its drive is the word nobody can
+    answer for, and its reason is the device's own and not the "no published
+    electrical model" the generic report would give it. With the pads
+    `input` the generic path would have called it "off"; with them `unknown`
+    it would have been called blind."""
+    got = run(tmp_path, """
+        const found = {};
+        for (const state of ["input", "unknown"]) {
+          const pads = BUS.map((pad) => (pad.name === "D4" || pad.name === "D5"
+                                         ? {...pad, state} : pad));
+          const report = analyse({supply: C3, pads, parts: [MCP9808], wires: MCP_WIRES});
+          found[state] = report.parts[0];
+        }
+        console.log(JSON.stringify(found));
+    """)
+    for state, entry in got.items():
+        assert entry["device"] is not None, (state, entry)
+        assert entry["drive"] == "unanswerable", (state, entry)
+        assert entry["reason"].startswith("MCP9808 on the board's bus"), (state, entry)
+
+
+def test_a_node_a_stood_in_value_decides_is_said_to_be_blind_and_not_open(tmp_path):
+    """A supply on such a node is not "not held by anything": that is false,
+    and the reader would go looking for a missing wire. The reason says a
+    value nobody published decides it. VDD and GND together are "are", not
+    "is"."""
+    got = run(tmp_path, """
+        const mystery = {label: "mystery", terminals: ["x", "y"], model: null};
+        const blind = analyse({supply: C3, pads: BUS, parts: [MCP9808, mystery], wires: [
+          ...MCP_WIRES.map((wire) => (wire.terminal === "VDD" ? {...wire, pad: "D1"} : wire)),
+          {pad: "3V3_OUT", part: 1, terminal: "x"}, {pad: "D1", part: 1, terminal: "y"}]});
+        const bare = analyse({supply: C3, pads: BUS, parts: [MCP9808], wires:
+          MCP_WIRES.filter((wire) => wire.terminal !== "VDD" && wire.terminal !== "GND")});
+        console.log(JSON.stringify({blind: blind.parts[0].reason, bare: bare.parts[0].reason}));
+    """)
+    assert "VDD" in got["blind"] and "published" in got["blind"], got["blind"]
+    assert "not held" not in got["blind"], got["blind"]
+    assert "VDD and GND are not held" in got["bare"], got["bare"]
+
+
+def test_an_i2c_model_with_ratios_out_of_order_or_range_or_no_device_is_refused(tmp_path):
+    """0 < low < high <= 1 and a named part: inverted ratios (0.7 and 0.3), ones
+    that are percentages (7 and 3) and a missing `device` each leave the part
+    with no device and a reason that has the values it found."""
+    got = run(tmp_path, """
+        const cases = {
+          inverted: {inputHighRatio: 0.3, inputLowRatio: 0.7},
+          percent: {inputHighRatio: 7, inputLowRatio: 3},
+          nameless: {device: undefined},
+          unnamed: {device: ""},
+        };
+        const found = {};
+        for (const [name, change] of Object.entries(cases)) {
+          const odd = {...MCP9808, model: {...MCP9808.model, ...change}};
+          const report = analyse({supply: C3, pads: BUS, parts: [odd], wires: MCP_WIRES});
+          found[name] = {device: report.parts[0].device, reason: report.parts[0].reason};
+        }
+        console.log(JSON.stringify(found));
+    """)
+    for name, answer in got.items():
+        assert answer["device"] is None, (name, answer)
+    assert "0.3" in got["inverted"]["reason"] and "0.7" in got["inverted"]["reason"]
+    assert "7" in got["percent"]["reason"] and "3" in got["percent"]["reason"]
+    assert "device" in got["nameless"]["reason"] and "undefined" in got["nameless"]["reason"]
+    assert "device" in got["unnamed"]["reason"], got["unnamed"]
+
+
 def test_a_part_that_is_not_an_i2c_device_reports_no_device(tmp_path):
     got = run(tmp_path, """
         const report = analyse({supply: C3, pads: XIAO, parts: [LED], wires: [
