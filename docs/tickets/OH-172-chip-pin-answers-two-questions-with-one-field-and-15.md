@@ -6,8 +6,6 @@ status: open
 priority: P2
 created: '2026-09-06'
 touches:
-- webui/static/board3d-panel.js
-- tests/webui/test_board3d.py
 - webui/boards/XIAO-MG24-SMD.json
 - webui/boards/XIAO-nRF54l15-SMD.json
 - webui/boards/XIAO-nRF54LM20A-SMD.json
@@ -332,3 +330,5 @@ LEFT is as the slice 2 note says, with one item added. A pad its footprint names
 **Note 2026-10-14:** 2026-10-14 lends tools/import_pindefs.py, tests/rules/test_import_pindefs.py and tests/rules/test_inventory.py to OH-171 (the STM32C5 board key rename); they come back when OH-171 closes.
 
 **Note 2026-10-14:** 2026-10-14 loans back from OH-171 (done): tools/import_pindefs.py, tests/rules/test_import_pindefs.py, tests/rules/test_inventory.py.
+
+**Note 2026-10-15:** Lends webui/static/board3d-panel.js and tests/webui/test_board3d.py to OH-161 (step 5 slice 4c: the bench panel's temperature field for an MCP9808 and the part's served view); they come back when slice 4c lands.
