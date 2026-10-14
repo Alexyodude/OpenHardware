@@ -115,8 +115,10 @@ it is not a gap in the mechanism.
 ## 3. 2026-08-25 — TEST-ENFORCED: the set itself is pinned
 
 `test_only_the_board_a_real_image_ran_on_claims_to_have_run_one` in
-`tests/webui/test_board_catalogue.py` asserts the verified set is exactly
-`{"RP2040"}`.
+`tests/webui/test_board_catalogue.py` asserts the verified set is exactly the
+one written in that test, which is where the set is held. (Amended 2026-10-15,
+§14: this said `{"RP2040"}`, which stopped being the set when the second chip
+joined.)
 
 That looks redundant beside §2 and is not. §2 checks that an entry is
 *well-formed* — a real test, naming a real image, reading and stepping it. The
@@ -440,3 +442,35 @@ another table moves no pad of this board at all.
 `SDA` -- its variant's `SDA` is the Thing Plus ESP32-C6's, and Olimex's net
 for it reaches only the surface-mount UEXT connectors -- or `TX`, which is
 the XIAO's.
+
+## 14. 2026-10-15 — a chip with two instruction sets, and evidence for one (OH-210)
+
+The RP2350 is the first chip in `FIRMWARE_VERIFIED` whose evidence covers
+one of its two instruction sets. `CHIPS` gives it "Armv8-M (Cortex-M33) +
+RV32 (Hazard3)" on core `riscv32`, and
+`tests/webui/test_xiao_rp2350_board.py` loads a RISC-V image onto the XIAO
+RP2350 by name, steps it on `core/riscv32`, and watches the pad of `D3`
+move. That is the Hazard3 half. The Cortex-M33 half has no core here, so
+nothing has run on it; `webui/boards/rp2350.py` and `CHIPS` call it OH-36's.
+
+What follows from that, and only that:
+
+- **The register is keyed by chip and cannot say which half.** The entry
+  licenses `RUNS FIRMWARE` for both XIAO RP2350 boards (§1), and nothing in
+  `FIRMWARE_VERIFIED` records that an Arm image does not run. The `core`
+  column is where the repository says which half it is, and the test
+  named above is where the evidence is.
+- **A surface that shows the ISA string beside that badge shows both halves
+  and the evidence for one.** `webui/static/emulator.js` prints
+  `board.isa` and `board.core` in separate cells and the badge from
+  `firmware_verified`. Saying on the page which half runs is OH-210 item 1,
+  and is not done by this section.
+- **A core's backlog row names only the half its core runs.**
+  `catalogue.CORE_ISA` maps the RP2350 to "RV32 (Hazard3)", and
+  `missing_cores` reads each row's `isas` from the boards waiting on that
+  core, so an RP2350 waiting on `riscv32` is not reported as waiting on an
+  Armv8-M core. `tests/webui/test_board_catalogue.py` holds it.
+- **§3 was amended** to stop naming a set it no longer pinned: it said
+  `{"RP2040"}`, and the test it cites has held a longer set since the second
+  chip joined. It now says the set is the one written in that test, rather
+  than restating the members here, where they went stale.
