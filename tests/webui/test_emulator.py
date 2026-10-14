@@ -367,11 +367,18 @@ def get(base: str, path: str, origin: str | None = None):
         return json.loads(response.read())
 
 
+#: How long a request may take: as long as a build is allowed to run. The reply
+#: to a compile is the build's, and one took 12.7 s on a loaded machine, which a
+#: 10 s timeout turned into "the build itself failed: None" (OH-166). The
+#: state-poll test joins its build thread for the same bound.
+BUILD_SECONDS = 120
+
+
 def post(base: str, path: str, body: dict[str, object]):
     request = urllib.request.Request(
         base + path, data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with urllib.request.urlopen(request, timeout=BUILD_SECONDS) as response:
         return json.loads(response.read())
 
 
@@ -621,7 +628,7 @@ def test_a_state_poll_answers_while_a_build_runs(live_server):
         state = get(live_server, "/api/state?at=0&len=16")
         waited = time.monotonic() - began
         still_building = builder.is_alive()
-        builder.join(timeout=120)
+        builder.join(timeout=BUILD_SECONDS)
         built = time.monotonic() - started
         if still_building:
             break

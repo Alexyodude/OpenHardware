@@ -1004,12 +1004,17 @@ def _tool(root: pathlib.Path, recipe: Recipe, name: str) -> str:
     return str(path if path.is_file() else path.with_suffix(".exe"))
 
 
-def build(board: str, source: str) -> Build:
+def build(board: str, source: str, root: pathlib.Path | None = None) -> Build:
     """Compile `source` for `board`, and return the image or the diagnostics.
 
     Raises `UnknownBoard` or `ToolchainMissing` when the build cannot be
     ATTEMPTED. A build that is attempted and fails returns `ok=False` -- see
     the module docstring for why that difference is load-bearing.
+
+    `root` is the directory the build's own temporary directory is made under;
+    None is the system temp directory. A caller that wants to see that a build
+    cleaned up after itself passes a root of its own, because the system one is
+    shared with every other build on the machine (OH-166).
     """
     if len(source.encode("utf-8")) > MAX_SOURCE_BYTES:
         raise CompileError(
@@ -1046,7 +1051,7 @@ def build(board: str, source: str) -> Build:
     # the framework at all -- and `g_APinDescription` lives in it, so an image
     # linked without it has no pin table and does not link.
     extra_sources = ((variant / "variant.cpp",) if recipe.variant_package else ())
-    with tempfile.TemporaryDirectory(prefix="openhardware-build-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="openhardware-build-", dir=root) as tmp:
         out = pathlib.Path(tmp)
         # **The one place untrusted input reaches the filesystem**, and it is
         # as file contents in a directory that exists for this build alone.

@@ -788,18 +788,29 @@ def test_the_samd21_variant_comes_from_seeed_and_not_from_the_framework():
 def test_nothing_in_a_recipe_comes_from_a_request():
     """**The safety property, checked structurally.**
 
-    `build` takes exactly two strings and neither reaches a command line: the
+    `build` takes two strings and neither reaches a command line: the
     source becomes the contents of a file, and the board name selects a row of
-    `RECIPES`. If a third parameter ever appears here, this test is where the
+    `RECIPES`. If a further parameter ever appears here, this test is where the
     argument about it should happen.
+
+    That argument happened once, for `root` (OH-166): the directory the
+    build's temporary directory is made under, there so that a test can give
+    its own and see that the build cleaned up. It is a place and not a
+    program or a flag, and it is allowed because the one caller that a request
+    reaches, the server, passes no root -- which the second assertion holds.
     """
     import inspect
 
     parameters = list(inspect.signature(compiler.build).parameters)
-    assert parameters == ["board", "source"], (
+    assert parameters == ["board", "source", "root"], (
         f"build() grew parameters {parameters}; anything beyond a board name "
         f"and source is something a request could use to choose a command line"
     )
+    server = (pathlib.Path(compiler.__file__).parent
+              / "emulator_server.py").read_text(encoding="utf-8")
+    assert "compile_service.build(board, source)" in server, (
+        "the server no longer calls build with exactly a board and a source; "
+        "if it passes a root, check that nothing in the request chooses it")
 
 
 def test_a_sketch_too_large_to_be_a_sketch_is_refused_before_a_compiler_starts():
@@ -996,14 +1007,19 @@ def test_the_temporary_path_is_not_in_the_diagnostics():
     assert "openhardware-build" not in built.diagnostics
 
 
-def test_a_failed_build_leaves_nothing_behind():
+def test_a_failed_build_leaves_nothing_behind(tmp_path):
     """The temporary directory is removed either way. A build that fails is
-    the common case, so leaking on that path would fill a disk first."""
+    the common case, so leaking on that path would fill a disk first.
+
+    The build is given a root of this test's own (OH-166). It used to glob the
+    system temp directory, which every concurrent build on the machine shares,
+    so it failed on somebody else's directory and could not tell it from its
+    own leak."""
     needs_toolchain()
-    built = compiler.build(BOARD, "void setup(){}\nvoid loop(){ int x = ; }")
+    built = compiler.build(
+        BOARD, "void setup(){}\nvoid loop(){ int x = ; }", root=tmp_path)
     assert not built.ok
-    leaked = [p for p in pathlib.Path(compiler.tempfile.gettempdir()).glob(
-        "openhardware-build-*")]
+    leaked = list(tmp_path.iterdir())
     assert not leaked, f"left behind: {leaked}"
 
 
