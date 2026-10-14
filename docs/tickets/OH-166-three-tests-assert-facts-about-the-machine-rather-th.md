@@ -7,6 +7,8 @@ priority: P3
 created: '2026-09-05'
 touches:
 - tests/webui/test_emulator.py
+- webui/compile.py
+- tests/webui/test_compile.py
 ---
 
 Three tests in tests/webui assert something that is not a property of this code, and each has now failed for a different session doing something else on the same machine.
@@ -101,3 +103,5 @@ it now would only re-measure item 2.
 **Note 2026-10-13:** 2026-10-13, the cause of test_a_state_poll_answers_while_a_build_runs failing on a loaded machine, found by reproducing it alone: its post() helper (tests/webui/test_emulator.py ~370-375) opens the compile request with urlopen(timeout=10), and a XIAO-SAMD21-DIP build of an empty sketch took 12.7 s here (webui.compile.build called directly, other worktrees building). The thread's urlopen then raises TimeoutError, finished['reply'] is never set, and the assertion reports 'the build itself failed: None' -- a fact about the machine's speed, which is this ticket's class. The build's own reply should be awaited as long as the build runs (join already allows 120 s), not 10 s.
 
 **Note 2026-10-15:** 2026-10-14 OH-237 folded in here. It is item 3, filed without seeing this ticket, and it carries the first diagnosis of item 3, from reading and NOT reproduced. emulator_server.py do_POST refuses on Origin before it reads the request body, so it sends the 403 with the declared body unread. On Windows, closing a socket with unread data sends RST, so a client still writing gets ConnectionAbortedError instead of the 403. The 413 path deliberately never reads (keep that); for it, send, shutdown(SHUT_WR) and drain with a deadline. Seen again on master full runs 2026-10-14 (5c73727), alongside item 1.
+
+**Note 2026-10-15:** 2026-10-14 borrows webui/compile.py and tests/webui/test_compile.py from OH-161 for item 1, in lane3, plus the 2026-10-13 note's test_emulator post() timeout.
