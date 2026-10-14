@@ -801,6 +801,8 @@ CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: opt
 
 **Note 2026-10-14:** 2026-10-14 tests/webui/test_pin_view.py back from OH-171 (done); it is still on loan here from OH-172.
 
+**Note 2026-10-15:** Step 5 slice 2 landed (61292bb): the MCP9808 register file (CONFIG, TUPPER, TLOWER, TCRIT, TA, resolution) in webui/devices/mcp9808.py with ta_word, locks, shutdown, power-on reset, a -40..+125 C hold (p.4), and the refusals (partial write, extra bytes, third byte read, Alert Cnt, THYST on a TA read, writes to TA/IDs) each citing its section. Seen to fail first: 20 new unit tests in tests/webui/test_mcp9808.py failed on slice-1 code (AttributeError POWER_ON/ta_word; pointers 1-8 refused 'arrives in slice 2'); 6 new watched Wire tests in tests/webui/test_board_run.py stopped with that same refusal. Mutation: dropping hold's celsius update failed the replay, shutdown and keeps-the-part tests. Counts: test_mcp9808 32 (12 before), test_board_run +6; the four suites 237 passed; test_compile -k wire 2 passed. Interpretations to confirm: a write to a locked limit register is ignored (ACKed, unchanged), not refused; lock bits read from before the write; rounding toward -inf is the model's reading of Register 5-4 note 2.
+
 **Note 2026-10-15:** 2026-10-14 lends webui/compile.py and tests/webui/test_compile.py to OH-166 for its item 1 (a build's temp directory under a root the caller controls). Slice 2 does not touch either file. They come back when OH-166's item 1 lands.
 
 **Note 2026-10-15:** 2026-10-15 webui/compile.py and tests/webui/test_compile.py back from OH-166 (its item 1 landed: build takes root=None, and the recipe guard is an ast check).
