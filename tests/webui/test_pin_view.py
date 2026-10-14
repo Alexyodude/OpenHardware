@@ -656,7 +656,15 @@ class _Words:
     sketch reaches only by writing `OUT` without ever calling `pinMode`."""
 
     def __init__(self, values: dict[int, int]):
-        self._values = values
+        from webui.boards import esp32c3
+
+        # A C3's pads come out of reset with OUT_SEL 128 (the GPIO block
+        # drives them), which an unmapped read of 0 would call a peripheral.
+        at_reset = {
+            esp32c3.GPIO + esp32c3.GPIO_FUNC_OUT_SEL_CFG0 + 4 * gpio:
+                esp32c3.GPIO_OUT_SEL_GPIO
+            for gpio in esp32c3.IO_MUX_PADS}
+        self._values = {**at_reset, **values}
 
     def read_word(self, address: int) -> int:
         return self._values.get(address, 0)
@@ -1252,7 +1260,7 @@ def test_a_manifest_boards_levels_agree_with_its_chip_module_on_every_gpio_both_
         enable, out = module.GPIO + module.GPIO_ENABLE, module.GPIO + module.GPIO_OUT
         sio = ({module.gpio_ctrl(gpio): module.FUNCSEL_SIO
                 for gpio in range(module.IO_BANK0_GPIOS)}
-               if hasattr(module, "unrouted_level") else {})
+               if hasattr(module, "gpio_ctrl") else {})
         for words in ({}, {enable: 0xFFFFFFFF}, {enable: 0xFFFFFFFF, out: 0xFFFFFFFF},
                       {enable: 0xAAAAAAAA, out: 0x66666666}):
             ours = api.row_levels(runtime, _Words({**sio, **words}))
