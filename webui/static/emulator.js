@@ -563,6 +563,7 @@ async function loadBoardImage() {
   $("board-step").disabled = true;
   try {
     boardImage = await api("/api/board/load", request);
+    showBoardSteps(0);
   } catch (error) {
     $("board-console").textContent = "";
     boardSays("Nothing loaded yet.", error.message);
@@ -669,6 +670,7 @@ async function loadArtefact() {
   $("board-go").disabled = true;
   $("board-step").disabled = true;
   boardImage = await api("/api/board/load-artefact", request);
+  showBoardSteps(0);
   $("board-go").disabled = false;
   $("board-step").disabled = false;
   $("board-console").textContent = "";
@@ -833,6 +835,7 @@ async function buildSketch() {
       return;
     }
     boardImage = built.board;
+    showBoardSteps(0);
     $("board-go").disabled = false;
   $("board-step").disabled = false;
     $("board-console").textContent = "";
@@ -863,6 +866,23 @@ async function buildSketch() {
  *  the tick already issued -- see `stopBoardClock`. */
 let boardClock = null;
 let boardRunning = null;
+
+/** Instructions the loaded board has retired since its image was loaded, and
+ *  what the top bar's counter shows while a board owns the panes (OH-232).
+ *
+ *  **The page adds it up, because the board's state reply does not carry it.**
+ *  `/api/board/run` answers the instructions that call took and
+ *  `/api/board/state` answers none, so a run's tick adds the clock's total to
+ *  the count it started from, and a step adds one if the board is still
+ *  running after it (a stop is the core refusing the instruction, which
+ *  retires nothing). `renderStatus` writes the same element for the 8086, and
+ *  never runs while a board owns the panes -- `refresh` returns first. */
+let boardSteps = 0;
+
+function showBoardSteps(total) {
+  boardSteps = total;
+  $("counter").textContent = `${total.toLocaleString()} steps`;
+}
 
 /** One line about a run: how far it has gone, how fast, and where it is now.
  *
@@ -1000,6 +1020,8 @@ async function runLoadedBoard() {
     return;
   }
 
+  // The clock counts from zero each time it starts; the board's total does not.
+  const stepsBefore = boardSteps;
   boardClock = new window.BoardClock.Clock({
     run: (steps) => api("/api/board/run", { steps }),
     now: () => performance.now(),
@@ -1010,6 +1032,7 @@ async function runLoadedBoard() {
       const state = await api(boardStateUrl());
       renderBoardConsole(state.uart);
       renderBoardState(state);
+      showBoardSteps(stepsBefore + report.steps);
       boardSays(runLine(report), stopDetail(report.status, report.detail));
     },
   });
@@ -1038,6 +1061,7 @@ async function stepLoadedBoard() {
   showBoardRunning(false);
   const state = await api(watchedUrl("/api/board/step"), {});
   renderBoardState(state);
+  showBoardSteps(boardSteps + (state.status === "running" ? 1 : 0));
   boardSays(stepLine(boardImage.board, state, $("where").textContent),
             stopDetail(state.status, state.detail));
 }

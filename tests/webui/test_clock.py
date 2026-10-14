@@ -497,3 +497,105 @@ def test_the_pages_worked_delay_costs_and_clock_pointers_are_the_boards_own():
             if not any(fnmatch.fnmatch(module, pointer) for pointer in pointers):
                 pytest.fail(f"{path.name} points at no pointer matching {module}: "
                             f"{sorted(set(pointers))}")
+
+
+# --- the top bar's counter beside a board (OH-232) -----------------------------
+
+
+def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
+    """Runs the real `emulator.js` under node against a fake page.
+
+    Before OH-232 `#counter` was written only by `renderStatus`, the 8086
+    session's redraw, so beside a board that had retired millions of
+    instructions it read "0 steps". A grep for `showBoardSteps` would pass
+    with the call in the wrong place; this loads a board, runs it three ticks of
+    1,000 and steps it once, and reads the element.
+
+    The fake page is a permissive element that remembers what is written to it,
+    and `fetch` answers only the four board routes the sequence uses. The
+    8086's own count is planted first (7), so a counter that was never written
+    by the board path would still read it.
+    """
+    source = EMULATOR.read_text(encoding="utf-8")
+    result = probe(tmp_path, """
+        const vm = await import("node:vm");
+        const source = %s;
+
+        class Element {
+          constructor(id) {
+            this.id = id; this.textContent = ""; this.value = ""; this.title = "";
+            this.className = ""; this.disabled = false; this.files = [];
+            this.dataset = {}; this.style = {}; this.children = []; this.handlers = {};
+            this.classList = { add() {}, remove() {}, toggle() {} };
+          }
+          addEventListener(name, handler) { this.handlers[name] = handler; }
+          setAttribute() {} append() {} replaceChildren() {} appendChild() {}
+          focus() {} querySelector() { return null; }
+        }
+        const elements = new Map();
+        const document = {
+          body: new Element("body"), documentElement: new Element("html"),
+          getElementById(id) {
+            if (!elements.has(id)) elements.set(id, new Element(id));
+            return elements.get(id);
+          },
+          createElement: () => new Element("made"),
+          createDocumentFragment: () => new Element("fragment"),
+          addEventListener() {},
+        };
+        document.body.dataset.view = "emulator";
+
+        const asked = [];
+        let ticks = 0;
+        const state = {
+          board: "xiao", chip: "c3", status: "running", detail: "",
+          registers: [{ name: "pc", value: 0, width: 32 }], flags: [],
+          pc: 0, memory: { at: 0, bytes: [] }, words: [],
+          uart: { present: false, note: "" }, pins: null,
+          listing: { present: false, note: "" },
+        };
+        const reply = (body) => ({ ok: true, status: 200, json: async () => body });
+        async function fetch(path, options) {
+          asked.push(path);
+          if (path === "/api/board/load") {
+            return reply({ board: "xiao", chip: "c3", core: "rv32", format: "bin",
+                           bytes: 4, entry: 0, notes: [] });
+          }
+          if (path === "/api/board/run") {
+            ticks += 1;
+            return reply({ steps: 1000, detail: "",
+                           status: ticks < 3 ? "running" : "stopped" });
+          }
+          if (path.startsWith("/api/board/state")) return reply(state);
+          if (path.startsWith("/api/board/step")) return reply(state);
+          return { ok: false, status: 404,
+                   json: async () => ({ error: "unrouted " + path }) };
+        }
+        class FileReader {
+          readAsDataURL() { this.result = "data:;base64,AAAA"; this.onload(); }
+        }
+        const window = { matchMedia: () => ({ matches: false }), BoardClock: { Clock } };
+        const sandbox = { document, window, fetch, FileReader, performance,
+                          localStorage: { getItem: () => null, setItem() {} },
+                          console, setTimeout, clearTimeout };
+        vm.runInNewContext(source, sandbox);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+
+        const counter = document.getElementById("counter");
+        const click = (id) => document.getElementById(id).handlers.click();
+        const text = [];
+        const shown = () => text.push(counter.textContent);
+
+        counter.textContent = "7 steps";
+        document.getElementById("board-pick").value = "xiao";
+        document.getElementById("board-file").files = [{ name: "a.bin" }];
+        await click("board-load");           shown();
+        await click("board-go");             shown();
+        state.status = "running";
+        await click("board-step");           shown();
+        await click("board-load");           shown();
+        console.log(JSON.stringify({
+          text, asked, expect: [0, 3000, 3001, 0].map((n) => n.toLocaleString() + " steps"),
+        }));
+    """ % json.dumps(source))
+    assert result["text"] == result["expect"], result
