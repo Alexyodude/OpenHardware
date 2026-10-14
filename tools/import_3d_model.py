@@ -85,6 +85,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import hashlib
 import json
 import math
 import pathlib
@@ -2290,7 +2291,9 @@ class Part:
     #: that has none.
     lens: str | None
     #: What the leads are called, in the order this file's own geometry puts
-    #: them -- see `lead_tips`, which sorts tips by x. **A tuple of N, not a
+    #: them -- see `lead_tips`, which sorts tips by x; for a part with a
+    #: `footprint` it is the order of its pad NUMBERS instead, terminal k
+    #: being pad k+1. **A tuple of N, not a
     #: pair** (OH-126): the hard 2-tuple was the single line that made a
     #: potentiometer inexpressible, and every reader downstream -- the
     #: extras, `dressPart`'s terminal loop, `circuit.terminalsOf` -- was
@@ -2308,6 +2311,12 @@ class Part:
     #: are named by their pad NUMBER in this file and located by `pad_tips`.
     #: `None` for the through-hole parts, whose leads it finds on its own.
     footprint: str | None = None
+    #: `(bytes, sha256)` the fetched footprint must be, checked on every read
+    #: (`part_pads`), as `compose_board_3d.Component.pinned` does for a model.
+    #: **A footprint decides which name lands on which foot**, so a file that
+    #: changed -- or was renumbered by a half turn in the cache -- is refused
+    #: and not believed. Required whenever `footprint` is set.
+    footprint_pin: tuple[int, str] | None = None
 
     @property
     def slug(self) -> str:
@@ -2343,7 +2352,15 @@ KICAD_3D = "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/master"
 
 #: KiCad's footprints, the same library's other half and **GitLab for the same
 #: reason** as `KICAD_3D`: the GitHub mirror is a different tree.
-KICAD_FOOTPRINTS = "https://gitlab.com/kicad/libraries/kicad-footprints/-/raw/master"
+#:
+#: **Pinned to a commit, not `master`**, because a footprint's pad numbers
+#: decide which terminal name lands on which foot. This is the commit that
+#: last touched `Package_SO.pretty/MSOP-8_3x3mm_P0.65mm.kicad_mod` (GitLab's
+#: commits API with `path=` that file, read 2026-10-15), and the file at it
+#: was byte-identical to `master`'s that day. `Part.footprint_pin` is the file
+#: as measured, and is what is checked on every read.
+KICAD_FOOTPRINTS = ("https://gitlab.com/kicad/libraries/kicad-footprints/-/raw/"
+                    "f8a45b4665c28a6280e46eefe9fd4df81d2cd17b")
 
 #: **KiCad's `kicad-packages3D`, not a vendor's.** Seeed publishes no 3D model
 #: for the Grove modules -- checked 2026-08-27, the Grove Red LED wiki lists a
@@ -2508,15 +2525,18 @@ PARTS: tuple[Part, ...] = (
     #: **MSOP-8, 3 x 3 mm at 0.65 mm pitch -- the first surface-mount part, and
     #: its leads are named by PAD NUMBER**, not by position: `lead_tips` groups
     #: metal at 1.27 mm and orders by x, which merges leads 0.65 mm apart and
-    #: cannot number two rows (it finds 5 tips in this mesh). Pin 1 is KiCad's
-    #: pad "1", pin 2 pad "2", and so on, and the names are Table 3-1's, MSOP
-    #: column (DS25095A p.11): 1 SDA, 2 SCL, 3 Alert, 4 GND, 5 A2, 6 A1,
-    #: 7 A0, 8 VDD. The package has no exposed pad -- pin 9, EP, is the DFN's.
+    #: cannot number two rows (it finds fewer than eight tips in this mesh).
+    #: Pin 1 is KiCad's pad "1", pin 2 pad "2", and so on, and the names are
+    #: Table 3-1's, MSOP column (DS25095A p.11): 1 SDA, 2 SCL, 3 Alert, 4 GND,
+    #: 5 A2, 6 A1, 7 A0, 8 VDD. The package has no exposed pad -- pin 9, EP,
+    #: is the DFN's. The footprint is held to its size and sha256 on every
+    #: read, as it decides which name lands on which foot.
     Part("Package_SO", "MSOP-8_3x3mm_P0.65mm", label="MCP9808 temperature sensor",
          lens=None,
          terminals=("SDA", "SCL", "Alert", "GND", "A2", "A1", "A0", "VDD"),
          electrical=MCP9808_ELECTRICAL,
-         footprint="Package_SO.pretty/MSOP-8_3x3mm_P0.65mm.kicad_mod"),
+         footprint="Package_SO.pretty/MSOP-8_3x3mm_P0.65mm.kicad_mod",
+         footprint_pin=(4572, "c85207be7edf4b5e1a128249fb05f91b67d622f536fc832d7a9f2a7f1e9a1223")),
 )
 
 
@@ -2623,27 +2643,39 @@ def pad_tips(mesh: Mesh, pads: dict[str, tuple[float, float]]) -> list[list[floa
     """Where a wire attaches to a surface-mount part, one tip per footprint pad.
 
     `pads` is the footprint's own, `{number: (x, z)}` in the mesh's frame (see
-    `part_pads`). Each metal vertex near the floor belongs to the pad it is
-    nearest, and each pad's tip is the average of the lowest ring of the
-    vertices it owns -- the same ring `lead_tips` takes, which for a gull-wing
-    foot is the centre of the face that sits on the board.
+    `part_pads`). Each vertex near the floor belongs to the pad it is nearest,
+    and each pad's tip is the average of the lowest ring of the vertices it
+    owns -- the same `LEAD_RING` `lead_tips` takes.
+
+    **That average is not the centre of the face that sits on the board.** The
+    ring is every vertex within `LEAD_RING` of the pad's lowest, which on a
+    gull-wing foot includes the first vertices of the bend up into the body,
+    so the tip is pulled inboard: on the MSOP-8 it is at x = +-2.095 against
+    +-2.2425 for the centre of the foot's bottom face, 0.148 mm inboard of it.
+    (It is within 0.02 mm of the pad's own centre, +-2.1125, which is a
+    coincidence and not a property of this function.)
 
     **The tips come back in pad-number order**, which is how the caller names
     them. `lead_tips` cannot do this: it groups at 1.27 mm, which merges leads
     0.65 mm apart, and it orders by x alone, which cannot number two rows.
 
-    A pad whose nearest metal is not on the floor is refused with what it was
-    and where: a surface-mount lead touches the board, so a pad that owns only
-    a body's underside is a footprint for a different part.
+    A pad whose nearest vertices are not on the floor is refused with what it
+    was and where: a surface-mount lead touches the board, so a pad that owns
+    only a body's underside is a footprint for a different part.
     """
-    metal = [(positions[at], positions[at + 1], positions[at + 2])
-             for positions, _normals, _indices in mesh.groups.values()
-             for at in range(0, len(positions), 3)]
-    if not metal:
+    # Every colour, not only the metal: this mesh is not split into metal and
+    # not-metal, and does not need to be. The body is excluded by the floor
+    # test below and not by its colour -- its underside stands off the board
+    # by 0.10 mm, more than `LEAD_RING`, so it can never be a pad's lowest
+    # ring, and a pad that owns only it is refused.
+    vertices = [(positions[at], positions[at + 1], positions[at + 2])
+                for positions, _normals, _indices in mesh.groups.values()
+                for at in range(0, len(positions), 3)]
+    if not vertices:
         raise ValueError("pad_tips: the mesh has no vertices")
-    floor = min(point[1] for point in metal)
+    floor = min(point[1] for point in vertices)
     owned: dict[str, list[tuple[float, float, float]]] = {number: [] for number in pads}
-    for point in metal:
+    for point in vertices:
         if point[1] > floor + LEAD_SLACK_MM:
             continue
         nearest = min(pads, key=lambda number: math.hypot(
@@ -2654,12 +2686,12 @@ def pad_tips(mesh: Mesh, pads: dict[str, tuple[float, float]]) -> list[list[floa
         mine = owned[number]
         if not mine:
             raise ValueError(
-                f"pad {number!r} at {pads[number]} owns no metal within "
+                f"pad {number!r} at {pads[number]} owns no vertices within "
                 f"{LEAD_SLACK_MM} mm of the floor ({floor:.3f}); {len(pads)} pads")
         here = min(point[1] for point in mine)
         if here > floor + LEAD_RING:
             raise ValueError(
-                f"pad {number!r} at {pads[number]}: its lowest metal is "
+                f"pad {number!r} at {pads[number]}: its lowest vertex is "
                 f"{here - floor:.3f} mm above the floor ({floor:.3f}), not "
                 f"within {LEAD_RING} mm of it")
         ring = [point for point in mine if point[1] <= here + LEAD_RING]
@@ -2672,7 +2704,11 @@ def part_pads(part: Part, frame: Frame) -> dict[str, tuple[float, float]]:
     """A part's footprint pads in the mesh's x and z, keyed by pad number.
 
     The footprint is fetched once into `CACHE` and read by `tools/kicad.py`'s
-    reader: it is a downloaded file, parsed as data and never run.
+    reader: it is a downloaded file, parsed as data and never run. **It is held
+    to `Part.footprint_pin` on every read**, fresh or cached, because it decides
+    which name lands on which foot; a mismatch is refused naming the path, its
+    size and its digest, and a bad cached file stays refused until it is
+    deleted to be fetched again.
 
     **The footprint is y-down and KiCad's 3D models are y-up**, so a pad at
     footprint `(x, y)` is at model `(x, -y)`, and the part's `Frame` then turns
@@ -2680,13 +2716,43 @@ def part_pads(part: Part, frame: Frame) -> dict[str, tuple[float, float]]:
     y = -0.975 and its foot is at glTF z = -0.975, with the model's own pin-1
     dimple on the same side.
     """
+    if part.footprint_pin is None:
+        raise SystemExit(f"{part.name} names a footprint and no footprint_pin; "
+                         f"measure the file's size and sha256 before trusting it")
     path = CACHE / f"footprint-{part.slug}.kicad_mod"
     if not path.is_file():
         CACHE.mkdir(parents=True, exist_ok=True)
         print(f"  fetch  {part.footprint_url}")
         with urllib.request.urlopen(part.footprint_url) as response:  # noqa: S310 - https
             path.write_bytes(response.read())
-    pads = kicad.read_footprint(path).pads
+    data = path.read_bytes()
+    size, sha256 = part.footprint_pin
+    digest = hashlib.sha256(data).hexdigest()
+    if len(data) != size or digest != sha256:
+        raise SystemExit(
+            f"{path} is {len(data):,} bytes, sha256 {digest}; {part.name} pins "
+            f"{size:,} bytes, sha256 {sha256} ({part.footprint_url}). The file "
+            f"changed or the download is bad: delete it to re-fetch, and "
+            f"re-measure the pin if the library moved.")
+    try:
+        tree = kicad.parse_sexp(data.decode("utf-8"))
+        pads = kicad.read_footprint(path).pads
+    except (kicad.KicadError, UnicodeDecodeError) as exc:
+        raise SystemExit(f"{part.name}: {path} does not read as a footprint "
+                         f"({exc}); delete it to re-fetch") from exc
+    # The footprint places a model and says how: a mesh offset, turned or
+    # scaled would put every pad in a different place than the STEP's own
+    # frame, and nothing here applies one. Refuse it by name.
+    shown = [model for model in kicad._models_of(tree) if not model.hidden]
+    identity = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0))
+    if (len(shown) != 1
+            or pathlib.PurePosixPath(shown[0].path).name != f"{part.name}.step"
+            or (shown[0].offset, shown[0].rotate, shown[0].scale) != identity):
+        raise SystemExit(
+            f"{path} places {[(m.path, m.offset, m.rotate, m.scale) for m in shown]}"
+            f"; {part.name} expects exactly one model named {part.name}.step "
+            f"with offset 0, rotate 0 and scale 1, as pad positions are used "
+            f"in the STEP's own frame")
     numbers = sorted(pad.number for pad in pads)
     wanted = sorted(str(n) for n in range(1, len(part.terminals) + 1))
     if numbers != wanted:
@@ -2694,7 +2760,8 @@ def part_pads(part: Part, frame: Frame) -> dict[str, tuple[float, float]]:
             f"{part.name}'s footprint has pads {numbers} and its terminals "
             f"name {len(part.terminals)}, pads {wanted}. Either the footprint "
             f"is a different part or the row is; terminals are named by pad "
-            f"number, so re-read Table 3-1 before trusting a wire to land.")
+            f"number, so re-read the datasheet's pin table before trusting a "
+            f"wire to land.")
     placed = {pad.number: frame.place(pad.x_mm, -pad.y_mm, 0.0) for pad in pads}
     return {number: (at[0], at[2]) for number, at in placed.items()}
 

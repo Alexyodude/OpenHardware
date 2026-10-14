@@ -25,9 +25,12 @@
 # which is where `tools/import_3d_model.py` leaves it. They skip and say so,
 # the same rule `CLAUDE.md` states for the checkers.
 
+import dataclasses
+import hashlib
 import json
 import math
 import pathlib
+import re
 import struct
 
 import pytest
@@ -1997,6 +2000,16 @@ def test_the_mcp9808_row_names_its_leads_from_table_3_1_and_cites_its_numbers():
         "https://gitlab.com/kicad/libraries/kicad-footprints/"), KICAD_FOOTPRINTS
     assert part.footprint_url == (
         f"{KICAD_FOOTPRINTS}/Package_SO.pretty/MSOP-8_3x3mm_P0.65mm.kicad_mod")
+    # Pinned to a commit and not a branch, and to the file's own size and
+    # digest: the footprint decides which name lands on which foot.
+    assert not KICAD_FOOTPRINTS.endswith("/master"), KICAD_FOOTPRINTS
+    assert re.fullmatch(r"[0-9a-f]{40}", KICAD_FOOTPRINTS.rsplit("/", 1)[1]), (
+        KICAD_FOOTPRINTS)
+    size, digest = part.footprint_pin
+    assert size > 0 and re.fullmatch(r"[0-9a-f]{64}", digest), part.footprint_pin
+    # One file per slug: a second MSOP-8 row would overwrite this one's mesh.
+    from tools.import_3d_model import PARTS
+    assert len({p.slug for p in PARTS}) == len(PARTS), [p.slug for p in PARTS]
 
     extras = part.electrical.extras()
     assert extras["kind"] == "i2c_device", extras
@@ -2040,18 +2053,24 @@ def _feet(pitch=0.65, rows=4, x_in=2.035, x_out=2.45, width=0.3):
 
 
 def test_pad_tips_puts_one_tip_on_each_foot_in_pad_order():
-    """Eight feet 0.65 mm apart, and `pad_tips` hands back eight tips, the
-    k-th on the foot nearest pad k+1 -- the centre of the foot's bottom, at the
-    floor, and not the body's underside 0.1 mm above it."""
+    """Feet 0.65 mm apart, and `pad_tips` hands back one tip per pad, the k-th
+    on the foot nearest pad k+1 -- here, with flat feet, the centre of the
+    foot's bottom at the floor, and not the body's underside 0.1 mm above it.
+
+    **Ten pads as well as eight**, because the order is by pad NUMBER: sorted
+    as strings "10" would come between "1" and "2", and a part with ten pads
+    would be given its tenth foot's tip as its second terminal."""
     from tools.import_3d_model import pad_tips
 
-    mesh, pads = _feet()
-    tips = pad_tips(mesh, pads)
-    assert len(tips) == 8, tips
-    for number, tip in enumerate(tips, start=1):
-        _x, z = pads[str(number)]
-        side = -1 if number <= 4 else 1
-        assert tip == pytest.approx([side * (2.035 + 2.45) / 2, 0.0, z]), (number, tip)
+    for rows in (4, 5):
+        mesh, pads = _feet(rows=rows)
+        tips = pad_tips(mesh, pads)
+        assert len(tips) == 2 * rows, (rows, tips)
+        for number, tip in enumerate(tips, start=1):
+            _x, z = pads[str(number)]
+            side = -1 if number <= rows else 1
+            assert tip == pytest.approx([side * (2.035 + 2.45) / 2, 0.0, z]), (
+                rows, number, tip)
 
 
 def test_lead_tips_merges_leads_closer_than_its_clustering_so_pads_are_the_key():
@@ -2134,8 +2153,10 @@ def test_the_mcp9808_tips_sit_on_pads_one_to_eight_and_carry_the_right_names(
         pad, first = pads[str(number)], pads["1"]
         want_x = tips[0][0] + (pad.x_mm - first.x_mm)
         want_z = tips[0][2] + (pad.y_mm - first.y_mm)
-        # 0.2 mm along the lead: a foot is 0.415 mm long and its pad is longer,
-        # so their centres are 0.13 mm apart there; across it the pitch is 0.65.
+        # 0.2 mm along the lead, 0.05 across it. A tip is the average of the
+        # lowest ring, which includes the first vertices of the foot's bend, so
+        # it is 0.148 mm inboard of the centre of the foot's bottom face
+        # (x +-2.095 against +-2.2425); across the lead the pitch is 0.65.
         assert abs(tip[0] - want_x) < 0.2 and abs(tip[2] - want_z) < 0.05, (
             f"pin {number} {name}: tip {tip}, pad {pad.x_mm},{pad.y_mm} "
             f"from pad 1 at {first.x_mm},{first.y_mm} puts it near "
@@ -2159,8 +2180,142 @@ def test_the_mcp9808_tips_sit_on_pads_one_to_eight_and_carry_the_right_names(
     assert tips[0][0] * mark[0] > 0 and tips[0][2] * mark[1] > 0, (
         f"pin 1's tip {tips[0]} is not on the dimple's side {mark}")
 
-    # Neighbours 0.65 apart: `dressPart` caps a target's radius under half
-    # the nearest pair, so a drop cannot land on the next pin.
+    # Neighbours 0.65 apart, which is what `dressPart`'s target radius is
+    # capped by (under half the nearest pair).
     nearest = min(math.dist(a, b) for i, a in enumerate(tips) for b in tips[i + 1:])
     assert nearest == pytest.approx(0.65, abs=0.05), nearest
-    assert 2 * min(0.55, 0.45 * nearest) < nearest
+
+
+# --- `part_pads`, without OCP or a network ------------------------------------
+#
+# A footprint written into a temporary CACHE and read back through the real
+# `part_pads`, so the pad-number guard, the y flip and the pin run under any
+# interpreter and in CI. The tests above that convert the real model need OCP
+# and the cached files and skip without them.
+
+#: The MSOP-8 footprint's own pad centres, footprint axes (y down), as read
+#: from KiCad's file: pads 1 to 4 down the left, 5 to 8 up the right.
+MSOP8_PADS = {
+    "1": (-2.1125, -0.975), "2": (-2.1125, -0.325),
+    "3": (-2.1125, 0.325), "4": (-2.1125, 0.975),
+    "5": (2.1125, 0.975), "6": (2.1125, 0.325),
+    "7": (2.1125, -0.325), "8": (2.1125, -0.975),
+}
+
+
+def _footprint_text(pads, model="Package_SO.3dshapes/MSOP-8_3x3mm_P0.65mm.step",
+                    rotate="0 0 0"):
+    """A minimal `.kicad_mod`: pads at `{number: (x, y)}` and one shown model."""
+    body = "".join(
+        f'\t(pad "{number}" smd roundrect (at {x} {y}) (size 0.3 0.4) '
+        f'(layers "F.Cu" "F.Paste" "F.Mask"))\n'
+        for number, (x, y) in pads.items())
+    return (f'(footprint "probe"\n{body}'
+            f'\t(model "${{KICAD10_3DMODEL_DIR}}/{model}"\n'
+            f'\t\t(offset (xyz 0 0 0))\n\t\t(scale (xyz 1 1 1))\n'
+            f'\t\t(rotate (xyz {rotate}))\n\t)\n)\n')
+
+
+def _pinned(tmp_path, monkeypatch, text, pinned_text=None):
+    """The MCP9808 row with `text` as its cached footprint, pinned to
+    `pinned_text` (or to `text`), and `CACHE` moved to `tmp_path`."""
+    part = _mcp9808()
+    pin = (pinned_text if pinned_text is not None else text).encode("utf-8")
+    monkeypatch.setattr(import_3d_model, "CACHE", tmp_path)
+    (tmp_path / f"footprint-{part.slug}.kicad_mod").write_bytes(text.encode("utf-8"))
+    return dataclasses.replace(
+        part, footprint_pin=(len(pin), hashlib.sha256(pin).hexdigest()))
+
+
+def _frame(origin=(0.0, 0.0, 0.0)):
+    """`part_frame`'s frame for any shape: x long, z up, y short, mirrored."""
+    return import_3d_model.Frame(long_axis=0, up=2, short_axis=1,
+                                 handedness=-1.0, origin=origin)
+
+
+def test_part_pads_maps_each_pad_through_the_flip_and_the_frame(tmp_path, monkeypatch):
+    """Pad 1 is at footprint y = -0.975 and lands at glTF z = -0.975: the
+    footprint is y-down and the STEP y-up, so the pad goes to model y = +0.975
+    and the frame's mirrored short axis puts it back. Removing the flip puts
+    it at +0.975, on pad 4's foot. A frame origin moves x by -ox and z by +oy,
+    which is the same flip seen through the frame."""
+    part = _pinned(tmp_path, monkeypatch, _footprint_text(MSOP8_PADS))
+    at_origin = import_3d_model.part_pads(part, _frame())
+    assert at_origin["1"] == pytest.approx((-2.1125, -0.975)), at_origin["1"]
+    moved = import_3d_model.part_pads(part, _frame(origin=(0.5, 0.25, 0.0)))
+    for number, (x, y) in MSOP8_PADS.items():
+        assert at_origin[number] == pytest.approx((x, y)), (number, at_origin[number])
+        assert moved[number] == pytest.approx((x - 0.5, y + 0.25)), (number, moved[number])
+
+
+def test_part_pads_refuses_pads_that_are_not_one_to_the_terminal_count(
+        tmp_path, monkeypatch):
+    """Terminals are named by pad NUMBER, so a footprint with 1 to 7, an extra
+    "9", or an "EP" is a different part or a different row; the refusal names
+    both lists."""
+    cases = {
+        "seven": {n: p for n, p in MSOP8_PADS.items() if n != "8"},
+        "an extra 9": {**MSOP8_PADS, "9": (0.0, 0.0)},
+        "an EP": {**MSOP8_PADS, "EP": (0.0, 0.0)},
+    }
+    for label, pads in cases.items():
+        part = _pinned(tmp_path, monkeypatch, _footprint_text(pads))
+        with pytest.raises(SystemExit) as refused:
+            import_3d_model.part_pads(part, _frame())
+        said = str(refused.value)
+        assert str(sorted(pads)) in said, (label, said)
+        assert str([str(n) for n in range(1, 9)]) in said, (label, said)
+
+
+def test_part_pads_refuses_a_footprint_that_is_not_the_pinned_file(
+        tmp_path, monkeypatch):
+    """**The footprint decides which name lands on which foot.** One renumbered
+    by a half turn (n becomes n + 4, wrapping) reads as a valid MSOP-8 and would put SDA
+    on pin 5's foot; the pin refuses it, naming the path, its size and its
+    digest, and says to delete it to re-fetch. The row that names no pin is
+    refused too."""
+    genuine = _footprint_text(MSOP8_PADS)
+    turned = _footprint_text({str((int(n) + 3) % 8 + 1): p
+                              for n, p in MSOP8_PADS.items()})
+    part = _pinned(tmp_path, monkeypatch, turned, pinned_text=genuine)
+    with pytest.raises(SystemExit) as refused:
+        import_3d_model.part_pads(part, _frame())
+    said = str(refused.value)
+    path = tmp_path / f"footprint-{part.slug}.kicad_mod"
+    assert str(path) in said, said
+    assert f"{len(turned):,} bytes" in said, said
+    assert hashlib.sha256(turned.encode("utf-8")).hexdigest() in said, said
+    assert "delete it" in said, said
+
+    # The same file, pinned to itself, reads: the pin is what refused it.
+    good = _pinned(tmp_path, monkeypatch, turned)
+    assert import_3d_model.part_pads(good, _frame())["1"][1] == pytest.approx(0.975)
+
+    with pytest.raises(SystemExit) as unpinned:
+        import_3d_model.part_pads(dataclasses.replace(good, footprint_pin=None), _frame())
+    assert "footprint_pin" in str(unpinned.value)
+
+
+def test_part_pads_refuses_a_footprint_that_moves_its_model_or_is_not_a_footprint(
+        tmp_path, monkeypatch):
+    """Pad positions are used in the STEP's own frame, so a footprint whose
+    model is offset, turned, scaled or another file's is refused by name; and a
+    pinned file that does not parse is refused with its path, not a traceback
+    from `kicad.py`."""
+    moved = _footprint_text(MSOP8_PADS, rotate="0 0 180")
+    part = _pinned(tmp_path, monkeypatch, moved)
+    with pytest.raises(SystemExit) as refused:
+        import_3d_model.part_pads(part, _frame())
+    assert "(0.0, 0.0, 180.0)" in str(refused.value), str(refused.value)
+
+    other = _footprint_text(MSOP8_PADS, model="Package_SO.3dshapes/SOIC-8.step")
+    part = _pinned(tmp_path, monkeypatch, other)
+    with pytest.raises(SystemExit) as refused:
+        import_3d_model.part_pads(part, _frame())
+    assert "SOIC-8.step" in str(refused.value), str(refused.value)
+
+    part = _pinned(tmp_path, monkeypatch, "(not-a-footprint)\n")
+    with pytest.raises(SystemExit) as refused:
+        import_3d_model.part_pads(part, _frame())
+    said = str(refused.value)
+    assert "does not read as a footprint" in said and "delete it" in said, said

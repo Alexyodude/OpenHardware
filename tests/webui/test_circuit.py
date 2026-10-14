@@ -2532,6 +2532,10 @@ def test_the_mcp9808_the_page_loads_carries_the_numbers_the_tests_use():
     for name, (value, _why) in part.electrical.cited.items():
         assert name in JS_NAME, f"{name} has no spelling on the JavaScript side"
         assert MCP9808["model"][JS_NAME[name]] == value, name
+    # And the other way: the fixture states nothing the part does not publish.
+    assert set(MCP9808["model"]) == (
+        {"kind", "device"} | {JS_NAME[name] for name in part.electrical.cited}), (
+        sorted(MCP9808["model"]))
 
 
 def test_every_i2c_device_part_names_a_device_the_server_models():
