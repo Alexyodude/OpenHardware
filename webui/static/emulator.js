@@ -674,7 +674,6 @@ async function loadArtefact() {
   $("board-go").disabled = true;
   $("board-step").disabled = true;
   boardImage = await api("/api/board/load-artefact", request);
-  showBoardSteps(0);
   $("board-go").disabled = false;
   $("board-step").disabled = false;
   $("board-console").textContent = "";

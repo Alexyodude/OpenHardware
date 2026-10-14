@@ -562,6 +562,8 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
           const asked = [];
           let calls = 0;
           let refuse = false;
+          let inFlight = 0;
+          let most = 0;
           const state = {
             board: "xiao", chip: "c3", status: "running", detail: "",
             registers: [{ name: "pc", value: 0, width: 32 }], flags: [],
@@ -586,7 +588,25 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
             }
             if (path === "/api/board/run") {
               calls += 1;
-              return reply(await runs(JSON.parse(options.body), calls));
+              inFlight += 1;
+              most = Math.max(most, inFlight);
+              try {
+                return reply(await runs(JSON.parse(options.body), calls));
+              } finally {
+                inFlight -= 1;
+              }
+            }
+            if (path === "/api/samples") {
+              return reply({ samples: [{ name: "s", hex: "", watch: 512,
+                                         listing: [] }] });
+            }
+            if (path === "/api/load") return reply({});
+            if (path.startsWith("/api/state")) {
+              // The 8086's own redraw: every register reads 0, 42 steps.
+              return reply({ status: "halted", steps: 42, detail: "",
+                             registers: new Proxy({}, { get: () => 0 }),
+                             flags: {}, disassembly: [],
+                             memory: { address: 0, bytes: [] } });
             }
             if (path.startsWith("/api/board/state")) return reply(state);
             return { ok: false, status: 404,
@@ -611,6 +631,8 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
           return {
             asked: () => asked.slice(first),
             calls: () => calls,
+            most: () => most,
+            machine: () => document.getElementById("machine").textContent,
             refuse: (on) => { refuse = on; },
             text: () => counter.textContent,
             click: (id) => document.getElementById(id).handlers.click(),
@@ -710,7 +732,51 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
         await refused.click("board-load");
         const afterRefusal = refused.text();
 
+        // -- the 8086 takes the panes while a board tick is in flight
+        let over = false;
+        let letGo;
+        const heldTick = new Promise((resolve) => { letGo = resolve; });
+        const sample = await page({ runs: async (body, calls) => {
+          if (calls === 2) await heldTick;
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          return { steps: 1000, status: over ? "stopped" : "running", detail: "" };
+        } });
+        await sample.click("board-load");
+        const sampleRun = sample.click("board-go");
+        await until(() => sample.calls() === 2);
+        const sampleLoad = sample.click("load");
+        letGo();
+        await sampleLoad;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        const sampleResult = [sample.calls(), sample.text(), sample.machine()];
+        over = true;      // ends a clock that was left going, so a miss is red
+        await sampleRun;
+
+        // -- two Run presses land behind a held tick: one clock, not two
+        let letGo2;
+        const held2 = new Promise((resolve) => { letGo2 = resolve; });
+        let over2 = false;
+        const twice = await page({ runs: async (body, calls) => {
+          if (calls === 1) await held2;
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          return { steps: 1000, status: over2 ? "stopped" : "running", detail: "" };
+        } });
+        await twice.click("board-load");
+        const twiceFirst = twice.click("board-go");
+        await until(() => twice.calls() === 1);
+        twice.click("board-go");                   // Stop
+        const twiceB = twice.click("board-go");    // Run
+        const twiceC = twice.click("board-go");    // and Run again
+        letGo2();
+        await twiceFirst;
+        await until(() => twice.calls() >= 5);
+        over2 = true;
+        await Promise.all([twiceB, twiceC]);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        const twiceResult = [twice.text(), twice.calls(), twice.most()];
+
         console.log(JSON.stringify({
+          sampleResult, twiceResult,
           mainText, mainAsked: main.asked(), expectedAsked,
           expect: [0, 3000, 3001, 3002, 3002, 0].map(steps),
           afterFirst, afterSecond, raceResult, viaRoutes,
@@ -725,6 +791,13 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
     assert text == f"{calls2 * 1000:,} steps" and calls2 > calls, result
     text, calls = result["raceResult"]
     assert text == f"{calls * 1000:,} steps" and calls >= 3, result
+    # The sample load stops the board clock: no third tick, the 8086's 42 steps
+    # on the counter, and the panes the 8086's.
+    assert result["sampleResult"] == [2, "42 steps", "i8086"], result
+    # One clock behind the held tick: never two requests in flight at once, and
+    # the counter is the sum of every tick that was answered.
+    text, calls, most = result["twiceResult"]
+    assert most == 1 and text == f"{calls * 1000:,} steps", result
     for route, before, after in result["viaRoutes"]:
         assert before != "0 steps" and after == "0 steps", (route, result)
     assert result["beforeRefusal"] != "0 steps", result
