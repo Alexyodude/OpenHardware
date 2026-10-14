@@ -61,3 +61,5 @@ LEFT. (a) CONN1's 0.56 mm: recorded and held in a test, not settled. (b) The cor
 **Note 2026-10-14:** Borrowed PROVENANCE.md from OH-163 for the review fix round's Adafruit_CAD_Parts entry; returned on close.
 
 **Note 2026-10-14:** Review fix round in 9c85f3f: the three new STEP tests skip rather than fetch, `thickness_step` now carries the URL alone (the row's pin is what the thickness test checks the cached file against), the manifest thickness test keeps the no-layer-stack assertion for both boards, the published geometry sentence and the STEP licence are held, and PROVENANCE.md records Adafruit_CAD_Parts. `--check` output is unchanged.
+
+**Note 2026-10-14:** Confirmation-pass LOWs fixed: the pin-one test no longer downloads (it skips a board with uncached models, and says which), the three Adafruit tests report boards they skipped, the sentence and licence assertions run without OpenCASCADE, and PROVENANCE.md was reworded.
