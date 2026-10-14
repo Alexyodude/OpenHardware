@@ -2,13 +2,15 @@
 id: OH-210
 title: 'The RP2350''s edges after OH-157: one half shown as both, an unchecked IMAGE_DEF,
   RESETS stored not obeyed'
-status: open
+status: in-progress
 priority: P3
 created: '2026-10-08'
 touches:
 - rules/board-claims.md
 - webui/boards/catalogue.py
 - tests/webui/test_board_catalogue.py
+- webui/static/emulator.js
+- webui/boards/rp2350.py
 ---
 
 The edges OH-157's reviews left (2026-10-08), none of which changes what the XIAO RP2350 blink shows today.
@@ -28,3 +30,5 @@ Done when each is fixed with a test that fails when reverted where it is behavio
 **Note 2026-10-15:** items 2 and 3 done in lane3 (eef2767, 58206ce). Item 3: catalogue.CORE_ISA maps the RP2350 to 'RV32 (Hazard3)' and missing_cores reads each row's isas from the boards waiting on that core, so a riscv32 row no longer names the M33 half or a runnable board's ISA; two tests in test_board_catalogue.py failed before the fix. Item 2: rules/board-claims.md section 14 records the first chip with two ISAs and evidence for one (tests/webui/test_xiao_rp2350_board.py, the Hazard3 half), and section 3 now points at the test that holds the verified set instead of {RP2040}. Items 1, 4, 5, 6, 7 untouched.
 
 **Note 2026-10-15:** 2026-10-15: review follow-ups in 7eb6669 (FIRMWARE_VERIFIED's comment no longer restates a set; CORE_ISA held to CHIPS by a test). Items 2 and 3 done; back to open for items 1, 4, 5, 6 and 7.
+
+**Note 2026-10-15:** 2026-10-15: borrows webui/static/emulator.js and webui/boards/rp2350.py from OH-161 for items 1 and 6.
