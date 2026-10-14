@@ -662,11 +662,31 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "VSON-0.65-3X3X1MM", "Package_DFN_QFN",
         "DFN-8-1EP_3x3mm_P0.65mm_EP1.55x2.4mm",
         "MEASURED, on the XIAO STM32C5's CAN FD transceiver U3: nine pads, "
-        "eight leads at 0.65 mm pitch and a 1.6 x 2.4 mm exposed pad, in a "
-        "3 x 3 mm package. Seeed's own model, `HVSON-8_L3.0-W3.0-P0.65-TL-EP`, "
-        "is on a drive nobody else has; this is the published 8-lead 3 x 3 mm "
-        "0.65 mm DFN with a 2.4 mm exposed pad. The body height is KiCad's "
-        "and was not compared with the 1 mm in Seeed's name. OH-231.",
+        "eight leads at 0.65 mm pitch and an exposed pad, in a 3 x 3 mm "
+        "package. Seeed's own model, `HVSON-8_L3.0-W3.0-P0.65-TL-EP`, is on "
+        "a drive nobody else has; this is the published 8-lead 3 x 3 mm 0.65 "
+        "mm DFN with a 2.4 mm exposed pad, drawn because the body plan, "
+        "pitch and lead count agree and what differs is small, MEASURED "
+        "2026-10-14: KiCad's STEP is 3.000 x 2.980 x 0.770 mm against "
+        "Seeed's name's 1 mm height; lead centres Seeed +-1.43 against "
+        "KiCad +-1.55 mm; leads 0.71 x 0.36 against 0.65 x 0.35 mm; "
+        "exposed pad 1.6 x 2.4 against 1.55 x 2.4 mm. OH-231.",
+    ),
+    Component(
+        "QFN48-0.5-7X7MM", "Package_DFN_QFN",
+        "QFN-48-1EP_7x7mm_P0.5mm_EP5.15x5.15mm",
+        "MEASURED, the STM32C5A3CG (ST's UFQFPN48) on the XIAO STM32C5, by "
+        "the precedent of the QFN32-0.5-5X5MM row (the ESP32-C6, a 3.0 mm "
+        "pad drawn with KiCad's EP3.45): the same body plan, pitch and "
+        "lead count, differing only in the exposed pad under the body. "
+        "Forty-nine pads, 7 x 7 mm at 0.5 mm. The pad is laid 5.6 mm; "
+        "Seeed's model name says 5.45 (`QFN-48-1EP_7x7mm_P0.5mm_EP5.45x5.45"
+        "mm`, not in KiCad's kicad-packages3D, raw 404); ST's own EP5.6x5.6 "
+        "footprint is in kicad-footprints (HTTP 200) but its STEP is not in "
+        "kicad-packages3D (404). The drawn model's pad is 5.15 mm, and so "
+        "is the model's name. MEASURED 2026-10-14: KiCad's STEP is 7.000 x "
+        "7.000 x 0.770 mm; lead centres +-3.4375 against Seeed's +-3.45 mm; "
+        "leads 0.25 x 0.875 against 0.3 x 0.7 mm. OH-231.",
     ),
     Component(
         "X2-SMD-1.6X1.0MM", "Crystal",
@@ -889,11 +909,17 @@ CORRESPONDENCE: tuple[Component, ...] = (
     ),
     Component(
         "USB2.0-TYPE-C_short", "modelled", "USB2.0-TYPE-C_short",
-        "MODELLED, not matched: the XIAO STM32C5's USB-C receptacle, whose "
-        "Description states 7.35 x 8.94 x 3.25 mm, against an F.Fab of 6.858 x "
-        "8.992 mm: the width agrees and the length is 0.49 mm apart, within "
-        "the tolerance `socket_geometry` allows. "
-        "Neither published 16-pin receptacle is 7.35 mm deep. No turn: the "
+        "MODELLED, not matched: the XIAO STM32C5's USB-C receptacle. **Its "
+        "Description, `SMD USB TYPE C-W/P;12+4P-7.35*8.94*3.25mm`, is "
+        "verbatim the RP2350's 31C-F land's** (its Status property still "
+        "reads `XIAO RP2350`), and this is another land: contacts 0.95 mm "
+        "long at x -0.3 against 1.05 at -0.225, four through-hole locks at "
+        "y +-4.32 against two at +-5.12, no smd feet, an F.Fab of 6.858 x "
+        "8.992 mm, and `_short` in its name. The drawn length is the F.Fab's; "
+        "the 7.35 passes `NAMED_BODY_TOLERANCE_MM` (0.5) by 0.008 mm, which "
+        "guards against a misparse and is not evidence of agreement. Only the "
+        "3.25 mm height rests on the copied string. "
+        "Neither published 16-pin receptacle is 6.858 mm deep. No turn: the "
         "model is built in the vendor footprint's own frame. OH-231.",
         modelled=True,
     ),
@@ -2391,18 +2417,6 @@ ABSENT: dict[str, str] = {
     ),
     # --- the XIAO STM32C5 (OH-231). KiCad's kicad-packages3D listed on GitLab
     # 2026-10-14 for each search below.
-    "QFN48-0.5-7X7MM": (
-        "U4 on the XIAO STM32C5, the STM32C5A3CG itself (ST's UFQFPN48): "
-        "forty-nine pads spanning 6.900 x 6.900 mm with a 5.6 mm exposed pad. "
-        "Seeed's own model is `QFN-48-1EP_7x7mm_P0.5mm_EP5.45x5.45mm`, which "
-        "KiCad's Package_DFN_QFN does not hold (HTTP 404). The 7 x 7 mm, "
-        "0.5 mm pitch parts it does hold are `QFN-48-1EP_..._EP5.15x5.15mm`, "
-        "its Texas twin of the same pad, `TQFN-48-1EP_..._EP5.1x5.1mm` and "
-        "`VQFN-48-1EP_..._EP4.1x4.1mm`: none is the part Seeed name, and "
-        "drawing one would put a model name in the .glb that is not the "
-        "chip's, the QFN-56 against QFN-60 argument. Left off rather than "
-        "drawn near."
-    ),
     "2P-SMD-SHORT_Larger": (
         "JP1 on the XIAO STM32C5, a solder jumper: two 1.6 x 1.2 mm pads "
         "0.775 mm either side of the middle, which a person bridges with "
@@ -2490,8 +2504,8 @@ class Composition:
     #: `(archive, bytes, sha256)` when `layout` was unzipped from an archive
     #: that `tools/board_sources.py` pins: `compose` refuses an archive whose
     #: size or hash differs, and a layout that is not that archive's member
-    #: (`verify_pinned_layout`). None for every board fetched through
-    #: `PCB_SOURCES`, whose pin is the size alone.
+    #: (`verify_pinned_layout`). None for every other board; only the XIAO
+    #: STM32C5 sets it.
     pinned: tuple[pathlib.Path, int, str] | None = None
 
 
@@ -2586,6 +2600,8 @@ def verify_pinned_layout(archive: pathlib.Path, size: int, sha256: str,
 
     if not archive.is_file():
         raise SystemExit(f"{archive} is not fetched; cannot verify {layout}")
+    if not layout.is_file():
+        raise SystemExit(f"{layout} is not extracted from {archive}")
     data = archive.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
     if len(data) != size or digest != sha256:
@@ -2602,10 +2618,13 @@ def verify_pinned_layout(archive: pathlib.Path, size: int, sha256: str,
                 f"expects exactly one: {inside}"
             )
         member = zipped.read(inside[0])
-    if layout.read_bytes() != member:
+    on_disk = layout.read_bytes()
+    if on_disk != member:
         raise SystemExit(
             f"{layout} is not the {inside[0]!r} inside {archive}: "
-            f"{layout.stat().st_size:,} bytes against {len(member):,}"
+            f"{len(on_disk):,} bytes, sha256 {hashlib.sha256(on_disk).hexdigest()}, "
+            f"against {len(member):,} bytes, sha256 "
+            f"{hashlib.sha256(member).hexdigest()}"
         )
 
 
@@ -2804,11 +2823,19 @@ COMPOSITIONS = COMPOSITIONS + (
         ),
         # The castellated XIAO-Add-On-PRO footprint; U4 is the MCU.
         headers=("U10",),
-        # **Stated, twice, and they agree**: `(general (thickness 1.6))` and a
-        # `(stackup ...)` whose layers sum to 1.6 (0.01 mask, 0.035 copper, 0.1
-        # prepreg, 0.035, 1.24 core, 0.035, 0.1, 0.035, 0.01). The other KiCad
-        # XIAOs state neither and take 1.2 as a cited judgement.
-        thickness_mm=1.6,
+        # **The family's 1.2, a judgement, and not what this file states.**
+        # This file says 1.6 twice -- `(general (thickness 1.6))` and a
+        # `(stackup ...)` whose layers sum to 1.6 -- exactly as the ESP32-C6,
+        # RP2350, nRF54L15, MG24 and nRF54LM20A files do (the C3 has the
+        # general 1.6 and no stackup; the C5 alone says 1.209108, in both
+        # places). 1.6 is KiCad's default board thickness
+        # (`DEFAULT_BOARD_THICKNESS_MM 1.6`, include/board_design_settings.h in
+        # kicad/code/kicad master, read 2026-10-14), so a file stating it may
+        # never have set it. The composed XIAOs are drawn at 1.2 from the
+        # RP2040 model's own PCB solid (0.00..1.20 in its extras), the
+        # sibling the vendor DID publish a mesh of, and this board follows
+        # them. Whether the family should be 1.6 is a separate question.
+        thickness_mm=1.2,
         colour=BOARD_MASK,
         colour_source=(
             "BOARD_MASK, A JUDGEMENT rather than a reading -- see that "

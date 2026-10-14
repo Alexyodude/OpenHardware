@@ -1003,8 +1003,9 @@ SOCKETS: tuple[ModelledSocket, ...] = (
             "drive on somebody's desk). Its Description states "
             "`7.35*8.94*3.25mm`, and KiCad's two 16-pin receptacles, listed "
             "2026-10-14, are the GCT USB4105 at 7.78 mm deep and Amphenol's "
-            "12401610E4-2A at 10.50, against 7.35 here: 0.43 and 3.15 mm "
-            "too long."
+            "12401610E4-2A at 10.50, against the 6.858 mm its F.Fab draws "
+            "(its Description's 7.35 is the RP2350 land's, copied): 0.92 and "
+            "3.64 mm too long."
         ),
     ),
 )

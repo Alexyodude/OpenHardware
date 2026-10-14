@@ -919,9 +919,9 @@ EXPLAINS: dict[str, set[str]] = {
         "JST_1x02_P2.0mm_Horizontal_SMD", "USB-C_16",
         "microSD_Friction_Fit_Common", "WS2812_2020",
         "Push_SMD_4.6x2.8mm_h2.5mm"},
-    # The STM32C5 itself (OH-231): its exposed pad is not any published 7 x 7
-    # mm part's. The jumper is NO_BODY, so not here.
-    "XIAO-XIAO STM32C5-SMD": {"QFN48-0.5-7X7MM"},
+    # The STM32C5 refuses nothing (OH-231): its MCU is drawn with the model
+    # whose exposed pad is nearest, and the jumper is NO_BODY.
+    "XIAO-XIAO STM32C5-SMD": set(),
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
 # same placements, same absences -- so the entries are derived the same way
@@ -1562,17 +1562,19 @@ def test_a_part_with_too_few_pads_has_no_facing_to_check():
         (0.0, 0.0)) is None
 
 
-def test_the_two_usb_c_land_patterns_are_given_different_receptacles():
-    """They differ in the count of holes, which is what picks the part.
+def test_the_three_usb_c_land_patterns_are_given_different_receptacles():
+    """Three lands, three meshes, never one entry for two.
 
-    Both are 16-pin USB-C, so the PIN count says nothing. `USB2.0-TYPE-C` has
-    four through-hole shell tabs and `USB2.0-TYPE-C_USB-31C-F-16P` has two
-    board locks. Giving them one entry is what OH-101 was: a four-tab model on
-    a two-lock land left the contact row 0.42 mm past the board edge.
+    All are 16-pin USB-C, so the PIN count says nothing. `USB2.0-TYPE-C` has
+    four through-hole shell tabs, `USB2.0-TYPE-C_USB-31C-F-16P` two board
+    locks, and the STM32C5's `USB2.0-TYPE-C_short` four locks again but a
+    shorter body and different contacts -- so the hole count does not pick the
+    part; the footprint does. Giving two lands one entry is what OH-101 was: a
+    four-tab model on a two-lock land left the contact row 0.42 mm past the
+    board edge.
 
-    Both are modelled now rather than matched, and the property survives the
-    change unaltered -- each land pattern is built from its own footprint, so
-    they cannot collapse into one mesh by accident.
+    Each is modelled rather than matched, and each land pattern is built from
+    its own footprint, so they cannot collapse into one mesh by accident.
     """
     usb = {c.package: c.model for c in compose.CORRESPONDENCE
            if c.package.startswith("USB2.0-TYPE-C")}
@@ -2287,7 +2289,7 @@ def test_the_receptacle_faces_the_way_its_own_tails_say():
 
 
 def test_the_modelled_receptacles_are_drawn_and_marked_as_modelled():
-    """Two land patterns, two meshes, both built here rather than fetched."""
+    """Three land patterns, three meshes, built here rather than fetched."""
     usb = [c for c in compose.CORRESPONDENCE
            if c.package.startswith("USB2.0-TYPE-C")]
     assert len(usb) == 3, usb  # the XIAO STM32C5's `_short` land joined (OH-231)
@@ -4674,7 +4676,7 @@ def test_an_smd_variant_is_its_dip_siblings_pcb_without_the_headers():
     # A board with no DIP sibling at all (the XIAO STM32C5, OH-231) is SMD
     # only and has no pair to compare; it is held on its own below.
     smd = [spec for spec in compose.COMPOSITIONS if spec.board.endswith("-SMD")
-           and spec.board.replace("-SMD", "-DIP") in by_board]
+           and spec.pinned is None]
     assert len(smd) >= 5, "the derived SMD variants are gone"
     for spec in smd:
         sibling = by_board[spec.board.replace("-SMD", "-DIP")]
@@ -10259,26 +10261,32 @@ def test_the_xiao_stm32c5_is_composed_from_the_archive_the_registry_pins():
         f"{source.size!r}")
 
 
-def test_the_xiao_stm32c5_thickness_is_what_its_own_file_states():
-    """`(general (thickness 1.6))`, and a stackup whose layers add up to the
-    same; the other KiCad XIAOs state neither and take 1.2. The file names no
-    mask colour, so the colour is `BOARD_MASK` and the source says it is a
-    judgement."""
+def test_the_xiao_stm32c5_takes_its_siblings_thickness_not_its_files():
+    """The board follows the family rule: it takes the thickness of its
+    composed XIAO siblings (the RP2040 mesh's 1.2), though its own file
+    states 1.6 in `(general)` and in a summing `(stackup)`, as its siblings'
+    files mostly do. 1.6 is KiCad's default, so that statement may never have
+    been set; whether the family should be 1.6 is OH-236. The file names no
+    mask colour, so the colour is `BOARD_MASK`, a judgement."""
     spec = _stm32c5_spec()
     assert spec is not None, f"{STM32C5} is not composed"
     if not spec.layout.is_file():
         pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched. Run: {spec.fetch_with}")
+    siblings = {s.board: s.thickness_mm for s in compose.COMPOSITIONS
+                if s.pcb_chip is not None}
+    assert len(set(siblings.values())) == 1, siblings
+    assert spec.thickness_mm == next(iter(siblings.values())), (
+        spec.thickness_mm, siblings)
     mask, stack, general, core = compose.kicad_stackup(spec.layout)
     assert mask is None and core == (), (mask, core)
-    assert abs(stack - general) < 5e-4, (stack, general)
-    assert spec.thickness_mm == general, (spec.thickness_mm, general)
+    assert abs(stack - general) < 5e-4 and general == 1.6, (stack, general)
     assert spec.colour == compose.BOARD_MASK and "JUDGEMENT" in spec.colour_source
 
 
 def test_the_xiao_stm32c5_draws_what_is_published_and_refuses_the_rest_by_name():
     """R0402, the 32 kHz crystal and the CAN transceiver are drawn from KiCad
-    models, the flash and the USB socket from `model_from_datasheet`; the MCU
-    is refused (no published 7 x 7 mm part has its exposed pad) with a reason."""
+    models, the MCU with the 7 x 7 mm model whose exposed pad is nearest, the
+    flash and the USB socket from `model_from_datasheet`."""
     spec = _stm32c5_spec()
     assert spec is not None, f"{STM32C5} is not composed"
     if not spec.layout.is_file():
@@ -10289,9 +10297,9 @@ def test_the_xiao_stm32c5_draws_what_is_published_and_refuses_the_rest_by_name()
                   "USON8-0.8-3X3X0.55MM", "USB2.0-TYPE-C_short"):
         assert drawn in packages and drawn in rows, drawn
         assert drawn not in compose.ABSENT, drawn
-    for refused in ("QFN48-0.5-7X7MM",):
-        assert refused in packages and refused not in rows, refused
-        assert refused in compose.ABSENT, refused
+    for drawn in ("QFN48-0.5-7X7MM",):
+        assert drawn in packages and drawn in rows, drawn
+        assert drawn not in compose.ABSENT, drawn
 
 
 def test_a_pinned_layout_is_refused_when_the_archive_or_the_layout_differs(tmp_path):
@@ -10315,3 +10323,26 @@ def test_a_pinned_layout_is_refused_when_the_archive_or_the_layout_differs(tmp_p
     layout.write_text("(kicad_pcb (edited))")
     with pytest.raises(SystemExit, match="is not the 'b.kicad_pcb'"):
         compose.verify_pinned_layout(archive, len(data), sha, layout)
+
+
+def test_compose_checks_the_pin_before_it_reads_the_layout(tmp_path):
+    """`compose` must call `verify_pinned_layout`: a pinned composition whose
+    archive is not the pinned size is refused with the pin's values, before the
+    layout (here unreadable on purpose) is parsed."""
+    import dataclasses
+    import hashlib
+    import zipfile
+
+    spec = _stm32c5_spec()
+    assert spec is not None, f"{STM32C5} is not composed"
+    archive = tmp_path / "a.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("b.kicad_pcb", "(kicad_pcb)")
+    data = archive.read_bytes()
+    layout = tmp_path / "b.kicad_pcb"
+    layout.write_text("not a board at all")
+    trial = dataclasses.replace(
+        spec, layout=layout,
+        pinned=(archive, len(data) + 1, hashlib.sha256(data).hexdigest()))
+    with pytest.raises(SystemExit, match="the registry pins"):
+        compose.compose(trial, 0.1, True)
