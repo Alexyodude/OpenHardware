@@ -1743,63 +1743,62 @@ def test_the_oh_board_header_restates_the_descriptions_own_numbers(variant):
     # `Wire.h` is in every recipe and the "no OH_I2C_*" hint has retired.
     assert ("OH_I2C_CTR" in defines) == hasattr(description, "I2C"), variant
     assert hasattr(description, "I2C"), variant
-    if hasattr(description, "I2C"):
-        i2c = description.I2C
-        # The register clock, where the description has one (the C5's PCR):
-        # `Wire.begin` sets it under `#ifdef`, and the model stores it.
-        assert ("OH_I2C_BUS_CLOCK" in defines) == hasattr(description, "PCR_I2C_CONF"), variant
-        if hasattr(description, "PCR_I2C_CONF"):
-            assert int(defines["OH_I2C_BUS_CLOCK"], 16) == (
-                description.PCR + description.PCR_I2C_CONF)
-            assert int(defines["OH_I2C_BUS_CLOCK_EN"], 16) == description.PCR_I2C_CLK_EN
-        assert int(defines["OH_I2C_CTR_INIT"], 16) & description.I2C_MS_MODE, variant
-        # Open drain is FORCE_OUT SET on the C3 and CLEAR on the C5 and the C6,
-        # each as its own `i2c_reg.h` says (the C5's: "0: Open drain output";
-        # the C6's: "1: direct output, 0: open drain output", i2c_reg.h:32-42,
-        # and `i2c_ll_enable_pins_open_drain` writes `!enable_od`, i2c_ll.h:920-924);
-        # copying the C3 word to either sets them, which makes the pads
-        # push-pull and fights the pull-ups. The bit numbers are the same on
-        # all three (esp32c3.py: SDA [0], SCL [1]). **One row per variant and
-        # no default**: a variant added without a row is a KeyError, not a
-        # clear pair of bits assumed. Each row is held to its own vendor header
-        # in that chip's vendor-bits test below.
-        force_out = esp32c5.I2C_SDA_FORCE_OUT | esp32c5.I2C_SCL_FORCE_OUT
-        force_out_in_init = {"xiao_esp32c3": force_out, "xiao_esp32c5": 0, "xiao_esp32c6": 0}
-        assert int(defines["OH_I2C_CTR_INIT"], 16) & force_out == force_out_in_init[variant], variant
-        for define, offset in (
-            ("OH_I2C_CTR", description.I2C_CTR), ("OH_I2C_FIFO_CONF", description.I2C_FIFO_CONF),
-            ("OH_I2C_DATA", description.I2C_DATA), ("OH_I2C_INT_RAW", description.I2C_INT_RAW),
-            ("OH_I2C_INT_CLR", description.I2C_INT_CLR), ("OH_I2C_COMD0", description.I2C_COMD0),
-        ):
-            assert int(defines[define], 16) == i2c + offset, define
-        for define, value in (
-            ("OH_I2C_CTR_MS_MODE", description.I2C_MS_MODE),
-            ("OH_I2C_CTR_TRANS_START", description.I2C_TRANS_START),
-            ("OH_I2C_INT_NACK", description.I2C_INT_NACK),
-            ("OH_I2C_INT_TRANS_COMPLETE", description.I2C_INT_TRANS_COMPLETE),
-            ("OH_I2C_ACK_EN", description.I2C_ACK_EN),
-            ("OH_I2C_GATE", description.I2C_GATE[0]),
-            ("OH_I2C_GATE_EN", description.I2C_GATE[1]),
-            ("OH_GPIO_SIG_IN_SEL", description.GPIO_SIG_IN_SEL),
-            ("OH_GPIO_FUNC_IN_SEL_CFG0", gpio + description.GPIO_FUNC_IN_SEL_CFG0),
-            ("OH_GPIO_FUNC_OUT_SEL_CFG0", gpio + description.GPIO_FUNC_OUT_SEL_CFG0),
-            ("OH_IO_MUX_MCU_SEL_GPIO", description.IO_MUX_FUNC_GPIO << description.IO_MUX_MCU_SEL_SHIFT),
-            ("OH_IO_MUX_MCU_SEL_MASK", description.IO_MUX_MCU_SEL_MASK << description.IO_MUX_MCU_SEL_SHIFT),
-        ):
-            assert int(defines[define], 16) == value, define
-        for define, name in (
-            ("OH_I2C_OP_RSTART", "RSTART"), ("OH_I2C_OP_WRITE", "WRITE"),
-            ("OH_I2C_OP_READ", "READ"), ("OH_I2C_OP_STOP", "STOP"),
-        ):
-            assert int(defines[define]) == description.I2C_OP[name], define
-        assert int(defines["OH_I2C_OP_SHIFT"]) == description.I2C_OP_SHIFT
-        assert int(defines["OH_I2C_SCL_SIGNAL"]) == description.I2CEXT0_SCL_IDX
-        assert int(defines["OH_I2C_SDA_SIGNAL"]) == description.I2CEXT0_SDA_IDX
-        assert int(defines["OH_I2C_ACK_EXP"], 16) == description.I2C_ACK_EXPECTED
-        assert int(defines["OH_I2C_CTR_CONF_UPGATE"], 16) == description.I2C_CONF_UPGATE
-        assert int(defines["OH_GPIO_PIN0"], 16) == gpio + description.GPIO_PIN0
-        assert int(defines["OH_GPIO_PIN_STRIDE"], 16) == description.GPIO_PIN_STRIDE
-        assert int(defines["OH_GPIO_PIN_PAD_DRIVER"], 16) == description.GPIO_PIN_PAD_DRIVER
+    i2c = description.I2C
+    # The register clock, where the description has one (the C5's and the C6's PCR):
+    # `Wire.begin` sets it under `#ifdef`, and the model stores it.
+    assert ("OH_I2C_BUS_CLOCK" in defines) == hasattr(description, "PCR_I2C_CONF"), variant
+    if hasattr(description, "PCR_I2C_CONF"):
+        assert int(defines["OH_I2C_BUS_CLOCK"], 16) == (
+            description.PCR + description.PCR_I2C_CONF)
+        assert int(defines["OH_I2C_BUS_CLOCK_EN"], 16) == description.PCR_I2C_CLK_EN
+    assert int(defines["OH_I2C_CTR_INIT"], 16) & description.I2C_MS_MODE, variant
+    # Open drain is FORCE_OUT SET on the C3 and CLEAR on the C5 and the C6,
+    # each as its own `i2c_reg.h` says (the C5's: "0: Open drain output";
+    # the C6's: "1: direct output, 0: open drain output", i2c_reg.h:32-42,
+    # and `i2c_ll_enable_pins_open_drain` writes `!enable_od`, i2c_ll.h:920-924);
+    # copying the C3 word to either sets them, which makes the pads
+    # push-pull and fights the pull-ups. The bit numbers are the same on
+    # all three (esp32c3.py: SDA [0], SCL [1]). **One row per variant and
+    # no default**: a variant added without a row is a KeyError, not a
+    # clear pair of bits assumed. Each row is held to its own vendor header
+    # in that chip's vendor-bits test below.
+    force_out = esp32c5.I2C_SDA_FORCE_OUT | esp32c5.I2C_SCL_FORCE_OUT
+    force_out_in_init = {"xiao_esp32c3": force_out, "xiao_esp32c5": 0, "xiao_esp32c6": 0}
+    assert int(defines["OH_I2C_CTR_INIT"], 16) & force_out == force_out_in_init[variant], variant
+    for define, offset in (
+        ("OH_I2C_CTR", description.I2C_CTR), ("OH_I2C_FIFO_CONF", description.I2C_FIFO_CONF),
+        ("OH_I2C_DATA", description.I2C_DATA), ("OH_I2C_INT_RAW", description.I2C_INT_RAW),
+        ("OH_I2C_INT_CLR", description.I2C_INT_CLR), ("OH_I2C_COMD0", description.I2C_COMD0),
+    ):
+        assert int(defines[define], 16) == i2c + offset, define
+    for define, value in (
+        ("OH_I2C_CTR_MS_MODE", description.I2C_MS_MODE),
+        ("OH_I2C_CTR_TRANS_START", description.I2C_TRANS_START),
+        ("OH_I2C_INT_NACK", description.I2C_INT_NACK),
+        ("OH_I2C_INT_TRANS_COMPLETE", description.I2C_INT_TRANS_COMPLETE),
+        ("OH_I2C_ACK_EN", description.I2C_ACK_EN),
+        ("OH_I2C_GATE", description.I2C_GATE[0]),
+        ("OH_I2C_GATE_EN", description.I2C_GATE[1]),
+        ("OH_GPIO_SIG_IN_SEL", description.GPIO_SIG_IN_SEL),
+        ("OH_GPIO_FUNC_IN_SEL_CFG0", gpio + description.GPIO_FUNC_IN_SEL_CFG0),
+        ("OH_GPIO_FUNC_OUT_SEL_CFG0", gpio + description.GPIO_FUNC_OUT_SEL_CFG0),
+        ("OH_IO_MUX_MCU_SEL_GPIO", description.IO_MUX_FUNC_GPIO << description.IO_MUX_MCU_SEL_SHIFT),
+        ("OH_IO_MUX_MCU_SEL_MASK", description.IO_MUX_MCU_SEL_MASK << description.IO_MUX_MCU_SEL_SHIFT),
+    ):
+        assert int(defines[define], 16) == value, define
+    for define, name in (
+        ("OH_I2C_OP_RSTART", "RSTART"), ("OH_I2C_OP_WRITE", "WRITE"),
+        ("OH_I2C_OP_READ", "READ"), ("OH_I2C_OP_STOP", "STOP"),
+    ):
+        assert int(defines[define]) == description.I2C_OP[name], define
+    assert int(defines["OH_I2C_OP_SHIFT"]) == description.I2C_OP_SHIFT
+    assert int(defines["OH_I2C_SCL_SIGNAL"]) == description.I2CEXT0_SCL_IDX
+    assert int(defines["OH_I2C_SDA_SIGNAL"]) == description.I2CEXT0_SDA_IDX
+    assert int(defines["OH_I2C_ACK_EXP"], 16) == description.I2C_ACK_EXPECTED
+    assert int(defines["OH_I2C_CTR_CONF_UPGATE"], 16) == description.I2C_CONF_UPGATE
+    assert int(defines["OH_GPIO_PIN0"], 16) == gpio + description.GPIO_PIN0
+    assert int(defines["OH_GPIO_PIN_STRIDE"], 16) == description.GPIO_PIN_STRIDE
+    assert int(defines["OH_GPIO_PIN_PAD_DRIVER"], 16) == description.GPIO_PIN_PAD_DRIVER
 
     ram_base = getattr(description, ram)
     ram_size = getattr(description, f"{ram}_SIZE")

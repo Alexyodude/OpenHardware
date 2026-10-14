@@ -1417,6 +1417,18 @@ def test_a_part_on_the_c3s_pads_is_not_on_this_bus():
         assert session.cpu.read_word(I2C_RAW_AT) & esp32c6.I2C_INT_NACK
 
 
+def test_a_part_wired_with_sda_and_scl_crossed_is_not_on_this_bus():
+    """The bench holds a part by (SDA pad, SCL pad). The same two pads in the
+    other order are a bus whose clock is on the data line, and a controller
+    that routes SDA to SDA_GPIO is not talking to it: NACK, not an answer."""
+    needs_core()
+    crossed = ((SCL_GPIO, SDA_GPIO, Mcp9808(straps=0, celsius=25.0, vdd=3.3)),)
+    session, result = run_i2c(stores(*wiring()) + stores(*write_pointer(6)), crossed)
+    with session:
+        assert result.status == "running", result
+        assert session.cpu.read_word(I2C_RAW_AT) & esp32c6.I2C_INT_NACK
+
+
 def test_a_gate_the_program_closes_answers_nothing():
     """The function clock is the gate, and a program can close it: a
     transaction started behind it raises no interrupt, which is what Wire's

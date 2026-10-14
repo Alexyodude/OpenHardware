@@ -1291,6 +1291,18 @@ def test_a_device_on_other_pads_is_a_nack_too():
         assert session.cpu.read_word(I2C_RAW_AT) & esp32c3.I2C_INT_NACK
 
 
+def test_a_part_wired_with_sda_and_scl_crossed_is_not_on_this_bus():
+    """The bench holds a part by (SDA pad, SCL pad). The same two pads in the
+    other order are a bus whose clock is on the data line, and a controller
+    that routes SDA to SDA_GPIO is not talking to it: NACK, not an answer."""
+    needs_riscv32()
+    crossed = ((SCL_GPIO, SDA_GPIO, Mcp9808(straps=0, celsius=25.0, vdd=3.3)),)
+    session, result = run_program(stores(*wiring()) + stores(*write_pointer(6)), crossed)
+    with session:
+        assert result.status == "running", result
+        assert session.cpu.read_word(I2C_RAW_AT) & esp32c3.I2C_INT_NACK
+
+
 def test_a_closed_clock_gate_answers_nothing():
     """TRAP 2: the function clock resets closed, and a transaction started
     behind it raises no interrupt, which is what Wire's 50 ms timeout waits

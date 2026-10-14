@@ -42,6 +42,7 @@
 # somewhere unrelated.
 
 import pathlib
+import re
 import struct
 
 import pytest
@@ -2166,9 +2167,10 @@ def test_a_wire_sketch_with_nothing_on_the_bus_is_nacked_and_reads_nothing():
             f"gone out yet: {words}")
 
 
-#: A sketch that never calls `begin`: the controller's function clock is still
-#: closed, so nothing answers, and `endTransmission` gives up after Wire's
-#: 50 ms of SYSTIMER (arduino-esp32's `_timeOutMillis`) and returns 5.
+#: A sketch that never calls `begin`. arduino-esp32 @ 2787dab allocates Wire's
+#: buffers only in `begin`, so `endTransmission` returns 4 from its NULL-buffer
+#: guard (`libraries/Wire/src/Wire.cpp:452-455`) and never reaches the bus,
+#: whatever the chip's clock gate is; every chip prints 4.
 WIRE_NO_BEGIN_SKETCH = """
 #include <Wire.h>
 void setup() {
@@ -2180,7 +2182,7 @@ void loop() { }
 """
 
 
-def test_a_wire_sketch_that_never_began_times_out_with_a_closed_gate():
+def test_a_wire_sketch_that_never_began_prints_4_and_does_not_touch_the_bus():
     needs_riscv32()
     from tests.webui.esp32_timing import steps_per_millisecond
     from webui import compile as compiler
@@ -2195,10 +2197,9 @@ def test_a_wire_sketch_that_never_began_times_out_with_a_closed_gate():
         session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
         words = _printed_tokens(session, 1, limit=20_000_000)
         assert session.status == "running", (session.status, session.detail)
-        assert words == ["5"], f"a part was on the bus, and the gate was closed: {words}"
-        fifty = 50 * steps_per_millisecond(esp32c3)
-        assert session.retired >= fifty, (
-            f"gave up after {session.retired} steps, before 50 ms ({fifty})")
+        assert words == ["4"], f"the vendor's NULL-buffer 4, with a part on the bus: {words}"
+        assert session.retired < 50 * steps_per_millisecond(esp32c3), (
+            f"answered after {session.retired} steps, which is a wait on the bus")
 
 
 # --- the review round: what Wire leaves between transactions, and its edges ----
@@ -2737,16 +2738,18 @@ def test_a_c5_nacked_probe_does_not_make_the_next_probe_read_as_nacked():
     assert words == ["2", "0"], f"0x19 NACKs, 0x18 acknowledges: {words}"
 
 
-def test_a_c5_wire_sketch_that_never_began_times_out_with_a_closed_gate():
-    """PCR_I2C_SCLK_EN resets 0 on the C5, so with no `begin` nothing answers
-    and `endTransmission` gives up after Wire's 50 ms of SYSTIMER."""
+def test_a_c5_wire_sketch_that_never_began_prints_4_and_does_not_touch_the_bus():
+    """arduino-esp32 @ 2787dab: `endTransmission` of a Wire that was never
+    begun returns 4 from its NULL-buffer guard (`libraries/Wire/src/Wire.cpp:
+    452-455`) without reaching the bus, so the closed gate (PCR_I2C_SCLK_EN
+    resets 0 on the C5) is never waited on: back well inside Wire's 50 ms."""
     from tests.webui.esp32_timing import steps_per_millisecond
     from webui.boards import esp32c5
 
     words, retired = _c5_run(WIRE_NO_BEGIN_SKETCH, 1, limit=20_000_000)
-    assert words == ["5"], f"a part was on the bus, and the gate was closed: {words}"
-    fifty = 50 * steps_per_millisecond(esp32c5)
-    assert retired >= fifty, f"gave up after {retired} steps, before 50 ms ({fifty})"
+    assert words == ["4"], f"the vendor's NULL-buffer 4, with a part on the bus: {words}"
+    assert retired < 50 * steps_per_millisecond(esp32c5), (
+        f"answered after {retired} steps, which is a wait on the bus")
 
 
 # --- Wire on the XIAO ESP32-C6 (OH-161 step 5, slice 3: the C6's half) --------
@@ -2817,21 +2820,93 @@ def test_a_c6_nacked_probe_does_not_make_the_next_probe_read_as_nacked():
     assert words == ["2", "0"], f"0x19 NACKs, 0x18 acknowledges: {words}"
 
 
-def test_a_c6_wire_sketch_that_never_began_is_refused_and_does_not_time_out():
-    """**Not the C3's and C5's 5.** PCR_I2C_SCLK_EN resets 1 on the C6, so a
-    sketch with no `begin` is not stopped by a closed gate and does not wait
-    out Wire's 50 ms: CTR comes out of reset 0x208, MS_MODE clear, and the
-    first transaction is refused by name (slave mode is not modelled), the
-    session stopped and nothing printed. On silicon the same sketch would be
-    a master that was never configured; the model says which register says
-    so."""
+def test_a_c6_wire_sketch_that_never_began_prints_4_and_does_not_touch_the_bus():
+    """arduino-esp32 @ 2787dab allocates Wire's buffers only in `begin`, so
+    `endTransmission` of a Wire that was never begun returns 4 from its
+    NULL-buffer guard (`libraries/Wire/src/Wire.cpp:452-455`) without reaching
+    the bus. The session keeps running (the C6's gate resets open and CTR's
+    MS_MODE is clear, which the description would refuse by name if a
+    transaction were started), and it is back well inside Wire's 50 ms."""
     from tests.webui.esp32_timing import steps_per_millisecond
     from webui.boards import esp32c6
 
     with _c6_session(WIRE_NO_BEGIN_SKETCH) as session:
         words = _printed_tokens(session, 1, limit=20_000_000)
-        assert words == [], words
-        assert session.status == "stopped", (session.status, session.detail)
-        assert "MS_MODE clear (CTR 0x208)" in session.detail, session.detail
+        assert session.status == "running", (session.status, session.detail)
+        assert words == ["4"], f"the vendor's NULL-buffer 4: {words}"
         assert session.retired < 50 * steps_per_millisecond(esp32c6), (
-            f"refused after {session.retired} steps, well inside Wire's 50 ms")
+            f"answered after {session.retired} steps, which is a wait on the bus")
+
+
+#: A probe of an empty bus that also says which pads the build calls SDA and SCL.
+WIRE_PINS_SKETCH = """
+#include <Wire.h>
+void setup() {
+  Wire.begin();
+  Wire.beginTransmission(0x18);
+  Serial.println(Wire.endTransmission());
+  Serial.println((int)SDA);
+  Serial.println((int)SCL);
+}
+void loop() { }
+"""
+
+
+def test_every_c6_board_in_the_catalogue_routes_the_i2c_signals_to_its_own_sda_and_scl():
+    """Each of the catalogue's ESP32-C6 boards builds a Wire sketch against its
+    own `pins_arduino.h` and gets 2 (a NACK) from an empty bus, and its
+    OUT_SEL routes SDA (signal 46) and SCL (signal 45) to the pads that header
+    names -- Feather 19/18, Olimex EVB 6/7, Glyph C6 4/5, Qwiic Pocket 6/7,
+    Thing Plus 6/7, and the XIAO's 22/23 on both of its boards, at arduino-
+    esp32 2787dab. The pads are read out of the board's header here and not
+    typed, and what the compiler gave the sketch must agree with that read:
+    a board built against another's table prints another's numbers."""
+    from tools import board_manifest
+    from webui import compile as compiler
+    from webui.boards import esp32c6
+
+    needs_riscv32()
+    boards = [name for name in catalogue.board_names()
+              if catalogue.chip_for(name) == "ESP32-C6"]
+    assert len(boards) > 1, f"the loop is over one board or none: {boards}"
+    seen: dict[str, tuple[int, int]] = {}
+    for board in boards:
+        recipe = compiler.recipe_for(board)
+        # The board's own header, found from the catalogue's row and not from
+        # the recipe under test: a recipe that pointed at another board's
+        # table would otherwise be read back as that board's own.
+        row = board_manifest.find(board)
+        if row is not None:
+            variant = f"{row.package}/variants/{row.variant}"
+        else:
+            (variant,) = recipe.bsp_includes
+        table = compiler.BOARD_SUPPORT / variant / "pins_arduino.h"
+        header = dict(re.findall(r"static const uint8_t (SDA|SCL)\s*=\s*(\d+);",
+                                 table.read_text(encoding="utf-8")))
+        assert set(header) == {"SDA", "SCL"}, f"{board}: {table} names {header}"
+        sda, scl = int(header["SDA"]), int(header["SCL"])
+        seen[board] = (sda, scl)
+        try:
+            built = compiler.build(board, WIRE_PINS_SKETCH)
+        except compiler.ToolchainMissing as exc:
+            pytest.skip(str(exc))
+        assert built.ok, f"{board}: {built.diagnostics}"
+        with api.load_firmware(board, built.image, base=recipe.base) as session:
+            words = _printed_tokens(session, 3)
+            assert session.status == "running", (board, session.status, session.detail, words)
+            assert words == ["2", str(sda), str(scl)], (
+                f"{board}: an empty bus NACKs a probe (2), and the sketch's SDA and "
+                f"SCL are the header's {table} ({sda}, {scl}): {words}")
+            for pad, signal, name in ((sda, esp32c6.I2CEXT0_SDA_IDX, "SDA"),
+                                      (scl, esp32c6.I2CEXT0_SCL_IDX, "SCL")):
+                out_sel = session.cpu.read_word(
+                    esp32c6.GPIO + esp32c6.GPIO_FUNC_OUT_SEL_CFG0 + 4 * pad)
+                assert out_sel & esp32c6.GPIO_FUNC_OUT_SEL_MASK == signal, (
+                    f"{board}: {name} is GPIO{pad}, whose OUT_SEL is {out_sel:#x}, "
+                    f"not signal {signal}")
+                in_sel = session.cpu.read_word(
+                    esp32c6.GPIO + esp32c6.GPIO_FUNC_IN_SEL_CFG0 + 4 * signal)
+                assert in_sel & esp32c6.GPIO_FUNC_IN_SEL_MASK == pad, (
+                    f"{board}: signal {signal} reads {name}'s GPIO{pad}, but its "
+                    f"IN_SEL is {in_sel:#x}")
+    assert len(set(seen.values())) > 1, f"every board has one pair of pads: {seen}"

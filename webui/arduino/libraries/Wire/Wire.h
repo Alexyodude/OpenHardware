@@ -6,9 +6,9 @@
  * Declared only where the board's `oh_board.h` defines `OH_I2C_*`, which is
  * the same rule `Arduino.h` states for `analogRead`: a function is here when
  * every register it needs is mapped. A board whose description maps no I2C
- * is not given this directory at all -- `webui/compile.py` carries a hint
- * row for it -- so the `#error` below is a second line, for a sketch that
- * reaches this header some other way.
+ * is still given this directory, because every `_openhardware` recipe in
+ * `webui/compile.py` carries it, so the `#error` below is the only line of
+ * defence: a sketch that includes `Wire.h` on such a board stops there.
  *
  * **A class of this project's own, not Arduino's `TwoWire`.** That one
  * inherits `Stream`, which brings `Print`, `String` and virtual dispatch;
@@ -82,6 +82,7 @@ private:
     uint8_t tx_length_;
     uint8_t rx_length_;
     uint8_t rx_index_;
+    bool begun_;
     bool deferred_;
     bool overflow_;
 };

@@ -58,17 +58,24 @@
  * DONE only when the address was acknowledged -- and nothing in the vendor's
  * software reads DONE, so nothing here does.
  *
- * 5 is a transaction that raised neither TRANS_COMPLETE nor NACK within
- * 50 ms of SYSTIMER, which on this model happens only when the controller's
- * function clock is closed and answers nothing: a C3 or a C5 whose sketch did
- * not call `begin`. **A C6 comes out of reset with that clock open**, so a
- * sketch that never began is not timed out there; the description refuses its
- * first transaction by name instead (CTR's MS_MODE is clear, `serve_i2c`).
- * **That 5 is this model's, not the vendor's.** 2787dab allocates its buffers
- * only in `begin` (`Wire.cpp:44`) and returns 4 from `endTransmission`'s
- * NULL-buffer guard (`:452-455`) without reaching the bus; its 5 is a probe
- * or bus lock that timed out. This one goes to the bus anyway, because it is
- * the only way a sketch shows what a closed gate does.
+ * 5 is the vendor's ESP_ERR_TIMEOUT: a transaction that raised neither
+ * TRANS_COMPLETE nor NACK within 50 ms of SYSTIMER, which on this model
+ * happens only when the controller's function clock is closed and answers
+ * nothing. **Nothing in Wire closes that gate** -- `begin` opens it and
+ * there is no `end` -- so a sketch reaches this 5 only by closing the gate
+ * itself, with a register write of its own; the branch stays because the
+ * vendor's map has it and the model can produce it.
+ *
+ * **A Wire that was never begun does not reach the bus, as the vendor's does
+ * not.** 2787dab allocates its buffers only in `begin` (`Wire.cpp:44` sets
+ * them NULL, `:146-157` allocates), so before it: `endTransmission` returns 4
+ * from its NULL-buffer guard (`:452-455`) without touching the bus,
+ * `requestFrom` returns 0 (`:502-509`), `write` returns 0 (`:555-558`) and
+ * `read` returns -1 (`:582-585`); `available` has no guard (`:575-578`) and
+ * is `rxLength - rxIndex`, 0. `begun_` is what stands for the NULL buffers
+ * here. The older answer for a never-begun C3 or C5 was a 5 from a closed
+ * gate, and a C6 was refused by the description; neither is what the
+ * vendor's core does.
  *
  * ## What `begin` does, and what it cannot
  *
@@ -81,9 +88,8 @@
  * signal back in from the same pad. The pins are the vendor's `SDA` and `SCL`
  * from `pins_arduino.h` -- GPIO6 and GPIO7 on a C3, GPIO23 and GPIO24 on a
  * C5, GPIO22 and GPIO23 on a C6, `D4` and `D5` on all three. Each pad's
- * GPIO_PINn PAD_DRIVER is set, which
- * makes it open-drain as I2C wants; the model maps the register and stores
- * the bit, and `i2c_pad` does not check it.
+ * GPIO_PINn PAD_DRIVER is set, which makes it open-drain as I2C wants; the
+ * model maps the register and stores the bit, and `i2c_pad` does not check it.
  *
  * CTR is written whole, `OH_I2C_CTR_INIT`, as the HAL writes it: on a C3
  * `i2c_ll_master_init` (`i2c_ll.h:909-918` in the framework copy) sets
@@ -91,17 +97,19 @@
  * `i2c_hal_master_init` (v5.5 `i2c_hal.c:39-50`) sets MS_MODE and clears the
  * FORCE_OUTs -- **the bits mean opposite things**: set is open drain on the
  * C3 and direct output on the C5 and C6; everything else is 0. And before each
- * TRANS_START CONF_UPGATE is set, as
- * `i2c_hal_update_config` does by way of `i2c_ll_update` (`i2c_ll.h:143-146`).
- * The model stores CONF_UPGATE as a write-trigger 0 and does nothing with it,
- * so no run can tell the write is there; it is here because the HAL does it.
+ * TRANS_START CONF_UPGATE is set, as `i2c_hal_update_config` does by way of
+ * `i2c_ll_update` (`i2c_ll.h:143-146` in the framework's C3 copy, :137-140 on
+ * a C5 and :136-139 on a C6). The model stores CONF_UPGATE as a write-trigger
+ * 0 and does nothing with it, so no run can tell the write is there; it is
+ * here because the HAL does it.
  *
  * **One thing silicon wants that this does not write.** The controller's
  * reset is released out of reset on all three parts, so nothing writes it: on
  * a C3 it is PERIP_RST_EN0 bit 7, which the model maps no register for
  * (writing it would only fault), and on a C5 or a C6 PCR_I2C_RST_EN, bit 1 of
  * PCR_I2C_CONF (`pcr_reg.h:272` on a C5, :232 on a C6, default 0), which
- * `install_i2c` maps and nothing here sets. The model checks the routing and the function clock and not that.
+ * `install_i2c` maps and nothing here sets. The model checks the routing and
+ * the function clock and not that.
  *
  * ## Why `setClock` does nothing
  *
@@ -199,6 +207,7 @@ void OhWire::begin(void) {
     OH_REG(OH_I2C_CTR) = OH_I2C_CTR_INIT;
     deferred_ = false;
     overflow_ = false;
+    begun_ = true;
 }
 
 void OhWire::setClock(uint32_t hz) {
@@ -217,6 +226,10 @@ void OhWire::beginTransmission(uint8_t address) {
 }
 
 size_t OhWire::write(uint8_t value) {
+    if (!begun_) {
+        /* The vendor's NULL TX buffer guard (`Wire.cpp:555-558`). */
+        return 0;
+    }
     if (tx_length_ >= kBuffer) {
         /* Remembered for `endTransmission`, which answers 1 ("data too long",
          * Arduino's documented code) rather than send a write that is not the
@@ -239,6 +252,11 @@ size_t OhWire::write(const uint8_t* data, size_t length) {
 }
 
 uint8_t OhWire::endTransmission(bool stop) {
+    if (!begun_) {
+        /* The vendor's NULL TX buffer guard (`Wire.cpp:452-455`): 4, and the
+         * bus is not touched. */
+        return 4;
+    }
     if (overflow_) {
         overflow_ = false;
         deferred_ = false;
@@ -280,6 +298,10 @@ uint8_t OhWire::requestFrom(uint8_t address, uint8_t quantity, bool stop) {
      * flag only deciding when its lock is released. The controller's other
      * way to end a list, END, is not modelled. */
     (void)stop;
+    if (!begun_) {
+        /* The vendor's NULL buffer guard (`Wire.cpp:502-509`). */
+        return 0;
+    }
     rx_length_ = 0;
     rx_index_ = 0;
     const bool repeated = deferred_;
@@ -341,6 +363,10 @@ uint8_t OhWire::requestFrom(uint8_t address, uint8_t quantity, bool stop) {
     return rx_length_;
 }
 
+/* Before `begin` both are the vendor's answers with no guard of their own
+ * here: `available` is `rxLength - rxIndex` with no NULL check
+ * (`Wire.cpp:575-578`), and `read` returns -1 for a NULL buffer (`:582-585`),
+ * which is also what an empty one gives. */
 int OhWire::available(void) { return rx_length_ - rx_index_; }
 
 int OhWire::read(void) {
