@@ -508,13 +508,24 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
     Before OH-232 `#counter` was written only by `renderStatus`, the 8086
     session's redraw, so beside a board that had retired millions of
     instructions it read "0 steps". A grep for `showBoardSteps` would pass
-    with the call in the wrong place; this loads a board, runs it three ticks of
-    1,000 and steps it once, and reads the element.
+    with the call in the wrong place; this drives the page and reads the
+    element.
 
-    The fake page is a permissive element that remembers what is written to it,
-    and `fetch` answers only the four board routes the sequence uses. The
-    8086's own count is planted first (7), so a counter that was never written
-    by the board path would still read it.
+    The fake page is a permissive element that remembers what is written to
+    it, and `fetch` answers only the board routes these sequences use, in the
+    order they are asked (`asked` is compared whole, so a tick that skipped a
+    route fails). The 8086's own count is planted first (7), so a counter that
+    the board path never wrote would still read it. Each scenario is one that
+    a wrong implementation survives the others of:
+
+    * `main`: load, three ticks of 1,000, three steps (one retiring, one
+      retiring and then stopping the board, one refused), a reload;
+    * `again`: Run, Stop, Run -- the total goes on from the first run's, and
+      is not the second clock's alone;
+    * `race`: Run, Stop, Run with the first tick still in flight when the
+      second Run is pressed, held by the fake until after that press;
+    * `reload`: the same zeroing through load-artefact and through compile;
+    * `refused`: a load the server refuses clears the old board's count.
     """
     source = EMULATOR.read_text(encoding="utf-8")
     result = probe(tmp_path, """
@@ -532,70 +543,189 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
           setAttribute() {} append() {} replaceChildren() {} appendChild() {}
           focus() {} querySelector() { return null; }
         }
-        const elements = new Map();
-        const document = {
-          body: new Element("body"), documentElement: new Element("html"),
-          getElementById(id) {
-            if (!elements.has(id)) elements.set(id, new Element(id));
-            return elements.get(id);
-          },
-          createElement: () => new Element("made"),
-          createDocumentFragment: () => new Element("fragment"),
-          addEventListener() {},
-        };
-        document.body.dataset.view = "emulator";
 
-        const asked = [];
-        let ticks = 0;
-        const state = {
-          board: "xiao", chip: "c3", status: "running", detail: "",
-          registers: [{ name: "pc", value: 0, width: 32 }], flags: [],
-          pc: 0, memory: { at: 0, bytes: [] }, words: [],
-          uart: { present: false, note: "" }, pins: null,
-          listing: { present: false, note: "" },
-        };
-        const reply = (body) => ({ ok: true, status: 200, json: async () => body });
-        async function fetch(path, options) {
-          asked.push(path);
-          if (path === "/api/board/load") {
-            return reply({ board: "xiao", chip: "c3", core: "rv32", format: "bin",
-                           bytes: 4, entry: 0, notes: [] });
+        /** A page running the real emulator.js. `runs(body, calls)` answers
+         *  /api/board/run; the three load routes answer one image. */
+        async function page({ runs }) {
+          const elements = new Map();
+          const document = {
+            body: new Element("body"), documentElement: new Element("html"),
+            getElementById(id) {
+              if (!elements.has(id)) elements.set(id, new Element(id));
+              return elements.get(id);
+            },
+            createElement: () => new Element("made"),
+            createDocumentFragment: () => new Element("fragment"),
+            addEventListener() {},
+          };
+          document.body.dataset.view = "emulator";
+          const asked = [];
+          let calls = 0;
+          let refuse = false;
+          const state = {
+            board: "xiao", chip: "c3", status: "running", detail: "",
+            registers: [{ name: "pc", value: 0, width: 32 }], flags: [],
+            pc: 0, memory: { at: 0, bytes: [] }, words: [],
+            uart: { present: false, note: "" }, pins: null,
+            listing: { present: false, note: "" },
+          };
+          const image = { board: "xiao", chip: "c3", core: "rv32", format: "bin",
+                          bytes: 4, entry: 0, notes: [] };
+          const reply = (body) => ({ ok: true, status: 200, json: async () => body });
+          async function fetch(path, options) {
+            asked.push(path);
+            if (path === "/api/board/load" && refuse) {
+              return { ok: false, status: 400,
+                       json: async () => ({ error: "refused" }) };
+            }
+            if (path === "/api/board/load" || path === "/api/board/load-artefact") {
+              return reply(image);
+            }
+            if (path === "/api/board/compile") {
+              return reply({ ok: true, bytes: 4, board: image });
+            }
+            if (path === "/api/board/run") {
+              calls += 1;
+              return reply(await runs(JSON.parse(options.body), calls));
+            }
+            if (path.startsWith("/api/board/state")) return reply(state);
+            return { ok: false, status: 404,
+                     json: async () => ({ error: "unrouted " + path }) };
           }
-          if (path === "/api/board/run") {
-            ticks += 1;
-            return reply({ steps: 1000, detail: "",
-                           status: ticks < 3 ? "running" : "stopped" });
+          class FileReader {
+            readAsDataURL() { this.result = "data:;base64,AAAA"; this.onload(); }
           }
-          if (path.startsWith("/api/board/state")) return reply(state);
-          if (path.startsWith("/api/board/step")) return reply(state);
-          return { ok: false, status: 404,
-                   json: async () => ({ error: "unrouted " + path }) };
+          const window = { matchMedia: () => ({ matches: false }),
+                           BoardClock: { Clock } };
+          const sandbox = { document, window, fetch, FileReader, performance,
+                            localStorage: { getItem: () => null, setItem() {} },
+                            console, setTimeout, clearTimeout };
+          vm.runInNewContext(source, sandbox);
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          const counter = document.getElementById("counter");
+          counter.textContent = "7 steps";
+          document.getElementById("board-pick").value = "xiao";
+          document.getElementById("board-file").files = [{ name: "a.bin" }];
+          document.getElementById("artefact-pick").value = "build/a.bin";
+          const first = asked.length;
+          return {
+            asked: () => asked.slice(first),
+            calls: () => calls,
+            refuse: (on) => { refuse = on; },
+            text: () => counter.textContent,
+            click: (id) => document.getElementById(id).handlers.click(),
+          };
         }
-        class FileReader {
-          readAsDataURL() { this.result = "data:;base64,AAAA"; this.onload(); }
+        const steps = (n) => n.toLocaleString() + " steps";
+        const until = async (test) => {
+          for (let i = 0; i < 2000 && !test(); i++) {
+            await new Promise((resolve) => setTimeout(resolve, 1));
+          }
+          if (!test()) throw new Error("never became true: " + test);
+        };
+        // A real request yields to timers; a fake that only yields microtasks would
+        // starve the `until` polls below and never be stopped.
+        const ticking = async () => {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          return { steps: 1000, status: "running", detail: "" };
+        };
+        /** Run, then Stop once two ticks have landed; resolves when it ends. */
+        async function runThenStop(p) {
+          const before = p.calls();
+          const run = p.click("board-go");
+          await until(() => p.calls() >= before + 2);
+          p.click("board-go");
+          await run;
         }
-        const window = { matchMedia: () => ({ matches: false }), BoardClock: { Clock } };
-        const sandbox = { document, window, fetch, FileReader, performance,
-                          localStorage: { getItem: () => null, setItem() {} },
-                          console, setTimeout, clearTimeout };
-        vm.runInNewContext(source, sandbox);
-        await new Promise((resolve) => setTimeout(resolve, 50));
 
-        const counter = document.getElementById("counter");
-        const click = (id) => document.getElementById(id).handlers.click();
-        const text = [];
-        const shown = () => text.push(counter.textContent);
+        // -- main
+        const scripted = [
+          { steps: 1, status: "running", detail: "" },
+          { steps: 1, status: "stopped", detail: "doorbell refused" },
+          { steps: 0, status: "stopped", detail: "stopped" },
+        ];
+        const main = await page({ runs: async (body, calls) => {
+          if (body.steps === 1) return scripted.shift();
+          return { steps: 1000, detail: "", status: calls < 3 ? "running" : "stopped" };
+        } });
+        const mainText = [];
+        for (const id of ["board-load", "board-go", "board-step", "board-step",
+                          "board-step", "board-load"]) {
+          await main.click(id);
+          mainText.push(main.text());
+        }
+        const stateRoute = "/api/board/state";
+        const expectedAsked = ["/api/board/load", stateRoute,
+          "/api/board/run", stateRoute, "/api/board/run", stateRoute,
+          "/api/board/run", stateRoute,
+          "/api/board/run", stateRoute, "/api/board/run", stateRoute,
+          "/api/board/run", stateRoute, "/api/board/load", stateRoute];
 
-        counter.textContent = "7 steps";
-        document.getElementById("board-pick").value = "xiao";
-        document.getElementById("board-file").files = [{ name: "a.bin" }];
-        await click("board-load");           shown();
-        await click("board-go");             shown();
-        state.status = "running";
-        await click("board-step");           shown();
-        await click("board-load");           shown();
+        // -- again
+        const again = await page({ runs: ticking });
+        await again.click("board-load");
+        await runThenStop(again);
+        const afterFirst = [again.text(), again.calls()];
+        await runThenStop(again);
+        const afterSecond = [again.text(), again.calls()];
+
+        // -- race: the first tick is held until Run has been pressed twice more
+        let release;
+        const held = new Promise((resolve) => { release = resolve; });
+        const race = await page({ runs: async (body, calls) => {
+          if (calls === 1) await held;
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          return { steps: 1000, status: "running", detail: "" };
+        } });
+        await race.click("board-load");
+        const raceFirst = race.click("board-go");
+        await until(() => race.calls() === 1);
+        race.click("board-go");                    // Stop, the tick in flight
+        const raceThird = race.click("board-go");  // Run again behind it
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        release();
+        await raceFirst;
+        await until(() => race.calls() >= 3);
+        race.click("board-go");
+        await raceThird;
+        const raceResult = [race.text(), race.calls()];
+
+        // -- reload through each route
+        const reload = await page({ runs: ticking });
+        const viaRoutes = [];
+        for (const route of ["board-load", "artefact-load", "sketch-build"]) {
+          await reload.click("board-load");
+          await runThenStop(reload);
+          const before = reload.text();
+          await reload.click(route);
+          viaRoutes.push([route, before, reload.text()]);
+        }
+
+        // -- a refused load
+        const refused = await page({ runs: ticking });
+        await refused.click("board-load");
+        await runThenStop(refused);
+        const beforeRefusal = refused.text();
+        refused.refuse(true);
+        await refused.click("board-load");
+        const afterRefusal = refused.text();
+
         console.log(JSON.stringify({
-          text, asked, expect: [0, 3000, 3001, 0].map((n) => n.toLocaleString() + " steps"),
+          mainText, mainAsked: main.asked(), expectedAsked,
+          expect: [0, 3000, 3001, 3002, 3002, 0].map(steps),
+          afterFirst, afterSecond, raceResult, viaRoutes,
+          beforeRefusal, afterRefusal,
         }));
     """ % json.dumps(source))
-    assert result["text"] == result["expect"], result
+    assert result["mainText"] == result["expect"], result
+    assert result["mainAsked"] == result["expectedAsked"], result
+    text, calls = result["afterFirst"]
+    assert text == f"{calls * 1000:,} steps", result
+    text, calls2 = result["afterSecond"]
+    assert text == f"{calls2 * 1000:,} steps" and calls2 > calls, result
+    text, calls = result["raceResult"]
+    assert text == f"{calls * 1000:,} steps" and calls >= 3, result
+    for route, before, after in result["viaRoutes"]:
+        assert before != "0 steps" and after == "0 steps", (route, result)
+    assert result["beforeRefusal"] != "0 steps", result
+    assert result["afterRefusal"] == "0 steps", result

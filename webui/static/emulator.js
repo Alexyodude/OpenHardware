@@ -559,6 +559,9 @@ async function loadBoardImage() {
   if (base) request.base = base;
 
   boardImage = null;
+  // A refused load leaves the old board's count beside "Nothing loaded yet."
+  // unless it is cleared here; with the 8086 showing, its count is not ours.
+  if (panes !== "i8086") showBoardSteps(0);
   $("board-go").disabled = true;
   $("board-step").disabled = true;
   try {
@@ -667,6 +670,7 @@ async function loadArtefact() {
   running = false;
   await stopBoardClock();
   boardImage = null;
+  if (panes !== "i8086") showBoardSteps(0);
   $("board-go").disabled = true;
   $("board-step").disabled = true;
   boardImage = await api("/api/board/load-artefact", request);
@@ -873,9 +877,8 @@ let boardRunning = null;
  *  **The page adds it up, because the board's state reply does not carry it.**
  *  `/api/board/run` answers the instructions that call took and
  *  `/api/board/state` answers none, so a run's tick adds the clock's total to
- *  the count it started from, and a step adds one if the board is still
- *  running after it (a stop is the core refusing the instruction, which
- *  retires nothing). `renderStatus` writes the same element for the 8086, and
+ *  the count it started from, and a step is a run of one whose `steps` is
+ *  added. `renderStatus` writes the same element for the 8086, and
  *  never runs while a board owns the panes -- `refresh` returns first. */
 let boardSteps = 0;
 
@@ -978,8 +981,10 @@ function showBoardRunning(on) {
  *  200,000-instruction request through -- and the page would then say "entered
  *  at 0x00000000" beside a board that had already run past it. */
 async function stopBoardClock() {
-  if (!boardClock?.running) return;
-  boardClock.stop();
+  // No early return on `running`: `stop()` clears it at once while the tick
+  // in flight is still on its way, and a caller that did not wait for it
+  // would have that tick's steps land after its own zeroing (OH-232).
+  boardClock?.stop();
   // A rejection here belongs to whoever pressed Run, and the click handler
   // that started it has already reported it. Observing it a second time would
   // put one failure on the page twice.
@@ -1020,6 +1025,11 @@ async function runLoadedBoard() {
     return;
   }
 
+  // Run, Stop, Run: `stop()` clears `running` at once, but the last tick is
+  // still in flight and its `onTick` has yet to write. The base is taken only
+  // after it has, or the new clock's first write would erase that tick.
+  await boardRunning?.catch(() => {});
+  if (boardClock?.running) return;
   // The clock counts from zero each time it starts; the board's total does not.
   const stepsBefore = boardSteps;
   boardClock = new window.BoardClock.Clock({
@@ -1059,9 +1069,14 @@ async function runLoadedBoard() {
 async function stepLoadedBoard() {
   await stopBoardClock();
   showBoardRunning(false);
-  const state = await api(watchedUrl("/api/board/step"), {});
+  // `/api/board/step` is `run(count=1)` and then the state, and answers
+  // neither how many instructions retired; `/api/board/run` answers `steps`,
+  // so a step is a run of one followed by the state read. An instruction that
+  // retires and then stops the board counts 1, and a refusal counts 0.
+  const taken = await api("/api/board/run", { steps: 1 });
+  const state = await api(boardStateUrl());
   renderBoardState(state);
-  showBoardSteps(boardSteps + (state.status === "running" ? 1 : 0));
+  showBoardSteps(boardSteps + taken.steps);
   boardSays(stepLine(boardImage.board, state, $("where").textContent),
             stopDetail(state.status, state.detail));
 }
@@ -1267,6 +1282,9 @@ async function loadSelected() {
   watching = sample.watch;
   $("at").value = hex(watching, 4);
   previous = null;
+  // A board clock left going would redraw the board over these panes on its
+  // next tick, and write its count over the 8086's (OH-232).
+  await stopBoardClock();
   showMachine("i8086");
   await refresh();
 }

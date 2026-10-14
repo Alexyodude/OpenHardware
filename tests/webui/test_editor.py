@@ -387,8 +387,14 @@ def test_a_step_carries_the_watch_so_the_note_survives_it():
     source = SCRIPT.read_text(encoding="utf-8")
     code = "\n".join(line for line in source.splitlines()
                      if not line.lstrip().startswith("//"))
-    assert 'api(watchedUrl("/api/board/step")' in code, (
-        "the step fetch does not carry the watch, so a step blanks the note"
+    # Since OH-232 a step is a run of one and then the state read, because the
+    # run reply is what says how many instructions retired; the state read is
+    # the one that carries the watch, through the shared builder.
+    step = code[code.index("async function stepLoadedBoard"):]
+    step = step[:step.index("\n}\n")]
+    assert "api(boardStateUrl())" in step, (
+        "the step does not read the state through the watch, so a step "
+        "blanks the note"
     )
     assert 'api("/api/board/step"' not in code, (
         "a bare step fetch bypasses watchedUrl, so the watch dies on step"
