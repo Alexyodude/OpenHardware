@@ -75,6 +75,7 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import itertools
 import math
 import pathlib
 import xml.etree.ElementTree as ET
@@ -96,42 +97,58 @@ MILLING_LAYER = "46"
 ARC_CHORD_MM = 0.2
 
 
+#: A flattened arc drops an axis crossing this close (along the arc) to one of
+#: its ends, in mm (OH-235). Keeping it would leave a segment shorter than the
+#: composer's `CHAIN_TOLERANCE_MM` = 0.02, which reads as a false one-point
+#: ring. Dropping it costs the bounding box at most eps^2 / 2r: 0.0005 mm on
+#: the QT Py's r = 2.54 mm corners, and nothing on a wire that starts and ends
+#: on an axis, as every fetched board's does.
+AXIS_EPS_MM = 0.05
+
+
 def arc_points(x1: float, y1: float, x2: float, y2: float, curve: float,
                chord: float = ARC_CHORD_MM) -> list[tuple[float, float]]:
     """The points of one EAGLE wire, first end to second.
 
     **`curve` is the angle the arc sweeps, in degrees, and its sign is the
     way round**: positive is counter-clockwise going from (x1, y1) to
-    (x2, y2), in EAGLE's y-up frame. The centre therefore lies to the LEFT of
-    the first-to-second direction for a positive minor arc, and to the right
-    for a negative one; past 180 degrees the side flips. That sign is held by
+    (x2, y2), in EAGLE's y-up frame. Autodesk's UL_WIRE help
+    (https://help.autodesk.com/cloudhelp/ENU/Fusion-ECAD/files/ECD-ULP-WIRE.htm)
+    says: "The valid range for curve is -360 to +360 ... Positive values for
+    curve mean that the arc is drawn in a mathematically positive sense (i.e.
+    counterclockwise)." KiCad's EAGLE importer agrees independently
+    (`eagle_parser.cpp:512-534`, `ConvertArcCenter`, used for a wire at
+    `pcb_io_eagle.cpp:808`). The centre therefore lies to the LEFT of the
+    first-to-second direction for a positive minor arc, and to the right for
+    a negative one; past 180 degrees the side flips. It is also held by
     `tests/rules/test_eagle.py` against Adafruit's own STEP of the QT Py
-    ESP32-C3, whose r = 2.54 mm corners are convex: the wrong sign puts the
-    centre outside the board.
+    ESP32-C3, whose r = 2.54 mm corners are convex.
 
-    A zero `curve` is a line. Otherwise the arc is cut into steps of at most
-    `chord` along the arc, never fewer than two, so a flattened point is never
-    further from the true arc than `ARC_CHORD_MM` allows -- and **the points
-    where the arc crosses an axis are included**, so the bounding box of the
-    result is the arc's own, which is what `Board.extent_mm` promises.
-    The ends are returned exactly as written, so a chain of wires still meets
-    end to end.
+    A zero `curve` is a line. Otherwise the sweep is split at the points
+    where the arc is due east, north, west or south of its centre, and each
+    piece is cut into `ceil(length / chord)` equal steps -- so no step is
+    longer than `chord`, no point of the result is further from the true arc
+    than `ARC_CHORD_MM` allows, and the arc has at least two segments. **The
+    axis crossings are vertices**, so the bounding box is the arc's own, which
+    is what `Board.extent_mm` promises -- except that a crossing within
+    `AXIS_EPS_MM` of an end is dropped, which costs the box at most
+    eps^2 / 2r. The ends are returned exactly as written, so a chain of wires
+    still meets end to end.
     """
+    where = f"wire ({x1}, {y1}) -> ({x2}, {y2}) curve {curve}"
+    if not math.isfinite(curve) or abs(curve) > 360:
+        raise EagleError(f"{where}: curve must be a number from -360 to 360")
     if curve == 0:
         return [(x1, y1), (x2, y2)]
     span = math.hypot(x2 - x1, y2 - y1)
     if span == 0:
-        raise EagleError(
-            f"wire ({x1}, {y1}) -> ({x2}, {y2}) curve {curve}: both ends are "
-            f"the same point, so the arc has no radius"
-        )
+        raise EagleError(f"{where}: both ends are the same point, so the arc "
+                         f"has no radius")
     sweep = math.radians(curve)
     half = sweep / 2
     if abs(math.sin(half)) < 1e-12:
-        raise EagleError(
-            f"wire ({x1}, {y1}) -> ({x2}, {y2}) curve {curve}: a whole turn "
-            f"or more has no radius from its two ends"
-        )
+        raise EagleError(f"{where}: a whole turn has no radius from its two "
+                         f"ends")
     radius = span / (2 * abs(math.sin(half)))
     # Left of the first-to-second direction, then along it by the apothem.
     offset = (span / 2) / math.tan(half)
@@ -139,17 +156,24 @@ def arc_points(x1: float, y1: float, x2: float, y2: float, curve: float,
     cy = (y1 + y2) / 2 + (x2 - x1) / span * offset
     start = math.atan2(y1 - cy, x1 - cx)
 
-    steps = max(2, math.ceil(abs(sweep) * radius / chord))
-    angles = {step / steps for step in range(steps + 1)}
-    # The fractions of the sweep at which the arc is due east, north, west
-    # and south of its centre.
+    length = abs(sweep) * radius
+    cuts = [0.0]
     for quarter in range(-8, 9):
         fraction = ((quarter * math.pi / 2) - start) / sweep
-        if 1e-9 < fraction < 1 - 1e-9:
-            angles.add(fraction)
+        if AXIS_EPS_MM < fraction * length < length - AXIS_EPS_MM:
+            cuts.append(fraction)
+    cuts = sorted(cuts) + [1.0]
+
+    fractions = [0.0]
+    for low, high in itertools.pairwise(cuts):
+        steps = max(1, math.ceil((high - low) * length / chord))
+        if len(cuts) == 2:
+            steps = max(2, steps)
+        fractions += [low + (high - low) * step / steps
+                      for step in range(1, steps + 1)]
     points = [(cx + radius * math.cos(start + sweep * fraction),
                cy + radius * math.sin(start + sweep * fraction))
-              for fraction in sorted(angles)]
+              for fraction in fractions]
     points[0], points[-1] = (x1, y1), (x2, y2)
     return points
 
@@ -415,7 +439,8 @@ class Board:
         Exact for arcs (OH-235): an outline wire's `curve` is read by
         `read_board` into the points of its arc, and `arc_points` includes the
         points where an arc crosses an axis, so the extreme of a bulge is a
-        vertex and not the sagitta short of it.
+        vertex and not the sagitta short of it -- to within eps^2 / 2r
+        (`AXIS_EPS_MM`), where a crossing lies that close to a wire's end.
         """
         if not self.outline:
             raise EagleError(
@@ -747,8 +772,9 @@ def _ink(board: ET.Element, elements: list[Element], packages: dict
              transform=None) -> None:
         # Counted and not drawn after OH-235, on purpose: `arc_points` could
         # flatten it, but that would change boards whose outline is straight
-        # (the Uno's DIP notch), and `_silk_mark` reads these same wires as
-        # pin-1 marks. A follow-up can draw them.
+        # and which carry silkscreen arcs (the KB2040, SparkFun's Pro Micro
+        # ESP32-C3 and Qwiic Pocket ESP32-C6), which OH-235 holds still.
+        # A follow-up can draw them.
         if wire.get("curve") is not None:
             unread["arc"] += 1
             return
@@ -911,12 +937,15 @@ def read_board(path: pathlib.Path, text: str | None = None) -> Board:
     for wire in board.findall("plain/wire"):
         if wire.get("layer") != DIMENSION_LAYER:
             continue
-        points = arc_points(
-            _float(wire, "x1", str(path)), _float(wire, "y1", str(path)),
-            _float(wire, "x2", str(path)), _float(wire, "y2", str(path)),
-            _float(wire, "curve", str(path)) if wire.get("curve") else 0.0)
+        try:
+            points = arc_points(
+                _float(wire, "x1", str(path)), _float(wire, "y1", str(path)),
+                _float(wire, "x2", str(path)), _float(wire, "y2", str(path)),
+                _float(wire, "curve", str(path)) if wire.get("curve") else 0.0)
+        except EagleError as exc:
+            raise EagleError(f"{path}: Dimension {exc}") from exc
         outline += [Segment(DIMENSION_LAYER, ax, ay, bx, by)
-                    for (ax, ay), (bx, by) in zip(points, points[1:])]
+                    for (ax, ay), (bx, by) in itertools.pairwise(points)]
     tracks, vias, unrouted = _routing(board, str(path))
     silk, silk_fills, silk_unread = _ink(board, elements, packages)
     return Board(path.stem, root.get("version") or "unknown", tuple(elements),

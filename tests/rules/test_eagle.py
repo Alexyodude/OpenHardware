@@ -16,6 +16,7 @@ as 45-degree chamfers. Three oracles hold the fix:
 """
 
 import hashlib
+import itertools
 import math
 import pathlib
 import xml.etree.ElementTree as ET
@@ -78,7 +79,7 @@ def test_a_negative_curve_goes_clockwise_and_stays_on_its_circle():
     for x, y in points:
         assert math.hypot(x - 15.24, y - 2.54) == pytest.approx(2.54, abs=1e-9)
     # Clockwise from due east: y only ever falls, x only ever falls.
-    assert all(b[1] < a[1] and b[0] < a[0] for a, b in zip(points, points[1:]))
+    assert all(b[1] < a[1] and b[0] < a[0] for a, b in itertools.pairwise(points))
 
 
 def test_a_positive_curve_is_the_same_arc_walked_the_other_way():
@@ -103,7 +104,7 @@ def test_a_flattened_arc_stands_off_its_circle_by_no_more_than_the_chord_allows(
     radius = 2.54
     points = eagle.arc_points(17.78, 2.54, 15.24, 0.0, -90.0)
     bound = radius * (1 - math.cos(min(eagle.ARC_CHORD_MM / (2 * radius), math.pi / 2)))
-    for (ax, ay), (bx, by) in zip(points, points[1:]):
+    for (ax, ay), (bx, by) in itertools.pairwise(points):
         middle = math.hypot((ax + bx) / 2 - 15.24, (ay + by) / 2 - 2.54)
         assert radius - middle <= bound + 1e-12
 
@@ -113,6 +114,85 @@ def test_an_arc_reaches_the_extremes_of_its_circle():
     # arc's, to the last digit, not the sagitta short.
     points = eagle.arc_points(1.0, 0.0, -1.0, 0.0, 180.0)
     assert max(y for _, y in points) == pytest.approx(1.0, abs=1e-12)
+
+
+def test_a_reflex_arc_that_passes_a_full_turn_of_angle_keeps_its_extremes():
+    # Start 170 degrees round the unit circle, sweep 300 counter-clockwise: it
+    # ends at 110 degrees having passed 180, 270 and 0 -- past 2 pi -- and 90.
+    a, b = math.radians(170), math.radians(110)
+    points = eagle.arc_points(math.cos(a), math.sin(a), math.cos(b),
+                              math.sin(b), 300.0)
+    for x, y in points:
+        assert math.hypot(x, y) == pytest.approx(1.0, abs=1e-9)
+    xs = [x for x, _ in points]
+    ys = [y for _, y in points]
+    assert (min(xs), max(xs)) == pytest.approx((-1.0, 1.0), abs=1e-9)
+    assert (min(ys), max(ys)) == pytest.approx((-1.0, 1.0), abs=1e-9)
+
+
+def test_a_short_arc_still_gets_two_segments():
+    # 0.1 mm of chord is less than one 0.2 mm step, and the docstring
+    # promises at least two segments. Slanted, so no axis crossing splits it.
+    points = eagle.arc_points(0.0, 0.0, 0.0707, 0.0707, 10.0)
+    assert len(points) == 3, points
+
+
+def test_no_flattened_arc_has_a_segment_the_composer_would_chain_through():
+    # Turned about a centre, an arc no longer starts and ends on an axis, so
+    # its axis crossings land anywhere, including a hair from an end.
+    cases = [(66.04, 1.0001, 65.04, 0.0, -90.0)]
+    for degrees in range(0, 360, 3):
+        for curve in (-90.0, 90.0):
+            turn = math.radians(degrees)
+            far = turn + math.radians(curve)
+            cases.append((10 + 2.54 * math.cos(turn), 10 + 2.54 * math.sin(turn),
+                          10 + 2.54 * math.cos(far), 10 + 2.54 * math.sin(far),
+                          curve))
+    for x1, y1, x2, y2, curve in cases:
+        points = eagle.arc_points(x1, y1, x2, y2, curve)
+        shortest = min(math.dist(a, b) for a, b in itertools.pairwise(points))
+        assert shortest > compose.CHAIN_TOLERANCE_MM, (
+            f"wire ({x1}, {y1}) -> ({x2}, {y2}) curve {curve}: a segment of "
+            f"{shortest:.6f} mm is not over the composer's "
+            f"{compose.CHAIN_TOLERANCE_MM}")
+
+
+def test_a_curved_outline_is_one_ring_whatever_its_turn():
+    # A 10 mm square with its (10, 10) corner rounded to r = 2.54, turned
+    # about the origin: the composer must find one ring, not also a one-point
+    # ring from a sliver of a segment.
+    for degrees in range(0, 360, 7):
+        turn = math.radians(degrees)
+
+        def at(x: float, y: float) -> tuple[float, float]:
+            return (x * math.cos(turn) - y * math.sin(turn) + 20,
+                    x * math.sin(turn) + y * math.cos(turn) + 20)
+
+        paths = [[at(0, 0), at(10, 0)], [at(10, 0), at(10, 7.46)],
+                 eagle.arc_points(*at(10, 7.46), *at(7.46, 10), 90.0),
+                 [at(7.46, 10), at(0, 10)], [at(0, 10), at(0, 0)]]
+        segments = tuple(
+            eagle.Segment(eagle.DIMENSION_LAYER, ax, ay, bx, by)
+            for path in paths for (ax, ay), (bx, by) in itertools.pairwise(path))
+        rings = compose.contours(segments)
+        assert len(rings) == 1, (
+            f"turn {degrees}: {len(rings)} rings: {[len(r) for r in rings]}")
+
+
+def test_a_bad_curve_is_refused_naming_the_file_and_the_value(tmp_path):
+    for curve in ("nan", "400", "-361"):
+        brd = tmp_path / "bad.brd"
+        brd.write_text(
+            '<eagle version="9"><drawing><board><plain>'
+            f'<wire x1="0" y1="0" x2="1" y2="1" width="0" layer="20" curve="{curve}"/>'
+            '</plain><libraries><library name="l"><packages><package name="p"/>'
+            '</packages></library></libraries><elements><element name="J1" '
+            'library="l" package="p" value="" x="0" y="0"/></elements>'
+            '</board></drawing></eagle>', encoding="utf-8")
+        with pytest.raises(eagle.EagleError) as raised:
+            eagle.read_board(brd)
+        message = str(raised.value)
+        assert str(brd) in message and f"curve {curve}" in message, message
 
 
 def test_the_two_chord_constants_agree():
@@ -167,16 +247,13 @@ def test_the_outline_area_is_the_arc_exact_area_within_the_chord_bound():
         board = eagle.read_board(path)
         drawn = _shoelace([(s.x1_mm, s.y1_mm, s.x2_mm, s.y2_mm)
                            for s in board.outline])
-        # The polyline is inscribed in its arcs, so it never has more area
-        # than the true outline walked the same way, and falls short of it
-        # by at most the sliver the chord rule allows.
-        assert abs(exact) - abs(drawn) <= bound, (
-            f"{path.name}: arc-exact area {abs(exact):.4f} mm2, drawn "
-            f"{abs(drawn):.4f} mm2: short by {abs(exact) - abs(drawn):.4f}, "
-            f"more than the {bound:.4f} the chord rule allows")
-        assert abs(drawn) <= abs(exact) + 1e-9, (
-            f"{path.name}: drawn {abs(drawn):.4f} mm2 is MORE than the "
-            f"arc-exact {abs(exact):.4f}")
+        # Two-sided: an inscribed polyline is off by a sliver per arc, to
+        # one side or the other as the arc bulges out of the outline or into
+        # it (a cutout), and by no more than the chord rule allows.
+        assert abs(exact - drawn) <= bound, (
+            f"{path.name}: arc-exact area {exact:.4f} mm2, drawn "
+            f"{drawn:.4f} mm2: off by {abs(exact - drawn):.4f}, more than "
+            f"the {bound:.4f} the chord rule allows")
 
 
 def test_extent_is_exact_for_an_outline_that_is_only_arcs(tmp_path):
@@ -196,8 +273,9 @@ def test_extent_is_exact_for_an_outline_that_is_only_arcs(tmp_path):
     assert (min_y, max_y) == pytest.approx((-5.0, 5.0), abs=1e-9)
 
 
-def _pairs(points):
-    return list(zip(points, points[1:]))
+def _pairs(points: list[tuple[float, float]]
+           ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    return list(itertools.pairwise(points))
 
 
 # --- Adafruit's own STEP of the QT Py ----------------------------------------
@@ -244,7 +322,8 @@ def _step_corner_centres(path: pathlib.Path) -> list[tuple[float, float]]:
     return sorted(centres)
 
 
-def _circumcentre(a, b, c) -> tuple[float, float]:
+def _circumcentre(a: tuple[float, float], b: tuple[float, float],
+                  c: tuple[float, float]) -> tuple[float, float]:
     (ax, ay), (bx, by), (cx, cy) = a, b, c
     d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
     assert abs(d) > 1e-9, f"corner points {a}, {b}, {c} are collinear: no arc"
