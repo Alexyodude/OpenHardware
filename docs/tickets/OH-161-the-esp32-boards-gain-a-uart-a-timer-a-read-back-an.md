@@ -59,8 +59,6 @@ touches:
 - webui/compile.py
 - tests/webui/test_compile.py
 - webui/emulator_server.py
-- webui/static/board3d-panel.js
-- tests/webui/test_board3d.py
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
@@ -852,3 +850,5 @@ CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: opt
 **Note 2026-10-15:** Slice 4d review round (the commit after 10bc751): the MSOP-8 footprint is now pinned to GitLab commit f8a45b46 and to 4,572 bytes / sha256 c85207be..., checked on every read; part_pads is tested without OCP; correction to the note above: lead_tips finds FEWER THAN EIGHT tips on this mesh (5 was measured once and is not asserted), and a pad_tips tip is the lowest-ring average, x +-2.095, 0.148 mm inboard of the foot-face centre (not its centre). The 3D model (STEP) is still fetched from KiCad's master, unpinned: a follow-up.
 
 **Note 2026-10-15:** 2026-10-15: slice 4d merged (master 7b81ee3); returns tools/import_3d_model.py and tests/rules/test_import_3d_model.py to OH-163. Left for OH-163: part_pads reads the footprint twice after hashing it (once via parse_sexp, once in read_footprint) where kicad._pads_of(tree) would do, and the MSOP-8 STEP is still fetched from KiCad master unpinned.
+
+**Note 2026-10-15:** 2026-10-15: slice 4c merged; returns webui/static/board3d-panel.js and tests/webui/test_board3d.py to OH-172. Left from its confirm review (LOW): visibilitychange clears presses even when the tab becomes visible (guard with document.hidden); the flush timeout renders unconditionally, safe only while the panel is never torn down. Still open from 4c: poll-vs-refetch ordering needs a sequence number from emulator.js; a state poll on a running board rebuilds the bench every tick, so a click on remove can be lost; the page-reload part-id question.
