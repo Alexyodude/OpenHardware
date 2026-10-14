@@ -2,14 +2,9 @@
 id: OH-235
 title: 'An EAGLE board''s curved outline wires are drawn as chords: the QT Py ESP32-C3''s
   rounded corners are 45-degree chamfers'
-status: in-review
+status: done
 priority: P3
 created: '2026-10-13'
-touches:
-- tools/eagle.py
-- tests/rules/test_eagle.py
-- tools/compose_board_3d.py
-- tests/rules/test_compose_board_3d.py
 ---
 
 Found by OH-229's comparison (2026-10-13): Adafruit's own whole-board STEP of the QT Py ESP32-C3 (Adafruit_CAD_Parts @ c128bceb, MIT) has four true r = 2.54 mm rounded corners, and the composed model draws 45-degree chamfers there -- visible in C:/Users/Alexyodude/scratch/oh229/shots/composed-qtpy-default.png against vendor-qtpy-default.png. The cause is that tools/eagle.py takes an EAGLE wire's endpoints and ignores its `curve` attribute (the bulge in degrees): `extent_mm` says so for the bounding box (eagle.py ~345-352), and the routed copper counts curved wires as unread (~937-953) -- but the board OUTLINE built from Dimension wires is drawn through the chord with nothing printed.
@@ -38,3 +33,5 @@ Boards with a curved Dimension wire: listed and counted by `test_every_board_wit
 **Note 2026-10-14:** 2026-10-14 borrows tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py (OH-163's, passed on from OH-231 at its close) for the follow-up: the Uno outline test's rounds/sharp-corners assertion, and compose_board_3d.ARC_CHORD_MM = eagle.ARC_CHORD_MM with the equality test dropped. They go back to OH-163 at close.
 
 **Note 2026-10-14 (composer follow-up, OH-231 closed):** `compose_board_3d.ARC_CHORD_MM = eagle.ARC_CHORD_MM` (one number; the equality test is gone); the Uno outline test now asserts its three r = 1 mm rounds (each more than two points) and six sharp corners instead of `len(ring) == 12`. Seen to fail: the composer constant set to 0.25 fails `test_a_milled_hole_is_a_cutout_flattened_as_an_arc_is` (the only one of the arc, hole and Uno tests that does); `eagle.arc_points` patched to return the two ends fails the Uno test ("each of the Uno's three r = 1 mm corners is an arc, not a chord"). `--check` is byte-identical to the pre-patch tree apart from a model fetch line caused by a cold cache. test_eagle, test_compose_board_3d, test_import_3d_model: 371 passed, 2 skipped, 2 failed, both failing identically before the patch because third_party/modelled/USB2.0-TYPE-C_short.obj is not built in lane4 (`test_a_usb_socket_faces_off_the_board_a_cable_can_reach`, `test_the_usb_c_shell_is_an_obround_and_not_a_box`).
+
+**Note 2026-10-14:** 2026-10-14 DONE. Merged to master at 2690cce (lane4): arcs (4d556f4, 9d895ab), confirmation LOWs (148ed48), the two tests that could not fail (33a7827), and the follow-up (2690cce: the composer takes ARC_CHORD_MM from eagle; the Uno test counts its three r = 1 mm rounds and six sharp corners). Confirmation pass APPROVE: the 14,400-arc sweep is clean, the M3/M5 mutants are killed, and --check matched 52d16b1. On master after a full model build and recompose: test_compose_board_3d + test_eagle + test_import_3d_model + test_inventory 452 passed, 1 skipped; TWINS geometry 38, model 38, pins 38, runs 26. Loans returned to OH-163: tools/eagle.py, tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py. tests/rules/test_eagle.py, new here, goes with eagle.py to OH-163.
