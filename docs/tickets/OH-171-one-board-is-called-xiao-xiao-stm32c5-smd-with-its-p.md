@@ -2,7 +2,7 @@
 id: OH-171
 title: One board is called XIAO-XIAO STM32C5-SMD, with its prefix doubled, and the
   name is the key everything joins on
-status: open
+status: done
 priority: P3
 created: '2026-09-06'
 touches:
@@ -12,15 +12,6 @@ touches:
 - README.md
 - docs/research/board-models/README.md
 - docs/research/board-models/sources.json
-- tools/compose_board_3d.py
-- tools/import_3d_model.py
-- tests/rules/test_compose_board_3d.py
-- tests/rules/test_import_board.py
-- tools/import_pindefs.py
-- tests/rules/test_import_pindefs.py
-- tests/rules/test_inventory.py
-- tests/webui/test_pin_view.py
-- CLAUDE.md
 ---
 
 One board is called `XIAO-XIAO STM32C5-SMD`, with the prefix doubled and a space where every sibling has a hyphen.
@@ -58,3 +49,5 @@ Found while finishing OH-170. Not fixed there: a rename is not a pin definition,
 **Note 2026-10-14:** 2026-10-14 starts in lane3. Plan: C:/Users/Alexyodude/scratch/oh171/plan.md (opus design pass, read-only). Seeed's own files give the name: footprint file XIAO-STM32C5-SMD.kicad_mod (only its line 1 declares 'XIAO-XIAO STM32C5-SMD'), symbol XIAO-STM32C5-SMD, product 'XIAO STM32C5 v1.0', board file 'XIAO STM32C5.kicad_pcb'. The key becomes XIAO-STM32C5-SMD; the vendor's declared string is kept as source.declared_name. Borrows from OH-163 (compose_board_3d, import_3d_model, test_compose_board_3d, test_import_board), from OH-172 (import_pindefs, test_import_pindefs, test_inventory), test_pin_view from OH-161 and CLAUDE.md from OH-149; claims the unclaimed board files, catalogue, its test, README and the board-models research files.
 
 **Note 2026-10-14:** 2026-10-14, b631153: the XIAO STM32C5 is filed as XIAO-STM32C5-SMD (files, JSON board and image.file, catalogue, composer, 3D index, pindefs registry, tests, README). Seeed's doubled declaration is kept in source.declared_name; source.footprint is the file name as for the 25 siblings; the IRREGULAR row is gone; the test_import_board .replace() is gone. No importer change (it already names a board after the file). Fail first, seen before the rename: test_no_xiao_board_is_named_rather_than_parsed -> AssertionError: assert ['XIAO-XIAO STM32C5-SMD'] == []; test_no_board_file_repeats_its_own_prefix -> AssertionError: a board file repeats its own prefix: ['XIAO-XIAO STM32C5-SMD']. Both pass after. import_pindefs --write-boards reports the renamed file unchanged. Inventory TWINS unchanged: geometry 38, model 38, pins 38, runs 26. git grep XIAO-XIAO outside tickets/HANDOFF lists only vendor-string files. Also fixed CLAUDE.md and board-models README s5 stale sentences (OH-231). Loans from OH-163, OH-172, OH-161, OH-149 still to be returned.
+
+**Note 2026-10-14:** 2026-10-14 DONE. Merged to master (lane3, b631153). Review APPROVE: no key left behind (every remaining XIAO-XIAO is the vendor's declared string); the JSON's declared_name is what import_board.py writes; chip_for gives STM32C5; both guard tests fail on eec69aa. With cores rebuilt in lane3: tests/webui + test_import_board + test_import_pindefs + test_inventory gave 1266 passed, 20 skipped, 1 failed (OH-166's test_a_failed_build_leaves_nothing_behind). TWINS unchanged: geometry 38, model 38, pins 38, runs 26. LOWs not done: the CLAUDE.md paragraph's line wrapping is uneven; the JSON has no source.file, like its import_kicad_board-era siblings. Loans returned: compose_board_3d, import_3d_model, test_compose_board_3d and test_import_board to OH-163; import_pindefs, test_import_pindefs and test_inventory to OH-172; test_pin_view to OH-161; CLAUDE.md to OH-149.
