@@ -57,6 +57,8 @@ touches:
 - webui/static/emulator.js
 - tests/webui/test_mcp9808.py
 - tests/webui/test_pin_view.py
+- webui/compile.py
+- tests/webui/test_compile.py
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
@@ -800,3 +802,5 @@ CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: opt
 **Note 2026-10-14:** 2026-10-14 tests/webui/test_pin_view.py back from OH-171 (done); it is still on loan here from OH-172.
 
 **Note 2026-10-15:** 2026-10-14 lends webui/compile.py and tests/webui/test_compile.py to OH-166 for its item 1 (a build's temp directory under a root the caller controls). Slice 2 does not touch either file. They come back when OH-166's item 1 lands.
+
+**Note 2026-10-15:** 2026-10-15 webui/compile.py and tests/webui/test_compile.py back from OH-166 (its item 1 landed: build takes root=None, and the recipe guard is an ast check).
