@@ -258,6 +258,15 @@ class ServiceFault(AbiError):
         self.address = address
 
 
+def _fits_32(name: str, number: int, address: int) -> None:
+    """Refuse a number the C side's `uint32_t` would take truncated."""
+    if not 0 <= number <= 0xFFFFFFFF:
+        raise AbiError(
+            f"{name} for 0x{address:08x} must fit in 32 bits, got {number!r}: "
+            f"ctypes would pass it as {number & 0xFFFFFFFF:#010x} without "
+            f"saying so")
+
+
 class Registers(ctypes.Structure):
     """Mirrors `Riscv32Registers`.
 
@@ -626,7 +635,11 @@ class Cpu:
     # --- memory-mapped registers -----------------------------------------
 
     def map_register(self, address: int, value: int = 0) -> None:
-        """An address that holds a word: reads answer it, writes replace it."""
+        """An address that holds a word: reads answer it, writes replace it.
+
+        A `value` that does not fit 32 bits is refused with the value: ctypes
+        would pass `1 << 33` as 0 without saying so."""
+        _fits_32("value", value, address)
         self._lib.riscv32_map_register(self._handle, address, value)
 
     def map_alias(self, address: int, target: int, op: str,
@@ -786,6 +799,7 @@ class Cpu:
         A start through an unreadable gate, for a key nothing holds, or with
         `result` or `status` unmapped faults naming `control`. See `cpu.h`.
         """
+        _fits_32("value", value, control)
         self._lib.riscv32_map_sampler(
             self._handle, control, value, start_mask, key_mask, result, status,
             done_mask, enable, enable_mask,
@@ -831,7 +845,8 @@ class Cpu:
         does not fit 32 bits, which ctypes would pass truncated.
         """
         for name, mask in (("ring_mask", ring_mask),
-                           ("write_trigger", write_trigger)):
+                           ("write_trigger", write_trigger),
+                           ("value", value)):
             if not 0 <= mask <= 0xFFFFFFFF:
                 raise AbiError(
                     f"{name} must fit in 32 bits, got {mask!r}: ctypes would "

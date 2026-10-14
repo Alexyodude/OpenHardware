@@ -1198,8 +1198,9 @@ function renderBoardState(state) {
   $("where").textContent = hex(pc.value, pc.width / 4);
   // The watched words, beside the box that asked for them (OH-140).
   $("board-watch-note").textContent = (state.words ?? [])
-    .map((word) => (word.value === null
-      ? `0x${word.address.toString(16)}: ${word.why}`
+    .map((word) => (word.value == null
+      // `why` is the core's sentence and already names the address.
+      ? (word.why ?? `0x${word.address.toString(16)} has no value`)
       : `0x${word.address.toString(16)} = 0x${word.value
         .toString(16).padStart(8, "0")}`))
     .join("  ");

@@ -80,9 +80,9 @@ that returns and posts a name back.
               memory: {at, bytes[]}, words: [{address, value, why?}],
               uart: {present, bytes, dropped_bytes, text, undecodable_bytes},
               listing: {present, at, lines[]}}
-              A word that cannot be shown without changing it -- a FIFO with
-              nothing held -- is {address, value: null, why}; the rest of the
-              state still arrives.
+              A word the core refuses to show -- an empty FIFO, an alias onto
+              a FIFO or a doorbell, an alias onto nothing -- is {address,
+              value: null, why}; the rest of the state still arrives.
 
     POST /api/board/step?words=...   {"count": 1}
       -> 200 the state, as /api/board/state answers it; a step that stops

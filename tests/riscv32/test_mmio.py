@@ -2059,3 +2059,22 @@ def test_a_peek_leaves_the_fault_record_as_the_last_instruction_left_it(fifo):
              fifo._lib.riscv32_fault_was_fetch(fifo._handle),
              fifo._lib.riscv32_fault_reason(fifo._handle))
     assert after == record
+
+
+def test_a_reset_value_past_32_bits_is_refused_and_not_truncated(cpu):
+    """`1 << 33` reached the core as 0 on every call that takes a `value`."""
+    calls = (
+        lambda: cpu.map_register(I2C_CLK_CONF, 1 << 33),
+        lambda: cpu.map_register(I2C_CLK_CONF, -1),
+        lambda: cpu.map_doorbell(BELL, value=1 << 33, ring_mask=RING),
+        lambda: cpu.map_sampler(
+            BELL, value=1 << 33, start_mask=1 << 31, key_mask=0,
+            result=I2C_CLK_CONF, status=I2C_CLK_CONF, done_mask=1,
+            enable=I2C_CLK_CONF, enable_mask=1),
+    )
+    for index, call in enumerate(calls):
+        with pytest.raises(abi.AbiError) as caught:
+            call()
+        assert "value" in str(caught.value) and "32 bits" in str(caught.value), (
+            index, str(caught.value))
+    assert not cpu.is_mapped(I2C_CLK_CONF) and not cpu.is_mapped(BELL)
