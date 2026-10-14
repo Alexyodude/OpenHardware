@@ -2044,6 +2044,12 @@ class Board:
     #: Every reason here cites where it was read. A reason is a claim like any
     #: other and gets no easier ride for being about an absence.
     reasons: tuple[tuple[str, str], ...] = ()
+    #: On a board no fetched package covers: what is published for it that this
+    #: tool does not read, as a clause the board file's `assumption` appends to
+    #: "no board-support package this tool fetches covers this board at all".
+    #: Empty says nothing more, and the sentence is then the same for every
+    #: such board (OH-231's second review: it had named Seeed in a generic text).
+    not_read: str = ""
 
 
 PACKAGES = {
@@ -2625,7 +2631,9 @@ _STM32C5_ZERO_OHM = (
 #: **The pads that are rails or nothing** (OH-231). Their generic reason said
 #: "no board-support package covers this board at all, and the vendor's own CAD
 #: does not name a pin beside this pad", which is false of a pad that is ground:
-#: each is read from Seeed's board file instead. `NC` is three pads on test
+#: each is read from Seeed's board file instead, by the net its pad lands on --
+#: except pad 35, the `GND` pad under the module, which lands on no test point
+#: and no U10 pad, so it is ground by its label and the reason says so. `NC` is three pads on test
 #: points TP16-TP18, each on a net of that one pad (`unconnected-(TP16-T-Pad1)`
 #: and so on); `GND` reaches the MCU on `VREF-` and four `VSS` pads; `VBAT`
 #: and `VBUS` reach no pad of it; `VOUT_3V3` reaches it on `VREF+` and two
@@ -2636,7 +2644,9 @@ _STM32C5_RAILS = (
            "a net of that one pad, so it is connected to nothing, the MCU "
            "included"),
     ("GND", "the ground rail, not a pin: in Seeed's `XIAO STM32C5.kicad_pcb` the "
-            "net `GND` reaches the STM32C5A3CG only on its `VREF-` and `VSS` pads"),
+            "net `GND` reaches the STM32C5A3CG only on its `VREF-` and `VSS` pads. "
+            "Pad 35, under the module, lands on no test point there and is ground "
+            "by its label alone, not by a join"),
     ("VBAT", "a supply rail, not a pin: in Seeed's `XIAO STM32C5.kicad_pcb` the "
              "net `VBAT` reaches no pad of the STM32C5A3CG"),
     ("VBUS", "a supply rail, not a pin: in Seeed's `XIAO STM32C5.kicad_pcb` the "
@@ -2781,6 +2791,8 @@ BOARDS = {
             tuple(f"D{n}" for n in range(13)) + ("D15", "SWDIO", "SWCLK", "STM32C5_BOOT"),
             nets={"STM32C5_RST": "~{STM32C5_RESET}"}),),
         reasons=_STM32C5_ZERO_OHM + _STM32C5_USB + _STM32C5_CAN + _STM32C5_RAILS,
+        not_read="Seeed's own Zephyr board for the STM32C5 (platform-seeedboards, "
+                 "OH-231) is published and is not read here",
     ),
     "XIAO-nRF52840-DIP": Board("nRF52840", _NRF52840),
     "XIAO-nRF52840-SMD": Board("nRF52840", _NRF52840, reasons=_NRF52840_SWD),
@@ -3826,7 +3838,8 @@ def assumption_for(chip: str, described: bool, covered: bool,
                    resolved: int = 0, unresolved: int = 0,
                    keyed_by: tuple[str, ...] = (), manifest: bool = False,
                    cad: tuple[str, ...] = (), answered: tuple[str, ...] = (),
-                   captions: tuple[tuple[str, str], ...] = ()) -> str:
+                   captions: tuple[tuple[str, str], ...] = (),
+                   not_read: str = "") -> str:
     """What a board file says about its own `pin`, `chip_pin` and `chip_index`.
 
     Three shapes, because three things can be true of a board. `pin` is null
@@ -3893,11 +3906,9 @@ def assumption_for(chip: str, described: bool, covered: bool,
         "board implementation (webui/pinmap.py), and none exists for this board. "
     )
     if not covered:
-        why = (
-            f"because no board-support package covers this board at all -- none "
-            f"that this tool fetches does, and Seeed's own Zephyr board for the "
-            f"{chip} (platform-seeedboards, OH-231) is not read here"
-        )
+        why = "because no board-support package this tool fetches covers this board at all"
+        if not_read:
+            why += f" -- {not_read}"
         if not resolved:
             return head + (
                 f"`chip_pin` and `chip_index` are null on every pad here, and "
@@ -4102,7 +4113,7 @@ def filled_board(
                 report["chip"], described, covered, spellings,
                 report["resolved"], report["unresolved"], keyed_by,
                 manifest=name in MANIFEST, cad=cad, answered=answered,
-                captions=captions,
+                captions=captions, not_read=BOARDS[name].not_read,
             )
             filled_document["pindefs"] = pindefs
     if "pindefs" not in filled_document:

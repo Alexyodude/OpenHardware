@@ -713,11 +713,22 @@ def test_the_xiao_stm32c5_row_states_no_licence_and_pins_its_archive():
     assert row.licence.evidence is Evidence.OPENED
     assert "recorded as seen, not taken as a grant" in row.licence.cite
     assert "OH-234" in row.licence.cite
-    # The site-wide page the wiki links, read and dated (OH-231's review): it
-    # grants nothing and says nothing of the archives, and the row says so.
-    assert "https://wiki.seeedstudio.com/License/, read 2026-10-13" in row.licence.cite
-    assert "No license, express, implied or otherwise, is granted" in row.licence.cite
-    assert "nothing of the archives" in row.licence.cite
+    # The site-wide page the wiki links, fetched and dated (OH-231's reviews):
+    # it licenses documents under CC BY-SA 4.0 and software under MIT, and
+    # leaves open which, if either, covers the archive. The row records all
+    # three sections and the disclaimer, and does not decide.
+    cite = row.licence.cite
+    assert "https://wiki.seeedstudio.com/License/, fetched 2026-10-14" in cite
+    assert ("'This work (product documents, tutorials and associated images) are "
+            "licensed under a Creative Commons Attribution-ShareAlike 4.0 "
+            "International License.'") in cite
+    assert "are licensed under MIT License unless otherwise specified.'" in cite
+    assert "The use of such items are governed by their respective licenses.'" in cite
+    assert "No license, express, implied or otherwise, is granted" in cite
+    assert "does not say which section, if any, covers a KiCad archive" in cite
+    assert "CC BY-SA 4.0 and demo software" in row.licence.covers
+    assert "nothing of the archives" not in cite + row.licence.covers
+    assert "disclaimer that says nothing" not in cite + row.licence.covers
     assert row.fetch.transport is Transport.HTTPS_ARCHIVE
     assert "1,559,346 bytes" in row.size
     assert "676070c1e35935869c39a52a624dec7cb937850e6d6e12401b061786aab35b1b" in row.size

@@ -952,7 +952,7 @@ def test_a_board_no_package_covers_counts_only_the_pins_the_gate_takes(tmp_path,
             tmp_path, {"D0": ChipPin("PA13"), "EN": ChipPin("RUN")}),)),
     })
     assumption = pindefs.filled_board("FAKE-NOTHING", bsp, boards)["assumption"]
-    assert "no board-support package covers this board at all" in assumption, assumption
+    assert "no board-support package this tool fetches covers this board at all" in assumption, assumption
     assert "Those 2 pads" not in assumption, assumption
     assert "spelling this tool recognises" not in assumption, assumption
     assert "The other 2 were read from the vendor's own CAD" in assumption, assumption
@@ -1318,10 +1318,11 @@ def test_a_board_no_package_covers_says_so_rather_than_that_its_labels_are_missi
     """"No package covering this board defines this label" is vacuously true
     of all 35 pads of the XIAO STM32C5 and reads as though a package had been
     consulted. The fact OH-26 recorded is that the count of packages covering
-    it is zero -- none this tool fetches; Seeed's own Zephyr board is unread
-    (OH-231) -- so the pads, the
+    it is zero -- none this tool fetches -- so the pads, the
     `assumption` and the `derivation` all say that instead of citing a
-    `packages` list that is empty."""
+    `packages` list that is empty. The sentence is the same for every such
+    board: a fact about one vendor's unread package reaches it only through
+    that board's own `Board.not_read` (OH-231's second review)."""
     bsp, boards = _fake_tree(tmp_path, monkeypatch)
     covered = dict(pindefs.BOARDS)
     _board_file(boards, "FAKE-NOTHING", [("D0", "1"), ("GND", "12")])
@@ -1343,8 +1344,16 @@ def test_a_board_no_package_covers_says_so_rather_than_that_its_labels_are_missi
         document["pindefs"]["derivation"])
     assert {pad["why_null"] for pad in document["pads"]} == {pindefs.NO_PACKAGE_AT_ALL}
     assumption = document["assumption"]
-    assert "no board-support package covers this board at all" in assumption
-    assert "Zephyr board for the NOTHING" in assumption
+    assert "because no board-support package this tool fetches covers this board at all" in assumption
+    for vendor_fact in ("Seeed", "Zephyr", "platform-seeedboards", "OH-231"):
+        assert vendor_fact not in assumption, (vendor_fact, assumption)
+    # ...and a board that does name something it does not read gets it appended.
+    _board_file(boards, "FAKE-NAMED", [("D0", "1"), ("GND", "12")])
+    monkeypatch.setattr(pindefs, "BOARDS", dict(pindefs.BOARDS) | {
+        "FAKE-NAMED": pindefs.Board("NOTHING", (), not_read="a vendor's own board is published"),
+    })
+    named = pindefs.filled_board("FAKE-NAMED", bsp, boards)["assumption"]
+    assert "this board at all -- a vendor's own board is published" in named, named
     assert "the join is ready, not made" not in assumption, (
         "there is nothing here to join, so the undescribed board's sentence is wrong"
     )
@@ -1403,7 +1412,7 @@ def test_the_committed_stm32c5_file_is_the_one_no_package_covers():
     ]
     borrowed = sorted(
         name for name in BOARDS
-        if "no board-support package covers this board at all" in json.loads(
+        if "no board-support package this tool fetches covers this board at all" in json.loads(
             pindefs.board_path(name).read_text(encoding="utf-8"))["assumption"]
     )
     assert borrowed == ["XIAO-XIAO STM32C5-SMD"]
@@ -1425,7 +1434,10 @@ def test_the_committed_stm32c5_file_is_the_one_no_package_covers():
     reasons = {pad["why_null"] for pad in document["pads"] if not pad["chip_pin"]}
     assert pindefs.NO_PACKAGE_AT_ALL not in reasons
     assert "17 of these 35 pads" in document["assumption"]
-    assert "Zephyr board for the STM32C5 (platform-seeedboards" in document["assumption"]
+    assert ("this board at all -- Seeed's own Zephyr board for the STM32C5 "
+            "(platform-seeedboards, OH-231) is published and is not read here"
+            ) in document["assumption"]
+    assert pindefs.BOARDS["XIAO-XIAO STM32C5-SMD"].not_read in document["assumption"]
     assert "no Zephyr board and no vendor core" not in document["assumption"]
 
 
@@ -5036,6 +5048,10 @@ def test_the_xiao_stm32c5_reset_and_boot_are_captions_and_the_rest_say_what_they
         assert all(pad["chip_pin"] is None and pad["why_null"] == reasons[label]
                    for pad in pads[label]), label
     assert "VBAT" in on and "VBUS" in on
+    # Pad 35 lands on no test point (the position-join test holds that), so
+    # the reason says it is ground by its label and not by a join (N3).
+    assert "Pad 35, under the module, lands on no test point" in reasons["GND"]
+    assert "by its label alone, not by a join" in reasons["GND"]
     assert all(re.match(r"(VREF\+|VDD)_\d+$", one) for one in mcu["VOUT_3V3"]), mcu["VOUT_3V3"]
 
     # The boot pad is a GPIO joined to a function, which the assumption says in

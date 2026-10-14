@@ -378,21 +378,38 @@ SOURCES: tuple[Source, ...] = (
         "676070c1e35935869c39a52a624dec7cb937850e6d6e12401b061786aab35b1b",
         licence=Licence(
             name=NONE_STATED,
-            covers="not stated: the zip holds no LICENSE file, and the site-wide "
-            "/License/ page the wiki links is a disclaimer that says nothing of "
-            "downloadable files",
+            covers="not stated for the archive: the zip holds no LICENSE file, and "
+            "the site-wide /License/ page the wiki links licenses product "
+            "documents, tutorials and associated images under CC BY-SA 4.0 and "
+            "demo software and code examples under MIT, without saying which, "
+            "if either, covers a linked KiCad archive",
             sampled=False,
             evidence=Evidence.OPENED,
             cite="a LOGO_CC_BY-SA_4.0 symbol reading 'CC BY-SA 4.0' on each of "
             "the zip's six .kicad_sch files: recorded as seen, not taken as a "
             "grant; whether it is one is for the owner, OH-234. "
-            "https://wiki.seeedstudio.com/License/, read 2026-10-13: 'No "
-            "license, express, implied or otherwise, is granted hereby under "
-            "any patents, copyrights or other intellectual property rights of "
-            "Seeed Studio or others', and 'You should not alter, modify, copy, "
-            "or otherwise misappropriate any Seeed Studio product'; it names "
-            "'board design files' only in a military-use clause, and says "
-            "nothing of the archives on files.seeedstudio.com",
+            "https://wiki.seeedstudio.com/License/, fetched 2026-10-14 (HTTP "
+            "200, 52,586 bytes; first read 2026-10-13), has five sections. "
+            "'IMPORTANT NOTICE AND DISCLAIMER': 'No license, express, implied "
+            "or otherwise, is granted hereby under any patents, copyrights or "
+            "other intellectual property rights of Seeed Studio or others.' and "
+            "'You should not alter, modify, copy, or otherwise misappropriate "
+            "any Seeed Studio product, whether in whole or in part.'; "
+            "'board design files' appears only in its military-use clause. "
+            "'Documents and Images': 'This work (product documents, tutorials "
+            "and associated images) are licensed under a Creative Commons "
+            "Attribution-ShareAlike 4.0 International License.' 'Software "
+            "Library': 'All demo software, code examples embedded in the "
+            "document and any software libraray provided with the product "
+            "document are licensed under MIT License unless otherwise "
+            "specified.' 'Thirdparty content': 'The resources provided with the "
+            "product documents also contains datasheets, software examples, "
+            "images and other content copyrighted by 3rd party authors and "
+            "companies. All such items are copyright of respective owners. The "
+            "use of such items are governed by their respective licenses.' "
+            "'Tech Support & Product Discussion' is not about licensing. The "
+            "page does not say which section, if any, covers a KiCad archive "
+            "on files.seeedstudio.com: that is the owner's, OH-234",
         ),
         fetch=Fetch(
             transport=Transport.HTTPS_ARCHIVE,
