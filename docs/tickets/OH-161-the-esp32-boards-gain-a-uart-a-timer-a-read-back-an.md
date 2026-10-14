@@ -9,8 +9,6 @@ touches:
 - webui/boards/esp32c3.py
 - tests/webui/test_board_run.py
 - webui/arduino/**
-- webui/compile.py
-- tests/webui/test_compile.py
 - webui/boards/esp32c5.py
 - webui/boards/esp32c6.py
 - tests/webui/test_feather_esp32c6_board.py
@@ -800,3 +798,5 @@ CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: opt
 **Note 2026-10-14:** 2026-10-14 lends tests/webui/test_pin_view.py (itself on loan from OH-172) to OH-171 for the STM32C5 board key rename; it comes back here when OH-171 closes.
 
 **Note 2026-10-14:** 2026-10-14 tests/webui/test_pin_view.py back from OH-171 (done); it is still on loan here from OH-172.
+
+**Note 2026-10-15:** 2026-10-14 lends webui/compile.py and tests/webui/test_compile.py to OH-166 for its item 1 (a build's temp directory under a root the caller controls). Slice 2 does not touch either file. They come back when OH-166's item 1 lands.
