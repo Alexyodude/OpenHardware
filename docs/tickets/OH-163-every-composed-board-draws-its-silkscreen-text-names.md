@@ -13,8 +13,6 @@ touches:
 - tools/eagle.py
 - tests/rules/test_eagle.py
 - tests/rules/test_import_board.py
-- tools/compose_board_3d.py
-- tests/rules/test_compose_board_3d.py
 - tools/import_3d_model.py
 - tests/rules/test_import_3d_model.py
 ---
@@ -168,3 +166,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-15:** Lends tools/compose_board_3d.py, tests/rules/test_compose_board_3d.py, tools/import_3d_model.py and tests/rules/test_import_3d_model.py to OH-197 (the Uno's D2/D3 drawn as the 1206 chip diode Bourns' datasheet states); they come back when OH-197 closes.
 
 **Note 2026-10-15:** Takes back tools/compose_board_3d.py, tests/rules/test_compose_board_3d.py, tools/import_3d_model.py and tests/rules/test_import_3d_model.py from OH-197, which is done.
+
+**Note 2026-10-15:** Lends tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py to OH-199 (the composer's latent edges: a skipped board's stale index entry, the skipped signal, a test that downloads, absent-by-name); they come back when OH-199's slice lands.
