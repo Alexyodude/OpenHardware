@@ -2087,3 +2087,113 @@ def test_a_refused_drive_leaves_a_kept_part_as_it_was():
         assert session.devices["u1"] is kept
         assert (kept.address, kept.pointer) == (0x18, 7), "held anew only on success"
         assert len(session.inputs) == 1
+
+
+# --- Wire, compiled and run against the controller (OH-161 step 5, slice 1c) --
+#
+# The hand-assembled programs above are the register sequence `Wire.cpp` must
+# produce; this is `Wire.cpp` producing it. A sketch is compiled through
+# `compile.py`, run on the C3, and an MCP9808 attached on D4/D5 through
+# `drive`'s devices answers the two ID reads of DS25095A 5.1.4 and 5.1.5:
+# the manufacturer ID 0x0054 (84) and the device ID 0x0400 (1024).
+
+#: The first read ends its write with a STOP, the second with `false`, which
+#: defers the write into `requestFrom` as a repeated START, so both shapes of
+#: a read-back are run. Each read prints `endTransmission`'s code, how many
+#: bytes `requestFrom` got, and the 16-bit value (-1 where it got none).
+WIRE_SKETCH = """
+#include <Wire.h>
+static void id_read(uint8_t pointer, bool stop) {
+  Wire.beginTransmission(0x18);
+  Wire.write(pointer);
+  Serial.println(Wire.endTransmission(stop));
+  uint8_t got = Wire.requestFrom(0x18, 2);
+  Serial.println(got);
+  int high = Wire.read();
+  int low = Wire.read();
+  Serial.println(got == 2 ? (high << 8) | low : -1);
+}
+void setup() {
+  Wire.begin();
+  id_read(6, true);
+  id_read(7, false);
+}
+void loop() { }
+"""
+
+
+def _printed_tokens(session: api.BoardSession, count: int,
+                    limit: int = 3_000_000) -> list[str]:
+    """Run until the sketch has printed `count` words, or `limit` steps."""
+    while session.retired < limit:
+        session.run(100_000)
+        words = session.state()["uart"]["text"].split()
+        if len(words) >= count or session.status != "running":
+            return words
+    return session.state()["uart"]["text"].split()
+
+
+def _wire_session() -> api.BoardSession:
+    needs_riscv32()
+    from webui import compile as compiler
+
+    try:
+        built = compiler.build(C3_BOARD, WIRE_SKETCH)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    assert built.ok, built.diagnostics
+    return api.load_firmware(C3_BOARD, built.image, base=compiler.recipe_for(C3_BOARD).base)
+
+
+def test_a_wire_sketch_reads_the_mcp9808_ids_through_the_controller():
+    with _wire_session() as session:
+        session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
+        words = _printed_tokens(session, 6)
+        assert session.status == "running", (session.status, session.detail)
+        assert words == ["0", "2", "84", "0", "2", "1024"], (
+            f"status, bytes and value of each read: {words}")
+
+
+def test_a_wire_sketch_with_nothing_on_the_bus_is_nacked_and_reads_nothing():
+    with _wire_session() as session:
+        words = _printed_tokens(session, 6)
+        assert session.status == "running", (session.status, session.detail)
+        assert words == ["2", "0", "-1", "0", "0", "-1"], (
+            f"a NACKed address is endTransmission's 2 and requestFrom's 0 "
+            f"bytes; the deferred write of the second read reports 0 because "
+            f"it has not gone out yet: {words}")
+
+
+#: A sketch that never calls `begin`: the controller's function clock is still
+#: closed, so nothing answers, and `endTransmission` gives up after Wire's
+#: 50 ms of SYSTIMER (arduino-esp32's `_timeOutMillis`) and returns 5.
+WIRE_NO_BEGIN_SKETCH = """
+#include <Wire.h>
+void setup() {
+  Wire.beginTransmission(0x18);
+  Wire.write(6);
+  Serial.println(Wire.endTransmission());
+}
+void loop() { }
+"""
+
+
+def test_a_wire_sketch_that_never_began_times_out_with_a_closed_gate():
+    needs_riscv32()
+    from tests.webui.esp32_timing import steps_per_millisecond
+    from webui import compile as compiler
+
+    try:
+        built = compiler.build(C3_BOARD, WIRE_NO_BEGIN_SKETCH)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    assert built.ok, built.diagnostics
+    base = compiler.recipe_for(C3_BOARD).base
+    with api.load_firmware(C3_BOARD, built.image, base=base) as session:
+        session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
+        words = _printed_tokens(session, 1, limit=20_000_000)
+        assert session.status == "running", (session.status, session.detail)
+        assert words == ["5"], f"a part was on the bus, and the gate was closed: {words}"
+        fifty = 50 * steps_per_millisecond(esp32c3)
+        assert session.retired >= fifty, (
+            f"gave up after {session.retired} steps, before 50 ms ({fifty})")

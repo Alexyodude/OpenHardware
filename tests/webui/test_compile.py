@@ -1678,6 +1678,42 @@ def test_the_oh_board_header_restates_the_descriptions_own_numbers(variant):
     if hasattr(description, "PCR_SARADC_CONF"):
         assert int(defines["OH_ADC_BUS_CLOCK"], 16) == description.PCR + description.PCR_SARADC_CONF
         assert int(defines["OH_ADC_BUS_CLOCK_EN"], 16) == description.PCR_SARADC_REG_CLK_EN
+    # I2C0, on the same terms (OH-161 step 5): the header carries it only
+    # where the description maps a controller, because `Wire.h` is declared
+    # by the macros and the recipe's `wire` flag by the same fact. The C5 and
+    # C6 have none until their own slices, and the next test holds the flag.
+    assert ("OH_I2C_CTR" in defines) == hasattr(description, "I2C"), variant
+    if hasattr(description, "I2C"):
+        i2c = description.I2C
+        for define, offset in (
+            ("OH_I2C_CTR", description.I2C_CTR), ("OH_I2C_FIFO_CONF", description.I2C_FIFO_CONF),
+            ("OH_I2C_DATA", description.I2C_DATA), ("OH_I2C_INT_RAW", description.I2C_INT_RAW),
+            ("OH_I2C_INT_CLR", description.I2C_INT_CLR), ("OH_I2C_COMD0", description.I2C_COMD0),
+        ):
+            assert int(defines[define], 16) == i2c + offset, define
+        for define, value in (
+            ("OH_I2C_CTR_MS_MODE", description.I2C_MS_MODE),
+            ("OH_I2C_CTR_TRANS_START", description.I2C_TRANS_START),
+            ("OH_I2C_INT_NACK", description.I2C_INT_NACK),
+            ("OH_I2C_INT_TRANS_COMPLETE", description.I2C_INT_TRANS_COMPLETE),
+            ("OH_I2C_ACK_EN", description.I2C_ACK_EN),
+            ("OH_I2C_GATE", description.I2C_GATE[0]),
+            ("OH_I2C_GATE_EN", description.I2C_GATE[1]),
+            ("OH_GPIO_SIG_IN_SEL", description.GPIO_SIG_IN_SEL),
+            ("OH_GPIO_FUNC_IN_SEL_CFG0", gpio + description.GPIO_FUNC_IN_SEL_CFG0),
+            ("OH_GPIO_FUNC_OUT_SEL_CFG0", gpio + description.GPIO_FUNC_OUT_SEL_CFG0),
+            ("OH_IO_MUX_MCU_SEL_GPIO", description.IO_MUX_FUNC_GPIO << description.IO_MUX_MCU_SEL_SHIFT),
+            ("OH_IO_MUX_MCU_SEL_MASK", description.IO_MUX_MCU_SEL_MASK << description.IO_MUX_MCU_SEL_SHIFT),
+        ):
+            assert int(defines[define], 16) == value, define
+        for define, name in (
+            ("OH_I2C_OP_RSTART", "RSTART"), ("OH_I2C_OP_WRITE", "WRITE"),
+            ("OH_I2C_OP_READ", "READ"), ("OH_I2C_OP_STOP", "STOP"),
+        ):
+            assert int(defines[define]) == description.I2C_OP[name], define
+        assert int(defines["OH_I2C_OP_SHIFT"]) == description.I2C_OP_SHIFT
+        assert int(defines["OH_I2C_SCL_SIGNAL"]) == description.I2CEXT0_SCL_IDX
+        assert int(defines["OH_I2C_SDA_SIGNAL"]) == description.I2CEXT0_SDA_IDX
 
     ram_base = getattr(description, ram)
     ram_size = getattr(description, f"{ram}_SIZE")
@@ -1688,6 +1724,58 @@ def test_the_oh_board_header_restates_the_descriptions_own_numbers(variant):
     assert f"ORIGIN = 0x{ram_base:08X}" in script
     assert f"LENGTH = {description.IROM_SIZE // (1 << 20)}M" in script
     assert f"LENGTH = {ram_size // (1 << 10)}K" in script
+
+
+def test_the_i2c_bits_the_description_does_not_carry_are_the_vendors_own():
+    """`oh_board.h` restates three bits the description has no name for: the
+    FIFO_CONF resets `Wire` pulses, and the OUT_SEL_CFG field that gives the
+    pad's output enable to GPIO_ENABLE. Held to the framework copy's headers
+    (ESP-IDF 4.4.7), the source the description cites.
+
+    **`OH_I2C_ACK_VAL` is held to nothing here, and that is a statement.**
+    The vendor's headers have no define for a command word's bit 10 (the
+    HAL's `i2c_ll.h:33-39` gives it as a bitfield) and the model ignores the
+    ACK a master sends, so neither a header nor a run can contradict it."""
+    include = (compiler.PACKAGES / "framework-arduinoespressif32" / "tools" / "sdk"
+               / "esp32c3" / "include" / "soc" / "esp32c3" / "include" / "soc")
+    if not (include / "i2c_reg.h").is_file():
+        pytest.skip("SKIPPED: no framework-arduinoespressif32; pio pkg install")
+    header = (pathlib.Path(compiler.ARDUINO_LITE) / "variants" / "xiao_esp32c3"
+              / "oh_board.h").read_text(encoding="utf-8")
+    defines = {parts[1]: parts[2].rstrip("u") for parts in
+               (line.split() for line in header.splitlines())
+               if len(parts) >= 3 and parts[0] == "#define"}
+
+    def vendor_bit(file: str, name: str) -> int:
+        found = re.search(rf"#define {name}\s+\(BIT\((\d+)\)\)",
+                          (include / file).read_text(encoding="utf-8", errors="replace"))
+        assert found, f"{file} defines no {name}"
+        return 1 << int(found.group(1))
+
+    for define, file, name in (
+        ("OH_I2C_FIFO_TX_RST", "i2c_reg.h", "I2C_TX_FIFO_RST"),
+        ("OH_I2C_FIFO_RX_RST", "i2c_reg.h", "I2C_RX_FIFO_RST"),
+        ("OH_GPIO_OUT_SEL_OEN_SEL", "gpio_reg.h", "GPIO_FUNC0_OEN_SEL"),
+    ):
+        assert int(defines[define], 16) == vendor_bit(file, name), define
+
+
+def test_wire_is_compiled_only_where_the_board_has_an_i2c_controller_and_only_when_named():
+    """The C3's recipe carries the `Wire` library; the C5's and C6's carry
+    none and say why, in the pane, where gcc says `Wire.h` is not there. A
+    sketch that does not name `Wire.h` is built without it on the C3 too."""
+    assert [lib.header for lib in compiler.recipe_for(C3_BOARD).libraries] == ["Wire.h"]
+    for board in sorted(OPENHARDWARE_BOARDS):
+        assert compiler.recipe_for(board).libraries == (), board
+        built = oh_build(board, "#include <Wire.h>\nvoid setup(){} void loop(){}")
+        assert not built.ok, board
+        assert "Wire.h: No such file" in built.diagnostics, built.diagnostics
+        assert "defines no OH_I2C_*" in built.diagnostics, (board, built.diagnostics)
+        assert compiler.recipe_for(board).variant in built.diagnostics, board
+    plain = c3_build("void setup(){} void loop(){}")
+    wired = c3_build("#include <Wire.h>\nvoid setup(){ Wire.begin(); } void loop(){}")
+    assert plain.ok and wired.ok, (plain.diagnostics, wired.diagnostics)
+    assert len(wired.image) > len(plain.image), "Wire.cpp was compiled in"
 
 
 # --- the ESP32-C5 and C6, on the same core (OH-156) ---------------------------
