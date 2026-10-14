@@ -363,6 +363,15 @@ async function fillBoards() {
     const isa = document.createElement("td");
     isa.className = "isa";
     isa.textContent = board.isa;
+    // The string is the chip's whole instruction set, and the badge beside it
+    // says RUNS FIRMWARE for the chip. Where the core runs only part of it
+    // (OH-210: the RP2350's RISC-V half) say which part, and that the rest
+    // has no core.
+    if (board.core_isa !== board.isa) {
+      isa.append(span("note",
+        ` Only ${board.core_isa} runs here, on core ${board.core}. ` +
+        `The rest has no core.`));
+    }
     const core = document.createElement("td");
     core.className = "isa";
     core.textContent = board.core;

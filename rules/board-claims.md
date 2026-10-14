@@ -461,11 +461,15 @@ What follows from that, and only that:
   column is where the repository says which half it is, and the test
   named above is where the evidence is.
 - **A surface that shows the ISA string beside that badge shows both halves
-  and the evidence for one.** `webui/static/emulator.js`'s boards table
-  prints `board.isa` and `board.core` in separate cells and the badge from
-  `firmware_verified`; its table of waiting cores prints the core and not
-  the ISA. Saying on the page which half runs is OH-210 item 1,
-  and is not done by this section.
+  and the evidence for one, so the page says which half runs.**
+  `webui/static/emulator.js`'s boards table prints `board.isa` and
+  `board.core` in separate cells and the badge from `firmware_verified`; where
+  `board.core_isa` (`catalogue.CORE_ISA`, served by `/api/boards`) is not the
+  whole string, the ISA cell adds "Only RV32 (Hazard3) runs here, on core
+  riscv32. The rest has no core." Its table of waiting cores prints the core
+  and not the ISA, and the evidence sentence still names just "RP2350".
+  `tests/webui/test_board_catalogue.py` runs the page's script under node
+  and reads the cell.
 - **A core's backlog row names only the half its core runs.**
   `catalogue.CORE_ISA` maps the RP2350 to "RV32 (Hazard3)", and
   `missing_cores` reads each row's `isas` from the boards waiting on that

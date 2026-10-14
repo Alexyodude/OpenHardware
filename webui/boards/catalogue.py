@@ -325,6 +325,9 @@ class Board:
             "name": self.name,
             "chip": self.chip,
             "isa": self.isa,
+            # What `core` runs of `isa` (OH-210): the page prints it where the
+            # whole string would read as all of it running.
+            "core_isa": CORE_ISA.get(self.chip, self.isa),
             "core": self.core,
             "core_exists": self.core_exists,
             "core_built": self.core_built,

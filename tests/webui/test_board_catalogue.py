@@ -553,7 +553,7 @@ def test_the_boards_route_carries_what_the_ui_reads():
         None, "/api/boards", {}, {}
     )
     board = payload["boards"][0]
-    for key in ("name", "chip", "isa", "core", "core_exists", "core_built",
+    for key in ("name", "chip", "isa", "core_isa", "core", "core_exists", "core_built",
                 "described", "runnable", "firmware_verified"):
         assert key in board, f"emulator.js reads board.{key}"
     row = payload["waiting"][0]
@@ -562,6 +562,98 @@ def test_the_boards_route_carries_what_the_ui_reads():
     assert "firmware_evidence" in board, (
         "emulator.js names the test behind each claim in the evidence sentence"
     )
+
+
+#: Runs the real `emulator.js` against a fake page whose `/api/boards` is the
+#: server's own answer, and prints, per board, the text of the instruction-set
+#: cell. Nothing is stubbed but the DOM: `replaceChildren` and `append` keep
+#: what they are given, and every other method is a no-op.
+BOARDS_TABLE_PROBE = """
+const vm = require("node:vm");
+const fs = require("node:fs");
+const [source, answer] = process.argv.slice(2).map((f) => fs.readFileSync(f, "utf8"));
+class Element {
+  constructor() {
+    this.textContent = ""; this.value = ""; this.title = ""; this.className = "";
+    this.disabled = false; this.files = []; this.dataset = {}; this.style = {};
+    this.children = [];
+    this.classList = { add() {}, remove() {}, toggle() {} };
+  }
+  append(...nodes) { this.children.push(...nodes); }
+  replaceChildren(...nodes) { this.children = nodes; }
+  addEventListener() {} setAttribute() {} appendChild() {} focus() {}
+  querySelector() { return null; }
+}
+const text = (node) => typeof node === "string" ? node
+  : node.textContent + node.children.map(text).join("");
+const elements = new Map();
+const document = {
+  body: new Element(), documentElement: new Element(),
+  getElementById(id) {
+    if (!elements.has(id)) elements.set(id, new Element());
+    return elements.get(id);
+  },
+  createElement: () => new Element(),
+  createDocumentFragment: () => new Element(),
+  addEventListener() {},
+};
+document.body.dataset.view = "emulator";
+const reply = (body) => ({ ok: true, status: 200, json: async () => body });
+const fetch = async (path) => path === "/api/boards" ? reply(JSON.parse(answer))
+  : { ok: false, status: 404, json: async () => ({ error: "unrouted " + path }) };
+const window = { matchMedia: () => ({ matches: false }) };
+vm.runInNewContext(source, { document, window, fetch, console, setTimeout,
+  clearTimeout, performance, localStorage: { getItem: () => null, setItem() {} } });
+setTimeout(() => {
+  const rows = document.getElementById("boards-rows").children;
+  console.log(JSON.stringify(rows.map((row) => [row.children[0].textContent,
+                                                text(row.children[2])])));
+}, 100);
+"""
+
+
+def test_the_boards_table_says_which_half_of_the_isa_runs(tmp_path):
+    """OH-210 item 1. The RP2350's ISA cell read "Armv8-M (Cortex-M33) + RV32
+    (Hazard3)" beside RUNS FIRMWARE, and only the core column said which half
+    runs. Runs the real `emulator.js` under node on the server's own answer;
+    a grep for the sentence would pass with it written in the wrong cell.
+
+    A board whose core runs the whole string gets the string and nothing more.
+    """
+    import json
+    import shutil
+    import subprocess
+
+    from webui import emulator_server
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed, so the boards table is unchecked")
+
+    static = pathlib.Path(__file__).resolve().parents[2] / "webui" / "static"
+    payload = emulator_server.handle_api(None, "/api/boards", {}, {})
+    (tmp_path / "answer.json").write_text(json.dumps(payload), encoding="utf-8")
+    (tmp_path / "probe.js").write_text(BOARDS_TABLE_PROBE, encoding="utf-8")
+    done = subprocess.run(
+        [node, str(tmp_path / "probe.js"), str(static / "emulator.js"),
+         str(tmp_path / "answer.json")],
+        capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    cells = dict(json.loads(done.stdout.strip().splitlines()[-1]))
+
+    boards = {b["name"]: b for b in payload["boards"]}
+    assert set(cells) == set(boards), (sorted(cells), sorted(boards))
+    split = [name for name, b in boards.items() if b["core_isa"] != b["isa"]]
+    assert any(boards[name]["chip"] == "RP2350" for name in split), (
+        f"no RP2350 board has a core_isa narrower than its isa: {split}")
+    for name, board in boards.items():
+        cell = cells[name]
+        if name in split:
+            assert cell.startswith(board["isa"]), (name, cell)
+            assert (f"Only {board['core_isa']} runs here, on core "
+                    f"{board['core']}. The rest has no core.") in cell, (name, cell)
+        else:
+            assert cell == board["isa"], (name, cell, board["isa"])
 
 
 def test_every_element_the_script_fills_exists_in_the_page():
