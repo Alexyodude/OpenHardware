@@ -2298,6 +2298,57 @@ def test_a_body_nested_past_the_json_depth_is_a_400_and_not_a_dropped_connection
     assert "body is not JSON" in json.loads(caught.value.read())["error"]
 
 
+def test_an_integer_field_refusal_does_not_echo_a_posted_value_whole(live_server):
+    """`_int`, `_optional_int` and `_query_int` named the field and then
+    printed what was posted: `{"steps": <1 MB of text>}` came back as a 1 MB
+    400. They show it through `reprlib` as the drive's refusals do."""
+    post(live_server, "/api/board/load", upload(board=BOARD, base=BLINK_LOAD))
+    big = "x" * 1_000_000
+    for name, path, body in (
+        ("steps", "/api/board/run", {"steps": big}),
+        ("steps as a list", "/api/board/run", {"steps": [big]}),
+        ("count", "/api/board/step", {"count": big}),
+        ("base", "/api/board/load", upload(board=BOARD, base=[big])),
+        ("base as text", "/api/board/load", upload(board=BOARD, base=big)),
+        ("a query integer", "/api/board/state?len=" + "x" * 60_000, None),
+    ):
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            if body is None:
+                get(live_server, path)
+            else:
+                post(live_server, path, body)
+        error = json.loads(caught.value.read())["error"]
+        assert caught.value.code == 400 and len(error) < 500, (name, caught.value.code, len(error))
+
+
+def test_two_long_device_ids_that_share_a_prefix_are_told_apart_in_a_refusal():
+    """Ids are bounded at 64 characters and `reprlib` cuts a string at 30, so
+    two ids that differ only after that printed the same name. A refusal
+    names the id whole."""
+    first, second = "x" * 40 + "-first", "x" * 40 + "-second"
+    other = dict(MCP9808_ON_D4_D5, address_pins={"A0": "high", "A1": "low", "A2": "low"})
+    with _i2c_session(_stores(*_i2c_wiring())) as session:
+        with pytest.raises(ValueError) as caught:
+            session.drive({}, None, {first: MCP9808_ON_D4_D5, second: dict(other, celsius=999.0)})
+        assert repr(second) in str(caught.value) and repr(first) not in str(caught.value), (
+            str(caught.value))
+
+
+def test_a_value_error_that_is_not_a_device_refusal_is_not_given_a_device_name(monkeypatch):
+    """Only the part's `DeviceRefusal` is re-said with the device's name; any
+    other `ValueError` out of it is a bug in the model and passes through as
+    it came."""
+    def broken(self, **kwargs):
+        raise ValueError("a bug")
+
+    with _i2c_session(_stores(*_i2c_wiring())) as session:
+        # The constructor holds the part, so a new device reaches it.
+        monkeypatch.setattr(api.mcp9808.Mcp9808, "hold", broken)
+        with pytest.raises(ValueError) as caught:
+            session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
+        assert str(caught.value) == "a bug", str(caught.value)
+
+
 def test_a_refused_drive_leaves_a_kept_part_as_it_was():
     with _i2c_session(_stores(*_i2c_wiring())) as session:
         session.drive({}, None, {"u1": MCP9808_ON_D4_D5})

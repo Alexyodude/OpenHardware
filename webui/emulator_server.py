@@ -288,7 +288,7 @@ def resolve_static(target: str) -> tuple[bytes, str] | None:
 def _int(payload: dict[str, object], name: str, default: int) -> int:
     value = payload.get(name, default)
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ApiError(f"{name} must be an integer, got {value!r}")
+        raise ApiError(f"{name} must be an integer, got {reprlib.repr(value)}")
     return value
 
 
@@ -365,7 +365,7 @@ def _query_int(query: dict[str, list[str]], name: str, default: str) -> int:
         return int(raw, 0)
     except ValueError:
         raise ApiError(f"{name} must be an integer, decimal or 0x hex, "
-                       f"got {raw!r}") from None
+                       f"got {reprlib.repr(raw)}") from None
 
 
 def _optional_int(payload: dict[str, object], name: str) -> int | None:
@@ -379,13 +379,16 @@ def _optional_int(payload: dict[str, object], name: str) -> int | None:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, str)):
-        raise ApiError(f"{name} must be an integer or a hex string, got {value!r}")
+        raise ApiError(f"{name} must be an integer or a hex string, "
+                       f"got {reprlib.repr(value)}")
     if isinstance(value, int):
         return value
     try:
         return int(value, 0)
     except ValueError as exc:
-        raise ApiError(f"{name}: {exc}") from exc
+        # `int`'s message carries the whole string it was handed.
+        raise ApiError(f"{name} must be an integer or a hex string, "
+                       f"got {reprlib.repr(value)}") from exc
 
 
 def _image_bytes(payload: dict[str, object]) -> bytes:

@@ -1657,7 +1657,6 @@ class BoardSession:
         wired: dict[str, tuple[int, int, mcp9808.Mcp9808]] = {}
         recorded: dict[str, dict[str, object]] = {}
         for name, device in devices.items():
-            where = f"{self.board}: device {reprlib.repr(name)}"
             if not isinstance(name, str) or not name:
                 raise ValueError(
                     f"{self.board}: a device id is a non-empty string, got {reprlib.repr(name)}")
@@ -1665,6 +1664,10 @@ class BoardSession:
                 raise ValueError(
                     f"{self.board}: a device id is at most {self.DEVICE_ID_LENGTH} "
                     f"characters, got {len(name)}: {reprlib.repr(name)}")
+            # Whole, once it is known to be a short string: `reprlib` cuts at
+            # 30 characters and ids may be 64, so two ids sharing a prefix
+            # would print as one.
+            where = f"{self.board}: device {name!r}"
             if not isinstance(device, typing.Mapping):
                 raise ValueError(f"{where} must be an object, got {reprlib.repr(device)}")
             unknown = [key for key in device if key not in self.DEVICE_KEYS]
@@ -1700,7 +1703,7 @@ class BoardSession:
                     part = mcp9808.Mcp9808(straps=straps, celsius=celsius, vdd=vdd)
                 else:
                     part.hold(straps=straps, celsius=celsius, vdd=vdd)
-            except ValueError as refusal:
+            except mcp9808.DeviceRefusal as refusal:
                 # The part's own sentence names its value and its section and
                 # not which part it is, and a bench may have several.
                 raise ValueError(f"{where}: {refusal}") from refusal

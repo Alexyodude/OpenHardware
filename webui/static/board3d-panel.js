@@ -134,6 +134,14 @@ let served = {};
 const celsiusFields = new Map();
 const servedLines = new Map();
 
+//: Whether a pointer is down, and whether a rebuild of the bench was put off
+//: because it was. A field losing focus rebuilds the bench it had frozen, and
+//: the press that took the focus may be on "remove" or an unwire cross in
+//: that bench: replaced between the press and its release, the click would
+//: land on a node that is gone.
+let pressed = false;
+let rebuildOwed = false;
+
 //: What Register 5-7's two bits make one step of TA, in degrees C
 //: (DS25095A p.29). The panel states the step so a temperature typed at a
 //: finer grain than the register's visibly reads back coarser.
@@ -556,12 +564,19 @@ async function addPart(slug) {
 function servedWords(part) {
   const seen = served[part.id];
   if (!seen) {
+    // The bench note leads with the board's refusal, and "not told yet" would
+    // be false of a part it was told of and refused.
+    if (scene.circuit()?.refused) {
+      return "The board refused what the bench drives, so this part is not on " +
+             "its bus: the bench note says why.";
+    }
     return "The board has not been told of this part yet: it joins the bus " +
            "once a program is running and the part is fully wired.";
   }
   const where = `0x${seen.address.toString(16)}`;
   if (!seen.powered) {
-    return `${where} · unpowered: it acknowledges nothing and reports no temperature`;
+    return `${where} · ${seen.why ?? "unpowered"} ` +
+           `(it acknowledges nothing and reports no temperature)`;
   }
   if (seen.ta === null) return `${where} · TA cannot be reported: ${seen.why}`;
   const hex4 = (word) => `0x${word.toString(16).toUpperCase().padStart(4, "0")}`;
@@ -583,6 +598,27 @@ function refreshServed() {
 }
 
 /**
+ * Ask the board what it reports now, once, after the drive of a new
+ * temperature has landed.
+ *
+ * A running board brings the new word with its next poll; a stopped one has
+ * none, and the line would keep the old temperature until Run or Step.
+ */
+async function askForTheState() {
+  try {
+    await scene.whenPosted();
+    const response = await fetch("/api/board/state");
+    if (!response.ok) {
+      throw new Error(`/api/board/state answered ${response.status}`);
+    }
+    served = (await response.json()).devices ?? {};
+    renderBench();
+  } catch (error) {
+    console.warn(`Could not read back what the board reports: ${error}`);
+  }
+}
+
+/**
  * The temperature field of a part that has one, and the line saying what the
  * board would report for it once the bench has stated the part.
  *
@@ -600,10 +636,21 @@ function deviceControls(index, part) {
   field.dataset.celsius = part.id;
   field.setAttribute("aria-label", `${part.label} temperature in degrees Celsius`);
   field.addEventListener("change", () => {
-    if (!scene.setCelsius(index, field.valueAsNumber)) {
-      field.value = String(scene.parts()[index].celsius);
+    // **By id, when the event fires**: the list is not rebuilt while this
+    // field has focus, so the position it was drawn at may belong to another
+    // part by now, or to none.
+    const at = scene.parts().findIndex((one) => one.id === part.id);
+    if (at < 0) return;
+    if (scene.setCelsius(at, field.valueAsNumber)) {
+      askForTheState();
+    } else {
+      field.value = String(scene.parts()[at].celsius);
     }
     renderBench();
+  });
+  field.addEventListener("blur", () => {
+    if (pressed) rebuildOwed = true;
+    else renderBench();
   });
   celsiusFields.set(part.id, field);
   const heading = document.createElement("p");
@@ -637,15 +684,16 @@ function renderBench() {
   // **A temperature field that has focus is not rebuilt.** This runs on every
   // state poll, and a number field replaced under the hand loses its caret,
   // its half-typed value and a held spinner arrow. The served lines are
-  // refreshed in place and the rest of the bench catches up when focus leaves.
+  // refreshed in place and the rest of the bench catches up when focus leaves
+  // -- but the note and Unwire-all are not part of the list, and a refusal of
+  // the number just typed has to show while the field still has focus.
   if ([...celsiusFields.values()].includes(document.activeElement)) {
     refreshServed();
+    renderSummary();
     return;
   }
   const joined = scene.connections();
   const onBench = scene.parts();
-  const solved = scene.circuit();
-  $(UNWIRE).disabled = joined.length === 0;
 
   const list = $(BENCH_LIST);
   list.textContent = "";
@@ -741,7 +789,16 @@ function renderBench() {
     }
     list.append(row);
   }
+  renderSummary();
+}
 
+/** The bench note and the Unwire-all button: what the bench says about itself
+ *  apart from its rows. */
+function renderSummary() {
+  const joined = scene.connections();
+  const onBench = scene.parts();
+  const solved = scene.circuit();
+  $(UNWIRE).disabled = joined.length === 0;
   if (!onBench.length) {
     $(BENCH_NOTE).textContent =
       "Drag from a pad to a part's terminal to wire it. A part needs a " +
@@ -769,6 +826,15 @@ function mountBench() {
   // A wire made by dragging happens inside the canvas and nothing else sees
   // it; `board3d.js` says so with an event rather than calling in here.
   $(CANVAS).addEventListener("wires-changed", renderBench);
+  const released = () => {
+    pressed = false;
+    // After the click that follows the release, not before it.
+    if (rebuildOwed) setTimeout(renderBench, 0);
+    rebuildOwed = false;
+  };
+  document.addEventListener("pointerdown", () => { pressed = true; });
+  document.addEventListener("pointerup", released);
+  document.addEventListener("pointercancel", released);
   $(MENU).addEventListener("toggle", () => {
     if ($(MENU).open) renderTree();
   });

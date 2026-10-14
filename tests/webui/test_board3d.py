@@ -3636,6 +3636,7 @@ export const removePart = (...a) => s().removePart(...a);
 export const disconnect = (...a) => s().disconnect(...a);
 export const clearBench = (...a) => s().clearBench(...a);
 export const addPart = (...a) => s().addPart(...a);
+export const whenPosted = (...a) => s().whenPosted(...a);
 """
 
 #: Each scenario is `{bench, devices, ...}`: `parts()` as the scene would
@@ -3679,20 +3680,32 @@ globalThis.document = {
   getElementById: (id) => (elements[id] ??= new El(id)),
   createElement: (tag) => new El(tag),
   createTextNode: (words) => text(words),
+  listeners: {},
+  addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); },
+  fire(type) { for (const fn of this.listeners[type] ?? []) fn({ target: this }); },
 };
 elements["board-pick"] = Object.assign(new El("select"), { value: given.layout.board });
 globalThis.fetch = async (url) => {
   if (url.startsWith("/api/board/pins")) return { ok: true, json: async () => given.layout };
   if (url === "/models/index.json") return { ok: true, json: async () => ({ boards: {} }) };
+  if (url.startsWith("/api/board/state")) {
+    fetched.push(url);
+    return { ok: true, json: async () => ({ devices: reported }) };
+  }
   throw new Error(`unexpected ${url}`);
 };
 
+const fetched = [];
 let bench = [];
 let accept = true;
+let wires = [];
+let circuit = null;
+let reported = {};
 const calls = [];
 globalThis.__scene = {
   mount() {}, showBoard() {}, setLevels() {}, refreshTheme() {},
-  connections: () => [], circuit: () => null, parts: () => bench,
+  connections: () => wires, circuit: () => circuit, parts: () => bench,
+  whenPosted: async () => {},
   setCelsius(index, celsius) { calls.push([index, celsius]); return accept; },
   removePart: () => true, disconnect: () => true, clearBench() {}, addPart: async () => null,
 };
@@ -3711,8 +3724,18 @@ const rows = () => list().children.map((li) => ({
 }));
 
 const results = [];
+let uid = 0;
+const snapshot = () => ({
+  fields: fields().map((el) => ({ owner: el.dataset.celsius, value: el.value,
+                                  uid: (el.uid ??= ++uid) })),
+  lines: lines(), note: elements["bench-note"].textContent,
+  unwire: elements["bench-clear"].disabled, calls: [...calls],
+  rows: list().children.length, state_fetches: fetched.length,
+});
 for (const one of given.scenarios) {
   bench = one.bench; accept = one.accept ?? true; calls.length = 0;
+  wires = one.connections ?? []; circuit = one.circuit ?? null; reported = {};
+  fetched.length = 0;
   window.boardPins.levels({ D1: "input" }, one.devices);
   const out = { rows: rows() };
   const field = fields()[0];
@@ -3732,6 +3755,34 @@ for (const one of given.scenarios) {
     window.boardPins.levels({ D1: "input" }, one.next_devices);
     out.rebuilt = fields()[0] !== field;
   }
+  // Scripted steps, each leaving a snapshot of the bench behind it.
+  out.snaps = [];
+  for (const step of one.steps ?? []) {
+    if (step.bench) bench = step.bench;
+    if (step.circuit !== undefined) circuit = step.circuit;
+    if (step.connections) wires = step.connections;
+    if (step.reported) reported = step.reported;
+    if (step.accept !== undefined) accept = step.accept;
+    if (step.do === "levels") window.boardPins.levels({ D1: "input" }, step.devices);
+    if (step.do === "focus") document.activeElement = fields()[step.at ?? 0];
+    if (step.do === "blur") {
+      const held = document.activeElement;
+      document.activeElement = null;
+      held.fire("blur");
+    }
+    if (step.do === "wires") elements["board-pins-canvas"].fire("wires-changed");
+    if (step.do === "type") {
+      const typed = fields()[step.at ?? 0];
+      typed.value = step.value;
+      typed.fire("change");
+    }
+    if (step.do === "pointer") document.fire(step.value);
+    await new Promise((done) => setTimeout(done, step.wait ?? 5));
+    out.snaps.push(snapshot());
+  }
+  // Let what a change started (the refetch of the board's state) land before
+  // the next scenario writes its own.
+  await new Promise((done) => setTimeout(done, 5));
   results.push(out);
 }
 console.log(JSON.stringify(results));
@@ -3789,7 +3840,9 @@ def test_a_device_row_has_a_celsius_field_and_says_what_the_part_would_report(tm
     refused = dict(view, ta=None, config=0x0200,
                    why="MCP9808 TA read with CONFIG 0x0200 THYST 1 (Register 5-2)")
     unpowered = dict(view, powered=False, ta=None,
-                     why="MCP9808 is unpowered: VDD is below VPOR, 2.2 V")
+                     why="MCP9808 lost its supply: VDD is below VPOR, 2.2 V")
+    unpowered_unsaid = dict(unpowered)
+    del unpowered_unsaid["why"]
     benches = [PANEL_MCP, PANEL_RESISTOR]
     got = run_panel(tmp_path, [
         {"bench": benches, "devices": {"part-1": view}},
@@ -3797,10 +3850,11 @@ def test_a_device_row_has_a_celsius_field_and_says_what_the_part_would_report(tm
         {"bench": benches, "devices": {"part-1": cold}},
         {"bench": benches, "devices": {"part-1": refused}},
         {"bench": benches, "devices": {"part-1": unpowered}},
+        {"bench": benches, "devices": {"part-1": unpowered_unsaid}},
         {"bench": benches, "devices": {}},
         {"bench": [dict(PANEL_MCP, device=None), PANEL_RESISTOR], "devices": {}},
     ])
-    ok, rounded, negative, no_ta, off, unserved, unstated = got
+    ok, rounded, negative, no_ta, off, off_unsaid, unserved, unstated = got
     assert ok["rows"][0]["fields"] == [
         {"type": "number", "step": "0.0625", "value": "25", "owner": "part-1"}], ok
     assert ok["rows"][1] == {"fields": [], "lines": []}, ("a resistor has neither", ok)
@@ -3814,6 +3868,8 @@ def test_a_device_row_has_a_celsius_field_and_says_what_the_part_would_report(tm
     line = no_ta["rows"][0]["lines"][0]
     assert "THYST 1" in line and "0x18" in line and "°C" not in line, line
     line = off["rows"][0]["lines"][0]
+    assert "lost its supply" in line and "°C" not in line, ("the model's reason", line)
+    line = off_unsaid["rows"][0]["lines"][0]
     assert "unpowered" in line.lower() and "°C" not in line, line
     line = unserved["rows"][0]["lines"][0]
     assert "not been told" in line, line
@@ -3857,6 +3913,122 @@ def test_a_poll_does_not_rebuild_the_field_being_edited_but_updates_its_line(tmp
     assert got["same"] is True, got
     assert [(owner, "0xC1E0" in text) for owner, text in got["lines"]] == [("part-1", True)], got
     assert got["rebuilt"] is True, got
+
+
+#: What the bench note leads with once the board has refused a drive.
+PANEL_REFUSAL = ("The board refused what the bench drives: XIAO-ESP32-C3-DIP: device "
+                 "'part-1': MCP9808 held at 130.0 C, outside the specified range (p.4)")
+PANEL_WIRE = {"id": 1, "part": 0, "pin": "D4", "terminal": "SDA", "label": "MCP9808"}
+
+
+def test_the_note_and_unwire_all_follow_the_bench_while_a_field_has_focus(tmp_path):
+    """**Design item 7 makes the server's refusal the only range feedback**,
+    and a number typed and committed with Enter keeps focus. The frozen early
+    path of `renderBench` used to return before the bench note and the
+    Unwire-all button, so on a stopped board (no poll, no blur) a refusal of
+    130 never appeared, nor did a wire made meanwhile. The list stays
+    standing (the same field) and the rest is current."""
+    got = run_panel(tmp_path, [{
+        "bench": [PANEL_MCP], "devices": {"part-1": PANEL_VIEW}, "steps": [
+            {"do": "focus"},
+            {"do": "wires", "circuit": {"ok": True, "note": PANEL_REFUSAL, "refused": True}},
+            {"do": "wires", "connections": [PANEL_WIRE]},
+        ]}])[0]["snaps"]
+    start, refused, wired = got
+    assert start["unwire"] is True and PANEL_REFUSAL not in start["note"], start
+    assert PANEL_REFUSAL in refused["note"], ("the refusal is hidden by focus", refused)
+    assert wired["unwire"] is False, ("Unwire-all stays disabled behind focus", wired)
+    assert {snap["fields"][0]["uid"] for snap in got} == {start["fields"][0]["uid"]}, (
+        "and the field was left standing", got)
+
+
+def test_leaving_the_field_rebuilds_the_bench_it_froze_even_on_a_stopped_board(tmp_path):
+    """Nothing else repaints a stopped board: no poll runs, so a list left
+    stale while the field had focus stays stale until a blur says it is over.
+    **Not while a pointer is down**: a rebuild between the press on "remove"
+    or an unwire cross and its release would leave the click on a detached
+    node, so a blur during a press waits for the release."""
+    one_more = [PANEL_MCP, PANEL_RESISTOR]
+    got = run_panel(tmp_path, [
+        {"bench": [PANEL_MCP], "devices": {"part-1": PANEL_VIEW}, "steps": [
+            {"do": "focus"},
+            {"do": "wires", "bench": one_more},
+            {"do": "blur"},
+        ]},
+        {"bench": [PANEL_MCP], "devices": {"part-1": PANEL_VIEW}, "steps": [
+            {"do": "focus"},
+            {"do": "wires", "bench": one_more},
+            {"do": "pointer", "value": "pointerdown"},
+            {"do": "blur"},
+            {"do": "pointer", "value": "pointerup", "wait": 30},
+        ]},
+    ])
+    frozen, blurred = got[0]["snaps"][1], got[0]["snaps"][2]
+    assert frozen["rows"] == 1 and blurred["rows"] == 2, got[0]["snaps"]
+    assert blurred["fields"][0]["uid"] != frozen["fields"][0]["uid"], "rebuilt, not patched"
+    focused, pressed, released = got[1]["snaps"][1], got[1]["snaps"][3], got[1]["snaps"][4]
+    assert (focused["rows"], pressed["rows"], released["rows"]) == (1, 1, 2), got[1]["snaps"]
+
+
+def test_a_committed_temperature_finds_its_part_by_id_when_the_list_has_moved(tmp_path):
+    """The handler captured the part's index, which goes stale while the list
+    is frozen: with part-1 removed under part-2's focused field it called
+    `setCelsius(1, 30)` -- another part, or none, and a TypeError restoring
+    the field. It resolves the index from the id when the event fires, and
+    does nothing if the part is gone."""
+    second = dict(PANEL_MCP, id="part-2")
+    views = {"part-1": PANEL_VIEW, "part-2": PANEL_VIEW}
+    got = run_panel(tmp_path, [
+        {"bench": [PANEL_MCP, second], "devices": views, "steps": [
+            {"do": "focus", "at": 1},
+            {"do": "wires", "bench": [second]},
+            {"do": "type", "at": 1, "value": "30"},
+            {"do": "wires", "bench": []},
+            {"do": "type", "at": 1, "value": "31"},
+        ]},
+        {"bench": [PANEL_MCP, second], "devices": views, "accept": False, "steps": [
+            {"do": "focus", "at": 1},
+            {"do": "wires", "bench": [second]},
+            {"do": "type", "at": 1, "value": "999"},
+        ]},
+    ])
+    moved, refused = got[0]["snaps"], got[1]["snaps"]
+    assert moved[2]["calls"] == [[0, 30]], moved[2]
+    assert moved[4]["calls"] == [[0, 30]], ("a part that is gone is not set", moved[4])
+    assert refused[2]["calls"] == [[0, 999]], refused[2]
+    assert refused[2]["fields"][1]["value"] == "25", ("restored from the part found", refused[2])
+
+
+def test_an_accepted_temperature_refreshes_what_the_board_reports_once(tmp_path):
+    """On a stopped board there is no poll to bring the new TA, so the line
+    kept "25 C" after 30 was accepted until Run or Step. After the drive has
+    landed the panel asks for the state once; a value the scene refused
+    changes nothing and asks nothing."""
+    later = dict(PANEL_VIEW, celsius=30.0, ta=0xC1E0)
+    got = run_panel(tmp_path, [
+        {"bench": [PANEL_MCP], "devices": {"part-1": PANEL_VIEW}, "steps": [
+            {"do": "type", "value": "30", "reported": {"part-1": later}, "wait": 30}]},
+        {"bench": [PANEL_MCP], "devices": {"part-1": PANEL_VIEW}, "accept": False, "steps": [
+            {"do": "type", "value": "999", "reported": {"part-1": later}, "wait": 30}]},
+    ])
+    accepted, refused = got[0]["snaps"][0], got[1]["snaps"][0]
+    assert accepted["state_fetches"] == 1, accepted
+    assert "0xC1E0" in accepted["lines"][0][1], ("the line is the board's new word", accepted)
+    assert refused["state_fetches"] == 0 and "0xC190" in refused["lines"][0][1], refused
+
+
+def test_a_part_the_board_refused_is_not_said_to_be_waiting_to_be_told(tmp_path):
+    """"Has not been told" is true before a program runs and false after a
+    refusal; the bench note leads with the refusal, so the line points to it."""
+    got = run_panel(tmp_path, [
+        {"bench": [PANEL_MCP], "devices": {},
+         "circuit": {"ok": True, "note": PANEL_REFUSAL, "refused": True}},
+        {"bench": [PANEL_MCP], "devices": {},
+         "circuit": {"ok": True, "note": None, "refused": False}},
+    ])
+    refused, waiting = (one["rows"][0]["lines"][0] for one in got)
+    assert "refused" in refused and "note" in refused and "not been told" not in refused, refused
+    assert "not been told" in waiting, waiting
 
 
 def test_the_page_hands_the_devices_of_the_state_to_the_panel():

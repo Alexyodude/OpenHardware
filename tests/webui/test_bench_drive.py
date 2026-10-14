@@ -251,6 +251,7 @@ const named = {};
 const returned = [];
 const after = [];
 const notes = [];
+const refused = [];
 const last = (at) => at ?? parts.length - 1;
 for (const [verb, ...rest] of given.steps) {
   if (verb === "show") page.showBoard(layouts[rest[0]], null);
@@ -268,8 +269,9 @@ for (const [verb, ...rest] of given.steps) {
   await settled();
   after.push(posted.length);
   notes.push(page.circuit()?.note ?? null);
+  refused.push(page.circuit()?.refused ?? null);
 }
-console.log(JSON.stringify({ posted, after, notes, warned, returned,
+console.log(JSON.stringify({ posted, after, notes, refused, warned, returned,
                              listing: page.parts() }));
 """
 
@@ -351,6 +353,9 @@ def test_a_refused_drive_is_said_in_the_bench_note_until_one_is_accepted(tmp_pat
         assert note and note.startswith("The board refused what the bench drives: "
                                         + refusal), note
     assert not (got["notes"][4] or "").startswith("The board refused"), got["notes"][4]
+    # And `circuit()` says in a field, not only in the note's words, that the
+    # board refused: the panel tells a refused part from one not yet told of.
+    assert got["refused"] == [True, True, True, True, False], got["refused"]
 
 
 def test_a_bench_that_does_not_solve_lets_go_of_nothing(tmp_path):
@@ -548,6 +553,27 @@ def test_a_change_of_celsius_alone_is_posted_and_the_same_celsius_is_not(tmp_pat
         25.0, 30.0, -10.5], got["posted"]
     assert got["returned"] == [True, True, True, False], got["returned"]
     assert [part["celsius"] for part in got["listing"]] == [-10.5, None], got["listing"]
+
+
+def test_whenposted_resolves_only_once_the_last_post_has_been_answered(tmp_path):
+    """The panel refetches the board's state after an accepted temperature,
+    and the state is only the new one once the drive has landed: a board that
+    is stopped has no poll to bring it. `whenPosted` is the chain of posts."""
+    probe = r"""
+    let answered = false;
+    api = async () => {
+      await new Promise((done) => setTimeout(done, 40));
+      answered = true;
+      return { ok: true, json: async () => ({}) };
+    };
+    page.showBoard(given.layout, null);
+    page.setLevels({ D1: "input" });
+    const before = answered;
+    await page.whenPosted();
+    console.log(JSON.stringify({ before, answered }));
+    """
+    got = run_page(tmp_path, probe, {"layout": layout()})
+    assert got == {"before": False, "answered": True}, got
 
 
 def test_unwiring_an_address_pin_posts_the_part_away(tmp_path):

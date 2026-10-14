@@ -2620,7 +2620,8 @@ export function parts() {
 export function circuit() {
   if (!view.circuit) return null;
   const note = [view.refusal, view.circuit.note].filter(Boolean).join(" ");
-  return { ok: view.circuit.ok, note: note || null, supply: view.supply };
+  return { ok: view.circuit.ok, note: note || null, supply: view.supply,
+           refused: view.refusal !== null };
 }
 
 /** Everything currently joined. For the page, and for a test. */
@@ -3030,6 +3031,12 @@ function applyCircuit() {
 //: on the way -- a press and its release, a few milliseconds apart -- would
 //: leave the board holding the press.
 let posting = Promise.resolve();
+
+/** Resolves once every drive posted so far has been answered. For a page that
+ *  wants to read the board's state after a change it just made. */
+export function whenPosted() {
+  return posting;
+}
 
 /**
  * Tell the board what the bench drives onto its inputs, when that changes
