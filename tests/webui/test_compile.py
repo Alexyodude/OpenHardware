@@ -785,6 +785,25 @@ def test_the_samd21_variant_comes_from_seeed_and_not_from_the_framework():
     )
 
 
+def compile_service_build_calls(source: str, name: str) -> tuple[int, list[str]]:
+    """How many `compile_service.build(...)` calls `source` makes, and the
+    `name:line` of each that passes anything beyond a board and a source."""
+    import ast
+
+    found = 0
+    bad: list[str] = []
+    for node in ast.walk(ast.parse(source, filename=name)):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "build"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "compile_service"):
+            found += 1
+            if len(node.args) != 2 or node.keywords:
+                bad.append(f"{name}:{node.lineno}")
+    return found, bad
+
+
 def test_nothing_in_a_recipe_comes_from_a_request():
     """**The safety property, checked structurally.**
 
@@ -797,7 +816,8 @@ def test_nothing_in_a_recipe_comes_from_a_request():
     build's temporary directory is made under, there so that a test can give
     its own and see that the build cleaned up. It is a place and not a
     program or a flag, and it is allowed because the one caller that a request
-    reaches, the server, passes no root -- which the second assertion holds.
+    reaches, the server, passes no root -- which the later assertions hold, by
+    parsing every module in `webui` rather than searching for a string.
     """
     import inspect
 
@@ -806,11 +826,31 @@ def test_nothing_in_a_recipe_comes_from_a_request():
         f"build() grew parameters {parameters}; anything beyond a board name "
         f"and source is something a request could use to choose a command line"
     )
-    server = (pathlib.Path(compiler.__file__).parent
-              / "emulator_server.py").read_text(encoding="utf-8")
-    assert "compile_service.build(board, source)" in server, (
-        "the server no longer calls build with exactly a board and a source; "
-        "if it passes a root, check that nothing in the request chooses it")
+    calls = 0
+    offenders: list[str] = []
+    for path in sorted(pathlib.Path(compiler.__file__).parent.glob("*.py")):
+        if path.name == "compile.py":
+            continue
+        found, bad = compile_service_build_calls(
+            path.read_text(encoding="utf-8"), path.name)
+        calls += found
+        offenders += bad
+    assert calls, "no module in webui calls compile_service.build; this checked nothing"
+    assert not offenders, (
+        "compile_service.build is called with more than a board and a source; "
+        "if it passes a root, check that nothing in the request chooses it: "
+        + "; ".join(offenders))
+
+
+def test_the_call_checker_sees_a_root_passed_to_build():
+    """A check that has never failed is evidence of nothing: this is the
+    checker above run on source that breaks the rule, three ways."""
+    keyword = "compile_service.build(board, source, root=x)\n"
+    positional = "def f():\n    return compile_service.build(board, source, x)\n"
+    fine = "compile_service.build(board, source)\nother.build(a, b, c)\n"
+    assert compile_service_build_calls(keyword, "k.py") == (1, ["k.py:1"])
+    assert compile_service_build_calls(positional, "p.py") == (1, ["p.py:2"])
+    assert compile_service_build_calls(fine, "f.py") == (1, [])
 
 
 def test_a_sketch_too_large_to_be_a_sketch_is_refused_before_a_compiler_starts():
@@ -1019,6 +1059,7 @@ def test_a_failed_build_leaves_nothing_behind(tmp_path):
     built = compiler.build(
         BOARD, "void setup(){}\nvoid loop(){ int x = ; }", root=tmp_path)
     assert not built.ok
+    assert tmp_path.exists(), "the root went away, so there is nothing to inspect"
     leaked = list(tmp_path.iterdir())
     assert not leaked, f"left behind: {leaked}"
 

@@ -33,6 +33,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from core.i8086 import abi, disasm  # noqa: E402
+from webui import compile as compile_service  # noqa: E402
 from webui import emulator, emulator_server  # noqa: E402
 
 
@@ -367,18 +368,21 @@ def get(base: str, path: str, origin: str | None = None):
         return json.loads(response.read())
 
 
-#: How long a request may take: as long as a build is allowed to run. The reply
-#: to a compile is the build's, and one took 12.7 s on a loaded machine, which a
-#: 10 s timeout turned into "the build itself failed: None" (OH-166). The
-#: state-poll test joins its build thread for the same bound.
-BUILD_SECONDS = 120
+#: How long a request for a build may take: the server's own budget for a whole
+#: build (`BUILD_BUDGET_SECONDS`, which `_run` enforces by shrinking each
+#: invocation's timeout to what remains) plus a margin for the server to answer
+#: once the budget is spent. The reply to a compile is the build's, and one took
+#: 12.7 s on a loaded machine, which a 10 s timeout turned into "the build
+#: itself failed: None" (OH-166). The state-poll test joins its build thread
+#: for the same bound.
+BUILD_TIMEOUT_SECONDS = compile_service.BUILD_BUDGET_SECONDS + 30
 
 
 def post(base: str, path: str, body: dict[str, object]):
     request = urllib.request.Request(
         base + path, data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(request, timeout=BUILD_SECONDS) as response:
+    with urllib.request.urlopen(request, timeout=BUILD_TIMEOUT_SECONDS) as response:
         return json.loads(response.read())
 
 
@@ -628,7 +632,7 @@ def test_a_state_poll_answers_while_a_build_runs(live_server):
         state = get(live_server, "/api/state?at=0&len=16")
         waited = time.monotonic() - began
         still_building = builder.is_alive()
-        builder.join(timeout=BUILD_SECONDS)
+        builder.join(timeout=BUILD_TIMEOUT_SECONDS)
         built = time.monotonic() - started
         if still_building:
             break
