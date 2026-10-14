@@ -7,7 +7,6 @@ priority: P1
 created: '2026-09-04'
 touches:
 - webui/boards/esp32c3.py
-- tests/webui/test_board_run.py
 - webui/arduino/**
 - webui/boards/esp32c5.py
 - webui/boards/esp32c6.py
@@ -43,7 +42,6 @@ touches:
 - tests/webui/sparkfun_qwiic_pocket_esp32c6/pocket_blink.ino
 - tests/webui/esp32_timing.py
 - core/cortexm0/abi.py
-- webui/api.py
 - webui/static/board3d.js
 - webui/static/circuit.js
 - tests/webui/test_circuit.py
@@ -54,10 +52,8 @@ touches:
 - webui/devices/**
 - tests/webui/test_mcp9808.py
 - tests/webui/test_pin_view.py
-- webui/compile.py
 - tests/webui/test_compile.py
 - webui/emulator_server.py
-- webui/static/emulator.js
 - webui/boards/rp2350.py
 ---
 
@@ -854,3 +850,5 @@ CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: opt
 **Note 2026-10-15:** 2026-10-15: lends webui/static/emulator.js and webui/boards/rp2350.py to OH-210 for its items 1 and 6; they come back when those land.
 
 **Note 2026-10-15:** 2026-10-15: takes back webui/static/emulator.js and webui/boards/rp2350.py from OH-210 (its items 1 and 6 landed).
+
+**Note 2026-10-15:** 2026-10-15: lends webui/api.py, webui/static/emulator.js, webui/compile.py and tests/webui/test_board_run.py to OH-233 (as_json gains cpu_hz; the run line says how far behind real time); they come back when it lands.
