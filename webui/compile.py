@@ -295,7 +295,7 @@ def _openhardware(*, variant: str, march: str, base: int,
                   wire: bool = False) -> Recipe:
     """A row for a board the repository's own core serves (see ARDUINO_LITE).
 
-    **The three ESP32 rows differ in exactly five things** -- the variant,
+    **The three ESP32 rows differ in what each states** -- the variant,
     the ISA string the compiler is told, the flash origin, which root the
     vendor's pin names come from, and whether the board's description maps an
     I2C controller, which is `wire` -- and everything else is the mechanism

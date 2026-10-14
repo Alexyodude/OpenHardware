@@ -37,8 +37,24 @@ public:
 
     void beginTransmission(uint8_t address);
     size_t write(uint8_t value);
-    size_t write(int value);
     size_t write(const uint8_t* data, size_t length);
+
+    /* The vendor's overloads (`Wire.h:136-155`), so `Wire.write(5u)`,
+     * `Wire.write(5L)`, a `size_t` and a string literal all compile. Each
+     * integer is cut to a byte, as the vendor cuts it; a string is its bytes
+     * without the terminator. Inline, and with no `strlen`: this image links
+     * `-nostdlib`. */
+    size_t write(const char* text) {
+        size_t length = 0;
+        while (text != 0 && text[length] != '\0') {
+            ++length;
+        }
+        return text == 0 ? 0 : write(reinterpret_cast<const uint8_t*>(text), length);
+    }
+    size_t write(unsigned long value) { return write(static_cast<uint8_t>(value)); }
+    size_t write(long value) { return write(static_cast<uint8_t>(value)); }
+    size_t write(unsigned int value) { return write(static_cast<uint8_t>(value)); }
+    size_t write(int value) { return write(static_cast<uint8_t>(value)); }
     uint8_t endTransmission(bool stop = true);
 
     uint8_t requestFrom(uint8_t address, uint8_t quantity, bool stop = true);
@@ -46,8 +62,13 @@ public:
     int read(void);
 
 private:
-    /* 31 bytes and the address byte make the controller's 32-byte FIFO
-     * (SOC_I2C_FIFO_LEN). */
+    /* **31 bytes here, against the vendor's 128** (`I2C_BUFFER_LENGTH`,
+     * vendor `Wire.h:43`): 31 bytes and the address byte make the
+     * controller's 32-byte FIFO (SOC_I2C_FIFO_LEN), and this model has no
+     * interrupt to refill it mid-transaction. The vendor's `write` drops the
+     * byte past its limit silently; here a byte past 31 is refused by
+     * `write` (it returns 0) and `endTransmission` then returns 1, "data too
+     * long", without sending anything. `requestFrom` reads at most 31 bytes. */
     enum { kBuffer = 31 };
 
     uint8_t tx_[kBuffer];
@@ -57,6 +78,7 @@ private:
     uint8_t rx_length_;
     uint8_t rx_index_;
     bool deferred_;
+    bool overflow_;
 };
 
 extern OhWire Wire;

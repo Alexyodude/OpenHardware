@@ -1714,6 +1714,11 @@ def test_the_oh_board_header_restates_the_descriptions_own_numbers(variant):
         assert int(defines["OH_I2C_OP_SHIFT"]) == description.I2C_OP_SHIFT
         assert int(defines["OH_I2C_SCL_SIGNAL"]) == description.I2CEXT0_SCL_IDX
         assert int(defines["OH_I2C_SDA_SIGNAL"]) == description.I2CEXT0_SDA_IDX
+        assert int(defines["OH_I2C_ACK_EXP"], 16) == description.I2C_ACK_EXPECTED
+        assert int(defines["OH_I2C_CTR_CONF_UPGATE"], 16) == description.I2C_CONF_UPGATE
+        assert int(defines["OH_GPIO_PIN0"], 16) == gpio + description.GPIO_PIN0
+        assert int(defines["OH_GPIO_PIN_STRIDE"], 16) == description.GPIO_PIN_STRIDE
+        assert int(defines["OH_GPIO_PIN_PAD_DRIVER"], 16) == description.GPIO_PIN_PAD_DRIVER
 
     ram_base = getattr(description, ram)
     ram_size = getattr(description, f"{ram}_SIZE")
@@ -1727,18 +1732,19 @@ def test_the_oh_board_header_restates_the_descriptions_own_numbers(variant):
 
 
 def test_the_i2c_bits_the_description_does_not_carry_are_the_vendors_own():
-    """`oh_board.h` restates three bits the description has no name for: the
-    FIFO_CONF resets `Wire` pulses, and the OUT_SEL_CFG field that gives the
-    pad's output enable to GPIO_ENABLE. Held to the framework copy's headers
-    (ESP-IDF 4.4.7), the source the description cites.
-
-    **`OH_I2C_ACK_VAL` is held to nothing here, and that is a statement.**
-    The vendor's headers have no define for a command word's bit 10 (the
-    HAL's `i2c_ll.h:33-39` gives it as a bitfield) and the model ignores the
-    ACK a master sends, so neither a header nor a run can contradict it."""
-    include = (compiler.PACKAGES / "framework-arduinoespressif32" / "tools" / "sdk"
-               / "esp32c3" / "include" / "soc" / "esp32c3" / "include" / "soc")
-    if not (include / "i2c_reg.h").is_file():
+    """`oh_board.h` restates bits the description has no name for: CTR's
+    CLK_EN and force-out bits, the FIFO_CONF resets `Wire` pulses, the
+    OUT_SEL_CFG field that gives the pad's output enable to GPIO_ENABLE and
+    the GPIO_PINn PAD_DRIVER. Held to the framework copy's headers (ESP-IDF
+    4.4.7), the source the description cites. The command word's fields are
+    held to `i2c_hw_cmd_t`'s declared widths (`i2c_ll.h:31-37`), which is where
+    the HAL says what bit 10 is: the vendor's register headers have no define
+    for it."""
+    root = (compiler.PACKAGES / "framework-arduinoespressif32" / "tools" / "sdk"
+            / "esp32c3" / "include")
+    include = root / "soc" / "esp32c3" / "include" / "soc"
+    ll = root / "hal" / "esp32c3" / "include" / "hal" / "i2c_ll.h"
+    if not (include / "i2c_reg.h").is_file() or not ll.is_file():
         pytest.skip("SKIPPED: no framework-arduinoespressif32; pio pkg install")
     header = (pathlib.Path(compiler.ARDUINO_LITE) / "variants" / "xiao_esp32c3"
               / "oh_board.h").read_text(encoding="utf-8")
@@ -1755,15 +1761,35 @@ def test_the_i2c_bits_the_description_does_not_carry_are_the_vendors_own():
     for define, file, name in (
         ("OH_I2C_FIFO_TX_RST", "i2c_reg.h", "I2C_TX_FIFO_RST"),
         ("OH_I2C_FIFO_RX_RST", "i2c_reg.h", "I2C_RX_FIFO_RST"),
+        ("OH_I2C_CTR_CLK_EN", "i2c_reg.h", "I2C_CLK_EN"),
+        ("OH_I2C_CTR_SDA_FORCE_OUT", "i2c_reg.h", "I2C_SDA_FORCE_OUT"),
+        ("OH_I2C_CTR_SCL_FORCE_OUT", "i2c_reg.h", "I2C_SCL_FORCE_OUT"),
+        ("OH_I2C_CTR_CONF_UPGATE", "i2c_reg.h", "I2C_CONF_UPGATE"),
         ("OH_GPIO_OUT_SEL_OEN_SEL", "gpio_reg.h", "GPIO_FUNC0_OEN_SEL"),
+        ("OH_GPIO_PIN_PAD_DRIVER", "gpio_reg.h", "GPIO_PIN0_PAD_DRIVER"),
     ):
         assert int(defines[define], 16) == vendor_bit(file, name), define
 
+    struct = re.search(r"typedef union \{\s*struct \{(.*?)\};\s*uint32_t val;\s*\} i2c_hw_cmd_t;",
+                       ll.read_text(encoding="utf-8", errors="replace"), re.S)
+    assert struct, "i2c_ll.h declares no i2c_hw_cmd_t"
+    shift, at = 0, {}
+    for name, width in re.findall(r"(\w+):\s*(\d+)", struct.group(1)):
+        at[name] = shift
+        shift += int(width)
+    for define, field in (("OH_I2C_ACK_EN", "ack_en"), ("OH_I2C_ACK_EXP", "ack_exp"),
+                          ("OH_I2C_ACK_VAL", "ack_val")):
+        assert int(defines[define], 16) == 1 << at[field], (define, at)
+    assert int(defines["OH_I2C_OP_SHIFT"]) == at["op_code"], at
 
-def test_wire_is_compiled_only_where_the_board_has_an_i2c_controller_and_only_when_named():
+
+def test_wire_is_compiled_only_where_the_board_has_an_i2c_controller_and_only_when_named(
+        monkeypatch):
     """The C3's recipe carries the `Wire` library; the C5's and C6's carry
     none and say why, in the pane, where gcc says `Wire.h` is not there. A
-    sketch that does not name `Wire.h` is built without it on the C3 too."""
+    sketch that does not name `Wire.h` is built without it on the C3 too --
+    read off the files the build handed the compiler, because the linker's
+    `--gc-sections` makes the plain image the smaller either way."""
     assert [lib.header for lib in compiler.recipe_for(C3_BOARD).libraries] == ["Wire.h"]
     for board in sorted(OPENHARDWARE_BOARDS):
         assert compiler.recipe_for(board).libraries == (), board
@@ -1772,10 +1798,50 @@ def test_wire_is_compiled_only_where_the_board_has_an_i2c_controller_and_only_wh
         assert "Wire.h: No such file" in built.diagnostics, built.diagnostics
         assert "defines no OH_I2C_*" in built.diagnostics, (board, built.diagnostics)
         assert compiler.recipe_for(board).variant in built.diagnostics, board
+    real_run = compiler._run
+    compiled: list[str] = []
+
+    def recording_run(command, deadline):
+        compiled.extend(part for part in command if part.endswith((".c", ".cpp")))
+        return real_run(command, deadline)
+
+    monkeypatch.setattr(compiler, "_run", recording_run)
     plain = c3_build("void setup(){} void loop(){}")
+    assert plain.ok, plain.diagnostics
+    assert compiled and not any(name.endswith("Wire.cpp") for name in compiled), compiled
+    compiled.clear()
     wired = c3_build("#include <Wire.h>\nvoid setup(){ Wire.begin(); } void loop(){}")
-    assert plain.ok and wired.ok, (plain.diagnostics, wired.diagnostics)
-    assert len(wired.image) > len(plain.image), "Wire.cpp was compiled in"
+    assert wired.ok, wired.diagnostics
+    assert any(name.replace("\\", "/").endswith("libraries/Wire/Wire.cpp")
+               for name in compiled), compiled
+
+
+def test_every_overload_the_vendors_wire_write_has_compiles_here():
+    """`Wire.write(5u)`, `(5L)`, a `size_t`, a string literal and the rest:
+    the vendor's `Wire.h:136-155` overloads, which an `int`-only `write` made
+    ambiguous or an error."""
+    sketch = """
+#include <Wire.h>
+void setup() {
+  const uint8_t bytes[2] = {1, 2};
+  size_t length = 3;
+  Wire.begin();
+  Wire.beginTransmission(0x18);
+  Wire.write((uint8_t)5);
+  Wire.write(5);
+  Wire.write(5u);
+  Wire.write(5L);
+  Wire.write(5UL);
+  Wire.write(length);
+  Wire.write('c');
+  Wire.write("text");
+  Wire.write(bytes, 2);
+  Wire.endTransmission();
+}
+void loop() { }
+"""
+    built = c3_build(sketch)
+    assert built.ok, built.diagnostics
 
 
 # --- the ESP32-C5 and C6, on the same core (OH-156) ---------------------------

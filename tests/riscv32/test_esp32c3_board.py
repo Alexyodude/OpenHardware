@@ -1107,6 +1107,26 @@ def test_the_installed_i2c_registers_read_the_words_the_header_gives():
             assert cpu.read_word(out_sel(gpio)) == 0x80, f"GPIO{gpio} resets to OUT_SEL 128"
 
 
+def test_every_pads_gpio_pin_register_is_mapped_where_and_as_the_header_gives():
+    """`GPIO_PINn_REG` for every pad: its address, its reset word and its
+    PAD_DRIVER bit read back out of `gpio_reg.h`, and the register stores what
+    `Wire.begin` writes to it (OH-161 step 5: PAD_DRIVER, bit 2)."""
+    text = header_text("soc/esp32c3/include/soc/gpio_reg.h")
+    driver = header_bit(text, "GPIO_PIN0_PAD_DRIVER")
+    assert driver == esp32c3.GPIO_PIN_PAD_DRIVER
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        for pad in esp32c3.IO_MUX_PADS:
+            found = re.search(rf"#define GPIO_PIN{pad}_REG\s+\(DR_REG_GPIO_BASE \+ (0x[0-9A-Fa-f]+)\)", text)
+            assert found, f"gpio_reg.h defines no GPIO_PIN{pad}_REG"
+            address = esp32c3.GPIO + esp32c3.GPIO_PIN0 + esp32c3.GPIO_PIN_STRIDE * pad
+            assert address == esp32c3.GPIO + int(found.group(1), 16), pad
+            assert cpu.read_word(address) == header_reset_word(text, f"GPIO_PIN{pad}") == (
+                esp32c3.GPIO_PIN_AT_RESET), pad
+            cpu.write_word(address, driver)
+            assert cpu.read_word(address) == driver, pad
+
+
 # --- hand-assembled transactions --------------------------------------------
 
 

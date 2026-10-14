@@ -167,6 +167,19 @@ GPIO_ENABLE_W1TS = 0x24
 GPIO_ENABLE_W1TC = 0x28
 GPIO_IN = 0x3C
 
+#: `GPIO_PINn_REG`, one per pad, `gpio_reg.h:178` for GPIO0 --
+#: `#define GPIO_PIN0_REG (DR_REG_GPIO_BASE + 0x74)` -- and each next GPIO's four
+#: bytes on. Mapped at its reset word for `Wire.begin`, which sets
+#: `GPIO_PINn_PAD_DRIVER` (bit 2, `gpio_reg.h:211`, "GPIO_PIN0_PAD_DRIVER :
+#: R/W ;bitpos:[2] ;default: 1'h0") to make the pad open-drain. **Stored and
+#: read back, nothing more**: the interrupt, wake-up and synchroniser fields
+#: do nothing here, and `i2c_pad` does not check PAD_DRIVER at TRANS_START
+#: (OH-161 design item 4). Every field of the register defaults to 0.
+GPIO_PIN0 = 0x74
+GPIO_PIN_STRIDE = 4
+GPIO_PIN_PAD_DRIVER = 1 << 2
+GPIO_PIN_AT_RESET = 0
+
 #: IO_MUX, `soc.h:49` -- `#define DR_REG_IO_MUX_BASE 0x60009000`.
 IO_MUX = 0x60009000
 
@@ -866,6 +879,10 @@ def install_gpio(cpu: Cpu) -> None:
                   readable=False)
     cpu.map_alias(GPIO + GPIO_ENABLE_W1TC, GPIO + GPIO_ENABLE, "clear",
                   readable=False)
+
+    # Each pad's PIN register, stored as the vendor's header resets it.
+    for gpio in IO_MUX_PADS:
+        cpu.map_register(GPIO + GPIO_PIN0 + GPIO_PIN_STRIDE * gpio, GPIO_PIN_AT_RESET)
 
 
 def install_gpio_in(cpu: Cpu) -> None:

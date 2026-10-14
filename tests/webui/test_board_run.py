@@ -2197,3 +2197,179 @@ def test_a_wire_sketch_that_never_began_times_out_with_a_closed_gate():
         fifty = 50 * steps_per_millisecond(esp32c3)
         assert session.retired >= fifty, (
             f"gave up after {session.retired} steps, before 50 ms ({fifty})")
+
+
+# --- the review round: what Wire leaves between transactions, and its edges ----
+
+
+def _session_for(sketch: str) -> api.BoardSession:
+    needs_riscv32()
+    from webui import compile as compiler
+
+    try:
+        built = compiler.build(C3_BOARD, sketch)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    assert built.ok, built.diagnostics
+    return api.load_firmware(C3_BOARD, built.image, base=compiler.recipe_for(C3_BOARD).base)
+
+
+def _run_wire(sketch: str, count: int, *, device: bool = True) -> tuple[list[str], str]:
+    """The words `sketch` prints on a C3 with an MCP9808 on D4/D5 (or none),
+    and the session's status after them."""
+    with _session_for(sketch) as session:
+        if device:
+            session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
+        words = _printed_tokens(session, count)
+        assert session.status == "running", (session.status, session.detail, words)
+        return words, session.status
+
+
+#: An address scanner: 0x19 has nothing on it and 0x18 is the part. INT_RAW
+#: holds a NACK until the next transaction clears it, so a scanner that did
+#: not clear it would call the part absent.
+WIRE_SCAN_SKETCH = """
+#include <Wire.h>
+void setup() {
+  Wire.begin();
+  Wire.beginTransmission(0x19);
+  Serial.println(Wire.endTransmission());
+  Wire.beginTransmission(0x18);
+  Serial.println(Wire.endTransmission());
+}
+void loop() { }
+"""
+
+
+def test_a_nacked_probe_does_not_make_the_next_probe_read_as_nacked():
+    words, _ = _run_wire(WIRE_SCAN_SKETCH, 2)
+    assert words == ["2", "0"], f"0x19 NACKs, 0x18 acknowledges: {words}"
+
+
+#: 32 writes into a 31-byte buffer: the 32nd is refused, endTransmission says
+#: so with 1 (Arduino's "data too long") and sends nothing, and the next
+#: transmission is not poisoned by it.
+WIRE_OVERFLOW_SKETCH = """
+#include <Wire.h>
+void setup() {
+  Wire.begin();
+  Wire.beginTransmission(0x18);
+  int accepted = 0;
+  for (int i = 0; i < 32; i++) { accepted += Wire.write((uint8_t)6); }
+  Serial.println(accepted);
+  Serial.println(Wire.endTransmission());
+  Wire.beginTransmission(0x18);
+  Wire.write(6);
+  Serial.println(Wire.endTransmission());
+}
+void loop() { }
+"""
+
+
+def test_a_write_past_the_buffer_makes_end_transmission_say_data_too_long():
+    words, _ = _run_wire(WIRE_OVERFLOW_SKETCH, 3)
+    assert words == ["31", "1", "0"], (
+        f"31 bytes taken, then 1 and nothing sent, then a clean 0: {words}")
+
+
+def test_begin_writes_ctr_as_the_hals_master_init_and_sets_the_pads_open_drain():
+    """`i2c_ll_master_init` (i2c_ll.h:909-918): CTR is MS_MODE, CLK_EN and
+    both force-out bits and nothing else, and it stays that way through a
+    transaction (TRANS_START and CONF_UPGATE are write-triggers that store 0).
+    Wire.begin also sets PAD_DRIVER on its two pads and on no other."""
+    sketch = ("#include <Wire.h>\nvoid setup() { Wire.begin(); "
+              "Wire.beginTransmission(0x18); Serial.println(Wire.endTransmission()); }\n"
+              "void loop() { }\n")
+    with _session_for(sketch) as session:
+        session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
+        assert _printed_tokens(session, 1) == ["0"]
+        ctr = session.cpu.read_word(esp32c3.I2C + esp32c3.I2C_CTR)
+        assert ctr == esp32c3.I2C_MS_MODE | 1 << 8 | 0b11, hex(ctr)
+        for gpio in esp32c3.IO_MUX_PADS:
+            word = session.cpu.read_word(
+                esp32c3.GPIO + esp32c3.GPIO_PIN0 + esp32c3.GPIO_PIN_STRIDE * gpio)
+            want = esp32c3.GPIO_PIN_PAD_DRIVER if gpio in (I2C_SDA, I2C_SCL) else 0
+            assert word == want, (gpio, hex(word))
+
+
+#: A write deferred by endTransmission(false) goes out with the requestFrom
+#: that names its address. One for another address, and one for zero bytes,
+#: read nothing and leave it deferred, as the vendor's nonStop stays set.
+WIRE_KEEP_SKETCH = """
+#include <Wire.h>
+static void value(void) {
+  int high = Wire.read();
+  int low = Wire.read();
+  Serial.println((high << 8) | low);
+}
+void setup() {
+  Wire.begin();
+  Wire.beginTransmission(0x18);
+  Wire.write(6);
+  Wire.endTransmission();
+  Wire.beginTransmission(0x18);
+  Wire.write(7);
+  Wire.endTransmission(false);
+  Serial.println(Wire.requestFrom(0x19, 2));
+  Serial.println(Wire.requestFrom(0x18, 0));
+  Serial.println(Wire.requestFrom(0x18, 2));
+  value();
+}
+void loop() { }
+"""
+
+
+def test_a_refused_request_from_leaves_the_deferred_write_for_the_one_that_matches():
+    words, _ = _run_wire(WIRE_KEEP_SKETCH, 4)
+    assert words == ["0", "0", "2", "1024"], (
+        f"pointer 7 was still waiting: 1024, and not pointer 6's 84: {words}")
+
+
+#: beginTransmission drops a write deferred and never followed by requestFrom.
+#: Pointer 6 is written for real; pointer 7 is deferred and dropped; the plain
+#: read after it is at 0x18 and so is the part's own pointer, 6.
+WIRE_DROP_SKETCH = """
+#include <Wire.h>
+void setup() {
+  Wire.begin();
+  Wire.beginTransmission(0x18);
+  Wire.write(6);
+  Wire.endTransmission();
+  Wire.beginTransmission(0x18);
+  Wire.write(7);
+  Wire.endTransmission(false);
+  Wire.beginTransmission(0x19);
+  Serial.println(Wire.requestFrom(0x18, 2));
+  int high = Wire.read();
+  int low = Wire.read();
+  Serial.println((high << 8) | low);
+}
+void loop() { }
+"""
+
+
+def test_begin_transmission_drops_a_deferred_write():
+    words, _ = _run_wire(WIRE_DROP_SKETCH, 2)
+    assert words == ["2", "84"], (
+        f"a plain read at pointer 6, not the dropped write's 7, and not a "
+        f"mismatched repeated START: {words}")
+
+
+#: 31 deferred bytes and the two address bytes are 33 for a 32-byte FIFO.
+WIRE_FIFO_SKETCH = """
+#include <Wire.h>
+void setup() {
+  Wire.begin();
+  Wire.beginTransmission(0x18);
+  for (int i = 0; i < 31; i++) { Wire.write((uint8_t)6); }
+  Serial.println(Wire.endTransmission(false));
+  Serial.println(Wire.requestFrom(0x18, 2));
+}
+void loop() { }
+"""
+
+
+def test_a_deferred_write_that_cannot_fit_the_fifo_reads_nothing_and_stops_nothing():
+    words, status = _run_wire(WIRE_FIFO_SKETCH, 2)
+    assert words == ["0", "0"], words
+    assert status == "running"

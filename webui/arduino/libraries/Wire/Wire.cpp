@@ -34,7 +34,8 @@
  *
  * ## What `endTransmission` returns, and what it does not tell apart
  *
- * 0 for a transaction that completed, 2 for every NACK, 5 for a timeout.
+ * 0 for a transaction that completed, 1 for a write that overflowed the
+ * buffer (`Wire.h` says how big), 2 for every NACK, 5 for a timeout.
  *
  * **2 for EVERY NACK, as arduino-esp32's own Wire does.** Arduino documents 2
  * as "received NACK on transmit of address" and 3 as "received NACK on
@@ -56,14 +57,21 @@
  * TRANS_START: each pad on function 1 with its input on and a pull-up, the
  * signal out of the pad with its output enable from GPIO_ENABLE, and the
  * signal back in from the same pad. The pins are the vendor's `SDA` and `SCL`
- * from `pins_arduino.h`, GPIO6 and GPIO7, `D4` and `D5`.
+ * from `pins_arduino.h`, GPIO6 and GPIO7, `D4` and `D5`. Each pad's
+ * GPIO_PINn PAD_DRIVER is set, which makes it open-drain as I2C wants; the
+ * model maps the register and stores the bit, and `i2c_pad` does not check it.
  *
- * **Two things silicon wants that this does not write, because the model
- * maps neither.** PAD_DRIVER, which makes the pad open-drain, is in a PIN
- * register nothing here maps, and PERIP_RST_EN0 bit 7, the controller's
- * reset, is 0 out of reset -- released -- so writing it would only fault.
- * The model checks the routing and the clock gate and neither of these, which
- * `i2c_pad` says.
+ * CTR is written whole as `i2c_ll_master_init` writes it (`i2c_ll.h:909-918`
+ * in the framework copy): MS_MODE, CLK_EN, SDA_FORCE_OUT and SCL_FORCE_OUT,
+ * everything else 0. And before each TRANS_START CONF_UPGATE is set, as
+ * `i2c_hal_update_config` does by way of `i2c_ll_update` (`i2c_ll.h:143-146`).
+ * The model stores CONF_UPGATE as a write-trigger 0 and does nothing with it,
+ * so no run can tell the write is there; it is here because the HAL does it.
+ *
+ * **One thing silicon wants that this does not write, because the model maps
+ * no such register.** PERIP_RST_EN0 bit 7, the controller's reset, is 0 out of
+ * reset -- released -- so writing it would only fault. The model checks the
+ * routing and the clock gate and not that.
  *
  * ## Why `setClock` does nothing
  *
@@ -96,20 +104,23 @@ void reg_clear(uint32_t address, uint32_t bits) {
 }
 
 /* One pad of the bus, as `i2c_pad` reads it back. OUT_SEL carries the signal
- * in [7:0]; OEN_SEL makes GPIO_ENABLE the pad's output enable. */
+ * in [7:0]; OEN_SEL makes GPIO_ENABLE the pad's output enable; PAD_DRIVER
+ * makes the pad open-drain. */
 void route(uint8_t gpio, uint32_t signal) {
     const uint32_t pad = OH_IO_MUX_GPIO0 + OH_IO_MUX_STRIDE * gpio;
     reg_clear(pad, OH_IO_MUX_MCU_SEL_MASK | OH_IO_MUX_FUN_PD);
     reg_set(pad, OH_IO_MUX_MCU_SEL_GPIO | OH_IO_MUX_FUN_IE | OH_IO_MUX_FUN_PU);
+    reg_set(OH_GPIO_PIN0 + OH_GPIO_PIN_STRIDE * gpio, OH_GPIO_PIN_PAD_DRIVER);
     OH_REG(OH_GPIO_ENABLE_W1TS) = 1u << gpio;
     OH_REG(OH_GPIO_FUNC_OUT_SEL_CFG0 + 4u * gpio) = signal | OH_GPIO_OUT_SEL_OEN_SEL;
     OH_REG(OH_GPIO_FUNC_IN_SEL_CFG0 + 4u * signal) = OH_GPIO_SIG_IN_SEL | gpio;
 }
 
-/* A transaction's first stores: master mode, the two interrupts this waits
- * on cleared, and both FIFOs reset (set the reset bits, then clear them). */
+/* A transaction's first stores: the two interrupts this waits on cleared --
+ * INT_RAW holds a NACK until something clears it, so without this a probe
+ * after a NACKed one would read the old NACK -- and both FIFOs reset (set the
+ * reset bits, then clear them). */
 void prepare(void) {
-    reg_set(OH_I2C_CTR, OH_I2C_CTR_MS_MODE);
     OH_REG(OH_I2C_INT_CLR) = OH_I2C_INT_NACK | OH_I2C_INT_TRANS_COMPLETE;
     reg_set(OH_I2C_FIFO_CONF, OH_I2C_FIFO_TX_RST | OH_I2C_FIFO_RX_RST);
     reg_clear(OH_I2C_FIFO_CONF, OH_I2C_FIFO_TX_RST | OH_I2C_FIFO_RX_RST);
@@ -128,6 +139,7 @@ enum Outcome { kDone, kNack, kTimeout };
  * raises TRANS_COMPLETE too (the STOP the controller sends after it), so
  * NACK is read first. */
 Outcome go(void) {
+    reg_set(OH_I2C_CTR, OH_I2C_CTR_CONF_UPGATE);
     reg_set(OH_I2C_CTR, OH_I2C_CTR_TRANS_START);
     const unsigned long began = millis();
     for (;;) {
@@ -150,8 +162,10 @@ void OhWire::begin(void) {
     reg_set(OH_I2C_GATE, OH_I2C_GATE_EN);
     route(SDA, OH_I2C_SDA_SIGNAL);
     route(SCL, OH_I2C_SCL_SIGNAL);
-    reg_set(OH_I2C_CTR, OH_I2C_CTR_MS_MODE);
+    OH_REG(OH_I2C_CTR) = OH_I2C_CTR_MS_MODE | OH_I2C_CTR_CLK_EN |
+                         OH_I2C_CTR_SDA_FORCE_OUT | OH_I2C_CTR_SCL_FORCE_OUT;
     deferred_ = false;
+    overflow_ = false;
 }
 
 void OhWire::setClock(uint32_t hz) {
@@ -164,19 +178,23 @@ void OhWire::beginTransmission(uint8_t address) {
     /* A write deferred by `endTransmission(false)` and never followed by
      * `requestFrom` is dropped, as arduino-esp32 drops it. */
     deferred_ = false;
+    overflow_ = false;
     tx_address_ = address;
     tx_length_ = 0;
 }
 
 size_t OhWire::write(uint8_t value) {
     if (tx_length_ >= kBuffer) {
+        /* Remembered for `endTransmission`, which answers 1 ("data too long",
+         * Arduino's documented code) rather than send a write that is not the
+         * one the sketch made. The vendor's buffer is 128 bytes and its
+         * `write` drops silently; see `Wire.h`. */
+        overflow_ = true;
         return 0;
     }
     tx_[tx_length_++] = value;
     return 1;
 }
-
-size_t OhWire::write(int value) { return write(static_cast<uint8_t>(value)); }
 
 size_t OhWire::write(const uint8_t* data, size_t length) {
     for (size_t i = 0; i < length; ++i) {
@@ -188,6 +206,11 @@ size_t OhWire::write(const uint8_t* data, size_t length) {
 }
 
 uint8_t OhWire::endTransmission(bool stop) {
+    if (overflow_) {
+        overflow_ = false;
+        deferred_ = false;
+        return 1;
+    }
     if (!stop) {
         /* The write goes out ahead of the next `requestFrom`, as a repeated
          * START. Nothing is on the bus yet, so there is nothing to NACK. */
@@ -226,20 +249,24 @@ uint8_t OhWire::requestFrom(uint8_t address, uint8_t quantity, bool stop) {
     rx_length_ = 0;
     rx_index_ = 0;
     const bool repeated = deferred_;
-    deferred_ = false;
     if (quantity == 0) {
+        /* Nothing is read and the deferred write stays deferred. */
         return 0;
     }
     if (quantity > kBuffer) {
         quantity = kBuffer;
     }
     if (repeated) {
-        /* arduino-esp32 refuses a repeated START to another address. Two
-         * address bytes and the data must also fit the 32-byte FIFO. */
+        /* arduino-esp32 refuses a repeated START to another address, and
+         * keeps `nonStop` set when it does (`Wire.cpp:490-493`): the write
+         * stays deferred for the `requestFrom` that names its address. Two
+         * address bytes and the data must also fit the 32-byte FIFO, which is
+         * this controller's limit and not the vendor driver's. */
         if (address != tx_address_ || tx_length_ + 2u > kFifoBytes) {
             return 0;
         }
     }
+    deferred_ = false;
     prepare();
     unsigned n = 0;
     if (repeated) {

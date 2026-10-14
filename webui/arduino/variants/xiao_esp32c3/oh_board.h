@@ -104,16 +104,22 @@
 /* I2C0, base 0x60013000 (OH-161 step 5): what `Wire` writes, from
  * `webui/boards/esp32c3.py`, which cites each line of `i2c_reg.h`,
  * `soc.h`, `system_reg.h`, `gpio_reg.h` and `i2c_ll.h`. A test holds every
- * line equal to the description's, and the three bits the description does
- * not carry -- the two FIFO resets and OEN_SEL -- to the vendor's headers.
- * Hex literals, for the reason the UART gate's is.
+ * line equal to the description's, and the bits the description does not
+ * carry to the vendor's own headers: the CTR bits and the FIFO resets
+ * (`i2c_reg.h`), OEN_SEL (`gpio_reg.h`) and the command word's field widths
+ * (`i2c_ll.h`'s `i2c_hw_cmd_t`). Hex literals, for the reason the UART gate's
+ * is.
  *
  * The clock gate is SYSTEM_PERIP_CLK_EN0's I2C_EXT0_CLK_EN, bit 7, which is
  * 0 out of reset. PERIP_RST_EN0's bit 7 is 0 out of reset too, so nothing
- * has to release it, and the description maps no such register. The matrix
+ * has to release it, and the description maps no such register, so `Wire`
+ * does not write it. The matrix
  * registers are GPIO_FUNCn_IN_SEL_CFG (signal n, + 0x154) and
  * GPIO_FUNCn_OUT_SEL_CFG (pad n, + 0x554), and the signals are
- * I2CEXT0_SCL 53 and I2CEXT0_SDA 54 (`gpio_sig_map.h:95-98`).
+ * I2CEXT0_SCL 53 and I2CEXT0_SDA 54 (`gpio_sig_map.h:95-98`). Each pad's
+ * GPIO_PINn_REG (+ 0x74 + 4n) is mapped, and `Wire` sets its PAD_DRIVER,
+ * bit 2, which makes the pad open-drain; the model stores it and checks
+ * nothing about it.
  *
  * **The op codes are `i2c_ll.h`'s and not the comment in `i2c_reg.h`**: that
  * comment gives the original ESP32's encoding. A command word is byte_num
@@ -124,8 +130,12 @@
 #define OH_I2C_INT_RAW                 0x60013020u
 #define OH_I2C_INT_CLR                 0x60013024u
 #define OH_I2C_COMD0                   0x60013058u
+#define OH_I2C_CTR_SDA_FORCE_OUT       0x00000001u   /* bit 0 */
+#define OH_I2C_CTR_SCL_FORCE_OUT       0x00000002u   /* bit 1 */
 #define OH_I2C_CTR_MS_MODE             0x00000010u   /* bit 4 */
 #define OH_I2C_CTR_TRANS_START         0x00000020u   /* bit 5, write-trigger */
+#define OH_I2C_CTR_CLK_EN              0x00000100u   /* bit 8 */
+#define OH_I2C_CTR_CONF_UPGATE         0x00000800u   /* bit 11, write-trigger */
 #define OH_I2C_FIFO_TX_RST             0x00002000u   /* FIFO_CONF bit 13 */
 #define OH_I2C_FIFO_RX_RST             0x00001000u   /* FIFO_CONF bit 12 */
 #define OH_I2C_INT_NACK                0x00000400u   /* bit 10 */
@@ -136,6 +146,7 @@
 #define OH_I2C_OP_READ                 3u
 #define OH_I2C_OP_STOP                 2u
 #define OH_I2C_ACK_EN                  0x00000100u   /* bit 8 */
+#define OH_I2C_ACK_EXP                 0x00000200u   /* bit 9 */
 #define OH_I2C_ACK_VAL                 0x00000400u   /* bit 10: 1 NACKs the byte read */
 #define OH_I2C_GATE                    0x600C0010u
 #define OH_I2C_GATE_EN                 0x00000080u   /* I2C_EXT0_CLK_EN, bit 7 */
@@ -145,6 +156,9 @@
 #define OH_GPIO_FUNC_OUT_SEL_CFG0      0x60004554u
 #define OH_GPIO_SIG_IN_SEL             0x00000040u   /* IN_SEL_CFG bit 6 */
 #define OH_GPIO_OUT_SEL_OEN_SEL        0x00000200u   /* OUT_SEL_CFG bit 9 */
+#define OH_GPIO_PIN0                   0x60004074u
+#define OH_GPIO_PIN_STRIDE             0x4u
+#define OH_GPIO_PIN_PAD_DRIVER         0x00000004u   /* GPIO_PINn bit 2 */
 #define OH_IO_MUX_MCU_SEL_MASK         0x00007000u   /* [14:12] */
 #define OH_IO_MUX_MCU_SEL_GPIO         0x00001000u   /* function 1 */
 
