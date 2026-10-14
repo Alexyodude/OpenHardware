@@ -11,10 +11,12 @@ read -- is refused by name and section, not answered with a plausible value.
 
 A bare class with no bus in it: `webui/boards/esp32c3.py`'s `serve_i2c` is the
 controller that calls `start`, `write`, `read` and `stop`. Nothing here knows
-what an ESP32 is, and nothing here raises anything but `DeviceRefusal`, the
-one exception `core/riscv32/abi.py` turns into a stopped session.
+what an ESP32 is, and `Mcp9808` raises nothing but `DeviceRefusal`, the one
+exception `core/riscv32/abi.py` turns into a stopped session. (`ta_word`, a
+function a caller may use alone, raises `ValueError` for a resolution that is
+not Register 5-7's two bits.)
 
-**Two places DS25095A disagrees with itself**, carried here as citations.
+**Three places DS25095A disagrees with itself**, carried here as citations.
 (a) Register 5-4's note 2 says the power-up resolution is 0.25 C/bit; Register
 5-7 (p.29) and Table 5-3 (p.33) give 0x03, 0.0625 C, and 5.1.6 and 5.2.4 agree
 with them, so the model follows them and
@@ -22,6 +24,11 @@ with them, so the model follows them and
 (b) 5.1.6 (p.29) says the resolution "is also reflected in the Capability
 register (see Register 5-2)", and this part has no Capability register:
 Register 5-2 is CONFIG and Register 5-1 lists no such pointer.
+(c) Figure 5-10 (p.32) gives TA bits 15:13 against hysteresis conditions
+(TA < TLOWER - THYST gives 0 0 1, TA <= TUPPER - THYST gives 0 0 0), where 5.1.3
+(p.24) sets them by plain comparison with TLOWER, TUPPER and TCRIT. A TA read
+with THYST non-zero is refused for it, and for the history those flags would
+need.
 
 **tCONV is not modelled** (p.3, Table 5-2 p.31): TA is the held temperature at
 the moment it is read, where silicon would show the last conversion.
@@ -43,9 +50,13 @@ VPOR_VOLTS, VDD_MIN, VDD_MAX = 2.2, 2.7, 5.5
 
 #: The ID registers, by pointer. 5.1.4, p.27: manufacturer ID 0x0054. 5.1.5,
 #: p.28: device ID 0x04 in the high byte, revision 0x00 in the low.
-IDS: dict[int, int] = {6: 0x0054, 7: 0x0400}
-
-CONFIG, TUPPER, TLOWER, TCRIT, TA, RESOLUTION = 1, 2, 3, 4, 5, 8
+#: The pointer values, Register 5-1 (p.16): 0001 CONFIG, 0010 TUPPER, 0011
+#: TLOWER, 0100 TCRIT, 0101 TA, 0110 manufacturer ID, 0111 device ID/revision,
+#: 1000 resolution. 0000 is RFU and 1xxx other than 1000 is reserved for test
+#: and calibration (Note 1), so every other pointer is refused for good.
+CONFIG, TUPPER, TLOWER, TCRIT, TA = 1, 2, 3, 4, 5
+MANUFACTURER_ID, DEVICE_ID, RESOLUTION = 6, 7, 8
+IDS: dict[int, int] = {MANUFACTURER_ID: 0x0054, DEVICE_ID: 0x0400}
 
 #: The writable registers' power-on data. Table 5-3, p.33: CONFIG, TUPPER,
 #: TLOWER and TCRIT 0x0000; resolution 0x03 (+0.0625 C, Register 5-7 p.29).
@@ -57,19 +68,22 @@ POWER_ON: dict[int, int] = {CONFIG: 0x0000, TUPPER: 0x0000, TLOWER: 0x0000,
 #: ones are Table 5-1's MSB and LSB rows (p.17) and the resolution register is
 #: one 8-bit row (Register 5-7, bit 7 to bit 0).
 WIDTH: dict[int, int] = {CONFIG: 2, TUPPER: 2, TLOWER: 2, TCRIT: 2, TA: 2,
-                         6: 2, 7: 2, RESOLUTION: 1}
+                         MANUFACTURER_ID: 2, DEVICE_ID: 2, RESOLUTION: 1}
 
 #: Where each register is described, for the refusals that name it.
 _WHERE = {CONFIG: "CONFIG, Register 5-2, p.18", TUPPER: "TUPPER, Register 5-3, p.22",
           TLOWER: "TLOWER, Register 5-3, p.22", TCRIT: "TCRIT, Register 5-3, p.22",
-          TA: "TA, Register 5-4, p.24", 6: "manufacturer ID, 5.1.4, p.27",
-          7: "device ID, 5.1.5, p.28", RESOLUTION: "resolution, Register 5-7, p.29"}
+          TA: "TA, Register 5-4, p.24",
+          MANUFACTURER_ID: "manufacturer ID, 5.1.4, p.27",
+          DEVICE_ID: "device ID, 5.1.5, p.28",
+          RESOLUTION: "resolution, Register 5-7, p.29"}
 
 #: The registers a host may not write: TA is "read-only" (5.1.3, p.24, "16-bit
 #: read-only Ambient Temperature register"), and the IDs are Register 5-5's and
 #: 5-6's "READ-ONLY" (p.27, p.28).
-_READ_ONLY = {TA: "5.1.3 and Register 5-4, p.24", 6: "5.1.4, Register 5-5, p.27",
-              7: "5.1.5, Register 5-6, p.28"}
+_READ_ONLY = {TA: "5.1.3 and Register 5-4, p.24",
+              MANUFACTURER_ID: "5.1.4, Register 5-5, p.27",
+              DEVICE_ID: "5.1.5, Register 5-6, p.28"}
 
 #: Register 5-2 (p.18-19) bits the host can hold: THYST 10:9, SHDN 8, Crit
 #: Lock 7, Win Lock 6, Alert Cnt 3, Alert Sel 2, Alert Pol 1, Alert Mod 0.
@@ -93,10 +107,6 @@ CELSIUS_MIN, CELSIUS_MAX = -40.0, 125.0
 #: before any pointer write is refused, as the RFU register it is.
 POWER_ON_POINTER = 0
 
-#: Every other pointer value than WIDTH's keys is RFU or reserved (Register
-#: 5-1, p.16), and is refused for good.
-
-
 def _signed(word: int) -> int:
     """The 13-bit two's complement a TA or limit word holds, in sixteenths of
     a degree (bit 0 = 2^-4 C, bit 12 the sign: Register 5-4 p.24)."""
@@ -116,11 +126,24 @@ def ta_word(celsius: float, resolution: int, tupper: int, tlower: int,
     reading of Register 5-4 note 2 ("bits 2, 1 and 0 may remain clear") this
     model takes (design item 6; DS25095A does not say which way it rounds).
     The flags compare the temperature the register shows with the limits.
+    **In shutdown the flags are recomputed, not frozen** (the model's
+    judgement: 5.2.1 says the temperature data is held and does not say
+    whether bits 15:13 follow a limit written afterwards), so only the
+    temperature bits are held.
     """
+    return _with_flags(_sixteenths(celsius, resolution), tupper, tlower, tcrit)
+
+
+def _sixteenths(celsius: float, resolution: int) -> int:
+    """`celsius` rounded toward minus infinity to `resolution`'s step, in
+    sixteenths of a degree: the signed value of TA's bits 12:0."""
     if not isinstance(resolution, int) or not 0 <= resolution <= 3:
         raise ValueError(f"MCP9808 resolution bits are 0 to 3 (Register 5-7), got {resolution!r}")
     step = 1 << (3 - resolution)
-    shown = math.floor(celsius * 16) // step * step
+    return math.floor(celsius * 16) // step * step
+
+
+def _with_flags(shown: int, tupper: int, tlower: int, tcrit: int) -> int:
     flags = (shown >= _signed(tcrit)) << 15 | (shown > _signed(tupper)) << 14 \
         | (shown < _signed(tlower)) << 13
     return flags | shown & 0x1FFF
@@ -134,10 +157,12 @@ class Mcp9808:
         self.celsius = celsius
         self.pointer = POWER_ON_POINTER
         self.registers = dict(POWER_ON)
-        #: The temperature TA holds while CONFIG's SHDN is set (5.2.1, p.30:
-        #: "TA holds the previous temperature data"), None when it follows
-        #: `celsius`.
-        self._frozen: float | None = None
+        #: TA's temperature bits while CONFIG's SHDN is set (5.2.1, p.30: "the
+        #: Ambient Temperature register (TA) holds the previous temperature
+        #: data"), as sixteenths already rounded to the resolution of the
+        #: moment SHDN was set, so a later resolution write does not change
+        #: them; None when TA follows `celsius`.
+        self._frozen: int | None = None
         self._powered = False
         self._writing = False
         self._bytes_in = 0
@@ -257,7 +282,9 @@ class Mcp9808:
 
     def _store(self, pointer: int, word: int) -> None:
         """A whole register written. The lock bits are read from before the
-        write, so one write cannot lock a register and change it too."""
+        write, so a write that sets a lock is itself held by the locks as they
+        were: it can set Crit Lock and change THYST in one write, and a
+        write to a limit register is stopped only by a lock set earlier."""
         config = self.registers[CONFIG]
         if pointer == CONFIG:
             self._store_config(config, word)
@@ -291,7 +318,7 @@ class Mcp9808:
         if not result & _SHDN:
             self._frozen = None
         elif not old & _SHDN:
-            self._frozen = self.celsius
+            self._frozen = _sixteenths(self.celsius, self.registers[RESOLUTION])
         self.registers[CONFIG] = result
 
     def _set_pointer(self, byte: int) -> None:
@@ -310,8 +337,9 @@ class Mcp9808:
         """The next byte of the selected register, MSB first."""
         if self._writing:
             raise DeviceRefusal(
-                "MCP9808 read inside a write transfer: the host addressed it "
-                "for writing (Table 3-2, p.11)")
+                f"MCP9808 read inside a write transfer (pointer "
+                f"{self.pointer}, {self._bytes_in} bytes written so far): the "
+                f"host addressed it for writing (Table 3-2, p.11)")
         if self.pointer not in WIDTH:
             raise DeviceRefusal(
                 f"MCP9808 read at pointer {self.pointer}: 0000 = RFU, reserved "
@@ -339,12 +367,16 @@ class Mcp9808:
             raise DeviceRefusal(
                 f"MCP9808 TA read with CONFIG {config:#06x} THYST "
                 f"{(config & _THYST) >> 9} (Register 5-2, p.18; 5.2.2, p.30): "
-                f"the hysteresis applies to the Alert limits as the "
-                f"temperature falls, and DS25095A does not say what it does "
-                f"to TA's flag bits, so TA is not answered")
-        held = self.celsius if self._frozen is None else self._frozen
+                f"Figure 5-10 (p.32) gives TA bits 15:13 against conditions "
+                f"such as TA < TLOWER - THYST, which disagrees with 5.1.3 "
+                f"(p.24), where bit 13 is set 'if TA is less than TLOWER', "
+                f"and flags under hysteresis depend on the temperature's "
+                f"history, which this model does not hold; TA is not "
+                f"answered rather than guessed")
         r = self.registers
-        return ta_word(held, r[RESOLUTION], r[TUPPER], r[TLOWER], r[TCRIT])
+        shown = self._frozen if self._frozen is not None \
+            else _sixteenths(self.celsius, r[RESOLUTION])
+        return _with_flags(shown, r[TUPPER], r[TLOWER], r[TCRIT])
 
     def stop(self) -> None:
         """A STOP: the transfer ends, the pointer stays (4.1.1, p.13). A write

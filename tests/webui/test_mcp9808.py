@@ -236,7 +236,7 @@ def test_ta_is_the_held_temperature_in_sixteenths_with_the_flags_above():
     """Register 5-4 (p.24), Equation 5-1 (p.25): 13-bit two's complement, bit
     0 = 2^-4 C, flags 15:13 = TA>=TCRIT, TA>TUPPER, TA<TLOWER. With power-on
     limits of 0 C: 25.0 C is 0xC190 = 49552 (Figure 5-5, p.26 draws 25.25 C
-    as 0x0191) and -10.5 C is 0x3F58 = 16216."""
+    as 0x0194) and -10.5 C is 0x3F58 = 16216."""
     assert mcp9808.ta_word(25.0, 3, 0, 0, 0) == 0xC190 == 49552
     assert mcp9808.ta_word(-10.5, 3, 0, 0, 0) == 0x3F58 == 16216
     assert mcp9808.ta_word(0.0, 3, 0, 0, 0) == 0x8000, "0 C: >= TCRIT 0, not > TUPPER"
@@ -267,6 +267,12 @@ def test_each_resolution_rounds_toward_minus_infinity_to_its_step():
             assert got == want, (resolution, celsius, got, want)
     assert mcp9808.ta_word(-10.5625, 0, 0x1000, 0x1000, 0x1000) & 0x1FFF == 0x1F50
     assert mcp9808.ta_word(-0.0625, 3, 0x1000, 0x1000, 0x1000) & 0x1FFF == 0x1FFF
+    # A temperature between two sixteenths goes down, not to the nearest: 25.1
+    # C is 401.6 sixteenths and -0.01 C is -0.16.
+    assert mcp9808.ta_word(25.1, 3, 0x1000, 0x1000, 0x1000) & 0x1FFF == 401
+    assert mcp9808.ta_word(-0.01, 3, 0x1000, 0x1000, 0x1000) & 0x1FFF == 0x1FFF
+    assert read_register(part(celsius=25.1), TA) & 0x1FFF == 401
+    assert read_register(part(celsius=-0.01), TA) & 0x1FFF == 0x1FFF
 
 
 def test_the_flags_compare_ta_with_each_limit_as_register_5_4_says():
@@ -339,13 +345,16 @@ def test_the_lock_bits_stay_until_power_on_and_hold_back_what_5_1_1_says():
     """Register 5-2: Crit Lock stops TCRIT, Win Lock stops TUPPER and TLOWER,
     either stops THYST, SHDN being set, Alert Pol and Mod, neither bit is
     cleared by a write, and a VDD glitch below VPOR (5.3, p.33) clears it."""
-    for lock, writable, stopped in ((0x80, TUPPER, TCRIT), (0x40, TCRIT, TUPPER)):
+    for lock, writables, stoppeds in ((0x80, (TUPPER, TLOWER), (TCRIT,)),
+                                      (0x40, (TCRIT,), (TUPPER, TLOWER))):
         device = part()
         write_word(device, CONFIG, lock)
-        write_word(device, writable, 0x0190)
-        assert read_register(device, writable) == 0x0190
-        write_word(device, stopped, 0x0190)
-        assert read_register(device, stopped) == 0, "can not be written"
+        for writable in writables:
+            write_word(device, writable, 0x0190)
+            assert read_register(device, writable) == 0x0190, writable
+        for stopped in stoppeds:
+            write_word(device, stopped, 0x0190)
+            assert read_register(device, stopped) == 0, (stopped, "can not be written")
         write_word(device, CONFIG, 0x0000)
         assert read_register(device, CONFIG) == lock, "cleared only by a reset"
         write_word(device, CONFIG, lock | 0x0600 | 0x0100 | 0x0003)
@@ -354,12 +363,34 @@ def test_the_lock_bits_stay_until_power_on_and_hold_back_what_5_1_1_says():
         device.hold(straps=0, celsius=25.0, vdd=0.0)
         device.hold(straps=0, celsius=25.0, vdd=3.3)
         assert read_register(device, CONFIG) == 0
-        assert read_register(device, writable) == 0, "the limits went with it"
+        for writable in writables:
+            assert read_register(device, writable) == 0, "the limits went with it"
     device = part()
     write_word(device, CONFIG, 0x0100)
     write_word(device, CONFIG, 0x0100 | 0x40)
     write_word(device, CONFIG, 0x0040)
     assert read_register(device, CONFIG) == 0x40, "SHDN can be cleared while locked"
+
+
+def test_alert_sel_is_held_by_win_lock_alone():
+    """Register 5-2 bit 2 (p.19): 'When the Alarm Window Lock bit is set, this
+    bit cannot be altered until unlocked (bit 6)'. Crit Lock does not hold it."""
+    device = part()
+    write_word(device, CONFIG, 0x0080)
+    write_word(device, CONFIG, 0x0084)
+    assert read_register(device, CONFIG) == 0x0084, "Crit Lock alone: Alert Sel is free"
+    write_word(device, CONFIG, 0x0080)
+    assert read_register(device, CONFIG) == 0x0080, "and can be cleared"
+    device = part()
+    write_word(device, CONFIG, 0x0040)
+    write_word(device, CONFIG, 0x0044)
+    assert read_register(device, CONFIG) == 0x0040, "Win Lock: bit 2 unchanged"
+    device = part()
+    write_word(device, CONFIG, 0x0004)
+    write_word(device, CONFIG, 0x0044)
+    assert read_register(device, CONFIG) == 0x0044
+    write_word(device, CONFIG, 0x0040)
+    assert read_register(device, CONFIG) == 0x0044, "set before the lock, held by it"
 
 
 def test_shutdown_holds_ta_and_leaving_it_follows_the_temperature_again():
@@ -370,6 +401,26 @@ def test_shutdown_holds_ta_and_leaving_it_follows_the_temperature_again():
     assert read_register(device, TA) == 0xC190
     write_word(device, CONFIG, 0x0000)
     assert read_register(device, TA) == 0xC000 | 30 * 16
+
+
+def test_shutdown_holds_ta_s_data_through_a_resolution_write_and_all_registers_stay_writable():
+    """5.2.1: 'In Shutdown mode, all registers can be read or written', and TA
+    holds the previous temperature data. A resolution write after SHDN does not
+    re-round the held bits: at 25.0625 C TA is 0xC191, and stays so at 0.5 C."""
+    device = part(celsius=25.0625)
+    assert read_register(device, TA) == 0xC191
+    write_word(device, CONFIG, 0x0100)
+    write_register(device, RESOLUTION, 0x00)
+    assert read_bytes(device, RESOLUTION, 1) == [0x00], "writable in shutdown"
+    assert read_register(device, TA) == 0xC191
+    device.hold(straps=0, celsius=-10.5, vdd=3.3)
+    assert read_register(device, TA) == 0xC191
+    # The judgement in `ta_word`'s docstring: the flags are recomputed against
+    # the limits as they are, the temperature bits are held.
+    write_word(device, TUPPER, 26 * 16)
+    assert read_register(device, TA) == 0x8191
+    write_word(device, CONFIG, 0x0000)
+    assert read_register(device, TA) == mcp9808.ta_word(-10.5, 0, 26 * 16, 0, 0)
 
 
 def test_the_power_on_reset_restores_every_register():
@@ -486,13 +537,15 @@ def test_alert_cnt_is_refused_because_the_alert_pin_is_not_modelled():
 
 
 def test_a_ta_read_with_thyst_set_is_refused_citing_the_hysteresis():
-    """5.2.2 (p.30): THYST applies to the Alert limits on falling temperature,
-    which DS25095A does not carry into TA's flag bits."""
+    """5.2.2 (p.30) and Figure 5-10 (p.32): the figure gives TA bits 15:13
+    against conditions such as TA < TLOWER - THYST, which disagrees with
+    5.1.3's plain comparisons, and needs the temperature's history."""
     device = part()
     write_word(device, CONFIG, 0x0200)
     assert read_register(device, CONFIG) == 0x0200
     write_register(device, TA)
     device.start(True)
-    refused(device.read, "5.2.2", "THYST")
+    message = refused(device.read, "5.2.2", "THYST", "Figure 5-10", "5.1.3", "history")
+    assert "does not say" not in message, "Figure 5-10 does say something"
     write_word(device, CONFIG, 0x0000)
     assert read_register(device, TA) == 0xC190

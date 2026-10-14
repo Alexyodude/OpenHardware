@@ -2414,7 +2414,9 @@ def test_a_deferred_write_that_cannot_fit_the_fifo_reads_nothing_and_stops_nothi
 # -10.5 C is 0x3F58, the sketch printing the 13 temperature bits and then the
 # whole word.
 
-#: `read16` is the TA read of Example 5-1 (p.25): write the pointer, STOP, read
+#: `read16` is Example 5-1's (p.25) TA read, with one difference: the example
+#: sends the pointer and a repeated START, and this ends the pointer write with
+#: a STOP (4.1.1, p.13: the part keeps the pointer across it) and then reads
 #: two bytes. It returns -1 where the part did not answer.
 WIRE_READ16 = """
 #include <Wire.h>
@@ -2459,7 +2461,7 @@ def _celsius(celsius: float) -> dict:
 
 def test_a_wire_sketch_reads_ta_at_the_held_temperature():
     """25.0 C prints 400 and 49552 and -10.5 C prints 16216 (Register 5-4;
-    Figure 5-5, p.26 draws +25.25 C as 0x0191 at the same 1/16 C weights).
+    Figure 5-5, p.26 draws +25.25 C as 0x0194 at the same 1/16 C weights).
     Conflict (a) in DS25095A is named by 25.0625 C: Register 5-4's note says
     the part powers up at 0.25 C a bit, which would print 400; Register 5-7
     and Table 5-3 say 0.0625 C, which prints 401, and the model follows them."""
@@ -2606,7 +2608,9 @@ def test_the_record_replays_the_printed_text_and_the_pc_at_every_drive():
 
     def run_to(session: api.BoardSession, retired: int) -> None:
         while session.retired < retired:
-            session.run(min(200_000, retired - session.retired))
+            result = session.run(min(200_000, retired - session.retired))
+            assert result.status == "running", (
+                f"stopped at {session.retired} on the way to {retired}: {result.detail}")
 
     landed = []
     with api.load_firmware(C3_BOARD, built.image, base=base) as session:
