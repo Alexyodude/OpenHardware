@@ -12,6 +12,9 @@ touches:
 - webui/boards/XIAO-nRF54l15-SMD.json
 - webui/boards/XIAO-nRF54LM20A-SMD.json
 - tools/inventory.py
+- tools/import_pindefs.py
+- tests/rules/test_import_pindefs.py
+- tests/rules/test_inventory.py
 ---
 
 `chip_pin` answers two different questions with one field, and 153 pads are answered wrongly by the half nobody meant.
@@ -327,3 +330,5 @@ LEFT is as the slice 2 note says, with one item added. A pad its footprint names
 **Note 2026-10-14:** 2026-10-14 loans back from OH-231 (done): tools/import_pindefs.py, tests/rules/test_import_pindefs.py, tools/inventory.py, tests/rules/test_inventory.py.
 
 **Note 2026-10-14:** 2026-10-14 lends tools/import_pindefs.py, tests/rules/test_import_pindefs.py and tests/rules/test_inventory.py to OH-171 (the STM32C5 board key rename); they come back when OH-171 closes.
+
+**Note 2026-10-14:** 2026-10-14 loans back from OH-171 (done): tools/import_pindefs.py, tests/rules/test_import_pindefs.py, tests/rules/test_inventory.py.
