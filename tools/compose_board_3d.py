@@ -225,6 +225,21 @@ ESPRESSIF_KICAD = ("https://raw.githubusercontent.com/espressif/kicad-libraries/
 ADAFRUIT_CAD = ("https://raw.githubusercontent.com/adafruit/Adafruit_CAD_Parts/"
                 "c128bceb1f96b6ea8b68f250bda986ba85da24ea")
 
+#: Adafruit's whole-board STEP of the QT Py ESP32-C3 in that repository, and
+#: the `(bytes, sha256)` it was measured as on 2026-10-13: the file the USB-C
+#: socket (OH-228) and the SK6805 LED (OH-229) are drawn from, and the one the
+#: QT Py's thickness is read from.
+ADAFRUIT_QTPY_STEP = (f"{ADAFRUIT_CAD}/5405%20QTPy%20ESP32%20C3/"
+                      f"5405%20QTPy%20ESP32%20C3.step")
+ADAFRUIT_QTPY_PINNED = (
+    1_877_611, "a220e20db7132d044a640680df0789c24ee89d7aa55e74a156cecac4bc25ebe8")
+
+#: The same for the KB2040's, measured 2026-10-13 (OH-229): the file its
+#: flash (U5) is drawn from, and the one its thickness is read from.
+ADAFRUIT_KB2040_STEP = (f"{ADAFRUIT_CAD}/5302%20KB2040/5302%20KB2040.step")
+ADAFRUIT_KB2040_PINNED = (
+    2_161_058, "bc990ea632850b47e18d6c8fcf9ffe5ca101bacc450d628d4d366b0a7890ae57")
+
 #: The licence each library a row's `step` is fetched from states, keyed by
 #: that library's pinned URL, for the components line of every .glb that
 #: draws one (OH-228). A STEP from any other library is refused there, by
@@ -1220,11 +1235,46 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "as CUI Devices is now named, make no such part -- their own site "
         "search finds none, read 2026-10-13 -- and Adafruit's files name no "
         "maker.",
-        step=(f"{ADAFRUIT_CAD}/5405%20QTPy%20ESP32%20C3/"
-              f"5405%20QTPy%20ESP32%20C3.step"),
+        step=ADAFRUIT_QTPY_STEP,
         product="USB_C_CUSB31-CFM2AX-01-X",
-        pinned=(1_877_611,
-                "a220e20db7132d044a640680df0789c24ee89d7aa55e74a156cecac4bc25ebe8"),
+        pinned=ADAFRUIT_QTPY_PINNED,
+    ),
+    # --- Adafruit's LED and flash, OH-229 -------------------------------------
+    Component(
+        "SK6805_1515", "Adafruit_CAD_Parts", "SK6805_1515",
+        "LED1 on the QT Py ESP32-C3 and the KB2040: Adafruit's addressable "
+        "LED, four 0.5 mm square pads on 1.00 x 0.90 mm centres under a "
+        "1.5 x 1.5 mm body, an SK6805 in its 1515 package. ADAFRUIT's own "
+        "model of it, out of their MIT-licensed whole-board STEP of the QT "
+        "Py ESP32-C3 -- the same file as the socket above, and the KB2040's "
+        "STEP carries the identical product. Measured 2026-10-13 it is "
+        "1.50 x 1.50 x 0.48 mm and unstyled, so it draws in the composer's "
+        "default grey. **ITS TURN IS A FREE CHOICE, and so is a quarter "
+        "turn**: the body is symmetric under both, so no check here has an "
+        "opinion; the row's 0 is Adafruit's own placement (OH-229). Until "
+        "then ABSENT left the land off, having searched KiCad's LED_SMD "
+        "alone, whose smallest addressable LED is 3.2 x 2.8 mm.",
+        step=ADAFRUIT_QTPY_STEP,
+        product="SK6805_1515",
+        pinned=ADAFRUIT_QTPY_PINNED,
+    ),
+    Component(
+        "USON8_4X4", "Adafruit_CAD_Parts", "USON8_4X4",
+        "U5 on the KB2040: a QSPI flash on Adafruit's USON land, valued "
+        "by its size and naming no maker -- eight 0.4 x 0.6 mm pads on a "
+        "0.8 mm pitch, 3.70 mm between the rows, round a 2.0 x 3.0 mm "
+        "exposed pad, under a 4 x 4 mm body. ADAFRUIT's own model of it, "
+        "out of their MIT-licensed whole-board STEP of the KB2040, the "
+        "file its thickness is read from as well. Measured 2026-10-13 it "
+        "is 4.002 x 4.000 x 0.800 mm, its leads reaching to x +/-2.001. "
+        "Its turn is decided by Adafruit's own pin-1 dot: at 0 the model's "
+        "asymmetric feature lands 0.427 mm from it, at the other three "
+        "3.68, 5.22 and 3.70. Until OH-229 ABSENT left the land off, having "
+        "searched KiCad's Package_DFN_QFN and Package_SON, whose only "
+        "eight-lead 4 x 4 mm parts on that pitch are 0.82 and 0.92 mm tall.",
+        step=ADAFRUIT_KB2040_STEP,
+        product="USON8_4X4",
+        pinned=ADAFRUIT_KB2040_PINNED,
     ),
     # --- the SparkFun Pro Micro ESP32-C3 and Qwiic Pocket ESP32-C6, OH-189 ----
     #
@@ -2008,13 +2058,6 @@ ABSENT: dict[str, str] = {
         "holds 38 models, listed 2026-09-29, and its smallest WS2812 is the "
         "3.5 x 3.5 mm WS2812B-Mini -- the Feather's, which is drawn."
     ),
-    "SK6805_1515": (
-        "Adafruit's addressable LED: four pads under a 1.5 x 1.5 mm "
-        "body, an SK6805 "
-        "in its 1515 package. The smallest addressable LED in KiCad's "
-        "LED_SMD, 38 models listed 2026-09-29, is the reverse-mount "
-        "SK6812MINI-E at 3.2 x 2.8 mm, about twice this one's side."
-    ),
     "LONGAN-IC_SNR6-1.0-3X3X1MM": (
         "U4 on the Feather, an AHT20 humidity sensor by value: six pads on a "
         "1.0 mm pitch and no exposed pad, 3 x 3 x 1 mm by its own name. "
@@ -2025,17 +2068,6 @@ ABSENT: dict[str, str] = {
         "tools/model_from_datasheet.py builds a slab from a name like this "
         "one, but reads it out of a KiCad footprint and this is an EAGLE "
         "package. The gap is that reader, filed in OH-180's note."
-    ),
-    "USON8_4X4": (
-        "a QSPI flash on Adafruit's USON land, valued by its size and naming "
-        "no maker: eight leads on a 0.8 mm pitch round a 2.0 x 3.0 mm "
-        "exposed pad, under a 4 x 4 mm body. KiCad's only eight-lead "
-        "4 x 4 mm parts on that pitch, listed 2026-09-30 in Package_DFN_QFN "
-        "and Package_SON, are DFN-8-1EP_4x4mm_P0.8mm_EP2.5x3.6mm, 0.92 mm "
-        "tall over a 2.5 x 3.6 mm pad, and WSON-8_4x4mm_P0.8mm, 0.82 mm "
-        "tall over none. U names the ultra-thin height class and neither "
-        "is in it, so either would draw a thicker part than the land is "
-        "named for; and the name states no height to build one from."
     ),
     # --- OH-195: the Glyph Mini's header rows -----------------------------------
     "PinHeader_1x05_P2.54mm_Vertical": GLYPH_HEADER,
@@ -2668,6 +2700,23 @@ FROM_PREVIEW = "the board file's own manufacturing preview, not yet read"
 #: entries is read back out of the board file by
 #: `test_a_manifest_boards_colour_is_read_where_its_file_states_one`.
 MANIFEST_STATED: dict[str, dict[str, object]] = {
+    # **Adafruit's two boards state their thickness in their own whole-board
+    # STEPs and nowhere else** (OH-229): the board solid in each is 1.570 mm,
+    # z 0 to 1.570, with every top part standing on that face. Their EAGLE
+    # files state none -- no layer-51 note -- so these were drawn at the
+    # assumed 1.6 mm until then. A constant per board and not a reading,
+    # because a composition is made at import and a STEP needs OpenCASCADE and
+    # a download; `thickness_step` is the `(url, (bytes, sha256))` the number
+    # was read from, and a test reads it back from that file. Neither board
+    # states a mask colour, so both stay `BOARD_MASK`.
+    "Adafruit QT Py ESP32-C3": {
+        "thickness_mm": 1.57,
+        "thickness_step": (ADAFRUIT_QTPY_STEP, ADAFRUIT_QTPY_PINNED),
+    },
+    "Adafruit KB2040": {
+        "thickness_mm": 1.57,
+        "thickness_step": (ADAFRUIT_KB2040_STEP, ADAFRUIT_KB2040_PINNED),
+    },
     "SparkFun Thing Plus ESP32-C6": {
         # The note on layer 51 in the board file's own <plain> section reads
         # "Board thickness: 1.6mm" as well as "Soldermask: Red".
@@ -2960,6 +3009,9 @@ def manifest_composition(entry: board_manifest.Row) -> Composition:
             f"{pathlib.PurePosixPath(entry.cad).name}, {source.licence.name}: "
             f"the outline and every component's position, rotation and "
             f"mirror as the file states them"
+            + ("" if "thickness_step" not in stated else
+               f"; the thickness, {stated['thickness_mm']} mm, from "
+               f"{source.vendor}'s own whole-board STEP of it")
         ),
         headers=entry.select,
         thickness_mm=stated.get("thickness_mm", MANIFEST_THICKNESS_MM),

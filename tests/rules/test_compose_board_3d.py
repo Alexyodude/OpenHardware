@@ -874,15 +874,16 @@ EXPLAINS: dict[str, set[str]] = {
         "WS2812-2020",
     },
     # Adafruit's USB-C socket left all three of these sets in OH-228, drawn
-    # from Adafruit's own model of it.
-    "Adafruit QT Py ESP32-C3": {"SK6805_1515"},
+    # from Adafruit's own model of it, and their LED and flash left the QT
+    # Py's and the KB2040's in OH-229.
+    "Adafruit QT Py ESP32-C3": set(),
     "Adafruit Feather ESP32-C6": {
         "1X16_ROUND", "1X12_ROUND",
         "JSTPH2_BATT", "JST_SH4_RA", "LONGAN-IC_SNR6-1.0-3X3X1MM",
     },
-    # The QT Py's LED and its own flash (OH-186). Its castellated edge is
-    # copper, as the QT Py's is, and so is not here.
-    "Adafruit KB2040": {"SK6805_1515", "USON8_4X4"},
+    # The KB2040's castellated edge is copper, as the QT Py's is, and so is
+    # not here.
+    "Adafruit KB2040": set(),
     # SparkFun's USB-C socket on both (OH-189), and the Pocket's battery
     # socket. The Pro Micro's castellated edge is copper, as the QT Py's is;
     # the Pocket's header holes are refused by its own schematic, whose
@@ -5238,7 +5239,8 @@ def test_a_manifest_boards_thickness_is_its_own_note_or_the_unos_stack():
     board file states nothing better. An EAGLE file's design rules carry a
     layer stack, and where it is the stack the Uno's own file carries it is
     EAGLE's and nobody's statement; where a board's note states a
-    thickness, that is the number drawn.
+    thickness, that is the number drawn. A board whose thickness is its
+    STEP's is held to that file instead (OH-229).
     """
     import xml.etree.ElementTree as ET
 
@@ -5263,7 +5265,13 @@ def test_a_manifest_boards_thickness_is_its_own_note_or_the_unos_stack():
             assert spec.thickness_mm == (
                 general if agree else compose.MANIFEST_THICKNESS_MM), row.board
             continue
-        stated = "thickness_mm" in compose.MANIFEST_STATED.get(row.board, {})
+        entry = compose.MANIFEST_STATED.get(row.board, {})
+        stated = "thickness_mm" in entry
+        if "thickness_step" in entry:
+            # Stated by the vendor's STEP rather than a note, and held to it
+            # by `test_the_thickness_of_adafruits_two_boards_is_the_one_...`
+            # (OH-229).
+            continue
         if not stated:
             assert spec.thickness_mm == _uno().thickness_mm, (
                 f"{row.board} states no thickness and is not drawn at the "
@@ -5313,8 +5321,9 @@ def test_every_placement_is_drawn_refused_or_padless_and_counted(capsys):
     # **A refused part and a bodyless pad are counted apart**, and which is
     # which on this board is written here rather than derived, so a reason
     # that loses its "no body" words -- or gains them -- is caught. The USB-C
-    # socket left this set in OH-228, drawn from Adafruit's own model.
-    parts = {"SK6805_1515"}
+    # socket left this set in OH-228 and the LED in OH-229, drawn from
+    # Adafruit's own models; nothing is refused for want of a model here now.
+    parts: set[str] = set()
     refused = [e for e in absent if e.package in parts]
     bodyless = [e for e in absent if e.package not in parts]
     assert {e.package for e in bodyless} == {
@@ -7709,8 +7718,9 @@ def test_what_decided_each_passive_is_recorded_in_the_model(
             "ESP32-C3.sch states: 19 by the deviceset's prefix and the value, "
             "2 by the prefix alone, 0 by the value alone") in out, out
     # 5 of 2 packages until OH-228 drew the USB-C socket, which `ABSENT`
-    # then held; the LED is the one left.
-    assert "  refused 4 placement(s): 1 of 1 package(s) with no published " \
+    # then held, and 4 of 1 until OH-229 drew the LED; the three left are
+    # the ones its own schematic refuses.
+    assert "  refused 3 placement(s): 0 of 0 package(s) with no published " \
            "model, and 3 by what their own schematic states" in out, out
     extras = read_extras(tmp_path / f"{compose._slug(spec.board)}.glb")
     assert extras["kinds"]["R1"] == {"kind": "resistor", "prefix": "R",
@@ -8353,21 +8363,25 @@ def test_a_pinned_model_that_is_not_the_file_measured_is_refused(tmp_path,
     monkeypatch.setattr(compose, "CACHE", tmp_path)
     rows = [c for c in compose.CORRESPONDENCE if c.pinned is not None]
     assert rows, "no model is pinned by its size and sha256"
-    row = rows[0]
-    size, digest = row.pinned
-    step = compose.cached(row, row.url, ".step")
-    step.write_bytes(b"x" * size)
-    with pytest.raises(SystemExit, match=rf"pins {size:,} bytes and {digest}"):
-        compose.component_mesh(row, compose.DEFLECTION)
-    assert step.is_file(), "a file on disk is named, not deleted"
+    # Every pinned row, not the first (OH-229): the KB2040's STEP is a second
+    # file with a pin of its own.
+    assert {row.step for row in rows} >= {compose.ADAFRUIT_QTPY_STEP,
+                                          compose.ADAFRUIT_KB2040_STEP}
+    for row in rows:
+        size, digest = row.pinned
+        step = compose.cached(row, row.url, ".step")
+        step.write_bytes(b"x" * size)
+        with pytest.raises(SystemExit, match=rf"pins {size:,} bytes and {digest}"):
+            compose.component_mesh(row, compose.DEFLECTION)
+        assert step.is_file(), "a file on disk is named, not deleted"
 
-    step.unlink()
-    monkeypatch.setattr(compose.urllib.request, "urlopen",
-                        lambda url: io.BytesIO(b"not the model"))
-    with pytest.raises(SystemExit) as said:
-        compose.component_mesh(row, compose.DEFLECTION)
-    assert f"{step} is 13 bytes" in str(said.value), said.value
-    assert "Deleted it" in str(said.value) and not step.exists(), said.value
+        step.unlink()
+        monkeypatch.setattr(compose.urllib.request, "urlopen",
+                            lambda url: io.BytesIO(b"not the model"))
+        with pytest.raises(SystemExit) as said:
+            compose.component_mesh(row, compose.DEFLECTION)
+        assert f"{step} is 13 bytes" in str(said.value), said.value
+        assert "Deleted it" in str(said.value) and not step.exists(), said.value
 
 
 def test_every_fetched_step_says_its_licence_on_the_components_line(
@@ -8409,6 +8423,319 @@ def test_every_fetched_step_says_its_licence_on_the_components_line(
         clause = next((part for part in line.split("; ") if source in part), None)
         assert clause is not None, f"{source} is not on: {line}"
         assert clause.endswith(f", {compose.STEP_LICENCES[source]}"), clause
+
+
+# --- Adafruit's LED and flash, and the thickness their STEPs state (OH-229) -----
+
+#: Each body OH-229 draws from Adafruit's own model, by the board's own names.
+ADAFRUIT_BODIES = (("Adafruit QT Py ESP32-C3", "LED1"),
+                   ("Adafruit KB2040", "LED1"), ("Adafruit KB2040", "U5"))
+
+#: How far a substituted body may stand from the body Adafruit's STEP puts at
+#: the same designator. Measured 2026-10-13 on all three: 0.001 mm at most,
+#: on the flash's far edge, so this is the model's own tessellation and
+#: nothing looser. The socket's `LEG_PLAY_MM` is the slot's play and a
+#: different quantity.
+BODY_TOLERANCE_MM = 0.01
+
+#: How far any other drawn placement's centre may stand from the body Adafruit
+#: draw there: OH-229's comparison found the QT Py's within 0.2 mm bar one and
+#: the KB2040's likewise.
+PLACEMENT_TOLERANCE_MM = 0.2
+
+
+def _vendor_boxes(step: pathlib.Path, wanted: set[str]) -> dict:
+    """`{instance name: Extent}` for each wanted instance of Adafruit's
+    assembly STEP, in the file's own millimetres (which are the EAGLE board
+    frame: their origin is the board's lower-left corner). An instance is
+    named `<package>:<designator>`, `SK6805_1515:LED1`."""
+    from OCP.STEPCAFControl import STEPCAFControl_Reader
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TDF import TDF_Label, TDF_LabelSequence
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+    from tools.import_3d_model import box_of
+
+    document = TDocStd_Document(TCollection_ExtendedString("step"))
+    reader = STEPCAFControl_Reader()
+    reader.SetNameMode(True)
+    reader.ReadFile(str(step))
+    reader.Transfer(document)
+    tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+
+    def name(label) -> str:
+        attribute = TDataStd_Name()
+        return (attribute.Get().ToExtString()
+                if label.FindAttribute(TDataStd_Name.GetID_s(), attribute) else "")
+
+    found: dict = {}
+
+    def walk(label, where) -> None:
+        if not tool.IsAssembly_s(label):
+            return
+        parts = TDF_LabelSequence()
+        tool.GetComponents_s(label, parts)
+        for at in range(1, parts.Length() + 1):
+            instance, product = parts.Value(at), TDF_Label()
+            tool.GetReferredShape_s(instance, product)
+            here = where.Multiplied(tool.GetLocation_s(instance))
+            if name(instance) in wanted:
+                found[name(instance)] = box_of(tool.GetShape_s(product).Located(here))
+            walk(product, here)
+
+    roots = TDF_LabelSequence()
+    tool.GetFreeShapes(roots)
+    walk(roots.Value(1), TopLoc_Location())
+    return found
+
+
+def _adafruit_boards():
+    """`(spec, board, centre)` for each of the two boards whose files are
+    fetched."""
+    specs = {spec.board: spec for spec in compose.COMPOSITIONS}
+    for name in dict.fromkeys(board for board, _ref in ADAFRUIT_BODIES):
+        spec = specs[name]
+        if not _fetched(spec):
+            continue
+        board = compose.read_layout(spec.layout)
+        pads = [p for header in spec.headers for p in board.element(header).pads]
+        centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
+                  (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
+        yield spec, board, centre
+
+
+def _board_box(put, centre) -> tuple[float, ...]:
+    """`(xmin, ymin, zmin, xmax, ymax, zmax)` of a placed mesh in the EAGLE
+    board frame, z up: the scene's x is the board's less the centre, its z
+    is the board's y turned over about it, and its y is up."""
+    points = [(p[at] + centre[0], centre[1] - p[at + 2], p[at + 1])
+              for _c, (p, _n, _i) in put.groups.items()
+              for at in range(0, len(p), 3)]
+    return (*(min(v[axis] for v in points) for axis in range(3)),
+            *(max(v[axis] for v in points) for axis in range(3)))
+
+
+def test_adafruits_led_and_flash_are_drawn_from_their_own_products_and_absent_from_none(
+        capsys, monkeypatch, tmp_path):
+    """**Adafruit's own SK6805 and USON8 are drawn, and nothing calls either
+    absent** (OH-229). Each row draws the product its land is named for out
+    of a pinned STEP: the LED from the QT Py's, which is the file the socket
+    comes from, and the flash from the KB2040's, a second file with a pin of
+    its own. The KB2040's size and sha256 are written out here, so a pin that
+    drifts is a diff in two places. Then `compose` itself, which the page's
+    file is written from: the part is on its `drawn` line, and the
+    components line says the product, the STEP it came from and its licence.
+
+    Seen red (2026-10-13): with `ABSENT` holding the LED's land and the
+    flash's again; with the flash row's pin changed one hex digit; and with
+    the licence left off the components line.
+    """
+    from tools.import_3d_model import read_extras
+
+    qtpy = (1_877_611,
+            "a220e20db7132d044a640680df0789c24ee89d7aa55e74a156cecac4bc25ebe8")
+    kb2040 = (2_161_058,
+              "bc990ea632850b47e18d6c8fcf9ffe5ca101bacc450d628d4d366b0a7890ae57")
+    assert compose.ADAFRUIT_QTPY_PINNED == qtpy
+    assert compose.ADAFRUIT_KB2040_PINNED == kb2040
+    assert compose.ADAFRUIT_KB2040_STEP == (
+        f"{compose.ADAFRUIT_CAD}/5302%20KB2040/5302%20KB2040.step")
+    rows = {}
+    for package, url, pin in (("SK6805_1515", compose.ADAFRUIT_QTPY_STEP, qtpy),
+                              ("USON8_4X4", compose.ADAFRUIT_KB2040_STEP, kb2040)):
+        assert package not in compose.ABSENT, (
+            f"{package} is drawn; ABSENT should no longer say it is not")
+        found = [c for c in compose.CORRESPONDENCE if c.package == package]
+        assert len(found) == 1, f"{len(found)} rows draw {package}"
+        assert (found[0].step, found[0].product, found[0].pinned) == (url, package, pin)
+        rows[package] = found[0]
+
+    placed = list(_adafruit_boards())
+    if not placed:
+        pytest.skip("SKIPPED: neither the QT Py nor the KB2040 is fetched")
+    for spec, board, _centre in placed:
+        for name, reference in ADAFRUIT_BODIES:
+            if name == spec.board:
+                element = board.element(reference)
+                row, refused = compose.drawn_from(
+                    element, compose.statements_for(spec), spec.schematic.name)
+                assert refused is None, f"{name} {reference}: {refused}"
+                assert row is rows[element.package], (name, reference, row)
+                assert compose.absent_why(element) is None
+
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    monkeypatch.setattr(compose, "OUT", tmp_path)
+    monkeypatch.setattr(compose, "REPO", tmp_path)
+    composed = []
+    for spec, board, _centre in placed:
+        if _inputs_missing(spec, board):
+            continue
+        compose.compose(spec, deflection=compose.DEFLECTION, check=False)
+        out = capsys.readouterr().out.splitlines()
+        drawn = next(line for line in out if line.startswith("  drawn "))
+        line = read_extras(tmp_path / f"{compose._slug(spec.board)}.glb")["components"]
+        for name, reference in ADAFRUIT_BODIES:
+            if name != spec.board:
+                continue
+            package = board.element(reference).package
+            assert f"{reference} ({package})" in drawn, (spec.board, drawn)
+            assert not [said for said in out if said.startswith(f"  absent  {reference} (")]
+            clause = next((part for part in line.split("; ")
+                           if f"{package!r}" in part and rows[package].url in part),
+                          None)
+            assert clause is not None, f"{spec.board}: {package} is not on: {line}"
+            assert clause.endswith(f", {compose.STEP_LICENCES[compose.ADAFRUIT_CAD]}"), clause
+        composed.append(spec.board)
+    if len(composed) < len(placed):
+        pytest.skip(f"SKIPPED in part: composed {composed}; the rest read "
+                    f"models that are not fetched (run tools/compose_board_3d.py)")
+
+
+def test_each_body_adafruit_substitutes_stands_where_adafruit_put_it():
+    """**The body is Adafruit's and so is the place** (OH-229): each of the
+    three, once `place` has put it on its land, stands in the same box as the
+    instance of the same designator in Adafruit's own STEP -- x, y and z to
+    `BODY_TOLERANCE_MM`. The z is the thickness: the vendor stands every top
+    part on its board's 1.570 mm face, so a board drawn 1.6 mm thick fails it.
+
+    **The turn.** The LED's body is the same set of vertices turned a quarter,
+    a half or three quarters, so its row's 0 is Adafruit's placement and not a
+    claim that can be wrong. The flash is not: Adafruit's pin-1 dot decides it
+    (`mark_turns`), and the row's turn beats the nearest of the other three by
+    more than `TURN_MARGIN_MM`.
+
+    Seen red (2026-10-13): with the board drawn 1.6 mm thick; and with the
+    flash turned 90, which its bounding box cannot tell from 0 -- the body is
+    4.002 x 4.000 mm.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    placed = list(_adafruit_boards())
+    if not placed:
+        pytest.skip("SKIPPED: neither the QT Py nor the KB2040 is fetched")
+    for spec, board, centre in placed:
+        elements = {ref: board.element(ref)
+                    for name, ref in ADAFRUIT_BODIES if name == spec.board}
+        rows = {ref: compose.correspondence_for(element)
+                for ref, element in elements.items()}
+        meshes = {ref: compose.component_mesh(row, compose.DEFLECTION)[0]
+                  for ref, row in rows.items()}
+        last = rows[list(rows)[-1]]
+        vendor = _vendor_boxes(
+            compose.cached(last, last.url, ".step"),
+            {f"{element.package}:{ref}" for ref, element in elements.items()})
+        for ref, element in elements.items():
+            where = f"{spec.board} {ref} ({element.package})"
+            row, mesh = rows[ref], meshes[ref]
+            theirs = vendor.get(f"{element.package}:{ref}")
+            assert theirs is not None, (where, sorted(vendor))
+            want = (theirs.xmin, theirs.ymin, theirs.zmin,
+                    theirs.xmax, theirs.ymax, theirs.zmax)
+            mine = _board_box(compose.place(
+                mesh, element, row.turn, spec.thickness_mm, centre), centre)
+            assert mine == pytest.approx(want, abs=BODY_TOLERANCE_MM), (
+                f"{where}: stands at {tuple(round(v, 3) for v in mine)} and "
+                f"Adafruit's own instance at {tuple(round(v, 3) for v in want)}")
+            if element.package == "SK6805_1515":
+                def vertices(turn: float) -> set:
+                    put = compose.place(mesh, element, turn, spec.thickness_mm, centre)
+                    return {tuple(round(v, 3) for v in (p[at], p[at + 1], p[at + 2]))
+                            for _c, (p, _n, _i) in put.groups.items()
+                            for at in range(0, len(p), 3)}
+                for quarter in (90.0, 180.0, 270.0):
+                    assert vertices(row.turn + quarter) == vertices(row.turn), (
+                        f"{where}: turned {quarter:.0f} from the row's, the body "
+                        f"is not the same body, so its turn is a claim after all")
+            else:
+                misses = compose.mark_turns(element, mesh, spec.thickness_mm, centre)
+                assert misses is not None, f"{where}: no pin-1 dot decides its turn"
+                rival = min(m for turn, m in misses.items() if turn != row.turn)
+                assert rival - misses[row.turn] > compose.TURN_MARGIN_MM, (
+                    where, {t: round(m, 3) for t, m in misses.items()})
+
+
+def test_the_thickness_of_adafruits_two_boards_is_the_one_their_own_step_states():
+    """**1.57 mm, not the assumed 1.6** (OH-229): each board's STEP carries
+    one solid named `Board`, z 0 to the number in `MANIFEST_STATED`, and the
+    composition draws that. Neither EAGLE file states a thickness (no
+    "Board thickness:" note), which is why the number is carried and not
+    read, so the constant is held to the STEP it names here.
+
+    Seen red (2026-10-13): with the QT Py's entry at 1.6.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    from tools.import_3d_model import box_of, read_product
+
+    stated = {name: entry for name, entry in compose.MANIFEST_STATED.items()
+              if "thickness_step" in entry}
+    assert set(stated) == {"Adafruit QT Py ESP32-C3", "Adafruit KB2040"}, set(stated)
+    specs = {spec.board: spec for spec in compose.COMPOSITIONS}
+    for name, entry in stated.items():
+        spec = specs[name]
+        url, pin = entry["thickness_step"]
+        assert spec.thickness_mm == entry["thickness_mm"]
+        assert spec.thickness_mm != compose.MANIFEST_THICKNESS_MM
+        row = next(c for c in compose.CORRESPONDENCE if c.step == url)
+        assert row.pinned == pin, (name, row.pinned, pin)
+        compose.component_mesh(row, compose.DEFLECTION)   # fetches, verifies the pin
+        shape, _styles, _document = read_product(
+            compose.cached(row, row.url, ".step"), "Board")
+        box = box_of(shape)
+        assert (box.zmin, box.zmax) == pytest.approx((0.0, spec.thickness_mm),
+                                                     abs=1e-3), (name, box)
+        if spec.layout.is_file():
+            assert not any("Board thickness" in note for note in _plain_notes(spec.layout)), (
+                f"{name}'s own file states a thickness, which outranks the STEP's")
+
+
+def test_nothing_else_on_adafruits_two_boards_stands_off_adafruits_own_placement():
+    """**The substitution moved nothing it was not asked to** (OH-229): every
+    drawn placement on the QT Py and the KB2040 -- the parts the composer
+    draws from KiCad's library as well as the three substituted -- has a body
+    of the same designator in Adafruit's STEP, and its centre stands within
+    `PLACEMENT_TOLERANCE_MM` of that body's in x and y, bar CONN1.
+
+    **CONN1 is recorded, not settled**: KiCad's SM04B is centred on the pads
+    and Adafruit's skinny body is not, 0.56 mm apart on both boards. Held
+    between 0.5 and 0.6 mm, so a change to it, either way, is noticed.
+
+    Seen red (2026-10-13): with `place` shifting U1 by 0.3 mm.
+    """
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    own_step = {"Adafruit QT Py ESP32-C3": "SK6805_1515",
+                "Adafruit KB2040": "USON8_4X4"}
+    checked = 0
+    for spec, board, centre in _adafruit_boards():
+        drawn = list(_drawn(spec, board))
+        row = next(c for c in compose.CORRESPONDENCE
+                   if c.package == own_step[spec.board])
+        step = compose.cached(row, row.url, ".step")
+        if not step.is_file():
+            continue
+        vendor = _vendor_boxes(step, {f"{e.package}:{e.name}" for e, _r in drawn})
+        meshes: dict = {}
+        for element, component in drawn:
+            if component.slug not in meshes:
+                meshes[component.slug] = compose.component_mesh(component, 0.05)[0]
+            mine = _board_box(compose.place(
+                meshes[component.slug], element, component.turn,
+                spec.thickness_mm, centre, component.flip), centre)
+            theirs = vendor.get(f"{element.package}:{element.name}")
+            assert theirs is not None, (
+                f"{spec.board}: Adafruit's STEP has no {element.package}:{element.name}")
+            off = math.dist(((mine[0] + mine[3]) / 2, (mine[1] + mine[4]) / 2),
+                            ((theirs.xmin + theirs.xmax) / 2,
+                             (theirs.ymin + theirs.ymax) / 2))
+            if element.name == "CONN1":
+                assert 0.5 < off < 0.6, f"{spec.board} CONN1: {off:.3f} mm"
+            else:
+                assert off <= PLACEMENT_TOLERANCE_MM, (
+                    f"{spec.board}: {element.name} ({element.package}) stands "
+                    f"{off:.3f} mm from Adafruit's own body of that name")
+            checked += 1
+    if not checked:
+        pytest.skip("SKIPPED: no Adafruit board and STEP is fetched")
 
 
 # --- a KiCad manifest row, read from what its own file states (OH-195) ---------
