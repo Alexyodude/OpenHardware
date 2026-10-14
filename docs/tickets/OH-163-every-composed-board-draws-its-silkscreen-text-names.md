@@ -13,6 +13,10 @@ touches:
 - tools/eagle.py
 - tests/rules/test_eagle.py
 - tests/rules/test_import_board.py
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
+- tools/import_3d_model.py
+- tests/rules/test_import_3d_model.py
 ---
 
 Twenty-five of twenty-six boards draw a vendor file or a board composed from the vendor's PCB, every placement is drawn or refused with a reason (OH-150), and what a person sees is still short of a photograph in four measurable ways. This ticket is those four, counted from `python tools/compose_board_3d.py --check` on 2026-09-04 (11 composed boards) and from the shipped .glb files.
@@ -162,3 +166,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-15:** OH-236 answered in the composer's comment on the XIAO STM32C5's thickness: the family stays 1.2. Mesh PCB solids read from webui/static/models/*.glb extras.pcb.thickness on 2026-10-15: RP2040 1.2, SAMD21 1.21, ESP32-S3 1.25, nRF52840 1.25, nRF54LM20A 1.51, MG24 1.6 (its own KiCad project's STEP, so not independent). ESP32-C5.kicad_pcb's 1.209108 sits on a filled-in stackup (0.01778 inner copper, 0.88492 core). The C3's comment, which said its file states no thickness, now says the file's 1.6 is KiCad's default. No geometry changed.
 
 **Note 2026-10-15:** Lends tools/compose_board_3d.py, tests/rules/test_compose_board_3d.py, tools/import_3d_model.py and tests/rules/test_import_3d_model.py to OH-197 (the Uno's D2/D3 drawn as the 1206 chip diode Bourns' datasheet states); they come back when OH-197 closes.
+
+**Note 2026-10-15:** Takes back tools/compose_board_3d.py, tests/rules/test_compose_board_3d.py, tools/import_3d_model.py and tests/rules/test_import_3d_model.py from OH-197, which is done.
