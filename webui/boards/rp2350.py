@@ -495,6 +495,14 @@ def pin_states(cpu: Cpu) -> dict[str, str]:
        goes on (section 9.8, PDF p.546).
     4. **SIO's GPIO_OE, then GPIO_OUT**, as `rp2040.py` reads them.
 
+    **Only `FUNCSEL` is read from `GPIO<n>_CTRL`** (OH-210). Its `OUTOVER`
+    and `OEOVER` fields, which force the function's output (`:111-119`: 2 low,
+    3 high) or its output enable (`:95-103`: 2 disable, 3 enable) in
+    pico-sdk's `io_bank0.h` at the commit named in the module docstring, are
+    stored as written and ignored, as are `INOVER` and `IRQOVER`: an image
+    that sets them reads here as if it had not, through the four stages
+    above. `rp2040.py`'s `unrouted_level` says the same of the RP2040.
+
     **RESETS is not consulted**, for the reason `install_resets` gives.
     `GPIO_OE` and `GPIO_OUT` are each read once: `sio.h:381` and `:114` give
     both as `_BITS _u(0xffffffff)`, one bit per GPIO0...31, and every `HEADER`
