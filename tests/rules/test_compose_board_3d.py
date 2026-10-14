@@ -4309,10 +4309,14 @@ def test_every_part_whose_vendor_marks_pin_one_agrees_with_its_model():
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
     cache: dict = {}
     checked = 0
+    unfetched: list[str] = []
     for spec in compose.COMPOSITIONS:
         if not _fetched(spec):
             continue
         board = compose.read_layout(spec.layout)
+        if _inputs_missing(spec, board):
+            unfetched.append(spec.board)
+            continue
         pads = [pad for name in spec.headers for pad in board.element(name).pads]
         centre = ((min(p.x_mm for p in pads) + max(p.x_mm for p in pads)) / 2,
                   (min(p.y_mm for p in pads) + max(p.y_mm for p in pads)) / 2)
@@ -4338,6 +4342,9 @@ def test_every_part_whose_vendor_marks_pin_one_agrees_with_its_model():
             )
     if not checked:
         pytest.skip("no layouts on disk; run tools/get_board_sources.py")
+    if unfetched:
+        pytest.skip(f"SKIPPED in part: checked {checked}; the models of "
+                    f"{unfetched} are not fetched (run tools/compose_board_3d.py)")
     assert checked >= 6, (
         f"only {checked} placement(s) had both a vendor marker and a model "
         f"feature to compare it with; six did when this was written, so a "
@@ -8629,9 +8636,11 @@ def test_each_body_adafruit_substitutes_stands_where_adafruit_put_it():
     if not placed:
         pytest.skip("SKIPPED: neither the QT Py nor the KB2040 is fetched")
     checked = 0
+    unchecked: list[str] = []
     for spec, board, centre in placed:
         _row, own_path = _own_step(spec.board)
         if _inputs_missing(spec, board) or not own_path.is_file():
+            unchecked.append(spec.board)
             continue
         checked += 1
         elements = {ref: board.element(ref)
@@ -8674,6 +8683,9 @@ def test_each_body_adafruit_substitutes_stands_where_adafruit_put_it():
     if not checked:
         pytest.skip("SKIPPED: Adafruit's STEPs are not fetched; run "
                     "tools/compose_board_3d.py")
+    if unchecked:
+        pytest.skip(f"SKIPPED in part: checked {checked}; {unchecked} read "
+                    f"files that are not fetched (run tools/compose_board_3d.py)")
 
 
 def test_the_thickness_of_adafruits_two_boards_is_the_one_their_own_step_states():
@@ -8691,24 +8703,30 @@ def test_the_thickness_of_adafruits_two_boards_is_the_one_their_own_step_states(
     Seen red (2026-10-13): with the QT Py's entry at 1.6; with the cached
     copy's bytes changed (the pin); and with the sentence's number dropped.
     """
-    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
-    from tools.import_3d_model import box_of, read_product
-
     stated = {name: entry for name, entry in compose.MANIFEST_STATED.items()
               if "thickness_step" in entry}
     assert set(stated) == {"Adafruit QT Py ESP32-C3", "Adafruit KB2040"}, set(stated)
     specs = {spec.board: spec for spec in compose.COMPOSITIONS}
-    checked = 0
+    # Needs no OpenCASCADE and no download, so it runs where CI does.
     for name, entry in stated.items():
         spec = specs[name]
-        url = entry["thickness_step"]
         assert spec.thickness_mm == entry["thickness_mm"]
         assert spec.thickness_mm != compose.MANIFEST_THICKNESS_MM
         assert (f"; the thickness, {entry['thickness_mm']} mm, from Adafruit's "
                 f"own whole-board STEP of it") in spec.geometry, spec.geometry
-        assert compose.step_licence(url) == compose.STEP_LICENCES[compose.ADAFRUIT_CAD]
+        assert (compose.step_licence(entry["thickness_step"])
+                == compose.STEP_LICENCES[compose.ADAFRUIT_CAD])
+
+    pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
+    from tools.import_3d_model import box_of, read_product
+
+    checked = 0
+    unchecked: list[str] = []
+    for name, entry in stated.items():
+        spec = specs[name]
         row, step = _own_step(name)
         if not step.is_file():
+            unchecked.append(name)
             continue
         checked += 1
         data = step.read_bytes()
@@ -8724,6 +8742,9 @@ def test_the_thickness_of_adafruits_two_boards_is_the_one_their_own_step_states(
     if not checked:
         pytest.skip("SKIPPED: Adafruit's STEPs are not fetched; run "
                     "tools/compose_board_3d.py")
+    if unchecked:
+        pytest.skip(f"SKIPPED in part: checked {checked}; {unchecked} read "
+                    f"files that are not fetched (run tools/compose_board_3d.py)")
 
 
 def test_nothing_else_on_adafruits_two_boards_stands_off_adafruits_own_placement():
@@ -8741,10 +8762,12 @@ def test_nothing_else_on_adafruits_two_boards_stands_off_adafruits_own_placement
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
     checked = 0
+    unchecked: list[str] = []
     for spec, board, centre in _adafruit_boards():
         drawn = list(_drawn(spec, board))
         _row, step = _own_step(spec.board)
         if _inputs_missing(spec, board) or not step.is_file():
+            unchecked.append(spec.board)
             continue
         vendor = _vendor_boxes(step, {f"{e.package}:{e.name}" for e, _r in drawn})
         meshes: dict = {}
@@ -8770,6 +8793,9 @@ def test_nothing_else_on_adafruits_two_boards_stands_off_adafruits_own_placement
     if not checked:
         pytest.skip("SKIPPED: Adafruit's STEPs are not fetched; run "
                     "tools/compose_board_3d.py")
+    if unchecked:
+        pytest.skip(f"SKIPPED in part: checked {checked}; {unchecked} read "
+                    f"files that are not fetched (run tools/compose_board_3d.py)")
 
 
 # --- a KiCad manifest row, read from what its own file states (OH-195) ---------

@@ -454,10 +454,10 @@ neither, and is how the KiCad component meshes are handled too.
 
 ### Fetched, never tracked: Adafruit_CAD_Parts (OH-228, OH-229)
 
-Adafruit's own whole-board STEP files supply the USB-C socket on the QT Py
-ESP32-C3 (OH-228), the SK6805 LED on it and the KB2040, and the KB2040's flash
-(OH-229), and the thickness the two boards are held to. **None of them is in
-this tree.** `tools/compose_board_3d.py` names the files by constant,
+Adafruit's own whole-board STEP files supply parts of the QT Py ESP32-C3 and
+the KB2040 (OH-228, OH-229): which parts is held by their `CORRESPONDENCE`
+rows in `tools/compose_board_3d.py`, and the two boards' thickness is held to
+them by a test. **None of them is in this tree.** `tools/compose_board_3d.py` names the files by constant,
 `ADAFRUIT_QTPY_STEP` and `ADAFRUIT_KB2040_STEP`, each under `ADAFRUIT_CAD`,
 and fetches them into the git-ignored `third_party/seeed-3d/` cache, checking
 each against its size and sha256 (`ADAFRUIT_QTPY_PINNED`,
@@ -465,14 +465,16 @@ each against its size and sha256 (`ADAFRUIT_QTPY_PINNED`,
 
 - They come from <https://github.com/adafruit/Adafruit_CAD_Parts>, at the
   commit `ADAFRUIT_CAD` pins, and from nowhere else.
-- That repository's `LICENSE` at the pinned commit is the MIT licence, headed
-  "Copyright (c) 2016 Adafruit Industries"; `STEP_LICENCES` records it, and
+- That repository's `LICENSE` at the pinned commit is the MIT licence: it
+  begins "MIT License" and then "Copyright (c) 2016 Adafruit Industries";
+  `STEP_LICENCES` records it, and
   `step_licence` refuses a STEP from a library with no record there.
 - The files and the `.glb` files derived from them are git-ignored.
 - **The MIT notice must travel with the `.glb` files** if they are ever
-  published, because each is a derivative of an MIT-licensed file; the
-  components line each one carries names the STEP and its licence for that
-  reason.
+  published, because each is a derivative of an MIT-licensed file. The
+  components line each one carries names the STEP and its licence, and is
+  **not** the notice: the licence's copyright line and permission text must
+  accompany any published `.glb`.
 
 ---
 
