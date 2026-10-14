@@ -2,7 +2,7 @@
 id: OH-232
 title: The top bar's step counter reads the 8086 session's count, so it says 0 steps
   beside a board that is running
-status: in-review
+status: done
 priority: P3
 created: '2026-10-13'
 touches:
@@ -27,3 +27,5 @@ Counts: test_clock.py 15 passed; with test_emulator.py and test_editor.py 89 pas
 NOTE 2026-10-14 (lane4, fix round after review): (1) A step is now `/api/board/run {steps: 1}` and then the state read, and adds that reply's `steps`, so an instruction that retires and then stops the board counts 1 and a refusal 0; the "+1 if running" inference is gone. `/api/board/step` is the same `run(1)` plus the state, so nothing else changed; the cost is two requests, not one, with the clock stopped. test_editor.py's watch-on-step pin now asserts the step's state read goes through `boardStateUrl()`. (2) Run, Stop, Run: `runLoadedBoard` awaits the previous clock's completion before taking the base, and `stopBoardClock` no longer returns early on `running`, which `stop()` clears at once, so a load also waits for the tick in flight. (3) A refused load zeroes the old board's count (only when a board owns the panes); `loadSelected` stops the board clock first, which also stops a board tick from redrawing the board over the 8086's panes. (4) The test now covers Run-Stop-Run, the race with a held tick, scripted step replies (1 running, 1 stopped, 0 stopped), reload through load, load-artefact and compile, a refused load, and the whole route list. Mutants all red: no base, stopped step counted, old inference, no zeroing on compile, no zeroing on artefact (both lines), no wait for the previous clock, no zero on refusal. Zeroing after the artefact call alone is redundant with the one before it, so that single line is not detectable. Retired count in state() is left for OH-233.
 
 NOTE 2026-10-14 (lane4): two scenarios added, one for loadSelected stopping a board clock whose tick is in flight and one for two Run presses behind a held tick, each seen red with its guard removed; the redundant post-success zero in loadArtefact is deleted.
+
+**Note 2026-10-14:** 2026-10-14: merged to master (..cedcc21) after an independent review (COMMENT), a fix round (Step reads the run reply's steps, the Run-Stop-Run race, stale counter on a refused load and on an 8086 load) and a confirmation pass (APPROVE), its two untested LOWs closed in 447a99f; test_clock + test_editor 38 passed on master. Not seen in a real browser against a live board: the node test runs the real emulator.js against a fake page and fetch. Done; the follow-up that gives the page the board's own retired count is on OH-233.
