@@ -15,6 +15,12 @@ touches:
 - tests/rules/test_board_sources.py
 - tools/inventory.py
 - tests/rules/test_inventory.py
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
+- tools/kicad.py
+- tests/rules/test_kicad.py
+- tools/import_3d_model.py
+- tests/rules/test_import_3d_model.py
 ---
 
 Found by OH-163 step 4's dated re-check of the vendor (2026-10-13). docs/research/board-models/README.md section 5 and sources.json record that on 2026-08-29 (OH-109) Seeed's wiki sitemap had no STM32C5 page, files.seeedstudio.com answered 403, and OSHW-XIAO-Series held only XIAO-STM32C5-SMD.kicad_mod -- "a footprint for a board that appears never to have shipped". tools/import_pindefs.py says the same in its STM32C5 row ("Nobody has published this one. Zephyr has no xiao_stm32c5 board"). None of that is true any more:
@@ -51,3 +57,5 @@ Claims: tools/import_pindefs.py and its tests are OH-172's (open, nobody buildin
 **Note 2026-10-14:** 2026-10-14 (lane4) second fix round, after the reviewer's REQUEST CHANGES at ef4d608. N1 (HIGH): the previous note and the row misreported https://wiki.seeedstudio.com/License/ as a disclaimer that grants nothing. Fetched again 2026-10-14 (HTTP 200, 52,586 bytes): besides the disclaimer it says 'Documents and Images: This work (product documents, tutorials and associated images) are licensed under a Creative Commons Attribution-ShareAlike 4.0 International License.', 'Software Library: ... licensed under MIT License unless otherwise specified.' and 'Thirdparty content: ... governed by their respective licenses.' The row's covers and cite in tools/board_sources.py now say so and quote all of it; the licence name stays none stated, since which section covers the KiCad zip is the owner's, OH-234; the test asserts the CC BY-SA sentence and failed when it was removed. The OH-231 note above and the OH-234 note were edited in place. N2: the generic uncovered sentence now reads 'no board-support package this tool fetches covers this board at all' and names no vendor; the Seeed Zephyr clause is Board.not_read on the STM32C5 entry, appended only where set (a fake board without it is asserted to carry no Seeed, Zephyr or platform-seeedboards text; a fake with it gets the clause; the first failed when the old text was put back). N3: pad 35 lands on no test point, so the _STM32C5_RAILS comment and the GND reason say it is ground by its label alone, not by a join; the facts test failed when that clause was removed. Regenerated: only the STM32C5 board file changed. Commits: 950649c (OH-234 note correction, under OH-234), a8477e3 (code, tests, board file and the in-place edit of the note above). TWINS pins 38.
 
 **Note 2026-10-14:** 2026-10-14: steps 1 and 2 merged to master (d839c2c..88b9937) after a second confirmation pass APPROVED (N1-N3 confirmed, 309 passed 2 skipped, all 37 other boards regenerate byte-identical). inventory TWINS on master: pins 38. Left as LOWs: the cite's byte count is that one fetch's size (a later fetch of the same text was 52,946 bytes); Board.not_read is ignored on a covered board. Step 3, composing the STM32C5 from its KiCad PCB for the model layer, waits for OH-229 to hand the composer back to OH-163.
+
+**Note 2026-10-14:** 2026-10-14: step 3 starts in lane3; borrows tools/compose_board_3d.py, tools/kicad.py, tools/import_3d_model.py and their tests from OH-163, returned when this closes.
