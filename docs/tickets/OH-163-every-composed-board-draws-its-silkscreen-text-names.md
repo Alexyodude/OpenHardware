@@ -9,7 +9,6 @@ touches:
 - tools/kicad.py
 - tests/rules/test_kicad.py
 - tools/eagle.py
-- PROVENANCE.md
 - tools/model_from_datasheet.py
 - tests/rules/test_import_board.py
 - tools/import_3d_model.py
@@ -141,3 +140,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-13:** 2026-10-13: tools/import_3d_model.py, tools/compose_board_3d.py and their tests returned from OH-226 (done, fd8bf18).
 
 **Note 2026-10-13:** 2026-10-13: tools/compose_board_3d.py and its tests lent to OH-229 (Adafruit's own bodies substituted into the QT Py ESP32-C3 and KB2040). Return them when OH-229 closes.
+
+**Note 2026-10-14:** PROVENANCE.md lent to OH-229 for its review fix round (a 'Fetched, never tracked: Adafruit_CAD_Parts' section beside the newstroke one); it comes back when OH-229 closes.
