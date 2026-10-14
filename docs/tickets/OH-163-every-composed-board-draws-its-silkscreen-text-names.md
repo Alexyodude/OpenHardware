@@ -9,13 +9,9 @@ touches:
 - PROVENANCE.md
 - tools/kicad.py
 - tests/rules/test_kicad.py
-- tests/rules/test_import_3d_model.py
 - tools/model_from_datasheet.py
 - tools/eagle.py
 - tests/rules/test_eagle.py
-- tools/compose_board_3d.py
-- tools/import_3d_model.py
-- tests/rules/test_compose_board_3d.py
 - tests/rules/test_import_board.py
 ---
 
@@ -164,3 +160,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-15:** test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert and test_the_tessellator_welds_what_it_meshes skipped only on a missing cached STEP, so master's full suite under Python 3.14 (no cadquery-ocp) failed both with Unavailable once the OH-231 recompose (run under conda, which has OCP) had cached the resistor STEP. Each now calls pytest.importorskip('OCP') as the file's other OCP tests do: 2 failed before, 2 skipped after under 3.14, 2 passed under conda.
 
 **Note 2026-10-15:** OH-236 answered in the composer's comment on the XIAO STM32C5's thickness: the family stays 1.2. Mesh PCB solids read from webui/static/models/*.glb extras.pcb.thickness on 2026-10-15: RP2040 1.2, SAMD21 1.21, ESP32-S3 1.25, nRF52840 1.25, nRF54LM20A 1.51, MG24 1.6 (its own KiCad project's STEP, so not independent). ESP32-C5.kicad_pcb's 1.209108 sits on a filled-in stackup (0.01778 inner copper, 0.88492 core). The C3's comment, which said its file states no thickness, now says the file's 1.6 is KiCad's default. No geometry changed.
+
+**Note 2026-10-15:** Lends tools/compose_board_3d.py, tests/rules/test_compose_board_3d.py, tools/import_3d_model.py and tests/rules/test_import_3d_model.py to OH-197 (the Uno's D2/D3 drawn as the 1206 chip diode Bourns' datasheet states); they come back when OH-197 closes.
