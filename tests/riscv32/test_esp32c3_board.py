@@ -1383,6 +1383,23 @@ def test_a_data_byte_after_an_unacknowledged_address_does_not_address_the_part()
         assert part.pointer == 0, "the pointer byte reached the part"
 
 
+def test_a_nacked_data_byte_completes_the_transfer_as_a_nacked_address_does():
+    """The STOP after a NACK (TRM p.685, p.707) follows a data byte too. The
+    MCP9808 never NACKs a byte it accepts, so the byte here goes to nobody: the
+    address before it was not acknowledged and that command's ack_en was clear."""
+    needs_riscv32()
+    part = Mcp9808(straps=0, celsius=25.0, vdd=3.3)
+    lists = [command("RSTART"), command("WRITE", 1), command("WRITE", 1, ack_en=True),
+             command("STOP")]
+    program = stores(*wiring()) + stores(*transaction(lists, [0x1A << 1, 6]))
+    session, result = run_program(program, ((SDA_GPIO, SCL_GPIO, part),))
+    with session:
+        assert result.status == "running", result
+        raw = session.cpu.read_word(I2C_RAW_AT)
+        assert raw & esp32c3.I2C_INT_NACK, hex(raw)
+        assert raw & esp32c3.I2C_INT_TRANS_COMPLETE, hex(raw)
+
+
 def test_a_read_from_a_part_addressed_for_writing_is_refused():
     needs_riscv32()
     lists = [command("RSTART"), command("WRITE", 1, ack_en=True), command("READ", 1),
