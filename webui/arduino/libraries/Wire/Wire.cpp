@@ -77,6 +77,14 @@
  * gate, and a C6 was refused by the description; neither is what the
  * vendor's core does.
  *
+ * **Two differences that are left alone.** The vendor's `beginTransmission`
+ * of a Wire that was never begun hits its lock guard (`:423-425`, the lock
+ * being NULL too) and sets nothing, where this one sets the address; it shows
+ * only in the order `beginTransmission`, `begin`, `write`, `endTransmission`
+ * (here the address survives, there it is 0). And in the default locked build the
+ * vendor's `requestFrom` answers 0 at its lock guard (`:494-496`) before it
+ * reaches the NULL-buffer check; the answer is the same 0.
+ *
  * ## What `begin` does, and what it cannot
  *
  * It opens the controller's clock gate -- and the register clock first,
