@@ -672,16 +672,20 @@ def handle_board_api(boards: BoardSlot, route: str,
         if volts is not None and not isinstance(volts, dict):
             raise ApiError(f"volts must be an object of pad name -> volts, "
                            f"got {volts!r}")
+        devices = payload.get("devices")
+        if devices is not None and not isinstance(devices, dict):
+            raise ApiError(f"devices must be an object of bench id -> device, "
+                           f"got {devices!r}")
         if board != session.board:
             raise api.BoardRunError(
                 "drive-refused",
                 f"the bench was solved for {board!r} and the session runs "
                 f"{session.board!r}; nothing was driven")
         try:
-            session.drive(levels, volts)
+            session.drive(levels, volts, devices)
         except ValueError as error:
             raise api.BoardRunError("drive-refused", str(error)) from error
-        retired, stated, held = session.inputs[-1]
+        retired, stated, held, _devices = session.inputs[-1]
         return {"board": session.board, "retired": retired, "levels": stated,
                 "volts": held}
 

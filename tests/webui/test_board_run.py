@@ -1148,8 +1148,8 @@ def test_a_drive_reaches_the_pin_and_is_recorded_when_it_took_effect():
         session.drive({})
         assert not gpio_in(session) & D1
         assert session.inputs == [
-            (100, {"D1": "high"}, {}), (105, {"D1": "low"}, {}),
-            (125, {"D1": "high"}, {}), (125, {}, {})]
+            (100, {"D1": "high"}, {}, {}), (105, {"D1": "low"}, {}, {}),
+            (125, {"D1": "high"}, {}, {}), (125, {}, {}, {})]
         assert session.retired == 125
 
 
@@ -1162,7 +1162,7 @@ def test_the_record_is_not_the_callers_dict():
         session.drive(levels, volts)
         levels["D1"] = "low"
         volts["D0"] = 1.1
-        assert session.inputs == [(0, {"D1": "high"}, {"D0": 1.65})]
+        assert session.inputs == [(0, {"D1": "high"}, {"D0": 1.65}, {})]
 
 
 def test_open_is_a_pad_nothing_drives_and_not_a_low_one():
@@ -1296,7 +1296,7 @@ def test_a_drive_on_an_output_pad_is_recorded_and_the_pin_reads_what_it_drives()
                 break
         session.drive({"D8": "low"})
         assert gpio_in(session) & d8, "the output's own level, not the drive"
-        assert session.inputs[-1] == (session.retired, {"D8": "low"}, {})
+        assert session.inputs[-1] == (session.retired, {"D8": "low"}, {}, {})
 
 
 #: A sketch whose output depends on WHEN each drive lands: it echoes `D1` to
@@ -1353,13 +1353,13 @@ def test_the_image_and_the_record_of_drives_replay_the_run():
     assert "0" in first[3] and "1" in first[3], f"the drives moved nothing: {first[3]!r}"
 
     with api.load_firmware(C3_BOARD, built.image, base=base) as replay:
-        for (at, levels, volts), pc in zip(record, landed):
+        for (at, levels, volts, devices), pc in zip(record, landed):
             while replay.retired < at:
                 replay.step()
             assert replay.cpu.pc == pc, (
                 f"the drive stamped {at} lands at pc {replay.cpu.pc:#x}, "
                 f"where the run had it at {pc:#x}")
-            replay.drive(levels, volts)
+            replay.drive(levels, volts, devices)
         while replay.retired < first[0]:
             replay.step()
         assert ending(replay) == first
@@ -1394,7 +1394,7 @@ def test_a_voltage_reaches_the_adc_and_is_recorded_beside_the_levels():
         session.drive({"D1": "low"})
         assert adc1_code(session, d0) == 0, "a drive without volts holds nothing"
         assert session.inputs == [
-            (50, {"D0": "open"}, {"D0": 1.65}), (60, {"D1": "low"}, {})]
+            (50, {"D0": "open"}, {"D0": 1.65}, {}), (60, {"D1": "low"}, {}, {})]
 
 
 def test_a_voltage_that_is_not_a_finite_number_of_volts_or_more_is_refused():
@@ -1498,7 +1498,7 @@ def test_volts_for_a_description_that_converts_none_are_refused(monkeypatch):
         session.drive({"D1": "high"})
         with pytest.raises(ValueError) as caught:
             session.drive({"D1": "low"}, {"D0": 1.65})
-        assert session.inputs == [(0, {"D1": "high"}, {})]
+        assert session.inputs == [(0, {"D1": "high"}, {}, {})]
     assert C3_BOARD in str(caught.value) and "1.65" in str(caught.value), (
         str(caught.value))
 
@@ -1558,13 +1558,13 @@ def test_the_image_and_a_record_of_drives_with_volts_replay_the_run():
         f"the volts did not each print: {first[3]!r}")
 
     with api.load_firmware(C3_BOARD, built.image, base=base) as replay:
-        for (at, levels, volts), pc in zip(record, landed):
+        for (at, levels, volts, devices), pc in zip(record, landed):
             while replay.retired < at:
                 replay.step()
             assert replay.cpu.pc == pc, (
                 f"the drive stamped {at} lands at pc {replay.cpu.pc:#x}, "
                 f"where the run had it at {pc:#x}")
-            replay.drive(levels, volts)
+            replay.drive(levels, volts, devices)
         while replay.retired < first[0]:
             replay.step()
         assert ending(replay) == first
@@ -1894,3 +1894,181 @@ def test_watching_a_fifo_never_changes_what_the_firmware_reads():
             assert watched == [{"address": data, "value": 0x31}]
         assert [cpu.read_word(data) for _ in range(2)] == [0x31, 0x32], (
             "the firmware still reads every byte, in order")
+
+
+# --- a device on the I2C pads, and the record that replays it (OH-161 step 5) --
+#
+# The programs are hand-assembled stores (`lui`, `addi`, `sw`, `lw`), so the
+# transaction is the C3's own doorbell and not a harness poking a register.
+
+
+def _lui(rd, imm20): return imm20 << 12 | rd << 7 | 0x37
+def _addi(rd, rs, imm): return (imm & 0xFFF) << 20 | rs << 15 | rd << 7 | 0x13
+def _sw(rs2, rs1): return rs2 << 20 | rs1 << 15 | 2 << 12 | 0x23
+def _lw(rd, rs1): return rs1 << 15 | 2 << 12 | rd << 7 | 0x03
+
+
+def _li(rd: int, value: int) -> list[int]:
+    value &= 0xFFFFFFFF
+    high = ((value + 0x800) >> 12) & 0xFFFFF
+    low = value - (high << 12)
+    return [_lui(rd, high), _addi(rd, rd, low)]
+
+
+def _stores(*pairs: tuple[int, int]) -> list[int]:
+    program: list[int] = []
+    for address, value in pairs:
+        program += _li(14, address) + _li(15, value) + [_sw(15, 14)]
+    return program
+
+
+def _read_into(register: int, address: int) -> list[int]:
+    return _li(14, address) + [_lw(register, 14)]
+
+
+I2C_SDA, I2C_SCL = esp32c3.HEADER["D4"], esp32c3.HEADER["D5"]
+I2C_BASE = esp32c3.I2C
+
+
+def _pad(gpio): return esp32c3.IO_MUX + esp32c3.IO_MUX_GPIO0 + gpio * esp32c3.IO_MUX_STRIDE
+
+
+def _i2c_wiring() -> list[tuple[int, int]]:
+    func = 1 << esp32c3.IO_MUX_MCU_SEL_SHIFT | esp32c3.IO_MUX_FUN_IE
+    return [
+        (esp32c3.I2C_GATE[0], esp32c3.I2C_GATE[1]),
+        (_pad(I2C_SDA), func), (_pad(I2C_SCL), func),
+        (esp32c3.GPIO + esp32c3.GPIO_FUNC_OUT_SEL_CFG0 + 4 * I2C_SDA, esp32c3.I2CEXT0_SDA_IDX),
+        (esp32c3.GPIO + esp32c3.GPIO_FUNC_OUT_SEL_CFG0 + 4 * I2C_SCL, esp32c3.I2CEXT0_SCL_IDX),
+        (esp32c3.GPIO + esp32c3.GPIO_FUNC_IN_SEL_CFG0 + 4 * esp32c3.I2CEXT0_SDA_IDX,
+         esp32c3.GPIO_SIG_IN_SEL | I2C_SDA),
+        (esp32c3.GPIO + esp32c3.GPIO_FUNC_IN_SEL_CFG0 + 4 * esp32c3.I2CEXT0_SCL_IDX,
+         esp32c3.GPIO_SIG_IN_SEL | I2C_SCL),
+    ]
+
+
+def _id_read(pointer: int, address: int = 0x18) -> list[tuple[int, int]]:
+    """Write `pointer` to the part, then read two bytes back: two lists, run."""
+    op = esp32c3.I2C_OP
+    write = [op["RSTART"] << 11, op["WRITE"] << 11 | 2 | 1 << 8, op["STOP"] << 11]
+    read = [op["RSTART"] << 11, op["WRITE"] << 11 | 1 | 1 << 8, op["READ"] << 11 | 1,
+            op["READ"] << 11 | 1 | 1 << 10, op["STOP"] << 11]
+    out: list[tuple[int, int]] = []
+    for words, data in ((write, [address << 1, pointer]), (read, [address << 1 | 1])):
+        out += [(I2C_BASE + esp32c3.I2C_CTR, esp32c3.I2C_MS_MODE),
+                (I2C_BASE + esp32c3.I2C_INT_CLR, 0x3FFFF)]
+        out += [(I2C_BASE + esp32c3.I2C_DATA, byte) for byte in data]
+        out += [(I2C_BASE + esp32c3.I2C_COMD0 + 4 * n, word) for n, word in enumerate(words)]
+        out += [(I2C_BASE + esp32c3.I2C_CTR, esp32c3.I2C_MS_MODE | esp32c3.I2C_TRANS_START)]
+    return out
+
+
+MCP9808_ON_D4_D5 = {"part": "MCP9808", "sda": "D4", "scl": "D5", "vdd": 3.3,
+                    "address_pins": {"A0": "low", "A1": "low", "A2": "low"},
+                    "celsius": 25.0}
+
+
+def _i2c_session(program: list[int]) -> api.BoardSession:
+    needs_riscv32()
+    image = b"".join(word.to_bytes(4, "little") for word in program)
+    return api.load_firmware(C3_BOARD, image, base=esp32c3.IROM)
+
+
+def test_a_device_drive_answers_the_firmware_and_the_record_replays_it():
+    """The id read through the controller, then the part taken off the bus by
+    a second drive, then the same read: NACK. A fresh session given the image
+    and the record, driven at the same instructions, ends the same."""
+    first = (_stores(*_i2c_wiring()) + _stores(*_id_read(6))
+             + _read_into(16, I2C_BASE + esp32c3.I2C_DATA)
+             + _read_into(17, I2C_BASE + esp32c3.I2C_DATA))
+    second = _stores(*_id_read(6)) + _read_into(18, I2C_BASE + esp32c3.I2C_INT_RAW)
+    program = first + second
+
+    def ending(session: api.BoardSession) -> tuple:
+        return (session.retired, session.cpu.pc, tuple(session.cpu.get_regs().as_list()))
+
+    with _i2c_session(program) as session:
+        session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
+        assert session.run(len(first)).status == "running"
+        regs = session.cpu.get_regs().as_list()
+        assert (regs[16], regs[17]) == (0x00, 0x54), "the part answered"
+        assert set(session.devices) == {"u1"}
+        session.drive({}, None, {})
+        assert session.devices == {}, "a part the bench removed is dropped"
+        assert session.run(len(second)).status == "running"
+        nack = session.cpu.get_regs().as_list()[18]
+        assert nack & esp32c3.I2C_INT_NACK, f"INT_RAW {nack:#x}: nobody answered"
+        record = list(session.inputs)
+        stamps = [entry[0] for entry in record]
+        done = ending(session)
+    assert stamps == [0, len(first)]
+    assert record[0][3] == {"u1": MCP9808_ON_D4_D5} and record[1][3] == {}
+
+    with _i2c_session(program) as replay:
+        for at, levels, volts, devices in record:
+            while replay.retired < at:
+                replay.step()
+            replay.drive(levels, volts, devices)
+        while replay.retired < done[0]:
+            replay.step()
+        assert ending(replay) == done
+        assert replay.inputs == record
+
+
+def test_the_record_keeps_its_own_copy_of_the_devices():
+    with _i2c_session(_stores(*_i2c_wiring())) as session:
+        posted = {"u1": dict(MCP9808_ON_D4_D5, address_pins=dict(MCP9808_ON_D4_D5["address_pins"]))}
+        session.drive({}, None, posted)
+        posted["u1"]["celsius"] = 99.0
+        posted["u1"]["address_pins"]["A0"] = "high"
+        assert session.inputs[-1][3]["u1"]["celsius"] == 25.0
+        assert session.inputs[-1][3]["u1"]["address_pins"]["A0"] == "low"
+
+
+def test_a_part_keeps_its_pointer_between_drives_and_the_straps_are_read_again():
+    with _i2c_session(_stores(*_i2c_wiring())) as session:
+        session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
+        part = session.devices["u1"]
+        part.start(False)
+        part.write(7)
+        part.stop()
+        session.drive({}, None, {"u1": dict(MCP9808_ON_D4_D5,
+                                            address_pins={"A0": "high", "A1": "low", "A2": "high"})})
+        assert session.devices["u1"].pointer == 7, "the pointer survived the drive"
+        assert session.devices["u1"].address == 0x18 | 0b101, "the straps were read again"
+
+
+def test_a_device_the_drive_cannot_read_is_refused_with_its_values_and_wires_nothing():
+    needs_riscv32()
+    bad = {
+        "a part nobody makes": (dict(MCP9808_ON_D4_D5, part="SSD1306"), "SSD1306"),
+        "a pad that is no pad": (dict(MCP9808_ON_D4_D5, sda="D99"), "D99"),
+        "both lines on one pad": (dict(MCP9808_ON_D4_D5, scl="D4"), "one GPIO"),
+        "a supply that is no number": (dict(MCP9808_ON_D4_D5, vdd="3.3"), "'3.3'"),
+        "a negative supply": (dict(MCP9808_ON_D4_D5, vdd=-1.0), "-1.0"),
+        "a temperature that is a bool": (dict(MCP9808_ON_D4_D5, celsius=True), "True"),
+        "a supply between VPOR and 2.7": (dict(MCP9808_ON_D4_D5, vdd=2.5), "2.5"),
+        "an open address pin": (dict(MCP9808_ON_D4_D5,
+                                     address_pins={"A0": "open", "A1": "low", "A2": "low"}),
+                                "'open'"),
+        "one address pin": (dict(MCP9808_ON_D4_D5, address_pins={"A0": "low"}), "A0"),
+    }
+    with _i2c_session(_stores(*_i2c_wiring())) as session:
+        for name, (device, value) in bad.items():
+            with pytest.raises(ValueError) as caught:
+                session.drive({}, None, {"u1": device})
+            assert value in str(caught.value), (name, str(caught.value))
+            assert session.inputs == [] and session.devices == {}, (
+                name, "a refused drive is not recorded and wires nothing")
+        with pytest.raises(ValueError) as caught:
+            session.drive({}, None, {"u1": MCP9808_ON_D4_D5, "u2": MCP9808_ON_D4_D5})
+        assert "0x18" in str(caught.value), "two parts at one address on one pair"
+
+
+def test_a_description_with_no_i2c_refuses_devices_by_name(monkeypatch):
+    needs_riscv32()
+    with _i2c_session(_stores(*_i2c_wiring())) as session:
+        monkeypatch.delattr(esp32c3, "hold_bus")
+        with pytest.raises(ValueError) as caught:
+            session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
+        assert "no I2C bus" in str(caught.value) and "u1" in str(caught.value)

@@ -100,8 +100,11 @@ the TRM's formula's, typical and uncalibrated. See `install_adc`.
 
 from __future__ import annotations
 
+import functools
 import math
 import typing
+
+from core.riscv32.abi import DeviceRefusal
 
 #: The flash execute window, from `soc.h:219-220`:
 #:
@@ -505,6 +508,114 @@ ADC_VREF_VOLTS = 1.1
 ADC_ATTEN_K: dict[int, float] = {0: 1.0, 1: 0.75, 2: 0.5, 3: 0.25}
 ADC_FULL_CODE = 4095
 
+#: I2C0, the controller `Wire` drives. Everything below is the framework copy
+#: the module docstring names (ESP-IDF 4.4.7), a bare `file.h:N` being a line
+#: of it; `tests/riscv32/test_esp32c3_board.py` reads each back by define name.
+#:
+#:     #define DR_REG_I2C_EXT_BASE  0x60013000                       soc.h:52
+#:     #define REG_I2C_BASE(i)  (DR_REG_I2C_EXT_BASE + (i) * 0x14000) soc.h:79
+#:
+#: So I2C0 is the base itself.
+I2C = 0x60013000
+
+#: The registers this board models, `i2c_reg.h`, as offsets as the header
+#: writes them:
+#:
+#:     I2C_CTR_REG        + 0x04  :31       I2C_INT_RAW_REG  + 0x20  :297
+#:     I2C_FIFO_CONF_REG  + 0x18  :245      I2C_INT_CLR_REG  + 0x24  :407
+#:     I2C_DATA_REG       + 0x1C  :289      I2C_CLK_CONF_REG + 0x54  :825
+#:     I2C_COMD0_REG      + 0x58  :857      I2C_COMD7_REG    + 0x74  :955
+#:
+#: `I2C_SR_REG` (+ 0x08, :123) is unmapped: firmware that reads the
+#: controller's state machine faults at a named address. The timing registers
+#: are unmapped too, and the timings have no effect (a transaction is instant).
+I2C_CTR = 0x04
+I2C_FIFO_CONF = 0x18
+I2C_DATA = 0x1C
+I2C_INT_RAW = 0x20
+I2C_INT_CLR = 0x24
+I2C_CLK_CONF = 0x54
+I2C_COMD0 = 0x58
+I2C_COMMANDS = 8
+
+#: CTR's bits (:52 :70 :88 :94) and what the header calls their access:
+#: `I2C_TRANS_START` **WT** (:87), `I2C_CONF_UPGATE` **WT** (:51),
+#: `I2C_FSM_RST` **WT** (:58) -- write-trigger, so a read finds them 0 and CTR
+#: stores them as 0. TRANS_START is the doorbell.
+I2C_MS_MODE = 1 << 4
+I2C_TRANS_START = 1 << 5
+I2C_CONF_UPGATE = 1 << 11
+I2C_FSM_RST = 1 << 10
+I2C_WRITE_TRIGGER = I2C_TRANS_START | I2C_CONF_UPGATE | I2C_FSM_RST
+
+#: INT_RAW's bits that a transaction here sets: `I2C_NACK_INT_RAW` [10] (:342),
+#: `I2C_TRANS_COMPLETE_INT_RAW` [7] (:360), `I2C_END_DETECT_INT_RAW` [3]
+#: (:384). INT_CLR is `R/SS/WTC`'s clear: a write of 1 clears the bit.
+I2C_INT_NACK = 1 << 10
+I2C_INT_TRANS_COMPLETE = 1 << 7
+I2C_INT_END_DETECT = 1 << 3
+
+#: A command word, `i2c_ll.h:33-39` at v5.5: byte_num [7:0], ack_en [8],
+#: ack_exp [9], ack_val [10], op_code [13:11]; `I2C_COMMANDn_DONE` is bit 31
+#: (:860). **The op codes are `hal/esp32c3/include/hal/i2c_ll.h`'s**
+#: (`I2C_LL_CMD_RESTART 6`, `_WRITE 1`, `_READ 3`, `_STOP 2`, `_END 4`, :72-76),
+#: **and not what a comment in `i2c_reg.h` says**: the original ESP32's
+#: encoding is another, and a test holds these to the HAL.
+I2C_OP: dict[str, int] = {"RSTART": 6, "WRITE": 1, "READ": 3, "STOP": 2, "END": 4}
+I2C_COMD_DONE = 1 << 31
+I2C_OP_SHIFT = 11
+I2C_ACK_EXPECTED = 1 << 9
+
+#: The system block's base (`soc.h:27`, 0x600c0000) and the clock gate:
+#: `SYSTEM_PERIP_CLK_EN0_REG` + 0x010 (`system_reg.h:84`), whose
+#: `SYSTEM_I2C_EXT0_CLK_EN` is bit 7, **default 0** (:229-231). The function
+#: clock resets CLOSED: Wire.begin opens it, and a sketch that does not gets a
+#: controller that never answers. A pair, as `ADC_GATE` is, because the C5 and
+#: C6 put it elsewhere.
+SYSTEM = 0x600C0000
+SYSTEM_PERIP_CLK_EN0 = 0x10
+I2C_GATE = (SYSTEM + SYSTEM_PERIP_CLK_EN0, 1 << 7)
+
+#: `SYSTEM_PERIP_CLK_EN0_REG` out of reset, composed from every field's
+#: `default:` in `system_reg.h:84-340` (the I2C bit is 0). Firmware reading it
+#: back gets what the part gives it.
+SYSTEM_PERIP_CLK_EN0_AT_RESET = 0xF9C1E06F
+
+#: The signals, `gpio_sig_map.h:95-98`: `I2CEXT0_SCL_{IN,OUT}_IDX 53`,
+#: `I2CEXT0_SDA_{IN,OUT}_IDX 54`.
+I2CEXT0_SCL_IDX = 53
+I2CEXT0_SDA_IDX = 54
+
+#: The GPIO matrix, `gpio_reg.h`. **This part's shape** (TRAP 3): the
+#: `GPIO_FUNCn_IN_SEL_CFG_REG` for signal n at + 0x154 + 4n (:1330), with
+#: `GPIO_FUNCn_IN_SEL` [4:0] (:1343) and `GPIO_SIGn_IN_SEL` bit 6 (:1331), the
+#: matrix-not-IO_MUX select; and `GPIO_FUNCn_OUT_SEL_CFG_REG` for pad n at
+#: + 0x554 + 4n (:3890), `GPIO_FUNCn_OUT_SEL` [7:0] default 0x80 (:3909), 128,
+#: meaning "the GPIO register drives this pad". The C5 and C6 differ in
+#: width and in offset.
+GPIO_FUNC_IN_SEL_CFG0 = 0x154
+GPIO_FUNC_OUT_SEL_CFG0 = 0x554
+GPIO_SIG_IN_SEL = 1 << 6
+GPIO_FUNC_IN_SEL_MASK = 0x1F
+GPIO_FUNC_OUT_SEL_MASK = 0xFF
+GPIO_OUT_SEL_GPIO = 128
+
+#: `MCU_SEL` [14:12] of a pad register (`io_mux_reg.h:74`), and the value that
+#: selects the GPIO matrix, `PIN_FUNC_GPIO 1` (:121).
+IO_MUX_MCU_SEL_SHIFT = 12
+IO_MUX_MCU_SEL_MASK = 0x7
+IO_MUX_FUNC_GPIO = 1
+
+#: The registers' words out of reset, each composed from the header's own
+#: `default:` comments (`i2c_reg.h`): CTR `ARBITRATION_EN` [9], `RX_FULL_ACK_LEVEL`
+#: [3], `SCL_FORCE_OUT` [1] and `SDA_FORCE_OUT` [0]; FIFO_CONF `FIFO_PRT_EN` [14],
+#: `TXFIFO_WM_THRHD` [9:5] 4 and `RXFIFO_WM_THRHD` [4:0] 0xb; INT_RAW
+#: `TXFIFO_WM_INT_RAW` [1]; CLK_CONF `SCLK_ACTIVE` [21]; every COMD 0.
+I2C_CTR_AT_RESET = 0x20B
+I2C_FIFO_CONF_AT_RESET = 0x408B
+I2C_INT_RAW_AT_RESET = 0x2
+I2C_CLK_CONF_AT_RESET = 0x200000
+
 #: The pin the fixture watches. **Not a user LED** -- see the module docstring.
 #: GPIO8 is what Espressif's own ESP32-C3-DevKitM-1 wires its RGB LED to, and
 #: on a XIAO it is an ordinary exposed output -- the pad silkscreened `D8`,
@@ -696,6 +807,14 @@ class Cpu(typing.Protocol):
     def hold_samples(self, control: int,
                      samples: typing.Mapping[int, int]) -> None: ...
     def stream(self, address: int) -> bytes: ...
+    def map_doorbell(self, address: int, *, value: int, ring_mask: int,
+                     write_trigger: int = ...) -> None: ...
+    def on_ring(self, address: int,
+                service: typing.Callable[[typing.Any, int], None]) -> None: ...
+    def map_fifo(self, address: int, *, enable: int, enable_mask: int) -> None: ...
+    def take_written(self, address: int) -> bytes: ...
+    def hold_readable(self, address: int, data: bytes) -> None: ...
+    def write_word(self, address: int, value: int) -> None: ...
     def read_word(self, address: int) -> int: ...
 
 
@@ -1004,6 +1123,197 @@ def hold_volts(cpu: Cpu, volts: typing.Mapping[int, float]) -> None:
     })
 
 
+def install_i2c(cpu: Cpu) -> None:
+    """I2C0 far enough for a `Wire.endTransmission` and a `requestFrom`, and
+    the pieces they need around it: the clock gate and the GPIO matrix.
+
+    CTR is a doorbell: **TRANS_START rings**, and `serve_i2c` runs between two
+    instructions, once the store has retired (core/riscv32/cpu.h). DATA is a
+    FIFO gated on `I2C_GATE`: a write while the function clock is closed is
+    dropped, as a gated peripheral drops it, and a read with nothing held
+    faults at the read. INT_RAW is a register with INT_CLR its clear alias,
+    the COMD registers are registers `serve_i2c` sets DONE in, and every
+    pad's OUT_SEL and the two I2C signals' IN_SEL are registers, so a sketch
+    can route and `pin_states` can see what it routed.
+
+    **What is deliberately absent, and what it costs.** SR and the timing
+    registers fault by name; there is no slave mode, no interrupt (the core
+    delivers none), no clock stretching, no arbitration, and a transaction
+    takes no time -- INT_RAW answers on the next instruction. A device is
+    attached with `hold_bus`; with none, this answers every address with a
+    NACK once the routing is coherent.
+    """
+    cpu.map_register(SYSTEM + SYSTEM_PERIP_CLK_EN0, SYSTEM_PERIP_CLK_EN0_AT_RESET)
+    for gpio in IO_MUX_PADS:
+        cpu.map_register(GPIO + GPIO_FUNC_OUT_SEL_CFG0 + 4 * gpio, GPIO_OUT_SEL_GPIO)
+    for signal in (I2CEXT0_SCL_IDX, I2CEXT0_SDA_IDX):
+        cpu.map_register(GPIO + GPIO_FUNC_IN_SEL_CFG0 + 4 * signal, 0)
+    cpu.map_doorbell(I2C + I2C_CTR, value=I2C_CTR_AT_RESET,
+                     ring_mask=I2C_TRANS_START, write_trigger=I2C_WRITE_TRIGGER)
+    cpu.map_register(I2C + I2C_FIFO_CONF, I2C_FIFO_CONF_AT_RESET)
+    cpu.map_register(I2C + I2C_INT_RAW, I2C_INT_RAW_AT_RESET)
+    cpu.map_alias(I2C + I2C_INT_CLR, I2C + I2C_INT_RAW, "clear", readable=False)
+    cpu.map_register(I2C + I2C_CLK_CONF, I2C_CLK_CONF_AT_RESET)
+    for number in range(I2C_COMMANDS):
+        cpu.map_register(I2C + I2C_COMD0 + 4 * number, 0)
+    cpu.map_fifo(I2C + I2C_DATA, enable=I2C_GATE[0], enable_mask=I2C_GATE[1])
+    hold_bus(cpu, ())
+
+
+def hold_bus(cpu: Cpu, bus: typing.Sequence[tuple[int, int, typing.Any]]) -> None:
+    """What is wired to the I2C pins, `(sda_gpio, scl_gpio, device)` each, as a
+    whole statement: the controller reaches only the devices on the pads its
+    routing names. `webui/api.py`'s `BoardSession.drive` is the caller."""
+    for sda, scl, _device in bus:
+        for gpio in (sda, scl):
+            if gpio not in IO_MUX_PADS:
+                raise ValueError(
+                    f"GPIO{gpio} has no pad on an ESP32-C3; its pads are GPIO"
+                    f"{min(IO_MUX_PADS)} to GPIO{max(IO_MUX_PADS)}")
+    cpu.on_ring(I2C + I2C_CTR, functools.partial(serve_i2c, bus=tuple(bus)))
+
+
+def i2c_pad(cpu: Cpu, name: str, signal: int) -> int:
+    """The one pad a signal leaves on and returns from, or `DeviceRefusal`
+    naming what was found. Checks `OUT_SEL`, `MCU_SEL`, the matrix select,
+    `IN_SEL` and `FUN_IE` -- not `PAD_DRIVER` or the pulls (design 4)."""
+    leaving = [gpio for gpio in IO_MUX_PADS
+               if cpu.read_word(GPIO + GPIO_FUNC_OUT_SEL_CFG0 + 4 * gpio)
+               & GPIO_FUNC_OUT_SEL_MASK == signal]
+    if len(leaving) != 1:
+        raise DeviceRefusal(
+            f"I2C {name} (signal {signal}) must leave on exactly one pad; "
+            f"found {'no pad' if not leaving else 'pads ' + ' and '.join(f'GPIO{g}' for g in leaving)} "
+            f"with OUT_SEL {signal}")
+    gpio = leaving[0]
+    mcu = (cpu.read_word(IO_MUX + IO_MUX_GPIO0 + gpio * IO_MUX_STRIDE)
+           >> IO_MUX_MCU_SEL_SHIFT) & IO_MUX_MCU_SEL_MASK
+    if mcu != IO_MUX_FUNC_GPIO:
+        raise DeviceRefusal(
+            f"I2C {name} leaves on GPIO{gpio} but its IO_MUX MCU_SEL is {mcu}, "
+            f"not {IO_MUX_FUNC_GPIO}")
+    back = cpu.read_word(GPIO + GPIO_FUNC_IN_SEL_CFG0 + 4 * signal)
+    if not back & GPIO_SIG_IN_SEL:
+        raise DeviceRefusal(
+            f"I2C {name} leaves on GPIO{gpio} but SIG_IN_SEL is clear in "
+            f"IN_SEL_CFG {back:#x}: it does not return from the matrix")
+    if back & GPIO_FUNC_IN_SEL_MASK != gpio:
+        raise DeviceRefusal(
+            f"I2C {name} leaves on GPIO{gpio} but returns from GPIO"
+            f"{back & GPIO_FUNC_IN_SEL_MASK} (IN_SEL_CFG {back:#x})")
+    if not cpu.read_word(IO_MUX + IO_MUX_GPIO0 + gpio * IO_MUX_STRIDE) & IO_MUX_FUN_IE:
+        raise DeviceRefusal(
+            f"I2C {name} leaves on GPIO{gpio} but its input is off (FUN_IE "
+            f"clear), so it cannot read the line back")
+    return gpio
+
+
+def serve_i2c(cpu: Cpu, address: int, *,
+              bus: tuple[tuple[int, int, typing.Any], ...]) -> None:
+    """Run the command list `TRANS_START` started, to its STOP.
+
+    Called by the core between two instructions, with the store retired. The
+    gate first: a closed function clock answers nothing, which Wire's timeout
+    waits out. Then the routing, then each COMDn: RSTART, WRITE (the first byte
+    after a RSTART is the address byte; the device on the routed pads
+    acknowledges it or nobody does), READ (into the RX FIFO) and STOP, each
+    marked DONE as it runs. An ack mismatch under `ack_en` sets NACK and ends
+    the list with that command not DONE.
+
+    **`DeviceRefusal` is the only refusal**, raised for what silicon does and
+    this model does not: slave mode, END, a TX byte no WRITE consumed or a
+    WRITE with too few, a list that never stops. Anything else raised here is
+    a bug in this host and is not caught.
+    """
+    if not cpu.read_word(I2C_GATE[0]) & I2C_GATE[1]:
+        return
+    if not cpu.read_word(address) & I2C_MS_MODE:
+        raise DeviceRefusal(
+            f"I2C TRANS_START with MS_MODE clear (CTR {cpu.read_word(address):#x}): "
+            f"slave mode is not modelled")
+    sda = i2c_pad(cpu, "SDA", I2CEXT0_SDA_IDX)
+    scl = i2c_pad(cpu, "SCL", I2CEXT0_SCL_IDX)
+    device = next((part for pads_sda, pads_scl, part in bus
+                   if (pads_sda, pads_scl) == (sda, scl)), None)
+    transmit = list(cpu.take_written(I2C + I2C_DATA))
+    received = bytearray()
+    addressed = None
+    raw = 0
+    for number in range(I2C_COMMANDS):
+        at = I2C + I2C_COMD0 + 4 * number
+        word = cpu.read_word(at)
+        op = (word >> I2C_OP_SHIFT) & 0x7
+        count = word & 0xFF
+        if op == I2C_OP["RSTART"]:
+            addressed = None
+        elif op == I2C_OP["WRITE"]:
+            if len(transmit) < count:
+                raise DeviceRefusal(
+                    f"I2C COMD{number} writes {count} bytes but the TX FIFO "
+                    f"holds {len(transmit)}")
+            chunk, transmit = transmit[:count], transmit[count:]
+            acked = True
+            for byte in chunk:
+                if addressed is None:
+                    if device is not None and byte >> 1 == device.address:
+                        acked = device.start(bool(byte & 1))
+                        addressed = device if acked else None
+                    else:
+                        acked = False
+                else:
+                    acked = addressed.write(byte)
+                if not acked:
+                    break
+            expect_nack = bool(word & I2C_ACK_EXPECTED)
+            if word & (1 << 8) and acked == expect_nack:
+                raw |= I2C_INT_NACK
+                break
+        elif op == I2C_OP["READ"]:
+            if addressed is None:
+                raise DeviceRefusal(
+                    f"I2C COMD{number} reads {count} bytes with no device "
+                    f"addressed for reading")
+            received += bytes(addressed.read() for _ in range(count))
+        elif op == I2C_OP["STOP"]:
+            if addressed is not None:
+                addressed.stop()
+            raw |= I2C_INT_TRANS_COMPLETE
+            cpu.write_word(at, word | I2C_COMD_DONE)
+            break
+        else:
+            raise DeviceRefusal(
+                f"I2C COMD{number} is {word & 0x3FFF:#x}: op_code {op} "
+                f"({next((n for n, v in I2C_OP.items() if v == op), 'none')}) "
+                f"is not modelled, and a list must reach a STOP")
+        cpu.write_word(at, word | I2C_COMD_DONE)
+    else:
+        raise DeviceRefusal(
+            f"I2C command list COMD0..COMD{I2C_COMMANDS - 1} reached no STOP")
+    if transmit and not raw & I2C_INT_NACK:
+        raise DeviceRefusal(
+            f"I2C TX FIFO held {len(transmit)} bytes no WRITE command consumed: "
+            f"{bytes(transmit).hex()}")
+    if raw & I2C_INT_NACK and addressed is not None:
+        addressed.stop()
+    cpu.hold_readable(I2C + I2C_DATA, bytes(received))
+    cpu.write_word(I2C + I2C_INT_RAW, cpu.read_word(I2C + I2C_INT_RAW) | raw)
+
+
+def unrouted_level(cpu: Cpu, gpio: int) -> str | None:
+    """What `webui.api.row_levels` and `pin_states` report for `gpio`'s pad
+    instead of the GPIO registers' level: `"unknown"` where a peripheral
+    drives the pad (`OUT_SEL` is not 128), whose output neither `ENABLE` nor
+    `OUT` says anything about, and None where the GPIO block decides.
+
+    Nothing here reclaims the pad when `pinMode` later runs (OUT_SEL back to
+    128): it stays `"unknown"` until the sketch writes it, a later step's.
+    """
+    if gpio not in IO_MUX_PADS:
+        return None
+    routed = cpu.read_word(GPIO + GPIO_FUNC_OUT_SEL_CFG0 + 4 * gpio) & GPIO_FUNC_OUT_SEL_MASK
+    return None if routed == GPIO_OUT_SEL_GPIO else "unknown"
+
+
 def pin_states(cpu: Cpu) -> dict[str, str]:
     """What every header pin this board knows about is doing, right now.
 
@@ -1034,7 +1344,10 @@ def pin_states(cpu: Cpu) -> dict[str, str]:
     states: dict[str, str] = {}
     for label, gpio in HEADER.items():
         mask = 1 << gpio
-        if not enable & mask:
+        instead = unrouted_level(cpu, gpio)
+        if instead is not None:
+            states[label] = instead
+        elif not enable & mask:
             states[label] = "input"
         else:
             states[label] = "high" if out & mask else "low"
@@ -1063,3 +1376,4 @@ def install(cpu: Cpu) -> None:
     install_systimer(cpu)
     # After `install_gpio_in`, whose pad registers `analogRead` writes.
     install_adc(cpu)
+    install_i2c(cpu)

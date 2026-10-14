@@ -2386,7 +2386,7 @@ def echoed(board: str, mode: str, drives: list[str | None],
                         f"{board}: D10 followed D1 {step + 1} steps after the drive")
                 before = now
             seen.append(session.state()["pins"]["D10"])
-        assert [levels for _, levels, _volts in session.inputs] == [
+        assert [levels for _, levels, _volts, _devices in session.inputs] == [
             {pin: level} for level in drives if level is not None]
     return seen
 
@@ -2566,7 +2566,7 @@ def analog_text(board: str, sketch: str, holds: list[dict[str, float]]) -> list[
             ran = session.run(ANALOG_STEPS)
             assert ran.status == "running", f"{board}: {ran.detail}"
             texts.append(session.state()["uart"]["text"])
-        assert [held for _, _, held in session.inputs] == holds, board
+        assert [held for _, _, held, _devices in session.inputs] == holds, board
     return texts
 
 

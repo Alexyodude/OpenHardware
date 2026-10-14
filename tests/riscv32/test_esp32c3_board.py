@@ -43,8 +43,11 @@ import subprocess
 
 import pytest
 
+from core.riscv32 import abi
 from webui import api
 from webui.boards import esp32c3
+
+from . import encode as e
 
 HERE = pathlib.Path(__file__).resolve().parent
 IMAGE = HERE / "c3blink" / "blink.bin"
@@ -959,3 +962,382 @@ def test_a_voltage_on_a_gpio_with_no_pad_is_refused_by_name():
         with pytest.raises(ValueError) as caught:
             esp32c3.hold_volts(cpu, {22: 1.0})
         assert "GPIO22" in str(caught.value), str(caught.value)
+
+
+# --- I2C0: the controller a Wire.endTransmission drives (OH-161 step 5, slice 1b) ----
+#
+# The registers, bits and opcodes are read back out of the framework copy
+# 3.20017.241212 (ESP-IDF 4.4.7) by define name; the transactions are run from
+# hand-assembled RISC-V stores, so the doorbell is rung by an executed
+# instruction and not by a harness poking a register.
+
+
+def framework_include() -> pathlib.Path | None:
+    from webui import compile as compiler
+
+    include = (compiler.PACKAGES / "framework-arduinoespressif32" / "tools" / "sdk"
+               / "esp32c3" / "include")
+    return include if (include / "hal" / "esp32c3" / "include" / "hal"
+                       / "i2c_ll.h").is_file() else None
+
+
+def header_text(relative: str) -> str:
+    include = framework_include()
+    if include is None:
+        pytest.skip("SKIPPED: no framework-arduinoespressif32; pio pkg install")
+    return (include / relative).read_text(encoding="utf-8", errors="replace")
+
+
+I2C_REG_H = "soc/esp32c3/include/soc/i2c_reg.h"
+SYSTEM_REG_H = "soc/esp32c3/include/soc/system_reg.h"
+
+
+def register_block(text: str, register: str) -> str:
+    """The lines from `#define <register>_REG` to the next `_REG` define."""
+    start = text.index(f"#define {register}_REG")
+    following = re.search(r"#define \w+_REG\b", text[start + 10:])
+    return text[start:start + 10 + following.start()] if following else text[start:]
+
+
+def header_reset_word(text: str, register: str) -> int:
+    """A register's reset word composed from every field's `default:` comment."""
+    word = 0
+    for match in re.finditer(
+            r"bitpos:\[(\d+)(?::(\d+))?\] ;default: \d+'([hbd])(\w+)",
+            register_block(text, register)):
+        high, low, base, digits = match.groups()
+        word |= int(digits, {"h": 16, "b": 2, "d": 10}[base]) << int(low or high)
+    return word
+
+
+def header_offset(text: str, register: str) -> int:
+    line = re.search(rf"#define {register}_REG\(i\)\s+\(REG_I2C_BASE\(i\) \+ (0x[0-9A-Fa-f]+)\)",
+                     text)
+    assert line, register
+    return int(line.group(1), 16)
+
+
+def header_bit(text: str, name: str) -> int:
+    line = re.search(rf"#define {name}\s+\(BIT\((\d+)\)\)", text)
+    assert line, name
+    return 1 << int(line.group(1))
+
+
+def defines_of(text: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        parts = line.split(maxsplit=2)
+        if len(parts) == 3 and parts[0] == "#define":
+            out[parts[1]] = parts[2].split("/*")[0].split("//")[0].strip()
+    return out
+
+
+def test_the_i2c_numbers_this_board_carries_are_the_ones_in_the_header():
+    i2c = header_text(I2C_REG_H)
+    soc = defines_of(header_text("soc/esp32c3/include/soc/soc.h"))
+    system = header_text(SYSTEM_REG_H)
+    sigs = defines_of(header_text("soc/esp32c3/include/soc/gpio_sig_map.h"))
+    gpio = header_text("soc/esp32c3/include/soc/gpio_reg.h")
+    assert int(soc["DR_REG_I2C_EXT_BASE"], 16) == esp32c3.I2C
+    for register, offset in (
+        ("I2C_CTR", esp32c3.I2C_CTR), ("I2C_FIFO_CONF", esp32c3.I2C_FIFO_CONF),
+        ("I2C_DATA", esp32c3.I2C_DATA), ("I2C_INT_RAW", esp32c3.I2C_INT_RAW),
+        ("I2C_INT_CLR", esp32c3.I2C_INT_CLR), ("I2C_CLK_CONF", esp32c3.I2C_CLK_CONF),
+        ("I2C_COMD0", esp32c3.I2C_COMD0), ("I2C_COMD7", esp32c3.I2C_COMD0 + 7 * 4),
+    ):
+        assert header_offset(i2c, register) == offset, register
+    for name, bit in (
+        ("I2C_TRANS_START", esp32c3.I2C_TRANS_START), ("I2C_MS_MODE", esp32c3.I2C_MS_MODE),
+        ("I2C_CONF_UPGATE", esp32c3.I2C_CONF_UPGATE),
+        ("I2C_NACK_INT_RAW", esp32c3.I2C_INT_NACK),
+        ("I2C_TRANS_COMPLETE_INT_RAW", esp32c3.I2C_INT_TRANS_COMPLETE),
+        ("I2C_END_DETECT_INT_RAW", esp32c3.I2C_INT_END_DETECT),
+        ("I2C_COMMAND0_DONE", esp32c3.I2C_COMD_DONE),
+    ):
+        assert header_bit(i2c, name) == bit, name
+    # The header marks these three WT (write-trigger), which is why I2C_CTR_AT stores
+    # them as 0: a write to I2C_CTR_AT must not leave TRANS_START set for a poll.
+    for name in ("I2C_TRANS_START", "I2C_CONF_UPGATE", "I2C_FSM_RST"):
+        assert re.search(rf"/\* {name} : WT ;", i2c), name
+    assert esp32c3.I2C_WRITE_TRIGGER == (esp32c3.I2C_TRANS_START
+                                         | esp32c3.I2C_CONF_UPGATE | 1 << 10)
+    assert int(soc["DR_REG_SYSTEM_BASE"], 16) == esp32c3.SYSTEM
+    assert esp32c3.I2C_GATE == (esp32c3.SYSTEM + 0x10,
+                                header_bit(system, "SYSTEM_I2C_EXT0_CLK_EN"))
+    assert re.search(r"SYSTEM_PERIP_CLK_EN0_REG\s+\(DR_REG_SYSTEM_BASE \+ 0x010\)", system)
+    assert esp32c3.I2C_GATE[1] == 1 << 7
+    assert int(sigs["I2CEXT0_SCL_IN_IDX"]) == esp32c3.I2CEXT0_SCL_IDX
+    assert int(sigs["I2CEXT0_SDA_OUT_IDX"]) == esp32c3.I2CEXT0_SDA_IDX
+    assert re.search(r"GPIO_FUNC0_IN_SEL_CFG_REG\s+\(DR_REG_GPIO_BASE \+ 0x154\)", gpio)
+    assert re.search(r"GPIO_FUNC0_OUT_SEL_CFG_REG\s+\(DR_REG_GPIO_BASE \+ 0x554\)", gpio)
+    assert (esp32c3.GPIO_FUNC_IN_SEL_CFG0, esp32c3.GPIO_FUNC_OUT_SEL_CFG0) == (0x154, 0x554)
+    assert header_bit(gpio, "GPIO_SIG0_IN_SEL") == esp32c3.GPIO_SIG_IN_SEL
+
+
+def test_the_opcodes_are_held_to_i2c_ll_h_and_not_to_a_header_comment():
+    """TRAP 1: the opcode encoding is i2c_ll.h's, RSTART 6, WRITE 1, READ 3,
+    STOP 2, END 4 -- the original ESP32's is a different one, and a comment
+    in a register header has been copied from it."""
+    ll = defines_of(header_text("hal/esp32c3/include/hal/i2c_ll.h"))
+    assert esp32c3.I2C_OP == {
+        "RSTART": int(ll["I2C_LL_CMD_RESTART"]), "WRITE": int(ll["I2C_LL_CMD_WRITE"]),
+        "READ": int(ll["I2C_LL_CMD_READ"]), "STOP": int(ll["I2C_LL_CMD_STOP"]),
+        "END": int(ll["I2C_LL_CMD_END"])}
+    assert esp32c3.I2C_OP == {"RSTART": 6, "WRITE": 1, "READ": 3, "STOP": 2, "END": 4}
+
+
+def test_the_installed_i2c_registers_read_the_words_the_header_gives():
+    i2c = header_text(I2C_REG_H)
+    system = header_text(SYSTEM_REG_H)
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        for register, offset in (
+            ("I2C_CTR", esp32c3.I2C_CTR), ("I2C_FIFO_CONF", esp32c3.I2C_FIFO_CONF),
+            ("I2C_INT_RAW", esp32c3.I2C_INT_RAW), ("I2C_CLK_CONF", esp32c3.I2C_CLK_CONF),
+            *((f"I2C_COMD{n}", esp32c3.I2C_COMD0 + 4 * n) for n in range(8)),
+        ):
+            assert cpu.read_word(esp32c3.I2C + offset) == header_reset_word(i2c, register), (
+                register, hex(cpu.read_word(esp32c3.I2C + offset)))
+        gate_at, gate_bit = esp32c3.I2C_GATE
+        assert cpu.read_word(gate_at) == header_reset_word(system, "SYSTEM_PERIP_CLK_EN0")
+        assert not cpu.read_word(gate_at) & gate_bit, "TRAP 2: the clock resets closed"
+        for gpio in esp32c3.IO_MUX_PADS:
+            assert cpu.read_word(out_sel(gpio)) == 0x80, f"GPIO{gpio} resets to OUT_SEL 128"
+
+
+# --- hand-assembled transactions --------------------------------------------
+
+
+def li(rd: str, value: int) -> list[int]:
+    value &= 0xFFFFFFFF
+    high = ((value + 0x800) >> 12) & 0xFFFFF
+    low = value - (high << 12)
+    if low >= 0x80000000:
+        low -= 1 << 32
+    return [e.lui(rd, high), e.addi(rd, rd, low)]
+
+
+def stores(*pairs: tuple[int, int]) -> list[int]:
+    program: list[int] = []
+    for address, value in pairs:
+        program += li("a4", address) + li("a5", value) + [e.sw("a5", "a4", 0)]
+    return program
+
+
+def loads(*addresses: int) -> list[int]:
+    """`lw` each address into x16, x17, ... in turn."""
+    program: list[int] = []
+    for number, address in enumerate(addresses):
+        program += li("a4", address) + [e.lw(16 + number, "a4", 0)]
+    return program
+
+
+SDA_GPIO, SCL_GPIO = 6, 7
+OP = esp32c3.I2C_OP
+
+
+def command(op: str, n: int = 0, *, ack_en: bool = False, ack_val: int = 0) -> int:
+    return n | ack_en << 8 | ack_val << 10 | OP[op] << 11
+
+
+def comd(index: int) -> int:
+    return esp32c3.I2C + esp32c3.I2C_COMD0 + 4 * index
+
+
+def pad(gpio: int) -> int:
+    return esp32c3.IO_MUX + esp32c3.IO_MUX_GPIO0 + gpio * esp32c3.IO_MUX_STRIDE
+
+
+def out_sel(gpio: int) -> int:
+    return esp32c3.GPIO + esp32c3.GPIO_FUNC_OUT_SEL_CFG0 + 4 * gpio
+
+
+def in_sel(signal: int) -> int:
+    return esp32c3.GPIO + esp32c3.GPIO_FUNC_IN_SEL_CFG0 + 4 * signal
+
+
+MCU_GPIO = 1 << 12 | esp32c3.IO_MUX_FUN_IE
+
+
+def wiring() -> list[tuple[int, int]]:
+    """What Wire.begin writes: both pads to function 1 with the input on, each
+    signal out of its pad and back in from it."""
+    return [
+        (pad(SDA_GPIO), MCU_GPIO), (pad(SCL_GPIO), MCU_GPIO),
+        (out_sel(SDA_GPIO), esp32c3.I2CEXT0_SDA_IDX),
+        (out_sel(SCL_GPIO), esp32c3.I2CEXT0_SCL_IDX),
+        (in_sel(esp32c3.I2CEXT0_SDA_IDX), esp32c3.GPIO_SIG_IN_SEL | SDA_GPIO),
+        (in_sel(esp32c3.I2CEXT0_SCL_IDX), esp32c3.GPIO_SIG_IN_SEL | SCL_GPIO),
+    ]
+
+
+I2C_CTR_AT = esp32c3.I2C + esp32c3.I2C_CTR
+I2C_DATA_AT = esp32c3.I2C + esp32c3.I2C_DATA
+I2C_RAW_AT = esp32c3.I2C + esp32c3.I2C_INT_RAW
+I2C_CLR_AT = esp32c3.I2C + esp32c3.I2C_INT_CLR
+I2C_START = esp32c3.I2C_TRANS_START | esp32c3.I2C_MS_MODE
+
+
+def transaction(commands: list[int], data: list[int]) -> list[tuple[int, int]]:
+    return ([(I2C_CTR_AT, esp32c3.I2C_MS_MODE), (I2C_CLR_AT, 0x3FFFF)]
+            + [(I2C_DATA_AT, byte) for byte in data]
+            + [(comd(n), word) for n, word in enumerate(commands)]
+            + [(I2C_CTR_AT, I2C_START)])
+
+
+def run_program(program: list[int], bus=(), *, gate: bool = True):
+    """A C3 session over `program` at the flash window, `bus` held on its
+    pins, run for exactly the program's length (the gate store first)."""
+    words = (stores((esp32c3.I2C_GATE[0], esp32c3.I2C_GATE[1])) if gate else []) + program
+    image = b"".join(word.to_bytes(4, "little") for word in words)
+    session = api.load_firmware(BOARD, image, base=esp32c3.IROM)
+    esp32c3.hold_bus(session.cpu, bus)
+    return session, session.run(len(words))
+
+
+def needs_riscv32() -> None:
+    pytest.importorskip("core.riscv32.abi")
+    try:
+        abi.Cpu().close()
+    except Exception as error:  # the core is not built
+        pytest.skip(f"SKIPPED: riscv32 core unavailable: {error}")
+
+
+def write_pointer(pointer: int) -> list[tuple[int, int]]:
+    return transaction([command("RSTART"), command("WRITE", 2, ack_en=True),
+                        command("STOP")], [0x18 << 1, pointer])
+
+
+def read_two() -> list[tuple[int, int]]:
+    return transaction([command("RSTART"), command("WRITE", 1, ack_en=True),
+                        command("READ", 1), command("READ", 1, ack_val=1),
+                        command("STOP")], [0x18 << 1 | 1])
+
+
+def attached(straps: int = 0):
+    from webui.devices.mcp9808 import Mcp9808
+
+    return ((SDA_GPIO, SCL_GPIO, Mcp9808(straps=straps, celsius=25.0)),)
+
+
+def test_a_pointer_write_and_a_two_byte_read_return_the_manufacturer_and_device_ids():
+    needs_riscv32()
+    for pointer, want in ((6, (0x00, 0x54)), (7, (0x04, 0x00))):
+        program = (stores(*wiring()) + stores(*write_pointer(pointer))
+                   + stores(*read_two()) + loads(I2C_DATA_AT, I2C_DATA_AT))
+        session, result = run_program(program, attached())
+        with session:
+            assert result.status == "running", (pointer, result)
+            regs = session.cpu.get_regs().as_list()
+            assert (regs[16], regs[17]) == want, (pointer, regs[16:18])
+            assert session.cpu.read_word(I2C_RAW_AT) & esp32c3.I2C_INT_TRANS_COMPLETE
+            assert session.cpu.read_word(I2C_CTR_AT) == esp32c3.I2C_MS_MODE, (
+                "TRANS_START rang and stored as 0")
+
+
+def test_every_command_the_transaction_ran_reads_done_and_no_more():
+    needs_riscv32()
+    program = stores(*wiring()) + stores(*write_pointer(6))
+    session, _ = run_program(program, attached())
+    with session:
+        for n in range(3):
+            assert session.cpu.read_word(comd(n)) >> 31 == 1, n
+        assert session.cpu.read_word(comd(3)) >> 31 == 0
+
+
+def test_with_no_device_on_the_pads_the_address_is_nacked_and_its_command_not_done():
+    needs_riscv32()
+    program = stores(*wiring()) + stores(*write_pointer(6))
+    session, result = run_program(program, ())
+    with session:
+        assert result.status == "running", result
+        raw = session.cpu.read_word(I2C_RAW_AT)
+        assert raw & esp32c3.I2C_INT_NACK, hex(raw)
+        assert not raw & esp32c3.I2C_INT_TRANS_COMPLETE
+        assert session.cpu.read_word(comd(0)) >> 31 == 1, "RSTART ran"
+        assert session.cpu.read_word(comd(1)) >> 31 == 0, "COMD1, the address, did not"
+
+
+def test_a_device_on_other_pads_is_a_nack_too():
+    needs_riscv32()
+    from webui.devices.mcp9808 import Mcp9808
+
+    elsewhere = ((2, 3, Mcp9808(straps=0, celsius=25.0)),)
+    session, result = run_program(stores(*wiring()) + stores(*write_pointer(6)), elsewhere)
+    with session:
+        assert session.cpu.read_word(I2C_RAW_AT) & esp32c3.I2C_INT_NACK
+
+
+def test_a_closed_clock_gate_answers_nothing():
+    """TRAP 2: the function clock resets closed, and a transaction started
+    behind it raises no interrupt, which is what Wire's 50 ms timeout waits
+    out. The pads are wired, so that only the gate is wrong."""
+    needs_riscv32()
+    program = stores(*wiring()) + stores(*write_pointer(6))
+    session, result = run_program(program, attached(), gate=False)
+    with session:
+        assert result.status == "running", result
+        assert session.cpu.read_word(I2C_RAW_AT) == 0, "cleared by the program, set by nothing"
+        assert session.cpu.read_word(comd(0)) >> 31 == 0
+
+
+def test_incoherent_routing_is_refused_by_naming_what_was_found():
+    needs_riscv32()
+    sda = esp32c3.I2CEXT0_SDA_IDX
+    cases = {
+        "no pad": ([(out_sel(SDA_GPIO), 128)], ("SDA", "no pad")),
+        "two pads": ([(out_sel(8), esp32c3.I2CEXT0_SCL_IDX)], ("SCL", "GPIO7", "GPIO8")),
+        "wrong pad back in": ([(in_sel(sda), esp32c3.GPIO_SIG_IN_SEL | 5)],
+                              ("SDA", "IN_SEL", "GPIO5")),
+        "matrix not selected": ([(in_sel(sda), SDA_GPIO)], ("SDA", "SIG_IN_SEL")),
+        "not the GPIO function": ([(pad(SDA_GPIO), esp32c3.IO_MUX_FUN_IE)],
+                                  ("SDA", "MCU_SEL", "GPIO6")),
+        "input off": ([(pad(SCL_GPIO), 1 << 12)], ("SCL", "FUN_IE", "GPIO7")),
+    }
+    for name, (changes, words) in cases.items():
+        program = stores(*wiring()) + stores(*changes) + stores(*write_pointer(6))
+        session, result = run_program(program, attached())
+        with session:
+            assert result.status == "stopped", (name, result)
+            for word in words:
+                assert word in result.detail, (name, word, result.detail)
+
+
+def test_the_third_byte_read_stops_the_session_and_does_not_fault_it():
+    """4.1.1 as a device refusal: the part is not a bug, the firmware asked for
+    something DS25095A does not describe."""
+    needs_riscv32()
+    third = transaction([command("RSTART"), command("WRITE", 1, ack_en=True),
+                         command("READ", 3), command("STOP")], [0x18 << 1 | 1])
+    program = stores(*wiring()) + stores(*write_pointer(6)) + stores(*third)
+    session, result = run_program(program, attached())
+    with session:
+        assert result.status == "stopped", result
+        assert session.status == "stopped" and "4.1.1" in result.detail, result
+
+
+def test_a_device_that_breaks_is_a_host_bug_and_faults_the_session():
+    needs_riscv32()
+
+    class Broken:
+        address = 0x18
+
+        def start(self, read):
+            return {}["missing"]
+
+    program = stores(*wiring()) + stores(*write_pointer(6))
+    session, result = run_program(program, ((SDA_GPIO, SCL_GPIO, Broken()),))
+    with session:
+        assert result.status == "faulted", result
+
+
+def test_a_pad_routed_to_a_peripheral_reports_unknown_and_the_others_do_not():
+    with abi.Cpu() as cpu:
+        esp32c3.install(cpu)
+        before = esp32c3.pin_states(cpu)
+        assert set(before.values()) == {"input"}
+        cpu.write_word(out_sel(SDA_GPIO), esp32c3.I2CEXT0_SDA_IDX)
+        after = esp32c3.pin_states(cpu)
+        assert after["D4"] == "unknown"
+        assert {label: state for label, state in after.items() if label != "D4"} == {
+            label: state for label, state in before.items() if label != "D4"}

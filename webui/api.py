@@ -16,6 +16,7 @@ worth pinning down before either front-end exists.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import importlib
 import math
@@ -26,6 +27,7 @@ import typing
 from tools import board_manifest
 from webui import firmware, pinmap, targets
 from webui.boards import catalogue, contract
+from webui.devices import mcp9808
 from webui.parts.schema import UNCONNECTED, PartSchema, SchemaError
 from webui.rcontrol import RControlClient, RControlCommandError, Response
 
@@ -1394,11 +1396,18 @@ class BoardSession:
         self.retired = 0
         #: Every `drive`, in order: the instructions retired when it took
         #: effect, the levels it said and the volts it held (OH-161 steps 3
-        #: and 4). **The replay record**: a level or a voltage enters a
+        #: and 4), and the devices it stated (step 5), deep-copied so the
+        #: caller's dict cannot change it. **The replay record**: a level or a voltage enters a
         #: session only through `drive`, so this image and this list
         #: reproduce the run -- no clock and no randomness is consulted, and
         #: when a call arrived in wall time is not part of it.
-        self.inputs: list[tuple[int, dict[str, str], dict[str, float]]] = []
+        self.inputs: list[tuple[int, dict[str, str], dict[str, float],
+                                dict[str, dict[str, object]]]] = []
+        #: The devices wired to the pads, by the bench's id for each, as the
+        #: last `drive` stated them (OH-161 step 5). Kept between drives, so
+        #: a part keeps its pointer from one transaction to the next; one
+        #: the bench removed is dropped, and so starts again when it is back.
+        self.devices: dict[str, mcp9808.Mcp9808] = {}
 
     @property
     def board(self) -> str:
@@ -1459,7 +1468,9 @@ class BoardSession:
         self.detail = str(error)
 
     def drive(self, levels: typing.Mapping[str, str],
-              volts: typing.Mapping[str, float] | None = None) -> None:
+              volts: typing.Mapping[str, float] | None = None,
+              devices: typing.Mapping[str, typing.Mapping[str, object]] | None = None,
+              ) -> None:
         """What the outside drives onto the pins: name -> "high", "low" or
         "open", each name as `pin_levels` keys it; and, in `volts`, name ->
         the voltage the outside holds a pin at, as an ADC converts it.
@@ -1500,6 +1511,15 @@ class BoardSession:
         out is held at nothing, and the description's `hold_volts` says what
         a floating pin converts to. Called with every drive on a description
         that has one, with an empty map where `volts` is None.
+
+        **`devices` is a third map** (OH-161 step 5), id -> `{"part":
+        "MCP9808", "sda": pad, "scl": pad, "vdd": volts, "address_pins":
+        {"A0"|"A1"|"A2": "high"|"low"}, "celsius": degrees}`, again a whole
+        statement. The id is the bench's own: a part is kept across drives
+        under it (its pointer survives), reset when the id leaves the map or
+        its `vdd` falls below VPOR, and its straps are read again every
+        drive. The description's `hold_bus` is told which pads each is on. A
+        description with no `hold_bus` refuses any device, by name.
 
         `ValueError`, naming the values, for a level that is none of the
         three, a voltage that is not a finite number of 0 V or more or is an
@@ -1577,6 +1597,7 @@ class BoardSession:
                     f"GPIO{gpio}, held at {held[gpio]!r} and {value!r} V")
             held[gpio] = as_float
             held_by[gpio] = label
+        wired = self._wired_devices(devices, gpios)
         # **The voltages before the levels.** Each of the two checks every
         # GPIO before it changes anything, so whichever goes first refuses
         # with nothing applied; the second refusing after the first applied
@@ -1590,7 +1611,104 @@ class BoardSession:
         if holder is not None:
             holder(self.cpu, held)
         driver(self.cpu, driven)
-        self.inputs.append((self.retired, dict(levels), dict(volts)))
+        bus_holder = getattr(self.runtime.description, "hold_bus", None)
+        if bus_holder is not None:
+            bus_holder(self.cpu, [(sda, scl, part) for sda, scl, part in wired.values()])
+        self.devices = {name: part for name, (_sda, _scl, part) in wired.items()}
+        self.inputs.append((self.retired, dict(levels), dict(volts),
+                            copy.deepcopy(dict(devices or {}))))
+
+    #: What a posted device may be, by its `part`.
+    DEVICE_PARTS = ("MCP9808",)
+
+    def _wired_devices(self, devices: typing.Mapping[str, typing.Mapping[str, object]] | None,
+                       gpios: typing.Mapping[str, int],
+                       ) -> dict[str, tuple[int, int, mcp9808.Mcp9808]]:
+        """Validate every device and build the parts to wire, touching
+        nothing: id -> (sda_gpio, scl_gpio, part). A part already kept under
+        the id is copied and held anew, so a refusal here leaves the
+        session's parts as they were."""
+        devices = {} if devices is None else devices
+        if not isinstance(devices, typing.Mapping):
+            raise ValueError(
+                f"{self.board}: devices must map a bench id to a device, got {devices!r}")
+        if devices and getattr(self.runtime.description, "hold_bus", None) is None:
+            raise ValueError(
+                f"{self.board}: its description has no I2C bus, so no device can be "
+                f"wired to its pads: {sorted(map(str, devices))!r}")
+        wired: dict[str, tuple[int, int, mcp9808.Mcp9808]] = {}
+        for name, device in devices.items():
+            where = f"{self.board}: device {name!r}"
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"{self.board}: a device id is a non-empty string, got {name!r}")
+            if not isinstance(device, typing.Mapping):
+                raise ValueError(f"{where} must be an object, got {device!r}")
+            if device.get("part") not in self.DEVICE_PARTS:
+                raise ValueError(
+                    f"{where} is part {device.get('part')!r}; the parts are "
+                    f"{list(self.DEVICE_PARTS)}")
+            pads = []
+            for field in ("sda", "scl"):
+                label = device.get(field)
+                if not isinstance(label, str) or label not in gpios:
+                    raise ValueError(
+                        f"{where} has {field} {label!r}; the pads that reach a GPIO are "
+                        f"{sorted(gpios)}")
+                pads.append(gpios[label])
+            if pads[0] == pads[1]:
+                raise ValueError(
+                    f"{where} has sda {device['sda']!r} and scl {device['scl']!r} on "
+                    f"one GPIO, {pads[0]}")
+            vdd, celsius = (self._finite(where, field, device.get(field))
+                            for field in ("vdd", "celsius"))
+            if vdd < 0:
+                raise ValueError(f"{where} has vdd {vdd!r}; a supply is 0 V or more")
+            straps = self._straps(where, device.get("address_pins"))
+            kept = self.devices.get(name)
+            part = copy.deepcopy(kept)
+            if part is None:
+                part = mcp9808.Mcp9808(straps=straps, celsius=celsius, vdd=vdd)
+            else:
+                part.hold(straps=straps, celsius=celsius, vdd=vdd)
+            wired[name] = (pads[0], pads[1], part)
+        for first, (sda, scl, part) in wired.items():
+            for second, (other_sda, other_scl, other) in wired.items():
+                if first < second and (sda, scl) == (other_sda, other_scl) \
+                        and part.address == other.address:
+                    raise ValueError(
+                        f"{self.board}: devices {first!r} and {second!r} are both at "
+                        f"address {part.address:#04x} on the same pads")
+        return wired
+
+    @staticmethod
+    def _finite(where: str, field: str, value: object) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{where} has {field} {value!r}; it is a finite number")
+        try:
+            as_float = float(value)
+        except OverflowError as error:
+            raise ValueError(f"{where} has {field} {value!r}, which no float can hold") from error
+        if not math.isfinite(as_float):
+            raise ValueError(f"{where} has {field} {value!r}; it is a finite number")
+        return as_float
+
+    @staticmethod
+    def _straps(where: str, pins: object) -> int:
+        """A2 A1 A0 as the number the part takes. An open pin is no level, so
+        the part has no address and the drive is refused (design: an open
+        address pin makes the part unanswerable, not posted)."""
+        if not isinstance(pins, typing.Mapping) or set(pins) != {"A0", "A1", "A2"}:
+            raise ValueError(
+                f"{where} has address_pins {pins!r}; they are A0, A1 and A2, each "
+                f"'high' or 'low'")
+        straps = 0
+        for number, pin in enumerate(("A0", "A1", "A2")):
+            if pins[pin] not in ("high", "low"):
+                raise ValueError(
+                    f"{where} has address pin {pin} {pins[pin]!r}; it is 'high' or "
+                    f"'low', and an open pin leaves the part with no address")
+            straps |= (pins[pin] == "high") << number
+        return straps
 
     def run(self, budget: int) -> RunResult:
         """Up to `budget` instructions, stopping where the core does.

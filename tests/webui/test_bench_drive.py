@@ -525,7 +525,7 @@ def test_the_page_drives_a_sketch_through_the_server(tmp_path):
             directory.mkdir()
             got = run_page(directory, END_TO_END, {
                 "server": base, "board": board, "input": pin_in, "output": pin_out})
-            record = [levels.get(pin_in) for _, levels, _volts
+            record = [levels.get(pin_in) for _, levels, _volts, _devices
                       in server.RequestHandlerClass.boards.session.inputs]
             watched[board] = (got["seen"], got["warned"], record)
     finally:
@@ -635,7 +635,7 @@ def test_the_page_holds_a_voltage_a_sketch_converts_through_the_server(tmp_path)
             directory.mkdir()
             got = run_page(directory, ANALOG_END_TO_END,
                            {"server": base, "board": board, "input": pad})
-            record = [volts.get(pad) for _, _levels, volts
+            record = [volts.get(pad) for _, _levels, volts, _devices
                       in server.RequestHandlerClass.boards.session.inputs]
             watched[board] = (got["seen"], got["warned"], record)
     finally:
