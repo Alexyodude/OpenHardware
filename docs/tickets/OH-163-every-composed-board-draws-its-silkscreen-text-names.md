@@ -15,6 +15,8 @@ touches:
 - tests/rules/test_import_board.py
 - tools/compose_board_3d.py
 - tests/rules/test_compose_board_3d.py
+- tools/import_3d_model.py
+- tests/rules/test_import_3d_model.py
 ---
 
 Twenty-five of twenty-six boards draw a vendor file or a board composed from the vendor's PCB, every placement is drawn or refused with a reason (OH-150), and what a person sees is still short of a photograph in four measurable ways. This ticket is those four, counted from `python tools/compose_board_3d.py --check` on 2026-09-04 (11 composed boards) and from the shipped .glb files.
@@ -172,3 +174,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-15:** Takes back tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py from OH-199 (slice 1 merged). For this ticket's importer, from OH-199: write_index lists every entry with file None where no .glb is on disk, while the composer now leaves a skipped board out, and an import_3d_model.py --all run re-indexes a stale .glb by file presence.
 
 **Note 2026-10-15:** Lends tools/import_3d_model.py and tests/rules/test_import_3d_model.py to OH-161 (step 5 slice 4d: the MCP9808's MSOP-8 PARTS row, its leads named from KiCad's footprint); they come back when slice 4d lands.
+
+**Note 2026-10-15:** 2026-10-15: takes back tools/import_3d_model.py and tests/rules/test_import_3d_model.py from OH-161 (slice 4d merged, master 7b81ee3). From OH-161's review: part_pads parses the footprint twice after the pin check, and the MSOP-8 STEP is fetched from KiCad master without a pin.
