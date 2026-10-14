@@ -13,6 +13,8 @@ touches:
 - tools/import_pindefs.py
 - tests/rules/test_import_pindefs.py
 - tests/rules/test_inventory.py
+- webui/static/board3d-panel.js
+- tests/webui/test_board3d.py
 ---
 
 `chip_pin` answers two different questions with one field, and 153 pads are answered wrongly by the half nobody meant.
@@ -332,3 +334,5 @@ LEFT is as the slice 2 note says, with one item added. A pad its footprint names
 **Note 2026-10-14:** 2026-10-14 loans back from OH-171 (done): tools/import_pindefs.py, tests/rules/test_import_pindefs.py, tests/rules/test_inventory.py.
 
 **Note 2026-10-15:** Lends webui/static/board3d-panel.js and tests/webui/test_board3d.py to OH-161 (step 5 slice 4c: the bench panel's temperature field for an MCP9808 and the part's served view); they come back when slice 4c lands.
+
+**Note 2026-10-15:** 2026-10-15: takes back webui/static/board3d-panel.js and tests/webui/test_board3d.py from OH-161 (slice 4c merged: the bench panel's temperature field and served view, rebuildSoon under a press, pointer Set, blur and visibilitychange).
