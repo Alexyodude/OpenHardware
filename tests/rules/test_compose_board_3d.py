@@ -919,11 +919,9 @@ EXPLAINS: dict[str, set[str]] = {
         "JST_1x02_P2.0mm_Horizontal_SMD", "USB-C_16",
         "microSD_Friction_Fit_Common", "WS2812_2020",
         "Push_SMD_4.6x2.8mm_h2.5mm"},
-    # The STM32C5 itself, its flash and its USB socket (OH-231): the chip's
-    # exposed pad is not any published 7 x 7 mm part's, and the other two are
-    # parts nobody publishes a body of. The jumper is NO_BODY, so not here.
-    "XIAO-XIAO STM32C5-SMD": {
-        "QFN48-0.5-7X7MM", "USON8-0.8-3X3X0.55MM", "USB2.0-TYPE-C_short"},
+    # The STM32C5 itself (OH-231): its exposed pad is not any published 7 x 7
+    # mm part's. The jumper is NO_BODY, so not here.
+    "XIAO-XIAO STM32C5-SMD": {"QFN48-0.5-7X7MM"},
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
 # same placements, same absences -- so the entries are derived the same way
@@ -1578,8 +1576,8 @@ def test_the_two_usb_c_land_patterns_are_given_different_receptacles():
     """
     usb = {c.package: c.model for c in compose.CORRESPONDENCE
            if c.package.startswith("USB2.0-TYPE-C")}
-    assert len(usb) == 2, usb
-    assert len(set(usb.values())) == 2, (
+    assert len(usb) == 3, usb  # the XIAO STM32C5's `_short` land joined (OH-231)
+    assert len(set(usb.values())) == 3, (
         f"both land patterns share {usb} -- they are two different parts, and "
         f"the one with two board locks is not the one with four shell tabs"
     )
@@ -2292,7 +2290,7 @@ def test_the_modelled_receptacles_are_drawn_and_marked_as_modelled():
     """Two land patterns, two meshes, both built here rather than fetched."""
     usb = [c for c in compose.CORRESPONDENCE
            if c.package.startswith("USB2.0-TYPE-C")]
-    assert len(usb) == 2, usb
+    assert len(usb) == 3, usb  # the XIAO STM32C5's `_short` land joined (OH-231)
     for component in usb:
         assert component.modelled is True, component.package
         assert component.library == "modelled", component.package
@@ -4098,7 +4096,7 @@ def test_the_usb_c_shell_is_an_obround_and_not_a_box():
                 f"{corner} of the envelope its vendor states, so its ends are "
                 f"square and it is not a Type-C"
             )
-    assert checked == 2, f"{checked} sockets are built, and there are two"
+    assert checked == 3, f"{checked} sockets are built, and there are three"
 
 
 def test_rounding_the_shell_did_not_move_the_part():
@@ -10279,17 +10277,19 @@ def test_the_xiao_stm32c5_thickness_is_what_its_own_file_states():
 
 def test_the_xiao_stm32c5_draws_what_is_published_and_refuses_the_rest_by_name():
     """R0402, the 32 kHz crystal and the CAN transceiver are drawn from KiCad
-    models; the MCU is refused (no published 7 x 7 mm part has its exposed
-    pad), as are the flash and the USB socket, each with a reason."""
+    models, the flash and the USB socket from `model_from_datasheet`; the MCU
+    is refused (no published 7 x 7 mm part has its exposed pad) with a reason."""
     spec = _stm32c5_spec()
     assert spec is not None, f"{STM32C5} is not composed"
     if not spec.layout.is_file():
         pytest.skip(f"SKIPPED: {spec.layout.name} is not fetched. Run: {spec.fetch_with}")
     rows = {c.package for c in compose.CORRESPONDENCE}
     packages = {e.package for e in compose.read_layout(spec.layout).elements}
-    for drawn in ("R0402", "X2-SMD-2.0X1.2MM", "VSON-0.65-3X3X1MM"):
+    for drawn in ("R0402", "X2-SMD-2.0X1.2MM", "VSON-0.65-3X3X1MM",
+                  "USON8-0.8-3X3X0.55MM", "USB2.0-TYPE-C_short"):
         assert drawn in packages and drawn in rows, drawn
-    for refused in ("QFN48-0.5-7X7MM", "USON8-0.8-3X3X0.55MM", "USB2.0-TYPE-C_short"):
+        assert drawn not in compose.ABSENT, drawn
+    for refused in ("QFN48-0.5-7X7MM",):
         assert refused in packages and refused not in rows, refused
         assert refused in compose.ABSENT, refused
 

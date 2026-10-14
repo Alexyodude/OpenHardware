@@ -881,6 +881,23 @@ CORRESPONDENCE: tuple[Component, ...] = (
         modelled=True,
     ),
     Component(
+        "USON8-0.8-3X3X0.55MM", "modelled", "USON8-0.8-3X3X0.55MM",
+        "MODELLED, not matched: the XIAO STM32C5's PY25Q128HA flash, a 3 x 3 "
+        "mm moulded body whose name states the 0.55 mm height and whose "
+        "F.Fab outline agrees with its 3 x 3. OH-231.",
+        modelled=True,
+    ),
+    Component(
+        "USB2.0-TYPE-C_short", "modelled", "USB2.0-TYPE-C_short",
+        "MODELLED, not matched: the XIAO STM32C5's USB-C receptacle, whose "
+        "Description states 7.35 x 8.94 x 3.25 mm, against an F.Fab of 6.858 x "
+        "8.992 mm: the width agrees and the length is 0.49 mm apart, within "
+        "the tolerance `socket_geometry` allows. "
+        "Neither published 16-pin receptacle is 7.35 mm deep. No turn: the "
+        "model is built in the vendor footprint's own frame. OH-231.",
+        modelled=True,
+    ),
+    Component(
         "X2SON4-0.625-1x1x0.6mm", "modelled", "X2SON4-0.625-1x1x0.6mm",
         "MODELLED, not matched: SGMICRO's SGM2040 LDO, a 1 mm square "
         "moulded body whose F.Fab and courtyard both measure exactly "
@@ -2385,28 +2402,6 @@ ABSENT: dict[str, str] = {
         "drawing one would put a model name in the .glb that is not the "
         "chip's, the QFN-56 against QFN-60 argument. Left off rather than "
         "drawn near."
-    ),
-    "USON8-0.8-3X3X0.55MM": (
-        "U7 on the XIAO STM32C5, the PY25Q128HA flash, whose footprint places "
-        "no model: ten pads spanning 2.600 x 2.400 mm. KiCad's Package_SON "
-        "holds `Microchip_USON-10-1EP_3x3mm_P0.5mm_EP1.8x2.5mm` (another "
-        "part's pad), `WSON-8-1EP_3x3mm_P0.5mm_EP1.6x2.0mm`, and 3 x 2 mm "
-        "and smaller USON-8s, and no 3 x 3 mm USON-8 that the footprint "
-        "states. **Its name states the whole body, 3 x 3 x 0.55 mm, so this "
-        "is the OH-153 kind of absence and not an honest one**: it wants a "
-        "`SLABS` entry in tools/model_from_datasheet.py, which OH-231 did "
-        "not hold when this was written. Refused until that entry is made."
-    ),
-    "USB2.0-TYPE-C_short": (
-        "USB1 on the XIAO STM32C5, Seeed's `ST-USB-Y1016`, a 12+4 pin "
-        "receptacle whose model is on a drive nobody else has. KiCad's "
-        "Connector_USB holds two 16-pin Type-C receptacles, the Amphenol "
-        "12401610E4-2A and the GCT USB4105, each a named part of another "
-        "land. **Its Description states the whole envelope, 7.35 x 8.94 x "
-        "3.25 mm, so this is the OH-153 kind of absence and not an honest "
-        "one**: it wants a `SOCKETS` entry in tools/model_from_datasheet.py, "
-        "which OH-231 did not hold when this was written. Refused until "
-        "that entry is made."
     ),
     "2P-SMD-SHORT_Larger": (
         "JP1 on the XIAO STM32C5, a solder jumper: two 1.6 x 1.2 mm pads "

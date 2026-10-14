@@ -713,6 +713,21 @@ SLABS: tuple[ModelledSlab, ...] = (
             "KiCad's library is under 3.2 mm."
         ),
     ),
+    ModelledSlab(
+        package="USON8-0.8-3X3X0.55MM",
+        pcb=REPO / "third_party" / "seeed-xiao-stm32c5" / "XIAO STM32C5.kicad_pcb",
+        colour="#262525",
+        colour_source=_MOULDED_IC,
+        why_not_fetched=(
+            "the XIAO STM32C5's U7, a PY25Q128HA 128 Mbit SPI NOR flash, "
+            "whose footprint places no model. Ten pads spanning 2.6 x 2.4 mm "
+            "and a name that states the body, 3 x 3 x 0.55 mm. KiCad's "
+            "Package_SON, listed 2026-10-14, holds "
+            "`Microchip_USON-10-1EP_3x3mm_P0.5mm_EP1.8x2.5mm`, a different "
+            "part's pad, `WSON-8-1EP_3x3mm_P0.5mm_EP1.6x2.0mm`, and 3 x 2 mm "
+            "and smaller USON-8s, so there is no 3 x 3 mm USON-8 to match."
+        ),
+    ),
 )
 
 
@@ -944,6 +959,52 @@ SOCKETS: tuple[ModelledSocket, ...] = (
             "of them is 0.43 mm too long and the one this land pattern needs "
             "-- it is the two-board-lock part, see OH-101 -- is 3.15 mm too "
             "long."
+        ),
+    ),
+    ModelledSocket(
+        package="USB2.0-TYPE-C_short",
+        pcb=REPO / "third_party" / "seeed-xiao-stm32c5" / "XIAO STM32C5.kicad_pcb",
+        cited={
+            "opening_width": (8.34, (
+                "the USB Type-C specification's plug interface, as for the "
+                "lands above and for the same reason"
+            )),
+            "opening_height": (2.56, (
+                "the same interface's height. On this part's 8.94 x 3.25 mm "
+                "envelope it leaves 0.30 mm of folded sheet at the sides and "
+                "0.345 above and below, as for the 31C-F land above"
+            )),
+            "terminal": (0.20, (
+                "how THICK a solder tail is drawn, as above: under the "
+                "connector, against the board, measured by nothing"
+            )),
+            "post_depth": (1.0, (
+                "how far the four shell posts stand below the board, which is "
+                "how far `compose_board_3d.leads_of` has to see them"
+            )),
+            "tongue_width": (6.70, (
+                "the paddle inside the opening, as for the lands above: a "
+                "drawing quantity rather than a measurement, 1.64 mm inside "
+                "an opening the standard fixes"
+            )),
+            "tongue_thickness": (0.70, (
+                "the same paddle's thickness, and the same standing: a drawing "
+                "quantity inside a cavity that nothing enters"
+            )),
+            "tongue_setback": (1.00, (
+                "how far behind the shell's lip the paddle's front edge sits, "
+                "as above: drawn so the paddle and the cavity do not share "
+                "the one face anybody looks at"
+            )),
+        },
+        why_not_fetched=(
+            "the XIAO STM32C5's USB1, Seeed's `ST-USB-Y1016` "
+            "(`Y:/01_Cadence_Library/02_PCB_Library/3D/ST-USB-Y1016.stp`, a "
+            "drive on somebody's desk). Its Description states "
+            "`7.35*8.94*3.25mm`, and KiCad's two 16-pin receptacles, listed "
+            "2026-10-14, are the GCT USB4105 at 7.78 mm deep and Amphenol's "
+            "12401610E4-2A at 10.50, against 7.35 here: 0.43 and 3.15 mm "
+            "too long."
         ),
     ),
 )
