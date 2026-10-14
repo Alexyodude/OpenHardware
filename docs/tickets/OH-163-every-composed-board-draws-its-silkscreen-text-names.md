@@ -6,15 +6,8 @@ status: open
 priority: P2
 created: '2026-09-04'
 touches:
-- tools/kicad.py
-- tests/rules/test_kicad.py
-- tools/eagle.py
 - tools/model_from_datasheet.py
 - tests/rules/test_import_board.py
-- tools/import_3d_model.py
-- tests/rules/test_import_3d_model.py
-- tools/compose_board_3d.py
-- tests/rules/test_compose_board_3d.py
 - PROVENANCE.md
 ---
 
@@ -147,3 +140,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-14:** PROVENANCE.md lent to OH-229 for its review fix round (a 'Fetched, never tracked: Adafruit_CAD_Parts' section beside the newstroke one); it comes back when OH-229 closes.
 
 **Note 2026-10-14:** 2026-10-14: OH-229 is done; tools/compose_board_3d.py, tests/rules/test_compose_board_3d.py and PROVENANCE.md come back from it.
+
+**Note 2026-10-14:** 2026-10-14: lends tools/compose_board_3d.py, tools/kicad.py, tools/import_3d_model.py and their three tests to OH-231 (step 3, composing the XIAO STM32C5 from Seeed's KiCad PCB), and tools/eagle.py to OH-235 (EAGLE curved outline wires); each comes back when its borrower closes.
