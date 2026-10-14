@@ -42,7 +42,6 @@ touches:
 - tests/webui/sparkfun_qwiic_pocket_esp32c6/pocket_blink.bin
 - tests/webui/sparkfun_qwiic_pocket_esp32c6/pocket_blink.ino
 - tests/webui/esp32_timing.py
-- webui/boards/rp2350.py
 - core/cortexm0/abi.py
 - webui/api.py
 - webui/static/board3d.js
@@ -53,7 +52,6 @@ touches:
 - core/riscv32/**
 - tests/riscv32/**
 - webui/devices/**
-- webui/static/emulator.js
 - tests/webui/test_mcp9808.py
 - tests/webui/test_pin_view.py
 - webui/compile.py
@@ -850,3 +848,5 @@ CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: opt
 **Note 2026-10-15:** 2026-10-15: slice 4c merged; returns webui/static/board3d-panel.js and tests/webui/test_board3d.py to OH-172. Left from its confirm review (LOW): visibilitychange clears presses even when the tab becomes visible (guard with document.hidden); the flush timeout renders unconditionally, safe only while the panel is never torn down. Still open from 4c: poll-vs-refetch ordering needs a sequence number from emulator.js; a state poll on a running board rebuilds the bench every tick, so a click on remove can be lost; the page-reload part-id question.
 
 **Note 2026-10-15:** 2026-10-15: the browser watch (checklist in the 4c note) was NOT done: the gstack browse skill is not installed in this session (the Skill tool answers 'Unknown skill: browse' in the main session and in a subagent), and CLAUDE.md allows no other browser, so it is left for the owner. The emulator server itself was started on port 8099 and answered 200, then stopped by PID. What stands in for it: test_bench_drive's TEMPERATURE_END_TO_END drives the page's own scene functions on the C3, C5 and C6 XIAOs and watches TA move 25.0 -> 30.0 -> -10.5 C.
+
+**Note 2026-10-15:** 2026-10-15: lends webui/static/emulator.js and webui/boards/rp2350.py to OH-210 for its items 1 and 6; they come back when those land.
