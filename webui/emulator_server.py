@@ -147,6 +147,7 @@ import json
 import pathlib
 import sys
 import threading
+import time
 import urllib.parse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -208,6 +209,9 @@ MAX_IMAGE_BYTES = 8 << 20
 #: small JSON object and matters now that one route exists to be handed a
 #: file.
 MAX_BODY_BYTES = 16 << 20
+
+#: How long a refusal waits for the rest of a body it will not use (OH-166).
+DRAIN_SECONDS = 5.0
 
 #: Which HTTP status each of `api.REASONS` deserves.
 #:
@@ -906,15 +910,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         if not self._origin_is_allowed():
+            self._discard_body()
             return
         parsed = urllib.parse.urlparse(self.path)
         if not parsed.path.startswith("/api/"):
             self._send(404, b"not found", "text/plain; charset=utf-8")
+            self._discard_body()
             return
         length = int(self.headers.get("Content-Length") or 0)
         if length > MAX_BODY_BYTES:
             # Checked from the header, before a byte is allocated. Reading a
             # declared length and then judging it is the thing this avoids.
+            #
+            # **Not drained, unlike the two refusals above (OH-166).** Those
+            # are answers about a body of a size this server was willing to
+            # accept, so it can afford to read it out. This one is an answer
+            # about a size it is not, and a drain bounded at MAX_BODY_BYTES
+            # would still leave the tail unread for the reset. The connection
+            # is closed so that the unread body is not parsed as the next
+            # request; a client that goes on sending past a 413 is told so by
+            # the reset, which is what it has earned.
+            self.close_connection = True
             self._json(413, {"error": f"body of {length} bytes exceeds "
                                       f"{MAX_BODY_BYTES}"})
             return
@@ -935,6 +951,52 @@ class Handler(http.server.BaseHTTPRequestHandler):
                   "POST")
 
     # --- helpers ------------------------------------------------------------
+
+    def _discard_body(self) -> None:
+        """Read out and drop the declared body, after a refusal has been sent.
+
+        **Why a refusal does this (OH-166 item 3).** A refusal is decided from
+        the headers, so the body is still on its way when the reply goes out.
+        Closing a socket that holds unread data sends RST on Windows, and an
+        RST discards whatever the client had not yet read, so a client still
+        writing saw `ConnectionAbortedError` in place of the 403. Reading the
+        body to its declared end first lets the close be an ordinary FIN.
+
+        **Why this one and not "send, `shutdown(SHUT_WR)`, drain".** The
+        server's own `shutdown_request` already does that shutdown after the
+        handler returns, so the only part missing was the drain, and it is
+        the same drain either way. Doing it after the reply rather than before
+        puts the 403 in front of a client that reads while it writes.
+
+        Bounded twice: by `MAX_BODY_BYTES` (a declared length above that is
+        the 413 path's, not this one's) and by `DRAIN_SECONDS` in total, so a
+        client that declares a body and then sends nothing holds a thread for
+        five seconds and not forever. The connection is closed afterwards in
+        every case: whatever was not read would otherwise be parsed as the
+        next request on a keep-alive connection.
+        """
+        self.close_connection = True
+        try:
+            remaining = min(int(self.headers.get("Content-Length") or 0),
+                            MAX_BODY_BYTES)
+        except ValueError:
+            return  # not a number: nothing to say how much is coming
+        deadline = time.monotonic() + DRAIN_SECONDS
+        try:
+            while remaining > 0:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return
+                self.connection.settimeout(left)
+                chunk = self.rfile.read1(min(remaining, 65536))
+                if not chunk:
+                    return
+                remaining -= len(chunk)
+        except (TimeoutError, *HUNG_UP):
+            # The reply is already sent and the connection is about to close,
+            # so there is nobody left to tell: the client went away, or
+            # stopped sending, and either way the drain has nothing more to do.
+            return
 
     def _api(self, route: str, query: dict[str, list[str]],
              payload: dict[str, object], verb: str) -> None:

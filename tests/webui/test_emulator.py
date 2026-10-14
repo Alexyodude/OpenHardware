@@ -427,6 +427,97 @@ def test_the_pages_own_origin_is_allowed(live_server):
     assert get(live_server, "/api/state", origin=f"http://127.0.0.1:{port}")
 
 
+# --- a refusal reaches a client that is still sending (OH-166 item 3) ------------
+
+
+#: Large enough that the body cannot sit in the socket buffers on either side,
+#: and well under `MAX_BODY_BYTES` so it is the Origin and the path that are
+#: refused and not the size.
+REFUSED_BODY_BYTES = 2_000_000
+
+
+def _post_in_pieces(base: str, path: str, origin: str | None) -> str:
+    """POST a body in pieces the way a browser does, headers first, and return
+    the status line the server answered with, or the name of the error.
+
+    Headers and body are separate writes, with the body in chunks, because the
+    failure needs the server to have decided before the client has finished
+    sending: a client that writes everything in one `sendall` into an idle
+    loopback buffer finishes before the server has looked at anything."""
+    import socket
+
+    host, port = base.removeprefix("http://").rsplit(":", 1)
+    body = b'{"x":"' + b"a" * REFUSED_BODY_BYTES + b'"}'
+    head = [f"POST {path} HTTP/1.1", f"Host: {host}:{port}",
+            "Content-Type: application/json",
+            f"Content-Length: {len(body)}"]
+    if origin:
+        head.append(f"Origin: {origin}")
+    wire = ("\r\n".join(head) + "\r\n\r\n").encode()
+    with socket.create_connection((host, int(port)), timeout=10) as client:
+        try:
+            client.sendall(wire)
+            for start in range(0, len(body), 65536):
+                client.sendall(body[start:start + 65536])
+            reply = b""
+            while b"\r\n" not in reply:
+                piece = client.recv(65536)
+                if not piece:
+                    break
+                reply += piece
+        except OSError as exc:
+            return type(exc).__name__
+    return reply.split(b"\r\n")[0].decode("latin-1") or "EMPTY"
+
+
+def _refusals_in_a_loop(base: str, path: str, origin: str | None,
+                        status_line: str) -> None:
+    """One request is a coin the machine flips; twenty is a rate. The error text
+    carries the rate and what each failure was."""
+    attempts = 20
+    answers = [_post_in_pieces(base, path, origin) for _ in range(attempts)]
+    wrong = [a for a in answers if a != status_line]
+    assert not wrong, (
+        f"{len(wrong)}/{attempts} requests to {path} with origin {origin!r} "
+        f"did not read {status_line!r}: {sorted(set(wrong))}")
+
+
+def test_a_refusal_reaches_a_client_still_sending_its_body(live_server):
+    """`do_POST` refuses on Origin before it reads the body, so it answers
+    with the declared body unread and then closes. Closing a socket that holds
+    unread data sends RST on Windows, which discards what the client had not
+    yet read, and the client sees `ConnectionAbortedError` where the 403 was.
+    This is `test_board_run.py::test_an_upload_from_another_origin_is_refused`
+    failing under load, made to fail without it. A 404 for a path outside
+    `/api/` is refused at the same point with the same body unread."""
+    _refusals_in_a_loop(live_server, "/api/board/load", "http://evil.example",
+                        "HTTP/1.1 403 Forbidden")
+    _refusals_in_a_loop(live_server, "/not-the-api", None,
+                        "HTTP/1.1 404 Not Found")
+
+
+def test_an_oversized_body_is_refused_from_its_header_and_the_connection_closes(
+        live_server):
+    """The 413 deliberately never reads the declared length, so it cannot be
+    made safe for a client still sending. What it can do is not leave the
+    connection open to parse the unsent body as the next request: after the
+    413 the server closes, and a client that sent nothing reads end of stream."""
+    import socket
+
+    host, port = live_server.removeprefix("http://").rsplit(":", 1)
+    wire = (f"POST /api/board/load HTTP/1.1\r\nHost: {host}:{port}\r\n"
+            f"Content-Length: {emulator_server.MAX_BODY_BYTES + 1}\r\n\r\n").encode()
+    with socket.create_connection((host, int(port)), timeout=10) as client:
+        client.sendall(wire)
+        reply = b""
+        while True:
+            piece = client.recv(65536)
+            if not piece:
+                break  # the server closed: end of stream, not a timeout
+            reply += piece
+    assert reply.startswith(b"HTTP/1.1 413"), reply[:80]
+
+
 # --- a client that goes away is not an error --------------------------------
 
 
