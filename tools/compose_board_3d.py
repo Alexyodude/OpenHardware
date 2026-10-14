@@ -228,14 +228,15 @@ ADAFRUIT_CAD = ("https://raw.githubusercontent.com/adafruit/Adafruit_CAD_Parts/"
 #: Adafruit's whole-board STEP of the QT Py ESP32-C3 in that repository, and
 #: the `(bytes, sha256)` it was measured as on 2026-10-13: the file the USB-C
 #: socket (OH-228) and the SK6805 LED (OH-229) are drawn from, and the one the
-#: QT Py's thickness is read from.
+#: QT Py's thickness constant is held to, by the thickness test.
 ADAFRUIT_QTPY_STEP = (f"{ADAFRUIT_CAD}/5405%20QTPy%20ESP32%20C3/"
                       f"5405%20QTPy%20ESP32%20C3.step")
 ADAFRUIT_QTPY_PINNED = (
     1_877_611, "a220e20db7132d044a640680df0789c24ee89d7aa55e74a156cecac4bc25ebe8")
 
 #: The same for the KB2040's, measured 2026-10-13 (OH-229): the file its
-#: flash (U5) is drawn from, and the one its thickness is read from.
+#: flash (U5) is drawn from, and the one its thickness constant is held to,
+#: by the thickness test.
 ADAFRUIT_KB2040_STEP = (f"{ADAFRUIT_CAD}/5302%20KB2040/5302%20KB2040.step")
 ADAFRUIT_KB2040_PINNED = (
     2_161_058, "bc990ea632850b47e18d6c8fcf9ffe5ca101bacc450d628d4d366b0a7890ae57")
@@ -1265,7 +1266,8 @@ CORRESPONDENCE: tuple[Component, ...] = (
         "0.8 mm pitch, 3.70 mm between the rows, round a 2.0 x 3.0 mm "
         "exposed pad, under a 4 x 4 mm body. ADAFRUIT's own model of it, "
         "out of their MIT-licensed whole-board STEP of the KB2040, the "
-        "file its thickness is read from as well. Measured 2026-10-13 it "
+        "file its thickness constant is held to, by the thickness test, as "
+        "well. Measured 2026-10-13 it "
         "is 4.002 x 4.000 x 0.800 mm, its leads reaching to x +/-2.001. "
         "Its turn is decided by Adafruit's own pin-1 dot: at 0 the model's "
         "asymmetric feature lands 0.427 mm from it, at the other three "
@@ -2706,16 +2708,17 @@ MANIFEST_STATED: dict[str, dict[str, object]] = {
     # files state none -- no layer-51 note -- so these were drawn at the
     # assumed 1.6 mm until then. A constant per board and not a reading,
     # because a composition is made at import and a STEP needs OpenCASCADE and
-    # a download; `thickness_step` is the `(url, (bytes, sha256))` the number
-    # was read from, and a test reads it back from that file. Neither board
+    # a download; `thickness_step` is the URL of the STEP the number was
+    # taken from, and a test reads it back from that file (the row that draws
+    # from the URL carries its pin). Neither board
     # states a mask colour, so both stay `BOARD_MASK`.
     "Adafruit QT Py ESP32-C3": {
         "thickness_mm": 1.57,
-        "thickness_step": (ADAFRUIT_QTPY_STEP, ADAFRUIT_QTPY_PINNED),
+        "thickness_step": ADAFRUIT_QTPY_STEP,
     },
     "Adafruit KB2040": {
         "thickness_mm": 1.57,
-        "thickness_step": (ADAFRUIT_KB2040_STEP, ADAFRUIT_KB2040_PINNED),
+        "thickness_step": ADAFRUIT_KB2040_STEP,
     },
     "SparkFun Thing Plus ESP32-C6": {
         # The note on layer 51 in the board file's own <plain> section reads

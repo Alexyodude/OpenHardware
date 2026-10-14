@@ -31,6 +31,7 @@
 #     6-pin analog header 2.54 mm off the end of the board.
 
 import dataclasses
+import hashlib
 import itertools
 import json
 import math
@@ -5270,7 +5271,11 @@ def test_a_manifest_boards_thickness_is_its_own_note_or_the_unos_stack():
         if "thickness_step" in entry:
             # Stated by the vendor's STEP rather than a note, and held to it
             # by `test_the_thickness_of_adafruits_two_boards_is_the_one_...`
-            # (OH-229).
+            # (OH-229). Its design rules still carry no stack of their own.
+            assert stack(spec.layout) == uno, (
+                f"{row.board}'s design rules carry a stack of their own; "
+                f"read its thickness from them as well as from the STEP"
+            )
             continue
         if not stated:
             assert spec.thickness_mm == _uno().thickness_mm, (
@@ -8517,6 +8522,15 @@ def _board_box(put, centre) -> tuple[float, ...]:
             *(max(v[axis] for v in points) for axis in range(3)))
 
 
+def _own_step(board: str):
+    """`(row, path)` for the whole-board STEP `MANIFEST_STATED` names for
+    `board`: the first row drawing from that URL, and where its copy is
+    cached (`cached` keys by row, so another row's copy is another file)."""
+    url = compose.MANIFEST_STATED[board]["thickness_step"]
+    row = next(c for c in compose.CORRESPONDENCE if c.step == url)
+    return row, compose.cached(row, row.url, ".step")
+
+
 def test_adafruits_led_and_flash_are_drawn_from_their_own_products_and_absent_from_none(
         capsys, monkeypatch, tmp_path):
     """**Adafruit's own SK6805 and USON8 are drawn, and nothing calls either
@@ -8614,16 +8628,20 @@ def test_each_body_adafruit_substitutes_stands_where_adafruit_put_it():
     placed = list(_adafruit_boards())
     if not placed:
         pytest.skip("SKIPPED: neither the QT Py nor the KB2040 is fetched")
+    checked = 0
     for spec, board, centre in placed:
+        _row, own_path = _own_step(spec.board)
+        if _inputs_missing(spec, board) or not own_path.is_file():
+            continue
+        checked += 1
         elements = {ref: board.element(ref)
                     for name, ref in ADAFRUIT_BODIES if name == spec.board}
         rows = {ref: compose.correspondence_for(element)
                 for ref, element in elements.items()}
         meshes = {ref: compose.component_mesh(row, compose.DEFLECTION)[0]
                   for ref, row in rows.items()}
-        last = rows[list(rows)[-1]]
         vendor = _vendor_boxes(
-            compose.cached(last, last.url, ".step"),
+            own_path,
             {f"{element.package}:{ref}" for ref, element in elements.items()})
         for ref, element in elements.items():
             where = f"{spec.board} {ref} ({element.package})"
@@ -8653,6 +8671,9 @@ def test_each_body_adafruit_substitutes_stands_where_adafruit_put_it():
                 rival = min(m for turn, m in misses.items() if turn != row.turn)
                 assert rival - misses[row.turn] > compose.TURN_MARGIN_MM, (
                     where, {t: round(m, 3) for t, m in misses.items()})
+    if not checked:
+        pytest.skip("SKIPPED: Adafruit's STEPs are not fetched; run "
+                    "tools/compose_board_3d.py")
 
 
 def test_the_thickness_of_adafruits_two_boards_is_the_one_their_own_step_states():
@@ -8662,7 +8683,13 @@ def test_the_thickness_of_adafruits_two_boards_is_the_one_their_own_step_states(
     "Board thickness:" note), which is why the number is carried and not
     read, so the constant is held to the STEP it names here.
 
-    Seen red (2026-10-13): with the QT Py's entry at 1.6.
+    **The sentence the page publishes** says it: `spec.geometry`, which
+    index.json carries as `source`, names the number and the vendor's STEP,
+    and the STEP's URL is from the library `STEP_LICENCES` records as
+    Adafruit's, MIT.
+
+    Seen red (2026-10-13): with the QT Py's entry at 1.6; with the cached
+    copy's bytes changed (the pin); and with the sentence's number dropped.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
     from tools.import_3d_model import box_of, read_product
@@ -8671,22 +8698,32 @@ def test_the_thickness_of_adafruits_two_boards_is_the_one_their_own_step_states(
               if "thickness_step" in entry}
     assert set(stated) == {"Adafruit QT Py ESP32-C3", "Adafruit KB2040"}, set(stated)
     specs = {spec.board: spec for spec in compose.COMPOSITIONS}
+    checked = 0
     for name, entry in stated.items():
         spec = specs[name]
-        url, pin = entry["thickness_step"]
+        url = entry["thickness_step"]
         assert spec.thickness_mm == entry["thickness_mm"]
         assert spec.thickness_mm != compose.MANIFEST_THICKNESS_MM
-        row = next(c for c in compose.CORRESPONDENCE if c.step == url)
-        assert row.pinned == pin, (name, row.pinned, pin)
-        compose.component_mesh(row, compose.DEFLECTION)   # fetches, verifies the pin
-        shape, _styles, _document = read_product(
-            compose.cached(row, row.url, ".step"), "Board")
+        assert (f"; the thickness, {entry['thickness_mm']} mm, from Adafruit's "
+                f"own whole-board STEP of it") in spec.geometry, spec.geometry
+        assert compose.step_licence(url) == compose.STEP_LICENCES[compose.ADAFRUIT_CAD]
+        row, step = _own_step(name)
+        if not step.is_file():
+            continue
+        checked += 1
+        data = step.read_bytes()
+        assert (len(data), hashlib.sha256(data).hexdigest()) == row.pinned, (
+            f"{step.name}: {len(data):,} bytes, and its row pins {row.pinned}")
+        shape, _styles, _document = read_product(step, "Board")
         box = box_of(shape)
         assert (box.zmin, box.zmax) == pytest.approx((0.0, spec.thickness_mm),
                                                      abs=1e-3), (name, box)
         if spec.layout.is_file():
             assert not any("Board thickness" in note for note in _plain_notes(spec.layout)), (
                 f"{name}'s own file states a thickness, which outranks the STEP's")
+    if not checked:
+        pytest.skip("SKIPPED: Adafruit's STEPs are not fetched; run "
+                    "tools/compose_board_3d.py")
 
 
 def test_nothing_else_on_adafruits_two_boards_stands_off_adafruits_own_placement():
@@ -8703,15 +8740,11 @@ def test_nothing_else_on_adafruits_two_boards_stands_off_adafruits_own_placement
     Seen red (2026-10-13): with `place` shifting U1 by 0.3 mm.
     """
     pytest.importorskip("OCP", reason="OpenCASCADE is needed to tessellate")
-    own_step = {"Adafruit QT Py ESP32-C3": "SK6805_1515",
-                "Adafruit KB2040": "USON8_4X4"}
     checked = 0
     for spec, board, centre in _adafruit_boards():
         drawn = list(_drawn(spec, board))
-        row = next(c for c in compose.CORRESPONDENCE
-                   if c.package == own_step[spec.board])
-        step = compose.cached(row, row.url, ".step")
-        if not step.is_file():
+        _row, step = _own_step(spec.board)
+        if _inputs_missing(spec, board) or not step.is_file():
             continue
         vendor = _vendor_boxes(step, {f"{e.package}:{e.name}" for e, _r in drawn})
         meshes: dict = {}
@@ -8735,7 +8768,8 @@ def test_nothing_else_on_adafruits_two_boards_stands_off_adafruits_own_placement
                     f"{off:.3f} mm from Adafruit's own body of that name")
             checked += 1
     if not checked:
-        pytest.skip("SKIPPED: no Adafruit board and STEP is fetched")
+        pytest.skip("SKIPPED: Adafruit's STEPs are not fetched; run "
+                    "tools/compose_board_3d.py")
 
 
 # --- a KiCad manifest row, read from what its own file states (OH-195) ---------
