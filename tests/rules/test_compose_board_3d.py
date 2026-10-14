@@ -832,11 +832,16 @@ def test_nothing_is_declared_absent_that_no_board_actually_has():
     the vendor files still checks those.
     """
     seen: set[str] = set()
+    fetched = False
     for spec in compose.COMPOSITIONS:
         if not spec.layout.is_file():
             continue
-        seen |= {e.package for e in compose.read_layout(spec.layout).elements}
-    if not seen:
+        fetched = True
+        # By `absent_why`, so a key that `ABSENT_ONLY_FROM` limits to one
+        # library is used only by a placement from that library (OH-199).
+        seen |= {e.package for e in compose.read_layout(spec.layout).elements
+                 if compose.absent_why(e) is not None}
+    if not fetched:
         pytest.skip("SKIPPED: no vendor layout is fetched")
     unused = [p for p in compose.ABSENT if p not in seen]
     assert not unused, (
@@ -964,8 +969,8 @@ def test_each_board_explains_the_parts_it_leaves_off():
         # own schematic refuses is explained there.
         statements = compose.statements_for(spec)
         refused = {e.package for e in board.elements
-                   if e.package in compose.ABSENT
-                   and compose.NO_BODY not in compose.ABSENT[e.package]
+                   if (why := compose.absent_why(e)) is not None
+                   and compose.NO_BODY not in why
                    and not (statements and e.name in statements
                             and statements[e.name].refused)}
         assert refused <= EXPLAINS[spec.board], (
@@ -1323,7 +1328,10 @@ def test_nothing_refused_is_a_part_this_file_could_have_drawn():
     for spec in compose.COMPOSITIONS:
         if not spec.layout.is_file():
             continue
-        placed = {e.package for e in compose.read_layout(spec.layout).elements}
+        # Refused as placed, by `absent_why` (OH-199): a package `ABSENT`
+        # limits to one library is not refused from another.
+        placed = {e.package for e in compose.read_layout(spec.layout).elements
+                  if compose.absent_why(e) is not None}
         kicad5 = spec.layout.suffix == ".kicad_pcb" and kicad.board_version(
             kicad.parse_sexp(spec.layout.read_text(encoding="utf-8"))) == kicad.KICAD5_VERSION
         if spec.layout.suffix != ".kicad_pcb" or kicad5:
@@ -1334,7 +1342,7 @@ def test_nothing_refused_is_a_part_this_file_could_have_drawn():
             # refused package whose own name states length x width x height
             # is the OH-153 kind of absence, and its reason must say that the
             # gap is the reader and not the part -- or it is a false one.
-            for package in sorted(placed & set(compose.ABSENT)):
+            for package in sorted(placed):
                 if model_from_datasheet._NAMED_BODY.search(package) is None:
                     continue
                 why = compose.ABSENT[package]
@@ -1346,7 +1354,7 @@ def test_nothing_refused_is_a_part_this_file_could_have_drawn():
                 )
                 checked += 1
             continue
-        for package in sorted(placed & set(compose.ABSENT)):
+        for package in sorted(placed):
             trial = dataclasses.replace(template, package=package,
                                         pcb=spec.layout)
             with pytest.raises(SystemExit) as raised:
@@ -1637,7 +1645,7 @@ def test_a_missing_layout_is_fetched_rather_than_only_talked_about(monkeypatch,
         layout=tmp_path / "NOT-FETCHED.kicad_pcb",
         pcb_chip="ESP32-C3",
     )
-    assert compose.compose(absent, deflection=0.05, check=True) == 3
+    assert compose.compose(absent, deflection=0.05, check=True) == compose.SKIPPED
     assert asked == ["ESP32-C3"], (
         "compose printed the instruction to fetch and did not fetch"
     )
@@ -1654,7 +1662,7 @@ def test_a_layout_nobody_can_fetch_is_only_talked_about(monkeypatch, tmp_path):
     asked: list[str] = []
     monkeypatch.setattr(compose, "fetch_pcb", lambda chip: asked.append(chip))
     absent = dataclasses.replace(_uno(), layout=tmp_path / "no.brd")
-    assert compose.compose(absent, deflection=0.05, check=True) == 3
+    assert compose.compose(absent, deflection=0.05, check=True) == compose.SKIPPED
     assert asked == []
 
 
@@ -4883,11 +4891,12 @@ def test_every_uno_package_is_drawn_or_its_absence_is_explained():
     statements = compose.statements_for(spec)
     stated_off = {e.package for e in board.elements
                   if compose.drawn_from(e, statements)[1] is not None}
-    explained = set(compose.ABSENT) | stated_off
     # A placement that puts down no pad -- the Uno's schematic frame -- is no
-    # part, and `compose` counts it apart (OH-163).
-    orphans = sorted({e.package for e in board.elements if e.pads}
-                     - mapped - explained)
+    # part, and `compose` counts it apart (OH-163). One `ABSENT` refuses is
+    # explained by `absent_why`, which asks the library too (OH-199).
+    orphans = sorted({e.package for e in board.elements
+                      if e.pads and compose.absent_why(e) is None}
+                     - mapped - stated_off)
     assert not orphans, (
         f"{orphans} are neither drawn nor explained. Add a CORRESPONDENCE "
         f"row with a measured why, or an ABSENT row with the reason -- "
@@ -4914,15 +4923,10 @@ def test_every_composed_boards_placements_are_drawn_or_explained():
         if not _fetched(spec):
             continue
         checked += 1
-        statements = compose.statements_for(spec)
-        for element in compose.read_layout(spec.layout).elements:
-            # A part its own schematic refuses is explained there (OH-187).
-            row, refused = compose.drawn_from(element, statements)
-            if ((element.pads or element.models) and not element.edge
-                    and element.package not in compose.ABSENT
-                    and row is None and refused is None):
-                orphans.setdefault(spec.board, []).append(
-                    f"{element.name} ({element.package})")
+        found = _unexplained(compose.read_layout(spec.layout).elements,
+                             compose.statements_for(spec))
+        if found:
+            orphans[spec.board] = found
     if not checked:
         pytest.skip("SKIPPED: no board layouts are fetched")
     assert not orphans, (
@@ -4930,6 +4934,42 @@ def test_every_composed_boards_placements_are_drawn_or_explained():
         f"CORRESPONDENCE row with a measured why, or an ABSENT row with the "
         f"reason"
     )
+
+
+def _unexplained(elements, statements) -> list[str]:
+    """`name (package)` of each placement that is neither drawn nor
+    explained, as `compose` decides it: a part its own schematic refuses is
+    explained there (OH-187), and one `ABSENT` refuses is explained by
+    `absent_why`, which asks the library too (OH-199) -- a package name
+    alone says another vendor's part is refused for this one's reason."""
+    found = []
+    for element in elements:
+        row, refused = compose.drawn_from(element, statements)
+        if ((element.pads or element.models) and not element.edge
+                and compose.absent_why(element) is None
+                and row is None and refused is None):
+            found.append(f"{element.name} ({element.package})")
+    return found
+
+
+def test_a_plain_header_in_absent_only_from_a_castellated_library_is_unexplained():
+    """**`ABSENT_ONLY_FROM` is part of what `ABSENT` says** (OH-199, from
+    OH-195's confirm review). A board placing KiCad's own
+    `PinHeader_1x05_P2.54mm_Vertical` from KiCad's library puts down another
+    part than the Glyph's castellated row of that name: `compose` prints it
+    no model, so the closed-world check must not count it explained."""
+    package = next(iter(compose.ABSENT_ONLY_FROM))
+    only = compose.ABSENT_ONLY_FROM[package]
+    pad = eagle.Pad("1", "thru_hole", 0.0, 0.0, 1.7, 1.7, None)
+    plain = eagle.Element("J1", "Connector_PinHeader_2.54mm", package, (pad,))
+    glyph = eagle.Element("J3", only, package, (pad,))
+    assert compose.absent_why(plain) is None
+    assert compose.absent_why(glyph) is not None
+    with mock.patch.object(compose, "CORRESPONDENCE", ()):
+        found = _unexplained([plain, glyph], None)
+    assert found == [f"J1 ({package})"], (
+        f"expected only the plain header from {plain.library!r} to be "
+        f"unexplained, got {found}")
 
 
 def test_the_pin_13_led_is_one_of_the_drawn_parts():
@@ -5437,8 +5477,8 @@ def test_every_placement_is_drawn_refused_or_padless_and_counted(capsys):
            if e.name in statements and statements[e.name].refused]
     padless = [e for e in board.elements if not e.pads and e not in off]
     absent = [e for e in board.elements
-              if e.package in compose.ABSENT and e not in off]
-    rest = [e for e in board.elements if e.pads and e.package not in compose.ABSENT
+              if compose.absent_why(e) is not None and e not in off]
+    rest = [e for e in board.elements if e.pads and compose.absent_why(e) is None
             and e not in off]
     assert padless and absent and rest, "the board no longer shows all three"
     # **A refused part and a bodyless pad are counted apart**, and which is
@@ -7712,7 +7752,7 @@ def test_each_manifest_board_counts_the_same_things_bodyless():
             continue
         statements = compose.statements_for(spec)
         absent = {e.package for e in compose.read_layout(spec.layout).elements
-                  if e.package in compose.ABSENT
+                  if compose.absent_why(e) is not None
                   and not (e.name in statements and statements[e.name].refused)}
         bodyless = {p for p in absent if compose.NO_BODY in compose.ABSENT[p]}
         assert bodyless == BODYLESS[spec.board], (spec.board, bodyless)
@@ -7985,6 +8025,16 @@ def test_compose_refuses_a_flip_on_a_mirrored_element(monkeypatch):
     if not _fetched(spec):
         pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
     row = next(c for c in compose.CORRESPONDENCE if c.package == "ESP32-C6-MINI-1")
+    # **No fetch, and the test fails if one is ever made** (OH-199). The
+    # download the ticket feared is `pads_origin`'s, of Espressif's footprint,
+    # but its only caller is `component_mesh`, which is replaced just below, so
+    # nothing here is read from the cache and a skip for an uncached file
+    # would skip a test that needs none.
+    # `test_the_flip_test_needs_no_cache_and_no_network` holds that.
+    def offline(url, *args, **kwargs):
+        raise AssertionError(f"composing fetched {url}")
+
+    monkeypatch.setattr(compose.urllib.request, "urlopen", offline)
     monkeypatch.setattr(compose, "silk_miss", lambda *args: None)
     for flip, refused in ((False, False), (True, True)):
         monkeypatch.setattr(compose, "CORRESPONDENCE",
@@ -7997,6 +8047,22 @@ def test_compose_refuses_a_flip_on_a_mirrored_element(monkeypatch):
                 compose.compose(spec, deflection=0.05, check=True)
         else:
             compose.compose(spec, deflection=0.05, check=True)
+
+
+def test_the_flip_test_needs_no_cache_and_no_network(monkeypatch, tmp_path):
+    """**The mirrored-element test fetches nothing** (OH-199, item 7). The
+    ticket supposed it downloaded Espressif's footprint when that was not
+    cached; `pads_origin` does, but it is called only by `component_mesh`, which
+    the test replaces. With `CACHE` empty and every download refused, the test
+    runs to its end, so there is no uncached file for it to skip on."""
+    spec = next(s for s in compose.COMPOSITIONS
+                if s.board == "SparkFun Qwiic Pocket ESP32-C6")
+    if not _fetched(spec):
+        pytest.skip(f"SKIPPED: not fetched; run {spec.fetch_with}")
+    monkeypatch.setattr(compose, "CACHE", tmp_path)
+    # Its own `offline` guard raises on any fetch.
+    test_compose_refuses_a_flip_on_a_mirrored_element(monkeypatch)
+    assert not list(tmp_path.iterdir()), sorted(tmp_path.iterdir())
 
 
 def test_a_body_code_is_not_a_lead_count():
@@ -8081,7 +8147,7 @@ def test_a_board_not_fetched_is_skipped_and_the_rest_still_compose(monkeypatch,
 
     def fake(spec, deflection, check):
         reached.append(spec.board)
-        return 3 if spec is first else 0
+        return compose.SKIPPED if spec is first else 0
 
     monkeypatch.setattr(compose, "COMPOSITIONS", (first, second))
     monkeypatch.setattr(compose, "MANIFEST_REFUSED", {})
@@ -8090,6 +8156,75 @@ def test_a_board_not_fetched_is_skipped_and_the_rest_still_compose(monkeypatch,
     assert reached == [first.board, second.board]
     assert f"SKIPPED 1 board(s), their files not fetched: {first.board}" in (
         capsys.readouterr().out)
+
+
+def test_a_board_that_wrote_three_bytes_is_not_a_skipped_board(monkeypatch, capsys):
+    """**`compose` returns a byte count, and 3 is one** (OH-199). `main` read
+    3 as SKIPPED, so a board that wrote three bytes would end the run 3 and
+    be listed as not fetched. The signal for a skip is not a number a count
+    can be."""
+    spec = compose.COMPOSITIONS[0]
+    monkeypatch.setattr(compose, "COMPOSITIONS", (spec,))
+    monkeypatch.setattr(compose, "MANIFEST_REFUSED", {})
+    monkeypatch.setattr(compose, "newstroke_font", lambda: pathlib.Path("font"))
+    monkeypatch.setattr(compose, "compose", lambda spec, deflection, check: 3)
+    code = compose.main(["--check", "--board", spec.board])
+    out = capsys.readouterr().out
+    assert code == 0, f"main ended {code} for a board that wrote 3 bytes: {out}"
+    assert "SKIPPED" not in out, out
+
+
+def test_a_skipped_board_is_not_served_from_the_file_an_earlier_run_left(
+        tmp_path, monkeypatch, capsys):
+    """**A skipped board is dropped from the index** (OH-199). `main` composes
+    past a board whose files are not fetched and wrote the index anyway, and
+    `write_index` lists a board by whether its `.glb` is on the disk -- so a
+    `.glb` an earlier run left was indexed, with its old contents, as that
+    board's model. It is dropped, with every board it serves, rather than
+    the whole index refused: a refusal would leave the earlier index in place,
+    which names the same stale file. Checked in a run that composes another
+    board, and in one that composes nothing, where the index used to be left
+    unwritten and so left as it was."""
+    from tools import import_3d_model
+    from tools.import_3d_model import Mesh, write_glb, write_index
+
+    skipped, other = compose.COMPOSITIONS[0], compose.COMPOSITIONS[1]
+    absent = dataclasses.replace(skipped, layout=tmp_path / "NOT-FETCHED.brd",
+                                 pcb_chip=None, schematic=None)
+    names = (absent.board, *absent.serves)
+    monkeypatch.setattr(import_3d_model, "OUT", tmp_path)
+    monkeypatch.setattr(compose, "REPO", tmp_path)   # main prints the index relative to it
+    monkeypatch.setattr(compose, "MANIFEST_REFUSED", {})
+    monkeypatch.setattr(compose, "newstroke_font", lambda: pathlib.Path("font"))
+    triangle = ([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0] * 3, [0, 1, 2])
+    real = compose.compose
+
+    def compose_other(spec, deflection, check):
+        return 1234 if spec is other else real(spec, deflection, check)
+
+    monkeypatch.setattr(compose, "compose", compose_other)
+    for specs in ((absent, other), (absent,)):
+        for spec in specs:
+            write_glb(Mesh({"#123456": triangle}),
+                      tmp_path / f"{compose._slug(spec.board)}.glb",
+                      spec.board, "an earlier run", (1.0, 1.0, 1.0),
+                      extras={"composed": True})
+        write_index(tuple((name, "chip", compose._slug(spec.board))
+                          for spec in specs for name in (spec.board, *spec.serves)))
+        monkeypatch.setattr(compose, "COMPOSITIONS", specs)
+        assert compose.main([]) == 3
+        capsys.readouterr()
+        boards = json.loads((tmp_path / "index.json").read_text(
+            encoding="utf-8"))["boards"]
+        served = {name: boards[name]["file"] for name in names if name in boards}
+        assert not served, (
+            f"{absent.board} was skipped, and the index still serves "
+            f"{served} from the file an earlier run left (run composing "
+            f"{[s.board for s in specs]})")
+        if other in specs:
+            assert boards[other.board]["file"] is not None, (
+                f"{other.board} composed and is not served: {boards[other.board]}")
 
 
 def test_a_manifest_row_in_neither_format_is_refused_by_name(capsys):
@@ -10150,7 +10285,7 @@ def test_a_board_whose_font_is_not_fetched_is_skipped_naming_it(tmp_path, monkey
 
     monkeypatch.setattr(compose.urllib.request, "urlopen", offline)
     fetch = "python tools/compose_board_3d.py --fetch-font"
-    assert compose.compose(spec, deflection=compose.DEFLECTION, check=True) == 3
+    assert compose.compose(spec, deflection=compose.DEFLECTION, check=True) == compose.SKIPPED
     out = capsys.readouterr().out
     assert f"SKIPPED: the newstroke font is not fetched under {nowhere}" in out, out
     assert f"Run: {fetch}" in out, out

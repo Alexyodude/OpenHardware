@@ -7169,18 +7169,25 @@ def not_drawn(board: eagle.Board, ink: dict[str, int], text: dict[str, int],
     }
 
 
+#: What `compose` returns for a board it did not compose because an input is
+#: not fetched (OH-199). It was 3, and a board that wrote 3 bytes read the
+#: same; no byte count is negative, and `--check` returns 0.
+SKIPPED = -1
+
+
 def compose(spec: Composition, deflection: float, check: bool) -> int:
-    """Read, confirm, compose and write one board. Returns the byte count."""
+    """Read, confirm, compose and write one board. Returns the byte count, 0
+    for `check`, or `SKIPPED`."""
     print(f"{spec.board}:")
     if not spec.layout.is_file() and spec.pcb_chip is not None:
         fetch_pcb(spec.pcb_chip)
     if not spec.layout.is_file():
         print(f"  SKIPPED: {spec.layout} is not fetched. Run: {spec.fetch_with}")
-        return 3
+        return SKIPPED
     if spec.schematic is not None and not spec.schematic.is_file():
         print(f"  SKIPPED: {spec.schematic} is not fetched, and it is what says "
               f"which kind each passive is. Run: {spec.fetch_with}")
-        return 3
+        return SKIPPED
     if spec.pinned is not None:
         verify_pinned_layout(*spec.pinned, spec.layout)
 
@@ -7192,7 +7199,7 @@ def compose(spec: Composition, deflection: float, check: bool) -> int:
         print(f"  SKIPPED: the newstroke font is not fetched under {FONT_CACHE}, "
               f"and this board's {len(board.kicad_text)} texts are lettered in "
               f"it. Run: {FETCH_FONT}")
-        return 3
+        return SKIPPED
     # **What a fab mills that the reader did not read into the outline**
     # (OH-163, from its review): an EAGLE board's, by kind -- see
     # `eagle._unmilled` -- and said before the outline is chained, so it is
@@ -7828,7 +7835,7 @@ def main(argv: list[str] | None = None) -> int:
     #: find its source does, rather than passing quietly or stopping at the
     #: first (OH-191: a checkout holding the Uno's board file and not its
     #: schematic composed nothing at all).
-    skipped: list[str] = []
+    skipped: list[Composition] = []
     for spec in wanted:
         try:
             written = compose(spec, args.deflection, args.check)
@@ -7836,24 +7843,33 @@ def main(argv: list[str] | None = None) -> int:
             print(f"SKIPPED: OpenCASCADE is not installed ({exc}). "
                   f"pip install cadquery-ocp")
             return 3
-        if written == 3:
-            skipped.append(spec.board)
+        if written == SKIPPED:
+            skipped.append(spec)
             continue
         total += written
-    if not args.check and total:
+    if not args.check:
         from tools.import_3d_model import write_index
         # **The composer's own list, not the importer's copy of it.** Every
         # board a `Composition` serves gets the same file, exactly as a XIAO's
         # DIP and SMD variants share one fetched mesh.
+        #
+        # **A skipped board is left out of the index, with the boards it
+        # serves** (OH-199). `write_index` lists a board by whether its `.glb`
+        # is on the disk, and a skipped board's is whatever an earlier run
+        # left, drawn as that model. Refusing to write the index instead would
+        # leave the index of that earlier run, which names the same file. It is
+        # written when every board was skipped too: the index is what the page
+        # reads, and nothing else says the old file is not to be served.
         index = write_index(tuple(
             (name, chip_for(spec.board), _slug(spec.board))
             for spec in COMPOSITIONS
+            if spec not in skipped
             for name in (spec.board, *spec.serves)
         ))
         print(f"{total:,} bytes of glTF; index at {index.relative_to(REPO)}")
     if skipped:
         print(f"SKIPPED {len(skipped)} board(s), their files not fetched: "
-              f"{', '.join(skipped)}")
+              f"{', '.join(spec.board for spec in skipped)}")
         return 3
     return 0
 
