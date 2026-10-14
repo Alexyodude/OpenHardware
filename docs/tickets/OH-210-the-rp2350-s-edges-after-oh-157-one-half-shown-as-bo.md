@@ -24,3 +24,5 @@ The edges OH-157's reviews left (2026-10-08), none of which changes what the XIA
 Done when each is fixed with a test that fails when reverted where it is behaviour, or the sentence says only what the files show.
 
 **Note 2026-10-15:** 2026-10-15: items 2 and 3 taken in this session's lane3; claims rules/board-claims.md, webui/boards/catalogue.py and its test. Items 1, 4, 5, 6 and 7 are not in this pass.
+
+**Note 2026-10-15:** items 2 and 3 done in lane3 (eef2767, 58206ce). Item 3: catalogue.CORE_ISA maps the RP2350 to 'RV32 (Hazard3)' and missing_cores reads each row's isas from the boards waiting on that core, so a riscv32 row no longer names the M33 half or a runnable board's ISA; two tests in test_board_catalogue.py failed before the fix. Item 2: rules/board-claims.md section 14 records the first chip with two ISAs and evidence for one (tests/webui/test_xiao_rp2350_board.py, the Hazard3 half), and section 3 now points at the test that holds the verified set instead of {RP2040}. Items 1, 4, 5, 6, 7 untouched.
