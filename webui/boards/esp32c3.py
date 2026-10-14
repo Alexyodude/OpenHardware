@@ -538,9 +538,10 @@ I2C_CLK_CONF = 0x54
 I2C_COMD0 = 0x58
 I2C_COMMANDS = 8
 
-#: CTR's bits (:52 :70 :88 :94) and what the header calls their access:
-#: `I2C_TRANS_START` **WT** (:87), `I2C_CONF_UPGATE` **WT** (:51),
-#: `I2C_FSM_RST` **WT** (:58) -- write-trigger, so a read finds them 0 and CTR
+#: CTR's bits (`I2C_CONF_UPGATE` :52, `I2C_FSM_RST` :58, `I2C_TRANS_START` :88,
+#: `I2C_MS_MODE` :94) and what the header calls their access, in the comment
+#: above each: `I2C_TRANS_START` **WT** (:86), `I2C_CONF_UPGATE` **WT** (:50),
+#: `I2C_FSM_RST` **WT** (:56) -- write-trigger, so a read finds them 0 and CTR
 #: stores them as 0. TRANS_START is the doorbell.
 I2C_MS_MODE = 1 << 4
 I2C_TRANS_START = 1 << 5
@@ -564,6 +565,7 @@ I2C_INT_END_DETECT = 1 << 3
 I2C_OP: dict[str, int] = {"RSTART": 6, "WRITE": 1, "READ": 3, "STOP": 2, "END": 4}
 I2C_COMD_DONE = 1 << 31
 I2C_OP_SHIFT = 11
+I2C_ACK_EN = 1 << 8
 I2C_ACK_EXPECTED = 1 << 9
 
 #: The system block's base (`soc.h:27`, 0x600c0000) and the clock gate:
@@ -1160,16 +1162,23 @@ def install_i2c(cpu: Cpu) -> None:
     hold_bus(cpu, ())
 
 
-def hold_bus(cpu: Cpu, bus: typing.Sequence[tuple[int, int, typing.Any]]) -> None:
-    """What is wired to the I2C pins, `(sda_gpio, scl_gpio, device)` each, as a
-    whole statement: the controller reaches only the devices on the pads its
-    routing names. `webui/api.py`'s `BoardSession.drive` is the caller."""
+def check_bus(bus: typing.Sequence[tuple[int, int, typing.Any]]) -> None:
+    """`ValueError`, naming the GPIO, for a device wired to a pad this part
+    does not have. Changes nothing."""
     for sda, scl, _device in bus:
         for gpio in (sda, scl):
             if gpio not in IO_MUX_PADS:
                 raise ValueError(
                     f"GPIO{gpio} has no pad on an ESP32-C3; its pads are GPIO"
                     f"{min(IO_MUX_PADS)} to GPIO{max(IO_MUX_PADS)}")
+
+
+def hold_bus(cpu: Cpu, bus: typing.Sequence[tuple[int, int, typing.Any]]) -> None:
+    """What is wired to the I2C pins, `(sda_gpio, scl_gpio, device)` each, as a
+    whole statement: the controller reaches only the devices on the pads its
+    routing names. `webui/api.py`'s `BoardSession.drive` is the caller, and
+    asks `check_bus` first so that a refusal lands before anything is driven."""
+    check_bus(bus)
     cpu.on_ring(I2C + I2C_CTR, functools.partial(serve_i2c, bus=tuple(bus)))
 
 
@@ -1215,15 +1224,28 @@ def serve_i2c(cpu: Cpu, address: int, *,
     Called by the core between two instructions, with the store retired. The
     gate first: a closed function clock answers nothing, which Wire's timeout
     waits out. Then the routing, then each COMDn: RSTART, WRITE (the first byte
-    after a RSTART is the address byte; the device on the routed pads
-    acknowledges it or nobody does), READ (into the RX FIFO) and STOP, each
-    marked DONE as it runs. An ack mismatch under `ack_en` sets NACK and ends
-    the list with that command not DONE.
+    after a RSTART is the address byte; of the parts on the routed pads, the
+    one whose address it names acknowledges it, or nobody does), READ (into
+    the RX FIFO, from a part addressed for reading) and STOP, each marked DONE
+    as it runs.
+
+    **A NACK is partly the model's choice.** TRM v1.4 28.4.9 item 5 (p.685):
+    with `ack_check_en` set and the level received not matching `ack_exp` in a
+    WRITE, the master "will generate an I2C_NACK_INT interrupt and a STOP
+    condition". That is modelled: NACK is set and the addressed part sees its
+    STOP. The manual is silent on whether TRANS_COMPLETE also rises and on
+    whether the NACKed command reads DONE; this model sets neither
+    (OH-161 design item 9, unverified against silicon), and nothing in the
+    vendor's own software reads either -- arduino-esp32's Wire maps every
+    NACK to return code 2 (Wire.cpp:466-468 at 3.20017.241212). A WRITE
+    without `ack_check_en` whose address byte nobody acknowledged goes on, and
+    its data bytes reach nobody.
 
     **`DeviceRefusal` is the only refusal**, raised for what silicon does and
     this model does not: slave mode, END, a TX byte no WRITE consumed or a
-    WRITE with too few, a list that never stops. Anything else raised here is
-    a bug in this host and is not caught.
+    WRITE with too few, a list that never stops, a READ from nothing addressed
+    for reading. Anything else raised here is a bug in this host and is not
+    caught.
     """
     if not cpu.read_word(I2C_GATE[0]) & I2C_GATE[1]:
         return
@@ -1233,11 +1255,13 @@ def serve_i2c(cpu: Cpu, address: int, *,
             f"slave mode is not modelled")
     sda = i2c_pad(cpu, "SDA", I2CEXT0_SDA_IDX)
     scl = i2c_pad(cpu, "SCL", I2CEXT0_SCL_IDX)
-    device = next((part for pads_sda, pads_scl, part in bus
-                   if (pads_sda, pads_scl) == (sda, scl)), None)
+    on_pads = [part for pads_sda, pads_scl, part in bus
+               if (pads_sda, pads_scl) == (sda, scl)]
     transmit = list(cpu.take_written(I2C + I2C_DATA))
     received = bytearray()
     addressed = None
+    reading = False
+    address_sent = False
     raw = 0
     for number in range(I2C_COMMANDS):
         at = I2C + I2C_COMD0 + 4 * number
@@ -1245,7 +1269,7 @@ def serve_i2c(cpu: Cpu, address: int, *,
         op = (word >> I2C_OP_SHIFT) & 0x7
         count = word & 0xFF
         if op == I2C_OP["RSTART"]:
-            addressed = None
+            addressed, reading, address_sent = None, False, False
         elif op == I2C_OP["WRITE"]:
             if len(transmit) < count:
                 raise DeviceRefusal(
@@ -1254,22 +1278,26 @@ def serve_i2c(cpu: Cpu, address: int, *,
             chunk, transmit = transmit[:count], transmit[count:]
             acked = True
             for byte in chunk:
-                if addressed is None:
-                    if device is not None and byte >> 1 == device.address:
-                        acked = device.start(bool(byte & 1))
-                        addressed = device if acked else None
-                    else:
-                        acked = False
+                if not address_sent:
+                    address_sent = True
+                    reading = bool(byte & 1)
+                    addressed = next((part for part in on_pads
+                                      if part.address == byte >> 1), None)
+                    acked = addressed is not None and addressed.start(reading)
+                    if not acked:
+                        addressed = None
+                elif addressed is None:
+                    acked = False
                 else:
                     acked = addressed.write(byte)
                 if not acked:
                     break
             expect_nack = bool(word & I2C_ACK_EXPECTED)
-            if word & (1 << 8) and acked == expect_nack:
+            if word & I2C_ACK_EN and acked == expect_nack:
                 raw |= I2C_INT_NACK
                 break
         elif op == I2C_OP["READ"]:
-            if addressed is None:
+            if addressed is None or not reading:
                 raise DeviceRefusal(
                     f"I2C COMD{number} reads {count} bytes with no device "
                     f"addressed for reading")

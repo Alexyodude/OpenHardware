@@ -1678,6 +1678,9 @@ class BoardSession:
                     raise ValueError(
                         f"{self.board}: devices {first!r} and {second!r} are both at "
                         f"address {part.address:#04x} on the same pads")
+        checker = getattr(self.runtime.description, "check_bus", None)
+        if checker is not None:
+            checker([(sda, scl, part) for sda, scl, part in wired.values()])
         return wired
 
     @staticmethod

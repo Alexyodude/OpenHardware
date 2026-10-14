@@ -31,16 +31,23 @@ VPOR_VOLTS, VDD_MIN, VDD_MAX = 2.2, 2.7, 5.5
 IDS: dict[int, int] = {6: 0x0054, 7: 0x0400}
 _ID_SECTION = {6: "5.1.4", 7: "5.1.5"}
 
-#: The pointer out of reset. Table 5-3 (p.33) lists the registers' defaults;
-#: its pointer row did not survive text extraction, so this is the temperature
-#: register, TA (pointer 5), whose read slice 1 refuses either way.
-POWER_ON_POINTER = 5
+#: The pointer out of reset: 0000. Table 5-3 (p.33) has no pointer row;
+#: Register 5-1 (p.16) marks every pointer bit W-0 under the legend "-n =
+#: Value at POR", and calls 0000 "RFU, Reserved for Future Use". So a read
+#: before any pointer write is refused, as the RFU register it is.
+POWER_ON_POINTER = 0
+
+#: The registers DS25095A lists that slice 2 builds (CONFIG, TUPPER, TLOWER,
+#: TCRIT, TA, and the resolution register at pointer 8, Table 5-3 p.33).
+#: Every other pointer value is RFU or reserved (Register 5-1, p.16), and is
+#: refused for good.
+SLICE_2_POINTERS = frozenset({1, 2, 3, 4, 5, 8})
 
 
 class Mcp9808:
     """One MCP9808 on a bus. `straps` is A2 A1 A0 as a number, 0 to 7."""
 
-    def __init__(self, *, straps: int, celsius: float, vdd: float = 3.3) -> None:
+    def __init__(self, *, straps: int, celsius: float, vdd: float) -> None:
         self.straps = 0
         self.celsius = celsius
         self.pointer = POWER_ON_POINTER
@@ -55,14 +62,15 @@ class Mcp9808:
         """The seven-bit address: `ADDRESS_CODE | straps` (Table 3-2, p.11)."""
         return ADDRESS_CODE | self.straps
 
-    def hold(self, *, straps: int, celsius: float, vdd: float = 3.3) -> None:
+    def hold(self, *, straps: int, celsius: float, vdd: float) -> None:
         """What the bench holds the part at, a whole statement at every drive.
 
         Refused, with the values: a strap that is not A2 A1 A0 (0 to 7), and
-        a VDD from VPOR up to 2.7 V, where DS25095A describes nothing. Below
-        VPOR the part is unpowered and its registers return to power-on
-        (5.3, p.33); above 5.5 V it is outside its operating range and does
-        not answer.
+        a VDD from VPOR up to 2.7 V, where DS25095A describes nothing, and
+        one above 5.5 V, past the operating range (p.3) and short of the
+        6.0 V absolute maximum (p.2), which "functional operation outside the
+        operational listings" is not implied by. Below VPOR the part is
+        unpowered and its registers return to power-on (5.3, p.33).
         """
         if isinstance(straps, bool) or not isinstance(straps, int) or not 0 <= straps <= 7:
             raise DeviceRefusal(
@@ -73,12 +81,18 @@ class Mcp9808:
                 f"MCP9808 VDD {vdd!r} V is between VPOR ({VPOR_VOLTS} V) and "
                 f"the 2.7 V minimum (p.3): DS25095A describes the part in "
                 f"neither state, so it is refused rather than guessed")
+        if vdd > VDD_MAX:
+            raise DeviceRefusal(
+                f"MCP9808 VDD {vdd!r} V is above the 5.5 V maximum operating "
+                f"voltage (p.3) and below the 6.0 V absolute maximum (p.2): "
+                f"the datasheet does not imply operation there, so it is "
+                f"refused rather than guessed")
         self.straps = straps
         self.celsius = celsius
         if vdd < VPOR_VOLTS:
             self.pointer = POWER_ON_POINTER
             self._writing = False
-        self._powered = VDD_MIN <= vdd <= VDD_MAX
+        self._powered = vdd >= VDD_MIN
 
     def start(self, read: bool) -> bool:
         """A START and this part's address byte; True where it acknowledges.
@@ -110,18 +124,31 @@ class Mcp9808:
             raise DeviceRefusal(
                 f"MCP9808 pointer {byte:#04x} has bits 7:4 set; they must be "
                 f"written 0 (Register 5-1, p.16)")
-        if byte not in IDS:
+        if byte in SLICE_2_POINTERS:
             raise DeviceRefusal(
                 f"MCP9808 pointer {byte:#04x}: the register file arrives in "
                 f"slice 2; slice 1 answers pointers 6 and 7 (5.1.4, 5.1.5)")
+        if byte not in IDS:
+            raise DeviceRefusal(
+                f"MCP9808 pointer {byte:#04x} is {'0000 = RFU' if byte == 0 else 'not a register'} "
+                f"(Register 5-1, p.16): the part has no register there")
         self.pointer = byte
 
     def read(self) -> int:
         """The next byte of the selected register, MSB first."""
-        if self.pointer not in IDS:
+        if self._writing:
+            raise DeviceRefusal(
+                "MCP9808 read inside a write transfer: the host addressed it "
+                "for writing (Table 3-2, p.11)")
+        if self.pointer in SLICE_2_POINTERS:
             raise DeviceRefusal(
                 f"MCP9808 read at pointer {self.pointer}: the register file "
                 f"arrives in slice 2; slice 1 answers pointers 6 and 7")
+        if self.pointer not in IDS:
+            raise DeviceRefusal(
+                f"MCP9808 read at pointer {self.pointer}: 0000 = RFU, reserved "
+                f"for future use (Register 5-1, p.16); nothing was written to "
+                f"select a register since power-on")
         if self._reads == 2:
             raise DeviceRefusal(
                 f"MCP9808 third byte read of pointer {self.pointer}: the "

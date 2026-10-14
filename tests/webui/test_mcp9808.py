@@ -19,7 +19,7 @@ from webui.devices.mcp9808 import Mcp9808
 
 
 def part(**kwargs) -> Mcp9808:
-    return Mcp9808(**{"straps": 0, "celsius": 25.0, **kwargs})
+    return Mcp9808(**{"straps": 0, "celsius": 25.0, "vdd": 3.3, **kwargs})
 
 
 def read_register(device: Mcp9808, pointer: int) -> int:
@@ -81,9 +81,9 @@ def test_each_thing_slice_one_does_not_model_is_refused_by_name_and_section():
             device.write(pointer)
         return run
 
-    for pointer in (0, 1, 2, 3, 4, 5):
+    for pointer in (1, 2, 3, 4, 5, 8):
         cases.append((another_pointer(pointer), "slice 2"))
-    for pointer in (0x10, 0x86, 0x80, 0xF6):
+    for pointer in (0, 9, 0xF, 0x10, 0x86, 0x80, 0xF6):
         cases.append((another_pointer(pointer), "Register 5-1"))
 
     def third_byte():
@@ -135,7 +135,11 @@ def test_vdd_bounds_the_part_answers_within():
         with pytest.raises(DeviceRefusal) as caught:
             part(vdd=vdd)
         assert repr(vdd) in str(caught.value), vdd
-    assert part(vdd=5.6).start(False) is False
+    for vdd in (5.6, 6.0):
+        with pytest.raises(DeviceRefusal) as caught:
+            part(vdd=vdd)
+        assert repr(vdd) in str(caught.value), vdd
+        assert "p.3" in str(caught.value) and "p.2" in str(caught.value), vdd
 
 
 def test_dropping_below_vpor_resets_the_pointer():
@@ -148,7 +152,17 @@ def test_dropping_below_vpor_resets_the_pointer():
     device.start(True)
     with pytest.raises(DeviceRefusal) as caught:
         device.read()
-    assert "slice 2" in str(caught.value), "back at the power-on pointer, TA"
+    assert "RFU" in str(caught.value) and "Register 5-1" in str(caught.value), (
+        "back at the power-on pointer, 0000")
+
+
+def test_a_read_inside_a_write_transfer_is_refused():
+    """Table 3-2: the address byte's R/W bit chose write."""
+    device = part()
+    assert device.start(False)
+    with pytest.raises(DeviceRefusal) as caught:
+        device.read()
+    assert "write transfer" in str(caught.value)
 
 
 def test_hold_rereads_the_straps_and_keeps_the_pointer_while_powered():

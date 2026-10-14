@@ -40,12 +40,14 @@ import pathlib
 import re
 import shutil
 import subprocess
+import typing
 
 import pytest
 
 from core.riscv32 import abi
 from webui import api
 from webui.boards import esp32c3
+from webui.devices.mcp9808 import Mcp9808
 
 from . import encode as e
 
@@ -1133,7 +1135,10 @@ def loads(*addresses: int) -> list[int]:
 
 
 SDA_GPIO, SCL_GPIO = 6, 7
-OP = esp32c3.I2C_OP
+#: The op codes as `hal/esp32c3/include/hal/i2c_ll.h:72-76` gives them, typed
+#: out here so that the transactions below do not depend on the module's own
+#: table (the header-parity test holds the table to the HAL).
+OP = {"RSTART": 6, "WRITE": 1, "READ": 3, "STOP": 2, "END": 4}
 
 
 def command(op: str, n: int = 0, *, ack_en: bool = False, ack_val: int = 0) -> int:
@@ -1185,7 +1190,8 @@ def transaction(commands: list[int], data: list[int]) -> list[tuple[int, int]]:
             + [(I2C_CTR_AT, I2C_START)])
 
 
-def run_program(program: list[int], bus=(), *, gate: bool = True):
+def run_program(program: list[int], bus: typing.Sequence = (), *, gate: bool = True,
+                ) -> tuple[api.BoardSession, api.RunResult]:
     """A C3 session over `program` at the flash window, `bus` held on its
     pins, run for exactly the program's length (the gate store first)."""
     words = (stores((esp32c3.I2C_GATE[0], esp32c3.I2C_GATE[1])) if gate else []) + program
@@ -1199,25 +1205,23 @@ def needs_riscv32() -> None:
     pytest.importorskip("core.riscv32.abi")
     try:
         abi.Cpu().close()
-    except Exception as error:  # the core is not built
+    except abi.AbiError as error:  # the core is not built
         pytest.skip(f"SKIPPED: riscv32 core unavailable: {error}")
 
 
-def write_pointer(pointer: int) -> list[tuple[int, int]]:
+def write_pointer(pointer: int, address: int = 0x18) -> list[tuple[int, int]]:
     return transaction([command("RSTART"), command("WRITE", 2, ack_en=True),
-                        command("STOP")], [0x18 << 1, pointer])
+                        command("STOP")], [address << 1, pointer])
 
 
-def read_two() -> list[tuple[int, int]]:
+def read_two(address: int = 0x18) -> list[tuple[int, int]]:
     return transaction([command("RSTART"), command("WRITE", 1, ack_en=True),
                         command("READ", 1), command("READ", 1, ack_val=1),
-                        command("STOP")], [0x18 << 1 | 1])
+                        command("STOP")], [address << 1 | 1])
 
 
-def attached(straps: int = 0):
-    from webui.devices.mcp9808 import Mcp9808
-
-    return ((SDA_GPIO, SCL_GPIO, Mcp9808(straps=straps, celsius=25.0)),)
+def attached(straps: int = 0) -> tuple[tuple[int, int, Mcp9808], ...]:
+    return ((SDA_GPIO, SCL_GPIO, Mcp9808(straps=straps, celsius=25.0, vdd=3.3)),)
 
 
 def test_a_pointer_write_and_a_two_byte_read_return_the_manufacturer_and_device_ids():
@@ -1260,11 +1264,10 @@ def test_with_no_device_on_the_pads_the_address_is_nacked_and_its_command_not_do
 
 def test_a_device_on_other_pads_is_a_nack_too():
     needs_riscv32()
-    from webui.devices.mcp9808 import Mcp9808
-
-    elsewhere = ((2, 3, Mcp9808(straps=0, celsius=25.0)),)
+    elsewhere = ((2, 3, Mcp9808(straps=0, celsius=25.0, vdd=3.3)),)
     session, result = run_program(stores(*wiring()) + stores(*write_pointer(6)), elsewhere)
     with session:
+        assert result.status == "running", result
         assert session.cpu.read_word(I2C_RAW_AT) & esp32c3.I2C_INT_NACK
 
 
@@ -1322,7 +1325,7 @@ def test_a_device_that_breaks_is_a_host_bug_and_faults_the_session():
     class Broken:
         address = 0x18
 
-        def start(self, read):
+        def start(self, read: bool) -> bool:
             return {}["missing"]
 
     program = stores(*wiring()) + stores(*write_pointer(6))
@@ -1341,3 +1344,83 @@ def test_a_pad_routed_to_a_peripheral_reports_unknown_and_the_others_do_not():
         assert after["D4"] == "unknown"
         assert {label: state for label, state in after.items() if label != "D4"} == {
             label: state for label, state in before.items() if label != "D4"}
+
+
+def test_two_parts_on_one_pad_pair_answer_each_at_its_own_address_in_either_order():
+    """The bus is modelled: the part whose address the byte names answers,
+    wherever it sits in the dict, and a byte that names none is a NACK."""
+    needs_riscv32()
+    for order in ((0, 1), (1, 0)):
+        parts = [(SDA_GPIO, SCL_GPIO, Mcp9808(straps=straps, celsius=25.0, vdd=3.3))
+                 for straps in (0, 1)]
+        bus = tuple(parts[i] for i in order)
+        program = (stores(*wiring()) + stores(*write_pointer(7, 0x19))
+                   + stores(*read_two(0x19)) + loads(I2C_DATA_AT, I2C_DATA_AT))
+        session, result = run_program(program, bus)
+        with session:
+            assert result.status == "running", (order, result)
+            regs = session.cpu.get_regs().as_list()
+            assert (regs[16], regs[17]) == (0x04, 0x00), order
+            assert not session.cpu.read_word(I2C_RAW_AT) & esp32c3.I2C_INT_NACK, order
+        assert parts[1][2].pointer == 7 and parts[0][2].pointer == 0, order
+
+        program = stores(*wiring()) + stores(*write_pointer(7, 0x1A))
+        session, result = run_program(program, bus)
+        with session:
+            assert session.cpu.read_word(I2C_RAW_AT) & esp32c3.I2C_INT_NACK, order
+
+
+def test_a_data_byte_after_an_unacknowledged_address_does_not_address_the_part():
+    """ack_en clear means the master does not stop at the NACK, but the bytes
+    that follow go to nobody: byte 0x30 is data here and not an address."""
+    needs_riscv32()
+    part = Mcp9808(straps=0, celsius=25.0, vdd=3.3)
+    lists = [command("RSTART"), command("WRITE", 1), command("WRITE", 2), command("STOP")]
+    program = stores(*wiring()) + stores(*transaction(lists, [0x1A << 1, 0x18 << 1, 6]))
+    session, result = run_program(program, ((SDA_GPIO, SCL_GPIO, part),))
+    with session:
+        assert result.status == "running", result
+        assert part.pointer == 0, "the pointer byte reached the part"
+
+
+def test_a_read_from_a_part_addressed_for_writing_is_refused():
+    needs_riscv32()
+    lists = [command("RSTART"), command("WRITE", 1, ack_en=True), command("READ", 1),
+             command("STOP")]
+    program = stores(*wiring()) + stores(*transaction(lists, [0x18 << 1]))
+    session, result = run_program(program, attached())
+    with session:
+        assert result.status == "stopped", result
+        assert "no device addressed for reading" in result.detail, result.detail
+
+
+def test_each_thing_the_controller_model_does_not_do_is_refused_by_its_message():
+    needs_riscv32()
+    rstart, stop = command("RSTART"), command("STOP")
+    cases = {
+        "a WRITE longer than the TX FIFO": (
+            [rstart, command("WRITE", 3, ack_en=True), stop], [0x30, 6], "holds 2"),
+        "TX bytes no WRITE consumed": (
+            [rstart, command("WRITE", 2, ack_en=True), stop], [0x30, 6, 7],
+            "no WRITE command consumed"),
+        "an END command": ([rstart, command("END")], [], "END"),
+        "a list with no STOP": ([rstart] * 8, [], "reached no STOP"),
+        "a READ with nothing addressed": ([rstart, command("READ", 1), stop], [],
+                                          "no device addressed for reading"),
+    }
+    for name, (lists, data, message) in cases.items():
+        program = stores(*wiring()) + stores(*transaction(lists, data))
+        session, result = run_program(program, attached())
+        with session:
+            assert result.status == "stopped", (name, result)
+            assert message in result.detail, (name, result.detail)
+    program = stores(*wiring()) + stores((I2C_CTR_AT, esp32c3.I2C_TRANS_START))
+    session, result = run_program(program, attached())
+    with session:
+        assert result.status == "stopped" and "MS_MODE clear" in result.detail, result
+
+
+def test_a_bus_pad_this_part_does_not_have_is_refused_before_anything_is_held():
+    with pytest.raises(ValueError) as caught:
+        esp32c3.check_bus(((SDA_GPIO, 99, None),))
+    assert "GPIO99" in str(caught.value)

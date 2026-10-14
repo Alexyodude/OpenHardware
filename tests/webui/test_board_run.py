@@ -1902,10 +1902,10 @@ def test_watching_a_fifo_never_changes_what_the_firmware_reads():
 # transaction is the C3's own doorbell and not a harness poking a register.
 
 
-def _lui(rd, imm20): return imm20 << 12 | rd << 7 | 0x37
-def _addi(rd, rs, imm): return (imm & 0xFFF) << 20 | rs << 15 | rd << 7 | 0x13
-def _sw(rs2, rs1): return rs2 << 20 | rs1 << 15 | 2 << 12 | 0x23
-def _lw(rd, rs1): return rs1 << 15 | 2 << 12 | rd << 7 | 0x03
+def _lui(rd: int, imm20: int) -> int: return imm20 << 12 | rd << 7 | 0x37
+def _addi(rd: int, rs: int, imm: int) -> int: return (imm & 0xFFF) << 20 | rs << 15 | rd << 7 | 0x13
+def _sw(rs2: int, rs1: int) -> int: return rs2 << 20 | rs1 << 15 | 2 << 12 | 0x23
+def _lw(rd: int, rs1: int) -> int: return rs1 << 15 | 2 << 12 | rd << 7 | 0x03
 
 
 def _li(rd: int, value: int) -> list[int]:
@@ -1930,7 +1930,7 @@ I2C_SDA, I2C_SCL = esp32c3.HEADER["D4"], esp32c3.HEADER["D5"]
 I2C_BASE = esp32c3.I2C
 
 
-def _pad(gpio): return esp32c3.IO_MUX + esp32c3.IO_MUX_GPIO0 + gpio * esp32c3.IO_MUX_STRIDE
+def _pad(gpio: int) -> int: return esp32c3.IO_MUX + esp32c3.IO_MUX_GPIO0 + gpio * esp32c3.IO_MUX_STRIDE
 
 
 def _i2c_wiring() -> list[tuple[int, int]]:
@@ -1949,7 +1949,7 @@ def _i2c_wiring() -> list[tuple[int, int]]:
 
 def _id_read(pointer: int, address: int = 0x18) -> list[tuple[int, int]]:
     """Write `pointer` to the part, then read two bytes back: two lists, run."""
-    op = esp32c3.I2C_OP
+    op = {"RSTART": 6, "WRITE": 1, "READ": 3, "STOP": 2}  # i2c_ll.h:72-76
     write = [op["RSTART"] << 11, op["WRITE"] << 11 | 2 | 1 << 8, op["STOP"] << 11]
     read = [op["RSTART"] << 11, op["WRITE"] << 11 | 1 | 1 << 8, op["READ"] << 11 | 1,
             op["READ"] << 11 | 1 | 1 << 10, op["STOP"] << 11]
@@ -2072,3 +2072,18 @@ def test_a_description_with_no_i2c_refuses_devices_by_name(monkeypatch):
         with pytest.raises(ValueError) as caught:
             session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
         assert "no I2C bus" in str(caught.value) and "u1" in str(caught.value)
+
+
+def test_a_refused_drive_leaves_a_kept_part_as_it_was():
+    with _i2c_session(_stores(*_i2c_wiring())) as session:
+        session.drive({}, None, {"u1": MCP9808_ON_D4_D5})
+        kept = session.devices["u1"]
+        kept.start(False)
+        kept.write(7)
+        kept.stop()
+        moved = dict(MCP9808_ON_D4_D5, address_pins={"A0": "high", "A1": "low", "A2": "low"})
+        with pytest.raises(ValueError):
+            session.drive({}, None, {"u1": moved, "u2": dict(MCP9808_ON_D4_D5, part="SSD1306")})
+        assert session.devices["u1"] is kept
+        assert (kept.address, kept.pointer) == (0x18, 7), "held anew only on success"
+        assert len(session.inputs) == 1
