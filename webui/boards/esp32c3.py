@@ -179,6 +179,10 @@ GPIO_PIN0 = 0x74
 GPIO_PIN_STRIDE = 4
 GPIO_PIN_PAD_DRIVER = 1 << 2
 GPIO_PIN_AT_RESET = 0
+#: **`pin_states` reads ENABLE, OUT and OUT_SEL and not PAD_DRIVER.** A
+#: hand-written image that sets PAD_DRIVER on a GPIO-driven pad therefore reads
+#: "high" for an open-drain pad that silicon would release; the Arduino core
+#: here cannot reach that, having no OUTPUT_OPEN_DRAIN.
 
 #: IO_MUX, `soc.h:49` -- `#define DR_REG_IO_MUX_BASE 0x60009000`.
 IO_MUX = 0x60009000

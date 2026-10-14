@@ -38,6 +38,11 @@ public:
     void beginTransmission(uint8_t address);
     size_t write(uint8_t value);
     size_t write(const uint8_t* data, size_t length);
+    /* The vendor reaches this through `Print::write(const char*, size_t)`
+     * (`Print.h:70`), so `Wire.write(char_buffer, n)` compiles there. */
+    size_t write(const char* data, size_t length) {
+        return write(reinterpret_cast<const uint8_t*>(data), length);
+    }
 
     /* The vendor's overloads (`Wire.h:136-155`), so `Wire.write(5u)`,
      * `Wire.write(5L)`, a `size_t` and a string literal all compile. Each

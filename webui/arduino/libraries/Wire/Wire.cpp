@@ -250,7 +250,16 @@ uint8_t OhWire::requestFrom(uint8_t address, uint8_t quantity, bool stop) {
     rx_index_ = 0;
     const bool repeated = deferred_;
     if (quantity == 0) {
-        /* Nothing is read and the deferred write stays deferred. */
+        /* Nothing is read. A zero-byte request at the deferred write's own
+         * address ends the repeated START, as the vendor's does
+         * (`Wire.cpp:494` sets `nonStop = false` once the address matches,
+         * whatever the size); at another address it does not
+         * (`Wire.cpp:490-493`), and the write stays deferred. The vendor's
+         * driver also sends the write ahead of its zero-byte read; here
+         * nothing goes out, so the part keeps the pointer it had. */
+        if (repeated && address == tx_address_) {
+            deferred_ = false;
+        }
         return 0;
     }
     if (quantity > kBuffer) {

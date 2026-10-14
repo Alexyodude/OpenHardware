@@ -2293,8 +2293,8 @@ def test_begin_writes_ctr_as_the_hals_master_init_and_sets_the_pads_open_drain()
 
 
 #: A write deferred by endTransmission(false) goes out with the requestFrom
-#: that names its address. One for another address, and one for zero bytes,
-#: read nothing and leave it deferred, as the vendor's nonStop stays set.
+#: that names its address. One for another address reads nothing and leaves it
+#: deferred, as the vendor's nonStop stays set (Wire.cpp:490-493).
 WIRE_KEEP_SKETCH = """
 #include <Wire.h>
 static void value(void) {
@@ -2311,7 +2311,6 @@ void setup() {
   Wire.write(7);
   Wire.endTransmission(false);
   Serial.println(Wire.requestFrom(0x19, 2));
-  Serial.println(Wire.requestFrom(0x18, 0));
   Serial.println(Wire.requestFrom(0x18, 2));
   value();
 }
@@ -2320,8 +2319,8 @@ void loop() { }
 
 
 def test_a_refused_request_from_leaves_the_deferred_write_for_the_one_that_matches():
-    words, _ = _run_wire(WIRE_KEEP_SKETCH, 4)
-    assert words == ["0", "0", "2", "1024"], (
+    words, _ = _run_wire(WIRE_KEEP_SKETCH, 3)
+    assert words == ["0", "2", "1024"], (
         f"pointer 7 was still waiting: 1024, and not pointer 6's 84: {words}")
 
 
@@ -2353,6 +2352,38 @@ def test_begin_transmission_drops_a_deferred_write():
     assert words == ["2", "84"], (
         f"a plain read at pointer 6, not the dropped write's 7, and not a "
         f"mismatched repeated START: {words}")
+
+
+#: A zero-byte requestFrom at the deferred write's own address ends the
+#: repeated START, as the vendor's does (Wire.cpp:494 clears nonStop once the
+#: address matches, whatever the size). The vendor's driver would also send
+#: the write ahead of that zero-byte read; this model sends nothing, so the
+#: part keeps the pointer 6 it had and the plain read after it is 84, where a
+#: write still deferred would have set pointer 7 and read 1024.
+WIRE_ZERO_SKETCH = """
+#include <Wire.h>
+void setup() {
+  Wire.begin();
+  Wire.beginTransmission(0x18);
+  Wire.write(6);
+  Wire.endTransmission();
+  Wire.beginTransmission(0x18);
+  Wire.write(7);
+  Wire.endTransmission(false);
+  Serial.println(Wire.requestFrom(0x18, 0));
+  Serial.println(Wire.requestFrom(0x18, 2));
+  int high = Wire.read();
+  int low = Wire.read();
+  Serial.println((high << 8) | low);
+}
+void loop() { }
+"""
+
+
+def test_a_zero_byte_request_from_at_the_matching_address_drops_the_deferred_write():
+    words, _ = _run_wire(WIRE_ZERO_SKETCH, 3)
+    assert words == ["0", "2", "84"], (
+        f"the deferred pointer 7 is gone, so the read is at pointer 6: {words}")
 
 
 #: 31 deferred bytes and the two address bytes are 33 for a 32-byte FIFO.

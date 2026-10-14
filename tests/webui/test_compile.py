@@ -1836,6 +1836,7 @@ void setup() {
   Wire.write('c');
   Wire.write("text");
   Wire.write(bytes, 2);
+  Wire.write("text", 4);
   Wire.endTransmission();
 }
 void loop() { }
