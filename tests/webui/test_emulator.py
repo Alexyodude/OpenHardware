@@ -551,9 +551,28 @@ def _converse(base: str, lines: list[str], body: bytes = b"", *,
     return data, ended
 
 
-def _statuses(data: bytes) -> list[str]:
-    return [line.decode("latin-1") for line in data.split(b"\r\n")
-            if line.startswith(b"HTTP/1.")]
+def _reply(data: bytes) -> tuple[str, dict[str, str], bytes]:
+    """The one reply in `data`: its status line, its headers (names lower-cased)
+    and its body. Walks the reply by its Content-Length and fails if ANYTHING is
+    left after it, a second reply or not.
+
+    Counting status lines cannot do this. This server's bodies do not end in
+    CRLF, so a second reply arrives glued to the last line of the first body,
+    and a 400 written as HTTP/0.9 has no status line at all. What is left over
+    after the declared length is the evidence, whatever it looks like."""
+    head, separator, rest = data.partition(b"\r\n\r\n")
+    assert separator, f"no complete reply: {data[:120]!r}"
+    lines = head.decode("latin-1").split("\r\n")
+    assert lines[0].startswith("HTTP/1."), f"not an HTTP reply: {data[:120]!r}"
+    headers = {}
+    for line in lines[1:]:
+        name, _, value = line.partition(":")
+        headers[name.strip().lower()] = value.strip()
+    length = int(headers.get("content-length", "0"))
+    body, left = rest[:length], rest[length:]
+    assert len(body) == length, f"reply cut short: {rest[:120]!r}"
+    assert not left, f"bytes after the first reply: {left[:160]!r}"
+    return lines[0], headers, body
 
 
 CLOSED = ("eof", "ConnectionResetError", "ConnectionAbortedError")
@@ -565,15 +584,19 @@ def _post_head(path: str, length: object, *extra: str) -> list[str]:
 
 
 def test_an_oversized_body_is_refused_from_its_header_and_the_connection_closes(
-        live_server):
+        live_server, monkeypatch):
     """The 413 is judged from the header, and then the connection closes: the
-    unsent body is never parsed as the next request. A client that sent
-    nothing and half-closed reads end of stream (not a reset, not a hang)."""
+    unsent body is never parsed as the next request. The client here neither
+    sends nor half-closes, so a server that kept the connection open would
+    leave it waiting and the read would time out, while one that closes after
+    its drain (shortened to half a second) reads end of stream."""
+    monkeypatch.setattr(emulator_server, "DRAIN_SECONDS", 0.5)
     data, ended = _converse(
         live_server, _post_head("/api/board/load",
-                                emulator_server.MAX_BODY_BYTES + 1),
-        shut_wr=True)
-    assert _statuses(data)[:1] == ["HTTP/1.1 413 Content Too Large"], (data[:80], ended)
+                                emulator_server.MAX_BODY_BYTES + 1))
+    status, headers, _ = _reply(data)
+    assert status == "HTTP/1.1 413 Content Too Large", (data[:80], ended)
+    assert headers.get("connection") == "close", headers
     assert ended == "eof", f"the server did not close after the 413: {ended}"
 
 
@@ -582,7 +605,8 @@ def test_a_413_reaches_a_client_that_has_already_sent_some_of_the_body(live_serv
     sends two bytes after declaring MAX_BODY_BYTES + 1, and failed 1 in 300 on
     its own: the server answered 413 and closed, and the bytes then arrived at
     a socket that had gone, which resets. The lag makes that the rule: the
-    server has certainly answered and closed before the bytes are sent."""
+    server has certainly answered before the bytes are sent. Those bytes must
+    also not be answered as a request of their own, which `_reply` fails on."""
     attempts = 20
     bad = []
     for _ in range(attempts):
@@ -590,9 +614,14 @@ def test_a_413_reaches_a_client_that_has_already_sent_some_of_the_body(live_serv
             live_server, _post_head("/api/board/load",
                                     emulator_server.MAX_BODY_BYTES + 1),
             b"{}", shut_wr=True, lag=0.05)
-        if _statuses(data)[:1] != ["HTTP/1.1 413 Content Too Large"]:
-            bad.append((ended, data[:40]))
-    assert not bad, f"{len(bad)}/{attempts} did not read the 413: {bad[:3]}"
+        try:
+            status, _, _ = _reply(data)
+        except AssertionError as exc:
+            bad.append((ended, str(exc)[:100]))
+            continue
+        if status != "HTTP/1.1 413 Content Too Large":
+            bad.append((ended, status))
+    assert not bad, f"{len(bad)}/{attempts} did not read one 413: {bad[:3]}"
 
 
 def _state(base: str) -> dict:
@@ -608,36 +637,48 @@ def _inner_load() -> bytes:
             + f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
 
 
-def test_a_refused_bodys_bytes_are_never_parsed_as_a_request(live_server):
+def test_a_request_inside_a_refused_body_is_not_run(live_server):
     """The connection is HTTP/1.1 keep-alive, so whatever a refusal leaves
     unread is parsed as the next request, and that one carries no Origin. A
     foreign page can send those bytes with a `text/plain` `fetch` in
-    `no-cors` mode, with no preflight. Two shapes, each exactly one reply (the
-    403) with the connection closed and the machine untouched:
+    `no-cors` mode, with no preflight.
 
-    - the inner request wholly inside the declared body, which is what
-      the server did before OH-166 (it parsed it after the 403 and ran it);
-    - the inner request after a declared body of MAX_BODY_BYTES, which the
-      drain reads out and which is only safe because the connection then
-      closes. Draining without closing is the mutant this one kills."""
+    Here the inner request is wholly inside the declared body, which is what
+    the server did before OH-166: it answered 403 and then parsed the body.
+    That server fails on `_reply` (a second reply after the first). What
+    guards it now is the drain, which reads those bytes out. A server that
+    drains and keeps the connection open therefore passes `_reply` and the
+    state check here and fails only on the last assertion, that the
+    connection closed (`ended` is `timeout`); the one that shows the close
+    keeping a request from running is the test after this."""
     before = _state(live_server)
     inner = _inner_load()
-
-    inside, ended = _converse(
+    data, ended = _converse(
         live_server, _post_head("/api/state", len(inner), f"Origin: {FOREIGN}"),
         inner)
-    assert _statuses(inside) == ["HTTP/1.1 403 Forbidden"], (inside[:200], ended)
-    assert ended in CLOSED, f"left open after the refusal: {ended}"
+    status, _, _ = _reply(data)
+    assert status == "HTTP/1.1 403 Forbidden", (data[:200], ended)
     assert _state(live_server) == before
+    assert ended in CLOSED, f"left open after the refusal: {ended}"
 
-    after, ended = _converse(
+
+def test_a_request_after_a_refused_body_is_not_run(live_server):
+    """The declared body is MAX_BODY_BYTES, which the drain reads out, and a
+    complete Origin-less `POST /api/load` follows it. That is safe only because
+    the connection then closes; a server that drained and kept the connection
+    open parses the follow-on and runs it. With the close removed this fails on
+    `_reply`, which finds the `200 OK` of the smuggled load after the 403, and
+    never reaches the state check."""
+    before = _state(live_server)
+    data, ended = _converse(
         live_server,
         _post_head("/api/state", emulator_server.MAX_BODY_BYTES,
                    f"Origin: {FOREIGN}"),
-        b"x" * emulator_server.MAX_BODY_BYTES, trailing=inner)
-    assert _statuses(after) == ["HTTP/1.1 403 Forbidden"], (after[:200], ended)
-    assert ended in CLOSED, f"left open after the refusal: {ended}"
+        b"x" * emulator_server.MAX_BODY_BYTES, trailing=_inner_load())
+    status, _, _ = _reply(data)
+    assert status == "HTTP/1.1 403 Forbidden", (data[:200], ended)
     assert _state(live_server) == before
+    assert ended in CLOSED, f"left open after the refusal: {ended}"
 
 
 def test_a_drain_gives_up_on_a_client_that_declares_a_body_and_sends_none(
@@ -648,7 +689,8 @@ def test_a_drain_gives_up_on_a_client_that_declares_a_body_and_sends_none(
         live_server, _post_head("/api/board/load", 1_000_000,
                                 f"Origin: {FOREIGN}"))
     waited = time.monotonic() - started
-    assert _statuses(data) == ["HTTP/1.1 403 Forbidden"], (data[:80], ended)
+    status, _, _ = _reply(data)
+    assert status == "HTTP/1.1 403 Forbidden", (data[:80], ended)
     assert ended == "eof", f"the drain never ended: {ended} after {waited:.1f}s"
     assert waited < 2.0, f"DRAIN_SECONDS is 0.5 and the close took {waited:.1f}s"
 
@@ -657,10 +699,27 @@ def test_a_content_length_that_is_not_a_count_is_a_400_that_says_so(live_server)
     for value in ("-5", "abc", "1_0", "1.5", "+7"):
         data, ended = _converse(live_server,
                                 _post_head("/api/board/load", value))
-        assert _statuses(data) == ["HTTP/1.1 400 Bad Request"], (
-            value, data[:120], ended)
-        assert repr(value).encode() in data, (value, data[-120:])
+        status, headers, body = _reply(data)
+        assert status == "HTTP/1.1 400 Bad Request", (value, data[:120], ended)
+        assert repr(value).encode() in body, (value, body)
+        assert headers.get("connection") == "close", (value, headers)
         assert ended in CLOSED, f"{value!r}: left open: {ended}"
+
+
+def test_a_refusal_says_connection_close(live_server):
+    """It closes, so it says so (RFC 9112 section 9.6 asks this of a server
+    that answers before the body is in): the 403, the 404 outside `/api/`, and
+    the 400 and 413 above, which have their own tests."""
+    cases = (
+        (_post_head("/api/board/load", 2, f"Origin: {FOREIGN}"), b"{}",
+         "HTTP/1.1 403 Forbidden"),
+        (_post_head("/not-the-api", 2), b"{}", "HTTP/1.1 404 Not Found"),
+    )
+    for lines, body, expected in cases:
+        data, ended = _converse(live_server, lines, body, shut_wr=True)
+        status, headers, _ = _reply(data)
+        assert status == expected, (data[:80], ended)
+        assert headers.get("connection") == "close", (expected, headers)
 
 
 def test_a_100_continue_is_not_offered_for_a_body_that_will_be_refused(live_server):
@@ -671,15 +730,23 @@ def test_a_100_continue_is_not_offered_for_a_body_that_will_be_refused(live_serv
                     "Expect: 100-continue"), "HTTP/1.1 403 Forbidden"),
         (_post_head("/api/board/load", emulator_server.MAX_BODY_BYTES + 1,
                     "Expect: 100-continue"), "HTTP/1.1 413 Content Too Large"),
+        # A length that is not a count: inviting the body would send the
+        # client's bytes to a server that then answers 400 and closes unread.
+        (_post_head("/api/board/load", "abc", "Expect: 100-continue"),
+         "HTTP/1.1 400 Bad Request"),
+        (_post_head("/api/board/load", "-5", "Expect: 100-continue"),
+         "HTTP/1.1 400 Bad Request"),
     )
-    for lines, status in cases:
+    for lines, expected in cases:
         data, ended = _converse(live_server, lines, shut_wr=True)
-        assert _statuses(data)[:1] == [status], (lines[2:], data[:80], ended)
+        status, headers, _ = _reply(data)
+        assert status == expected, (lines[2:], data[:80], ended)
+        assert headers.get("connection") == "close", (expected, headers)
     # And an acceptable request is still invited to continue.
     data, _ = _converse(live_server,
                         _post_head("/api/load", 2, "Expect: 100-continue"),
                         shut_wr=True)
-    assert _statuses(data)[:1] == ["HTTP/1.1 100 Continue"], data[:80]
+    assert data.startswith(b"HTTP/1.1 100 Continue\r\n"), data[:80]
 
 
 # --- a client that goes away is not an error --------------------------------

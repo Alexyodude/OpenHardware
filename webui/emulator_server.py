@@ -914,19 +914,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         parsed = urllib.parse.urlparse(self.path)
         if not parsed.path.startswith("/api/"):
-            self._send(404, b"not found", "text/plain; charset=utf-8")
+            self._send(404, b"not found", "text/plain; charset=utf-8",
+                       close=True)
             self._discard_body()
             return
         length = self._declared_length()
         if length is None:
-            # `rfile.read(-1)` reads until the peer closes, uncapped, and a
-            # non-numeric value used to raise out of `do_POST` with no reply
-            # sent. There is no length to drain, so the connection is closed
-            # and that is all: the body's extent is unknown.
-            self.close_connection = True
-            self._json(400, {"error": "Content-Length must be a non-negative "
-                                      "integer, got "
-                                      f"{self.headers.get('Content-Length', '')[:80]!r}"})
+            self._refuse_length()
             return
         if length > MAX_BODY_BYTES:
             # Checked from the header, before a byte is allocated. Reading a
@@ -941,8 +935,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # on that); a client that sends more than MAX_BODY_BYTES is still
             # reset past the cap, which is deliberate: this server will not
             # read a body it has already said it will not accept.
-            self._json(413, {"error": f"body of {length} bytes exceeds "
-                                      f"{MAX_BODY_BYTES}"})
+            self._refuse_oversize(length)
             self._discard_body()
             return
         raw = self.rfile.read(length) if length else b"{}"
@@ -977,6 +970,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             return None
 
+    def _refuse_length(self) -> None:
+        """400 for a Content-Length that is not a count. `rfile.read(-1)` reads
+        until the peer closes, uncapped, and a non-numeric value used to raise
+        out of `do_POST` with no reply sent. There is no length to drain, so
+        the connection is closed and that is all: the body's extent is
+        unknown."""
+        shown = self.headers.get("Content-Length", "")[:80]
+        self._json(400, {"error": "Content-Length must be a non-negative "
+                                  f"integer, got {shown!r}"}, close=True)
+
+    def _refuse_oversize(self, length: int) -> None:
+        self._json(413, {"error": f"body of {length} bytes exceeds "
+                                  f"{MAX_BODY_BYTES}"}, close=True)
+
     def handle_expect_100(self) -> bool:
         """Refuse a body this server would refuse before inviting it.
 
@@ -988,13 +995,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         checked here: it is not a security refusal and is not worth a second
         copy of the routing."""
         if not self._origin_is_allowed():
-            self.close_connection = True
             return False
         length = self._declared_length()
-        if length is not None and length > MAX_BODY_BYTES:
-            self.close_connection = True
-            self._json(413, {"error": f"body of {length} bytes exceeds "
-                                      f"{MAX_BODY_BYTES}"})
+        if length is None:
+            # Not a count: do not invite a body whose extent is unknown.
+            self._refuse_length()
+            return False
+        if length > MAX_BODY_BYTES:
+            self._refuse_oversize(length)
             return False
         return super().handle_expect_100()
 
@@ -1008,9 +1016,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         foreign page smuggle a request past the Origin check: its body was a
         complete, Origin-less `POST /api/load`, which is allowed, and it ran
         (a `text/plain` `fetch` with `no-cors` can send those bytes with no
-        preflight). `close_connection = True` below is what stops that, and
-        the drain is only what makes the close polite. Do not move one without
-        the other, and do not return before the first line.
+        preflight). Closing the connection is what stops that, and it is done
+        by the refusal itself, sent with `close=True` (`Connection: close`,
+        see `_send`): every caller of this has sent its reply that way. The
+        drain is only what makes the close polite.
 
         **Why the drain (OH-166 item 3).** A refusal is decided from the
         headers, so the body is still on its way when the reply goes out.
@@ -1032,7 +1041,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         request that declares more than the cap is drained up to the cap and
         then closed, not 413'd. Past the cap the close still resets.
         """
-        self.close_connection = True
         remaining = self._declared_length()
         if remaining is None:
             return  # no length to say how much is coming
@@ -1111,19 +1119,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if origin is None or origin in self.allowed_origins:
             return True
-        self._send(403, b"origin not allowed", "text/plain; charset=utf-8")
+        self._send(403, b"origin not allowed", "text/plain; charset=utf-8",
+                   close=True)
         return False
 
-    def _json(self, status: int, body: dict[str, object]) -> None:
+    def _json(self, status: int, body: dict[str, object], *,
+              close: bool = False) -> None:
         self._send(status, json.dumps(body).encode("utf-8"),
-                   "application/json; charset=utf-8")
+                   "application/json; charset=utf-8", close=close)
 
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
+    def _send(self, status: int, body: bytes, content_type: str, *,
+              close: bool = False) -> None:
+        """Send one reply. `close=True` is for a reply sent without reading the
+        whole request: it says so with `Connection: close` (RFC 9112 section
+        9.6 asks this of a server that answers before the body is in) and
+        closes the connection after the handler returns, so the bytes of the
+        unread body are never parsed as the next request (see
+        `_discard_body`)."""
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         # The page is served from this origin and talks only to it.
         self.send_header("Cache-Control", "no-store")
+        if close:
+            self.send_header("Connection", "close")
+            self.close_connection = True
         self.end_headers()
         self.wfile.write(body)
 
