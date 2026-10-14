@@ -291,14 +291,12 @@ class Recipe:
 #: `recipe_for` names the chip rather than failing to find a compiler.
 def _openhardware(*, variant: str, march: str, base: int,
                   extra_includes: tuple[str, ...] = (),
-                  bsp_includes: tuple[str, ...] = (),
-                  wire: bool = False) -> Recipe:
+                  bsp_includes: tuple[str, ...] = ()) -> Recipe:
     """A row for a board the repository's own core serves (see ARDUINO_LITE).
 
     **The three ESP32 rows differ in what each states** -- the variant,
-    the ISA string the compiler is told, the flash origin, which root the
-    vendor's pin names come from, and whether the board's description maps an
-    I2C controller, which is `wire` -- and everything else is the mechanism
+    the ISA string the compiler is told, the flash origin and which root the
+    vendor's pin names come from -- and everything else is the mechanism
     OH-148 built once for the C3. Written out three times it is the copy
     the C3 row's own comments warned against, so the mechanism lives here
     and each row states only what is its own. The API surface is exactly
@@ -336,15 +334,14 @@ def _openhardware(*, variant: str, march: str, base: int,
         linker_script="link.ld",
         extra_includes=extra_includes,
         bsp_includes=bsp_includes,
-        # **`Wire` is the one library this framework carries, and only where
-        # the variant's `oh_board.h` defines `OH_I2C_*`** (OH-161 step 5):
-        # the row exists exactly when the description maps an I2C controller,
-        # so a sketch naming `<Wire.h>` on a board without one gets the hint
-        # below and not a library that would not run. Compiled only for a
-        # sketch that names its header, the `Library` rule.
-        libraries=(
-            (Library("Wire.h", "libraries/Wire", ("libraries/Wire/Wire.cpp",)),)
-            if wire else ()),
+        # **`Wire` is the one library this framework carries**, and every
+        # variant's `oh_board.h` defines the `OH_I2C_*` it is written in
+        # (OH-161 step 5: the C3's, the C5's and the C6's halves). A chip
+        # whose description mapped no controller would need a hint row here
+        # for `Wire.h: No such file`, which retired with the last chip to
+        # gain one. Compiled only for a sketch that names its header, the
+        # `Library` rule.
+        libraries=(Library("Wire.h", "libraries/Wire", ("libraries/Wire/Wire.cpp",)),),
         # Every hint names the modelling decision the absence stands on, in
         # the pane the person is looking at (the OH-138 pattern).
         #
@@ -394,15 +391,6 @@ def _openhardware(*, variant: str, march: str, base: int,
             ("attachInterrupt",
              ("this model has no interrupt controller; the emulated core "
               "executes straight-line code only.")),
-            # Only on the rows without the library, so the absence it names
-            # is only ever a board whose description maps no I2C.
-            *(() if wire else (
-                ("Wire.h: No such file",
-                 (f"Wire needs an I2C controller, and this board's model maps "
-                  f"none -- {header} defines no OH_I2C_*. The ESP32-C3's and "
-                  f"ESP32-C5's have one; this chip's arrives with its own "
-                  f"half of OH-161 step 5.")),
-            )),
         ),
     )
 
@@ -475,7 +463,6 @@ RECIPES: dict[str, Recipe] = {
         extra_includes=(
             "framework-arduinoespressif32/variants/XIAO_ESP32C3",
         ),
-        wire=True,
     ),
     "ESP32-C5": _openhardware(
         variant="variants/xiao_esp32c5",
@@ -498,7 +485,6 @@ RECIPES: dict[str, Recipe] = {
         # `tools/import_pindefs.py --fetch` already brings it; see
         # `Recipe.bsp_includes`. A freestanding header, like the C3's.
         bsp_includes=("arduino-esp32/variants/XIAO_ESP32C5",),
-        wire=True,
     ),
     "ESP32-C6": _openhardware(
         variant="variants/xiao_esp32c6",

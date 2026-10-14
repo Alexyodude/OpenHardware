@@ -6,7 +6,7 @@
  * ## What this is a face on
  *
  * I2C0 in master mode, as the board's description models it
- * (`webui/boards/esp32c3.py` or `esp32c5.py`; the registers are the board's
+ * (`webui/boards/esp32c3.py`, `esp32c5.py` or `esp32c6.py`; the registers are the board's
  * `oh_board.h` macros, and a chip's differences are macros: no `#ifdef` on the
  * chip, one on whether the board has a register clock): bytes go into the DATA
  * FIFO, up to eight commands go into COMD0 to COMD7, and setting TRANS_START in
@@ -59,8 +59,11 @@
  * software reads DONE, so nothing here does.
  *
  * 5 is a transaction that raised neither TRANS_COMPLETE nor NACK within
- * 50 ms of SYSTIMER, which on this model happens only when `begin` was not
- * called: the controller's function clock is closed and answers nothing.
+ * 50 ms of SYSTIMER, which on this model happens only when the controller's
+ * function clock is closed and answers nothing: a C3 or a C5 whose sketch did
+ * not call `begin`. **A C6 comes out of reset with that clock open**, so a
+ * sketch that never began is not timed out there; the description refuses its
+ * first transaction by name instead (CTR's MS_MODE is clear, `serve_i2c`).
  * **That 5 is this model's, not the vendor's.** 2787dab allocates its buffers
  * only in `begin` (`Wire.cpp:44`) and returns 4 from `endTransmission`'s
  * NULL-buffer guard (`:452-455`) without reaching the bus; its 5 is a probe
@@ -70,34 +73,35 @@
  * ## What `begin` does, and what it cannot
  *
  * It opens the controller's clock gate -- and the register clock first,
- * where the board has one (`OH_I2C_BUS_CLOCK`, the C5's PCR; the model
- * stores it and checks only the function clock) -- and routes both pads
+ * where the board has one (`OH_I2C_BUS_CLOCK`, the C5's and C6's PCR; the
+ * model stores it and checks only the function clock) -- and routes both pads
  * through the GPIO matrix as the description's `i2c_pad` checks at every
  * TRANS_START: each pad on function 1 with its input on and a pull-up, the
  * signal out of the pad with its output enable from GPIO_ENABLE, and the
  * signal back in from the same pad. The pins are the vendor's `SDA` and `SCL`
  * from `pins_arduino.h` -- GPIO6 and GPIO7 on a C3, GPIO23 and GPIO24 on a
- * C5, `D4` and `D5` on both. Each pad's GPIO_PINn PAD_DRIVER is set, which
+ * C5, GPIO22 and GPIO23 on a C6, `D4` and `D5` on all three. Each pad's
+ * GPIO_PINn PAD_DRIVER is set, which
  * makes it open-drain as I2C wants; the model maps the register and stores
  * the bit, and `i2c_pad` does not check it.
  *
  * CTR is written whole, `OH_I2C_CTR_INIT`, as the HAL writes it: on a C3
  * `i2c_ll_master_init` (`i2c_ll.h:909-918` in the framework copy) sets
- * MS_MODE, CLK_EN, SDA_FORCE_OUT and SCL_FORCE_OUT, and on a C5
+ * MS_MODE, CLK_EN, SDA_FORCE_OUT and SCL_FORCE_OUT, and on a C5 or a C6
  * `i2c_hal_master_init` (v5.5 `i2c_hal.c:39-50`) sets MS_MODE and clears the
  * FORCE_OUTs -- **the bits mean opposite things**: set is open drain on the
- * C3 and direct output on the C5; everything else is 0. And before each
+ * C3 and direct output on the C5 and C6; everything else is 0. And before each
  * TRANS_START CONF_UPGATE is set, as
  * `i2c_hal_update_config` does by way of `i2c_ll_update` (`i2c_ll.h:143-146`).
  * The model stores CONF_UPGATE as a write-trigger 0 and does nothing with it,
  * so no run can tell the write is there; it is here because the HAL does it.
  *
  * **One thing silicon wants that this does not write.** The controller's
- * reset is released out of reset on both parts, so nothing writes it: on a C3
- * it is PERIP_RST_EN0 bit 7, which the model maps no register for (writing it
- * would only fault), and on a C5 PCR_I2C_RST_EN, bit 1 of PCR_I2C_CONF
- * (`pcr_reg.h:272`, default 0), which `install_i2c` maps and nothing here
- * sets. The model checks the routing and the function clock and not that.
+ * reset is released out of reset on all three parts, so nothing writes it: on
+ * a C3 it is PERIP_RST_EN0 bit 7, which the model maps no register for
+ * (writing it would only fault), and on a C5 or a C6 PCR_I2C_RST_EN, bit 1 of
+ * PCR_I2C_CONF (`pcr_reg.h:272` on a C5, :232 on a C6, default 0), which
+ * `install_i2c` maps and nothing here sets. The model checks the routing and the function clock and not that.
  *
  * ## Why `setClock` does nothing
  *
@@ -130,7 +134,7 @@ void reg_clear(uint32_t address, uint32_t bits) {
 }
 
 /* One pad of the bus, as `i2c_pad` reads it back. OUT_SEL carries the signal
- * in its low bits (8 on a C3, 9 on a C5); OEN_SEL (OE_SEL on a C5,
+ * in its low bits (8 on a C3 and a C6, 9 on a C5); OEN_SEL (OE_SEL on a C5,
  * `gpio_reg.h:6175`) makes GPIO_ENABLE the pad's output enable; PAD_DRIVER
  * makes the pad open-drain. */
 void route(uint8_t gpio, uint32_t signal) {

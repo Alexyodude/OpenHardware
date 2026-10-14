@@ -2729,6 +2729,14 @@ def test_a_c5_zero_length_probe_is_nacked_with_2_and_a_write_with_data_with_4():
     assert words == ["2", "4", "4"], words
 
 
+def test_a_c5_nacked_probe_does_not_make_the_next_probe_read_as_nacked():
+    """The scanner of `WIRE_SCAN_SKETCH` on a C5, with the part at 0x18: 0x19
+    NACKs and 0x18 acknowledges, so the NACK INT_RAW holds is cleared before
+    the next transaction."""
+    words, _ = _c5_run(WIRE_SCAN_SKETCH, 2)
+    assert words == ["2", "0"], f"0x19 NACKs, 0x18 acknowledges: {words}"
+
+
 def test_a_c5_wire_sketch_that_never_began_times_out_with_a_closed_gate():
     """PCR_I2C_SCLK_EN resets 0 on the C5, so with no `begin` nothing answers
     and `endTransmission` gives up after Wire's 50 ms of SYSTIMER."""
@@ -2739,3 +2747,91 @@ def test_a_c5_wire_sketch_that_never_began_times_out_with_a_closed_gate():
     assert words == ["5"], f"a part was on the bus, and the gate was closed: {words}"
     fifty = 50 * steps_per_millisecond(esp32c5)
     assert retired >= fifty, f"gave up after {retired} steps, before 50 ms ({fifty})"
+
+
+# --- Wire on the XIAO ESP32-C6 (OH-161 step 5, slice 3: the C6's half) --------
+#
+# The sketches above, compiled for the C6 and run on it. The C6 reaches the
+# bus on GPIO22 and GPIO23 (the vendor's pins_arduino.h SDA and SCL, which are
+# D4 and D5 here as on the other two), its clock gate is in PCR and **resets
+# OPEN**, and its matrix registers are the C3's shape; none of that is visible
+# to a sketch, except the gate, which is what the last test below is about.
+
+C6_BOARD = "XIAO-ESP32-C6-DIP"
+
+
+def _c6_session(sketch: str, *, device: bool = True, celsius: float = 25.0) -> api.BoardSession:
+    """A C6 session over `sketch`, an MCP9808 on D4/D5 (or none) held."""
+    needs_riscv32()
+    from webui import compile as compiler
+
+    try:
+        built = compiler.build(C6_BOARD, sketch)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    assert built.ok, built.diagnostics
+    session = api.load_firmware(C6_BOARD, built.image, base=compiler.recipe_for(C6_BOARD).base)
+    if device:
+        session.drive({}, None, {"u1": dict(MCP9808_ON_D4_D5, celsius=celsius)})
+    return session
+
+
+def _c6_run(sketch: str, count: int, *, device: bool = True, celsius: float = 25.0,
+            limit: int = 3_000_000):
+    """The words `sketch` prints on a C6 with an MCP9808 on D4/D5 (or none),
+    and the session's retired count after them."""
+    with _c6_session(sketch, device=device, celsius=celsius) as session:
+        words = _printed_tokens(session, count, limit=limit)
+        assert session.status == "running", (session.status, session.detail, words)
+        return words, session.retired
+
+
+def test_a_c6_wire_sketch_reads_the_mcp9808_ids_through_the_controller():
+    """The two ID reads of DS25095A 5.1.4 and 5.1.5, 0x0054 (84) and 0x0400
+    (1024), each as a write ended by a STOP and as a repeated START."""
+    words, _ = _c6_run(WIRE_SKETCH, 6)
+    assert words == ["0", "2", "84", "0", "2", "1024"], (
+        f"status, bytes and value of each read: {words}")
+
+
+def test_a_c6_wire_sketch_reads_ta_at_the_held_temperature():
+    """25.0 C prints 400 and 49552 (Register 5-4: 25.0 / 0.0625, and the
+    comparison flags in bits 15:13 against the power-on limits)."""
+    words, _ = _c6_run(WIRE_TA_SKETCH, 2)
+    assert words == ["400", "49552"], words
+
+
+def test_a_c6_wire_sketch_with_nothing_on_the_bus_is_nacked_and_reads_nothing():
+    words, _ = _c6_run(WIRE_SKETCH, 6, device=False)
+    assert words == ["4", "0", "-1", "0", "0", "-1"], words
+
+
+def test_a_c6_zero_length_probe_is_nacked_with_2_and_a_write_with_data_with_4():
+    words, _ = _c6_run(WIRE_PROBE_SKETCH, 3, device=False)
+    assert words == ["2", "4", "4"], words
+
+
+def test_a_c6_nacked_probe_does_not_make_the_next_probe_read_as_nacked():
+    """The scanner of `WIRE_SCAN_SKETCH`, with the part at 0x18."""
+    words, _ = _c6_run(WIRE_SCAN_SKETCH, 2)
+    assert words == ["2", "0"], f"0x19 NACKs, 0x18 acknowledges: {words}"
+
+
+def test_a_c6_wire_sketch_that_never_began_is_refused_and_does_not_time_out():
+    """**Not the C3's and C5's 5.** PCR_I2C_SCLK_EN resets 1 on the C6, so a
+    sketch with no `begin` is not stopped by a closed gate and does not wait
+    out Wire's 50 ms: CTR comes out of reset 0x208, MS_MODE clear, and the
+    first transaction is refused by name (slave mode is not modelled), the
+    session stopped and nothing printed. On silicon the same sketch would be
+    a master that was never configured; the model says which register says
+    so."""
+    from tests.webui.esp32_timing import steps_per_millisecond
+    from webui.boards import esp32c6
+
+    with _c6_session(WIRE_NO_BEGIN_SKETCH) as session:
+        words = _printed_tokens(session, 1, limit=20_000_000)
+        assert words == [], words
+        assert session.status == "stopped", (session.status, session.detail)
+        assert "MS_MODE clear (CTR 0x208)" in session.detail, session.detail
+        assert session.retired < 50 * steps_per_millisecond(esp32c6), (
+            f"refused after {session.retired} steps, well inside Wire's 50 ms")
