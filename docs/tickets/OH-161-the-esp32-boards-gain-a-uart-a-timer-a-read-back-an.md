@@ -58,7 +58,6 @@ touches:
 - webui/devices/**
 - webui/static/emulator.js
 - tests/webui/test_mcp9808.py
-- tests/webui/test_pin_view.py
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
@@ -796,3 +795,5 @@ CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: opt
 **Note 2026-10-14:** step 5 slice 1c review round, fix commit on top of cd2a81c: INT_CLR held by an address-scanner test (2 then 0; with the INT_CLR write removed it read 2 2); CTR written whole as i2c_ll_master_init (0x113, was 0x21b) and CONF_UPGATE set before TRANS_START (the model stores it as a write-trigger 0, so no run can see it); write overflow latched, endTransmission 1 (31 bytes here, vendor 128); GPIO_PINn mapped at reset 0 in esp32c3.py and PAD_DRIVER set on SDA and SCL only; vendor write overloads; kept/dropped deferred write and FIFO bound tests (each seen to fail by mutation: the deferred_ clear in beginTransmission removed gave 0 and -1, the bound + 1u stopped the session on MCP9808's read-only refusal, the old requestFrom gave 84 for 1024); compiled-sources check records the compiler's files; i2c_hw_cmd_t widths parsed for ACK_EN, ACK_EXP, ACK_VAL and the op shift. Counts: test_compile 105 passed 1 skipped 1 failed (OH-166 test_a_failed_build_leaves_nothing_behind); test_board_run + test_mcp9808 + test_esp32c3_board + test_pin_view 209 passed 1 failed (test_an_upload_from_another_origin_is_refused, ConnectionAbortedError on the loaded machine, passes alone).
 
 **Note 2026-10-14:** step 5 slice 1c last round, 65da61f: a zero-byte requestFrom at the deferred write's own address clears the deferral (vendor Wire.cpp:494), a mismatched one keeps it (:490-493); seen to fail first, ['0','2','1024'] against the old keep. write(const char*, size_t) added; the overload compile test failed first on the invalid conversion. A note at GPIO_PIN_AT_RESET: pin_states ignores PAD_DRIVER. Counts: board_run + esp32c3_board + pin_view + mcp9808 211 passed; test_compile -k wire/overload/restates/vendors_own 6 passed. The vendor's driver also sends the deferred write ahead of a zero-byte read; this model does not.
+
+**Note 2026-10-14:** 2026-10-14 lends tests/webui/test_pin_view.py (itself on loan from OH-172) to OH-171 for the STM32C5 board key rename; it comes back here when OH-171 closes.
