@@ -5,6 +5,22 @@ title: One board is called XIAO-XIAO STM32C5-SMD, with its prefix doubled, and t
 status: open
 priority: P3
 created: '2026-09-06'
+touches:
+- webui/boards/XIAO-*STM32C5-SMD.*
+- webui/boards/catalogue.py
+- tests/webui/test_board_catalogue.py
+- README.md
+- docs/research/board-models/README.md
+- docs/research/board-models/sources.json
+- tools/compose_board_3d.py
+- tools/import_3d_model.py
+- tests/rules/test_compose_board_3d.py
+- tests/rules/test_import_board.py
+- tools/import_pindefs.py
+- tests/rules/test_import_pindefs.py
+- tests/rules/test_inventory.py
+- tests/webui/test_pin_view.py
+- CLAUDE.md
 ---
 
 One board is called `XIAO-XIAO STM32C5-SMD`, with the prefix doubled and a space where every sibling has a hyphen.
@@ -38,3 +54,5 @@ STEPS:
 4. A test that no board file's name repeats its own prefix, so the next importer that does this is caught by the suite rather than by a reader twelve days later.
 
 Found while finishing OH-170. Not fixed there: a rename is not a pin definition, and OH-170's claim is on the pin data.
+
+**Note 2026-10-14:** 2026-10-14 starts in lane3. Plan: C:/Users/Alexyodude/scratch/oh171/plan.md (opus design pass, read-only). Seeed's own files give the name: footprint file XIAO-STM32C5-SMD.kicad_mod (only its line 1 declares 'XIAO-XIAO STM32C5-SMD'), symbol XIAO-STM32C5-SMD, product 'XIAO STM32C5 v1.0', board file 'XIAO STM32C5.kicad_pcb'. The key becomes XIAO-STM32C5-SMD; the vendor's declared string is kept as source.declared_name. Borrows from OH-163 (compose_board_3d, import_3d_model, test_compose_board_3d, test_import_board), from OH-172 (import_pindefs, test_import_pindefs, test_inventory), test_pin_view from OH-161 and CLAUDE.md from OH-149; claims the unclaimed board files, catalogue, its test, README and the board-models research files.
