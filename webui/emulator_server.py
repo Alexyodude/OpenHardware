@@ -386,9 +386,10 @@ def _optional_int(payload: dict[str, object], name: str) -> int | None:
     try:
         return int(value, 0)
     except ValueError as exc:
-        # `int`'s message carries the whole string it was handed.
+        # `int`'s own reason is kept; CPython cuts the string in it at 200
+        # characters (`%.200R`), so it cannot echo a posted body whole.
         raise ApiError(f"{name} must be an integer or a hex string, "
-                       f"got {reprlib.repr(value)}") from exc
+                       f"got {reprlib.repr(value)}: {exc}") from exc
 
 
 def _image_bytes(payload: dict[str, object]) -> bytes:

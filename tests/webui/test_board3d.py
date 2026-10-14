@@ -3674,6 +3674,8 @@ class El {
   fire(type) { for (const fn of this.listeners[type] ?? []) fn({ target: this }); }
 }
 const elements = {};
+const windowListeners = {};
+globalThis.addEventListener = (type, fn) => { (windowListeners[type] ??= []).push(fn); };
 globalThis.window = globalThis;
 globalThis.document = {
   activeElement: null,
@@ -3682,7 +3684,9 @@ globalThis.document = {
   createTextNode: (words) => text(words),
   listeners: {},
   addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); },
-  fire(type) { for (const fn of this.listeners[type] ?? []) fn({ target: this }); },
+  fire(type, extra = {}) {
+    for (const fn of this.listeners[type] ?? []) fn({ target: this, ...extra });
+  },
 };
 elements["board-pick"] = Object.assign(new El("select"), { value: given.layout.board });
 globalThis.fetch = async (url) => {
@@ -3690,12 +3694,18 @@ globalThis.fetch = async (url) => {
   if (url === "/models/index.json") return { ok: true, json: async () => ({ boards: {} }) };
   if (url.startsWith("/api/board/state")) {
     fetched.push(url);
-    return { ok: true, json: async () => ({ devices: reported }) };
+    // What the board reports is what it reports when asked, and the answer
+    // may be slow: `stateDelays` hands one delay to each request in turn.
+    const asked = reported;
+    await new Promise((done) => setTimeout(done, stateDelays.shift() ?? 0));
+    return { ok: true, json: async () => ({ devices: asked }) };
   }
   throw new Error(`unexpected ${url}`);
 };
 
 const fetched = [];
+const stateDelays = [];
+let landing = null;
 let bench = [];
 let accept = true;
 let wires = [];
@@ -3705,7 +3715,12 @@ const calls = [];
 globalThis.__scene = {
   mount() {}, showBoard() {}, setLevels() {}, refreshTheme() {},
   connections: () => wires, circuit: () => circuit, parts: () => bench,
-  whenPosted: async () => {},
+  // The drive lands after `post_delay`, and what the board then reports is
+  // `landing`: a refetch made before that sees the old state.
+  whenPosted: async () => {
+    await new Promise((done) => setTimeout(done, given.post_delay ?? 0));
+    if (landing) reported = landing;
+  },
   setCelsius(index, celsius) { calls.push([index, celsius]); return accept; },
   removePart: () => true, disconnect: () => true, clearBench() {}, addPart: async () => null,
 };
@@ -3735,7 +3750,8 @@ const snapshot = () => ({
 for (const one of given.scenarios) {
   bench = one.bench; accept = one.accept ?? true; calls.length = 0;
   wires = one.connections ?? []; circuit = one.circuit ?? null; reported = {};
-  fetched.length = 0;
+  fetched.length = 0; stateDelays.length = 0; landing = one.landing ?? null;
+  given.post_delay = one.post_delay ?? 0;
   window.boardPins.levels({ D1: "input" }, one.devices);
   const out = { rows: rows() };
   const field = fields()[0];
@@ -3763,6 +3779,7 @@ for (const one of given.scenarios) {
     if (step.connections) wires = step.connections;
     if (step.reported) reported = step.reported;
     if (step.accept !== undefined) accept = step.accept;
+    if (step.state_delays) stateDelays.push(...step.state_delays);
     if (step.do === "levels") window.boardPins.levels({ D1: "input" }, step.devices);
     if (step.do === "focus") document.activeElement = fields()[step.at ?? 0];
     if (step.do === "blur") {
@@ -3774,9 +3791,15 @@ for (const one of given.scenarios) {
     if (step.do === "type") {
       const typed = fields()[step.at ?? 0];
       typed.value = step.value;
+      // Chrome fires "change" inside the focus change that a press caused,
+      // with the body already the active element.
+      if (step.unfocus) document.activeElement = null;
       typed.fire("change");
     }
-    if (step.do === "pointer") document.fire(step.value);
+    if (step.do === "pointer") document.fire(step.value, { pointerId: step.id });
+    if (step.do === "window") {
+      for (const fn of windowListeners[step.value] ?? []) fn({ target: globalThis });
+    }
     await new Promise((done) => setTimeout(done, step.wait ?? 5));
     out.snaps.push(snapshot());
   }
@@ -4025,10 +4048,92 @@ def test_a_part_the_board_refused_is_not_said_to_be_waiting_to_be_told(tmp_path)
          "circuit": {"ok": True, "note": PANEL_REFUSAL, "refused": True}},
         {"bench": [PANEL_MCP], "devices": {},
          "circuit": {"ok": True, "note": None, "refused": False}},
+        {"bench": [PANEL_MCP], "devices": {},
+         "circuit": {"ok": True, "refused": False, "unreached": True,
+                     "note": "What the bench drives did not reach the board: TypeError"}},
     ])
-    refused, waiting = (one["rows"][0]["lines"][0] for one in got)
+    refused, waiting, unreached = (one["rows"][0]["lines"][0] for one in got)
     assert "refused" in refused and "note" in refused and "not been told" not in refused, refused
     assert "not been told" in waiting, waiting
+    # A post that never arrived was not refused by anyone.
+    assert ("did not reach" in unreached and "refused" not in unreached
+            and "not been told" not in unreached), unreached
+
+
+def test_a_change_that_arrives_inside_a_press_does_not_rebuild_under_it(tmp_path):
+    """**Found in real Chrome**: "change" fires inside the focus change, with
+    the body already the active element and the pointer still down, so the
+    change handler's rebuild (and the refetch's, ~100 ms into the press)
+    replaced the "remove" or unwire cross the person was pressing, and the
+    click never arrived. Both wait for the release."""
+    later = dict(PANEL_VIEW, celsius=30.0, ta=0xC1E0)
+    one_more = [PANEL_MCP, PANEL_RESISTOR]
+    got = run_panel(tmp_path, [{
+        "bench": [PANEL_MCP], "devices": {"part-1": PANEL_VIEW}, "steps": [
+            {"do": "focus"},
+            {"do": "wires", "bench": one_more},
+            {"do": "pointer", "value": "pointerdown", "id": 1},
+            {"do": "type", "value": "30", "unfocus": True, "reported": {"part-1": later},
+             "wait": 30},
+            {"do": "pointer", "value": "pointerup", "id": 1, "wait": 30},
+        ]}])[0]["snaps"]
+    pressed, released = got[3], got[4]
+    assert pressed["state_fetches"] == 1, ("the refetch has landed in the press", pressed)
+    assert pressed["rows"] == 1, ("rebuilt under the pointer", pressed)
+    assert released["rows"] == 2, ("and rebuilt once it is up", released)
+    assert "0xC1E0" in released["lines"][0][1], released
+
+
+def test_the_state_is_asked_for_only_after_the_drive_has_landed(tmp_path):
+    """A refetch made while the drive is still in flight reads the board as it
+    was: the stub's drive lands after 40 ms and only then reports 30 C."""
+    later = dict(PANEL_VIEW, celsius=30.0, ta=0xC1E0)
+    got = run_panel(tmp_path, [{
+        "bench": [PANEL_MCP], "devices": {"part-1": PANEL_VIEW}, "post_delay": 40,
+        "landing": {"part-1": later}, "steps": [
+            {"do": "type", "value": "30", "wait": 150}]}])[0]["snaps"][0]
+    assert "0xC1E0" in got["lines"][0][1], ("the line is what the landed drive left", got)
+
+
+def test_an_older_state_answer_does_not_overwrite_a_newer_one(tmp_path):
+    """Two temperatures committed close together ask twice, and the answers
+    can come back the other way round: the first is slow here, and when it
+    lands it is no longer the newest question."""
+    middle = dict(PANEL_VIEW, celsius=30.0, ta=0xC1E0)
+    newest = dict(PANEL_VIEW, celsius=31.0, ta=0xC1F0)
+    got = run_panel(tmp_path, [{
+        "bench": [PANEL_MCP], "devices": {"part-1": PANEL_VIEW}, "steps": [
+            {"do": "type", "value": "30", "reported": {"part-1": middle},
+             "state_delays": [80, 0], "wait": 10},
+            {"do": "type", "value": "31", "reported": {"part-1": newest}, "wait": 200},
+        ]}])[0]["snaps"][1]
+    assert got["state_fetches"] == 2, got
+    assert "0xC1F0" in got["lines"][0][1] and "0xC1E0" not in got["lines"][0][1], got
+
+
+def test_a_press_that_never_ends_does_not_hold_the_bench_back(tmp_path):
+    """A context menu can swallow the release and a switch of window can take
+    it mid-press: losing the window (or the page being hidden) ends every
+    press, so the rebuild a blur put off is not owed until the next click.
+    **And with two fingers down, the first one up ends nothing**: the
+    pointers are kept by id."""
+    one_more = [PANEL_MCP, PANEL_RESISTOR]
+    held = [{"do": "focus"}, {"do": "wires", "bench": one_more},
+            {"do": "pointer", "value": "pointerdown", "id": 1}]
+    base = {"bench": [PANEL_MCP], "devices": {"part-1": PANEL_VIEW}}
+    got = run_panel(tmp_path, [
+        {**base, "steps": [*held, {"do": "blur"}, {"do": "window", "value": "blur", "wait": 30}]},
+        {**base, "steps": [*held, {"do": "blur"},
+                           {"do": "pointer", "value": "visibilitychange", "wait": 30}]},
+        {**base, "steps": [*held, {"do": "pointer", "value": "pointerdown", "id": 2},
+                           {"do": "blur"},
+                           {"do": "pointer", "value": "pointerup", "id": 1, "wait": 30},
+                           {"do": "pointer", "value": "pointerup", "id": 2, "wait": 30}]},
+    ])
+    for name, one in zip(("window blur", "visibilitychange"), got[:2]):
+        assert (one["snaps"][3]["rows"], one["snaps"][4]["rows"]) == (1, 2), (name, one["snaps"])
+    fingers = got[2]["snaps"]
+    assert [fingers[i]["rows"] for i in (4, 5, 6)] == [1, 1, 2], fingers
 
 
 def test_the_page_hands_the_devices_of_the_state_to_the_panel():

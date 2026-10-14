@@ -2321,6 +2321,17 @@ def test_an_integer_field_refusal_does_not_echo_a_posted_value_whole(live_server
         assert caught.value.code == 400 and len(error) < 500, (name, caught.value.code, len(error))
 
 
+def test_a_hex_string_that_is_not_one_keeps_the_reason_int_gave(live_server):
+    """`base="zz"` is refused naming the field, the value, and why `int` would
+    not take it -- the part of the reason that says what was wrong with it."""
+    post(live_server, "/api/board/load", upload(board=BOARD, base=BLINK_LOAD))
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        post(live_server, "/api/board/load", upload(board=BOARD, base="zz"))
+    error = json.loads(caught.value.read())["error"]
+    assert caught.value.code == 400 and error.startswith("base must be an integer or a hex "), error
+    assert "'zz'" in error and "invalid literal for int()" in error, error
+
+
 def test_two_long_device_ids_that_share_a_prefix_are_told_apart_in_a_refusal():
     """Ids are bounded at 64 characters and `reprlib` cuts a string at 30, so
     two ids that differ only after that printed the same name. A refusal

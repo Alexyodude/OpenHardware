@@ -134,13 +134,25 @@ let served = {};
 const celsiusFields = new Map();
 const servedLines = new Map();
 
-//: Whether a pointer is down, and whether a rebuild of the bench was put off
-//: because it was. A field losing focus rebuilds the bench it had frozen, and
-//: the press that took the focus may be on "remove" or an unwire cross in
-//: that bench: replaced between the press and its release, the click would
-//: land on a node that is gone.
-let pressed = false;
+//: The pointers that are down, by id, and whether a rebuild of the bench was
+//: put off because one was. A field losing focus rebuilds the bench it had
+//: frozen, and the press that took the focus may be on "remove" or an unwire
+//: cross in that bench: replaced between the press and its release, the click
+//: would land on a node that is gone. A set and not a flag, so that with two
+//: fingers down the first one up does not end the press.
+const pressing = new Set();
 let rebuildOwed = false;
+
+//: The state requests the panel has made, so that an answer to an older one
+//: that lands after a newer one is dropped (see `askForTheState`).
+let asked = 0;
+
+/** Rebuild the bench, but not under a pointer that is down: in Chrome a
+ *  field's "change" fires inside the focus change that a press caused. */
+function rebuildSoon() {
+  if (pressing.size) rebuildOwed = true;
+  else renderBench();
+}
 
 //: What Register 5-7's two bits make one step of TA, in degrees C
 //: (DS25095A p.29). The panel states the step so a temperature typed at a
@@ -566,9 +578,14 @@ function servedWords(part) {
   if (!seen) {
     // The bench note leads with the board's refusal, and "not told yet" would
     // be false of a part it was told of and refused.
-    if (scene.circuit()?.refused) {
+    const said = scene.circuit();
+    if (said?.refused) {
       return "The board refused what the bench drives, so this part is not on " +
              "its bus: the bench note says why.";
+    }
+    if (said?.unreached) {
+      return "What the bench drives did not reach the board, so this part is " +
+             "not on its bus: the bench note says why.";
     }
     return "The board has not been told of this part yet: it joins the bus " +
            "once a program is running and the part is fully wired.";
@@ -605,14 +622,19 @@ function refreshServed() {
  * none, and the line would keep the old temperature until Run or Step.
  */
 async function askForTheState() {
+  const mine = ++asked;
   try {
     await scene.whenPosted();
     const response = await fetch("/api/board/state");
     if (!response.ok) {
       throw new Error(`/api/board/state answered ${response.status}`);
     }
-    served = (await response.json()).devices ?? {};
-    renderBench();
+    const devices = (await response.json()).devices ?? {};
+    // Two temperatures committed close together ask twice, and the answers
+    // may come back the other way round: only the newest question's counts.
+    if (mine !== asked) return;
+    served = devices;
+    rebuildSoon();
   } catch (error) {
     console.warn(`Could not read back what the board reports: ${error}`);
   }
@@ -646,12 +668,9 @@ function deviceControls(index, part) {
     } else {
       field.value = String(scene.parts()[at].celsius);
     }
-    renderBench();
+    rebuildSoon();
   });
-  field.addEventListener("blur", () => {
-    if (pressed) rebuildOwed = true;
-    else renderBench();
-  });
+  field.addEventListener("blur", rebuildSoon);
   celsiusFields.set(part.id, field);
   const heading = document.createElement("p");
   heading.className = "bench-why";
@@ -826,15 +845,28 @@ function mountBench() {
   // A wire made by dragging happens inside the canvas and nothing else sees
   // it; `board3d.js` says so with an event rather than calling in here.
   $(CANVAS).addEventListener("wires-changed", renderBench);
-  const released = () => {
-    pressed = false;
-    // After the click that follows the release, not before it.
-    if (rebuildOwed) setTimeout(renderBench, 0);
+  // After the click that follows the release, not before it.
+  const flush = () => {
+    if (pressing.size || !rebuildOwed) return;
     rebuildOwed = false;
+    setTimeout(renderBench, 0);
   };
-  document.addEventListener("pointerdown", () => { pressed = true; });
-  document.addEventListener("pointerup", released);
-  document.addEventListener("pointercancel", released);
+  const lifted = (event) => {
+    pressing.delete(event.pointerId);
+    flush();
+  };
+  // A release that never comes -- a context menu that swallowed it, a
+  // switch to another window mid-press -- must not hold the bench back for
+  // good, so losing the window ends every press too.
+  const abandoned = () => {
+    pressing.clear();
+    flush();
+  };
+  document.addEventListener("pointerdown", (event) => pressing.add(event.pointerId));
+  document.addEventListener("pointerup", lifted);
+  document.addEventListener("pointercancel", lifted);
+  window.addEventListener("blur", abandoned);
+  document.addEventListener("visibilitychange", abandoned);
   $(MENU).addEventListener("toggle", () => {
     if ($(MENU).open) renderTree();
   });

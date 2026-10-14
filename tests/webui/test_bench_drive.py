@@ -230,13 +230,15 @@ def layout(board: str = BOARD) -> dict:
 #: added by default. `add` takes the kind (the resistor by default), `unwire`
 #: a terminal and an index, `celsius` an index and a temperature, and
 #: `remove` an index; `returned` collects what `celsius` and `remove` answer
-#: and `listing` is `parts()` at the end. `api` refuses the first `given.refusing` posts with
-#: `given.refusal`, answers 200 to the rest, and keeps them all, in order.
+#: and `listing` is `parts()` at the end. `api` loses the first `given.unreaching` posts in
+#: transit, refuses the next `given.refusing` with `given.refusal`, answers 200 to
+#: the rest, and keeps them all, in order.
 STEPS = r"""
 const posted = [];
 api = async (url, options) => {
   if (url !== "/api/board/drive") throw new Error(`unexpected ${url}`);
   posted.push(JSON.parse(options.body));
+  if (posted.length <= (given.unreaching ?? 0)) throw new TypeError("fetch failed");
   if (posted.length <= (given.refusing ?? 0)) {
     return { ok: false, json: async () => ({ error: given.refusal, reason: "drive-refused" }) };
   }
@@ -252,6 +254,7 @@ const returned = [];
 const after = [];
 const notes = [];
 const refused = [];
+const unreached = [];
 const last = (at) => at ?? parts.length - 1;
 for (const [verb, ...rest] of given.steps) {
   if (verb === "show") page.showBoard(layouts[rest[0]], null);
@@ -270,8 +273,9 @@ for (const [verb, ...rest] of given.steps) {
   after.push(posted.length);
   notes.push(page.circuit()?.note ?? null);
   refused.push(page.circuit()?.refused ?? null);
+  unreached.push(page.circuit()?.unreached ?? null);
 }
-console.log(JSON.stringify({ posted, after, notes, refused, warned, returned,
+console.log(JSON.stringify({ posted, after, notes, refused, unreached, warned, returned,
                              listing: page.parts() }));
 """
 
@@ -356,6 +360,20 @@ def test_a_refused_drive_is_said_in_the_bench_note_until_one_is_accepted(tmp_pat
     # And `circuit()` says in a field, not only in the note's words, that the
     # board refused: the panel tells a refused part from one not yet told of.
     assert got["refused"] == [True, True, True, True, False], got["refused"]
+
+
+def test_a_post_that_never_arrived_is_not_called_a_refusal(tmp_path):
+    """`circuit().refused` is the board's answer, and a transport failure is
+    nobody's: the panel says "did not reach the board" for it and never
+    "refused", and the next accepted post clears it as it clears a refusal."""
+    running = {"D1": "input", "D2": "input"}
+    got = run_page(tmp_path, STEPS, {
+        "layout": layout(), "unreaching": 1,
+        "steps": [["levels", running], ["levels", running], ["add"],
+                  ["connect", "D1", "lead A"], ["connect", "GND", "lead B"]]})
+    assert got["unreached"] == [True, True, True, True, False], got["unreached"]
+    assert got["refused"] == [False, False, False, False, False], got["refused"]
+    assert got["notes"][0].startswith("What the bench drives did not reach the board: "), got["notes"]
 
 
 def test_a_bench_that_does_not_solve_lets_go_of_nothing(tmp_path):

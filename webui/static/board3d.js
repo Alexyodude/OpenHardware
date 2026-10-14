@@ -664,6 +664,9 @@ const view = {
   //: The sentence for the last post the board refused or never received, or
   //: null once one is accepted. `circuit()` puts it in the bench note.
   refusal: null,
+  //: Whether `refusal` is a post that never reached the board (a transport
+  //: failure) rather than one the board answered and refused.
+  unreached: false,
   //: Pin name -> EVERY marker drawn for it, and the plural is OH-117.
   //:
   //: **A name can mean more than one pad and this held one.** An Arduino Uno
@@ -2621,7 +2624,8 @@ export function circuit() {
   if (!view.circuit) return null;
   const note = [view.refusal, view.circuit.note].filter(Boolean).join(" ");
   return { ok: view.circuit.ok, note: note || null, supply: view.supply,
-           refused: view.refusal !== null };
+           refused: view.refusal !== null && !view.unreached,
+           unreached: view.refusal !== null && view.unreached };
 }
 
 /** Everything currently joined. For the page, and for a test. */
@@ -3088,8 +3092,9 @@ function postInputs(levels, volts = {}, devices = {}) {
   }
   view.posted = stated;
   const body = JSON.stringify({ board, levels, volts, devices });
-  const refused = (sentence) => {
+  const refused = (sentence, unreached = false) => {
     view.refusal = sentence;
+    view.unreached = unreached;
     console.warn(sentence);
     announce();
   };
@@ -3104,7 +3109,8 @@ function postInputs(levels, volts = {}, devices = {}) {
         announce();
       }
     })
-    .catch((error) => refused(`What the bench drives did not reach the board: ${error}`));
+    .catch((error) => refused(
+      `What the bench drives did not reach the board: ${error}`, true));
 }
 
 /**
