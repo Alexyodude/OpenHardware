@@ -59,8 +59,6 @@ touches:
 - webui/compile.py
 - tests/webui/test_compile.py
 - webui/emulator_server.py
-- tools/import_3d_model.py
-- tests/rules/test_import_3d_model.py
 ---
 
 A sketch on an ESP32 board here can set a pin high and wait; it cannot print, time, read a pin, or talk to anything. That is the whole API, and it is honest about it -- every absence carries a hint naming the modelling decision (OH-138) -- but the decisions are now the gap.
@@ -838,3 +836,5 @@ CONFIRMED FOR THE OWNER, with the design's own strongest objection recorded: opt
 **Note 2026-10-15:** Step 5 slice 4d (aef2fd5): the MCP9808's real PARTS row, a bare MSOP-8. Eight terminals named from DS25095A Table 3-1 (p.11) by KiCad footprint pad NUMBER, located by the new pad_tips (lead_tips clusters at 1.27 mm and orders by x: it finds 5 tips on this mesh). Footprint fetched from GitLab kicad-footprints into the cache, read by tools/kicad.py. Cited: IDD 200 uA typ (p.3), VIH 0.7 VDD, VIL 0.3 VDD (p.4). Pad 1's tip sits on the model's own pin-1 dimple side; tips are 0.65 mm apart, so parts.js targetRadius = 0.29. Not yet done: the browser watch (pick it from the menu, wire the seven pins). The 3 bench_drive tests needed a rebuilt riscv32.dll in lane4 (stale, environmental); test_compose_board_3d was not run in full (about 1.5 h).
 
 **Note 2026-10-15:** Slice 4d review round (the commit after 10bc751): the MSOP-8 footprint is now pinned to GitLab commit f8a45b46 and to 4,572 bytes / sha256 c85207be..., checked on every read; part_pads is tested without OCP; correction to the note above: lead_tips finds FEWER THAN EIGHT tips on this mesh (5 was measured once and is not asserted), and a pad_tips tip is the lowest-ring average, x +-2.095, 0.148 mm inboard of the foot-face centre (not its centre). The 3D model (STEP) is still fetched from KiCad's master, unpinned: a follow-up.
+
+**Note 2026-10-15:** 2026-10-15: slice 4d merged (master 7b81ee3); returns tools/import_3d_model.py and tests/rules/test_import_3d_model.py to OH-163. Left for OH-163: part_pads reads the footprint twice after hashing it (once via parse_sexp, once in read_footprint) where kicad._pads_of(tree) would do, and the MSOP-8 STEP is still fetched from KiCad master unpinned.
