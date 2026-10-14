@@ -929,7 +929,7 @@ EXPLAINS: dict[str, set[str]] = {
         "Push_SMD_4.6x2.8mm_h2.5mm"},
     # The STM32C5 refuses nothing (OH-231): its MCU is drawn with the model
     # whose exposed pad is nearest, and the jumper is NO_BODY.
-    "XIAO-XIAO STM32C5-SMD": set(),
+    "XIAO-STM32C5-SMD": set(),
 }
 # **An SMD variant leaves off exactly what its DIP sibling does** -- same PCB,
 # same placements, same absences -- so the entries are derived the same way
@@ -10242,7 +10242,7 @@ def test_a_boards_thickness_is_its_top_face_and_not_its_solids_box():
 # --- the XIAO STM32C5, composed from the registry's pinned archive (OH-231) ----
 
 
-STM32C5 = "XIAO-XIAO STM32C5-SMD"
+STM32C5 = "XIAO-STM32C5-SMD"
 
 
 def _stm32c5_spec():

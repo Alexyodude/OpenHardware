@@ -838,8 +838,7 @@ def test_the_committed_xiao_board_files_state_the_importers_underside():
     wrong, left_out = [], []
     for board in sorted((REPO / "webui" / "boards").glob("XIAO-*.json")):
         stated = json.loads(board.read_text(encoding="utf-8"))
-        # OH-171: one footprint declares itself with its prefix doubled.
-        name = stated["source"]["footprint"].replace("XIAO-XIAO ", "XIAO-")
+        name = stated["source"]["footprint"]
         chip = next((chip for chip in MODULE_BOARDS if f"-{chip}-" in f"{board.stem}-"),
                     None)
         module = (REPO / "third_party" / "seeed-pcb" / f"{MODULE_BOARDS[chip]}.kicad_pcb"

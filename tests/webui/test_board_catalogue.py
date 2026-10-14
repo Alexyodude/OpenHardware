@@ -46,10 +46,25 @@ def test_the_two_spellings_of_nordic_parts_both_resolve():
     assert catalogue.chip_for("XIAO-nRF54LM20A-SMD") == "nRF54LM20A"
 
 
-def test_the_board_with_a_doubled_prefix_is_named_rather_than_parsed():
-    """Seeed's own footprint really is `XIAO-XIAO STM32C5-SMD`. Faithful, and
-    unparseable by rule, so it is listed explicitly."""
-    assert catalogue.chip_for("XIAO-XIAO STM32C5-SMD") == "STM32C5"
+def test_no_xiao_board_is_named_rather_than_parsed():
+    """OH-171. The XIAO STM32C5 was in IRREGULAR only because its key carried
+    Seeed's doubled footprint declaration; filed under the footprint file's own
+    name it parses by rule, as its siblings do."""
+    assert [name for name in catalogue.IRREGULAR if name.startswith("XIAO-")] == []
+    assert catalogue.chip_for("XIAO-STM32C5-SMD") == "STM32C5"
+
+
+def test_no_board_file_repeats_its_own_prefix():
+    """OH-171. A board was filed as `XIAO-` plus Seeed's own doubled footprint
+    declaration, so its chip parsed as `XIAO STM32C5` and it needed an
+    IRREGULAR row to resolve at all. tools/import_board.py names a board after
+    the vendor's file, not its declaration; this holds every committed board
+    file to that, whichever tool or hand wrote it."""
+    stems = sorted(path.stem for path in catalogue.BOARDS_DIR.glob("*.json"))
+    doubled = [stem for stem in stems
+               if re.match(r"([^-\s]+)[-\s]+\1(?:[-\s]|$)", stem, re.IGNORECASE)]
+    assert len(stems) > 1, f"no board files under {catalogue.BOARDS_DIR}"
+    assert doubled == [], f"a board file repeats its own prefix: {doubled}"
 
 
 def test_a_board_that_is_not_a_xiao_is_named_rather_than_parsed():

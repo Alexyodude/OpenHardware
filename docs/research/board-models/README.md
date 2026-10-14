@@ -162,8 +162,9 @@ a decoy, and it was opened this time: it does hold
 RP2040, SAMD21, C3, S3 and nRF52840 STEPs — the boilerplate list §2 already
 describes, and not one of them a C5.
 
-**`XIAO-XIAO STM32C5-SMD`** — the last board without a model, and the only
-one whose absence has been searched with a CONTROL. Every query below was run
+**`XIAO-STM32C5-SMD`** — the last board that had no model (OH-231 has since
+composed it from Seeed's own PCB, which Seeed now publishes), and the only
+one whose absence was searched with a CONTROL. Every query below was run
 twice on 2026-08-29, once for it and once for the ESP32-C5 whose PCB is now
 composed:
 
@@ -177,9 +178,11 @@ a LoRa-E5, two ODYSSEY boards, a SOM and an ADC hat.
 
 **The one path is a footprint**, `XIAO-STM32C5-SMD.kicad_mod`, and that is
 where this board entered our catalogue —
-`webui/boards/XIAO-XIAO STM32C5-SMD.json` names that repository and that
-footprint as its source, and the doubled `XIAO-XIAO` is the footprint's own
-name rather than a typo. So this is not a board whose vendor has not published
+`webui/boards/XIAO-STM32C5-SMD.json` names that repository and that
+footprint as its source. The footprint declares itself
+`XIAO-XIAO STM32C5-SMD`, Seeed's own doubling; the board was filed under
+that declaration until OH-171 and is filed under the file's name now, with
+the declaration kept in `source.declared_name`. So this is not a board whose vendor has not published
 its CAD; it is a footprint for a board that appears never to have shipped.
 
 Its 709 KB looks promising until it is measured: `User.1` holds 2,225 lines of

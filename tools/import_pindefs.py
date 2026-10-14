@@ -2785,7 +2785,7 @@ BOARDS = {
     # `test_the_xiao_stm32c5_underside_pads_land_on_the_nets_the_registry_reads`)
     # and the BOOT and reset pads. D13, D14, USB and CAN are reached through a
     # part, which this tracer never crosses, so they carry reasons.
-    "XIAO-XIAO STM32C5-SMD": Board(
+    "XIAO-STM32C5-SMD": Board(
         "STM32C5",
         (seeed_xiao_stm32c5(
             tuple(f"D{n}" for n in range(13)) + ("D15", "SWDIO", "SWCLK", "STM32C5_BOOT"),

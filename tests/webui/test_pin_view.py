@@ -747,7 +747,7 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     twenty-six**, while the panel asked `chip_pin`. A chip pin used to come
     only from the board module's `PIN_NAMES`, and fourteen boards have no
     module; it now falls back to the `chip_pin` the board file has carried
-    since OH-26. The last exclusion was `XIAO-XIAO STM32C5-SMD`, whose file
+    since OH-26. The last exclusion was `XIAO-STM32C5-SMD`, whose file
     stated no chip pin for any of its 35 pads because no board-support package
     covers it -- and that stayed true while Seeed's own schematic symbol
     library named two of them `SWDIO/PA13` and `SWCLK/PA14`.
@@ -814,7 +814,7 @@ def test_a_view_says_whether_any_levels_were_read_at_all():
     silent = sorted(set(boards) - set(would_have_lied))
     assert silent == [
         "XIAO-ESP32-S3-DIP", "XIAO-ESP32-S3-SMD", "XIAO-ESP32-S3-SMD_PAD",
-        "XIAO-MG24-DIP", "XIAO-MG24-SMD", "XIAO-XIAO STM32C5-SMD",
+        "XIAO-MG24-DIP", "XIAO-MG24-SMD", "XIAO-STM32C5-SMD",
         "XIAO-nRF52840-DIP", "XIAO-nRF52840-SMD", "XIAO-nRF54LM20A-DIP",
         "XIAO-nRF54LM20A-SMD", "XIAO-nRF54l15-DIP", "XIAO-nRF54l15-SMD",
     ], silent

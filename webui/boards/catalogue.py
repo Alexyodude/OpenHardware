@@ -44,9 +44,8 @@ An earlier version of this paragraph claimed matching against the table "cannot
 do that, because a chip that is not in the table raises instead". It could,
 and it did.
 
-The two boards that do not start with `XIAO-` at all (`Arduino Uno`, and
-`XIAO-XIAO STM32C5-SMD` with its doubled prefix) are named explicitly rather
-than silently mis-parsed. A board that is a row in `tools/board_manifest.py`
+The board that does not start with `XIAO-` at all (`Arduino Uno`) is named
+explicitly rather than silently mis-parsed. A board that is a row in `tools/board_manifest.py`
 takes its chip from that row (OH-176).
 """
 
@@ -271,9 +270,6 @@ ORACLES: dict[str, str] = {
 #: they are handled, rather than parsed into something plausible and wrong.
 IRREGULAR: dict[str, str] = {
     "Arduino Uno": "ATmega328P",
-    # Seeed's own footprint really is doubled; `XIAO-XIAO STM32C5-SMD.kicad_mod`
-    # exists in their KiCad library. Faithful, and still unparseable by rule.
-    "XIAO-XIAO STM32C5-SMD": "STM32C5",
 }
 
 

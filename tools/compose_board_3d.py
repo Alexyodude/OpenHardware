@@ -2813,7 +2813,7 @@ STM32C5_ARCHIVE = (
 )
 COMPOSITIONS = COMPOSITIONS + (
     Composition(
-        board="XIAO-XIAO STM32C5-SMD",
+        board="XIAO-STM32C5-SMD",
         layout=STM32C5_SOURCE / "XIAO STM32C5.kicad_pcb",
         fetch_with="python tools/get_board_sources.py seeed-xiao-stm32c5",
         pcb_chip=None,

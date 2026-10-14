@@ -2657,7 +2657,7 @@ COMPOSED: tuple[tuple[str, str, str], ...] = (
     ("XIAO-ESP32-C5-DIP", "ESP32-C5", "XIAO-ESP32-C5-DIP"),
     ("XIAO-ESP32-C5-SMD", "ESP32-C5", "XIAO-ESP32-C5-SMD"),
     # SMD only, with no DIP sibling (OH-231).
-    ("XIAO-XIAO STM32C5-SMD", "STM32C5", "XIAO-XIAO-STM32C5-SMD"),
+    ("XIAO-STM32C5-SMD", "STM32C5", "XIAO-STM32C5-SMD"),
 )
 #: Every manifest row whose board file is EAGLE's or KiCad's, which is every
 #: row the composer composes: it refuses any other by name

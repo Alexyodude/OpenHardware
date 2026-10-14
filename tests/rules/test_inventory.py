@@ -1213,8 +1213,8 @@ def test_not_built_here_and_cannot_be_built_read_differently(tmp_path, monkeypat
     # **No committed board is without a source any more** (the XIAO STM32C5
     # was the last, composed in OH-231), so a board no builder names is a real
     # board file under a name that nothing in `import_3d_model` knows.
-    unknown = _real_board(boards, "XIAO-XIAO STM32C5-SMD")
-    (boards / "XIAO-XIAO STM32C5-SMD.json").unlink()
+    unknown = _real_board(boards, "XIAO-STM32C5-SMD")
+    (boards / "XIAO-STM32C5-SMD.json").unlink()
     unknown["board"] = "XIAO-NO-SUCH-BOARD"
     (boards / "XIAO-NO-SUCH-BOARD.json").write_text(
         json.dumps(unknown), encoding="utf-8")
@@ -1505,11 +1505,11 @@ def test_the_xiao_stm32c5_pins_layer_holds_because_its_supply_pads_are_supplies(
     board file that carries the spelling."""
     assert "VOUT_3V3" in supply_labels()
     twins = {twin.name: twin for twin in collect_twins()}
-    stm32c5 = twins["XIAO-XIAO STM32C5-SMD"]
+    stm32c5 = twins["XIAO-STM32C5-SMD"]
     assert stm32c5.pins.holds, stm32c5.pins.detail
     assert "unanswered" not in stm32c5.pins.detail, stm32c5.pins.detail
     carrying = sorted(
         path.stem for path in (REPO / "webui" / "boards").glob("*.json")
         if any(pad["label"] == "VOUT_3V3" for pad in json.loads(
             path.read_text(encoding="utf-8"))["pads"]))
-    assert carrying == ["XIAO-XIAO STM32C5-SMD"], carrying
+    assert carrying == ["XIAO-STM32C5-SMD"], carrying

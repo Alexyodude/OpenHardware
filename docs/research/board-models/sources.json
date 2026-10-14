@@ -123,7 +123,7 @@
     },
     "STM32C5": {
       "boards": [
-        "XIAO-XIAO STM32C5-SMD"
+        "XIAO-STM32C5-SMD"
       ],
       "mesh": null,
       "pcb": {

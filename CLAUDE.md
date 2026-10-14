@@ -101,9 +101,10 @@ paragraph carried the counts, and the first board added through
 python tools/inventory.py      # TWINS: the model column, per board
 ```
 
-`XIAO-XIAO STM32C5-SMD` has
-no page on the vendor's wiki at all -- see `docs/research/board-models/`,
-whose §5 also records that the same document twice said a board could not be
+`XIAO-STM32C5-SMD` had only a
+footprint and no page on the vendor's wiki; Seeed now publishes its KiCad PCB
+and schematic, and it is composed from them (OH-231). See
+`docs/research/board-models/`, whose §5 also records that the same document twice said a board could not be
 drawn when the vendor was publishing its PCB the whole time. The meshes are
 gitignored -- see
 `tools/import_3d_model.py` for the licence reason -- so a fresh checkout gets
