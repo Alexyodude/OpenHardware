@@ -2,7 +2,7 @@
 id: OH-231
 title: 'Seeed now publishes the XIAO STM32C5''s KiCad PCB and schematic: read its
   pins from them and compose it, retiring ''nobody has published this one'''
-status: in-review
+status: done
 priority: P2
 created: '2026-10-13'
 touches:
@@ -10,18 +10,7 @@ touches:
 - docs/research/board-models/sources.json
 - webui/boards/XIAO-XIAO STM32C5-SMD.json
 - tools/board_sources.py
-- tools/import_pindefs.py
-- tests/rules/test_import_pindefs.py
 - tests/rules/test_board_sources.py
-- tools/inventory.py
-- tests/rules/test_inventory.py
-- tools/compose_board_3d.py
-- tests/rules/test_compose_board_3d.py
-- tools/kicad.py
-- tests/rules/test_kicad.py
-- tools/import_3d_model.py
-- tests/rules/test_import_3d_model.py
-- tools/model_from_datasheet.py
 ---
 
 Found by OH-163 step 4's dated re-check of the vendor (2026-10-13). docs/research/board-models/README.md section 5 and sources.json record that on 2026-08-29 (OH-109) Seeed's wiki sitemap had no STM32C5 page, files.seeedstudio.com answered 403, and OSHW-XIAO-Series held only XIAO-STM32C5-SMD.kicad_mod -- "a footprint for a board that appears never to have shipped". tools/import_pindefs.py says the same in its STM32C5 row ("Nobody has published this one. Zephyr has no xiao_stm32c5 board"). None of that is true any more:
@@ -72,3 +61,5 @@ Claims: tools/import_pindefs.py and its tests are OH-172's (open, nobody buildin
 **Note 2026-10-14:** 2026-10-14 (lane3) wind-down status of the review fix round. DONE and committed: thickness follows the family at 1.2 with the false claim corrected and the test holding it to the siblings (HIGH); OH-236 filed (P3, committed as fe1b2dc, it was filed before the wind-down); U4 drawn with the EP5.15 model and U3's measured numbers stated (MEDIUM); the test that compose() calls the pin check, seen failing with the call replaced by pass (MEDIUM); LOWs 1-5 (sha256 and missing-layout errors, USB1 row and model_from_datasheet reason against the 6.858 F.Fab, stale USB test names, SMD-sibling exclusion by pinned, pinned comment) and the ticket text corrections; LOW 7 investigated: the inventory 'Seeed Studio, MIT' pins line reads the board file's source block (OSHW-XIAO-Series, MIT), not the zip, and pindefs stays 'none stated'. Checked: --check differs only by this board's block with nothing removed, compose passes mark_turns for U4, inventory model 38, and a targeted run of the changed and related tests passed (13). NOT DONE: the one clean full run of the three composer files plus test_inventory.py was cut off by the wind-down at 27 percent with no failure seen, so it must be re-run; check_ticket_claims was not re-run; the frontmatter claim line for tests/rules/test_model_from_datasheet.py is still there (the file does not exist), and the earlier notes' "89 drawn, 8 modelled" counts were reworded in one place only.
 
 **Note 2026-10-14:** 2026-10-14 confirmation pass (reviewer, read-only) on 58a24e2..07df7b8: APPROVE. H1, M1-M3 and L1-L7 confirmed with mutants. The full composer+kicad+import+inventory run is 533 passed, exit 0. --check against 7a922fc differs only by this board's block. Inventory: geometry 38, model 38, pins 38, runs 26. Its three LOWs are applied here. N1: the USB1 row now gives the 31C-F land's own pad types (S1/S2 thru-hole at (-4.75,+-4.32), S3/S4 smd feet at (-0.75,+-5.12), two unplated pegs at (-1.25,+-2.89)) against _short's four thru-hole locks all at y +-4.32; both re-read from the two .kicad_pcb files. N2: the U4 row no longer says 'differing only in the exposed pad', since its leads differ too. N3: the first lane3 note's U3 height clause and its LEFT parts are corrected in place. Not done (optional): quoting ST's UFQFPN48 package height against the drawn 0.770; Seeed's file states none, so the rule owes nothing.
+
+**Note 2026-10-14:** 2026-10-14 DONE. Merged to master at 3c537ce (lane3), after the confirmation pass APPROVE and its three LOWs (d546f5c, composer tests 288 passed). The board composes: TWINS model 38. Loans returned: import_pindefs.py, inventory.py and their tests to OH-172; kicad.py, import_3d_model.py, model_from_datasheet.py and their tests to OH-163. compose_board_3d.py and test_compose_board_3d.py pass to OH-235 for its Uno-outline and ARC_CHORD_MM follow-up, on loan from OH-163. Left open elsewhere: OH-234 (the zip's licence, for the owner), OH-236 (family thickness), OH-171 (the doubled XIAO- prefix in this board's name).
