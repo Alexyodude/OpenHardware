@@ -1960,3 +1960,207 @@ def test_a_product_the_file_does_not_name_is_refused_naming_those_it_does(tmp_pa
         read_product(step, "A PART")
     said = str(refused.value)
     assert "has 2 products named 'A PART', not one" in said, said
+
+
+# --- the MCP9808, the first surface-mount part (OH-161 step 5, slice 4d) ------
+
+#: Table 3-1 of DS25095A (p.11), the MSOP column, pins 1 to 8 in order. Copied
+#: from the datasheet and not from the importer, so a row that swaps two of
+#: them disagrees with a source it did not write.
+MCP9808_PINS = ("SDA", "SCL", "Alert", "GND", "A2", "A1", "A0", "VDD")
+
+
+def _mcp9808():
+    from tools.import_3d_model import PARTS
+
+    return next(p for p in PARTS
+                if p.electrical is not None and p.electrical.device == "MCP9808")
+
+
+def test_the_mcp9808_row_names_its_leads_from_table_3_1_and_cites_its_numbers():
+    """**A bare MSOP-8 whose eight leads are Table 3-1's names, pin 1 first**
+    (DS25095A p.11). The footprint is KiCad's own, fetched from GitLab like
+    the mesh and for the same reason (`KICAD_3D`'s comment): the GitHub mirror
+    is a different tree. Each cited number carries the datasheet's number and
+    page, and `device` reaches `extras()` because `circuit.js` finds a device's
+    model by it."""
+    from tools.import_3d_model import (
+        KICAD_3D, KICAD_FOOTPRINTS, LED_ELECTRICAL, Electrical)
+
+    part = _mcp9808()
+    assert part.terminals == MCP9808_PINS, part.terminals
+    assert part.lens is None, "a sensor shows nothing"
+    assert part.footprint == "Package_SO.pretty/MSOP-8_3x3mm_P0.65mm.kicad_mod"
+    assert part.url == (f"{KICAD_3D}/Package_SO.3dshapes/"
+                        "MSOP-8_3x3mm_P0.65mm.step"), part.url
+    assert KICAD_FOOTPRINTS.startswith(
+        "https://gitlab.com/kicad/libraries/kicad-footprints/"), KICAD_FOOTPRINTS
+    assert part.footprint_url == (
+        f"{KICAD_FOOTPRINTS}/Package_SO.pretty/MSOP-8_3x3mm_P0.65mm.kicad_mod")
+
+    extras = part.electrical.extras()
+    assert extras["kind"] == "i2c_device", extras
+    assert extras["device"] == "MCP9808", extras
+    assert (extras["supply_amps"], extras["input_high_ratio"],
+            extras["input_low_ratio"]) == (200e-6, 0.7, 0.3), extras
+    assert set(part.electrical.cited) == {
+        "supply_amps", "input_high_ratio", "input_low_ratio"}
+    for name, why in extras["cited"].items():
+        assert "DS25095A" in why and " p." in why, (name, why)
+    # Absent, not null, for a part that is not a device -- the convention
+    # `Electrical.extras` keeps for `from`/`to`.
+    assert "device" not in LED_ELECTRICAL.extras()
+    assert Electrical(kind="resistor", cited={}, note="").device is None
+
+
+def _feet(pitch=0.65, rows=4, x_in=2.035, x_out=2.45, width=0.3):
+    """A synthetic MSOP-8: eight flat feet on the floor and a body above them.
+
+    Pad `n` (1 to 4 down the left, 5 to 8 up the right) is at the footprint's
+    own coordinates; each foot is a box 0.15 mm tall whose bottom corners are
+    the floor ring. The body's bottom corners sit at 0.1 mm, as KiCad's do.
+    """
+    from tools.import_3d_model import Mesh
+
+    pads: dict[str, tuple[float, float]] = {}
+    positions: list[float] = []
+    for number in range(1, 2 * rows + 1):
+        slot = number - 1 if number <= rows else 2 * rows - number
+        z = (slot - (rows - 1) / 2) * pitch
+        side = -1 if number <= rows else 1
+        pads[str(number)] = (side * 2.1125, z)
+        for x in (side * x_in, side * x_out):
+            for dz in (-width / 2, width / 2):
+                for y in (0.0, 0.15):
+                    positions += [x, y, z + dz]
+    for x in (-1.4, 1.4):
+        for z in (-1.4, 1.4):
+            positions += [x, 0.1, z]
+    return Mesh(groups={"#d2d1c7": (positions, [], [])}), pads
+
+
+def test_pad_tips_puts_one_tip_on_each_foot_in_pad_order():
+    """Eight feet 0.65 mm apart, and `pad_tips` hands back eight tips, the
+    k-th on the foot nearest pad k+1 -- the centre of the foot's bottom, at the
+    floor, and not the body's underside 0.1 mm above it."""
+    from tools.import_3d_model import pad_tips
+
+    mesh, pads = _feet()
+    tips = pad_tips(mesh, pads)
+    assert len(tips) == 8, tips
+    for number, tip in enumerate(tips, start=1):
+        _x, z = pads[str(number)]
+        side = -1 if number <= 4 else 1
+        assert tip == pytest.approx([side * (2.035 + 2.45) / 2, 0.0, z]), (number, tip)
+
+
+def test_lead_tips_merges_leads_closer_than_its_clustering_so_pads_are_the_key():
+    """**Why the MSOP-8 does not use `lead_tips`.** It groups metal within
+    `LEAD_APART_MM / 2` = 1.27 mm and sorts by x alone, which is right for
+    leads on a 0.1 inch pitch and wrong for these: three or four feet 0.65 mm
+    apart become one cluster, and two rows of four cannot be numbered by x at
+    all. Run on the same eight feet it does not find eight, so a row that
+    named its tips by it would fail `convert_part`'s count -- or, worse, if
+    the count happened to match, put names on the wrong leads."""
+    from tools.import_3d_model import LEAD_APART_MM, lead_tips
+
+    mesh, _pads = _feet()
+    found = lead_tips(mesh, "#none")
+    assert len(found) < 8, f"lead_tips found {len(found)} tips: {found}"
+    assert LEAD_APART_MM / 2 > 0.65
+
+
+def test_pad_tips_refuses_a_pad_with_no_foot_and_says_which():
+    """A pad that no metal is nearer to than another pad, or whose nearest
+    metal is a body's underside 0.1 mm off the floor, is a footprint for a
+    different part; the error carries the pad number and where it is."""
+    from tools.import_3d_model import pad_tips
+
+    mesh, pads = _feet()
+    pads["9"] = (40.0, 40.0)
+    with pytest.raises(ValueError) as refused:
+        pad_tips(mesh, pads)
+    said = str(refused.value)
+    assert "'9'" in said and "40" in said, said
+
+    pads["9"] = (1.4, 1.4)  # under a corner of the body
+    with pytest.raises(ValueError) as refused:
+        pad_tips(mesh, pads)
+    said = str(refused.value)
+    assert "'9'" in said and "0.100 mm above the floor" in said, said
+
+
+def _cached_mcp9808_files():
+    """The part and its cached footprint, or a skip."""
+    pytest.importorskip("OCP")
+    from tools.import_3d_model import CACHE
+
+    part = _mcp9808()
+    footprint = CACHE / f"footprint-{part.slug}.kicad_mod"
+    for needed in (CACHE / f"part-{part.slug}.step", footprint):
+        if not needed.is_file():
+            pytest.skip(f"no {needed.name}; run tools/import_3d_model.py --parts")
+    return part, footprint
+
+
+def test_the_mcp9808_tips_sit_on_pads_one_to_eight_and_carry_the_right_names(
+        tmp_path, monkeypatch):
+    """**The whole row, converted in-process from the cached KiCad files.**
+
+    Each terminal's name is Table 3-1's name for its pad NUMBER in the
+    footprint. The footprint is y-down and the model's frame is y-up, so a tip
+    is compared with its pad as the footprint states it: relative to pad 1,
+    the glTF x and z of a tip differ by the footprint's x and y -- a flipped y
+    would put pad 1's name on the foot opposite it. And pad 1 is where the
+    model's own pin-1 dimple is, which is independent of both files' axes.
+    """
+    from tools import kicad
+    from tools.import_3d_model import DEFLECTION, convert_part, read_extras
+
+    part, footprint = _cached_mcp9808_files()
+    # `convert_part` prints OUT relative to REPO, so both move.
+    monkeypatch.setattr(import_3d_model, "OUT", tmp_path)
+    monkeypatch.setattr(import_3d_model, "REPO", tmp_path)
+    convert_part(part, DEFLECTION, check=False)
+    glb = tmp_path / "parts" / f"{part.slug}.glb"
+    extras = read_extras(glb)
+
+    pads = {pad.number: pad for pad in kicad.read_footprint(footprint).pads}
+    assert sorted(pads, key=int) == [str(n) for n in range(1, 9)], sorted(pads)
+    names = [terminal["name"] for terminal in extras["terminals"]]
+    assert names == list(MCP9808_PINS), names
+    tips = [terminal["at"] for terminal in extras["terminals"]]
+    for number, (name, tip) in enumerate(zip(MCP9808_PINS, tips), start=1):
+        pad, first = pads[str(number)], pads["1"]
+        want_x = tips[0][0] + (pad.x_mm - first.x_mm)
+        want_z = tips[0][2] + (pad.y_mm - first.y_mm)
+        # 0.2 mm along the lead: a foot is 0.415 mm long and its pad is longer,
+        # so their centres are 0.13 mm apart there; across it the pitch is 0.65.
+        assert abs(tip[0] - want_x) < 0.2 and abs(tip[2] - want_z) < 0.05, (
+            f"pin {number} {name}: tip {tip}, pad {pad.x_mm},{pad.y_mm} "
+            f"from pad 1 at {first.x_mm},{first.y_mm} puts it near "
+            f"({want_x:.3f}, {want_z:.3f})")
+        assert abs(tip[1]) < 0.05, f"pin {number} {name} is {tip[1]} mm off the floor"
+
+    # The dimple on the body's top is the model's pin-1 mark: pad 1's tip is
+    # on its side in both axes. Not a number out of the footprint at all.
+    raw = glb.read_bytes()
+    length, _kind = struct.unpack_from("<II", raw, 12)
+    document = json.loads(raw[20:20 + length].decode("utf-8"))
+    body = raw[20 + length + 8:]
+    materials = [m["name"] for m in document["materials"]]
+    primitive = next(p for p in document["meshes"][0]["primitives"]
+                     if p["material"] == materials.index("#b0a998"))
+    accessor = document["accessors"][primitive["attributes"]["POSITION"]]
+    view = document["bufferViews"][accessor["bufferView"]]
+    flat = struct.unpack_from(f"<{accessor['count'] * 3}f", body,
+                              view.get("byteOffset", 0))
+    mark = [sum(flat[axis::3]) / accessor["count"] for axis in (0, 2)]
+    assert tips[0][0] * mark[0] > 0 and tips[0][2] * mark[1] > 0, (
+        f"pin 1's tip {tips[0]} is not on the dimple's side {mark}")
+
+    # Neighbours 0.65 apart: `dressPart` caps a target's radius under half
+    # the nearest pair, so a drop cannot land on the next pin.
+    nearest = min(math.dist(a, b) for i, a in enumerate(tips) for b in tips[i + 1:])
+    assert nearest == pytest.approx(0.65, abs=0.05), nearest
+    assert 2 * min(0.55, 0.45 * nearest) < nearest

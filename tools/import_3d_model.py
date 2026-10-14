@@ -94,10 +94,10 @@ import urllib.request
 import zipfile
 
 try:
-    from tools import board_manifest
+    from tools import board_manifest, kicad
 except ModuleNotFoundError:  # pragma: no cover - exercised only as a script
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-    from tools import board_manifest
+    from tools import board_manifest, kicad
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
@@ -2107,6 +2107,11 @@ class Electrical:
     #: round the "wrong" one. `analyse` takes the magnitude of a non-diode's
     #: current for the same reason, so nothing downstream needs the direction.
     forward: tuple[str, str] | None = None
+    #: Which device an `i2c_device` is -- the name the board's bus models it by,
+    #: which `webui/api.py`'s `BoardSession.DEVICE_PARTS` lists and
+    #: `circuit.js` posts as the device's `part`. `None` for every part that is
+    #: not one.
+    device: str | None = None
 
     def extras(self) -> dict[str, object]:
         """The shape `circuit.js` reads, values and citations side by side."""
@@ -2115,6 +2120,9 @@ class Electrical:
             "note": self.note,
             "cited": {name: why for name, (_value, why) in self.cited.items()},
         }
+        # Absent rather than null, like `from` and `to` below.
+        if self.device is not None:
+            out["device"] = self.device
         # Absent rather than null, for the reason `convert_part` gives about
         # `electrical` itself: a missing key is what a part with no forward
         # direction has, and `from: null` invites a reader to look for one.
@@ -2295,6 +2303,11 @@ class Part:
     #: on. Inventing a resistance to fill this in would decide every other
     #: part's current by it.
     electrical: Electrical | None = None
+    #: KiCad's footprint for it, as `Library.pretty/name.kicad_mod`, for a part
+    #: whose leads `lead_tips` cannot find: a surface-mount one, whose leads
+    #: are named by their pad NUMBER in this file and located by `pad_tips`.
+    #: `None` for the through-hole parts, whose leads it finds on its own.
+    footprint: str | None = None
 
     @property
     def slug(self) -> str:
@@ -2304,6 +2317,12 @@ class Part:
     @property
     def url(self) -> str:
         return f"{KICAD_3D}/{self.library}.3dshapes/{self.name}.step"
+
+    @property
+    def footprint_url(self) -> str:
+        if self.footprint is None:
+            raise ValueError(f"{self.name} names no footprint")
+        return f"{KICAD_FOOTPRINTS}/{self.footprint}"
 
 
 #: Where KiCad's 3D library actually lives.
@@ -2321,6 +2340,10 @@ class Part:
 #: as OH-29's census of Seeed's repository, which closed a question for a day
 #: by stating its conclusion without its scope.
 KICAD_3D = "https://gitlab.com/kicad/libraries/kicad-packages3D/-/raw/master"
+
+#: KiCad's footprints, the same library's other half and **GitLab for the same
+#: reason** as `KICAD_3D`: the GitHub mirror is a different tree.
+KICAD_FOOTPRINTS = "https://gitlab.com/kicad/libraries/kicad-footprints/-/raw/master"
 
 #: **KiCad's `kicad-packages3D`, not a vendor's.** Seeed publishes no 3D model
 #: for the Grove modules -- checked 2026-08-27, the Grove Red LED wiki lists a
@@ -2369,6 +2392,51 @@ POT_ELECTRICAL = Electrical(
             "bound, the 220 Ohm resistor's own argument"
         )),
     },
+)
+
+#: **The first part that is a chip and not a component, and it stamps nothing
+#: into the circuit** (OH-161 step 5). Microchip's MCP9808 is an I2C
+#: temperature sensor; what it does is on the wire, which the board's I2C
+#: controller answers, so `circuit.js` only reads what the bench states of it
+#: -- which pads its SDA and SCL are on, its supply, how its address pins are
+#: tied -- and the page posts that. Its three numbers are therefore the ones
+#: that reading needs, each from DS25095A (Rev. A, 2011), quoted:
+#:
+#: - the supply current, which nothing reads yet (the IDD load is deferred) but
+#:   which the model carries so the day something does, it is cited;
+#: - VIH and VIL as fractions of the part's OWN supply, because the datasheet
+#:   states them that way (`0.7 VDD`, `0.3 VDD`) and a fraction survives a
+#:   different VDD where a voltage copied from a 3.3 V bench would not.
+#:
+#: A bare MSOP-8, as `Part` says: no breakout board, no pull-ups, no Alert
+#: load. Those are the bench's to wire, and a breakout is a separate part.
+MCP9808_ELECTRICAL = Electrical(
+    kind="i2c_device",
+    device="MCP9808",
+    cited={
+        "supply_amps": (200e-6, (
+            "IDD, typical: DS25095A p.3, 'Operating Current IDD — 200 400 µA' "
+            "(typical, maximum), at VDD = 2.7 V to 5.5 V; p.1 says the same "
+            "in the feature list, 'Operating Current: 200 µA (typical)'. A "
+            "typical and not a bound, so nothing may call it a worst case"
+        )),
+        "input_high_ratio": (0.7, (
+            "VIH, minimum: DS25095A p.4, 'Serial Input/Output (SCL, SDA, A0, "
+            "A1, A2)', 'High-Level Voltage VIH 0.7 VDD — VDD V'. A fraction "
+            "of the part's own supply: an address pin at or above 0.7 VDD "
+            "reads high"
+        )),
+        "input_low_ratio": (0.3, (
+            "VIL, maximum: DS25095A p.4, the same group as VIH, 'Low-Level "
+            "Voltage VIL GND — 0.3 VDD V'. An address pin at or below 0.3 VDD "
+            "reads low; between the two the datasheet states no level"
+        )),
+    },
+    note=(
+        "A bare MSOP-8 MCP9808 (DS25095A): eight leads named from Table 3-1 "
+        "(p.11) by their footprint pad numbers. It stamps nothing into the "
+        "circuit; the bench states its pads, supply and address."
+    ),
 )
 
 PARTS: tuple[Part, ...] = (
@@ -2437,6 +2505,18 @@ PARTS: tuple[Part, ...] = (
          label="5 kΩ trimmer", lens=None,
          terminals=("lead A", "wiper", "lead B"),
          electrical=POT_ELECTRICAL),
+    #: **MSOP-8, 3 x 3 mm at 0.65 mm pitch -- the first surface-mount part, and
+    #: its leads are named by PAD NUMBER**, not by position: `lead_tips` groups
+    #: metal at 1.27 mm and orders by x, which merges leads 0.65 mm apart and
+    #: cannot number two rows (it finds 5 tips in this mesh). Pin 1 is KiCad's
+    #: pad "1", pin 2 pad "2", and so on, and the names are Table 3-1's, MSOP
+    #: column (DS25095A p.11): 1 SDA, 2 SCL, 3 Alert, 4 GND, 5 A2, 6 A1,
+    #: 7 A0, 8 VDD. The package has no exposed pad -- pin 9, EP, is the DFN's.
+    Part("Package_SO", "MSOP-8_3x3mm_P0.65mm", label="MCP9808 temperature sensor",
+         lens=None,
+         terminals=("SDA", "SCL", "Alert", "GND", "A2", "A1", "A0", "VDD"),
+         electrical=MCP9808_ELECTRICAL,
+         footprint="Package_SO.pretty/MSOP-8_3x3mm_P0.65mm.kicad_mod"),
 )
 
 
@@ -2539,6 +2619,86 @@ def lead_tips(mesh: Mesh, lens: str) -> list[list[float]]:
     return tips
 
 
+def pad_tips(mesh: Mesh, pads: dict[str, tuple[float, float]]) -> list[list[float]]:
+    """Where a wire attaches to a surface-mount part, one tip per footprint pad.
+
+    `pads` is the footprint's own, `{number: (x, z)}` in the mesh's frame (see
+    `part_pads`). Each metal vertex near the floor belongs to the pad it is
+    nearest, and each pad's tip is the average of the lowest ring of the
+    vertices it owns -- the same ring `lead_tips` takes, which for a gull-wing
+    foot is the centre of the face that sits on the board.
+
+    **The tips come back in pad-number order**, which is how the caller names
+    them. `lead_tips` cannot do this: it groups at 1.27 mm, which merges leads
+    0.65 mm apart, and it orders by x alone, which cannot number two rows.
+
+    A pad whose nearest metal is not on the floor is refused with what it was
+    and where: a surface-mount lead touches the board, so a pad that owns only
+    a body's underside is a footprint for a different part.
+    """
+    metal = [(positions[at], positions[at + 1], positions[at + 2])
+             for positions, _normals, _indices in mesh.groups.values()
+             for at in range(0, len(positions), 3)]
+    if not metal:
+        raise ValueError("pad_tips: the mesh has no vertices")
+    floor = min(point[1] for point in metal)
+    owned: dict[str, list[tuple[float, float, float]]] = {number: [] for number in pads}
+    for point in metal:
+        if point[1] > floor + LEAD_SLACK_MM:
+            continue
+        nearest = min(pads, key=lambda number: math.hypot(
+            point[0] - pads[number][0], point[2] - pads[number][1]))
+        owned[nearest].append(point)
+    tips: list[list[float]] = []
+    for number in sorted(pads, key=int):
+        mine = owned[number]
+        if not mine:
+            raise ValueError(
+                f"pad {number!r} at {pads[number]} owns no metal within "
+                f"{LEAD_SLACK_MM} mm of the floor ({floor:.3f}); {len(pads)} pads")
+        here = min(point[1] for point in mine)
+        if here > floor + LEAD_RING:
+            raise ValueError(
+                f"pad {number!r} at {pads[number]}: its lowest metal is "
+                f"{here - floor:.3f} mm above the floor ({floor:.3f}), not "
+                f"within {LEAD_RING} mm of it")
+        ring = [point for point in mine if point[1] <= here + LEAD_RING]
+        tips.append([sum(point[axis] for point in ring) / len(ring)
+                     for axis in range(3)])
+    return tips
+
+
+def part_pads(part: Part, frame: Frame) -> dict[str, tuple[float, float]]:
+    """A part's footprint pads in the mesh's x and z, keyed by pad number.
+
+    The footprint is fetched once into `CACHE` and read by `tools/kicad.py`'s
+    reader: it is a downloaded file, parsed as data and never run.
+
+    **The footprint is y-down and KiCad's 3D models are y-up**, so a pad at
+    footprint `(x, y)` is at model `(x, -y)`, and the part's `Frame` then turns
+    that into glTF coordinates. Measured on the MSOP-8: pad 1 is at footprint
+    y = -0.975 and its foot is at glTF z = -0.975, with the model's own pin-1
+    dimple on the same side.
+    """
+    path = CACHE / f"footprint-{part.slug}.kicad_mod"
+    if not path.is_file():
+        CACHE.mkdir(parents=True, exist_ok=True)
+        print(f"  fetch  {part.footprint_url}")
+        with urllib.request.urlopen(part.footprint_url) as response:  # noqa: S310 - https
+            path.write_bytes(response.read())
+    pads = kicad.read_footprint(path).pads
+    numbers = sorted(pad.number for pad in pads)
+    wanted = sorted(str(n) for n in range(1, len(part.terminals) + 1))
+    if numbers != wanted:
+        raise SystemExit(
+            f"{part.name}'s footprint has pads {numbers} and its terminals "
+            f"name {len(part.terminals)}, pads {wanted}. Either the footprint "
+            f"is a different part or the row is; terminals are named by pad "
+            f"number, so re-read Table 3-1 before trusting a wire to land.")
+    placed = {pad.number: frame.place(pad.x_mm, -pad.y_mm, 0.0) for pad in pads}
+    return {number: (at[0], at[2]) for number, at in placed.items()}
+
+
 def convert_part(part: Part, deflection: float, check: bool) -> int:
     """Fetch, tessellate and write one part. Returns the glTF's byte count."""
     print(f"{part.library}/{part.name}:")
@@ -2567,7 +2727,13 @@ def convert_part(part: Part, deflection: float, check: bool) -> int:
             f"{sorted(mesh.groups)}. The file changed; re-read it before "
             f"trusting a part that cannot light up."
         )
-    tips = lead_tips(mesh, part.lens)
+    if part.footprint is None:
+        tips = lead_tips(mesh, part.lens)
+    else:
+        try:
+            tips = pad_tips(mesh, part_pads(part, frame))
+        except ValueError as exc:
+            raise SystemExit(f"{part.name}: {exc}") from exc
     if len(tips) != len(part.terminals):
         raise SystemExit(
             f"{part.name} has {len(tips)} lead tips and its terminals name "

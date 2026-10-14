@@ -78,6 +78,9 @@ JS_NAME = {
     "rated_amps": "ratedAmps",
     "absolute_amps": "absoluteAmps",
     "ohms": "ohms",
+    "supply_amps": "supplyAmps",
+    "input_high_ratio": "inputHighRatio",
+    "input_low_ratio": "inputLowRatio",
 }
 
 #: The 220 Ω resistor, as `tools/import_3d_model.py`'s `RESISTOR_ELECTRICAL`
@@ -1381,7 +1384,7 @@ def test_the_resistor_the_page_loads_carries_the_value_the_tests_use():
     # count.
     assert part.lens is None
     assert {p.name for p in PARTS if p.lens is None} == {
-        part.name, "Potentiometer_Bourns_3266W_Vertical",
+        part.name, "Potentiometer_Bourns_3266W_Vertical", "MSOP-8_3x3mm_P0.65mm",
     }
 
 def test_a_resistor_on_the_weakest_pin_is_still_well_clear_of_the_threshold(tmp_path):
@@ -2511,3 +2514,37 @@ def test_a_part_that_is_not_an_i2c_device_reports_no_device(tmp_path):
         console.log(JSON.stringify(report.parts[0]));
     """)
     assert got["device"] is None and got["drive"] == "lit", got
+
+
+def test_the_mcp9808_the_page_loads_carries_the_numbers_the_tests_use():
+    """`MCP9808` above is `tools/import_3d_model.py`'s row, or this fails: the
+    terminals in Table 3-1's order, the device name `circuit.js` reads, and each
+    cited number under the spelling `parts.js`'s `electricalOf` gives it."""
+    from tools.import_3d_model import PARTS
+
+    part = next(p for p in PARTS
+                if p.electrical is not None and p.electrical.device == "MCP9808")
+    assert list(part.terminals) == MCP9808["terminals"], part.terminals
+    assert part.electrical.kind == MCP9808["model"]["kind"]
+    assert part.electrical.device == MCP9808["model"]["device"]
+    assert set(part.electrical.cited) == {
+        "supply_amps", "input_high_ratio", "input_low_ratio"}
+    for name, (value, _why) in part.electrical.cited.items():
+        assert name in JS_NAME, f"{name} has no spelling on the JavaScript side"
+        assert MCP9808["model"][JS_NAME[name]] == value, name
+
+
+def test_every_i2c_device_part_names_a_device_the_server_models():
+    """A part the menu offers that the server would refuse is a bench that
+    wires up and then posts a device the drive route turns away. Every
+    `i2c_device` row must name a `part` in `BoardSession.DEVICE_PARTS`."""
+    from tools.import_3d_model import PARTS
+    from webui.api import BoardSession
+
+    devices = [part for part in PARTS
+               if part.electrical is not None and part.electrical.kind == "i2c_device"]
+    assert devices, "no i2c_device part in PARTS, so this proves nothing"
+    for part in devices:
+        assert part.electrical.device in BoardSession.DEVICE_PARTS, (
+            f"{part.name} names device {part.electrical.device!r}; the server "
+            f"models {list(BoardSession.DEVICE_PARTS)}")
