@@ -218,11 +218,6 @@ def test_a_bad_coordinate_names_the_file_once(tmp_path):
     assert message.count(str(brd)) == 1, message
 
 
-def test_the_two_chord_constants_agree():
-    # eagle.py cannot import the composer, so it holds its own copy.
-    assert eagle.ARC_CHORD_MM == compose.ARC_CHORD_MM
-
-
 # --- every board with a curved outline ---------------------------------------
 
 

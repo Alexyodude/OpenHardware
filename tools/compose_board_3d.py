@@ -3273,8 +3273,10 @@ MODELLED = REPO / "third_party" / "modelled"
 #: mm on a 1.5 mm corner, 0.0194 mm on a 0.254 mm (10 mil) radius, and the
 #: whole radius below chord / pi = 0.064 mm, where two steps round a whole
 #: circle are its diameter. `test_a_flattened_arc_stands_off_its_circle_by_
-#: no_more_than_its_chord_allows` holds that bound.
-ARC_CHORD_MM = 0.2
+#: no_more_than_its_chord_allows` holds that bound. The number is
+#: `tools/eagle.ARC_CHORD_MM`, so an EAGLE board's arcs and a KiCad
+#: board's are cut to one chord (OH-235).
+ARC_CHORD_MM = eagle.ARC_CHORD_MM
 
 
 def arc_points(arc: kicad.Arc, chord: float = ARC_CHORD_MM

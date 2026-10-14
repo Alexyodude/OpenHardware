@@ -779,7 +779,15 @@ def test_the_unos_outline_is_the_size_arduino_publishes():
     ys = [point[1] for point in ring]
     assert max(xs) - min(xs) == pytest.approx(68.58, abs=0.001)
     assert max(ys) - min(ys) == pytest.approx(53.34, abs=0.001)
-    assert len(ring) == 12, "the Uno's silhouette has twelve corners"
+    # Arduino's file: nine straight wires (three of them the 45-degree
+    # chamfers on the header side) and three r = 1 mm quarter-rounds.
+    rounds = [(1.0, 1.0), (1.0, 52.34), (65.04, 1.0)]
+    on = [[p for p in ring if math.hypot(p[0] - cx, p[1] - cy)
+           == pytest.approx(1.0, abs=1e-9)] for cx, cy in rounds]
+    assert all(len(points) > 2 for points in on), (
+        f"each of the Uno's three r = 1 mm corners is an arc, not a chord: {on}")
+    sharp = [p for p in ring if not any(p in points for points in on)]
+    assert len(sharp) == 6, f"six sharp corners, the chamfers' ends: {sharp}"
 
 
 def test_the_composed_model_records_what_it_could_not_draw():

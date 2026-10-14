@@ -87,11 +87,10 @@ DIMENSION_LAYER = "20"
 #: EAGLE's `Milling` layer: contours a fab routes, as against drills (OH-163).
 MILLING_LAYER = "46"
 
-#: The longest chord a flattened arc is drawn with, in mm (OH-235). This is
-#: the number `tools/compose_board_3d.ARC_CHORD_MM` holds for KiCad arcs and
-#: drilled holes, defined again here because a reader must not import the
-#: composer. Two constants now exist; they must agree, and
-#: `tests/rules/test_eagle.py` compares them. A step of angle t stands off its
+#: The longest chord a flattened arc is drawn with, in mm (OH-235). It is
+#: defined here and not in the composer because a reader must not import
+#: the composer; `tools/compose_board_3d.ARC_CHORD_MM` is this number, for
+#: KiCad arcs and drilled holes. A step of angle t stands off its
 #: arc by the sagitta r(1 - cos(t/2)), so no point of a flattened arc is
 #: further from the circle than r(1 - cos(min(chord / 2r, pi / 2))).
 ARC_CHORD_MM = 0.2
