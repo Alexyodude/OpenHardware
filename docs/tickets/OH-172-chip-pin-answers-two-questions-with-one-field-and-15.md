@@ -11,6 +11,10 @@ touches:
 - webui/boards/XIAO-MG24-SMD.json
 - webui/boards/XIAO-nRF54l15-SMD.json
 - webui/boards/XIAO-nRF54LM20A-SMD.json
+- tools/import_pindefs.py
+- tests/rules/test_import_pindefs.py
+- tools/inventory.py
+- tests/rules/test_inventory.py
 ---
 
 `chip_pin` answers two different questions with one field, and 153 pads are answered wrongly by the half nobody meant.
@@ -322,3 +326,5 @@ LEFT is as the slice 2 note says, with one item added. A pad its footprint names
 **Note 2026-10-13:** 2026-10-13: tools/inventory.py lent to OH-231 (its supply list lacks Seeed's VOUT_3V3). Return it when OH-231 closes.
 
 **Note 2026-10-14:** 2026-10-14: lends tests/webui/test_pin_view.py to OH-161 (step 5 slice 1b: a C3 pad routed to a peripheral now reads 'unknown', so the module-parity fake must give C3 pads their reset OUT_SEL); comes back when OH-161 closes.
+
+**Note 2026-10-14:** 2026-10-14 loans back from OH-231 (done): tools/import_pindefs.py, tests/rules/test_import_pindefs.py, tools/inventory.py, tests/rules/test_inventory.py.
