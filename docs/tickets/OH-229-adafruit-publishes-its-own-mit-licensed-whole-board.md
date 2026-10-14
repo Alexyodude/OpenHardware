@@ -2,7 +2,7 @@
 id: OH-229
 title: 'Adafruit publishes its own MIT-licensed whole-board models for the QT Py ESP32-C3
   and KB2040: decide whether they draw instead of the composed ones'
-status: in-review
+status: done
 priority: P3
 created: '2026-10-13'
 touches:
@@ -63,3 +63,5 @@ LEFT. (a) CONN1's 0.56 mm: recorded and held in a test, not settled. (b) The cor
 **Note 2026-10-14:** Review fix round in 9c85f3f: the three new STEP tests skip rather than fetch, `thickness_step` now carries the URL alone (the row's pin is what the thickness test checks the cached file against), the manifest thickness test keeps the no-layer-stack assertion for both boards, the published geometry sentence and the STEP licence are held, and PROVENANCE.md records Adafruit_CAD_Parts. `--check` output is unchanged.
 
 **Note 2026-10-14:** Confirmation-pass LOWs fixed: the pin-one test no longer downloads (it skips a board with uncached models, and says which), the three Adafruit tests report boards they skipped, the sentence and licence assertions run without OpenCASCADE, and PROVENANCE.md was reworded.
+
+**Note 2026-10-14:** 2026-10-14: merged to master (fea026b..d5d03fe) after an independent review (COMMENT, no HIGH: geometry, pins and orientation verified against Adafruit's STEPs, other 21 composed .glbs byte-identical) and a confirmation pass (APPROVE); its LOWs fixed in 2119cc1. Recomposed in main: import_3d_model --all and compose_board_3d exit 0. Master suite before the merge: 2955 passed, 49 skipped, 3 failed (the known OCP pair under Python 3.14 and OH-166's shared-TEMP build test). Done. tools/compose_board_3d.py, tests/rules/test_compose_board_3d.py and PROVENANCE.md go back to OH-163.
