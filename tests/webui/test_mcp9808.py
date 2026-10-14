@@ -415,12 +415,27 @@ def test_shutdown_holds_ta_s_data_through_a_resolution_write_and_all_registers_s
     assert read_register(device, TA) == 0xC191
     device.hold(straps=0, celsius=-10.5, vdd=3.3)
     assert read_register(device, TA) == 0xC191
-    # The judgement in `ta_word`'s docstring: the flags are recomputed against
-    # the limits as they are, the temperature bits are held.
+    # The judgement in `Mcp9808._frozen`'s comment: the flags are recomputed
+    # against the limits as they are, the temperature bits are held.
     write_word(device, TUPPER, 26 * 16)
     assert read_register(device, TA) == 0x8191
     write_word(device, CONFIG, 0x0000)
     assert read_register(device, TA) == mcp9808.ta_word(-10.5, 0, 26 * 16, 0, 0)
+
+
+def test_shutdown_freezes_at_the_resolution_in_force_when_it_is_set():
+    """25.3 C is 404.8 sixteenths: 0x190 at the 0.5 C step, 0x194 at the power-on
+    0.0625 C. Set SHDN at 0.5 C and then raise the resolution: TA keeps the
+    bits it had, and does not look at the finer step the held temperature
+    would now allow."""
+    device = part(celsius=25.3)
+    write_register(device, RESOLUTION, 0x00)
+    assert read_register(device, TA) == 0xC190
+    write_word(device, CONFIG, 0x0100)
+    write_register(device, RESOLUTION, 0x03)
+    assert read_register(device, TA) == 0xC190
+    write_word(device, CONFIG, 0x0000)
+    assert read_register(device, TA) == 0xC194, "and leaving shutdown looks again"
 
 
 def test_the_power_on_reset_restores_every_register():

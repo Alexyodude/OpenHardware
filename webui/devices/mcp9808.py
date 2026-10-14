@@ -48,14 +48,15 @@ ADDRESS_CODE = 0b0011 << 3
 #: VPOR 2.2 V typical (p.3), and the operating range VDD 2.7 to 5.5 V (p.3).
 VPOR_VOLTS, VDD_MIN, VDD_MAX = 2.2, 2.7, 5.5
 
-#: The ID registers, by pointer. 5.1.4, p.27: manufacturer ID 0x0054. 5.1.5,
-#: p.28: device ID 0x04 in the high byte, revision 0x00 in the low.
 #: The pointer values, Register 5-1 (p.16): 0001 CONFIG, 0010 TUPPER, 0011
 #: TLOWER, 0100 TCRIT, 0101 TA, 0110 manufacturer ID, 0111 device ID/revision,
 #: 1000 resolution. 0000 is RFU and 1xxx other than 1000 is reserved for test
 #: and calibration (Note 1), so every other pointer is refused for good.
 CONFIG, TUPPER, TLOWER, TCRIT, TA = 1, 2, 3, 4, 5
 MANUFACTURER_ID, DEVICE_ID, RESOLUTION = 6, 7, 8
+
+#: The ID registers, by pointer. 5.1.4, p.27: manufacturer ID 0x0054. 5.1.5,
+#: p.28: device ID 0x04 in the high byte, revision 0x00 in the low.
 IDS: dict[int, int] = {MANUFACTURER_ID: 0x0054, DEVICE_ID: 0x0400}
 
 #: The writable registers' power-on data. Table 5-3, p.33: CONFIG, TUPPER,
@@ -126,10 +127,7 @@ def ta_word(celsius: float, resolution: int, tupper: int, tlower: int,
     reading of Register 5-4 note 2 ("bits 2, 1 and 0 may remain clear") this
     model takes (design item 6; DS25095A does not say which way it rounds).
     The flags compare the temperature the register shows with the limits.
-    **In shutdown the flags are recomputed, not frozen** (the model's
-    judgement: 5.2.1 says the temperature data is held and does not say
-    whether bits 15:13 follow a limit written afterwards), so only the
-    temperature bits are held.
+    (What shutdown does to them is `Mcp9808._word`'s, not this function's.)
     """
     return _with_flags(_sixteenths(celsius, resolution), tupper, tlower, tcrit)
 
@@ -162,6 +160,21 @@ class Mcp9808:
         #: data"), as sixteenths already rounded to the resolution of the
         #: moment SHDN was set, so a later resolution write does not change
         #: them; None when TA follows `celsius`.
+        #:
+        #: **Bits 15:13 are recomputed in shutdown, not frozen: the model's
+        #: judgement, with DS25095A pulling both ways.** For recomputing:
+        #: 5.1.3 (p.24) scopes the hold to TA<12:0>, which are "double-buffered
+        #: ... loaded in parallel to the TA register at tCONV", and Register
+        #: 5-4 note 1 says bits 15:13 are not affected by CONFIG<5:0>. For
+        #: freezing: 5.1.3 says TA<15:13> "reflect the Alert pin state", 5.2.3.1
+        #: says an asserted Alert stays asserted in shutdown and needs
+        #: Continuous Conversion for tCONV to deassert, and Alert Stat "can not
+        #: be set to 1 or cleared to 0 in Shutdown mode" (Register 5-2). It is
+        #: answered and THYST's similar ambiguity is refused because here the
+        #: Alert pin is not modelled (Alert Cnt is refused), so no asserted
+        #: state exists to hold, and a plain comparison with the limits is the
+        #: one reading 5.1.3 gives; THYST's flags have two readings and a
+        #: history.
         self._frozen: int | None = None
         self._powered = False
         self._writing = False
