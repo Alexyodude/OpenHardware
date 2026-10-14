@@ -15,3 +15,5 @@ STEPS:
 3. Tests: the route's `cpu_hz` for one board of each kind and a null, each seen to fail first; a page test that the line appears only with a clock.
 
 Claims: webui/api.py is OH-172's (lent to OH-161), webui/static/emulator.js OH-221's (done); borrow when this starts.
+
+**Note 2026-10-14:** 2026-10-14, from OH-232's review: when a route gains cpu_hz, also give the page the board's own retired count. BoardSession.retired (webui/api.py ~1394, incremented ~1436 and ~1617) is authoritative but only the /api/board/drive reply carries it (emulator_server.py ~682). OH-232 made the top bar's counter add up run replies on the page (a base kept across Run presses, plus each step's count) because webui/api.py and emulator_server.py are OH-161's and were changing in lane2. Putting 'retired' in state() lets renderBoardState write the counter directly and retires the page's arithmetic and its races. Do it after OH-161's slice 1a merges.
