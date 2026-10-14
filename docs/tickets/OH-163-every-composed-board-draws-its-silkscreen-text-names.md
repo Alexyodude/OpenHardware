@@ -13,6 +13,10 @@ touches:
 - tools/import_3d_model.py
 - tests/rules/test_import_3d_model.py
 - tools/model_from_datasheet.py
+- tools/eagle.py
+- tests/rules/test_eagle.py
+- tools/compose_board_3d.py
+- tests/rules/test_compose_board_3d.py
 ---
 
 Twenty-five of twenty-six boards draw a vendor file or a board composed from the vendor's PCB, every placement is drawn or refused with a reason (OH-150), and what a person sees is still short of a photograph in four measurable ways. This ticket is those four, counted from `python tools/compose_board_3d.py --check` on 2026-09-04 (11 composed boards) and from the shipped .glb files.
@@ -150,3 +154,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-14:** 2026-10-14: also lends tools/model_from_datasheet.py to OH-231, for the XIAO STM32C5's U7 (a SLABS row) and USB1 (a SOCKETS row); comes back when OH-231 closes.
 
 **Note 2026-10-14:** 2026-10-14 loans back from OH-231 (done): tools/kicad.py, tests/rules/test_kicad.py, tools/import_3d_model.py, tests/rules/test_import_3d_model.py, tools/model_from_datasheet.py. tools/compose_board_3d.py and tests/rules/test_compose_board_3d.py pass from OH-231 straight to OH-235 (the Uno outline test and ARC_CHORD_MM from eagle); they come back here, with tools/eagle.py and tests/rules/test_eagle.py, when OH-235 closes.
+
+**Note 2026-10-14:** 2026-10-14 loans back from OH-235 (done): tools/eagle.py, tools/compose_board_3d.py, tests/rules/test_compose_board_3d.py, and tests/rules/test_eagle.py (new in OH-235; it tests eagle.py, so it is claimed here with it).
