@@ -160,3 +160,5 @@ Every number above is from --check; do not restate the counts in prose anywhere 
 **Note 2026-10-14:** 2026-10-14 lends tools/compose_board_3d.py, tools/import_3d_model.py, tests/rules/test_compose_board_3d.py and tests/rules/test_import_board.py to OH-171 (the STM32C5 board's key XIAO-XIAO STM32C5-SMD becomes XIAO-STM32C5-SMD); they come back when OH-171 closes.
 
 **Note 2026-10-14:** 2026-10-14 loans back from OH-171 (done): tools/compose_board_3d.py, tools/import_3d_model.py, tests/rules/test_compose_board_3d.py, tests/rules/test_import_board.py.
+
+**Note 2026-10-15:** test_a_part_that_names_a_lens_it_has_lost_still_refuses_to_convert and test_the_tessellator_welds_what_it_meshes skipped only on a missing cached STEP, so master's full suite under Python 3.14 (no cadquery-ocp) failed both with Unavailable once the OH-231 recompose (run under conda, which has OCP) had cached the resistor STEP. Each now calls pytest.importorskip('OCP') as the file's other OCP tests do: 2 failed before, 2 skipped after under 3.14, 2 passed under conda.
