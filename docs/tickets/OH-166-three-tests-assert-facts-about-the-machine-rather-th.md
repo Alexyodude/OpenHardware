@@ -7,6 +7,7 @@ priority: P3
 created: '2026-09-05'
 touches:
 - tests/webui/test_emulator.py
+- webui/emulator_server.py
 ---
 
 Three tests in tests/webui assert something that is not a property of this code, and each has now failed for a different session doing something else on the same machine.
@@ -109,3 +110,5 @@ it now would only re-measure item 2.
 **Note 2026-10-15:** 2026-10-15 review of 8b2c89e approved; its two MEDIUMs and a LOW applied in 2e1240b. The server-call guard is now an ast walk over webui/*.py except compile.py (every compile_service.build call has exactly two positional arguments, and at least one exists), with a test that runs the checker on source passing root as a keyword and as a third positional; run on a scratch copy of emulator_server.py with root=x injected it names emulator_server.py:867. The emulator test's post() timeout and the state-poll join are BUILD_TIMEOUT_SECONDS, BUILD_BUDGET_SECONDS plus a 30 s margin, since the earlier 120 s was shorter than the 300 s a build is allowed. The failed-build test asserts its root exists before checking it is empty. Item 3 remains.
 
 **Note 2026-10-15:** 2026-10-15 item 1 and the test_emulator timeout merged to master. Changes: compile.build(board, source, root=None); the failed-build test builds under tmp_path; the recipe guard is an ast check that no webui caller passes root; BUILD_TIMEOUT_SECONDS = compile.BUILD_BUDGET_SECONDS + 30. Independent review APPROVE; its MEDIUMs applied in 2e1240b. webui/compile.py and tests/webui/test_compile.py go back to OH-161. Item 3 (the refused-upload reset, OH-237's diagnosis) and item 4 (the whole suite twice concurrently) remain.
+
+**Note 2026-10-15:** 2026-10-15 borrows webui/emulator_server.py from OH-161 for item 3, in lane3; the reproduction test goes in tests/webui/test_emulator.py (claimed here).
