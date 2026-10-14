@@ -36,11 +36,15 @@ import itertools
 import os
 import pathlib
 import re
+import typing
 
 import pytest
 
 from webui import api
 from webui.boards import esp32c5, esp32c6
+from webui.devices.mcp9808 import Mcp9808
+
+from . import encode as e
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -1234,3 +1238,431 @@ def test_a_start_on_adc2_or_on_no_channel_faults_and_a_flash_pad_is_refused():
         with pytest.raises(ValueError) as caught:
             esp32c5.hold_volts(cpu, {16: 1.0})
         assert "GPIO16" in str(caught.value), str(caught.value)
+
+
+# --- I2C0, a master transaction (OH-161 step 5, the C5's half) ----------------
+
+I2C_REGISTERS = "components/soc/esp32c5/register/soc"
+
+
+def i2c_reset_word(text: str, register: str) -> int:
+    """`register`'s reset word composed from every field's `default:` comment
+    between its `#define <register>` and the next register's define, in a
+    header whose register macros may or may not take an `(i)`. Refuses a block
+    in which a `bitpos` has no decimal `default:` to read, rather than count it
+    as 0."""
+    start = re.search(rf"#define {register}(?:\(i\))?\s", text)
+    assert start, f"no #define {register}"
+    stop = re.search(r"#define \w+_REG(?:\(i\))?\s", text[start.end():])
+    block = text[start.end():start.end() + stop.start()] if stop else text[start.end():]
+    found = re.findall(r"/\*\* \w+ : [\w/]+; bitpos: \[(\d+)(?::(\d+))?\]; default: (\d+);", block)
+    assert len(found) == block.count("bitpos:"), (register, found)
+    return sum(int(default) << int(low or high) for high, low, default in found)
+
+
+def i2c_offset(text: str, register: str, base: str) -> int:
+    found = re.search(rf"#define {register}(?:\(i\))?\s+\({base}(?:\(i\))? \+ (0x[0-9a-fA-F]+)\)", text)
+    assert found, f"{register} is not an offset from {base}"
+    return int(found.group(1), 16)
+
+
+def i2c_bit(text: str, name: str) -> int:
+    found = re.search(rf"#define {name}\s+\(BIT\((\d+)\)\)", text)
+    assert found, f"no BIT define for {name}"
+    return 1 << int(found.group(1))
+
+
+def test_the_i2c_numbers_this_board_carries_are_the_ones_in_the_header():
+    """Every I2C0 constant in `esp32c5.py` read back, by define name, out of
+    this part's own headers: the base (`reg_base.h`, and `soc.h`'s one-
+    controller `REG_I2C_BASE`), the eight offsets and every bit (`i2c_reg.h`),
+    the two PCR registers and their bits (`pcr_reg.h`), the two signals
+    (`gpio_sig_map.h`) and the matrix registers (`gpio_reg.h`) -- the part
+    where this C5 is neither a C3 nor a C6."""
+    root = idf_root()
+    if root is None:
+        pytest.skip("no ESP-IDF checkout; see docs/esp-idf-reference.md")
+    soc = root / "components/soc/esp32c5"
+    base = defines(soc / "register/soc/reg_base.h")
+    i2c = (soc / "register/soc/i2c_reg.h").read_text(encoding="utf-8", errors="replace")
+    gpio = (soc / "register/soc/gpio_reg.h").read_text(encoding="utf-8", errors="replace")
+    pcr = (soc / "register/soc/pcr_reg.h").read_text(encoding="utf-8", errors="replace")
+    sigs = defines(soc / "include/soc/gpio_sig_map.h")
+
+    assert int(base["DR_REG_I2C_BASE"], 16) == esp32c5.I2C
+    assert int(base["DR_REG_PCR_BASE"], 16) == esp32c5.PCR
+    assert defines(soc / "include/soc/soc.h")["REG_I2C_BASE(i)"].split("//")[0].strip() == (
+        "(DR_REG_I2C_BASE)"), "one controller, whatever the index"
+    for register, offset in (
+        ("I2C_CTR_REG", esp32c5.I2C_CTR), ("I2C_FIFO_CONF_REG", esp32c5.I2C_FIFO_CONF),
+        ("I2C_DATA_REG", esp32c5.I2C_DATA), ("I2C_INT_RAW_REG", esp32c5.I2C_INT_RAW),
+        ("I2C_INT_CLR_REG", esp32c5.I2C_INT_CLR), ("I2C_CLK_CONF_REG", esp32c5.I2C_CLK_CONF),
+        ("I2C_COMD0_REG", esp32c5.I2C_COMD0), ("I2C_COMD7_REG", esp32c5.I2C_COMD0 + 7 * 4),
+    ):
+        assert i2c_offset(i2c, register, "REG_I2C_BASE") == offset, register
+    for name, bit in (
+        ("I2C_TRANS_START", esp32c5.I2C_TRANS_START), ("I2C_MS_MODE", esp32c5.I2C_MS_MODE),
+        ("I2C_CONF_UPGATE", esp32c5.I2C_CONF_UPGATE), ("I2C_FSM_RST", esp32c5.I2C_FSM_RST),
+        ("I2C_NACK_INT_RAW", esp32c5.I2C_INT_NACK),
+        ("I2C_TRANS_COMPLETE_INT_RAW", esp32c5.I2C_INT_TRANS_COMPLETE),
+        ("I2C_END_DETECT_INT_RAW", esp32c5.I2C_INT_END_DETECT),
+        ("I2C_COMMAND0_DONE", esp32c5.I2C_COMD_DONE),
+    ):
+        assert i2c_bit(i2c, name) == bit, name
+    # The header marks these three WT (write-trigger), which is why CTR stores
+    # them as 0: a store must not leave TRANS_START set for a poll.
+    for name in ("I2C_TRANS_START", "I2C_CONF_UPGATE", "I2C_FSM_RST"):
+        assert re.search(rf"/\*\* {name} : WT;", i2c), name
+    assert esp32c5.I2C_WRITE_TRIGGER == (esp32c5.I2C_TRANS_START
+                                         | esp32c5.I2C_CONF_UPGATE | esp32c5.I2C_FSM_RST)
+    # TRAP 2: the gate is the function clock, in PCR, and resets closed.
+    assert i2c_offset(pcr, "PCR_I2C_CONF_REG", "DR_REG_PCR_BASE") == esp32c5.PCR_I2C_CONF
+    assert i2c_offset(pcr, "PCR_I2C_SCLK_CONF_REG", "DR_REG_PCR_BASE") == esp32c5.PCR_I2C_SCLK_CONF
+    assert i2c_bit(pcr, "PCR_I2C_CLK_EN") == esp32c5.PCR_I2C_CLK_EN
+    assert i2c_bit(pcr, "PCR_I2C_SCLK_EN") == esp32c5.PCR_I2C_SCLK_EN
+    assert esp32c5.I2C_GATE == (esp32c5.PCR + esp32c5.PCR_I2C_SCLK_CONF, esp32c5.PCR_I2C_SCLK_EN)
+    assert esp32c5.I2C_GATE[0] != esp32c5.ADC_GATE[0], "not the ADC's PCR register either"
+    assert int(sigs["I2CEXT0_SCL_IN_IDX"]) == int(sigs["I2CEXT0_SCL_OUT_IDX"]) == (
+        esp32c5.I2CEXT0_SCL_IDX)
+    assert int(sigs["I2CEXT0_SDA_IN_IDX"]) == int(sigs["I2CEXT0_SDA_OUT_IDX"]) == (
+        esp32c5.I2CEXT0_SDA_IDX)
+    # TRAP 3: this part's matrix.
+    assert i2c_offset(gpio, "GPIO_FUNC0_IN_SEL_CFG_REG", "DR_REG_GPIO_BASE") == (
+        esp32c5.GPIO_FUNC_IN_SEL_CFG0)
+    assert i2c_offset(gpio, "GPIO_FUNC0_OUT_SEL_CFG_REG", "DR_REG_GPIO_BASE") == (
+        esp32c5.GPIO_FUNC_OUT_SEL_CFG0)
+    for signal in (esp32c5.I2CEXT0_SCL_IDX, esp32c5.I2CEXT0_SDA_IDX):
+        assert i2c_offset(gpio, f"GPIO_FUNC{signal}_IN_SEL_CFG_REG", "DR_REG_GPIO_BASE") == (
+            esp32c5.GPIO_FUNC_IN_SEL_CFG0 + 4 * signal), signal
+    assert i2c_bit(gpio, "GPIO_SIG0_IN_SEL") == esp32c5.GPIO_SIG_IN_SEL
+    assert int(re.search(r"#define GPIO_FUNC0_IN_SEL\s+(0x[0-9A-Fa-f]+)U", gpio).group(1), 16) == (
+        esp32c5.GPIO_FUNC_IN_SEL_MASK)
+    assert int(re.search(r"#define GPIO_FUNC0_OUT_SEL\s+(0x[0-9A-Fa-f]+)U", gpio).group(1), 16) == (
+        esp32c5.GPIO_FUNC_OUT_SEL_MASK)
+    assert re.search(r"GPIO_FUNC0_OUT_SEL : R/W/SC; bitpos: \[8:0\]; default: "
+                     rf"{esp32c5.GPIO_OUT_SEL_GPIO};", gpio)
+    assert i2c_bit(gpio, "GPIO_FUNC0_OE_SEL") == 1 << 10
+    assert esp32c5.IO_MUX_MCU_SEL_MASK == 0x7 and esp32c5.IO_MUX_FUNC_GPIO == 1
+
+
+def test_the_opcodes_are_i2c_regs_own_comment_here():
+    """Unlike the C3's, whose register header carries the original ESP32's
+    encoding, this part's `I2C_COMMAND0` comment states the HAL's: WRITE 1,
+    STOP 2, READ 3, END 4, RSTART 6 (the HAL's own file is held in
+    `tests/webui/test_compile.py`, where a checkout without `components/hal`
+    is read from git)."""
+    root = idf_root()
+    if root is None:
+        pytest.skip("no ESP-IDF checkout; see docs/esp-idf-reference.md")
+    i2c = (root / I2C_REGISTERS / "i2c_reg.h").read_text(encoding="utf-8", errors="replace")
+    commented = {name: int(code) for code, name in
+                 re.findall(r"\*\s+(\d): (WRITE|STOP|READ|END|RSTART)\\\\", i2c)}
+    assert esp32c5.I2C_OP == commented == {
+        "RSTART": 6, "WRITE": 1, "READ": 3, "STOP": 2, "END": 4}
+
+
+def test_the_installed_i2c_registers_read_the_words_the_header_gives():
+    """Each register out of reset is every `default:` its header states --
+    among them CTR's FORCE_OUT bits, 0 here and 1 on a C3, and each I2C
+    signal's IN_SEL, 64, which is neither the C3's 0 nor FUNC0's 96 -- and the
+    function clock resets closed."""
+    needs_core()
+    from core.riscv32 import abi
+
+    root = idf_root()
+    if root is None:
+        pytest.skip("no ESP-IDF checkout; see docs/esp-idf-reference.md")
+    regs = root / I2C_REGISTERS
+    i2c = (regs / "i2c_reg.h").read_text(encoding="utf-8", errors="replace")
+    gpio = (regs / "gpio_reg.h").read_text(encoding="utf-8", errors="replace")
+    pcr = (regs / "pcr_reg.h").read_text(encoding="utf-8", errors="replace")
+    with abi.Cpu() as cpu:
+        esp32c5.install(cpu)
+        for register, offset in (
+            ("I2C_CTR_REG", esp32c5.I2C_CTR),
+            ("I2C_FIFO_CONF_REG", esp32c5.I2C_FIFO_CONF),
+            ("I2C_INT_RAW_REG", esp32c5.I2C_INT_RAW),
+            ("I2C_CLK_CONF_REG", esp32c5.I2C_CLK_CONF),
+        ):
+            word = i2c_reset_word(i2c, register)
+            assert cpu.read_word(esp32c5.I2C + offset) == word, (
+                register, hex(word), hex(cpu.read_word(esp32c5.I2C + offset)))
+        for number in range(8):
+            assert cpu.read_word(esp32c5.I2C + esp32c5.I2C_COMD0 + 4 * number) == 0, number
+        for register, offset in (
+            ("PCR_I2C_CONF_REG", esp32c5.PCR_I2C_CONF),
+            ("PCR_I2C_SCLK_CONF_REG", esp32c5.PCR_I2C_SCLK_CONF),
+        ):
+            word = i2c_reset_word(pcr, register)
+            assert cpu.read_word(esp32c5.PCR + offset) == word == 0, register
+        gate_at, gate_bit = esp32c5.I2C_GATE
+        assert not cpu.read_word(gate_at) & gate_bit, "TRAP 2: the clock resets closed"
+        for signal in (esp32c5.I2CEXT0_SCL_IDX, esp32c5.I2CEXT0_SDA_IDX):
+            word = i2c_reset_word(gpio, f"GPIO_FUNC{signal}_IN_SEL_CFG_REG")
+            assert cpu.read_word(in_sel_at(signal)) == word == (
+                esp32c5.GPIO_IN_SEL_I2C_AT_RESET), signal
+        for gpio_number in esp32c5.IO_MUX_PADS:
+            word = i2c_reset_word(gpio, f"GPIO_FUNC{gpio_number}_OUT_SEL_CFG_REG")
+            assert cpu.read_word(out_sel_at(gpio_number)) == word == (
+                esp32c5.GPIO_OUT_SEL_GPIO), f"GPIO{gpio_number} resets to OUT_SEL 256"
+
+
+def test_every_pads_gpio_pin_register_is_mapped_where_and_as_the_header_gives():
+    """`GPIO_PINn_REG` for every pad: its address (+ 0xd4 here, + 0x74 on a C3),
+    its reset word and its PAD_DRIVER bit read back out of `gpio_reg.h`, and
+    the register stores what `Wire.begin` writes to it."""
+    needs_core()
+    from core.riscv32 import abi
+
+    root = idf_root()
+    if root is None:
+        pytest.skip("no ESP-IDF checkout; see docs/esp-idf-reference.md")
+    text = (root / I2C_REGISTERS / "gpio_reg.h").read_text(encoding="utf-8", errors="replace")
+    driver = i2c_bit(text, "GPIO_PIN0_PAD_DRIVER")
+    assert driver == esp32c5.GPIO_PIN_PAD_DRIVER
+    with abi.Cpu() as cpu:
+        esp32c5.install(cpu)
+        for pad in esp32c5.IO_MUX_PADS:
+            found = i2c_offset(text, f"GPIO_PIN{pad}_REG", "DR_REG_GPIO_BASE")
+            address = esp32c5.GPIO + esp32c5.GPIO_PIN0 + esp32c5.GPIO_PIN_STRIDE * pad
+            assert address == esp32c5.GPIO + found, pad
+            assert cpu.read_word(address) == i2c_reset_word(text, f"GPIO_PIN{pad}_REG") == (
+                esp32c5.GPIO_PIN_AT_RESET), pad
+            cpu.write_word(address, driver)
+            assert cpu.read_word(address) == driver, pad
+
+
+# --- hand-assembled transactions ----------------------------------------------
+
+
+def in_sel_at(signal: int) -> int:
+    return esp32c5.GPIO + esp32c5.GPIO_FUNC_IN_SEL_CFG0 + 4 * signal
+
+
+def out_sel_at(gpio: int) -> int:
+    return esp32c5.GPIO + esp32c5.GPIO_FUNC_OUT_SEL_CFG0 + 4 * gpio
+
+
+def li(rd: str, value: int) -> list[int]:
+    value &= 0xFFFFFFFF
+    high = ((value + 0x800) >> 12) & 0xFFFFF
+    low = value - (high << 12)
+    if low >= 0x80000000:
+        low -= 1 << 32
+    return [e.lui(rd, high), e.addi(rd, rd, low)]
+
+
+def stores(*pairs: tuple[int, int]) -> list[int]:
+    program: list[int] = []
+    for address, value in pairs:
+        program += li("a4", address) + li("a5", value) + [e.sw("a5", "a4", 0)]
+    return program
+
+
+def loads(*addresses: int) -> list[int]:
+    """`lw` each address into x16, x17, ... in turn."""
+    program: list[int] = []
+    for number, address in enumerate(addresses):
+        program += li("a4", address) + [e.lw(16 + number, "a4", 0)]
+    return program
+
+
+#: D4 and D5 of a XIAO ESP32-C5, the vendor's SDA and SCL.
+SDA_GPIO, SCL_GPIO = 23, 24
+#: `hal/esp32c5/include/hal/i2c_ll.h:46-50`, typed out so that the
+#: transactions below do not depend on the module's own table.
+OP = {"RSTART": 6, "WRITE": 1, "READ": 3, "STOP": 2, "END": 4}
+I2C_CTR_AT = esp32c5.I2C + esp32c5.I2C_CTR
+I2C_DATA_AT = esp32c5.I2C + esp32c5.I2C_DATA
+I2C_RAW_AT = esp32c5.I2C + esp32c5.I2C_INT_RAW
+I2C_CLR_AT = esp32c5.I2C + esp32c5.I2C_INT_CLR
+I2C_START = esp32c5.I2C_TRANS_START | esp32c5.I2C_MS_MODE
+MCU_GPIO = 1 << 12 | esp32c5.IO_MUX_FUN_IE
+
+
+def command(op: str, n: int = 0, *, ack_en: bool = False, ack_val: int = 0) -> int:
+    return n | ack_en << 8 | ack_val << 10 | OP[op] << 11
+
+
+def comd(index: int) -> int:
+    return esp32c5.I2C + esp32c5.I2C_COMD0 + 4 * index
+
+
+def pad(gpio: int) -> int:
+    return esp32c5.IO_MUX + esp32c5.IO_MUX_GPIO0 + gpio * esp32c5.IO_MUX_STRIDE
+
+
+def wiring() -> list[tuple[int, int]]:
+    """What Wire.begin writes: both pads to function 1 with the input on, each
+    signal out of its pad and back in from it."""
+    return [
+        (pad(SDA_GPIO), MCU_GPIO), (pad(SCL_GPIO), MCU_GPIO),
+        (out_sel_at(SDA_GPIO), esp32c5.I2CEXT0_SDA_IDX),
+        (out_sel_at(SCL_GPIO), esp32c5.I2CEXT0_SCL_IDX),
+        (in_sel_at(esp32c5.I2CEXT0_SDA_IDX), esp32c5.GPIO_SIG_IN_SEL | SDA_GPIO),
+        (in_sel_at(esp32c5.I2CEXT0_SCL_IDX), esp32c5.GPIO_SIG_IN_SEL | SCL_GPIO),
+    ]
+
+
+def transaction(commands: list[int], data: list[int]) -> list[tuple[int, int]]:
+    return ([(I2C_CTR_AT, esp32c5.I2C_MS_MODE), (I2C_CLR_AT, 0x3FFFF)]
+            + [(I2C_DATA_AT, byte) for byte in data]
+            + [(comd(n), word) for n, word in enumerate(commands)]
+            + [(I2C_CTR_AT, I2C_START)])
+
+
+def write_pointer(pointer: int, address: int = 0x18) -> list[tuple[int, int]]:
+    return transaction([command("RSTART"), command("WRITE", 2, ack_en=True),
+                        command("STOP")], [address << 1, pointer])
+
+
+def read_two(address: int = 0x18) -> list[tuple[int, int]]:
+    return transaction([command("RSTART"), command("WRITE", 1, ack_en=True),
+                        command("READ", 1), command("READ", 1, ack_val=1),
+                        command("STOP")], [address << 1 | 1])
+
+
+def attached(straps: int = 0) -> tuple[tuple[int, int, Mcp9808], ...]:
+    return ((SDA_GPIO, SCL_GPIO, Mcp9808(straps=straps, celsius=25.0, vdd=3.3)),)
+
+
+def run_i2c(program: list[int], bus: typing.Sequence = (), *, gate: bool = True,
+            ) -> tuple[api.BoardSession, api.RunResult]:
+    """A C5 session over `program` at the flash window, `bus` held on its
+    pins, run for exactly the program's length (the gate store first)."""
+    words = (stores((esp32c5.I2C_GATE[0], esp32c5.I2C_GATE[1])) if gate else []) + program
+    image = b"".join(word.to_bytes(4, "little") for word in words)
+    session = api.load_firmware(BOARD, image, base=esp32c5.IROM)
+    esp32c5.hold_bus(session.cpu, bus)
+    return session, session.run(len(words))
+
+
+def test_a_pointer_write_and_a_two_byte_read_return_the_manufacturer_and_device_ids():
+    needs_core()
+    for pointer, want in ((6, (0x00, 0x54)), (7, (0x04, 0x00))):
+        program = (stores(*wiring()) + stores(*write_pointer(pointer))
+                   + stores(*read_two()) + loads(I2C_DATA_AT, I2C_DATA_AT))
+        session, result = run_i2c(program, attached())
+        with session:
+            assert result.status == "running", (pointer, result)
+            regs = session.cpu.get_regs().as_list()
+            assert (regs[16], regs[17]) == want, (pointer, regs[16:18])
+            assert session.cpu.read_word(I2C_RAW_AT) & esp32c5.I2C_INT_TRANS_COMPLETE
+            assert session.cpu.read_word(I2C_CTR_AT) == esp32c5.I2C_MS_MODE, (
+                "TRANS_START rang and stored as 0")
+            for n in range(5):
+                assert session.cpu.read_word(comd(n)) >> 31 == 1, n
+
+
+def test_with_no_device_on_the_pads_the_address_is_nacked_and_its_command_not_done():
+    needs_core()
+    session, result = run_i2c(stores(*wiring()) + stores(*write_pointer(6)), ())
+    with session:
+        assert result.status == "running", result
+        raw = session.cpu.read_word(I2C_RAW_AT)
+        assert raw & esp32c5.I2C_INT_NACK and raw & esp32c5.I2C_INT_TRANS_COMPLETE, hex(raw)
+        assert session.cpu.read_word(comd(0)) >> 31 == 1, "RSTART ran"
+        assert session.cpu.read_word(comd(1)) >> 31 == 0, "COMD1, the address, did not"
+
+
+def test_a_part_on_the_c3s_pads_is_not_on_this_bus():
+    """GPIO6 and GPIO7 are a C3's D4 and D5 and no pads of the C5's bus: a
+    part held there is not answered, and one held on the C5's own pair is."""
+    needs_core()
+    elsewhere = ((6, 7, Mcp9808(straps=0, celsius=25.0, vdd=3.3)),)
+    session, result = run_i2c(stores(*wiring()) + stores(*write_pointer(6)), elsewhere)
+    with session:
+        assert result.status == "running", result
+        assert session.cpu.read_word(I2C_RAW_AT) & esp32c5.I2C_INT_NACK
+
+
+def test_a_closed_clock_gate_answers_nothing():
+    """TRAP 2: PCR_I2C_SCLK_EN resets closed, and a transaction started behind
+    it raises no interrupt, which is what Wire's 50 ms timeout waits out. The
+    pads are wired, so that only the gate is wrong. The register clock, set
+    here and not checked, changes nothing."""
+    needs_core()
+    program = (stores((esp32c5.PCR + esp32c5.PCR_I2C_CONF, esp32c5.PCR_I2C_CLK_EN))
+               + stores(*wiring()) + stores(*write_pointer(6)))
+    session, result = run_i2c(program, attached(), gate=False)
+    with session:
+        assert result.status == "running", result
+        assert session.cpu.read_word(I2C_RAW_AT) == 0, "cleared by the program, set by nothing"
+        assert session.cpu.read_word(comd(0)) >> 31 == 0
+
+
+def test_incoherent_routing_is_refused_by_naming_what_was_found():
+    """Including TRAP 3 itself: the C3's SIG_IN_SEL is bit 6, and a C5 given
+    that is not routed back in -- bit 8 is the matrix select here."""
+    needs_core()
+    sda = esp32c5.I2CEXT0_SDA_IDX
+    cases = {
+        "no pad": ([(out_sel_at(SDA_GPIO), 256)], ("SDA", "no pad")),
+        "a C3's out-of-reset OUT_SEL": ([(out_sel_at(SDA_GPIO), 128)], ("SDA", "no pad")),
+        "two pads": ([(out_sel_at(8), esp32c5.I2CEXT0_SCL_IDX)], ("SCL", "GPIO24", "GPIO8")),
+        "wrong pad back in": ([(in_sel_at(sda), esp32c5.GPIO_SIG_IN_SEL | 5)],
+                              ("SDA", "IN_SEL", "GPIO5")),
+        "matrix not selected": ([(in_sel_at(sda), SDA_GPIO)], ("SDA", "SIG_IN_SEL")),
+        "the C3's SIG_IN_SEL bit": ([(in_sel_at(sda), 1 << 6 | SDA_GPIO)],
+                                    ("SDA", "SIG_IN_SEL")),
+        "not the GPIO function": ([(pad(SDA_GPIO), esp32c5.IO_MUX_FUN_IE)],
+                                  ("SDA", "MCU_SEL", "GPIO23")),
+        "input off": ([(pad(SCL_GPIO), 1 << 12)], ("SCL", "FUN_IE", "GPIO24")),
+    }
+    for name, (changes, words) in cases.items():
+        program = stores(*wiring()) + stores(*changes) + stores(*write_pointer(6))
+        session, result = run_i2c(program, attached())
+        with session:
+            assert result.status == "stopped", (name, result)
+            for word in words:
+                assert word in result.detail, (name, word, result.detail)
+
+
+def test_each_thing_the_controller_model_does_not_do_is_refused_by_its_message():
+    needs_core()
+    rstart, stop = command("RSTART"), command("STOP")
+    cases = {
+        "a WRITE longer than the TX FIFO": (
+            [rstart, command("WRITE", 3, ack_en=True), stop], [0x30, 6], "holds 2"),
+        "TX bytes no WRITE consumed": (
+            [rstart, command("WRITE", 2, ack_en=True), stop], [0x30, 6, 7],
+            "no WRITE command consumed"),
+        "an END command": ([rstart, command("END")], [], "END"),
+        "a list with no STOP": ([rstart] * 8, [], "reached no STOP"),
+        "a READ with nothing addressed": ([rstart, command("READ", 1), stop], [],
+                                          "no device addressed for reading"),
+    }
+    for name, (lists, data, message) in cases.items():
+        program = stores(*wiring()) + stores(*transaction(lists, data))
+        session, result = run_i2c(program, attached())
+        with session:
+            assert result.status == "stopped", (name, result)
+            assert message in result.detail, (name, result.detail)
+    program = stores(*wiring()) + stores((I2C_CTR_AT, esp32c5.I2C_TRANS_START))
+    session, result = run_i2c(program, attached())
+    with session:
+        assert result.status == "stopped" and "MS_MODE clear" in result.detail, result
+
+
+def test_a_bus_pad_this_part_does_not_have_is_refused_before_anything_is_held():
+    """GPIO16 is one of the SPI flash pads this board maps no register for."""
+    needs_core()
+    for gpio in (16, 99):
+        with pytest.raises(ValueError) as caught:
+            esp32c5.check_bus(((SDA_GPIO, gpio, None),))
+        assert f"GPIO{gpio}" in str(caught.value), str(caught.value)
+
+
+def test_a_pad_routed_to_a_peripheral_reports_unknown_and_the_others_do_not():
+    needs_core()
+    from core.riscv32 import abi
+
+    with abi.Cpu() as cpu:
+        esp32c5.install(cpu)
+        before = esp32c5.pin_states(cpu)
+        assert set(before.values()) == {"input"}
+        cpu.write_word(out_sel_at(SDA_GPIO), esp32c5.I2CEXT0_SDA_IDX)
+        after = esp32c5.pin_states(cpu)
+        assert after["D4"] == "unknown"
+        assert {label: state for label, state in after.items() if label != "D4"} == {
+            label: state for label, state in before.items() if label != "D4"}

@@ -135,6 +135,7 @@
 #define OH_I2C_CTR_MS_MODE             0x00000010u   /* bit 4 */
 #define OH_I2C_CTR_TRANS_START         0x00000020u   /* bit 5, write-trigger */
 #define OH_I2C_CTR_CLK_EN              0x00000100u   /* bit 8 */
+#define OH_I2C_CTR_INIT                0x00000113u   /* MS_MODE | CLK_EN | both FORCE_OUT, as `i2c_ll_master_init` writes CTR */
 #define OH_I2C_CTR_CONF_UPGATE         0x00000800u   /* bit 11, write-trigger */
 #define OH_I2C_FIFO_TX_RST             0x00002000u   /* FIFO_CONF bit 13 */
 #define OH_I2C_FIFO_RX_RST             0x00001000u   /* FIFO_CONF bit 12 */

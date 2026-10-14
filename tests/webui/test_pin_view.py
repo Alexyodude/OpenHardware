@@ -656,14 +656,17 @@ class _Words:
     sketch reaches only by writing `OUT` without ever calling `pinMode`."""
 
     def __init__(self, values: dict[int, int]):
-        from webui.boards import esp32c3
+        from webui.boards import esp32c3, esp32c5
 
-        # A C3's pads come out of reset with OUT_SEL 128 (the GPIO block
-        # drives them), which an unmapped read of 0 would call a peripheral.
+        # A C3's pads come out of reset with OUT_SEL 128 and a C5's with 256
+        # (the GPIO block drives them), which an unmapped read of 0 would call
+        # a peripheral. The two blocks sit at different bases, so one dict
+        # holds both.
         at_reset = {
-            esp32c3.GPIO + esp32c3.GPIO_FUNC_OUT_SEL_CFG0 + 4 * gpio:
-                esp32c3.GPIO_OUT_SEL_GPIO
-            for gpio in esp32c3.IO_MUX_PADS}
+            module.GPIO + module.GPIO_FUNC_OUT_SEL_CFG0 + 4 * gpio:
+                module.GPIO_OUT_SEL_GPIO
+            for module in (esp32c3, esp32c5)
+            for gpio in module.IO_MUX_PADS}
         self._values = {**at_reset, **values}
 
     def read_word(self, address: int) -> int:

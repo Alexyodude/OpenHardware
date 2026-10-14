@@ -2638,3 +2638,67 @@ def test_the_record_replays_the_printed_text_and_the_pc_at_every_drive():
         run_to(replay, final[0])
         assert where(replay) == final
         assert replay.inputs == record
+
+
+# --- Wire on the XIAO ESP32-C5 (OH-161 step 5, slice 3: the C5's half) --------
+#
+# The sketches above, compiled for the C5 and run on it. The C5 reaches the
+# bus on GPIO23 and GPIO24 (the vendor's pins_arduino.h SDA and SCL, which are
+# D4 and D5 here as on the C3), its clock gate is in PCR and resets closed, and
+# its matrix registers are another shape; none of that is visible to a sketch,
+# which is the point of running one.
+
+C5_BOARD = "XIAO-ESP32-C5-DIP"
+
+
+def _c5_run(sketch: str, count: int, *, device: bool = True,
+            celsius: float = 25.0, limit: int = 3_000_000):
+    """The words `sketch` prints on a C5 with an MCP9808 on D4/D5 (or none),
+    and the session's retired count after them."""
+    needs_riscv32()
+    from webui import compile as compiler
+
+    try:
+        built = compiler.build(C5_BOARD, sketch)
+    except compiler.ToolchainMissing as exc:
+        pytest.skip(str(exc))
+    assert built.ok, built.diagnostics
+    with api.load_firmware(C5_BOARD, built.image,
+                           base=compiler.recipe_for(C5_BOARD).base) as session:
+        if device:
+            session.drive({}, None, {"u1": dict(MCP9808_ON_D4_D5, celsius=celsius)})
+        words = _printed_tokens(session, count, limit=limit)
+        assert session.status == "running", (session.status, session.detail, words)
+        return words, session.retired
+
+
+def test_a_c5_wire_sketch_reads_the_mcp9808_ids_through_the_controller():
+    """The two ID reads of DS25095A 5.1.4 and 5.1.5, 0x0054 (84) and 0x0400
+    (1024), each as a write ended by a STOP and as a repeated START."""
+    words, _ = _c5_run(WIRE_SKETCH, 6)
+    assert words == ["0", "2", "84", "0", "2", "1024"], (
+        f"status, bytes and value of each read: {words}")
+
+
+def test_a_c5_wire_sketch_reads_ta_at_the_held_temperature():
+    """25.0 C prints 400 and 49552 (Register 5-4: 25.0 / 0.0625, and the
+    comparison flags in bits 15:13 against the power-on limits)."""
+    words, _ = _c5_run(WIRE_TA_SKETCH, 2)
+    assert words == ["400", "49552"], words
+
+
+def test_a_c5_wire_sketch_with_nothing_on_the_bus_is_nacked_and_reads_nothing():
+    words, _ = _c5_run(WIRE_SKETCH, 6, device=False)
+    assert words == ["2", "0", "-1", "0", "0", "-1"], words
+
+
+def test_a_c5_wire_sketch_that_never_began_times_out_with_a_closed_gate():
+    """PCR_I2C_SCLK_EN resets 0 on the C5, so with no `begin` nothing answers
+    and `endTransmission` gives up after Wire's 50 ms of SYSTIMER."""
+    from tests.webui.esp32_timing import steps_per_millisecond
+    from webui.boards import esp32c5
+
+    words, retired = _c5_run(WIRE_NO_BEGIN_SKETCH, 1, limit=20_000_000)
+    assert words == ["5"], f"a part was on the bus, and the gate was closed: {words}"
+    fifty = 50 * steps_per_millisecond(esp32c5)
+    assert retired >= fifty, f"gave up after {retired} steps, before 50 ms ({fifty})"

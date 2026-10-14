@@ -399,9 +399,9 @@ def _openhardware(*, variant: str, march: str, base: int,
             *(() if wire else (
                 ("Wire.h: No such file",
                  (f"Wire needs an I2C controller, and this board's model maps "
-                  f"none -- {header} defines no OH_I2C_*. The ESP32-C3's has "
-                  f"one; this chip's arrives with its own slice of OH-161 "
-                  f"step 5.")),
+                  f"none -- {header} defines no OH_I2C_*. The ESP32-C3's and "
+                  f"ESP32-C5's have one; this chip's arrives with its own "
+                  f"half of OH-161 step 5.")),
             )),
         ),
     )
@@ -498,6 +498,7 @@ RECIPES: dict[str, Recipe] = {
         # `tools/import_pindefs.py --fetch` already brings it; see
         # `Recipe.bsp_includes`. A freestanding header, like the C3's.
         bsp_includes=("arduino-esp32/variants/XIAO_ESP32C5",),
+        wire=True,
     ),
     "ESP32-C6": _openhardware(
         variant="variants/xiao_esp32c6",

@@ -28,6 +28,7 @@ import itertools
 import os
 import pathlib
 import re
+import subprocess
 
 import pytest
 
@@ -1332,6 +1333,7 @@ def test_link_diagnostics_scrub_the_machines_paths():
 # decision it stands on.
 
 C3_BOARD = "XIAO-ESP32-C3-DIP"
+C5_BOARD = "XIAO-ESP32-C5-DIP"
 
 #: The vendor's D10 is GPIO10 -- `pins_arduino.h` in Seeed's own variant,
 #: which the recipe puts on the include path -- and the sketch deliberately
@@ -1737,11 +1739,19 @@ def test_the_oh_board_header_restates_the_descriptions_own_numbers(variant):
         assert int(defines["OH_ADC_BUS_CLOCK_EN"], 16) == description.PCR_SARADC_REG_CLK_EN
     # I2C0, on the same terms (OH-161 step 5): the header carries it only
     # where the description maps a controller, because `Wire.h` is declared
-    # by the macros and the recipe's `wire` flag by the same fact. The C5 and
-    # C6 have none until their own slices, and the next test holds the flag.
+    # by the macros and the recipe's `wire` flag by the same fact. The C6 has
+    # none until its own half, and a later test holds the flag.
     assert ("OH_I2C_CTR" in defines) == hasattr(description, "I2C"), variant
     if hasattr(description, "I2C"):
         i2c = description.I2C
+        # The register clock, where the description has one (the C5's PCR):
+        # `Wire.begin` sets it under `#ifdef`, and the model stores it.
+        assert ("OH_I2C_BUS_CLOCK" in defines) == hasattr(description, "PCR_I2C_CONF"), variant
+        if hasattr(description, "PCR_I2C_CONF"):
+            assert int(defines["OH_I2C_BUS_CLOCK"], 16) == (
+                description.PCR + description.PCR_I2C_CONF)
+            assert int(defines["OH_I2C_BUS_CLOCK_EN"], 16) == description.PCR_I2C_CLK_EN
+        assert int(defines["OH_I2C_CTR_INIT"], 16) & description.I2C_MS_MODE, variant
         for define, offset in (
             ("OH_I2C_CTR", description.I2C_CTR), ("OH_I2C_FIFO_CONF", description.I2C_FIFO_CONF),
             ("OH_I2C_DATA", description.I2C_DATA), ("OH_I2C_INT_RAW", description.I2C_INT_RAW),
@@ -1838,17 +1848,124 @@ def test_the_i2c_bits_the_description_does_not_carry_are_the_vendors_own():
                           ("OH_I2C_ACK_VAL", "ack_val")):
         assert int(defines[define], 16) == 1 << at[field], (define, at)
     assert int(defines["OH_I2C_OP_SHIFT"]) == at["op_code"], at
+    # `Wire.begin` stores one CTR word: `i2c_ll_master_init`'s, which is these
+    # four bits on this part (a set FORCE_OUT is open drain here).
+    assert int(defines["OH_I2C_CTR_INIT"], 16) == sum(
+        int(defines[name], 16) for name in (
+            "OH_I2C_CTR_MS_MODE", "OH_I2C_CTR_CLK_EN",
+            "OH_I2C_CTR_SDA_FORCE_OUT", "OH_I2C_CTR_SCL_FORCE_OUT"))
+
+
+def _esp_idf_reference() -> pathlib.Path | None:
+    """The ESP-IDF v5.5 checkout the C5's numbers were read from, or None:
+    `$ESP_IDF_ROOT`, else a sibling `esp-idf-reference` or `esp-idf` of the
+    repository (the resolution `tests/riscv32/test_esp32c5_board.py` does,
+    written out again because two callers in two files are not three)."""
+    named = os.environ.get("ESP_IDF_ROOT")
+    repo = pathlib.Path(__file__).resolve().parents[2]
+    for path in ([pathlib.Path(named)] if named else []) + [
+            repo.parent / "esp-idf-reference", repo.parent / "esp-idf"]:
+        if (path / "components" / "soc" / "esp32c5").is_dir():
+            return path
+    return None
+
+
+def test_the_c5_i2c_bits_the_description_does_not_carry_are_the_vendors_own():
+    """The C5's `oh_board.h` restated against ESP-IDF v5.5's own C5 headers:
+    the FIFO resets `Wire` pulses, the OUT_SEL_CFG field that gives the pad's
+    output enable to GPIO_ENABLE (`GPIO_FUNC0_OE_SEL`, bit 10 where a C3's
+    `OEN_SEL` is bit 9), PCR's two I2C clock bits, and CTR's FORCE_OUT bits,
+    which are open drain when CLEAR here -- so `OH_I2C_CTR_INIT`, the word
+    `Wire.begin` stores, is MS_MODE alone, and the header says so in the
+    register's own words. The command word's fields are held to
+    `i2c_ll_hw_cmd_t` and its op codes to `i2c_reg.h`'s `COMMAND0` comment
+    and to the HAL's `I2C_LL_CMD_*`, which agree on this part."""
+    root = _esp_idf_reference()
+    if root is None:
+        pytest.skip("no ESP-IDF checkout; see docs/esp-idf-reference.md")
+    registers = root / "components" / "soc" / "esp32c5" / "register" / "soc"
+    i2c = (registers / "i2c_reg.h").read_text(encoding="utf-8", errors="replace")
+    gpio = (registers / "gpio_reg.h").read_text(encoding="utf-8", errors="replace")
+    pcr = (registers / "pcr_reg.h").read_text(encoding="utf-8", errors="replace")
+    header = (pathlib.Path(compiler.ARDUINO_LITE) / "variants" / "xiao_esp32c5"
+              / "oh_board.h").read_text(encoding="utf-8")
+    defines = {parts[1]: parts[2].rstrip("u") for parts in
+               (line.split() for line in header.splitlines())
+               if len(parts) >= 3 and parts[0] == "#define"}
+
+    def vendor_bit(text: str, name: str) -> int:
+        found = re.search(rf"#define {name}\s+\(BIT\((\d+)\)\)", text)
+        assert found, f"no BIT define for {name}"
+        return 1 << int(found.group(1))
+
+    for define, text, name in (
+        ("OH_I2C_FIFO_TX_RST", i2c, "I2C_TX_FIFO_RST"),
+        ("OH_I2C_FIFO_RX_RST", i2c, "I2C_RX_FIFO_RST"),
+        ("OH_I2C_CTR_CONF_UPGATE", i2c, "I2C_CONF_UPGATE"),
+        ("OH_GPIO_OUT_SEL_OEN_SEL", gpio, "GPIO_FUNC0_OE_SEL"),
+        ("OH_GPIO_PIN_PAD_DRIVER", gpio, "GPIO_PIN0_PAD_DRIVER"),
+        ("OH_I2C_BUS_CLOCK_EN", pcr, "PCR_I2C_CLK_EN"),
+        ("OH_I2C_GATE_EN", pcr, "PCR_I2C_SCLK_EN"),
+    ):
+        assert int(defines[define], 16) == vendor_bit(text, name), define
+
+    for force in ("I2C_SDA_FORCE_OUT", "I2C_SCL_FORCE_OUT"):
+        assert re.search(rf"/\*\* {force} : R/W; bitpos: \[\d\]; default: 0;\s*"
+                         rf"\*\s+Configures the S\w\w output mode\.\\\\\s*"
+                         rf"\*\s+0: Open drain output", i2c), force
+    assert int(defines["OH_I2C_CTR_INIT"], 16) == vendor_bit(i2c, "I2C_MS_MODE"), (
+        "MS_MODE alone: the FORCE_OUT bits are clear for open drain")
+
+    ops = dict(re.findall(r"\*\s+(\d): (WRITE|STOP|READ|END|RSTART)\\\\", i2c))
+    assert {name: int(code) for code, name in ops.items()} == {
+        "WRITE": 1, "STOP": 2, "READ": 3, "END": 4, "RSTART": 6}, ops
+    for define, name in (("OH_I2C_OP_RSTART", "RSTART"), ("OH_I2C_OP_WRITE", "WRITE"),
+                         ("OH_I2C_OP_READ", "READ"), ("OH_I2C_OP_STOP", "STOP")):
+        assert int(defines[define]) == int(next(c for c, n in ops.items() if n == name)), define
+
+    relative = "components/hal/esp32c5/include/hal/i2c_ll.h"
+    if (root / relative).is_file():
+        ll = (root / relative).read_text(encoding="utf-8", errors="replace")
+    else:
+        # The reference checkout is sparse and carries no `components/hal`;
+        # the object is in its history.
+        shown = subprocess.run(["git", "-C", str(root), "show", f"HEAD:{relative}"],
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", check=False)
+        if shown.returncode != 0:
+            pytest.skip(f"SKIPPED: {relative} is neither checked out nor in git: {shown.stderr}")
+        ll = shown.stdout
+    commands = {name: int(code) for name, code in
+                re.findall(r"#define I2C_LL_CMD_(\w+)\s+(\d+)", ll)}
+    assert commands == {"RESTART": 6, "WRITE": 1, "READ": 3, "STOP": 2, "END": 4}, commands
+    struct = re.search(r"typedef union \{\s*struct \{(.*?)\};\s*uint32_t val;\s*\} i2c_ll_hw_cmd_t;",
+                       ll, re.S)
+    assert struct, "i2c_ll.h declares no i2c_ll_hw_cmd_t"
+    shift, at = 0, {}
+    for name, width in re.findall(r"(\w+):\s*(\d+)", struct.group(1)):
+        at[name] = shift
+        shift += int(width)
+    for define, field in (("OH_I2C_ACK_EN", "ack_en"), ("OH_I2C_ACK_EXP", "ack_exp"),
+                          ("OH_I2C_ACK_VAL", "ack_val")):
+        assert int(defines[define], 16) == 1 << at[field], (define, at)
+    assert int(defines["OH_I2C_OP_SHIFT"]) == at["op_code"], at
 
 
 def test_wire_is_compiled_only_where_the_board_has_an_i2c_controller_and_only_when_named(
         monkeypatch):
-    """The C3's recipe carries the `Wire` library; the C5's and C6's carry
-    none and say why, in the pane, where gcc says `Wire.h` is not there. A
-    sketch that does not name `Wire.h` is built without it on the C3 too --
-    read off the files the build handed the compiler, because the linker's
-    `--gc-sections` makes the plain image the smaller either way."""
+    """The recipes of the boards whose description maps an I2C controller --
+    the C3's and, since the C5's half of OH-161 step 5, the C5's -- carry the
+    `Wire` library; the C6's carries none and says why, in the pane, where gcc
+    says `Wire.h` is not there. A sketch that does not name `Wire.h` is built
+    without it on the C3 and the C5 too -- read off the files the build handed
+    the compiler, because the linker's `--gc-sections` makes the plain image
+    the smaller either way."""
     assert [lib.header for lib in compiler.recipe_for(C3_BOARD).libraries] == ["Wire.h"]
-    for board in sorted(OPENHARDWARE_BOARDS):
+    assert [lib.header for lib in compiler.recipe_for(C5_BOARD).libraries] == ["Wire.h"]
+    without = sorted(board for board, (description, _gpio) in OPENHARDWARE_BOARDS.items()
+                     if not hasattr(description, "I2C"))
+    assert without == ["XIAO-ESP32-C6-DIP"], without
+    for board in without:
         assert compiler.recipe_for(board).libraries == (), board
         built = oh_build(board, "#include <Wire.h>\nvoid setup(){} void loop(){}")
         assert not built.ok, board
@@ -1863,14 +1980,17 @@ def test_wire_is_compiled_only_where_the_board_has_an_i2c_controller_and_only_wh
         return real_run(command, deadline)
 
     monkeypatch.setattr(compiler, "_run", recording_run)
-    plain = c3_build("void setup(){} void loop(){}")
-    assert plain.ok, plain.diagnostics
-    assert compiled and not any(name.endswith("Wire.cpp") for name in compiled), compiled
-    compiled.clear()
-    wired = c3_build("#include <Wire.h>\nvoid setup(){ Wire.begin(); } void loop(){}")
-    assert wired.ok, wired.diagnostics
-    assert any(name.replace("\\", "/").endswith("libraries/Wire/Wire.cpp")
-               for name in compiled), compiled
+    for board in (C3_BOARD, C5_BOARD):
+        compiled.clear()
+        plain = oh_build(board, "void setup(){} void loop(){}")
+        assert plain.ok, (board, plain.diagnostics)
+        assert compiled and not any(name.endswith("Wire.cpp") for name in compiled), (
+            board, compiled)
+        compiled.clear()
+        wired = oh_build(board, "#include <Wire.h>\nvoid setup(){ Wire.begin(); } void loop(){}")
+        assert wired.ok, (board, wired.diagnostics)
+        assert any(name.replace("\\", "/").endswith("libraries/Wire/Wire.cpp")
+                   for name in compiled), (board, compiled)
 
 
 def test_every_overload_the_vendors_wire_write_has_compiles_here():
@@ -1898,8 +2018,9 @@ void setup() {
 }
 void loop() { }
 """
-    built = c3_build(sketch)
-    assert built.ok, built.diagnostics
+    for board in (C3_BOARD, C5_BOARD):
+        built = oh_build(board, sketch)
+        assert built.ok, (board, built.diagnostics)
 
 
 # --- the ESP32-C5 and C6, on the same core (OH-156) ---------------------------

@@ -5,8 +5,10 @@
  *
  * ## What this is a face on
  *
- * The C3's I2C0 in master mode, as `webui/boards/esp32c3.py` models it:
- * bytes go into the DATA FIFO, up to eight commands go into COMD0 to COMD7,
+ * I2C0 in master mode, as the board's description models it
+ * (`webui/boards/esp32c3.py` or `esp32c5.py`; the registers are the board's
+ * `oh_board.h` macros, and a chip's differences are macros and not `#ifdef`s
+ * here): bytes go into the DATA FIFO, up to eight commands go into COMD0 to COMD7,
  * and setting TRANS_START in CTR runs the list. The board's description runs
  * it between two instructions, so by the time the next instruction polls
  * INT_RAW the transaction is over. `begin` and each method below do what
@@ -52,18 +54,25 @@
  *
  * ## What `begin` does, and what it cannot
  *
- * It opens the controller's clock gate and routes both pads through the GPIO
- * matrix as `webui/boards/esp32c3.py`'s `i2c_pad` checks at every
+ * It opens the controller's clock gate -- and the register clock first,
+ * where the board has one (`OH_I2C_BUS_CLOCK`, the C5's PCR; the model
+ * stores it and checks only the function clock) -- and routes both pads
+ * through the GPIO matrix as the description's `i2c_pad` checks at every
  * TRANS_START: each pad on function 1 with its input on and a pull-up, the
  * signal out of the pad with its output enable from GPIO_ENABLE, and the
  * signal back in from the same pad. The pins are the vendor's `SDA` and `SCL`
- * from `pins_arduino.h`, GPIO6 and GPIO7, `D4` and `D5`. Each pad's
- * GPIO_PINn PAD_DRIVER is set, which makes it open-drain as I2C wants; the
- * model maps the register and stores the bit, and `i2c_pad` does not check it.
+ * from `pins_arduino.h` -- GPIO6 and GPIO7 on a C3, GPIO23 and GPIO24 on a
+ * C5, `D4` and `D5` on both. Each pad's GPIO_PINn PAD_DRIVER is set, which
+ * makes it open-drain as I2C wants; the model maps the register and stores
+ * the bit, and `i2c_pad` does not check it.
  *
- * CTR is written whole as `i2c_ll_master_init` writes it (`i2c_ll.h:909-918`
- * in the framework copy): MS_MODE, CLK_EN, SDA_FORCE_OUT and SCL_FORCE_OUT,
- * everything else 0. And before each TRANS_START CONF_UPGATE is set, as
+ * CTR is written whole, `OH_I2C_CTR_INIT`, as the HAL writes it: on a C3
+ * `i2c_ll_master_init` (`i2c_ll.h:909-918` in the framework copy) sets
+ * MS_MODE, CLK_EN, SDA_FORCE_OUT and SCL_FORCE_OUT, and on a C5
+ * `i2c_hal_master_init` (v5.5 `i2c_hal.c:39-50`) sets MS_MODE and clears the
+ * FORCE_OUTs -- **the bits mean opposite things**: set is open drain on the
+ * C3 and direct output on the C5; everything else is 0. And before each
+ * TRANS_START CONF_UPGATE is set, as
  * `i2c_hal_update_config` does by way of `i2c_ll_update` (`i2c_ll.h:143-146`).
  * The model stores CONF_UPGATE as a write-trigger 0 and does nothing with it,
  * so no run can tell the write is there; it is here because the HAL does it.
@@ -104,7 +113,7 @@ void reg_clear(uint32_t address, uint32_t bits) {
 }
 
 /* One pad of the bus, as `i2c_pad` reads it back. OUT_SEL carries the signal
- * in [7:0]; OEN_SEL makes GPIO_ENABLE the pad's output enable; PAD_DRIVER
+ * in its low bits (8 on a C3, 9 on a C5); OEN_SEL makes GPIO_ENABLE the pad's output enable; PAD_DRIVER
  * makes the pad open-drain. */
 void route(uint8_t gpio, uint32_t signal) {
     const uint32_t pad = OH_IO_MUX_GPIO0 + OH_IO_MUX_STRIDE * gpio;
@@ -159,11 +168,13 @@ Outcome go(void) {
 }  // namespace
 
 void OhWire::begin(void) {
+#ifdef OH_I2C_BUS_CLOCK
+    reg_set(OH_I2C_BUS_CLOCK, OH_I2C_BUS_CLOCK_EN);
+#endif
     reg_set(OH_I2C_GATE, OH_I2C_GATE_EN);
     route(SDA, OH_I2C_SDA_SIGNAL);
     route(SCL, OH_I2C_SCL_SIGNAL);
-    OH_REG(OH_I2C_CTR) = OH_I2C_CTR_MS_MODE | OH_I2C_CTR_CLK_EN |
-                         OH_I2C_CTR_SDA_FORCE_OUT | OH_I2C_CTR_SCL_FORCE_OUT;
+    OH_REG(OH_I2C_CTR) = OH_I2C_CTR_INIT;
     deferred_ = false;
     overflow_ = false;
 }

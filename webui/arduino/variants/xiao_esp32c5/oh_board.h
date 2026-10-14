@@ -20,9 +20,9 @@
  * collision is recorded and `test_the_c5_register_file_is_not_the_c6_one`
  * is what pins it.
  *
- * No I2C, because the description maps none, and the core's API surface
+ * What is NOT here is as deliberate as what is: the core's API surface
  * equals the model. GPIO_IN was absent on the same terms until OH-161's
- * step 3, and the ADC until its step 4.
+ * step 3, the ADC until its step 4, and I2C until its step 5.
  */
 
 #ifndef OH_BOARD_XIAO_ESP32C5_H
@@ -118,6 +118,69 @@
  * channel is its GPIO less one here, so a XIAO's A0, GPIO1, is channel 0. */
 #define OH_ADC1_FIRST_GPIO             1u
 #define OH_ADC1_CHANNELS               6u
+
+/* I2C0, base 0x60004000 (OH-161 step 5): what `Wire` writes, from
+ * `webui/boards/esp32c5.py`, which cites each line of `i2c_reg.h`,
+ * `reg_base.h`, `pcr_reg.h`, `gpio_reg.h` and `i2c_ll.h`. A test holds every
+ * line equal to the description's, and the bits the description does not
+ * carry to the vendor's own headers. Hex literals, for the reason the UART
+ * gate's is.
+ *
+ * **Not the C3's header with the base changed**, and each difference is a
+ * register `Wire` would write wrongly without the model faulting it:
+ *   - the clock gate is in PCR: the register clock PCR_I2C_CONF (+ 0x20)
+ *     CLK_EN, bit 0, and the function clock PCR_I2C_SCLK_CONF (+ 0x24)
+ *     SCLK_EN, bit 22, both 0 out of reset. The model checks the second and
+ *     stores the first, as the ADC's two;
+ *   - the matrix registers move and widen: GPIO_FUNCn_IN_SEL_CFG at + 0x2D4,
+ *     its SIG_IN_SEL bit 8 and a 7-bit IN_SEL; GPIO_FUNCn_OUT_SEL_CFG at
+ *     + 0xAD4 with OE_SEL at bit 10; GPIO_PINn at + 0xD4, PAD_DRIVER still
+ *     bit 2;
+ *   - the signals are I2CEXT0_SCL 46 and I2CEXT0_SDA 47
+ *     (`gpio_sig_map.h:80-83`);
+ *   - **open drain is FORCE_OUT clear** (`i2c_reg.h:32-36`, "0: Open drain
+ *     output"), and ESP-IDF sets it so (`i2c_ll_enable_pins_open_drain`,
+ *     `i2c_hal.c:42`), where the C3's is FORCE_OUT set. So CTR is written
+ *     MS_MODE alone, and OH_I2C_CTR_INIT is the word `Wire.begin` stores.
+ * The op codes are `i2c_ll.h`'s, as on the C3; a command word is byte_num
+ * [7:0], ack_en [8], ack_exp [9], ack_val [10], op_code [13:11]. */
+#define OH_I2C_CTR                     0x60004004u
+#define OH_I2C_FIFO_CONF               0x60004018u
+#define OH_I2C_DATA                    0x6000401Cu
+#define OH_I2C_INT_RAW                 0x60004020u
+#define OH_I2C_INT_CLR                 0x60004024u
+#define OH_I2C_COMD0                   0x60004058u
+#define OH_I2C_CTR_MS_MODE             0x00000010u   /* bit 4 */
+#define OH_I2C_CTR_TRANS_START         0x00000020u   /* bit 5, write-trigger */
+#define OH_I2C_CTR_CONF_UPGATE         0x00000800u   /* bit 11, write-trigger */
+#define OH_I2C_CTR_INIT                0x00000010u   /* MS_MODE; open drain is FORCE_OUT clear */
+#define OH_I2C_FIFO_TX_RST             0x00002000u   /* FIFO_CONF bit 13 */
+#define OH_I2C_FIFO_RX_RST             0x00001000u   /* FIFO_CONF bit 12 */
+#define OH_I2C_INT_NACK                0x00000400u   /* bit 10 */
+#define OH_I2C_INT_TRANS_COMPLETE      0x00000080u   /* bit 7 */
+#define OH_I2C_OP_SHIFT                11u
+#define OH_I2C_OP_RSTART               6u
+#define OH_I2C_OP_WRITE                1u
+#define OH_I2C_OP_READ                 3u
+#define OH_I2C_OP_STOP                 2u
+#define OH_I2C_ACK_EN                  0x00000100u   /* bit 8 */
+#define OH_I2C_ACK_EXP                 0x00000200u   /* bit 9 */
+#define OH_I2C_ACK_VAL                 0x00000400u   /* bit 10: 1 NACKs the byte read */
+#define OH_I2C_BUS_CLOCK               0x60096020u
+#define OH_I2C_BUS_CLOCK_EN            0x00000001u   /* PCR_I2C_CLK_EN, bit 0 */
+#define OH_I2C_GATE                    0x60096024u
+#define OH_I2C_GATE_EN                 0x00400000u   /* PCR_I2C_SCLK_EN, bit 22 */
+#define OH_I2C_SCL_SIGNAL              46u
+#define OH_I2C_SDA_SIGNAL              47u
+#define OH_GPIO_FUNC_IN_SEL_CFG0       0x600912D4u
+#define OH_GPIO_FUNC_OUT_SEL_CFG0      0x60091AD4u
+#define OH_GPIO_SIG_IN_SEL             0x00000100u   /* IN_SEL_CFG bit 8 */
+#define OH_GPIO_OUT_SEL_OEN_SEL        0x00000400u   /* OUT_SEL_CFG bit 10, OE_SEL */
+#define OH_GPIO_PIN0                   0x600910D4u
+#define OH_GPIO_PIN_STRIDE             0x4u
+#define OH_GPIO_PIN_PAD_DRIVER         0x00000004u   /* GPIO_PINn bit 2 */
+#define OH_IO_MUX_MCU_SEL_MASK         0x00007000u   /* [14:12] */
+#define OH_IO_MUX_MCU_SEL_GPIO         0x00001000u   /* function 1 */
 
 /* The top of HP SRAM (0x40860000, soc.h's SOC_DRAM_HIGH), minus a word so
  * the first push stays inside it -- the C3 header's arithmetic applied to
