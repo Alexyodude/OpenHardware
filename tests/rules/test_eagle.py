@@ -141,6 +141,13 @@ def test_no_flattened_arc_has_a_segment_the_composer_would_chain_through():
     # Turned about a centre, an arc no longer starts and ends on an axis, so
     # its axis crossings land anywhere, including a hair from an end.
     cases = [(66.04, 1.0001, 65.04, 0.0, -90.0)]
+    # An r = 2.54 arc that starts 0.01 mm of arc past due east and sweeps 90
+    # degrees: it crosses due north 0.01 mm before its end, which only the
+    # axis-crossing cutoff keeps from leaving a 0.01 mm segment.
+    start = 0.01 / 2.54
+    end = start + math.pi / 2
+    cases.append((10 + 2.54 * math.cos(start), 10 + 2.54 * math.sin(start),
+                  10 + 2.54 * math.cos(end), 10 + 2.54 * math.sin(end), 90.0))
     for degrees in range(0, 360, 3):
         for curve in (-90.0, 90.0):
             turn = math.radians(degrees)
@@ -200,10 +207,15 @@ def test_a_bad_coordinate_names_the_file_once(tmp_path):
     brd.write_text(
         '<eagle version="9"><drawing><board><plain>'
         '<wire x1="oops" y1="0" x2="1" y2="1" width="0" layer="20"/>'
-        '</plain></board></drawing></eagle>', encoding="utf-8")
+        '</plain><libraries><library name="l"><packages><package name="p"/>'
+        '</packages></library></libraries><elements><element name="J1" '
+        'library="l" package="p" value="" x="0" y="0"/></elements>'
+        '</board></drawing></eagle>', encoding="utf-8")
     with pytest.raises(eagle.EagleError) as raised:
         eagle.read_board(brd)
-    assert str(raised.value).count(str(brd)) == 1, str(raised.value)
+    message = str(raised.value)
+    assert "x1='oops'" in message, message
+    assert message.count(str(brd)) == 1, message
 
 
 def test_the_two_chord_constants_agree():
