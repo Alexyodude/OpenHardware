@@ -2,14 +2,10 @@
 id: OH-233
 title: 'The page could say how far behind real time a board runs, but no route sends
   it the board''s clock: as_json gains cpu_hz'
-status: in-progress
+status: open
 priority: P3
 created: '2026-10-13'
 touches:
-- webui/api.py
-- webui/static/emulator.js
-- webui/compile.py
-- tests/webui/test_board_run.py
 - webui/static/clock.js
 - tests/webui/test_clock.py
 ---
@@ -32,3 +28,5 @@ Claims: webui/api.py is OH-172's (lent to OH-161), webui/static/emulator.js OH-2
 **Note 2026-10-15:** 2026-10-15: review follow-ups done. The N in the run line is cpu_hz over the measured rate, which presumes one retired instruction per cycle. That is exact for the ESP32s (esp32c3/c5/c6.py SYSTIMER_INSTRUCTIONS_PER_TICK = CPU_HZ // SYSTIMER_HZ), and is the model's own clock for the Uno and the SAMD21, whose silicon averages more than one cycle per instruction, so on those two a real chip is slower than the model's clock says and 'about 1/N of real time' is N against the model's cycle, not against silicon.
 
 **Note 2026-10-15:** 2026-10-15: the cpu_hz route test now ends SKIPPED, naming the kinds it matched and the images missing, when it could check only some kinds; a full run passes.
+
+**Note 2026-10-15:** 2026-10-15: steps 1-3 merged to master; returns webui/api.py, webui/static/emulator.js, webui/compile.py and tests/webui/test_board_run.py to OH-161. Open for the 2026-10-14 note (the board's own retired count in state()).
