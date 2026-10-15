@@ -2,13 +2,10 @@
 id: OH-173
 title: 'a board file says which pin a pad reaches and not how strongly that is known:
   12 pads rest on other vendors'' boards and read identically to the 331 that do not'
-status: in-progress
+status: done
 priority: P2
 created: '2026-09-06'
 touches:
-- tools/import_pindefs.py
-- tests/rules/test_import_pindefs.py
-- webui/boards/*.json
 - tools/board_manifest.py
 - tests/rules/test_board_manifest.py
 ---
@@ -91,3 +88,5 @@ visible: before it, no pad was resolved from another board's files at all.
 **Note 2026-10-15:** Shape 2 built (commits 7ae891b, 21ac014). Each pad whose chip_pin is resolved carries pin_source: own or family, written by import_pindefs.filled_board right after chip_index/chip_pin_from; a null pad carries none, as it carries no chip_pin_from. How it is decided: Source.family is True only on arduino_chip (read_chip_pins, every variant of the chip); published_pins copies it onto each Claim.family; board_report sets family when EVERY claim that named the pin has family, own when any claim came from a file about this board (variant, devicetree, CAD, schematic). No pad is named anywhere in the code. board_manifest.py is unchanged: its rows go through filled_board and gain the field the same way. chip_pin keeps its meaning (OH-172). Counts, from git diff HEAD~1 HEAD -U0 -- webui/boards/*.json | grep pin_source | sort | uniq -c: 553 own and 12 family over 37 board files, and no other line of those files changed. The 12 are MTMS, MTDI, MTDO, MTCK, USB_DN, USB_DP on XIAO-ESP32-S3-SMD and XIAO-ESP32-S3-SMD_PAD. Not covered: Arduino Uno, which is not in the registry (its pins come from webui/pinmap.py) and carries no pin_source.
 
 **Note 2026-10-15:** Follow-ups (review). (1) test_a_source_that_reads_every_variant_of_a_chip_is_marked_family walks BOARDS and asserts (source.expand is not None) == source.family; shown failing with arduino_chip's family=True removed (the S3 DIP/SMD/_PAD sources listed). (2) The Arduino Uno's file is hand-maintained (OH-170 step 1, OH-201; no tool writes it), so its 22 resolved pads now say pin_source own and the every-pad test covers all 38 board files. The comma added after chip_index on those 22 lines is the only other change. Left alone, not this ticket's: the comment at tools/import_board.py:897 still lists the fields import_pindefs writes without pin_source.
+
+**Note 2026-10-15:** 2026-10-15: merged to master (923ae28). Shape 2: every resolved pad says pin_source own or family (553 own and 12 family in the generated files, plus the Uno's 22 own by hand); a guard test holds that a source expanding over a chip's variants is marked family. Returns tools/import_pindefs.py, its test and the three XIAO board files to OH-172; releases the board-file glob. Left: the comment at tools/import_board.py:897 does not list pin_source among what an import strips.
