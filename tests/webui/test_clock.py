@@ -36,7 +36,7 @@ import textwrap
 import pytest
 
 from webui import compile as compiler
-from webui.boards import atmega328p, esp32c3, esp32c5
+from webui.boards import atmega328p, catalogue, esp32c3, esp32c5
 
 CLOCK = (pathlib.Path(__file__).resolve().parents[2]
          / "webui" / "static" / "clock.js")
@@ -497,6 +497,30 @@ def test_the_pages_worked_delay_costs_and_clock_pointers_are_the_boards_own():
             if not any(fnmatch.fnmatch(module, pointer) for pointer in pointers):
                 pytest.fail(f"{path.name} points at no pointer matching {module}: "
                             f"{sorted(set(pointers))}")
+
+
+def test_every_recipe_answers_f_cpu_hz_with_a_number_or_none():
+    """`BoardSession.cpu_hz` asks `compile.f_cpu_hz` on every load, so a recipe
+    that made it raise (two `-DF_CPU`s) would be a load-time error on a board
+    page. Held here instead, for the first board of each chip in `RECIPES`.
+    A loop in one test, because `parametrize` would break the inventory."""
+    boards = catalogue.catalogue()
+    answers = {}
+    for chip in compiler.RECIPES:
+        candidates = []
+        for board in boards:
+            if board.chip != chip:
+                continue
+            try:
+                compiler.recipe_for(board.name)
+            except compiler.UnknownBoard:
+                continue
+            candidates.append(board.name)
+        assert candidates, f"{chip} has a recipe and no catalogue board that builds with it"
+        answers[chip] = (candidates[0], compiler.f_cpu_hz(candidates[0]))
+    bad = {chip: got for chip, got in answers.items()
+           if got[1] is not None and not isinstance(got[1], int)}
+    assert not bad, f"f_cpu_hz is neither an int nor None for {bad}; all: {answers}"
 
 
 # --- the top bar's counter beside a board (OH-232) -----------------------------

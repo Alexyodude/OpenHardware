@@ -3273,12 +3273,16 @@ def test_the_load_reply_carries_the_boards_clock_where_one_is_recorded(live_serv
         ("the SAMD21", QUIET_BOARD, QUIET_IMAGE, 0, 48_000_000),
         ("the RP2040", BOARD, BLINK, BLINK_LOAD, None),
     ]
+    present = [case for case in cases if case[2].is_file()]
+    missing = [kind for kind, _, image, _, _ in cases if not image.is_file()]
+    if not present:
+        pytest.skip(f"no image to load; missing for {missing}")
     got = {}
-    for kind, board, image, base, _ in cases:
-        if not image.is_file():
-            pytest.skip(f"{image} is missing")
+    for kind, board, image, base, _ in present:
         reply = post(live_server, "/api/board/load",
                      upload(image.read_bytes(), board=board, base=base))
         got[kind] = reply.get("cpu_hz", "absent from the reply")
-    expected = {kind: hz for kind, _, _, _, hz in cases}
-    assert got == expected, f"cpu_hz on /api/board/load: expected {expected}, got {got}"
+    expected = {kind: hz for kind, _, _, _, hz in present}
+    assert got == expected, (
+        f"cpu_hz on /api/board/load: expected {expected}, got {got}; "
+        f"not checked, image missing: {missing}")
