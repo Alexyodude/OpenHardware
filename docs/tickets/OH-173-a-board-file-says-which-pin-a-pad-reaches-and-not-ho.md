@@ -2,9 +2,15 @@
 id: OH-173
 title: 'a board file says which pin a pad reaches and not how strongly that is known:
   12 pads rest on other vendors'' boards and read identically to the 331 that do not'
-status: open
+status: in-progress
 priority: P2
 created: '2026-09-06'
+touches:
+- tools/import_pindefs.py
+- tests/rules/test_import_pindefs.py
+- webui/boards/*.json
+- tools/board_manifest.py
+- tests/rules/test_board_manifest.py
 ---
 
 The committed board files drop the per-pad citation, so two pins with very
@@ -79,3 +85,5 @@ column would make it three.
 
 Found in review of OH-170, which added the sources that make the asymmetry
 visible: before it, no pad was resolved from another board's files at all.
+
+**Note 2026-10-15:** 2026-10-15: taken in this session's lane2. SHAPE 2 chosen, as this ticket recommends: one pin_source word per pad, own or family, not per-pad sources; it answers the question asked and does not move when a vendor commits. Borrows tools/import_pindefs.py and its test from OH-172; claims the board files, tools/board_manifest.py and its test. Not chip_pin (OH-172).
