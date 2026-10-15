@@ -10,8 +10,6 @@ touches:
 - webui/boards/XIAO-nRF54l15-SMD.json
 - webui/boards/XIAO-nRF54LM20A-SMD.json
 - tools/inventory.py
-- tools/import_pindefs.py
-- tests/rules/test_import_pindefs.py
 - tests/rules/test_inventory.py
 - webui/static/board3d-panel.js
 - tests/webui/test_board3d.py
@@ -336,5 +334,7 @@ LEFT is as the slice 2 note says, with one item added. A pad its footprint names
 **Note 2026-10-15:** Lends webui/static/board3d-panel.js and tests/webui/test_board3d.py to OH-161 (step 5 slice 4c: the bench panel's temperature field for an MCP9808 and the part's served view); they come back when slice 4c lands.
 
 **Note 2026-10-15:** 2026-10-15: takes back webui/static/board3d-panel.js and tests/webui/test_board3d.py from OH-161 (slice 4c merged: the bench panel's temperature field and served view, rebuildSoon under a press, pointer Set, blur and visibilitychange).
+
+**Note 2026-10-15:** 2026-10-15: lends tools/import_pindefs.py and tests/rules/test_import_pindefs.py to OH-173 (a pin_source word per pad, shape 2); they come back when it lands.
 
 **Note 2026-10-15:** 2026-10-15: tests/webui/test_board3d.py::test_an_accepted_temperature_refreshes_what_the_board_reports_once failed once under heavy load (two full suites at once, OH-166 item 4): the served line read TA 0xC190 where 0xC1E0 was expected. Its whenPosted stub resolves on a timer and the board state changes at that moment, so under load the panel's refetch can be answered before the stub's timer fires. Passed in every other run. Make the stub resolve on a promise the test releases, not a timer. Also from 4c's confirm review: guard visibilitychange with document.hidden; the flush timeout renders even if the panel were torn down.
