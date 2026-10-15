@@ -8,7 +8,6 @@ created: '2026-10-08'
 touches:
 - rules/board-claims.md
 - webui/boards/catalogue.py
-- tests/webui/test_board_catalogue.py
 ---
 
 The edges OH-157's reviews left (2026-10-08), none of which changes what the XIAO RP2350 blink shows today.
@@ -36,3 +35,5 @@ Done when each is fixed with a test that fails when reverted where it is behavio
 **Note 2026-10-15:** review follow-ups to items 1 and 6: test_the_page_sentence_the_rest_has_no_core_stays_true fails when a core exists for a split chip's other half (shown by patching build_core.cores to add cortexm33); the boards-table probe polls up to 5 s and fails by name instead of sleeping 100 ms.
 
 **Note 2026-10-15:** 2026-10-15: items 1 and 6 reviewed (merge) with the guard and the probe poll as follow-ups; returns webui/static/emulator.js and webui/boards/rp2350.py to OH-161, back to open for items 4, 5 and 7.
+
+**Note 2026-10-15:** 2026-10-15: lends tests/webui/test_board_catalogue.py to OH-166 (the board-listing lock test's wall-clock budget); it comes back when that lands.
