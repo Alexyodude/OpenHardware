@@ -60,15 +60,15 @@
 // 2026-08-27 (5.4x and 29x) were taken on the Debug core every Windows build
 // made until OH-220.
 //
-// It is deliberately **instructions per second and not a fraction of real
-// time**, because the page is not told a board's clock. Where the repository
-// records one in a board's module it is `CPU_HZ` in each
+// This file reports **instructions per second and nothing about real time**,
+// because it is handed no board. The fraction of real time is `emulator.js`'s
+// `runLine`, which divides a board's clock by this rate (OH-233). Where the
+// repository records a clock in a board's module it is `CPU_HZ` in each
 // `webui/boards/esp32c*.py` (cited there, with the rate it sets for the
-// SYSTIMER) and `F_CPU_HZ` in `atmega328p.py` (which only computes a baud
+// SYSTIMER) and `F_CPU_HZ` in `atmega328p.py` (which also computes a baud
 // divisor). The SAMD21's module, `samd21.py`, records none; its 48 MHz is the
-// build's `-DF_CPU` in `webui/compile.py`. None of these reaches the page: no
-// route carries a clock, which `emulator.js`'s `runLine` says and what to add
-// (OH-221).
+// build's `-DF_CPU` in `webui/compile.py`. `BoardSession.cpu_hz` in
+// `webui/api.py` reads those, and `/api/board/load` carries the answer.
 
 /** Instructions per request.
  *

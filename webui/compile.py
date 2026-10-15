@@ -656,6 +656,29 @@ def recipe_for(board: str) -> Recipe:
     return recipe
 
 
+#: `-DF_CPU=48000000L`: the one spelling the Arduino cores take, with the
+#: trailing `L` that makes it a long in C.
+_F_CPU_FLAG = re.compile(r"-DF_CPU=(\d+)L?")
+
+
+def f_cpu_hz(board: str) -> int | None:
+    """The clock a board's build is told, read from its recipe's `-DF_CPU`.
+
+    `None` where the recipe passes none -- the ESP32 rows, which count SYSTIMER
+    ticks and say why at `_openhardware`. Raises `UnknownBoard` for a board
+    with no recipe, as `recipe_for` does. More than one `-DF_CPU` is refused
+    rather than picking one: the compiler would take the last, and a reader of
+    the recipe the first.
+    """
+    flags = recipe_for(board).flags
+    found = [int(m.group(1)) for flag in flags if (m := _F_CPU_FLAG.fullmatch(flag))]
+    if len(found) > 1:
+        raise CompileError(
+            f"{board}: expected at most one -DF_CPU in the recipe's flags, "
+            f"got {found}: {flags}")
+    return found[0] if found else None
+
+
 def own_variant(row: board_manifest.Row, recipe: Recipe) -> Recipe:
     """`recipe`, the row's chip's, with the row's variant as its only pin table.
 

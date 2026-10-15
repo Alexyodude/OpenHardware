@@ -802,3 +802,127 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
         assert before != "0 steps" and after == "0 steps", (route, result)
     assert result["beforeRefusal"] != "0 steps", result
     assert result["afterRefusal"] == "0 steps", result
+
+
+# --- how far behind real time a run is (OH-233) --------------------------------
+
+
+def test_the_run_line_says_how_far_behind_real_time_only_where_a_clock_is_known(tmp_path):
+    """Runs the real `emulator.js` against a fake page whose clock is fake.
+
+    Every tick retires 1,000 instructions and takes 10 ms of the fake
+    `performance.now`, so the measured rate is exactly 100,000/s and the
+    fraction is `cpu_hz / 100,000` -- the only thing that varies between
+    pages. The line is read from `#board-report` after a Run and a Stop.
+    A `cpu_hz` of `null` (the RP2040) and an absent one must print nothing
+    about real time, so a page loaded from an older server does not invent a
+    speed. A loop over the cases in one test, because `parametrize` would
+    break `tools/inventory.py`'s count."""
+    source = EMULATOR.read_text(encoding="utf-8")
+    cases = [
+        (16_000_000, ", about 1/160 of real time"),
+        (160_000_000, ", about 1/1,600 of real time"),
+        (1_540_000, ", about 1/15 of real time"),
+        (1_560_000, ", about 1/16 of real time"),
+        (450_000, ", about 1/4.5 of real time"),
+        (160_000, ", about 1/1.6 of real time"),
+        (140_000, ", about real time or faster"),
+        (50_000, ", about real time or faster"),
+        (None, ""),
+        ("absent", ""),
+    ]
+    result = probe(tmp_path, """
+        const vm = await import("node:vm");
+        const source = %s;
+        const cases = %s;
+
+        class Element {
+          constructor(id) {
+            this.id = id; this.textContent = ""; this.value = ""; this.title = "";
+            this.className = ""; this.disabled = false; this.files = [];
+            this.dataset = {}; this.style = {}; this.children = []; this.handlers = {};
+            this.classList = { add() {}, remove() {}, toggle() {} };
+          }
+          addEventListener(name, handler) { this.handlers[name] = handler; }
+          setAttribute() {} append() {} replaceChildren() {} appendChild() {}
+          focus() {} querySelector() { return null; }
+        }
+
+        async function lineFor(cpuHz) {
+          const elements = new Map();
+          const document = {
+            body: new Element("body"), documentElement: new Element("html"),
+            getElementById(id) {
+              if (!elements.has(id)) elements.set(id, new Element(id));
+              return elements.get(id);
+            },
+            createElement: () => new Element("made"),
+            createDocumentFragment: () => new Element("fragment"),
+            addEventListener() {},
+          };
+          document.body.dataset.view = "emulator";
+          let fakeNow = 0;
+          let calls = 0;
+          const image = { board: "xiao", chip: "c3", core: "rv32", format: "bin",
+                          bytes: 4, entry: 0, notes: [] };
+          if (cpuHz !== "absent") image.cpu_hz = cpuHz;
+          const state = {
+            board: "xiao", chip: "c3", status: "running", detail: "",
+            registers: [{ name: "pc", value: 0, width: 32 }], flags: [],
+            pc: 0, memory: { at: 0, bytes: [] }, words: [],
+            uart: { present: false, note: "" }, pins: null,
+            listing: { present: false, note: "" },
+          };
+          const reply = (body) => ({ ok: true, status: 200, json: async () => body });
+          async function fetch(path) {
+            if (path === "/api/board/load") return reply(image);
+            if (path === "/api/board/run") {
+              calls += 1;
+              fakeNow += 10;
+              await new Promise((resolve) => setTimeout(resolve, 1));
+              return reply({ steps: 1000, status: "running", detail: "" });
+            }
+            if (path === "/api/samples") {
+              return reply({ samples: [{ name: "s", hex: "", watch: 512,
+                                         listing: [] }] });
+            }
+            if (path.startsWith("/api/board/state")) return reply(state);
+            return { ok: false, status: 404,
+                     json: async () => ({ error: "unrouted " + path }) };
+          }
+          const window = { matchMedia: () => ({ matches: false }),
+                           BoardClock: { Clock } };
+          class FileReader {
+            readAsDataURL() { this.result = "data:;base64,AAAA"; this.onload(); }
+          }
+          const sandbox = { document, window, fetch, FileReader,
+                            performance: { now: () => fakeNow },
+                            localStorage: { getItem: () => null, setItem() {} },
+                            console, setTimeout, clearTimeout };
+          vm.runInNewContext(source, sandbox);
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          document.getElementById("board-pick").value = "xiao";
+          document.getElementById("board-file").files = [{ name: "a.bin" }];
+          const click = (id) => document.getElementById(id).handlers.click();
+          await click("board-load");
+          const run = click("board-go");
+          for (let i = 0; i < 2000 && calls < 2; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 1));
+          }
+          click("board-go");
+          await run;
+          return document.getElementById("board-report").textContent;
+        }
+
+        const lines = [];
+        for (const [cpuHz] of cases) lines.push(await lineFor(cpuHz));
+        console.log(JSON.stringify({ lines }));
+    """ % (json.dumps(source), json.dumps(cases)))
+    tail = re.compile(r", ([\d,]+)/s(?P<behind>, about (?:1/[\d.,]+ of real time"
+                      r"|real time or faster))?\. pc 0x")
+    for (cpu_hz, wanted), line in zip(cases, result["lines"], strict=True):
+        found = tail.search(line)
+        assert found, f"cpu_hz {cpu_hz!r}: no rate on the run line {line!r}"
+        assert found.group(1) == "100,000", f"cpu_hz {cpu_hz!r}: {line!r}"
+        assert (found.group("behind") or "") == wanted, (
+            f"cpu_hz {cpu_hz!r}: expected {wanted!r} after the rate, got {line!r}")

@@ -27,6 +27,8 @@ import typing
 
 from tools import board_manifest
 from webui import firmware, pinmap, targets
+# Aliased, because `compile` is a builtin (as `emulator_server.py` does).
+from webui import compile as compile_service
 from webui.boards import catalogue, contract
 from webui.devices import mcp9808
 from webui.parts.schema import UNCONNECTED, PartSchema, SchemaError
@@ -1418,6 +1420,25 @@ class BoardSession:
     def chip(self) -> str:
         return self.runtime.chip
 
+    @property
+    def cpu_hz(self) -> int | None:
+        """The board's clock in Hz, or `None` where nothing records one (OH-233).
+
+        Read, never listed here: the board module's own `CPU_HZ` (the ESP32s)
+        or `F_CPU_HZ` (the ATmega328P), else the `-DF_CPU` the board's build is
+        told (the SAMD21, whose module records none), else `None` -- the RP2040
+        among them. The page says how far behind real time a run is only
+        where this is a number.
+        """
+        for name in ("CPU_HZ", "F_CPU_HZ"):
+            hz = getattr(self.runtime.description, name, None)
+            if hz is not None:
+                return hz
+        try:
+            return compile_service.f_cpu_hz(self.board)
+        except compile_service.UnknownBoard:
+            return None
+
     def step(self, count: int = 1) -> None:
         """`count` instructions, or raise from the core saying why not.
 
@@ -1933,6 +1954,7 @@ class BoardSession:
             "board": self.board,
             "chip": self.chip,
             "core": self.runtime.core,
+            "cpu_hz": self.cpu_hz,
             "format": self.image.format,
             "family": self.image.family,
             "bytes": self.image.total_bytes,

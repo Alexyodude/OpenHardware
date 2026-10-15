@@ -905,19 +905,19 @@ function showBoardSteps(total) {
  *  reads as a broken sketch. Saying the rate is what turns "it is stuck" into
  *  "it is slow".
  *
- *  Instructions per second and **not** a fraction of real time, because the
- *  page is never told a board's clock. The repository records one in some
- *  board modules (`CPU_HZ` in `webui/boards/esp32c*.py`, `F_CPU_HZ` in
- *  `atmega328p.py`; the SAMD21's module records none, its 48 MHz is the
- *  build's `-DF_CPU` in `webui/compile.py`) but no route carries it:
- *  `boardImage` is `/api/board/load`'s reply (board, chip, core, format,
- *  bytes, entry, notes) and `/api/board/run` answers steps, status and
- *  detail. Showing "about 1/N of real time" would need `/api/board/load` to
- *  carry the board's clock as `cpu_hz` -- the module's constant, or the build's
- *  `F_CPU` for the SAMD21, null where neither exists -- and this line to
- *  divide the rate by it. That is an edit to `webui/api.py` and
- *  `webui/emulator_server.py`, which OH-161 held when this was decided, so it
- *  is not made here (OH-221).
+ *  Beside the instructions per second it says "about 1/N of real time" where
+ *  the board's clock is known (OH-233), and nothing about real time where it
+ *  is not. `boardImage.cpu_hz` is `/api/board/load`'s answer: the board
+ *  module's own constant (`CPU_HZ` in `webui/boards/esp32c*.py`, `F_CPU_HZ` in
+ *  `atmega328p.py`), or for the SAMD21, whose module records none, the build's
+ *  `-DF_CPU` in `webui/compile.py`; `null` where the repository records none,
+ *  the RP2040 among them. **N is the clock over the measured rate**, because
+ *  the model retires one instruction per cycle (`esp32c3.py`'s
+ *  `SYSTIMER_INSTRUCTIONS_PER_TICK`). It is rounded to the nearest whole
+ *  number from 10 up and to one decimal below, since a rate measured over a
+ *  few ticks is not good to more, and "about real time or faster" stands
+ *  where N is under 1.5. The arithmetic lives here and not in `clock.js`,
+ *  which is handed no board and says so.
  *
  *  `$("where")` was set by `renderBoardState`, from the machine's own pc
  *  register and at that register's width. Read back rather than recomputed:
@@ -928,12 +928,18 @@ function runLine(report) {
   const fast = report.rate === null
     ? ""
     : `, ${Math.round(report.rate).toLocaleString()}/s`;
+  let behind = "";
+  if (report.rate && boardImage.cpu_hz) {
+    const n = boardImage.cpu_hz / report.rate;
+    const shown = n >= 10 ? Math.round(n).toLocaleString() : Number(n.toFixed(1));
+    behind = n < 1.5 ? ", about real time or faster" : `, about 1/${shown} of real time`;
+  }
   // The core's sentence ends with its own full stop, dropped so the line does
   // not end it twice before the pc.
   const why = stopDetail(report.status, report.detail);
   const stopped = why ? ` and ${report.status}: ${why.replace(/\.$/, "")}` : "";
   return `${boardImage.board}: ${report.steps.toLocaleString()} instructions` +
-         `${fast}${stopped}. pc 0x${$("where").textContent}`;
+         `${fast}${behind}${stopped}. pc 0x${$("where").textContent}`;
 }
 
 /** Why a board is not running, in the core's own sentence, or "" while it is.

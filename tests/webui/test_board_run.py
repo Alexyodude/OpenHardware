@@ -1107,7 +1107,7 @@ def test_the_step_route_moves_the_board_one_instruction():
 # never touches GPIO3 -- `D1` -- so GPIO3 is as reset leaves it: input on, no
 # pull (`esp32c3.IO_MUX_PADS`). What it reads is the drive and nothing else.
 
-from webui.boards import esp32c3  # noqa: E402
+from webui.boards import atmega328p, esp32c3  # noqa: E402
 
 C3_BOARD = "XIAO-ESP32-C3-DIP"
 C3_BLINK = REPO / "tests" / "riscv32" / "c3blink" / "blink.bin"
@@ -3249,3 +3249,36 @@ def test_every_c6_board_in_the_catalogue_routes_the_i2c_signals_to_its_own_sda_a
                     f"{board}: signal {signal} reads {name}'s GPIO{pad}, but its "
                     f"IN_SEL is {in_sel:#x}")
     assert len(set(seen.values())) > 1, f"every board has one pair of pads: {seen}"
+
+
+# --- the board's clock on the load reply (OH-233) ------------------------------
+
+
+def test_the_load_reply_carries_the_boards_clock_where_one_is_recorded(live_server):
+    """`cpu_hz` over the route the page loads through, one board of each kind.
+
+    An ESP32 answers its module's `CPU_HZ`; the Uno its module's `F_CPU_HZ`;
+    the SAMD21, whose module records none, the `-DF_CPU` its build is told
+    (48 MHz, Seeed's `boards.txt`); and the RP2040, with neither, `null`. The
+    page prints "about 1/N of real time" from it, and prints nothing for the
+    null (`test_clock.py`), so a clock invented for the RP2040 would be a
+    claim about a speed nobody recorded. A loop in one test, because
+    `parametrize` would break `tools/inventory.py`'s count."""
+    pytest.importorskip("core.avr.abi")
+    needs_riscv32()
+    uno = REPO / "tests" / "avr" / "blink" / "blink.bin"
+    cases = [
+        ("an ESP32", C3_BOARD, C3_BLINK, esp32c3.IROM, esp32c3.CPU_HZ),
+        ("the Uno", "Arduino Uno", uno, 0, atmega328p.F_CPU_HZ),
+        ("the SAMD21", QUIET_BOARD, QUIET_IMAGE, 0, 48_000_000),
+        ("the RP2040", BOARD, BLINK, BLINK_LOAD, None),
+    ]
+    got = {}
+    for kind, board, image, base, _ in cases:
+        if not image.is_file():
+            pytest.skip(f"{image} is missing")
+        reply = post(live_server, "/api/board/load",
+                     upload(image.read_bytes(), board=board, base=base))
+        got[kind] = reply.get("cpu_hz", "absent from the reply")
+    expected = {kind: hz for kind, _, _, _, hz in cases}
+    assert got == expected, f"cpu_hz on /api/board/load: expected {expected}, got {got}"
