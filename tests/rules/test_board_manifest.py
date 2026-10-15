@@ -1169,14 +1169,14 @@ def test_a_pad_the_variant_names_and_the_copper_does_not_reach_is_refused(tmp_pa
 
 
 def test_a_regenerated_pad_keeps_nothing_from_an_earlier_run(tmp_path):
-    """`chip_pin_from`, `why_null` and `disputed_by` are written from this
-    run's report or not at all."""
+    """`chip_pin_from`, `pin_source` (OH-173), `why_null` and `disputed_by` are
+    written from this run's report or not at all."""
     row = row_named("SparkFun Thing Plus ESP32-C6")
     _fetched(row)
     committed = _committed(row)
     stale = json.loads(json.dumps(committed))
     for pad in stale["pads"]:
-        pad.update({"chip_pin_from": ["stale"], "why_null": "stale",
+        pad.update({"chip_pin_from": ["stale"], "pin_source": "stale", "why_null": "stale",
                     "disputed_by": [{"chip_pin": "GPIO99", "chip_pin_from": ["stale"]}]})
     (tmp_path / f"{row.board}.json").write_text(json.dumps(stale), encoding="utf-8")
     filled = import_pindefs.filled_board(row.board, import_pindefs.BSP_DIR, tmp_path,

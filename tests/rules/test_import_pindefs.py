@@ -1050,7 +1050,8 @@ def test_write_board_fills_chip_pin_and_keeps_pin_null_with_a_reason(tmp_path, m
     assert "why_null" not in by_label["D0"]
     assert by_label["GND"]["chip_pin"] is None and by_label["GND"]["chip_index"] is None
     assert by_label["GND"]["why_null"] == pindefs.NOT_PUBLISHED
-    assert list(by_label["D0"]) == ["label", "pin", "chip_pin", "chip_index", "x", "y", "group", "pad"]
+    assert list(by_label["D0"]) == ["label", "pin", "chip_pin", "chip_index", "pin_source",
+                                    "x", "y", "group", "pad"]
     assert [pad["pad"] for pad in document["pads"]] == ["1", "7", "11", "12", "12"], (
         "two pads numbered alike, as the nRF54LM20A SMD's GNDs are, and both kept"
     )
@@ -1791,6 +1792,57 @@ def test_the_s3s_jtag_pads_are_the_ones_every_variant_of_that_chip_states():
     where = pindefs.board_report("XIAO-ESP32-S3-SMD")
     said = {pad["label"]: pad.get("sources") for pad in where["pads"]}
     assert any("every esp32s3 board" in one for one in said["MTMS"]), said["MTMS"]
+
+
+def test_the_twelve_pads_read_off_other_boards_say_family_and_the_rest_say_own():
+    """OH-173: a board file says whether a pad's pin was read from files about
+    THIS board (`own`) or only from other boards carrying the same part
+    (`family`, `read_chip_pins`' agreement across every variant of the chip).
+
+    The twelve are the S3's six silicon-fixed labels on `XIAO-ESP32-S3-SMD`
+    and its `_PAD` twin; `D0` on the same board is Seeed's own variant and
+    devicetree. The count is asserted so that a thirteenth is a decision.
+    """
+    family: dict[str, list[str]] = {}
+    for path in sorted(BOARDS_DIR.glob("*.json")):
+        for pad in json.loads(path.read_text(encoding="utf-8"))["pads"]:
+            if pad.get("pin_source") == "family":
+                family.setdefault(path.stem, []).append(pad["label"])
+    six = ["MTMS", "MTDI", "MTDO", "MTCK", "USB_DN", "USB_DP"]
+    assert {board: sorted(labels) for board, labels in family.items()} == {
+        "XIAO-ESP32-S3-SMD": sorted(six), "XIAO-ESP32-S3-SMD_PAD": sorted(six)}, family
+    for board in ("XIAO-ESP32-S3-SMD", "XIAO-ESP32-S3-SMD_PAD"):
+        pads = {p["label"]: p for p in json.loads(
+            (BOARDS_DIR / f"{board}.json").read_text(encoding="utf-8"))["pads"]}
+        assert pads["D0"]["pin_source"] == "own", (board, pads["D0"])
+        assert pads["D0"]["chip_pin"] == "GPIO1", (board, pads["D0"])
+
+
+def test_every_resolved_pad_of_a_generated_board_file_says_where_its_pin_came_from():
+    """OH-173: `pin_source` is `own` or `family` on a pad whose `chip_pin` is
+    resolved, and absent on one that is not -- as `why_null` is absent on a
+    resolved pad, the one field there is for the other half.
+
+    **The Arduino Uno is not checked**: it is not in the registry, and its
+    pins are measured off PICSimLab's own board.svg by `webui/pinmap.py`, not
+    read by this tool, which is what writes the field.
+    """
+    wrong: list[str] = []
+    checked = 0
+    for path in sorted(BOARDS_DIR.glob("*.json")):
+        if path.stem not in pindefs.BOARDS:
+            continue
+        for pad in json.loads(path.read_text(encoding="utf-8"))["pads"]:
+            checked += 1
+            source = pad.get("pin_source")
+            if pad["chip_pin"] is not None and source not in ("own", "family"):
+                wrong.append(f"{path.stem} {pad['label']}: chip_pin {pad['chip_pin']!r}, "
+                             f"pin_source {source!r}, expected 'own' or 'family'")
+            if pad["chip_pin"] is None and "pin_source" in pad:
+                wrong.append(f"{path.stem} {pad['label']}: chip_pin null, "
+                             f"pin_source {source!r}, expected none")
+    assert checked > 500, checked
+    assert not wrong, wrong
 
 
 def test_the_s3s_usb_pads_rest_on_the_same_five_variants_as_its_jtag():

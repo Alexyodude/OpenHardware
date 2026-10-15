@@ -93,7 +93,9 @@ refuses to write one.
 
 **The board file.** `--write-boards` adds `chip_pin` and `chip_index` to every
 pad of every registered `webui/boards/*.json`, a `why_null` on every pad that
-resolves to nothing, and a `pindefs` object naming the packages. **`pin` stays
+resolves to nothing, a `pin_source` on every pad that resolves (`own`: read from
+files about this board; `family`: only from other boards carrying the same
+part, OH-173), and a `pindefs` object naming the packages. **`pin` stays
 null**, because that field means something else: `webui/pinmap.py` defines it
 as the rcontrol pin index of a PICSimLab board, 1..99, and no PICSimLab board
 exists for any XIAO. Writing a GPIO number there would be a different fact in
@@ -2008,6 +2010,11 @@ class Source:
     #: `arduino_pico`, whose preprocessor follows the variant's `#include`s
     #: and reads the package's `boards.txt` and `platform.txt` (OH-181).
     reads_checkout: bool = False
+    #: True where the files are about OTHER boards carrying the same part, and
+    #: not about this one: only `arduino_chip`, which reads every variant of a
+    #: chip. A claim from it carries this as `Claim.family`, and a pad whose
+    #: every claim does is `pin_source: "family"` in the board file (OH-173).
+    family: bool = False
 
     def pins(self, checkout: pathlib.Path,
              texts: tuple[str, ...]) -> tuple[dict[str, typing.Any], tuple[str, ...]]:
@@ -2189,6 +2196,7 @@ def arduino_chip(package: str, chip: str, labels: tuple[str, ...]) -> Source:
         (f"variants/*/pins_arduino.h for every {chip} board in boards.txt",),
         functools.partial(read_chip_pins, labels=labels),
         expand=functools.partial(variants_of_chip, chip=chip),
+        family=True,
     )
 
 
@@ -2919,6 +2927,9 @@ class Claim:
     package: str = ""
     #: A traced source's path, `Traced.via`, which `source` ends with.
     via: str = ""
+    #: The claim was read from files about other boards carrying the same
+    #: part: `Source.family`.
+    family: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -3040,8 +3051,10 @@ def published_pins(board: Board, bsp_dir: pathlib.Path) -> dict[str, list[Claim]
         citation = f"{source.package} {', '.join(cited)} @ {stamp}"
         for label, found in pins.items():
             claims.setdefault(label, []).append(
-                Claim(found.pin, f"{citation}: {found.via}", source.package, found.via)
-                if isinstance(found, Traced) else Claim(found, citation, source.package))
+                Claim(found.pin, f"{citation}: {found.via}", source.package, found.via,
+                      source.family)
+                if isinstance(found, Traced)
+                else Claim(found, citation, source.package, family=source.family))
     return claims
 
 
@@ -3382,6 +3395,14 @@ def board_report(
     for pad in pads:
         if pad["chip_pin"] is None and pad["label"] in reasons:
             pad["reason"] = reasons[pad["label"]]
+    # OH-173: how strongly a resolved pin is known, in one word. `family` when
+    # every claim that named it was read from other boards carrying the same
+    # part (`Claim.family`); `own` when any file about this board did. Read
+    # last, so a pad the checks above made null carries none, as it carries no
+    # `chip_pin_from`; and from the claims, so no pad is listed here by name.
+    for pad, entry in zip(pads, entries, strict=True):
+        if pad["chip_pin"] is not None:
+            pad["pin_source"] = "own" if any(not claim.family for claim in entry.claims) else "family"
     packages = sorted({source.package for source in board.sources})
     on_board_pads = [pad_report(entry) for entry in on_board]
     # **The sentence above the pads is chosen as the board file's is, from
@@ -4018,14 +4039,17 @@ def filled_board(
         }
         if "chip_pin_from" in entry:
             filled["chip_pin_from"] = entry["chip_pin_from"]
+        if "pin_source" in entry:
+            filled["pin_source"] = entry["pin_source"]
         if entry["chip_pin"] is None:
             filled["why_null"] = entry["reason"]
         if "disputed_by" in entry:
             filled["disputed_by"] = entry["disputed_by"]
         # Written from this report or not at all: a staged pad's own copy of
-        # any of the three is from an earlier run.
+        # any of the four is from an earlier run.
         for key, value in pad.items():
-            if key not in filled and key not in ("chip_pin_from", "why_null", "disputed_by"):
+            if key not in filled and key not in (
+                    "chip_pin_from", "pin_source", "why_null", "disputed_by"):
                 filled[key] = value
         pads.append(filled)
 
