@@ -814,32 +814,96 @@ def test_every_board_states_whether_a_sketch_can_be_built_for_it():
     )
 
 
-def test_the_board_listing_is_answered_while_the_session_lock_is_held():
+def test_the_board_listing_is_answered_while_the_session_lock_is_held(monkeypatch):
     """`/api/boards` asks `recipe_for` of every board, which runs a compiler
     for a manifest board's table (OH-183), and touches no session state: it
-    is answered without the lock, so a listing never stalls a step."""
+    is answered without the lock, so a listing never stalls a step.
+
+    **The property is that the handler never asks for the lock**, and that is
+    what is watched (OH-166): the handler's `lock` is swapped for a wrapper
+    that records the ask and delegates to a real lock this test holds. A
+    handler that asks fails the test at once, naming that; one that does not
+    is waited for as long as the listing is allowed to compile, so machine
+    speed cannot fail it. The first version asked for the reply inside 10 s,
+    and the listing, which runs a compiler, takes 4-6 s alone here."""
     import json
     import threading
+    import time
     import urllib.request
 
+    from tools import board_manifest
     from webui import compile as compile_service
     from webui import emulator_server
+
+    asked = threading.Event()
+
+    class Recording:
+        def __init__(self, real):
+            self.real = real
+
+        def acquire(self, *args, **kwargs):
+            asked.set()
+            return self.real.acquire(*args, **kwargs)
+
+        def release(self):
+            self.real.release()
+
+        def __enter__(self):
+            asked.set()
+            return self.real.__enter__()
+
+        def __exit__(self, *exc):
+            return self.real.__exit__(*exc)
+
+    # One compiler invocation per manifest row, each allowed
+    # `compile.TIMEOUT_SECONDS`, plus a margin for the rest of the listing.
+    bound = compile_service.TIMEOUT_SECONDS * len(board_manifest.ROWS) + 30
 
     compile_service._ASKED.clear()
     server = emulator_server.build_server("127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    lock = server.RequestHandlerClass.lock
-    lock.acquire()
-    try:
+    real = threading.Lock()
+    monkeypatch.setattr(server.RequestHandlerClass, "lock", Recording(real))
+    real.acquire()
+    outcome: dict[str, object] = {}
+    replied = threading.Event()
+
+    def ask() -> None:
         host, port = server.server_address[:2]
-        with urllib.request.urlopen(f"http://{host}:{port}/api/boards", timeout=10) as reply:
-            names = {entry["name"] for entry in json.loads(reply.read())["boards"]}
+        try:
+            with urllib.request.urlopen(f"http://{host}:{port}/api/boards",
+                                        timeout=bound) as reply:
+                outcome["names"] = {
+                    entry["name"] for entry in json.loads(reply.read())["boards"]}
+        except Exception as exc:  # reported below, with the request that raised it
+            outcome["error"] = exc
+        replied.set()
+
+    asker = threading.Thread(target=ask, daemon=True)
+    try:
+        asker.start()
+        give_up = time.monotonic() + bound
+        while not (asked.is_set() or replied.is_set()):
+            assert time.monotonic() < give_up, (
+                f"/api/boards neither replied nor asked for the session lock "
+                f"in {bound} s (compile.TIMEOUT_SECONDS {compile_service.TIMEOUT_SECONDS}"
+                f" x {len(board_manifest.ROWS)} manifest rows + 30 s)")
+            time.sleep(0.01)
+        assert not asked.is_set(), (
+            "the /api/boards handler asked for the session lock, which this "
+            "test holds: a listing would stall behind every step")
+        assert "error" not in outcome, (
+            f"/api/boards raised {outcome['error']!r} while the lock was held")
     finally:
-        lock.release()
+        real.release()
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+        # `asker` is a daemon and is not joined: on a regression its handler
+        # is let go by the release above and compiles for seconds, which
+        # failing fast should not wait for.
+    names = outcome["names"]
     assert "Adafruit Feather ESP32-C6" in names, sorted(names)
 
 
