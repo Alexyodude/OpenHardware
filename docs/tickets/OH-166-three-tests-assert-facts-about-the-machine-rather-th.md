@@ -2,11 +2,12 @@
 id: OH-166
 title: Three tests assert facts about the machine rather than the code, and fail when
   another session is working
-status: open
+status: in-progress
 priority: P3
 created: '2026-09-05'
 touches:
 - tests/webui/test_emulator.py
+- tests/webui/test_board_catalogue.py
 ---
 
 Three tests in tests/webui assert something that is not a property of this code, and each has now failed for a different session doing something else on the same machine.
@@ -121,3 +122,5 @@ it now would only re-measure item 2.
 **Note 2026-10-15:** Item 3 merged to master at 333ce38 (two review rounds, both APPROVE; the keep-alive Origin bypass is closed). webui/emulator_server.py goes back to OH-161. Open LOWs from the last confirm: nothing structural stops a future refusal that drains without close=True (a tripwire at the top of _discard_body, or one reply-close-then-drain helper); _send's own close_connection = True is redundant with send_header's. Item 4 remains.
 
 **Note 2026-10-15:** Item 4 evidence, 2026-10-15: tests/webui/test_board_catalogue.py::test_the_board_listing_is_answered_while_the_session_lock_is_held failed once with TimeoutError at its 10 s timeout during a full tests/webui run while other lanes were compiling; alone it passed in 3.62, 4.47 and 6.54 s, and /api/boards called directly without the lock took 6.31 and 4.76 s. Under 2x headroom on this machine, and the cost is the listing (it runs a compiler), not the lock. Same class as the three this ticket names: a fixed wall-clock budget against work whose time depends on what else the machine is doing.
+
+**Note 2026-10-15:** 2026-10-15: borrows tests/webui/test_board_catalogue.py from OH-210, in lane3, to take the wall clock out of test_the_board_listing_is_answered_while_the_session_lock_is_held (item 4's evidence above).
