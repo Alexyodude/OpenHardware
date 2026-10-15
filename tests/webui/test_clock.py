@@ -575,7 +575,7 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
 
         /** A page running the real emulator.js. `runs(body, calls)` answers
          *  /api/board/run; the three load routes answer one image. */
-        async function page({ runs }) {
+        async function page({ runs, omitRetired = false }) {
           const elements = new Map();
           const document = {
             body: new Element("body"), documentElement: new Element("html"),
@@ -644,7 +644,9 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
                              flags: {}, disassembly: [],
                              memory: { address: 0, bytes: [] } });
             }
-            if (path.startsWith("/api/board/state")) return reply({ ...state, retired });
+            if (path.startsWith("/api/board/state")) {
+              return reply(omitRetired ? state : { ...state, retired });
+            }
             return { ok: false, status: 404,
                      json: async () => ({ error: "unrouted " + path }) };
           }
@@ -669,6 +671,8 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
             calls: () => calls,
             most: () => most,
             machine: () => document.getElementById("machine").textContent,
+            where: () => document.getElementById("where").textContent,
+            error: () => document.getElementById("board-error").textContent,
             refuse: (on) => { refuse = on; },
             bump: (n) => { retired += n; },
             retiredNow: () => retired,
@@ -785,6 +789,12 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
         await runThenStop(own);
         ownTexts.push([own.text(), own.retiredNow()]);
 
+        // -- a state answer with no `retired`: the rest is drawn, then it throws
+        const lacking = await page({ runs: ticking, omitRetired: true });
+        await lacking.click("board-load");
+        const lackingResult = [lacking.where(), lacking.machine(), lacking.text(),
+                               lacking.error()];
+
         // -- the 8086 takes the panes while a board tick is in flight
         let over = false;
         let letGo;
@@ -833,7 +843,7 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
           mainText, mainAsked: main.asked(), expectedAsked,
           expect: [0, 3000, 3001, 3002, 3002, 0].map(steps),
           afterFirst, afterSecond, raceResult, viaRoutes,
-          beforeRefusal, afterRefusal, ownTexts,
+          beforeRefusal, afterRefusal, ownTexts, lackingResult,
         }));
     """ % json.dumps(source))
     assert result["mainText"] == result["expect"], result
@@ -863,6 +873,17 @@ def test_the_top_bars_counter_shows_the_boards_instructions(tmp_path):
     assert not wrong and len(result["ownTexts"]) == 4, (
         f"counter text vs the board's own retired count, each as "
         f"(text, board): {wrong}; all: {result['ownTexts']}")
+    # A state answer with no `retired` costs the counter and nothing else: the
+    # program counter and the machine name are drawn (the registers and memory
+    # were before it), the counter keeps what it had (the planted 7), and the
+    # page's error line names the missing field and what the reply held.
+    # Throwing before those lines left a half-drawn page.
+    where, machine, counter, error = result["lackingResult"]
+    assert (where, machine, counter) == ("00000000", "xiao", "7 steps"), (
+        f"after a state answer with no retired, (where, machine, counter): "
+        f"{result['lackingResult']}")
+    assert "retired" in error and "got undefined" in error, (
+        f"the error should name `retired` and the value it got: {error!r}")
 
 
 # --- how far behind real time a run is (OH-233) --------------------------------

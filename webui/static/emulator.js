@@ -1207,8 +1207,6 @@ function renderBoardState(state) {
   renderBoardFlags(state.flags);
   renderBoardListing(state.listing);
   renderMemory({ address: state.memory.at, bytes: state.memory.bytes });
-  // The top bar's counter is the board's own (OH-233); see `showBoardSteps`.
-  showBoardSteps(state.retired);
   // Found by name rather than at position 15, which is the program counter on
   // Armv6-M and an ordinary working register on an AVR. Every machine's view carries a register
   // called `pc` -- `test_every_machine_view_carries_a_register_called_pc` is
@@ -1238,6 +1236,11 @@ function renderBoardState(state) {
   // tick. `boardImage` is set before the first call on both load paths; the
   // fallback word covers a redraw that somehow beats it.
   showMachine(boardImage ? boardImage.board : "board");
+  // The top bar's counter is the board's own (OH-233); see `showBoardSteps`.
+  // **Last, because it throws** on a reply with no `retired`: anywhere earlier
+  // that would leave the page half drawn, with the pc, the pins and the
+  // toolbar of the board before it. This way a bad reply costs the counter.
+  showBoardSteps(state.retired);
 }
 
 /** What the board printed, or why there is nothing to print.
