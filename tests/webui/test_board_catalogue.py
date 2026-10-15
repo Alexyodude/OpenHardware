@@ -855,9 +855,13 @@ def test_the_board_listing_is_answered_while_the_session_lock_is_held(monkeypatc
         def __exit__(self, *exc):
             return self.real.__exit__(*exc)
 
-    # One compiler invocation per manifest row, each allowed
-    # `compile.TIMEOUT_SECONDS`, plus a margin for the rest of the listing.
-    bound = compile_service.TIMEOUT_SECONDS * len(board_manifest.ROWS) + 30
+    # A manifest row's table is checked by `compile.compiled_gaps`, which
+    # runs g++ and then gcc (webui/compile.py ~741-755), and `_syntax_errors`
+    # gives each run its own `TIMEOUT_SECONDS`; the rows are checked one
+    # after another. Plus a margin for the rest of the listing.
+    runs_per_row = 2
+    bound = (compile_service.TIMEOUT_SECONDS * runs_per_row
+             * len(board_manifest.ROWS) + 30)
 
     compile_service._ASKED.clear()
     server = emulator_server.build_server("127.0.0.1", 0)
@@ -888,7 +892,7 @@ def test_the_board_listing_is_answered_while_the_session_lock_is_held(monkeypatc
             assert time.monotonic() < give_up, (
                 f"/api/boards neither replied nor asked for the session lock "
                 f"in {bound} s (compile.TIMEOUT_SECONDS {compile_service.TIMEOUT_SECONDS}"
-                f" x {len(board_manifest.ROWS)} manifest rows + 30 s)")
+                f" x {runs_per_row} runs x {len(board_manifest.ROWS)} manifest rows + 30 s)")
             time.sleep(0.01)
         assert not asked.is_set(), (
             "the /api/boards handler asked for the session lock, which this "
