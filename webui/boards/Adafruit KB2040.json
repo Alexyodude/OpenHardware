@@ -107,6 +107,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 119.8,
       "y": 18.2,
       "group": "header-top",
@@ -121,6 +122,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 140.1,
       "y": 18.2,
       "group": "header-top",
@@ -135,6 +137,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 160.4,
       "y": 18.2,
       "group": "header-top",
@@ -149,6 +152,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 18.2,
       "group": "header-top",
@@ -162,6 +166,7 @@
       "chip_pin_from": [
         "adafruit-kb2040"
       ],
+      "pin_source": "own",
       "x": 201.0,
       "y": 18.2,
       "group": "header-top",
@@ -176,6 +181,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 221.4,
       "y": 18.2,
       "group": "header-top",
@@ -190,6 +196,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 241.7,
       "y": 18.2,
       "group": "header-top",
@@ -204,6 +211,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 262.0,
       "y": 18.2,
       "group": "header-top",
@@ -229,6 +237,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 38.5,
       "y": 140.1,
       "group": "header-bottom",
@@ -243,6 +252,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 58.8,
       "y": 140.1,
       "group": "header-bottom",
@@ -279,6 +289,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 119.8,
       "y": 140.1,
       "group": "header-bottom",
@@ -293,6 +304,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 140.1,
       "y": 140.1,
       "group": "header-bottom",
@@ -307,6 +319,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 160.4,
       "y": 140.1,
       "group": "header-bottom",
@@ -321,6 +334,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 140.1,
       "group": "header-bottom",
@@ -335,6 +349,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 201.0,
       "y": 140.1,
       "group": "header-bottom",
@@ -349,6 +364,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 221.4,
       "y": 140.1,
       "group": "header-bottom",
@@ -363,6 +379,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 241.7,
       "y": 140.1,
       "group": "header-bottom",
@@ -377,6 +394,7 @@
         "adafruit-kb2040",
         "arduino-pico"
       ],
+      "pin_source": "own",
       "x": 262.0,
       "y": 140.1,
       "group": "header-bottom",

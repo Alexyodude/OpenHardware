@@ -84,6 +84,7 @@
       "chip_pin_from": [
         "adafruit-feather-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 201.0,
       "y": 18.2,
       "group": "header-top",
@@ -97,6 +98,7 @@
       "chip_pin_from": [
         "adafruit-feather-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 221.4,
       "y": 18.2,
       "group": "header-top",
@@ -110,6 +112,7 @@
       "chip_pin_from": [
         "adafruit-feather-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 241.7,
       "y": 18.2,
       "group": "header-top",
@@ -123,6 +126,7 @@
       "chip_pin_from": [
         "adafruit-feather-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 262.0,
       "y": 18.2,
       "group": "header-top",
@@ -136,6 +140,7 @@
       "chip_pin_from": [
         "adafruit-feather-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 282.3,
       "y": 18.2,
       "group": "header-top",
@@ -150,6 +155,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 302.6,
       "y": 18.2,
       "group": "header-top",
@@ -164,6 +170,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 323.0,
       "y": 18.2,
       "group": "header-top",
@@ -178,6 +185,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 343.3,
       "y": 18.2,
       "group": "header-top",
@@ -192,6 +200,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 363.6,
       "y": 18.2,
       "group": "header-top",
@@ -250,6 +259,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 140.1,
       "y": 180.7,
       "group": "header-bottom",
@@ -264,6 +274,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 160.4,
       "y": 180.7,
       "group": "header-bottom",
@@ -278,6 +289,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 180.7,
       "group": "header-bottom",
@@ -292,6 +304,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 201.0,
       "y": 180.7,
       "group": "header-bottom",
@@ -306,6 +319,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 221.4,
       "y": 180.7,
       "group": "header-bottom",
@@ -320,6 +334,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 241.7,
       "y": 180.7,
       "group": "header-bottom",
@@ -334,6 +349,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 262.0,
       "y": 180.7,
       "group": "header-bottom",
@@ -348,6 +364,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 282.3,
       "y": 180.7,
       "group": "header-bottom",
@@ -362,6 +379,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 302.6,
       "y": 180.7,
       "group": "header-bottom",
@@ -376,6 +394,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 323.0,
       "y": 180.7,
       "group": "header-bottom",
@@ -390,6 +409,7 @@
         "adafruit-feather-esp32-c6",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 343.3,
       "y": 180.7,
       "group": "header-bottom",
@@ -403,6 +423,7 @@
       "chip_pin_from": [
         "adafruit-feather-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 363.6,
       "y": 180.7,
       "group": "header-bottom",

@@ -96,6 +96,7 @@
         "arduino-esp32",
         "sparkfun-qwiic-pocket-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 99.4,
       "group": "header-left",
@@ -109,6 +110,7 @@
       "chip_pin_from": [
         "sparkfun-qwiic-pocket-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 201.0,
       "y": 99.4,
       "group": "header-right",
@@ -123,6 +125,7 @@
         "arduino-esp32",
         "sparkfun-qwiic-pocket-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 119.8,
       "group": "header-left",
@@ -136,6 +139,7 @@
       "chip_pin_from": [
         "sparkfun-qwiic-pocket-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 201.0,
       "y": 119.8,
       "group": "header-right",
@@ -149,6 +153,7 @@
       "chip_pin_from": [
         "sparkfun-qwiic-pocket-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 140.1,
       "group": "header-left",
@@ -162,6 +167,7 @@
       "chip_pin_from": [
         "sparkfun-qwiic-pocket-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 201.0,
       "y": 140.1,
       "group": "header-right",
@@ -175,6 +181,7 @@
       "chip_pin_from": [
         "sparkfun-qwiic-pocket-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 160.4,
       "group": "header-left",
@@ -188,6 +195,7 @@
       "chip_pin_from": [
         "sparkfun-qwiic-pocket-esp32-c6"
       ],
+      "pin_source": "own",
       "x": 201.0,
       "y": 160.4,
       "group": "header-right",

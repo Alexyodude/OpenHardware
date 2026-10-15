@@ -84,6 +84,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 200.7,
       "y": 18.0,
       "group": "J2",
@@ -97,6 +98,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 221.0,
       "y": 18.0,
       "group": "J2",
@@ -110,6 +112,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 241.4,
       "y": 18.0,
       "group": "J2",
@@ -123,6 +126,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 261.7,
       "y": 18.0,
       "group": "J2",
@@ -147,6 +151,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 302.3,
       "y": 18.0,
       "group": "J2",
@@ -160,6 +165,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 322.6,
       "y": 18.0,
       "group": "J2",
@@ -174,6 +180,7 @@
         "arduino-esp32",
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 343.0,
       "y": 18.0,
       "group": "J2",
@@ -188,6 +195,7 @@
         "arduino-esp32",
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 363.3,
       "y": 18.0,
       "group": "J2",
@@ -245,6 +253,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 140.2,
       "y": 180.8,
       "group": "J4",
@@ -258,6 +267,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 160.5,
       "y": 180.8,
       "group": "J4",
@@ -271,6 +281,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 180.8,
       "y": 180.8,
       "group": "J4",
@@ -284,6 +295,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 201.1,
       "y": 180.8,
       "group": "J4",
@@ -297,6 +309,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 221.4,
       "y": 180.8,
       "group": "J4",
@@ -310,6 +323,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 241.8,
       "y": 180.8,
       "group": "J4",
@@ -324,6 +338,7 @@
         "arduino-esp32",
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 262.1,
       "y": 180.8,
       "group": "J4",
@@ -338,6 +353,7 @@
         "arduino-esp32",
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 282.4,
       "y": 180.8,
       "group": "J4",
@@ -352,6 +368,7 @@
         "arduino-esp32",
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 302.7,
       "y": 180.8,
       "group": "J4",
@@ -365,6 +382,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 323.0,
       "y": 180.8,
       "group": "J4",
@@ -378,6 +396,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-c3"
       ],
+      "pin_source": "own",
       "x": 343.4,
       "y": 180.8,
       "group": "J4",

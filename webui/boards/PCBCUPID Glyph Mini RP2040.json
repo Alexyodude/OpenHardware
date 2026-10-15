@@ -51,6 +51,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 141.0,
       "y": 20.6,
       "group": "J4",
@@ -75,6 +76,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 141.0,
       "y": 40.9,
       "group": "J4",
@@ -99,6 +101,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 141.0,
       "y": 61.2,
       "group": "J4",
@@ -123,6 +126,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 141.0,
       "y": 81.5,
       "group": "J4",
@@ -136,6 +140,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 19.0,
       "y": 81.8,
       "group": "J5",
@@ -149,6 +154,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 141.0,
       "y": 101.8,
       "group": "J4",
@@ -162,6 +168,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 19.0,
       "y": 102.1,
       "group": "J5",
@@ -175,6 +182,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 141.0,
       "y": 122.2,
       "group": "J4",
@@ -188,6 +196,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 19.0,
       "y": 122.4,
       "group": "J5",
@@ -201,6 +210,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 141.0,
       "y": 142.5,
       "group": "J4",
@@ -214,6 +224,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 19.0,
       "y": 142.7,
       "group": "J5",
@@ -227,6 +238,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 141.0,
       "y": 162.8,
       "group": "J4",
@@ -240,6 +252,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 19.0,
       "y": 163.0,
       "group": "J5",
@@ -253,6 +266,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 39.4,
       "y": 183.1,
       "group": "J3",
@@ -266,6 +280,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 59.7,
       "y": 183.1,
       "group": "J3",
@@ -279,6 +294,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 80.0,
       "y": 183.1,
       "group": "J3",
@@ -292,6 +308,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 100.3,
       "y": 183.1,
       "group": "J3",
@@ -305,6 +322,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 120.6,
       "y": 183.1,
       "group": "J3",
@@ -318,6 +336,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 141.0,
       "y": 183.1,
       "group": "J4",
@@ -331,6 +350,7 @@
       "chip_pin_from": [
         "pcbcupid-glyph-mini-2040"
       ],
+      "pin_source": "own",
       "x": 19.0,
       "y": 183.4,
       "group": "J5",

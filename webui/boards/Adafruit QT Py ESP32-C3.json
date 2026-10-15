@@ -52,6 +52,7 @@
         "adafruit-qt-py-esp32-c3",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 29.8,
       "group": "header-left",
@@ -77,6 +78,7 @@
         "adafruit-qt-py-esp32-c3",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 50.2,
       "group": "header-left",
@@ -102,6 +104,7 @@
         "adafruit-qt-py-esp32-c3",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 70.5,
       "group": "header-left",
@@ -127,6 +130,7 @@
         "adafruit-qt-py-esp32-c3",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 90.8,
       "group": "header-left",
@@ -141,6 +145,7 @@
         "adafruit-qt-py-esp32-c3",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 140.1,
       "y": 90.8,
       "group": "header-right",
@@ -155,6 +160,7 @@
         "adafruit-qt-py-esp32-c3",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 111.1,
       "group": "header-left",
@@ -169,6 +175,7 @@
         "adafruit-qt-py-esp32-c3",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 140.1,
       "y": 111.1,
       "group": "header-right",
@@ -183,6 +190,7 @@
         "adafruit-qt-py-esp32-c3",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 131.4,
       "group": "header-left",
@@ -197,6 +205,7 @@
         "adafruit-qt-py-esp32-c3",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 140.1,
       "y": 131.4,
       "group": "header-right",
@@ -211,6 +220,7 @@
         "adafruit-qt-py-esp32-c3",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 151.8,
       "group": "header-left",
@@ -225,6 +235,7 @@
         "adafruit-qt-py-esp32-c3",
         "arduino-esp32"
       ],
+      "pin_source": "own",
       "x": 140.1,
       "y": 151.8,
       "group": "header-right",

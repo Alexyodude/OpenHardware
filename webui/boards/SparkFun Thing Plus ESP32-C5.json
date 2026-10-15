@@ -52,6 +52,7 @@
         "arduino-esp32",
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 58.8,
       "group": "U3",
@@ -77,6 +78,7 @@
         "arduino-esp32",
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 79.1,
       "group": "U3",
@@ -91,6 +93,7 @@
         "arduino-esp32",
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 79.1,
       "group": "U3",
@@ -116,6 +119,7 @@
         "arduino-esp32",
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 99.4,
       "group": "U3",
@@ -129,6 +133,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 119.8,
       "group": "U3",
@@ -142,6 +147,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 119.8,
       "group": "U3",
@@ -155,6 +161,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 140.1,
       "group": "U3",
@@ -168,6 +175,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 140.1,
       "group": "U3",
@@ -181,6 +189,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 160.4,
       "group": "U3",
@@ -195,6 +204,7 @@
         "arduino-esp32",
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 160.4,
       "group": "U3",
@@ -208,6 +218,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 180.7,
       "group": "U3",
@@ -221,6 +232,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 180.7,
       "group": "U3",
@@ -234,6 +246,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 201.0,
       "group": "U3",
@@ -247,6 +260,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 201.0,
       "group": "U3",
@@ -260,6 +274,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 221.4,
       "group": "U3",
@@ -273,6 +288,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 221.4,
       "group": "U3",
@@ -297,6 +313,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 241.7,
       "group": "U3",
@@ -321,6 +338,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 262.0,
       "group": "U3",
@@ -345,6 +363,7 @@
       "chip_pin_from": [
         "sparkfun-thing-plus-esp32-c5"
       ],
+      "pin_source": "own",
       "x": 180.7,
       "y": 282.3,
       "group": "U3",

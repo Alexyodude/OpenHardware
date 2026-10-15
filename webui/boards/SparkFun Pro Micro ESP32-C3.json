@@ -51,6 +51,7 @@
       "chip_pin_from": [
         "sparkfun-pro-micro-esp32-c3"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 38.5,
       "group": "header-left",
@@ -75,6 +76,7 @@
       "chip_pin_from": [
         "sparkfun-pro-micro-esp32-c3"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 58.8,
       "group": "header-left",
@@ -144,6 +146,7 @@
         "arduino-esp32",
         "sparkfun-pro-micro-esp32-c3"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 119.8,
       "group": "header-left",
@@ -157,6 +160,7 @@
       "chip_pin_from": [
         "sparkfun-pro-micro-esp32-c3"
       ],
+      "pin_source": "own",
       "x": 140.1,
       "y": 119.8,
       "group": "header-right",
@@ -171,6 +175,7 @@
         "arduino-esp32",
         "sparkfun-pro-micro-esp32-c3"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 140.1,
       "group": "header-left",
@@ -184,6 +189,7 @@
       "chip_pin_from": [
         "sparkfun-pro-micro-esp32-c3"
       ],
+      "pin_source": "own",
       "x": 140.1,
       "y": 140.1,
       "group": "header-right",
@@ -197,6 +203,7 @@
       "chip_pin_from": [
         "sparkfun-pro-micro-esp32-c3"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 160.4,
       "group": "header-left",
@@ -210,6 +217,7 @@
       "chip_pin_from": [
         "sparkfun-pro-micro-esp32-c3"
       ],
+      "pin_source": "own",
       "x": 140.1,
       "y": 160.4,
       "group": "header-right",
@@ -223,6 +231,7 @@
       "chip_pin_from": [
         "sparkfun-pro-micro-esp32-c3"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 180.7,
       "group": "header-left",
@@ -236,6 +245,7 @@
       "chip_pin_from": [
         "sparkfun-pro-micro-esp32-c3"
       ],
+      "pin_source": "own",
       "x": 140.1,
       "y": 180.7,
       "group": "header-right",
@@ -249,6 +259,7 @@
       "chip_pin_from": [
         "sparkfun-pro-micro-esp32-c3"
       ],
+      "pin_source": "own",
       "x": 18.2,
       "y": 201.0,
       "group": "header-left",
@@ -262,6 +273,7 @@
       "chip_pin_from": [
         "sparkfun-pro-micro-esp32-c3"
       ],
+      "pin_source": "own",
       "x": 140.1,
       "y": 201.0,
       "group": "header-right",
