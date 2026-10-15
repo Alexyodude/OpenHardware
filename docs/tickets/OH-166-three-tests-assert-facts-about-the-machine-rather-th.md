@@ -2,12 +2,11 @@
 id: OH-166
 title: Three tests assert facts about the machine rather than the code, and fail when
   another session is working
-status: in-progress
+status: open
 priority: P3
 created: '2026-09-05'
 touches:
 - tests/webui/test_emulator.py
-- tests/webui/test_board_catalogue.py
 ---
 
 Three tests in tests/webui assert something that is not a property of this code, and each has now failed for a different session doing something else on the same machine.
@@ -128,3 +127,5 @@ it now would only re-measure item 2.
 **Note 2026-10-15:** 2026-10-15 item 4's first failure, test_the_board_listing_is_answered_while_the_session_lock_is_held, fixed in 8f8da9f: it no longer asks for a reply inside 10 s. The handler class's lock is a recording wrapper over a real lock the test holds; a handler that asks fails at once ('the /api/boards handler asked for the session lock'), and the reply is awaited for compile.TIMEOUT_SECONDS x manifest rows + 30 s, the longest the listing may compile. Seen to fail with the route wrapped in 'with self.lock:' (throwaway edit to emulator_server.py, restored, git status clean): 1.18 s call, 1.5 s total, message as quoted; the first version took 6 s because it joined the request thread, which finishes the compile once the lock is released, and no longer does. Passes 3 of 3 alone (5.0, 6.1, 10.1 s) and the whole file (56 passed). Item 4 itself, the whole suite twice concurrently, still remains and has not been run.
 
 **Note 2026-10-15:** 2026-10-15 review of 8f8da9f: the lock test's bound said one compiler run per manifest row, but compile.compiled_gaps runs g++ and then gcc, each with its own TIMEOUT_SECONDS; the bound is now TIMEOUT_SECONDS x 2 runs x rows + 30 s, the 2 cited to compiled_gaps. Item 4 still remains.
+
+**Note 2026-10-15:** 2026-10-15: the lock test merged to master; returns tests/webui/test_board_catalogue.py to OH-210. Item 4 (the whole suite twice concurrently) is next, run on master by this session.
